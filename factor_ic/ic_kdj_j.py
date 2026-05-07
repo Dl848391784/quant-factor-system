@@ -44,6 +44,9 @@ from typing import Tuple, Optional, Dict, List
 import warnings
 warnings.filterwarnings('ignore')
 
+# 增量判断模块
+from common.data_completeness import check_data_completeness, get_ic_output_path
+
 
 # ============================================================
 # 内存监控函数
@@ -1295,22 +1298,303 @@ def run_kdj_j_analysis(
     return result
 
 
+def run_kdj_j_incremental(
+    missing_dates: List[str],
+    n: int = 9,
+    m1: int = 3,
+    m2: int = 3,
+    num_layers: int = 5
+) -> Dict:
+    """
+    执行增量 KDJ_J 因子分析
+    
+    只计算缺失日期的数据，并与现有 IC 结果合并
+    
+    Args:
+        missing_dates: 需要计算的日期列表
+        n: RSV 计算周期
+        m1: K值平滑周期
+        m2: D值平滑周期
+        num_layers: 分层数量
+        
+    Returns:
+        分析结果字典
+    """
+    from datetime import datetime
+    from layered_backtest import LayeredBacktest
+    
+    print(f"\n{'='*80}", flush=True)
+    print(f"KDJ_J 增量分析 (N={n}, M1={m1}, M2={m2})", flush=True)
+    print(f"{'='*80}", flush=True)
+    print(f"  缺失日期: {missing_dates[0]} ~ {missing_dates[-1]} ({len(missing_dates)} 天)", flush=True)
+    print(f"  开始时间: {datetime.now().isoformat()}", flush=True)
+    
+    initial_mem = get_memory_usage_mb()
+    print(f"  初始内存: {initial_mem:.2f} MB", flush=True)
+    
+    # ========== Step 1: 加载缺失日期的数据 ==========
+    print(f"\n[Step 1] 加载缺失日期数据...", flush=True)
+    check_memory_threshold(force_print=True)
+    
+    # 加载因子数据
+    factor_df = load_factor_data_by_date_range(missing_dates, data_type='factor')
+    if factor_df is None or factor_df.empty:
+        return {'success': False, 'error': '缺失日期因子数据为空'}
+    
+    print(f"  因子数据: {len(factor_df):,} 条", flush=True)
+    
+    # ========== Step 2: 计算 KDJ_J 因子 ==========
+    print(f"\n[Step 2] 计算 KDJ_J 因子...", flush=True)
+    factor_df, factor_stats = calculate_kdj_j_factor(factor_df, n=n, m1=m1, m2=m2)
+    
+    # ========== Step 3: 加载收益数据 ==========
+    print(f"\n[Step 3] 加载收益数据...", flush=True)
+    check_memory_threshold(force_print=True)
+    
+    return_df = load_factor_data_by_date_range(missing_dates, data_type='return')
+    if return_df is None or return_df.empty:
+        return {'success': False, 'error': '缺失日期收益数据为空'}
+    
+    print(f"  收益数据: {len(return_df):,} 条", flush=True)
+    
+    # ========== Step 4: 计算 IC ==========
+    print(f"\n[Step 4] 计算 IC...", flush=True)
+    check_memory_threshold(force_print=True)
+    ic_result = calculate_kdj_j_ic(factor_df, return_df)
+    
+    # ========== Step 5: 合并现有 IC 结果 ==========
+    print(f"\n[Step 5] 合并现有 IC 结果...", flush=True)
+    ic_output_path = get_ic_output_path('kdj_j')
+    
+    existing_ic_series = None
+    existing_ic_metrics = None
+    
+    if ic_output_path.exists():
+        try:
+            with open(ic_output_path, 'r', encoding='utf-8') as f:
+                existing_data = json.load(f)
+            
+            # 提取现有 IC 时间序列
+            existing_dates = existing_data.get('ic_series', {}).get('dates', [])
+            existing_values = existing_data.get('ic_series', {}).get('ic_values', [])
+            
+            if existing_dates and existing_values:
+                # 将现有 IC 序列转换为 Series（排除缺失日期）
+                existing_df = pd.DataFrame({
+                    'date': existing_dates,
+                    'ic': existing_values
+                })
+                # 过滤掉新计算的日期
+                existing_df = existing_df[~existing_df['date'].isin(missing_dates)]
+                existing_ic_series = existing_df.set_index('date')['ic']
+                print(f"  已加载现有 IC 序列: {len(existing_ic_series)} 天", flush=True)
+            
+            existing_ic_metrics = existing_data.get('ic_metrics', {})
+            
+            del existing_data
+            gc.collect()
+            
+        except Exception as e:
+            print(f"  ⚠️ 读取现有 IC 结果失败: {e}", flush=True)
+    
+    # ========== Step 6: 合并 IC 序列 ==========
+    print(f"\n[Step 6] 合并 IC 序列...", flush=True)
+    
+    new_ic_series = ic_result.get('ic_series')
+    if new_ic_series is not None and existing_ic_series is not None:
+        # 合并 IC 序列
+        combined_ic = pd.concat([existing_ic_series, new_ic_series])
+        combined_ic = combined_ic.sort_index()
+        
+        # 重新计算统计量
+        ic_mean = combined_ic.mean()
+        ic_std = combined_ic.std()
+        icir = ic_mean / ic_std if ic_std > 0 else 0
+        positive_ratio = (combined_ic > 0).mean()
+        
+        import math
+        from scipy import stats
+        n_obs = len(combined_ic)
+        t_stat = ic_mean / (ic_std / math.sqrt(n_obs)) if ic_std > 0 else 0
+        p_value = 2 * (1 - stats.t.cdf(abs(t_stat), df=n_obs-1)) if n_obs > 1 else 1
+        
+        abs_t = abs(t_stat)
+        if abs_t > 3.29:
+            significance = '***'
+        elif abs_t > 2.58:
+            significance = '**'
+        elif abs_t > 1.96:
+            significance = '*'
+        else:
+            significance = ''
+        
+        # 更新 IC 结果
+        ic_result['ic_mean'] = ic_mean
+        ic_result['ic_std'] = ic_std
+        ic_result['icir'] = icir
+        ic_result['positive_ratio'] = positive_ratio
+        ic_result['t_stat'] = round(t_stat, 4)
+        ic_result['p_value'] = round(p_value, 6)
+        ic_result['significance'] = significance
+        ic_result['n_days'] = n_obs
+        ic_result['ic_series'] = combined_ic
+        
+        print(f"  合并后 IC 序列: {n_obs} 天", flush=True)
+        print(f"  IC 均值: {ic_mean:.4f}", flush=True)
+        print(f"  ICIR: {icir:.2f}", flush=True)
+        
+        del combined_ic
+        
+    elif new_ic_series is not None:
+        # 只有新计算的 IC
+        ic_result['n_days'] = len(new_ic_series)
+        print(f"  使用新计算的 IC 序列: {ic_result['n_days']} 天", flush=True)
+    
+    del existing_ic_series, new_ic_series
+    gc.collect()
+    
+    # ========== Step 7: 分层回测（需要全量数据）==========
+    print(f"\n[Step 7] 分层回测（需要全量数据，跳过增量）...", flush=True)
+    print(f"  注意: 增量模式下跳过分层回测，保留现有分层结果", flush=True)
+    
+    # 加载现有的分层回测结果
+    layered_result_json = None
+    if ic_output_path.exists():
+        try:
+            with open(ic_output_path, 'r', encoding='utf-8') as f:
+                existing_data = json.load(f)
+            layered_result_json = existing_data.get('layered_result', {})
+            print(f"  使用现有分层回测结果", flush=True)
+            del existing_data
+            gc.collect()
+        except Exception as e:
+            print(f"  ⚠️ 读取现有分层结果失败: {e}", flush=True)
+    
+    if layered_result_json is None:
+        layered_result_json = {
+            'layer_returns': [],
+            'cumulative_returns': [],
+            'statistics': [],
+            'long_short': [],
+            'num_layers': num_layers,
+            'n_days': 0,
+            'n_stocks': 0,
+            'summary': {
+                'long_short_annual_return': 0,
+                'long_short_sharpe': 0,
+                'long_short_max_drawdown': 0,
+                'monotonicity_passed': False
+            }
+        }
+    
+    # ========== Step 8: 构建结果 ==========
+    print(f"\n[Step 8] 构建结果...", flush=True)
+    
+    # IC 指标
+    ic_metrics = {
+        'ic_mean': ic_result.get('ic_mean', 0),
+        'ic_std': ic_result.get('ic_std', 0),
+        'icir': ic_result.get('icir', 0),
+        't_stat': ic_result.get('t_stat', 0),
+        'p_value': ic_result.get('p_value', 1),
+        'positive_ratio': ic_result.get('positive_ratio', 0),
+        'n_days': ic_result.get('n_days', 0),
+        'n_assets': ic_result.get('n_assets', 0),
+        'significance': ic_result.get('significance', ''),
+        'summary': ic_result.get('summary', '')
+    }
+    
+    # IC 时间序列
+    ic_series = ic_result.get('ic_series')
+    if ic_series is not None:
+        rolling_mean = ic_series.rolling(window=20, min_periods=1).mean()
+        ic_series_data = {
+            'dates': [d.strftime('%Y-%m-%d') if hasattr(d, 'strftime') else str(d).split()[0] for d in ic_series.index],
+            'ic_values': [round(v, 6) for v in ic_series.values],
+            'rolling_ic_mean': [round(v, 6) for v in rolling_mean.values]
+        }
+    else:
+        ic_series_data = {
+            'dates': [],
+            'ic_values': [],
+            'rolling_ic_mean': []
+        }
+    
+    # 构建完整结果
+    result = {
+        'factor_name': 'kdj_j',
+        'success': True,
+        'mode': 'incremental',
+        'ic_metrics': ic_metrics,
+        'ic_series': ic_series_data,
+        'layered_result': layered_result_json,
+        'factor_stats': factor_stats,
+        'params': {
+            'n': n,
+            'm1': m1,
+            'm2': m2,
+            'num_layers': num_layers,
+            'factor_col': 'kdj_j',
+            'missing_dates': missing_dates
+        },
+        'generated_at': datetime.now().isoformat()
+    }
+    
+    # 转换 numpy 类型
+    result = convert_to_native_types(result)
+    
+    gc.collect()
+    
+    final_mem = get_memory_usage_mb()
+    print(f"  [内存监控] 最终内存: {final_mem:.2f} MB (增量: {final_mem - initial_mem:.2f} MB)", flush=True)
+    print(f"  完成时间: {datetime.now().isoformat()}", flush=True)
+    print(f"{'='*80}", flush=True)
+    
+    return result
+
+
 if __name__ == '__main__':
     """执行 KDJ_J 因子分析并保存结果"""
-    result = run_kdj_j_analysis(n_days=500, n=9, m1=3, m2=3, num_layers=5)
+    # ========== 增量判断 ==========
+    mode, missing_dates, info = check_data_completeness('kdj_j')
+    
+    print(f"\n[模式判断] mode={mode}, missing_dates_count={len(missing_dates)}", flush=True)
+    print(f"[模式原因] {info.get('mode_reason', 'N/A')}", flush=True)
+    
+    if mode == 'skip':
+        print("\n数据完备，无需重新计算", flush=True)
+        print("=" * 60, flush=True)
+        exit(0)
+    
+    # 根据模式选择计算方式
+    if mode == 'incremental' and missing_dates:
+        # 增量计算
+        print(f"\n执行增量计算，补充 {len(missing_dates)} 天数据", flush=True)
+        result = run_kdj_j_incremental(
+            missing_dates=missing_dates,
+            n=9, m1=3, m2=3, num_layers=5
+        )
+    else:
+        # 全量计算
+        print(f"\n执行全量计算", flush=True)
+        result = run_kdj_j_analysis(n_days=500, n=9, m1=3, m2=3, num_layers=5)
     
     if result.get('success'):
         print("\n" + "="*60, flush=True)
         print("[保存结果] 正在保存分析结果...", flush=True)
         gc.collect()
         
-        # 分阶段保存，避免大字典内存峰值（参考 precompute_return_3d.py）
+        # 使用统一的输出路径
+        OUTPUT_FILE = get_ic_output_path('kdj_j')
+        
+        # 分阶段保存，避免大字典内存峰值
         temp_output_file = OUTPUT_FILE.with_suffix('.json.tmp')
         
         with open(temp_output_file, 'w', encoding='utf-8') as f:
             f.write('{\n')
             
             f.write('  "factor_name": "kdj_j",\n')
+            f.write(f'  "dates": {json.dumps(result.get("ic_series", {}).get("dates", []))},\n')
             
             f.write('  "ic_metrics": ')
             json.dump(result['ic_metrics'], f, ensure_ascii=False)

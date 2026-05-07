@@ -42,6 +42,8 @@ from typing import Tuple, Optional, Dict, List
 import warnings
 warnings.filterwarnings('ignore')
 
+from common.data_completeness import check_data_completeness, get_ic_output_path
+
 
 # ============================================================
 # 内存监控函数
@@ -120,8 +122,8 @@ BOLLINGER_PB_CACHE_DIR = BASE_DIR / 'cache' / 'bollinger_pb'
 # 历史缓存文件
 HISTORY_FILE = BOLLINGER_PB_CACHE_DIR / 'bollinger_pb_history.json.gz'
 
-# 分析结果输出文件
-OUTPUT_FILE = BASE_DIR / 'cache' / 'factor_ic' / 'bollinger_pb_ic.json'
+# 分析结果输出文件（使用增量判断模块获取路径）
+OUTPUT_FILE = get_ic_output_path('bollinger_pb')
 
 # 内存优化配置
 MEMORY_THRESHOLD_MB = 900  # 内存阈值（MB）
@@ -1139,7 +1141,26 @@ def run_bollinger_pb_analysis(
 
 if __name__ == '__main__':
     """执行布林带%B 因子分析并保存结果"""
-    result = run_bollinger_pb_analysis(n_days=500, n=20, k=2.0, num_layers=5)
+    import sys
+    
+    # ========== 增量判断 ==========
+    mode, missing_dates, info = check_data_completeness('bollinger_pb')
+    
+    if mode == 'skip':
+        print("\n[增量判断] 数据完备，跳过计算")
+        print(f"  信息: {info}")
+        sys.exit(0)
+    elif mode == 'incremental':
+        print(f"\n[增量判断] 需要增量计算 {len(missing_dates)} 天")
+        print(f"  缺失日期: {missing_dates[0]} ~ {missing_dates[-1]}")
+        # 增量计算：使用缺失日期作为计算范围
+        n_days = len(missing_dates)
+        # TODO: 后续可优化为仅计算缺失日期的数据
+    else:  # mode == 'full'
+        print("\n[增量判断] 需要全量计算")
+        n_days = 500
+    
+    result = run_bollinger_pb_analysis(n_days=n_days, n=20, k=2.0, num_layers=5)
     
     if result.get('success'):
         print("\n" + "="*60, flush=True)

@@ -34,6 +34,8 @@ from typing import Tuple, Optional, Dict
 import warnings
 warnings.filterwarnings('ignore')
 
+from common.data_completeness import check_data_completeness, get_ic_output_path
+
 
 # 内存优化配置
 MEMORY_THRESHOLD_MB = 900  # 内存阈值（MB）- 缓存数据约700MB，留200MB缓冲
@@ -1053,6 +1055,28 @@ if __name__ == '__main__':
     """测试换手率突增因子分析"""
     from datetime import datetime
     
+    # ========== 增量判断 ==========
+    FACTOR_NAME = 'turnover_surge'
+    print(f"\n{'='*60}")
+    print(f"[增量判断] 检查 {FACTOR_NAME} 因子")
+    print(f"{'='*60}")
+    
+    mode, missing_dates, info = check_data_completeness(FACTOR_NAME)
+    
+    if mode == 'skip':
+        print(f"\n[增量判断] 数据完备，无需重新计算")
+        print(f"  原因: {info.get('mode_reason', '未知')}")
+        exit(0)
+    elif mode == 'incremental':
+        print(f"\n[增量判断] 需要增量计算 {len(missing_dates)} 天")
+        print(f"  缺失日期: {missing_dates[0]} ~ {missing_dates[-1]}")
+        # 当前版本暂不支持增量计算，执行全量计算
+        print(f"  注意: 当前版本执行全量计算")
+    else:  # mode == 'full'
+        print(f"\n[增量判断] 需要全量计算")
+        print(f"  原因: {info.get('mode_reason', '未知')}")
+    
+    # ========== 执行分析 ==========
     result = run_turnover_surge_analysis(n_days=500, num_layers=5)
     
     if result.get('success'):
@@ -1061,12 +1085,12 @@ if __name__ == '__main__':
         print(f"ICIR: {result['ic_metrics']['icir']:.2f}")
         print(f"多空收益: {result['layered_result']['summary']['long_short_annual_return']:.2%}")
         
-        # 保存 IC 结果到缓存文件
-        ic_cache_path = Path(__file__).parent.parent / 'cache' / 'factor_ic' / 'turnover_surge_ic.json'
+        # 保存 IC 结果到缓存文件（使用 get_ic_output_path）
+        ic_cache_path = get_ic_output_path(FACTOR_NAME)
         ic_cache_path.parent.mkdir(parents=True, exist_ok=True)
         
         ic_data = {
-            'factor_name': 'turnover_surge',
+            'factor_name': FACTOR_NAME,
             'ic_mean': result['ic_metrics']['ic_mean'],
             'icir': result['ic_metrics']['icir'],
             'dates': result['ic_series']['dates'],
