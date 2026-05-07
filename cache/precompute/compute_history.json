@@ -1,0 +1,104 @@
+{
+  "version": "1.0",
+  "updated_at": "2026-04-17 06:39:21",
+  "history": [
+    {
+      "task_id": "precompute_20260415_162417",
+      "computed_at": "2026-04-15 17:27:28",
+      "status": "success",
+      "best_score": 0.3445,
+      "best_weights": {
+        "rsi": -0.1,
+        "bollinger_pb": 0.45,
+        "volume_ratio": 0.6,
+        "turnover_surge": -0.2,
+        "return_3d": 0.1
+      },
+      "elapsed_seconds": 3791.4
+    },
+    {
+      "task_id": "precompute_20260415_200555",
+      "computed_at": "2026-04-15 20:39:45",
+      "status": "success",
+      "best_score": 0.0,
+      "best_weights": {
+        "rsi": 0.05,
+        "bollinger_pb": 0.0,
+        "volume_ratio": -0.05,
+        "turnover_surge": -0.2,
+        "return_3d": 0.0
+      },
+      "elapsed_seconds": 2030.6
+    },
+    {
+      "task_id": "precompute_20260415_204520",
+      "computed_at": "2026-04-15 21:20:04",
+      "status": "success",
+      "best_score": 0.0,
+      "best_weights": {
+        "rsi": 0.05,
+        "bollinger_pb": 0.0,
+        "volume_ratio": -0.05,
+        "turnover_surge": -0.2,
+        "return_3d": 0.0
+      },
+      "elapsed_seconds": 2084.4
+    },
+    {
+      "task_id": "precompute_20260415_211715",
+      "computed_at": "2026-04-15 22:04:40",
+      "status": "success",
+      "best_score": 0.9089,
+      "best_weights": {
+        "rsi": 0.0,
+        "bollinger_pb": 0.2,
+        "volume_ratio": 0.25,
+        "turnover_surge": -0.2,
+        "return_3d": 0.3
+      },
+      "elapsed_seconds": 2845.6
+    },
+    {
+      "task_id": "precompute_20260415_223941",
+      "computed_at": "2026-04-15 23:26:41",
+      "status": "success",
+      "best_score": 0.9089,
+      "best_weights": {
+        "rsi": 0.0,
+        "bollinger_pb": 0.2,
+        "volume_ratio": 0.25,
+        "turnover_surge": -0.2,
+        "return_3d": 0.3
+      },
+      "elapsed_seconds": 2819.9
+    },
+    {
+      "task_id": "precompute_20260416_050002",
+      "computed_at": "2026-04-16 05:44:48",
+      "status": "success",
+      "best_score": 0.767,
+      "best_weights": {
+        "rsi": 0.0,
+        "bollinger_pb": 0.2,
+        "volume_ratio": 0.25,
+        "turnover_surge": -0.2,
+        "return_3d": 0.3
+      },
+      "elapsed_seconds": 2686.6
+    },
+    {
+      "task_id": "precompute_20260417_060001",
+      "computed_at": "2026-04-17 06:39:21",
+      "status": "success",
+      "best_score": 0.5138,
+      "best_weights": {
+        "rsi": 0.0,
+        "bollinger_pb": 0.2,
+        "volume_ratio": 0.25,
+        "turnover_surge": -0.2,
+        "return_3d": 0.3
+      },
+      "elapsed_seconds": 2360.3
+    }
+  ]
+}

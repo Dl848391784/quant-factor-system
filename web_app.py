@@ -871,7 +871,7 @@ def api_home_summary():
         factors = []
         
         # 加载 RSI 因子数据
-        rsi_path = BASE_DIR / 'factor_analysis_result.json'
+        rsi_path = BASE_DIR / 'cache/factor_ic/rsi_ic.json'
         if rsi_path.exists():
             with open(rsi_path, 'r', encoding='utf-8') as f:
                 rsi_data = json.load(f)
@@ -899,7 +899,7 @@ def api_home_summary():
             })
         
         # 加载量比因子数据
-        vol_path = BASE_DIR / 'volume_ratio_analysis_result.json'
+        vol_path = BASE_DIR / 'cache/factor_ic/volume_ratio_ic.json'
         if vol_path.exists():
             with open(vol_path, 'r', encoding='utf-8') as f:
                 vol_data = json.load(f)
@@ -955,7 +955,7 @@ def api_home_summary():
             })
         
         # 加载换手率突增因子数据
-        turnover_surge_path = BASE_DIR / 'turnover_surge_analysis_result.json'
+        turnover_surge_path = BASE_DIR / 'cache/factor_ic/turnover_surge_ic.json'
         if turnover_surge_path.exists():
             with open(turnover_surge_path, 'r', encoding='utf-8') as f:
                 turnover_surge_data = json.load(f)
@@ -984,7 +984,7 @@ def api_home_summary():
             })
         
         # 加载主力净流入占比因子数据
-        main_inflow_path = BASE_DIR / 'main_inflow_ratio_analysis_result.json'
+        main_inflow_path = BASE_DIR / 'cache/factor_ic/main_inflow_ratio_ic.json'
         if main_inflow_path.exists():
             with open(main_inflow_path, 'r', encoding='utf-8') as f:
                 main_inflow_data = json.load(f)
@@ -1013,7 +1013,7 @@ def api_home_summary():
             })
         
         # 加载 KDJ_J 因子数据
-        kdj_j_path = BASE_DIR / 'kdj_j_analysis_result.json'
+        kdj_j_path = BASE_DIR / 'cache/factor_ic/kdj_j_ic.json'
         if kdj_j_path.exists():
             with open(kdj_j_path, 'r', encoding='utf-8') as f:
                 kdj_j_data = json.load(f)
@@ -1043,7 +1043,7 @@ def api_home_summary():
             })
         
         # 加载布林带%B 因子数据
-        bollinger_pb_path = BASE_DIR / 'bollinger_pb_analysis_result.json'
+        bollinger_pb_path = BASE_DIR / 'cache/factor_ic/bollinger_pb_ic.json'
         if bollinger_pb_path.exists():
             with open(bollinger_pb_path, 'r', encoding='utf-8') as f:
                 bollinger_pb_data = json.load(f)
@@ -1163,7 +1163,7 @@ def api_factor_rsi():
     - params: 分析参数
     - generated_at: 生成时间
     """
-    result_file = BASE_DIR / 'factor_analysis_result.json'
+    result_file = BASE_DIR / 'cache/factor_ic/rsi_ic.json'
     
     if not result_file.exists():
         return jsonify({
@@ -1749,7 +1749,7 @@ def api_factor_analysis():
             }
             
             # 保存结果到文件
-            result_file = BASE_DIR / 'factor_analysis_result.json'
+            result_file = BASE_DIR / 'cache/factor_ic/rsi_ic.json'
             with open(result_file, 'w', encoding='utf-8') as f:
                 json.dump(result_json, f, ensure_ascii=False, indent=2)
             
@@ -1820,7 +1820,7 @@ def api_factor_analysis_progress():
 @app.route('/api/factor-analysis/result')
 def api_factor_analysis_result():
     """API: 获取因子分析缓存结果"""
-    result_file = BASE_DIR / 'factor_analysis_result.json'
+    result_file = BASE_DIR / 'cache/factor_ic/rsi_ic.json'
     
     if not result_file.exists():
         return jsonify({'error': '暂无分析结果，请先运行因子分析'})
@@ -2062,7 +2062,7 @@ def api_volume_ratio_analysis():
             }
             
             # 保存结果到文件
-            result_file = BASE_DIR / 'volume_ratio_analysis_result.json'
+            result_file = BASE_DIR / 'cache/factor_ic/volume_ratio_ic.json'
             with open(result_file, 'w', encoding='utf-8') as f:
                 json.dump(result_json, f, ensure_ascii=False, indent=2)
             
@@ -2133,7 +2133,7 @@ def api_volume_ratio_analysis_progress():
 @app.route('/api/volume-ratio-analysis/result')
 def api_volume_ratio_analysis_result():
     """API: 获取量比因子分析缓存结果"""
-    result_file = BASE_DIR / 'volume_ratio_analysis_result.json'
+    result_file = BASE_DIR / 'cache/factor_ic/volume_ratio_ic.json'
     
     if not result_file.exists():
         return jsonify({'error': '暂无分析结果，请先运行量比因子分析'})
@@ -2152,7 +2152,7 @@ def api_factor_volume_ratio():
     
     返回格式与 /api/factor/rsi 一致
     """
-    result_file = BASE_DIR / 'volume_ratio_analysis_result.json'
+    result_file = BASE_DIR / 'cache/factor_ic/volume_ratio_ic.json'
     
     if not result_file.exists():
         return jsonify({
@@ -2758,7 +2758,7 @@ def api_turnover_surge_analysis():
         }
     
     # ========== 优先检查预计算结果 ==========
-    result_file = BASE_DIR / 'turnover_surge_analysis_result.json'
+    result_file = BASE_DIR / 'cache/factor_ic/turnover_surge_ic.json'
     
     if result_file.exists():
         # 预计算结果存在，直接返回
@@ -2889,7 +2889,7 @@ def api_turnover_surge_analysis_progress():
 @app.route('/api/turnover-surge-analysis/result')
 def api_turnover_surge_analysis_result():
     """API: 获取换手率突增因子分析缓存结果"""
-    result_file = BASE_DIR / 'turnover_surge_analysis_result.json'
+    result_file = BASE_DIR / 'cache/factor_ic/turnover_surge_ic.json'
     
     if not result_file.exists():
         return jsonify({'error': '暂无分析结果，请先运行换手率突增因子分析'})
@@ -2908,7 +2908,7 @@ def api_factor_turnover_surge():
     
     返回格式与 /api/factor/rsi 一致
     """
-    result_file = BASE_DIR / 'turnover_surge_analysis_result.json'
+    result_file = BASE_DIR / 'cache/factor_ic/turnover_surge_ic.json'
     
     if not result_file.exists():
         return jsonify({
@@ -3020,7 +3020,7 @@ def api_main_inflow_ratio_analysis():
         }
     
     # ========== 优先检查预计算结果 ==========
-    result_file = BASE_DIR / 'main_inflow_ratio_analysis_result.json'
+    result_file = BASE_DIR / 'cache/factor_ic/main_inflow_ratio_ic.json'
     
     if result_file.exists():
         # 预计算结果存在，直接返回
@@ -3156,7 +3156,7 @@ def api_main_inflow_ratio_analysis_progress():
 @app.route('/api/main-inflow-ratio-analysis/result')
 def api_main_inflow_ratio_analysis_result():
     """API: 获取主力净流入占比因子分析缓存结果"""
-    result_file = BASE_DIR / 'main_inflow_ratio_analysis_result.json'
+    result_file = BASE_DIR / 'cache/factor_ic/main_inflow_ratio_ic.json'
     
     if not result_file.exists():
         return jsonify({'error': '暂无分析结果，请先运行主力净流入占比因子分析'})
@@ -3175,7 +3175,7 @@ def api_factor_main_inflow_ratio():
     
     返回格式与 /api/factor/rsi 一致
     """
-    result_file = BASE_DIR / 'main_inflow_ratio_analysis_result.json'
+    result_file = BASE_DIR / 'cache/factor_ic/main_inflow_ratio_ic.json'
     
     if not result_file.exists():
         return jsonify({
@@ -3285,7 +3285,7 @@ def api_kdj_j_analysis():
         }
     
     # ========== 优先检查预计算结果 ==========
-    result_file = BASE_DIR / 'kdj_j_analysis_result.json'
+    result_file = BASE_DIR / 'cache/factor_ic/kdj_j_ic.json'
     
     if result_file.exists():
         try:
@@ -3429,7 +3429,7 @@ def api_kdj_j_analysis_progress():
 @app.route('/api/kdj-j-analysis/result')
 def api_kdj_j_analysis_result():
     """API: 获取 KDJ_J 因子分析缓存结果"""
-    result_file = BASE_DIR / 'kdj_j_analysis_result.json'
+    result_file = BASE_DIR / 'cache/factor_ic/kdj_j_ic.json'
     
     if not result_file.exists():
         return jsonify({'error': '暂无分析结果，请先运行 KDJ_J 因子分析'})
@@ -3448,7 +3448,7 @@ def api_factor_kdj_j():
     
     返回格式与 /api/factor/rsi 一致
     """
-    result_file = BASE_DIR / 'kdj_j_analysis_result.json'
+    result_file = BASE_DIR / 'cache/factor_ic/kdj_j_ic.json'
     
     if not result_file.exists():
         return jsonify({
@@ -3548,7 +3548,7 @@ def api_bollinger_pb_analysis():
         }
     
     # ========== 优先检查预计算结果 ==========
-    result_file = BASE_DIR / 'bollinger_pb_analysis_result.json'
+    result_file = BASE_DIR / 'cache/factor_ic/bollinger_pb_ic.json'
     
     if result_file.exists():
         try:
@@ -3689,7 +3689,7 @@ def api_bollinger_pb_analysis_progress():
 @app.route('/api/bollinger-pb-analysis/result')
 def api_bollinger_pb_analysis_result():
     """API: 获取布林带%B 因子分析缓存结果"""
-    result_file = BASE_DIR / 'bollinger_pb_analysis_result.json'
+    result_file = BASE_DIR / 'cache/factor_ic/bollinger_pb_ic.json'
     
     if not result_file.exists():
         return jsonify({'error': '暂无分析结果，请先运行布林带%B 因子分析'})
@@ -3708,7 +3708,7 @@ def api_factor_bollinger_pb():
     
     返回格式与 /api/factor/rsi 一致
     """
-    result_file = BASE_DIR / 'bollinger_pb_analysis_result.json'
+    result_file = BASE_DIR / 'cache/factor_ic/bollinger_pb_ic.json'
     
     if not result_file.exists():
         return jsonify({

@@ -1,0 +1,12 @@
+{
+  "generated_at": "2026-04-04T04:11:38.053598",
+  "n_days_target": 500,
+  "n_days_actual": 545,
+  "n_stocks": 3061,
+  "n_records": 1514076,
+  "total_batches": 8,
+  "successful_batches": 8,
+  "elapsed_seconds": 696.1707897186279,
+  "batch_size": 400,
+  "is_valid": true
+}

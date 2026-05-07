@@ -1,0 +1,16 @@
+[Unit]
+Description=Daily Factor Optimizer Timer - Runs at 02:00 AM
+Documentation=https://github.com/openclaw/factor_ic_analyzer
+
+[Timer]
+# 每天凌晨 02:00 执行
+OnCalendar=*-*-* 02:00:00
+
+# 如果错过了执行时间（如服务器重启），则立即执行
+Persistent=true
+
+# 随机延迟 0-5 分钟，避免精确时间点的资源竞争
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

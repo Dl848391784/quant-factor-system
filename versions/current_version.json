@@ -1,0 +1,7 @@
+{
+  "current_version": "v2",
+  "description": "当前使用的多周期优化版本",
+  "updated_at": "2026-04-28",
+  "updated_by": "云瑶（主agent）",
+  "reason": "v1已删除，v2为生产版本"
+}

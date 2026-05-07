@@ -1,0 +1,134 @@
+{
+  "version": "3.9",
+  "mode": "parallel",
+  "task_id": "multi_period_parallel_20260429_143043",
+  "computed_at": "2026-04-29 15:34:36",
+  "computed_at_iso": "2026-04-29T15:34:36.975774",
+  "compute_duration_seconds": 3833.9,
+  "status": "success",
+  "best_period": "T+1",
+  "best_result": {
+    "weights": {
+      "rsi": -0.35,
+      "bollinger_pb": -0.35,
+      "volume_ratio": -0.4,
+      "turnover_surge": -0.3,
+      "return_3d": 0.15
+    },
+    "metrics": {
+      "sharpe_ratio": 1.33,
+      "max_drawdown": 24.04,
+      "win_rate": 57.05,
+      "annual_return": 28.33,
+      "final_nav": 1.1686,
+      "total_trades": 1290,
+      "total_days": 150
+    },
+    "icir": 0.2445080849014246,
+    "tier": "tier1",
+    "elapsed_seconds": 2568.7
+  },
+  "all_periods": {
+    "T+1": {
+      "success": true,
+      "weights": {
+        "rsi": -0.35,
+        "bollinger_pb": -0.35,
+        "volume_ratio": -0.4,
+        "turnover_surge": -0.3,
+        "return_3d": 0.15
+      },
+      "metrics": {
+        "sharpe_ratio": 1.33,
+        "max_drawdown": 24.04,
+        "win_rate": 57.05,
+        "annual_return": 28.33,
+        "final_nav": 1.1686,
+        "total_trades": 1290,
+        "total_days": 150
+      },
+      "icir": 0.2445080849014246,
+      "elapsed_seconds": 2568.7,
+      "error": null
+    },
+    "T+3": {
+      "success": true,
+      "weights": {
+        "rsi": -0.1,
+        "bollinger_pb": 0.05,
+        "volume_ratio": -0.2,
+        "turnover_surge": 0.2,
+        "return_3d": 0.1
+      },
+      "metrics": {
+        "sharpe_ratio": 0.26,
+        "max_drawdown": 32.57,
+        "win_rate": 53.06,
+        "annual_return": 2.34,
+        "final_nav": 1.0137,
+        "total_trades": 1366,
+        "total_days": 148
+      },
+      "icir": 0.2711179397378001,
+      "elapsed_seconds": 2649.8,
+      "error": null
+    },
+    "T+5": {
+      "success": true,
+      "weights": {
+        "rsi": -0.1,
+        "bollinger_pb": 0.05,
+        "volume_ratio": -0.2,
+        "turnover_surge": 0.2,
+        "return_3d": 0.05
+      },
+      "metrics": {
+        "sharpe_ratio": -0.4,
+        "max_drawdown": 42.96,
+        "win_rate": 48.28,
+        "annual_return": -29.1,
+        "final_nav": 0.8314,
+        "total_trades": 1350,
+        "total_days": 146
+      },
+      "icir": 0.31938949248996995,
+      "elapsed_seconds": 1122.7,
+      "error": null
+    }
+  },
+  "periods_comparison": {
+    "T+1": {
+      "annual_return": 28.33,
+      "sharpe_ratio": 1.33,
+      "max_drawdown": 24.04,
+      "win_rate": 57.05
+    },
+    "T+3": {
+      "annual_return": 2.34,
+      "sharpe_ratio": 0.26,
+      "max_drawdown": 32.57,
+      "win_rate": 53.06
+    },
+    "T+5": {
+      "annual_return": -29.1,
+      "sharpe_ratio": -0.4,
+      "max_drawdown": 42.96,
+      "win_rate": 48.28
+    }
+  },
+  "config": {
+    "periods": [
+      "T+1",
+      "T+3",
+      "T+5"
+    ],
+    "factors": [
+      "rsi",
+      "bollinger_pb",
+      "volume_ratio",
+      "turnover_surge",
+      "return_3d"
+    ],
+    "parallel_mode": true
+  }
+}

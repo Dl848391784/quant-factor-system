@@ -1,0 +1,19 @@
+{
+  "version": "3.4_with_ohlc",
+  "n_days": 545,
+  "n_assets": 2996,
+  "n_records": 1481773,
+  "elapsed_seconds": 853.1273837089539,
+  "is_valid": true,
+  "memory_monitor": "proc_self_status",
+  "fields": [
+    "date",
+    "asset",
+    "open",
+    "close",
+    "high",
+    "low",
+    "rsi_6",
+    "volume_ratio_5"
+  ]
+}

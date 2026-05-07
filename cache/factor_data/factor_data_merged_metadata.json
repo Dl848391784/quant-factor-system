@@ -1,0 +1,30 @@
+{
+  "created_at": "2026-05-04T09:38:24.492761",
+  "total_records": 1490715,
+  "total_factors": 20,
+  "factors": [
+    "date",
+    "asset",
+    "open",
+    "close",
+    "high",
+    "low",
+    "rsi_6",
+    "volume_ratio_5",
+    "A_FA_N0112",
+    "A_FA_N0322",
+    "A_FA_N0340",
+    "B_atr_pct",
+    "B_bollinger_width_20",
+    "B_cci_overbought",
+    "B_keltner_position",
+    "B_ma_trend",
+    "B_mfi_overbought",
+    "B_plus_di_14",
+    "B_rsi_24",
+    "B_trend_strength",
+    "B_volatility_ratio",
+    "C_genetic_combo"
+  ],
+  "source": "factor_data.json.gz + 14 new factors"
+}
