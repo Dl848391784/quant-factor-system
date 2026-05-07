@@ -25,7 +25,7 @@ import pandas as pd
 import numpy as np
 
 # 配置
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 CACHE_DIR = BASE_DIR / 'cache' / 'factor_data'
 OUTPUT_FILE = BASE_DIR / 'cache' / 'factor_ic' / 'volume_ratio_ic.json'
 

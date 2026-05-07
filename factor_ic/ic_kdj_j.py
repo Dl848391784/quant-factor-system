@@ -115,7 +115,7 @@ def convert_to_native_types(obj):
 # 配置常量
 # ============================================================
 
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 CACHE_DIR = BASE_DIR / 'cache' / 'factor_data'
 KDJ_J_CACHE_DIR = BASE_DIR / 'cache' / 'kdj_j'
 

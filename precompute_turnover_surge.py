@@ -40,7 +40,7 @@ import sys
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent))
 
-from turnover_surge_factor import run_turnover_surge_analysis
+from factor_ic.ic_turnover_surge import run_turnover_surge_analysis
 
 
 def get_memory_usage_mb() -> float:
