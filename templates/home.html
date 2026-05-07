@@ -1,0 +1,468 @@
+{% extends 'base.html' %}
+
+{% block title %}因子分析系统 - 总览{% endblock %}
+
+{% block header_title %}📊 因子分析总览{% endblock %}
+
+{% block header_desc %}一站式量化因子有效性评估平台{% endblock %}
+
+{% block head_styles %}
+<style>
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+    
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        min-height: 100vh;
+        padding: 20px;
+        color: #e9ecef;
+    }
+    
+    .container {
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+    
+    header {
+        text-align: center;
+        margin-bottom: 25px;
+        padding: 20px;
+    }
+    
+    header h1 {
+        font-size: 2.5em;
+        margin-bottom: 10px;
+        background: linear-gradient(90deg, #00d9ff, #00ff88);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    
+    header p {
+        font-size: 1.1em;
+        color: #a0a0a0;
+    }
+    
+    /* 因子卡片区域 */
+    .factors-section {
+        margin-bottom: 30px;
+    }
+    
+    .factors-section h2 {
+        color: #fff;
+        margin-bottom: 20px;
+        font-size: 1.3em;
+        text-align: center;
+    }
+    
+    .factors-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 25px;
+        justify-items: center;
+    }
+    
+    .factor-card {
+        background: rgba(255,255,255,0.05);
+        border-radius: 12px;
+        padding: 25px;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255,255,255,0.1);
+        width: 100%;
+        max-width: 400px;
+        cursor: pointer;
+        transition: transform 0.3s, box-shadow 0.3s;
+    }
+    
+    .factor-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 30px rgba(0, 217, 255, 0.2);
+    }
+    
+    .factor-card .card-header {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        margin-bottom: 15px;
+    }
+    
+    .factor-card .factor-icon {
+        font-size: 2.5em;
+    }
+    
+    .factor-card .name {
+        font-size: 1.4em;
+        background: linear-gradient(90deg, #00d9ff, #00ff88);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    
+    .factor-card .desc {
+        color: #a0a0a0;
+        font-size: 0.9em;
+        margin: 12px 0;
+        line-height: 1.6;
+    }
+    
+    .factor-card .metrics {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 15px;
+        margin-top: 20px;
+        padding-top: 15px;
+        border-top: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .factor-card .metric-item {
+        text-align: center;
+    }
+    
+    .factor-card .metric-label {
+        font-size: 0.75em;
+        color: #888;
+        text-transform: uppercase;
+        margin-bottom: 5px;
+    }
+    
+    .factor-card .metric-value {
+        font-size: 1.2em;
+        font-weight: bold;
+    }
+    
+    .factor-card .metric-value.positive {
+        color: #00ff88;
+    }
+    
+    .factor-card .metric-value.neutral {
+        color: #adb5bd;
+    }
+    
+    .factor-card .metric-value.negative {
+        color: #ff6b6b;
+    }
+    
+    .factor-card .status-badge {
+        font-size: 0.75em;
+        padding: 3px 10px;
+        border-radius: 12px;
+        display: inline-block;
+        margin-top: 5px;
+    }
+    
+    .factor-card .status-badge.effective {
+        background: rgba(0, 255, 136, 0.2);
+        color: #00ff88;
+    }
+    
+    .factor-card .status-badge.stable {
+        background: rgba(0, 217, 255, 0.2);
+        color: #00d9ff;
+    }
+    
+    .factor-card .update-time {
+        font-size: 0.8em;
+        color: #6c757d;
+        margin-top: 15px;
+        text-align: center;
+    }
+    
+    .factor-card .btn-enter {
+        display: block;
+        width: 100%;
+        padding: 12px;
+        margin-top: 20px;
+        border-radius: 8px;
+        border: none;
+        font-size: 1em;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s;
+        background: linear-gradient(90deg, #00d9ff, #00ff88);
+        color: #1a1a2e;
+        text-align: center;
+    }
+    
+    .factor-card .btn-enter:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0, 217, 255, 0.3);
+    }
+    
+    /* 无数据状态 */
+    .no-data {
+        text-align: center;
+        padding: 50px 20px;
+        color: #6c757d;
+    }
+    
+    .no-data-icon {
+        font-size: 3em;
+        margin-bottom: 15px;
+    }
+    
+    .no-data p {
+        font-size: 1em;
+        margin-bottom: 10px;
+    }
+    
+    .no-data .hint {
+        font-size: 0.9em;
+        color: #888;
+    }
+    
+    /* 加载状态 */
+    .loading {
+        text-align: center;
+        padding: 50px 20px;
+        color: #6c757d;
+    }
+    
+    .loading-spinner {
+        font-size: 2em;
+        animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+    
+    /* 统计摘要 */
+    .summary-bar {
+        background: rgba(255,255,255,0.05);
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 30px;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255,255,255,0.1);
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 20px;
+        text-align: center;
+    }
+    
+    .summary-item .label {
+        font-size: 0.85em;
+        color: #888;
+        margin-bottom: 5px;
+    }
+    
+    .summary-item .value {
+        font-size: 1.5em;
+        font-weight: bold;
+        color: #00d9ff;
+    }
+    
+    /* 说明区域 */
+    .info-section {
+        background: rgba(255,255,255,0.05);
+        border-radius: 12px;
+        padding: 25px;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255,255,255,0.1);
+        margin-bottom: 30px;
+    }
+    
+    .info-section h3 {
+        color: #00d9ff;
+        margin-bottom: 15px;
+        font-size: 1.2em;
+    }
+    
+    .info-section p {
+        color: #a0a0a0;
+        line-height: 1.8;
+        margin-bottom: 10px;
+    }
+    
+    .info-section code {
+        background: rgba(0, 217, 255, 0.1);
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-family: 'Consolas', monospace;
+        color: #00d9ff;
+    }
+    
+    footer {
+        text-align: center;
+        color: #adb5bd;
+        margin-top: 30px;
+        padding: 20px;
+        opacity: 0.8;
+    }
+    
+    @media (max-width: 768px) {
+        .factors-grid {
+            grid-template-columns: 1fr;
+        }
+        
+        header h1 {
+            font-size: 1.8em;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- 统计摘要 -->
+<div class="summary-bar" id="summaryBar" style="display: none;">
+    <div class="summary-item">
+        <div class="label">因子总数</div>
+        <div class="value" id="totalFactors">--</div>
+    </div>
+    <div class="summary-item">
+        <div class="label">有效因子</div>
+        <div class="value" id="effectiveFactors">--</div>
+    </div>
+    <div class="summary-item">
+        <div class="label">最近更新</div>
+        <div class="value" id="lastUpdate" style="font-size: 1em;">--</div>
+    </div>
+</div>
+
+<!-- 因子卡片区域 -->
+<div class="factors-section">
+    <h2>📈 因子列表</h2>
+    
+    <!-- 加载状态 -->
+    <div class="loading" id="loadingState">
+        <div class="loading-spinner">⏳</div>
+        <p>正在加载因子数据...</p>
+    </div>
+    
+    <!-- 因子卡片容器 -->
+    <div class="factors-grid" id="factorCards" style="display: none;"></div>
+    
+    <!-- 无数据状态 -->
+    <div class="no-data" id="noDataState" style="display: none;">
+        <div class="no-data-icon">📭</div>
+        <p>暂无因子分析数据</p>
+        <p class="hint">请先运行因子分析，数据将自动显示在此处</p>
+    </div>
+</div>
+
+<!-- 说明区域 -->
+<div class="info-section">
+    <h3>📖 关于本系统</h3>
+    <p><strong>因子分析系统</strong>：通过 IC 分析和分层回测，评估因子对未来收益的预测能力。</p>
+    <p><strong>IC（Information Coefficient）</strong>：衡量因子值与未来收益排名的相关性。<code>IC > 0.03</code> 通常认为因子有效。</p>
+    <p><strong>ICIR</strong>：信息比率，IC 均值除以 IC 标准差。<code>ICIR > 0.5</code> 表示因子稳定性较好。</p>
+    <p><strong>分层回测</strong>：每日按因子值分层，计算各层等权组合收益，验证因子预测能力。</p>
+    <p><strong>使用方式</strong>：点击卡片进入因子详情页，查看完整的 IC 分析和分层回测结果。</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // 页面加载时获取因子摘要
+    window.onload = async function() {
+        await loadFactorSummary();
+    };
+    
+    // 加载因子摘要
+    async function loadFactorSummary() {
+        const loadingState = document.getElementById('loadingState');
+        const noDataState = document.getElementById('noDataState');
+        const factorCards = document.getElementById('factorCards');
+        const summaryBar = document.getElementById('summaryBar');
+        
+        try {
+            const response = await fetch('/api/home/summary');
+            const data = await response.json();
+            
+            // 隐藏加载状态
+            loadingState.style.display = 'none';
+            
+            if (data.success) {
+                // 显示因子卡片
+                displayFactorCards(data.data.factors);
+                
+                // 显示统计摘要
+                displaySummary(data.data.summary);
+                
+                factorCards.style.display = 'grid';
+                summaryBar.style.display = 'grid';
+            } else {
+                // 显示无数据状态
+                noDataState.style.display = 'block';
+            }
+            
+        } catch (error) {
+            console.error('加载因子数据失败:', error);
+            loadingState.style.display = 'none';
+            noDataState.style.display = 'block';
+        }
+    }
+    
+    // 显示统计摘要
+    function displaySummary(summary) {
+        document.getElementById('totalFactors').textContent = summary.total_factors;
+        document.getElementById('effectiveFactors').textContent = summary.effective_factors;
+        document.getElementById('lastUpdate').textContent = summary.last_global_update || '--';
+    }
+    
+    // 显示因子卡片
+    function displayFactorCards(factors) {
+        const container = document.getElementById('factorCards');
+        container.innerHTML = '';
+        
+        factors.forEach(factor => {
+            const card = createFactorCard(factor);
+            container.appendChild(card);
+        });
+    }
+    
+    // 创建因子卡片
+    function createFactorCard(factor) {
+        const div = document.createElement('div');
+        div.className = 'factor-card';
+        div.onclick = () => window.location.href = factor.analysis_url;
+        
+        // IC均值颜色
+        const icMeanClass = factor.ic_mean > 0.03 ? 'positive' : 
+                            (factor.ic_mean > 0 ? 'neutral' : 'negative');
+        
+        // ICIR颜色
+        const icirClass = factor.icir > 0.5 ? 'positive' : 'neutral';
+        
+        // 图标
+        const icon = factor.id === 'rsi_6' ? '📊' : (factor.id === 'volume_ratio_5' ? '📈' : '📉');
+        
+        div.innerHTML = `
+            <div class="card-header">
+                <span class="factor-icon">${icon}</span>
+                <h3 class="name">${factor.full_name}</h3>
+            </div>
+            <p class="desc">${factor.description}</p>
+            <div class="metrics">
+                <div class="metric-item">
+                    <div class="metric-label">IC 均值</div>
+                    <div class="metric-value ${icMeanClass}">${factor.ic_mean.toFixed(4)}</div>
+                    <span class="status-badge ${factor.status.effective ? 'effective' : ''}">${factor.status.effective ? '✓ 有效' : '待验证'}</span>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">ICIR</div>
+                    <div class="metric-value ${icirClass}">${factor.icir.toFixed(2)}</div>
+                    <span class="status-badge ${factor.status.stable ? 'stable' : ''}">${factor.status.stable ? '✓ 稳定' : '待验证'}</span>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">多空年化收益</div>
+                    <div class="metric-value ${(factor.long_short_return || 0) > 0 ? 'positive' : 'negative'}">${((factor.long_short_return || 0) * 100).toFixed(2)}%</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">IC>0 比例</div>
+                    <div class="metric-value ${(factor.ic_positive_ratio || 0) > 0.5 ? 'positive' : 'neutral'}">${((factor.ic_positive_ratio || 0) * 100).toFixed(1)}%</div>
+                </div>
+            </div>
+            <div class="update-time">更新时间: ${factor.last_updated || '--'}</div>
+            <button class="btn-enter">进入分析 →</button>
+        `;
+        
+        return div;
+    }
+</script>
+{% endblock %}

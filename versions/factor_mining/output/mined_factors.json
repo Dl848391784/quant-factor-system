@@ -1,0 +1,139 @@
+{
+  "timestamp": "2026-05-03 19:55:46",
+  "quick_mode": false,
+  "total_factors": 14,
+  "stage_summary": {
+    "A": 3,
+    "B": 10,
+    "C": 1
+  },
+  "factors": [
+    {
+      "factor_id": "B_mfi_overbought",
+      "expression": "mfi_overbought",
+      "stage": "B",
+      "ic": -0.06953852131881882,
+      "ic_ir": -0.16130083988851526,
+      "create_time": "2026-05-03 19:28:34"
+    },
+    {
+      "factor_id": "B_volatility_ratio",
+      "expression": "volatility_ratio",
+      "stage": "B",
+      "ic": -0.059534063001288114,
+      "ic_ir": -0.3004732332112313,
+      "create_time": "2026-05-03 19:28:34"
+    },
+    {
+      "factor_id": "B_plus_di_14",
+      "expression": "plus_di_14",
+      "stage": "B",
+      "ic": -0.05660724478899371,
+      "ic_ir": -0.2912514437634498,
+      "create_time": "2026-05-03 19:28:34"
+    },
+    {
+      "factor_id": "B_cci_overbought",
+      "expression": "cci_overbought",
+      "stage": "B",
+      "ic": -0.04386114797826947,
+      "ic_ir": -0.2838650723505745,
+      "create_time": "2026-05-03 19:28:34"
+    },
+    {
+      "factor_id": "B_keltner_position",
+      "expression": "keltner_position",
+      "stage": "B",
+      "ic": -0.04275103545594091,
+      "ic_ir": -0.3057659052709169,
+      "create_time": "2026-05-03 19:28:34"
+    },
+    {
+      "factor_id": "B_trend_strength",
+      "expression": "trend_strength",
+      "stage": "B",
+      "ic": -0.03707347681910328,
+      "ic_ir": -0.19421716315241,
+      "create_time": "2026-05-03 19:28:34"
+    },
+    {
+      "factor_id": "B_atr_pct",
+      "expression": "atr_pct",
+      "stage": "B",
+      "ic": -0.03691695831282033,
+      "ic_ir": -0.14714985589880708,
+      "create_time": "2026-05-03 19:28:34"
+    },
+    {
+      "factor_id": "B_bollinger_width_20",
+      "expression": "bollinger_width_20",
+      "stage": "B",
+      "ic": -0.03651765830582496,
+      "ic_ir": -0.1617753742358884,
+      "create_time": "2026-05-03 19:28:34"
+    },
+    {
+      "factor_id": "B_ma_trend",
+      "expression": "ma_trend",
+      "stage": "B",
+      "ic": -0.033267501481226376,
+      "ic_ir": -0.18925755231137675,
+      "create_time": "2026-05-03 19:28:34"
+    },
+    {
+      "factor_id": "B_rsi_24",
+      "expression": "rsi_24",
+      "stage": "B",
+      "ic": -0.03231033826666927,
+      "ic_ir": -0.14036347157359264,
+      "create_time": "2026-05-03 19:28:34"
+    },
+    {
+      "factor_id": "C_unknown",
+      "expression": "mul(add(-0.945, FA_N0112), turnover_rate)",
+      "stage": "C",
+      "ic": 0.043959107867002675,
+      "cv_decay": null,
+      "create_time": "2026-05-03 19:55:46"
+    },
+    {
+      "factor_id": "FA_N0340",
+      "expression": "neg((bollinger_pb * turnover_rate))",
+      "stage": "A",
+      "ic": 0.040921595708287156,
+      "factors": [
+        "bollinger_pb",
+        "turnover_rate"
+      ],
+      "operator": "neg(*)",
+      "type": "nested",
+      "create_time": "2026-05-03 19:27:39"
+    },
+    {
+      "factor_id": "FA_N0322",
+      "expression": "neg((kdj_j min turnover_rate))",
+      "stage": "A",
+      "ic": 0.034462805404699766,
+      "factors": [
+        "kdj_j",
+        "turnover_rate"
+      ],
+      "operator": "neg(min)",
+      "type": "nested",
+      "create_time": "2026-05-03 19:27:39"
+    },
+    {
+      "factor_id": "FA_N0112",
+      "expression": "neg((rsi_6 + turnover_rate))",
+      "stage": "A",
+      "ic": 0.03445270202654714,
+      "factors": [
+        "rsi_6",
+        "turnover_rate"
+      ],
+      "operator": "neg(+)",
+      "type": "nested",
+      "create_time": "2026-05-03 19:27:39"
+    }
+  ]
+}

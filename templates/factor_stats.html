@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>因子统计 - IC 分析系统</title>
+    {% include 'components/navbar_styles.html' %}
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #e9ecef;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 25px;
+            padding: 20px;
+        }
+        
+        header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        header p {
+            color: #adb5bd;
+            font-size: 1.1em;
+        }
+        
+        .stats-section {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 25px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 25px;
+        }
+        
+        .stats-section h2 {
+            color: #00d9ff;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .factor-selector {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+        }
+        
+        .factor-btn {
+            padding: 10px 20px;
+            border: 1px solid rgba(0, 217, 255, 0.3);
+            background: rgba(0, 217, 255, 0.1);
+            color: #00d9ff;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 600;
+        }
+        
+        .factor-btn:hover {
+            background: rgba(0, 217, 255, 0.2);
+        }
+        
+        .factor-btn.active {
+            background: #00d9ff;
+            color: #1a1a2e;
+        }
+        
+        .stats-content {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 20px;
+            min-height: 300px;
+        }
+        
+        .stats-text {
+            white-space: pre-wrap;
+            font-size: 1em;
+            line-height: 1.8;
+            color: #e9ecef;
+        }
+        
+        .stats-text .highlight {
+            color: #00ff88;
+            font-weight: 600;
+        }
+        
+        .stats-text .warning {
+            color: #ff6b6b;
+        }
+        
+        .stats-text .info {
+            color: #00d9ff;
+        }
+        
+        .copy-btn-container {
+            text-align: center;
+            margin-top: 20px;
+        }
+        
+        .copy-btn {
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #00d9ff, #00ff88);
+            color: #1a1a2e;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 1em;
+            transition: all 0.3s;
+        }
+        
+        .copy-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0, 217, 255, 0.4);
+        }
+        
+        .copy-btn:active {
+            transform: translateY(0);
+        }
+        
+        .copy-btn.copied {
+            background: linear-gradient(135deg, #00ff88, #00d9ff);
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #adb5bd;
+        }
+        
+        .loading-spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(0, 217, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #00d9ff;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .error-message {
+            color: #ff6b6b;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        footer {
+            text-align: center;
+            color: #adb5bd;
+            margin-top: 30px;
+            padding: 20px;
+            opacity: 0.8;
+        }
+        
+        /* 移动端适配 */
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 1.8em;
+            }
+            
+            .stats-section {
+                padding: 15px;
+            }
+            
+            .factor-btn {
+                padding: 8px 15px;
+                font-size: 0.9em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 因子统计文案</h1>
+            <p>一键生成因子分析统计文案，支持复制使用</p>
+        </header>
+        
+        {% set active_page = 'factor_stats' %}
+        <div class="navbar-container">
+            {% include 'components/navbar.html' %}
+        </div>
+        
+        <div class="stats-section">
+            <h2>📈 因子选择</h2>
+            
+            <div class="factor-selector" id="factorSelector">
+                <button class="factor-btn active" data-factor="all" onclick="selectFactor('all')">
+                    📊 全因子汇总
+                </button>
+                <!-- 因子按钮将通过 JS 动态加载 -->
+            </div>
+            
+            <div class="stats-content" id="statsContent">
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <p style="margin-top: 15px;">正在加载统计数据...</p>
+                </div>
+            </div>
+            
+            <div class="copy-btn-container">
+                <button class="copy-btn" id="copyBtn" onclick="copyText()">
+                    📋 一键复制
+                </button>
+            </div>
+        </div>
+        
+        <footer>
+            <p>🛠️ 云舟开发 | 因子池 IC 分析系统</p>
+        </footer>
+    </div>
+    
+    <script>
+        let currentText = '';
+        let currentFactor = 'all';
+        
+        // 页面加载时获取因子列表和默认内容
+        document.addEventListener('DOMContentLoaded', function() {
+            loadFactorList();
+            loadStats('all');
+        });
+        
+        // 加载因子列表
+        function loadFactorList() {
+            fetch('/api/factor/stats/list')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.factors) {
+                        const selector = document.getElementById('factorSelector');
+                        data.factors.forEach(factor => {
+                            const btn = document.createElement('button');
+                            btn.className = 'factor-btn';
+                            btn.setAttribute('data-factor', factor.id);
+                            btn.onclick = function() { selectFactor(factor.id); };
+                            btn.textContent = `${factor.icon || '📊'} ${factor.cn_name}`;
+                            selector.appendChild(btn);
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('加载因子列表失败:', error);
+                });
+        }
+        
+        // 选择因子
+        function selectFactor(factorId) {
+            currentFactor = factorId;
+            
+            // 更新按钮状态
+            const buttons = document.querySelectorAll('.factor-btn');
+            buttons.forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.getAttribute('data-factor') === factorId) {
+                    btn.classList.add('active');
+                }
+            });
+            
+            // 加载对应数据
+            loadStats(factorId);
+        }
+        
+        // 加载统计数据
+        function loadStats(factorId) {
+            const content = document.getElementById('statsContent');
+            content.innerHTML = `
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <p style="margin-top: 15px;">正在生成文案...</p>
+                </div>
+            `;
+            
+            const url = factorId === 'all' 
+                ? '/api/factor/stats/all' 
+                : `/api/factor/stats/${factorId}`;
+            
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        currentText = data.text;
+                        content.innerHTML = `<div class="stats-text">${formatText(data.text)}</div>`;
+                    } else {
+                        content.innerHTML = `<div class="error-message">❌ ${data.error || '加载失败'}</div>`;
+                        currentText = '';
+                    }
+                })
+                .catch(error => {
+                    content.innerHTML = `<div class="error-message">❌ 加载失败: ${error.message}</div>`;
+                    currentText = '';
+                });
+        }
+        
+        // 格式化文本（添加高亮）
+        function formatText(text) {
+            // 高亮数字
+            text = text.replace(/(\d+\.?\d*%)/g, '<span class="highlight">$1</span>');
+            // 高亮 ICIR
+            text = text.replace(/(ICIR)/g, '<span class="info">$1</span>');
+            // 高亮警告词汇
+            text = text.replace(/(较弱|不显著|注意)/g, '<span class="warning">$1</span>');
+            return text;
+        }
+        
+        // 复制文本
+        function copyText() {
+            if (!currentText) {
+                alert('暂无内容可复制');
+                return;
+            }
+            
+            const btn = document.getElementById('copyBtn');
+            
+            // 使用 Clipboard API
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(currentText)
+                    .then(() => {
+                        btn.textContent = '✅ 已复制!';
+                        btn.classList.add('copied');
+                        setTimeout(() => {
+                            btn.textContent = '📋 一键复制';
+                            btn.classList.remove('copied');
+                        }, 2000);
+                    })
+                    .catch(err => {
+                        fallbackCopy(currentText, btn);
+                    });
+            } else {
+                fallbackCopy(currentText, btn);
+            }
+        }
+        
+        // 兼容性复制方法
+        function fallbackCopy(text, btn) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+            
+            try {
+                document.execCommand('copy');
+                btn.textContent = '✅ 已复制!';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = '📋 一键复制';
+                    btn.classList.remove('copied');
+                }, 2000);
+            } catch (err) {
+                alert('复制失败，请手动复制');
+            }
+            
+            document.body.removeChild(textarea);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,1446 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>主力净流入占比因子分析总览</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    {% include 'components/navbar_styles.html' %}
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #e9ecef;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 25px;
+            padding: 20px;
+        }
+        
+        header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        header p {
+            font-size: 1.1em;
+            color: #a0a0a0;
+        }
+        
+        /* 因子说明区 */
+        .factor-info {
+            background: rgba(0, 217, 255, 0.1);
+            border: 1px solid rgba(0, 217, 255, 0.3);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .factor-info h3 {
+            color: #00d9ff;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+        
+        .factor-info .info-box {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+        }
+        
+        @media (max-width: 900px) {
+            .factor-info .info-box {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        
+        @media (max-width: 600px) {
+            .factor-info .info-box {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .info-item {
+            background: rgba(255,255,255,0.05);
+            padding: 15px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .info-item .icon {
+            font-size: 1.5em;
+        }
+        
+        .info-item .label {
+            font-size: 0.9em;
+            color: #adb5bd;
+        }
+        
+        .info-item .value {
+            font-weight: 600;
+            color: #00ff88;
+            font-size: 0.95em;
+        }
+        
+        .info-item .desc {
+            font-size: 0.8em;
+            color: #6c757d;
+        }
+        
+        /* 控制面板 */
+        .control-panel {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 25px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .control-panel h2 {
+            color: #fff;
+            margin-bottom: 20px;
+            font-size: 1.3em;
+        }
+        
+        .control-row {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .control-group label {
+            color: #adb5bd;
+            font-size: 0.9em;
+        }
+        
+        .control-group input, .control-group select {
+            padding: 10px 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.1);
+            color: #e9ecef;
+            font-size: 1em;
+            min-width: 150px;
+        }
+        
+        .control-group input:focus, .control-group select:focus {
+            outline: none;
+            border-color: #00d9ff;
+        }
+        
+        .btn {
+            padding: 12px 30px;
+            border-radius: 8px;
+            border: none;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            color: #1a1a2e;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 217, 255, 0.3);
+        }
+        
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .hint {
+            font-size: 0.8em;
+            color: #6c757d;
+            margin-top: 3px;
+        }
+        
+        /* 进度显示 */
+        .progress-panel {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            display: none;
+        }
+        
+        .progress-panel.active {
+            display: block;
+        }
+        
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .progress-title {
+            font-size: 1.1em;
+            color: #00d9ff;
+        }
+        
+        .progress-status {
+            font-size: 0.9em;
+            color: #888;
+        }
+        
+        .progress-bar-wrapper {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            height: 30px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            border-radius: 8px;
+            transition: width 0.3s ease;
+            min-width: 0%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .progress-text {
+            color: white;
+            font-weight: bold;
+            font-size: 0.9em;
+            z-index: 1;
+        }
+        
+        .progress-details {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .progress-detail-item {
+            text-align: center;
+            padding: 10px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px;
+        }
+        
+        .progress-detail-label {
+            font-size: 0.75em;
+            color: #888;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        
+        .progress-detail-value {
+            font-size: 1.1em;
+            color: #00d9ff;
+            font-weight: bold;
+        }
+        
+        /* 核心指标卡片组 */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        
+        .metric-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            text-align: center;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 217, 255, 0.2);
+        }
+        
+        .metric-card .label {
+            font-size: 0.85em;
+            color: #888;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .metric-card .value {
+            font-size: 1.8em;
+            font-weight: bold;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .metric-card .value.positive {
+            background: linear-gradient(90deg, #00ff88, #00ffcc);
+            -webkit-background-clip: text;
+            background-clip: text;
+        }
+        
+        .metric-card .value.negative {
+            background: linear-gradient(90deg, #ff6b6b, #ffa500);
+            -webkit-background-clip: text;
+            background-clip: text;
+        }
+        
+        .metric-card .subtitle {
+            font-size: 0.75em;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .metric-card .status {
+            font-size: 0.8em;
+            margin-top: 5px;
+            padding: 3px 10px;
+            border-radius: 12px;
+        }
+        
+        .metric-card .status.pass {
+            background: rgba(0, 255, 136, 0.2);
+            color: #00ff88;
+        }
+        
+        .metric-card .status.fail {
+            background: rgba(255, 107, 107, 0.2);
+            color: #ff6b6b;
+        }
+        
+        /* 图表区域 */
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+        
+        @media (max-width: 1200px) {
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .chart-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .chart-card h3 {
+            color: #fff;
+            margin-bottom: 15px;
+            font-size: 1.1em;
+        }
+        
+        .chart-wrapper {
+            position: relative;
+            height: 350px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px;
+            padding: 10px;
+        }
+        
+        /* 数据表格区域 */
+        .tables-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+        
+        @media (max-width: 900px) {
+            .tables-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .table-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .table-card h3 {
+            color: #fff;
+            margin-bottom: 15px;
+            font-size: 1.1em;
+        }
+        
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .data-table th, .data-table td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .data-table th {
+            color: #adb5bd;
+            font-weight: 600;
+            background: rgba(255,255,255,0.05);
+            font-size: 0.85em;
+        }
+        
+        .data-table td {
+            color: #e9ecef;
+            font-size: 0.9em;
+        }
+        
+        .data-table .positive {
+            color: #00ff88;
+        }
+        
+        .data-table .negative {
+            color: #ff6b6b;
+        }
+        
+        .data-table .significant {
+            font-weight: 700;
+        }
+        
+        /* 说明区域 */
+        .info-section {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 25px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .info-section h3 {
+            color: #00d9ff;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+        
+        .info-section p {
+            color: #a0a0a0;
+            line-height: 1.8;
+            margin-bottom: 10px;
+        }
+        
+        .info-section code {
+            background: rgba(0, 217, 255, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'Consolas', monospace;
+            color: #00d9ff;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #666;
+        }
+        
+        .error {
+            background: rgba(255, 100, 100, 0.1);
+            border: 1px solid rgba(255, 100, 100, 0.3);
+            color: #ff6b6b;
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+        }
+        
+        /* 单调性指示 */
+        .monotonicity-indicator {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin-top: 15px;
+        }
+        
+        .monotonicity-pass {
+            background: rgba(0, 255, 136, 0.2);
+            color: #00ff88;
+        }
+        
+        .monotonicity-fail {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+        }
+        
+        footer {
+            text-align: center;
+            color: #adb5bd;
+            margin-top: 30px;
+            padding: 20px;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>💰 主力净流入占比因子分析总览</h1>
+            <p>整合 IC 分析与分层回测，评估主力资金流向因子的有效性</p>
+        </header>
+{% set active_page = 'main_inflow' %}
+        <div class="navbar-container">
+            {% include 'components/navbar.html' %}
+        </div>
+        
+        <!-- 因子说明区 -->
+        <div class="factor-info">
+            <h3>📖 因子定义说明</h3>
+            <div class="info-box">
+                <div class="info-item">
+                    <div class="icon">💹</div>
+                    <div>
+                        <div class="label">因子公式</div>
+                        <div class="value">主力净流入 / 流通市值</div>
+                        <div class="desc">主力资金流入占流通市值的比例</div>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <div class="icon">📊</div>
+                    <div>
+                        <div class="label">主力净流入</div>
+                        <div class="value">大单 + 特大单净流入</div>
+                        <div class="desc">东方财富定义的主力资金</div>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <div class="icon">📈</div>
+                    <div>
+                        <div class="label">因子逻辑</div>
+                        <div class="value">正值看涨，负值看跌</div>
+                        <div class="desc">流入表示资金看好，流出表示看空</div>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <div class="icon">🎯</div>
+                    <div>
+                        <div class="label">分层策略</div>
+                        <div class="value">10层等频分层</div>
+                        <div class="desc">Layer 1 流出最大，Layer 10 流入最大</div>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <div class="icon">🔄</div>
+                    <div>
+                        <div class="label">多空组合</div>
+                        <div class="value">做多 Layer 10 - 做空 Layer 1</div>
+                        <div class="desc">做多流入股，做空流出股</div>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <div class="icon">📡</div>
+                    <div>
+                        <div class="label">数据来源</div>
+                        <div class="value">东方财富 API</div>
+                        <div class="desc">每日凌晨自动更新</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 参数控制面板 -->
+        <div class="control-panel">
+            <h2>⚙️ 分析参数设置</h2>
+            <div class="control-row">
+                <div class="control-group">
+                    <label>数据范围</label>
+                    <input type="text" value="全部主板股票，近2年数据" disabled style="opacity: 0.7;">
+                    <span class="hint">固定参数：约3000只股票，500个交易日</span>
+                </div>
+                <div class="control-group">
+                    <label>分层数量</label>
+                    <select id="num_layers">
+                        <option value="5">5层（每层20%）</option>
+                        <option value="10" selected>10层（每层10%）</option>
+                    </select>
+                    <span class="hint">分层越细，单调性检验更敏感</span>
+                </div>
+                <button class="btn btn-primary" id="runBtn" onclick="runAnalysis()">
+                    🚀 运行分析
+                </button>
+            </div>
+        </div>
+        
+        <!-- 进度显示 -->
+        <div class="progress-panel" id="progressPanel">
+            <div class="progress-header">
+                <div class="progress-title">📊 分析进度</div>
+                <div class="progress-status" id="progressStatus">准备开始...</div>
+            </div>
+            <div class="progress-bar-wrapper">
+                <div class="progress-bar" id="progressBar" style="width: 0%"></div>
+                <div class="progress-text" id="progressPercent">0%</div>
+            </div>
+            <div class="progress-details">
+                <div class="progress-detail-item">
+                    <div class="progress-detail-label">当前阶段</div>
+                    <div class="progress-detail-value" id="progressStage">初始化</div>
+                </div>
+                <div class="progress-detail-item">
+                    <div class="progress-detail-label">预计剩余</div>
+                    <div class="progress-detail-value" id="estimatedTime">--秒</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 核心指标卡片组 -->
+        <div class="metrics-grid" id="metricsGrid" style="display: none;">
+            <div class="metric-card">
+                <div class="label">IC 均值</div>
+                <div class="value" id="icMean">--</div>
+                <div class="subtitle">Mean Rank IC</div>
+                <div class="status" id="icMeanStatus"></div>
+            </div>
+            <div class="metric-card">
+                <div class="label">ICIR</div>
+                <div class="value" id="icir">--</div>
+                <div class="subtitle">IC均值/IC标准差</div>
+                <div class="status" id="icirStatus"></div>
+            </div>
+            <div class="metric-card">
+                <div class="label">t 统计量</div>
+                <div class="value" id="tStat">--</div>
+                <div class="subtitle" id="tStatSubtitle">T-Statistic</div>
+            </div>
+            <div class="metric-card">
+                <div class="label">多空年化收益</div>
+                <div class="value" id="longShortReturn">--</div>
+                <div class="subtitle">Long-Short Return</div>
+                <div class="status" id="lsReturnStatus"></div>
+            </div>
+            <div class="metric-card">
+                <div class="label">夏普比率</div>
+                <div class="value" id="sharpeRatio">--</div>
+                <div class="subtitle">Long-Short Sharpe</div>
+                <div class="status" id="sharpeStatus"></div>
+            </div>
+            <div class="metric-card">
+                <div class="label">单调性检验</div>
+                <div class="value" id="monotonicity">--</div>
+                <div class="subtitle">Layer 1→10 收益递增</div>
+                <div class="status" id="monotonicityStatus"></div>
+            </div>
+        </div>
+        
+        <!-- 图表区域 -->
+        <div class="charts-grid" id="chartsGrid" style="display: none;">
+            <div class="chart-card">
+                <h3>📈 IC 时间序列图</h3>
+                <div class="chart-wrapper">
+                    <canvas id="icChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <h3>📊 分层收益柱状图</h3>
+                <div class="chart-wrapper">
+                    <canvas id="barChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <h3>📉 多空净值曲线</h3>
+                <div class="chart-wrapper">
+                    <canvas id="longShortChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <h3>📈 各层净值叠加图</h3>
+                <div class="chart-wrapper">
+                    <canvas id="cumulativeChart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 数据表格区域 -->
+        <div class="tables-grid" id="tablesGrid" style="display: none;">
+            <div class="table-card">
+                <h3>📋 IC 统计指标表</h3>
+                <table class="data-table" id="icStatsTable">
+                    <thead>
+                        <tr>
+                            <th>指标</th>
+                            <th>值</th>
+                            <th>说明</th>
+                            <th>状态</th>
+                        </tr>
+                    </thead>
+                    <tbody id="icStatsBody"></tbody>
+                </table>
+            </div>
+            <div class="table-card">
+                <h3>📊 分层统计指标表</h3>
+                <table class="data-table" id="layerStatsTable">
+                    <thead>
+                        <tr>
+                            <th>分层</th>
+                            <th>年化收益</th>
+                            <th>t统计量</th>
+                            <th>p值</th>
+                            <th>夏普比率</th>
+                        </tr>
+                    </thead>
+                    <tbody id="layerStatsBody"></tbody>
+                </table>
+                <div id="monotonicityResult"></div>
+            </div>
+        </div>
+        
+        <!-- 说明区域 -->
+        <div class="info-section">
+            <h3>📖 指标说明</h3>
+            <p><strong>主力净流入占比因子</strong>：主力资金净流入占流通市值的比例，衡量主力资金对个股的关注程度。</p>
+            <p><strong>主力资金定义</strong>：东方财富将大单（10-50万）和特大单（>50万）归为主力资金。</p>
+            <p><strong>因子逻辑</strong>：正值表示主力资金净流入，市场看好，预期上涨；负值表示主力资金净流出，市场看空，预期下跌。</p>
+            <p><strong>Rank IC（秩相关系数）</strong>：衡量因子与未来收益排名的相关性。使用<strong>正向排名</strong>（因子值越高预期收益越高）。</p>
+            <p><strong>IC 均值</strong>：所有交易日 IC 的平均值。<code>IC > 0.03</code> 通常认为因子有效。</p>
+            <p><strong>ICIR</strong>：信息比率，IC 均值除以 IC 标准差。<code>ICIR > 0.5</code> 表示因子稳定性较好。</p>
+            <p><strong>分层回测</strong>：每日按因子值升序分层。第1层为因子值最低（主力流出最大），第N层为因子值最高（主力流入最大）。</p>
+            <p><strong>多空组合</strong>：做多 Layer N（主力流入最大组）+ 做空 Layer 1（主力流出最大组）。</p>
+            <p><strong>单调性检验</strong>：检查分层收益是否从 Layer 1 到 Layer N 递增，符合因子预期方向（流入收益高）。</p>
+            <p><strong>显著性标注</strong>：<code>* p&lt;0.05</code>, <code>** p&lt;0.01</code>, <code>*** p&lt;0.001</code></p>
+            <p><strong>数据获取</strong>：运行 <code>python precompute_main_inflow.py</code> 获取历史数据。</p>
+        </div>
+        
+        <footer>
+            <p>🛠️ 云舟开发 | 主力净流入占比因子分析系统 | 数据来源：东方财富API</p>
+        </footer>
+    </div>
+    
+    <script>
+        // 图表实例
+        let icChartInstance = null;
+        let barChartInstance = null;
+        let longShortChartInstance = null;
+        let cumulativeChartInstance = null;
+        
+        // 进度轮询间隔
+        let progressInterval = null;
+        
+        // 运行分析
+        async function runAnalysis() {
+            const runBtn = document.getElementById('runBtn');
+            const progressPanel = document.getElementById('progressPanel');
+            
+            // 获取参数
+            const num_layers = document.getElementById('num_layers').value;
+            
+            // 禁用按钮，显示进度
+            runBtn.disabled = true;
+            runBtn.textContent = '⏳ 运行中...';
+            progressPanel.classList.add('active');
+            
+            // 初始化进度
+            updateProgressUI({
+                status: 'running',
+                progress: 0,
+                message: '正在启动...',
+                estimated_remaining_seconds: 0
+            });
+            
+            try {
+                // 启动分析
+                const startResponse = await fetch(`/api/main-inflow-ratio-analysis?num_layers=${num_layers}`);
+                const startData = await startResponse.json();
+                
+                if (!startData.success) {
+                    throw new Error(startData.error || '启动分析失败');
+                }
+                
+                // 如果有预计算结果，直接显示
+                if (startData.result) {
+                    displayResults(startData.result);
+                    runBtn.disabled = false;
+                    runBtn.textContent = '🚀 运行分析';
+                    setTimeout(() => {
+                        document.getElementById('progressPanel').classList.remove('active');
+                    }, 1000);
+                    return;
+                }
+                
+                // 开始轮询进度
+                startProgressPolling();
+                
+            } catch (error) {
+                console.error('Error:', error);
+                showProgressError(error.message);
+                runBtn.disabled = false;
+                runBtn.textContent = '🚀 运行分析';
+            }
+        }
+        
+        // 开始轮询进度
+        function startProgressPolling() {
+            if (progressInterval) {
+                clearInterval(progressInterval);
+            }
+            progressInterval = setInterval(pollProgress, 1000);
+        }
+        
+        // 停止轮询进度
+        function stopProgressPolling() {
+            if (progressInterval) {
+                clearInterval(progressInterval);
+                progressInterval = null;
+            }
+        }
+        
+        // 轮询进度
+        async function pollProgress() {
+            try {
+                const response = await fetch('/api/main-inflow-ratio-analysis/progress');
+                const progress = await response.json();
+                
+                updateProgressUI(progress);
+                
+                // 如果已完成，显示结果
+                if (progress.status === 'completed') {
+                    stopProgressPolling();
+                    
+                    if (progress.result) {
+                        displayResults(progress.result);
+                    } else {
+                        loadExistingResult();
+                    }
+                    
+                    const runBtn = document.getElementById('runBtn');
+                    runBtn.disabled = false;
+                    runBtn.textContent = '🚀 运行分析';
+                    
+                    setTimeout(() => {
+                        document.getElementById('progressPanel').classList.remove('active');
+                    }, 2000);
+                    
+                } else if (progress.status === 'error') {
+                    stopProgressPolling();
+                    showProgressError(progress.error || '分析失败');
+                    
+                    const runBtn = document.getElementById('runBtn');
+                    runBtn.disabled = false;
+                    runBtn.textContent = '🚀 运行分析';
+                }
+                
+            } catch (error) {
+                console.error('轮询进度失败:', error);
+            }
+        }
+        
+        // 更新进度 UI
+        function updateProgressUI(progress) {
+            document.getElementById('progressBar').style.width = progress.progress + '%';
+            document.getElementById('progressPercent').textContent = progress.progress + '%';
+            document.getElementById('progressStatus').textContent = progress.message || '处理中...';
+            
+            const message = progress.message || '';
+            if (message.includes('加载')) {
+                document.getElementById('progressStage').textContent = '数据加载';
+            } else if (message.includes('IC') || message.includes('因子')) {
+                document.getElementById('progressStage').textContent = '因子计算';
+            } else if (message.includes('分层')) {
+                document.getElementById('progressStage').textContent = '分层回测';
+            } else if (message.includes('保存')) {
+                document.getElementById('progressStage').textContent = '保存结果';
+            } else if (message.includes('完成')) {
+                document.getElementById('progressStage').textContent = '完成';
+            } else {
+                document.getElementById('progressStage').textContent = '处理';
+            }
+            
+            const remaining = progress.estimated_remaining_seconds || 0;
+            if (remaining > 60) {
+                document.getElementById('estimatedTime').textContent = Math.round(remaining / 60) + '分钟';
+            } else {
+                document.getElementById('estimatedTime').textContent = remaining + '秒';
+            }
+        }
+        
+        // 显示进度错误
+        function showProgressError(message) {
+            document.getElementById('progressStatus').textContent = '错误: ' + message;
+            document.getElementById('progressStage').textContent = '失败';
+        }
+        
+        // 加载已有结果
+        async function loadExistingResult() {
+            try {
+                const response = await fetch('/api/main-inflow-ratio-analysis/result');
+                const data = await response.json();
+                
+                if (data.error) {
+                    console.log('无缓存结果:', data.error);
+                    return;
+                }
+                
+                displayResults(data);
+                
+            } catch (error) {
+                console.log('加载缓存失败:', error);
+            }
+        }
+        
+        // 显示结果
+        function displayResults(result) {
+            // 显示指标卡片
+            displayMetrics(result);
+            
+            // 显示图表
+            displayICChart(result.ic_series);
+            displayBarChart(result.layered_result.statistics, result.layered_result.num_layers);
+            displayLongShortChart(result.layered_result.long_short);
+            displayCumulativeChart(result.layered_result.cumulative_returns, result.layered_result.num_layers);
+            
+            // 显示表格
+            displayICStatsTable(result.ic_metrics);
+            displayLayerStatsTable(result.layered_result.statistics, result.layered_result.num_layers);
+            
+            // 显示区域
+            document.getElementById('metricsGrid').style.display = 'grid';
+            document.getElementById('chartsGrid').style.display = 'grid';
+            document.getElementById('tablesGrid').style.display = 'grid';
+        }
+        
+        // 显示指标卡片
+        function displayMetrics(result) {
+            const icMetrics = result.ic_metrics;
+            const summary = result.layered_result.summary;
+            
+            // IC 均值
+            const icMean = document.getElementById('icMean');
+            icMean.textContent = icMetrics.ic_mean.toFixed(4);
+            icMean.className = 'value ' + (icMetrics.ic_mean > 0.03 ? 'positive' : (icMetrics.ic_mean > 0 ? '' : 'negative'));
+            
+            const icMeanStatus = document.getElementById('icMeanStatus');
+            if (icMetrics.ic_mean > 0.03) {
+                icMeanStatus.className = 'status pass';
+                icMeanStatus.textContent = '✓ 有效';
+            } else if (icMetrics.ic_mean > 0) {
+                icMeanStatus.className = 'status';
+                icMeanStatus.textContent = '微弱';
+            } else {
+                icMeanStatus.className = 'status fail';
+                icMeanStatus.textContent = '✗ 无效';
+            }
+            
+            // ICIR
+            const icir = document.getElementById('icir');
+            icir.textContent = icMetrics.icir.toFixed(2);
+            icir.className = 'value ' + (icMetrics.icir > 0.5 ? 'positive' : (icMetrics.icir > 0 ? '' : 'negative'));
+            
+            const icirStatus = document.getElementById('icirStatus');
+            if (icMetrics.icir > 0.5) {
+                icirStatus.className = 'status pass';
+                icirStatus.textContent = '✓ 稳定';
+            } else {
+                icirStatus.className = 'status fail';
+                icirStatus.textContent = '不稳定';
+            }
+            
+            // t 统计量
+            const tStat = document.getElementById('tStat');
+            const absTStat = Math.abs(icMetrics.t_stat);
+            let significance = '';
+            
+            if (absTStat > 3.29) {
+                significance = ' ***';
+                tStat.className = 'value positive';
+            } else if (absTStat > 2.58) {
+                significance = ' **';
+                tStat.className = 'value positive';
+            } else if (absTStat > 1.96) {
+                significance = ' *';
+                tStat.className = 'value positive';
+            } else {
+                significance = '';
+                tStat.className = 'value';
+            }
+            
+            tStat.textContent = icMetrics.t_stat.toFixed(4) + significance;
+            document.getElementById('tStatSubtitle').textContent = `T-Statistic (n=${icMetrics.n_days})`;
+            
+            // 多空年化收益
+            const lsReturn = document.getElementById('longShortReturn');
+            const lsReturnValue = summary.long_short_annual_return;
+            lsReturn.textContent = (lsReturnValue * 100).toFixed(2) + '%';
+            lsReturn.className = 'value ' + (lsReturnValue > 0 ? 'positive' : 'negative');
+            
+            const lsReturnStatus = document.getElementById('lsReturnStatus');
+            if (lsReturnValue > 0) {
+                lsReturnStatus.className = 'status pass';
+                lsReturnStatus.textContent = '✓ 有效';
+            } else {
+                lsReturnStatus.className = 'status fail';
+                lsReturnStatus.textContent = '✗ 无效';
+            }
+            
+            // 夏普比率
+            const sharpe = document.getElementById('sharpeRatio');
+            sharpe.textContent = summary.long_short_sharpe.toFixed(2);
+            sharpe.className = 'value ' + (summary.long_short_sharpe > 1 ? 'positive' : (summary.long_short_sharpe > 0 ? '' : 'negative'));
+            
+            const sharpeStatus = document.getElementById('sharpeStatus');
+            if (summary.long_short_sharpe > 1) {
+                sharpeStatus.className = 'status pass';
+                sharpeStatus.textContent = '✓ 优秀';
+            } else if (summary.long_short_sharpe > 0) {
+                sharpeStatus.className = 'status';
+                sharpeStatus.textContent = '合格';
+            } else {
+                sharpeStatus.className = 'status fail';
+                sharpeStatus.textContent = '较差';
+            }
+            
+            // 单调性检验
+            const monotonicity = document.getElementById('monotonicity');
+            if (summary.monotonicity_passed) {
+                monotonicity.textContent = '✓ 通过';
+                monotonicity.className = 'value positive';
+                
+                const monoStatus = document.getElementById('monotonicityStatus');
+                monoStatus.className = 'status pass';
+                monoStatus.textContent = '符合预期';
+            } else {
+                monotonicity.textContent = '✗ 未通过';
+                monotonicity.className = 'value negative';
+                
+                const monoStatus = document.getElementById('monotonicityStatus');
+                monoStatus.className = 'status fail';
+                monoStatus.textContent = '存在反转';
+            }
+        }
+        
+        // 显示 IC 时间序列图
+        function displayICChart(icSeries) {
+            const canvas = document.getElementById('icChart');
+            const ctx = canvas.getContext('2d');
+            
+            if (icChartInstance) {
+                icChartInstance.destroy();
+            }
+            
+            if (!icSeries || !icSeries.dates || icSeries.dates.length === 0) {
+                return;
+            }
+            
+            // 采样显示
+            const sampledIndices = [];
+            for (let i = 0; i < icSeries.dates.length; i += 5) {
+                sampledIndices.push(i);
+            }
+            // 确保最后一个数据点被采样，避免遗漏末尾数据
+            const lastIdx = icSeries.dates.length - 1;
+            if (sampledIndices[sampledIndices.length - 1] !== lastIdx) {
+                sampledIndices.push(lastIdx);
+            }
+            
+            const sampledDates = sampledIndices.map(i => icSeries.dates[i]);
+            const sampledIC = sampledIndices.map(i => icSeries.ic_values[i]);
+            const sampledRolling = sampledIndices.map(i => icSeries.rolling_ic_mean[i]);
+            
+            icChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: sampledDates,
+                    datasets: [
+                        {
+                            label: '每日 IC',
+                            data: sampledIC,
+                            borderColor: '#00d9ff',
+                            backgroundColor: 'rgba(0, 217, 255, 0.1)',
+                            borderWidth: 1.5,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            fill: true,
+                            tension: 0.1
+                        },
+                        {
+                            label: '20日滚动均值',
+                            data: sampledRolling,
+                            borderColor: '#00ff88',
+                            backgroundColor: 'transparent',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            fill: false,
+                            tension: 0.3
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            labels: { color: '#e9ecef' }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleColor: '#00d9ff',
+                            bodyColor: '#fff'
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#666', maxTicksLimit: 12 }
+                        },
+                        y: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#888' }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 显示分层收益柱状图
+        function displayBarChart(statistics, numLayers) {
+            const canvas = document.getElementById('barChart');
+            const ctx = canvas.getContext('2d');
+            
+            if (barChartInstance) {
+                barChartInstance.destroy();
+            }
+            
+            // 构建标签（主力净流入：流出→流入，红→绿）
+            const layerLabels = {
+                'layer_1': 'L1(流出最大)',
+                'layer_2': 'L2',
+                'layer_3': 'L3',
+                'layer_4': 'L4',
+                'layer_5': 'L5',
+                'layer_6': 'L6',
+                'layer_7': 'L7',
+                'layer_8': 'L8',
+                'layer_9': 'L9',
+                'layer_10': 'L10(流入最大)',
+                'long_short': '多空'
+            };
+            
+            const labels = statistics.map(r => layerLabels[r.layer] || r.layer);
+            const data = statistics.map(r => (r.annual_return * 100).toFixed(2));
+            
+            // 颜色方案（主力净流入：流出→流入，红→绿）
+            const colors = [];
+            for (let i = 1; i <= numLayers; i++) {
+                if (i === 1) colors.push('#dc3545'); // 深红（流出最大）
+                else if (i === numLayers) colors.push('#28a745'); // 深绿（流入最大）
+                else colors.push('#adb5bd'); // 中间灰色
+            }
+            colors.push('#6f42c1'); // 多空：紫色
+            
+            barChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '年化收益率 (%)',
+                        data: data,
+                        backgroundColor: colors,
+                        borderColor: colors,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            title: { display: true, text: '年化收益率 (%)', color: '#e9ecef' },
+                            ticks: { color: '#adb5bd' },
+                            grid: { color: 'rgba(255,255,255,0.1)' }
+                        },
+                        x: {
+                            ticks: { color: '#adb5bd' },
+                            grid: { color: 'rgba(255,255,255,0.1)' }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 显示多空净值曲线
+        function displayLongShortChart(longShort) {
+            const canvas = document.getElementById('longShortChart');
+            const ctx = canvas.getContext('2d');
+            
+            if (longShortChartInstance) {
+                longShortChartInstance.destroy();
+            }
+            
+            if (!longShort || longShort.length === 0) {
+                return;
+            }
+            
+            const dates = longShort.map(r => r.date);
+            const navs = longShort.map(r => r.cumulative_nav);
+            
+            longShortChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [{
+                        label: '多空净值',
+                        data: navs,
+                        borderColor: '#6f42c1',
+                        backgroundColor: 'rgba(111, 66, 193, 0.1)',
+                        fill: true,
+                        tension: 0.1,
+                        pointRadius: 0,
+                        pointHoverRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: true, labels: { color: '#e9ecef' } }
+                    },
+                    scales: {
+                        y: {
+                            title: { display: true, text: '累计净值', color: '#e9ecef' },
+                            ticks: { color: '#adb5bd' },
+                            grid: { color: 'rgba(255,255,255,0.1)' }
+                        },
+                        x: {
+                            ticks: { color: '#adb5bd', maxTicksLimit: 10 },
+                            grid: { color: 'rgba(255,255,255,0.1)' }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 显示各层累计净值曲线
+        function displayCumulativeChart(cumulativeReturns, numLayers) {
+            const canvas = document.getElementById('cumulativeChart');
+            const ctx = canvas.getContext('2d');
+            
+            if (cumulativeChartInstance) {
+                cumulativeChartInstance.destroy();
+            }
+            
+            if (!cumulativeReturns || cumulativeReturns.length === 0) {
+                return;
+            }
+            
+            const dates = cumulativeReturns.map(r => r.date);
+            
+            const datasets = [];
+            // 主力净流入因子颜色：流出（红）→ 流入（绿）
+            const layerColors = [
+                '#dc3545', // Layer 1: 深红（流出最大）
+                '#fd7e14', // Layer 2: 浅红
+                '#ffc107', // Layer 3: 黄色
+                '#5cb85c', // Layer 4: 浅绿
+                '#28a745', // Layer 5: 深绿
+                '#20c997',
+                '#17a2b8',
+                '#6c757d',
+                '#e83e8c',
+                '#6f42c1'
+            ];
+            
+            for (let i = 1; i <= numLayers; i++) {
+                const colName = `layer_${i}`;
+                const data = cumulativeReturns.map(r => r[colName]);
+                
+                datasets.push({
+                    label: `Layer ${i}`,
+                    data: data,
+                    borderColor: layerColors[i - 1] || '#adb5bd',
+                    backgroundColor: 'transparent',
+                    tension: 0.1,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
+                });
+            }
+            
+            cumulativeChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: true, position: 'top', labels: { color: '#e9ecef' } },
+                        tooltip: { mode: 'index', intersect: false }
+                    },
+                    scales: {
+                        y: {
+                            title: { display: true, text: '累计净值', color: '#e9ecef' },
+                            ticks: { color: '#adb5bd' },
+                            grid: { color: 'rgba(255,255,255,0.1)' }
+                        },
+                        x: {
+                            ticks: { color: '#adb5bd', maxTicksLimit: 10 },
+                            grid: { color: 'rgba(255,255,255,0.1)' }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 显示 IC 统计指标表
+        function displayICStatsTable(icMetrics) {
+            const tbody = document.getElementById('icStatsBody');
+            tbody.innerHTML = '';
+            
+            const metrics = [
+                { name: 'IC均值', value: icMetrics.ic_mean.toFixed(4), desc: 'Rank IC 平均值', status: icMetrics.ic_mean > 0.03 ? '✓ 有效 (>0.03)' : (icMetrics.ic_mean > 0 ? '微弱' : '✗ 无效') },
+                { name: 'IC标准差', value: icMetrics.ic_std.toFixed(4), desc: 'IC 波动性', status: '-' },
+                { name: 'ICIR', value: icMetrics.icir.toFixed(2), desc: 'IC均值/IC标准差', status: icMetrics.icir > 0.5 ? '✓ 稳定 (>0.5)' : '不稳定' },
+                { name: 't统计量', value: icMetrics.t_stat.toFixed(4), desc: '显著性检验', status: Math.abs(icMetrics.t_stat) > 1.96 ? '✓ 显著' : '不显著' },
+                { name: 'p值', value: icMetrics.p_value.toFixed(4), desc: '显著性概率', status: icMetrics.p_value < 0.05 ? '✓ 显著' : '不显著' },
+                { name: 'IC>0比例', value: (icMetrics.positive_ratio * 100).toFixed(1) + '%', desc: '正 IC 占比', status: icMetrics.positive_ratio > 0.5 ? '✓ 正向 (>50%)' : '负向' }
+            ];
+            
+            metrics.forEach(m => {
+                const tr = document.createElement('tr');
+                const statusClass = m.status.includes('✓') ? 'positive' : (m.status.includes('✗') ? 'negative' : '');
+                tr.innerHTML = `
+                    <td>${m.name}</td>
+                    <td class="${statusClass}">${m.value}</td>
+                    <td>${m.desc}</td>
+                    <td class="${statusClass}">${m.status}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+        
+        // 显示分层统计指标表
+        function displayLayerStatsTable(statistics, numLayers) {
+            const tbody = document.getElementById('layerStatsBody');
+            tbody.innerHTML = '';
+            
+            const layerNames = {
+                'layer_1': 'L1 (流出最大)',
+                'layer_2': 'L2',
+                'layer_3': 'L3',
+                'layer_4': 'L4',
+                'layer_5': 'L5',
+                'layer_6': 'L6',
+                'layer_7': 'L7',
+                'layer_8': 'L8',
+                'layer_9': 'L9',
+                'layer_10': 'L10 (流入最大)',
+                'long_short': '多空组合'
+            };
+            
+            statistics.forEach(row => {
+                const name = layerNames[row.layer] || row.layer;
+                const annRet = (row.annual_return * 100).toFixed(2);
+                const tStat = row.t_stat.toFixed(4);
+                const pVal = row.p_value.toFixed(4);
+                const sharpe = row.sharpe.toFixed(4);
+                
+                const annRetClass = row.annual_return > 0 ? 'positive' : 'negative';
+                const pValClass = row.p_value < 0.05 ? 'significant' : '';
+                
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${name}</td>
+                    <td class="${annRetClass}">${annRet}%</td>
+                    <td>${tStat}</td>
+                    <td class="${pValClass}">${pVal}</td>
+                    <td>${sharpe}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            
+            // 检查单调性
+            const layerReturns = statistics.filter(r => r.layer.startsWith('layer_'))
+                .map(r => r.annual_return);
+            
+            let monotonic = true;
+            for (let i = 0; i < layerReturns.length - 1; i++) {
+                if (layerReturns[i] > layerReturns[i + 1]) {
+                    monotonic = false;
+                    break;
+                }
+            }
+            
+            const longShortReturn = statistics.find(r => r.layer === 'long_short')?.annual_return || 0;
+            
+            let msg = '';
+            if (monotonic) {
+                msg = '<span class="monotonicity-indicator monotonicity-pass">✓ 单调性检验通过</span> ';
+            } else {
+                msg = '<span class="monotonicity-indicator monotonicity-fail">✗ 单调性检验未通过</span> ';
+            }
+            
+            if (longShortReturn > 0) {
+                msg += `<span class="monotonicity-indicator monotonicity-pass">✓ 多空收益 ${(longShortReturn*100).toFixed(2)}% > 0</span>`;
+            } else {
+                msg += `<span class="monotonicity-indicator monotonicity-fail">✗ 多空收益 ${(longShortReturn*100).toFixed(2)}% <= 0</span>`;
+            }
+            
+            document.getElementById('monotonicityResult').innerHTML = msg;
+        }
+        
+        // 页面加载完成时尝试读取已有结果
+        window.onload = function() {
+            loadExistingResult();
+        };
+    </script>
+</body>
+</html>

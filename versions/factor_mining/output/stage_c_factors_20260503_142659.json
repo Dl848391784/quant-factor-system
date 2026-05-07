@@ -1,0 +1,63 @@
+{
+  "config": {
+    "population_size": 100,
+    "generations": 5,
+    "cv_n_splits": 3,
+    "ic_threshold": 0.03
+  },
+  "data_info": {
+    "n_samples": 100,
+    "n_features": 10,
+    "feature_names": [
+      "factor_0",
+      "factor_1",
+      "factor_2",
+      "factor_3",
+      "factor_4",
+      "factor_5",
+      "factor_6",
+      "factor_7",
+      "factor_8",
+      "factor_9"
+    ]
+  },
+  "best_factors": [
+    {
+      "factor_index": 1,
+      "train_ic_mean": 0.23740961993815377,
+      "test_ic_mean": 0.25482874968169084,
+      "ic_decay_mean": -0.01741912974353707,
+      "ic_stability": 1.0733716251293342,
+      "is_overfitting": false,
+      "overfitting_score": 0.0,
+      "ic": 0.25482874968169084,
+      "create_time": "2026-05-03 14:26:59",
+      "stage": "C"
+    },
+    {
+      "factor_index": 30,
+      "train_ic_mean": 0.16122206736780928,
+      "test_ic_mean": 0.19636172650878536,
+      "ic_decay_mean": -0.03513965914097608,
+      "ic_stability": 1.217958121942533,
+      "is_overfitting": false,
+      "overfitting_score": 0.0,
+      "ic": 0.19636172650878536,
+      "create_time": "2026-05-03 14:26:59",
+      "stage": "C"
+    },
+    {
+      "factor_index": 8,
+      "train_ic_mean": 0.07113793435127941,
+      "test_ic_mean": 0.1101031321619557,
+      "ic_decay_mean": -0.0389651978106763,
+      "ic_stability": 1.5477414829546758,
+      "is_overfitting": false,
+      "overfitting_score": 0.0,
+      "ic": 0.1101031321619557,
+      "create_time": "2026-05-03 14:26:59",
+      "stage": "C"
+    }
+  ],
+  "timestamp": "20260503_142659"
+}

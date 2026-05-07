@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}因子分析系统{% endblock %}</title>
+    
+    <!-- 统一的基础样式 -->
+    <style>
+        /* 全局重置 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        /* 深色主题背景 */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #e9ecef;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        /* 页头样式 */
+        header {
+            text-align: center;
+            margin-bottom: 25px;
+            padding: 20px;
+        }
+        
+        header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        header p {
+            font-size: 1.1em;
+            color: #a0a0a0;
+        }
+        
+        /* 页脚样式 */
+        footer {
+            text-align: center;
+            color: #adb5bd;
+            margin-top: 30px;
+            padding: 20px;
+            opacity: 0.8;
+        }
+        
+        /* 导航栏统一样式 */
+        .navbar-container nav {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 15px 25px;
+            margin-bottom: 25px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .navbar-container nav a {
+            text-decoration: none;
+            color: #00d9ff;
+            font-weight: 600;
+            padding: 8px 16px;
+            border-radius: 8px;
+            transition: all 0.3s;
+            font-size: 0.95em;
+        }
+        
+        .navbar-container nav a:hover {
+            background: rgba(0, 217, 255, 0.2);
+        }
+        
+        .navbar-container nav a.active {
+            background: #00d9ff;
+            color: #1a1a2e;
+        }
+    </style>
+    
+    <!-- 页面特定样式块 -->
+    {% block head_styles %}{% endblock %}
+    
+    <!-- 页面特定的 head 内容（如脚本） -->
+    {% block head_scripts %}{% endblock %}
+</head>
+<body>
+    <div class="container">
+        {% block header %}
+        <header>
+            <h1>{% block header_title %}{% endblock %}</h1>
+            <p>{% block header_desc %}{% endblock %}</p>
+        </header>
+        {% endblock %}
+        
+        <!-- 统一导航栏 -->
+        <div class="navbar-container">
+            {% include 'components/navbar.html' %}
+        </div>
+        
+        <!-- 页面主要内容 -->
+        {% block content %}{% endblock %}
+        
+        {% block footer %}
+        <footer>
+            <p>🛠️ 云舟开发 | 因子分析系统 | 数据来源：新浪财经API</p>
+        </footer>
+        {% endblock %}
+    </div>
+    
+    <!-- jQuery 库 -->
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
+    
+    <!-- 认证模块（Phase 1 安全模块） -->
+    <script src="/static/js/auth.js"></script>
+    
+    <!-- 认证检查脚本（Cookie 方式） -->
+    <script>
+    // 定义公开页面白名单
+    const PUBLIC_PAGES = ['/login'];
+    const CURRENT_PATH = window.location.pathname;
+
+    // 检查当前页面是否需要认证
+    function needsAuth(path) {
+        return !PUBLIC_PAGES.includes(path);
+    }
+
+    // 如果需要认证，执行异步 Cookie 验证
+    if (needsAuth(CURRENT_PATH)) {
+        // Cookie 方式：无需同步检查 localStorage
+        // 直接调用 auth.js 的 initAuth 异步验证 Cookie
+        // initAuth 在页面加载时自动执行（见 auth.js）
+    }
+    </script>
+    
+    <!-- 页面特定脚本 -->
+    {% block scripts %}{% endblock %}
+</body>
+</html>

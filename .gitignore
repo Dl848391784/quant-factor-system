@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+.venv_akshare_new/
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Cache data files (large binary data)
+cache/factor_data/*.json.gz
+cache/factor_data/*.parquet
+cache/factor_data/factors/
+cache/v2/
+cache/v3/
+cache/*.json.gz
+cache/*_history.json.gz
+cache/stock_industry.json
+
+# Logs
+logs/*.log
+*.log
+
+# Checkpoints (backup directories)
+checkpoints/
+backups/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
+
+# Output files (generated)
+output/*.png
+output/*.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp files
+*.tmp
+*.bak
+*.backup
+test_venv/
+
+# Results (generated)
+*_analysis_result.json
+*_result.json
+rsi_ic_data.json

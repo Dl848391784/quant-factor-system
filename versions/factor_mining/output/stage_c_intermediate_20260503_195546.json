@@ -1,0 +1,2348 @@
+{
+  "eval_results": [
+    {
+      "rank": 21,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03974817236709273,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 100,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03930999046834218,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 51,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03912657775135146,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 79,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03911762164057218,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 92,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03905737304194531,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 28,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03905435046795128,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 52,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03878716048531062,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 60,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03877043431388662,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 32,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03871042602640998,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 39,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03864432914117922,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 15,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03852106301930463,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 85,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.038412048571788406,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 69,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03840512549371232,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 14,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03832617669287363,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 78,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03826531334548837,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 5,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.038230846673982986,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 70,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.038219377605652416,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 67,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03820853507478246,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 99,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03819749846719776,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 37,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.038182455318415624,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 94,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03811347978757824,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 73,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03809062264453288,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 46,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03800302274572814,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 89,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037977834069794825,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 4,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037971301611591256,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 65,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037953396990078096,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 23,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03790196459064932,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 33,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037869654552991384,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 1,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037855588206588776,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 97,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03785536474944395,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 98,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03783956124524069,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 43,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037809193394526326,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 2,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03779870212255275,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 93,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037757366181659945,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 18,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037675014980945165,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 72,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03766444099246672,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 35,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03763674391832476,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 84,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03760806643777103,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 80,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03759044723733104,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 22,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03757799159699306,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 31,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03757715348876396,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 19,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03755829008312866,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 6,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037528005589144584,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 12,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037523133057910704,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 83,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037484848516721625,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 27,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03746607930609327,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 41,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03736878645077666,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 91,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037361324639126704,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 20,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037245638604924365,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 77,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03723482401380365,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 7,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037173306720908884,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 55,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03715469557582773,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 59,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037154357244956755,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 45,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03710010214101615,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 75,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03703636439114182,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 29,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037015120832054126,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 61,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03701455619645349,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 10,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03691513362783712,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 48,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03669700085409111,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 66,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.036450571209939435,
+      "length": 3,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 96,
+      "expression": "mul(sqrt(volume_ratio_5), turnover_rate)",
+      "fitness": 0.03532986161866269,
+      "length": 4,
+      "ic": -0.022099251984649453,
+      "ic_pvalue": 1.0684525047708458e-156,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 47,
+      "expression": "mul(turnover_rate, log(volume_ratio_5))",
+      "fitness": 0.03424326589230009,
+      "length": 4,
+      "ic": -0.021104983736046856,
+      "ic_pvalue": 4.330248810693991e-143,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 24,
+      "expression": "turnover_rate",
+      "fitness": 0.034219515489675424,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 53,
+      "expression": "turnover_rate",
+      "fitness": 0.03410669527128301,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 26,
+      "expression": "turnover_rate",
+      "fitness": 0.0340829327779241,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 56,
+      "expression": "turnover_rate",
+      "fitness": 0.03400073126198609,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 62,
+      "expression": "turnover_rate",
+      "fitness": 0.03390525996864448,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 90,
+      "expression": "turnover_rate",
+      "fitness": 0.03389108899781422,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 30,
+      "expression": "turnover_rate",
+      "fitness": 0.03386563299145292,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 42,
+      "expression": "turnover_rate",
+      "fitness": 0.03384065611710763,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 81,
+      "expression": "turnover_rate",
+      "fitness": 0.03372103795546609,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 86,
+      "expression": "turnover_rate",
+      "fitness": 0.03370534834494091,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 3,
+      "expression": "mul(turnover_rate, mul(turnover_rate, turnover_rate))",
+      "fitness": 0.033486608397906764,
+      "length": 5,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 76,
+      "expression": "turnover_rate",
+      "fitness": 0.03346198896925023,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 87,
+      "expression": "mul(volume_ratio_5, turnover_rate)",
+      "fitness": 0.03344894599242117,
+      "length": 3,
+      "ic": -0.019889167457070926,
+      "ic_pvalue": 2.6732659326291272e-127,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 36,
+      "expression": "turnover_rate",
+      "fitness": 0.033422961203059494,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 58,
+      "expression": "turnover_rate",
+      "fitness": 0.03341103190428473,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 16,
+      "expression": "turnover_rate",
+      "fitness": 0.03322664312226941,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 71,
+      "expression": "turnover_rate",
+      "fitness": 0.033220564709033854,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 38,
+      "expression": "turnover_rate",
+      "fitness": 0.033075967039534616,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 57,
+      "expression": "turnover_rate",
+      "fitness": 0.03303767302918923,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 34,
+      "expression": "turnover_rate",
+      "fitness": 0.032881673063214434,
+      "length": 1,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 44,
+      "expression": "mul(mul(turnover_rate, turnover_rate), turnover_rate)",
+      "fitness": 0.03272183105909203,
+      "length": 5,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 9,
+      "expression": "mul(add(-0.945, FA_N0112), turnover_rate)",
+      "fitness": 0.03261080769333586,
+      "length": 5,
+      "ic": 0.031560040904067437,
+      "ic_pvalue": 0.0,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 49,
+      "expression": "mul(turnover_rate, mul(turnover_rate, turnover_rate))",
+      "fitness": 0.03179074095758269,
+      "length": 5,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 64,
+      "expression": "mul(turnover_rate, mul(turnover_rate, turnover_rate))",
+      "fitness": 0.03160636677010558,
+      "length": 5,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 68,
+      "expression": "mul(mul(turnover_rate, turnover_rate), turnover_rate)",
+      "fitness": 0.03155377548243716,
+      "length": 5,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 25,
+      "expression": "mul(mul(turnover_rate, turnover_rate), turnover_rate)",
+      "fitness": 0.03152954746235721,
+      "length": 5,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 8,
+      "expression": "mul(neg(FA_N0322), abs(FA_N0112))",
+      "fitness": 0.03142164063841107,
+      "length": 5,
+      "ic": -0.03770738002345297,
+      "ic_pvalue": 0.0,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 50,
+      "expression": "mul(turnover_rate, mul(turnover_rate, turnover_rate))",
+      "fitness": 0.031174119364244614,
+      "length": 5,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 11,
+      "expression": "mul(mul(turnover_rate, turnover_rate), turnover_rate)",
+      "fitness": 0.030687680343851283,
+      "length": 5,
+      "ic": -0.02403936901135375,
+      "ic_pvalue": 4.739034606229979e-185,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 74,
+      "expression": "mul(turnover_rate, bollinger_pb)",
+      "fitness": 0.028051234090964914,
+      "length": 3,
+      "ic": -0.040921595708287156,
+      "ic_pvalue": 0.0,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 82,
+      "expression": "FA_N0340",
+      "fitness": 0.026458786586272855,
+      "length": 1,
+      "ic": 0.040921595708287156,
+      "ic_pvalue": 0.0,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 13,
+      "expression": "max(sqrt(FA_N0322), neg(turnover_rate))",
+      "fitness": 0.018781134514676223,
+      "length": 5,
+      "ic": -0.019118774823488657,
+      "ic_pvalue": 8.892817521089927e-118,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 54,
+      "expression": "sqrt(kdj_j)",
+      "fitness": 0.007841546383107648,
+      "length": 2,
+      "ic": -0.019598737812024522,
+      "ic_pvalue": 1.1502066931432821e-123,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 17,
+      "expression": "log(FA_N0112)",
+      "fitness": 0.002535660265539831,
+      "length": 2,
+      "ic": -0.03445270177081969,
+      "ic_pvalue": 0.0,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 63,
+      "expression": "abs(inv(bollinger_pb))",
+      "fitness": 0.0018851757093373248,
+      "length": 3,
+      "ic": 0.031638442971778445,
+      "ic_pvalue": 0.0,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 95,
+      "expression": "sub(sqrt(log(inv(FA_N0322))), abs(mul(sqrt(0.620), max(volume_ratio_5, FA_N0112))))",
+      "fitness": 0.0014913439877355403,
+      "length": 12,
+      "ic": 0.008329105127927191,
+      "ic_pvalue": 9.141177201435374e-24,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 40,
+      "expression": "sqrt(min(kdj_j, FA_N0112))",
+      "fitness": 0.0001360175043480108,
+      "length": 4,
+      "ic": -0.03445313704248759,
+      "ic_pvalue": 0.0,
+      "valid_samples": 1456007
+    },
+    {
+      "rank": 88,
+      "expression": "inv(0.535)",
+      "fitness": 3.767957530946016e-17,
+      "length": 2,
+      "ic": NaN,
+      "ic_pvalue": NaN,
+      "valid_samples": 1456007
+    }
+  ],
+  "cv_results": [
+    {
+      "factor_index": 83,
+      "train_ic_mean": 0.03231521682689294,
+      "test_ic_mean": 0.043959107867002675,
+      "ic_decay_mean": -0.011643891040109738,
+      "ic_stability": 1.3603222273411266,
+      "is_overfitting": false,
+      "overfitting_score": 0,
+      "expression": "mul(add(-0.945, FA_N0112), turnover_rate)",
+      "fitness": 0.03261080769333586,
+      "length": 5.0
+    },
+    {
+      "factor_index": 99,
+      "train_ic_mean": NaN,
+      "test_ic_mean": NaN,
+      "ic_decay_mean": NaN,
+      "ic_stability": NaN,
+      "is_overfitting": false,
+      "overfitting_score": 1,
+      "expression": "inv(0.535)",
+      "fitness": 3.767957530946016e-17,
+      "length": 2.0
+    },
+    {
+      "factor_index": 92,
+      "train_ic_mean": 0.0417035656388389,
+      "test_ic_mean": 0.05360909769301131,
+      "ic_decay_mean": -0.011905532054172406,
+      "ic_stability": 1.2854799522114886,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "FA_N0340",
+      "fitness": 0.026458786586272855,
+      "length": 1.0
+    },
+    {
+      "factor_index": 96,
+      "train_ic_mean": 0.03218269851812085,
+      "test_ic_mean": 0.04031131140968644,
+      "ic_decay_mean": -0.008128612891565593,
+      "ic_stability": 1.252577103244806,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "abs(inv(bollinger_pb))",
+      "fitness": 0.0018851757093373248,
+      "length": 3.0
+    },
+    {
+      "factor_index": 97,
+      "train_ic_mean": 0.00875374116733221,
+      "test_ic_mean": 0.01521828363910605,
+      "ic_decay_mean": -0.006464542471773841,
+      "ic_stability": 1.7384890841929095,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "sub(sqrt(log(inv(FA_N0322))), abs(mul(sqrt(0.620), max(volume_ratio_5, FA_N0112))))",
+      "fitness": 0.0014913439877355403,
+      "length": 12.0
+    },
+    {
+      "factor_index": 94,
+      "train_ic_mean": -0.019934421324643518,
+      "test_ic_mean": -0.025009735362059415,
+      "ic_decay_mean": 0.005075314037415898,
+      "ic_stability": 1.2546005264071398,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "sqrt(kdj_j)",
+      "fitness": 0.007841546383107648,
+      "length": 2.0
+    },
+    {
+      "factor_index": 93,
+      "train_ic_mean": -0.01963851061083884,
+      "test_ic_mean": -0.027714138948416456,
+      "ic_decay_mean": 0.008075628337577617,
+      "ic_stability": 1.4112138969562145,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "max(sqrt(FA_N0322), neg(turnover_rate))",
+      "fitness": 0.018781134514676223,
+      "length": 5.0
+    },
+    {
+      "factor_index": 74,
+      "train_ic_mean": -0.020430720083363486,
+      "test_ic_mean": -0.028779997991791838,
+      "ic_decay_mean": 0.008349277908428352,
+      "ic_stability": 1.408662935776472,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(volume_ratio_5, turnover_rate)",
+      "fitness": 0.03344894599242117,
+      "length": 3.0
+    },
+    {
+      "factor_index": 61,
+      "train_ic_mean": -0.021661815855331095,
+      "test_ic_mean": -0.030263861595037533,
+      "ic_decay_mean": 0.008602045739706438,
+      "ic_stability": 1.3971064077391309,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, log(volume_ratio_5))",
+      "fitness": 0.03424326589230009,
+      "length": 4.0
+    },
+    {
+      "factor_index": 60,
+      "train_ic_mean": -0.022669374593678834,
+      "test_ic_mean": -0.031489048510140366,
+      "ic_decay_mean": 0.008819673916461532,
+      "ic_stability": 1.38905678755807,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(sqrt(volume_ratio_5), turnover_rate)",
+      "fitness": 0.03532986161866269,
+      "length": 4.0
+    },
+    {
+      "factor_index": 0,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03974817236709273,
+      "length": 3.0
+    },
+    {
+      "factor_index": 1,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03930999046834218,
+      "length": 3.0
+    },
+    {
+      "factor_index": 2,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03912657775135146,
+      "length": 3.0
+    },
+    {
+      "factor_index": 3,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03911762164057218,
+      "length": 3.0
+    },
+    {
+      "factor_index": 4,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03905737304194531,
+      "length": 3.0
+    },
+    {
+      "factor_index": 5,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03905435046795128,
+      "length": 3.0
+    },
+    {
+      "factor_index": 6,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03878716048531062,
+      "length": 3.0
+    },
+    {
+      "factor_index": 7,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03877043431388662,
+      "length": 3.0
+    },
+    {
+      "factor_index": 8,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03871042602640998,
+      "length": 3.0
+    },
+    {
+      "factor_index": 9,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03864432914117922,
+      "length": 3.0
+    },
+    {
+      "factor_index": 10,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03852106301930463,
+      "length": 3.0
+    },
+    {
+      "factor_index": 11,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.038412048571788406,
+      "length": 3.0
+    },
+    {
+      "factor_index": 12,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03840512549371232,
+      "length": 3.0
+    },
+    {
+      "factor_index": 13,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03832617669287363,
+      "length": 3.0
+    },
+    {
+      "factor_index": 14,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03826531334548837,
+      "length": 3.0
+    },
+    {
+      "factor_index": 15,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.038230846673982986,
+      "length": 3.0
+    },
+    {
+      "factor_index": 16,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.038219377605652416,
+      "length": 3.0
+    },
+    {
+      "factor_index": 17,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03820853507478246,
+      "length": 3.0
+    },
+    {
+      "factor_index": 18,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03819749846719776,
+      "length": 3.0
+    },
+    {
+      "factor_index": 19,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.038182455318415624,
+      "length": 3.0
+    },
+    {
+      "factor_index": 20,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03811347978757824,
+      "length": 3.0
+    },
+    {
+      "factor_index": 21,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03809062264453288,
+      "length": 3.0
+    },
+    {
+      "factor_index": 22,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03800302274572814,
+      "length": 3.0
+    },
+    {
+      "factor_index": 23,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037977834069794825,
+      "length": 3.0
+    },
+    {
+      "factor_index": 24,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037971301611591256,
+      "length": 3.0
+    },
+    {
+      "factor_index": 25,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037953396990078096,
+      "length": 3.0
+    },
+    {
+      "factor_index": 26,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03790196459064932,
+      "length": 3.0
+    },
+    {
+      "factor_index": 27,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037869654552991384,
+      "length": 3.0
+    },
+    {
+      "factor_index": 28,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037855588206588776,
+      "length": 3.0
+    },
+    {
+      "factor_index": 29,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03785536474944395,
+      "length": 3.0
+    },
+    {
+      "factor_index": 30,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03783956124524069,
+      "length": 3.0
+    },
+    {
+      "factor_index": 31,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037809193394526326,
+      "length": 3.0
+    },
+    {
+      "factor_index": 32,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03779870212255275,
+      "length": 3.0
+    },
+    {
+      "factor_index": 33,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037757366181659945,
+      "length": 3.0
+    },
+    {
+      "factor_index": 34,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037675014980945165,
+      "length": 3.0
+    },
+    {
+      "factor_index": 35,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03766444099246672,
+      "length": 3.0
+    },
+    {
+      "factor_index": 36,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03763674391832476,
+      "length": 3.0
+    },
+    {
+      "factor_index": 37,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03760806643777103,
+      "length": 3.0
+    },
+    {
+      "factor_index": 38,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03759044723733104,
+      "length": 3.0
+    },
+    {
+      "factor_index": 39,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03757799159699306,
+      "length": 3.0
+    },
+    {
+      "factor_index": 40,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03757715348876396,
+      "length": 3.0
+    },
+    {
+      "factor_index": 41,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03755829008312866,
+      "length": 3.0
+    },
+    {
+      "factor_index": 42,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037528005589144584,
+      "length": 3.0
+    },
+    {
+      "factor_index": 43,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037523133057910704,
+      "length": 3.0
+    },
+    {
+      "factor_index": 44,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037484848516721625,
+      "length": 3.0
+    },
+    {
+      "factor_index": 45,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03746607930609327,
+      "length": 3.0
+    },
+    {
+      "factor_index": 46,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03736878645077666,
+      "length": 3.0
+    },
+    {
+      "factor_index": 47,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037361324639126704,
+      "length": 3.0
+    },
+    {
+      "factor_index": 48,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037245638604924365,
+      "length": 3.0
+    },
+    {
+      "factor_index": 49,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03723482401380365,
+      "length": 3.0
+    },
+    {
+      "factor_index": 50,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037173306720908884,
+      "length": 3.0
+    },
+    {
+      "factor_index": 51,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03715469557582773,
+      "length": 3.0
+    },
+    {
+      "factor_index": 52,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037154357244956755,
+      "length": 3.0
+    },
+    {
+      "factor_index": 53,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03710010214101615,
+      "length": 3.0
+    },
+    {
+      "factor_index": 54,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03703636439114182,
+      "length": 3.0
+    },
+    {
+      "factor_index": 55,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037015120832054126,
+      "length": 3.0
+    },
+    {
+      "factor_index": 56,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03701455619645349,
+      "length": 3.0
+    },
+    {
+      "factor_index": 57,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03691513362783712,
+      "length": 3.0
+    },
+    {
+      "factor_index": 58,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03669700085409111,
+      "length": 3.0
+    },
+    {
+      "factor_index": 59,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.036450571209939435,
+      "length": 3.0
+    },
+    {
+      "factor_index": 62,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.034219515489675424,
+      "length": 1.0
+    },
+    {
+      "factor_index": 63,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.03410669527128301,
+      "length": 1.0
+    },
+    {
+      "factor_index": 64,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.0340829327779241,
+      "length": 1.0
+    },
+    {
+      "factor_index": 65,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.03400073126198609,
+      "length": 1.0
+    },
+    {
+      "factor_index": 66,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.03390525996864448,
+      "length": 1.0
+    },
+    {
+      "factor_index": 67,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.03389108899781422,
+      "length": 1.0
+    },
+    {
+      "factor_index": 68,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.03386563299145292,
+      "length": 1.0
+    },
+    {
+      "factor_index": 69,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.03384065611710763,
+      "length": 1.0
+    },
+    {
+      "factor_index": 70,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.03372103795546609,
+      "length": 1.0
+    },
+    {
+      "factor_index": 71,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.03370534834494091,
+      "length": 1.0
+    },
+    {
+      "factor_index": 72,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, mul(turnover_rate, turnover_rate))",
+      "fitness": 0.033486608397906764,
+      "length": 5.0
+    },
+    {
+      "factor_index": 73,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.03346198896925023,
+      "length": 1.0
+    },
+    {
+      "factor_index": 75,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.033422961203059494,
+      "length": 1.0
+    },
+    {
+      "factor_index": 76,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.03341103190428473,
+      "length": 1.0
+    },
+    {
+      "factor_index": 77,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.03322664312226941,
+      "length": 1.0
+    },
+    {
+      "factor_index": 78,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.033220564709033854,
+      "length": 1.0
+    },
+    {
+      "factor_index": 79,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.033075967039534616,
+      "length": 1.0
+    },
+    {
+      "factor_index": 80,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.03303767302918923,
+      "length": 1.0
+    },
+    {
+      "factor_index": 81,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "turnover_rate",
+      "fitness": 0.032881673063214434,
+      "length": 1.0
+    },
+    {
+      "factor_index": 82,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(mul(turnover_rate, turnover_rate), turnover_rate)",
+      "fitness": 0.03272183105909203,
+      "length": 5.0
+    },
+    {
+      "factor_index": 84,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, mul(turnover_rate, turnover_rate))",
+      "fitness": 0.03179074095758269,
+      "length": 5.0
+    },
+    {
+      "factor_index": 85,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, mul(turnover_rate, turnover_rate))",
+      "fitness": 0.03160636677010558,
+      "length": 5.0
+    },
+    {
+      "factor_index": 86,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(mul(turnover_rate, turnover_rate), turnover_rate)",
+      "fitness": 0.03155377548243716,
+      "length": 5.0
+    },
+    {
+      "factor_index": 87,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(mul(turnover_rate, turnover_rate), turnover_rate)",
+      "fitness": 0.03152954746235721,
+      "length": 5.0
+    },
+    {
+      "factor_index": 89,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, mul(turnover_rate, turnover_rate))",
+      "fitness": 0.031174119364244614,
+      "length": 5.0
+    },
+    {
+      "factor_index": 90,
+      "train_ic_mean": -0.024631959331400617,
+      "test_ic_mean": -0.03382441594837844,
+      "ic_decay_mean": 0.009192456616977825,
+      "ic_stability": 1.3731922674368249,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(mul(turnover_rate, turnover_rate), turnover_rate)",
+      "fitness": 0.030687680343851283,
+      "length": 5.0
+    },
+    {
+      "factor_index": 95,
+      "train_ic_mean": -0.03514500755063555,
+      "test_ic_mean": -0.04557789844001181,
+      "ic_decay_mean": 0.01043289088937626,
+      "ic_stability": 1.2968527181002945,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "log(FA_N0112)",
+      "fitness": 0.002535660265539831,
+      "length": 2.0
+    },
+    {
+      "factor_index": 98,
+      "train_ic_mean": -0.03514554282254909,
+      "test_ic_mean": -0.04558001138857522,
+      "ic_decay_mean": 0.010434468566026124,
+      "ic_stability": 1.296893086796223,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "sqrt(min(kdj_j, FA_N0112))",
+      "fitness": 0.0001360175043480108,
+      "length": 4.0
+    },
+    {
+      "factor_index": 88,
+      "train_ic_mean": -0.03833992944551524,
+      "test_ic_mean": -0.04813236161099928,
+      "ic_decay_mean": 0.00979243216548404,
+      "ic_stability": 1.2554108062442086,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(neg(FA_N0322), abs(FA_N0112))",
+      "fitness": 0.03142164063841107,
+      "length": 5.0
+    },
+    {
+      "factor_index": 91,
+      "train_ic_mean": -0.0417035656388389,
+      "test_ic_mean": -0.05360909769301131,
+      "ic_decay_mean": 0.011905532054172406,
+      "ic_stability": 1.285479958376333,
+      "is_overfitting": true,
+      "overfitting_score": 0,
+      "expression": "mul(turnover_rate, bollinger_pb)",
+      "fitness": 0.028051234090964914,
+      "length": 3.0
+    }
+  ],
+  "all_programs": [
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03974817236709273,
+      "length": 3,
+      "rank": 21
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03930999046834218,
+      "length": 3,
+      "rank": 100
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03912657775135146,
+      "length": 3,
+      "rank": 51
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03911762164057218,
+      "length": 3,
+      "rank": 79
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03905737304194531,
+      "length": 3,
+      "rank": 92
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03905435046795128,
+      "length": 3,
+      "rank": 28
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03878716048531062,
+      "length": 3,
+      "rank": 52
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03877043431388662,
+      "length": 3,
+      "rank": 60
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03871042602640998,
+      "length": 3,
+      "rank": 32
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03864432914117922,
+      "length": 3,
+      "rank": 39
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03852106301930463,
+      "length": 3,
+      "rank": 15
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.038412048571788406,
+      "length": 3,
+      "rank": 85
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03840512549371232,
+      "length": 3,
+      "rank": 69
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03832617669287363,
+      "length": 3,
+      "rank": 14
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03826531334548837,
+      "length": 3,
+      "rank": 78
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.038230846673982986,
+      "length": 3,
+      "rank": 5
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.038219377605652416,
+      "length": 3,
+      "rank": 70
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03820853507478246,
+      "length": 3,
+      "rank": 67
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03819749846719776,
+      "length": 3,
+      "rank": 99
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.038182455318415624,
+      "length": 3,
+      "rank": 37
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03811347978757824,
+      "length": 3,
+      "rank": 94
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03809062264453288,
+      "length": 3,
+      "rank": 73
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03800302274572814,
+      "length": 3,
+      "rank": 46
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037977834069794825,
+      "length": 3,
+      "rank": 89
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037971301611591256,
+      "length": 3,
+      "rank": 4
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037953396990078096,
+      "length": 3,
+      "rank": 65
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03790196459064932,
+      "length": 3,
+      "rank": 23
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037869654552991384,
+      "length": 3,
+      "rank": 33
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037855588206588776,
+      "length": 3,
+      "rank": 1
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03785536474944395,
+      "length": 3,
+      "rank": 97
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03783956124524069,
+      "length": 3,
+      "rank": 98
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037809193394526326,
+      "length": 3,
+      "rank": 43
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03779870212255275,
+      "length": 3,
+      "rank": 2
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037757366181659945,
+      "length": 3,
+      "rank": 93
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.037675014980945165,
+      "length": 3,
+      "rank": 18
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03766444099246672,
+      "length": 3,
+      "rank": 72
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03763674391832476,
+      "length": 3,
+      "rank": 35
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03760806643777103,
+      "length": 3,
+      "rank": 84
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03759044723733104,
+      "length": 3,
+      "rank": 80
+    },
+    {
+      "expression": "mul(turnover_rate, turnover_rate)",
+      "fitness": 0.03757799159699306,
+      "length": 3,
+      "rank": 22
+    }
+  ]
+}
