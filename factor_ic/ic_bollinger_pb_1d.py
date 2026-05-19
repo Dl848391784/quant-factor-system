@@ -804,9 +804,41 @@ def generate_bollinger_pb_1d_ic_data(
                 cached_data = json.load(f)
                 cached_data['update_mode'] = 'skip'
                 return cached_data
-        except Exception as e:
-            print(f"读取缓存失败: {e}，将执行全量计算")
+        except FileNotFoundError:
+            # 缓存文件不存在 → 可恢复错误，降级全量计算
+            print("  [诊断] 缓存文件不存在，执行全量计算")
             return _full_recalculate(output_file, n=n, k=k, min_stocks=min_stocks)
+        except json.JSONDecodeError as e:
+            # JSON解析失败 → 严重错误（文件损坏），不应静默降级
+            print("  [严重错误] 缓存文件损坏，JSON解析失败")
+            print(f"  [详情] {e}")
+            print(f"  [文件] {output_file}")
+            print("  [建议] 请检查缓存文件是否损坏，或删除后重新生成")
+            raise RuntimeError(
+                f"缓存文件损坏，无法解析 JSON: {output_file}\n"
+                f"错误详情: {e}\n"
+                f"建议: 删除损坏的缓存文件后重新运行"
+            ) from e
+        except PermissionError as e:
+            # 权限问题 → 严重错误，不应静默降级
+            print("  [严重错误] 缓存文件权限不足")
+            print(f"  [详情] {e}")
+            print(f"  [文件] {output_file}")
+            raise RuntimeError(
+                f"缓存文件权限不足，无法读取: {output_file}\n"
+                f"错误详情: {e}"
+            ) from e
+        except Exception as e:
+            # 其他未预期的异常 → 提供详细诊断，不应静默降级
+            print("  [未预期错误] 读取缓存失败")
+            print(f"  [异常类型] {type(e).__name__}")
+            print(f"  [详情] {e}")
+            print(f"  [文件] {output_file}")
+            raise RuntimeError(
+                f"读取缓存失败（未预期异常）: {output_file}\n"
+                f"异常类型: {type(e).__name__}\n"
+                f"错误详情: {e}"
+            ) from e
     
     elif mode == 'incremental':
         return _incremental_update(missing_dates, output_file, n=n, k=k, min_stocks=min_stocks)

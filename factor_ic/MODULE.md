@@ -2306,6 +2306,143 @@ dates_to_check = [all_dates[0], all_dates[-1], ...]  # ✗ IndexError if all_dat
 
 ---
 
+## 异常处理必须区分严重错误和可恢复错误规范
+
+### 核心原则
+
+**异常处理必须区分严重错误（文件损坏、权限问题）和可恢复错误（文件不存在），严重错误不应静默降级，应抛出异常并提供详细诊断。**
+
+### 问题背景
+
+```
+静默吞掉异常问题：
+
+旧代码（错误）：
+```python
+try:
+    with open(output_file, 'r', encoding='utf-8') as f:
+        cached_data = json.load(f)
+        return cached_data
+except Exception as e:  # ✗ 静默吞掉所有异常！
+    print(f"读取缓存失败: {e}，将执行全量计算")
+    return _full_recalculate(...)  # ✗ 严重错误也降级全量计算
+```
+
+问题后果：
+- 文件损坏（JSONDecodeError）→ 静默降级全量计算
+- 权限问题（PermissionError）→ 静默降级全量计算
+- 用户以为数据完备，但缓存文件损坏
+- 只打印一行日志，用户不知道严重错误
+- 丢失了诊断信息，无法排查问题
+
+严重错误示例：
+- 缓存文件损坏: JSONDecodeError("Expecting value: line 1 column 1")
+  - 用户以为数据完备（mode='skip'），但缓存文件损坏
+  - 静默降级全量计算，用户不知道文件损坏
+  - 丢失了诊断信息，无法排查问题
+  
+- 权限问题: PermissionError("Permission denied")
+  - 缓存文件存在但无法读取
+  - 静默降级全量计算，用户不知道权限问题
+  - 可能导致重复全量计算，浪费资源
+```
+
+### 正确实现
+
+```python
+# ✓ 正确：区分异常类型，严重错误不静默降级
+try:
+    with open(output_file, 'r', encoding='utf-8') as f:
+        cached_data = json.load(f)
+        return cached_data
+except FileNotFoundError:
+    # 缓存文件不存在 → 可恢复错误，降级全量计算
+    print("  [诊断] 缓存文件不存在，执行全量计算")
+    return _full_recalculate(...)
+except json.JSONDecodeError as e:
+    # JSON解析失败 → 严重错误（文件损坏），不应静默降级
+    print("  [严重错误] 缓存文件损坏，JSON解析失败")
+    print(f"  [详情] {e}")
+    print(f"  [文件] {output_file}")
+    print("  [建议] 请检查缓存文件是否损坏，或删除后重新生成")
+    raise RuntimeError(
+        f"缓存文件损坏，无法解析 JSON: {output_file}\n"
+        f"错误详情: {e}\n"
+        f"建议: 删除损坏的缓存文件后重新运行"
+    ) from e
+except PermissionError as e:
+    # 权限问题 → 严重错误，不应静默降级
+    print("  [严重错误] 缓存文件权限不足")
+    print(f"  [详情] {e}")
+    print(f"  [文件] {output_file}")
+    raise RuntimeError(
+        f"缓存文件权限不足，无法读取: {output_file}\n"
+        f"错误详情: {e}"
+    ) from e
+except Exception as e:
+    # 其他未预期的异常 → 提供详细诊断，不应静默降级
+    print("  [未预期错误] 读取缓存失败")
+    print(f"  [异常类型] {type(e).__name__}")
+    print(f"  [详情] {e}")
+    print(f"  [文件] {output_file}")
+    raise RuntimeError(
+        f"读取缓存失败（未预期异常）: {output_file}\n"
+        f"异常类型: {type(e).__name__}\n"
+        f"错误详情: {e}"
+    ) from e
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：静默吞掉所有异常
+except Exception as e:  # ✗ 捕获所有异常，包括严重错误
+    print(f"读取缓存失败: {e}，将执行全量计算")  # ✗ 只打印一行日志
+    return _full_recalculate(...)  # ✗ 严重错误也降级全量计算
+
+# ❌ 禁止：不区分异常类型
+# 问题：
+# - 文件损坏（JSONDecodeError）是严重错误，不应静默降级
+# - 权限问题（PermissionError）是严重错误，不应静默降级
+# - 用户不知道严重错误，无法排查问题
+```
+
+### 异常分类
+
+| 异常类型 | 错误级别 | 处理方式 | 是否降级 |
+|---------|---------|---------|---------|
+| FileNotFoundError | 可恢复 | 降级全量计算 | ✓ 可以 |
+| json.JSONDecodeError | 严重 | 抛出异常 + 详细诊断 | ✗ 不可以 |
+| PermissionError | 严重 | 抛出异常 + 详细诊断 | ✗ 不可以 |
+| 其他 Exception | 未预期 | 抛出异常 + 详细诊断 | ✗ 不可以 |
+
+### 为何必须区分异常类型
+
+1. **诊断信息完整**：用户需要知道是文件损坏还是权限问题
+2. **严重错误不掩盖**：文件损坏是严重错误，不应静默降级
+3. **避免重复问题**：权限问题不解决，每次都会降级全量计算
+4. **用户可操作**：提供具体建议（删除损坏文件、修复权限）
+
+### 适用范围
+
+此规范适用于所有缓存读取场景：
+1. **IC 数据缓存读取**：读取 JSON 格式的 IC 计算结果
+2. **因子数据缓存读取**：读取 gzip 压缩的因子数据
+3. **配置文件读取**：读取 JSON/YAML 配置文件
+4. **任何需要区分错误级别的场景**
+
+### 检查清单
+
+```
+□ 区分 FileNotFoundError（可恢复）和 JSONDecodeError（严重）
+□ 区分 PermissionError（严重）和其他异常
+□ 严重错误不静默降级（抛出异常）
+□ 提供详细诊断信息（异常类型、详情、文件路径）
+□ 提供用户可操作的建议（删除损坏文件、修复权限）
+```
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |
