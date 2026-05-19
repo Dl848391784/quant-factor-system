@@ -42,10 +42,11 @@ import re
 from typing import Tuple, Optional
 from datetime import datetime
 
-# 导入 IC 计算模块（支持方向验证 + 单日 IC 计算）
+# 导入 IC 计算模块（支持方向验证 + 单日 IC 计算 + IC 统计指标计算）
 from factor_ic.common.ic_calculator import (
     calculate_ic_with_direction_verification,
-    calculate_single_day_ic  # 用于增量计算
+    calculate_single_day_ic,  # 用于增量计算
+    calculate_ic_statistics   # 用于增量路径重新计算统计指标
 )
 
 # 导入数据完整性检查模块
@@ -725,7 +726,7 @@ def _incremental_update(
     
     # 重新计算统计指标（遵循 MODULE.md 增量路径 rolling_ic_mean 规范）
     # 核心原则：rolling_ic_mean 必须基于 all_dates 计算，与 dates/ic_values 长度一致
-    from factor_ic.common.ic_calculator import calculate_ic_statistics
+    # calculate_ic_statistics 已在文件顶部导入（遵循 PEP8 import 规范）
     ic_series = pd.Series(all_ic_values, index=all_dates)
     result = calculate_ic_statistics(ic_series)
     
