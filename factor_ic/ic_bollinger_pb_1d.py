@@ -358,11 +358,13 @@ def calculate_daily_ic_series(
     )
     
     # 函数返回值契约校验（遵循 MODULE.md 函数返回值契约规范）
+    # 核心原则：p_value 是必需字段（回退逻辑依赖），p_value_display 是可选字段（可从 p_value 计算）
     required_fields = [
-        'ic_series', 'ic_mean', 'ic_std', 'icir', 'p_value', 'p_value_display',
+        'ic_series', 'ic_mean', 'ic_std', 'icir', 'p_value',  # p_value 必需
         'statistical_significance', 'factor_direction',
         'economic_significance', 'positive_ratio', 'summary'
     ]
+    # p_value_display 是可选字段，不校验（可从 p_value 计算回退值）
     missing_fields = [f for f in required_fields if f not in result]
     if missing_fields:
         raise RuntimeError(
@@ -433,6 +435,9 @@ def calculate_daily_ic_series(
             'ic_std': round(result['ic_std'], 6),
             'icir': round(result['icir'], 4),
             'p_value': round(result['p_value'], 6),
+            # p_value_display 回退逻辑说明（遵循 MODULE.md 可选字段回退逻辑规范）
+            # 核心原则：p_value_display 是可选字段，缺少时从 p_value 计算
+            # p_value 是必需字段（已校验），回退逻辑可靠
             'p_value_display': result.get('p_value_display', str(round(result['p_value'], 6)))
         },
         'statistical_significance': {
@@ -781,7 +786,7 @@ def _incremental_update(
             'ic_std': round(result['ic_std'], 6),
             'icir': round(result['icir'], 4),
             'p_value': round(result['p_value'], 6),  # ✓ 与全量路径一致
-            'p_value_display': result.get('p_value_display', str(round(result['p_value'], 6)))  # ✓ 与全量路径一致
+            'p_value_display': result.get('p_value_display', str(round(result['p_value'], 6)))  # 可选字段，缺少时从 p_value 计算
         },
         'sample_stats': {  # ✓ 8空格缩进，与上方字段对齐
             'total_days': raw_metadata.get('total_days', 0),  # 直接使用原始缓存天数（遵循 MODULE.md total_days 规范）
