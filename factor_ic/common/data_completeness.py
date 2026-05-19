@@ -22,6 +22,25 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 CACHE_DIR = BASE_DIR / 'cache'
 FACTOR_IC_DIR = CACHE_DIR / 'factor_ic'
 FACTOR_DATA_DIR = CACHE_DIR / 'factor_data'
+FACTOR_IC_RESULT_DIR = BASE_DIR / 'factor_ic' / 'result'  # 规范输出目录
+
+
+def get_ic_output_path(factor_name: str) -> Path:
+    """
+    获取因子IC输出文件路径
+    
+    参数:
+        factor_name: 因子名称（如 'rsi_1d', 'kdj_j_3d' 等）
+    
+    返回:
+        Path: 输出文件路径，格式为 ic_<因子名>_analysis_result.json
+    
+    规范:
+        目录: factor_ic/result/
+        命名: ic_<因子名>_analysis_result.json
+    """
+    FACTOR_IC_RESULT_DIR.mkdir(parents=True, exist_ok=True)
+    return FACTOR_IC_RESULT_DIR / f'ic_{factor_name}_analysis_result.json'
 
 
 def get_factor_data_dates() -> Tuple[List[str], Optional[str]]:
@@ -64,12 +83,12 @@ def get_cache_latest_date(factor_name: str) -> Optional[str]:
     获取因子IC缓存的最新日期
     
     Args:
-        factor_name: 因子名称 (如 'kdj_j', 'bollinger_pb')
+        factor_name: 因子名称 (如 'rsi_1d', 'kdj_j_3d')
         
     Returns:
         最新日期字符串 (YYYY-MM-DD) 或 None
     """
-    cache_file = FACTOR_IC_DIR / f'{factor_name}_ic.json'
+    cache_file = FACTOR_IC_RESULT_DIR / f'ic_{factor_name}_analysis_result.json'
     
     if not cache_file.exists():
         return None
@@ -78,8 +97,13 @@ def get_cache_latest_date(factor_name: str) -> Optional[str]:
         with open(cache_file, 'r', encoding='utf-8') as f:
             result = json.load(f)
         
-        ic_series = result.get('ic_series', {})
-        dates = ic_series.get('dates', [])
+        # dates 字段在顶层
+        dates = result.get('dates', [])
+        
+        if not dates:
+            # 兼容旧格式：ic_series.dates
+            ic_series = result.get('ic_series', {})
+            dates = ic_series.get('dates', [])
         
         if not dates:
             return None
@@ -128,7 +152,7 @@ def check_data_completeness(
     """
     # 初始化信息
     info: Dict[str, Any] = {
-        'cache_file': str(FACTOR_IC_DIR / f'{factor_name}_ic.json'),
+        'cache_file': str(FACTOR_IC_RESULT_DIR / f'ic_{factor_name}_analysis_result.json'),
         'cache_exists': False,
         'cache_latest_date': None,
         'source_latest_date': None,
@@ -152,8 +176,8 @@ def check_data_completeness(
     
     if cache_latest is None:
         # 缓存不存在，需要全量计算
-        # 默认加载最近100天
-        missing_dates = all_dates[-100:] if len(all_dates) > 100 else all_dates
+        # 返回所有日期，让调用方决定计算范围
+        missing_dates = all_dates
         info['missing_count'] = len(missing_dates)
         return 'full', missing_dates, info
     
@@ -211,12 +235,12 @@ def get_cache_info(factor_name: str) -> Dict[str, Any]:
     获取因子IC缓存的信息摘要
     
     Args:
-        factor_name: 因子名称
+        factor_name: 因子名称 (如 'rsi_1d', 'kdj_j_3d')
         
     Returns:
         信息字典
     """
-    cache_file = FACTOR_IC_DIR / f'{factor_name}_ic.json'
+    cache_file = FACTOR_IC_RESULT_DIR / f'ic_{factor_name}_analysis_result.json'
     
     info = {
         'factor_name': factor_name,

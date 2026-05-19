@@ -1,0 +1,820 @@
+#!/usr/bin/env python3
+"""
+布林带%B 因子 IC 计算器（缓存版） - 1日收益周期
+
+因子定义：
+- Middle Band = SMA(Close, N)
+- Upper Band = Middle Band + K × StdDev(Close, N)
+- Lower Band = Middle Band - K × StdDev(Close, N)
+- %B = (Close - Lower Band) / (Upper Band - Lower Band)
+
+参数：
+- N = 20（移动平均周期）
+- K = 2.0（标准差倍数）
+
+边界处理：
+- %B > 1：价格突破上轨，超买信号
+- %B = 1：价格在上轨
+- 0 < %B < 1：价格在布林带内
+- %B = 0：价格在下轨
+- %B < 0：价格跌破下轨，超卖信号
+
+因子逻辑：
+- %B > 1：超买，预期回落
+- %B < 0：超卖，预期反弹
+- 使用反向排名（%B值高排名低）
+
+作者: 云舟
+日期: 2026-04-07
+"""
+
+import sys
+from pathlib import Path
+
+# 添加项目路径
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import pandas as pd
+import numpy as np
+import gzip
+import json
+import re
+from typing import Tuple, Optional
+from datetime import datetime
+
+# 导入 IC 计算模块（支持方向验证 + 单日 IC 计算）
+from factor_ic.common.ic_calculator import (
+    calculate_ic_with_direction_verification,
+    calculate_single_day_ic  # 用于增量计算
+)
+
+# 导入数据完整性检查模块
+from factor_ic.common.data_completeness import check_data_completeness, get_ic_output_path
+
+# 导入类型转换模块
+from factor_ic.common.convert_types import convert_to_native_types
+
+# 缓存路径
+CACHE_DIR = Path(__file__).parent.parent / 'cache' / 'factor_data'
+FACTOR_CACHE = CACHE_DIR / 'factor_data.json.gz'
+RETURN_CACHE = CACHE_DIR / 'return_data.json.gz'
+
+# 默认参数（遵循 PROJECT.md 参数传递规范）
+DEFAULT_MIN_STOCKS = 10  # 每日最少股票数阈值，统一管理
+
+
+def load_data_from_cache(
+    factor_col: str = 'close',
+    return_col: str = 'forward_return_1d'
+) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """
+    从缓存加载因子数据和收益数据
+    
+    参数:
+        factor_col: 因子列名
+        return_col: 收益列名
+        
+    返回:
+        (factor_df, return_df, raw_metadata)
+        - factor_df: 过滤后的因子数据 DataFrame
+        - return_df: 过滤后的收益数据 DataFrame
+        - raw_metadata: 原始数据元信息字典
+            - period_start: 原始缓存最小日期
+            - period_end: 原始缓存最大日期
+            - total_days: 原始缓存日期数
+    
+    规范:
+        period 和 total_days 基于 dropna 前的原始缓存数据
+        （遵循 PROJECT.md 输出字段语义规范）
+    """
+    print("\n[数据加载] 从缓存读取数据...")
+    
+    # 加载因子数据
+    if not FACTOR_CACHE.exists():
+        raise FileNotFoundError(f"因子缓存不存在: {FACTOR_CACHE}")
+    
+    with gzip.open(FACTOR_CACHE, 'rt', encoding='utf-8') as f:
+        factor_data = json.load(f)
+    
+    factor_df = pd.DataFrame(factor_data['data'])
+    print(f"  - 因子数据: {len(factor_df)} 行, {factor_df['asset'].nunique()} 只股票")
+    
+    # 加载收益数据
+    if not RETURN_CACHE.exists():
+        raise FileNotFoundError(f"收益缓存不存在: {RETURN_CACHE}")
+    
+    with gzip.open(RETURN_CACHE, 'rt', encoding='utf-8') as f:
+        return_data = json.load(f)
+    
+    return_df = pd.DataFrame(return_data['data'])
+    print(f"  - 收益数据: {len(return_df)} 行, {return_df['asset'].nunique()} 只股票")
+    
+    # 日期类型统一转换（遵循 PROJECT.md 日期类型一致性规范）
+    # 统一转换为字符串格式 "YYYY-MM-DD"，确保 isin 操作类型匹配
+    if 'date' in factor_df.columns:
+        date_series = pd.to_datetime(factor_df['date'], errors='coerce')
+        nat_count = date_series.isna().sum()
+        if nat_count > 0:
+            invalid_samples = factor_df['date'][date_series.isna()].head(5).tolist()
+            raise ValueError(
+                f"因子数据中存在 {nat_count} 个无效日期格式\n"
+                f"无效日期示例: {invalid_samples}\n"
+                f"请检查缓存数据源是否包含脏数据"
+            )
+        factor_df['date'] = date_series.dt.strftime('%Y-%m-%d')
+    if 'date' in return_df.columns:
+        date_series = pd.to_datetime(return_df['date'], errors='coerce')
+        nat_count = date_series.isna().sum()
+        if nat_count > 0:
+            invalid_samples = return_df['date'][date_series.isna()].head(5).tolist()
+            raise ValueError(
+                f"收益数据中存在 {nat_count} 个无效日期格式\n"
+                f"无效日期示例: {invalid_samples}\n"
+                f"请检查缓存数据源是否包含脏数据"
+            )
+        return_df['date'] = date_series.dt.strftime('%Y-%m-%d')
+    
+    # 输入验证（遵循 PROJECT.md 输入验证规范）
+    # 检查因子列是否存在，提供友好错误信息
+    if factor_col not in factor_df.columns:
+        available_cols = sorted([c for c in factor_df.columns if c not in ['date', 'asset']])
+        raise KeyError(
+            f"因子列 '{factor_col}' 不存在于缓存数据中\n"
+            f"可用因子列: {available_cols}"
+        )
+    
+    # 选择需要的列（因子数据需要 close 价格）
+    factor_cols = ['date', 'asset', factor_col]
+    factor_df = factor_df[factor_cols].copy()
+    
+    # 输入验证：检查收益列是否存在
+    if return_col not in return_df.columns:
+        available_cols = sorted([c for c in return_df.columns if c not in ['date', 'asset']])
+        raise KeyError(
+            f"收益列 '{return_col}' 不存在于缓存数据中\n"
+            f"可用收益列: {available_cols}"
+        )
+    
+    # 重命名收益列（统一为 forward_return）
+    return_df = return_df[['date', 'asset', return_col]].copy()
+    return_df = return_df.rename(columns={return_col: 'forward_return'})
+    
+    # 在 dropna 之前，计算原始数据范围（遵循 PROJECT.md 输出字段语义规范）
+    raw_period_start = str(factor_df['date'].min())
+    raw_period_end = str(factor_df['date'].max())
+    raw_total_days = factor_df['date'].nunique()
+    
+    print(f"  - 原始数据范围: {raw_period_start} ~ {raw_period_end}, {raw_total_days} 个交易日")
+    
+    # 过滤缺失值（遵循 PROJECT.md 数据过滤后索引处理规范）
+    factor_df = factor_df.dropna(subset=[factor_col]).reset_index(drop=True)
+    return_df = return_df.dropna(subset=['forward_return']).reset_index(drop=True)
+    
+    print(f"  - 过滤缺失值后: 因子 {len(factor_df)} 行, 收益 {len(return_df)} 行")
+    
+    # 返回过滤后的数据 + 原始数据元信息
+    return factor_df, return_df, {
+        'period_start': raw_period_start,
+        'period_end': raw_period_end,
+        'total_days': raw_total_days
+    }
+
+
+# ============================================================
+# 布林带%B 因子计算函数
+# ============================================================
+
+def calculate_bollinger_bands(
+    close_series: pd.Series,
+    n: int = 20,
+    k: float = 2.0
+) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    计算布林带上轨、中轨、下轨
+    
+    公式：
+    - Middle Band = SMA(Close, N)
+    - Upper Band = Middle Band + K × StdDev(Close, N)
+    - Lower Band = Middle Band - K × StdDev(Close, N)
+    
+    Args:
+        close_series: 收盘价序列
+        n: 移动平均周期（默认 20）
+        k: 标准差倍数（默认 2.0）
+        
+    Returns:
+        (upper_band, middle_band, lower_band)
+    """
+    # 计算中轨（SMA）
+    middle_band = close_series.rolling(window=n, min_periods=1).mean()
+    
+    # 计算标准差
+    std_dev = close_series.rolling(window=n, min_periods=1).std()
+    
+    # 计算上轨
+    upper_band = middle_band + k * std_dev
+    
+    # 计算下轨
+    lower_band = middle_band - k * std_dev
+    
+    return upper_band, middle_band, lower_band
+
+
+def calculate_percent_b(
+    close: float,
+    upper_band: float,
+    lower_band: float
+) -> float:
+    """
+    计算 %B 值
+    
+    公式：%B = (Close - Lower Band) / (Upper Band - Lower Band)
+    
+    边界处理：
+    - 当 Upper == Lower 时，返回 0.5（避免除零）
+    
+    Args:
+        close: 当日收盘价
+        upper_band: 上轨
+        lower_band: 下轨
+        
+    Returns:
+        %B 值
+    """
+    diff = upper_band - lower_band
+    
+    if diff == 0 or pd.isna(diff):
+        return 0.5  # 避免除零
+    
+    percent_b = (close - lower_band) / diff
+    return percent_b
+
+
+def calculate_bollinger_pb_1d_factor(
+    factor_df: pd.DataFrame,
+    n: int = 20,
+    k: float = 2.0
+) -> Tuple[pd.DataFrame, dict]:
+    """
+    计算所有股票的布林带%B 因子（向量化版本，高效）
+    
+    使用 pandas 分组操作和向量化计算。
+    
+    Args:
+        factor_df: 包含 date, asset, close 的 DataFrame
+        n: 移动平均周期（默认 20）
+        k: 标准差倍数（默认 2.0）
+        
+    Returns:
+        (处理后的 factor_df, 统计信息)
+    """
+    print(f"\n{'='*60}")
+    print(f"[因子计算] 布林带%B_1D 因子 (N={n}, K={k})")
+    print(f"{'='*60}")
+    
+    stats = {
+        'total_records': len(factor_df),
+        'valid_records': 0,
+        'missing_price_count': 0,
+        'n': n,
+        'k': k
+    }
+    
+    if factor_df.empty:
+        print("  ✗ 数据为空")
+        return factor_df, stats
+    
+    # 检查必要列
+    required_cols = ['date', 'asset', 'close']
+    missing_cols = [c for c in required_cols if c not in factor_df.columns]
+    if missing_cols:
+        print(f"  ✗ 缺少必要列: {missing_cols}")
+        return factor_df, stats
+    
+    # 统计缺失数据
+    missing_price_mask = factor_df['close'].isna()
+    stats['missing_price_count'] = int(missing_price_mask.sum())
+    
+    print(f"  总记录数: {stats['total_records']:,}")
+    print(f"  价格缺失数: {stats['missing_price_count']:,}")
+    
+    # 按股票分组计算布林带%B（使用向量化操作）
+    print(f"\n[计算] 使用向量化计算布林带%B...")
+    
+    # 确保按日期排序（每个股票内部）
+    factor_df = factor_df.sort_values(['asset', 'date']).copy()
+    
+    # ========== 向量化计算布林带 ==========
+    print(f"  [Step 1] 计算中轨（SMA）...")
+    
+    # 按股票分组计算滚动窗口
+    factor_df['middle_band'] = factor_df.groupby('asset')['close'].transform(
+        lambda x: x.rolling(window=n, min_periods=1).mean()
+    )
+    
+    print(f"  [Step 2] 计算标准差...")
+    factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
+        lambda x: x.rolling(window=n, min_periods=1).std()
+    )
+    
+    print(f"  [Step 3] 计算上轨和下轨...")
+    factor_df['upper_band'] = factor_df['middle_band'] + k * factor_df['std_dev']
+    factor_df['lower_band'] = factor_df['middle_band'] - k * factor_df['std_dev']
+    
+    # ========== 计算 %B ==========
+    print(f"  [Step 4] 计算 %B...")
+    
+    # 处理除零情况
+    diff = factor_df['upper_band'] - factor_df['lower_band']
+    factor_df['bollinger_pb_1d'] = np.where(
+        diff == 0,
+        0.5,
+        (factor_df['close'] - factor_df['lower_band']) / diff
+    )
+    
+    # 释放临时列
+    factor_df.drop(columns=['middle_band', 'std_dev', 'upper_band', 'lower_band'], inplace=True)
+    
+    # 统计有效记录
+    stats['valid_records'] = int(factor_df['bollinger_pb_1d'].notna().sum())
+    
+    # 输出统计
+    print(f"\n  有效记录数: {stats['valid_records']:,}")
+    
+    # 输出因子统计
+    valid_values = factor_df['bollinger_pb_1d'].dropna()
+    if len(valid_values) > 0:
+        print(f"\n  因子统计:")
+        print(f"    均值:   {valid_values.mean():.4f}")
+        print(f"    标准差: {valid_values.std():.4f}")
+        print(f"    最小值: {valid_values.min():.4f}")
+        print(f"    最大值: {valid_values.max():.4f}")
+        print(f"    中位数: {valid_values.median():.4f}")
+        
+        # 超买超卖统计
+        overbought = (valid_values > 1).sum()
+        oversold = (valid_values < 0).sum()
+        in_band = ((valid_values >= 0) & (valid_values <= 1)).sum()
+        print(f"\n  超买(%B>1):  {overbought:,} ({overbought/len(valid_values)*100:.2f}%)")
+        print(f"  超卖(%B<0):  {oversold:,} ({oversold/len(valid_values)*100:.2f}%)")
+        print(f"  布林带内:   {in_band:,} ({in_band/len(valid_values)*100:.2f}%)")
+    
+    # 转换统计中的 numpy 类型
+    stats = convert_to_native_types(stats)
+    
+    return factor_df, stats
+
+
+def calculate_daily_ic_series(
+    factor_df: pd.DataFrame,
+    return_df: pd.DataFrame,
+    raw_metadata: dict,
+    min_stocks: int = 10,
+    period_start: str = None,
+    period_end: str = None
+) -> dict:
+    """
+    计算每日的 IC 时间序列
+    
+    参数:
+        factor_df: 因子数据（已过滤缺失值）
+        return_df: 收益数据（已过滤缺失值）
+        raw_metadata: 原始数据元信息（遵循 PROJECT.md period/total_days 数据源规范）
+            - period_start: 原始缓存最小日期
+            - period_end: 原始缓存最大日期
+            - total_days: 原始缓存日期数
+        min_stocks: 最小股票数阈值（遵循 PROJECT.md 参数传递规范）
+        period_start: 数据起始日期
+        period_end: 数据结束日期
+    
+    返回:
+        dict: IC 计算结果（符合 PROJECT.md 五维度判断规范）
+    """
+    # 使用 IC 计算（支持因子方向验证）
+    result = calculate_ic_with_direction_verification(
+        factor_df=factor_df,
+        return_df=return_df,
+        factor_col='bollinger_pb_1d',
+        return_col='forward_return',
+        date_col='date',
+        asset_col='asset',
+        min_stocks=min_stocks  # 遵循 PROJECT.md 参数传递规范
+    )
+    
+    ic_series = result['ic_series']
+    
+    # 获取日期范围
+    if period_start is None:
+        period_start = str(factor_df['date'].min())
+    if period_end is None:
+        period_end = str(factor_df['date'].max())
+    
+    # 转换为 JSON 友好格式
+    dates = [str(d) for d in ic_series.index]
+    ic_values = [round(v, 6) for v in ic_series.values]
+    
+    # 计算 20 日滚动均值
+    # 计算 20 日滚动均值（min_periods=10，至少需要10个有效值）
+    rolling_mean = ic_series.rolling(window=20, min_periods=10).mean()
+    rolling_ic_mean = [round(v, 6) for v in rolling_mean.values]
+    
+    # 符合 PROJECT.md 规范的数据结构（五维度判断）
+    return {
+        'factor_name': 'bollinger_pb_1d',
+        'calculation_date': datetime.now().strftime('%Y-%m-%d'),
+        'period': {
+            'start': period_start,
+            'end': period_end
+        },
+        'ic_metrics': {
+            'ic_mean': round(result['ic_mean'], 6),
+            'ic_std': round(result['ic_std'], 6),
+            'icir': round(result['icir'], 4),
+            'p_value': round(result['p_value'], 6),
+            'p_value_display': result.get('p_value_display', str(round(result['p_value'], 6)))
+        },
+        'statistical_significance': {
+            'is_significant': result['statistical_significance']['is_significant'],
+            'p_value': result['statistical_significance']['p_value'],
+            'p_value_display': result['statistical_significance']['p_value_display'],
+            't_stat': result['statistical_significance']['t_stat'],
+            'conclusion': result['statistical_significance']['conclusion']
+        },
+        'factor_direction': {
+            'direction': result['factor_direction']['ic_mean_sign'],
+            'ic_mean': result['factor_direction']['ic_mean'],
+            'conclusion': result['factor_direction']['conclusion']
+        },
+        'economic_significance': {
+            'ic_strength': result['economic_significance']['level'],
+            'ic_mean_abs': result['economic_significance']['abs_ic_mean'],
+            'conclusion': result['economic_significance']['conclusion']
+        },
+        'sample_stats': {
+            # 语义定义（遵循 PROJECT.md 输出字段语义规范）：
+            # - total_days: 因子缓存覆盖的日期数（包含无效日期）
+            # - valid_days: 实际计算出 IC 的天数（每交易日股票数 >= min_stocks）
+            # - avg_stocks_per_day: 当前因子缓存范围内的平均每日股票数
+            #   - 口径范围见 avg_stocks_period 字段（遵循 PROJECT.md 输出字段口径规范）
+            # - 差值含义: total_days - valid_days = 因股票不足或数据缺失跳过的交易日数
+            'total_days': raw_metadata.get('total_days', factor_df['date'].nunique()),
+            'valid_days': len(dates),
+            'avg_stocks_per_day': int(factor_df.groupby('date').size().mean()),
+            'avg_stocks_period': {
+                'start': str(factor_df['date'].min()),
+                'end': str(factor_df['date'].max()),
+                'description': f"avg_stocks_per_day 反映 {factor_df['date'].min()} ~ {factor_df['date'].max()} 范围内的平均每日股票数"
+            }
+        },
+        'dates': dates,
+        'ic_values': ic_values,
+        'rolling_ic_mean': rolling_ic_mean,
+        'positive_ratio': round(result['positive_ratio'], 4),
+        'n_assets': factor_df['asset'].nunique(),
+        'summary': result['summary']
+    }
+
+
+def _full_recalculate(
+    output_file: Path,
+    n: int = 20,
+    k: float = 2.0,
+    min_stocks: int = DEFAULT_MIN_STOCKS
+) -> dict:
+    """
+    全量重新计算布林带%B IC 数据
+    
+    参数:
+        output_file: 输出文件路径
+        n: 布林带移动平均周期
+        k: 布林带标准差倍数
+        min_stocks: 最小股票数阈值（遵循 PROJECT.md 参数传递规范）
+        
+    返回:
+        IC 数据字典
+    """
+    print("=" * 60)
+    print("布林带%B_1D IC 计算器（全量模式）")
+    print("=" * 60)
+    print(f"参数: N={n}, K={k}")
+    
+    # 从缓存加载数据
+    print("\n[1/3] 从缓存加载因子和收益数据...")
+    try:
+        factor_df, return_df, raw_metadata = load_data_from_cache(factor_col='close')
+        
+        # 检查数据量（遵循 PROJECT.md 参数传递规范）
+        if factor_df['asset'].nunique() < min_stocks:
+            raise ValueError(
+                f"股票数量不足以计算有效的 IC\n"
+                f"当前: {factor_df['asset'].nunique()} < {min_stocks}"
+            )
+            
+    except FileNotFoundError as e:
+        raise RuntimeError(f"缓存文件不存在，请检查缓存路径\n原始错误: {e}") from e
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"缓存文件 JSON 格式错误，请检查缓存文件\n原始错误: {e}") from e
+    except KeyError as e:
+        raise RuntimeError(f"缓存字段缺失，可能是缓存版本过期\n缺失字段: {e}") from e
+    except ValueError as e:
+        # 数据量不足：直接传递，保留原始异常类型
+        raise
+    except Exception as e:
+        raise RuntimeError(f"数据加载时发生未预期的异常\n异常类型: {type(e).__name__}\n原始错误: {e}") from e
+    
+    # 数据统计
+    print(f"\n数据统计:")
+    print(f"  - 原始日期范围: {raw_metadata['period_start']} ~ {raw_metadata['period_end']}")
+    print(f"  - 原始交易日数: {raw_metadata['total_days']}")
+    print(f"  - 过滤后交易日数: {factor_df['date'].nunique()}")
+    print(f"  - 股票数量: {factor_df['asset'].nunique()}")
+    
+    # 计算布林带%B因子
+    print(f"\n[2/3] 计算布林带%B 因子...")
+    factor_df, factor_stats = calculate_bollinger_pb_1d_factor(factor_df, n=n, k=k)
+    
+    # 合并因子和收益数据
+    print(f"\n[合并] 合并因子和收益数据...")
+    factor_df = factor_df[['date', 'asset', 'bollinger_pb_1d']].copy()
+    merged_df = pd.merge(factor_df, return_df, on=['date', 'asset'], how='inner')
+    print(f"  - 合并后: {len(merged_df)} 行")
+    
+    # 计算 IC
+    print(f"\n[3/3] 计算每日 IC...")
+    ic_data = calculate_daily_ic_series(factor_df, return_df, raw_metadata, min_stocks=min_stocks)
+    print(f"  - IC 均值: {ic_data['ic_metrics']['ic_mean']:.4f}")
+    print(f"  - ICIR: {ic_data['ic_metrics']['icir']:.2f}")
+    print(f"  - 正比例: {ic_data['positive_ratio']:.1%}")
+    t_stat = ic_data['statistical_significance']['t_stat']
+    is_sig = ic_data['statistical_significance']['is_significant']
+    print(f"  - t 统计量: {t_stat:.2f} {'显著' if is_sig else '不显著'}")
+    
+    # 添加因子统计信息
+    ic_data['factor_stats'] = factor_stats
+    ic_data['update_mode'] = 'full'
+    
+    # 保存数据
+    print(f"\n[保存] 保存数据到: {output_file}")
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(convert_to_native_types(ic_data), f, ensure_ascii=False, indent=2)
+    
+    print("\n" + "=" * 60)
+    print(f"完成！共计算 {ic_data['sample_stats']['total_days']} 天 IC 数据")
+    print("=" * 60)
+    
+    return ic_data
+
+
+def _incremental_update(
+    missing_dates: list,
+    output_file: Path,
+    n: int = 20,
+    k: float = 2.0,
+    min_stocks: int = DEFAULT_MIN_STOCKS
+) -> dict:
+    """
+    增量更新：只计算缺失日期的 IC，合并到现有缓存
+    
+    参数:
+        missing_dates: 缺失日期列表
+        output_file: 输出文件路径
+        n: 布林带移动平均周期
+        k: 布林带标准差倍数
+        min_stocks: 最小股票数阈值（遵循 PROJECT.md 参数传递规范）
+        
+    返回:
+        IC 数据字典
+    """
+    print("=" * 60)
+    print("布林带%B_1D IC 计算器（增量模式）")
+    print("=" * 60)
+    print(f"[增量模式] 缺失 {len(missing_dates)} 天数据，执行增量更新")
+    
+    # 读取现有缓存
+    print("\n[1/4] 读取现有缓存...")
+    try:
+        with open(output_file, 'r', encoding='utf-8') as f:
+            existing_data = json.load(f)
+        existing_dates = existing_data.get('dates', [])
+        existing_ic_values = existing_data.get('ic_values', [])
+        print(f"  - 现有数据: {len(existing_dates)} 天")
+    except Exception as e:
+        print(f"  - 读取失败: {e}，切换到全量计算")
+        return _full_recalculate(output_file, n=n, k=k, min_stocks=min_stocks)
+    
+    # 加载全量缓存数据
+    print(f"\n[2/4] 加载缺失日期数据（{len(missing_dates)} 天）...")
+    factor_df_full, return_df_full, raw_metadata = load_data_from_cache(factor_col='close')
+    
+    # 计算布林带%B因子（全量数据，用于筛选）
+    factor_df_full, factor_stats = calculate_bollinger_pb_1d_factor(factor_df_full, n=n, k=k)
+    factor_df_full = factor_df_full[['date', 'asset', 'bollinger_pb_1d']].copy()
+    
+    # 筛选缺失日期的数据
+    missing_set = set(missing_dates)
+    factor_df_new = factor_df_full[factor_df_full['date'].isin(missing_set)]
+    return_df_new = return_df_full[return_df_full['date'].isin(missing_set)]
+    
+    # 诊断：检查缺失日期的数据覆盖情况
+    dates_in_cache = set(factor_df_full['date'].unique())
+    dates_not_in_cache = missing_set - dates_in_cache
+    
+    if dates_not_in_cache:
+        print(f"  [警告] {len(dates_not_in_cache)} 个缺失日期不在当前因子缓存范围")
+        examples = sorted(dates_not_in_cache)[:5]
+        print(f"  [警告] 示例日期: {examples}")
+    
+    if factor_df_new.empty:
+        print("  - 跳过增量计算，返回现有缓存")
+        return existing_data
+    
+    print(f"  - 筛选后: {len(factor_df_new)} 行")
+    
+    # 计算新日期的每日 IC
+    print("\n[3/4] 计算新日期 IC...")
+    new_dates = sorted(factor_df_new['date'].unique())
+    new_ic_values = []
+    
+    for date in new_dates:
+        day_factor = factor_df_new[factor_df_new['date'] == date]
+        day_return = return_df_new[return_df_new['date'] == date]
+        
+        # 合并
+        merged = day_factor.merge(day_return, on=['date', 'asset'], how='inner')
+        
+        # 使用核心函数计算单日 IC（遵循 PROJECT.md 规范）
+        ic_value = calculate_single_day_ic(
+            merged, factor_col='bollinger_pb_1d', return_col='forward_return', min_stocks=min_stocks
+        )
+        new_ic_values.append(round(ic_value, 6) if ic_value is not None else None)
+    
+    # 过滤 None 值
+    valid_new_ic = [ic for ic in new_ic_values if ic is not None]
+    skipped_new_ic = len(new_dates) - len(valid_new_ic)
+    
+    print(f"  - 计算完成: {len(new_dates)} 天，其中 {len(valid_new_ic)} 天有效 IC")
+    if skipped_new_ic > 0:
+        print(f"  - {skipped_new_ic} 天因股票数不足跳过")
+    
+    # 合并数据
+    print("\n[4/4] 合并数据并重新计算统计指标...")
+    
+    # 检查重叠
+    existing_set = set(existing_dates)
+    new_set = set(new_dates)
+    overlap_dates = existing_set & new_set
+    
+    if overlap_dates:
+        print(f"  [警告] 发现 {len(overlap_dates)} 个重叠日期，将使用新计算的 IC 值覆盖")
+    
+    # 使用字典去重
+    date_ic_map = {}
+    for date, ic in zip(existing_dates, existing_ic_values):
+        if ic is not None:
+            date_ic_map[date] = ic
+    for date, ic in zip(new_dates, new_ic_values):
+        if ic is not None:
+            date_ic_map[date] = ic
+    
+    # 按日期排序
+    all_dates = sorted(date_ic_map.keys())
+    all_ic_values = [date_ic_map[d] for d in all_dates]
+    
+    print(f"  - 合并后总计: {len(all_dates)} 天（去重后）")
+    
+    # 过滤有效值
+    valid_indices = [i for i, ic in enumerate(all_ic_values) if ic is not None]
+    valid_dates = [all_dates[i] for i in valid_indices]
+    valid_ic = [all_ic_values[i] for i in valid_indices]
+    
+    # 重新计算统计指标
+    from factor_ic.common.ic_calculator import calculate_ic_statistics
+    ic_series = pd.Series(valid_ic, index=valid_dates)
+    result = calculate_ic_statistics(ic_series)
+    
+    # 日期格式断言（遵循 PROJECT.md 日期字符串比较规范）
+    dates_to_check = [all_dates[0], all_dates[-1], raw_metadata['period_start'], raw_metadata['period_end']]
+    for d in dates_to_check:
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', str(d)):
+            raise ValueError(f"日期格式不符合 YYYY-MM-DD 约定: {d}")
+    
+    # 构建合并后的数据结构
+    merged_data = {
+        'factor_name': 'bollinger_pb_1d',
+        'calculation_date': datetime.now().strftime('%Y-%m-%d'),
+        'period': {
+            'start': min(all_dates[0], raw_metadata['period_start']),
+            'end': max(all_dates[-1], raw_metadata['period_end'])
+        },
+        'ic_metrics': {
+            'ic_mean': round(result['ic_mean'], 6),
+            'ic_std': round(result['ic_std'], 6),
+            'icir': round(result['icir'], 4)
+        },
+        'sample_stats': {
+            'total_days': max(raw_metadata.get('total_days', 0), factor_df_full['date'].nunique()),
+            'valid_days': len(valid_ic),
+            'avg_stocks_per_day': int(factor_df_full.groupby('date').size().mean()),
+            'avg_stocks_period': {
+                'start': str(factor_df_full['date'].min()),
+                'end': str(factor_df_full['date'].max()),
+                'description': f"avg_stocks_per_day 反映此范围内的平均每日股票数"
+            }
+        },
+        'statistical_significance': result['statistical_significance'],
+        'factor_direction': result['factor_direction'],
+        'economic_significance': result['economic_significance'],
+        'dates': all_dates,
+        'ic_values': all_ic_values,
+        'positive_ratio': round(result['positive_ratio'], 4),
+        'n_assets': factor_df_full['asset'].nunique(),
+        'summary': result['summary'],
+        'update_mode': 'incremental',
+        'incremental_days': len(new_dates)
+    }
+    
+    # 保存
+    print(f"\n保存数据到: {output_file}")
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(convert_to_native_types(merged_data), f, ensure_ascii=False, indent=2)
+    
+    print("\n" + "=" * 60)
+    print(f"增量更新完成！新增 {len(new_dates)} 天，总计 {len(all_dates)} 天")
+    print("=" * 60)
+    
+    return merged_data
+
+
+def generate_bollinger_pb_1d_ic_data(
+    output_file: Path | str | None = None,
+    force_full: bool = False,
+    n: int = 20,
+    k: float = 2.0,
+    min_stocks: int = DEFAULT_MIN_STOCKS
+) -> dict:
+    """
+    从缓存数据计算布林带%B IC（主入口函数）
+    
+    参数:
+        output_file: 输出文件路径
+        force_full: 强制全量计算
+        n: 布林带移动平均周期
+        k: 布林带标准差倍数
+        min_stocks: 最小股票数阈值
+    
+    返回:
+        IC 数据字典
+    """
+    # 统一转换为 Path 对象
+    if output_file is None:
+        output_file = get_ic_output_path('bollinger_pb_1d')
+    else:
+        output_file = Path(output_file)
+    
+    # 强制全量计算
+    if force_full:
+        return _full_recalculate(output_file, n=n, k=k, min_stocks=min_stocks)
+    
+    # 增量判断
+    mode, missing_dates, info = check_data_completeness('bollinger_pb_1d')
+    
+    if mode == 'skip':
+        print("\n数据完备，无需更新")
+        try:
+            with open(output_file, 'r', encoding='utf-8') as f:
+                cached_data = json.load(f)
+                cached_data['update_mode'] = 'skip'
+                return cached_data
+        except Exception as e:
+            print(f"读取缓存失败: {e}，将执行全量计算")
+            return _full_recalculate(output_file, n=n, k=k, min_stocks=min_stocks)
+    
+    elif mode == 'incremental':
+        return _incremental_update(missing_dates, output_file, n=n, k=k, min_stocks=min_stocks)
+    
+    elif mode == 'full':
+        return _full_recalculate(output_file, n=n, k=k, min_stocks=min_stocks)
+    
+    else:
+        raise RuntimeError(f"未知的更新模式: {mode}，合法值: ['skip', 'incremental', 'full']")
+
+
+if __name__ == '__main__':
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='布林带%B_1D IC 计算器')
+    parser.add_argument('--force-full', action='store_true', 
+                        help='强制全量计算（忽略增量判断）')
+    parser.add_argument('--n', type=int, default=20,
+                        help='布林带移动平均周期（默认: 20）')
+    parser.add_argument('--k', type=float, default=2.0,
+                        help='布林带标准差倍数（默认: 2.0）')
+    
+    args = parser.parse_args()
+    
+    generate_bollinger_pb_1d_ic_data(
+        force_full=args.force_full,
+        n=args.n,
+        k=args.k
+    )

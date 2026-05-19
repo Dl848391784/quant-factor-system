@@ -1,0 +1,300 @@
+# Turnover_Surge_1D IC 计算流程文档
+
+> 生成时间: 2026-05-08 00:00:00 (北京时间)
+> 审阅版本: v1.0
+
+---
+
+## 📋 整体架构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    ic_turnover_surge_1d.py 主流程                │
+├─────────────────────────────────────────────────────────────────┤
+│  入口: main()                                                    │
+│    ↓                                                             │
+│  [1] 加载换手率数据（turnover_rate_data.json.gz）                 │
+│    ↓                                                             │
+│  [2] 加载收盘价数据（factor_data.json.gz）                        │
+│    ↓                                                             │
+│  [3] 加载收益数据（return_data.json.gz）                          │
+│    ↓                                                             │
+│  [4] 计算换手率突增因子（带筛选条件）                              │
+│    ↓                                                             │
+│  [5] 调用 calculate_turnover_surge_ic() 计算正向排名 IC           │
+│    ↓                                                             │
+│  [6] 保存结果到 JSON 文件                                          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🔍 详细流程步骤
+
+### Step 1: 数据加载
+
+```
+load_data_for_turnover_surge(n_days=500)
+    │
+    ├── [Step 1] 加载换手率数据
+    │   │
+    │   ├── 文件: cache/factor_data/turnover_rate_data.json.gz
+    │   ├── 提取: [date, asset, turnover_rate]
+    │   └── 过滤缺失值
+    │
+    ├── [Step 2] 加载收盘价数据
+    │   │
+    │   ├── 文件: cache/factor_data/factor_data.json.gz
+    │   ├── 提取: [date, asset, close]
+    │   └── 过滤缺失值
+    │
+    ├── [Step 3] 合并换手率和收盘价
+    │   │
+    │   └── factor_df = pd.merge(turnover_df, close_df, on=['date', 'asset'])
+    │
+    ├── [Step 4] 加载收益数据
+    │   │
+    │   ├── 文件: cache/factor_data/return_data.json.gz
+    │   ├── 提取: [date, asset, forward_return_1d]
+    │   └── 重命名: forward_return_1d → forward_return
+    │
+    └── 返回 (factor_df, return_df)
+```
+
+**关键区别**：换手率突增因子需要三个数据源：换手率、收盘价、收益数据。
+
+---
+
+### Step 2: 换手率突增因子计算（核心）
+
+这是 `calculate_turnover_surge_factor()` 的计算流程：
+
+```
+calculate_turnover_surge_factor(factor_df, filter_conditions=True)
+    │
+    ├── [Step 1] 计算换手率突增因子
+    │   │
+    │   ├── 按股票分组，按日期排序
+    │   │
+    │   ├── 计算 5 日换手率均值:
+    │   │   │
+    │   │   └── turnover_ma = turnover_rate.rolling(window=5, min_periods=5).mean()
+    │   │
+    │   └── 计算换手率突增:
+    │   │   │
+    │   │   └── turnover_surge = turnover_rate / turnover_ma
+    │   │
+    │   └── 因子定义: turnover_surge = 当日换手率 / 过去5日换手率均值
+    │
+    ├── [Step 2] 计算当日涨跌幅
+    │   │
+    │   └── pct_change = close.pct_change()（按股票分组）
+    │
+    ├── [Step 3] 应用筛选条件（filter_conditions=True）
+    │   │
+    │   ├── 条件1: turnover_surge > 1（换手率高于近期均值）
+    │   │
+    │   ├── 条件2: pct_change > 0（当日上涨）
+    │   │
+    │   └── 同时满足两个条件才保留因子值，否则设为 None
+    │       │
+    │       └── 不满足条件的股票，turnover_surge 设为 None
+    │
+    ├── [Step 4] 极端值处理
+    │   │
+    │   └── turnover_surge.clip(0.5, 10)
+    │       │
+    │       └── 将因子值裁剪到 [0.5, 10] 范围
+    │
+    └── [统计] 输出筛选统计
+        │
+        ├── 总记录数
+        ├── 换手率突增记录数（surge > 1）
+        ├── 上涨记录数（pct_change > 0）
+        ├── 同时满足两条件记录数
+        └── 有效因子记录数
+```
+
+**筛选条件说明**：
+
+```
+换手率突增 + 上涨 = 资金异动信号
+
+┌────────────────────────────────────────────────────────────┐
+│  篮选逻辑:                                                  │
+│                                                            │
+│  条件1: turnover_surge > 1                                 │
+│  → 当日换手率高于近期均值，表明资金关注度提升               │
+│                                                            │
+│  条件2: pct_change > 0                                     │
+│  → 当日价格上涨，表明资金流入而非恐慌抛售                   │
+│                                                            │
+│  两个条件同时满足:                                          │
+│  → 换手率突增伴随上涨 = 主力资金主动买入信号                │
+│  → 预期后续继续上涨                                        │
+│                                                            │
+│  不满足条件的股票:                                          │
+│  → 因子值设为 None，不参与 IC 计算                          │
+└────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Step 3: IC 计算（正向排名）
+
+```
+calculate_turnover_surge_ic(factor_df, return_df)
+    │
+    ├── [验证] 检查必需列 [date, asset, turnover_surge, forward_return]
+    │
+    ├── [合并] 按键合并
+    │   │
+    │   └── merged = pd.merge(factor_df, return_df, on=['date', 'asset'])
+    │   │
+    │   └── 只保留 turnover_surge 不为 None 的记录
+    │
+    ├── [遍历] 按日期分组，逐日计算 IC
+    │   │
+    │   └─────────────────────────────────────────────┐
+    │   │                                             │
+    │   │  for each date:                              │
+    │   │      │                                       │
+    │   │      ├── 股票数 < 10? → 跳过该日              │
+    │   │      │                                       │
+    │   │      └── 计算正向排名 IC:                     │
+    │   │          │                                   │
+    │   │          ├── factor_rank = turnover_surge.rank(pct=True, ascending=True)
+    │   │          │                                   │
+    │   │          ├── return_rank = forward_return.rank(pct=True, ascending=True)
+    │   │          │                                   │
+    │   │          └── IC = factor_rank.corr(return_rank, method='spearman')
+    │   │                                              │
+    │   └─────────────────────────────────────────────┘
+    │
+    ├── [统计量计算]
+    │   │
+    │   ├── IC均值 = ic_series.mean()
+    │   ├── IC标准差 = ic_series.std()
+    │   ├── ICIR = |IC均值| / IC标准差  # 使用绝对值（PROJECT.md 规范）
+    │   ├── 正比例 = IC > 0 的天数占比
+    │   ├── t统计量 = IC均值 × sqrt(n) / IC标准差
+    │   └
+    │   └── 显著性判断:
+    │       │
+    │       ├── |t_stat| > 3.29 → "***"（99.9%显著）
+    │       ├── |t_stat| > 2.58 → "**"（99%显著）
+    │       ├── |t_stat| > 1.96 → "*"（95%显著）
+    │       └── 否则 → 无星号
+    │
+    └── 返回结果字典
+```
+
+---
+
+### Step 4: 正向排名原理
+
+**换手率突增因子特殊性**：
+
+```
+换手率突增因子含义：
+┌────────────────────────────────────────────────────────────┐
+│  turnover_surge = 当日换手率 / 过去5日换手率均值            │
+│                                                            │
+│  - surge > 1 且价格上涨 → 主力资金主动买入                  │
+│  - surge < 1 → 资金关注度降低                              │
+│                                                            │
+│  通过筛选条件（surge > 1 且 pct_change > 0）后:              │
+│  - surge 越高 → 资金异动越强烈 → 预期收益越高               │
+│                                                            │
+│  因此是"正向指标"，使用正向排名                             │
+└────────────────────────────────────────────────────────────┘
+
+正向排名处理:
+  factor_rank = turnover_surge.rank(pct=True, ascending=True)
+  
+  示例（某日3只满足筛选条件的股票）:
+  | 股票 | surge | 收益 | 排名关系 |
+  |------|-------|------|----------|
+  | A    | 3.0   | 8%   | surge高,收益高 → 正相关贡献 |
+  | B    | 1.5   | 3%   | surge中,收益中 → 中性 |
+  | C    | 1.2   | 1%   | surge低,收益低 → 正相关贡献 |
+```
+
+---
+
+### Step 5: 输出结果
+
+```json
+{
+    "factor_name": "turnover_surge_1d",
+    "ic_metrics": {
+        "ic_mean": 0.0345,
+        "ic_std": 0.0123,
+        "icir": 2.81,
+        "positive_ratio": 0.72,
+        "t_stat": 4.23,
+        "significance": "***",
+        "n_days": 500,
+        "n_assets": 3500,
+        "filter_stats": {
+            "total_records": 1500000,
+            "turnover_surge_count": 450000,
+            "price_up_count": 750000,
+            "both_conditions_count": 225000,
+            "filter_ratio": 0.15
+        },
+        "summary": "IC均值=0.0345, ICIR=2.81, 正比例=72.0%, 因子有效"
+    }
+}
+```
+
+---
+
+## 📊 关键指标含义
+
+| 指标 | 含义 | 判断标准 |
+|------|------|----------|
+| **IC均值** | 因子预测能力 | > 0.05 = 有效；< -0.05 = 反向有效 |
+| **ICIR** | IC稳定性 | > 0.5 = 可用；> 1.0 = 较好；> 2.0 = 很好 |
+| **正比例** | IC > 0 的天数占比 | > 50% = 有预测能力 |
+| **筛选比例** | 满足筛选条件的股票比例 | 体现因子覆盖度 |
+
+---
+
+## 🔧 数据依赖
+
+```
+cache/factor_data/
+    ├── turnover_rate_data.json.gz  ← 真实换手率（必需）
+    ├── factor_data.json.gz         ← close（收盘价）
+    └── return_data.json.gz         ← forward_return_1d（未来收益）
+
+特点：换手率突增因子需要现场计算，且有筛选条件。
+```
+
+---
+
+## 📁 文件位置
+
+| 文件 | 路径 |
+|------|------|
+| IC计算脚本 | `factor_ic/ic_turnover_surge_1d.py` |
+| 输出结果 | `cache/factor_ic/turnover_surge_1d_ic.json` |
+| 本文档 | `factor_ic/docs/turnover_surge_1d_ic_flow.md` |
+
+---
+
+## 🔄 与其他因子的对比
+
+| 因子 | IC计算方式 | 排序方向 | 因子计算来源 | 筛选条件 |
+|------|------------|----------|--------------|----------|
+| RSI | reverse_rank_ic | 反向 | 缓存预计算 | 无 |
+| KDJ_J | reverse_rank_ic | 反向 | 现场计算 | 无 |
+| Bollinger_PB | reverse_rank_ic | 反向 | 现场计算 | 无 |
+| Volume_Ratio | normal_rank_ic | 正向 | 缓存预计算 | 无 |
+| **Turnover_Surge** | **normal_rank_ic** | **正向** | **现场计算** | **有** |
+| Main_Inflow_Ratio | normal_rank_ic | 正向 | 缓存预计算 | 无 |
+
+---
+
+*文档结束*

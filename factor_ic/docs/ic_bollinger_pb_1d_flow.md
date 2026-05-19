@@ -1,0 +1,351 @@
+# Bollinger_PB_1D IC 计算流程文档
+
+> 生成时间: 2026-05-19 21:00 (北京时间)
+> 审阅版本: v1.2
+> 更新内容: 
+>   1. 初始版本：参照 ic_rsi_1d.py v1.52 规范创建
+>   2. 修复异常处理类型错误：ValueError 直接 raise，不包装为 RuntimeError
+>   3. 修复 total_days 计算错误：使用 raw_metadata['total_days'] 而非 len(dates)
+>   4. 添加 avg_stocks_period 字段：明确口径范围
+>   5. 添加 DEFAULT_MIN_STOCKS 常量：统一管理参数
+>   6. 遵循 PROJECT.md 参数传递规范：min_stocks 通过函数签名传递
+>   7. 遵循 PROJECT.md 异常处理类型保留规范：数据验证错误保留原始类型
+>   8. 遵循 PROJECT.md 输出字段口径规范：avg_stocks_period 子字段描述口径范围
+>   9. 遵循 PROJECT.md avg_stocks_per_day 计算口径规范：基于 dropna 后数据
+>   10. 添加增量模式：_incremental_update() 和 _full_recalculate() 分离
+>   11. 添加命令行参数：--force-full 强制全量计算
+>   12. 添加日期类型转换：pd.to_datetime + errors='coerce' + NaT 检查
+>   13. 添加输入验证：列存在检查 + 可用列列表（遵循 PROJECT.md 输入验证规范）
+
+---
+
+## 概述
+
+本文档描述布林带%B 因子 IC 计算的完整流程，遵循 PROJECT.md 规范。
+
+**更新模式（遵循 PROJECT.md 增量模式规范）：**
+
+```
+三种更新模式:
+- skip: 数据完备，直接返回缓存
+- incremental: 只计算缺失日期 IC，合并后重算统计指标
+- full: 全量重算所有日期 IC
+
+模式判断: check_data_completeness('bollinger_pb_1d')
+强制全量: --force-full 参数
+```
+
+---
+
+## 因子定义
+
+```
+布林带%B（Bollinger Band %B）因子定义：
+- Middle Band = SMA(Close, N)
+- Upper Band = Middle Band + K × StdDev(Close, N)
+- Lower Band = Middle Band - K × StdDev(Close, N)
+- %B = (Close - Lower Band) / (Upper Band - Lower Band)
+
+参数：
+- N = 20（移动平均周期）
+- K = 2.0（标准差倍数）
+
+边界处理：
+- %B > 1：价格突破上轨，超买信号
+- %B = 1：价格在上轨
+- 0 < %B < 1：价格在布林带内
+- %B = 0：价格在下轨
+- %B < 0：价格跌破下轨，超卖信号
+
+因子逻辑：
+- %B > 1：超买，预期回落
+- %B < 0：超卖，预期反弹
+- 使用反向排名（%B值高排名低）
+```
+
+---
+
+## 核心函数
+
+### 1. load_data_from_cache()
+
+**功能：** 从缓存加载因子数据和收益数据
+
+**输入：**
+- `factor_col: str = 'close'` — 因子列名
+- `return_col: str = 'forward_return_1d'` — 收益列名
+
+**输出：**
+- `(factor_df, return_df, raw_metadata)`
+- `raw_metadata` 包含 `period_start`, `period_end`, `total_days`
+
+**异常处理（遵循 PROJECT.md 异常处理类型保留规范）：**
+
+```
+except FileNotFoundError → RuntimeError（基础设施错误，包装）
+except JSONDecodeError → RuntimeError（基础设施错误，包装）
+except KeyError → RuntimeError（基础设施错误，包装）
+except ValueError → raise（数据验证错误，直接传递）
+except Exception → RuntimeError（未预期异常，包装）
+```
+
+---
+
+### 2. calculate_bollinger_pb_1d_factor()
+
+**功能：** 计算布林带%B 因子
+
+**输入：**
+- `factor_df: DataFrame` — 包含 date, asset, close 的数据
+- `n: int = 20` — 移动平均周期
+- `k: float = 2.0` — 标准差倍数
+
+**输出：**
+- `(factor_df, stats)`
+- `factor_df` 添加 `bollinger_pb_1d` 列
+- `stats` 包含因子计算统计信息
+
+---
+
+### 3. calculate_daily_ic_series()
+
+**功能：** 计算每日 IC 时间序列
+
+**输入：**
+- `factor_df: DataFrame` — 因子数据（已过滤缺失值）
+- `return_df: DataFrame` — 收益数据（已过滤缺失值）
+- `raw_metadata: dict` — 原始数据元信息
+- `min_stocks: int` — 最小股票数阈值（遵循 PROJECT.md 参数传递规范）
+- `period_start: str` — 数据起始日期
+- `period_end: str` — 数据结束日期
+
+---
+
+### 4. _full_recalculate()
+
+**功能：** 全量重新计算所有日期 IC
+
+**输入：**
+- `output_file: Path` — 输出文件路径
+- `n: int = 20` — 布林带移动平均周期
+- `k: float = 2.0` — 布林带标准差倍数
+- `min_stocks: int = DEFAULT_MIN_STOCKS` — 最小股票数阈值
+
+**输出：**
+- IC 数据字典
+- `update_mode: 'full'`
+
+---
+
+### 5. _incremental_update()
+
+**功能：** 只计算缺失日期 IC，合并后重算统计指标
+
+**输入：**
+- `missing_dates: list` — 缺失日期列表
+- `output_file: Path` — 输出文件路径
+- `n: int = 20` — 布林带移动平均周期
+- `k: float = 2.0` — 布林带标准差倍数
+- `min_stocks: int = DEFAULT_MIN_STOCKS` — 最小股票数阈值
+
+**输出：**
+- IC 数据字典
+- `update_mode: 'incremental'`
+- `incremental_days: int` — 新增日期数
+
+**流程（遵循 PROJECT.md 增量计算规范）：**
+
+```
+[1/4] 读取现有缓存
+[2/4] 加载全量数据，计算因子，筛选缺失日期
+[3/4] 计算新日期 IC（复用 calculate_single_day_ic）
+[4/4] 合并数据，去重，重算统计指标（复用 calculate_ic_statistics）
+```
+
+---
+
+### 6. generate_bollinger_pb_1d_ic_data()
+
+**功能：** 主入口函数
+
+**输入：**
+- `output_file: Path | str | None = None` — 输出文件路径
+- `force_full: bool = False` — 强制全量计算
+- `n: int = 20` — 布林带移动平均周期
+- `k: float = 2.0` — 布林带标准差倍数
+- `min_stocks: int = DEFAULT_MIN_STOCKS` — 最小股票数阈值
+
+**输出：**
+- IC 数据字典
+
+**模式判断流程（遵循 PROJECT.md 增量模式规范）：**
+
+```
+if force_full → _full_recalculate()
+else:
+    mode = check_data_completeness('bollinger_pb_1d')
+    if mode == 'skip' → 返回缓存
+    if mode == 'incremental' → _incremental_update()
+    if mode == 'full' → _full_recalculate()
+```
+
+---
+
+## 字段定义
+
+### sample_stats 字段
+
+| 字段 | 类型 | 语义 | 计算方式 |
+|------|------|------|---------|
+| `total_days` | int | 原始缓存日期数（含无效日期） | `raw_metadata['total_days']` |
+| `valid_days` | int | 有效 IC 天数 | `len(dates)` |
+| `avg_stocks_per_day` | int | 平均每日股票数 | `int(factor_df.groupby('date').size().mean())` |
+| `avg_stocks_period` | dict | 口径范围 | `{start, end, description}` |
+
+**口径差异说明（遵循 PROJECT.md avg_stocks_per_day 计算口径规范）：**
+
+```
+| 字段 | 数据基准 | 说明 |
+|------|---------|------|
+| total_days | dropna 前（原始缓存） | 因子缓存的日期数，包含 NaN 日期 |
+| avg_stocks_per_day | dropna 后（有效数据） | 因子值非 NaN 的日期数，不含 NaN 日期 |
+| valid_days | IC 计算后（有效 IC） | 股票数 >= min_stocks 的日期数 |
+```
+
+---
+
+## 参数传递规范
+
+遵循 PROJECT.md 参数传递规范：
+
+```python
+# 默认参数常量
+DEFAULT_MIN_STOCKS = 10
+
+# 函数签名
+def generate_bollinger_pb_1d_ic_data(
+    min_stocks: int = DEFAULT_MIN_STOCKS  # 通过函数签名传递
+) -> dict:
+    # 内部调用也传递该参数
+    calculate_daily_ic_series(..., min_stocks=min_stocks)
+```
+
+---
+
+## 异常处理规范
+
+遵循 PROJECT.md 异常处理类型保留规范：
+
+```python
+try:
+    factor_df, return_df, raw_metadata = load_data_from_cache()
+    
+    if factor_df['asset'].nunique() < min_stocks:
+        raise ValueError(f"股票数量不足: ...")
+        
+except FileNotFoundError as e:
+    # 基础设施错误：包装为 RuntimeError
+    raise RuntimeError(f"缓存文件不存在...") from e
+    
+except ValueError as e:
+    # 数据验证错误：直接传递，保留原始类型
+    raise  # 不包装
+```
+
+---
+
+## 输出文件
+
+**路径：** `factor_ic/result/ic_bollinger_pb_1d_analysis_result.json`
+
+**格式：** JSON，utf-8 编码，indent=2
+
+---
+
+## 运行示例
+
+### 增量模式（默认）
+
+```bash
+cd /home/admin/projects/factor_ic_analyzer
+python factor_ic/ic_bollinger_pb_1d.py
+```
+
+**输出：**
+
+```
+============================================================
+布林带%B_1D IC 计算器（增量模式）
+============================================================
+[增量模式] 缺失 1 天数据，执行增量更新
+
+[1/4] 读取现有缓存...
+  - 现有数据: 513 天
+
+[2/4] 加载缺失日期数据（1 天）...
+  ...
+
+[3/4] 计算新日期 IC...
+  - 计算完成: 1 天，其中 0 天有效 IC
+
+[4/4] 合并数据并重新计算统计指标...
+  - 合并后总计: 513 天（去重后）
+
+============================================================
+增量更新完成！新增 1 天，总计 513 天
+============================================================
+```
+
+### 全量模式（强制）
+
+```bash
+python factor_ic/ic_bollinger_pb_1d.py --force-full
+```
+
+**输出：**
+
+```
+============================================================
+布林带%B_1D IC 计算器（全量模式）
+============================================================
+参数: N=20, K=2.0
+
+[1/3] 从缓存加载因子和收益数据...
+
+[数据加载] 从缓存读取数据...
+  - 因子数据: 1482714 行, 2999 只股票
+  - 收益数据: 1482714 行, 2999 只股票
+  - 原始数据范围: 2024-02-06 ~ 2026-05-15, 545 个交易日
+
+数据统计:
+  - 原始日期范围: 2024-02-06 ~ 2026-05-15
+  - 原始交易日数: 545
+  - 股票数量: 2999
+
+[2/3] 计算布林带%B 因子...
+  ...
+
+[3/3] 计算每日 IC...
+  - IC 均值: -0.0348
+  - ICIR: 0.25
+  - 正比例: 39.6%
+  - t 统计量: -5.99 显著
+
+============================================================
+完成！共计算 545 天 IC 数据
+============================================================
+```
+
+---
+
+## 版本历史
+
+| 版本 | 日期 | 更新内容 |
+|------|------|---------|
+| v1.0 | 2026-05-19 | 初始版本，参照 ic_rsi_1d.py v1.52 规范创建 |
+| v1.1 | 2026-05-19 | 添加增量模式，命令行参数 --force-full |
+| v1.2 | 2026-05-19 | 添加日期类型转换（遵循 PROJECT.md 日期类型一致性规范），添加输入验证（遵循 PROJECT.md 输入验证规范） |
+
+---
+
+*最后更新: 2026-05-19 21:00:00 (北京时间)*
