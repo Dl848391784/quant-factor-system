@@ -242,13 +242,15 @@ def calculate_bollinger_pb_1d_factor(
     print(f"  [Step 1] 计算中轨（SMA）...")
     
     # 按股票分组计算滚动窗口
+    # min_periods=n：遵循布林带标准定义，满 N 个周期才计算
+    # 前N-1个交易日的布林带值为 NaN（等待足够数据）
     factor_df['middle_band'] = factor_df.groupby('asset')['close'].transform(
-        lambda x: x.rolling(window=n, min_periods=1).mean()
+        lambda x: x.rolling(window=n, min_periods=n).mean()
     )
     
     print(f"  [Step 2] 计算标准差...")
     factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
-        lambda x: x.rolling(window=n, min_periods=1).std()
+        lambda x: x.rolling(window=n, min_periods=n).std()
     )
     
     print(f"  [Step 3] 计算上轨和下轨...")

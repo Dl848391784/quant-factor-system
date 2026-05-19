@@ -788,6 +788,57 @@ result = {
 
 **核心原则：** 新实现替代旧实现后，必须删除旧代码，禁止保留死代码。
 
+---
+
+## 技术指标参数规范
+
+### 布林带 rolling 窗口参数
+
+**核心原则：** min_periods 必须等于 window，遵循技术指标标准定义。
+
+**布林带标准定义：**
+```
+布林带需要满 N 个周期的数据才能计算：
+- Middle Band = SMA(Close, N)，需要 N 个数据点
+- Upper/Lower Band = Middle + K × StdDev，标准差也需要 N 个数据点
+- 前 N-1 个周期的布林带值应为 NaN（等待足够数据）
+```
+
+**正确实现：**
+```python
+# ✓ 正确：min_periods=n，遵循标准定义
+factor_df['middle_band'] = factor_df.groupby('asset')['close'].transform(
+    lambda x: x.rolling(window=n, min_periods=n).mean()
+)
+factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
+    lambda x: x.rolling(window=n, min_periods=n).std()
+)
+```
+
+**禁止行为：**
+```python
+# ❌ 禁止：min_periods=1，违反标准定义
+factor_df['middle_band'] = factor_df.groupby('asset')['close'].transform(
+    lambda x: x.rolling(window=n, min_periods=1).mean()  # 错误！
+)
+factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
+    lambda x: x.rolling(window=n, min_periods=1).std()  # 错误！
+)
+
+# 问题：
+# - 第1个数据点：std=NaN（单点无法计算样本标准差）
+# - 第2-4个数据点：std有值（基于不足N个数据点）
+# - 违反布林带"满N周期才计算"的标准定义
+```
+
+**为何 min_periods=n 是标准：**
+1. 布林带业界定义：需要满 N 个周期才产生有效值
+2. 技术分析软件（TradingView、MetaTrader）均采用此定义
+3. min_periods=1 会在前 N-1 周期产生非标准值，误导分析
+4. 前N-1周期的NaN表示"数据不足，暂不计算"，语义清晰
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |

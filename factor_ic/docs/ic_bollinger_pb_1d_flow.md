@@ -1,8 +1,8 @@
 # Bollinger_PB_1D IC 计算流程文档
 
-> 生成时间: 2026-05-19 22:45 (北京时间)
-> 实测数据时间: 2026-05-19 22:45 (北京时间)
-> 审阅版本: v1.5
+> 生成时间: 2026-05-19 23:00 (北京时间)
+> 实测数据时间: 2026-05-19 23:00 (北京时间)
+> 审阅版本: v1.6
 > 更新内容: 
 >   1. 初始版本：参照 ic_rsi_1d.py v1.52 规范创建
 >   2. 修复异常处理类型错误：ValueError 直接 raise，不包装为 RuntimeError
@@ -22,6 +22,7 @@
 >   16. 添加 NaN → None 处理：rolling_ic_mean 在数据生成阶段处理 NaN（遵循 MODULE.md NaN 处理规范）
 >   17. 删除死代码 merged_df：遵循 MODULE.md 数据传递规范，不在调用 calculate_ic_with_direction_verification 前合并数据
 >   18. 删除死代码 calculate_bollinger_bands 和 calculate_percent_b：遵循 MODULE.md 设计演进清理规范，向量化版本替代后删除单股票版本
+>   19. 修复布林带 min_periods 参数：从 min_periods=1 改为 min_periods=n，遵循布林带标准定义（MODULE.md 技术指标参数规范）
 
 ---
 
@@ -331,11 +332,21 @@ python factor_ic/ic_bollinger_pb_1d.py --force-full
 [2/3] 计算布林带%B 因子...
   ...
 
+  有效记录数: 1,425,736（min_periods=n，前19交易日NaN）
+
+  因子统计:
+    均值:   0.5131
+    标准差: 0.3250
+
+  超买(%B>1):  100,310 (7.04%)
+  超卖(%B<0):  55,577 (3.90%)
+  布林带内:   1,269,849 (89.07%)
+
 [3/3] 计算每日 IC...
-  - IC 均值: -0.0348
-  - ICIR: 0.25
-  - 正比例: 39.6%
-  - t 统计量: -5.99 显著
+  - IC 均值: -0.0408
+  - ICIR: 0.29
+  - 正比例: 38.6%
+  - t 统计量: -7.09 显著
 
 ============================================================
 完成！共计算 545 天 IC 数据
@@ -354,6 +365,7 @@ python factor_ic/ic_bollinger_pb_1d.py --force-full
 | v1.3 | 2026-05-19 | 添加函数返回值契约校验（遵循 MODULE.md 规范），添加 ic_series 显式排序（遵循 MODULE.md 规范），添加 NaN → None 处理（遵循 MODULE.md 规范） |
 | v1.4 | 2026-05-19 | 删除死代码 merged_df，补充 MODULE.md 数据传递规范 |
 | v1.5 | 2026-05-19 | 删除死代码 calculate_bollinger_bands 和 calculate_percent_b，补充 MODULE.md 设计演进清理规范 |
+| v1.6 | 2026-05-19 | 修复布林带 min_periods 参数（min_periods=1 → min_periods=n），补充 MODULE.md 技术指标参数规范 |
 
 ---
 
