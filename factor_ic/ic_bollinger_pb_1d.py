@@ -263,11 +263,15 @@ def calculate_bollinger_pb_1d_factor(
     # ========== 计算 %B ==========
     print(f"  [Step 4] 计算 %B...")
     
-    # 处理除零情况
+    # 处理除零情况（浮点数精度容差）
+    # 遵循 MODULE.md 浮点数等值比较规范：使用精度容差而非 == 0
     diff = factor_df['upper_band'] - factor_df['lower_band']
+    
+    # 使用精度容差判断（|diff| < 1e-10 视为零）
+    # 避免浮点精度问题导致漏判或极端 %B 值
     factor_df['bollinger_pb_1d'] = np.where(
-        diff == 0,
-        0.5,
+        np.abs(diff) < 1e-10,
+        0.5,  # 布林带宽度为零时，%B 定义为 0.5（价格在中轨）
         (factor_df['close'] - factor_df['lower_band']) / diff
     )
     

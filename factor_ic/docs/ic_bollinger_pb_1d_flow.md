@@ -1,10 +1,12 @@
 # Bollinger_PB_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 00:10 (北京时间)
-> 实测数据时间: 2026-05-20 00:10 (北京时间)
-> 审阅版本: v2.6
+> 生成时间: 2026-05-20 00:20 (北京时间)
+> 实测数据时间: 2026-05-20 00:20 (北京时间)
+> 审阅版本: v2.7
 > 更新内容:
 >   ...
+>   32. 修复 %B 计算浮点数除零判断：从 diff==0 改为 np.abs(diff)<1e-10（精度容差）+ 补充 MODULE.md 浮点数等值比较规范
+>   31. 修复布林带标准差 ddof 参数：从默认 ddof=1（样本标准差）改为 ddof=0（总体标准差）+ 补充 MODULE.md 布林带标准差 ddof 参数规范
 >   30. 修复布林带标准差 ddof 参数：从默认 ddof=1（样本标准差）改为 ddof=0（总体标准差）+ 补充 MODULE.md 布林带标准差 ddof 参数规范
 >   29. 修复增量路径 ic_metrics 缺少 p_value/p_value_display 字段（KeyError）+ 补充 MODULE.md ic_metrics 字段规范
 >   29. 修复增量路径 factor_direction/economic_significance 字段名不一致（KeyError）+ 补充 MODULE.md factor_direction/economic_significance/statistical_significance 字段规范
@@ -385,9 +387,9 @@ python factor_ic/ic_bollinger_pb_1d.py --force-full
 | v2.2 | 2026-05-19 | 修复缩进错误（IndentationError）：'icir' 和 'sample_stats' 字段缩进不一致 + 补充 MODULE.md 字典结构缩进规范 |
 | v2.3 | 2026-05-19 | 修复增量路径 rolling_ic_mean NaN 处理缺失（显式转换 NaN → None）+ 补充 MODULE.md 两条路径一致性要求 |
 | v2.4 | 2026-05-19 | 修复增量路径 ic_metrics 缺少 p_value/p_value_display 字段（KeyError）+ 补充 MODULE.md ic_metrics 字段规范 |
+| v2.7 | 2026-05-20 | 修复 %B 计算浮点数除零判断（diff==0 → np.abs(diff)<1e-10）+ 补充 MODULE.md 浮点数等值比较规范 |
 | v2.6 | 2026-05-20 | 修复布林带标准差 ddof 参数（ddof=1 → ddof=0）+ 补充 MODULE.md 布林带标准差 ddof 参数规范 |
-| v2.5 | 2026-05-19 | 修复增量路径 factor_direction/economic_significance 字段名不一致（KeyError）+ 补充 MODULE.md factor_direction/economic_significance/statistical_significance 字段规范 |
 
 ---
 
-*最后更新: 2026-05-20 00:10:00 (北京时间)*
+*最后更新: 2026-05-20 00:20:00 (北京时间)*
