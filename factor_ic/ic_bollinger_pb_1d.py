@@ -694,7 +694,13 @@ def _incremental_update(
     ]
     
     # 日期格式断言（遵循 PROJECT.md 日期字符串比较规范)
-    dates_to_check = [all_dates[0], all_dates[-1], raw_metadata['period_start'], raw_metadata['period_end']]
+    # 核心原则：all_dates 为空时跳过日期格式检查（避免 IndexError）
+    if len(all_dates) == 0:
+        print("  [警告] 合并后无有效日期，跳过日期格式检查")
+        dates_to_check = [raw_metadata['period_start'], raw_metadata['period_end']]
+    else:
+        dates_to_check = [all_dates[0], all_dates[-1], raw_metadata['period_start'], raw_metadata['period_end']]
+    
     for d in dates_to_check:
         if not re.match(r'^\d{4}-\d{2}-\d{2}$', str(d)):
             raise ValueError(f"日期格式不符合 YYYY-MM-DD 约定: {d}")

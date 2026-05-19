@@ -2218,6 +2218,94 @@ load_data_from_cache(factor_col='volume')  # ✗ 布林带因子不能使用 vol
 
 ---
 
+## 列表索引访问前必须检查长度规范
+
+### 核心原则
+
+**访问列表元素（如 list[0], list[-1]）前必须检查列表长度，避免 IndexError。**
+
+### 问题背景
+
+```
+IndexError 问题：
+
+旧代码（错误）：
+```python
+# 日期格式断言
+dates_to_check = [all_dates[0], all_dates[-1], raw_metadata['period_start'], raw_metadata['period_end']]
+for d in dates_to_check:
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', str(d)):
+        raise ValueError(f"日期格式不符合 YYYY-MM-DD 约定: {d}")
+```
+
+问题后果：
+- 如果 all_dates 为空（极端情况）
+- all_dates[0] → IndexError: list index out of range
+- all_dates[-1] → IndexError: list index out of range
+
+示例场景（增量路径）：
+- 现有缓存为空：existing_dates = [], existing_ic_values = []
+- 新日期无有效数据：
+  - 因子值全为 NaN（布林带预热期）
+  - 或全部因股票数不足跳过（IC=None）
+- 合并后：all_dates = [], all_ic_values = []
+- 访问 all_dates[0] → IndexError
+```
+
+### 正确实现
+
+```python
+# ✓ 正确：检查列表长度，避免 IndexError
+if len(all_dates) == 0:
+    print("  [警告] 合并后无有效日期，跳过日期格式检查")
+    dates_to_check = [raw_metadata['period_start'], raw_metadata['period_end']]
+else:
+    dates_to_check = [all_dates[0], all_dates[-1], raw_metadata['period_start'], raw_metadata['period_end']]
+
+for d in dates_to_check:
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', str(d)):
+        raise ValueError(f"日期格式不符合 YYYY-MM-DD 约定: {d}")
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：直接访问列表元素，不检查长度
+dates_to_check = [all_dates[0], all_dates[-1], ...]  # ✗ IndexError if all_dates is empty
+
+# ❌ 禁止：假设列表不为空
+# 问题：
+# - 空列表访问索引会抛出 IndexError
+# - 增量路径可能合并后为空
+# - 缺少防御性检查
+```
+
+### 为何必须检查列表长度
+
+1. **防御性编程**：避免极端情况下的 IndexError
+2. **增量路径空合并**：现有缓存为空 + 新日期无有效数据 → 空列表
+3. **诊断信息清晰**：告知用户为何跳过检查
+4. **稳定运行**：不应因边界情况崩溃
+
+### 适用范围
+
+此规范适用于所有列表索引访问：
+1. **dates[0], dates[-1]**：访问日期列表首尾
+2. **ic_values[0]**：访问 IC 值列表
+3. **任何 list[index]**：访问列表任意索引
+
+### 检查清单
+
+```
+□ 访问 list[0] 前检查 len(list) > 0
+□ 访问 list[-1] 前检查 len(list) > 0
+□ 访问 list[index] 前检查 len(list) > index
+□ 提供诊断信息（为何跳过检查）
+□ 避免 IndexError 崩溃
+```
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |
