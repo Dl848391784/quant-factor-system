@@ -654,20 +654,26 @@ def _incremental_update(
     if overlap_dates:
         print(f"  [警告] 发现 {len(overlap_dates)} 个重叠日期，将使用新计算的 IC 值覆盖")
     
-    # 使用字典去重（遵循 MODULE.md 增量计算 None 处理规范）
+    # 使用字典去重（遵循 MODULE.md 增量路径 None 值保留规范）
+    # 核心原则：保留所有日期（包括 None IC 值的日期），不过滤 None
+    # 这样 total_days 与 valid_days 的差值才能正确反映"股票数不足跳过"的日期数
     date_ic_map = {}
     for date, ic in zip(existing_dates, existing_ic_values):
-        if ic is not None:  # 兼容旧缓存：过滤可能存在的 None
-            date_ic_map[date] = ic
+        date_ic_map[date] = ic  # 保留 None 值，不过滤
     for date, ic in zip(new_dates, new_ic_values):
-        if ic is not None:  # 只写入有效 IC 值
-            date_ic_map[date] = ic
+        date_ic_map[date] = ic  # 保留 None 值，不过滤
     
-    # 按日期排序
+    # 按日期排序（包含所有日期，包括 None IC 值的日期）
     all_dates = sorted(date_ic_map.keys())
-    all_ic_values = [date_ic_map[d] for d in all_dates]
+    all_ic_values = [date_ic_map[d] for d in all_dates]  # 包含 None
+    
+    # 统计有效 IC 数（用于诊断信息）
+    valid_ic_count = sum(1 for ic in all_ic_values if ic is not None)
+    none_ic_count = len(all_ic_values) - valid_ic_count
     
     print(f"  - 合并后总计: {len(all_dates)} 天（去重后）")
+    if none_ic_count > 0:
+        print(f"  - 其中 {valid_ic_count} 天有效 IC，{none_ic_count} 天因股票数不足跳过（IC=None）")
     
     # 重新计算统计指标（遵循 MODULE.md 增量路径 rolling_ic_mean 规范）
     # 核心原则：rolling_ic_mean 必须基于 all_dates 计算，与 dates/ic_values 长度一致

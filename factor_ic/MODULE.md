@@ -1880,6 +1880,133 @@ print(f"  - 篛选后: {len(factor_df_new)} 行")  # ✗ 没有检查因子值�
 
 ---
 
+## 增量路径 None 值保留规范
+
+### 核心原则
+
+**增量路径合并时必须保留所有日期（包括 None IC 值的日期），不过滤 None，确保 total_days 与 valid_days 的差值语义正确。**
+
+### 问题背景
+
+```
+逻辑矛盾问题：
+
+旧代码（错误）：
+```python
+date_ic_map = {}
+for date, ic in zip(existing_dates, existing_ic_values):
+    if ic is not None:  # ✗ 过滤了 None
+        date_ic_map[date] = ic
+for date, ic in zip(new_dates, new_ic_values):
+    if ic is not None:  # ✗ 过滤了 None
+        date_ic_map[date] = ic
+
+all_dates = sorted(date_ic_map.keys())  # ✗ 只包含有效 IC 的日期
+all_ic_values = [date_ic_map[d] for d in all_dates]  # ✗ 不包含 None
+```
+
+问题后果：
+- 丢失了"股票数不足跳过"的日期（IC=None）
+- total_days = len(all_dates) 只计算有效 IC 的日期数
+- valid_days 也只计算有效 IC 的日期数
+- 两者相等，无法区分跳过的日期
+- 语义失真：用户不知道有多少天因股票数不足跳过
+
+示例场景：
+- 现有缓存：dates=['2024-01-01', '2024-01-02'], ic_values=[0.05, None]
+- 增量计算：new_dates=['2024-01-03'], new_ic_values=[None]
+- 合并后：all_dates=['2024-01-01'], all_ic_values=[0.05]
+- ✗ 丢失了 2024-01-02, 2024-01-03（都因股票数不足跳过）
+- total_days=1, valid_days=1，但实际应有 total_days=3, valid_days=1
+```
+
+### 正确实现
+
+```python
+# ✓ 正确：保留所有日期，不过滤 None
+# 使用字典去重，保留 None 值
+date_ic_map = {}
+for date, ic in zip(existing_dates, existing_ic_values):
+    date_ic_map[date] = ic  # 保留 None 值，不过滤
+for date, ic in zip(new_dates, new_ic_values):
+    date_ic_map[date] = ic  # 保留 None 值，不过滤
+
+# 按日期排序（包含所有日期，包括 None IC 值的日期）
+all_dates = sorted(date_ic_map.keys())
+all_ic_values = [date_ic_map[d] for d in all_dates]  # 包含 None
+
+# 统计有效 IC 数（用于诊断信息）
+valid_ic_count = sum(1 for ic in all_ic_values if ic is not None)
+none_ic_count = len(all_ic_values) - valid_ic_count
+
+print(f"  - 合并后总计: {len(all_dates)} 天（去重后）")
+if none_ic_count > 0:
+    print(f"  - 其中 {valid_ic_count} 天有效 IC，{none_ic_count} 天因股票数不足跳过（IC=None）")
+
+# 后续 calculate_ic_statistics 会自动过滤 None 计算 valid_days
+# total_days = len(all_dates)，valid_days = valid_ic_count
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：合并时过滤 None
+date_ic_map = {}
+for date, ic in zip(existing_dates, existing_ic_values):
+    if ic is not None:  # ✗ 过滤了 None，丢失跳过的日期
+        date_ic_map[date] = ic
+
+# ❌ 禁止：只统计有效 IC 的日期
+all_dates = sorted(date_ic_map.keys())  # ✗ 不包含 None IC 的日期
+all_ic_values = [date_ic_map[d] for d in all_dates]  # ✗ 不包含 None
+
+# 问题：
+# - total_days = len(all_dates) = valid_days
+# - 无法区分"股票数不足跳过"的日期
+# - 语义失真
+```
+
+### 为何必须保留 None 值
+
+1. **语义正确性：** total_days 应表示所有日期数，valid_days 应表示有效 IC 数
+2. **诊断信息完整：** 用户需要知道有多少天因股票数不足跳过
+3. **统计指标准确：** calculate_ic_statistics 自动过滤 None，不影响 IC/ICIR 计算
+4. **与全量路径一致：** 全量路径也保留 None 值
+
+### calculate_ic_statistics 处理逻辑
+
+```python
+# common/ic_calculator.py 中的 calculate_ic_statistics
+# 自动过滤 None 值，只计算有效 IC 的统计指标
+def calculate_ic_statistics(ic_series: pd.Series) -> dict:
+    # 过滤 None 值（pd.Series 中的 NaN）
+    valid_ic = ic_series.dropna()
+    
+    # 统计指标基于有效 IC 计算
+    ic_mean = valid_ic.mean()
+    ic_std = valid_ic.std()
+    icir = ic_mean / ic_std if ic_std > 0 else 0
+    
+    # 但 total_days = len(ic_series)，valid_days = len(valid_ic)
+    return {
+        'total_days': len(ic_series),  # 包含 None 的日期数
+        'valid_days': len(valid_ic),   # 有效 IC 的日期数
+        ...
+    }
+```
+
+### 检查清单
+
+```
+□ 合并时不过滤 None（保留所有日期）
+□ all_dates 包含所有日期（包括 None IC 的日期）
+□ all_ic_values 包含 None（不过滤）
+□ 提供诊断信息（valid_ic_count vs none_ic_count）
+□ total_days 与 valid_days 差值语义正确
+```
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |
