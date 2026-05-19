@@ -634,20 +634,76 @@ if dates != sorted(dates):
     raise RuntimeError("dates 未按升序排列")
 ```
 
-**为何必须显式排序：**
+**为何必须显式排序:**
 1. rolling 计算按位置顺序，而非 index 值顺序
 2. 若 ic_series.index 乱序 → dates 与 rolling_ic_mean 对应错误
 3. pandas groupby 默认 sort=True，但不应依赖隐式行为
-4. 版本升级风险：pandas 可能改变默认行为
+4. 版本升级风险: pandas 可能改变默认行为
 5. 增量路径合并后可能乱序
+
+6. **两条路径一致性:**
+   - 全量路径: `load_data_from_cache` 第124行显式转换为字符串
+   - 增量路径: JSON 缓存存储字符串，读取后直接使用
+   - 当前一致，但依赖隐式实现，缺乏规范保障
+
+---
+
+## ic_series.index 类型规范
+
+### 核心原则
+**ic_series.index 必须是字符串类型（格式为 "YYYY-MM-DD"），禁止使用 datetime 对象。**
+
+### 类型约束
+```python
+# ✓ 正确: index 为字符串 "YYYY-MM-DD"
+ic_series.index  # 类型: pandas.Index with dtype='object' (字符串)
+# 示例: Index(['2024-01-01', '2024-01-02', ...], dtype='object')
+
+```
+
+**禁止行为:**
+```python
+# ❌ 禁止: index 为 datetime 对象
+ic_series.index  # 类型: pandas.DatetimeIndex
+# 问题:
+# 1. rolling 计算无法处理 datetime index（可能报错）
+# 2. JSON 序列化失败（datetime 无法直接序列化）
+# 3. 日期比较逻辑不一致（datetime vs 字符串）
+```
+
+### 全量路径实现
+**`load_data_from_cache` 负责显式转换:**
+```python
+# 第124行: 显式转换为字符串格式
+factor_df['date'] = date_series.dt.strftime('%Y-%m-%d')
+```
+
+**`calculate_daily_ic_series` 返回时:**
+```python
+# 第376行: 转换为 JSON 友好格式
+dates = [str(d) for d in ic_series.index]
+```
+
+### 增量路径实现
+**`_incremental_update` 直接使用字符串 index:**
+```python
+# 第660行: 直接使用 valid_dates (字符串)
+ic_series = pd.Series(valid_ic, index=valid_dates)
+```
+
+### 一致性验证
+**两条路径必须确保 index 类型一致（字符串 "YYYY-MM-DD"）：**
+
+| 路径 | index 来源 | 类型 | 保障机制 |
+|------|------------|------|----------|
+| 全量 | `load_data_from_cache` 第124行转换 | 字符串 | 显式转换规范 |
+| 增量 | `existing_dates` (JSON 缓存) + `new_dates` (strftime) | 字符串 | JSON 缓存格式规范 |
 
 ---
 
 ## 函数返回值契约规范
 
-**核心原则：** 调用方必须校验返回值字段存在性。
-
-**正确实现：**
+**核心原则:** 调用方必须校验返回值字段存在性。
 ```python
 # 定义必需字段列表
 required_fields = [

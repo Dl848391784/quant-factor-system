@@ -1,12 +1,13 @@
 # Bollinger_PB_1D IC 计算流程文档
 
-> 生成时间: 2026-05-19 23:15 (北京时间)
-> 实测数据时间: 2026-05-19 23:15 (北京时间)
-> 审阅版本: v1.7
-> 更新内容: 
+> 生成时间: 2026-05-19 23:20 (北京时间)
+> 实测数据时间: 2026-05-19 23:20 (北京时间)
+> 审阅版本: v1.8
+> 更新内容:
 >   1. 初始版本：参照 ic_rsi_1d.py v1.52 规范创建
->   2. 修复异常处理类型错误：ValueError 直接 raise，不包装为 RuntimeError
->   3. 修复 total_days 计算错误：使用 raw_metadata['total_days'] 而非 len(dates)
+>   ...
+>   21. 修复 _full_recalculate 完成信息字段错误:从 total_days 改为 valid_days,遵循 MODULE.md 打印信息规范
+>   22. 补充 MODULE.md ic_series.index 类型规范:明确两条路径必须使用字符串类型 "YYYY-MM-DD"
 >   4. 添加 avg_stocks_period 字段：明确口径范围
 >   5. 添加 DEFAULT_MIN_STOCKS 常量：统一管理参数
 >   6. 遵循 PROJECT.md 参数传递规范：min_stocks 通过函数签名传递
@@ -369,6 +370,7 @@ python factor_ic/ic_bollinger_pb_1d.py --force-full
 | v1.5 | 2026-05-19 | 删除死代码 calculate_bollinger_bands 和 calculate_percent_b，补充 MODULE.md 设计演进清理规范 |
 | v1.6 | 2026-05-19 | 修复布林带 min_periods 参数（min_periods=1 → min_periods=n），补充 MODULE.md 技术指标参数规范 |
 | v1.7 | 2026-05-19 | 修复 _incremental_update 缺失 rolling_ic_mean 字段 + 修复 _full_recalculate 完成信息字段错误（total_days → valid_days），补充 MODULE.md 增量更新返回数据规范 |
+| v1.8 | 2026-05-19 | 补充 MODULE.md ic_series index 类型规范（字符串而非 datetime），明确两条路径一致性保障 |
 
 ---
 
