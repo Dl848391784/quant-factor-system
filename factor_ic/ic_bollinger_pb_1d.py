@@ -64,19 +64,17 @@ DEFAULT_MIN_STOCKS = 10  # 每日最少股票数阈值，统一管理
 
 
 def load_data_from_cache(
-    factor_col: str = 'close',
     return_col: str = 'forward_return_1d'
 ) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
     """
     从缓存加载因子数据和收益数据
     
     参数:
-        factor_col: 因子列名
         return_col: 收益列名
         
     返回:
         (factor_df, return_df, raw_metadata)
-        - factor_df: 过滤后的因子数据 DataFrame
+        - factor_df: 过滤后的因子数据 DataFrame（包含 date, asset, close）
         - return_df: 过滤后的收益数据 DataFrame
         - raw_metadata: 原始数据元信息字典
             - period_start: 原始缓存最小日期
@@ -84,8 +82,9 @@ def load_data_from_cache(
             - total_days: 原始缓存日期数
     
     规范:
-        period 和 total_days 基于 dropna 前的原始缓存数据
-        （遵循 PROJECT.md 输出字段语义规范）
+        布林带因子必须使用 close 价格，这是布林带的数学定义
+        因此固定加载和过滤 'close' 列，不接受 factor_col 参数
+        （遵循 MODULE.md 布林带因子固定使用 close 列规范）
     """
     print("\n[数据加载] 从缓存读取数据...")
     
@@ -135,23 +134,18 @@ def load_data_from_cache(
         return_df['date'] = date_series.dt.strftime('%Y-%m-%d')
     
     # 输入验证（遵循 PROJECT.md 输入验证规范）
-    # 检查因子列是否存在，提供友好错误信息
-    if factor_col not in factor_df.columns:
+    # 布林带因子固定使用 close 列，检查 close 列是否存在
+    if 'close' not in factor_df.columns:
         available_cols = sorted([c for c in factor_df.columns if c not in ['date', 'asset']])
         raise KeyError(
-            f"因子列 '{factor_col}' 不存在于缓存数据中\n"
-            f"可用因子列: {available_cols}"
+            "布林带因子必须使用 'close' 列（布林带的数学定义）\n"
+            f"但缓存数据中不存在 'close' 列\n"
+            f"可用列: {available_cols}"
         )
     
-    # 选择需要的列（遵循 MODULE.md 布林带因子必须加载 close 列规范）
-    # 核心原则：布林带因子依赖 close 价格，必须加载和过滤 close 列
-    # 即使 factor_col 不是 'close'，也要强制加载 'close' 列
-    factor_cols = ['date', 'asset']
-    if factor_col not in factor_cols:
-        factor_cols.append(factor_col)
-    if 'close' not in factor_cols:  # 强制加载 'close' 列（布林带依赖）
-        factor_cols.append('close')
-    
+    # 布林带因子固定加载 'close' 列（遵循 MODULE.md 布林带因子固定使用 close 列规范）
+    # 布林带公式必须使用 close 价格：中轨 = SMA(close, N)
+    factor_cols = ['date', 'asset', 'close']  # 固定列名，不接受参数
     factor_df = factor_df[factor_cols].copy()
     
     # 输入验证：检查收益列是否存在
@@ -174,16 +168,11 @@ def load_data_from_cache(
     print(f"  - 原始数据范围: {raw_period_start} ~ {raw_period_end}, {raw_total_days} 个交易日")
     
     # 过滤缺失值（遵循 PROJECT.md 数据过滤后索引处理规范）
-    # 核心原则：布林带因子依赖 close 价格，必须过滤 close 列的 NaN
-    # 同时过滤 factor_col 的 NaN（调用方指定的因子列）
-    dropna_cols = ['close']  # 布林带因子必须过滤 close 列
-    if factor_col not in dropna_cols:
-        dropna_cols.append(factor_col)
-    
-    factor_df = factor_df.dropna(subset=dropna_cols).reset_index(drop=True)
+    # 布林带因子固定过滤 close 列的 NaN
+    factor_df = factor_df.dropna(subset=['close']).reset_index(drop=True)
     return_df = return_df.dropna(subset=['forward_return']).reset_index(drop=True)
     
-    print(f"  - 过滤缺失值后: 因子 {len(factor_df)} 行（过滤列: {dropna_cols}），收益 {len(return_df)} 行")
+    print(f"  - 过滤缺失值后: 因子 {len(factor_df)} 行（过滤列: ['close']），收益 {len(return_df)} 行")
     
     # 返回过滤后的数据 + 原始数据元信息
     return factor_df, return_df, {
@@ -590,7 +579,7 @@ def _incremental_update(
     
     # 加载全量缓存数据
     print(f"\n[2/4] 加载缺失日期数据（{len(missing_dates)} 天）...")
-    factor_df_full, return_df_full, raw_metadata = load_data_from_cache(factor_col='close')
+    factor_df_full, return_df_full, raw_metadata = load_data_from_cache()
     
     # 计算布林带%B因子（全量数据，用于筛选）
     factor_df_full, factor_stats = calculate_bollinger_pb_1d_factor(factor_df_full, n=n, k=k)

@@ -2103,6 +2103,121 @@ factor_df.dropna(subset=[factor_col])  # ✗ close 列的 NaN 未被过滤
 
 ---
 
+## 布林带因子固定使用 close 列规范
+
+### 核心原则
+
+**布林带因子必须使用 close 价格，这是布林带的数学定义。load_data_from_cache 不接受 factor_col 参数，固定加载和过滤 'close' 列。**
+
+### 问题背景
+
+```
+接口设计不一致问题：
+
+旧设计（错误）：
+```python
+# load_data_from_cache 接受 factor_col 参数
+def load_data_from_cache(factor_col: str = 'close', ...):
+    factor_cols = ['date', 'asset', factor_col]  # ✗ 参数误导
+
+# calculate_bollinger_pb_1d_factor 硬编码使用 close
+def calculate_bollinger_pb_1d_factor(factor_df, n=20, k=2.0):
+    required_cols = ['date', 'asset', 'close']  # ✗ 硬编码
+    factor_df.groupby('asset')['close'].transform(...)  # ✗ 硬编码
+```
+
+问题后果：
+- 接口设计不一致：factor_col 参数对布林带因子没有意义
+- 如果调用方传入 factor_col='volume'，会加载 volume 列
+- 但布林带计算硬编码使用 close 列
+- 参数设计误导用户，扩展性差
+
+布林带公式定义：
+- 中轨 = SMA(close, N)
+- 上轨 = 中轨 + K × Std(close, N)
+- 下轨 = 中轨 - K × Std(close, N)
+- %B = (close - 下轨) / (上轨 - 下轨)
+
+布林带因子必须使用 close 价格，这是布林带的数学定义。
+factor_col 参数对于布林带因子来说没有意义，只能为 'close'。
+```
+
+### 正确实现
+
+```python
+# ✓ 正确：不接受 factor_col 参数，固定加载 close 列
+def load_data_from_cache(return_col: str = 'forward_return_1d'):
+    """
+    布林带因子必须使用 close 价格，这是布林带的数学定义
+    因此固定加载和过滤 'close' 列，不接受 factor_col 参数
+    """
+    factor_cols = ['date', 'asset', 'close']  # 固定列名，不接受参数
+    factor_df = factor_df[factor_cols].copy()
+    
+    # 固定过滤 close 列的 NaN
+    factor_df = factor_df.dropna(subset=['close']).reset_index(drop=True)
+    return factor_df, return_df, raw_metadata
+
+# ✓ 正确：calculate_bollinger_pb_1d_factor 签名一致
+def calculate_bollinger_pb_1d_factor(factor_df, n=20, k=2.0):
+    """
+    布林带因子必须使用 close 价格（布林带的数学定义）
+    """
+    required_cols = ['date', 'asset', 'close']  # 与 load_data_from_cache 一致
+    factor_df.groupby('asset')['close'].transform(...)  # 使用 close 列
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：接受 factor_col 参数（误导用户）
+def load_data_from_cache(factor_col: str = 'close', ...):  # ✗ 参数对布林带因子没有意义
+    factor_cols = ['date', 'asset', factor_col]  # ✗ 参数化加载列
+
+# ❌ 禁止：调用方传入错误的 factor_col
+load_data_from_cache(factor_col='volume')  # ✗ 布林带因子不能使用 volume
+
+# 问题：
+# - 布林带公式必须使用 close 价格
+# - factor_col 参数误导用户
+# - 接口设计不一致
+```
+
+### 为何必须固定使用 close 列
+
+1. **布林带公式定义**：布林带指标基于 close 价格计算，这是布林带的数学定义
+2. **技术指标本质**：布林带是价格波动范围指标，必须使用 close 价格
+3. **接口一致性**：load_data_from_cache 和 calculate_bollinger_pb_1d_factor 签名一致
+4. **避免误导**：不接受 factor_col 参数，避免调用方传入错误的值
+
+### 适用范围
+
+此规范适用于所有固定依赖特定列的技术指标：
+1. **布林带 %B**：固定使用 close 价格
+2. **RSI**：固定使用 close 价格
+3. **KDJ**：固定使用 close 价格
+4. **量比**：固定使用 volume 成交量
+
+### 其他因子脚本的 factor_col 参数
+
+对于其他因子脚本（如 IC 相关的因子），factor_col 参数可能有意义：
+- `ic_volume_ratio_1d.py`：量比因子固定使用 volume
+- `ic_turnover_surge_1d.py`：换手率因子固定使用 turnover
+
+但布林带因子固定使用 close，不接受 factor_col 参数。
+
+### 检查清单
+
+```
+□ 不接受 factor_col 参数（布林带因子固定使用 close）
+□ 固定加载 'close' 列（factor_cols = ['date', 'asset', 'close'])
+□ 固定过滤 'close' 列的 NaN
+□ 函数签名与 calculate_bollinger_pb_1d_factor 一致
+□ 文档说明布林带的数学定义
+```
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |
