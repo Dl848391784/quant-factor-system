@@ -401,7 +401,34 @@ def calculate_daily_ic_series(
         min_stocks=min_stocks  # 遵循 PROJECT.md 参数传递规范
     )
     
+    # 函数返回值契约校验（遵循 MODULE.md 函数返回值契约规范）
+    required_fields = [
+        'ic_series', 'ic_mean', 'ic_std', 'icir',
+        'statistical_significance', 'factor_direction',
+        'economic_significance', 'positive_ratio', 'summary'
+    ]
+    missing_fields = [f for f in required_fields if f not in result]
+    if missing_fields:
+        raise RuntimeError(
+            f"calculate_ic_with_direction_verification 返回值缺少必需字段\n"
+            f"缺失字段: {missing_fields}\n"
+            f"问题定位: factor_ic/common/ic_calculator.py\n"
+            f"期望字段: {required_fields}"
+        )
+    
     ic_series = result['ic_series']
+    
+    # ic_series 显式排序（遵循 MODULE.md ic_series 排序规范）
+    ic_series = ic_series.sort_index()
+    
+    # 防御性校验：确保 dates 按升序排列
+    dates_from_series = [str(d) for d in ic_series.index]
+    if dates_from_series != sorted(dates_from_series):
+        raise RuntimeError(
+            f"ic_series.index 未按日期升序排列\n"
+            f"问题定位: factor_ic/ic_bollinger_pb_1d.py calculate_daily_ic_series\n"
+            f"请检查 calculate_ic_with_direction_verification 返回值"
+        )
     
     # 获取日期范围
     if period_start is None:
@@ -413,10 +440,15 @@ def calculate_daily_ic_series(
     dates = [str(d) for d in ic_series.index]
     ic_values = [round(v, 6) for v in ic_series.values]
     
-    # 计算 20 日滚动均值
     # 计算 20 日滚动均值（min_periods=10，至少需要10个有效值）
     rolling_mean = ic_series.rolling(window=20, min_periods=10).mean()
-    rolling_ic_mean = [round(v, 6) for v in rolling_mean.values]
+    
+    # NaN → None 转换（遵循 MODULE.md NaN 处理规范）
+    # 在数据生成阶段处理，而非延迟到 convert_to_native_types
+    rolling_ic_mean = [
+        round(v, 6) if not pd.isna(v) else None
+        for v in rolling_mean.values
+    ]
     
     # 符合 PROJECT.md 规范的数据结构（五维度判断）
     return {
