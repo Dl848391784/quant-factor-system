@@ -617,6 +617,27 @@ rolling_ic_mean = [
 3. 若延迟到 convert_to_native_types 处理，语义不一致
 4. JSON 序列化时 None → null，标准 JSON 不支持 nan
 
+**两条路径一致性要求：**
+```python
+# ✓ 全量路径（calculate_daily_ic_series）：数据生成阶段处理
+rolling_mean = ic_series.rolling(window=20, min_periods=10).mean()
+rolling_ic_mean = [
+    round(v, 6) if not pd.isna(v) else None
+    for v in rolling_mean.values
+]
+
+# ✓ 增量路径（_incremental_update）：数据生成阶段处理（必须与全量路径一致）
+rolling_ic_mean_series = ic_series.rolling(window=20, min_periods=10).mean()
+rolling_ic_mean = [
+    round(v, 6) if not pd.isna(v) else None
+    for v in rolling_ic_mean_series.values
+]
+
+# ❌ 禁止：延迟到 convert_to_native_types 处理
+rolling_ic_mean = ic_series.rolling(window=20, min_periods=10).mean()  # pd.Series
+# 延迟到 json.dump 时才通过 convert_to_native_types 转换（违反规范）
+```
+
 ---
 
 ## ic_series 排序规范

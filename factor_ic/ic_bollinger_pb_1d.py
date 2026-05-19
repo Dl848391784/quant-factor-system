@@ -659,7 +659,14 @@ def _incremental_update(
     result = calculate_ic_statistics(ic_series)
     
     # 添加滚动IC均值计算（遵循 MODULE.md 滚动IC均值规范)
-    rolling_ic_mean = ic_series.rolling(window=20, min_periods=10).mean()
+    rolling_ic_mean_series = ic_series.rolling(window=20, min_periods=10).mean()
+    
+    # NaN → None 转换（遵循 MODULE.md NaN 处理规范）
+    # 在数据生成阶段处理，而非延迟到 convert_to_native_types
+    rolling_ic_mean = [
+        round(v, 6) if not pd.isna(v) else None
+        for v in rolling_ic_mean_series.values
+    ]
     
     # 日期格式断言（遵循 PROJECT.md 日期字符串比较规范)
     dates_to_check = [all_dates[0], all_dates[-1], raw_metadata['period_start'], raw_metadata['period_end']]
