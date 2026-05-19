@@ -3109,6 +3109,101 @@ def _incremental_update(...):
 
 ---
 
+## PEP8 import 规范
+
+### 核心原则
+
+**所有 import 语句必须在文件顶部，禁止在函数内部 import。函数内部 import 会每次调用时重新导入（性能问题），且降低代码可读性。**
+
+### 问题背景
+
+```
+函数内部 import 问题：
+
+旧代码（错误）：
+```python
+# 文件顶部
+from factor_ic.common.ic_calculator import (
+    calculate_ic_with_direction_verification,
+    calculate_single_day_ic
+)
+
+def _incremental_update(...):
+    # 函数内部 import（违反 PEP8）
+    from factor_ic.common.ic_calculator import calculate_ic_statistics  # ✗ 在函数内
+    result = calculate_ic_statistics(ic_series)
+```
+
+问题后果：
+- 违反 PEP8 规范：所有 import 应在文件顶部
+- 性能问题：每次调用函数时都会执行 import（虽然 Python 有缓存机制）
+- 降低可读性：import 分散在不同位置，难以追踪依赖
+- 代码风格不一致：同一模块的函数分散导入
+```
+
+### 正确实现
+
+```python
+# ✓ 正确：所有 import 在文件顶部
+# 导入 IC 计算模块（支持方向验证 + 单日 IC 计算 + IC 统计指标计算）
+from factor_ic.common.ic_calculator import (
+    calculate_ic_with_direction_verification,
+    calculate_single_day_ic,  # 用于增量计算
+    calculate_ic_statistics   # 用于增量路径重新计算统计指标
+)
+
+def _incremental_update(...):
+    # calculate_ic_statistics 已在文件顶部导入（遵循 PEP8 import 规范）
+    result = calculate_ic_statistics(ic_series)
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：函数内部 import
+def _incremental_update(...):
+    from factor_ic.common.ic_calculator import calculate_ic_statistics  # ✗ 在函数内
+    result = calculate_ic_statistics(ic_series)
+
+# ❌ 禁止：同一模块分散导入
+# 文件顶部：
+from factor_ic.common.ic_calculator import calculate_ic_with_direction_verification
+# 函数内：
+from factor_ic.common.ic_calculator import calculate_ic_statistics  # ✗ 分散导入
+
+# 问题：
+# - 违反 PEP8 规范
+# - 降低可读性
+# - 同一模块应统一导入
+```
+
+### 为何必须遵循 PEP8 import 规范
+
+1. **PEP8 标准**：Python 官方代码风格指南要求所有 import 在文件顶部
+2. **性能考虑**：虽然 Python 有 import 缓存机制，但函数内 import 每次调用都会执行查找
+3. **可读性**：import 在顶部易于追踪模块依赖
+4. **代码风格一致**：同一模块的函数应统一导入
+
+### 适用范围
+
+此规范适用于所有 Python 代码：
+1. **模块级 import**：所有 import 在文件顶部
+2. **同一模块导入**：同一模块的多个函数应统一导入
+3. **避免函数内 import**：除非有特殊原因（如避免循环导入）
+4. **任何 Python 代码**
+
+### 检查清单
+
+```
+□ 所有 import 在文件顶部
+□ 同一模块的函数统一导入
+□ 避免函数内 import（除非有特殊原因）
+□ 遵循 PEP8 规范
+□ 提高代码可读性
+```
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |
