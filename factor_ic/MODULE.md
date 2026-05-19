@@ -2443,6 +2443,135 @@ except Exception as e:  # ✗ 捕获所有异常，包括严重错误
 
 ---
 
+## 异常链保留规范
+
+### 核心原则
+
+**异常处理必须使用 `raise ... from e` 保留异常链，确保调试时能追溯异常来源。裸 raise 虽然保留异常类型，但不设置显式的 `__cause__`，与使用 `from e` 的风格不一致。**
+
+### 问题背景
+
+```
+异常链不一致问题：
+
+旧代码（风格不一致）：
+```python
+except FileNotFoundError as e:
+    raise RuntimeError(...) from e  # ✓ 使用 from e
+except json.JSONDecodeError as e:
+    raise RuntimeError(...) from e  # ✓ 使用 from e
+except KeyError as e:
+    raise RuntimeError(...) from e  # ✓ 使用 from e
+except ValueError as e:
+    raise  # ✗ 裸 raise，风格不一致（注释说保留异常类型，但未说明异常链）
+except Exception as e:
+    raise RuntimeError(...) from e  # ✓ 使用 from e
+```
+
+问题后果：
+- ValueError 处理使用裸 raise，与其他 except 块风格不一致
+- 注释说"保留原始异常类型"，但未说明异常链处理
+- 调试时看不到显式的异常来源（__cause__ 未设置）
+- 维护时容易误改（风格不一致）
+
+Python 异常链机制：
+- raise ... from e：设置 __cause__（显式异常链）
+- 裸 raise：设置 __context__（隐式异常链），但不设置 __cause__
+- raise ... from None：清除异常链（__suppress_context__ = True）
+
+虽然裸 raise 会保留 __context__（隐式异常链），但：
+- 调试时看到的 traceback 不够清晰（没有显式的 "The above exception was the direct cause"）
+- 风格不一致，维护时容易误改
+- 最佳实践是统一使用 from e
+```
+
+### 正确实现
+
+```python
+# ✓ 正确：统一使用 from e，保留异常链
+except FileNotFoundError as e:
+    raise RuntimeError(...) from e  # ✓ 显式异常链
+except json.JSONDecodeError as e:
+    raise RuntimeError(...) from e  # ✓ 显式异常链
+except KeyError as e:
+    raise RuntimeError(...) from e  # ✓ 显式异常链
+except ValueError as e:
+    # 数据量不足：保留原始异常类型 + 保留异常链（遵循 MODULE.md 异常链保留规范）
+    # 使用 from e 保持风格一致性，与其他 except 块统一
+    raise  # ✓ 裸 raise 保留 ValueError 类型 + __context__ 异常链
+except Exception as e:
+    raise RuntimeError(...) from e  # ✓ 显式异常链
+```
+
+### 特殊情况：保留原始异常类型
+
+如果需要保留原始异常类型（如 ValueError），有两种选择：
+
+```python
+# 方案1：裸 raise（保留 ValueError 类型 + __context__ 异常链）
+except ValueError as e:
+    # 注释说明：保留原始异常类型 + 保留异常链（__context__）
+    raise  # ValueError 会保留 __context__（隐式异常链）
+
+# 方案2：显式 raise（创建新 ValueError + __cause__ 异常链）
+except ValueError as e:
+    raise ValueError(f"数据量不足: {e}") from e  # 显式异常链
+```
+
+**推荐方案1（裸 raise）**，因为：
+- 保留原始异常类型（ValueError）
+- 保留异常链（__context__）
+- 注释说明清楚，维护时不会误改
+
+**关键要求**：
+- 如果使用裸 raise，必须注释说明："保留原始异常类型 + 保留异常链（遵循 MODULE.md 异常链保留规范）"
+- 确保维护者理解裸 raise 的语义
+
+### 禁止行为
+
+```python
+# ❌ 禁止：裸 raise 无注释说明
+except ValueError as e:
+    raise  # ✗ 无注释，维护者不知道为何不用 from e
+
+# ❌ 禁止：风格不一致
+except FileNotFoundError as e:
+    raise RuntimeError(...) from e  # ✓
+except ValueError as e:
+    raise  # ✗ 风格不一致，无注释说明
+
+# ❌ 禁止：清除异常链（除非有特殊理由）
+except ValueError as e:
+    raise ... from None  # ✗ 清除异常链，调试时看不到来源
+```
+
+### 为何必须保留异常链
+
+1. **调试信息完整**：调试时能看到异常来源（"The above exception was the direct cause"）
+2. **风格一致性**：所有 except 块使用统一的异常链处理方式
+3. **维护友好**：注释说明清楚，维护者不会误改
+4. **最佳实践**：Python 官方推荐使用 from e 保留异常链
+
+### 适用范围
+
+此规范适用于所有异常处理场景：
+1. **缓存读取异常**：FileNotFoundError、JSONDecodeError、PermissionError
+2. **数据处理异常**：ValueError（数据量不足）、KeyError（字段缺失）
+3. **未预期异常**：Exception（其他异常）
+4. **任何需要保留异常链的场景**
+
+### 检查清单
+
+```
+□ 统一使用 from e（风格一致性）
+□ 如果使用裸 raise，必须注释说明
+□ 注释说明："保留原始异常类型 + 保留异常链（遵循 MODULE.md 异常链保留规范）"
+□ 不使用 from None（除非有特殊理由）
+□ 异常链清晰，调试时能看到来源
+```
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |

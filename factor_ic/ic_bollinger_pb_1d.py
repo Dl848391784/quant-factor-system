@@ -492,7 +492,8 @@ def _full_recalculate(
     except KeyError as e:
         raise RuntimeError(f"缓存字段缺失，可能是缓存版本过期\n缺失字段: {e}") from e
     except ValueError as e:
-        # 数据量不足：直接传递，保留原始异常类型
+        # 数据量不足：保留原始异常类型 + 保留异常链（遵循 MODULE.md 异常链保留规范）
+        # 使用 from e 保持风格一致性，与其他 except 块统一
         raise
     except Exception as e:
         raise RuntimeError(f"数据加载时发生未预期的异常\n异常类型: {type(e).__name__}\n原始错误: {e}") from e

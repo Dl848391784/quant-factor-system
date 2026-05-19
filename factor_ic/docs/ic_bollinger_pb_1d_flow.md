@@ -1,10 +1,11 @@
 # Bollinger_PB_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 02:00 (北京时间)
-> 实测数据时间: 2026-05-20 02:00 (北京时间)
-> 审阅版本: v3.7
+> 生成时间: 2026-05-20 02:10 (北京时间)
+> 实测数据时间: 2026-05-20 02:10 (北京时间)
+> 审阅版本: v3.8
 > 更新内容:
 >   ...
+>   43. 修复异常链风格不一致：ValueError 裸 raise 补充注释说明 + 补充 MODULE.md 异常链保留规范
 >   42. 修复静默吞掉异常问题：区分 FileNotFoundError（可恢复）和 JSONDecodeError/PermissionError（严重）+ 补充 MODULE.md 异常处理必须区分严重错误和可恢复错误规范
 >   41. 修复增量路径空列表 IndexError：检查 all_dates 长度 + 补充 MODULE.md 列表索引访问前必须检查长度规范
 >   40. 修复接口设计不一致：删除 load_data_from_cache 的 factor_col 参数（布林带因子固定使用 close）+ 补充 MODULE.md 布林带因子固定使用 close 列规范
@@ -396,9 +397,9 @@ python factor_ic/ic_bollinger_pb_1d.py --force-full
 | v2.2 | 2026-05-19 | 修复缩进错误（IndentationError）：'icir' 和 'sample_stats' 字段缩进不一致 + 补充 MODULE.md 字典结构缩进规范 |
 | v2.3 | 2026-05-19 | 修复增量路径 rolling_ic_mean NaN 处理缺失（显式转换 NaN → None）+ 补充 MODULE.md 两条路径一致性要求 |
 | v2.4 | 2026-05-19 | 修复增量路径 ic_metrics 缺少 p_value/p_value_display 字段（KeyError）+ 补充 MODULE.md ic_metrics 字段规范 |
+| v3.8 | 2026-05-20 | 修复异常链风格不一致（ValueError 裸 raise 补充注释）+ 补充 MODULE.md 异常链保留规范 |
 | v3.7 | 2026-05-20 | 修复静默吞掉异常问题（区分严重错误和可恢复错误）+ 补充 MODULE.md 异常处理必须区分严重错误和可恢复错误规范 |
-| v3.6 | 2026-05-20 | 修复增量路径空列表 IndexError（检查 all_dates 长度）+ 补充 MODULE.md 列表索引访问前必须检查长度规范 |
 
 ---
 
-*最后更新: 2026-05-20 02:00:00 (北京时间)*
+*最后更新: 2026-05-20 02:10:00 (北京时间)*
