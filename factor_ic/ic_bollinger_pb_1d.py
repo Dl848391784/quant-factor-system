@@ -719,6 +719,7 @@ def _incremental_update(
         'positive_ratio': round(result['positive_ratio'], 4),
         'n_assets': factor_df_full['asset'].nunique(),
         'summary': result['summary'],
+        'factor_stats': factor_stats,  # 因子统计信息（与全量路径一致）
         'update_mode': 'incremental',
         'incremental_days': len(new_dates)
     }

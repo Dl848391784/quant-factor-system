@@ -1580,6 +1580,119 @@ merged_data = {
 
 ---
 
+## 增量路径返回结构一致性规范
+
+### 核心原则
+
+**增量路径返回结构必须与全量路径完全一致，禁止遗漏字段。**
+
+### 问题背景
+
+```
+两条路径返回结构对比：
+
+全量路径返回字段：
+- factor_name ✓
+- calculation_date ✓
+- period ✓
+- ic_metrics ✓
+- sample_stats ✓
+- statistical_significance ✓
+- factor_direction ✓
+- economic_significance ✓
+- dates ✓
+- ic_values ✓
+- rolling_ic_mean ✓
+- positive_ratio ✓
+- n_assets ✓
+- summary ✓
+- factor_stats ✓  ← 全量路径包含
+- update_mode ✓
+
+增量路径返回字段：
+- ...（与全量相同）
+- factor_stats ✗  ← 增量路径可能缺失！
+- update_mode ✓
+- incremental_days ✓
+```
+
+### 正确实现
+
+```python
+# ✓ 正确：增量路径包含所有字段（与全量路径一致）
+merged_data = {
+    'factor_name': 'xxx',
+    'calculation_date': 'xxx',
+    'period': {...},
+    'ic_metrics': {...},
+    'sample_stats': {...},
+    'statistical_significance': {...},
+    'factor_direction': {...},
+    'economic_significance': {...},
+    'dates': all_dates,
+    'ic_values': all_ic_values,
+    'rolling_ic_mean': rolling_ic_mean,
+    'positive_ratio': xxx,
+    'n_assets': xxx,
+    'summary': {...},
+    'factor_stats': factor_stats,  # ✓ 必须包含（与全量路径一致）
+    'update_mode': 'incremental',
+    'incremental_days': xxx
+}
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：增量路径缺少 factor_stats
+merged_data = {
+    'factor_name': 'xxx',
+    # ... 其他字段 ...
+    'summary': {...},
+    'update_mode': 'incremental',  # 缺少 factor_stats！
+    'incremental_days': xxx
+}
+
+# 问题：
+# - 全量路径包含 factor_stats（因子计算统计信息）
+# - 增量路径缺失 factor_stats
+# - 两种模式返回结构不一致
+# - 下游代码读取 factor_stats 时在增量模式下会 KeyError
+```
+
+### 为何必须结构一致
+
+1. **下游依赖：** 前端或其他分析代码可能读取 `factor_stats` 字段
+2. **接口一致性：** 同一函数的两种模式应返回相同结构
+3. **类型安全：** 避免 KeyError 或字段缺失导致的运行时错误
+4. **维护成本：** 结构一致降低代码复杂度和排查难度
+
+### 全量/增量路径字段一致性验证
+
+| 字段 | 全量路径 | 增量路径 | 是否必须 |
+|------|---------|---------|---------|
+| factor_name | ✓ | ✓ | ✓ |
+| calculation_date | ✓ | ✓ | ✓ |
+| period | ✓ | ✓ | ✓ |
+| ic_metrics | ✓ | ✓ | ✓ |
+| sample_stats | ✓ | ✓ | ✓ |
+| statistical_significance | ✓ | ✓ | ✓ |
+| factor_direction | ✓ | ✓ | ✓ |
+| economic_significance | ✓ | ✓ | ✓ |
+| dates | ✓ | ✓ | ✓ |
+| ic_values | ✓ | ✓ | ✓ |
+| rolling_ic_mean | ✓ | ✓ | ✓ |
+| positive_ratio | ✓ | ✓ | ✓ |
+| n_assets | ✓ | ✓ | ✓ |
+| summary | ✓ | ✓ | ✓ |
+| factor_stats | ✓ | ✓ | ✓ 必须包含！ |
+| update_mode | ✓ | ✓ | ✓ |
+| incremental_days | ✗ | ✓ | 增量路径特有 |
+
+**关键：** 增量路径必须在构建 `merged_data` 时添加 `factor_stats` 字段，与全量路径保持结构一致。
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |
