@@ -440,6 +440,16 @@ ic = calculate_rank_ic(df['factor_value'], df['future_return'])
 
 ## 流程文档规范
 
+### 流程文档创建时机
+
+**强制规则：** 新建 `ic_xxx.py` 脚本时，必须同步创建 `docs/ic_xxx_flow.md`。
+
+**禁止行为：**
+- ❌ 只写代码不写流程文档
+- ❌ 流程文档滞后于代码修改
+
+---
+
 ### 流程文档位置
 
 **路径：** `factor_ic/docs/ic_<因子名>_<周期>_flow.md`
@@ -467,6 +477,369 @@ factor_ic/docs/ic_volume_ratio_1d_flow.md
 - 代码修改 → 版本号递增（v1.0 → v1.1）
 - 规范变更 → 更新内容说明
 - 每次更新 → 同步更新所有时间标注
+
+---
+
+## NaN 处理规范
+
+**核心原则：** NaN → None 转换应在数据生成阶段完成。
+
+**正确实现：**
+```python
+# 使用 pd.isna(v) 检查 NaN
+# NaN → None（语义转换："无有效数据"）
+rolling_ic_mean = [
+    round(v, 6) if not pd.isna(v) else None
+    for v in rolling_mean.values
+]
+```
+
+**为何必须在数据生成阶段处理：**
+1. 语义一致性：None 表示"无有效数据"，nan 是浮点数运算结果
+2. 增量路径用 None 填充无效日期，全量路径用 NaN 填充不满 min_periods 的日期
+3. 若延迟到 convert_to_native_types 处理，语义不一致
+4. JSON 序列化时 None → null，标准 JSON 不支持 nan
+
+---
+
+## ic_series 排序规范
+
+**核心原则：** ic_series.index 必须按日期升序排列。
+
+**显式排序：**
+```python
+ic_series = ic_series.sort_index()
+```
+
+**防御性校验：**
+```python
+if dates != sorted(dates):
+    raise RuntimeError("dates 未按升序排列")
+```
+
+**为何必须显式排序：**
+1. rolling 计算按位置顺序，而非 index 值顺序
+2. 若 ic_series.index 乱序 → dates 与 rolling_ic_mean 对应错误
+3. pandas groupby 默认 sort=True，但不应依赖隐式行为
+4. 版本升级风险：pandas 可能改变默认行为
+5. 增量路径合并后可能乱序
+
+---
+
+## 函数返回值契约规范
+
+**核心原则：** 调用方必须校验返回值字段存在性。
+
+**正确实现：**
+```python
+# 定义必需字段列表
+required_fields = [
+    'ic_series', 'ic_mean', 'ic_std', 'icir',
+    'statistical_significance', 'factor_direction',
+    'economic_significance', 'icir_stability',
+    'ic_distribution_consistency', 'positive_ratio', 'summary'
+]
+
+# 检查缺失字段
+missing_fields = [f for f in required_fields if f not in result]
+
+# 若缺失字段 → 抛出 RuntimeError
+if missing_fields:
+    raise RuntimeError(
+        f"calculate_ic_with_direction_verification 返回值缺少必需字段\n"
+        f"缺失字段: {missing_fields}\n"
+        f"问题定位: factor_ic/common/ic_calculator.py\n"
+        f"期望字段: {required_fields}"
+    )
+```
+
+**为何必须校验返回值字段：**
+1. 直接下标访问 result['field'] 会抛出 KeyError
+2. KeyError 错误信息无法判断问题模块
+3. 函数返回值结构变更时，调用方静默失败
+4. 校验后的 RuntimeError 包含：缺失字段列表、问题定位、期望字段列表
+
+---
+
+## 增量计算 None 处理规范
+
+**核心原则：** 增量计算中 None（股票数不足）的处理必须与全量计算保持一致。
+
+**None 语义定义：**
+
+| None 来源 | 语义 | 是否存储 |
+|----------|------|---------|
+| `calculate_single_day_ic` 返回 None | 股票数 < min_stocks | **不存储**（过滤） |
+| 全量计算中 ic_series.index | 只有有效 IC 日期 | 不含 None |
+| 增量计算中 new_ic_values | 可能含 None | **过滤后存储** |
+
+**正确实现：**
+```python
+# 合并数据时过滤 None
+date_ic_map = {}
+for date, ic in zip(existing_dates, existing_ic_values):
+    if ic is not None:  # 兼容旧缓存：过滤可能存在的 None
+        date_ic_map[date] = ic
+
+for date, ic in zip(new_dates, new_ic_values):
+    if ic is not None:  # 只写入有效 IC 值
+        date_ic_map[date] = ic
+```
+
+---
+
+## 全量/增量 IC 计算等价性规范
+
+**核心原则：** 全量计算与增量计算必须使用同一核心函数（calculate_single_day_ic）。
+
+**等价性验证三重保障机制：**
+
+| 保障层 | 机制 | 说明 |
+|-------|------|------|
+| 第一层：代码架构 | 设计原则 | 全量/增量调用同一函数，无法独立演化 |
+| 第二层：单元测试 | TestAlgorithmEquivalence | 验证单日期、多日期、边界情况等价性 |
+| 第三层：文档规范 | Step 4.5 规范 | 修改核心函数时必须检查等价性 |
+
+**禁止行为：**
+```python
+# ❌ 禁止：增量计算不使用 calculate_single_day_ic
+for date in missing_dates:
+    ic_value = scipy.stats.spearmanr(factor_values, return_values)[0]  # 错误！
+
+# ✓ 正确：增量计算使用 calculate_single_day_ic
+for date in missing_dates:
+    ic_value = calculate_single_day_ic(
+        daily_data,
+        factor_col='rsi_6',
+        return_col='forward_return',
+        min_stocks=10
+    )
+```
+
+---
+
+## 旧缓存兼容性处理规范
+
+**核心原则：** 增量计算读取现有缓存时，必须兼容旧版本缓存数据。
+
+**问题背景：**
+- v1.32 之前版本：ic_values 可能包含 None（未过滤股票数不足）
+- 增量更新读取现有缓存 → existing_ic_values 可能包含 None
+
+**兼容性处理：**
+```python
+# 合并数据时，existing 和 new 都过滤 None（语义一致）
+for date, ic in zip(existing_dates, existing_ic_values):
+    if ic is not None:  # 兼容旧缓存：过滤可能存在的 None
+        date_ic_map[date] = ic
+```
+
+---
+
+## 返回值标记规范
+
+**核心原则：** 三种模式返回值必须标记 update_mode 字段。
+
+**返回值标记设计：**
+
+| 场景 | update_mode | 附加字段 | 调用方判断逻辑 |
+|------|------------|---------|---------------|
+| 正常 skip | `'skip'` | 无 | `update_mode == 'skip'` → 从缓存读取 |
+| skip-fallback | `'full'` | `fallback_event` | `update_mode == 'full' && 'fallback_event' in result` → 意外触发全量 |
+| 正常 incremental | `'incremental'` | `incremental_events` | `update_mode == 'incremental'` → 增量更新 |
+| 正常 full | `'full'` | 无 | `update_mode == 'full' && 'fallback_event' not in result` → 正常全量 |
+
+**为何必须标记返回值：**
+1. mode='skip' 时读取缓存失败会 fallback 到全量计算
+2. fallback 后返回值与正常全量计算返回值结构相同
+3. 调用方无法区分来源
+4. 若全量计算耗时很长，调用方毫不知情
+
+---
+
+## 错误信息格式规范
+
+**核心原则：** 枚举类错误必须包含合法值列表。
+
+**正确示例：**
+```python
+raise RuntimeError(
+    f"未知模式: {mode}\n"
+    f"合法值: ['skip', 'incremental', 'full']"
+)
+```
+
+**错误信息对比：**
+
+| 场景 | 未校验（KeyError） | 已校验（RuntimeError） |
+|-----|-------------------|----------------------|
+| 错误信息 | `KeyError: 'ic_mean'` | `缺少必需字段: ['ic_mean']\n问题定位: factor_ic/common/ic_calculator.py` |
+| 问题定位 | 无法判断 | 明确模块路径 |
+| 排查效率 | 低 | 高 |
+
+---
+
+## 字典构建规范
+
+**核心原则：** 字段应集中定义在构建阶段，避免分散赋值。
+
+**禁止行为：**
+```python
+# ❌ 禁止：分散赋值
+result = {}
+result['ic_mean'] = ic_mean
+result['ic_std'] = ic_std
+# ... 后面又赋值
+result['update_mode'] = 'full'  # 分散，容易重复
+```
+
+**正确做法：**
+```python
+# ✓ 正确：集中定义
+result = {
+    'ic_mean': ic_mean,
+    'ic_std': ic_std,
+    'icir': icir,
+    'update_mode': 'full',  # 集中定义
+}
+```
+
+---
+
+## 输出字段口径规范
+
+**核心原则：** 统计字段必须明确口径范围。
+
+**正确实现：**
+```json
+{
+  "avg_stocks_per_day": 4235.2,
+  "avg_stocks_period": {
+    "start": "2024-01-01",
+    "end": "2024-12-31",
+    "description": "平均每日有效股票数统计范围"
+  }
+}
+```
+
+**为何必须明确口径：**
+- avg_stocks_per_day 基于 dropna 后数据
+- total_days 基于 dropna 前数据
+- 口径不同导致数值差异，必须通过字段说明
+
+---
+
+## 代码维护同步检查规范
+
+**核心原则：** 添加新代码后必须检查旧代码是否冗余。
+
+**检查清单：**
+```
+□ 新增字段 → 检查是否有重复赋值
+□ 新增函数 → 检查是否有类似功能函数可合并
+□ 新增逻辑 → 检查是否有冗余分支
+□ 新增参数 → 检查是否有硬编码值可替换
+```
+
+---
+
+## 函数签名变更同步规范
+
+**核心原则：** 返回值变更时必须同步更新类型注解和 docstring。
+
+**正确示例：**
+```python
+def load_data_from_cache(...) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """
+    Returns:
+        factor_df: 过滤后的因子数据
+        return_df: 过滤后的收益数据
+        raw_metadata: 原始数据范围信息（新增）
+    """
+```
+
+**禁止行为：**
+- ❌ 只改返回值不改类型注解
+- ❌ 只改返回值不改 docstring
+
+---
+
+## 参数类型约定规范
+
+**核心原则：** output_file 统一转为 Path 对象。
+
+**正确实现：**
+```python
+def generate_rsi_ic_data(output_file=None):
+    if output_file is None:
+        output_file = get_ic_output_path('rsi_1d')  # 返回 Path
+    else:
+        output_file = Path(output_file)  # str → Path
+```
+
+**为何必须统一类型：**
+- Path 对象可安全使用 .parent.mkdir()
+- str 对象需要额外处理
+- 统一类型避免后续代码类型判断
+
+---
+
+## 统计显著性判断规范
+
+**五维度判断（独立输出，不合并）：**
+
+| 维度 | 判断规则 | 输出字段 |
+|------|---------|---------|
+| 维度1: 统计显著性 | p < 0.05（与 |t| > 1.96 等价） | is_significant, nw_lag |
+| 维度2: 因子方向 | ic_mean 符号判断 | factor_direction |
+| 维度3: 经济显著性 | |ic_mean| >= 0.05 → strong; >= 0.03 → weak | economic_significance |
+| 维度4: ICIR稳定性 | ICIR >= 2.0 → excellent; >= 1.0 → good | icir_stability |
+| 维度5: IC分布一致性 | positive_ratio 与 ic_mean_sign 匹配 | is_consistent, consistency_type |
+
+---
+
+## IC分布一致性判断边界规范
+
+**判断规则（含优先级）：**
+
+| 优先级 | 条件 | 输出 |
+|-------|------|------|
+| 1（最高） | ic_mean_sign = 'zero' | balanced |
+| 2 | 正向因子 positive_ratio >= 50% | consistent |
+| 2 | 反向因子 positive_ratio <= 50% | consistent |
+| 3 | positive_ratio ∈ [49%, 51%]（闭区间） | balanced |
+| 4 | 其他情况 | contradictory |
+
+**边界示例：**
+- 正向因子 49% → balanced（优先级3）
+- 正向因子 50% → consistent（优先级2）
+- 反向因子 50% → consistent（优先级2）
+- 反向因子 51% → balanced（优先级3）
+
+---
+
+## 增量模式 period 语义规范
+
+**核心原则：** period.start/end 必须基于原始缓存数据（dropna 前）。
+
+**正确实现：**
+```python
+# 在 dropna 之前，先计算原始数据范围
+raw_period_start = factor_df['date'].min()
+raw_period_end = factor_df['date'].max()
+raw_total_days = factor_df['date'].nunique()
+
+# 然后 dropna
+factor_df = factor_df.dropna()
+
+# 返回过滤后的数据 + raw_metadata
+return factor_df, return_df, {'period_start': raw_period_start, ...}
+```
+
+**为何必须使用原始数据：**
+- dropna 可能过滤掉某些日期的全部股票
+- factor_df['date'].min()/max() 计算的是过滤后的范围
+- 与语义定义冲突："原始缓存覆盖范围" ≠ "过滤后的数据范围"
 
 ---
 
