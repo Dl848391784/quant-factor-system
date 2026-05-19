@@ -701,6 +701,88 @@ ic_series = pd.Series(valid_ic, index=valid_dates)
 
 ---
 
+## 函数参数设计规范
+
+### 核心原则
+**函数签名不应有冗余参数，每个参数必须有实际用途。**
+
+### 冗余参数判定规则
+```python
+# ❌ 禁止：参数永远不被传入，永远使用默认值
+def calculate_daily_ic_series(
+    factor_df,
+    return_df,
+    raw_metadata,
+    min_stocks=10,
+    period_start=None,  # 永远不传入
+    period_end=None     # 永远不传入
+):
+    if period_start is None:  # 永远为 True
+        period_start = str(factor_df['date'].min())
+
+# ✓ 正确：删除冗余参数，直接使用已有数据
+def calculate_daily_ic_series(
+    factor_df,
+    return_df,
+    raw_metadata,
+    min_stocks=10
+):
+    period_start = raw_metadata['period_start']  # 直接使用
+```
+
+### 设计原则
+1. **参数必要性：** 每个参数必须被实际传入或有明确的默认值语义
+2. **数据源优先：** 如果已有数据结构包含所需信息，应直接使用，不应添加额外参数
+3. **语义一致性：** 参数语义应与数据源语义一致，不应混用不同来源的数据
+4. **接口简洁：** 函数签名应尽可能简洁，避免不必要的复杂度
+
+---
+
+## period.start/end 语义规范
+
+### 核心原则
+**period.start/end 表示原始缓存范围（dropna 前），而非过滤后范围。**
+
+### 语义定义
+
+| 字段 | 来源 | 语义 | 示例 |
+|------|------|------|------|
+| `raw_metadata['period_start']` | 原始缓存 dropna 前 | 原始数据最小日期 | 2024-01-01 |
+| `raw_metadata['period_end']` | 原始缓存 dropna 前 | 原始数据最大日期 | 2026-05-15 |
+| `factor_df['date'].min()` | 过滤后数据 | 过滤后最小日期 | 2024-01-20 |
+| `factor_df['date'].max()` | 过滤后数据 | 过滤后最大日期 | 2026-05-15 |
+
+### 差异原因
+```
+原始缓存范围：2024-01-01 ~ 2026-05-15
+dropna 后范围：2024-01-20 ~ 2026-05-15
+
+差异：前19天布林带 NaN 被过滤
+```
+
+### 正确使用
+```python
+# ✓ 正确：使用 raw_metadata 表示原始缓存范围
+period_start = raw_metadata['period_start']  # 2024-01-01
+period_end = raw_metadata['period_end']      # 2026-05-15
+
+# ❌ 禁止：使用 factor_df 表示原始缓存范围（语义错误）
+period_start = str(factor_df['date'].min())  # 2024-01-20（错误！）
+```
+
+### 输出规范
+**IC 计算结果的 period 字段应表示原始缓存范围：**
+```json
+{
+  "period": {
+    "start": "2024-01-01",  // 原始缓存最小日期
+    "end": "2026-05-15"     // 原始缓存最大日期
+  }
+}
+```
+
+---
+
 ## 函数返回值契约规范
 
 **核心原则:** 调用方必须校验返回值字段存在性。

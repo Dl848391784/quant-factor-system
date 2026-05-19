@@ -1,8 +1,8 @@
 # Bollinger_PB_1D IC 计算流程文档
 
-> 生成时间: 2026-05-19 23:25 (北京时间)
-> 实测数据时间: 2026-05-19 23:25 (北京时间)
-> 审阅版本: v1.9
+> 生成时间: 2026-05-19 23:30 (北京时间)
+> 实测数据时间: 2026-05-19 23:30 (北京时间)
+> 审阅版本: v2.0
 > 更新内容:
 >   1. 初始版本：参照 ic_rsi_1d.py v1.52 规范创建
 >   2. 修复异常处理类型错误：ValueError 直接 raise，不包装为 RuntimeError
@@ -27,6 +27,7 @@
 >   21. 修复完成信息字段错误：从 total_days 改为 valid_days，遵循 MODULE.md 打印信息规范
 >   22. 补充 MODULE.md ic_series.index 类型规范（字符串而非 datetime），明确两条路径一致性保障
 >   23. 修复 %B 计算 NaN 处理缺失：添加 diff.isna() 判断，遵循 MODULE.md %B 计算规范
+>   24. 删除冗余参数 period_start/period_end：直接使用 raw_metadata，遵循 MODULE.md 函数参数设计规范 + period.start/end 语义规范
 
 ---
 
@@ -373,6 +374,7 @@ python factor_ic/ic_bollinger_pb_1d.py --force-full
 | v1.7 | 2026-05-19 | 修复 _incremental_update 缺失 rolling_ic_mean 字段 + 修复完成信息字段错误（total_days → valid_days），补充 MODULE.md 增量更新返回数据规范 |
 | v1.8 | 2026-05-19 | 补充 MODULE.md ic_series.index 类型规范（字符串而非 datetime），明确两条路径一致性保障 |
 | v1.9 | 2026-05-19 | 修复 %B 计算 NaN 处理缺失 + 补充 MODULE.md %B 计算规范 |
+| v2.0 | 2026-05-19 | 删除冗余参数 period_start/period_end + 补充 MODULE.md 函数参数设计规范 + period.start/end 语义规范 |
 
 ---
 

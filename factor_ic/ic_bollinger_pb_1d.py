@@ -305,9 +305,7 @@ def calculate_daily_ic_series(
     factor_df: pd.DataFrame,
     return_df: pd.DataFrame,
     raw_metadata: dict,
-    min_stocks: int = 10,
-    period_start: str = None,
-    period_end: str = None
+    min_stocks: int = 10
 ) -> dict:
     """
     计算每日的 IC 时间序列
@@ -320,11 +318,13 @@ def calculate_daily_ic_series(
             - period_end: 原始缓存最大日期
             - total_days: 原始缓存日期数
         min_stocks: 最小股票数阈值（遵循 PROJECT.md 参数传递规范）
-        period_start: 数据起始日期
-        period_end: 数据结束日期
     
     返回:
         dict: IC 计算结果（符合 PROJECT.md 五维度判断规范）
+    
+    注意:
+        period.start/end 直接使用 raw_metadata，不从 factor_df 推断
+        原因：raw_metadata 表示原始缓存范围（dropna 前），factor_df 表示过滤后范围
     """
     # 使用 IC 计算（支持因子方向验证）
     result = calculate_ic_with_direction_verification(
@@ -366,11 +366,9 @@ def calculate_daily_ic_series(
             f"请检查 calculate_ic_with_direction_verification 返回值"
         )
     
-    # 获取日期范围
-    if period_start is None:
-        period_start = str(factor_df['date'].min())
-    if period_end is None:
-        period_end = str(factor_df['date'].max())
+    # 获取日期范围（直接使用 raw_metadata，遵循 PROJECT.md 输出字段语义规范）
+    period_start = raw_metadata['period_start']
+    period_end = raw_metadata['period_end']
     
     # 转换为 JSON 友好格式
     dates = [str(d) for d in ic_series.index]
