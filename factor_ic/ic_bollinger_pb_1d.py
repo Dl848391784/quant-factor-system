@@ -691,7 +691,7 @@ def _incremental_update(
     if skipped_new_ic > 0:
         print(f"  - {skipped_new_ic} 天因股票数不足跳过")
     
-# 合并数据
+    # 合并数据（遵循 MODULE.md 注释缩进一致性规范）
     print("\n[4/4] 合并数据并重新计算统计指标...")
     
     # 检查重叠
