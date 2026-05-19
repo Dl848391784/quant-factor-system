@@ -2007,6 +2007,102 @@ def calculate_ic_statistics(ic_series: pd.Series) -> dict:
 
 ---
 
+## 布林带因子必须加载 close 列规范
+
+### 核心原则
+
+**布林带因子依赖 close 价格计算，load_data_from_cache 必须强制加载和过滤 'close' 列，无论 factor_col 参数值为何。**
+
+### 问题背景
+
+```
+设计缺陷问题：
+
+旧代码（错误）：
+```python
+factor_cols = ['date', 'asset', factor_col]  # ✗ 如果 factor_col != 'close'，不包含 'close'
+factor_df = factor_df[factor_cols].copy()
+
+factor_df.dropna(subset=[factor_col])  # ✗ 只过滤 factor_col 的 NaN，不过滤 'close'
+```
+
+问题后果：
+- 如果调用方传入 factor_col='volume'（或其他非 'close'）
+- close 列不会被加载和过滤
+- 原始缓存中 close 有 NaN 的行不会被过滤
+- 后续布林带计算需要 close 列 → KeyError 或 NaN 值传播
+
+示例场景：
+- 原始缓存: {"date": "2024-01-02", "close": null, "volume": 500000}
+- 调用 load_data_from_cache(factor_col='volume')
+- factor_cols = ['date', 'asset', 'volume']（不包含 'close'）
+- dropna(subset=['volume']) 不过滤 close=null 的行
+- 后续布林带计算: close 列不存在 → KeyError
+- 或如果 close 列存在但未被过滤: close=null → NaN 值传播
+```
+
+### 正确实现
+
+```python
+# ✓ 正确：强制加载 'close' 列（布林带依赖）
+factor_cols = ['date', 'asset']
+if factor_col not in factor_cols:
+    factor_cols.append(factor_col)
+if 'close' not in factor_cols:  # 强制加载 'close' 列
+    factor_cols.append('close')
+
+factor_df = factor_df[factor_cols].copy()
+
+# ✓ 正确：强制过滤 'close' 列的 NaN
+dropna_cols = ['close']  # 布林带因子必须过滤 close 列
+if factor_col not in dropna_cols:
+    dropna_cols.append(factor_col)
+
+factor_df = factor_df.dropna(subset=dropna_cols).reset_index(drop=True)
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：只加载 factor_col 列，不强制加载 'close'
+factor_cols = ['date', 'asset', factor_col]  # ✗ 如果 factor_col != 'close'，不包含 'close'
+
+# ❌ 禁止：只过滤 factor_col 的 NaN，不过滤 'close'
+factor_df.dropna(subset=[factor_col])  # ✗ close 列的 NaN 未被过滤
+
+# 问题：
+# - 布林带计算需要 close 列
+# - close 有 NaN 的行未被过滤
+# - NaN 值传播到布林带计算
+```
+
+### 为何必须强制加载 close 列
+
+1. **布林带公式依赖 close**：布林带%B = (close - lower) / (upper - lower)
+2. **close 有 NaN 必须过滤**：NaN 值传播会导致布林带计算产生 NaN
+3. **防御性设计**：即使调用方传入错误的 factor_col，也能确保 close 列被正确加载
+4. **避免 KeyError**：后续布林带计算需要 close 列，必须提前加载
+
+### 适用范围
+
+此规范适用于所有依赖 close 价格的因子脚本：
+1. **布林带 %B**：依赖 close 计算布林带上下轨
+2. **RSI**：依赖 close 计算价格变动
+3. **KDJ**：依赖 close 计算 J 值
+4. **任何需要 close 价格的技术指标**
+
+### 检查清单
+
+```
+□ 强制加载 'close' 列（无论 factor_col 参数）
+□ 强制过滤 'close' 列的 NaN
+□ 同时过滤 factor_col 的 NaN（调用方指定的因子列）
+□ 提供诊断信息（显示过滤的列）
+□ 确保布林带计算所需列存在
+```
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |

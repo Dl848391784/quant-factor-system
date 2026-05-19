@@ -143,8 +143,15 @@ def load_data_from_cache(
             f"可用因子列: {available_cols}"
         )
     
-    # 选择需要的列（因子数据需要 close 价格）
-    factor_cols = ['date', 'asset', factor_col]
+    # 选择需要的列（遵循 MODULE.md 布林带因子必须加载 close 列规范）
+    # 核心原则：布林带因子依赖 close 价格，必须加载和过滤 close 列
+    # 即使 factor_col 不是 'close'，也要强制加载 'close' 列
+    factor_cols = ['date', 'asset']
+    if factor_col not in factor_cols:
+        factor_cols.append(factor_col)
+    if 'close' not in factor_cols:  # 强制加载 'close' 列（布林带依赖）
+        factor_cols.append('close')
+    
     factor_df = factor_df[factor_cols].copy()
     
     # 输入验证：检查收益列是否存在
@@ -167,10 +174,16 @@ def load_data_from_cache(
     print(f"  - 原始数据范围: {raw_period_start} ~ {raw_period_end}, {raw_total_days} 个交易日")
     
     # 过滤缺失值（遵循 PROJECT.md 数据过滤后索引处理规范）
-    factor_df = factor_df.dropna(subset=[factor_col]).reset_index(drop=True)
+    # 核心原则：布林带因子依赖 close 价格，必须过滤 close 列的 NaN
+    # 同时过滤 factor_col 的 NaN（调用方指定的因子列）
+    dropna_cols = ['close']  # 布林带因子必须过滤 close 列
+    if factor_col not in dropna_cols:
+        dropna_cols.append(factor_col)
+    
+    factor_df = factor_df.dropna(subset=dropna_cols).reset_index(drop=True)
     return_df = return_df.dropna(subset=['forward_return']).reset_index(drop=True)
     
-    print(f"  - 过滤缺失值后: 因子 {len(factor_df)} 行, 收益 {len(return_df)} 行")
+    print(f"  - 过滤缺失值后: 因子 {len(factor_df)} 行（过滤列: {dropna_cols}），收益 {len(return_df)} 行")
     
     # 返回过滤后的数据 + 原始数据元信息
     return factor_df, return_df, {
