@@ -565,11 +565,10 @@ def _full_recalculate(
     print(f"\n[2/3] 计算布林带%B 因子...")
     factor_df, factor_stats = calculate_bollinger_pb_1d_factor(factor_df, n=n, k=k)
     
-    # 合并因子和收益数据
-    print(f"\n[合并] 合并因子和收益数据...")
+    # 选择必要列（遵循 MODULE.md 数据传递规范）
+    # 注意：不在此处合并数据，合并操作在 calculate_ic_with_direction_verification 内部完成
+    # 原因：calculate_ic_with_direction_verification 接收未合并的 factor_df 和 return_df
     factor_df = factor_df[['date', 'asset', 'bollinger_pb_1d']].copy()
-    merged_df = pd.merge(factor_df, return_df, on=['date', 'asset'], how='inner')
-    print(f"  - 合并后: {len(merged_df)} 行")
     
     # 计算 IC
     print(f"\n[3/3] 计算每日 IC...")

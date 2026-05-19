@@ -1,8 +1,8 @@
 # Bollinger_PB_1D IC 计算流程文档
 
-> 生成时间: 2026-05-19 22:15 (北京时间)
-> 实测数据时间: 2026-05-19 22:15 (北京时间)
-> 审阅版本: v1.3
+> 生成时间: 2026-05-19 22:30 (北京时间)
+> 实测数据时间: 2026-05-19 22:30 (北京时间)
+> 审阅版本: v1.4
 > 更新内容: 
 >   1. 初始版本：参照 ic_rsi_1d.py v1.52 规范创建
 >   2. 修复异常处理类型错误：ValueError 直接 raise，不包装为 RuntimeError
@@ -20,6 +20,7 @@
 >   14. 添加函数返回值契约校验：校验 calculate_ic_with_direction_verification 返回字段（遵循 MODULE.md 函数返回值契约规范）
 >   15. 添加 ic_series 显式排序：ic_series.sort_index() + 防御性校验（遵循 MODULE.md ic_series 排序规范）
 >   16. 添加 NaN → None 处理：rolling_ic_mean 在数据生成阶段处理 NaN（遵循 MODULE.md NaN 处理规范）
+>   17. 删除死代码 merged_df：遵循 MODULE.md 数据传递规范，不在调用 calculate_ic_with_direction_verification 前合并数据
 
 ---
 
@@ -350,6 +351,7 @@ python factor_ic/ic_bollinger_pb_1d.py --force-full
 | v1.1 | 2026-05-19 | 添加增量模式，命令行参数 --force-full |
 | v1.2 | 2026-05-19 | 添加日期类型转换（遵循 PROJECT.md 日期类型一致性规范），添加输入验证（遵循 PROJECT.md 输入验证规范） |
 | v1.3 | 2026-05-19 | 添加函数返回值契约校验（遵循 MODULE.md 规范），添加 ic_series 显式排序（遵循 MODULE.md 规范），添加 NaN → None 处理（遵循 MODULE.md 规范） |
+| v1.4 | 2026-05-19 | 删除死代码 merged_df，补充 MODULE.md 数据传递规范 |
 
 ---
 

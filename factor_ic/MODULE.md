@@ -438,6 +438,47 @@ ic = calculate_rank_ic(df['factor_value'], df['future_return'])
 
 ---
 
+### 数据传递规范（calculate_ic_with_direction_verification）
+
+**核心原则：** calculate_ic_with_direction_verification 接收未合并的 factor_df 和 return_df，内部负责合并。
+
+**函数设计意图：**
+
+```
+calculate_ic_with_direction_verification(factor_df, return_df, ...)
+    ↓
+内部执行：
+    1. 验证列存在性
+    2. 选择必要列 [date, asset, factor_col] 和 [date, asset, return_col]
+    3. 执行 pd.merge(..., how='inner')
+    4. dropna 处理
+    5. 计算每日 IC
+```
+
+**禁止行为：**
+```python
+# ❌ 禁止：在调用前合并数据（死代码）
+merged_df = pd.merge(factor_df, return_df, on=['date', 'asset'], how='inner')
+result = calculate_ic_with_direction_verification(factor_df, return_df, ...)
+# merged_df 未被使用，是死代码
+```
+
+**正确做法：**
+```python
+# ✓ 正确：直接传递未合并的数据
+factor_df = factor_df[['date', 'asset', 'factor_col']].copy()
+result = calculate_ic_with_direction_verification(factor_df, return_df, ...)
+# 合并在函数内部完成
+```
+
+**为何禁止提前合并：**
+1. 函数设计意图明确：接收未合并数据，内部负责合并
+2. 提前合并的 merged_df 无法传递给函数（函数需要两个独立 DataFrame）
+3. 提前合并会产生死代码，误导读者认为"合并数据用于IC计算"
+4. 函数内部需要验证列存在性、选择必要列、dropna 处理
+
+---
+
 ## 流程文档规范
 
 ### 流程文档创建时机
