@@ -1,10 +1,11 @@
 # Bollinger_PB_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 01:00 (北京时间)
-> 实测数据时间: 2026-05-20 01:00 (北京时间)
-> 审阅版本: v3.1
+> 生成时间: 2026-05-20 01:10 (北京时间)
+> 实测数据时间: 2026-05-20 01:10 (北京时间)
+> 审阅版本: v3.2
 > 更新内容:
 >   ...
+>   37. 修复增量路径因子值有效性检查缺失：添加 bollinger_pb_1d NaN 诊断 + 补充 MODULE.md 增量路径因子值有效性检查规范
 >   36. 修复 calculate_daily_ic_series required_fields 校验列表缺失 p_value/p_value_display + 补充 MODULE.md 函数返回值契约校验规范
 >   35. 修复增量路径 factor_stats 字段缺失：添加 factor_stats 到 merged_data + 补充 MODULE.md 增量路径返回结构一致性规范
 >   34. 修复增量路径 period 字段语义错误：直接使用 raw_metadata（与全量路径一致）+ 补充 MODULE.md 增量路径 period 字段规范
@@ -390,9 +391,9 @@ python factor_ic/ic_bollinger_pb_1d.py --force-full
 | v2.2 | 2026-05-19 | 修复缩进错误（IndentationError）：'icir' 和 'sample_stats' 字段缩进不一致 + 补充 MODULE.md 字典结构缩进规范 |
 | v2.3 | 2026-05-19 | 修复增量路径 rolling_ic_mean NaN 处理缺失（显式转换 NaN → None）+ 补充 MODULE.md 两条路径一致性要求 |
 | v2.4 | 2026-05-19 | 修复增量路径 ic_metrics 缺少 p_value/p_value_display 字段（KeyError）+ 补充 MODULE.md ic_metrics 字段规范 |
+| v3.2 | 2026-05-20 | 修复增量路径因子值有效性检查缺失 + 补充 MODULE.md 增量路径因子值有效性检查规范 |
 | v3.1 | 2026-05-20 | 修复 required_fields 校验列表缺失 p_value/p_value_display + 补充 MODULE.md 函数返回值契约校验规范 |
-| v3.0 | 2026-05-20 | 修复增量路径 factor_stats 字段缺失 + 补充 MODULE.md 增量路径返回结构一致性规范 |
 
 ---
 
-*最后更新: 2026-05-20 01:00:00 (北京时间)*
+*最后更新: 2026-05-20 01:10:00 (北京时间)*

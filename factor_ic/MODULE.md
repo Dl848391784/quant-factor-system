@@ -1785,6 +1785,101 @@ required_fields = [
 
 ---
 
+## 增量路径因子值有效性检查规范
+
+### 核心原则
+
+**增量路径必须检查缺失日期的因子值是否有效，避免静默产生大量 None IC值。**
+
+### 问题背景
+
+```
+布林带预热期问题：
+
+布林带计算需要前N-1日数据预热：
+- N=20，需要前19日数据
+- rolling(window=n, min_periods=n) 确保 前19天为 NaN
+- 缺失日期如果是缓存范围的前19天
+- bollinger_pb_1d 全为 NaN（即使 factor_df_new 不为空）
+
+示例场景：
+- 缓存范围：2024-01-01 ~ 2026-05-15
+- 缺失日期：2024-01-02（缓存范围第2天）
+- factor_df_new 有数据（日期、股票、close）
+- 但 bollinger_pb_1d 全为 NaN（只有1天历史数据，无法计算20日布林带）
+- calculate_single_day_ic 返回 None
+- 用户看不到诊断信息，不知道为什么跳过
+
+问题后果：
+- 静默产生大量 None IC值
+- 用户不知道跳过原因
+- 无法区分"股票数不足"和"因子值NaN"
+```
+
+### 正确实现
+
+```python
+# ✓ 正确：检查因子值有效性
+# 篛选缺失日期的数据
+factor_df_new = factor_df_full[factor_df_full['date'].isin(missing_set)]
+
+# 检查因子值有效性
+valid_factor_count = factor_df_new['bollinger_pb_1d'].notna().sum()
+total_factor_count = len(factor_df_new)
+
+if valid_factor_count == 0:
+    # 缺失日期的因子值全为 NaN（布林带预热期）
+    print(f"  [诊断] 缺失日期的因子值全为 NaN（可能因布林带预热期）")
+    print(f"  [诊断] 缺失日期: {sorted(factor_df_new['date'].unique())[:5]}")
+    print(f"  [建议] 这些日期需要更多历史数据才能计算布林带，跳过增量计算")
+    return existing_data
+
+print(f"  - 篛选后: {len(factor_df_new)} 行，其中 {valid_factor_count} 行有效因子值")
+if total_factor_count - valid_factor_count > 0:
+    print(f"  - {total_factor_count - valid_factor_count} 行因子值为 NaN（布林带预热期）")
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：只检查 factor_df_new 是否为空，不检查因子值有效性
+if factor_df_new.empty:
+    return existing_data
+
+print(f"  - 篛选后: {len(factor_df_new)} 行")  # ✗ 没有检查因子值是否有效！
+
+# 问题：
+# - factor_df_new 不为空，但 bollinger_pb_1d 可能全为 NaN
+# - 后续 calculate_single_day_ic 返回 None
+# - 用户看不到诊断信息，不知道跳过原因
+```
+
+### 为何必须检查因子值有效性
+
+1. **布林带预热期：** 技术指标需要历史数据预热，前N-1天因子值为 NaN
+2. **诊断信息清晰：** 告知用户跳过原因，而非静默产生 None
+3. **区分跳过原因：** 区分"数据缺失"、"股票数不足"、"因子值NaN"
+4. **提前返回：** 若全为 NaN，直接返回缓存，避免无效计算
+
+### 适用场景
+
+1. **布林带 %B**：N=20，前19天预热期
+2. **RSI**：N=6/14，前N-1天预热期
+3. **KDJ**：N=9，前N-1天预热期
+4. **任何需要历史数据的技术指标**
+
+### 检查清单
+
+```
+□ 检查 factor_df_new 是否为空（数据缺失）
+□ 检查因子值是否有效（notna().sum() > 0）
+□ 提供诊断信息（缺失日期示例）
+□ 区分不同跳过原因（数据缺失/因子值NaN/股票数不足）
+□ 提前返回缓存（避免无效计算）
+```
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |
