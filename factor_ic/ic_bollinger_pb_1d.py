@@ -630,23 +630,30 @@ def _incremental_update(
     if total_factor_count - valid_factor_count > 0:
         print(f"  - {total_factor_count - valid_factor_count} 行因子值为 NaN（布林带预热期）")
     
-    # 计算新日期的每日 IC
+    # 计算新日期的每日 IC（遵循 MODULE.md 增量路径向量化计算 IC 规范）
+    # 核心原则：先整体 merge，再按日期 groupby 计算，避免逐行循环性能问题
     print("\n[3/4] 计算新日期 IC...")
     new_dates = sorted(factor_df_new['date'].unique())
-    new_ic_values = []
     
-    for date in new_dates:
-        day_factor = factor_df_new[factor_df_new['date'] == date]
-        day_return = return_df_new[return_df_new['date'] == date]
+    # 向量化处理：先整体 merge（一次操作）
+    merged_new = factor_df_new.merge(return_df_new, on=['date', 'asset'], how='inner')
+    
+    # 检查 merge 后是否有数据
+    if merged_new.empty:
+        print("  [警告] merge 后无数据，所有日期因股票数不足跳过")
+        new_ic_values = [None] * len(new_dates)
+    else:
+        # 按日期分组计算 IC（向量化）
+        # 使用 groupby 避免逐行循环，提升性能约 N 倍（N 为 missing_dates 数）
+        ic_results = {}
+        for date, group in merged_new.groupby('date'):
+            ic_value = calculate_single_day_ic(
+                group, factor_col='bollinger_pb_1d', return_col='forward_return', min_stocks=min_stocks
+            )
+            ic_results[date] = round(ic_value, 6) if ic_value is not None else None
         
-        # 合并
-        merged = day_factor.merge(day_return, on=['date', 'asset'], how='inner')
-        
-        # 使用核心函数计算单日 IC（遵循 PROJECT.md 规范）
-        ic_value = calculate_single_day_ic(
-            merged, factor_col='bollinger_pb_1d', return_col='forward_return', min_stocks=min_stocks
-        )
-        new_ic_values.append(round(ic_value, 6) if ic_value is not None else None)
+        # 按日期顺序填充 IC 值（缺失日期填充 None）
+        new_ic_values = [ic_results.get(date) for date in new_dates]
     
     # 过滤 None 值
     valid_new_ic = [ic for ic in new_ic_values if ic is not None]

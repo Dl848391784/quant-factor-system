@@ -2687,6 +2687,135 @@ factor_df['bollinger_pb_1d'] = np.where(
 
 ---
 
+## 增量路径向量化计算 IC 规范
+
+### 核心原则
+
+**增量路径计算 IC 必须使用向量化处理：先整体 merge，再按日期 groupby 计算。禁止逐行循环做 DataFrame 过滤和 merge，这会导致严重性能问题。**
+
+### 问题背景
+
+```
+逐行循环性能问题：
+
+旧代码（低效）：
+```python
+for date in new_dates:
+    day_factor = factor_df_new[factor_df_new['date'] == date]  # ✗ 每次循环做 DataFrame 过滤
+    day_return = return_df_new[return_df_new['date'] == date]  # ✗ 每次循环做 DataFrame 过滤
+    
+    # 合并
+    merged = day_factor.merge(day_return, on=['date', 'asset'], how='inner')  # ✗ 每次循环做 merge
+    
+    # 计算 IC
+    ic_value = calculate_single_day_ic(merged, ...)
+    new_ic_values.append(...)
+```
+
+性能分析：
+- 当 missing_dates = 100 天时
+- 循环 100 次，每次做：
+  - 2次 DataFrame 过滤（扫描全表 O(n)）
+  - 1次 merge（O(m)）
+- 总性能：100 × (2n + m) = O(200n + 100m)
+- DataFrame 过滤每次扫描全表，非常低效
+
+示例场景：
+- missing_dates = 100 天
+- factor_df_new = 100,000 行（100天 × 1000股票）
+- 每次 DataFrame 过滤：扫描 100,000 行 → 找到 1000 行
+- 100 次循环 × 100,000 扫描 = 10,000,000 次操作
+- 性能极差，耗时显著增加
+```
+
+### 正确实现
+
+```python
+# ✓ 正确：向量化处理，先整体 merge
+# 计算新日期的每日 IC（遵循 MODULE.md 增量路径向量化计算 IC 规范）
+new_dates = sorted(factor_df_new['date'].unique())
+
+# 向量化处理：先整体 merge（一次操作）
+merged_new = factor_df_new.merge(return_df_new, on=['date', 'asset'], how='inner')
+
+# 检查 merge 后是否有数据
+if merged_new.empty:
+    print("  [警告] merge 后无数据，所有日期因股票数不足跳过")
+    new_ic_values = [None] * len(new_dates)
+else:
+    # 按日期分组计算 IC（向量化）
+    # 使用 groupby 避免逐行循环，提升性能约 N 倍
+    ic_results = {}
+    for date, group in merged_new.groupby('date'):
+        ic_value = calculate_single_day_ic(
+            group, factor_col='bollinger_pb_1d', return_col='forward_return', min_stocks=min_stocks
+        )
+        ic_results[date] = round(ic_value, 6) if ic_value is not None else None
+    
+    # 按日期顺序填充 IC 值（缺失日期填充 None）
+    new_ic_values = [ic_results.get(date) for date in new_dates]
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：逐行循环做 DataFrame 过滤
+for date in new_dates:
+    day_factor = factor_df_new[factor_df_new['date'] == date]  # ✗ 每次循环扫描全表
+
+# ❌ 禁止：逐行循环做 merge
+for date in new_dates:
+    merged = day_factor.merge(day_return, ...)  # ✗ 每次循环做 merge
+
+# ❌ 禁止：逐行循环计算 IC
+for date in new_dates:
+    ic_value = calculate_single_day_ic(merged, ...)  # ✗ 逐行循环
+
+# 问题：
+# - DataFrame 过滤每次扫描全表 O(n)
+# - 当 missing_dates 较多时（如100天），性能极差
+# - 总性能：N × (2n + m)，其中 N 为 missing_dates 数
+# - 向量化处理性能：O(n + g)，其中 g 为组数（g << n）
+```
+
+### 性能对比
+
+| 方式 | 操作数 | 性能 |
+|------|--------|------|
+| 逐行循环（N=100） | 100 × (2n + m) | O(200n + 100m) |
+| 向量化处理 | n + g | O(n + g) |
+| **性能提升** | - | **约 100 倍** |
+
+当 missing_dates = 100 时，向量化处理性能提升约 100 倍。
+
+### 为何必须使用向量化处理
+
+1. **性能显著提升**：避免逐行循环扫描全表，性能提升约 N 倍
+2. **DataFrame 过滤低效**：每次过滤扫描全表，非常耗时
+3. **merge 操作昂贵**：每次 merge 需要哈希匹配，逐行循环浪费资源
+4. **pandas 最佳实践**：向量化处理是 pandas 最佳实践
+
+### 适用范围
+
+此规范适用于所有按日期分组计算的场景：
+1. **IC 计算**：按日期分组计算 Spearman IC
+2. **因子统计**：按日期分组计算因子统计指标
+3. **收益分析**：按日期分组计算收益指标
+4. **任何需要按日期分组的批量计算**
+
+### 检查清单
+
+```
+□ 先整体 merge（一次操作）
+□ 按 groupby 计算（避免逐行循环）
+□ 检查 merge 后是否有数据（空数据处理）
+□ 按日期顺序填充 IC 值（缺失日期填充 None）
+□ 禁止逐行循环做 DataFrame 过滤
+□ 禁止逐行循环做 merge
+```
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |
