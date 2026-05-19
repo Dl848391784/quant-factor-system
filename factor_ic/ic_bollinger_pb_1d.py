@@ -589,10 +589,38 @@ def _incremental_update(
         return _full_recalculate(output_file, n=n, k=k, min_stocks=min_stocks)
     
     # 加载全量缓存数据
-    print(f"\n[2/4] 加载缺失日期数据（{len(missing_dates)} 天）...")
+    # 布林带计算说明（遵循 MODULE.md 增量路径布林带历史数据必要性规范）：
+    # - 布林带使用 rolling(window=N) 计算 SMA 和 Std，每个目标日期需要前面 N-1 天历史数据
+    # - 例如 N=20：计算 2024-01-20 的布林带，需要 2024-01-01 ~ 2024-01-19 的历史数据
+    # - 因此必须加载全量数据计算布林带，再筛选缺失日期
+    # - 这是必要的，不是浪费：缺失日期的布林带依赖历史数据作为滚动窗口
+    print(f"\n[2/4] 加载全量数据计算布林带（缺失 {len(missing_dates)} 天）...")
     factor_df_full, return_df_full, raw_metadata = load_data_from_cache()
     
-    # 计算布林带%B因子（全量数据，用于筛选）
+    # 边界检查：最小必需历史窗口（遵循 MODULE.md 增量路径最小必需历史窗口边界检查规范）
+    # 布林带需要前 N-1 天数据，缺失日期如果靠近缓存起始点，可能因预热期不足而全为 NaN
+    cache_start_date = raw_metadata['period_start']
+    cache_start_dt = pd.to_datetime(cache_start_date)
+    
+    # 计算布林带预热期边界日期（缓存起始点后 N-1 天）
+    warmup_boundary_date = (cache_start_dt + pd.Timedelta(days=n-1)).strftime('%Y-%m-%d')
+    warmup_days_count = n - 1
+    
+    # 检查缺失日期是否在预热期内
+    missing_dates_in_warmup = [d for d in missing_dates if d <= warmup_boundary_date]
+    
+    if missing_dates_in_warmup:
+        print(f"  [边界检查] 缓存起始: {cache_start_date}")
+        print(f"  [边界检查] 布林带预热期: 前 {warmup_days_count} 天（{cache_start_date} ~ {warmup_boundary_date}）")
+        print(f"  [边界检查] {len(missing_dates_in_warmup)} 个缺失日期在预热期内，因子值可能全为 NaN")
+        examples = sorted(missing_dates_in_warmup)[:5]
+        print(f"  [边界检查] 示例日期: {examples}")
+        if len(missing_dates_in_warmup) == len(missing_dates):
+            print("  [边界检查] 所有缺失日期都在预热期内，无法计算有效 IC")
+            print("  [建议] 延长缓存历史范围，或跳过这些日期")
+            # 不直接返回缓存，继续计算以验证（可能部分股票有更多历史数据）
+    
+    # 计算布林带%B因子（全量数据，滚动窗口需要历史数据）
     factor_df_full, factor_stats = calculate_bollinger_pb_1d_factor(factor_df_full, n=n, k=k)
     factor_df_full = factor_df_full[['date', 'asset', 'bollinger_pb_1d']].copy()
     
