@@ -597,7 +597,7 @@ def _incremental_update(
         examples = sorted(dates_not_in_cache)[:5]
         print(f"  [警告] 示例日期: {examples}")
     
-if factor_df_new.empty:
+    if factor_df_new.empty:
         print("  - 跳过增量计算，返回现有缓存")
         return existing_data
     
@@ -607,15 +607,15 @@ if factor_df_new.empty:
     total_factor_count = len(factor_df_new)
     
     if valid_factor_count == 0:
-        print(f\"  [诊断] 缺失日期的因子值全为 NaN（可能因布林带预热期）")
-        print(f\"  [诊断] 缺失日期: {sorted(factor_df_new['date'].unique())[:5]}")
-        print(f\"  [建议] 这些日期需要更多历史数据才能计算布林带，跳过增量计算")
-        print(\"  - 返回现有缓存")
+        print("  [诊断] 缺失日期的因子值全为 NaN（可能因布林带预热期）")
+        print(f"  [诊断] 缺失日期: {sorted(factor_df_new['date'].unique())[:5]}")
+        print("  [建议] 这些日期需要更多历史数据才能计算布林带，跳过增量计算")
+        print("  - 返回现有缓存")
         return existing_data
     
-    print(f\"  - 篮选后: {len(factor_df_new)} 行，其中 {valid_factor_count} 行有效因子值")
+    print(f"  - 筛选后: {len(factor_df_new)} 行，其中 {valid_factor_count} 行有效因子值")
     if total_factor_count - valid_factor_count > 0:
-        print(f\"  - {total_factor_count - valid_factor_count} 行因子值为 NaN（布林带预热期）")
+        print(f"  - {total_factor_count - valid_factor_count} 行因子值为 NaN（布林带预热期）")
     
     # 计算新日期的每日 IC
     print("\n[3/4] 计算新日期 IC...")
