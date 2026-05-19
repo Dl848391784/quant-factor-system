@@ -265,16 +265,26 @@ def calculate_bollinger_pb_1d_factor(
     # ========== 计算 %B ==========
     print(f"  [Step 4] 计算 %B...")
     
-    # 处理除零情况（浮点数精度容差）
-    # 遵循 MODULE.md 浮点数等值比较规范：使用精度容差而非 == 0
+# 处理除零和 NaN 情况（遵循 MODULE.md 布林带 %B 计算显式处理 NaN 规范）
+    # 核心原则：显式处理 NaN，避免依赖 NaN 传播的隐式行为
+    # 布林带预热期（前 N-1 日）：upper_band/lower_band 为 NaN → diff 为 NaN
+    # 浮点数除零：diff ≈ 0（宽度为零）→ 定义 %B = 0.5
+    
     diff = factor_df['upper_band'] - factor_df['lower_band']
     
-    # 使用精度容差判断（|diff| < 1e-10 视为零）
-    # 避免浮点精度问题导致漏判或极端 %B 值
+    # 显式处理三种情况：
+    # 1. diff 为 NaN（布林带预热期）→ %B = NaN
+    # 2. diff ≈ 0（布林带宽度为零）→ %B = 0.5
+    # 3. diff > 0（正常情况）→ %B = (close - lower) / diff
+    
     factor_df['bollinger_pb_1d'] = np.where(
-        np.abs(diff) < 1e-10,
-        0.5,  # 布林带宽度为零时，%B 定义为 0.5（价格在中轨）
-        (factor_df['close'] - factor_df['lower_band']) / diff
+        pd.isna(diff),  # 显式检查 NaN（布林带预热期）
+        np.nan,         # NaN → NaN（显式定义，而非依赖隐式传播）
+        np.where(
+            np.abs(diff) < 1e-10,  # 浮点数精度容差判断
+            0.5,  # 布林带宽度为零时，%B 定义为 0.5（价格在中轨）
+            (factor_df['close'] - factor_df['lower_band']) / diff  # 正常计算
+        )
     )
     
     # 释放临时列

@@ -2572,6 +2572,121 @@ except ValueError as e:
 
 ---
 
+## 布林带 %B 计算显式处理 NaN 规范
+
+### 核心原则
+
+**布林带 %B 计算必须显式处理 NaN，避免依赖 NaN 传播的隐式行为。布林带预热期（前 N-1 日）的 upper_band/lower_band 为 NaN，应显式定义 %B = NaN。**
+
+### 问题背景
+
+```
+隐式 NaN 传播问题：
+
+旧代码（隐式处理）：
+```python
+diff = factor_df['upper_band'] - factor_df['lower_band']
+
+factor_df['bollinger_pb_1d'] = np.where(
+    np.abs(diff) < 1e-10,  # ✗ 当 diff 为 NaN 时，np.abs(NaN) = NaN，NaN < 1e-10 = False
+    0.5,
+    (factor_df['close'] - factor_df['lower_band']) / diff  # ✗ NaN / NaN = NaN（隐式传播）
+)
+```
+
+问题后果：
+- 布林带预热期（前 N-1 日）：upper_band/lower_band 为 NaN
+- diff = NaN - NaN = NaN
+- np.abs(NaN) = NaN
+- NaN < 1e-10 = False（条件为 False）
+- np.where 执行除法分支：(close - lower_band) / diff = NaN / NaN = NaN
+
+虽然最终结果是 NaN（正确），但：
+- 依赖了 NaN 比较返回 False 的隐式行为
+- 逻辑不够清晰，维护者需要理解 NaN 传播规则
+- 代码可读性差，不够显式
+
+Python NaN 比较规则：
+- NaN == NaN → False
+- NaN < 任何值 → False
+- NaN > 任何值 → False
+- np.abs(NaN) → NaN
+```
+
+### 正确实现
+
+```python
+# ✓ 正确：显式处理 NaN
+diff = factor_df['upper_band'] - factor_df['lower_band']
+
+# 显式处理三种情况：
+# 1. diff 为 NaN（布林带预热期）→ %B = NaN
+# 2. diff ≈ 0（布林带宽度为零）→ %B = 0.5
+# 3. diff > 0（正常情况）→ %B = (close - lower) / diff
+
+factor_df['bollinger_pb_1d'] = np.where(
+    pd.isna(diff),  # 显式检查 NaN（布林带预热期）
+    np.nan,         # NaN → NaN（显式定义，而非依赖隐式传播）
+    np.where(
+        np.abs(diff) < 1e-10,  # 浮点数精度容差判断
+        0.5,  # 布林带宽度为零时，%B 定义为 0.5（价格在中轨）
+        (factor_df['close'] - factor_df['lower_band']) / diff  # 正常计算
+    )
+)
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：依赖 NaN 传播的隐式行为
+factor_df['bollinger_pb_1d'] = np.where(
+    np.abs(diff) < 1e-10,  # ✗ NaN < 1e-10 返回 False（隐式）
+    0.5,
+    (factor_df['close'] - factor_df['lower_band']) / diff  # ✗ NaN / NaN = NaN（隐式传播）
+)
+
+# ❌ 禁止：不显式检查 NaN
+# 问题：
+# - 维护者需要理解 NaN 比较规则
+# - 代码可读性差，不够显式
+# - 容易误解逻辑
+```
+
+### 为何必须显式处理 NaN
+
+1. **代码可读性**：显式定义三种情况，逻辑清晰
+2. **维护友好**：维护者不需要理解 NaN 比较规则
+3. **避免误解**：明确说明布林带预热期 %B = NaN
+4. **最佳实践**：显式优于隐式，代码更健壮
+
+### 布林带预热期说明
+
+布林带计算需要前 N-1 日数据预热：
+- N=20，需要前19日数据
+- rolling(window=n, min_periods=n) 确保前 N-1 天为 NaN
+- upper_band/lower_band 在前 N-1 天为 NaN
+- %B 在前 N-1 天也应为 NaN（显式定义）
+
+### 适用范围
+
+此规范适用于所有依赖技术指标预热的因子计算：
+1. **布林带 %B**：N=20，前19天预热期
+2. **RSI**：N=6/14，前N-1天预热期
+3. **KDJ**：N=9，前N-1天预热期
+4. **任何需要历史数据的技术指标**
+
+### 检查清单
+
+```
+□ 显式检查 pd.isna(diff)（布林带预热期）
+□ 显式定义 %B = np.nan（而非依赖隐式传播）
+□ 使用嵌套 np.where 处理三种情况
+□ 注释说明每种情况的语义
+□ 避免依赖 NaN 比较返回 False 的隐式行为
+```
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |
