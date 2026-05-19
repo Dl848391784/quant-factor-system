@@ -390,9 +390,14 @@ def calculate_daily_ic_series(
     period_start = raw_metadata['period_start']
     period_end = raw_metadata['period_end']
     
+    # 转换为 JSON 友好格式
+    dates = [str(d) for d in ic_series.index]
+    ic_values = [round(v, 6) for v in ic_series.values]
+    
     # 日期格式断言（遵循 PROJECT.md 日期字符串比较规范）
     # 核心原则：全量路径与增量路径保持一致的防御机制
     # 检查关键日期格式是否符合 YYYY-MM-DD 约定
+    # 注意：dates 已定义，可以直接使用
     dates_to_check = [dates[0] if len(dates) > 0 else None, 
                       dates[-1] if len(dates) > 0 else None,
                       period_start, period_end]
@@ -404,10 +409,6 @@ def calculate_daily_ic_series(
                 f"位置: 全量路径 calculate_daily_ic_series\n"
                 f"请检查因子数据或缓存数据的日期格式"
             )
-    
-    # 转换为 JSON 友好格式
-    dates = [str(d) for d in ic_series.index]
-    ic_values = [round(v, 6) for v in ic_series.values]
     
     # 计算 20 日滚动均值（min_periods=10，至少需要10个有效值）
     rolling_mean = ic_series.rolling(window=20, min_periods=10).mean()
