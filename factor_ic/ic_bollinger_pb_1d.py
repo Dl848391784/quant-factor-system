@@ -682,8 +682,8 @@ def _incremental_update(
         'factor_name': 'bollinger_pb_1d',
         'calculation_date': datetime.now().strftime('%Y-%m-%d'),
         'period': {
-            'start': min(all_dates[0], raw_metadata['period_start']),
-            'end': max(all_dates[-1], raw_metadata['period_end'])
+            'start': raw_metadata['period_start'],  # 原始缓存范围（与全量路径一致）
+            'end': raw_metadata['period_end']       # 原始缓存范围（与全量路径一致）
         },
         'ic_metrics': {
             'ic_mean': round(result['ic_mean'], 6),

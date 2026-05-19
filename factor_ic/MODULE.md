@@ -1504,6 +1504,82 @@ merged_data = {
 
 ---
 
+## 增量路径 period 字段规范
+
+### 核心原则
+
+**增量路径 `period.start/end` 必须直接使用 `raw_metadata`，与全量路径语义完全一致。**
+
+### 语义定义
+
+**period 字段表示原始缓存范围（dropna前），而非合并后有效IC日期范围。**
+
+```
+| 数据源 | 语义 | 示例 |
+|--------|------|------|
+| raw_metadata['period_start'] | 原始缓存最小日期（dropna前） | 2024-01-01 |
+| raw_metadata['period_end'] | 原始缓存最大日期（dropna前） | 2026-05-15 |
+| all_dates[0] | 合并后有效IC最小日期 | 2024-01-20 |
+| all_dates[-1] | 合并后有效IC最大日期 | 2026-05-15 |
+
+差异原因：
+- 原始缓存范围：2024-01-01 ~ 2026-05-15（545天）
+- 有效IC范围：2024-01-20 ~ 2026-05-15（526天）
+- 前19天布林带值NaN（等待足够数据）
+```
+
+### 正确实现
+
+```python
+# ✓ 正确：period 直接使用 raw_metadata（与全量路径一致）
+merged_data = {
+    'period': {
+        'start': raw_metadata['period_start'],  # 原始缓存范围
+        'end': raw_metadata['period_end']       # 原始缓存范围
+    },
+    'sample_stats': {
+        'total_days': raw_metadata.get('total_days', 0),  # 原始缓存天数
+        'valid_days': len(all_dates),  # 有效IC天数
+    }
+}
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：混合不同语义的范围
+merged_data = {
+    'period': {
+        'start': min(all_dates[0], raw_metadata['period_start']),  # 混合语义
+        'end': max(all_dates[-1], raw_metadata['period_end'])      # 混合语义
+    }
+}
+
+# 问题：
+# - all_dates[0] 和 raw_metadata['period_start'] 语义不同
+# - min/max 混合两个不同范围，语义模糊
+# - 无法解释 period 表示什么范围
+# - 与全量路径不一致（全量路径直接使用 raw_metadata）
+```
+
+### 为何必须使用 raw_metadata
+
+1. **语义一致性：** period 表示原始缓存范围，而非有效IC范围
+2. **两条路径一致：** 全量路径使用 raw_metadata，增量路径必须一致
+3. **数据源稳定性：** raw_metadata 表示数据源范围，不受计算过程影响
+4. **下游依赖明确：** 前端显示 period 时期望原始数据范围，而非计算后范围
+
+### 全量/增量路径一致性验证
+
+| 路径 | period.start来源 | period.end来源 | 语义 |
+|------|-----------------|----------------|------|
+| 全量 | raw_metadata['period_start'] | raw_metadata['period_end'] | 原始缓存范围 ✓ |
+| 增量 | raw_metadata['period_start'] | raw_metadata['period_end'] | 原始缓存范围 ✓ |
+
+**关键：** 增量模式追加数据不改变原始缓存范围，`period` 应始终表示数据源范围。
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |
