@@ -1413,6 +1413,97 @@ result = np.where(
 
 ---
 
+## 增量路径 rolling_ic_mean 规范
+
+### 核心原则
+
+**增量路径 `rolling_ic_mean` 必须基于 `all_dates` 计算，与 `dates` 和 `ic_values` 长度完全一致。**
+
+### 问题背景
+
+```
+增量路径数据合并流程：
+1. existing_dates + existing_ic_values（来自缓存）
+2. new_dates + new_ic_values（新计算）
+3. 合并 → date_ic_map（过滤None）
+4. all_dates = sorted(date_ic_map.keys())
+5. all_ic_values = [date_ic_map[d] for d in all_dates]
+
+关键问题：
+- 若 rolling_ic_mean 基于 valid_dates（子集）计算
+- len(rolling_ic_mean) = len(valid_dates) ≠ len(all_dates)
+- 前端按索引对应 dates[i] → rolling_ic_mean[i] 会错位
+```
+
+### 正确实现
+
+```python
+# ✓ 正确：rolling_ic_mean 基于 all_dates 计算
+from factor_ic.common.ic_calculator import calculate_ic_statistics
+
+# 使用 all_dates 和 all_ic_values 构建 ic_series
+ic_series = pd.Series(all_ic_values, index=all_dates)
+result = calculate_ic_statistics(ic_series)
+
+# rolling_ic_mean 基于 all_dates（与全量路径一致）
+rolling_ic_mean_series = ic_series.rolling(window=20, min_periods=10).mean()
+rolling_ic_mean = [
+    round(v, 6) if not pd.isna(v) else None
+    for v in rolling_ic_mean_series.values
+]
+
+# 输出：dates, ic_values, rolling_ic_mean 长度一致
+merged_data = {
+    'dates': all_dates,           # len = N
+    'ic_values': all_ic_values,   # len = N
+    'rolling_ic_mean': rolling_ic_mean,  # len = N ✓
+}
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：rolling_ic_mean 基于 valid_dates（子集）计算
+valid_indices = [i for i, ic in enumerate(all_ic_values) if ic is not None]
+valid_dates = [all_dates[i] for i in valid_indices]
+valid_ic = [all_ic_values[i] for i in valid_indices]
+
+ic_series = pd.Series(valid_ic, index=valid_dates)  # 基于 valid_dates
+rolling_ic_mean_series = ic_series.rolling(window=20, min_periods=10).mean()
+rolling_ic_mean = [round(v, 6) if not pd.isna(v) else None for v in rolling_ic_mean_series.values]
+
+# 输出：dates, ic_values, rolling_ic_mean 长度不一致
+merged_data = {
+    'dates': all_dates,           # len = N
+    'ic_values': all_ic_values,   # len = N
+    'rolling_ic_mean': rolling_ic_mean,  # len = M (M < N) ✗ 错误！
+}
+
+# 问题：
+# - all_dates 和 all_ic_values 长度 = N
+# - rolling_ic_mean 长度 = M（M < N）
+# - 前端 dates[i] → rolling_ic_mean[i] 索引错位
+# - 第 M 个日期之后的数据无 rolling_ic_mean 对应
+```
+
+### 为何必须长度一致
+
+1. 前端图表按索引对应：`dates[i] → ic_values[i] → rolling_ic_mean[i]`
+2. 长度不一致会导致索引错位，图表显示错误
+3. 全量路径已经保证长度一致，增量路径必须遵循相同原则
+4. JSON 数据结构一致性要求：三条数组长度相等
+
+### 全量/增量路径一致性验证
+
+| 路径 | dates来源 | ic_values来源 | rolling_ic_mean来源 | 长度一致性 |
+|------|----------|--------------|-------------------|-----------|
+| 全量 | ic_series.index | ic_series.values | ic_series.rolling() | ✓ N=N=N |
+| 增量 | all_dates | all_ic_values | ic_series.rolling()（基于all_dates） | ✓ N=N=N |
+
+**关键：** 增量路径的 `ic_series` 必须使用 `all_dates` 和 `all_ic_values` 构建，而非 `valid_dates` 子集。
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |

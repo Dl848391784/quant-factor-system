@@ -629,7 +629,7 @@ def _incremental_update(
     if skipped_new_ic > 0:
         print(f"  - {skipped_new_ic} 天因股票数不足跳过")
     
-    # 合并数据
+# 合并数据
     print("\n[4/4] 合并数据并重新计算统计指标...")
     
     # 检查重叠
@@ -640,13 +640,13 @@ def _incremental_update(
     if overlap_dates:
         print(f"  [警告] 发现 {len(overlap_dates)} 个重叠日期，将使用新计算的 IC 值覆盖")
     
-    # 使用字典去重
+    # 使用字典去重（遵循 MODULE.md 增量计算 None 处理规范）
     date_ic_map = {}
     for date, ic in zip(existing_dates, existing_ic_values):
-        if ic is not None:
+        if ic is not None:  # 兼容旧缓存：过滤可能存在的 None
             date_ic_map[date] = ic
     for date, ic in zip(new_dates, new_ic_values):
-        if ic is not None:
+        if ic is not None:  # 只写入有效 IC 值
             date_ic_map[date] = ic
     
     # 按日期排序
@@ -655,17 +655,13 @@ def _incremental_update(
     
     print(f"  - 合并后总计: {len(all_dates)} 天（去重后）")
     
-    # 过滤有效值
-    valid_indices = [i for i, ic in enumerate(all_ic_values) if ic is not None]
-    valid_dates = [all_dates[i] for i in valid_indices]
-    valid_ic = [all_ic_values[i] for i in valid_indices]
-    
-# 重新计算统计指标
+    # 重新计算统计指标（遵循 MODULE.md 增量路径 rolling_ic_mean 规范）
+    # 核心原则：rolling_ic_mean 必须基于 all_dates 计算，与 dates/ic_values 长度一致
     from factor_ic.common.ic_calculator import calculate_ic_statistics
-    ic_series = pd.Series(valid_ic, index=valid_dates)
+    ic_series = pd.Series(all_ic_values, index=all_dates)
     result = calculate_ic_statistics(ic_series)
     
-    # 添加滚动IC均值计算（遵循 MODULE.md 滚动IC均值规范)
+    # 添加滚动IC均值计算（基于 all_dates，与全量路径一致）
     rolling_ic_mean_series = ic_series.rolling(window=20, min_periods=10).mean()
     
     # NaN → None 转换（遵循 MODULE.md NaN 处理规范）
@@ -698,7 +694,7 @@ def _incremental_update(
         },
         'sample_stats': {  # ✓ 8空格缩进，与上方字段对齐
             'total_days': raw_metadata.get('total_days', 0),  # 直接使用原始缓存天数（遵循 MODULE.md total_days 规范）
-            'valid_days': len(valid_ic),
+            'valid_days': len(all_dates),
             'avg_stocks_per_day': int(factor_df_full.groupby('date').size().mean()),
             'avg_stocks_period': {
                 'start': str(factor_df_full['date'].min()),
