@@ -680,8 +680,8 @@ def _incremental_update(
             'ic_std': round(result['ic_std'], 6),
             'icir': round(result['icir'], 4)
         },
-        'sample_stats': {
-            'total_days': max(raw_metadata.get('total_days', 0), factor_df_full['date'].nunique()),
+'sample_stats': {
+            'total_days': raw_metadata.get('total_days', 0),  # 直接使用原始缓存天数（遵循 MODULE.md total_days 规范）
             'valid_days': len(valid_ic),
             'avg_stocks_per_day': int(factor_df_full.groupby('date').size().mean()),
             'avg_stocks_period': {

@@ -781,6 +781,27 @@ period_start = str(factor_df['date'].min())  # 2024-01-20（错误！）
 }
 ```
 
+### total_days 使用规范
+**核心原则：** total_days 直接使用 raw_metadata，不与过滤后数据做比较。
+
+**禁止行为：**
+```python
+# ❌ 禁止：冗余的 max 比较
+'total_days': max(raw_metadata.get('total_days', 0), factor_df_full['date'].nunique())
+
+# 理由：
+# 1. raw_metadata['total_days'] 表示原始缓存天数（dropna 前）
+# 2. factor_df_full['date'].nunique() 表示过滤后天数（dropna 后）
+# 3. 过滤后天数 ≤ 原始天数，max 永远返回原始天数
+# 4. 冗余操作，增加代码复杂度
+```
+
+**正确实现：**
+```python
+# ✓ 正确：直接使用 raw_metadata
+'total_days': raw_metadata.get('total_days', 0)  # 原始缓存天数
+```
+
 ---
 
 ## 函数返回值契约规范
