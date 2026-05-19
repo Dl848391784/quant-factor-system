@@ -1,13 +1,12 @@
 # Bollinger_PB_1D IC 计算流程文档
 
-> 生成时间: 2026-05-19 23:20 (北京时间)
-> 实测数据时间: 2026-05-19 23:20 (北京时间)
-> 审阅版本: v1.8
+> 生成时间: 2026-05-19 23:25 (北京时间)
+> 实测数据时间: 2026-05-19 23:25 (北京时间)
+> 审阅版本: v1.9
 > 更新内容:
 >   1. 初始版本：参照 ic_rsi_1d.py v1.52 规范创建
->   ...
->   21. 修复 _full_recalculate 完成信息字段错误:从 total_days 改为 valid_days,遵循 MODULE.md 打印信息规范
->   22. 补充 MODULE.md ic_series.index 类型规范:明确两条路径必须使用字符串类型 "YYYY-MM-DD"
+>   2. 修复异常处理类型错误：ValueError 直接 raise，不包装为 RuntimeError
+>   3. 修复 total_days 计算错误：使用 raw_metadata['total_days'] 而非 len(dates)
 >   4. 添加 avg_stocks_period 字段：明确口径范围
 >   5. 添加 DEFAULT_MIN_STOCKS 常量：统一管理参数
 >   6. 遵循 PROJECT.md 参数传递规范：min_stocks 通过函数签名传递
@@ -15,17 +14,19 @@
 >   8. 遵循 PROJECT.md 输出字段口径规范：avg_stocks_period 子字段描述口径范围
 >   9. 遵循 PROJECT.md avg_stocks_per_day 计算口径规范：基于 dropna 后数据
 >   10. 添加增量模式：_incremental_update() 和 _full_recalculate() 分离
->   11. 添加命令行参数: --force-full 强制全量计算
+>   11. 添加命令行参数：--force-full 强制全量计算
 >   12. 添加日期类型转换：pd.to_datetime + errors='coerce' + NaT 检查
->   13. 添加输入验证:列存在检查 + 可用列列表（遵循 PROJECT.md 输入验证规范）
+>   13. 添加输入验证：列存在检查 + 可用列列表（遵循 PROJECT.md 输入验证规范）
 >   14. 添加函数返回值契约校验：校验 calculate_ic_with_direction_verification 返回字段（遵循 MODULE.md 函数返回值契约规范）
->   15. 添加 ic_series 显式排序:ic_series.sort_index() + 防御性校验（遵循 MODULE.md ic_series 排序规范）
->   16. 添加 NaN → None 处理:rolling_ic_mean 在数据生成阶段处理 NaN（遵循 MODULE.md NaN 处理规范）
+>   15. 添加 ic_series 显式排序：ic_series.sort_index() + 防御性校验（遵循 MODULE.md ic_series 排序规范）
+>   16. 添加 NaN → None 处理：rolling_ic_mean 在数据生成阶段处理 NaN（遵循 MODULE.md NaN 处理规范）
 >   17. 删除死代码 merged_df：遵循 MODULE.md 数据传递规范，不在调用 calculate_ic_with_direction_verification 前合并数据
->   18. 删除死代码 calculate_bollinger_bands 和 calculate_percent_b：遵循 MODULE.md 设计演进清理规范,向量化版本替代后删除单股票版本
->   19. 修复布林带 min_periods 参数:从 min_periods=1 改为 min_periods=n，遵循布林带标准定义（MODULE.md 技术指标参数规范）
->   20. 修复 _incremental_update 缺失 rolling_ic_mean 字段:在 merged_data 中添加该字段,遵循 MODULE.md 增量更新返回数据规范
->   21. 修复 _full_recalculate 完成信息字段错误:从 total_days 改为 valid_days,遵循 MODULE.md 打印信息规范
+>   18. 删除死代码 calculate_bollinger_bands 和 calculate_percent_b：遵循 MODULE.md 设计演进清理规范，向量化版本替代后删除单股票版本
+>   19. 修复布林带 min_periods 参数：从 min_periods=1 改为 min_periods=n，遵循布林带标准定义（MODULE.md 技术指标参数规范）
+>   20. 修复 _incremental_update 缺失 rolling_ic_mean 字段：在 merged_data 中添加该字段，遵循 MODULE.md 增量更新返回数据规范
+>   21. 修复完成信息字段错误：从 total_days 改为 valid_days，遵循 MODULE.md 打印信息规范
+>   22. 补充 MODULE.md ic_series.index 类型规范（字符串而非 datetime），明确两条路径一致性保障
+>   23. 修复 %B 计算 NaN 处理缺失：添加 diff.isna() 判断，遵循 MODULE.md %B 计算规范
 
 ---
 
@@ -369,8 +370,9 @@ python factor_ic/ic_bollinger_pb_1d.py --force-full
 | v1.4 | 2026-05-19 | 删除死代码 merged_df，补充 MODULE.md 数据传递规范 |
 | v1.5 | 2026-05-19 | 删除死代码 calculate_bollinger_bands 和 calculate_percent_b，补充 MODULE.md 设计演进清理规范 |
 | v1.6 | 2026-05-19 | 修复布林带 min_periods 参数（min_periods=1 → min_periods=n），补充 MODULE.md 技术指标参数规范 |
-| v1.7 | 2026-05-19 | 修复 _incremental_update 缺失 rolling_ic_mean 字段 + 修复 _full_recalculate 完成信息字段错误（total_days → valid_days），补充 MODULE.md 增量更新返回数据规范 |
-| v1.8 | 2026-05-19 | 补充 MODULE.md ic_series index 类型规范（字符串而非 datetime），明确两条路径一致性保障 |
+| v1.7 | 2026-05-19 | 修复 _incremental_update 缺失 rolling_ic_mean 字段 + 修复完成信息字段错误（total_days → valid_days），补充 MODULE.md 增量更新返回数据规范 |
+| v1.8 | 2026-05-19 | 补充 MODULE.md ic_series.index 类型规范（字符串而非 datetime），明确两条路径一致性保障 |
+| v1.9 | 2026-05-19 | 修复 %B 计算 NaN 处理缺失 + 补充 MODULE.md %B 计算规范 |
 
 ---
 
