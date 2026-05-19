@@ -1,8 +1,8 @@
 # Bollinger_PB_1D IC 计算流程文档
 
-> 生成时间: 2026-05-19 23:00 (北京时间)
-> 实测数据时间: 2026-05-19 23:00 (北京时间)
-> 审阅版本: v1.6
+> 生成时间: 2026-05-19 23:10 (北京时间)
+> 实测数据时间: 2026-05-19 23:10 (北京时间)
+> 审阅版本: v1.7
 > 更新内容: 
 >   1. 初始版本：参照 ic_rsi_1d.py v1.52 规范创建
 >   2. 修复异常处理类型错误：ValueError 直接 raise，不包装为 RuntimeError
@@ -23,6 +23,7 @@
 >   17. 删除死代码 merged_df：遵循 MODULE.md 数据传递规范，不在调用 calculate_ic_with_direction_verification 前合并数据
 >   18. 删除死代码 calculate_bollinger_bands 和 calculate_percent_b：遵循 MODULE.md 设计演进清理规范，向量化版本替代后删除单股票版本
 >   19. 修复布林带 min_periods 参数：从 min_periods=1 改为 min_periods=n，遵循布林带标准定义（MODULE.md 技术指标参数规范）
+>   20. 修复完成信息字段错误：从 total_days 改为 valid_days，遵循 MODULE.md 打印信息规范
 
 ---
 
@@ -349,7 +350,7 @@ python factor_ic/ic_bollinger_pb_1d.py --force-full
   - t 统计量: -7.09 显著
 
 ============================================================
-完成！共计算 545 天 IC 数据
+完成！共计算 495 天有效 IC 数据（原始数据 545 天）
 ============================================================
 ```
 
@@ -366,6 +367,7 @@ python factor_ic/ic_bollinger_pb_1d.py --force-full
 | v1.4 | 2026-05-19 | 删除死代码 merged_df，补充 MODULE.md 数据传递规范 |
 | v1.5 | 2026-05-19 | 删除死代码 calculate_bollinger_bands 和 calculate_percent_b，补充 MODULE.md 设计演进清理规范 |
 | v1.6 | 2026-05-19 | 修复布林带 min_periods 参数（min_periods=1 → min_periods=n），补充 MODULE.md 技术指标参数规范 |
+| v1.7 | 2026-05-19 | 修复完成信息字段错误（total_days → valid_days），补充 MODULE.md 打印信息规范 |
 
 ---
 

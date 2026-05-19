@@ -681,7 +681,7 @@ def _full_recalculate(
         json.dump(convert_to_native_types(ic_data), f, ensure_ascii=False, indent=2)
     
     print("\n" + "=" * 60)
-    print(f"完成！共计算 {ic_data['sample_stats']['total_days']} 天 IC 数据")
+    print(f"完成！共计算 {ic_data['sample_stats']['valid_days']} 天有效 IC 数据（原始数据 {ic_data['sample_stats']['total_days']} 天）")
     print("=" * 60)
     
     return ic_data

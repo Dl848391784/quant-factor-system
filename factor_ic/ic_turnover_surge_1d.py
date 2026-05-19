@@ -501,7 +501,7 @@ def generate_turnover_surge_ic_data(
     
     print(f"\n保存数据到: {output_file}")
     print("=" * 60)
-    print(f"完成！共计算 {ic_data['sample_stats']['total_days']} 天 IC 数据")
+    print(f"完成！共计算 {ic_data['sample_stats']['valid_days']} 天有效 IC 数据（原始数据 {ic_data['sample_stats']['total_days']} 天）")
     print("=" * 60)
     
     return result_json

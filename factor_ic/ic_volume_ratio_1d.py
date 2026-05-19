@@ -544,9 +544,9 @@ def main():
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
     
-    print("\n" + "=" * 80)
-    print(f"完成！共计算 {result['sample_stats']['total_days']} 天 IC 数据")
-    print(f"分层回测天数: {result['layered_result']['n_days']}")
+    print("\n" + "=" * 60)
+    print(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC 数据（原始数据 {result['sample_stats']['total_days']} 天）")
+    print("=" * 60)
     print(f"输出文件: {OUTPUT_FILE}")
     
     # 打印关键指标
