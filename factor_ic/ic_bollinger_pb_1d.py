@@ -346,7 +346,7 @@ def calculate_daily_ic_series(
     
     # 函数返回值契约校验（遵循 MODULE.md 函数返回值契约规范）
     required_fields = [
-        'ic_series', 'ic_mean', 'ic_std', 'icir',
+        'ic_series', 'ic_mean', 'ic_std', 'icir', 'p_value', 'p_value_display',
         'statistical_significance', 'factor_direction',
         'economic_significance', 'positive_ratio', 'summary'
     ]

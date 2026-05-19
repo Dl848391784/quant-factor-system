@@ -1693,6 +1693,98 @@ merged_data = {
 
 ---
 
+## 函数返回值契约校验规范
+
+### 核心原则
+
+**`required_fields` 校验列表必须包含所有后续直接访问的字段，禁止遗漏。**
+
+### 问题背景
+
+```
+校验列表 vs 实际访问字段：
+
+校验列表（required_fields）：
+- ic_series ✓
+- ic_mean ✓
+- ic_std ✓
+- icir ✓
+- p_value ✗  ← 校验列表缺少！
+- p_value_display ✗  ← 校验列表缺少！
+- statistical_significance ✓
+- factor_direction ✓
+- economic_significance ✓
+- positive_ratio ✓
+- summary ✓
+
+后续代码直接访问：
+- result['p_value']  ← 未校验，若缺失会 KeyError
+- result['p_value_display']  ← 使用 .get()，有默认值，但仍依赖 p_value
+```
+
+### 正确实现
+
+```python
+# ✓ 正确：校验列表包含所有直接访问的字段
+required_fields = [
+    'ic_series', 'ic_mean', 'ic_std', 'icir',
+    'p_value', 'p_value_display',  # ✓ 必须包含！
+    'statistical_significance', 'factor_direction',
+    'economic_significance', 'positive_ratio', 'summary'
+]
+
+missing_fields = [f for f in required_fields if f not in result]
+if missing_fields:
+    raise RuntimeError(
+        f"calculate_ic_with_direction_verification 返回值缺少必需字段\n"
+        f"缺失字段: {missing_fields}\n"
+        f"问题定位: factor_ic/common/ic_calculator.py\n"
+        f"期望字段: {required_fields}"
+    )
+
+# 校验后可以安全访问
+'p_value': round(result['p_value'], 6)  # ✓ 已校验，不会 KeyError
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：校验列表缺少 p_value
+required_fields = [
+    'ic_series', 'ic_mean', 'ic_std', 'icir',
+    'statistical_significance', 'factor_direction',
+    'economic_significance', 'positive_ratio', 'summary'
+]
+
+# 后续直接访问 p_value
+'p_value': round(result['p_value'], 6)  # ✗ 未校验，可能 KeyError！
+
+# 问题：
+# - 若 calculate_ic_with_direction_verification 返回值缺少 p_value
+# - 第406行会抛出 KeyError: 'p_value'
+# - 错误信息不友好，无法定位问题模块
+# - 与校验机制设计初衷矛盾
+```
+
+### 为何必须校验所有字段
+
+1. **错误信息友好：** RuntimeError 包含缺失字段列表、问题定位、期望字段列表
+2. **问题定位快速：** 明确指出哪个模块返回值不符合契约
+3. **维护成本低：** 契约校验是统一入口，一处修改全局生效
+4. **代码健壮性：** 避免 KeyError 在运行时突然出现
+
+### 校验列表完整性检查清单
+
+```
+□ 检查所有 result['field'] 直接访问的字段
+□ 检查所有 result.get('field') 有默认值但仍依赖的字段
+□ 检查嵌套字段父级（如 statistical_significance）
+□ 确保校验列表与实际访问一致
+□ 新增字段访问时同步更新校验列表
+```
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |
