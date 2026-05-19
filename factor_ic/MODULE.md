@@ -936,6 +936,99 @@ p_value_display = ic_data['ic_metrics']['p_value_display']  # 必须存在
 
 ---
 
+## factor_direction 字段规范
+
+### 核心原则
+**factor_direction 字段结构在两条路径（全量/增量）中必须完全一致。**
+
+### 字段映射（原始字段名 → 输出字段名）
+
+| 原始字段名（ic_calculator.py） | 输出字段名 | 类型 | 用途 |
+|------------------------------|----------|------|------|
+| `ic_mean_sign` | `direction` | str | 因子方向（'positive'/'negative'/'zero') |
+| `ic_mean` | `ic_mean` | float | IC 均值 |
+| `conclusion` | `conclusion` | str | 方向判断结论 |
+
+### 正确实现（两条路径一致）
+```python
+# ✓ 全量路径（calculate_daily_ic_series）：重映射字段名
+'factor_direction': {
+    'direction': result['factor_direction']['ic_mean_sign'],
+    'ic_mean': result['factor_direction']['ic_mean'],
+    'conclusion': result['factor_direction']['conclusion']
+}
+
+# ✓ 增量路径（_incremental_update）：重映射字段名（必须与全量路径一致）
+'factor_direction': {
+    'direction': result['factor_direction']['ic_mean_sign'],
+    'ic_mean': result['factor_direction']['ic_mean'],
+    'conclusion': result['factor_direction']['conclusion']
+}
+
+# ❌ 禁止：直接透传原始字段名
+'factor_direction': result['factor_direction']  # 字段名是 ic_mean_sign，不是 direction
+```
+
+---
+
+## economic_significance 字段规范
+
+### 核心原则
+**economic_significance 字段结构在两条路径（全量/增量）中必须完全一致。**
+
+### 字段映射（原始字段名 → 输出字段名）
+
+| 原始字段名（ic_calculator.py） | 输出字段名 | 类型 | 用途 |
+|------------------------------|----------|------|------|
+| `level` | `ic_strength` | str | IC 强度（'strong'/'weak'/'none') |
+| `abs_ic_mean` | `ic_mean_abs` | float | IC 均值绝对值 |
+| `conclusion` | `conclusion` | str | 经济显著性判断结论 |
+
+### 正确实现（两条路径一致）
+```python
+# ✓ 全量路径（calculate_daily_ic_series）：重映射字段名
+'economic_significance': {
+    'ic_strength': result['economic_significance']['level'],
+    'ic_mean_abs': result['economic_significance']['abs_ic_mean'],
+    'conclusion': result['economic_significance']['conclusion']
+}
+
+# ✓ 增量路径（_incremental_update）：重映射字段名（必须与全量路径一致）
+'economic_significance': {
+    'ic_strength': result['economic_significance']['level'],
+    'ic_mean_abs': result['economic_significance']['abs_ic_mean'],
+    'conclusion': result['economic_significance']['conclusion']
+}
+
+# ❌ 禁止：直接透传原始字段名
+'economic_significance': result['economic_significance']  # 字段名是 level，不是 ic_strength
+```
+
+---
+
+## statistical_significance 字段规范
+
+### 核心原则
+**statistical_significance 字段结构在两条路径中可直接透传（字段名一致）。**
+
+### 字段定义（无需重映射）
+
+| 字段名 | 类型 | 来源 | 用途 |
+|--------|------|------|------|
+| `is_significant` | bool | `result['statistical_significance']['is_significant']` | 统计显著性标志 |
+| `p_value` | float | `result['statistical_significance']['p_value']` | p 值 |
+| `p_value_display` | str | `result['statistical_significance']['p_value_display']` | p 值显示格式 |
+| `t_stat` | float | `result['statistical_significance']['t_stat']` | t 统计量 |
+| `conclusion` | str | `result['statistical_significance']['conclusion']` | 统计显著性判断结论 |
+
+### 正确实现（两条路径一致）
+```python
+# ✓ 全量路径和增量路径：均可直接透传（字段名一致）
+'statistical_significance': result['statistical_significance']
+```
+
+---
+
 **校验示例:**
 # 定义必需字段列表
 required_fields = [

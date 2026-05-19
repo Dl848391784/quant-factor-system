@@ -699,9 +699,17 @@ def _incremental_update(
                 'description': f"avg_stocks_per_day 反映此范围内的平均每日股票数"
             }
         },
-        'statistical_significance': result['statistical_significance'],
-        'factor_direction': result['factor_direction'],
-        'economic_significance': result['economic_significance'],
+        'statistical_significance': result['statistical_significance'],  # ✓ 直接透传（字段名一致）
+        'factor_direction': {  # ✓ 重映射字段名（与全量路径一致）
+            'direction': result['factor_direction']['ic_mean_sign'],
+            'ic_mean': result['factor_direction']['ic_mean'],
+            'conclusion': result['factor_direction']['conclusion']
+        },
+        'economic_significance': {  # ✓ 重映射字段名（与全量路径一致）
+            'ic_strength': result['economic_significance']['level'],
+            'ic_mean_abs': result['economic_significance']['abs_ic_mean'],
+            'conclusion': result['economic_significance']['conclusion']
+        },
         'dates': all_dates,
         'ic_values': all_ic_values,
         'rolling_ic_mean': rolling_ic_mean,  # 添加滚动IC均值字段
