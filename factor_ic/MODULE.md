@@ -1294,6 +1294,48 @@ factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
 3. min_periods=1 会在前 N-1 周期产生非标准值，误导分析
 4. 前N-1周期的NaN表示"数据不足，暂不计算"，语义清晰
 
+### 布林带标准差 ddof 参数
+
+**核心原则：** 布林带标准差必须使用总体标准差（ddof=0），而非样本标准差（ddof=1）。
+
+**布林带标准定义：**
+```
+布林带是对固定窗口内所有价格数据的标准差计算：
+- Upper Band = Middle + K × StdDev(Close, N)
+- StdDev = Population Standard Deviation（总体标准差）
+- 公式：σ = sqrt(Σ(xi - μ)^2 / N)
+- 不是对未知总体的样本估计，而是对固定窗口数据的完整统计
+```
+
+**正确实现：**
+```python
+# ✓ 正确：ddof=0，使用总体标准差
+factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
+    lambda x: x.rolling(window=n, min_periods=n).std(ddof=0)
+)
+```
+
+**禁止行为：**
+```python
+# ❌ 禁止：默认 ddof=1（样本标准差），系统性高估布林带宽度
+factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
+    lambda x: x.rolling(window=n, min_periods=n).std()  # 默认 ddof=1，错误！
+)
+
+# 问题：
+# - 样本标准差公式：σ_sample = sqrt(Σ(xi-μ)^2 / (N-1))
+# - 总体标准差公式：σ_population = sqrt(Σ(xi-μ)^2 / N)
+# - 偏差系数：σ_sample = σ_population × sqrt(N/(N-1))
+# - 对于 N=20：偏差约 2.5%（sqrt(20/19) ≈ 1.025）
+# - 结果：布林带宽度系统性高估，%B 值系统性偏小
+```
+
+**为何 ddof=0 是标准：**
+1. 布林带定义：对固定窗口内所有价格数据的完整统计，非样本估计
+2. TradingView、MetaTrader 等业界软件均使用总体标准差
+3. Bollinger 本人定义：Population Standard Deviation
+4. ddof=1 会系统性高估带宽，导致 %B 指标失真
+
 ---
 
 **典型场景：**

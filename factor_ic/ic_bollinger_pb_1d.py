@@ -248,9 +248,12 @@ def calculate_bollinger_pb_1d_factor(
         lambda x: x.rolling(window=n, min_periods=n).mean()
     )
     
-    print(f"  [Step 2] 计算标准差...")
+    print(f"  [Step 2] 计算标准差（总体标准差，ddof=0）...")
+    # 布林带标准定义使用总体标准差（Population Standard Deviation）
+    # pandas rolling().std() 默认 ddof=1（样本标准差），需显式指定 ddof=0
+    # 遵循 MODULE.md 技术指标参数规范
     factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
-        lambda x: x.rolling(window=n, min_periods=n).std()
+        lambda x: x.rolling(window=n, min_periods=n).std(ddof=0)
     )
     
     print(f"  [Step 3] 计算上轨和下轨...")
