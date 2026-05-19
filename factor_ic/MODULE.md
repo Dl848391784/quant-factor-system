@@ -490,7 +490,7 @@ result = calculate_ic_with_direction_verification(factor_df, return_df, ...)
 # merged_df 未被使用，是死代码
 ```
 
-**正确做法：**
+**正确做法:**
 ```python
 # ✓ 正确：直接传递未合并的数据
 factor_df = factor_df[['date', 'asset', 'factor_col']].copy()
@@ -498,13 +498,62 @@ result = calculate_ic_with_direction_verification(factor_df, return_df, ...)
 # 合并在函数内部完成
 ```
 
-**为何禁止提前合并：**
-1. 函数设计意图明确：接收未合并数据，内部负责合并
+**为何禁止提前合并:**
+1. 函数设计意图明确：接收未合并数据,内部负责合并
 2. 提前合并的 merged_df 无法传递给函数（函数需要两个独立 DataFrame）
-3. 提前合并会产生死代码，误导读者认为"合并数据用于IC计算"
-4. 函数内部需要验证列存在性、选择必要列、dropna 处理
 
 ---
+
+## 增量更新返回数据规范
+
+### _incremental_update 返回数据结构
+**核心原则:** _incremental_update 返回数据必须包含 `rolling_ic_mean` 字段, 与 `_full_recalculate` 返回值结构一致.
+
+**必须包含的字段:**
+```python
+{
+    'factor_name': str,
+    'calculation_date': str,
+    'period': {'start': str, 'end': str},
+    'ic_metrics': {
+        'ic_mean': float,
+        'ic_std': float,
+        'icir': float
+    },
+    'sample_stats': {
+        'total_days': int,
+        'valid_days': int,
+        'avg_stocks_per_day': int,
+        'avg_stocks_period': dict
+    },
+    'statistical_significance': {
+        't_stat': float,
+        'p_value': float,
+        'is_significant': bool
+    },
+    'factor_direction': dict,
+    'economic_significance': dict,
+    'dates': list,
+    'ic_values': list,
+    'rolling_ic_mean': list,  # 必须！用于绘制滚动IC均值趋势图
+    'positive_ratio': float,
+    'n_assets': int,
+    'summary': dict,
+    'update_mode': str,
+    'incremental_days': int
+}
+```
+
+**为何必须包含 rolling_ic_mean:**
+1. 增量更新合并历史数据和新增数据后,需要重新计算滚动IC均值
+2. 前端依赖该字段绘制滚动IC均值趋势图
+3. 缺失该字段会导致前端功能异常
+
+4. 数据结构不一致会破坏保存数据的完整性
+
+---
+
+## 流程文档规范
 
 ## 流程文档规范
 

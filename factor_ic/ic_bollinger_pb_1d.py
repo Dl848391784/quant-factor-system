@@ -655,12 +655,15 @@ def _incremental_update(
     valid_dates = [all_dates[i] for i in valid_indices]
     valid_ic = [all_ic_values[i] for i in valid_indices]
     
-    # 重新计算统计指标
+# 重新计算统计指标
     from factor_ic.common.ic_calculator import calculate_ic_statistics
     ic_series = pd.Series(valid_ic, index=valid_dates)
     result = calculate_ic_statistics(ic_series)
     
-    # 日期格式断言（遵循 PROJECT.md 日期字符串比较规范）
+    # 添加滚动IC均值计算（遵循 MODULE.md 滚动IC均值规范)
+    rolling_ic_mean = ic_series.rolling(window=20, min_periods=10).mean()
+    
+    # 日期格式断言（遵循 PROJECT.md 日期字符串比较规范)
     dates_to_check = [all_dates[0], all_dates[-1], raw_metadata['period_start'], raw_metadata['period_end']]
     for d in dates_to_check:
         if not re.match(r'^\d{4}-\d{2}-\d{2}$', str(d)):
@@ -694,6 +697,7 @@ def _incremental_update(
         'economic_significance': result['economic_significance'],
         'dates': all_dates,
         'ic_values': all_ic_values,
+        'rolling_ic_mean': rolling_ic_mean,  # 添加滚动IC均值字段
         'positive_ratio': round(result['positive_ratio'], 4),
         'n_assets': factor_df_full['asset'].nunique(),
         'summary': result['summary'],
