@@ -784,6 +784,52 @@ result = {
 
 ---
 
+## 设计演进清理规范
+
+**核心原则：** 新实现替代旧实现后，必须删除旧代码，禁止保留死代码。
+
+**典型场景：**
+
+| 场景 | 旧实现 | 新实现 | 清理要求 |
+|------|-------|-------|---------|
+| 性能优化 | 循环处理单股票 | 向量化处理多股票 | 删除循环版本函数 |
+| 算法重构 | 单数据点函数 | 向量化版本 | 删除单数据点函数 |
+| 公共函数复用 | 本地实现 | common/ 公共函数 | 删除本地实现 |
+
+**正确示例：**
+```python
+# ✓ 正确：向量化版本替代循环版本后，删除旧函数
+
+# 旧版本（删除）：
+# def calculate_single_stock(stock_df): ...  # 已删除
+
+# 新版本（保留）：
+def calculate_all_stocks_vectorized(factor_df):
+    return factor_df.groupby('asset').transform(...)
+```
+
+**禁止行为：**
+```python
+# ❌ 禁止：保留旧函数但从不调用（死代码）
+def calculate_single_stock(stock_df):  # 死代码！
+    """单股票版本，从未被调用"""
+    return stock_df.rolling(20).mean()
+
+def calculate_all_stocks_vectorized(factor_df):  # 实际使用
+    """向量化版本"""
+    return factor_df.groupby('asset').transform(...)
+
+# calculate_single_stock 定义后从未被调用，是死代码
+```
+
+**为何必须清理死代码：**
+1. 死代码误导读者：以为有两条实现路径可选
+2. 死代码增加维护成本：修改逻辑时需同步多处
+3. 死代码可能不一致：与新实现产生偏差
+4. 代码审计浪费时间：分析死代码的用途
+
+---
+
 ## 函数签名变更同步规范
 
 **核心原则：** 返回值变更时必须同步更新类型注解和 docstring。

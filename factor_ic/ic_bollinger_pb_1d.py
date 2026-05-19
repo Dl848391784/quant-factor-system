@@ -181,74 +181,8 @@ def load_data_from_cache(
 
 
 # ============================================================
-# 布林带%B 因子计算函数
+# 布林带%B 因子计算函数（向量化版本）
 # ============================================================
-
-def calculate_bollinger_bands(
-    close_series: pd.Series,
-    n: int = 20,
-    k: float = 2.0
-) -> Tuple[pd.Series, pd.Series, pd.Series]:
-    """
-    计算布林带上轨、中轨、下轨
-    
-    公式：
-    - Middle Band = SMA(Close, N)
-    - Upper Band = Middle Band + K × StdDev(Close, N)
-    - Lower Band = Middle Band - K × StdDev(Close, N)
-    
-    Args:
-        close_series: 收盘价序列
-        n: 移动平均周期（默认 20）
-        k: 标准差倍数（默认 2.0）
-        
-    Returns:
-        (upper_band, middle_band, lower_band)
-    """
-    # 计算中轨（SMA）
-    middle_band = close_series.rolling(window=n, min_periods=1).mean()
-    
-    # 计算标准差
-    std_dev = close_series.rolling(window=n, min_periods=1).std()
-    
-    # 计算上轨
-    upper_band = middle_band + k * std_dev
-    
-    # 计算下轨
-    lower_band = middle_band - k * std_dev
-    
-    return upper_band, middle_band, lower_band
-
-
-def calculate_percent_b(
-    close: float,
-    upper_band: float,
-    lower_band: float
-) -> float:
-    """
-    计算 %B 值
-    
-    公式：%B = (Close - Lower Band) / (Upper Band - Lower Band)
-    
-    边界处理：
-    - 当 Upper == Lower 时，返回 0.5（避免除零）
-    
-    Args:
-        close: 当日收盘价
-        upper_band: 上轨
-        lower_band: 下轨
-        
-    Returns:
-        %B 值
-    """
-    diff = upper_band - lower_band
-    
-    if diff == 0 or pd.isna(diff):
-        return 0.5  # 避免除零
-    
-    percent_b = (close - lower_band) / diff
-    return percent_b
-
 
 def calculate_bollinger_pb_1d_factor(
     factor_df: pd.DataFrame,
