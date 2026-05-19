@@ -3204,6 +3204,118 @@ from factor_ic.common.ic_calculator import calculate_ic_statistics  # ✗ 分散
 
 ---
 
+## 全量路径与增量路径防御对称规范
+
+### 核心原则
+
+**全量路径与增量路径必须保持一致的防御机制。防御检查（如日期格式断言）不应只在某一条路径执行，两条路径都应有等效的防御。**
+
+### 问题背景
+
+```
+防御不对称问题：
+
+旧代码（错误）：
+```python
+# 增量路径：有日期格式断言
+def _incremental_update(...):
+    # 日期格式断言（遵循 PROJECT.md 日期字符串比较规范)
+    for d in dates_to_check:
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', str(d)):
+            raise ValueError(f"日期格式不符合 YYYY-MM-DD 约定: {d}")
+
+# 全量路径：无日期格式断言
+def calculate_daily_ic_series(...):
+    dates = [str(d) for d in ic_series.index]  # ✗ 无格式检查
+    period_start = raw_metadata['period_start']  # ✗ 无格式检查
+```
+
+问题后果：
+- 增量路径检查日期格式，全量路径不检查
+- 防御不对称：全量路径可能通过错误的日期格式
+- 如果日期格式错误（如 '2024/01/01' 或 '2024-1-1'）
+- 增量路径会报错，全量路径不会报错
+- 导致下游问题：JSON 序列化失败、日期比较错误
+```
+
+### 正确实现
+
+```python
+# ✓ 正确：两条路径都有日期格式断言
+# 全量路径
+def calculate_daily_ic_series(...):
+    # 转换为 JSON 友好格式
+    dates = [str(d) for d in ic_series.index]
+    
+    # 日期格式断言（遵循 PROJECT.md 日期字符串比较规范）
+    # 核心原则：全量路径与增量路径保持一致的防御机制
+    dates_to_check = [dates[0] if len(dates) > 0 else None,
+                      dates[-1] if len(dates) > 0 else None,
+                      period_start, period_end]
+    
+    for d in dates_to_check:
+        if d is not None and not re.match(r'^\d{4}-\d{2}-\d{2}$', str(d)):
+            raise ValueError(f"日期格式不符合 YYYY-MM-DD 约定: {d}")
+
+# 增量路径
+def _incremental_update(...):
+    # 日期格式断言（遵循 PROJECT.md 日期字符串比较规范)
+    dates_to_check = [all_dates[0], all_dates[-1], raw_metadata['period_start'], raw_metadata['period_end']]
+    
+    for d in dates_to_check:
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', str(d)):
+            raise ValueError(f"日期格式不符合 YYYY-MM-DD 约定: {d}")
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：只在一条路径有防御检查
+# 增量路径：有检查
+def _incremental_update(...):
+    for d in dates_to_check:
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', str(d)):
+            raise ValueError(...)
+
+# 全量路径：无检查  # ✗ 防御不对称
+def calculate_daily_ic_series(...):
+    dates = [str(d) for d in ic_series.index]  # ✗ 直接使用，无检查
+
+# ❌ 禁止：防御检查不一致
+# 问题：
+# - 某一条路径可能通过错误的格式
+# - 增量路径报错，全量路径不报错
+# - 导致下游问题
+# - 维护者困惑：为什么只有一条路径报错？
+```
+
+### 为何必须保持防御对称
+
+1. **一致性**：两条路径应有相同的防御机制
+2. **可靠性**：避免某一条路径通过错误的格式
+3. **可维护性**：维护者不会困惑为何只有一条路径报错
+4. **避免下游问题**：错误的日期格式会导致 JSON 序列化失败、日期比较错误
+
+### 适用范围
+
+此规范适用于所有全量/增量路径：
+1. **日期格式断言**：全量和增量路径都应检查
+2. **数据类型校验**：全量和增量路径都应校验
+3. **边界检查**：全量和增量路径都应检查
+4. **任何防御性编程**
+
+### 检查清单
+
+```
+□ 全量路径和增量路径都有日期格式断言
+□ 防御检查在两条路径保持一致
+□ 避免只在一条路径有防御
+□ 两条路径都应验证数据格式
+□ 保持防御对称，避免下游问题
+```
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |
