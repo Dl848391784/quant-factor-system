@@ -3316,6 +3316,112 @@ def calculate_daily_ic_series(...):
 
 ---
 
+## 可选字段回退逻辑规范
+
+### 核心原则
+
+**可选字段的回退逻辑必须依赖必需字段（已校验）。禁止在 required_fields 中包含可选字段，这会导致回退逻辑永远不会触发（矛盾设计）。**
+
+### 问题背景
+
+```
+回退逻辑矛盾问题：
+
+旧代码（错误）：
+```python
+# required_fields 包含可选字段
+required_fields = [
+    'ic_series', 'ic_mean', 'ic_std', 'icir', 'p_value', 'p_value_display',  # ✗ 矛盾
+    ...
+]
+
+# 回退逻辑（永远不会触发）
+'p_value_display': result.get('p_value_display', str(round(result['p_value'], 6)))
+```
+
+问题后果：
+- required_fields 包含 'p_value_display'
+- 缺少 'p_value_display' 时校验抛出 RuntimeError
+- 回退逻辑永远不会触发
+- 矛盾设计：既然校验会报错，为何还有回退逻辑？
+
+依赖问题：
+- 回退逻辑使用 result['p_value'] 作为回退值
+- 如果同时缺少 'p_value_display' 和 'p_value'，回退逻辑抛出 KeyError
+- 虽然 required_fields 包含 'p_value'，但如果不包含 'p_value_display'...
+- 回退逻辑会因缺少 'p_value' 而抛出 KeyError
+```
+
+### 正确实现
+
+```python
+# ✓ 正确：区分必需字段和可选字段
+# 核心原则：p_value 是必需字段（回退逻辑依赖），p_value_display 是可选字段（可从 p_value 计算）
+required_fields = [
+    'ic_series', 'ic_mean', 'ic_std', 'icir', 'p_value',  # p_value 必需
+    'statistical_significance', 'factor_direction',
+    'economic_significance', 'positive_ratio', 'summary'
+]
+# p_value_display 是可选字段，不校验（可从 p_value 计算回退值）
+
+missing_fields = [f for f in required_fields if f not in result]
+if missing_fields:
+    raise RuntimeError(...)
+
+# 回退逻辑（可靠依赖 p_value）
+# p_value_display 回退逻辑说明（遵循 MODULE.md 可选字段回退逻辑规范）
+# 核心原则：p_value_display 是可选字段，缺少时从 p_value 计算
+# p_value 是必需字段（已校验），回退逻辑可靠
+'p_value_display': result.get('p_value_display', str(round(result['p_value'], 6)))
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：required_fields 包含可选字段
+required_fields = [
+    'ic_series', 'ic_mean', 'ic_std', 'icir', 'p_value', 'p_value_display',  # ✗ 矛盾
+    ...
+]
+
+# ❌ 禁止：回退逻辑依赖未校验的字段
+'p_value_display': result.get('p_value_display', str(round(result['p_value'], 6)))  # ✗ p_value 未校验？
+
+# ❌ 禁止：矛盾设计
+# 问题：
+# - 既然校验会报错，为何还有回退逻辑？
+# - 回退逻辑永远不会触发
+# - 代码维护者困惑：为何有两种处理方式？
+```
+
+### 为何必须区分必需字段和可选字段
+
+1. **消除矛盾**：required_fields 包含可选字段是矛盾设计
+2. **回退逻辑有效**：可选字段缺少时，回退逻辑才会触发
+3. **依赖可靠**：回退逻辑依赖必需字段（已校验），不会抛出 KeyError
+4. **代码清晰**：维护者不会困惑为何有两种处理方式
+
+### 适用范围
+
+此规范适用于所有有回退逻辑的可选字段：
+1. **p_value_display**：可选字段，可从 p_value 计算
+2. **任何有回退逻辑的字段**：必需区分必需字段和可选字段
+3. **字段校验逻辑**：required_fields 只包含必需字段
+4. **回退逻辑设计**：依赖必需字段（已校验）
+
+### 检查清单
+
+```
+□ 区分必需字段和可选字段
+□ required_fields 只包含必需字段
+□ 可选字段不在 required_fields 中
+□ 回退逻辑依赖必需字段（已校验）
+□ 回退逻辑不会因缺少依赖字段而抛出 KeyError
+□ 注释说明可选字段的回退逻辑
+```
+
+---
+
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |
