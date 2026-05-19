@@ -685,7 +685,9 @@ def _incremental_update(
         'ic_metrics': {
             'ic_mean': round(result['ic_mean'], 6),
             'ic_std': round(result['ic_std'], 6),
-            'icir': round(result['icir'], 4)  # ✓ 12空格缩进，与上方字段对齐
+            'icir': round(result['icir'], 4),
+            'p_value': round(result['p_value'], 6),  # ✓ 与全量路径一致
+            'p_value_display': result.get('p_value_display', str(round(result['p_value'], 6)))  # ✓ 与全量路径一致
         },
         'sample_stats': {  # ✓ 8空格缩进，与上方字段对齐
             'total_days': raw_metadata.get('total_days', 0),  # 直接使用原始缓存天数（遵循 MODULE.md total_days 规范）

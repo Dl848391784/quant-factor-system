@@ -879,7 +879,64 @@ merged_data = {
 ## 函数返回值契约规范
 
 **核心原则:** 调用方必须校验返回值字段存在性。
+
+---
+
+## ic_metrics 字段规范
+
+### 核心原则
+**ic_metrics 字段结构在两条路径（全量/增量）中必须完全一致。**
+
+### 字段定义
+
+| 字段 | 类型 | 来源 | 用途 |
+|------|------|------|------|
+| `ic_mean` | float | `result['ic_mean']` | IC 均值（核心指标） |
+| `ic_std` | float | `result['ic_std']` | IC 标准差 |
+| `icir` | float | `result['icir']` | ICIR（信息系数比率） |
+| `p_value` | float | `result['p_value']` | p 值（统计显著性） |
+| `p_value_display` | str | `result['p_value_display']` | p 值显示格式（科学计数法或小数） |
+
+### 正确实现（两条路径一致）
 ```python
+# ✓ 全量路径（calculate_daily_ic_series）
+'ic_metrics': {
+    'ic_mean': round(result['ic_mean'], 6),
+    'ic_std': round(result['ic_std'], 6),
+    'icir': round(result['icir'], 4),
+    'p_value': round(result['p_value'], 6),
+    'p_value_display': result.get('p_value_display', str(round(result['p_value'], 6)))
+}
+
+# ✓ 增量路径（_incremental_update）：必须与全量路径完全一致
+'ic_metrics': {
+    'ic_mean': round(result['ic_mean'], 6),
+    'ic_std': round(result['ic_std'], 6),
+    'icir': round(result['icir'], 4),
+    'p_value': round(result['p_value'], 6),
+    'p_value_display': result.get('p_value_display', str(round(result['p_value'], 6)))
+}
+
+# ❌ 禁止：增量路径缺少字段
+'ic_metrics': {
+    'ic_mean': round(result['ic_mean'], 6),
+    'ic_std': round(result['ic_std'], 6),
+    'icir': round(result['icir'], 4)  # 缺少 p_value 和 p_value_display
+}
+```
+
+### 下游依赖
+**下游代码可能读取以下字段：**
+```python
+# 前端或分析代码
+ic_mean = ic_data['ic_metrics']['ic_mean']
+p_value = ic_data['ic_metrics']['p_value']  # 必须存在
+p_value_display = ic_data['ic_metrics']['p_value_display']  # 必须存在
+```
+
+---
+
+**校验示例:**
 # 定义必需字段列表
 required_fields = [
     'ic_series', 'ic_mean', 'ic_std', 'icir',

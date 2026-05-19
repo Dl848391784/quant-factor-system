@@ -1,11 +1,12 @@
 # Bollinger_PB_1D IC 计算流程文档
 
-> 生成时间: 2026-05-19 23:45 (北京时间)
-> 实测数据时间: 2026-05-19 23:45 (北京时间)
-> 审阅版本: v2.3
+> 生成时间: 2026-05-19 23:50 (北京时间)
+> 实测数据时间: 2026-05-19 23:50 (北京时间)
+> 审阅版本: v2.4
 > 更新内容:
 >   ...
->   26. 修复缩进错误：'icir' 和 'sample_stats' 字段缩进不一致（IndentationError）+ 补充 MODULE.md 字典结构缩进规范
+>   27. 修复增量路径 rolling_ic_mean NaN 处理缺失：显式转换 NaN → None（与全量路径一致）+ 补充 MODULE.md 两条路径一致性要求
+>   28. 修复增量路径 ic_metrics 缺少 p_value/p_value_display 字段（KeyError）+ 补充 MODULE.md ic_metrics 字段规范
 >   27. 修复增量路径 rolling_ic_mean NaN 处理缺失：显式转换 NaN → None（与全量路径一致）+ 补充 MODULE.md 两条路径一致性要求
 >   26. 修复缩进错误：'icir' 和 'sample_stats' 字段缩进不一致（IndentationError）+ 补充 MODULE.md 字典结构缩进规范
 >   25. 删除冗余 max 比较逻辑：total_days 直接使用 raw_metadata，遵循 MODULE.md total_days 使用规范
@@ -381,6 +382,7 @@ python factor_ic/ic_bollinger_pb_1d.py --force-full
 | v2.1 | 2026-05-19 | 删除冗余 max 比较逻辑：total_days 直接使用 raw_metadata + 补充 MODULE.md total_days 使用规范 |
 | v2.2 | 2026-05-19 | 修复缩进错误（IndentationError）：'icir' 和 'sample_stats' 字段缩进不一致 + 补充 MODULE.md 字典结构缩进规范 |
 | v2.3 | 2026-05-19 | 修复增量路径 rolling_ic_mean NaN 处理缺失（显式转换 NaN → None）+ 补充 MODULE.md 两条路径一致性要求 |
+| v2.4 | 2026-05-19 | 修复增量路径 ic_metrics 缺少 p_value/p_value_display 字段（KeyError）+ 补充 MODULE.md ic_metrics 字段规范 |
 
 ---
 
