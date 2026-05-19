@@ -678,9 +678,9 @@ def _incremental_update(
         'ic_metrics': {
             'ic_mean': round(result['ic_mean'], 6),
             'ic_std': round(result['ic_std'], 6),
-            'icir': round(result['icir'], 4)
+            'icir': round(result['icir'], 4)  # ✓ 12空格缩进，与上方字段对齐
         },
-'sample_stats': {
+        'sample_stats': {  # ✓ 8空格缩进，与上方字段对齐
             'total_days': raw_metadata.get('total_days', 0),  # 直接使用原始缓存天数（遵循 MODULE.md total_days 规范）
             'valid_days': len(valid_ic),
             'avg_stocks_per_day': int(factor_df_full.groupby('date').size().mean()),

@@ -804,6 +804,57 @@ period_start = str(factor_df['date'].min())  # 2024-01-20（错误！）
 
 ---
 
+## 字典结构缩进规范
+
+### 核心原则
+**JSON 字典结构必须保持一致的缩进层级，缩进不一致会导致 IndentationError。**
+
+### 缩进层级定义
+```python
+# ✓ 正确：多层级字典缩进
+merged_data = {
+    'factor_name': 'bollinger_pb_1d',      # 第1层：8空格
+    'ic_metrics': {                        # 第1层：8空格
+        'ic_mean': 0.05,                   # 第2层：12空格
+        'ic_std': 0.15                     # 第2层：12空格
+    },                                     # 第1层闭合：8空格
+    'sample_stats': {                      # 第1层：8空格
+        'total_days': 545                  # 第2层：12空格
+    }                                      # 第1层闭合：8空格
+}
+
+# ❌ 禁止：缩进不一致（IndentationError）
+merged_data = {
+    'factor_name': 'bollinger_pb_1d',
+    'ic_metrics': {
+        'ic_mean': 0.05,
+        'ic_std': 0.15
+    },
+'sample_stats': {  # ❌ 缺少缩进
+    'total_days': 545
+}
+```
+
+### 缩进规则
+1. **第1层字段：** 8空格缩进（函数体内字典）
+2. **第2层字段：** 12空格缩进（嵌套字典内）
+3. **第3层字段：** 16空格缩进（三层嵌套）
+4. **闭合括号：** 与同级字段对齐（同级缩进）
+
+### 常见错误
+```python
+# ❌ 错误：字典字段缩进缺失
+'sample_stats': {  # 应有8空格缩进
+
+# ❌ 错误：嵌套字段缩进不一致
+'icir': round(result['icir'], 4)  # 应有12空格缩进
+
+# ✓ 正确：所有字段缩进一致
+        'icir': round(result['icir'], 4)  # 12空格缩进
+```
+
+---
+
 ## 函数返回值契约规范
 
 **核心原则:** 调用方必须校验返回值字段存在性。
