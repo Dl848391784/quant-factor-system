@@ -54,6 +54,11 @@ from factor_ic.common.convert_types import convert_to_native_types
 # 注意：修改此值会影响所有 IC 计算逻辑，需同步更新相关注释
 DEFAULT_MIN_STOCKS = 10
 
+# 浮点数精度容差：用于浮点数等值比较（替代 == 0）
+# 原因：浮点数运算结果直接 == 0 比较会漏判极小值（如 1e-15）
+# 注意：修改此值会影响 RSV 计算等浮点数除零判断逻辑
+EPSILON = 1e-10
+
 # 缓存路径
 CACHE_DIR = Path(__file__).parent.parent / 'cache' / 'factor_data'
 FACTOR_CACHE = CACHE_DIR / 'factor_data.json.gz'
@@ -263,7 +268,7 @@ def calculate_kdj_j_factor(
     
     # 使用精度容差判断浮点数除零（遵循 PROJECT.md 浮点数等值比较规范）
     # 原因：diff 是浮点数运算结果，直接 == 0 比较会漏判极小值（如 1e-15）
-    EPSILON = 1e-10  # 浮点数精度容差
+    # 使用模块级常量 EPSILON，便于统一管理和复用
     diff = factor_df['rolling_high'] - factor_df['rolling_low']
     factor_df['rsv'] = np.where(
         np.abs(diff) < EPSILON,  # 精度容差判断（替代 diff == 0）
