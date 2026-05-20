@@ -667,11 +667,13 @@ def calculate_daily_ic_series(
             'end': period_end
         },
         'ic_metrics': {
+            # 字段去重化规范（遵循 MODULE.md 字段去重化规范）
+            # - ic_metrics 只包含核心 IC 指标：ic_mean, ic_std, icir
+            # - p_value, t_stat 等在 statistical_significance 中独立输出
+            # - 避免字段重复出现导致数据结构冗余
             'ic_mean': round(result['ic_mean'], 6),
             'ic_std': round(result['ic_std'], 6),
-            'icir': round(result['icir'], 4),
-            'p_value': round(result['p_value'], 6),
-            'p_value_display': result.get('p_value_display', str(round(result['p_value'], 6)))
+            'icir': round(result['icir'], 4)
         },
         
         # 五维度判断（独立输出，遵循 PROJECT.md 规范）

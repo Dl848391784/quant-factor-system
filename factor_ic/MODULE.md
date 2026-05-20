@@ -489,6 +489,77 @@ raise RuntimeError(
 
 ---
 
+## 字段去重化规范（2026-05-20新增）
+
+### 核心原则
+
+**原则：** 同一字段只在一个位置输出，避免数据结构冗余。
+
+**场景：**
+- `ic_metrics` 和 `statistical_significance` 可能包含相同字段
+- `ic_metrics` 和 `result` 顶层字段可能重复
+
+**正确示例：**
+```python
+# ✓ 正确：ic_metrics 只包含核心 IC 指标，p_value 在 statistical_significance 中
+'ic_metrics': {
+    'ic_mean': round(result['ic_mean'], 6),
+    'ic_std': round(result['ic_std'], 6),
+    'icir': round(result['icir'], 4)
+},
+'statistical_significance': {
+    'p_value': ss_dict['p_value'],
+    'p_value_display': ss_dict['p_value_display'],
+    't_stat': ss_dict['t_stat'],
+    'is_significant': ss_dict['is_significant'],
+    'conclusion': ss_dict['conclusion']
+}
+```
+
+**禁止行为：**
+```python
+# ❌ 禁止：字段在多处重复出现
+'ic_metrics': {
+    'ic_mean': round(result['ic_mean'], 6),
+    'p_value': round(result['p_value'], 6),  # 冗余！statistical_significance 中已有
+    'p_value_display': str(round(result['p_value'], 6))  # 冗余！且回退值无意义
+},
+'statistical_significance': {
+    'p_value': ss_dict['p_value'],  # 重复
+    'p_value_display': ss_dict['p_value_display']
+}
+```
+
+### 字段归属表
+
+| 字段 | 输出位置 | 说明 |
+|------|----------|------|
+| ic_mean, ic_std, icir | `ic_metrics` | 核心 IC 指标 |
+| p_value, p_value_display, t_stat | `statistical_significance` | 统计显著性判断 |
+| positive_ratio | 顶层或 `ic_distribution_consistency` | IC 分布一致性判断使用 |
+
+### p_value_display 回退逻辑说明
+
+**场景：** `p_value_display` 是可选字段，上游可能不提供。
+
+**正确做法：**
+```python
+# ✓ 正确：在 statistical_significance 中使用 .get() 安全访问，有意义的回退值
+'p_value_display': ss_dict.get('p_value_display', str(round(ss_dict['p_value'], 4)))
+```
+
+**禁止行为：**
+```python
+# ❌ 禁止：回退值与 p_value 完全相同（只是类型转换）
+'p_value_display': str(round(result['p_value'], 6))  # round(x,6) 再 str()，值不变
+```
+
+**设计原则：**
+- `p_value_display` 应由上游 `_format_p_value()` 生成，格式化逻辑一致
+- 回退值仅在极端情况下使用，应与上游格式化逻辑对齐（如 `round(x, 4)` 或科学计数法）
+
+---
+
 ## 日期类型一致性规范
 
 ### 日期格式断言
