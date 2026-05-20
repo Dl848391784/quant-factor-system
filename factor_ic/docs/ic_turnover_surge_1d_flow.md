@@ -25,6 +25,7 @@
 >   19. [v1.4] 添加 sample_stats.avg_stocks_period 字段：口径范围说明，遵循 MODULE.md 输出结构统一性规范
 >   20. [v1.4] 改进异常处理注释：说明为何保留 FileNotFoundError 原始类型
 >   21. [v1.4] 改进增量模式注释：说明设计决策和技术原因
+>   22. [v1.4] 修复跨脚本输出结构不一致：将 dates/ic_values/rolling_ic_mean 提升为顶层字段（遵循 MODULE.md 输出结构统一性规范）
 
 ---
 

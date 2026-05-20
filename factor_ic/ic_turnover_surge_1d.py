@@ -485,12 +485,10 @@ def _full_recalculate(
         'icir_stability': ic_data['icir_stability'],
         'ic_distribution_consistency': ic_data['ic_distribution_consistency'],
         
-        # ic_series 输出字段（遵循 PROJECT.md ic_series 结构规范）
-        'ic_series': {
-            'dates': ic_data['dates'],
-            'ic_values': ic_data['ic_values'],
-            'rolling_ic_mean': ic_data['rolling_ic_mean']
-        },
+        # ic_series 输出字段（遵循 MODULE.md 输出结构统一性规范：顶层字段）
+        'dates': ic_data['dates'],
+        'ic_values': ic_data['ic_values'],
+        'rolling_ic_mean': ic_data['rolling_ic_mean'],
         
         # 额外字段（保留原有功能）
         'filter_stats': filter_stats,
