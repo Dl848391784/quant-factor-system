@@ -297,6 +297,7 @@ def calculate_turnover_surge_ic(
     
     if factor_data.empty:
         return {
+            # PROJECT.md 规范必需字段
             'factor_name': 'turnover_surge_1d',
             'calculation_date': datetime.now().strftime('%Y-%m-%d'),
             'period': {'start': '', 'end': ''},
@@ -317,8 +318,39 @@ def calculate_turnover_surge_ic(
                     'description': '平均每日有效股票数统计范围'
                 }
             },
-            'ic_series': None,
-            'summary': '数据不足，无法计算IC'
+            
+            # 五维度判断（空数据默认值）
+            'statistical_significance': {
+                'is_significant': False,
+                'p_value_threshold': 0.05,
+                't_stat_threshold': 1.96,
+                'description': '数据不足，无法判断统计显著性'
+            },
+            'factor_direction': {
+                'ic_mean_sign': 'unknown',
+                'ic_mean_sign_reason': '数据不足，无法确定因子方向',
+                'ic_mean_abs': 0.0,
+                'direction_threshold': 0.03,
+                'description': '数据不足，无法确定因子方向'
+            },
+            'economic_significance': {
+                'icir': 0.0,
+                'icir_threshold': 0.5,
+                'is_economically_significant': False,
+                'description': '数据不足，无法判断经济显著性'
+            },
+            
+            # 顶层输出字段（遵循 MODULE.md 输出结构统一性规范）
+            'dates': [],
+            'ic_values': [],
+            'rolling_ic_mean': [],
+            
+            # 额外字段
+            'positive_ratio': 0.0,
+            'n_assets': 0,
+            'summary': '数据不足，无法计算IC',
+            'factor_stats': None,
+            'update_mode': 'full'
         }
     
     # 使用公共模块计算 IC（含五维度判断）
@@ -334,6 +366,7 @@ def calculate_turnover_surge_ic(
     except ValueError as e:
         # 公共模块抛出 ValueError（如数据不足）
         return {
+            # PROJECT.md 规范必需字段
             'factor_name': 'turnover_surge_1d',
             'calculation_date': datetime.now().strftime('%Y-%m-%d'),
             'period': {
@@ -357,8 +390,39 @@ def calculate_turnover_surge_ic(
                     'description': '平均每日有效股票数统计范围'
                 }
             },
-            'ic_series': None,
-            'summary': f'无法计算IC: {str(e)}'
+            
+            # 五维度判断（空数据默认值）
+            'statistical_significance': {
+                'is_significant': False,
+                'p_value_threshold': 0.05,
+                't_stat_threshold': 1.96,
+                'description': f'无法判断统计显著性: {str(e)}'
+            },
+            'factor_direction': {
+                'ic_mean_sign': 'unknown',
+                'ic_mean_sign_reason': f'无法确定因子方向: {str(e)}',
+                'ic_mean_abs': 0.0,
+                'direction_threshold': 0.03,
+                'description': f'无法确定因子方向: {str(e)}'
+            },
+            'economic_significance': {
+                'icir': 0.0,
+                'icir_threshold': 0.5,
+                'is_economically_significant': False,
+                'description': f'无法判断经济显著性: {str(e)}'
+            },
+            
+            # 顶层输出字段（遵循 MODULE.md 输出结构统一性规范）
+            'dates': [],
+            'ic_values': [],
+            'rolling_ic_mean': [],
+            
+            # 额外字段
+            'positive_ratio': 0.0,
+            'n_assets': int(factor_data['asset'].nunique()),
+            'summary': f'无法计算IC: {str(e)}',
+            'factor_stats': None,
+            'update_mode': 'full'
         }
     
     # 获取日期范围
