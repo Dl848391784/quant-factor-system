@@ -28,11 +28,7 @@ import numpy as np
 import gzip
 import json
 from typing import Tuple, Dict
-from scipy.stats import spearmanr, norm as scipy_stats_norm
 from datetime import datetime
-
-# scipy.stats.norm.cdf 辅助函数
-scipy_stats_norm_cdf = scipy_stats_norm.cdf
 
 # 导入数据完整性检查模块
 from factor_ic.common.data_completeness import get_ic_output_path
@@ -155,91 +151,6 @@ def load_data_from_cache(
         'period_start': raw_period_start,
         'period_end': raw_period_end,
         'total_days': raw_total_days
-    }
-
-
-def calculate_daily_ic_series(
-    factor_df: pd.DataFrame,
-    return_df: pd.DataFrame,
-    min_stocks: int = DEFAULT_MIN_STOCKS
-) -> dict:
-    """
-    计算每日的 IC 时间序列（量比是正向因子）
-    
-    参数:
-        factor_df: 因子数据
-        return_df: 收益数据
-        min_stocks: 每日最少股票数阈值（遵循 MODULE.md 代码质量规范）
-        
-    返回:
-        dict: IC 计算结果
-    """
-    print(f"\n[计算 IC] 开始计算（正向排名，min_stocks={min_stocks}）...")
-    
-    # 合并数据
-    merged_df = pd.merge(
-        factor_df[['date', 'asset', 'volume_ratio_5']],
-        return_df[['date', 'asset', 'forward_return']],
-        on=['date', 'asset'],
-        how='inner'
-    )
-    
-    # 确保日期是字符串类型
-    merged_df['date'] = merged_df['date'].astype(str)
-    
-    # 按日期分组计算 Rank IC
-    ic_values = []
-    ic_dates = []
-    
-    for date, group in merged_df.groupby('date'):
-        # 过滤 NaN
-        valid = group.dropna(subset=['volume_ratio_5', 'forward_return'])
-        
-        if len(valid) < min_stocks:  # 遵循 MODULE.md 代码质量规范（使用参数而非硬编码）
-            continue
-        
-        # 计算 Spearman Rank IC
-        ic, p_value = spearmanr(valid['volume_ratio_5'], valid['forward_return'])
-        
-        ic_dates.append(date)
-        ic_values.append(ic)
-    
-    ic_series = pd.Series(ic_values, index=ic_dates)
-    
-    # 计算 20 日滚动均值
-    # 计算 20 日滚动均值（min_periods=10，至少需要10个有效值）
-    rolling_mean = ic_series.rolling(window=20, min_periods=10).mean()
-    
-    # 计算统计指标
-    ic_mean = ic_series.mean()
-    ic_std = ic_series.std()
-    icir = abs(ic_mean) / ic_std if ic_std != 0 else 0  # 使用绝对值（PROJECT.md 规范）
-    
-    # t 统计量和显著性
-    n_days = len(ic_series)
-    t_stat = ic_mean / ic_std * np.sqrt(n_days) if ic_std != 0 else 0
-    
-    # 正 IC 比例
-    positive_ratio = (ic_series > 0).mean()
-    
-    # 摘要（遵循 MODULE.md 输出结构统一性规范，不使用星号标识）
-    summary = f"IC均值={ic_mean:.4f}, ICIR={icir:.2f}, 正比例={positive_ratio:.1%}, 因子预测能力{'较弱' if abs(icir) < 0.3 else '中等' if abs(icir) < 0.5 else '较强'}"
-    
-    print(f"[计算 IC] 完成，IC Mean: {ic_mean:.4f}")
-    
-    return {
-        'factor_name': 'volume_ratio_1d',
-        'dates': [str(d) for d in ic_series.index],
-        'ic_values': [round(v, 6) for v in ic_values],
-        'rolling_ic_mean': [round(v, 6) if pd.notna(v) else None for v in rolling_mean.values],  # NaN处理（遵循MODULE.md代码质量规范）
-        'ic_mean': round(ic_mean, 6),
-        'ic_std': round(ic_std, 6),
-        'icir': round(icir, 4),
-        'positive_ratio': round(positive_ratio, 4),
-        't_stat': round(t_stat, 4),
-        'n_days': n_days,
-        'n_assets': factor_df['asset'].nunique(),
-        'summary': summary
     }
 
 
