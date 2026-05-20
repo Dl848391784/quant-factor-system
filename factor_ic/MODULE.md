@@ -138,25 +138,22 @@ IC(d) = spearman_correlation(factor_values_on_day_d, returns_on_day_d+period)
 **选择 Spearman 的原因：**
 1. 对异常值不敏感（Rank变换后）
 2. 不要求线性关系
-3. 适用于非线性因子（如技术指标）
+3. 适用非线性因子（技术指标）
 
 ### IC 统计指标
 
 **必须输出的统计指标：**
-
 | 字段 | 含义 | 计算方式 |
 |------|------|---------|
-| ic_mean | IC均值 | 所有有效日期IC值的算术平均 |
-| ic_std | IC标准差 | 所有有效日期IC值的标准差 |
-| ICIR | 信息比率 | abs(ic_mean) / ic_std |
-| t_stat | t统计量 | ic_mean * sqrt(valid_days) / ic_std |
-| p_value | 显著性p值 | 双尾t检验的p值 |
-| valid_days | 有效IC天数 | 实际参与统计的日期数 |
-| total_days | 总天数 | 原始缓存覆盖的日期数 |
+| ic_mean | IC均值 | 有效日期IC算术平均 |
+| ic_std | IC标准差 | 有效日期IC标准差 |
+| ICIR | 信息比率 | abs(ic_mean)/ic_std |
+| t_stat | t统计量 | ic_mean*sqrt(valid_days)/ic_std |
+| p_value | 显著性p值 | 双尾t检验p值 |
+| valid_days | 有效IC天数 | 参与统计日期数 |
+| total_days | 总天数 | 原始缓存日期数 |
 
-**注意：**
-- ICIR 使用 `abs(ic_mean)`，因为负IC和正IC同等重要
-- p < 0.05 表示统计显著（与 |t| > 1.96 等价）
+**注意：** ICIR用abs(ic_mean)；p<0.05表示统计显著（|t|>1.96）
 
 ### 打印信息规范
 
@@ -174,9 +171,9 @@ print(f"完成！共计算 {total_days} 天 IC 数据")  # 错误！
 **字段选择规则：**
 | 场景 | 正确字段 | 禁止字段 | 说明 |
 |------|---------|---------|------|
-| "共计算X天IC数据" | valid_days | total_days | 实际有效IC天数 |
-| "原始数据覆盖X天" | total_days | valid_days | 缓存范围 |
-| 统计检验样本量 | valid_days | total_days | 参与统计 |
+| "共计算X天IC" | valid_days | total_days | 实际有效IC |
+| "原始数据X天" | total_days | valid_days | 缓存范围 |
+| 统计检验样本 | valid_days | total_days | 参与统计 |
 
 差距原因：计算周期等待（布林带前N-1天NaN）、股票数不足跳过
 
@@ -3727,7 +3724,7 @@ return factor_df, return_df, {'period_start': raw_period_start, ...}
 **为何必须使用原始数据：**
 - dropna 可能过滤掉某些日期的全部股票
 - factor_df['date'].min()/max() 计算的是过滤后的范围
-- 与语义定义冲突："原始缓存覆盖范围" ≠ "过滤后的数据范围"
+- 与语义定义冲突："原始缓存范围" ≠ "过滤后的数据范围"
 
 ## 引用说明
 
