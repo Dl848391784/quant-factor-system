@@ -27,8 +27,11 @@ import numpy as np
 import gzip
 import json
 from typing import Tuple, Dict, Any
-from scipy.stats import spearmanr
+from scipy.stats import spearmanr, norm as scipy_stats_norm
 from datetime import datetime
+
+# scipy.stats.norm.cdf 辅助函数
+scipy_stats_norm_cdf = scipy_stats_norm.cdf
 
 # 导入数据完整性检查模块
 from factor_ic.common.data_completeness import get_ic_output_path
@@ -190,20 +193,7 @@ def calculate_daily_ic_series(
     # 正 IC 比例
     positive_ratio = (ic_series > 0).mean()
     
-    # 显著性判断（统一标准阈值）
-    # |t|>3.29 → "***" (p<0.001, 99.9%置信度)
-    # |t|>2.58 → "**" (p<0.01, 99%置信度)
-    # |t|>1.96 → "*" (p<0.05, 95%置信度)
-    if abs(t_stat) > 3.29:
-        significance = "***"
-    elif abs(t_stat) > 2.58:
-        significance = "**"
-    elif abs(t_stat) > 1.96:
-        significance = "*"
-    else:
-        significance = ""
-    
-    # 摘要
+    # 摘要（遵循 MODULE.md 输出结构统一性规范，不使用星号标识）
     summary = f"IC均值={ic_mean:.4f}, ICIR={icir:.2f}, 正比例={positive_ratio:.1%}, 因子预测能力{'较弱' if abs(icir) < 0.3 else '中等' if abs(icir) < 0.5 else '较强'}"
     
     print(f"[计算 IC] 完成，IC Mean: {ic_mean:.4f}")
@@ -218,7 +208,6 @@ def calculate_daily_ic_series(
         'icir': round(icir, 4),
         'positive_ratio': round(positive_ratio, 4),
         't_stat': round(t_stat, 4),
-        'significance': significance,
         'n_days': n_days,
         'n_assets': factor_df['asset'].nunique(),
         'summary': summary
@@ -363,7 +352,7 @@ def run_volume_ratio_analysis(
     print(f"  - IC 均值: {ic_data['ic_mean']:.4f}")
     print(f"  - ICIR: {ic_data['icir']:.2f}")
     print(f"  - 正比例: {ic_data['positive_ratio']:.1%}")
-    print(f"  - t 统计量: {ic_data['t_stat']:.2f} {ic_data['significance']}")
+    print(f"  - t 统计量: {ic_data['t_stat']:.2f}{' ***' if abs(ic_data['t_stat']) > 3.29 else ' **' if abs(ic_data['t_stat']) > 2.58 else ' *' if abs(ic_data['t_stat']) > 1.96 else ''}")
     
     # ========== Step 3: 分层回测 ==========
     print(f"\n[3/4] 执行分层回测...")
@@ -415,18 +404,65 @@ def run_volume_ratio_analysis(
         'ic_mean': ic_data['ic_mean'],
         'ic_std': ic_data['ic_std'],
         'icir': ic_data['icir'],
-        'p_value': round(2 * (1 - __import__('scipy.stats', fromlist=['stats']).stats.norm.cdf(abs(ic_data['t_stat']))), 6) if ic_data['t_stat'] else None,
+        'p_value': round(float(2 * (1 - scipy_stats_norm_cdf(abs(ic_data['t_stat'])))), 6) if ic_data['t_stat'] else None,
         # 额外保留字段（便于分析）
         'positive_ratio': ic_data['positive_ratio'],
-        't_stat': ic_data['t_stat'],
-        'significance': ic_data['significance']
+        't_stat': ic_data['t_stat']
     }
     
-    # 样本统计（符合 PROJECT.md 规范）
+    # 样本统计（遵循 MODULE.md 输出结构统一性规范）
     sample_stats = {
-        'total_days': len(all_dates),           # 数据范围内所有日期（遵循 PROJECT.md 规范）
-        'valid_days': ic_data['n_days'],        # 实际计算出 IC 的天数（有效天数）
-        'avg_stocks_per_day': int(factor_df.groupby('date').size().mean())
+        'total_days': raw_metadata['total_days'],  # 原始缓存日期数（dropna 前）
+        'valid_days': ic_data['n_days'],           # 实际计算出 IC 的天数（有效天数）
+        'avg_stocks_per_day': int(factor_df.groupby('date').size().mean()),  # 过滤后每日平均股票数
+        'avg_stocks_period': {  # 口径范围说明（遵循 MODULE.md 统计口径规范）
+            'start': period_start,
+            'end': period_end,
+            'description': '过滤后每日平均股票数（dropna 后）'
+        }
+    }
+    
+    # 五维度判断（遵循 MODULE.md 输出结构统一性规范）
+    # 第1维：统计显著性（t检验）
+    statistical_significance = {
+        't_stat': ic_data['t_stat'],
+        'p_value': round(float(2 * (1 - scipy_stats_norm_cdf(abs(ic_data['t_stat'])))), 6) if ic_data['t_stat'] else None,
+        'is_significant': abs(ic_data['t_stat']) > 1.96,  # p < 0.05 等价于 |t| > 1.96
+        'threshold': 1.96,
+        'description': f"|t|={abs(ic_data['t_stat']):.2f} {'>' if abs(ic_data['t_stat']) > 1.96 else '≤'} 1.96，{'统计显著' if abs(ic_data['t_stat']) > 1.96 else '不显著'}"
+    }
+    
+    # 第2维：因子方向（IC均值符号）
+    factor_direction_judgment = {
+        'ic_mean_sign': 'negative' if ic_data['ic_mean'] < -0.03 else 'positive' if ic_data['ic_mean'] > 0.03 else 'neutral',
+        'ic_mean_abs': abs(ic_data['ic_mean']),
+        'direction_threshold': 0.03,
+        'description': f"IC均值={ic_data['ic_mean']:.4f}，{'反向因子' if ic_data['ic_mean'] < -0.03 else '正向因子' if ic_data['ic_mean'] > 0.03 else '方向不明确'}"
+    }
+    
+    # 第3维：经济显著性（ICIR）
+    economic_significance = {
+        'icir': ic_data['icir'],
+        'icir_threshold': 0.5,
+        'is_economically_significant': ic_data['icir'] > 0.5,
+        'description': f"ICIR={ic_data['icir']:.2f} {'>' if ic_data['icir'] > 0.5 else '≤'} 0.5，{'经济显著' if ic_data['icir'] > 0.5 else '不显著'}"
+    }
+    
+    # 第4维：ICIR 稳定性（滚动 ICIR 标准差）
+    # 简化实现：使用 IC 时间序列的标准差作为稳定性代理
+    icir_stability = {
+        'is_stable': ic_data['ic_std'] < 0.15,  # IC 标准差小于阈值表示稳定
+        'rolling_icir_std': ic_data['ic_std'],  # 使用 IC 标准差作为稳定性代理
+        'stability_threshold': 0.15,
+        'description': f"IC_std={ic_data['ic_std']:.4f} {'<' if ic_data['ic_std'] < 0.15 else '≥'} 0.15，{'稳定' if ic_data['ic_std'] < 0.15 else '不稳定'}"
+    }
+    
+    # 第5维：IC 分布一致性（正 IC 比例）
+    ic_distribution_consistency = {
+        'is_consistent': ic_data['positive_ratio'] > 0.55 if ic_data['ic_mean'] > 0 else ic_data['positive_ratio'] < 0.45,
+        'positive_ratio': ic_data['positive_ratio'],
+        'consistency_threshold': 0.55,
+        'description': f"正IC比例={ic_data['positive_ratio']:.1%}，{'分布正常' if (ic_data['ic_mean'] > 0 and ic_data['positive_ratio'] > 0.55) or (ic_data['ic_mean'] < 0 and ic_data['positive_ratio'] < 0.45) else '分布异常'}"
     }
     
     # IC 时间序列
@@ -491,9 +527,9 @@ def run_volume_ratio_analysis(
             }
         }
     
-    # 构建完整结果（符合 PROJECT.md 规范）
+    # 构建完整结果（遵循 MODULE.md 输出结构统一性规范）
     result = {
-        # PROJECT.md 必需字段
+        # MODULE.md 必需字段
         'factor_name': 'volume_ratio_1d',
         'calculation_date': datetime.now().strftime('%Y-%m-%d'),
         'period': {
@@ -503,11 +539,24 @@ def run_volume_ratio_analysis(
         'ic_metrics': ic_metrics,
         'sample_stats': sample_stats,
         
+        # 五维度判断（遵循 MODULE.md 输出结构统一性规范）
+        'statistical_significance': statistical_significance,
+        'factor_direction': factor_direction_judgment,
+        'economic_significance': economic_significance,
+        'icir_stability': icir_stability,
+        'ic_distribution_consistency': ic_distribution_consistency,
+        
         # 扩展字段（分层回测等）
         'ic_series': ic_series,
         'layered_result': layered_result_json,
+        'raw_metadata': {  # 原始缓存元信息（遵循 MODULE.md 输出结构统一性规范）
+            'period_start': raw_metadata['period_start'],
+            'period_end': raw_metadata['period_end'],
+            'total_days': raw_metadata['total_days']
+        },
+        'update_mode': 'full',  # 更新模式标记（遵循 MODULE.md 输出结构统一性规范）
         'params': {
-            'n_days': n_days,
+            'n_days': ic_data['n_days'],  # 使用 ic_data['n_days']，而非未定义的 n_days 变量
             'num_layers': num_layers,
             'factor_col': 'volume_ratio_5',
             'return_col': 'forward_return_1d',
@@ -563,4 +612,22 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    # 主入口错误处理（遵循 MODULE.md 主入口错误处理规范）
+    try:
+        main()
+    except FileNotFoundError as e:
+        print(f"\n[错误] 缓存文件不存在: {e}")
+        print("  请先运行数据缓存脚本生成数据")
+        sys.exit(1)
+    except ValueError as e:
+        print(f"\n[错误] 数据验证失败: {e}")
+        print("  请检查缓存数据完整性")
+        sys.exit(1)
+    except RuntimeError as e:
+        print(f"\n[错误] 计算过程失败: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n[错误] 未预期的异常: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
