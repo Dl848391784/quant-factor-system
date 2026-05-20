@@ -1,14 +1,17 @@
 # 量比因子 IC 分析流程文档
 
-> 版本: v1.1
-> 生成时间: 2026-05-21 01:30 北京时间
-> 实测数据时间: 2026-05-21 01:30 北京时间（运行验证通过）
+> 版本: v1.2
+> 生成时间: 2026-05-21 01:42 北京时间
+> 实测数据时间: 2026-05-21 01:42 北京时间（运行验证通过）
 > 脚本: ic_volume_ratio_1d.py
 > 更新内容:
 >   1. 修复import位置违规（traceback移到文件顶部）
 >   2. 删除未使用导入（Any类型）
 >   3. 补充空数据分支五维度字段（遵循MODULE.md输出结构统一性规范）
 >   4. MODULE.md更新：明确icir_stability、ic_distribution_consistency为顶层字段
+>   5. 修复JSON序列化：添加numpy.bool_类型处理
+>   6. 补充顶层字段：dates/ic_values/rolling_ic_mean/positive_ratio/n_assets/summary/factor_stats
+>   7. 五维度判断一致性验证通过
 
 ---
 
