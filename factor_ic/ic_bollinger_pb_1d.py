@@ -293,12 +293,10 @@ def calculate_bollinger_pb_1d_factor(
                 (factor_df['close'] - factor_df['lower_band']) / diff  # 正常计算
             )
         )
-        
-        # 释放临时列（正常流程）
-        factor_df.drop(columns=temp_cols, inplace=True)
+        # 注意：临时列清理由 finally 块统一处理，此处不主动删除
         
     finally:
-        # 确保临时列清理（异常时也执行，防止脏列残留）
+        # 确保临时列清理（正常流程和异常流程统一处理）
         # 检查列是否存在再删除（部分临时列可能未写入）
         existing_temp_cols = [c for c in temp_cols if c in factor_df.columns]
         if existing_temp_cols:
