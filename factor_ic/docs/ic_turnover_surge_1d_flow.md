@@ -1,7 +1,14 @@
 # Turnover_Surge_1D IC 计算流程文档
 
-> 生成时间: 2026-05-08 00:00:00 (北京时间)
-> 审阅版本: v1.0
+> 生成时间: 2026-05-20 17:00 (北京时间)
+> 审阅版本: v1.1
+> 实测数据时间: 2026-05-20
+> 更新内容:
+>   1. [v1.1] 修复 ic_metrics 字段缺失问题：添加 p_value_display（遵循 MODULE.md 输出结构规范）
+>   2. [v1.1] 修复 rolling_ic_mean NaN 处理：在数据生成阶段将 NaN 转为 None（遵循 PROJECT.md 规范）
+>   3. [v1.1] 空数据返回路径添加 p_value_display 字段
+>   4. [v1.1] 流程文档重命名：turnover_surge_1d_ic_flow.md → ic_turnover_surge_1d_flow.md（遵循 PROJECT.md 命名规范）
+>   5. [v1.1] 跨脚本验证通过：ic_metrics 5 字段一致（RSI/布林带/KDJ/换手率突增）
 
 ---
 

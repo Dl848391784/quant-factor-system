@@ -270,7 +270,13 @@ def calculate_turnover_surge_ic(
             'factor_name': 'turnover_surge_1d',
             'calculation_date': datetime.now().strftime('%Y-%m-%d'),
             'period': {'start': '', 'end': ''},
-            'ic_metrics': {'ic_mean': 0, 'ic_std': 0, 'icir': 0, 'p_value': 1},
+            'ic_metrics': {
+                'ic_mean': 0,
+                'ic_std': 0,
+                'icir': 0,
+                'p_value': 1.0,
+                'p_value_display': '1.0'
+            },
             'sample_stats': {'total_days': 0, 'valid_days': 0, 'avg_stocks_per_day': 0},
             'ic_series': None,
             'summary': '数据不足，无法计算IC'
@@ -300,7 +306,13 @@ def calculate_turnover_surge_ic(
             'factor_name': 'turnover_surge_1d',
             'calculation_date': datetime.now().strftime('%Y-%m-%d'),
             'period': {'start': '', 'end': ''},
-            'ic_metrics': {'ic_mean': 0, 'ic_std': 0, 'icir': 0, 'p_value': 1},
+            'ic_metrics': {
+                'ic_mean': 0,
+                'ic_std': 0,
+                'icir': 0,
+                'p_value': 1.0,
+                'p_value_display': '1.0'
+            },
             'sample_stats': {
                 'total_days': 0, 
                 'valid_days': 0, 
@@ -359,8 +371,12 @@ def calculate_turnover_surge_ic(
     dates = [str(d) for d in ic_series.index]
     ic_values = [round(v, 6) for v in ic_series.values]
     # 计算 20 日滚动均值（min_periods=10，至少需要10个有效值）
+    # 遵循 PROJECT.md NaN 处理规范：在数据生成阶段将 NaN 转为 None
     rolling_mean = ic_series.rolling(window=20, min_periods=10).mean()
-    rolling_ic_mean = [round(v, 6) for v in rolling_mean.values]
+    rolling_ic_mean = [
+        round(v, 6) if pd.notna(v) else None
+        for v in rolling_mean.values
+    ]
     
     return {
         # PROJECT.md 规范必需字段
@@ -374,7 +390,8 @@ def calculate_turnover_surge_ic(
             'ic_mean': round(ic_mean, 6),
             'ic_std': round(ic_std, 6),
             'icir': round(icir, 4),
-            'p_value': round(p_value, 6)
+            'p_value': round(p_value, 6),
+            'p_value_display': f"{p_value:.2e}" if p_value < 0.001 else f"{p_value:.4f}"
         },
         'sample_stats': {
             'total_days': len(dates),
