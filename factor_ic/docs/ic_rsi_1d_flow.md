@@ -1,7 +1,8 @@
 # RSI_1D IC 计算流程文档
 
-> 生成时间: 2026-05-19 19:00 (北京时间)
-> 审阅版本: v1.52
+> 生成时间: 2026-05-20 16:30 (北京时间)
+> 审阅版本: v1.53
+> 实测数据时间: 2026-05-20
 > 更新内容: 
 >   1. 增量计算单日 IC 改用 calculate_single_day_ic 核心函数（遵循 PROJECT.md 规范）
 >   2. 移除直接调用 scipy.stats.spearmanr，确保增量与全量计算算法一致
@@ -60,13 +61,11 @@
 >   55. [v1.52] 明确 avg_stocks_per_day 基于 dropna 后数据，与 total_days 口径不同
 >   56. [v1.52] 解释均值偏高原因：NaN 日期被排除，这些日期通常股票数较少
 >   57. [v1.52] 提供口径一致性检查表，确保用户理解统计含义
+>   58. [v1.53] 修复 ic_metrics 字段缺失问题：添加 p_value 和 p_value_display（遵循 MODULE.md 输出结构规范）
+>   59. [v1.53] 导入 calculate_ic_statistics 移至顶部（遵循 PEP8 导入规范）
+>   60. [v1.53] required_fields 校验添加 p_value、p_value_display
+>   61. [v1.53] 全量/增量路径 ic_metrics 结构一致，跨脚本验证通过（RSI/布林带/KDJ 三脚本 5 字段一致）
 >
->   47. [v1.49] 删除第582行冗余赋值：update_mode 已在第568行字典构建阶段设置（遵循 PROJECT.md 字典构建规范）
->   48. [v1.49] 补充 PROJECT.md 「字典构建规范」章节：字段应集中定义，避免分散赋值和重复赋值
->   49. [v1.49] 补充 PROJECT.md 「代码维护同步检查规范」章节：添加新代码后必须检查旧代码是否冗余
->   50. [v1.50] 新增 avg_stocks_period 字段：明确标注 avg_stocks_per_day 的口径范围（遵循 PROJECT.md 输出字段口径规范）
->   51. [v1.50] 删除 v1.37 误导性注释"用户可通过 total_days 判断数据范围"（total_days 无法传递时间范围，承诺未被实现）
->   52. [v1.50] 补充 PROJECT.md 「输出字段口径规范」章节：统计字段必须提供口径范围字段，注释承诺必须可验证
 
 ---
 

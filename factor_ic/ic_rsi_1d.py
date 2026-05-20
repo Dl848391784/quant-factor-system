@@ -26,7 +26,8 @@ from datetime import datetime
 # 导入通用 IC 计算模块（支持方向验证）
 from factor_ic.common.ic_calculator import (
     calculate_ic_with_direction_verification,
-    calculate_single_day_ic  # 用于增量计算
+    calculate_single_day_ic,  # 用于增量计算
+    calculate_ic_statistics   # 用于增量统计重算
 )
 
 # ============================================================================
@@ -210,6 +211,7 @@ def calculate_daily_ic_series(
     # 遵循 PROJECT.md 函数返回值契约规范
     required_fields = [
         'ic_series', 'ic_mean', 'ic_std', 'icir',
+        'p_value', 'p_value_display',
         'statistical_significance', 'factor_direction',
         'economic_significance', 'icir_stability',
         'ic_distribution_consistency', 'positive_ratio', 'summary'
@@ -291,7 +293,9 @@ def calculate_daily_ic_series(
         'ic_metrics': {
             'ic_mean': round(result['ic_mean'], 6),
             'ic_std': round(result['ic_std'], 6),
-            'icir': round(result['icir'], 4)
+            'icir': round(result['icir'], 4),
+            'p_value': result['p_value'],
+            'p_value_display': result['p_value_display']
         },
         'sample_stats': {
             # 语义定义（遵循 PROJECT.md 输出字段语义规范）：
@@ -461,8 +465,7 @@ def _incremental_update(
     # （calculate_ic_statistics 输入约束：索引顺序决定输出顺序）
     ic_series = pd.Series(valid_ic, index=valid_dates)
     
-    # 重新计算统计指标
-    from factor_ic.common.ic_calculator import calculate_ic_statistics
+    # 重新计算统计指标（已从顶部导入 calculate_ic_statistics）
     result = calculate_ic_statistics(ic_series)
     
     # 将 rolling_ic_mean 映射回 all_dates（None 日期填 None）
@@ -523,7 +526,9 @@ def _incremental_update(
         'ic_metrics': {
             'ic_mean': round(result['ic_mean'], 6),
             'ic_std': round(result['ic_std'], 6),
-            'icir': round(result['icir'], 4)
+            'icir': round(result['icir'], 4),
+            'p_value': result['p_value'],
+            'p_value_display': result['p_value_display']
         },
         'sample_stats': {
             # 语义定义（遵循 PROJECT.md 输出字段语义规范）：
