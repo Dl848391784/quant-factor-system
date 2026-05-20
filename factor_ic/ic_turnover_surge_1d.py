@@ -261,11 +261,17 @@ def calculate_turnover_surge_factor(factor_df: pd.DataFrame) -> Tuple[pd.DataFra
     filter_stats['valid_count'] = int(valid_count)
     filter_stats['retention_ratio'] = valid_count / len(factor_df) if len(factor_df) > 0 else 0
     
+    # 计算各阶段的占比（遵循 MODULE.md 输出语义清晰原则）
+    # 虽然数值相同（裁剪前后相同），但语义应区分：
+    # - both_conditions_ratio: 两个条件同时满足的占比
+    # - retention_ratio: 有效因子保留比例
+    both_conditions_ratio = filter_stats['both_conditions_count'] / filter_stats['total_records'] if filter_stats['total_records'] > 0 else 0
+    
     print(f"    总记录数:           {filter_stats['total_records']:,}")
     print(f"    换手率突增记录数:   {filter_stats['turnover_surge_count']:,}")
     print(f"    上涨记录数:         {filter_stats['price_up_count']:,}")
-    print(f"    换手率突增+上涨:     {filter_stats['both_conditions_count']:,} ({filter_stats['retention_ratio']*100:.1f}%)")
-    print(f"    有效因子记录数:     {valid_count:,}")
+    print(f"    换手率突增+上涨:     {filter_stats['both_conditions_count']:,} ({both_conditions_ratio*100:.1f}%)")
+    print(f"    有效因子记录数:     {valid_count:,} (保留比例 {filter_stats['retention_ratio']*100:.1f}%)")
     
     # Step 4: 极端值处理（裁剪到 1.0-10，遵循 MODULE.md 极端值裁剪规范）
     # 裁剪下界 1.0 等于筛选条件下界（turnover_surge > 1），裁剪范围与筛选条件一致
