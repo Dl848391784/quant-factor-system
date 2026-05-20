@@ -666,7 +666,54 @@ factor_ic/docs/ic_volume_ratio_1d_flow.md
 
 **核心原则：** NaN → None 转换应在数据生成阶段完成。
 
-**正确实现：**
+**隐式行为显式化原则：** 若代码依赖数据不含 NaN 的隐式假设，必须添加注释说明原因。
+
+---
+
+### ic_series 数据来源说明
+
+**ic_series 不含 NaN 的原因（隐式行为）：**
+
+ic_calculator.py 第 162-167 行：
+```python
+for date, daily_data in merged.groupby(date_col):
+    ic_value = calculate_single_day_ic(daily_data, factor_col, return_col, min_stocks)
+    if ic_value is not None:
+        ic_list.append({'date': date, 'ic': ic_value})
+```
+
+**关键逻辑：**
+- 只有 `ic_value is not None` 的日期才会被添加
+- 不满足 `min_stocks` 的日期不会被添加（而非添加 NaN）
+- 因此 ic_series.values 中的值都是有效的 numpy.float64
+
+---
+
+### ic_values vs rolling_ic_mean 处理差异
+
+**ic_values 不需要 pd.isna(v) 检查：**
+```python
+# ✓ 正确：ic_series 不含 NaN（隐式行为已注释）
+# ic_series.values 不含 NaN 的原因：
+# - ic_calculator.py 只添加 ic_value is not None 的日期
+# - 不满足 min_stocks 的日期不会被添加（而非添加 NaN）
+ic_values = [round(v, 6) for v in ic_series.values]
+```
+
+**rolling_ic_mean 需要 pd.isna(v) 检查：**
+```python
+# ✓ 正确：rolling 含 NaN（需显式检查）
+# rolling 参数语义：window=20, min_periods=10
+# 前 min_periods-1=9 个时间点不满足最小样本要求，返回 NaN
+rolling_ic_mean = [
+    round(v, 6) if not pd.isna(v) else None
+    for v in rolling_mean.values
+]
+```
+
+---
+
+### 正确实现
 ```python
 # 使用 pd.isna(v) 检查 NaN
 # NaN → None（语义转换："无有效数据"）

@@ -776,7 +776,7 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.21 | 2026-05-20 | 修复 K/D 值 NaN 传播错误（核心缺陷）—— ewm alpha 参数、ignore_na 参数、初始值位置 |
 | v1.22 | 2026-05-20 | 统一异常处理风格注释，明确包装类与保留类的设计意图（遵循 PROJECT.md 异常处理规范） |
 | v1.23 | 2026-05-20 | 删除 should_full_recalculate 死代码变量，简化控制流注释（遵循 MODULE.md 控制流规范） |
-| v1.24 | 2026-05-20 | 补充 ic_values round 隐式行为注释，说明 ic_series 不含 NaN 的原因（遵循 PROJECT.md 注释规范） |
+| v1.24 | 2026-05-20 | 补充 ic_values round 隐式行为注释，说明 ic_series 不含 NaN 的原因（遵循 MODULE.md NaN 处理规范） |
 
 ---
 
@@ -1641,7 +1641,7 @@ rolling_ic_mean = [
 - 前 `min_periods-1` 个时间点返回 NaN
 - 必须显式检查并转为 `None`（JSON 友好）
 
-**参考规范：PROJECT.md "注释规范 - 隐式行为显式化"**
+**参考规范：MODULE.md "NaN 处理规范 - 隐式行为显式化原则"**
 
 ---
 
