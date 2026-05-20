@@ -2,7 +2,7 @@
 
 > 本文档定义 factor_ic/ 目录下 IC 计算脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v1.3
+> 版本: v1.4
 > 更新内容:
 >   1. v1.0 首次创建模块规范
 >   2. v1.1 删除重复的流程文档规范（已迁移至 PROJECT.md）
@@ -13,7 +13,11 @@
 >   4. v1.3（2026-05-21）：
 >      - 精简重复章节标题（核心原则、禁止行为等改为带上下文标题）
 >      - 36个"核心原则" → 各章节独立标题（如"IC计算规范核心原则"）
->      - 保持所有关键规范内容完整（不删除任何##章节）
+>   5. v1.4（2026-05-22）：
+>      - 合并重复章节：布林带章节（3→1）、异常处理章节（4→1）、
+>        字段规范章节（4→1）、增量路径章节（部分合并）、函数契约章节（2→1）
+>      - 行数：4761→3892（-869行，-18%）
+>      - 保留所有关键规范内容（公共模块同步规范、statistical_significance 7字段）
 
 ---
 
@@ -841,72 +845,87 @@ assert 'new_col' not in original_df.columns
 
 ---
 
-## 异常处理规范
+## 异常处理规范（合并）
+
+### 核心原则
+
+**异常处理必须：**
+1. 区分严重错误（文件损坏、权限问题）和可恢复错误（文件不存在）
+2. 使用 `raise ... from e` 保留异常链
+3. 异常消息只包装一次，不在多层叠加
 
 ### 异常类型保留
 
-**原则：** 异常类型必须准确反映错误原因，不随意包装。
-
-| 异常类型 | 使用场景 | 是否包装 |
+| 异常类型 | 使用场景 | 处理方式 |
 |---------|---------|---------|
-| ValueError | 数据验证错误（缺失列、格式错误） | ❌ 直接 raise |
-| RuntimeError | 基础设施错误（API失败、网络异常） | ✓ 可包装 |
-| KeyError | 必需字段缺失 | ❌ 直接 raise |
-| TypeError | 类型错误 | ❌ 直接 raise |
+| ValueError | 数据验证错误 | ❌ 直接 raise |
+| FileNotFoundError | 文件不存在（可恢复） | ✓ 降级全量计算 |
+| JSONDecodeError | 文件损坏（严重） | ❌ 不静默降级 |
+| PermissionError | 权限问题（严重） | ❌ 不静默降级 |
+| RuntimeError | 基础设施错误 | ✓ 可包装 |
 
-**正确示例：**
-```python
-if 'rsi' not in factor_df.columns:
-    raise ValueError(f"因子数据缺少必需列 'rsi'，现有列: {list(factor_df.columns)}")
-```
+### 正确实现
 
-**禁止行为：**
 ```python
-# ❌ 禁止：ValueError包装为RuntimeError
+# ✓ 正确：区分异常类型，严重错误不静默降级
 try:
-    validate_data(factor_df)
-except ValueError as e:
-    raise RuntimeError(f"数据验证失败: {e}")  # 错误！
-```
+    cached_data = json.load(f)
+except FileNotFoundError:
+    print("缓存文件不存在，执行全量计算")
+    return _full_recalculate(...)
+except json.JSONDecodeError as e:
+    # 严重错误：不静默降级
+    raise RuntimeError(f"缓存文件损坏: {output_file}\n建议: 删除后重新生成") from e
+except PermissionError as e:
+    raise RuntimeError(f"缓存文件权限不足: {output_file}") from e
 
----
-
-### 防御性异常处理
-
-**原则：** 异常诊断信息中的数据访问必须防御性处理，避免二次异常。
-
-**场景：**
-- 异常处理时访问可能不存在的 DataFrame 列
-- 空 DataFrame 统计（返回 0 而非抛出异常）
-
-**正确示例：**
-```python
-# ✓ 正确：先检查列存在，不存在时返回安全默认值
+# ✓ 正确：防御性处理（避免二次异常）
 factor_assets = factor_df['asset'].nunique() if 'asset' in factor_df.columns else 0
-return_assets = return_df['asset'].nunique() if 'asset' in return_df.columns else 0
+raise RuntimeError(f"IC 计算结果为空，因子数据: {len(factor_df)} 行, {factor_assets} 只股票")
 
-raise RuntimeError(
-    f"IC 计算结果为空\n"
-    f"因子数据: {len(factor_df)} 行, {factor_assets} 只股票\n"
-    f"收益数据: {len(return_df)} 行, {return_assets} 只股票\n"
-    f"建议: 检查数据源或降低阈值"
-)
+# ✓ 正确：异常链保留
+raise RuntimeError(f"数据处理失败: {e}") from e  # 显式异常链
 ```
 
-**禁止行为：**
+### 禁止行为
+
 ```python
+# ❌ 禁止：静默吞掉所有异常
+except Exception as e:
+    return _full_recalculate(...)  # 严重错误也降级
+
+# ❌ 禁止：ValueError包装为RuntimeError
+except ValueError as e:
+    raise RuntimeError(f"数据验证失败: {e}")  # 错误类型变更
+
+# ❌ 禁止：异常消息多层叠加
+# 底层: raise FileNotFoundError(f"缓存不存在: {path}")
+# 中间层: raise RuntimeError(f"缓存文件不存在: {e}") from e  # 两层叠加！
+
 # ❌ 禁止：直接访问可能不存在的列
-raise RuntimeError(
-    f"因子数据: {factor_df['asset'].nunique()} 只股票"  # KeyError 风险！
-)
+raise RuntimeError(f"因子数据: {factor_df['asset'].nunique()} 只股票")  # KeyError 风险！
 ```
 
-**空 DataFrame 统计行为：**
-| 操作 | 空 DataFrame 结果 | 说明 |
-|------|------------------|------|
-| `len(df)` | 0 | 安全 |
-| `df['col'].nunique()` | 0（若列存在） | 安全 |
-| `df['col']` | KeyError（若列不存在） | 需防御 |
+### 异常处理链设计规范
+
+| 层级 | 职责 | 处理方式 |
+|------|------|----------|
+| 底层函数 | 抛出语义清晰的原始异常 | 裸 raise 或构造异常 |
+| 中间层 | 区分异常类型 | 裸 raise（保留原始）或不捕获 |
+| 顶层 | 提供用户友好消息 | 包装为 RuntimeError |
+
+**单层包装原则：异常消息只包装一次，不在多层叠加。**
+
+### 检查清单
+
+```
+□ 区分 FileNotFoundError（可恢复）和 JSONDecodeError（严重）
+□ 严重错误不静默降级（抛出异常）
+□ 使用 from e 保留异常链（风格一致）
+□ 异常消息单层包装（不叠加）
+□ 防御性处理（先检查列存在）
+□ 提供详细诊断信息（异常类型、详情、建议）
+```
 
 ---
 
@@ -1941,30 +1960,94 @@ merged_data = {
 
 ---
 
-## 函数返回值契约规范
+## 函数返回值契约规范（合并）
 
-**核心原则:** 调用方必须校验返回值字段存在性。
+### 核心原则
+
+**`required_fields` 校验列表必须包含所有后续直接访问的字段，禁止遗漏。**
+
+### 正确实现
+
+```python
+# ✓ 正确：校验列表包含所有直接访问的字段
+required_fields = [
+    'ic_series', 'ic_mean', 'ic_std', 'icir',
+    'p_value', 'p_value_display',  # ✓ 必须包含！
+    'statistical_significance', 'factor_direction',
+    'economic_significance', 'positive_ratio', 'summary'
+]
+
+missing_fields = [f for f in required_fields if f not in result]
+if missing_fields:
+    raise RuntimeError(
+        f"返回值缺少必需字段\n"
+        f"缺失字段: {missing_fields}\n"
+        f"问题定位: factor_ic/common/ic_calculator.py"
+    )
+
+# 校验后可以安全访问
+'p_value': round(result['p_value'], 6)  # ✓ 已校验，不会 KeyError
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：校验列表缺少 p_value
+required_fields = ['ic_series', 'ic_mean', 'ic_std', 'icir']
+
+# 后续直接访问 p_value
+'p_value': round(result['p_value'], 6)  # ✗ 未校验，可能 KeyError！
+```
+
+### 检查清单
+
+```
+□ 校验列表包含所有直接访问的字段
+□ 校验后抛出 RuntimeError（包含缺失字段列表、问题定位）
+□ 后续代码可安全访问已校验字段
+```
 
 ---
 
-## ic_metrics 字段规范
+## 输出字段规范（合并）
 
-### ic_metrics 字段规范核心原则
-**ic_metrics 字段结构在两条路径（全量/增量）中必须完全一致。**
+### 核心原则
 
-### 字段定义
+**所有字段结构在两条路径（全量/增量）中必须完全一致。**
 
-| 字段 | 类型 | 来源 | 用途 |
-|------|------|------|------|
-| `ic_mean` | float | `result['ic_mean']` | IC 均值（核心指标） |
-| `ic_std` | float | `result['ic_std']` | IC 标准差 |
-| `icir` | float | `result['icir']` | ICIR（信息系数比率） |
-| `p_value` | float | `result['p_value']` | p 值（统计显著性） |
-| `p_value_display` | str | `result['p_value_display']` | p 值显示格式（科学计数法或小数） |
+### 字段映射表（原始→输出）
 
-### ic_metrics 字段规范正确实现
+| 字段组 | 原始字段名 | 输出字段名 | 类型 | 说明 |
+|-------|----------|----------|------|------|
+| **ic_metrics** | `ic_mean` | `ic_mean` | float | IC 均值 |
+| | `ic_std` | `ic_std` | float | IC 标准差 |
+| | `icir` | `icir` | float | ICIR |
+| | `p_value` | `p_value` | float | p 值 |
+| | `p_value_display` | `p_value_display` | str | p 值显示格式 |
+| **factor_direction** | `ic_mean_sign` | `direction` | str | 因子方向（'positive'/'negative'/'zero') |
+| | `ic_mean` | `ic_mean` | float | IC 均值 |
+| | `conclusion` | `conclusion` | str | 方向判断结论 |
+| **economic_significance** | `level` | `ic_strength` | str | IC 强度（'strong'/'weak'/'none') |
+| | `abs_ic_mean` | `ic_mean_abs` | float | IC 均值绝对值 |
+| | `conclusion` | `conclusion` | str | 经济显著性结论 |
+| **statistical_significance** | 直接透传 | — | — | 字段名一致，无需重映射 |
+
+### statistical_significance 必需字段（7个）
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `t_stat` | float | t 统计量（Newey-West调整） |
+| `p_value` | float | p 值 |
+| `p_value_display` | str | p 值显示格式 |
+| `nw_lag` | int | Newey-West滞后阶数 |
+| `nw_lag_method` | str | NW滞后选择方法 |
+| `is_significant` | bool | 统计显著性标志 |
+| `conclusion` | str | 统计显著性结论 |
+
+### 正确实现
+
 ```python
-# ✓ 全量路径（calculate_daily_ic_series）
+# ✓ ic_metrics：全量/增量路径结构一致
 'ic_metrics': {
     'ic_mean': round(result['ic_mean'], 6),
     'ic_std': round(result['ic_std'], 6),
@@ -1973,125 +2056,37 @@ merged_data = {
     'p_value_display': result.get('p_value_display', str(round(result['p_value'], 6)))
 }
 
-# ✓ 增量路径（_incremental_update）：必须与全量路径完全一致
-'ic_metrics': {
-    'ic_mean': round(result['ic_mean'], 6),
-    'ic_std': round(result['ic_std'], 6),
-    'icir': round(result['icir'], 4),
-    'p_value': round(result['p_value'], 6),
-    'p_value_display': result.get('p_value_display', str(round(result['p_value'], 6)))
-}
-
-# ❌ 禁止：增量路径缺少字段
-'ic_metrics': {
-    'ic_mean': round(result['ic_mean'], 6),
-    'ic_std': round(result['ic_std'], 6),
-    'icir': round(result['icir'], 4)  # 缺少 p_value 和 p_value_display
-}
-```
-
-### 下游依赖
-**下游代码可能读取以下字段：**
-```python
-# 前端或分析代码
-ic_mean = ic_data['ic_metrics']['ic_mean']
-p_value = ic_data['ic_metrics']['p_value']  # 必须存在
-p_value_display = ic_data['ic_metrics']['p_value_display']  # 必须存在
-```
-
----
-
-## factor_direction 字段规范
-
-### factor_direction 字段规范核心原则
-**factor_direction 字段结构在两条路径（全量/增量）中必须完全一致。**
-
-### 字段映射（原始字段名 → 输出字段名）
-
-| 原始字段名（ic_calculator.py） | 输出字段名 | 类型 | 用途 |
-|------------------------------|----------|------|------|
-| `ic_mean_sign` | `direction` | str | 因子方向（'positive'/'negative'/'zero') |
-| `ic_mean` | `ic_mean` | float | IC 均值 |
-| `conclusion` | `conclusion` | str | 方向判断结论 |
-
-### factor_direction 字段规范正确实现
-```python
-# ✓ 全量路径（calculate_daily_ic_series）：重映射字段名
+# ✓ factor_direction：重映射字段名
 'factor_direction': {
     'direction': result['factor_direction']['ic_mean_sign'],
     'ic_mean': result['factor_direction']['ic_mean'],
     'conclusion': result['factor_direction']['conclusion']
 }
 
-# ✓ 增量路径（_incremental_update）：重映射字段名（必须与全量路径一致）
-'factor_direction': {
-    'direction': result['factor_direction']['ic_mean_sign'],
-    'ic_mean': result['factor_direction']['ic_mean'],
-    'conclusion': result['factor_direction']['conclusion']
-}
-
-# ❌ 禁止：直接透传原始字段名
-'factor_direction': result['factor_direction']  # 字段名是 ic_mean_sign，不是 direction
-```
-
----
-
-## economic_significance 字段规范
-
-### economic_significance 字段规范核心原则
-**economic_significance 字段结构在两条路径（全量/增量）中必须完全一致。**
-
-### 字段映射（原始字段名 → 输出字段名）
-
-| 原始字段名（ic_calculator.py） | 输出字段名 | 类型 | 用途 |
-|------------------------------|----------|------|------|
-| `level` | `ic_strength` | str | IC 强度（'strong'/'weak'/'none') |
-| `abs_ic_mean` | `ic_mean_abs` | float | IC 均值绝对值 |
-| `conclusion` | `conclusion` | str | 经济显著性判断结论 |
-
-### economic_significance 字段规范正确实现
-```python
-# ✓ 全量路径（calculate_daily_ic_series）：重映射字段名
+# ✓ economic_significance：重映射字段名
 'economic_significance': {
     'ic_strength': result['economic_significance']['level'],
     'ic_mean_abs': result['economic_significance']['abs_ic_mean'],
     'conclusion': result['economic_significance']['conclusion']
 }
 
-# ✓ 增量路径（_incremental_update）：重映射字段名（必须与全量路径一致）
-'economic_significance': {
-    'ic_strength': result['economic_significance']['level'],
-    'ic_mean_abs': result['economic_significance']['abs_ic_mean'],
-    'conclusion': result['economic_significance']['conclusion']
-}
-
-# ❌ 禁止：直接透传原始字段名
-'economic_significance': result['economic_significance']  # 字段名是 level，不是 ic_strength
-```
-
----
-
-## statistical_significance 字段规范
-
-### statistical_significance 字段规范核心原则
-**statistical_significance 字段结构在两条路径中可直接透传（字段名一致）。**
-
-### 字段定义（无需重映射）
-
-| 字段名 | 类型 | 来源 | 用途 |
-|--------|------|------|------|
-| `t_stat` | float | `result['statistical_significance']['t_stat']` | t 统计量（Newey-West调整） |
-| `p_value` | float | `result['statistical_significance']['p_value']` | p 值 |
-| `p_value_display` | str | `result['statistical_significance']['p_value_display']` | p 值显示格式 |
-| `nw_lag` | int | `result['statistical_significance']['nw_lag']` | Newey-West滞后阶数 |
-| `nw_lag_method` | str | `result['statistical_significance']['nw_lag_method']` | NW滞后选择方法 |
-| `is_significant` | bool | `result['statistical_significance']['is_significant']` | 统计显著性标志 |
-| `conclusion` | str | `result['statistical_significance']['conclusion']` | 统计显著性判断结论 |
-
-### statistical_significance 字段规范正确实现
-```python
-# ✓ 全量路径和增量路径：均可直接透传（字段名一致）
+# ✓ statistical_significance：直接透传
 'statistical_significance': result['statistical_significance']
+```
+
+### 禁止行为
+
+```python
+# ❌ 禁止：增量路径缺少字段
+'ic_metrics': {'ic_mean': ..., 'ic_std': ..., 'icir': ...}  # 缺少 p_value
+
+# ❌ 禁止：直接透传原始字段名（factor_direction/economic_significance）
+'factor_direction': result['factor_direction']  # 字段名是 ic_mean_sign，不是 direction
+
+# ❌ 禁止：分散赋值（字典构建）
+result = {}
+result['ic_mean'] = ic_mean
+result['ic_std'] = ic_std  # 分散定义，容易遗漏
 ```
 
 ---
@@ -2480,126 +2475,95 @@ result = np.where(
 
 ---
 
-## 增量路径 rolling_ic_mean 规范
+## 增量路径核心规范（合并）
 
-### 增量路径 rolling_ic_mean 规范核心原则
+### 核心原则
 
-**增量路径 `rolling_ic_mean` 必须基于 `all_dates` 计算，与 `dates` 和 `ic_values` 长度完全一致。**
+**增量路径必须与全量路径保持一致：**
+1. `rolling_ic_mean` 基于 `all_dates` 计算（长度一致）
+2. `period.start/end` 使用 `raw_metadata`（语义一致）
+3. 返回结构包含所有字段（与全量路径一致）
 
-### 增量路径 rolling_ic_mean 规范问题背景
-
-```
-增量路径数据合并流程：
-1. existing_dates + existing_ic_values（来自缓存）
-2. new_dates + new_ic_values（新计算）
-3. 合并 → date_ic_map（过滤None）
-4. all_dates = sorted(date_ic_map.keys())
-5. all_ic_values = [date_ic_map[d] for d in all_dates]
-
-关键问题：
-- 若 rolling_ic_mean 基于 valid_dates（子集）计算
-- len(rolling_ic_mean) = len(valid_dates) ≠ len(all_dates)
-- 前端按索引对应 dates[i] → rolling_ic_mean[i] 会错位
-```
-
-### 增量路径 rolling_ic_mean 规范正确实现
+### rolling_ic_mean 规范
 
 ```python
 # ✓ 正确：rolling_ic_mean 基于 all_dates 计算
-from factor_ic.common.ic_calculator import calculate_ic_statistics
-
-# 使用 all_dates 和 all_ic_values 构建 ic_series
 ic_series = pd.Series(all_ic_values, index=all_dates)
-result = calculate_ic_statistics(ic_series)
-
-# rolling_ic_mean 基于 all_dates（与全量路径一致）
 rolling_ic_mean_series = ic_series.rolling(window=20, min_periods=10).mean()
-rolling_ic_mean = [
-    round(v, 6) if not pd.isna(v) else None
-    for v in rolling_ic_mean_series.values
-]
+rolling_ic_mean = [round(v, 6) if not pd.isna(v) else None for v in rolling_ic_mean_series.values]
 
-# 输出：dates, ic_values, rolling_ic_mean 长度一致
+# 输出：dates, ic_values, rolling_ic_mean 长度一致（N=N=N）
 merged_data = {
     'dates': all_dates,           # len = N
     'ic_values': all_ic_values,   # len = N
     'rolling_ic_mean': rolling_ic_mean,  # len = N ✓
 }
-```
 
-### 增量路径 rolling_ic_mean 规范禁止行为
-
-```python
-# ❌ 禁止：rolling_ic_mean 基于 valid_dates（子集）计算
-valid_indices = [i for i, ic in enumerate(all_ic_values) if ic is not None]
+# ❌ 禁止：基于 valid_dates 子集计算（长度不一致）
 valid_dates = [all_dates[i] for i in valid_indices]
-valid_ic = [all_ic_values[i] for i in valid_indices]
-
-ic_series = pd.Series(valid_ic, index=valid_dates)  # 基于 valid_dates
-rolling_ic_mean_series = ic_series.rolling(window=20, min_periods=10).mean()
-rolling_ic_mean = [round(v, 6) if not pd.isna(v) else None for v in rolling_ic_mean_series.values]
-
-# 输出：dates, ic_values, rolling_ic_mean 长度不一致
-merged_data = {
-    'dates': all_dates,           # len = N
-    'ic_values': all_ic_values,   # len = N
-    'rolling_ic_mean': rolling_ic_mean,  # len = M (M < N) ✗ 错误！
-}
-
-# 问题：
-# - all_dates 和 all_ic_values 长度 = N
-# - rolling_ic_mean 长度 = M（M < N）
-# - 前端 dates[i] → rolling_ic_mean[i] 索引错位
-# - 第 M 个日期之后的数据无 rolling_ic_mean 对应
+ic_series = pd.Series(valid_ic, index=valid_dates)  # 基于 valid_dates → 长度错位
 ```
 
-### 为何必须长度一致
+### period 字段规范
 
-1. 前端图表按索引对应：`dates[i] → ic_values[i] → rolling_ic_mean[i]`
-2. 长度不一致会导致索引错位，图表显示错误
-3. 全量路径已经保证长度一致，增量路径必须遵循相同原则
-4. JSON 数据结构一致性要求：三条数组长度相等
+**period 表示原始缓存范围（dropna前），而非合并后有效IC日期范围。**
 
-### 全量/增量路径一致性验证
-
-| 路径 | dates来源 | ic_values来源 | rolling_ic_mean来源 | 长度一致性 |
-|------|----------|--------------|-------------------|-----------|
-| 全量 | ic_series.index | ic_series.values | ic_series.rolling() | ✓ N=N=N |
-| 增量 | all_dates | all_ic_values | ic_series.rolling()（基于all_dates） | ✓ N=N=N |
-
-**关键：** 增量路径的 `ic_series` 必须使用 `all_dates` 和 `all_ic_values` 构建，而非 `valid_dates` 子集。
-
----
-
-## 增量路径 period 字段规范
-
-### 增量路径 period 字段规范核心原则
-
-**增量路径 `period.start/end` 必须直接使用 `raw_metadata`，与全量路径语义完全一致。**
-
-### 语义定义
-
-**period 字段表示原始缓存范围（dropna前），而非合并后有效IC日期范围。**
-
-```
 | 数据源 | 语义 | 示例 |
 |--------|------|------|
-| raw_metadata['period_start'] | 原始缓存最小日期（dropna前） | 2024-01-01 |
-| raw_metadata['period_end'] | 原始缓存最大日期（dropna前） | 2026-05-15 |
+| raw_metadata['period_start'] | 原始缓存最小日期 | 2024-01-01 |
+| raw_metadata['period_end'] | 原始缓存最大日期 | 2026-05-15 |
 | all_dates[0] | 合并后有效IC最小日期 | 2024-01-20 |
-| all_dates[-1] | 合并后有效IC最大日期 | 2026-05-15 |
-
-差异原因：
-- 原始缓存范围：2024-01-01 ~ 2026-05-15（545天）
-- 有效IC范围：2024-01-20 ~ 2026-05-15（526天）
-- 前19天布林带值NaN（等待足够数据）
-```
-
-### 增量路径 period 字段规范正确实现
 
 ```python
-# ✓ 正确：period 直接使用 raw_metadata（与全量路径一致）
+# ✓ 正确：period 直接使用 raw_metadata
 merged_data = {
+    'period': {
+        'start': raw_metadata['period_start'],  # 原始缓存范围
+        'end': raw_metadata['period_end']
+    }
+}
+
+# ❌ 禁止：使用 all_dates（语义不一致）
+'period': {'start': all_dates[0], 'end': all_dates[-1]}  # 有效IC范围 ≠ 原始缓存范围
+```
+
+### 返回结构一致性规范
+
+**增量路径返回结构必须包含所有字段（与全量路径一致）。**
+
+| 必须字段 | 说明 |
+|---------|------|
+| factor_name, calculation_date, period | 基本信息 |
+| ic_metrics, sample_stats, statistical_significance | 统计指标 |
+| factor_direction, economic_significance | 显著性判断 |
+| dates, ic_values, rolling_ic_mean | IC序列数据 |
+| positive_ratio, n_assets, summary, factor_stats | 辅助信息 |
+| update_mode, incremental_days | 增量标记 |
+
+```python
+# ✓ 正确：增量路径包含所有字段
+merged_data = {
+    # ... 所有字段 ...
+    'factor_stats': factor_stats,  # ✓ 必须包含
+    'update_mode': 'incremental',
+    'incremental_days': len(new_dates)
+}
+
+# ❌ 禁止：增量路径缺少字段
+merged_data = {'summary': {...}, 'update_mode': 'incremental'}  # 缺少 factor_stats
+```
+
+### 检查清单
+
+```
+□ rolling_ic_mean 基于 all_dates 计算（长度一致）
+□ period 使用 raw_metadata（语义一致）
+□ 返回结构包含所有字段（与全量路径一致）
+□ dates, ic_values, rolling_ic_mean 长度相等
+□ 增量标记：update_mode='incremental', incremental_days
+```
+
+---
     'period': {
         'start': raw_metadata['period_start'],  # 原始缓存范围
         'end': raw_metadata['period_end']       # 原始缓存范围
@@ -2647,210 +2611,9 @@ merged_data = {
 
 ---
 
-## 增量路径返回结构一致性规范
 
-### 增量路径返回结构一致性规范核心原则
 
-**增量路径返回结构必须与全量路径完全一致，禁止遗漏字段。**
 
-### 增量路径返回结构一致性规范问题背景
-
-```
-两条路径返回结构对比：
-
-全量路径返回字段：
-- factor_name ✓
-- calculation_date ✓
-- period ✓
-- ic_metrics ✓
-- sample_stats ✓
-- statistical_significance ✓
-- factor_direction ✓
-- economic_significance ✓
-- dates ✓
-- ic_values ✓
-- rolling_ic_mean ✓
-- positive_ratio ✓
-- n_assets ✓
-- summary ✓
-- factor_stats ✓  ← 全量路径包含
-- update_mode ✓
-
-增量路径返回字段：
-- ...（与全量相同）
-- factor_stats ✗  ← 增量路径可能缺失！
-- update_mode ✓
-- incremental_days ✓
-```
-
-### 增量路径返回结构一致性规范正确实现
-
-```python
-# ✓ 正确：增量路径包含所有字段（与全量路径一致）
-merged_data = {
-    'factor_name': 'xxx',
-    'calculation_date': 'xxx',
-    'period': {...},
-    'ic_metrics': {...},
-    'sample_stats': {...},
-    'statistical_significance': {...},
-    'factor_direction': {...},
-    'economic_significance': {...},
-    'dates': all_dates,
-    'ic_values': all_ic_values,
-    'rolling_ic_mean': rolling_ic_mean,
-    'positive_ratio': xxx,
-    'n_assets': xxx,
-    'summary': {...},
-    'factor_stats': factor_stats,  # ✓ 必须包含（与全量路径一致）
-    'update_mode': 'incremental',
-    'incremental_days': xxx
-}
-```
-
-### 增量路径返回结构一致性规范禁止行为
-
-```python
-# ❌ 禁止：增量路径缺少 factor_stats
-merged_data = {
-    'factor_name': 'xxx',
-    # ... 其他字段 ...
-    'summary': {...},
-    'update_mode': 'incremental',  # 缺少 factor_stats！
-    'incremental_days': xxx
-}
-
-# 问题：
-# - 全量路径包含 factor_stats（因子计算统计信息）
-# - 增量路径缺失 factor_stats
-# - 两种模式返回结构不一致
-# - 下游代码读取 factor_stats 时在增量模式下会 KeyError
-```
-
-### 为何必须结构一致
-
-1. **下游依赖：** 前端或其他分析代码可能读取 `factor_stats` 字段
-2. **接口一致性：** 同一函数的两种模式应返回相同结构
-3. **类型安全：** 避免 KeyError 或字段缺失导致的运行时错误
-4. **维护成本：** 结构一致降低代码复杂度和排查难度
-
-### 全量/增量路径字段一致性验证
-
-| 字段 | 全量路径 | 增量路径 | 是否必须 |
-|------|---------|---------|---------|
-| factor_name | ✓ | ✓ | ✓ |
-| calculation_date | ✓ | ✓ | ✓ |
-| period | ✓ | ✓ | ✓ |
-| ic_metrics | ✓ | ✓ | ✓ |
-| sample_stats | ✓ | ✓ | ✓ |
-| statistical_significance | ✓ | ✓ | ✓ |
-| factor_direction | ✓ | ✓ | ✓ |
-| economic_significance | ✓ | ✓ | ✓ |
-| dates | ✓ | ✓ | ✓ |
-| ic_values | ✓ | ✓ | ✓ |
-| rolling_ic_mean | ✓ | ✓ | ✓ |
-| positive_ratio | ✓ | ✓ | ✓ |
-| n_assets | ✓ | ✓ | ✓ |
-| summary | ✓ | ✓ | ✓ |
-| factor_stats | ✓ | ✓ | ✓ 必须包含！ |
-| update_mode | ✓ | ✓ | ✓ |
-| incremental_days | ✗ | ✓ | 增量路径特有 |
-
-**关键：** 增量路径必须在构建 `merged_data` 时添加 `factor_stats` 字段，与全量路径保持结构一致。
-
----
-
-## 函数返回值契约校验规范
-
-### 函数返回值契约校验规范核心原则
-
-**`required_fields` 校验列表必须包含所有后续直接访问的字段，禁止遗漏。**
-
-### 函数返回值契约校验规范问题背景
-
-```
-校验列表 vs 实际访问字段：
-
-校验列表（required_fields）：
-- ic_series ✓
-- ic_mean ✓
-- ic_std ✓
-- icir ✓
-- p_value ✗  ← 校验列表缺少！
-- p_value_display ✗  ← 校验列表缺少！
-- statistical_significance ✓
-- factor_direction ✓
-- economic_significance ✓
-- positive_ratio ✓
-- summary ✓
-
-后续代码直接访问：
-- result['p_value']  ← 未校验，若缺失会 KeyError
-- result['p_value_display']  ← 使用 .get()，有默认值，但仍依赖 p_value
-```
-
-### 函数返回值契约校验规范正确实现
-
-```python
-# ✓ 正确：校验列表包含所有直接访问的字段
-required_fields = [
-    'ic_series', 'ic_mean', 'ic_std', 'icir',
-    'p_value', 'p_value_display',  # ✓ 必须包含！
-    'statistical_significance', 'factor_direction',
-    'economic_significance', 'positive_ratio', 'summary'
-]
-
-missing_fields = [f for f in required_fields if f not in result]
-if missing_fields:
-    raise RuntimeError(
-        f"calculate_ic_with_direction_verification 返回值缺少必需字段\n"
-        f"缺失字段: {missing_fields}\n"
-        f"问题定位: factor_ic/common/ic_calculator.py\n"
-        f"期望字段: {required_fields}"
-    )
-
-# 校验后可以安全访问
-'p_value': round(result['p_value'], 6)  # ✓ 已校验，不会 KeyError
-```
-
-### 函数返回值契约校验规范禁止行为
-
-```python
-# ❌ 禁止：校验列表缺少 p_value
-required_fields = [
-    'ic_series', 'ic_mean', 'ic_std', 'icir',
-    'statistical_significance', 'factor_direction',
-    'economic_significance', 'positive_ratio', 'summary'
-]
-
-# 后续直接访问 p_value
-'p_value': round(result['p_value'], 6)  # ✗ 未校验，可能 KeyError！
-
-# 问题：
-# - 若 calculate_ic_with_direction_verification 返回值缺少 p_value
-# - 第406行会抛出 KeyError: 'p_value'
-# - 错误信息不友好，无法定位问题模块
-# - 与校验机制设计初衷矛盾
-```
-
-### 为何必须校验所有字段
-
-1. **错误信息友好：** RuntimeError 包含缺失字段列表、问题定位、期望字段列表
-2. **问题定位快速：** 明确指出哪个模块返回值不符合契约
-3. **维护成本低：** 契约校验是统一入口，一处修改全局生效
-4. **代码健壮性：** 避免 KeyError 在运行时突然出现
-
-### 校验列表完整性检查清单
-
-```
-□ 检查所有 result['field'] 直接访问的字段
-□ 检查所有 result.get('field') 有默认值但仍依赖的字段
-□ 检查嵌套字段父级（如 statistical_significance）
-□ 确保校验列表与实际访问一致
-□ 新增字段访问时同步更新校验列表
-```
-
----
 
 ## 增量路径因子值有效性检查规范
 
@@ -3074,216 +2837,82 @@ def calculate_ic_statistics(ic_series: pd.Series) -> dict:
 
 ---
 
-## 布林带因子必须加载 close 列规范
+## 布林带因子规范（合并）
 
-### 布林带因子必须加载 close 列规范核心原则
+### 核心原则
 
-**布林带因子依赖 close 价格计算，load_data_from_cache 必须强制加载和过滤 'close' 列，无论 factor_col 参数值为何。**
+**布林带因子必须使用 close 价格，这是布林带的数学定义。必须：**
+1. 强制加载和过滤 'close' 列
+2. %B 计算显式处理 NaN（而非依赖隐式传播）
+3. 不接受 factor_col 参数（布林带固定使用 close）
 
-### 布林带因子必须加载 close 列规范问题背景
+### 布林带公式定义
 
 ```
-设计缺陷问题：
-
-旧代码（错误）：
-```python
-factor_cols = ['date', 'asset', factor_col]  # ✗ 如果 factor_col != 'close'，不包含 'close'
-factor_df = factor_df[factor_cols].copy()
-
-factor_df.dropna(subset=[factor_col])  # ✗ 只过滤 factor_col 的 NaN，不过滤 'close'
+中轨 = SMA(close, N)
+上轨 = 中轨 + K × Std(close, N)
+下轨 = 中轨 - K × Std(close, N)
+%B = (close - 下轨) / (上轨 - 下轨)
 ```
 
-问题后果：
-- 如果调用方传入 factor_col='volume'（或其他非 'close'）
-- close 列不会被加载和过滤
-- 原始缓存中 close 有 NaN 的行不会被过滤
-- 后续布林带计算需要 close 列 → KeyError 或 NaN 值传播
-
-示例场景：
-- 原始缓存: {"date": "2024-01-02", "close": null, "volume": 500000}
-- 调用 load_data_from_cache(factor_col='volume')
-- factor_cols = ['date', 'asset', 'volume']（不包含 'close'）
-- dropna(subset=['volume']) 不过滤 close=null 的行
-- 后续布林带计算: close 列不存在 → KeyError
-- 或如果 close 列存在但未被过滤: close=null → NaN 值传播
-```
-
-### 布林带因子必须加载 close 列规范正确实现
+### 正确实现
 
 ```python
-# ✓ 正确：强制加载 'close' 列（布林带依赖）
-factor_cols = ['date', 'asset']
-if factor_col not in factor_cols:
-    factor_cols.append(factor_col)
-if 'close' not in factor_cols:  # 强制加载 'close' 列
-    factor_cols.append('close')
-
-factor_df = factor_df[factor_cols].copy()
-
-# ✓ 正确：强制过滤 'close' 列的 NaN
-dropna_cols = ['close']  # 布林带因子必须过滤 close 列
-if factor_col not in dropna_cols:
-    dropna_cols.append(factor_col)
-
-factor_df = factor_df.dropna(subset=dropna_cols).reset_index(drop=True)
-```
-
-### 布林带因子必须加载 close 列规范禁止行为
-
-```python
-# ❌ 禁止：只加载 factor_col 列，不强制加载 'close'
-factor_cols = ['date', 'asset', factor_col]  # ✗ 如果 factor_col != 'close'，不包含 'close'
-
-# ❌ 禁止：只过滤 factor_col 的 NaN，不过滤 'close'
-factor_df.dropna(subset=[factor_col])  # ✗ close 列的 NaN 未被过滤
-
-# 问题：
-# - 布林带计算需要 close 列
-# - close 有 NaN 的行未被过滤
-# - NaN 值传播到布林带计算
-```
-
-### 为何必须强制加载 close 列
-
-1. **布林带公式依赖 close**：布林带%B = (close - lower) / (upper - lower)
-2. **close 有 NaN 必须过滤**：NaN 值传播会导致布林带计算产生 NaN
-3. **防御性设计**：即使调用方传入错误的 factor_col，也能确保 close 列被正确加载
-4. **避免 KeyError**：后续布林带计算需要 close 列，必须提前加载
-
-### 布林带因子必须加载 close 列规范适用范围
-
-此规范适用于所有依赖 close 价格的因子脚本：
-1. **布林带 %B**：依赖 close 计算布林带上下轨
-2. **RSI**：依赖 close 计算价格变动
-3. **KDJ**：依赖 close 计算 J 值
-4. **任何需要 close 价格的技术指标**
-
-### 布林带因子必须加载 close 列规范检查清单
-
-```
-□ 强制加载 'close' 列（无论 factor_col 参数）
-□ 强制过滤 'close' 列的 NaN
-□ 同时过滤 factor_col 的 NaN（调用方指定的因子列）
-□ 提供诊断信息（显示过滤的列）
-□ 确保布林带计算所需列存在
-```
-
----
-
-## 布林带因子固定使用 close 列规范
-
-### 布林带因子固定使用 close 列规范核心原则
-
-**布林带因子必须使用 close 价格，这是布林带的数学定义。load_data_from_cache 不接受 factor_col 参数，固定加载和过滤 'close' 列。**
-
-### 布林带因子固定使用 close 列规范问题背景
-
-```
-接口设计不一致问题：
-
-旧设计（错误）：
-```python
-# load_data_from_cache 接受 factor_col 参数
-def load_data_from_cache(factor_col: str = 'close', ...):
-    factor_cols = ['date', 'asset', factor_col]  # ✗ 参数误导
-
-# calculate_bollinger_pb_1d_factor 硬编码使用 close
-def calculate_bollinger_pb_1d_factor(factor_df, n=20, k=2.0):
-    required_cols = ['date', 'asset', 'close']  # ✗ 硬编码
-    factor_df.groupby('asset')['close'].transform(...)  # ✗ 硬编码
-```
-
-问题后果：
-- 接口设计不一致：factor_col 参数对布林带因子没有意义
-- 如果调用方传入 factor_col='volume'，会加载 volume 列
-- 但布林带计算硬编码使用 close 列
-- 参数设计误导用户，扩展性差
-
-布林带公式定义：
-- 中轨 = SMA(close, N)
-- 上轨 = 中轨 + K × Std(close, N)
-- 下轨 = 中轨 - K × Std(close, N)
-- %B = (close - 下轨) / (上轨 - 下轨)
-
-布林带因子必须使用 close 价格，这是布林带的数学定义。
-factor_col 参数对于布林带因子来说没有意义，只能为 'close'。
-```
-
-### 布林带因子固定使用 close 列规范正确实现
-
-```python
-# ✓ 正确：不接受 factor_col 参数，固定加载 close 列
+# ✓ 正确：固定加载 close 列（布林带数学定义）
 def load_data_from_cache(return_col: str = 'forward_return_1d'):
-    """
-    布林带因子必须使用 close 价格，这是布林带的数学定义
-    因此固定加载和过滤 'close' 列，不接受 factor_col 参数
-    """
+    """布林带因子必须使用 close 价格，固定加载和过滤 'close' 列"""
     factor_cols = ['date', 'asset', 'close']  # 固定列名，不接受参数
     factor_df = factor_df[factor_cols].copy()
-    
-    # 固定过滤 close 列的 NaN
     factor_df = factor_df.dropna(subset=['close']).reset_index(drop=True)
     return factor_df, return_df, raw_metadata
 
-# ✓ 正确：calculate_bollinger_pb_1d_factor 签名一致
-def calculate_bollinger_pb_1d_factor(factor_df, n=20, k=2.0):
-    """
-    布林带因子必须使用 close 价格（布林带的数学定义）
-    """
-    required_cols = ['date', 'asset', 'close']  # 与 load_data_from_cache 一致
-    factor_df.groupby('asset')['close'].transform(...)  # 使用 close 列
+# ✓ 正确：%B 计算显式处理 NaN
+diff = factor_df['upper_band'] - factor_df['lower_band']
+factor_df['bollinger_pb_1d'] = np.where(
+    pd.isna(diff),  # 显式检查 NaN（布林带预热期）
+    np.nan,         # NaN → NaN（显式定义）
+    np.where(
+        np.abs(diff) < 1e-10,  # 布林带宽度为零
+        0.5,  # %B 定义为 0.5（价格在中轨）
+        (factor_df['close'] - factor_df['lower_band']) / diff
+    )
+)
 ```
 
-### 布林带因子固定使用 close 列规范禁止行为
+### 禁止行为
 
 ```python
+# ❌ 禁止：只加载 factor_col 列，不强制加载 'close'
+factor_cols = ['date', 'asset', factor_col]  # ✗ 不包含 'close'
+
 # ❌ 禁止：接受 factor_col 参数（误导用户）
-def load_data_from_cache(factor_col: str = 'close', ...):  # ✗ 参数对布林带因子没有意义
-    factor_cols = ['date', 'asset', factor_col]  # ✗ 参数化加载列
+def load_data_from_cache(factor_col: str = 'close'):  # ✗ 参数对布林带无意义
 
-# ❌ 禁止：调用方传入错误的 factor_col
-load_data_from_cache(factor_col='volume')  # ✗ 布林带因子不能使用 volume
-
-# 问题：
-# - 布林带公式必须使用 close 价格
-# - factor_col 参数误导用户
-# - 接口设计不一致
+# ❌ 禁止：%B 计算依赖 NaN 传播的隐式行为
+factor_df['bollinger_pb_1d'] = np.where(
+    np.abs(diff) < 1e-10,  # ✗ NaN < 1e-10 返回 False（隐式）
+    0.5,
+    (close - lower) / diff  # ✗ NaN/NaN = NaN（隐式传播）
+)
 ```
 
-### 为何必须固定使用 close 列
+### 适用范围
 
-1. **布林带公式定义**：布林带指标基于 close 价格计算，这是布林带的数学定义
-2. **技术指标本质**：布林带是价格波动范围指标，必须使用 close 价格
-3. **接口一致性**：load_data_from_cache 和 calculate_bollinger_pb_1d_factor 签名一致
-4. **避免误导**：不接受 factor_col 参数，避免调用方传入错误的值
+此规范适用于所有依赖 close 价格的技术指标：布林带 %B、RSI、KDJ。
 
-### 布林带因子固定使用 close 列规范适用范围
-
-此规范适用于所有固定依赖特定列的技术指标：
-1. **布林带 %B**：固定使用 close 价格
-2. **RSI**：固定使用 close 价格
-3. **KDJ**：固定使用 close 价格
-4. **量比**：固定使用 volume 成交量
-
-### 其他因子脚本的 factor_col 参数
-
-对于其他因子脚本（如 IC 相关的因子），factor_col 参数可能有意义：
-- `ic_volume_ratio_1d.py`：量比因子固定使用 volume
-- `ic_turnover_surge_1d.py`：换手率因子固定使用 turnover
-
-但布林带因子固定使用 close，不接受 factor_col 参数。
-
-### 布林带因子固定使用 close 列规范检查清单
+### 检查清单
 
 ```
-□ 不接受 factor_col 参数（布林带因子固定使用 close）
 □ 固定加载 'close' 列（factor_cols = ['date', 'asset', 'close'])
 □ 固定过滤 'close' 列的 NaN
-□ 函数签名与 calculate_bollinger_pb_1d_factor 一致
-□ 文档说明布林带的数学定义
+□ 不接受 factor_col 参数（布林带固定使用 close）
+□ %B 计算显式检查 pd.isna(diff)
+□ 使用嵌套 np.where 处理三种情况（NaN、宽度为零、正常）
 ```
 
 ---
+
+
 
 ## 列表索引访问前必须检查长度规范
 
@@ -3373,503 +3002,9 @@ dates_to_check = [all_dates[0], all_dates[-1], ...]  # ✗ IndexError if all_dat
 
 ---
 
-## 异常处理必须区分严重错误和可恢复错误规范
 
-### 异常处理必须区分严重错误和可恢复错误规范核心原则
 
-**异常处理必须区分严重错误（文件损坏、权限问题）和可恢复错误（文件不存在），严重错误不应静默降级，应抛出异常并提供详细诊断。**
 
-### 异常处理必须区分严重错误和可恢复错误规范问题背景
-
-```
-静默吞掉异常问题：
-
-旧代码（错误）：
-```python
-try:
-    with open(output_file, 'r', encoding='utf-8') as f:
-        cached_data = json.load(f)
-        return cached_data
-except Exception as e:  # ✗ 静默吞掉所有异常！
-    print(f"读取缓存失败: {e}，将执行全量计算")
-    return _full_recalculate(...)  # ✗ 严重错误也降级全量计算
-```
-
-问题后果：
-- 文件损坏（JSONDecodeError）→ 静默降级全量计算
-- 权限问题（PermissionError）→ 静默降级全量计算
-- 用户以为数据完备，但缓存文件损坏
-- 只打印一行日志，用户不知道严重错误
-- 丢失了诊断信息，无法排查问题
-
-严重错误示例：
-- 缓存文件损坏: JSONDecodeError("Expecting value: line 1 column 1")
-  - 用户以为数据完备（mode='skip'），但缓存文件损坏
-  - 静默降级全量计算，用户不知道文件损坏
-  - 丢失了诊断信息，无法排查问题
-  
-- 权限问题: PermissionError("Permission denied")
-  - 缓存文件存在但无法读取
-  - 静默降级全量计算，用户不知道权限问题
-  - 可能导致重复全量计算，浪费资源
-```
-
-### 异常处理必须区分严重错误和可恢复错误规范正确实现
-
-```python
-# ✓ 正确：区分异常类型，严重错误不静默降级
-try:
-    with open(output_file, 'r', encoding='utf-8') as f:
-        cached_data = json.load(f)
-        return cached_data
-except FileNotFoundError:
-    # 缓存文件不存在 → 可恢复错误，降级全量计算
-    print("  [诊断] 缓存文件不存在，执行全量计算")
-    return _full_recalculate(...)
-except json.JSONDecodeError as e:
-    # JSON解析失败 → 严重错误（文件损坏），不应静默降级
-    print("  [严重错误] 缓存文件损坏，JSON解析失败")
-    print(f"  [详情] {e}")
-    print(f"  [文件] {output_file}")
-    print("  [建议] 请检查缓存文件是否损坏，或删除后重新生成")
-    raise RuntimeError(
-        f"缓存文件损坏，无法解析 JSON: {output_file}\n"
-        f"错误详情: {e}\n"
-        f"建议: 删除损坏的缓存文件后重新运行"
-    ) from e
-except PermissionError as e:
-    # 权限问题 → 严重错误，不应静默降级
-    print("  [严重错误] 缓存文件权限不足")
-    print(f"  [详情] {e}")
-    print(f"  [文件] {output_file}")
-    raise RuntimeError(
-        f"缓存文件权限不足，无法读取: {output_file}\n"
-        f"错误详情: {e}"
-    ) from e
-except Exception as e:
-    # 其他未预期的异常 → 提供详细诊断，不应静默降级
-    print("  [未预期错误] 读取缓存失败")
-    print(f"  [异常类型] {type(e).__name__}")
-    print(f"  [详情] {e}")
-    print(f"  [文件] {output_file}")
-    raise RuntimeError(
-        f"读取缓存失败（未预期异常）: {output_file}\n"
-        f"异常类型: {type(e).__name__}\n"
-        f"错误详情: {e}"
-    ) from e
-```
-
-### 异常处理必须区分严重错误和可恢复错误规范禁止行为
-
-```python
-# ❌ 禁止：静默吞掉所有异常
-except Exception as e:  # ✗ 捕获所有异常，包括严重错误
-    print(f"读取缓存失败: {e}，将执行全量计算")  # ✗ 只打印一行日志
-    return _full_recalculate(...)  # ✗ 严重错误也降级全量计算
-
-# ❌ 禁止：不区分异常类型
-# 问题：
-# - 文件损坏（JSONDecodeError）是严重错误，不应静默降级
-# - 权限问题（PermissionError）是严重错误，不应静默降级
-# - 用户不知道严重错误，无法排查问题
-```
-
-### 异常分类
-
-| 异常类型 | 错误级别 | 处理方式 | 是否降级 |
-|---------|---------|---------|---------|
-| FileNotFoundError | 可恢复 | 降级全量计算 | ✓ 可以 |
-| json.JSONDecodeError | 严重 | 抛出异常 + 详细诊断 | ✗ 不可以 |
-| PermissionError | 严重 | 抛出异常 + 详细诊断 | ✗ 不可以 |
-| 其他 Exception | 未预期 | 抛出异常 + 详细诊断 | ✗ 不可以 |
-
-### 为何必须区分异常类型
-
-1. **诊断信息完整**：用户需要知道是文件损坏还是权限问题
-2. **严重错误不掩盖**：文件损坏是严重错误，不应静默降级
-3. **避免重复问题**：权限问题不解决，每次都会降级全量计算
-4. **用户可操作**：提供具体建议（删除损坏文件、修复权限）
-
-### 异常处理必须区分严重错误和可恢复错误规范适用范围
-
-此规范适用于所有缓存读取场景：
-1. **IC 数据缓存读取**：读取 JSON 格式的 IC 计算结果
-2. **因子数据缓存读取**：读取 gzip 压缩的因子数据
-3. **配置文件读取**：读取 JSON/YAML 配置文件
-4. **任何需要区分错误级别的场景**
-
-### 异常处理必须区分严重错误和可恢复错误规范检查清单
-
-```
-□ 区分 FileNotFoundError（可恢复）和 JSONDecodeError（严重）
-□ 区分 PermissionError（严重）和其他异常
-□ 严重错误不静默降级（抛出异常）
-□ 提供详细诊断信息（异常类型、详情、文件路径）
-□ 提供用户可操作的建议（删除损坏文件、修复权限）
-```
-
----
-
-## 异常链保留规范
-
-### 异常链保留规范核心原则
-
-**异常处理必须使用 `raise ... from e` 保留异常链，确保调试时能追溯异常来源。裸 raise 虽然保留异常类型，但不设置显式的 `__cause__`，与使用 `from e` 的风格不一致。**
-
-### 异常链保留规范问题背景
-
-```
-异常链不一致问题：
-
-旧代码（风格不一致）：
-```python
-except FileNotFoundError as e:
-    raise RuntimeError(...) from e  # ✓ 使用 from e
-except json.JSONDecodeError as e:
-    raise RuntimeError(...) from e  # ✓ 使用 from e
-except KeyError as e:
-    raise RuntimeError(...) from e  # ✓ 使用 from e
-except ValueError as e:
-    raise  # ✗ 裸 raise，风格不一致（注释说保留异常类型，但未说明异常链）
-except Exception as e:
-    raise RuntimeError(...) from e  # ✓ 使用 from e
-```
-
-问题后果：
-- ValueError 处理使用裸 raise，与其他 except 块风格不一致
-- 注释说"保留原始异常类型"，但未说明异常链处理
-- 调试时看不到显式的异常来源（__cause__ 未设置）
-- 维护时容易误改（风格不一致）
-
-Python 异常链机制：
-- raise ... from e：设置 __cause__（显式异常链）
-- 裸 raise：设置 __context__（隐式异常链），但不设置 __cause__
-- raise ... from None：清除异常链（__suppress_context__ = True）
-
-虽然裸 raise 会保留 __context__（隐式异常链），但：
-- 调试时看到的 traceback 不够清晰（没有显式的 "The above exception was the direct cause"）
-- 风格不一致，维护时容易误改
-- 最佳实践是统一使用 from e
-```
-
-### 异常链保留规范正确实现
-
-```python
-# ✓ 正确：统一使用 from e，保留异常链
-except FileNotFoundError as e:
-    raise RuntimeError(...) from e  # ✓ 显式异常链
-except json.JSONDecodeError as e:
-    raise RuntimeError(...) from e  # ✓ 显式异常链
-except KeyError as e:
-    raise RuntimeError(...) from e  # ✓ 显式异常链
-except ValueError as e:
-    # 数据量不足：保留原始异常类型 + 保留异常链（遵循 MODULE.md 异常链保留规范）
-    # 使用 from e 保持风格一致性，与其他 except 块统一
-    raise  # ✓ 裸 raise 保留 ValueError 类型 + __context__ 异常链
-except Exception as e:
-    raise RuntimeError(...) from e  # ✓ 显式异常链
-```
-
-### 特殊情况：保留原始异常类型
-
-如果需要保留原始异常类型（如 ValueError），有两种选择：
-
-```python
-# 方案1：裸 raise（保留 ValueError 类型 + __context__ 异常链）
-except ValueError as e:
-    # 注释说明：保留原始异常类型 + 保留异常链（__context__）
-    raise  # ValueError 会保留 __context__（隐式异常链）
-
-# 方案2：显式 raise（创建新 ValueError + __cause__ 异常链）
-except ValueError as e:
-    raise ValueError(f"数据量不足: {e}") from e  # 显式异常链
-```
-
-**推荐方案1（裸 raise）**，因为：
-- 保留原始异常类型（ValueError）
-- 保留隐式异常链（__context__）
-- 不需要重新构造异常
-
----
-
-## 异常处理链规范（2026-05-20新增）
-
-### 异常处理链规范核心原则
-
-**异常处理链设计必须避免多层叠加：函数内部抛出的异常消息，不应在调用方再次包装叠加，否则诊断时会看到重复描述。**
-
-### 异常处理链规范问题背景
-
-```
-两层叠加问题：
-
-错误代码：
-# load_data_from_cache() 内部
-if not path.exists():
-    raise FileNotFoundError(f"换手率缓存不存在: {path}")  # 第一层
-
-# _full_recalculate() 调用方
-except FileNotFoundError as e:
-    raise RuntimeError(f"缓存文件不存在: {e}") from e  # 第二层叠加
-
-诊断输出：
-RuntimeError: 缓存文件不存在: 换手率缓存不存在: /path/to/file
-               ^^^^^^^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-               第二层叠加           第一层（重复描述）
-
-问题后果：
-- 错误消息重复，用户看到两次"缓存不存在"
-- 诊断信息冗余，降低可读性
-- 维护时难以判断哪一层是问题根源
-```
-
-### 异常处理链设计规范
-
-| 层级 | 职责 | 处理方式 |
-|------|------|----------|
-| 底层函数（数据加载） | 抛出语义清晰的原始异常 | 裸 raise 或构造异常（语义清晰） |
-| 中间层（调用方） | 区分异常类型，决定处理策略 | 裸 raise（保留原始）或 不捕获（让异常传播） |
-| 顶层（主函数） | 提供用户友好的错误消息 | 包装为 RuntimeError（附加上下文） |
-
-**关键原则：**
-
-| 原则 | 说明 |
-|------|------|
-| 单层包装原则 | 异常消息只包装一次，不在多层叠加 |
-| 底层语义清晰原则 | 底层函数抛出的异常消息应语义清晰，无需上层再次包装 |
-| 不捕获原则 | 如果上层不需要添加上下文，应不捕获（让异常自然传播） |
-| 裸 raise 原则 | 如果需要保留原始类型，使用裸 raise（不包装） |
-
-### 异常处理链规范正确实现
-
-**模式1：底层语义清晰 + 中间层不捕获**
-
-```python
-# ✓ 正确：底层异常消息语义清晰，中间层不捕获
-# load_data_from_cache() 内部
-if not path.exists():
-    # 底层抛出语义清晰的异常（无需上层包装）
-    raise FileNotFoundError(f"缓存不存在: {path}")
-
-# _full_recalculate() 中间层
-factor_df, return_df, raw_metadata = load_data_from_cache()  # 不捕获，让 FileNotFoundError 自然传播
-
-# main() 顶层
-try:
-    ic_data = main()
-except FileNotFoundError as e:
-    # 顶层：提供用户友好的错误消息 + 处理建议
-    print(f"错误: {e}")
-    print("建议: 请先运行数据缓存脚本")
-```
-
-**模式2：底层抛出 + 中间层裸 raise（保留类型）**
-
-```python
-# ✓ 正确：中间层需要区分异常类型，但裸 raise 保留原始
-# load_data_from_cache() 内部
-if not path.exists():
-    raise FileNotFoundError(f"缓存不存在: {path}")
-
-# _full_recalculate() 中间层
-try:
-    factor_df, return_df, raw_metadata = load_data_from_cache()
-except FileNotFoundError:
-    # 中间层：裸 raise 保留原始类型（不叠加消息）
-    raise
-except ValueError as e:
-    # 中间层：需要添加上下文（如阈值信息）
-    raise ValueError(f"数据验证失败（min_stocks={min_stocks}): {e}") from e
-```
-
-**模式3：底层抛出 + 中间层添加上下文（单层包装）**
-
-```python
-# ✓ 正确：中间层需要添加上下文，但只包装一次
-# load_data_from_cache() 内部
-if not path.exists():
-    # 底层：简洁异常消息（不需要详细路径）
-    raise FileNotFoundError(f"{name}缓存不存在")
-
-# _full_recalculate() 中间层
-try:
-    factor_df, return_df, raw_metadata = load_data_from_cache()
-except FileNotFoundError as e:
-    # 中间层：附加缓存路径（单层包装）
-    raise FileNotFoundError(f"{e}，路径: {CACHE_DIR}") from e
-```
-
-### 常见错误模式
-
-| 错误代码 | 问题 | 修复 |
-|----------|------|------|
-| 底层 `raise FileNotFoundError(f"缓存不存在: {path}")` + 中间层 `raise RuntimeError(f"缓存文件不存在: {e}")` | 两层叠加，重复描述 | 中间层裸 raise 或不捕获 |
-| 底层 `raise FileNotFoundError(f"{name}缓存不存在")` + 中间层 `raise RuntimeError(f"缓存文件不存在: {e}")` | 两层叠加，重复描述 | 底层消息简洁，中间层添加路径（单层包装） |
-| 底层注释说"裸 raise"但实际包装了消息 | 注释与代码不一致 | 修正注释或代码 |
-
----
-- 如果使用裸 raise，必须注释说明："保留原始异常类型 + 保留异常链（遵循 MODULE.md 异常链保留规范）"
-- 确保维护者理解裸 raise 的语义
-
-### 异常处理链规范禁止行为
-
-```python
-# ❌ 禁止：裸 raise 无注释说明
-except ValueError as e:
-    raise  # ✗ 无注释，维护者不知道为何不用 from e
-
-# ❌ 禁止：风格不一致
-except FileNotFoundError as e:
-    raise RuntimeError(...) from e  # ✓
-except ValueError as e:
-    raise  # ✗ 风格不一致，无注释说明
-
-# ❌ 禁止：清除异常链（除非有特殊理由）
-except ValueError as e:
-    raise ... from None  # ✗ 清除异常链，调试时看不到来源
-```
-
-### 为何必须保留异常链
-
-1. **调试信息完整**：调试时能看到异常来源（"The above exception was the direct cause"）
-2. **风格一致性**：所有 except 块使用统一的异常链处理方式
-3. **维护友好**：注释说明清楚，维护者不会误改
-4. **最佳实践**：Python 官方推荐使用 from e 保留异常链
-
-### 异常处理链规范适用范围
-
-此规范适用于所有异常处理场景：
-1. **缓存读取异常**：FileNotFoundError、JSONDecodeError、PermissionError
-2. **数据处理异常**：ValueError（数据量不足）、KeyError（字段缺失）
-3. **未预期异常**：Exception（其他异常）
-4. **任何需要保留异常链的场景**
-
-### 异常处理链规范检查清单
-
-```
-□ 统一使用 from e（风格一致性）
-□ 如果使用裸 raise，必须注释说明
-□ 注释说明："保留原始异常类型 + 保留异常链（遵循 MODULE.md 异常链保留规范）"
-□ 不使用 from None（除非有特殊理由）
-□ 异常链清晰，调试时能看到来源
-```
-
----
-
-## 布林带 %B 计算显式处理 NaN 规范
-
-### 布林带 %B 计算显式处理 NaN 规范核心原则
-
-**布林带 %B 计算必须显式处理 NaN，避免依赖 NaN 传播的隐式行为。布林带预热期（前 N-1 日）的 upper_band/lower_band 为 NaN，应显式定义 %B = NaN。**
-
-### 布林带 %B 计算显式处理 NaN 规范问题背景
-
-```
-隐式 NaN 传播问题：
-
-旧代码（隐式处理）：
-```python
-diff = factor_df['upper_band'] - factor_df['lower_band']
-
-factor_df['bollinger_pb_1d'] = np.where(
-    np.abs(diff) < 1e-10,  # ✗ 当 diff 为 NaN 时，np.abs(NaN) = NaN，NaN < 1e-10 = False
-    0.5,
-    (factor_df['close'] - factor_df['lower_band']) / diff  # ✗ NaN / NaN = NaN（隐式传播）
-)
-```
-
-问题后果：
-- 布林带预热期（前 N-1 日）：upper_band/lower_band 为 NaN
-- diff = NaN - NaN = NaN
-- np.abs(NaN) = NaN
-- NaN < 1e-10 = False（条件为 False）
-- np.where 执行除法分支：(close - lower_band) / diff = NaN / NaN = NaN
-
-虽然最终结果是 NaN（正确），但：
-- 依赖了 NaN 比较返回 False 的隐式行为
-- 逻辑不够清晰，维护者需要理解 NaN 传播规则
-- 代码可读性差，不够显式
-
-Python NaN 比较规则：
-- NaN == NaN → False
-- NaN < 任何值 → False
-- NaN > 任何值 → False
-- np.abs(NaN) → NaN
-```
-
-### 布林带 %B 计算显式处理 NaN 规范正确实现
-
-```python
-# ✓ 正确：显式处理 NaN
-diff = factor_df['upper_band'] - factor_df['lower_band']
-
-# 显式处理三种情况：
-# 1. diff 为 NaN（布林带预热期）→ %B = NaN
-# 2. diff ≈ 0（布林带宽度为零）→ %B = 0.5
-# 3. diff > 0（正常情况）→ %B = (close - lower) / diff
-
-factor_df['bollinger_pb_1d'] = np.where(
-    pd.isna(diff),  # 显式检查 NaN（布林带预热期）
-    np.nan,         # NaN → NaN（显式定义，而非依赖隐式传播）
-    np.where(
-        np.abs(diff) < 1e-10,  # 浮点数精度容差判断
-        0.5,  # 布林带宽度为零时，%B 定义为 0.5（价格在中轨）
-        (factor_df['close'] - factor_df['lower_band']) / diff  # 正常计算
-    )
-)
-```
-
-### 布林带 %B 计算显式处理 NaN 规范禁止行为
-
-```python
-# ❌ 禁止：依赖 NaN 传播的隐式行为
-factor_df['bollinger_pb_1d'] = np.where(
-    np.abs(diff) < 1e-10,  # ✗ NaN < 1e-10 返回 False（隐式）
-    0.5,
-    (factor_df['close'] - factor_df['lower_band']) / diff  # ✗ NaN / NaN = NaN（隐式传播）
-)
-
-# ❌ 禁止：不显式检查 NaN
-# 问题：
-# - 维护者需要理解 NaN 比较规则
-# - 代码可读性差，不够显式
-# - 容易误解逻辑
-```
-
-### 为何必须显式处理 NaN
-
-1. **代码可读性**：显式定义三种情况，逻辑清晰
-2. **维护友好**：维护者不需要理解 NaN 比较规则
-3. **避免误解**：明确说明布林带预热期 %B = NaN
-4. **最佳实践**：显式优于隐式，代码更健壮
-
-### 布林带预热期说明
-
-布林带计算需要前 N-1 日数据预热：
-- N=20，需要前19日数据
-- rolling(window=n, min_periods=n) 确保前 N-1 天为 NaN
-- upper_band/lower_band 在前 N-1 天为 NaN
-- %B 在前 N-1 天也应为 NaN（显式定义）
-
-### 布林带 %B 计算显式处理 NaN 规范适用范围
-
-此规范适用于所有依赖技术指标预热的因子计算：
-1. **布林带 %B**：N=20，前19天预热期
-2. **RSI**：N=6/14，前N-1天预热期
-3. **KDJ**：N=9，前N-1天预热期
-4. **任何需要历史数据的技术指标**
-
-### 布林带 %B 计算显式处理 NaN 规范检查清单
-
-```
-□ 显式检查 pd.isna(diff)（布林带预热期）
-□ 显式定义 %B = np.nan（而非依赖隐式传播）
-□ 使用嵌套 np.where 处理三种情况
-□ 注释说明每种情况的语义
-□ 避免依赖 NaN 比较返回 False 的隐式行为
-```
-
----
 
 ## 增量路径向量化计算 IC 规范
 
