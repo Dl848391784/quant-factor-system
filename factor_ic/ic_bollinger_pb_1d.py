@@ -358,20 +358,59 @@ def calculate_daily_ic_series(
     )
     
     # 函数返回值契约校验（遵循 MODULE.md 函数返回值契约规范）
-    # 核心原则：p_value 是必需字段（回退逻辑依赖），p_value_display 是可选字段（可从 p_value 计算）
-    required_fields = [
-        'ic_series', 'ic_mean', 'ic_std', 'icir', 'p_value',  # p_value 必需
+    # 核心原则：必需字段直接访问（缺失即报错），可选字段使用 .get() 安全访问
+    # 校验分为两层：顶层字段 + 嵌套字典必需字段
+    
+    # 顶层必需字段校验
+    required_top_fields = [
+        'ic_series', 'ic_mean', 'ic_std', 'icir', 'p_value',
         'statistical_significance', 'factor_direction',
         'economic_significance', 'positive_ratio', 'summary'
     ]
-    # p_value_display 是可选字段，不校验（可从 p_value 计算回退值）
-    missing_fields = [f for f in required_fields if f not in result]
-    if missing_fields:
+    missing_top = [f for f in required_top_fields if f not in result]
+    if missing_top:
         raise RuntimeError(
-            f"calculate_ic_with_direction_verification 返回值缺少必需字段\n"
-            f"缺失字段: {missing_fields}\n"
+            f"calculate_ic_with_direction_verification 返回值缺少必需顶层字段\n"
+            f"缺失字段: {missing_top}\n"
             f"问题定位: factor_ic/common/ic_calculator.py\n"
-            f"期望字段: {required_fields}"
+            f"期望字段: {required_top_fields}"
+        )
+    
+    # statistical_significance 嵌套字典必需字段校验
+    ss_dict = result['statistical_significance']
+    required_ss_fields = ['is_significant', 'p_value', 't_stat', 'conclusion']
+    missing_ss = [f for f in required_ss_fields if f not in ss_dict]
+    if missing_ss:
+        raise RuntimeError(
+            f"statistical_significance 缺少必需嵌套字段\n"
+            f"缺失字段: {missing_ss}\n"
+            f"问题定位: factor_ic/common/ic_calculator.py _assess_statistical_significance\n"
+            f"期望字段: {required_ss_fields}"
+        )
+    # p_value_display 是可选字段（可从 p_value 计算），使用 .get() 安全访问
+    
+    # factor_direction 嵌套字典必需字段校验
+    fd_dict = result['factor_direction']
+    required_fd_fields = ['ic_mean_sign', 'ic_mean', 'conclusion']
+    missing_fd = [f for f in required_fd_fields if f not in fd_dict]
+    if missing_fd:
+        raise RuntimeError(
+            f"factor_direction 缺少必需嵌套字段\n"
+            f"缺失字段: {missing_fd}\n"
+            f"问题定位: factor_ic/common/ic_calculator.py _assess_factor_direction\n"
+            f"期望字段: {required_fd_fields}"
+        )
+    
+    # economic_significance 嵌套字典必需字段校验
+    es_dict = result['economic_significance']
+    required_es_fields = ['level', 'abs_ic_mean', 'conclusion']
+    missing_es = [f for f in required_es_fields if f not in es_dict]
+    if missing_es:
+        raise RuntimeError(
+            f"economic_significance 缺少必需嵌套字段\n"
+            f"缺失字段: {missing_es}\n"
+            f"问题定位: factor_ic/common/ic_calculator.py _assess_economic_significance\n"
+            f"期望字段: {required_es_fields}"
         )
     
     ic_series = result['ic_series']
@@ -441,21 +480,23 @@ def calculate_daily_ic_series(
             'p_value_display': result.get('p_value_display', str(round(result['p_value'], 6)))
         },
         'statistical_significance': {
-            'is_significant': result['statistical_significance']['is_significant'],
-            'p_value': result['statistical_significance']['p_value'],
-            'p_value_display': result['statistical_significance']['p_value_display'],
-            't_stat': result['statistical_significance']['t_stat'],
-            'conclusion': result['statistical_significance']['conclusion']
+            'is_significant': ss_dict['is_significant'],
+            'p_value': ss_dict['p_value'],
+            # p_value_display 是可选字段，使用 .get() 安全访问
+            # 回退值：从必需字段 p_value 计算
+            'p_value_display': ss_dict.get('p_value_display', str(round(ss_dict['p_value'], 6))),
+            't_stat': ss_dict['t_stat'],
+            'conclusion': ss_dict['conclusion']
         },
         'factor_direction': {
-            'direction': result['factor_direction']['ic_mean_sign'],
-            'ic_mean': result['factor_direction']['ic_mean'],
-            'conclusion': result['factor_direction']['conclusion']
+            'direction': fd_dict['ic_mean_sign'],
+            'ic_mean': fd_dict['ic_mean'],
+            'conclusion': fd_dict['conclusion']
         },
         'economic_significance': {
-            'ic_strength': result['economic_significance']['level'],
-            'ic_mean_abs': result['economic_significance']['abs_ic_mean'],
-            'conclusion': result['economic_significance']['conclusion']
+            'ic_strength': es_dict['level'],
+            'ic_mean_abs': es_dict['abs_ic_mean'],
+            'conclusion': es_dict['conclusion']
         },
         'sample_stats': {
             # 语义定义（遵循 PROJECT.md 输出字段语义规范）：
