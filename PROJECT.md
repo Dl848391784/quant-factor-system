@@ -208,10 +208,180 @@ data_fetchers/
 
 ---
 
+## 代码风格规范（2026-05-20新增）
+
+以下规范适用于全项目所有模块，不仅限于特定模块。
+
+### Python 代码风格
+
+**核心原则：** 遵循 PEP8 规范，保持代码可读性和一致性。
+
+### import 规范
+
+**所有 import 语句必须在文件顶部，禁止在函数内部 import。**
+
+```python
+# ✓ 正确：所有 import 在文件顶部
+from factor_ic.common.ic_calculator import (
+    calculate_ic_with_direction_verification,
+    calculate_single_day_ic,
+    calculate_ic_statistics
+)
+
+def _incremental_update(...):
+    result = calculate_ic_statistics(ic_series)  # 已在顶部导入
+
+# ❌ 禁止：函数内部 import
+def _incremental_update(...):
+    from factor_ic.common.ic_calculator import calculate_ic_statistics  # 错误！
+```
+
+### 注释缩进规范
+
+**注释必须与代码保持一致的缩进层级。**
+
+```python
+# ✓ 正确：注释与代码缩进一致
+def calculate_ic_series(...):
+    # 计算每日IC值（4空格缩进，与函数体一致）
+    for date, daily_data in merged.groupby('date'):
+        ic_value = calculate_single_day_ic(daily_data)  # 正确
+
+# ❌ 禁止：注释缩进不一致
+def calculate_ic_series(...):
+# 计算每日IC值（顶格，与函数体不一致）  # 错误！
+    for date, daily_data in merged.groupby('date'):
+        ic_value = calculate_single_day_ic(daily_data)
+```
+
+### 字典结构缩进规范
+
+**JSON 字典结构必须保持一致的缩进层级。**
+
+```python
+# ✓ 正确：多层级字典缩进一致
+result = {
+    'factor_name': 'rsi_1d',          # 第1层：4空格
+    'ic_metrics': {                   # 第1层：4空格
+        'ic_mean': 0.05,              # 第2层：8空格
+        'ic_std': 0.15                # 第2层：8空格
+    },                                # 第1层闭合：4空格
+    'sample_stats': {                 # 第1层：4空格
+        'total_days': 545             # 第2层：8空格
+    }                                 # 第1层闭合：4空格
+}
+
+# ❌ 禁止：缩进不一致（IndentationError）
+result = {
+    'factor_name': 'rsi_1d',
+    'ic_metrics': {
+        'ic_mean': 0.05
+    },
+'sample_stats': {  # 错误！缺少缩进
+    'total_days': 545
+}
+```
+
+**缩进规则：**
+- 第1层字段：4空格（函数体内字典）
+- 第2层字段：8空格（嵌套字典内）
+- 闭合括号：与同级字段对齐
+
+### 异常处理规范
+
+**异常链必须使用 `from e` 保留原始异常信息。**
+
+```python
+# ✓ 正确：保留异常链
+try:
+    result = calculate_ic_with_direction_verification(...)
+except KeyError as e:
+    raise RuntimeError(
+        f"返回值缺少必需字段\n"
+        f"缺失字段: {missing_fields}"
+    ) from e  # 保留原始 KeyError
+
+# ❌ 禁止：丢弃异常链
+try:
+    result = calculate_ic_with_direction_verification(...)
+except KeyError as e:
+    raise RuntimeError(f"返回值缺少必需字段")  # 错误！丢弃了 KeyError
+```
+
+**为何必须保留异常链：**
+1. traceback 可追溯原始异常位置
+2. 问题定位更快速
+3. 符合 Python 最佳实践
+
+### 错误信息格式规范
+
+**枚举类错误必须包含合法值列表。**
+
+```python
+# ✓ 正确：包含合法值列表
+raise RuntimeError(
+    f"未知模式: {mode}\n"
+    f"合法值: ['skip', 'incremental', 'full']"
+)
+
+# ❌ 禁止：错误信息不完整
+raise RuntimeError(f"未知模式: {mode}")  # 错误！缺少合法值列表
+```
+
+### 设计演进清理规范
+
+**新实现替代旧实现后，必须删除旧代码，禁止保留死代码。**
+
+```python
+# ✓ 正确：向量化版本替代循环版本后，删除旧函数
+
+# 旧版本（已删除）：
+# def calculate_single_stock(stock_df): ...
+
+# 新版本（保留）：
+def calculate_all_stocks_vectorized(factor_df):
+    return factor_df.groupby('asset').transform(...)
+
+# ❌ 禁止：保留旧函数但从不调用（死代码）
+def calculate_single_stock(stock_df):  # 死代码！
+    """单股票版本，从未被调用"""
+    return stock_df.rolling(20).mean()
+
+def calculate_all_stocks_vectorized(factor_df):  # 实际使用
+    return factor_df.groupby('asset').transform(...)
+```
+
+**为何必须清理死代码：**
+1. 死代码误导读者
+2. 增加维护成本
+3. 可能与新实现不一致
+
+### 函数签名变更同步规范
+
+**返回值变更时必须同步更新类型注解和 docstring。**
+
+```python
+# ✓ 正确：类型注解和 docstring 同步更新
+def load_data_from_cache(...) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """
+    Returns:
+        factor_df: 过滤后的因子数据
+        return_df: 过滤后的收益数据
+        raw_metadata: 原始数据范围信息（新增）
+    """
+
+# ❌ 禁止：只改返回值不改类型注解
+def load_data_from_cache(...):  # 错误！缺少返回类型注解
+    return factor_df, return_df, raw_metadata
+```
+
+---
+
 ## 版本历史
 
 | 版本 | 日期 | 更新内容 |
 |------|------|---------|
+| v2.2 | 2026-05-20 | 新增"代码风格规范"章节（import、注释缩进、异常链、死代码清理等） |
 | v2.1 | 2026-05-20 | 新增"脚本配套文件规范"：流程文档位置、测试用例位置、强制规则 |
 | v2.0 | 2026-05-19 | 重构：factor_ic 规范移至 MODULE.md，精简项目级规范 |
 | v1.x | 2026-05-07~19 | factor_ic 规范逐步完善（已移至 MODULE.md） |
