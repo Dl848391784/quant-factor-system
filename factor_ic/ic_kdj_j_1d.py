@@ -500,6 +500,20 @@ def calculate_daily_ic_series(
     dates = [str(d) for d in ic_series.index]
     ic_values = [round(v, 6) for v in ic_series.values]
     
+    # 边界条件检查：dates 为空时提前抛出异常（遵循 MODULE.md 边界条件规范）
+    # 原因：若所有交易日股票数均不足 min_stocks，ic_series 为空，dates 也为空
+    # 问题：返回"半空"结果字典难以诊断根本原因，valid_range.start/end 为 None
+    # 解决：在生成结果前检查，抛出有意义的异常便于诊断
+    if len(dates) == 0:
+        raise RuntimeError(
+            f"IC 计算结果为空：所有交易日股票数均不足 min_stocks={min_stocks}\n"
+            f"诊断信息:\n"
+            f"  - 因子数据: {len(factor_df)} 行, {factor_df['asset'].nunique()} 只股票\n"
+            f"  - 收益数据: {len(return_df)} 行, {return_df['asset'].nunique()} 只股票\n"
+            f"  - 日期范围: {factor_df['date'].min()} ~ {factor_df['date'].max()}\n"
+            f"建议: 降低 min_stocks 阈值或检查数据源股票覆盖率"
+        )
+    
     # 计算 20 日滚动均值（min_periods=10，至少需要10个有效值）
     rolling_mean = ic_series.rolling(window=20, min_periods=10).mean()
     

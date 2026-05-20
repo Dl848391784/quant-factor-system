@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 16:15 北京时间
-> 实测数据时间: 2026-05-20 16:10 北京时间
-> 版本: v1.14
-> 更新内容: 补充 RSV 值域检查规范，添加值域统计日志和异常值警告
+> 生成时间: 2026-05-20 16:25 北京时间
+> 实测数据时间: 2026-05-20 16:20 北京时间
+> 版本: v1.15
+> 更新内容: 修复边界条件处理缺失，dates 为空时提前抛出有意义的异常
 
 ---
 
@@ -767,6 +767,7 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.12 | 2026-05-20 | 修复 should_full_recalculate 标志未使用问题，添加显式检查确保控制流有效 |
 | v1.13 | 2026-05-20 | 修复闭包耦合问题，将内嵌函数提升为模块级私有函数 `_calculate_k_with_initial` 和 `_calculate_d_with_initial`，显式传参 |
 | v1.14 | 2026-05-20 | 补充 RSV 值域检查规范，添加值域统计日志和异常值警告（遵循 MODULE.md 因子计算规范） |
+| v1.15 | 2026-05-20 | 修复边界条件处理缺失，dates 为空时提前抛出有意义的异常（遵循 MODULE.md 边界条件规范） |
 
 ---
 
@@ -940,4 +941,76 @@ factor_df.drop(columns=['rolling_high', 'rolling_low'], inplace=True)
 
 ---
 
-*最后更新: 2026-05-20 16:15*
+## 边界条件规范
+
+### 问题根因
+
+**原始代码（缺少边界条件检查）：**
+```python
+# 转换为 JSON 友好格式
+dates = [str(d) for d in ic_series.index]
+ic_values = [round(v, 6) for v in ic_series.values]
+
+# 直接继续处理，未检查 dates 是否为空
+rolling_mean = ic_series.rolling(window=20, min_periods=10).mean()
+# ...
+
+# 在 avg_stocks_period 中使用 dates[0]/dates[-1]，若 dates 为空则返回 None
+'valid_range': {
+    'start': dates[0] if dates else None,
+    'end': dates[-1] if dates else None,
+}
+```
+
+**问题分析：**
+- 若所有交易日股票数均不足 `min_stocks`，`ic_series` 为空，`dates` 也为空
+- `valid_range.start/end` 返回 `None`，形成"半空"结果字典
+- 其他字段（`n_assets`、`positive_ratio`）正常，难以发现根本原因
+- 调用方拿到无效结果，但不知道问题在哪
+- 缺少边界条件检查，违反"前置条件必须验证"原则
+
+### 修复方式
+
+**在 dates 为空时提前抛出有意义的异常：**
+```python
+# 转换为 JSON 友好格式
+dates = [str(d) for d in ic_series.index]
+ic_values = [round(v, 6) for v in ic_series.values]
+
+# 边界条件检查：dates 为空时提前抛出异常（遵循 MODULE.md 边界条件规范）
+# 原因：若所有交易日股票数均不足 min_stocks，ic_series 为空，dates 也为空
+# 问题：返回"半空"结果字典难以诊断根本原因，valid_range.start/end 为 None
+# 解决：在生成结果前检查，抛出有意义的异常便于诊断
+if len(dates) == 0:
+    raise RuntimeError(
+        f"IC 计算结果为空：所有交易日股票数均不足 min_stocks={min_stocks}\n"
+        f"诊断信息:\n"
+        f"  - 因子数据: {len(factor_df)} 行, {factor_df['asset'].nunique()} 只股票\n"
+        f"  - 收益数据: {len(return_df)} 行, {return_df['asset'].nunique()} 只股票\n"
+        f"  - 日期范围: {factor_df['date'].min()} ~ {factor_df['date'].max()}\n"
+        f"建议: 降低 min_stocks 阈值或检查数据源股票覆盖率"
+    )
+
+# 计算 20 日滚动均值（dates 已验证非空）
+rolling_mean = ic_series.rolling(window=20, min_periods=10).mean()
+```
+
+### 设计原则
+
+| 原则 | 说明 |
+|------|------|
+| 前置条件验证 | 在生成结果前检查输入有效性 |
+| 有意义的异常 | 提供诊断信息和修复建议 |
+| 避免"半空"结果 | 不返回无效结果，让调用方无从诊断 |
+| 快速失败 | 尽早发现问题，不传播无效数据 |
+
+**优势：**
+- 调用方立即知道问题根源（股票数不足）
+- 异常信息包含诊断数据和修复建议
+- 不返回无效 JSON，避免下游分析错误
+
+**参考规范：MODULE.md "边界条件规范 - 前置条件验证"**
+
+---
+
+*最后更新: 2026-05-20 16:25*
