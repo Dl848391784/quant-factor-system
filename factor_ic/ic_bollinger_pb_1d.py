@@ -853,8 +853,7 @@ def _incremental_update(
         else:
             rolling_ic_mean.append(None)  # None IC 的日期，rolling_ic_mean 也为 None
     
-    # NaN → None 转换（确保 JSON 兼容）
-    rolling_ic_mean = [v if v is not None else None for v in rolling_ic_mean]
+    # 注意：NaN 已在 rolling_ic_mean_map 赋值时处理（第844-845行），无需额外转换
     
     # 日期格式断言（遵循 PROJECT.md 日期字符串比较规范)
     # 核心原则：all_dates 为空时跳过日期格式检查（避免 IndexError）
