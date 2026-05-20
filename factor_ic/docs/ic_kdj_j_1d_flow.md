@@ -2,8 +2,8 @@
 
 > 生成时间: 2026-05-20 17:25 北京时间
 > 实测数据时间: 2026-05-20 17:20 北京时间
-> 版本: v1.23
-> 更新内容: 删除 should_full_recalculate 死代码变量，简化控制流注释
+> 版本: v1.24
+> 更新内容: 补充 ic_values round 隐式行为注释，说明 ic_series 不含 NaN 的原因
 
 ---
 
@@ -776,6 +776,7 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.21 | 2026-05-20 | 修复 K/D 值 NaN 传播错误（核心缺陷）—— ewm alpha 参数、ignore_na 参数、初始值位置 |
 | v1.22 | 2026-05-20 | 统一异常处理风格注释，明确包装类与保留类的设计意图（遵循 PROJECT.md 异常处理规范） |
 | v1.23 | 2026-05-20 | 删除 should_full_recalculate 死代码变量，简化控制流注释（遵循 MODULE.md 控制流规范） |
+| v1.24 | 2026-05-20 | 补充 ic_values round 隐式行为注释，说明 ic_series 不含 NaN 的原因（遵循 PROJECT.md 注释规范） |
 
 ---
 
@@ -1562,4 +1563,86 @@ rolling_mean = ic_series.rolling(window=20, min_periods=10).mean()
 
 ---
 
-*最后更新: 2026-05-20 16:45*
+## 隐式行为注释规范
+
+### 问题场景
+
+**代码位置：** `ic_values = [round(v, 6) for v in ic_series.values]`
+
+**隐式行为：**
+- `ic_series.values` 中的 `v` 理论上可能为 `numpy.nan` 或 Python `None`
+- `round(NaN, 6)` 返回 Python `float('nan')`，而非 `None`
+- `pd.isna(None)` 和 `pd.isna(numpy.nan)` 都返回 `True`
+
+**问题：**
+- 代码依赖 `ic_series` 不含 NaN 的隐式假设
+- 若未来 `ic_calculator.py` 逻辑变化导致 `ic_series` 含 NaN，`round(v, 6)` 会返回 `nan`
+- JSON 序列化时 `nan` 会被转为字符串 `"NaN"` 或报错（取决于序列化器）
+- 缺少注释说明为什么这里不需要 `pd.isna(v)` 检查
+
+### 根因分析
+
+**ic_series 不含 NaN 的原因：**
+
+`ic_calculator.py` 第 162-167 行：
+```python
+for date, daily_data in merged.groupby(date_col):
+    ic_value = calculate_single_day_ic(
+        daily_data, factor_col, return_col, min_stocks
+    )
+    if ic_value is not None:
+        ic_list.append({'date': date, 'ic': ic_value})
+```
+
+**关键逻辑：**
+- 只有 `ic_value is not None` 的日期才会被添加到 `ic_list`
+- 不满足 `min_stocks` 的日期不会被添加（而非添加 NaN）
+- `ic_series = pd.DataFrame(ic_list).set_index('date')['ic']`
+- 因此 `ic_series.values` 中的 `v` 都是有效的 `numpy.float64` 值
+
+### 修复方式
+
+**添加注释说明隐式行为：**
+```python
+# 转换为 JSON 友好格式
+dates = [str(d) for d in ic_series.index]
+
+# ic_series.values 不含 NaN 的原因（隐式行为说明）：
+# - ic_series 由 ic_calculator.py 构建，只有 ic_value is not None 的日期被添加
+# - 不满足 min_stocks 的日期不会被添加到 ic_series（而非添加 NaN）
+# - 因此 ic_series.values 中的 v 都是有效的 numpy.float64 值
+# - round(v, 6) 对有效值正常工作，无需 pd.isna(v) 检查
+# 防御性说明：若未来 ic_series 逻辑变化导致含 NaN，需改为：
+#   [round(v, 6) if not pd.isna(v) else None for v in ic_series.values]
+ic_values = [round(v, 6) for v in ic_series.values]
+```
+
+### 设计原则
+
+| 原则 | 说明 |
+|------|------|
+| 隐式行为显式化 | 解释为什么不需要防御性检查 |
+| 根因追溯 | 引用上游逻辑说明数据来源 |
+| 防御性说明 | 提供未来变化的修改方案 |
+
+**对比：rolling_ic_mean 处理**
+```python
+# rolling 参数语义：window=20（窗口大小），min_periods=10（最小有效样本数）
+# 前 min_periods-1=9 个时间点不满足最小样本要求，返回 NaN
+# 注意：round(NaN, 6) 返回 Python float nan，而非 None
+rolling_ic_mean = [
+    round(v, 6) if not pd.isna(v) else None
+    for v in rolling_mean.values
+]
+```
+
+**rolling_ic_mean 需要 pd.isna(v) 检查的原因：**
+- `rolling_mean` 来自 `ic_series.rolling(...).mean()`
+- 前 `min_periods-1` 个时间点返回 NaN
+- 必须显式检查并转为 `None`（JSON 友好）
+
+**参考规范：PROJECT.md "注释规范 - 隐式行为显式化"**
+
+---
+
+*最后更新: 2026-05-20 17:35*

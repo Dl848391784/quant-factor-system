@@ -584,6 +584,14 @@ def calculate_daily_ic_series(
     
     # 转换为 JSON 友好格式
     dates = [str(d) for d in ic_series.index]
+    
+    # ic_series.values 不含 NaN 的原因（隐式行为说明）：
+    # - ic_series 由 ic_calculator.py 构建，只有 ic_value is not None 的日期被添加
+    # - 不满足 min_stocks 的日期不会被添加到 ic_series（而非添加 NaN）
+    # - 因此 ic_series.values 中的 v 都是有效的 numpy.float64 值
+    # - round(v, 6) 对有效值正常工作，无需 pd.isna(v) 检查
+    # 防御性说明：若未来 ic_series 逻辑变化导致含 NaN，需改为：
+    #   [round(v, 6) if not pd.isna(v) else None for v in ic_series.values]
     ic_values = [round(v, 6) for v in ic_series.values]
     
     # 边界条件检查：dates 为空时提前抛出异常（遵循 MODULE.md 边界条件规范）
