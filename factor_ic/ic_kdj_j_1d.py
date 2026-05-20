@@ -427,8 +427,10 @@ def calculate_daily_ic_series(
     rolling_mean = ic_series.rolling(window=20, min_periods=10).mean()
     
     # 遵循 PROJECT.md NaN 处理规范：在数据生成阶段将 NaN 转为 None
-    # 原因：rolling 前 9 天不满 min_periods=10，返回 NaN
-    #       round(NaN, 6) 返回 Python float nan，而非 None
+    # rolling 参数语义：window=20（窗口大小），min_periods=10（最小有效样本数）
+    # 前 min_periods-1=9 个时间点不满足最小样本要求，返回 NaN
+    # 第 min_periods=10 个时间点（index 9）起，窗口内至少有 10 个有效值
+    # 注意：round(NaN, 6) 返回 Python float nan，而非 None
     rolling_ic_mean = [
         round(v, 6) if not pd.isna(v) else None
         for v in rolling_mean.values

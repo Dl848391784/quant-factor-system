@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 15:20 北京时间
-> 实测数据时间: 2026-05-20 15:15 北京时间
-> 版本: v1.9
-> 更新内容: 修复统计口径不一致，新增 raw_avg_stocks_per_day（口径与 total_days 一致）
+> 生成时间: 2026-05-20 15:30 北京时间
+> 实测数据时间: 2026-05-20 15:25 北京时间
+> 版本: v1.10
+> 更新内容: 统一 min_periods 注释表述，使用"前 min_periods-1 个时间点"替代模糊的"前 N 天"
 
 ---
 
@@ -171,7 +171,7 @@ generate_kdj_j_ic_data()
 ]
 ```
 
-**说明：** 前9个为 null（min_periods=10，至少需要10个有效值）
+**说明：** 前 min_periods-1=9 个时间点为 null（min_periods=10，窗口需至少10个有效值才返回结果）
 
 ---
 
@@ -732,7 +732,8 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.7 | 2026-05-20 | 修复增量模式隐式 fallthrough，使用显式控制流（should_full_recalculate 变量） |
 | v1.8 | 2026-05-20 | 修复 required_fields 校验遗漏 p_value 字段（防御性校验完整性） |
 | v1.9 | 2026-05-20 | 修复统计口径不一致，新增 raw_avg_stocks_per_day（口径与 total_days 一致） |
+| v1.10 | 2026-05-20 | 统一 min_periods 注释表述，使用"前 min_periods-1 个时间点"替代模糊的"前 N 天" |
 
 ---
 
-*最后更新: 2026-05-20 15:20*
+*最后更新: 2026-05-20 15:30*
