@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 14:15 北京时间
-> 实测数据时间: 2026-05-20 14:10 北京时间
-> 版本: v1.4
-> 更新内容: 修复 K/D 初始值 ewm 递推逻辑（预处理 RSV[0]/K[0] 使 ewm 输出 = initial_k/initial_d）
+> 生成时间: 2026-05-20 14:30 北京时间
+> 实测数据时间: 2026-05-20 14:25 北京时间
+> 版本: v1.5
+> 更新内容: 删除死代码 calculate_kdj_j_for_stock_vectorized（未被调用，仅保留 calculate_kdj_j_factor）
 
 ---
 
@@ -535,7 +535,8 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | 异常分层缓存读取 | ✓ | 区分可恢复和严重错误 |
 | 五维度判断字段结构 | ✓ | 对齐 ic_rsi_1d.py，直接传递完整 result 对象 |
 | 浮点数除零精度容差 | ✓ | 使用 EPSILON=1e-10，替代 diff == 0 |
-| KDJ 初始值 ewm 递推 | ✓ | 预处理 RSV[0]/K[0] 使 ewm 输出 = initial_k/initial_d |
+|| KDJ 初始值 ewm 递推 | ✓ | 预处理 RSV[0]/K[0] 使 ewm 输出 = initial_k/initial_d |
+| 死代码清理 | ✓ | 删除未调用的 calculate_kdj_j_for_stock_vectorized |
 
 ---
 
@@ -548,7 +549,8 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.2 | 2026-05-20 | 对齐 ic_rsi_1d.py 五维度判断字段结构（直接传递完整 result 对象） |
 | v1.3 | 2026-05-20 | 修复浮点数除零判断（使用精度容差 EPSILON=1e-10，遵循 Section 17 规范） |
 | v1.4 | 2026-05-20 | 修复 K/D 初始值 ewm 递推逻辑（预处理 RSV[0]/K[0] 使 ewm 输出 = initial_k/initial_d） |
+| v1.5 | 2026-05-20 | 删除死代码 calculate_kdj_j_for_stock_vectorized（未被调用，仅保留 calculate_kdj_j_factor） |
 
 ---
 
-*最后更新: 2026-05-20 14:15*"
+*最后更新: 2026-05-20 14:30*
