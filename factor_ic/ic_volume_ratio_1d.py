@@ -17,6 +17,7 @@
 """
 
 import sys
+import traceback
 from pathlib import Path
 
 # 添加项目路径
@@ -26,7 +27,7 @@ import pandas as pd
 import numpy as np
 import gzip
 import json
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict
 from scipy.stats import spearmanr, norm as scipy_stats_norm
 from datetime import datetime
 
@@ -120,6 +121,26 @@ def load_data_from_cache(
     return_df = return_df.dropna(subset=['forward_return']).reset_index(drop=True)
     
     print(f"  - 过滤缺失值后: 因子 {len(factor_df)} 行, 收益 {len(return_df)} 行")
+    
+    # 验证日期对齐（遵循 MODULE.md 数据对齐验证规范）
+    factor_dates = set(factor_df['date'].unique())
+    return_dates = set(return_df['date'].unique())
+    
+    if factor_dates != return_dates:
+        missing_in_return = factor_dates - return_dates
+        missing_in_factor = return_dates - factor_dates
+        
+        print(f"  [警告] 因子数据和收益数据日期不对齐")
+        print(f"    因子数据日期数: {len(factor_dates)}")
+        print(f"    收益数据日期数: {len(return_dates)}")
+        print(f"    因子数据缺失日期数: {len(missing_in_factor)}")
+        print(f"    收益数据缺失日期数: {len(missing_in_return)}")
+        
+        # 选择交集日期（保证数据对齐）
+        common_dates = factor_dates & return_dates
+        factor_df = factor_df[factor_df['date'].isin(common_dates)]
+        return_df = return_df[return_df['date'].isin(common_dates)]
+        print(f"    对齐后日期数: {len(common_dates)}")
     
     # 使用缓存全部日期（不截断）
     
@@ -334,9 +355,94 @@ def run_volume_ratio_analysis(
             print(f"  建议: 减少分层数或降低 min_stocks_per_layer")
         
     except Exception as e:
+        # 数据加载失败分支：必须返回完整的五维度字段结构（遵循MODULE.md输出结构统一性规范）
+        error_msg = f'数据加载失败: {e}'
+        print(f"  ✗ {error_msg}")
         return {
             'success': False,
-            'error': f'数据加载失败: {e}',
+            'error': error_msg,
+            # MODULE.md 必需字段（默认值）
+            'factor_name': 'volume_ratio_1d',
+            'calculation_date': datetime.now().strftime('%Y-%m-%d'),
+            'period': {'start': '', 'end': '', 'description': '数据加载失败，无有效日期范围'},
+            'ic_metrics': {
+                'ic_mean': None,
+                'ic_std': None,
+                'icir': None,
+                'p_value': None,
+                'p_value_display': 'N/A'
+            },
+            'sample_stats': {
+                'total_days': 0,
+                'valid_days': 0,
+                'avg_stocks_per_day': 0,
+                'avg_stocks_period': {'start': '', 'end': '', 'description': '数据加载失败'}
+            },
+            # 五维度判断（默认值）
+            'statistical_significance': {
+                't_stat': None,
+                'p_value': None,
+                'p_value_display': 'N/A',
+                'is_significant': False,
+                'threshold': 1.96,
+                'description': '数据加载失败，无法进行统计检验'
+            },
+            'factor_direction': {
+                'ic_mean_sign': 'unknown',
+                'ic_mean_abs': 0,
+                'direction_threshold': 0.03,
+                'description': '数据加载失败，无法判断因子方向'
+            },
+            'economic_significance': {
+                'icir': None,
+                'icir_threshold': 0.5,
+                'is_economically_significant': False,
+                'description': '数据加载失败，无法判断经济显著性'
+            },
+            'icir_stability': {
+                'is_stable': False,
+                'rolling_icir_std': None,
+                'stability_threshold': 0.15,
+                'description': '数据加载失败，无法判断ICIR稳定性'
+            },
+            'ic_distribution_consistency': {
+                'is_consistent': False,
+                'positive_ratio': None,
+                'consistency_threshold': 0.55,
+                'description': '数据加载失败，无法判断IC分布一致性'
+            },
+            # IC时间序列（空数组）
+            'dates': [],
+            'ic_values': [],
+            'rolling_ic_mean': [],
+            'positive_ratio': None,
+            'n_assets': 0,
+            'summary': {
+                'ic_performance': '数据加载失败',
+                'statistical_significance': '无法检验',
+                'factor_direction': '无法判断',
+                'economic_significance': '无法判断',
+                'recommendation': '检查数据源完整性，确保缓存文件存在且格式正确'
+            },
+            'factor_stats': {
+                'factor_name': 'volume_ratio_1d',
+                'return_period': '1d',
+                'data_source': str(FACTOR_CACHE),
+                'total_days': 0,
+                'valid_days': 0
+            },
+            'layered_result': {},
+            'raw_metadata': {'period_start': '', 'period_end': '', 'total_days': 0},
+            'update_mode': 'failed',
+            'params': {
+                'n_days': 0,
+                'num_layers': num_layers,
+                'factor_col': 'volume_ratio_5',
+                'return_col': 'forward_return_1d',
+                'factor_direction': 'positive',
+                'trade_cost_rate': trade_cost_rate,
+                'min_stocks_per_layer': min_stocks_per_layer
+            },
             'generated_at': datetime.now().isoformat()
         }
     
@@ -387,7 +493,6 @@ def run_volume_ratio_analysis(
         
     except Exception as e:
         print(f"  ✗ 分层回测失败: {e}")
-        import traceback
         traceback.print_exc()
         layered_result = None
     
@@ -399,15 +504,15 @@ def run_volume_ratio_analysis(
     period_start = str(all_dates[0]) if all_dates else ''
     period_end = str(all_dates[-1]) if all_dates else ''
     
-    # IC 指标（符合 PROJECT.md 规范）
+    # IC 指标（遵循 MODULE.md 输出结构统一性规范）
+    # ic_metrics 只包含核心 IC 指标，positive_ratio 和 t_stat 在其他位置输出
+    p_value_raw = round(float(2 * (1 - scipy_stats_norm_cdf(abs(ic_data['t_stat'])))), 6) if ic_data['t_stat'] else None
     ic_metrics = {
         'ic_mean': ic_data['ic_mean'],
         'ic_std': ic_data['ic_std'],
         'icir': ic_data['icir'],
-        'p_value': round(float(2 * (1 - scipy_stats_norm_cdf(abs(ic_data['t_stat'])))), 6) if ic_data['t_stat'] else None,
-        # 额外保留字段（便于分析）
-        'positive_ratio': ic_data['positive_ratio'],
-        't_stat': ic_data['t_stat']
+        'p_value': p_value_raw,
+        'p_value_display': str(round(p_value_raw, 4)) if p_value_raw is not None else 'N/A'  # MODULE.md 必需字段
     }
     
     # 样本统计（遵循 MODULE.md 输出结构统一性规范）

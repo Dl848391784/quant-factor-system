@@ -308,10 +308,15 @@ engine = LayeredBacktestEngine(factor_direction='negative')
 **所有 factor_ic/ 目录下的 IC 计算脚本必须输出完全一致的 JSON 结构。**
 
 **统一性要求：**
-- 相同的顶层字段（factor_name, calculation_date, period, ic_metrics, sample_stats, statistical_significance, factor_direction, economic_significance, dates, ic_values, rolling_ic_mean, positive_ratio, n_assets, summary, factor_stats, update_mode）
+- 相同的顶层字段（factor_name, calculation_date, period, ic_metrics, sample_stats, statistical_significance, factor_direction, economic_significance, icir_stability, ic_distribution_consistency, dates, ic_values, rolling_ic_mean, positive_ratio, n_assets, summary, factor_stats, update_mode）
 - 相同的嵌套字段结构（如 ic_metrics 必须包含 ic_mean, ic_std, icir, p_value, p_value_display）
 - 相同的字段类型（如 ic_mean 必须是 float，dates 必须是 list[str]）
 - 相同的字段顺序（便于对比和自动化处理）
+
+**说明（2026-05-21补充）：**
+- icir_stability 和 ic_distribution_consistency 是五维度判断的第4、5维，必须作为顶层字段输出
+- dates, ic_values, rolling_ic_mean 是IC时间序列数据，必须作为顶层字段输出（不嵌套在ic_series）
+- positive_ratio 是第5维判断的核心指标，必须作为顶层字段输出
 
 #### 统一输出结构定义
 
