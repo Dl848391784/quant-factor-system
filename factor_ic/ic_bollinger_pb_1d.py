@@ -506,9 +506,11 @@ def _full_recalculate(
     print(f"参数: N={n}, K={k}")
     
     # 从缓存加载数据
+    # 布林带因子固定使用 close 列，load_data_from_cache 内部已硬编码
+    # 不需要传 factor_col 参数（函数签名不接受该参数）
     print("\n[1/3] 从缓存加载因子和收益数据...")
     try:
-        factor_df, return_df, raw_metadata = load_data_from_cache(factor_col='close')
+        factor_df, return_df, raw_metadata = load_data_from_cache()
         
         # 检查数据量（遵循 PROJECT.md 参数传递规范）
         if factor_df['asset'].nunique() < min_stocks:
