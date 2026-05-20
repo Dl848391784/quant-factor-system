@@ -1,8 +1,8 @@
 # Bollinger_PB_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 03:20 (北京时间)
-> 实测数据时间: 2026-05-20 03:20 (北京时间)
-> 审阅版本: v4.5
+> 生成时间: 2026-05-20 16:19 (北京时间)
+> 实测数据时间: 2026-05-20 16:19 (北京时间)
+> 审阅版本: v4.6
 > 更新内容:
 >   ...
 >   50. 修复 p_value_display 回退逻辑矛盾：改为可选字段 + 补充 MODULE.md 可选字段回退逻辑规范
@@ -402,11 +402,12 @@ python factor_ic/ic_bollinger_pb_1d.py --force-full
 | v2.0 | 2026-05-19 | 删除冗余参数 period_start/period_end + 补充 MODULE.md 函数参数设计规范 + period.start/end 语义规范 |
 | v2.1 | 2026-05-19 | 删除冗余 max 比较逻辑：total_days 直接使用 raw_metadata + 补充 MODULE.md total_days 使用规范 |
 | v2.2 | 2026-05-19 | 修复缩进错误（IndentationError）：'icir' 和 'sample_stats' 字段缩进不一致 + 补充 MODULE.md 字典结构缩进规范 |
-| v2.3 | 2026-05-19 | 修复增量路径 rolling_ic_mean NaN 处理缺失（显式转换 NaN → None）+ 补充 MODULE.md 两条路径一致性要求 |
-| v2.4 | 2026-05-19 | 修复增量路径 ic_metrics 缺少 p_value/p_value_display 字段（KeyError）+ 补充 MODULE.md ic_metrics 字段规范 |
-| v4.5 | 2026-05-20 | 修复 p_value_display 回退逻辑矛盾（改为可选字段）+ 补充 MODULE.md 可选字段回退逻辑规范 |
-| v4.4 | 2026-05-20 | 修复全量路径缺失日期格式断言（添加防御对称）+ 补充 MODULE.md 全量路径与增量路径防御对称规范 |
+|| v2.3 | 2026-05-19 | 修复增量路径 rolling_ic_mean NaN 处理缺失（显式转换 NaN → None）+ 补充 MODULE.md 两条路径一致性要求 |
+|| v2.4 | 2026-05-19 | 修复增量路径 ic_metrics 缺少 p_value/p_value_display 字段（KeyError）+ 补充 MODULE.md ic_metrics 字段规范 |
+|| v4.5 | 2026-05-20 | 修复 p_value_display 回退逻辑矛盾（改为可选字段）+ 补充 MODULE.md 可选字段回退逻辑规范 |
+|| v4.6 | 2026-05-20 | 验证脚本合规性：输出结构符合 MODULE.md 规范，ic_metrics 包含 5 字段，数组长度一致 |
+|| v4.4 | 2026-05-20 | 修复全量路径缺失日期格式断言（添加防御对称）+ 补充 MODULE.md 全量路径与增量路径防御对称规范 |
 
 ---
 
-*最后更新: 2026-05-20 03:20:00 (北京时间)*
+*最后更新: 2026-05-20 16:19:00 (北京时间)*
