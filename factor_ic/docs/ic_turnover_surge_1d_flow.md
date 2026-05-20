@@ -1,7 +1,7 @@
 # Turnover_Surge_1D IC 计算流程文档
 
-> 生成时间: 2026-05-21 00:00 (北京时间)
-> 审阅版本: v1.13
+> 生成时间: 2026-05-21 00:30 (北京时间)
+> 审阅版本: v1.14
 > 实测数据时间: 2026-05-20
 > 更新内容:
 >   1. [v1.1] 修复 ic_metrics 字段缺失问题：添加 p_value_display（遵循 MODULE.md 输出结构规范）
@@ -49,6 +49,8 @@
 >   43. [v1.12] 调用方 _full_recalculate 直接访问 ic_data['factor_direction'] 等字段，空数据返回值必须完整
 >   44. [v1.13] 修复变量命名语义混淆：pct_change → price_pct_change（遵循 MODULE.md 变量命名语义清晰原则规范）
 >   45. [v1.13] MODULE.md 新增变量命名语义清晰原则规范：明确数据源前缀原则、上下文明确原则
+>   46. [v1.14] 补充数据对齐验证：load_data_from_cache 中验证 factor_df 与 return_df 日期对齐（遵循 MODULE.md 数据对齐验证规范）
+>   47. [v1.14] MODULE.md 新增数据对齐验证规范：避免静默丢失数据，选择交集日期
 
 ---
 

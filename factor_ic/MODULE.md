@@ -1349,6 +1349,139 @@ factor_df['price_pct_change'] = factor_df.groupby('asset')['close'].transform(la
 
 ---
 
+## 数据对齐验证规范（2026-05-21新增）
+
+### 核心原则
+
+**合并数据后必须验证日期对齐，避免静默丢失数据。因子数据和收益数据的日期范围必须一致，否则 IC 计算会静默丢失不匹配的日期。**
+
+### 问题背景
+
+```
+数据对齐问题：
+
+错误代码（无验证）：
+factor_data = factor_df[['date', 'asset', 'turnover_surge']].dropna(subset=['turnover_surge']).copy()
+return_data = return_df[['date', 'asset', 'forward_return']].copy()
+
+# 统一 date 列类型
+factor_data['date'] = factor_data['date'].astype(str)
+return_data['date'] = return_data['date'].astype(str)
+
+# 直接计算 IC（无验证）
+result = calculate_ic_with_direction_verification(factor_data, return_data, ...)
+
+问题：
+- factor_data 日期范围：2024-01-01 ~ 2026-05-20（换手率 + 收盘价合并）
+- return_data 日期范围：2024-01-01 ~ 2026-05-15（收益数据）
+- IC 计算时，2026-05-16 ~ 2026-05-20 的因子数据会静默丢失
+- 用户无法感知数据丢失
+
+正确代码（有验证）：
+factor_dates = factor_data['date'].unique()
+return_dates = return_data['date'].unique()
+
+if set(factor_dates) != set(return_dates):
+    missing_in_return = set(factor_dates) - set(return_dates)
+    missing_in_factor = set(return_dates) - set(factor_dates)
+    
+    print(f"警告：因子数据和收益数据日期不对齐")
+    print(f"  因子数据缺失日期数: {len(missing_in_factor)}")
+    print(f"  收益数据缺失日期数: {len(missing_in_return)}")
+    
+    # 选择交集日期（保证数据对齐）
+    common_dates = set(factor_dates) & set(return_dates)
+    factor_data = factor_data[factor_data['date'].isin(common_dates)]
+    return_data = return_data[return_data['date'].isin(common_dates)]
+    print(f"  对齐后日期数: {len(common_dates)}")
+```
+
+### 数据对齐验证规范
+
+| 场景 | 必须验证 | 验证内容 |
+|------|----------|----------|
+| load_data_from_cache | ✓ 必须验证 | factor_df 与 return_df 日期范围一致性 |
+| calculate_ic_with_direction_verification 前 | ✓ 必须验证 | factor_data 与 return_data 日期对齐 |
+| merge 多个 DataFrame 后 | ✓ 必须验证 | 合并前后日期范围变化 |
+| 增量更新时 | ✓ 必须验证 | 新增日期与已有日期连续性 |
+
+### 验证实现模式
+
+**模式1：load_data_from_cache 中验证**
+
+```python
+# ✓ 正确：在数据加载阶段验证日期对齐
+def load_data_from_cache() -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
+    # 加载换手率数据
+    turnover_df = pd.DataFrame(turnover_data['data'])
+    # 加载收盘价数据
+    close_df = pd.DataFrame(factor_data['data'])
+    # 加载收益数据
+    return_df = pd.DataFrame(return_data['data'])
+    
+    # 合并换手率和收盘价
+    factor_df = pd.merge(turnover_df, close_df, on=['date', 'asset'], how='inner')
+    
+    # 验证日期对齐（遵循 MODULE.md 数据对齐验证规范）
+    factor_dates = factor_df['date'].unique()
+    return_dates = return_df['date'].unique()
+    
+    if set(factor_dates) != set(return_dates):
+        missing_in_return = set(factor_dates) - set(return_dates)
+        missing_in_factor = set(return_dates) - set(factor_dates)
+        
+        print(f"警告：因子数据和收益数据日期不对齐")
+        print(f"  因子数据日期数: {len(factor_dates)}")
+        print(f"  收益数据日期数: {len(return_dates)}")
+        print(f"  因子数据缺失日期数: {len(missing_in_factor)}")
+        print(f"  收益数据缺失日期数: {len(missing_in_return)}")
+        
+        # 选择交集日期（保证数据对齐）
+        common_dates = set(factor_dates) & set(return_dates)
+        factor_df = factor_df[factor_df['date'].isin(common_dates)]
+        return_df = return_df[return_df['date'].isin(common_dates)]
+        print(f"  对齐后日期数: {len(common_dates)}")
+    
+    return factor_df, return_df, raw_metadata
+```
+
+**模式2：calculate_ic_with_direction_verification 前验证**
+
+```python
+# ✓ 正确：在 IC 计算前验证日期对齐
+def calculate_turnover_surge_ic(factor_df, return_df, ...):
+    factor_data = factor_df[['date', 'asset', 'turnover_surge']].dropna().copy()
+    return_data = return_df[['date', 'asset', 'forward_return']].copy()
+    
+    # 统一 date 列类型
+    factor_data['date'] = factor_data['date'].astype(str)
+    return_data['date'] = return_data['date'].astype(str)
+    
+    # 验证日期对齐（遵循 MODULE.md 数据对齐验证规范）
+    factor_dates = set(factor_data['date'].unique())
+    return_dates = set(return_data['date'].unique())
+    
+    if factor_dates != return_dates:
+        common_dates = factor_dates & return_dates
+        factor_data = factor_data[factor_data['date'].isin(common_dates)]
+        return_data = return_data[return_data['date'].isin(common_dates)]
+        print(f"日期对齐：保留 {len(common_dates)} 个共同日期")
+    
+    # 计算 IC
+    result = calculate_ic_with_direction_verification(factor_data, return_data, ...)
+```
+
+### 常见错误模式
+
+| 错误代码 | 问题 | 修复 |
+|----------|------|------|
+| merge 后无验证 | 静默丢失不匹配日期 | 添加日期对齐验证 |
+| 直接计算 IC 无验证 | factor_data 和 return_data 日期范围不同 | 添加日期交集筛选 |
+| 只检查数量不检查日期 | 数量相同但日期不同 | 检查 set(factor_dates) == set(return_dates) |
+| 只打印警告不处理 | 用户无法感知数据丢失 | 选择交集日期 + 打印对齐信息 |
+
+---
+
 ## ic_series 排序规范
 
 **核心原则：** ic_series.index 必须按日期升序排列。

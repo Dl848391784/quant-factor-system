@@ -136,6 +136,27 @@ def load_data_from_cache() -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
     )
     print(f"    合并后: {len(factor_df)} 行, {factor_df['asset'].nunique()} 只股票")
     
+    # 验证日期对齐（遵循 MODULE.md 数据对齐验证规范）
+    # 因子数据和收益数据的日期范围必须一致，否则 IC 计算会静默丢失不匹配的日期
+    factor_dates = factor_df['date'].unique()
+    return_dates = return_df['date'].unique()
+    
+    if set(factor_dates) != set(return_dates):
+        missing_in_return = set(factor_dates) - set(return_dates)
+        missing_in_factor = set(return_dates) - set(factor_dates)
+        
+        print(f"  警告：因子数据和收益数据日期不对齐")
+        print(f"    因子数据日期数: {len(factor_dates)}")
+        print(f"    收益数据日期数: {len(return_dates)}")
+        print(f"    因子数据缺失日期数: {len(missing_in_factor)}")
+        print(f"    收益数据缺失日期数: {len(missing_in_return)}")
+        
+        # 选择交集日期（保证数据对齐）
+        common_dates = set(factor_dates) & set(return_dates)
+        factor_df = factor_df[factor_df['date'].isin(common_dates)]
+        return_df = return_df[return_df['date'].isin(common_dates)]
+        print(f"    对齐后日期数: {len(common_dates)}")
+    
     # 在进一步处理之前，计算原始数据范围（遵循 PROJECT.md 输出字段语义规范）
     raw_period_start = str(factor_df['date'].min())
     raw_period_end = str(factor_df['date'].max())
