@@ -369,12 +369,14 @@ def calculate_turnover_surge_ic(
                 'is_economically_significant': False,
                 'description': '数据不足，无法判断经济显著性'
             },
+            # 五维度判断（第4维）：ICIR 稳定性（遵循 MODULE.md 输出结构统一性规范）
             'icir_stability': {
                 'is_stable': False,
                 'rolling_icir_std': 0.0,
                 'stability_threshold': 0.15,
                 'description': '数据不足，无法判断 ICIR 稳定性'
             },
+            # 五维度判断（第5维）：IC 分布一致性（遵循 MODULE.md 输出结构统一性规范）
             'ic_distribution_consistency': {
                 'is_consistent': False,
                 'positive_ratio': 0.0,
@@ -456,12 +458,14 @@ def calculate_turnover_surge_ic(
                 'is_economically_significant': False,
                 'description': f'无法判断经济显著性: {str(e)}'
             },
+            # 五维度判断（第4维）：ICIR 稳定性（遵循 MODULE.md 输出结构统一性规范）
             'icir_stability': {
                 'is_stable': False,
                 'rolling_icir_std': 0.0,
                 'stability_threshold': 0.15,
                 'description': f'无法判断 ICIR 稳定性: {str(e)}'
             },
+            # 五维度判断（第5维）：IC 分布一致性（遵循 MODULE.md 输出结构统一性规范）
             'ic_distribution_consistency': {
                 'is_consistent': False,
                 'positive_ratio': 0.0,
@@ -526,7 +530,7 @@ def calculate_turnover_surge_ic(
             'p_value_display': result['p_value_display']
         },
         'sample_stats': {
-            # 统计口径说明（遵循 MODULE.md 第1870行规范）
+            # 统计口径说明（遵循 MODULE.md filter_stats 统计口径规范）
             # avg_stocks_per_day 基于 dropna 后数据（只统计有效因子的每日股票数）
             # total_days 基于 dropna 前数据（原始缓存日期数）
             # 口径差异：factor_data 是 dropna(subset=['turnover_surge']) 后的数据
@@ -713,12 +717,12 @@ def generate_turnover_surge_ic_data(
     if mode == 'skip':
         # 数据完备，无需计算
         print("\n数据完备，无需更新")
+        cached_data = None
         try:
             with open(output_file, 'r', encoding='utf-8') as f:
                 cached_data = json.load(f)
                 # 添加更新模式标记（遵循 PROJECT.md 返回值标记规范）
                 cached_data['update_mode'] = 'skip'
-                return cached_data  # 成功：返回缓存数据（带 skip 标记）
         except Exception as e:
             # 失败：显式调用全量计算（遵循 PROJECT.md 增量模式异常处理规范）
             print(f"读取缓存失败: {e}，将执行全量计算")
@@ -733,6 +737,7 @@ def generate_turnover_surge_ic_data(
                 'description': f"缓存读取失败，触发全量计算。原始错误: {e}"
             }
             return full_data
+        return cached_data  # 成功：返回缓存数据（带 skip 标记），return 在 with 块外部保持一致性
     
     elif mode == 'incremental':
         # 增量模式 fallback：换手率突增因子依赖5日窗口计算
