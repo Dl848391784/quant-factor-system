@@ -43,6 +43,9 @@ from factor_ic.common.convert_types import convert_to_native_types
 # 导入分层回测引擎
 from backtest.layered_backtest import LayeredBacktestEngine
 
+# 默认常量（遵循 MODULE.md 代码质量规范）
+DEFAULT_MIN_STOCKS = 10  # 每日最少股票数阈值（用于IC计算和分层回测）
+
 # 缓存路径
 CACHE_DIR = Path(__file__).parent.parent / 'cache' / 'factor_data'
 FACTOR_CACHE = CACHE_DIR / 'factor_data.json.gz'
@@ -154,7 +157,8 @@ def load_data_from_cache(
 
 def calculate_daily_ic_series(
     factor_df: pd.DataFrame,
-    return_df: pd.DataFrame
+    return_df: pd.DataFrame,
+    min_stocks: int = DEFAULT_MIN_STOCKS
 ) -> dict:
     """
     计算每日的 IC 时间序列（量比是正向因子）
@@ -162,11 +166,12 @@ def calculate_daily_ic_series(
     参数:
         factor_df: 因子数据
         return_df: 收益数据
+        min_stocks: 每日最少股票数阈值（遵循 MODULE.md 代码质量规范）
         
     返回:
         dict: IC 计算结果
     """
-    print("\n[计算 IC] 开始计算（正向排名）...")
+    print(f"\n[计算 IC] 开始计算（正向排名，min_stocks={min_stocks}）...")
     
     # 合并数据
     merged_df = pd.merge(
@@ -187,7 +192,7 @@ def calculate_daily_ic_series(
         # 过滤 NaN
         valid = group.dropna(subset=['volume_ratio_5', 'forward_return'])
         
-        if len(valid) < 10:  # 最少 10 只股票
+        if len(valid) < min_stocks:  # 遵循 MODULE.md 代码质量规范（使用参数而非硬编码）
             continue
         
         # 计算 Spearman Rank IC
@@ -223,7 +228,7 @@ def calculate_daily_ic_series(
         'factor_name': 'volume_ratio_1d',
         'dates': [str(d) for d in ic_series.index],
         'ic_values': [round(v, 6) for v in ic_values],
-        'rolling_ic_mean': [round(v, 6) for v in rolling_mean.values],
+        'rolling_ic_mean': [round(v, 6) if pd.notna(v) else None for v in rolling_mean.values],  # NaN处理（遵循MODULE.md代码质量规范）
         'ic_mean': round(ic_mean, 6),
         'ic_std': round(ic_std, 6),
         'icir': round(icir, 4),
@@ -454,7 +459,7 @@ def run_volume_ratio_analysis(
     
     # ========== Step 2: 计算 IC ==========
     print("\n[2/4] 计算每日 IC...")
-    ic_data = calculate_daily_ic_series(factor_df, return_df)
+    ic_data = calculate_daily_ic_series(factor_df, return_df, min_stocks=min_stocks_per_layer)  # 传递参数（遵循MODULE.md代码质量规范）
     print(f"  - IC 均值: {ic_data['ic_mean']:.4f}")
     print(f"  - ICIR: {ic_data['icir']:.2f}")
     print(f"  - 正比例: {ic_data['positive_ratio']:.1%}")
@@ -760,6 +765,5 @@ if __name__ == '__main__':
         sys.exit(1)
     except Exception as e:
         print(f"\n[错误] 未预期的异常: {e}")
-        import traceback
-        traceback.print_exc()
+        traceback.print_exc()  # 使用顶部导入的traceback（遵循MODULE.md代码质量规范）
         sys.exit(1)
