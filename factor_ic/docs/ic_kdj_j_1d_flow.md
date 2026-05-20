@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 17:15 北京时间
-> 实测数据时间: 2026-05-20 17:10 北京时间
-> 版本: v1.21
-> 更新内容: 修复 K/D 值 NaN 传播错误（核心缺陷）—— ewm alpha 参数、ignore_na 参数、初始值位置
+> 生成时间: 2026-05-20 17:20 北京时间
+> 实测数据时间: 2026-05-20 17:15 北京时间
+> 版本: v1.22
+> 更新内容: 统一异常处理风格注释，明确包装类与保留类的设计意图
 
 ---
 
@@ -774,6 +774,90 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.19 | 2026-05-20 | 修复 IC 空场景异常信息使用过滤后数据而非原始数据统计的问题（遵循 MODULE.md 异常处理规范） |
 | v1.20 | 2026-05-20 | 修复 EPSILON 常量未提升为模块级的问题，便于统一管理和复用（遵循 PROJECT.md 常量管理规范） |
 | v1.21 | 2026-05-20 | 修复 K/D 值 NaN 传播错误（核心缺陷）—— ewm alpha 参数、ignore_na 参数、初始值位置 |
+| v1.22 | 2026-05-20 | 统一异常处理风格注释，明确包装类与保留类的设计意图（遵循 PROJECT.md 异常处理规范） |
+
+---
+
+## 异常处理风格规范
+
+### 问题根因
+
+**场景：** generate_kdj_j_ic_data 函数中有两类异常处理风格：
+- 包装类：`raise RuntimeError(...) from e`
+- 保留类：裸 `raise`
+
+**原始代码（风格混淆）：**
+```python
+except FileNotFoundError as e:
+    # 基础设施错误：可包装为 RuntimeError
+    raise RuntimeError(f"缓存文件不存在: {e}") from e
+    
+except KeyError as e:
+    # 数据验证错误：直接 raise，保留原始类型
+    raise  # 不包装，遵循 PROJECT.md 异常处理类型保留规范
+    
+except Exception as e:
+    # 未预期异常：包装为 RuntimeError，保留异常链
+    raise RuntimeError(...) from e
+```
+
+**问题分析：**
+1. 注释表述不够清晰，"可包装"与"直接 raise"风格对比不明显
+2. FileNotFoundError 错误信息使用 `{e}` 而非缓存路径常量
+3. 缺少设计意图说明：为什么有些包装、有些保留？
+
+### 修复方案
+
+**明确分层设计原则：**
+
+1. **基础设施错误（FileNotFoundError）：包装**
+   - 原因：原始信息不够详细，需要附加缓存路径
+   - 使用 `from e` 保留异常链
+
+2. **数据验证错误（KeyError、ValueError）：保留原始类型**
+   - 原因：是可预期错误，原始类型更易诊断
+   - 裸 `raise` 直接传播
+
+3. **未预期异常（Exception）：包装**
+   - 原因：类型多变，统一处理
+   - 使用 `from e` 保留异常链
+
+**修复后代码：**
+```python
+except FileNotFoundError as e:
+    # 基础设施错误：包装为 RuntimeError，添加缓存路径上下文
+    # 原因：FileNotFoundError 原始信息不够详细，需要附加缓存路径
+    # 使用 `from e` 保留异常链，便于调试
+    raise RuntimeError(f"缓存文件不存在: {FACTOR_CACHE}") from e
+    
+except KeyError as e:
+    # 数据验证错误：裸 raise 保留原始类型
+    # 原因：KeyError 表示数据缺少必需列，是可预期错误，原始类型更易诊断
+    # 不包装，直接传播原始异常（遵循 PROJECT.md 异常类型保留规范）
+    raise
+    
+except ValueError as e:
+    # 数据验证错误：裸 raise 保留原始类型
+    # 原因：ValueError 表示数据格式错误（如无效日期），是可预期错误
+    raise
+    
+except Exception as e:
+    # 未预期异常：包装为 RuntimeError，保留异常链
+    # 原因：未预期异常类型多变，包装为 RuntimeError 统一处理
+    raise RuntimeError(...) from e
+```
+
+### 设计原则
+
+1. **包装类：** 需要添加上下文的错误（如缓存路径）
+2. **保留类：** 可预期错误，原始类型更易诊断
+3. **统一风格：** 注释必须说明设计意图，避免维护混乱
+4. **异常链：** 包装类必须使用 `from e` 保留原始异常
+
+### 适用场景
+
+- 所有需要分层异常处理的主函数
+- 所有需要区分"可预期错误"与"未预期异常"的场景
 
 ---
 

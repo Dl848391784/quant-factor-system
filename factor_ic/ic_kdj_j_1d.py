@@ -809,16 +809,24 @@ def generate_kdj_j_ic_data(
             )
         
     except FileNotFoundError as e:
-        # 基础设施错误：可包装为 RuntimeError
-        raise RuntimeError(f"缓存文件不存在: {e}") from e
+        # 基础设施错误：包装为 RuntimeError，添加缓存路径上下文
+        # 原因：FileNotFoundError 原始信息不够详细，需要附加缓存路径
+        # 使用 `from e` 保留异常链，便于调试
+        raise RuntimeError(f"缓存文件不存在: {FACTOR_CACHE}") from e
     except KeyError as e:
-        # 数据验证错误：直接 raise，保留原始类型
-        raise  # 不包装，遵循 PROJECT.md 异常处理类型保留规范
+        # 数据验证错误：裸 raise 保留原始类型
+        # 原因：KeyError 表示数据缺少必需列，是可预期错误，原始类型更易诊断
+        # 不包装，直接传播原始异常（遵循 PROJECT.md 异常类型保留规范）
+        raise
     except ValueError as e:
-        # 数据验证错误：直接 raise，保留原始类型
-        raise  # 不包装，遵循 PROJECT.md 异常处理类型保留规范
+        # 数据验证错误：裸 raise 保留原始类型
+        # 原因：ValueError 表示数据格式错误（如无效日期），是可预期错误
+        # 不包装，直接传播原始异常（遵循 PROJECT.md 异常类型保留规范）
+        raise
     except Exception as e:
         # 未预期异常：包装为 RuntimeError，保留异常链
+        # 原因：未预期异常类型多变，包装为 RuntimeError 统一处理
+        # 使用 `from e` 保留异常链，确保原始异常信息不丢失
         raise RuntimeError(
             f"数据加载失败（未预期异常）\n"
             f"异常类型: {type(e).__name__}\n"
