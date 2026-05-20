@@ -1,7 +1,7 @@
 # Turnover_Surge_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 21:00 (北京时间)
-> 审阅版本: v1.7
+> 生成时间: 2026-05-20 21:30 (北京时间)
+> 审阅版本: v1.8
 > 实测数据时间: 2026-05-20
 > 更新内容:
 >   1. [v1.1] 修复 ic_metrics 字段缺失问题：添加 p_value_display（遵循 MODULE.md 输出结构规范）
@@ -32,6 +32,9 @@
 >   26. [v1.6] 修复遗留 ic_series 注释：第341行和第488行注释更新为顶层字段说明（遵循 MODULE.md 输出结构统一性规范）
 >   27. [v1.7] 修复 DataFrame 副作用问题：calculate_turnover_surge_factor 函数入口处添加 factor_df.copy()（遵循 MODULE.md DataFrame 参数副本规范）
 >   28. [v1.7] MODULE.md 新增 DataFrame 参数副本规范章节：明确函数入口处必须先 .copy() 防止副作用
+>   29. [v1.8] 补充滚动窗口参数业务决策注释：window=5, min_periods=5 的设计决策说明（遵循 MODULE.md 滚动窗口参数规范）
+>   30. [v1.8] 补充 filter_stats 统计口径注释：说明 total_records 和 filtered_count 的统计口径（遵循 MODULE.md filter_stats 统计口径规范）
+>   31. [v1.8] MODULE.md 新增滚动窗口参数规范章节：明确业务决策必须注释说明 min_periods 选择理由和影响范围
 
 ---
 

@@ -169,13 +169,18 @@ def calculate_turnover_surge_factor(factor_df: pd.DataFrame) -> Tuple[pd.DataFra
     """
     print("\n[因子计算] 计算换手率突增因子...")
     
+    # filter_stats 统计口径说明（遵循 MODULE.md filter_stats 统计口径规范）
+    # total_records: 过滤前总记录数（原始数据总量）
+    # 注意：后续不区分 rolling NaN 和条件过滤，因为本因子设计为：
+    #   - rolling NaN（min_periods=5）+ 条件不满足 → 统一设为 None
+    #   - 统计口径简化：只统计 total_records 和 filtered_count
     filter_stats = {
-        'total_records': len(factor_df),
-        'turnover_surge_count': 0,
-        'price_up_count': 0,
-        'both_conditions_count': 0,
-        'filtered_count': 0,
-        'filter_ratio': 0.0
+        'total_records': len(factor_df),        # 过滤前总记录数
+        'turnover_surge_count': 0,              # turnover_surge > 1 的记录数（不含 rolling NaN）
+        'price_up_count': 0,                    # pct_change > 0 的记录数
+        'both_conditions_count': 0,             # 两个条件同时满足的记录数
+        'filtered_count': 0,                    # 最终有效因子记录数
+        'filter_ratio': 0.0                     # 有效比例 = filtered_count / total_records
     }
     
     if factor_df.empty:
@@ -191,6 +196,17 @@ def calculate_turnover_surge_factor(factor_df: pd.DataFrame) -> Tuple[pd.DataFra
     factor_df['date_str'] = factor_df['date'].astype(str)
     factor_df = factor_df.sort_values(['asset', 'date_str'])
     
+    # 滚动窗口参数业务决策说明（遵循 MODULE.md 滚动窗口参数规范）
+    # window=5, min_periods=5 的设计决策：
+    # 1. 业务含义：当日换手率 / 过去5日换手率均值，衡量相对突增程度
+    # 2. min_periods=5 确保只有足够历史数据（≥5日）的股票才能计算因子
+    # 3. 数据丢失影响：每只股票前4个交易日 turnover_ma 为 NaN → turnover_surge 为 NaN
+    # 4. 对少量历史数据股票的影响：若股票历史 < 5日，全部记录的 turnover_surge 为 NaN
+    # 5. 设计意图：保证因子质量，避免因历史数据不足导致的均值不稳定
+    # 
+    # 影响范围示例：
+    # - 上市5天的股票：前4天 NaN，第5天有效
+    # - 上市仅3天的股票：全部3条记录的 turnover_surge 均为 NaN
     factor_df['turnover_ma'] = factor_df.groupby('asset')['turnover_rate'].transform(
         lambda x: x.rolling(window=5, min_periods=5).mean()
     )

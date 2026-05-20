@@ -1183,6 +1183,109 @@ rolling_ic_mean = ic_series.rolling(window=20, min_periods=10).mean()  # pd.Seri
 
 ---
 
+## 滚动窗口参数规范（2026-05-20新增）
+
+**核心原则：** 滚动窗口参数（window, min_periods）是业务决策，必须在注释中明确说明其影响。
+
+### 参数语义
+
+| 参数 | 语义 | 影响 |
+|------|------|------|
+| `window=N` | 滚动窗口大小 | 使用过去 N 个时间点的数据计算 |
+| `min_periods=M` | 最小有效样本数 | 至少需要 M 个有效值才能计算结果 |
+
+**关键公式：**
+- 前 `min_periods-1` 个时间点返回 NaN（无法计算）
+- 对于新上市股票，若历史数据 < `min_periods`，全部记录返回 NaN
+
+### 业务决策必须注释说明
+
+**示例：换手率突增因子（turnover_surge）**
+
+```python
+# ✓ 正确：业务决策显式说明
+# 滚动窗口参数决策：window=5, min_periods=5
+# 
+# 业务决策说明：
+# 1. min_periods=5 确保只有足够历史数据（≥5日）的股票才能计算因子
+# 2. 前景：新上市股票前4日无法计算 turnover_ma，导致 turnover_surge 为 NaN
+# 3. 设计意图：保证因子质量，避免因历史数据不足导致的均值不稳定
+# 4. 数据丢失：每只股票前4个交易日 turnover_surge 为 NaN
+# 5. 对少量历史数据股票的影响：若股票历史 < 5 日，全部记录的 turnover_surge 为 NaN
+#
+# 影响范围：
+# - min_periods=5 → 每只股票丢失前4日数据
+# - 若股票上市仅3天 → 该股票全部3条记录的 turnover_surge 均为 NaN
+factor_df['turnover_ma'] = factor_df.groupby('asset')['turnover_rate'].transform(
+    lambda x: x.rolling(window=5, min_periods=5).mean()
+)
+factor_df['turnover_surge'] = factor_df['turnover_rate'] / factor_df['turnover_ma']
+```
+
+### min_periods 选择原则
+
+| min_periods 值 | 适用场景 | 数据丢失 |
+|----------------|----------|----------|
+| `min_periods=window`（等于窗口） | 高质量要求，拒绝不完整数据 | 前 `window-1` 日全部丢失 |
+| `min_periods=1`（最小） | 宽松要求，接受任意数据 | 无丢失，但早期数据质量低 |
+| `min_periods=window/2`（折中） | 平衡质量和覆盖度 | 前 `window/2-1` 日丢失 |
+
+**推荐选择：**
+- 日常因子计算：`min_periods=window`（保证数据质量）
+- 紧急监控场景：`min_periods=window//2`（扩大覆盖度）
+- 禁止 `min_periods=1`（早期数据质量极差，可能导致误导）
+
+### filter_stats 统计口径规范
+
+**核心原则：** filter_stats 必须区分三种数据丢失原因：
+
+| 字段 | 统计口径 | 说明 |
+|------|----------|------|
+| `total_records` | 过滤前总记录数 | 原始数据总量 |
+| `rolling_nan_count` | rolling NaN 记录数 | 因 min_periods 不满足无法计算 |
+| `condition_filtered_count` | 条件过滤记录数 | 因筛选条件不满足被剔除 |
+| `filtered_count` | 最终有效记录数 | 筛选后保留的记录 |
+| `filter_ratio` | 有效比例 | filtered_count / total_records |
+
+**必须注释说明：**
+```python
+filter_stats = {
+    'total_records': len(factor_df),           # 过滤前总记录数（原始数据）
+    'rolling_nan_count': 0,                    # 因 rolling min_periods 不满足导致 NaN 的记录数
+    'condition_filtered_count': 0,             # 因筛选条件不满足被剔除的记录数
+    'filtered_count': 0,                       # 最终有效因子记录数
+    'filter_ratio': 0.0                        # 有效比例 = filtered_count / total_records
+}
+```
+
+**区分两种 NaN 来源：**
+
+```python
+# ✓ 正确：区分 rolling NaN 和条件过滤
+# Step 1: 统计 rolling NaN（因 min_periods 不满足）
+rolling_nan_mask = factor_df['turnover_surge'].isna()
+# 注意：此时 turnover_surge 为 NaN 是因为 min_periods=5 不满足，尚未应用筛选条件
+
+# Step 2: 应用筛选条件
+both_conditions = turnover_surge_cond & price_up
+
+# Step 3: 统计条件过滤（不满足条件的记录）
+condition_filtered_mask = ~both_conditions & ~rolling_nan_mask  # 本可计算但条件不满足
+
+# Step 4: 最终有效记录
+valid_mask = both_conditions & ~rolling_nan_mask
+```
+
+### 常见错误模式
+
+| 错误代码 | 问题 | 修复 |
+|----------|------|------|
+| `rolling(...).mean()` 无注释 | 业务决策未说明 | 添加 min_periods 选择理由注释 |
+| `filter_stats` 无 rolling_nan_count | 无法区分 NaN 来源 | 添加 rolling_nan_count 字段 |
+| `min_periods=1` 无质量评估 | 早期数据质量极差 | 评估数据质量或使用折中值 |
+
+---
+
 ## ic_series 排序规范
 
 **核心原则：** ic_series.index 必须按日期升序排列。
