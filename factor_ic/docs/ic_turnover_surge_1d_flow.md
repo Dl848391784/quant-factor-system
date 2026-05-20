@@ -1,7 +1,7 @@
 # Turnover_Surge_1D IC 计算流程文档
 
 > 生成时间: 2026-05-20 17:00 (北京时间)
-> 审阅版本: v1.1
+> 审阅版本: v1.2
 > 实测数据时间: 2026-05-20
 > 更新内容:
 >   1. [v1.1] 修复 ic_metrics 字段缺失问题：添加 p_value_display（遵循 MODULE.md 输出结构规范）
@@ -9,6 +9,12 @@
 >   3. [v1.1] 空数据返回路径添加 p_value_display 字段
 >   4. [v1.1] 流程文档重命名：turnover_surge_1d_ic_flow.md → ic_turnover_surge_1d_flow.md（遵循 PROJECT.md 命名规范）
 >   5. [v1.1] 跨脚本验证通过：ic_metrics 5 字段一致（RSI/布林带/KDJ/换手率突增）
+>   6. [v1.2] 使用公共模块 calculate_ic_with_direction_verification 计算 IC（遵循 PROJECT.md 公共模块复用规范）
+>   7. [v1.2] 添加五维度判断字段（statistical_significance、factor_direction 等）
+>   8. [v1.2] 修复 sample_stats.total_days 语义：使用 raw_metadata['total_days']（遵循 PROJECT.md 输出字段语义规范）
+>   9. [v1.2] 添加 DEFAULT_MIN_STOCKS 常量（遵循 PROJECT.md 参数传递规范）
+>   10. [v1.2] 添加 update_mode='full' 返回标记（遵循 PROJECT.md 返回值标记规范）
+>   11. [v1.2] 删除自定义 IC 计算逻辑，改用公共模块统一实现
 
 ---
 

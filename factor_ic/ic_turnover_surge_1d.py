@@ -35,9 +35,25 @@ from scipy import stats
 import warnings
 warnings.filterwarnings('ignore')
 
-# 导入公共模块
+# 导入通用 IC 计算模块（支持方向验证）
+from factor_ic.common.ic_calculator import (
+    calculate_ic_with_direction_verification,
+    calculate_single_day_ic,  # 用于增量计算
+    calculate_ic_statistics   # 用于增量统计重算
+)
+
+# 导入数据完整性检查模块
 from factor_ic.common.data_completeness import check_data_completeness, get_ic_output_path
+
+# 导入类型转换模块
 from factor_ic.common.convert_types import convert_to_native_types
+
+# ============================================================================
+# 参数统一管理（遵循 PROJECT.md 参数传递规范）
+# ============================================================================
+# 默认最小股票数：用于 IC 计算（单日股票数不足时返回 None）
+# 注意：修改此值会影响所有 IC 计算逻辑，需同步更新相关注释
+DEFAULT_MIN_STOCKS = 10
 
 # 缓存路径
 CACHE_DIR = Path(__file__).parent.parent / 'cache' / 'factor_data'
@@ -234,20 +250,23 @@ def calculate_turnover_surge_factor(factor_df: pd.DataFrame) -> Tuple[pd.DataFra
 def calculate_turnover_surge_ic(
     factor_df: pd.DataFrame,
     return_df: pd.DataFrame,
-    period_start: str = None,
-    period_end: str = None
+    raw_metadata: dict = None,
+    min_stocks: int = DEFAULT_MIN_STOCKS  # 遵循 PROJECT.md 参数传递规范
 ) -> Dict:
     """
-    计算换手率突增因子的正向 Rank IC
+    计算换手率突增因子的正向 Rank IC（使用公共模块）
     
     参数:
         factor_df: 包含 date, asset, turnover_surge 的 DataFrame
         return_df: 包含 date, asset, forward_return 的 DataFrame
-        period_start: 数据起始日期
-        period_end: 数据结束日期
+        raw_metadata: 原始数据元信息（遵循 PROJECT.md period/total_days 数据源规范）
+            - period_start: 原始缓存最小日期
+            - period_end: 原始缓存最大日期
+            - total_days: 原始缓存日期数
+        min_stocks: 最小股票数阈值（遵循 PROJECT.md 参数传递规范）
         
     返回:
-        IC 计算结果字典（符合 PROJECT.md 规范）
+        IC 计算结果字典（符合 PROJECT.md 规范，含五维度判断）
     """
     print("\n[IC计算] 计算换手率突增因子 Rank IC（正向因子）...")
     
@@ -259,49 +278,7 @@ def calculate_turnover_surge_ic(
     factor_data['date'] = factor_data['date'].astype(str)
     return_data['date'] = return_data['date'].astype(str)
     
-    merged = pd.merge(factor_data, return_data, on=['date', 'asset'], how='inner')
-    del factor_data, return_data
-    gc.collect()
-    
-    print(f"  合并后记录数: {len(merged):,}")
-    
-    if merged.empty:
-        return {
-            'factor_name': 'turnover_surge_1d',
-            'calculation_date': datetime.now().strftime('%Y-%m-%d'),
-            'period': {'start': '', 'end': ''},
-            'ic_metrics': {
-                'ic_mean': 0,
-                'ic_std': 0,
-                'icir': 0,
-                'p_value': 1.0,
-                'p_value_display': '1.0'
-            },
-            'sample_stats': {'total_days': 0, 'valid_days': 0, 'avg_stocks_per_day': 0},
-            'ic_series': None,
-            'summary': '数据不足，无法计算IC'
-        }
-    
-    # 计算每日 IC（正向因子，因子值越大预期收益越高）
-    ic_results = []
-    
-    for date, group in merged.groupby('date'):
-        if len(group) < 10:
-            continue
-        
-        if group['turnover_surge'].nunique() == 1 or group['forward_return'].nunique() == 1:
-            continue
-        
-        # 正向因子：因子排名与收益排名正相关
-        factor_rank = group['turnover_surge'].rank(pct=True, ascending=True, method='average')
-        return_rank = group['forward_return'].rank(pct=True, ascending=True, method='average')
-        
-        ic_value = factor_rank.corr(return_rank, method='spearman')
-        
-        if pd.notna(ic_value):
-            ic_results.append({'date': date, 'ic': ic_value})
-    
-    if not ic_results:
+    if factor_data.empty:
         return {
             'factor_name': 'turnover_surge_1d',
             'calculation_date': datetime.now().strftime('%Y-%m-%d'),
@@ -314,62 +291,60 @@ def calculate_turnover_surge_ic(
                 'p_value_display': '1.0'
             },
             'sample_stats': {
-                'total_days': 0, 
-                'valid_days': 0, 
-                'avg_stocks_per_day': int(merged['asset'].nunique())
+                'total_days': raw_metadata.get('total_days', 0) if raw_metadata else 0,
+                'valid_days': 0,
+                'avg_stocks_per_day': 0
             },
             'ic_series': None,
-            'summary': '无法计算IC'
+            'summary': '数据不足，无法计算IC'
         }
     
-    ic_df = pd.DataFrame(ic_results)
-    ic_series = ic_df.set_index('date')['ic']
-    
-    # 计算 IC 统计量
-    ic_mean = ic_series.mean()
-    ic_std = ic_series.std()
-    icir = abs(ic_mean) / ic_std if ic_std > 0 else 0  # 使用绝对值（PROJECT.md 规范）
-    positive_ratio = (ic_series > 0).mean()
-    
-    n = len(ic_series)
-    t_stat = ic_mean / (ic_std / np.sqrt(n)) if ic_std > 0 else 0
-    p_value = 2 * (1 - stats.t.cdf(abs(t_stat), df=n-1)) if n > 1 else 1
+    # 使用公共模块计算 IC（含五维度判断）
+    # 参数 min_stocks 通过函数签名传递，统一管理（遵循 PROJECT.md 参数传递规范）
+    try:
+        result = calculate_ic_with_direction_verification(
+            factor_df=factor_data,
+            return_df=return_data,
+            factor_col='turnover_surge',
+            return_col='forward_return',
+            min_stocks=min_stocks
+        )
+    except ValueError as e:
+        # 公共模块抛出 ValueError（如数据不足）
+        return {
+            'factor_name': 'turnover_surge_1d',
+            'calculation_date': datetime.now().strftime('%Y-%m-%d'),
+            'period': {
+                'start': raw_metadata.get('period_start', '') if raw_metadata else '',
+                'end': raw_metadata.get('period_end', '') if raw_metadata else ''
+            },
+            'ic_metrics': {
+                'ic_mean': 0,
+                'ic_std': 0,
+                'icir': 0,
+                'p_value': 1.0,
+                'p_value_display': '1.0'
+            },
+            'sample_stats': {
+                'total_days': raw_metadata.get('total_days', 0) if raw_metadata else 0,
+                'valid_days': 0,
+                'avg_stocks_per_day': int(factor_data['asset'].nunique())
+            },
+            'ic_series': None,
+            'summary': f'无法计算IC: {str(e)}'
+        }
     
     # 获取日期范围
-    if period_start is None:
-        period_start = str(merged['date'].min())
-    if period_end is None:
-        period_end = str(merged['date'].max())
+    period_start = raw_metadata.get('period_start', '') if raw_metadata else ''
+    period_end = raw_metadata.get('period_end', '') if raw_metadata else ''
     
-    # 显著性标记
-    abs_t = abs(t_stat)
-    if abs_t > 3.29:
-        significance = '***'
-    elif abs_t > 2.58:
-        significance = '**'
-    elif abs_t > 1.96:
-        significance = '*'
-    else:
-        significance = ''
+    # 提取 ic_series 用于 ic_series 输出字段
+    ic_series = result['ic_series']
     
-    # 有效性判断
-    if ic_mean > 0.03:
-        effectiveness = "因子有效"
-    elif ic_mean < -0.03:
-        effectiveness = "因子反向有效"
-    else:
-        effectiveness = "因子预测能力较弱"
-    
-    summary = f"IC均值={ic_mean:.4f}, ICIR={icir:.2f}, 正比例={positive_ratio:.1%}, {effectiveness}"
-    
-    print(f"  IC 均值: {ic_mean:.4f}")
-    print(f"  ICIR: {icir:.2f}")
-    print(f"  t 统计量: {t_stat:.4f}{significance}")
-    print(f"  正 IC 比例: {positive_ratio:.1%}")
-    
-    # 转换为 JSON 友好格式
+    # 转换为 JSON 友好格式（遵循 PROJECT.md NaN 处理规范）
     dates = [str(d) for d in ic_series.index]
     ic_values = [round(v, 6) for v in ic_series.values]
+    
     # 计算 20 日滚动均值（min_periods=10，至少需要10个有效值）
     # 遵循 PROJECT.md NaN 处理规范：在数据生成阶段将 NaN 转为 None
     rolling_mean = ic_series.rolling(window=20, min_periods=10).mean()
@@ -377,6 +352,12 @@ def calculate_turnover_surge_ic(
         round(v, 6) if pd.notna(v) else None
         for v in rolling_mean.values
     ]
+    
+    print(f"  IC 均值: {result['ic_mean']:.4f}")
+    print(f"  ICIR: {result['icir']:.2f}")
+    print(f"  方向: {result['factor_direction']['ic_mean_sign']}")
+    print(f"  统计显著: {result['statistical_significance']['is_significant']}")
+    print(f"  正 IC 比例: {result['positive_ratio']:.1%}")
     
     return {
         # PROJECT.md 规范必需字段
@@ -387,27 +368,35 @@ def calculate_turnover_surge_ic(
             'end': period_end
         },
         'ic_metrics': {
-            'ic_mean': round(ic_mean, 6),
-            'ic_std': round(ic_std, 6),
-            'icir': round(icir, 4),
-            'p_value': round(p_value, 6),
-            'p_value_display': f"{p_value:.2e}" if p_value < 0.001 else f"{p_value:.4f}"
+            'ic_mean': round(result['ic_mean'], 6),
+            'ic_std': round(result['ic_std'], 6),
+            'icir': round(result['icir'], 4),
+            'p_value': round(result['p_value'], 6),
+            'p_value_display': result['p_value_display']
         },
         'sample_stats': {
-            'total_days': len(dates),
-            'valid_days': len(dates),
-            'avg_stocks_per_day': int(merged.groupby('date').size().mean())
+            'total_days': raw_metadata.get('total_days', 0) if raw_metadata else 0,
+            'valid_days': result['n_days'],
+            'avg_stocks_per_day': int(factor_data.groupby('date').size().mean())
         },
         
-        # 额外字段（保留原有功能）
+        # 五维度判断（遵循 PROJECT.md IC 计算规范）
+        'statistical_significance': result['statistical_significance'],
+        'factor_direction': result['factor_direction'],
+        'economic_significance': result['economic_significance'],
+        'icir_stability': result['icir_stability'],
+        'ic_distribution_consistency': result['ic_distribution_consistency'],
+        
+        # ic_series 输出字段（遵循 PROJECT.md ic_series 结构规范）
         'dates': dates,
         'ic_values': ic_values,
         'rolling_ic_mean': rolling_ic_mean,
-        'positive_ratio': round(positive_ratio, 4),
-        't_stat': round(t_stat, 4),
-        'significance': significance,
-        'n_assets': merged['asset'].nunique(),
-        'summary': summary
+        
+        # 额外字段（保留原有功能）
+        'positive_ratio': round(result['positive_ratio'], 4),
+        't_stat': result['t_stat'],
+        'n_assets': factor_data['asset'].nunique(),
+        'summary': result['summary']
     }
 
 
@@ -476,15 +465,16 @@ def generate_turnover_surge_ic_data(
     
     # 计算 IC
     print("\n[3/3] 计算 IC...")
-    ic_data = calculate_turnover_surge_ic(factor_df, return_df)
+    ic_data = calculate_turnover_surge_ic(factor_df, return_df, raw_metadata=raw_metadata)
     
     print(f"\nIC 统计:")
     print(f"  - IC 均值: {ic_data['ic_metrics']['ic_mean']:.4f}")
     print(f"  - ICIR: {ic_data['ic_metrics']['icir']:.2f}")
+    print(f"  - 方向: {ic_data['factor_direction']['ic_mean_sign']}")
+    print(f"  - 统计显著: {ic_data['statistical_significance']['is_significant']}")
     print(f"  - 正比例: {ic_data['positive_ratio']:.1%}")
-    print(f"  - t 统计量: {ic_data['t_stat']:.2f} {ic_data['significance']}")
     
-    # 构建完整结果
+    # 构建完整结果（遵循 PROJECT.md 输出结构规范）
     result_json = {
         'factor_name': FACTOR_NAME,
         'calculation_date': ic_data['calculation_date'],
@@ -492,18 +482,29 @@ def generate_turnover_surge_ic_data(
         'ic_metrics': ic_data['ic_metrics'],
         'sample_stats': ic_data['sample_stats'],
         
-        # 额外字段
+        # 五维度判断（遵循 PROJECT.md IC 计算规范）
+        'statistical_significance': ic_data['statistical_significance'],
+        'factor_direction': ic_data['factor_direction'],
+        'economic_significance': ic_data['economic_significance'],
+        'icir_stability': ic_data['icir_stability'],
+        'ic_distribution_consistency': ic_data['ic_distribution_consistency'],
+        
+        # ic_series 输出字段（遵循 PROJECT.md ic_series 结构规范）
         'ic_series': {
             'dates': ic_data['dates'],
             'ic_values': ic_data['ic_values'],
             'rolling_ic_mean': ic_data['rolling_ic_mean']
         },
+        
+        # 额外字段（保留原有功能）
         'filter_stats': filter_stats,
         'positive_ratio': ic_data['positive_ratio'],
         't_stat': ic_data['t_stat'],
-        'significance': ic_data['significance'],
         'n_assets': ic_data['n_assets'],
-        'summary': ic_data['summary']
+        'summary': ic_data['summary'],
+        
+        # 更新模式标记（遵循 PROJECT.md 返回值标记规范）
+        'update_mode': 'full'
     }
     
     # 转换类型
