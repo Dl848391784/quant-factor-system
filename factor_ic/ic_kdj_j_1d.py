@@ -477,23 +477,25 @@ def calculate_daily_ic_series(
             'p_value': round(result['p_value'], 6),
             'p_value_display': result.get('p_value_display', str(round(result['p_value'], 6)))
         },
-        'statistical_significance': {
-            'is_significant': result['statistical_significance']['is_significant'],
-            'p_value': result['statistical_significance']['p_value'],
-            'p_value_display': result['statistical_significance']['p_value_display'],
-            't_stat': result['statistical_significance']['t_stat'],
-            'conclusion': result['statistical_significance']['conclusion']
-        },
-        'factor_direction': {
-            'direction': result['factor_direction']['ic_mean_sign'],
-            'ic_mean': result['factor_direction']['ic_mean'],
-            'conclusion': result['factor_direction']['conclusion']
-        },
-        'economic_significance': {
-            'ic_strength': result['economic_significance']['level'],
-            'ic_mean_abs': result['economic_significance']['abs_ic_mean'],
-            'conclusion': result['economic_significance']['conclusion']
-        },
+        
+        # 五维度判断（独立输出，遵循 PROJECT.md 规范）
+        # 对齐 ic_rsi_1d.py 实现：直接传递完整 result 对象，而非手动拆分
+        'statistical_significance': result['statistical_significance'],
+        'factor_direction': result['factor_direction'],
+        'economic_significance': result['economic_significance'],
+        'icir_stability': result['icir_stability'],
+        'ic_distribution_consistency': result['ic_distribution_consistency'],
+        
+        # IC 序列数据
+        'dates': dates,
+        'ic_values': ic_values,
+        'rolling_ic_mean': rolling_ic_mean,
+        
+        # 其他统计（不与五维度判断重复）
+        'positive_ratio': round(result['positive_ratio'], 4),
+        'n_assets': factor_df['asset'].nunique(),
+        'summary': result['summary'],
+        
         'sample_stats': {
             # 语义定义（遵循 PROJECT.md 输出字段语义规范）：
             # - total_days: 原始因子缓存覆盖的日期数（dropna 前的数据范围）
@@ -508,13 +510,7 @@ def calculate_daily_ic_series(
                 'end': period_end,
                 'description': 'avg_stocks_per_day 反映此范围内的平均每日股票数（dropna 后）'
             }
-        },
-        'dates': dates,
-        'ic_values': ic_values,
-        'rolling_ic_mean': rolling_ic_mean,
-        'positive_ratio': round(result['positive_ratio'], 4),
-        'n_assets': factor_df['asset'].nunique(),
-        'summary': result['summary']
+        }
     }
 
 

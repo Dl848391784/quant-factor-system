@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 13:15 北京时间
-> 实测数据时间: 2026-05-20 13:10 北京时间
-> 版本: v1.1
-> 更新内容: 新增 avg_stocks_period 字段说明、完善异常处理分层规范
+> 生成时间: 2026-05-20 13:25 北京时间
+> 实测数据时间: 2026-05-20 13:20 北京时间
+> 版本: v1.2
+> 更新内容: 对齐 ic_rsi_1d.py 五维度判断字段结构（直接传递完整 result 对象）
 
 ---
 
@@ -115,28 +115,52 @@ generate_kdj_j_ic_data()
 
 ```json
 {
-  "is_significant": true,
   "p_value": 0.008991,
+  "p_value_display": "0.0090",
   "t_stat": -2.6124,
+  "nw_lag": 5,
+  "nw_lag_method": "Newey-West (1994): lag = int(4*(T/100)^(2/9))",
+  "is_significant": true,
   "conclusion": "统计显著（p=0.0090<0.05）"
 }
 ```
+
+**字段说明：**
+- `nw_lag`：Newey-West 自相关校正滞后阶数
+- `nw_lag_method`：滞后阶数计算方法（遵循 PROJECT.md 规范）
+- 直接传递完整 result 对象，包含所有子字段（对齐 ic_rsi_1d.py）
 
 ### 因子方向判断
 
 ```json
 {
-  "direction": "negative",
+  "ic_mean_sign": "negative",
   "ic_mean": -0.016024,
+  "direction_usage": "反向因子",
   "conclusion": "因子方向为反向（ic_mean=-0.0160<0），分层回测做多低值组"
 }
 ```
 
-**KDJ_J 因子说明：**
-- J值 > 100：超买，预期下跌
-- J值 < 0：超卖，预期反弹
-- **IC均值负向（-0.0160）符合反向因子预期**
-- ic_mean < 0 表示因子有效（高J值预测低收益）
+**字段说明：**
+- `ic_mean_sign`：IC均值符号（negative/positive）
+- `direction_usage`：因子使用方向说明
+- 直接传递完整 result 对象（对齐 ic_rsi_1d.py）
+
+### 经济显著性判断
+
+```json
+{
+  "abs_ic_mean": 0.016024,
+  "level": "不显著",
+  "is_economically_significant": false,
+  "threshold_used": "0.03",
+  "conclusion": "经济不显著（|ic_mean|=0.0160<0.03）"
+}
+```
+
+**字段说明：**
+- `threshold_used`：显著性阈值（遵循 PROJECT.md 规范）
+- 直接传递完整 result 对象（对齐 ic_rsi_1d.py）
 
 ### rolling_ic_mean 前10个值
 
@@ -359,6 +383,7 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | 防御性校验完整 | ✓ | required_fields + 排序 |
 | avg_stocks_period 字段 | ✓ | 新增，说明统计口径范围 |
 | 异常分层缓存读取 | ✓ | 区分可恢复和严重错误 |
+| 五维度判断字段结构 | ✓ | 对齐 ic_rsi_1d.py，直接传递完整 result 对象 |
 
 ---
 
@@ -368,7 +393,8 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 |------|------|---------|
 | v1.0 | 2026-05-20 | 初始版本，基于优化后的代码实现 |
 | v1.1 | 2026-05-20 | 新增 avg_stocks_period 字段说明，完善异常处理分层规范（Section 22） |
+| v1.2 | 2026-05-20 | 对齐 ic_rsi_1d.py 五维度判断字段结构（直接传递完整 result 对象） |
 
 ---
 
-*最后更新: 2026-05-20 13:15*"
+*最后更新: 2026-05-20 13:25*"
