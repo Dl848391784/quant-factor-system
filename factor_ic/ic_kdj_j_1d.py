@@ -602,6 +602,13 @@ def calculate_daily_ic_series(
         # 诊断信息必须使用原始数据统计（遵循 MODULE.md 异常处理规范）
         # 原因：factor_df/return_df 是过滤后的数据，若 IC 为空可能本身已很小或为空
         # raw_metadata 包含原始数据统计（period_start/total_days/avg_stocks_per_day）
+        
+        # 防御性访问：避免 KeyError（遵循 MODULE.md 防御性异常处理规范）
+        # 场景：factor_df/return_df 可能没有 'asset' 列（极端情况）
+        # 处理：先检查列存在，不存在时 nunique=0
+        factor_assets = factor_df['asset'].nunique() if 'asset' in factor_df.columns else 0
+        return_assets = return_df['asset'].nunique() if 'asset' in return_df.columns else 0
+        
         raise RuntimeError(
             f"IC 计算结果为空：所有交易日股票数均不足 min_stocks={min_stocks}\n"
             f"原始数据统计（来自 raw_metadata）:\n"
@@ -609,8 +616,8 @@ def calculate_daily_ic_series(
             f"  - 原始交易日数: {total_days}\n"
             f"  - 原始平均每日股票数: {raw_metadata.get('avg_stocks_per_day', 'N/A')}\n"
             f"过滤后数据统计（诊断用）:\n"
-            f"  - 因子数据: {len(factor_df)} 行, {factor_df['asset'].nunique()} 只股票\n"
-            f"  - 收益数据: {len(return_df)} 行, {return_df['asset'].nunique()} 只股票\n"
+            f"  - 因子数据: {len(factor_df)} 行, {factor_assets} 只股票\n"
+            f"  - 收益数据: {len(return_df)} 行, {return_assets} 只股票\n"
             f"建议: 降低 min_stocks 阈值或检查数据源股票覆盖率"
         )
     

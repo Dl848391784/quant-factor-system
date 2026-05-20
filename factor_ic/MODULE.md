@@ -450,6 +450,45 @@ except ValueError as e:
 
 ---
 
+### 防御性异常处理
+
+**原则：** 异常诊断信息中的数据访问必须防御性处理，避免二次异常。
+
+**场景：**
+- 异常处理时访问可能不存在的 DataFrame 列
+- 空 DataFrame 统计（返回 0 而非抛出异常）
+
+**正确示例：**
+```python
+# ✓ 正确：先检查列存在，不存在时返回安全默认值
+factor_assets = factor_df['asset'].nunique() if 'asset' in factor_df.columns else 0
+return_assets = return_df['asset'].nunique() if 'asset' in return_df.columns else 0
+
+raise RuntimeError(
+    f"IC 计算结果为空\n"
+    f"因子数据: {len(factor_df)} 行, {factor_assets} 只股票\n"
+    f"收益数据: {len(return_df)} 行, {return_assets} 只股票\n"
+    f"建议: 检查数据源或降低阈值"
+)
+```
+
+**禁止行为：**
+```python
+# ❌ 禁止：直接访问可能不存在的列
+raise RuntimeError(
+    f"因子数据: {factor_df['asset'].nunique()} 只股票"  # KeyError 风险！
+)
+```
+
+**空 DataFrame 统计行为：**
+| 操作 | 空 DataFrame 结果 | 说明 |
+|------|------------------|------|
+| `len(df)` | 0 | 安全 |
+| `df['col'].nunique()` | 0（若列存在） | 安全 |
+| `df['col']` | KeyError（若列不存在） | 需防御 |
+
+---
+
 ## 日期类型一致性规范
 
 ### 日期格式断言

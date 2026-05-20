@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 18:30 北京时间
+> 生成时间: 2026-05-20 18:35 北京时间
 > 实测数据时间: 2026-05-20 17:20 北京时间
-> 版本: v1.25
-> 更新内容: 修复 output_file 参数类型标注不一致（str vs Path），统一转换为 Path 对象
+> 版本: v1.26
+> 更新内容: 修复异常诊断中 DataFrame 列访问的 KeyError 风险，添加防御性检查（遵循 MODULE.md 防御性异常处理规范）
 
 ---
 
@@ -778,6 +778,7 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.23 | 2026-05-20 | 删除 should_full_recalculate 死代码变量，简化控制流注释（遵循 MODULE.md 控制流规范） |
 | v1.24 | 2026-05-20 | 补充 ic_values round 隐式行为注释，说明 ic_series 不含 NaN 的原因（遵循 MODULE.md NaN 处理规范） |
 | v1.25 | 2026-05-20 | 修复 output_file 参数类型标注不一致（str vs Path），统一转换为 Path 对象（遵循 PROJECT.md 参数类型约定） |
+| v1.26 | 2026-05-20 | 修复异常诊断中 DataFrame 列访问的 KeyError 风险，添加防御性检查（遵循 MODULE.md 防御性异常处理规范） |
 
 ---
 
