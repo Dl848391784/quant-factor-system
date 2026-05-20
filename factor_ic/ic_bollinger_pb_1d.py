@@ -770,7 +770,8 @@ def _incremental_update(
     
     # 使用字典去重（遵循 MODULE.md 增量路径 None 值保留规范）
     # 核心原则：保留所有日期（包括 None IC 值的日期），不过滤 None
-    # 这样 total_days 与 valid_days 的差值才能正确反映"股票数不足跳过"的日期数
+    # dates/ic_values 用于完整记录，valid_days 用于统计有效 IC 天数
+    # 两条路径语义一致：valid_days = 有效 IC 天数（不含 None）
     date_ic_map = {}
     for date, ic in zip(existing_dates, existing_ic_values):
         date_ic_map[date] = ic  # 保留 None 值，不过滤
@@ -781,7 +782,8 @@ def _incremental_update(
     all_dates = sorted(date_ic_map.keys())
     all_ic_values = [date_ic_map[d] for d in all_dates]  # 包含 None
     
-    # 统计有效 IC 数（用于诊断信息）
+    # 统计有效 IC 数（用于 valid_days 字段 + 诊断信息）
+    # 语义定义：valid_days = 实际计算出有效 IC 的天数（与全量路径一致）
     valid_ic_count = sum(1 for ic in all_ic_values if ic is not None)
     none_ic_count = len(all_ic_values) - valid_ic_count
     
@@ -834,7 +836,8 @@ def _incremental_update(
         },
         'sample_stats': {  # ✓ 8空格缩进，与上方字段对齐
             'total_days': raw_metadata.get('total_days', 0),  # 直接使用原始缓存天数（遵循 MODULE.md total_days 规范）
-            'valid_days': len(all_dates),
+            'valid_days': valid_ic_count,  # 有效 IC 天数（不含 None，与全量路径语义一致）
+            # total_days - valid_days = 因股票不足或数据缺失跳过的交易日数
             'avg_stocks_per_day': int(factor_df_full.groupby('date').size().mean()),
             'avg_stocks_period': {
                 'start': str(factor_df_full['date'].min()),
