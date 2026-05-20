@@ -37,7 +37,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # 缓存目录
-CACHE_DIR = Path('/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/cache')
+CACHE_DIR = Path('/home/admin/projects/factor_ic_analyzer/cache')
 FACTOR_DATA_DIR = CACHE_DIR / 'factor_data'
 CACHE_FILE = FACTOR_DATA_DIR / 'float_mv_data.json.gz'
 STOCK_LIST_FILE = CACHE_DIR / 'stock_list.json'

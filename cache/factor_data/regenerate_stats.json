@@ -1,9 +1,9 @@
 {
   "version": "3.4_with_ohlc",
   "n_days": 545,
-  "n_assets": 2996,
-  "n_records": 1481773,
-  "elapsed_seconds": 853.1273837089539,
+  "n_assets": 2999,
+  "n_records": 1482714,
+  "elapsed_seconds": 870.7397487163544,
   "is_valid": true,
   "memory_monitor": "proc_self_status",
   "fields": [

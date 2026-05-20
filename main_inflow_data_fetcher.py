@@ -47,7 +47,7 @@ warnings.filterwarnings('ignore')
 # ============================================================
 
 # 缓存路径
-CACHE_DIR = os.path.expanduser('~/.openclaw/workspace/yunzhou/factor_ic_analyzer/cache')
+CACHE_DIR = os.path.expanduser('~/projects/factor_ic_analyzer/cache')
 FACTOR_CACHE_DIR = os.path.join(CACHE_DIR, 'factor_data')
 MAIN_INFLOW_CACHE_DIR = os.path.join(CACHE_DIR, 'main_inflow')
 

@@ -2,9 +2,8 @@
 # 作者: 云舟
 # 功能: 计算因子 Rank IC 并生成可视化报告
 
-from .ic_calculator import ICCalculator
-from .visualizer import ICVisualizer
-from .data_loader import DataLoader
+# 注意: 项目采用模块化结构，各子目录独立导入
+# 因子计算脚本在 factor_ic/ 目录下
+# 分层回测在 backtest/ 目录下
 
-__all__ = ['ICCalculator', 'ICVisualizer', 'DataLoader']
 __version__ = '1.0.0'

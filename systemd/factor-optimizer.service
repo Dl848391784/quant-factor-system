@@ -7,14 +7,14 @@ Documentation=https://github.com/openclaw/factor_ic_analyzer
 Type=oneshot
 User=admin
 Group=admin
-WorkingDirectory=/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer
+WorkingDirectory=/home/admin/projects/factor_ic_analyzer
 
 # 使用虚拟环境中的 Python
-ExecStart=/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/.venv/bin/python precompute_optimizer.py
+ExecStart=/home/admin/projects/factor_ic_analyzer/.venv/bin/python precompute_optimizer.py
 
 # 日志输出
-StandardOutput=append:/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/logs/optimizer.log
-StandardError=append:/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/logs/optimizer_error.log
+StandardOutput=append:/home/admin/projects/factor_ic_analyzer/logs/optimizer.log
+StandardError=append:/home/admin/projects/factor_ic_analyzer/logs/optimizer_error.log
 
 # 内存限制（适配 3.5GB 服务器）
 MemoryMax=2G

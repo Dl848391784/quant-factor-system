@@ -412,7 +412,7 @@ def load_cached_data_light(max_days: int = 500, use_category: bool = True):
     """
     import gc
     
-    cache_dir = Path('/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/cache/factor_data')
+    cache_dir = Path('/home/admin/projects/factor_ic_analyzer/cache/factor_data')
     factor_path = cache_dir / 'factor_data.json.gz'
     return_path = cache_dir / 'return_data.json.gz'
     
@@ -2277,7 +2277,7 @@ def api_return_3d_analysis():
             reverse_rank_ic = reverse_rank_ic_module.reverse_rank_ic
             
             # ========== Step 1: 检查缓存是否存在 ==========
-            cache_dir = Path('/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/cache/factor_data')
+            cache_dir = Path('/home/admin/projects/factor_ic_analyzer/cache/factor_data')
             factor_cache_path = cache_dir / 'factor_data.json.gz'
             return_cache_path = cache_dir / 'return_data.json.gz'
             
@@ -2796,7 +2796,7 @@ def api_turnover_surge_analysis():
         try:
             # 动态加载模块
             import importlib.util
-            module_path = Path('/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/turnover_surge_factor.py')
+            module_path = Path('/home/admin/projects/factor_ic_analyzer/turnover_surge_factor.py')
             spec = importlib.util.spec_from_file_location("turnover_surge_factor", str(module_path))
             turnover_surge_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(turnover_surge_module)
@@ -3060,7 +3060,7 @@ def api_main_inflow_ratio_analysis():
         try:
             # 动态加载模块
             import importlib.util
-            module_path = Path('/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/main_inflow_ratio_factor.py')
+            module_path = Path('/home/admin/projects/factor_ic_analyzer/main_inflow_ratio_factor.py')
             spec = importlib.util.spec_from_file_location("main_inflow_ratio_factor", str(module_path))
             main_inflow_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(main_inflow_module)
@@ -3333,7 +3333,7 @@ def api_kdj_j_analysis():
         try:
             # 动态加载模块
             import importlib.util
-            module_path = Path('/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/kdj_j_factor.py')
+            module_path = Path('/home/admin/projects/factor_ic_analyzer/kdj_j_factor.py')
             spec = importlib.util.spec_from_file_location("kdj_j_factor", str(module_path))
             kdj_j_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(kdj_j_module)
@@ -3594,7 +3594,7 @@ def api_bollinger_pb_analysis():
         try:
             # 动态加载模块
             import importlib.util
-            module_path = Path('/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/bollinger_pb_factor.py')
+            module_path = Path('/home/admin/projects/factor_ic_analyzer/bollinger_pb_factor.py')
             spec = importlib.util.spec_from_file_location("bollinger_pb_factor", str(module_path))
             bollinger_pb_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(bollinger_pb_module)
@@ -6326,7 +6326,7 @@ def warmup_cache():
     
     try:
         # 检查缓存文件是否存在
-        cache_dir = Path('/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/cache/factor_data')
+        cache_dir = Path('/home/admin/projects/factor_ic_analyzer/cache/factor_data')
         factor_path = cache_dir / 'factor_data.json.gz'
         return_path = cache_dir / 'return_data.json.gz'
         

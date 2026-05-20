@@ -451,7 +451,6 @@ def calculate_daily_ic_series(
     # 日期格式断言（遵循 PROJECT.md 日期字符串比较规范）
     # 核心原则：全量路径与增量路径保持一致的防御机制
     # 检查关键日期格式是否符合 YYYY-MM-DD 约定
-    # 注意：dates 已定义，可以直接使用
     dates_to_check = [dates[0] if len(dates) > 0 else None, 
                       dates[-1] if len(dates) > 0 else None,
                       period_start, period_end]

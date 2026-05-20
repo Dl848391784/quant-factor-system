@@ -10,7 +10,7 @@ After=network.target
 [Service]
 Type=simple
 User=admin
-WorkingDirectory=/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer
+WorkingDirectory=/home/admin/projects/factor_ic_analyzer
 # 启动前杀掉所有旧进程（防止叠加）
 ExecStartPre=/usr/bin/pkill -9 -f "python.*web_app.py"
 ExecStartPre=/usr/bin/sleep 2

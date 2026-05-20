@@ -43,7 +43,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # 缓存目录
-CACHE_DIR = Path('/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/cache')
+CACHE_DIR = Path('/home/admin/projects/factor_ic_analyzer/cache')
 FACTOR_DATA_DIR = CACHE_DIR / 'factor_data'
 CACHE_FILE = FACTOR_DATA_DIR / 'main_inflow_data.json.gz'
 STOCK_LIST_FILE = CACHE_DIR / 'stock_list.json'
@@ -850,7 +850,7 @@ def main():
 2. 添加定时任务
 
    # 主力净流入数据每日增量更新（凌晨 4:35）
-   35 4 * * 2-6 cd /home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer && /usr/bin/python3 fetch_main_inflow.py --daily >> logs/fetch_main_inflow_daily.log 2>&1
+   35 4 * * 2-6 cd /home/admin/projects/factor_ic_analyzer && /usr/bin/python3 fetch_main_inflow.py --daily >> logs/fetch_main_inflow_daily.log 2>&1
 
 3. 验证定时任务
    crontab -l

@@ -7,7 +7,7 @@ import sys
 import os
 
 # 设置正确的导入路径
-sys.path.insert(0, '/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/versions/factor_mining')
+sys.path.insert(0, '/home/admin/projects/factor_ic_analyzer/versions/factor_mining')
 
 from stage_a.factor_combiner import FactorCombiner
 from stage_a.safe_math import SafeMath

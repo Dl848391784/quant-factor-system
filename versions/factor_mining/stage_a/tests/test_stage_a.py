@@ -9,7 +9,7 @@ import sys
 import os
 
 # 添加路径
-sys.path.insert(0, '/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer')
+sys.path.insert(0, '/home/admin/projects/factor_ic_analyzer')
 
 from versions.factor_mining.stage_a.safe_math import SafeMath, safe_div, safe_log, safe_sqrt, safe_rank
 from versions.factor_mining.stage_a.factor_combiner import FactorCombiner

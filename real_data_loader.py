@@ -67,11 +67,11 @@ class RealDataLoader:
     KLINE_URL = 'https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData'
     
     # 本地数据路径
-    LOCAL_DATA_DIR = os.path.expanduser('~/.openclaw/workspace/yunzhou/factor_ic_analyzer/data')
+    LOCAL_DATA_DIR = os.path.expanduser('~/projects/factor_ic_analyzer/data')
     # 缓存路径
-    CACHE_DIR = os.path.expanduser('~/.openclaw/workspace/yunzhou/factor_ic_analyzer/cache')
+    CACHE_DIR = os.path.expanduser('~/projects/factor_ic_analyzer/cache')
     # 因子数据缓存路径（按日期命名）
-    FACTOR_CACHE_DIR = os.path.expanduser('~/.openclaw/workspace/yunzhou/factor_ic_analyzer/cache/factor_data')
+    FACTOR_CACHE_DIR = os.path.expanduser('~/projects/factor_ic_analyzer/cache/factor_data')
     
     def __init__(
         self, 
@@ -2333,7 +2333,7 @@ def load_factor_light(
     """
     import gc
     
-    cache_dir = Path('/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/cache/factor_data')
+    cache_dir = Path('/home/admin/projects/factor_ic_analyzer/cache/factor_data')
     factor_path = cache_dir / 'factor_data.json.gz'
     
     if not factor_path.exists():
@@ -2416,7 +2416,7 @@ def load_return_light(
     """
     import gc
     
-    cache_dir = Path('/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/cache/factor_data')
+    cache_dir = Path('/home/admin/projects/factor_ic_analyzer/cache/factor_data')
     return_path = cache_dir / 'return_data.json.gz'
     
     if not return_path.exists():

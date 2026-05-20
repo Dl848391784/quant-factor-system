@@ -98,7 +98,7 @@ def winsorize_factor(
 
 
 # 缓存路径（与 real_data_loader.py 保持一致）
-CACHE_DIR = os.path.expanduser('~/.openclaw/workspace/yunzhou/factor_ic_analyzer/cache')
+CACHE_DIR = os.path.expanduser('~/projects/factor_ic_analyzer/cache')
 FACTOR_CACHE_DIR = os.path.join(CACHE_DIR, 'factor_data')
 
 

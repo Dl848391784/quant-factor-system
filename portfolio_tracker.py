@@ -999,7 +999,7 @@ def load_precompute_result(period: str = 'T1') -> Tuple[Optional[Dict], Optional
         period = 'T1'
     
     # v2优化结果路径（直接读取 optimization_T_*.json）
-    v2_output_dir = Path('/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/versions/v2/output')
+    v2_output_dir = Path('/home/admin/projects/factor_ic_analyzer/versions/v2/output')
     
     # 转换周期格式：T1 -> T_1, T3 -> T_3, T5 -> T_5
     file_period = f"T_{period[1]}"  # T1 -> T_1

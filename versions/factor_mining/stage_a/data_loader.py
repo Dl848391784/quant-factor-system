@@ -13,7 +13,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-CACHE_BASE = "/home/admin/.openclaw/workspace/yunzhou/factor_ic_analyzer/cache"
+CACHE_BASE = "/home/admin/projects/factor_ic_analyzer/cache"
 
 
 class RealFactorLoader:
