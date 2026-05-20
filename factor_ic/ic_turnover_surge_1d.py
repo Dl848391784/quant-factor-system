@@ -134,6 +134,14 @@ def load_data_from_cache() -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
     )
     print(f"    合并后: {len(factor_df)} 行, {factor_df['asset'].nunique()} 只股票")
     
+    # 在日期对齐前，先记录原始数据范围（遵循 PROJECT.md 输出字段语义规范）
+    # raw_metadata 应该记录原始缓存范围，而不是对齐后的范围
+    raw_period_start = str(factor_df['date'].min())
+    raw_period_end = str(factor_df['date'].max())
+    raw_total_days = factor_df['date'].nunique()
+    
+    print(f"  - 原始数据范围: {raw_period_start} ~ {raw_period_end}, {raw_total_days} 个交易日")
+    
     # 验证日期对齐（遵循 MODULE.md 数据对齐验证规范）
     # 因子数据和收益数据的日期范围必须一致，否则 IC 计算会静默丢失不匹配的日期
     factor_dates = factor_df['date'].unique()
@@ -155,14 +163,8 @@ def load_data_from_cache() -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
         return_df = return_df[return_df['date'].isin(common_dates)]
         print(f"    对齐后日期数: {len(common_dates)}")
     
-    # 在进一步处理之前，计算原始数据范围（遵循 PROJECT.md 输出字段语义规范）
-    raw_period_start = str(factor_df['date'].min())
-    raw_period_end = str(factor_df['date'].max())
-    raw_total_days = factor_df['date'].nunique()
-    
-    print(f"  - 原始数据范围: {raw_period_start} ~ {raw_period_end}, {raw_total_days} 个交易日")
-    
     # 使用缓存全部日期（不截断）
+    # raw_metadata 记录的是原始范围（对齐前），不是对齐后的范围
     
     return factor_df, return_df, {
         'period_start': raw_period_start,
