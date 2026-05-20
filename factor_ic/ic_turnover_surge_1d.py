@@ -173,14 +173,14 @@ def calculate_turnover_surge_factor(factor_df: pd.DataFrame) -> Tuple[pd.DataFra
     # total_records: 过滤前总记录数（原始数据总量）
     # 注意：后续不区分 rolling NaN 和条件过滤，因为本因子设计为：
     #   - rolling NaN（min_periods=5）+ 条件不满足 → 统一设为 None
-    #   - 统计口径简化：只统计 total_records 和 filtered_count
+    #   - 统计口径简化：只统计 total_records 和 valid_count（语义清晰：有效计数）
     filter_stats = {
         'total_records': len(factor_df),        # 过滤前总记录数
         'turnover_surge_count': 0,              # turnover_surge > 1 的记录数（不含 rolling NaN）
         'price_up_count': 0,                    # pct_change > 0 的记录数
         'both_conditions_count': 0,             # 两个条件同时满足的记录数
-        'filtered_count': 0,                    # 最终有效因子记录数
-        'filter_ratio': 0.0                     # 有效比例 = filtered_count / total_records
+        'valid_count': 0,                       # 最终有效因子记录数（语义清晰：valid）
+        'retention_ratio': 0.0                  # 保留比例 = valid_count / total_records（语义清晰：retention）
     }
     
     if factor_df.empty:
@@ -236,13 +236,13 @@ def calculate_turnover_surge_factor(factor_df: pd.DataFrame) -> Tuple[pd.DataFra
     factor_df.loc[~both_conditions, 'turnover_surge'] = None
     
     valid_count = factor_df['turnover_surge'].notna().sum()
-    filter_stats['filtered_count'] = int(valid_count)
-    filter_stats['filter_ratio'] = valid_count / len(factor_df) if len(factor_df) > 0 else 0
+    filter_stats['valid_count'] = int(valid_count)
+    filter_stats['retention_ratio'] = valid_count / len(factor_df) if len(factor_df) > 0 else 0
     
     print(f"    总记录数:           {filter_stats['total_records']:,}")
     print(f"    换手率突增记录数:   {filter_stats['turnover_surge_count']:,}")
     print(f"    上涨记录数:         {filter_stats['price_up_count']:,}")
-    print(f"    换手率突增+上涨:     {filter_stats['both_conditions_count']:,} ({filter_stats['filter_ratio']*100:.1f}%)")
+    print(f"    换手率突增+上涨:     {filter_stats['both_conditions_count']:,} ({filter_stats['retention_ratio']*100:.1f}%)")
     print(f"    有效因子记录数:     {valid_count:,}")
     
     # Step 4: 极端值处理（裁剪到 0.5-10）

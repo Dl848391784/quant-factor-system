@@ -1,7 +1,7 @@
 # Turnover_Surge_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 22:00 (北京时间)
-> 审阅版本: v1.9
+> 生成时间: 2026-05-20 22:30 (北京时间)
+> 审阅版本: v1.10
 > 实测数据时间: 2026-05-20
 > 更新内容:
 >   1. [v1.1] 修复 ic_metrics 字段缺失问题：添加 p_value_display（遵循 MODULE.md 输出结构规范）
@@ -38,6 +38,9 @@
 >   32. [v1.9] 补充 sample_stats 统计口径注释：avg_stocks_per_day 基于 dropna 后数据（遵循 MODULE.md 第1870行规范）
 >   33. [v1.9] 补充函数参数预期注释：factor_df 可以含有 turnover_surge=None 的记录（遵循 MODULE.md 隐式行为显式化原则）
 >   34. [v1.9] 补充 dropna 过滤注释：说明函数内部隐式行为和口径影响（遵循 MODULE.md 隐式行为显式化原则）
+>   35. [v1.10] 修复 filter_stats 字段名语义混淆：filtered_count → valid_count（语义清晰：有效计数）
+>   36. [v1.10] 修复 filter_stats 字段名语义混淆：filter_ratio → retention_ratio（语义清晰：保留比例）
+>   37. [v1.10] MODULE.md 更新 filter_stats 统计口径规范：新增字段命名规范章节，禁止使用模糊命名
 
 ---
 

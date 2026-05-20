@@ -1235,17 +1235,25 @@ factor_df['turnover_surge'] = factor_df['turnover_rate'] / factor_df['turnover_m
 - 紧急监控场景：`min_periods=window//2`（扩大覆盖度）
 - 禁止 `min_periods=1`（早期数据质量极差，可能导致误导）
 
-### filter_stats 统计口径规范
+### filter_stats 统计口径规范（2026-05-20更新）
 
-**核心原则：** filter_stats 必须区分三种数据丢失原因：
+**核心原则：** filter_stats 必须区分三种数据丢失原因，字段命名语义清晰。
 
-| 字段 | 统计口径 | 说明 |
-|------|----------|------|
-| `total_records` | 过滤前总记录数 | 原始数据总量 |
-| `rolling_nan_count` | rolling NaN 记录数 | 因 min_periods 不满足无法计算 |
-| `condition_filtered_count` | 条件过滤记录数 | 因筛选条件不满足被剔除 |
-| `filtered_count` | 最终有效记录数 | 筛选后保留的记录 |
-| `filter_ratio` | 有效比例 | filtered_count / total_records |
+**字段命名规范（语义清晰原则）：**
+
+| 字段 | 统计口径 | 说明 | 命名理由 |
+|------|----------|------|----------|
+| `total_records` | 过滤前总记录数 | 原始数据总量 | 明确"总"语义 |
+| `rolling_nan_count` | rolling NaN 记录数 | 因 min_periods 不满足无法计算 | 明确"NaN来源" |
+| `condition_filtered_count` | 条件过滤记录数 | 因筛选条件不满足被剔除 | 明确"被剔除"语义 |
+| `valid_count` | 最终有效记录数 | 筛选后保留的记录 | ✓ 语义清晰："有效计数" |
+| `retention_ratio` | 保留比例 | valid_count / total_records | ✓ 语义清晰："保留比例" |
+
+**禁止使用模糊命名：**
+| 模糊命名 | 问题 | 正确命名 |
+|----------|------|----------|
+| `filtered_count` | ❌ 语义混淆："过滤后计数"易误解为"被过滤掉的计数" | `valid_count` |
+| `filter_ratio` | ❌ 语义混淆："过滤比例"易误解为"被过滤掉的比例" | `retention_ratio` |
 
 **必须注释说明：**
 ```python
@@ -1253,8 +1261,8 @@ filter_stats = {
     'total_records': len(factor_df),           # 过滤前总记录数（原始数据）
     'rolling_nan_count': 0,                    # 因 rolling min_periods 不满足导致 NaN 的记录数
     'condition_filtered_count': 0,             # 因筛选条件不满足被剔除的记录数
-    'filtered_count': 0,                       # 最终有效因子记录数
-    'filter_ratio': 0.0                        # 有效比例 = filtered_count / total_records
+    'valid_count': 0,                          # 最终有效因子记录数（语义清晰：valid）
+    'retention_ratio': 0.0                     # 保留比例 = valid_count / total_records（语义清晰：retention）
 }
 ```
 
@@ -1283,6 +1291,8 @@ valid_mask = both_conditions & ~rolling_nan_mask
 | `rolling(...).mean()` 无注释 | 业务决策未说明 | 添加 min_periods 选择理由注释 |
 | `filter_stats` 无 rolling_nan_count | 无法区分 NaN 来源 | 添加 rolling_nan_count 字段 |
 | `min_periods=1` 无质量评估 | 早期数据质量极差 | 评估数据质量或使用折中值 |
+| `filtered_count` 字段名 | ❌ 语义混淆："过滤后计数"易误解 | 改为 `valid_count`（语义清晰） |
+| `filter_ratio` 字段名 | ❌ 语义混淆："过滤比例"易误解 | 改为 `retention_ratio`（语义清晰） |
 
 ---
 
