@@ -36,8 +36,6 @@ warnings.filterwarnings('ignore')
 # 导入通用 IC 计算模块（支持方向验证）
 from factor_ic.common.ic_calculator import (
     calculate_ic_with_direction_verification,
-    calculate_single_day_ic,  # 用于增量计算
-    calculate_ic_statistics   # 用于增量统计重算
 )
 
 # 导入数据完整性检查模块
@@ -688,7 +686,7 @@ def generate_turnover_surge_ic_data(
             print(f"读取缓存失败: {e}，将执行全量计算")
             full_data = _full_recalculate(output_file, min_stocks=min_stocks)
             # 添加 fallback 事件标记（遵循 PROJECT.md 返回值标记规范）
-            full_data['update_mode'] = 'full'  # 实际执行的模式
+            # update_mode 已在 _full_recalculate 中设置为 'full'，无需重复赋值
             full_data['fallback_event'] = {
                 'original_mode': 'skip',
                 'actual_mode': 'full',
@@ -707,7 +705,7 @@ def generate_turnover_surge_ic_data(
         print("  注意：换手率突增因子需要5日窗口计算，增量模式暂用全量计算替代")
         full_data = _full_recalculate(output_file, min_stocks=min_stocks)
         # 添加增量替代事件标记
-        full_data['update_mode'] = 'full'
+        # update_mode 已在 _full_recalculate 中设置为 'full'，无需重复赋值
         full_data['incremental_fallback'] = {
             'original_mode': 'incremental',
             'actual_mode': 'full',

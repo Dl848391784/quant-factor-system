@@ -53,6 +53,8 @@
 >   47. [v1.14] MODULE.md 新增数据对齐验证规范：避免静默丢失数据，选择交集日期
 >   48. [v1.15] 修复极端值裁剪范围矛盾：clip(0.5, 10) -> clip(1.0, 10)（遵循 MODULE.md 极端值裁剪规范）
 >   49. [v1.15] MODULE.md 新增极端值裁剪规范：裁剪范围必须与筛选条件一致
+>   50. [v1.16] 删除未使用的导入：calculate_single_day_ic 和 calculate_ic_statistics（增量模式已 fallback）
+>   51. [v1.16] 删除冗余的 update_mode 赋值：_full_recalculate 已设置，外部无需重复赋值
 
 ---
 
