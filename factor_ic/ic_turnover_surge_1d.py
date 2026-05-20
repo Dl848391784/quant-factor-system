@@ -268,6 +268,10 @@ def calculate_turnover_surge_ic(
     
     参数:
         factor_df: 包含 date, asset, turnover_surge 的 DataFrame
+            - **参数预期（遵循 MODULE.md 隐式行为显式化原则）**：
+            - turnover_surge 列可以包含 None/NaN 值（不满足筛选条件的股票）
+            - 函数内部会执行 dropna(subset=['turnover_surge']) 过滤无效记录
+            - 外部调用方无需预先过滤，但需理解 avg_stocks_per_day 基于 dropna 后数据
         return_df: 包含 date, asset, forward_return 的 DataFrame
         raw_metadata: 原始数据元信息（遵循 PROJECT.md period/total_days 数据源规范）
             - period_start: 原始缓存最小日期
@@ -280,7 +284,10 @@ def calculate_turnover_surge_ic(
     """
     print("\n[IC计算] 计算换手率突增因子 Rank IC（正向因子）...")
     
-    # 准备数据
+    # 准备数据（遵循 MODULE.md 隐式行为显式化原则）
+    # dropna 过滤：turnover_surge=None/NaN 的记录（不满足筛选条件的股票）
+    # 这是函数参数预期的隐式行为，外部调用方无需预先过滤
+    # 口径影响：avg_stocks_per_day 基于 dropna 后数据（只统计有效因子记录）
     factor_data = factor_df[['date', 'asset', 'turnover_surge']].dropna(subset=['turnover_surge']).copy()
     return_data = return_df[['date', 'asset', 'forward_return']].copy()
     
@@ -395,6 +402,10 @@ def calculate_turnover_surge_ic(
             'p_value_display': result['p_value_display']
         },
         'sample_stats': {
+            # 统计口径说明（遵循 MODULE.md 第1870行规范）
+            # avg_stocks_per_day 基于 dropna 后数据（只统计有效因子的每日股票数）
+            # total_days 基于 dropna 前数据（原始缓存日期数）
+            # 口径差异：factor_data 是 dropna(subset=['turnover_surge']) 后的数据
             'total_days': raw_metadata.get('total_days', 0) if raw_metadata else 0,
             'valid_days': result['n_days'],
             'avg_stocks_per_day': int(factor_data.groupby('date').size().mean()),
