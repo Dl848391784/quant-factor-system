@@ -2,8 +2,14 @@
 
 > 本文档定义 factor_ic/ 目录下 IC 计算脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v1.1
-> 更新内容: 删除重复的流程文档规范（已迁移至 PROJECT.md）
+> 版本: v1.2
+> 更新内容:
+>   1. v1.0 首次创建模块规范
+>   2. v1.1 删除重复的流程文档规范（已迁移至 PROJECT.md）
+>   3. v1.2（2026-05-21）：
+>      - 统一 statistical_significance 字段定义（三处统一为7字段）
+>      - 补充公共模块同步规范（修改公共模块必须同步更新 MODULE.md）
+>      - 添加典型案例（2026-05-20教训：nw_lag字段遗漏）
 
 ---
 
@@ -15,6 +21,49 @@ factor_ic 模块负责计算各类因子的 IC（Information Coefficient）值�
 - 输入：来自 data_fetchers 的缓存数据（cache/factor_data/）
 - 输出：IC 分析结果（factor_ic/result/）
 - 依赖：不自行拉取数据，只处理已缓存数据
+
+---
+
+## 公共模块同步规范（2026-05-21新增）
+
+**核心原则：修改公共模块必须同步更新 MODULE.md**
+
+公共模块（`factor_ic/common/*.py`）是所有因子脚本的共享基础设施，其输出结构变更会影响所有依赖脚本。
+
+### 同步检查清单
+
+```
+□ 修改 ic_calculator.py 输出结构 → 检查 MODULE.md 所有字段定义位置
+□ 修改 convert_types.py 类型转换逻辑 → 更新 MODULE.md 类型规范章节
+□ 修改 data_completeness.py 数据加载逻辑 → 更新 MODULE.md 数据依赖规范
+□ 新增公共函数 → 在 MODULE.md 添加函数签名和用途说明
+□ 字段重命名 → 全文搜索旧字段名，批量更新所有引用位置
+```
+
+### 典型案例（2026-05-20教训）
+
+**问题**：公共模块 `ic_calculator.py` 输出 `nw_lag` 字段，但 MODULE.md 三处定义均缺少该字段。
+
+**根因**：
+- 第350行（模板定义）：只写5字段，遗漏 nw_lag
+- 第511行（检查函数）：只写4字段，遗漏 p_value_display + nw_lag
+- 第1070行（类型注解）：只写3字段，遗漏 p_value_display + conclusion + nw_lag
+
+**修复**：统一三处定义为公共模块标准（7字段）
+
+### 正确实践
+
+```python
+# ✓ 修改公共模块后立即检查 MODULE.md
+# 1. 运行脚本验证输出结构
+# 2. grep MODULE.md 搜索字段定义位置
+# 3. 批量更新所有不一致位置
+# 4. 更新版本号和时间标注
+# 5. git commit 提交变更
+
+# ✗ 修改公共模块后忘记更新 MODULE.md
+# 导致：新脚本遵循旧规范，输出结构不一致
+```
 
 ---
 
@@ -351,6 +400,8 @@ engine = LayeredBacktestEngine(factor_direction='negative')
     "t_stat": <float>,
     "p_value": <float>,
     "p_value_display": "<str>",
+    "nw_lag": <int>,
+    "nw_lag_method": "<str>",
     "is_significant": <bool>,
     "conclusion": "<str>"
   },
@@ -508,7 +559,7 @@ def validate_output_completeness(result: dict) -> None:
     required_nested = {
         'ic_metrics': ['ic_mean', 'ic_std', 'icir', 'p_value', 'p_value_display'],
         'sample_stats': ['total_days', 'valid_days', 'avg_stocks_per_day', 'avg_stocks_period'],
-        'statistical_significance': ['t_stat', 'p_value', 'is_significant', 'conclusion'],
+        'statistical_significance': ['t_stat', 'p_value', 'p_value_display', 'nw_lag', 'nw_lag_method', 'is_significant', 'conclusion'],
         'factor_direction': ['direction', 'ic_mean', 'conclusion'],
         'economic_significance': ['annual_ic_mean', 'icir_annualized', 'conclusion']
     }
@@ -1070,7 +1121,11 @@ result = calculate_ic_with_direction_verification(factor_df, return_df, ...)
     'statistical_significance': {
         't_stat': float,
         'p_value': float,
-        'is_significant': bool
+        'p_value_display': str,
+        'nw_lag': int,
+        'nw_lag_method': str,
+        'is_significant': bool,
+        'conclusion': str
     },
     'factor_direction': dict,
     'economic_significance': dict,
@@ -2021,10 +2076,12 @@ p_value_display = ic_data['ic_metrics']['p_value_display']  # 必须存在
 
 | 字段名 | 类型 | 来源 | 用途 |
 |--------|------|------|------|
-| `is_significant` | bool | `result['statistical_significance']['is_significant']` | 统计显著性标志 |
+| `t_stat` | float | `result['statistical_significance']['t_stat']` | t 统计量（Newey-West调整） |
 | `p_value` | float | `result['statistical_significance']['p_value']` | p 值 |
 | `p_value_display` | str | `result['statistical_significance']['p_value_display']` | p 值显示格式 |
-| `t_stat` | float | `result['statistical_significance']['t_stat']` | t 统计量 |
+| `nw_lag` | int | `result['statistical_significance']['nw_lag']` | Newey-West滞后阶数 |
+| `nw_lag_method` | str | `result['statistical_significance']['nw_lag_method']` | NW滞后选择方法 |
+| `is_significant` | bool | `result['statistical_significance']['is_significant']` | 统计显著性标志 |
 | `conclusion` | str | `result['statistical_significance']['conclusion']` | 统计显著性判断结论 |
 
 ### 正确实现（两条路径一致）
