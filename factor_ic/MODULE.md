@@ -1296,6 +1296,59 @@ valid_mask = both_conditions & ~rolling_nan_mask
 
 ---
 
+## 变量命名语义清晰原则规范（2026-05-20新增）
+
+### 核心原则
+
+**变量命名必须语义清晰，避免误解。在因子脚本中，变量名应明确指示数据来源（价格、换手率、成交量等），避免使用模糊命名。**
+
+### 问题背景
+
+```
+变量命名语义混淆问题：
+
+错误代码（换手率因子脚本中）：
+factor_df['pct_change'] = factor_df.groupby('asset')['close'].transform(lambda x: x.pct_change())
+
+问题：
+- pct_change 在换手率因子脚本中容易误解为"换手率变化率"
+- 实际含义是"收盘价涨跌幅"
+- 读者需要查看代码才能理解语义
+
+正确代码：
+factor_df['price_pct_change'] = factor_df.groupby('asset')['close'].transform(lambda x: x.pct_change())
+# ↑ 语义清晰：价格涨跌幅
+```
+
+### 因子脚本常见变量命名规范
+
+| 场景 | 模糊命名（禁止） | 正确命名 | 语义说明 |
+|------|-----------------|----------|----------|
+| 收盘价涨跌幅 | `pct_change` | `price_pct_change` 或 `daily_return` | 价格涨跌幅（非换手率变化） |
+| 换手率变化率 | `pct_change` | `turnover_pct_change` | 换手率变化率（非价格涨跌） |
+| 成交量变化率 | `pct_change` | `volume_pct_change` | 成交量变化率（非价格涨跌） |
+| 因子值 | `factor_value` | `<因子名>_factor` | 如 `turnover_surge_factor` |
+| 均值 | `ma` | `<数据源>_ma_<窗口>` | 如 `turnover_ma_5`、`price_ma_20` |
+| 标准差 | `std` | `<数据源>_std_<窗口>` | 如 `turnover_std_5` |
+
+### 命名规则
+
+| 规则 | 说明 |
+|------|------|
+| 数据源前缀原则 | 变量名应包含数据源前缀（price, turnover, volume, return） |
+| 上下文明确原则 | 在换手率因子脚本中，`pct_change` 默认指换手率变化，需明确区分 |
+| 避免通用词原则 | 避免 `pct_change`, `ma`, `std` 等通用词，应添加数据源前缀 |
+
+### 常见错误模式
+
+| 错误代码 | 问题 | 修复 |
+|----------|------|------|
+| `pct_change = close.pct_change()`（换手率脚本） | 语义混淆：读者误以为换手率变化 | `price_pct_change = close.pct_change()` |
+| `ma = turnover.rolling(5).mean()` | 语义模糊：何种数据的均值 | `turnover_ma_5 = turnover.rolling(5).mean()` |
+| `factor_value = ...` | 语义模糊：何种因子 | `turnover_surge_factor = ...` |
+
+---
+
 ## ic_series 排序规范
 
 **核心原则：** ic_series.index 必须按日期升序排列。

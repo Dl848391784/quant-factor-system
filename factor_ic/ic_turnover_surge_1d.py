@@ -212,19 +212,20 @@ def calculate_turnover_surge_factor(factor_df: pd.DataFrame) -> Tuple[pd.DataFra
     )
     factor_df['turnover_surge'] = factor_df['turnover_rate'] / factor_df['turnover_ma']
     
-    # Step 2: 计算当日涨跌幅
+    # Step 2: 计算当日涨跌幅（遵循 MODULE.md 变量命名语义清晰原则规范）
+    # price_pct_change 明确指示数据来源：收盘价涨跌幅（非换手率变化）
     print("  计算当日涨跌幅...")
-    factor_df['pct_change'] = factor_df.groupby('asset')['close'].transform(
+    factor_df['price_pct_change'] = factor_df.groupby('asset')['close'].transform(
         lambda x: x.pct_change()
     )
     
     factor_df = factor_df.drop(columns=['date_str'])
     
     # Step 3: 应用筛选条件
-    print("  应用筛选条件（turnover_surge > 1 且 pct_change > 0）...")
+    print("  应用筛选条件（turnover_surge > 1 且 price_pct_change > 0）...")
     
     turnover_surge_cond = factor_df['turnover_surge'] > 1
-    price_up = factor_df['pct_change'] > 0
+    price_up = factor_df['price_pct_change'] > 0
     
     filter_stats['turnover_surge_count'] = int(turnover_surge_cond.sum())
     filter_stats['price_up_count'] = int(price_up.sum())
