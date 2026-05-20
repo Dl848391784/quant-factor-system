@@ -219,6 +219,30 @@ def calculate_kdj_j_factor(
         (factor_df['close'] - factor_df['rolling_low']) / diff * 100
     )
     
+    # RSV 值域检查（遵循 MODULE.md 因子计算规范）
+    # 理论上 RSV 应在 [0, 100]，但浮点运算可能产生微小偏差
+    # NaN 传播正确（前 N-1 期为 NaN），此处只检查非 NaN 值
+    rsv_valid = factor_df['rsv'].dropna()
+    if len(rsv_valid) > 0:
+        rsv_min = rsv_valid.min()
+        rsv_max = rsv_valid.max()
+        rsv_out_of_range = int(((rsv_valid < 0) | (rsv_valid > 100)).sum())
+        
+        # 值域统计日志（便于诊断）
+        print(f"  RSV 值域统计:")
+        print(f"    最小值: {rsv_min:.4f}")
+        print(f"    最大值: {rsv_max:.4f}")
+        
+        # 异常值警告（超出理论范围）
+        if rsv_out_of_range > 0:
+            print(f"    ⚠ 超出 [0, 100] 范围: {rsv_out_of_range} 个 ({rsv_out_of_range/len(rsv_valid)*100:.2f}%)")
+            print(f"    原因分析: 可能是 diff 极小（接近 EPSILON）导致的数值放大")
+            print(f"    建议: 若异常值比例 > 1%，检查 EPSILON 阈值是否合适")
+        
+        # 调试断言（仅在开发期启用，生产环境可注释）
+        # assert rsv_min >= -EPSILON * 100, f"RSV 下界溢出: {rsv_min}"
+        # assert rsv_max <= 100 + EPSILON * 100, f"RSV 上界溢出: {rsv_max}"
+    
     factor_df.drop(columns=['rolling_high', 'rolling_low'], inplace=True)
     
     # 计算 K（批量向量化）

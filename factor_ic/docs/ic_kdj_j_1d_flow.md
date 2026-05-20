@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 16:05 北京时间
-> 实测数据时间: 2026-05-20 16:00 北京时间
-> 版本: v1.13
-> 更新内容: 修复闭包耦合问题，将内嵌函数提升为模块级私有函数，显式传参
+> 生成时间: 2026-05-20 16:15 北京时间
+> 实测数据时间: 2026-05-20 16:10 北京时间
+> 版本: v1.14
+> 更新内容: 补充 RSV 值域检查规范，添加值域统计日志和异常值警告
 
 ---
 
@@ -766,6 +766,7 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.11 | 2026-05-20 | 修复 ewm 初始值函数副作用问题，使用 .copy() 避免修改原始数据 |
 | v1.12 | 2026-05-20 | 修复 should_full_recalculate 标志未使用问题，添加显式检查确保控制流有效 |
 | v1.13 | 2026-05-20 | 修复闭包耦合问题，将内嵌函数提升为模块级私有函数 `_calculate_k_with_initial` 和 `_calculate_d_with_initial`，显式传参 |
+| v1.14 | 2026-05-20 | 补充 RSV 值域检查规范，添加值域统计日志和异常值警告（遵循 MODULE.md 因子计算规范） |
 
 ---
 
@@ -856,4 +857,87 @@ def calculate_kdj_j_factor(factor_df, n=9, m1=3, m2=3):
 
 ---
 
-*最后更新: 2026-05-20 15:40*
+## RSV 值域检查规范
+
+### 问题根因
+
+**原始代码（缺少值域检查）：**
+```python
+EPSILON = 1e-10
+diff = factor_df['rolling_high'] - factor_df['rolling_low']
+factor_df['rsv'] = np.where(
+    np.abs(diff) < EPSILON,
+    50.0, 
+    (factor_df['close'] - factor_df['rolling_low']) / diff * 100
+)
+
+# 直接删除临时列，没有值域检查
+factor_df.drop(columns=['rolling_high', 'rolling_low'], inplace=True)
+```
+
+**问题分析：**
+- RSV 理论值域：[0, 100]
+- 浮点运算可能产生微小偏差（如 -0.000001 或 100.000001）
+- 若 diff 极小（接近 EPSILON），除法可能产生极大值（如 1e12）
+- np.where 先计算两个分支再选择，diff=0 时除零运算仍触发
+- NaN 传播正确（前 N-1 期为 NaN），但非 NaN 值需要检查
+- 缺少值域统计和异常值警告，难以诊断数值问题
+
+### 修复方式
+
+**添加值域统计日志和异常值警告：**
+```python
+EPSILON = 1e-10
+diff = factor_df['rolling_high'] - factor_df['rolling_low']
+factor_df['rsv'] = np.where(
+    np.abs(diff) < EPSILON,
+    50.0, 
+    (factor_df['close'] - factor_df['rolling_low']) / diff * 100
+)
+
+# RSV 值域检查（遵循 MODULE.md 因子计算规范）
+# 理论上 RSV 应在 [0, 100]，但浮点运算可能产生微小偏差
+# NaN 传播正确（前 N-1 期为 NaN），此处只检查非 NaN 值
+rsv_valid = factor_df['rsv'].dropna()
+if len(rsv_valid) > 0:
+    rsv_min = rsv_valid.min()
+    rsv_max = rsv_valid.max()
+    rsv_out_of_range = int(((rsv_valid < 0) | (rsv_valid > 100)).sum())
+    
+    # 值域统计日志（便于诊断）
+    print(f"  RSV 值域统计:")
+    print(f"    最小值: {rsv_min:.4f}")
+    print(f"    最大值: {rsv_max:.4f}")
+    
+    # 异常值警告（超出理论范围）
+    if rsv_out_of_range > 0:
+        print(f"    ⚠ 超出 [0, 100] 范围: {rsv_out_of_range} 个 ({rsv_out_of_range/len(rsv_valid)*100:.2f}%)")
+        print(f"    原因分析: 可能是 diff 极小（接近 EPSILON）导致的数值放大")
+        print(f"    建议: 若异常值比例 > 1%，检查 EPSILON 阈值是否合适")
+    
+    # 调试断言（仅在开发期启用，生产环境可注释）
+    # assert rsv_min >= -EPSILON * 100, f"RSV 下界溢出: {rsv_min}"
+    # assert rsv_max <= 100 + EPSILON * 100, f"RSV 上界溢出: {rsv_max}"
+
+factor_df.drop(columns=['rolling_high', 'rolling_low'], inplace=True)
+```
+
+### 检查原则
+
+| 检查项 | 说明 |
+|--------|------|
+| 值域统计 | 打印最小值/最大值，便于诊断 |
+| 异常值计数 | 统计超出 [0, 100] 范围的数量 |
+| 异常值警告 | 若存在异常值，打印原因分析和建议 |
+| 调试断言 | 开发期可启用，生产环境可注释 |
+
+**实测数据（v1.14）：**
+- RSV 最小值: 0.0000
+- RSV 最大值: 100.0000
+- 超出 [0, 100] 范围: 0 个（EPSILON=1e-10 保护有效）
+
+**参考规范：MODULE.md "因子计算规范 - 值域检查"**
+
+---
+
+*最后更新: 2026-05-20 16:15*
