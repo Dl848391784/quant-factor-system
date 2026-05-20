@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 16:35 北京时间
-> 实测数据时间: 2026-05-20 16:30 北京时间
-> 版本: v1.16
-> 更新内容: 修复 K/D 初始值函数注释语义表述，精确描述 ewm 递推逻辑
+> 生成时间: 2026-05-20 16:45 北京时间
+> 实测数据时间: 2026-05-20 16:40 北京时间
+> 版本: v1.17
+> 更新内容: 修复死代码守卫问题，移除无效守卫逻辑，用注释说明控制流语义
 
 ---
 
@@ -769,6 +769,7 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.14 | 2026-05-20 | 补充 RSV 值域检查规范，添加值域统计日志和异常值警告（遵循 MODULE.md 因子计算规范） |
 | v1.15 | 2026-05-20 | 修复边界条件处理缺失，dates 为空时提前抛出有意义的异常（遵循 MODULE.md 边界条件规范） |
 | v1.16 | 2026-05-20 | 修复 K/D 初始值函数注释语义表述，精确描述 ewm 递推逻辑（预处理输入而非直接赋值输出） |
+| v1.17 | 2026-05-20 | 修复死代码守卫问题，移除无效守卫逻辑，用注释说明控制流语义（遵循 MODULE.md 控制流规范） |
 
 ---
 
@@ -856,6 +857,96 @@ def calculate_kdj_j_factor(factor_df, n=9, m1=3, m2=3):
 - 文档完整性：函数签名 + docstring 说明所有参数
 
 **参考规范：MODULE.md "函数设计规范 - 禁止闭包捕获外部变量"**
+
+---
+
+## 死代码守卫问题规范
+
+### 问题根因
+
+**原始代码（死代码守卫）：**
+```python
+should_full_recalculate = force_full  # 初始值
+
+if not force_full:
+    mode, missing_dates, info = check_data_completeness('kdj_j_1d')
+    
+    if mode == 'skip':
+        try:
+            with open(output_file, 'r') as f:
+                return json.load(f)  # 成功读取 → 直接返回
+        except FileNotFoundError:
+            should_full_recalculate = True  # 分支1
+    elif mode == 'incremental':
+        should_full_recalculate = True  # 分支2
+    else:  # mode == 'full'
+        should_full_recalculate = True  # 分支3
+
+# 无效守卫：在所有可达路径上 should_full_recalculate=True 或已返回
+if not should_full_recalculate:
+    raise RuntimeError("控制流逻辑错误...")  # 死代码！永远不会执行
+```
+
+**问题分析：**
+- `should_full_recalculate` 初始值 `force_full`：
+  - `force_full=True` → `should_full_recalculate=True` → 守卫不执行
+- `force_full=False` 时进入 `if not force_full` 块：
+  - `mode='skip'` + 成功读取 → `return`（已退出，不达守卫）
+  - `mode='skip'` + FileNotFoundError → `should_full_recalculate=True`
+  - `mode='incremental'` → `should_full_recalculate=True`
+  - `mode='full'` → `should_full_recalculate=True`
+- **所有可达路径**：`should_full_recalculate=True` 或已返回
+- 守卫 `if not should_full_recalculate` 永远为 False，永远不会执行
+- v1.12 添加的"显式控制流"守卫实际上是死代码
+
+### 修复方式
+
+**移除无效守卫，用注释说明控制流语义：**
+```python
+should_full_recalculate = force_full  # 初始值
+
+if not force_full:
+    mode, missing_dates, info = check_data_completeness('kdj_j_1d')
+    
+    if mode == 'skip':
+        try:
+            with open(output_file, 'r') as f:
+                return json.load(f)  # 成功读取 → 直接返回
+        except FileNotFoundError:
+            should_full_recalculate = True
+    elif mode == 'incremental':
+        should_full_recalculate = True
+    else:  # mode == 'full'
+        should_full_recalculate = True
+
+# 控制流语义（遵循 MODULE.md 控制流规范）
+# 此处 should_full_recalculate 在所有可达路径上均为 True：
+# - force_full=True → 初始值=True
+# - force_full=False + mode='skip' + 成功读取 → 已返回（不达此处）
+# - force_full=False + mode='skip' + FileNotFoundError → True
+# - force_full=False + mode='incremental' → True
+# - force_full=False + mode='full' → True
+# 若到达此处，说明 should_full_recalculate=True（所有分支已处理）
+
+# 全量计算逻辑
+print("KDJ_J_1D IC 计算器...")
+```
+
+### 设计原则
+
+| 原则 | 说明 |
+|------|------|
+| 移除死代码 | 守卫在所有路径上为 False，给读者制造"有保护"错觉 |
+| 注释说明语义 | 用注释而非代码表达控制流逻辑（避免死代码） |
+| 控制流分析 | 明确列出所有可达路径及其结果 |
+| 避免无效守卫 | v1.12 添加的守卫本意是"显式控制流"，实为死代码 |
+
+**优势：**
+- 代码更简洁，无死代码干扰
+- 注释清晰说明控制流语义
+- 避免读者误以为有保护
+
+**参考规范：MODULE.md "控制流规范 - 死代码守卫"**
 
 ---
 
@@ -1014,4 +1105,4 @@ rolling_mean = ic_series.rolling(window=20, min_periods=10).mean()
 
 ---
 
-*最后更新: 2026-05-20 16:25*
+*最后更新: 2026-05-20 16:45*
