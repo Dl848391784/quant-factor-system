@@ -633,6 +633,24 @@ def run_volume_ratio_analysis(
         }
     
     # 构建完整结果（遵循 MODULE.md 输出结构统一性规范）
+    # IC 相关的 summary（五维度综合判断）
+    ic_summary = {
+        'ic_performance': f"IC均值={ic_data['ic_mean']:.4f}, ICIR={ic_data['icir']:.2f}, 因子预测能力{'较弱' if abs(ic_data['icir']) < 0.3 else '中等' if abs(ic_data['icir']) < 0.5 else '较强'}",
+        'statistical_significance': statistical_significance['description'],
+        'factor_direction': factor_direction_judgment['description'],
+        'economic_significance': economic_significance['description'],
+        'recommendation': f"{'可用于分层回测' if statistical_significance['is_significant'] and abs(ic_data['icir']) > 0.2 else '建议进一步验证或优化因子'}"
+    }
+    
+    # factor_stats（MODULE.md 必需字段）
+    factor_stats = {
+        'factor_name': 'volume_ratio_1d',
+        'return_period': '1d',
+        'data_source': str(FACTOR_CACHE),
+        'total_days': raw_metadata['total_days'],
+        'valid_days': ic_data['n_days']
+    }
+    
     result = {
         # MODULE.md 必需字段
         'factor_name': 'volume_ratio_1d',
@@ -651,8 +669,17 @@ def run_volume_ratio_analysis(
         'icir_stability': icir_stability,
         'ic_distribution_consistency': ic_distribution_consistency,
         
+        # IC 时间序列（顶层字段，遵循 MODULE.md 输出结构统一性规范）
+        'dates': ic_data['dates'],
+        'ic_values': ic_data['ic_values'],
+        'rolling_ic_mean': ic_data['rolling_ic_mean'],
+        'positive_ratio': ic_data['positive_ratio'],
+        'n_assets': ic_data['n_assets'],
+        'summary': ic_summary,
+        'factor_stats': factor_stats,
+        
         # 扩展字段（分层回测等）
-        'ic_series': ic_series,
+        'ic_series': ic_series,  # 保留嵌套结构供兼容
         'layered_result': layered_result_json,
         'raw_metadata': {  # 原始缓存元信息（遵循 MODULE.md 输出结构统一性规范）
             'period_start': raw_metadata['period_start'],

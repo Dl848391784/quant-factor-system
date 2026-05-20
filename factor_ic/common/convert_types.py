@@ -51,6 +51,10 @@ def convert_to_native_types(obj: Any) -> Any:
             return None
         return float(obj)
     
+    elif isinstance(obj, (np.bool_, bool)):
+        # 处理 numpy.bool_ 和 Python bool（2026-05-21新增）
+        return bool(obj)
+    
     elif isinstance(obj, np.ndarray):
         return convert_to_native_types(obj.tolist())
     
