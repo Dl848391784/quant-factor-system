@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 15:30 北京时间
-> 实测数据时间: 2026-05-20 15:25 北京时间
-> 版本: v1.10
-> 更新内容: 统一 min_periods 注释表述，使用"前 min_periods-1 个时间点"替代模糊的"前 N 天"
+> 生成时间: 2026-05-20 15:40 北京时间
+> 实测数据时间: 2026-05-20 15:35 北京时间
+> 版本: v1.11
+> 更新内容: 修复 ewm 初始值函数副作用问题，使用 .copy() 避免修改原始数据
 
 ---
 
@@ -550,24 +550,46 @@ if len(stock_data) > 0:
 - K[1] = 2/3 * K[0] + 1/3 * RSV[1] = 2/3 * 50 + 1/3 * RSV[1]（正确递推）
 - ewm 计算后恢复原始 RSV 值（不影响后续逻辑）
 
-### 批量计算处理
+### 批量计算处理（无副作用版本）
 
 **calculate_kdj_j_factor() 批量处理：**
 ```python
 def calculate_k_with_initial(rsv_series):
-    """计算 K 值，第一个值使用 initial_k"""
+    """计算 K 值，第一个值使用 initial_k（无副作用版本）
+    
+    正确做法：复制 Series，在副本上构造初始值序列，不修改原始数据
+    原因：iloc 修改传入的 Series 产生副作用，若 ewm 异则还原不会执行
+    """
     if len(rsv_series) == 0:
         return rsv_series
     
-    original_rsv_0 = rsv_series.iloc[0]
-    rsv_series.iloc[0] = initial_k
+    # 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
+    rsv_copy = rsv_series.copy()
     
-    k_series = rsv_series.ewm(alpha=alpha_k, adjust=False).mean()
+    # 在副本上预处理第一个 RSV 值
+    rsv_copy.iloc[0] = initial_k
     
-    rsv_series.iloc[0] = original_rsv_0
+    # 计算 ewm
+    k_series = rsv_copy.ewm(alpha=alpha_k, adjust=False).mean()
+    
     return k_series
 
 factor_df['k'] = factor_df.groupby('asset')['rsv'].transform(calculate_k_with_initial)
+```
+
+**为何必须避免副作用：**
+1. **数据污染风险**：`iloc` 修改传入的 Series，可能影响原始 `factor_df`
+2. **异常恢复失败**：若 `ewm` 抛异常，还原代码不会执行，原始数据被污染
+3. **调试困难**：副作用难以追踪，数据来源不清晰
+4. **函数契约违反**：transform 函数应返回新 Series，不应修改输入
+
+**旧版本问题（已修复）：**
+```python
+# ❌ 错误：修改原始数据 + 还原（不可靠的 hack）
+original_rsv_0 = rsv_series.iloc[0]
+rsv_series.iloc[0] = initial_k  # 副作用！
+k_series = rsv_series.ewm(...).mean()
+rsv_series.iloc[0] = original_rsv_0  # 若 ewm 异常，这行不执行
 ```
 
 ### D 值初始值处理
@@ -715,6 +737,7 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | 增量模式控制流 | ✓ | 使用显式变量 should_full_recalculate，避免隐式 fallthrough |
 | required_fields 完整性 | ✓ | 包含 p_value 字段，校验与实际访问一致 |
 | 统计口径一致性 | ✓ | raw_avg_stocks_per_day 与 total_days 一致，avg_stocks_per_day 与 valid_days 一致 |
+| ewm 初始值无副作用 | ✓ | 使用 .copy() 避免修改原始数据，替代不可靠的"修改再还原" hack |
 
 ---
 
@@ -733,7 +756,8 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.8 | 2026-05-20 | 修复 required_fields 校验遗漏 p_value 字段（防御性校验完整性） |
 | v1.9 | 2026-05-20 | 修复统计口径不一致，新增 raw_avg_stocks_per_day（口径与 total_days 一致） |
 | v1.10 | 2026-05-20 | 统一 min_periods 注释表述，使用"前 min_periods-1 个时间点"替代模糊的"前 N 天" |
+| v1.11 | 2026-05-20 | 修复 ewm 初始值函数副作用问题，使用 .copy() 避免修改原始数据 |
 
 ---
 
-*最后更新: 2026-05-20 15:30*
+*最后更新: 2026-05-20 15:40*

@@ -153,19 +153,22 @@ def calculate_kdj_j_factor(
     initial_k = 50.0  # K 初始值
     
     def calculate_k_with_initial(rsv_series):
-        """计算 K 值，第一个值使用 initial_k"""
+        """计算 K 值，第一个值使用 initial_k（无副作用版本）
+        
+        正确做法：复制 Series，在副本上构造初始值序列，不修改原始数据
+        原因：iloc 修改传入的 Series 产生副作用，若 ewm 异则还原不会执行
+        """
         if len(rsv_series) == 0:
             return rsv_series
         
-        # 预处理第一个 RSV 值
-        original_rsv_0 = rsv_series.iloc[0]
-        rsv_series.iloc[0] = initial_k
+        # 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
+        rsv_copy = rsv_series.copy()
+        
+        # 在副本上预处理第一个 RSV 值
+        rsv_copy.iloc[0] = initial_k
         
         # 计算 ewm
-        k_series = rsv_series.ewm(alpha=alpha_k, adjust=False).mean()
-        
-        # 恢复原始 RSV 值（不影响后续逻辑）
-        rsv_series.iloc[0] = original_rsv_0
+        k_series = rsv_copy.ewm(alpha=alpha_k, adjust=False).mean()
         
         return k_series
     
@@ -182,19 +185,22 @@ def calculate_kdj_j_factor(
     initial_d = 50.0  # D 初始值
     
     def calculate_d_with_initial(k_series):
-        """计算 D 值，第一个值使用 initial_d"""
+        """计算 D 值，第一个值使用 initial_d（无副作用版本）
+        
+        正确做法：复制 Series，在副本上构造初始值序列，不修改原始数据
+        原因：iloc 修改传入的 Series 产生副作用，若 ewm 异则还原不会执行
+        """
         if len(k_series) == 0:
             return k_series
         
-        # 预处理第一个 K 值
-        original_k_0 = k_series.iloc[0]
-        k_series.iloc[0] = initial_d
+        # 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
+        k_copy = k_series.copy()
+        
+        # 在副本上预处理第一个 K 值
+        k_copy.iloc[0] = initial_d
         
         # 计算 ewm
-        d_series = k_series.ewm(alpha=alpha_d, adjust=False).mean()
-        
-        # 恢复原始 K 值（不影响后续逻辑）
-        k_series.iloc[0] = original_k_0
+        d_series = k_copy.ewm(alpha=alpha_d, adjust=False).mean()
         
         return d_series
     
