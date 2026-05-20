@@ -318,8 +318,11 @@ def load_data_from_cache(
     raw_period_start = str(factor_df['date'].min())
     raw_period_end = str(factor_df['date'].max())
     raw_total_days = factor_df['date'].nunique()
+    # 计算原始数据的平均每日股票数（口径与 total_days 一致）
+    raw_avg_stocks_per_day = int(factor_df.groupby('date').size().mean())
     
     print(f"  - 原始数据范围: {raw_period_start} ~ {raw_period_end}, {raw_total_days} 个交易日")
+    print(f"  - 原始平均每日股票数: {raw_avg_stocks_per_day}")
     
     # 过滤缺失值
     factor_df = factor_df.dropna(subset=['close', 'high', 'low']).reset_index(drop=True)
@@ -350,7 +353,8 @@ def load_data_from_cache(
     return factor_df, return_df, {
         'period_start': raw_period_start,
         'period_end': raw_period_end,
-        'total_days': raw_total_days
+        'total_days': raw_total_days,
+        'avg_stocks_per_day': raw_avg_stocks_per_day  # 口径与 total_days 一致
     }
 
 
@@ -493,14 +497,27 @@ def calculate_daily_ic_series(
             # - total_days: 原始因子缓存覆盖的日期数（dropna 前的数据范围）
             # - valid_days: 实际计算出 IC 的天数（每交易日股票数 >= min_stocks）
             # - 差值含义: total_days - valid_days = 因股票不足或数据缺失跳过的交易日数
-            'total_days': total_days,  # 使用 raw_metadata
+            'total_days': total_days,  # 使用 raw_metadata（dropna 前）
             'valid_days': len(dates),  # dates 来自 ic_series.index（有效IC日期）
+            
+            # 口径一致性规范（遵循 MODULE.md 统计口径规范）：
+            # - raw_avg_stocks_per_day: 与 total_days 口径一致（原始数据范围）
+            # - avg_stocks_per_day: 与 valid_days 口径一致（有效IC数据范围）
+            'raw_avg_stocks_per_day': raw_metadata.get('avg_stocks_per_day', 0),
             'avg_stocks_per_day': int(factor_df.groupby('date').size().mean()),
-            # avg_stocks_period 说明 avg_stocks_per_day 的统计口径范围（遵循 MODULE.md 输出字段口径规范）
+            
+            # 口径说明（明确差异，避免误导分析）
             'avg_stocks_period': {
-                'start': period_start,
-                'end': period_end,
-                'description': 'avg_stocks_per_day 反映此范围内的平均每日股票数（dropna 后）'
+                'raw_range': {
+                    'start': period_start,
+                    'end': period_end,
+                    'description': 'raw_avg_stocks_per_day 统计范围（与 total_days 一致）'
+                },
+                'valid_range': {
+                    'start': dates[0] if dates else None,
+                    'end': dates[-1] if dates else None,
+                    'description': 'avg_stocks_per_day 统计范围（与 valid_days 一致）'
+                }
             }
         }
     }

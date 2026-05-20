@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 15:10 北京时间
-> 实测数据时间: 2026-05-20 15:05 北京时间
-> 版本: v1.8
-> 更新内容: 修复 required_fields 校验遗漏 p_value 字段（防御性校验完整性）
+> 生成时间: 2026-05-20 15:20 北京时间
+> 实测数据时间: 2026-05-20 15:15 北京时间
+> 版本: v1.9
+> 更新内容: 修复统计口径不一致，新增 raw_avg_stocks_per_day（口径与 total_days 一致）
 
 ---
 
@@ -714,6 +714,7 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | RSV 窗口期完整性 | ✓ | 使用 min_periods=n，前 N-1 天为 NaN |
 | 增量模式控制流 | ✓ | 使用显式变量 should_full_recalculate，避免隐式 fallthrough |
 | required_fields 完整性 | ✓ | 包含 p_value 字段，校验与实际访问一致 |
+| 统计口径一致性 | ✓ | raw_avg_stocks_per_day 与 total_days 一致，avg_stocks_per_day 与 valid_days 一致 |
 
 ---
 
@@ -730,7 +731,8 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.6 | 2026-05-20 | 修复 RSV 计算 min_periods 参数，使用 min_periods=n 确保满窗口期数据完整性 |
 | v1.7 | 2026-05-20 | 修复增量模式隐式 fallthrough，使用显式控制流（should_full_recalculate 变量） |
 | v1.8 | 2026-05-20 | 修复 required_fields 校验遗漏 p_value 字段（防御性校验完整性） |
+| v1.9 | 2026-05-20 | 修复统计口径不一致，新增 raw_avg_stocks_per_day（口径与 total_days 一致） |
 
 ---
 
-*最后更新: 2026-05-20 15:10*
+*最后更新: 2026-05-20 15:20*
