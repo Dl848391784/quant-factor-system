@@ -1,10 +1,19 @@
 # ic_volume_ratio_1d 测试用例
 
-> 版本: v1.5
-> 生成时间: 2026-05-21 02:15 北京时间
-> 实测数据时间: 2026-05-21（验证输出结构符合MODULE.md v1.4规范）
+> 版本: v1.7
+> 生成时间: 2026-05-21 02:35 北京时间
+> 实测数据时间: 2026-05-21 02:35（验证输出结构符合MODULE.md规范）
 > 脚本: ic_volume_ratio_1d.py
 > 测试目的: 验证量比因子IC计算脚本的功能完整性、输出结构合规性、边界处理正确性
+> 更新内容:
+>   1. v1.5 测试用例创建（2026-05-21 02:15）
+>   2. v1.6 Newey-West 重构同步（2026-05-21 02:25）：
+>      - TC001预期日志更新：Newey-West 调整版日志格式
+>      - statistical_significance 字段添加 nw_lag, nw_lag_method, conclusion
+>      - 五维度判断字段结构对齐公共模块标准
+>   3. v1.7 废弃代码清理同步（2026-05-21 02:35）：
+>      - 删除 calculate_daily_ic_series 函数引用（已改用公共模块）
+>      - 流程文档架构图更新：calculate_daily_ic_series → calculate_ic_with_direction_verification
 
 ---
 
@@ -43,7 +52,9 @@
 ✓ 脚本正常执行，无异常抛出
 ✓ 输出日志包含：
   - "[数据加载] 从缓存读取数据..."
-  - "[计算 IC] 开始计算（正向排名，min_stocks=10）..."
+  - "[2/4] 计算每日 IC（Newey-West 调整）..."
+  - "t 统计量（NW调整）: -X.XX"
+  - "NW lag: X"
   - "[3/4] 执行分层回测..."
   - "完成！共计算 X 天有效 IC 数据（原始数据 Y 天）"
 ✓ 输出文件存在且非空
@@ -90,11 +101,11 @@ print('valid_days:', result.get('sample_stats', {}).get('valid_days'))
 ✓ period: 存在且包含 start, end
 ✓ ic_metrics: 存在且包含 ic_mean, ic_std, icir, p_value, p_value_display
 ✓ sample_stats: 存在且包含 total_days, valid_days, avg_stocks_per_day, avg_stocks_period
-✓ statistical_significance: 存在且包含 t_stat, p_value, is_significant
-✓ factor_direction: 存在且包含 ic_mean_sign, ic_mean_abs, direction_threshold
-✓ economic_significance: 存在且包含 icir, icir_threshold, is_economically_significant
-✓ icir_stability: 存在且包含 is_stable, rolling_icir_std, stability_threshold
-✓ ic_distribution_consistency: 存在且包含 is_consistent, positive_ratio, consistency_threshold
+✓ statistical_significance: 存在且包含 t_stat, p_value, p_value_display, nw_lag, nw_lag_method, is_significant, conclusion
+✓ factor_direction: 存在且包含 ic_mean, ic_mean_sign, direction_usage, conclusion
+✓ economic_significance: 存在且包含 abs_ic_mean, level, is_economically_significant, conclusion
+✓ icir_stability: 存在且包含 icir, level, is_stable, conclusion
+✓ ic_distribution_consistency: 存在且包含 positive_ratio, ic_mean_sign, is_consistent, consistency_type, conclusion
 ✓ dates: 存在且为非空数组
 ✓ ic_values: 存在且为非空数组
 ✓ rolling_ic_mean: 存在且为数组（前9个可为None）
@@ -126,15 +137,15 @@ if missing:
 else:
     print('✓ 所有顶层字段存在')
 
-# 嵌套字段检查
+# 嵌套字段检查（Newey-West 标准结构）
 nested_required = {
     'ic_metrics': ['ic_mean', 'ic_std', 'icir', 'p_value', 'p_value_display'],
     'sample_stats': ['total_days', 'valid_days', 'avg_stocks_per_day', 'avg_stocks_period'],
-    'statistical_significance': ['t_stat', 'p_value', 'p_value_display', 'is_significant'],
-    'factor_direction': ['ic_mean_sign', 'ic_mean_abs'],
-    'economic_significance': ['icir', 'is_economically_significant'],
-    'icir_stability': ['is_stable', 'stability_threshold'],
-    'ic_distribution_consistency': ['is_consistent', 'positive_ratio']
+    'statistical_significance': ['t_stat', 'p_value', 'p_value_display', 'nw_lag', 'nw_lag_method', 'is_significant', 'conclusion'],
+    'factor_direction': ['ic_mean', 'ic_mean_sign', 'direction_usage', 'conclusion'],
+    'economic_significance': ['abs_ic_mean', 'level', 'is_economically_significant', 'conclusion'],
+    'icir_stability': ['icir', 'level', 'is_stable', 'conclusion'],
+    'ic_distribution_consistency': ['positive_ratio', 'ic_mean_sign', 'is_consistent', 'consistency_type', 'conclusion']
 }
 
 for parent, children in nested_required.items():

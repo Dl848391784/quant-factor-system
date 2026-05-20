@@ -1,8 +1,8 @@
 # 量比因子 IC 分析流程文档
 
-> 版本: v1.7
-> 生成时间: 2026-05-21 02:31 北京时间
-> 实测数据时间: 2026-05-21 02:31 北京时间（运行验证通过）
+> 版本: v1.8
+> 生成时间: 2026-05-21 02:35 北京时间
+> 实测数据时间: 2026-05-21 02:35 北京时间（运行验证通过）
 > 脚本: ic_volume_ratio_1d.py
 > 更新内容:
 >   1. v1.0 首次创建流程文档
@@ -21,7 +21,6 @@
 >      - statistical_significance 结构升级：添加 nw_lag, nw_lag_method, conclusion 字段
 >      - 五维度判断全部使用公共模块标准结构（与 ic_kdj_j_1d.py 对齐）
 >      - 空数据分支同步更新五维度结构
->      - 删除本地 calculate_daily_ic_series 函数（改用公共模块）
 >      - 实测结果：IC=-0.031, ICIR=0.31, t_stat=-7.13（NW调整）, nw_lag=5
 >   7. v1.7 废弃代码清理（2026-05-21 02:31）：
 >      - 删除废弃函数 calculate_daily_ic_series（已改用公共模块）
@@ -29,6 +28,10 @@
 >      - 删除废弃变量：scipy_stats_norm_cdf（不再使用）
 >      - 代码行数减少：776行 → 690行（精简86行）
 >      - 运行验证通过：IC=-0.031, ICIR=0.31
+>   8. v1.8 文档架构图更新（2026-05-21 02:35）：
+>      - 架构图更新：calculate_daily_ic_series → calculate_ic_with_direction_verification（公共模块）
+>      - 测试用例同步更新：nw_lag字段、五维度结构对齐、预期日志格式
+>      - 三文件版本同步：脚本v1.7、流程文档v1.8、测试用例v1.7
 
 ---
 
@@ -44,8 +47,9 @@
          ▼
 ┌─────────────────┐
 │  IC 计算层       │
-│ calculate_daily_ │
-│  ic_series()     │
+│ calculate_ic_    │
+│ with_direction_  │  （公共模块，Newey-West 标准）
+│ verification()   │
 └─────────────────┘
          │
          ▼
