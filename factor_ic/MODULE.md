@@ -1566,6 +1566,81 @@ print(f"极端值裁剪范围: [{clip_lower}, {clip_upper}]，筛选条件: > {f
 
 ---
 
+## 主入口错误处理规范（2026-05-21新增）
+
+### 核心原则
+
+**if __name__ == '__main__' 主入口必须有错误处理，异常不能直接暴露给用户，需提供友好提示。**
+
+### 问题背景
+
+```
+主入口错误处理缺失问题：
+
+错误代码：
+if __name__ == '__main__':
+    # 无错误处理，异常直接暴露
+    generate_turnover_surge_ic_data()
+
+问题：
+- FileNotFoundError、ValueError、RuntimeError 等异常直接打印到终端
+- 用户看到的是 Python 异常栈，无法快速定位问题
+- 缺少友好的错误提示和解决建议
+
+正确代码：
+if __name__ == '__main__':
+    try:
+        generate_turnover_surge_ic_data()
+    except FileNotFoundError as e:
+        print(f"错误：缓存文件不存在")
+        print(f"  文件路径: {e}")
+        print(f"  解决方法: 先运行数据缓存脚本，生成因子数据")
+        sys.exit(1)
+    except ValueError as e:
+        print(f"错误：数据验证失败")
+        print(f"  详情: {e}")
+        print(f"  解决方法: 检查数据质量，确保股票数量充足")
+        sys.exit(1)
+    except RuntimeError as e:
+        print(f"错误：计算过程异常")
+        print(f"  详情: {e}")
+        print(f"  解决方法: 查看日志，定位具体问题")
+        sys.exit(1)
+    except Exception as e:
+        print(f"错误：未知异常")
+        print(f"  详情: {type(e).__name__}: {e}")
+        print(f"  解决方法: 联系开发人员，提供完整错误信息")
+        sys.exit(1)
+```
+
+### 错误处理规范
+
+| 异常类型 | 处理方式 | 用户提示 |
+|----------|----------|----------|
+| FileNotFoundError | 友好提示 + 文件路径 + 解决方法 | "缓存文件不存在，先运行数据缓存脚本" |
+| ValueError | 友好提示 + 详情 + 解决方法 | "数据验证失败，检查数据质量" |
+| RuntimeError | 友好提示 + 详情 + 解决方法 | "计算过程异常，查看日志" |
+| Exception（未知异常） | 友好提示 + 类型 + 详情 + 解决方法 | "未知异常，联系开发人员" |
+
+### 退出码规范
+
+| 退出码 | 含义 | 场景 |
+|--------|------|------|
+| 0 | 成功完成 | 正常退出 |
+| 1 | 通用错误 | 文件不存在、数据验证失败等 |
+| 2 | 参数错误 | 命令行参数解析失败（如有） |
+
+### 常见错误模式
+
+| 错误代码 | 问题 | 修复 |
+|----------|------|------|
+| `if __name__ == '__main__': func()` | 无错误处理，异常直接暴露 | 添加 try-except 块 |
+| `except Exception: pass` | 隐藏异常，用户无法感知错误 | 打印友好提示 + sys.exit(1) |
+| `print(e)` 只打印异常对象 | 用户无法理解错误含义 | 打印友好提示 + 详情 + 解决方法 |
+| 无 sys.exit() | 异常后继续执行，可能产生更严重错误 | 错误处理后立即 sys.exit(1) |
+
+---
+
 ## ic_series 排序规范
 
 **核心原则：** ic_series.index 必须按日期升序排列。

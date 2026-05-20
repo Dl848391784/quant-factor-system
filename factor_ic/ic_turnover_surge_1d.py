@@ -729,5 +729,28 @@ def generate_turnover_surge_ic_data(
 
 
 if __name__ == '__main__':
-    # 计算缓存全部日期的 IC 数据
-    generate_turnover_surge_ic_data()
+    # 主入口错误处理（遵循 MODULE.md 主入口错误处理规范）
+    # 异常不能直接暴露给用户，需提供友好提示
+    try:
+        generate_turnover_surge_ic_data()
+    except FileNotFoundError as e:
+        print(f"错误：缓存文件不存在")
+        print(f"  详情: {e}")
+        print(f"  解决方法: 先运行数据缓存脚本，生成因子数据")
+        sys.exit(1)
+    except ValueError as e:
+        print(f"错误：数据验证失败")
+        print(f"  详情: {e}")
+        print(f"  解决方法: 检查数据质量，确保股票数量充足")
+        sys.exit(1)
+    except RuntimeError as e:
+        print(f"错误：计算过程异常")
+        print(f"  详情: {e}")
+        print(f"  解决方法: 查看日志，定位具体问题")
+        sys.exit(1)
+    except Exception as e:
+        print(f"错误：未知异常")
+        print(f"  类型: {type(e).__name__}")
+        print(f"  详情: {e}")
+        print(f"  解决方法: 联系开发人员，提供完整错误信息")
+        sys.exit(1)

@@ -1,7 +1,7 @@
 # Turnover_Surge_1D IC 计算流程文档
 
-> 生成时间: 2026-05-21 01:00 (北京时间)
-> 审阅版本: v1.15
+> 生成时间: 2026-05-21 01:30 (北京时间)
+> 审阅版本: v1.17
 > 实测数据时间: 2026-05-20
 > 更新内容:
 >   1. [v1.1] 修复 ic_metrics 字段缺失问题：添加 p_value_display（遵循 MODULE.md 输出结构规范）
@@ -55,6 +55,8 @@
 >   49. [v1.15] MODULE.md 新增极端值裁剪规范：裁剪范围必须与筛选条件一致
 >   50. [v1.16] 删除未使用的导入：calculate_single_day_ic 和 calculate_ic_statistics（增量模式已 fallback）
 >   51. [v1.16] 删除冗余的 update_mode 赋值：_full_recalculate 已设置，外部无需重复赋值
+>   52. [v1.17] 补充主入口错误处理：if __name__ == '__main__' 添加 try-except 块（遵循 MODULE.md 主入口错误处理规范）
+>   53. [v1.17] MODULE.md 新增主入口错误处理规范：异常不能直接暴露给用户，需提供友好提示
 
 ---
 
