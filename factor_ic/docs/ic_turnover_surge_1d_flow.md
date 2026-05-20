@@ -1,7 +1,7 @@
 # Turnover_Surge_1D IC 计算流程文档
 
-> 生成时间: 2026-05-21 03:00 (北京时间)
-> 审阅版本: v1.20
+> 生成时间: 2026-05-21 03:30 (北京时间)
+> 审阅版本: v1.21
 > 实测数据时间: 2026-05-20
 > 更新内容:
 >   1. [v1.1] 修复 ic_metrics 字段缺失问题：添加 p_value_display（遵循 MODULE.md 输出结构规范）
@@ -61,6 +61,7 @@
 >   55. [v1.19] 修复空数据返回值字段不一致：补充 icir_stability、ic_distribution_consistency、filter_stats、t_stat（遵循 MODULE.md 输出结构统一性规范）
 >   56. [v1.19] 修复空数据返回值字段不一致：删除 factor_stats 字段（正常路径无此字段）
 >   57. [v1.20] 修复 filter_stats 打印语义误导：both_conditions_count 显示 both_conditions_ratio，valid_count 显示 retention_ratio（遵循 MODULE.md 输出语义清晰原则）
+>   58. [v1.21] 修复 ValueError 分支 avg_stocks_per_day 语义错误：nunique() 是资产总数，改为 0（遵循 MODULE.md 语义清晰原则）
 
 ---
 

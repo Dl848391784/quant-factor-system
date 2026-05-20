@@ -428,7 +428,7 @@ def calculate_turnover_surge_ic(
             'sample_stats': {
                 'total_days': raw_metadata.get('total_days', 0) if raw_metadata else 0,
                 'valid_days': 0,
-                'avg_stocks_per_day': int(factor_data['asset'].nunique()),
+                'avg_stocks_per_day': 0,  # ValueError 表示数据验证失败，无法计算 IC，设为 0（遵循 MODULE.md 语义清晰原则）
                 'avg_stocks_period': {
                     'start': raw_metadata.get('period_start', '') if raw_metadata else '',
                     'end': raw_metadata.get('period_end', '') if raw_metadata else '',
