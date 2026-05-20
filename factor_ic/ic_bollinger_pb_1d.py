@@ -618,9 +618,12 @@ def _full_recalculate(
     except KeyError as e:
         raise RuntimeError(f"缓存字段缺失，可能是缓存版本过期\n缺失字段: {e}") from e
     except ValueError as e:
-        # 数据量不足：保留原始异常类型和完整堆栈信息
-        # 使用裸 raise 保留 ValueError（不重新包装，不改变异常链）
+        # ValueError 来源分析（load_data_from_cache 内部抛出）：
+        # 1. 日期格式无效（第121/132行）："因子/收益数据中存在 N 个无效日期格式"
+        # 2. 数据量不足（第609行）：股票数量不足以计算有效的 IC
+        # 统一处理：保留原始异常类型和完整堆栈信息，使用裸 raise
         # 原因：ValueError 是业务逻辑主动抛出的，信息已足够，无需额外包装
+        # 注意：此块捕获所有 ValueError，不区分来源，均裸 raise 透传
         raise
     except Exception as e:
         raise RuntimeError(f"数据加载时发生未预期的异常\n异常类型: {type(e).__name__}\n原始错误: {e}") from e
