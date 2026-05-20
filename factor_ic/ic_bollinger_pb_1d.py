@@ -429,6 +429,12 @@ def calculate_daily_ic_series(
     # ic_series 显式排序（遵循 MODULE.md ic_series 排序规范）
     ic_series = ic_series.sort_index()
     
+    # 防御性校验：显式过滤 NaN/None（确保与 calculate_ic_with_direction_verification 行为一致）
+    # calculate_ic_with_direction_verification 内部已过滤 None（ic_calculator.py 第166-167行）
+    # 但此处的防御性过滤确保即使上游行为变化，全量路径仍正确
+    # 注意：NaN 来自 rolling 计算预热期，None 来自股票数不足
+    ic_series = ic_series.dropna()  # 过滤 NaN
+    
     # 防御性校验：确保 dates 按升序排列
     dates_from_series = [str(d) for d in ic_series.index]
     if dates_from_series != sorted(dates_from_series):
@@ -443,7 +449,7 @@ def calculate_daily_ic_series(
     period_end = raw_metadata['period_end']
     
     # 获取完整日期列表（从 factor_df 提取，包含所有计算过的日期）
-    # 注意：ic_series 只含有效日期（IC≠None），需要补充无效日期（IC=None）
+    # 注意：ic_series 经 dropna 后只含有效日期（IC≠NaN≠None），需要补充无效日期（IC=None）
     # 与增量路径语义一致：dates 含所有日期，ic_values 含 None，valid_days 统计有效天数
     all_dates_from_factor = sorted(factor_df['date'].unique())
     
