@@ -1,7 +1,8 @@
 # ic_volume_ratio_1d 测试用例
 
-> 版本: v1.0
-> 生成时间: 2026-05-21 01:30 北京时间
+> 版本: v1.5
+> 生成时间: 2026-05-21 02:15 北京时间
+> 实测数据时间: 2026-05-21（验证输出结构符合MODULE.md v1.4规范）
 > 脚本: ic_volume_ratio_1d.py
 > 测试目的: 验证量比因子IC计算脚本的功能完整性、输出结构合规性、边界处理正确性
 
@@ -42,7 +43,7 @@
 ✓ 脚本正常执行，无异常抛出
 ✓ 输出日志包含：
   - "[数据加载] 从缓存读取数据..."
-  - "[计算 IC] 开始计算（正向排名）..."
+  - "[计算 IC] 开始计算（正向排名，min_stocks=10）..."
   - "[3/4] 执行分层回测..."
   - "完成！共计算 X 天有效 IC 数据（原始数据 Y 天）"
 ✓ 输出文件存在且非空
@@ -129,7 +130,7 @@ else:
 nested_required = {
     'ic_metrics': ['ic_mean', 'ic_std', 'icir', 'p_value', 'p_value_display'],
     'sample_stats': ['total_days', 'valid_days', 'avg_stocks_per_day', 'avg_stocks_period'],
-    'statistical_significance': ['t_stat', 'p_value', 'is_significant'],
+    'statistical_significance': ['t_stat', 'p_value', 'p_value_display', 'is_significant'],
     'factor_direction': ['ic_mean_sign', 'ic_mean_abs'],
     'economic_significance': ['icir', 'is_economically_significant'],
     'icir_stability': ['is_stable', 'stability_threshold'],
@@ -359,4 +360,5 @@ TC001 → TC002 → TC003 → TC004 → TC005 → TC006
 
 | 版本 | 时间 | 更新内容 |
 |------|------|---------|
-| v1.0 | 2026-05-21 | 首次创建测试用例文件 |
+| v1.5 | 2026-05-21 02:15 | 同步代码v1.4优化：TC001日志添加min_stocks参数、statistical_significance添加p_value_display字段 |
+| v1.0 | 2026-05-21 01:30 | 首次创建测试用例文件 |
