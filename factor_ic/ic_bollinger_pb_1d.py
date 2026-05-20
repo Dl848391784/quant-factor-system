@@ -20,9 +20,11 @@
 - %B < 0：价格跌破下轨，超卖信号
 
 因子逻辑：
-- %B > 1：超买，预期回落
-- %B < 0：超卖，预期反弹
-- 使用反向排名（%B值高排名低）
+- %B > 1：超买，预期回落（价格下跌）
+- %B < 0：超卖，预期反弹（价格上涨）
+- 布林带%B 是反向因子：因子值高预期收益低
+- IC 计算使用正向 Spearman 相关（ic_calculator.py 实现）
+- ic_mean < 0 表示因子有效（符合反向预期）
 
 作者: 云舟
 日期: 2026-04-07
@@ -500,9 +502,18 @@ def calculate_daily_ic_series(
             'conclusion': ss_dict['conclusion']
         },
         'factor_direction': {
+            # 语义澄清（遵循 PROJECT.md 反向因子方向语义规范）：
+            # - ic_mean_sign：统计验证方向（ic_mean 符号）
+            # - 反向因子（布林带%B）的 direction 含义：
+            #   - 'negative' (ic_mean<0)：因子有效，%B高→收益低（下跌），符合反向预期
+            #   - 'positive' (ic_mean>0)：因子无效，%B高→收益高（上涨），与反向预期矛盾
+            # - ic_calculator.py 计算正向 IC（不反转），此处 ic_mean_sign 是统计验证结果
             'direction': fd_dict['ic_mean_sign'],
             'ic_mean': fd_dict['ic_mean'],
-            'conclusion': fd_dict['conclusion']
+            'conclusion': fd_dict['conclusion'],
+            # 补充因子逻辑方向（与统计验证方向区分）
+            'factor_logic_direction': 'negative',  # 布林带%B 是反向因子：%B高→预期下跌
+            'logic_description': '反向因子：%B值越高（超买），预期下跌；分层回测做多低值组'
         },
         'economic_significance': {
             'ic_strength': es_dict['level'],
@@ -866,9 +877,17 @@ def _incremental_update(
         },
         'statistical_significance': result['statistical_significance'],  # ✓ 直接透传（字段名一致）
         'factor_direction': {  # ✓ 重映射字段名（与全量路径一致）
+            # 语义澄清（遵循 PROJECT.md 反向因子方向语义规范）：
+            # - ic_mean_sign：统计验证方向（ic_mean 符号）
+            # - 反向因子（布林带%B）的 direction 含义：
+            #   - 'negative' (ic_mean<0)：因子有效，%B高→收益低（下跌），符合反向预期
+            #   - 'positive' (ic_mean>0)：因子无效，%B高→收益高（上涨），与反向预期矛盾
             'direction': result['factor_direction']['ic_mean_sign'],
             'ic_mean': result['factor_direction']['ic_mean'],
-            'conclusion': result['factor_direction']['conclusion']
+            'conclusion': result['factor_direction']['conclusion'],
+            # 补充因子逻辑方向（与统计验证方向区分）
+            'factor_logic_direction': 'negative',  # 布林带%B 是反向因子：%B高→预期下跌
+            'logic_description': '反向因子：%B值越高（超买），预期下跌；分层回测做多低值组'
         },
         'economic_significance': {  # ✓ 重映射字段名（与全量路径一致）
             'ic_strength': result['economic_significance']['level'],
