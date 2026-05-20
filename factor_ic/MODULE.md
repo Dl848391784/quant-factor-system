@@ -292,11 +292,291 @@ engine = LayeredBacktestEngine(factor_direction='negative')
 | statistics.p_value | float | ✓ | 显著性p值 |
 | statistics.significance | str | ✓ | 显著性判断（"significant"/"not_significant"） |
 | daily_ic | array | ✓ | 每日IC值数组 |
-| daily_ic[].date | str | ✓ | 日期 |
-| daily_ic[].ic | float | ✓ | 当日IC值 |
-| daily_ic[].stocks_count | int | ✓ | 当日有效股票数 |
-| period.start | str | ✓ | 覆盖起始日期 |
-| period.end | str | ✓ | 覆盖结束日期 |
+|| daily_ic[].date | str | ✓ | 日期 |
+|| daily_ic[].ic | float | ✓ | 当日IC值 |
+|| daily_ic[].stocks_count | int | ✓ | 当日有效股票数 |
+|| period.start | str | ✓ | 覆盖起始日期 |
+|| period.end | str | ✓ | 覆盖结束日期 |
+
+---
+
+### 输出结构统一性规范（2026-05-20新增）
+
+#### 核心原则
+
+**所有 factor_ic/ 目录下的 IC 计算脚本必须输出完全一致的 JSON 结构。**
+
+**统一性要求：**
+- 相同的顶层字段（factor_name, calculation_date, period, ic_metrics, sample_stats, statistical_significance, factor_direction, economic_significance, dates, ic_values, rolling_ic_mean, positive_ratio, n_assets, summary, factor_stats, update_mode）
+- 相同的嵌套字段结构（如 ic_metrics 必须包含 ic_mean, ic_std, icir, p_value, p_value_display）
+- 相同的字段类型（如 ic_mean 必须是 float，dates 必须是 list[str]）
+- 相同的字段顺序（便于对比和自动化处理）
+
+#### 统一输出结构定义
+
+**所有因子脚本必须输出以下结构：**
+```json
+{
+  "factor_name": "<因子名>",
+  "calculation_date": "<ISO时间>",
+  "period": {
+    "start": "<起始日期>",
+    "end": "<结束日期>",
+    "description": "<范围说明>"
+  },
+  "ic_metrics": {
+    "ic_mean": <float>,
+    "ic_std": <float>,
+    "icir": <float>,
+    "p_value": <float>,
+    "p_value_display": "<str>"
+  },
+  "sample_stats": {
+    "total_days": <int>,
+    "valid_days": <int>,
+    "avg_stocks_per_day": <float>,
+    "avg_stocks_period": {
+      "start": "<str>",
+      "end": "<str>",
+      "description": "<str>"
+    }
+  },
+  "statistical_significance": {
+    "t_stat": <float>,
+    "p_value": <float>,
+    "p_value_display": "<str>",
+    "is_significant": <bool>,
+    "conclusion": "<str>"
+  },
+  "factor_direction": {
+    "direction": "<str>",
+    "ic_mean": <float>,
+    "conclusion": "<str>"
+  },
+  "economic_significance": {
+    "annual_ic_mean": <float>,
+    "icir_annualized": <float>,
+    "conclusion": "<str>"
+  },
+  "dates": ["<日期列表>"],
+  "ic_values": [<IC值列表>],
+  "rolling_ic_mean": [<滚动均值列表>],
+  "positive_ratio": <float>,
+  "n_assets": <int>,
+  "summary": {
+    "ic_performance": "<str>",
+    "statistical_significance": "<str>",
+    "factor_direction": "<str>",
+    "economic_significance": "<str>",
+    "recommendation": "<str>"
+  },
+  "factor_stats": {
+    "factor_name": "<str>",
+    "return_period": "<str>",
+    "data_source": "<str>",
+    "total_days": <int>,
+    "valid_days": <int>
+  },
+  "update_mode": "<str>"
+}
+```
+
+#### 禁止行为
+
+```python
+# ❌ 禁止：不同因子脚本输出不同结构
+# ic_rsi_1d.py 输出：
+{
+  "ic_mean": 0.05,  # 顶层字段
+  "ic_std": 0.15
+}
+
+# ic_kdj_j_1d.py 输出：
+{
+  "ic_metrics": {  # 嵌套结构，与 rsi 不一致！
+    "ic_mean": 0.05,
+    "ic_std": 0.15
+  }
+}
+```
+
+#### 为何必须统一输出结构
+
+1. **自动化处理：** 后续分析脚本可以统一解析所有因子结果，无需针对每个因子写特殊处理逻辑
+2. **横向对比：** 不同因子可以直接对比 IC 表现，字段位置一致便于可视化
+3. **维护成本：** 新增因子只需遵循统一模板，无需重新设计输出结构
+4. **错误预防：** 统一结构避免字段缺失导致的 KeyError
+
+#### 结构一致性检查清单
+
+```
+□ 所有因子脚本输出相同的顶层字段
+□ 所有因子脚本的嵌套字段结构一致（如 ic_metrics 字段列表）
+□ 所有因子脚本的字段类型一致（如 ic_mean 永远是 float）
+□ 所有因子脚本的字段顺序一致（便于自动化对比）
+□ 新增因子脚本时，对比已有脚本输出结构，确保一致
+```
+
+---
+
+### 字段值完整性检查规范（2026-05-20新增）
+
+#### 核心原则
+
+**输出 JSON 前，必须检查每个字段是否有值。字段值为 None/null 代表数据有问题，需要明确诊断原因。**
+
+#### 检查范围
+
+**必须检查完整性的字段：**
+
+| 字段类型 | 检查内容 | None/null 含义 |
+|---------|---------|---------------|
+| 数值字段（ic_mean, ic_std, icir, t_stat, p_value） | 必须有有效数值 | 计算失败，数据不足以计算统计指标 |
+| 整数字段（total_days, valid_days, n_assets） | 必须 ≥ 0 | 数据源为空或计算过程异常 |
+| 字符串字段（factor_name, calculation_date, period.start/end） | 必须非空 | 数据缺失或格式转换失败 |
+| 数组字段（dates, ic_values, rolling_ic_mean） | 必须非空数组 | IC 计算完全失败，无任何有效日期 |
+| 嵌套对象（ic_metrics, sample_stats, statistical_significance） | 必须存在且包含所有子字段 | 返回值契约不完整 |
+
+#### 正确实现
+
+```python
+# ✓ 正确：输出前检查字段完整性
+def validate_output_completeness(result: dict) -> None:
+    """校验输出字段完整性，None/null 值需要诊断原因"""
+    
+    # 1. 检查数值字段
+    numeric_fields = ['ic_mean', 'ic_std', 'icir', 't_stat', 'p_value']
+    for field in numeric_fields:
+        value = result.get('ic_metrics', {}).get(field)
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            raise RuntimeError(
+                f"输出字段 {field} 值为 None/null\n"
+                f"问题定位: IC 计算过程未能生成有效统计指标\n"
+                f"可能原因: valid_days=0（无有效IC日期），或计算异常\n"
+                f"建议: 检查数据源是否有足够的因子值和收益数据"
+            )
+    
+    # 2. 检查整数字段
+    int_fields = ['total_days', 'valid_days', 'n_assets']
+    for field in int_fields:
+        if field in ['total_days', 'valid_days']:
+            value = result.get('sample_stats', {}).get(field)
+        else:
+            value = result.get(field)
+        if value is None or value < 0:
+            raise RuntimeError(
+                f"输出字段 {field} 值无效: {value}\n"
+                f"问题定位: 数据统计失败\n"
+                f"建议: 检查数据源是否为空"
+            )
+    
+    # 3. 检查数组字段
+    dates = result.get('dates', [])
+    ic_values = result.get('ic_values', [])
+    if len(dates) == 0 or len(ic_values) == 0:
+        raise RuntimeError(
+            f"输出数组字段为空: dates={len(dates)}, ic_values={len(ic_values)}\n"
+            f"问题定位: IC 计算完全失败，无任何有效日期\n"
+            f"可能原因: 所有日期因股票数不足跳过，或因子值全为 NaN\n"
+            f"建议: 检查 min_stocks 阈值是否过高，或因子计算预热期问题"
+        )
+    
+    # 4. 检查数组长度一致性
+    if len(dates) != len(ic_values):
+        raise RuntimeError(
+            f"数组长度不一致: dates={len(dates)}, ic_values={len(ic_values)}\n"
+            f"问题定位: 数据结构构建错误\n"
+            f"建议: 检查 dates 和 ic_values 是否来自同一数据源"
+        )
+    
+    # 5. 检查 rolling_ic_mean 与 dates 长度一致
+    rolling_ic_mean = result.get('rolling_ic_mean', [])
+    if len(rolling_ic_mean) != len(dates):
+        raise RuntimeError(
+            f"rolling_ic_mean 长度不一致: {len(rolling_ic_mean)} vs dates={len(dates)}\n"
+            f"问题定位: 滚动计算未正确填充\n"
+            f"建议: 检查 rolling 计算是否基于完整 ic_series"
+        )
+    
+    # 6. 检查嵌套对象完整性
+    required_nested = {
+        'ic_metrics': ['ic_mean', 'ic_std', 'icir', 'p_value', 'p_value_display'],
+        'sample_stats': ['total_days', 'valid_days', 'avg_stocks_per_day', 'avg_stocks_period'],
+        'statistical_significance': ['t_stat', 'p_value', 'is_significant', 'conclusion'],
+        'factor_direction': ['direction', 'ic_mean', 'conclusion'],
+        'economic_significance': ['annual_ic_mean', 'icir_annualized', 'conclusion']
+    }
+    
+    for parent, children in required_nested.items():
+        parent_obj = result.get(parent)
+        if parent_obj is None:
+            raise RuntimeError(
+                f"输出缺少嵌套对象: {parent}\n"
+                f"问题定位: 返回值契约不完整\n"
+                f"建议: 检查 calculate_ic_with_direction_verification 返回值"
+            )
+        for child in children:
+            if child not in parent_obj:
+                raise RuntimeError(
+                    f"嵌套对象 {parent} 缺少字段: {child}\n"
+                    f"问题定位: 字段构建遗漏\n"
+                    f"建议: 检查 {parent} 字段构建逻辑"
+                )
+
+# 在输出前调用
+validate_output_completeness(result)
+with open(output_path, 'w') as f:
+    json.dump(result, f, indent=2)
+```
+
+#### None/null 值诊断清单
+
+**当字段值为 None/null 时，必须诊断原因：**
+
+| 字段 | None/null 原因 | 诊断方法 |
+|------|---------------|---------|
+| ic_mean | valid_days=0（无有效IC日期） | 检查 dates 数组是否为空 |
+| ic_std | 单一IC值（std无法计算） | 检查 valid_days 是否 = 1 |
+| icir | ic_std=0（除零） | 检查 IC 值是否全部相同 |
+| dates=[] | 所有日期跳过 | 检查跳过原因日志（股票数不足/因子NaN） |
+| rolling_ic_mean=[] | ic_series 为空 | 检查 dates 数组长度 |
+| avg_stocks_per_day | 所有日期股票数=0 | 检查因子数据是否有股票 |
+
+#### 禁止行为
+
+```python
+# ❌ 禁止：输出前不检查字段完整性
+with open(output_path, 'w') as f:
+    json.dump(result, f)  # 直接输出，可能包含 None/null
+
+# ❌ 禁止：忽略 None 值，不诊断原因
+if result['ic_mean'] is None:
+    print("IC 计算失败")  # 缺乏诊断信息
+    return  # 静默返回，用户不知道失败原因
+
+# ❌ 禁止：用默认值掩盖 None
+'ic_mean': result.get('ic_mean', 0.0)  # None → 0.0，掩盖问题！
+```
+
+#### 为何必须检查字段完整性
+
+1. **问题定位：** None/null 值代表数据有问题，必须明确诊断原因
+2. **数据质量：** 避免 None 值被默认值掩盖，误导后续分析
+3. **用户友好：** 明确告知用户失败原因，而非输出空数据
+4. **自动化处理：** 后续脚本可以信任所有字段都有有效值
+
+#### 检查清单
+
+```
+□ 数值字段检查：ic_mean, ic_std, icir, t_stat, p_value 必须有有效值
+□ 整数字段检查：total_days, valid_days, n_assets 必须 ≥ 0
+□ 字符串字段检查：factor_name, period.start/end 必须非空
+□ 数组字段检查：dates, ic_values 必须非空
+□ 数组长度检查：dates, ic_values, rolling_ic_mean 长度必须一致
+□ 嵌套对象检查：所有嵌套对象必须存在且包含所有子字段
+□ None 值诊断：发现 None 时必须明确原因并输出诊断信息
+□ 输出前校验：在 json.dump 前调用 validate_output_completeness
+```
 
 ---
 
