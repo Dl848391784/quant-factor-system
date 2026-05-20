@@ -2,7 +2,7 @@
 
 > 本文档定义 factor_ic/ 目录下 IC 计算脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v1.2
+> 版本: v1.3
 > 更新内容:
 >   1. v1.0 首次创建模块规范
 >   2. v1.1 删除重复的流程文档规范（已迁移至 PROJECT.md）
@@ -10,6 +10,10 @@
 >      - 统一 statistical_significance 字段定义（三处统一为7字段）
 >      - 补充公共模块同步规范（修改公共模块必须同步更新 MODULE.md）
 >      - 添加典型案例（2026-05-20教训：nw_lag字段遗漏）
+>   4. v1.3（2026-05-21）：
+>      - 精简重复章节标题（核心原则、禁止行为等改为带上下文标题）
+>      - 36个"核心原则" → 各章节独立标题（如"IC计算规范核心原则"）
+>      - 保持所有关键规范内容完整（不删除任何##章节）
 
 ---
 
@@ -908,7 +912,7 @@ raise RuntimeError(
 
 ## 字段去重化规范（2026-05-20新增）
 
-### 核心原则
+### 字段去重化规范核心原则
 
 **原则：** 同一字段只在一个位置输出，避免数据结构冗余。
 
@@ -1204,7 +1208,7 @@ rolling_ic_mean = [
 
 ---
 
-### 正确实现
+### NaN 处理规范正确实现
 ```python
 # 使用 pd.isna(v) 检查 NaN
 # NaN → None（语义转换："无有效数据"）
@@ -1358,11 +1362,11 @@ valid_mask = both_conditions & ~rolling_nan_mask
 
 ## 变量命名语义清晰原则规范（2026-05-20新增）
 
-### 核心原则
+### 变量命名语义清晰原则规范核心原则
 
 **变量命名必须语义清晰，避免误解。在因子脚本中，变量名应明确指示数据来源（价格、换手率、成交量等），避免使用模糊命名。**
 
-### 问题背景
+### 变量命名语义清晰原则规范问题背景
 
 ```
 变量命名语义混淆问题：
@@ -1411,11 +1415,11 @@ factor_df['price_pct_change'] = factor_df.groupby('asset')['close'].transform(la
 
 ## 数据对齐验证规范（2026-05-21新增）
 
-### 核心原则
+### 数据对齐验证规范核心原则
 
 **合并数据后必须验证日期对齐，避免静默丢失数据。因子数据和收益数据的日期范围必须一致，否则 IC 计算会静默丢失不匹配的日期。**
 
-### 问题背景
+### 数据对齐验证规范问题背景
 
 ```
 数据对齐问题：
@@ -1544,11 +1548,11 @@ def calculate_turnover_surge_ic(factor_df, return_df, ...):
 
 ## 极端值裁剪规范（2026-05-21新增）
 
-### 核心原则
+### 极端值裁剪规范核心原则
 
 **极端值裁剪范围必须与筛选条件一致。裁剪下界应等于或大于筛选条件下界，裁剪上界应等于或小于筛选条件上界（如有）。**
 
-### 问题背景
+### 极端值裁剪规范问题背景
 
 ```
 极端值裁剪与筛选条件矛盾问题：
@@ -1628,11 +1632,11 @@ print(f"极端值裁剪范围: [{clip_lower}, {clip_upper}]，筛选条件: > {f
 
 ## 主入口错误处理规范（2026-05-21新增）
 
-### 核心原则
+### 主入口错误处理规范核心原则
 
 **if __name__ == '__main__' 主入口必须有错误处理，异常不能直接暴露给用户，需提供友好提示。**
 
-### 问题背景
+### 主入口错误处理规范问题背景
 
 ```
 主入口错误处理缺失问题：
@@ -1732,7 +1736,7 @@ if dates != sorted(dates):
 
 ## ic_series.index 类型规范
 
-### 核心原则
+### ic_series.index 类型规范核心原则
 **ic_series.index 必须是字符串类型（格式为 "YYYY-MM-DD"），禁止使用 datetime 对象。**
 
 ### 类型约束
@@ -1785,7 +1789,7 @@ ic_series = pd.Series(valid_ic, index=valid_dates)
 
 ## 函数参数设计规范
 
-### 核心原则
+### 函数参数设计规范核心原则
 **函数签名不应有冗余参数，每个参数必须有实际用途。**
 
 ### 冗余参数判定规则
@@ -1822,7 +1826,7 @@ def calculate_daily_ic_series(
 
 ## period.start/end 语义规范
 
-### 核心原则
+### period.start/end 语义规范核心原则
 **period.start/end 表示原始缓存范围（dropna 前），而非过滤后范围。**
 
 ### 语义定义
@@ -1888,7 +1892,7 @@ period_start = str(factor_df['date'].min())  # 2024-01-20（错误！）
 
 ## 字典结构缩进规范
 
-### 核心原则
+### 字典结构缩进规范核心原则
 **JSON 字典结构必须保持一致的缩进层级，缩进不一致会导致 IndentationError。**
 
 ### 缩进层级定义
@@ -1945,7 +1949,7 @@ merged_data = {
 
 ## ic_metrics 字段规范
 
-### 核心原则
+### ic_metrics 字段规范核心原则
 **ic_metrics 字段结构在两条路径（全量/增量）中必须完全一致。**
 
 ### 字段定义
@@ -1958,7 +1962,7 @@ merged_data = {
 | `p_value` | float | `result['p_value']` | p 值（统计显著性） |
 | `p_value_display` | str | `result['p_value_display']` | p 值显示格式（科学计数法或小数） |
 
-### 正确实现（两条路径一致）
+### ic_metrics 字段规范正确实现
 ```python
 # ✓ 全量路径（calculate_daily_ic_series）
 'ic_metrics': {
@@ -1999,7 +2003,7 @@ p_value_display = ic_data['ic_metrics']['p_value_display']  # 必须存在
 
 ## factor_direction 字段规范
 
-### 核心原则
+### factor_direction 字段规范核心原则
 **factor_direction 字段结构在两条路径（全量/增量）中必须完全一致。**
 
 ### 字段映射（原始字段名 → 输出字段名）
@@ -2010,7 +2014,7 @@ p_value_display = ic_data['ic_metrics']['p_value_display']  # 必须存在
 | `ic_mean` | `ic_mean` | float | IC 均值 |
 | `conclusion` | `conclusion` | str | 方向判断结论 |
 
-### 正确实现（两条路径一致）
+### factor_direction 字段规范正确实现
 ```python
 # ✓ 全量路径（calculate_daily_ic_series）：重映射字段名
 'factor_direction': {
@@ -2034,7 +2038,7 @@ p_value_display = ic_data['ic_metrics']['p_value_display']  # 必须存在
 
 ## economic_significance 字段规范
 
-### 核心原则
+### economic_significance 字段规范核心原则
 **economic_significance 字段结构在两条路径（全量/增量）中必须完全一致。**
 
 ### 字段映射（原始字段名 → 输出字段名）
@@ -2045,7 +2049,7 @@ p_value_display = ic_data['ic_metrics']['p_value_display']  # 必须存在
 | `abs_ic_mean` | `ic_mean_abs` | float | IC 均值绝对值 |
 | `conclusion` | `conclusion` | str | 经济显著性判断结论 |
 
-### 正确实现（两条路径一致）
+### economic_significance 字段规范正确实现
 ```python
 # ✓ 全量路径（calculate_daily_ic_series）：重映射字段名
 'economic_significance': {
@@ -2069,7 +2073,7 @@ p_value_display = ic_data['ic_metrics']['p_value_display']  # 必须存在
 
 ## statistical_significance 字段规范
 
-### 核心原则
+### statistical_significance 字段规范核心原则
 **statistical_significance 字段结构在两条路径中可直接透传（字段名一致）。**
 
 ### 字段定义（无需重映射）
@@ -2084,7 +2088,7 @@ p_value_display = ic_data['ic_metrics']['p_value_display']  # 必须存在
 | `is_significant` | bool | `result['statistical_significance']['is_significant']` | 统计显著性标志 |
 | `conclusion` | str | `result['statistical_significance']['conclusion']` | 统计显著性判断结论 |
 
-### 正确实现（两条路径一致）
+### statistical_significance 字段规范正确实现
 ```python
 # ✓ 全量路径和增量路径：均可直接透传（字段名一致）
 'statistical_significance': result['statistical_significance']
@@ -2403,11 +2407,11 @@ factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
 
 ## 浮点数等值比较规范
 
-### 核心原则
+### 浮点数等值比较规范核心原则
 
 **浮点数等值比较必须使用精度容差，禁止直接使用 == 比较。**
 
-### 问题背景
+### 浮点数等值比较规范问题背景
 
 ```
 浮点数运算精度问题：
@@ -2417,7 +2421,7 @@ factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
 - 极小值作为除数会产生极端结果（如 1e15）
 ```
 
-### 正确实现
+### 浮点数等值比较规范正确实现
 
 ```python
 # ✓ 正确：使用精度容差判断
@@ -2434,7 +2438,7 @@ result = np.where(
 )
 ```
 
-### 禁止行为
+### 浮点数等值比较规范禁止行为
 
 ```python
 # ❌ 禁止：直接 == 0 比较（浮点精度问题）
@@ -2478,11 +2482,11 @@ result = np.where(
 
 ## 增量路径 rolling_ic_mean 规范
 
-### 核心原则
+### 增量路径 rolling_ic_mean 规范核心原则
 
 **增量路径 `rolling_ic_mean` 必须基于 `all_dates` 计算，与 `dates` 和 `ic_values` 长度完全一致。**
 
-### 问题背景
+### 增量路径 rolling_ic_mean 规范问题背景
 
 ```
 增量路径数据合并流程：
@@ -2498,7 +2502,7 @@ result = np.where(
 - 前端按索引对应 dates[i] → rolling_ic_mean[i] 会错位
 ```
 
-### 正确实现
+### 增量路径 rolling_ic_mean 规范正确实现
 
 ```python
 # ✓ 正确：rolling_ic_mean 基于 all_dates 计算
@@ -2523,7 +2527,7 @@ merged_data = {
 }
 ```
 
-### 禁止行为
+### 增量路径 rolling_ic_mean 规范禁止行为
 
 ```python
 # ❌ 禁止：rolling_ic_mean 基于 valid_dates（子集）计算
@@ -2569,7 +2573,7 @@ merged_data = {
 
 ## 增量路径 period 字段规范
 
-### 核心原则
+### 增量路径 period 字段规范核心原则
 
 **增量路径 `period.start/end` 必须直接使用 `raw_metadata`，与全量路径语义完全一致。**
 
@@ -2591,7 +2595,7 @@ merged_data = {
 - 前19天布林带值NaN（等待足够数据）
 ```
 
-### 正确实现
+### 增量路径 period 字段规范正确实现
 
 ```python
 # ✓ 正确：period 直接使用 raw_metadata（与全量路径一致）
@@ -2607,7 +2611,7 @@ merged_data = {
 }
 ```
 
-### 禁止行为
+### 增量路径 period 字段规范禁止行为
 
 ```python
 # ❌ 禁止：混合不同语义的范围
@@ -2645,11 +2649,11 @@ merged_data = {
 
 ## 增量路径返回结构一致性规范
 
-### 核心原则
+### 增量路径返回结构一致性规范核心原则
 
 **增量路径返回结构必须与全量路径完全一致，禁止遗漏字段。**
 
-### 问题背景
+### 增量路径返回结构一致性规范问题背景
 
 ```
 两条路径返回结构对比：
@@ -2679,7 +2683,7 @@ merged_data = {
 - incremental_days ✓
 ```
 
-### 正确实现
+### 增量路径返回结构一致性规范正确实现
 
 ```python
 # ✓ 正确：增量路径包含所有字段（与全量路径一致）
@@ -2704,7 +2708,7 @@ merged_data = {
 }
 ```
 
-### 禁止行为
+### 增量路径返回结构一致性规范禁止行为
 
 ```python
 # ❌ 禁止：增量路径缺少 factor_stats
@@ -2758,11 +2762,11 @@ merged_data = {
 
 ## 函数返回值契约校验规范
 
-### 核心原则
+### 函数返回值契约校验规范核心原则
 
 **`required_fields` 校验列表必须包含所有后续直接访问的字段，禁止遗漏。**
 
-### 问题背景
+### 函数返回值契约校验规范问题背景
 
 ```
 校验列表 vs 实际访问字段：
@@ -2785,7 +2789,7 @@ merged_data = {
 - result['p_value_display']  ← 使用 .get()，有默认值，但仍依赖 p_value
 ```
 
-### 正确实现
+### 函数返回值契约校验规范正确实现
 
 ```python
 # ✓ 正确：校验列表包含所有直接访问的字段
@@ -2809,7 +2813,7 @@ if missing_fields:
 'p_value': round(result['p_value'], 6)  # ✓ 已校验，不会 KeyError
 ```
 
-### 禁止行为
+### 函数返回值契约校验规范禁止行为
 
 ```python
 # ❌ 禁止：校验列表缺少 p_value
@@ -2850,11 +2854,11 @@ required_fields = [
 
 ## 增量路径因子值有效性检查规范
 
-### 核心原则
+### 增量路径因子值有效性检查规范核心原则
 
 **增量路径必须检查缺失日期的因子值是否有效，避免静默产生大量 None IC值。**
 
-### 问题背景
+### 增量路径因子值有效性检查规范问题背景
 
 ```
 布林带预热期问题：
@@ -2879,7 +2883,7 @@ required_fields = [
 - 无法区分"股票数不足"和"因子值NaN"
 ```
 
-### 正确实现
+### 增量路径因子值有效性检查规范正确实现
 
 ```python
 # ✓ 正确：检查因子值有效性
@@ -2902,7 +2906,7 @@ if total_factor_count - valid_factor_count > 0:
     print(f"  - {total_factor_count - valid_factor_count} 行因子值为 NaN（布林带预热期）")
 ```
 
-### 禁止行为
+### 增量路径因子值有效性检查规范禁止行为
 
 ```python
 # ❌ 禁止：只检查 factor_df_new 是否为空，不检查因子值有效性
@@ -2931,7 +2935,7 @@ print(f"  - 篛选后: {len(factor_df_new)} 行")  # ✗ 没有检查因子值�
 3. **KDJ**：N=9，前N-1天预热期
 4. **任何需要历史数据的技术指标**
 
-### 检查清单
+### 增量路径因子值有效性检查规范检查清单
 
 ```
 □ 检查 factor_df_new 是否为空（数据缺失）
@@ -2945,11 +2949,11 @@ print(f"  - 篛选后: {len(factor_df_new)} 行")  # ✗ 没有检查因子值�
 
 ## 增量路径 None 值保留规范
 
-### 核心原则
+### 增量路径 None 值保留规范核心原则
 
 **增量路径合并时必须保留所有日期（包括 None IC 值的日期），不过滤 None，确保 total_days 与 valid_days 的差值语义正确。**
 
-### 问题背景
+### 增量路径 None 值保留规范问题背景
 
 ```
 逻辑矛盾问题：
@@ -2983,7 +2987,7 @@ all_ic_values = [date_ic_map[d] for d in all_dates]  # ✗ 不包含 None
 - total_days=1, valid_days=1，但实际应有 total_days=3, valid_days=1
 ```
 
-### 正确实现
+### 增量路径 None 值保留规范正确实现
 
 ```python
 # ✓ 正确：保留所有日期，不过滤 None
@@ -3010,7 +3014,7 @@ if none_ic_count > 0:
 # total_days = len(all_dates)，valid_days = valid_ic_count
 ```
 
-### 禁止行为
+### 增量路径 None 值保留规范禁止行为
 
 ```python
 # ❌ 禁止：合并时过滤 None
@@ -3058,7 +3062,7 @@ def calculate_ic_statistics(ic_series: pd.Series) -> dict:
     }
 ```
 
-### 检查清单
+### 增量路径 None 值保留规范检查清单
 
 ```
 □ 合并时不过滤 None（保留所有日期）
@@ -3072,11 +3076,11 @@ def calculate_ic_statistics(ic_series: pd.Series) -> dict:
 
 ## 布林带因子必须加载 close 列规范
 
-### 核心原则
+### 布林带因子必须加载 close 列规范核心原则
 
 **布林带因子依赖 close 价格计算，load_data_from_cache 必须强制加载和过滤 'close' 列，无论 factor_col 参数值为何。**
 
-### 问题背景
+### 布林带因子必须加载 close 列规范问题背景
 
 ```
 设计缺陷问题：
@@ -3104,7 +3108,7 @@ factor_df.dropna(subset=[factor_col])  # ✗ 只过滤 factor_col 的 NaN，不�
 - 或如果 close 列存在但未被过滤: close=null → NaN 值传播
 ```
 
-### 正确实现
+### 布林带因子必须加载 close 列规范正确实现
 
 ```python
 # ✓ 正确：强制加载 'close' 列（布林带依赖）
@@ -3124,7 +3128,7 @@ if factor_col not in dropna_cols:
 factor_df = factor_df.dropna(subset=dropna_cols).reset_index(drop=True)
 ```
 
-### 禁止行为
+### 布林带因子必须加载 close 列规范禁止行为
 
 ```python
 # ❌ 禁止：只加载 factor_col 列，不强制加载 'close'
@@ -3146,7 +3150,7 @@ factor_df.dropna(subset=[factor_col])  # ✗ close 列的 NaN 未被过滤
 3. **防御性设计**：即使调用方传入错误的 factor_col，也能确保 close 列被正确加载
 4. **避免 KeyError**：后续布林带计算需要 close 列，必须提前加载
 
-### 适用范围
+### 布林带因子必须加载 close 列规范适用范围
 
 此规范适用于所有依赖 close 价格的因子脚本：
 1. **布林带 %B**：依赖 close 计算布林带上下轨
@@ -3154,7 +3158,7 @@ factor_df.dropna(subset=[factor_col])  # ✗ close 列的 NaN 未被过滤
 3. **KDJ**：依赖 close 计算 J 值
 4. **任何需要 close 价格的技术指标**
 
-### 检查清单
+### 布林带因子必须加载 close 列规范检查清单
 
 ```
 □ 强制加载 'close' 列（无论 factor_col 参数）
@@ -3168,11 +3172,11 @@ factor_df.dropna(subset=[factor_col])  # ✗ close 列的 NaN 未被过滤
 
 ## 布林带因子固定使用 close 列规范
 
-### 核心原则
+### 布林带因子固定使用 close 列规范核心原则
 
 **布林带因子必须使用 close 价格，这是布林带的数学定义。load_data_from_cache 不接受 factor_col 参数，固定加载和过滤 'close' 列。**
 
-### 问题背景
+### 布林带因子固定使用 close 列规范问题背景
 
 ```
 接口设计不一致问题：
@@ -3205,7 +3209,7 @@ def calculate_bollinger_pb_1d_factor(factor_df, n=20, k=2.0):
 factor_col 参数对于布林带因子来说没有意义，只能为 'close'。
 ```
 
-### 正确实现
+### 布林带因子固定使用 close 列规范正确实现
 
 ```python
 # ✓ 正确：不接受 factor_col 参数，固定加载 close 列
@@ -3230,7 +3234,7 @@ def calculate_bollinger_pb_1d_factor(factor_df, n=20, k=2.0):
     factor_df.groupby('asset')['close'].transform(...)  # 使用 close 列
 ```
 
-### 禁止行为
+### 布林带因子固定使用 close 列规范禁止行为
 
 ```python
 # ❌ 禁止：接受 factor_col 参数（误导用户）
@@ -3253,7 +3257,7 @@ load_data_from_cache(factor_col='volume')  # ✗ 布林带因子不能使用 vol
 3. **接口一致性**：load_data_from_cache 和 calculate_bollinger_pb_1d_factor 签名一致
 4. **避免误导**：不接受 factor_col 参数，避免调用方传入错误的值
 
-### 适用范围
+### 布林带因子固定使用 close 列规范适用范围
 
 此规范适用于所有固定依赖特定列的技术指标：
 1. **布林带 %B**：固定使用 close 价格
@@ -3269,7 +3273,7 @@ load_data_from_cache(factor_col='volume')  # ✗ 布林带因子不能使用 vol
 
 但布林带因子固定使用 close，不接受 factor_col 参数。
 
-### 检查清单
+### 布林带因子固定使用 close 列规范检查清单
 
 ```
 □ 不接受 factor_col 参数（布林带因子固定使用 close）
@@ -3283,11 +3287,11 @@ load_data_from_cache(factor_col='volume')  # ✗ 布林带因子不能使用 vol
 
 ## 列表索引访问前必须检查长度规范
 
-### 核心原则
+### 列表索引访问前必须检查长度规范核心原则
 
 **访问列表元素（如 list[0], list[-1]）前必须检查列表长度，避免 IndexError。**
 
-### 问题背景
+### 列表索引访问前必须检查长度规范问题背景
 
 ```
 IndexError 问题：
@@ -3315,7 +3319,7 @@ for d in dates_to_check:
 - 访问 all_dates[0] → IndexError
 ```
 
-### 正确实现
+### 列表索引访问前必须检查长度规范正确实现
 
 ```python
 # ✓ 正确：检查列表长度，避免 IndexError
@@ -3330,7 +3334,7 @@ for d in dates_to_check:
         raise ValueError(f"日期格式不符合 YYYY-MM-DD 约定: {d}")
 ```
 
-### 禁止行为
+### 列表索引访问前必须检查长度规范禁止行为
 
 ```python
 # ❌ 禁止：直接访问列表元素，不检查长度
@@ -3350,14 +3354,14 @@ dates_to_check = [all_dates[0], all_dates[-1], ...]  # ✗ IndexError if all_dat
 3. **诊断信息清晰**：告知用户为何跳过检查
 4. **稳定运行**：不应因边界情况崩溃
 
-### 适用范围
+### 列表索引访问前必须检查长度规范适用范围
 
 此规范适用于所有列表索引访问：
 1. **dates[0], dates[-1]**：访问日期列表首尾
 2. **ic_values[0]**：访问 IC 值列表
 3. **任何 list[index]**：访问列表任意索引
 
-### 检查清单
+### 列表索引访问前必须检查长度规范检查清单
 
 ```
 □ 访问 list[0] 前检查 len(list) > 0
@@ -3371,11 +3375,11 @@ dates_to_check = [all_dates[0], all_dates[-1], ...]  # ✗ IndexError if all_dat
 
 ## 异常处理必须区分严重错误和可恢复错误规范
 
-### 核心原则
+### 异常处理必须区分严重错误和可恢复错误规范核心原则
 
 **异常处理必须区分严重错误（文件损坏、权限问题）和可恢复错误（文件不存在），严重错误不应静默降级，应抛出异常并提供详细诊断。**
 
-### 问题背景
+### 异常处理必须区分严重错误和可恢复错误规范问题背景
 
 ```
 静默吞掉异常问题：
@@ -3410,7 +3414,7 @@ except Exception as e:  # ✗ 静默吞掉所有异常！
   - 可能导致重复全量计算，浪费资源
 ```
 
-### 正确实现
+### 异常处理必须区分严重错误和可恢复错误规范正确实现
 
 ```python
 # ✓ 正确：区分异常类型，严重错误不静默降级
@@ -3455,7 +3459,7 @@ except Exception as e:
     ) from e
 ```
 
-### 禁止行为
+### 异常处理必须区分严重错误和可恢复错误规范禁止行为
 
 ```python
 # ❌ 禁止：静默吞掉所有异常
@@ -3486,7 +3490,7 @@ except Exception as e:  # ✗ 捕获所有异常，包括严重错误
 3. **避免重复问题**：权限问题不解决，每次都会降级全量计算
 4. **用户可操作**：提供具体建议（删除损坏文件、修复权限）
 
-### 适用范围
+### 异常处理必须区分严重错误和可恢复错误规范适用范围
 
 此规范适用于所有缓存读取场景：
 1. **IC 数据缓存读取**：读取 JSON 格式的 IC 计算结果
@@ -3494,7 +3498,7 @@ except Exception as e:  # ✗ 捕获所有异常，包括严重错误
 3. **配置文件读取**：读取 JSON/YAML 配置文件
 4. **任何需要区分错误级别的场景**
 
-### 检查清单
+### 异常处理必须区分严重错误和可恢复错误规范检查清单
 
 ```
 □ 区分 FileNotFoundError（可恢复）和 JSONDecodeError（严重）
@@ -3508,11 +3512,11 @@ except Exception as e:  # ✗ 捕获所有异常，包括严重错误
 
 ## 异常链保留规范
 
-### 核心原则
+### 异常链保留规范核心原则
 
 **异常处理必须使用 `raise ... from e` 保留异常链，确保调试时能追溯异常来源。裸 raise 虽然保留异常类型，但不设置显式的 `__cause__`，与使用 `from e` 的风格不一致。**
 
-### 问题背景
+### 异常链保留规范问题背景
 
 ```
 异常链不一致问题：
@@ -3548,7 +3552,7 @@ Python 异常链机制：
 - 最佳实践是统一使用 from e
 ```
 
-### 正确实现
+### 异常链保留规范正确实现
 
 ```python
 # ✓ 正确：统一使用 from e，保留异常链
@@ -3590,11 +3594,11 @@ except ValueError as e:
 
 ## 异常处理链规范（2026-05-20新增）
 
-### 核心原则
+### 异常处理链规范核心原则
 
 **异常处理链设计必须避免多层叠加：函数内部抛出的异常消息，不应在调用方再次包装叠加，否则诊断时会看到重复描述。**
 
-### 问题背景
+### 异常处理链规范问题背景
 
 ```
 两层叠加问题：
@@ -3636,7 +3640,7 @@ RuntimeError: 缓存文件不存在: 换手率缓存不存在: /path/to/file
 | 不捕获原则 | 如果上层不需要添加上下文，应不捕获（让异常自然传播） |
 | 裸 raise 原则 | 如果需要保留原始类型，使用裸 raise（不包装） |
 
-### 正确实现模式
+### 异常处理链规范正确实现
 
 **模式1：底层语义清晰 + 中间层不捕获**
 
@@ -3707,7 +3711,7 @@ except FileNotFoundError as e:
 - 如果使用裸 raise，必须注释说明："保留原始异常类型 + 保留异常链（遵循 MODULE.md 异常链保留规范）"
 - 确保维护者理解裸 raise 的语义
 
-### 禁止行为
+### 异常处理链规范禁止行为
 
 ```python
 # ❌ 禁止：裸 raise 无注释说明
@@ -3732,7 +3736,7 @@ except ValueError as e:
 3. **维护友好**：注释说明清楚，维护者不会误改
 4. **最佳实践**：Python 官方推荐使用 from e 保留异常链
 
-### 适用范围
+### 异常处理链规范适用范围
 
 此规范适用于所有异常处理场景：
 1. **缓存读取异常**：FileNotFoundError、JSONDecodeError、PermissionError
@@ -3740,7 +3744,7 @@ except ValueError as e:
 3. **未预期异常**：Exception（其他异常）
 4. **任何需要保留异常链的场景**
 
-### 检查清单
+### 异常处理链规范检查清单
 
 ```
 □ 统一使用 from e（风格一致性）
@@ -3754,11 +3758,11 @@ except ValueError as e:
 
 ## 布林带 %B 计算显式处理 NaN 规范
 
-### 核心原则
+### 布林带 %B 计算显式处理 NaN 规范核心原则
 
 **布林带 %B 计算必须显式处理 NaN，避免依赖 NaN 传播的隐式行为。布林带预热期（前 N-1 日）的 upper_band/lower_band 为 NaN，应显式定义 %B = NaN。**
 
-### 问题背景
+### 布林带 %B 计算显式处理 NaN 规范问题背景
 
 ```
 隐式 NaN 传播问题：
@@ -3793,7 +3797,7 @@ Python NaN 比较规则：
 - np.abs(NaN) → NaN
 ```
 
-### 正确实现
+### 布林带 %B 计算显式处理 NaN 规范正确实现
 
 ```python
 # ✓ 正确：显式处理 NaN
@@ -3815,7 +3819,7 @@ factor_df['bollinger_pb_1d'] = np.where(
 )
 ```
 
-### 禁止行为
+### 布林带 %B 计算显式处理 NaN 规范禁止行为
 
 ```python
 # ❌ 禁止：依赖 NaN 传播的隐式行为
@@ -3847,7 +3851,7 @@ factor_df['bollinger_pb_1d'] = np.where(
 - upper_band/lower_band 在前 N-1 天为 NaN
 - %B 在前 N-1 天也应为 NaN（显式定义）
 
-### 适用范围
+### 布林带 %B 计算显式处理 NaN 规范适用范围
 
 此规范适用于所有依赖技术指标预热的因子计算：
 1. **布林带 %B**：N=20，前19天预热期
@@ -3855,7 +3859,7 @@ factor_df['bollinger_pb_1d'] = np.where(
 3. **KDJ**：N=9，前N-1天预热期
 4. **任何需要历史数据的技术指标**
 
-### 检查清单
+### 布林带 %B 计算显式处理 NaN 规范检查清单
 
 ```
 □ 显式检查 pd.isna(diff)（布林带预热期）
@@ -3869,11 +3873,11 @@ factor_df['bollinger_pb_1d'] = np.where(
 
 ## 增量路径向量化计算 IC 规范
 
-### 核心原则
+### 增量路径向量化计算 IC 规范核心原则
 
 **增量路径计算 IC 必须使用向量化处理：先整体 merge，再按日期 groupby 计算。禁止逐行循环做 DataFrame 过滤和 merge，这会导致严重性能问题。**
 
-### 问题背景
+### 增量路径向量化计算 IC 规范问题背景
 
 ```
 逐行循环性能问题：
@@ -3908,7 +3912,7 @@ for date in new_dates:
 - 性能极差，耗时显著增加
 ```
 
-### 正确实现
+### 增量路径向量化计算 IC 规范正确实现
 
 ```python
 # ✓ 正确：向量化处理，先整体 merge
@@ -3936,7 +3940,7 @@ else:
     new_ic_values = [ic_results.get(date) for date in new_dates]
 ```
 
-### 禁止行为
+### 增量路径向量化计算 IC 规范禁止行为
 
 ```python
 # ❌ 禁止：逐行循环做 DataFrame 过滤
@@ -3975,7 +3979,7 @@ for date in new_dates:
 3. **merge 操作昂贵**：每次 merge 需要哈希匹配，逐行循环浪费资源
 4. **pandas 最佳实践**：向量化处理是 pandas 最佳实践
 
-### 适用范围
+### 增量路径向量化计算 IC 规范适用范围
 
 此规范适用于所有按日期分组计算的场景：
 1. **IC 计算**：按日期分组计算 Spearman IC
@@ -3983,7 +3987,7 @@ for date in new_dates:
 3. **收益分析**：按日期分组计算收益指标
 4. **任何需要按日期分组的批量计算**
 
-### 检查清单
+### 增量路径向量化计算 IC 规范检查清单
 
 ```
 □ 先整体 merge（一次操作）
@@ -3998,11 +4002,11 @@ for date in new_dates:
 
 ## 增量路径布林带历史数据必要性规范
 
-### 核心原则
+### 增量路径布林带历史数据必要性规范核心原则
 
 **增量路径必须加载全量数据计算布林带，再筛选缺失日期。布林带使用 rolling(window=N) 计算 SMA 和 Std，每个目标日期需要前面 N-1 天历史数据。这是必要的，不是浪费。**
 
-### 问题背景
+### 增量路径布林带历史数据必要性规范问题背景
 
 ```
 历史数据必要性：
@@ -4028,7 +4032,7 @@ for date in new_dates:
 - 因此必须加载全量数据，再筛选缺失日期
 ```
 
-### 正确实现
+### 增量路径布林带历史数据必要性规范正确实现
 
 ```python
 # ✓ 正确：加载全量数据计算布林带，再筛选缺失日期
@@ -4048,7 +4052,7 @@ missing_set = set(missing_dates)
 factor_df_new = factor_df_full[factor_df_full['date'].isin(missing_set)]
 ```
 
-### 禁止行为
+### 增量路径布林带历史数据必要性规范禁止行为
 
 ```python
 # ❌ 禁止：只加载缺失日期的数据
@@ -4067,7 +4071,7 @@ factor_df_full = load_data_from_cache()  # ✗ 无注释说明
 3. **缺失日期不连续**：缺失日期可能分散，每个都需要历史数据
 4. **历史数据不可缺失**：缺失日期前的历史数据必须存在
 
-### 适用范围
+### 增量路径布林带历史数据必要性规范适用范围
 
 此规范适用于所有依赖技术指标预热的因子计算：
 1. **布林带 %B**：N=20，需要前19天历史数据
@@ -4075,7 +4079,7 @@ factor_df_full = load_data_from_cache()  # ✗ 无注释说明
 3. **KDJ**：N=9，需要前N-1天历史数据
 4. **任何需要滚动窗口的技术指标**
 
-### 检查清单
+### 增量路径布林带历史数据必要性规范检查清单
 
 ```
 □ 加载全量数据计算布林带
@@ -4089,11 +4093,11 @@ factor_df_full = load_data_from_cache()  # ✗ 无注释说明
 
 ## 增量路径最小必需历史窗口边界检查规范
 
-### 核心原则
+### 增量路径最小必需历史窗口边界检查规范核心原则
 
 **增量路径必须检查缺失日期是否在最小必需历史窗口内（布林带预热期）。缺失日期如果靠近缓存起始点（前N-1天内），因子值可能全为 NaN，需要提前警告并提供诊断信息。**
 
-### 问题背景
+### 增量路径最小必需历史窗口边界检查规范问题背景
 
 ```
 预热期边界问题：
@@ -4116,7 +4120,7 @@ factor_df_full = load_data_from_cache()  # ✗ 无注释说明
 - 避免无效计算：如果所有缺失日期都在预热期，提前返回缓存
 ```
 
-### 正确实现
+### 增量路径最小必需历史窗口边界检查规范正确实现
 
 ```python
 # ✓ 正确：检查缺失日期是否在预热期内
@@ -4143,7 +4147,7 @@ if missing_dates_in_warmup:
         # 不直接返回缓存，继续计算以验证（可能部分股票有更多历史数据）
 ```
 
-### 禁止行为
+### 增量路径最小必需历史窗口边界检查规范禁止行为
 
 ```python
 # ❌ 禁止：不检查预热期边界
@@ -4173,7 +4177,7 @@ if valid_factor_count == 0:
 3. **用户可操作**：提供建议（延长缓存历史范围）
 4. **提前预警**：避免用户困惑为何 IC 计算失败
 
-### 适用范围
+### 增量路径最小必需历史窗口边界检查规范适用范围
 
 此规范适用于所有依赖技术指标预热的因子计算：
 1. **布林带 %B**：N=20，预热期前19天
@@ -4181,7 +4185,7 @@ if valid_factor_count == 0:
 3. **KDJ**：N=9，预热期前N-1天
 4. **任何需要滚动窗口的技术指标**
 
-### 检查清单
+### 增量路径最小必需历史窗口边界检查规范检查清单
 
 ```
 □ 计算预热期边界日期（缓存起始 + N-1 天）
@@ -4195,11 +4199,11 @@ if valid_factor_count == 0:
 
 ## 注释缩进一致性规范
 
-### 核心原则
+### 注释缩进一致性规范核心原则
 
 **注释必须与代码保持一致的缩进级别。Python不强制注释缩进，但最佳实践是注释与代码保持一致的缩进，避免视觉歧义。**
 
-### 问题背景
+### 注释缩进一致性规范问题背景
 
 ```
 注释缩进不一致问题：
@@ -4226,7 +4230,7 @@ def _incremental_update(...):
 - 不符合 Python 最佳实践
 ```
 
-### 正确实现
+### 注释缩进一致性规范正确实现
 
 ```python
 # ✓ 正确：注释与代码保持一致的缩进
@@ -4242,7 +4246,7 @@ def _incremental_update(...):
     existing_set = set(existing_dates)
 ```
 
-### 禁止行为
+### 注释缩进一致性规范禁止行为
 
 ```python
 # ❌ 禁止：注释顶格，代码有缩进
@@ -4268,7 +4272,7 @@ def _incremental_update(...):
 3. **最佳实践**：Python 最佳实践是注释与代码保持一致的缩进
 4. **代码可读性**：提高代码可读性，易于维护
 
-### 适用范围
+### 注释缩进一致性规范适用范围
 
 此规范适用于所有 Python 代码：
 1. **函数内注释**：注释与函数体代码保持一致的缩进
@@ -4276,7 +4280,7 @@ def _incremental_update(...):
 3. **循环/条件块内注释**：注释与循环/条件块代码保持一致的缩进
 4. **任何 Python 代码**
 
-### 检查清单
+### 注释缩进一致性规范检查清单
 
 ```
 □ 注释与代码保持一致的缩进
@@ -4291,11 +4295,11 @@ def _incremental_update(...):
 
 ## PEP8 import 规范
 
-### 核心原则
+### PEP8 import 规范核心原则
 
 **所有 import 语句必须在文件顶部，禁止在函数内部 import。函数内部 import 会每次调用时重新导入（性能问题），且降低代码可读性。**
 
-### 问题背景
+### PEP8 import 规范问题背景
 
 ```
 函数内部 import 问题：
@@ -4321,7 +4325,7 @@ def _incremental_update(...):
 - 代码风格不一致：同一模块的函数分散导入
 ```
 
-### 正确实现
+### PEP8 import 规范正确实现
 
 ```python
 # ✓ 正确：所有 import 在文件顶部
@@ -4337,7 +4341,7 @@ def _incremental_update(...):
     result = calculate_ic_statistics(ic_series)
 ```
 
-### 禁止行为
+### PEP8 import 规范禁止行为
 
 ```python
 # ❌ 禁止：函数内部 import
@@ -4364,7 +4368,7 @@ from factor_ic.common.ic_calculator import calculate_ic_statistics  # ✗ 分散
 3. **可读性**：import 在顶部易于追踪模块依赖
 4. **代码风格一致**：同一模块的函数应统一导入
 
-### 适用范围
+### PEP8 import 规范适用范围
 
 此规范适用于所有 Python 代码：
 1. **模块级 import**：所有 import 在文件顶部
@@ -4372,7 +4376,7 @@ from factor_ic.common.ic_calculator import calculate_ic_statistics  # ✗ 分散
 3. **避免函数内 import**：除非有特殊原因（如避免循环导入）
 4. **任何 Python 代码**
 
-### 检查清单
+### PEP8 import 规范检查清单
 
 ```
 □ 所有 import 在文件顶部
@@ -4386,11 +4390,11 @@ from factor_ic.common.ic_calculator import calculate_ic_statistics  # ✗ 分散
 
 ## 全量路径与增量路径防御对称规范
 
-### 核心原则
+### 全量路径与增量路径防御对称规范核心原则
 
 **全量路径与增量路径必须保持一致的防御机制。防御检查（如日期格式断言）不应只在某一条路径执行，两条路径都应有等效的防御。**
 
-### 问题背景
+### 全量路径与增量路径防御对称规范问题背景
 
 ```
 防御不对称问题：
@@ -4418,7 +4422,7 @@ def calculate_daily_ic_series(...):
 - 导致下游问题：JSON 序列化失败、日期比较错误
 ```
 
-### 正确实现
+### 全量路径与增量路径防御对称规范正确实现
 
 ```python
 # ✓ 正确：两条路径都有日期格式断言
@@ -4447,7 +4451,7 @@ def _incremental_update(...):
             raise ValueError(f"日期格式不符合 YYYY-MM-DD 约定: {d}")
 ```
 
-### 禁止行为
+### 全量路径与增量路径防御对称规范禁止行为
 
 ```python
 # ❌ 禁止：只在一条路径有防御检查
@@ -4476,7 +4480,7 @@ def calculate_daily_ic_series(...):
 3. **可维护性**：维护者不会困惑为何只有一条路径报错
 4. **避免下游问题**：错误的日期格式会导致 JSON 序列化失败、日期比较错误
 
-### 适用范围
+### 全量路径与增量路径防御对称规范适用范围
 
 此规范适用于所有全量/增量路径：
 1. **日期格式断言**：全量和增量路径都应检查
@@ -4484,7 +4488,7 @@ def calculate_daily_ic_series(...):
 3. **边界检查**：全量和增量路径都应检查
 4. **任何防御性编程**
 
-### 检查清单
+### 全量路径与增量路径防御对称规范检查清单
 
 ```
 □ 全量路径和增量路径都有日期格式断言
@@ -4498,11 +4502,11 @@ def calculate_daily_ic_series(...):
 
 ## 可选字段回退逻辑规范
 
-### 核心原则
+### 可选字段回退逻辑规范核心原则
 
 **可选字段的回退逻辑必须依赖必需字段（已校验）。禁止在 required_fields 中包含可选字段，这会导致回退逻辑永远不会触发（矛盾设计）。**
 
-### 问题背景
+### 可选字段回退逻辑规范问题背景
 
 ```
 回退逻辑矛盾问题：
@@ -4532,7 +4536,7 @@ required_fields = [
 - 回退逻辑会因缺少 'p_value' 而抛出 KeyError
 ```
 
-### 正确实现
+### 可选字段回退逻辑规范正确实现
 
 ```python
 # ✓ 正确：区分必需字段和可选字段
@@ -4555,7 +4559,7 @@ if missing_fields:
 'p_value_display': result.get('p_value_display', str(round(result['p_value'], 6)))
 ```
 
-### 禁止行为
+### 可选字段回退逻辑规范禁止行为
 
 ```python
 # ❌ 禁止：required_fields 包含可选字段
@@ -4581,7 +4585,7 @@ required_fields = [
 3. **依赖可靠**：回退逻辑依赖必需字段（已校验），不会抛出 KeyError
 4. **代码清晰**：维护者不会困惑为何有两种处理方式
 
-### 适用范围
+### 可选字段回退逻辑规范适用范围
 
 此规范适用于所有有回退逻辑的可选字段：
 1. **p_value_display**：可选字段，可从 p_value 计算
@@ -4589,7 +4593,7 @@ required_fields = [
 3. **字段校验逻辑**：required_fields 只包含必需字段
 4. **回退逻辑设计**：依赖必需字段（已校验）
 
-### 检查清单
+### 可选字段回退逻辑规范检查清单
 
 ```
 □ 区分必需字段和可选字段
