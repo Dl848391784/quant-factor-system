@@ -207,10 +207,10 @@ print(f"完成！共计算 {total_days} 天IC")
 
 **IC计算实现方式（业界标准）：**
 
-| 方案 | 因子值处理 | IC计算方式 | 负IC含义 | 说明 |
-|------|-----------|-----------|---------|------|
-| **方案A（业界标准）** | 保持原始值 | 正向Spearman | 因子有效 | ic_calculator.py 实现 |
-| 方案B | 反转因子值（1-%B） | 正向Spearman | 因子无效 | 改变因子语义 |
+| 方案 | 因子处理 | IC方式 | 负IC含义 | 说明 |
+|------|---------|--------|---------|------|
+| **方案A（业界）** | 原始值 | Spearman | 有效 | ic_calculator实现 |
+| 方案B | 反转因子 | Spearman | 无效 | 改变语义 |
 
 **当前项目采用方案A（业界标准）：**
 ```python
@@ -224,10 +224,10 @@ ic_value = daily_data[factor_col].corr(
 
 **IC结果解释（反向因子）：**
 
-| ic_mean_sign | 统计方向 | 因子有效性 | 因子逻辑解释 |
-|--------------|----------|------------|--------------|
-| 'negative' (ic_mean<0) | 负向 | ✓ 有效 | 高因子→低收益，符合反向预期 |
-| 'positive' (ic_mean>0) | 正向 | ✗ 无效 | 高因子→高收益，与反向预期矛盾 |
+| ic_mean_sign | 统计方向 | 有效性 | 解释 |
+|--------------|----------|--------|------|
+| 'negative' (ic_mean<0) | 负向 | ✓ 有效 | 高因子→低收益 |
+| 'positive' (ic_mean>0) | 正向 | ✗ 无效 | 高因子→高收益 |
 
 **为什么不在因子值层面做反向处理？**
 1. **保持因子原始语义：** %B = 0.5 表示价格在中轨，1-%B 会改变语义
@@ -562,14 +562,14 @@ with open(output_path, 'w') as f:
 
 **当字段值为 None/null 时，必须诊断原因：**
 
-| 字段 | None/null 原因 | 诊断方法 |
-|------|---------------|---------|
-| ic_mean | valid_days=0（无有效IC日期） | 检查 dates 数组是否为空 |
-| ic_std | 单一IC值（std无法计算） | 检查 valid_days 是否 = 1 |
-| icir | ic_std=0（除零） | 检查 IC 值是否全部相同 |
-| dates=[] | 所有日期跳过 | 检查跳过原因日志（股票数不足/因子NaN） |
-| rolling_ic_mean=[] | ic_series 为空 | 检查 dates 数组长度 |
-| avg_stocks_per_day | 所有日期股票数=0 | 检查因子数据是否有股票 |
+| 字段 | None原因 | 诊断方法 |
+|------|---------|---------|
+| ic_mean | valid_days=0 | 检查dates数组 |
+| ic_std | valid_days=1 | 检查有效天数 |
+| icir | ic_std=0 | 检查IC值是否相同 |
+| dates=[] | 所有跳过 | 检查跳过日志 |
+| rolling_ic_mean=[] | ic_series空 | 检查dates长度 |
+| avg_stocks_per_day | 股票数=0 | 检查因子数据 |
 
 #### 禁止行为
 
@@ -930,9 +930,9 @@ raise RuntimeError(f"因子数据: {factor_df['asset'].nunique()} 只股票")  #
 
 | 字段 | 输出位置 | 说明 |
 |------|----------|------|
-| ic_mean, ic_std, icir | `ic_metrics` | 核心 IC 指标 |
-| p_value, p_value_display, t_stat | `statistical_significance` | 统计显著性判断 |
-| positive_ratio | 顶层或 `ic_distribution_consistency` | IC 分布一致性判断使用 |
+| ic_mean, ic_std, icir | `ic_metrics` | 核心IC指标 |
+| p_value, p_value_display, t_stat | `statistical_significance` | 统计显著性 |
+| positive_ratio | 顶层或`ic_distribution_consistency` | IC分布一致性 |
 
 ### p_value_display 回退逻辑说明
 
@@ -1260,17 +1260,17 @@ factor_df['turnover_surge'] = factor_df['turnover_rate'] / factor_df['turnover_m
 
 | 字段 | 统计口径 | 说明 | 命名理由 |
 |------|----------|------|----------|
-| `total_records` | 过滤前总记录数 | 原始数据总量 | 明确"总"语义 |
-| `rolling_nan_count` | rolling NaN 记录数 | 因 min_periods 不满足无法计算 | 明确"NaN来源" |
-| `condition_filtered_count` | 条件过滤记录数 | 因筛选条件不满足被剔除 | 明确"被剔除"语义 |
-| `valid_count` | 最终有效记录数 | 筛选后保留的记录 | ✓ 语义清晰："有效计数" |
-| `retention_ratio` | 保留比例 | valid_count / total_records | ✓ 语义清晰："保留比例" |
+| `total_records` | 过滤前总数 | 原始总量 | 明确"总" |
+| `rolling_nan_count` | rolling NaN数 | min_periods不满足 | 明确"NaN来源" |
+| `condition_filtered_count` | 条件过滤数 | 筛选不满足剔除 | 明确"剔除" |
+| `valid_count` | 最终有效数 | 筛选后保留 | "有效计数" |
+| `retention_ratio` | 保留比例 | valid/total | "保留比例" |
 
-**禁止使用模糊命名：**
+**禁止模糊命名：**
 | 模糊命名 | 问题 | 正确命名 |
 |----------|------|----------|
-| `filtered_count` | ❌ 语义混淆："过滤后计数"易误解为"被过滤掉的计数" | `valid_count` |
-| `filter_ratio` | ❌ 语义混淆："过滤比例"易误解为"被过滤掉的比例" | `retention_ratio` |
+| `filtered_count` | ❌ "过滤后"易误解为"被过滤掉" | `valid_count` |
+| `filter_ratio` | ❌ "过滤比例"易误解为"被过滤掉的比例" | `retention_ratio` |
 
 **必须注释说明：**
 ```python
@@ -1772,8 +1772,8 @@ def calculate_daily_ic_series(
 
 | 字段 | 来源 | 语义 | 示例 |
 |------|------|------|------|
-| `raw_metadata['period_start']` | 原始缓存 dropna 前 | 原始数据最小日期 | 2024-01-01 |
-| `raw_metadata['period_end']` | 原始缓存 dropna 前 | 原始数据最大日期 | 2026-05-15 |
+| `raw_metadata['period_start']` | 原始缓存dropna前 | 原始最小日期 | 2024-01-01 |
+| `raw_metadata['period_end']` | 原始缓存dropna前 | 原始最大日期 | 2026-05-15 |
 | `factor_df['date'].min()` | 过滤后数据 | 过滤后最小日期 | 2024-01-20 |
 | `factor_df['date'].max()` | 过滤后数据 | 过滤后最大日期 | 2026-05-15 |
 
