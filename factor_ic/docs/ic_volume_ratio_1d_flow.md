@@ -1,8 +1,8 @@
 # 量比因子 IC 分析流程文档
 
-> 版本: v1.5
-> 生成时间: 2026-05-21 02:15 北京时间
-> 实测数据时间: 2026-05-21 02:15 北京时间（运行验证通过）
+> 版本: v1.6
+> 生成时间: 2026-05-21 02:25 北京时间
+> 实测数据时间: 2026-05-21 02:25 北京时间（运行验证通过）
 > 脚本: ic_volume_ratio_1d.py
 > 更新内容:
 >   1. v1.0 首次创建流程文档
@@ -16,6 +16,13 @@
 >      - TC001预期日志添加min_stocks参数
 >      - nested_required字段添加p_value_display
 >      - 版本和时间标注同步更新
+>   6. v1.6 Newey-West 重构（2026-05-21 02:25）：
+>      - 改用公共模块 ic_calculator.py（Newey-West 标准）
+>      - statistical_significance 结构升级：添加 nw_lag, nw_lag_method, conclusion 字段
+>      - 五维度判断全部使用公共模块标准结构（与 ic_kdj_j_1d.py 对齐）
+>      - 空数据分支同步更新五维度结构
+>      - 删除本地 calculate_daily_ic_series 函数（改用公共模块）
+>      - 实测结果：IC=-0.031, ICIR=0.31, t_stat=-7.13（NW调整）, nw_lag=5
 
 ---
 
