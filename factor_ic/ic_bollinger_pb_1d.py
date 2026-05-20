@@ -822,20 +822,37 @@ def _incremental_update(
         print(f"  - 其中 {valid_ic_count} 天有效 IC，{none_ic_count} 天因股票数不足跳过（IC=None）")
     
     # 重新计算统计指标（遵循 MODULE.md 增量路径 rolling_ic_mean 规范）
-    # 核心原则：rolling_ic_mean 必须基于 all_dates 计算，与 dates/ic_values 长度一致
+    # 核心原则：rolling_ic_mean 计算方式与全量路径一致（基于不含 None 的有效 IC 序列）
     # calculate_ic_statistics 已在文件顶部导入（遵循 PEP8 import 规范）
-    ic_series = pd.Series(all_ic_values, index=all_dates)
-    result = calculate_ic_statistics(ic_series)
     
-    # 添加滚动IC均值计算（基于 all_dates，与全量路径一致）
-    rolling_ic_mean_series = ic_series.rolling(window=20, min_periods=10).mean()
+    # 构建有效 IC 序列（不含 None，与全量路径 ic_series 语义一致）
+    valid_dates = [d for d, ic in zip(all_dates, all_ic_values) if ic is not None]
+    valid_ic_values = [ic for ic in all_ic_values if ic is not None]
     
-    # NaN → None 转换（遵循 MODULE.md NaN 处理规范）
-    # 在数据生成阶段处理，而非延迟到 convert_to_native_types
-    rolling_ic_mean = [
-        round(v, 6) if not pd.isna(v) else None
-        for v in rolling_ic_mean_series.values
-    ]
+    # calculate_ic_statistics 内部会处理 NaN，传入 Series 即可
+    ic_series_for_stats = pd.Series(valid_ic_values, index=valid_dates)
+    result = calculate_ic_statistics(ic_series_for_stats)
+    
+    # 计算 rolling_ic_mean（基于有效 IC 序列，与全量路径一致）
+    # window=20: 20个有效 IC 的滚动均值（非20个交易日）
+    rolling_ic_mean_series = ic_series_for_stats.rolling(window=20, min_periods=10).mean()
+    
+    # 将 rolling_ic_mean 映射回完整日期列表（与 ic_values 语义一致）
+    # ic_values[d] = None 的日期，rolling_ic_mean[d] 也为 None
+    rolling_ic_mean_map = {}
+    for date, value in zip(valid_dates, rolling_ic_mean_series.values):
+        rolling_ic_mean_map[date] = round(value, 6) if not pd.isna(value) else None
+    
+    # 按完整日期顺序填充（含 None IC 的日期填 None）
+    rolling_ic_mean = []
+    for date in all_dates:
+        if all_ic_values[all_dates.index(date)] is not None:
+            rolling_ic_mean.append(rolling_ic_mean_map.get(date))
+        else:
+            rolling_ic_mean.append(None)  # None IC 的日期，rolling_ic_mean 也为 None
+    
+    # NaN → None 转换（确保 JSON 兼容）
+    rolling_ic_mean = [v if v is not None else None for v in rolling_ic_mean]
     
     # 日期格式断言（遵循 PROJECT.md 日期字符串比较规范)
     # 核心原则：all_dates 为空时跳过日期格式检查（避免 IndexError）
