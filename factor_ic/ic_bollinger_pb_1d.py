@@ -336,7 +336,7 @@ def calculate_daily_ic_series(
     factor_df: pd.DataFrame,
     return_df: pd.DataFrame,
     raw_metadata: dict,
-    min_stocks: int = 10
+    min_stocks: int = DEFAULT_MIN_STOCKS
 ) -> dict:
     """
     计算每日的 IC 时间序列
