@@ -89,6 +89,8 @@ def load_data_from_cache() -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
     # 检查文件存在性
     for path, name in [(turnover_path, '换手率'), (factor_path, '因子'), (return_path, '收益')]:
         if not path.exists():
+            # 数据验证错误：裸 raise 保留原始类型
+            # 原因：FileNotFoundError 表示缓存缺失，是可预期错误，原始类型更易诊断
             raise FileNotFoundError(f"{name}缓存不存在: {path}")
     
     # 加载换手率数据
@@ -281,7 +283,12 @@ def calculate_turnover_surge_ic(
             'sample_stats': {
                 'total_days': raw_metadata.get('total_days', 0) if raw_metadata else 0,
                 'valid_days': 0,
-                'avg_stocks_per_day': 0
+                'avg_stocks_per_day': 0,
+                'avg_stocks_period': {
+                    'start': '',
+                    'end': '',
+                    'description': '平均每日有效股票数统计范围'
+                }
             },
             'ic_series': None,
             'summary': '数据不足，无法计算IC'
@@ -316,7 +323,12 @@ def calculate_turnover_surge_ic(
             'sample_stats': {
                 'total_days': raw_metadata.get('total_days', 0) if raw_metadata else 0,
                 'valid_days': 0,
-                'avg_stocks_per_day': int(factor_data['asset'].nunique())
+                'avg_stocks_per_day': int(factor_data['asset'].nunique()),
+                'avg_stocks_period': {
+                    'start': raw_metadata.get('period_start', '') if raw_metadata else '',
+                    'end': raw_metadata.get('period_end', '') if raw_metadata else '',
+                    'description': '平均每日有效股票数统计范围'
+                }
             },
             'ic_series': None,
             'summary': f'无法计算IC: {str(e)}'
@@ -365,7 +377,12 @@ def calculate_turnover_surge_ic(
         'sample_stats': {
             'total_days': raw_metadata.get('total_days', 0) if raw_metadata else 0,
             'valid_days': result['n_days'],
-            'avg_stocks_per_day': int(factor_data.groupby('date').size().mean())
+            'avg_stocks_per_day': int(factor_data.groupby('date').size().mean()),
+            'avg_stocks_period': {
+                'start': period_start,
+                'end': period_end,
+                'description': '平均每日有效股票数统计范围'
+            }
         },
         
         # 五维度判断（遵循 PROJECT.md IC 计算规范）
@@ -419,8 +436,18 @@ def _full_recalculate(
                 f"股票数量不足以计算有效的 IC\n"
                 f"当前: {factor_df['asset'].nunique()} < {min_stocks}"
             )
+    except FileNotFoundError as e:
+        # 基础设施错误：包装为 RuntimeError，添加上下文信息
+        # 原因：FileNotFoundError 原始信息不够详细，需要附加缓存路径
+        raise RuntimeError(f"缓存文件不存在: {e}") from e
+    except ValueError as e:
+        # 数据验证错误：直接 raise，保留原始类型
+        # 原因：ValueError 表示股票数不足，是可预期错误，原始类型更易诊断
+        raise  # 不包装
     except Exception as e:
-        raise RuntimeError(f"数据加载失败: {e}")
+        # 未预期异常：包装为 RuntimeError，保留异常链
+        # 原因：未预期异常类型多变，包装为 RuntimeError 统一处理
+        raise RuntimeError(f"数据加载失败: {e}") from e
     
     print(f"\n数据统计:")
     print(f"  - 原始日期范围: {raw_metadata['period_start']} ~ {raw_metadata['period_end']}")
@@ -554,9 +581,10 @@ def generate_turnover_surge_ic_data(
             return full_data
     
     elif mode == 'incremental':
-        # 缺失数据，执行增量更新
-        # 注意：换手率突增因子需要窗口计算（5日换手率均值），增量计算需要额外历史数据
-        # 为简化实现，暂使用全量计算替代增量计算
+        # 增量模式 fallback：换手率突增因子依赖5日窗口计算
+        # 设计决策：为简化实现，暂用全量计算替代增量计算
+        # 技术原因：增量计算需要额外历史数据（前5日换手率），实现复杂度高
+        # 未来改进：实现真正的增量计算（仅计算缺失日期 + 窗口数据）
         print(f"\n[增量模式] 缺失 {len(missing_dates)} 天数据")
         print("  注意：换手率突增因子需要5日窗口计算，增量模式暂用全量计算替代")
         full_data = _full_recalculate(output_file, min_stocks=min_stocks)

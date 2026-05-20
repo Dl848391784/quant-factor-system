@@ -1,7 +1,7 @@
 # Turnover_Surge_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 17:00 (北京时间)
-> 审阅版本: v1.3
+> 生成时间: 2026-05-20 18:00 (北京时间)
+> 审阅版本: v1.4
 > 实测数据时间: 2026-05-20
 > 更新内容:
 >   1. [v1.1] 修复 ic_metrics 字段缺失问题：添加 p_value_display（遵循 MODULE.md 输出结构规范）
@@ -21,6 +21,10 @@
 >   15. [v1.3] 添加 skip 模式 update_mode 标记（遵循 PROJECT.md 返回值标记规范）
 >   16. [v1.3] 添加 fallback_event 和 incremental_fallback 字段（遵循 PROJECT.md 返回值标记规范）
 >   17. [v1.3] 增量模式 fallback 处理：换手率突增因子需要5日窗口计算，增量模式暂用全量计算替代
+>   18. [v1.4] 修复异常处理类型不一致：区分 FileNotFoundError/ValueError/Exception，遵循 PROJECT.md 异常处理规范
+>   19. [v1.4] 添加 sample_stats.avg_stocks_period 字段：口径范围说明，遵循 MODULE.md 输出结构统一性规范
+>   20. [v1.4] 改进异常处理注释：说明为何保留 FileNotFoundError 原始类型
+>   21. [v1.4] 改进增量模式注释：说明设计决策和技术原因
 
 ---
 
