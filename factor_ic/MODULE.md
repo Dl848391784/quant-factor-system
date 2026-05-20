@@ -96,7 +96,7 @@ ic_volume_ratio_1d.py  # 量比因子，T+1收益
 
 **数据来源：** 所有因子计算脚本数据必须来自 `data_fetchers/` 目录的拉取脚本。
 
-**禁止行为：**
+**禁止：**
 - ❌ 在 factor_ic 脚本中直接调用外部 API 拉取数据
 - ❌ 在 factor_ic 脚本中定义数据拉取逻辑
 
@@ -118,7 +118,7 @@ factor_ic/result/ic_bollinger_pb_1d_analysis_result.json
 factor_ic/result/ic_volume_ratio_1d_analysis_result.json
 ```
 
-**禁止行为：**
+**禁止：**
 - ❌ 输出到其他目录（如 cache/、backtest/）
 - ❌ 使用非标准命名格式
 
@@ -142,7 +142,7 @@ IC(d) = spearman_correlation(factor_values_on_day_d, returns_on_day_d+period)
 
 ### IC 统计指标
 
-**必须输出的统计指标：**
+**必须输出指标：**
 | 字段 | 含义 | 计算方式 |
 |------|------|---------|
 | ic_mean | IC均值 | 有效日期IC算术平均 |
@@ -199,7 +199,7 @@ print(f"完成！共计算 {total_days} 天IC")
 
 ### 反向因子IC计算规范
 
-**背景：** 布林带%B、RSI、KDJ_J等技术指标因子在逻辑上是反向因子（高值→超买→预期下跌），但IC计算实现方式存在歧义。本规范明确业界标准做法。
+**背景：** 布林带%B、RSI、KDJ_J等技术指标因子在逻辑上是反向因子（高值→超买→预期下跌），但IC计算实现方式存在歧义。规范明确业界做法。
 
 **反向因子定义：**
 - 因子逻辑方向：因子高→收益低（如%B > 1 → 超买 → 预期下跌）
@@ -212,7 +212,7 @@ print(f"完成！共计算 {total_days} 天IC")
 | **方案A（业界）** | 原始值 | Spearman | 有效 | ic_calculator实现 |
 | 方案B | 反转因子 | Spearman | 无效 | 改变语义 |
 
-**当前项目采用方案A（业界标准）：**
+**项目采用方案A（业界标准）：**
 ```python
 # ic_calculator.py 第303行
 # 使用 Spearman 秩相关计算正向 IC（不反转）
@@ -452,11 +452,11 @@ engine = LayeredBacktestEngine(factor_direction='negative')
 
 #### 核心原则
 
-**输出 JSON 前，必须检查每个字段是否有值。字段值为 None/null 代表数据有问题，需要明确诊断原因。**
+**输出 JSON 前，检查每个字段是否有值。字段值为 None/null 代表数据有问题，需要明确诊断原因。**
 
 #### 检查范围
 
-**必须检查完整性的字段：**
+**检查完整性的字段：**
 
 | 字段类型 | 检查内容 | None/null 含义 |
 |---------|---------|---------------|
@@ -587,7 +587,7 @@ if result['ic_mean'] is None:
 'ic_mean': result.get('ic_mean', 0.0)  # None → 0.0，掩盖问题！
 ```
 
-#### 为何必须检查字段完整性
+#### 为何检查字段完整性
 
 1. **问题定位：** None/null 值代表数据有问题，必须明确诊断原因
 2. **数据质量：** 避免 None 值被默认值掩盖，误导后续分析
@@ -669,7 +669,7 @@ if result['ic_mean'] is None:
 | 缺失日期在缓存范围但无有效数据 | `[诊断] 缺失日期在缓存范围内，但筛选后无有效数据` | 检查股票过滤条件 |
 | 所有缺失日期均不在缓存范围 | `[诊断] 无法增量更新` | 执行全量重算 (force_full=True) |
 
-**正确实现：**
+**正确：**
 ```python
 # 筛选缺失日期数据
 missing_set = set(missing_dates)
@@ -717,7 +717,7 @@ def calculate_ic(factor_df: pd.DataFrame,
     pass
 ```
 
-**禁止行为：**
+**禁止：**
 - ❌ 在函数内部硬编码参数值（如 `min_stocks = 10`）
 - ❌ 使用全局变量传递参数
 
@@ -912,7 +912,7 @@ raise RuntimeError(f"因子数据: {factor_df['asset'].nunique()} 只股票")  #
 }
 ```
 
-**禁止行为：**
+**禁止：**
 ```python
 # ❌ 字段在多处重复出现
 'ic_metrics': {
@@ -944,7 +944,7 @@ raise RuntimeError(f"因子数据: {factor_df['asset'].nunique()} 只股票")  #
 'p_value_display': ss_dict.get('p_value_display', str(round(ss_dict['p_value'], 4)))
 ```
 
-**禁止行为：**
+**禁止：**
 ```python
 # ❌ 回退值与 p_value 完全相同（只是类型转换）
 'p_value_display': str(round(result['p_value'], 6))  # round(x,6) 再 str()，值不变
@@ -981,7 +981,7 @@ for date in dates:
 2. 读取现有IC结果时，验证 existing_dates 格式
 3. 生成 period.start/end 时，确保格式一致
 
-**禁止行为：**
+**禁止：**
 - ❌ 依赖字符串比较的隐式约定（如 `"2024-01-01" < "2024-02-01"`）
 - ❌ 不验证格式就使用 min/max 比较日期
 
@@ -989,7 +989,7 @@ for date in dates:
 
 ### 列存在检查
 
-**必须验证的列：**
+**验证的列：**
 ```python
 REQUIRED_COLUMNS = ['date', 'symbol', 'factor_value', 'future_return']
 
@@ -1045,7 +1045,7 @@ calculate_ic_with_direction_verification(factor_df, return_df, ...)
     5. 计算每日 IC
 ```
 
-**禁止行为：**
+**禁止：**
 ```python
 # ❌ 在调用前合并数据（死代码）
 merged_df = pd.merge(factor_df, return_df, on=['date', 'asset'], how='inner')
@@ -1366,7 +1366,7 @@ factor_df['price_pct_change'] = factor_df.groupby('asset')['close'].transform(la
 
 ### 数据对齐验证规范核心原则
 
-**合并数据后必须验证日期对齐，避免静默丢失数据。因子数据和收益数据日期范围必须一致，否则 IC 计算会静默丢失不匹配的日期。**
+**合并数据后验证日期对齐，避免静默丢失数据。因子数据和收益数据日期范围必须一致，否则 IC 计算会静默丢失不匹配的日期。**
 
 ### 数据对齐验证规范问题背景
 
@@ -1411,12 +1411,12 @@ if set(factor_dates) != set(return_dates):
 
 ### 数据对齐验证规范
 
-| 场景 | 必须验证 | 验证内容 |
+| 场景 | 验证 | 验证内容 |
 |------|----------|----------|
-| load_data_from_cache | ✓ 必须验证 | factor_df 与 return_df 日期范围一致性 |
-| calculate_ic_with_direction_verification 前 | ✓ 必须验证 | factor_data 与 return_data 日期对齐 |
-| merge 多个 DataFrame 后 | ✓ 必须验证 | 合并前后日期范围变化 |
-| 增量更新时 | ✓ 必须验证 | 新增日期与已有日期连续性 |
+| load_data_from_cache | ✓ 验证 | factor_df 与 return_df 日期范围一致性 |
+| calculate_ic_with_direction_verification 前 | ✓ 验证 | factor_data 与 return_data 日期对齐 |
+| merge 多个 DataFrame 后 | ✓ 验证 | 合并前后日期范围变化 |
+| 增量更新时 | ✓ 验证 | 新增日期与已有日期连续性 |
 
 ### 验证实现模式
 
@@ -1719,7 +1719,7 @@ ic_series = pd.Series(valid_ic, index=valid_dates)
 ```
 
 ### 一致性验证
-**两条路径必须确保 index 类型一致（字符串 "YYYY-MM-DD"）：**
+**两条路径确保 index 类型一致（字符串 "YYYY-MM-DD"）：**
 
 | 路径 | index 来源 | 类型 | 保障机制 |
 |------|------------|------|----------|
@@ -1809,7 +1809,7 @@ period_start = str(factor_df['date'].min())  # 2024-01-20（错误！）
 ### total_days 使用规范
 **核心原则：** total_days 直接使用 raw_metadata，不与过滤后数据做比较。
 
-**禁止行为：**
+**禁止：**
 ```python
 # ❌ 冗余的 max 比较
 'total_days': max(raw_metadata.get('total_days', 0), factor_df_full['date'].nunique())
@@ -1821,7 +1821,7 @@ period_start = str(factor_df['date'].min())  # 2024-01-20（错误！）
 # 4. 冗余操作，增加代码复杂度
 ```
 
-**正确实现：**
+**正确：**
 ```python
 # ✓ 直接使用 raw_metadata
 'total_days': raw_metadata.get('total_days', 0)  # 原始缓存天数
@@ -2043,7 +2043,7 @@ if missing_fields:
 | 全量计算中 ic_series.index | 只有有效 IC 日期 | 不含 None |
 | 增量计算中 new_ic_values | 可能含 None | **过滤后存储** |
 
-**正确实现：**
+**正确：**
 ```python
 # 合并数据时过滤 None
 date_ic_map = {}
@@ -2058,7 +2058,7 @@ for date, ic in zip(new_dates, new_ic_values):
 
 ## 全量/增量IC等价性规范
 
-**核心原则：** 全量计算与增量计算必须使用同一核心函数（calculate_single_day_ic）。
+**核心原则：** 全量计算与增量计算使用同一核心函数（calculate_single_day_ic）。
 
 **等价性验证三重保障机制：**
 
@@ -2066,9 +2066,9 @@ for date, ic in zip(new_dates, new_ic_values):
 |-------|------|------|
 | 第一层：代码架构 | 设计原则 | 全量/增量调用同一函数，无法独立演化 |
 | 第二层：单元测试 | TestAlgorithmEquivalence | 验证单日期、多日期、边界情况等价性 |
-| 第三层：文档规范 | Step 4.5 规范 | 修改核心函数时必须检查等价性 |
+| 第三层：文档规范 | Step 4.5 规范 | 修改核心函数时检查等价性 |
 
-**禁止行为：**
+**禁止：**
 ```python
 # ❌ 增量计算不使用 calculate_single_day_ic
 for date in missing_dates:
@@ -2088,7 +2088,7 @@ for date in missing_dates:
 
 **核心原则：** 增量计算读取现有缓存时，必须兼容旧版本缓存数据。
 
-**问题背景：**
+**背景：**
 - v1.32 之前版本：ic_values 可能包含 None（未过滤股票数不足）
 - 增量更新读取现有缓存 → existing_ic_values 可能包含 None
 
@@ -2143,7 +2143,7 @@ raise RuntimeError(
 
 **核心原则：** 字段应集中定义在构建阶段，避免分散赋值。
 
-**禁止行为：**
+**禁止：**
 ```python
 # ❌ 分散赋值
 result = {}
@@ -2168,7 +2168,7 @@ result = {
 
 **核心原则：** 统计字段必须明确口径范围。
 
-**正确实现：**
+**正确：**
 ```json
 {
   "avg_stocks_per_day": 4235.2,
@@ -2187,9 +2187,9 @@ result = {
 
 ## 代码维护同步检查规范
 
-**核心原则：** 添加新代码后必须检查旧代码是否冗余。
+**核心原则：** 添加新代码后检查旧代码是否冗余。
 
-**检查清单：**
+**清单：**
 ```
 □ 新增字段 → 检查是否有重复赋值
 □ 新增函数 → 检查是否有类似功能函数可合并
@@ -2215,7 +2215,7 @@ result = {
 - 前 N-1 个周期布林带值应为 NaN（等待足够数据）
 ```
 
-**正确实现：**
+**正确：**
 ```python
 # ✓ min_periods=n，遵循标准定义
 factor_df['middle_band'] = factor_df.groupby('asset')['close'].transform(
@@ -2226,7 +2226,7 @@ factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
 )
 ```
 
-**禁止行为：**
+**禁止：**
 ```python
 # ❌ min_periods=1，违反标准定义
 factor_df['middle_band'] = factor_df.groupby('asset')['close'].transform(
@@ -2250,7 +2250,7 @@ factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
 
 ### 布林带标准差 ddof 参数
 
-**核心原则：** 布林带标准差必须使用总体标准差（ddof=0），而非样本标准差（ddof=1）。
+**核心原则：** 布林带标准差使用总体标准差（ddof=0），而非样本标准差（ddof=1）。
 
 **布林带标准定义：**
 ```
@@ -2261,7 +2261,7 @@ factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
 - 不是对未知总体的样本估计，而是对固定窗口数据的完整统计
 ```
 
-**正确实现：**
+**正确：**
 ```python
 # ✓ ddof=0，使用总体标准差
 factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
@@ -2269,7 +2269,7 @@ factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
 )
 ```
 
-**禁止行为：**
+**禁止：**
 ```python
 # ❌ 默认 ddof=1（样本标准差），系统性高估布林带宽度
 factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
@@ -2294,7 +2294,7 @@ factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
 
 ### 浮点数等值比较规范核心原则
 
-**浮点数等值比较必须使用精度容差，禁止直接使用 == 比较。**
+**浮点数等值比较使用精度容差，禁止直接使用 == 比较。**
 
 ### 浮点数等值比较规范问题背景
 
@@ -2356,12 +2356,12 @@ result = np.where(
 2. **RSI 计算**：`diff = max_gain - max_loss` 除零判断
 3. **任何浮点数除法**：除数为运算结果时需精度容差判断
 
-### 为何必须使用精度容差
+### 为何使用精度容差
 
 1. IEEE 754 标准无法精确表示所有数值
 2. 浮点运算累积误差可能导致极小值
 3. 直接 == 比较会漏判，产生极端结果
-4. 精度容差是业界标准做法（numpy、scipy 均采用）
+4. 精度容差是业界做法（numpy、scipy 均采用）
 
 ## 增量路径核心规范（合并）
 
@@ -2480,7 +2480,7 @@ merged_data = {
 # - 与全量路径不一致（全量路径直接使用 raw_metadata）
 ```
 
-### 为何必须使用 raw_metadata
+### 为何使用 raw_metadata
 
 1. **语义一致性：** period 表示原始缓存范围，而非有效IC范围
 2. **两条路径一致：** 全量路径使用 raw_metadata，增量路径必须一致
@@ -2500,7 +2500,7 @@ merged_data = {
 
 ### 增量路径因子值有效性检查规范核心原则
 
-**增量路径必须检查缺失日期因子值是否有效，避免静默产生大量 None IC值。**
+**增量路径检查缺失日期因子值是否有效，避免静默产生大量 None IC值。**
 
 ### 增量路径因子值有效性检查规范问题背景
 
@@ -2565,7 +2565,7 @@ print(f"  - 篛选后: {len(factor_df_new)} 行")  # ✗ 没有检查因子值�
 # - 用户看不到诊断信息，不知道跳过原因
 ```
 
-### 为何必须检查因子值有效性
+### 为何检查因子值有效性
 
 1. **布林带预热期：** 技术指标需要历史数据预热，前N-1天因子值为 NaN
 2. **诊断信息清晰：** 告知用户跳过原因，而非静默产生 None
@@ -2593,7 +2593,7 @@ print(f"  - 篛选后: {len(factor_df_new)} 行")  # ✗ 没有检查因子值�
 
 ### 增量路径 None 值保留规范核心原则
 
-**增量路径合并时必须保留所有日期（包括 None IC 值日期），不过滤 None，确保 total_days 与 valid_days 的差值语义正确。**
+**增量路径合并时保留所有日期（包括 None IC 值日期），不过滤 None，确保 total_days 与 valid_days 的差值语义正确。**
 
 ### 增量路径 None 值保留规范问题背景
 
@@ -2675,7 +2675,7 @@ all_ic_values = [date_ic_map[d] for d in all_dates]  # ✗ 不包含 None
 # - 语义失真
 ```
 
-### 为何必须保留 None 值
+### 为何保留 None 值
 
 1. **语义正确性：** total_days 应表示所有日期数，valid_days 应表示有效 IC 数
 2. **诊断信息完整：** 用户需要知道有多少天因股票数不足跳过
@@ -2718,7 +2718,7 @@ def calculate_ic_statistics(ic_series: pd.Series) -> dict:
 
 ### 核心原则
 
-**布林带因子必须使用 close 价格，这是布林带的数学定义。必须：**
+**布林带因子使用 close 价格，这是布林带的数学定义。必须：**
 1. 强制加载和过滤 'close' 列
 2. %B 计算显式处理 NaN（而非依赖隐式传播）
 3. 不接受 factor_col 参数（布林带固定使用 close）
@@ -2737,7 +2737,7 @@ def calculate_ic_statistics(ic_series: pd.Series) -> dict:
 ```python
 # ✓ 固定加载 close 列（布林带数学定义）
 def load_data_from_cache(return_col: str = 'forward_return_1d'):
-    """布林带因子必须使用 close 价格，固定加载和过滤 'close' 列"""
+    """布林带因子使用 close 价格，固定加载和过滤 'close' 列"""
     factor_cols = ['date', 'asset', 'close']  # 固定列名，不接受参数
     factor_df = factor_df[factor_cols].copy()
     factor_df = factor_df.dropna(subset=['close']).reset_index(drop=True)
@@ -2787,13 +2787,13 @@ factor_df['bollinger_pb_1d'] = np.where(
 □ 使用嵌套 np.where 处理三种情况（NaN、宽度为零、正常）
 ```
 
-## 列表索引访问前必须检查长度规范
+## 列表索引访问前检查长度规范
 
-### 列表索引访问前必须检查长度规范核心原则
+### 列表索引访问前检查长度规范核心原则
 
-**访问列表元素（如 list[0], list[-1]）前必须检查列表长度，避免 IndexError。**
+**访问列表元素（如 list[0], list[-1]）前检查列表长度，避免 IndexError。**
 
-### 列表索引访问前必须检查长度规范问题背景
+### 列表索引访问前检查长度规范问题背景
 
 ```
 IndexError 问题：
@@ -2821,7 +2821,7 @@ for d in dates_to_check:
 - 访问 all_dates[0] → IndexError
 ```
 
-### 列表索引访问前必须检查长度规范正确实现
+### 列表索引访问前检查长度规范正确实现
 
 ```python
 # ✓ 检查列表长度，避免 IndexError
@@ -2836,7 +2836,7 @@ for d in dates_to_check:
         raise ValueError(f"日期格式不符合 YYYY-MM-DD 约定: {d}")
 ```
 
-### 列表索引访问前必须检查长度规范禁止行为
+### 列表索引访问前检查长度规范禁止行为
 
 ```python
 # ❌ 直接访问列表元素，不检查长度
@@ -2849,21 +2849,21 @@ dates_to_check = [all_dates[0], all_dates[-1], ...]  # ✗ IndexError if all_dat
 # - 缺少防御性检查
 ```
 
-### 为何必须检查列表长度
+### 为何检查列表长度
 
 1. **防御性编程**：避免极端情况下的 IndexError
 2. **增量路径空合并**：现有缓存为空 + 新日期无有效数据 → 空列表
 3. **诊断信息清晰**：告知用户为何跳过检查
 4. **稳定运行**：不应因边界情况崩溃
 
-### 列表索引访问前必须检查长度规范适用范围
+### 列表索引访问前检查长度规范适用范围
 
 此规范适用于所有列表索引访问：
 1. **dates[0], dates[-1]**：访问日期列表首尾
 2. **ic_values[0]**：访问 IC 值列表
 3. **任何 list[index]**：访问列表任意索引
 
-### 列表索引访问前必须检查长度规范检查清单
+### 列表索引访问前检查长度规范检查清单
 
 ```
 □ 访问 list[0] 前检查 len(list) > 0
@@ -2877,7 +2877,7 @@ dates_to_check = [all_dates[0], all_dates[-1], ...]  # ✗ IndexError if all_dat
 
 ### 增量路径向量化计算 IC 规范核心原则
 
-**增量路径计算 IC 必须使用向量化处理：先整体 merge，再按日期 groupby 计算。禁止逐行循环做 DataFrame 过滤和 merge，这会导致严重性能问题。**
+**增量路径计算 IC 使用向量化处理：先整体 merge，再按日期 groupby 计算。禁止逐行循环做 DataFrame 过滤和 merge，这会导致严重性能问题。**
 
 ### 增量路径向量化计算 IC 规范问题背景
 
@@ -2974,7 +2974,7 @@ for date in new_dates:
 
 当 missing_dates = 100 时，向量化处理性能提升约 100 倍。
 
-### 为何必须使用向量化处理
+### 为何使用向量化处理
 
 1. **性能显著提升**：避免逐行循环扫描全表，性能提升约 N 倍
 2. **DataFrame 过滤低效**：每次过滤扫描全表，非常耗时
@@ -3093,7 +3093,7 @@ factor_df_full = load_data_from_cache()  # ✗ 无注释说明
 
 ### 增量路径最小必需历史窗口边界检查规范核心原则
 
-**增量路径必须检查缺失日期是否在最小必需历史窗口内（布林带预热期）。缺失日期如果靠近缓存起始点（前N-1天内），因子值可能全为 NaN，需要提前警告并提供诊断信息。**
+**增量路径检查缺失日期是否在最小必需历史窗口内（布林带预热期）。缺失日期如果靠近缓存起始点（前N-1天内），因子值可能全为 NaN，需要提前警告并提供诊断信息。**
 
 ### 增量路径最小必需历史窗口边界检查规范问题背景
 
@@ -3168,7 +3168,7 @@ if valid_factor_count == 0:
 | 缺失日期在预热期 | `missing_dates <= warmup_boundary` | X 个缺失日期在预热期内 |
 | 全部在预热期 | `len(missing_dates_in_warmup) == len(missing_dates)` | 无法计算有效 IC |
 
-### 为何必须检查边界
+### 为何检查边界
 
 1. **避免无效计算**：缺失日期在预热期内，因子值全为 NaN
 2. **提供诊断信息**：告知用户为何因子值全为 NaN
@@ -3614,7 +3614,7 @@ def calculate_all_stocks_vectorized(factor_df):
     return factor_df.groupby('asset').transform(...)
 ```
 
-**禁止行为：**
+**禁止：**
 ```python
 # ❌ 保留旧函数但从不调用（死代码）
 def calculate_single_stock(stock_df):  # 死代码！
@@ -3649,7 +3649,7 @@ def load_data_from_cache(...) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
     """
 ```
 
-**禁止行为：**
+**禁止：**
 - ❌ 只改返回值不改类型注解
 - ❌ 只改返回值不改 docstring
 
@@ -3657,7 +3657,7 @@ def load_data_from_cache(...) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
 
 **核心原则：** output_file 统一转为 Path 对象。
 
-**正确实现：**
+**正确：**
 ```python
 def generate_rsi_ic_data(output_file=None):
     if output_file is None:
@@ -3707,7 +3707,7 @@ def generate_rsi_ic_data(output_file=None):
 
 **核心原则：** period.start/end 必须基于原始缓存数据（dropna 前）。
 
-**正确实现：**
+**正确：**
 ```python
 # 在 dropna 之前，先计算原始数据范围
 raw_period_start = factor_df['date'].min()
@@ -3721,7 +3721,7 @@ factor_df = factor_df.dropna()
 return factor_df, return_df, {'period_start': raw_period_start, ...}
 ```
 
-**为何必须使用原始数据：**
+**为何使用原始数据：**
 - dropna 可能过滤掉某些日期的全部股票
 - factor_df['date'].min()/max() 计算的是过滤后的范围
 - 与语义定义冲突："原始缓存范围" ≠ "过滤后数据范围"
