@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 15:50 北京时间
-> 实测数据时间: 2026-05-20 15:45 北京时间
-> 版本: v1.12
-> 更新内容: 修复 should_full_recalculate 标志未使用问题，添加显式检查确保控制流有效
+> 生成时间: 2026-05-20 16:05 北京时间
+> 实测数据时间: 2026-05-20 16:00 北京时间
+> 版本: v1.13
+> 更新内容: 修复闭包耦合问题，将内嵌函数提升为模块级私有函数，显式传参
 
 ---
 
@@ -764,6 +764,95 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.9 | 2026-05-20 | 修复统计口径不一致，新增 raw_avg_stocks_per_day（口径与 total_days 一致） |
 | v1.10 | 2026-05-20 | 统一 min_periods 注释表述，使用"前 min_periods-1 个时间点"替代模糊的"前 N 天" |
 | v1.11 | 2026-05-20 | 修复 ewm 初始值函数副作用问题，使用 .copy() 避免修改原始数据 |
+| v1.12 | 2026-05-20 | 修复 should_full_recalculate 标志未使用问题，添加显式检查确保控制流有效 |
+| v1.13 | 2026-05-20 | 修复闭包耦合问题，将内嵌函数提升为模块级私有函数 `_calculate_k_with_initial` 和 `_calculate_d_with_initial`，显式传参 |
+
+---
+
+## 闭包耦合规范
+
+### 问题根因
+
+**原始代码（闭包耦合）：**
+```python
+def calculate_kdj_j_factor(factor_df, n=9, m1=3, m2=3):
+    # ...
+    alpha_k = 1.0 / m1
+    initial_k = 50.0
+    
+    def calculate_k_with_initial(rsv_series):
+        # 闭包捕获 alpha_k, initial_k（隐式依赖）
+        rsv_copy = rsv_series.copy()
+        rsv_copy.iloc[0] = initial_k  # 使用外层变量
+        k_series = rsv_copy.ewm(alpha=alpha_k, adjust=False).mean()  # 使用外层变量
+        return k_series
+    
+    factor_df['k'] = factor_df.groupby('asset')['rsv'].transform(calculate_k_with_initial)
+```
+
+**问题分析：**
+- 内嵌函数通过闭包隐式依赖 `alpha_k`、`initial_k`
+- 函数签名只有 `rsv_series`，无法看出依赖关系
+- 若外层函数重构（如 `m1` 改名），内嵌函数静默使用旧值，难以发现
+- 重构风险高：修改外层变量时，需手动追踪所有闭包使用点
+
+### 修复方式
+
+**提升为模块级私有函数，显式传参：**
+```python
+# 模块级私有函数（显式传参）
+def _calculate_k_with_initial(
+    rsv_series: pd.Series,
+    alpha_k: float,
+    initial_k: float
+) -> pd.Series:
+    """计算 K 值，第一个值使用 initial_k（无副作用版本）
+    
+    Args:
+        rsv_series: RSV 序列（单只股票）
+        alpha_k: K 值 ewm 平滑系数（1/m1）
+        initial_k: K 初始值（标准值 50.0）
+    
+    Returns:
+        K 值序列
+    
+    设计原则：显式传参，避免闭包捕获外部变量
+    """
+    if len(rsv_series) == 0:
+        return rsv_series
+    
+    rsv_copy = rsv_series.copy()
+    rsv_copy.iloc[0] = initial_k
+    k_series = rsv_copy.ewm(alpha=alpha_k, adjust=False).mean()
+    return k_series
+
+
+def calculate_kdj_j_factor(factor_df, n=9, m1=3, m2=3):
+    # ...
+    alpha_k = 1.0 / m1
+    initial_k = 50.0
+    
+    # 使用模块级函数，显式传参（lambda 包装适配 groupby transform）
+    factor_df['k'] = factor_df.groupby('asset')['rsv'].transform(
+        lambda rsv: _calculate_k_with_initial(rsv, alpha_k, initial_k)
+    )
+```
+
+### 设计原则
+
+| 原则 | 说明 |
+|------|------|
+| 显式传参 | 函数签名暴露所有依赖，调用者一目了然 |
+| 避免闭包 | 外层变量重构时，编译器/静态分析能发现传参错误 |
+| 模块级私有函数 | 以 `_` 前缀命名，表明仅供模块内部使用 |
+| lambda 包装 | 适配 `groupby transform` 接口，保持向量化性能 |
+
+**优势：**
+- 重构安全：修改 `alpha_k` 参数名时，调用处报错，不会静默失败
+- 可测试性：模块级函数可独立测试，无需构造完整上下文
+- 文档完整性：函数签名 + docstring 说明所有参数
+
+**参考规范：MODULE.md "函数设计规范 - 禁止闭包捕获外部变量"**
 
 ---
 

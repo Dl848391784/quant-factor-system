@@ -60,6 +60,85 @@ FACTOR_CACHE = CACHE_DIR / 'factor_data.json.gz'
 RETURN_CACHE = CACHE_DIR / 'return_data.json.gz'
 
 
+# ============================================================================
+# KDJ 辅助函数（模块级私有函数，显式传参，避免闭包耦合）
+# 遵循 MODULE.md 函数设计规范：禁止闭包捕获外部变量，必须显式传参
+# ============================================================================
+
+def _calculate_k_with_initial(
+    rsv_series: pd.Series,
+    alpha_k: float,
+    initial_k: float
+) -> pd.Series:
+    """计算 K 值，第一个值使用 initial_k（无副作用版本）
+    
+    Args:
+        rsv_series: RSV 序列（单只股票）
+        alpha_k: K 值 ewm 平滑系数（1/m1）
+        initial_k: K 初始值（标准值 50.0）
+    
+    Returns:
+        K 值序列
+    
+    正确做法：复制 Series，在副本上构造初始值序列，不修改原始数据
+    原因：iloc 修改传入的 Series 产生副作用，若 ewm 异则还原不会执行
+    
+    设计原则：显式传参，避免闭包捕获外部变量
+    - 若闭包捕获 alpha_k/initial_k，外层函数重构时静默使用旧值
+    - 函数签名必须暴露所有依赖，便于调用者理解
+    """
+    if len(rsv_series) == 0:
+        return rsv_series
+    
+    # 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
+    rsv_copy = rsv_series.copy()
+    
+    # 在副本上预处理第一个 RSV 值
+    rsv_copy.iloc[0] = initial_k
+    
+    # 计算 ewm
+    k_series = rsv_copy.ewm(alpha=alpha_k, adjust=False).mean()
+    
+    return k_series
+
+
+def _calculate_d_with_initial(
+    k_series: pd.Series,
+    alpha_d: float,
+    initial_d: float
+) -> pd.Series:
+    """计算 D 值，第一个值使用 initial_d（无副作用版本）
+    
+    Args:
+        k_series: K 值序列（单只股票）
+        alpha_d: D 值 ewm 平滑系数（1/m2）
+        initial_d: D 初始值（标准值 50.0）
+    
+    Returns:
+        D 值序列
+    
+    正确做法：复制 Series，在副本上构造初始值序列，不修改原始数据
+    原因：iloc 修改传入的 Series 产生副作用，若 ewm 异则还原不会执行
+    
+    设计原则：显式传参，避免闭包捕获外部变量
+    - 若闭包捕获 alpha_d/initial_d，外层函数重构时静默使用旧值
+    - 函数签名必须暴露所有依赖，便于调用者理解
+    """
+    if len(k_series) == 0:
+        return k_series
+    
+    # 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
+    k_copy = k_series.copy()
+    
+    # 在副本上预处理第一个 K 值
+    k_copy.iloc[0] = initial_d
+    
+    # 计算 ewm
+    d_series = k_copy.ewm(alpha=alpha_d, adjust=False).mean()
+    
+    return d_series
+
+
 # ============================================================
 # KDJ_J 因子计算函数（实际被调用的主路径）
 # ============================================================
@@ -152,27 +231,11 @@ def calculate_kdj_j_factor(
     alpha_k = 1.0 / m1
     initial_k = 50.0  # K 初始值
     
-    def calculate_k_with_initial(rsv_series):
-        """计算 K 值，第一个值使用 initial_k（无副作用版本）
-        
-        正确做法：复制 Series，在副本上构造初始值序列，不修改原始数据
-        原因：iloc 修改传入的 Series 产生副作用，若 ewm 异则还原不会执行
-        """
-        if len(rsv_series) == 0:
-            return rsv_series
-        
-        # 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
-        rsv_copy = rsv_series.copy()
-        
-        # 在副本上预处理第一个 RSV 值
-        rsv_copy.iloc[0] = initial_k
-        
-        # 计算 ewm
-        k_series = rsv_copy.ewm(alpha=alpha_k, adjust=False).mean()
-        
-        return k_series
-    
-    factor_df['k'] = factor_df.groupby('asset')['rsv'].transform(calculate_k_with_initial)
+    # 使用模块级私有函数，显式传参（避免闭包耦合）
+    # lambda 包装以适配 groupby transform 接口
+    factor_df['k'] = factor_df.groupby('asset')['rsv'].transform(
+        lambda rsv: _calculate_k_with_initial(rsv, alpha_k, initial_k)
+    )
     
     # 计算 D（批量向量化）
     # ewm(adjust=False) 的第一个输出 = 第一个输入，即 D[0] = K[0]
@@ -184,27 +247,11 @@ def calculate_kdj_j_factor(
     alpha_d = 1.0 / m2
     initial_d = 50.0  # D 初始值
     
-    def calculate_d_with_initial(k_series):
-        """计算 D 值，第一个值使用 initial_d（无副作用版本）
-        
-        正确做法：复制 Series，在副本上构造初始值序列，不修改原始数据
-        原因：iloc 修改传入的 Series 产生副作用，若 ewm 异则还原不会执行
-        """
-        if len(k_series) == 0:
-            return k_series
-        
-        # 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
-        k_copy = k_series.copy()
-        
-        # 在副本上预处理第一个 K 值
-        k_copy.iloc[0] = initial_d
-        
-        # 计算 ewm
-        d_series = k_copy.ewm(alpha=alpha_d, adjust=False).mean()
-        
-        return d_series
-    
-    factor_df['d'] = factor_df.groupby('asset')['k'].transform(calculate_d_with_initial)
+    # 使用模块级私有函数，显式传参（避免闭包耦合）
+    # lambda 包装以适配 groupby transform 接口
+    factor_df['d'] = factor_df.groupby('asset')['k'].transform(
+        lambda k: _calculate_d_with_initial(k, alpha_d, initial_d)
+    )
     
     # 计算 J = 3K - 2D
     print("  [Step 4] 计算 J...")
