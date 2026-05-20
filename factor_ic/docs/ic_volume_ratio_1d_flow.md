@@ -1,18 +1,17 @@
 # 量比因子 IC 分析流程文档
 
-> 版本: v1.3
-> 生成时间: 2026-05-21 05:52 北京时间
-> 实测数据时间: 2026-05-21 05:52 北京时间（运行验证通过）
+> 版本: v1.4
+> 生成时间: 2026-05-21 05:59 北京时间
+> 实测数据时间: 2026-05-21 05:59 北京时间（运行验证通过）
 > 脚本: ic_volume_ratio_1d.py
 > 更新内容:
 >   1. v1.0 首次创建流程文档
 >   2. v1.2 修复import位置、补充顶层字段、JSON序列化修复
->   3. v1.3 代码质量优化（2026-05-21）：
->      - 定义 DEFAULT_MIN_STOCKS 常量（遵循 MODULE.md 代码质量规范）
->      - calculate_daily_ic_series 接收 min_stocks 参数
->      - rolling_ic_mean NaN 处理（pd.notna 检查，输出 None）
->      - 删除主入口冗余 import traceback（顶部已导入）
->      - min_stocks_per_layer 参数传递到 IC 计算
+>   3. v1.3 代码质量优化（DEFAULT_MIN_STOCKS常量、NaN处理、min_stocks参数）
+>   4. v1.4 跨脚本一致性优化（2026-05-21）：
+>      - 函数注释更新：ic_series → dates/ic_values/rolling_ic_mean（顶层字段）
+>      - statistical_significance 添加 p_value_display 字段（跨脚本一致性）
+>      - 空数据分支已有 p_value_display（无需修改）
 
 ---
 

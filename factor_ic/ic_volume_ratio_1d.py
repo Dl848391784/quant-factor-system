@@ -334,7 +334,7 @@ def run_volume_ratio_analysis(
     Returns:
         完整分析结果字典，包含：
         - ic_metrics: IC 指标
-        - ic_series: IC 时间序列
+        - dates, ic_values, rolling_ic_mean: IC 时间序列（顶层字段）
         - layered_result: 分层回测结果
         - params: 参数配置
         - generated_at: 生成时间
@@ -534,9 +534,11 @@ def run_volume_ratio_analysis(
     
     # 五维度判断（遵循 MODULE.md 输出结构统一性规范）
     # 第1维：统计显著性（t检验）
+    p_value_calc = round(float(2 * (1 - scipy_stats_norm_cdf(abs(ic_data['t_stat'])))), 6) if ic_data['t_stat'] else None
     statistical_significance = {
         't_stat': ic_data['t_stat'],
-        'p_value': round(float(2 * (1 - scipy_stats_norm_cdf(abs(ic_data['t_stat'])))), 6) if ic_data['t_stat'] else None,
+        'p_value': p_value_calc,
+        'p_value_display': str(round(p_value_calc, 4)) if p_value_calc is not None else 'N/A',  # 跨脚本一致性（遵循MODULE.md）
         'is_significant': abs(ic_data['t_stat']) > 1.96,  # p < 0.05 等价于 |t| > 1.96
         'threshold': 1.96,
         'description': f"|t|={abs(ic_data['t_stat']):.2f} {'>' if abs(ic_data['t_stat']) > 1.96 else '≤'} 1.96，{'统计显著' if abs(ic_data['t_stat']) > 1.96 else '不显著'}"
