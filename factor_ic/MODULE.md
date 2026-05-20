@@ -15,7 +15,6 @@
 5. v1.4（2026-05-22）：合并重复章节，行数4761→3892
 6. v2.0（2026-05-22）：按主题归类为6大章节，压缩格式，保留所有内容
 
-
 # 一、概述与基础
 
 ## 概述
@@ -68,7 +67,6 @@ factor_ic 模块负责计算各类因子的 IC（Information Coefficient）值�
 # 导致：新脚本遵循旧规范，输出结构不一致
 ```
 
-
 ## factor_ic/ 目录规范
 
 以下规范**仅适用于 `factor_ic/` 目录**，其他目录另有规范。
@@ -94,7 +92,6 @@ ic_volume_ratio_1d.py  # 量比因子，T+1收益
 - 因子名使用小写+下划线：`rsi`、`kdj_j`、`bollinger_pb`、`volume_ratio`
 - 一个因子可有多个收益周期版本（1d、3d、5d等）
 
-
 ### 数据依赖
 
 **数据来源：** 所有因子计算脚本的数据必须来自 `data_fetchers/` 目录的拉取脚本。
@@ -109,7 +106,6 @@ ic_volume_ratio_1d.py  # 量比因子，T+1收益
 factor_df = pd.read_csv('cache/factor_data/rsi/rsi_1d.csv')
 # 计算 IC，不涉及数据拉取
 ```
-
 
 ### 输出目录规范
 
@@ -144,7 +140,6 @@ IC(d) = spearman_correlation(factor_values_on_day_d, returns_on_day_d+period)
 2. 不要求线性关系
 3. 适用于非线性因子（如技术指标）
 
-
 ### IC 统计指标
 
 **必须输出的统计指标：**
@@ -163,7 +158,6 @@ IC(d) = spearman_correlation(factor_values_on_day_d, returns_on_day_d+period)
 - ICIR 使用 `abs(ic_mean)`，因为负IC和正IC同等重要
 - p < 0.05 表示统计显著（与 |t| > 1.96 等价）
 
-
 ### 打印信息规范
 
 **核心原则：** 打印信息必须准确反映实际计算结果，不得误导用户。
@@ -178,42 +172,33 @@ print(f"完成！共计算 {total_days} 天 IC 数据")  # 错误！
 ```
 
 **字段选择规则：**
-| 场景 | 正确字段 | 禁止字段 |
-|------|---------|---------|
-| "共计算 X 天 IC 数据" | `valid_days` | `total_days` |
-| "原始数据覆盖 X 天" | `total_days` | `valid_days` |
-| 统计检验样本量 | `valid_days` | `total_days` |
+| 场景 | 正确字段 | 禁止字段 | 说明 |
+|------|---------|---------|------|
+| "共计算X天IC数据" | valid_days | total_days | 实际有效IC天数 |
+| "原始数据覆盖X天" | total_days | valid_days | 缓存范围 |
+| 统计检验样本量 | valid_days | total_days | 参与统计 |
 
-**语义说明：**
-- `valid_days`：实际计算出有效IC的天数（参与统计检验）
-- `total_days`：原始缓存覆盖的日期数（可能包含NaN/跳过）
-- 差距原因：计算周期等待（如布林带前N-1天NaN）、股票数不足跳过
+差距原因：计算周期等待（布林带前N-1天NaN）、股票数不足跳过
 
+```python
+# ✓ 正确：显示有效天数和原始天数
+print(f"完成！共计算 {valid_days} 天有效IC数据（原始数据 {total_days} 天）")
+# ❌ 禁止：只显示total_days，误导用户
+print(f"完成！共计算 {total_days} 天IC数据")
+```
 
 ### 因子方向判断规范
 
-**核心原则：** 因子方向必须根据实际IC测试结果确定，不能根据因子类型假设。
+**核心原则：** 因子方向必须根据实际IC测试结果确定，不能假设
 
-**判断规则：**
+| IC特征 | 方向 | 说明 |
+|--------|------|------|
+| ic_mean>0.03 且 p<0.05 | 正向 | 高因子值→高收益 |
+| ic_mean<-0.03 且 p<0.05 | 反向 | 高因子值→低收益 |
+| |t|<1.96 或 p>0.05 | 无效 | 无预测能力 |
 
-| IC特征 | 因子方向 | 说明 |
-|--------|---------|------|
-| ic_mean > 0.03 且 p < 0.05 | 正向因子 | 高因子值预测高收益 |
-| ic_mean < -0.03 且 p < 0.05 | 反向因子 | 高因子值预测低收益 |
-| |t| < 1.96 或 p > 0.05 | 无效因子 | 无预测能力 |
-
-**禁止行为：**
-- ❌ 根据因子类型假设方向（如"RSI超买区应该是反向因子")
-- ❌ 不做IC测试就预设 factor_direction 参数
-
-**正确做法：**
-```python
-# 先运行IC计算脚本，根据 ic_mean 和 p_value 确定方向
-python factor_ic/ic_rsi_1d.py
-# 查看结果中的 ic_mean 和 p_value
-# 根据结果设置分层回测的 factor_direction 参数
-```
-
+禁止：根据因子类型假设方向（如"RSI超买应该是反向")
+正确：先运行IC脚本，根据ic_mean和p_value确定方向
 
 ### 反向因子IC计算规范（2026-05-20新增）
 
@@ -278,7 +263,6 @@ engine = LayeredBacktestEngine(factor_direction='negative')
 """
 ```
 
-
 ### 输出格式规范
 
 **JSON输出结构：**
@@ -342,7 +326,6 @@ engine = LayeredBacktestEngine(factor_direction='negative')
 || daily_ic[].stocks_count | int | ✓ | 当日有效股票数 |
 || period.start | str | ✓ | 覆盖起始日期 |
 || period.end | str | ✓ | 覆盖结束日期 |
-
 
 ### 输出结构统一性规范（2026-05-20新增）
 
@@ -467,7 +450,6 @@ engine = LayeredBacktestEngine(factor_direction='negative')
 □ 所有因子脚本的字段顺序一致（便于自动化对比）
 □ 新增因子脚本时，对比已有脚本输出结构，确保一致
 ```
-
 
 ### 字段值完整性检查规范（2026-05-20新增）
 
@@ -628,7 +610,6 @@ if result['ic_mean'] is None:
 □ 输出前校验：在 json.dump 前调用 validate_output_completeness
 ```
 
-
 ## 增量更新规范
 
 ### 增量模式定义
@@ -645,7 +626,6 @@ if result['ic_mean'] is None:
 - 缓存存在 → 尝试增量更新
 - 缓存不存在 → 执行全量计算
 - 命令行参数 `--force-full` → 强制全量计算
-
 
 ### 增量判断流程
 
@@ -679,7 +659,6 @@ if result['ic_mean'] is None:
 │    └─ 更新 metadata（valid_days, total_days等）      │
 └─────────────────────────────────────────────────────┘
 ```
-
 
 ### 缺失日期诊断规范
 
@@ -909,7 +888,6 @@ raise RuntimeError(f"因子数据: {factor_df['asset'].nunique()} 只股票")  #
 □ 提供详细诊断信息（异常类型、详情、建议）
 ```
 
-
 ## 字段去重化规范（2026-05-20新增）
 
 ### 字段去重化规范核心原则
@@ -979,7 +957,6 @@ raise RuntimeError(f"因子数据: {factor_df['asset'].nunique()} 只股票")  #
 - `p_value_display` 应由上游 `_format_p_value()` 生成，格式化逻辑一致
 - 回退值仅在极端情况下使用，应与上游格式化逻辑对齐（如 `round(x, 4)` 或科学计数法）
 
-
 ## 日期类型一致性规范
 
 ### 日期格式断言
@@ -1011,7 +988,6 @@ for date in dates:
 - ❌ 依赖字符串比较的隐式约定（如 `"2024-01-01" < "2024-02-01"`）
 - ❌ 不验证格式就使用 min/max 比较日期
 
-
 ## 输入验证规范
 
 ### 列存在检查
@@ -1030,7 +1006,6 @@ def validate_columns(df: pd.DataFrame) -> None:
             f"可用列: {available}"
         )
 ```
-
 
 ## 公共函数复用规范
 
@@ -1055,7 +1030,6 @@ def my_calculate_ic(df):
 # ✓ 正确：复用公共函数
 ic = calculate_rank_ic(df['factor_value'], df['future_return'])
 ```
-
 
 ### 数据传递规范（calculate_ic_with_direction_verification）
 
@@ -1093,7 +1067,6 @@ result = calculate_ic_with_direction_verification(factor_df, return_df, ...)
 **为何禁止提前合并:**
 1. 函数设计意图明确：接收未合并数据,内部负责合并
 2. 提前合并的 merged_df 无法传递给函数（函数需要两个独立 DataFrame）
-
 
 ## 增量更新返回数据规范
 
@@ -1146,16 +1119,13 @@ result = calculate_ic_with_direction_verification(factor_df, return_df, ...)
 
 4. 数据结构不一致会破坏保存数据的完整性
 
-
 > **流程文档规范已迁移至 PROJECT.md "脚本配套文件规范"章节**
-
 
 ## NaN 处理规范
 
 **核心原则：** NaN → None 转换应在数据生成阶段完成。
 
 **隐式行为显式化原则：** 若代码依赖数据不含 NaN 的隐式假设，必须添加注释说明原因。
-
 
 ### ic_series 数据来源说明
 
@@ -1173,7 +1143,6 @@ for date, daily_data in merged.groupby(date_col):
 - 只有 `ic_value is not None` 的日期才会被添加
 - 不满足 `min_stocks` 的日期不会被添加（而非添加 NaN）
 - 因此 ic_series.values 中的值都是有效的 numpy.float64
-
 
 ### ic_values vs rolling_ic_mean 处理差异
 
@@ -1196,7 +1165,6 @@ rolling_ic_mean = [
     for v in rolling_mean.values
 ]
 ```
-
 
 ### NaN 处理规范正确实现
 ```python
@@ -1234,7 +1202,6 @@ rolling_ic_mean = [
 rolling_ic_mean = ic_series.rolling(window=20, min_periods=10).mean()  # pd.Series
 # 延迟到 json.dump 时才通过 convert_to_native_types 转换（违反规范）
 ```
-
 
 ## 滚动窗口参数规范（2026-05-20新增）
 
@@ -1347,7 +1314,6 @@ valid_mask = both_conditions & ~rolling_nan_mask
 | `filtered_count` 字段名 | ❌ 语义混淆："过滤后计数"易误解 | 改为 `valid_count`（语义清晰） |
 | `filter_ratio` 字段名 | ❌ 语义混淆："过滤比例"易误解 | 改为 `retention_ratio`（语义清晰） |
 
-
 ## 变量命名语义清晰原则规范（2026-05-20新增）
 
 ### 变量命名语义清晰原则规范核心原则
@@ -1398,7 +1364,6 @@ factor_df['price_pct_change'] = factor_df.groupby('asset')['close'].transform(la
 | `pct_change = close.pct_change()`（换手率脚本） | 语义混淆：读者误以为换手率变化 | `price_pct_change = close.pct_change()` |
 | `ma = turnover.rolling(5).mean()` | 语义模糊：何种数据的均值 | `turnover_ma_5 = turnover.rolling(5).mean()` |
 | `factor_value = ...` | 语义模糊：何种因子 | `turnover_surge_factor = ...` |
-
 
 ## 数据对齐验证规范（2026-05-21新增）
 
@@ -1531,7 +1496,6 @@ def calculate_turnover_surge_ic(factor_df, return_df, ...):
 | 只检查数量不检查日期 | 数量相同但日期不同 | 检查 set(factor_dates) == set(return_dates) |
 | 只打印警告不处理 | 用户无法感知数据丢失 | 选择交集日期 + 打印对齐信息 |
 
-
 ## 极端值裁剪规范（2026-05-21新增）
 
 ### 极端值裁剪规范核心原则
@@ -1614,7 +1578,6 @@ print(f"极端值裁剪范围: [{clip_lower}, {clip_upper}]，筛选条件: > {f
 | `clip(0, 5)`（筛选条件 `> 0`） | 裁剪下界 = 筛选下界边界，逻辑不清晰 | `clip(0.001, 5)`（明确 > 0 的边界） |
 | 无验证裁剪范围 | 裁剪范围与筛选条件可能矛盾 | 添加一致性验证 |
 
-
 ## 主入口错误处理规范（2026-05-21新增）
 
 ### 主入口错误处理规范核心原则
@@ -1688,7 +1651,6 @@ if __name__ == '__main__':
 | `print(e)` 只打印异常对象 | 用户无法理解错误含义 | 打印友好提示 + 详情 + 解决方法 |
 | 无 sys.exit() | 异常后继续执行，可能产生更严重错误 | 错误处理后立即 sys.exit(1) |
 
-
 ## ic_series 排序规范
 
 **核心原则：** ic_series.index 必须按日期升序排列。
@@ -1715,7 +1677,6 @@ if dates != sorted(dates):
    - 全量路径: `load_data_from_cache` 第124行显式转换为字符串
    - 增量路径: JSON 缓存存储字符串，读取后直接使用
    - 当前一致，但依赖隐式实现，缺乏规范保障
-
 
 ## ic_series.index 类型规范
 
@@ -1805,7 +1766,6 @@ def calculate_daily_ic_series(
 3. **语义一致性：** 参数语义应与数据源语义一致，不应混用不同来源的数据
 4. **接口简洁：** 函数签名应尽可能简洁，避免不必要的复杂度
 
-
 ## period.start/end 语义规范
 
 ### period.start/end 语义规范核心原则
@@ -1870,7 +1830,6 @@ period_start = str(factor_df['date'].min())  # 2024-01-20（错误！）
 'total_days': raw_metadata.get('total_days', 0)  # 原始缓存天数
 ```
 
-
 ## 字典结构缩进规范
 
 ### 字典结构缩进规范核心原则
@@ -1920,7 +1879,6 @@ merged_data = {
         'icir': round(result['icir'], 4)  # 12空格缩进
 ```
 
-
 ## 函数返回值契约规范（合并）
 
 ### 核心原则
@@ -1967,7 +1925,6 @@ required_fields = ['ic_series', 'ic_mean', 'ic_std', 'icir']
 □ 校验后抛出 RuntimeError（包含缺失字段列表、问题定位）
 □ 后续代码可安全访问已校验字段
 ```
-
 
 ## 输出字段规范（合并）
 
@@ -2049,7 +2006,6 @@ result['ic_mean'] = ic_mean
 result['ic_std'] = ic_std  # 分散定义，容易遗漏
 ```
 
-
 **校验示例:**
 # 定义必需字段列表
 required_fields = [
@@ -2078,7 +2034,6 @@ if missing_fields:
 3. 函数返回值结构变更时，调用方静默失败
 4. 校验后的 RuntimeError 包含：缺失字段列表、问题定位、期望字段列表
 
-
 ## 增量计算 None 处理规范
 
 **核心原则：** 增量计算中 None（股票数不足）的处理必须与全量计算保持一致。
@@ -2103,7 +2058,6 @@ for date, ic in zip(new_dates, new_ic_values):
     if ic is not None:  # 只写入有效 IC 值
         date_ic_map[date] = ic
 ```
-
 
 ## 全量/增量 IC 计算等价性规范
 
@@ -2133,7 +2087,6 @@ for date in missing_dates:
     )
 ```
 
-
 ## 旧缓存兼容性处理规范
 
 **核心原则：** 增量计算读取现有缓存时，必须兼容旧版本缓存数据。
@@ -2149,7 +2102,6 @@ for date, ic in zip(existing_dates, existing_ic_values):
     if ic is not None:  # 兼容旧缓存：过滤可能存在的 None
         date_ic_map[date] = ic
 ```
-
 
 ## 返回值标记规范
 
@@ -2170,7 +2122,6 @@ for date, ic in zip(existing_dates, existing_ic_values):
 3. 调用方无法区分来源
 4. 若全量计算耗时很长，调用方毫不知情
 
-
 ## 错误信息格式规范
 
 **核心原则：** 枚举类错误必须包含合法值列表。
@@ -2190,7 +2141,6 @@ raise RuntimeError(
 | 错误信息 | `KeyError: 'ic_mean'` | `缺少必需字段: ['ic_mean']\n问题定位: factor_ic/common/ic_calculator.py` |
 | 问题定位 | 无法判断 | 明确模块路径 |
 | 排查效率 | 低 | 高 |
-
 
 ## 字典构建规范
 
@@ -2217,7 +2167,6 @@ result = {
 }
 ```
 
-
 ## 输出字段口径规范
 
 **核心原则：** 统计字段必须明确口径范围。
@@ -2239,7 +2188,6 @@ result = {
 - total_days 基于 dropna 前数据
 - 口径不同导致数值差异，必须通过字段说明
 
-
 ## 代码维护同步检查规范
 
 **核心原则：** 添加新代码后必须检查旧代码是否冗余。
@@ -2252,11 +2200,9 @@ result = {
 □ 新增参数 → 检查是否有硬编码值可替换
 ```
 
-
 ## 设计演进清理规范
 
 **核心原则：** 新实现替代旧实现后，必须删除旧代码，禁止保留死代码。
-
 
 ## 技术指标参数规范
 
@@ -2347,7 +2293,6 @@ factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
 3. Bollinger 本人定义：Population Standard Deviation
 4. ddof=1 会系统性高估带宽，导致 %B 指标失真
 
-
 ## 浮点数等值比较规范
 
 ### 浮点数等值比较规范核心原则
@@ -2420,7 +2365,6 @@ result = np.where(
 2. 浮点运算累积误差可能导致极小值
 3. 直接 == 比较会漏判，产生极端结果
 4. 精度容差是业界标准做法（numpy、scipy 均采用）
-
 
 ## 增量路径核心规范（合并）
 
@@ -2555,11 +2499,6 @@ merged_data = {
 
 **关键：** 增量模式追加数据不改变原始缓存范围，`period` 应始终表示数据源范围。
 
-
-
-
-
-
 ## 增量路径因子值有效性检查规范
 
 ### 增量路径因子值有效性检查规范核心原则
@@ -2652,7 +2591,6 @@ print(f"  - 篛选后: {len(factor_df_new)} 行")  # ✗ 没有检查因子值�
 □ 区分不同跳过原因（数据缺失/因子值NaN/股票数不足）
 □ 提前返回缓存（避免无效计算）
 ```
-
 
 ## 增量路径 None 值保留规范
 
@@ -2779,7 +2717,6 @@ def calculate_ic_statistics(ic_series: pd.Series) -> dict:
 □ total_days 与 valid_days 差值语义正确
 ```
 
-
 ## 布林带因子规范（合并）
 
 ### 核心原则
@@ -2852,9 +2789,6 @@ factor_df['bollinger_pb_1d'] = np.where(
 □ %B 计算显式检查 pd.isna(diff)
 □ 使用嵌套 np.where 处理三种情况（NaN、宽度为零、正常）
 ```
-
-
-
 
 ## 列表索引访问前必须检查长度规范
 
@@ -2941,11 +2875,6 @@ dates_to_check = [all_dates[0], all_dates[-1], ...]  # ✗ IndexError if all_dat
 □ 提供诊断信息（为何跳过检查）
 □ 避免 IndexError 崩溃
 ```
-
-
-
-
-
 
 ## 增量路径向量化计算 IC 规范
 
@@ -3074,7 +3003,6 @@ for date in new_dates:
 □ 禁止逐行循环做 merge
 ```
 
-
 ## 增量路径布林带历史数据必要性规范
 
 ### 增量路径布林带历史数据必要性规范核心原则
@@ -3163,7 +3091,6 @@ factor_df_full = load_data_from_cache()  # ✗ 无注释说明
 □ 篮选缺失日期的数据
 □ 不只加载缺失日期的数据（缺少历史数据）
 ```
-
 
 ## 增量路径最小必需历史窗口边界检查规范
 
@@ -3269,7 +3196,6 @@ if valid_factor_count == 0:
 □ 不直接返回缓存，继续计算以验证（部分股票可能有更多历史数据）
 ```
 
-
 ## 注释缩进一致性规范
 
 ### 注释缩进一致性规范核心原则
@@ -3364,7 +3290,6 @@ def _incremental_update(...):
 □ 遵循 Python 最佳实践
 ```
 
-
 ## PEP8 import 规范
 
 ### PEP8 import 规范核心原则
@@ -3457,7 +3382,6 @@ from factor_ic.common.ic_calculator import calculate_ic_statistics  # ✗ 分散
 □ 遵循 PEP8 规范
 □ 提高代码可读性
 ```
-
 
 ## 全量路径与增量路径防御对称规范
 
@@ -3569,7 +3493,6 @@ def calculate_daily_ic_series(...):
 □ 保持防御对称，避免下游问题
 ```
 
-
 ## 可选字段回退逻辑规范
 
 ### 可选字段回退逻辑规范核心原则
@@ -3674,7 +3597,6 @@ required_fields = [
 □ 注释说明可选字段的回退逻辑
 ```
 
-
 **典型场景：**
 
 | 场景 | 旧实现 | 新实现 | 清理要求 |
@@ -3715,7 +3637,6 @@ def calculate_all_stocks_vectorized(factor_df):  # 实际使用
 3. 死代码可能不一致：与新实现产生偏差
 4. 代码审计浪费时间：分析死代码的用途
 
-
 ## 函数签名变更同步规范
 
 **核心原则：** 返回值变更时必须同步更新类型注解和 docstring。
@@ -3734,7 +3655,6 @@ def load_data_from_cache(...) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
 **禁止行为：**
 - ❌ 只改返回值不改类型注解
 - ❌ 只改返回值不改 docstring
-
 
 ## 参数类型约定规范
 
@@ -3768,7 +3688,6 @@ def generate_rsi_ic_data(output_file=None):
 | 维度4: ICIR稳定性 | ICIR >= 2.0 → excellent; >= 1.0 → good | icir_stability |
 | 维度5: IC分布一致性 | positive_ratio 与 ic_mean_sign 匹配 | is_consistent, consistency_type |
 
-
 ## IC分布一致性判断边界规范
 
 **判断规则（含优先级）：**
@@ -3786,7 +3705,6 @@ def generate_rsi_ic_data(output_file=None):
 - 正向因子 50% → consistent（优先级2）
 - 反向因子 50% → consistent（优先级2）
 - 反向因子 51% → balanced（优先级3）
-
 
 ## 增量模式 period 语义规范
 
@@ -3811,7 +3729,6 @@ return factor_df, return_df, {'period_start': raw_period_start, ...}
 - factor_df['date'].min()/max() 计算的是过滤后的范围
 - 与语义定义冲突："原始缓存覆盖范围" ≠ "过滤后的数据范围"
 
-
 ## 引用说明
 
 本文档定义 factor_ic/ 目录下所有 IC 计算脚本的开发规范。
@@ -3820,6 +3737,5 @@ return factor_df, return_df, {'period_start': raw_period_start, ...}
 - 项目级规范：PROJECT.md（目录结构、开发检查清单）
 - 流程文档：factor_ic/docs/ic_<因子名>_<周期>_flow.md
 - 公共函数：factor_ic/common/ 模块
-
 
 *最后更新: 2026-05-19*
