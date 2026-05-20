@@ -67,7 +67,7 @@ factor_ic 模块负责计算各类因子的 IC（Information Coefficient）值�
 # 导致：新脚本遵循旧规范，输出结构不一致
 ```
 
-## factor_ic/ 目录规范
+## factor_ic目录规范
 
 以下规范**仅适用于 `factor_ic/` 目录**，其他目录另有规范。
 
@@ -1648,7 +1648,7 @@ if __name__ == '__main__':
 | `print(e)` 只打印异常对象 | 用户无法理解错误含义 | 打印友好提示 + 详情 + 解决方法 |
 | 无 sys.exit() | 异常后继续执行，可能产生更严重错误 | 错误处理后立即 sys.exit(1) |
 
-## ic_series 排序规范
+## ic_series排序规范
 
 **核心原则：** ic_series.index 必须按日期升序排列。
 
@@ -1675,9 +1675,9 @@ if dates != sorted(dates):
    - 增量路径: JSON 缓存存储字符串，读取后直接使用
    - 当前一致，但依赖隐式实现，缺乏规范保障
 
-## ic_series.index 类型规范
+## ic_series.index类型规范
 
-### ic_series.index 类型规范核心原则
+### ic_series.index类型规范核心原则
 **ic_series.index 必须是字符串类型（格式为 "YYYY-MM-DD"），禁止使用 datetime 对象。**
 
 ### 类型约束
@@ -1763,9 +1763,9 @@ def calculate_daily_ic_series(
 3. **语义一致性：** 参数语义应与数据源语义一致，不应混用不同来源数据
 4. **接口简洁：** 函数签名应尽可能简洁，避免不必要的复杂度
 
-## period.start/end 语义规范
+## period.start/end语义规范
 
-### period.start/end 语义规范核心原则
+### period.start/end语义规范核心原则
 **period.start/end 表示原始缓存范围（dropna 前），而非过滤后范围。**
 
 ### 语义定义
@@ -2031,7 +2031,7 @@ if missing_fields:
 3. 函数返回值结构变更时，调用方静默失败
 4. 校验后的 RuntimeError 包含：缺失字段列表、问题定位、期望字段列表
 
-## 增量计算 None 处理规范
+## 增量计算None处理规范
 
 **核心原则：** 增量计算中 None（股票数不足）的处理必须与全量计算保持一致。
 
@@ -2056,7 +2056,7 @@ for date, ic in zip(new_dates, new_ic_values):
         date_ic_map[date] = ic
 ```
 
-## 全量/增量 IC 计算等价性规范
+## 全量/增量IC等价性规范
 
 **核心原则：** 全量计算与增量计算必须使用同一核心函数（calculate_single_day_ic）。
 
@@ -3287,13 +3287,13 @@ def _incremental_update(...):
 □ 遵循 Python 最佳实践
 ```
 
-## PEP8 import 规范
+## PEP8 import规范
 
-### PEP8 import 规范核心原则
+### PEP8 import规范核心原则
 
 **所有 import 语句必须在文件顶部，禁止在函数内部 import。函数内部 import 会每次调用时重新导入（性能问题），且降低代码可读性。**
 
-### PEP8 import 规范问题背景
+### PEP8 import规范问题背景
 
 ```
 函数内部 import 问题：
@@ -3319,7 +3319,7 @@ def _incremental_update(...):
 - 代码风格不一致：同一模块的函数分散导入
 ```
 
-### PEP8 import 规范正确实现
+### PEP8 import规范正确实现
 
 ```python
 # ✓ 所有 import 在文件顶部
@@ -3335,7 +3335,7 @@ def _incremental_update(...):
     result = calculate_ic_statistics(ic_series)
 ```
 
-### PEP8 import 规范禁止行为
+### PEP8 import规范禁止行为
 
 ```python
 # ❌ 函数内部 import
@@ -3362,7 +3362,7 @@ from factor_ic.common.ic_calculator import calculate_ic_statistics  # ✗ 分散
 3. **可读性**：import 在顶部易于追踪模块依赖
 4. **代码风格一致**：同一模块的函数应统一导入
 
-### PEP8 import 规范适用范围
+### PEP8 import规范适用范围
 
 此规范适用于所有 Python 代码：
 1. **模块级 import**：所有 import 在文件顶部
@@ -3370,7 +3370,7 @@ from factor_ic.common.ic_calculator import calculate_ic_statistics  # ✗ 分散
 3. **避免函数内 import**：除非有特殊原因（如避免循环导入）
 4. **任何 Python 代码**
 
-### PEP8 import 规范检查清单
+### PEP8 import规范检查清单
 
 ```
 □ 所有 import 在文件顶部
@@ -3703,7 +3703,7 @@ def generate_rsi_ic_data(output_file=None):
 - 反向因子 50% → consistent（优先级2）
 - 反向因子 51% → balanced（优先级3）
 
-## 增量模式 period 语义规范
+## 增量模式period语义规范
 
 **核心原则：** period.start/end 必须基于原始缓存数据（dropna 前）。
 
