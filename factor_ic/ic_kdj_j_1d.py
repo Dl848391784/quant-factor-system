@@ -47,6 +47,13 @@ from factor_ic.common.data_completeness import check_data_completeness, get_ic_o
 # 导入类型转换模块
 from factor_ic.common.convert_types import convert_to_native_types
 
+# ============================================================================
+# 参数统一管理（遵循 PROJECT.md 参数传递规范）
+# ============================================================================
+# 默认最小股票数：用于 IC 计算（单日股票数不足时返回 None）
+# 注意：修改此值会影响所有 IC 计算逻辑，需同步更新相关注释
+DEFAULT_MIN_STOCKS = 10
+
 # 缓存路径
 CACHE_DIR = Path(__file__).parent.parent / 'cache' / 'factor_data'
 FACTOR_CACHE = CACHE_DIR / 'factor_data.json.gz'
@@ -274,8 +281,46 @@ def load_data_from_cache(
     return_df = pd.DataFrame(return_data['data'])
     print(f"  - 收益数据: {len(return_df)} 行, {return_df['asset'].nunique()} 只股票")
     
+    # 日期类型统一转换（遵循 PROJECT.md 日期类型一致性规范）
+    # 从 JSON 加载后，日期可能是多种格式（字符串、datetime、timestamp）
+    # 统一转换为字符串格式 "YYYY-MM-DD"，确保 isin 操作类型匹配
+    # 使用 errors='coerce' 处理异常格式，转换后检查 NaT 数量
+    
+    if 'date' in factor_df.columns:
+        date_series = pd.to_datetime(factor_df['date'], errors='coerce')
+        nat_count = date_series.isna().sum()
+        if nat_count > 0:
+            # 获取无效日期样本（前 5 个）
+            invalid_samples = factor_df['date'][date_series.isna()].iloc[:5].tolist()
+            raise ValueError(
+                f"因子数据中存在 {nat_count} 个无效日期格式\n"
+                f"无效日期示例: {invalid_samples}\n"
+                f"请检查缓存数据源是否包含脏数据"
+            )
+        factor_df['date'] = date_series.dt.strftime('%Y-%m-%d')
+    
+    if 'date' in return_df.columns:
+        date_series = pd.to_datetime(return_df['date'], errors='coerce')
+        nat_count = date_series.isna().sum()
+        if nat_count > 0:
+            invalid_samples = return_df['date'][date_series.isna()].iloc[:5].tolist()
+            raise ValueError(
+                f"收益数据中存在 {nat_count} 个无效日期格式\n"
+                f"无效日期示例: {invalid_samples}\n"
+                f"请检查缓存数据源是否包含脏数据"
+            )
+        return_df['date'] = date_series.dt.strftime('%Y-%m-%d')
+    
     # 选择必要的列（KDJ_J 需要 close, high, low）
+    # 输入验证（遵循 PROJECT.md 输入验证规范）
     required_cols = ['date', 'asset', 'close', 'high', 'low']
+    missing_cols = [c for c in required_cols if c not in factor_df.columns]
+    if missing_cols:
+        available_cols = sorted(factor_df.columns.tolist())
+        raise KeyError(
+            f"因子数据缺少必需列: {missing_cols}\n"
+            f"可用列: {available_cols}"
+        )
     factor_df = factor_df[required_cols].copy()
     
     # 在 dropna 之前，计算原始数据范围（遵循 PROJECT.md 输出字段语义规范）
@@ -289,11 +334,15 @@ def load_data_from_cache(
     factor_df = factor_df.dropna(subset=['close', 'high', 'low']).reset_index(drop=True)
     
     # 重命名收益列
-    if 'forward_return_1d' in return_df.columns:
-        return_df = return_df[['date', 'asset', 'forward_return_1d']].copy()
-        return_df = return_df.rename(columns={'forward_return_1d': 'forward_return'})
-    else:
-        raise KeyError("收益列 'forward_return_1d' 不存在于缓存数据中")
+    # 输入验证（遵循 PROJECT.md 输入验证规范）
+    if 'forward_return_1d' not in return_df.columns:
+        available_cols = sorted(return_df.columns.tolist())
+        raise KeyError(
+            f"收益列 'forward_return_1d' 不存在于缓存数据中\n"
+            f"可用列: {available_cols}"
+        )
+    return_df = return_df[['date', 'asset', 'forward_return_1d']].copy()
+    return_df = return_df.rename(columns={'forward_return_1d': 'forward_return'})
     
     return_df = return_df.dropna(subset=['forward_return']).reset_index(drop=True)
     
@@ -317,22 +366,26 @@ def load_data_from_cache(
 def calculate_daily_ic_series(
     factor_df: pd.DataFrame,
     return_df: pd.DataFrame,
-    period_start: str = None,
-    period_end: str = None
+    raw_metadata: dict = None,
+    min_stocks: int = DEFAULT_MIN_STOCKS  # 遵循 PROJECT.md 参数传递规范
 ) -> dict:
     """
-    计算每日的 IC 时间序列
+    计算每日的 IC 时间序列（带方向验证）
     
     参数:
-        factor_df: 因子数据
-        return_df: 收益数据
-        period_start: 数据起始日期
-        period_end: 数据结束日期
+        factor_df: 因子数据（已过滤缺失值）
+        return_df: 收益数据（已过滤缺失值）
+        raw_metadata: 原始数据元信息（遵循 PROJECT.md period/total_days 数据源规范）
+            - period_start: 原始缓存最小日期
+            - period_end: 原始缓存最大日期
+            - total_days: 原始缓存日期数
+        min_stocks: 最小股票数阈值（遵循 PROJECT.md 参数传递规范）
     
     返回:
-        dict: IC 计算结果（符合 PROJECT.md 五维度判断规范）
+        dict: IC 计算结果（符合 PROJECT.md 规范）
     """
-    # 使用 IC 计算（支持因子方向验证）
+    # 使用方向验证 IC 计算
+    # 参数 min_stocks 通过函数签名传递，统一管理（遵循 PROJECT.md 参数传递规范）
     result = calculate_ic_with_direction_verification(
         factor_df=factor_df,
         return_df=return_df,
@@ -340,25 +393,74 @@ def calculate_daily_ic_series(
         return_col='forward_return',
         date_col='date',
         asset_col='asset',
-        min_stocks=10
+        min_stocks=min_stocks  # 使用函数参数，遵循 PROJECT.md 参数传递规范
     )
     
     ic_series = result['ic_series']
     
-    # 获取日期范围
-    if period_start is None:
-        period_start = str(factor_df['date'].min())
-    if period_end is None:
-        period_end = str(factor_df['date'].max())
+    # 防御性校验：确保 result 包含必需字段
+    # 遵循 PROJECT.md 函数返回值契约规范
+    required_fields = [
+        'ic_series', 'ic_mean', 'ic_std', 'icir',
+        'statistical_significance', 'factor_direction',
+        'economic_significance', 'icir_stability',
+        'ic_distribution_consistency', 'positive_ratio', 'summary'
+    ]
+    missing_fields = [f for f in required_fields if f not in result]
+    if missing_fields:
+        raise RuntimeError(
+            f"calculate_ic_with_direction_verification 返回值缺少必需字段\n"
+            f"缺失字段: {missing_fields}\n"
+            f"问题定位: factor_ic/common/ic_calculator.py\n"
+            f"期望字段: {required_fields}"
+        )
+    
+    # 获取日期范围（遵循 PROJECT.md period 数据源规范）
+    # 使用 raw_metadata 中的原始数据范围，而非过滤后的 factor_df
+    if raw_metadata is None:
+        raw_metadata = {}
+    period_start = raw_metadata.get('period_start', str(factor_df['date'].min()))
+    period_end = raw_metadata.get('period_end', str(factor_df['date'].max()))
+    total_days = raw_metadata.get('total_days', factor_df['date'].nunique())
     
     # 转换为 JSON 友好格式
     dates = [str(d) for d in ic_series.index]
     ic_values = [round(v, 6) for v in ic_series.values]
     
-    # 计算 20 日滚动均值
     # 计算 20 日滚动均值（min_periods=10，至少需要10个有效值）
     rolling_mean = ic_series.rolling(window=20, min_periods=10).mean()
-    rolling_ic_mean = [round(v, 6) for v in rolling_mean.values]
+    
+    # 遵循 PROJECT.md NaN 处理规范：在数据生成阶段将 NaN 转为 None
+    # 原因：rolling 前 9 天不满 min_periods=10，返回 NaN
+    #       round(NaN, 6) 返回 Python float nan，而非 None
+    rolling_ic_mean = [
+        round(v, 6) if not pd.isna(v) else None
+        for v in rolling_mean.values
+    ]
+    
+    # 防御性校验：确保 dates、ic_values、rolling_ic_mean 长度一致
+    # 遵循 PROJECT.md 输出字段长度一致性规范
+    if len(dates) != len(ic_values):
+        raise RuntimeError(
+            f"dates 与 ic_values 长度不一致: "
+            f"len(dates)={len(dates)} != len(ic_values)={len(ic_values)}"
+        )
+    if len(dates) != len(rolling_ic_mean):
+        raise RuntimeError(
+            f"dates 与 rolling_ic_mean 长度不一致: "
+            f"len(dates)={len(dates)} != len(rolling_ic_mean)={len(rolling_ic_mean)}\n"
+            f"理论上应相等（都来自 ic_series），若不一致可能是 pandas rolling 内部问题"
+        )
+    
+    # 防御性校验：确保 dates 按升序排列
+    # 遵循 PROJECT.md 规范：ic_series.index 必须按日期排序
+    # 原因：rolling 计算按位置顺序，若 dates 乱序会导致 dates[i] 与 rolling_ic_mean[i] 对应错误
+    if dates != sorted(dates):
+        raise RuntimeError(
+            f"dates 未按升序排列，可能导致 dates 与 rolling_ic_mean 对应错误\n"
+            f"dates 前5个: {dates[:5]}\n"
+            f"sorted 前5个: {sorted(dates)[:5]}"
+        )
     
     # 符合 PROJECT.md 规范的数据结构（五维度判断）
     return {
@@ -393,8 +495,12 @@ def calculate_daily_ic_series(
             'conclusion': result['economic_significance']['conclusion']
         },
         'sample_stats': {
-            'total_days': len(dates),
-            'valid_days': len(dates),
+            # 语义定义（遵循 PROJECT.md 输出字段语义规范）：
+            # - total_days: 原始因子缓存覆盖的日期数（dropna 前的数据范围）
+            # - valid_days: 实际计算出 IC 的天数（每交易日股票数 >= min_stocks）
+            # - 差值含义: total_days - valid_days = 因股票不足或数据缺失跳过的交易日数
+            'total_days': total_days,  # 使用 raw_metadata
+            'valid_days': len(dates),  # dates 来自 ic_series.index（有效IC日期）
             'avg_stocks_per_day': int(factor_df.groupby('date').size().mean())
         },
         'dates': dates,
@@ -457,15 +563,29 @@ def generate_kdj_j_ic_data(
     try:
         factor_df, return_df, raw_metadata = load_data_from_cache(n=n, m1=m1, m2=m2)
         
-        # 检查数据量
-        if factor_df['asset'].nunique() < 10:
+        # 检查数据量（遵循 PROJECT.md 数据验证规范）
+        if factor_df['asset'].nunique() < DEFAULT_MIN_STOCKS:
             raise ValueError(
                 f"股票数量不足以计算有效的 IC\n"
-                f"当前: {factor_df['asset'].nunique()} < 10"
+                f"当前: {factor_df['asset'].nunique()} < {DEFAULT_MIN_STOCKS}"
             )
-            
+        
+    except FileNotFoundError as e:
+        # 基础设施错误：可包装为 RuntimeError
+        raise RuntimeError(f"缓存文件不存在: {e}") from e
+    except KeyError as e:
+        # 数据验证错误：直接 raise，保留原始类型
+        raise  # 不包装，遵循 PROJECT.md 异常处理类型保留规范
+    except ValueError as e:
+        # 数据验证错误：直接 raise，保留原始类型
+        raise  # 不包装，遵循 PROJECT.md 异常处理类型保留规范
     except Exception as e:
-        raise RuntimeError(f"数据加载失败: {e}")
+        # 未预期异常：包装为 RuntimeError，保留异常链
+        raise RuntimeError(
+            f"数据加载失败（未预期异常）\n"
+            f"异常类型: {type(e).__name__}\n"
+            f"错误详情: {e}"
+        ) from e
     
     # 使用缓存全部日期（不截断）
     
@@ -477,11 +597,14 @@ def generate_kdj_j_ic_data(
     
     # 计算 IC
     print("\n[2/3] 计算每日 IC...")
-    ic_data = calculate_daily_ic_series(factor_df, return_df)
+    ic_data = calculate_daily_ic_series(factor_df, return_df, raw_metadata=raw_metadata)
     print(f"  - IC 均值: {ic_data['ic_metrics']['ic_mean']:.4f}")
     print(f"  - ICIR: {ic_data['ic_metrics']['icir']:.2f}")
     print(f"  - 正比例: {ic_data['positive_ratio']:.1%}")
-    print(f"  - t 统计量: {ic_data['t_stat']:.2f} {ic_data['significance']}")
+    t_stat = ic_data['statistical_significance']['t_stat']
+    is_sig = ic_data['statistical_significance']['is_significant']
+    sig_display = "显著" if is_sig else "不显著"
+    print(f"  - t 统计量: {t_stat:.2f} ({sig_display})")
     
     # 保存数据
     print(f"\n[3/3] 保存数据到: {output_file}")
