@@ -298,9 +298,16 @@ def calculate_bollinger_pb_1d_factor(
     finally:
         # 确保临时列清理（正常流程和异常流程统一处理）
         # 检查列是否存在再删除（部分临时列可能未写入）
-        existing_temp_cols = [c for c in temp_cols if c in factor_df.columns]
-        if existing_temp_cols:
-            factor_df.drop(columns=existing_temp_cols, inplace=True)
+        # 异常保护：清理失败不应掩盖 try 块的真实结果（成功或异常）
+        try:
+            existing_temp_cols = [c for c in temp_cols if c in factor_df.columns]
+            if existing_temp_cols:
+                factor_df.drop(columns=existing_temp_cols, inplace=True)
+        except Exception as cleanup_error:
+            # 清理失败：打印警告但不抛出异常（避免掩盖 try 块的真实结果）
+            # 临时列残留不会影响 bollinger_pb_1d 的正确性，只是可能干扰后续调试
+            print(f"  [警告] 临时列清理失败: {cleanup_error}")
+            print(f"  [警告] 残留列: {[c for c in temp_cols if c in factor_df.columns]}")
     
     # 统计有效记录
     stats['valid_records'] = int(factor_df['bollinger_pb_1d'].notna().sum())
