@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 12:30 北京时间
-> 实测数据时间: 2026-05-20 12:15 北京时间
-> 版本: v1.0
-> 更新内容: 初始版本，基于优化后的代码实现
+> 生成时间: 2026-05-20 13:15 北京时间
+> 实测数据时间: 2026-05-20 13:10 北京时间
+> 版本: v1.1
+> 更新内容: 新增 avg_stocks_period 字段说明、完善异常处理分层规范
 
 ---
 
@@ -80,11 +80,21 @@ generate_kdj_j_ic_data()
 | total_days | int | 原始缓存覆盖的日期数（545） |
 | valid_days | int | 实际计算出IC的天数（514） |
 | avg_stocks_per_day | int | 平均每日有效股票数（2720） |
+| avg_stocks_period | object | avg_stocks_per_day 的统计口径范围 |
+
+**avg_stocks_period 子字段：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| start | str | 统计范围起始日期（2024-02-06） |
+| end | str | 统计范围结束日期（2026-05-15） |
+| description | str | 字段语义说明 |
 
 **语义说明：**
 - `total_days = 545`：原始因子缓存覆盖545个交易日
 - `valid_days = 514`：实际参与IC计算的日期（股票数 >= 10）
 - `差值 = 31`：因股票数不足跳过的交易日
+- `avg_stocks_per_day`：反映 dropna 后数据范围内的平均每日股票数
 
 ---
 
@@ -159,7 +169,7 @@ DEFAULT_MIN_STOCKS = 10
 
 ## 异常处理规范
 
-### 分层捕获
+### 分层捕获（数据加载）
 
 ```python
 except FileNotFoundError as e:
@@ -175,6 +185,41 @@ except Exception as e:
     # 未预期异常：包装为 RuntimeError
     raise RuntimeError(...) from e
 ```
+
+### 分层捕获（缓存文件读取）
+
+```python
+# 增量模式读取已有缓存时
+except FileNotFoundError:
+    # 可恢复错误：缓存文件不存在，降级全量计算
+    print("  [诊断] 缓存文件不存在，执行全量计算")
+    pass  # fallthrough 到全量计算
+except json.JSONDecodeError as e:
+    # 严重错误：缓存文件损坏，不静默降级
+    raise RuntimeError(
+        f"缓存文件损坏，无法解析 JSON: {output_file}\n"
+        f"错误详情: {e}\n"
+        f"建议: 删除损坏的缓存文件后重新运行"
+    ) from e
+except PermissionError as e:
+    # 严重错误：权限问题，不静默降级
+    raise RuntimeError(
+        f"缓存文件权限不足，无法读取: {output_file}\n"
+        f"错误详情: {e}"
+    ) from e
+except Exception as e:
+    # 未预期异常：抛出异常 + 详细诊断
+    raise RuntimeError(
+        f"读取缓存失败（未预期异常）: {output_file}\n"
+        f"异常类型: {type(e).__name__}\n"
+        f"错误详情: {e}"
+    ) from e
+```
+
+**关键原则：**
+- FileNotFoundError：可恢复，降级全量计算
+- JSONDecodeError/PermissionError：严重错误，不静默降级
+- 遵循 factor-script-optimization-checklist.md Section 22 规范
 
 ---
 
@@ -305,13 +350,15 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 |--------|---------|------|
 | DEFAULT_MIN_STOCKS 常量 | ✓ | 已添加 |
 | 函数签名一致性 | ✓ | 与 ic_rsi_1d.py 一致 |
-| 异常处理分层 | ✓ | ValueError直接raise |
+| 异常处理分层 | ✓ | ValueError直接raise，JSONDecodeError/PermissionError不降级 |
 | 日期类型转换 | ✓ | pd.to_datetime + errors='coerce' |
 | total_days 使用 raw_metadata | ✓ | 545 vs 514（有差距） |
 | rolling_ic_mean NaN处理 | ✓ | 前9个为 null |
 | 打印字段访问正确 | ✓ | statistical_significance子对象 |
 | 输入验证友好 | ✓ | 显示可用列列表 |
 | 防御性校验完整 | ✓ | required_fields + 排序 |
+| avg_stocks_period 字段 | ✓ | 新增，说明统计口径范围 |
+| 异常分层缓存读取 | ✓ | 区分可恢复和严重错误 |
 
 ---
 
@@ -320,7 +367,8 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | 版本 | 日期 | 更新内容 |
 |------|------|---------|
 | v1.0 | 2026-05-20 | 初始版本，基于优化后的代码实现 |
+| v1.1 | 2026-05-20 | 新增 avg_stocks_period 字段说明，完善异常处理分层规范（Section 22） |
 
 ---
 
-*最后更新: 2026-05-20 12:30*
+*最后更新: 2026-05-20 13:15*"

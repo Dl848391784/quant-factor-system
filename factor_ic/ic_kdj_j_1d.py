@@ -501,7 +501,13 @@ def calculate_daily_ic_series(
             # - 差值含义: total_days - valid_days = 因股票不足或数据缺失跳过的交易日数
             'total_days': total_days,  # 使用 raw_metadata
             'valid_days': len(dates),  # dates 来自 ic_series.index（有效IC日期）
-            'avg_stocks_per_day': int(factor_df.groupby('date').size().mean())
+            'avg_stocks_per_day': int(factor_df.groupby('date').size().mean()),
+            # avg_stocks_period 说明 avg_stocks_per_day 的统计口径范围（遵循 MODULE.md 输出字段口径规范）
+            'avg_stocks_period': {
+                'start': period_start,
+                'end': period_end,
+                'description': 'avg_stocks_per_day 反映此范围内的平均每日股票数（dropna 后）'
+            }
         },
         'dates': dates,
         'ic_values': ic_values,
@@ -547,10 +553,31 @@ def generate_kdj_j_ic_data(
             try:
                 with open(output_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
-            except Exception as e:
-                print(f"读取缓存失败: {e}，将执行全量计算")
+            except FileNotFoundError:
+                # 可恢复错误：缓存文件不存在，降级全量计算
+                print("  [诊断] 缓存文件不存在，执行全量计算")
                 # 显式 fallthrough 到全量计算（遵循 PROJECT.md 增量模式异常处理规范）
                 pass  # except 块结束，代码继续向下执行全量计算
+            except json.JSONDecodeError as e:
+                # 严重错误：缓存文件损坏，不静默降级
+                raise RuntimeError(
+                    f"缓存文件损坏，无法解析 JSON: {output_file}\n"
+                    f"错误详情: {e}\n"
+                    f"建议: 删除损坏的缓存文件后重新运行"
+                ) from e
+            except PermissionError as e:
+                # 严重错误：权限问题，不静默降级
+                raise RuntimeError(
+                    f"缓存文件权限不足，无法读取: {output_file}\n"
+                    f"错误详情: {e}"
+                ) from e
+            except Exception as e:
+                # 未预期异常：抛出异常 + 详细诊断
+                raise RuntimeError(
+                    f"读取缓存失败（未预期异常）: {output_file}\n"
+                    f"异常类型: {type(e).__name__}\n"
+                    f"错误详情: {e}"
+                ) from e
     
     # 全量计算逻辑
     print("=" * 60)
