@@ -267,10 +267,12 @@ def calculate_turnover_surge_factor(factor_df: pd.DataFrame) -> Tuple[pd.DataFra
     print(f"    换手率突增+上涨:     {filter_stats['both_conditions_count']:,} ({filter_stats['retention_ratio']*100:.1f}%)")
     print(f"    有效因子记录数:     {valid_count:,}")
     
-    # Step 4: 极端值处理（裁剪到 0.5-10）
+    # Step 4: 极端值处理（裁剪到 1.0-10，遵循 MODULE.md 极端值裁剪规范）
+    # 裁剪下界 1.0 等于筛选条件下界（turnover_surge > 1），裁剪范围与筛选条件一致
+    # 筛选条件已经过滤掉了 <= 1 的值，裁剪下界 0.5 永远不会生效
     if factor_df['turnover_surge'].notna().any():
         mask = factor_df['turnover_surge'].notna()
-        factor_df.loc[mask, 'turnover_surge'] = factor_df.loc[mask, 'turnover_surge'].clip(0.5, 10)
+        factor_df.loc[mask, 'turnover_surge'] = factor_df.loc[mask, 'turnover_surge'].clip(1.0, 10)
         
         valid_values = factor_df.loc[mask, 'turnover_surge']
         print(f"    因子范围（裁剪后）: [{valid_values.min():.2f}, {valid_values.max():.2f}]")

@@ -1482,6 +1482,90 @@ def calculate_turnover_surge_ic(factor_df, return_df, ...):
 
 ---
 
+## 极端值裁剪规范（2026-05-21新增）
+
+### 核心原则
+
+**极端值裁剪范围必须与筛选条件一致。裁剪下界应等于或大于筛选条件下界，裁剪上界应等于或小于筛选条件上界（如有）。**
+
+### 问题背景
+
+```
+极端值裁剪与筛选条件矛盾问题：
+
+错误代码：
+# 筛选条件：turnover_surge > 1
+turnover_surge_cond = factor_df['turnover_surge'] > 1
+price_up = factor_df['price_pct_change'] > 0
+both_conditions = turnover_surge_cond & price_up
+
+# 不满足条件的股票因子值设为 None
+factor_df.loc[~both_conditions, 'turnover_surge'] = None
+
+# 极端值裁剪：clip(0.5, 10)
+factor_df.loc[mask, 'turnover_surge'] = factor_df.loc[mask, 'turnover_surge'].clip(0.5, 10)
+
+问题：
+- 筛选条件要求 turnover_surge > 1（不满足的设为 None）
+- 裁剪下界 0.5 < 筛选下界 1.0
+- 满足筛选条件的值已经 > 1，裁剪下界 0.5 永远不会生效
+- 裁剪范围与筛选条件矛盾，浪费计算资源
+
+正确代码：
+# 筛选条件：turnover_surge > 1
+turnover_surge_cond = factor_df['turnover_surge'] > 1
+price_up = factor_df['price_pct_change'] > 0
+both_conditions = turnover_surge_cond & price_up
+
+# 不满足条件的股票因子值设为 None
+factor_df.loc[~both_conditions, 'turnover_surge'] = None
+
+# 极端值裁剪：clip(1.0, 10)（遵循 MODULE.md 极端值裁剪规范）
+# 下界 1.0 等于筛选条件下界，裁剪范围与筛选条件一致
+factor_df.loc[mask, 'turnover_surge'] = factor_df.loc[mask, 'turnover_surge'].clip(1.0, 10)
+```
+
+### 极端值裁剪一致性规范
+
+| 场景 | 裁剪下界规则 | 裁剪上界规则 |
+|------|--------------|--------------|
+| 筛选条件 `factor > X` | 裁剪下界 ≥ X（推荐 = X） | 无上界约束 |
+| 筛选条件 `factor < Y` | 无下界约束 | 裁剪上界 ≤ Y（推荐 = Y） |
+| 筛选条件 `factor > X 且 factor < Y` | 裁剪下界 ≥ X（推荐 = X） | 裁剪上界 ≤ Y（推荐 = Y） |
+| 无筛选条件 | 根据业务逻辑设定 | 根据业务逻辑设定 |
+
+### 验证规则
+
+**验证公式：**
+```
+裁剪下界 ≥ 筛选下界（如有）
+裁剪上界 ≤ 筛选上界（如有）
+```
+
+**验证代码：**
+```python
+# ✓ 正确：验证裁剪范围与筛选条件一致性
+clip_lower = 1.0
+clip_upper = 10.0
+filter_lower = 1.0  # 筛选条件：turnover_surge > 1
+
+if clip_lower < filter_lower:
+    raise ValueError(f"裁剪下界 {clip_lower} < 筛选下界 {filter_lower}，裁剪范围与筛选条件矛盾")
+
+print(f"极端值裁剪范围: [{clip_lower}, {clip_upper}]，筛选条件: > {filter_lower}")
+```
+
+### 常见错误模式
+
+| 错误代码 | 问题 | 修复 |
+|----------|------|------|
+| `clip(0.5, 10)`（筛选条件 `> 1`） | 裁剪下界 < 筛选下界，下界永远不生效 | `clip(1.0, 10)` |
+| `clip(1, 20)`（筛选条件 `< 10`） | 裁剪上界 > 筛选上界，上界永远不生效 | `clip(1, 10)` |
+| `clip(0, 5)`（筛选条件 `> 0`） | 裁剪下界 = 筛选下界边界，逻辑不清晰 | `clip(0.001, 5)`（明确 > 0 的边界） |
+| 无验证裁剪范围 | 裁剪范围与筛选条件可能矛盾 | 添加一致性验证 |
+
+---
+
 ## ic_series 排序规范
 
 **核心原则：** ic_series.index 必须按日期升序排列。
