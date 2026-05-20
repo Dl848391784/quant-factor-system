@@ -717,7 +717,7 @@ def calculate_daily_ic_series(
 
 
 def generate_kdj_j_ic_data(
-    output_file: str = None,
+    output_file: Path | str | None = None,
     force_full: bool = False,
     n: int = 9,
     m1: int = 3,
@@ -727,7 +727,7 @@ def generate_kdj_j_ic_data(
     从缓存数据计算 KDJ_J IC
     
     参数:
-        output_file: 输出文件路径
+        output_file: 输出文件路径（Path 或 str，内部统一转为 Path）
         force_full: 强制全量计算
         n: RSV 计算周期
         m1: K值平滑周期
@@ -739,8 +739,11 @@ def generate_kdj_j_ic_data(
     规范:
         使用缓存全部日期数据，不截断
     """
+    # 统一转换为 Path 对象（遵循 PROJECT.md 参数类型约定）
     if output_file is None:
         output_file = get_ic_output_path('kdj_j_1d')
+    else:
+        output_file = Path(output_file)
     
     # 增量判断（除非强制全量）
     # 控制流语义（遵循 MODULE.md 控制流规范）：
