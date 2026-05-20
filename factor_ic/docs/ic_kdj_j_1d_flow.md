@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 16:55 北京时间
-> 实测数据时间: 2026-05-20 16:50 北京时间
-> 版本: v1.18
-> 更新内容: 修复 groupby transform 异常信息淹没问题，添加 try/except 捕获并附加诊断信息
+> 生成时间: 2026-05-20 17:00 北京时间
+> 实测数据时间: 2026-05-20 16:55 北京时间
+> 版本: v1.19
+> 更新内容: 修复 IC 空场景异常信息使用过滤后数据而非原始数据的问题
 
 ---
 
@@ -771,6 +771,64 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.16 | 2026-05-20 | 修复 K/D 初始值函数注释语义表述，精确描述 ewm 递推逻辑（预处理输入而非直接赋值输出） |
 | v1.17 | 2026-05-20 | 修复死代码守卫问题，移除无效守卫逻辑，用注释说明控制流语义（遵循 MODULE.md 控制流规范） |
 | v1.18 | 2026-05-20 | 修复 groupby transform 异常信息淹没问题，添加 try/except 捕获并附加诊断信息（遵循 MODULE.md 异常处理规范） |
+| v1.19 | 2026-05-20 | 修复 IC 空场景异常信息使用过滤后数据而非原始数据统计的问题（遵循 MODULE.md 异常处理规范） |
+
+---
+
+## IC 空场景异常诊断规范
+
+### 问题根因
+
+**场景：** 当所有交易日股票数均不足 min_stocks 时，IC 计算结果为空，抛出 RuntimeError。
+
+**原始代码（诊断信息误导）：**
+```python
+if len(dates) == 0:
+    raise RuntimeError(
+        f"IC 计算结果为空：所有交易日股票数均不足 min_stocks={min_stocks}\n"
+        f"诊断信息:\n"
+        f"  - 因子数据: {len(factor_df)} 行, {factor_df['asset'].nunique()} 只股票\n"  # 过滤后数据
+        f"  - 收益数据: {len(return_df)} 行, {return_df['asset'].nunique()} 只股票\n"
+        f"  - 日期范围: {factor_df['date'].min()} ~ {factor_df['date'].max()}\n"
+    )
+```
+
+**问题分析：**
+1. factor_df/return_df 是过滤后的数据（已删除缺失值）
+2. 若 IC 为空，这些数据可能已经很小或为空，甚至无法获取 min/max
+3. 用户无法知道原始数据规模，无法判断是数据源问题还是过滤问题
+4. 诊断信息误导：`len(factor_df)=0` 可能让人误以为是数据缺失，而非 min_stocks 过滤
+
+### 修复方案
+
+**使用 raw_metadata 中的原始数据统计：**
+```python
+if len(dates) == 0:
+    # 诊断信息必须使用原始数据统计（遵循 MODULE.md 异常处理规范）
+    # raw_metadata 包含原始数据统计（period_start/total_days/avg_stocks_per_day）
+    raise RuntimeError(
+        f"IC 计算结果为空：所有交易日股票数均不足 min_stocks={min_stocks}\n"
+        f"原始数据统计（来自 raw_metadata）:\n"
+        f"  - 原始日期范围: {period_start} ~ {period_end}\n"
+        f"  - 原始交易日数: {total_days}\n"
+        f"  - 原始平均每日股票数: {raw_metadata.get('avg_stocks_per_day', 'N/A')}\n"
+        f"过滤后数据统计（诊断用）:\n"
+        f"  - 因子数据: {len(factor_df)} 行, {factor_df['asset'].nunique()} 只股票\n"
+        f"  - 收益数据: {len(return_df)} 行, {return_df['asset'].nunique()} 只股票\n"
+    )
+```
+
+### 设计原则
+
+1. **优先使用原始数据：** raw_metadata 中的统计反映数据源真实情况
+2. **保留过滤后数据作为补充：** 便于诊断过滤过程是否有问题
+3. **信息分层：** 原始数据统计（判断数据源）→ 过滤后统计（判断过滤逻辑）
+4. **遵循 MODULE.md 规范：** 异常信息必须完整、可诊断
+
+### 适用场景
+
+- 所有涉及数据过滤后的异常处理
+- 所有需要诊断数据规模的异常场景
 
 ---
 

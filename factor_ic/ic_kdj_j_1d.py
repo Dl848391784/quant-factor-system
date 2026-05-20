@@ -557,12 +557,18 @@ def calculate_daily_ic_series(
     # 问题：返回"半空"结果字典难以诊断根本原因，valid_range.start/end 为 None
     # 解决：在生成结果前检查，抛出有意义的异常便于诊断
     if len(dates) == 0:
+        # 诊断信息必须使用原始数据统计（遵循 MODULE.md 异常处理规范）
+        # 原因：factor_df/return_df 是过滤后的数据，若 IC 为空可能本身已很小或为空
+        # raw_metadata 包含原始数据统计（period_start/total_days/avg_stocks_per_day）
         raise RuntimeError(
             f"IC 计算结果为空：所有交易日股票数均不足 min_stocks={min_stocks}\n"
-            f"诊断信息:\n"
+            f"原始数据统计（来自 raw_metadata）:\n"
+            f"  - 原始日期范围: {period_start} ~ {period_end}\n"
+            f"  - 原始交易日数: {total_days}\n"
+            f"  - 原始平均每日股票数: {raw_metadata.get('avg_stocks_per_day', 'N/A')}\n"
+            f"过滤后数据统计（诊断用）:\n"
             f"  - 因子数据: {len(factor_df)} 行, {factor_df['asset'].nunique()} 只股票\n"
             f"  - 收益数据: {len(return_df)} 行, {return_df['asset'].nunique()} 只股票\n"
-            f"  - 日期范围: {factor_df['date'].min()} ~ {factor_df['date'].max()}\n"
             f"建议: 降低 min_stocks 阈值或检查数据源股票覆盖率"
         )
     
