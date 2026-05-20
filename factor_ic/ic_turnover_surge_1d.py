@@ -343,7 +343,7 @@ def calculate_turnover_surge_ic(
                 }
             },
             
-            # 五维度判断（空数据默认值）
+            # 五维度判断（空数据默认值，遵循 MODULE.md 输出结构统一性规范）
             'statistical_significance': {
                 'is_significant': False,
                 'p_value_threshold': 0.05,
@@ -363,17 +363,32 @@ def calculate_turnover_surge_ic(
                 'is_economically_significant': False,
                 'description': '数据不足，无法判断经济显著性'
             },
+            'icir_stability': {
+                'is_stable': False,
+                'rolling_icir_std': 0.0,
+                'stability_threshold': 0.15,
+                'description': '数据不足，无法判断 ICIR 稳定性'
+            },
+            'ic_distribution_consistency': {
+                'is_consistent': False,
+                'positive_ratio': 0.0,
+                'consistency_threshold': 0.55,
+                'description': '数据不足，无法判断 IC 分布一致性'
+            },
             
             # 顶层输出字段（遵循 MODULE.md 输出结构统一性规范）
             'dates': [],
             'ic_values': [],
             'rolling_ic_mean': [],
             
-            # 额外字段
+            # 额外字段（遵循 MODULE.md 输出结构统一性规范）
+            'filter_stats': None,
             'positive_ratio': 0.0,
+            't_stat': 0.0,
             'n_assets': 0,
             'summary': '数据不足，无法计算IC',
-            'factor_stats': None,
+            
+            # 更新模式标记（遵循 PROJECT.md 返回值标记规范）
             'update_mode': 'full'
         }
     
@@ -415,7 +430,7 @@ def calculate_turnover_surge_ic(
                 }
             },
             
-            # 五维度判断（空数据默认值）
+            # 五维度判断（空数据默认值，遵循 MODULE.md 输出结构统一性规范）
             'statistical_significance': {
                 'is_significant': False,
                 'p_value_threshold': 0.05,
@@ -435,17 +450,32 @@ def calculate_turnover_surge_ic(
                 'is_economically_significant': False,
                 'description': f'无法判断经济显著性: {str(e)}'
             },
+            'icir_stability': {
+                'is_stable': False,
+                'rolling_icir_std': 0.0,
+                'stability_threshold': 0.15,
+                'description': f'无法判断 ICIR 稳定性: {str(e)}'
+            },
+            'ic_distribution_consistency': {
+                'is_consistent': False,
+                'positive_ratio': 0.0,
+                'consistency_threshold': 0.55,
+                'description': f'无法判断 IC 分布一致性: {str(e)}'
+            },
             
             # 顶层输出字段（遵循 MODULE.md 输出结构统一性规范）
             'dates': [],
             'ic_values': [],
             'rolling_ic_mean': [],
             
-            # 额外字段
+            # 额外字段（遵循 MODULE.md 输出结构统一性规范）
+            'filter_stats': None,
             'positive_ratio': 0.0,
+            't_stat': 0.0,
             'n_assets': int(factor_data['asset'].nunique()),
             'summary': f'无法计算IC: {str(e)}',
-            'factor_stats': None,
+            
+            # 更新模式标记（遵循 PROJECT.md 返回值标记规范）
             'update_mode': 'full'
         }
     
