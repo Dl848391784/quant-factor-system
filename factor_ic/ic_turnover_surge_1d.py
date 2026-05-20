@@ -338,7 +338,7 @@ def calculate_turnover_surge_ic(
     period_start = raw_metadata.get('period_start', '') if raw_metadata else ''
     period_end = raw_metadata.get('period_end', '') if raw_metadata else ''
     
-    # 提取 ic_series 用于 ic_series 输出字段
+    # 提取 ic_series（内部变量，用于生成顶层输出字段 dates/ic_values/rolling_ic_mean）
     ic_series = result['ic_series']
     
     # 转换为 JSON 友好格式（遵循 PROJECT.md NaN 处理规范）
@@ -485,7 +485,7 @@ def _full_recalculate(
         'icir_stability': ic_data['icir_stability'],
         'ic_distribution_consistency': ic_data['ic_distribution_consistency'],
         
-        # ic_series 输出字段（遵循 MODULE.md 输出结构统一性规范：顶层字段）
+        # 顶层输出字段（遵循 MODULE.md 输出结构统一性规范）
         'dates': ic_data['dates'],
         'ic_values': ic_data['ic_values'],
         'rolling_ic_mean': ic_data['rolling_ic_mean'],
