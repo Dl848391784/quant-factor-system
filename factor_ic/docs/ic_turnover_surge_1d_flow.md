@@ -1,7 +1,7 @@
 # Turnover_Surge_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 22:30 (北京时间)
-> 审阅版本: v1.10
+> 生成时间: 2026-05-20 23:00 (北京时间)
+> 审阅版本: v1.11
 > 实测数据时间: 2026-05-20
 > 更新内容:
 >   1. [v1.1] 修复 ic_metrics 字段缺失问题：添加 p_value_display（遵循 MODULE.md 输出结构规范）
@@ -41,6 +41,9 @@
 >   35. [v1.10] 修复 filter_stats 字段名语义混淆：filtered_count → valid_count（语义清晰：有效计数）
 >   36. [v1.10] 修复 filter_stats 字段名语义混淆：filter_ratio → retention_ratio（语义清晰：保留比例）
 >   37. [v1.10] MODULE.md 更新 filter_stats 统计口径规范：新增字段命名规范章节，禁止使用模糊命名
+>   38. [v1.11] 修复异常处理链两层叠加：load_data_from_cache 底层抛出语义清晰异常（遵循 MODULE.md 异常处理链规范）
+>   39. [v1.11] 修复异常处理链两层叠加：_full_recalculate 中间层裸 raise（不叠加消息）
+>   40. [v1.11] MODULE.md 新增异常处理链规范章节：明确单层包装原则、底层语义清晰原则
 
 ---
 

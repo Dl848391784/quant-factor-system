@@ -89,8 +89,8 @@ def load_data_from_cache() -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
     # 检查文件存在性
     for path, name in [(turnover_path, '换手率'), (factor_path, '因子'), (return_path, '收益')]:
         if not path.exists():
-            # 数据验证错误：裸 raise 保留原始类型
-            # 原因：FileNotFoundError 表示缓存缺失，是可预期错误，原始类型更易诊断
+            # 底层抛出语义清晰的异常（遵循 MODULE.md 异常处理链规范）
+            # 异常消息包含名称和路径，无需上层再次包装
             raise FileNotFoundError(f"{name}缓存不存在: {path}")
     
     # 加载换手率数据
@@ -467,12 +467,13 @@ def _full_recalculate(
                 f"股票数量不足以计算有效的 IC\n"
                 f"当前: {factor_df['asset'].nunique()} < {min_stocks}"
             )
-    except FileNotFoundError as e:
-        # 基础设施错误：包装为 RuntimeError，添加上下文信息
-        # 原因：FileNotFoundError 原始信息不够详细，需要附加缓存路径
-        raise RuntimeError(f"缓存文件不存在: {e}") from e
+    except FileNotFoundError:
+        # 中间层：裸 raise（遵循 MODULE.md 异常处理链规范）
+        # 底层已抛出语义清晰的异常（包含名称和路径），无需再次包装
+        # 让 FileNotFoundError 自然传播，保留原始类型和消息
+        raise
     except ValueError as e:
-        # 数据验证错误：直接 raise，保留原始类型
+        # 数据验证错误：裸 raise 保留原始类型（遵循 MODULE.md 异常链保留规范）
         # 原因：ValueError 表示股票数不足，是可预期错误，原始类型更易诊断
         raise  # 不包装
     except Exception as e:

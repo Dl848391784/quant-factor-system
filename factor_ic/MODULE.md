@@ -3176,10 +3176,127 @@ except ValueError as e:
 
 **推荐方案1（裸 raise）**，因为：
 - 保留原始异常类型（ValueError）
-- 保留异常链（__context__）
-- 注释说明清楚，维护时不会误改
+- 保留隐式异常链（__context__）
+- 不需要重新构造异常
 
-**关键要求**：
+---
+
+## 异常处理链规范（2026-05-20新增）
+
+### 核心原则
+
+**异常处理链设计必须避免多层叠加：函数内部抛出的异常消息，不应在调用方再次包装叠加，否则诊断时会看到重复描述。**
+
+### 问题背景
+
+```
+两层叠加问题：
+
+错误代码：
+# load_data_from_cache() 内部
+if not path.exists():
+    raise FileNotFoundError(f"换手率缓存不存在: {path}")  # 第一层
+
+# _full_recalculate() 调用方
+except FileNotFoundError as e:
+    raise RuntimeError(f"缓存文件不存在: {e}") from e  # 第二层叠加
+
+诊断输出：
+RuntimeError: 缓存文件不存在: 换手率缓存不存在: /path/to/file
+               ^^^^^^^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+               第二层叠加           第一层（重复描述）
+
+问题后果：
+- 错误消息重复，用户看到两次"缓存不存在"
+- 诊断信息冗余，降低可读性
+- 维护时难以判断哪一层是问题根源
+```
+
+### 异常处理链设计规范
+
+| 层级 | 职责 | 处理方式 |
+|------|------|----------|
+| 底层函数（数据加载） | 抛出语义清晰的原始异常 | 裸 raise 或构造异常（语义清晰） |
+| 中间层（调用方） | 区分异常类型，决定处理策略 | 裸 raise（保留原始）或 不捕获（让异常传播） |
+| 顶层（主函数） | 提供用户友好的错误消息 | 包装为 RuntimeError（附加上下文） |
+
+**关键原则：**
+
+| 原则 | 说明 |
+|------|------|
+| 单层包装原则 | 异常消息只包装一次，不在多层叠加 |
+| 底层语义清晰原则 | 底层函数抛出的异常消息应语义清晰，无需上层再次包装 |
+| 不捕获原则 | 如果上层不需要添加上下文，应不捕获（让异常自然传播） |
+| 裸 raise 原则 | 如果需要保留原始类型，使用裸 raise（不包装） |
+
+### 正确实现模式
+
+**模式1：底层语义清晰 + 中间层不捕获**
+
+```python
+# ✓ 正确：底层异常消息语义清晰，中间层不捕获
+# load_data_from_cache() 内部
+if not path.exists():
+    # 底层抛出语义清晰的异常（无需上层包装）
+    raise FileNotFoundError(f"缓存不存在: {path}")
+
+# _full_recalculate() 中间层
+factor_df, return_df, raw_metadata = load_data_from_cache()  # 不捕获，让 FileNotFoundError 自然传播
+
+# main() 顶层
+try:
+    ic_data = main()
+except FileNotFoundError as e:
+    # 顶层：提供用户友好的错误消息 + 处理建议
+    print(f"错误: {e}")
+    print("建议: 请先运行数据缓存脚本")
+```
+
+**模式2：底层抛出 + 中间层裸 raise（保留类型）**
+
+```python
+# ✓ 正确：中间层需要区分异常类型，但裸 raise 保留原始
+# load_data_from_cache() 内部
+if not path.exists():
+    raise FileNotFoundError(f"缓存不存在: {path}")
+
+# _full_recalculate() 中间层
+try:
+    factor_df, return_df, raw_metadata = load_data_from_cache()
+except FileNotFoundError:
+    # 中间层：裸 raise 保留原始类型（不叠加消息）
+    raise
+except ValueError as e:
+    # 中间层：需要添加上下文（如阈值信息）
+    raise ValueError(f"数据验证失败（min_stocks={min_stocks}): {e}") from e
+```
+
+**模式3：底层抛出 + 中间层添加上下文（单层包装）**
+
+```python
+# ✓ 正确：中间层需要添加上下文，但只包装一次
+# load_data_from_cache() 内部
+if not path.exists():
+    # 底层：简洁异常消息（不需要详细路径）
+    raise FileNotFoundError(f"{name}缓存不存在")
+
+# _full_recalculate() 中间层
+try:
+    factor_df, return_df, raw_metadata = load_data_from_cache()
+except FileNotFoundError as e:
+    # 中间层：附加缓存路径（单层包装）
+    raise FileNotFoundError(f"{e}，路径: {CACHE_DIR}") from e
+```
+
+### 常见错误模式
+
+| 错误代码 | 问题 | 修复 |
+|----------|------|------|
+| 底层 `raise FileNotFoundError(f"缓存不存在: {path}")` + 中间层 `raise RuntimeError(f"缓存文件不存在: {e}")` | 两层叠加，重复描述 | 中间层裸 raise 或不捕获 |
+| 底层 `raise FileNotFoundError(f"{name}缓存不存在")` + 中间层 `raise RuntimeError(f"缓存文件不存在: {e}")` | 两层叠加，重复描述 | 底层消息简洁，中间层添加路径（单层包装） |
+| 底层注释说"裸 raise"但实际包装了消息 | 注释与代码不一致 | 修正注释或代码 |
+
+---
 - 如果使用裸 raise，必须注释说明："保留原始异常类型 + 保留异常链（遵循 MODULE.md 异常链保留规范）"
 - 确保维护者理解裸 raise 的语义
 
