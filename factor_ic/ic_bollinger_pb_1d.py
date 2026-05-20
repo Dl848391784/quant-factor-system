@@ -755,8 +755,8 @@ def _incremental_update(
     # 计算布林带%B因子（全量数据，滚动窗口需要历史数据）
     # 注意：factor_stats 在此处定义，后续所有路径均可安全使用
     # 提前返回路径分析：
-    # - 第676行（缓存读取失败）→ return _full_recalculate()，已返回不会到此
-    # - 第738/750行（数据为空）→ return existing_data，factor_stats已定义但返回后不使用
+    # - 第706行（缓存读取失败）→ return _full_recalculate()，已返回不会到此
+    # - 第779/791行（数据为空）→ return existing_data，factor_stats已定义但返回后不使用
     factor_df_full, factor_stats = calculate_bollinger_pb_1d_factor(factor_df_full, n=n, k=k)
     factor_df_full = factor_df_full[['date', 'asset', 'bollinger_pb_1d']].copy()
     
@@ -927,7 +927,7 @@ def _incremental_update(
         else:
             rolling_ic_mean.append(None)  # None IC 的日期，rolling_ic_mean 也为 None
     
-    # 注意：NaN 已在 rolling_ic_mean_map 赋值时处理（第844-845行），无需额外转换
+    # 注意：NaN 已在 rolling_ic_mean_map 赋值时处理（第919行），无需额外转换
     
     # 日期格式断言（遵循 PROJECT.md 日期字符串比较规范)
     # 核心原则：all_dates 为空时跳过日期格式检查（避免 IndexError）
