@@ -691,7 +691,14 @@ def _incremental_update(
     trading_dates = sorted(factor_df_full['date'].unique())
     
     # 找到缓存起始日期在交易日列表中的索引位置
-    cache_start_idx = trading_dates.index(cache_start_date) if cache_start_date in trading_dates else 0
+    # 注意：cache_start_date 必须在 trading_dates 中，否则说明数据不一致
+    if cache_start_date not in trading_dates:
+        raise ValueError(
+            f"数据不一致：缓存起始日期 '{cache_start_date}' 不在交易日列表中\n"
+            f"交易日列表范围: {trading_dates[0] if trading_dates else '空'} ~ {trading_dates[-1] if trading_dates else '空'}\n"
+            f"请检查 factor_df_full 数据是否与 raw_metadata 一致"
+        )
+    cache_start_idx = trading_dates.index(cache_start_date)
     
     # 计算真正的预热期边界：缓存起始点后第 N-1 个交易日
     # 例如 N=20：预热期需要前 19 个交易日，边界为 trading_dates[cache_start_idx + 19]
