@@ -182,10 +182,14 @@ def calculate_turnover_surge_factor(factor_df: pd.DataFrame) -> Tuple[pd.DataFra
         print("  数据为空")
         return factor_df, filter_stats
     
+    # Step 0: 创建副本（遵循 MODULE.md DataFrame 参数副本规范）
+    # 避免修改调用方传入的 DataFrame，隔离副作用
+    factor_df = factor_df.copy()
+    
     # Step 1: 计算换手率突增因子（当日换手率 / 过去5日均值）
     print("  计算换手率突增因子（窗口=5日）...")
     factor_df['date_str'] = factor_df['date'].astype(str)
-    factor_df = factor_df.sort_values(['asset', 'date_str']).copy()
+    factor_df = factor_df.sort_values(['asset', 'date_str'])
     
     factor_df['turnover_ma'] = factor_df.groupby('asset')['turnover_rate'].transform(
         lambda x: x.rolling(window=5, min_periods=5).mean()

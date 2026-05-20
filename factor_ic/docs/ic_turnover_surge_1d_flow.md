@@ -1,7 +1,7 @@
 # Turnover_Surge_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 20:00 (北京时间)
-> 审阅版本: v1.6
+> 生成时间: 2026-05-20 21:00 (北京时间)
+> 审阅版本: v1.7
 > 实测数据时间: 2026-05-20
 > 更新内容:
 >   1. [v1.1] 修复 ic_metrics 字段缺失问题：添加 p_value_display（遵循 MODULE.md 输出结构规范）
@@ -30,6 +30,8 @@
 >   24. [v1.5] 更新测试用例过时内容：函数名、输出结构、字段名、必需字段列表等（ic_series→顶层字段, significance→移除, n_days→valid_days）
 >   25. [v1.5] 测试用例 TC007 重构：删除不存在的日期限制功能测试，改为缓存数据检查测试
 >   26. [v1.6] 修复遗留 ic_series 注释：第341行和第488行注释更新为顶层字段说明（遵循 MODULE.md 输出结构统一性规范）
+>   27. [v1.7] 修复 DataFrame 副作用问题：calculate_turnover_surge_factor 函数入口处添加 factor_df.copy()（遵循 MODULE.md DataFrame 参数副本规范）
+>   28. [v1.7] MODULE.md 新增 DataFrame 参数副本规范章节：明确函数入口处必须先 .copy() 防止副作用
 
 ---
 

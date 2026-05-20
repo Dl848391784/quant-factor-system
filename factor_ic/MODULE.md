@@ -699,6 +699,86 @@ def calculate_ic(factor_df: pd.DataFrame,
 - ❌ 在函数内部硬编码参数值（如 `min_stocks = 10`）
 - ❌ 使用全局变量传递参数
 
+### DataFrame 参数副本规范（2026-05-20新增）
+
+**核心原则：** 函数接收 DataFrame 参数时，必须先调用 `.copy()` 创建副本，避免修改原始数据。
+
+**为何必须副本：**
+
+pandas DataFrame 是引用类型。直接修改传入的 DataFrame 会导致副作用：
+```python
+# ❌ 错误示例：副作用影响调用方
+def calculate_factor(factor_df: pd.DataFrame):
+    factor_df['new_col'] = factor_df['existing_col'].transform(...)  # 副作用！
+    factor_df = factor_df.sort_values('date').copy()  # .copy() 太晚，副作用已发生
+    return factor_df
+
+# 调用方传入的 original_df 被污染：
+original_df['new_col']  # 本不应存在，但已被添加
+```
+
+**正确做法：**
+```python
+# ✓ 正确：函数入口处先复制
+def calculate_factor(factor_df: pd.DataFrame):
+    factor_df = factor_df.copy()  # ← 第一步：创建副本，隔离副作用
+    factor_df['new_col'] = factor_df['existing_col'].transform(...)  # 安全修改副本
+    factor_df = factor_df.sort_values('date')  # 不需要再 .copy()
+    return factor_df
+```
+
+**位置要求：**
+
+| 操作顺序 | 正确性 | 原因 |
+|----------|--------|------|
+| `.copy()` → 列赋值 → `.sort_values()` | ✓ 正确 | 副本隔离，后续操作安全 |
+| 列赋值 → `.sort_values().copy()` | ❌ 错误 | 赋值发生在原始 DataFrame，副作用已产生 |
+| `.sort_values().copy()` → 列赋值 | ⚠ 部分安全 | sort 可能改变原始索引视图，赋值可能污染 |
+
+**最佳实践：**
+```python
+def calculate_xxx_ic(factor_df: pd.DataFrame, ...):
+    # Step 0: 创建副本（必须放在函数开头）
+    factor_df = factor_df.copy()
+    
+    # Step 1: 类型转换（现在安全）
+    factor_df['date_str'] = factor_df['date'].astype(str)
+    
+    # Step 2: 排序（不需要再 .copy()）
+    factor_df = factor_df.sort_values(['asset', 'date_str'])
+    
+    # Step 3: 计算因子列
+    factor_df['factor_col'] = ...
+    
+    return factor_df
+```
+
+**何时不需要 `.copy()`：**
+- 函数只读取 DataFrame，不修改列
+- 函数返回全新的 DataFrame（如 `pd.DataFrame(result_dict)`）
+- 函数内部使用 `.copy()` 创建中间变量（如 `temp_df = df.copy()`）
+
+**常见错误模式：**
+
+| 错误代码 | 问题 | 修复 |
+|----------|------|------|
+| `factor_df['col'] = ...` | 直接赋值，副作用 | 先 `factor_df = factor_df.copy()` |
+| `factor_df.sort_values().copy()` | copy 太晚 | 移到开头 `factor_df = factor_df.copy()` |
+| `factor_df.assign(col=...)` | assign 返回新 DataFrame，但原 df 未保护 | 若后续用原 df，需先 copy |
+
+**验证方法：**
+```python
+# 单元测试：验证无副作用
+original_df = pd.DataFrame({'date': [1, 2, 3], 'value': [10, 20, 30]})
+original_cols = original_df.columns.tolist()
+
+result_df = calculate_factor(original_df)
+
+# 原始 DataFrame 不应被修改
+assert original_df.columns.tolist() == original_cols
+assert 'new_col' not in original_df.columns
+```
+
 ---
 
 ## 异常处理规范
