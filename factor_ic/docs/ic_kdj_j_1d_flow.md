@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 13:35 北京时间
-> 实测数据时间: 2026-05-20 13:30 北京时间
-> 版本: v1.3
-> 更新内容: 修复浮点数除零判断（使用精度容差 EPSILON=1e-10，遵循 Section 17 规范）
+> 生成时间: 2026-05-20 14:15 北京时间
+> 实测数据时间: 2026-05-20 14:10 北京时间
+> 版本: v1.4
+> 更新内容: 修复 K/D 初始值 ewm 递推逻辑（预处理 RSV[0]/K[0] 使 ewm 输出 = initial_k/initial_d）
 
 ---
 
@@ -352,6 +352,133 @@ rsv = np.where(np.abs(diff) < EPSILON, 50.0, ...)
 
 ---
 
+## KDJ 初始值规范
+
+### 问题根因
+
+**原始代码（错误）：**
+```python
+# ewm 计算完成后修正第一个值
+stock_data['k'] = stock_data['rsv'].ewm(alpha=1/3, adjust=False).mean()
+stock_data.loc[stock_data.index[0], 'k'] = initial_k * (m1-1)/m1 + stock_data['rsv'].iloc[0] / m1
+```
+
+**问题分析：**
+- `ewm(adjust=False)` 的第一个输出 = 第一个输入，即 K[0] = RSV[0]
+- ewm 已完成所有行的递推计算：K[1] = 2/3*K[0] + 1/3*RSV[1]，K[2] = ...
+- 后修正 K[0] 无法影响已计算完成的 K[1]、K[2]...
+- **修正无效！后续 K 值递推链断裂**
+
+### ewm(adjust=False) 递推公式
+
+```
+y[0] = x[0]                  # 第一个输出 = 第一个输入
+y[1] = (1-alpha) * y[0] + alpha * x[1]
+y[2] = (1-alpha) * y[1] + alpha * x[2]
+...
+```
+
+对于 KDJ（alpha = 1/M1 = 1/3）：
+```
+K[0] = RSV[0]
+K[1] = 2/3 * K[0] + 1/3 * RSV[1]
+K[2] = 2/3 * K[1] + 1/3 * RSV[2]
+```
+
+### 标准定义 vs ewm 默认行为
+
+**标准 KDJ 定义：**
+```
+K[0] = initial_k = 50       # 用户指定初始值
+K[1] = 2/3 * K[0] + 1/3 * RSV[1]
+K[2] = 2/3 * K[1] + 1/3 * RSV[2]
+```
+
+**ewm(adjust=False) 默认行为：**
+```
+K[0] = RSV[0]               # 第一个观测值（非标准）
+K[1] = 2/3 * K[0] + 1/3 * RSV[1]
+```
+
+### 修复方案：预处理第一个输入值
+
+**修复代码：**
+```python
+# 在 ewm 前预处理 RSV[0]
+alpha_k = 1.0 / m1
+initial_k = 50.0
+
+if len(stock_data) > 0:
+    original_rsv_0 = stock_data['rsv'].iloc[0]
+    stock_data.loc[stock_data.index[0], 'rsv'] = initial_k  # 替换为 initial_k
+
+stock_data['k'] = stock_data['rsv'].ewm(alpha=alpha_k, adjust=False).mean()
+
+# 恢复原始 RSV 值（不影响后续逻辑）
+if len(stock_data) > 0:
+    stock_data.loc[stock_data.index[0], 'rsv'] = original_rsv_0
+```
+
+**原理：**
+- ewm(adjust=False) 的 y[0] = x[0]
+- 若要 y[0] = initial_k，则 x[0] = initial_k
+- 在 ewm 前替换 RSV[0] = initial_k，使 K[0] = initial_k
+- K[1] = 2/3 * K[0] + 1/3 * RSV[1] = 2/3 * 50 + 1/3 * RSV[1]（正确递推）
+- ewm 计算后恢复原始 RSV 值（不影响后续逻辑）
+
+### 批量计算处理
+
+**calculate_kdj_j_factor() 批量处理：**
+```python
+def calculate_k_with_initial(rsv_series):
+    """计算 K 值，第一个值使用 initial_k"""
+    if len(rsv_series) == 0:
+        return rsv_series
+    
+    original_rsv_0 = rsv_series.iloc[0]
+    rsv_series.iloc[0] = initial_k
+    
+    k_series = rsv_series.ewm(alpha=alpha_k, adjust=False).mean()
+    
+    rsv_series.iloc[0] = original_rsv_0
+    return k_series
+
+factor_df['k'] = factor_df.groupby('asset')['rsv'].transform(calculate_k_with_initial)
+```
+
+### D 值初始值处理
+
+同理，D 值需要预处理 K[0]：
+```python
+# D[0] = initial_d = 50
+original_k_0 = stock_data['k'].iloc[0]
+stock_data.loc[stock_data.index[0], 'k'] = initial_d
+
+stock_data['d'] = stock_data['k'].ewm(alpha=alpha_d, adjust=False).mean()
+
+stock_data.loc[stock_data.index[0], 'k'] = original_k_0
+```
+
+### 验证结果
+
+```
+测试股票: 002309
+RSV 前5个值: [50.0, 0.0, 21.05, 54.17, 91.67]
+K 前5个值:   [50.0, 33.33, 29.24, 37.55, 55.59]
+D 前5个值:   [50.0, 44.44, 39.38, 38.77, 44.37]
+J 前5个值:   [50.0, 11.11, 8.97, 35.11, 78.02]
+
+验证结论:
+✓ K[0] = 50.0（正确初始化）
+✓ D[0] = 50.0（正确初始化）
+✓ K[1] = 2/3 * K[0] + 1/3 * RSV[1] = 33.33（正确递推）
+✓ D[1] = 2/3 * D[0] + 1/3 * K[1] = 44.44（正确递推）
+```
+
+**参考规范：** MODULE.md 「KDJ 初始值规范」
+
+---
+
 ## 五维度判断结果
 
 ### KDJ_J_1D 测试结果
@@ -393,7 +520,7 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 
 ## 规范符合性
 
-| 规范项 | 符合状态 | 说明 |
+|| 规范项 | 符合状态 | 说明 |
 |--------|---------|------|
 | DEFAULT_MIN_STOCKS 常量 | ✓ | 已添加 |
 | 函数签名一致性 | ✓ | 与 ic_rsi_1d.py 一致 |
@@ -408,6 +535,7 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | 异常分层缓存读取 | ✓ | 区分可恢复和严重错误 |
 | 五维度判断字段结构 | ✓ | 对齐 ic_rsi_1d.py，直接传递完整 result 对象 |
 | 浮点数除零精度容差 | ✓ | 使用 EPSILON=1e-10，替代 diff == 0 |
+| KDJ 初始值 ewm 递推 | ✓ | 预处理 RSV[0]/K[0] 使 ewm 输出 = initial_k/initial_d |
 
 ---
 
@@ -419,7 +547,8 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.1 | 2026-05-20 | 新增 avg_stocks_period 字段说明，完善异常处理分层规范（Section 22） |
 | v1.2 | 2026-05-20 | 对齐 ic_rsi_1d.py 五维度判断字段结构（直接传递完整 result 对象） |
 | v1.3 | 2026-05-20 | 修复浮点数除零判断（使用精度容差 EPSILON=1e-10，遵循 Section 17 规范） |
+| v1.4 | 2026-05-20 | 修复 K/D 初始值 ewm 递推逻辑（预处理 RSV[0]/K[0] 使 ewm 输出 = initial_k/initial_d） |
 
 ---
 
-*最后更新: 2026-05-20 13:35*"
+*最后更新: 2026-05-20 14:15*"

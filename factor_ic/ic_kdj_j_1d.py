@@ -105,20 +105,53 @@ def calculate_kdj_j_for_stock_vectorized(
     stock_data['rsv'] = rsv
     
     # 计算 K（使用 ewm）
+    # ewm(adjust=False) 的第一个输出 = 第一个输入，即 K[0] = RSV[0]
+    # 但标准 KDJ 定义：K[0] = initial_k = 50
+    # 解决方案：在 ewm 前预处理 RSV[0]，使其 ewm 输出 = initial_k
+    # 同时保证后续 K[1] = (m1-1)/m1 * K[0] + 1/m1 * RSV[1] 正确递推
+    # 
+    # 技术细节：ewm(adjust=False) 递推公式：
+    #   y[0] = x[0]
+    #   y[1] = (1-alpha) * y[0] + alpha * x[1]
+    # 若要 y[0] = initial_k，则 x[0] = initial_k
+    # 若要 y[1] 符合标准定义 K[1] = (m1-1)/m1 * K[0] + 1/m1 * RSV[1]
+    # 则 x[1] = RSV[1]（正常）
+    # 
+    # 因此：将 RSV[0] 替换为 initial_k（在 ewm 前处理）
+    # 遵循 MODULE.md KDJ 初始值规范
+    
     alpha_k = 1.0 / m1
+    original_rsv_0 = None  # 初始化变量，避免 Pyright possibly unbound 错误
+    if len(stock_data) > 0:
+        # 预处理第一个 RSV 值：使其 ewm 输出 = initial_k
+        original_rsv_0 = stock_data['rsv'].iloc[0]
+        stock_data.loc[stock_data.index[0], 'rsv'] = initial_k
+    
     stock_data['k'] = stock_data['rsv'].ewm(alpha=alpha_k, adjust=False).mean()
     
-    # 修正第一个 K 值
-    if len(stock_data) > 0:
-        stock_data.loc[stock_data.index[0], 'k'] = initial_k * (m1 - 1) / m1 + stock_data['rsv'].iloc[0] / m1
+    # ewm 计算后，第一个 RSV 值已用于计算，恢复原始值（不影响后续逻辑）
+    if len(stock_data) > 0 and original_rsv_0 is not None:
+        stock_data.loc[stock_data.index[0], 'rsv'] = original_rsv_0
     
     # 计算 D
+    # ewm(adjust=False) 的第一个输出 = 第一个输入，即 D[0] = K[0]
+    # 但标准 KDJ 定义：D[0] = initial_d = 50
+    # 解决方案：在 ewm 前预处理 K[0]，使其 ewm 输出 = initial_d
+    # 技术细节同 K 值预处理逻辑
+    # 遵循 MODULE.md KDJ 初始值规范
+    
     alpha_d = 1.0 / m2
+    original_k_0 = None  # 初始化变量，避免 Pyright possibly unbound 错误
+    if len(stock_data) > 0:
+        # 预处理第一个 K 值：使其 ewm 输出 = initial_d
+        original_k_0 = stock_data['k'].iloc[0]
+        stock_data.loc[stock_data.index[0], 'k'] = initial_d
+    
     stock_data['d'] = stock_data['k'].ewm(alpha=alpha_d, adjust=False).mean()
     
-    # 修正第一个 D 值
-    if len(stock_data) > 0:
-        stock_data.loc[stock_data.index[0], 'd'] = initial_d * (m2 - 1) / m2 + stock_data['k'].iloc[0] / m2
+    # ewm 计算后，第一个 K 值已用于计算，恢复原始值（不影响后续逻辑）
+    if len(stock_data) > 0 and original_k_0 is not None:
+        stock_data.loc[stock_data.index[0], 'k'] = original_k_0
     
     # 计算 J = 3K - 2D
     stock_data['j'] = 3 * stock_data['k'] - 2 * stock_data['d']
@@ -201,19 +234,63 @@ def calculate_kdj_j_factor(
     
     factor_df.drop(columns=['rolling_high', 'rolling_low'], inplace=True)
     
-    # 计算 K
+    # 计算 K（批量向量化）
+    # ewm(adjust=False) 的第一个输出 = 第一个输入，即 K[0] = RSV[0]
+    # 但标准 KDJ 定义：K[0] = initial_k = 50
+    # 解决方案：在 ewm 前预处理每只股票的第一个 RSV 值
+    # 遵循 MODULE.md KDJ 初始值规范
+    
     print("  [Step 2] 计算 K...")
     alpha_k = 1.0 / m1
-    factor_df['k'] = factor_df.groupby('asset')['rsv'].transform(
-        lambda x: x.ewm(alpha=alpha_k, adjust=False).mean()
-    )
+    initial_k = 50.0  # K 初始值
     
-    # 计算 D
+    def calculate_k_with_initial(rsv_series):
+        """计算 K 值，第一个值使用 initial_k"""
+        if len(rsv_series) == 0:
+            return rsv_series
+        
+        # 预处理第一个 RSV 值
+        original_rsv_0 = rsv_series.iloc[0]
+        rsv_series.iloc[0] = initial_k
+        
+        # 计算 ewm
+        k_series = rsv_series.ewm(alpha=alpha_k, adjust=False).mean()
+        
+        # 恢复原始 RSV 值（不影响后续逻辑）
+        rsv_series.iloc[0] = original_rsv_0
+        
+        return k_series
+    
+    factor_df['k'] = factor_df.groupby('asset')['rsv'].transform(calculate_k_with_initial)
+    
+    # 计算 D（批量向量化）
+    # ewm(adjust=False) 的第一个输出 = 第一个输入，即 D[0] = K[0]
+    # 但标准 KDJ 定义：D[0] = initial_d = 50
+    # 解决方案：在 ewm 前预处理每只股票的第一个 K 值
+    # 遵循 MODULE.md KDJ 初始值规范
+    
     print("  [Step 3] 计算 D...")
     alpha_d = 1.0 / m2
-    factor_df['d'] = factor_df.groupby('asset')['k'].transform(
-        lambda x: x.ewm(alpha=alpha_d, adjust=False).mean()
-    )
+    initial_d = 50.0  # D 初始值
+    
+    def calculate_d_with_initial(k_series):
+        """计算 D 值，第一个值使用 initial_d"""
+        if len(k_series) == 0:
+            return k_series
+        
+        # 预处理第一个 K 值
+        original_k_0 = k_series.iloc[0]
+        k_series.iloc[0] = initial_d
+        
+        # 计算 ewm
+        d_series = k_series.ewm(alpha=alpha_d, adjust=False).mean()
+        
+        # 恢复原始 K 值（不影响后续逻辑）
+        k_series.iloc[0] = original_k_0
+        
+        return d_series
+    
+    factor_df['d'] = factor_df.groupby('asset')['k'].transform(calculate_d_with_initial)
     
     # 计算 J = 3K - 2D
     print("  [Step 4] 计算 J...")
