@@ -845,9 +845,10 @@ def _incremental_update(
         rolling_ic_mean_map[date] = round(value, 6) if not pd.isna(value) else None
     
     # 按完整日期顺序填充（含 None IC 的日期填 None）
+    # 使用 zip 同时遍历，避免 all_dates.index(date) 的 O(n²) 性能问题
     rolling_ic_mean = []
-    for date in all_dates:
-        if all_ic_values[all_dates.index(date)] is not None:
+    for date, ic_value in zip(all_dates, all_ic_values):
+        if ic_value is not None:
             rolling_ic_mean.append(rolling_ic_mean_map.get(date))
         else:
             rolling_ic_mean.append(None)  # None IC 的日期，rolling_ic_mean 也为 None
