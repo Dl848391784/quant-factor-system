@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 17:20 北京时间
-> 实测数据时间: 2026-05-20 17:15 北京时间
-> 版本: v1.22
-> 更新内容: 统一异常处理风格注释，明确包装类与保留类的设计意图
+> 生成时间: 2026-05-20 17:25 北京时间
+> 实测数据时间: 2026-05-20 17:20 北京时间
+> 版本: v1.23
+> 更新内容: 删除 should_full_recalculate 死代码变量，简化控制流注释
 
 ---
 
@@ -775,6 +775,86 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.20 | 2026-05-20 | 修复 EPSILON 常量未提升为模块级的问题，便于统一管理和复用（遵循 PROJECT.md 常量管理规范） |
 | v1.21 | 2026-05-20 | 修复 K/D 值 NaN 传播错误（核心缺陷）—— ewm alpha 参数、ignore_na 参数、初始值位置 |
 | v1.22 | 2026-05-20 | 统一异常处理风格注释，明确包装类与保留类的设计意图（遵循 PROJECT.md 异常处理规范） |
+| v1.23 | 2026-05-20 | 删除 should_full_recalculate 死代码变量，简化控制流注释（遵循 MODULE.md 控制流规范） |
+
+---
+
+## 死代码清理规范
+
+### 问题根因
+
+**场景：** should_full_recalculate 变量作为"控制流标记"，但实际上所有可达路径都会执行全量计算。
+
+**原始代码（死代码）：**
+```python
+should_full_recalculate = force_full  # 默认需要全量计算
+
+if not force_full:
+    mode, missing_dates, info = check_data_completeness('kdj_j_1d')
+    
+    if mode == 'skip':
+        try:
+            return json.load(f)  # 提前退出
+        except FileNotFoundError:
+            should_full_recalculate = True  # 显式标记：需要全量计算
+    
+    elif mode == 'incremental':
+        should_full_recalculate = True  # 当前版本降级全量计算
+    
+    else:  # mode == 'full'
+        should_full_recalculate = True
+
+# 控制流语义说明（大量注释解释）
+# 此处 should_full_recalculate 在所有可达路径上均为 True：
+# - force_full=True → 初始值 True
+# - force_full=False + mode='skip' + 成功读取 → 已提前 return
+# - ...（更多注释）
+```
+
+**问题分析：**
+1. 变量在所有可达路径上都为 True，没有实际用途
+2. 大量注释解释控制流，增加认知负担
+3. 代码逻辑依赖"提前 return"而非变量标记
+4. 违反"最小必要复杂度"原则
+
+### 修复方案
+
+**删除死代码，简化注释：**
+```python
+# 增量判断（除非强制全量）
+# 控制流语义：
+# - force_full=True → 直接执行全量计算
+# - force_full=False + mode='skip' + 成功读取 → 提前 return（退出函数）
+# - force_full=False + 其他情况 → 执行全量计算
+# 结论：只有 mode='skip' 且成功读取会提前退出，其他所有路径都执行全量计算
+
+if not force_full:
+    mode, missing_dates, info = check_data_completeness('kdj_j_1d')
+    
+    if mode == 'skip':
+        try:
+            return json.load(f)  # 成功读取，提前退出
+        except FileNotFoundError:
+            # 继续执行全量计算（无需标记，控制流自然到达）
+            print("  [诊断] 缓存文件不存在，执行全量计算")
+    
+    elif mode == 'incremental':
+        # 当前版本降级全量计算，继续执行全量计算逻辑
+
+# 全量计算逻辑（此处无变量守卫）
+```
+
+### 设计原则
+
+1. **控制流优于标记：** 使用 `return` 提前退出，而非变量标记
+2. **注释精简：** 用一行注释说明控制流语义，而非十行解释
+3. **死代码删除：** 所有可达路径都相同的变量都是死代码
+4. **自然控制流：** 代码执行顺序本身表达逻辑，无需额外标记
+
+### 适用场景
+
+- 所有使用"控制流标记变量"的场景
+- 所有需要判断是否提前退出的逻辑
 
 ---
 
