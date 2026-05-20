@@ -1,9 +1,14 @@
 # 换手率突增因子IC测试用例
 
 > 生成时间: 2026-05-20
-> 对应脚本: ic_turnover_surge_1d.py (v1.3)
-> 测试版本: v1.1
-> 更新内容: 更新 ic_metrics 字段规范（ic_mean, ic_std, icir, p_value, p_value_display）
+> 对应脚本: ic_turnover_surge_1d.py (v1.5)
+> 测试版本: v1.2
+> 更新内容:
+>   - [v1.1] 更新 ic_metrics 字段规范（ic_mean, ic_std, icir, p_value, p_value_display）
+>   - [v1.2] 修复输出结构过时：dates/ic_values/rolling_ic_mean 提升为顶层字段（ic_series 子结构已移除）
+>   - [v1.2] 修复字段名过时：significance 已移除，n_days 改为 valid_days
+>   - [v1.2] 修复函数名过时：load_data_for_turnover_surge 改为 load_data_from_cache
+>   - [v1.2] 修复测试用例 TC007：删除不存在的日期限制功能测试，改为缓存数据检查测试
 
 ---
 
@@ -58,7 +63,9 @@ cache/factor_data/
   - `factor_name`: "turnover_surge_1d"
   - `update_mode`: "full" 或 "incremental" 或 "skip"
   - `ic_metrics`: ic_mean, ic_std, icir, p_value, p_value_display (5字段)
-  - `ic_series`: dict with dates and ic_values
+  - `dates`: list of dates (顶层字段)
+  - `ic_values`: list of IC values (顶层字段)
+  - `rolling_ic_mean`: list of rolling IC mean (顶层字段)
   - `filter_stats`: total_records, turnover_surge_count, price_up_count 等
   - `positive_ratio`: 正 IC 比例（顶层字段）
   - `t_stat`: t 统计量（顶层字段）
@@ -173,18 +180,19 @@ cache/factor_data/
 
 ---
 
-### TC007: 数据加载 - 日期限制
+### TC007: 数据加载 - 缓存数据检查
 
 **前置条件**:
-- 缓存数据包含 1000 个交易日
+- 缓存数据存在且可加载
 
 **测试步骤**:
-1. 调用 `load_data_for_turnover_surge(n_days=100)`
-2. 检查加载的数据范围
+1. 调用 `load_data_from_cache()`
+2. 检查加载的数据结构
 
 **预期结果**:
-- 只加载最近 100 个交易日的数据
-- 日期范围正确
+- factor_df 和 return_df 成功加载
+- metadata 包含 total_days 和 date_range 信息
+- 数据类型正确（date 为 datetime，asset 为 str）
 
 ---
 
@@ -219,13 +227,9 @@ cache/factor_data/
 - p_value 计算公式正确：
   ```python
   from scipy import stats
-  p_value = 2 * (1 - stats.t.cdf(abs(t_stat), df=n_days - 1))
+  p_value = 2 * (1 - stats.t.cdf(abs(t_stat), df=valid_days - 1))
   ```
-- p_value 与 significance 对应正确：
-  - p < 0.001 → significance = "***"
-  - p < 0.01 → significance = "**"
-  - p < 0.05 → significance = "*"
-  - p >= 0.05 → significance = ""
+- p_value_display 格式正确（科学计数法或百分比）
 - p_value 可序列化为 JSON（非 numpy 类型）
 
 **实际结果**: (测试时填写)
@@ -261,7 +265,7 @@ cache/factor_data/
 **预期结果**:
 - 无法计算滚动均值（需要 5 日）
 - IC 时间序列为空
-- 返回 `n_days: 0`, `ic_mean: 0`
+- 返回 `valid_days: 0`, `ic_mean: 0`
 
 ---
 
@@ -291,7 +295,7 @@ cache/factor_data/
 **预期结果**:
 - `filtered_count = 0`
 - `filter_ratio = 0`
-- IC 计算返回 `n_days: 0`
+- IC 计算返回 `valid_days: 0`
 
 ---
 
@@ -461,7 +465,7 @@ cache/factor_data/
 - 典型转换场景：
   ```python
   # ic_mean: numpy.float64 → float
-  # n_days: numpy.int64 → int  
+  # valid_days: numpy.int64 → int  
   # ic_values: numpy.ndarray → list[float]
   # positive_ratio: numpy.float64 → float
   ```
@@ -481,7 +485,7 @@ cache/factor_data/
 
 **测试步骤**:
 1. 记录开始时间
-2. 运行 `load_data_for_turnover_surge()`
+2. 运行 `load_data_from_cache()`
 3. 记录结束时间
 
 **预期结果**:
@@ -617,16 +621,17 @@ cache/factor_data/
 ```
 - factor_name
 - ic_metrics.ic_mean
+- ic_metrics.ic_std
 - ic_metrics.icir
-- ic_metrics.positive_ratio
-- ic_metrics.t_stat
-- ic_metrics.significance
-- ic_metrics.n_days
-- ic_metrics.n_assets
-- ic_series.dates
-- ic_series.ic_values
+- ic_metrics.p_value
+- ic_metrics.p_value_display
+- sample_stats.total_days
+- sample_stats.valid_days
+- dates (顶层字段)
+- ic_values (顶层字段)
+- rolling_ic_mean (顶层字段)
 - filter_stats
-- generated_at
+- calculation_date
 ```
 
 ---
@@ -644,10 +649,11 @@ cache/factor_data/
 | 指标 | 合理范围 |
 |------|----------|
 | ic_mean | [-1, 1] |
+| ic_std | [0, 1] |
 | icir | 实数（通常 -5 到 5） |
+| p_value | [0, 1] |
 | positive_ratio | [0, 1] |
 | t_stat | 实数 |
-| significance | '', '*', '**', '***' |
 
 ---
 
@@ -677,7 +683,7 @@ filter_ratio = filtered_count / total_records
 - 完成一次成功计算
 
 **测试步骤**:
-1. 读取 ic_series
+1. 读取 dates, ic_values, rolling_ic_mean 顶层字段
 2. 验证格式
 
 **预期结果**:

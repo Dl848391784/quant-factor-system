@@ -392,7 +392,7 @@ def calculate_turnover_surge_ic(
         'icir_stability': result['icir_stability'],
         'ic_distribution_consistency': result['ic_distribution_consistency'],
         
-        # ic_series 输出字段（遵循 PROJECT.md ic_series 结构规范）
+        # 顶层输出字段（遵循 MODULE.md 输出结构统一性规范）
         'dates': dates,
         'ic_values': ic_values,
         'rolling_ic_mean': rolling_ic_mean,
