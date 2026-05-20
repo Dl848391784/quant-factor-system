@@ -70,7 +70,10 @@ def _calculate_k_with_initial(
     alpha_k: float,
     initial_k: float
 ) -> pd.Series:
-    """计算 K 值，第一个值使用 initial_k（无副作用版本）
+    """计算 K 值（无副作用版本）
+    
+    核心逻辑：ewm(adjust=False) 的第一个输出 = 第一个输入
+    因此将 RSV 序列的初始值设为 initial_k，使 ewm 的第一个 K 值 = initial_k
     
     Args:
         rsv_series: RSV 序列（单只股票）
@@ -80,8 +83,10 @@ def _calculate_k_with_initial(
     Returns:
         K 值序列
     
-    正确做法：复制 Series，在副本上构造初始值序列，不修改原始数据
-    原因：iloc 修改传入的 Series 产生副作用，若 ewm 异则还原不会执行
+    实现步骤：
+    1. 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
+    2. 将副本的第一个元素设为 initial_k（预处理输入）
+    3. 应用 ewm 递推，得到 K 序列（第一个 K 值 = initial_k）
     
     设计原则：显式传参，避免闭包捕获外部变量
     - 若闭包捕获 alpha_k/initial_k，外层函数重构时静默使用旧值
@@ -93,10 +98,11 @@ def _calculate_k_with_initial(
     # 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
     rsv_copy = rsv_series.copy()
     
-    # 在副本上预处理第一个 RSV 值
+    # 预处理：将副本的第一个 RSV 值设为 initial_k
+    # ewm(adjust=False) 的第一个输出 = 第一个输入，因此 ewm 后 K[0] = initial_k
     rsv_copy.iloc[0] = initial_k
     
-    # 计算 ewm
+    # 计算 ewm 递推：K[0] = rsv_copy[0] = initial_k
     k_series = rsv_copy.ewm(alpha=alpha_k, adjust=False).mean()
     
     return k_series
@@ -107,7 +113,10 @@ def _calculate_d_with_initial(
     alpha_d: float,
     initial_d: float
 ) -> pd.Series:
-    """计算 D 值，第一个值使用 initial_d（无副作用版本）
+    """计算 D 值（无副作用版本）
+    
+    核心逻辑：ewm(adjust=False) 的第一个输出 = 第一个输入
+    因此将 K 序列的初始值设为 initial_d，使 ewm 的第一个 D 值 = initial_d
     
     Args:
         k_series: K 值序列（单只股票）
@@ -117,8 +126,10 @@ def _calculate_d_with_initial(
     Returns:
         D 值序列
     
-    正确做法：复制 Series，在副本上构造初始值序列，不修改原始数据
-    原因：iloc 修改传入的 Series 产生副作用，若 ewm 异则还原不会执行
+    实现步骤：
+    1. 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
+    2. 将副本的第一个元素设为 initial_d（预处理输入）
+    3. 应用 ewm 递推，得到 D 序列（第一个 D 值 = initial_d）
     
     设计原则：显式传参，避免闭包捕获外部变量
     - 若闭包捕获 alpha_d/initial_d，外层函数重构时静默使用旧值
@@ -130,10 +141,11 @@ def _calculate_d_with_initial(
     # 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
     k_copy = k_series.copy()
     
-    # 在副本上预处理第一个 K 值
+    # 预处理：将副本的第一个 K 值设为 initial_d
+    # ewm(adjust=False) 的第一个输出 = 第一个输入，因此 ewm 后 D[0] = initial_d
     k_copy.iloc[0] = initial_d
     
-    # 计算 ewm
+    # 计算 ewm 递推：D[0] = k_copy[0] = initial_d
     d_series = k_copy.ewm(alpha=alpha_d, adjust=False).mean()
     
     return d_series
