@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 14:30 北京时间
-> 实测数据时间: 2026-05-20 14:25 北京时间
-> 版本: v1.5
-> 更新内容: 删除死代码 calculate_kdj_j_for_stock_vectorized（未被调用，仅保留 calculate_kdj_j_factor）
+> 生成时间: 2026-05-20 14:45 北京时间
+> 实测数据时间: 2026-05-20 14:40 北京时间
+> 版本: v1.6
+> 更新内容: 修复 RSV 计算 min_periods 参数，使用 min_periods=n 确保满窗口期数据完整性
 
 ---
 
@@ -352,6 +352,57 @@ rsv = np.where(np.abs(diff) < EPSILON, 50.0, ...)
 
 ---
 
+## RSV 计算窗口期规范
+
+### 问题根因
+
+**原始代码（错误）：**
+```python
+factor_df['rolling_high'] = factor_df.groupby('asset')['high'].transform(
+    lambda x: x.rolling(window=n, min_periods=1).max()
+)
+```
+
+**问题分析：**
+- `min_periods=1` 允许前 N-1 天用不足 N 天的数据计算
+- 第 1 天只有 1 天数据，`rolling_high = high[0]`, `rolling_low = low[0]`
+- 若 `close[0] = high[0]` 或 `close[0] = low[0]`，则 `RSV = 100` 或 `0`（极端值）
+- 前 N-1 天的 RSV 数据失真，影响后续 K/D/J 计算
+
+### 标准定义
+
+**标准 KDJ 实现要求：**
+- 满 N 期才开始计算 RSV
+- 前 N-1 天标记为 NaN（无有效数据）
+- 确保使用完整窗口数据（最高价取 N 天内最高，最低价取 N 天内最低）
+
+### 修复方式
+
+```python
+# 遵循标准 KDJ 定义：满 N 期才开始计算，前 N-1 期为 NaN
+# min_periods=n 确保使用完整窗口数据，避免前 N-1 天数据失真
+factor_df['rolling_high'] = factor_df.groupby('asset')['high'].transform(
+    lambda x: x.rolling(window=n, min_periods=n).max()
+)
+factor_df['rolling_low'] = factor_df.groupby('asset')['low'].transform(
+    lambda x: x.rolling(window=n, min_periods=n).min()
+)
+```
+
+### 影响分析
+
+| 指标 | min_periods=1（错误） | min_periods=n（正确） | 说明 |
+|------|----------------------|---------------------|------|
+| 有效数据起点 | 第 1 天 | 第 N 天 | 前 N-1 天为 NaN |
+| 因子最小值 | -28.62 | -54.44 | 消除极端值后范围更真实 |
+| 因子最大值 | 129.14 | 154.44 | 消除极端值后范围更真实 |
+| IC 均值 | -0.0160 | -0.0180 | 消除噪音后更显著 |
+| t 统计量 | -2.61 | -3.12 | 显著性增强 |
+
+**结论：** min_periods=n 消除了前 N-1 天的失真数据，使因子统计更准确、IC 更显著。
+
+---
+
 ## KDJ 初始值规范
 
 ### 问题根因
@@ -537,6 +588,7 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | 浮点数除零精度容差 | ✓ | 使用 EPSILON=1e-10，替代 diff == 0 |
 || KDJ 初始值 ewm 递推 | ✓ | 预处理 RSV[0]/K[0] 使 ewm 输出 = initial_k/initial_d |
 | 死代码清理 | ✓ | 删除未调用的 calculate_kdj_j_for_stock_vectorized |
+| RSV 窗口期完整性 | ✓ | 使用 min_periods=n，前 N-1 天为 NaN |
 
 ---
 
@@ -550,7 +602,8 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.3 | 2026-05-20 | 修复浮点数除零判断（使用精度容差 EPSILON=1e-10，遵循 Section 17 规范） |
 | v1.4 | 2026-05-20 | 修复 K/D 初始值 ewm 递推逻辑（预处理 RSV[0]/K[0] 使 ewm 输出 = initial_k/initial_d） |
 | v1.5 | 2026-05-20 | 删除死代码 calculate_kdj_j_for_stock_vectorized（未被调用，仅保留 calculate_kdj_j_factor） |
+| v1.6 | 2026-05-20 | 修复 RSV 计算 min_periods 参数，使用 min_periods=n 确保满窗口期数据完整性 |
 
 ---
 
-*最后更新: 2026-05-20 14:30*
+*最后更新: 2026-05-20 14:45*

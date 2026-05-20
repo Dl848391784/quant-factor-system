@@ -119,12 +119,15 @@ def calculate_kdj_j_factor(
     factor_df = factor_df.sort_values(['asset', 'date']).copy()
     
     # 向量化计算 RSV
+    # 遵循标准 KDJ 定义：满 N 期才开始计算，前 N-1 期为 NaN
+    # min_periods=n 确保使用完整窗口数据，避免前 N-1 天数据失真
+    # 原因：min_periods=1 时，第1天只有1天数据，RSV 可能是 0 或 100（极端值）
     print("  [Step 1] 计算 RSV...")
     factor_df['rolling_high'] = factor_df.groupby('asset')['high'].transform(
-        lambda x: x.rolling(window=n, min_periods=1).max()
+        lambda x: x.rolling(window=n, min_periods=n).max()
     )
     factor_df['rolling_low'] = factor_df.groupby('asset')['low'].transform(
-        lambda x: x.rolling(window=n, min_periods=1).min()
+        lambda x: x.rolling(window=n, min_periods=n).min()
     )
     
     # 使用精度容差判断浮点数除零（遵循 PROJECT.md 浮点数等值比较规范）
