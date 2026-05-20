@@ -1,7 +1,7 @@
 # Turnover_Surge_1D IC 计算流程文档
 
 > 生成时间: 2026-05-20 17:00 (北京时间)
-> 审阅版本: v1.2
+> 审阅版本: v1.3
 > 实测数据时间: 2026-05-20
 > 更新内容:
 >   1. [v1.1] 修复 ic_metrics 字段缺失问题：添加 p_value_display（遵循 MODULE.md 输出结构规范）
@@ -15,6 +15,12 @@
 >   9. [v1.2] 添加 DEFAULT_MIN_STOCKS 常量（遵循 PROJECT.md 参数传递规范）
 >   10. [v1.2] 添加 update_mode='full' 返回标记（遵循 PROJECT.md 返回值标记规范）
 >   11. [v1.2] 删除自定义 IC 计算逻辑，改用公共模块统一实现
+>   12. [v1.3] 删除未使用的导入：scipy.stats, gc（遵循代码规范）
+>   13. [v1.3] 重构主函数：添加 _full_recalculate 全量计算封装函数
+>   14. [v1.3] 实现显式控制流架构：每个分支都有明确的 return（遵循 PROJECT.md 控制流规范）
+>   15. [v1.3] 添加 skip 模式 update_mode 标记（遵循 PROJECT.md 返回值标记规范）
+>   16. [v1.3] 添加 fallback_event 和 incremental_fallback 字段（遵循 PROJECT.md 返回值标记规范）
+>   17. [v1.3] 增量模式 fallback 处理：换手率突增因子需要5日窗口计算，增量模式暂用全量计算替代
 
 ---
 

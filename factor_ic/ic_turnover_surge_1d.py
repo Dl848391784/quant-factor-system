@@ -28,10 +28,8 @@ import pandas as pd
 import numpy as np
 import gzip
 import json
-import gc
 from typing import Tuple, Optional, Dict
 from datetime import datetime
-from scipy import stats
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -101,8 +99,6 @@ def load_data_from_cache() -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
     turnover_df = pd.DataFrame(turnover_data['data'])
     turnover_df['turnover_rate'] = pd.to_numeric(turnover_df['turnover_rate'], errors='coerce')
     turnover_df = turnover_df.dropna(subset=['turnover_rate'])
-    del turnover_data
-    gc.collect()
     print(f"    换手率数据: {len(turnover_df)} 行")
     
     # 加载收盘价数据
@@ -113,8 +109,6 @@ def load_data_from_cache() -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
     close_df = pd.DataFrame(factor_data['data'])
     close_df = close_df[['date', 'asset', 'close']].copy()
     close_df['close'] = pd.to_numeric(close_df['close'], errors='coerce')
-    del factor_data
-    gc.collect()
     print(f"    收盘价数据: {len(close_df)} 行")
     
     # 加载收益数据
@@ -128,8 +122,6 @@ def load_data_from_cache() -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
         return_df['forward_return'] = return_df['forward_return_1d']
     return_df = return_df[['date', 'asset', 'forward_return']].copy()
     return_df['forward_return'] = pd.to_numeric(return_df['forward_return'], errors='coerce')
-    del return_data
-    gc.collect()
     print(f"    收益数据: {len(return_df)} 行")
     
     # 合并换手率和收盘价
@@ -140,8 +132,6 @@ def load_data_from_cache() -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
         on=['date', 'asset'],
         how='inner'
     )
-    del turnover_df, close_df
-    gc.collect()
     print(f"    合并后: {len(factor_df)} 行, {factor_df['asset'].nunique()} 只股票")
     
     # 在进一步处理之前，计算原始数据范围（遵循 PROJECT.md 输出字段语义规范）
@@ -241,8 +231,6 @@ def calculate_turnover_surge_factor(factor_df: pd.DataFrame) -> Tuple[pd.DataFra
         valid_values = factor_df.loc[mask, 'turnover_surge']
         print(f"    因子范围（裁剪后）: [{valid_values.min():.2f}, {valid_values.max():.2f}]")
         print(f"    因子均值: {valid_values.mean():.2f}")
-    
-    gc.collect()
     
     return factor_df, filter_stats
 
@@ -400,40 +388,21 @@ def calculate_turnover_surge_ic(
     }
 
 
-def generate_turnover_surge_ic_data(
-    n_days: int = 500,
-    output_file: str = None,
-    force_full: bool = False
-) -> Dict:
+def _full_recalculate(
+    output_file: Path,
+    min_stocks: int = DEFAULT_MIN_STOCKS  # 遵循 PROJECT.md 参数传递规范
+) -> dict:
     """
-    从缓存数据计算换手率突增因子 IC
+    全量计算换手率突增因子 IC
     
     参数:
-        n_days: 保留最近多少天的数据
         output_file: 输出文件路径
-        force_full: 强制全量计算
+        min_stocks: 最小股票数阈值（遵循 PROJECT.md 参数传递规范）
         
     返回:
-        IC 数据字典
+        IC 数据字典（遵循 PROJECT.md 输出结构规范）
     """
     FACTOR_NAME = 'turnover_surge_1d'
-    
-    if output_file is None:
-        output_file = get_ic_output_path(FACTOR_NAME)
-    
-    # 增量判断（除非强制全量）
-    if not force_full:
-        mode, missing_dates, info = check_data_completeness(FACTOR_NAME)
-        
-        if mode == 'skip':
-            print("\n数据完备，无需更新")
-            try:
-                with open(output_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"读取缓存失败: {e}，将执行全量计算")
-                # 显式 fallthrough 到全量计算（遵循 PROJECT.md 增量模式异常处理规范）
-                pass  # except 块结束，代码继续向下执行全量计算
     
     # 全量计算
     print("=" * 60)
@@ -445,10 +414,10 @@ def generate_turnover_surge_ic_data(
     try:
         factor_df, return_df, raw_metadata = load_data_from_cache()
         
-        if factor_df['asset'].nunique() < 10:
+        if factor_df['asset'].nunique() < min_stocks:
             raise ValueError(
                 f"股票数量不足以计算有效的 IC\n"
-                f"当前: {factor_df['asset'].nunique()} < 10"
+                f"当前: {factor_df['asset'].nunique()} < {min_stocks}"
             )
     except Exception as e:
         raise RuntimeError(f"数据加载失败: {e}")
@@ -465,7 +434,7 @@ def generate_turnover_surge_ic_data(
     
     # 计算 IC
     print("\n[3/3] 计算 IC...")
-    ic_data = calculate_turnover_surge_ic(factor_df, return_df, raw_metadata=raw_metadata)
+    ic_data = calculate_turnover_surge_ic(factor_df, return_df, raw_metadata=raw_metadata, min_stocks=min_stocks)
     
     print(f"\nIC 统计:")
     print(f"  - IC 均值: {ic_data['ic_metrics']['ic_mean']:.4f}")
@@ -511,7 +480,6 @@ def generate_turnover_surge_ic_data(
     result_json = convert_to_native_types(result_json)
     
     # 保存
-    output_file = Path(output_file)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     
     with open(output_file, 'w', encoding='utf-8') as f:
@@ -523,6 +491,97 @@ def generate_turnover_surge_ic_data(
     print("=" * 60)
     
     return result_json
+
+
+def generate_turnover_surge_ic_data(
+    output_file: Path | str | None = None,
+    force_full: bool = False,
+    min_stocks: int = DEFAULT_MIN_STOCKS  # 遵循 PROJECT.md 参数传递规范
+) -> dict:
+    """
+    从缓存数据计算换手率突增因子 IC
+    
+    参数:
+        output_file: 输出文件路径（Path 或 str，内部统一转为 Path）
+        force_full: 强制全量计算
+        min_stocks: 最小股票数阈值（遵循 PROJECT.md 参数传递规范）
+        
+    返回:
+        IC 数据字典
+    
+    规范:
+        计算日期范围为缓存数据的全部日期，不截断
+    """
+    FACTOR_NAME = 'turnover_surge_1d'
+    
+    # 统一转换为 Path 对象（遵循 PROJECT.md 参数类型约定）
+    if output_file is None:
+        output_file = get_ic_output_path(FACTOR_NAME)
+    else:
+        output_file = Path(output_file)
+    
+    # 强制全量计算：直接调用全量计算函数
+    # 参数 min_stocks 通过函数签名传递，统一管理（遵循 PROJECT.md 参数传递规范）
+    if force_full:
+        return _full_recalculate(output_file, min_stocks=min_stocks)
+    
+    # 增量判断
+    mode, missing_dates, info = check_data_completeness(FACTOR_NAME)
+    
+    # 显式控制流架构：每个分支都有明确的 return，不存在隐式 fallthrough
+    if mode == 'skip':
+        # 数据完备，无需计算
+        print("\n数据完备，无需更新")
+        try:
+            with open(output_file, 'r', encoding='utf-8') as f:
+                cached_data = json.load(f)
+                # 添加更新模式标记（遵循 PROJECT.md 返回值标记规范）
+                cached_data['update_mode'] = 'skip'
+                return cached_data  # 成功：返回缓存数据（带 skip 标记）
+        except Exception as e:
+            # 失败：显式调用全量计算（遵循 PROJECT.md 增量模式异常处理规范）
+            print(f"读取缓存失败: {e}，将执行全量计算")
+            full_data = _full_recalculate(output_file, min_stocks=min_stocks)
+            # 添加 fallback 事件标记（遵循 PROJECT.md 返回值标记规范）
+            full_data['update_mode'] = 'full'  # 实际执行的模式
+            full_data['fallback_event'] = {
+                'original_mode': 'skip',
+                'actual_mode': 'full',
+                'trigger_reason': 'cache_read_failed',
+                'error_message': str(e),
+                'description': f"缓存读取失败，触发全量计算。原始错误: {e}"
+            }
+            return full_data
+    
+    elif mode == 'incremental':
+        # 缺失数据，执行增量更新
+        # 注意：换手率突增因子需要窗口计算（5日换手率均值），增量计算需要额外历史数据
+        # 为简化实现，暂使用全量计算替代增量计算
+        print(f"\n[增量模式] 缺失 {len(missing_dates)} 天数据")
+        print("  注意：换手率突增因子需要5日窗口计算，增量模式暂用全量计算替代")
+        full_data = _full_recalculate(output_file, min_stocks=min_stocks)
+        # 添加增量替代事件标记
+        full_data['update_mode'] = 'full'
+        full_data['incremental_fallback'] = {
+            'original_mode': 'incremental',
+            'actual_mode': 'full',
+            'trigger_reason': 'factor_window_dependency',
+            'missing_dates_count': len(missing_dates),
+            'description': "换手率突增因子需要5日窗口计算，增量模式暂用全量计算替代"
+        }
+        return full_data
+    
+    elif mode == 'full':
+        # 需要全量计算
+        return _full_recalculate(output_file, min_stocks=min_stocks)
+    
+    else:
+        # 未知模式：防御性处理（遵循 PROJECT.md 错误信息格式规范）
+        raise RuntimeError(
+            f"未知的计算模式: {mode}\n"
+            f"合法值: ['skip', 'incremental', 'full']\n"
+            f"请检查 check_data_completeness() 返回值是否正确"
+        )
 
 
 if __name__ == '__main__':
