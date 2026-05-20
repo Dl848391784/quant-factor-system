@@ -960,11 +960,12 @@ def _incremental_update(
             'total_days': raw_metadata.get('total_days', 0),  # 直接使用原始缓存天数（遵循 MODULE.md total_days 规范）
             'valid_days': valid_ic_count,  # 有效 IC 天数（不含 None，与全量路径语义一致）
             # total_days - valid_days = 因股票不足或数据缺失跳过的交易日数
-            'avg_stocks_per_day': int(factor_df_full.groupby('date').size().mean()),
+            # avg_stocks_per_day 基于有效因子值计算（过滤 NaN，避免预热期数据计入平均）
+            'avg_stocks_per_day': int(factor_df_full[factor_df_full['bollinger_pb_1d'].notna()].groupby('date').size().mean()),
             'avg_stocks_period': {
                 'start': str(factor_df_full['date'].min()),
                 'end': str(factor_df_full['date'].max()),
-                'description': f"avg_stocks_per_day 反映此范围内的平均每日股票数"
+                'description': f"avg_stocks_per_day 反映此范围内有效因子值的平均每日股票数（不含预热期NaN）"
             }
         },
         'statistical_significance': result['statistical_significance'],  # ✓ 直接透传（字段名一致）
