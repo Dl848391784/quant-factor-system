@@ -442,9 +442,27 @@ def calculate_daily_ic_series(
     period_start = raw_metadata['period_start']
     period_end = raw_metadata['period_end']
     
-    # 转换为 JSON 友好格式
-    dates = [str(d) for d in ic_series.index]
-    ic_values = [round(v, 6) for v in ic_series.values]
+    # 获取完整日期列表（从 factor_df 提取，包含所有计算过的日期）
+    # 注意：ic_series 只含有效日期（IC≠None），需要补充无效日期（IC=None）
+    # 与增量路径语义一致：dates 含所有日期，ic_values 含 None，valid_days 统计有效天数
+    all_dates_from_factor = sorted(factor_df['date'].unique())
+    
+    # 构建完整日期列表和 IC 值列表（含无效日期 IC=None）
+    dates = []
+    ic_values = []
+    ic_series_dict = {str(d): round(v, 6) for d, v in ic_series.items()}
+    
+    for date in all_dates_from_factor:
+        date_str = str(date)
+        dates.append(date_str)
+        if date_str in ic_series_dict:
+            ic_values.append(ic_series_dict[date_str])
+        else:
+            ic_values.append(None)  # 无效日期（股票数不足），IC=None
+    
+    # 统计有效 IC 天数（不含 None）
+    valid_ic_count = sum(1 for ic in ic_values if ic is not None)
+    none_ic_count = len(ic_values) - valid_ic_count
     
     # 日期格式断言（遵循 PROJECT.md 日期字符串比较规范）
     # 核心原则：全量路径与增量路径保持一致的防御机制
@@ -462,14 +480,22 @@ def calculate_daily_ic_series(
             )
     
     # 计算 20 日滚动均值（min_periods=10，至少需要10个有效值）
+    # 注意：rolling 基于 ic_series（不含 None），然后映射回完整 dates 列表
+    # 与增量路径语义一致：有效 IC 的日期有 rolling 值，None IC 的日期 rolling 为 None
     rolling_mean = ic_series.rolling(window=20, min_periods=10).mean()
     
-    # NaN → None 转换（遵循 MODULE.md NaN 处理规范）
-    # 在数据生成阶段处理，而非延迟到 convert_to_native_types
-    rolling_ic_mean = [
-        round(v, 6) if not pd.isna(v) else None
-        for v in rolling_mean.values
-    ]
+    # 构建 rolling_ic_mean 映射（有效日期 → rolling 值）
+    rolling_map = {}
+    for date_str, value in zip([str(d) for d in ic_series.index], rolling_mean.values):
+        rolling_map[date_str] = round(value, 6) if not pd.isna(value) else None
+    
+    # 映射回完整日期列表（None IC 的日期，rolling_ic_mean 为 None）
+    rolling_ic_mean = []
+    for date in dates:
+        if ic_series_dict.get(date) is not None:
+            rolling_ic_mean.append(rolling_map.get(date))
+        else:
+            rolling_ic_mean.append(None)  # None IC 的日期，rolling_ic_mean 也为 None
     
     # 符合 PROJECT.md 规范的数据结构（五维度判断）
     return {
@@ -525,7 +551,7 @@ def calculate_daily_ic_series(
             #   - 口径范围见 avg_stocks_period 字段（遵循 PROJECT.md 输出字段口径规范）
             # - 差值含义: total_days - valid_days = 因股票不足或数据缺失跳过的交易日数
             'total_days': raw_metadata.get('total_days', factor_df['date'].nunique()),
-            'valid_days': len(dates),
+            'valid_days': valid_ic_count,  # 有效 IC 天数（不含 None，与增量路径语义一致）
             'avg_stocks_per_day': int(factor_df.groupby('date').size().mean()),
             'avg_stocks_period': {
                 'start': str(factor_df['date'].min()),
