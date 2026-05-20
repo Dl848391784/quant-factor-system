@@ -602,9 +602,18 @@ def generate_kdj_j_ic_data(
         else:  # mode == 'full'
             should_full_recalculate = True
     
-    # 此处：should_full_recalculate=True（所有分支已处理）
+    # 显式控制流：检查标志变量，确保控制流清晰
+    # 遵循 MODULE.md 控制流规范：变量必须被使用，否则形同虚设
+    if not should_full_recalculate:
+        # 不应该到达这里：所有分支已处理，skip 模式应已返回
+        # 若到达此处，说明逻辑错误，抛出异常便于调试
+        raise RuntimeError(
+            "控制流逻辑错误：should_full_recalculate=False 但未返回\n"
+            "可能原因：skip 模式成功读取缓存后应直接返回，不应继续执行\n"
+            "请检查增量判断逻辑是否正确"
+        )
     
-    # 全量计算逻辑
+    # 全量计算逻辑（显式保护：仅当 should_full_recalculate=True 时执行）
     print("=" * 60)
     print(f"KDJ_J_1D IC 计算器（缓存版） - 1日收益周期")
     print(f"参数: N={n}, M1={m1}, M2={m2}")

@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 15:40 北京时间
-> 实测数据时间: 2026-05-20 15:35 北京时间
-> 版本: v1.11
-> 更新内容: 修复 ewm 初始值函数副作用问题，使用 .copy() 避免修改原始数据
+> 生成时间: 2026-05-20 15:50 北京时间
+> 实测数据时间: 2026-05-20 15:45 北京时间
+> 版本: v1.12
+> 更新内容: 修复 should_full_recalculate 标志未使用问题，添加显式检查确保控制流有效
 
 ---
 
@@ -402,8 +402,15 @@ if not force_full:
     else:  # mode == 'full'
         should_full_recalculate = True
 
-# 此处：should_full_recalculate=True（所有分支已处理）
-# 全量计算逻辑
+# 显式控制流：检查标志变量，确保控制流清晰
+if not should_full_recalculate:
+    raise RuntimeError(
+        "控制流逻辑错误：should_full_recalculate=False 但未返回\n"
+        "可能原因：skip 模式成功读取缓存后应直接返回，不应继续执行\n"
+        "请检查增量判断逻辑是否正确"
+    )
+
+# 全量计算逻辑（显式保护：仅当 should_full_recalculate=True 时执行）
 ```
 
 ### 控制流分析
