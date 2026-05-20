@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 16:45 北京时间
-> 实测数据时间: 2026-05-20 16:40 北京时间
-> 版本: v1.17
-> 更新内容: 修复死代码守卫问题，移除无效守卫逻辑，用注释说明控制流语义
+> 生成时间: 2026-05-20 16:55 北京时间
+> 实测数据时间: 2026-05-20 16:50 北京时间
+> 版本: v1.18
+> 更新内容: 修复 groupby transform 异常信息淹没问题，添加 try/except 捕获并附加诊断信息
 
 ---
 
@@ -770,6 +770,84 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.15 | 2026-05-20 | 修复边界条件处理缺失，dates 为空时提前抛出有意义的异常（遵循 MODULE.md 边界条件规范） |
 | v1.16 | 2026-05-20 | 修复 K/D 初始值函数注释语义表述，精确描述 ewm 递推逻辑（预处理输入而非直接赋值输出） |
 | v1.17 | 2026-05-20 | 修复死代码守卫问题，移除无效守卫逻辑，用注释说明控制流语义（遵循 MODULE.md 控制流规范） |
+| v1.18 | 2026-05-20 | 修复 groupby transform 异常信息淹没问题，添加 try/except 捕获并附加诊断信息（遵循 MODULE.md 异常处理规范） |
+
+---
+
+## groupby transform 异常处理规范
+
+### 问题根因
+
+**场景：** groupby transform 对每个分组调用 lambda 函数，若某只股票触发异常，pandas 会将异常包装在模糊的 ValueError 或 TypeError 中，丢失股票代码和原始异常类型。
+
+**原始代码（异常信息淹没）：**
+```python
+factor_df['k'] = factor_df.groupby('asset')['rsv'].transform(
+    lambda rsv: _calculate_k_with_initial(rsv, alpha_k, initial_k)
+)
+
+def _calculate_k_with_initial(rsv_series, alpha_k, initial_k):
+    # 若此处抛出异常，pandas 会包装为：
+    # ValueError: transform() returned an error
+    # 丢失股票代码和原始异常类型
+    k_series = rsv_series.ewm(alpha=alpha_k, adjust=False).mean()
+    return k_series
+```
+
+**问题分析：**
+1. pandas groupby transform 内部捕获异常并包装
+2. 无法知道是哪只股票出错
+3. 无法知道原始异常类型（TypeError、ValueError 等）
+4. 调试困难，需要手动遍历所有股票
+
+### 修复方案
+
+**在辅助函数内部添加 try/except，捕获并附加诊断信息：**
+```python
+def _calculate_k_with_initial(rsv_series, alpha_k, initial_k):
+    """计算 K 值（无副作用版本）"""
+    if len(rsv_series) == 0:
+        return rsv_series
+    
+    try:
+        rsv_copy = rsv_series.copy()
+        rsv_copy.iloc[0] = initial_k
+        k_series = rsv_copy.ewm(alpha=alpha_k, adjust=False).mean()
+        return k_series
+        
+    except Exception as e:
+        # 捕获异常并附加诊断信息
+        raise RuntimeError(
+            f"K 值计算异常（groupby transform 内部）\n"
+            f"原始异常: {type(e).__name__}: {e}\n"
+            f"诊断信息:\n"
+            f"  - Series 长度: {len(rsv_series)}\n"
+            f"  - 索引范围: {rsv_series.index.min() if len(rsv_series) > 0 else 'N/A'} ~ "
+            f"{rsv_series.index.max() if len(rsv_series) > 0 else 'N/A'}\n"
+            f"  - 参数: alpha_k={alpha_k}, initial_k={initial_k}\n"
+            f"  - RSV[0] 原始值: {rsv_series.iloc[0] if len(rsv_series) > 0 else 'N/A'}\n"
+            f"建议: 检查对应股票的 RSV 数据是否存在异常值（如 inf、NaN）"
+        ) from e
+```
+
+### 设计原则
+
+1. **异常链保留：** 使用 `raise ... from e` 保留原始异常链，便于调试
+2. **诊断信息完整：** 附加 Series 长度、索引范围、参数值、第一个数据值
+3. **修复建议明确：** 提供具体的检查方向（如 inf、NaN）
+4. **遵循 MODULE.md 规范：** 异常分层、信息完整、可恢复性明确
+
+### 适用场景
+
+- 所有 groupby transform 中的辅助函数
+- 所有 apply/map 中的辅助函数
+- 任何可能被 pandas 内部包装的函数
+
+### 注意事项
+
+- 由于函数只有 Series 数据，无法获取股票代码（asset）
+- 若需要股票代码，需在外层捕获或改用 groupby apply（牺牲性能）
+- 诊断信息应包含足够的信息以定位问题（索引范围、参数值等）
 
 ---
 

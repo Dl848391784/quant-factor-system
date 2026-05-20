@@ -91,21 +91,41 @@ def _calculate_k_with_initial(
     设计原则：显式传参，避免闭包捕获外部变量
     - 若闭包捕获 alpha_k/initial_k，外层函数重构时静默使用旧值
     - 函数签名必须暴露所有依赖，便于调用者理解
+    
+    异常处理：捕获 groupby transform 内部异常，附加诊断信息
+    - 原因：lambda 包装后 pandas 淹没异常信息，丢失股票代码
+    - 解决：在函数内部捕获异常，添加 Series 长度、索引范围、参数值等诊断信息
     """
     if len(rsv_series) == 0:
         return rsv_series
     
-    # 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
-    rsv_copy = rsv_series.copy()
-    
-    # 预处理：将副本的第一个 RSV 值设为 initial_k
-    # ewm(adjust=False) 的第一个输出 = 第一个输入，因此 ewm 后 K[0] = initial_k
-    rsv_copy.iloc[0] = initial_k
-    
-    # 计算 ewm 递推：K[0] = rsv_copy[0] = initial_k
-    k_series = rsv_copy.ewm(alpha=alpha_k, adjust=False).mean()
-    
-    return k_series
+    try:
+        # 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
+        rsv_copy = rsv_series.copy()
+        
+        # 预处理：将副本的第一个 RSV 值设为 initial_k
+        # ewm(adjust=False) 的第一个输出 = 第一个输入，因此 ewm 后 K[0] = initial_k
+        rsv_copy.iloc[0] = initial_k
+        
+        # 计算 ewm 递推：K[0] = rsv_copy[0] = initial_k
+        k_series = rsv_copy.ewm(alpha=alpha_k, adjust=False).mean()
+        
+        return k_series
+        
+    except Exception as e:
+        # 捕获异常并附加诊断信息（遵循 MODULE.md 异常处理规范）
+        # 原因：groupby transform 淹没异常信息，极难定位问题股票
+        raise RuntimeError(
+            f"K 值计算异常（groupby transform 内部）\n"
+            f"原始异常: {type(e).__name__}: {e}\n"
+            f"诊断信息:\n"
+            f"  - Series 长度: {len(rsv_series)}\n"
+            f"  - 索引范围: {rsv_series.index.min() if len(rsv_series) > 0 else 'N/A'} ~ "
+            f"{rsv_series.index.max() if len(rsv_series) > 0 else 'N/A'}\n"
+            f"  - 参数: alpha_k={alpha_k}, initial_k={initial_k}\n"
+            f"  - RSV[0] 原始值: {rsv_series.iloc[0] if len(rsv_series) > 0 else 'N/A'}\n"
+            f"建议: 检查对应股票的 RSV 数据是否存在异常值（如 inf、NaN）"
+        ) from e
 
 
 def _calculate_d_with_initial(
@@ -134,21 +154,41 @@ def _calculate_d_with_initial(
     设计原则：显式传参，避免闭包捕获外部变量
     - 若闭包捕获 alpha_d/initial_d，外层函数重构时静默使用旧值
     - 函数签名必须暴露所有依赖，便于调用者理解
+    
+    异常处理：捕获 groupby transform 内部异常，附加诊断信息
+    - 原因：lambda 包装后 pandas 淹没异常信息，丢失股票代码
+    - 解决：在函数内部捕获异常，添加 Series 长度、索引范围、参数值等诊断信息
     """
     if len(k_series) == 0:
         return k_series
     
-    # 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
-    k_copy = k_series.copy()
-    
-    # 预处理：将副本的第一个 K 值设为 initial_d
-    # ewm(adjust=False) 的第一个输出 = 第一个输入，因此 ewm 后 D[0] = initial_d
-    k_copy.iloc[0] = initial_d
-    
-    # 计算 ewm 递推：D[0] = k_copy[0] = initial_d
-    d_series = k_copy.ewm(alpha=alpha_d, adjust=False).mean()
-    
-    return d_series
+    try:
+        # 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
+        k_copy = k_series.copy()
+        
+        # 预处理：将副本的第一个 K 值设为 initial_d
+        # ewm(adjust=False) 的第一个输出 = 第一个输入，因此 ewm 后 D[0] = initial_d
+        k_copy.iloc[0] = initial_d
+        
+        # 计算 ewm 递推：D[0] = k_copy[0] = initial_d
+        d_series = k_copy.ewm(alpha=alpha_d, adjust=False).mean()
+        
+        return d_series
+        
+    except Exception as e:
+        # 捕获异常并附加诊断信息（遵循 MODULE.md 异常处理规范）
+        # 原因：groupby transform 淹没异常信息，极难定位问题股票
+        raise RuntimeError(
+            f"D 值计算异常（groupby transform 内部）\n"
+            f"原始异常: {type(e).__name__}: {e}\n"
+            f"诊断信息:\n"
+            f"  - Series 长度: {len(k_series)}\n"
+            f"  - 索引范围: {k_series.index.min() if len(k_series) > 0 else 'N/A'} ~ "
+            f"{k_series.index.max() if len(k_series) > 0 else 'N/A'}\n"
+            f"  - 参数: alpha_d={alpha_d}, initial_d={initial_d}\n"
+            f"  - K[0] 原始值: {k_series.iloc[0] if len(k_series) > 0 else 'N/A'}\n"
+            f"建议: 检查对应股票的 K 值数据是否存在异常值（如 inf、NaN）"
+        ) from e
 
 
 # ============================================================
