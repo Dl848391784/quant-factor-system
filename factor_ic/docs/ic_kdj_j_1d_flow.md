@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 15:00 北京时间
-> 实测数据时间: 2026-05-20 14:55 北京时间
-> 版本: v1.7
-> 更新内容: 修复增量模式隐式 fallthrough，使用显式控制流（should_full_recalculate 变量）
+> 生成时间: 2026-05-20 15:10 北京时间
+> 实测数据时间: 2026-05-20 15:05 北京时间
+> 版本: v1.8
+> 更新内容: 修复 required_fields 校验遗漏 p_value 字段（防御性校验完整性）
 
 ---
 
@@ -603,6 +603,56 @@ J 前5个值:   [50.0, 11.11, 8.97, 35.11, 78.02]
 
 ---
 
+## 防御性校验完整性规范
+
+### 问题根因
+
+**原始代码（校验不完整）：**
+```python
+required_fields = [
+    'ic_series', 'ic_mean', 'ic_std', 'icir',
+    'statistical_significance', 'factor_direction',
+    ...
+]
+missing_fields = [f for f in required_fields if f not in result]
+if missing_fields:
+    raise RuntimeError(...)
+
+# 校验通过后，直接访问 p_value
+'p_value': round(result['p_value'], 6),  # KeyError！
+```
+
+**问题分析：**
+- `required_fields` 未包含 `p_value`，校验通过
+- 第468行直接访问 `result['p_value']`
+- 若 `ic_calculator` 未返回 `p_value`，校验通过后仍会 KeyError
+- 校验与实际访问不一致，防御失效
+
+### 修复方式
+
+**校验列表必须包含所有直接访问的字段：**
+```python
+required_fields = [
+    'ic_series', 'ic_mean', 'ic_std', 'icir', 'p_value',  # 新增 p_value
+    'statistical_significance', 'factor_direction',
+    ...
+]
+```
+
+### 规范要求
+
+**遵循 PROJECT.md 函数返回值契约规范：**
+- `required_fields` 必须包含所有后续直接访问的字段
+- 校验通过意味着所有字段访问安全
+- 校验列表与实际访问代码需保持一致
+
+**为何必须完整校验：**
+1. 防御失效：校验通过后仍抛 KeyError，违背防御目的
+2. 错误定位误导：KeyError 在第468行而非校验处，难以定位根因
+3. 重构风险：新增字段访问时，易忘记更新校验列表
+
+---
+
 ## 五维度判断结果
 
 ### KDJ_J_1D 测试结果
@@ -663,6 +713,7 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | 死代码清理 | ✓ | 删除未调用的 calculate_kdj_j_for_stock_vectorized |
 | RSV 窗口期完整性 | ✓ | 使用 min_periods=n，前 N-1 天为 NaN |
 | 增量模式控制流 | ✓ | 使用显式变量 should_full_recalculate，避免隐式 fallthrough |
+| required_fields 完整性 | ✓ | 包含 p_value 字段，校验与实际访问一致 |
 
 ---
 
@@ -678,7 +729,8 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.5 | 2026-05-20 | 删除死代码 calculate_kdj_j_for_stock_vectorized（未被调用，仅保留 calculate_kdj_j_factor） |
 | v1.6 | 2026-05-20 | 修复 RSV 计算 min_periods 参数，使用 min_periods=n 确保满窗口期数据完整性 |
 | v1.7 | 2026-05-20 | 修复增量模式隐式 fallthrough，使用显式控制流（should_full_recalculate 变量） |
+| v1.8 | 2026-05-20 | 修复 required_fields 校验遗漏 p_value 字段（防御性校验完整性） |
 
 ---
 
-*最后更新: 2026-05-20 15:00*
+*最后更新: 2026-05-20 15:10*

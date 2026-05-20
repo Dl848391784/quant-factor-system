@@ -391,8 +391,9 @@ def calculate_daily_ic_series(
     
     # 防御性校验：确保 result 包含必需字段
     # 遵循 PROJECT.md 函数返回值契约规范
+    # 注意：p_value 在 ic_metrics 中直接访问，必须包含在校验列表中
     required_fields = [
-        'ic_series', 'ic_mean', 'ic_std', 'icir',
+        'ic_series', 'ic_mean', 'ic_std', 'icir', 'p_value',
         'statistical_significance', 'factor_direction',
         'economic_significance', 'icir_stability',
         'ic_distribution_consistency', 'positive_ratio', 'summary'
