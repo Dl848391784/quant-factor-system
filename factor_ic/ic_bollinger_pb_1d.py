@@ -242,54 +242,65 @@ def calculate_bollinger_pb_1d_factor(
     factor_df = factor_df.sort_values(['asset', 'date']).copy()
     
     # ========== 向量化计算布林带 ==========
-    print(f"  [Step 1] 计算中轨（SMA）...")
+    # 定义临时列名（用于异常时清理，确保不残留脏列）
+    temp_cols = ['middle_band', 'std_dev', 'upper_band', 'lower_band']
     
-    # 按股票分组计算滚动窗口
-    # min_periods=n：遵循布林带标准定义，满 N 个周期才计算
-    # 前N-1个交易日的布林带值为 NaN（等待足够数据）
-    factor_df['middle_band'] = factor_df.groupby('asset')['close'].transform(
-        lambda x: x.rolling(window=n, min_periods=n).mean()
-    )
-    
-    print(f"  [Step 2] 计算标准差（总体标准差，ddof=0）...")
-    # 布林带标准定义使用总体标准差（Population Standard Deviation）
-    # pandas rolling().std() 默认 ddof=1（样本标准差），需显式指定 ddof=0
-    # 遵循 MODULE.md 技术指标参数规范
-    factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
-        lambda x: x.rolling(window=n, min_periods=n).std(ddof=0)
-    )
-    
-    print(f"  [Step 3] 计算上轨和下轨...")
-    factor_df['upper_band'] = factor_df['middle_band'] + k * factor_df['std_dev']
-    factor_df['lower_band'] = factor_df['middle_band'] - k * factor_df['std_dev']
-    
-    # ========== 计算 %B ==========
-    print(f"  [Step 4] 计算 %B...")
-    
-# 处理除零和 NaN 情况（遵循 MODULE.md 布林带 %B 计算显式处理 NaN 规范）
-    # 核心原则：显式处理 NaN，避免依赖 NaN 传播的隐式行为
-    # 布林带预热期（前 N-1 日）：upper_band/lower_band 为 NaN → diff 为 NaN
-    # 浮点数除零：diff ≈ 0（宽度为零）→ 定义 %B = 0.5
-    
-    diff = factor_df['upper_band'] - factor_df['lower_band']
-    
-    # 显式处理三种情况：
-    # 1. diff 为 NaN（布林带预热期）→ %B = NaN
-    # 2. diff ≈ 0（布林带宽度为零）→ %B = 0.5
-    # 3. diff > 0（正常情况）→ %B = (close - lower) / diff
-    
-    factor_df['bollinger_pb_1d'] = np.where(
-        pd.isna(diff),  # 显式检查 NaN（布林带预热期）
-        np.nan,         # NaN → NaN（显式定义，而非依赖隐式传播）
-        np.where(
-            np.abs(diff) < 1e-10,  # 浮点数精度容差判断
-            0.5,  # 布林带宽度为零时，%B 定义为 0.5（价格在中轨）
-            (factor_df['close'] - factor_df['lower_band']) / diff  # 正常计算
+    try:
+        print(f"  [Step 1] 计算中轨（SMA）...")
+        
+        # 按股票分组计算滚动窗口
+        # min_periods=n：遵循布林带标准定义，满 N 个周期才计算
+        # 前N-1个交易日的布林带值为 NaN（等待足够数据）
+        factor_df['middle_band'] = factor_df.groupby('asset')['close'].transform(
+            lambda x: x.rolling(window=n, min_periods=n).mean()
         )
-    )
-    
-    # 释放临时列
-    factor_df.drop(columns=['middle_band', 'std_dev', 'upper_band', 'lower_band'], inplace=True)
+        
+        print(f"  [Step 2] 计算标准差（总体标准差，ddof=0）...")
+        # 布林带标准定义使用总体标准差（Population Standard Deviation）
+        # pandas rolling().std() 默认 ddof=1（样本标准差），需显式指定 ddof=0
+        # 遵循 MODULE.md 技术指标参数规范
+        factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
+            lambda x: x.rolling(window=n, min_periods=n).std(ddof=0)
+        )
+        
+        print(f"  [Step 3] 计算上轨和下轨...")
+        factor_df['upper_band'] = factor_df['middle_band'] + k * factor_df['std_dev']
+        factor_df['lower_band'] = factor_df['middle_band'] - k * factor_df['std_dev']
+        
+        # ========== 计算 %B ==========
+        print(f"  [Step 4] 计算 %B...")
+        
+        # 处理除零和 NaN 情况（遵循 MODULE.md 布林带 %B 计算显式处理 NaN 规范）
+        # 核心原则：显式处理 NaN，避免依赖 NaN 传播的隐式行为
+        # 布林带预热期（前 N-1 日）：upper_band/lower_band 为 NaN → diff 为 NaN
+        # 浮点数除零：diff ≈ 0（宽度为零）→ 定义 %B = 0.5
+        
+        diff = factor_df['upper_band'] - factor_df['lower_band']
+        
+        # 显式处理三种情况：
+        # 1. diff 为 NaN（布林带预热期）→ %B = NaN
+        # 2. diff ≈ 0（布林带宽度为零）→ %B = 0.5
+        # 3. diff > 0（正常情况）→ %B = (close - lower) / diff
+        
+        factor_df['bollinger_pb_1d'] = np.where(
+            pd.isna(diff),  # 显式检查 NaN（布林带预热期）
+            np.nan,         # NaN → NaN（显式定义，而非依赖隐式传播）
+            np.where(
+                np.abs(diff) < 1e-10,  # 浮点数精度容差判断
+                0.5,  # 布林带宽度为零时，%B 定义为 0.5（价格在中轨）
+                (factor_df['close'] - factor_df['lower_band']) / diff  # 正常计算
+            )
+        )
+        
+        # 释放临时列（正常流程）
+        factor_df.drop(columns=temp_cols, inplace=True)
+        
+    finally:
+        # 确保临时列清理（异常时也执行，防止脏列残留）
+        # 检查列是否存在再删除（部分临时列可能未写入）
+        existing_temp_cols = [c for c in temp_cols if c in factor_df.columns]
+        if existing_temp_cols:
+            factor_df.drop(columns=existing_temp_cols, inplace=True)
     
     # 统计有效记录
     stats['valid_records'] = int(factor_df['bollinger_pb_1d'].notna().sum())
