@@ -1029,11 +1029,14 @@ if __name__ == '__main__':
                         help='布林带移动平均周期（默认: 20）')
     parser.add_argument('--k', type=float, default=2.0,
                         help='布林带标准差倍数（默认: 2.0）')
+    parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS,
+                        help=f'每日最少股票数阈值（默认: {DEFAULT_MIN_STOCKS}）')
     
     args = parser.parse_args()
     
     generate_bollinger_pb_1d_ic_data(
         force_full=args.force_full,
         n=args.n,
-        k=args.k
+        k=args.k,
+        min_stocks=args.min_stocks
     )
