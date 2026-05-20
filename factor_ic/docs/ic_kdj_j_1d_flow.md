@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 13:25 北京时间
-> 实测数据时间: 2026-05-20 13:20 北京时间
-> 版本: v1.2
-> 更新内容: 对齐 ic_rsi_1d.py 五维度判断字段结构（直接传递完整 result 对象）
+> 生成时间: 2026-05-20 13:35 北京时间
+> 实测数据时间: 2026-05-20 13:30 北京时间
+> 版本: v1.3
+> 更新内容: 修复浮点数除零判断（使用精度容差 EPSILON=1e-10，遵循 Section 17 规范）
 
 ---
 
@@ -320,12 +320,35 @@ rolling_low = factor_df.groupby('asset')['low'].transform(
     lambda x: x.rolling(window=n, min_periods=1).min()
 )
 
+# 浮点数除零精度容差判断（遵循 PROJECT.md 浮点数等值比较规范）
+EPSILON = 1e-10  # 浮点数精度容差
+diff = rolling_high - rolling_low
+# 使用 np.abs(diff) < EPSILON 替代 diff == 0
+rsv = np.where(np.abs(diff) < EPSILON, 50.0, (close - rolling_low) / diff * 100)
+
 # K 计算（ewm）
 alpha_k = 1.0 / m1
 factor_df['k'] = factor_df.groupby('asset')['rsv'].transform(
     lambda x: x.ewm(alpha=alpha_k, adjust=False).mean()
 )
 ```
+
+### 浮点数精度容差规范
+
+**问题根因：**
+- `diff` 是浮点数运算结果（`rolling_high - rolling_low`）
+- IEEE 754 浮点数无法精确表示某些数值，运算结果可能产生微小误差（如 `1e-15`）
+- 直接 `== 0` 比较会漏判极小值
+- 极小值作为除数会产生极端 RSV 值（如 `1e15`）
+
+**修复方式：**
+```python
+# 精度容差判断：|diff| < 1e-10 视为零
+EPSILON = 1e-10
+rsv = np.where(np.abs(diff) < EPSILON, 50.0, ...)
+```
+
+**参考规范：** factor-script-optimization-checklist.md Section 17
 
 ---
 
@@ -384,6 +407,7 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | avg_stocks_period 字段 | ✓ | 新增，说明统计口径范围 |
 | 异常分层缓存读取 | ✓ | 区分可恢复和严重错误 |
 | 五维度判断字段结构 | ✓ | 对齐 ic_rsi_1d.py，直接传递完整 result 对象 |
+| 浮点数除零精度容差 | ✓ | 使用 EPSILON=1e-10，替代 diff == 0 |
 
 ---
 
@@ -394,7 +418,8 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.0 | 2026-05-20 | 初始版本，基于优化后的代码实现 |
 | v1.1 | 2026-05-20 | 新增 avg_stocks_period 字段说明，完善异常处理分层规范（Section 22） |
 | v1.2 | 2026-05-20 | 对齐 ic_rsi_1d.py 五维度判断字段结构（直接传递完整 result 对象） |
+| v1.3 | 2026-05-20 | 修复浮点数除零判断（使用精度容差 EPSILON=1e-10，遵循 Section 17 规范） |
 
 ---
 
-*最后更新: 2026-05-20 13:25*"
+*最后更新: 2026-05-20 13:35*"

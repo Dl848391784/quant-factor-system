@@ -97,8 +97,11 @@ def calculate_kdj_j_for_stock_vectorized(
     rolling_low = stock_data['low'].rolling(window=n, min_periods=1).min()
     
     # RSV = (Close - Low_N) / (High_N - Low_N) * 100
+    # 使用精度容差判断浮点数除零（遵循 PROJECT.md 浮点数等值比较规范）
+    # 原因：diff 是浮点数运算结果，直接 == 0 比较会漏判极小值（如 1e-15）
+    EPSILON = 1e-10  # 浮点数精度容差
     diff = rolling_high - rolling_low
-    rsv = np.where(diff == 0, 50.0, (stock_data['close'] - rolling_low) / diff * 100)
+    rsv = np.where(np.abs(diff) < EPSILON, 50.0, (stock_data['close'] - rolling_low) / diff * 100)
     stock_data['rsv'] = rsv
     
     # 计算 K（使用 ewm）
@@ -186,9 +189,12 @@ def calculate_kdj_j_factor(
         lambda x: x.rolling(window=n, min_periods=1).min()
     )
     
+    # 使用精度容差判断浮点数除零（遵循 PROJECT.md 浮点数等值比较规范）
+    # 原因：diff 是浮点数运算结果，直接 == 0 比较会漏判极小值（如 1e-15）
+    EPSILON = 1e-10  # 浮点数精度容差
     diff = factor_df['rolling_high'] - factor_df['rolling_low']
     factor_df['rsv'] = np.where(
-        diff == 0, 
+        np.abs(diff) < EPSILON,  # 精度容差判断（替代 diff == 0）
         50.0, 
         (factor_df['close'] - factor_df['rolling_low']) / diff * 100
     )
