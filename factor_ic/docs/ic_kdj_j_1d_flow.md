@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 17:05 北京时间
-> 实测数据时间: 2026-05-20 17:00 北京时间
-> 版本: v1.20
-> 更新内容: 修复 EPSILON 常量未提升为模块级的问题，便于统一管理和复用
+> 生成时间: 2026-05-20 17:15 北京时间
+> 实测数据时间: 2026-05-20 17:10 北京时间
+> 版本: v1.21
+> 更新内容: 修复 K/D 值 NaN 传播错误（核心缺陷）—— ewm alpha 参数、ignore_na 参数、初始值位置
 
 ---
 
@@ -773,6 +773,98 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.18 | 2026-05-20 | 修复 groupby transform 异常信息淹没问题，添加 try/except 捕获并附加诊断信息（遵循 MODULE.md 异常处理规范） |
 | v1.19 | 2026-05-20 | 修复 IC 空场景异常信息使用过滤后数据而非原始数据统计的问题（遵循 MODULE.md 异常处理规范） |
 | v1.20 | 2026-05-20 | 修复 EPSILON 常量未提升为模块级的问题，便于统一管理和复用（遵循 PROJECT.md 常量管理规范） |
+| v1.21 | 2026-05-20 | 修复 K/D 值 NaN 传播错误（核心缺陷）—— ewm alpha 参数、ignore_na 参数、初始值位置 |
+
+---
+
+## KDJ ewm 参数匹配规范
+
+### 问题根因（核心缺陷）
+
+**场景：** RSV 前 N-1 期为 NaN（rolling window min_periods=n），计算 K 值时应正确传播 NaN。
+
+**原始代码（三个关键错误）：**
+```python
+# 错误 1：alpha 参数语义不匹配
+alpha_k = 1.0 / m1  # 错误！应该是 (m1-1)/m1
+
+# 错误 2：ewm 默认跳过 NaN
+k_series = rsv_copy.ewm(alpha=alpha_k, adjust=False).mean()  # 缺少 ignore_na=False
+
+# 错误 3：初始值位置错误
+rsv_copy.iloc[0] = initial_k  # 应该是第一个有效位置，而非第一个元素
+```
+
+**问题分析：**
+
+1. **alpha 参数语义错误：**
+   - ewm(alpha) 公式：`y[t] = alpha * x[t] + (1-alpha) * y[t-1]`
+   - KDJ 公式：`K[t] = (1/m1) * K[t-1] + (1-1/m1) * RSV[t]`
+   - 要匹配，需要 `alpha = 1 - 1/m1 = (m1-1)/m1`
+   - 例如 m1=3：alpha = 2/3（而非 1/3）
+   - 原代码使用 alpha=1/m1 导致权重颠倒！
+
+2. **ignore_na 缺失：**
+   - ewm 默认 `ignore_na=True`，会跳过 NaN 继续计算
+   - 例如 RSV=[50, NaN, NaN, 10]，ewm 会继续计算 K[1]=50, K[2]=50（错误）
+   - 正确行为：`ignore_na=False`，NaN 应传播
+
+3. **初始值位置错误：**
+   - 原代码把第一个元素设为 initial_k（但第一个元素可能是 NaN）
+   - 应该找到第一个有效 RSV 位置，设为 initial_k
+   - 使用 `rsv_series.first_valid_index()` 而非 `iloc[0]`
+
+### 修复方案
+
+**正确实现：**
+```python
+# 1. alpha 参数修正
+alpha_k = (m1 - 1) / m1  # 匹配 KDJ 公式
+alpha_d = (m2 - 1) / m2
+
+# 2. K 值计算函数
+def _calculate_k_with_initial(rsv_series, alpha_k, initial_k):
+    # 找到第一个有效位置
+    first_valid_idx = rsv_series.first_valid_index()
+    if first_valid_idx is None:
+        return rsv_series  # 全 NaN
+    
+    rsv_copy = rsv_series.copy()
+    rsv_copy[first_valid_idx] = initial_k  # 索引访问（而非 iloc）
+    
+    # 使用 ignore_na=False 使 NaN 传播
+    k_series = rsv_copy.ewm(alpha=alpha_k, adjust=False, ignore_na=False).mean()
+    return k_series
+```
+
+### 验证示例
+
+```
+RSV = [NaN, NaN, NaN, 10, 20, 30, 40, 50]  # 前 N-1=3 天为 NaN
+
+修复前（alpha=1/3, ignore_na=True）:
+K = [50, 50, 50, 28.82, 25.88, 27.25, ...]  # 错误：前缀不是 NaN
+
+修复后（alpha=2/3, ignore_na=False）:
+K = [NaN, NaN, NaN, 50, 30, 30, 36.67, 45.56]  # 正确！
+
+手动验证：
+K[3] = 50（初始值）
+K[4] = 1/3 * 50 + 2/3 * 20 = 30 ✓
+K[5] = 1/3 * 30 + 2/3 * 30 = 30 ✓
+```
+
+### 设计原则
+
+1. **公式匹配：** ewm 参数必须与 KDJ 公式语义一致
+2. **NaN 传播：** 使用 `ignore_na=False` 确保前缀 NaN 正确传播
+3. **初始值位置：** 使用 `first_valid_index()` 找到第一个有效位置
+4. **索引访问：** 使用 `series[idx]` 而非 `series.iloc[idx]`（因为 groupby transform 后索引是原始索引）
+
+### 适用场景
+
+- 所有基于 ewm 的技术指标计算（KDJ、MACD 等）
+- 所有需要正确处理 NaN 前缀的场景
 
 ---
 

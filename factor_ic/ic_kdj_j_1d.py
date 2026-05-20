@@ -75,61 +75,72 @@ def _calculate_k_with_initial(
     alpha_k: float,
     initial_k: float
 ) -> pd.Series:
-    """计算 K 值（无副作用版本）
+    """计算 K 值（正确处理 NaN 前缀版本）
     
-    核心逻辑：ewm(adjust=False) 的第一个输出 = 第一个输入
-    因此将 RSV 序列的初始值设为 initial_k，使 ewm 的第一个 K 值 = initial_k
+    核心逻辑：
+    1. RSV 前 N-1 期为 NaN（rolling window min_periods=n）
+    2. ewm(ignore_na=False) 使 NaN 传播，前 N-1 期 K 也为 NaN
+    3. 第一个有效 RSV 位置设为 initial_k，使该期 K = initial_k
+    
+    ewm(alpha) 公式：y[t] = alpha * x[t] + (1-alpha) * y[t-1]
+    KDJ 公式：K[t] = (1/m1) * K[t-1] + (1-1/m1) * RSV[t]
+    要匹配，alpha = 1 - 1/m1 = (m1-1)/m1
     
     Args:
-        rsv_series: RSV 序列（单只股票）
-        alpha_k: K 值 ewm 平滑系数（1/m1）
+        rsv_series: RSV 序列（单只股票，前 N-1 期为 NaN）
+        alpha_k: K 值 ewm 平滑系数（(m1-1)/m1）
         initial_k: K 初始值（标准值 50.0）
     
     Returns:
-        K 值序列
+        K 值序列（前 N-1 期为 NaN）
     
-    实现步骤：
-    1. 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
-    2. 将副本的第一个元素设为 initial_k（预处理输入）
-    3. 应用 ewm 递推，得到 K 序列（第一个 K 值 = initial_k）
-    
-    设计原则：显式传参，避免闭包捕获外部变量
-    - 若闭包捕获 alpha_k/initial_k，外层函数重构时静默使用旧值
-    - 函数签名必须暴露所有依赖，便于调用者理解
+    设计原则：
+    - 找到第一个有效 RSV 位置（而非第一个元素）
+    - 使用 ignore_na=False 使 NaN 传播
+    - 遵循 MODULE.md 无副作用规范
     
     异常处理：捕获 groupby transform 内部异常，附加诊断信息
-    - 原因：lambda 包装后 pandas 淹没异常信息，丢失股票代码
-    - 解决：在函数内部捕获异常，添加 Series 长度、索引范围、参数值等诊断信息
     """
     if len(rsv_series) == 0:
         return rsv_series
     
     try:
-        # 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
+        # 复制 Series，避免修改原始数据
         rsv_copy = rsv_series.copy()
         
-        # 预处理：将副本的第一个 RSV 值设为 initial_k
-        # ewm(adjust=False) 的第一个输出 = 第一个输入，因此 ewm 后 K[0] = initial_k
-        rsv_copy.iloc[0] = initial_k
+        # 找到第一个有效 RSV 的位置（而非第一个元素）
+        # 前提：RSV 前 N-1 期为 NaN（rolling window min_periods=n）
+        first_valid_idx = rsv_series.first_valid_index()
         
-        # 计算 ewm 递推：K[0] = rsv_copy[0] = initial_k
-        k_series = rsv_copy.ewm(alpha=alpha_k, adjust=False).mean()
+        if first_valid_idx is None:
+            # 所有值都是 NaN，返回空序列
+            return rsv_series
+        
+        # 预处理：将第一个有效 RSV 值设为 initial_k
+        # ewm(adjust=False) 的第一个有效输出 = 第一个有效输入
+        # 因此 ewm 后 K[first_valid_idx] = initial_k
+        # 注意：使用索引值访问（rsv_copy[idx]），而非位置索引（rsv_copy.iloc[idx]）
+        # 原因：groupby transform 后 Series 的索引是原始索引（如日期），而非位置索引（0, 1, 2...）
+        rsv_copy[first_valid_idx] = initial_k
+        
+        # 计算 ewm 递推：使用 ignore_na=False 使 NaN 传播
+        # 前缀 NaN → K[0:first_valid_idx] 为 NaN
+        # 第一个有效值 → K[first_valid_idx] = initial_k
+        # 后续值 → 标准递推
+        k_series = rsv_copy.ewm(alpha=alpha_k, adjust=False, ignore_na=False).mean()
         
         return k_series
         
     except Exception as e:
         # 捕获异常并附加诊断信息（遵循 MODULE.md 异常处理规范）
-        # 原因：groupby transform 淹没异常信息，极难定位问题股票
         raise RuntimeError(
             f"K 值计算异常（groupby transform 内部）\n"
             f"原始异常: {type(e).__name__}: {e}\n"
             f"诊断信息:\n"
             f"  - Series 长度: {len(rsv_series)}\n"
-            f"  - 索引范围: {rsv_series.index.min() if len(rsv_series) > 0 else 'N/A'} ~ "
-            f"{rsv_series.index.max() if len(rsv_series) > 0 else 'N/A'}\n"
+            f"  - 第一个有效位置: {rsv_series.first_valid_index()}\n"
             f"  - 参数: alpha_k={alpha_k}, initial_k={initial_k}\n"
-            f"  - RSV[0] 原始值: {rsv_series.iloc[0] if len(rsv_series) > 0 else 'N/A'}\n"
-            f"建议: 检查对应股票的 RSV 数据是否存在异常值（如 inf、NaN）"
+            f"建议: 检查对应股票的 RSV 数据是否存在异常"
         ) from e
 
 
@@ -138,61 +149,72 @@ def _calculate_d_with_initial(
     alpha_d: float,
     initial_d: float
 ) -> pd.Series:
-    """计算 D 值（无副作用版本）
+    """计算 D 值（正确处理 NaN 前缀版本）
     
-    核心逻辑：ewm(adjust=False) 的第一个输出 = 第一个输入
-    因此将 K 序列的初始值设为 initial_d，使 ewm 的第一个 D 值 = initial_d
+    核心逻辑：
+    1. K 前 N-1 期为 NaN（因为 RSV 前 N-1 期为 NaN）
+    2. ewm(ignore_na=False) 使 NaN 传播，前 N-1 期 D 也为 NaN
+    3. 第一个有效 K 位置设为 initial_d，使该期 D = initial_d
+    
+    ewm(alpha) 公式：y[t] = alpha * x[t] + (1-alpha) * y[t-1]
+    KDJ 公式：D[t] = (1/m2) * D[t-1] + (1-1/m2) * K[t]
+    要匹配，alpha = 1 - 1/m2 = (m2-1)/m2
     
     Args:
-        k_series: K 值序列（单只股票）
-        alpha_d: D 值 ewm 平滑系数（1/m2）
+        k_series: K 值序列（单只股票，前 N-1 期为 NaN）
+        alpha_d: D 值 ewm 平滑系数（(m2-1)/m2）
         initial_d: D 初始值（标准值 50.0）
     
     Returns:
-        D 值序列
+        D 值序列（前 N-1 期为 NaN）
     
-    实现步骤：
-    1. 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
-    2. 将副本的第一个元素设为 initial_d（预处理输入）
-    3. 应用 ewm 递推，得到 D 序列（第一个 D 值 = initial_d）
-    
-    设计原则：显式传参，避免闭包捕获外部变量
-    - 若闭包捕获 alpha_d/initial_d，外层函数重构时静默使用旧值
-    - 函数签名必须暴露所有依赖，便于调用者理解
+    设计原则：
+    - 找到第一个有效 K 位置（而非第一个元素）
+    - 使用 ignore_na=False 使 NaN 传播
+    - 遵循 MODULE.md 无副作用规范
     
     异常处理：捕获 groupby transform 内部异常，附加诊断信息
-    - 原因：lambda 包装后 pandas 淹没异常信息，丢失股票代码
-    - 解决：在函数内部捕获异常，添加 Series 长度、索引范围、参数值等诊断信息
     """
     if len(k_series) == 0:
         return k_series
     
     try:
-        # 复制 Series，避免修改原始数据（遵循 MODULE.md 无副作用规范）
+        # 复制 Series，避免修改原始数据
         k_copy = k_series.copy()
         
-        # 预处理：将副本的第一个 K 值设为 initial_d
-        # ewm(adjust=False) 的第一个输出 = 第一个输入，因此 ewm 后 D[0] = initial_d
-        k_copy.iloc[0] = initial_d
+        # 找到第一个有效 K 的位置（而非第一个元素）
+        # 前提：K 前 N-1 期为 NaN（因为 RSV 前 N-1 期为 NaN）
+        first_valid_idx = k_series.first_valid_index()
         
-        # 计算 ewm 递推：D[0] = k_copy[0] = initial_d
-        d_series = k_copy.ewm(alpha=alpha_d, adjust=False).mean()
+        if first_valid_idx is None:
+            # 所有值都是 NaN，返回空序列
+            return k_series
+        
+        # 预处理：将第一个有效 K 值设为 initial_d
+        # ewm(adjust=False) 的第一个有效输出 = 第一个有效输入
+        # 因此 ewm 后 D[first_valid_idx] = initial_d
+        # 注意：使用索引值访问（k_copy[idx]），而非位置索引（k_copy.iloc[idx]）
+        # 原因：groupby transform 后 Series 的索引是原始索引（如日期），而非位置索引（0, 1, 2...）
+        k_copy[first_valid_idx] = initial_d
+        
+        # 计算 ewm 递推：使用 ignore_na=False 使 NaN 传播
+        # 前缀 NaN → D[0:first_valid_idx] 为 NaN
+        # 第一个有效值 → D[first_valid_idx] = initial_d
+        # 后续值 → 标准递推
+        d_series = k_copy.ewm(alpha=alpha_d, adjust=False, ignore_na=False).mean()
         
         return d_series
         
     except Exception as e:
         # 捕获异常并附加诊断信息（遵循 MODULE.md 异常处理规范）
-        # 原因：groupby transform 淹没异常信息，极难定位问题股票
         raise RuntimeError(
             f"D 值计算异常（groupby transform 内部）\n"
             f"原始异常: {type(e).__name__}: {e}\n"
             f"诊断信息:\n"
             f"  - Series 长度: {len(k_series)}\n"
-            f"  - 索引范围: {k_series.index.min() if len(k_series) > 0 else 'N/A'} ~ "
-            f"{k_series.index.max() if len(k_series) > 0 else 'N/A'}\n"
+            f"  - 第一个有效位置: {k_series.first_valid_index()}\n"
             f"  - 参数: alpha_d={alpha_d}, initial_d={initial_d}\n"
-            f"  - K[0] 原始值: {k_series.iloc[0] if len(k_series) > 0 else 'N/A'}\n"
-            f"建议: 检查对应股票的 K 值数据是否存在异常值（如 inf、NaN）"
+            f"建议: 检查对应股票的 K 值数据是否存在异常"
         ) from e
 
 
@@ -309,7 +331,11 @@ def calculate_kdj_j_factor(
     # 遵循 MODULE.md KDJ 初始值规范
     
     print("  [Step 2] 计算 K...")
-    alpha_k = 1.0 / m1
+    # ewm(alpha) 公式：y[t] = alpha * x[t] + (1-alpha) * y[t-1]
+    # KDJ 公式：K[t] = (1/m1) * K[t-1] + (1-1/m1) * RSV[t]
+    # 要匹配，需要 alpha = 1 - 1/m1 = (m1-1)/m1
+    # 注意：之前使用 alpha = 1/m1 是错误的，导致权重颠倒
+    alpha_k = (m1 - 1) / m1
     initial_k = 50.0  # K 初始值
     
     # 使用模块级私有函数，显式传参（避免闭包耦合）
@@ -325,7 +351,10 @@ def calculate_kdj_j_factor(
     # 遵循 MODULE.md KDJ 初始值规范
     
     print("  [Step 3] 计算 D...")
-    alpha_d = 1.0 / m2
+    # ewm(alpha) 公式：y[t] = alpha * x[t] + (1-alpha) * y[t-1]
+    # KDJ 公式：D[t] = (1/m2) * D[t-1] + (1-1/m2) * K[t]
+    # 要匹配，需要 alpha = 1 - 1/m2 = (m2-1)/m2
+    alpha_d = (m2 - 1) / m2
     initial_d = 50.0  # D 初始值
     
     # 使用模块级私有函数，显式传参（避免闭包耦合）
