@@ -1,8 +1,9 @@
-# 换手率异动因子IC测试用例
+# 换手率突增因子IC测试用例
 
-> 生成时间: 2026-05-09
-> 对应脚本: ic_turnover_surge_1d.py
-> 测试版本: v1.0
+> 生成时间: 2026-05-20
+> 对应脚本: ic_turnover_surge_1d.py (v1.3)
+> 测试版本: v1.1
+> 更新内容: 更新 ic_metrics 字段规范（ic_mean, ic_std, icir, p_value, p_value_display）
 
 ---
 
@@ -55,9 +56,12 @@ cache/factor_data/
   - IC 统计（IC均值、ICIR、正比例、t统计量）
 - 输出 JSON 文件包含以下字段:
   - `factor_name`: "turnover_surge_1d"
-  - `ic_metrics`: ic_mean, icir, positive_ratio, t_stat, significance
-  - `ic_series`: dates, ic_values, rolling_ic_mean
+  - `update_mode`: "full" 或 "incremental" 或 "skip"
+  - `ic_metrics`: ic_mean, ic_std, icir, p_value, p_value_display (5字段)
+  - `ic_series`: dict with dates and ic_values
   - `filter_stats`: total_records, turnover_surge_count, price_up_count 等
+  - `positive_ratio`: 正 IC 比例（顶层字段）
+  - `t_stat`: t 统计量（顶层字段）
 
 ---
 
