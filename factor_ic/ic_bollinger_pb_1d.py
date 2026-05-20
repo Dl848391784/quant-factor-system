@@ -716,6 +716,10 @@ def _incremental_update(
             # 不直接返回缓存，继续计算以验证（可能部分股票有更多历史数据）
     
     # 计算布林带%B因子（全量数据，滚动窗口需要历史数据）
+    # 注意：factor_stats 在此处定义，后续所有路径均可安全使用
+    # 提前返回路径分析：
+    # - 第676行（缓存读取失败）→ return _full_recalculate()，已返回不会到此
+    # - 第738/750行（数据为空）→ return existing_data，factor_stats已定义但返回后不使用
     factor_df_full, factor_stats = calculate_bollinger_pb_1d_factor(factor_df_full, n=n, k=k)
     factor_df_full = factor_df_full[['date', 'asset', 'bollinger_pb_1d']].copy()
     
