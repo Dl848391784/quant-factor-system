@@ -41,7 +41,7 @@ import numpy as np
 import gzip
 import json
 import re
-from typing import Tuple, Optional
+from typing import Tuple
 from datetime import datetime
 
 # 导入 IC 计算模块（支持方向验证 + 单日 IC 计算 + IC 统计指标计算）
