@@ -841,6 +841,41 @@ def _incremental_update(
     ic_series_for_stats = pd.Series(valid_ic_values, index=valid_dates)
     result = calculate_ic_statistics(ic_series_for_stats)
     
+    # 嵌套字典必需字段校验（与全量路径 calculate_daily_ic_series 保持一致）
+    # 防止 calculate_ic_statistics 返回结构不完整导致下游访问崩溃
+    required_ss_fields = ['is_significant', 'p_value', 't_stat', 'conclusion']
+    ss_dict = result['statistical_significance']
+    missing_ss = [f for f in required_ss_fields if f not in ss_dict]
+    if missing_ss:
+        raise RuntimeError(
+            f"statistical_significance 缺少必需嵌套字段\n"
+            f"缺失字段: {missing_ss}\n"
+            f"问题定位: factor_ic/common/ic_calculator.py _assess_statistical_significance\n"
+            f"期望字段: {required_ss_fields}"
+        )
+    
+    required_fd_fields = ['ic_mean_sign', 'ic_mean', 'conclusion']
+    fd_dict = result['factor_direction']
+    missing_fd = [f for f in required_fd_fields if f not in fd_dict]
+    if missing_fd:
+        raise RuntimeError(
+            f"factor_direction 缺少必需嵌套字段\n"
+            f"缺失字段: {missing_fd}\n"
+            f"问题定位: factor_ic/common/ic_calculator.py _assess_factor_direction\n"
+            f"期望字段: {required_fd_fields}"
+        )
+    
+    required_es_fields = ['level', 'abs_ic_mean', 'conclusion']
+    es_dict = result['economic_significance']
+    missing_es = [f for f in required_es_fields if f not in es_dict]
+    if missing_es:
+        raise RuntimeError(
+            f"economic_significance 缺少必需嵌套字段\n"
+            f"缺失字段: {missing_es}\n"
+            f"问题定位: factor_ic/common/ic_calculator.py _assess_economic_significance\n"
+            f"期望字段: {required_es_fields}"
+        )
+    
     # 计算 rolling_ic_mean（基于有效 IC 序列，与全量路径一致）
     # window=20: 20个有效 IC 的滚动均值（非20个交易日）
     rolling_ic_mean_series = ic_series_for_stats.rolling(window=20, min_periods=10).mean()
