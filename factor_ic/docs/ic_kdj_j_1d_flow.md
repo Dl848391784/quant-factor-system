@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 14:45 北京时间
-> 实测数据时间: 2026-05-20 14:40 北京时间
-> 版本: v1.6
-> 更新内容: 修复 RSV 计算 min_periods 参数，使用 min_periods=n 确保满窗口期数据完整性
+> 生成时间: 2026-05-20 15:00 北京时间
+> 实测数据时间: 2026-05-20 14:55 北京时间
+> 版本: v1.7
+> 更新内容: 修复增量模式隐式 fallthrough，使用显式控制流（should_full_recalculate 变量）
 
 ---
 
@@ -352,6 +352,79 @@ rsv = np.where(np.abs(diff) < EPSILON, 50.0, ...)
 
 ---
 
+## 增量模式控制流规范
+
+### 问题根因
+
+**原始代码（隐式 fallthrough）：**
+```python
+if mode == 'skip':
+    print("\n数据完备，无需更新")
+    try:
+        with open(output_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print("  [诊断] 缓存文件不存在，执行全量计算")
+        pass  # except 块结束，代码继续向下执行全量计算
+    except json.JSONDecodeError as e:
+        raise RuntimeError(...)  # 不继续
+    except PermissionError as e:
+        raise RuntimeError(...)  # 不继续
+
+# 全量计算逻辑（隐式 fallthrough 到这里）
+```
+
+**问题分析：**
+- `pass` 后代码继续执行，读者需追踪"哪些分支会继续"
+- 重构风险：若外层加 `else`，可能误判控制流
+- 缺少 `mode == 'incremental'` 处理
+- 控制流依赖隐式 fallthrough，违反显式控制流原则
+
+### 修复方式
+
+**使用显式控制流（变量标记）：**
+```python
+should_full_recalculate = force_full  # 默认需要全量计算
+
+if not force_full:
+    mode, missing_dates, info = check_data_completeness('kdj_j_1d')
+    
+    if mode == 'skip':
+        try:
+            with open(output_file, 'r', encoding='utf-8') as f:
+                return json.load(f)  # 成功读取，直接返回
+        except FileNotFoundError:
+            should_full_recalculate = True  # 显式标记：需要全量计算
+    
+    elif mode == 'incremental':
+        should_full_recalculate = True  # 当前版本降级全量计算
+    
+    else:  # mode == 'full'
+        should_full_recalculate = True
+
+# 此处：should_full_recalculate=True（所有分支已处理）
+# 全量计算逻辑
+```
+
+### 控制流分析
+
+| 分支 | should_full_recalculate | 行为 |
+|------|------------------------|------|
+| force_full=True | True | 执行全量计算 |
+| mode='skip' + 成功读取 | - | 直接返回（不继续） |
+| mode='skip' + FileNotFoundError | True | 执行全量计算 |
+| mode='incremental' | True | 执行全量计算 |
+| mode='full' | True | 执行全量计算 |
+
+**优势：**
+- 显式控制流，每个分支行为清晰
+- 重构安全：添加新分支不会破坏逻辑
+- 易于扩展：增量模式可单独实现
+
+**参考规范：** MODULE.md "控制流显式化"章节
+
+---
+
 ## RSV 计算窗口期规范
 
 ### 问题根因
@@ -589,6 +662,7 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 || KDJ 初始值 ewm 递推 | ✓ | 预处理 RSV[0]/K[0] 使 ewm 输出 = initial_k/initial_d |
 | 死代码清理 | ✓ | 删除未调用的 calculate_kdj_j_for_stock_vectorized |
 | RSV 窗口期完整性 | ✓ | 使用 min_periods=n，前 N-1 天为 NaN |
+| 增量模式控制流 | ✓ | 使用显式变量 should_full_recalculate，避免隐式 fallthrough |
 
 ---
 
@@ -603,7 +677,8 @@ factor_ic/result/ic_kdj_j_1d_analysis_result.json
 | v1.4 | 2026-05-20 | 修复 K/D 初始值 ewm 递推逻辑（预处理 RSV[0]/K[0] 使 ewm 输出 = initial_k/initial_d） |
 | v1.5 | 2026-05-20 | 删除死代码 calculate_kdj_j_for_stock_vectorized（未被调用，仅保留 calculate_kdj_j_factor） |
 | v1.6 | 2026-05-20 | 修复 RSV 计算 min_periods 参数，使用 min_periods=n 确保满窗口期数据完整性 |
+| v1.7 | 2026-05-20 | 修复增量模式隐式 fallthrough，使用显式控制流（should_full_recalculate 变量） |
 
 ---
 
-*最后更新: 2026-05-20 14:45*
+*最后更新: 2026-05-20 15:00*

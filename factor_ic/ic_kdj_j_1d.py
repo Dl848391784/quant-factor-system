@@ -532,6 +532,9 @@ def generate_kdj_j_ic_data(
         output_file = get_ic_output_path('kdj_j_1d')
     
     # 增量判断（除非强制全量）
+    # 使用显式控制流，避免隐式 fallthrough（遵循 MODULE.md 控制流规范）
+    should_full_recalculate = force_full  # 默认需要全量计算
+    
     if not force_full:
         mode, missing_dates, info = check_data_completeness('kdj_j_1d')
         
@@ -539,12 +542,11 @@ def generate_kdj_j_ic_data(
             print("\n数据完备，无需更新")
             try:
                 with open(output_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    return json.load(f)  # 成功读取，直接返回
             except FileNotFoundError:
                 # 可恢复错误：缓存文件不存在，降级全量计算
                 print("  [诊断] 缓存文件不存在，执行全量计算")
-                # 显式 fallthrough 到全量计算（遵循 PROJECT.md 增量模式异常处理规范）
-                pass  # except 块结束，代码继续向下执行全量计算
+                should_full_recalculate = True  # 显式标记：需要全量计算
             except json.JSONDecodeError as e:
                 # 严重错误：缓存文件损坏，不静默降级
                 raise RuntimeError(
@@ -565,6 +567,16 @@ def generate_kdj_j_ic_data(
                     f"异常类型: {type(e).__name__}\n"
                     f"错误详情: {e}"
                 ) from e
+        
+        elif mode == 'incremental':
+            # 增量计算模式：只计算缺失日期的 IC（待实现）
+            print(f"\n增量模式：需要计算 {len(missing_dates)} 个缺失日期")
+            should_full_recalculate = True  # 当前版本降级全量计算（增量待实现）
+        
+        else:  # mode == 'full'
+            should_full_recalculate = True
+    
+    # 此处：should_full_recalculate=True（所有分支已处理）
     
     # 全量计算逻辑
     print("=" * 60)
