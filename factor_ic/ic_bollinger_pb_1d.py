@@ -675,20 +675,28 @@ def _incremental_update(
     factor_df_full, return_df_full, raw_metadata = load_data_from_cache()
     
     # 边界检查：最小必需历史窗口（遵循 MODULE.md 增量路径最小必需历史窗口边界检查规范）
-    # 布林带需要前 N-1 天数据，缺失日期如果靠近缓存起始点，可能因预热期不足而全为 NaN
+    # 布林带需要前 N-1 个交易日数据，缺失日期如果靠近缓存起始点，可能因预热期不足而全为 NaN
+    # 注意：必须使用交易日而非日历天计算预热期边界
     cache_start_date = raw_metadata['period_start']
-    cache_start_dt = pd.to_datetime(cache_start_date)
     
-    # 计算布林带预热期边界日期（缓存起始点后 N-1 天）
-    warmup_boundary_date = (cache_start_dt + pd.Timedelta(days=n-1)).strftime('%Y-%m-%d')
-    warmup_days_count = n - 1
+    # 获取实际交易日列表（从 factor_df_full 中提取）
+    trading_dates = sorted(factor_df_full['date'].unique())
     
-    # 检查缺失日期是否在预热期内
+    # 找到缓存起始日期在交易日列表中的索引位置
+    cache_start_idx = trading_dates.index(cache_start_date) if cache_start_date in trading_dates else 0
+    
+    # 计算真正的预热期边界：缓存起始点后第 N-1 个交易日
+    # 例如 N=20：预热期需要前 19 个交易日，边界为 trading_dates[cache_start_idx + 19]
+    warmup_end_idx = min(cache_start_idx + n - 1, len(trading_dates) - 1)  # 防止越界
+    warmup_boundary_date = trading_dates[warmup_end_idx]
+    warmup_trading_days_count = warmup_end_idx - cache_start_idx + 1  # 预热期交易日数
+    
+    # 检查缺失日期是否在预热期内（使用交易日边界）
     missing_dates_in_warmup = [d for d in missing_dates if d <= warmup_boundary_date]
     
     if missing_dates_in_warmup:
         print(f"  [边界检查] 缓存起始: {cache_start_date}")
-        print(f"  [边界检查] 布林带预热期: 前 {warmup_days_count} 天（{cache_start_date} ~ {warmup_boundary_date}）")
+        print(f"  [边界检查] 布林带预热期: 前 {warmup_trading_days_count} 个交易日（{cache_start_date} ~ {warmup_boundary_date}）")
         print(f"  [边界检查] {len(missing_dates_in_warmup)} 个缺失日期在预热期内，因子值可能全为 NaN")
         examples = sorted(missing_dates_in_warmup)[:5]
         print(f"  [边界检查] 示例日期: {examples}")
