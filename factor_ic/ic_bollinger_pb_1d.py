@@ -560,16 +560,17 @@ def calculate_daily_ic_series(
             # 语义定义（遵循 PROJECT.md 输出字段语义规范）：
             # - total_days: 因子缓存覆盖的日期数（包含无效日期）
             # - valid_days: 实际计算出 IC 的天数（每交易日股票数 >= min_stocks）
-            # - avg_stocks_per_day: 当前因子缓存范围内的平均每日股票数
+            # - avg_stocks_per_day: 基于有效因子值的平均每日股票数（过滤 NaN）
             #   - 口径范围见 avg_stocks_period 字段（遵循 PROJECT.md 输出字段口径规范）
+            #   - 与增量路径语义一致：不含预热期 NaN 行
             # - 差值含义: total_days - valid_days = 因股票不足或数据缺失跳过的交易日数
             'total_days': raw_metadata.get('total_days', factor_df['date'].nunique()),
             'valid_days': valid_ic_count,  # 有效 IC 天数（不含 None，与增量路径语义一致）
-            'avg_stocks_per_day': int(factor_df.groupby('date').size().mean()),
+            'avg_stocks_per_day': int(factor_df[factor_df['bollinger_pb_1d'].notna()].groupby('date').size().mean()),
             'avg_stocks_period': {
                 'start': str(factor_df['date'].min()),
                 'end': str(factor_df['date'].max()),
-                'description': f"avg_stocks_per_day 反映 {factor_df['date'].min()} ~ {factor_df['date'].max()} 范围内的平均每日股票数"
+                'description': f"avg_stocks_per_day 反映此范围内有效因子值的平均每日股票数（不含预热期NaN）"
             }
         },
         'dates': dates,
