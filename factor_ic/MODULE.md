@@ -1,9 +1,64 @@
 # factor_ic 模块规范
 
-> 版本: v2.6（新增职责边界规范）
+> 版本: v3.0（精简版）
 > 创建时间: 2026-05-19
 > 重构时间: 2026-05-22
-> 最后更新: 2026-05-22 14:30
+> 最后更新: 2026-05-22
+
+## 快速参考
+
+### 必须遵守的约束（15条）
+
+| # | 约束 | 说明 |
+|---|------|------|
+| 1 | 因子方向不可预判 | 根据 IC 结果确定，不能假设 |
+| 2 | 统计显著性只用 p<0.05 | 与 |t|>1.96 等价 |
+| 3 | ICIR 用 abs(ic_mean) | 无论正向反向因子 |
+| 4 | 输出结构必须统一 | 所有因子脚本输出相同结构 |
+| 5 | 字段值不可为 None | 输出前诊断原因 |
+| 6 | 日期格式 YYYY-MM-DD | 强制格式 |
+| 7 | DataFrame 参数先 copy() | 函数入口处 |
+| 8 | 禁止分层回测逻辑 | IC 脚本职责仅限于 IC 计算 |
+| 9 | 增量模式复用 calculate_single_day_ic | 确保算法一致性 |
+| 10 | 异常链保留 from e | ValueError 不包装 |
+| 11 | Newey-West 样本量 T=valid_days | 不是 total_days |
+| 12 | rolling_ic_mean 前 9 个为 None | min_periods=10 |
+| 13 | sample_stats.avg_stocks_period 含口径说明 | 语义完整 |
+| 14 | 修改公共模块同步更新 MODULE.md | 字段定义一致性 |
+| 15 | 字段不重复输出 | 同一字段只在一处 |
+
+### 关键函数签名
+
+| 函数 | 文件 | 用途 |
+|------|------|------|
+| `load_factor_return_data(factor_cols)` | data_loader.py | 加载因子+收益数据 |
+| `calculate_ic_with_direction_verification(factor_df, return_df, factor_col)` | ic_calculator.py | IC计算+五维度判断 |
+| `build_ic_result(ic_result, raw_metadata, factor_name)` | ic_result_builder.py | 构建输出结构 |
+| `incremental_update_ic(output_path, factor_df_full, ...)` | incremental_engine.py | 增量更新 |
+| `run_simple_factor_ic(factor_name, factor_col)` | factor_ic_runner.py | 简单因子主入口 |
+| `run_complex_factor_ic(..., custom_factor_calculation)` | factor_ic_runner.py | 复杂因子主入口 |
+
+### 输出结构模板
+
+```json
+{
+  "factor_name": "<str>",
+  "calculation_date": "<ISO时间>",
+  "period": {"start": "<str>", "end": "<str>", "description": "<str>"},
+  "ic_metrics": {"ic_mean": <float>, "ic_std": <float>, "icir": <float>, "p_value": <float>},
+  "sample_stats": {"total_days": <int>, "valid_days": <int>, "avg_stocks_per_day": <float>},
+  "statistical_significance": {"t_stat", "p_value", "nw_lag", "is_significant", "conclusion"},
+  "factor_direction": {"direction", "ic_mean", "conclusion"},
+  "dates": ["<日期列表>"],
+  "ic_values": [<IC值列表>],
+  "rolling_ic_mean": [<滚动均值列表>],
+  "positive_ratio": <float>,
+  "summary": {"recommendation": "<str>"},
+  "update_mode": "<str>"
+}
+```
+
+---
 
 ## 更新记录
 
@@ -139,393 +194,20 @@ layered_result = layered_engine.run(factor_direction='positive', ...)
 # 导致：新脚本遵循旧规范，输出结构不一致
 ```
 
-## 公共模块架构（2026-05-22新增）
+## 公共模块架构
 
-### 设计目标
+详细规范见 `factor_ic/common/README.md`。
 
-**核心问题：** 5个因子IC脚本存在大量重复代码（45%-70%），新增因子开发成本高。
-
-**解决方案：** 抽取公共模块，新增因子只需实现因子计算逻辑。
-
-| 模块 | 功能 | 每脚本减少行数 |
-|------|------|----------------|
-| `data_loader.py` | 数据加载（gzip解压、日期转换、列验证） | ~80-120行 |
-| `ic_result_builder.py` | IC结果构建（统一输出结构） | ~60-100行 |
-| `incremental_engine.py` | 增量更新引擎 | ~150-200行 |
-| `factor_ic_runner.py` | 主入口模板 | ~100-150行 |
-
-**预期效果：** 新增因子脚本从 ~700-1100行 降至 ~50-200行。
-
-### data_loader.py — 数据加载公共模块
-
-**文件路径：** `factor_ic/common/data_loader.py`
-
-**核心函数：**
-
-```python
-def load_factor_return_data(
-    factor_cols: List[str],
-    return_col: str = 'forward_return_1d',
-    factor_cache_path: Optional[Path] = None,
-    return_cache_path: Optional[Path] = None,
-    dropna_cols: Optional[List[str]] = None,
-    validate_date_alignment: bool = True,
-    additional_factor_files: Optional[Dict[str, Path]] = None
-) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
-    """
-    从缓存加载因子数据和收益数据
-    
-    返回:
-        (factor_df, return_df, raw_metadata)
-        - raw_metadata: 原始数据元信息（period_start, period_end, total_days, avg_stocks_per_day）
-    """
-```
-
-**功能列表：**
-
-| 功能 | 描述 | 防御性检查 |
-|------|------|------------|
-| gzip解压 + JSON加载 | 从缓存读取数据 | FileNotFoundError（可恢复） |
-| 日期类型转换 | 统一为 YYYY-MM-DD | NaT检查 + 无效样本显示 |
-| 列存在验证 | 检查必需列存在 | KeyError + 显示可用列列表 |
-| dropna前记录metadata | 原始数据范围 | 保留原始语义 |
-| dropna过滤 | 去除缺失值 | 指定过滤列 |
-| 日期对齐验证 | 因子 vs 收益日期 | 选择交集日期（可选） |
-| 额外因子文件合并 | 如换手率数据 | 内连接合并 |
-
-**使用示例：**
-
-```python
-from factor_ic.common.data_loader import load_factor_return_data
-
-# RSI因子（直接用缓存列）
-factor_df, return_df, raw_metadata = load_factor_return_data(
-    factor_cols=['rsi_6']
-)
-
-# KDJ因子（需要 close, high, low）
-factor_df, return_df, raw_metadata = load_factor_return_data(
-    factor_cols=['close', 'high', 'low']
-)
-
-# 换手率突增（需要额外文件）
-from factor_ic.common.data_loader import DEFAULT_CACHE_DIR
-factor_df, return_df, raw_metadata = load_factor_return_data(
-    factor_cols=['close'],
-    additional_factor_files={
-        'turnover_rate': DEFAULT_CACHE_DIR / 'turnover_rate_data.json.gz'
-    }
-)
-
-# 查看原始数据范围
-print(f"原始数据: {raw_metadata['period_start']} ~ {raw_metadata['period_end']}")
-print(f"原始天数: {raw_metadata['total_days']}")
-print(f"原始平均股票数: {raw_metadata['avg_stocks_per_day']}")
-```
-
-**辅助函数：**
-
-| 函数 | 用途 |
-|------|------|
-| `get_cache_dir()` | 获取缓存目录路径 |
-| `get_factor_cache_path()` | 获取因子缓存文件路径 |
-| `get_return_cache_path()` | 获取收益缓存文件路径 |
-
-**规范要点：**
-
-1. `raw_metadata` 在 dropna 之前记录，保留原始数据语义
-2. `period_start/end` 为字符串格式 `YYYY-MM-DD`
-3. 日期转换后 `isin` 操作类型匹配
-4. 列缺失时显示可用列列表（用户友好）
-
-### ic_result_builder.py — IC结果构建公共模块
-
-**文件路径：** `factor_ic/common/ic_result_builder.py`
-
-**核心函数：**
-
-```python
-def build_ic_result(
-    ic_result: Dict,
-    raw_metadata: Dict,
-    factor_name: str,
-    return_period: str = '1d',
-    data_source: str = '',
-    factor_col: str = '',
-    update_mode: str = 'full'
-) -> Dict:
-    """
-    构建 IC 分析完整结果（符合 MODULE.md 输出结构统一性规范）
-    
-    参数:
-        ic_result: calculate_ic_with_direction_verification 返回值
-        raw_metadata: load_factor_return_data 返回的原始数据元信息
-        factor_name: 因子名称（如 'rsi_1d', 'volume_ratio_1d'）
-    
-    返回:
-        符合 MODULE.md 规范的完整 JSON 结构字典
-    """
-```
-
-**功能列表：**
-
-| 功能 | 描述 | 输出字段 |
+| 模块 | 功能 | 核心函数 |
 |------|------|----------|
-| 结果组装 | 将 ic_calculator 返回值转换为完整结构 | 所有顶层字段 |
-| rolling_ic_mean | 20日窗口滚动均值（min_periods=10） | `rolling_ic_mean` |
-| sample_stats | 样本统计 + 口径范围说明 | `sample_stats` |
-| summary | 综合评价 + 推荐 | `summary` |
-| factor_stats | 因子基本信息 | `factor_stats` |
-| error_result | 错误情况默认结构 | 所有字段（默认值） |
+| `data_loader.py` | 数据加载 | `load_factor_return_data()` |
+| `ic_result_builder.py` | IC结果构建 | `build_ic_result()` |
+| `incremental_engine.py` | 增量更新 | `incremental_update_ic()` |
+| `factor_ic_runner.py` | 主入口 | `run_simple_factor_ic()`, `run_complex_factor_ic()` |
 
-**使用示例：**
-
-```python
-from factor_ic.common.data_loader import load_factor_return_data
-from factor_ic.common.ic_calculator import calculate_ic_with_direction_verification
-from factor_ic.common.ic_result_builder import build_ic_result, save_ic_result
-
-# 加载数据
-factor_df, return_df, raw_metadata = load_factor_return_data(
-    factor_cols=['rsi_6']
-)
-
-# 计算 IC
-ic_result = calculate_ic_with_direction_verification(
-    factor_df=factor_df,
-    return_df=return_df,
-    factor_col='rsi_6',
-    return_col='forward_return'
-)
-
-# 构建完整结果
-result = build_ic_result(
-    ic_result=ic_result,
-    raw_metadata=raw_metadata,
-    factor_name='rsi_1d',
-    data_source='cache/factor_data/factor_data.json.gz',
-    factor_col='rsi_6'
-)
-
-# 保存
-save_ic_result(result)
-```
-
-**辅助函数：**
-
-| 函数 | 用途 |
-|------|------|
-| `build_sample_stats()` | 单独构建样本统计字段 |
-| `build_rolling_ic_mean()` | 单独计算滚动均值 |
-| `build_error_result()` | 构建错误默认结构 |
-| `get_ic_output_path()` | 获取输出文件路径 |
-| `save_ic_result()` | 保存结果到 JSON |
-
-**规范要点：**
-
-1. 所有字段符合 MODULE.md "输出结构统一性规范"
-2. rolling_ic_mean 前 9 个为 None（min_periods=10）
-3. sample_stats.avg_stocks_period 包含口径说明
-4. summary 基于五维度判断生成推荐
-
-### incremental_engine.py — 增量更新引擎
-
-**文件路径：** `factor_ic/common/incremental_engine.py`
-
-**核心函数：**
-
-```python
-def incremental_update_ic(
-    output_path: Path,
-    factor_df_full: pd.DataFrame,
-    return_df_full: pd.DataFrame,
-    raw_metadata: Dict,
-    factor_name: str,
-    factor_col: str,
-    return_col: str = 'forward_return',
-    min_stocks: int = 10
-) -> Dict:
-    """
-    执行增量更新
-    
-    流程:
-        1. 读取现有缓存
-        2. 确定缺失日期
-        3. 计算缺失日期 IC（复用 calculate_single_day_ic）
-        4. 合并数据（去重，新值覆盖旧值）
-        5. 重算统计指标（复用 calculate_ic_statistics）
-        6. 构建输出并保存
-    """
-```
-
-**功能列表：**
-
-| 功能 | 描述 | 规范要点 |
-|------|------|----------|
-| 缓存读取 | 读取现有 IC 结果 | FileNotFoundError → 全量，JSONDecodeError → 严重错误 |
-| 缺失日期筛选 | 因子日期 - 缓存日期 | 全量加载 + 日期差集 |
-| 逐日 IC 计算 | 复用 calculate_single_day_ic | 确保算法一致性 |
-| 数据合并 | 字典去重（新值优先） | overlap_dates 记录覆盖事件 |
-| 统计重算 | 复用 calculate_ic_statistics | 不手工构建统计字段 |
-| 模式判断 | should_use_incremental() | force_full → 全量 |
-
-**辅助函数：**
-
-| 函数 | 用途 |
-|------|------|
-| `get_cache_latest_date()` | 获取缓存最新日期 |
-| `read_existing_cache()` | 读取现有缓存数据 |
-| `calculate_missing_dates_ic()` | 计算缺失日期 IC |
-| `merge_ic_data()` | 合并 IC 数据（去重） |
-| `recalculate_statistics()` | 重算统计指标 |
-| `should_use_incremental()` | 判断是否使用增量模式 |
-
-**使用示例：**
-
-```python
-from factor_ic.common.incremental_engine import incremental_update_ic, should_use_incremental
-from factor_ic.common.data_loader import load_factor_return_data
-
-# 加载全量数据
-factor_df, return_df, raw_metadata = load_factor_return_data(
-    factor_cols=['rsi_6']
-)
-
-# 判断模式
-output_path = get_ic_output_path('rsi', '1d')
-use_incremental = should_use_incremental(output_path, factor_df, force_full=False)
-
-if use_incremental:
-    # 增量更新
-    result = incremental_update_ic(
-        output_path=output_path,
-        factor_df_full=factor_df,
-        return_df_full=return_df,
-        raw_metadata=raw_metadata,
-        factor_name='rsi_1d',
-        factor_col='rsi_6'
-    )
-else:
-    # 全量计算（使用 calculate_ic_with_direction_verification）
-    ...
-```
-
-**规范要点：**
-
-1. 增量模式必须复用 calculate_single_day_ic（算法一致性）
-2. 合并时使用字典去重（新值覆盖旧值）
-3. overlap_dates 必须记录（事件追踪）
-4. rolling_ic_mean 需对齐回 all_dates（None 填充）
-
-### factor_ic_runner.py — 主入口模板
-
-**文件路径：** `factor_ic/common/factor_ic_runner.py`
-
-**核心函数：**
-
-```python
-def run_factor_ic_analysis(
-    factor_name: str,
-    factor_col: str,
-    return_period: str = '1d',
-    return_col: str = 'forward_return_1d',
-    factor_cols: Optional[List[str]] = None,
-    min_stocks: int = 10,
-    force_full: bool = False,
-    output_path: Optional[Path] = None,
-    custom_factor_calculation: Optional[Callable] = None
-) -> Dict:
-    """
-    因子 IC 分析统一主入口
-    
-    流程:
-        1. 判断模式（全量/增量/跳过）
-        2. 加载数据
-        3. 执行计算
-        4. 构建输出
-        5. 保存结果
-    """
-```
-
-**功能列表：**
-
-| 功能 | 描述 | 规范要点 |
-|------|------|----------|
-| 模式判断 | should_use_incremental() | force_full → 全量 |
-| 数据加载 | load_factor_return_data() | 支持额外因子文件 |
-| 全量计算 | calculate_ic_with_direction_verification() | 五维度判断 |
-| 增量更新 | incremental_update_ic() | 补充五维度判断 |
-| 结果构建 | build_ic_result() | 符合输出结构规范 |
-| 结果保存 | save_ic_result() | 自动路径生成 |
-
-**快捷函数：**
-
-| 函数 | 用途 | 适用场景 |
-|------|------|----------|
-| `run_simple_factor_ic()` | 简单因子（直接用缓存列） | RSI、量比 |
-| `run_complex_factor_ic()` | 复杂因子（需预处理） | KDJ、布林带 |
-
-**使用示例：**
-
-```python
-from factor_ic.common.factor_ic_runner import run_simple_factor_ic, run_complex_factor_ic
-
-# 简单因子（直接用缓存列）
-result = run_simple_factor_ic('rsi', 'rsi_6')
-result = run_simple_factor_ic('volume_ratio', 'volume_ratio_5')
-
-# 复杂因子（需自定义计算）
-def calculate_kdj_j(factor_df):
-    # KDJ 计算逻辑
-    low_min = factor_df.groupby('asset')['low'].transform(lambda x: x.rolling(9, min_periods=9).min())
-    high_max = factor_df.groupby('asset')['high'].transform(lambda x: x.rolling(9, min_periods=9).max())
-    rsv = (factor_df['close'] - low_min) / (high_max - low_min) * 100
-    k = rsv.ewm(alpha=1/3, adjust=False).mean()
-    d = k.ewm(alpha=1/3, adjust=False).mean()
-    j = 3 * k - 2 * d
-    factor_df['kdj_j'] = j
-    return factor_df
-
-result = run_complex_factor_ic(
-    factor_name='kdj_j',
-    factor_col='kdj_j',
-    factor_cols=['close', 'high', 'low'],
-    custom_factor_calculation=calculate_kdj_j
-)
-```
-
-**新增因子开发流程：**
-
-```
-1. 确定因子类型：
-   - 简单因子（缓存列直接可用）→ 使用 run_simple_factor_ic()
-   - 复杂因子（需预处理）→ 使用 run_complex_factor_ic()
-
-2. 实现因子计算逻辑（复杂因子）：
-   - 定义 custom_factor_calculation 函数
-   - 输入: factor_df（包含原始列）
-   - 输出: factor_df（添加 factor_col 列）
-
-3. 调用主入口：
-   result = run_xxx_factor_ic(...)
-
-4. 检查结果：
-   - update_mode: full/incremental/skip/failed
-   - ic_mean, icir, p_value
-   - 五维度判断结论
-
-总代码量：~50-200行（仅因子计算逻辑）
-```
-
-**CLI 支持：**
-
-```bash
-# 简单因子
-python -m factor_ic.common.factor_ic_runner --factor rsi --col rsi_6
-
-# 强制全量
-python -m factor_ic.common.factor_ic_runner --factor volume_ratio --col volume_ratio_5 --force-full
-```
+**新增因子开发：**
+- 简单因子：`run_simple_factor_ic('rsi', 'rsi_6')`
+- 复杂因子：`run_complex_factor_ic(factor_name, factor_col, factor_cols, custom_factor_calculation)`
 
 ## factor_ic目录规范
 
@@ -720,86 +402,13 @@ engine = LayeredBacktestEngine(factor_direction='negative')
 """
 ```
 
-### 输出格式规范
-
-**JSON输出结构：**
-```json
-{
-  "metadata": {
-    "factor_name": "rsi",
-    "return_period": "1d",
-    "calculation_date": "2026-05-19T10:30:00",
-    "data_source": "cache/factor_data/rsi/rsi_1d.csv",
-    "total_days": 545,
-    "valid_days": 513,
-    "avg_stocks_per_day": 4235.2,
-    "avg_stocks_period": {
-      "start": "2024-01-01",
-      "end": "2024-12-31",
-      "description": "平均每日有效股票数统计范围"
-    }
-  },
-  "statistics": {
-    "ic_mean": -0.0348,
-    "ic_std": 0.1377,
-    "ICIR": 0.252,
-    "t_stat": -5.99,
-    "p_value": 3.2e-9,
-    "significance": "significant"
-  },
-  "daily_ic": [
-    {"date": "2024-01-02", "ic": -0.0412, "stocks_count": 4210},
-    ...
-  ],
-  "period": {
-    "start": "2024-01-01",
-    "end": "2024-12-31",
-    "description": "IC计算覆盖日期范围"
-  }
-}
-```
-
-**字段说明：**
-
-| 字段路径 | 类型 | 必填 | 说明 |
-|---------|------|------|------|
-| metadata.factor_name | str | ✓ | 因子名称（小写） |
-| metadata.return_period | str | ✓ | 收益周期（如 "1d"） |
-| metadata.calculation_date | str | ✓ | 计算时间（ISO格式） |
-| metadata.data_source | str | ✓ | 数据来源路径 |
-| metadata.total_days | int | ✓ | 原始缓存日期数 |
-| metadata.valid_days | int | ✓ | 有效IC天数 |
-| metadata.avg_stocks_per_day | float | ✓ | 平均每日有效股票数 |
-| metadata.avg_stocks_period | object | ✓ | 口径范围说明 |
-| statistics.ic_mean | float | ✓ | IC均值 |
-| statistics.ic_std | float | ✓ | IC标准差 |
-| statistics.ICIR | float | ✓ | 信息比率 |
-| statistics.t_stat | float | ✓ | t统计量 |
-| statistics.p_value | float | ✓ | 显著性p值 |
-| statistics.significance | str | ✓ | 显著性判断（"significant"/"not_significant"） |
-| daily_ic | array | ✓ | 每日IC值数组 |
-|| daily_ic[].date | str | ✓ | 日期 |
-|| daily_ic[].ic | float | ✓ | 当日IC值 |
-|| daily_ic[].stocks_count | int | ✓ | 当日有效股票数 |
-|| period.start | str | ✓ | 覆盖起始日期 |
-|| period.end | str | ✓ | 覆盖结束日期 |
-
 ### 输出结构统一性规范
 
-#### 核心原则
-
-**所有 factor_ic/ 目录下的 IC 计算脚本必须输出完全一致的 JSON 结构。**
-
-**统一性要求：**
-- 相同的顶层字段（factor_name, calculation_date, period, ic_metrics, sample_stats, statistical_significance, factor_direction, economic_significance, icir_stability, ic_distribution_consistency, dates, ic_values, rolling_ic_mean, positive_ratio, n_assets, summary, factor_stats, update_mode）
-- 相同的嵌套字段结构（如 ic_metrics 必须包含 ic_mean, ic_std, icir, p_value, p_value_display）
-- 相同的字段类型（如 ic_mean 必须是 float，dates 必须是 list[str]）
-- 相同的字段顺序（便于对比和自动化处理）
-
-**说明（2026-05-21补充）：**
-- icir_stability 和 ic_distribution_consistency 是五维度判断的第4、5维，必须作为顶层字段输出
-- dates, ic_values, rolling_ic_mean 是IC时间序列数据，必须作为顶层字段输出（不嵌套在ic_series）
-- positive_ratio 是第5维判断的核心指标，必须作为顶层字段输出
+#### 统一性要求
+- 相同的顶层字段结构
+- 相同的嵌套字段结构
+- 相同的字段类型
+- 相同的字段顺序
 
 #### 统一输出结构定义
 
@@ -872,200 +481,21 @@ engine = LayeredBacktestEngine(factor_direction='negative')
 }
 ```
 
-#### 禁止行为
-
-```python
-# ❌ 不同因子脚本输出不同结构
-# ic_rsi_1d.py 输出：
-{
-  "ic_mean": 0.05,  # 顶层字段
-  "ic_std": 0.15
-}
-
-# ic_kdj_j_1d.py 输出：
-{
-  "ic_metrics": {  # 嵌套结构，与 rsi 不一致！
-    "ic_mean": 0.05,
-    "ic_std": 0.15
-  }
-}
-```
-
-#### 为何必须统一输出结构
-
-1. **自动化处理：** 后续分析脚本可以统一解析所有因子结果，无需针对每个因子写特殊处理逻辑
-2. **横向对比：** 不同因子可以直接对比 IC 表现，字段位置一致便于可视化
-3. **维护成本：** 新增因子只需遵循统一模板，无需重新设计输出结构
-4. **错误预防：** 统一结构避免字段缺失导致的 KeyError
-
-#### 结构一致性检查清单
-
-```
-□ 所有因子脚本输出相同的顶层字段
-□ 所有因子脚本的嵌套字段结构一致（如 ic_metrics 字段列表）
-□ 所有因子脚本的字段类型一致（如 ic_mean 永远是 float）
-□ 所有因子脚本的字段顺序一致（便于自动化对比）
-□ 新增因子脚本时，对比已有脚本输出结构，确保一致
-```
-
 ### 字段值完整性检查规范
 
-#### 核心原则
-
-**输出 JSON 前，检查每个字段是否有值。字段值为 None/null 代表数据有问题，需要明确诊断原因。**
-
-#### 检查范围
-
-**检查完整性的字段：**
+**核心原则：输出 JSON 前，检查每个字段是否有值。字段值为 None/null 代表数据有问题。**
 
 | 字段类型 | 检查内容 | None/null 含义 |
 |---------|---------|---------------|
-| 数值字段（ic_mean, ic_std, icir, t_stat, p_value） | 必须有有效数值 | 计算失败，数据不足以计算统计指标 |
-| 整数字段（total_days, valid_days, n_assets） | 必须 ≥ 0 | 数据源为空或计算过程异常 |
-| 字符串字段（factor_name, calculation_date, period.start/end） | 必须非空 | 数据缺失或格式转换失败 |
-| 数组字段（dates, ic_values, rolling_ic_mean） | 必须非空数组 | IC 计算完全失败，无任何有效日期 |
-| 嵌套对象（ic_metrics, sample_stats, statistical_significance） | 必须存在且包含所有子字段 | 返回值契约不完整 |
+| 数值字段（ic_mean, ic_std, icir, t_stat, p_value） | 必须有有效数值 | 计算失败 |
+| 整数字段（total_days, valid_days, n_assets） | 必须 ≥ 0 | 数据源为空 |
+| 字符串字段（factor_name, period.start/end） | 必须非空 | 数据缺失 |
+| 数组字段（dates, ic_values） | 必须非空 | IC 计算失败 |
 
-#### 正确实现
-
-```python
-# ✓ 输出前检查字段完整性
-def validate_output_completeness(result: dict) -> None:
-    """校验输出字段完整性，None/null 值需要诊断原因"""
-    
-    # 1. 检查数值字段
-    numeric_fields = ['ic_mean', 'ic_std', 'icir', 't_stat', 'p_value']
-    for field in numeric_fields:
-        value = result.get('ic_metrics', {}).get(field)
-        if value is None or (isinstance(value, float) and pd.isna(value)):
-            raise RuntimeError(
-                f"输出字段 {field} 值为 None/null\n"
-                f"问题定位: IC 计算过程未能生成有效统计指标\n"
-                f"可能原因: valid_days=0（无有效IC日期），或计算异常\n"
-                f"建议: 检查数据源是否有足够因子值和收益数据"
-            )
-    
-    # 2. 检查整数字段
-    int_fields = ['total_days', 'valid_days', 'n_assets']
-    for field in int_fields:
-        if field in ['total_days', 'valid_days']:
-            value = result.get('sample_stats', {}).get(field)
-        else:
-            value = result.get(field)
-        if value is None or value < 0:
-            raise RuntimeError(
-                f"输出字段 {field} 值无效: {value}\n"
-                f"问题定位: 数据统计失败\n"
-                f"建议: 检查数据源是否为空"
-            )
-    
-    # 3. 检查数组字段
-    dates = result.get('dates', [])
-    ic_values = result.get('ic_values', [])
-    if len(dates) == 0 or len(ic_values) == 0:
-        raise RuntimeError(
-            f"输出数组字段为空: dates={len(dates)}, ic_values={len(ic_values)}\n"
-            f"问题定位: IC 计算完全失败，无任何有效日期\n"
-            f"可能原因: 所有日期因股票数不足跳过，或因子值全为 NaN\n"
-            f"建议: 检查 min_stocks 阈值是否过高，或因子计算预热期问题"
-        )
-    
-    # 4. 检查数组长度一致性
-    if len(dates) != len(ic_values):
-        raise RuntimeError(
-            f"数组长度不一致: dates={len(dates)}, ic_values={len(ic_values)}\n"
-            f"问题定位: 数据结构构建错误\n"
-            f"建议: 检查 dates 和 ic_values 是否来自同一数据源"
-        )
-    
-    # 5. 检查 rolling_ic_mean 与 dates 长度一致
-    rolling_ic_mean = result.get('rolling_ic_mean', [])
-    if len(rolling_ic_mean) != len(dates):
-        raise RuntimeError(
-            f"rolling_ic_mean 长度不一致: {len(rolling_ic_mean)} vs dates={len(dates)}\n"
-            f"问题定位: 滚动计算未正确填充\n"
-            f"建议: 检查 rolling 计算是否基于完整 ic_series"
-        )
-    
-    # 6. 检查嵌套对象完整性
-    required_nested = {
-        'ic_metrics': ['ic_mean', 'ic_std', 'icir', 'p_value', 'p_value_display'],
-        'sample_stats': ['total_days', 'valid_days', 'avg_stocks_per_day', 'avg_stocks_period'],
-        'statistical_significance': ['t_stat', 'p_value', 'p_value_display', 'nw_lag', 'nw_lag_method', 'is_significant', 'conclusion'],
-        'factor_direction': ['direction', 'ic_mean', 'conclusion'],
-        'economic_significance': ['annual_ic_mean', 'icir_annualized', 'conclusion']
-    }
-    
-    for parent, children in required_nested.items():
-        parent_obj = result.get(parent)
-        if parent_obj is None:
-            raise RuntimeError(
-                f"输出缺少嵌套对象: {parent}\n"
-                f"问题定位: 返回值契约不完整\n"
-                f"建议: 检查 calculate_ic_with_direction_verification 返回值"
-            )
-        for child in children:
-            if child not in parent_obj:
-                raise RuntimeError(
-                    f"嵌套对象 {parent} 缺少字段: {child}\n"
-                    f"问题定位: 字段构建遗漏\n"
-                    f"建议: 检查 {parent} 字段构建逻辑"
-                )
-
-# 在输出前调用
-validate_output_completeness(result)
-with open(output_path, 'w') as f:
-    json.dump(result, f, indent=2)
-```
-
-#### None/null 值诊断清单
-
-**当字段值为 None/null 时，必须诊断原因：**
-
-| 字段 | None原因 | 诊断方法 |
-|------|---------|---------|
-| ic_mean | valid_days=0 | 检查dates数组 |
-| ic_std | valid_days=1 | 检查有效天数 |
-| icir | ic_std=0 | 检查IC值是否相同 |
-| dates=[] | 所有跳过 | 检查跳过日志 |
-| rolling_ic_mean=[] | ic_series空 | 检查dates长度 |
-| avg_stocks_per_day | 股票数=0 | 检查因子数据 |
-
-#### 禁止行为
-
-```python
-# ❌ 输出前不检查字段完整性
-with open(output_path, 'w') as f:
-    json.dump(result, f)  # 直接输出，可能包含 None/null
-
-# ❌ 忽略 None 值，不诊断原因
-if result['ic_mean'] is None:
-    print("IC 计算失败")  # 缺乏诊断信息
-    return  # 静默返回，用户不知道失败原因
-
-# ❌ 用默认值掩盖 None
-'ic_mean': result.get('ic_mean', 0.0)  # None → 0.0，掩盖问题！
-```
-
-#### 为何检查字段完整性
-
-1. **问题定位：** None/null 值代表数据有问题，必须明确诊断原因
-2. **数据质量：** 避免 None 值被默认值掩盖，误导后续分析
-3. **用户友好：** 明确告知用户失败原因，而非输出空数据
-4. **自动化处理：** 后续脚本可以信任所有字段都有有效值
-
-#### 检查清单
-
-```
-□ 数值字段检查：ic_mean, ic_std, icir, t_stat, p_value 必须有有效值
-□ 整数字段检查：total_days, valid_days, n_assets 必须 ≥ 0
-□ 字符串字段检查：factor_name, period.start/end 必须非空
-□ 数组字段检查：dates, ic_values 必须非空
-□ 数组长度检查：dates, ic_values, rolling_ic_mean 长度必须一致
-□ 嵌套对象检查：所有嵌套对象必须存在且包含所有子字段
-□ None 值诊断：发现 None 时必须明确原因并输出诊断信息
-□ 输出前校验：在 json.dump 前调用 validate_output_completeness
-```
+**诊断清单：**
+- ic_mean=None → valid_days=0
+- dates=[] → 所有日期跳过
+- icir 无法计算 → ic_std=0
 
 ## 增量更新规范
 
