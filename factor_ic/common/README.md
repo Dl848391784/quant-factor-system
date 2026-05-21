@@ -194,6 +194,39 @@ def get_cache_info(factor_name: str):
 
 ### JSON 数据日期提取规范（重要）
 
+**日期格式必须在源头统一标准化为 YYYY-MM-DD：**
+
+```python
+# 错误写法（格式不一致）
+# get_factor_data_dates() 返回 "2026-04-03 00:00:00"
+# _extract_dates_from_cache() 返回 "2026-04-03"
+# 字符串比较 "2026-04-03 00:00:00" > "2026-04-03" 结果错误
+
+# 正确写法（源头统一标准化）
+def get_factor_data_dates():
+    dates = meta.get('dates', [])
+    if dates:
+        # 格式统一：处理 "2026-04-03 00:00:00" → "2026-04-03"
+        normalized_dates = [d.split()[0] if ' ' in d else d for d in dates]
+        dates = normalized_dates
+    return dates
+```
+
+**标准化位置：**
+- `get_factor_data_dates()`：因子数据源日期提取时标准化
+- `_extract_dates_from_cache()`：缓存数据日期提取时标准化
+
+**原因：**
+1. JSON 中的日期可能包含时间戳 `"YYYY-MM-DD HH:MM:SS"` 或 datetime 对象
+2. 字符串比较依赖格式一致性：`"2026-04-03 00:00:00" > "2026-04-03"` 因空格导致错误结果
+3. 标准化必须在源头进行，而非在使用前临时处理
+
+**影响范围：**
+- `check_data_completeness()` 使用 `d > cache_latest` 进行日期比较
+- 所有日期比较逻辑依赖 YYYY-MM-DD 格式一致性
+
+**参考：** data_completeness.py 第70-78行、第106-115行（2026-05-22 更新）
+
 **从 JSON 数据中提取日期时，必须强制转换为字符串：**
 
 ```python

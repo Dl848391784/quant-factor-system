@@ -68,6 +68,17 @@ def get_factor_data_dates() -> Tuple[List[str], Optional[str]]:
             # 使用 str() 强制转换，防止 datetime/int 等非字符串类型导致 sorted() TypeError
             dates = sorted(set(str(r['date']) for r in data.get('data', []) if r.get('date') is not None))
         
+        if dates:
+            # 格式统一：处理 "2026-04-03 00:00:00" → "2026-04-03"
+            # 确保 check_data_completeness() 中的字符串比较正确
+            normalized_dates = []
+            for d in dates:
+                if ' ' in d:
+                    normalized_dates.append(d.split()[0])
+                else:
+                    normalized_dates.append(d)
+            dates = normalized_dates
+        
         latest_date = dates[-1] if dates else None
         
         del data
