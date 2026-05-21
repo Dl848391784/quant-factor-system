@@ -977,6 +977,67 @@ save_ic_result(result)
 3. sample_stats.avg_stocks_period 包含口径说明
 4. summary 基于五维度判断生成推荐
 
+### 同名字段格式统一规范（重要）
+
+**同一模块输出的同名字段格式必须一致，避免消费方兼容处理**
+
+| 字段 | 格式 | 适用函数 |
+|------|------|---------|
+| `calculation_date` | `datetime.now().isoformat()` | `build_ic_result`, `build_error_result` |
+
+**错误示例：**
+```python
+# build_ic_result
+'calculation_date': datetime.now().isoformat()  # '2026-05-22T14:30:00'
+
+# build_error_result
+'calculation_date': datetime.now().strftime('%Y-%m-%d')  # '2026-05-22'（格式不一致！）
+```
+
+### 函数参数必要结构说明规范（重要）
+
+**函数签名和文档必须说明参数的必要结构，避免 KeyError 无错误处理**
+
+| 函数 | 参数 | 必要结构 |
+|------|------|---------|
+| `build_sample_stats` | `factor_df` | 必须含 `'date'` 列 |
+| `build_ic_result` | `ic_result` | 必须含 `'ic_series'` 且非空 |
+
+**正确做法：**
+```python
+def build_sample_stats(..., factor_df: pd.DataFrame) -> Dict:
+    """
+    参数:
+        factor_df: 过滤后因子数据 DataFrame【必须含 'date' 列】
+    
+    异常:
+        KeyError: factor_df 缺少 'date' 列
+    """
+    if 'date' not in factor_df.columns:
+        raise KeyError("factor_df 必须包含 'date' 列")
+```
+
+### ICIR 分级规范（重要）
+
+**ICIR < 0 表示因子方向不稳定（ic_mean 与 ic_std 符号相反），需单独标注**
+
+| ICIR 范围 | 稳定性评级 |
+|----------|-----------|
+| ICIR < 0 | 不稳定（方向需验证） |
+| ICIR >= 2.0 | 优秀 |
+| ICIR >= 1.0 | 良好 |
+| ICIR < 1.0 | 一般 |
+
+### 入口校验规范（重要）
+
+**公共函数应在入口处校验关键参数，避免处理无效数据**
+
+| 函数 | 校验条件 | 错误处理 |
+|------|---------|---------|
+| `build_ic_result` | `ic_series` 为空 | `ValueError` → 提示调用 `build_error_result` |
+
+---
+
 ### 模块内部函数复用规范（重要）
 
 **DRY原则：模块内公共函数必须复用，禁止重复实现相同逻辑**
