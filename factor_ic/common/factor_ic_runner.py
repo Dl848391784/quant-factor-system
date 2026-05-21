@@ -122,6 +122,14 @@ def run_factor_ic_analysis(
     
     if factor_cols is None:
         factor_cols = [factor_col]
+    else:
+        # 参数校验：factor_col 必须在 factor_cols 中
+        if factor_col not in factor_cols:
+            logger.warning(
+                f"factor_col '{factor_col}' 不在 factor_cols {factor_cols} 中，"
+                f"自动添加以防止列缺失错误"
+            )
+            factor_cols = [factor_col] + factor_cols
     
     data_source = str(factor_cache_path)
     
