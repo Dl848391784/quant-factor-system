@@ -201,6 +201,64 @@ def generate_turnover_surge_ic_data(
     # ========== Step 2: 判断模式 ==========
     mode = should_use_incremental(output_file, factor_df, force_full)
     
+    # 定义内部函数：全量计算（用于 FULL 模式和 SKIP fallback）
+    def do_full_recalculate() -> dict:
+        """执行全量计算（用于正常 FULL 模式和 SKIP fallback）"""
+        logger.info("[模式] 全量计算")
+        logger.info("[2/3] 计算换手率突增因子...")
+        
+        factor_df_local = calculate_turnover_surge(factor_df, surge_window=surge_window)
+        
+        surge_count = factor_df_local['turnover_surge'].notna().sum()
+        total_count = len(factor_df_local)
+        logger.info("✓ 换手率突增计算完成")
+        logger.info(f"满足条件股票数: {surge_count} / {total_count} ({surge_count/total_count:.1%})")
+        
+        # ========== Step 3: 计算 IC ==========
+        logger.info("[3/3] 计算 IC...")
+        ic_result = calculate_ic_with_direction_verification(
+            factor_df=factor_df_local,
+            return_df=return_df,
+            factor_col='turnover_surge',
+            return_col='forward_return_1d',
+            min_stocks=min_stocks,
+            logger=logger
+        )
+        
+        logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
+        logger.info(f"ICIR: {ic_result['icir']:.2f}")
+        logger.info(f"正比例: {ic_result['positive_ratio']:.1%}")
+        
+        # ========== Step 4: 构建输出 ==========
+        result = build_ic_result(
+            ic_result=ic_result,
+            raw_metadata=raw_metadata,
+            factor_name='turnover_surge_1d',
+            data_source='cache/factor_data/factor_data.json.gz + turnover_rate_data.json.gz',
+            factor_col='turnover_surge'
+        )
+        
+        # 添加参数信息
+        result['params'] = {
+            'surge_window': surge_window,
+            'factor_col': 'turnover_surge',
+            'filter_conditions': [
+                'turnover_surge > 1',
+                'daily_return > 0'
+            ]
+        }
+        result['update_mode'] = 'full'
+        
+        # 保存结果
+        save_ic_result(result, output_file)
+        
+        logger.info("=" * 60)
+        logger.info(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC 数据")
+        logger.info(f"更新模式: {result['update_mode']}")
+        logger.info("=" * 60)
+        
+        return result
+    
     if mode == UpdateMode.SKIP:
         # ========== 跳过更新（缓存已最新） ==========
         logger.info("[模式] 缓存已最新，跳过更新")
@@ -210,7 +268,8 @@ def generate_turnover_surge_ic_data(
                 cached_data['update_mode'] = 'skip'
                 return cached_data
         except FileNotFoundError:
-            logger.info("[诊断] 缓存文件不存在，执行全量计算")
+            logger.warning("[诊断] 缓存文件不存在，执行全量计算")
+            return do_full_recalculate()  # 显式调用，逻辑清晰
         except json.JSONDecodeError as e:
             raise RuntimeError(f"缓存文件损坏: {output_file}\n{e}") from e
     
@@ -220,17 +279,17 @@ def generate_turnover_surge_ic_data(
         logger.info("[2/3] 计算换手率突增因子（需要全量历史数据）...")
         
         # 注意：换手率突增计算需要完整的历史换手率数据才能正确计算 rolling mean
-        factor_df = calculate_turnover_surge(factor_df, surge_window=surge_window)
+        factor_df_local = calculate_turnover_surge(factor_df, surge_window=surge_window)
         
-        surge_count = factor_df['turnover_surge'].notna().sum()
-        total_count = len(factor_df)
+        surge_count = factor_df_local['turnover_surge'].notna().sum()
+        total_count = len(factor_df_local)
         logger.info("✓ 换手率突增计算完成")
         logger.info(f"满足条件股票数: {surge_count} / {total_count} ({surge_count/total_count:.1%})")
         
         logger.info("[3/3] 执行增量 IC 计算...")
         result = incremental_update_ic(
             output_path=output_file,
-            factor_df_full=factor_df,
+            factor_df_full=factor_df_local,
             return_df_full=return_df,
             raw_metadata=raw_metadata,
             factor_name='turnover_surge_1d',
@@ -256,60 +315,7 @@ def generate_turnover_surge_ic_data(
         return result
     
     # ========== 全量计算 ==========
-    logger.info("[模式] 全量计算")
-    logger.info("[2/3] 计算换手率突增因子...")
-    
-    factor_df = calculate_turnover_surge(factor_df, surge_window=surge_window)
-    
-    surge_count = factor_df['turnover_surge'].notna().sum()
-    total_count = len(factor_df)
-    logger.info("✓ 换手率突增计算完成")
-    logger.info(f"满足条件股票数: {surge_count} / {total_count} ({surge_count/total_count:.1%})")
-    
-    # ========== Step 3: 计算 IC ==========
-    logger.info("[3/3] 计算 IC...")
-    ic_result = calculate_ic_with_direction_verification(
-        factor_df=factor_df,
-        return_df=return_df,
-        factor_col='turnover_surge',
-        return_col='forward_return_1d',
-        min_stocks=min_stocks,
-        logger=logger
-    )
-    
-    logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
-    logger.info(f"ICIR: {ic_result['icir']:.2f}")
-    logger.info(f"正比例: {ic_result['positive_ratio']:.1%}")
-    
-    # ========== Step 4: 构建输出 ==========
-    result = build_ic_result(
-        ic_result=ic_result,
-        raw_metadata=raw_metadata,
-        factor_name='turnover_surge_1d',
-        data_source='cache/factor_data/factor_data.json.gz + turnover_rate_data.json.gz',
-        factor_col='turnover_surge'
-    )
-    
-    # 添加参数信息
-    result['params'] = {
-        'surge_window': surge_window,
-        'factor_col': 'turnover_surge',
-        'filter_conditions': [
-            'turnover_surge > 1',
-            'daily_return > 0'
-        ]
-    }
-    result['update_mode'] = 'full'
-    
-    # 保存结果
-    save_ic_result(result, output_file)
-    
-    logger.info("=" * 60)
-    logger.info(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC 数据")
-    logger.info(f"更新模式: {result['update_mode']}")
-    logger.info("=" * 60)
-    
-    return result
+    return do_full_recalculate()  # 复用同一函数
 
 
 if __name__ == '__main__':
@@ -329,16 +335,18 @@ if __name__ == '__main__':
             surge_window=args.surge_window
         )
         
+        # 使用防御性访问（遵循 MODULE.md __main__ 防御性访问规范）
+        ic_metrics = result.get('ic_metrics', {})
+        logger.info("=" * 60)
         logger.info("结果摘要:")
-        logger.info(f"因子名称: {result['factor_name']}")
-        logger.info(f"IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
-        logger.info(f"ICIR: {result['ic_metrics']['icir']:.2f}")
+        logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
+        logger.info(f"IC 均值: {ic_metrics.get('ic_mean', 0):.4f}")
+        logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
+        logger.info("=" * 60)
         
     except FileNotFoundError as e:
-        logger.error(f"缓存文件不存在: {e}")
+        logger.exception("缓存文件不存在")  # 使用 .exception() 保留完整堆栈
         sys.exit(1)
     except Exception as e:
-        logger.error(f"计算失败: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("计算失败")  # 使用 .exception() 保留完整堆栈
         sys.exit(1)

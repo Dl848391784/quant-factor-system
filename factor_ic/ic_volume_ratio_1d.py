@@ -181,19 +181,21 @@ def main():
     try:
         result = generate_volume_ratio_ic_data()
         
-        # 打印关键指标
+        # 使用防御性访问（遵循 MODULE.md __main__ 防御性访问规范）
+        ic_metrics = result.get('ic_metrics', {})
+        summary = result.get('summary', {})
+        logger.info("=" * 60)
         logger.info("关键指标摘要:")
-        logger.info(f"IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
-        logger.info(f"ICIR: {result['ic_metrics']['icir']:.2f}")
-        logger.info(f"方向判断: {result['summary']['factor_direction']}")
+        logger.info(f"IC 均值: {ic_metrics.get('ic_mean', 0):.4f}")
+        logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
+        logger.info(f"方向判断: {summary.get('factor_direction', 'unknown')}")
+        logger.info("=" * 60)
         
     except FileNotFoundError as e:
-        logger.error(f"缓存文件不存在: {e}")
+        logger.exception("缓存文件不存在")  # 使用 .exception() 保留完整堆栈
         sys.exit(1)
     except Exception as e:
-        logger.error(f"分析失败: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("分析失败")  # 使用 .exception() 保留完整堆栈
         sys.exit(1)
 
 

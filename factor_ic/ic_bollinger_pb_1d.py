@@ -161,8 +161,8 @@ if __name__ == '__main__':
     try:
         main()
     except RuntimeError as e:
-        logger.error(f"计算失败: {e}")
+        logger.exception("计算失败")  # 使用 .exception() 保留完整堆栈
         sys.exit(1)
     except Exception as e:
-        logger.error(f"未预期的错误: {e}")
+        logger.exception("未预期的错误")  # 使用 .exception() 保留完整堆栈
         sys.exit(1)
