@@ -22,11 +22,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from factor_ic.common import (
-    run_simple_factor_ic,
     load_factor_return_data,
     calculate_ic_with_direction_verification,
     build_ic_result,
-    save_ic_result,
     incremental_update_ic
 )
 from factor_ic.common.incremental_engine import UpdateMode, should_use_incremental
@@ -178,27 +176,6 @@ def generate_rsi_ic_data(
 
 
 # ============================================================================
-# 快捷入口（使用 run_simple_factor_ic）
-# ============================================================================
-
-def quick_generate():
-    """
-    快捷入口：使用 run_simple_factor_ic() 一行调用
-    
-    适用于：简单因子（直接用缓存列，无需预处理）
-    
-    返回:
-        IC 数据字典
-    """
-    return run_simple_factor_ic(
-        factor_name='rsi',
-        factor_col='rsi_6',
-        return_period='1d',
-        min_stocks=DEFAULT_MIN_STOCKS
-    )
-
-
-# ============================================================================
 # 主入口
 # ============================================================================
 
@@ -209,21 +186,15 @@ if __name__ == '__main__':
     parser.add_argument('--force-full', action='store_true', help='强制全量计算')
     parser.add_argument('--output', type=str, help='输出文件路径')
     parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数阈值')
-    parser.add_argument('--quick', action='store_true', help='使用快捷入口（run_simple_factor_ic）')
     
     args = parser.parse_args()
     
     try:
-        if args.quick:
-            # 快捷入口
-            result = quick_generate()
-        else:
-            # 标准入口
-            result = generate_rsi_ic_data(
-                output_file=args.output,
-                force_full=args.force_full,
-                min_stocks=args.min_stocks
-            )
+        result = generate_rsi_ic_data(
+            output_file=args.output,
+            force_full=args.force_full,
+            min_stocks=args.min_stocks
+        )
         
         # 使用防御性访问（遵循 MODULE.md __main__ 防御性访问规范）
         ic_metrics = result.get('ic_metrics', {})
