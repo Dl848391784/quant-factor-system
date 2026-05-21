@@ -56,7 +56,10 @@
   "ic_values": [<IC值列表>],
   "rolling_ic_mean": [<滚动均值列表>],
   "positive_ratio": <float>,
+  "n_assets": <int>,
   "summary": {"ic_performance": "<str>", "statistical_significance": "<str>", "factor_direction": "<str>", "economic_significance": "<str>", "recommendation": "<str>"},
+  "factor_stats": {"factor_name": "<str>", "return_period": "<str>", "data_source": "<str>", "total_days": <int>, "valid_days": <int>},
+  "factor_col": "<str>",
   "update_mode": "<str>"
 }
 ```
@@ -70,6 +73,14 @@
 | economic_significance | |ic_mean| >= 0.03/0.05 | abs_ic_mean, threshold_used, level, is_economically_significant, conclusion |
 | icir_stability | |ICIR| >= 0.5/1.0/2.0 | icir, threshold_used, level, is_stable, conclusion |
 | ic_distribution_consistency | 正比例与方向一致/矛盾 | positive_ratio, ic_mean_sign, consistency_type, distribution_hint, is_consistent, conclusion |
+
+**辅助字段说明**：
+
+| 字段 | 含义 | 来源 |
+|------|------|------|
+| n_assets | 平均股票数 | raw_metadata.avg_stocks_per_day |
+| factor_stats | 因子元信息 | build_ic_result 构建（含 data_source, return_period） |
+| factor_col | 因子列名 | 用于追踪（如 rsi_6, kdj_j） |
 
 ---
 
@@ -132,6 +143,11 @@
     - 更新 ic_metrics（添加 p_value_display）、sample_stats（添加 avg_stocks_period）
     - 更新 statistical_significance（7字段）、factor_direction（4字段）、summary（5子字段）
     - 添加五维度判断字段说明表
+18. v3.6（2026-05-22 17:30）：
+    - 合并输出结构模板（行41-80）和统一输出结构定义（原行242-310）
+    - 补充辅助字段：n_assets、factor_stats、factor_col
+    - 删除重复定义，精简76行
+    - 保留统一性要求和字段值完整性检查规范
 
 # 一、概述与基础
 
@@ -228,76 +244,7 @@ ic_mean<0 表示反向因子有效（高因子→低收益）。
 - 相同的字段类型
 - 相同的字段顺序
 
-#### 统一输出结构定义
-
-**所有因子脚本必须输出以下结构：**
-```json
-{
-  "factor_name": "<因子名>",
-  "calculation_date": "<ISO时间>",
-  "period": {
-    "start": "<起始日期>",
-    "end": "<结束日期>",
-    "description": "<范围说明>"
-  },
-  "ic_metrics": {
-    "ic_mean": <float>,
-    "ic_std": <float>,
-    "icir": <float>,
-    "p_value": <float>,
-    "p_value_display": "<str>"
-  },
-  "sample_stats": {
-    "total_days": <int>,
-    "valid_days": <int>,
-    "avg_stocks_per_day": <float>,
-    "avg_stocks_period": {
-      "start": "<str>",
-      "end": "<str>",
-      "description": "<str>"
-    }
-  },
-  "statistical_significance": {
-    "t_stat": <float>,
-    "p_value": <float>,
-    "p_value_display": "<str>",
-    "nw_lag": <int>,
-    "nw_lag_method": "<str>",
-    "is_significant": <bool>,
-    "conclusion": "<str>"
-  },
-  "factor_direction": {
-    "direction": "<str>",
-    "ic_mean": <float>,
-    "conclusion": "<str>"
-  },
-  "economic_significance": {
-    "annual_ic_mean": <float>,
-    "icir_annualized": <float>,
-    "conclusion": "<str>"
-  },
-  "dates": ["<日期列表>"],
-  "ic_values": [<IC值列表>],
-  "rolling_ic_mean": [<滚动均值列表>],
-  "positive_ratio": <float>,
-  "n_assets": <int>,
-  "summary": {
-    "ic_performance": "<str>",
-    "statistical_significance": "<str>",
-    "factor_direction": "<str>",
-    "economic_significance": "<str>",
-    "recommendation": "<str>"
-  },
-  "factor_stats": {
-    "factor_name": "<str>",
-    "return_period": "<str>",
-    "data_source": "<str>",
-    "total_days": <int>,
-    "valid_days": <int>
-  },
-  "update_mode": "<str>"
-}
-```
+**输出结构定义见上方"输出结构模板"章节（行41-80），此处不再重复。**
 
 ### 字段值完整性检查规范
 
