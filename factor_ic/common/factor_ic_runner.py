@@ -350,7 +350,7 @@ def run_complex_factor_ic(
     factor_name: str,
     factor_col: str,
     factor_cols: List[str],
-    custom_factor_calculation: Optional[Callable] = None,
+    custom_factor_calculation: Callable,
     _logger=None,
     **kwargs
 ) -> Dict[str, Any]:
@@ -359,11 +359,13 @@ def run_complex_factor_ic(
     
     适用于需要预处理因子值的场景（如 KDJ、布林带）
     
+    注意：custom_factor_calculation 为必须参数，若无需自定义计算请使用 run_simple_factor_ic
+    
     参数:
         factor_name: 因子名称
         factor_col: 最终因子列名
         factor_cols: 需加载的原始因子列
-        custom_factor_calculation: 自定义因子计算函数
+        custom_factor_calculation: 自定义因子计算函数（必须提供）
         _logger: 日志记录器（由调用方传入，默认使用模块 logger）
             - 参数名使用下划线前缀避免遮蔽模块级 logger
         **kwargs: 其他参数
@@ -380,6 +382,13 @@ def run_complex_factor_ic(
             factor_cols=['close', 'high', 'low'],
             custom_factor_calculation=calculate_kdj_j
         )
+    
+    错误示例（无需自定义计算时应使用 run_simple_factor_ic）:
+        # 错误：custom_factor_calculation 缺失
+        result = run_complex_factor_ic('rsi', 'rsi_6', ['rsi_6'])  # TypeError
+        
+        # 正确：使用 run_simple_factor_ic
+        result = run_simple_factor_ic('rsi', 'rsi_6')
     """
     return run_factor_ic_analysis(
         factor_name=factor_name,

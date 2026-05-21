@@ -1118,6 +1118,45 @@ def run_factor_ic_analysis(
 | `run_simple_factor_ic()` | 简单因子（直接用缓存列） | RSI、量比 |
 | `run_complex_factor_ic()` | 复杂因子（需预处理） | KDJ、布林带 |
 
+### 快捷函数语义清晰规范（重要）
+
+**函数参数必须与函数名语义一致：**
+
+```python
+# 错误设计（语义矛盾）
+def run_complex_factor_ic(
+    factor_name: str,
+    factor_col: str,
+    factor_cols: List[str],
+    custom_factor_calculation: Optional[Callable] = None  # Optional 与 "complex" 语义矛盾
+):
+    # 若传 None，等价于 run_simple_factor_ic，功能重叠
+    # 调用者可能误用：run_complex_factor_ic('rsi', 'rsi_6', ['rsi_6'])  # 静默跳过自定义计算
+
+# 正确设计（语义清晰）
+def run_complex_factor_ic(
+    factor_name: str,
+    factor_col: str,
+    factor_cols: List[str],
+    custom_factor_calculation: Callable  # 必须参数，与 "complex" 语义一致
+):
+    # 若无需自定义计算，调用者应使用 run_simple_factor_ic
+    # 强制参数防止误用：run_complex_factor_ic('rsi', 'rsi_6', ['rsi_6'])  # TypeError
+```
+
+**原因：**
+1. 函数名定义了用途：`simple` = 无需自定义计算，`complex` = 必须有自定义计算
+2. Optional 参数破坏语义，导致两个函数功能重叠
+3. 调用者可能误用，传 None 导致复杂因子计算被静默跳过
+4. 必须参数强制调用者选择正确的函数，防止误用
+
+**适用场景：**
+- 任何快捷函数设计，参数必须与函数名语义一致
+- 函数名暗示"必须"时，参数不应 Optional
+- 功能重叠时，应明确区分（必须参数 vs 可选参数）
+
+**参考：** factor_ic_runner.py 第353行（2026-05-22 更新）
+
 ### 使用示例
 
 ```python
