@@ -831,7 +831,51 @@ if rows_lost > 0:
 | 日志级别 | DEBUG/INFO/WARNING/ERROR/CRITICAL（第423-438行） |
 | 日志路径 | 脚本当前目录下 `logs/` 子目录（第441-460行） |
 | 文件命名 | `<脚本名>_YYYY-MM-DD.log`（第473-492行） |
-| 日志格式 | `%(asctime)s | %(levelname)-8s | %(name)s | %(message)s`（第494-500行） |
+|| 日志格式 | `%(asctime)s | %(levelname)-8s | %(name)s | %(message)s`（第494-500行） |
+|| 公共模块日志传递 | PROJECT.md 第783-857行（重要） |
+
+### 公共模块日志传递规范（重要）
+
+**核心原则：公共模块不独立创建 logger，由调用方传入。**
+
+遵循 PROJECT.md 第783-857行规范：
+- 公共函数签名：`def public_function(..., logger=None)`
+- 调用方传入：`load_data_from_cache(..., logger=logger)`
+- 日志定位：调用方的日志文件
+
+**logger 参数命名规范（防止遮蔽）：**
+
+| 问题 | 错误做法 | 正确做法 |
+|------|---------|---------|
+| 参数遮蔽模块级变量 | `def func(logger=None)` + 模块级 `logger = get_logger()` | 使用已导入的 get_logger，不重复导入 |
+| fallback 重复导入 | `from .logger_config import get_logger` 在函数内再次导入 | 删除函数内导入，使用模块级已导入的 get_logger |
+
+**正确示例：**
+
+```python
+# 模块级导入（一次导入）
+from .logger_config import get_logger
+logger = get_logger(__name__)  # 模块级 logger（给 main 使用）
+
+def public_function(..., logger=None):
+    """
+    参数:
+        logger: 日志记录器（由调用方传入，默认使用模块 logger）
+    """
+    # fallback 使用已导入的 get_logger（不重复导入）
+    if logger is None:
+        logger = get_logger(__name__)
+    
+    logger.info("操作完成")
+```
+
+**禁止行为：**
+
+```
+❌ 函数内重复导入 get_logger（浪费资源）
+❌ 参数名与模块级变量同名且无明确 fallback 逻辑（遮蔽混淆）
+❌ 公共模块独立创建 logger（无法定位调用方）
+```
 
 ### 迁移计划
 
