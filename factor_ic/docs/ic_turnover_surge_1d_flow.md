@@ -1,7 +1,7 @@
 # Turnover_Surge_1D IC 计算流程文档
 
-> 生成时间: 2026-05-23 10:30 (北京时间)
-> 审阅版本: v2.1（规范强化）
+> 生成时间: 2026-05-23 11:45 (北京时间)
+> 审阅版本: v2.2（异常检测顺序修正）
 > 实测数据时间: 2026-05-23
 > 更新内容:
 >   1. [v2.0] 重构：使用 run_complex_factor_ic() 公共模块主入口（遵循 PROJECT.md 第92行强制规范）
@@ -13,6 +13,8 @@
 >   7. [v2.1] EPSILON 模块级常量：添加 EPSILON = 1e-10（遵循模块级常量规范）
 >   8. [v2.1] 除零防护：safe_avg_turnover.clip(lower=EPSILON)（遵循异常检测规范）
 >   9. [v2.1] 异常检测：turnover_surge < 0 检测并标记 pd.NA（遵循异常检测而非静默修正规范）
+>  10. [v2.2] 异常检测顺序修正：先检测数据质量异常（Step 3），再应用业务筛选条件（Step 5）
+>  11. [v2.2] 更新因子计算流程图：反映正确的异常检测位置（遵循异常处理顺序规范）
 
 ---
 
@@ -135,7 +137,7 @@ calculate_turnover_surge(factor_df, surge_window=5)
     │
     ├── [入口] factor_df.copy()（遵循 MODULE.md DataFrame副本规范）
     │
-    ├── [Step 1] 计算5日换手率均值
+    ├── [Step 1] 计算5日换手率均值（局部变量）
     │   │
     │   ├── avg_turnover = turnover_rate.groupby('asset').transform(
     │   │       lambda x: x.rolling(5, min_periods=5).mean()
@@ -146,19 +148,34 @@ calculate_turnover_surge(factor_df, surge_window=5)
     │       ├── min_periods=5: 最少需要5个数据点（业务决策）
     │       └── 按股票分组计算
     │
-    ├── [Step 2] 计算换手率突增
+    ├── [Step 2] 计算换手率突增（除零防护）
     │   │
-    │   └── turnover_surge = turnover_rate / avg_turnover
+    │   ├── safe_avg_turnover = avg_turnover.clip(lower=EPSILON)
+    │   │
+    │   └── turnover_surge = turnover_rate / safe_avg_turnover
     │       │
     │       └── 因子定义: 当日换手率 / 过去5日换手率均值
     │
-    ├── [Step 3] 计算涨跌幅
+    ├── [Step 3] 异常检测（先于筛选条件）
+    │   │
+    │   ├── 检测异常负值:
+    │   │   ├── abnormal_mask = turnover_surge < 0
+    │   │   └── 异常原因: turnover_rate/avg_turnover理论上恒>=0，负值说明数据异常
+    │   │
+    │   ├── 处理异常:
+    │   │   ├── logger.warning(f"检测到 {abnormal_count} 个异常换手率突增（负值）")
+    │   │   └── turnover_surge.where(~abnormal_mask, pd.NA)
+    │   │
+    │   └── 注意: 异常检测必须在筛选条件之前（否则 surge>1 会排除 surge<0）
+    │
+    ├── [Step 4] 计算涨跌幅（局部变量）
     │   │
     │   ├── prev_close = close.groupby('asset').transform(lambda x: x.shift(1))
     │   │
-    │   └── daily_return = (close - prev_close) / prev_close
+    │   └── daily_return = (close - prev_close) / prev_close.clip(lower=EPSILON)
+    │       └── 使用局部变量，不污染输出 DataFrame（遵循中间变量规范）
     │
-    ├── [Step 4] 应用筛选条件
+    ├── [Step 5] 应用业务筛选条件
     │   │
     │   ├── 条件1: turnover_surge > 1（换手率高于近期均值）
     │   │
@@ -166,7 +183,7 @@ calculate_turnover_surge(factor_df, surge_window=5)
     │   │
     │   └── condition = (surge > 1) & (return > 0)
     │       │
-    │       └── 不满足条件的股票: turnover_surge = np.nan
+    │       └── 不满足条件的股票: turnover_surge = pd.NA
     │           ├── 不参与 IC 计算
     │           └── 体现资金异动信号筛选
     │
@@ -343,11 +360,11 @@ cache/factor_data/
 
 ## 📈 代码量对比
 
-| 版本 | 行数 | 说明 |
-|------|------|------|
-| v1.24（旧版） | 389行 | 手写三模式分支 + 数据加载 |
-| **v2.0（重构版）** | **158行** | **使用公共模块主入口** |
-| 降幅 | **75%** | **删除231行冗余代码** |
+|| 版本 | 行数 | 说明 |
+||------|------|------||
+|| v1.24（旧版） | 389行 | 手写三模式分支 + 数据加载 |
+|| **v2.2（当前版）** | **178行** | **使用公共模块主入口 + 异常检测顺序修正** |
+|| 降幅 | **54%** | **删除211行冗余代码** |
 
 ---
 

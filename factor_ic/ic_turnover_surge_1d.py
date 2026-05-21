@@ -19,7 +19,7 @@
 
 作者: 云瑶
 重构日期: 2026-05-21
-修订日期: 2026-05-23（中间变量规范 + 除零防护 + 异常检测）
+修订日期: 2026-05-23（中间变量规范 + 除零防护 + 异常检测顺序修正）
 原版作者: 云舟
 原版日期: 2026-05-08
 """
@@ -61,7 +61,7 @@ def calculate_turnover_surge(
     计算换手率突增因子（因子特有逻辑）
     
     参数:
-        factor_df: 包含 turnover_rate, close 列的 DataFrame
+        factor_df: 包含 turnover_rate, close 列的 DataFrame【必需】
         surge_window: 换手率均值计算窗口
     
     返回:
@@ -71,6 +71,15 @@ def calculate_turnover_surge(
         - 函数入口必须先 .copy()，避免修改原始数据（MODULE.md DataFrame参数副本规范）
         - 使用局部变量存储中间结果，避免污染输出 DataFrame（中间变量规范）
         - 异常检测而非静默修正（MODULE.md 异常检测规范）
+        - 异常检测顺序：先检测数据质量异常，再应用业务筛选条件
+    
+    流程:
+        1. 计算换手率均值（局部变量）
+        2. 计算换手率突增（除零防护）
+        3. 检测异常负值（数据质量问题）
+        4. 计算涨跌幅（局部变量）
+        5. 应用业务筛选条件（surge > 1, return > 0）
+        6. 写入最终因子列
     """
     # 函数入口必须先 copy，避免副作用
     factor_df = factor_df.copy()
@@ -87,7 +96,17 @@ def calculate_turnover_surge(
     safe_avg_turnover = avg_turnover.clip(lower=EPSILON)
     turnover_surge = factor_df['turnover_rate'] / safe_avg_turnover
     
-    # ========== Step 3: 计算涨跌幅（局部变量）==========
+    # ========== Step 3: 异常检测（先于筛选条件）==========
+    # turnover_surge 理论上恒 >= 0（turnover_rate >= 0, avg_turnover >= 0）
+    # 若出现负值，说明数据异常，需检测并记录
+    # 注意：必须在筛选条件之前检测，否则 surge > 1 会排除 surge < 0 的情况
+    abnormal_mask = turnover_surge < 0
+    abnormal_count = abnormal_mask.sum()
+    if abnormal_count > 0:
+        logger.warning(f"检测到 {abnormal_count} 个异常换手率突增（负值），已标记为 pd.NA")
+        turnover_surge = turnover_surge.where(~abnormal_mask, pd.NA)
+    
+    # ========== Step 4: 计算涨跌幅（局部变量）==========
     # 获取前一日收盘价
     prev_close = factor_df.groupby('asset')['close'].transform(
         lambda x: x.shift(1)
@@ -95,9 +114,10 @@ def calculate_turnover_surge(
     # 使用局部变量存储涨跌幅，不污染输出 DataFrame
     daily_return = (factor_df['close'] - prev_close) / prev_close.clip(lower=EPSILON)
     
-    # ========== Step 4: 应用筛选条件 ==========
+    # ========== Step 5: 应用业务筛选条件 ==========
     # 条件1: turnover_surge > 1（换手率高于近期均值）
     # 条件2: daily_return > 0（当日上涨）
+    # 注意：异常负值已在 Step 3 处理，此处筛选不影响异常检测
     condition = (
         (turnover_surge > 1) &
         (daily_return > 0)
@@ -105,15 +125,6 @@ def calculate_turnover_surge(
     
     # 不满足条件的股票因子值设为 NaN
     turnover_surge = turnover_surge.where(condition, pd.NA)
-    
-    # ========== Step 5: 异常检测 ==========
-    # turnover_surge 理论上恒 >= 0（turnover_rate >= 0, avg_turnover >= 0）
-    # 若出现负值，说明数据异常
-    abnormal_mask = turnover_surge < 0
-    abnormal_count = abnormal_mask.sum()
-    if abnormal_count > 0:
-        logger.warning(f"检测到 {abnormal_count} 个异常换手率突增（负值），已标记为 pd.NA")
-        turnover_surge = turnover_surge.where(~abnormal_mask, pd.NA)
     
     # ========== Step 6: 写入最终因子列 ==========
     # 只写入 turnover_surge，中间变量（avg_turnover, daily_return）不保留
