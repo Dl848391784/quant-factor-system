@@ -95,6 +95,48 @@ def generate_rsi_ic_data(
     # ========== 判断模式 ==========
     mode = should_use_incremental(output_file, factor_df, force_full)
     
+    # 定义内部函数：全量计算（用于 FULL 模式和 SKIP fallback）
+    def do_full_recalculate() -> dict:
+        """执行全量计算（用于正常 FULL 模式和 SKIP fallback）"""
+        logger.info("[模式] 全量计算")
+        logger.info("[2/3] 计算每日 IC...")
+        
+        # 使用公共模块计算 IC
+        ic_result = calculate_ic_with_direction_verification(
+            factor_df=factor_df,
+            return_df=return_df,
+            factor_col='rsi_6',
+            return_col='forward_return_1d',
+            min_stocks=min_stocks,
+            logger=logger
+        )
+        
+        logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
+        logger.info(f"ICIR: {ic_result['icir']:.2f}")
+        logger.info(f"正比例: {ic_result['positive_ratio']:.1%}")
+        
+        # 使用公共模块构建输出
+        result = build_ic_result(
+            ic_result=ic_result,
+            raw_metadata=raw_metadata,
+            factor_name='rsi_1d',
+            data_source='cache/factor_data/factor_data.json.gz',
+            factor_col='rsi_6'
+        )
+        
+        # ========== 保存结果 ==========
+        logger.info(f"[3/3] 保存数据到: {output_file}")
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        
+        logger.info("=" * 60)
+        logger.info(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC 数据")
+        logger.info(f"更新模式: {result['update_mode']}")
+        logger.info("=" * 60)
+        
+        return result
+    
     if mode == UpdateMode.SKIP:
         # ========== 跳过更新（缓存已最新） ==========
         logger.info("[模式] 缓存已最新，跳过更新")
@@ -104,7 +146,8 @@ def generate_rsi_ic_data(
                 cached_data['update_mode'] = 'skip'
                 return cached_data
         except FileNotFoundError:
-            logger.info("[诊断] 缓存文件不存在，执行全量计算")
+            logger.warning("[诊断] 缓存文件不存在，执行全量计算")
+            return do_full_recalculate()  # 显式调用，逻辑清晰
         except json.JSONDecodeError as e:
             raise RuntimeError(f"缓存文件损坏: {output_file}\n{e}") from e
     
@@ -131,44 +174,7 @@ def generate_rsi_ic_data(
         return result
     
     # ========== 全量计算 ==========
-    logger.info("[模式] 全量计算")
-    logger.info("[2/3] 计算每日 IC...")
-    
-    # 使用公共模块计算 IC
-    ic_result = calculate_ic_with_direction_verification(
-        factor_df=factor_df,
-        return_df=return_df,
-        factor_col='rsi_6',
-        return_col='forward_return_1d',
-        min_stocks=min_stocks,
-        logger=logger
-    )
-    
-    logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
-    logger.info(f"ICIR: {ic_result['icir']:.2f}")
-    logger.info(f"正比例: {ic_result['positive_ratio']:.1%}")
-    
-    # 使用公共模块构建输出
-    result = build_ic_result(
-        ic_result=ic_result,
-        raw_metadata=raw_metadata,
-        factor_name='rsi_1d',
-        data_source='cache/factor_data/factor_data.json.gz',
-        factor_col='rsi_6'
-    )
-    
-    # ========== 保存结果 ==========
-    logger.info(f"[3/3] 保存数据到: {output_file}")
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
-    
-    logger.info("=" * 60)
-    logger.info(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC 数据")
-    logger.info(f"更新模式: {result['update_mode']}")
-    logger.info("=" * 60)
-    
-    return result
+    return do_full_recalculate()  # 复用同一函数
 
 
 # ============================================================================
@@ -207,20 +213,31 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
-    if args.quick:
-        # 快捷入口
-        result = quick_generate()
-    else:
-        # 标准入口
-        result = generate_rsi_ic_data(
-            output_file=args.output,
-            force_full=args.force_full,
-            min_stocks=args.min_stocks
-        )
-    
-    # 打印结果摘要
-    logger.info("结果摘要:")
-    logger.info(f"因子名称: {result['factor_name']}")
-    logger.info(f"IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
-    logger.info(f"ICIR: {result['ic_metrics']['icir']:.2f}")
-    logger.info(f"更新模式: {result['update_mode']}")
+    try:
+        if args.quick:
+            # 快捷入口
+            result = quick_generate()
+        else:
+            # 标准入口
+            result = generate_rsi_ic_data(
+                output_file=args.output,
+                force_full=args.force_full,
+                min_stocks=args.min_stocks
+            )
+        
+        # 使用防御性访问（遵循 MODULE.md __main__ 防御性访问规范）
+        ic_metrics = result.get('ic_metrics', {})
+        logger.info("=" * 60)
+        logger.info("结果摘要:")
+        logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
+        logger.info(f"IC 均值: {ic_metrics.get('ic_mean', 0):.4f}")
+        logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
+        logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
+        logger.info("=" * 60)
+        
+    except RuntimeError as e:
+        logger.exception("计算失败")  # 使用 .exception() 保留完整堆栈
+        sys.exit(1)
+    except Exception as e:
+        logger.exception("未预期的错误")  # 使用 .exception() 保留完整堆栈
+        sys.exit(1)
