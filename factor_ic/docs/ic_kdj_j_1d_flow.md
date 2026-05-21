@@ -1,9 +1,13 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-21 19:00 北京时间
-> 实测数据时间: 2026-05-21 19:00 北京时间
-> 版本: v1.30
-> 更新内容: 测试用例同步公共模块重构（33→17用例），删除过时内容
+> 生成时间: 2026-05-21 19:05 北京时间
+> 实测数据时间: 2026-05-21 19:05 北京时间
+> 版本: v1.31
+> 更新内容: 
+>   - 修复废弃函数引用（calculate_daily_ic_series → 公共模块参数）
+>   - 删除不存在字段（n_assets）
+>   - 修正字段类型（summary: str → object）
+>   - 补充遗漏字段（update_mode）
 
 ---
 
@@ -95,8 +99,8 @@ main()
 | ic_values | array | 每日IC值列表 |
 | rolling_ic_mean | array | 20日滚动IC均值 |
 | positive_ratio | float | IC正值比例 |
-| n_assets | int | 股票数量 |
-| summary | str | 五维度判断摘要 |
+| summary | object | 五维度判断摘要（含recommendation） |
+| update_mode | str | 更新模式（full/incremental） |
 
 ### sample_stats 字段
 
@@ -210,7 +214,7 @@ DEFAULT_MIN_STOCKS = 10
 ```
 
 **用途：**
-- calculate_daily_ic_series 函数参数
+- 公共模块 min_stocks 参数
 - 数据验证阈值
 - 统一参数管理（遵循 PROJECT.md 规范）
 
