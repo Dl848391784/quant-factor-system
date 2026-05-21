@@ -1,9 +1,9 @@
 # KDJ_J_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 18:40 北京时间
-> 实测数据时间: 2026-05-20 17:20 北京时间
-> 版本: v1.27
-> 更新内容: 移除 ic_metrics 中冗余的 p_value 和 p_value_display 字段，与 ic_rsi_1d.py 对齐（遵循 MODULE.md 字段去重化规范）
+> 生成时间: 2026-05-21 18:50 北京时间
+> 实测数据时间: 2026-05-21 18:49 北京时间
+> 版本: v1.28
+> 更新内容: 重构为公共模块版本（run_complex_factor_ic），修复增量模式自定义因子计算缺失问题
 
 ---
 
@@ -11,43 +11,69 @@
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   cache/    │────▶│  load_data  │────▶│ calculate_kdj_j │
-│ factor_data │     │ from_cache  │     │    factor      │
+│   cache/    │────▶│ run_complex │────▶│ calculate_kdj_j │
+│ factor_data │     │ factor_ic   │     │    (自定义)      │
 └─────────────┘     └─────────────┘     └─────────────┘
-                                               │
-                                               ▼
-                                        ┌─────────────┐
-                                        │ calculate_ic│
-                                        │ with_direction│
-                                        └─────────────┘
-                                               │
-                                               ▼
-                                        ┌─────────────┐
-                                        │   result/   │
-                                        │  ic_kdj_j_  │
-                                        │ 1d_*.json   │
-                                        └─────────────┘
+                          │                   │
+                          │                   ▼
+                          │            添加 kdj_j 列
+                          │                   │
+                          ▼                   ▼
+                   ┌─────────────┐     ┌─────────────┐
+                   │ incremental │────▶│  IC 计算    │
+                   │  engine     │     │  (五维度)   │
+                   └─────────────┘     └─────────────┘
+                          │                   │
+                          ▼                   ▼
+                   ┌─────────────┐     ┌─────────────┐
+                   │   result/   │     │   保存      │
+                   │ ic_kdj_j_   │◀────│  JSON      │
+                   │ 1d_*.json   │     └─────────────┘
+                   └─────────────┘
 ```
 
 ---
 
-## 函数调用关系
+## 函数调用关系（公共模块版本）
 
 ```
-generate_kdj_j_ic_data()
-    ├─ load_data_from_cache()
-    │   ├─ calculate_kdj_j_factor()
-    │   │   ├─ 计算 RSV (向量化)
-    │   │   ├─ 计算 K (ewm)
-    │   │   ├─ 计算 D (ewm)
-    │   │   └─ 计算 J = 3K - 2D
-    │   └─ 返回 factor_df + raw_metadata
-    ├─ calculate_daily_ic_series(factor_df, return_df, raw_metadata)
-    │   ├─ calculate_ic_with_direction_verification()
-    │   │   └─ 返回五维度判断结果
-    │   ├─ 计算 rolling_ic_mean
-    │   └─ 构建 JSON 输出结构
-    └─ 保存到 result/ic_kdj_j_1d_analysis_result.json
+main()
+    │
+    └─ run_complex_factor_ic(
+         factor_name='kdj_j',
+         factor_col='kdj_j',
+         factor_cols=['close', 'high', 'low'],
+         custom_factor_calculation=calculate_kdj_j
+       )
+         │
+         ├─ load_factor_return_data(factor_cols=['close', 'high', 'low'])
+         │   └─ 返回 factor_df, return_df, raw_metadata
+         │
+         ├─ [增量模式] custom_factor_calculation(factor_df)
+         │   │   ├─ 计算 RSV (rolling, min_periods=n)
+         │   │   ├─ 计算 K (_calculate_k_with_initial, ewm)
+         │   │   ├─ 计算 D (_calculate_d_with_initial, ewm)
+         │   │   └─ 计算 J = 3K - 2D
+         │   │   └─ 返回带 kdj_j 列的 factor_df
+         │   │
+         │   └─ incremental_update_ic(factor_df, return_df, factor_col='kdj_j')
+         │       ├─ 读取现有缓存
+         │       ├─ 确定缺失日期
+         │       ├─ 计算缺失日期 IC (calculate_single_day_ic)
+         │       ├─ 合并数据（去重）
+         │       └─ 重算统计指标 (calculate_ic_statistics)
+         │
+         ├─ [全量模式] custom_factor_calculation(factor_df)
+         │   │   └─ 同上 KDJ 计算
+         │   │
+         │   └ calculate_ic_with_direction_verification(factor_df, return_df)
+         │       ├─ 计算每日 IC 序列
+         │       ├─ Newey-West t 检验
+         │       └─ 五维度判断输出
+         │
+         └─ build_ic_result + save_ic_result
+             └─ 保存到 result/ic_kdj_j_1d_analysis_result.json
+```
 ```
 
 ---

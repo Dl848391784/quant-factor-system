@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-KDJ_J_1D IC 计算器（重构版） - 1日收益周期
+KDJ_J 因子 IC 计算器 - 使用公共模块主入口
 
-使用公共模块实现数据加载和输出构建，保留 KDJ 计算逻辑。
-代码量从 ~882行降至 ~200行（KDJ 计算保留）。
+遵循 PROJECT.md 公共模块强制复用规范：
+- 主流程使用 run_complex_factor_ic()（禁止手写三模式分支）
+- 仅实现因子特有计算逻辑（KDJ 公式）
+
+代码量：~120行（仅KDJ计算），而非 ~360行手写主流程。
 
 因子定义：
 - RSV(N) = (Close_t - Low_N) / (High_N - Low_N) × 100
@@ -24,27 +27,17 @@ KDJ_J_1D IC 计算器（重构版） - 1日收益周期
 
 import sys
 from pathlib import Path
-import json
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
-import numpy as np
 
-# 导入日志
+# 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
+from factor_ic.common.factor_ic_runner import run_complex_factor_ic
 from factor_ic.common.logger_config import get_logger
-logger = get_logger(__name__)
 
-# 导入公共模块
-from factor_ic.common import (
-    load_factor_return_data,
-    calculate_ic_with_direction_verification,
-    build_ic_result,
-    incremental_update_ic
-)
-from factor_ic.common.incremental_engine import UpdateMode, should_use_incremental
-from factor_ic.common.data_completeness import get_ic_output_path, check_data_completeness
+logger = get_logger(__name__)
 
 # ============================================================================
 # 参数统一管理
@@ -59,7 +52,7 @@ DEFAULT_M2 = 3     # D值平滑周期
 
 
 # ============================================================================
-# KDJ 计算函数（保留原版逻辑）
+# KDJ 计算函数（因子特有逻辑）
 # ============================================================================
 
 def _calculate_k_with_initial(
@@ -127,7 +120,7 @@ def calculate_kdj_j(
     m2: int = DEFAULT_M2
 ) -> pd.DataFrame:
     """
-    计算 KDJ_J 因子
+    计算 KDJ_J 因子（因子特有逻辑）
     
     参数:
         factor_df: 包含 close, high, low 列的 DataFrame
@@ -186,179 +179,53 @@ def calculate_kdj_j(
 
 
 # ============================================================================
-# 主函数
+# CLI 入口
 # ============================================================================
 
-def generate_kdj_j_ic_data(
-    output_file: Path | str | None = None,
-    force_full: bool = False,
-    n: int = DEFAULT_N,
-    m1: int = DEFAULT_M1,
-    m2: int = DEFAULT_M2,
-    min_stocks: int = DEFAULT_MIN_STOCKS
-) -> dict:
-    """
-    从缓存数据计算 KDJ_J IC
+def main():
+    """CLI 主入口"""
+    import argparse
     
-    参数:
-        output_file: 输出文件路径
-        force_full: 强制全量计算
-        n: RSV 计算周期
-        m1: K值平滑周期
-        m2: D值平滑周期
-        min_stocks: 最小股票数阈值
+    parser = argparse.ArgumentParser(description='KDJ_J IC 计算器')
+    parser.add_argument('--force-full', action='store_true', help='强制全量计算')
+    parser.add_argument('--n', type=int, default=DEFAULT_N, help='RSV 计算周期')
+    parser.add_argument('--m1', type=int, default=DEFAULT_M1, help='K值平滑周期')
+    parser.add_argument('--m2', type=int, default=DEFAULT_M2, help='D值平滑周期')
+    parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数')
     
-    返回:
-        IC 数据字典
-    """
-    # 统一转换为 Path 对象
-    if output_file is None:
-        output_file = get_ic_output_path('kdj_j_1d')
-    else:
-        output_file = Path(output_file)
+    args = parser.parse_args()
     
-    logger.info("=" * 60)
-    logger.info(f"KDJ_J_1D IC 计算器（重构版） - 1日收益周期")
-    logger.info(f"参数: N={n}, M1={m1}, M2={m2}")
-    logger.info("=" * 60)
-    
-    # ========== Step 1: 加载原始数据 ==========
-    logger.info("[1/3] 从缓存加载因子和收益数据...")
-    try:
-        # 加载原始列（close, high, low）
-        factor_df, return_df, raw_metadata = load_factor_return_data(
-            factor_cols=['close', 'high', 'low'],
-            logger=logger
-        )
-        logger.info("✓ 加载成功")
-        logger.info(f"原始日期范围: {raw_metadata['period_start']} ~ {raw_metadata['period_end']}")
-        
-    except FileNotFoundError as e:
-        raise RuntimeError(f"缓存文件不存在: {e}") from e
-    
-    # ========== Step 2: 判断模式 ==========
-    mode = should_use_incremental(output_file, factor_df, force_full)
-    
-    if mode == UpdateMode.SKIP:
-        # ========== 跳过更新（缓存已最新） ==========
-        logger.info("[模式] 缓存已最新，跳过更新")
-        try:
-            with open(output_file, 'r', encoding='utf-8') as f:
-                cached_data = json.load(f)
-                cached_data['update_mode'] = 'skip'
-                return cached_data
-        except FileNotFoundError:
-            logger.info("[诊断] 缓存文件不存在，执行全量计算")
-        except json.JSONDecodeError as e:
-            raise RuntimeError(f"缓存文件损坏: {output_file}\n{e}") from e
-    
-    elif mode == UpdateMode.INCREMENTAL:
-        # ========== 增量更新（缓存滞后） ==========
-        logger.info("[模式] 增量更新")
-        logger.info("[2/3] 计算 KDJ_J 因子（需要全量历史数据）...")
-        
-        # 注意：KDJ ewm 计算需要完整的历史数据才能正确初始化
-        factor_df = calculate_kdj_j(factor_df, n=n, m1=m1, m2=m2)
-        logger.info("✓ KDJ_J 计算完成")
-        
-        logger.info("[3/3] 执行增量 IC 计算...")
-        result = incremental_update_ic(
-            output_path=output_file,
-            factor_df_full=factor_df,
-            return_df_full=return_df,
-            raw_metadata=raw_metadata,
-            factor_name='kdj_j_1d',
-            factor_col='kdj_j',
-            return_col='forward_return_1d',
-            min_stocks=min_stocks
-        )
-        
-        # 添加 KDJ 参数信息
-        result['params'] = {
-            'n': n,
-            'm1': m1,
-            'm2': m2,
-            'factor_col': 'kdj_j'
-        }
-        
-        logger.info(f"IC 均值: {result.get('ic_mean', 0):.4f}")
-        logger.info(f"ICIR: {result.get('icir', 0):.2f}")
-        logger.info(f"更新模式: {result['update_mode']}")
-        
-        return result
-    
-    # ========== 全量计算 ==========
-    logger.info("[模式] 全量计算")
-    logger.info("[2/3] 计算 KDJ_J 因子...")
-    factor_df = calculate_kdj_j(factor_df, n=n, m1=m1, m2=m2)
-    logger.info("✓ KDJ_J 计算完成")
-    
-    # ========== Step 3: 计算 IC ==========
-    logger.info("[3/3] 计算 IC...")
-    ic_result = calculate_ic_with_direction_verification(
-        factor_df=factor_df,
-        return_df=return_df,
+    # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
+    result = run_complex_factor_ic(
+        factor_name='kdj_j',
         factor_col='kdj_j',
-return_col='forward_return_1d',
-        min_stocks=min_stocks,
-        logger=logger
+        factor_cols=['close', 'high', 'low'],
+        custom_factor_calculation=calculate_kdj_j,
+        custom_factor_calculation_params={'n': args.n, 'm1': args.m1, 'm2': args.m2},
+        min_stocks=args.min_stocks,
+        force_full=args.force_full,
+        _logger=logger
     )
     
-    logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
-    logger.info(f"ICIR: {ic_result['icir']:.2f}")
-    logger.info(f"正比例: {ic_result['positive_ratio']:.1%}")
-    
-    # ========== Step 4: 构建输出 ==========
-    result = build_ic_result(
-        ic_result=ic_result,
-        raw_metadata=raw_metadata,
-        factor_name='kdj_j_1d',
-        data_source='cache/factor_data/factor_data.json.gz',
-        factor_col='kdj_j'
-    )
-    
-    # 添加 KDJ 参数信息
-    result['params'] = {
-        'n': n,
-        'm1': m1,
-        'm2': m2,
-        'factor_col': 'kdj_j'
-    }
-    
-    # 保存结果
-    logger.info(f"保存数据到: {output_file}")
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
-    
+    # 使用 .get() 防御性访问结果（遵循 MODULE.md 日志访问规范）
+    ic_metrics = result.get('ic_metrics', {})
     logger.info("=" * 60)
-    logger.info(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC 数据")
+    logger.info("结果摘要:")
+    logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
+    logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
+    logger.info(f"IC 均值: {ic_metrics.get('ic_mean', 0):.4f}")
+    logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
     logger.info("=" * 60)
     
     return result
 
 
 if __name__ == '__main__':
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='KDJ_J_1D IC 计算器（重构版）')
-    parser.add_argument('--force-full', action='store_true', help='强制全量计算')
-    parser.add_argument('--output', type=str, help='输出文件路径')
-    parser.add_argument('--n', type=int, default=DEFAULT_N, help='RSV 计算周期')
-    parser.add_argument('--m1', type=int, default=DEFAULT_M1, help='K值平滑周期')
-    parser.add_argument('--m2', type=int, default=DEFAULT_M2, help='D值平滑周期')
-    
-    args = parser.parse_args()
-    
-    result = generate_kdj_j_ic_data(
-        output_file=args.output,
-        force_full=args.force_full,
-        n=args.n,
-        m1=args.m1,
-        m2=args.m2
-    )
-    
-    logger.info("结果摘要:")
-    logger.info(f"因子名称: {result['factor_name']}")
-    logger.info(f"IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
-    logger.info(f"ICIR: {result['ic_metrics']['icir']:.2f}")
+    try:
+        main()
+    except RuntimeError as e:
+        logger.error(f"计算失败: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"未预期的错误: {e}")
+        sys.exit(1)

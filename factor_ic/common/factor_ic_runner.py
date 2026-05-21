@@ -126,7 +126,10 @@ def run_factor_ic_analysis(
         factor_cols = [factor_col]
     else:
         # 参数校验：factor_col 必须在 factor_cols 中
-        if factor_col not in factor_cols:
+        # **重要修正**：复杂因子（有 custom_factor_calculation）跳过此校验
+        # 原因：factor_col 是计算后的因子列名，不存在于原始缓存数据中
+        # 只有简单因子才需要校验（直接从缓存读取 factor_col）
+        if custom_factor_calculation is None and factor_col not in factor_cols:
             _logger.warning(
                 f"factor_col '{factor_col}' 不在 factor_cols {factor_cols} 中，"
                 f"自动添加以防止列缺失错误"
@@ -174,6 +177,14 @@ def run_factor_ic_analysis(
     if use_incremental:
         # 增量模式
         _logger.info("[执行模式] 增量更新...")
+        
+        # **重要修正**：复杂因子在增量模式也需要先执行自定义计算
+        # 原因：factor_col 是计算后的因子列名，不存在于原始缓存数据中
+        if custom_factor_calculation is not None:
+            _logger.info("[因子预处理] 执行自定义因子计算...")
+            params = custom_factor_calculation_params or {}
+            factor_df = custom_factor_calculation(factor_df, **params)
+            _logger.info(f"处理后数据: {len(factor_df)} 行")
         
         result = incremental_update_ic(
             output_path=output_path,
