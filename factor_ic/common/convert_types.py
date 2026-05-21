@@ -11,6 +11,12 @@
 - 显式列举子类（如 np.int64/np.int32）是冗余的，且会造成误解
 - bool 检查必须在 integer 之前（Python bool 是 int 的子类，防止误判）
 
+容器类型处理（2026-05-22）：
+- dict: 递归转换值
+- list: 递归转换元素
+- tuple: 递归转换元素并返回 tuple（numpy 操作如 np.where 返回 tuple）
+- np.ndarray/pd.Series: 转为 list 后递归处理
+
 作者: 云舟
 日期: 2026-05-10
 """
@@ -47,6 +53,10 @@ def convert_to_native_types(obj: Any) -> Any:
     
     elif isinstance(obj, list):
         return [convert_to_native_types(v) for v in obj]
+    
+    elif isinstance(obj, tuple):
+        # tuple 递归转换（numpy 操作如 np.where 返回 tuple）
+        return tuple(convert_to_native_types(v) for v in obj)
     
     # bool 检查必须在 integer 之前（Python bool 是 int 的子类）
     elif isinstance(obj, (np.bool_, bool)):
