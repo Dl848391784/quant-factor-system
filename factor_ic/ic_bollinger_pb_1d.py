@@ -12,7 +12,7 @@
 - Middle Band = SMA(Close, N)
 - Upper Band = Middle Band + K × StdDev(Close, N)
 - Lower Band = Middle Band - K × StdDev(Close, N)
-- %B = (Close - Lower Band) / (Upper Band - Lower Band) × 100%
+- %B = (Close - Lower Band) / (Upper Band - Lower Band)
 
 参数：
 - N = 20（移动平均周期）
@@ -44,6 +44,9 @@ logger = get_logger(__name__)
 DEFAULT_MIN_STOCKS = 10
 DEFAULT_N = 20     # 移动平均周期
 DEFAULT_K = 2.0    # 标差倍数
+
+# 模块级常量（避免除零阈值）
+EPSILON = 1e-10
 
 
 # ============================================================================
@@ -84,28 +87,29 @@ def calculate_bollinger_pb(
     # 边界处理：布林带宽度理论上恒 >= 0（upper - lower = 2 * k * std_dev）
     band_width = upper - lower
     
-    # 避免除零（使用 EPSILON）
-    EPSILON = 1e-10
+    # 异常检测：明确分离异常类型（集合关系清晰）
+    # - abnormal_mask: band_width < 0（异常负值，数据质量问题）
+    # - narrow_band_mask: 0 <= band_width < EPSILON（过窄带宽，接近零）
+    # 集合关系：abnormal_mask ⊂ narrow_band_mask（负值 < EPSILON）
+    # 明确分离：narrow_band_mask 排除 abnormal_mask，只处理正常范围内的过窄情况
+    abnormal_mask = band_width < 0
+    narrow_band_mask = (band_width >= 0) & (band_width < EPSILON)
     
-    # 检测异常：band_width < 0 说明 std 计算异常（数据质量问题）
-    # 正确做法：标记异常为 NaN，而非静默修正
-    abnormal_mask = band_width < 0  # 异常带宽（负值）
-    narrow_band_mask = band_width < EPSILON  # 过窄带宽（接近零）
-    
-    # 正常情况：band_width >= EPSILON
-    safe_band_width = band_width.clip(lower=EPSILON)
+    # 安全带宽计算：先排除异常（mask 将异常设为 NaN），再 clip（避免冗余计算）
+    # 逻辑清晰：异常数据不参与 clip，NaN 保留到最终输出
+    safe_band_width = band_width.mask(abnormal_mask).clip(lower=EPSILON)
     bollinger_pb = (factor_df['close'] - lower) / safe_band_width
     
     # 异常处理：按优先级顺序处理，先低后高，高优先级覆盖低优先级
-    # 优先级1（低）：band_width < EPSILON（过窄带宽）→ 0.5（中性值）
-    # 优先级2（高）：band_width < 0（异常负值）→ NaN（覆盖上一步）
+    # 优先级1（低）：过窄带宽（正常范围内）→ 0.5（中性值）
+    # 优先级2（高）：异常负值 → pd.NA（显式缺失值标记）
     bollinger_pb = bollinger_pb.where(~narrow_band_mask, 0.5)  # 过窄 → 0.5
-    bollinger_pb = bollinger_pb.where(~abnormal_mask, None)    # 异常负值 → NaN（覆盖）
+    bollinger_pb = bollinger_pb.where(~abnormal_mask, pd.NA)   # 异常负值 → pd.NA
     
     # 异常统计日志
     abnormal_count = abnormal_mask.sum()
     if abnormal_count > 0:
-        logger.warning(f"检测到 {abnormal_count} 个异常布林带宽度（负值），已标记为 NaN")
+        logger.warning(f"检测到 {abnormal_count} 个异常布林带宽度（负值），已标记为 pd.NA")
     
     factor_df['bollinger_pb'] = bollinger_pb
     

@@ -348,7 +348,7 @@ bollinger_pb = bollinger_pb.where(~narrow_band_mask | abnormal_mask, 0.5)  # 过
 # 优先级1（低）：band_width < EPSILON（过窄带宽）→ 0.5（中性值）
 # 优先级2（高）：band_width < 0（异常负值）→ NaN（覆盖上一步）
 bollinger_pb = bollinger_pb.where(~narrow_band_mask, 0.5)  # 过窄 → 0.5
-bollinger_pb = bollinger_pb.where(~abnormal_mask, None)    # 异常负值 → NaN（覆盖）
+bollinger_pb = bollinger_pb.where(~abnormal_mask, pd.NA)   # 异常负值 → pd.NA（覆盖）
 ```
 
 **为何必须按优先级顺序：**
@@ -366,6 +366,169 @@ bollinger_pb = bollinger_pb.where(~abnormal_mask, None)    # 异常负值 → Na
 - 使用 `.where()` 或类似条件替换操作
 
 **参考：** ic_bollinger_pb_1d.py 第99-103行（2026-05-22 修复）
+
+### 因子计算异常集合关系规范（2026-05-22新增）
+
+**核心原则：异常类型集合关系必须明确分离，避免模糊的包含关系。**
+
+**错误示例（集合关系模糊）：**
+
+```python
+# ❌ 错误：narrow_band_mask 包含 abnormal_mask，集合关系不清晰
+abnormal_mask = band_width < 0
+narrow_band_mask = band_width < EPSILON  # 包含 band_width < 0！
+# 问题：
+# - narrow_band_mask ⊇ abnormal_mask（负值 < EPSILON）
+# - 异常负值会被 narrow_band_mask 处理设为 0.5，再被 abnormal_mask 覆盖为 NaN
+# - 冗余计算，逻辑意图不清晰
+```
+
+**正确示例（集合关系明确分离）：**
+
+```python
+# ✅ 正确：明确分离异常类型，集合关系清晰
+abnormal_mask = band_width < 0
+narrow_band_mask = (band_width >= 0) & (band_width < EPSILON)  # 排除异常负值
+# 集合关系：abnormal_mask ∩ narrow_band_mask = ∅（互斥）
+# 异常负值只被 abnormal_mask 处理，不参与 narrow_band_mask 处理
+```
+
+**为何必须明确分离：**
+
+| 原因 | 说明 |
+|------|------|
+| 避免冗余处理 | 异常负值不会被 narrow_band_mask 处理再覆盖 |
+| 逻辑意图清晰 | 每种异常类型只被处理一次 |
+| 易于维护 | 新增异常类型时集合关系清晰，无需推断包含关系 |
+| 便于调试 | 异常统计日志数量准确，不重复计数 |
+
+**参考：** ic_bollinger_pb_1d.py 第93-95行（2026-05-22 修复）
+
+### 因子计算异常排除时机规范（2026-05-22新增）
+
+**核心原则：先排除异常再计算，避免冗余计算和掩盖意图。**
+
+**错误示例（先计算后覆盖）：**
+
+```python
+# ❌ 错误：先 clip 异常数据，计算无意义值，再覆盖为 NaN
+safe_band_width = band_width.clip(lower=EPSILON)  # 负值被 clip 为 EPSILON
+bollinger_pb = (close - lower) / safe_band_width  # 异常数据计算出无意义值
+bollinger_pb = bollinger_pb.where(~abnormal_mask, None)  # 再覆盖为 NaN
+# 问题：
+# - 冗余计算：异常数据先计算出无意义值，再被覆盖
+# - 掩盖意图：clip 将负值提升为 EPSILON，看似"修正"实则后续覆盖
+# - 效率损失：异常数据参与除法运算，浪费计算资源
+```
+
+**正确示例（先排除异常再计算）：**
+
+```python
+# ✅ 正确：先排除异常（mask 将异常设为 NaN），再 clip
+safe_band_width = band_width.mask(abnormal_mask).clip(lower=EPSILON)
+bollinger_pb = (close - lower) / safe_band_width
+# 异常数据已为 NaN，NaN / 任何值 = NaN，无需后续覆盖
+# 逻辑清晰：异常数据不参与 clip 和除法运算
+```
+
+**为何必须先排除异常：**
+
+| 原因 | 说明 |
+|------|------|
+| 避免冗余计算 | 异常数据不参与除法运算，节省计算资源 |
+| 意图清晰 | 异常数据从一开始就被排除，逻辑一目了然 |
+| 无隐晦覆盖 | 不依赖后续 `.where()` 覆盖无意义值 |
+| 符合直觉 | 异常数据不参与正常数据处理流程 |
+
+**适用场景：**
+- 异常数据需要排除而非静默修正
+- 异常数据会导致计算结果无意义
+- 使用 `.clip()` 或类似修正操作前需排除异常
+
+**参考：** ic_bollinger_pb_1d.py 第97-99行（2026-05-22 修复）
+
+### pandas 缺失值标记规范（2026-05-22新增）
+
+**核心原则：使用 `pd.NA` 而非 `None` 作为 pandas 显式缺失值标记。**
+
+**错误示例（使用 None）：**
+
+```python
+# ❌ 错误：使用 None 作为缺失值标记
+bollinger_pb = bollinger_pb.where(~abnormal_mask, None)
+# 问题：
+# - None 在 pandas Series 中会被转换为 NaN，但语义不明确
+# - None 是 Python 原生类型，不是 pandas 显式缺失值标记
+# - 类型注解混乱：Series 元素类型包含 None，语义不准确
+```
+
+**正确示例（使用 pd.NA）：**
+
+```python
+# ✅ 正确：使用 pd.NA 作为 pandas 显式缺失值标记
+bollinger_pb = bollinger_pb.where(~abnormal_mask, pd.NA)
+# pd.NA 是 pandas 1.0+ 引入的显式缺失值标记
+# 语义清晰：明确表示 pandas 缺失值，而非 Python None
+# 类型准确：Series 元素类型为 float，缺失值用 pd.NA 表示
+```
+
+**为何必须使用 pd.NA：**
+
+| 原因 | 说明 |
+|------|------|
+| 语义明确 | pd.NA 是 pandas 显式缺失值标记，不是 Python None |
+| 类型准确 | Series 类型注解更准确，元素类型不包含 None |
+| 行为一致 | pd.NA 在 pandas 操作中行为一致（传播、比较） |
+| 易于维护 | 新增缺失值处理时统一使用 pd.NA，风格一致 |
+
+**适用场景：**
+- `.where()` 或 `.mask()` 设置缺失值
+- DataFrame 初始化设置缺失值
+- pandas Series/DataFrame 缺失值标记
+
+**参考：** ic_bollinger_pb_1d.py 第102行（2026-05-22 修复）
+
+### 模块级常量规范（2026-05-22新增）
+
+**核心原则：避免除零阈值、精度参数等常量应提升为模块级常量。**
+
+**错误示例（函数内定义）：**
+
+```python
+# ❌ 错误：EPSILON 定义在函数内部
+def calculate_bollinger_pb(factor_df):
+    EPSILON = 1e-10  # 函数内定义
+    ...
+```
+
+**正确示例（模块级定义）：**
+
+```python
+# ✅ 正确：EPSILON 定义为模块级常量
+EPSILON = 1e-10  # 模块级常量
+
+def calculate_bollinger_pb(factor_df):
+    # 使用模块级常量
+    safe_band_width = band_width.clip(lower=EPSILON)
+    ...
+```
+
+**为何必须使用模块级常量：**
+
+| 原因 | 说明 |
+|------|------|
+| 易于复用 | 同一模块内其他函数可复用常量 |
+| 易于维护 | 修改常量只需一处，无需逐函数修改 |
+| 语义明确 | 模块级常量命名更规范（如 EPSILON 而非 epsilon） |
+| 便于测试 | 常量可独立测试和验证 |
+
+**适用场景：**
+- 避免除零阈值（EPSILON）
+- 数值精度参数（PRECISION）
+- 默认窗口参数（DEFAULT_WINDOW）
+- 任何模块内多处使用的固定值
+
+**参考：** ic_bollinger_pb_1d.py 第49行（2026-05-22 修复）
 
 ### 缺失日期诊断
 
