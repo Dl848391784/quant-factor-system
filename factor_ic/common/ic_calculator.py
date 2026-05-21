@@ -376,18 +376,15 @@ def _newey_west_t_stat(ic_series: pd.Series, lag: int = None) -> Tuple[float, fl
         # 设置上下限
         lag = max(1, min(lag, 10))
     
-    # 计算自协方差
-    autocov = []
-    for k in range(lag + 1):
-        if k == 0:
-            cov = np.var(ic_series, ddof=1)
-        else:
-            cov = np.cov(ic_series[:-k].values, ic_series[k:].values)[0, 1]
-        weight = 1 - k / (lag + 1)
-        autocov.append(weight * cov)
+    # 计算自协方差（Newey-West 公式：k=0 为方差，k>0 为对称自协方差）
+    # 公式: nw_var = σ² + Σ_{k=1}^{L} 2·w_k·γ_k
+    # 其中 γ_k 为 k阶自协方差，w_k = 1 - k/(L+1) 为 Bartlett 权重
+    nw_var = np.var(ic_series, ddof=1)  # k=0: 样本方差
     
-    # 调整后的方差
-    nw_var = sum(autocov)
+    for k in range(1, lag + 1):  # k>0: 对称自协方差
+        cov_k = np.cov(ic_series[:-k].values, ic_series[k:].values)[0, 1]
+        weight = 1 - k / (lag + 1)
+        nw_var += 2 * weight * cov_k  # 注意乘以 2（对称性：γ_k = γ_{-k}）
     
     if nw_var <= 0:
         nw_var = np.var(ic_series, ddof=1)
