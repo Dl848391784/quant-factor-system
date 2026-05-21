@@ -1,9 +1,9 @@
 # factor_ic 模块规范
 
-> 版本: v3.1（精简版）
+> 版本: v3.2（精简版）
 > 创建时间: 2026-05-19
 > 重构时间: 2026-05-22
-> 最后更新: 2026-05-22 (从3558行精简至2615行，减少26%)
+> 最后更新: 2026-05-22 (从3558行精简至2652行，减少26%；补充KDJ ewm参数陷阱)
 
 ## 快速参考
 
@@ -1120,11 +1120,48 @@ factor_df['std_dev'] = factor_df.groupby('asset')['close'].transform(
 # - 违反布林带"满N周期才计算"的标准定义
 ```
 
-**为何 min_periods=n 是标准：**
+为何 min_periods=n 是标准：
 1. 布林带业界定义：需要满 N 个周期才产生有效值
 2. 技术分析软件（TradingView、MetaTrader）均采用此定义
 3. min_periods=1 会在前 N-1 周期产生非标准值，误导分析
 4. 前N-1周期的NaN表示"数据不足，暂不计算"，语义清晰
+
+### KDJ ewm 参数陷阱
+
+**核心陷阱：ewm alpha 参数计算错误是常见bug。**
+
+| 参数 | 错误值 | 正确值 | 原因 |
+|------|--------|--------|------|
+| alpha | `(m-1)/m` | `1/m` | ewm公式：y[t] = alpha * x[t] + (1-alpha) * y[t-1] |
+| ignore_na | True | False | False使NaN传播，前N-1期K也为NaN |
+| first_valid_index | 用iloc[0] | 用series[idx] | 返回索引值而非位置 |
+
+**ewm公式与KDJ公式对照：**
+```
+ewm公式：y[t] = alpha * x[t] + (1-alpha) * y[t-1]
+KDJ公式：K[t] = (1/m) * RSV[t] + (m-1)/m * K[t-1]
+
+要匹配：alpha = 1/m（不是(m-1)/m）
+```
+
+**正确实现（ic_kdj_j_1d.py 第93行）：**
+```python
+# ✓ alpha = 1/m，ignore_na=False
+k_series = rsv_copy.ewm(alpha=1/m, adjust=False, ignore_na=False).mean()
+
+# ❌ alpha = (m-1)/m，错误
+k_series = rsv_copy.ewm(alpha=(m-1)/m, adjust=False).mean()  # 错误！
+```
+
+**first_valid_index陷阱：**
+```python
+first_valid_idx = rsv_series.first_valid_index()
+# ✓ 返回的是索引值，用series[idx]访问
+initial_rsv = rsv_series[first_valid_idx]
+
+# ❌ 用iloc[0]访问，错误
+initial_rsv = rsv_series.iloc[0]  # 可能不是第一个有效值的位置
+```
 
 ### 布林带标准差 ddof 参数
 
