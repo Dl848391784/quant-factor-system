@@ -45,6 +45,36 @@ def convert_to_native_types(obj: Any) -> Any:
 | numpy布尔 | `isinstance(obj, np.bool_)` | **必须显式分开**，不能与 bool 合并 |
 | Python布尔 | `isinstance(obj, bool)` | **必须在 integer 之前**，因为 bool 是 int 子类 |
 | Python整数 | 直接返回 | 不需要类型检查（原生类型） |
+| Python浮点 | `isinstance(obj, float)` | 用 `math.isnan` 检查 NaN（标准库） |
+
+### NaN 检查规范（重要）
+
+**必须使用类型匹配的 isnan 函数：**
+
+| 浮点类型 | 正确写法 | 错误写法 |
+|---------|---------|---------|
+| numpy浮点 | `np.isnan(obj)` | `math.isnan(obj)` |
+| Python float | `math.isnan(obj)` | `np.isnan(obj)` |
+
+**错误写法示例：**
+```python
+# 错误写法（语义不准确）
+elif isinstance(obj, float):
+    if np.isnan(obj):  # numpy 函数处理 Python 类型
+        return None
+
+# 正确写法（类型匹配）
+elif isinstance(obj, float):
+    if math.isnan(obj):  # 标准库处理 Python 类型
+        return None
+```
+
+**原因：**
+1. `np.isnan` 是为 numpy 类型设计的，处理 Python float 是额外支持
+2. `math.isnan` 是标准库函数，专为 Python float 设计，语义更准确
+3. 类型匹配更轻量、语义清晰，减少不必要的依赖
+
+**参考：** convert_types.py 源码注释（2026-05-22 更新）
 
 ### isinstance 多类型检查规范（重要）
 

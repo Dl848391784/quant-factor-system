@@ -25,16 +25,23 @@
 pandas 缺失值处理（2026-05-22）：
 - pd.NaT: 缺失时间，转为 None（使用 `obj is pd.NaT` 检查单例，必须在 pd.Timestamp 之前检查）
 - pd.NA: 扩展类型缺失值，转为 None（使用 `obj is pd.NA` 检查单例）
-- np.NaN/nan: numpy 浮点 NaN，转为 None（在 np.floating 分支处理）
+- np.NaN/nan: numpy 浮点 NaN，转为 None（在 np.floating 分支用 np.isnan 处理）
+- Python float NaN: 使用 math.isnan 处理（标准库，语义更准确）
 - 检查顺序：pd.NaT/pd.NA → pd.Timestamp（某些版本 NaTType 继承 Timestamp，防止误判）
 - 单例检查规范：必须用 `is` 判断，禁止 `isinstance(obj, type(singleton))`：
   * isinstance 依赖私有内部类（如 pandas.core.arrays.masked.NAType），跨版本不稳定
   * 单例对象用 `is` 即可完全覆盖，isinstance 检查是冗余的
 
+NaN 检查规范（2026-05-22）：
+- numpy 浮点类型：使用 `np.isnan(obj)`（专为 numpy 类型设计）
+- Python float 类型：使用 `math.isnan(obj)`（标准库，语义更准确、更轻量）
+- 禁止混用：语义不准确，增加不必要的依赖
+
 作者: 云舟
 日期: 2026-05-10
 """
 
+import math
 import numpy as np
 import pandas as pd
 from typing import Any
@@ -120,8 +127,8 @@ def convert_to_native_types(obj: Any) -> Any:
         return str(obj)
     
     elif isinstance(obj, float):
-        # 处理 Python float 的 NaN
-        if np.isnan(obj):
+        # 处理 Python float 的 NaN（使用 math.isnan，语义更准确）
+        if math.isnan(obj):
             return None
         return obj
     
