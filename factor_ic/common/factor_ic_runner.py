@@ -102,9 +102,8 @@ def run_factor_ic_analysis(
             custom_factor_calculation=calculate_kdj_j
         )
     """
-    # logger fallback 初始化
+    # logger fallback 初始化（使用模块级已导入的 get_logger）
     if logger is None:
-        from .logger_config import get_logger
         logger = get_logger(__name__)
     
     logger.info("=" * 60)
