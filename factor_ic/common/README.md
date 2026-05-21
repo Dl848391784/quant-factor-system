@@ -819,88 +819,27 @@ if rows_lost > 0:
 
 ---
 
-## 日志规范（重要）
+## 日志规范
 
-**禁止使用 print() 输出运行状态，应使用 logging 模块：**
+**遵循 PROJECT.md 项目级日志规范（第380-500行）。**
 
-### 核心原则
+### 核心要点
 
-```python
-# 错误写法（print 无法控制级别、无法持久化）
-print(f"[数据加载] 从缓存读取数据...")
-print(f"  - 因子数据: {len(factor_df)} 行")
-print(f"[警告] 发现 {len(overlap_dates)} 个重叠日期")
-
-# 正确写法（logging 可控制级别、持久化到日志文件）
-import logging
-logger = logging.getLogger(__name__)
-
-logger.info("从缓存读取数据...")
-logger.info(f"因子数据: {len(factor_df)} 行")
-logger.warning(f"发现 {len(overlap_dates)} 个重叠日期")
-logger.error(f"缓存文件损坏: {e}")
-```
-
-### 日志级别规范
-
-| 级别 | 用途 | 示例 |
-|------|------|------|
-| DEBUG | 详细诊断信息 | `logger.debug(f"处理日期: {date}, 股票数: {n}")` |
-| INFO | 正常运行状态 | `logger.info(f"数据加载完成: {len(df)} 行")` |
-| WARNING | 异常但可继续 | `logger.warning(f"日期不对齐，已选择交集")` |
-| ERROR | 错误需处理 | `logger.error(f"缓存文件损坏: {e}")` |
-| CRITICAL | 严重错误 | `logger.critical(f"无法继续处理")` |
-
-### 日志配置规范
-
-```python
-# 在项目入口文件（如 factor_ic/__init__.py）配置日志
-import logging
-from pathlib import Path
-
-# 日志目录
-LOG_DIR = Path(__file__).parent.parent.parent / 'logs'
-LOG_DIR.mkdir(exist_ok=True)
-
-# 日志配置
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        # 控制台输出（INFO 及以上）
-        logging.StreamHandler(),
-        # 文件持久化（DEBUG 及以上，按日期分割）
-        logging.FileHandler(LOG_DIR / 'factor_ic.log')
-    ]
-)
-```
-
-### 替换 print 为 logging 的规范
-
-| print 语义 | logging 级别 | 替换方式 |
-|-----------|-------------|---------|
-| `print("[数据加载]...")` | INFO | `logger.info("数据加载...")` |
-| `print("  - ...")` | INFO | `logger.info(f"...")`（去掉缩进前缀） |
-| `print("[警告]...")` | WARNING | `logger.warning("...")` |
-| `print("[错误]...")` | ERROR | `logger.error("...")` |
-| `print("[诊断]...")` | DEBUG | `logger.debug("...")` |
-| `print("=" * 60)` | INFO | `logger.info("=" * 40)`（缩短分隔线） |
-
-### 原因
-
-1. **级别控制**：print 无级别，无法按重要性过滤；logging 有 5 个级别，可按需调整
-2. **持久化**：print 输出到控制台，无法追溯；logging 可写入日志文件，便于排查
-3. **结构化**：print 输出无时间戳、模块名；logging 自动添加时间戳、模块名、级别
-4. **生产环境**：print 无法关闭，影响性能；logging 可动态调整级别，生产环境关闭 DEBUG
-5. **运维友好**：日志文件可集中收集、分析、告警；print 输出散落在控制台
+| 规范内容 | PROJECT.md 定义位置 |
+|---------|---------------------|
+| 日志框架 | Python 标准库 `logging` 模块（第384-392行） |
+| 日志级别 | DEBUG/INFO/WARNING/ERROR/CRITICAL（第423-438行） |
+| 日志路径 | 脚本当前目录下 `logs/` 子目录（第441-460行） |
+| 文件命名 | `<脚本名>_YYYY-MM-DD.log`（第473-492行） |
+| 日志格式 | `%(asctime)s | %(levelname)-8s | %(name)s | %(message)s`（第494-500行） |
 
 ### 迁移计划
 
-**Phase 1**：先补充日志规范（本次）
-**Phase 2**：替换 factor_ic/common/*.py 中所有 print（后续）
-**Phase 3**：替换 factor_ic/*.py 中所有 print（后续）
+**Phase 1**：已完成（PROJECT.md 规范定义）
+**Phase 2**：替换 `factor_ic/common/*.py` 中所有 print → logging（待执行）
+**Phase 3**：替换 `factor_ic/*.py` 中所有 print → logging（待执行）
 
-**参考：** Python logging 官方文档 https://docs.python.org/3/library/logging.html
+**详细规范请参考：** `PROJECT.md` 第380-500行（日志规范章节）
 
 ---
 
