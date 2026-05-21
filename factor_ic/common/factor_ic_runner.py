@@ -50,9 +50,9 @@ def run_factor_ic_analysis(
     return_cache_path: Optional[Path] = None,
     additional_factor_files: Optional[Dict[str, Path]] = None,
     custom_factor_calculation: Optional[Callable] = None,
-    custom_factor_calculation_params: Optional[Dict] = None,
+    custom_factor_calculation_params: Optional[Dict[str, Any]] = None,
     logger=None
-) -> Dict:
+) -> Dict[str, Any]:
     """
     因子 IC 分析统一主入口
     
@@ -314,7 +314,7 @@ def run_simple_factor_ic(
     factor_col: str,
     logger=None,
     **kwargs
-) -> Dict:
+) -> Dict[str, Any]:
     """
     快捷函数：简单因子 IC 分析
     
@@ -346,7 +346,7 @@ def run_complex_factor_ic(
     custom_factor_calculation: Optional[Callable] = None,
     logger=None,
     **kwargs
-) -> Dict:
+) -> Dict[str, Any]:
     """
     快捷函数：复杂因子 IC 分析
     
