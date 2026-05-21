@@ -632,22 +632,23 @@ def _assess_ic_distribution_consistency(positive_ratio: float, ic_mean_sign: str
             'conclusion': 'IC均值接近零，分布均衡'
         }
     
-    # 一致性判断（边界对称设计：使用非严格不等号）
-    if positive_ratio <= 0.5 and ic_mean_sign == 'negative':
-        is_consistent = True
-        consistency_type = 'consistent'
-        distribution_hint = f'IC分布偏向负值（{negative_ratio:.1%}天数IC<0）'
-        conclusion = '一致：正比例<=50%对应负方向，IC分布正常'
-    elif positive_ratio >= 0.5 and ic_mean_sign == 'positive':
-        is_consistent = True
-        consistency_type = 'consistent'
-        distribution_hint = f'IC分布偏向正值（{positive_ratio:.1%}天数IC>0）'
-        conclusion = '一致：正比例>=50%对应正方向，IC分布正常'
-    elif abs(positive_ratio - 0.5) <= 0.011:  # 浮点容差，覆盖 [49%, 51%]
+    # 一致性判断（先判断 balanced，避免边界重叠被 A/B 覆盖）
+    # 条件顺序：balanced → consistent → contradictory
+    if abs(positive_ratio - 0.5) <= 0.011:  # 浮点容差，覆盖 [49%, 51%]
         is_consistent = True
         consistency_type = 'balanced'
         distribution_hint = f'IC分布均衡（正{positive_ratio:.1%}，负{negative_ratio:.1%}）'
         conclusion = '均衡：IC正负各半，均值由极值决定'
+    elif positive_ratio < 0.5 and ic_mean_sign == 'negative':  # 严格 <，0.5 已被 balanced 覆盖
+        is_consistent = True
+        consistency_type = 'consistent'
+        distribution_hint = f'IC分布偏向负值（{negative_ratio:.1%}天数IC<0）'
+        conclusion = '一致：正比例<50%对应负方向，IC分布正常'
+    elif positive_ratio > 0.5 and ic_mean_sign == 'positive':  # 严格 >，0.5 已被 balanced 覆盖
+        is_consistent = True
+        consistency_type = 'consistent'
+        distribution_hint = f'IC分布偏向正值（{positive_ratio:.1%}天数IC>0）'
+        conclusion = '一致：正比例>50%对应正方向，IC分布正常'
     elif positive_ratio < 0.49 and ic_mean_sign == 'positive':
         is_consistent = False
         consistency_type = 'contradictory'
@@ -659,7 +660,7 @@ def _assess_ic_distribution_consistency(positive_ratio: float, ic_mean_sign: str
         distribution_hint = f'IC分布异常：均值负但{positive_ratio:.1%}天数IC>0（少数大幅负值拉低均值）'
         conclusion = '矛盾：均值负但多数天正，存在大幅负值偏度，需检查异常交易日'
     else:
-        # 其他边界情况
+        # 其他边界情况（如 0.49-0.51 区间但非 balanced）
         is_consistent = True
         consistency_type = 'consistent'
         distribution_hint = f'IC分布偏向{ic_mean_sign}方向'
