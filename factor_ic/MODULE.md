@@ -1,8 +1,9 @@
 # factor_ic 模块规范
 
-> 版本: v2.0（结构归类版）
+> 版本: v2.1（新增公共模块架构）
 > 创建时间: 2026-05-19
 > 重构时间: 2026-05-22
+> 最后更新: 2026-05-22 08:35
 
 ## 更新记录
 
@@ -14,6 +15,10 @@
 4. v1.3（2026-05-21）：精简重复章节标题
 5. v1.4（2026-05-22）：合并重复章节，行数4761→3892
 6. v2.0（2026-05-22）：按主题归类为6大章节，压缩格式，保留所有内容
+7. v2.1（2026-05-22 08:35）：
+   - 新增"公共模块架构"章节（data_loader.py 规范）
+   - 新增因子脚本抽象设计目标（从~700-1100行降至~50-200行）
+   - 添加 data_loader.py 使用示例和规范要点
 
 # 一、概述与基础
 
@@ -66,6 +71,117 @@ factor_ic 模块负责计算各类因子的 IC（Information Coefficient）值�
 # ✗ 修改公共模块后忘记更新 MODULE.md
 # 导致：新脚本遵循旧规范，输出结构不一致
 ```
+
+## 公共模块架构（2026-05-22新增）
+
+### 设计目标
+
+**核心问题：** 5个因子IC脚本存在大量重复代码（45%-70%），新增因子开发成本高。
+
+**解决方案：** 抽取公共模块，新增因子只需实现因子计算逻辑。
+
+| 模块 | 功能 | 每脚本减少行数 |
+|------|------|----------------|
+| `data_loader.py` | 数据加载（gzip解压、日期转换、列验证） | ~80-120行 |
+| `ic_result_builder.py` | IC结果构建（统一输出结构） | ~60-100行 |
+| `incremental_engine.py` | 增量更新引擎 | ~150-200行 |
+| `factor_ic_runner.py` | 主入口模板 | ~100-150行 |
+
+**预期效果：** 新增因子脚本从 ~700-1100行 降至 ~50-200行。
+
+### data_loader.py — 数据加载公共模块
+
+**文件路径：** `factor_ic/common/data_loader.py`
+
+**核心函数：**
+
+```python
+def load_factor_return_data(
+    factor_cols: List[str],
+    return_col: str = 'forward_return_1d',
+    factor_cache_path: Optional[Path] = None,
+    return_cache_path: Optional[Path] = None,
+    dropna_cols: Optional[List[str]] = None,
+    validate_date_alignment: bool = True,
+    additional_factor_files: Optional[Dict[str, Path]] = None
+) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
+    """
+    从缓存加载因子数据和收益数据
+    
+    返回:
+        (factor_df, return_df, raw_metadata)
+        - raw_metadata: 原始数据元信息（period_start, period_end, total_days, avg_stocks_per_day）
+    """
+```
+
+**功能列表：**
+
+| 功能 | 描述 | 防御性检查 |
+|------|------|------------|
+| gzip解压 + JSON加载 | 从缓存读取数据 | FileNotFoundError（可恢复） |
+| 日期类型转换 | 统一为 YYYY-MM-DD | NaT检查 + 无效样本显示 |
+| 列存在验证 | 检查必需列存在 | KeyError + 显示可用列列表 |
+| dropna前记录metadata | 原始数据范围 | 保留原始语义 |
+| dropna过滤 | 去除缺失值 | 指定过滤列 |
+| 日期对齐验证 | 因子 vs 收益日期 | 选择交集日期（可选） |
+| 额外因子文件合并 | 如换手率数据 | 内连接合并 |
+
+**使用示例：**
+
+```python
+from factor_ic.common.data_loader import load_factor_return_data
+
+# RSI因子（直接用缓存列）
+factor_df, return_df, raw_metadata = load_factor_return_data(
+    factor_cols=['rsi_6']
+)
+
+# KDJ因子（需要 close, high, low）
+factor_df, return_df, raw_metadata = load_factor_return_data(
+    factor_cols=['close', 'high', 'low']
+)
+
+# 换手率突增（需要额外文件）
+from factor_ic.common.data_loader import DEFAULT_CACHE_DIR
+factor_df, return_df, raw_metadata = load_factor_return_data(
+    factor_cols=['close'],
+    additional_factor_files={
+        'turnover_rate': DEFAULT_CACHE_DIR / 'turnover_rate_data.json.gz'
+    }
+)
+
+# 查看原始数据范围
+print(f"原始数据: {raw_metadata['period_start']} ~ {raw_metadata['period_end']}")
+print(f"原始天数: {raw_metadata['total_days']}")
+print(f"原始平均股票数: {raw_metadata['avg_stocks_per_day']}")
+```
+
+**辅助函数：**
+
+| 函数 | 用途 |
+|------|------|
+| `get_cache_dir()` | 获取缓存目录路径 |
+| `get_factor_cache_path()` | 获取因子缓存文件路径 |
+| `get_return_cache_path()` | 获取收益缓存文件路径 |
+
+**规范要点：**
+
+1. `raw_metadata` 在 dropna 之前记录，保留原始数据语义
+2. `period_start/end` 为字符串格式 `YYYY-MM-DD`
+3. 日期转换后 `isin` 操作类型匹配
+4. 列缺失时显示可用列列表（用户友好）
+
+### ic_result_builder.py — IC结果构建公共模块（待实现）
+
+**功能：** 将 ic_calculator 返回值转换为符合 PROJECT.md 规范的完整 JSON 结构。
+
+### incremental_engine.py — 增量更新引擎（待实现）
+
+**功能：** 封装增量更新逻辑（读取现有缓存 → 筛选缺失日期 → 逐日计算 → 合并）。
+
+### factor_ic_runner.py — 主入口模板（待实现）
+
+**功能：** 封装主入口逻辑（模式判断 → 分支调用 → 输出）。
 
 ## factor_ic目录规范
 
