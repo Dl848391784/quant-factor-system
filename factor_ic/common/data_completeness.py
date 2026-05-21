@@ -65,7 +65,8 @@ def get_factor_data_dates() -> Tuple[List[str], Optional[str]]:
         
         if not dates:
             # 从数据记录中提取日期
-            dates = sorted(set(r.get('date') for r in data.get('data', []) if r.get('date')))
+            # 使用 str() 强制转换，防止 datetime/int 等非字符串类型导致 sorted() TypeError
+            dates = sorted(set(str(r['date']) for r in data.get('data', []) if r.get('date') is not None))
         
         latest_date = dates[-1] if dates else None
         

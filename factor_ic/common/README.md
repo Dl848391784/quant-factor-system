@@ -145,6 +145,44 @@ pd.Series 分支 → obj is pd.NA 分支
 
 ---
 
+## data_completeness.py — 数据完整性检查模块
+
+**文件路径：** `factor_ic/common/data_completeness.py`
+
+### 核心函数
+
+| 函数 | 用途 |
+|------|------|
+| `check_data_completeness()` | 检查数据完整性，返回处理模式（full/incremental/skip） |
+| `get_factor_data_dates()` | 获取因子数据日期列表 |
+| `get_cache_latest_date()` | 获取缓存最新日期 |
+
+### 日期提取规范（重要）
+
+**从 JSON 数据中提取日期时，必须强制转换为字符串：**
+
+```python
+# 错误写法（类型不一致隐患）
+dates = sorted(set(r.get('date') for r in data.get('data', []) if r.get('date')))
+
+# 正确写法（强制 str 转换，防止 TypeError）
+dates = sorted(set(str(r['date']) for r in data.get('data', []) if r.get('date') is not None))
+```
+
+**原因：**
+1. JSON 中的 date 字段可能是 datetime、int、Timestamp 等非字符串类型
+2. `sorted()` 对混合类型会抛出 TypeError（如 `sorted(['2026-01-01', datetime(2026,1,2)])`）
+3. `str()` 强制转换确保类型一致性，避免运行时错误
+
+**过滤条件：**
+- 使用 `r.get('date') is not None` 而非 `if r.get('date')`
+- `if r.get('date')` 会过滤掉空字符串 `''`，但空字符串可能是有效日期（不应过滤）
+- `is not None` 只过滤真正的缺失值，语义更准确
+
+**参考：** data_completeness.py 第66-69行（2026-05-22 更新）
+
+---
+
 ## data_loader.py — 数据加载公共模块
 
 **文件路径：** `factor_ic/common/data_loader.py`
