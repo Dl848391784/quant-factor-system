@@ -95,10 +95,11 @@ def build_ic_result(
     
     # ========== 构建 sample_stats ==========
     # 口径说明：avg_stocks_period 描述过滤后的统计范围
+    # 注意：avg_stocks_per_day 来自 raw_metadata（data_loader 已计算）
     sample_stats = {
         'total_days': raw_metadata['total_days'],  # 原始缓存日期数（dropna 前）
         'valid_days': n_days,                      # 实际计算出 IC 的天数
-        'avg_stocks_per_day': int(ic_series.index.to_series().map(lambda d: 0).sum() + raw_metadata['avg_stocks_per_day']),  # 简化：使用原始值
+        'avg_stocks_per_day': raw_metadata.get('avg_stocks_per_day', 0),  # 使用 raw_metadata 值
         'avg_stocks_period': {
             'start': period_start,
             'end': period_end,
