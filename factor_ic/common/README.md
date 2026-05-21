@@ -426,6 +426,39 @@ def load_factor_return_data(factor_cols, additional_factor_files=None):
 
 **参考：** data_loader.py 第122行（default_dropna_cols 定义）
 
+### inner join 数据丢失告知规范（重要）
+
+**合并额外因子文件时必须告知数据丢失情况：**
+
+```python
+# 错误写法（静默丢失数据）
+factor_df = pd.merge(factor_df, additional_df, on=['date', 'asset'], how='inner')
+print(f"  - 合并 {col_name} 后: {len(factor_df)} 行")  # 只打印结果行数
+
+# 正确写法（告知数据丢失）
+rows_before = len(factor_df)
+factor_df = pd.merge(factor_df, additional_df, on=['date', 'asset'], how='inner')
+rows_after = len(factor_df)
+rows_lost = rows_before - rows_after
+
+if rows_lost > 0:
+    print(f"  - 合并 {col_name} 后: {rows_after} 行（丢失 {rows_lost} 行，{rows_lost/rows_before*100:.1f}%）")
+else:
+    print(f"  - 合并 {col_name} 后: {rows_after} 行（无数据丢失）")
+```
+
+**原因：**
+1. inner join 会静默丢弃不匹配的行（如额外因子文件缺少某些日期/股票）
+2. 只打印合并后行数，用户无法感知数据丢失
+3. 数据丢失可能导致下游分析结果偏差，排查困难
+4. 打印丢失行数和百分比，帮助用户判断数据质量
+
+**输出示例：**
+- 有数据丢失：`合并 turnover_rate 后: 15000 行（丢失 500 行，3.2%）`
+- 无数据丢失：`合并 turnover_rate 后: 15500 行（无数据丢失）`
+
+**参考：** data_loader.py 第142-154行（合并前后对比行数）
+
 ---
 
 ## ic_result_builder.py — IC结果构建公共模块

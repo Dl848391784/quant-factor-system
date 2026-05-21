@@ -140,13 +140,21 @@ def load_factor_return_data(
                 additional_df[col_name] = pd.to_numeric(additional_df[col_name], errors='coerce')
             
             # 合并到主因子数据
+            rows_before = len(factor_df)
             factor_df = pd.merge(
                 factor_df,
                 additional_df[['date', 'asset', col_name]],
                 on=['date', 'asset'],
                 how='inner'
             )
-            print(f"  - 合并 {col_name} 后: {len(factor_df)} 行")
+            rows_after = len(factor_df)
+            rows_lost = rows_before - rows_after
+            
+            # 打印合并结果，告知用户数据丢失情况
+            if rows_lost > 0:
+                print(f"  - 合并 {col_name} 后: {rows_after} 行（丢失 {rows_lost} 行，{rows_lost/rows_before*100:.1f}%）")
+            else:
+                print(f"  - 合并 {col_name} 后: {rows_after} 行（无数据丢失）")
         
         # 更新因子列列表（包含额外列）
         # 使用独立变量，保持顺序：先 factor_cols，再追加不在 factor_cols 的额外列
