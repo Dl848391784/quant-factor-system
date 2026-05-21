@@ -9,6 +9,7 @@
 1. 从缓存数据计算量比因子的 IC
 2. 五维度独立判断
 3. 支持 skip/incremental/full 三种更新模式
+4. 支持 CLI 参数：--force-full、--output、--min-stocks
 
 实现方式：
 - 使用 calculate_ic_with_direction_verification 计算 IC
@@ -19,7 +20,7 @@
 重构日期: 2026-05-22
 增量模式补充: 2026-05-22
 SKIP模式修复: 2026-05-23（不修改缓存对象+内部函数封装）
-异常处理优化: 2026-05-23（分开处理多种异常类型）
+CLI参数添加: 2026-05-23（与 ic_rsi_1d.py 保持一致）
 原版作者: 云舟
 原版日期: 2026-05-08
 """
@@ -46,7 +47,6 @@ from factor_ic.common import (
 )
 from factor_ic.common.incremental_engine import UpdateMode, should_use_incremental
 from factor_ic.common.data_completeness import get_ic_output_path
-from factor_ic.common.convert_types import convert_to_native_types
 
 # ============================================================================
 # 参数统一管理
@@ -121,7 +121,11 @@ def generate_volume_ratio_ic_data(
         """执行全量计算（用于正常 FULL 模式和 SKIP fallback）"""
         logger.info("[模式] 全量计算")
         
-        # ========== [3/4] 计算 IC ==========
+        # ========== [2/4] 计算因子 ==========
+        # 量比因子已在缓存中，无需计算（跳过此步骤）
+        logger.info("[2/4] 因子已在缓存中，跳过因子计算")
+        
+        # ========== [3/4] 计算每日 IC ==========
         logger.info("[3/4] 计算每日 IC...")
         
         ic_result = calculate_ic_with_direction_verification(
@@ -144,8 +148,7 @@ def generate_volume_ratio_ic_data(
             factor_col='volume_ratio_5'
         )
         
-        # 转换类型
-        result = convert_to_native_types(result)
+        # update_mode 在保存前设置（save_ic_result 内部会调用 convert_to_native_types）
         result['update_mode'] = 'full'
         
         # 使用 result['ic_metrics'] 统一取值（遵循 MODULE.md 增量更新返回结构统一规范）
@@ -211,25 +214,38 @@ def generate_volume_ratio_ic_data(
 
 
 def main():
-    """主函数"""
+    """主函数（支持 CLI 参数）"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='量比因子 IC 计算器（重构版） - 1日收益周期')
+    parser.add_argument('--force-full', action='store_true', help='强制全量计算')
+    parser.add_argument('--output', type=str, help='输出文件路径')
+    parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数阈值')
+    
+    args = parser.parse_args()
+    
     try:
-        result = generate_volume_ratio_ic_data()
+        result = generate_volume_ratio_ic_data(
+            output_file=args.output,
+            force_full=args.force_full,
+            min_stocks=args.min_stocks
+        )
         
         # 使用防御性访问（遵循 MODULE.md __main__ 防御性访问规范）
         ic_metrics = result.get('ic_metrics', {})
-        summary = result.get('summary', {})
         logger.info("=" * 60)
-        logger.info("关键指标摘要:")
+        logger.info("结果摘要:")
+        logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
         logger.info(f"IC 均值: {ic_metrics.get('ic_mean', 0):.4f}")
         logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
-        logger.info(f"方向判断: {summary.get('factor_direction', 'unknown')}")
+        logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
         logger.info("=" * 60)
         
-    except FileNotFoundError as e:
-        logger.exception("缓存文件不存在")  # 使用 .exception() 保留完整堆栈
+    except RuntimeError as e:
+        logger.exception("计算失败")  # 使用 .exception() 保留完整堆栈
         sys.exit(1)
     except Exception as e:
-        logger.exception("分析失败")  # 使用 .exception() 保留完整堆栈
+        logger.exception("未预期的错误")  # 使用 .exception() 保留完整堆栈
         sys.exit(1)
 
 
