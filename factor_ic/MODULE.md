@@ -299,6 +299,32 @@ ic_mean<0 表示反向因子有效（高因子→低收益）。
   new_dates有缺失 → incremental（计算缺失日期IC，合并后重算统计）
 ```
 
+### 因子脚本三模式处理规范（强制）
+
+**所有因子脚本主函数必须处理 skip/incremental/full 三种模式。**
+
+使用 `UpdateMode` 枚举判断：
+
+```python
+from factor_ic.common.incremental_engine import UpdateMode, should_use_incremental
+
+mode = should_use_incremental(output_file, factor_df, force_full)
+
+if mode == UpdateMode.SKIP:
+    # 返回缓存数据，设置 update_mode='skip'
+    ...
+elif mode == UpdateMode.INCREMENTAL:
+    # 调用 incremental_update_ic，设置 update_mode='incremental'
+    ...
+else:  # UpdateMode.FULL
+    # 全量计算，设置 update_mode='full'
+    ...
+```
+
+**禁止：**
+- ❌ 只处理 skip 模式，缺失 incremental 分支（ic_bollinger_pb_1d.py 2026-05-22 诊断）
+- ❌ 使用旧版 `should_use_incremental` 返回 bool（已改为返回 `UpdateMode` 枚举）
+
 ### 缺失日期诊断
 
 区分"数据源无数据"和"缓存缺失"：
