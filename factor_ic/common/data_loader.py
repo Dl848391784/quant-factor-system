@@ -118,6 +118,8 @@ def load_factor_return_data(
     return_df = _convert_date_column(return_df, '收益')
     
     # ========== 加载额外因子文件（如有） ==========
+    all_factor_cols = factor_cols  # 独立变量，保持顺序，不污染调用方
+    
     if additional_factor_files:
         for col_name, file_path in additional_factor_files.items():
             if not file_path.exists():
@@ -142,8 +144,9 @@ def load_factor_return_data(
             )
             print(f"  - 合并 {col_name} 后: {len(factor_df)} 行")
         
-        # 更新 factor_cols（包含额外列）
-        factor_cols = list(set(factor_cols) | set(additional_factor_files.keys()))
+        # 更新因子列列表（包含额外列）
+        # 使用独立变量，保持顺序：先 factor_cols，再追加不在 factor_cols 的额外列
+        all_factor_cols = factor_cols + [k for k in additional_factor_files.keys() if k not in factor_cols]
     
     # ========== 列存在验证 ==========
     # 必须包含 date 和 asset
@@ -153,7 +156,7 @@ def load_factor_return_data(
             raise KeyError(f"因子数据缺少必需列: '{col}'")
     
     # 验证因子列
-    missing_factor_cols = [col for col in factor_cols if col not in factor_df.columns]
+    missing_factor_cols = [col for col in all_factor_cols if col not in factor_df.columns]
     if missing_factor_cols:
         available_cols = sorted([c for c in factor_df.columns if c not in ['date', 'asset']])
         raise KeyError(
@@ -170,7 +173,7 @@ def load_factor_return_data(
         )
     
     # ========== 选择需要的列 ==========
-    select_cols = ['date', 'asset'] + factor_cols
+    select_cols = ['date', 'asset'] + all_factor_cols
     factor_df = factor_df[select_cols].copy()
     
     # 重命名收益列（统一为 forward_return）
@@ -187,9 +190,9 @@ def load_factor_return_data(
     print(f"  - 原始平均每日股票数: {raw_avg_stocks_per_day}")
     
     # ========== 过滤缺失值 ==========
-    # dropna_cols 默认为 factor_cols（不含 date/asset）
+    # dropna_cols 默认为 all_factor_cols（不含 date/asset）
     if dropna_cols is None:
-        dropna_cols = factor_cols
+        dropna_cols = all_factor_cols
     
     factor_df = factor_df.dropna(subset=dropna_cols).reset_index(drop=True)
     return_df = return_df.dropna(subset=['forward_return']).reset_index(drop=True)

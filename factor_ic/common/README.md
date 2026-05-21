@@ -359,6 +359,39 @@ print(f"原始平均股票数: {raw_metadata['avg_stocks_per_day']}")
 2. `period_start/end` 为字符串格式 `YYYY-MM-DD`
 3. 日期转换后 `isin` 操作类型匹配
 4. 列缺失时显示可用列列表（用户友好）
+5. **参数污染禁止**：函数内禁止修改参数（特别是可变参数如 List[str]）
+
+### 参数污染规范（重要）
+
+**禁止修改传入的参数：**
+
+```python
+# 错误写法（参数污染）
+def load_factor_return_data(factor_cols: List[str], additional_factor_files: Dict = None):
+    if additional_factor_files:
+        # 直接修改参数，污染调用方，调用方无感知
+        factor_cols = list(set(factor_cols) | set(additional_factor_files.keys()))
+        # set 合并后丢失顺序
+
+# 正确写法（使用独立变量）
+def load_factor_return_data(factor_cols: List[str], additional_factor_files: Dict = None):
+    all_factor_cols = factor_cols  # 独立变量，不污染调用方
+    if additional_factor_files:
+        # 保持顺序：先 factor_cols，再追加不在 factor_cols 的额外列
+        all_factor_cols = factor_cols + [k for k in additional_factor_files.keys() if k not in factor_cols]
+```
+
+**原因：**
+1. Python 参数是引用传递，修改参数会影响调用方
+2. 调用方传入 `factor_cols=['close']`，函数内修改为 `['close', 'turnover_rate']`
+3. 调用方后续代码可能依赖原 `factor_cols`，导致逻辑错误
+4. `list(set(...))` 丢失顺序，语义不确定
+
+**影响范围：**
+- `load_factor_return_data()` 的 `factor_cols` 参数
+- 任何可变参数（List、Dict、Set）的函数内修改
+
+**参考：** data_loader.py 第120行（all_factor_cols 独立变量定义）
 
 ---
 
