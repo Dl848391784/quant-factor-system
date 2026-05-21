@@ -459,6 +459,41 @@ else:
 
 **参考：** data_loader.py 第142-154行（合并前后对比行数）
 
+### raw_metadata 计算规范（重要）
+
+**必须在所有 merge 前快照原始数据：**
+
+```python
+# 错误写法（在 inner join 后计算，已不是"原始缓存"数据）
+factor_df = pd.merge(factor_df, additional_df, on=['date', 'asset'], how='inner')
+# inner join 会丢失数据，导致 avg_stocks_per_day 不准确
+raw_avg_stocks_per_day = int(factor_df.groupby('date').size().mean())
+
+# 正确写法（在所有 merge 前快照）
+factor_df = _convert_date_column(factor_df, '因子')
+# 在加载额外因子文件前，快照原始数据范围
+raw_period_start = str(factor_df['date'].min())
+raw_period_end = str(factor_df['date'].max())
+raw_total_days = factor_df['date'].nunique()
+raw_avg_stocks_per_day = round(factor_df.groupby('date').size().mean(), 1)
+
+# 后续 merge 不影响 raw_metadata
+if additional_factor_files:
+    factor_df = pd.merge(factor_df, additional_df, ...)
+```
+
+**精度处理：**
+- 使用 `round(x, 1)` 保留一位小数（如 155.7）
+- 禁止 `int()` 直接截断（如 int(155.7) = 155，不是四舍五入）
+- avg_stocks_per_day 是浮点数，不应强制截断为整数
+
+**原因：**
+1. raw_metadata 应反映原始缓存数据，而非 merge/dropna 后的数据
+2. inner join 会丢失数据，导致 avg_stocks_per_day 不准确
+3. int() 直接截断精度丢失，round() 四舍五入更合理
+
+**参考：** data_loader.py 第120-127行（在 merge 前快照原始数据）
+
 ---
 
 ## ic_result_builder.py — IC结果构建公共模块

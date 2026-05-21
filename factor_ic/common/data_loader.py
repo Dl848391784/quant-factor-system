@@ -117,6 +117,16 @@ def load_factor_return_data(
     factor_df = _convert_date_column(factor_df, '因子')
     return_df = _convert_date_column(return_df, '收益')
     
+    # ========== 在所有 merge 前，快照原始数据范围 ==========
+    # raw_metadata 应基于原始缓存数据，而非 inner join 后的数据
+    raw_period_start = str(factor_df['date'].min())
+    raw_period_end = str(factor_df['date'].max())
+    raw_total_days = factor_df['date'].nunique()
+    raw_avg_stocks_per_day = round(factor_df.groupby('date').size().mean(), 1)
+    
+    print(f"  - 原始数据范围: {raw_period_start} ~ {raw_period_end}, {raw_total_days} 个交易日")
+    print(f"  - 原始平均每日股票数: {raw_avg_stocks_per_day}")
+    
     # ========== 加载额外因子文件（如有） ==========
     # 在修改 factor_cols 之前，确定 dropna_cols 默认值（基于原始 factor_cols）
     # 避免隐式包含额外列，防止过多数据被过滤
@@ -191,15 +201,6 @@ def load_factor_return_data(
     # 重命名收益列（统一为 forward_return）
     return_df = return_df[['date', 'asset', return_col]].copy()
     return_df = return_df.rename(columns={return_col: 'forward_return'})
-    
-    # ========== 在 dropna 之前，记录原始数据范围 ==========
-    raw_period_start = str(factor_df['date'].min())
-    raw_period_end = str(factor_df['date'].max())
-    raw_total_days = factor_df['date'].nunique()
-    raw_avg_stocks_per_day = int(factor_df.groupby('date').size().mean())
-    
-    print(f"  - 原始数据范围: {raw_period_start} ~ {raw_period_end}, {raw_total_days} 个交易日")
-    print(f"  - 原始平均每日股票数: {raw_avg_stocks_per_day}")
     
     # ========== 过滤缺失值 ==========
     # dropna_cols 默认为原始 factor_cols（不含额外列）
