@@ -172,6 +172,7 @@ def calculate_kdj_j(
     
     规范:
         - 函数入口必须先 .copy()，避免修改原始数据（MODULE.md DataFrame参数副本规范）
+        - 使用局部变量存储中间结果，避免污染输出 DataFrame
         - 使用 pandas 语义，避免 np.where 混用
     """
     # 函数入口必须先 copy，避免副作用
@@ -181,7 +182,7 @@ def calculate_kdj_j(
     alpha_k = 1 / m1
     alpha_d = 1 / m2
     
-    # 计算 RSV
+    # 计算 RSV（使用局部变量，避免污染输出）
     low_min = factor_df.groupby('asset')['low'].transform(
         lambda x: x.rolling(n, min_periods=n).min()
     )
@@ -204,18 +205,18 @@ def calculate_kdj_j(
     # 异常位置设为 50（中性值，KDJ 标准处理）
     rsv = rsv.where(~narrow_range_mask, 50.0)
     
-    factor_df['rsv'] = rsv
-    
-    # 计算 K 和 D（按股票分组）
-    factor_df['k'] = factor_df.groupby('asset')['rsv'].transform(
+    # 计算 K 和 D（使用局部变量，避免污染输出）
+    # 使用临时列名计算，最后只保留 kdj_j
+    k = rsv.groupby(factor_df['asset']).transform(
         lambda x: _calculate_k_with_initial(x, alpha_k, 50.0)
     )
-    factor_df['d'] = factor_df.groupby('asset')['k'].transform(
+    
+    d = k.groupby(factor_df['asset']).transform(
         lambda x: _calculate_d_with_initial(x, alpha_d, 50.0)
     )
     
-    # 计算 J
-    factor_df['kdj_j'] = 3 * factor_df['k'] - 2 * factor_df['d']
+    # 计算 J（只写入最终因子列）
+    factor_df['kdj_j'] = 3 * k - 2 * d
     
     return factor_df
 
@@ -266,8 +267,8 @@ if __name__ == '__main__':
     try:
         main()
     except RuntimeError as e:
-        logger.error(f"计算失败: {e}")
+        logger.exception(f"计算失败")  # 使用 .exception() 保留完整堆栈
         sys.exit(1)
     except Exception as e:
-        logger.error(f"未预期的错误: {e}")
+        logger.exception(f"未预期的错误")  # 使用 .exception() 保留完整堆栈
         sys.exit(1)

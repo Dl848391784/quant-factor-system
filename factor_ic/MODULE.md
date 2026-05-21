@@ -1,9 +1,9 @@
 # factor_ic 模块规范
 
-> 版本: v3.3（精简版）
+> 版本: v3.4（精简版）
 > 创建时间: 2026-05-19
 > 重构时间: 2026-05-22
-> 最后更新: 2026-05-22 (新增 EWM 初始值处理规范，修复 KDJ 计算逻辑错误)
+> 最后更新: 2026-05-22 (新增中间变量避免污染输出规范、CLI异常处理堆栈保留规范)
 
 ## 快速参考
 
@@ -108,6 +108,11 @@
     - 修复 ic_kdj_j_1d.py `_calculate_k_with_initial` 和 `_calculate_d_with_initial` 逻辑错误
     - 核心原则：EWM 初始值是前一期(t-1)的虚拟值，不是当前期(t)的输入覆盖值
     - 错误：覆盖第一个有效 RSV/K 值；正确：在第一个有效值前插入虚拟初始值
+16. v3.4（2026-05-22 23:00）：
+    - 新增"中间变量避免污染输出 DataFrame 规范"章节
+    - 新增"CLI 入口异常处理堆栈保留规范"章节
+    - 修复 ic_kdj_j_1d.py `calculate_kdj_j` 中间变量污染问题（rsv/k/d 改为局部变量）
+    - 修复 `__main__` 异常处理堆栈丢失问题（logger.error → logger.exception）
 
 # 一、概述与基础
 
@@ -582,6 +587,121 @@ def calculate_factor(factor_df: pd.DataFrame):
 ```
 
 不需要 `.copy()`：只读、返回全新DataFrame、内部已用 `.copy()`。
+
+### 中间变量避免污染输出规范（2026-05-22新增）
+
+**核心原则：使用局部变量存储中间结果，只写入最终因子列到输出 DataFrame。**
+
+**错误示例（中间列污染输出）：**
+```python
+# ❌ 错误：rsv, k, d 中间列污染输出 DataFrame
+def calculate_kdj_j(factor_df: pd.DataFrame):
+    factor_df = factor_df.copy()
+    
+    factor_df['rsv'] = ...  # 中间列
+    factor_df['k'] = ...    # 中间列
+    factor_df['d'] = ...    # 中间列
+    factor_df['kdj_j'] = 3 * factor_df['k'] - 2 * factor_df['d']
+    
+    return factor_df  # 返回包含 rsv, k, d, kdj_j 四列
+
+# 问题：
+# - 调用方拿到包含中间列的 DataFrame，增加内存占用
+# - 中间列可能干扰下游逻辑（如 IC 计算期望只有因子列）
+# - 输出结构不清晰，意图不明确
+```
+
+**正确示例（局部变量存储中间结果）：**
+```python
+# ✅ 正确：使用局部变量，只写入最终因子列
+def calculate_kdj_j(factor_df: pd.DataFrame):
+    factor_df = factor_df.copy()
+    
+    # 使用局部变量存储中间结果
+    rsv = ...  # 局部变量（不写入 factor_df）
+    k = rsv.groupby(factor_df['asset']).transform(...)
+    d = k.groupby(factor_df['asset']).transform(...)
+    
+    # 只写入最终因子列
+    factor_df['kdj_j'] = 3 * k - 2 * d
+    
+    return factor_df  # 只包含原始列 + kdj_j
+
+# 优点：
+# - 输出结构清晰，只有最终因子列
+# - 减少内存占用，中间变量不保留
+# - 不干扰下游逻辑
+```
+
+**为何必须避免中间列污染：**
+
+| 原因 | 说明 |
+|------|------|
+| 减少内存占用 | 中间列不保留，减少 DataFrame 大小 |
+| 输出结构清晰 | 调用方只拿到最终因子列，意图明确 |
+| 不干扰下游逻辑 | IC 计算、回测等下游模块期望只有因子列 |
+| 易于维护 | 新增因子开发时遵循统一规范 |
+
+**适用场景：**
+- 多步骤计算的因子（如 KDJ 的 rsv → k → d → j）
+- 中间结果不需要保留的场景
+- 因子计算函数返回 DataFrame
+
+**参考：** ic_kdj_j_1d.py `calculate_kdj_j`（2026-05-22 修复）
+
+### CLI 入口异常处理堆栈保留规范（2026-05-22新增）
+
+**核心原则：使用 `logger.exception()` 保留完整堆栈信息，便于调试定位问题。**
+
+**错误示例（堆栈信息丢失）：**
+```python
+# ❌ 错误：logger.error() 只记录异常消息，不记录堆栈
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as e:
+        logger.error(f"未预期的错误: {e}")  # 只记录消息
+        sys.exit(1)
+
+# 问题：
+# - 堆栈信息丢失，无法定位异常发生位置
+# - 调试困难，需要重新运行才能看到完整堆栈
+# - 日志信息不完整，不利于问题追溯
+```
+
+**正确示例（保留完整堆栈）：**
+```python
+# ✅ 正确：logger.exception() 自动记录异常消息 + 堆栈
+if __name__ == '__main__':
+    try:
+        main()
+    except RuntimeError as e:
+        logger.exception(f"计算失败")  # 自动附加堆栈
+        sys.exit(1)
+    except Exception as e:
+        logger.exception(f"未预期的错误")  # 自动附加堆栈
+        sys.exit(1)
+
+# 优点：
+# - 堆栈信息完整，便于定位异常位置
+# - 日志信息完整，利于问题追溯
+# - 符合 Python 异常处理最佳实践
+```
+
+**为何必须保留堆栈：**
+
+| 原因 | 说明 |
+|------|------|
+| 定位异常位置 | 堆栈显示异常发生的文件、行号、调用链 |
+| 问题追溯 | 日志文件包含完整信息，便于事后分析 |
+| 符合最佳实践 | Python 标准 logging 模块推荐做法 |
+
+**适用场景：**
+- CLI 入口（`if __name__ == '__main__'`）
+- 顶层异常处理（捕获后退出程序）
+- 需要记录完整异常信息的场景
+
+**参考：** ic_kdj_j_1d.py `__main__` 部分（2026-05-22 修复）
 
 ### numpy 与 pandas 混用规范
 
