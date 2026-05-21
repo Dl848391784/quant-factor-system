@@ -97,6 +97,14 @@ def load_factor_return_data(
     with gzip.open(factor_cache_path, 'rt', encoding='utf-8') as f:
         factor_data = json.load(f)
     
+    # ========== JSON 结构验证 ==========
+    # 验证 'data' 键存在，防止 JSON 格式错误导致 KeyError
+    if 'data' not in factor_data:
+        raise KeyError(
+            f"因子缓存文件 '{factor_cache_path}' 缺少 'data' 键\n"
+            f"JSON 结构: {list(factor_data.keys())}"
+        )
+    
     factor_df = pd.DataFrame(factor_data['data'])
     
     # ========== 基础列验证（加载后立即验证） ==========
@@ -113,6 +121,14 @@ def load_factor_return_data(
     
     with gzip.open(return_cache_path, 'rt', encoding='utf-8') as f:
         return_data = json.load(f)
+    
+    # ========== JSON 结构验证 ==========
+    # 验证 'data' 键存在，防止 JSON 格式错误导致 KeyError
+    if 'data' not in return_data:
+        raise KeyError(
+            f"收益缓存文件 '{return_cache_path}' 缺少 'data' 键\n"
+            f"JSON 结构: {list(return_data.keys())}"
+        )
     
     return_df = pd.DataFrame(return_data['data'])
     
@@ -181,8 +197,13 @@ def load_factor_return_data(
             rows_lost = rows_before - rows_after
             
             # 打印合并结果，告知用户数据丢失情况
+            # 防止 rows_before == 0 时除零错误
             if rows_lost > 0:
-                print(f"  - 合并 {col_name} 后: {rows_after} 行（丢失 {rows_lost} 行，{rows_lost/rows_before*100:.1f}%）")
+                if rows_before > 0:
+                    loss_pct = rows_lost / rows_before * 100
+                    print(f"  - 合并 {col_name} 后: {rows_after} 行（丢失 {rows_lost} 行，{loss_pct:.1f}%）")
+                else:
+                    print(f"  - 合并 {col_name} 后: {rows_after} 行（丢失 {rows_lost} 行，原始数据为空）")
             else:
                 print(f"  - 合并 {col_name} 后: {rows_after} 行（无数据丢失）")
         

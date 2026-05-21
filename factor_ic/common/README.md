@@ -746,6 +746,77 @@ print(f"  - 因子数据: {len(factor_df)} 行, {factor_df['asset'].nunique()} �
 
 **参考：** data_loader.py 第100-106行（加载后立即验证基础列）
 
+### JSON键验证规范（重要）
+
+**JSON数据加载后应立即验证关键键存在：**
+
+```python
+# 错误写法（键未验证，抛出难以定位的 KeyError）
+factor_data = json.load(f)
+factor_df = pd.DataFrame(factor_data['data'])
+# 若 factor_data 缺少 'data' 键，pd.DataFrame 抛出 KeyError: "data"
+# 错误位置在 DataFrame 构造，而非 JSON 加载，难以定位
+
+# 正确写法（加载后立即验证键）
+factor_data = json.load(f)
+
+# 验证 JSON 结构键存在
+if 'data' not in factor_data:
+    raise KeyError(
+        f"因子缓存文件 '{factor_cache_path}' 缺少 'data' 键\n"
+        f"JSON 结构: {list(factor_data.keys())}"
+    )
+
+factor_df = pd.DataFrame(factor_data['data'])
+```
+
+**原因：**
+1. JSON 文件可能缺少 'data' 键（格式错误、损坏、版本不匹配）
+2. pd.DataFrame(factor_data['data']) 若键不存在，抛出 KeyError
+3. 错误位置在 DataFrame 构造，而非 JSON 加载，难以定位问题根源
+4. 提前验证键存在，提供明确错误信息（显示 JSON 结构）
+
+**验证顺序：**
+1. 加载 JSON → 立即验证关键键（'data'）→ 构建 DataFrame
+2. 验证基础列 → 打印统计信息 → 其他操作
+
+**参考：** data_loader.py 第100-105行（JSON 键验证）
+
+### 除零防护规范（重要）
+
+**除法运算前应检查除数是否为零：**
+
+```python
+# 错误写法（除零风险）
+rows_before = len(factor_df)
+rows_lost = rows_before - rows_after
+pct = rows_lost / rows_before * 100  # 若 rows_before == 0，抛出 ZeroDivisionError
+
+# 正确写法（检查除数）
+rows_before = len(factor_df)
+rows_lost = rows_before - rows_after
+
+if rows_lost > 0:
+    if rows_before > 0:
+        pct = rows_lost / rows_before * 100
+        print(f"丢失 {rows_lost} 行，{pct:.1f}%")
+    else:
+        print(f"丢失 {rows_lost} 行，原始数据为空")
+```
+
+**原因：**
+1. rows_before 可能为 0（数据为空、merge 后清空）
+2. 直接除法 rows_lost / rows_before 会抛出 ZeroDivisionError
+3. 分支检查 rows_before > 0 防止除零错误
+4. 特殊情况（rows_before == 0）提供友好提示
+
+**适用场景：**
+- 任何除法运算（计算百分比、比例）
+- 计算统计指标（IC、相关性）
+- 数据丢失率计算
+
+**参考：** data_loader.py 第199-204行（除零防护）
+
 ---
 
 ## ic_result_builder.py — IC结果构建公共模块
