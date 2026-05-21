@@ -94,6 +94,25 @@ elif obj is pd.NA:
 
 **参考：** convert_types.py 源码注释（2026-05-22 更新）
 
+### 分支依赖关系（重要）
+
+**pd.Series.tolist() 与 pd.NA 处理的依赖关系：**
+
+```
+pd.Series 分支 → obj is pd.NA 分支
+```
+
+**原因：**
+- 扩展类型 Series（如 `pd.Series([1, pd.NA], dtype='Int64')`）的 `.tolist()` 返回 `[1, pd.NA]`，而非 `[1, None]`
+- 后续递归调用 `convert_to_native_types` 会处理列表中的 pd.NA
+- 若误删 `obj is pd.NA` 分支，扩展类型 Series 的缺失值无法转换为 None
+
+**维护警告：**
+- `pd.Series` 分支依赖 `obj is pd.NA` 分支正确工作
+- 删除 `pd.NA` 分支前必须确认无扩展类型 Series 使用场景
+
+**参考：** convert_types.py 第98-103行注释（2026-05-22 更新）
+
 ---
 
 ## data_loader.py — 数据加载公共模块

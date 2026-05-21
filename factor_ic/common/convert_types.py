@@ -96,6 +96,10 @@ def convert_to_native_types(obj: Any) -> Any:
         return convert_to_native_types(obj.tolist())
     
     elif isinstance(obj, pd.Series):
+        # Series.tolist() 对扩展类型（如 Int64 dtype）可能残留 pd.NA：
+        # - pd.Series([1, pd.NA], dtype='Int64').tolist() → [1, pd.NA]（非 None）
+        # - 后续递归调用 convert_to_native_types 会处理 pd.NA
+        # - 依赖关系：此分支 → obj is pd.NA 分支（勿删除）
         return convert_to_native_types(obj.tolist())
     
     elif isinstance(obj, pd.DataFrame):
