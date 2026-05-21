@@ -32,8 +32,11 @@ from factor_ic.common import (
 )
 # 使用 data_completeness 版本的 get_ic_output_path（输出 ic_<因子名>_analysis_result.json）
 from factor_ic.common.data_completeness import get_ic_output_path
+from factor_ic.common.logger_config import get_logger
 
 import json
+
+logger = get_logger(__name__)
 
 # ============================================================================
 # 参数统一管理（遵循 PROJECT.md 参数传递规范）
@@ -68,20 +71,20 @@ def generate_rsi_ic_data(
     else:
         output_file = Path(output_file)
     
-    print("=" * 60)
-    print("RSI_1D IC 计算器（重构版） - 1日收益周期")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("RSI_1D IC 计算器（重构版） - 1日收益周期")
+    logger.info("=" * 60)
     
     # ========== 加载全量数据 ==========
-    print("\n[1/3] 从缓存加载因子和收益数据...")
+    logger.info("[1/3] 从缓存加载因子和收益数据...")
     try:
         factor_df, return_df, raw_metadata = load_factor_return_data(
             factor_cols=['rsi_6']
         )
-        print(f"✓ 加载成功")
-        print(f"  - 原始日期范围: {raw_metadata['period_start']} ~ {raw_metadata['period_end']}")
-        print(f"  - 原始交易日数: {raw_metadata['total_days']}")
-        print(f"  - 过滤后交易日数: {factor_df['date'].nunique()}")
+        logger.info("✓ 加载成功")
+        logger.info(f"原始日期范围: {raw_metadata['period_start']} ~ {raw_metadata['period_end']}")
+        logger.info(f"原始交易日数: {raw_metadata['total_days']}")
+        logger.info(f"过滤后交易日数: {factor_df['date'].nunique()}")
         
     except FileNotFoundError as e:
         raise RuntimeError(f"缓存文件不存在: {e}") from e
@@ -93,8 +96,8 @@ def generate_rsi_ic_data(
     
     if use_incremental and not force_full:
         # ========== 增量更新 ==========
-        print("\n[模式] 增量更新")
-        print(f"\n[2/3] 执行增量计算...")
+        logger.info("[模式] 增量更新")
+        logger.info("[2/3] 执行增量计算...")
         
         result = incremental_update_ic(
             output_path=output_file,
@@ -105,16 +108,16 @@ def generate_rsi_ic_data(
             factor_col='rsi_6',
             return_col='forward_return',
             min_stocks=min_stocks
-        )
+)
         
-        print(f"  - IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
-        print(f"  - ICIR: {result['ic_metrics']['icir']:.2f}")
-        print(f"  - 更新模式: {result['update_mode']}")
+        logger.info(f"IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
+        logger.info(f"ICIR: {result['icir']:.2f}")
+        logger.info(f"更新模式: {result['update_mode']}")
         
     else:
         # ========== 全量计算 ==========
-        print("\n[模式] 全量计算")
-        print(f"\n[2/3] 计算每日 IC...")
+        logger.info("[模式] 全量计算")
+        logger.info("[2/3] 计算每日 IC...")
         
         # 使用公共模块计算 IC
         ic_result = calculate_ic_with_direction_verification(
@@ -125,9 +128,9 @@ def generate_rsi_ic_data(
             min_stocks=min_stocks
         )
         
-        print(f"  - IC 均值: {ic_result['ic_mean']:.4f}")
-        print(f"  - ICIR: {ic_result['icir']:.2f}")
-        print(f"  - 正比例: {ic_result['positive_ratio']:.1%}")
+        logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
+        logger.info(f"ICIR: {ic_result['icir']:.2f}")
+        logger.info(f"正比例: {ic_result['positive_ratio']:.1%}")
         
         # 使用公共模块构建输出
         result = build_ic_result(
@@ -139,15 +142,15 @@ def generate_rsi_ic_data(
         )
     
     # ========== 保存结果 ==========
-    print(f"\n[3/3] 保存数据到: {output_file}")
+    logger.info(f"[3/3] 保存数据到: {output_file}")
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
     
-    print("\n" + "=" * 60)
-    print(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC 数据")
-    print(f"更新模式: {result['update_mode']}")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC 数据")
+    logger.info(f"更新模式: {result['update_mode']}")
+    logger.info("=" * 60)
     
     return result
 
@@ -200,8 +203,8 @@ if __name__ == '__main__':
         )
     
     # 打印结果摘要
-    print("\n结果摘要:")
-    print(f"  - 因子名称: {result['factor_name']}")
-    print(f"  - IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
-    print(f"  - ICIR: {result['ic_metrics']['icir']:.2f}")
-    print(f"  - 更新模式: {result['update_mode']}")
+    logger.info("结果摘要:")
+    logger.info(f"因子名称: {result['factor_name']}")
+    logger.info(f"IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
+    logger.info(f"ICIR: {result['ic_metrics']['icir']:.2f}")
+    logger.info(f"更新模式: {result['update_mode']}")

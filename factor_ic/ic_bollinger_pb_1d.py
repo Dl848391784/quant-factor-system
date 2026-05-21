@@ -40,6 +40,9 @@ from factor_ic.common import (
     should_use_incremental
 )
 from factor_ic.common.data_completeness import get_ic_output_path, check_data_completeness
+from factor_ic.common.logger_config import get_logger
+
+logger = get_logger(__name__)
 
 # ============================================================================
 # 参数统一管理
@@ -140,42 +143,42 @@ def generate_bollinger_pb_ic_data(
         mode, missing_dates, info = check_data_completeness('bollinger_pb_1d')
         
         if mode == 'skip':
-            print("\n数据完备，无需更新")
+            logger.info("数据完备，无需更新")
             try:
                 with open(output_file, 'r', encoding='utf-8') as f:
                     cached_data = json.load(f)
                     cached_data['update_mode'] = 'skip'
                     return cached_data
             except FileNotFoundError:
-                print("  [诊断] 缓存文件不存在，执行全量计算")
+                logger.info("[诊断] 缓存文件不存在，执行全量计算")
             except json.JSONDecodeError as e:
                 raise RuntimeError(f"缓存文件损坏: {output_file}\n{e}") from e
     
     # 全量计算逻辑
-    print("=" * 60)
-    print(f"布林带%B IC 计算器（重构版） - 1日收益周期")
-    print(f"参数: N={n}, K={k}")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info(f"布林带%B IC 计算器（重构版） - 1日收益周期")
+    logger.info(f"参数: N={n}, K={k}")
+    logger.info("=" * 60)
     
     # ========== Step 1: 加载数据 ==========
-    print("\n[1/3] 从缓存加载因子和收益数据...")
+    logger.info("[1/3] 从缓存加载因子和收益数据...")
     try:
         factor_df, return_df, raw_metadata = load_factor_return_data(
             factor_cols=['close']
         )
-        print(f"✓ 加载成功")
-        print(f"  - 原始日期范围: {raw_metadata['period_start']} ~ {raw_metadata['period_end']}")
+        logger.info("✓ 加载成功")
+        logger.info(f"原始日期范围: {raw_metadata['period_start']} ~ {raw_metadata['period_end']}")
         
     except FileNotFoundError as e:
         raise RuntimeError(f"缓存文件不存在: {e}") from e
     
     # ========== Step 2: 计算布林带 %B ==========
-    print("\n[2/3] 计算布林带 %B 因子...")
+    logger.info("[2/3] 计算布林带 %B 因子...")
     factor_df = calculate_bollinger_pb(factor_df, n=n, k=k)
-    print(f"  ✓ 布林带 %B 计算完成")
+    logger.info("✓ 布林带 %B 计算完成")
     
     # ========== Step 3: 计算 IC ==========
-    print("\n[3/3] 计算 IC...")
+    logger.info("[3/3] 计算 IC...")
     ic_result = calculate_ic_with_direction_verification(
         factor_df=factor_df,
         return_df=return_df,
@@ -184,9 +187,9 @@ def generate_bollinger_pb_ic_data(
         min_stocks=min_stocks
     )
     
-    print(f"  - IC 均值: {ic_result['ic_mean']:.4f}")
-    print(f"  - ICIR: {ic_result['icir']:.2f}")
-    print(f"  - 正比例: {ic_result['positive_ratio']:.1%}")
+    logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
+    logger.info(f"ICIR: {ic_result['icir']:.2f}")
+    logger.info(f"正比例: {ic_result['positive_ratio']:.1%}")
     
     # ========== Step 4: 构建输出 ==========
     result = build_ic_result(
@@ -205,14 +208,14 @@ def generate_bollinger_pb_ic_data(
     }
     
     # 保存结果
-    print(f"\n保存数据到: {output_file}")
+    logger.info(f"保存数据到: {output_file}")
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
     
-    print("\n" + "=" * 60)
-    print(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC 数据")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC 数据")
+    logger.info("=" * 60)
     
     return result
 
@@ -235,7 +238,7 @@ if __name__ == '__main__':
         k=args.k
     )
     
-    print("\n结果摘要:")
-    print(f"  - 因子名称: {result['factor_name']}")
-    print(f"  - IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
-    print(f"  - ICIR: {result['ic_metrics']['icir']:.2f}")
+    logger.info("结果摘要:")
+    logger.info(f"因子名称: {result['factor_name']}")
+    logger.info(f"IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
+    logger.info(f"ICIR: {result['ic_metrics']['icir']:.2f}")
