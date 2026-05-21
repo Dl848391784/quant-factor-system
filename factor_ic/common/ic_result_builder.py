@@ -67,6 +67,10 @@ def build_ic_result(
     positive_ratio = ic_result['positive_ratio']
     n_days = ic_result['n_days']
     
+    # 入口校验：ic_series 为空时不应调用此函数
+    if ic_series is None or len(ic_series) == 0:
+        raise ValueError("ic_series 为空，应调用 build_error_result 而非 build_ic_result")
+    
     # 五维度判断（直接使用公共模块返回）
     statistical_significance = ic_result['statistical_significance']
     factor_direction_judgment = ic_result['factor_direction']
@@ -185,14 +189,19 @@ def build_sample_stats(
     参数:
         raw_metadata: 原始数据元信息
         n_days: 有效 IC 天数
-        factor_df: 过滤后因子数据 DataFrame
+        factor_df: 过滤后因子数据 DataFrame【必须含 'date' 列】
         period_start: 覆盖起始日期
         period_end: 覆盖结束日期
         avg_stocks_description: 口径范围说明
     
     返回:
         sample_stats 字典
+    
+    异常:
+        KeyError: factor_df 缺少 'date' 列
     """
+    if 'date' not in factor_df.columns:
+        raise KeyError("factor_df 必须包含 'date' 列，当前列: %s" % list(factor_df.columns))
     avg_stocks_per_day = int(factor_df.groupby('date').size().mean())
     
     return {
@@ -252,7 +261,7 @@ def build_error_result(
         'success': False,
         'error': error_msg,
         'factor_name': factor_name,
-        'calculation_date': datetime.now().strftime('%Y-%m-%d'),
+        'calculation_date': datetime.now().isoformat(),
         'period': {
             'start': '',
             'end': '',
@@ -336,7 +345,12 @@ def build_error_result(
 
 
 def _format_ic_performance(ic_mean: float, icir: float) -> str:
-    """格式化 IC 表现描述"""
+    """
+    格式化 IC 表现描述
+    
+    规范:
+        ICIR < 0 表示因子方向不稳定（ic_mean 与 ic_std 符号相反），需单独标注
+    """
     if abs(ic_mean) >= 0.05:
         level = '强'
     elif abs(ic_mean) >= 0.03:
@@ -344,7 +358,10 @@ def _format_ic_performance(ic_mean: float, icir: float) -> str:
     else:
         level = '弱'
     
-    if icir >= 2.0:
+    # ICIR 分级：负值表示方向不稳定
+    if icir < 0:
+        stability = '不稳定（方向需验证）'
+    elif icir >= 2.0:
         stability = '优秀'
     elif icir >= 1.0:
         stability = '良好'
