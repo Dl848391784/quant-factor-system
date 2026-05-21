@@ -1147,6 +1147,63 @@ result = run_complex_factor_ic(
 )
 ```
 
+### 规范要点（重要）
+
+**日志访问字段必须使用 .get() 防止 KeyError：**
+
+```python
+# 错误写法（直接访问字段，KeyError 会被 except 误报）
+try:
+    ic_result = calculate_ic_with_direction_verification(...)
+    _logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")  # 若 ic_mean 缺失，KeyError
+except Exception as e:
+    _logger.error(f"IC 计算失败: {e}")  # 实际是日志格式化失败，误报为 IC 计算失败
+
+# 正确写法（使用 .get() 防止 KeyError）
+try:
+    ic_result = calculate_ic_with_direction_verification(...)
+    _logger.info(f"IC 均值: {ic_result.get('ic_mean', 0.0):.4f}")  # 安全访问
+except Exception as e:
+    _logger.error(f"IC 计算失败: {e}")  # 真正的 IC 计算错误
+```
+
+**嵌套字段需双重保护：**
+
+```python
+# 错误写法（嵌套访问无保护）
+_logger.info(f"t 统计量: {ic_result['statistical_significance']['t_stat']:.2f}")
+# 若 statistical_significance 缺失，KeyError；若 t_stat 缺失，KeyError
+
+# 正确写法（双重 .get() 保护）
+t_stat = ic_result.get('statistical_significance', {}).get('t_stat', 0.0)
+_logger.info(f"t 统计量: {t_stat:.2f}")
+```
+
+**保持全量/增量模式一致性：**
+
+```python
+# 增量模式（正确示例）
+_logger.info(
+    f"五维度补充完成: 有效天数={len(valid_ic)}, "
+    f"IC均值={stats_result.get('ic_mean', 0.0):.4f}, "
+    f"ICIR={stats_result.get('icir', 0.0):.2f}"
+)
+
+# 全量模式（应与增量模式一致）
+_logger.info(f"IC 均值: {ic_result.get('ic_mean', 0.0):.4f}")
+_logger.info(f"ICIR: {ic_result.get('icir', 0.0):.2f}")
+```
+
+**原因：**
+1. try 块内的 KeyError 会被 except Exception 捕获，掩盖真实原因
+2. 日志格式化失败会被误报为"IC 计算失败"，用户难以定位问题
+3. 嵌套字段访问需双重保护，防止任一层级缺失导致 KeyError
+4. 全量/增量模式应使用一致的访问方式，便于维护
+
+**参考：** factor_ic_runner.py 第277-283行（2026-05-22 更新）
+
+---
+
 ### 新增因子开发流程
 
 ```
