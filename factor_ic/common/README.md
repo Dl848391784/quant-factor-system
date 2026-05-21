@@ -216,6 +216,26 @@ def get_factor_data_dates():
 - `get_factor_data_dates()`：因子数据源日期提取时标准化
 - `_extract_dates_from_cache()`：缓存数据日期提取时标准化
 
+**标准化顺序（重要）：必须先标准化，再去重排序**
+
+```python
+# 错误写法（顺序错误）
+dates = sorted(set(dates))  # 先去重排序
+normalized_dates = [d.split()[0] if ' ' in d else d for d in dates]  # 后标准化
+dates = normalized_dates  # 可能产生重复（"2026-04-03" + "2026-04-03 12:00:00" → 两个 "2026-04-03")
+
+# 正确写法（先标准化，再去重排序）
+normalized_dates = [d.split()[0] if ' ' in d else d for d in dates]  # 先标准化
+dates = sorted(set(normalized_dates))  # 后去重排序
+```
+
+**原因：**
+1. 若原始数据存在 `"2026-04-03"` 和 `"2026-04-03 12:00:00"` 混合格式
+2. 先去重排序无法去除截断后的重复项（sorted + set 在截断之前完成）
+3. 先标准化截断，再 sorted + set 去重，确保无重复日期
+
+**参考：** data_completeness.py 第71-80行（2026-05-22 更新）
+
 **原因：**
 1. JSON 中的日期可能包含时间戳 `"YYYY-MM-DD HH:MM:SS"` 或 datetime 对象
 2. 字符串比较依赖格式一致性：`"2026-04-03 00:00:00" > "2026-04-03"` 因空格导致错误结果

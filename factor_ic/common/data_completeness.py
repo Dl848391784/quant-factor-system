@@ -77,7 +77,8 @@ def get_factor_data_dates() -> Tuple[List[str], Optional[str]]:
                     normalized_dates.append(d.split()[0])
                 else:
                     normalized_dates.append(d)
-            dates = normalized_dates
+            # 先标准化，再去重排序（防止 "2026-04-03" 和 "2026-04-03 12:00:00" 截断后重复）
+            dates = sorted(set(normalized_dates))
         
         latest_date = dates[-1] if dates else None
         
