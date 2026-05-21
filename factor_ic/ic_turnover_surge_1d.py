@@ -180,8 +180,8 @@ def generate_turnover_surge_ic_data(
     logger.info(f"参数: surge_window={surge_window}")
     logger.info("=" * 60)
     
-    # ========== Step 1: 加载原始数据 ==========
-    logger.info("[1/3] 从缓存加载因子和收益数据...")
+    # ========== [1/4] 加载原始数据（前置步骤，所有模式共享） ==========
+    logger.info("[1/4] 从缓存加载因子和收益数据...")
     try:
         # 加载基本数据
         factor_df, return_df, raw_metadata = load_factor_return_data(
@@ -196,7 +196,20 @@ def generate_turnover_surge_ic_data(
         logger.info(f"原始日期范围: {raw_metadata['period_start']} ~ {raw_metadata['period_end']}")
         
     except FileNotFoundError as e:
-        raise RuntimeError(f"缓存文件不存在: {e}") from e
+        # 缓存文件不存在：严重错误，不降级（数据源缺失）
+        raise RuntimeError(f"缓存文件不存在，请先运行数据采集: {e}") from e
+    except json.JSONDecodeError as e:
+        # 缓存文件损坏：严重错误，不降级
+        raise RuntimeError(f"缓存文件损坏，请检查数据源: {e}") from e
+    except PermissionError as e:
+        # 权限错误：严重错误，不降级
+        raise RuntimeError(f"缓存文件权限错误: {e}") from e
+    except KeyError as e:
+        # 数据结构错误：严重错误，不降级（缺失必需字段）
+        raise ValueError(f"缓存数据结构错误，缺少必需字段: {e}") from e
+    except Exception as e:
+        # 其他未预期异常：保留完整堆栈信息，便于诊断
+        raise RuntimeError(f"数据加载失败（未预期错误）: {type(e).__name__}: {e}") from e
     
     # ========== Step 2: 判断模式 ==========
     mode = should_use_incremental(output_file, factor_df, force_full)
@@ -205,7 +218,9 @@ def generate_turnover_surge_ic_data(
     def do_full_recalculate() -> dict:
         """执行全量计算（用于正常 FULL 模式和 SKIP fallback）"""
         logger.info("[模式] 全量计算")
-        logger.info("[2/3] 计算换手率突增因子...")
+        
+        # ========== [2/4] 计算换手率突增因子 ==========
+        logger.info("[2/4] 计算换手率突增因子...")
         
         factor_df_local = calculate_turnover_surge(factor_df, surge_window=surge_window)
         
@@ -214,8 +229,8 @@ def generate_turnover_surge_ic_data(
         logger.info("✓ 换手率突增计算完成")
         logger.info(f"满足条件股票数: {surge_count} / {total_count} ({surge_count/total_count:.1%})")
         
-        # ========== Step 3: 计算 IC ==========
-        logger.info("[3/3] 计算 IC...")
+        # ========== [3/4] 计算 IC ==========
+        logger.info("[3/4] 计算 IC...")
         ic_result = calculate_ic_with_direction_verification(
             factor_df=factor_df_local,
             return_df=return_df,
@@ -225,10 +240,6 @@ def generate_turnover_surge_ic_data(
             logger=logger
         )
         
-        logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
-        logger.info(f"ICIR: {ic_result['icir']:.2f}")
-        logger.info(f"正比例: {ic_result['positive_ratio']:.1%}")
-        
         # ========== Step 4: 构建输出 ==========
         result = build_ic_result(
             ic_result=ic_result,
@@ -237,6 +248,11 @@ def generate_turnover_surge_ic_data(
             data_source='cache/factor_data/factor_data.json.gz + turnover_rate_data.json.gz',
             factor_col='turnover_surge'
         )
+        
+        # 使用 result['ic_metrics'] 统一取值（遵循 MODULE.md 增量更新返回结构统一规范）
+        logger.info(f"IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
+        logger.info(f"ICIR: {result['ic_metrics']['icir']:.2f}")
+        logger.info(f"正比例: {result['positive_ratio']:.1%}")
         
         # 添加参数信息
         result['params'] = {
@@ -249,7 +265,8 @@ def generate_turnover_surge_ic_data(
         }
         result['update_mode'] = 'full'
         
-        # 保存结果
+        # ========== [4/4] 保存结果 ==========
+        logger.info("[4/4] 保存数据到: {output_file}")
         save_ic_result(result, output_file)
         
         logger.info("=" * 60)
@@ -261,11 +278,12 @@ def generate_turnover_surge_ic_data(
     
     if mode == UpdateMode.SKIP:
         # ========== 跳过更新（缓存已最新） ==========
+        # 规范：SKIP 模式不修改缓存对象，直接返回（update_mode 在缓存中已是正确值）
         logger.info("[模式] 缓存已最新，跳过更新")
         try:
             with open(output_file, 'r', encoding='utf-8') as f:
                 cached_data = json.load(f)
-                cached_data['update_mode'] = 'skip'
+                # 不修改 cached_data，直接返回（避免内存与文件不一致）
                 return cached_data
         except FileNotFoundError:
             logger.warning("[诊断] 缓存文件不存在，执行全量计算")
@@ -276,9 +294,11 @@ def generate_turnover_surge_ic_data(
     elif mode == UpdateMode.INCREMENTAL:
         # ========== 增量更新（缓存滞后） ==========
         logger.info("[模式] 增量更新")
-        logger.info("[2/3] 计算换手率突增因子（需要全量历史数据）...")
         
+        # ========== [2/4] 计算换手率突增因子 ==========
         # 注意：换手率突增计算需要完整的历史换手率数据才能正确计算 rolling mean
+        logger.info("[2/4] 计算换手率突增因子（需要全量历史数据）...")
+        
         factor_df_local = calculate_turnover_surge(factor_df, surge_window=surge_window)
         
         surge_count = factor_df_local['turnover_surge'].notna().sum()
@@ -286,7 +306,8 @@ def generate_turnover_surge_ic_data(
         logger.info("✓ 换手率突增计算完成")
         logger.info(f"满足条件股票数: {surge_count} / {total_count} ({surge_count/total_count:.1%})")
         
-        logger.info("[3/3] 执行增量 IC 计算...")
+        # ========== [3/4] 执行增量 IC 计算 ==========
+        logger.info("[3/4] 执行增量 IC 计算...")
         result = incremental_update_ic(
             output_path=output_file,
             factor_df_full=factor_df_local,
@@ -298,6 +319,8 @@ def generate_turnover_surge_ic_data(
             min_stocks=min_stocks
         )
         
+        # 增量结果已在 incremental_update_ic 内部保存（[4/4] 已完成）
+        
         # 添加参数信息
         result['params'] = {
             'surge_window': surge_window,
@@ -308,8 +331,9 @@ def generate_turnover_surge_ic_data(
             ]
         }
         
-        logger.info(f"IC 均值: {result.get('ic_mean', 0):.4f}")
-        logger.info(f"ICIR: {result.get('icir', 0):.2f}")
+        # 使用 result['ic_metrics'] 统一取值（遵循 MODULE.md 增量更新返回结构统一规范）
+        logger.info(f"IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
+        logger.info(f"ICIR: {result['ic_metrics']['icir']:.2f}")
         logger.info(f"更新模式: {result['update_mode']}")
         
         return result
@@ -345,8 +369,18 @@ if __name__ == '__main__':
         logger.info("=" * 60)
         
     except FileNotFoundError as e:
-        logger.exception("缓存文件不存在")  # 使用 .exception() 保留完整堆栈
+        # 缓存文件不存在：严重错误，不降级
+        logger.error(f"缓存文件不存在，请先运行数据采集: {e}")
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        # 缓存文件损坏：严重错误，不降级
+        logger.error(f"缓存文件损坏，请检查数据源: {e}")
+        sys.exit(1)
+    except PermissionError as e:
+        # 权限错误：严重错误，不降级
+        logger.error(f"缓存文件权限错误: {e}")
         sys.exit(1)
     except Exception as e:
-        logger.exception("计算失败")  # 使用 .exception() 保留完整堆栈
+        # 其他未预期异常：保留完整堆栈信息
+        logger.exception(f"计算失败（未预期错误）: {type(e).__name__}")
         sys.exit(1)
