@@ -189,16 +189,19 @@ def calculate_kdj_j(
         lambda x: x.rolling(n, min_periods=n).max()
     )
     
-    # 避免除零（使用 EPSILON）
+    # 避免除零：denom = high_max - low_min 理论上恒 >= 0
     denom = high_max - low_min
     
-    # 使用 pandas Series.clip 避免 np.where 混用问题
-    # 当 denom 接近 0 时，RSV 设为 50（中性值）
-    safe_denom = denom.clip(lower=EPSILON)
+    # 先判断异常位置（过窄带宽，无法有效计算 RSV）
+    # denom 理论上恒 >= 0，无需 .abs()
+    narrow_range_mask = denom < EPSILON
+    
+    # 先排除异常再计算（遵循 MODULE.md "因子计算异常排除时机规范"）
+    # 异常位置用 EPSILON 防止除零崩溃，但计算结果无意义会被后续覆盖
+    safe_denom = denom.where(~narrow_range_mask, EPSILON)
     rsv = (factor_df['close'] - low_min) / safe_denom * 100
     
-    # denom < EPSILON 的位置设为 50
-    narrow_range_mask = denom.abs() < EPSILON
+    # 异常位置设为 50（中性值，KDJ 标准处理）
     rsv = rsv.where(~narrow_range_mask, 50.0)
     
     factor_df['rsv'] = rsv
