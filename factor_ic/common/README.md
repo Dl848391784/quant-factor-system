@@ -21,6 +21,55 @@
 
 ---
 
+## convert_types.py — 类型转换模块
+
+**文件路径：** `factor_ic/common/convert_types.py`
+
+### 核心函数
+
+```python
+def convert_to_native_types(obj: Any) -> Any:
+    """
+    递归转换 numpy/pandas 类型为 Python 原生类型
+    
+    解决 JSON 序列化时 numpy 类型无法直接序列化的问题。
+    """
+```
+
+### 类型检查规范（2026-05-22）
+
+| 类型 | 检查方式 | 说明 |
+|------|---------|------|
+| numpy整数 | `isinstance(obj, np.integer)` | 抽象基类覆盖所有子类 |
+| numpy浮点 | `isinstance(obj, np.floating)` | 抽象基类覆盖所有子类 |
+| numpy布尔 | `isinstance(obj, np.bool_)` | **必须显式分开**，不能与 bool 合并 |
+| Python布尔 | `isinstance(obj, bool)` | **必须在 integer 之前**，因为 bool 是 int 子类 |
+| Python整数 | 直接返回 | 不需要类型检查（原生类型） |
+
+### isinstance 多类型检查规范（重要）
+
+**禁止合并写法：**
+```python
+# 错误写法（脆弱，依赖分支顺序）
+elif isinstance(obj, (np.bool_, bool)):
+    return bool(obj)
+
+# 正确写法（显式分开处理）
+elif isinstance(obj, np.bool_):
+    return bool(obj)
+elif isinstance(obj, bool):
+    return obj
+```
+
+**原因：**
+1. bool 是 int 的子类，`isinstance(True, int)` 返回 True
+2. 若有人在未来添加 `isinstance(obj, int)` 分支在 bool 检查之前，合并写法会将 True/False 误判为整数
+3. 显式分开处理：意图清晰，防止分支顺序变化导致的隐蔽 bug
+
+**参考：** convert_types.py 源码注释（2026-05-22 更新）
+
+---
+
 ## data_loader.py — 数据加载公共模块
 
 **文件路径：** `factor_ic/common/data_loader.py`

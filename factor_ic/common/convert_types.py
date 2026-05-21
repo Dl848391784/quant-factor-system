@@ -10,6 +10,10 @@
 - np.floating 是所有 numpy 浮点类型的抽象基类，无需显式列举子类
 - 显式列举子类（如 np.int64/np.int32）是冗余的，且会造成误解
 - bool 检查必须在 integer 之前（Python bool 是 int 的子类，防止误判）
+- isinstance 多类型检查禁止合并：必须显式分开处理（如 np.bool_ 和 bool），因为：
+  * bool 是 int 的子类，若合并为 isinstance(obj, (np.bool_, bool))，
+    在分支顺序变化时（如有人在 bool 之前添加 int 检查）会被误判
+  * 显式分开处理：意图清晰，防止分支顺序变化导致的隐蔽 bug
 
 容器类型处理（2026-05-22）：
 - dict: 递归转换值
@@ -66,9 +70,13 @@ def convert_to_native_types(obj: Any) -> Any:
         return tuple(convert_to_native_types(v) for v in obj)
     
     # bool 检查必须在 integer 之前（Python bool 是 int 的子类）
-    elif isinstance(obj, (np.bool_, bool)):
-        # np.bool_: numpy 布尔类型，bool: Python 布尔类型
+    # 显式分开处理：防止分支顺序变化导致误判，意图清晰
+    elif isinstance(obj, np.bool_):
+        # numpy 布尔类型
         return bool(obj)
+    elif isinstance(obj, bool):
+        # Python 布尔类型（必须在 integer 之前，因为 bool 是 int 的子类）
+        return obj
     
     elif isinstance(obj, np.integer):
         # np.integer 是所有 numpy 整数类型的抽象基类（int64/int32/int16/int8/uint64等）
