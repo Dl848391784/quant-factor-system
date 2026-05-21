@@ -1,9 +1,12 @@
 # RSI_1D IC 计算流程文档
 
-> 生成时间: 2026-05-20 16:30 (北京时间)
-> 审阅版本: v1.53
-> 实测数据时间: 2026-05-20
+> 生成时间: 2026-05-22 17:00 (北京时间)
+> 审阅版本: v1.54
+> 实测数据时间: 2026-05-22
 > 更新内容: 
+>   1. [v1.54] 修正旧函数引用：calculate_daily_ic_series → build_ic_result（公共模块重构后函数名变更）
+>   2. [v1.54] 同步代码版本：ic_rsi_1d.py 已移除本地 calculate_daily_ic_series，改用公共模块
+>   3. [v1.54] 更新流程图节点名称，反映实际代码实现 
 >   1. 增量计算单日 IC 改用 calculate_single_day_ic 核心函数（遵循 PROJECT.md 规范）
 >   2. 移除直接调用 scipy.stats.spearmanr，确保增量与全量计算算法一致
 >   3. 增量合并添加去重验证，防止日期重叠污染数据
@@ -363,7 +366,7 @@ load_data_from_cache 中的 dropna 操作可能过滤掉某些日期的全部股
 正确做法：
 - 在 dropna 之前，先计算 raw_period_start, raw_period_end, raw_total_days
 - 返回过滤后的数据 + raw_metadata
-- calculate_daily_ic_series 使用 raw_metadata 计算 period/total_days
+- build_ic_result 使用 raw_metadata 构建 sample_stats/period 字段
 ```
 
 **日期转换异常处理规范（遵循 PROJECT.md）：**
@@ -506,7 +509,7 @@ calculate_ic_with_direction_verification(factor_df, return_df)
 **遵循 PROJECT.md NaN 处理规范：NaN → None 转换应在数据生成阶段完成。**
 
 ```
-calculate_daily_ic_series(factor_df, return_df, raw_metadata)
+calculate_ic_with_direction_verification(factor_df, return_df, raw_metadata)
     │
     ├── [计算 IC] 调用 calculate_ic_with_direction_verification
     │
@@ -573,7 +576,7 @@ calculate_ic_with_direction_verification(factor_df, return_df)
 **防御性校验：**
 
 ```
-calculate_daily_ic_series(factor_df, return_df, raw_metadata)
+build_ic_result(ic_result, raw_metadata, factor_name)
     │
     ├── [长度校验]
     │   ├── len(dates) == len(ic_values)
@@ -606,7 +609,7 @@ calculate_daily_ic_series(factor_df, return_df, raw_metadata)
 **遵循 PROJECT.md 函数返回值契约规范：调用方必须校验返回值字段存在性。**
 
 ```
-calculate_daily_ic_series(factor_df, return_df, raw_metadata)
+generate_rsi_ic_data(factor_df, return_df, raw_metadata)
     │
     ├── [调用函数]
     │   │
@@ -619,7 +622,7 @@ calculate_daily_ic_series(factor_df, return_df, raw_metadata)
     │   │       'ic_series', 'ic_mean', 'ic_std', 'icir',
     │   │       'statistical_significance', 'factor_direction',
     │   │       'economic_significance', 'icir_stability',
-    │   │       'ic_distribution_consistency', 'positive_ratio', 'summary'
+    │   │       'ic_distribution_consistency', 'positive_ratio', 'n_days'
     │   │   ]
     │   │
     │   ├── 检查缺失字段：
