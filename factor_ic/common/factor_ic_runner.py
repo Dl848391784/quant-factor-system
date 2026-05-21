@@ -14,7 +14,6 @@
 import json
 import pandas as pd
 from pathlib import Path
-from datetime import datetime
 from typing import Dict, List, Optional, Callable, Any
 
 # 导入日志
@@ -307,7 +306,9 @@ def run_factor_ic_analysis(
         save_ic_result(result, output_path)
         
         _logger.info("=" * 60)
-        _logger.info(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC")
+        # 使用 .get() 双重保护防止 KeyError（与日志访问规范一致）
+        valid_days = result.get('sample_stats', {}).get('valid_days', 0)
+        _logger.info(f"完成！共计算 {valid_days} 天有效 IC")
         _logger.info("=" * 60)
         
         return result
