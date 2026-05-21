@@ -609,6 +609,41 @@ all_factor_cols = list(factor_cols)      # 真正的副本，不污染调用方
 
 **参考：** data_loader.py 第132-135行（list() 创建副本）
 
+### 列验证规范（重要）
+
+**在 merge/select 前验证列是否存在：**
+
+```python
+# 错误写法（列未验证，pandas 抛出不友好的 KeyError）
+factor_df = pd.merge(factor_df, additional_df[['date', 'asset', col_name]], ...)
+# 若 col_name 不存在，pandas KeyError: "['col_name'] not in index"
+
+# 正确写法（在 merge 前验证，提供友好错误信息）
+if col_name in additional_df.columns:
+    additional_df[col_name] = pd.to_numeric(additional_df[col_name], errors='coerce')
+else:
+    available_cols = sorted([c for c in additional_df.columns if c not in ['date', 'asset']])
+    raise KeyError(
+        f"额外因子文件 '{file_path}' 缺少指定列: '{col_name}'\n"
+        f"可用列: {available_cols}"
+    )
+
+factor_df = pd.merge(factor_df, additional_df[['date', 'asset', col_name]], ...)
+```
+
+**原因：**
+1. pandas 原生 KeyError 信息不友好，不显示可用列
+2. 用户无法快速定位问题，排查困难
+3. 提供可用列列表，帮助用户修正参数
+4. 验证时机应在 merge/select 前而非操作后
+
+**适用场景：**
+- merge 合并 DataFrame 前
+- select 选择列前（`df[['col1', 'col2']]`）
+- dropna 指定列前
+
+**参考：** data_loader.py 第148-155行（列验证 + 友好错误信息）
+
 ---
 
 ## ic_result_builder.py — IC结果构建公共模块

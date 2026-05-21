@@ -147,6 +147,13 @@ def load_factor_return_data(
             # 类型转换
             if col_name in additional_df.columns:
                 additional_df[col_name] = pd.to_numeric(additional_df[col_name], errors='coerce')
+            else:
+                # 列不存在时提供友好错误信息
+                available_cols = sorted([c for c in additional_df.columns if c not in ['date', 'asset']])
+                raise KeyError(
+                    f"额外因子文件 '{file_path}' 缺少指定列: '{col_name}'\n"
+                    f"可用列: {available_cols}"
+                )
             
             # 合并到主因子数据
             rows_before = len(factor_df)
