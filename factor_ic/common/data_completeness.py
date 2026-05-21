@@ -79,6 +79,43 @@ def get_factor_data_dates() -> Tuple[List[str], Optional[str]]:
         return [], None
 
 
+def _extract_dates_from_cache(data: Dict[str, Any]) -> Tuple[List[str], Optional[str]]:
+    """
+    从缓存数据中提取日期列表和最新日期（公共函数）
+    
+    统一处理顶层 dates 和 ic_series.dates 格式，确保逻辑一致性
+    
+    Args:
+        data: 缓存 JSON 数据（已加载）
+        
+    Returns:
+        (dates, latest_date)
+        - dates: 日期列表，格式统一为 YYYY-MM-DD
+        - latest_date: 最新日期字符串或 None
+    """
+    # 优先读取顶层 dates 字段
+    dates = data.get('dates', [])
+    
+    if not dates:
+        # 兼容旧格式：ic_series.dates
+        ic_series = data.get('ic_series', {})
+        dates = ic_series.get('dates', [])
+    
+    if not dates:
+        return [], None
+    
+    # 格式统一：处理 "2026-04-03 00:00:00" → "2026-04-03"
+    normalized_dates = []
+    for d in dates:
+        if ' ' in d:
+            normalized_dates.append(d.split()[0])
+        else:
+            normalized_dates.append(d)
+    
+    latest_date = normalized_dates[-1] if normalized_dates else None
+    return normalized_dates, latest_date
+
+
 def get_cache_latest_date(factor_name: str) -> Optional[str]:
     """
     获取因子IC缓存的最新日期
@@ -98,23 +135,10 @@ def get_cache_latest_date(factor_name: str) -> Optional[str]:
         with open(cache_file, 'r', encoding='utf-8') as f:
             result = json.load(f)
         
-        # dates 字段在顶层
-        dates = result.get('dates', [])
+        # 使用公共函数提取日期，确保逻辑一致性
+        dates, latest_date = _extract_dates_from_cache(result)
         
-        if not dates:
-            # 兼容旧格式：ic_series.dates
-            ic_series = result.get('ic_series', {})
-            dates = ic_series.get('dates', [])
-        
-        if not dates:
-            return None
-        
-        # 格式可能是 "2026-04-03 00:00:00" 或 "2026-04-03"
-        latest = dates[-1]
-        if ' ' in latest:
-            latest = latest.split()[0]
-        
-        return latest
+        return latest_date
     except Exception as e:
         print(f"[警告] 读取缓存失败 {factor_name}: {e}")
         return None
@@ -266,11 +290,10 @@ def get_cache_info(factor_name: str) -> Dict[str, Any]:
         # IC指标
         info['ic_metrics'] = data.get('ic_metrics', {})
         
-        # 天数和最新日期
-        ic_series = data.get('ic_series', {})
-        dates = ic_series.get('dates', [])
+        # 使用公共函数提取日期，确保逻辑一致性
+        dates, latest_date = _extract_dates_from_cache(data)
         info['n_days'] = len(dates)
-        info['latest_date'] = dates[-1] if dates else None
+        info['latest_date'] = latest_date
         
     except Exception as e:
         info['error'] = str(e)

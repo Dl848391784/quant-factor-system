@@ -156,8 +156,43 @@ pd.Series 分支 → obj is pd.NA 分支
 | `check_data_completeness()` | 检查数据完整性，返回处理模式（full/incremental/skip） |
 | `get_factor_data_dates()` | 获取因子数据日期列表 |
 | `get_cache_latest_date()` | 获取缓存最新日期 |
+| `get_cache_info()` | 获取缓存信息摘要 |
+| `_extract_dates_from_cache()` | 公共函数：从缓存数据提取日期（内部使用） |
 
 ### 日期提取规范（重要）
+
+**缓存日期提取必须使用公共函数 `_extract_dates_from_cache()`：**
+
+```python
+# 错误写法（逻辑不一致）
+# get_cache_latest_date() 优先顶层 dates
+# get_cache_info() 只读 ic_series.dates
+# 同一文件返回不同日期
+
+# 正确写法（统一处理）
+def get_cache_latest_date(factor_name: str):
+    dates, latest_date = _extract_dates_from_cache(result)
+    return latest_date
+
+def get_cache_info(factor_name: str):
+    dates, latest_date = _extract_dates_from_cache(data)
+    info['n_days'] = len(dates)
+    info['latest_date'] = latest_date
+```
+
+**公共函数逻辑（`_extract_dates_from_cache()`）：**
+1. 优先读取顶层 `dates` 字段（新格式）
+2. 兼容旧格式：`ic_series.dates`
+3. 格式统一：处理 `"2026-04-03 00:00:00"` → `"2026-04-03"`
+4. 返回 `(dates, latest_date)` 元组
+
+**原因：**
+- 统一日期提取逻辑，避免不同函数返回不同日期
+- 格式统一处理，防止 `"YYYY-MM-DD HH:MM:SS"` 格式污染下游逻辑
+
+**参考：** data_completeness.py 第80-117行（公共函数定义）
+
+### JSON 数据日期提取规范（重要）
 
 **从 JSON 数据中提取日期时，必须强制转换为字符串：**
 
