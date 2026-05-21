@@ -312,6 +312,7 @@ def run_factor_ic_analysis(
 def run_simple_factor_ic(
     factor_name: str,
     factor_col: str,
+    logger=None,
     **kwargs
 ) -> Dict:
     """
@@ -322,6 +323,7 @@ def run_simple_factor_ic(
     参数:
         factor_name: 因子名称
         factor_col: 因子列名
+        logger: 日志记录器（由调用方传入，默认使用模块 logger）
         **kwargs: 其他参数（传递给 run_factor_ic_analysis）
     
     示例:
@@ -332,6 +334,7 @@ def run_simple_factor_ic(
         factor_name=factor_name,
         factor_col=factor_col,
         factor_cols=[factor_col],
+        logger=logger,
         **kwargs
     )
 
@@ -340,19 +343,21 @@ def run_complex_factor_ic(
     factor_name: str,
     factor_col: str,
     factor_cols: List[str],
-    custom_factor_calculation: Callable,
+    custom_factor_calculation: Optional[Callable] = None,
+    logger=None,
     **kwargs
 ) -> Dict:
     """
     快捷函数：复杂因子 IC 分析
     
-    适用于需要预处理的因子（如 KDJ、布林带）
+    适用于需要预处理因子值的场景（如 KDJ、布林带）
     
     参数:
         factor_name: 因子名称
         factor_col: 最终因子列名
         factor_cols: 需加载的原始因子列
         custom_factor_calculation: 自定义因子计算函数
+        logger: 日志记录器（由调用方传入，默认使用模块 logger）
         **kwargs: 其他参数
     
     示例:
@@ -373,6 +378,7 @@ def run_complex_factor_ic(
         factor_col=factor_col,
         factor_cols=factor_cols,
         custom_factor_calculation=custom_factor_calculation,
+        logger=logger,
         **kwargs
     )
 
@@ -397,15 +403,18 @@ def main():
     
     args = parser.parse_args()
     
+    # CLI 使用模块级 logger
     result = run_simple_factor_ic(
         factor_name=args.factor,
         factor_col=args.col,
         return_period=args.period,
         min_stocks=args.min_stocks,
-        force_full=args.force_full
+        force_full=args.force_full,
+        logger=logger  # 传入模块级 logger
     )
     
-    logger.info(f"结果: {result.get('update_mode', 'unknown')}")
+    # 使用模块级 logger（明确标识）
+    logger.info(f"[CLI] 结果: {result.get('update_mode', 'unknown')}")
 
 
 if __name__ == '__main__':
