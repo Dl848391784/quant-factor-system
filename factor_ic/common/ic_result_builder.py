@@ -113,9 +113,8 @@ def build_ic_result(
     dates = [str(d) for d in ic_series.index]
     ic_values = [round(float(v), 6) for v in ic_series.values]
     
-    # 计算 rolling_ic_mean（20日窗口，min_periods=10）
-    rolling_mean = ic_series.rolling(window=20, min_periods=10).mean()
-    rolling_ic_mean = [round(float(v), 6) if pd.notna(v) else None for v in rolling_mean.values]
+    # 计算 rolling_ic_mean（20日窗口，min_periods=10）— 复用公共函数
+    rolling_ic_mean = build_rolling_ic_mean(ic_series)
     
     # ========== 构建 n_assets ==========
     # 从 ic_series 无法直接获取，需要外部传入或使用 raw_metadata
@@ -414,12 +413,14 @@ def save_ic_result(result: Dict, output_path: Optional[Path] = None) -> Path:
         # 从 result 中提取因子信息生成路径
         factor_name = result.get('factor_name', 'unknown')
         return_period = result.get('factor_stats', {}).get('return_period', '1d')
-        output_path = get_ic_output_path(factor_name.replace('_1d', ''), return_period)
+        # 只处理后缀 _1d，避免误处理因子名中间的 _1d（如 my_1d_factor_1d → my_1d_factor）
+        factor_name_clean = factor_name[:-3] if factor_name.endswith('_1d') else factor_name
+        output_path = get_ic_output_path(factor_name_clean, return_period)
     
     # 确保目录存在
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
-# 保存（统一转换，添加异常处理）
+    # 保存（统一转换，添加异常处理）
     try:
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(convert_to_native_types(result), f, indent=2, ensure_ascii=False)
