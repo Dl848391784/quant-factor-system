@@ -241,9 +241,8 @@ def run_factor_ic_analysis(
                     f"ICIR={stats_result.get('icir', 0.0):.2f}"
                 )
                 
-                # 更新缓存
-                with open(output_path, 'w', encoding='utf-8') as f:
-                    json.dump(convert_to_native_types(result), f, ensure_ascii=False, indent=2)
+                # 更新缓存（复用 save_ic_result 保持一致性）
+                save_ic_result(result, output_path)
         
         return result
     

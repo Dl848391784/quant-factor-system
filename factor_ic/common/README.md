@@ -1063,6 +1063,39 @@ else:
 
 ### 规范要点
 
+**保存逻辑必须统一使用 save_ic_result：**
+
+```python
+# 错误写法（增量模式裸写，全量模式不一致）
+# 全量模式
+save_ic_result(result, output_path)  # 封装调用
+
+# 增量模式（错误）
+with open(output_path, 'w', encoding='utf-8') as f:
+    json.dump(convert_to_native_types(result), f, ensure_ascii=False, indent=2)  # 裸写
+
+# 正确写法（全量/增量统一使用 save_ic_result）
+save_ic_result(result, output_path)  # 全量模式
+save_ic_result(result, output_path)  # 增量模式
+```
+
+**原因：**
+1. 全量/增量模式应使用统一的保存逻辑，便于维护
+2. `save_ic_result` 内置异常处理（PermissionError、OSError），磁盘满/权限错误时有友好日志
+3. 裸写 `json.dump` 无异常处理，磁盘满/权限错误时直接抛出未捕获异常
+4. 封装函数便于统一修改保存逻辑（如添加校验、更改格式）
+
+**适用场景：**
+- 全量模式保存
+- 增量模式保存
+- 任何 IC 结果保存场景
+
+**参考：** factor_ic_runner.py 第244-245行、ic_result_builder.py 第422-433行（2026-05-22 更新）
+
+---
+
+### incremental_engine 规范要点（旧版保留）
+
 1. 增量模式必须复用 calculate_single_day_ic（算法一致性）
 2. 合并时使用字典去重（新值覆盖旧值）
 3. overlap_dates 必须记录（事件追踪）

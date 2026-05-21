@@ -419,9 +419,15 @@ def save_ic_result(result: Dict, output_path: Optional[Path] = None) -> Path:
     # 确保目录存在
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
-# 保存（统一转换）
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(convert_to_native_types(result), f, indent=2, ensure_ascii=False)
-    
-    logger.info(f"  ✓ 结果已保存: {output_path}")
+# 保存（统一转换，添加异常处理）
+    try:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(convert_to_native_types(result), f, indent=2, ensure_ascii=False)
+        logger.info(f"  ✓ 结果已保存: {output_path}")
+    except PermissionError as e:
+        logger.error(f"保存失败（权限错误）: {output_path} - {e}")
+        raise
+    except OSError as e:
+        logger.error(f"保存失败（磁盘满/路径错误）: {output_path} - {e}")
+        raise
     return output_path
