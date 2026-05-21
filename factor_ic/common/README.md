@@ -1110,9 +1110,67 @@ def incremental_update_ic(
 | 逐日 IC 计算 | 复用 calculate_single_day_ic | 确保算法一致性 |
 | 数据合并 | 字典去重（新值优先） | overlap_dates 记录覆盖事件 |
 | 统计重算 | 复用 calculate_ic_statistics | 不手工构建统计字段 |
-| 模式判断 | should_use_incremental() | force_full → 全量 |
+| 模式判断 | should_use_incremental() | 返回 UpdateMode 枚举（三值语义清晰） |
 
-### 辅助函数
+### 步骤日志规范（重要）
+
+**步骤编号必须与实际步骤一致，每个步骤都应有对应日志**
+
+| 场景 | 正确做法 | 错误做法 |
+|------|---------|---------|
+| 5步流程 | `[1/5]` `[2/5]` `[3/5]` `[4/5]` `[5/5]` | 只打 `[1/5]` `[2/5]`，后续无日志 |
+| 流程注释 | "流程: 1-5（与日志编号一致）" | "流程: 1-6" 但日志只有 1-5 |
+
+### 字典访问防御性规范（重要）
+
+**访问外部传入字典字段必须使用 .get() 并提供默认值**
+
+| 场景 | 正确做法 | 错误做法 |
+|------|---------|---------|
+| sample_stats | `raw_metadata.get('total_days', 0)` | `raw_metadata['total_days']` |
+
+**原因：** 外部字典字段可能缺失，KeyError 会中断流程
+
+### 日期比较格式规范（重要）
+
+**日期字符串比较前必须显式统一格式，避免格式不一致导致错误**
+
+```python
+# 错误写法（格式不一致时比较出错）
+if cache_latest >= factor_latest:  # '2026/05/22' vs '2026-05-22' → 错误
+
+# 正确写法（显式格式统一）
+cache_date_normalized = cache_latest.replace('/', '-')
+factor_date_normalized = factor_latest.replace('/', '-')
+if cache_date_normalized >= factor_date_normalized:  # 安全
+```
+
+### 返回值语义规范（重要）
+
+**返回值语义必须清晰，避免布尔多义（False 有多种含义）**
+
+| 场景 | 正确做法 | 错误做法 |
+|------|---------|---------|
+| should_use_incremental | 返回 `UpdateMode` 枚举（INCREMENTAL/FULL/SKIP） | 返回 `bool`（False 含义：缓存不存在 OR 缓存已最新） |
+
+**UpdateMode 枚举定义：**
+```python
+class UpdateMode(Enum):
+    INCREMENTAL = 'incremental'  # 缓存滞后，增量更新
+    FULL = 'full'                # 缓存不存在，全量计算
+    SKIP = 'skip'                # 缓存已最新，无需计算
+```
+
+### 变量命名语义规范（重要）
+
+**变量名必须准确反映其语义，避免误导维护者**
+
+| 场景 | 错误命名 | 正确命名 |
+|------|---------|---------|
+| 因子数据所有日期 | `dates_in_cache`（误导：缓存日期） | `dates_in_factor_data` |
+| 缺失日期中不在因子数据的 | `dates_not_in_cache`（误导：不在缓存） | `phantom_dates`（幽灵日期） |
+
+---
 
 | 函数 | 用途 |
 |------|------|
