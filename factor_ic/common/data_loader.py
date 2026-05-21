@@ -17,7 +17,6 @@
 import gzip
 import json
 import pandas as pd
-import numpy as np
 from pathlib import Path
 from typing import Tuple, List, Optional, Dict
 
@@ -230,8 +229,8 @@ def load_factor_return_data(
             
             # 选择交集日期（保证数据对齐）
             common_dates = factor_dates & return_dates
-            factor_df = factor_df[factor_df['date'].isin(common_dates)]
-            return_df = return_df[return_df['date'].isin(common_dates)]
+            factor_df = factor_df[factor_df['date'].isin(common_dates)].reset_index(drop=True)
+            return_df = return_df[return_df['date'].isin(common_dates)].reset_index(drop=True)
             print(f"    对齐后日期数: {len(common_dates)}")
     
     # ========== 返回结果 ==========

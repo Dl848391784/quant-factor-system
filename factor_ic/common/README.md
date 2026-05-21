@@ -524,6 +524,61 @@ def _convert_date_column(df: pd.DataFrame) -> pd.DataFrame:
 
 **参考：** data_loader.py 第263行（df.copy() 创建副本）
 
+### reset_index 规范（重要）
+
+**过滤/筛选操作后必须 reset_index：**
+
+```python
+# 错误写法（reset_index 缺失）
+factor_df = factor_df.dropna(subset=dropna_cols)  # dropna 后索引断裂
+factor_df = factor_df[factor_df['date'].isin(common_dates)]  # isin 筛选后索引断裂
+# 后续操作可能因索引断裂导致错误
+
+# 正确写法（统一 reset_index）
+factor_df = factor_df.dropna(subset=dropna_cols).reset_index(drop=True)
+factor_df = factor_df[factor_df['date'].isin(common_dates)].reset_index(drop=True)
+# 所有过滤操作后统一重置索引，行为一致
+```
+
+**原因：**
+1. dropna/isin 等过滤操作会导致索引断裂（不连续）
+2. 索引断裂可能导致下游操作错误（如 iloc/loc 混用）
+3. 与前面 dropna 后的 reset_index 行为一致，保持统一性
+4. `reset_index(drop=True)` 避免保留旧索引列
+
+**适用场景：**
+- dropna 过滤缺失值后
+- isin 筛选日期/股票后
+- merge 合并数据后（可选，视场景）
+- 任何导致行数减少的操作后
+
+**参考：** data_loader.py 第225-226行（日期对齐后 reset_index）
+
+### 未使用 import 规范（重要）
+
+**禁止导入未使用的模块：**
+
+```python
+# 错误写法（未使用 import）
+import numpy as np  # 代码中无 np 引用
+import pandas as pd
+...
+
+# 正确写法（只导入需要的模块）
+import gzip
+import json
+import pandas as pd
+from pathlib import Path
+```
+
+**原因：**
+1. 未使用 import 增加代码噪音，降低可读性
+2. 可能误导读者认为模块被使用
+3. 部分工具（如 lint）会检测未使用 import 并报错
+4. 保持代码整洁，只导入真正需要的模块
+
+**参考：** data_loader.py 第17-22行（import 列表）
+
 ---
 
 ## ic_result_builder.py — IC结果构建公共模块
