@@ -514,39 +514,82 @@ logger.info(f"IC 均值: {result.get('ic_mean', 0):.4f}")  # 增量模式可能 
 
 **禁止：** 增量模式使用 `[2/3]`、`[3/3]`，全量模式使用 `[2/4]`、`[3/4]`、`[4/4]`。
 
-### fallback 重置后显式分支规范
+### fallback 使用内部函数重构规范
 
-**`mode = UpdateMode.FULL` 重置后必须显式进入全量分支，不依赖隐式继续执行。**
+**SKIP fallback 应使用内部函数 `do_full_calculation()`，而非 mode 重置依赖 elif 链。**
 
 ```python
-# ✓ 正确：重置后显式进入分支
-try:
-    cached_data = json.load(f)
-    return cached_data
-except FileNotFoundError:
-    logger.warning("[诊断] 缓存文件不存在，fallback 到全量计算")
-    mode = UpdateMode.FULL  # 重置模式
-# ... 后续显式 if-elif 分支处理 FULL 模式
+# ✓ 正确：使用内部函数，逻辑清晰
+def do_full_calculation() -> dict:
+    """执行全量计算（用于正常 FULL 模式和 SKIP fallback）"""
+    # ... 全量计算逻辑
+    return result
 
-if mode == UpdateMode.INCREMENTAL:
-    # 增量分支
+# SKIP 模式
+if mode == UpdateMode.SKIP:
+    try:
+        cached_data = json.load(f)
+        return cached_data
+    except FileNotFoundError:
+        logger.warning("[诊断] 缓存文件不存在，执行全量计算")
+        return do_full_calculation()  # 直接调用，逻辑清晰
+
+# FULL 模式
 elif mode == UpdateMode.FULL:
-    # 全量分支（fallback 会进入这里）
-else:
-    raise RuntimeError(f"未知更新模式: {mode}")
+    return do_full_calculation()  # 复用同一函数
 ```
 
-**禁止：** 依赖隐式继续执行（skip 分支后直接是全量代码块）。
+**禁止：mode 重置依赖 elif 链**
 ```python
-# ❌ 错误：依赖隐式继续执行
-except FileNotFoundError:
-    mode = UpdateMode.FULL
-# 代码继续执行，依赖隐式进入全量代码块（语义歧义）
+# ❌ 错误：mode 重置后依赖 elif 链（逻辑冗余且脆弱）
+if mode == UpdateMode.SKIP:
+    try:
+        cached_data = json.load(f)
+        return cached_data
+    except FileNotFoundError:
+        mode = UpdateMode.FULL  # 重置模式
+        # 依赖后续 elif 链进入 FULL 分支
 
-# ========== 全量计算 ==========  # ← 无 if 判断，依赖隐式继续
+# 后续代码
+elif mode == UpdateMode.INCREMENTAL:
+    ...
+elif mode == UpdateMode.FULL:
+    # fallback 会进入这里，但读者需追踪 elif 链才能理解
 ```
 
-**规范原因：** 显式分支结构语义清晰，避免 fallback 后控制流混乱。
+**规范原因：**
+1. 内部函数语义清晰，fallback 直接调用而非依赖控制流
+2. FULL 模式和 SKIP fallback 复用同一函数，避免代码重复
+3. 维护时不会引入 bug（显式调用而非隐式跳转）
+
+### __main__ 防御性访问规范
+
+**`__main__` 中访问嵌套字段必须使用 `.get()` 防御，兼容 SKIP 模式旧格式缓存。**
+
+SKIP 模式返回的 `cached_data` 结构取决于缓存文件内容，旧格式可能无 `ic_metrics` 层。
+
+```python
+# ✓ 正确：使用 .get() 防御性访问
+if __name__ == '__main__':
+    result = generate_bollinger_pb_ic_data(...)
+    
+    ic_metrics = result.get('ic_metrics', {})  # 兼容旧格式
+    logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
+    logger.info(f"IC 均值: {ic_metrics.get('ic_mean', 0):.4f}")
+    logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
+
+# ❌ 错误：直接访问嵌套字段（SKIP 模式可能 KeyError）
+if __name__ == '__main__':
+    result = generate_bollinger_pb_ic_data(...)
+    
+    logger.info(f"因子名称: {result['factor_name']}")  # 可能 KeyError
+    logger.info(f"IC 均值: {result['ic_metrics']['ic_mean']:.4f}")  # 旧格式无 ic_metrics
+```
+
+**适用场景：**
+- `__main__` 中访问 `result['ic_metrics']['ic_mean']`
+- SKIP 模式返回旧格式缓存（顶层 `ic_mean` 而非 `ic_metrics['ic_mean']`)
+- 增量模式已统一使用 `ic_metrics`，但全量和 SKIP 模式可能不一致
 
 ## NaN处理规范
 
@@ -2472,6 +2515,41 @@ from factor_ic.common.ic_calculator import calculate_ic_statistics  # ✗ 分散
 □ 遵循 PEP8 规范
 □ 提高代码可读性
 ```
+
+### 未使用导入清理规范
+
+**导入但从未使用的模块必须删除，避免死代码误导读者。**
+
+```python
+# ✓ 正确：只导入实际使用的模块
+from factor_ic.common import (
+    load_factor_return_data,
+    calculate_ic_with_direction_verification,
+    build_ic_result,
+    incremental_update_ic,
+    save_ic_result
+)
+from factor_ic.common.incremental_engine import UpdateMode, should_use_incremental
+from factor_ic.common.data_completeness import get_ic_output_path
+
+# ❌ 错误：导入但从未使用
+from factor_ic.common.data_completeness import get_ic_output_path, check_data_completeness
+# check_data_completeness 已被 should_use_incremental 替代，应删除
+```
+
+**典型场景：**
+
+| 场景 | 旧导入 | 新导入 | 清理要求 |
+|------|--------|--------|---------|
+| 函数替代 | `check_data_completeness` | `should_use_incremental` | 删除旧导入 |
+| 模块重构 | `from old_module import func` | `from new_module import func` | 删除旧模块导入 |
+| 功能移除 | `from module import deprecated_func` | 无 | 删除整个导入 |
+
+**为何必须清理未使用导入：**
+1. 未使用导入误导读者：以为代码依赖该模块
+2. 代码审计浪费时间：分析未使用导入的用途
+3. 增加导入开销：Python 仍会加载未使用模块（虽有缓存机制）
+4. 维护混乱：重构时误认为需要保留未使用模块
 
 ## 全量路径与增量路径防御对称规范
 
