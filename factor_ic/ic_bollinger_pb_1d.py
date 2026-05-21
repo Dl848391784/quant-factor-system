@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 """
-布林带%B 因子 IC 计算器（重构版） - 1日收益周期
+布林带%B 因子 IC 计算器 - 使用公共模块主入口
 
-使用公共模块实现数据加载和输出构建，保留布林带计算逻辑。
-代码量从 ~1129行降至 ~200行（布林带计算保留）。
+遵循 PROJECT.md 公共模块强制复用规范：
+- 主流程使用 run_complex_factor_ic()（禁止手写三模式分支）
+- 仅实现因子特有计算逻辑（布林带公式）
+
+代码量：~80行（仅布林带计算），而非 ~300行手写主流程。
 
 因子定义：
 - Middle Band = SMA(Close, N)
 - Upper Band = Middle Band + K × StdDev(Close, N)
 - Lower Band = Middle Band - K × StdDev(Close, N)
-- %B = (Close - Lower Band) / (Upper Band - Lower Band)
+- %B = (Close - Lower Band) / (Upper Band - Lower Band) × 100%
 
 参数：
 - N = 20（移动平均周期）
-- K = 2.0（标准差倍数）
+- K = 2.0（标差倍数）
 
 作者: 云瑶
 重构日期: 2026-05-22
@@ -23,24 +26,14 @@
 
 import sys
 from pathlib import Path
-import json
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
-import numpy as np
 
-# 导入公共模块
-from factor_ic.common import (
-    load_factor_return_data,
-    calculate_ic_with_direction_verification,
-    build_ic_result,
-    incremental_update_ic,
-    save_ic_result
-)
-from factor_ic.common.incremental_engine import UpdateMode, should_use_incremental
-from factor_ic.common.data_completeness import get_ic_output_path
+# 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
+from factor_ic.common.factor_ic_runner import run_complex_factor_ic
 from factor_ic.common.logger_config import get_logger
 
 logger = get_logger(__name__)
@@ -49,14 +42,12 @@ logger = get_logger(__name__)
 # 参数统一管理
 # ============================================================================
 DEFAULT_MIN_STOCKS = 10
-
-# 布林带默认参数
 DEFAULT_N = 20     # 移动平均周期
 DEFAULT_K = 2.0    # 标差倍数
 
 
 # ============================================================================
-# 布林带 %B 计算
+# 布林带 %B 计算（因子特有逻辑）
 # ============================================================================
 
 def calculate_bollinger_pb(
@@ -65,7 +56,7 @@ def calculate_bollinger_pb(
     k: float = DEFAULT_K
 ) -> pd.DataFrame:
     """
-    计算布林带 %B 因子
+    计算布林带 %B 因子（因子特有逻辑）
     
     参数:
         factor_df: 包含 close 列的 DataFrame
@@ -73,7 +64,7 @@ def calculate_bollinger_pb(
         k: 标差倍数
     
     返回:
-        添加 bollinger_pb, middle_band, upper_band, lower_band 列的 DataFrame
+        添加 bollinger_pb 列的 DataFrame
     
     注意:
         函数入口必须先 .copy()，避免修改原始数据
@@ -117,194 +108,54 @@ def calculate_bollinger_pb(
         logger.warning(f"检测到 {abnormal_count} 个异常布林带宽度（负值），已标记为 NaN")
     
     factor_df['bollinger_pb'] = bollinger_pb
-    factor_df['middle_band'] = middle
-    factor_df['upper_band'] = upper
-    factor_df['lower_band'] = lower
     
     return factor_df
 
 
 # ============================================================================
-# 主函数
+# CLI 入口
 # ============================================================================
 
-def generate_bollinger_pb_ic_data(
-    output_file: Path | str | None = None,
-    force_full: bool = False,
-    n: int = DEFAULT_N,
-    k: float = DEFAULT_K,
-    min_stocks: int = DEFAULT_MIN_STOCKS
-) -> dict:
-    """
-    从缓存数据计算布林带 %B IC
-    
-    参数:
-        output_file: 输出文件路径
-        force_full: 强制全量计算
-        n: 移动平均周期
-        k: 标差倍数
-        min_stocks: 最小股票数阈值
-    
-    返回:
-        IC 数据字典
-    """
-    # 统一转换为 Path 对象
-    if output_file is None:
-        output_file = get_ic_output_path('bollinger_pb_1d')
-    else:
-        output_file = Path(output_file)
-    
-    logger.info("=" * 60)
-    logger.info(f"布林带%B IC 计算器（重构版） - 1日收益周期")
-    logger.info(f"参数: N={n}, K={k}")
-    logger.info("=" * 60)
-    
-    # ========== Step 1: 加载原始数据 ==========
-    logger.info("[1/4] 从缓存加载因子和收益数据...")
-    try:
-        factor_df, return_df, raw_metadata = load_factor_return_data(
-            factor_cols=['close'],
-            logger=logger
-        )
-        logger.info("✓ 加载成功")
-        logger.info(f"原始日期范围: {raw_metadata['period_start']} ~ {raw_metadata['period_end']}")
-        
-    except FileNotFoundError as e:
-        raise RuntimeError(f"缓存文件不存在: {e}") from e
-    
-    # ========== 内部函数：全量计算 ==========
-    def do_full_calculation() -> dict:
-        """执行全量计算（用于正常 FULL 模式和 SKIP fallback）"""
-        logger.info("[模式] 全量计算")
-        logger.info("[2/4] 计算布林带 %B 因子...")
-        factor_df_calc = calculate_bollinger_pb(factor_df, n=n, k=k)
-        logger.info("✓ 布林带 %B 计算完成")
-        
-        logger.info("[3/4] 计算 IC...")
-        ic_result = calculate_ic_with_direction_verification(
-            factor_df=factor_df_calc,
-            return_df=return_df,
-            factor_col='bollinger_pb',
-            return_col='forward_return_1d',
-            min_stocks=min_stocks,
-            logger=logger
-        )
-        
-        logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
-        logger.info(f"ICIR: {ic_result['icir']:.2f}")
-        logger.info(f"正比例: {ic_result['positive_ratio']:.1%}")
-        
-        logger.info("[4/4] 构建输出并保存...")
-        result = build_ic_result(
-            ic_result=ic_result,
-            raw_metadata=raw_metadata,
-            factor_name='bollinger_pb_1d',
-            data_source='cache/factor_data/factor_data.json.gz',
-            factor_col='bollinger_pb'
-        )
-        
-        result['params'] = {
-            'n': n,
-            'k': k,
-            'factor_col': 'bollinger_pb'
-        }
-        
-        save_ic_result(result, output_file)
-        
-        logger.info("=" * 60)
-        logger.info(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC 数据")
-        logger.info("=" * 60)
-        
-        return result
-    
-    # ========== Step 2: 判断模式 ==========
-    mode = should_use_incremental(output_file, factor_df, force_full)
-    
-    # ========== SKIP 模式 ==========
-    if mode == UpdateMode.SKIP:
-        logger.info("[模式] 缓存已最新，跳过更新")
-        try:
-            with open(output_file, 'r', encoding='utf-8') as f:
-                cached_data = json.load(f)
-                cached_data['update_mode'] = 'skip'
-                return cached_data
-        except FileNotFoundError:
-            # 缓存文件被删除（并发情况），fallback 到全量计算
-            logger.warning("[诊断] 缓存文件不存在（可能被并发删除），执行全量计算")
-            return do_full_calculation()  # 直接调用，逻辑清晰
-        except json.JSONDecodeError as e:
-            raise RuntimeError(f"缓存文件损坏: {output_file}\n{e}") from e
-    
-    # ========== INCREMENTAL 模式 ==========
-    elif mode == UpdateMode.INCREMENTAL:
-        logger.info("[模式] 增量更新")
-        logger.info("[2/4] 计算布林带 %B 因子（需要全量历史数据）...")
-        
-        factor_df = calculate_bollinger_pb(factor_df, n=n, k=k)
-        logger.info("✓ 布林带 %B 计算完成")
-        
-        logger.info("[3/4] 执行增量 IC 计算...")
-        result = incremental_update_ic(
-            output_path=output_file,
-            factor_df_full=factor_df,
-            return_df_full=return_df,
-            raw_metadata=raw_metadata,
-            factor_name='bollinger_pb_1d',
-            factor_col='bollinger_pb',
-            return_col='forward_return_1d',
-            min_stocks=min_stocks
-        )
-        
-        result['params'] = {
-            'n': n,
-            'k': k,
-            'factor_col': 'bollinger_pb'
-        }
-        
-        # 使用 .get() 防御性访问（兼容旧格式缓存）
-        ic_metrics = result.get('ic_metrics', {})
-        logger.info(f"IC 均值: {ic_metrics.get('ic_mean', 0):.4f}")
-        logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
-        logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
-        logger.info("=" * 60)
-        
-        return result
-    
-    # ========== FULL 模式 ==========
-    elif mode == UpdateMode.FULL:
-        return do_full_calculation()
-    
-    # ========== 未知模式（防御性代码） ==========
-    else:
-        raise RuntimeError(f"未知更新模式: {mode}")
-
-
-if __name__ == '__main__':
+def main():
+    """CLI 主入口"""
     import argparse
     
-    parser = argparse.ArgumentParser(description='布林带%B IC 计算器（重构版）')
+    parser = argparse.ArgumentParser(description='布林带%B IC 计算器')
     parser.add_argument('--force-full', action='store_true', help='强制全量计算')
-    parser.add_argument('--output', type=str, help='输出文件路径')
     parser.add_argument('--n', type=int, default=DEFAULT_N, help='移动平均周期')
     parser.add_argument('--k', type=float, default=DEFAULT_K, help='标差倍数')
+    parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数')
     
     args = parser.parse_args()
     
+    # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
+    result = run_complex_factor_ic(
+        factor_name='bollinger_pb',
+        factor_col='bollinger_pb',
+        factor_cols=['close'],
+        custom_factor_calculation=calculate_bollinger_pb,
+        custom_factor_calculation_params={'n': args.n, 'k': args.k},
+        min_stocks=args.min_stocks,
+        force_full=args.force_full,
+        _logger=logger
+    )
+    
+    # 使用 .get() 防御性访问结果
+    ic_metrics = result.get('ic_metrics', {})
+    logger.info("=" * 60)
+    logger.info("结果摘要:")
+    logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
+    logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
+    logger.info(f"IC 均值: {ic_metrics.get('ic_mean', 0):.4f}")
+    logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
+    logger.info("=" * 60)
+    
+    return result
+
+
+if __name__ == '__main__':
     try:
-        result = generate_bollinger_pb_ic_data(
-            output_file=args.output,
-            force_full=args.force_full,
-            n=args.n,
-            k=args.k
-        )
-        
-        # 使用 .get() 防御性访问（兼容 SKIP 模式旧格式缓存）
-        ic_metrics = result.get('ic_metrics', {})
-        logger.info("结果摘要:")
-        logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
-        logger.info(f"IC 均值: {ic_metrics.get('ic_mean', 0):.4f}")
-        logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
-        
+        main()
     except RuntimeError as e:
         logger.error(f"计算失败: {e}")
         sys.exit(1)
