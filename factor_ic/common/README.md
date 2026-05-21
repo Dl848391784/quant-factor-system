@@ -66,6 +66,32 @@ elif isinstance(obj, bool):
 2. 若有人在未来添加 `isinstance(obj, int)` 分支在 bool 检查之前，合并写法会将 True/False 误判为整数
 3. 显式分开处理：意图清晰，防止分支顺序变化导致的隐蔽 bug
 
+### 单例检查规范（重要）
+
+**必须用 `is` 判断单例对象：**
+
+| 单例对象 | 正确写法 | 错误写法 |
+|---------|---------|---------|
+| pd.NaT | `obj is pd.NaT` | `isinstance(obj, type(pd.NaT))` |
+| pd.NA | `obj is pd.NA` | `isinstance(obj, type(pd.NA))` |
+| None | `obj is None` | `isinstance(obj, type(None))` |
+
+**错误写法示例：**
+```python
+# 错误写法（冗余 + 依赖私有类）
+elif obj is pd.NA or isinstance(obj, type(pd.NA)):
+    return None
+
+# 正确写法（单例用 is 即可）
+elif obj is pd.NA:
+    return None
+```
+
+**原因：**
+1. 单例对象（如 pd.NA、pd.NaT、None）全局唯一，`is` 检查完全覆盖
+2. `isinstance(obj, type(singleton))` 依赖私有内部类（如 `pandas.core.arrays.masked.NAType`），跨版本不稳定
+3. isinstance 检查单例是冗余的，增加不必要的类型查找开销
+
 **参考：** convert_types.py 源码注释（2026-05-22 更新）
 
 ---
