@@ -45,18 +45,31 @@
   "factor_name": "<str>",
   "calculation_date": "<ISO时间>",
   "period": {"start": "<str>", "end": "<str>", "description": "<str>"},
-  "ic_metrics": {"ic_mean": <float>, "ic_std": <float>, "icir": <float>, "p_value": <float>},
-  "sample_stats": {"total_days": <int>, "valid_days": <int>, "avg_stocks_per_day": <float>},
-  "statistical_significance": {"t_stat", "p_value", "nw_lag", "is_significant", "conclusion"},
-  "factor_direction": {"direction", "ic_mean", "conclusion"},
+  "ic_metrics": {"ic_mean": <float>, "ic_std": <float>, "icir": <float>, "p_value": <float>, "p_value_display": "<str>"},
+  "sample_stats": {"total_days": <int>, "valid_days": <int>, "avg_stocks_per_day": <float>, "avg_stocks_period": {"start": "<str>", "end": "<str>", "description": "<str>"}},
+  "statistical_significance": {"t_stat": <float>, "p_value": <float>, "p_value_display": "<str>", "nw_lag": <int>, "nw_lag_method": "<str>", "is_significant": <bool>, "conclusion": "<str>"},
+  "factor_direction": {"ic_mean": <float>, "ic_mean_sign": "<str>", "direction_usage": "<str>", "conclusion": "<str>"},
+  "economic_significance": {"abs_ic_mean": <float>, "threshold_used": {"weak": 0.03, "strong": 0.05}, "level": "<str>", "is_economically_significant": <bool>, "conclusion": "<str>"},
+  "icir_stability": {"icir": <float>, "threshold_used": {"usable": 0.5, "good": 1.0, "excellent": 2.0}, "level": "<str>", "is_stable": <bool>, "conclusion": "<str>"},
+  "ic_distribution_consistency": {"positive_ratio": <float>, "ic_mean_sign": "<str>", "consistency_type": "<str>", "distribution_hint": "<str>", "is_consistent": <bool>, "conclusion": "<str>"},
   "dates": ["<日期列表>"],
   "ic_values": [<IC值列表>],
   "rolling_ic_mean": [<滚动均值列表>],
   "positive_ratio": <float>,
-  "summary": {"recommendation": "<str>"},
+  "summary": {"ic_performance": "<str>", "statistical_significance": "<str>", "factor_direction": "<str>", "economic_significance": "<str>", "recommendation": "<str>"},
   "update_mode": "<str>"
 }
 ```
+
+**字段说明（五维度判断）**：
+
+| 字段 | 判断依据 | 子字段 |
+|------|---------|--------|
+| statistical_significance | Newey-West t检验，p<0.05 | t_stat, p_value, p_value_display, nw_lag, nw_lag_method, is_significant, conclusion |
+| factor_direction | ic_mean 符号判断 | ic_mean, ic_mean_sign, direction_usage, conclusion |
+| economic_significance | |ic_mean| >= 0.03/0.05 | abs_ic_mean, threshold_used, level, is_economically_significant, conclusion |
+| icir_stability | |ICIR| >= 0.5/1.0/2.0 | icir, threshold_used, level, is_stable, conclusion |
+| ic_distribution_consistency | 正比例与方向一致/矛盾 | positive_ratio, ic_mean_sign, consistency_type, distribution_hint, is_consistent, conclusion |
 
 ---
 
@@ -113,6 +126,12 @@
     - 新增"CLI 入口异常处理堆栈保留规范"章节
     - 修复 ic_kdj_j_1d.py `calculate_kdj_j` 中间变量污染问题（rsv/k/d 改为局部变量）
     - 修复 `__main__` 异常处理堆栈丢失问题（logger.error → logger.exception）
+17. v3.5（2026-05-22 17:15）：
+    - 补充输出结构模板缺失字段（五维度判断完整定义）
+    - 添加 economic_significance、icir_stability、ic_distribution_consistency 字段定义
+    - 更新 ic_metrics（添加 p_value_display）、sample_stats（添加 avg_stocks_period）
+    - 更新 statistical_significance（7字段）、factor_direction（4字段）、summary（5子字段）
+    - 添加五维度判断字段说明表
 
 # 一、概述与基础
 
