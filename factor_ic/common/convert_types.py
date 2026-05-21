@@ -5,6 +5,11 @@
 将 numpy/pandas 类型转换为 Python 原生类型，
 确保 JSON 序列化正常工作。
 
+类型检查规范（2026-05-22）：
+- np.integer 是所有 numpy 整数类型的抽象基类，无需显式列举子类
+- np.floating 是所有 numpy 浮点类型的抽象基类，无需显式列举子类
+- 显式列举子类（如 np.int64/np.int32）是冗余的，且会造成误解
+
 作者: 云舟
 日期: 2026-05-10
 """
@@ -42,10 +47,12 @@ def convert_to_native_types(obj: Any) -> Any:
     elif isinstance(obj, list):
         return [convert_to_native_types(v) for v in obj]
     
-    elif isinstance(obj, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+    elif isinstance(obj, np.integer):
+        # np.integer 是所有 numpy 整数类型的抽象基类（int64/int32/int16/int8/uint64等）
         return int(obj)
     
-    elif isinstance(obj, (np.floating, np.float64, np.float32, np.float16)):
+    elif isinstance(obj, np.floating):
+        # np.floating 是所有 numpy 浮点类型的抽象基类（float64/float32/float16）
         # 处理 NaN
         if np.isnan(obj):
             return None
