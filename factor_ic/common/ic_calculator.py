@@ -191,10 +191,8 @@ def calculate_ic_with_direction_verification(
     ic_std = ic_series.std()
     
     # ICIR 使用 |ic_mean| / ic_std，统一判断标准（反向因子也适用）
-    if ic_std == 0:
-        icir = 0.0
-    else:
-        icir = abs(ic_mean) / ic_std
+    # 注意：除零防护与 calculate_ic_statistics 保持一致（三元表达式）
+    icir = abs(ic_mean) / ic_std if ic_std > 0 else 0.0
     
     n = len(ic_series)
     
