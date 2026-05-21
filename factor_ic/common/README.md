@@ -677,6 +677,40 @@ select_cols = list(dict.fromkeys(['date', 'asset'] + factor_cols))
 
 **参考：** data_loader.py 第204行（dict.fromkeys 去重保序）
 
+### dropna_cols 参数验证规范（重要）
+
+**使用 dropna 前验证列是否存在：**
+
+```python
+# 错误写法（列未验证，pandas 抛出不友好的 KeyError）
+factor_df = factor_df.dropna(subset=dropna_cols)
+# 若 dropna_cols=['invalid_col']，pandas KeyError: "['invalid_col'] not in index"
+
+# 正确写法（在 dropna 前验证，提供友好错误信息）
+missing_dropna_cols = [col for col in dropna_cols if col not in factor_df.columns]
+if missing_dropna_cols:
+    available_cols = sorted([c for c in factor_df.columns if c not in ['date', 'asset']])
+    raise KeyError(
+        f"dropna_cols 包含不存在的列: {missing_dropna_cols}\n"
+        f"可用列: {available_cols}"
+    )
+
+factor_df = factor_df.dropna(subset=dropna_cols).reset_index(drop=True)
+```
+
+**原因：**
+1. 用户显式传入 dropna_cols 参数时，可能包含不存在的列名
+2. pandas 原生 KeyError 信息不友好，不显示可用列
+3. 提供可用列列表，帮助用户快速修正参数
+4. 与其他参数验证风格一致（如 factor_cols、return_col）
+
+**适用场景：**
+- 用户显式传入 dropna_cols 参数
+- dropna 操作前验证列是否存在
+- 任何使用 subset 参数的 pandas 操作前
+
+**参考：** data_loader.py 第218-226行（dropna 前验证列）
+
 ---
 
 ## ic_result_builder.py — IC结果构建公共模块

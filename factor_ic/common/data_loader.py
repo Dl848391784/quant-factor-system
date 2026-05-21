@@ -215,6 +215,15 @@ def load_factor_return_data(
     if dropna_cols is None:
         dropna_cols = default_dropna_cols
     
+    # 验证 dropna_cols 中的列是否存在于 factor_df
+    missing_dropna_cols = [col for col in dropna_cols if col not in factor_df.columns]
+    if missing_dropna_cols:
+        available_cols = sorted([c for c in factor_df.columns if c not in ['date', 'asset']])
+        raise KeyError(
+            f"dropna_cols 包含不存在的列: {missing_dropna_cols}\n"
+            f"可用列: {available_cols}"
+        )
+    
     factor_df = factor_df.dropna(subset=dropna_cols).reset_index(drop=True)
     return_df = return_df.dropna(subset=['forward_return']).reset_index(drop=True)
     
