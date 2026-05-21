@@ -204,32 +204,32 @@ def run_factor_ic_analysis(
                 from .ic_calculator import calculate_ic_statistics
                 stats_result = calculate_ic_statistics(valid_ic)
                 
-                # 补充五维度判断字段
-                result['statistical_significance'] = stats_result['statistical_significance']
-                result['factor_direction'] = stats_result['factor_direction']
-                result['economic_significance'] = stats_result['economic_significance']
-                result['icir_stability'] = stats_result['icir_stability']
-                result['ic_distribution_consistency'] = stats_result['ic_distribution_consistency']
-                result['summary'] = stats_result['summary']
+                # 补充五维度判断字段（使用 .get() 鷻加默认值防止 KeyError）
+                result['statistical_significance'] = stats_result.get('statistical_significance', {})
+                result['factor_direction'] = stats_result.get('factor_direction', {})
+                result['economic_significance'] = stats_result.get('economic_significance', {})
+                result['icir_stability'] = stats_result.get('icir_stability', {})
+                result['ic_distribution_consistency'] = stats_result.get('ic_distribution_consistency', {})
+                result['summary'] = stats_result.get('summary', '无')
                 
-                # 更新统计量（基于有效 IC）
-                result['ic_mean'] = stats_result['ic_mean']
-                result['ic_std'] = stats_result['ic_std']
-                result['icir'] = stats_result['icir']
-                result['p_value'] = stats_result['p_value']
-                result['t_stat'] = stats_result['t_stat']
-                result['positive_ratio'] = stats_result['positive_ratio']
-                result['n_days'] = stats_result['n_days']
+                # 更新统计量（基于有效 IC，使用 .get() 防止 KeyError）
+                result['ic_mean'] = stats_result.get('ic_mean', 0.0)
+                result['ic_std'] = stats_result.get('ic_std', 0.0)
+                result['icir'] = stats_result.get('icir', 0.0)
+                result['p_value'] = stats_result.get('p_value', 1.0)
+                result['t_stat'] = stats_result.get('t_stat', 0.0)
+                result['positive_ratio'] = stats_result.get('positive_ratio', 0.0)
+                result['n_days'] = stats_result.get('n_days', 0)
                 
                 # 更新有效数据（保持一致性）
                 result['valid_dates'] = valid_dates
                 result['valid_ic_values'] = valid_ic.tolist()
                 
-                # 记录日志
+                # 记录日志（使用 .get() 防止 KeyError）
                 logger.info(
                     f"五维度补充完成: 有效天数={len(valid_ic)}, "
-                    f"IC均值={stats_result['ic_mean']:.4f}, "
-                    f"ICIR={stats_result['icir']:.2f}"
+                    f"IC均值={stats_result.get('ic_mean', 0.0):.4f}, "
+                    f"ICIR={stats_result.get('icir', 0.0):.2f}"
                 )
                 
                 # 更新缓存
