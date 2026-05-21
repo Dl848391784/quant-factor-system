@@ -579,6 +579,36 @@ from pathlib import Path
 
 **参考：** data_loader.py 第17-22行（import 列表）
 
+### 列表浅拷贝规范（重要）
+
+**列表赋值必须使用显式拷贝（防止引用污染）：**
+
+```python
+# 错误写法（浅拷贝，引用同一对象）
+default_dropna_cols = factor_cols  # 浅拷贝，引用调用方传入的列表
+all_factor_cols = factor_cols      # 同上，注释说"独立变量"但实际是引用
+# 调用方修改 factor_cols 会影响函数内的 default_dropna_cols
+
+# 正确写法（显式拷贝，创建新列表对象）
+default_dropna_cols = list(factor_cols)  # 真正的副本，不污染调用方
+all_factor_cols = list(factor_cols)      # 真正的副本，不污染调用方
+# 调用方修改 factor_cols 不影响函数内的副本
+```
+
+**原因：**
+1. Python 列表赋值是浅拷贝（引用传递），而非深拷贝
+2. `a = b` 让 a 和 b 指向同一对象，修改一个会影响另一个
+3. 函数参数是调用方传入的列表，函数内赋值仍引用原列表
+4. 注释说"独立变量"但实际是引用，语义矛盾，误导维护者
+5. 使用 `list()` 创建新列表对象，确保真正的独立
+
+**适用场景：**
+- 函数参数是可变对象（List、Dict、Set）
+- 需要在函数内修改副本而不影响调用方
+- 注释说"独立变量"或"副本"时必须使用显式拷贝
+
+**参考：** data_loader.py 第132-135行（list() 创建副本）
+
 ---
 
 ## ic_result_builder.py — IC结果构建公共模块

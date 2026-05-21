@@ -127,11 +127,11 @@ def load_factor_return_data(
     print(f"  - 原始平均每日股票数: {raw_avg_stocks_per_day}")
     
     # ========== 加载额外因子文件（如有） ==========
-    # 在修改 factor_cols 之前，确定 dropna_cols 默认值（基于原始 factor_cols）
-    # 避免隐式包含额外列，防止过多数据被过滤
-    default_dropna_cols = factor_cols
+    # 在修改因子列列表之前，创建 factor_cols 的副本（防止引用污染）
+    # 使用 list() 创建新列表对象，确保后续操作不影响调用方传入的原始列表
+    default_dropna_cols = list(factor_cols)
     
-    all_factor_cols = factor_cols  # 独立变量，保持顺序，不污染调用方
+    all_factor_cols = list(factor_cols)  # 真正的副本，不污染调用方
     
     if additional_factor_files:
         for col_name, file_path in additional_factor_files.items():
