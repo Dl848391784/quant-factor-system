@@ -51,7 +51,7 @@ def run_factor_ic_analysis(
     additional_factor_files: Optional[Dict[str, Path]] = None,
     custom_factor_calculation: Optional[Callable] = None,
     custom_factor_calculation_params: Optional[Dict[str, Any]] = None,
-    logger=None
+    _logger=None
 ) -> Dict[str, Any]:
     """
     因子 IC 分析统一主入口
@@ -72,6 +72,8 @@ def run_factor_ic_analysis(
             - 用于需要预处理因子值的场景（如 KDJ 计算）
             - 函数签名: (factor_df: pd.DataFrame) -> pd.DataFrame
         custom_factor_calculation_params: 自定义因子计算参数
+        _logger: 日志记录器（由调用方传入，默认使用模块 logger）
+            - 参数名使用下划线前缀避免遮蔽模块级 logger
     
     返回:
         IC 分析结果字典（符合 MODULE.md 输出结构统一性规范）
@@ -102,13 +104,14 @@ def run_factor_ic_analysis(
             custom_factor_calculation=calculate_kdj_j
         )
     """
-    # logger fallback 初始化（使用模块级已导入的 get_logger）
-    if logger is None:
-        logger = get_logger(__name__)
+    # _logger fallback 初始化（使用模块级已导入的 get_logger）
+    # 参数重命名避免遮蔽模块级 logger
+    if _logger is None:
+        _logger = get_logger(__name__)
     
-    logger.info("=" * 60)
-    logger.info(f"因子 IC 分析: {factor_name}_{return_period}")
-    logger.info("=" * 60)
+    _logger.info("=" * 60)
+    _logger.info(f"因子 IC 分析: {factor_name}_{return_period}")
+    _logger.info("=" * 60)
     
     # ========== 确定路径 ==========
     if output_path is None:
@@ -125,7 +128,7 @@ def run_factor_ic_analysis(
     else:
         # 参数校验：factor_col 必须在 factor_cols 中
         if factor_col not in factor_cols:
-            logger.warning(
+            _logger.warning(
                 f"factor_col '{factor_col}' 不在 factor_cols {factor_cols} 中，"
                 f"自动添加以防止列缺失错误"
             )
@@ -134,7 +137,7 @@ def run_factor_ic_analysis(
     data_source = str(factor_cache_path)
     
     # ========== 判断模式 ==========
-    logger.info("[模式判断] 判断更新模式...")
+    _logger.info("[模式判断] 判断更新模式...")
     
     # 先尝试加载数据（用于判断模式）
     try:
@@ -144,11 +147,11 @@ def run_factor_ic_analysis(
             factor_cache_path=factor_cache_path,
             return_cache_path=return_cache_path,
             additional_factor_files=additional_factor_files,
-            logger=logger
+            logger=_logger
         )
     except FileNotFoundError as e:
         # 缓存不存在：返回错误结构
-        logger.error(f"数据加载失败: {e}")
+        _logger.error(f"数据加载失败: {e}")
         return build_error_result(
             factor_name=f'{factor_name}_{return_period}',
             error_msg=str(e),
@@ -157,7 +160,7 @@ def run_factor_ic_analysis(
         )
     except Exception as e:
         # 其他异常：返回错误结构
-        logger.error(f"数据加载异常: {e}")
+        _logger.error(f"数据加载异常: {e}")
         return build_error_result(
             factor_name=f'{factor_name}_{return_period}',
             error_msg=str(e),
@@ -171,7 +174,7 @@ def run_factor_ic_analysis(
     # ========== 执行计算 ==========
     if use_incremental:
         # 增量模式
-        logger.info("[执行模式] 增量更新...")
+        _logger.info("[执行模式] 增量更新...")
         
         result = incremental_update_ic(
             output_path=output_path,
@@ -190,7 +193,7 @@ def run_factor_ic_analysis(
             
             # 检查长度一致性（防止数据不一致）
             if len(result.get('ic_values', [])) != len(result.get('dates', [])):
-                logger.warning(
+                _logger.warning(
                     f"增量数据长度不一致: ic_values={len(result.get('ic_values', []))}, "
                     f"dates={len(result.get('dates', []))}"
                 )
@@ -233,7 +236,7 @@ def run_factor_ic_analysis(
                 result['valid_ic_values'] = valid_ic.tolist()
                 
                 # 记录日志（使用 .get() 防止 KeyError）
-                logger.info(
+                _logger.info(
                     f"五维度补充完成: 有效天数={len(valid_ic)}, "
                     f"IC均值={stats_result.get('ic_mean', 0.0):.4f}, "
                     f"ICIR={stats_result.get('icir', 0.0):.2f}"
@@ -247,17 +250,17 @@ def run_factor_ic_analysis(
     
     else:
         # 全量模式
-        logger.info("[执行模式] 全量计算...")
+        _logger.info("[执行模式] 全量计算...")
         
         # 自定义因子计算（如有）
         if custom_factor_calculation is not None:
-            logger.info("[因子预处理] 执行自定义因子计算...")
+            _logger.info("[因子预处理] 执行自定义因子计算...")
             params = custom_factor_calculation_params or {}
             factor_df = custom_factor_calculation(factor_df, **params)
-            logger.info(f"处理后数据: {len(factor_df)} 行")
+            _logger.info(f"处理后数据: {len(factor_df)} 行")
         
         # 计算 IC（五维度判断）
-        logger.info("[IC 计算] 计算 IC（含五维度判断）...")
+        _logger.info("[IC 计算] 计算 IC（含五维度判断）...")
         
         try:
             ic_result = calculate_ic_with_direction_verification(
@@ -268,15 +271,15 @@ def run_factor_ic_analysis(
                 date_col='date',
                 asset_col='asset',
                 min_stocks=min_stocks,
-                logger=logger
+                logger=_logger
             )
             
-            logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
-            logger.info(f"ICIR: {ic_result['icir']:.2f}")
-            logger.info(f"t 统计量: {ic_result['statistical_significance']['t_stat']:.2f}")
+            _logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
+            _logger.info(f"ICIR: {ic_result['icir']:.2f}")
+            _logger.info(f"t 统计量: {ic_result['statistical_significance']['t_stat']:.2f}")
             
         except Exception as e:
-            logger.error(f"IC 计算失败: {e}")
+            _logger.error(f"IC 计算失败: {e}")
             return build_error_result(
                 factor_name=f'{factor_name}_{return_period}',
                 error_msg=f'IC 计算失败: {e}',
@@ -285,7 +288,7 @@ def run_factor_ic_analysis(
             )
         
         # 构建完整结果
-        logger.info("[结果构建] 构建完整输出结构...")
+        _logger.info("[结果构建] 构建完整输出结构...")
         
         result = build_ic_result(
             ic_result=ic_result,
@@ -300,9 +303,9 @@ def run_factor_ic_analysis(
         # 保存
         save_ic_result(result, output_path)
         
-        logger.info("=" * 60)
-        logger.info(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC")
-        logger.info("=" * 60)
+        _logger.info("=" * 60)
+        _logger.info(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC")
+        _logger.info("=" * 60)
         
         return result
 
@@ -312,7 +315,7 @@ def run_factor_ic_analysis(
 def run_simple_factor_ic(
     factor_name: str,
     factor_col: str,
-    logger=None,
+    _logger=None,
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -323,7 +326,8 @@ def run_simple_factor_ic(
     参数:
         factor_name: 因子名称
         factor_col: 因子列名
-        logger: 日志记录器（由调用方传入，默认使用模块 logger）
+        _logger: 日志记录器（由调用方传入，默认使用模块 logger）
+            - 参数名使用下划线前缀避免遮蔽模块级 logger
         **kwargs: 其他参数（传递给 run_factor_ic_analysis）
     
     示例:
@@ -334,7 +338,7 @@ def run_simple_factor_ic(
         factor_name=factor_name,
         factor_col=factor_col,
         factor_cols=[factor_col],
-        logger=logger,
+        _logger=_logger,
         **kwargs
     )
 
@@ -344,7 +348,7 @@ def run_complex_factor_ic(
     factor_col: str,
     factor_cols: List[str],
     custom_factor_calculation: Optional[Callable] = None,
-    logger=None,
+    _logger=None,
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -357,7 +361,8 @@ def run_complex_factor_ic(
         factor_col: 最终因子列名
         factor_cols: 需加载的原始因子列
         custom_factor_calculation: 自定义因子计算函数
-        logger: 日志记录器（由调用方传入，默认使用模块 logger）
+        _logger: 日志记录器（由调用方传入，默认使用模块 logger）
+            - 参数名使用下划线前缀避免遮蔽模块级 logger
         **kwargs: 其他参数
     
     示例:
@@ -378,7 +383,7 @@ def run_complex_factor_ic(
         factor_col=factor_col,
         factor_cols=factor_cols,
         custom_factor_calculation=custom_factor_calculation,
-        logger=logger,
+        _logger=_logger,
         **kwargs
     )
 
@@ -410,7 +415,7 @@ def main():
         return_period=args.period,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        logger=logger  # 传入模块级 logger
+        _logger=logger  # 传入模块级 logger（参数名 _logger，值是模块级 logger）
     )
     
     # 使用模块级 logger（明确标识）
