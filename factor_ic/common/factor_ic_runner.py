@@ -179,12 +179,25 @@ def run_factor_ic_analysis(
         # 增量结果需要补充五维度判断
         if result.get('update_mode') != 'need_full':
             # 使用 calculate_ic_with_direction_verification 补充五维度判断
+            
+            # 检查长度一致性（防止数据不一致）
+            if len(result.get('ic_values', [])) != len(result.get('dates', [])):
+                logger.warning(
+                    f"增量数据长度不一致: ic_values={len(result.get('ic_values', []))}, "
+                    f"dates={len(result.get('dates', []))}"
+                )
+                # 返回原始结果，不补充五维度
+                return result
+            
+            # 构造 IC 序列（dates 作为索引）
             ic_series = pd.Series(
                 result['ic_values'],
                 index=result['dates']
             )
-            # 过滤 None
+            
+            # 过滤 None 得到有效 IC
             valid_ic = ic_series[ic_series.notna()]
+            valid_dates = valid_ic.index.tolist()
             
             if len(valid_ic) > 0:
                 # 调用统计计算（五维度判断）
@@ -198,6 +211,26 @@ def run_factor_ic_analysis(
                 result['icir_stability'] = stats_result['icir_stability']
                 result['ic_distribution_consistency'] = stats_result['ic_distribution_consistency']
                 result['summary'] = stats_result['summary']
+                
+                # 更新统计量（基于有效 IC）
+                result['ic_mean'] = stats_result['ic_mean']
+                result['ic_std'] = stats_result['ic_std']
+                result['icir'] = stats_result['icir']
+                result['p_value'] = stats_result['p_value']
+                result['t_stat'] = stats_result['t_stat']
+                result['positive_ratio'] = stats_result['positive_ratio']
+                result['n_days'] = stats_result['n_days']
+                
+                # 更新有效数据（保持一致性）
+                result['valid_dates'] = valid_dates
+                result['valid_ic_values'] = valid_ic.tolist()
+                
+                # 记录日志
+                logger.info(
+                    f"五维度补充完成: 有效天数={len(valid_ic)}, "
+                    f"IC均值={stats_result['ic_mean']:.4f}, "
+                    f"ICIR={stats_result['icir']:.2f}"
+                )
                 
                 # 更新缓存
                 with open(output_path, 'w', encoding='utf-8') as f:
