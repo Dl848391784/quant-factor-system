@@ -9,6 +9,7 @@
 - np.integer 是所有 numpy 整数类型的抽象基类，无需显式列举子类
 - np.floating 是所有 numpy 浮点类型的抽象基类，无需显式列举子类
 - 显式列举子类（如 np.int64/np.int32）是冗余的，且会造成误解
+- bool 检查必须在 integer 之前（Python bool 是 int 的子类，防止误判）
 
 作者: 云舟
 日期: 2026-05-10
@@ -47,6 +48,11 @@ def convert_to_native_types(obj: Any) -> Any:
     elif isinstance(obj, list):
         return [convert_to_native_types(v) for v in obj]
     
+    # bool 检查必须在 integer 之前（Python bool 是 int 的子类）
+    elif isinstance(obj, (np.bool_, bool)):
+        # np.bool_: numpy 布尔类型，bool: Python 布尔类型
+        return bool(obj)
+    
     elif isinstance(obj, np.integer):
         # np.integer 是所有 numpy 整数类型的抽象基类（int64/int32/int16/int8/uint64等）
         return int(obj)
@@ -57,10 +63,6 @@ def convert_to_native_types(obj: Any) -> Any:
         if np.isnan(obj):
             return None
         return float(obj)
-    
-    elif isinstance(obj, (np.bool_, bool)):
-        # 处理 numpy.bool_ 和 Python bool（2026-05-21新增）
-        return bool(obj)
     
     elif isinstance(obj, np.ndarray):
         return convert_to_native_types(obj.tolist())
