@@ -413,28 +413,69 @@ def incremental_update_ic(
     logger.info("[5/5] 重算统计并保存...")
     stats = recalculate_statistics(all_dates, all_ic_values)
     
-    # 6. 构建输出（简化版，不含五维度判断）
-    # 注意：这里只返回增量合并后的数据，五维度判断需要外部调用 calculate_ic_with_direction_verification
-    result = {
-        'factor_name': factor_name,
-        'calculation_date': datetime.now().isoformat(),
-        'dates': all_dates,
-        'ic_values': all_ic_values,
-        'rolling_ic_mean': stats['rolling_ic_mean_aligned'],
+    # 6. 构建输出（与 build_ic_result 结构一致）
+    # 使用 calculate_ic_statistics 返回的五维度判断结果
+    valid_dates = [all_dates[i] for i in stats['valid_indices']]
+    valid_ic = [all_ic_values[i] for i in stats['valid_indices'] if all_ic_values[i] is not None]
+    ic_series = pd.Series(valid_ic, index=valid_dates)
+    
+    # 调用 calculate_ic_statistics 获取五维度判断（已在 recalculate_statistics 中调用）
+    # stats 已包含 statistical_significance, factor_direction, economic_significance 等
+    
+    # 构建 ic_metrics（与 build_ic_result 结构一致）
+    ic_metrics = {
         'ic_mean': stats['ic_mean'],
         'ic_std': stats['ic_std'],
         'icir': stats['icir'],
+        'p_value': stats['p_value'],
+        'p_value_display': stats.get('p_value_display', f"{stats['p_value']:.4f}")
+    }
+    
+    # 构建 period
+    period = {
+        'start': all_dates[0] if all_dates else '',
+        'end': all_dates[-1] if all_dates else '',
+        'description': '增量更新合并后的日期范围'
+    }
+    
+    # 构建 sample_stats
+    sample_stats = {
+        'total_days': raw_metadata.get('total_days', 0),
+        'valid_days': stats['valid_days'],
+        'avg_stocks_per_day': raw_metadata.get('avg_stocks_per_day', 0),
+        'avg_stocks_period': {
+            'start': all_dates[0] if all_dates else '',
+            'end': all_dates[-1] if all_dates else '',
+            'description': '过滤后每日平均股票数（dropna 后）'
+        }
+    }
+    
+    # 构建 summary（使用五维度判断结论）
+    summary = {
+        'ic_performance': stats.get('ic_performance', f"IC均值={stats['ic_mean']:.4f}, ICIR={stats['icir']:.2f}"),
+        'statistical_significance': stats.get('statistical_significance', {}).get('conclusion', '未判断'),
+        'factor_direction': stats.get('factor_direction', {}).get('conclusion', '未判断'),
+        'economic_significance': stats.get('economic_significance', {}).get('conclusion', '未判断'),
+        'recommendation': stats.get('recommendation', '请结合五维度判断综合评估')
+    }
+    
+    # 组装完整结果（与 build_ic_result 结构一致）
+    result = {
+        'factor_name': factor_name,
+        'calculation_date': datetime.now().isoformat(),
+        'period': period,
+        'ic_metrics': ic_metrics,
+        'sample_stats': sample_stats,
+        'statistical_significance': stats.get('statistical_significance', {}),
+        'factor_direction': stats.get('factor_direction', {}),
+        'economic_significance': stats.get('economic_significance', {}),
+        'icir_stability': stats.get('icir_stability', {}),
+        'ic_distribution_consistency': stats.get('ic_distribution_consistency', {}),
+        'dates': all_dates,
+        'ic_values': all_ic_values,
+        'rolling_ic_mean': stats['rolling_ic_mean_aligned'],
         'positive_ratio': stats['positive_ratio'],
-        'sample_stats': {
-            'total_days': raw_metadata.get('total_days', 0),
-            'valid_days': stats['valid_days'],
-            'avg_stocks_per_day': raw_metadata.get('avg_stocks_per_day', 0),
-            'avg_stocks_period': {
-                'start': all_dates[0],
-                'end': all_dates[-1],
-                'description': '增量更新合并后的日期范围'
-            }
-        },
+        'summary': summary,
         'update_mode': 'incremental',
         'incremental_info': {
             'new_dates_count': len(new_dates),
@@ -449,6 +490,8 @@ def incremental_update_ic(
         json.dump(convert_to_native_types(result), f, ensure_ascii=False, indent=2)
     
     logger.info(f"✓ 增量更新完成！新增 {len(new_dates)} 天，总计 {len(all_dates)} 天")
+    logger.info(f"✓ IC 均值: {stats['ic_mean']:.4f}")
+    logger.info(f"✓ ICIR: {stats['icir']:.2f}")
     logger.info(f"✓ 结果已保存: {output_path}")
     
     return result

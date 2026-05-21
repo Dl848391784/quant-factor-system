@@ -36,12 +36,12 @@ from factor_ic.common import (
     load_factor_return_data,
     calculate_ic_with_direction_verification,
     build_ic_result,
-    incremental_update_ic
+    incremental_update_ic,
+    save_ic_result
 )
 from factor_ic.common.incremental_engine import UpdateMode, should_use_incremental
 from factor_ic.common.data_completeness import get_ic_output_path, check_data_completeness
 from factor_ic.common.logger_config import get_logger
-from factor_ic.common.ic_result_builder import save_ic_result
 
 logger = get_logger(__name__)
 
@@ -103,12 +103,12 @@ def calculate_bollinger_pb(
     # 避免除零（使用 EPSILON）
     EPSILON = 1e-10
     
-    # 使用 pandas Series.clip 避免 np.where 混用问题
-    # 当 band_width 接近 0 时，%B 设为 0.5（中性值）
-    safe_band_width = band_width.clip(lower=EPSILON)
+    # 使用绝对值确保分母为正，避免负宽度被错误处理
+    # band_width.abs() 确保 upper-lower 为正（理论上应 >=0，但异常数据可能为负）
+    safe_band_width = band_width.abs().clip(lower=EPSILON)
     bollinger_pb = (factor_df['close'] - lower) / safe_band_width
     
-    # band_width < EPSILON 的位置设为 0.5
+    # band_width 绝对值接近 0 的位置设为 0.5（中性值）
     narrow_band_mask = band_width.abs() < EPSILON
     bollinger_pb = bollinger_pb.where(~narrow_band_mask, 0.5)
     
@@ -181,21 +181,24 @@ def generate_bollinger_pb_ic_data(
                 return cached_data
         except FileNotFoundError:
             # 缓存文件被删除（并发情况），fallback 到全量计算
-            logger.info("[诊断] 缓存文件不存在（可能被并发删除），执行全量计算")
-            mode = UpdateMode.FULL  # 重置模式，继续执行全量逻辑
+            logger.warning("[诊断] 缓存文件不存在（可能被并发删除），fallback 到全量计算")
+            # 重置模式后直接进入全量计算分支（不依赖隐式继续执行）
+            mode = UpdateMode.FULL
         except json.JSONDecodeError as e:
             raise RuntimeError(f"缓存文件损坏: {output_file}\n{e}") from e
     
-    elif mode == UpdateMode.INCREMENTAL:
+    # ========== 模式统一处理入口 ==========
+    # 注意：mode 可能被 fallback 重置为 FULL
+    if mode == UpdateMode.INCREMENTAL:
         # ========== 增量更新（缓存滞后） ==========
         logger.info("[模式] 增量更新")
-        logger.info("[2/3] 计算布林带 %B 因子（需要全量历史数据）...")
+        logger.info("[2/4] 计算布林带 %B 因子（需要全量历史数据）...")
         
         # 注意：布林带计算需要完整的历史 close 数据才能正确计算 rolling mean/std
         factor_df = calculate_bollinger_pb(factor_df, n=n, k=k)
         logger.info("✓ 布林带 %B 计算完成")
         
-        logger.info("[3/3] 执行增量 IC 计算...")
+        logger.info("[3/4] 执行增量 IC 计算...")
         result = incremental_update_ic(
             output_path=output_file,
             factor_df_full=factor_df,
@@ -214,60 +217,65 @@ def generate_bollinger_pb_ic_data(
             'factor_col': 'bollinger_pb'
         }
         
-        logger.info(f"IC 均值: {result.get('ic_mean', 0):.4f}")
-        logger.info(f"ICIR: {result.get('icir', 0):.2f}")
-        logger.info(f"更新模式: {result['update_mode']}")
+        # 使用统一字段路径（ic_metrics 结构）
+        logger.info(f"IC 均值: {result.get('ic_metrics', {}).get('ic_mean', 0):.4f}")
+        logger.info(f"ICIR: {result.get('ic_metrics', {}).get('icir', 0):.2f}")
+        logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
+        logger.info("=" * 60)
         
         return result
     
-    # ========== 全量计算 ==========
-    logger.info("[模式] 全量计算")
-    logger.info("[2/3] 计算布林带 %B 因子...")
-    factor_df = calculate_bollinger_pb(factor_df, n=n, k=k)
-    logger.info("✓ 布林带 %B 计算完成")
+    elif mode == UpdateMode.FULL:
+        # ========== 全量计算 ==========
+        logger.info("[模式] 全量计算")
+        logger.info("[2/4] 计算布林带 %B 因子...")
+        factor_df = calculate_bollinger_pb(factor_df, n=n, k=k)
+        logger.info("✓ 布林带 %B 计算完成")
+        
+        # ========== Step 3: 计算 IC ==========
+        logger.info("[3/4] 计算 IC...")
+        ic_result = calculate_ic_with_direction_verification(
+            factor_df=factor_df,
+            return_df=return_df,
+            factor_col='bollinger_pb',
+            return_col='forward_return_1d',
+            min_stocks=min_stocks,
+            logger=logger
+        )
+        
+        logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
+        logger.info(f"ICIR: {ic_result['icir']:.2f}")
+        logger.info(f"正比例: {ic_result['positive_ratio']:.1%}")
+        
+        # ========== Step 4: 构建输出并保存 ==========
+        logger.info("[4/4] 构建输出并保存...")
+        result = build_ic_result(
+            ic_result=ic_result,
+            raw_metadata=raw_metadata,
+            factor_name='bollinger_pb_1d',
+            data_source='cache/factor_data/factor_data.json.gz',
+            factor_col='bollinger_pb'
+        )
+        
+        # 添加布林带参数信息
+        result['params'] = {
+            'n': n,
+            'k': k,
+            'factor_col': 'bollinger_pb'
+        }
+        
+        # 保存结果（使用统一封装函数）
+        save_ic_result(result, output_file)
+        
+        logger.info("=" * 60)
+        logger.info(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC 数据")
+        logger.info("=" * 60)
+        
+        return result
     
-    # ========== Step 3: 计算 IC ==========
-    logger.info("[3/3] 计算 IC...")
-    ic_result = calculate_ic_with_direction_verification(
-        factor_df=factor_df,
-        return_df=return_df,
-        factor_col='bollinger_pb',
-return_col='forward_return_1d',
-        min_stocks=min_stocks,
-        logger=logger
-    )
-    
-    logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
-    logger.info(f"ICIR: {ic_result['icir']:.2f}")
-    logger.info(f"正比例: {ic_result['positive_ratio']:.1%}")
-    
-    # ========== Step 4: 构建输出 ==========
-    result = build_ic_result(
-        ic_result=ic_result,
-        raw_metadata=raw_metadata,
-        factor_name='bollinger_pb_1d',
-        data_source='cache/factor_data/factor_data.json.gz',
-        factor_col='bollinger_pb'
-    )
-    
-    # 添加布林带参数信息
-    result['params'] = {
-        'n': n,
-        'k': k,
-        'factor_col': 'bollinger_pb'
-    }
-    
-    # 保存结果
-    logger.info(f"保存数据到: {output_file}")
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
-    
-    logger.info("=" * 60)
-    logger.info(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC 数据")
-    logger.info("=" * 60)
-    
-    return result
+    else:
+        # 未知模式（防御性代码）
+        raise RuntimeError(f"未知更新模式: {mode}")
 
 
 if __name__ == '__main__':

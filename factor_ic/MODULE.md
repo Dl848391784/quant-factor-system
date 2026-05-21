@@ -482,6 +482,72 @@ def validate_columns(df: pd.DataFrame) -> None:
 
 前端依赖该字段绘制滚动IC均值趋势图，缺失会导致功能异常。
 
+### incremental_update_ic 返回结构统一规范
+
+**`incremental_update_ic` 返回结构必须与 `build_ic_result` 一致，包含 `ic_metrics`、`statistical_significance` 等五维度判断字段。**
+
+调用方（因子脚本）使用统一字段路径访问：
+```python
+# ✓ 正确：使用 ic_metrics 结构
+logger.info(f"IC 均值: {result.get('ic_metrics', {}).get('ic_mean', 0):.4f}")
+logger.info(f"ICIR: {result.get('ic_metrics', {}).get('icir', 0):.2f}")
+
+# ❌ 错误：直接访问顶层字段（增量返回结构不一致）
+logger.info(f"IC 均值: {result.get('ic_mean', 0):.4f}")  # 增量模式可能 KeyError
+```
+
+**规范原因：**
+1. 全量模式返回 `ic_metrics['ic_mean']`，增量模式返回顶层 `ic_mean` → 字段路径不一致
+2. 调用方需要 `.get()` 防御，说明接口未统一
+3. 增量模式缺少 `statistical_significance` 等五维度判断字段
+
+### 步骤编号统一规范
+
+**增量模式与全量模式步骤编号必须一致，统一为 `[N/4]` 格式。**
+
+| 步骤 | 全量模式 | 增量模式 |
+|------|----------|----------|
+| 1 | 数据加载（前置） | 数据加载（前置） |
+| 2 | `[2/4]` 计算因子 | `[2/4]` 计算因子 |
+| 3 | `[3/4]` 计算 IC | `[3/4]` 执行增量 IC 计算 |
+| 4 | `[4/4]` 构建输出并保存 | 增量结果已保存（内部完成） |
+
+**禁止：** 增量模式使用 `[2/3]`、`[3/3]`，全量模式使用 `[2/4]`、`[3/4]`、`[4/4]`。
+
+### fallback 重置后显式分支规范
+
+**`mode = UpdateMode.FULL` 重置后必须显式进入全量分支，不依赖隐式继续执行。**
+
+```python
+# ✓ 正确：重置后显式进入分支
+try:
+    cached_data = json.load(f)
+    return cached_data
+except FileNotFoundError:
+    logger.warning("[诊断] 缓存文件不存在，fallback 到全量计算")
+    mode = UpdateMode.FULL  # 重置模式
+# ... 后续显式 if-elif 分支处理 FULL 模式
+
+if mode == UpdateMode.INCREMENTAL:
+    # 增量分支
+elif mode == UpdateMode.FULL:
+    # 全量分支（fallback 会进入这里）
+else:
+    raise RuntimeError(f"未知更新模式: {mode}")
+```
+
+**禁止：** 依赖隐式继续执行（skip 分支后直接是全量代码块）。
+```python
+# ❌ 错误：依赖隐式继续执行
+except FileNotFoundError:
+    mode = UpdateMode.FULL
+# 代码继续执行，依赖隐式进入全量代码块（语义歧义）
+
+# ========== 全量计算 ==========  # ← 无 if 判断，依赖隐式继续
+```
+
+**规范原因：** 显式分支结构语义清晰，避免 fallback 后控制流混乱。
+
 ## NaN处理规范
 
 **NaN → None 转换应在数据生成阶段完成。**
