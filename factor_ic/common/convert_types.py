@@ -19,9 +19,10 @@
 - pd.DataFrame: 转为 list of dicts（每行一个 dict，to_dict('records'))
 
 pandas 缺失值处理（2026-05-22）：
-- pd.NaT: 缺失时间，转为 None（使用 `obj is pd.NaT` 检查单例）
+- pd.NaT: 缺失时间，转为 None（使用 `obj is pd.NaT` 检查单例，必须在 pd.Timestamp 之前检查）
 - pd.NA: 扩展类型缺失值，转为 None（使用 `obj is pd.NA` 检查单例）
 - np.NaN/nan: numpy 浮点 NaN，转为 None（在 np.floating 分支处理）
+- 检查顺序：pd.NaT/pd.NA → pd.Timestamp（某些版本 NaTType 继承 Timestamp，防止误判）
 
 作者: 云舟
 日期: 2026-05-10
@@ -90,18 +91,18 @@ def convert_to_native_types(obj: Any) -> Any:
         # DataFrame 转为 list of dicts（每行一个 dict）
         return convert_to_native_types(obj.to_dict('records'))
     
-    elif isinstance(obj, pd.Timestamp):
-        # pandas 时间戳转字符串
-        return str(obj)
-    
-    # pandas 缺失值处理（必须在 pd.Timestamp 之后检查）
+    # pandas 缺失值检查必须在 pd.Timestamp 之前（某些版本 NaTType 继承 Timestamp）
     elif obj is pd.NaT:
-        # pandas 缺失时间，转为 None
+        # pandas 缺失时间，转为 None（单例检查）
         return None
     
     elif obj is pd.NA or isinstance(obj, type(pd.NA)):
         # pandas 扩展类型缺失值（pd.NA 是单例对象）
         return None
+    
+    elif isinstance(obj, pd.Timestamp):
+        # pandas 时间戳转字符串（pd.NaT 已在前面处理）
+        return str(obj)
     
     elif isinstance(obj, float):
         # 处理 Python float 的 NaN
