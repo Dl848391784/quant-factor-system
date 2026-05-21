@@ -260,6 +260,9 @@ def _convert_date_column(df: pd.DataFrame, name: str) -> pd.DataFrame:
     if 'date' not in df.columns:
         return df
     
+    # 使用 .copy() 创建副本，确保不修改原始 DataFrame（遵循最小惊讶原则）
+    df = df.copy()
+    
     date_series = pd.to_datetime(df['date'], errors='coerce')
     nat_count = date_series.isna().sum()
     

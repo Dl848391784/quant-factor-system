@@ -494,6 +494,36 @@ if additional_factor_files:
 
 **参考：** data_loader.py 第120-127行（在 merge 前快照原始数据）
 
+### DataFrame 函数修改规范（重要）
+
+**函数不应修改传入的 DataFrame（遵循最小惊讶原则）：**
+
+```python
+# 错误写法（直接修改传入对象）
+def _convert_date_column(df: pd.DataFrame) -> pd.DataFrame:
+    df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
+    return df  # 同时修改了原始 df，违反最小惊讶原则
+
+# 正确写法（使用 .copy() 创建副本）
+def _convert_date_column(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()  # 创建副本，确保不修改原始对象
+    df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
+    return df  # 返回新对象，原始对象不变
+```
+
+**原则：**
+1. 函数有返回值时，不应同时修改传入对象
+2. 用户期望函数返回新对象，而非修改传入对象
+3. 使用 `.copy()` 创建副本，确保不修改原始对象
+4. 若必须修改传入对象，应在函数名和文档中明确声明（如 `_modify_xxx_inplace`）
+
+**原因：**
+1. DataFrame 是可变对象，直接修改会影响调用方
+2. 调用方可能后续使用原始 DataFrame，修改导致逻辑错误
+3. 违反最小惊讶原则，用户未预期传入对象被修改
+
+**参考：** data_loader.py 第263行（df.copy() 创建副本）
+
 ---
 
 ## ic_result_builder.py — IC结果构建公共模块
