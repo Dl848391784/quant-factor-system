@@ -98,6 +98,13 @@ def load_factor_return_data(
         factor_data = json.load(f)
     
     factor_df = pd.DataFrame(factor_data['data'])
+    
+    # ========== 基础列验证（加载后立即验证） ==========
+    # 验证基础列存在，防止后续操作因列缺失而抛出难以定位的 KeyError
+    for col in ['date', 'asset']:
+        if col not in factor_df.columns:
+            raise KeyError(f"因子数据缺少必需列: '{col}'，无法继续处理")
+    
     print(f"  - 因子数据: {len(factor_df)} 行, {factor_df['asset'].nunique()} 只股票")
     
     # ========== 加载收益数据 ==========
@@ -108,6 +115,13 @@ def load_factor_return_data(
         return_data = json.load(f)
     
     return_df = pd.DataFrame(return_data['data'])
+    
+    # ========== 基础列验证（加载后立即验证） ==========
+    # 验证基础列存在，防止后续操作因列缺失而抛出难以定位的 KeyError
+    for col in ['date', 'asset']:
+        if col not in return_df.columns:
+            raise KeyError(f"收益数据缺少必需列: '{col}'，无法继续处理")
+    
     print(f"  - 收益数据: {len(return_df)} 行, {return_df['asset'].nunique()} 只股票")
     
     # ========== 日期类型统一转换 ==========

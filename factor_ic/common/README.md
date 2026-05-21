@@ -711,6 +711,41 @@ factor_df = factor_df.dropna(subset=dropna_cols).reset_index(drop=True)
 
 **参考：** data_loader.py 第218-226行（dropna 前验证列）
 
+### 基础列验证时机规范（重要）
+
+**基础列验证应在数据加载后立即执行：**
+
+```python
+# 错误写法（验证时机晚，错误难以定位）
+factor_df = pd.DataFrame(factor_data['data'])
+print(f"  - 因子数据: {len(factor_df)} 行, {factor_df['asset'].nunique()} 只股票")
+# 若 asset 列不存在，KeyError 抛出在打印语句，难以定位问题根源
+# 用户可能以为是打印语句错误，而非数据缺少 asset 列
+
+# 正确写法（加载后立即验证，提供明确错误信息）
+factor_df = pd.DataFrame(factor_data['data'])
+
+# 基础列验证（加载后立即验证）
+for col in ['date', 'asset']:
+    if col not in factor_df.columns:
+        raise KeyError(f"因子数据缺少必需列: '{col}'，无法继续处理")
+
+print(f"  - 因子数据: {len(factor_df)} 行, {factor_df['asset'].nunique()} 只股票")
+```
+
+**原因：**
+1. 基础列（date, asset）是所有后续操作的依赖，必须首先验证
+2. 验证时机应在数据加载后立即执行，而非打印语句前
+3. 打印语句中访问列时，若列不存在会抛出 KeyError，错误位置难以定位
+4. 提前验证提供明确错误信息，帮助用户定位问题根源
+
+**验证顺序：**
+1. 加载数据 → 立即验证基础列 → 打印统计信息
+2. 日期转换 → 验证因子列/收益列 → 其他操作
+3. 基础列验证必须最先执行，其他验证可按逻辑顺序执行
+
+**参考：** data_loader.py 第100-106行（加载后立即验证基础列）
+
 ---
 
 ## ic_result_builder.py — IC结果构建公共模块
