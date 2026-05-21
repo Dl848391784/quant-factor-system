@@ -2,12 +2,17 @@
 """
 RSI_1D IC 计算器（重构版） - 1日收益周期
 
-使用公共模块 run_simple_factor_ic() 实现，代码量从 ~774行降至 ~100行。
+使用公共模块实现 IC 计算，代码量从 ~774行降至 ~214行。
 
 功能：
 1. 从缓存数据计算 RSI(6) 因子的 IC
-2. 支持全量计算和增量更新
+2. 支持全量计算、增量更新和跳过三种模式
 3. 五维度独立判断（统计显著性、因子方向、经济显著性、ICIR稳定性、IC分布一致性）
+
+实现方式：
+- 使用 calculate_ic_with_direction_verification 计算 IC
+- 使用 build_ic_result 构建输出结构
+- 使用 incremental_update_ic 执行增量更新
 
 作者: 云瑶
 重构日期: 2026-05-22
@@ -58,10 +63,19 @@ def generate_rsi_ic_data(
     返回:
         IC 数据字典
     
+    实现方式:
+        - 使用 calculate_ic_with_direction_verification 计算 IC
+        - 使用 build_ic_result 构建输出结构
+        - 使用 incremental_update_ic 执行增量更新
+    
+    支持模式:
+        - FULL: 全量计算
+        - INCREMENTAL: 增量更新（只计算缺失日期）
+        - SKIP: 跳过更新（缓存已最新）
+    
     规范:
-        - 使用公共模块 run_simple_factor_ic()
-        - 支持全量/增量/跳过三种模式
         - 输出结构符合 MODULE.md 规范
+        - 全量/增量使用同一核心函数确保算法一致性
     """
     # 统一转换为 Path 对象
     if output_file is None:
