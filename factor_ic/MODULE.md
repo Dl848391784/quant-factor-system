@@ -1,9 +1,9 @@
 # factor_ic 模块规范
 
-> 版本: v2.5（公共模块验证 + 5个脚本重构完成）
+> 版本: v2.6（新增职责边界规范）
 > 创建时间: 2026-05-19
 > 重构时间: 2026-05-22
-> 最后更新: 2026-05-22 11:15
+> 最后更新: 2026-05-22 14:30
 
 ## 更新记录
 
@@ -34,11 +34,15 @@
     - 新增重构脚本使用说明（保留原版为 ic_rsi_1d_legacy.py）
 11. v2.5（2026-05-22 11:15）：
     - 5个因子脚本全部重构完成，平均减少72%代码量
-    - ic_volume_ratio_1d.py（686行→193行，减少72%，保留分层回测）
+    - ic_volume_ratio_1d.py（686行→193行，减少72%）
     - ic_kdj_j_1d.py（882行→310行，减少65%，保留KDJ计算）
     - ic_bollinger_pb_1d.py（1129行→240行，减少79%，保留布林带计算）
     - ic_turnover_surge_1d.py（798行→261行，减少67%，保留换手率筛选）
     - 重构汇总：原版保存为 *_legacy.py，新增因子仅需~200-300行
+12. v2.6（2026-05-22 14:30）：
+    - 新增"职责边界规范"章节：IC脚本只做IC计算，禁止分层回测
+    - ic_volume_ratio_1d.py 删除分层回测逻辑（193行→145行）
+    - 明确 factor_ic/ 与 backtest/ 模块职责边界
 
 # 一、概述与基础
 
@@ -50,6 +54,49 @@ factor_ic 模块负责计算各类因子的 IC（Information Coefficient）值�
 - 输入：来自 data_fetchers 的缓存数据（cache/factor_data/）
 - 输出：IC 分析结果（factor_ic/result/）
 - 依赖：不自行拉取数据，只处理已缓存数据
+
+## 职责边界规范（2026-05-22 新增）
+
+**核心原则：IC 计算脚本的职责仅限于 IC 计算，不包含分层回测逻辑。**
+
+| 模块 | 职责 | 禁止内容 |
+|------|------|----------|
+| `factor_ic/` | IC 计算、方向判断、统计显著性 | ❌ 分层回测、回测引擎导入 |
+| `backtest/` | 分层回测、多空收益、净值曲线 | - |
+
+**正确实践：**
+
+```python
+# ✓ IC 脚本只做 IC 计算
+ic_result = calculate_ic_with_direction_verification(...)
+result = build_ic_result(ic_result, ...)
+save_ic_result(result)  # 输出到 factor_ic/result/
+
+# ✗ IC 脚本调用分层回测（禁止）
+from backtest.layered_backtest import LayeredBacktestEngine  # 禁止导入
+layered_engine = LayeredBacktestEngine(...)  # 禁止调用
+result['layered_result'] = layered_result  # 禁止扩展字段
+```
+
+**分离原因：**
+
+1. **职责清晰**：IC 计算和分层回测是两个独立的分析维度
+2. **输出规范**：IC 结果输出到 `factor_ic/result/`，回测结果输出到 `backtest/result/`
+3. **解耦依赖**：因子脚本不依赖回测模块，便于独立维护
+4. **复用性**：分层回测可独立调用任意因子，无需因子脚本内置
+
+**分离后调用方式：**
+
+```python
+# Step 1: IC 计算（factor_ic 脚本）
+from factor_ic.common import run_simple_factor_ic
+ic_result = run_simple_factor_ic('volume_ratio', 'volume_ratio_5')
+
+# Step 2: 分层回测（独立脚本或 backtest 模块）
+from backtest.layered_backtest import LayeredBacktestEngine
+layered_engine = LayeredBacktestEngine(...)
+layered_result = layered_engine.run(factor_direction='positive', ...)
+```
 
 ## 公共模块同步规范
 
