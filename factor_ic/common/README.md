@@ -393,6 +393,39 @@ def load_factor_return_data(factor_cols: List[str], additional_factor_files: Dic
 
 **参考：** data_loader.py 第120行（all_factor_cols 独立变量定义）
 
+### dropna_cols 默认值规范（重要）
+
+**默认值应在参数修改之前确定：**
+
+```python
+# 错误写法（隐式包含额外列）
+def load_factor_return_data(factor_cols, additional_factor_files=None):
+    all_factor_cols = factor_cols
+    if additional_factor_files:
+        all_factor_cols = factor_cols + list(additional_factor_files.keys())
+    # dropna_cols 默认值在参数修改之后确定，隐式包含额外列
+    dropna_cols = all_factor_cols
+
+# 正确写法（在修改之前确定）
+def load_factor_return_data(factor_cols, additional_factor_files=None):
+    # 在修改 factor_cols 之前，确定 dropna_cols 默认值
+    default_dropna_cols = factor_cols
+    
+    all_factor_cols = factor_cols
+    if additional_factor_files:
+        all_factor_cols = factor_cols + list(additional_factor_files.keys())
+    # dropna_cols 默认值基于原始 factor_cols，不含额外列
+    dropna_cols = default_dropna_cols
+```
+
+**原因：**
+1. 用户传入 `factor_cols=['close']`，预期 dropna 默认只过滤 'close'
+2. 若 dropna_cols 在参数修改之后确定，会隐式包含额外列（如 'turnover_rate'）
+3. 隐式行为导致过多数据被过滤，用户未预期
+4. 若用户需要过滤额外列，需显式传入 `dropna_cols` 参数
+
+**参考：** data_loader.py 第122行（default_dropna_cols 定义）
+
 ---
 
 ## ic_result_builder.py — IC结果构建公共模块

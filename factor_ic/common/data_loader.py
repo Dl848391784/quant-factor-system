@@ -118,6 +118,10 @@ def load_factor_return_data(
     return_df = _convert_date_column(return_df, '收益')
     
     # ========== 加载额外因子文件（如有） ==========
+    # 在修改 factor_cols 之前，确定 dropna_cols 默认值（基于原始 factor_cols）
+    # 避免隐式包含额外列，防止过多数据被过滤
+    default_dropna_cols = factor_cols
+    
     all_factor_cols = factor_cols  # 独立变量，保持顺序，不污染调用方
     
     if additional_factor_files:
@@ -190,9 +194,10 @@ def load_factor_return_data(
     print(f"  - 原始平均每日股票数: {raw_avg_stocks_per_day}")
     
     # ========== 过滤缺失值 ==========
-    # dropna_cols 默认为 all_factor_cols（不含 date/asset）
+    # dropna_cols 默认为原始 factor_cols（不含额外列）
+    # 若用户需要过滤额外列，需显式传入 dropna_cols 参数
     if dropna_cols is None:
-        dropna_cols = all_factor_cols
+        dropna_cols = default_dropna_cols
     
     factor_df = factor_df.dropna(subset=dropna_cols).reset_index(drop=True)
     return_df = return_df.dropna(subset=['forward_return']).reset_index(drop=True)
