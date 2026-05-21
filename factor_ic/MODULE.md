@@ -22,6 +22,11 @@
 8. v2.2（2026-05-22 08:45）：
    - 新增 ic_result_builder.py 规范（构建完整输出结构）
    - 添加 build_ic_result() 使用示例和辅助函数说明
+9. v2.3（2026-05-22 09:00）：
+   - 新增 incremental_engine.py 规范（增量更新引擎）
+   - 新增 factor_ic_runner.py 规范（主入口模板）
+   - 添加新增因子开发流程说明（总代码量~50-200行）
+   - 添加 CLI 支持说明
 
 # 一、概述与基础
 
@@ -264,13 +269,204 @@ save_ic_result(result)
 3. sample_stats.avg_stocks_period 包含口径说明
 4. summary 基于五维度判断生成推荐
 
-### incremental_engine.py — 增量更新引擎（待实现）
+### incremental_engine.py — 增量更新引擎
 
-**功能：** 封装增量更新逻辑（读取现有缓存 → 筛选缺失日期 → 逐日计算 → 合并）。
+**文件路径：** `factor_ic/common/incremental_engine.py`
 
-### factor_ic_runner.py — 主入口模板（待实现）
+**核心函数：**
 
-**功能：** 封装主入口逻辑（模式判断 → 分支调用 → 输出）。
+```python
+def incremental_update_ic(
+    output_path: Path,
+    factor_df_full: pd.DataFrame,
+    return_df_full: pd.DataFrame,
+    raw_metadata: Dict,
+    factor_name: str,
+    factor_col: str,
+    return_col: str = 'forward_return',
+    min_stocks: int = 10
+) -> Dict:
+    """
+    执行增量更新
+    
+    流程:
+        1. 读取现有缓存
+        2. 确定缺失日期
+        3. 计算缺失日期 IC（复用 calculate_single_day_ic）
+        4. 合并数据（去重，新值覆盖旧值）
+        5. 重算统计指标（复用 calculate_ic_statistics）
+        6. 构建输出并保存
+    """
+```
+
+**功能列表：**
+
+| 功能 | 描述 | 规范要点 |
+|------|------|----------|
+| 缓存读取 | 读取现有 IC 结果 | FileNotFoundError → 全量，JSONDecodeError → 严重错误 |
+| 缺失日期筛选 | 因子日期 - 缓存日期 | 全量加载 + 日期差集 |
+| 逐日 IC 计算 | 复用 calculate_single_day_ic | 确保算法一致性 |
+| 数据合并 | 字典去重（新值优先） | overlap_dates 记录覆盖事件 |
+| 统计重算 | 复用 calculate_ic_statistics | 不手工构建统计字段 |
+| 模式判断 | should_use_incremental() | force_full → 全量 |
+
+**辅助函数：**
+
+| 函数 | 用途 |
+|------|------|
+| `get_cache_latest_date()` | 获取缓存最新日期 |
+| `read_existing_cache()` | 读取现有缓存数据 |
+| `calculate_missing_dates_ic()` | 计算缺失日期 IC |
+| `merge_ic_data()` | 合并 IC 数据（去重） |
+| `recalculate_statistics()` | 重算统计指标 |
+| `should_use_incremental()` | 判断是否使用增量模式 |
+
+**使用示例：**
+
+```python
+from factor_ic.common.incremental_engine import incremental_update_ic, should_use_incremental
+from factor_ic.common.data_loader import load_factor_return_data
+
+# 加载全量数据
+factor_df, return_df, raw_metadata = load_factor_return_data(
+    factor_cols=['rsi_6']
+)
+
+# 判断模式
+output_path = get_ic_output_path('rsi', '1d')
+use_incremental = should_use_incremental(output_path, factor_df, force_full=False)
+
+if use_incremental:
+    # 增量更新
+    result = incremental_update_ic(
+        output_path=output_path,
+        factor_df_full=factor_df,
+        return_df_full=return_df,
+        raw_metadata=raw_metadata,
+        factor_name='rsi_1d',
+        factor_col='rsi_6'
+    )
+else:
+    # 全量计算（使用 calculate_ic_with_direction_verification）
+    ...
+```
+
+**规范要点：**
+
+1. 增量模式必须复用 calculate_single_day_ic（算法一致性）
+2. 合并时使用字典去重（新值覆盖旧值）
+3. overlap_dates 必须记录（事件追踪）
+4. rolling_ic_mean 需对齐回 all_dates（None 填充）
+
+### factor_ic_runner.py — 主入口模板
+
+**文件路径：** `factor_ic/common/factor_ic_runner.py`
+
+**核心函数：**
+
+```python
+def run_factor_ic_analysis(
+    factor_name: str,
+    factor_col: str,
+    return_period: str = '1d',
+    return_col: str = 'forward_return_1d',
+    factor_cols: Optional[List[str]] = None,
+    min_stocks: int = 10,
+    force_full: bool = False,
+    output_path: Optional[Path] = None,
+    custom_factor_calculation: Optional[Callable] = None
+) -> Dict:
+    """
+    因子 IC 分析统一主入口
+    
+    流程:
+        1. 判断模式（全量/增量/跳过）
+        2. 加载数据
+        3. 执行计算
+        4. 构建输出
+        5. 保存结果
+    """
+```
+
+**功能列表：**
+
+| 功能 | 描述 | 规范要点 |
+|------|------|----------|
+| 模式判断 | should_use_incremental() | force_full → 全量 |
+| 数据加载 | load_factor_return_data() | 支持额外因子文件 |
+| 全量计算 | calculate_ic_with_direction_verification() | 五维度判断 |
+| 增量更新 | incremental_update_ic() | 补充五维度判断 |
+| 结果构建 | build_ic_result() | 符合输出结构规范 |
+| 结果保存 | save_ic_result() | 自动路径生成 |
+
+**快捷函数：**
+
+| 函数 | 用途 | 适用场景 |
+|------|------|----------|
+| `run_simple_factor_ic()` | 简单因子（直接用缓存列） | RSI、量比 |
+| `run_complex_factor_ic()` | 复杂因子（需预处理） | KDJ、布林带 |
+
+**使用示例：**
+
+```python
+from factor_ic.common.factor_ic_runner import run_simple_factor_ic, run_complex_factor_ic
+
+# 简单因子（直接用缓存列）
+result = run_simple_factor_ic('rsi', 'rsi_6')
+result = run_simple_factor_ic('volume_ratio', 'volume_ratio_5')
+
+# 复杂因子（需自定义计算）
+def calculate_kdj_j(factor_df):
+    # KDJ 计算逻辑
+    low_min = factor_df.groupby('asset')['low'].transform(lambda x: x.rolling(9, min_periods=9).min())
+    high_max = factor_df.groupby('asset')['high'].transform(lambda x: x.rolling(9, min_periods=9).max())
+    rsv = (factor_df['close'] - low_min) / (high_max - low_min) * 100
+    k = rsv.ewm(alpha=1/3, adjust=False).mean()
+    d = k.ewm(alpha=1/3, adjust=False).mean()
+    j = 3 * k - 2 * d
+    factor_df['kdj_j'] = j
+    return factor_df
+
+result = run_complex_factor_ic(
+    factor_name='kdj_j',
+    factor_col='kdj_j',
+    factor_cols=['close', 'high', 'low'],
+    custom_factor_calculation=calculate_kdj_j
+)
+```
+
+**新增因子开发流程：**
+
+```
+1. 确定因子类型：
+   - 简单因子（缓存列直接可用）→ 使用 run_simple_factor_ic()
+   - 复杂因子（需预处理）→ 使用 run_complex_factor_ic()
+
+2. 实现因子计算逻辑（复杂因子）：
+   - 定义 custom_factor_calculation 函数
+   - 输入: factor_df（包含原始列）
+   - 输出: factor_df（添加 factor_col 列）
+
+3. 调用主入口：
+   result = run_xxx_factor_ic(...)
+
+4. 检查结果：
+   - update_mode: full/incremental/skip/failed
+   - ic_mean, icir, p_value
+   - 五维度判断结论
+
+总代码量：~50-200行（仅因子计算逻辑）
+```
+
+**CLI 支持：**
+
+```bash
+# 简单因子
+python -m factor_ic.common.factor_ic_runner --factor rsi --col rsi_6
+
+# 强制全量
+python -m factor_ic.common.factor_ic_runner --factor volume_ratio --col volume_ratio_5 --force-full
+```
 
 ## factor_ic目录规范
 
