@@ -19,6 +19,9 @@
    - 新增"公共模块架构"章节（data_loader.py 规范）
    - 新增因子脚本抽象设计目标（从~700-1100行降至~50-200行）
    - 添加 data_loader.py 使用示例和规范要点
+8. v2.2（2026-05-22 08:45）：
+   - 新增 ic_result_builder.py 规范（构建完整输出结构）
+   - 添加 build_ic_result() 使用示例和辅助函数说明
 
 # 一、概述与基础
 
@@ -171,9 +174,95 @@ print(f"原始平均股票数: {raw_metadata['avg_stocks_per_day']}")
 3. 日期转换后 `isin` 操作类型匹配
 4. 列缺失时显示可用列列表（用户友好）
 
-### ic_result_builder.py — IC结果构建公共模块（待实现）
+### ic_result_builder.py — IC结果构建公共模块
 
-**功能：** 将 ic_calculator 返回值转换为符合 PROJECT.md 规范的完整 JSON 结构。
+**文件路径：** `factor_ic/common/ic_result_builder.py`
+
+**核心函数：**
+
+```python
+def build_ic_result(
+    ic_result: Dict,
+    raw_metadata: Dict,
+    factor_name: str,
+    return_period: str = '1d',
+    data_source: str = '',
+    factor_col: str = '',
+    update_mode: str = 'full'
+) -> Dict:
+    """
+    构建 IC 分析完整结果（符合 MODULE.md 输出结构统一性规范）
+    
+    参数:
+        ic_result: calculate_ic_with_direction_verification 返回值
+        raw_metadata: load_factor_return_data 返回的原始数据元信息
+        factor_name: 因子名称（如 'rsi_1d', 'volume_ratio_1d'）
+    
+    返回:
+        符合 MODULE.md 规范的完整 JSON 结构字典
+    """
+```
+
+**功能列表：**
+
+| 功能 | 描述 | 输出字段 |
+|------|------|----------|
+| 结果组装 | 将 ic_calculator 返回值转换为完整结构 | 所有顶层字段 |
+| rolling_ic_mean | 20日窗口滚动均值（min_periods=10） | `rolling_ic_mean` |
+| sample_stats | 样本统计 + 口径范围说明 | `sample_stats` |
+| summary | 综合评价 + 推荐 | `summary` |
+| factor_stats | 因子基本信息 | `factor_stats` |
+| error_result | 错误情况默认结构 | 所有字段（默认值） |
+
+**使用示例：**
+
+```python
+from factor_ic.common.data_loader import load_factor_return_data
+from factor_ic.common.ic_calculator import calculate_ic_with_direction_verification
+from factor_ic.common.ic_result_builder import build_ic_result, save_ic_result
+
+# 加载数据
+factor_df, return_df, raw_metadata = load_factor_return_data(
+    factor_cols=['rsi_6']
+)
+
+# 计算 IC
+ic_result = calculate_ic_with_direction_verification(
+    factor_df=factor_df,
+    return_df=return_df,
+    factor_col='rsi_6',
+    return_col='forward_return'
+)
+
+# 构建完整结果
+result = build_ic_result(
+    ic_result=ic_result,
+    raw_metadata=raw_metadata,
+    factor_name='rsi_1d',
+    data_source='cache/factor_data/factor_data.json.gz',
+    factor_col='rsi_6'
+)
+
+# 保存
+save_ic_result(result)
+```
+
+**辅助函数：**
+
+| 函数 | 用途 |
+|------|------|
+| `build_sample_stats()` | 单独构建样本统计字段 |
+| `build_rolling_ic_mean()` | 单独计算滚动均值 |
+| `build_error_result()` | 构建错误默认结构 |
+| `get_ic_output_path()` | 获取输出文件路径 |
+| `save_ic_result()` | 保存结果到 JSON |
+
+**规范要点：**
+
+1. 所有字段符合 MODULE.md "输出结构统一性规范"
+2. rolling_ic_mean 前 9 个为 None（min_periods=10）
+3. sample_stats.avg_stocks_period 包含口径说明
+4. summary 基于五维度判断生成推荐
 
 ### incremental_engine.py — 增量更新引擎（待实现）
 
