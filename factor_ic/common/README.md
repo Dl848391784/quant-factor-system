@@ -977,6 +977,37 @@ save_ic_result(result)
 3. sample_stats.avg_stocks_period 包含口径说明
 4. summary 基于五维度判断生成推荐
 
+### 模块内部函数复用规范（重要）
+
+**DRY原则：模块内公共函数必须复用，禁止重复实现相同逻辑**
+
+| 场景 | 正确做法 | 错误做法 |
+|------|---------|---------|
+| build_ic_result 需要滚动均值 | 调用 `build_rolling_ic_mean(ic_series)` | 直接实现 `ic_series.rolling(window=20, min_periods=10).mean()` |
+
+**原因：**
+1. 避免后续修改窗口参数时需改多处
+2. 公共函数已有完整注释和测试
+3. 语义清晰，易于维护
+
+### 后缀处理规范（重要）
+
+**只处理后缀，避免误处理字符串中间的匹配**
+
+| 场景 | 正确做法 | 错误做法 |
+|------|---------|---------|
+| 移除因子名 `_1d` 后缀 | `name[:-3] if name.endswith('_1d') else name` | `name.replace('_1d', '')` |
+
+**示例对比：**
+```python
+# 错误写法（误处理中间的 _1d）
+factor_name = 'my_1d_factor_1d'
+clean = factor_name.replace('_1d', '')  # → 'my_factor'（错误！）
+
+# 正确写法（只处理后缀）
+clean = factor_name[:-3] if factor_name.endswith('_1d') else factor_name  # → 'my_1d_factor'
+```
+
 ---
 
 ## incremental_engine.py — 增量更新引擎
