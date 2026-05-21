@@ -419,9 +419,9 @@ def save_ic_result(result: Dict, output_path: Optional[Path] = None) -> Path:
     # 确保目录存在
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # 保存
+# 保存（统一转换）
     with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(result, f, indent=2, ensure_ascii=False)
+        json.dump(convert_to_native_types(result), f, indent=2, ensure_ascii=False)
     
     logger.info(f"  ✓ 结果已保存: {output_path}")
     return output_path
