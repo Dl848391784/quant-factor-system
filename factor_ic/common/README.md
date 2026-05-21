@@ -644,6 +644,39 @@ factor_df = pd.merge(factor_df, additional_df[['date', 'asset', col_name]], ...)
 
 **参考：** data_loader.py 第148-155行（列验证 + 友好错误信息）
 
+### 列表去重保序规范（重要）
+
+**合并列表时必须去重并保持顺序：**
+
+```python
+# 错误写法（不去重，可能产生重复列）
+select_cols = ['date', 'asset'] + factor_cols
+# 若 factor_cols=['date', 'rsi_6']，select_cols=['date', 'asset', 'date', 'rsi_6']
+# factor_df 出现重复 'date' 列，下游操作异常
+
+# 正确写法（去重保序）
+select_cols = list(dict.fromkeys(['date', 'asset'] + factor_cols))
+# 结果：['date', 'asset', 'rsi_6']（去重后顺序正确）
+```
+
+**原理：**
+- `dict.fromkeys(iterable)` 创建字典，键来自 iterable，值全为 None
+- 字典键天然去重，保留首次出现顺序（Python 3.7+）
+- `list(dict.fromkeys(...))` 转为列表，实现去重保序
+
+**原因：**
+1. 用户可能传入 `factor_cols=['date', 'rsi_6']`（包含基础列）
+2. 直接合并会导致重复列名，DataFrame 操作异常
+3. `set()` 去重但丢失顺序，`dict.fromkeys()` 去重保序
+4. 保持顺序确保 'date'、'asset' 在前，方便调试
+
+**适用场景：**
+- 合并列表时去重（如 `base_cols + user_cols`）
+- DataFrame 列选择前去重（防止重复列）
+- 需要保持首次出现顺序的场景
+
+**参考：** data_loader.py 第204行（dict.fromkeys 去重保序）
+
 ---
 
 ## ic_result_builder.py — IC结果构建公共模块

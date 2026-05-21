@@ -201,7 +201,8 @@ def load_factor_return_data(
         )
     
     # ========== 选择需要的列 ==========
-    select_cols = ['date', 'asset'] + all_factor_cols
+    # 去重并保持顺序：防止用户传入 factor_cols=['date', 'rsi_6'] 导致重复列
+    select_cols = list(dict.fromkeys(['date', 'asset'] + all_factor_cols))
     factor_df = factor_df[select_cols].copy()
     
     # 重命名收益列（统一为 forward_return）
