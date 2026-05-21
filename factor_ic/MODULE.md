@@ -1,9 +1,9 @@
 # factor_ic 模块规范
 
-> 版本: v3.4（精简版）
+> 版本: v3.7（精简版）
 > 创建时间: 2026-05-19
 > 重构时间: 2026-05-22
-> 最后更新: 2026-05-22 (新增中间变量避免污染输出规范、CLI异常处理堆栈保留规范)
+> 最后更新: 2026-05-23 (新增 SKIP 模式缓存对象处理规范、修复键名不一致问题)
 
 ## 快速参考
 
@@ -148,6 +148,11 @@
     - 补充辅助字段：n_assets、factor_stats、factor_col
     - 删除重复定义，精简76行
     - 保留统一性要求和字段值完整性检查规范
+19. v3.7（2026-05-23）：
+    - 新增"SKIP 模式缓存对象处理规范"章节
+    - 修复 ic_rsi_1d.py SKIP 模式修改缓存对象未持久化问题
+    - 修复 ic_rsi_1d.py 全量/增量模式日志取值路径不一致问题
+    - 核心原则：SKIP 模式不修改缓存对象，避免内存与文件不一致
 
 # 一、概述与基础
 
@@ -305,6 +310,49 @@ else:  # UpdateMode.FULL
 **禁止：**
 - ❌ 只处理 skip 模式，缺失 incremental 分支（ic_bollinger_pb_1d.py 2026-05-22 诊断）
 - ❌ 使用旧版 `should_use_incremental` 返回 bool（已改为返回 `UpdateMode` 枚举）
+
+### SKIP 模式缓存对象处理规范（2026-05-23新增）
+
+**核心原则：SKIP 模式不修改缓存对象，直接返回原数据，避免内存与文件不一致。**
+
+**错误示例（修改缓存对象）**：
+```python
+# ❌ 错误：修改 cached_data['update_mode']，但未持久化
+if mode == UpdateMode.SKIP:
+    with open(output_file, 'r', encoding='utf-8') as f:
+        cached_data = json.load(f)
+        cached_data['update_mode'] = 'skip'  # 内存修改
+        return cached_data
+    # 问题：
+    # - 调用方拿到的 cached_data['update_mode'] = 'skip'
+    # - 但文件中 cached_data['update_mode'] 可能是旧值
+    # - 内存数据与文件不一致，下次读取行为不可预测
+```
+
+**正确示例（不修改缓存对象）**：
+```python
+# ✓ 正确：直接返回缓存，不修改
+if mode == UpdateMode.SKIP:
+    logger.info("[模式] 缓存已最新，跳过更新")
+    with open(output_file, 'r', encoding='utf-8') as f:
+        cached_data = json.load(f)
+        # 不修改 cached_data，直接返回
+        return cached_data
+```
+
+**为何必须不修改缓存对象**：
+
+| 原因 | 说明 |
+|------|------|
+| 内存文件一致性 | 修改后不持久化，调用方数据与文件不同步 |
+| 行为可预测 | 下次读取时缓存内容不变，行为一致 |
+| 遵循最小修改原则 | SKIP 模式语义是"跳过"，不应有任何修改 |
+
+**适用场景**：
+- SKIP 模式返回缓存数据
+- 任何"只读返回"场景
+
+**参考**：ic_rsi_1d.py 第152-165行（2026-05-23 修复）
 
 ### 因子计算异常处理顺序规范（2026-05-22新增）
 

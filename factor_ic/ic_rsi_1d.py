@@ -123,10 +123,6 @@ def generate_rsi_ic_data(
             logger=logger
         )
         
-        logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
-        logger.info(f"ICIR: {ic_result['icir']:.2f}")
-        logger.info(f"正比例: {ic_result['positive_ratio']:.1%}")
-        
         # 使用公共模块构建输出
         result = build_ic_result(
             ic_result=ic_result,
@@ -135,6 +131,11 @@ def generate_rsi_ic_data(
             data_source='cache/factor_data/factor_data.json.gz',
             factor_col='rsi_6'
         )
+        
+        # 使用 result['ic_metrics'] 统一取值（遵循 MODULE.md 增量更新返回结构统一规范）
+        logger.info(f"IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
+        logger.info(f"ICIR: {result['ic_metrics']['icir']:.2f}")
+        logger.info(f"正比例: {result['positive_ratio']:.1%}")
         
         # ========== 保存结果 ==========
         logger.info(f"[3/3] 保存数据到: {output_file}")
@@ -151,11 +152,12 @@ def generate_rsi_ic_data(
     
     if mode == UpdateMode.SKIP:
         # ========== 跳过更新（缓存已最新） ==========
+        # 规范：SKIP 模式不修改缓存对象，直接返回（update_mode 在缓存中已是正确值）
         logger.info("[模式] 缓存已最新，跳过更新")
         try:
             with open(output_file, 'r', encoding='utf-8') as f:
                 cached_data = json.load(f)
-                cached_data['update_mode'] = 'skip'
+                # 不修改 cached_data，直接返回（避免内存与文件不一致）
                 return cached_data
         except FileNotFoundError:
             logger.warning("[诊断] 缓存文件不存在，执行全量计算")
@@ -180,7 +182,7 @@ def generate_rsi_ic_data(
         )
         
         logger.info(f"IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
-        logger.info(f"ICIR: {result['icir']:.2f}")
+        logger.info(f"ICIR: {result['ic_metrics']['icir']:.2f}")
         logger.info(f"更新模式: {result['update_mode']}")
         
         return result
