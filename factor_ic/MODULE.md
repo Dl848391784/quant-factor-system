@@ -325,6 +325,48 @@ else:  # UpdateMode.FULL
 - ❌ 只处理 skip 模式，缺失 incremental 分支（ic_bollinger_pb_1d.py 2026-05-22 诊断）
 - ❌ 使用旧版 `should_use_incremental` 返回 bool（已改为返回 `UpdateMode` 枚举）
 
+### 因子计算异常处理顺序规范（2026-05-22新增）
+
+**核心原则：按优先级顺序处理异常，先低后高，高优先级覆盖低优先级。**
+
+**错误示例（逻辑隐晦，意图不清晰）：**
+
+```python
+# ❌ 错误：高优先级先处理，低优先级需额外条件排除
+bollinger_pb = bollinger_pb.where(~abnormal_mask, None)  # 异常负值 → NaN（步骤1）
+bollinger_pb = bollinger_pb.where(~narrow_band_mask | abnormal_mask, 0.5)  # 过窄 → 0.5（步骤2）
+# 问题：
+# - 步骤2的 `| abnormal_mask` 意图不明确（排除异常负值？）
+# - 逻辑依赖 .where(True, value) 保留原值的隐晦行为
+# - 注释与代码逻辑不符，极易引入维护bug
+```
+
+**正确示例（按优先级顺序，意图清晰）：**
+
+```python
+# ✅ 正确：按优先级顺序处理，先低后高，高优先级覆盖低优先级
+# 优先级1（低）：band_width < EPSILON（过窄带宽）→ 0.5（中性值）
+# 优先级2（高）：band_width < 0（异常负值）→ NaN（覆盖上一步）
+bollinger_pb = bollinger_pb.where(~narrow_band_mask, 0.5)  # 过窄 → 0.5
+bollinger_pb = bollinger_pb.where(~abnormal_mask, None)    # 异常负值 → NaN（覆盖）
+```
+
+**为何必须按优先级顺序：**
+
+| 原因 | 说明 |
+|------|------|
+| 意图清晰 | 低优先级先处理，高优先级后处理并覆盖，逻辑一目了然 |
+| 无隐晦条件 | 不需要 `| abnormal_mask` 这种"排除"逻辑 |
+| 易于维护 | 新增异常类型只需追加一行 `.where()`，无需修改现有逻辑 |
+| 符合直觉 | 高优先级"覆盖"低优先级，符合人类思维习惯 |
+
+**适用场景：**
+- 多种异常类型需不同处理（如：过窄 → 0.5，异常负值 → NaN）
+- 异常类型有优先级关系（高优先级覆盖低优先级）
+- 使用 `.where()` 或类似条件替换操作
+
+**参考：** ic_bollinger_pb_1d.py 第99-103行（2026-05-22 修复）
+
 ### 缺失日期诊断
 
 区分"数据源无数据"和"缓存缺失"：

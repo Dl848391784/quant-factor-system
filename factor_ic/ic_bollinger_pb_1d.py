@@ -96,11 +96,11 @@ def calculate_bollinger_pb(
     safe_band_width = band_width.clip(lower=EPSILON)
     bollinger_pb = (factor_df['close'] - lower) / safe_band_width
     
-    # 异常处理：标记为 NaN（让后续 dropna 过滤）
-    # 1. band_width < 0（异常负值）→ NaN
-    # 2. band_width < EPSILON（过窄带宽）→ 0.5（中性值，符合布林带定义）
-    bollinger_pb = bollinger_pb.where(~abnormal_mask, None)  # 异常负值 → NaN
-    bollinger_pb = bollinger_pb.where(~narrow_band_mask | abnormal_mask, 0.5)  # 过窄 → 0.5
+    # 异常处理：按优先级顺序处理，先低后高，高优先级覆盖低优先级
+    # 优先级1（低）：band_width < EPSILON（过窄带宽）→ 0.5（中性值）
+    # 优先级2（高）：band_width < 0（异常负值）→ NaN（覆盖上一步）
+    bollinger_pb = bollinger_pb.where(~narrow_band_mask, 0.5)  # 过窄 → 0.5
+    bollinger_pb = bollinger_pb.where(~abnormal_mask, None)    # 异常负值 → NaN（覆盖）
     
     # 异常统计日志
     abnormal_count = abnormal_mask.sum()
