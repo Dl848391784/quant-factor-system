@@ -127,6 +127,10 @@ factor_ic 模块负责计算各类因子的 IC（Information Coefficient）值�
 
 ## 公共模块架构
 
+**目录规范：factor_ic下IC计算脚本的共用模块放在 `factor_ic/common/` 目录。**
+
+禁止在IC脚本中重复实现已有公共功能，应复用common模块。
+
 详细规范见 `factor_ic/common/README.md`。
 
 | 模块 | 功能 | 核心函数 |
