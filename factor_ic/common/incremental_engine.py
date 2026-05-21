@@ -19,6 +19,13 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
+from enum import Enum
+
+# 更新模式枚举（三值返回，语义清晰）
+class UpdateMode(Enum):
+    INCREMENTAL = 'incremental'  # 缓存滞后，增量更新
+    FULL = 'full'                # 缓存不存在，全量计算
+    SKIP = 'skip'                # 缓存已最新，无需计算
 
 # 导入日志配置
 from .logger_config import get_logger
@@ -125,19 +132,20 @@ def calculate_missing_dates_ic(
     factor_df_new = factor_df_full[factor_df_full['date'].isin(missing_set)]
     return_df_new = return_df_full[return_df_full['date'].isin(missing_set)]
     
-    # 诊断信息
-    dates_in_cache = set(factor_df_full['date'].unique())
-    dates_not_in_cache = missing_set - dates_in_cache
+    # 诊断信息：检查缺失日期是否在因子数据中存在
+    # 注意：变量名应准确反映语义
+    dates_in_factor_data = set(factor_df_full['date'].unique())  # 因子数据中的所有日期
+    phantom_dates = missing_set - dates_in_factor_data  # 缺失日期中不在因子数据里的"幽灵日期"
     
     diagnostics = {
-        'dates_not_in_cache': sorted(dates_not_in_cache)[:10],
-        'dates_not_in_cache_count': len(dates_not_in_cache),
+        'phantom_dates': sorted(phantom_dates)[:10],  # 幽灵日期示例
+        'phantom_dates_count': len(phantom_dates),    # 幽灵日期数量
         'has_data': not factor_df_new.empty
     }
     
-    if dates_not_in_cache:
-        logger.warning(f"{len(dates_not_in_cache)} 个缺失日期不在当前缓存范围")
-        examples = diagnostics['dates_not_in_cache'][:5]
+    if phantom_dates:
+        logger.warning(f"{len(phantom_dates)} 个缺失日期不在因子数据中（幽灵日期）")
+        examples = diagnostics['phantom_dates'][:5]
         logger.warning(f"示例日期: {examples}")
     
     if factor_df_new.empty:
@@ -269,6 +277,7 @@ def recalculate_statistics(
     
     # 过滤有效 IC 值
     valid_indices = [i for i, ic in enumerate(all_ic_values) if ic is not None]
+    valid_indices_set = set(valid_indices)  # O(1) 成员检测，避免 O(n²)
     valid_dates = [all_dates[i] for i in valid_indices]
     valid_ic = [all_ic_values[i] for i in valid_indices]
     
@@ -299,7 +308,7 @@ def recalculate_statistics(
     valid_idx = 0
     
     for i in range(len(all_dates)):
-        if i in valid_indices:
+        if i in valid_indices_set:  # 使用 set 实现 O(1) 检测
             rolling_ic_mean_aligned.append(rolling_ic_mean_raw[valid_idx])
             valid_idx += 1
         else:
@@ -339,12 +348,11 @@ def incremental_update_ic(
         增量更新结果字典
     
     流程:
-        1. 读取现有缓存
-        2. 确定缺失日期
-        3. 计算缺失日期 IC
-        4. 合并数据
-        5. 重算统计
-        6. 构建输出
+        1. 读取现有缓存 [1/5]
+        2. 确定缺失日期 [2/5]
+        3. 计算缺失日期 IC [3/5]
+        4. 合并数据 [4/5]
+        5. 重算统计并保存 [5/5]
     """
     logger.info("=" * 40)
     logger.info(f"增量更新: {factor_name}")
@@ -378,6 +386,7 @@ def incremental_update_ic(
     logger.info(f"示例: {missing_dates[:5]}")
     
     # 3. 计算缺失日期 IC
+    logger.info("[3/5] 计算缺失日期 IC...")
     new_dates, new_ic_values, diagnostics = calculate_missing_dates_ic(
         factor_df_full=factor_df_full,
         return_df_full=return_df_full,
@@ -392,6 +401,7 @@ def incremental_update_ic(
         return existing_data
     
     # 4. 合并数据
+    logger.info("[4/5] 合并数据...")
     all_dates, all_ic_values, merge_info = merge_ic_data(
         existing_dates=existing_dates,
         existing_ic_values=existing_ic_values,
@@ -399,7 +409,8 @@ def incremental_update_ic(
         new_ic_values=new_ic_values
     )
     
-    # 5. 重算统计
+    # 5. 重算统计并保存
+    logger.info("[5/5] 重算统计并保存...")
     stats = recalculate_statistics(all_dates, all_ic_values)
     
     # 6. 构建输出（简化版，不含五维度判断）
@@ -415,9 +426,9 @@ def incremental_update_ic(
         'icir': stats['icir'],
         'positive_ratio': stats['positive_ratio'],
         'sample_stats': {
-            'total_days': raw_metadata['total_days'],
+            'total_days': raw_metadata.get('total_days', 0),
             'valid_days': stats['valid_days'],
-            'avg_stocks_per_day': raw_metadata['avg_stocks_per_day'],
+            'avg_stocks_per_day': raw_metadata.get('avg_stocks_per_day', 0),
             'avg_stocks_period': {
                 'start': all_dates[0],
                 'end': all_dates[-1],
@@ -447,7 +458,7 @@ def should_use_incremental(
     output_path: Path,
     factor_df: pd.DataFrame,
     force_full: bool = False
-) -> bool:
+) -> UpdateMode:
     """
     判断是否使用增量模式
     
@@ -457,34 +468,42 @@ def should_use_incremental(
         force_full: 是否强制全量
     
     返回:
-        True = 使用增量模式，False = 使用全量模式
+        UpdateMode 枚举值：
+        - INCREMENTAL: 缓存滞后，增量更新
+        - FULL: 缓存不存在或损坏，全量计算
+        - SKIP: 缓存已最新，无需计算
     
     判断逻辑:
-        force_full = True → 全量
-        缓存不存在 → 全量
-        缓存存在 + 缓存日期 >= 因子日期 → skip（无需更新）
-        缓存存在 + 缺失日期 > 0 → 增量
+        force_full = True → FULL
+        缓存不存在 → FULL
+        缓存存在 + 缓存日期 >= 因子日期 → SKIP
+        缓存存在 + 缺失日期 > 0 → INCREMENTAL
     """
     if force_full:
         logger.info("模式判断: 强制全量计算")
-        return False
+        return UpdateMode.FULL
     
     if not output_path.exists():
         logger.info("模式判断: 缓存不存在，全量计算")
-        return False
+        return UpdateMode.FULL
     
     # 读取缓存最新日期
     cache_latest = get_cache_latest_date(output_path)
     if cache_latest is None:
         logger.info("模式判断: 缓存日期为空，全量计算")
-        return False
+        return UpdateMode.FULL
     
-    # 因子数据最新日期
+    # 因子数据最新日期（显式转换为日期字符串，确保格式一致）
     factor_latest = str(factor_df['date'].max())
     
-    if cache_latest >= factor_latest:
+    # 日期比较：显式转换为 YYYY-MM-DD 格式，避免格式不一致导致错误比较
+    # 例如 '2026/05/22' 与 '2026-05-22' 字符串比较会出错
+    cache_date_normalized = cache_latest.replace('/', '-')
+    factor_date_normalized = factor_latest.replace('/', '-')
+    
+    if cache_date_normalized >= factor_date_normalized:
         logger.info(f"模式判断: 缓存已最新（{cache_latest} >= {factor_latest}），跳过更新")
-        return False  # 缓存已最新，无需更新
+        return UpdateMode.SKIP  # 缓存已最新，无需更新
     
     logger.info(f"模式判断: 缓存滞后（{cache_latest} < {factor_latest}），增量更新")
-    return True
+    return UpdateMode.INCREMENTAL
