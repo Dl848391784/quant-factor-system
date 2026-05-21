@@ -224,15 +224,22 @@ dates = sorted(set(dates))  # 先去重排序
 normalized_dates = [d.split()[0] if ' ' in d else d for d in dates]  # 后标准化
 dates = normalized_dates  # 可能产生重复（"2026-04-03" + "2026-04-03 12:00:00" → 两个 "2026-04-03")
 
-# 正确写法（先标准化，再去重排序）
-normalized_dates = [d.split()[0] if ' ' in d else d for d in dates]  # 先标准化
-dates = sorted(set(normalized_dates))  # 后去重排序
+# 正确写法（先 str() 转换，再截断，最后去重排序）
+dates = [str(d) for d in dates]  # 先统一转换为字符串（防止 datetime 对象）
+normalized_dates = [d.split()[0] if ' ' in d else d for d in dates]  # 再截断时间戳
+dates = sorted(set(normalized_dates))  # 最后去重排序
 ```
+
+**完整标准化流程：**
+1. **str() 转换**：将 datetime/int/Timestamp 等非字符串类型转换为字符串（防止 TypeError）
+2. **截断时间戳**：处理 `"2026-04-03 00:00:00"` → `"2026-04-03"`（确保格式一致）
+3. **去重排序**：sorted + set 去除截断后的重复项
 
 **原因：**
 1. 若原始数据存在 `"2026-04-03"` 和 `"2026-04-03 12:00:00"` 混合格式
 2. 先去重排序无法去除截断后的重复项（sorted + set 在截断之前完成）
-3. 先标准化截断，再 sorted + set 去重，确保无重复日期
+3. meta.dates 可能包含 datetime 对象，`' ' in d` 检查会抛出 TypeError
+4. 先 str() 转换确保类型一致，再截断，最后去重排序
 
 **参考：** data_completeness.py 第71-80行（2026-05-22 更新）
 

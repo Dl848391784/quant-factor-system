@@ -69,6 +69,9 @@ def get_factor_data_dates() -> Tuple[List[str], Optional[str]]:
             dates = sorted(set(str(r['date']) for r in data.get('data', []) if r.get('date') is not None))
         
         if dates:
+            # 先统一转换为字符串，防止 datetime/int 等非字符串类型导致 TypeError
+            dates = [str(d) for d in dates]
+            
             # 格式统一：处理 "2026-04-03 00:00:00" → "2026-04-03"
             # 确保 check_data_completeness() 中的字符串比较正确
             normalized_dates = []
