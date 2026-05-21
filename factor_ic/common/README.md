@@ -1389,16 +1389,22 @@ except Exception as e:
     _logger.error(f"IC 计算失败: {e}")  # 真正的 IC 计算错误
 ```
 
-**嵌套字段需双重保护：**
+**嵌套字段需双重保护（含 None fallback）：**
 
 ```python
 # 错误写法（嵌套访问无保护）
 _logger.info(f"t 统计量: {ic_result['statistical_significance']['t_stat']:.2f}")
 # 若 statistical_significance 缺失，KeyError；若 t_stat 缺失，KeyError
 
-# 正确写法（双重 .get() 保护）
+# 错误写法（双重 .get() 无法处理 None 值）
 t_stat = ic_result.get('statistical_significance', {}).get('t_stat', 0.0)
+# 若 statistical_significance 值为 None（而非缺失），None.get() 抛 TypeError
+
+# 正确写法（显式 None fallback）
+stats_sig = ic_result.get('statistical_significance') or {}
+t_stat = stats_sig.get('t_stat', 0.0)
 _logger.info(f"t 统计量: {t_stat:.2f}")
+# .get() 默认值 {} 只在键缺失时生效，若键存在但值为 None，需 or {} fallback
 ```
 
 **保持全量/增量模式一致性：**

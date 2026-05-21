@@ -275,8 +275,9 @@ def run_factor_ic_analysis(
             # 使用 .get() 防止 KeyError，保持与增量模式一致
             _logger.info(f"IC 均值: {ic_result.get('ic_mean', 0.0):.4f}")
             _logger.info(f"ICIR: {ic_result.get('icir', 0.0):.2f}")
-            # 五维度字段嵌套访问需双重保护
-            t_stat = ic_result.get('statistical_significance', {}).get('t_stat', 0.0)
+            # 五维度字段嵌套访问需双重保护（get 默认 {}，或 None 时 fallback {}）
+            stats_sig = ic_result.get('statistical_significance') or {}
+            t_stat = stats_sig.get('t_stat', 0.0)
             _logger.info(f"t 统计量: {t_stat:.2f}")
             
         except Exception as e:
