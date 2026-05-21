@@ -25,7 +25,7 @@ logger = get_logger(__name__)
 from .data_loader import load_factor_return_data, get_factor_cache_path, get_return_cache_path
 
 # 导入 IC 计算
-from .ic_calculator import calculate_ic_with_direction_verification
+from .ic_calculator import calculate_ic_with_direction_verification, calculate_ic_statistics
 
 # 导入结果构建
 from .ic_result_builder import build_ic_result, build_error_result, save_ic_result, get_ic_output_path
@@ -201,7 +201,6 @@ def run_factor_ic_analysis(
             
             if len(valid_ic) > 0:
                 # 调用统计计算（五维度判断）
-                from .ic_calculator import calculate_ic_statistics
                 stats_result = calculate_ic_statistics(valid_ic)
                 
                 # 补充五维度判断字段（使用 .get() 鷻加默认值防止 KeyError）
