@@ -50,7 +50,8 @@ def run_factor_ic_analysis(
     return_cache_path: Optional[Path] = None,
     additional_factor_files: Optional[Dict[str, Path]] = None,
     custom_factor_calculation: Optional[Callable] = None,
-    custom_factor_calculation_params: Optional[Dict] = None
+    custom_factor_calculation_params: Optional[Dict] = None,
+    logger=None
 ) -> Dict:
     """
     因子 IC 分析统一主入口
@@ -101,6 +102,11 @@ def run_factor_ic_analysis(
             custom_factor_calculation=calculate_kdj_j
         )
     """
+    # logger fallback 初始化
+    if logger is None:
+        from .logger_config import get_logger
+        logger = get_logger(__name__)
+    
     logger.info("=" * 60)
     logger.info(f"因子 IC 分析: {factor_name}_{return_period}")
     logger.info("=" * 60)
@@ -130,7 +136,8 @@ def run_factor_ic_analysis(
             return_col=return_col,
             factor_cache_path=factor_cache_path,
             return_cache_path=return_cache_path,
-            additional_factor_files=additional_factor_files
+            additional_factor_files=additional_factor_files,
+            logger=logger
         )
     except FileNotFoundError as e:
         # 缓存不存在：返回错误结构
@@ -221,7 +228,8 @@ def run_factor_ic_analysis(
                 return_col='forward_return',
                 date_col='date',
                 asset_col='asset',
-                min_stocks=min_stocks
+                min_stocks=min_stocks,
+                logger=logger
             )
             
             logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")

@@ -156,7 +156,8 @@ def generate_turnover_surge_ic_data(
     try:
         # 加载基本数据
         factor_df, return_df, raw_metadata = load_factor_return_data(
-            factor_cols=['close']
+            factor_cols=['close'],
+            logger=logger
         )
         logger.info("✓ 基本数据加载成功")
         
@@ -204,7 +205,8 @@ def generate_turnover_surge_ic_data(
         return_df=return_df,
         factor_col='turnover_surge',
         return_col='forward_return',
-        min_stocks=min_stocks
+        min_stocks=min_stocks,
+        logger=logger
     )
     
     logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")

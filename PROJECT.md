@@ -780,6 +780,80 @@ def cleanup_old_logs(logs_dir: Path, keep_days: int = 30):
 - 开发环境：30 天
 - 生产环境：90 天（可根据审计需求调整）
 
+### 公共模块日志传递规范（重要）
+
+**核心原则：公共模块不独立创建 logger，由调用方传入。**
+
+**问题背景：**
+- common 模块（如 `data_loader.py`）被多个因子脚本调用
+- 若 common 模块独立创建 logger，日志分散在多个文件
+- 无法追溯日志是哪个脚本调用的
+
+**解决方案：调用方传入 logger 参数**
+
+```python
+# ❌ 错误：common 模块独立创建 logger（无法定位调用方）
+def load_data_from_cache(cache_path):
+    logger = get_logger(__name__)  # 固定为 data_loader
+    logger.info("数据加载完成")
+    return data
+
+# ✓ 正确：common 模块接收调用方 logger
+def load_data_from_cache(cache_path, logger=None):
+    if logger is None:
+        logger = get_logger(__name__)  # fallback（独立调用时）
+    logger.info("数据加载完成")
+    return data
+
+# ✓ 正确：调用方传入自己的 logger
+# ic_kdj_j_1d.py 中调用
+logger = get_logger(__name__)  # ic_kdj_j_1d 的 logger
+data = load_data_from_cache(cache_path, logger=logger)
+# 日志记录在 ic_kdj_j_1d_2026-05-22.log
+```
+
+**规则总结：**
+
+| 模块类型 | logger 创建方式 | 日志文件 |
+|---------|----------------|---------|
+| 因子脚本（factor_ic/*.py） | `logger = get_logger(__name__)` | `ic_<因子名>_YYYY-MM-DD.log` |
+| 公共模块（factor_ic/common/*.py） | 接收 `logger` 参数 | 由调用方决定 |
+
+**公共模块函数签名规范：**
+
+```python
+# 所有公共模块的公共函数必须添加 logger 参数
+def public_function(..., logger=None):
+    """
+    参数:
+        ...: 其他参数
+        logger: 日志记录器（由调用方传入，默认使用模块 logger）
+    """
+    if logger is None:
+        logger = get_logger(__name__)
+    
+    logger.info("操作完成")
+```
+
+**调用方传入规范：**
+
+```python
+# 因子脚本中调用公共模块
+logger = get_logger(__name__)  # 创建脚本 logger
+
+# 传入 logger 参数
+data = load_data_from_cache(cache_path, logger=logger)
+result = calculate_ic_with_direction_verification(data, logger=logger)
+```
+
+**禁止行为：**
+
+```
+❌ 公共模块独立创建 logger（日志分散，无法定位调用方）
+❌ 调用方不传入 logger（common 模块 fallback 到模块名）
+❌ 公共模块函数缺少 logger 参数（无法传递日志上下文）
+```
+
 ---
 
 ## 版本历史

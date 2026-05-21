@@ -22,8 +22,6 @@ from typing import Tuple, List, Optional, Dict
 
 from .logger_config import get_logger
 
-logger = get_logger(__name__)
-
 # 默认缓存路径
 DEFAULT_CACHE_DIR = Path(__file__).parent.parent.parent / 'cache' / 'factor_data'
 DEFAULT_FACTOR_CACHE = DEFAULT_CACHE_DIR / 'factor_data.json.gz'
@@ -37,7 +35,8 @@ def load_factor_return_data(
     return_cache_path: Optional[Path] = None,
     dropna_cols: Optional[List[str]] = None,
     validate_date_alignment: bool = True,
-    additional_factor_files: Optional[Dict[str, Path]] = None
+    additional_factor_files: Optional[Dict[str, Path]] = None,
+    logger=None
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
     """
     从缓存加载因子数据和收益数据
@@ -53,6 +52,7 @@ def load_factor_return_data(
         additional_factor_files: 额外因子文件（如换手率数据）
             - 格式: {'turnover_rate': Path(...)}
             - 会合并到主因子数据
+        logger: 日志记录器（由调用方传入，默认使用模块 logger）
     
     返回:
         (factor_df, return_df, raw_metadata)
@@ -87,6 +87,9 @@ def load_factor_return_data(
             }
         )
     """
+    if logger is None:
+        logger = get_logger(__name__)
+    
     logger.info("[数据加载] 从缓存读取数据...")
     
     # 确定缓存路径

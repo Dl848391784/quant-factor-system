@@ -17,7 +17,6 @@ from typing import Dict, Optional, Tuple
 import math
 
 from .logger_config import get_logger
-logger = get_logger(__name__)
 
 
 def calculate_ic_with_direction_verification(
@@ -27,7 +26,8 @@ def calculate_ic_with_direction_verification(
     return_col: str = 'forward_return',
     date_col: str = 'date',
     asset_col: str = 'asset',
-    min_stocks: int = 10
+    min_stocks: int = 10,
+    logger=None
 ) -> Dict:
     """
     计算因子 IC，五维度独立判断
@@ -64,6 +64,8 @@ def calculate_ic_with_direction_verification(
         资产列名，默认 'asset'
     min_stocks : int
         每日最少股票数，默认 10
+    logger : Logger
+        日志记录器（由调用方传入，默认使用模块 logger）
         
     返回:
     ---
@@ -125,6 +127,9 @@ def calculate_ic_with_direction_verification(
     方向判断仅描述 ic_mean 符号，不代表因子有效性。
     有效性判断请参考 statistical_significance、economic_significance、icir_stability。
     """
+    if logger is None:
+        logger = get_logger(__name__)
+    
     # ========== 输入验证 ==========
     if factor_df.empty:
         raise ValueError("factor_df 不能为空")
@@ -265,7 +270,8 @@ def calculate_single_day_ic(
     daily_data: pd.DataFrame,
     factor_col: str,
     return_col: str = 'forward_return',
-    min_stocks: int = 10
+    min_stocks: int = 10,
+    logger=None
 ) -> Optional[float]:
     """
     计算单日的 IC 值（核心算法函数）
@@ -280,6 +286,7 @@ def calculate_single_day_ic(
         factor_col: 因子列名
         return_col: 收益列名，默认 'forward_return'
         min_stocks: 每日最少股票数，默认 10
+        logger: 日志记录器（由调用方传入，默认使用模块 logger）
         
     返回:
         float: IC 值（可能为 0.0）
@@ -291,6 +298,9 @@ def calculate_single_day_ic(
         - 收益值全相同 → 返回 0.0（相关性无法定义）
         - IC 为 NaN → 返回 0.0
     """
+    if logger is None:
+        logger = get_logger(__name__)
+    
     # 股票数不足
     if len(daily_data) < min_stocks:
         return None
@@ -694,6 +704,9 @@ if __name__ == "__main__":
     # 简单测试
     import numpy as np
     
+    # 创建 logger（__main__ 测试场景）
+    logger = get_logger(__name__)
+    
     np.random.seed(42)
     dates = pd.date_range('2025-01-01', periods=20, freq='D')
     assets = [f'00000{i}.SZ' for i in range(1, 11)]
@@ -723,7 +736,7 @@ if __name__ == "__main__":
     return_df = pd.DataFrame(return_rows)
     
     result = calculate_ic_with_direction_verification(
-        factor_df, return_df, factor_col='rsi_6'
+        factor_df, return_df, factor_col='rsi_6', logger=logger
     )
     
     logger.info("=" * 60)
@@ -734,7 +747,7 @@ if __name__ == "__main__":
     logger.info(f"ICIR:        {result['icir']:.2f}")
 
 
-def calculate_ic_statistics(ic_series: pd.Series) -> Dict:
+def calculate_ic_statistics(ic_series: pd.Series, logger=None) -> Dict:
     """
     从 IC 序列计算统计指标（不重新计算 IC）
     
@@ -742,6 +755,7 @@ def calculate_ic_statistics(ic_series: pd.Series) -> Dict:
     
     参数:
         ic_series: IC 值序列（pandas Series）
+        logger: 日志记录器（由调用方传入，默认使用模块 logger）
         
     输入约束（重要）:
         1. 索引必须按日期升序排列，确保 rolling 计算顺序正确
@@ -772,6 +786,9 @@ def calculate_ic_statistics(ic_series: pd.Series) -> Dict:
         rolling_ic_mean 输出顺序与 ic_series 索引顺序一致，
         调用方对齐时应保证索引顺序匹配。
     """
+    if logger is None:
+        logger = get_logger(__name__)
+    
     # 复用 _calculate_ic_statistics 函数
     ic_mean = ic_series.mean()
     ic_std = ic_series.std()

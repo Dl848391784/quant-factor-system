@@ -17,7 +17,6 @@ import json
 import gc
 
 from .logger_config import get_logger
-logger = get_logger(__name__)
 
 
 # 默认路径配置
@@ -46,14 +45,20 @@ def get_ic_output_path(factor_name: str) -> Path:
     return FACTOR_IC_RESULT_DIR / f'ic_{factor_name}_analysis_result.json'
 
 
-def get_factor_data_dates() -> Tuple[List[str], Optional[str]]:
+def get_factor_data_dates(logger=None) -> Tuple[List[str], Optional[str]]:
     """
     获取 factor_data.json.gz 的日期列表和最新日期
+    
+    Args:
+        logger: 日志记录器（由调用方传入，默认使用模块 logger）
     
     Returns:
         (日期列表, 最新日期)
         日期格式: "YYYY-MM-DD"
     """
+    if logger is None:
+        logger = get_logger(__name__)
+    
     factor_path = FACTOR_DATA_DIR / 'factor_data.json.gz'
     
     if not factor_path.exists():
@@ -134,16 +139,20 @@ def _extract_dates_from_cache(data: Dict[str, Any]) -> Tuple[List[str], Optional
     return normalized_dates, latest_date
 
 
-def get_cache_latest_date(factor_name: str) -> Optional[str]:
+def get_cache_latest_date(factor_name: str, logger=None) -> Optional[str]:
     """
     获取因子IC缓存的最新日期
     
     Args:
         factor_name: 因子名称 (如 'rsi_1d', 'kdj_j_3d')
+        logger: 日志记录器（由调用方传入，默认使用模块 logger）
         
     Returns:
         最新日期字符串 (YYYY-MM-DD) 或 None
     """
+    if logger is None:
+        logger = get_logger(__name__)
+    
     cache_file = FACTOR_IC_RESULT_DIR / f'ic_{factor_name}_analysis_result.json'
     
     if not cache_file.exists():
@@ -163,13 +172,15 @@ def get_cache_latest_date(factor_name: str) -> Optional[str]:
 
 
 def check_data_completeness(
-    factor_name: str
+    factor_name: str,
+    logger=None
 ) -> Tuple[str, List[str], Dict[str, Any]]:
     """
     检查因子IC数据的完整性
     
     Args:
         factor_name: 因子名称 (如 'kdj_j', 'bollinger_pb')
+        logger: 日志记录器（由调用方传入，默认使用模块 logger）
         
     Returns:
         (mode, missing_dates, info)
@@ -193,6 +204,9 @@ def check_data_completeness(
         >>> mode, missing, info = check_data_completeness('kdj_j')
         >>> print(f"模式: {mode}, 缺失天数: {len(missing)}")
     """
+    if logger is None:
+        logger = get_logger(__name__)
+    
     # 初始化信息
     info: Dict[str, Any] = {
         'cache_file': str(FACTOR_IC_RESULT_DIR / f'ic_{factor_name}_analysis_result.json'),
@@ -204,7 +218,7 @@ def check_data_completeness(
     }
     
     # 检查数据源
-    all_dates, source_latest = get_factor_data_dates()
+    all_dates, source_latest = get_factor_data_dates(logger=logger)
     info['source_latest_date'] = source_latest
     info['total_dates'] = len(all_dates)
     
@@ -213,7 +227,7 @@ def check_data_completeness(
         return 'skip', [], info
     
     # 检查缓存是否存在
-    cache_latest = get_cache_latest_date(factor_name)
+    cache_latest = get_cache_latest_date(factor_name, logger=logger)
     info['cache_latest_date'] = cache_latest
     info['cache_exists'] = cache_latest is not None
     
@@ -273,16 +287,20 @@ def check_incremental_update(
 # 便捷函数
 # ============================================================
 
-def get_cache_info(factor_name: str) -> Dict[str, Any]:
+def get_cache_info(factor_name: str, logger=None) -> Dict[str, Any]:
     """
     获取因子IC缓存的信息摘要
     
     Args:
         factor_name: 因子名称 (如 'rsi_1d', 'kdj_j_3d')
+        logger: 日志记录器（由调用方传入，默认使用模块 logger）
         
     Returns:
         信息字典
     """
+    if logger is None:
+        logger = get_logger(__name__)
+    
     cache_file = FACTOR_IC_RESULT_DIR / f'ic_{factor_name}_analysis_result.json'
     
     info = {
@@ -321,6 +339,9 @@ def get_cache_info(factor_name: str) -> Dict[str, Any]:
 
 if __name__ == '__main__':
     """测试"""
+    # 创建 logger（__main__ 测试场景）
+    logger = get_logger(__name__)
+    
     logger.info("=" * 60)
     logger.info("数据完整性检查模块测试")
     logger.info("=" * 60)
@@ -330,7 +351,7 @@ if __name__ == '__main__':
     
     for factor in test_factors:
         logger.info(f"【{factor}】")
-        mode, missing, info = check_data_completeness(factor)
+        mode, missing, info = check_data_completeness(factor, logger=logger)
         logger.info(f"模式: {mode}")
         logger.info(f"缓存存在: {info['cache_exists']}")
         logger.info(f"缓存最新日期: {info['cache_latest_date'] or '无'}")

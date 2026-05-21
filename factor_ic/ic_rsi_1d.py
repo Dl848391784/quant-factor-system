@@ -79,7 +79,8 @@ def generate_rsi_ic_data(
     logger.info("[1/3] 从缓存加载因子和收益数据...")
     try:
         factor_df, return_df, raw_metadata = load_factor_return_data(
-            factor_cols=['rsi_6']
+            factor_cols=['rsi_6'],
+            logger=logger
         )
         logger.info("✓ 加载成功")
         logger.info(f"原始日期范围: {raw_metadata['period_start']} ~ {raw_metadata['period_end']}")
@@ -125,7 +126,8 @@ def generate_rsi_ic_data(
             return_df=return_df,
             factor_col='rsi_6',
             return_col='forward_return',
-            min_stocks=min_stocks
+            min_stocks=min_stocks,
+            logger=logger
         )
         
         logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")

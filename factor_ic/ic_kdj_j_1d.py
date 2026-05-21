@@ -232,7 +232,8 @@ def generate_kdj_j_ic_data(
     try:
         # 加载原始列（close, high, low）
         factor_df, return_df, raw_metadata = load_factor_return_data(
-            factor_cols=['close', 'high', 'low']
+            factor_cols=['close', 'high', 'low'],
+            logger=logger
         )
         logger.info("✓ 加载成功")
         logger.info(f"原始日期范围: {raw_metadata['period_start']} ~ {raw_metadata['period_end']}")
@@ -252,7 +253,8 @@ def generate_kdj_j_ic_data(
         return_df=return_df,
         factor_col='kdj_j',
         return_col='forward_return',
-        min_stocks=min_stocks
+        min_stocks=min_stocks,
+        logger=logger
     )
     
     logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")

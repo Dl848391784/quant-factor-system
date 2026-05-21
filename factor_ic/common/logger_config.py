@@ -8,13 +8,24 @@
 - 文件命名：<脚本名>_YYYY-MM-DD.log
 - 日志格式：%(asctime)s | %(levelname)-8s | %(name)s | %(message)s
 
+公共模块日志传递规范（PROJECT.md 第783-857行）：
+- 公共模块不独立创建 logger，由调用方传入
+- 公共函数签名：def public_function(..., logger=None)
+- 调用方传入：data = load_data_from_cache(cache_path, logger=logger)
+
 使用方式：
+    # 因子脚本（独立使用）
     from factor_ic.common.logger_config import get_logger
     
     logger = get_logger(__name__)
     logger.info("数据加载完成")
-    logger.warning("缓存过期")
-    logger.error("文件损坏")
+    
+    # 公共模块（接收调用方 logger）
+    def load_data_from_cache(cache_path, logger=None):
+        if logger is None:
+            logger = get_logger(__name__)  # fallback
+        logger.info("数据加载完成")
+        return data
 """
 
 import logging
