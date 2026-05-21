@@ -357,13 +357,46 @@ def calculate_factor(factor_df: pd.DataFrame):
     return factor_df
 ```
 
-错误：列赋值后再 `.copy()`，副作用已产生。
-    factor_df['factor_col'] = ...
+**错误：** 列赋值后再 `.copy()`，副作用已产生。
+```python
+def calculate_factor(factor_df: pd.DataFrame):
+    factor_df['factor_col'] = ...  # ❌ 先修改原数据
+    factor_df = factor_df.copy()   # 副本已包含副作用
     
     return factor_df
 ```
 
 不需要 `.copy()`：只读、返回全新DataFrame、内部已用 `.copy()`。
+
+### numpy 与 pandas 混用规范
+
+**避免 `np.where` 与 pandas Series 混用，保持 pandas 语义。**
+
+`np.where` 返回 numpy ndarray，丢失 Series 的 index 和 metadata。
+
+**正确：** 使用 `Series.clip()` + `Series.where()` 保持 pandas 语义。
+```python
+# 避免除零
+safe_denom = denom.clip(lower=EPSILON)
+result = (factor_df['close'] - lower) / safe_denom
+
+# 条件替换
+narrow_mask = denom.abs() < EPSILON
+result = result.where(~narrow_mask, 0.5)  # 保持 Series 类型
+```
+
+**禁止：**
+```python
+# ❌ np.where 返回 ndarray，丢失 Series index
+result = np.where(
+    np.abs(denom) < EPSILON,
+    0.5,
+    (factor_df['close'] - lower) / denom
+)
+factor_df['result'] = result  # ndarray 赋值给 DataFrame 列
+```
+
+适用场景：边界处理、条件替换、除零防护。
 
 # 四、异常处理
 

@@ -137,7 +137,14 @@ def calculate_kdj_j(
     
     返回:
         添加了 kdj_j 列的 DataFrame
+    
+    规范:
+        - 函数入口必须先 .copy()，避免修改原始数据（MODULE.md DataFrame参数副本规范）
+        - 使用 pandas 语义，避免 np.where 混用
     """
+    # 函数入口必须先 copy，避免副作用
+    factor_df = factor_df.copy()
+    
     # ewm alpha 参数：alpha = 1/m（KDJ 标准公式）
     alpha_k = 1 / m1
     alpha_d = 1 / m2
@@ -152,11 +159,16 @@ def calculate_kdj_j(
     
     # 避免除零（使用 EPSILON）
     denom = high_max - low_min
-    rsv = np.where(
-        np.abs(denom) < EPSILON,
-        50.0,  # 价格无波动时，RSV 设为 50
-        (factor_df['close'] - low_min) / denom * 100
-    )
+    
+    # 使用 pandas Series.clip 避免 np.where 混用问题
+    # 当 denom 接近 0 时，RSV 设为 50（中性值）
+    safe_denom = denom.clip(lower=EPSILON)
+    rsv = (factor_df['close'] - low_min) / safe_denom * 100
+    
+    # denom < EPSILON 的位置设为 50
+    narrow_range_mask = denom.abs() < EPSILON
+    rsv = rsv.where(~narrow_range_mask, 50.0)
+    
     factor_df['rsv'] = rsv
     
     # 计算 K 和 D（按股票分组）

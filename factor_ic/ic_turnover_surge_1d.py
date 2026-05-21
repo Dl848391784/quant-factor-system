@@ -71,7 +71,13 @@ def calculate_turnover_surge(
     
     返回:
         添加了 turnover_surge 列的 DataFrame
+    
+    规范:
+        - 函数入口必须先 .copy()，避免修改原始数据（MODULE.md DataFrame参数副本规范）
     """
+    # 函数入口必须先 copy，避免副作用
+    factor_df = factor_df.copy()
+    
     # 计算过去 surge_window 日换手率均值
     avg_turnover = factor_df.groupby('asset')['turnover_rate'].transform(
         lambda x: x.rolling(surge_window, min_periods=surge_window).mean()

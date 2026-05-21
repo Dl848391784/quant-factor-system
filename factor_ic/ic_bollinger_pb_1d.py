@@ -74,7 +74,14 @@ def calculate_bollinger_pb(
     
     返回:
         添加了 bollinger_pb 列的 DataFrame
+    
+    规范:
+        - 函数入口必须先 .copy()，避免修改原始数据（MODULE.md DataFrame参数副本规范）
+        - 使用 pandas 语义，避免 np.where 混用
     """
+    # 函数入口必须先 copy，避免副作用
+    factor_df = factor_df.copy()
+    
     # 计算 Middle Band（SMA）
     middle = factor_df.groupby('asset')['close'].transform(
         lambda x: x.rolling(n, min_periods=n).mean()
@@ -95,11 +102,15 @@ def calculate_bollinger_pb(
     
     # 避免除零（使用 EPSILON）
     EPSILON = 1e-10
-    bollinger_pb = np.where(
-        np.abs(band_width) < EPSILON,
-        0.5,  # 布林带宽度为0时，%B 设为 0.5（中性值）
-        (factor_df['close'] - lower) / band_width
-    )
+    
+    # 使用 pandas Series.clip 避免 np.where 混用问题
+    # 当 band_width 接近 0 时，%B 设为 0.5（中性值）
+    safe_band_width = band_width.clip(lower=EPSILON)
+    bollinger_pb = (factor_df['close'] - lower) / safe_band_width
+    
+    # band_width < EPSILON 的位置设为 0.5
+    narrow_band_mask = band_width.abs() < EPSILON
+    bollinger_pb = bollinger_pb.where(~narrow_band_mask, 0.5)
     
     factor_df['bollinger_pb'] = bollinger_pb
     factor_df['middle_band'] = middle
@@ -169,7 +180,9 @@ def generate_bollinger_pb_ic_data(
                 cached_data['update_mode'] = 'skip'
                 return cached_data
         except FileNotFoundError:
-            logger.info("[诊断] 缓存文件不存在，执行全量计算")
+            # 缓存文件被删除（并发情况），fallback 到全量计算
+            logger.info("[诊断] 缓存文件不存在（可能被并发删除），执行全量计算")
+            mode = UpdateMode.FULL  # 重置模式，继续执行全量逻辑
         except json.JSONDecodeError as e:
             raise RuntimeError(f"缓存文件损坏: {output_file}\n{e}") from e
     
