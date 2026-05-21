@@ -97,20 +97,31 @@ def calculate_bollinger_pb(
     lower = middle - k * std_dev
     
     # 计算 %B
-    # 边界处理：价格在上轨外 %B > 1，在下轨外 %B < 0
+    # 边界处理：布林带宽度理论上恒 >= 0（upper - lower = 2 * k * std_dev）
     band_width = upper - lower
     
     # 避免除零（使用 EPSILON）
     EPSILON = 1e-10
     
-    # 使用绝对值确保分母为正，避免负宽度被错误处理
-    # band_width.abs() 确保 upper-lower 为正（理论上应 >=0，但异常数据可能为负）
-    safe_band_width = band_width.abs().clip(lower=EPSILON)
+    # 检测异常：band_width < 0 说明 std 计算异常（数据质量问题）
+    # 正确做法：标记异常为 NaN，而非静默修正
+    abnormal_mask = band_width < 0  # 异常带宽（负值）
+    narrow_band_mask = band_width < EPSILON  # 过窄带宽（接近零）
+    
+    # 正常情况：band_width >= EPSILON
+    safe_band_width = band_width.clip(lower=EPSILON)
     bollinger_pb = (factor_df['close'] - lower) / safe_band_width
     
-    # band_width 绝对值接近 0 的位置设为 0.5（中性值）
-    narrow_band_mask = band_width.abs() < EPSILON
-    bollinger_pb = bollinger_pb.where(~narrow_band_mask, 0.5)
+    # 异常处理：标记为 NaN（让后续数据处理过滤）
+    # 1. band_width < 0（异常负值）→ NaN
+    # 2. band_width < EPSILON（过窄带宽）→ 0.5（中性值，符合布林带定义）
+    bollinger_pb = bollinger_pb.where(~abnormal_mask, None)  # 异常负值 → NaN
+    bollinger_pb = bollinger_pb.where(~narrow_band_mask | abnormal_mask, 0.5)  # 过窄 → 0.5
+    
+    # 异常统计日志
+    abnormal_count = abnormal_mask.sum()
+    if abnormal_count > 0:
+        logger.warning(f"检测到 {abnormal_count} 个异常布林带宽度（负值），已标记为 NaN")
     
     factor_df['bollinger_pb'] = bollinger_pb
     factor_df['middle_band'] = middle

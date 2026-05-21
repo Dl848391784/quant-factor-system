@@ -636,6 +636,55 @@ if missing_in_return:
 
 验证：裁剪下界 ≥ 筛选下界（如有）；裁剪上界 ≤ 筛选上界（如有）。
 
+## 异常检测而非静默修正规范
+
+**核心原则：检测异常并标记为 NaN，而非静默修正数值。**
+
+静默修正会导致：
+1. 计算结果符号和数值错误
+2. 异常被掩盖，无法追溯数据质量问题
+3. 比除零更难察觉的错误
+
+**正确做法：**
+```python
+# ✓ 检测异常 → 标记为 NaN → 后续过滤处理
+abnormal_mask = band_width < 0  # 布林带宽度理论上恒 >= 0，负值异常
+normal_band_width = band_width.clip(lower=EPSILON)  # 正常带宽除零防护
+bollinger_pb = (close - lower) / normal_band_width
+
+# 异常标记为 NaN（不静默修正）
+bollinger_pb = bollinger_pb.where(~abnormal_mask, None)
+
+# 异常统计日志
+if abnormal_mask.sum() > 0:
+    logger.warning(f"检测到 {abnormal_mask.sum()} 个异常数据，已标记为 NaN")
+```
+
+**禁止：静默修正异常数值**
+```python
+# ❌ 使用 .abs() 静默修正负值
+safe_band_width = band_width.abs().clip(lower=EPSILON)  # 分母变正，但 numerator 未变
+bollinger_pb = (close - lower) / safe_band_width  # 符号和数值均错误
+
+# 问题：
+# 1. band_width < 0 说明 std 计算异常（数据质量问题）
+# 2. .abs() 将分母变正，但 lower 仍是原始值（可能错误）
+# 3. (close - lower) / |band_width| 符号和数值均错误
+# 4. 难以察觉（没有报错，但结果语义错误）
+```
+
+**适用场景：**
+- 布林带宽度 `band_width < 0`（理论上恒 >= 0）
+- 换手率 `turnover < 0`（理论上恒 >= 0）
+- 量比 `volume_ratio < 0`（理论上恒 >= 0）
+
+**处理原则：**
+| 异常类型 | 处理方式 |
+|----------|----------|
+| 数值超出理论范围 | 检测 → 标记 NaN → 日志警告 |
+| 除零边界 | `clip(lower=EPSILON)` 防护 |
+| 过窄带宽（接近零） | 设为中性值（如 0.5）|
+
 ## 主入口错误处理规范
 
 **if __name__ == '__main__' 必须有错误处理，提供友好提示。**
