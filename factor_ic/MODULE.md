@@ -1,9 +1,9 @@
 # factor_ic 模块规范
 
-> 版本: v3.2（精简版）
+> 版本: v3.3（精简版）
 > 创建时间: 2026-05-19
 > 重构时间: 2026-05-22
-> 最后更新: 2026-05-22 (从3558行精简至2652行，减少26%；补充KDJ ewm参数陷阱)
+> 最后更新: 2026-05-22 (新增 EWM 初始值处理规范，修复 KDJ 计算逻辑错误)
 
 ## 快速参考
 
@@ -98,6 +98,16 @@
     - 新增"职责边界规范"章节：IC脚本只做IC计算，禁止分层回测
     - ic_volume_ratio_1d.py 删除分层回测逻辑（193行→145行）
     - 明确 factor_ic/ 与 backtest/ 模块职责边界
+13. v3.0（2026-05-22）：
+    - 大规模精简，从3558行精简至2652行，减少26%
+    - 按主题归类为6大章节
+    - 补充多个技术陷阱规范
+14. v3.1-v3.2（2026-05-22）：持续精简优化
+15. v3.3（2026-05-22 22:30）：
+    - 新增"EWM 初始值处理规范"章节
+    - 修复 ic_kdj_j_1d.py `_calculate_k_with_initial` 和 `_calculate_d_with_initial` 逻辑错误
+    - 核心原则：EWM 初始值是前一期(t-1)的虚拟值，不是当前期(t)的输入覆盖值
+    - 错误：覆盖第一个有效 RSV/K 值；正确：在第一个有效值前插入虚拟初始值
 
 # 一、概述与基础
 
@@ -602,6 +612,65 @@ factor_df['result'] = result  # ndarray 赋值给 DataFrame 列
 ```
 
 适用场景：边界处理、条件替换、除零防护。
+
+### EWM 初始值处理规范（2026-05-22新增）
+
+**核心原则：EWM 递推的初始值是前一期（t-1）的虚拟值，不是当前期（t）的输入覆盖值。**
+
+**技术陷阱：pandas ewm 不支持直接设置初始条件，常见错误是覆盖第一个有效输入值。**
+
+**错误示例（覆盖第一个有效值）：**
+```python
+# ❌ 错误：将第一个有效 RSV 值覆盖为 initial_k
+rsv_copy[first_valid_idx] = initial_k
+k_series = rsv_copy.ewm(alpha=alpha_k, adjust=False, ignore_na=False).mean()
+# 问题：
+# - 第一期的 RSV 真实值被丢弃
+# - K[0] = initial_k（覆盖值），而非 alpha * RSV[0] + (1-alpha) * initial_k
+# - K 值递推起点错误，后续所有 K 值都受影响
+```
+
+**正确示例（在第一个有效值前插入虚拟初始值）：**
+```python
+# ✅ 正确：在第一个有效 RSV **前**插入虚拟 initial_k
+# EWM 递推公式：K[t] = alpha * RSV[t] + (1-alpha) * K[t-1]
+# 初始条件：K[t-1] = initial_k（第一期之前的虚拟值）
+rsv_with_initial = pd.concat([
+    pd.Series([initial_k], index=[-1]),  # 虚拟初始值
+    rsv_series
+], ignore_index=True)
+
+# 计算 ewm（使用 ignore_na=True，让初始值正确传播）
+k_with_initial = rsv_with_initial.ewm(alpha=alpha_k, adjust=False, ignore_na=True).mean()
+
+# 移除虚拟初始值，恢复原始索引
+k_series = k_with_initial.iloc[1:]
+k_series.index = rsv_series.index
+
+# 恢复原始 NaN 位置（ewm 会填充 NaN 位置为初始值）
+k_series = k_series.where(rsv_series.notna(), float('nan'))
+
+# 结果：
+# - K[0] = alpha * RSV[0] + (1-alpha) * initial_k（正确应用初始条件）
+# - RSV 前缀 NaN 位置的 K 也为 NaN
+# - 保留真实 RSV 值，不覆盖
+```
+
+**为何必须正确处理初始值：**
+
+| 原因 | 说明 |
+|------|------|
+| 保留真实数据 | 第一期的输入值不应被覆盖 |
+| 正确递推起点 | K[t-1]=50 是初始条件，K[0] = alpha * RSV[0] + (1-alpha) * 50 |
+| 符合 KDJ 标准 | KDJ 标准公式中 K/D 的初始值都是 50（作为 t-1 的虚拟值） |
+| pandas ewm 限制 | ewm 不支持直接设置 y[t-1] 初始条件，需手动插入虚拟值 |
+
+**适用场景：**
+- KDJ 的 K 值计算（initial_k=50）
+- KDJ 的 D 值计算（initial_d=50）
+- 任何需要 EWM 从特定初始值开始递推的场景
+
+**参考：** ic_kdj_j_1d.py `_calculate_k_with_initial` 和 `_calculate_d_with_initial`（2026-05-22 修复）
 
 # 四、异常处理
 

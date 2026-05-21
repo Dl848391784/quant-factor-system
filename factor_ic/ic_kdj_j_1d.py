@@ -31,6 +31,7 @@ from pathlib import Path
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import numpy as np
 import pandas as pd
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
@@ -64,18 +65,18 @@ def _calculate_k_with_initial(
     
     核心逻辑：
     1. RSV 前 N-1 期为 NaN（rolling window min_periods=n）
-    2. ewm(ignore_na=False) 使 NaN 传播，前 N-1 期 K 也为 NaN
-    3. 第一个有效 RSV 位置设为 initial_k，使该期 K = initial_k
+    2. ewm(ignore_na=True) 使 NaN 不参与计算，但输出中 NaN 位置被填充
+    3. 在第一个有效 RSV **前**插入虚拟 initial_k，作为 K_{t-1} 初始条件
+    4. 计算后恢复原始 NaN 位置
     
-    ewm(alpha) 公式：y[t] = alpha * x[t] + (1-alpha) * y[t-1]
-    KDJ 公式：K[t] = (1/m1) * RSV[t] + (m1-1)/m1 * K[t-1]
-    要匹配，alpha = 1/m1
+    EWM 递推公式：K[t] = alpha * RSV[t] + (1-alpha) * K[t-1]
+    初始条件：K[t-1] = initial_k（第一期之前的虚拟 K 值）
+    alpha = 1/m1（KDJ 标准参数）
+    
+    关键：initial_k 是 K_{t-1} 的初始值，不是 RSV 输入的覆盖值！
     """
     if len(rsv_series) == 0:
         return rsv_series
-    
-    # 复制 Series，避免修改原始数据
-    rsv_copy = rsv_series.copy()
     
     # 找到第一个有效 RSV 的位置
     first_valid_idx = rsv_series.first_valid_index()
@@ -83,11 +84,22 @@ def _calculate_k_with_initial(
     if first_valid_idx is None:
         return rsv_series
     
-    # 预处理：将第一个有效 RSV 值设为 initial_k
-    rsv_copy[first_valid_idx] = initial_k
+    # 正确实现：在第一个有效 RSV **前**插入虚拟 initial_k
+    # 使用 pd.concat 拼接（用临时整数索引，避免时间索引减法问题）
+    rsv_with_initial = pd.concat([
+        pd.Series([initial_k], index=[-1]),  # 虚拟初始值（临时索引）
+        rsv_series
+    ], ignore_index=True)  # 重置索引为整数位置
     
-    # 计算 ewm 递推
-    k_series = rsv_copy.ewm(alpha=alpha_k, adjust=False, ignore_na=False).mean()
+    # 计算 ewm 递推（使用 ignore_na=True，让初始值正确传播）
+    k_with_initial = rsv_with_initial.ewm(alpha=alpha_k, adjust=False, ignore_na=True).mean()
+    
+    # 移除虚拟初始值，恢复原始索引
+    k_series = k_with_initial.iloc[1:]
+    k_series.index = rsv_series.index
+    
+    # 恢复原始 NaN 位置（ewm 会填充 NaN 位置为初始值）
+    k_series = k_series.where(rsv_series.notna(), float('nan'))
     
     return k_series
 
@@ -97,18 +109,45 @@ def _calculate_d_with_initial(
     alpha_d: float,
     initial_d: float
 ) -> pd.Series:
-    """计算 D 值（正确处理 NaN 前缀版本）"""
+    """计算 D 值（正确处理 NaN 前缀版本）
+    
+    核心逻辑：
+    1. K 前 N-1 期为 NaN（与 RSV 前缀一致）
+    2. ewm(ignore_na=True) 使 NaN 不参与计算，但输出中 NaN 位置被填充
+    3. 在第一个有效 K **前**插入虚拟 initial_d，作为 D_{t-1} 初始条件
+    4. 计算后恢复原始 NaN 位置
+    
+    EWM 递推公式：D[t] = alpha * K[t] + (1-alpha) * D[t-1]
+    初始条件：D[t-1] = initial_d（第一期之前的虚拟 D 值）
+    alpha = 1/m2（KDJ 标准参数）
+    
+    关键：initial_d 是 D_{t-1} 的初始值，不是 K 输入的覆盖值！
+    """
     if len(k_series) == 0:
         return k_series
     
-    k_copy = k_series.copy()
+    # 找到第一个有效 K 的位置
     first_valid_idx = k_series.first_valid_index()
     
     if first_valid_idx is None:
         return k_series
     
-    k_copy[first_valid_idx] = initial_d
-    d_series = k_copy.ewm(alpha=alpha_d, adjust=False, ignore_na=False).mean()
+    # 正确实现：在第一个有效 K **前**插入虚拟 initial_d
+    # 使用 pd.concat 拼接（用临时整数索引，避免时间索引减法问题）
+    k_with_initial = pd.concat([
+        pd.Series([initial_d], index=[-1]),  # 虚拟初始值（临时索引）
+        k_series
+    ], ignore_index=True)  # 重置索引为整数位置
+    
+    # 计算 ewm 递推（使用 ignore_na=True，让初始值正确传播）
+    d_with_initial = k_with_initial.ewm(alpha=alpha_d, adjust=False, ignore_na=True).mean()
+    
+    # 移除虚拟初始值，恢复原始索引
+    d_series = d_with_initial.iloc[1:]
+    d_series.index = k_series.index
+    
+    # 恢复原始 NaN 位置（ewm 会填充 NaN 位置为初始值）
+    d_series = d_series.where(k_series.notna(), float('nan'))
     
     return d_series
 
