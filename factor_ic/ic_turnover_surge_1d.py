@@ -15,6 +15,7 @@
 
 作者: 云瑶
 重构日期: 2026-05-22
+增量模式补充: 2026-05-22
 原版作者: 云舟
 原版日期: 2026-05-08
 """
@@ -37,9 +38,10 @@ from factor_ic.common import (
     calculate_ic_with_direction_verification,
     build_ic_result,
     incremental_update_ic,
-    should_use_incremental
+    save_ic_result
 )
-from factor_ic.common.data_completeness import get_ic_output_path, check_data_completeness
+from factor_ic.common.incremental_engine import UpdateMode, should_use_incremental
+from factor_ic.common.data_completeness import get_ic_output_path
 from factor_ic.common.data_loader import DEFAULT_CACHE_DIR
 from factor_ic.common.logger_config import get_logger
 
@@ -101,6 +103,40 @@ def calculate_turnover_surge(
     return factor_df
 
 
+def load_turnover_data(factor_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    加载并合并换手率数据
+    
+    参数:
+        factor_df: 基础因子数据
+    
+    返回:
+        合并了换手率数据的 DataFrame
+    """
+    import gzip
+    
+    turnover_path = DEFAULT_CACHE_DIR / 'turnover_rate_data.json.gz'
+    with gzip.open(turnover_path, 'rt', encoding='utf-8') as f:
+        turnover_data = json.load(f)
+    
+    turnover_df = pd.DataFrame(turnover_data['data'])
+    turnover_df['turnover_rate'] = pd.to_numeric(turnover_df['turnover_rate'], errors='coerce')
+    turnover_df = turnover_df.dropna(subset=['turnover_rate'])
+    
+    # 处理日期格式（转换为 YYYY-MM-DD）
+    turnover_df['date'] = pd.to_datetime(turnover_df['date'], errors='coerce').dt.strftime('%Y-%m-%d')
+    
+    # 合并换手率数据
+    factor_df = pd.merge(
+        factor_df,
+        turnover_df[['date', 'asset', 'turnover_rate']],
+        on=['date', 'asset'],
+        how='inner'
+    )
+    
+    return factor_df
+
+
 # ============================================================================
 # 主函数
 # ============================================================================
@@ -112,7 +148,7 @@ def generate_turnover_surge_ic_data(
     min_stocks: int = DEFAULT_MIN_STOCKS
 ) -> dict:
     """
-    从缓存数据计算换手率突增 IC
+    从缓存数据计算换手率突增 IC（支持三模式）
     
     参数:
         output_file: 输出文件路径
@@ -122,6 +158,10 @@ def generate_turnover_surge_ic_data(
     
     返回:
         IC 数据字典
+    
+    规范:
+        - 支持 skip/incremental/full 三种模式
+        - 输出结构符合 MODULE.md 规范
     """
     # 统一转换为 Path 对象
     if output_file is None:
@@ -129,30 +169,13 @@ def generate_turnover_surge_ic_data(
     else:
         output_file = Path(output_file)
     
-    # 增量判断（除非强制全量）
-    if not force_full:
-        mode, missing_dates, info = check_data_completeness('turnover_surge_1d')
-        
-        if mode == 'skip':
-            logger.info("\n数据完备，无需更新")
-            try:
-                with open(output_file, 'r', encoding='utf-8') as f:
-                    cached_data = json.load(f)
-                    cached_data['update_mode'] = 'skip'
-                    return cached_data
-            except FileNotFoundError:
-                logger.info("  [诊断] 缓存文件不存在，执行全量计算")
-            except json.JSONDecodeError as e:
-                raise RuntimeError(f"缓存文件损坏: {output_file}\n{e}") from e
-    
-    # 全量计算逻辑
     logger.info("=" * 60)
     logger.info(f"换手率突增 IC 计算器（重构版） - 1日收益周期")
     logger.info(f"参数: surge_window={surge_window}")
     logger.info("=" * 60)
     
-    # ========== Step 1: 加载数据 ==========
-    logger.info("\n[1/3] 从缓存加载因子和收益数据...")
+    # ========== Step 1: 加载原始数据 ==========
+    logger.info("[1/3] 从缓存加载因子和收益数据...")
     try:
         # 加载基本数据
         factor_df, return_df, raw_metadata = load_factor_return_data(
@@ -161,50 +184,89 @@ def generate_turnover_surge_ic_data(
         )
         logger.info("✓ 基本数据加载成功")
         
-        # 手动加载换手率数据（处理日期格式）
-        turnover_path = DEFAULT_CACHE_DIR / 'turnover_rate_data.json.gz'
-        import gzip
-        with gzip.open(turnover_path, 'rt', encoding='utf-8') as f:
-            turnover_data = json.load(f)
-        
-        turnover_df = pd.DataFrame(turnover_data['data'])
-        turnover_df['turnover_rate'] = pd.to_numeric(turnover_df['turnover_rate'], errors='coerce')
-        turnover_df = turnover_df.dropna(subset=['turnover_rate'])
-        
-        # 处理日期格式（转换为 YYYY-MM-DD）
-        turnover_df['date'] = pd.to_datetime(turnover_df['date'], errors='coerce').dt.strftime('%Y-%m-%d')
-        
-        # 合并换手率数据
-        factor_df = pd.merge(
-            factor_df,
-            turnover_df[['date', 'asset', 'turnover_rate']],
-            on=['date', 'asset'],
-            how='inner'
-        )
-        
+        # 加载并合并换手率数据
+        factor_df = load_turnover_data(factor_df)
         logger.info(f"合并换手率后: {len(factor_df)} 行")
         logger.info(f"原始日期范围: {raw_metadata['period_start']} ~ {raw_metadata['period_end']}")
         
     except FileNotFoundError as e:
         raise RuntimeError(f"缓存文件不存在: {e}") from e
     
-    # ========== Step 2: 计算换手率突增 ==========
-    logger.info("\n[2/3] 计算换手率突增因子...")
+    # ========== Step 2: 判断模式 ==========
+    mode = should_use_incremental(output_file, factor_df, force_full)
+    
+    if mode == UpdateMode.SKIP:
+        # ========== 跳过更新（缓存已最新） ==========
+        logger.info("[模式] 缓存已最新，跳过更新")
+        try:
+            with open(output_file, 'r', encoding='utf-8') as f:
+                cached_data = json.load(f)
+                cached_data['update_mode'] = 'skip'
+                return cached_data
+        except FileNotFoundError:
+            logger.info("[诊断] 缓存文件不存在，执行全量计算")
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"缓存文件损坏: {output_file}\n{e}") from e
+    
+    elif mode == UpdateMode.INCREMENTAL:
+        # ========== 增量更新（缓存滞后） ==========
+        logger.info("[模式] 增量更新")
+        logger.info("[2/3] 计算换手率突增因子（需要全量历史数据）...")
+        
+        # 注意：换手率突增计算需要完整的历史换手率数据才能正确计算 rolling mean
+        factor_df = calculate_turnover_surge(factor_df, surge_window=surge_window)
+        
+        surge_count = factor_df['turnover_surge'].notna().sum()
+        total_count = len(factor_df)
+        logger.info("✓ 换手率突增计算完成")
+        logger.info(f"满足条件股票数: {surge_count} / {total_count} ({surge_count/total_count:.1%})")
+        
+        logger.info("[3/3] 执行增量 IC 计算...")
+        result = incremental_update_ic(
+            output_path=output_file,
+            factor_df_full=factor_df,
+            return_df_full=return_df,
+            raw_metadata=raw_metadata,
+            factor_name='turnover_surge_1d',
+            factor_col='turnover_surge',
+            return_col='forward_return_1d',
+            min_stocks=min_stocks
+        )
+        
+        # 添加参数信息
+        result['params'] = {
+            'surge_window': surge_window,
+            'factor_col': 'turnover_surge',
+            'filter_conditions': [
+                'turnover_surge > 1',
+                'daily_return > 0'
+            ]
+        }
+        
+        logger.info(f"IC 均值: {result.get('ic_mean', 0):.4f}")
+        logger.info(f"ICIR: {result.get('icir', 0):.2f}")
+        logger.info(f"更新模式: {result['update_mode']}")
+        
+        return result
+    
+    # ========== 全量计算 ==========
+    logger.info("[模式] 全量计算")
+    logger.info("[2/3] 计算换手率突增因子...")
+    
     factor_df = calculate_turnover_surge(factor_df, surge_window=surge_window)
     
-    # 统计筛选结果
     surge_count = factor_df['turnover_surge'].notna().sum()
     total_count = len(factor_df)
     logger.info("✓ 换手率突增计算完成")
     logger.info(f"满足条件股票数: {surge_count} / {total_count} ({surge_count/total_count:.1%})")
     
     # ========== Step 3: 计算 IC ==========
-    logger.info("\n[3/3] 计算 IC...")
+    logger.info("[3/3] 计算 IC...")
     ic_result = calculate_ic_with_direction_verification(
         factor_df=factor_df,
         return_df=return_df,
         factor_col='turnover_surge',
-return_col='forward_return_1d',
+        return_col='forward_return_1d',
         min_stocks=min_stocks,
         logger=logger
     )
@@ -231,15 +293,14 @@ return_col='forward_return_1d',
             'daily_return > 0'
         ]
     }
+    result['update_mode'] = 'full'
     
     # 保存结果
-    logger.info(f"\n保存数据到: {output_file}")
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
+    save_ic_result(result, output_file)
     
-    logger.info("\n" + "=" * 60)
+    logger.info("=" * 60)
     logger.info(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC 数据")
+    logger.info(f"更新模式: {result['update_mode']}")
     logger.info("=" * 60)
     
     return result
@@ -255,13 +316,23 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
-    result = generate_turnover_surge_ic_data(
-        output_file=args.output,
-        force_full=args.force_full,
-        surge_window=args.surge_window
-    )
-    
-    logger.info("\n结果摘要:")
-    logger.info(f"因子名称: {result['factor_name']}")
-    logger.info(f"IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
-    logger.info(f"ICIR: {result['ic_metrics']['icir']:.2f}")
+    try:
+        result = generate_turnover_surge_ic_data(
+            output_file=args.output,
+            force_full=args.force_full,
+            surge_window=args.surge_window
+        )
+        
+        logger.info("结果摘要:")
+        logger.info(f"因子名称: {result['factor_name']}")
+        logger.info(f"IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
+        logger.info(f"ICIR: {result['ic_metrics']['icir']:.2f}")
+        
+    except FileNotFoundError as e:
+        logger.error(f"缓存文件不存在: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"计算失败: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

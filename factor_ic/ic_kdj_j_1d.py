@@ -41,9 +41,9 @@ from factor_ic.common import (
     load_factor_return_data,
     calculate_ic_with_direction_verification,
     build_ic_result,
-    incremental_update_ic,
-    should_use_incremental
+    incremental_update_ic
 )
+from factor_ic.common.incremental_engine import UpdateMode, should_use_incremental
 from factor_ic.common.data_completeness import get_ic_output_path, check_data_completeness
 
 # ============================================================================
@@ -205,29 +205,12 @@ def generate_kdj_j_ic_data(
     else:
         output_file = Path(output_file)
     
-    # 增量判断（除非强制全量）
-    if not force_full:
-        mode, missing_dates, info = check_data_completeness('kdj_j_1d')
-        
-        if mode == 'skip':
-            logger.info("数据完备，无需更新")
-            try:
-                with open(output_file, 'r', encoding='utf-8') as f:
-                    cached_data = json.load(f)
-                    cached_data['update_mode'] = 'skip'
-                    return cached_data
-            except FileNotFoundError:
-                logger.info("[诊断] 缓存文件不存在，执行全量计算")
-            except json.JSONDecodeError as e:
-                raise RuntimeError(f"缓存文件损坏: {output_file}\n{e}") from e
-    
-    # 全量计算逻辑
     logger.info("=" * 60)
     logger.info(f"KDJ_J_1D IC 计算器（重构版） - 1日收益周期")
     logger.info(f"参数: N={n}, M1={m1}, M2={m2}")
     logger.info("=" * 60)
     
-    # ========== Step 1: 加载数据 ==========
+    # ========== Step 1: 加载原始数据 ==========
     logger.info("[1/3] 从缓存加载因子和收益数据...")
     try:
         # 加载原始列（close, high, low）
@@ -241,7 +224,59 @@ def generate_kdj_j_ic_data(
     except FileNotFoundError as e:
         raise RuntimeError(f"缓存文件不存在: {e}") from e
     
-    # ========== Step 2: 计算 KDJ_J ==========
+    # ========== Step 2: 判断模式 ==========
+    mode = should_use_incremental(output_file, factor_df, force_full)
+    
+    if mode == UpdateMode.SKIP:
+        # ========== 跳过更新（缓存已最新） ==========
+        logger.info("[模式] 缓存已最新，跳过更新")
+        try:
+            with open(output_file, 'r', encoding='utf-8') as f:
+                cached_data = json.load(f)
+                cached_data['update_mode'] = 'skip'
+                return cached_data
+        except FileNotFoundError:
+            logger.info("[诊断] 缓存文件不存在，执行全量计算")
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"缓存文件损坏: {output_file}\n{e}") from e
+    
+    elif mode == UpdateMode.INCREMENTAL:
+        # ========== 增量更新（缓存滞后） ==========
+        logger.info("[模式] 增量更新")
+        logger.info("[2/3] 计算 KDJ_J 因子（需要全量历史数据）...")
+        
+        # 注意：KDJ ewm 计算需要完整的历史数据才能正确初始化
+        factor_df = calculate_kdj_j(factor_df, n=n, m1=m1, m2=m2)
+        logger.info("✓ KDJ_J 计算完成")
+        
+        logger.info("[3/3] 执行增量 IC 计算...")
+        result = incremental_update_ic(
+            output_path=output_file,
+            factor_df_full=factor_df,
+            return_df_full=return_df,
+            raw_metadata=raw_metadata,
+            factor_name='kdj_j_1d',
+            factor_col='kdj_j',
+            return_col='forward_return_1d',
+            min_stocks=min_stocks
+        )
+        
+        # 添加 KDJ 参数信息
+        result['params'] = {
+            'n': n,
+            'm1': m1,
+            'm2': m2,
+            'factor_col': 'kdj_j'
+        }
+        
+        logger.info(f"IC 均值: {result.get('ic_mean', 0):.4f}")
+        logger.info(f"ICIR: {result.get('icir', 0):.2f}")
+        logger.info(f"更新模式: {result['update_mode']}")
+        
+        return result
+    
+    # ========== 全量计算 ==========
+    logger.info("[模式] 全量计算")
     logger.info("[2/3] 计算 KDJ_J 因子...")
     factor_df = calculate_kdj_j(factor_df, n=n, m1=m1, m2=m2)
     logger.info("✓ KDJ_J 计算完成")

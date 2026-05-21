@@ -27,9 +27,9 @@ from factor_ic.common import (
     calculate_ic_with_direction_verification,
     build_ic_result,
     save_ic_result,
-    incremental_update_ic,
-    should_use_incremental
+    incremental_update_ic
 )
+from factor_ic.common.incremental_engine import UpdateMode, should_use_incremental
 # 使用 data_completeness 版本的 get_ic_output_path（输出 ic_<因子名>_analysis_result.json）
 from factor_ic.common.data_completeness import get_ic_output_path
 from factor_ic.common.logger_config import get_logger
@@ -93,9 +93,22 @@ def generate_rsi_ic_data(
         raise RuntimeError(f"数据加载失败: {e}") from e
     
     # ========== 判断模式 ==========
-    use_incremental = should_use_incremental(output_file, factor_df, force_full)
+    mode = should_use_incremental(output_file, factor_df, force_full)
     
-    if use_incremental and not force_full:
+    if mode == UpdateMode.SKIP:
+        # ========== 跳过更新（缓存已最新） ==========
+        logger.info("[模式] 缓存已最新，跳过更新")
+        try:
+            with open(output_file, 'r', encoding='utf-8') as f:
+                cached_data = json.load(f)
+                cached_data['update_mode'] = 'skip'
+                return cached_data
+        except FileNotFoundError:
+            logger.info("[诊断] 缓存文件不存在，执行全量计算")
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"缓存文件损坏: {output_file}\n{e}") from e
+    
+    elif mode == UpdateMode.INCREMENTAL:
         # ========== 增量更新 ==========
         logger.info("[模式] 增量更新")
         logger.info("[2/3] 执行增量计算...")
@@ -107,41 +120,42 @@ def generate_rsi_ic_data(
             raw_metadata=raw_metadata,
             factor_name='rsi_1d',
             factor_col='rsi_6',
-return_col='forward_return_1d',
+            return_col='forward_return_1d',
             min_stocks=min_stocks
-)
+        )
         
         logger.info(f"IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
         logger.info(f"ICIR: {result['icir']:.2f}")
         logger.info(f"更新模式: {result['update_mode']}")
         
-    else:
-        # ========== 全量计算 ==========
-        logger.info("[模式] 全量计算")
-        logger.info("[2/3] 计算每日 IC...")
-        
-        # 使用公共模块计算 IC
-        ic_result = calculate_ic_with_direction_verification(
-            factor_df=factor_df,
-            return_df=return_df,
-            factor_col='rsi_6',
-return_col='forward_return_1d',
-            min_stocks=min_stocks,
-            logger=logger
-        )
-        
-        logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
-        logger.info(f"ICIR: {ic_result['icir']:.2f}")
-        logger.info(f"正比例: {ic_result['positive_ratio']:.1%}")
-        
-        # 使用公共模块构建输出
-        result = build_ic_result(
-            ic_result=ic_result,
-            raw_metadata=raw_metadata,
-            factor_name='rsi_1d',
-            data_source='cache/factor_data/factor_data.json.gz',
-            factor_col='rsi_6'
-        )
+        return result
+    
+    # ========== 全量计算 ==========
+    logger.info("[模式] 全量计算")
+    logger.info("[2/3] 计算每日 IC...")
+    
+    # 使用公共模块计算 IC
+    ic_result = calculate_ic_with_direction_verification(
+        factor_df=factor_df,
+        return_df=return_df,
+        factor_col='rsi_6',
+        return_col='forward_return_1d',
+        min_stocks=min_stocks,
+        logger=logger
+    )
+    
+    logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
+    logger.info(f"ICIR: {ic_result['icir']:.2f}")
+    logger.info(f"正比例: {ic_result['positive_ratio']:.1%}")
+    
+    # 使用公共模块构建输出
+    result = build_ic_result(
+        ic_result=ic_result,
+        raw_metadata=raw_metadata,
+        factor_name='rsi_1d',
+        data_source='cache/factor_data/factor_data.json.gz',
+        factor_col='rsi_6'
+    )
     
     # ========== 保存结果 ==========
     logger.info(f"[3/3] 保存数据到: {output_file}")
