@@ -87,8 +87,8 @@ def generate_rsi_ic_data(
     logger.info("RSI_1D IC 计算器（重构版） - 1日收益周期")
     logger.info("=" * 60)
     
-    # ========== 加载全量数据 ==========
-    logger.info("[1/3] 从缓存加载因子和收益数据...")
+    # ========== [1/4] 加载全量数据（前置步骤，所有模式共享） ==========
+    logger.info("[1/4] 从缓存加载因子和收益数据...")
     try:
         factor_df, return_df, raw_metadata = load_factor_return_data(
             factor_cols=['rsi_6'],
@@ -100,9 +100,20 @@ def generate_rsi_ic_data(
         logger.info(f"过滤后交易日数: {factor_df['date'].nunique()}")
         
     except FileNotFoundError as e:
-        raise RuntimeError(f"缓存文件不存在: {e}") from e
+        # 缓存文件不存在：严重错误，不降级（数据源缺失）
+        raise RuntimeError(f"缓存文件不存在，请先运行数据采集: {e}") from e
+    except json.JSONDecodeError as e:
+        # 缓存文件损坏：严重错误，不降级
+        raise RuntimeError(f"缓存文件损坏，请检查数据源: {e}") from e
+    except PermissionError as e:
+        # 权限错误：严重错误，不降级
+        raise RuntimeError(f"缓存文件权限错误: {e}") from e
+    except KeyError as e:
+        # 数据结构错误：严重错误，不降级（缺失必需字段）
+        raise ValueError(f"缓存数据结构错误，缺少必需字段: {e}") from e
     except Exception as e:
-        raise RuntimeError(f"数据加载失败: {e}") from e
+        # 其他未预期异常：保留完整堆栈信息，便于诊断
+        raise RuntimeError(f"数据加载失败（未预期错误）: {type(e).__name__}: {e}") from e
     
     # ========== 判断模式 ==========
     mode = should_use_incremental(output_file, factor_df, force_full)
@@ -111,7 +122,13 @@ def generate_rsi_ic_data(
     def do_full_recalculate() -> dict:
         """执行全量计算（用于正常 FULL 模式和 SKIP fallback）"""
         logger.info("[模式] 全量计算")
-        logger.info("[2/3] 计算每日 IC...")
+        
+        # ========== [2/4] 计算因子 ==========
+        # RSI 因子已在缓存中，无需计算（跳过此步骤）
+        logger.info("[2/4] 因子已在缓存中，跳过因子计算")
+        
+        # ========== [3/4] 计算每日 IC ==========
+        logger.info("[3/4] 计算每日 IC...")
         
         # 使用公共模块计算 IC
         ic_result = calculate_ic_with_direction_verification(
@@ -137,8 +154,8 @@ def generate_rsi_ic_data(
         logger.info(f"ICIR: {result['ic_metrics']['icir']:.2f}")
         logger.info(f"正比例: {result['positive_ratio']:.1%}")
         
-        # ========== 保存结果 ==========
-        logger.info(f"[3/3] 保存数据到: {output_file}")
+        # ========== [4/4] 保存结果 ==========
+        logger.info("[4/4] 保存数据到: {output_file}")
         output_file.parent.mkdir(parents=True, exist_ok=True)
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
@@ -168,7 +185,13 @@ def generate_rsi_ic_data(
     elif mode == UpdateMode.INCREMENTAL:
         # ========== 增量更新 ==========
         logger.info("[模式] 增量更新")
-        logger.info("[2/3] 执行增量计算...")
+        
+        # ========== [2/4] 计算因子 ==========
+        # RSI 因子已在缓存中，无需计算（跳过此步骤）
+        logger.info("[2/4] 因子已在缓存中，跳过因子计算")
+        
+        # ========== [3/4] 执行增量 IC 计算 ==========
+        logger.info("[3/4] 执行增量 IC 计算...")
         
         result = incremental_update_ic(
             output_path=output_file,
@@ -181,6 +204,7 @@ def generate_rsi_ic_data(
             min_stocks=min_stocks
         )
         
+        # 增量结果已在 incremental_update_ic 内部保存（[4/4] 已完成）
         logger.info(f"IC 均值: {result['ic_metrics']['ic_mean']:.4f}")
         logger.info(f"ICIR: {result['ic_metrics']['icir']:.2f}")
         logger.info(f"更新模式: {result['update_mode']}")

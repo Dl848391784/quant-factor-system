@@ -1,9 +1,9 @@
 # factor_ic 模块规范
 
-> 版本: v3.7（精简版）
+> 版本: v3.8（精简版）
 > 创建时间: 2026-05-19
 > 重构时间: 2026-05-22
-> 最后更新: 2026-05-23 (新增 SKIP 模式缓存对象处理规范、修复键名不一致问题)
+> 最后更新: 2026-05-23 (新增主函数数据加载异常处理规范、修复步骤编号错误)
 
 ## 快速参考
 
@@ -153,6 +153,11 @@
     - 修复 ic_rsi_1d.py SKIP 模式修改缓存对象未持久化问题
     - 修复 ic_rsi_1d.py 全量/增量模式日志取值路径不一致问题
     - 核心原则：SKIP 模式不修改缓存对象，避免内存与文件不一致
+20. v3.8（2026-05-23）：
+    - 新增"主函数数据加载异常处理规范"章节
+    - 修复 ic_rsi_1d.py 步骤编号错误（[N/3] → [N/4]）
+    - 修复 ic_rsi_1d.py 异常处理粒度过粗问题
+    - 核心原则：按异常类型分开处理，保留原始异常类型信息
 
 # 一、概述与基础
 
@@ -812,6 +817,8 @@ k_series = k_series.where(rsv_series.notna(), float('nan'))
 
 **核心原则：区分严重错误（文件损坏、权限）和可恢复错误（文件不存在）；使用 `raise ... from e` 保留异常链；异常消息只包装一次。**
 
+### SKIP 模式缓存读取异常处理
+
 | 异常类型 | 处理方式 |
 |---------|---------|
 | ValueError | 直接 raise |
@@ -827,6 +834,78 @@ except json.JSONDecodeError as e:
 ```
 
 **禁止：** 静默吞掉所有异常；ValueError包装为RuntimeError；异常消息多层叠加。
+
+### 主函数数据加载异常处理规范（2026-05-23新增）
+
+**核心原则：按异常类型分开处理，保留原始异常类型信息，便于调用方差异化处理。**
+
+**异常分类与处理方式：**
+
+| 异常类型 | 语义 | 处理方式 | 调用方应对 |
+|---------|------|---------|-----------|
+| FileNotFoundError | 缓存文件不存在（数据源缺失） | RuntimeError（提示运行数据采集） | 先运行数据采集 |
+| JSONDecodeError | 缓存文件损坏 | RuntimeError（提示检查数据源） | 检查/重建缓存文件 |
+| PermissionError | 权限错误 | RuntimeError | 检查文件权限 |
+| KeyError | 数据结构错误（缺失必需字段） | ValueError（保留原始类型） | 检查数据采集脚本 |
+| ValueError | 参数/数据验证失败 | 直接 raise（不包装） | 检查输入参数 |
+| Exception | 其他未预期异常 | RuntimeError（含原始类型名） | 诊断堆栈信息 |
+
+**正确示例（按类型分开处理）**：
+```python
+# ✓ 正确：按异常类型分开处理，保留原始异常信息
+try:
+    factor_df, return_df, raw_metadata = load_factor_return_data(...)
+    
+except FileNotFoundError as e:
+    # 缓存文件不存在：严重错误，不降级（数据源缺失）
+    raise RuntimeError(f"缓存文件不存在，请先运行数据采集: {e}") from e
+except json.JSONDecodeError as e:
+    # 缓存文件损坏：严重错误，不降级
+    raise RuntimeError(f"缓存文件损坏，请检查数据源: {e}") from e
+except PermissionError as e:
+    # 权限错误：严重错误，不降级
+    raise RuntimeError(f"缓存文件权限错误: {e}") from e
+except KeyError as e:
+    # 数据结构错误：严重错误，不降级（缺失必需字段）
+    raise ValueError(f"缓存数据结构错误，缺少必需字段: {e}") from e
+except Exception as e:
+    # 其他未预期异常：保留完整堆栈信息，便于诊断
+    raise RuntimeError(f"数据加载失败（未预期错误）: {type(e).__name__}: {e}") from e
+```
+
+**错误示例（粒度过粗）**：
+```python
+# ❌ 错误：所有异常统一包装为 RuntimeError，丢失原始异常类型
+try:
+    factor_df, return_df, raw_metadata = load_factor_return_data(...)
+except FileNotFoundError as e:
+    raise RuntimeError(f"缓存文件不存在: {e}") from e  # 丢失 FileNotFoundError 类型
+except Exception as e:
+    raise RuntimeError(f"数据加载失败: {e}") from e  # 粒度过粗，无法区分错误类型
+```
+
+**为何必须按类型分开处理：**
+
+| 原因 | 说明 |
+|------|------|
+| 保留原始类型 | 调用方可通过异常类型判断错误类型，差异化处理 |
+| 便于诊断 | 不同错误类型有不同的应对方案（数据采集、权限修复、重建缓存） |
+| 符合规范 | MODULE.md 第815-819行已定义异常分类，代码应遵守 |
+| 避免信息丢失 | `except Exception` 统一处理会丢失具体异常类型信息 |
+
+**异常消息最佳实践：**
+
+| 要素 | 示例 |
+|------|------|
+| 错误类型 | `缓存文件不存在` |
+| 应对建议 | `请先运行数据采集` |
+| 原始异常 | `: {e}` |
+
+**适用场景：**
+- 主函数数据加载（所有模式共享的前置步骤）
+- 需要区分错误类型的场景
+
+**参考：** ic_rsi_1d.py 第90-117行（2026-05-23 修复）
 ```
 
 ## 字段去重化规范
