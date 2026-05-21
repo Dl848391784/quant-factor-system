@@ -80,7 +80,7 @@ def run_volume_ratio_analysis(min_stocks: int = DEFAULT_MIN_STOCKS) -> dict:
         factor_df=factor_df,
         return_df=return_df,
         factor_col='volume_ratio_5',
-        return_col='forward_return',
+return_col='forward_return_1d',
         min_stocks=min_stocks,
         logger=logger
     )

@@ -252,7 +252,7 @@ def generate_kdj_j_ic_data(
         factor_df=factor_df,
         return_df=return_df,
         factor_col='kdj_j',
-        return_col='forward_return',
+return_col='forward_return_1d',
         min_stocks=min_stocks,
         logger=logger
     )

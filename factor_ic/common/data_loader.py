@@ -246,9 +246,8 @@ def load_factor_return_data(
     select_cols = list(dict.fromkeys(['date', 'asset'] + all_factor_cols))
     factor_df = factor_df[select_cols].copy()
     
-    # 重命名收益列（统一为 forward_return）
+    # 收益列保持原始名称（由 return_col 参数决定）
     return_df = return_df[['date', 'asset', return_col]].copy()
-    return_df = return_df.rename(columns={return_col: 'forward_return'})
     
     # ========== 过滤缺失值 ==========
     # dropna_cols 默认为原始 factor_cols（不含额外列）
@@ -266,7 +265,7 @@ def load_factor_return_data(
         )
     
     factor_df = factor_df.dropna(subset=dropna_cols).reset_index(drop=True)
-    return_df = return_df.dropna(subset=['forward_return']).reset_index(drop=True)
+    return_df = return_df.dropna(subset=[return_col]).reset_index(drop=True)
     
     logger.info(f"过滤缺失值后: 因子 {len(factor_df)} 行（过滤列: {dropna_cols}），收益 {len(return_df)} 行")
     

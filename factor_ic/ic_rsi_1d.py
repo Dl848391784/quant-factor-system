@@ -107,7 +107,7 @@ def generate_rsi_ic_data(
             raw_metadata=raw_metadata,
             factor_name='rsi_1d',
             factor_col='rsi_6',
-            return_col='forward_return',
+return_col='forward_return_1d',
             min_stocks=min_stocks
 )
         
@@ -125,7 +125,7 @@ def generate_rsi_ic_data(
             factor_df=factor_df,
             return_df=return_df,
             factor_col='rsi_6',
-            return_col='forward_return',
+return_col='forward_return_1d',
             min_stocks=min_stocks,
             logger=logger
         )

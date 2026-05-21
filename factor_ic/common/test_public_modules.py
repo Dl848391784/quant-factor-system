@@ -61,7 +61,7 @@ def test_public_modules():
             factor_df=factor_df,
             return_df=return_df,
             factor_col='rsi_6',
-            return_col='forward_return',
+return_col='forward_return_1d',
             min_stocks=10
         )
         print(f"✓ 计算成功")

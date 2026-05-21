@@ -172,7 +172,7 @@ def run_factor_ic_analysis(
             raw_metadata=raw_metadata,
             factor_name=f'{factor_name}_{return_period}',
             factor_col=factor_col,
-            return_col='forward_return',
+            return_col=return_col,
             min_stocks=min_stocks
         )
         
@@ -224,7 +224,7 @@ def run_factor_ic_analysis(
                 factor_df=factor_df,
                 return_df=return_df,
                 factor_col=factor_col,
-                return_col='forward_return',
+                return_col=return_col,
                 date_col='date',
                 asset_col='asset',
                 min_stocks=min_stocks,

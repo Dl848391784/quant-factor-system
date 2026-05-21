@@ -204,7 +204,7 @@ def generate_turnover_surge_ic_data(
         factor_df=factor_df,
         return_df=return_df,
         factor_col='turnover_surge',
-        return_col='forward_return',
+return_col='forward_return_1d',
         min_stocks=min_stocks,
         logger=logger
     )
