@@ -16,6 +16,9 @@ from scipy import stats
 from typing import Dict, Optional, Tuple
 import math
 
+from .logger_config import get_logger
+logger = get_logger(__name__)
+
 
 def calculate_ic_with_direction_verification(
     factor_df: pd.DataFrame,
@@ -723,12 +726,12 @@ if __name__ == "__main__":
         factor_df, return_df, factor_col='rsi_6'
     )
     
-    print("=" * 60)
-    print("因子方向验证 IC 分析")
-    print("=" * 60)
-    print(f"IC 均值:     {result['ic_mean']:.4f}")
-    print(f"IC 标准差:   {result['ic_std']:.4f}")
-    print(f"ICIR:        {result['icir']:.2f}")
+    logger.info("=" * 60)
+    logger.info("因子方向验证 IC 分析")
+    logger.info("=" * 60)
+    logger.info(f"IC 均值:     {result['ic_mean']:.4f}")
+    logger.info(f"IC 标准差:   {result['ic_std']:.4f}")
+    logger.info(f"ICIR:        {result['icir']:.2f}")
 
 
 def calculate_ic_statistics(ic_series: pd.Series) -> Dict:

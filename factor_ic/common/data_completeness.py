@@ -16,6 +16,9 @@ import gzip
 import json
 import gc
 
+from .logger_config import get_logger
+logger = get_logger(__name__)
+
 
 # 默认路径配置
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -90,7 +93,7 @@ def get_factor_data_dates() -> Tuple[List[str], Optional[str]]:
         
         return dates, latest_date
     except Exception as e:
-        print(f"[警告] 读取 factor_data 失败: {e}")
+        logger.warning(f"读取 factor_data 失败: {e}")
         return [], None
 
 
@@ -155,7 +158,7 @@ def get_cache_latest_date(factor_name: str) -> Optional[str]:
         
         return latest_date
     except Exception as e:
-        print(f"[警告] 读取缓存失败 {factor_name}: {e}")
+        logger.warning(f"读取缓存失败 {factor_name}: {e}")
         return None
 
 
@@ -318,20 +321,20 @@ def get_cache_info(factor_name: str) -> Dict[str, Any]:
 
 if __name__ == '__main__':
     """测试"""
-    print("=" * 60)
-    print("数据完整性检查模块测试")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("数据完整性检查模块测试")
+    logger.info("=" * 60)
     
     # 测试几个因子
     test_factors = ['kdj_j', 'bollinger_pb', 'turnover_surge', 'rsi', 'volume_ratio']
     
     for factor in test_factors:
-        print(f"\n【{factor}】")
+        logger.info(f"【{factor}】")
         mode, missing, info = check_data_completeness(factor)
-        print(f"  模式: {mode}")
-        print(f"  缓存存在: {info['cache_exists']}")
-        print(f"  缓存最新日期: {info['cache_latest_date'] or '无'}")
-        print(f"  数据源最新日期: {info['source_latest_date'] or '无'}")
-        print(f"  缺失天数: {info['missing_count']}")
+        logger.info(f"模式: {mode}")
+        logger.info(f"缓存存在: {info['cache_exists']}")
+        logger.info(f"缓存最新日期: {info['cache_latest_date'] or '无'}")
+        logger.info(f"数据源最新日期: {info['source_latest_date'] or '无'}")
+        logger.info(f"缺失天数: {info['missing_count']}")
         if missing:
-            print(f"  缺失日期范围: {missing[0]} ~ {missing[-1]}")
+            logger.info(f"缺失日期范围: {missing[0]} ~ {missing[-1]}")

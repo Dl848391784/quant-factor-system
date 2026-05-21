@@ -20,6 +20,8 @@ from pathlib import Path
 
 # 导入类型转换函数
 from .convert_types import convert_to_native_types
+from .logger_config import get_logger
+logger = get_logger(__name__)
 
 
 def build_ic_result(
@@ -421,5 +423,5 @@ def save_ic_result(result: Dict, output_path: Optional[Path] = None) -> Path:
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
     
-    print(f"  ✓ 结果已保存: {output_path}")
+    logger.info(f"  ✓ 结果已保存: {output_path}")
     return output_path

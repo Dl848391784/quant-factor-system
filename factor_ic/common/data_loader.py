@@ -20,6 +20,9 @@ import pandas as pd
 from pathlib import Path
 from typing import Tuple, List, Optional, Dict
 
+from .logger_config import get_logger
+
+logger = get_logger(__name__)
 
 # 默认缓存路径
 DEFAULT_CACHE_DIR = Path(__file__).parent.parent.parent / 'cache' / 'factor_data'
@@ -84,7 +87,7 @@ def load_factor_return_data(
             }
         )
     """
-    print("\n[数据加载] 从缓存读取数据...")
+    logger.info("[数据加载] 从缓存读取数据...")
     
     # 确定缓存路径
     factor_cache_path = factor_cache_path or DEFAULT_FACTOR_CACHE
@@ -113,7 +116,7 @@ def load_factor_return_data(
         if col not in factor_df.columns:
             raise KeyError(f"因子数据缺少必需列: '{col}'，无法继续处理")
     
-    print(f"  - 因子数据: {len(factor_df)} 行, {factor_df['asset'].nunique()} 只股票")
+    logger.info(f"因子数据: {len(factor_df)} 行, {factor_df['asset'].nunique()} 只股票")
     
     # ========== 加载收益数据 ==========
     if not return_cache_path.exists():
@@ -138,7 +141,7 @@ def load_factor_return_data(
         if col not in return_df.columns:
             raise KeyError(f"收益数据缺少必需列: '{col}'，无法继续处理")
     
-    print(f"  - 收益数据: {len(return_df)} 行, {return_df['asset'].nunique()} 只股票")
+    logger.info(f"收益数据: {len(return_df)} 行, {return_df['asset'].nunique()} 只股票")
     
     # ========== 日期类型统一转换 ==========
     # 从 JSON 加载后，日期可能是多种格式（字符串、datetime、timestamp）
@@ -153,8 +156,8 @@ def load_factor_return_data(
     raw_total_days = factor_df['date'].nunique()
     raw_avg_stocks_per_day = round(factor_df.groupby('date').size().mean(), 1)
     
-    print(f"  - 原始数据范围: {raw_period_start} ~ {raw_period_end}, {raw_total_days} 个交易日")
-    print(f"  - 原始平均每日股票数: {raw_avg_stocks_per_day}")
+    logger.info(f"原始数据范围: {raw_period_start} ~ {raw_period_end}, {raw_total_days} 个交易日")
+    logger.info(f"原始平均每日股票数: {raw_avg_stocks_per_day}")
     
     # ========== 加载额外因子文件（如有） ==========
     # 在修改因子列列表之前，创建 factor_cols 的副本（防止引用污染）
@@ -201,11 +204,11 @@ def load_factor_return_data(
             if rows_lost > 0:
                 if rows_before > 0:
                     loss_pct = rows_lost / rows_before * 100
-                    print(f"  - 合并 {col_name} 后: {rows_after} 行（丢失 {rows_lost} 行，{loss_pct:.1f}%）")
+                    logger.info(f"合并 {col_name} 后: {rows_after} 行（丢失 {rows_lost} 行，{loss_pct:.1f}%）")
                 else:
-                    print(f"  - 合并 {col_name} 后: {rows_after} 行（丢失 {rows_lost} 行，原始数据为空）")
+                    logger.info(f"合并 {col_name} 后: {rows_after} 行（丢失 {rows_lost} 行，原始数据为空）")
             else:
-                print(f"  - 合并 {col_name} 后: {rows_after} 行（无数据丢失）")
+                logger.info(f"合并 {col_name} 后: {rows_after} 行（无数据丢失）")
         
         # 更新因子列列表（包含额外列）
         # 使用独立变量，保持顺序：先 factor_cols，再追加不在 factor_cols 的额外列
@@ -262,7 +265,7 @@ def load_factor_return_data(
     factor_df = factor_df.dropna(subset=dropna_cols).reset_index(drop=True)
     return_df = return_df.dropna(subset=['forward_return']).reset_index(drop=True)
     
-    print(f"  - 过滤缺失值后: 因子 {len(factor_df)} 行（过滤列: {dropna_cols}），收益 {len(return_df)} 行")
+    logger.info(f"过滤缺失值后: 因子 {len(factor_df)} 行（过滤列: {dropna_cols}），收益 {len(return_df)} 行")
     
     # ========== 日期对齐验证（可选） ==========
     if validate_date_alignment:
@@ -273,17 +276,17 @@ def load_factor_return_data(
             missing_in_return = factor_dates - return_dates
             missing_in_factor = return_dates - factor_dates
             
-            print(f"  [警告] 因子数据和收益数据日期不对齐")
-            print(f"    因子数据日期数: {len(factor_dates)}")
-            print(f"    收益数据日期数: {len(return_dates)}")
-            print(f"    因子数据缺失日期数: {len(missing_in_factor)}")
-            print(f"    收益数据缺失日期数: {len(missing_in_return)}")
+            logger.warning("因子数据和收益数据日期不对齐")
+            logger.info(f"因子数据日期数: {len(factor_dates)}")
+            logger.info(f"收益数据日期数: {len(return_dates)}")
+            logger.info(f"因子数据缺失日期数: {len(missing_in_factor)}")
+            logger.info(f"收益数据缺失日期数: {len(missing_in_return)}")
             
             # 选择交集日期（保证数据对齐）
             common_dates = factor_dates & return_dates
             factor_df = factor_df[factor_df['date'].isin(common_dates)].reset_index(drop=True)
             return_df = return_df[return_df['date'].isin(common_dates)].reset_index(drop=True)
-            print(f"    对齐后日期数: {len(common_dates)}")
+            logger.info(f"对齐后日期数: {len(common_dates)}")
     
     # ========== 返回结果 ==========
     return factor_df, return_df, {

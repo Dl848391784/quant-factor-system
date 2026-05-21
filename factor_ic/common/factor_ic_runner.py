@@ -17,6 +17,10 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Callable, Any
 
+# 导入日志
+from .logger_config import get_logger
+logger = get_logger(__name__)
+
 # 导入数据加载
 from .data_loader import load_factor_return_data, get_factor_cache_path, get_return_cache_path
 
@@ -97,9 +101,9 @@ def run_factor_ic_analysis(
             custom_factor_calculation=calculate_kdj_j
         )
     """
-    print("=" * 60)
-    print(f"因子 IC 分析: {factor_name}_{return_period}")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info(f"因子 IC 分析: {factor_name}_{return_period}")
+    logger.info("=" * 60)
     
     # ========== 确定路径 ==========
     if output_path is None:
@@ -117,7 +121,7 @@ def run_factor_ic_analysis(
     data_source = str(factor_cache_path)
     
     # ========== 判断模式 ==========
-    print("\n[模式判断] 判断更新模式...")
+    logger.info("[模式判断] 判断更新模式...")
     
     # 先尝试加载数据（用于判断模式）
     try:
@@ -130,7 +134,7 @@ def run_factor_ic_analysis(
         )
     except FileNotFoundError as e:
         # 缓存不存在：返回错误结构
-        print(f"  [错误] 数据加载失败: {e}")
+        logger.error(f"数据加载失败: {e}")
         return build_error_result(
             factor_name=f'{factor_name}_{return_period}',
             error_msg=str(e),
@@ -139,7 +143,7 @@ def run_factor_ic_analysis(
         )
     except Exception as e:
         # 其他异常：返回错误结构
-        print(f"  [错误] 数据加载异常: {e}")
+        logger.error(f"数据加载异常: {e}")
         return build_error_result(
             factor_name=f'{factor_name}_{return_period}',
             error_msg=str(e),
@@ -153,7 +157,7 @@ def run_factor_ic_analysis(
     # ========== 执行计算 ==========
     if use_incremental:
         # 增量模式
-        print("\n[执行模式] 增量更新...")
+        logger.info("[执行模式] 增量更新...")
         
         result = incremental_update_ic(
             output_path=output_path,
@@ -197,17 +201,17 @@ def run_factor_ic_analysis(
     
     else:
         # 全量模式
-        print("\n[执行模式] 全量计算...")
+        logger.info("[执行模式] 全量计算...")
         
         # 自定义因子计算（如有）
         if custom_factor_calculation is not None:
-            print("\n[因子预处理] 执行自定义因子计算...")
+            logger.info("[因子预处理] 执行自定义因子计算...")
             params = custom_factor_calculation_params or {}
             factor_df = custom_factor_calculation(factor_df, **params)
-            print(f"  - 处理后数据: {len(factor_df)} 行")
+            logger.info(f"处理后数据: {len(factor_df)} 行")
         
         # 计算 IC（五维度判断）
-        print("\n[IC 计算] 计算 IC（含五维度判断）...")
+        logger.info("[IC 计算] 计算 IC（含五维度判断）...")
         
         try:
             ic_result = calculate_ic_with_direction_verification(
@@ -220,12 +224,12 @@ def run_factor_ic_analysis(
                 min_stocks=min_stocks
             )
             
-            print(f"  - IC 均值: {ic_result['ic_mean']:.4f}")
-            print(f"  - ICIR: {ic_result['icir']:.2f}")
-            print(f"  - t 统计量: {ic_result['statistical_significance']['t_stat']:.2f}")
+            logger.info(f"IC 均值: {ic_result['ic_mean']:.4f}")
+            logger.info(f"ICIR: {ic_result['icir']:.2f}")
+            logger.info(f"t 统计量: {ic_result['statistical_significance']['t_stat']:.2f}")
             
         except Exception as e:
-            print(f"  [错误] IC 计算失败: {e}")
+            logger.error(f"IC 计算失败: {e}")
             return build_error_result(
                 factor_name=f'{factor_name}_{return_period}',
                 error_msg=f'IC 计算失败: {e}',
@@ -234,7 +238,7 @@ def run_factor_ic_analysis(
             )
         
         # 构建完整结果
-        print("\n[结果构建] 构建完整输出结构...")
+        logger.info("[结果构建] 构建完整输出结构...")
         
         result = build_ic_result(
             ic_result=ic_result,
@@ -249,9 +253,9 @@ def run_factor_ic_analysis(
         # 保存
         save_ic_result(result, output_path)
         
-        print("\n" + "=" * 60)
-        print(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info(f"完成！共计算 {result['sample_stats']['valid_days']} 天有效 IC")
+        logger.info("=" * 60)
         
         return result
 
@@ -354,7 +358,7 @@ def main():
         force_full=args.force_full
     )
     
-    print(f"\n结果: {result.get('update_mode', 'unknown')}")
+    logger.info(f"结果: {result.get('update_mode', 'unknown')}")
 
 
 if __name__ == '__main__':

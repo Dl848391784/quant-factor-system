@@ -46,6 +46,9 @@ import numpy as np
 import pandas as pd
 from typing import Any
 
+from .logger_config import get_logger
+logger = get_logger(__name__)
+
 
 def convert_to_native_types(obj: Any) -> Any:
     """
@@ -150,14 +153,14 @@ if __name__ == '__main__':
     }
     
     result = convert_to_native_types(test_dict)
-    print("转换结果:")
-    print(f"  int: {result['int']} (type: {type(result['int']).__name__})")
-    print(f"  float: {result['float']} (type: {type(result['float']).__name__})")
-    print(f"  nan: {result['nan']} (应为 None)")
-    print(f"  array: {result['array']}")
-    print(f"  nested.value: {result['nested']['value']}")
+    logger.info("转换结果:")
+    logger.info(f"  int: {result['int']} (type: {type(result['int']).__name__})")
+    logger.info(f"  float: {result['float']} (type: {type(result['float']).__name__})")
+    logger.info(f"  nan: {result['nan']} (应为 None)")
+    logger.info(f"  array: {result['array']}")
+    logger.info(f"  nested.value: {result['nested']['value']}")
     
     # 测试 JSON 序列化
     import json
     json_str = json.dumps(result, ensure_ascii=False)
-    print(f"\nJSON 序列化成功: {len(json_str)} chars")
+    logger.info(f"\nJSON 序列化成功: {len(json_str)} chars")
