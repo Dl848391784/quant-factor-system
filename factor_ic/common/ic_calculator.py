@@ -326,7 +326,7 @@ def calculate_single_day_ic(
     return ic_value
 
 
-def _newey_west_t_stat(ic_series: pd.Series, lag: int = None) -> Tuple[float, float]:
+def _newey_west_t_stat(ic_series: pd.Series, lag: int = None) -> Tuple[float, float, int]:
     """
     Newey-West 调整的 t 统计量
     
@@ -361,7 +361,10 @@ def _newey_west_t_stat(ic_series: pd.Series, lag: int = None) -> Tuple[float, fl
              若指定则使用固定值，否则使用 NW(1994) 自动选择准则
         
     返回:
-        (t_stat, p_value, lag_used) - Newey-West 调整后的 t 统计量、p 值和使用的 lag
+        Tuple[float, float, int] - (t_stat, p_value, lag_used)
+        - t_stat: Newey-West 调整后的 t 统计量
+        - p_value: 双尾检验 p 值
+        - lag_used: 实际使用的 lag 值（int）
     """
     n = len(ic_series)
     ic_mean = ic_series.mean()
@@ -975,7 +978,8 @@ def industry_neutral_residual(
         # 残差即为中性化因子
         residual = valid_industries[factor_col] - model.predict(industry_dummies)
         
-        for idx, (asset, res) in zip(valid_industries[asset_col], residual):
+        # zip 返回二元组，用两个变量解包（idx 通过 enumerate 获取）
+        for idx, (asset, res) in enumerate(zip(valid_industries[asset_col].values, residual)):
             results.append({
                 date_col: date,
                 asset_col: asset,
