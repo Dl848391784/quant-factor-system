@@ -56,100 +56,58 @@ DEFAULT_M2 = 3     # D值平滑周期
 # KDJ 计算函数（因子特有逻辑）
 # ============================================================================
 
-def _calculate_k_with_initial(
-    rsv_series: pd.Series,
-    alpha_k: float,
-    initial_k: float
+def _calculate_ewm_with_initial(
+    series: pd.Series,
+    alpha: float,
+    initial_value: float
 ) -> pd.Series:
-    """计算 K 值（正确处理 NaN 前缀版本）
+    """计算 EWM 递推值（正确处理 NaN 前缀版本）
+    
+    公共函数：统一处理 K 值和 D 值的 EWM 递推计算
     
     核心逻辑：
-    1. RSV 前 N-1 期为 NaN（rolling window min_periods=n）
+    1. 输入序列前 N-1 期可能为 NaN（rolling window min_periods=n）
     2. ewm(ignore_na=True) 使 NaN 不参与计算，但输出中 NaN 位置被填充
-    3. 在第一个有效 RSV **前**插入虚拟 initial_k，作为 K_{t-1} 初始条件
+    3. 在第一个有效值**前**插入虚拟 initial_value，作为递推初始条件
     4. 计算后恢复原始 NaN 位置
     
-    EWM 递推公式：K[t] = alpha * RSV[t] + (1-alpha) * K[t-1]
-    初始条件：K[t-1] = initial_k（第一期之前的虚拟 K 值）
-    alpha = 1/m1（KDJ 标准参数）
+    EWM 递推公式：output[t] = alpha * input[t] + (1-alpha) * output[t-1]
+    初始条件：output[t-1] = initial_value（第一期之前的虚拟值）
     
-    关键：initial_k 是 K_{t-1} 的初始值，不是 RSV 输入的覆盖值！
+    参数:
+        series: 输入序列（RSV 或 K）
+        alpha: EWM alpha 参数
+        initial_value: 初始值（KDJ 标准为 50.0）
+    
+    返回:
+        EWM 递推结果序列
     """
-    if len(rsv_series) == 0:
-        return rsv_series
+    # 空序列直接返回
+    if len(series) == 0:
+        return series
     
-    # 找到第一个有效 RSV 的位置
-    first_valid_idx = rsv_series.first_valid_index()
+    # 全 NaN 序列直接返回（语义准确，替代 first_valid_idx 检查）
+    if series.isna().all():
+        return series
     
-    if first_valid_idx is None:
-        return rsv_series
-    
-    # 正确实现：在第一个有效 RSV **前**插入虚拟 initial_k
+    # 在第一个有效值**前**插入虚拟 initial_value
     # 使用 pd.concat 拼接（用临时整数索引，避免时间索引减法问题）
-    rsv_with_initial = pd.concat([
-        pd.Series([initial_k], index=[-1]),  # 虚拟初始值（临时索引）
-        rsv_series
+    series_with_initial = pd.concat([
+        pd.Series([initial_value], index=[-1]),  # 虚拟初始值（临时索引）
+        series
     ], ignore_index=True)  # 重置索引为整数位置
     
     # 计算 ewm 递推（使用 ignore_na=True，让初始值正确传播）
-    k_with_initial = rsv_with_initial.ewm(alpha=alpha_k, adjust=False, ignore_na=True).mean()
+    result_with_initial = series_with_initial.ewm(alpha=alpha, adjust=False, ignore_na=True).mean()
     
     # 移除虚拟初始值，恢复原始索引
-    k_series = k_with_initial.iloc[1:]
-    k_series.index = rsv_series.index
+    result_series = result_with_initial.iloc[1:]
+    result_series.index = series.index
     
     # 恢复原始 NaN 位置（ewm 会填充 NaN 位置为初始值）
-    k_series = k_series.where(rsv_series.notna(), float('nan'))
+    result_series = result_series.where(series.notna(), float('nan'))
     
-    return k_series
-
-
-def _calculate_d_with_initial(
-    k_series: pd.Series,
-    alpha_d: float,
-    initial_d: float
-) -> pd.Series:
-    """计算 D 值（正确处理 NaN 前缀版本）
-    
-    核心逻辑：
-    1. K 前 N-1 期为 NaN（与 RSV 前缀一致）
-    2. ewm(ignore_na=True) 使 NaN 不参与计算，但输出中 NaN 位置被填充
-    3. 在第一个有效 K **前**插入虚拟 initial_d，作为 D_{t-1} 初始条件
-    4. 计算后恢复原始 NaN 位置
-    
-    EWM 递推公式：D[t] = alpha * K[t] + (1-alpha) * D[t-1]
-    初始条件：D[t-1] = initial_d（第一期之前的虚拟 D 值）
-    alpha = 1/m2（KDJ 标准参数）
-    
-    关键：initial_d 是 D_{t-1} 的初始值，不是 K 输入的覆盖值！
-    """
-    if len(k_series) == 0:
-        return k_series
-    
-    # 找到第一个有效 K 的位置
-    first_valid_idx = k_series.first_valid_index()
-    
-    if first_valid_idx is None:
-        return k_series
-    
-    # 正确实现：在第一个有效 K **前**插入虚拟 initial_d
-    # 使用 pd.concat 拼接（用临时整数索引，避免时间索引减法问题）
-    k_with_initial = pd.concat([
-        pd.Series([initial_d], index=[-1]),  # 虚拟初始值（临时索引）
-        k_series
-    ], ignore_index=True)  # 重置索引为整数位置
-    
-    # 计算 ewm 递推（使用 ignore_na=True，让初始值正确传播）
-    d_with_initial = k_with_initial.ewm(alpha=alpha_d, adjust=False, ignore_na=True).mean()
-    
-    # 移除虚拟初始值，恢复原始索引
-    d_series = d_with_initial.iloc[1:]
-    d_series.index = k_series.index
-    
-    # 恢复原始 NaN 位置（ewm 会填充 NaN 位置为初始值）
-    d_series = d_series.where(k_series.notna(), float('nan'))
-    
-    return d_series
+    return result_series
 
 
 def calculate_kdj_j(
@@ -162,7 +120,7 @@ def calculate_kdj_j(
     计算 KDJ_J 因子（因子特有逻辑）
     
     参数:
-        factor_df: 包含 close, high, low 列的 DataFrame
+        factor_df: 包含 close, high, low, date, asset 列的 DataFrame
         n: RSV 计算周期
         m1: K值平滑周期
         m2: D值平滑周期
@@ -174,19 +132,29 @@ def calculate_kdj_j(
         - 函数入口必须先 .copy()，避免修改原始数据（MODULE.md DataFrame参数副本规范）
         - 使用局部变量存储中间结果，避免污染输出 DataFrame
         - 使用 pandas 语义，避免 np.where 混用
+        - KDJ 是单股票时序指标，必须按 asset 分组后再做 rolling/ewm
+    
+    注意:
+        rolling/ewm 计算前必须先按 asset+date 排序，确保：
+        1. 每只股票的数据在正确时序上排列
+        2. groupby.transform 不会混合不同股票的数据
     """
     # 函数入口必须先 copy，避免副作用
     factor_df = factor_df.copy()
+    
+    # 先按 asset+date 排序，确保 rolling/ewm 在正确时序上计算
+    factor_df = factor_df.sort_values(['asset', 'date'])
     
     # ewm alpha 参数：alpha = 1/m（KDJ 标准公式）
     alpha_k = 1 / m1
     alpha_d = 1 / m2
     
     # 计算 RSV（使用局部变量，避免污染输出）
-    low_min = factor_df.groupby('asset')['low'].transform(
+    # 按 asset 分组后做 rolling（KDJ 是单股票时序指标）
+    low_min = factor_df.groupby('asset', group_keys=False)['low'].transform(
         lambda x: x.rolling(n, min_periods=n).min()
     )
-    high_max = factor_df.groupby('asset')['high'].transform(
+    high_max = factor_df.groupby('asset', group_keys=False)['high'].transform(
         lambda x: x.rolling(n, min_periods=n).max()
     )
     
@@ -207,12 +175,13 @@ def calculate_kdj_j(
     
     # 计算 K 和 D（使用局部变量，避免污染输出）
     # 使用临时列名计算，最后只保留 kdj_j
+    # 由于数据已按 asset+date 排序，groupby.transform 不会混合不同股票的数据
     k = rsv.groupby(factor_df['asset']).transform(
-        lambda x: _calculate_k_with_initial(x, alpha_k, 50.0)
+        lambda x: _calculate_ewm_with_initial(x, alpha_k, 50.0)
     )
     
     d = k.groupby(factor_df['asset']).transform(
-        lambda x: _calculate_d_with_initial(x, alpha_d, 50.0)
+        lambda x: _calculate_ewm_with_initial(x, alpha_d, 50.0)
     )
     
     # 计算 J（只写入最终因子列）
@@ -267,8 +236,8 @@ if __name__ == '__main__':
     try:
         main()
     except RuntimeError as e:
-        logger.exception(f"计算失败")  # 使用 .exception() 保留完整堆栈
+        logger.exception("计算失败")  # 使用 .exception() 保留完整堆栈
         sys.exit(1)
     except Exception as e:
-        logger.exception(f"未预期的错误")  # 使用 .exception() 保留完整堆栈
+        logger.exception("未预期的错误")  # 使用 .exception() 保留完整堆栈
         sys.exit(1)
