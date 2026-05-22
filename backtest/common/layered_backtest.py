@@ -166,15 +166,33 @@ class LayeredBacktestEngine:
         
         logger.info(f"开始分层回测: layer_method={layer_method}, factor_direction={factor_direction}")
         
-        # 设置默认多空组合
+        # ========== 确定分层数量（先修正 n_layers）==========
+        # 必须在设置默认多空层之前，避免层编号越界
+        if layer_method == 'fixed_threshold' and thresholds:
+            n_layers = len(thresholds) - 1
+        
+        # ========== 设置默认多空组合（依赖已修正的 n_layers）==========
+        # 多头：正向因子取高层，反向因子取低层
+        # 空头：正向因子取低层，反向因子取高层
         if long_layers is None:
             long_layers = [n_layers - 1, n_layers] if factor_direction == 'positive' else [1, 2]
         if short_layers is None:
             short_layers = [1, 2] if factor_direction == 'positive' else [n_layers - 1, n_layers]
         
-        # 确定分层数量
-        if layer_method == 'fixed_threshold' and thresholds:
-            n_layers = len(thresholds) - 1
+        # ========== 校验多空层编号不越界 ==========
+        max_layer = n_layers
+        for layer_id in long_layers:
+            if layer_id > max_layer or layer_id < 1:
+                raise ValueError(
+                    f"long_layers 越界: 层编号 {layer_id} 不在有效范围 [1, {max_layer}]，"
+                    f"当前 n_layers={n_layers}，请检查 thresholds 参数"
+                )
+        for layer_id in short_layers:
+            if layer_id > max_layer or layer_id < 1:
+                raise ValueError(
+                    f"short_layers 越界: 层编号 {layer_id} 不在有效范围 [1, {max_layer}]，"
+                    f"当前 n_layers={n_layers}，请检查 thresholds 参数"
+                )
         
         # 每日处理
         daily_records = []
@@ -288,8 +306,18 @@ class LayeredBacktestEngine:
             
             # 处理最大边界
             layer_assignment[factor_values >= thresholds[-1]] = n_layers
+            
             # 处理最小边界（低于第一个阈值）
-            layer_assignment[factor_values < thresholds[0]] = 1
+            below_min_mask = factor_values < thresholds[0]
+            if below_min_mask.any():
+                n_below = below_min_mask.sum()
+                pct_below = n_below / len(factor_values) * 100
+                logger.warning(
+                    f"fixed_threshold 边界警告: {n_below} 个股票 ({pct_below:.2f}%) "
+                    f"因子值低于最小阈值 {thresholds[0]}，已归入 Layer1。"
+                    f"建议：检查 thresholds 参数是否覆盖数据范围，或使用 percentile 分层。"
+                )
+                layer_assignment[below_min_mask] = 1
         
         else:
             raise ValueError(f"Unknown layer method: {method}")
@@ -456,28 +484,36 @@ class LayeredBacktestEngine:
         # 直接提取数据，避免逐行迭代
         long_returns = daily_df.loc[long_mask, 'return'].tolist()
         short_returns = daily_df.loc[short_mask, 'return'].tolist()
-        long_turnovers = daily_df.loc[long_mask & daily_df['turnover'].notna(), 'turnover'].tolist()
-        short_turnovers = daily_df.loc[short_mask & daily_df['turnover'].notna(), 'turnover'].tolist()
         
         # 计算多空组合收益（优化：用 groupby 替代循环）
-        # 按 date 分组，计算每日多空收益
+        # 按 date 分组，计算每日多空收益和换手率
         def calc_daily_ls(group):
             long_rets = group[group['layer'].isin(long_layers)]['return'].dropna()
             short_rets = group[group['layer'].isin(short_layers)]['return'].dropna()
+            
+            # 换手率：按日期分组取均值，避免多头多层重复计次
+            # 若某天多头有2层（layer4 + layer5），先取均值再整体平均
+            long_turnover_vals = group[group['layer'].isin(long_layers)]['turnover'].dropna()
+            short_turnover_vals = group[group['layer'].isin(short_layers)]['turnover'].dropna()
+            
             if len(long_rets) > 0 and len(short_rets) > 0:
                 return pd.Series({
                     'long_return': long_rets.mean(),
                     'short_return': short_rets.mean(),
-                    'long_short_return': long_rets.mean() - short_rets.mean()
+                    'long_short_return': long_rets.mean() - short_rets.mean(),
+                    'long_turnover': long_turnover_vals.mean() if len(long_turnover_vals) > 0 else 0,
+                    'short_turnover': short_turnover_vals.mean() if len(short_turnover_vals) > 0 else 0
                 })
             return pd.Series({
                 'long_return': np.nan,
                 'short_return': np.nan,
-                'long_short_return': np.nan
+                'long_short_return': np.nan,
+                'long_turnover': np.nan,
+                'short_turnover': np.nan
             })
         
-        # 应用 groupby，过滤 NaN 行
-        long_short_df = daily_df.groupby('date').apply(calc_daily_ls).dropna()
+        # 应用 groupby，过滤 NaN 行（收益为 NaN 的行）
+        long_short_df = daily_df.groupby('date').apply(calc_daily_ls).dropna(subset=['long_short_return'])
         # 重置索引，保留 date 列
         if len(long_short_df) > 0:
             long_short_df = long_short_df.reset_index()
@@ -499,8 +535,9 @@ class LayeredBacktestEngine:
                 'long_short_return_annual': float(ls_annual),
                 'long_short_sharpe': float(ls_annual / ls_vol) if ls_vol > 0 else None,
                 'long_short_volatility': float(ls_vol),
-                'avg_turnover_long': float(np.mean(long_turnovers)) if long_turnovers else 0,
-                'avg_turnover_short': float(np.mean(short_turnovers)) if short_turnovers else 0,
+                # 换手率：从每日平均换手率中取均值（已按日期分组，权重正确）
+                'avg_turnover_long': float(long_short_df['long_turnover'].mean()),
+                'avg_turnover_short': float(long_short_df['short_turnover'].mean()),
                 'n_days': int(len(long_short_df))  # 转 int 避免 JSON 序列化问题
             }
         

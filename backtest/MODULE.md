@@ -2,7 +2,8 @@
 
 > 本文档定义 backtest/ 目录下分层回测脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v0.2（补充日志规范）
+> 版本: v0.3（补充分层规则、换手率计算、参数校验规范）
+> 修订日期: 2026-05-22
 
 ---
 
@@ -52,12 +53,56 @@ backtest 模块负责对因子 IC 结果进行分层回测，评估因子的实�
 
 ## 分层规则
 
-待定义：
+**分层数量：**
+- percentile 模式：由 n_layers 参数控制（默认 5 层）
+- fixed_threshold 模式：由 thresholds 长度决定（n 层 = len(thresholds) - 1）
 
-- 分层数量（如 5 层、10 层）
-- 分层方式（正向因子 vs 反向因子）
-- 每层权重分配
-- 边界处理规则
+**分层方式：**
+- 正向因子（factor_direction='positive'）：高值预期高收益，多头取高层
+- 反向因子（factor_direction='negative'）：低值预期高收益，多头取低层
+
+**多空层默认设置（依赖已修正的 n_layers）：**
+- 正向因子：多头 Layer(n-1, n)，空头 Layer(1, 2)
+- 反向因子：多头 Layer(1, 2)，空头 Layer(n-1, n)
+
+**边界处理规则（fixed_threshold 模式）：**
+- 最大边界（≥ thresholds[-1]）：归入 Layer n
+- 最小边界（< thresholds[0]）：归入 Layer 1，并输出警告日志
+  - 警告内容：股票数量、占比、建议检查 thresholds 或改用 percentile
+- 边界内（[thresholds[i], thresholds[i+1])）：归入 Layer (i+1)
+- **业务建议：thresholds 应覆盖数据范围，避免边界外数据**
+
+**每层权重分配：**
+- 等权平均（每只股票权重相等）
+
+---
+
+## 多空组合换手率计算规则
+
+**计算逻辑：先按日期分组取均值，再整体平均**
+
+正确做法（已实现）：
+```
+每日多头换手率 = mean(多头各层换手率)  # 若有2层，先取均值
+avg_turnover_long = mean(每日多头换手率)  # 每日权重相等
+```
+
+错误做法（已修复）：
+```
+avg_turnover_long = mean(所有多头层所有日期换手率列表)  # 多头多层重复计次
+```
+
+**原因：** 若某天多头有 2 层（如 Layer4 + Layer5），直接取列表会导致该天换手率被计 2 次，权重不对。
+
+---
+
+## 参数校验规范
+
+**必须校验：**
+- factor_direction：'positive' / 'negative'
+- layer_method：'percentile' / 'fixed_threshold'
+- thresholds（fixed_threshold 模式）：至少 2 个阈值点，严格递增
+- long_layers / short_layers：层编号不越界（在 [1, n_layers] 范围内）
 
 ---
 
@@ -69,18 +114,6 @@ backtest 模块负责对因子 IC 结果进行分层回测，评估因子的实�
 - 夏普比率
 - 最大回撤
 - IC 与回测收益的对应关系
-
----
-
-## 待补充内容
-
-```
-□ 分层规则定义
-□ 输出字段规范
-□ 统计指标计算公式
-□ 因子方向处理规则
-□ 测试用例规范
-```
 
 ---
 
