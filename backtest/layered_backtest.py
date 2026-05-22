@@ -6,13 +6,27 @@
 2. 支持自定义分层数量和阈值
 3. 支持正向因子和反向因子
 4. 输出标准化结果，方便比较分析
+
+作者: 云瑶
+创建日期: 2026-05-19
+修订日期: 2026-05-23（日志规范化 + 代码质量优化）
 """
+
+import sys
+from pathlib import Path
+
+# 添加项目路径
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
 import warnings
-warnings.filterwarnings('ignore')
+
+# 导入公共日志模块（遵循 PROJECT.md 强制复用规范）
+from factor_ic.common.logger_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class LayeredBacktestEngine:
@@ -122,6 +136,36 @@ class LayeredBacktestEngine:
         返回:
             回测结果字典
         """
+        # ========== 参数校验 ==========
+        # 校验 factor_direction
+        valid_directions = ['positive', 'negative']
+        if factor_direction not in valid_directions:
+            raise ValueError(
+                f"factor_direction 必须是 'positive' 或 'negative', 当前值: '{factor_direction}'"
+            )
+        
+        # 校验 layer_method
+        valid_methods = ['percentile', 'fixed_threshold']
+        if layer_method not in valid_methods:
+            raise ValueError(
+                f"layer_method 必须是 'percentile' 或 'fixed_threshold', 当前值: '{layer_method}'"
+            )
+        
+        # 校验 thresholds（fixed_threshold 模式）
+        if layer_method == 'fixed_threshold':
+            if thresholds is None or len(thresholds) < 2:
+                raise ValueError(
+                    f"fixed_threshold 模式需要 thresholds 参数，且至少包含2个阈值点"
+                )
+            # 校验阈值递增
+            for i in range(len(thresholds) - 1):
+                if thresholds[i] >= thresholds[i + 1]:
+                    raise ValueError(
+                        f"thresholds 必须严格递增，第{i}个阈值 {thresholds[i]} >= 第{i+1}个阈值 {thresholds[i+1]}"
+                    )
+        
+        logger.info(f"开始分层回测: layer_method={layer_method}, factor_direction={factor_direction}")
+        
         # 设置默认多空组合
         if long_layers is None:
             long_layers = [n_layers - 1, n_layers] if factor_direction == 'positive' else [1, 2]
@@ -392,8 +436,8 @@ class LayeredBacktestEngine:
             turnover_avg = turnover_data.mean() if len(turnover_data) > 0 else 0
             
             layer_stats[f'layer_{layer_id}'] = {
-                'n_days': len(layer_data),
-                'n_stocks_avg': layer_data['n_stocks'].mean(),
+                'n_days': int(len(layer_data)),  # 转 int 避免 JSON 序列化问题
+                'n_stocks_avg': float(layer_data['n_stocks'].mean()),  # 转 float
                 'daily_return_mean': float(daily_return_mean),
                 'daily_return_std': float(daily_return_std),
                 'cumulative_return': float(cumulative_return),
@@ -404,26 +448,16 @@ class LayeredBacktestEngine:
                 'turnover_avg': float(turnover_avg)
             }
         
-        # 多空组合统计
-        long_returns = []
-        short_returns = []
-        long_turnovers = []
-        short_turnovers = []
+        # 多空组合统计（优化：用 groupby 替代 iterrows）
+        # 构建筛选条件
+        long_mask = daily_df['layer'].isin(long_layers) & daily_df['return'].notna()
+        short_mask = daily_df['layer'].isin(short_layers) & daily_df['return'].notna()
         
-        for _, row in daily_df.iterrows():
-            layer = int(row['layer'])
-            ret = row['return']
-            turn = row['turnover']
-            
-            if layer in long_layers and not pd.isna(ret):
-                long_returns.append(ret)
-                if not pd.isna(turn):
-                    long_turnovers.append(turn)
-            
-            if layer in short_layers and not pd.isna(ret):
-                short_returns.append(ret)
-                if not pd.isna(turn):
-                    short_turnovers.append(turn)
+        # 直接提取数据，避免逐行迭代
+        long_returns = daily_df.loc[long_mask, 'return'].tolist()
+        short_returns = daily_df.loc[short_mask, 'return'].tolist()
+        long_turnovers = daily_df.loc[long_mask & daily_df['turnover'].notna(), 'turnover'].tolist()
+        short_turnovers = daily_df.loc[short_mask & daily_df['turnover'].notna(), 'turnover'].tolist()
         
         # 计算多空组合收益
         long_short_records = []
@@ -485,7 +519,8 @@ class LayeredBacktestEngine:
             'factor_direction': factor_direction,
             'long_layers': long_layers,
             'short_layers': short_layers,
-            'min_stocks_per_layer': min(layer_data['n_stocks'].min() for layer_data in [daily_df[daily_df['layer'] == i] for i in range(1, n_layers + 1)]),
+            # 简化 min 表达式：用 groupby 替代循环
+            'min_stocks_per_layer': int(daily_df.groupby('layer')['n_stocks'].min().min()) if len(daily_df) > 0 else 0,
             'trade_cost_rate': trade_cost_rate,
             'layer_method': layer_method,
             'thresholds': thresholds,
