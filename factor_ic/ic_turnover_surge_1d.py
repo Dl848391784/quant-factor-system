@@ -89,14 +89,26 @@ def calculate_turnover_surge(
     # avg_turnover: 过去 surge_window 日换手率均值（不含当日）
     # 因子定义：换手率突增 = 当日换手率 / 过去几日换手率均值
     # "过去几日"不含当日，否则当日换手率同时出现在分子和分母，因子值被稀释
+    #
+    # 数据量要求：shift(1) 后再做 rolling(surge_window, min_periods=surge_window)
+    # 需要至少 surge_window + 1 天的历史数据才能得到第一个有效均值
+    # 例如：surge_window=5 时，需要第6个交易日才能得到第一个有效 avg_turnover
     avg_turnover = factor_df.groupby('asset')['turnover_rate'].transform(
         lambda x: x.shift(1).rolling(surge_window, min_periods=surge_window).mean()
     )
     
-    # ========== Step 2: 计算换手率突增（除零防护）==========
-    # turnover_rate 理论上恒 >= 0，avg_turnover 理论上恒 >= 0
-    # 但 avg_turnover 可能为 0（窗口期内所有 turnover_rate 为 0），需除零防护
-    safe_avg_turnover = avg_turnover.clip(lower=EPSILON)
+    # ========== Step 2: 检测 avg_turnover 异常值（先检测再处理）==========
+    # avg_turnover = 0 表示过去 surge_window 天完全无交易（合法但无意义）
+    # avg_turnover 接近零会导致 turnover_surge 爆炸式放大，需检测并标记为 NaN
+    # 注意：不能使用 clip 静默修正，因为 turnover_rate=0 是合法值
+    # 遵循 MODULE.md 异常检测规范：先检测异常，再应用业务逻辑
+    zero_avg_mask = (avg_turnover.notna()) & (avg_turnover.abs() < EPSILON)
+    zero_avg_count = zero_avg_mask.sum()
+    if zero_avg_count > 0:
+        logger.warning(f"检测到 {zero_avg_count} 个 avg_turnover 接近零，已标记为 np.nan")
+    
+    # 标记异常位置为 NaN，而非 clip 静默修正
+    safe_avg_turnover = avg_turnover.where(~zero_avg_mask, np.nan)
     turnover_surge = factor_df['turnover_rate'] / safe_avg_turnover
     
     # ========== Step 3: 异常检测（先于筛选条件）==========
@@ -127,8 +139,8 @@ def calculate_turnover_surge(
     # 计算涨跌幅：仅对有效数据（notna 且 > EPSILON）计算，其余保持 NaN
     # 使用 mask 排除异常，而非 clip 静默修正（遵循 MODULE.md 异常排除时机规范）
     safe_prev_close = prev_close.mask(prev_close.isna() | (prev_close <= EPSILON))
-    daily_return = (factor_df['close'] - prev_close) / safe_prev_close
-    # 注意：safe_prev_close 中 NaN/异常位置仍为 NaN，除法结果自然为 NaN
+    # 分子分母统一使用 safe_prev_close，语义更清晰
+    daily_return = (factor_df['close'] - safe_prev_close) / safe_prev_close
     
     # ========== Step 5: 应用业务筛选条件 ==========
     # 条件1: turnover_surge > 1（换手率高于近期均值）
@@ -195,9 +207,9 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except RuntimeError as e:
+    except RuntimeError:
         logger.exception("计算失败")  # 使用 .exception() 保留完整堆栈
         sys.exit(1)
-    except Exception as e:
+    except Exception:
         logger.exception("未预期的错误")  # 使用 .exception() 保留完整堆栈
         sys.exit(1)
