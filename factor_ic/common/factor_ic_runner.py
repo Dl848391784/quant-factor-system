@@ -7,8 +7,18 @@
 2. 封装全量/增量/跳过三种模式
 3. 简化新增因子脚本的开发成本
 
+模式判断流程（2026-05-23）：
+1. 先调用 check_data_completeness 判断模式（不需要加载数据）
+2. SKIP 模式：直接返回缓存数据（不加载全量数据，避免浪费）
+3. FULL/INCREMENTAL 模式：再加载数据执行计算
+
+增量模式职责划分（2026-05-23）：
+- incremental_update_ic 负责保存结果（内部已调用 save_ic_result）
+- factor_ic_runner 不再重复保存（避免双重写入）
+
 作者: 云瑶
 日期: 2026-05-22
+最后修改: 2026-05-23（修复模式判断顺序、职责划分、参数修正逻辑）
 """
 
 import json
@@ -30,7 +40,10 @@ from .ic_calculator import calculate_ic_with_direction_verification, calculate_i
 from .ic_result_builder import build_ic_result, build_error_result, save_ic_result, get_ic_output_path
 
 # 导入增量引擎
-from .incremental_engine import incremental_update_ic, should_use_incremental
+from .incremental_engine import incremental_update_ic, UpdateMode
+
+# 导入数据完整性检查
+from .data_completeness import check_data_completeness
 
 # 导入类型转换
 from .convert_types import convert_to_native_types
@@ -78,11 +91,12 @@ def run_factor_ic_analysis(
         IC 分析结果字典（符合 MODULE.md 输出结构统一性规范）
     
     流程:
-        1. 判断模式（全量/增量/跳过）
-        2. 加载数据
-        3. 执行计算（全量用 calculate_ic_with_direction_verification，增量用 incremental_update_ic）
-        4. 构建输出
-        5. 保存结果
+        1. 判断模式（全量/增量/跳过）- 使用 check_data_completeness，不需要加载数据
+        2. SKIP 模式：直接返回缓存数据
+        3. 加载数据（仅在 FULL/INCREMENTAL 模式）
+        4. 执行计算
+        5. 构建输出
+        6. 保存结果
     
     示例:
         # RSI 因子（直接用缓存列）
@@ -134,14 +148,49 @@ def run_factor_ic_analysis(
                 f"factor_col '{factor_col}' 不在 factor_cols {factor_cols} 中，"
                 f"自动添加以防止列缺失错误"
             )
-            factor_cols = [factor_col] + factor_cols
+            # 追加到末尾，保持原有顺序
+            factor_cols = factor_cols + [factor_col]
     
     data_source = str(factor_cache_path)
     
-    # ========== 判断模式 ==========
+    # ========== 判断模式（不需要加载数据）==========
+    # 使用 check_data_completeness 判断模式，避免 SKIP 模式也加载全量数据
     _logger.info("[模式判断] 判断更新模式...")
     
-    # 先尝试加载数据（用于判断模式）
+    # force_full 强制全量模式
+    if force_full:
+        mode = 'full'
+        missing_dates = []
+        info = {'cache_exists': False}
+        _logger.info("模式判断: 强制全量计算")
+    else:
+        mode, missing_dates, info = check_data_completeness(factor_name, logger=_logger)
+        _logger.info(f"模式判断: {mode}")
+    
+    # ========== SKIP 模式：直接返回缓存数据 ==========
+    if mode == 'skip':
+        _logger.info("[执行模式] 数据已最新，跳过计算")
+        
+        # 直接读取缓存数据返回
+        if output_path.exists():
+            with open(output_path, 'r', encoding='utf-8') as f:
+                cached_result = json.load(f)
+            cached_result['update_mode'] = 'skip'
+            _logger.info(f"✓ 返回缓存数据: {len(cached_result.get('dates', []))} 天")
+            return cached_result
+        else:
+            # 缓存文件不存在（理论上不应该发生，因为 mode='skip' 需要缓存存在）
+            _logger.warning("缓存文件不存在，返回错误结构")
+            return build_error_result(
+                factor_name=f'{factor_name}_{return_period}',
+                error_msg='缓存文件不存在（mode=skip 状态异常）',
+                return_period=return_period,
+                data_source=data_source
+            )
+    
+    # ========== 加载数据（仅在 FULL/INCREMENTAL 模式）==========
+    _logger.info("[数据加载] 加载因子和收益数据...")
+    
     try:
         factor_df, return_df, raw_metadata = load_factor_return_data(
             factor_cols=factor_cols,
@@ -170,12 +219,8 @@ def run_factor_ic_analysis(
             data_source=data_source
         )
     
-    # 判断模式
-    use_incremental = should_use_incremental(output_path, factor_df, force_full)
-    
-    # ========== 执行计算 ==========
-    if use_incremental:
-        # 增量模式
+    # ========== 增量模式处理 ==========
+    if mode == 'incremental':
         _logger.info("[执行模式] 增量更新...")
         
         # **重要修正**：复杂因子在增量模式也需要先执行自定义计算
@@ -186,6 +231,7 @@ def run_factor_ic_analysis(
             factor_df = custom_factor_calculation(factor_df, **params)
             _logger.info(f"处理后数据: {len(factor_df)} 行")
         
+        # 调用增量引擎（内部已保存结果）
         result = incremental_update_ic(
             output_path=output_path,
             factor_df_full=factor_df,
@@ -197,132 +243,87 @@ def run_factor_ic_analysis(
             min_stocks=min_stocks
         )
         
-        # 增量结果需要补充五维度判断
-        if result.get('update_mode') != 'need_full':
-            # 使用 calculate_ic_with_direction_verification 补充五维度判断
-            
-            # 检查长度一致性（防止数据不一致）
-            if len(result.get('ic_values', [])) != len(result.get('dates', [])):
-                _logger.warning(
-                    f"增量数据长度不一致: ic_values={len(result.get('ic_values', []))}, "
-                    f"dates={len(result.get('dates', []))}"
-                )
-                # 返回原始结果，不补充五维度
-                return result
-            
-            # 构造 IC 序列（dates 作为索引）
-            ic_series = pd.Series(
-                result['ic_values'],
-                index=result['dates']
-            )
-            
-            # 过滤 None 得到有效 IC
-            valid_ic = ic_series[ic_series.notna()]
-            valid_dates = valid_ic.index.tolist()
-            
-            if len(valid_ic) > 0:
-                # 调用统计计算（五维度判断）
-                stats_result = calculate_ic_statistics(valid_ic)
-                
-                # 补充五维度判断字段（使用 .get() 鷻加默认值防止 KeyError）
-                result['statistical_significance'] = stats_result.get('statistical_significance', {})
-                result['factor_direction'] = stats_result.get('factor_direction', {})
-                result['economic_significance'] = stats_result.get('economic_significance', {})
-                result['icir_stability'] = stats_result.get('icir_stability', {})
-                result['ic_distribution_consistency'] = stats_result.get('ic_distribution_consistency', {})
-                result['summary'] = stats_result.get('summary', '无')
-                
-                # 更新统计量（基于有效 IC，使用 .get() 防止 KeyError）
-                result['ic_mean'] = stats_result.get('ic_mean', 0.0)
-                result['ic_std'] = stats_result.get('ic_std', 0.0)
-                result['icir'] = stats_result.get('icir', 0.0)
-                result['p_value'] = stats_result.get('p_value', 1.0)
-                result['t_stat'] = stats_result.get('t_stat', 0.0)
-                result['positive_ratio'] = stats_result.get('positive_ratio', 0.0)
-                result['n_days'] = stats_result.get('n_days', 0)
-                
-                # 更新有效数据（保持一致性）
-                result['valid_dates'] = valid_dates
-                result['valid_ic_values'] = valid_ic.tolist()
-                
-                # 记录日志（使用 .get() 防止 KeyError）
-                _logger.info(
-                    f"五维度补充完成: 有效天数={len(valid_ic)}, "
-                    f"IC均值={stats_result.get('ic_mean', 0.0):.4f}, "
-                    f"ICIR={stats_result.get('icir', 0.0):.2f}"
-                )
-                
-                # 更新缓存（复用 save_ic_result 保持一致性）
-                save_ic_result(result, output_path)
+        # **注意**：incremental_update_ic 内部已保存结果
+        # 职责划分：增量引擎负责保存，factor_ic_runner 不再重复保存
+        # 避免双重写入问题
         
-        return result
+        # 检查增量引擎是否需要全量计算（缓存不存在或损坏）
+        if result.get('update_mode') == 'need_full':
+            _logger.warning("缓存不存在或损坏，转为全量计算")
+            mode = 'full'
+            # 继续执行下方的全量模式代码
+        else:
+            # 增量引擎已返回完整结果（包含五维度判断）
+            # incremental_update_ic 内部已调用 calculate_ic_statistics 计算五维度
+            # 数据来源一致性：ic_values 和 dates 来自增量引擎合并后的全量数据
+            return result
     
-    else:
-        # 全量模式
-        _logger.info("[执行模式] 全量计算...")
-        
-        # 自定义因子计算（如有）
-        if custom_factor_calculation is not None:
-            _logger.info("[因子预处理] 执行自定义因子计算...")
-            params = custom_factor_calculation_params or {}
-            factor_df = custom_factor_calculation(factor_df, **params)
-            _logger.info(f"处理后数据: {len(factor_df)} 行")
-        
-        # 计算 IC（五维度判断）
-        _logger.info("[IC 计算] 计算 IC（含五维度判断）...")
-        
-        try:
-            ic_result = calculate_ic_with_direction_verification(
-                factor_df=factor_df,
-                return_df=return_df,
-                factor_col=factor_col,
-                return_col=return_col,
-                date_col='date',
-                asset_col='asset',
-                min_stocks=min_stocks,
-                logger=_logger
-            )
-            
-            # 使用 .get() 防止 KeyError，保持与增量模式一致
-            _logger.info(f"IC 均值: {ic_result.get('ic_mean', 0.0):.4f}")
-            _logger.info(f"ICIR: {ic_result.get('icir', 0.0):.2f}")
-            # 五维度字段嵌套访问需双重保护（get 默认 {}，或 None 时 fallback {}）
-            stats_sig = ic_result.get('statistical_significance') or {}
-            t_stat = stats_sig.get('t_stat', 0.0)
-            _logger.info(f"t 统计量: {t_stat:.2f}")
-            
-        except Exception as e:
-            _logger.error(f"IC 计算失败: {e}")
-            return build_error_result(
-                factor_name=f'{factor_name}_{return_period}',
-                error_msg=f'IC 计算失败: {e}',
-                return_period=return_period,
-                data_source=data_source
-            )
-        
-        # 构建完整结果
-        _logger.info("[结果构建] 构建完整输出结构...")
-        
-        result = build_ic_result(
-            ic_result=ic_result,
-            raw_metadata=raw_metadata,
-            factor_name=f'{factor_name}_{return_period}',
-            return_period=return_period,
-            data_source=data_source,
+    # ========== 全量模式 ==========
+    # 注意：此分支也处理增量模式转全量模式的情况
+    _logger.info("[执行模式] 全量计算...")
+    
+    # 自定义因子计算（如有）
+    if custom_factor_calculation is not None:
+        _logger.info("[因子预处理] 执行自定义因子计算...")
+        params = custom_factor_calculation_params or {}
+        factor_df = custom_factor_calculation(factor_df, **params)
+        _logger.info(f"处理后数据: {len(factor_df)} 行")
+    
+    # 计算 IC（五维度判断）
+    _logger.info("[IC 计算] 计算 IC（含五维度判断）...")
+    
+    try:
+        ic_result = calculate_ic_with_direction_verification(
+            factor_df=factor_df,
+            return_df=return_df,
             factor_col=factor_col,
-            update_mode='full'
+            return_col=return_col,
+            date_col='date',
+            asset_col='asset',
+            min_stocks=min_stocks,
+            logger=_logger
         )
         
-        # 保存
-        save_ic_result(result, output_path)
+        # 使用 .get() 防止 KeyError，保持与增量模式一致
+        _logger.info(f"IC 均值: {ic_result.get('ic_mean', 0.0):.4f}")
+        _logger.info(f"ICIR: {ic_result.get('icir', 0.0):.2f}")
+        # 五维度字段嵌套访问需双重保护（get 默认 {}，或 None 时 fallback {}）
+        stats_sig = ic_result.get('statistical_significance') or {}
+        t_stat = stats_sig.get('t_stat', 0.0)
+        _logger.info(f"t 统计量: {t_stat:.2f}")
         
-        _logger.info("=" * 60)
-        # 使用 .get() 双重保护防止 KeyError（与日志访问规范一致）
-        valid_days = result.get('sample_stats', {}).get('valid_days', 0)
-        _logger.info(f"完成！共计算 {valid_days} 天有效 IC")
-        _logger.info("=" * 60)
-        
-        return result
+    except Exception as e:
+        _logger.error(f"IC 计算失败: {e}")
+        return build_error_result(
+            factor_name=f'{factor_name}_{return_period}',
+            error_msg=f'IC 计算失败: {e}',
+            return_period=return_period,
+            data_source=data_source
+        )
+    
+    # 构建完整结果
+    _logger.info("[结果构建] 构建完整输出结构...")
+    
+    result = build_ic_result(
+        ic_result=ic_result,
+        raw_metadata=raw_metadata,
+        factor_name=f'{factor_name}_{return_period}',
+        return_period=return_period,
+        data_source=data_source,
+        factor_col=factor_col,
+        update_mode='full'
+    )
+    
+    # 保存
+    save_ic_result(result, output_path)
+    
+    _logger.info("=" * 60)
+    # 使用 .get() 双重保护防止 KeyError（与日志访问规范一致）
+    valid_days = result.get('sample_stats', {}).get('valid_days', 0)
+    _logger.info(f"完成！共计算 {valid_days} 天有效 IC")
+    _logger.info("=" * 60)
+    
+    return result
 
 
 # ========== 快捷函数 ==========
@@ -371,8 +372,6 @@ def run_complex_factor_ic(
     
     适用于需要预处理因子值的场景（如 KDJ、布林带）
     
-    注意：custom_factor_calculation 为必须参数，若无需自定义计算请使用 run_simple_factor_ic
-    
     参数:
         factor_name: 因子名称
         factor_col: 最终因子列名
@@ -394,13 +393,6 @@ def run_complex_factor_ic(
             factor_cols=['close', 'high', 'low'],
             custom_factor_calculation=calculate_kdj_j
         )
-    
-    错误示例（无需自定义计算时应使用 run_simple_factor_ic）:
-        # 错误：custom_factor_calculation 缺失
-        result = run_complex_factor_ic('rsi', 'rsi_6', ['rsi_6'])  # TypeError
-        
-        # 正确：使用 run_simple_factor_ic
-        result = run_simple_factor_ic('rsi', 'rsi_6')
     """
     return run_factor_ic_analysis(
         factor_name=factor_name,
