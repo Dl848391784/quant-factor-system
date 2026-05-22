@@ -187,60 +187,26 @@ def calculate_ic_with_direction_verification(
     ic_series = ic_series.sort_index()
     
     # ========== 计算统计量 ==========
-    ic_mean = ic_series.mean()
-    ic_std = ic_series.std()
+    # 使用 calculate_ic_statistics 公共函数，避免代码重复
+    stats_result = calculate_ic_statistics(ic_series, logger)
     
-    # ICIR 使用 |ic_mean| / ic_std，统一判断标准（反向因子也适用）
-    # 注意：除零防护与 calculate_ic_statistics 保持一致（三元表达式）
-    icir = abs(ic_mean) / ic_std if ic_std > 0 else 0.0
+    # 从 stats_result 中提取结果（保持原有返回结构）
+    ic_mean = stats_result['ic_mean']
+    ic_std = stats_result['ic_std']
+    icir = stats_result['icir']
+    p_value = stats_result['p_value']
+    p_value_str = stats_result['p_value_display']
+    t_stat = stats_result['t_stat']
     
-    n = len(ic_series)
+    statistical_significance = stats_result['statistical_significance']
+    factor_direction = stats_result['factor_direction']
+    economic_significance = stats_result['economic_significance']
+    icir_stability = stats_result['icir_stability']
+    ic_distribution_consistency = stats_result['ic_distribution_consistency']
     
-    # Newey-West 调整的 t 统计量和 p 值（自动选择 lag）
-    t_stat, p_value, nw_lag = _newey_west_t_stat(ic_series)
-    
-    # IC > 0 的比例
-    positive_count = (ic_series > 0).sum()
-    positive_ratio = positive_count / n
-    
-    # ========== 五维度判断（独立输出）==========
-    # 维度1: 统计显著性
-    statistical_significance = _assess_statistical_significance(
-        p_value, t_stat, nw_lag, p_threshold=0.05, t_threshold=1.96
-    )
-    
-    # 维度2: 方向判断（ic_mean符号）
-    factor_direction = _assess_factor_direction(ic_mean)
-    
-    # 维度3: 经济显著性
-    economic_significance = _assess_economic_significance(
-        abs(ic_mean), weak_threshold=0.03, strong_threshold=0.05
-    )
-    
-    # 维度4: ICIR 稳定性
-    icir_stability = _assess_icir_stability(icir)
-    
-    # 维度5: IC 分布一致性
-    ic_distribution_consistency = _assess_ic_distribution_consistency(
-        positive_ratio, factor_direction['ic_mean_sign']
-    )
-    
-    # ========== 生成摘要 ==========
-    # p_value 格式化（避免 0.0 显示问题）
-    p_value_str = _format_p_value(p_value)
-    
-    # summary 格式规范：positive_ratio 独立描述，不嵌入一致性判断文字
-    # 一致性判断在 ic_distribution_consistency 中独立输出
-    summary = (
-        f"IC均值={ic_mean:.4f}, "
-        f"ICIR={icir:.2f}, "
-        f"p值={p_value_str}, "
-        f"方向={factor_direction['ic_mean_sign']}, "
-        f"统计显著={statistical_significance['is_significant']}, "
-        f"经济显著={economic_significance['level']}, "
-        f"ICIR稳定={icir_stability['level']}, "
-        f"正比例={positive_ratio:.1%}（IC>0天数占比）"
-    )
+    positive_ratio = stats_result['positive_ratio']
+    n = stats_result['n_days']
+    summary = stats_result['summary']
     
     return {
         'ic_series': ic_series,
@@ -385,6 +351,12 @@ def _newey_west_t_stat(ic_series: pd.Series, lag: int = None) -> Tuple[float, fl
         nw_var += 2 * weight * cov_k  # 注意乘以 2（对称性：γ_k = γ_{-k}）
     
     if nw_var <= 0:
+        # 回退使用样本方差，并记录警告
+        if logger:
+            logger.warning(
+                f"Newey-West 方差为负或零（{nw_var:.6f}），IC序列可能存在强负自相关，"
+                f"回退使用样本方差，统计显著性判断可信度下降"
+            )
         nw_var = np.var(ic_series, ddof=1)
     
     # 调整后的标准误
@@ -627,39 +599,43 @@ def _assess_ic_distribution_consistency(positive_ratio: float, ic_mean_sign: str
             'conclusion': 'IC均值接近零，分布均衡'
         }
     
-    # 一致性判断（先判断 balanced，避免边界重叠被 A/B 覆盖）
-    # 条件顺序：balanced → consistent → contradictory
-    if abs(positive_ratio - 0.5) <= 0.011:  # 浮点容差，覆盖 [49%, 51%]
+    # 一致性判断（统一阈值：balanced 覆盖 [0.49, 0.51]，contradictory 条件互斥）
+    # 条件顺序：balanced → consistent → contradictory → else（边界过渡）
+    # 阈值说明：
+    # - balanced: positive_ratio ∈ [0.49, 0.51]（约 ±1% 容差）
+    # - contradictory: positive_ratio < 0.49 或 > 0.51，且方向矛盾
+    if positive_ratio >= 0.49 and positive_ratio <= 0.51:  # balanced 覆盖 [49%, 51%]
         is_consistent = True
         consistency_type = 'balanced'
         distribution_hint = f'IC分布均衡（正{positive_ratio:.1%}，负{negative_ratio:.1%}）'
         conclusion = '均衡：IC正负各半，均值由极值决定'
-    elif positive_ratio < 0.5 and ic_mean_sign == 'negative':  # 严格 <，0.5 已被 balanced 覆盖
+    elif positive_ratio < 0.49 and ic_mean_sign == 'negative':  # consistent：<49% 且负方向
         is_consistent = True
         consistency_type = 'consistent'
         distribution_hint = f'IC分布偏向负值（{negative_ratio:.1%}天数IC<0）'
         conclusion = '一致：正比例<50%对应负方向，IC分布正常'
-    elif positive_ratio > 0.5 and ic_mean_sign == 'positive':  # 严格 >，0.5 已被 balanced 覆盖
+    elif positive_ratio > 0.51 and ic_mean_sign == 'positive':  # consistent：>51% 且正方向
         is_consistent = True
         consistency_type = 'consistent'
         distribution_hint = f'IC分布偏向正值（{positive_ratio:.1%}天数IC>0）'
         conclusion = '一致：正比例>50%对应正方向，IC分布正常'
-    elif positive_ratio < 0.49 and ic_mean_sign == 'positive':
+    elif positive_ratio < 0.49 and ic_mean_sign == 'positive':  # contradictory：<49% 但正方向
         is_consistent = False
         consistency_type = 'contradictory'
         distribution_hint = f'IC分布异常：均值正但{negative_ratio:.1%}天数IC<0（少数大幅正值拉高均值）'
         conclusion = '矛盾：均值正但多数天负，存在大幅正值偏度，需检查异常交易日'
-    elif positive_ratio > 0.51 and ic_mean_sign == 'negative':
+    elif positive_ratio > 0.51 and ic_mean_sign == 'negative':  # contradictory：>51% 但负方向
         is_consistent = False
         consistency_type = 'contradictory'
         distribution_hint = f'IC分布异常：均值负但{positive_ratio:.1%}天数IC>0（少数大幅负值拉低均值）'
         conclusion = '矛盾：均值负但多数天正，存在大幅负值偏度，需检查异常交易日'
     else:
-        # 其他边界情况（如 0.49-0.51 区间但非 balanced）
+        # 边界过渡区间（如 positive_ratio=0.495 时 ic_mean_sign='positive'）
+        # 此时不满足 balanced（超出 ±1%）也不满足 contradictory（未超出阈值）
         is_consistent = True
         consistency_type = 'consistent'
-        distribution_hint = f'IC分布偏向{ic_mean_sign}方向'
-        conclusion = f'一致：分布与方向{ic_mean_sign}吻合'
+        distribution_hint = f'IC分布偏向{ic_mean_sign}方向（边界过渡）'
+        conclusion = f'一致：分布与方向{ic_mean_sign}吻合（边界过渡区间）'
     
     return {
         'positive_ratio': round(positive_ratio, 4),
@@ -697,53 +673,6 @@ def _format_p_value(p_value: float) -> str:
         return f"{p_value:.2e}"  # 科学计数法，保留精度
     else:
         return f"{p_value:.4f}"  # 小数格式
-
-
-if __name__ == "__main__":
-    # 简单测试
-    import numpy as np
-    
-    # 创建 logger（__main__ 测试场景）
-    logger = get_logger(__name__)
-    
-    np.random.seed(42)
-    dates = pd.date_range('2025-01-01', periods=20, freq='D')
-    assets = [f'00000{i}.SZ' for i in range(1, 11)]
-    
-    factor_rows = []
-    return_rows = []
-    
-    for date in dates:
-        for asset in assets:
-            # RSI 随机生成
-            rsi = np.random.uniform(20, 80)
-            # 未来收益与 RSI 负相关（模拟反向因子）
-            forward_return = -0.001 * rsi + np.random.normal(0, 0.02)
-            
-            factor_rows.append({
-                'date': date,
-                'asset': asset,
-                'rsi_6': rsi
-            })
-            return_rows.append({
-                'date': date,
-                'asset': asset,
-                'forward_return': forward_return
-            })
-    
-    factor_df = pd.DataFrame(factor_rows)
-    return_df = pd.DataFrame(return_rows)
-    
-    result = calculate_ic_with_direction_verification(
-        factor_df, return_df, factor_col='rsi_6', logger=logger
-    )
-    
-    logger.info("=" * 60)
-    logger.info("因子方向验证 IC 分析")
-    logger.info("=" * 60)
-    logger.info(f"IC 均值:     {result['ic_mean']:.4f}")
-    logger.info(f"IC 标准差:   {result['ic_std']:.4f}")
-    logger.info(f"ICIR:        {result['icir']:.2f}")
 
 
 def calculate_ic_statistics(ic_series: pd.Series, logger=None) -> Dict:
@@ -788,7 +717,6 @@ def calculate_ic_statistics(ic_series: pd.Series, logger=None) -> Dict:
     if logger is None:
         logger = get_logger(__name__)
     
-    # 复用 _calculate_ic_statistics 函数
     ic_mean = ic_series.mean()
     ic_std = ic_series.std()
     
@@ -869,6 +797,58 @@ def calculate_ic_statistics(ic_series: pd.Series, logger=None) -> Dict:
 # 行业中性化函数（PROJECT.md 规范）
 # ============================================================
 
+
+if __name__ == "__main__":
+    # 简单测试
+    import numpy as np
+    
+    # 创建 logger（__main__ 测试场景）
+    logger = get_logger(__name__)
+    
+    np.random.seed(42)
+    dates = pd.date_range('2025-01-01', periods=20, freq='D')
+    assets = [f'00000{i}.SZ' for i in range(1, 11)]
+    
+    factor_rows = []
+    return_rows = []
+    
+    for date in dates:
+        for asset in assets:
+            # RSI 随机生成
+            rsi = np.random.uniform(20, 80)
+            # 未来收益与 RSI 负相关（模拟反向因子）
+            forward_return = -0.001 * rsi + np.random.normal(0, 0.02)
+            
+            factor_rows.append({
+                'date': date,
+                'asset': asset,
+                'rsi_6': rsi
+            })
+            return_rows.append({
+                'date': date,
+                'asset': asset,
+                'forward_return': forward_return
+            })
+    
+    factor_df = pd.DataFrame(factor_rows)
+    return_df = pd.DataFrame(return_rows)
+    
+    result = calculate_ic_with_direction_verification(
+        factor_df, return_df, factor_col='rsi_6', logger=logger
+    )
+    
+    logger.info("=" * 60)
+    logger.info("因子方向验证 IC 分析")
+    logger.info("=" * 60)
+    logger.info(f"IC 均值:     {result['ic_mean']:.4f}")
+    logger.info(f"IC 标准差:   {result['ic_std']:.4f}")
+    logger.info(f"ICIR:        {result['icir']:.2f}")
+
+
+# ============================================================
+# 行业中性化函数（PROJECT.md 规范）
+# ============================================================
+
 def industry_neutral_rank(
     factor_df: pd.DataFrame,
     factor_col: str,
@@ -900,8 +880,9 @@ def industry_neutral_rank(
             f"请先补充行业数据后再使用行业中性化"
         )
     
-    # 创建行业内排名列
+    # 重置索引，确保索引唯一且连续，避免 SettingWithCopyWarning
     factor_df = factor_df.copy()
+    factor_df = factor_df.reset_index(drop=True)
     factor_df['industry_rank'] = float('nan')
     
     # 按日期和行业分组排名
@@ -912,6 +893,7 @@ def industry_neutral_rank(
                 continue
             
             # 计算行业内百分位排名
+            # 使用 iloc 按位置写入，避免索引对齐问题
             rank_pct = ind_data[factor_col].rank(pct=True)
             factor_df.loc[ind_data.index, 'industry_rank'] = rank_pct
     
@@ -974,8 +956,8 @@ def industry_neutral_residual(
         # 残差即为中性化因子
         residual = valid_industries[factor_col] - model.predict(industry_dummies)
         
-        # zip 返回二元组，用两个变量解包（idx 通过 enumerate 获取）
-        for idx, (asset, res) in enumerate(zip(valid_industries[asset_col].values, residual)):
+        # zip 返回二元组，用两个变量解包
+        for asset, res in zip(valid_industries[asset_col].values, residual):
             results.append({
                 date_col: date,
                 asset_col: asset,
