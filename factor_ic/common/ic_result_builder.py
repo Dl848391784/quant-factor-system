@@ -79,7 +79,9 @@ def build_ic_result(
     ic_distribution_consistency = ic_result['ic_distribution_consistency']
     
     # ========== 构建日期范围 ==========
-    dates_from_series = [str(d) for d in ic_series.index]
+    # 显式排序 ic_series.index，消除对调用方的隐式依赖
+    # 确保 [0] 取最早日期、[-1] 取最晚日期
+    dates_from_series = [str(d) for d in ic_series.sort_index().index]
     period_start = dates_from_series[0] if dates_from_series else raw_metadata.get('period_start', '')
     period_end = dates_from_series[-1] if dates_from_series else raw_metadata.get('period_end', '')
     
@@ -120,9 +122,9 @@ def build_ic_result(
     # 计算 rolling_ic_mean（20日窗口，min_periods=10）— 复用公共函数
     rolling_ic_mean = build_rolling_ic_mean(ic_series)
     
-    # ========== 构建 n_assets ==========
-    # 从 ic_series 无法直接获取，需要外部传入或使用 raw_metadata
-    n_assets = raw_metadata.get('avg_stocks_per_day', 0)
+    # ========== 构建 avg_stocks_per_day ==========
+    # 从 raw_metadata 获取每日平均股票数
+    avg_stocks_per_day = raw_metadata.get('avg_stocks_per_day', 0)
     
     # ========== 构建 summary ==========
     summary = {
@@ -162,7 +164,7 @@ def build_ic_result(
         'ic_values': ic_values,
         'rolling_ic_mean': rolling_ic_mean,
         'positive_ratio': positive_ratio,
-        'n_assets': n_assets,
+        'avg_stocks_per_day': avg_stocks_per_day,  # 与 sample_stats 字段语义一致
         'summary': summary,
         'factor_stats': factor_stats,
         'update_mode': update_mode,
@@ -202,7 +204,9 @@ def build_sample_stats(
     """
     if 'date' not in factor_df.columns:
         raise KeyError("factor_df 必须包含 'date' 列，当前列: %s" % list(factor_df.columns))
-    avg_stocks_per_day = int(factor_df.groupby('date').size().mean())
+    
+    # 统一使用 round(x, 1) 保留一位小数，与 build_ic_result 中的 raw_metadata 值精度一致
+    avg_stocks_per_day = round(factor_df.groupby('date').size().mean(), 1)
     
     return {
         'total_days': raw_metadata['total_days'],
@@ -308,7 +312,7 @@ def build_error_result(
         },
         'icir_stability': {
             'icir': None,
-            'threshold_used': {'excellent': 2.0, 'good': 1.0},
+            'threshold_used': {'usable': 0.5, 'good': 1.0, 'excellent': 2.0},  # 与正常结果一致
             'level': 'none',
             'is_stable': False,
             'conclusion': '数据加载失败，无法判断ICIR稳定性'
@@ -325,7 +329,7 @@ def build_error_result(
         'ic_values': [],
         'rolling_ic_mean': [],
         'positive_ratio': None,
-        'n_assets': 0,
+        'avg_stocks_per_day': 0,  # 与正常结果字段名一致
         'summary': {
             'ic_performance': '数据加载失败',
             'statistical_significance': '无法检验',
@@ -349,7 +353,8 @@ def _format_ic_performance(ic_mean: float, icir: float) -> str:
     格式化 IC 表现描述
     
     规范:
-        ICIR < 0 表示因子方向不稳定（ic_mean 与 ic_std 符号相反），需单独标注
+        ICIR 使用 abs(ic_mean)/ic_std 计算，始终为正（见 ic_calculator.py）
+        因此删除 icir < 0 判断分支
     """
     if abs(ic_mean) >= 0.05:
         level = '强'
@@ -358,15 +363,15 @@ def _format_ic_performance(ic_mean: float, icir: float) -> str:
     else:
         level = '弱'
     
-    # ICIR 分级：负值表示方向不稳定
-    if icir < 0:
-        stability = '不稳定（方向需验证）'
-    elif icir >= 2.0:
+    # ICIR 分级（ICIR 始终 >= 0）
+    if icir >= 2.0:
         stability = '优秀'
     elif icir >= 1.0:
         stability = '良好'
+    elif icir >= 0.5:
+        stability = '可用'
     else:
-        stability = '一般'
+        stability = '不足'
     
     return f'IC均值={ic_mean:.4f}（{level}），ICIR={icir:.2f}（{stability}）'
 
@@ -430,8 +435,11 @@ def save_ic_result(result: Dict, output_path: Optional[Path] = None) -> Path:
         # 从 result 中提取因子信息生成路径
         factor_name = result.get('factor_name', 'unknown')
         return_period = result.get('factor_stats', {}).get('return_period', '1d')
-        # 只处理后缀 _1d，避免误处理因子名中间的 _1d（如 my_1d_factor_1d → my_1d_factor）
-        factor_name_clean = factor_name[:-3] if factor_name.endswith('_1d') else factor_name
+        
+        # 使用 return_period 动态构造后缀，而非硬编码 _1d
+        # 处理因子名已包含收益周期后缀的情况（如 rsi_1d → rsi）
+        suffix = f'_{return_period}'
+        factor_name_clean = factor_name[:-len(suffix)] if factor_name.endswith(suffix) else factor_name
         output_path = get_ic_output_path(factor_name_clean, return_period)
     
     # 确保目录存在
