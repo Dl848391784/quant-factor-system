@@ -171,6 +171,11 @@
     - 新增"股价类数据异常检测规范"章节
     - 修复 ic_turnover_surge_1d.py：prev_close 除零防护逻辑错误
     - 核心原则：异常检测优于静默修正，prev_close=0 计算出天文数字
+24. v3.12（2026-05-23）：
+    - 新增"rolling 窗口语义规范"章节
+    - 修复 ic_turnover_surge_1d.py：surge_window rolling 包含当日语义错误
+    - 核心原则："过去几日"不含当日，使用 shift(1).rolling(N)
+    - 问题：包含当日导致因子值稀释，无法正确反映"突增"
 
 # 一、概述与基础
 
@@ -548,6 +553,55 @@ daily_return = (factor_df['close'] - prev_close) / safe_prev_close
 - 区分"正常缺失"与"数据异常"
 
 **参考：** ic_turnover_surge_1d.py 第115-129行（2026-05-23 修复）
+
+### rolling 窗口语义规范（2026-05-23新增）
+
+**核心原则："过去几日"不含当日，使用 shift(1).rolling(N) 而非 rolling(N)。**
+
+**错误示例（包含当日）：**
+
+```python
+# ❌ 错误：rolling 包含当日，当日值同时出现在分子和分母
+avg_turnover = turnover_rate.rolling(surge_window, min_periods=surge_window).mean()
+turnover_surge = turnover_rate / avg_turnover
+# 问题：
+# - 当日换手率同时出现在分子（turnover_rate）和分母（avg_turnover）
+# - 因子值被稀释，无法正确反映"突增"
+# - 极端情况：当日换手率极高，因子值永远无法超过 1
+# - 示例：turnover_rate = [1, 2, 3, 10, 5]
+#   - 第4日 avg = (3+10)/2 = 5，surge = 10/5 = 2.0（稀释）
+#   - 正确应为 avg = (1+2+3)/3 = 2，surge = 10/2 = 5.0（突增明显）
+```
+
+**正确示例（不含当日）：**
+
+```python
+# ✅ 正确：shift(1) 排除当日，rolling 只计算"过去几日"
+avg_turnover = turnover_rate.shift(1).rolling(surge_window, min_periods=surge_window).mean()
+turnover_surge = turnover_rate / avg_turnover
+# 结果：
+# - 分子：当日换手率
+# - 分母：过去几日换手率均值（不含当日）
+# - 因子值正确反映"突增"语义
+# - 示例：turnover_rate = [1, 2, 3, 10, 5]
+#   - 第4日 avg = (1+2+3)/3 = 2，surge = 10/2 = 5.0（突增明显）
+```
+
+**为何必须不含当日：**
+
+|| 原因 | 说明 |
+|------|------|
+|| 因子语义 | "过去几日"不含当日，是业界标准定义 |
+|| 避免稀释 | 当日值同时出现在分子分母，因子值被稀释 |
+|| 正确反映突增 | 不含当日才能正确反映"突增"程度 |
+|| 避免极端偏差 | 包含当日时，极高值因子永远无法超过 1 |
+
+**适用场景：**
+- 换手率突增因子（turnover_surge）
+- 均值比较因子（当日值 vs 过去均值）
+- 任何"当日 vs 历史"对比场景
+
+**参考：** ic_turnover_surge_1d.py 第90-94行（2026-05-23 修复）
 
 ### pandas 缺失值标记规范（2026-05-22新增，2026-05-23修订）
 

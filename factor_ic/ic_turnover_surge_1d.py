@@ -86,9 +86,11 @@ def calculate_turnover_surge(
     factor_df = factor_df.copy()
     
     # ========== Step 1: 计算换手率均值（局部变量）==========
-    # avg_turnover: 过去 surge_window 日换手率均值
+    # avg_turnover: 过去 surge_window 日换手率均值（不含当日）
+    # 因子定义：换手率突增 = 当日换手率 / 过去几日换手率均值
+    # "过去几日"不含当日，否则当日换手率同时出现在分子和分母，因子值被稀释
     avg_turnover = factor_df.groupby('asset')['turnover_rate'].transform(
-        lambda x: x.rolling(surge_window, min_periods=surge_window).mean()
+        lambda x: x.shift(1).rolling(surge_window, min_periods=surge_window).mean()
     )
     
     # ========== Step 2: 计算换手率突增（除零防护）==========
