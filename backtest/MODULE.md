@@ -106,6 +106,99 @@ avg_turnover_long = mean(所有多头层所有日期换手率列表)  # 多头�
 
 ---
 
+## 阈值描述规范
+
+**LAYER_THRESHOLD_DESC 格式：** 完整区间 `[lower, upper)`，必须包含下界。
+
+**示例：**
+```python
+LAYER_THRESHOLD_DESC = {
+    1: '0 ≤ RSI < 20 (超卖)',   # 完整区间，含下界
+    2: '20 ≤ RSI < 40 (含边界20)',
+    5: 'RSI ≥ 80 (含边界80)'    # 最大边界使用 ≥
+}
+```
+
+**原因：**
+- 引擎 fixed_threshold 模式执行 `[thresholds[i], thresholds[i+1])` 归入 Layer (i+1)
+- 描述必须与引擎一致，避免误导
+- RSI 理论范围 [0, 100]，实际数据可能因计算误差越界，需校验
+
+---
+
+## 路径构造规范
+
+**必须使用 `pathlib.Path`，语义清晰、不依赖文件层级假设。**
+
+**正确写法：**
+```python
+from pathlib import Path
+project_root = Path(__file__).parent.parent  # 项目根目录
+cache_dir = project_root / 'cache' / 'factor_data'
+```
+
+**错误写法：**
+```python
+os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # 两次 dirname，语义不清晰
+```
+
+**原因：**
+- 两次 `dirname` 意味着祖父目录，但语义不直观
+- 若脚本被移动或从其他目录调用，路径会静默失效
+- `Path` 的 `/` 操作符更清晰表达层级关系
+
+---
+
+## 参数显式传入规范
+
+**fixed_threshold 模式必须显式传入 `n_layers`。**
+
+**正确写法：**
+```python
+n_layers = len(config.LAYER_THRESHOLDS) - 1  # fixed_threshold 模式
+result = engine.run(
+    layer_method='fixed_threshold',
+    thresholds=config.LAYER_THRESHOLDS,
+    n_layers=n_layers,  # 显式传入
+    ...
+)
+```
+
+**错误写法：**
+```python
+result = engine.run(
+    layer_method='fixed_threshold',
+    thresholds=config.LAYER_THRESHOLDS,
+    # n_layers 未传入，依赖引擎内部覆盖
+)
+```
+
+**原因：**
+- 引擎内部会覆盖 `n_layers = len(thresholds) - 1`
+- 若将来 `run` 默认值改变或 thresholds 变长，隐式依赖会静默出错
+- 显式传入避免歧义，代码意图清晰
+
+---
+
+## 因子数据校验规范
+
+**回测脚本必须校验因子数据范围，避免越界值。**
+
+**校验逻辑：**
+```python
+factor_min = factor_df[factor_col].min()
+factor_max = factor_df[factor_col].max()
+logger.info("因子范围: %.2f ~ %.2f", factor_min, factor_max)
+
+# 越界警告（如 RSI 理论范围 [0, 100]）
+if factor_min < thresholds[0] or factor_max > thresholds[-1]:
+    logger.warning(
+        "因子值超出 thresholds 范围，建议检查因子计算或调整 thresholds"
+    )
+```
+
+---
+
 ## 输出格式
 
 待定义：
@@ -117,4 +210,4 @@ avg_turnover_long = mean(所有多头层所有日期换手率列表)  # 多头�
 
 ---
 
-*最后更新: 2026-05-22*
+*最后更新: 2026-05-23*

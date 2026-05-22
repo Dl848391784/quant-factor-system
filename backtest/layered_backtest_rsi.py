@@ -23,6 +23,7 @@ import gzip
 import pandas as pd
 from datetime import datetime
 from typing import Dict, Optional
+from pathlib import Path
 
 # 导入公共日志模块（遵循 PROJECT.md 日志规范）
 from factor_ic.common.logger_config import get_logger
@@ -59,8 +60,9 @@ class RSILayerConfig:
     
     # RSI阈值说明（边界值明确归属规则）
     # 边界值归属原则：边界值归入下一层（向上进位）
+    # 格式遵循 MODULE.md "阈值描述规范": 完整区间 [lower, upper)
     LAYER_THRESHOLD_DESC = {
-        1: 'RSI < 20 (超卖)',
+        1: '0 ≤ RSI < 20 (超卖)',
         2: '20 ≤ RSI < 40 (含边界20)',
         3: '40 ≤ RSI < 60 (含边界40)',
         4: '60 ≤ RSI < 80 (含边界60)',
@@ -88,15 +90,16 @@ def load_data_from_cache(
     
     规范:
         加载缓存全部日期数据，不截断
+        路径构造遵循 MODULE.md: 使用 Path 解析项目根目录
     """
     if cache_dir is None:
-        cache_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'cache', 'factor_data'
-        )
+        # 使用 Path 解析项目根目录（语义清晰，不依赖文件层级假设）
+        # Path(__file__).parent = backtest/，.parent.parent = 项目根目录
+        project_root = Path(__file__).parent.parent
+        cache_dir = project_root / 'cache' / 'factor_data'
     
     # 加载因子数据
-    factor_path = os.path.join(cache_dir, 'factor_data.json.gz')
+    factor_path = Path(cache_dir) / 'factor_data.json.gz'
     logger.info("加载因子数据: %s", factor_path)
     
     with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
@@ -107,7 +110,7 @@ def load_data_from_cache(
     logger.debug("因子列: %s", list(factor_df.columns))
     
     # 加载收益数据
-    return_path = os.path.join(cache_dir, 'return_data.json.gz')
+    return_path = Path(cache_dir) / 'return_data.json.gz'
     logger.info("加载收益数据: %s", return_path)
     
     with gzip.open(return_path, 'rt', encoding='utf-8') as f:
@@ -185,12 +188,15 @@ def run_rsi_layered_backtest(
         asset_col='asset'
     )
     
-    # 执行回测
+    # 执行回测（显式传入 n_layers，遵循 MODULE.md 参数显式规范）
     logger.info("执行分层回测...")
+    
+    n_layers = len(config.LAYER_THRESHOLDS) - 1  # fixed_threshold 模式
     
     result = engine.run(
         layer_method='fixed_threshold',
         thresholds=config.LAYER_THRESHOLDS,
+        n_layers=n_layers,
         factor_direction=config.FACTOR_DIRECTION,
         long_layers=config.LONG_LAYERS,
         short_layers=config.SHORT_LAYERS,
@@ -217,15 +223,14 @@ def run_rsi_layered_backtest(
     
     # 保存结果
     if output_dir is None:
-        output_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'cache', 'backtest'
-        )
+        # 使用 Path 解析项目根目录（语义清晰）
+        project_root = Path(__file__).parent.parent
+        output_dir = project_root / 'cache' / 'backtest'
     
-    os.makedirs(output_dir, exist_ok=True)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
     
     # 保存完整结果
-    output_file = os.path.join(output_dir, 'rsi_layered_backtest.json')
+    output_file = Path(output_dir) / 'rsi_layered_backtest.json'
     
     # 准备输出数据（不包含daily_records以减少文件大小）
     output_data = {
@@ -253,10 +258,11 @@ def run_rsi_layered_backtest(
     logger.info("结果已保存: %s", output_file)
     
     # 保存每日明细（压缩）
-    daily_file = os.path.join(output_dir, 'rsi_layered_backtest_daily.json.gz')
+    # 使用引擎返回的 n_days_total，避免低效 set 计算
+    daily_file = Path(output_dir) / 'rsi_layered_backtest_daily.json.gz'
     daily_data = {
         'meta': {
-            'n_days': len(set(r['date'] for r in result['daily_records'])),
+            'n_days': result['meta']['n_days_total'],
             'columns': ['date', 'layer', 'n_stocks', 'return', 'turnover']
         },
         'data': result['daily_records']
