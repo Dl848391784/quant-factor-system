@@ -1,14 +1,14 @@
 {
   "meta": {
-    "last_updated": "2026-05-21T01:00:28.715712",
+    "last_updated": "2026-05-22T01:00:37.679880",
     "source": "sina_api",
-    "total_count": 3006,
+    "total_count": 3008,
     "sh_count": 1618,
-    "sz_count": 1388,
-    "added_count": 4,
+    "sz_count": 1390,
+    "added_count": 2,
     "removed_count": 0,
     "removed_codes": [],
-    "existing_count": 3002,
+    "existing_count": 3006,
     "api_pages": 66,
     "version": "2.1"
   },
@@ -966,6 +966,12 @@
       "name": "华媒控股",
       "market": "sz",
       "updated_at": "2026-04-02"
+    },
+    {
+      "code": "000608",
+      "name": "阳光股份",
+      "market": "sz",
+      "added_at": "2026-05-22"
     },
     {
       "code": "000612",
@@ -3234,6 +3240,12 @@
       "name": "国机精工",
       "market": "sz",
       "updated_at": "2026-04-02"
+    },
+    {
+      "code": "002047",
+      "name": "宝鹰股份",
+      "market": "sz",
+      "added_at": "2026-05-22"
     },
     {
       "code": "002048",
@@ -18210,6 +18222,7 @@
     "000603",
     "000605",
     "000607",
+    "000608",
     "000612",
     "000617",
     "000619",
@@ -18588,6 +18601,7 @@
     "002044",
     "002045",
     "002046",
+    "002047",
     "002048",
     "002049",
     "002050",

@@ -158,6 +158,10 @@
     - 修复 ic_rsi_1d.py 步骤编号错误（[N/3] → [N/4]）
     - 修复 ic_rsi_1d.py 异常处理粒度过粗问题
     - 核心原则：按异常类型分开处理，保留原始异常类型信息
+21. v3.9（2026-05-23）：
+    - 补充"新增因子开发"章节：数据加载流程说明
+    - 明确 `factor_cols` 与 `additional_factor_files` 数据合并机制
+    - 核心原则：自定义计算函数可访问所有合并列
 
 # 一、概述与基础
 
@@ -202,7 +206,12 @@ factor_ic 模块负责计算各类因子的 IC（Information Coefficient）值�
 
 **新增因子开发：**
 - 简单因子：`run_simple_factor_ic('rsi', 'rsi_6')`
-- 复杂因子：`run_complex_factor_ic(factor_name, factor_col, factor_cols, custom_factor_calculation)`
+- 复杂因子：`run_complex_factor_ic(factor_name, factor_col, factor_cols, custom_factor_calculation, additional_factor_files)`
+- 数据加载流程（2026-05-23 补充）：
+  1. `factor_cols` 指定从主缓存加载的列
+  2. `additional_factor_files` 指定额外缓存文件，列会合并到 `factor_df`
+  3. 合并后的 `factor_df` 传递给 `custom_factor_calculation`
+  4. 自定义计算函数可访问所有合并列（`factor_cols` + `additional_factor_files`）
 
 ### factor_ic目录规范
 
