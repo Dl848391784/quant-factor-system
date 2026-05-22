@@ -63,7 +63,7 @@ def calculate_bollinger_pb(
     计算布林带 %B 因子（因子特有逻辑）
     
     参数:
-        factor_df: 包含 close 列的 DataFrame
+        factor_df: 包含 close、date、asset 列的 DataFrame（面板数据长格式）
         n: 移动平均周期
         k: 标差倍数
     
@@ -71,14 +71,21 @@ def calculate_bollinger_pb(
         添加 bollinger_pb 列的 DataFrame
     
     注意:
-        函数入口必须先 .copy()，避免修改原始数据
+        1. 函数入口必须先 .copy()，避免修改原始数据
+        2. 布林带是单只股票的时序指标，必须按 asset 分组后再做 rolling
+        3. 直接对整个 factor_df['close'] 做 rolling 会把不同股票价格混在一起，
+           产生完全错误的布林带
     """
     # 入口：创建副本避免副作用
     factor_df = factor_df.copy()
     
-    # 计算移动平均和标准差
-    middle = factor_df['close'].rolling(window=n).mean()
-    std_dev = factor_df['close'].rolling(window=n).std()
+    # 按股票分组计算移动平均和标准差（布林带是单股票时序指标）
+    # 先按 asset 分组，再按 date 排序，确保 rolling 计算正确
+    factor_df = factor_df.sort_values(['asset', 'date'])
+    
+    # 按 asset 分组计算滚动统计（避免跨股票混合）
+    middle = factor_df.groupby('asset', group_keys=False)['close'].rolling(window=n).mean()
+    std_dev = factor_df.groupby('asset', group_keys=False)['close'].rolling(window=n).std()
     
     # 计算布林带
     upper = middle + k * std_dev
@@ -91,8 +98,8 @@ def calculate_bollinger_pb(
     # 异常检测：明确分离异常类型（集合关系清晰）
     # - abnormal_mask: band_width < 0（异常负值，数据质量问题）
     # - narrow_band_mask: 0 <= band_width < EPSILON（过窄带宽，接近零）
-    # 集合关系：abnormal_mask ⊂ narrow_band_mask（负值 < EPSILON）
-    # 明确分离：narrow_band_mask 排除 abnormal_mask，只处理正常范围内的过窄情况
+    # 集合关系：abnormal_mask 与 narrow_band_mask 互斥（负值 vs 正值）
+    # 不存在交集：负值不可能同时 >= 0
     abnormal_mask = band_width < 0
     narrow_band_mask = (band_width >= 0) & (band_width < EPSILON)
     
@@ -161,9 +168,9 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except RuntimeError as e:
-        logger.exception("计算失败")  # 使用 .exception() 保留完整堆栈
+    except RuntimeError:
+        logger.exception("计算失败")
         sys.exit(1)
-    except Exception as e:
-        logger.exception("未预期的错误")  # 使用 .exception() 保留完整堆栈
+    except Exception:
+        logger.exception("未预期的错误")
         sys.exit(1)
