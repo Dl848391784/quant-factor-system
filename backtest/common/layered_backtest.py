@@ -9,7 +9,7 @@
 
 作者: 云瑶
 创建日期: 2026-05-19
-修订日期: 2026-05-23（修复7个代码bug + 优化docstring）
+修订日期: 2026-05-23（修复4个代码bug + 补充MODULE.md规范）
 """
 
 import sys
@@ -185,13 +185,22 @@ class LayeredBacktestEngine:
         if layer_method == 'fixed_threshold' and thresholds:
             n_layers = len(thresholds) - 1
         
-        # ========== 设置默认多空组合（依赖已修正的 n_layers）==========
+# ========== 设置默认多空组合（依赖已修正的 n_layers）==========
         # 多头：正向因子取高层，反向因子取低层
         # 空头：正向因子取低层，反向因子取高层
+        # 特殊处理：n_layers=1 时，long_layers 和 short_layers 都为 [1]
         if long_layers is None:
-            long_layers = [n_layers - 1, n_layers] if factor_direction == 'positive' else [1, 2]
+            if n_layers == 1:
+                # 单层模式：多头和空头都取唯一的层
+                long_layers = [1]
+            else:
+                long_layers = [n_layers - 1, n_layers] if factor_direction == 'positive' else [1, 2]
         if short_layers is None:
-            short_layers = [1, 2] if factor_direction == 'positive' else [n_layers - 1, n_layers]
+            if n_layers == 1:
+                # 单层模式：空头也取唯一的层（此时多空组合无意义）
+                short_layers = [1]
+            else:
+                short_layers = [1, 2] if factor_direction == 'positive' else [n_layers - 1, n_layers]
         
         # ========== 校验多空层编号不越界 ==========
         max_layer = n_layers
@@ -262,11 +271,14 @@ class LayeredBacktestEngine:
             # 记录每日结果
             for layer_id in range(1, n_layers + 1):
                 n_stocks = int((day_data['_layer'] == layer_id).sum())  # 转为int避免JSON序列化问题
+                # 安全转换：NaN → None（避免 json.dumps 抛 ValueError）
+                raw_return = layer_returns.get(layer_id, np.nan)
+                safe_return = None if pd.isna(raw_return) else float(raw_return)
                 daily_records.append({
                     'date': date,
                     'layer': int(layer_id),  # 转为int
                     'n_stocks': n_stocks,
-                    'return': layer_returns.get(layer_id, np.nan),
+                    'return': safe_return,
                     'turnover': float(turnover_rates.get(layer_id, 0.0))  # 转为float
                 })
             
@@ -307,7 +319,9 @@ class LayeredBacktestEngine:
         """
         if method == 'percentile':
             # 百分位分层
-            ranks = factor_values.rank(pct=True)
+            # 先转 float64，避免 float32 类型不一致（factor_values 可能被转为 float32）
+            factor_values_f64 = factor_values.astype('float64')
+            ranks = factor_values_f64.rank(pct=True)
             layer_assignment = np.ceil(ranks * n_layers).astype(int)
             # 处理边界（rank=1时为第n层）
             layer_assignment = layer_assignment.clip(1, n_layers)
@@ -421,6 +435,46 @@ class LayeredBacktestEngine:
         
         return turnover_rates
     
+    @staticmethod
+    def _calc_daily_ls(
+        group: pd.DataFrame,
+        long_layers: List[int],
+        short_layers: List[int]
+    ) -> pd.Series:
+        """
+        计算每日多空收益和换手率（静态方法，显式传参避免闭包捕获）
+        
+        参数:
+            group: 单日数据 DataFrame
+            long_layers: 多头组合层编号
+            short_layers: 空头组合层编号
+        
+        返回:
+            pd.Series: {'long_return', 'short_return', 'long_short_return', 'long_turnover', 'short_turnover'}
+        """
+        long_rets = group[group['layer'].isin(long_layers)]['return'].dropna()
+        short_rets = group[group['layer'].isin(short_layers)]['return'].dropna()
+        
+        # 换手率：按日期分组取均值，避免多头多层重复计次
+        long_turnover_vals = group[group['layer'].isin(long_layers)]['turnover'].dropna()
+        short_turnover_vals = group[group['layer'].isin(short_layers)]['turnover'].dropna()
+        
+        if len(long_rets) > 0 and len(short_rets) > 0:
+            return pd.Series({
+                'long_return': long_rets.mean(),
+                'short_return': short_rets.mean(),
+                'long_short_return': long_rets.mean() - short_rets.mean(),
+                'long_turnover': long_turnover_vals.mean() if len(long_turnover_vals) > 0 else 0,
+                'short_turnover': short_turnover_vals.mean() if len(short_turnover_vals) > 0 else 0
+            })
+        return pd.Series({
+            'long_return': np.nan,
+            'short_return': np.nan,
+            'long_short_return': np.nan,
+            'long_turnover': np.nan,
+            'short_turnover': np.nan
+        })
+    
     def _aggregate_results(
         self,
         daily_df: pd.DataFrame,
@@ -528,33 +582,10 @@ class LayeredBacktestEngine:
         
         # 计算多空组合收益（优化：用 groupby 替代循环）
         # 按 date 分组，计算每日多空收益和换手率
-        def calc_daily_ls(group):
-            long_rets = group[group['layer'].isin(long_layers)]['return'].dropna()
-            short_rets = group[group['layer'].isin(short_layers)]['return'].dropna()
-            
-            # 换手率：按日期分组取均值，避免多头多层重复计次
-            # 若某天多头有2层（layer4 + layer5），先取均值再整体平均
-            long_turnover_vals = group[group['layer'].isin(long_layers)]['turnover'].dropna()
-            short_turnover_vals = group[group['layer'].isin(short_layers)]['turnover'].dropna()
-            
-            if len(long_rets) > 0 and len(short_rets) > 0:
-                return pd.Series({
-                    'long_return': long_rets.mean(),
-                    'short_return': short_rets.mean(),
-                    'long_short_return': long_rets.mean() - short_rets.mean(),
-                    'long_turnover': long_turnover_vals.mean() if len(long_turnover_vals) > 0 else 0,
-                    'short_turnover': short_turnover_vals.mean() if len(short_turnover_vals) > 0 else 0
-                })
-            return pd.Series({
-                'long_return': np.nan,
-                'short_return': np.nan,
-                'long_short_return': np.nan,
-                'long_turnover': np.nan,
-                'short_turnover': np.nan
-            })
-        
-        # 应用 groupby，过滤 NaN 行（收益为 NaN 的行）
-        long_short_df = daily_df.groupby('date').apply(calc_daily_ls).dropna(subset=['long_short_return'])
+        # 使用静态方法（避免闭包捕获外部变量，显式传参）
+        long_short_df = daily_df.groupby('date').apply(
+            lambda group: self._calc_daily_ls(group, long_layers, short_layers)
+        ).dropna(subset=['long_short_return'])
         # 重置索引，保留 date 列
         if len(long_short_df) > 0:
             long_short_df = long_short_df.reset_index()
@@ -567,18 +598,22 @@ class LayeredBacktestEngine:
             ls_annual = ls_mean * 252
             ls_vol = ls_std * np.sqrt(252)
             
+            # 安全转换：NaN → None（避免 json.dumps 抛 ValueError）
+            def safe_float(val):
+                return None if pd.isna(val) else float(val)
+            
             long_short_stats = {
-                'long_return_daily': float(long_short_df['long_return'].mean()),
-                'long_return_annual': float(long_short_df['long_return'].mean() * 252),
-                'short_return_daily': float(long_short_df['short_return'].mean()),
-                'short_return_annual': float(long_short_df['short_return'].mean() * 252),
-                'long_short_return_daily': float(ls_mean),
-                'long_short_return_annual': float(ls_annual),
-                'long_short_sharpe': float(ls_annual / ls_vol) if ls_vol > 0 else None,
-                'long_short_volatility': float(ls_vol),
+                'long_return_daily': safe_float(long_short_df['long_return'].mean()),
+                'long_return_annual': safe_float(long_short_df['long_return'].mean() * 252),
+                'short_return_daily': safe_float(long_short_df['short_return'].mean()),
+                'short_return_annual': safe_float(long_short_df['short_return'].mean() * 252),
+                'long_short_return_daily': safe_float(ls_mean),
+                'long_short_return_annual': safe_float(ls_annual),
+                'long_short_sharpe': safe_float(ls_annual / ls_vol) if ls_vol > 0 else None,
+                'long_short_volatility': safe_float(ls_vol),
                 # 换手率：从每日平均换手率中取均值（已按日期分组，权重正确）
-                'avg_turnover_long': float(long_short_df['long_turnover'].mean()),
-                'avg_turnover_short': float(long_short_df['short_turnover'].mean()),
+                'avg_turnover_long': safe_float(long_short_df['long_turnover'].mean()),
+                'avg_turnover_short': safe_float(long_short_df['short_turnover'].mean()),
                 'n_days': int(len(long_short_df))  # 转 int 避免 JSON 序列化问题
             }
         

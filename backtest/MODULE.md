@@ -2,7 +2,7 @@
 
 > 本文档定义 backtest/ 目录下分层回测脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v0.4（补充 Config 类、字典 key 类型、数据完整性校验、命令行入口规范）
+> 版本: v0.5（补充单层模式、NaN安全转换、percentile类型一致性、避免闭包捕获规范）
 > 修订日期: 2026-05-23
 
 ---
@@ -350,6 +350,125 @@ def main():
 **原因：**
 - 命令行入口应返回退出码，方便 CI/CD 判断执行结果
 - 不同退出码对应不同错误类型，便于排查
+
+---
+
+## 单层模式处理规范
+
+**引擎必须处理 n_layers=1 的特殊情况，避免默认多空层越界。**
+
+**正确处理：**
+```python
+if long_layers is None:
+    if n_layers == 1:
+        # 单层模式：多头和空头都取唯一的层
+        long_layers = [1]
+    else:
+        long_layers = [n_layers - 1, n_layers] if factor_direction == 'positive' else [1, 2]
+```
+
+**错误处理：**
+```python
+# n_layers=1 时，正向因子 long_layers = [0, 1]
+# layer_id=0 触发 < 1 校验，抛出 ValueError（归咎于用户）
+long_layers = [n_layers - 1, n_layers] if factor_direction == 'positive' else [1, 2]
+```
+
+**原因：**
+- n_layers=1 时，`[n_layers - 1, n_layers] = [0, 1]`
+- layer_id=0 越界（有效范围 [1, n_layers]），但错误信息归咎于用户
+- 单层模式多空组合无意义，应显式处理避免误导
+
+---
+
+## NaN 安全转换规范
+
+**JSON 序列化前必须将 NaN 替换为 None，避免 `json.dumps` 抛 ValueError。**
+
+**正确写法：**
+```python
+def safe_float(val):
+    """NaN → None，避免 json.dumps 抛 ValueError"""
+    return None if pd.isna(val) else float(val)
+
+long_short_stats = {
+    'long_return_daily': safe_float(long_short_df['long_return'].mean()),
+    ...
+}
+```
+
+**错误写法：**
+```python
+long_short_stats = {
+    'long_return_daily': float(long_short_df['long_return'].mean()),  # NaN 会抛 ValueError
+    ...
+}
+```
+
+**原因：**
+- `float(np.nan)` 产生 `nan`，JSON 不支持 NaN
+- `json.dumps({'val': nan})` 抛 `ValueError: Out of range float values are not JSON compliant`
+- 使用 `pd.isna()` 检测 NaN，替换为 None（JSON 支持 `null`）
+
+---
+
+## percentile 类型一致性规范
+
+**百分位分层前必须将 factor_values 转为 float64，避免 float32 类型不一致。**
+
+**正确写法：**
+```python
+# 先转 float64，避免 float32 类型不一致（factor_values 可能被转为 float32）
+factor_values_f64 = factor_values.astype('float64')
+ranks = factor_values_f64.rank(pct=True)
+layer_assignment = np.ceil(ranks * n_layers).astype(int)
+```
+
+**错误写法：**
+```python
+ranks = factor_values.rank(pct=True)  # float32 可能导致类型不一致
+layer_assignment = np.ceil(ranks * n_layers).astype(int)
+```
+
+**原因：**
+- 内存优化时 `factor_values` 可能被转为 `float32`
+- `rank(pct=True)` 后与 `n_layers` 计算，类型不一致可能导致精度问题
+- 显式转 `float64` 确保 rank 计算精度
+
+---
+
+## 避免闭包捕获规范
+
+**groupby 内部函数必须使用静态方法或独立函数，显式传参避免闭包捕获外部变量。**
+
+**正确写法：**
+```python
+@staticmethod
+def _calc_daily_ls(group: pd.DataFrame, long_layers: List[int], short_layers: List[int]) -> pd.Series:
+    """计算每日多空收益和换手率（静态方法，显式传参）"""
+    long_rets = group[group['layer'].isin(long_layers)]['return'].dropna()
+    ...
+
+# 调用
+long_short_df = daily_df.groupby('date').apply(
+    lambda group: self._calc_daily_ls(group, long_layers, short_layers)
+)
+```
+
+**错误写法：**
+```python
+# 闭包捕获 long_layers/short_layers
+def calc_daily_ls(group):
+    long_rets = group[group['layer'].isin(long_layers)]['return'].dropna()  # 捕获外部变量
+    ...
+
+long_short_df = daily_df.groupby('date').apply(calc_daily_ls)
+```
+
+**原因：**
+- 闭包捕获外部变量（long_layers/short_layers），存在可维护性风险
+- 若外部变量被修改，闭包行为不可预期
+- 静态方法显式传参，代码意图清晰，便于测试和复用
 
 ---
 
