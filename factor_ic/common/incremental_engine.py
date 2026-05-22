@@ -39,19 +39,26 @@ from .ic_calculator import (
 # 导入类型转换
 from .convert_types import convert_to_native_types
 
+# 导入日期标准化函数（复用公共逻辑，避免重复实现）
+from .data_completeness import _normalize_dates
+
 # 初始化 logger
 logger = get_logger(__name__)
 
 
 def get_cache_latest_date(cache_path: Path) -> Optional[str]:
     """
-    获取缓存最新日期
+    获取缓存最新日期（复用 data_completeness 日期标准化逻辑）
     
     参数:
-        cache_path: IC 结果缓存路径
+        cache_path: IC 结果缓存路径（直接传入 Path，而非因子名）
     
     返回:
         最新日期字符串（YYYY-MM-DD），若缓存不存在则返回 None
+    
+    设计说明:
+        复用 _normalize_dates 函数，确保日期格式标准化（去重、排序）
+        与 data_completeness.py 中同名函数职责不同（参数签名不同）
     """
     if not cache_path.exists():
         return None
@@ -64,7 +71,10 @@ def get_cache_latest_date(cache_path: Path) -> Optional[str]:
         if not dates:
             return None
         
-        return dates[-1]  # 返回最后一个日期（已排序）
+        # 使用公共函数标准化日期（确保 YYYY-MM-DD 格式，去重排序）
+        dates = _normalize_dates(dates)
+        
+        return dates[-1] if dates else None
     
     except Exception:
         return None
@@ -233,21 +243,22 @@ def merge_ic_data(
     # 使用字典去重（新值覆盖旧值）
     date_ic_map = {}
     
-    # 先写入历史值（过滤 None）
+    # 先写入历史值（保留 None，维持日期与 IC 值的对应关系）
     for date, ic in zip(existing_dates, existing_ic_values):
-        if ic is not None:
-            date_ic_map[date] = ic
+        date_ic_map[date] = ic  # 保留 None
     
-    # 再写入新值（覆盖旧值）
+    # 再写入新值（覆盖旧值，保留 None）
     for date, ic in zip(new_dates, new_ic_values):
-        if ic is not None:
-            date_ic_map[date] = ic
+        date_ic_map[date] = ic  # 新值覆盖，保留 None
     
-    # 按日期排序
+    # 按日期排序（包含全部日期）
     all_dates = sorted(date_ic_map.keys())
-    all_ic_values = [date_ic_map[d] for d in all_dates]
+    all_ic_values = [date_ic_map[d] for d in all_dates]  # 包含 None
     
-    logger.info(f"合并后总计: {len(all_dates)} 天")
+    # 统计有效 IC 数量（用于日志）
+    valid_count = len([v for v in all_ic_values if v is not None])
+    
+    logger.info(f"合并后总计: {len(all_dates)} 天（{valid_count} 天有效 IC）")
     
     return all_dates, all_ic_values, merge_info
 
@@ -347,19 +358,20 @@ def incremental_update_ic(
     返回:
         增量更新结果字典
     
-    流程:
-        1. 读取现有缓存 [1/5]
-        2. 确定缺失日期 [2/5]
-        3. 计算缺失日期 IC [3/5]
-        4. 合并数据 [4/5]
-        5. 重算统计并保存 [5/5]
+    流程（6 步）:
+        1. 读取现有缓存 [1/6]
+        2. 确定缺失日期 [2/6]
+        3. 计算缺失日期 IC [3/6]
+        4. 合并数据 [4/6]
+        5. 重算统计指标 [5/6]
+        6. 构建输出并保存 [6/6]
     """
     logger.info("=" * 40)
     logger.info(f"增量更新: {factor_name}")
     logger.info("=" * 40)
     
     # 1. 读取现有缓存
-    logger.info("[1/5] 读取现有缓存...")
+    logger.info("[1/6] 读取现有缓存...")
     try:
         existing_data, existing_dates, existing_ic_values = read_existing_cache(output_path)
         logger.info(f"现有数据: {len(existing_dates)} 天")
@@ -372,7 +384,7 @@ def incremental_update_ic(
         return {'update_mode': 'need_full', 'reason': 'cache_not_found'}
     
     # 2. 确定缺失日期
-    logger.info("[2/5] 确定缺失日期...")
+    logger.info("[2/6] 确定缺失日期...")
     cache_dates = set(existing_dates)
     all_factor_dates = set(factor_df_full['date'].unique())
     
@@ -386,7 +398,7 @@ def incremental_update_ic(
     logger.info(f"示例: {missing_dates[:5]}")
     
     # 3. 计算缺失日期 IC
-    logger.info("[3/5] 计算缺失日期 IC...")
+    logger.info("[3/6] 计算缺失日期 IC...")
     new_dates, new_ic_values, diagnostics = calculate_missing_dates_ic(
         factor_df_full=factor_df_full,
         return_df_full=return_df_full,
@@ -401,7 +413,7 @@ def incremental_update_ic(
         return existing_data
     
     # 4. 合并数据
-    logger.info("[4/5] 合并数据...")
+    logger.info("[4/6] 合并数据...")
     all_dates, all_ic_values, merge_info = merge_ic_data(
         existing_dates=existing_dates,
         existing_ic_values=existing_ic_values,
@@ -409,11 +421,11 @@ def incremental_update_ic(
         new_ic_values=new_ic_values
     )
     
-    # 5. 重算统计并保存
-    logger.info("[5/5] 重算统计并保存...")
+    # 5. 重算统计指标
+    logger.info("[5/6] 重算统计指标...")
     stats = recalculate_statistics(all_dates, all_ic_values)
     
-    # 6. 构建输出（与 build_ic_result 结构一致）
+    # 6. 构建输出并保存
     # 使用 calculate_ic_statistics 返回的五维度判断结果
     valid_dates = [all_dates[i] for i in stats['valid_indices']]
     valid_ic = [all_ic_values[i] for i in stats['valid_indices'] if all_ic_values[i] is not None]
