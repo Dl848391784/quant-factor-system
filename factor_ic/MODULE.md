@@ -1,9 +1,9 @@
 # factor_ic 模块规范
 
-> 版本: v3.8（精简版）
+> 版本: v3.13
 > 创建时间: 2026-05-19
 > 重构时间: 2026-05-22
-> 最后更新: 2026-05-23 (新增主函数数据加载异常处理规范、修复步骤编号错误)
+> 最后更新: 2026-05-22 (从 PROJECT.md 迁移公共模块强制复用规范、公共模块日志传递规范)
 
 ## 快速参考
 
@@ -176,6 +176,10 @@
     - 修复 ic_turnover_surge_1d.py：surge_window rolling 包含当日语义错误
     - 核心原则："过去几日"不含当日，使用 shift(1).rolling(N)
     - 问题：包含当日导致因子值稀释，无法正确反映"突增"
+25. v3.13（2026-05-22）：
+    - 从 PROJECT.md 迁移"公共模块强制复用规范"章节（约130行）
+    - 从 PROJECT.md 迁移"公共模块日志传递规范"章节（约75行）
+    - 新增文档层级判断约束（新增规范时必须判断层级）
 
 # 一、概述与基础
 
@@ -234,6 +238,226 @@ factor_ic 模块负责计算各类因子的 IC（Information Coefficient）值�
 **数据来源：** 必须来自 `data_fetchers/` 缓存，禁止在脚本中拉取数据。
 
 **输出路径：** `factor_ic/result/ic_<因子名>_<周期>_analysis_result.json`
+
+---
+
+## 公共模块强制复用规范（2026-05-22新增）
+
+### 核心原则
+
+**目录下有公共模块就必须使用公共模块，绝对禁止脚本自行实现一遍！**
+
+这是抽取公共模块的根本目的，违背此原则等于公共模块毫无意义。
+
+### 强制规则
+
+```
+❌ 目录下有 common/ 公共模块，脚本仍手写相同逻辑
+❌ 公共模块已封装主流程（如 run_complex_factor_ic），脚本自行实现三模式分支
+❌ 公共模块已封装数据加载，脚本自行实现 gzip 解压 + JSON 加载
+❌ 公共模块已封装结果构建，脚本自行拼接输出字典
+❌ 跨目录调用公共模块（factor_ic/ 脚本调用 backtest/common/）
+```
+
+### 正确做法
+
+```
+✅ 开发前先检查目录下 common/ 是否有可复用函数
+✅ 公共模块已封装的逻辑，直接调用，不重复实现
+✅ 仅实现因子特有的计算逻辑（如布林带、KDJ 公式）
+✅ 主流程、数据加载、结果构建、保存逻辑全部复用公共模块
+```
+
+### 检查清单
+
+```
+□ 目录下是否有 common/ 子目录？
+□ common/ 是否有主入口函数（如 run_xxx_factor_ic）？
+□ common/ 是否有数据加载函数（如 load_factor_return_data）？
+□ common/ 是否有结果构建函数（如 build_ic_result）？
+□ common/ 是否有保存函数（如 save_ic_result）？
+□ 如有以上函数，直接调用，禁止自行实现
+```
+
+### 违反示例
+
+```python
+# ❌ 错误：脚本手写主流程（三模式分支），公共模块已有 run_complex_factor_ic
+
+def generate_bollinger_pb_ic_data(...):
+    # 手写模式判断
+    mode = should_use_incremental(...)
+    
+    # 手写 SKIP 分支
+    if mode == UpdateMode.SKIP:
+        with open(output_file, 'r') as f:
+            cached_data = json.load(f)
+            return cached_data
+    
+    # 手写 INCREMENTAL 分支
+    elif mode == UpdateMode.INCREMENTAL:
+        result = incremental_update_ic(...)
+        ...
+    
+    # 手写 FULL 分支
+    elif mode == UpdateMode.FULL:
+        ic_result = calculate_ic_with_direction_verification(...)
+        result = build_ic_result(...)
+        save_ic_result(result, output_file)
+        ...
+
+# ✅ 正确：调用公共模块主入口，仅实现因子特有逻辑
+
+def calculate_bollinger_pb(factor_df, n=20, k=2.0):
+    """布林带计算（因子特有逻辑）"""
+    ...
+
+result = run_complex_factor_ic(
+    factor_name='bollinger_pb',
+    factor_col='bollinger_pb',
+    factor_cols=['close'],
+    custom_factor_calculation=calculate_bollinger_pb
+)
+```
+
+### 公共模块封装范围
+
+| 功能 | 公共模块函数 | 禁止脚本自行实现 |
+|------|-------------|----------------|
+| 主流程入口 | `run_factor_ic_analysis()` / `run_simple_factor_ic()` / `run_complex_factor_ic()` | 三模式分支、模式判断、流程控制 |
+| 数据加载 | `load_factor_return_data()` | gzip解压、JSON加载、日期转换、列验证 |
+| IC计算 | `calculate_ic_with_direction_verification()` | Spearman IC、五维度判断 |
+| 结果构建 | `build_ic_result()` | 输出字典拼接、rolling_ic_mean、sample_stats |
+| 结果保存 | `save_ic_result()` | JSON序列化、文件写入、异常处理 |
+| 增量更新 | `incremental_update_ic()` | 缓存读取、缺失日期计算、数据合并 |
+| 模式判断 | `should_use_incremental()` | 日期对比、缓存完整性检查 |
+
+### 跨目录公共模块限制
+
+**公共模块仅在本目录内复用，禁止跨目录调用。**
+
+```
+✅ factor_ic/ic_rsi_1d.py 调用 factor_ic/common/data_loader.py
+✅ backtest/layered_backtest.py 调用 backtest/common/backtest_utils.py
+
+❌ factor_ic/ic_rsi_1d.py 调用 backtest/common/backtest_utils.py
+❌ backtest/layered_backtest.py 调用 factor_ic/common/ic_calculator.py
+```
+
+**原因：**
+1. 模块职责分离：factor_ic 负责 IC 计算，backtest 负责分层回测
+2. 依赖方向单向：data_fetchers → cache → factor_ic → backtest
+3. 跨目录调用破坏模块边界，增加耦合
+
+### 新增因子脚本最小模板
+
+```python
+#!/usr/bin/env python3
+"""XXX 因子 IC 计算器 - 使用公共模块"""
+
+from factor_ic.common.factor_ic_runner import run_simple_factor_ic, run_complex_factor_ic
+
+# ===== 简单因子（直接用缓存列）=====
+result = run_simple_factor_ic('rsi', 'rsi_6')
+
+# ===== 复杂因子（需自定义计算）=====
+def calculate_xxx(factor_df, ...):
+    """因子特有计算逻辑"""
+    ...
+    return factor_df
+
+result = run_complex_factor_ic(
+    factor_name='xxx',
+    factor_col='xxx',
+    factor_cols=['close', 'high', 'low'],
+    custom_factor_calculation=calculate_xxx
+)
+```
+
+**代码量目标：** 新增因子脚本 ~50-100行（仅因子计算逻辑），而非 ~300-1000行。
+
+---
+
+## 公共模块日志传递规范（重要）
+
+### 核心原则
+
+**公共模块不独立创建 logger，由调用方传入。**
+
+### 问题背景
+
+- common 模块（如 `data_loader.py`）被多个因子脚本调用
+- 若 common 模块独立创建 logger，日志分散在多个文件
+- 无法追溯日志是哪个脚本调用的
+
+### 解决方案
+
+调用方传入 logger 参数：
+
+```python
+# ❌ 错误：common 模块独立创建 logger（无法定位调用方）
+def load_data_from_cache(cache_path):
+    logger = get_logger(__name__)  # 固定为 data_loader
+    logger.info("数据加载完成")
+    return data
+
+# ✓ 正确：common 模块接收调用方 logger
+def load_data_from_cache(cache_path, logger=None):
+    if logger is None:
+        logger = get_logger(__name__)  # fallback（独立调用时）
+    logger.info("数据加载完成")
+    return data
+
+# ✓ 正确：调用方传入自己的 logger
+# ic_kdj_j_1d.py 中调用
+logger = get_logger(__name__)  # ic_kdj_j_1d 的 logger
+data = load_data_from_cache(cache_path, logger=logger)
+# 日志记录在 ic_kdj_j_1d_2026-05-22.log
+```
+
+### 规则总结
+
+| 模块类型 | logger 创建方式 | 日志文件 |
+|---------|----------------|---------|
+| 因子脚本（factor_ic/*.py） | `logger = get_logger(__name__)` | `ic_<因子名>_YYYY-MM-DD.log` |
+| 公共模块（factor_ic/common/*.py） | 接收 `logger` 参数 | 由调用方决定 |
+
+### 公共模块函数签名规范
+
+```python
+# 所有公共模块的公共函数必须添加 logger 参数
+def public_function(..., logger=None):
+    """
+    参数:
+        ...: 其他参数
+        logger: 日志记录器（由调用方传入，默认使用模块 logger）
+    """
+    if logger is None:
+        logger = get_logger(__name__)
+    
+    logger.info("操作完成")
+```
+
+### 调用方传入规范
+
+```python
+# 因子脚本中调用公共模块
+logger = get_logger(__name__)  # 创建脚本 logger
+
+# 传入 logger 参数
+data = load_data_from_cache(cache_path, logger=logger)
+result = calculate_ic_with_direction_verification(data, logger=logger)
+```
+
+### 禁止行为
+
+```
+❌ 公共模块独立创建 logger（日志分散，无法定位调用方）
+❌ 调用方不传入 logger（common 模块 fallback 到模块名）
+❌ 公共模块函数缺少 logger 参数（无法传递日志上下文）
+```
+
+---
 
 # 二、IC计算核心
 
