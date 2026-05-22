@@ -459,28 +459,28 @@ class LayeredBacktestEngine:
         long_turnovers = daily_df.loc[long_mask & daily_df['turnover'].notna(), 'turnover'].tolist()
         short_turnovers = daily_df.loc[short_mask & daily_df['turnover'].notna(), 'turnover'].tolist()
         
-        # 计算多空组合收益
-        long_short_records = []
-        for date in daily_df['date'].unique():
-            day_data = daily_df[daily_df['date'] == date]
-            
-            # 多头收益
-            long_layer_rets = day_data[day_data['layer'].isin(long_layers)]['return'].dropna()
-            long_ret = long_layer_rets.mean() if len(long_layer_rets) > 0 else np.nan
-            
-            # 空头收益
-            short_layer_rets = day_data[day_data['layer'].isin(short_layers)]['return'].dropna()
-            short_ret = short_layer_rets.mean() if len(short_layer_rets) > 0 else np.nan
-            
-            if not pd.isna(long_ret) and not pd.isna(short_ret):
-                long_short_records.append({
-                    'date': date,
-                    'long_return': long_ret,
-                    'short_return': short_ret,
-                    'long_short_return': long_ret - short_ret
+        # 计算多空组合收益（优化：用 groupby 替代循环）
+        # 按 date 分组，计算每日多空收益
+        def calc_daily_ls(group):
+            long_rets = group[group['layer'].isin(long_layers)]['return'].dropna()
+            short_rets = group[group['layer'].isin(short_layers)]['return'].dropna()
+            if len(long_rets) > 0 and len(short_rets) > 0:
+                return pd.Series({
+                    'long_return': long_rets.mean(),
+                    'short_return': short_rets.mean(),
+                    'long_short_return': long_rets.mean() - short_rets.mean()
                 })
+            return pd.Series({
+                'long_return': np.nan,
+                'short_return': np.nan,
+                'long_short_return': np.nan
+            })
         
-        long_short_df = pd.DataFrame(long_short_records)
+        # 应用 groupby，过滤 NaN 行
+        long_short_df = daily_df.groupby('date').apply(calc_daily_ls).dropna()
+        # 重置索引，保留 date 列
+        if len(long_short_df) > 0:
+            long_short_df = long_short_df.reset_index()
         
         # 多空组合统计
         long_short_stats = {}
@@ -501,7 +501,7 @@ class LayeredBacktestEngine:
                 'long_short_volatility': float(ls_vol),
                 'avg_turnover_long': float(np.mean(long_turnovers)) if long_turnovers else 0,
                 'avg_turnover_short': float(np.mean(short_turnovers)) if short_turnovers else 0,
-                'n_days': len(long_short_df)
+                'n_days': int(len(long_short_df))  # 转 int 避免 JSON 序列化问题
             }
         
         # 单调性检验
@@ -524,8 +524,8 @@ class LayeredBacktestEngine:
             'trade_cost_rate': trade_cost_rate,
             'layer_method': layer_method,
             'thresholds': thresholds,
-            'n_days_total': len(daily_df['date'].unique()),
-            'n_assets_total': len(self.merged_df[self.asset_col].unique())
+            'n_days_total': int(len(daily_df['date'].unique())),  # 转 int 避免 JSON 序列化问题
+            'n_assets_total': int(len(self.merged_df[self.asset_col].unique()))  # 转 int
         }
         
         return {
