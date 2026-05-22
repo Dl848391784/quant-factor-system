@@ -162,6 +162,11 @@
     - 补充"新增因子开发"章节：数据加载流程说明
     - 明确 `factor_cols` 与 `additional_factor_files` 数据合并机制
     - 核心原则：自定义计算函数可访问所有合并列
+22. v3.10（2026-05-23）：
+    - 修订"pandas 缺失值标记规范"：浮点 Series 统一使用 np.nan
+    - 修复 ic_turnover_surge_1d.py：pd.NA → np.nan（第107/127行）
+    - 修复 ic_bollinger_pb_1d.py：pd.NA → np.nan（第107/112行）
+    - 核心原则：构造时 pd.NA 会导致 dtype 变为 object，引发类型问题
 
 # 一、概述与基础
 
@@ -490,46 +495,59 @@ bollinger_pb = (close - lower) / safe_band_width
 
 **参考：** ic_bollinger_pb_1d.py 第97-99行（2026-05-22 修复）
 
-### pandas 缺失值标记规范（2026-05-22新增）
+### pandas 缺失值标记规范（2026-05-22新增，2026-05-23修订）
 
-**核心原则：使用 `pd.NA` 而非 `None` 作为 pandas 显式缺失值标记。**
+**核心原则：浮点 Series 统一使用 np.nan 或 float('nan')，而非 pd.NA。**
 
-**错误示例（使用 None）：**
+**错误示例（使用 pd.NA）：**
 
 ```python
-# ❌ 错误：使用 None 作为缺失值标记
-bollinger_pb = bollinger_pb.where(~abnormal_mask, None)
+# ❌ 错误1：构造时使用 pd.NA（dtype 变为 object）
+s = pd.Series([pd.NA, 1.0, 2.0])  # dtype: object，而非 float64
 # 问题：
-# - None 在 pandas Series 中会被转换为 NaN，但语义不明确
-# - None 是 Python 原生类型，不是 pandas 显式缺失值标记
-# - 类型注解混乱：Series 元素类型包含 None，语义不准确
+# - dtype 变为 object，无法使用矢量化数值运算
+# - 内存效率低，类型不一致（NAType vs float）
+# - 后续运算可能引发类型错误
+
+# ❌ 错误2：.where() 使用 pd.NA（风格不一致）
+s = pd.Series([1.0, 2.0, 3.0])
+s = s.where(s > 1.5, pd.NA)  # 虽然 dtype 保持 float64，但风格不一致
+# 问题：
+# - pd.NA 会被转换为 np.nan，但意图不明确
+# - 与构造场景使用 np.nan 的风格不一致
 ```
 
-**正确示例（使用 pd.NA）：**
+**正确示例（使用 np.nan 或 float('nan'))：**
 
 ```python
-# ✅ 正确：使用 pd.NA 作为 pandas 显式缺失值标记
-bollinger_pb = bollinger_pb.where(~abnormal_mask, pd.NA)
-# pd.NA 是 pandas 1.0+ 引入的显式缺失值标记
-# 语义清晰：明确表示 pandas 缺失值，而非 Python None
-# 类型准确：Series 元素类型为 float，缺失值用 pd.NA 表示
+# ✅ 正确1：构造时使用 np.nan（dtype 保持 float64）
+s = pd.Series([np.nan, 1.0, 2.0])  # dtype: float64
+
+# ✅ 正确2：.where() 使用 np.nan 或 float('nan')
+s = pd.Series([1.0, 2.0, 3.0])
+s = s.where(s > 1.5, np.nan)  # dtype: float64，风格一致
+s = s.where(s > 1.5, float('nan'))  # dtype: float64，风格一致
 ```
 
-**为何必须使用 pd.NA：**
+**为何浮点 Series 必须使用 np.nan：**
 
-| 原因 | 说明 |
+|| 原因 | 说明 |
 |------|------|
-| 语义明确 | pd.NA 是 pandas 显式缺失值标记，不是 Python None |
-| 类型准确 | Series 类型注解更准确，元素类型不包含 None |
-| 行为一致 | pd.NA 在 pandas 操作中行为一致（传播、比较） |
-| 易于维护 | 新增缺失值处理时统一使用 pd.NA，风格一致 |
+|| dtype 一致 | 构造和 `.where()` 都保持 float64 |
+|| 矢量化运算 | float64 支持矢量化数值运算，object 不支持 |
+|| 内存效率 | float64 内存效率高于 object |
+|| 类型一致 | 元素类型统一为 numpy.float64 |
+|| 风格统一 | 与 ic_kdj_j_1d.py 使用 float('nan') 保持一致 |
 
-**适用场景：**
-- `.where()` 或 `.mask()` 设置缺失值
-- DataFrame 初始化设置缺失值
-- pandas Series/DataFrame 缺失值标记
+**pd.NA 适用场景：**
+- nullable Int64/String/boolean Series（非浮点）
+- 显式缺失值标记（文档说明）
 
-**参考：** ic_bollinger_pb_1d.py 第102行（2026-05-22 修复）
+**np.nan 适用场景：**
+- float64 Series（因子计算主要场景）
+- 数值运算 Series
+
+**参考：** ic_kdj_j_1d.py 第102/150行（使用 float('nan'))
 
 ### 模块级常量规范（2026-05-22新增）
 

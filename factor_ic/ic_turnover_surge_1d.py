@@ -31,6 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
+import numpy as np
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
@@ -103,8 +104,8 @@ def calculate_turnover_surge(
     abnormal_mask = turnover_surge < 0
     abnormal_count = abnormal_mask.sum()
     if abnormal_count > 0:
-        logger.warning(f"检测到 {abnormal_count} 个异常换手率突增（负值），已标记为 pd.NA")
-        turnover_surge = turnover_surge.where(~abnormal_mask, pd.NA)
+        logger.warning(f"检测到 {abnormal_count} 个异常换手率突增（负值），已标记为 np.nan")
+        turnover_surge = turnover_surge.where(~abnormal_mask, np.nan)
     
     # ========== Step 4: 计算涨跌幅（局部变量）==========
     # 获取前一日收盘价
@@ -124,7 +125,7 @@ def calculate_turnover_surge(
     )
     
     # 不满足条件的股票因子值设为 NaN
-    turnover_surge = turnover_surge.where(condition, pd.NA)
+    turnover_surge = turnover_surge.where(condition, np.nan)
     
     # ========== Step 6: 写入最终因子列 ==========
     # 只写入 turnover_surge，中间变量（avg_turnover, daily_return）不保留

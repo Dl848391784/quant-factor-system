@@ -31,6 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
+import numpy as np
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
@@ -102,14 +103,14 @@ def calculate_bollinger_pb(
     
     # 异常处理：按优先级顺序处理，先低后高，高优先级覆盖低优先级
     # 优先级1（低）：过窄带宽（正常范围内）→ 0.5（中性值）
-    # 优先级2（高）：异常负值 → pd.NA（显式缺失值标记）
+    # 优先级2（高）：异常负值 → np.nan（浮点 Series 缺失值）
     bollinger_pb = bollinger_pb.where(~narrow_band_mask, 0.5)  # 过窄 → 0.5
-    bollinger_pb = bollinger_pb.where(~abnormal_mask, pd.NA)   # 异常负值 → pd.NA
+    bollinger_pb = bollinger_pb.where(~abnormal_mask, np.nan)   # 异常负值 → np.nan
     
     # 异常统计日志
     abnormal_count = abnormal_mask.sum()
     if abnormal_count > 0:
-        logger.warning(f"检测到 {abnormal_count} 个异常布林带宽度（负值），已标记为 pd.NA")
+        logger.warning(f"检测到 {abnormal_count} 个异常布林带宽度（负值），已标记为 np.nan")
     
     factor_df['bollinger_pb'] = bollinger_pb
     
