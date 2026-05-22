@@ -80,9 +80,9 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except RuntimeError as e:
+    except RuntimeError:
         logger.exception("计算失败")  # 使用 .exception() 保留完整堆栈
         sys.exit(1)
-    except Exception as e:
+    except Exception:
         logger.exception("未预期的错误")  # 使用 .exception() 保留完整堆栈
         sys.exit(1)
