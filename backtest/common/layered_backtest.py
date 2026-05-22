@@ -9,7 +9,7 @@
 
 作者: 云瑶
 创建日期: 2026-05-19
-修订日期: 2026-05-23（修复4个代码bug + 补充MODULE.md规范）
+修订日期: 2026-05-23（修复2个代码bug + 补充MODULE.md规范）
 """
 
 import sys
@@ -495,6 +495,21 @@ class LayeredBacktestEngine:
                 f"回测无有效数据：所有日期数据量均不足 min_stocks_per_layer，"
                 f"请检查数据范围或降低 min_stocks_per_layer 参数"
             )
+            # 构造结构完整但值为 None 的 layer_stats（与正常返回结构一致）
+            layer_stats = {}
+            for layer_id in range(1, n_layers + 1):
+                layer_stats[f'layer_{layer_id}'] = {
+                    'n_days': 0,
+                    'n_stocks_avg': 0,
+                    'daily_return_mean': None,
+                    'daily_return_std': None,
+                    'cumulative_return': None,
+                    'annual_return': None,
+                    'annual_volatility': None,
+                    'sharpe_ratio': None,
+                    'max_drawdown': None,
+                    'turnover_avg': None
+                }
             return {
                 'meta': {
                     'n_layers': n_layers,
@@ -508,9 +523,9 @@ class LayeredBacktestEngine:
                     'n_days_total': 0,
                     'n_assets_total': int(len(self.merged_df[self.asset_col].unique()))
                 },
-                'layer_stats': {},
+                'layer_stats': layer_stats,
                 'long_short': {},
-                'monotonicity': {'correlation': None, 'quality': 'no_data', 'layer_returns': []},
+                'monotonicity': {'correlation': None, 'quality': 'no_data', 'layer_returns': [None] * n_layers},
                 'trading_cost_analysis': {},
                 'daily_records': []
             }
@@ -757,11 +772,14 @@ class LayeredBacktestEngine:
         lines.append(f"{'分层':<8} {'股票数':<10} {'日均收益':<12} {'年化收益':<12} {'夏普比':<10} {'换手率':<10}")
         lines.append("-" * 70)
         
+        # 统计有效层数（用于空数据提示）
+        valid_layer_count = 0
         for layer_id in range(1, meta['n_layers'] + 1):
             stats = result['layer_stats'].get(f'layer_{layer_id}', {})
             if stats.get('n_stocks_avg', 0) == 0:
                 continue
             
+            valid_layer_count += 1
             n_stocks = stats.get('n_stocks_avg', 0)
             daily_ret = stats.get('daily_return_mean', 0) or 0
             annual_ret = stats.get('annual_return', 0) or 0
@@ -770,6 +788,11 @@ class LayeredBacktestEngine:
             
             sharpe_str = f"{sharpe:.2f}" if sharpe is not None else "N/A"
             lines.append(f"Layer{layer_id:<3} {n_stocks:<10.0f} {daily_ret*100:>10.2f}% {annual_ret*100:>10.2f}% {sharpe_str:<10} {turnover*100:>8.1f}%")
+        
+        # 空数据提示（所有层都无效时）
+        if valid_layer_count == 0:
+            lines.append("⚠ 无有效分层数据：所有日期数据量均不足 min_stocks_per_layer")
+            lines.append("  建议：检查数据范围或降低 min_stocks_per_layer 参数")
         
         lines.append("-" * 70)
         lines.append("")
@@ -791,6 +814,9 @@ class LayeredBacktestEngine:
             sharpe = ls_stats.get('long_short_sharpe')
             sharpe_str = f"{sharpe:.2f}" if sharpe is not None else "N/A"
             lines.append(f"多空夏普比率: {sharpe_str}")
+        else:
+            # 空数据提示
+            lines.append("⚠ 无多空组合数据：缺少有效的多空层收益数据")
         
         lines.append("-" * 70)
         lines.append("")
@@ -813,6 +839,12 @@ class LayeredBacktestEngine:
                     lines.append("△ 反向因子单调性一般")
                 else:
                     lines.append("✗ 反向因子单调性较差")
+        else:
+            # 空数据提示
+            quality = mono.get('quality', 'unknown')
+            lines.append(f"单调性质量: {quality}")
+            if quality == 'no_data':
+                lines.append("⚠ 无单调性数据：缺少有效的分层收益数据")
         
         lines.append("-" * 70)
         lines.append("")
@@ -831,6 +863,9 @@ class LayeredBacktestEngine:
             lines.append(f"空头日均成本: {cost['short_daily_cost']*100:.4f}%")
             lines.append(f"多空毛收益: {cost['long_short_gross_daily']*100:.4f}%")
             lines.append(f"多空净收益: {cost['long_short_net_daily']*100:.4f}%")
+        else:
+            # 空数据提示
+            lines.append("⚠ 无交易成本数据：缺少有效的多空组合换手率数据")
         
         lines.append("-" * 70)
         

@@ -2,7 +2,7 @@
 
 > 本文档定义 backtest/ 目录下分层回测脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v0.5（补充单层模式、NaN安全转换、percentile类型一致性、避免闭包捕获规范）
+> 版本: v0.6（补充空数据返回结构、空数据报告提示规范）
 > 修订日期: 2026-05-23
 
 ---
@@ -469,6 +469,94 @@ long_short_df = daily_df.groupby('date').apply(calc_daily_ls)
 - 闭包捕获外部变量（long_layers/short_layers），存在可维护性风险
 - 若外部变量被修改，闭包行为不可预期
 - 静态方法显式传参，代码意图清晰，便于测试和复用
+
+---
+
+## 空数据返回结构规范
+
+**引擎空数据返回结构必须与正常返回结构一致，便于下游统一处理。**
+
+**正确写法：**
+```python
+if len(daily_df) == 0:
+    # 构造结构完整但值为 None 的 layer_stats
+    layer_stats = {}
+    for layer_id in range(1, n_layers + 1):
+        layer_stats[f'layer_{layer_id}'] = {
+            'n_days': 0,
+            'n_stocks_avg': 0,
+            'daily_return_mean': None,
+            'daily_return_std': None,
+            'cumulative_return': None,
+            'annual_return': None,
+            'annual_volatility': None,
+            'sharpe_ratio': None,
+            'max_drawdown': None,
+            'turnover_avg': None
+        }
+    return {
+        'meta': {...},
+        'layer_stats': layer_stats,  # 结构完整
+        'long_short': {},
+        'monotonicity': {'correlation': None, 'quality': 'no_data', 'layer_returns': [None] * n_layers},
+        ...
+    }
+```
+
+**错误写法：**
+```python
+if len(daily_df) == 0:
+    return {
+        'meta': {...},
+        'layer_stats': {},  # 结构缺失，下游处理不一致
+        'long_short': {},
+        'monotonicity': {'correlation': None, 'quality': 'no_data', 'layer_returns': []},
+        ...
+    }
+```
+
+**原因：**
+- 空路径 `layer_stats: {}` 与正常路径结构不一致
+- 下游访问 `result['layer_stats'].get('layer_1')` 可能返回 None 或空 dict
+- 结构统一便于下游处理，避免 TypeError 或 KeyError
+
+---
+
+## 空数据报告提示规范
+
+**generate_report 必须对空数据输出明确提示，避免用户困惑。**
+
+**正确写法：**
+```python
+# 统计有效层数
+valid_layer_count = 0
+for layer_id in range(1, meta['n_layers'] + 1):
+    stats = result['layer_stats'].get(f'layer_{layer_id}', {})
+    if stats.get('n_stocks_avg', 0) == 0:
+        continue
+    valid_layer_count += 1
+    ...
+
+# 空数据提示
+if valid_layer_count == 0:
+    lines.append("⚠ 无有效分层数据：所有日期数据量均不足 min_stocks_per_layer")
+    lines.append("  建议：检查数据范围或降低 min_stocks_per_layer 参数")
+```
+
+**错误写法：**
+```python
+for layer_id in range(1, meta['n_layers'] + 1):
+    stats = result['layer_stats'].get(f'layer_{layer_id}', {})
+    if stats.get('n_stocks_avg', 0) == 0:
+        continue  # 空数据时所有层都跳过，报告完全空白
+    ...
+# 无任何提示，用户困惑
+```
+
+**原因：**
+- 空数据时所有层都跳过，分层收益统计部分完全空白
+- 用户无法理解为何空白，认为是代码错误
+- 明确提示原因和建议，帮助用户排查
 
 ---
 
