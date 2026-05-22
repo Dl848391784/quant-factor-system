@@ -20,7 +20,7 @@ from typing import Dict, Optional
 # 添加父目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backtest.layered_backtest import LayeredBacktestEngine
+from backtest.common.layered_backtest import LayeredBacktestEngine
 
 
 class RSILayerConfig:
