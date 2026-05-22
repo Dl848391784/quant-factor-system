@@ -2,7 +2,7 @@
 
 > 本文档定义 backtest/ 目录下分层回测脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v0.1（骨架版，待补充）
+> 版本: v0.2（补充日志规范）
 
 ---
 
@@ -23,6 +23,30 @@ backtest 模块负责对因子 IC 结果进行分层回测，评估因子的实�
 **示例：**
 - `layered_backtest_rsi.py` — RSI 因子分层回测
 - `layered_backtest_volume_ratio.py` — 量比因子分层回测
+
+---
+
+## 日志规范
+
+**遵循 PROJECT.md 项目级日志规范（第783-857行）。**
+
+核心要点：
+- 使用 Python 标准库 `logging` 模块
+- 导入方式：`from factor_ic.common.logger_config import get_logger`
+- 日志路径：`backtest/logs/*.log`
+
+---
+
+## 公共模块复用
+
+**遵循 PROJECT.md 强制复用规范（MODULE.md 第X-Y行）。**
+
+必须复用的公共模块：
+| 功能 | 公共模块路径 | 说明 |
+|------|-------------|------|
+| 类型转换 | `factor_ic.common.convert_types` | numpy/pandas → Python 原生类型 |
+| 日志配置 | `factor_ic.common.logger_config` | get_logger 函数 |
+| 分层回测引擎 | `backtest.common.layered_backtest` | LayeredBacktestEngine 类 |
 
 ---
 
@@ -60,4 +84,4 @@ backtest 模块负责对因子 IC 结果进行分层回测，评估因子的实�
 
 ---
 
-*最后更新: 2026-05-19*
+*最后更新: 2026-05-22*

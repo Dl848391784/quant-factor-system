@@ -1,15 +1,23 @@
 """
-RSI分层回测入口脚本
+RSI 因子分层回测入口脚本
 
 功能:
-1. 加载RSI因子数据
-2. 配置RSI分层参数
+1. 加载 RSI 因子数据
+2. 配置 RSI 分层参数
 3. 调用通用分层回测引擎
-4. 输出结果到cache/backtest/
+4. 输出结果到 cache/backtest/
+
+规范:
+- 命名遵循 MODULE.md: layered_backtest_<因子名>.py
+- 日志遵循 PROJECT.md: 使用 logging 模块
+- 数据加载使用缓存，不截断
+
+作者: 云瑶
+创建日期: 2026-05-11
+修订日期: 2026-05-22（重命名 + 日志规范化）
 """
 
 import os
-import sys
 import json
 import gzip
 import pandas as pd
@@ -17,8 +25,13 @@ import numpy as np
 from datetime import datetime
 from typing import Dict, Optional
 
-# 添加父目录到路径
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 导入公共日志模块（遵循 PROJECT.md 日志规范）
+from factor_ic.common.logger_config import get_logger
+
+logger = get_logger(__name__)
+
+# 导入公共类型转换模块（遵循 PROJECT.md 强制复用规范）
+from factor_ic.common.convert_types import convert_to_native_types
 
 from backtest.common.layered_backtest import LayeredBacktestEngine
 
@@ -89,25 +102,25 @@ def load_data_from_cache(
     
     # 加载因子数据
     factor_path = os.path.join(cache_dir, 'factor_data.json.gz')
-    print(f"加载因子数据: {factor_path}")
+    logger.info("加载因子数据: %s", factor_path)
     
     with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
         factor_data = json.load(f)
     
     factor_df = pd.DataFrame(factor_data['data'])
-    print(f"因子数据: {len(factor_df)} 条记录")
-    print(f"因子列: {list(factor_df.columns)}")
+    logger.info("因子数据: %d 条记录", len(factor_df))
+    logger.debug("因子列: %s", list(factor_df.columns))
     
     # 加载收益数据
     return_path = os.path.join(cache_dir, 'return_data.json.gz')
-    print(f"加载收益数据: {return_path}")
+    logger.info("加载收益数据: %s", return_path)
     
     with gzip.open(return_path, 'rt', encoding='utf-8') as f:
         return_data = json.load(f)
     
     return_df = pd.DataFrame(return_data['data'])
-    print(f"收益数据: {len(return_df)} 条记录")
-    print(f"收益列: {list(return_df.columns)}")
+    logger.info("收益数据: %d 条记录", len(return_df))
+    logger.debug("收益列: %s", list(return_df.columns))
     
     # 使用缓存全部日期（不截断）
     
@@ -131,23 +144,21 @@ def run_rsi_layered_backtest(
     规范:
         使用缓存全部日期数据，不截断
     """
-    print("=" * 70)
-    print("RSI分层回测")
-    print("=" * 70)
-    print()
+    logger.info("=" * 40)
+    logger.info("RSI 分层回测")
+    logger.info("=" * 40)
     
     # 配置
     config = RSILayerConfig()
     
     if verbose:
-        print("配置信息:")
-        print(f"  分层阈值: {config.LAYER_THRESHOLDS}")
-        print(f"  因子方向: {config.FACTOR_DIRECTION}")
-        print(f"  多头组合: Layer {config.LONG_LAYERS}")
-        print(f"  空头组合: Layer {config.SHORT_LAYERS}")
-        print(f"  最小股票数: {config.MIN_STOCKS_PER_LAYER}")
-        print(f"  交易成本率: {config.TRADE_COST_RATE * 100:.2f}%")
-        print()
+        logger.info("配置信息:")
+        logger.info("  分层阈值: %s", config.LAYER_THRESHOLDS)
+        logger.info("  因子方向: %s", config.FACTOR_DIRECTION)
+        logger.info("  多头组合: Layer %s", config.LONG_LAYERS)
+        logger.info("  空头组合: Layer %s", config.SHORT_LAYERS)
+        logger.info("  最小股票数: %d", config.MIN_STOCKS_PER_LAYER)
+        logger.info("  交易成本率: %.2f%%", config.TRADE_COST_RATE * 100)
     
     # 加载数据
     factor_df, return_df = load_data_from_cache()
@@ -161,16 +172,15 @@ def run_rsi_layered_backtest(
     
     # 打印数据统计
     if verbose:
-        print("\n数据统计:")
-        print(f"  日期范围: {factor_df['date'].min()} ~ {factor_df['date'].max()}")
-        print(f"  股票数量: {factor_df['asset'].nunique()}")
-        print(f"  RSI 范围: {factor_df['rsi_6'].min():.2f} ~ {factor_df['rsi_6'].max():.2f}")
-        print(f"  RSI 均值: {factor_df['rsi_6'].mean():.2f}")
-        print(f"  收益范围: {return_df['forward_return_1d'].min():.4f} ~ {return_df['forward_return_1d'].max():.4f}")
-        print()
+        logger.info("数据统计:")
+        logger.info("  日期范围: %s ~ %s", factor_df['date'].min(), factor_df['date'].max())
+        logger.info("  股票数量: %d", factor_df['asset'].nunique())
+        logger.info("  RSI 范围: %.2f ~ %.2f", factor_df['rsi_6'].min(), factor_df['rsi_6'].max())
+        logger.info("  RSI 均值: %.2f", factor_df['rsi_6'].mean())
+        logger.info("  收益范围: %.4f ~ %.4f", return_df['forward_return_1d'].min(), return_df['forward_return_1d'].max())
     
     # 创建回测引擎
-    print("创建回测引擎...")
+    logger.info("创建回测引擎...")
     engine = LayeredBacktestEngine(
         factor_df=factor_df,
         return_df=return_df,
@@ -181,8 +191,7 @@ def run_rsi_layered_backtest(
     )
     
     # 执行回测
-    print("执行分层回测...")
-    print()
+    logger.info("执行分层回测...")
     
     result = engine.run(
         layer_method='fixed_threshold',
@@ -201,17 +210,15 @@ def run_rsi_layered_backtest(
     
     # 生成报告
     report = engine.generate_report(result)
-    print(report)
+    logger.info(report)
     
     # 输出RSI特有信息
-    print()
-    print("=" * 70)
-    print("RSI分层说明")
-    print("=" * 70)
+    logger.info("=" * 40)
+    logger.info("RSI 分层说明")
+    logger.info("=" * 40)
     for layer_id, desc in config.LAYER_THRESHOLD_DESC.items():
         name = config.LAYER_NAMES.get(layer_id, f'Layer{layer_id}')
-        print(f"  Layer{layer_id} ({name}): {desc}")
-    print()
+        logger.info("  Layer%d (%s): %s", layer_id, name, desc)
     
     # 保存结果
     if output_dir is None:
@@ -244,21 +251,11 @@ def run_rsi_layered_backtest(
         'created_at': datetime.now().isoformat()
     }
     
-    # JSON序列化辅助函数（处理numpy类型）
-    def json_serialize(obj):
-        import numpy as np
-        if isinstance(obj, (np.integer, np.int64, np.int32)):
-            return int(obj)
-        if isinstance(obj, (np.floating, np.float64, np.float32)):
-            return float(obj)
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        raise TypeError(f'Object of type {obj.__class__.__name__} is not JSON serializable')
-    
+    # 使用公共模块转换 numpy/pandas 类型（遵循 PROJECT.md 强制复用规范）
     with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(output_data, f, indent=2, ensure_ascii=False, default=json_serialize)
+        json.dump(convert_to_native_types(output_data), f, indent=2, ensure_ascii=False)
     
-    print(f"结果已保存: {output_file}")
+    logger.info("结果已保存: %s", output_file)
     
     # 保存每日明细（压缩）
     daily_file = os.path.join(output_dir, 'rsi_layered_backtest_daily.json.gz')
@@ -271,9 +268,9 @@ def run_rsi_layered_backtest(
     }
     
     with gzip.open(daily_file, 'wt', encoding='utf-8') as f:
-        json.dump(daily_data, f, indent=2, ensure_ascii=False, default=json_serialize)
+        json.dump(convert_to_native_types(daily_data), f, indent=2, ensure_ascii=False)
     
-    print(f"每日明细已保存: {daily_file}")
+    logger.info("每日明细已保存: %s", daily_file)
     
     return result
 
