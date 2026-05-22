@@ -14,16 +14,19 @@ RSI 因子分层回测入口脚本
 
 作者: 云瑶
 创建日期: 2026-05-11
-修订日期: 2026-05-22（重命名 + 日志规范化）
+修订日期: 2026-05-23（修复6个代码bug + 补充MODULE.md规范）
 """
 
 import os
+import sys
 import json
 import gzip
 import pandas as pd
 from datetime import datetime
 from typing import Dict, Optional
 from pathlib import Path
+from dataclasses import dataclass, field
+from typing import List, Dict as TypingDict
 
 # 导入公共日志模块（遵循 PROJECT.md 日志规范）
 from factor_ic.common.logger_config import get_logger
@@ -36,44 +39,82 @@ from factor_ic.common.convert_types import convert_to_native_types
 from backtest.common.layered_backtest import LayeredBacktestEngine
 
 
+@dataclass
 class RSILayerConfig:
-    """RSI分层配置"""
+    """RSI分层配置（使用 dataclass 提供类型约束和不可变性保护）"""
     
     # 固定阈值分层（推荐）
-    LAYER_THRESHOLDS = [0, 20, 40, 60, 80, 100]
+    layer_thresholds: List[float] = field(default_factory=lambda: [0, 20, 40, 60, 80, 100])
     
-    # 分层命名
-    LAYER_NAMES = {
-        1: '超卖层',
-        2: '弱势层', 
-        3: '中性层',
-        4: '强势层',
-        5: '超买层'
-    }
+    # 分层命名（使用 str key，避免 JSON 序列化后 int→str 转换问题）
+    # 保存和加载时 key 类型一致，下游使用 layer_names.get('1') 返回正确值
+    layer_names: TypingDict[str, str] = field(default_factory=lambda: {
+        '1': '超卖层',
+        '2': '弱势层', 
+        '3': '中性层',
+        '4': '强势层',
+        '5': '超买层'
+    })
     
     # 因子方向（重要：RSI是反向因子）
-    FACTOR_DIRECTION = 'negative'  # 反向因子
+    factor_direction: str = 'negative'  # 反向因子
     
     # 多空组合（反向因子：买超卖、卖超买）
-    LONG_LAYERS = [1, 2]   # 多头：超卖+弱势（预期收益高）
-    SHORT_LAYERS = [4, 5]  # 空头：强势+超买（预期收益低）
+    long_layers: List[int] = field(default_factory=lambda: [1, 2])   # 多头：超卖+弱势（预期收益高）
+    short_layers: List[int] = field(default_factory=lambda: [4, 5])  # 空头：强势+超买（预期收益低）
     
     # RSI阈值说明（边界值明确归属规则）
     # 边界值归属原则：边界值归入下一层（向上进位）
     # 格式遵循 MODULE.md "阈值描述规范": 完整区间 [lower, upper)
-    LAYER_THRESHOLD_DESC = {
-        1: '0 ≤ RSI < 20 (超卖)',
-        2: '20 ≤ RSI < 40 (含边界20)',
-        3: '40 ≤ RSI < 60 (含边界40)',
-        4: '60 ≤ RSI < 80 (含边界60)',
-        5: 'RSI ≥ 80 (含边界80)'
-    }
+    # 第5层特殊处理：RSI ≥ 80 归入 Layer5（含 RSI >= 100 的越界值）
+    # 使用 str key，与 layer_names 保持一致
+    layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {
+        '1': '0 ≤ RSI < 20 (超卖)',
+        '2': '20 ≤ RSI < 40 (含边界20)',
+        '3': '40 ≤ RSI < 60 (含边界40)',
+        '4': '60 ≤ RSI < 80 (含边界60)',
+        '5': 'RSI ≥ 80 (含边界80，含越界值)'
+    })
     
     # 交易成本
-    TRADE_COST_RATE = 0.003  # 单边千分之三
+    trade_cost_rate: float = 0.003  # 单边千分之三
     
     # 最小股票数
-    MIN_STOCKS_PER_LAYER = 10
+    min_stocks_per_layer: int = 10
+    
+    # 允许类属性访问（兼容旧代码）
+    # 使用 property 或 __getattr__ 提供类属性风格的访问
+    @property
+    def LAYER_THRESHOLDS(self) -> List[float]:
+        return self.layer_thresholds
+    
+    @property
+    def LAYER_NAMES(self) -> TypingDict[str, str]:
+        return self.layer_names
+    
+    @property
+    def FACTOR_DIRECTION(self) -> str:
+        return self.factor_direction
+    
+    @property
+    def LONG_LAYERS(self) -> List[int]:
+        return self.long_layers
+    
+    @property
+    def SHORT_LAYERS(self) -> List[int]:
+        return self.short_layers
+    
+    @property
+    def LAYER_THRESHOLD_DESC(self) -> TypingDict[str, str]:
+        return self.layer_threshold_desc
+    
+    @property
+    def TRADE_COST_RATE(self) -> float:
+        return self.trade_cost_rate
+    
+    @property
+    def MIN_STOCKS_PER_LAYER(self) -> int:
+        return self.min_stocks_per_layer
 
 
 def load_data_from_cache(
@@ -91,6 +132,12 @@ def load_data_from_cache(
     规范:
         加载缓存全部日期数据，不截断
         路径构造遵循 MODULE.md: 使用 Path 解析项目根目录
+        数据完整性校验遵循 MODULE.md: 必须校验 JSON 结构
+    
+    异常:
+        FileNotFoundError: 缓存文件不存在
+        KeyError: JSON 结构缺失必需字段（data）
+        json.JSONDecodeError: JSON 解析失败
     """
     if cache_dir is None:
         # 使用 Path 解析项目根目录（语义清晰，不依赖文件层级假设）
@@ -102,8 +149,25 @@ def load_data_from_cache(
     factor_path = Path(cache_dir) / 'factor_data.json.gz'
     logger.info("加载因子数据: %s", factor_path)
     
-    with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
-        factor_data = json.load(f)
+    # 校验文件存在
+    if not factor_path.exists():
+        raise FileNotFoundError(f"因子数据缓存文件不存在: {factor_path}")
+    
+    try:
+        with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
+            factor_data = json.load(f)
+    except json.JSONDecodeError as e:
+        raise json.JSONDecodeError(
+            f"因子数据 JSON 解析失败: {factor_path}, 错误: {e.msg}",
+            e.doc, e.pos
+        )
+    
+    # 校验 JSON 结构完整性（遵循 MODULE.md 数据完整性校验规范）
+    if 'data' not in factor_data:
+        raise KeyError(
+            f"因子数据 JSON 结构缺失 'data' 字段: {factor_path}, "
+            f"顶层字段: {list(factor_data.keys())}"
+        )
     
     factor_df = pd.DataFrame(factor_data['data'])
     logger.info("因子数据: %d 条记录", len(factor_df))
@@ -113,8 +177,25 @@ def load_data_from_cache(
     return_path = Path(cache_dir) / 'return_data.json.gz'
     logger.info("加载收益数据: %s", return_path)
     
-    with gzip.open(return_path, 'rt', encoding='utf-8') as f:
-        return_data = json.load(f)
+    # 校验文件存在
+    if not return_path.exists():
+        raise FileNotFoundError(f"收益数据缓存文件不存在: {return_path}")
+    
+    try:
+        with gzip.open(return_path, 'rt', encoding='utf-8') as f:
+            return_data = json.load(f)
+    except json.JSONDecodeError as e:
+        raise json.JSONDecodeError(
+            f"收益数据 JSON 解析失败: {return_path}, 错误: {e.msg}",
+            e.doc, e.pos
+        )
+    
+    # 校验 JSON 结构完整性
+    if 'data' not in return_data:
+        raise KeyError(
+            f"收益数据 JSON 结构缺失 'data' 字段: {return_path}, "
+            f"顶层字段: {list(return_data.keys())}"
+        )
     
     return_df = pd.DataFrame(return_data['data'])
     logger.info("收益数据: %d 条记录", len(return_df))
@@ -205,9 +286,10 @@ def run_rsi_layered_backtest(
     )
     
     # 添加RSI特定信息
+    # 使用 str key，与 config.layer_names 保持一致（避免 JSON 序列化 int→str 转换问题）
     result['meta']['factor_name'] = 'rsi_6'
-    result['meta']['layer_names'] = config.LAYER_NAMES
-    result['meta']['layer_thresholds_desc'] = config.LAYER_THRESHOLD_DESC
+    result['meta']['layer_names'] = config.LAYER_NAMES  # str key
+    result['meta']['layer_thresholds_desc'] = config.LAYER_THRESHOLD_DESC  # str key
     
     # 生成报告
     report = engine.generate_report(result)
@@ -217,8 +299,11 @@ def run_rsi_layered_backtest(
     logger.info("=" * 40)
     logger.info("RSI 分层说明")
     logger.info("=" * 40)
-    for layer_id, desc in config.LAYER_THRESHOLD_DESC.items():
-        name = config.LAYER_NAMES.get(layer_id, f'Layer{layer_id}')
+    # 使用 str key 访问（与 dataclass 定义一致）
+    for layer_id in range(1, n_layers + 1):
+        layer_key = str(layer_id)
+        name = config.LAYER_NAMES.get(layer_key, f'Layer{layer_id}')
+        desc = config.LAYER_THRESHOLD_DESC.get(layer_key, '')
         logger.info("  Layer%d (%s): %s", layer_id, name, desc)
     
     # 保存结果
@@ -233,6 +318,7 @@ def run_rsi_layered_backtest(
     output_file = Path(output_dir) / 'rsi_layered_backtest.json'
     
     # 准备输出数据（不包含daily_records以减少文件大小）
+    # 使用 str key 的 layer_names，避免 JSON 序列化后 int→str 转换问题
     output_data = {
         'meta': result['meta'],
         'layer_stats': result['layer_stats'],
@@ -241,7 +327,7 @@ def run_rsi_layered_backtest(
         'trading_cost_analysis': result['trading_cost_analysis'],
         'config': {
             'layer_thresholds': config.LAYER_THRESHOLDS,
-            'layer_names': config.LAYER_NAMES,
+            'layer_names': config.LAYER_NAMES,  # str key
             'factor_direction': config.FACTOR_DIRECTION,
             'long_layers': config.LONG_LAYERS,
             'short_layers': config.SHORT_LAYERS,
@@ -277,7 +363,7 @@ def run_rsi_layered_backtest(
 
 
 def main():
-    """命令行入口"""
+    """命令行入口（遵循 MODULE.md: 捕获异常返回退出码）"""
     import argparse
     
     parser = argparse.ArgumentParser(description='RSI分层回测')
@@ -286,12 +372,32 @@ def main():
     
     args = parser.parse_args()
     
-    result = run_rsi_layered_backtest(
-        output_dir=args.output_dir,
-        verbose=not args.quiet
-    )
-    
-    return result
+    try:
+        result = run_rsi_layered_backtest(
+            output_dir=args.output_dir,
+            verbose=not args.quiet
+        )
+        
+        # 检查结果有效性
+        if result['meta']['n_days_total'] == 0:
+            logger.error("回测无有效数据，退出码 1")
+            sys.exit(1)
+        
+        logger.info("回测完成，退出码 0")
+        sys.exit(0)
+        
+    except FileNotFoundError as e:
+        logger.error("数据文件不存在: %s", e)
+        sys.exit(2)
+    except KeyError as e:
+        logger.error("数据结构错误: %s", e)
+        sys.exit(3)
+    except ValueError as e:
+        logger.error("参数错误: %s", e)
+        sys.exit(4)
+    except Exception as e:
+        logger.exception("回测执行异常: %s", e)
+        sys.exit(5)
 
 
 if __name__ == '__main__':

@@ -2,8 +2,8 @@
 
 > 本文档定义 backtest/ 目录下分层回测脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v0.3（补充分层规则、换手率计算、参数校验规范）
-> 修订日期: 2026-05-22
+> 版本: v0.4（补充 Config 类、字典 key 类型、数据完整性校验、命令行入口规范）
+> 修订日期: 2026-05-23
 
 ---
 
@@ -110,17 +110,20 @@ avg_turnover_long = mean(所有多头层所有日期换手率列表)  # 多头�
 
 **LAYER_THRESHOLD_DESC 格式：** 完整区间 `[lower, upper)`，必须包含下界。
 
+**第5层（最大边界）特殊处理：** 使用 `≥` 并说明上界处理逻辑。
+
 **示例：**
 ```python
-LAYER_THRESHOLD_DESC = {
-    1: '0 ≤ RSI < 20 (超卖)',   # 完整区间，含下界
-    2: '20 ≤ RSI < 40 (含边界20)',
-    5: 'RSI ≥ 80 (含边界80)'    # 最大边界使用 ≥
-}
+layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {
+    '1': '0 ≤ RSI < 20 (超卖)',   # 完整区间，含下界
+    '2': '20 ≤ RSI < 40 (含边界20)',
+    '5': 'RSI ≥ 80 (含边界80，含越界值)'  # 最大边界使用 ≥，说明越界值处理
+})
 ```
 
 **原因：**
 - 引擎 fixed_threshold 模式执行 `[thresholds[i], thresholds[i+1])` 归入 Layer (i+1)
+- 最大边界（`≥ thresholds[-1]`）归入 Layer n，包括越界值（如 RSI >= 100）
 - 描述必须与引擎一致，避免误导
 - RSI 理论范围 [0, 100]，实际数据可能因计算误差越界，需校验
 
@@ -196,6 +199,157 @@ if factor_min < thresholds[0] or factor_max > thresholds[-1]:
         "因子值超出 thresholds 范围，建议检查因子计算或调整 thresholds"
     )
 ```
+
+---
+
+## Config 类规范
+
+**必须使用 `@dataclass`，提供类型约束和不可变性保护。**
+
+**正确写法：**
+```python
+from dataclasses import dataclass, field
+from typing import List, Dict as TypingDict
+
+@dataclass
+class RSILayerConfig:
+    """RSI分层配置"""
+    layer_thresholds: List[float] = field(default_factory=lambda: [0, 20, 40, 60, 80, 100])
+    layer_names: TypingDict[str, str] = field(default_factory=lambda: {'1': '超卖层', ...})
+    factor_direction: str = 'negative'
+    
+    # 允许类属性访问（兼容旧代码）
+    @property
+    def LAYER_THRESHOLDS(self) -> List[float]:
+        return self.layer_thresholds
+```
+
+**错误写法：**
+```python
+class RSILayerConfig:
+    """RSI分层配置"""
+    LAYER_THRESHOLDS = [0, 20, 40, 60, 80, 100]  # 类属性，可被实例覆盖
+    LAYER_NAMES = {1: '超卖层', ...}  # int key，JSON 序列化后转为 str
+```
+
+**原因：**
+- 类属性可被实例意外覆盖（`config.FACTOR_DIRECTION = 'positive'`）
+- dataclass 提供类型约束，IDE 可检查类型错误
+- property 提供不可变性保护，兼容旧代码的类属性访问风格
+
+---
+
+## 字典 key 类型规范
+
+**layer_names / layer_threshold_desc 必须使用 `str key`，避免 JSON 序列化后 int→str 转换问题。**
+
+**正确写法：**
+```python
+layer_names: TypingDict[str, str] = field(default_factory=lambda: {
+    '1': '超卖层',  # str key
+    '2': '弱势层',
+    '5': '超买层'
+})
+```
+
+**错误写法：**
+```python
+LAYER_NAMES = {
+    1: '超卖层',  # int key，JSON dump 后变为 {'1': '超卖层'}
+    2: '弱势层',
+    5: '超买层'
+}
+# 下游使用 layer_names.get(1) 返回 None（key 已变为 '1'）
+```
+
+**原因：**
+- JSON 序列化会将 int key 转为 str key
+- 加载后 `layer_names.get(1)` 返回 None（因为 key 已变为 `'1'`）
+- 使用 str key 保持一致性，下游访问 `layer_names.get('1')` 返回正确值
+
+---
+
+## 数据完整性校验规范
+
+**load_data_from_cache 必须校验 JSON 结构完整性。**
+
+**校验逻辑：**
+```python
+# 1. 校验文件存在
+if not factor_path.exists():
+    raise FileNotFoundError(f"缓存文件不存在: {factor_path}")
+
+# 2. 校验 JSON 解析
+try:
+    with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
+        factor_data = json.load(f)
+except json.JSONDecodeError as e:
+    raise json.JSONDecodeError(f"JSON 解析失败: {factor_path}, 错误: {e.msg}", e.doc, e.pos)
+
+# 3. 校验结构完整性
+if 'data' not in factor_data:
+    raise KeyError(
+        f"JSON 结构缺失 'data' 字段: {factor_path}, "
+        f"顶层字段: {list(factor_data.keys())}"
+    )
+```
+
+**原因：**
+- JSON 文件损坏或格式变更时，抛 KeyError 错误信息不友好
+- 校验文件存在、JSON 解析、结构完整性，提供清晰的错误信息
+- 错误信息包含文件路径、缺失字段、实际顶层字段
+
+---
+
+## 命令行入口规范
+
+**main 函数必须捕获异常并返回正确退出码。**
+
+**退出码定义：**
+- 0：成功
+- 1：回测无有效数据（n_days_total = 0）
+- 2：数据文件不存在（FileNotFoundError）
+- 3：数据结构错误（KeyError）
+- 4：参数错误（ValueError）
+- 5：其他异常
+
+**正确写法：**
+```python
+def main():
+    """命令行入口"""
+    import argparse
+    import sys
+    
+    parser = argparse.ArgumentParser(...)
+    args = parser.parse_args()
+    
+    try:
+        result = run_rsi_layered_backtest(...)
+        
+        if result['meta']['n_days_total'] == 0:
+            logger.error("回测无有效数据，退出码 1")
+            sys.exit(1)
+        
+        logger.info("回测完成，退出码 0")
+        sys.exit(0)
+        
+    except FileNotFoundError as e:
+        logger.error("数据文件不存在: %s", e)
+        sys.exit(2)
+    except KeyError as e:
+        logger.error("数据结构错误: %s", e)
+        sys.exit(3)
+    except ValueError as e:
+        logger.error("参数错误: %s", e)
+        sys.exit(4)
+    except Exception as e:
+        logger.exception("回测执行异常: %s", e)
+        sys.exit(5)
+```
+
+**原因：**
+- 命令行入口应返回退出码，方便 CI/CD 判断执行结果
+- 不同退出码对应不同错误类型，便于排查
 
 ---
 
