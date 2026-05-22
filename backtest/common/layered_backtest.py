@@ -9,7 +9,7 @@
 
 作者: 云瑶
 创建日期: 2026-05-19
-修订日期: 2026-05-23（日志规范化 + 代码质量优化）
+修订日期: 2026-05-23（修复7个代码bug + 优化docstring）
 """
 
 import sys
@@ -123,18 +123,32 @@ class LayeredBacktestEngine:
             layer_method: 分层方法
                 - 'percentile': 百分位分层（每层20%）
                 - 'fixed_threshold': 固定阈值分层（需指定thresholds）
-            n_layers: 分层数量（仅percentile模式）
+            n_layers: 分层数量
+                - percentile 模式：有效，控制分层数量（默认5层）
+                - fixed_threshold 模式：无效，由 thresholds 长度决定（n层 = len(thresholds) - 1）
             thresholds: 固定阈值列表，如 [0, 20, 40, 60, 80, 100]
+                - 仅 fixed_threshold 模式使用
+                - 必须至少包含2个阈值点，严格递增
             factor_direction: 因子方向
                 - 'positive': 正向因子，高值=高收益预期
                 - 'negative': 反向因子，低值=高收益预期
             long_layers: 多头组合的层编号（从1开始）
+                - 若未指定，根据 factor_direction 自动设置：
+                  正向因子取高层 [n-1, n]，反向因子取低层 [1, 2]
             short_layers: 空头组合的层编号
+                - 若未指定，根据 factor_direction 自动设置：
+                  正向因子取低层 [1, 2]，反向因子取高层 [n-1, n]
             min_stocks_per_layer: 每层最少股票数
             trade_cost_rate: 单边交易成本率
         
         返回:
-            回测结果字典
+            回测结果字典，包含：
+            - meta: 元数据（分层数量、因子方向、回测天数等）
+            - layer_stats: 各层统计（收益、夏普、换手率等）
+            - long_short: 多空组合统计
+            - monotonicity: 单调性检验
+            - trading_cost_analysis: 交易成本分析
+            - daily_records: 每日详细记录
         """
         # ========== 参数校验 ==========
         # 校验 factor_direction
@@ -221,7 +235,11 @@ class LayeredBacktestEngine:
                 thresholds
             )
             
-            # 将分层结果直接赋值（layer_assignment index与day_data相同）
+            # 【重要】将分层结果赋值到 day_data['_layer']
+            # layer_assignment.index 与 day_data.index 必须一致才能正确对齐
+            # get_layer_assignment 传入 day_data[self.factor_col]，其 index 继承自 day_data
+            # 因此此处赋值安全，不会出现 SettingWithCopyWarning
+            # 后续重构时请保持此依赖关系，切勿改变 index 对齐逻辑
             day_data['_layer'] = layer_assignment
             
             # 计算各层收益
@@ -416,6 +434,33 @@ class LayeredBacktestEngine:
     ) -> Dict:
         """汇总统计结果"""
         
+        # ========== 空数据前置检查 ==========
+        # 若所有日期数据量均不足 min_stocks_per_layer，daily_df 为空
+        if len(daily_df) == 0:
+            logger.warning(
+                f"回测无有效数据：所有日期数据量均不足 min_stocks_per_layer，"
+                f"请检查数据范围或降低 min_stocks_per_layer 参数"
+            )
+            return {
+                'meta': {
+                    'n_layers': n_layers,
+                    'factor_direction': factor_direction,
+                    'long_layers': long_layers,
+                    'short_layers': short_layers,
+                    'min_stocks_per_layer': 0,
+                    'trade_cost_rate': trade_cost_rate,
+                    'layer_method': layer_method,
+                    'thresholds': thresholds,
+                    'n_days_total': 0,
+                    'n_assets_total': int(len(self.merged_df[self.asset_col].unique()))
+                },
+                'layer_stats': {},
+                'long_short': {},
+                'monotonicity': {'correlation': None, 'quality': 'no_data', 'layer_returns': []},
+                'trading_cost_analysis': {},
+                'daily_records': []
+            }
+        
         # 各层统计
         layer_stats = {}
         for layer_id in range(1, n_layers + 1):
@@ -480,10 +525,6 @@ class LayeredBacktestEngine:
         # 构建筛选条件
         long_mask = daily_df['layer'].isin(long_layers) & daily_df['return'].notna()
         short_mask = daily_df['layer'].isin(short_layers) & daily_df['return'].notna()
-        
-        # 直接提取数据，避免逐行迭代
-        long_returns = daily_df.loc[long_mask, 'return'].tolist()
-        short_returns = daily_df.loc[short_mask, 'return'].tolist()
         
         # 计算多空组合收益（优化：用 groupby 替代循环）
         # 按 date 分组，计算每日多空收益和换手率
@@ -589,7 +630,8 @@ class LayeredBacktestEngine:
         layer_returns = []
         for i in range(1, n_layers + 1):
             ret = layer_stats.get(f'layer_{i}', {}).get('daily_return_mean')
-            if not pd.isna(ret) and ret is not None:
+            # pd.notna 同时检查 NaN 和 None，语义更清晰
+            if pd.notna(ret):
                 layer_returns.append(ret)
             else:
                 layer_returns.append(np.nan)
@@ -668,7 +710,7 @@ class LayeredBacktestEngine:
         lines.append(f"分层数量: {meta['n_layers']}")
         lines.append(f"因子方向: {'反向因子' if meta['factor_direction'] == 'negative' else '正向因子'}")
         lines.append(f"多头组合: Layer {', '.join(map(str, meta['long_layers']))}")
-        lines.append(f"空头组合: Layer {meta['short_layers']}")
+        lines.append(f"空头组合: Layer {', '.join(map(str, meta['short_layers']))}")
         lines.append(f"回测天数: {meta['n_days_total']}")
         lines.append(f"股票数量: {meta['n_assets_total']}")
         lines.append("")
@@ -710,7 +752,10 @@ class LayeredBacktestEngine:
             lines.append(f"空头年化收益: {ls_stats.get('short_return_annual', 0)*100:.2f}%")
             lines.append(f"多空日均收益: {ls_stats.get('long_short_return_daily', 0)*100:.4f}%")
             lines.append(f"多空年化收益: {ls_stats.get('long_short_return_annual', 0)*100:.2f}%")
-            lines.append(f"多空夏普比率: {ls_stats.get('long_short_sharpe', 0):.2f}")
+            # 夏普比率可能为 None（volatility=0 时），需单独处理避免 TypeError
+            sharpe = ls_stats.get('long_short_sharpe')
+            sharpe_str = f"{sharpe:.2f}" if sharpe is not None else "N/A"
+            lines.append(f"多空夏普比率: {sharpe_str}")
         
         lines.append("-" * 70)
         lines.append("")
