@@ -75,17 +75,13 @@ class RSILayerConfig:
 
 
 def load_data_from_cache(
-    cache_dir: str = None,
-    factor_col: str = 'rsi_6',
-    return_col: str = 'forward_return_1d'
+    cache_dir: Optional[str] = None
 ) -> tuple:
     """
     从缓存加载因子和收益数据
     
     参数:
-        cache_dir: 缓存目录
-        factor_col: 因子列名
-        return_col: 收益列名
+        cache_dir: 缓存目录，默认 cache/factor_data/
     
     返回:
         (factor_df, return_df)
