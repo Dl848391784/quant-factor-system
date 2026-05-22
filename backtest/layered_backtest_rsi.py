@@ -21,7 +21,6 @@ import os
 import json
 import gzip
 import pandas as pd
-import numpy as np
 from datetime import datetime
 from typing import Dict, Optional
 
