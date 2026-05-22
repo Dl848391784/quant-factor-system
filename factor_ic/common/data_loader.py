@@ -165,8 +165,6 @@ def load_factor_return_data(
     # ========== 加载额外因子文件（如有） ==========
     # 在修改因子列列表之前，创建 factor_cols 的副本（防止引用污染）
     # 使用 list() 创建新列表对象，确保后续操作不影响调用方传入的原始列表
-    default_dropna_cols = list(factor_cols)
-    
     all_factor_cols = list(factor_cols)  # 真正的副本，不污染调用方
     
     if additional_factor_files:
@@ -176,6 +174,14 @@ def load_factor_return_data(
             
             with gzip.open(file_path, 'rt', encoding='utf-8') as f:
                 additional_data = json.load(f)
+            
+            # ========== JSON 结构验证 ==========
+            # 验证 'data' 键存在，防止 JSON 格式错误导致 KeyError
+            if 'data' not in additional_data:
+                raise KeyError(
+                    f"额外因子文件 '{file_path}' 缺少 'data' 键\n"
+                    f"JSON 结构: {list(additional_data.keys())}"
+                )
             
             additional_df = pd.DataFrame(additional_data['data'])
             additional_df = _convert_date_column(additional_df, f'额外因子({col_name})')
@@ -214,8 +220,10 @@ def load_factor_return_data(
                 logger.info(f"合并 {col_name} 后: {rows_after} 行（无数据丢失）")
         
         # 更新因子列列表（包含额外列）
-        # 使用独立变量，保持顺序：先 factor_cols，再追加不在 factor_cols 的额外列
-        all_factor_cols = factor_cols + [k for k in additional_factor_files.keys() if k not in factor_cols]
+        # 使用 extend 而非覆盖赋值，保持语义清晰
+        # 排除已存在于 all_factor_cols 的列，防止重复
+        additional_cols = [k for k in additional_factor_files.keys() if k not in all_factor_cols]
+        all_factor_cols.extend(additional_cols)
     
     # ========== 列存在验证 ==========
     # 必须包含 date 和 asset
@@ -242,7 +250,7 @@ def load_factor_return_data(
         )
     
     # ========== 选择需要的列 ==========
-    # 去重并保持顺序：防止用户传入 factor_cols=['date', 'rsi_6'] 导致重复列
+    # 去重并保持顺序：date/asset 基础列已自动添加，排除用户传入的重复项
     select_cols = list(dict.fromkeys(['date', 'asset'] + all_factor_cols))
     factor_df = factor_df[select_cols].copy()
     
@@ -250,10 +258,10 @@ def load_factor_return_data(
     return_df = return_df[['date', 'asset', return_col]].copy()
     
     # ========== 过滤缺失值 ==========
-    # dropna_cols 默认为原始 factor_cols（不含额外列）
-    # 若用户需要过滤额外列，需显式传入 dropna_cols 参数
+    # dropna_cols 默认为原始 factor_cols（不含额外列和基础列）
+    # 就近计算，语义清晰：排除 date/asset 基础列
     if dropna_cols is None:
-        dropna_cols = default_dropna_cols
+        dropna_cols = [c for c in factor_cols if c not in ['date', 'asset']]
     
     # 验证 dropna_cols 中的列是否存在于 factor_df
     missing_dropna_cols = [col for col in dropna_cols if col not in factor_df.columns]
@@ -288,7 +296,9 @@ def load_factor_return_data(
             common_dates = factor_dates & return_dates
             factor_df = factor_df[factor_df['date'].isin(common_dates)].reset_index(drop=True)
             return_df = return_df[return_df['date'].isin(common_dates)].reset_index(drop=True)
-            logger.info(f"对齐后日期数: {len(common_dates)}")
+            
+            # 更新日志统计：显示对齐后的行数变化
+            logger.info(f"对齐后: {len(common_dates)} 个日期, 因子 {len(factor_df)} 行, 收益 {len(return_df)} 行")
     
     # ========== 返回结果 ==========
     return factor_df, return_df, {
