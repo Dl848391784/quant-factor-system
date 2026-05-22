@@ -112,8 +112,21 @@ def calculate_turnover_surge(
     prev_close = factor_df.groupby('asset')['close'].transform(
         lambda x: x.shift(1)
     )
-    # 使用局部变量存储涨跌幅，不污染输出 DataFrame
-    daily_return = (factor_df['close'] - prev_close) / prev_close.clip(lower=EPSILON)
+    
+    # 异常检测：prev_close <= EPSILON（股价不应为零或负值）
+    # 区分两种情况：
+    # 1. prev_close = NaN：首个交易日无前一日数据（正常缺失，不参与计算）
+    # 2. prev_close <= EPSILON：数据异常（股价不应为零），需检测并记录
+    abnormal_prev_close_mask = (prev_close.notna()) & (prev_close <= EPSILON)
+    abnormal_prev_close_count = abnormal_prev_close_mask.sum()
+    if abnormal_prev_close_count > 0:
+        logger.warning(f"检测到 {abnormal_prev_close_count} 个异常前收盘价（≤ {EPSILON}），已标记为 np.nan")
+    
+    # 计算涨跌幅：仅对有效数据（notna 且 > EPSILON）计算，其余保持 NaN
+    # 使用 mask 排除异常，而非 clip 静默修正（遵循 MODULE.md 异常排除时机规范）
+    safe_prev_close = prev_close.mask(prev_close.isna() | (prev_close <= EPSILON))
+    daily_return = (factor_df['close'] - prev_close) / safe_prev_close
+    # 注意：safe_prev_close 中 NaN/异常位置仍为 NaN，除法结果自然为 NaN
     
     # ========== Step 5: 应用业务筛选条件 ==========
     # 条件1: turnover_surge > 1（换手率高于近期均值）

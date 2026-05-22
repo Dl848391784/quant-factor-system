@@ -167,6 +167,10 @@
     - 修复 ic_turnover_surge_1d.py：pd.NA → np.nan（第107/127行）
     - 修复 ic_bollinger_pb_1d.py：pd.NA → np.nan（第107/112行）
     - 核心原则：构造时 pd.NA 会导致 dtype 变为 object，引发类型问题
+23. v3.11（2026-05-23）：
+    - 新增"股价类数据异常检测规范"章节
+    - 修复 ic_turnover_surge_1d.py：prev_close 除零防护逻辑错误
+    - 核心原则：异常检测优于静默修正，prev_close=0 计算出天文数字
 
 # 一、概述与基础
 
@@ -494,6 +498,56 @@ bollinger_pb = (close - lower) / safe_band_width
 - 使用 `.clip()` 或类似修正操作前需排除异常
 
 **参考：** ic_bollinger_pb_1d.py 第97-99行（2026-05-22 修复）
+
+### 股价类数据异常检测规范（2026-05-23新增）
+
+**核心原则：股价类数据不应为零或负值，异常检测优于静默修正。**
+
+**错误示例（静默修正掩盖异常）：**
+
+```python
+# ❌ 错误：使用 clip 静默修正 prev_close=0
+prev_close = factor_df.groupby('asset')['close'].transform(lambda x: x.shift(1))
+daily_return = (factor_df['close'] - prev_close) / prev_close.clip(lower=EPSILON)
+# 问题：
+# - prev_close=0 时：daily_return = (close - 0) / EPSILON = 天文数字（完全错误）
+# - 静默修正掩盖了"股价为零"的数据异常
+# - 无法区分 NaN（正常缺失）和 0（数据异常）
+```
+
+**正确示例（异常检测 + 排除）：**
+
+```python
+# ✅ 正确：检测异常并排除，而非静默修正
+prev_close = factor_df.groupby('asset')['close'].transform(lambda x: x.shift(1))
+
+# 异常检测：prev_close <= EPSILON（股价不应为零或负值）
+abnormal_mask = (prev_close.notna()) & (prev_close <= EPSILON)
+abnormal_count = abnormal_mask.sum()
+if abnormal_count > 0:
+    logger.warning(f"检测到 {abnormal_count} 个异常前收盘价（≤ {EPSILON}），已标记为 np.nan")
+
+# 使用 mask 排除异常，而非 clip 静默修正
+safe_prev_close = prev_close.mask(prev_close.isna() | (prev_close <= EPSILON))
+daily_return = (factor_df['close'] - prev_close) / safe_prev_close
+# 结果：NaN/异常位置自然为 NaN，无需后续覆盖
+```
+
+**为何必须异常检测而非静默修正：**
+
+|| 原因 | 说明 |
+|------|------|
+|| 业务语义 | 股价不应为零，prev_close=0 是数据异常，应检测 |
+|| 结果正确 | prev_close=0 静默修正后计算出天文数字，完全错误 |
+|| 区分场景 | NaN（正常缺失）vs 0（数据异常），语义不同 |
+|| 可追溯 | 异常日志记录，便于后续排查数据源问题 |
+
+**适用场景：**
+- 股价类数据计算（prev_close, close, high, low）
+- 除零防护前需排除数据异常
+- 区分"正常缺失"与"数据异常"
+
+**参考：** ic_turnover_surge_1d.py 第115-129行（2026-05-23 修复）
 
 ### pandas 缺失值标记规范（2026-05-22新增，2026-05-23修订）
 
