@@ -15,30 +15,33 @@
     在分支顺序变化时（如有人在 bool 之前添加 int 检查）会被误判
   * 显式分开处理：意图清晰，防止分支顺序变化导致的隐蔽 bug
 
-容器类型处理（2026-05-22）：
-- dict: 递归转换值
+容器类型处理（2026-05-23）：
+- dict: 递归转换键和值（键也需转换，如 np.int64 键）
 - list: 递归转换元素
 - tuple: 递归转换元素并返回 tuple（numpy 操作如 np.where 返回 tuple）
 - np.ndarray/pd.Series: 转为 list 后递归处理
-- pd.DataFrame: 转为 list of dicts（每行一个 dict，to_dict('records'))
+- pd.DataFrame: 转为 list of dicts（每行一个 dict，to_dict('records')）
 
-pandas 缺失值处理（2026-05-22）：
-- pd.NaT: 缺失时间，转为 None（使用 `obj is pd.NaT` 检查单例，必须在 pd.Timestamp 之前检查）
-- pd.NA: 扩展类型缺失值，转为 None（使用 `obj is pd.NA` 检查单例）
-- np.NaN/nan: numpy 浮点 NaN，转为 None（在 np.floating 分支用 np.isnan 处理）
-- Python float NaN: 使用 math.isnan 处理（标准库，语义更准确）
-- 检查顺序：pd.NaT/pd.NA → pd.Timestamp（某些版本 NaTType 继承 Timestamp，防止误判）
-- 单例检查规范：必须用 `is` 判断，禁止 `isinstance(obj, type(singleton))`：
-  * isinstance 依赖私有内部类（如 pandas.core.arrays.masked.NAType），跨版本不稳定
-  * 单例对象用 `is` 即可完全覆盖，isinstance 检查是冗余的
+pandas 缺失值处理（2026-05-23）：
+- pd.NaT: 缺失时间，转为 None（单例检查）
+- pd.NA: 扩展类型缺失值，转为 None（单例检查）
+- np.NaN/nan: numpy 浮点 NaN/Inf，转为 None
+- Python float NaN/Inf: 转为 None
+- 单例检查规范（2026-05-23更新）：
+  * 单例检查（pd.NaT/pd.NA）必须放在所有 isinstance 检查之前
+  * 必须用 `is` 判断，禁止 `isinstance(obj, type(singleton))`
+  * isinstance 依赖类型继承，而 pd.NaT 在某些 pandas 版本继承 pd.Timestamp
+  * 单例检查不依赖类型继承，跨版本稳定
 
-NaN 检查规范（2026-05-22）：
-- numpy 浮点类型：使用 `np.isnan(obj)`（专为 numpy 类型设计）
-- Python float 类型：使用 `math.isnan(obj)`（标准库，语义更准确、更轻量）
+NaN/Inf 检查规范（2026-05-23）：
+- numpy 浮点类型：使用 `np.isnan(obj) or np.isinf(obj)`
+- Python float 类型：使用 `math.isnan(obj) or math.isinf(obj)`
+- NaN 和 Inf 都转为 None（JSON 不支持 Inf）
 - 禁止混用：语义不准确，增加不必要的依赖
 
 作者: 云舟
 日期: 2026-05-10
+最后修改: 2026-05-23（修复单例检查顺序、dict键转换、Inf检查遗漏）
 """
 
 import math
@@ -52,7 +55,7 @@ logger = get_logger(__name__)
 
 def convert_to_native_types(obj: Any) -> Any:
     """
-    递归转换 numpy/pandas 类型为 Python 原生类型
+    递归转换 numpy/pandas 类型为 Python 厬生类型
     
     解决 JSON 序列化时 numpy 类型无法直接序列化的问题。
     
@@ -69,11 +72,24 @@ def convert_to_native_types(obj: Any) -> Any:
         >>> convert_to_native_types([np.int64(10), np.float32(2.5)])
         [10, 2.5]
     """
+    # None 直接返回
     if obj is None:
         return None
     
+    # 单例检查：必须在所有 isinstance 检查之前
+    # 单例对象用 `is` 判断，不依赖类型继承，跨版本稳定
+    if obj is pd.NaT:
+        # pandas 缺失时间，转为 None
+        return None
+    
+    if obj is pd.NA:
+        # pandas 扩展类型缺失值，转为 None
+        return None
+    
+    # 容器类型：递归处理
     if isinstance(obj, dict):
-        return {k: convert_to_native_types(v) for k, v in obj.items()}
+        # 字典的键和值都需要转换（键可能是 numpy 类型）
+        return {convert_to_native_types(k): convert_to_native_types(v) for k, v in obj.items()}
     
     elif isinstance(obj, list):
         return [convert_to_native_types(v) for v in obj]
@@ -97,12 +113,16 @@ def convert_to_native_types(obj: Any) -> Any:
     
     elif isinstance(obj, np.floating):
         # np.floating 是所有 numpy 浮点类型的抽象基类（float64/float32/float16）
-        # 处理 NaN
-        if np.isnan(obj):
+        # 处理 NaN 和 Inf
+        if np.isnan(obj) or np.isinf(obj):
             return None
         return float(obj)
     
     elif isinstance(obj, np.ndarray):
+        # ndarray.tolist() 对 object dtype 不做元素转换，必须递归处理
+        # 例如：np.array([np.int64(1), np.float64(2.5)], dtype=object).tolist()
+        #       返回 [np.int64(1), np.float64(2.5)]，而非 [1, 2.5]
+        # 因此必须递归调用 convert_to_native_types 处理每个元素
         return convert_to_native_types(obj.tolist())
     
     elif isinstance(obj, pd.Series):
@@ -116,22 +136,13 @@ def convert_to_native_types(obj: Any) -> Any:
         # DataFrame 转为 list of dicts（每行一个 dict）
         return convert_to_native_types(obj.to_dict('records'))
     
-    # pandas 缺失值检查必须在 pd.Timestamp 之前（某些版本 NaTType 继承 Timestamp）
-    elif obj is pd.NaT:
-        # pandas 缺失时间，转为 None（单例检查）
-        return None
-    
-    elif obj is pd.NA:
-        # pandas 扩展类型缺失值（pd.NA 是单例对象，用 is 检查）
-        return None
-    
     elif isinstance(obj, pd.Timestamp):
-        # pandas 时间戳转字符串（pd.NaT 已在前面处理）
+        # pandas 时间戳转字符串（pd.NaT 已在前面单例检查处理）
         return str(obj)
     
     elif isinstance(obj, float):
-        # 处理 Python float 的 NaN（使用 math.isnan，语义更准确）
-        if math.isnan(obj):
+        # 处理 Python float 的 NaN 和 Inf
+        if math.isnan(obj) or math.isinf(obj):
             return None
         return obj
     

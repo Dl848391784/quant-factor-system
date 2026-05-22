@@ -233,14 +233,56 @@ class TestConvertToNativeTypes:
         result = convert_to_native_types(data)
         assert result == [10, None, None, 'string', 1.5]
     
-    def test_inf_not_converted_to_none(self):
-        """inf（无穷大）不转换为 None，保持为 float"""
-        # 注意：inf 是有效浮点数，不应转为 None
+    def test_inf_converted_to_none(self):
+        """inf（无穷大）转换为 None（JSON 不支持 inf）"""
+        # numpy float inf
         inf_val = np.float64(np.inf)
         result = convert_to_native_types(inf_val)
-        assert result == float('inf') or result is None  # 视函数设计而定
+        assert result is None
         
-        # 如果函数不处理 inf，这里需要更新测试以反映实际行为
+        # Python float inf
+        inf_val = float('inf')
+        result = convert_to_native_types(inf_val)
+        assert result is None
+        
+        # negative inf
+        neg_inf = np.float64(-np.inf)
+        result = convert_to_native_types(neg_inf)
+        assert result is None
+    
+    def test_dict_key_conversion(self):
+        """字典键转换：numpy 类型键应转换为 Python 原生类型"""
+        # numpy int 作为键
+        data = {np.int64(10): 'value'}
+        result = convert_to_native_types(data)
+        # 验证键被转换（检查键的类型）
+        keys = list(result.keys())
+        assert len(keys) == 1
+        assert type(keys[0]) == int  # 键类型应为 int，而非 np.int64
+        assert keys[0] == 10
+        
+        # numpy float 作为键
+        data = {np.float64(1.5): 'value'}
+        result = convert_to_native_types(data)
+        keys = list(result.keys())
+        assert len(keys) == 1
+        assert type(keys[0]) == float  # 键类型应为 float
+        assert keys[0] == 1.5
+    
+    def test_singleton_check_order(self):
+        """单例检查顺序：pd.NaT/pd.NA 在 isinstance 检查之前"""
+        # pd.NaT 是单例，应被正确识别
+        result = convert_to_native_types(pd.NaT)
+        assert result is None
+        
+        # pd.NA 是单例，应被正确识别
+        result = convert_to_native_types(pd.NA)
+        assert result is None
+        
+        # pd.NaT 在某些 pandas 版本继承 pd.Timestamp，但单例检查应在 isinstance 之前
+        # 验证不会被误判为 Timestamp
+        result = convert_to_native_types(pd.NaT)
+        assert result is None  # 不是字符串
 
 
 class TestConvertTypesBehaviorVerification:
