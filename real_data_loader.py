@@ -73,7 +73,7 @@ EPSILON = 1e-10
 # ============================================================================
 
 def _wilder_smoothing_rsi(series: pd.Series, n: int) -> pd.Series:
-    """Wilder 平滑（前 n 天 SMA 种子，之后 EWM 递推）- RSI专用
+    """Wilder 平滑：前 n-1 天 NaN，第 n 天 SMA 种子，第 n+1 天起 EWM 递推
     
     Args:
         series: 单资产的序列（gain 或 loss）
@@ -84,29 +84,39 @@ def _wilder_smoothing_rsi(series: pd.Series, n: int) -> pd.Series:
     
     Note:
         Wilder (1978) 标准实现：
-        1. 前 n 天使用 rolling SMA（rolling(n).mean()）
-           - 前 n-1 天：NaN（数据不足）
-           - 第 n-1 天（索引 n-1）：SMA 值作为 EWM 种子
-        2. 第 n 天及之后：EWM 递推
+        1. 前 n-1 天为 NaN（数据不足以计算 SMA）
+        2. 第 n 天（索引 n-1）使用 SMA 值作为 EWM 种子
+           - SMA = series.iloc[:n].mean()
+        3. 第 n+1 天及之后使用 EWM 递推
            - 公式：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
            - alpha = 1/n
+           - NaN 传播：若当天输入为 NaN，结果也为 NaN
         
         与 pandas ewm(adjust=False) 的差异：
         - pandas ewm(adjust=False) 从第 1 个观测值就开始计算
-        - Wilder 标准要求前 n-1 天为 NaN，第 n-1 天用 SMA
+        - Wilder 标准要求前 n-1 天为 NaN，第 n 天用 SMA
     """
-    # 前 n 天使用 rolling SMA（rolling 前n-1天为NaN）
-    rolling_avg = series.rolling(window=n).mean()
-    
-    # 手动计算EWM递推（确保与SMA种子衔接）
-    result = rolling_avg.copy()
-    
-    # 从第 n 天开始 EWM 递推（索引 n 到 len-1）
     alpha = 1.0 / n
+    
+    # 初始化全 NaN 序列
+    result = pd.Series(float('nan'), index=series.index, dtype=float)
+    
+    # 防御性检查：序列长度不足
+    if len(series) < n:
+        return result
+    
+    # 第 n 天（索引 n-1）：SMA 种子
+    seed = series.iloc[:n].mean()
+    if pd.isna(seed):  # 防御：前 n 天全为 NaN 时无法计算种子
+        return result
+    result.iloc[n - 1] = seed
+    
+    # 第 n+1 天起（索引 n 到 len-1）：EWM 递推
     for i in range(n, len(series)):
-        if pd.notna(rolling_avg.iloc[i-1]):  # 前一天的avg有效
-            # EWM 递推：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
-            result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * result.iloc[i-1]
+        if pd.isna(series.iloc[i]):  # 当天值为 NaN：传播 NaN
+            result.iloc[i] = float('nan')
+        else:
+            result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * result.iloc[i - 1]
     
     return result
 
