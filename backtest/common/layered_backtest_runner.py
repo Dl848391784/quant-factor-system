@@ -16,8 +16,15 @@ from backtest.common.layered_backtest_runner import run_layered_backtest, LayerC
 
 # 定义因子特有 Config（继承基类）
 class MyFactorLayerConfig(LayerConfigBase):
-    layer_thresholds = [0, 0.5, 1.0, 1.5, 2.0, 5.0]
+    n_layers = 5  # percentile 分层（每层20%）
     factor_direction = 'negative'
+    layer_names = {
+        '1': '极低层',
+        '2': '偏低层',
+        '3': '正常层',
+        '4': '偏高层',
+        '5': '极高层'
+    }
     # ...
 
 # 调用公共入口
