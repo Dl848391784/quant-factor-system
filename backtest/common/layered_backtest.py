@@ -29,26 +29,34 @@ from backtest.common.logger_config import get_logger
 logger = get_logger(__name__)
 
 
-def _coalesce(val: Any, default: float = 0.0) -> float:
+def _coalesce(val: Any, default: float = 0.0) -> Any:
     """
-    安全取值：只替换 None，保留合法的 0.0 和负数
+    安全取值：只替换 None，保留 NaN、0.0 和负数
     
     用法:
         long_daily = _coalesce(ls_stats.get('long_return_daily'))
+        # 报告展示时：若返回 NaN，显示 N/A
+        if pd.isna(long_daily):
+            lines.append("多空日均收益: N/A")
+        else:
+            lines.append(f"多空日均收益: {long_daily*100:.4f}%")
     
     参数:
         val: 可能为 None 的值
         default: None 时的默认值（默认 0.0）
     
     返回:
-        float: val 不为 None 时返回 float(val)，否则返回 default
+        Any: val 不为 None 时返回原值（保留 NaN），否则返回 default
+    
+    设计说明:
+        - NaN 透传：数据不足时收益为 NaN，报告应显示 N/A 而非 0.00%
+        - None 替换：字典键缺失时返回 None，应替换为默认值
+        - 区分场景：NaN 表示"有数据但计算无效"，None 表示"无数据"
     """
     if val is None:
         return default
-    # NaN 也视为无效值
-    if isinstance(val, float) and pd.isna(val):
-        return default
-    return float(val)
+    # NaN 透传，不替换（报告展示时由调用方决定如何显示）
+    return val
 
 
 class LayeredBacktestEngine:
@@ -240,13 +248,21 @@ class LayeredBacktestEngine:
                     f"当前 n_layers={n_layers}，请检查 thresholds 参数"
                 )
         
-        # 每日处理
+        # 每日处理（预先按日期分组，时间复杂度 O(n) 而非 O(n²)）
+        # 原布尔索引每次全表扫描，groupby 一次分组后遍历
         daily_records = []
         prev_assignment = None
         
+        # 预先按日期分组（self.dates 已排序）
+        grouped_by_date = self.merged_df.groupby(self.date_col)
+        
         for date in self.dates:
-            # 获取当日数据
-            day_data = self.merged_df[self.merged_df[self.date_col] == date].copy()
+            # 获取当日数据（groupby 后，直接取组，无需全表扫描）
+            try:
+                day_data = grouped_by_date.get_group(date).copy()
+            except KeyError:
+                # 该日期无数据（如停牌日），跳过
+                continue
             
             # 停牌过滤
             if self.volume_col and self.volume_col in day_data.columns:
@@ -347,21 +363,26 @@ class LayeredBacktestEngine:
         
         elif method == 'fixed_threshold' and thresholds:
             # 固定阈值分层（最后一层右闭区间，其余右开）
+            # 顺序依赖说明：
+            #   1. 先处理边界外数据（低于最小阈值归Layer1，高于最大阈值归Layer n）
+            #   2. 再处理边界内数据（循环归层）
+            #   若调整顺序，需确保边界外数据不被循环覆盖
             layer_assignment = pd.Series(0, index=factor_values.index)
             
-            # 统一循环：处理所有层（包括最后一层）
-            for i in range(len(thresholds) - 1):
-                lower = thresholds[i]
-                upper = thresholds[i + 1]
-                # 最后一层（i == n_layers - 1）：右闭区间 [lower, upper]
-                # 其余层：右开区间 [lower, upper)
-                if i == n_layers - 1:  # 最后一层
-                    mask = (factor_values >= lower) & (factor_values <= upper)
-                else:  # 前n-1层
-                    mask = (factor_values >= lower) & (factor_values < upper)
-                layer_assignment[mask] = i + 1
+            # ========== 边界处理（必须在循环前执行）==========
+            # 低于最小阈值：归入 Layer 1
+            below_min_mask = factor_values < thresholds[0]
+            if below_min_mask.any():
+                n_below = below_min_mask.sum()
+                pct_below = n_below / len(factor_values) * 100
+                logger.warning(
+                    f"fixed_threshold 边界警告: {n_below} 个股票 ({pct_below:.2f}%) "
+                    f"因子值低于最小阈值 {thresholds[0]}，已归入 Layer1。"
+                    f"建议：检查 thresholds 参数是否覆盖数据范围，或使用 percentile 分层。"
+                )
+                layer_assignment[below_min_mask] = 1
             
-            # 超最大阈值报警（归入最后一层）
+            # 超最大阈值：归入最后一层
             above_max_mask = factor_values > thresholds[-1]
             if above_max_mask.any():
                 n_above = above_max_mask.sum()
@@ -373,17 +394,19 @@ class LayeredBacktestEngine:
                 )
                 layer_assignment[above_max_mask] = n_layers
             
-            # 低于最小阈值报警（归入第一层）
-            below_min_mask = factor_values < thresholds[0]
-            if below_min_mask.any():
-                n_below = below_min_mask.sum()
-                pct_below = n_below / len(factor_values) * 100
-                logger.warning(
-                    f"fixed_threshold 边界警告: {n_below} 个股票 ({pct_below:.2f}%) "
-                    f"因子值低于最小阈值 {thresholds[0]}，已归入 Layer1。"
-                    f"建议：检查 thresholds 参数是否覆盖数据范围，或使用 percentile 分层。"
-                )
-                layer_assignment[below_min_mask] = 1
+            # ========== 边界内循环归层 ==========
+            for i in range(len(thresholds) - 1):
+                lower = thresholds[i]
+                upper = thresholds[i + 1]
+                # 最后一层（i == n_layers - 1）：右闭区间 [lower, upper]
+                # 其余层：右开区间 [lower, upper)
+                if i == n_layers - 1:  # 最后一层
+                    mask = (factor_values >= lower) & (factor_values <= upper)
+                else:  # 前n-1层
+                    mask = (factor_values >= lower) & (factor_values < upper)
+                # 只处理未归层的股票（layer_assignment == 0）
+                mask_unassigned = mask & (layer_assignment == 0)
+                layer_assignment[mask_unassigned] = i + 1
             
             # 断言：所有股票都已归层
             unassigned_mask = layer_assignment == 0
@@ -643,10 +666,11 @@ class LayeredBacktestEngine:
         
         # 多空组合统计（用 concat 替代 groupby.apply，跨版本行为一致）
         # pandas ≥ 2.2 下 groupby.apply 可能产生多级索引，改用 concat 更稳定
+        # 显式排序日期：保证时间序列顺序，便于后续累计收益计算
         daily_ls_list = []
-        for date_val in daily_df['date'].unique():
+        for date_val in sorted(daily_df['date'].unique()):
             group = daily_df[daily_df['date'] == date_val]
-            ls_series = self._calc_daily_ls(group, long_layers, short_layers)
+            ls_series = LayeredBacktestEngine._calc_daily_ls(group, long_layers, short_layers)
             if pd.notna(ls_series.get('long_short_return')):
                 ls_series['date'] = date_val
                 daily_ls_list.append(ls_series)
@@ -677,9 +701,9 @@ class LayeredBacktestEngine:
                 'long_short_return_annual': safe_float(ls_annual),
                 'long_short_sharpe': safe_float(ls_annual / ls_vol) if ls_vol > 0 else None,
                 'long_short_volatility': safe_float(ls_vol),
-                # 换手率：从每日平均换手率中取均值（已按日期分组，权重正确）
-                'avg_turnover_long': safe_float(long_short_df['long_turnover'].mean()),
-                'avg_turnover_short': safe_float(long_short_df['short_turnover'].mean()),
+                # 换手率：统一命名（turnover_xxx_avg，与 layer_stats.turnover_avg 风格一致）
+                'turnover_long_avg': safe_float(long_short_df['long_turnover'].mean()),
+                'turnover_short_avg': safe_float(long_short_df['short_turnover'].mean()),
                 'n_days': int(len(long_short_df))  # 转 int 避免 JSON 序列化问题
             }
         
@@ -773,8 +797,8 @@ class LayeredBacktestEngine:
             return {}
         
         # 安全取值：使用 _coalesce 辅助函数
-        long_turnover = _coalesce(long_short_stats.get('avg_turnover_long'))
-        short_turnover = _coalesce(long_short_stats.get('avg_turnover_short'))
+        long_turnover = _coalesce(long_short_stats.get('turnover_long_avg'))
+        short_turnover = _coalesce(long_short_stats.get('turnover_short_avg'))
         long_daily_ret = _coalesce(long_short_stats.get('long_return_daily'))
         short_daily_ret = _coalesce(long_short_stats.get('short_return_daily'))
         

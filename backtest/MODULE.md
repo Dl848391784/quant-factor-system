@@ -2,7 +2,7 @@
 
 > 本文档定义 backtest/ 目录下分层回测脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v1.0（新增安全取值辅助函数、多空组合计算规范、fixed_threshold 分层规范）
+> 版本: v1.1（新增性能优化规范、静态方法调用规范、命名风格规范、NaN透传规范）
 > 修订日期: 2026-05-23
 
 ---
@@ -264,6 +264,74 @@ unassigned_mask = layer_assignment == 0
 if unassigned_mask.any():
     raise ValueError("fixed_threshold 分层逻辑错误：存在未归层的股票")
 ```
+
+**边界处理顺序依赖：**
+- 边界处理必须在循环前执行
+- 循环内只处理未归层股票（`mask & (layer_assignment == 0)`）
+- 原因：若调整顺序，边界外数据会被循环覆盖
+
+---
+
+## 性能优化规范
+
+**预先按日期分组：**
+- 原布尔索引每次全表扫描，时间复杂度 O(n²)
+- groupby 一次分组后遍历，时间复杂度 O(n)
+- 原因：merged_df 有 n_dates × n_assets 行，全表扫描耗时
+
+**正确写法：**
+```python
+grouped_by_date = merged_df.groupby(date_col)
+for date in dates:
+    day_data = grouped_by_date.get_group(date).copy()
+```
+
+**错误写法：**
+```python
+for date in dates:
+    day_data = merged_df[merged_df[date_col] == date].copy()  # 全表扫描
+```
+
+---
+
+## 静态方法调用规范
+
+**静态方法应通过类名调用，而非 self.：**
+- self. 调用破坏静态方法语义
+- 类名调用明确是静态方法，便于维护
+
+**正确写法：**
+```python
+ls_series = LayeredBacktestEngine._calc_daily_ls(group, long_layers, short_layers)
+```
+
+**错误写法：**
+```python
+ls_series = self._calc_daily_ls(group, long_layers, short_layers)
+```
+
+---
+
+## 命名风格规范
+
+**同一概念在不同字典中命名风格必须统一：**
+- 换手率字段：统一使用 `turnover_xxx_avg`（与 `layer_stats.turnover_avg` 一致）
+- 原因：`avg_turnover_long` 与 `turnover_avg` 风格不一致，增加维护成本
+
+**正确写法：**
+```python
+long_short_stats = {
+    'turnover_long_avg': ...,  # 统一风格
+    'turnover_short_avg': ...,
+}
+```
+
+**错误写法：**
+```python
+long_short_stats = {
+    'avg_turnover_long': ...,  # 与 turnover_avg 风格不一致
+    'avg_turnover_short': ...,
+}
 
 ---
 
