@@ -2,7 +2,7 @@
 
 > 本文档定义 backtest/ 目录下分层回测脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v0.9（新增强制复用规范、模块边界规范）
+> 版本: v1.0（新增安全取值辅助函数、多空组合计算规范、fixed_threshold 分层规范）
 > 修订日期: 2026-05-23
 
 ---
@@ -194,8 +194,76 @@ if __name__ == '__main__':
 **字典取值规范（防 None 运算）：**
 - 错误写法：`val = dict.get('key', 0)` — 键存在但值为 None 时返回 None
 - 错误写法：`val = dict.get('key') or 0` — 合法的 0.0 或负数会被替换为 0
-- 正确写法：`val = dict.get('key'); val = val if val is not None else 0`
+- 正确写法：`val = _coalesce(dict.get('key'))` — 使用辅助函数，只替换 None/NaN
 - 原因：`None * 100` 会抛 TypeError，但 `0.0` 和负数是合法值不应替换
+
+**安全取值辅助函数（必须使用）：**
+- 模块级辅助函数：`_coalesce(val, default=0.0)`
+- 用法：`long_daily = _coalesce(ls_stats.get('long_return_daily'))`
+- 原因：避免每个字段写两行代码，约 20 次重复
+
+---
+
+## 多空组合计算规范
+
+**groupby.apply 多级索引风险：**
+- pandas ≥ 2.2 下，`groupby.apply` 当 `group_keys=False` 时可能产生多级索引
+- `reset_index()` 后 date 列不会出现，而是变成整数索引
+- **正确做法：用显式循环 + concat 替代 groupby.apply**
+- 原因：跨版本行为一致，避免多级索引陷阱
+
+**正确写法：**
+```python
+daily_ls_list = []
+for date_val in daily_df['date'].unique():
+    group = daily_df[daily_df['date'] == date_val]
+    ls_series = _calc_daily_ls(group, long_layers, short_layers)
+    if pd.notna(ls_series.get('long_short_return')):
+        ls_series['date'] = date_val
+        daily_ls_list.append(ls_series)
+long_short_df = pd.DataFrame(daily_ls_list)
+```
+
+**错误写法：**
+```python
+long_short_df = daily_df.groupby('date', group_keys=False).apply(
+    lambda group: _calc_daily_ls(group, long_layers, short_layers)
+)
+long_short_df = long_short_df.reset_index()  # date 列可能消失
+```
+
+---
+
+## fixed_threshold 分层规范
+
+**统一循环写法（避免空循环）：**
+- `range(len(thresholds) - 2)` 在双阈值时产生空循环（range(0)）
+- **正确做法：统一循环处理所有层，最后一层用条件判断**
+- 原因：语义清晰，避免空循环陷阱
+
+**正确写法：**
+```python
+for i in range(len(thresholds) - 1):  # 统一循环
+    lower = thresholds[i]
+    upper = thresholds[i + 1]
+    if i == n_layers - 1:  # 最后一层：右闭区间
+        mask = (factor_values >= lower) & (factor_values <= upper)
+    else:  # 前n-1层：右开区间
+        mask = (factor_values >= lower) & (factor_values < upper)
+    layer_assignment[mask] = i + 1
+```
+
+**断言验证（分层后必须校验）：**
+- 归层后必须校验所有股票都已归层
+- 未归层股票（layer_assignment == 0）应抛 ValueError
+- 原因：边界逻辑遗漏时静默出错，断言强制暴露问题
+
+**正确写法：**
+```python
+unassigned_mask = layer_assignment == 0
+if unassigned_mask.any():
+    raise ValueError("fixed_threshold 分层逻辑错误：存在未归层的股票")
+```
 
 ---
 

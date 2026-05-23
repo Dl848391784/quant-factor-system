@@ -29,6 +29,28 @@ from backtest.common.logger_config import get_logger
 logger = get_logger(__name__)
 
 
+def _coalesce(val: Any, default: float = 0.0) -> float:
+    """
+    安全取值：只替换 None，保留合法的 0.0 和负数
+    
+    用法:
+        long_daily = _coalesce(ls_stats.get('long_return_daily'))
+    
+    参数:
+        val: 可能为 None 的值
+        default: None 时的默认值（默认 0.0）
+    
+    返回:
+        float: val 不为 None 时返回 float(val)，否则返回 default
+    """
+    if val is None:
+        return default
+    # NaN 也视为无效值
+    if isinstance(val, float) and pd.isna(val):
+        return default
+    return float(val)
+
+
 class LayeredBacktestEngine:
     """
     通用分层回测引擎
@@ -327,19 +349,19 @@ class LayeredBacktestEngine:
             # 固定阈值分层（最后一层右闭区间，其余右开）
             layer_assignment = pd.Series(0, index=factor_values.index)
             
-            for i in range(len(thresholds) - 2):  # 前n-1层：左闭右开
+            # 统一循环：处理所有层（包括最后一层）
+            for i in range(len(thresholds) - 1):
                 lower = thresholds[i]
                 upper = thresholds[i + 1]
-                mask = (factor_values >= lower) & (factor_values < upper)
+                # 最后一层（i == n_layers - 1）：右闭区间 [lower, upper]
+                # 其余层：右开区间 [lower, upper)
+                if i == n_layers - 1:  # 最后一层
+                    mask = (factor_values >= lower) & (factor_values <= upper)
+                else:  # 前n-1层
+                    mask = (factor_values >= lower) & (factor_values < upper)
                 layer_assignment[mask] = i + 1
             
-            # 最后一层：左闭右闭 [thresholds[-2], thresholds[-1]]
-            last_lower = thresholds[-2]
-            last_upper = thresholds[-1]
-            mask_last = (factor_values >= last_lower) & (factor_values <= last_upper)
-            layer_assignment[mask_last] = n_layers
-            
-            # 超最大阈值报警
+            # 超最大阈值报警（归入最后一层）
             above_max_mask = factor_values > thresholds[-1]
             if above_max_mask.any():
                 n_above = above_max_mask.sum()
@@ -351,7 +373,7 @@ class LayeredBacktestEngine:
                 )
                 layer_assignment[above_max_mask] = n_layers
             
-            # 低于最小阈值报警
+            # 低于最小阈值报警（归入第一层）
             below_min_mask = factor_values < thresholds[0]
             if below_min_mask.any():
                 n_below = below_min_mask.sum()
@@ -362,6 +384,15 @@ class LayeredBacktestEngine:
                     f"建议：检查 thresholds 参数是否覆盖数据范围，或使用 percentile 分层。"
                 )
                 layer_assignment[below_min_mask] = 1
+            
+            # 断言：所有股票都已归层
+            unassigned_mask = layer_assignment == 0
+            if unassigned_mask.any():
+                logger.error(
+                    f"fixed_threshold 逻辑错误: {unassigned_mask.sum()} 个股票未归层，"
+                    f"请检查 thresholds 参数是否覆盖数据范围"
+                )
+                raise ValueError("fixed_threshold 分层逻辑错误：存在未归层的股票")
         
         else:
             raise ValueError(f"Unknown layer method: {method}")
@@ -610,16 +641,20 @@ class LayeredBacktestEngine:
                 'turnover_avg': float(turnover_avg)
             }
         
-        # 多空组合统计（优化：用 groupby 替代 iterrows）
-        # 按 date 分组，计算每日多空收益和换手率
-        # 使用静态方法（避免闭包捕获外部变量，显式传参）
-        long_short_df = daily_df.groupby('date', group_keys=False).apply(
-            lambda group: self._calc_daily_ls(group, long_layers, short_layers)
-        )
-        # 先 reset_index 还原 date 列，再 dropna 过滤无效数据
-        if len(long_short_df) > 0:
-            long_short_df = long_short_df.reset_index()
-            long_short_df = long_short_df.dropna(subset=['long_short_return'])
+        # 多空组合统计（用 concat 替代 groupby.apply，跨版本行为一致）
+        # pandas ≥ 2.2 下 groupby.apply 可能产生多级索引，改用 concat 更稳定
+        daily_ls_list = []
+        for date_val in daily_df['date'].unique():
+            group = daily_df[daily_df['date'] == date_val]
+            ls_series = self._calc_daily_ls(group, long_layers, short_layers)
+            if pd.notna(ls_series.get('long_short_return')):
+                ls_series['date'] = date_val
+                daily_ls_list.append(ls_series)
+        
+        if len(daily_ls_list) > 0:
+            long_short_df = pd.DataFrame(daily_ls_list)
+        else:
+            long_short_df = pd.DataFrame()  # 空 DataFrame
         
         # 多空组合统计
         long_short_stats = {}
@@ -737,17 +772,11 @@ class LayeredBacktestEngine:
         if not long_short_stats:
             return {}
         
-        # 安全取值：键存在但值为None时，get('key', 0)返回None，后续乘法抛TypeError
-        # 正确写法：val if val is not None else 0（只替换None，保留合法的0.0和负数）
-        long_turnover = long_short_stats.get('avg_turnover_long')
-        long_turnover = long_turnover if long_turnover is not None else 0
-        short_turnover = long_short_stats.get('avg_turnover_short')
-        short_turnover = short_turnover if short_turnover is not None else 0
-        
-        long_daily_ret = long_short_stats.get('long_return_daily')
-        long_daily_ret = long_daily_ret if long_daily_ret is not None else 0
-        short_daily_ret = long_short_stats.get('short_return_daily')
-        short_daily_ret = short_daily_ret if short_daily_ret is not None else 0
+        # 安全取值：使用 _coalesce 辅助函数
+        long_turnover = _coalesce(long_short_stats.get('avg_turnover_long'))
+        short_turnover = _coalesce(long_short_stats.get('avg_turnover_short'))
+        long_daily_ret = _coalesce(long_short_stats.get('long_return_daily'))
+        short_daily_ret = _coalesce(long_short_stats.get('short_return_daily'))
         
         # 多头交易成本（单边）
         long_daily_cost = long_turnover * trade_cost_rate
@@ -803,10 +832,10 @@ class LayeredBacktestEngine:
             
             valid_layer_count += 1
             n_stocks = stats.get('n_stocks_avg', 0)
-            daily_ret = stats.get('daily_return_mean', 0) or 0
-            annual_ret = stats.get('annual_return', 0) or 0
+            daily_ret = _coalesce(stats.get('daily_return_mean'))
+            annual_ret = _coalesce(stats.get('annual_return'))
             sharpe = stats.get('sharpe_ratio')
-            turnover = stats.get('turnover_avg', 0) or 0
+            turnover = _coalesce(stats.get('turnover_avg'))
             
             sharpe_str = f"{sharpe:.2f}" if sharpe is not None else "N/A"
             lines.append(f"Layer{layer_id:<3} {n_stocks:<10.0f} {daily_ret*100:>10.2f}% {annual_ret*100:>10.2f}% {sharpe_str:<10} {turnover*100:>8.1f}%")
@@ -826,20 +855,12 @@ class LayeredBacktestEngine:
         
         ls_stats = result.get('long_short', {})
         if ls_stats:
-            # 安全取值：键存在但值为None时，get('key', 0)返回None，后续乘法抛TypeError
-            # 正确写法：val if val is not None else 0（只替换None，保留合法的0.0和负数）
-            long_daily = ls_stats.get('long_return_daily')
-            long_daily = long_daily if long_daily is not None else 0
-            long_annual = ls_stats.get('long_return_annual')
-            long_annual = long_annual if long_annual is not None else 0
-            short_daily = ls_stats.get('short_return_daily')
-            short_daily = short_daily if short_daily is not None else 0
-            short_annual = ls_stats.get('short_return_annual')
-            short_annual = short_annual if short_annual is not None else 0
-            ls_daily = ls_stats.get('long_short_return_daily')
-            ls_daily = ls_daily if ls_daily is not None else 0
-            ls_annual = ls_stats.get('long_short_return_annual')
-            ls_annual = ls_annual if ls_annual is not None else 0
+            long_daily = _coalesce(ls_stats.get('long_return_daily'))
+            long_annual = _coalesce(ls_stats.get('long_return_annual'))
+            short_daily = _coalesce(ls_stats.get('short_return_daily'))
+            short_annual = _coalesce(ls_stats.get('short_return_annual'))
+            ls_daily = _coalesce(ls_stats.get('long_short_return_daily'))
+            ls_annual = _coalesce(ls_stats.get('long_short_return_annual'))
             lines.append(f"多头日均收益: {long_daily*100:.4f}%")
             lines.append(f"多头年化收益: {long_annual*100:.2f}%")
             lines.append(f"空头日均收益: {short_daily*100:.4f}%")
@@ -899,22 +920,13 @@ class LayeredBacktestEngine:
         
         cost = result.get('trading_cost_analysis', {})
         if cost:
-            # 安全取值：键存在但值为None时，get('key', 0)返回None，后续乘法抛TypeError
-            # 正确写法：val if val is not None else 0（只替换None，保留合法的0.0和负数）
-            cost_rate = cost.get('cost_rate')
-            cost_rate = cost_rate if cost_rate is not None else 0
-            long_turnover = cost.get('long_turnover')
-            long_turnover = long_turnover if long_turnover is not None else 0
-            short_turnover = cost.get('short_turnover')
-            short_turnover = short_turnover if short_turnover is not None else 0
-            long_daily_cost = cost.get('long_daily_cost')
-            long_daily_cost = long_daily_cost if long_daily_cost is not None else 0
-            short_daily_cost = cost.get('short_daily_cost')
-            short_daily_cost = short_daily_cost if short_daily_cost is not None else 0
-            ls_gross = cost.get('long_short_gross_daily')
-            ls_gross = ls_gross if ls_gross is not None else 0
-            ls_net = cost.get('long_short_net_daily')
-            ls_net = ls_net if ls_net is not None else 0
+            cost_rate = _coalesce(cost.get('cost_rate'))
+            long_turnover = _coalesce(cost.get('long_turnover'))
+            short_turnover = _coalesce(cost.get('short_turnover'))
+            long_daily_cost = _coalesce(cost.get('long_daily_cost'))
+            short_daily_cost = _coalesce(cost.get('short_daily_cost'))
+            ls_gross = _coalesce(cost.get('long_short_gross_daily'))
+            ls_net = _coalesce(cost.get('long_short_net_daily'))
             lines.append(f"单边交易成本率: {cost_rate*100:.2f}%")
             lines.append(f"多头日均换手率: {long_turnover*100:.2f}%")
             lines.append(f"空头日均换手率: {short_turnover*100:.2f}%")
