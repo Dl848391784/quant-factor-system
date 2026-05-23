@@ -17,7 +17,7 @@ import sys
 import pandas as pd
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List, Dict as TypingDict
+from typing import List, Dict as TypingDict, Any
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -38,7 +38,11 @@ DEFAULT_M2 = 3
 class KDJJLayerConfig(LayerConfigBase):
     """KDJ_J 分层配置"""
     
-    layer_thresholds: List[float] = field(default_factory=lambda: [-30, 0, 20, 80, 100, 130])
+    # thresholds 设计说明：
+    # - 去掉最后一个阈值点（130），避免 J ∈ (100, 130] 区间无法归层
+    # - 边界处理：J < -30 归 Layer 1，J > 100 归 Layer 5
+    # - KDJ J 理论范围 [-20, 120]，实际数据可能越界
+    layer_thresholds: List[float] = field(default_factory=lambda: [-30, 0, 20, 80, 100])
     
     layer_names: TypingDict[str, str] = field(default_factory=lambda: {
         '1': '超卖层(J<-30)',
@@ -53,11 +57,11 @@ class KDJJLayerConfig(LayerConfigBase):
     short_layers: List[int] = field(default_factory=lambda: [4, 5])
     
     layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {
-        '1': 'J < -30 (超卖层)',
+        '1': 'J < -30 (含越界值，超卖层)',
         '2': '-30 ≤ J < 0 (偏空层)',
         '3': '0 ≤ J < 20 (中性层)',
         '4': '20 ≤ J < 80 (偏多层)',
-        '5': 'J ≥ 80 (超买层)'
+        '5': 'J ≥ 80 (含边界80，含越界值，超买层)'
     })
     
     kdj_n: int = DEFAULT_N
@@ -89,7 +93,8 @@ def calculate_kdj_j(
     factor_df: pd.DataFrame,
     n: int = DEFAULT_N,
     m1: int = DEFAULT_M1,
-    m2: int = DEFAULT_M2
+    m2: int = DEFAULT_M2,
+    logger: Any = None
 ) -> pd.DataFrame:
     """计算 KDJ_J 因子
     
@@ -98,6 +103,7 @@ def calculate_kdj_j(
         n: RSV 计算周期，默认 9
         m1: K 值平滑周期，默认 3
         m2: D 值平滑周期，默认 3
+        logger: 日志对象（可选）
     
     Returns:
         包含 kdj_j 列的 DataFrame
@@ -133,6 +139,12 @@ def calculate_kdj_j(
     # 计算 J
     df['kdj_j'] = 3 * df['k'] - 2 * df['d']
     
+    # 因子数据范围校验（遵循 MODULE.md 第505行规范）
+    kdj_j_min = df['kdj_j'].min()
+    kdj_j_max = df['kdj_j'].max()
+    if logger:
+        logger.info("KDJ_J 因子范围: %.2f ~ %.2f", kdj_j_min, kdj_j_max)
+    
     return df
 
 
@@ -153,7 +165,7 @@ def main():
     
     try:
         def factor_calc(df):
-            return calculate_kdj_j(df, n=args.kdj_n, m1=args.kdj_m1, m2=args.kdj_m2)
+            return calculate_kdj_j(df, n=args.kdj_n, m1=args.kdj_m1, m2=args.kdj_m2, logger=logger)
         
         result = run_layered_backtest(
             factor_name='kdj_j',
