@@ -54,11 +54,11 @@ class KDJJLayerConfig(LayerConfigBase):
     short_layers: List[int] = field(default_factory=lambda: [4, 5])
     
     layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {
-        '1': 'J < -30 (极度超卖)',
-        '2': '-30 ≤ J < 0 (超卖)',
-        '3': '0 ≤ J < 20 (偏空)',
-        '4': '20 ≤ J < 80 (中性偏多)',
-        '5': 'J ≥ 80 (超买)'
+        '1': 'J < -30 (超卖层)',
+        '2': '-30 ≤ J < 0 (偏空层)',
+        '3': '0 ≤ J < 20 (中性层)',
+        '4': '20 ≤ J < 80 (偏多层)',
+        '5': 'J ≥ 80 (超买层)'
     })
     
     kdj_n: int = DEFAULT_N
@@ -124,11 +124,16 @@ def calculate_kdj_j(
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='KDJ_J 分层回测')
+    parser.add_argument('--cache_dir', type=str, default=None,
+                        help='缓存目录路径')
     parser.add_argument('--output_dir', type=str, default=None)
     parser.add_argument('--quiet', action='store_true')
-    parser.add_argument('--kdj-n', type=int, default=DEFAULT_N)
-    parser.add_argument('--kdj-m1', type=int, default=DEFAULT_M1)
-    parser.add_argument('--kdj-m2', type=int, default=DEFAULT_M2)
+    parser.add_argument('--kdj-n', type=int, default=DEFAULT_N,
+                        help=f'KDJ N 参数，默认 {DEFAULT_N}')
+    parser.add_argument('--kdj-m1', type=int, default=DEFAULT_M1,
+                        help=f'KDJ M1 参数，默认 {DEFAULT_M1}')
+    parser.add_argument('--kdj-m2', type=int, default=DEFAULT_M2,
+                        help=f'KDJ M2 参数，默认 {DEFAULT_M2}')
     args = parser.parse_args()
     
     try:
@@ -141,9 +146,10 @@ def main():
             config=KDJJLayerConfig(),
             factor_calculator=factor_calc,
             required_factor_cols=['close', 'high', 'low'],
+            cache_dir=args.cache_dir,
             output_dir=args.output_dir,
             verbose=not args.quiet,
-            _logger=logger
+            logger=logger
         )
         
         if result['meta']['n_days_total'] == 0:
@@ -155,6 +161,12 @@ def main():
     except FileNotFoundError as e:
         logger.error("数据文件不存在: %s", e)
         sys.exit(2)
+    except KeyError as e:
+        logger.error("数据结构错误: %s", e)
+        sys.exit(3)
+    except ValueError as e:
+        logger.error("参数错误: %s", e)
+        sys.exit(4)
     except Exception as e:
         logger.exception("回测执行异常: %s", e)
         sys.exit(5)
