@@ -175,12 +175,19 @@ def calculate_rsi(
         包含 rsi 列的 DataFrame
     
     Note:
-        - Wilder (1978) RSI 计算方法：
-          1. 前 n 天使用 SMA（简单移动平均）作为种子
-          2. 之后使用 EWM（指数加权移动平均）递推
-        - EWM 公式：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
-        - pandas ewm(adjust=False) 使用第一个观测值作为初始值，
-          但 Wilder 标准要求前 n 天用 SMA 种子
+        Wilder (1978) RSI 计算方法：
+        1. 前 n-1 天为 NaN（数据不足以计算 SMA）
+        2. 第 n 天（索引 n-1）使用 SMA 值作为 EWM 种子
+           - SMA = rolling(n).mean() 的第一个有效值
+        3. 第 n+1 天及之后使用 EWM 递推
+           - 公式：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
+           - alpha = 1/n
+        
+        与 pandas ewm(adjust=False) 的差异：
+        - pandas ewm(adjust=False) 从第 1 个观测值就开始计算
+        - Wilder 标准要求前 n-1 天为 NaN，第 n 天用 SMA
+        
+        RSI 公式：
         - RSI = 100 - 100 / (1 + RS)，RS = avg_gain / avg_loss
         - RSI 理论范围 [0, 100]，实际数据可能因计算误差越界
         - avg_loss 接近零时，RS → ∞，RSI → 100
@@ -235,7 +242,6 @@ def calculate_rsi(
     # 防御性代码说明：
     # avg_loss 和 avg_gain 理论上非负（delta.abs() 后 EWM）
     # 使用 .abs() 是防御性代码，防止数值误差或异常数据产生负值
-    EPSILON = 1e-10  # 零值阈值（相对 avg_loss 量级极小）
     
     # 边界判断：使用 .abs() 防御负值（理论上不应出现）
     zero_loss_mask = (df['avg_loss'].notna()) & (df['avg_loss'].abs() < EPSILON)
@@ -261,11 +267,12 @@ def calculate_rsi(
     
     # 计算 RS 和 RSI（避免中间污染值）
     # 使用 safe_avg_loss 避免 EPSILON 替换导致的数值污染
-    safe_avg_loss = df['avg_loss'].where(df['avg_loss'] > EPSILON)
+    # 边界判断统一使用 >= EPSILON（对齐 zero_loss_mask 的 < EPSILON）
+    safe_avg_loss = df['avg_loss'].where(df['avg_loss'] >= EPSILON)
     df['rs'] = df['avg_gain'] / safe_avg_loss
-    # RSI 计算：只在 rs 有效时计算，其余保持 NaN
-    rsi_raw = 100 - (100 / (1 + df['rs']))
-    df['rsi'] = rsi_raw.where(df['rs'].notna())
+    
+    # RSI 计算：直接赋值，无需 .where 冗余（rs 为 NaN 时，计算结果自动为 NaN）
+    df['rsi'] = 100 - (100 / (1 + df['rs']))
     
     # 边界处理覆盖（逻辑清晰，无中间污染值）
     # avg_loss=0 且 avg_gain>0 → RSI=100（超买）

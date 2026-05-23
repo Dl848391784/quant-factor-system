@@ -58,6 +58,15 @@ import json
 import gzip
 warnings.filterwarnings('ignore')
 
+# ============================================================================
+# 模块级常量
+# ============================================================================
+
+# EPSILON 用于判断 avg_loss 是否接近零（避免 division by zero 或极小值）
+# RSI 理论范围 [0, 100]，avg_loss 为价格变动绝对值，量级约价格*0.01~0.05
+# 1e-10 作为零值阈值，相对 avg_loss 量级极小（约 1e-8 倍），判断合理
+EPSILON = 1e-10
+
 
 # ============================================================================
 # 模块级 Wilder 平滑函数（可被单元测试直接覆盖）
@@ -1799,9 +1808,8 @@ class RealDataLoader:
         - 使用模块级函数 _wilder_smoothing_rsi（可被单元测试覆盖）
         - avg_loss 接近零时，直接除法会产生 inf，需分场景处理
         - avg_loss 和 avg_gain 理论上非负，使用 .abs() 是防御性代码
+        - 使用模块级常量 EPSILON（定义在文件开头）
         """
-        EPSILON = 1e-10  # 零值阈值
-        
         delta = close_prices.diff()
         gain = delta.where(delta > 0, 0)
         loss = (-delta).where(delta < 0, 0)
@@ -1822,10 +1830,12 @@ class RealDataLoader:
         only_zero_loss_mask = zero_loss_mask & ~zero_gain_mask
         
         # RS 计算（避免中间污染值）
-        safe_avg_loss = avg_loss.where(avg_loss > EPSILON)
+        # 边界判断统一使用 >= EPSILON（对齐 zero_loss_mask 的 < EPSILON）
+        safe_avg_loss = avg_loss.where(avg_loss >= EPSILON)
         rs = avg_gain / safe_avg_loss
-        rsi_raw = 100 - (100 / (1 + rs))
-        rsi = rsi_raw.where(rs.notna())
+        
+        # RSI 计算：直接赋值，无需 .where 冗余（rs 为 NaN 时，计算结果自动为 NaN）
+        rsi = 100 - (100 / (1 + rs))
         
         # 边界处理覆盖（必须在 RS 计算后）
         rsi.loc[only_zero_loss_mask] = 100  # avg_loss=0, avg_gain>0 → 超买
