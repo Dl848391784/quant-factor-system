@@ -89,12 +89,15 @@ class BollingerPBLayerConfig(LayerConfigBase):
     long_layers: List[int] = field(default_factory=lambda: [1, 2])
     short_layers: List[int] = field(default_factory=lambda: [4, 5])
     
+    # layer_threshold_desc 与 thresholds 对应（5层）
+    # 格式遵循 MODULE.md 第451行规范：完整区间 [lower, upper)，必须包含下界
+    # 最大边界使用 ≥，说明越界值处理
     layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {
-        '1': 'PB < 0.5 (价格低于下轨)',
-        '2': '0.5 ≤ PB < 0.8 (接近下轨，偏弱)',
-        '3': '0.8 ≤ PB < 1.0 (中轨偏下)',
-        '4': '1.0 ≤ PB < 1.2 (中轨偏上，偏强)',
-        '5': 'PB ≥ 1.2 (接近或高于上轨)'
+        '1': 'PB < 0.5 (含越界值<0，价格远低于下轨，超卖层，做多)',   # 含越界值 PB < 0
+        '2': '0.5 ≤ PB < 0.8 (接近下轨，偏弱层，做多)',
+        '3': '0.8 ≤ PB < 1.0 (中轨偏下，中性层，不参与多空)',
+        '4': '1.0 ≤ PB < 1.2 (中轨偏上，偏强层，做空)',
+        '5': 'PB ≥ 1.2 (含边界1.2，含越界值>2，价格远高于上轨，超买层，做空)'  # 含越界值 PB > 2
     })
     
     # 配置元数据：记录默认布林带窗口（CLI 可通过 --bollinger-n 覆盖）
