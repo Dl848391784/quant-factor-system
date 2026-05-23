@@ -153,7 +153,13 @@ class LayeredBacktestEngine:
         参数:
             layer_method: 分层方法
                 - 'percentile': 百分位分层（每层20%）
-                - 'fixed_threshold': 固定阈值分层（需指定thresholds）
+                    - 层编号语义（v1.6 补充）：
+                      - percentile 分层后，Layer 1 包含因子值最低的20%股票
+                      - Layer n_layers 包含因子值最高的20%股票
+                      - 正向因子（factor_direction='positive'）：Layer n_layers 是"最好的层"（高因子值预期高收益）
+                      - 反向因子（factor_direction='negative'）：Layer 1 是"最好的层"（低因子值预期高收益）
+                      - 这与默认多空层设置一致：正向因子 long_layers=[n-1, n]，反向因子 long_layers=[1, 2]
+                - 'fixed_threshold': 固定阈值分层（需指定thresholds，已废弃）
             n_layers: 分层数量
                 - percentile 模式：有效，控制分层数量（默认5层）
                 - fixed_threshold 模式：无效，由 thresholds 长度决定（n层 = len(thresholds) - 1）
@@ -411,11 +417,12 @@ class LayeredBacktestEngine:
             for i in range(len(thresholds) - 1):
                 lower = thresholds[i]
                 upper = thresholds[i + 1]
-                # 最后一层（i == n_layers - 1）：右闭区间 [lower, upper]
+                # 最后一层（i == len(thresholds) - 2）：右闭区间 [lower, upper]
                 # 其余层：右开区间 [lower, upper)
-                if i == n_layers - 1:  # 最后一层
+                # 注意：len(thresholds) - 1 个区间，最后一个区间索引为 len(thresholds) - 2
+                if i == len(thresholds) - 2:  # 最后一个区间（Layer n_layers）
                     mask = (factor_values >= lower) & (factor_values <= upper)
-                else:  # 前n-1层
+                else:  # 前 len(thresholds) - 2 个区间（Layer 1 到 n_layers-1）
                     mask = (factor_values >= lower) & (factor_values < upper)
                 # 只处理未归层的股票（layer_assignment == 0）
                 mask_unassigned = mask & (layer_assignment == 0)
@@ -619,6 +626,10 @@ class LayeredBacktestEngine:
             layer_data = daily_df[daily_df['layer'] == layer_id]
             
             # 过滤NaN收益
+            # 假设说明：NaN 日（停牌、数据缺失）不参与收益计算
+            #   - dropna() 后索引可能不连续（部分交易日缺失）
+            #   - cumprod() 对非连续索引有效：所有非 NaN 日收益连乘
+            #   - 语义：忽略停牌日收益，反映实际可交易时段的累计表现
             valid_returns = layer_data['return'].dropna()
             
             if len(valid_returns) == 0:
@@ -639,7 +650,7 @@ class LayeredBacktestEngine:
             daily_return_mean = valid_returns.mean()
             daily_return_std = valid_returns.std()
             
-            # 累计收益
+            # 累计收益（假设：停牌日不参与计算，反映实际可交易时段表现）
             cum_returns = (1 + valid_returns).cumprod() - 1
             cumulative_return = cum_returns.iloc[-1] if len(cum_returns) > 0 else 0
             
