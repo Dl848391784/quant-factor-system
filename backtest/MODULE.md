@@ -421,6 +421,23 @@ avg_turnover_long = mean(所有多头层所有日期换手率列表)  # 多头�
 - thresholds（fixed_threshold 模式）：至少 2 个阈值点，严格递增
 - long_layers / short_layers：层编号不越界（在 [1, n_layers] 范围内）
 
+**thresholds 与 layer_names 数量对应关系（强制）：**
+- `n_layers = len(thresholds) - 1`（fixed_threshold 模式）
+- `len(layer_names) = n_layers`（必须相等）
+- `len(layer_threshold_desc) = n_layers`（必须相等）
+
+**示例：**
+```python
+# 5个阈值点形成4层
+layer_thresholds = [-30, 0, 20, 80, 100]  # 5个阈值点 → 4层
+layer_names = {'1': ..., '2': ..., '3': ..., '4': ...}  # 4层名称
+layer_threshold_desc = {'1': ..., '2': ..., '3': ..., '4': ...}  # 4层描述
+```
+
+**原因：**
+- thresholds 定义边界点，层数量 = 阈值点数量 - 1
+- layer_names / layer_threshold_desc 与层数不一致会导致运行时错误或逻辑混淆
+
 ---
 
 ## 阈值描述规范

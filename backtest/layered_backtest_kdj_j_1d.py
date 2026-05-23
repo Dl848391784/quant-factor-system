@@ -39,29 +39,35 @@ class KDJJLayerConfig(LayerConfigBase):
     """KDJ_J 分层配置"""
     
     # thresholds 设计说明：
-    # - 去掉最后一个阈值点（130），避免 J ∈ (100, 130] 区间无法归层
-    # - 边界处理：J < -30 归 Layer 1，J > 100 归 Layer 5
+    # - 5个阈值点 [-30, 0, 20, 80, 100] 形成 4 层（len(thresholds) - 1 = 4）
+    # - 边界处理：J < -30 归 Layer 1（越界），J > 100 归 Layer 4（越界）
+    # - Layer 划分：Layer1: [-30, 0), Layer2: [0, 20), Layer3: [20, 80), Layer4: [80, 100]
     # - KDJ J 理论范围 [-20, 120]，实际数据可能越界
     layer_thresholds: List[float] = field(default_factory=lambda: [-30, 0, 20, 80, 100])
     
+    # layer_names 与 thresholds 对应（4层）：
+    # - Layer 1: J < -30（超卖，越界值归入此层）→ 做多（反向因子）
+    # - Layer 2: -30 ≤ J < 0（偏弱）→ 做多（反向因子）
+    # - Layer 3: 0 ≤ J < 80（中性）→ 不参与多空组合
+    # - Layer 4: J ≥ 80（偏强，越界值归入此层）→ 做空（反向因子）
     layer_names: TypingDict[str, str] = field(default_factory=lambda: {
         '1': '超卖层(J<-30)',
-        '2': '偏空层(-30≤J<0)',
-        '3': '中性层(0≤J<20)',
-        '4': '偏多层(20≤J<80)',
-        '5': '超买层(J≥80)'
+        '2': '偏弱层(-30≤J<0)',
+        '3': '中性层(0≤J<80)',
+        '4': '偏强层(J≥80)'
     })
     
+    # 反向因子：J值低做多（超卖），J值高做空（超买）
     factor_direction: str = 'negative'
-    long_layers: List[int] = field(default_factory=lambda: [1, 2])
-    short_layers: List[int] = field(default_factory=lambda: [4, 5])
+    long_layers: List[int] = field(default_factory=lambda: [1, 2])   # 超卖/偏弱层做多
+    short_layers: List[int] = field(default_factory=lambda: [4])      # 偏强层做空
     
+    # layer_threshold_desc 与 thresholds 对应（4层）
     layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {
-        '1': 'J < -30 (含越界值，超卖层)',
-        '2': '-30 ≤ J < 0 (偏空层)',
-        '3': '0 ≤ J < 20 (中性层)',
-        '4': '20 ≤ J < 80 (偏多层)',
-        '5': 'J ≥ 80 (含边界80，含越界值，超买层)'
+        '1': 'J < -30 (含越界值，超卖层，做多)',
+        '2': '-30 ≤ J < 0 (偏弱层，做多)',
+        '3': '0 ≤ J < 80 (中性层，不参与多空)',
+        '4': 'J ≥ 80 (含边界80，含越界值>100，偏强层，做空)'
     })
     
     kdj_n: int = DEFAULT_N
@@ -90,7 +96,7 @@ def _calc_ewm_with_initial(
 
 
 def _calc_k_from_rsv(series: pd.Series, alpha: float) -> pd.Series:
-    """从 RSV 计算 K 值（groupby transform 专用，显式传参避免闭包）
+    """从 RSV 计算 K 值
     
     Args:
         series: RSV 序列
@@ -98,12 +104,16 @@ def _calc_k_from_rsv(series: pd.Series, alpha: float) -> pd.Series:
     
     Returns:
         K 值序列
+    
+    Note:
+        用于 groupby.transform，lambda 仍会捕获 alpha（闭包特性），
+        但 alpha 在循环外定义且不变，不会引发实际问题。
     """
     return _calc_ewm_with_initial(series, alpha)
 
 
 def _calc_d_from_k(series: pd.Series, alpha: float) -> pd.Series:
-    """从 K 值计算 D 值（groupby transform 专用，显式传参避免闭包）
+    """从 K 值计算 D 值
     
     Args:
         series: K 值序列
@@ -111,6 +121,10 @@ def _calc_d_from_k(series: pd.Series, alpha: float) -> pd.Series:
     
     Returns:
         D 值序列
+    
+    Note:
+        用于 groupby.transform，lambda 仍会捕获 alpha（闭包特性），
+        但 alpha 在循环外定义且不变，不会引发实际问题。
     """
     return _calc_ewm_with_initial(series, alpha)
 
@@ -120,7 +134,7 @@ def calculate_kdj_j(
     n: int = DEFAULT_N,
     m1: int = DEFAULT_M1,
     m2: int = DEFAULT_M2,
-    logger: Any = None
+    log_handler: Any = None
 ) -> pd.DataFrame:
     """计算 KDJ_J 因子
     
@@ -129,7 +143,7 @@ def calculate_kdj_j(
         n: RSV 计算周期，默认 9
         m1: K 值平滑周期，默认 3
         m2: D 值平滑周期，默认 3
-        logger: 日志对象（可选）
+        log_handler: 日志对象（可选，避免遮蔽模块级 logger）
     
     Returns:
         包含 kdj_j 列的 DataFrame
@@ -137,7 +151,12 @@ def calculate_kdj_j(
     df = factor_df.copy()
     df = df.sort_values(['asset', 'date'])
     
-    # 计算 RSV（未成熟随机值）
+    # RSV 计算（未成熟随机值）
+    # 边界处理说明：
+    # - 当 range_val == 0（high == low，如停牌）时：
+    #   - safe_range 替换为 1.0 防止 division by zero
+    #   - 第二个 where 将 RSV 设为 50.0（中性值），覆盖第一个计算结果
+    # - 逻辑：range_val == 0 → RSV = 50.0（而非 0）
     df['low_n'] = df.groupby('asset')['low'].transform(
         lambda x: x.rolling(window=n, min_periods=n).min()
     )
@@ -145,10 +164,10 @@ def calculate_kdj_j(
         lambda x: x.rolling(window=n, min_periods=n).max()
     )
     
-    # 使用 Series 方法，避免 np.where 导致 index 丢失（遵循 memory numpy/pandas 规范）
+    # 使用 Series.where 避免 division by zero
     range_val = df['high_n'] - df['low_n']
-    safe_range = range_val.where(range_val > 0, 1.0)  # 避免 division by zero
-    df['rsv'] = ((df['close'] - df['low_n']) / safe_range * 100).where(range_val > 0, 50.0)
+    safe_range = range_val.where(range_val > 0, 1.0)  # 避免 division by zero（但不影响最终结果）
+    df['rsv'] = ((df['close'] - df['low_n']) / safe_range * 100).where(range_val > 0, 50.0)  # range_val==0 时 RSV=50.0
     
     # 计算 K（alpha = 1/m1，使得权重衰减半衰期约为 m1）
     alpha_k = 1.0 / m1
@@ -168,8 +187,8 @@ def calculate_kdj_j(
     # 因子数据范围校验（遵循 MODULE.md 第505行规范）
     kdj_j_min = df['kdj_j'].min()
     kdj_j_max = df['kdj_j'].max()
-    if logger:
-        logger.info("KDJ_J 因子范围: %.2f ~ %.2f", kdj_j_min, kdj_j_max)
+    if log_handler:
+        log_handler.info("KDJ_J 因子范围: %.2f ~ %.2f", kdj_j_min, kdj_j_max)
     
     return df
 
@@ -181,6 +200,10 @@ def main():
                         help='缓存目录路径')
     parser.add_argument('--output_dir', type=str, default=None)
     parser.add_argument('--quiet', action='store_true')
+    # argparse 参数命名说明：
+    # - 命令行使用 --kdj-n（连字符）
+    # - Python 访问使用 args.kdj_n（下划线，argparse 自动转换）
+    # - 这是 argparse 标准行为，dest 参数可自定义内部名称
     parser.add_argument('--kdj-n', type=int, default=DEFAULT_N,
                         help=f'KDJ N 参数，默认 {DEFAULT_N}')
     parser.add_argument('--kdj-m1', type=int, default=DEFAULT_M1,
@@ -191,7 +214,7 @@ def main():
     
     try:
         def factor_calc(df):
-            return calculate_kdj_j(df, n=args.kdj_n, m1=args.kdj_m1, m2=args.kdj_m2, logger=logger)
+            return calculate_kdj_j(df, n=args.kdj_n, m1=args.kdj_m1, m2=args.kdj_m2, log_handler=logger)
         
         result = run_layered_backtest(
             factor_name='kdj_j',
