@@ -13,11 +13,11 @@ RSI 因子分层回测脚本
 """
 
 import sys
-import numpy as np
 import pandas as pd
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List, Dict as TypingDict
+from functools import partial
+from typing import List, Dict as TypingDict, Any
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -30,6 +30,44 @@ from backtest.common.logger_config import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_N = 6
+# EPSILON 用于判断 avg_loss 是否接近零（避免 division by zero 或极小值）
+# RSI 理论范围 [0, 100]，avg_loss 为价格变动绝对值，量级约价格*0.01~0.05
+# 1e-10 作为零值阈值，相对 avg_loss 量级极小（约 1e-8 倍），判断合理
+EPSILON = 1e-10
+
+
+def _calc_delta(series: pd.Series) -> pd.Series:
+    """计算价格变化（groupby transform 专用，显式传参避免闭包）
+    
+    Args:
+        series: 单资产的收盘价序列
+    
+    Returns:
+        价格变化序列（第一天为 NaN）
+    
+    Note:
+        - diff() 计算与前一天的差值
+        - 第一天无前值，结果为 NaN
+    """
+    return series.diff()
+
+
+def _calc_rolling_mean(series: pd.Series, window: int) -> pd.Series:
+    """计算滚动均值（groupby transform 专用，显式传参避免闭包）
+    
+    Args:
+        series: 单资产的序列（gain 或 loss）
+        window: 滚动窗口期
+    
+    Returns:
+        滚动均值序列（前 window-1 天为 NaN）
+    
+    Note:
+        - min_periods=window 确保只有足够历史数据时才计算
+        - 前 window-1 天为 NaN，无法计算有效均值
+        - 例如 window=6，需要至少 6 天数据才能产生第一个有效结果
+    """
+    return series.rolling(window=window, min_periods=window).mean()
 
 
 @dataclass
@@ -40,8 +78,8 @@ class RSILayerConfig(LayerConfigBase):
     
     layer_names: TypingDict[str, str] = field(default_factory=lambda: {
         '1': '超卖层(RSI<30)',
-        '2': '偏空层(30≤RSI<50)',
-        '3': '偏多层(50≤RSI<70)',
+        '2': '偏弱层(30≤RSI<50)',
+        '3': '偏强层(50≤RSI<70)',
         '4': '超买层(RSI≥70)'
     })
     
@@ -49,42 +87,113 @@ class RSILayerConfig(LayerConfigBase):
     long_layers: List[int] = field(default_factory=lambda: [1, 2])
     short_layers: List[int] = field(default_factory=lambda: [3, 4])
     
+    # layer_threshold_desc 与 thresholds 对应（4层）
+    # 格式遵循 MODULE.md 第451行规范：完整区间 [lower, upper)，必须包含下界
+    # 最大边界使用 ≥，说明越界值处理
     layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {
-        '1': 'RSI < 30 (超卖)',
-        '2': '30 ≤ RSI < 50 (偏空)',
-        '3': '50 ≤ RSI < 70 (偏多)',
-        '4': 'RSI ≥ 70 (超买)'
+        '1': 'RSI < 30 (含越界值<0，超卖层，做多)',   # 含越界值 RSI < 0
+        '2': '30 ≤ RSI < 50 (偏弱层，做多)',
+        '3': '50 ≤ RSI < 70 (偏强层，做空)',
+        '4': 'RSI ≥ 70 (含边界70，含越界值>100，超买层，做空)'  # 含越界值 RSI > 100
     })
     
+    # 配置元数据：记录默认 RSI 窗口（CLI 可通过 --rsi-n 覆盖）
     rsi_n: int = DEFAULT_N
 
 
 def calculate_rsi(
     factor_df: pd.DataFrame,
-    n: int = DEFAULT_N
+    n: int = DEFAULT_N,
+    log_handler: Any = None
 ) -> pd.DataFrame:
-    """计算 RSI 因子"""
+    """计算 RSI 因子
+    
+    Args:
+        factor_df: 包含 close 列的 DataFrame
+        n: 滚动窗口期，默认 6
+        log_handler: 日志对象（可选，避免遮蔽模块级 logger）
+    
+    Returns:
+        包含 rsi 列的 DataFrame
+    
+    Note:
+        - 前 n 天 RSI 为 NaN（rolling 计算 NaN）
+        - RSI = 100 - 100 / (1 + RS)
+        - RS = avg_gain / avg_loss
+        - RSI 理论范围 [0, 100]，实际数据可能因计算误差越界
+        - avg_loss 接近零时，RS → ∞，RSI → 100
+    """
     df = factor_df.copy()
     df = df.sort_values(['asset', 'date'])
     
-    # 计算价格变化
-    df['delta'] = df.groupby('asset')['close'].transform(lambda x: x.diff())
+    # 使用独立函数替代 lambda 闭包（遵循 MODULE.md 第789行规范）
+    calc_delta = _calc_delta
+    calc_avg = partial(_calc_rolling_mean, window=n)
     
-    # 分离上涨和下跌
+    # 计算价格变化
+    df['delta'] = df.groupby('asset')['close'].transform(calc_delta)
+    
+    # 分离上涨和下跌（使用 Series.where）
     df['gain'] = df['delta'].where(df['delta'] > 0, 0)
     df['loss'] = df['delta'].where(df['delta'] < 0, 0).abs()
     
     # 计算平均上涨和下跌
-    df['avg_gain'] = df.groupby('asset')['gain'].transform(
-        lambda x: x.rolling(window=n, min_periods=n).mean()
-    )
-    df['avg_loss'] = df.groupby('asset')['loss'].transform(
-        lambda x: x.rolling(window=n, min_periods=n).mean()
-    )
+    df['avg_gain'] = df.groupby('asset')['gain'].transform(calc_avg)
+    df['avg_loss'] = df.groupby('asset')['loss'].transform(calc_avg)
+    
+    # ========== 边界处理：avg_loss 接近零时 ==========
+    # avg_loss 接近零时，RS → ∞，RSI → 100（超买）
+    # 使用 EPSILON 判断避免浮点精度问题
+    zero_loss_mask = (df['avg_loss'].notna()) & (df['avg_loss'].abs() < EPSILON)
+    if zero_loss_mask.sum() > 0 and log_handler:
+        log_handler.warning(
+            "avg_loss 接近零的记录数: %d (%.2f%%)，RSI 设为 100",
+            zero_loss_mask.sum(), zero_loss_mask.sum() / len(df) * 100
+        )
     
     # 计算 RS 和 RSI
-    df['rs'] = df['avg_gain'] / df['avg_loss'].replace(0, np.inf)
+    # avg_loss > EPSILON: 正常计算 RS
+    # avg_loss <= EPSILON: RS = inf, RSI = 100
+    df['rs'] = df['avg_gain'] / df['avg_loss'].where(
+        df['avg_loss'] > EPSILON,
+        EPSILON  # 避免 division by zero
+    )
     df['rsi'] = 100 - (100 / (1 + df['rs']))
+    
+    # avg_loss <= EPSILON 时强制设置 RSI = 100
+    df.loc[zero_loss_mask, 'rsi'] = 100
+    
+    # ========== 因子值统计（正常业务场景记录）==========
+    # RSI < 0: 计算误差导致越界，归入 Layer 1（runner 边界处理）
+    # RSI > 100: 计算误差导致越界，归入 Layer 4（runner 边界处理）
+    below_min_mask = (df['rsi'].notna()) & (df['rsi'] < 0)
+    if below_min_mask.sum() > 0 and log_handler:
+        log_handler.info(
+            "RSI 越界统计: RSI<0 的记录数: %d (%.2f%%)，将归入 Layer1（超卖层）",
+            below_min_mask.sum(), below_min_mask.sum() / len(df) * 100
+        )
+    
+    above_max_mask = (df['rsi'].notna()) & (df['rsi'] > 100)
+    if above_max_mask.sum() > 0 and log_handler:
+        log_handler.info(
+            "RSI 越界统计: RSI>100 的记录数: %d (%.2f%%)，将归入 Layer4（超买层）",
+            above_max_mask.sum(), above_max_mask.sum() / len(df) * 100
+        )
+    
+    # 因子数据范围校验（遵循 MODULE.md 第505行规范）
+    # 全 NaN 防御：检查是否有有效数据
+    rsi_values = df['rsi'].dropna()
+    if len(rsi_values) == 0:
+        if log_handler:
+            log_handler.warning("RSI 全部为 NaN，无法计算范围")
+        # 全 NaN 时提前返回，避免输出误导性的 "0.00 ~ 0.00" 日志
+        return df
+    
+    rsi_min = rsi_values.min()
+    rsi_max = rsi_values.max()
+    
+    if log_handler:
+        log_handler.info("RSI 因子范围: %.2f ~ %.2f", rsi_min, rsi_max)
     
     return df
 
@@ -92,14 +201,24 @@ def calculate_rsi(
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='RSI 分层回测')
-    parser.add_argument('--output_dir', type=str, default=None)
-    parser.add_argument('--quiet', action='store_true')
-    parser.add_argument('--rsi-n', type=int, default=DEFAULT_N)
+    parser.add_argument('--cache_dir', type=str, default=None,
+                        help='缓存目录路径')
+    parser.add_argument('--output_dir', type=str, default=None,
+                        help='输出目录路径')
+    parser.add_argument('--quiet', action='store_true',
+                        help='静默模式')
+    parser.add_argument('--rsi-n', type=int, default=DEFAULT_N,
+                        help=f'RSI 计算窗口，默认 {DEFAULT_N}')
     args = parser.parse_args()
     
     try:
-        def factor_calc(df):
-            return calculate_rsi(df, n=args.rsi_n)
+        # 使用 functools.partial 替代闭包，显式传参避免隐式捕获
+        # 透传 log_handler 参数（遵循 bollinger_pb 模式）
+        factor_calc = partial(
+            calculate_rsi,
+            n=args.rsi_n,
+            log_handler=logger
+        )
         
         result = run_layered_backtest(
             factor_name='rsi',
@@ -107,9 +226,10 @@ def main():
             config=RSILayerConfig(),
             factor_calculator=factor_calc,
             required_factor_cols=['close'],
+            cache_dir=args.cache_dir,
             output_dir=args.output_dir,
             verbose=not args.quiet,
-            _logger=logger
+            logger=logger  # 符合 MODULE.md 第382行规范：参数名统一为 logger
         )
         
         if result['meta']['n_days_total'] == 0:
@@ -121,6 +241,12 @@ def main():
     except FileNotFoundError as e:
         logger.error("数据文件不存在: %s", e)
         sys.exit(2)
+    except KeyError as e:
+        logger.error("数据字段缺失: %s", e)
+        sys.exit(3)
+    except ValueError as e:
+        logger.error("数据值异常: %s", e)
+        sys.exit(4)
     except Exception as e:
         logger.exception("回测执行异常: %s", e)
         sys.exit(5)
