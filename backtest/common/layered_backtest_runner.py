@@ -27,7 +27,7 @@ result = run_layered_backtest(
     config=MyFactorLayerConfig(),
     factor_calculator=my_calculate_func,  # 可选
     additional_data_files={'turnover_rate': 'path/to/data.json.gz'},  # 可选
-    _logger=logger
+    logger=logger
 )
 ```
 
@@ -39,10 +39,11 @@ import os
 import sys
 import json
 import gzip
+import logging
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from typing import Dict, Optional, Callable, List, Union
+from typing import Dict, Optional, Callable, List, Union, Tuple
 from pathlib import Path
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
@@ -68,6 +69,11 @@ class LayerConfigBase:
     - factor_direction: 因子方向 ('positive' / 'negative')
     - long_layers: 多头组合
     - short_layers: 空头组合
+    
+    设计变更（2026-05-23）：
+    - 删除 Property 方法，统一使用字段名访问
+    - 原因：Property 与字段重复定义，存在同步风险
+    - 调用方从 config.layer_thresholds 改为 config.layer_thresholds
     """
     
     # 子类必须定义的参数
@@ -82,47 +88,36 @@ class LayerConfigBase:
     trade_cost_rate: float = 0.003
     min_stocks_per_layer: int = 10
     
-    # Property 方法（所有因子共享，无需子类重写）
-    @property
-    def LAYER_THRESHOLDS(self) -> List[float]:
-        return self.layer_thresholds
-    
-    @property
-    def LAYER_NAMES(self) -> Dict[str, str]:
-        return self.layer_names
-    
-    @property
-    def FACTOR_DIRECTION(self) -> str:
-        return self.factor_direction
-    
-    @property
-    def LONG_LAYERS(self) -> List[int]:
-        return self.long_layers
-    
-    @property
-    def SHORT_LAYERS(self) -> List[int]:
-        return self.short_layers
-    
-    @property
-    def LAYER_THRESHOLD_DESC(self) -> Dict[str, str]:
-        return self.layer_threshold_desc
-    
-    @property
-    def TRADE_COST_RATE(self) -> float:
-        return self.trade_cost_rate
-    
-    @property
-    def MIN_STOCKS_PER_LAYER(self) -> int:
-        return self.min_stocks_per_layer
-    
     def validate(self) -> None:
-        """校验配置完整性"""
+        """校验配置完整性
+        
+        前置校验层编号上界，避免错误延迟到 engine.run 才抛出
+        """
         if len(self.layer_thresholds) < 2:
             raise ValueError("layer_thresholds 至少需要 2 个阈值")
+        
+        n_layers = len(self.layer_thresholds) - 1
+        
         if self.factor_direction not in ['positive', 'negative']:
             raise ValueError(f"factor_direction 必须是 'positive' 或 'negative', 当前: {self.factor_direction}")
+        
         if not self.long_layers or not self.short_layers:
             raise ValueError("long_layers 和 short_layers 不能为空")
+        
+        # 校验层编号上界（前置校验，避免错误延迟到 engine.run）
+        for layer_id in self.long_layers:
+            if layer_id > n_layers or layer_id < 1:
+                raise ValueError(
+                    f"long_layers 层编号 {layer_id} 越界，有效范围 [1, {n_layers}]，"
+                    f"当前 layer_thresholds 有 {n_layers} 层"
+                )
+        
+        for layer_id in self.short_layers:
+            if layer_id > n_layers or layer_id < 1:
+                raise ValueError(
+                    f"short_layers 层编号 {layer_id} 越界，有效范围 [1, {n_layers}]，"
+                    f"当前 layer_thresholds 有 {n_layers} 层"
+                )
 
 
 # ============================================================================
@@ -134,7 +129,7 @@ def load_factor_return_data(
     additional_data_files: Optional[Dict[str, str]] = None,
     required_factor_cols: Optional[List[str]] = None,
     logger: Optional[logging.Logger] = None
-) -> tuple:
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """从缓存加载因子和收益数据
     
     参数:
@@ -171,9 +166,9 @@ def load_factor_return_data(
             factor_data = json.load(f)
     except json.JSONDecodeError as e:
         raise json.JSONDecodeError(
-            f"因子数据 JSON 解析失败: {factor_path}, 错误: {e.msg}",
+            f"因子数据 JSON 解析失败: {factor_path}",
             e.doc, e.pos
-        )
+        ) from e
     
     if 'data' not in factor_data:
         raise KeyError(
@@ -198,9 +193,9 @@ def load_factor_return_data(
                     extra_data = json.load(f)
             except json.JSONDecodeError as e:
                 raise json.JSONDecodeError(
-                    f"额外数据 JSON 解析失败: {extra_path}, 错误: {e.msg}",
+                    f"额外数据 JSON 解析失败: {extra_path}",
                     e.doc, e.pos
-                )
+                ) from e
             
             if 'data' not in extra_data:
                 raise KeyError(
@@ -241,9 +236,9 @@ def load_factor_return_data(
             return_data = json.load(f)
     except json.JSONDecodeError as e:
         raise json.JSONDecodeError(
-            f"收益数据 JSON 解析失败: {return_path}, 错误: {e.msg}",
+            f"收益数据 JSON 解析失败: {return_path}",
             e.doc, e.pos
-        )
+        ) from e
     
     if 'data' not in return_data:
         raise KeyError(
@@ -271,9 +266,10 @@ def run_layered_backtest(
     factor_calculator: Optional[Callable] = None,
     additional_data_files: Optional[Dict[str, str]] = None,
     required_factor_cols: Optional[List[str]] = None,
+    cache_dir: Optional[str] = None,
     output_dir: Optional[str] = None,
     verbose: bool = True,
-    _logger: Optional[logging.Logger] = None
+    logger: Optional[logging.Logger] = None
 ) -> Dict:
     """分层回测公共入口
     
@@ -284,9 +280,10 @@ def run_layered_backtest(
         factor_calculator: 因子计算函数（可选，若因子已在缓存中则不需要）
         additional_data_files: 额外数据文件映射（可选）
         required_factor_cols: 因子数据必需字段列表（可选）
+        cache_dir: 缓存目录（可选，默认 cache/factor_data/）
         output_dir: 输出目录（默认 backtest/result/）
         verbose: 是否打印详细信息
-        _logger: 日志对象
+        logger: 日志对象
     
     返回:
         回测结果字典
@@ -309,66 +306,67 @@ def run_layered_backtest(
             required_factor_cols=['turnover_rate', 'close']
         )
     """
-    if _logger is None:
-        _logger = get_logger(__name__)
+    if logger is None:
+        logger = get_logger(__name__)
     
     # 校验配置
     config.validate()
     
-    _logger.info("=" * 40)
-    _logger.info("%s 分层回测", factor_name)
-    _logger.info("=" * 40)
+    logger.info("=" * 40)
+    logger.info("%s 分层回测", factor_name)
+    logger.info("=" * 40)
     
     if verbose:
-        _logger.info("配置信息:")
-        _logger.info("  分层阈值: %s", config.LAYER_THRESHOLDS)
-        _logger.info("  因子方向: %s", config.FACTOR_DIRECTION)
-        _logger.info("  多头组合: Layer %s", config.LONG_LAYERS)
-        _logger.info("  空头组合: Layer %s", config.SHORT_LAYERS)
-        _logger.info("  最小股票数: %d", config.MIN_STOCKS_PER_LAYER)
-        _logger.info("  交易成本率: %.2f%%", config.TRADE_COST_RATE * 100)
+        logger.info("配置信息:")
+        logger.info("  分层阈值: %s", config.layer_thresholds)
+        logger.info("  因子方向: %s", config.factor_direction)
+        logger.info("  多头组合: Layer %s", config.long_layers)
+        logger.info("  空头组合: Layer %s", config.short_layers)
+        logger.info("  最小股票数: %d", config.min_stocks_per_layer)
+        logger.info("  交易成本率: %.2f%%", config.trade_cost_rate * 100)
     
-    # 加载数据
+    # 加载数据（透传 cache_dir）
     factor_df, return_df = load_factor_return_data(
+        cache_dir=cache_dir,
         additional_data_files=additional_data_files,
         required_factor_cols=required_factor_cols,
-        logger=_logger
+        logger=logger
     )
     
     # 因子计算（如果需要）
     if factor_calculator:
-        _logger.info("计算 %s 因子...", factor_name)
+        logger.info("计算 %s 因子...", factor_name)
         factor_df = factor_calculator(factor_df)
     
     # 数据统计
     if verbose:
-        _logger.info("数据统计:")
-        _logger.info("  日期范围: %s ~ %s", factor_df['date'].min(), factor_df['date'].max())
-        _logger.info("  股票数量: %d", factor_df['asset'].nunique())
+        logger.info("数据统计:")
+        logger.info("  日期范围: %s ~ %s", factor_df['date'].min(), factor_df['date'].max())
+        logger.info("  股票数量: %d", factor_df['asset'].nunique())
         valid_factor = factor_df[factor_col].dropna()
         if len(valid_factor) > 0:
-            _logger.info("  %s 范围: %.2f ~ %.2f", factor_col, valid_factor.min(), valid_factor.max())
-            _logger.info("  %s 均值: %.2f", factor_col, valid_factor.mean())
+            logger.info("  %s 范围: %.2f ~ %.2f", factor_col, valid_factor.min(), valid_factor.max())
+            logger.info("  %s 均值: %.2f", factor_col, valid_factor.mean())
     
     # 验证因子范围
     factor_min = factor_df[factor_col].min()
     factor_max = factor_df[factor_col].max()
-    thresholds = config.LAYER_THRESHOLDS
+    thresholds = config.layer_thresholds
     
     if pd.notna(factor_min) and factor_min < thresholds[0]:
-        _logger.warning(
+        logger.warning(
             "因子最小值 %.2f 低于阈值下限 %s，建议调整 thresholds",
             factor_min, thresholds[0]
         )
     
     if pd.notna(factor_max) and factor_max > thresholds[-1]:
-        _logger.warning(
+        logger.warning(
             "因子最大值 %.2f 超出阈值上限 %s，将归入边界层",
             factor_max, thresholds[-1]
         )
     
     # 创建回测引擎
-    _logger.info("创建回测引擎...")
+    logger.info("创建回测引擎...")
     engine = LayeredBacktestEngine(
         factor_df=factor_df,
         return_df=return_df,
@@ -379,38 +377,39 @@ def run_layered_backtest(
     )
     
     # 执行分层回测
-    _logger.info("执行分层回测...")
-    n_layers = len(config.LAYER_THRESHOLDS) - 1
+    logger.info("执行分层回测...")
+    # 注意：n_layers 由 engine.run 内部根据 thresholds 长度自动计算
+    # fixed_threshold 模式下 n_layers 参数无效，无需传递
     
     result = engine.run(
         layer_method='fixed_threshold',
-        thresholds=config.LAYER_THRESHOLDS,
-        n_layers=n_layers,
-        factor_direction=config.FACTOR_DIRECTION,
-        long_layers=config.LONG_LAYERS,
-        short_layers=config.SHORT_LAYERS,
-        min_stocks_per_layer=config.MIN_STOCKS_PER_LAYER,
-        trade_cost_rate=config.TRADE_COST_RATE
+        thresholds=config.layer_thresholds,
+        factor_direction=config.factor_direction,
+        long_layers=config.long_layers,
+        short_layers=config.short_layers,
+        min_stocks_per_layer=config.min_stocks_per_layer,
+        trade_cost_rate=config.trade_cost_rate
     )
     
     # 添加因子特定信息
     result['meta']['factor_name'] = factor_name
-    result['meta']['layer_names'] = config.LAYER_NAMES
-    result['meta']['layer_thresholds_desc'] = config.LAYER_THRESHOLD_DESC
+    result['meta']['layer_names'] = config.layer_names
+    result['meta']['layer_thresholds_desc'] = config.layer_threshold_desc
     
     # 生成报告
     report = engine.generate_report(result)
-    _logger.info(report)
+    logger.info(report)
     
     # 分层说明
-    _logger.info("=" * 40)
-    _logger.info("%s 分层说明", factor_name)
-    _logger.info("=" * 40)
+    logger.info("=" * 40)
+    logger.info("%s 分层说明", factor_name)
+    logger.info("=" * 40)
+    n_layers = len(config.layer_thresholds) - 1  # 计算层数用于遍历
     for layer_id in range(1, n_layers + 1):
         layer_key = str(layer_id)
-        name = config.LAYER_NAMES.get(layer_key, f'Layer{layer_id}')
-        desc = config.LAYER_THRESHOLD_DESC.get(layer_key, '')
-        _logger.info("  Layer%d (%s): %s", layer_id, name, desc)
+        name = config.layer_names.get(layer_key, f'Layer{layer_id}')
+        desc = config.layer_threshold_desc.get(layer_key, '')
+        logger.info("  Layer%d (%s): %s", layer_id, name, desc)
     
     # 保存结果
     if output_dir is None:
@@ -428,13 +427,13 @@ def run_layered_backtest(
         'monotonicity': result['monotonicity'],
         'trading_cost_analysis': result['trading_cost_analysis'],
         'config': {
-            'layer_thresholds': config.LAYER_THRESHOLDS,
-            'layer_names': config.LAYER_NAMES,
-            'factor_direction': config.FACTOR_DIRECTION,
-            'long_layers': config.LONG_LAYERS,
-            'short_layers': config.SHORT_LAYERS,
-            'trade_cost_rate': config.TRADE_COST_RATE,
-            'min_stocks_per_layer': config.MIN_STOCKS_PER_LAYER
+            'layer_thresholds': config.layer_thresholds,
+            'layer_names': config.layer_names,
+            'factor_direction': config.factor_direction,
+            'long_layers': config.long_layers,
+            'short_layers': config.short_layers,
+            'trade_cost_rate': config.trade_cost_rate,
+            'min_stocks_per_layer': config.min_stocks_per_layer
         },
         'created_at': datetime.now().isoformat()
     }
@@ -442,7 +441,7 @@ def run_layered_backtest(
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(convert_to_native_types(output_data), f, indent=2, ensure_ascii=False)
     
-    _logger.info("结果已保存: %s", output_file)
+    logger.info("结果已保存: %s", output_file)
     
     # 保存每日明细
     daily_file = Path(output_dir) / f'{factor_name}_layered_backtest_daily.json.gz'
@@ -457,7 +456,7 @@ def run_layered_backtest(
     with gzip.open(daily_file, 'wt', encoding='utf-8') as f:
         json.dump(convert_to_native_types(daily_data), f, indent=2, ensure_ascii=False)
     
-    _logger.info("每日明细已保存: %s", daily_file)
+    logger.info("每日明细已保存: %s", daily_file)
     
     return result
 
@@ -473,7 +472,7 @@ def create_cli_entrypoint(
     factor_calculator: Optional[Callable] = None,
     additional_data_files: Optional[Dict[str, str]] = None,
     required_factor_cols: Optional[List[str]] = None
-) -> Callable:
+) -> Callable[[], None]:
     """创建 CLI 入口函数
     
     使用方式:
@@ -507,7 +506,7 @@ def create_cli_entrypoint(
                 required_factor_cols=required_factor_cols,
                 output_dir=args.output_dir,
                 verbose=not args.quiet,
-                _logger=logger
+                logger=logger
             )
             
             if result['meta']['n_days_total'] == 0:

@@ -2,7 +2,7 @@
 
 > 本文档定义 backtest/ 目录下分层回测脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v1.1（新增性能优化规范、静态方法调用规范、命名风格规范、NaN透传规范）
+> 版本: v1.2（新增 Config 类设计规范、异常处理规范、参数命名规范、类型注解规范）
 > 修订日期: 2026-05-23
 
 ---
@@ -332,6 +332,54 @@ long_short_stats = {
     'avg_turnover_long': ...,  # 与 turnover_avg 风格不一致
     'avg_turnover_short': ...,
 }
+
+---
+
+## Config 类设计规范（更新）
+
+**禁止 Property 与字段重复定义：**
+- Property 与字段同步风险：修改字段后 Property 返回旧值
+- 统一使用字段名访问：`config.layer_thresholds` 而非 `config.LAYER_THRESHOLDS`
+- 原因：dataclass 字段已提供类型约束，Property 是冗余设计
+
+---
+
+## 异常处理规范
+
+**JSONDecodeError 必须用链式抛出 raise ... from e：**
+- 不能用 `raise json.JSONDecodeError(...)` 重新构造
+- 正确做法：保留原始异常链，便于调试
+
+**正确写法：**
+```python
+except json.JSONDecodeError as e:
+    raise json.JSONDecodeError(f"解析失败: {path}", e.doc, e.pos) from e
+```
+
+**错误写法：**
+```python
+except json.JSONDecodeError as e:
+    raise json.JSONDecodeError(f"解析失败: {path}, 错误: {e.msg}", e.doc, e.pos)
+    # 缺少 from e，异常链断裂
+```
+
+---
+
+## 参数命名规范
+
+**统一命名风格，禁止下划线前缀：**
+- 参数名统一为 `logger`，而非 `_logger`
+- 下划线前缀语义是"私有变量"，但参数是外部传入
+- 原因：风格不一致增加维护成本
+
+---
+
+## 类型注解规范
+
+**返回类型注解必须精确：**
+- `tuple` → `Tuple[pd.DataFrame, pd.DataFrame]`
+- `Callable` → `Callable[[], None]`
+- 原因：宽泛类型注解无法提供有效类型检查
 
 ---
 
