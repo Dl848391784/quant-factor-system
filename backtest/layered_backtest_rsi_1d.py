@@ -111,7 +111,6 @@ def _wilder_smoothing(series: pd.Series, n: int) -> pd.Series:
 class RSILayerConfig(LayerConfigBase):
     """RSI 分层配置"""
     
-    layer_thresholds: List[float] = field(default_factory=lambda: [0, 30, 50, 70, 100])
     
     layer_names: TypingDict[str, str] = field(default_factory=lambda: {
         '1': '超卖层(RSI<30)',
@@ -142,7 +141,6 @@ class RSILayerConfig(LayerConfigBase):
     # 但均值回归策略认为偏离中性后可能回归，故做空。
     # 若需趋势跟随策略，请调整 factor_direction='positive'。
     
-    # layer_threshold_desc 与 thresholds 对应（4层）
     # 格式遵循 MODULE.md 第451行规范：完整区间 [lower, upper)，必须包含下界
     # 最大边界使用 ≥，说明越界值处理
     #

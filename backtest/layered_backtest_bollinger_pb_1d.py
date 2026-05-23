@@ -71,7 +71,6 @@ def _calc_rolling(series: pd.Series, window: int, method: str = 'mean') -> pd.Se
 class BollingerPBLayerConfig(LayerConfigBase):
     """BOLLINGER_PB 分层配置"""
     
-    layer_thresholds: List[float] = field(default_factory=lambda: [0, 0.5, 0.8, 1.0, 1.2, 2.0])
     
     layer_names: TypingDict[str, str] = field(default_factory=lambda: {
         '1': '超卖层(PB<0.5)',
@@ -85,7 +84,6 @@ class BollingerPBLayerConfig(LayerConfigBase):
     long_layers: List[int] = field(default_factory=lambda: [1, 2])
     short_layers: List[int] = field(default_factory=lambda: [4, 5])
     
-    # layer_threshold_desc 与 thresholds 对应（5层）
     # 格式遵循 MODULE.md 第451行规范：完整区间 [lower, upper)，必须包含下界
     # 最大边界使用 ≥，说明越界值处理
     layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {

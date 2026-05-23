@@ -63,40 +63,37 @@ class LayerConfigBase:
     """分层配置基类
     
     子类只需定义因子特有参数：
-    - layer_thresholds: 分层阈值
-    - layer_names: 分层命名
-    - layer_threshold_desc: 阈值说明
+    - n_layers: 分层数量（默认5层，每层20%）
+    - layer_names: 分层命名（业务描述）
     - factor_direction: 因子方向 ('positive' / 'negative')
     - long_layers: 多头组合
     - short_layers: 空头组合
     
-    设计变更（2026-05-23）：
-    - 删除 Property 方法，统一使用字段名访问
-    - 原因：Property 与字段重复定义，存在同步风险
-    - 调用方从 config.LAYER_THRESHOLDS 改为 config.layer_thresholds
+    设计变更（v1.5，2026-05-23）：
+    - 删除 layer_thresholds（固定阈值已废弃）
+    - 新增 n_layers（percentile 分层强制参数）
+    - 原因：fixed_threshold 在极端行情时分层不稳定
     """
     
-    # 子类必须定义的参数
-    layer_thresholds: List[float] = field(default_factory=list)
+    # percentile 分层参数（强制）
+    n_layers: int = 5  # 默认5层，每层20%
+    
+    # 分层命名（业务描述，不含阈值）
     layer_names: Dict[str, str] = field(default_factory=dict)
-    layer_threshold_desc: Dict[str, str] = field(default_factory=dict)
+    
+    # 因子方向和多空组合
     factor_direction: str = 'negative'
     long_layers: List[int] = field(default_factory=lambda: [1, 2])
     short_layers: List[int] = field(default_factory=lambda: [4, 5])
     
-    # 通用参数（所有因子共享）
+    # 通用参数
     trade_cost_rate: float = 0.003
     min_stocks_per_layer: int = 10
     
     def validate(self) -> None:
-        """校验配置完整性
-        
-        前置校验层编号上界，避免错误延迟到 engine.run 才抛出
-        """
-        if len(self.layer_thresholds) < 2:
-            raise ValueError("layer_thresholds 至少需要 2 个阈值")
-        
-        n_layers = len(self.layer_thresholds) - 1
+        """校验配置完整性"""
+        if self.n_layers < 2:
+            raise ValueError(f"n_layers 至少需要 2 层，当前: {self.n_layers}")
         
         if self.factor_direction not in ['positive', 'negative']:
             raise ValueError(f"factor_direction 必须是 'positive' 或 'negative', 当前: {self.factor_direction}")
@@ -106,17 +103,15 @@ class LayerConfigBase:
         
         # 校验层编号上界（前置校验，避免错误延迟到 engine.run）
         for layer_id in self.long_layers:
-            if layer_id > n_layers or layer_id < 1:
+            if layer_id > self.n_layers or layer_id < 1:
                 raise ValueError(
-                    f"long_layers 层编号 {layer_id} 越界，有效范围 [1, {n_layers}]，"
-                    f"当前 layer_thresholds 有 {n_layers} 层"
+                    f"long_layers 层编号 {layer_id} 越界，有效范围 [1, {self.n_layers}]"
                 )
         
         for layer_id in self.short_layers:
-            if layer_id > n_layers or layer_id < 1:
+            if layer_id > self.n_layers or layer_id < 1:
                 raise ValueError(
-                    f"short_layers 层编号 {layer_id} 越界，有效范围 [1, {n_layers}]，"
-                    f"当前 layer_thresholds 有 {n_layers} 层"
+                    f"short_layers 层编号 {layer_id} 越界，有效范围 [1, {self.n_layers}]"
                 )
 
 
@@ -318,7 +313,7 @@ def run_layered_backtest(
     
     if verbose:
         logger.info("配置信息:")
-        logger.info("  分层阈值: %s", config.layer_thresholds)
+        logger.info("  分层数量: %d (percentile)", config.n_layers)
         logger.info("  因子方向: %s", config.factor_direction)
         logger.info("  多头组合: Layer %s", config.long_layers)
         logger.info("  空头组合: Layer %s", config.short_layers)
@@ -356,22 +351,7 @@ def run_layered_backtest(
             logger.info("  %s 范围: %.2f ~ %.2f", factor_col, valid_factor.min(), valid_factor.max())
             logger.info("  %s 均值: %.2f", factor_col, valid_factor.mean())
     
-    # 验证因子范围
-    factor_min = factor_df[factor_col].min()
-    factor_max = factor_df[factor_col].max()
-    thresholds = config.layer_thresholds
-    
-    if pd.notna(factor_min) and factor_min < thresholds[0]:
-        logger.warning(
-            "因子最小值 %.2f 低于阈值下限 %s，建议调整 thresholds",
-            factor_min, thresholds[0]
-        )
-    
-    if pd.notna(factor_max) and factor_max > thresholds[-1]:
-        logger.warning(
-            "因子最大值 %.2f 超出阈值上限 %s，将归入边界层",
-            factor_max, thresholds[-1]
-        )
+    # percentile 分层无需阈值验证（自适应数据范围）
     
     # 创建回测引擎
     logger.info("创建回测引擎...")
@@ -384,14 +364,13 @@ def run_layered_backtest(
         asset_col='asset'
     )
     
-    # 执行分层回测
+# 执行分层回测
     logger.info("执行分层回测...")
-    # 注意：n_layers 由 engine.run 内部根据 thresholds 长度自动计算
-    # fixed_threshold 模式下 n_layers 参数无效，无需传递
+    # percentile 模式：强制使用（v1.5 规范），每层固定比例
     
     result = engine.run(
-        layer_method='fixed_threshold',
-        thresholds=config.layer_thresholds,
+        layer_method='percentile',
+        n_layers=config.n_layers,
         factor_direction=config.factor_direction,
         long_layers=config.long_layers,
         short_layers=config.short_layers,
@@ -402,7 +381,6 @@ def run_layered_backtest(
     # 添加因子特定信息
     result['meta']['factor_name'] = factor_name
     result['meta']['layer_names'] = config.layer_names
-    result['meta']['layer_thresholds_desc'] = config.layer_threshold_desc
     
     # 生成报告
     report = engine.generate_report(result)
@@ -412,12 +390,13 @@ def run_layered_backtest(
     logger.info("=" * 40)
     logger.info("%s 分层说明", factor_name)
     logger.info("=" * 40)
-    n_layers = len(config.layer_thresholds) - 1  # 计算层数用于遍历
-    for layer_id in range(1, n_layers + 1):
+    for layer_id in range(1, config.n_layers + 1):
         layer_key = str(layer_id)
         name = config.layer_names.get(layer_key, f'Layer{layer_id}')
-        desc = config.layer_threshold_desc.get(layer_key, '')
-        logger.info("  Layer%d (%s): %s", layer_id, name, desc)
+        logger.info("  Layer%d (%s): percentile %d-%d%%", 
+            layer_id, name, 
+            (layer_id-1)*100//config.n_layers, 
+            layer_id*100//config.n_layers)
     
     # 保存结果
     if output_dir is None:
@@ -435,7 +414,7 @@ def run_layered_backtest(
         'monotonicity': result['monotonicity'],
         'trading_cost_analysis': result['trading_cost_analysis'],
         'config': {
-            'layer_thresholds': config.layer_thresholds,
+            'n_layers': config.n_layers,
             'layer_names': config.layer_names,
             'factor_direction': config.factor_direction,
             'long_layers': config.long_layers,

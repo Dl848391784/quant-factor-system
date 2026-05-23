@@ -47,7 +47,6 @@ class KDJJLayerConfig(LayerConfigBase):
     # - 边界处理：J < -30 归 Layer 1（越界），J > 100 归 Layer 4（越界）
     # - Layer 划分：Layer1: [-30, 0), Layer2: [0, 20), Layer3: [20, 80), Layer4: [80, 100]
     # - KDJ J 理论范围 [-20, 120]，实际数据可能越界
-    layer_thresholds: List[float] = field(default_factory=lambda: [-30, 0, 20, 80, 100])
     
     # layer_names 与 thresholds 对应（4层）：
     # - Layer 1: J < -30（超卖，越界值归入此层）→ 做多（反向因子）
@@ -66,7 +65,6 @@ class KDJJLayerConfig(LayerConfigBase):
     long_layers: List[int] = field(default_factory=lambda: [1, 2])   # 超卖/偏弱层做多
     short_layers: List[int] = field(default_factory=lambda: [4])      # 偏强层做空
     
-    # layer_threshold_desc 与 thresholds 对应（4层）
     layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {
         '1': 'J < -30 (含越界值，超卖层，做多)',
         '2': '-30 ≤ J < 0 (偏弱层，做多)',

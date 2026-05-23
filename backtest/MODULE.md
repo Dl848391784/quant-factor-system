@@ -2,7 +2,7 @@
 
 > 本文档定义 backtest/ 目录下分层回测脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v1.4（新增预计算因子列校验、layer_names分离、IC溯源、阈值设计规范）
+> 版本: v1.5（强制 percentile 分层，废弃 fixed_threshold）
 > 修订日期: 2026-05-23
 
 ---
@@ -162,9 +162,35 @@ if __name__ == '__main__':
 
 ## 分层规则
 
+**分层方法强制规范（v1.5 更新）：**
+
+> **强制使用 percentile 分层，禁止使用 fixed_threshold**
+> 
+> 原因：fixed_threshold 在极端行情时分层不稳定（如2024-09-27政策行情，布林带Layer5涌入1235只股票），导致分层收益失真。percentile 分层保证每层固定比例股票，自适应数据分布变化。
+
+**分层配置：**
+```python
+layer_method='percentile'  # 强制值，不得改为 fixed_threshold
+n_layers=5                 # 默认5层（每层20%）
+```
+
+**禁止写法：**
+```python
+# ❌ 禁止：fixed_threshold 模式
+layer_method='fixed_threshold'
+thresholds=[0, 30, 50, 70, 100]  # 固定阈值
+```
+
+**正确写法：**
+```python
+# ✅ 正确：percentile 模式
+layer_method='percentile'
+n_layers=5
+```
+
 **分层数量：**
 - percentile 模式：由 n_layers 参数控制（默认 5 层）
-- fixed_threshold 模式：由 thresholds 长度决定（n 层 = len(thresholds) - 1）
+- fixed_threshold 模式：**已废弃**，禁止使用
 
 **分层方式：**
 - 正向因子（factor_direction='positive'）：高值预期高收益，多头取高层
@@ -174,12 +200,10 @@ if __name__ == '__main__':
 - 正向因子：多头 Layer(n-1, n)，空头 Layer(1, 2)
 - 反向因子：多头 Layer(1, 2)，空头 Layer(n-1, n)
 
-**边界处理规则（fixed_threshold 模式）：**
-- 最大边界（≥ thresholds[-1]）：归入 Layer n
-- 最小边界（< thresholds[0]）：归入 Layer 1，并输出警告日志
-  - 警告内容：股票数量、占比、建议检查 thresholds 或改用 percentile
-- 边界内（[thresholds[i], thresholds[i+1])）：归入 Layer (i+1)
-- **业务建议：thresholds 应覆盖数据范围，避免边界外数据**
+**percentile 分层优势：**
+- 分层稳定：每层固定比例（如20%），不受数据分布变化影响
+- 自适应：极端行情时仍保持分层比例稳定
+- 可比较：不同因子、不同时期的分层结果可直接对比
 
 **每层权重分配：**
 - 等权平均（每只股票权重相等）

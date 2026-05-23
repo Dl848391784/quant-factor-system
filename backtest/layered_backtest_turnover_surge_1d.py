@@ -75,7 +75,6 @@ class TurnoverSurgeLayerConfig(LayerConfigBase):
     """
     
     # thresholds 与 layer_names 对应（6个阈值点 → 5层）
-    layer_thresholds: List[float] = field(default_factory=lambda: [0, 0.5, 1.0, 2.0, 5.0, 500.0])
     
     # layer_names 与 thresholds 对应（5层）：
     # - Layer 1: surge < 0.5（极低）→ 做多（反向因子）
@@ -96,7 +95,6 @@ class TurnoverSurgeLayerConfig(LayerConfigBase):
     long_layers: List[int] = field(default_factory=lambda: [1, 2])   # 极低/偏低层做多
     short_layers: List[int] = field(default_factory=lambda: [4, 5])  # 偏高/突增层做空
     
-    # layer_threshold_desc 与 thresholds 对应（5层）
     # 格式遵循 MODULE.md 第451行规范：完整区间 [lower, upper)，必须包含下界
     layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {
         '1': '0 ≤ surge < 0.5 (含越界值<0，换手率远低于均值，做多)',   # 含越界值 surge < 0

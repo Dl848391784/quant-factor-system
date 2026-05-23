@@ -93,7 +93,6 @@ class VolumeRatioLayerConfig(LayerConfigBase):
     - 注：实际数据无负值和越界值，阈值设计为防御性预留
     """
     
-    layer_thresholds: List[float] = field(default_factory=lambda: [0, 0.5, 1.0, 1.5, 2.0, 5.0])
     
     layer_names: TypingDict[str, str] = field(default_factory=lambda: {
         '1': '极缩量层',
@@ -107,7 +106,6 @@ class VolumeRatioLayerConfig(LayerConfigBase):
     long_layers: List[int] = field(default_factory=lambda: [1, 2])
     short_layers: List[int] = field(default_factory=lambda: [4, 5])
     
-    # layer_threshold_desc 与 thresholds 对应（5层）
     # 格式遵循 MODULE.md 第451行规范：完整区间 [lower, upper)，必须包含下界
     # 最大边界使用 ≥，说明越界值处理
     #
