@@ -193,8 +193,9 @@ if __name__ == '__main__':
 
 **字典取值规范（防 None 运算）：**
 - 错误写法：`val = dict.get('key', 0)` — 键存在但值为 None 时返回 None
-- 正确写法：`val = dict.get('key') or 0` — 键缺失或值为 None 都返回 0
-- 原因：`None * 100` 会抛 TypeError
+- 错误写法：`val = dict.get('key') or 0` — 合法的 0.0 或负数会被替换为 0
+- 正确写法：`val = dict.get('key'); val = val if val is not None else 0`
+- 原因：`None * 100` 会抛 TypeError，但 `0.0` 和负数是合法值不应替换
 
 ---
 
