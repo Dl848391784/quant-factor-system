@@ -11,17 +11,19 @@
 - 量比>1: 成交量高于均值（放量）
 
 数据来源：
-- 缓存数据：~/projects/factor_ic_analyzer/cache/factor_data.json.gz
+- 缓存数据：DEFAULT_CACHE_DIR/factor_data.json.gz（默认为项目根目录/cache/factor_data）
 - 因子列：volume_ratio_5（已预计算）
+- 注：可通过 --cache_dir 参数指定其他缓存目录
 
 输出：
 - 分层回测结果：backtest/result/volume_ratio_layered_backtest.json
 - 每日收益数据：backtest/result/volume_ratio_layered_backtest_daily.json.gz
+- 注：可通过 --output_dir 参数指定其他输出目录
 
 CLI 参数：
-- --cache_dir: 缓存目录路径（默认：~/projects/factor_ic_analyzer/cache）
-- --output_dir: 输出目录路径（默认：backtest/result）
-- --quiet: 静默模式（不输出进度日志）
+- --cache_dir: 缓存目录路径（默认：None，使用 DEFAULT_CACHE_DIR）
+- --output_dir: 输出目录路径（默认：None，使用 backtest/result）
+- --quiet: 静默模式（默认：False）
 
 规范:
 - 遵循 PROJECT.md 公共模块强制复用规范
