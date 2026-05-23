@@ -136,9 +136,9 @@ if __name__ == '__main__':
 
 | 因子类型 | 示例文件 | 特点 |
 |---------|---------|------|
-| 简单因子（数据已在缓存） | `layered_backtest_volume_ratio_1d.py` | 66 行，无需额外数据和计算 |
-| 复杂因子（需额外数据） | `layered_backtest_turnover_surge_1d.py` | 136 行，需加载换手率数据 + 因子计算 |
-| 复杂因子（需因子计算） | `layered_backtest_kdj_j_1d.py` | 163 行，需计算 KDJ_J |
+| 简单因子（数据已在缓存） | `layered_backtest_volume_ratio_1d.py` | 134行（原始374行→重构66行→补充文档134行），无需额外数据和计算 |
+| 复杂因子（需额外数据） | `layered_backtest_turnover_surge_1d.py` | 136行，需加载换手率数据 + 因子计算 |
+| 复杂因子（需因子计算） | `layered_backtest_kdj_j_1d.py` | 163行，需计算 KDJ_J |
 
 **分层数说明：**
 - `n_layers = len(layer_thresholds) - 1`
