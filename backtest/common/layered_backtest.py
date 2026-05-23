@@ -46,17 +46,35 @@ def _coalesce(val: Any, default: float = 0.0) -> Any:
         default: None 时的默认值（默认 0.0）
     
     返回:
-        Any: val 不为 None 时返回原值（保留 NaN），否则返回 default
-    
-    设计说明:
-        - NaN 透传：数据不足时收益为 NaN，报告应显示 N/A 而非 0.00%
-        - None 替换：字典键缺失时返回 None，应替换为默认值
-        - 区分场景：NaN 表示"有数据但计算无效"，None 表示"无数据"
+        若 val 为 None，返回 default
+        若 val 为 NaN/0.0/负数，原样返回（这些是合法值）
     """
     if val is None:
         return default
-    # NaN 透传，不替换（报告展示时由调用方决定如何显示）
     return val
+
+
+def _format_pct(val: Any, decimals: int = 2, suffix: str = '%') -> str:
+    """
+    格式化百分比：NaN 显示 N/A，数值显示百分比
+    
+    用法:
+        daily_ret = _coalesce(stats.get('daily_return_mean'))
+        lines.append(f"日均收益: {_format_pct(daily_ret, 4)}")
+        # 输出：NaN → "N/A"，数值 → "12.34%"
+    
+    参数:
+        val: 可能为 NaN 的值
+        decimals: 小数位数（默认 2）
+        suffix: 后缀（默认 '%'）
+    
+    返回:
+        若 val 为 NaN，返回 "N/A"
+        否则返回 f"{val*100:.{decimals}f}{suffix}"
+    """
+    if pd.isna(val):
+        return "N/A"
+    return f"{val*100:.{decimals}f}{suffix}"
 
 
 class LayeredBacktestEngine:
@@ -128,11 +146,14 @@ class LayeredBacktestEngine:
         # 获取日期列表
         self.dates = sorted(self.merged_df[self.date_col].unique())
         
-        # 内存优化（仅因子列用 float32，收益列保持 float64 防精度损失）
-        # 收益列用于累计收益计算 (1+r).cumprod()，float32 精度约7位，长时间序列误差累积
+        # 内存优化（v1.6 修正：因子列必须 float64，禁用 float32）
+        # 因子列用于 percentile 分层，float32 精度损失会导致分层偏差
+        # 收益列用于累计收益计算 (1+r).cumprod()，float64 防长时间序列误差累积
         self.merged_df[self.asset_col] = self.merged_df[self.asset_col].astype('category')
         if self.factor_col in self.merged_df.columns:
-            self.merged_df[self.factor_col] = self.merged_df[self.factor_col].astype('float32')
+            # 禁用 float32：rank 分层需要精确区分相邻因子值
+            # float32 精度约7位有效数字，1.0000001 vs 1.0000002 会被截断为相同值
+            self.merged_df[self.factor_col] = self.merged_df[self.factor_col].astype('float64')
         if self.return_col in self.merged_df.columns:
             self.merged_df[self.return_col] = self.merged_df[self.return_col].astype('float64')
     
@@ -386,7 +407,9 @@ class LayeredBacktestEngine:
             #   1. 先处理边界外数据（低于最小阈值归Layer1，高于最大阈值归Layer n）
             #   2. 再处理边界内数据（循环归层）
             #   若调整顺序，需确保边界外数据不被循环覆盖
-            layer_assignment = pd.Series(0, index=factor_values.index)
+            # 使用显式 bool mask 替代哨兵值，避免歧义（v1.6 修正）
+            layer_assignment = pd.Series(0, index=factor_values.index)  # 层号：0=未归层，1-n=已归层
+            assigned = pd.Series(False, index=factor_values.index)     # 是否已归层的显式标记
             
             # ========== 边界处理（必须在循环前执行）==========
             # 低于最小阈值：归入 Layer 1
@@ -400,6 +423,7 @@ class LayeredBacktestEngine:
                     f"建议：检查 thresholds 参数是否覆盖数据范围，或使用 percentile 分层。"
                 )
                 layer_assignment[below_min_mask] = 1
+                assigned[below_min_mask] = True
             
             # 超最大阈值：归入最后一层
             above_max_mask = factor_values > thresholds[-1]
@@ -412,6 +436,7 @@ class LayeredBacktestEngine:
                     f"建议：检查 thresholds 参数是否覆盖数据范围，或使用 percentile 分层。"
                 )
                 layer_assignment[above_max_mask] = n_layers
+                assigned[above_max_mask] = True
             
             # ========== 边界内循环归层 ==========
             for i in range(len(thresholds) - 1):
@@ -424,12 +449,13 @@ class LayeredBacktestEngine:
                     mask = (factor_values >= lower) & (factor_values <= upper)
                 else:  # 前 len(thresholds) - 2 个区间（Layer 1 到 n_layers-1）
                     mask = (factor_values >= lower) & (factor_values < upper)
-                # 只处理未归层的股票（layer_assignment == 0）
-                mask_unassigned = mask & (layer_assignment == 0)
+                # 只处理未归层的股票（显式 bool mask，避免哨兵值歧义）
+                mask_unassigned = mask & ~assigned
                 layer_assignment[mask_unassigned] = i + 1
+                assigned[mask_unassigned] = True
             
             # 断言：所有股票都已归层
-            unassigned_mask = layer_assignment == 0
+            unassigned_mask = ~assigned
             if unassigned_mask.any():
                 logger.error(
                     f"fixed_threshold 逻辑错误: {unassigned_mask.sum()} 个股票未归层，"
@@ -885,8 +911,13 @@ class LayeredBacktestEngine:
             sharpe = stats.get('sharpe_ratio')
             turnover = _coalesce(stats.get('turnover_avg'))
             
-            sharpe_str = f"{sharpe:.2f}" if sharpe is not None else "N/A"
-            lines.append(f"Layer{layer_id:<3} {n_stocks:<10.0f} {daily_ret*100:>10.2f}% {annual_ret*100:>10.2f}% {sharpe_str:<10} {turnover*100:>8.1f}%")
+            # 使用 _format_pct 处理 NaN（v1.6 修正）
+            sharpe_str = f"{sharpe:.2f}" if sharpe is not None and not pd.isna(sharpe) else "N/A"
+            daily_str = _format_pct(daily_ret, decimals=2)
+            annual_str = _format_pct(annual_ret, decimals=2)
+            turnover_str = _format_pct(turnover, decimals=1)
+            
+            lines.append(f"Layer{layer_id:<3} {n_stocks:<10.0f} {daily_str:>10} {annual_str:>10} {sharpe_str:<10} {turnover_str:>8}")
         
         # 空数据提示（所有层都无效时）
         if valid_layer_count == 0:
@@ -909,15 +940,17 @@ class LayeredBacktestEngine:
             short_annual = _coalesce(ls_stats.get('short_return_annual'))
             ls_daily = _coalesce(ls_stats.get('long_short_return_daily'))
             ls_annual = _coalesce(ls_stats.get('long_short_return_annual'))
-            lines.append(f"多头日均收益: {long_daily*100:.4f}%")
-            lines.append(f"多头年化收益: {long_annual*100:.2f}%")
-            lines.append(f"空头日均收益: {short_daily*100:.4f}%")
-            lines.append(f"空头年化收益: {short_annual*100:.2f}%")
-            lines.append(f"多空日均收益: {ls_daily*100:.4f}%")
-            lines.append(f"多空年化收益: {ls_annual*100:.2f}%")
+            
+            # 使用 _format_pct 处理 NaN（v1.6 修正）
+            lines.append(f"多头日均收益: {_format_pct(long_daily, 4)}")
+            lines.append(f"多头年化收益: {_format_pct(long_annual, 2)}")
+            lines.append(f"空头日均收益: {_format_pct(short_daily, 4)}")
+            lines.append(f"空头年化收益: {_format_pct(short_annual, 2)}")
+            lines.append(f"多空日均收益: {_format_pct(ls_daily, 4)}")
+            lines.append(f"多空年化收益: {_format_pct(ls_annual, 2)}")
             # 夏普比率可能为 None（volatility=0 时），需单独处理避免 TypeError
             sharpe = ls_stats.get('long_short_sharpe')
-            sharpe_str = f"{sharpe:.2f}" if sharpe is not None else "N/A"
+            sharpe_str = f"{sharpe:.2f}" if sharpe is not None and not pd.isna(sharpe) else "N/A"
             lines.append(f"多空夏普比率: {sharpe_str}")
         else:
             # 空数据提示

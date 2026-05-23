@@ -293,10 +293,34 @@ percentile 分层使用 `rank + ceil` 算法，分层结果取决于 N（股票�
 - 保护：若 `rolling_max == 0`（净值归零），drawdown 设为 0
 - 原因：除零会产生 inf 或 NaN，破坏后续统计
 
-**数据类型规范：**
-- 因子列：`float32`（仅用于排序，精度要求低）
-- 收益列：`float64`（用于累计收益 `(1+r).cumprod()`，长时间序列误差累积）
-- 原因：float32 精度约7位有效数字，连乘累积收益误差会放大
+**数据类型规范（v1.6 修正）：**
+- 因子列：`float64`（rank 分层需要精确区分相邻因子值）
+- 收益列：`float64`（累计收益 `(1+r).cumprod()` 防长时间序列误差累积）
+- **禁用 float32**：精度约7位有效数字，会导致分层偏差
+
+修正说明：
+- 旧版本将因子列转为 float32 以节省内存，但 percentile 分层需要精确区分相邻因子值
+- float32 精度损失后，1.0000001 vs 1.0000002 会被截断为相同值
+- 分层结果偏离预期：本应分层N的股票被错误归入分层M
+- 修正后：因子列强制 float64，代价是内存增加，但分层精确
+
+**格式化辅助函数规范（v1.6 新增）：**
+
+使用 `_format_pct(val, decimals, suffix)` 处理百分比格式化：
+- NaN → "N/A"
+- 数值 → "12.34%"
+
+用法示例：
+```python
+from backtest.common.layered_backtest import _coalesce, _format_pct
+
+daily_ret = _coalesce(stats.get('daily_return_mean'))
+# 正确用法：使用 _format_pct 处理 NaN
+lines.append(f"日均收益: {_format_pct(daily_ret, 4)}")
+
+# 错误用法（已修正）：直接乘法格式化会传播 NaN
+# lines.append(f"日均收益: {daily_ret*100:.4f}%")  # ❌ NaN 会导致格式化错误
+```
 
 **字典取值规范（防 None 运算）：**
 - 错误写法：`val = dict.get('key', 0)` — 键存在但值为 None 时返回 None
