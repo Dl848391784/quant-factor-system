@@ -2,7 +2,7 @@
 
 > 本文档定义 backtest/ 目录下分层回测脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v0.6（补充空数据返回结构、空数据报告提示规范）
+> 版本: v0.7（脚本命名规则同步 factor_ic 格式）
 > 修订日期: 2026-05-23
 
 ---
@@ -19,11 +19,13 @@ backtest 模块负责对因子 IC 结果进行分层回测，评估因子的实�
 
 ## 脚本命名
 
-**格式：** `layered_backtest_<因子名>.py`
+**格式：** `layered_backtest_<因子名>_<收益周期>.py`（仿照 factor_ic 命名规则）
 
 **示例：**
-- `layered_backtest_rsi.py` — RSI 因子分层回测
-- `layered_backtest_volume_ratio.py` — 量比因子分层回测
+- `layered_backtest_rsi_1d.py` — RSI 因子 1日收益分层回测
+- `layered_backtest_volume_ratio_1d.py` — 量比因子 1日收益分层回测
+
+**命名规则来源：** 与 factor_ic 模块命名规则保持一致（`ic_<因子名>_<收益周期>.py`）
 
 ---
 
