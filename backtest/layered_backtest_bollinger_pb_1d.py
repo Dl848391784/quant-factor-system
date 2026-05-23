@@ -13,10 +13,10 @@ BOLLINGER_PB 因子分层回测脚本
 """
 
 import sys
-import numpy as np
 import pandas as pd
 from pathlib import Path
 from dataclasses import dataclass, field
+from functools import partial
 from typing import List, Dict as TypingDict
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -40,9 +40,9 @@ class BollingerPBLayerConfig(LayerConfigBase):
     
     layer_names: TypingDict[str, str] = field(default_factory=lambda: {
         '1': '超卖层(PB<0.5)',
-        '2': '偏空层(0.5≤PB<0.8)',
+        '2': '偏弱层(0.5≤PB<0.8)',
         '3': '中性层(0.8≤PB<1.0)',
-        '4': '偏多层(1.0≤PB<1.2)',
+        '4': '偏强层(1.0≤PB<1.2)',
         '5': '超买层(PB≥1.2)'
     })
     
@@ -52,9 +52,9 @@ class BollingerPBLayerConfig(LayerConfigBase):
     
     layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {
         '1': 'PB < 0.5 (价格低于下轨)',
-        '2': '0.5 ≤ PB < 0.8 (接近下轨)',
+        '2': '0.5 ≤ PB < 0.8 (接近下轨，偏弱)',
         '3': '0.8 ≤ PB < 1.0 (中轨偏下)',
-        '4': '1.0 ≤ PB < 1.2 (中轨偏上)',
+        '4': '1.0 ≤ PB < 1.2 (中轨偏上，偏强)',
         '5': 'PB ≥ 1.2 (接近或高于上轨)'
     })
     
@@ -84,11 +84,17 @@ def calculate_bollinger_pb(
     # 计算 %B (Position in Band)
     # %B = (Close - Lower) / (Upper - Lower)
     band_width = df['upper'] - df['lower']
-    df['bollinger_pb'] = np.where(
+    
+    # 使用 Series.where 替代 np.where（避免 ndarray 丢失 index）
+    df['bollinger_pb'] = ((df['close'] - df['lower']) / band_width).where(
         band_width > 0,
-        (df['close'] - df['lower']) / band_width,
-        0.5  # 默认值
+        0.5  # 带宽为0时的默认值（价格在中轨）
     )
+    
+    # 因子数据范围校验（遵循 MODULE.md 第505行规范）
+    pb_min = df['bollinger_pb'].min()
+    pb_max = df['bollinger_pb'].max()
+    logger.info("bollinger_pb 因子范围: %.2f ~ %.2f", pb_min, pb_max)
     
     return df
 
@@ -96,14 +102,16 @@ def calculate_bollinger_pb(
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='BOLLINGER_PB 分层回测')
+    parser.add_argument('--cache_dir', type=str, default=None,
+                        help='缓存目录路径')
     parser.add_argument('--output_dir', type=str, default=None)
     parser.add_argument('--quiet', action='store_true')
     parser.add_argument('--bollinger-n', type=int, default=DEFAULT_N)
     args = parser.parse_args()
     
     try:
-        def factor_calc(df):
-            return calculate_bollinger_pb(df, n=args.bollinger_n)
+        # 使用 functools.partial 替代闭包，显式传参避免隐式捕获
+        factor_calc = partial(calculate_bollinger_pb, n=args.bollinger_n)
         
         result = run_layered_backtest(
             factor_name='bollinger_pb',
@@ -111,9 +119,10 @@ def main():
             config=BollingerPBLayerConfig(),
             factor_calculator=factor_calc,
             required_factor_cols=['close'],
+            cache_dir=args.cache_dir,
             output_dir=args.output_dir,
             verbose=not args.quiet,
-            _logger=logger
+            logger=logger  # 符合 MODULE.md 第382行规范：参数名统一为 logger
         )
         
         if result['meta']['n_days_total'] == 0:
@@ -125,6 +134,12 @@ def main():
     except FileNotFoundError as e:
         logger.error("数据文件不存在: %s", e)
         sys.exit(2)
+    except KeyError as e:
+        logger.error("数据字段缺失: %s", e)
+        sys.exit(3)
+    except ValueError as e:
+        logger.error("数据值异常: %s", e)
+        sys.exit(4)
     except Exception as e:
         logger.exception("回测执行异常: %s", e)
         sys.exit(5)
