@@ -14,7 +14,6 @@ KDJ_J 因子分层回测脚本
 """
 
 import sys
-import numpy as np
 import pandas as pd
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -84,12 +83,11 @@ def calculate_kdj_j(
         lambda x: x.rolling(window=n, min_periods=n).max()
     )
     
+    # 使用 Series 方法，避免 np.where 导致 index 丢失（遵循 memory numpy/pandas 规范）
     range_val = df['high_n'] - df['low_n']
-    df['rsv'] = np.where(
-        range_val > 0,
-        (df['close'] - df['low_n']) / range_val * 100,
-        50.0
-    )
+    # 先计算 RSV，再处理 range_val == 0 的边界情况
+    safe_range = range_val.where(range_val > 0, 1.0)  # 避免 division by zero
+    df['rsv'] = ((df['close'] - df['low_n']) / safe_range * 100).where(range_val > 0, 50.0)
     
     # 计算 K
     alpha_k = 1.0 / m1

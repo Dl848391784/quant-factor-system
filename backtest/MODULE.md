@@ -107,7 +107,7 @@ result = run_layered_backtest(
     # 可选参数：
     factor_calculator=my_calculate_func,  # 若因子需实时计算
     additional_data_files={'turnover_rate': 'path/to/data.json.gz'},  # 若需额外数据
-    _logger=logger
+    logger=logger
 )
 ```
 
