@@ -64,10 +64,18 @@ class VolumeRatioLayerConfig(LayerConfigBase):
     - Layer4/Layer5（放量）→ 做空（量比>1.5，成交量高于均值）
     - Layer3（正常）→ 不参与（量比接近均值，方向不明确）
     
+    实际数据特征（基于全量统计）：
+    - 数据范围：[0.1, 4.97]，无负值和零值
+    - 均值：1.01（接近基准）
+    - 中位数：0.94（小于1，说明大部分数据在缩量区间）
+    - Layer1数据占比：1.39%（ratio<0.5）
+    - Layer5数据占比：2.23%（ratio>2）
+    
     阈值边界依赖说明（runner 实现）：
     - fixed_threshold 模式：[thresholds[i], thresholds[i+1]) 归入 Layer (i+1)
     - 最大边界使用 ≥，包括越界值（如量比>5）
-    - 最小边界以下归入 Layer1（如量比<0）
+    - 最小边界以下归入 Layer1（如量比<0，防御性设计）
+    - 注：实际数据无负值和越界值，阈值设计为防御性预留
     """
     
     layer_thresholds: List[float] = field(default_factory=lambda: [0, 0.5, 1.0, 1.5, 2.0, 5.0])
