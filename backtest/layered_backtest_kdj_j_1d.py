@@ -65,17 +65,47 @@ class KDJJLayerConfig(LayerConfigBase):
     kdj_m2: int = DEFAULT_M2
 
 
+def _calc_ewm_with_initial(
+    series: pd.Series,
+    alpha: float,
+    initial_value: float = 50.0
+) -> pd.Series:
+    """计算 EWM，填充 NaN 为初始值
+    
+    Args:
+        series: 输入序列（可能包含 NaN）
+        alpha: EWM alpha 参数（alpha = 1/period，权重衰减半衰期约为 period）
+        initial_value: 初始值，默认 50（KDJ 的 K 和 D 初始值）
+    
+    Returns:
+        EWM 计算结果
+    """
+    filled = series.fillna(initial_value)
+    result = filled.ewm(alpha=alpha, adjust=False).mean()
+    return result  # type: ignore
+
+
 def calculate_kdj_j(
     factor_df: pd.DataFrame,
     n: int = DEFAULT_N,
     m1: int = DEFAULT_M1,
     m2: int = DEFAULT_M2
 ) -> pd.DataFrame:
-    """计算 KDJ_J 因子"""
+    """计算 KDJ_J 因子
+    
+    Args:
+        factor_df: 包含 close, high, low 列的 DataFrame
+        n: RSV 计算周期，默认 9
+        m1: K 值平滑周期，默认 3
+        m2: D 值平滑周期，默认 3
+    
+    Returns:
+        包含 kdj_j 列的 DataFrame
+    """
     df = factor_df.copy()
     df = df.sort_values(['asset', 'date'])
     
-    # 计算 RSV
+    # 计算 RSV（未成熟随机值）
     df['low_n'] = df.groupby('asset')['low'].transform(
         lambda x: x.rolling(window=n, min_periods=n).min()
     )
@@ -85,33 +115,20 @@ def calculate_kdj_j(
     
     # 使用 Series 方法，避免 np.where 导致 index 丢失（遵循 memory numpy/pandas 规范）
     range_val = df['high_n'] - df['low_n']
-    # 先计算 RSV，再处理 range_val == 0 的边界情况
     safe_range = range_val.where(range_val > 0, 1.0)  # 避免 division by zero
     df['rsv'] = ((df['close'] - df['low_n']) / safe_range * 100).where(range_val > 0, 50.0)
     
-    # 计算 K
+    # 计算 K（alpha = 1/m1，使得权重衰减半衰期约为 m1）
     alpha_k = 1.0 / m1
-    def calc_k_with_initial(rsv_series):
-        k = rsv_series.ewm(alpha=alpha_k, adjust=False).mean()
-        first_valid_idx = rsv_series.first_valid_index()
-        if first_valid_idx is not None:
-            rsv_expanded = rsv_series.copy()
-            rsv_expanded.loc[:first_valid_idx] = rsv_expanded.loc[:first_valid_idx].fillna(50)
-            k = rsv_expanded.ewm(alpha=alpha_k, adjust=False).mean()
-        return k
-    df['k'] = df.groupby('asset')['rsv'].transform(calc_k_with_initial)
+    df['k'] = df.groupby('asset')['rsv'].transform(
+        lambda s: _calc_ewm_with_initial(s, alpha_k)
+    )
     
-    # 计算 D
+    # 计算 D（alpha = 1/m2，使得权重衰减半衰期约为 m2）
     alpha_d = 1.0 / m2
-    def calc_d_with_initial(k_series):
-        d = k_series.ewm(alpha=alpha_d, adjust=False).mean()
-        first_valid_idx = k_series.first_valid_index()
-        if first_valid_idx is not None:
-            k_expanded = k_series.copy()
-            k_expanded.loc[:first_valid_idx] = k_expanded.loc[:first_valid_idx].fillna(50)
-            d = k_expanded.ewm(alpha=alpha_d, adjust=False).mean()
-        return d
-    df['d'] = df.groupby('asset')['k'].transform(calc_d_with_initial)
+    df['d'] = df.groupby('asset')['k'].transform(
+        lambda s: _calc_ewm_with_initial(s, alpha_d)
+    )
     
     # 计算 J
     df['kdj_j'] = 3 * df['k'] - 2 * df['d']
