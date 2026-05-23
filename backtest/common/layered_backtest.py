@@ -353,12 +353,25 @@ class LayeredBacktestEngine:
         返回: Series(index=asset, value=layer_id)
         """
         if method == 'percentile':
-            # 百分位分层（method='first' 保证唯一秩，分层均匀）
-            # method='average' 会使相同因子值获得相同平均秩，ceil后全部落入同一层
+            # 百分位分层（method='first' 保证唯一秩）
+            # 
+            # 精度要求：因子值必须以 float64 存储。float32 精度损失会导致：
+            #   - 相邻因子值在存储时被截断为相同值
+            #   - method='first' 虽能给相同值分配不同秩，但无法恢复原始顺序信息
+            #   - 分层结果偏离预期（本应分层N的股票被错误归入分层M）
+            # 
+            # 分层均匀性：当 N (股票数) 不能被 n_layers 整除时，
+            #   - ceil(N/n_layers) 支股票会归入最后一层
+            #   - 例如 N=3003, n_layers=5 → Layer1-4 各600支，Layer5 有603支
+            #   - 这是 rank+ceil 算法的数学特性，非bug
+            # 
+            # method='first' vs 'average'：
+            #   - 'first': 相同值按出现顺序分配不同秩，保证分层覆盖所有股票
+            #   - 'average': 相同值获得相同平均秩，可能导致某层股票过多
             factor_values_f64 = factor_values.astype('float64')
             ranks = factor_values_f64.rank(pct=True, method='first')
             layer_assignment = np.ceil(ranks * n_layers).astype(int)
-            # 处理边界（rank=1时为第n层）
+            # 边界处理：rank=1.0 → ceil(5.0)=5, clip后归Layer5
             layer_assignment = layer_assignment.clip(1, n_layers)
         
         elif method == 'fixed_threshold' and thresholds:

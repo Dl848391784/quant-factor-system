@@ -2,7 +2,7 @@
 
 > 本文档定义 backtest/ 目录下分层回测脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v1.5（强制 percentile 分层，废弃 fixed_threshold）
+> 版本: v1.6（新增 percentile 精度要求 + 分层均匀性说明）
 > 修订日期: 2026-05-23
 
 ---
@@ -204,6 +204,40 @@ n_layers=5
 - 分层稳定：每层固定比例（如20%），不受数据分布变化影响
 - 自适应：极端行情时仍保持分层比例稳定
 - 可比较：不同因子、不同时期的分层结果可直接对比
+
+**percentile 分层精度要求（v1.6 更新）：**
+
+> **因子数据必须以 float64 存储，禁止使用 float32**
+
+原因：
+- float32 精度约为7位有效数字，相邻因子值（如 1.0000001 vs 1.0000002）会被截断为相同值
+- 精度损失后，method='first' 虽能给相同值分配不同秩，但无法恢复原始顺序信息
+- 分层结果偏离预期：本应分层N的股票被错误归入分层M
+
+数据源规范：
+- Parquet 文件：使用 `dtype='float64'` 存储
+- 数据库读取：使用 `pd.read_sql(..., dtype={'factor_col': 'float64'})`
+- 内存计算：默认 float64，避免 `.astype('float32')`
+
+验证方法：
+```python
+# 检查因子值唯一性
+unique_ratio = factor_values.nunique() / len(factor_values)
+if unique_ratio < 0.95:
+    logger.warning(f'因子值重复率高 ({(1-unique_ratio)*100:.1f}%)，检查精度问题')
+```
+
+**分层均匀性说明：**
+
+percentile 分层使用 `rank + ceil` 算法，分层结果取决于 N（股票数）与 n_layers 的整除关系：
+
+- 当 N 可被 n_layers 整除时：每层恰好 N/n_layers 支股票（完全均匀）
+- 当 N 不能被 n_layers 整除时：
+  - 使用 `ceil(rank_pct * n_layers)` 计算层号
+  - 余数个股票会均匀分布到后几层
+  - 例如 N=3003, n_layers=5 → Layer1-3 各600支，Layer4-5 各601支
+
+这是算法的数学特性，非bug。实际影响：每层股票数差异 ≤1，对回测结果无实质影响。
 
 **每层权重分配：**
 - 等权平均（每只股票权重相等）
