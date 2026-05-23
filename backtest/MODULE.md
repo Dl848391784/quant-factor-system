@@ -2,7 +2,7 @@
 
 > 本文档定义 backtest/ 目录下分层回测脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v1.3（新增因子列校验规范、JSONDecodeError 内存问题规范）
+> 版本: v1.4（新增预计算因子列校验、layer_names分离、IC溯源、阈值设计规范）
 > 修订日期: 2026-05-23
 
 ---
@@ -71,6 +71,19 @@ backtest 模块负责对因子 IC 结果进行分层回测，评估因子的实�
 | 数据加载 | `run_layered_backtest()` 自动加载 | 手写 gzip.open + json.load |
 | 结果保存 | `run_layered_backtest()` 自动保存 | 手写 json.dump |
 | CLI 入口 | `create_cli_entrypoint()` | 手写 argparse + 异常处理 |
+
+**历史脚本兼容说明：**
+- 新因子脚本强制使用 `create_cli_entrypoint`
+- 历史脚本（KDJ_J、BOLLINGER_PB、RSI、换手率突增）在 2026-05-23 前开发，手写 main() 函数
+- 历史脚本待后续重构，新脚本必须遵循新规范
+
+**create_cli_entrypoint 支持的参数：**
+- `factor_name`：因子名称
+- `factor_col`：因子列名
+- `config_class`：Config 类（继承 LayerConfigBase）
+- `required_factor_cols`：预计算因子列校验（可选，见第 845 行规范）
+- `additional_data_files`：额外数据文件（可选）
+- `factor_calculator`：因子计算函数（可选）
 | Config 基类 | 继承 `LayerConfigBase` | 手写 property 方法 |
 | 分层回测 | 调用 `LayeredBacktestEngine` | 手写分层逻辑 |
 
@@ -545,6 +558,142 @@ df['rsi'] = 100 - (100 / (1 + df['rs']))  # 无后续覆盖，逻辑漏洞
 - `avg_loss=0` 有两种场景：`avg_gain>0`（超买）和 `avg_gain=0`（中性）
 - 合并处理会导致后者误判为超买
 - 分开处理逻辑清晰，避免边界情况遗漏
+
+---
+
+## 预计算因子列校验规范（2026-05-23 新增）
+
+**预计算因子列（数据已在缓存中）应指定 required_factor_cols 作为防御性校验。**
+
+**使用场景：**
+- 因子列已在 `factor_data.json.gz` 中预存（如 volume_ratio_5）
+- 无需 factor_calculator 实时计算
+
+**正确写法：**
+```python
+main = create_cli_entrypoint(
+    factor_name='volume_ratio',
+    factor_col='volume_ratio_5',
+    config_class=VolumeRatioLayerConfig,
+    required_factor_cols=['volume_ratio_5']  # 预计算列防御性校验
+)
+```
+
+**原因：**
+- 虽然 runner 内部会在因子计算后校验 factor_col 存在（第 342 行）
+- 但 required_factor_cols 在数据加载阶段提前校验，更快暴露问题
+- 防御性编程：显式声明依赖，避免数据源变更后静默失败
+
+---
+
+## layer_names 与 layer_threshold_desc 分离规范（2026-05-23 新增）
+
+**layer_names 只包含业务描述，技术边界说明放在 layer_threshold_desc。**
+
+**正确写法：**
+```python
+layer_names: TypingDict[str, str] = field(default_factory=lambda: {
+    '1': '极缩量层',  # 只包含业务含义
+    '2': '缩量层',
+    '3': '正常层',
+    '4': '放量层',
+    '5': '极放量层'
+})
+
+layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {
+    '1': 'ratio < 0.5 (含越界值<0，极缩量，做多)',  # 技术边界 + 业务含义
+    '2': '0.5 ≤ ratio < 1.0 (缩量，做多)',
+    '3': '1.0 ≤ ratio < 1.5 (正常，不参与)',
+    '4': '1.5 ≤ ratio < 2.0 (放量，做空)',
+    '5': 'ratio ≥ 2.0 (含边界2.0，含越界值>5，极放量，做空)'
+})
+```
+
+**错误写法：**
+```python
+layer_names: TypingDict[str, str] = field(default_factory=lambda: {
+    '1': '极缩量层(ratio<0.5，含越界值<0)',  # 混合技术边界和业务含义
+    '2': '缩量层(0.5≤ratio<1)',
+    ...
+})
+```
+
+**原因：**
+- `layer_names` 用于结果展示（日志、报告），应简洁易懂
+- `layer_threshold_desc` 用于技术文档说明，包含完整边界信息
+- 分离职责：业务语义与技术细节解耦，便于维护
+
+---
+
+## IC 值溯源规范（2026-05-23 新增）
+
+**Config 类注释中必须说明 IC 值来源文件，不能硬编码无溯源。**
+
+**正确写法：**
+```python
+@dataclass
+class VolumeRatioLayerConfig(LayerConfigBase):
+    """量比分层配置
+    
+    因子方向说明（基于IC测试结果）：
+    - IC均值 = -0.029（负相关，显著）
+    - IC来源：factor_ic/result/volume_ratio_5_ic_result.json（2026-05-22 测试）
+    - 高量比 → 未来收益倾向于更低（放量可能预示见顶）
+    ...
+    """
+```
+
+**错误写法：**
+```python
+@dataclass
+class VolumeRatioLayerConfig(LayerConfigBase):
+    """量比分层配置
+    
+    因子方向说明（基于IC测试结果）：
+    - IC均值 = -0.029（负相关，显著）  # 无来源说明
+    ...
+    """
+```
+
+**原因：**
+- IC 值硬编码在注释中，维护风险：IC 测试更新后注释未同步
+- 必须溯源到具体文件，便于后续验证和更新
+- 方法论严谨性：结论可追溯
+
+---
+
+## 阈值设计建议（2026-05-23 新增）
+
+**阈值应根据数据统计特征设计，避免各层数据占比极端不平衡。**
+
+**设计流程：**
+1. 先运行数据统计脚本，获取因子范围、均值、中位数、分位数分布
+2. 根据业务逻辑（如均值回归、趋势跟随）确定分层边界
+3. 检查各层数据占比，避免单层占比过低（< 1%）或过高（> 40%）
+
+**示例（量比因子）：**
+```python
+# 数据统计结果：
+# - 范围：[0.1, 4.97]
+# - 均值：1.01
+# - 中位数：0.94（大部分数据在缩量区间）
+
+# 阈值设计：
+layer_thresholds: List[float] = field(default_factory=lambda: [0, 0.5, 1.0, 1.5, 2.0, 5.0])
+
+# 数据占比校验（建议在 Config 类注释中说明）：
+# - Layer1（ratio<0.5）：1.39%（极缩量，占比低但符合预期）
+# - Layer5（ratio≥2）：2.23%（极放量，占比低但符合预期）
+```
+
+**极端占比检查：**
+- 若某层占比 < 1%，检查阈值是否过于严格
+- 若某层占比 > 40%，检查阈值是否过于宽松
+- 均值回归策略中，中间层（如 Layer3）占比高是合理的
+
+**原因：**
+- 阈值设计应基于实际数据分布，而非主观假设
+- 各层占比不平衡可能导致多空组合收益不稳定
 
 ---
 

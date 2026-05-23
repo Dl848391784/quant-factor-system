@@ -63,6 +63,7 @@ class VolumeRatioLayerConfig(LayerConfigBase):
     
     因子方向说明（基于IC测试结果）：
     - IC均值 = -0.029（负相关，显著）
+    - IC来源：factor_ic/result/volume_ratio_5_ic_result.json（2026-05-22 测试）
     - 高量比 → 未来收益倾向于更低（放量可能预示见顶）
     - 低量比 → 未来收益倾向于更高（缩量可能预示反弹）
     - factor_direction='negative' 意味着：低量比做多，高量比做空
@@ -95,11 +96,11 @@ class VolumeRatioLayerConfig(LayerConfigBase):
     layer_thresholds: List[float] = field(default_factory=lambda: [0, 0.5, 1.0, 1.5, 2.0, 5.0])
     
     layer_names: TypingDict[str, str] = field(default_factory=lambda: {
-        '1': '极缩量层(ratio<0.5，含越界值<0)',
-        '2': '缩量层(0.5≤ratio<1)',
-        '3': '正常层(1≤ratio<1.5)',
-        '4': '放量层(1.5≤ratio<2)',
-        '5': '极放量层(ratio≥2，含越界值>5)'
+        '1': '极缩量层',
+        '2': '缩量层',
+        '3': '正常层',
+        '4': '放量层',
+        '5': '极放量层'
     })
     
     factor_direction: str = 'negative'
@@ -132,7 +133,8 @@ class VolumeRatioLayerConfig(LayerConfigBase):
 main = create_cli_entrypoint(
     factor_name='volume_ratio',
     factor_col='volume_ratio_5',
-    config_class=VolumeRatioLayerConfig
+    config_class=VolumeRatioLayerConfig,
+    required_factor_cols=['volume_ratio_5']  # 预计算列防御性校验
 )
 
 if __name__ == '__main__':
