@@ -885,11 +885,12 @@ class LayeredBacktestEngine:
             'long_daily_cost': long_daily_cost,
             'short_daily_cost': short_daily_cost,
             'long_gross_daily_return': long_daily_ret,
-            'long_net_daily_return': long_daily_ret - long_daily_cost,
+            # Net return：收益 NaN 时也传播 NaN（语义正确：收益未知时净收益也未知）
+            'long_net_daily_return': long_daily_ret - long_daily_cost if not pd.isna(long_daily_ret) else None,
             'short_gross_daily_return': short_daily_ret,
-            'short_net_daily_return': short_daily_ret - short_daily_cost,
-            'long_short_gross_daily': long_daily_ret - short_daily_ret,
-            'long_short_net_daily': (long_daily_ret - long_daily_cost) - (short_daily_ret - short_daily_cost)
+            'short_net_daily_return': short_daily_ret - short_daily_cost if not pd.isna(short_daily_ret) else None,
+            'long_short_gross_daily': long_daily_ret - short_daily_ret if not pd.isna(long_daily_ret) and not pd.isna(short_daily_ret) else None,
+            'long_short_net_daily': (long_daily_ret - long_daily_cost) - (short_daily_ret - short_daily_cost) if not pd.isna(long_daily_ret) and not pd.isna(short_daily_ret) else None
         }
     
     def generate_report(self, result: Dict) -> str:
