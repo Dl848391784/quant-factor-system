@@ -32,11 +32,13 @@ CLI 参数：
 重构日期: 2026-05-23（使用公共入口）
 """
 
+# 标准库
 import sys
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Dict as TypingDict
 
+# 本地模块
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backtest.common.layered_backtest_runner import (

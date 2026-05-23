@@ -845,6 +845,34 @@ if factor_col not in factor_df.columns:
 
 ---
 
+## 导入分组规范
+
+**导入语句应按分组注释组织：标准库、第三方库、本地模块。**
+
+**正确写法：**
+```python
+# 标准库
+import sys
+from pathlib import Path
+from dataclasses import dataclass, field
+from typing import List, Dict
+
+# 第三方库（如 pandas）
+import pandas as pd
+
+# 本地模块
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from backtest.common.layered_backtest_runner import run_layered_backtest
+```
+
+**原因：**
+- 分组注释提高可读性
+- 符合 Python 编码规范（PEP 8）
+- 便于识别依赖来源
+
+----
+
 ## Config 类规范
 
 **必须使用 `@dataclass`，提供类型约束和不可变性保护。**

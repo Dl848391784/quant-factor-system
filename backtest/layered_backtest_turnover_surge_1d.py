@@ -13,14 +13,18 @@
 重构日期: 2026-05-23（使用公共入口）
 """
 
+# 标准库
 import sys
-import numpy as np
-import pandas as pd
-from functools import partial
 from pathlib import Path
 from dataclasses import dataclass, field
+from functools import partial
 from typing import List, Dict as TypingDict, Any
 
+# 第三方库
+import numpy as np
+import pandas as pd
+
+# 本地模块
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backtest.common.layered_backtest_runner import (
