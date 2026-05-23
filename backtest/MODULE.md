@@ -564,61 +564,44 @@ for layer_id in range(1, meta['n_layers'] + 1):
 
 ## 必须遵守的约束
 
+**遵循 PROJECT.md"输出数据规范"章节（2026-05-23新增）的跨模块通用原则：**
+- 输出结构必须统一
+- 字段值不可为 None
+- 结果输出到 result 目录
+- 因子方向不可预判
+
+**本模块特定约束：**
+
 | # | 约束 | 说明 |
 |---|------|------|
-| 1 | 输出结构必须统一 | 所有回测脚本输出相同结构 |
-| 2 | 字段值不可为 None | 输出前诊断原因 |
-| 3 | 每次改动必须更新测试用例 | 与 factor_ic 规范一致 |
-| 4 | 结果输出到 result 目录 | `backtest/result/` 而非 cache |
-| 5 | 因子方向不可预判 | 根据 IC 结果确定，不能假设 |
+| 1 | 分层阈值必须覆盖数据范围 | 避免 fixed_threshold 边界警告 |
+| 2 | 反向因子多头取低层 | Layer(1,2)，空头取高层 Layer(n-1,n) |
+| 3 | 每层最小股票数校验 | min_stocks_per_layer 参数 |
 
 ---
 
 ## 测试用例规范
 
-**核心原则：** 每次改动必须更新测试用例，与 factor_ic 规范一致。
+**遵循 PROJECT.md"脚本配套文件规范"章节。**
 
 **测试用例目录：** `backtest/test_cases/`
 
-**测试用例文件命名：** `<因子名>_layered_backtest_test_cases.md` 或 `test_<功能>.py`
-
-**必须包含的测试场景：**
-- 正常数据场景（分层收益计算正确）
-- 边界数据场景（数据量不足、单层模式）
-- 异常数据场景（NaN 处理、空数据返回结构）
-
-**示例：** 参见 `factor_ic/test_cases/ic_rsi_1d_test_cases.md`
+**测试用例文件命名：** `<因子名>_layered_backtest_test_cases.md`
 
 ---
 
 ## 输出目录规范
 
-**核心原则：** 分层回测结果必须输出到 `backtest/result/` 目录。
+**遵循 PROJECT.md"输出数据规范 > 输出目录规范"章节。**
 
-**输出路径格式：** `backtest/result/<因子名>_layered_backtest.json`
-
-**正确写法：**
-```python
-output_file = project_root / 'backtest' / 'result' / f'{factor_name}_layered_backtest.json'
-```
-
-**错误写法：**
-```python
-output_file = project_root / 'cache' / 'backtest' / f'{factor_name}_layered_backtest.json'  # cache 目录不持久化
-```
-
-**原因：**
-- `result/` 目录用于持久化输出，纳入版本管理
-- `cache/` 目录用于临时缓存，不纳入版本管理
-- 与 factor_ic 模块规范一致（`factor_ic/result/`）
+**输出路径：** `backtest/result/<因子名>_layered_backtest.json`
 
 ---
 
-## 输出结构一致性规范
+## 输出结构模板
 
-**核心原则：** 所有回测脚本输出结构必须一致，便于下游统一处理。
+**本模块特定输出结构（遵循 PROJECT.md"输出结构一致性规范"）：**
 
-**输出结构模板：**
 ```json
 {
   "meta": {
@@ -630,12 +613,21 @@ output_file = project_root / 'cache' / 'backtest' / f'{factor_name}_layered_back
     "date_range": {"start": "<str>", "end": "<str>"},
     "layer_names": {<dict>},
     "layer_thresholds": [<list>],
-    "layer_thresholds_desc": {<dict>},
-    "kdj_params": {<dict>}  // 可选，因子特定参数
+    "layer_thresholds_desc": {<dict>}
   },
   "layer_stats": {
-    "layer_1": {...},
-    "layer_2": {...},
+    "layer_1": {
+      "n_days": <int>,
+      "n_stocks_avg": <float>,
+      "daily_return_mean": <float>,
+      "daily_return_std": <float>,
+      "cumulative_return": <float>,
+      "annual_return": <float>,
+      "annual_volatility": <float>,
+      "sharpe_ratio": <float>,
+      "max_drawdown": <float>,
+      "turnover_avg": <float>
+    },
     ...
   },
   "long_short": {
@@ -666,41 +658,15 @@ output_file = project_root / 'cache' / 'backtest' / f'{factor_name}_layered_back
 }
 ```
 
-**字段说明：**
-| 字段 | 含义 | 必须非空 |
-|------|------|---------|
-| meta.factor_name | 因子名称 | ✓ |
-| meta.n_days_total | 回测天数 | ✓ |
-| meta.n_assets_total | 股票总数 | ✓ |
-| layer_stats.layer_X.n_stocks_avg | 平均股票数 | ✓ |
-| long_short.sharpe_ratio | 夏普比率 | ✓（空数据时可为 None） |
+**字段说明（必须非空字段）：**
 
----
-
-## 字段不能为空规范
-
-**核心原则：** 输出字段不能为 None，否则说明输出有问题。
-
-**诊断步骤：**
-1. 检查数据加载是否正确
-2. 检查因子计算是否正确
-3. 检查分层逻辑是否正确
-4. 检查统计计算是否正确
-
-**正确处理：**
-```python
-# 空数据时显式设置 None，并记录原因
-if len(daily_df) == 0:
-    sharpe_ratio = None  # 明确标记，而非计算错误
-    logger.warning("数据不足，sharpe_ratio 设为 None")
-```
-
-**错误处理：**
-```python
-# 计算错误导致隐式 None
-sharpe_ratio = daily_df['return'].mean() / daily_df['return'].std()  # 空数据时除零错误
-# 未捕获异常，sharpe_ratio 未设置
-```
+| 字段 | 含义 | 空数据处理 |
+|------|------|-----------|
+| meta.factor_name | 因子名称 | 必须有值 |
+| meta.n_days_total | 回测天数 | 必须有值（空数据为 0） |
+| meta.n_assets_total | 股票总数 | 必须有值 |
+| layer_stats.layer_X.n_stocks_avg | 平均股票数 | 必须有值（空数据为 0） |
+| long_short.sharpe_ratio | 夏普比率 | 空数据可为 None |
 
 ---
 

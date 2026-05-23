@@ -212,6 +212,111 @@ data_fetchers/
 
 ---
 
+## 输出数据规范（2026-05-23新增）
+
+### 核心原则
+
+| # | 约束 | 适用模块 | 说明 |
+|---|------|---------|------|
+| 1 | 输出结构必须统一 | factor_ic, backtest | 所有脚本输出相同结构，便于下游统一处理 |
+| 2 | 字段值不可为 None | factor_ic, backtest | 输出前诊断原因，空数据显式标记 |
+| 3 | 结果输出到 result 目录 | factor_ic, backtest | `模块目录/result/`，纳入版本管理 |
+| 4 | 因子方向不可预判 | factor_ic, backtest | 根据实际 IC/回测结果确定，不能假设 |
+
+### 输出目录规范
+
+**所有模块的输出结果必须放在 `<模块目录>/result/` 目录。**
+
+| 模块 | 输出目录 | 文件格式 |
+|------|---------|---------|
+| factor_ic | `factor_ic/result/` | `ic_<因子名>_<周期>_analysis_result.json` |
+| backtest | `backtest/result/` | `<因子名>_layered_backtest.json` |
+
+**禁止：**
+```
+❌ 输出到 cache/ 目录（临时缓存，不持久化）
+❌ 输出到脚本同级目录（散乱，难管理）
+```
+
+### 输出结构一致性规范
+
+**同一模块内所有脚本输出结构必须一致。**
+
+**MODULE.md 职责：**
+- 定义模块特定的输出结构模板（具体字段）
+- 定义字段含义和必须非空的字段列表
+
+**PROJECT.md 职责：**
+- 定义跨模块通用原则（结构一致、字段非空）
+- 各模块 MODULE.md 引用 PROJECT.md 通用原则
+
+**示例：**
+```json
+// factor_ic 输出结构（MODULE.md 定义）
+{
+  "meta": {...},
+  "ic_metrics": {...},
+  "statistical_significance": {...},
+  ...
+}
+
+// backtest 输出结构（MODULE.md 定义）
+{
+  "meta": {...},
+  "layer_stats": {...},
+  "long_short": {...},
+  ...
+}
+```
+
+### 字段不能为空规范
+
+**输出字段为 None 说明有问题，必须诊断原因。**
+
+**诊断步骤：**
+1. 检查数据加载是否正确
+2. 检查计算逻辑是否正确
+3. 检查边界条件处理是否正确
+
+**正确处理：**
+```python
+# 空数据时显式设置 None，并记录原因
+if len(data) == 0:
+    result['sharpe_ratio'] = None  # 明确标记
+    logger.warning("数据不足，sharpe_ratio 设为 None")
+```
+
+**禁止：**
+```python
+# 计算错误导致隐式 None
+result['sharpe_ratio'] = data['return'].mean() / data['return'].std()
+# 空数据时除零错误，result['sharpe_ratio'] 未设置
+```
+
+### 因子方向不可预判规范
+
+**因子方向必须根据实际结果确定，不能根据因子类型假设。**
+
+**正确做法：**
+```python
+# 根据 IC 结果判断
+ic_mean = result['ic_metrics']['ic_mean']
+factor_direction = 'negative' if ic_mean < 0 else 'positive'
+```
+
+**禁止：**
+```python
+# 根据因子类型假设（错误！）
+# RSI 是反向因子？不一定，要看实际 IC
+factor_direction = 'negative'  # 预判，错误
+```
+
+**原因：**
+- 同类型因子在不同市场/时间段可能方向不同
+- IC 结果是唯一可靠的判断依据
+
+---
+
 ## 文档一致性规范
 
 ### 跨文档同步原则

@@ -1,31 +1,35 @@
 # factor_ic 模块规范
 
-> 版本: v3.13
+> 版本: v3.14
 > 创建时间: 2026-05-19
 > 重构时间: 2026-05-22
-> 最后更新: 2026-05-22 (从 PROJECT.md 迁移公共模块强制复用规范、公共模块日志传递规范)
+> 最后更新: 2026-05-23 (引用 PROJECT.md 输出数据规范，精简模块特定约束)
 
 ## 快速参考
 
-### 必须遵守的约束（15条）
+### 必须遵守的约束
+
+**遵循 PROJECT.md"输出数据规范"章节（2026-05-23新增）的跨模块通用原则：**
+- 输出结构必须统一
+- 字段值不可为 None
+- 结果输出到 result 目录
+- 因子方向不可预判
+
+**本模块特定约束（11条）：**
 
 | # | 约束 | 说明 |
 |---|------|------|
-| 1 | 因子方向不可预判 | 根据 IC 结果确定，不能假设 |
-| 2 | 统计显著性只用 p<0.05 | 与 |t|>1.96 等价 |
-| 3 | ICIR 用 abs(ic_mean) | 无论正向反向因子 |
-| 4 | 输出结构必须统一 | 所有因子脚本输出相同结构 |
-| 5 | 字段值不可为 None | 输出前诊断原因 |
-| 6 | 日期格式 YYYY-MM-DD | 强制格式 |
-| 7 | DataFrame 参数先 copy() | 函数入口处 |
-| 8 | 禁止分层回测逻辑 | IC 脚本职责仅限于 IC 计算 |
-| 9 | 增量模式复用 calculate_single_day_ic | 确保算法一致性 |
-| 10 | 异常链保留 from e | ValueError 不包装 |
-| 11 | Newey-West 样本量 T=valid_days | 不是 total_days |
-| 12 | rolling_ic_mean 前 9 个为 None | min_periods=10 |
-| 13 | sample_stats.avg_stocks_period 含口径说明 | 语义完整 |
-| 14 | 修改公共模块同步更新 MODULE.md | 字段定义一致性 |
-| 15 | 字段不重复输出 | 同一字段只在一处 |
+| 1 | 统计显著性只用 p<0.05 | 与 |t|>1.96 等价 |
+| 2 | ICIR 用 abs(ic_mean) | 无论正向反向因子 |
+| 3 | 日期格式 YYYY-MM-DD | 强制格式 |
+| 4 | DataFrame 参数先 copy() | 函数入口处 |
+| 5 | 禁止分层回测逻辑 | IC 脚本职责仅限于 IC 计算 |
+| 6 | 增量模式复用 calculate_single_day_ic | 确保算法一致性 |
+| 7 | 异常链保留 from e | ValueError 不包装 |
+| 8 | Newey-West 样本量 T=valid_days | 不是 total_days |
+| 9 | rolling_ic_mean 前 9 个为 None | min_periods=10 |
+| 10 | sample_stats.avg_stocks_period 含口径说明 | 语义完整 |
+| 11 | 字段不重复输出 | 同一字段只在一处 |
 
 ### 关键函数签名
 
