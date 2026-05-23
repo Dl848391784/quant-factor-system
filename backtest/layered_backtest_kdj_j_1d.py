@@ -89,6 +89,32 @@ def _calc_ewm_with_initial(
     return result  # type: ignore
 
 
+def _calc_k_from_rsv(series: pd.Series, alpha: float) -> pd.Series:
+    """从 RSV 计算 K 值（groupby transform 专用，显式传参避免闭包）
+    
+    Args:
+        series: RSV 序列
+        alpha: K 值平滑 alpha
+    
+    Returns:
+        K 值序列
+    """
+    return _calc_ewm_with_initial(series, alpha)
+
+
+def _calc_d_from_k(series: pd.Series, alpha: float) -> pd.Series:
+    """从 K 值计算 D 值（groupby transform 专用，显式传参避免闭包）
+    
+    Args:
+        series: K 值序列
+        alpha: D 值平滑 alpha
+    
+    Returns:
+        D 值序列
+    """
+    return _calc_ewm_with_initial(series, alpha)
+
+
 def calculate_kdj_j(
     factor_df: pd.DataFrame,
     n: int = DEFAULT_N,
@@ -127,13 +153,13 @@ def calculate_kdj_j(
     # 计算 K（alpha = 1/m1，使得权重衰减半衰期约为 m1）
     alpha_k = 1.0 / m1
     df['k'] = df.groupby('asset')['rsv'].transform(
-        lambda s: _calc_ewm_with_initial(s, alpha_k)
+        lambda s: _calc_k_from_rsv(s, alpha_k)  # 显式传参，避免闭包
     )
     
     # 计算 D（alpha = 1/m2，使得权重衰减半衰期约为 m2）
     alpha_d = 1.0 / m2
     df['d'] = df.groupby('asset')['k'].transform(
-        lambda s: _calc_ewm_with_initial(s, alpha_d)
+        lambda s: _calc_d_from_k(s, alpha_d)  # 显式传参，避免闭包
     )
     
     # 计算 J
