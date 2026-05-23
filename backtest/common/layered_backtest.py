@@ -714,16 +714,17 @@ class LayeredBacktestEngine:
                 'turnover_avg': float(turnover_avg)
             }
         
-        # 多空组合统计（用 concat 替代 groupby.apply，跨版本行为一致）
+        # 多空组合统计（v1.6 修正：保留所有日期，年化考虑覆盖率）
         # pandas ≥ 2.2 下 groupby.apply 可能产生多级索引，改用 concat 更稳定
         # 显式排序日期：保证时间序列顺序，便于后续累计收益计算
+        total_days = len(sorted(daily_df['date'].unique()))  # 总天数（含NaN日）
         daily_ls_list = []
         for date_val in sorted(daily_df['date'].unique()):
             group = daily_df[daily_df['date'] == date_val]
             ls_series = LayeredBacktestEngine._calc_daily_ls(group, long_layers, short_layers)
-            if pd.notna(ls_series.get('long_short_return')):
-                ls_series['date'] = date_val
-                daily_ls_list.append(ls_series)
+            # 保留所有日期（包括 NaN），用于计算总天数和覆盖率
+            ls_series['date'] = date_val
+            daily_ls_list.append(ls_series)
         
         if len(daily_ls_list) > 0:
             long_short_df = pd.DataFrame(daily_ls_list)
@@ -733,28 +734,43 @@ class LayeredBacktestEngine:
         # 多空组合统计
         long_short_stats = {}
         if len(long_short_df) > 0:
-            ls_mean = long_short_df['long_short_return'].mean()
+            # 有效天数：用于均值计算（自动忽略 NaN）
+            valid_days = long_short_df['long_short_return'].notna().sum()
+            coverage = valid_days / total_days if total_days > 0 else 0
+            
+            ls_mean = long_short_df['long_short_return'].mean()  # 有效天数均值
             ls_std = long_short_df['long_short_return'].std()
-            ls_annual = ls_mean * 252
-            ls_vol = ls_std * np.sqrt(252)
+            
+            # 年化计算：考虑覆盖率（v1.6 修正）
+            # 语义：如果某因子只有60%的交易日有数据，年化收益应乘以覆盖率
+            ls_annual = ls_mean * 252 * coverage
+            ls_vol = ls_std * np.sqrt(252)  # 波动率不需要覆盖率（假设NaN日波动为0）
             
             # 安全转换：NaN → None（避免 json.dumps 抛 ValueError）
             def safe_float(val):
                 return None if pd.isna(val) else float(val)
             
+            # 年化计算考虑覆盖率（v1.6 修正）
+            long_mean = long_short_df['long_return'].mean()
+            short_mean = long_short_df['short_return'].mean()
+            long_turnover_mean = long_short_df['long_turnover'].mean()
+            short_turnover_mean = long_short_df['short_turnover'].mean()
+            
             long_short_stats = {
-                'long_return_daily': safe_float(long_short_df['long_return'].mean()),
-                'long_return_annual': safe_float(long_short_df['long_return'].mean() * 252),
-                'short_return_daily': safe_float(long_short_df['short_return'].mean()),
-                'short_return_annual': safe_float(long_short_df['short_return'].mean() * 252),
+                'long_return_daily': safe_float(long_mean),
+                'long_return_annual': safe_float(long_mean * 252 * coverage),
+                'short_return_daily': safe_float(short_mean),
+                'short_return_annual': safe_float(short_mean * 252 * coverage),
                 'long_short_return_daily': safe_float(ls_mean),
                 'long_short_return_annual': safe_float(ls_annual),
                 'long_short_sharpe': safe_float(ls_annual / ls_vol) if ls_vol > 0 else None,
                 'long_short_volatility': safe_float(ls_vol),
                 # 换手率：统一命名（turnover_xxx_avg，与 layer_stats.turnover_avg 风格一致）
-                'turnover_long_avg': safe_float(long_short_df['long_turnover'].mean()),
-                'turnover_short_avg': safe_float(long_short_df['short_turnover'].mean()),
-                'n_days': int(len(long_short_df))  # 转 int 避免 JSON 序列化问题
+                'turnover_long_avg': safe_float(long_turnover_mean),
+                'turnover_short_avg': safe_float(short_turnover_mean),
+                'n_days': int(valid_days),  # 有效天数（转 int 避免 JSON 序列化问题）
+                'n_days_total': int(total_days),  # 总天数（含NaN日）
+                'coverage': float(coverage)  # 数据覆盖率
             }
         
         # 单调性检验
@@ -846,9 +862,13 @@ class LayeredBacktestEngine:
         if not long_short_stats:
             return {}
         
-        # 安全取值：使用 _coalesce 辅助函数
-        long_turnover = _coalesce(long_short_stats.get('turnover_long_avg'))
-        short_turnover = _coalesce(long_short_stats.get('turnover_short_avg'))
+        # 安全取值：显式处理 NaN（v1.6 修正）
+        # 换手率 NaN → 成本按 0 处理（语义：换手率未知时无法计算交易成本）
+        long_turnover_raw = long_short_stats.get('turnover_long_avg')
+        short_turnover_raw = long_short_stats.get('turnover_short_avg')
+        long_turnover = 0.0 if pd.isna(long_turnover_raw) else float(long_turnover_raw)
+        short_turnover = 0.0 if pd.isna(short_turnover_raw) else float(short_turnover_raw)
+        
         long_daily_ret = _coalesce(long_short_stats.get('long_return_daily'))
         short_daily_ret = _coalesce(long_short_stats.get('short_return_daily'))
         

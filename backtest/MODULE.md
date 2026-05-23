@@ -282,6 +282,51 @@ percentile 分层使用 `rank + ceil` 算法，分层结果取决于 N（股票�
 - cumulative_return = 第1-9日收益连乘 × 第11-N日收益连乘
 - 第 10 日不参与计算（符合实际：停牌日无交易收益）
 
+**年化收益计算规范（v1.6 修正）：**
+
+> **年化收益必须考虑数据覆盖率**
+
+修正说明：
+- 旧版本：年化 = 有效均值 * 252（假设全年都有收益，忽略数据缺失）
+- 新版本：年化 = 有效均值 * 252 * 覆盖率
+
+覆盖率计算：
+- 覆盖率 = 有效天数 / 总天数
+- 总天数：回测区间内的所有交易日（含 NaN 日）
+- 有效天数：有收益数据的交易日（忽略 NaN）
+
+语义说明：
+- 如果某因子只有 60% 的交易日有数据（覆盖率=0.6）
+- 年化收益应乘以 0.6（反映实际可交易时段）
+- 否则会高估收益（假设全年都有收益）
+
+示例：
+- 总天数 6天，有效天数 4天（2天停牌）
+- 有效均值 2.5%
+- 错误年化：2.5% * 252 = 6.3%
+- 正确年化：2.5% * 252 * (4/6) = 4.2%
+
+**交易成本计算规范（v1.6 修正）：**
+
+> **换手率 NaN → 成本按 0 处理**
+
+语义说明：
+- 换手率 NaN 表示"未知"（数据缺失、计算异常）
+- 无法计算交易成本 → 成本按 0 处理
+- 不是"成本为 NaN"，而是"无成本"
+
+修复方案：
+```python
+# 错误写法：NaN 传播
+long_turnover = _coalesce(stats.get('turnover_long_avg'))  # NaN 透传
+long_daily_cost = long_turnover * trade_cost_rate  # NaN * 0.003 = NaN
+
+# 正确写法：显式处理 NaN
+long_turnover_raw = stats.get('turnover_long_avg')
+long_turnover = 0.0 if pd.isna(long_turnover_raw) else float(long_turnover_raw)
+long_daily_cost = long_turnover * trade_cost_rate  # 0.0 * 0.003 = 0.0
+```
+
 **夏普比率（简化版）：**
 - 公式：`sharpe = annual_return / annual_volatility`
 - 说明：简化夏普（rf=0），未扣除无风险收益率
