@@ -51,76 +51,78 @@
     "layer_3": {
       "n_days": 515,
       "n_stocks_avg": 575.7611650485437,
-      "daily_return_mean": 0.0008482456317106549,
-      "daily_return_std": 0.01493025066293355,
-      "cumulative_return": 0.45441129390634516,
-      "annual_return": 0.21375789919108504,
-      "annual_volatility": 0.23701038159587648,
-      "sharpe_ratio": 0.9018925574136285,
-      "max_drawdown": -0.19606656552260204,
+      "daily_return_mean": 0.0008483051297409978,
+      "daily_return_std": 0.014930260436723606,
+      "cumulative_return": 0.45445519598226247,
+      "annual_return": 0.21377289269473146,
+      "annual_volatility": 0.23701053674998362,
+      "sharpe_ratio": 0.9019552279240439,
+      "max_drawdown": -0.19604229842097742,
       "turnover_avg": 0.5494234850777235
     },
     "layer_4": {
       "n_days": 515,
       "n_stocks_avg": 575.8058252427185,
-      "daily_return_mean": 0.0007829341920987126,
-      "daily_return_std": 0.014343975104489174,
-      "cumulative_return": 0.41318074161046736,
-      "annual_return": 0.19729941640887558,
-      "annual_volatility": 0.2277035456314805,
-      "sharpe_ratio": 0.8664749416251449,
-      "max_drawdown": -0.2207594951983942,
-      "turnover_avg": 0.5268228083225712
+      "daily_return_mean": 0.0007815244476659538,
+      "daily_return_std": 0.014344128899027617,
+      "cumulative_return": 0.412166271624516,
+      "annual_return": 0.19694416081182037,
+      "annual_volatility": 0.2277059870440908,
+      "sharpe_ratio": 0.86490550102965,
+      "max_drawdown": -0.22131888302521624,
+      "turnover_avg": 0.5268261106143617
     },
     "layer_5": {
       "n_days": 515,
       "n_stocks_avg": 576.1766990291262,
-      "daily_return_mean": 0.0009658901233958082,
-      "daily_return_std": 0.014156339845626321,
-      "cumulative_return": 0.5533512245227212,
-      "annual_return": 0.24340431109574365,
-      "annual_volatility": 0.22472492823865048,
-      "sharpe_ratio": 1.0831210983289592,
-      "max_drawdown": -0.23251501537683997,
-      "turnover_avg": 0.2839755845615153
+      "daily_return_mean": 0.0009672404709853503,
+      "daily_return_std": 0.014156358514364123,
+      "cumulative_return": 0.5544180117621902,
+      "annual_return": 0.24374459868830828,
+      "annual_volatility": 0.22472522459567557,
+      "sharpe_ratio": 1.084633908484694,
+      "max_drawdown": -0.23198793355841343,
+      "turnover_avg": 0.2840129258609925
     }
   },
   "long_short": {
     "long_return_daily": 0.0008363958996660348,
-    "long_return_annual": 0.21077176671584077,
-    "short_return_daily": 0.0007829341920987126,
-    "short_return_annual": 0.19729941640887558,
-    "long_short_return_daily": 5.346170756732225e-05,
-    "long_short_return_annual": 0.013472350306965206,
-    "long_short_sharpe": 0.177937632940784,
-    "long_short_volatility": 0.07571388966070308,
+    "long_return_annual": 0.2083161733172096,
+    "short_return_daily": 0.0007815244476659539,
+    "short_return_annual": 0.19464966573440112,
+    "long_short_return_daily": 5.4871452000081065e-05,
+    "long_short_return_annual": 0.013666507582808539,
+    "long_short_sharpe": 0.18051013606795543,
+    "long_short_volatility": 0.07571047189097238,
     "turnover_long_avg": 0.3790925617825227,
-    "turnover_short_avg": 0.5295081434306743,
-    "n_days": 509
+    "turnover_short_avg": 0.5295114846492835,
+    "n_days": 509,
+    "n_days_total": 515,
+    "coverage": 0.9883495145631068
   },
   "monotonicity": {
-    "correlation": 0.5262016090237377,
+    "correlation": 0.5236099172920051,
     "quality": "poor",
     "layer_returns": [
       0.0007755787385068091,
       0.0008972130608252608,
-      0.0008482456317106549,
-      0.0007829341920987126,
-      0.0009658901233958082
+      0.0008483051297409978,
+      0.0007815244476659538,
+      0.0009672404709853503
     ]
   },
   "trading_cost_analysis": {
     "cost_rate": 0.003,
     "long_turnover": 0.3790925617825227,
-    "short_turnover": 0.5295081434306743,
+    "short_turnover": 0.5295114846492835,
     "long_daily_cost": 0.001137277685347568,
-    "short_daily_cost": 0.003177048860584046,
+    "short_daily_cost": 0.0031770689078957012,
     "long_gross_daily_return": 0.0008363958996660348,
     "long_net_daily_return": -0.0003008817856815333,
-    "short_gross_daily_return": 0.0007829341920987126,
-    "short_net_daily_return": -0.002394114668485333,
-    "long_short_gross_daily": 5.3461707567322206e-05,
-    "long_short_net_daily": 0.0020932328828038
+    "short_gross_daily_return": 0.0007815244476659539,
+    "short_net_daily_return": -0.0023955444602297474,
+    "long_short_gross_daily": 5.4871452000080875e-05,
+    "long_short_net_daily": 0.002094662674548214
   },
   "config": {
     "n_layers": 5,
@@ -141,5 +143,5 @@
     "trade_cost_rate": 0.003,
     "min_stocks_per_layer": 10
   },
-  "created_at": "2026-05-23T20:32:24.551697"
+  "created_at": "2026-05-23T23:20:17.912083"
 }

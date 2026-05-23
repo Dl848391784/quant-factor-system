@@ -88,17 +88,19 @@
     }
   },
   "long_short": {
-    "long_return_daily": 0.0011093562561696052,
-    "long_return_annual": 0.2795577765547405,
-    "short_return_daily": 0.0004679791078301174,
-    "short_return_annual": 0.11793073517318958,
-    "long_short_return_daily": 0.000641377148339488,
-    "long_short_return_annual": 0.16162704138155098,
-    "long_short_sharpe": 1.99738234042259,
+    "long_return_daily": 0.001109356256169605,
+    "long_return_annual": 0.27630079275021924,
+    "short_return_daily": 0.00046797910783011727,
+    "short_return_annual": 0.1165567848604922,
+    "long_short_return_daily": 0.0006413771483394879,
+    "long_short_return_annual": 0.15974400788972706,
+    "long_short_sharpe": 1.9741118665535888,
     "long_short_volatility": 0.08091943045183589,
-    "turnover_long_avg": 0.6684035469733876,
+    "turnover_long_avg": 0.6684035469733877,
     "turnover_short_avg": 0.7031634262054138,
-    "n_days": 509
+    "n_days": 509,
+    "n_days_total": 515,
+    "coverage": 0.9883495145631068
   },
   "monotonicity": {
     "correlation": -0.8765100123175599,
@@ -113,15 +115,15 @@
   },
   "trading_cost_analysis": {
     "cost_rate": 0.003,
-    "long_turnover": 0.6684035469733876,
+    "long_turnover": 0.6684035469733877,
     "short_turnover": 0.7031634262054138,
-    "long_daily_cost": 0.0020052106409201628,
+    "long_daily_cost": 0.002005210640920163,
     "short_daily_cost": 0.004218980557232483,
-    "long_gross_daily_return": 0.0011093562561696052,
-    "long_net_daily_return": -0.0008958543847505576,
-    "short_gross_daily_return": 0.0004679791078301174,
-    "short_net_daily_return": -0.0037510014494023655,
-    "long_short_gross_daily": 0.0006413771483394879,
+    "long_gross_daily_return": 0.001109356256169605,
+    "long_net_daily_return": -0.0008958543847505582,
+    "short_gross_daily_return": 0.00046797910783011727,
+    "short_net_daily_return": -0.003751001449402366,
+    "long_short_gross_daily": 0.0006413771483394877,
     "long_short_net_daily": 0.002855147064651808
   },
   "config": {
@@ -145,5 +147,5 @@
     "trade_cost_rate": 0.003,
     "min_stocks_per_layer": 10
   },
-  "created_at": "2026-05-23T20:31:45.847290"
+  "created_at": "2026-05-23T23:21:04.237203"
 }

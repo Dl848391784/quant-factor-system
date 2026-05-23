@@ -53,24 +53,24 @@
     "layer_3": {
       "n_days": 515,
       "n_stocks_avg": 575.7611650485437,
-      "daily_return_mean": 0.0008993121588188718,
-      "daily_return_std": 0.014830361620622633,
-      "cumulative_return": 0.4938063441458651,
-      "annual_return": 0.22662666402235568,
-      "annual_volatility": 0.23542469220794593,
-      "sharpe_ratio": 0.9626291188784092,
+      "daily_return_mean": 0.0008993680458292732,
+      "daily_return_std": 0.014830393875452624,
+      "cumulative_return": 0.49384844082167323,
+      "annual_return": 0.22664074754897684,
+      "annual_volatility": 0.23542520423749835,
+      "sharpe_ratio": 0.96268684690336,
       "max_drawdown": -0.19138641972624257,
       "turnover_avg": 0.5197434031615827
     },
     "layer_4": {
       "n_days": 515,
       "n_stocks_avg": 575.8058252427185,
-      "daily_return_mean": 0.0005991870115478476,
-      "daily_return_std": 0.014641696456483288,
-      "cumulative_return": 0.2841973687785475,
-      "annual_return": 0.1509951269100576,
-      "annual_volatility": 0.23242972557570257,
-      "sharpe_ratio": 0.6496377627089627,
+      "daily_return_mean": 0.000599131124537446,
+      "daily_return_std": 0.014641667286879807,
+      "cumulative_return": 0.2841611364432046,
+      "annual_return": 0.1509810433834364,
+      "annual_volatility": 0.23242926252260268,
+      "sharpe_ratio": 0.6495784641951191,
       "max_drawdown": -0.20823972269408966,
       "turnover_avg": 0.49005003345297193
     },
@@ -88,41 +88,43 @@
     }
   },
   "long_short": {
-    "long_return_daily": 0.0009487720347229082,
-    "long_return_annual": 0.23909055275017288,
-    "short_return_daily": 0.0007376123292803311,
-    "short_return_annual": 0.18587830697864344,
-    "long_short_return_daily": 0.00021115970544257704,
-    "long_short_return_annual": 0.053212245771529415,
-    "long_short_sharpe": 0.5567709520034752,
-    "long_short_volatility": 0.09557295613223242,
-    "turnover_long_avg": 0.37446459720815384,
+    "long_return_daily": 0.000948772034722908,
+    "long_return_annual": 0.2363050317472582,
+    "short_return_daily": 0.0007375843857751304,
+    "short_return_annual": 0.1837057747468047,
+    "long_short_return_daily": 0.00021118764894777773,
+    "long_short_return_annual": 0.0525992570004535,
+    "long_short_sharpe": 0.5503568796824037,
+    "long_short_volatility": 0.0955729980713735,
+    "turnover_long_avg": 0.3744645972081538,
     "turnover_short_avg": 0.3882387709178934,
-    "n_days": 509
+    "n_days": 509,
+    "n_days_total": 515,
+    "coverage": 0.9883495145631068
   },
   "monotonicity": {
-    "correlation": -0.42343820739243615,
+    "correlation": -0.4234218940584586,
     "quality": "moderate",
     "layer_returns": [
       0.0008715346861332322,
       0.0010260093833125842,
-      0.0008993121588188718,
-      0.0005991870115478476,
+      0.0008993680458292732,
+      0.000599131124537446,
       0.0008760376470128145
     ]
   },
   "trading_cost_analysis": {
     "cost_rate": 0.003,
-    "long_turnover": 0.37446459720815384,
+    "long_turnover": 0.3744645972081538,
     "short_turnover": 0.3882387709178934,
-    "long_daily_cost": 0.0011233937916244616,
+    "long_daily_cost": 0.0011233937916244614,
     "short_daily_cost": 0.0023294326255073605,
-    "long_gross_daily_return": 0.0009487720347229082,
+    "long_gross_daily_return": 0.000948772034722908,
     "long_net_daily_return": -0.0001746217569015534,
-    "short_gross_daily_return": 0.0007376123292803311,
-    "short_net_daily_return": -0.0015918202962270293,
-    "long_short_gross_daily": 0.00021115970544257712,
-    "long_short_net_daily": 0.001417198539325476
+    "short_gross_daily_return": 0.0007375843857751304,
+    "short_net_daily_return": -0.00159184823973223,
+    "long_short_gross_daily": 0.00021118764894777762,
+    "long_short_net_daily": 0.0014172264828306766
   },
   "config": {
     "n_layers": 5,
@@ -145,5 +147,5 @@
     "trade_cost_rate": 0.003,
     "min_stocks_per_layer": 10
   },
-  "created_at": "2026-05-23T20:33:25.278921"
+  "created_at": "2026-05-23T23:20:43.805424"
 }

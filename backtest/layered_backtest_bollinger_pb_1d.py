@@ -163,14 +163,14 @@ def calculate_bollinger_pb(
     negative_mask = (df['bollinger_pb'].notna()) & (df['bollinger_pb'] < 0)
     if negative_mask.sum() > 0 and log_handler:
         log_handler.info(
-            "bollinger_pb 越界统计: %B<0 的记录数: %d (%.2f%%)，将归入 Layer1（超卖层）",
+            "bollinger_pb 越界统计: %%B<0 的记录数: %d (%.2f%%)，将归入 Layer1（超卖层）",
             negative_mask.sum(), negative_mask.sum() / len(df) * 100
         )
     
     above_max_mask = (df['bollinger_pb'].notna()) & (df['bollinger_pb'] > 2)
     if above_max_mask.sum() > 0 and log_handler:
         log_handler.info(
-            "bollinger_pb 越界统计: %B>2 的记录数: %d (%.2f%%)，将归入 Layer5（超买层）",
+            "bollinger_pb 越界统计: %%B>2 的记录数: %d (%.2f%%)，将归入 Layer5（超买层）",
             above_max_mask.sum(), above_max_mask.sum() / len(df) * 100
         )
     

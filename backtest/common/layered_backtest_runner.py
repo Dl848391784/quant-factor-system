@@ -371,7 +371,7 @@ def run_layered_backtest(
         asset_col='asset'
     )
     
-# 执行分层回测
+    # 执行分层回测
     logger.info("执行分层回测...")
     # percentile 模式：强制使用（v1.5 规范），每层固定比例
     

@@ -32,6 +32,7 @@ from backtest.common.layered_backtest_runner import (
     LayerConfigBase
 )
 from backtest.common.logger_config import get_logger
+from backtest.common.data_loader import DEFAULT_CACHE_DIR
 
 logger = get_logger(__name__)
 
@@ -174,7 +175,7 @@ def main():
     # - 命令行使用 --surge-window（连字符）
     # - Python 访问使用 args.surge_window（下划线，argparse 自动转换）
     # - 这是 argparse 标准行为，dest 参数可自定义内部名称
-    parser.add_argument('--cache_dir', type=str, default=None,
+    parser.add_argument('--cache_dir', type=str, default=str(DEFAULT_CACHE_DIR),
                         help='缓存目录路径')
     parser.add_argument('--output_dir', type=str, default=None)
     parser.add_argument('--quiet', action='store_true')
