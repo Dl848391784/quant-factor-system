@@ -106,7 +106,7 @@ result = run_layered_backtest(
     config=MyFactorLayerConfig(),
     # 可选参数：
     factor_calculator=my_calculate_func,  # 若因子需实时计算
-    additional_data_files={'turnover_rate': 'path/to/data.json.gz'},  # 若需额外数据
+    additional_data_files={'turnover_rate': str(Path(args.cache_dir) / 'turnover_rate_data.json.gz')},  # 动态构建路径
     logger=logger
 )
 ```
@@ -756,6 +756,37 @@ def main():
 **原因：**
 - cache_dir 支持自定义缓存路径，便于多环境部署
 - output_dir 支持自定义输出路径，便于结果归档
+
+### additional_data_files 动态构建规范
+
+**additional_data_files 的路径必须使用 args.cache_dir 动态构建，而非硬编码 DEFAULT_CACHE_DIR。**
+
+**原因：**
+- DEFAULT_CACHE_DIR 在模块导入时即被求值，无法响应用户指定的 --cache_dir
+- 附加数据文件应与主缓存目录保持一致
+
+**正确写法：**
+```python
+result = run_layered_backtest(
+    ...
+    additional_data_files={
+        'turnover_rate': str(Path(args.cache_dir) / 'turnover_rate_data.json.gz')
+    },
+    cache_dir=args.cache_dir,
+    ...
+)
+```
+
+**错误写法：**
+```python
+# 硬编码 DEFAULT_CACHE_DIR，--cache_dir 参数对附加数据无效
+result = run_layered_backtest(
+    ...
+    additional_data_files={'turnover_rate': str(DEFAULT_CACHE_DIR / 'turnover_rate_data.json.gz')},
+    cache_dir=args.cache_dir,
+    ...
+)
+```
 - 参数透传保证 CLI 参数生效
 
 ---
@@ -816,6 +847,27 @@ long_short_stats = {
 - `float(np.nan)` 产生 `nan`，JSON 不支持 NaN
 - `json.dumps({'val': nan})` 抛 `ValueError: Out of range float values are not JSON compliant`
 - 使用 `pd.isna()` 检测 NaN，替换为 None（JSON 支持 `null`）
+
+### pd.NA vs np.nan 规范
+
+**对于 float64 Series，应使用 `np.nan` 或 `float('nan')`，而非 `pd.NA`。**
+
+**原因：**
+- `pd.NA` 是 pandas 1.0+ 引入的 nullable 类型标量，适用于 `Int64`、`StringDtype` 等 nullable 类型
+- 对于 `float64` Series，`pd.NA` 可能触发类型提升或警告
+- `np.nan` 与浮点运算完全兼容，不会改变 Series 的 dtype
+
+**正确写法：**
+```python
+# float64 Series 使用 np.nan
+safe_avg = avg_turnover.where(~zero_mask, np.nan)
+```
+
+**错误写法：**
+```python
+# pd.NA 不适合 float64 Series
+safe_avg = avg_turnover.where(~zero_mask, pd.NA)  # 可能触发类型提升
+```
 
 ---
 
