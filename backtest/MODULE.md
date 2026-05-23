@@ -717,6 +717,49 @@ def main():
 
 ---
 
+## CLI 参数透传规范
+
+**CLI 参数必须透传给 run_layered_backtest。**
+
+**必须支持的 CLI 参数：**
+| 参数 | 用途 | 默认值 |
+|------|------|--------|
+| `--cache_dir` | 缓存目录路径 | None（使用 DEFAULT_CACHE_DIR） |
+| `--output_dir` | 输出目录路径 | None（使用默认路径） |
+| `--quiet` | 静默模式 | False |
+
+**正确写法：**
+```python
+def main():
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='因子分层回测')
+    parser.add_argument('--cache_dir', type=str, default=None,
+                        help='缓存目录路径')
+    parser.add_argument('--output_dir', type=str, default=None)
+    parser.add_argument('--quiet', action='store_true')
+    args = parser.parse_args()
+    
+    try:
+        result = run_layered_backtest(
+            factor_name='my_factor',
+            factor_col='my_factor_value',
+            config=MyFactorLayerConfig(),
+            cache_dir=args.cache_dir,      # 透传 cache_dir
+            output_dir=args.output_dir,    # 透传 output_dir
+            verbose=not args.quiet,        # 透传 quiet（反向为 verbose）
+            logger=logger
+        )
+        ...
+```
+
+**原因：**
+- cache_dir 支持自定义缓存路径，便于多环境部署
+- output_dir 支持自定义输出路径，便于结果归档
+- 参数透传保证 CLI 参数生效
+
+---
+
 ## 单层模式处理规范
 
 **引擎必须处理 n_layers=1 的特殊情况，避免默认多空层越界。**
