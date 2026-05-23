@@ -15,6 +15,7 @@
 
 import sys
 import pandas as pd
+from functools import partial
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Dict as TypingDict, Any
@@ -31,6 +32,8 @@ from backtest.common.data_loader import DEFAULT_CACHE_DIR
 logger = get_logger(__name__)
 
 DEFAULT_SURGE_WINDOW = 5
+# EPSILON 用于判断 avg_turnover 是否接近零（避免 division by zero）
+# 换手率典型范围 0.0 ~ 1.0，1e-10 作为零值阈值合理
 EPSILON = 1e-10
 
 
@@ -113,9 +116,9 @@ def calculate_turnover_surge(
     df = factor_df.copy()
     df = df.sort_values(['asset', 'date'])
     
-    # 计算历史平均换手率（显式传参避免闭包）
+    # 计算历史平均换手率（用 partial 显式传参，避免 lambda 闭包）
     avg_turnover = df.groupby('asset')['turnover_rate'].transform(
-        lambda s: _calc_avg_turnover(s, surge_window)
+        partial(_calc_avg_turnover, window=surge_window)
     )
     
     # 边界处理：avg_turnover 接近零时标记为 NaN（避免 division by zero 或极小值）
@@ -149,7 +152,6 @@ def calculate_turnover_surge(
 
 def main():
     import argparse
-    from functools import partial
     
     parser = argparse.ArgumentParser(description='换手率突增分层回测')
     # argparse 参数命名说明：
