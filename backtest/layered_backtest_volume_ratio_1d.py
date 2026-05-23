@@ -4,6 +4,25 @@
 
 使用公共入口 run_layered_backtest，代码量从 ~370 行降至 ~80 行。
 
+因子定义：
+- 量比(volume_ratio) = 当日成交量 / 过去N日平均成交量
+- 本脚本使用 volume_ratio_5（5日平均成交量基准）
+- 量比<1: 成交量低于均值（缩量）
+- 量比>1: 成交量高于均值（放量）
+
+数据来源：
+- 缓存数据：~/projects/factor_ic_analyzer/cache/factor_data.json.gz
+- 因子列：volume_ratio_5（已预计算）
+
+输出：
+- 分层回测结果：backtest/result/volume_ratio_layered_backtest.json
+- 每日收益数据：backtest/result/volume_ratio_layered_backtest_daily.json.gz
+
+CLI 参数：
+- --cache_dir: 缓存目录路径（默认：~/projects/factor_ic_analyzer/cache）
+- --output_dir: 输出目录路径（默认：backtest/result）
+- --quiet: 静默模式（不输出进度日志）
+
 规范:
 - 遵循 PROJECT.md 公共模块强制复用规范
 - 命名遵循 MODULE.md: layered_backtest_<因子名>_<收益周期>.py
@@ -54,11 +73,11 @@ class VolumeRatioLayerConfig(LayerConfigBase):
     layer_thresholds: List[float] = field(default_factory=lambda: [0, 0.5, 1.0, 1.5, 2.0, 5.0])
     
     layer_names: TypingDict[str, str] = field(default_factory=lambda: {
-        '1': '极缩量层(ratio<0.5)',
+        '1': '极缩量层(ratio<0.5，含越界值<0)',
         '2': '缩量层(0.5≤ratio<1)',
         '3': '正常层(1≤ratio<1.5)',
         '4': '放量层(1.5≤ratio<2)',
-        '5': '极放量层(ratio≥2)'
+        '5': '极放量层(ratio≥2，含越界值>5)'
     })
     
     factor_direction: str = 'negative'
