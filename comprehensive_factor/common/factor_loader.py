@@ -149,6 +149,7 @@ def load_ic_daily(
 ) -> Dict[str, pd.DataFrame]:
     """从 factor_ic/result/ 加载 IC 每日序列
     
+    从现有的 IC 分析结果文件中提取 ic_values 和 dates 字段，
     用于滚动ICIR加权计算。
     
     Args:
@@ -176,27 +177,48 @@ def load_ic_daily(
     ic_daily_data = {}
     
     for factor_name in factor_names:
-        # IC每日文件命名: ic_<因子名>_<收益周期>_daily.json.gz
-        daily_file = ic_result_dir / f'ic_{factor_name}_{return_period}_daily.json.gz'
+        # IC结果文件命名: ic_<因子名>_<收益周期>_analysis_result.json
+        ic_file = ic_result_dir / f'ic_{factor_name}_{return_period}_analysis_result.json'
         
-        if not daily_file.exists():
-            logger.warning("IC每日文件不存在: %s，跳过该因子", daily_file)
+        if not ic_file.exists():
+            logger.warning("IC结果文件不存在: %s，跳过该因子", ic_file)
             continue
         
-        logger.info("加载 IC 每日序列: %s", daily_file)
+        logger.info("加载 IC 每日序列: %s", ic_file)
         
-        with gzip.open(daily_file, 'rt', encoding='utf-8') as f:
-            daily_data = json.load(f)
+        with open(ic_file, 'r', encoding='utf-8') as f:
+            ic_data = json.load(f)
         
-        if 'data' not in daily_data:
-            logger.warning("IC每日文件缺失 'data' 字段: %s", daily_file)
+        # 提取 ic_values 和 dates/valid_dates 字段
+        if 'ic_values' not in ic_data:
+            logger.warning("IC结果文件缺失 'ic_values' 字段: %s", ic_file)
             continue
         
-        daily_df = pd.DataFrame(daily_data['data'])
+        # 使用 valid_dates（有效日期）或 dates
+        dates = ic_data.get('valid_dates', ic_data.get('dates', []))
+        ic_values = ic_data.get('ic_values', [])
+        
+        if len(dates) != len(ic_values):
+            logger.warning(
+                "日期与IC值数量不一致: dates=%d, ic_values=%d, 文件: %s",
+                len(dates), len(ic_values), ic_file
+            )
+            # 使用较短的那个
+            min_len = min(len(dates), len(ic_values))
+            dates = dates[:min_len]
+            ic_values = ic_values[:min_len]
+        
+        # 构建 DataFrame
+        daily_df = pd.DataFrame({
+            'date': dates,
+            'ic': ic_values,
+            'ic_sign': [1 if v > 0 else -1 if v < 0 else 0 for v in ic_values]
+        })
+        
         ic_daily_data[factor_name] = daily_df
     
     if not ic_daily_data:
-        raise ValueError(f"未找到任何 IC 每日文件，路径: {ic_result_dir}")
+        raise ValueError(f"未找到任何 IC 每日数据，路径: {ic_result_dir}")
     
     logger.info("加载 IC 每日序列: %d 个因子", len(ic_daily_data))
     
