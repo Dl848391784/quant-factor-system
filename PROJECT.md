@@ -17,7 +17,20 @@ factor_ic_analyzer/
 │
 ├── backtest/               # 分层回测模块
 │   ├── MODULE.md           # 分层回测规范
+│   ├── common/             # 公共函数
+│   ├── result/             # 回测结果输出
 │   └── ...
+│
+├── comprehensive_factor/   # 综合因子模块（新增）
+│   ├── MODULE.md           # 综合因子规范（加权方式、因子组合、输出格式）
+│   ├── common/             # 公共函数
+│   │   ├── factor_loader.py        # 因子数据加载
+│   │   ├── weight_engine.py        # 加权计算引擎
+│   │   ├── composite_runner.py     # 公共入口（调用backtest）
+│   │   └── ...
+│   ├── docs/               # 流程文档
+│   ├── result/             # 综合因子结果输出
+│   └── test_cases/         # 测试用例
 │
 ├── data_fetchers/          # 数据获取模块
 │   ├── MODULE.md           # 数据拉取规范
@@ -40,17 +53,21 @@ factor_ic_analyzer/
 │  (数据拉取)  │     │  (缓存数据)  │     │  (IC 计算)  │
 └─────────────┘     └─────────────┘     └─────────────┘
                                               │
-                                              ▼
-                                        ┌─────────────┐
-                                        │   backtest  │
-                                        │ (分层回测)  │
+                      ┌───────────────────────┼───────────────────────┐
+                      │                       │                       │
+                      ▼                       ▼                       ▼
+                ┌─────────────┐         ┌─────────────┐         ┌─────────────┐
+                │   backtest  │         │comprehensive│         │  backtest   │
+                │ (分层回测)  │◀────────│  _factor    │────────▶│ (分层回测)  │
+                └─────────────┘         │ (综合因子)  │         └─────────────┘
                                         └─────────────┘
 ```
 
 **数据流向：**
 1. data_fetchers 拉取数据 → cache 存储
 2. factor_ic 读取 cache → 计算 IC → 输出 result
-3. backtest 读取 IC 结果 → 分层回测
+3. backtest 读取 cache → 分层回测 → 输出 result
+4. comprehensive_factor 读取 factor_ic result + cache → 加权计算综合因子 → 调用 backtest 分层回测
 
 **模块边界规范（2026-05-23新增）：**
 
@@ -77,7 +94,8 @@ factor_ic_analyzer/
 | 模块 | 规范文件 | 说明 |
 |------|---------|------|
 | factor_ic | factor_ic/MODULE.md | IC 计算脚本命名、输出格式、增量模式、参数传递 |
-| backtest | backtest/MODULE.md | 分层回测规则、统计指标 |
+| backtest | backtest/MODULE.md | 分层回测规则、统计指标、公共模块复用 |
+| comprehensive_factor | comprehensive_factor/MODULE.md | 综合因子加权方式、因子组合、输出格式、调用backtest规范 |
 | data_fetchers | data_fetchers/MODULE.md | 数据源定义、缓存格式 |
 
 ---
