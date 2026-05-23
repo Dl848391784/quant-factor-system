@@ -31,44 +31,36 @@ logger = get_logger(__name__)
 
 DEFAULT_N = 20
 # EPSILON 用于判断 band_width 是否接近零（避免 division by zero 或极小值）
-# %B 典型范围 0.0 ~ 2.0，band_width 为价格标准差*2，1e-10 作为零值阈值合理
+# %B 典型范围 0.0 ~ 2.0，band_width 为价格标准差*2，量级约价格*0.02~0.1
+# 1e-10 作为零值阈值，相对 band_width 量级极小（约 1e-8 倍），判断合理
 EPSILON = 1e-10
 
 
-def _calc_rolling_mean(series: pd.Series, window: int) -> pd.Series:
-    """计算滚动均值（groupby transform 专用，显式传参避免闭包）
+def _calc_rolling(series: pd.Series, window: int, method: str = 'mean') -> pd.Series:
+    """计算滚动统计量（groupby transform 专用，显式传参避免闭包）
     
     Args:
         series: 单资产的收盘价序列
         window: 滚动窗口期
+        method: 统计方法，'mean' 或 'std'
     
     Returns:
-        滚动均值序列（前 window-1 天为 NaN）
+        滚动统计量序列（前 window-1 天为 NaN）
     
     Note:
         - min_periods=window 确保只有足够历史数据时才计算
-        - 前 window-1 天为 NaN，无法计算有效均值
+        - 前 window-1 天为 NaN，无法计算有效统计量
         - 例如 window=20，需要至少 20 天数据才能产生第一个有效结果
+        - std 默认使用样本标准差（ddof=1，除以 n-1），布林带标准定义使用总体标准差（ddof=0）
+        - 对于 window=20，两者差异约 sqrt(20/19) ≈ 2.6%，不影响分层方向
     """
-    return series.rolling(window=window, min_periods=window).mean()
-
-
-def _calc_rolling_std(series: pd.Series, window: int) -> pd.Series:
-    """计算滚动标准差（groupby transform 专用，显式传参避免闭包）
-    
-    Args:
-        series: 单资产的收盘价序列
-        window: 滚动窗口期
-    
-    Returns:
-        滚动标准差序列（前 window-1 天为 NaN）
-    
-    Note:
-        - min_periods=window 确保只有足够历史数据时才计算
-        - 前 window-1 天为 NaN，无法计算有效标准差
-        - 例如 window=20，需要至少 20 天数据才能产生第一个有效结果
-    """
-    return series.rolling(window=window, min_periods=window).std()
+    rolling_obj = series.rolling(window=window, min_periods=window)
+    if method == 'mean':
+        return rolling_obj.mean()
+    elif method == 'std':
+        return rolling_obj.std()  # 默认 ddof=1（样本标准差）
+    else:
+        raise ValueError(f"method 必须是 'mean' 或 'std', 当前值: '{method}'")
 
 
 @dataclass
@@ -130,8 +122,8 @@ def calculate_bollinger_pb(
     df = df.sort_values(['asset', 'date'])
     
     # 使用独立函数替代 lambda 闭包（遵循 MODULE.md 第789行规范）
-    calc_mean = partial(_calc_rolling_mean, window=n)
-    calc_std = partial(_calc_rolling_std, window=n)
+    calc_mean = partial(_calc_rolling, window=n, method='mean')
+    calc_std = partial(_calc_rolling, window=n, method='std')
     
     # 计算均线和标准差
     df['ma_n'] = df.groupby('asset')['close'].transform(calc_mean)
@@ -162,16 +154,35 @@ def calculate_bollinger_pb(
         0.5  # 带宽接近零时的默认值（价格在中轨）
     )
     
+    # ========== 因子值统计（正常业务场景记录）==========
+    # %B < 0: 价格低于下轨（超卖），归入 Layer 1（runner 边界处理）
+    # %B > 2: 价格远高于上轨（超买），归入 Layer 5（runner 边界处理）
+    # 这些是正常业务场景，不需要过滤，但记录统计信息供分析
+    negative_mask = (df['bollinger_pb'].notna()) & (df['bollinger_pb'] < 0)
+    if negative_mask.sum() > 0 and log_handler:
+        log_handler.info(
+            "bollinger_pb 越界统计: %B<0 的记录数: %d (%.2f%%)，将归入 Layer1（超卖层）",
+            negative_mask.sum(), negative_mask.sum() / len(df) * 100
+        )
+    
+    above_max_mask = (df['bollinger_pb'].notna()) & (df['bollinger_pb'] > 2)
+    if above_max_mask.sum() > 0 and log_handler:
+        log_handler.info(
+            "bollinger_pb 越界统计: %B>2 的记录数: %d (%.2f%%)，将归入 Layer5（超买层）",
+            above_max_mask.sum(), above_max_mask.sum() / len(df) * 100
+        )
+    
     # 因子数据范围校验（遵循 MODULE.md 第505行规范）
     # 全 NaN 防御：检查是否有有效数据
     pb_values = df['bollinger_pb'].dropna()
     if len(pb_values) == 0:
         if log_handler:
             log_handler.warning("bollinger_pb 全部为 NaN，无法计算范围")
-        pb_min, pb_max = 0.0, 0.0
-    else:
-        pb_min = pb_values.min()
-        pb_max = pb_values.max()
+        # 全 NaN 时提前返回，避免输出误导性的 "0.00 ~ 0.00" 日志
+        return df
+    
+    pb_min = pb_values.min()
+    pb_max = pb_values.max()
     
     if log_handler:
         log_handler.info("bollinger_pb 因子范围: %.2f ~ %.2f", pb_min, pb_max)
