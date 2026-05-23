@@ -34,6 +34,23 @@ DEFAULT_SURGE_WINDOW = 5
 EPSILON = 1e-10
 
 
+def _calc_avg_turnover(series: pd.Series, window: int) -> pd.Series:
+    """计算历史平均换手率（groupby transform 专用，显式传参避免闭包）
+    
+    Args:
+        series: 单资产的换手率序列
+        window: 滚动窗口期
+    
+    Returns:
+        历史平均换手率序列（shift(1) 排除当日）
+    
+    Note:
+        - 使用 shift(1) 排除当日换手率，避免未来数据泄露
+        - min_periods=window 确保只有足够历史数据时才计算
+    """
+    return series.shift(1).rolling(window, min_periods=window).mean()
+
+
 @dataclass
 class TurnoverSurgeLayerConfig(LayerConfigBase):
     """换手率突增分层配置
@@ -95,9 +112,9 @@ def calculate_turnover_surge(
     df = factor_df.copy()
     df = df.sort_values(['asset', 'date'])
     
-    # 计算历史平均换手率（排除当日）
+    # 计算历史平均换手率（显式传参避免闭包）
     avg_turnover = df.groupby('asset')['turnover_rate'].transform(
-        lambda x: x.shift(1).rolling(surge_window, min_periods=surge_window).mean()
+        lambda s: _calc_avg_turnover(s, surge_window)
     )
     
     # 边界处理：avg_turnover 接近零时标记为 NaN（避免 division by zero 或极小值）
