@@ -9,7 +9,7 @@
 
 作者: 云瑶
 创建日期: 2026-05-19
-修订日期: 2026-05-23（修复6个代码bug + 补充MODULE.md规范）
+修订日期: 2026-05-23（修复10个代码bug + 补充MODULE.md规范）
 """
 
 import sys
@@ -186,7 +186,7 @@ class LayeredBacktestEngine:
         if layer_method == 'fixed_threshold' and thresholds:
             n_layers = len(thresholds) - 1
         
-# ========== 设置默认多空组合（依赖已修正的 n_layers）==========
+        # ========== 设置默认多空组合（依赖已修正的 n_layers）==========
         # 多头：正向因子取高层，反向因子取低层
         # 空头：正向因子取低层，反向因子取高层
         # 特殊处理：n_layers=1 时，long_layers 和 short_layers 都为 [1]
@@ -245,11 +245,7 @@ class LayeredBacktestEngine:
                 thresholds
             )
             
-            # 【重要】将分层结果赋值到 day_data['_layer']
-            # layer_assignment.index 与 day_data.index 必须一致才能正确对齐
-            # get_layer_assignment 传入 day_data[self.factor_col]，其 index 继承自 day_data
-            # 因此此处赋值安全，不会出现 SettingWithCopyWarning
-            # 后续重构时请保持此依赖关系，切勿改变 index 对齐逻辑
+            # 分层结果赋值（day_data 已 .copy()，此处赋值安全）
             day_data['_layer'] = layer_assignment
             
             # 计算各层收益
@@ -378,7 +374,8 @@ class LayeredBacktestEngine:
         """
         layer_returns = {}
         
-        for layer_id in layer_assignment.unique():
+        # 遍历顺序：从小到大，与后续 range(1, n_layers+1) 风格一致
+        for layer_id in sorted(layer_assignment.dropna().unique()):
             if pd.isna(layer_id) or layer_id == 0:
                 continue
             
@@ -402,13 +399,16 @@ class LayeredBacktestEngine:
     
     def calculate_turnover(
         self,
-        prev_assignment: Optional[Dict[str, int]],
-        curr_assignment: Dict[str, int]
+        prev_assignment: Optional[Dict[str, Any]],
+        curr_assignment: Dict[str, Any]
     ) -> Dict[int, float]:
         """
         计算换手率
         
         换手率 = 新入股票数 / 层股票总数
+        
+        参数类型说明:
+            layer_id 实际类型为 numpy.int64（来自 pd.Series），标注 Any 防误导
         """
         turnover_rates = {}
         
