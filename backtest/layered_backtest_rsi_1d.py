@@ -82,25 +82,27 @@ def _wilder_smoothing(series: pd.Series, n: int) -> pd.Series:
     """
     alpha = 1.0 / n
     
-    # 初始化全 NaN 序列
-    result = pd.Series(float('nan'), index=series.index, dtype=float)
-    
     # 防御性检查：序列长度不足
     if len(series) < n:
-        return result
+        return pd.Series(float('nan'), index=series.index, dtype=float)
     
     # 第 n 天（索引 n-1）：SMA 种子
     seed = series.iloc[:n].mean()
     if pd.isna(seed):  # 防御：前 n 天全为 NaN 时无法计算种子
-        return result
-    result.iloc[n - 1] = seed
+        return pd.Series(float('nan'), index=series.index, dtype=float)
     
-    # 第 n+1 天起（索引 n 到 len-1）：EWM 递推
-    for i in range(n, len(series)):
-        if pd.isna(series.iloc[i]):  # 当天值为 NaN：传播 NaN
-            result.iloc[i] = float('nan')
-        else:
-            result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * result.iloc[i - 1]
+    # 向量化 EWM 递推（替代显式循环）
+    # 使用 ignore_na=True：NaN 不参与 ewm 计算，但仍需手动传播
+    ewm_result = series.ewm(alpha=alpha, adjust=False, ignore_na=True).mean()
+    
+    # 构建结果：前 n-1 天 NaN，第 n 天 SMA 种子，第 n+1 天起 ewm 结果
+    result = pd.Series(float('nan'), index=series.index, dtype=float)
+    result.iloc[n - 1] = seed  # 手动设置 SMA 种子（ewm 计算起点不同）
+    result.iloc[n:] = ewm_result.iloc[n:]  # 第 n+1 天起使用 ewm 递推结果
+    
+    # NaN 传播：ewm(ignore_na=True) 会跳过 NaN，需手动强制传播
+    # 使用 .where() 避免 ChainedAssignmentError（Copy-on-Write）
+    result.iloc[n:] = ewm_result.iloc[n:].where(series.iloc[n:].notna(), float('nan'))
     
     return result
 
