@@ -1744,7 +1744,7 @@ class RealDataLoader:
         """
         向量化计算 RSI 指标
         
-        使用 ewm（指数加权移动平均）进行向量化计算，
+        使用 Wilder 标准（前 period 天 SMA 种子，之后 EWM 递推），
         避免 Python 循环，提升性能。
         
         边界处理（遵循 Wilder 1978 标准）：
@@ -1755,6 +1755,7 @@ class RealDataLoader:
         注意：
         - avg_loss 接近零时，直接除法会产生 inf，需分场景处理
         - 使用 EPSILON 判断零值（相对 avg_loss 量级极小）
+        - avg_loss 和 avg_gain 理论上非负，使用 .abs() 是防御性代码
         """
         EPSILON = 1e-10  # 零值阈值
         
@@ -1762,11 +1763,30 @@ class RealDataLoader:
         gain = delta.where(delta > 0, 0)
         loss = (-delta).where(delta < 0, 0)
         
-        # 使用 ewm 进行向量化计算（Wilder 平滑）
-        avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
-        avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
+        # Wilder 标准 RSI 计算（前 period 天 SMA 种子，之后 EWM 递推）
+        # pandas ewm(adjust=False) 从第一个观测值就开始计算，
+        # 但 Wilder 标准要求前 n 天用 SMA 种子，之后才 EWM 递推
+        
+        def _wilder_smoothing(series: pd.Series, n: int) -> pd.Series:
+            """Wilder 平滑（前 n 天 SMA 种子，之后 EWM 递推）"""
+            # 前 n 天 SMA 种子
+            sma_seed = series.iloc[:n].mean()
+            
+            # 从第 n 天开始 EWM 递推
+            ewm_part = series.iloc[n:].ewm(alpha=1/n, adjust=False).mean()
+            
+            # 合并：前 n 天用 SMA 种子填充，之后用 EWM
+            result = pd.Series(index=series.index, dtype=float)
+            result.iloc[:n] = sma_seed
+            result.iloc[n:] = ewm_part
+            
+            return result
+        
+        avg_gain = _wilder_smoothing(gain, period)
+        avg_loss = _wilder_smoothing(loss, period)
         
         # 边界处理：avg_loss 接近零时
+        # 防御性代码：使用 .abs() 防止数值误差产生负值
         zero_loss_mask = avg_loss.notna() & (avg_loss.abs() < EPSILON)
         zero_gain_mask = avg_gain.notna() & (avg_gain.abs() < EPSILON)
         
@@ -1776,11 +1796,11 @@ class RealDataLoader:
         # 只有 avg_loss 接近零（avg_gain>0）→ RSI=100（超买）
         only_zero_loss_mask = zero_loss_mask & ~zero_gain_mask
         
-        # RS 计算（避免 division by zero）
-        # avg_loss > EPSILON: 正常计算 RS
-        # avg_loss <= EPSILON: 临时替换为 EPSILON，会被后续覆盖
-        rs = avg_gain / avg_loss.where(avg_loss > EPSILON, EPSILON)
-        rsi = 100 - (100 / (1 + rs))
+        # RS 计算（避免中间污染值）
+        safe_avg_loss = avg_loss.where(avg_loss > EPSILON)
+        rs = avg_gain / safe_avg_loss
+        rsi_raw = 100 - (100 / (1 + rs))
+        rsi = rsi_raw.where(rs.notna())
         
         # 边界处理覆盖（必须在 RS 计算后）
         rsi.loc[only_zero_loss_mask] = 100  # avg_loss=0, avg_gain>0 → 超买

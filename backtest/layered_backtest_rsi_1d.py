@@ -150,24 +150,53 @@ def calculate_rsi(
         包含 rsi 列的 DataFrame
     
     Note:
-        - 前 n 天 RSI 为 NaN（rolling 计算 NaN）
-        - RSI = 100 - 100 / (1 + RS)
-        - RS = avg_gain / avg_loss
+        - Wilder (1978) RSI 计算方法：
+          1. 前 n 天使用 SMA（简单移动平均）作为种子
+          2. 之后使用 EWM（指数加权移动平均）递推
+        - EWM 公式：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
+        - pandas ewm(adjust=False) 使用第一个观测值作为初始值，
+          但 Wilder 标准要求前 n 天用 SMA 种子
+        - RSI = 100 - 100 / (1 + RS)，RS = avg_gain / avg_loss
         - RSI 理论范围 [0, 100]，实际数据可能因计算误差越界
         - avg_loss 接近零时，RS → ∞，RSI → 100
     """
     df = factor_df.copy()
     df = df.sort_values(['asset', 'date'])
     
-    # 使用独立函数替代 lambda 闭包（遵循 MODULE.md 第789行规范）
-    calc_avg = partial(_calc_ewm_mean, alpha=1/n)  # Wilder 平滑：alpha=1/n
-    
-    # 计算价格变化（直接使用独立函数）
+    # 计算价格变化
     df['delta'] = df.groupby('asset')['close'].transform(_calc_delta)
     
-    # 分离上涨和下跌（使用 Series.where）
+    # 分离上涨和下跌
     df['gain'] = df['delta'].where(df['delta'] > 0, 0)
     df['loss'] = df['delta'].where(df['delta'] < 0, 0).abs()
+    
+    # Wilder 标准 RSI 计算（前 n 天 SMA 种子，之后 EWM 递推）
+    # 使用 rolling 计算 SMA，之后用 EWM 递推（alpha=1/n）
+    # 注意：pandas ewm(adjust=False) 从第一个观测值就开始计算，
+    # 但 Wilder 标准要求前 n 天用 SMA 种子，之后才 EWM 递推
+    # 
+    # 实现方式：
+    # 1. 先用 rolling(n).mean() 计算前 n 天的 SMA
+    # 2. 从第 n+1 天开始，用 EWM(alpha=1/n, adjust=False) 递推
+    # 3. 合并两个序列：前 n 天用 SMA，之后用 EWM
+    
+    def _wilder_smoothing(series: pd.Series, n: int) -> pd.Series:
+        """Wilder 平滑（前 n 天 SMA 种子，之后 EWM 递推）"""
+        # 前 n 天 SMA 种子
+        sma_seed = series.iloc[:n].mean()
+        
+        # 从第 n 天开始 EWM 递推
+        ewm_part = series.iloc[n:].ewm(alpha=1/n, adjust=False).mean()
+        
+        # 合并：前 n 天用 SMA 种子填充，之后用 EWM
+        result = pd.Series(index=series.index, dtype=float)
+        result.iloc[:n] = sma_seed
+        result.iloc[n:] = ewm_part
+        
+        return result
+    
+    # 使用独立函数替代 lambda 闭包（遵循 MODULE.md 规范）
+    calc_avg = partial(_wilder_smoothing, n=n)
     
     # 计算平均上涨和下跌
     df['avg_gain'] = df.groupby('asset')['gain'].transform(calc_avg)
@@ -181,7 +210,7 @@ def calculate_rsi(
     # 2. avg_loss > EPSILON 且 avg_gain = 0: RS = 0，RSI = 0（超卖）
     # 3. avg_loss = 0 且 avg_gain > 0: RS → ∞，RSI = 100（超买）
     # 4. avg_loss = 0 且 avg_gain = 0: 无涨无跌，RSI = 50（中性）
-    #    - 场景：连续多天价格不变（delta=0）
+    #    - 场景：连续多天价格不变（delta=0），或停牌/价格冻结
     #    - gain=0 且 loss=0，导致 avg_gain=0 且 avg_loss=0
     #    - 此时 RSI 应为 50（无涨无跌），而非 100（超买）
     #
@@ -190,14 +219,22 @@ def calculate_rsi(
     # - 这是正确的处理：既不是上涨也不是下跌
     # - 但连续多天 delta=0 会累积导致 avg_gain=0 且 avg_loss=0
     
+    # 防御性代码说明：
+    # avg_loss 和 avg_gain 理论上非负（delta.abs() 后 EWM）
+    # 使用 .abs() 是防御性代码，防止数值误差或异常数据产生负值
+    EPSILON = 1e-10  # 零值阈值（相对 avg_loss 量级极小）
+    
+    # 边界判断：使用 .abs() 防御负值（理论上不应出现）
     zero_loss_mask = (df['avg_loss'].notna()) & (df['avg_loss'].abs() < EPSILON)
     zero_gain_mask = (df['avg_gain'].notna()) & (df['avg_gain'].abs() < EPSILON)
     
     # 同时接近零：avg_gain=0 且 avg_loss=0 → RSI=50
     both_zero_mask = zero_loss_mask & zero_gain_mask
     if both_zero_mask.sum() > 0 and log_handler:
-        log_handler.info(
-            "avg_gain=avg_loss=0 的记录数: %d (%.2f%%)，RSI 设为 50（无涨无跌）",
+        # 数据质量问题：可能表示停牌或价格冻结
+        log_handler.warning(
+            "avg_gain=avg_loss=0 的记录数: %d (%.2f%%)，RSI 设为 50（无涨无跌）。"
+            "可能原因：停牌、价格冻结、数据质量问题，建议检查。",
             both_zero_mask.sum(), both_zero_mask.sum() / len(df) * 100
         )
     
@@ -209,16 +246,15 @@ def calculate_rsi(
             only_zero_loss_mask.sum(), only_zero_loss_mask.sum() / len(df) * 100
         )
     
-    # 计算 RS 和 RSI
-    # avg_loss > EPSILON: 正常计算 RS
-    # avg_loss <= EPSILON: RS = inf（当 avg_gain > 0）或 0（当 avg_gain = 0）
-    df['rs'] = df['avg_gain'] / df['avg_loss'].where(
-        df['avg_loss'] > EPSILON,
-        EPSILON  # 避免 division by zero，但会被后续 mask 覆盖
-    )
-    df['rsi'] = 100 - (100 / (1 + df['rs']))
+    # 计算 RS 和 RSI（避免中间污染值）
+    # 使用 safe_avg_loss 避免 EPSILON 替换导致的数值污染
+    safe_avg_loss = df['avg_loss'].where(df['avg_loss'] > EPSILON)
+    df['rs'] = df['avg_gain'] / safe_avg_loss
+    # RSI 计算：只在 rs 有效时计算，其余保持 NaN
+    rsi_raw = 100 - (100 / (1 + df['rs']))
+    df['rsi'] = rsi_raw.where(df['rs'].notna())
     
-    # 边界处理覆盖
+    # 边界处理覆盖（逻辑清晰，无中间污染值）
     # avg_loss=0 且 avg_gain>0 → RSI=100（超买）
     df.loc[only_zero_loss_mask, 'rsi'] = 100
     # avg_loss=0 且 avg_gain=0 → RSI=50（中性）

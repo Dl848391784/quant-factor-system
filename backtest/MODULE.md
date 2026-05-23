@@ -586,6 +586,87 @@ class RSILayerConfig(LayerConfigBase):
 
 ---
 
+## EWM 累积计算规范（2026-05-23 新增）
+
+**EWM 在 groupby transform 中的索引连续性要求。**
+
+**问题场景：**
+- groupby transform 使用 EWM 时，依赖索引连续性
+- 若存在重复日期或缺失日期，EWM 递推可能产生错误结果
+- EWM 累积计算假设时间序列连续，缺失日期会跳过递推步骤
+
+**校验要求：**
+1. 检查重复日期：每个 asset 的 date 必须唯一
+2. 检查缺失日期：建议补全缺失日期（可选）
+3. 排序：必须按 asset + date 排序后再计算
+
+**正确写法：**
+```python
+# 数据加载后必须排序
+df = df.sort_values(['asset', 'date'])
+
+# 检查重复日期
+duplicate_dates = df.groupby('asset')['date'].apply(lambda x: x.duplicated().sum())
+if duplicate_dates.sum() > 0:
+    logger.warning(
+        f"发现重复日期: {duplicate_dates.sum()} 条，建议检查数据源"
+    )
+
+# 检查缺失日期（可选，取决于业务需求）
+# 若需严格连续，可补全缺失日期并填充 NaN
+```
+
+**原因：**
+- EWM 递推公式：`avg_t = alpha * val_t + (1-alpha) * avg_{t-1}`
+- 若索引不连续（缺失日期），`avg_{t-1}` 可能指向错误的时间点
+- 重复日期会导致同一日期计算多次
+
+---
+
+## 阈值边界依赖说明规范（2026-05-23 新增）
+
+**layer_threshold_desc 与 runner 实现的依赖关系。**
+
+**依赖说明：**
+- `layer_threshold_desc` 描述依赖于 `LayeredBacktestEngine` 的 `fixed_threshold` 实现
+- runner 实现逻辑（`backtest/common/layered_backtest.py` 第398-409行）：
+  - 前n-1层：左闭右开区间 `[lower, upper)`
+  - 第n层（最后一层）：左闭右闭区间 `[lower, upper]`
+- 边界外数据：
+  - 低于最小阈值：归入 Layer 1
+  - 高于最大阈值：归入 Layer n
+
+**注释要求：**
+- 必须在 Config 类注释中明确引用 runner 实现逻辑
+- 避免声称"已解决"而实际依赖其他模块实现
+
+**正确写法：**
+```python
+@dataclass
+class RSILayerConfig(LayerConfigBase):
+    # layer_threshold_desc 与 thresholds 对应（4层）
+    # 格式遵循 MODULE.md 第451行规范：完整区间 [lower, upper)，必须包含下界
+    # 最大边界使用 ≥，说明越界值处理
+    #
+    # runner 分层逻辑说明（fixed_threshold 模式）：
+    # - 低于最小阈值（RSI<0）→ 归入 Layer1（边界处理）
+    # - 边界内循环归层：
+    #   - Layer1: [0, 30) 区间（0 ≤ RSI < 30）
+    #   - Layer2: [30, 50) 区间（30 ≤ RSI < 50）
+    #   - Layer3: [50, 70) 区间（50 ≤ RSI < 70）
+    #   - Layer4: [70, 100] 区间（最后一层右闭：70 ≤ RSI ≤ 100）
+    # - 高于最大阈值（RSI>100）→ 归入 Layer4（边界处理）
+    #
+    # 注意：上述分层逻辑由 runner 实现（layered_backtest.py），Config 仅描述
+```
+
+**原因：**
+- Config 配置与 runner 实现存在依赖关系
+- 单独修改 Config 或 runner 可能导致不一致
+- 必须明确依赖关系，避免维护时遗漏
+
+---
+
 ## 路径构造规范
 
 **必须使用 `pathlib.Path`，语义清晰、不依赖文件层级假设。**
