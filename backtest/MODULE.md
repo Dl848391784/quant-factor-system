@@ -2,7 +2,7 @@
 
 > 本文档定义 backtest/ 目录下分层回测脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v1.2（新增 Config 类设计规范、异常处理规范、参数命名规范、类型注解规范）
+> 版本: v1.3（新增因子列校验规范、JSONDecodeError 内存问题规范）
 > 修订日期: 2026-05-23
 
 ---
@@ -346,22 +346,33 @@ long_short_stats = {
 
 ## 异常处理规范
 
-**JSONDecodeError 必须用链式抛出 raise ... from e：**
-- 不能用 `raise json.JSONDecodeError(...)` 重新构造
-- 正确做法：保留原始异常链，便于调试
+**JSONDecodeError 必须用链式抛出，但不能重新构造 json.JSONDecodeError：**
 
-**正确写法：**
+**正确写法（使用 ValueError，避免传递 e.doc 导致内存翻倍）：**
 ```python
 except json.JSONDecodeError as e:
-    raise json.JSONDecodeError(f"解析失败: {path}", e.doc, e.pos) from e
+    # 不传递 e.doc（完整文档字符串），避免内存翻倍
+    raise ValueError(
+        f"JSON 解析失败: {path}, 位置 {e.pos}: {e.msg}"
+    ) from e
 ```
 
-**错误写法：**
+**错误写法（传递 e.doc 导致内存翻倍）：**
 ```python
 except json.JSONDecodeError as e:
-    raise json.JSONDecodeError(f"解析失败: {path}, 错误: {e.msg}", e.doc, e.pos)
-    # 缺少 from e，异常链断裂
+    # e.doc 是完整 JSON 文档字符串，传递给新异常会导致内存翻倍
+    raise json.JSONDecodeError(
+        f"JSON 解析失败: {path}, 错误: {e.msg}",
+        e.doc,  # 完整文档字符串，内存翻倍
+        e.pos
+    ) from e
 ```
+
+**原因：**
+- `e.doc` 是完整 JSON 文档字符串（可能几十MB）
+- `json.JSONDecodeError(msg, doc, pos)` 构造函数会存储 doc 参数
+- 重新构造异常时传递 `e.doc`，异常对象持有完整文档副本，内存翻倍
+- 使用 `ValueError` + `from e` 保留异常链，仅传递 `e.pos` 和 `e.msg`（字符串片段）
 
 ---
 
@@ -508,6 +519,33 @@ if factor_min < thresholds[0] or factor_max > thresholds[-1]:
 
 ---
 
+## 因子列校验规范
+
+**run_layered_backtest 必须在因子计算后校验 factor_col 存在。**
+
+**校验逻辑：**
+```python
+# 因子计算（如果需要）
+if factor_calculator:
+    logger.info("计算 %s 因子...", factor_name)
+    factor_df = factor_calculator(factor_df)
+
+# 校验因子列存在
+if factor_col not in factor_df.columns:
+    available_cols = [c for c in factor_df.columns if c not in ['date', 'asset']]
+    raise ValueError(
+        f"因子列 '{factor_col}' 不存在于 factor_df 中，"
+        f"可用因子列: {available_cols}"
+    )
+```
+
+**原因：**
+- 直接访问 `factor_df[factor_col]` 在列不存在时抛 KeyError
+- KeyError 消息不友好（仅显示列名），无法帮助用户定位问题
+- 显式校验并提供可用因子列，帮助用户排查配置错误
+
+---
+
 ## Config 类规范
 
 **必须使用 `@dataclass`，提供类型约束和不可变性保护。**
@@ -585,12 +623,14 @@ LAYER_NAMES = {
 if not factor_path.exists():
     raise FileNotFoundError(f"缓存文件不存在: {factor_path}")
 
-# 2. 校验 JSON 解析
+# 2. 校验 JSON 解析（使用 ValueError，避免传递 e.doc）
 try:
     with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
         factor_data = json.load(f)
 except json.JSONDecodeError as e:
-    raise json.JSONDecodeError(f"JSON 解析失败: {factor_path}, 错误: {e.msg}", e.doc, e.pos)
+    raise ValueError(
+        f"JSON 解析失败: {factor_path}, 位置 {e.pos}: {e.msg}"
+    ) from e
 
 # 3. 校验结构完整性
 if 'data' not in factor_data:
@@ -604,6 +644,7 @@ if 'data' not in factor_data:
 - JSON 文件损坏或格式变更时，抛 KeyError 错误信息不友好
 - 校验文件存在、JSON 解析、结构完整性，提供清晰的错误信息
 - 错误信息包含文件路径、缺失字段、实际顶层字段
+- 使用 ValueError 而非 json.JSONDecodeError，避免传递 e.doc 导致内存翻倍
 
 ---
 
@@ -881,6 +922,7 @@ for layer_id in range(1, meta['n_layers'] + 1):
 | 1 | 分层阈值必须覆盖数据范围 | 避免 fixed_threshold 边界警告 |
 | 2 | 反向因子多头取低层 | Layer(1,2)，空头取高层 Layer(n-1,n) |
 | 3 | 每层最小股票数校验 | min_stocks_per_layer 参数 |
+| 4 | 因子列必须校验存在 | 避免 KeyError，提供可用列列表 |
 
 ---
 

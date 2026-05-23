@@ -73,7 +73,7 @@ class LayerConfigBase:
     设计变更（2026-05-23）：
     - 删除 Property 方法，统一使用字段名访问
     - 原因：Property 与字段重复定义，存在同步风险
-    - 调用方从 config.layer_thresholds 改为 config.layer_thresholds
+    - 调用方从 config.LAYER_THRESHOLDS 改为 config.layer_thresholds
     """
     
     # 子类必须定义的参数
@@ -165,9 +165,9 @@ def load_factor_return_data(
         with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
             factor_data = json.load(f)
     except json.JSONDecodeError as e:
-        raise json.JSONDecodeError(
-            f"因子数据 JSON 解析失败: {factor_path}",
-            e.doc, e.pos
+        # 不传递 e.doc（完整文档字符串），避免内存翻倍
+        raise ValueError(
+            f"因子数据 JSON 解析失败: {factor_path}, 位置 {e.pos}: {e.msg}"
         ) from e
     
     if 'data' not in factor_data:
@@ -192,9 +192,9 @@ def load_factor_return_data(
                 with gzip.open(extra_path, 'rt', encoding='utf-8') as f:
                     extra_data = json.load(f)
             except json.JSONDecodeError as e:
-                raise json.JSONDecodeError(
-                    f"额外数据 JSON 解析失败: {extra_path}",
-                    e.doc, e.pos
+                # 不传递 e.doc（完整文档字符串），避免内存翻倍
+                raise ValueError(
+                    f"额外数据 JSON 解析失败: {extra_path}, 位置 {e.pos}: {e.msg}"
                 ) from e
             
             if 'data' not in extra_data:
@@ -235,9 +235,9 @@ def load_factor_return_data(
         with gzip.open(return_path, 'rt', encoding='utf-8') as f:
             return_data = json.load(f)
     except json.JSONDecodeError as e:
-        raise json.JSONDecodeError(
-            f"收益数据 JSON 解析失败: {return_path}",
-            e.doc, e.pos
+        # 不传递 e.doc（完整文档字符串），避免内存翻倍
+        raise ValueError(
+            f"收益数据 JSON 解析失败: {return_path}, 位置 {e.pos}: {e.msg}"
         ) from e
     
     if 'data' not in return_data:
@@ -337,6 +337,14 @@ def run_layered_backtest(
     if factor_calculator:
         logger.info("计算 %s 因子...", factor_name)
         factor_df = factor_calculator(factor_df)
+    
+    # 校验因子列存在
+    if factor_col not in factor_df.columns:
+        available_cols = [c for c in factor_df.columns if c not in ['date', 'asset']]
+        raise ValueError(
+            f"因子列 '{factor_col}' 不存在于 factor_df 中，"
+            f"可用因子列: {available_cols}"
+        )
     
     # 数据统计
     if verbose:
@@ -471,7 +479,8 @@ def create_cli_entrypoint(
     config_class: type,
     factor_calculator: Optional[Callable] = None,
     additional_data_files: Optional[Dict[str, str]] = None,
-    required_factor_cols: Optional[List[str]] = None
+    required_factor_cols: Optional[List[str]] = None,
+    cache_dir: Optional[str] = None
 ) -> Callable[[], None]:
     """创建 CLI 入口函数
     
@@ -489,6 +498,8 @@ def create_cli_entrypoint(
         import argparse
         
         parser = argparse.ArgumentParser(description=f'{factor_name} 分层回测')
+        parser.add_argument('--cache_dir', type=str, default=cache_dir,
+                            help='缓存目录路径')
         parser.add_argument('--output_dir', type=str, default=None)
         parser.add_argument('--quiet', action='store_true')
         
@@ -504,6 +515,7 @@ def create_cli_entrypoint(
                 factor_calculator=factor_calculator,
                 additional_data_files=additional_data_files,
                 required_factor_cols=required_factor_cols,
+                cache_dir=args.cache_dir,
                 output_dir=args.output_dir,
                 verbose=not args.quiet,
                 logger=logger
@@ -530,7 +542,3 @@ def create_cli_entrypoint(
             sys.exit(5)
     
     return main
-
-
-# 导入 logging 模块（用于类型注解）
-import logging
