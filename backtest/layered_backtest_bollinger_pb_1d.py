@@ -30,6 +30,9 @@ from backtest.common.logger_config import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_N = 20
+# EPSILON 用于判断 band_width 是否接近零（避免 division by zero 或极小值）
+# %B 典型范围 0.0 ~ 2.0，band_width 为价格标准差*2，1e-10 作为零值阈值合理
+EPSILON = 1e-10
 
 
 def _calc_rolling_mean(series: pd.Series, window: int) -> pd.Series:
@@ -94,6 +97,7 @@ class BollingerPBLayerConfig(LayerConfigBase):
         '5': 'PB ≥ 1.2 (接近或高于上轨)'
     })
     
+    # 配置元数据：记录默认布林带窗口（CLI 可通过 --bollinger-n 覆盖）
     bollinger_n: int = DEFAULT_N
 
 
@@ -138,10 +142,21 @@ def calculate_bollinger_pb(
     # %B = (Close - Lower) / (Upper - Lower)
     band_width = df['upper'] - df['lower']
     
+    # 边界处理：band_width 接近零时使用默认值 0.5（价格在中轨）
+    # 使用 EPSILON 判断避免浮点精度问题（如 1e-15 导致 %B 极端值）
+    zero_band_mask = (band_width.notna()) & (band_width.abs() < EPSILON)
+    if zero_band_mask.sum() > 0 and log_handler:
+        log_handler.warning(
+            "band_width 接近零的记录数: %d (%.2f%%)，使用默认值 0.5",
+            zero_band_mask.sum(), zero_band_mask.sum() / len(df) * 100
+        )
+    
     # 使用 Series.where 替代 np.where（避免 ndarray 丢失 index）
+    # band_width > EPSILON: 正常计算 %B
+    # band_width <= EPSILON: 使用默认值 0.5（价格在中轨）
     df['bollinger_pb'] = ((df['close'] - df['lower']) / band_width).where(
-        band_width > 0,
-        0.5  # 带宽为0时的默认值（价格在中轨）
+        band_width > EPSILON,
+        0.5  # 带宽接近零时的默认值（价格在中轨）
     )
     
     # 因子数据范围校验（遵循 MODULE.md 第505行规范）
@@ -166,14 +181,22 @@ def main():
     parser = argparse.ArgumentParser(description='BOLLINGER_PB 分层回测')
     parser.add_argument('--cache_dir', type=str, default=None,
                         help='缓存目录路径')
-    parser.add_argument('--output_dir', type=str, default=None)
-    parser.add_argument('--quiet', action='store_true')
-    parser.add_argument('--bollinger-n', type=int, default=DEFAULT_N)
+    parser.add_argument('--output_dir', type=str, default=None,
+                        help='输出目录路径')
+    parser.add_argument('--quiet', action='store_true',
+                        help='静默模式')
+    parser.add_argument('--bollinger-n', type=int, default=DEFAULT_N,
+                        help=f'布林带计算窗口，默认 {DEFAULT_N}')
     args = parser.parse_args()
     
     try:
         # 使用 functools.partial 替代闭包，显式传参避免隐式捕获
-        factor_calc = partial(calculate_bollinger_pb, n=args.bollinger_n)
+        # 透传 log_handler 参数（遵循 turnover_surge 模式）
+        factor_calc = partial(
+            calculate_bollinger_pb,
+            n=args.bollinger_n,
+            log_handler=logger
+        )
         
         result = run_layered_backtest(
             factor_name='bollinger_pb',
