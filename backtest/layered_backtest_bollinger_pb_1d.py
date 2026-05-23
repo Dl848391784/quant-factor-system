@@ -17,7 +17,7 @@ import pandas as pd
 from pathlib import Path
 from dataclasses import dataclass, field
 from functools import partial
-from typing import List, Dict as TypingDict
+from typing import List, Dict as TypingDict, Any
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -30,6 +30,42 @@ from backtest.common.logger_config import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_N = 20
+
+
+def _calc_rolling_mean(series: pd.Series, window: int) -> pd.Series:
+    """计算滚动均值（groupby transform 专用，显式传参避免闭包）
+    
+    Args:
+        series: 单资产的收盘价序列
+        window: 滚动窗口期
+    
+    Returns:
+        滚动均值序列（前 window-1 天为 NaN）
+    
+    Note:
+        - min_periods=window 确保只有足够历史数据时才计算
+        - 前 window-1 天为 NaN，无法计算有效均值
+        - 例如 window=20，需要至少 20 天数据才能产生第一个有效结果
+    """
+    return series.rolling(window=window, min_periods=window).mean()
+
+
+def _calc_rolling_std(series: pd.Series, window: int) -> pd.Series:
+    """计算滚动标准差（groupby transform 专用，显式传参避免闭包）
+    
+    Args:
+        series: 单资产的收盘价序列
+        window: 滚动窗口期
+    
+    Returns:
+        滚动标准差序列（前 window-1 天为 NaN）
+    
+    Note:
+        - min_periods=window 确保只有足够历史数据时才计算
+        - 前 window-1 天为 NaN，无法计算有效标准差
+        - 例如 window=20，需要至少 20 天数据才能产生第一个有效结果
+    """
+    return series.rolling(window=window, min_periods=window).std()
 
 
 @dataclass
@@ -63,19 +99,36 @@ class BollingerPBLayerConfig(LayerConfigBase):
 
 def calculate_bollinger_pb(
     factor_df: pd.DataFrame,
-    n: int = DEFAULT_N
+    n: int = DEFAULT_N,
+    log_handler: Any = None
 ) -> pd.DataFrame:
-    """计算 BOLLINGER_PB 因子"""
+    """计算 BOLLINGER_PB 因子
+    
+    Args:
+        factor_df: 包含 close 列的 DataFrame
+        n: 滚动窗口期，默认 20
+        log_handler: 日志对象（可选，避免遮蔽模块级 logger）
+    
+    Returns:
+        包含 bollinger_pb 列的 DataFrame
+    
+    Note:
+        - 前 n-1 天 bollinger_pb 为 NaN（rolling 计算 NaN）
+        - %B = (Close - Lower) / (Upper - Lower)
+        - %B < 0: 价格低于下轨
+        - %B = 0.5: 价格在中轨
+        - %B > 1: 价格高于上轨
+    """
     df = factor_df.copy()
     df = df.sort_values(['asset', 'date'])
     
+    # 使用独立函数替代 lambda 闭包（遵循 MODULE.md 第789行规范）
+    calc_mean = partial(_calc_rolling_mean, window=n)
+    calc_std = partial(_calc_rolling_std, window=n)
+    
     # 计算均线和标准差
-    df['ma_n'] = df.groupby('asset')['close'].transform(
-        lambda x: x.rolling(window=n, min_periods=n).mean()
-    )
-    df['std_n'] = df.groupby('asset')['close'].transform(
-        lambda x: x.rolling(window=n, min_periods=n).std()
-    )
+    df['ma_n'] = df.groupby('asset')['close'].transform(calc_mean)
+    df['std_n'] = df.groupby('asset')['close'].transform(calc_std)
     
     # 计算布林带上下轨
     df['upper'] = df['ma_n'] + 2 * df['std_n']
@@ -92,9 +145,18 @@ def calculate_bollinger_pb(
     )
     
     # 因子数据范围校验（遵循 MODULE.md 第505行规范）
-    pb_min = df['bollinger_pb'].min()
-    pb_max = df['bollinger_pb'].max()
-    logger.info("bollinger_pb 因子范围: %.2f ~ %.2f", pb_min, pb_max)
+    # 全 NaN 防御：检查是否有有效数据
+    pb_values = df['bollinger_pb'].dropna()
+    if len(pb_values) == 0:
+        if log_handler:
+            log_handler.warning("bollinger_pb 全部为 NaN，无法计算范围")
+        pb_min, pb_max = 0.0, 0.0
+    else:
+        pb_min = pb_values.min()
+        pb_max = pb_values.max()
+    
+    if log_handler:
+        log_handler.info("bollinger_pb 因子范围: %.2f ~ %.2f", pb_min, pb_max)
     
     return df
 
