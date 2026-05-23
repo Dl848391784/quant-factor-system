@@ -85,12 +85,13 @@ class TurnoverSurgeLayerConfig(LayerConfigBase):
     short_layers: List[int] = field(default_factory=lambda: [4, 5])  # 偏高/突增层做空
     
     # layer_threshold_desc 与 thresholds 对应（5层）
+    # 格式遵循 MODULE.md 第451行规范：完整区间 [lower, upper)，必须包含下界
     layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {
-        '1': 'surge < 0.5 (换手率远低于均值，做多)',
+        '1': '0 ≤ surge < 0.5 (含越界值<0，换手率远低于均值，做多)',   # 含越界值 surge < 0
         '2': '0.5 ≤ surge < 1 (换手率偏低，做多)',
         '3': '1 ≤ surge < 2 (换手率接近均值，不参与多空)',
         '4': '2 ≤ surge < 5 (换手率偏高，做空)',
-        '5': 'surge ≥ 5 (含越界值>500，换手率突增，做空)'
+        '5': 'surge ≥ 5 (含边界5，含越界值>500，换手率突增，做空)'     # 含越界值 surge > 500
     })
 
 
@@ -148,6 +149,8 @@ def calculate_turnover_surge(
 
 def main():
     import argparse
+    from functools import partial
+    
     parser = argparse.ArgumentParser(description='换手率突增分层回测')
     # argparse 参数命名说明：
     # - 命令行使用 --surge-window（连字符）
@@ -162,8 +165,12 @@ def main():
     args = parser.parse_args()
     
     try:
-        def factor_calc(df):
-            return calculate_turnover_surge(df, surge_window=args.surge_window, log_handler=logger)
+        # 使用 functools.partial 替代闭包，显式传参避免捕获外部变量
+        factor_calc = partial(
+            calculate_turnover_surge,
+            surge_window=args.surge_window,
+            log_handler=logger
+        )
         
         result = run_layered_backtest(
             factor_name='turnover_surge',
