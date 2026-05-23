@@ -444,7 +444,7 @@ layer_threshold_desc = {'1': ..., '2': ..., '3': ..., '4': ...}  # 4层描述
 
 **LAYER_THRESHOLD_DESC 格式：** 完整区间 `[lower, upper)`，必须包含下界。
 
-**第5层（最大边界）特殊处理：** 使用 `≥` 并说明上界处理逻辑。
+**第n层（最大边界）特殊处理：** 使用 `≥` 并说明上界处理逻辑。
 
 **示例：**
 ```python
@@ -460,6 +460,129 @@ layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {
 - 最大边界（`≥ thresholds[-1]`）归入 Layer n，包括越界值（如 RSI >= 100）
 - 描述必须与引擎一致，避免误导
 - RSI 理论范围 [0, 100]，实际数据可能因计算误差越界，需校验
+
+---
+
+## RSI 计算规范（2026-05-23 新增）
+
+**RSI 计算方法：必须使用 Wilder 平滑（EWM，alpha=1/n），而非简单移动平均（SMA）。**
+
+**原因：**
+- Wilder (1978) 定义 RSI 使用指数加权移动平均（EWM）
+- EWM 公式：`avg_t = alpha * val_t + (1-alpha) * avg_{t-1}`，其中 `alpha=1/n`
+- SMA 与 EWM 在短窗口（如 n=6）差异显著
+- EWM 对近期数据更敏感，更符合 RSI 标准定义
+
+**正确写法：**
+```python
+def _calc_ewm_mean(series: pd.Series, alpha: float) -> pd.Series:
+    """Wilder 平滑均值（groupby transform 专用）"""
+    return series.ewm(alpha=alpha, adjust=False).mean()
+
+calc_avg = partial(_calc_ewm_mean, alpha=1/n)  # Wilder 平滑：alpha=1/n
+df['avg_gain'] = df.groupby('asset')['gain'].transform(calc_avg)
+df['avg_loss'] = df.groupby('asset')['loss'].transform(calc_avg)
+```
+
+**错误写法：**
+```python
+# 使用简单移动平均（SMA）—— 不符合 RSI 标准定义
+df['avg_gain'] = df.groupby('asset')['gain'].transform(lambda x: x.rolling(n).mean())
+df['avg_loss'] = df.groupby('asset')['loss'].transform(lambda x: x.rolling(n).mean())
+```
+
+---
+
+## 边界处理规范（2026-05-23 新增）
+
+**avg_loss 接近零时的 RSI 计算必须分场景处理，避免逻辑漏洞。**
+
+**边界情况分类：**
+1. `avg_loss > EPSILON` 且 `avg_gain > 0`: 正常计算 RS，RSI ∈ [0, 100]
+2. `avg_loss > EPSILON` 且 `avg_gain = 0`: RS = 0，RSI = 0（超卖）
+3. `avg_loss = 0` 且 `avg_gain > 0`: RS → ∞，RSI = 100（超买）
+4. `avg_loss = 0` 且 `avg_gain = 0`: 无涨无跌，RSI = 50（中性）
+
+**delta=0 归属说明：**
+- `delta=0`（价格不变）时，`gain=0` 且 `loss=0`
+- 这是正确的处理：既不是上涨也不是下跌
+- 但连续多天 `delta=0` 会累积导致 `avg_gain=0` 且 `avg_loss=0`
+- 此时 RSI 应为 50（无涨无跌），而非 100（超买）
+
+**正确写法（分开处理）：**
+```python
+zero_loss_mask = (df['avg_loss'].notna()) & (df['avg_loss'].abs() < EPSILON)
+zero_gain_mask = (df['avg_gain'].notna()) & (df['avg_gain'].abs() < EPSILON)
+
+# 同时接近零：avg_gain=0 且 avg_loss=0 → RSI=50
+both_zero_mask = zero_loss_mask & zero_gain_mask
+df.loc[both_zero_mask, 'rsi'] = 50
+
+# 只有 avg_loss 接近零（avg_gain > 0）: RSI=100
+only_zero_loss_mask = zero_loss_mask & ~zero_gain_mask
+df.loc[only_zero_loss_mask, 'rsi'] = 100
+
+# RS 计算（避免 division by zero）
+df['rs'] = df['avg_gain'] / df['avg_loss'].where(
+    df['avg_loss'] > EPSILON,
+    EPSILON  # 临时避免除零，会被后续 mask 覆盖
+)
+df['rsi'] = 100 - (100 / (1 + df['rs']))
+
+# 边界处理覆盖（必须在 RS 计算后执行）
+df.loc[only_zero_loss_mask, 'rsi'] = 100
+df.loc[both_zero_mask, 'rsi'] = 50
+```
+
+**错误写法（合并处理）：**
+```python
+# 错误：avg_loss=0 且 avg_gain=0 时，RS → ∞，RSI → 100（应为 50）
+df['rsi'] = df['avg_gain'] / df['avg_loss'].replace(0, EPSILON)  # 合并处理
+df['rsi'] = 100 - (100 / (1 + df['rs']))  # 无后续覆盖，逻辑漏洞
+```
+
+**原因：**
+- `avg_loss=0` 有两种场景：`avg_gain>0`（超买）和 `avg_gain=0`（中性）
+- 合并处理会导致后者误判为超买
+- 分开处理逻辑清晰，避免边界情况遗漏
+
+---
+
+## 因子方向与策略适配规范（2026-05-23 新增）
+
+**factor_direction 必须与业务策略逻辑一致，注释需明确策略类型。**
+
+**策略类型说明：**
+- **均值回归策略**：偏离中性后可能回归，反向操作
+  - RSI < 30（超卖）→ 做多
+  - RSI > 70（超买）→ 做空
+  - RSI 50~70（偏强）→ 可能回落，做空（而非趋势跟随）
+- **趋势跟随策略**：延续当前趋势，同向操作
+  - RSI 50~70（上涨趋势）→ 做多
+  - RSI 30~50（下跌趋势）→ 做空
+
+**factor_direction 配置规则：**
+- 均值回归策略：`factor_direction='negative'`（低值做多，高值做空）
+- 趋势跟随策略：`factor_direction='positive'`（高值做多，低值做空）
+
+**配置示例（均值回归）：**
+```python
+@dataclass
+class RSILayerConfig(LayerConfigBase):
+    factor_direction: str = 'negative'  # 均值回归：低RSI做多，高RSI做空
+    long_layers: List[int] = field(default_factory=lambda: [1, 2])  # Layer1/2（超卖/偏弱）做多
+    short_layers: List[int] = field(default_factory=lambda: [3, 4])  # Layer3/4（偏强/超买）做空
+    
+    # 策略说明注释（必须明确）
+    # 注意：这是均值回归策略，而非趋势跟随策略。
+    # Layer3（50≤RSI<70）做空是基于"偏离中性偏强后可能回落"的均值回归逻辑。
+    # 若需趋势跟随策略，请调整 factor_direction='positive'。
+```
+
+**原因：**
+- `factor_direction` 与策略类型直接相关
+- Layer3 做空在均值回归策略中合理，在趋势跟随策略中错误
+- 必须在注释中明确策略类型，避免读者猜测或误用
 
 ---
 

@@ -1746,21 +1746,51 @@ class RealDataLoader:
         
         使用 ewm（指数加权移动平均）进行向量化计算，
         避免 Python 循环，提升性能。
+        
+        边界处理（遵循 Wilder 1978 标准）：
+        1. avg_loss=0 且 avg_gain>0 → RSI=100（超买）
+        2. avg_loss=0 且 avg_gain=0 → RSI=50（中性）
+        3. avg_loss>0 → 正常计算 RS
+        
+        注意：
+        - avg_loss 接近零时，直接除法会产生 inf，需分场景处理
+        - 使用 EPSILON 判断零值（相对 avg_loss 量级极小）
         """
+        EPSILON = 1e-10  # 零值阈值
+        
         delta = close_prices.diff()
         gain = delta.where(delta > 0, 0)
         loss = (-delta).where(delta < 0, 0)
         
-        # 使用 ewm 进行向量化计算
+        # 使用 ewm 进行向量化计算（Wilder 平滑）
         avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
         avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
         
-        rs = avg_gain / avg_loss
+        # 边界处理：avg_loss 接近零时
+        zero_loss_mask = avg_loss.notna() & (avg_loss.abs() < EPSILON)
+        zero_gain_mask = avg_gain.notna() & (avg_gain.abs() < EPSILON)
+        
+        # 同时为零：avg_gain=0 且 avg_loss=0 → RSI=50（中性）
+        both_zero_mask = zero_loss_mask & zero_gain_mask
+        
+        # 只有 avg_loss 接近零（avg_gain>0）→ RSI=100（超买）
+        only_zero_loss_mask = zero_loss_mask & ~zero_gain_mask
+        
+        # RS 计算（避免 division by zero）
+        # avg_loss > EPSILON: 正常计算 RS
+        # avg_loss <= EPSILON: 临时替换为 EPSILON，会被后续覆盖
+        rs = avg_gain / avg_loss.where(avg_loss > EPSILON, EPSILON)
         rsi = 100 - (100 / (1 + rs))
         
+        # 边界处理覆盖（必须在 RS 计算后）
+        rsi.loc[only_zero_loss_mask] = 100  # avg_loss=0, avg_gain>0 → 超买
+        rsi.loc[both_zero_mask] = 50         # avg_loss=0, avg_gain=0 → 中性
+        
         # 处理缺失值和边界值
-        rsi = rsi.fillna(50)  # 缺失值填充为中性值
-        rsi = rsi.clip(0, 100)  # 确保范围在 0-100
+        # 缺失值填充为中性值（遵循 MODULE.md 边界处理规范）
+        rsi = rsi.fillna(50)
+        # clip 确保范围在 0-100（计算误差可能导致越界）
+        rsi = rsi.clip(0, 100)
         
         return rsi
     
