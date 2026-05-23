@@ -61,6 +61,81 @@ comprehensive_factor 模块负责将多个单因子按加权方式组合成综�
 
 ---
 
+## Step 2: 因子筛选（自动化）
+
+> 2026-05-24 新增自动化逻辑，详见 `common/factor_selector.py`
+
+### 无效因子判定标准
+
+| 指标 | 阈值 | 判断逻辑 | 理由 |
+|-----|------|---------|------|
+| |ic_mean| | < 0.03 | 无效 | IC均值太低无预测能力 |
+| p_value | > 0.05 | 无效 | 统计不显著 |
+| |icir| | < 0.15 | 无效 | 稳定性差（波动大） |
+| |monotonicity_corr| | < 0.4 | 无效 | 分层收益不单调 |
+| long_short_return_annual | < 3% | 无效 | 经济意义弱（扣除成本后负收益） |
+
+**判定规则：** 任一指标不满足即判定为无效因子。
+
+**阈值依据：**
+- |ic_mean| ≥ 0.03：业界公认的最低有效阈值
+- p_value ≤ 0.05：统计显著性标准（95%置信）
+- |icir| ≥ 0.15：IC均值/IC标准差 ≥ 0.03/0.2，最低稳定水平
+- |monotonicity_corr| ≥ 0.4：一般单调性标准（0.5为强单调）
+- long_short_return ≥ 3%：扣除双边成本（各1%）后仍正收益
+
+### 高相关组筛选标准
+
+| 指标 | 阈值 | 处理方式 | 理由 |
+|-----|------|---------|------|
+| |corr| | > 0.7 | 组内保留 |ICIR| 最高的 | 高相关因子冗余，信息重叠 |
+
+**筛选算法：**
+1. 使用连通分量算法识别高相关因子组
+2. 组内比较 |ICIR|，保留最高的因子
+3. 其他因子标记为"高相关冗余"并丢弃
+
+### 使用方式
+
+**手动配置（默认）：**
+```python
+# 脚本中直接指定因子列表
+factor_list = ['rsi', 'volume_ratio']
+factor_cols = ['rsi_6', 'volume_ratio_5']
+```
+
+**自动筛选（推荐）：**
+```python
+# 启用自动筛选
+result = run_composite_backtest(
+    weight_method='icir_weight',
+    auto_select=True,  # 启用自动筛选
+    thresholds={        # 可自定义阈值（可选）
+        'ic_mean_abs_min': 0.03,
+        'monotonicity_corr_abs_min': 0.4,
+        ...
+    }
+)
+```
+
+### 筛选输出示例
+
+```json
+{
+  "selected": ["volume_ratio", "rsi"],
+  "valid_count": 4,
+  "total_count": 5,
+  "invalid": {
+    "kdj_j": ["|ic_mean|=0.015<0.03", "|icir|=0.092<0.15"]
+  },
+  "high_corr_dropped": {
+    "turnover_surge": "与volume_ratio高相关(0.99)，ICIR较低"
+  }
+}
+```
+
+---
+
 ## 脚本命名
 
 **格式：** `composite_<加权方式>_<收益周期>.py`

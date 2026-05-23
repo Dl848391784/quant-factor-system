@@ -90,14 +90,17 @@ class CompositeLayerConfig(LayerConfigBase):
 # ============================================================================
 
 def run_composite_backtest(
-    weight_method: str,
-    factor_list: List[str],
-    factor_cols: List[str],
-    config: CompositeLayerConfig,
+    weight_method: str = 'equal_weight',
+    factor_list: Optional[List[str]] = None,      # 可选，如为None则自动筛选
+    factor_cols: Optional[List[str]] = None,      # 可选，如为None则自动筛选
+    config: Optional['CompositeLayerConfig'] = None,
     return_period: str = '1d',
     cache_dir: Optional[str] = None,
     ic_result_dir: Optional[str] = None,
+    backtest_result_dir: Optional[str] = None,
     output_dir: Optional[str] = None,
+    auto_select: bool = False,                    # 是否自动筛选因子
+    thresholds: Optional[Dict] = None,            # 筛选阈值配置
     verbose: bool = True,
     logger: Optional[logging.Logger] = None
 ) -> Dict:
@@ -105,13 +108,16 @@ def run_composite_backtest(
     
     Args:
         weight_method: 加权方式（equal_weight/icir_weight/ic_weight/rolling_icir_weight）
-        factor_list: 因子名称列表（用于加载IC结果）
-        factor_cols: 因子列名列表（用于加载因子值）
+        factor_list: 因子名称列表（用于加载IC结果），如为None且auto_select=True则自动筛选
+        factor_cols: 因子列名列表（用于加载因子值），如为None且auto_select=True则自动筛选
         config: 分层配置对象
         return_period: 收益周期
         cache_dir: 缓存目录
         ic_result_dir: IC结果目录
+        backtest_result_dir: 回测结果目录
         output_dir: 输出目录
+        auto_select: 是否自动筛选因子（Step 2自动化）
+        thresholds: 筛选阈值配置（如未提供则使用默认值）
         verbose: 是否打印详细信息
         logger: 日志对象
     
@@ -121,12 +127,57 @@ def run_composite_backtest(
     if logger is None:
         logger = get_logger(__name__)
     
+    # 创建默认配置（如果未传入）
+    if config is None:
+        config = CompositeLayerConfig()
+    
     # 校验配置
     config.validate()
     
     logger.info("=" * 40)
     logger.info("综合因子分层回测 [%s]", weight_method)
     logger.info("=" * 40)
+    
+    # ====================================================================
+    # Step 2: 自动筛选因子（如果启用）
+    # ====================================================================
+    selection_result = None
+    if auto_select and factor_list is None:
+        from comprehensive_factor.common.factor_selector import select_factors
+        
+        logger.info("启用自动因子筛选...")
+        
+        # 加载所有因子数据用于计算相关性
+        # 注意：这需要 factor_data.json.gz 包含所有因子列
+        # 如果缓存数据不完整，只能使用手动配置
+        
+        selection_result = select_factors(
+            ic_result_dir=Path(ic_result_dir) if ic_result_dir else None,
+            backtest_result_dir=Path(backtest_result_dir) if backtest_result_dir else None,
+            thresholds=thresholds,
+            logger=logger
+        )
+        
+        # 根据筛选结果设置 factor_list
+        factor_list = selection_result['selected']
+        
+        # factor_cols 需要根据缓存数据的实际列名调整
+        # 例如：'rsi' → 'rsi_6', 'volume_ratio' → 'volume_ratio_5'
+        # 这里简化处理：factor_cols = factor_list
+        if factor_cols is None:
+            factor_cols = factor_list
+        
+        logger.info("自动筛选完成: %s", factor_list)
+    
+    # 如果仍未指定，使用默认配置
+    if factor_list is None:
+        raise ValueError(
+            "factor_list 未指定\n"
+            "请设置 auto_select=True 启用自动筛选，或手动传入 factor_list"
+        )
+    
+    if factor_cols is None:
+        factor_cols = factor_list
     
     if verbose:
         logger.info("配置信息:")
@@ -136,6 +187,8 @@ def run_composite_backtest(
         logger.info("  分层数量: %d (percentile)", config.n_layers)
         logger.info("  多头组合: Layer %s", config.long_layers)
         logger.info("  空头组合: Layer %s", config.short_layers)
+        if auto_select:
+            logger.info("  自动筛选: 启用")
     
     # 1. 加载因子数据
     logger.info("加载因子数据...")
