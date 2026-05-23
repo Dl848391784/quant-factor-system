@@ -50,6 +50,72 @@ backtest 模块负责对因子 IC 结果进行分层回测，评估因子的实�
 | 类型转换 | `factor_ic.common.convert_types` | numpy/pandas → Python 原生类型 |
 | 日志配置 | `factor_ic.common.logger_config` | get_logger 函数 |
 | 分层回测引擎 | `backtest.common.layered_backtest` | LayeredBacktestEngine 类 |
+| **分层回测入口** | `backtest.common.layered_backtest_runner` | run_layered_backtest 公共入口 |
+
+---
+
+## 新因子开发规范（使用公共入口）
+
+**强制要求：新因子分层回测脚本必须使用公共入口 `run_layered_backtest`。**
+
+### 开发步骤
+
+1. **定义 Config 类**（继承 `LayerConfigBase`）
+```python
+from backtest.common.layered_backtest_runner import LayerConfigBase
+
+@dataclass
+class MyFactorLayerConfig(LayerConfigBase):
+    # 只需定义因子特有参数
+    layer_thresholds: List[float] = field(default_factory=lambda: [0, 0.5, 1.0, 1.5, 2.0, 5.0])
+    factor_direction: str = 'negative'
+    long_layers: List[int] = field(default_factory=lambda: [1, 2])
+    short_layers: List[int] = field(default_factory=lambda: [4, 5])
+    # ... 其他因子特有参数
+```
+
+2. **调用公共入口**
+```python
+from backtest.common.layered_backtest_runner import run_layered_backtest
+
+result = run_layered_backtest(
+    factor_name='my_factor',
+    factor_col='my_factor_value',
+    config=MyFactorLayerConfig(),
+    # 可选参数：
+    factor_calculator=my_calculate_func,  # 若因子需实时计算
+    additional_data_files={'turnover_rate': 'path/to/data.json.gz'},  # 若需额外数据
+    _logger=logger
+)
+```
+
+3. **CLI 入口**（使用工厂函数）
+```python
+from backtest.common.layered_backtest_runner import create_cli_entrypoint
+
+main = create_cli_entrypoint(
+    factor_name='my_factor',
+    factor_col='my_factor_value',
+    config_class=MyFactorLayerConfig
+)
+
+if __name__ == '__main__':
+    main()
+```
+
+### 代码量对比
+
+| 方式 | 行数 | 适用场景 |
+|------|------|---------|
+| 旧方式（手写全部逻辑） | ~350-500 | 不推荐 |
+| 新方式（使用公共入口） | **~60-180** | 强制使用 |
+
+### 示例脚本
+
+| 因子类型 | 示例文件 | 特点 |
+|---------|---------|------|
+| 简单因子（数据已在缓存） | `layered_backtest_volume_ratio_1d_v2.py` | 84 行，无需额外数据和计算 |
+| 复杂因子（需额外数据） | `layered_backtest_turnover_surge_1d_v2.py` | 182 行，需加载换手率数据 + 因子计算 |
 
 ---
 
