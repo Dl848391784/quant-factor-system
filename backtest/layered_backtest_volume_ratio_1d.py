@@ -32,7 +32,24 @@ logger = get_logger(__name__)
 
 @dataclass
 class VolumeRatioLayerConfig(LayerConfigBase):
-    """量比分层配置"""
+    """量比分层配置
+    
+    因子方向说明（基于IC测试结果）：
+    - IC均值 = -0.029（负相关，显著）
+    - 高量比 → 未来收益倾向于更低（放量可能预示见顶）
+    - 低量比 → 未来收益倾向于更高（缩量可能预示反弹）
+    - factor_direction='negative' 意味着：低量比做多，高量比做空
+    
+    策略逻辑：
+    - Layer1/Layer2（缩量）→ 做多（量比<1，成交量低于均值）
+    - Layer4/Layer5（放量）→ 做空（量比>1.5，成交量高于均值）
+    - Layer3（正常）→ 不参与（量比接近均值，方向不明确）
+    
+    阈值边界依赖说明（runner 实现）：
+    - fixed_threshold 模式：[thresholds[i], thresholds[i+1]) 归入 Layer (i+1)
+    - 最大边界使用 ≥，包括越界值（如量比>5）
+    - 最小边界以下归入 Layer1（如量比<0）
+    """
     
     layer_thresholds: List[float] = field(default_factory=lambda: [0, 0.5, 1.0, 1.5, 2.0, 5.0])
     
@@ -48,12 +65,26 @@ class VolumeRatioLayerConfig(LayerConfigBase):
     long_layers: List[int] = field(default_factory=lambda: [1, 2])
     short_layers: List[int] = field(default_factory=lambda: [4, 5])
     
+    # layer_threshold_desc 与 thresholds 对应（5层）
+    # 格式遵循 MODULE.md 第451行规范：完整区间 [lower, upper)，必须包含下界
+    # 最大边界使用 ≥，说明越界值处理
+    #
+    # runner 分层逻辑说明（fixed_threshold 模式）：
+    # - 低于最小阈值（ratio<0）→ 归入 Layer1（边界处理）
+    # - 边界内循环归层：
+    #   - Layer1: [0, 0.5) 区间（0 ≤ ratio < 0.5）
+    #   - Layer2: [0.5, 1.0) 区间（0.5 ≤ ratio < 1.0）
+    #   - Layer3: [1.0, 1.5) 区间（1.0 ≤ ratio < 1.5）
+    #   - Layer4: [1.5, 2.0) 区间（1.5 ≤ ratio < 2.0）
+    #   - Layer5: [2.0, 5.0] 区间（最后一层右闭：2.0 ≤ ratio ≤ 5.0）
+    # - 高于最大阈值（ratio>5.0）→ 归入 Layer5（边界处理）
+    #
     layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {
-        '1': 'ratio < 0.5 (成交量远低于均值)',
-        '2': '0.5 ≤ ratio < 1 (成交量低于均值)',
-        '3': '1 ≤ ratio < 1.5 (成交量接近均值)',
-        '4': '1.5 ≤ ratio < 2 (成交量偏高)',
-        '5': 'ratio ≥ 2 (成交量极放量)'
+        '1': 'ratio < 0.5 (含越界值<0，极缩量，做多)',
+        '2': '0.5 ≤ ratio < 1.0 (缩量，做多)',
+        '3': '1.0 ≤ ratio < 1.5 (正常，不参与)',
+        '4': '1.5 ≤ ratio < 2.0 (放量，做空)',
+        '5': 'ratio ≥ 2.0 (含边界2.0，含越界值>5，极放量，做空)'
     })
 
 
