@@ -52,23 +52,48 @@ def _calc_delta(series: pd.Series) -> pd.Series:
     return series.diff()
 
 
-def _calc_ewm_mean(series: pd.Series, alpha: float) -> pd.Series:
-    """计算 Wilder 平滑均值（groupby transform 专用，显式传参避免闭包）
+def _wilder_smoothing(series: pd.Series, n: int) -> pd.Series:
+    """Wilder 平滑（前 n 天 SMA 种子，之后 EWM 递推）
     
     Args:
         series: 单资产的序列（gain 或 loss）
-        alpha: EWM 平滑系数，标准 RSI 使用 alpha=1/n
+        n: 窗口期
     
     Returns:
-        Wilder 平滑均值序列（第一天为 NaN，之后累积计算）
+        Wilder 平滑均值序列
     
     Note:
-        - Wilder (1978) 使用 EWM 平滑而非 SMA
-        - EWM 累积计算：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
-        - 第一天使用当天的 gain/loss 作为初始值
-        - 相比 SMA，EWM 对近期数据更敏感，更符合 RSI 标准
+        Wilder (1978) 标准实现：
+        1. 前 n 天使用 rolling SMA（rolling(n).mean()）
+           - 前 n-1 天：NaN（数据不足）
+           - 第 n-1 天（索引 n-1）：SMA 值作为 EWM 种子
+        2. 第 n 天及之后：EWM 递推
+           - 公式：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
+           - alpha = 1/n
+           - EWM 初始值 = SMA 值（第 n-1 天的 rolling 值）
+        
+        与 pandas ewm(adjust=False) 的差异：
+        - pandas ewm(adjust=False) 从第 1 个观测值就开始计算
+        - Wilder 标准要求前 n-1 天为 NaN，第 n-1 天用 SMA
     """
-    return series.ewm(alpha=alpha, adjust=False).mean()
+    # 前 n 天使用 rolling SMA（rolling 前n-1天为NaN）
+    rolling_avg = series.rolling(window=n).mean()
+    
+    # 从第 n 天开始 EWM 递推
+    # 注意：rolling_avg.iloc[n-1] 是第n-1天的SMA值，作为EWM种子
+    # EWM从第n天开始（索引n），初始值=rolling_avg.iloc[n-1]
+    
+    # 手动计算EWM递推（确保与SMA种子衔接）
+    result = rolling_avg.copy()
+    
+    # 从第 n 天开始 EWM 递推（索引 n 到 len-1）
+    alpha = 1.0 / n
+    for i in range(n, len(series)):
+        if pd.notna(rolling_avg.iloc[i-1]):  # 前一天的avg有效
+            # EWM 递推：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
+            result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * result.iloc[i-1]
+    
+    return result
 
 
 @dataclass
@@ -176,24 +201,12 @@ def calculate_rsi(
     # 但 Wilder 标准要求前 n 天用 SMA 种子，之后才 EWM 递推
     # 
     # 实现方式：
-    # 1. 先用 rolling(n).mean() 计算前 n 天的 SMA
-    # 2. 从第 n+1 天开始，用 EWM(alpha=1/n, adjust=False) 递推
-    # 3. 合并两个序列：前 n 天用 SMA，之后用 EWM
-    
-    def _wilder_smoothing(series: pd.Series, n: int) -> pd.Series:
-        """Wilder 平滑（前 n 天 SMA 种子，之后 EWM 递推）"""
-        # 前 n 天 SMA 种子
-        sma_seed = series.iloc[:n].mean()
-        
-        # 从第 n 天开始 EWM 递推
-        ewm_part = series.iloc[n:].ewm(alpha=1/n, adjust=False).mean()
-        
-        # 合并：前 n 天用 SMA 种子填充，之后用 EWM
-        result = pd.Series(index=series.index, dtype=float)
-        result.iloc[:n] = sma_seed
-        result.iloc[n:] = ewm_part
-        
-        return result
+    # 1. 前 n 天使用 rolling(n).mean() 计算 SMA
+    #    - 前 n-1 天：NaN（数据不足）
+    #    - 第 n-1 天：SMA 值作为 EWM 种子
+    # 2. 第 n 天及之后：手动 EWM 递推
+    #    - 公式：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
+    #    - alpha = 1/n
     
     # 使用独立函数替代 lambda 闭包（遵循 MODULE.md 规范）
     calc_avg = partial(_wilder_smoothing, n=n)

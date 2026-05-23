@@ -667,6 +667,84 @@ class RSILayerConfig(LayerConfigBase):
 
 ---
 
+## 模块级函数定义规范（2026-05-23 新增）
+
+**关键算法函数应定义为模块级函数而非嵌套函数。**
+
+**原因：**
+1. **单元测试覆盖**：嵌套函数无法被外部单元测试直接调用
+2. **代码复用**：模块级函数可被其他脚本导入复用
+3. **维护性**：独立函数更易于调试和版本管理
+
+**禁止模式：**
+```python
+def calculate_rsi(...):
+    def _wilder_smoothing(series, n):  # 嵌套定义 ❌
+        """Wilder 平滑（前 n 天 SMA 种子，之后 EWM 递推）"""
+        sma_seed = series.iloc[:n].mean()  # 错误：单一值填充前n天
+        ewm_part = series.iloc[n:].ewm(alpha=1/n, adjust=False).mean()  # 错误：未衔接SMA种子
+        result = pd.Series(index=series.index, dtype=float)
+        result.iloc[:n] = sma_seed
+        result.iloc[n:] = ewm_part
+        return result
+    
+    avg_gain = _wilder_smoothing(gain, period)  # 无法单元测试 ❌
+```
+
+**推荐模式：**
+```python
+# 模块级函数定义（可被单元测试覆盖）
+def _wilder_smoothing(series: pd.Series, n: int) -> pd.Series:
+    """Wilder 平滑（前 n 天 SMA 种子，之后 EWM 递推）
+    
+    Wilder (1978) 标准实现：
+    1. 前 n 天使用 rolling SMA（rolling(n).mean()）
+       - 前 n-1 天：NaN（数据不足）
+       - 第 n-1 天（索引 n-1）：SMA 值作为 EWM 种子
+    2. 第 n 天及之后：EWM 递推
+       - 公式：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
+       - alpha = 1/n
+    
+    与 pandas ewm(adjust=False) 的差异：
+    - pandas ewm(adjust=False) 从第 1 个观测值就开始计算
+    - Wilder 标准要求前 n-1 天为 NaN，第 n-1 天用 SMA
+    """
+    rolling_avg = series.rolling(window=n).mean()
+    result = rolling_avg.copy()
+    
+    alpha = 1.0 / n
+    for i in range(n, len(series)):
+        if pd.notna(rolling_avg.iloc[i-1]):
+            result.iloc[i] = alpha * series.iloc[i] + (1-alpha) * result.iloc[i-1]
+    
+    return result
+
+def calculate_rsi(...):
+    avg_gain = _wilder_smoothing(gain, period)  # ✓ 可单元测试
+```
+
+**单元测试示例：**
+```python
+# tests/test_wilder_smoothing.py
+from backtest.layered_backtest_rsi_1d import _wilder_smoothing
+
+def test_wilder_smoothing():
+    series = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0])
+    result = _wilder_smoothing(series, n=3)
+    
+    # 验证前 n-1 天为 NaN
+    assert pd.isna(result.iloc[0])
+    assert pd.isna(result.iloc[1])
+    
+    # 验证第 n-1 天为 SMA 值
+    assert result.iloc[2] == 2.0  # (1+2+3)/3
+    
+    # 验证第 n 天开始 EWM 递推
+    assert result.iloc[3] == 1/3 * 4.0 + 2/3 * 2.0
+```
+
+---
+
 ## 路径构造规范
 
 **必须使用 `pathlib.Path`，语义清晰、不依赖文件层级假设。**

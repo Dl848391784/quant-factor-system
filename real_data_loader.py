@@ -59,6 +59,49 @@ import gzip
 warnings.filterwarnings('ignore')
 
 
+# ============================================================================
+# 模块级 Wilder 平滑函数（可被单元测试直接覆盖）
+# ============================================================================
+
+def _wilder_smoothing_rsi(series: pd.Series, n: int) -> pd.Series:
+    """Wilder 平滑（前 n 天 SMA 种子，之后 EWM 递推）- RSI专用
+    
+    Args:
+        series: 单资产的序列（gain 或 loss）
+        n: 窗口期
+    
+    Returns:
+        Wilder 平滑均值序列
+    
+    Note:
+        Wilder (1978) 标准实现：
+        1. 前 n 天使用 rolling SMA（rolling(n).mean()）
+           - 前 n-1 天：NaN（数据不足）
+           - 第 n-1 天（索引 n-1）：SMA 值作为 EWM 种子
+        2. 第 n 天及之后：EWM 递推
+           - 公式：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
+           - alpha = 1/n
+        
+        与 pandas ewm(adjust=False) 的差异：
+        - pandas ewm(adjust=False) 从第 1 个观测值就开始计算
+        - Wilder 标准要求前 n-1 天为 NaN，第 n-1 天用 SMA
+    """
+    # 前 n 天使用 rolling SMA（rolling 前n-1天为NaN）
+    rolling_avg = series.rolling(window=n).mean()
+    
+    # 手动计算EWM递推（确保与SMA种子衔接）
+    result = rolling_avg.copy()
+    
+    # 从第 n 天开始 EWM 递推（索引 n 到 len-1）
+    alpha = 1.0 / n
+    for i in range(n, len(series)):
+        if pd.notna(rolling_avg.iloc[i-1]):  # 前一天的avg有效
+            # EWM 递推：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
+            result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * result.iloc[i-1]
+    
+    return result
+
+
 class RealDataLoader:
     """真实 A股数据加载器（多线程版本）"""
     
@@ -1753,8 +1796,8 @@ class RealDataLoader:
         3. avg_loss>0 → 正常计算 RS
         
         注意：
+        - 使用模块级函数 _wilder_smoothing_rsi（可被单元测试覆盖）
         - avg_loss 接近零时，直接除法会产生 inf，需分场景处理
-        - 使用 EPSILON 判断零值（相对 avg_loss 量级极小）
         - avg_loss 和 avg_gain 理论上非负，使用 .abs() 是防御性代码
         """
         EPSILON = 1e-10  # 零值阈值
@@ -1763,27 +1806,9 @@ class RealDataLoader:
         gain = delta.where(delta > 0, 0)
         loss = (-delta).where(delta < 0, 0)
         
-        # Wilder 标准 RSI 计算（前 period 天 SMA 种子，之后 EWM 递推）
-        # pandas ewm(adjust=False) 从第一个观测值就开始计算，
-        # 但 Wilder 标准要求前 n 天用 SMA 种子，之后才 EWM 递推
-        
-        def _wilder_smoothing(series: pd.Series, n: int) -> pd.Series:
-            """Wilder 平滑（前 n 天 SMA 种子，之后 EWM 递推）"""
-            # 前 n 天 SMA 种子
-            sma_seed = series.iloc[:n].mean()
-            
-            # 从第 n 天开始 EWM 递推
-            ewm_part = series.iloc[n:].ewm(alpha=1/n, adjust=False).mean()
-            
-            # 合并：前 n 天用 SMA 种子填充，之后用 EWM
-            result = pd.Series(index=series.index, dtype=float)
-            result.iloc[:n] = sma_seed
-            result.iloc[n:] = ewm_part
-            
-            return result
-        
-        avg_gain = _wilder_smoothing(gain, period)
-        avg_loss = _wilder_smoothing(loss, period)
+        # Wilder 标准 RSI 计算（调用模块级函数）
+        avg_gain = _wilder_smoothing_rsi(gain, period)
+        avg_loss = _wilder_smoothing_rsi(loss, period)
         
         # 边界处理：avg_loss 接近零时
         # 防御性代码：使用 .abs() 防止数值误差产生负值
