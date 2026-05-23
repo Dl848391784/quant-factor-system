@@ -52,22 +52,23 @@ def _calc_delta(series: pd.Series) -> pd.Series:
     return series.diff()
 
 
-def _calc_rolling_mean(series: pd.Series, window: int) -> pd.Series:
-    """计算滚动均值（groupby transform 专用，显式传参避免闭包）
+def _calc_ewm_mean(series: pd.Series, alpha: float) -> pd.Series:
+    """计算 Wilder 平滑均值（groupby transform 专用，显式传参避免闭包）
     
     Args:
         series: 单资产的序列（gain 或 loss）
-        window: 滚动窗口期
+        alpha: EWM 平滑系数，标准 RSI 使用 alpha=1/n
     
     Returns:
-        滚动均值序列（前 window-1 天为 NaN）
+        Wilder 平滑均值序列（第一天为 NaN，之后累积计算）
     
     Note:
-        - min_periods=window 确保只有足够历史数据时才计算
-        - 前 window-1 天为 NaN，无法计算有效均值
-        - 例如 window=6，需要至少 6 天数据才能产生第一个有效结果
+        - Wilder (1978) 使用 EWM 平滑而非 SMA
+        - EWM 累积计算：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
+        - 第一天使用当天的 gain/loss 作为初始值
+        - 相比 SMA，EWM 对近期数据更敏感，更符合 RSI 标准
     """
-    return series.rolling(window=window, min_periods=window).mean()
+    return series.ewm(alpha=alpha, adjust=False).mean()
 
 
 @dataclass
@@ -87,9 +88,41 @@ class RSILayerConfig(LayerConfigBase):
     long_layers: List[int] = field(default_factory=lambda: [1, 2])
     short_layers: List[int] = field(default_factory=lambda: [3, 4])
     
+    # ========== 策略说明（均值回归）==========
+    # RSI 经典均值回归策略：
+    # - RSI < 30（超卖）→ 价格可能反弹，做多（Layer1）
+    # - RSI > 70（超买）→ 价格可能回落，做空（Layer4）
+    # 
+    # Layer2/Layer3 扩展说明：
+    # - Layer2（30≤RSI<50，偏弱）→ 偏离中性偏弱，可能反弹，做多
+    # - Layer3（50≤RSI<70，偏强）→ 偏离中性偏强，可能回落，做空
+    # 
+    # factor_direction='negative' 意味着：
+    # - 低 RSI（超卖/偏弱）→ 做多（long_layers=[1,2]）
+    # - 高 RSI（超买/偏强）→ 做空（short_layers=[3,4]）
+    # 
+    # 注意：这是均值回归策略，而非趋势跟随策略。
+    # 趋势跟随策略会在 RSI 50~70（上涨趋势延续）时做多，
+    # 但均值回归策略认为偏离中性后可能回归，故做空。
+    # 若需趋势跟随策略，请调整 factor_direction='positive'。
+    
     # layer_threshold_desc 与 thresholds 对应（4层）
     # 格式遵循 MODULE.md 第451行规范：完整区间 [lower, upper)，必须包含下界
     # 最大边界使用 ≥，说明越界值处理
+    #
+    # runner 分层逻辑说明（fixed_threshold 模式）：
+    # - 低于最小阈值（RSI<0）→ 归入 Layer1（边界处理）
+    # - 边界内循环归层：
+    #   - Layer1: [0, 30) 区间（0 ≤ RSI < 30）
+    #   - Layer2: [30, 50) 区间（30 ≤ RSI < 50）
+    #   - Layer3: [50, 70) 区间（50 ≤ RSI < 70）
+    #   - Layer4: [70, 100] 区间（最后一层右闭：70 ≤ RSI ≤ 100）
+    # - 高于最大阈值（RSI>100）→ 归入 Layer4（边界处理）
+    #
+    # 关键边界点说明：
+    # - RSI=30 → 归入 Layer2（runner 使用 [30,50) 区间，左闭右开）
+    # - RSI=70 → 归入 Layer4（runner 最后一层右闭：[70,100]）
+    # - 与 layer_names 描述一致，不存在"碰巧正确"问题
     layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {
         '1': 'RSI < 30 (含越界值<0，超卖层，做多)',   # 含越界值 RSI < 0
         '2': '30 ≤ RSI < 50 (偏弱层，做多)',
@@ -127,11 +160,10 @@ def calculate_rsi(
     df = df.sort_values(['asset', 'date'])
     
     # 使用独立函数替代 lambda 闭包（遵循 MODULE.md 第789行规范）
-    calc_delta = _calc_delta
-    calc_avg = partial(_calc_rolling_mean, window=n)
+    calc_avg = partial(_calc_ewm_mean, alpha=1/n)  # Wilder 平滑：alpha=1/n
     
-    # 计算价格变化
-    df['delta'] = df.groupby('asset')['close'].transform(calc_delta)
+    # 计算价格变化（直接使用独立函数）
+    df['delta'] = df.groupby('asset')['close'].transform(_calc_delta)
     
     # 分离上涨和下跌（使用 Series.where）
     df['gain'] = df['delta'].where(df['delta'] > 0, 0)
@@ -142,26 +174,55 @@ def calculate_rsi(
     df['avg_loss'] = df.groupby('asset')['loss'].transform(calc_avg)
     
     # ========== 边界处理：avg_loss 接近零时 ==========
-    # avg_loss 接近零时，RS → ∞，RSI → 100（超买）
-    # 使用 EPSILON 判断避免浮点精度问题
+    # avg_loss 接近零时的 RSI 计算（遵循 Wilder 1978 标准）
+    # 
+    # 边界情况分类：
+    # 1. avg_loss > EPSILON 且 avg_gain > 0: 正常计算 RS，RSI ∈ [0, 100]
+    # 2. avg_loss > EPSILON 且 avg_gain = 0: RS = 0，RSI = 0（超卖）
+    # 3. avg_loss = 0 且 avg_gain > 0: RS → ∞，RSI = 100（超买）
+    # 4. avg_loss = 0 且 avg_gain = 0: 无涨无跌，RSI = 50（中性）
+    #    - 场景：连续多天价格不变（delta=0）
+    #    - gain=0 且 loss=0，导致 avg_gain=0 且 avg_loss=0
+    #    - 此时 RSI 应为 50（无涨无跌），而非 100（超买）
+    #
+    # delta=0 归属说明：
+    # - delta=0（价格不变）时，gain=0 且 loss=0
+    # - 这是正确的处理：既不是上涨也不是下跌
+    # - 但连续多天 delta=0 会累积导致 avg_gain=0 且 avg_loss=0
+    
     zero_loss_mask = (df['avg_loss'].notna()) & (df['avg_loss'].abs() < EPSILON)
-    if zero_loss_mask.sum() > 0 and log_handler:
+    zero_gain_mask = (df['avg_gain'].notna()) & (df['avg_gain'].abs() < EPSILON)
+    
+    # 同时接近零：avg_gain=0 且 avg_loss=0 → RSI=50
+    both_zero_mask = zero_loss_mask & zero_gain_mask
+    if both_zero_mask.sum() > 0 and log_handler:
+        log_handler.info(
+            "avg_gain=avg_loss=0 的记录数: %d (%.2f%%)，RSI 设为 50（无涨无跌）",
+            both_zero_mask.sum(), both_zero_mask.sum() / len(df) * 100
+        )
+    
+    # 只有 avg_loss 接近零（avg_gain > 0）: RSI=100（超买）
+    only_zero_loss_mask = zero_loss_mask & ~zero_gain_mask
+    if only_zero_loss_mask.sum() > 0 and log_handler:
         log_handler.warning(
-            "avg_loss 接近零的记录数: %d (%.2f%%)，RSI 设为 100",
-            zero_loss_mask.sum(), zero_loss_mask.sum() / len(df) * 100
+            "avg_loss 接近零但 avg_gain>0 的记录数: %d (%.2f%%)，RSI 设为 100（超买）",
+            only_zero_loss_mask.sum(), only_zero_loss_mask.sum() / len(df) * 100
         )
     
     # 计算 RS 和 RSI
     # avg_loss > EPSILON: 正常计算 RS
-    # avg_loss <= EPSILON: RS = inf, RSI = 100
+    # avg_loss <= EPSILON: RS = inf（当 avg_gain > 0）或 0（当 avg_gain = 0）
     df['rs'] = df['avg_gain'] / df['avg_loss'].where(
         df['avg_loss'] > EPSILON,
-        EPSILON  # 避免 division by zero
+        EPSILON  # 避免 division by zero，但会被后续 mask 覆盖
     )
     df['rsi'] = 100 - (100 / (1 + df['rs']))
     
-    # avg_loss <= EPSILON 时强制设置 RSI = 100
-    df.loc[zero_loss_mask, 'rsi'] = 100
+    # 边界处理覆盖
+    # avg_loss=0 且 avg_gain>0 → RSI=100（超买）
+    df.loc[only_zero_loss_mask, 'rsi'] = 100
+    # avg_loss=0 且 avg_gain=0 → RSI=50（中性）
+    df.loc[both_zero_mask, 'rsi'] = 50
     
     # ========== 因子值统计（正常业务场景记录）==========
     # RSI < 0: 计算误差导致越界，归入 Layer 1（runner 边界处理）
