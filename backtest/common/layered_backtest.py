@@ -24,7 +24,7 @@ from typing import Dict, List, Optional, Tuple, Any
 import warnings
 
 # 导入公共日志模块（遵循 PROJECT.md 强制复用规范）
-from factor_ic.common.logger_config import get_logger
+from backtest.common.logger_config import get_logger
 
 logger = get_logger(__name__)
 

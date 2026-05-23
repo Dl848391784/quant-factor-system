@@ -26,8 +26,8 @@ from backtest.common.layered_backtest_runner import (
     run_layered_backtest,
     LayerConfigBase
 )
-from factor_ic.common.logger_config import get_logger
-from factor_ic.common.data_loader import DEFAULT_CACHE_DIR
+from backtest.common.logger_config import get_logger
+from backtest.common.data_loader import DEFAULT_CACHE_DIR
 
 logger = get_logger(__name__)
 

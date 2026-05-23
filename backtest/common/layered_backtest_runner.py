@@ -48,8 +48,8 @@ from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 
 # 导入公共模块
-from factor_ic.common.logger_config import get_logger
-from factor_ic.common.convert_types import convert_to_native_types
+from backtest.common.logger_config import get_logger
+from backtest.common.convert_types import convert_to_native_types
 from backtest.common.layered_backtest import LayeredBacktestEngine
 
 

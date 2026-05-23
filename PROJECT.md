@@ -52,6 +52,24 @@ factor_ic_analyzer/
 2. factor_ic 读取 cache → 计算 IC → 输出 result
 3. backtest 读取 IC 结果 → 分层回测
 
+**模块边界规范（2026-05-23新增）：**
+
+```
+模块只能复用自己目录下的 common 模块，禁止跨模块复用。
+
+✓ factor_ic 脚本复用 factor_ic/common/
+✓ backtest 脚本复用 backtest/common/
+✗ factor_ic 脚本复用 backtest/common/（禁止）
+✗ backtest 脚本复用 factor_ic/common/（禁止）
+
+如果需要复用其他模块的功能，将代码复制到本模块的 common/ 目录下。
+```
+
+**原因：**
+- 模块边界清晰，便于独立测试和迁移
+- 避免跨模块依赖导致的耦合问题
+- 每个模块可以独立演进
+
 ---
 
 ## 模块规范文件

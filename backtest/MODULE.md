@@ -42,15 +42,21 @@ backtest 模块负责对因子 IC 结果进行分层回测，评估因子的实�
 
 ## 公共模块复用
 
-**遵循 PROJECT.md 强制复用规范（MODULE.md 第X-Y行）。**
+**遵循 PROJECT.md 模块边界规范：只复用 backtest/common/ 下的模块。**
 
 必须复用的公共模块：
 | 功能 | 公共模块路径 | 说明 |
 |------|-------------|------|
-| 类型转换 | `factor_ic.common.convert_types` | numpy/pandas → Python 原生类型 |
-| 日志配置 | `factor_ic.common.logger_config` | get_logger 函数 |
+| 类型转换 | `backtest.common.convert_types` | numpy/pandas → Python 原生类型 |
+| 日志配置 | `backtest.common.logger_config` | get_logger 函数 |
 | 分层回测引擎 | `backtest.common.layered_backtest` | LayeredBacktestEngine 类 |
-| **分层回测入口** | `backtest.common.layered_backtest_runner` | run_layered_backtest 公共入口 |
+| 分层回测入口 | `backtest.common.layered_backtest_runner` | run_layered_backtest 公共入口 |
+
+**禁止跨模块复用：**
+```
+✗ from factor_ic.common.xxx  # 禁止
+✓ from backtest.common.xxx   # 正确
+```
 
 ---
 
