@@ -9,7 +9,7 @@
 
 作者: 云瑶
 创建日期: 2026-05-19
-修订日期: 2026-05-23（修复2个代码bug + 补充MODULE.md规范）
+修订日期: 2026-05-23（修复6个代码bug + 补充MODULE.md规范）
 """
 
 import sys
@@ -98,12 +98,13 @@ class LayeredBacktestEngine:
         # 获取日期列表
         self.dates = sorted(self.merged_df[self.date_col].unique())
         
-        # 内存优化
+        # 内存优化（仅因子列用 float32，收益列保持 float64 防精度损失）
+        # 收益列用于累计收益计算 (1+r).cumprod()，float32 精度约7位，长时间序列误差累积
         self.merged_df[self.asset_col] = self.merged_df[self.asset_col].astype('category')
         if self.factor_col in self.merged_df.columns:
             self.merged_df[self.factor_col] = self.merged_df[self.factor_col].astype('float32')
         if self.return_col in self.merged_df.columns:
-            self.merged_df[self.return_col] = self.merged_df[self.return_col].astype('float32')
+            self.merged_df[self.return_col] = self.merged_df[self.return_col].astype('float64')
     
     def run(
         self,
@@ -567,10 +568,14 @@ class LayeredBacktestEngine:
             # 夏普比率
             sharpe_ratio = annual_return / annual_volatility if annual_volatility > 0 else np.nan
             
-            # 最大回撤
+            # 最大回撤（保护除零风险：若净值归零，rolling_max 含 0，产生 inf）
             cum_series = (1 + valid_returns).cumprod()
             rolling_max = cum_series.expanding().max()
-            drawdowns = (cum_series - rolling_max) / rolling_max
+            # 除零保护：若 rolling_max == 0，drawdown = 0（已完全亏损，后续收益无法弥补）
+            with np.errstate(divide='ignore', invalid='ignore'):
+                drawdowns = (cum_series - rolling_max) / rolling_max
+                drawdowns = np.where(rolling_max == 0, 0, drawdowns)  # 除零时回撤为0
+            drawdowns = pd.Series(drawdowns, index=cum_series.index)
             max_drawdown = drawdowns.min()
             
             # 换手率
@@ -721,11 +726,13 @@ class LayeredBacktestEngine:
         if not long_short_stats:
             return {}
         
-        long_turnover = long_short_stats.get('avg_turnover_long', 0)
-        short_turnover = long_short_stats.get('avg_turnover_short', 0)
+        # 安全取值：键存在但值为None时，get('key', 0)返回None，后续乘法抛TypeError
+        # 正确写法：val or 0（键缺失或值为None都返回0）
+        long_turnover = long_short_stats.get('avg_turnover_long') or 0
+        short_turnover = long_short_stats.get('avg_turnover_short') or 0
         
-        long_daily_ret = long_short_stats.get('long_return_daily', 0)
-        short_daily_ret = long_short_stats.get('short_return_daily', 0)
+        long_daily_ret = long_short_stats.get('long_return_daily') or 0
+        short_daily_ret = long_short_stats.get('short_return_daily') or 0
         
         # 多头交易成本（单边）
         long_daily_cost = long_turnover * trade_cost_rate
@@ -804,12 +811,20 @@ class LayeredBacktestEngine:
         
         ls_stats = result.get('long_short', {})
         if ls_stats:
-            lines.append(f"多头日均收益: {ls_stats.get('long_return_daily', 0)*100:.4f}%")
-            lines.append(f"多头年化收益: {ls_stats.get('long_return_annual', 0)*100:.2f}%")
-            lines.append(f"空头日均收益: {ls_stats.get('short_return_daily', 0)*100:.4f}%")
-            lines.append(f"空头年化收益: {ls_stats.get('short_return_annual', 0)*100:.2f}%")
-            lines.append(f"多空日均收益: {ls_stats.get('long_short_return_daily', 0)*100:.4f}%")
-            lines.append(f"多空年化收益: {ls_stats.get('long_short_return_annual', 0)*100:.2f}%")
+            # 安全取值：键存在但值为None时，get('key', 0)返回None，后续乘法抛TypeError
+            # 正确写法：val or 0（键缺失或值为None都返回0）
+            long_daily = ls_stats.get('long_return_daily') or 0
+            long_annual = ls_stats.get('long_return_annual') or 0
+            short_daily = ls_stats.get('short_return_daily') or 0
+            short_annual = ls_stats.get('short_return_annual') or 0
+            ls_daily = ls_stats.get('long_short_return_daily') or 0
+            ls_annual = ls_stats.get('long_short_return_annual') or 0
+            lines.append(f"多头日均收益: {long_daily*100:.4f}%")
+            lines.append(f"多头年化收益: {long_annual*100:.2f}%")
+            lines.append(f"空头日均收益: {short_daily*100:.4f}%")
+            lines.append(f"空头年化收益: {short_annual*100:.2f}%")
+            lines.append(f"多空日均收益: {ls_daily*100:.4f}%")
+            lines.append(f"多空年化收益: {ls_annual*100:.2f}%")
             # 夏普比率可能为 None（volatility=0 时），需单独处理避免 TypeError
             sharpe = ls_stats.get('long_short_sharpe')
             sharpe_str = f"{sharpe:.2f}" if sharpe is not None else "N/A"
@@ -856,13 +871,21 @@ class LayeredBacktestEngine:
         
         cost = result.get('trading_cost_analysis', {})
         if cost:
-            lines.append(f"单边交易成本率: {cost['cost_rate']*100:.2f}%")
-            lines.append(f"多头日均换手率: {cost['long_turnover']*100:.2f}%")
-            lines.append(f"空头日均换手率: {cost['short_turnover']*100:.2f}%")
-            lines.append(f"多头日均成本: {cost['long_daily_cost']*100:.4f}%")
-            lines.append(f"空头日均成本: {cost['short_daily_cost']*100:.4f}%")
-            lines.append(f"多空毛收益: {cost['long_short_gross_daily']*100:.4f}%")
-            lines.append(f"多空净收益: {cost['long_short_net_daily']*100:.4f}%")
+            # 安全取值：键存在但值为None时，get('key', 0)返回None，后续乘法抛TypeError
+            cost_rate = cost.get('cost_rate') or 0
+            long_turnover = cost.get('long_turnover') or 0
+            short_turnover = cost.get('short_turnover') or 0
+            long_daily_cost = cost.get('long_daily_cost') or 0
+            short_daily_cost = cost.get('short_daily_cost') or 0
+            ls_gross = cost.get('long_short_gross_daily') or 0
+            ls_net = cost.get('long_short_net_daily') or 0
+            lines.append(f"单边交易成本率: {cost_rate*100:.2f}%")
+            lines.append(f"多头日均换手率: {long_turnover*100:.2f}%")
+            lines.append(f"空头日均换手率: {short_turnover*100:.2f}%")
+            lines.append(f"多头日均成本: {long_daily_cost*100:.4f}%")
+            lines.append(f"空头日均成本: {short_daily_cost*100:.4f}%")
+            lines.append(f"多空毛收益: {ls_gross*100:.4f}%")
+            lines.append(f"多空净收益: {ls_net*100:.4f}%")
         else:
             # 空数据提示
             lines.append("⚠ 无交易成本数据：缺少有效的多空组合换手率数据")

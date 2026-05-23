@@ -173,6 +173,31 @@ if __name__ == '__main__':
 
 ---
 
+## 统计指标计算规范
+
+**夏普比率（简化版）：**
+- 公式：`sharpe = annual_return / annual_volatility`
+- 说明：简化夏普（rf=0），未扣除无风险收益率
+- 适用场景：内部因子对比（相对排序），不用于绝对收益评估
+- 若需标准夏普，应改为 `(annual_return - risk_free_rate) / annual_volatility`
+
+**最大回撤（除零保护）：**
+- 公式：`drawdown = (cum_series - rolling_max) / rolling_max`
+- 保护：若 `rolling_max == 0`（净值归零），drawdown 设为 0
+- 原因：除零会产生 inf 或 NaN，破坏后续统计
+
+**数据类型规范：**
+- 因子列：`float32`（仅用于排序，精度要求低）
+- 收益列：`float64`（用于累计收益 `(1+r).cumprod()`，长时间序列误差累积）
+- 原因：float32 精度约7位有效数字，连乘累积收益误差会放大
+
+**字典取值规范（防 None 运算）：**
+- 错误写法：`val = dict.get('key', 0)` — 键存在但值为 None 时返回 None
+- 正确写法：`val = dict.get('key') or 0` — 键缺失或值为 None 都返回 0
+- 原因：`None * 100` 会抛 TypeError
+
+---
+
 ## 多空组合换手率计算规则
 
 **计算逻辑：先按日期分组取均值，再整体平均**
