@@ -2,7 +2,7 @@
 
 > 本文档定义 backtest/ 目录下分层回测脚本的开发规范。
 > 创建时间: 2026-05-19
-> 版本: v0.8（同步 factor_ic 测试用例、输出目录、输出结构一致性规范）
+> 版本: v0.9（新增强制复用规范、模块边界规范）
 > 修订日期: 2026-05-23
 
 ---
@@ -31,32 +31,48 @@ backtest 模块负责对因子 IC 结果进行分层回测，评估因子的实�
 
 ## 日志规范
 
-**遵循 PROJECT.md 项目级日志规范（第783-857行）。**
+**遵循 PROJECT.md 项目级日志规范。**
 
 核心要点：
 - 使用 Python 标准库 `logging` 模块
-- 导入方式：`from factor_ic.common.logger_config import get_logger`
+- 导入方式：`from backtest.common.logger_config import get_logger`
 - 日志路径：`backtest/logs/*.log`
 
 ---
 
-## 公共模块复用
+## 公共模块复用（强制）
 
 **遵循 PROJECT.md 模块边界规范：只复用 backtest/common/ 下的模块。**
 
-必须复用的公共模块：
+### 核心原则
+
+**能用公共模块的一定复用，不要自己再实现。**
+
+```
+✓ 必须复用 backtest/common/ 下的模块
+✗ 禁止手写数据加载、结果保存、CLI 入口逻辑
+✗ 禁止跨模块复用 factor_ic/common/
+```
+
+### 必须复用的公共模块
+
 | 功能 | 公共模块路径 | 说明 |
 |------|-------------|------|
 | 类型转换 | `backtest.common.convert_types` | numpy/pandas → Python 原生类型 |
 | 日志配置 | `backtest.common.logger_config` | get_logger 函数 |
 | 分层回测引擎 | `backtest.common.layered_backtest` | LayeredBacktestEngine 类 |
 | 分层回测入口 | `backtest.common.layered_backtest_runner` | run_layered_backtest 公共入口 |
+| 数据路径 | `backtest.common.data_loader` | DEFAULT_CACHE_DIR |
 
-**禁止跨模块复用：**
-```
-✗ from factor_ic.common.xxx  # 禁止
-✓ from backtest.common.xxx   # 正确
-```
+### 禁止手写的逻辑
+
+| 逻辑 | 正确方式 | 错误方式 |
+|------|---------|---------|
+| 数据加载 | `run_layered_backtest()` 自动加载 | 手写 gzip.open + json.load |
+| 结果保存 | `run_layered_backtest()` 自动保存 | 手写 json.dump |
+| CLI 入口 | `create_cli_entrypoint()` | 手写 argparse + 异常处理 |
+| Config 基类 | 继承 `LayerConfigBase` | 手写 property 方法 |
+| 分层回测 | 调用 `LayeredBacktestEngine` | 手写分层逻辑 |
 
 ---
 
