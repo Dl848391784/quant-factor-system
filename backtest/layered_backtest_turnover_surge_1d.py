@@ -14,6 +14,7 @@
 """
 
 import sys
+import numpy as np
 import pandas as pd
 from functools import partial
 from pathlib import Path
@@ -27,7 +28,6 @@ from backtest.common.layered_backtest_runner import (
     LayerConfigBase
 )
 from backtest.common.logger_config import get_logger
-from backtest.common.data_loader import DEFAULT_CACHE_DIR
 
 logger = get_logger(__name__)
 
@@ -50,6 +50,11 @@ def _calc_avg_turnover(series: pd.Series, window: int) -> pd.Series:
     Note:
         - 使用 shift(1) 排除当日换手率，避免未来数据泄露
         - min_periods=window 确保只有足够历史数据时才计算
+        - 有效数据从第 window+1 行才开始：
+          * 第 0 行 shift 产生 NaN
+          * 第 1~window 行凑不够 window 个非 NaN
+          * 第 window+1 行才有第一个有效结果
+          * 例如 window=5，需要至少 6 行原始数据才能产生第一个有效结果
     """
     return series.shift(1).rolling(window, min_periods=window).mean()
 
@@ -129,7 +134,8 @@ def calculate_turnover_surge(
             zero_avg_mask.sum(), zero_avg_mask.sum() / len(df) * 100
         )
     
-    safe_avg = avg_turnover.where(~zero_avg_mask, pd.NA)  # 用 pd.NA 替代 np.nan
+    # 使用 np.nan 替代 pd.NA（float64 Series 更兼容）
+    safe_avg = avg_turnover.where(~zero_avg_mask, np.nan)
     df['turnover_surge'] = df['turnover_rate'] / safe_avg
     
     # 边界处理：负值标记为 NaN（换手率突增应为正）
@@ -139,11 +145,19 @@ def calculate_turnover_surge(
             "turnover_surge 负值记录数: %d (%.2f%%)，标记为 NaN",
             negative_mask.sum(), negative_mask.sum() / len(df) * 100
         )
-        df.loc[negative_mask, 'turnover_surge'] = pd.NA  # 用 pd.NA 替代 np.nan
+        df.loc[negative_mask, 'turnover_surge'] = np.nan  # 使用 np.nan 替代 pd.NA
     
     # 因子数据范围校验（遵循 MODULE.md 第505行规范）
-    surge_min = df['turnover_surge'].min()
-    surge_max = df['turnover_surge'].max()
+    # 全 NaN 防御：检查是否有有效数据
+    surge_values = df['turnover_surge'].dropna()
+    if len(surge_values) == 0:
+        if log_handler:
+            log_handler.warning("turnover_surge 全部为 NaN，无法计算范围")
+        surge_min, surge_max = np.nan, np.nan
+    else:
+        surge_min = surge_values.min()
+        surge_max = surge_values.max()
+    
     if log_handler:
         log_handler.info("turnover_surge 因子范围: %.2f ~ %.2f", surge_min, surge_max)
     
@@ -179,7 +193,9 @@ def main():
             factor_col='turnover_surge',
             config=TurnoverSurgeLayerConfig(),
             factor_calculator=factor_calc,
-            additional_data_files={'turnover_rate': str(DEFAULT_CACHE_DIR / 'turnover_rate_data.json.gz')},
+            additional_data_files={
+                'turnover_rate': str(Path(args.cache_dir) / 'turnover_rate_data.json.gz')
+            },
             required_factor_cols=['turnover_rate', 'close'],
             cache_dir=args.cache_dir,
             output_dir=args.output_dir,
