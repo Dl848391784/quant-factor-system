@@ -36,7 +36,8 @@ __all__ = [
 ]
 
 # 模块级 fallback logger（遵循 PROJECT.md 第783-857行规范）
-_MODULE_LOGGER = None
+# 直接初始化，避免延迟初始化的多线程安全问题
+_MODULE_LOGGER = logging.getLogger('data_fetchers.common.cache_manager')
 
 # 大文件阈值（MB）
 _LARGE_FILE_THRESHOLD_MB = 100
@@ -54,7 +55,7 @@ def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger
     获取 logger，遵循 PROJECT.md 公共模块日志规范
     
     公共模块接收 logger 参数，调用方传入以追溯调用方。
-    不传 logger 时使用模块级 fallback logger。
+    不传 logger 时使用模块级 fallback logger（模块加载时已初始化）。
     
     Args:
         logger: 调用方传入的 logger（可选）
@@ -62,11 +63,8 @@ def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger
     Returns:
         Logger 对象
     """
-    global _MODULE_LOGGER
     if logger is not None:
         return logger
-    if _MODULE_LOGGER is None:
-        _MODULE_LOGGER = logging.getLogger('data_fetchers.common.cache_manager')
     return _MODULE_LOGGER
 
 
@@ -158,7 +156,7 @@ def _read_cache_impl(
 
 def _write_cache_impl(
     path: Path,
-    data: Dict[str, Any],
+    data: Any,
     use_gzip: bool,
     ensure_dir: bool,
     logger: logging.Logger,
@@ -329,6 +327,7 @@ def append_to_cache(
     增量追加数据到缓存
     
     读取现有缓存，追加新数据到指定 key 的列表中，重新写入。
+    文件不存在时创建新缓存。
     
     Args:
         path: 缓存文件路径，支持 Path 或 str
@@ -338,6 +337,12 @@ def append_to_cache(
         
     Returns:
         int: 追加后的总数据量
+        
+    Raises:
+        ValueError: JSON 解析失败（文件存在但损坏）
+        PermissionError: 无权限读取或写入文件
+        OSError: 磁盘空间不足或文件系统错误
+        RuntimeError: 未知错误
     """
     path = Path(path)  # 统一转换为 Path
     logger = get_module_logger(logger)
@@ -370,10 +375,10 @@ def append_to_cache(
     result = {key: merged_data}
     
     # 保留其他字段（如 dates）
-    if path.exists():
-        for k, v in existing.items():
-            if k != key:
-                result[k] = v
+    # existing 在第 348 行已处理：文件不存在时为 {}
+    for k, v in existing.items():
+        if k != key:
+            result[k] = v
     
     # 写入缓存
     _write_cache_impl(path, result, use_gzip, ensure_dir=True, logger=logger)
@@ -527,11 +532,16 @@ def delete_cache(
         logger: 调用方传入的 logger（可选）
         
     Returns:
-        bool: 是否成功删除（文件不存在时返回 False）
+        bool: True 表示成功删除，False 表示文件不存在
         
     Example:
+        # 删除成功
         if delete_cache('data.json.gz'):
             print("缓存已删除")
+        
+        # 文件不存在
+        if not delete_cache('old_cache.json.gz'):
+            print("文件不存在，无需删除")
     """
     path = Path(path)
     logger = get_module_logger(logger)
@@ -574,88 +584,90 @@ if __name__ == '__main__':
     # 测试路径直接定义
     test_dir = Path(__file__).parent.parent.parent / 'cache' / 'test'
     test_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 定义所有测试文件路径（便于统一清理）
     test_path = test_dir / 'test_cache.json.gz'
-    
-    test_data = {'test': [1, 2, 3], 'dates': ['2024-01-01']}
-    
-    test_logger.info("写入测试缓存...")
-    write_gzip_cache(test_path, test_data, logger=test_logger)
-    
-    test_logger.info("读取测试缓存...")
-    loaded = read_gzip_cache(test_path, logger=test_logger)
-    test_logger.info("读取结果: %s", loaded)
-    
-    test_logger.info("获取缓存信息...")
-    info = get_cache_file_info(test_path, logger=test_logger)
-    test_logger.info("文件信息: %s", info)
-    
-    # 测试统一 API
-    test_logger.info("测试统一缓存 API...")
     test_unified_path_gz = test_dir / 'test_unified.json.gz'
     test_unified_path_json = test_dir / 'test_unified.json'
-    
-    write_cache(test_unified_path_gz, {'gzip': True}, logger=test_logger)
-    write_cache(test_unified_path_json, {'gzip': False}, logger=test_logger)
-    
-    gzip_data = read_cache(test_unified_path_gz, logger=test_logger)
-    json_data = read_cache(test_unified_path_json, logger=test_logger)
-    test_logger.info("gzip 数据: %s", gzip_data)
-    test_logger.info("json 数据: %s", json_data)
-    
-    # 测试新增参数
-    test_logger.info("测试新增参数（压缩级别 + JSON 格式选项）...")
     test_options_path = test_dir / 'test_options.json.gz'
     test_readable_path = test_dir / 'test_readable.json'
-    
-    # 压缩级别测试（级别 1，最快）
-    write_gzip_cache(test_options_path, {'compresslevel': 1}, compresslevel=1, logger=test_logger)
-    test_logger.info("压缩级别 1 写入成功")
-    
-    # 可读格式测试（indent=2）
-    write_json_cache(test_readable_path, {'key1': 'value1', 'key2': 'value2'}, json_indent=2, json_sort_keys=True, logger=test_logger)
-    test_logger.info("可读格式写入成功")
-    
-    # 验证可读格式
-    with open(test_readable_path, 'r') as f:
-        readable_content = f.read()
-    test_logger.info("可读格式内容:\n%s", readable_content)
-    
-    # 测试辅助函数
-    test_logger.info("测试辅助函数...")
-    test_logger.info("cache_exists(test_unified.json.gz): %s", cache_exists(test_unified_path_gz))
-    test_logger.info("cache_exists(not_exist.json): %s", cache_exists(test_dir / 'not_exist.json'))
-    
-    test_logger.info("delete_cache(test_unified.json.gz): %s", delete_cache(test_unified_path_gz, logger=test_logger))
-    test_logger.info("delete_cache(not_exist.json): %s", delete_cache(test_dir / 'not_exist.json', logger=test_logger))
-    
-    # 测试 append_to_cache
-    test_logger.info("测试 append_to_cache...")
     test_append_path = test_dir / 'test_append.json'
-    append_to_cache(test_append_path, [1, 2], key='data', logger=test_logger)
-    append_to_cache(test_append_path, [3, 4], key='data', logger=test_logger)
-    append_result = read_json_cache(test_append_path, logger=test_logger)
-    test_logger.info("追加结果: %s", append_result)
-    
-    # 测试错误场景
-    test_logger.info("测试错误场景...")
-    try:
-        read_gzip_cache(test_dir / 'not_exist.json.gz', logger=test_logger)
-    except FileNotFoundError as e:
-        test_logger.info("捕获预期异常 FileNotFoundError: %s", e)
-    
-    # 测试防御性编程（数据结构异常）
-    test_logger.info("测试防御性编程...")
     test_invalid_path = test_dir / 'test_invalid.json'
-    write_json_cache(test_invalid_path, {'data': {'nested': 'dict'}}, logger=test_logger)
-    append_to_cache(test_invalid_path, [5, 6], key='data', logger=test_logger)
-    invalid_result = read_json_cache(test_invalid_path, logger=test_logger)
-    test_logger.info("异常数据修复结果: %s", invalid_result)
     
-    # 清理测试文件
-    test_path.unlink()
-    test_unified_path_json.unlink()
-    test_options_path.unlink()
-    test_readable_path.unlink()
-    test_append_path.unlink()
-    test_invalid_path.unlink()
-    test_logger.info("测试完成，已清理测试文件")
+    # 使用 try/finally 确保测试文件清理（健壮性）
+    try:
+        test_data = {'test': [1, 2, 3], 'dates': ['2024-01-01']}
+        
+        test_logger.info("写入测试缓存...")
+        write_gzip_cache(test_path, test_data, logger=test_logger)
+        
+        test_logger.info("读取测试缓存...")
+        loaded = read_gzip_cache(test_path, logger=test_logger)
+        test_logger.info("读取结果: %s", loaded)
+        
+        test_logger.info("获取缓存信息...")
+        info = get_cache_file_info(test_path, logger=test_logger)
+        test_logger.info("文件信息: %s", info)
+        
+        # 测试统一 API
+        test_logger.info("测试统一缓存 API...")
+        write_cache(test_unified_path_gz, {'gzip': True}, logger=test_logger)
+        write_cache(test_unified_path_json, {'gzip': False}, logger=test_logger)
+        
+        gzip_data = read_cache(test_unified_path_gz, logger=test_logger)
+        json_data = read_cache(test_unified_path_json, logger=test_logger)
+        test_logger.info("gzip 数据: %s", gzip_data)
+        test_logger.info("json 数据: %s", json_data)
+        
+        # 测试新增参数
+        test_logger.info("测试新增参数（压缩级别 + JSON 格式选项）...")
+        # 压缩级别测试（级别 1，最快）
+        write_gzip_cache(test_options_path, {'compresslevel': 1}, compresslevel=1, logger=test_logger)
+        test_logger.info("压缩级别 1 写入成功")
+        
+        # 可读格式测试（indent=2）
+        write_json_cache(test_readable_path, {'key1': 'value1', 'key2': 'value2'}, json_indent=2, json_sort_keys=True, logger=test_logger)
+        test_logger.info("可读格式写入成功")
+        
+        # 验证可读格式
+        with open(test_readable_path, 'r') as f:
+            readable_content = f.read()
+        test_logger.info("可读格式内容:\n%s", readable_content)
+        
+        # 测试辅助函数
+        test_logger.info("测试辅助函数...")
+        test_logger.info("cache_exists(test_unified.json.gz): %s", cache_exists(test_unified_path_gz))
+        test_logger.info("cache_exists(not_exist.json): %s", cache_exists(test_dir / 'not_exist.json'))
+        
+        test_logger.info("delete_cache(test_unified.json.gz): %s", delete_cache(test_unified_path_gz, logger=test_logger))
+        test_logger.info("delete_cache(not_exist.json): %s", delete_cache(test_dir / 'not_exist.json', logger=test_logger))
+        
+        # 测试 append_to_cache
+        test_logger.info("测试 append_to_cache...")
+        append_to_cache(test_append_path, [1, 2], key='data', logger=test_logger)
+        append_to_cache(test_append_path, [3, 4], key='data', logger=test_logger)
+        append_result = read_json_cache(test_append_path, logger=test_logger)
+        test_logger.info("追加结果: %s", append_result)
+        
+        # 测试错误场景
+        test_logger.info("测试错误场景...")
+        try:
+            read_gzip_cache(test_dir / 'not_exist.json.gz', logger=test_logger)
+        except FileNotFoundError as e:
+            test_logger.info("捕获预期异常 FileNotFoundError: %s", e)
+        
+        # 测试防御性编程（数据结构异常）
+        test_logger.info("测试防御性编程...")
+        write_json_cache(test_invalid_path, {'data': {'nested': 'dict'}}, logger=test_logger)
+        append_to_cache(test_invalid_path, [5, 6], key='data', logger=test_logger)
+        invalid_result = read_json_cache(test_invalid_path, logger=test_logger)
+        test_logger.info("异常数据修复结果: %s", invalid_result)
+        
+        test_logger.info("测试完成")
+    finally:
+        # 清理测试文件（finally 确保无论成功或失败都执行）
+        for test_file in [test_path, test_unified_path_json, test_options_path,
+                          test_readable_path, test_append_path, test_invalid_path]:
+            if test_file.exists():
+                test_file.unlink()
+        test_logger.info("已清理测试文件")

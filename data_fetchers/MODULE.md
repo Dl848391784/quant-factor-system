@@ -169,6 +169,71 @@ data_fetchers/
    - **测试用例版本同步**：v1.7 → v1.10
    - **流程文档更新**：版本历史 v1.11
 
+17. v2.14（2026-05-25 00:10）：
+   - **类型注解修复**：`_write_cache_impl` 参数 `data` 类型从 `Dict[str, Any]` 改为 `Any`（与实际实现一致）
+   - **冗余代码消除**：`append_to_cache` 移除第373行重复的 `path.exists()` 检查
+   - **规范补充**：新增"缓存文件格式限制"说明（必须是 JSON 格式）
+   - **修复原因**：代码审查发现类型注解与实现不一致、冗余检查
+
+18. v2.15（2026-05-25 00:30）：
+   - **线程安全修复**：`_MODULE_LOGGER` 改为模块加载时直接初始化（避免延迟初始化的多线程竞争）
+   - **docstring 补充 Raises**：`append_to_cache` 新增异常说明
+   - **文档示例完善**：`delete_cache` Example 补充文件不存在场景
+   - **测试清理健壮化**：`__main__` 使用 try/finally 确保测试文件清理
+   - **修复原因**：代码审查发现线程安全、文档完整性、测试健壮性问题
+
+19. v2.16（2026-05-25 01:00）：
+   - **http_client.py 优化**：遵循 PROJECT.md 公共模块规范
+   - **logger 参数化**：新增 `get_module_logger` 函数 + 所有函数接收 logger 参数
+   - **__all__ 导出**：明确定义 6 个公共 API
+   - **模块级导入**：`import time` 从函数内移至模块级
+   - **类型注解修复**：`Exception | None` → `Optional[Exception]`、`Dict` → `Dict[str, Any]`
+   - **docstring 补充**：新增 Raises 说明（TypeError、HTTPError、JSONDecodeError）
+   - **__main__ 日志规范**：print → logger + try/finally + Session.close()
+   - **修复原因**：公共模块规范合规化（与 cache_manager.py 保持一致）
+
+20. v2.17（2026-05-25 01:30）：
+   - **http_client.py 第二轮优化**：深度审查修复
+   - **异常处理精确化**：区分 HTTPError/Timeout/ConnectionError/JSONDecodeError，避免宽泛捕获
+   - **异常链保留**：RuntimeError 使用 `from last_error` 保留原始异常类型
+   - **便捷函数参数补全**：`create_eastmoney_session`/`create_sina_session` 新增 logger 参数
+   - **__all__ 导出补充**：新增 `get_module_logger`（与 cache_manager.py 一致）
+   - **timeout 类型注解扩展**：支持 `(connect_timeout, read_timeout)` 元组
+   - **Retry 参数重构**：提取公共参数 `retry_params`，减少 try/except 内重复代码
+   - **import json 补充**：request_with_retry 需要 JSONDecodeError
+   - **response 变量初始化**：避免 except 分支未绑定错误
+   - **修复原因**：异常处理类型不一致、类型注解不完整、API 参数缺失
+
+21. v2.18（2026-05-25 02:00）：
+   - **http_client.py 第三轮优化**：与 cache_manager.py 对比分析
+   - **docstring Example 补充**：4 个公共函数新增使用示例
+   - **返回类型注解修复**：`request_with_retry` 返回 `Dict[str, Any]` → `Any`（JSON 可为任意类型）
+   - **模块级常量补全**：新增 7 个 `_DEFAULT_*` 私有常量（保持风格一致）
+   - **请求头数据来源注释**：补充"浏览器开发者工具抓包，2026-05-24"和用途说明
+   - **__main__ 测试增强**：5 项测试覆盖（Session 创建、自定义配置、logger、常量）
+   - **函数默认参数重构**：使用 `_DEFAULT_*` 常量替代硬编码数字
+   - **修复原因**：文档示例缺失、类型注解不精确、常量风格不一致
+
+22. v2.19（2026-05-25 02:30）：
+   - **http_client.py 第四轮优化**：深度审查完善
+   - **模块注释版本历史**：新增 v1.0-v1.3 版本演进说明（与 cache_manager.py 一致）
+   - **get_module_logger Example 补充**：新增 fallback logger 和调用方 logger 示例
+   - **重试状态码常量定义**：新增 `_DEFAULT_RETRY_STATUS_CODES`（注释说明各状态码含义）
+   - **HTTP 方法参数扩展**：新增 `allowed_methods` 参数支持 POST 等方法重试
+   - **便捷函数 Raises 补充**：create_eastmoney_session/create_sina_session 新增异常说明
+   - **User-Agent 版本更新注释**：补充"每季度检查更新"提示
+   - **__main__ 测试扩展**：新增测试 6（allowed_methods 参数）+ 异常测试说明
+   - **修复原因**：版本历史缺失、重试方法硬编码、文档不完整
+
+23. v2.20（2026-05-25 03:00）：
+   - **http_client.py 第五轮优化**：修复 4 个关键问题
+   - **最后一次失败日志补全**：Timeout/ConnectionError 分支最后一次失败新增警告日志
+   - **request_with_retry 方法参数**：新增 `method` 参数支持 GET/POST/PUT/DELETE
+   - **退避策略文档化**：docstring 明确说明"线性递增退避策略"及适用场景
+   - **create_retry_session 默认 headers 修复**：默认 None（不再使用东财请求头），调用方必须显式传入
+   - **__main__ 测试扩展**：新增测试 7（headers=None）+ 测试 8（method 参数验证）
+   - **修复原因**：代码bug（日志缺失、默认headers不合理）、规范遗漏（方法参数缺失、退避策略未说明）
+
 ---
 
 ## 概述
@@ -267,6 +332,12 @@ stocks = load_main_board_stock_list()
 ### cache_manager.py 日志参数规范（2026-05-24 新增）
 
 **遵循 PROJECT.md 第783-857行规范，公共模块接收 logger 参数。**
+
+**缓存文件格式限制（2026-05-25 补充）：**
+- 缓存文件必须是 JSON 格式（gzip 压缩或非压缩）
+- `.gz` 文件必须是 gzip 压缩的 JSON，不能是纯 gzip 二进制文件
+- `read_cache`、`read_gzip_cache` 内部调用 `json.load()`，非 JSON 文件会抛 `ValueError`
+- 违反此限制会导致 JSON 解析失败
 
 **使用方式：**
 ```python
@@ -581,4 +652,4 @@ factor_df['middle'] = middle  # 成功赋值
 
 ---
 
-*最后更新: 2026-05-24 21:55*
+*最后更新: 2026-05-25 03:00*

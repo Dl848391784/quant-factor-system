@@ -60,6 +60,7 @@ from .stock_utils import (
 # http_client 需要 requests 模块，可选导入
 try:
     from .http_client import (
+        get_module_logger as http_get_module_logger,
         create_retry_session,
         create_eastmoney_session,
         create_sina_session,
@@ -71,6 +72,8 @@ try:
 except ImportError:
     _HTTP_CLIENT_AVAILABLE = False
     # 定义占位函数，避免导入报错
+    def http_get_module_logger(*args, **kwargs):
+        raise ImportError("http_client 需要 requests 模块，请安装: pip install requests")
     def create_retry_session(*args, **kwargs):
         raise ImportError("http_client 需要 requests 模块，请安装: pip install requests")
     def create_eastmoney_session(*args, **kwargs):
@@ -106,7 +109,7 @@ __all__ = [
     'get_cache_file_info',
     'cache_exists',
     'delete_cache',
-    # http_client
+    # http_client (注：get_module_logger 从 cache_manager 导入，http_get_module_logger 为内部别名)
     'create_retry_session',
     'create_eastmoney_session',
     'create_sina_session',
