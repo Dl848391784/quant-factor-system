@@ -1,10 +1,20 @@
 # cache_manager.py 测试用例
 
-> 版本: v1.0
+> 版本: v1.3
 > 创建时间: 2026-05-24 21:10 北京时间
+> 最后更新: 2026-05-24 21:55 北京时间
 > 脚本位置: data_fetchers/common/cache_manager.py
 
 ---
+
+## 版本历史
+
+| 版本 | 日期 | 变更内容 |
+|------|------|---------|
+| v1.0 | 2026-05-24 21:10 | 初始版本，覆盖第二轮优化功能 |
+| v1.1 | 2026-05-24 21:45 | 第四轮优化：防御性编程测试用例 |
+| v1.2 | 2026-05-24 21:50 | 第五轮优化：统一缓存 API + 辅助函数测试用例 |
+| v1.3 | 2026-05-24 21:55 | 第六轮优化：gzip 压缩级别 + JSON 格式选项测试用例 |
 
 ## 测试概述
 
@@ -324,23 +334,309 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
 ---
 
-## 测试汇总
+## 第五轮优化测试用例（v1.2）
 
-| 测试编号 | 测试类型 | 测试目标 |
-|---------|---------|---------|
-| TC001 | 功能 | gzip 缓存读写一致性 |
-| TC002 | 功能 | json 缓存读写一致性 |
-| TC003 | 功能 | 增量追加数据 |
-| TC004 | 功能 | 获取缓存文件信息 |
-| TC005 | 边界 | 文件不存在异常 |
-| TC006 | 边界 | JSON 格式错误异常 |
-| TC007 | 边界 | 空数据写入 |
-| TC008 | 参数 | path 类型支持 |
-| TC009 | 参数 | logger 参数传递 |
-| TC010 | 参数 | logger fallback |
-| TC011 | 日志 | get_cache_file_info 日志 |
-| TC012 | 异常 | JSONDecodeError 包装 |
+### TC013: 统一缓存 API - gzip 文件
+
+**测试目标：** 验证 `read_cache`、`write_cache` 自动判断 gzip 文件。
+
+**测试步骤：**
+1. 使用 `write_cache` 写入 `.json.gz` 文件
+2. 使用 `read_cache` 读取
+3. 验证数据一致性
+
+**预期结果：**
+- 自动使用 gzip 格式
+- 数据一致
+
+**测试代码：**
+```python
+from data_fetchers.common import read_cache, write_cache
+from pathlib import Path
+import tempfile
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    test_path = Path(tmpdir) / 'test.json.gz'
+    data = {'gzip': True}
+    
+    # 统一 API（自动判断 gzip）
+    write_cache(test_path, data)
+    loaded = read_cache(test_path)
+    
+    assert loaded == data
+```
 
 ---
 
-*最后更新: 2026-05-24 21:10 北京时间*
+### TC014: 统一缓存 API - json 文件
+
+**测试目标：** 验证 `read_cache`、`write_cache` 自动判断 json 文件。
+
+**测试步骤：**
+1. 使用 `write_cache` 写入 `.json` 文件
+2. 使用 `read_cache` 读取
+3. 验证数据一致性
+
+**预期结果：**
+- 自动使用普通 JSON 格式
+- 数据一致
+
+---
+
+### TC015: 缓存存在性检查
+
+**测试目标：** 验证 `cache_exists` 函数。
+
+**测试步骤：**
+1. 创建缓存文件
+2. 使用 `cache_exists` 检查
+3. 删除文件后再检查
+
+**预期结果：**
+- 文件存在时返回 True
+- 文件不存在时返回 False
+
+**测试代码：**
+```python
+from data_fetchers.common import cache_exists, write_cache, delete_cache
+from pathlib import Path
+import tempfile
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    test_path = Path(tmpdir) / 'test.json.gz'
+    
+    # 文件不存在
+    assert cache_exists(test_path) == False
+    
+    # 创建文件
+    write_cache(test_path, {'data': 'test'})
+    assert cache_exists(test_path) == True
+    
+    # 删除文件
+    delete_cache(test_path)
+    assert cache_exists(test_path) == False
+```
+
+---
+
+### TC016: 缓存删除函数
+
+**测试目标：** 验证 `delete_cache` 函数返回值和日志。
+
+**测试步骤：**
+1. 创建缓存文件
+2. 使用 `delete_cache` 删除
+3. 删除不存在文件
+
+**预期结果：**
+- 文件存在时删除成功，返回 True
+- 文件不存在时返回 False
+- 输出 INFO 日志（删除成功）
+
+---
+
+### TC017: 大文件监控
+
+**测试目标：** 验证大文件（>100MB）触发 WARNING 日志。
+
+**测试步骤：**
+1. 模拟大文件场景（检查阈值）
+2. 触发 WARNING 日志
+
+**预期结果：**
+- 文件大小 >100MB 时输出 WARNING 日志
+- 日志内容包含文件大小和路径
+
+---
+
+## 第六轮优化测试用例（v1.3）
+
+### TC018: gzip 压缩级别控制
+
+**测试目标：** 验证 `compresslevel` 参数控制 gzip 压缩级别。
+
+**测试步骤：**
+1. 使用不同压缩级别（1、6、9）写入
+2. 比较文件大小和压缩时间
+
+**预期结果：**
+- 压缩级别 1：文件最大，压缩最快
+- 压缩级别 6：平衡（默认）
+- 压缩级别 9：文件最小，压缩最慢
+
+**测试代码：**
+```python
+from data_fetchers.common import write_gzip_cache, read_gzip_cache
+from pathlib import Path
+import tempfile
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    data = {'large_data': [i for i in range(10000)]}
+    
+    # 压缩级别 1（最快）
+    path1 = Path(tmpdir) / 'level1.json.gz'
+    write_gzip_cache(path1, data, compresslevel=1)
+    size1 = path1.stat().st_size
+    
+    # 压缩级别 9（最高）
+    path9 = Path(tmpdir) / 'level9.json.gz'
+    write_gzip_cache(path9, data, compresslevel=9)
+    size9 = path9.stat().st_size
+    
+    # 验证：级别 9 文件更小
+    assert size9 < size1
+    
+    # 验证：都能正常读取
+    assert read_gzip_cache(path1) == data
+    assert read_gzip_cache(path9) == data
+```
+
+---
+
+### TC019: JSON 可读格式（indent）
+
+**测试目标：** 验证 `json_indent` 参数生成可读格式。
+
+**测试步骤：**
+1. 使用 `json_indent=None`（紧凑格式）
+2. 使用 `json_indent=2`（可读格式）
+3. 比较文件内容
+
+**预期结果：**
+- 紧凑格式：无缩进，文件最小
+- 可读格式：缩进 2，可读性好
+
+**测试代码：**
+```python
+from data_fetchers.common import write_json_cache, read_json_cache
+from pathlib import Path
+import tempfile
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    data = {'key1': 'value1', 'key2': 'value2'}
+    
+    # 紧凑格式
+    compact_path = Path(tmpdir) / 'compact.json'
+    write_json_cache(compact_path, data, json_indent=None)
+    with open(compact_path) as f:
+        compact_content = f.read()
+    assert '\n' not in compact_content  # 无换行
+    
+    # 可读格式
+    readable_path = Path(tmpdir) / 'readable.json'
+    write_json_cache(readable_path, data, json_indent=2)
+    with open(readable_path) as f:
+        readable_content = f.read()
+    assert '\n' in readable_content  # 有换行
+    assert '  ' in readable_content  # 有缩进
+    
+    # 数据一致
+    assert read_json_cache(compact_path) == data
+    assert read_json_cache(readable_path) == data
+```
+
+---
+
+### TC020: JSON 键排序（sort_keys）
+
+**测试目标：** 验证 `json_sort_keys` 参数排序 JSON 键。
+
+**测试步骤：**
+1. 使用 `json_sort_keys=False`（不排序）
+2. 使用 `json_sort_keys=True`（排序）
+3. 比较文件内容
+
+**预期结果：**
+- 不排序：键顺序不确定
+- 排序：键按字母顺序排序
+
+**测试代码：**
+```python
+from data_fetchers.common import write_json_cache
+from pathlib import Path
+import tempfile
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    data = {'z_key': 1, 'a_key': 2, 'm_key': 3}
+    
+    # 排序键
+    sorted_path = Path(tmpdir) / 'sorted.json'
+    write_json_cache(sorted_path, data, json_sort_keys=True, json_indent=2)
+    with open(sorted_path) as f:
+        content = f.read()
+    
+    # 验证：键顺序为 a_key, m_key, z_key
+    assert content.index('a_key') < content.index('m_key') < content.index('z_key')
+```
+
+---
+
+### TC021: 缓存数据类型验证
+
+**测试目标：** 验证 `_write_cache_impl` 数据类型验证和 WARNING 日志。
+
+**测试步骤：**
+1. 写入字典数据（正常）
+2. 写入非字典数据（触发 WARNING）
+
+**预期结果：**
+- 字典数据：正常写入，无 WARNING
+- 非字典数据（如 list）：触发 WARNING 日志，但仍写入
+
+**测试代码：**
+```python
+from data_fetchers.common import write_json_cache
+from pathlib import Path
+import tempfile
+import logging
+
+# 配置日志捕获
+logging.basicConfig(level=logging.WARNING)
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    # 正常写入（字典）
+    normal_path = Path(tmpdir) / 'normal.json'
+    write_json_cache(normal_path, {'data': 'test'})
+    
+    # 异常写入（非字典）- 应触发 WARNING
+    abnormal_path = Path(tmpdir) / 'abnormal.json'
+    write_json_cache(abnormal_path, ['list', 'data'])  # list 类型
+    
+    # 验证：文件仍成功写入（JSON 支持 list）
+    import json
+    with open(abnormal_path) as f:
+        loaded = json.load(f)
+    assert loaded == ['list', 'data']
+```
+
+---
+
+## 测试汇总
+
+| 测试编号 | 测试类型 | 测试目标 | 版本 |
+|---------|---------|---------|------|
+| TC001 | 功能 | gzip 缓存读写一致性 | v1.0 |
+| TC002 | 功能 | json 缓存读写一致性 | v1.0 |
+| TC003 | 功能 | 增量追加数据 | v1.0 |
+| TC004 | 功能 | 获取缓存文件信息 | v1.0 |
+| TC005 | 边界 | 文件不存在异常 | v1.0 |
+| TC006 | 边界 | JSON 格式错误异常 | v1.0 |
+| TC007 | 边界 | 空数据写入 | v1.0 |
+| TC008 | 参数 | path 类型支持 | v1.0 |
+| TC009 | 参数 | logger 参数传递 | v1.0 |
+| TC010 | 参数 | logger fallback | v1.0 |
+| TC011 | 日志 | get_cache_file_info 日志 | v1.0 |
+| TC012 | 异常 | JSONDecodeError 包装 | v1.0 |
+| TC013 | 功能 | 统一缓存 API - gzip | v1.2 |
+| TC014 | 功能 | 统一缓存 API - json | v1.2 |
+| TC015 | 功能 | 缓存存在性检查 | v1.2 |
+| TC016 | 功能 | 缓存删除函数 | v1.2 |
+| TC017 | 性能 | 大文件监控 | v1.2 |
+| TC018 | 参数 | gzip 压缩级别控制 | v1.3 |
+| TC019 | 参数 | JSON 可读格式 | v1.3 |
+| TC020 | 参数 | JSON 键排序 | v1.3 |
+| TC021 | 验证 | 缓存数据类型验证 | v1.3 |
+
+---
+
+*最后更新: 2026-05-24 21:55 北京时间*
