@@ -1384,3 +1384,217 @@ result = run_layered_backtest(
 | v1.4 | 2026-05-24 | 新增校验前置规范、DataFrame空值检查规范、权重元信息分离规范、CLI异常堆栈保留规范 |
 | v1.5 | 2026-05-24 | 新增标准化列名接口约定规范、标准化NaN处理规范（单样本场景返回NaN而非0） |
 | v1.6 | 2026-05-24 | 新增函数前置条件校验、数据类型校验、缺失因子返回、数据一致性强校验、死代码移除、字段回退验证规范 |
+| v1.7 | 2026-05-24 | 新增Union-Find算法、正则因子名解析、关键指标缺失判定、筛选完整性标记、ICIR缺失处理规范 |
+
+---
+
+## Union-Find 算法规范（v1.7 新增）
+
+> 本节定义高相关因子组识别的 Union-Find（并查集）算法规范。
+
+### 问题类型
+
+**问题：** identify_high_corr_groups 使用遍历 pair 合并到第一个找到的组，会漏掉跨组合并。
+例：A-B、B-C、C-D 高相关时，可能产生 [A,B,C] 和 [D] 两个独立组，而非 [A,B,C,D]。
+
+### Union-Find 算法规范
+
+**算法步骤：**
+1. 初始化每个因子为独立集合（parent[name] = name）
+2. 遍历高相关 pair，union 两个因子
+3. 最终按 root 分组输出
+
+**代码示例：**
+```python
+# Union-Find 数据结构
+parent = {name: name for name in factor_names}
+
+def find(x: str) -> str:
+    """查找根节点（带路径压缩）"""
+    if parent[x] != x:
+        parent[x] = find(parent[x])  # 路径压缩
+    return parent[x]
+
+def union(x: str, y: str) -> None:
+    """合并两个集合"""
+    root_x = find(x)
+    root_y = find(y)
+    if root_x != root_y:
+        parent[root_x] = root_y  # 合并
+
+# 遍历高相关 pair，union
+for (name_i, name_j, _) in high_corr_pairs:
+    union(name_i, name_j)
+
+# 按 root 分组
+groups_dict = {}
+for name in factor_names:
+    root = find(name)
+    if root not in groups_dict:
+        groups_dict[root] = []
+    groups_dict[root].append(name)
+
+# 只返回有多个因子的组
+groups = [group for group in groups_dict.values() if len(group) > 1]
+```
+
+**算法保证：**
+- 所有高相关因子合并到同一连通分量
+- 路径压缩优化查找效率
+
+---
+
+## 正则因子名解析规范（v1.7 新增）
+
+> 本节定义文件名因子名解析的正则规范。
+
+### 问题类型
+
+**问题：** 使用多次 replace 解析因子名，非标准文件名（如 `ic_rsi_1d_special_analysis_result.json`）会解析错误。
+
+### 正则解析规范
+
+**正则模式：**
+```python
+import re
+
+# IC 结果文件：ic_<因子名>_<收益周期>_analysis_result.json
+ic_pattern = re.compile(rf'^ic_(.+?)_{return_period}_analysis_result$')
+
+# 回测文件：<因子名>_layered_backtest.json
+backtest_pattern = re.compile(r'^(.+?)_layered_backtest$')
+
+# 使用正则提取
+match = ic_pattern.match(ic_file.stem)
+if match:
+    factor_name = match.group(1)
+else:
+    # 回退：使用原逻辑（兼容非标准文件名）
+    factor_name = ic_file.stem.replace(...)
+    logger.warning("文件名格式非标准: %s", ic_file.name)
+```
+
+**正则模式说明：**
+- `.+?` 非贪婪匹配因子名（支持含 `_` 的因子名，如 `volume_ratio`）
+- 回退逻辑兼容非标准文件名，但记录警告
+
+---
+
+## 关键指标缺失判定规范（v1.7 新增）
+
+> 本节定义因子有效性判定时关键指标缺失的处理规范。
+
+### 问题类型
+
+**问题：** validate_factor 中 ic_mean/icir 缺失时静默跳过检查，空字典因子被判为有效。
+
+### 缺失判定规范
+
+**关键指标（必需）：**
+- `ic_mean`：静态权重计算必需
+- `icir`：静态权重计算必需
+
+**缺失时判定：**
+```python
+# 1. IC 均值检查
+ic_mean = ic_metrics.get('ic_mean', None)
+
+if ic_mean is None:
+    reasons.append("ic_mean 缺失（数据不完整）")
+elif abs(ic_mean) < thresholds['ic_mean_abs_min']:
+    reasons.append(f"|ic_mean|={abs(ic_mean):.3f}<{thresholds['ic_mean_abs_min']}")
+
+# 3. ICIR 检查
+icir = ic_metrics.get('icir', None)
+
+if icir is None:
+    reasons.append("icir 缺失（数据不完整）")
+elif abs(icir) < thresholds['icir_abs_min']:
+    reasons.append(f"|icir|={abs(icir):.3f}<{thresholds['icir_abs_min']}")
+```
+
+**判定原则：**
+- 关键指标缺失 → 因子无效（数据不完整）
+- 可选指标缺失 → 跳过检查（不影响判定）
+- 区分缺失和未达标（reason 信息不同）
+
+---
+
+## 筛选完整性标记规范（v1.7 新增）
+
+> 本节定义筛选结果返回结构中的完整性标记规范。
+
+### 问题类型
+
+**问题：** select_factors 中 corr_matrix 为 None 跳过高相关筛选，但返回结构无标记，调用方无法判断筛选是否完整。
+
+### 完整性标记规范
+
+**返回结构：**
+```python
+result = {
+    'selected': selected_factors,
+    'valid_count': len(valid_factors),
+    'invalid': invalid_factors,
+    ...
+    'selection_complete': True/False,  # 筛选是否完整
+    'selection_warnings': [...]        # 筛选过程中的警告
+}
+```
+
+**标记说明：**
+- `selection_complete=True`：完整筛选（包括高相关筛选）
+- `selection_complete=False`：跳过高相关筛选（corr_matrix 缺失或无有效因子）
+- `selection_warnings`：警告信息列表
+
+**调用方处理：**
+```python
+result = select_factors(...)
+
+if not result['selection_complete']:
+    logger.warning("筛选不完整: %s", result['selection_warnings'])
+    # 决策：是否补充相关性矩阵重新筛选
+```
+
+---
+
+## ICIR 缺失处理规范（v1.7 新增）
+
+> 本节定义高相关组选择时 ICIR 缺失的处理规范。
+
+### 问题类型
+
+**问题：** select_best_from_groups 中 icir 缺失时默认为 0，icir 缺失的因子可能因 "ICIR=0" 被选中，而实际 ICIR 较高的因子被丢弃。
+
+### 缺失处理规范
+
+**处理逻辑：**
+```python
+icir_values = {}
+missing_icir_factors = []
+
+for factor_name in group:
+    icir = ic_metrics.get('icir', None)  # 不默认为 0
+    
+    if icir is None:
+        missing_icir_factors.append(factor_name)
+        icir_values[factor_name] = None  # 明确标记缺失
+    else:
+        icir_values[factor_name] = abs(icir)
+
+# 只比较有 ICIR 的因子
+valid_icir_values = {k: v for k, v in icir_values.items() if v is not None}
+
+if not valid_icir_values:
+    # 所有因子 ICIR 缺失，保留第一个（无法比较）
+    best_factor = group[0]
+    logger.warning("高相关组 %s 所有因子 icir 缺失，无法比较", group)
+else:
+    # 找出 ICIR 最高的因子
+    best_factor = max(valid_icir_values.keys(), key=lambda k: valid_icir_values[k])
+```
+
+**处理原则：**
+- ICIR 缺失的因子不参与比较（不默认为 0）
+- 所有因子 ICIR 缺失时保留第一个（无法比较）
+- 区分 ICIR 缺失和 ICIR 较低（丢弃原因不同）
