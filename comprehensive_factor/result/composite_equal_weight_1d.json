@@ -14,29 +14,34 @@
       "rsi_6": 0.5,
       "volume_ratio_5": 0.5
     },
+    "weight_meta": {
+      "is_dynamic": false,
+      "method": "equal_weight"
+    },
     "ic_results": {
       "rsi": {
-        "ic_mean": null,
-        "icir": null,
-        "ic_std": null
+        "ic_mean": -0.037202,
+        "icir": 0.2519,
+        "ic_std": 0.147691
       },
       "volume_ratio": {
-        "ic_mean": null,
-        "icir": null,
-        "ic_std": null
+        "ic_mean": -0.031017,
+        "icir": 0.3058,
+        "ic_std": 0.101427
       }
     },
     "correlation_matrix": {
       "rsi_6": {
         "rsi_6": 1.0,
-        "volume_ratio_5": 0.3169889016674959
+        "volume_ratio_5": 0.3169889016674828
       },
       "volume_ratio_5": {
-        "rsi_6": 0.3169889016674959,
+        "rsi_6": 0.3169889016674828,
         "volume_ratio_5": 1.0
       }
     },
     "high_corr_pairs": [],
+    "nan_corr_pairs": [],
     "n_factors": 2,
     "n_days": 515
   },
@@ -177,5 +182,5 @@
     "min_stocks_per_layer": 10,
     "rolling_window": 60
   },
-  "created_at": "2026-05-23T23:56:12.485584"
+  "created_at": "2026-05-24T14:40:59.802139"
 }
