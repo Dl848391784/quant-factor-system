@@ -83,9 +83,13 @@ def calculate_bollinger_pb(
     # 先按 asset 分组，再按 date 排序，确保 rolling 计算正确
     factor_df = factor_df.sort_values(['asset', 'date'])
     
-    # 按 asset 分组计算滚动统计（避免跨股票混合）
-    middle = factor_df.groupby('asset', group_keys=False)['close'].rolling(window=n).mean()
-    std_dev = factor_df.groupby('asset', group_keys=False)['close'].rolling(window=n).std()
+    # 按 asset 分组计算滚动统计（使用 transform 避免 pandas 3.0 索引问题）
+    middle = factor_df.groupby('asset', group_keys=False)['close'].transform(
+        lambda x: x.rolling(window=n).mean()
+    )
+    std_dev = factor_df.groupby('asset', group_keys=False)['close'].transform(
+        lambda x: x.rolling(window=n).std()
+    )
     
     # 计算布林带
     upper = middle + k * std_dev
