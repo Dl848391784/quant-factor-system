@@ -1,6 +1,6 @@
 # data_fetchers 模块规范
 
-> 版本: v2.32
+> 版本: v2.33
 > 创建时间: 2026-05-19
 > 更新时间: 2026-05-25
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
@@ -360,6 +360,16 @@ data_fetchers/
    - **load_main_board_stock_list 非字典元素统计补全**：新增 invalid_elements 统计 + WARNING 日志（与其他辅助函数保持一致）
    - **版本历史补全**：stock_utils.py 新增 v1.10 版本演进说明
    - **修复原因**：代码bug（重复调用效率低、非字典元素统计缺失）+ 规范遗漏（docstring 格式不规范、Raises 描述不精确）
+
+11. **stock_utils.py v2.0 (2026-05-25)** — 第十一轮深度优化（重大重构）
+   - **DCL模式简化**：移除 `_get_imported_functions()` 双重检查锁定模式，改为模块级条件导入（if __name__ == '__main__'）
+   - **MAX_STOCK_DATE 命名改为 get_max_stock_date**：遵循最小惊讶原则（函数命名以 get_ 开头），保留 MAX_STOCK_DATE 别名向后兼容
+   - **get_stock_codes_only 空代码统计修复**：改用直接计数 empty_codes（而非减法计算 total_count - valid_count - invalid_elements）
+   - **filter_stocks_by_date date_value 格式验证补全**：新增 `_DATE_PATTERN.match(date_value)` 检查 + invalid_dates 统计 + WARNING 日志
+   - **移除 threading 导入**：不再需要线程锁保护
+   - **__all__ 导出更新**：新增 `get_max_stock_date`，保留 `MAX_STOCK_DATE` 别名（deprecated）
+   - **版本历史补全**：stock_utils.py 新增 v2.0 版本演进说明
+   - **修复原因**：代码bug（DCL模式复杂、空代码统计逻辑混乱、date_value 缺少格式验证）+ 规范遗漏（MAX_STOCK_DATE 命名违反最小惊讶原则）
 
 ---
 

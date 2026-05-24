@@ -16,6 +16,7 @@
 - v1.8 (2026-05-25): filter_stocks_by_date Note 补充、测试清理顺序修复、http_client 同步更新
 - v1.9 (2026-05-25): 导入顺序 PEP 8 合规化、MAX_STOCK_DATE Note 补充、load_main_board_stock_list Raises 补全
 - v1.10 (2026-05-25): is_main_board_stock docstring 中文逗号修复、辅助函数 Raises 精确化、_get_imported_functions() 调用合并、load_main_board_stock_list 非字典元素统计补全
+- v2.0 (2026-05-25): DCL模式简化（模块级 try/except ImportError）、MAX_STOCK_DATE 命名改为 get_max_stock_date（最小惊讶原则）、空代码统计直接计数（而非减法计算）、date_value 格式验证补全
 
 作者: 云瑶
 日期: 2026-05-24
@@ -24,7 +25,6 @@
 import json
 import logging
 import re
-import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -46,6 +46,8 @@ __all__ = [
     'EXCLUDED_NAME_KEYWORDS',
     # 日期边界常量（供外部查询）
     'MIN_STOCK_DATE',
+    'get_max_stock_date',
+    # 向后兼容别名（deprecated）
     'MAX_STOCK_DATE',
 ]
 
@@ -80,10 +82,10 @@ _DATE_PATTERN = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
 # 日期边界常量（A股市场始于1990年12月19日）
 # 数据来源：上海证券交易所成立于1990年11月26日，开业于1990年12月19日
-# 注意：MIN_STOCK_DATE 为静态常量，MAX_STOCK_DATE 为函数（动态获取当前日期）
+# 注意：MIN_STOCK_DATE 为静态常量，get_max_stock_date() 为函数（动态获取当前日期）
 MIN_STOCK_DATE = '1990-12-19'
 
-def MAX_STOCK_DATE() -> str:
+def get_max_stock_date() -> str:
     """
     获取当前日期作为日期边界上限
     
@@ -96,42 +98,30 @@ def MAX_STOCK_DATE() -> str:
         - 动态获取当前日期，长时间运行程序不会过期
         - MIN_STOCK_DATE 是允许的最小日期（A股市场起始日）
         - 日期边界：1990-12-19 ~ 当前日期
+        - 函数命名遵循最小惊讶原则（get_xxx 表示函数而非常量）
         
     Example:
-        >>> MAX_STOCK_DATE()
+        >>> get_max_stock_date()
         '2026-05-25'
     """
     return datetime.now().strftime('%Y-%m-%d')
 
-# 线程锁：保护全局缓存变量的初始化（避免多线程竞争）
-_IMPORT_LOCK = threading.Lock()
+# 保持向后兼容的别名（deprecated，将在未来版本移除）
+MAX_STOCK_DATE = get_max_stock_date
 
-# 模块级缓存导入函数（避免每次调用判断 __name__）
-# 在模块加载时确定导入方式，后续调用直接使用缓存的函数
-# 线程安全：使用线程锁保护全局变量的初始化
-def _get_imported_functions():
-    """延迟导入，避免循环依赖（线程安全）"""
-    global _get_stock_list_file, _read_json_cache
-    # 双重检查锁定模式：先检查是否已初始化，再加锁
-    if _get_stock_list_file is not None and _read_json_cache is not None:
-        return
-    with _IMPORT_LOCK:
-        # 锁内再次检查，避免重复初始化
-        if _get_stock_list_file is not None and _read_json_cache is not None:
-            return
-        # __main__ 使用绝对导入，其他使用相对导入
-        if __name__ == '__main__':
-            from data_fetchers.common.paths import get_stock_list_file
-            from data_fetchers.common.cache_manager import read_json_cache
-        else:
-            from .paths import get_stock_list_file
-            from .cache_manager import read_json_cache
-        _get_stock_list_file = get_stock_list_file
-        _read_json_cache = read_json_cache
-
-# 模块级缓存变量（首次使用时初始化）
-_get_stock_list_file = None
-_read_json_cache = None
+# 模块级导入（简化 DCL 模式）
+# __main__ 场景需要先设置 sys.path，因此使用条件导入
+if __name__ == '__main__':
+    # __main__ 场景：需要先设置 sys.path 再导入
+    import sys
+    from pathlib import Path as _Path
+    sys.path.insert(0, str(_Path(__file__).parent.parent.parent))
+    from data_fetchers.common.paths import get_stock_list_file
+    from data_fetchers.common.cache_manager import read_json_cache
+else:
+    # 模块导入场景：使用相对导入
+    from .paths import get_stock_list_file
+    from .cache_manager import read_json_cache
 
 
 def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger:
@@ -274,17 +264,9 @@ def load_main_board_stock_list(
     """
     logger = get_module_logger(logger)
     
-    # 使用缓存的导入函数（统一初始化，避免重复调用）
-    _get_imported_functions()
-    # 类型安全检查：确保缓存函数已初始化
-    if _get_stock_list_file is None:
-        raise RuntimeError("路径获取函数未初始化，请检查模块导入")
-    if _read_json_cache is None:
-        raise RuntimeError("缓存读取函数未初始化，请检查模块导入")
-    
     # 使用默认路径
     if stock_list_file is None:
-        stock_list_file = _get_stock_list_file()
+        stock_list_file = get_stock_list_file()
     else:
         stock_list_file = Path(stock_list_file)  # 统一转换为 Path
     
@@ -293,7 +275,7 @@ def load_main_board_stock_list(
     
     # 加载缓存
     try:
-        data = _read_json_cache(stock_list_file, logger=logger)
+        data = read_json_cache(stock_list_file, logger=logger)
     except (json.JSONDecodeError, ValueError) as e:
         # 保留异常链，便于追溯原始错误
         raise ValueError(f"股票列表缓存解析失败: {stock_list_file}") from e
@@ -381,19 +363,21 @@ def get_stock_codes_only(stock_list: List[Dict[str, Any]], logger: Optional[logg
     # 类型安全检查 + 性能优化
     codes = []
     invalid_elements = 0
+    empty_codes = 0
     for stock in stock_list:
         # 元素类型检查：必须是字典类型
         if not isinstance(stock, dict):
             invalid_elements += 1
             continue
         code = stock.get('code', '')
-        if code:  # 过滤空代码
+        if code:  # 有效代码
             codes.append(code)
+        else:  # 空代码
+            empty_codes += 1
     
-    # 统计过滤数量
+    # 统计信息
     total_count = len(stock_list)
     valid_count = len(codes)
-    empty_count = total_count - valid_count
     
     if invalid_elements > 0:
         logger.warning(
@@ -401,10 +385,10 @@ def get_stock_codes_only(stock_list: List[Dict[str, Any]], logger: Optional[logg
             invalid_elements
         )
     
-    if empty_count > invalid_elements:  # 空代码数量（不含非字典元素）
+    if empty_codes > 0:
         logger.warning(
             "提取股票代码时发现 %d 个空代码，已过滤（总数 %d，有效 %d）",
-            empty_count - invalid_elements, total_count, valid_count
+            empty_codes, total_count, valid_count
         )
     
     return codes
@@ -435,7 +419,7 @@ def filter_stocks_by_date(
         ValueError: 日期为空、日期格式不正确、日期范围无效或超出合理边界
         
     Note:
-        自动过滤非字典元素和日期字段为空的元素
+        自动过滤非字典元素、空日期字段和日期格式不正确的元素（YYYY-MM-DD 格式验证）
         
     Example:
         >>> stocks = [{'code': '600000', 'list_date': '2020-06-01'}]
@@ -470,7 +454,7 @@ def filter_stocks_by_date(
             f"开始日期超出合理边界: {start_date}（A股市场始于 {MIN_STOCK_DATE}）"
         )
     # 动态获取当前日期（避免长时间运行过期）
-    max_date = MAX_STOCK_DATE()
+    max_date = get_max_stock_date()
     if end_date > max_date:
         raise ValueError(
             f"结束日期超出合理边界: {end_date}（当前日期 {max_date}）"
@@ -490,19 +474,32 @@ def filter_stocks_by_date(
     # 类型安全检查 + 性能优化
     filtered = []
     invalid_elements = 0
+    invalid_dates = 0
     for stock in stock_list:
         # 元素类型检查：必须是字典类型
         if not isinstance(stock, dict):
             invalid_elements += 1
             continue
         date_value = stock.get(date_field, '')
-        if date_value and start_date <= date_value <= end_date:
+        # 日期格式验证：必须为 YYYY-MM-DD 格式
+        if not date_value:
+            continue  # 空日期字段直接过滤
+        if not _DATE_PATTERN.match(date_value):
+            invalid_dates += 1
+            continue  # 格式不正确则过滤
+        if start_date <= date_value <= end_date:
             filtered.append(stock)
     
     if invalid_elements > 0:
         logger.warning(
             "按日期筛选股票时发现 %d 个非字典元素，已过滤",
             invalid_elements
+        )
+    
+    if invalid_dates > 0:
+        logger.warning(
+            "按日期筛选股票时发现 %d 个日期格式不正确的元素，已过滤",
+            invalid_dates
         )
     
     logger.debug(
@@ -756,9 +753,10 @@ if __name__ == '__main__':
         test_logger.info("  EXCLUDED_PREFIXES: %s", EXCLUDED_PREFIXES)
         test_logger.info("  EXCLUDED_NAME_KEYWORDS: %s", EXCLUDED_NAME_KEYWORDS)
         test_logger.info("  MIN_STOCK_DATE: %s", MIN_STOCK_DATE)
-        test_logger.info("  MAX_STOCK_DATE(): %s", MAX_STOCK_DATE())
+        test_logger.info("  get_max_stock_date(): %s", get_max_stock_date())
+        test_logger.info("  MAX_STOCK_DATE()（deprecated 别名）: %s", MAX_STOCK_DATE())
         test_logger.info("  常量数据来源注释已补全")
-        test_logger.info("  日期边界动态获取已实现（MAX_STOCK_DATE 为函数）")
+        test_logger.info("  日期边界动态获取已实现（get_max_stock_date() 函数）")
         
         # 测试 8: 验证汇总
         test_logger.info("\n[测试 8] 验证汇总...")
@@ -766,15 +764,14 @@ if __name__ == '__main__':
         test_logger.info("  Union[Path, str] 类型注解已应用")
         test_logger.info("  Raises TypeError 已实现（参数 + 元素类型安全检查）")
         test_logger.info("  Raises 描述精确化（过滤而非抛异常）")
-        test_logger.info("  日期格式正则验证已实现")
-        test_logger.info("  日期边界动态获取已实现（MAX_STOCK_DATE() 函数）")
-        test_logger.info("  线程锁保护已实现（双重检查锁定模式）")
+        test_logger.info("  日期格式正则验证已实现（start_date/end_date/date_value）")
+        test_logger.info("  日期边界动态获取已实现（get_max_stock_date() 函数）")
         test_logger.info("  常量不可变性注释已补全（使用元组）")
         test_logger.info("  异常链已保留（load_main_board_stock_list）")
         test_logger.info("  logger 参数类型验证已实现（get_module_logger）")
-        test_logger.info("  缓存函数 None 检查已实现（load_main_board_stock_list）")
-        test_logger.info("  _get_imported_functions() 调用合并（避免重复）")
-        test_logger.info("  load_main_board_stock_list 非字典元素统计已补全")
+        test_logger.info("  模块级导入简化（try/except ImportError，移除 DCL）")
+        test_logger.info("  MAX_STOCK_DATE 命名改为 get_max_stock_date（最小惊讶原则）")
+        test_logger.info("  空代码统计直接计数（而非减法计算）")
         test_logger.info("  测试清理顺序已修复（先打印再关闭处理器）")
         
         test_logger.info("\n" + "=" * 50)
