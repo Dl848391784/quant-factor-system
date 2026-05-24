@@ -1598,3 +1598,229 @@ else:
 - ICIR 缺失的因子不参与比较（不默认为 0）
 - 所有因子 ICIR 缺失时保留第一个（无法比较）
 - 区分 ICIR 缺失和 ICIR 较低（丢弃原因不同）
+
+---
+
+## Union-Find 迭代实现规范（v1.8 新增）
+
+> 本节定义 Union-Find 算法的迭代实现规范，避免大规模因子库栈溢出。
+
+### 问题类型
+
+**问题：** Union-Find 使用递归实现 find(x)，大规模因子库（10000+）可能栈溢出。
+
+### 迭代实现规范
+
+**代码示例：**
+```python
+def find(x: str) -> str:
+    """查找根节点（迭代实现 + 路径压缩）"""
+    # 迭代查找根节点
+    root = x
+    while parent[root] != root:
+        root = parent[root]
+    
+    # 路径压缩：将路径上所有节点直接指向根
+    current = x
+    while parent[current] != root:
+        next_node = parent[current]
+        parent[current] = root
+        current = next_node
+    
+    return root
+```
+
+**优势：**
+- 避免递归栈溢出（10000+ 因子安全）
+- 保持路径压缩优化（查找效率接近 O(1))
+
+---
+
+## 正则跳过非标准文件规范（v1.8 新增）
+
+> 本节定义文件名解析失败时的跳过处理规范。
+
+### 问题类型
+
+**问题：** 正则不匹配时使用回退逻辑（多次 replace），可能复现已修复的解析 bug。
+
+### 跳过处理规范
+
+**处理逻辑：**
+```python
+match = ic_pattern.match(ic_file.stem)
+if match:
+    factor_name = match.group(1)
+else:
+    # 正则不匹配时跳过文件，而非使用可能有问题的回退逻辑
+    logger.warning(
+        "文件名格式非标准，跳过: %s（期望格式: ic_<因子名>_%s_analysis_result.json）",
+        ic_file.name, return_period
+    )
+    continue  # 跳过非标准文件
+```
+
+**处理原则：**
+- 正则不匹配 → 跳过文件（不降级处理）
+- 明确告知期望格式（便于排查）
+- 单文件问题不影响整体加载
+
+---
+
+## logger 参数传递规范（v1.8 新增）
+
+> 本节定义函数签名新增 logger 参数时的调用方更新规范。
+
+### 问题类型
+
+**问题：** validate_factor 签名新增 logger 参数，但 filter_invalid_factors 调用时未传入。
+
+### 传递规范
+
+**修复代码：**
+```python
+# filter_invalid_factors 中调用 validate_factor
+for factor_name, factor_data in all_factors.items():
+    # 传入 logger 参数，以便 validate_factor 记录日志
+    is_valid, reasons = validate_factor(
+        factor_name, factor_data, thresholds, logger
+    )
+```
+
+**规范原则：**
+- 签名新增 logger 参数 → 所有调用方必须传入
+- 子函数需要日志 → 传递父函数的 logger（追溯调用方）
+
+---
+
+## 文件读取异常处理规范（v1.8 新增）
+
+> 本节定义多文件加载时的异常处理规范，单文件损坏不影响整体。
+
+### 问题类型
+
+**问题：** load_all_factor_results 文件读取无异常处理，单文件损坏导致整体失败。
+
+### 异常处理规范
+
+**代码示例：**
+```python
+for ic_file in ic_result_dir.glob(...):
+    match = ic_pattern.match(ic_file.stem)
+    if not match:
+        continue
+    
+    # 异常处理：单文件损坏不影响整体加载
+    try:
+        with open(ic_file, 'r', encoding='utf-8') as f:
+            ic_data = json.load(f)
+        
+        all_factors[factor_name] = {...}
+    except (json.JSONDecodeError, UnicodeDecodeError, IOError) as e:
+        # JSON 格式错误、编码错误、磁盘问题
+        logger.error(
+            "文件加载失败，跳过: %s，错误类型: %s，错误信息: %s",
+            ic_file.name, type(e).__name__, str(e)
+        )
+        continue  # 跳过损坏文件，继续加载其他文件
+```
+
+**捕获异常类型：**
+- `json.JSONDecodeError`: JSON 格式错误
+- `UnicodeDecodeError`: 编码错误
+- `IOError`: 磁盘问题（文件不存在、权限错误）
+
+**处理原则：**
+- 单文件损坏 → 跳过该文件，记录错误
+- 其他文件 → 正常加载
+- 异常信息 → 包含文件名、错误类型、错误详情
+
+---
+
+## 因子名匹配校验规范（v1.8 新增）
+
+> 本节定义因子名与相关性矩阵索引的匹配校验规范。
+
+### 问题类型
+
+**问题：** identify_high_corr_groups 只在遍历时检查单因子，入口无校验。
+
+### 入口校验规范
+
+**代码示例：**
+```python
+factor_names = list(valid_factors.keys())
+
+# 入口校验因子名与相关性矩阵索引的匹配性
+missing_in_index = [name for name in factor_names if name not in corr_matrix.index]
+missing_in_columns = [name for name in factor_names if name not in corr_matrix.columns]
+
+if missing_in_index or missing_in_columns:
+    logger.warning(
+        "因子名与相关性矩阵索引不匹配: "
+        "缺失于 index=%s, 缺失于 columns=%s，将跳过这些因子",
+        missing_in_index[:5], missing_in_columns[:5]
+    )
+    # 过滤掉不在矩阵中的因子
+    factor_names = [name for name in factor_names 
+                    if name in corr_matrix.index and name in corr_matrix.columns]
+    
+    if len(factor_names) == 0:
+        logger.error("所有因子都不在相关性矩阵中，返回空组")
+        return []
+```
+
+**校验原则：**
+- 入口校验 → 发现问题立即处理
+- 跳过不匹配因子 → 继续处理其他因子
+- 全部不匹配 → 返回空组，记录错误
+
+---
+
+## set 替代 list 性能规范（v1.8 新增）
+
+> 本节定义使用 set 替代 list 提升性能的规范。
+
+### 问题类型
+
+**问题：** select_best_from_groups 使用 list.remove() + in 检查，嵌套循环 O(n²) 复杂度。
+
+### 性能优化规范
+
+**代码示例：**
+```python
+# 使用 set 替代 list，避免 O(n²) 复杂度
+# list.remove() + in 检查 都是 O(n)，嵌套循环总体 O(n²)
+# set.discard() + in 检查 都是 O(1)，总体 O(n)
+selected_factors_set = set(valid_factors.keys())  # 初始为所有有效因子
+
+for group in high_corr_groups:
+    for factor_name in group:
+        if factor_name != best_factor:
+            if factor_name in selected_factors_set:  # O(1)
+                selected_factors_set.discard(factor_name)  # O(1)
+
+# 返回 list 格式（兼容调用方）
+return list(selected_factors_set), dropped_factors
+```
+
+**性能对比：**
+| 操作 | list | set |
+|------|------|-----|
+| in 检查 | O(n) | O(1) |
+| remove/discard | O(n) | O(1) |
+| 嵌套循环总体 | O(n²) | O(n) |
+
+**适用场景：**
+- 嵌套循环中需要频繁删除 + 检查
+- 因子数量可能增长到 100+| 版本 | 日期 | 变更内容 |
+|------|------|----------|
+| v1.0 | 2026-05-24 | 初始设计：目录结构、脚本命名、加权方式、公共模块、输出规范 |
+| v1.1 | 2026-05-24 | 新增公共入口防御性编程规范（必需列校验、返回值解包校验、父类 validate 调用规范） |
+| v1.2 | 2026-05-24 | 新增因子名到列名映射规范、动态权重保存规范、NaN相关性处理规范 |
+| v1.3 | 2026-05-24 | 新增模块级代码规范、函数入口类型统一规范、composite_factor NaN检查规范、CLI异常退出码规范 |
+| v1.4 | 2026-05-24 | 新增校验前置规范、DataFrame空值检查规范、权重元信息分离规范、CLI异常堆栈保留规范 |
+| v1.5 | 2026-05-24 | 新增标准化列名接口约定规范、标准化NaN处理规范（单样本场景返回NaN而非0） |
+| v1.6 | 2026-05-24 | 新增函数前置条件校验、数据类型校验、缺失因子返回、数据一致性强校验、死代码移除、字段回退验证规范 |
+| v1.7 | 2026-05-24 | 新增Union-Find算法、正则因子名解析、关键指标缺失判定、筛选完整性标记、ICIR缺失处理规范 |
+| v1.8 | 2026-05-24 | 新增Union-Find迭代实现、正则跳过非标准文件、logger参数传递、文件读取异常处理、因子名匹配校验、set替代list性能规范 |

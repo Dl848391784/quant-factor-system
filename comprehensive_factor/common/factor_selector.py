@@ -117,18 +117,30 @@ def load_all_factor_results(
         if match:
             factor_name = match.group(1)
         else:
-            # 回退：使用原逻辑（兼容非标准文件名）
-            factor_name = ic_file.stem.replace(f'ic_', '').replace(f'_analysis_result', '').replace(f'_{return_period}', '')
-            logger.warning("IC文件名格式非标准: %s，因子名: %s", ic_file.name, factor_name)
+            # 修复：正则不匹配时跳过文件，而非使用可能有问题的回退逻辑
+            logger.warning(
+                "IC文件名格式非标准，跳过: %s（期望格式: ic_<因子名>_%s_analysis_result.json）",
+                ic_file.name, return_period
+            )
+            continue  # 跳过非标准文件
         
-        with open(ic_file, 'r', encoding='utf-8') as f:
-            ic_data = json.load(f)
-        
-        all_factors[factor_name] = {
-            'ic_metrics': ic_data.get('ic_metrics', {}),
-            'ic_file': str(ic_file)
-        }
-        logger.debug("加载 IC 结果: %s", factor_name)
+        # 修复：添加异常处理，单文件损坏不影响整体加载
+        try:
+            with open(ic_file, 'r', encoding='utf-8') as f:
+                ic_data = json.load(f)
+            
+            all_factors[factor_name] = {
+                'ic_metrics': ic_data.get('ic_metrics', {}),
+                'ic_file': str(ic_file)
+            }
+            logger.debug("加载 IC 结果: %s", factor_name)
+        except (json.JSONDecodeError, UnicodeDecodeError, IOError) as e:
+            # JSON 格式错误、编码错误、磁盘问题
+            logger.error(
+                "IC文件加载失败，跳过: %s，错误类型: %s，错误信息: %s",
+                ic_file.name, type(e).__name__, str(e)
+            )
+            continue  # 跳过损坏文件，继续加载其他文件
     
     # 加载回测结果
     logger.info("加载回测结果: %s", backtest_result_dir)
@@ -141,21 +153,32 @@ def load_all_factor_results(
         if match:
             factor_name = match.group(1)
         else:
-            # 回退
-            factor_name = backtest_file.stem.replace('_layered_backtest', '')
-            logger.warning("回测文件名格式非标准: %s", backtest_file.name)
+            # 修复：正则不匹配时跳过文件
+            logger.warning(
+                "回测文件名格式非标准，跳过: %s（期望格式: <因子名>_layered_backtest.json）",
+                backtest_file.name
+            )
+            continue  # 跳过非标准文件
         
-        with open(backtest_file, 'r', encoding='utf-8') as f:
-            backtest_data = json.load(f)
-        
-        if factor_name in all_factors:
-            all_factors[factor_name]['backtest'] = backtest_data
-        else:
-            all_factors[factor_name] = {
-                'backtest': backtest_data,
-                'ic_metrics': {}
-            }
-        logger.debug("加载回测结果: %s", factor_name)
+        # 修复：添加异常处理
+        try:
+            with open(backtest_file, 'r', encoding='utf-8') as f:
+                backtest_data = json.load(f)
+            
+            if factor_name in all_factors:
+                all_factors[factor_name]['backtest'] = backtest_data
+            else:
+                all_factors[factor_name] = {
+                    'backtest': backtest_data,
+                    'ic_metrics': {}
+                }
+            logger.debug("加载回测结果: %s", factor_name)
+        except (json.JSONDecodeError, UnicodeDecodeError, IOError) as e:
+            logger.error(
+                "回测文件加载失败，跳过: %s，错误类型: %s，错误信息: %s",
+                backtest_file.name, type(e).__name__, str(e)
+            )
+            continue
     
     logger.info("加载因子数据: %d 个因子", len(all_factors))
     
@@ -260,7 +283,8 @@ def filter_invalid_factors(
     invalid_factors = {}
     
     for factor_name, factor_data in all_factors.items():
-        is_valid, reasons = validate_factor(factor_name, factor_data, thresholds)
+        # 修复：传入 logger 参数，以便 validate_factor 记录日志
+        is_valid, reasons = validate_factor(factor_name, factor_data, thresholds, logger)
         
         if is_valid:
             valid_factors[factor_name] = factor_data
@@ -316,14 +340,44 @@ def identify_high_corr_groups(
     if len(factor_names) == 0:
         return []
     
+    # 修复：入口校验因子名与相关性矩阵索引的匹配性
+    missing_in_index = [name for name in factor_names if name not in corr_matrix.index]
+    missing_in_columns = [name for name in factor_names if name not in corr_matrix.columns]
+    
+    if missing_in_index or missing_in_columns:
+        logger.warning(
+            "因子名与相关性矩阵索引不匹配: "
+            "缺失于 index=%s, 缺失于 columns=%s，将跳过这些因子",
+            missing_in_index[:5] if len(missing_in_index) > 5 else missing_in_index,
+            missing_in_columns[:5] if len(missing_in_columns) > 5 else missing_in_columns
+        )
+        # 过滤掉不在矩阵中的因子
+        factor_names = [name for name in factor_names 
+                        if name in corr_matrix.index and name in corr_matrix.columns]
+        
+        if len(factor_names) == 0:
+            logger.error("所有因子都不在相关性矩阵中，返回空组")
+            return []
+    
     # Union-Find 数据结构
     parent = {name: name for name in factor_names}  # 每个因子初始指向自己
     
+    # 修复：使用迭代实现 find，避免大规模因子库栈溢出
     def find(x: str) -> str:
-        """查找根节点（带路径压缩）"""
-        if parent[x] != x:
-            parent[x] = find(parent[x])  # 路径压缩
-        return parent[x]
+        """查找根节点（迭代实现 + 路径压缩）"""
+        # 迭代查找根节点
+        root = x
+        while parent[root] != root:
+            root = parent[root]
+        
+        # 路径压缩：将路径上所有节点直接指向根
+        current = x
+        while parent[current] != root:
+            next_node = parent[current]
+            parent[current] = root
+            current = next_node
+        
+        return root
     
     def union(x: str, y: str) -> None:
         """合并两个集合"""
@@ -383,7 +437,10 @@ def select_best_from_groups(
     if logger is None:
         logger = get_logger(__name__)
     
-    selected_factors = list(valid_factors.keys())  # 初始为所有有效因子
+    # 修复：使用 set 替代 list，避免 O(n²) 复杂度
+    # list.remove() + in 检查 都是 O(n)，嵌套循环总体 O(n²)
+    # set.discard() + in 检查 都是 O(1)，总体 O(n)
+    selected_factors_set = set(valid_factors.keys())  # 初始为所有有效因子
     dropped_factors = {}
     
     for group in high_corr_groups:
@@ -414,8 +471,9 @@ def select_best_from_groups(
             )
             # 丢弃其他因子
             for factor_name in group:
-                if factor_name != best_factor and factor_name in selected_factors:
-                    selected_factors.remove(factor_name)
+                if factor_name != best_factor and factor_name in selected_factors_set:
+                    # 修复：使用 discard 替代 remove（O(1) vs O(n)）
+                    selected_factors_set.discard(factor_name)
                     dropped_factors[factor_name] = f"与{best_factor}高相关，icir 缺失无法比较"
         else:
             # 找出 ICIR 最高的因子（只比较有 icir 的因子）
@@ -424,8 +482,9 @@ def select_best_from_groups(
             # 丢弃其他因子（包括 icir 缺失的因子）
             for factor_name in group:
                 if factor_name != best_factor:
-                    if factor_name in selected_factors:
-                        selected_factors.remove(factor_name)
+                    # 修复：使用 in + discard（O(1) vs O(n)）
+                    if factor_name in selected_factors_set:
+                        selected_factors_set.discard(factor_name)
                         
                         # 修复：区分 icir 缺失和 ICIR 较低
                         if factor_name in missing_icir_factors:
@@ -439,7 +498,8 @@ def select_best_from_groups(
                         
                         logger.info("丢弃高相关因子: %s（保留 %s，ICIR 更高）", factor_name, best_factor)
     
-    return selected_factors, dropped_factors
+    # 修复：返回 list 格式（兼容调用方）
+    return list(selected_factors_set), dropped_factors
 
 
 def select_factors(
