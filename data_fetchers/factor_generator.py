@@ -275,11 +275,24 @@ def generate_all_factors(
 # CLI 入口
 # ============================================================================
 
+# 条件导入：__main__ 时添加 sys.path + 绝对导入，其他时候使用相对导入
+# 注意：sys.path.insert 是必要的，因为脚本需要能够直接运行
+# 遵循 stock_utils.py 的条件导入模式
+if __name__ == '__main__':
+    import sys
+    from pathlib import Path
+    project_root = Path(__file__).parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+    from data_fetchers.common.logger_config import setup_logger
+else:
+    from .common.logger_config import setup_logger
+
+
 def main():
     """CLI 主入口"""
     import argparse
     import logging
-    from data_fetchers.common.logger_config import setup_logger
     
     parser = argparse.ArgumentParser(description='统一因子生成模块')
     parser.add_argument('--output', type=str, default=None, help='输出路径')
