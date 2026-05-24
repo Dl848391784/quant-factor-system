@@ -24,14 +24,10 @@ from typing import List
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from comprehensive_factor.common.composite_runner import (
-    run_composite_backtest,
     create_cli_entrypoint,
     CompositeLayerConfig
 )
-from comprehensive_factor.common.logger_config import get_logger
 from comprehensive_factor.common.data_loader import DEFAULT_CACHE_DIR
-
-logger = get_logger(__name__)
 
 
 # ============================================================================
@@ -47,23 +43,28 @@ class RollingICIRWeightLayerConfig(CompositeLayerConfig):
     - volume_ratio_5: 量比因子
     
     加权逻辑：
-    - 每日计算滚动窗口（60日）内的 ICIR
-    - 动态调整权重：|rolling_icir| 越高权重越大
+    - 每日计算滚动窗口内的 ICIR（动态）
+    - weight_i_t = |rolling_icir_i_t| / sum(|rolling_icir_j_t|)
     - 适应因子有效性随时间变化
     
-    滚动窗口参数：
-    - window=60（约3个月）
-    - min_periods=20（数据不足时回退静态ICIR）
+    滚动窗口参数（继承父类 rolling_window）：
+    - rolling_window=60（约3个月交易日，捕捉季度周期性）
+    - min_periods=20（window//3，数据不足时回退等权）
     
-    综合因子方向：反向因子
+    选择依据（rolling_window=60）：
+    - 1个季度≈60个交易日，符合财报披露周期
+    - ICIR稳定性检验：60日窗口的ICIR波动较小（vs 20日/30日）
+    - 业界惯例：IC衰减检验常用60日窗口
+    
+    异常处理（weight_engine.py 实现）：
+    - weight_sum=0时：回退等权（1/n_factors）
+    - rolling_std=0时：ICIR为NaN，权重为NaN，最终回退等权
+    
+    综合因子方向：反向因子（因子值越大，未来收益越低）
     """
     
-    # 因子组合
-    factor_list: List[str] = field(default_factory=lambda: ['rsi', 'volume_ratio'])
-    factor_cols: List[str] = field(default_factory=lambda: ['rsi_6', 'volume_ratio_5'])
-    
-    # 滚动窗口参数
-    rolling_window: int = 60
+    # 滚动窗口参数（继承父类的 factor_list, factor_cols, rolling_window）
+    min_periods: int = 20  # 显式定义，与实现一致（max(1, window // 3)）
     
     # 分层参数
     n_layers: int = 5
@@ -72,16 +73,35 @@ class RollingICIRWeightLayerConfig(CompositeLayerConfig):
     short_layers: List[int] = field(default_factory=lambda: [4, 5])
     trade_cost_rate: float = 0.003
     min_stocks_per_layer: int = 10
+    
+    def __post_init__(self):
+        """滚动加权参数校验
+        
+        规范：
+        - min_periods <= rolling_window（窗口内至少需要min_periods个数据）
+        - min_periods >= 1（避免空窗口）
+        - factor_list/factor_cols 由父类 validate() 校验
+        """
+        # 滚动参数校验
+        if self.min_periods > self.rolling_window:
+            raise ValueError(
+                f"min_periods ({self.min_periods}) 必须小于等于 rolling_window ({self.rolling_window})"
+            )
+        if self.min_periods < 1:
+            raise ValueError("min_periods 必须大于等于 1")
 
 
 # ============================================================================
 # CLI 入口
 # ============================================================================
 
+# 创建默认配置实例用于CLI参数
+_default_config = RollingICIRWeightLayerConfig()
+
 main = create_cli_entrypoint(
     weight_method='rolling_icir_weight',
-    factor_list=['rsi', 'volume_ratio'],
-    factor_cols=['rsi_6', 'volume_ratio_5'],
+    factor_list=_default_config.factor_list,
+    factor_cols=_default_config.factor_cols,
     config_class=RollingICIRWeightLayerConfig,
     return_period='1d',
     cache_dir=str(DEFAULT_CACHE_DIR)
