@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""
+data_fetchers 公共模块
+
+提供数据拉取脚本的公共功能：
+- paths: 路径管理
+- cache_manager: 缓存读写
+- http_client: HTTP 客户端（需要 requests）
+- stock_utils: 股票筛选
+
+使用方式：
+    from data_fetchers.common import paths, cache_manager, stock_utils
+    
+    # 获取路径
+    cache_dir = paths.get_cache_dir()
+    
+    # 读取缓存
+    data = cache_manager.read_gzip_cache(cache_dir / 'factor_data/data.json.gz')
+    
+    # 加载主板股票列表
+    stocks = stock_utils.load_main_board_stock_list()
+
+作者: 云瑶
+日期: 2026-05-24
+"""
+
+from .paths import (
+    get_project_root,
+    get_cache_dir,
+    get_factor_data_dir,
+    get_stock_list_file,
+    get_logs_dir,
+    Paths,
+    paths,
+)
+
+from .cache_manager import (
+    read_gzip_cache,
+    write_gzip_cache,
+    read_json_cache,
+    write_json_cache,
+    append_to_cache,
+    get_cache_file_info,
+)
+
+from .stock_utils import (
+    is_main_board_stock,
+    load_main_board_stock_list,
+    get_stock_codes_only,
+    filter_stocks_by_date,
+    get_stock_name_map,
+)
+
+# http_client 需要 requests 模块，可选导入
+try:
+    from .http_client import (
+        create_retry_session,
+        create_eastmoney_session,
+        create_sina_session,
+        request_with_retry,
+        DEFAULT_EASTMONEY_HEADERS,
+        DEFAULT_SINA_HEADERS,
+    )
+    _HTTP_CLIENT_AVAILABLE = True
+except ImportError:
+    _HTTP_CLIENT_AVAILABLE = False
+    # 定义占位函数，避免导入报错
+    def create_retry_session(*args, **kwargs):
+        raise ImportError("http_client 需要 requests 模块，请安装: pip install requests")
+    def create_eastmoney_session(*args, **kwargs):
+        raise ImportError("http_client 需要 requests 模块，请安装: pip install requests")
+    def create_sina_session(*args, **kwargs):
+        raise ImportError("http_client 需要 requests 模块，请安装: pip install requests")
+    def request_with_retry(*args, **kwargs):
+        raise ImportError("http_client 需要 requests 模块，请安装: pip install requests")
+    DEFAULT_EASTMONEY_HEADERS = {}
+    DEFAULT_SINA_HEADERS = {}
+
+
+__all__ = [
+    # paths
+    'get_project_root',
+    'get_cache_dir',
+    'get_factor_data_dir',
+    'get_stock_list_file',
+    'get_logs_dir',
+    'Paths',
+    'paths',
+    # cache_manager
+    'read_gzip_cache',
+    'write_gzip_cache',
+    'read_json_cache',
+    'write_json_cache',
+    'append_to_cache',
+    'get_cache_file_info',
+    # http_client
+    'create_retry_session',
+    'create_eastmoney_session',
+    'create_sina_session',
+    'request_with_retry',
+    'DEFAULT_EASTMONEY_HEADERS',
+    'DEFAULT_SINA_HEADERS',
+    # stock_utils
+    'is_main_board_stock',
+    'load_main_board_stock_list',
+    'get_stock_codes_only',
+    'filter_stocks_by_date',
+    'get_stock_name_map',
+]

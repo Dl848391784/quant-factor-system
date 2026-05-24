@@ -34,7 +34,15 @@ factor_ic_analyzer/
 │
 ├── data_fetchers/          # 数据获取模块
 │   ├── MODULE.md           # 数据拉取规范
-│   └── ...
+│   ├── common/             # 公共函数
+│   ├── docs/               # 流程文档
+│   ├── result/             # 数据拉取元信息输出
+│   ├── logs/               # 日志目录
+│   ├── test_cases/         # 测试用例
+│   ├── factor_generator.py # 统一因子生成入口
+│   ├── fetch_turnover.py   # 换手率数据拉取
+│   ├── fetch_main_inflow.py # 主力资金流数据拉取
+│   └── ...                 # 其他数据拉取脚本
 │
 ├── common/                 # 项目级公共模块
 ├── cache/                  # 缓存目录
@@ -96,7 +104,7 @@ factor_ic_analyzer/
 | factor_ic | factor_ic/MODULE.md | IC 计算脚本命名、输出格式、增量模式、参数传递 |
 | backtest | backtest/MODULE.md | 分层回测规则、统计指标、公共模块复用 |
 | comprehensive_factor | comprehensive_factor/MODULE.md | 综合因子加权方式、因子组合、输出格式、调用backtest规范 |
-| data_fetchers | data_fetchers/MODULE.md | 数据源定义、缓存格式 |
+|| data_fetchers | data_fetchers/MODULE.md | 数据源定义、缓存格式、脚本命名、公共模块复用、因子生成规范 |
 
 ---
 

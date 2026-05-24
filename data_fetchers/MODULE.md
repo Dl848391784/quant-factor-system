@@ -103,6 +103,13 @@ data_fetchers/
    - **get_cache_file_info 日志使用**：添加 DEBUG/WARNING 日志输出
    - **流程文档创建**：docs/cache_manager_flow.md
    - **测试用例创建**：test_cases/cache_manager_test_cases.md
+7. v2.4（2026-05-24 21:40）：
+   - **代码重复消除**：新增 `_read_cache_impl`、`_write_cache_impl` 公共函数
+   - **文件类型判断优化**：新增 `_is_gzip_file` 函数统一判断
+   - **重构读写函数**：read_gzip_cache/read_json_cache/write_gzip_cache/write_json_cache 调用公共实现
+   - **append_to_cache 重构**：使用 `_is_gzip_file` 和公共实现函数
+   - **代码行数减少**：从 322行 → 272行（减少 50行）
+   - **流程文档更新**：版本历史 v1.2，架构图新增公共函数
 
 ---
 
@@ -516,4 +523,4 @@ factor_df['middle'] = middle  # 成功赋值
 
 ---
 
-*最后更新: 2026-05-24 21:10*
+*最后更新: 2026-05-24 21:40*

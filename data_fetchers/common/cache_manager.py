@@ -38,6 +38,103 @@ def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger
     return _MODULE_LOGGER
 
 
+def _is_gzip_file(path: Path) -> bool:
+    """
+    判断是否为 gzip 文件
+    
+    Args:
+        path: 文件路径
+        
+    Returns:
+        bool: 是否为 gzip 文件（后缀为 .gz）
+    """
+    return path.suffix == '.gz'
+
+
+def _read_cache_impl(
+    path: Path,
+    use_gzip: bool,
+    logger: logging.Logger
+) -> Dict[str, Any]:
+    """
+    读取缓存的公共实现
+    
+    Args:
+        path: 文件路径（已转换为 Path）
+        use_gzip: 是否使用 gzip 解压
+        logger: Logger 对象
+        
+    Returns:
+        Dict: JSON 数据
+        
+    Raises:
+        FileNotFoundError: 文件不存在
+        ValueError: JSON 解析失败
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"缓存文件不存在: {path}")
+    
+    try:
+        if use_gzip:
+            with gzip.open(path, 'rt', encoding='utf-8') as f:
+                data = json.load(f)
+        else:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        logger.debug("成功读取缓存: %s", path)
+        return data
+    except json.JSONDecodeError as e:
+        # 遵循 references/backtest-module-optimization-patterns.md Section 1.2
+        # 避免传递完整 JSON 文档字符串导致内存翻倍
+        logger.error(
+            "JSON 解析失败\n"
+            "文件路径: %s\n"
+            "错误位置: 行 %d, 列 %d\n"
+            "错误信息: %s",
+            path, e.lineno, e.colno, e.msg
+        )
+        raise ValueError(f"JSON解析失败: {path}, 位置 {e.pos}") from e
+    except Exception as e:
+        logger.exception("读取缓存失败: %s", path)
+        raise
+
+
+def _write_cache_impl(
+    path: Path,
+    data: Dict[str, Any],
+    use_gzip: bool,
+    ensure_dir: bool,
+    logger: logging.Logger
+) -> None:
+    """
+    写入缓存的公共实现
+    
+    Args:
+        path: 文件路径（已转换为 Path）
+        data: 要写入的数据
+        use_gzip: 是否使用 gzip 压缩
+        ensure_dir: 是否自动创建目录
+        logger: Logger 对象
+        
+    Raises:
+        OSError: 文件写入失败
+    """
+    if ensure_dir:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        if use_gzip:
+            with gzip.open(path, 'wt', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
+        else:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
+        logger.debug("成功写入缓存: %s", path)
+    except Exception as e:
+        logger.exception("写入缓存失败: %s", path)
+        raise
+
+
 def read_gzip_cache(
     path: Union[Path, str],
     logger: Optional[logging.Logger] = None
@@ -56,31 +153,7 @@ def read_gzip_cache(
         FileNotFoundError: 文件不存在
         ValueError: JSON 解析失败（避免内存翻倍）
     """
-    path = Path(path)  # 统一转换为 Path
-    logger = get_module_logger(logger)
-    
-    if not path.exists():
-        raise FileNotFoundError(f"缓存文件不存在: {path}")
-    
-    try:
-        with gzip.open(path, 'rt', encoding='utf-8') as f:
-            data = json.load(f)
-        logger.debug("成功读取缓存: %s", path)
-        return data
-    except json.JSONDecodeError as e:
-        # 遵循 references/backtest-module-optimization-patterns.md Section 1.2
-        # 避免传递完整 JSON 文档字符串导致内存翻倍
-        logger.error(
-            "JSON 解析失败\n"
-            "文件路径: %s\n"
-            "错误位置: 行 %d, 列 %d\n"
-            "错误信息: %s",
-            path, e.lineno, e.colno, e.msg
-        )
-        raise ValueError(f"JSON解析失败: {path}, 位置 {e.pos}") from e
-    except Exception as e:
-        logger.exception("读取缓存失败: %s", path)
-        raise
+    return _read_cache_impl(Path(path), use_gzip=True, logger=get_module_logger(logger))
 
 
 def write_gzip_cache(
@@ -101,19 +174,7 @@ def write_gzip_cache(
     Raises:
         OSError: 文件写入失败
     """
-    path = Path(path)  # 统一转换为 Path
-    logger = get_module_logger(logger)
-    
-    if ensure_dir:
-        path.parent.mkdir(parents=True, exist_ok=True)
-    
-    try:
-        with gzip.open(path, 'wt', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
-        logger.debug("成功写入缓存: %s", path)
-    except Exception as e:
-        logger.exception("写入缓存失败: %s", path)
-        raise
+    _write_cache_impl(Path(path), data, use_gzip=True, ensure_dir=ensure_dir, logger=get_module_logger(logger))
 
 
 def read_json_cache(
@@ -134,31 +195,7 @@ def read_json_cache(
         FileNotFoundError: 文件不存在
         ValueError: JSON 解析失败（避免内存翻倍）
     """
-    path = Path(path)  # 统一转换为 Path
-    logger = get_module_logger(logger)
-    
-    if not path.exists():
-        raise FileNotFoundError(f"缓存文件不存在: {path}")
-    
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        logger.debug("成功读取缓存: %s", path)
-        return data
-    except json.JSONDecodeError as e:
-        # 遵循 references/backtest-module-optimization-patterns.md Section 1.2
-        # 避免传递完整 JSON 文档字符串导致内存翻倍
-        logger.error(
-            "JSON 解析失败\n"
-            "文件路径: %s\n"
-            "错误位置: 行 %d, 列 %d\n"
-            "错误信息: %s",
-            path, e.lineno, e.colno, e.msg
-        )
-        raise ValueError(f"JSON解析失败: {path}, 位置 {e.pos}") from e
-    except Exception as e:
-        logger.exception("读取缓存失败: %s", path)
-        raise
+    return _read_cache_impl(Path(path), use_gzip=False, logger=get_module_logger(logger))
 
 
 def write_json_cache(
@@ -179,19 +216,7 @@ def write_json_cache(
     Raises:
         OSError: 文件写入失败
     """
-    path = Path(path)  # 统一转换为 Path
-    logger = get_module_logger(logger)
-    
-    if ensure_dir:
-        path.parent.mkdir(parents=True, exist_ok=True)
-    
-    try:
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
-        logger.debug("成功写入缓存: %s", path)
-    except Exception as e:
-        logger.exception("写入缓存失败: %s", path)
-        raise
+    _write_cache_impl(Path(path), data, use_gzip=False, ensure_dir=ensure_dir, logger=get_module_logger(logger))
 
 
 def append_to_cache(
@@ -216,11 +241,12 @@ def append_to_cache(
     """
     path = Path(path)  # 统一转换为 Path
     logger = get_module_logger(logger)
+    use_gzip = _is_gzip_file(path)  # 使用统一判断函数
     
     # 读取现有缓存
     existing: Dict[str, Any] = {}
     if path.exists():
-        existing = read_gzip_cache(path, logger=logger) if path.suffix == '.gz' else read_json_cache(path, logger=logger)
+        existing = _read_cache_impl(path, use_gzip, logger)
         existing_data = existing.get(key, [])
     else:
         existing_data = []
@@ -239,10 +265,7 @@ def append_to_cache(
                 result[k] = v
     
     # 写入缓存
-    if path.suffix == '.gz':
-        write_gzip_cache(path, result, logger=logger)
-    else:
-        write_json_cache(path, result, logger=logger)
+    _write_cache_impl(path, result, use_gzip, ensure_dir=True, logger=logger)
     
     logger.info(
         "缓存追加完成: %s\n"
