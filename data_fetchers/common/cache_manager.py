@@ -38,6 +38,13 @@ _MODULE_LOGGER = None
 # 大文件阈值（MB）
 _LARGE_FILE_THRESHOLD_MB = 100
 
+# gzip 压缩级别（1-9，默认 6 平衡压缩率和速度）
+_DEFAULT_GZIP_COMPRESSLEVEL = 6
+
+# JSON 序列化选项
+_JSON_COMPACT_SEPARATORS = (',', ':')  # 紧凑格式
+_JSON_READABLE_INDENT = 2               # 可读格式缩进
+
 
 def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger:
     """
@@ -135,7 +142,10 @@ def _write_cache_impl(
     data: Dict[str, Any],
     use_gzip: bool,
     ensure_dir: bool,
-    logger: logging.Logger
+    logger: logging.Logger,
+    compresslevel: int = _DEFAULT_GZIP_COMPRESSLEVEL,
+    json_indent: Optional[int] = None,
+    json_sort_keys: bool = False
 ) -> None:
     """
     写入缓存的公共实现
@@ -146,20 +156,38 @@ def _write_cache_impl(
         use_gzip: 是否使用 gzip 压缩
         ensure_dir: 是否自动创建目录
         logger: Logger 对象
+        compresslevel: gzip 压缩级别（1-9，默认 6）
+        json_indent: JSON 缩进（None=紧凑，数字=可读）
+        json_sort_keys: 是否排序 JSON 键
         
     Raises:
         OSError: 文件写入失败
     """
+    # 验证数据类型
+    if not isinstance(data, dict):
+        logger.warning(
+            "缓存数据类型异常: 预期 dict，实际 %s\n"
+            "文件路径: %s\n"
+            "继续写入（JSON 支持非字典数据）",
+            type(data).__name__, path
+        )
+    
     if ensure_dir:
         path.parent.mkdir(parents=True, exist_ok=True)
     
+    # JSON 序列化参数
+    if json_indent is None:
+        separators = _JSON_COMPACT_SEPARATORS
+    else:
+        separators = None  # 使用默认分隔符
+    
     try:
         if use_gzip:
-            with gzip.open(path, 'wt', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
+            with gzip.open(path, 'wt', encoding='utf-8', compresslevel=compresslevel) as f:
+                json.dump(data, f, ensure_ascii=False, indent=json_indent, separators=separators, sort_keys=json_sort_keys)
         else:
             with open(path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
+                json.dump(data, f, ensure_ascii=False, indent=json_indent, separators=separators, sort_keys=json_sort_keys)
         logger.debug("成功写入缓存: %s", path)
     except Exception as e:
         logger.exception("写入缓存失败: %s", path)
@@ -191,7 +219,10 @@ def write_gzip_cache(
     path: Union[Path, str],
     data: Dict[str, Any],
     ensure_dir: bool = True,
-    logger: Optional[logging.Logger] = None
+    logger: Optional[logging.Logger] = None,
+    compresslevel: int = _DEFAULT_GZIP_COMPRESSLEVEL,
+    json_indent: Optional[int] = None,
+    json_sort_keys: bool = False
 ) -> None:
     """
     写入 gzip 压缩的 JSON 缓存
@@ -201,11 +232,17 @@ def write_gzip_cache(
         data: 要写入的数据
         ensure_dir: 是否自动创建目录（默认 True）
         logger: 调用方传入的 logger（可选）
+        compresslevel: gzip 压缩级别（1-9，默认 6）
+        json_indent: JSON 缩进（None=紧凑，数字=可读）
+        json_sort_keys: 是否排序 JSON 键
         
     Raises:
         OSError: 文件写入失败
     """
-    _write_cache_impl(Path(path), data, use_gzip=True, ensure_dir=ensure_dir, logger=get_module_logger(logger))
+    _write_cache_impl(
+        Path(path), data, use_gzip=True, ensure_dir=ensure_dir, logger=get_module_logger(logger),
+        compresslevel=compresslevel, json_indent=json_indent, json_sort_keys=json_sort_keys
+    )
 
 
 def read_json_cache(
@@ -233,7 +270,9 @@ def write_json_cache(
     path: Union[Path, str],
     data: Dict[str, Any],
     ensure_dir: bool = True,
-    logger: Optional[logging.Logger] = None
+    logger: Optional[logging.Logger] = None,
+    json_indent: Optional[int] = None,
+    json_sort_keys: bool = False
 ) -> None:
     """
     写入普通 JSON 缓存（非压缩）
@@ -243,11 +282,16 @@ def write_json_cache(
         data: 要写入的数据
         ensure_dir: 是否自动创建目录（默认 True）
         logger: 调用方传入的 logger（可选）
+        json_indent: JSON 缩进（None=紧凑，数字=可读）
+        json_sort_keys: 是否排序 JSON 键
         
     Raises:
         OSError: 文件写入失败
     """
-    _write_cache_impl(Path(path), data, use_gzip=False, ensure_dir=ensure_dir, logger=get_module_logger(logger))
+    _write_cache_impl(
+        Path(path), data, use_gzip=False, ensure_dir=ensure_dir, logger=get_module_logger(logger),
+        json_indent=json_indent, json_sort_keys=json_sort_keys
+    )
 
 
 def append_to_cache(
@@ -388,7 +432,10 @@ def write_cache(
     path: Union[Path, str],
     data: Dict[str, Any],
     ensure_dir: bool = True,
-    logger: Optional[logging.Logger] = None
+    logger: Optional[logging.Logger] = None,
+    compresslevel: int = _DEFAULT_GZIP_COMPRESSLEVEL,
+    json_indent: Optional[int] = None,
+    json_sort_keys: bool = False
 ) -> None:
     """
     写入缓存（自动判断 gzip/json）
@@ -400,6 +447,9 @@ def write_cache(
         data: 要写入的数据
         ensure_dir: 是否自动创建目录（默认 True）
         logger: 调用方传入的 logger（可选）
+        compresslevel: gzip 压缩级别（1-9，默认 6）
+        json_indent: JSON 缩进（None=紧凑，数字=可读）
+        json_sort_keys: 是否排序 JSON 键
         
     Raises:
         OSError: 文件写入失败
@@ -408,10 +458,19 @@ def write_cache(
         # 统一接口，无需手动判断文件类型
         write_cache('data.json.gz', {'key': 'value'})
         write_cache('data.json', {'key': 'value'})
+        
+        # 可读格式
+        write_cache('data.json', {'key': 'value'}, json_indent=2)
+        
+        # 排序键
+        write_cache('data.json', {'key': 'value'}, json_sort_keys=True)
     """
     path = Path(path)
     use_gzip = _is_gzip_file(path)
-    _write_cache_impl(path, data, use_gzip, ensure_dir=ensure_dir, logger=get_module_logger(logger))
+    _write_cache_impl(
+        path, data, use_gzip, ensure_dir=ensure_dir, logger=get_module_logger(logger),
+        compresslevel=compresslevel, json_indent=json_indent, json_sort_keys=json_sort_keys
+    )
 
 
 def cache_exists(path: Union[Path, str]) -> bool:
@@ -506,6 +565,24 @@ if __name__ == '__main__':
     print(f"gzip 数据: {gzip_data}")
     print(f"json 数据: {json_data}")
     
+    # 测试新增参数
+    print("\n测试新增参数（压缩级别 + JSON 格式选项）...")
+    test_options_path = test_dir / 'test_options.json.gz'
+    test_readable_path = test_dir / 'test_readable.json'
+    
+    # 压缩级别测试（级别 1，最快）
+    write_gzip_cache(test_options_path, {'compresslevel': 1}, compresslevel=1, logger=test_logger)
+    print(f"压缩级别 1 写入成功")
+    
+    # 可读格式测试（indent=2）
+    write_json_cache(test_readable_path, {'key1': 'value1', 'key2': 'value2'}, json_indent=2, json_sort_keys=True, logger=test_logger)
+    print(f"可读格式写入成功")
+    
+    # 验证可读格式
+    with open(test_readable_path, 'r') as f:
+        readable_content = f.read()
+    print(f"可读格式内容:\n{readable_content}")
+    
     # 测试辅助函数
     print("\n测试辅助函数...")
     print(f"cache_exists(test_unified.json.gz): {cache_exists(test_unified_path_gz)}")
@@ -540,6 +617,8 @@ if __name__ == '__main__':
     # 清理测试文件
     test_path.unlink()
     test_unified_path_json.unlink()
+    test_options_path.unlink()
+    test_readable_path.unlink()
     test_append_path.unlink()
     test_invalid_path.unlink()
     print("\n测试完成，已清理测试文件")

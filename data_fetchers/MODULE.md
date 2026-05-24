@@ -123,6 +123,14 @@ data_fetchers/
    - **__all__ 更新**：新增 4 个函数（11个公共API）
    - **测试代码增强**：新增统一 API + 辅助函数测试
    - **流程文档更新**：版本历史 v1.4
+10. v2.7（2026-05-24 21:55）：
+   - **gzip 压缩级别控制**：新增 `compresslevel` 参数（默认 6，平衡压缩率和速度）
+   - **JSON 序列化格式选项**：新增 `json_indent`、`json_sort_keys` 参数
+   - **缓存数据类型验证**：`_write_cache_impl` 添加非字典类型 WARNING 日志
+   - **新增模块级常量**：`_DEFAULT_GZIP_COMPRESSLEVEL`、`_JSON_COMPACT_SEPARATORS`、`_JSON_READABLE_INDENT`
+   - **更新所有写入函数签名**：`write_gzip_cache`、`write_json_cache`、`write_cache` 新增参数
+   - **测试代码增强**：新增压缩级别 + 可读格式测试
+   - **流程文档更新**：版本历史 v1.5
 
 ---
 
@@ -536,4 +544,4 @@ factor_df['middle'] = middle  # 成功赋值
 
 ---
 
-*最后更新: 2026-05-24 21:50*
+*最后更新: 2026-05-24 21:55*
