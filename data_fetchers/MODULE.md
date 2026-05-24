@@ -1,6 +1,6 @@
 # data_fetchers 模块规范
 
-> 版本: v2.26
+> 版本: v2.27
 > 创建时间: 2026-05-19
 > 更新时间: 2026-05-25
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
@@ -304,9 +304,20 @@ data_fetchers/
    - **版本历史补全**：stock_utils.py 新增 v1.4 版本演进说明
    - **修复原因**：代码bug（类型安全未实现）+ 规范遗漏（日期格式验证不够严格）
 
----
+30. v2.27（2026-05-25 21:57）：
+   - **stock_utils.py 第五轮优化**：参数类型安全 + 线程安全 + 日期边界验证
+   - **参数类型安全检查**：`is_main_board_stock` 新增 `isinstance(code, str)` 和 `isinstance(name, str)` 检查
+   - **线程锁保护**：`_get_imported_functions` 使用双重检查锁定模式（DCL）避免多线程竞争
+   - **日期边界验证**：新增 `_MIN_DATE = '1990-12-19'`（A股市场始于1990）和 `_MAX_DATE = datetime.now()` 验证
+   - **数据格式验证**：`load_main_board_stock_list` 新增 `isinstance(data, dict)` 检查
+   - **常量不可变性注释**：`MAIN_BOARD_PREFIXES`、`EXCLUDED_PREFIXES`、`EXCLUDED_NAME_KEYWORDS` 补充"使用元组确保不可变"注释
+   - **docstring Example 格式统一**：`get_module_logger` 从注释改为 `>>>` 格式
+   - **docstring Raises 补全**：`is_main_board_stock` 补充 TypeError 说明
+   - **测试扩展**：8项测试（含参数类型验证 + 日期边界验证）
+   - **版本历史补全**：stock_utils.py 新增 v1.5 版本演进说明
+   - **修复原因**：代码bug（参数类型安全未实现、线程竞争）+ 规范遗漏（日期边界验证缺失、常量不可变性注释缺失）
 
-## 概述
+---
 
 data_fetchers 模块负责：
 1. 从外部数据源拉取因子数据、收益数据等

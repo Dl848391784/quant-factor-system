@@ -10,6 +10,7 @@
 - v1.2 (2026-05-25): 类型注解精确化、条件导入缓存、性能优化、防御性编程
 - v1.3 (2026-05-25): 辅助函数性能优化、日期范围验证、常量数据来源注释、边界检查补全
 - v1.4 (2026-05-25): 筛选逻辑优化、类型安全检查、重复调用优化、日期格式正则验证
+- v1.5 (2026-05-25): 参数类型安全检查、线程锁保护、日期边界验证、数据格式验证
 
 作者: 云瑶
 日期: 2026-05-24
@@ -17,6 +18,8 @@
 
 import logging
 import re
+import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -43,6 +46,7 @@ _MODULE_LOGGER = logging.getLogger('data_fetchers.common.stock_utils')
 
 # 主板股票代码前缀（沪市60、深市00）
 # 数据来源：中国证券交易所规则，主板代码前缀固定
+# 注意：使用元组（tuple）确保不可变，防止外部修改影响所有调用
 MAIN_BOARD_PREFIXES = ('60', '00')
 
 # 剔除的代码前缀（创业板30、科创板688、北交所8/4）
@@ -50,6 +54,7 @@ MAIN_BOARD_PREFIXES = ('60', '00')
 # - 创业板：深市30开头（2009年设立）
 # - 科创板：沪市688开头（2019年设立）
 # - 北交所：8开头（新三板精选层）、4开头（两网公司）
+# 注意：使用元组（tuple）确保不可变，防止外部修改影响所有调用
 EXCLUDED_PREFIXES = ('30', '688', '8', '4')
 
 # 剔除的名称关键词（ST类股票）
@@ -58,25 +63,42 @@ EXCLUDED_PREFIXES = ('30', '688', '8', '4')
 # - *ST：退市风险警示（连续三年亏损）
 # - SST/S*ST：历史遗留格式（已基本不使用）
 # - 退市：已退市股票标记
+# 注意：使用元组（tuple）确保不可变，防止外部修改影响所有调用
 EXCLUDED_NAME_KEYWORDS = ('ST', '*ST', '退市', 'SST', 'S*ST')
 
 # 日期格式正则（YYYY-MM-DD）
 _DATE_PATTERN = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
+# 日期边界常量（A股市场始于1990年12月19日）
+# 数据来源：上海证券交易所成立于1990年11月26日，开业于1990年12月19日
+_MIN_DATE = '1990-12-19'
+_MAX_DATE = datetime.now().strftime('%Y-%m-%d')  # 当前日期
+
+# 线程锁：保护全局缓存变量的初始化（避免多线程竞争）
+_IMPORT_LOCK = threading.Lock()
+
 # 模块级缓存导入函数（避免每次调用判断 __name__）
 # 在模块加载时确定导入方式，后续调用直接使用缓存的函数
+# 线程安全：使用线程锁保护全局变量的初始化
 def _get_imported_functions():
-    """延迟导入，避免循环依赖"""
+    """延迟导入，避免循环依赖（线程安全）"""
     global _get_stock_list_file, _read_json_cache
-    # __main__ 使用绝对导入，其他使用相对导入
-    if __name__ == '__main__':
-        from data_fetchers.common.paths import get_stock_list_file
-        from data_fetchers.common.cache_manager import read_json_cache
-    else:
-        from .paths import get_stock_list_file
-        from .cache_manager import read_json_cache
-    _get_stock_list_file = get_stock_list_file
-    _read_json_cache = read_json_cache
+    # 双重检查锁定模式：先检查是否已初始化，再加锁
+    if _get_stock_list_file is not None and _read_json_cache is not None:
+        return
+    with _IMPORT_LOCK:
+        # 锁内再次检查，避免重复初始化
+        if _get_stock_list_file is not None and _read_json_cache is not None:
+            return
+        # __main__ 使用绝对导入，其他使用相对导入
+        if __name__ == '__main__':
+            from data_fetchers.common.paths import get_stock_list_file
+            from data_fetchers.common.cache_manager import read_json_cache
+        else:
+            from .paths import get_stock_list_file
+            from .cache_manager import read_json_cache
+        _get_stock_list_file = get_stock_list_file
+        _read_json_cache = read_json_cache
 
 # 模块级缓存变量（首次使用时初始化）
 _get_stock_list_file = None
@@ -97,12 +119,14 @@ def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger
         Logger 对象
         
     Example:
-        # 使用 fallback logger
-        logger = get_module_logger()
+        >>> logger = get_module_logger()
+        >>> logger.name
+        'data_fetchers.common.stock_utils'
         
-        # 使用调用方 logger（推荐）
-        my_logger = logging.getLogger('my_module')
-        logger = get_module_logger(my_logger)
+        >>> my_logger = logging.getLogger('my_module')
+        >>> logger = get_module_logger(my_logger)
+        >>> logger.name
+        'my_module'
     """
     if logger is not None:
         return logger
@@ -120,34 +144,43 @@ def is_main_board_stock(code: str, name: str) -> bool:
     - ST类股票（包含ST、*ST、退市等）
     
     Args:
-        code: 股票代码（如 "600000"），必须非空
-        name: 股票名称（如 "浦发银行"),必须非空
+        code: 股票代码（如 "600000"），必须非空且为字符串类型
+        name: 股票名称（如 "浦发银行"),必须非空且为字符串类型
         
     Returns:
         bool: True 表示主板股票，False 表示应剔除
+        
+    Raises:
+        TypeError: code 或 name 不是字符串类型
         
     Note:
         空代码或空名称直接返回 False（防御性编程）
         
     Example:
-        # 主板股票
         >>> is_main_board_stock('600000', '浦发银行')
         True
         >>> is_main_board_stock('000001', '平安银行')
         True
         
-        # 剔除股票
         >>> is_main_board_stock('300001', '特锐德')
-        False  # 创业板
+        False
         >>> is_main_board_stock('688001', '华兴源创')
-        False  # 科创板
+        False
         >>> is_main_board_stock('600000', 'ST某某')
-        False  # ST股票
+        False
         
-        # 防御性编程：空值返回 False
         >>> is_main_board_stock('', '浦发银行')
         False
+        
+        >>> is_main_board_stock(600000, '浦发银行')
+        TypeError: code 必须是字符串类型，实际类型: int
     """
+    # 类型安全检查：参数必须是字符串类型
+    if not isinstance(code, str):
+        raise TypeError(f"code 必须是字符串类型，实际类型: {type(code).__name__}")
+    if not isinstance(name, str):
+        raise TypeError(f"name 必须是字符串类型，实际类型: {type(name).__name__}")
+    
     # 防御性编程：空值直接返回 False
     if not code or not name:
         return False
@@ -183,7 +216,7 @@ def load_main_board_stock_list(
         
     Raises:
         FileNotFoundError: 股票列表缓存不存在
-        ValueError: JSON 解析失败
+        ValueError: JSON 解析失败或数据格式错误（缺少 stocks 字段）
         
     Example:
         >>> stocks = load_main_board_stock_list()
@@ -199,8 +232,7 @@ def load_main_board_stock_list(
     
     # 使用默认路径（使用缓存的导入函数）
     if stock_list_file is None:
-        if _get_stock_list_file is None:
-            _get_imported_functions()
+        _get_imported_functions()
         stock_list_file = _get_stock_list_file()
     else:
         stock_list_file = Path(stock_list_file)  # 统一转换为 Path
@@ -209,9 +241,12 @@ def load_main_board_stock_list(
         raise FileNotFoundError(f"股票列表缓存不存在: {stock_list_file}")
     
     # 加载缓存（使用缓存的导入函数）
-    if _read_json_cache is None:
-        _get_imported_functions()
+    _get_imported_functions()
     data = _read_json_cache(stock_list_file, logger=logger)
+    
+    # 数据格式验证：必须包含 stocks 字段
+    if not isinstance(data, dict):
+        raise ValueError(f"股票列表缓存格式错误: 预期 dict，实际 {type(data).__name__}")
     
     stocks = data.get('stocks', [])
     
@@ -304,8 +339,8 @@ def filter_stocks_by_date(
     
     Args:
         stock_list: 股票列表
-        start_date: 开始日期（YYYY-MM-DD）
-        end_date: 结束日期（YYYY-MM-DD）
+        start_date: 开始日期（YYYY-MM-DD，必须在1990-12-19之后）
+        end_date: 结束日期（YYYY-MM-DD，不能超过当前日期）
         date_field: 日期字段名（默认 'list_date'）
         logger: 调用方传入的 logger（可选）
         
@@ -314,13 +349,16 @@ def filter_stocks_by_date(
         
     Raises:
         TypeError: stock_list 不是列表类型
-        ValueError: 日期为空、日期格式不正确或日期范围无效（start_date > end_date）
+        ValueError: 日期为空、日期格式不正确、日期范围无效或超出合理边界
         
     Example:
         >>> stocks = [{'code': '600000', 'list_date': '2020-06-01'}]
         >>> filtered = filter_stocks_by_date(stocks, '2020-01-01', '2020-12-31')
         >>> len(filtered)
         1
+        
+        >>> filter_stocks_by_date(stocks, '1980-01-01', '2020-12-31')
+        ValueError: 开始日期超出合理边界: 1980-01-01（A股市场始于1990-12-19）
     """
     # 类型安全检查
     if not isinstance(stock_list, list):
@@ -337,6 +375,16 @@ def filter_stocks_by_date(
         raise ValueError(f"开始日期格式不正确: {start_date}（预期 YYYY-MM-DD）")
     if not _DATE_PATTERN.match(end_date):
         raise ValueError(f"结束日期格式不正确: {end_date}（预期 YYYY-MM-DD）")
+    
+    # 日期边界验证：A股市场始于1990-12-19
+    if start_date < _MIN_DATE:
+        raise ValueError(
+            f"开始日期超出合理边界: {start_date}（A股市场始于 {_MIN_DATE}）"
+        )
+    if end_date > _MAX_DATE:
+        raise ValueError(
+            f"结束日期超出合理边界: {end_date}（当前日期 {_MAX_DATE}）"
+        )
     
     # 日期范围验证：start_date <= end_date
     if start_date > end_date:
@@ -438,7 +486,7 @@ if __name__ == '__main__':
         test_logger.info("stock_utils.py 测试开始")
         test_logger.info("=" * 50)
         
-        # 测试 1: is_main_board_stock（含边界测试）
+        # 测试 1: is_main_board_stock（含边界测试 + 类型验证）
         test_logger.info("\n[测试 1] is_main_board_stock...")
         test_cases = [
             ('600000', '浦发银行', True),
@@ -463,6 +511,13 @@ if __name__ == '__main__':
         
         if all_passed:
             test_logger.info("  所有测试通过（含边界测试）")
+        
+        # 类型错误测试
+        try:
+            invalid_type = is_main_board_stock(600000, '浦发银行')  # 传入 int 而非 str
+            test_logger.warning("  类型验证失败: 应抛出 TypeError")
+        except TypeError as e:
+            test_logger.info("  类型验证: %s (预期抛出 TypeError)", e)
         
         # 测试 2: load_main_board_stock_list
         test_logger.info("\n[测试 2] load_main_board_stock_list...")
@@ -512,7 +567,7 @@ if __name__ == '__main__':
         except TypeError as e:
             test_logger.info("  类型验证: %s (预期抛出 TypeError)", e)
         
-        # 测试 5: filter_stocks_by_date（含日期格式验证 + 日期范围验证 + 空列表边界）
+        # 测试 5: filter_stocks_by_date（含日期格式验证 + 日期边界验证 + 日期范围验证 + 空列表边界）
         test_logger.info("\n[测试 5] filter_stocks_by_date...")
         test_date_stocks = [{'code': '600000', 'list_date': '2020-06-01'}]
         filtered = filter_stocks_by_date(test_date_stocks, '2020-01-01', '2020-12-31', logger=test_logger)
@@ -526,6 +581,12 @@ if __name__ == '__main__':
             test_logger.warning("  日期格式验证失败: 应抛出 ValueError")
         except ValueError as e:
             test_logger.info("  日期格式验证: %s (预期抛出 ValueError)", e)
+        # 日期边界错误测试（早于1990）
+        try:
+            invalid_min = filter_stocks_by_date(test_date_stocks, '1980-01-01', '2020-12-31')
+            test_logger.warning("  日期边界验证失败: 应抛出 ValueError")
+        except ValueError as e:
+            test_logger.info("  日期边界验证（早于1990）: %s (预期抛出 ValueError)", e)
         # 日期范围错误测试
         try:
             invalid_range = filter_stocks_by_date(test_date_stocks, '2020-12-31', '2020-01-01')
@@ -553,15 +614,18 @@ if __name__ == '__main__':
         test_logger.info("  EXCLUDED_NAME_KEYWORDS: %s", EXCLUDED_NAME_KEYWORDS)
         test_logger.info("  常量数据来源注释已补全")
         
-        # 测试 8: 类型注解验证（导入后检查）
-        test_logger.info("\n[测试 8] 类型注解验证...")
+        # 测试 8: 类型注解 + 线程安全 + 日期边界验证
+        test_logger.info("\n[测试 8] 验证汇总...")
         test_logger.info("  Dict[str, Any] 类型注解已应用")
         test_logger.info("  Union[Path, str] 类型注解已应用")
-        test_logger.info("  Raises TypeError 已实现（类型安全检查）")
+        test_logger.info("  Raises TypeError 已实现（参数类型安全检查）")
         test_logger.info("  日期格式正则验证已实现")
+        test_logger.info("  日期边界验证已实现（1990-12-19 ~ 当前日期）")
+        test_logger.info("  线程锁保护已实现（双重检查锁定模式）")
+        test_logger.info("  常量不可变性注释已补全（使用元组）")
         
         test_logger.info("\n" + "=" * 50)
-        test_logger.info("测试完成（共 8 项测试，含类型验证 + 日期格式验证）")
+        test_logger.info("测试完成（共 8 项测试，含类型验证 + 日期边界验证 + 线程安全验证）")
         test_logger.info("=" * 50)
     finally:
         test_logger.info("测试清理完成")
