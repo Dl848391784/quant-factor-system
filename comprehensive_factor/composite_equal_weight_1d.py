@@ -40,9 +40,9 @@ from comprehensive_factor.common.data_loader import DEFAULT_CACHE_DIR
 class EqualWeightLayerConfig(CompositeLayerConfig):
     """等权综合因子配置
     
-    因子组合：
-    - rsi_6: RSI 因子（技术指标，反向）
-    - volume_ratio_5: 量比因子（流动性，反向）
+    继承 CompositeLayerConfig，因子组合参数已在父类定义：
+    - factor_list: ['rsi', 'volume_ratio']
+    - factor_cols: ['rsi_6', 'volume_ratio_5']
     
     相关性：corr ≈ 0.30（低相关，适合组合）
     
@@ -50,11 +50,7 @@ class EqualWeightLayerConfig(CompositeLayerConfig):
     - 缩量（volume_ratio低）+ 超卖（rsi低） → 预期高收益
     """
     
-    # 因子组合
-    factor_list: List[str] = field(default_factory=lambda: ['rsi', 'volume_ratio'])
-    factor_cols: List[str] = field(default_factory=lambda: ['rsi_6', 'volume_ratio_5'])
-    
-    # 分层参数
+    # 分层参数（覆盖父类默认值，因子组合参数继承父类）
     n_layers: int = 5
     factor_direction: str = 'negative'
     long_layers: List[int] = field(default_factory=lambda: [1, 2])

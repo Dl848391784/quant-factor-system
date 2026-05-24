@@ -2629,6 +2629,85 @@ main = create_cli_entrypoint(
 
 ---
 
+## Config 继承规范（v1.14 新增）
+
+> 本节定义 Config 子类的继承规范，避免冗余字段定义。
+
+### 问题类型
+
+**问题：** Config 子类重复定义父类已有字段，违反 DRY 原则。
+
+**CompositeLayerConfig 父类字段（composite_runner.py 第 72-74 行）：**
+```python
+@dataclass
+class CompositeLayerConfig(LayerConfigBase):
+    # 因子组合参数
+    factor_list: List[str] = field(default_factory=lambda: ['rsi', 'volume_ratio'])
+    factor_cols: List[str] = field(default_factory=lambda: ['rsi_6', 'volume_ratio_5'])
+    rolling_window: int = 60
+```
+
+**错误写法：**
+```python
+# ❌ 子类重复定义父类已有字段
+@dataclass
+class ICIRWeightLayerConfig(CompositeLayerConfig):
+    # 冗余：factor_list/factor_cols 已在父类定义
+    factor_list: List[str] = field(default_factory=lambda: ['rsi', 'volume_ratio'])
+    factor_cols: List[str] = field(default_factory=lambda: ['rsi_6', 'volume_ratio_5'])
+    
+    # 分层参数
+    n_layers: int = 5
+    ...
+```
+
+**正确写法：**
+```python
+# ✓ 子类只定义因子特有的参数，继承父类字段
+@dataclass
+class ICIRWeightLayerConfig(CompositeLayerConfig):
+    """ICIR加权配置
+    
+    继承 CompositeLayerConfig：
+    - factor_list: ['rsi', 'volume_ratio']
+    - factor_cols: ['rsi_6', 'volume_ratio_5']
+    """
+    
+    # 只定义分层参数（覆盖父类 LayerConfigBase 默认值）
+    n_layers: int = 5
+    factor_direction: str = 'negative'
+    long_layers: List[int] = [1, 2]  # 直接赋值，无需 field()
+    short_layers: List[int] = [4, 5]
+    trade_cost_rate: float = 0.003
+    min_stocks_per_layer: int = 10
+```
+
+**继承层级字段定义：**
+
+| 字段 | 定义层级 | 说明 |
+|------|---------|------|
+| factor_list | CompositeLayerConfig | 因子名称列表 |
+| factor_cols | CompositeLayerConfig | 因子列名列表 |
+| rolling_window | CompositeLayerConfig | 滚动ICIR窗口 |
+| n_layers | LayerConfigBase | 分层数量 |
+| factor_direction | LayerConfigBase | 因子方向 |
+| long_layers | LayerConfigBase | 多头层组合 |
+| short_layers | LayerConfigBase | 空头层组合 |
+| trade_cost_rate | LayerConfigBase | 交易成本率 |
+| min_stocks_per_layer | LayerConfigBase | 每层最小股票数 |
+
+**子类只需定义：**
+- 特有参数（如其他加权方式需要的特殊参数）
+- 覆盖父类默认值（如不同的 n_layers）
+
+**简单列表赋值：**
+- `List[int]` 类型**必须使用 `field(default_factory=...)`**，不能直接赋值 `[1, 2]`
+- 原因：Python dataclass 不允许可变默认值（list 是可变类型）
+- 正确：`long_layers: List[int] = field(default_factory=lambda: [1, 2])`
+- 错误：`long_layers: List[int] = [1, 2]` → ValueError
+
+---
+
 | 版本 | 日期 | 变更内容 |
 |------|------|----------|
 | v1.0 | 2026-05-24 | 初始设计：目录结构、脚本命名、加权方式、公共模块、输出规范 |
@@ -2645,3 +2724,4 @@ main = create_cli_entrypoint(
 | v1.11 | 2026-05-24 | 新增lambda延迟绑定修复、NaN动态权重归一化、正则预编译规范 |
 | v1.12 | 2026-05-24 | 新增正则贪婪匹配、校验层级规范、rolling_std ddof规范、条件冗余删除、常量替代硬编码规范 |
 | v1.13 | 2026-05-24 | 新增CLI入口最小导入规范、Config默认值单一数据源规范 |
+| v1.14 | 2026-05-24 | 新增Config继承规范（子类不应重复定义父类字段）、ICIR数据来源注释规范 |
