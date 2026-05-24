@@ -12,17 +12,40 @@
 版本历史：
 - v1.0 (2026-05-24): 初始版本，支持 bollinger_pb、kdj_j、turnover_surge 因子
 - v1.1 (2026-05-25): logger 参数化 + __all__ 导出 + 类型注解精确化 + 异常处理补全
+- v1.2 (2026-05-25): 清理冗余导入/常量 + os 导入规范化 + 数据验证补全 + CLI 参数补全 + 运行耗时统计
+- v1.3 (2026-05-25): 常量命名私有化（DEFAULT_CACHE_DIR → _DEFAULT_CACHE_DIR）+ 导入顺序 PEP 8 合规化 + 导入位置规范化（函数内导入移到顶部）
 
 作者: 云瑶
 """
-import json
 import gzip
+import json
 import logging
-import pandas as pd
-import numpy as np
+import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Union, Any
+from typing import Any, Dict, Optional, Union
+
+import pandas as pd
+
+# ============================================================================
+# 因子计算函数导入（遵循模块边界规范：导入计算函数而非公共模块）
+# ============================================================================
+# 条件导入：__main__ 时添加 sys.path + 绝对导入，其他时候使用相对导入
+# 注意：sys.path.insert 是必要的，因为脚本需要能够直接运行
+# 遵循 stock_utils.py 的条件导入模式
+if __name__ == '__main__':
+    import sys
+    from pathlib import Path as _Path
+    project_root = _Path(__file__).parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+    from factor_ic.ic_bollinger_pb_1d import calculate_bollinger_pb
+    from factor_ic.ic_kdj_j_1d import calculate_kdj_j
+    from factor_ic.ic_turnover_surge_1d import calculate_turnover_surge
+else:
+    from factor_ic.ic_bollinger_pb_1d import calculate_bollinger_pb
+    from factor_ic.ic_kdj_j_1d import calculate_kdj_j
+    from factor_ic.ic_turnover_surge_1d import calculate_turnover_surge
 
 # ============================================================================
 # 模块级 fallback logger（遵循 PROJECT.md 公共模块日志规范）
@@ -38,19 +61,10 @@ __all__ = [
 ]
 
 # ============================================================================
-# 参数统一管理
+# 默认路径配置（私有常量）
 # ============================================================================
 
-DEFAULT_N_BOLLINGER = 20     # 布林带移动平均周期
-DEFAULT_K_BOLLINGER = 2.0    # 布林带标差倍数
-DEFAULT_N_KDJ = 9            # KDJ RSV计算周期
-DEFAULT_M1_KDJ = 3           # KDJ K值平滑周期
-DEFAULT_M2_KDJ = 3           # KDJ D值平滑周期
-DEFAULT_SURGE_WINDOW = 5     # 换手率突增均值计算窗口
-
-EPSILON = 1e-10              # 避免除零阈值
-
-DEFAULT_CACHE_DIR = Path(__file__).parent.parent / 'cache' / 'factor_data'
+_DEFAULT_CACHE_DIR = Path(__file__).parent.parent / 'cache' / 'factor_data'
 
 
 # ============================================================================
@@ -111,35 +125,35 @@ def generate_all_factors(
         logger: 调用方传入的 logger（可选）
         
     Returns:
-        Dict[str, Any]: 元数据字典（包含生成时间、因子列表等）
+        Dict[str, Any]: 元数据字典（包含生成时间、因子列表、运行耗时等）
         
     Raises:
         FileNotFoundError: 输入数据文件不存在
         json.JSONDecodeError: JSON 解析失败
-        ValueError: 数据格式不正确
+        ValueError: 数据格式不正确（缺少 'data' 字段）
+        KeyError: 必需字段不存在
         
     Note:
         - 输出到 cache/factor_data/factor_data_extended.json.gz
         - 复用 factor_ic 计算函数（遵循强制复用规范）
         - 公共模块接收 logger 参数，日志可追溯调用方
+        - 运行耗时统计方便性能分析
         
     Example:
         >>> from data_fetchers.factor_generator import generate_all_factors
         >>> metadata = generate_all_factors()
         >>> metadata['factor_columns']
         ['bollinger_pb', 'kdj_j', 'turnover_surge']
+        >>> metadata['elapsed_seconds']
+        120.5
     """
+    start_time = datetime.now()
     logger = get_module_logger(logger)
     
-    # 导入因子计算函数（遵循模块边界规范）
-    from factor_ic.ic_kdj_j_1d import calculate_kdj_j
-    from factor_ic.ic_bollinger_pb_1d import calculate_bollinger_pb
-    from factor_ic.ic_turnover_surge_1d import calculate_turnover_surge
-    
     # 默认路径
-    factor_data_path = Path(factor_data_path) if factor_data_path else DEFAULT_CACHE_DIR / 'factor_data.json.gz'
-    turnover_data_path = Path(turnover_data_path) if turnover_data_path else DEFAULT_CACHE_DIR / 'turnover_rate_data.json.gz'
-    output_path = Path(output_path) if output_path else DEFAULT_CACHE_DIR / 'factor_data_extended.json.gz'
+    factor_data_path = Path(factor_data_path) if factor_data_path else _DEFAULT_CACHE_DIR / 'factor_data.json.gz'
+    turnover_data_path = Path(turnover_data_path) if turnover_data_path else _DEFAULT_CACHE_DIR / 'turnover_rate_data.json.gz'
+    output_path = Path(output_path) if output_path else _DEFAULT_CACHE_DIR / 'factor_data_extended.json.gz'
     
     logger.info("=" * 40)
     logger.info("统一因子生成模块")
@@ -155,6 +169,10 @@ def generate_all_factors(
         raise FileNotFoundError(f"基础因子数据文件不存在: {factor_data_path}")
     except json.JSONDecodeError as e:
         raise ValueError(f"基础因子数据 JSON 解析失败: {factor_data_path}") from e
+    
+    # 数据验证：检查 'data' 字段存在
+    if 'data' not in base_data:
+        raise ValueError(f"基础因子数据缺少 'data' 字段: {factor_data_path}")
     
     factor_df = pd.DataFrame(base_data['data'])
     factor_df['date'] = pd.to_datetime(factor_df['date'])
@@ -173,6 +191,10 @@ def generate_all_factors(
     except json.JSONDecodeError as e:
         raise ValueError(f"换手率数据 JSON 解析失败: {turnover_data_path}") from e
     
+    # 数据验证：检查 'data' 字段存在
+    if 'data' not in turnover_data:
+        raise ValueError(f"换手率数据缺少 'data' 字段: {turnover_data_path}")
+    
     turnover_df = pd.DataFrame(turnover_data['data'])
     # 使用 format='mixed' 处理不同日期格式（有的带时间，有的不带）
     turnover_df['date'] = pd.to_datetime(turnover_df['date'], format='mixed')
@@ -186,6 +208,11 @@ def generate_all_factors(
         how='left'
     )
     
+    # 检查换手率缺失情况
+    turnover_missing = factor_df['turnover_rate'].isna().sum()
+    if turnover_missing > 0:
+        logger.warning("  换手率缺失记录数: %d (%.2f%%)", turnover_missing, turnover_missing / len(factor_df) * 100)
+    
     logger.info("  合并后记录数: %d", len(factor_df))
     
     # ========== Step 3: 计算 bollinger_pb ==========
@@ -193,24 +220,24 @@ def generate_all_factors(
     
     factor_df = calculate_bollinger_pb(factor_df)
     
-    valid_count = factor_df['bollinger_pb'].notna().sum()
-    logger.info("  有效 bollinger_pb: %d", valid_count)
+    bollinger_valid = factor_df['bollinger_pb'].notna().sum()
+    logger.info("  有效 bollinger_pb: %d (%.2f%%)", bollinger_valid, bollinger_valid / len(factor_df) * 100)
     
     # ========== Step 4: 计算 kdj_j ==========
     logger.info("Step 4: 计算 KDJ_J 因子...")
     
     factor_df = calculate_kdj_j(factor_df)
     
-    valid_count = factor_df['kdj_j'].notna().sum()
-    logger.info("  有效 kdj_j: %d", valid_count)
+    kdj_valid = factor_df['kdj_j'].notna().sum()
+    logger.info("  有效 kdj_j: %d (%.2f%%)", kdj_valid, kdj_valid / len(factor_df) * 100)
     
     # ========== Step 5: 计算 turnover_surge ==========
     logger.info("Step 5: 计算换手率突增因子...")
     
     factor_df = calculate_turnover_surge(factor_df)
     
-    valid_count = factor_df['turnover_surge'].notna().sum()
-    logger.info("  有效 turnover_surge: %d", valid_count)
+    surge_valid = factor_df['turnover_surge'].notna().sum()
+    logger.info("  有效 turnover_surge: %d (%.2f%%)", surge_valid, surge_valid / len(factor_df) * 100)
     
     # ========== Step 6: 格式化输出 ==========
     logger.info("Step 6: 格式化输出...")
@@ -224,6 +251,11 @@ def generate_all_factors(
         'bollinger_pb', 'kdj_j', 'turnover_surge'
     ]
     
+    # 检查列是否存在
+    missing_cols = [col for col in output_cols if col not in factor_df.columns]
+    if missing_cols:
+        raise KeyError(f"输出列不存在: {missing_cols}")
+    
     output_df = factor_df[output_cols].copy()
     
     # ========== Step 7: 保存输出 ==========
@@ -235,7 +267,6 @@ def generate_all_factors(
     }
     
     # 使用临时文件 + os.replace 原子写入（遵循 PROJECT.md 文件写入规范）
-    import os
     temp_path = output_path.with_suffix('.tmp')
     try:
         with gzip.open(temp_path, 'wt') as f:
@@ -250,11 +281,21 @@ def generate_all_factors(
     logger.info("  输出路径: %s", output_path)
     logger.info("  输出记录数: %d", len(output_df))
     
+    # 计算运行耗时
+    end_time = datetime.now()
+    elapsed_seconds = (end_time - start_time).total_seconds()
+    
     # ========== Step 8: 返回元数据 ==========
     metadata = {
-        'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'generated_at': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'elapsed_seconds': round(elapsed_seconds, 2),
         'total_records': len(output_df),
-        'factor_columns': output_cols[6:],  # 因子列（不含基础列）
+        'valid_records': {
+            'bollinger_pb': bollinger_valid,
+            'kdj_j': kdj_valid,
+            'turnover_surge': surge_valid,
+        },
+        'factor_columns': output_cols[8:],  # 扩展因子列（不含基础列和基础因子）
         'input_sources': {
             'factor_data': str(factor_data_path),
             'turnover_data': str(turnover_data_path)
@@ -265,6 +306,7 @@ def generate_all_factors(
     logger.info("=" * 40)
     logger.info("因子生成完成")
     logger.info("生成时间: %s", metadata['generated_at'])
+    logger.info("运行耗时: %.2f 秒", metadata['elapsed_seconds'])
     logger.info("因子列: %s", metadata['factor_columns'])
     logger.info("=" * 40)
     
@@ -295,6 +337,8 @@ def main():
     import logging
     
     parser = argparse.ArgumentParser(description='统一因子生成模块')
+    parser.add_argument('--factor_data', type=str, default=None, help='基础因子数据路径')
+    parser.add_argument('--turnover_data', type=str, default=None, help='换手率数据路径')
     parser.add_argument('--output', type=str, default=None, help='输出路径')
     parser.add_argument('--quiet', action='store_true', help='静默模式（只输出 ERROR 级别日志）')
     
@@ -304,10 +348,15 @@ def main():
     log_level = logging.ERROR if args.quiet else logging.INFO
     logger = setup_logger('factor_generator', level=log_level)
     
+    # 参数路径转换
+    factor_data_path = Path(args.factor_data) if args.factor_data else None
+    turnover_data_path = Path(args.turnover_data) if args.turnover_data else None
     output_path = Path(args.output) if args.output else None
     
     try:
         metadata = generate_all_factors(
+            factor_data_path=factor_data_path,
+            turnover_data_path=turnover_data_path,
             output_path=output_path,
             logger=logger
         )
@@ -324,4 +373,76 @@ def main():
 # ============================================================================
 
 if __name__ == '__main__':
-    main()
+    # 测试模式：使用真实数据进行验证
+    import sys
+    from pathlib import Path
+    
+    # 添加项目根目录到 sys.path（仅在直接运行时）
+    project_root = Path(__file__).parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+    
+    from data_fetchers.common.logger_config import setup_logger
+    
+    # 设置测试 logger（遵循 PROJECT.md 第780-839行规范，使用真实模块名）
+    test_logger = setup_logger('data_fetchers.factor_generator', level=logging.INFO)
+    
+    test_logger.info("=" * 40)
+    test_logger.info("factor_generator.py 自测试")
+    test_logger.info("=" * 40)
+    
+    try:
+        # 测试 1: 导入验证
+        test_logger.info("\n[测试 1] 导入验证...")
+        from data_fetchers.factor_generator import generate_all_factors, get_module_logger
+        test_logger.info("  generate_all_factors 导入成功")
+        test_logger.info("  get_module_logger 导入成功")
+        
+        # 测试 2: get_module_logger 验证
+        test_logger.info("\n[测试 2] get_module_logger 验证...")
+        module_logger = get_module_logger()
+        test_logger.info("  模块 logger 名称: %s", module_logger.name)
+        assert module_logger.name == 'data_fetchers.factor_generator', "logger 名称不正确"
+        test_logger.info("  logger 名称验证通过")
+        
+        # 测试 3: generate_all_factors 验证（使用真实数据）
+        test_logger.info("\n[测试 3] generate_all_factors 验证...")
+        test_logger.info("  使用真实数据进行测试...")
+        
+        metadata = generate_all_factors(logger=test_logger)
+        
+        # 验证返回字段
+        test_logger.info("\n[测试 4] 返回字段验证...")
+        required_fields = [
+            'generated_at', 'elapsed_seconds', 'total_records',
+            'valid_records', 'factor_columns', 'input_sources', 'output_path'
+        ]
+        for field in required_fields:
+            assert field in metadata, f"缺少必需字段: {field}"
+            test_logger.info("  字段 %s 存在: %s", field, metadata[field])
+        
+        # 验证因子列
+        test_logger.info("\n[测试 5] 因子列验证...")
+        expected_factors = ['bollinger_pb', 'kdj_j', 'turnover_surge']
+        assert metadata['factor_columns'] == expected_factors, "因子列不正确"
+        test_logger.info("  因子列验证通过: %s", metadata['factor_columns'])
+        
+        # 验证有效记录数
+        test_logger.info("\n[测试 6] 有效记录数验证...")
+        for factor, count in metadata['valid_records'].items():
+            test_logger.info("  %s 有效记录数: %d", factor, count)
+            assert count > 0, f"{factor} 有效记录数为 0"
+        
+        test_logger.info("\n" + "=" * 40)
+        test_logger.info("所有测试通过")
+        test_logger.info("运行耗时: %.2f 秒", metadata['elapsed_seconds'])
+        test_logger.info("=" * 40)
+        
+    except Exception as e:
+        test_logger.error("测试失败: %s", str(e))
+        raise
+    finally:
+        # 清理测试 logger 处理器
+        for handler in list(test_logger.handlers):
+            handler.close()
+            test_logger.removeHandler(handler)

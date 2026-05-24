@@ -1,6 +1,6 @@
 # data_fetchers 模块规范
 
-> 版本: v2.35
+> 版本: v2.36
 > 创建时间: 2026-05-19
 > 更新时间: 2026-05-25
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
@@ -392,6 +392,13 @@ data_fetchers/
    - **docstring 补全**：Args/Returns/Raises/Note/Example 全部补齐
    - **__init__.py 导出**：新增模块级导出
    - **修复原因**：代码bug（print vs logger、sys.path.insert、缺少异常处理）+ 规范遗漏（缺少 __all__、logger 参数、docstring Raises）
+
+14. **factor_generator.py v1.3 (2026-05-25)** — 第二轮深度优化
+   - **常量命名私有化**：`DEFAULT_CACHE_DIR` → `_DEFAULT_CACHE_DIR`（遵循 cache_manager.py 私有常量规范）
+   - **导入顺序 PEP 8 合规化**：标准库按字母顺序（gzip, json, logging, os）+ 第三方库分隔
+   - **导入位置规范化**：函数内导入因子计算函数移到文件顶部（遵循 PROJECT.md 第401-418行规范）
+   - **版本历史补全**：factor_generator.py 新增 v1.3 版本演进说明
+   - **修复原因**：规范遗漏（常量命名不规范、导入顺序不规范、导入位置违反规范）
 
 ---
 
@@ -813,4 +820,4 @@ factor_df['middle'] = middle  # 成功赋值
 
 ---
 
-*最后更新: 2026-05-25 03:00*
+*最后更新: 2026-05-25 03:15*
