@@ -1,6 +1,6 @@
 # data_fetchers 模块规范
 
-> 版本: v2.23
+> 版本: v2.24
 > 创建时间: 2026-05-19
 > 更新时间: 2026-05-25
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
@@ -264,6 +264,21 @@ data_fetchers/
    - **常量导出**：`MAIN_BOARD_PREFIXES`、`EXCLUDED_PREFIXES`、`EXCLUDED_NAME_KEYWORDS` 导出为公共 API
    - **版本历史补全**：stock_utils.py 新增 v1.0-v1.1 版本演进说明
    - **修复原因**：公共模块规范合规化（logger 参数化、__all__ 导出、测试规范化）
+
+27. v2.24（2026-05-25 21:41）：
+   - **stock_utils.py 第二轮优化**：深度审查优化
+   - **类型注解精确化**：`List[Dict]` → `List[Dict[str, Any]]`
+   - **条件导入缓存**：模块级缓存导入函数，避免每次调用判断 `__name__`
+   - **性能优化**：`is_main_board_stock` 使用 `any()` 替代 for 循环
+   - **防御性编程**：
+     - `is_main_board_stock` 空值返回 False
+     - `get_stock_codes_only` 过滤空代码 + WARNING 日志
+     - `get_stock_name_map` 过滤空代码和空名称 + WARNING 日志
+     - `filter_stocks_by_date` 参数验证 + DEBUG 日志
+   - **类型灵活性**：`load_main_board_stock_list` 支持 `Union[Path, str]`
+   - **测试扩展**：8项测试（含边界测试）
+   - **版本历史补全**：stock_utils.py 新增 v1.2 版本演进说明
+   - **修复原因**：代码bug（条件导入效率低、空值处理缺失）+ 规范遗漏（类型注解不精确）
 
 ---
 
