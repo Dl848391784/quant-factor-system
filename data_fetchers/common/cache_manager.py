@@ -12,7 +12,19 @@ import gzip
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
+
+__all__ = [
+    # 日志函数
+    'get_module_logger',
+    # 缓存读写函数
+    'read_gzip_cache',
+    'write_gzip_cache',
+    'read_json_cache',
+    'write_json_cache',
+    'append_to_cache',
+    'get_cache_file_info',
+]
 
 # 模块级 fallback logger（遵循 PROJECT.md 第783-857行规范）
 _MODULE_LOGGER = None
@@ -221,7 +233,7 @@ def write_json_cache(
 
 def append_to_cache(
     path: Union[Path, str],
-    new_data: list,
+    new_data: List[Any],
     key: str = 'data',
     logger: Optional[logging.Logger] = None
 ) -> int:
@@ -248,6 +260,17 @@ def append_to_cache(
     if path.exists():
         existing = _read_cache_impl(path, use_gzip, logger)
         existing_data = existing.get(key, [])
+        
+        # 防御性编程：验证数据类型
+        if not isinstance(existing_data, list):
+            logger.warning(
+                "缓存数据结构异常: key '%s' 不是 list 类型\n"
+                "实际类型: %s\n"
+                "文件路径: %s\n"
+                "使用空列表作为 fallback",
+                key, type(existing_data).__name__, path
+            )
+            existing_data = []
     else:
         existing_data = []
     
@@ -340,6 +363,31 @@ if __name__ == '__main__':
     info = get_cache_file_info(test_path, logger=test_logger)
     print(f"文件信息: {info}")
     
+    # 测试 append_to_cache
+    print("\n测试 append_to_cache...")
+    test_append_path = test_dir / 'test_append.json'
+    append_to_cache(test_append_path, [1, 2], key='data', logger=test_logger)
+    append_to_cache(test_append_path, [3, 4], key='data', logger=test_logger)
+    append_result = read_json_cache(test_append_path, logger=test_logger)
+    print(f"追加结果: {append_result}")
+    
+    # 测试错误场景
+    print("\n测试错误场景...")
+    try:
+        read_gzip_cache(test_dir / 'not_exist.json.gz', logger=test_logger)
+    except FileNotFoundError as e:
+        print(f"捕获预期异常 FileNotFoundError: {e}")
+    
+    # 测试防御性编程（数据结构异常）
+    print("\n测试防御性编程...")
+    test_invalid_path = test_dir / 'test_invalid.json'
+    write_json_cache(test_invalid_path, {'data': {'nested': 'dict'}}, logger=test_logger)
+    append_to_cache(test_invalid_path, [5, 6], key='data', logger=test_logger)
+    invalid_result = read_json_cache(test_invalid_path, logger=test_logger)
+    print(f"异常数据修复结果: {invalid_result}")
+    
     # 清理测试文件
     test_path.unlink()
-    print("测试完成，已清理测试文件")
+    test_append_path.unlink()
+    test_invalid_path.unlink()
+    print("\n测试完成，已清理测试文件")
