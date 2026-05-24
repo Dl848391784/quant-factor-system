@@ -34,6 +34,7 @@ from .paths import (
     paths,
 )
 
+from .logger_config import setup_logger
 from .cache_manager import (
     get_module_logger,
     read_cache,
@@ -91,6 +92,8 @@ __all__ = [
     'get_logs_dir',
     'Paths',
     'paths',
+    # logger_config
+    'setup_logger',
     # cache_manager
     'get_module_logger',
     'read_cache',

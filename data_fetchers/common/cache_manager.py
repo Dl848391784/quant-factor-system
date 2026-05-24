@@ -556,48 +556,20 @@ def delete_cache(
 
 
 if __name__ == '__main__':
-    # 配置测试日志（遵循 PROJECT.md 第780-839行规范）
-    def setup_test_logger():
-        """配置测试日志记录器"""
-        # 日志目录：data_fetchers/logs/
-        logs_dir = Path(__file__).parent.parent / 'logs'
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 日志文件名：cache_manager_YYYY-MM-DD.log
-        today = datetime.now().strftime('%Y-%m-%d')
-        log_file = logs_dir / f"cache_manager_{today}.log"
-        
-        # 创建 Logger
-        logger = logging.getLogger('test.cache_manager')
-        logger.setLevel(logging.DEBUG)  # 测试用 DEBUG
-        
-        # 防止重复添加 Handler
-        if logger.handlers:
-            return logger
-        
-        # 文件 Handler
-        file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
-        file_handler.setLevel(logging.DEBUG)
-        
-        # 控制台 Handler（便于调试）
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        
-        # Formatter（遵循 PROJECT.md 规范）
-        formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-        file_handler.setFormatter(formatter)
-        console_handler.setFormatter(formatter)
-        
-        # 添加 Handler
-        logger.addHandler(file_handler)
-        logger.addHandler(console_handler)
-        
-        return logger
+    # 配置测试日志（复用 logger_config.py 的 setup_logger）
+    # 遵循 PROJECT.md 第780-839行规范
+    # __main__ 中需要添加项目根目录到 sys.path
+    import sys
+    from pathlib import Path as _Path
+    sys.path.insert(0, str(_Path(__file__).parent.parent.parent))
     
-    test_logger = setup_test_logger()
+    from data_fetchers.common.logger_config import setup_logger
+    
+    test_logger = setup_logger(
+        'cache_manager',  # 脚本名称
+        level=logging.DEBUG,  # 测试用 DEBUG
+        console_level=logging.INFO  # 控制台用 INFO
+    )
     
     # 测试路径直接定义
     test_dir = Path(__file__).parent.parent.parent / 'cache' / 'test'

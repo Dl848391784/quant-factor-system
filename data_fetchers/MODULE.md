@@ -143,6 +143,13 @@ data_fetchers/
    - **日志文件输出**：data_fetchers/logs/cache_manager_YYYY-MM-DD.log
    - **导入 datetime**：setup_logger 需要
    - **流程文档更新**：版本历史 v1.7
+13. v2.10（2026-05-24 20:35）：
+   - **创建 logger_config.py**：遵循 PROJECT.md 第780-839行规范
+   - **定义 setup_logger 函数**：可被所有模块复用
+   - **复用 setup_logger**：cache_manager.py __main__ 复用 logger_config.py 的 setup_logger
+   - **删除 setup_test_logger**：避免重复定义，遵循 DRY 原则
+   - **__init__.py 导出新增**：`setup_logger`
+   - **流程文档更新**：版本历史 v1.8
 
 ---
 
