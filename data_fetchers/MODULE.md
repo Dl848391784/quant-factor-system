@@ -98,6 +98,11 @@ data_fetchers/
    - **新增 cache_manager.py 日志参数规范**：使用方式、参数类型、禁止行为
    - **JSON 解析异常处理**：避免内存翻倍（参考 backtest-module-optimization-patterns.md）
    - **参数类型支持**：`path` 支持 `Path | str`
+6. v2.3（2026-05-24 21:10）：
+   - **函数命名修复**：`_get_logger` → `get_module_logger`（遵循命名规范）
+   - **get_cache_file_info 日志使用**：添加 DEBUG/WARNING 日志输出
+   - **流程文档创建**：docs/cache_manager_flow.md
+   - **测试用例创建**：test_cases/cache_manager_test_cases.md
 
 ---
 
@@ -511,4 +516,4 @@ factor_df['middle'] = middle  # 成功赋值
 
 ---
 
-*最后更新: 2026-05-24 20:35*
+*最后更新: 2026-05-24 21:10*

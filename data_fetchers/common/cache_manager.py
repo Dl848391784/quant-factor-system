@@ -18,7 +18,7 @@ from typing import Any, Dict, Optional, Union
 _MODULE_LOGGER = None
 
 
-def _get_logger(logger: Optional[logging.Logger] = None) -> logging.Logger:
+def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger:
     """
     获取 logger，遵循 PROJECT.md 公共模块日志规范
     
@@ -57,7 +57,7 @@ def read_gzip_cache(
         ValueError: JSON 解析失败（避免内存翻倍）
     """
     path = Path(path)  # 统一转换为 Path
-    logger = _get_logger(logger)
+    logger = get_module_logger(logger)
     
     if not path.exists():
         raise FileNotFoundError(f"缓存文件不存在: {path}")
@@ -102,7 +102,7 @@ def write_gzip_cache(
         OSError: 文件写入失败
     """
     path = Path(path)  # 统一转换为 Path
-    logger = _get_logger(logger)
+    logger = get_module_logger(logger)
     
     if ensure_dir:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -135,7 +135,7 @@ def read_json_cache(
         ValueError: JSON 解析失败（避免内存翻倍）
     """
     path = Path(path)  # 统一转换为 Path
-    logger = _get_logger(logger)
+    logger = get_module_logger(logger)
     
     if not path.exists():
         raise FileNotFoundError(f"缓存文件不存在: {path}")
@@ -180,7 +180,7 @@ def write_json_cache(
         OSError: 文件写入失败
     """
     path = Path(path)  # 统一转换为 Path
-    logger = _get_logger(logger)
+    logger = get_module_logger(logger)
     
     if ensure_dir:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -215,7 +215,7 @@ def append_to_cache(
         int: 追加后的总数据量
     """
     path = Path(path)  # 统一转换为 Path
-    logger = _get_logger(logger)
+    logger = get_module_logger(logger)
     
     # 读取现有缓存
     existing: Dict[str, Any] = {}
@@ -269,7 +269,7 @@ def get_cache_file_info(
         Dict: 文件信息（存在、大小、修改时间等）
     """
     path = Path(path)  # 统一转换为 Path
-    logger = _get_logger(logger)
+    logger = get_module_logger(logger)
     
     info = {
         'path': str(path),
@@ -282,6 +282,9 @@ def get_cache_file_info(
         stat = path.stat()
         info['size_mb'] = stat.st_size / (1024 * 1024)
         info['modified_time'] = stat.st_mtime
+        logger.debug("获取缓存文件信息: %s, 大小 %.4f MB", path, info['size_mb'])
+    else:
+        logger.warning("缓存文件不存在: %s", path)
     
     return info
 
