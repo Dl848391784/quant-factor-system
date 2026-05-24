@@ -15,7 +15,9 @@
 | v1.1 | 2026-05-24 21:45 | 第四轮优化：防御性编程测试用例 |
 | v1.2 | 2026-05-24 21:50 | 第五轮优化：统一缓存 API + 辅助函数测试用例 |
 | v1.3 | 2026-05-24 21:55 | 第六轮优化：gzip 压缩级别 + JSON 格式选项测试用例 |
-| v1.4 | 2026-05-24 22:20 | 第七轮优化：异常处理精确化 + 空文件处理测试用例 |
+|| v1.4 | 2026-05-24 22:20 | 第七轮优化：异常处理精确化 + 空文件处理 + __init__.py 导出修复 |
+|| v1.5 | 2026-05-24 22:40 | 第八轮优化：测试代码日志规范化（print → logger + setup_test_logger） |
+|| v1.6 | 2026-05-24 22:50 | 第九轮优化：创建 logger_config.py，复用 setup_logger（DRY 原则） |
 
 ## 测试概述
 
@@ -612,34 +614,6 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
 ---
 
-## 测试汇总
-
-| 测试编号 | 测试类型 | 测试目标 | 版本 |
-|---------|---------|---------|------|
-| TC001 | 功能 | gzip 缓存读写一致性 | v1.0 |
-| TC002 | 功能 | json 缓存读写一致性 | v1.0 |
-| TC003 | 功能 | 增量追加数据 | v1.0 |
-| TC004 | 功能 | 获取缓存文件信息 | v1.0 |
-| TC005 | 边界 | 文件不存在异常 | v1.0 |
-| TC006 | 边界 | JSON 格式错误异常 | v1.0 |
-| TC007 | 边界 | 空数据写入 | v1.0 |
-| TC008 | 参数 | path 类型支持 | v1.0 |
-| TC009 | 参数 | logger 参数传递 | v1.0 |
-| TC010 | 参数 | logger fallback | v1.0 |
-| TC011 | 日志 | get_cache_file_info 日志 | v1.0 |
-| TC012 | 异常 | JSONDecodeError 包装 | v1.0 |
-| TC013 | 功能 | 统一缓存 API - gzip | v1.2 |
-| TC014 | 功能 | 统一缓存 API - json | v1.2 |
-| TC015 | 功能 | 缓存存在性检查 | v1.2 |
-| TC016 | 功能 | 缓存删除函数 | v1.2 |
-| TC017 | 性能 | 大文件监控 | v1.2 |
-| TC018 | 参数 | gzip 压缩级别控制 | v1.3 |
-| TC019 | 参数 | JSON 可读格式 | v1.3 |
-| TC020 | 参数 | JSON 键排序 | v1.3 |
-| TC021 | 验证 | 缓存数据类型验证 | v1.3 |
-
----
-
 ## 第七轮优化测试用例（v1.4）
 
 ### TC022: gzip 文件损坏处理
@@ -738,7 +712,101 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
 ---
 
-## 测试汇总（v1.4）
+## 第九轮优化测试用例（v1.6）
+
+### TC025: setup_logger 日志配置
+
+**测试目标：** 验证 setup_logger 配置日志记录器。
+
+**测试步骤：**
+1. 调用 setup_logger 创建 logger
+2. 验证日志文件路径
+3. 验证日志格式
+4. 验证防止重复添加 Handler
+
+**预期结果：**
+- 日志文件路径：`logs/<script_name>_YYYY-MM-DD.log`
+- 日志格式：`%(asctime)s | %(levelname)-8s | %(name)s | %(message)s`
+- 多次调用返回同一 logger（不重复添加 Handler）
+
+**测试代码：**
+```python
+from data_fetchers.common import setup_logger
+from pathlib import Path
+from datetime import datetime
+import logging
+
+# 创建 logger
+logger1 = setup_logger('test_script')
+
+# 验证日志文件路径
+logs_dir = Path(__file__).parent.parent / 'logs'
+today = datetime.now().strftime('%Y-%m-%d')
+expected_path = logs_dir / f"test_script_{today}.log"
+assert expected_path.exists()
+
+# 验证日志格式（通过 Formatter）
+formatter = logger1.handlers[0].formatter
+assert 'asctime' in formatter._fmt
+assert 'levelname' in formatter._fmt
+assert 'name' in formatter._fmt
+assert 'message' in formatter._fmt
+
+# 验证防止重复添加 Handler
+logger2 = setup_logger('test_script')
+assert logger1 == logger2  # 同一 logger 对象
+assert len(logger1.handlers) == 2  # 文件 + 控制台（不增加）
+
+# 清理
+expected_path.unlink()
+```
+
+---
+
+## 第十轮优化测试用例（v1.7）
+
+### TC026: get_module_logger global 声明修复
+
+**测试目标：** 验证 get_module_logger 正确使用 global 声明访问模块级变量。
+
+**背景：**
+- 第九轮优化后发现 bug：`get_module_logger` 内部修改 `_MODULE_LOGGER` 但未声明 `global`
+- Python 将 `_MODULE_LOGGER` 视为局部变量，导致 `UnboundLocalError`
+- 修复：添加 `global _MODULE_LOGGER` 声明
+
+**测试步骤：**
+1. 获取 fallback logger（不传参数）
+2. 传入自定义 logger，验证返回传入的 logger
+3. 多次调用 fallback logger，验证返回同一对象
+
+**预期结果：**
+- fallback logger 不为 None
+- 自定义 logger 返回传入的 logger
+- 多次调用 fallback logger 返回同一对象
+
+**测试代码：**
+```python
+from data_fetchers.common.cache_manager import get_module_logger, _MODULE_LOGGER
+import logging
+
+# Test 1: 获取 fallback logger
+fallback_logger = get_module_logger()
+assert fallback_logger is not None
+assert fallback_logger.name == 'data_fetchers.common.cache_manager'
+
+# Test 2: 传入自定义 logger
+custom_logger = logging.getLogger('custom_test')
+result_logger = get_module_logger(custom_logger)
+assert result_logger is custom_logger
+
+# Test 3: 多次调用返回同一 fallback logger
+another_fallback = get_module_logger()
+assert another_fallback is fallback_logger
+```
+
+---
+
+## 测试汇总（v1.7）
 
 | 测试编号 | 测试类型 | 测试目标 | 版本 |
 |---------|---------|---------|------|
@@ -766,7 +834,9 @@ with tempfile.TemporaryDirectory() as tmpdir:
 | TC022 | 异常 | gzip 文件损坏处理 | v1.4 |
 | TC023 | 边界 | 空文件处理 | v1.4 |
 | TC024 | 异常 | 权限错误处理 | v1.4 |
+| TC025 | 配置 | setup_logger 日志配置 | v1.6 |
+| TC026 | Bug修复 | get_module_logger global 声明 | v1.7 |
 
 ---
 
-*最后更新: 2026-05-24 22:20 北京时间*
+*最后更新: 2026-05-24 23:10 北京时间*

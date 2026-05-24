@@ -143,13 +143,26 @@ data_fetchers/
    - **日志文件输出**：data_fetchers/logs/cache_manager_YYYY-MM-DD.log
    - **导入 datetime**：setup_logger 需要
    - **流程文档更新**：版本历史 v1.7
-13. v2.10（2026-05-24 20:35）：
+13. v2.10（2026-05-24 22:50）：
    - **创建 logger_config.py**：遵循 PROJECT.md 第780-839行规范
    - **定义 setup_logger 函数**：可被所有模块复用
    - **复用 setup_logger**：cache_manager.py __main__ 复用 logger_config.py 的 setup_logger
    - **删除 setup_test_logger**：避免重复定义，遵循 DRY 原则
    - **__init__.py 导出新增**：`setup_logger`
    - **流程文档更新**：版本历史 v1.8
+
+14. v2.11（2026-05-24 23:00）：
+   - **测试用例版本同步**：新增 v1.5/v1.6 版本历史
+   - **新增 TC025**：setup_logger 测试用例
+   - **删除冗余汇总表**：测试用例文档精简
+   - **时间标注修复**：流程文档 v1.8 时间改为 22:50
+   - **流程文档更新**：版本历史 v1.9
+
+15. v2.12（2026-05-24 23:10）：
+   - **发现 bug**：get_module_logger 缺少 global 声明
+   - **修复 UnboundLocalError**：添加 `global _MODULE_LOGGER`
+   - **新增 TC026**：get_module_logger global 声明测试
+   - **流程文档更新**：版本历史 v1.10
 
 ---
 

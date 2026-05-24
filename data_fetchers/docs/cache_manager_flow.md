@@ -1,8 +1,8 @@
 # cache_manager.py 流程文档
 
-> 版本: v1.2
+> 版本: v1.10
 > 创建时间: 2026-05-24 21:05 北京时间
-> 最后更新: 2026-05-24 21:40 北京时间
+> 最后更新: 2026-05-24 23:10 北京时间
 > 脚本位置: data_fetchers/common/cache_manager.py
 
 ---
@@ -19,7 +19,9 @@
 | v1.5 | 2026-05-24 21:55 | 第六轮优化：gzip 压缩级别 + JSON 格式选项 + 数据类型验证 |
 | v1.6 | 2026-05-24 22:20 | 第七轮优化：异常处理精确化 + 空文件处理 + __init__.py 导出修复 |
 | v1.7 | 2026-05-24 22:40 | 第八轮优化：测试代码日志规范化（print → logger + setup_test_logger） |
-| v1.8 | 2026-05-24 20:35 | 第九轮优化：创建 logger_config.py，复用 setup_logger（DRY 原则） |
+| v1.8 | 2026-05-24 22:50 | 第九轮优化：创建 logger_config.py，复用 setup_logger（DRY 原则） |
+| v1.9 | 2026-05-24 23:00 | 第十轮优化：测试用例版本同步 + 时间标注修复 + TC025 新增 |
+| v1.10 | 2026-05-24 23:10 | 第十轮发现 bug：get_module_logger 缺少 global 声明，修复 UnboundLocalError |
 
 ---
 
@@ -386,6 +388,8 @@ except ValueError as e:
 | v1.0 | 2026-05-24 | 创建流程文档 |
 | v1.1 | 2026-05-24 | 修复 `_get_logger` → `get_module_logger`，添加 get_cache_file_info 日志 |
 | v1.8 | 2026-05-24 | 第九轮优化：创建 logger_config.py，复用 setup_logger（DRY 原则） |
+| v1.9 | 2026-05-24 | 第十轮优化：测试用例版本同步 + 时间标注修复 + TC025 新增 |
+| v1.10 | 2026-05-24 | 第十轮发现 bug：get_module_logger 缺少 global 声明，修复 UnboundLocalError |
 
 ---
 

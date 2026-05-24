@@ -63,6 +63,7 @@ def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger
     Returns:
         Logger 对象
     """
+    global _MODULE_LOGGER
     if logger is not None:
         return logger
     if _MODULE_LOGGER is None:
