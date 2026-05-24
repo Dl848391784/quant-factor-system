@@ -2195,3 +2195,146 @@ def _apply_weights(
 | v1.8 | 2026-05-24 | 新增Union-Find迭代实现、正则跳过非标准文件、logger参数传递、文件读取异常处理、因子名匹配校验、set替代list性能规范 |
 | v1.9 | 2026-05-24 | 新增import位置规范、thresholds入口统一处理、logger参数使用规范 |
 | v1.10 | 2026-05-24 | 新增滚动ICIR时间轴计算、因子名反向映射、factor_cols空值校验、除零保护、无效参数警告、向量化加权实现规范 |
+| v1.11 | 2026-05-24 | 新增lambda延迟绑定修复、NaN动态权重归一化、正则预编译规范 |
+
+---
+
+## lambda 延迟绑定问题规范（v1.11 新增）
+
+> 本节定义 lambda 延迟绑定问题的修复规范，避免循环变量捕获问题。
+
+### 问题类型
+
+**问题：** RollingICIRWeightMethod 中 lambda 捕获循环变量，导致所有因子映射到同一序列。
+
+### 错误实现
+
+```python
+# 错误：lambda 延迟绑定
+for col in factor_cols:
+    rolling_icir_series = rolling_icir_dict[col]
+    factor_df[f'{col}_rolling_icir'] = factor_df['date_sorted'].map(
+        lambda d: rolling_icir_series.get(pd.Timestamp(d), np.nan)
+    )
+```
+
+**问题分析：**
+- Python lambda 捕获变量是延迟绑定的（闭包引用）
+- 循环中 `rolling_icir_series` 被多次赋值
+- `map` 是惰性的（返回 map 对象，未立即执行）
+- 循环结束后，所有 lambda 中的 `rolling_icir_series` 指向最后一个因子的序列
+
+**结果：** 所有因子列映射到同一个 IC 序列（最后一个因子）
+
+### 正确实现
+
+```python
+# 正确：直接使用 pandas.Series.map（无 lambda）
+for col in factor_cols:
+    if col in rolling_icir_dict and len(rolling_icir_dict[col]) > 0:
+        rolling_icir_series = rolling_icir_dict[col]
+        # Series.map(Series) 会用 date_sorted 的值在 rolling_icir_series 索引中查找
+        factor_df[f'{col}_rolling_icir'] = factor_df['date_sorted'].map(rolling_icir_series)
+```
+
+**优势：**
+- 无 lambda，无延迟绑定问题
+- pandas.Series.map(Series) 直接索引查找
+- 更简洁且更高效
+
+### 其他解决方案
+
+```python
+# 方案2：使用默认参数固定当前值（不推荐）
+lambda d, series=rolling_icir_series: series.get(pd.Timestamp(d), np.nan)
+```
+
+---
+
+## NaN 动态权重归一化规范（v1.11 新增）
+
+> 本节定义加权计算中的 NaN 处理规范，避免权重稀释问题。
+
+### 问题类型
+
+**问题：** _apply_weights 中 sum(axis=1) 将 NaN 位置计为 0，导致综合因子偏低。
+
+### 错误实现
+
+```python
+# 错误：sum(axis=1) 默认 skipna=True，NaN 计为 0
+composite = std_df.multiply(weight_values, axis=1).sum(axis=1)
+```
+
+**问题分析：**
+- 3个因子，权重各 1/3
+- 因子1缺失（NaN），因子2、3有效
+- 原实现：综合因子 = 0 + factor2*1/3 + factor3*1/3 = factor2*1/3 + factor3*1/3
+- 权重之和 = 1/3 + 1/3 = 2/3 < 1（权重被稀释）
+
+**结果：** 缺失因子值时综合因子偏低（权重不归一）
+
+### 正确实现
+
+```python
+# 正确：动态权重归一化
+# 识别有效值（非 NaN）位置
+valid_mask = ~std_df.isna()
+
+# 计算每行的有效权重之和
+valid_weight_sum = (valid_mask.multiply(weight_values, axis=1)).sum(axis=1)
+
+# 加权后归一化
+weighted_df = std_df.multiply(weight_values, axis=1)
+composite = weighted_df.divide(valid_weight_sum.replace(0, np.nan), axis=0).sum(axis=1, skipna=False)
+
+# 全 NaN 行保持 NaN
+composite = composite.where(valid_weight_sum > 0, np.nan)
+```
+
+**处理逻辑：**
+- 因子1缺失 → 有效权重 = factor2权重 + factor3权重
+- 归一化：每个有效因子权重 / 有效权重之和
+- 结果：权重之和始终为 1（无稀释）
+
+---
+
+## 正则预编译规范（v1.11 新增）
+
+> 本节定义正则表达式预编译规范，避免重复编译开销。
+
+### 问题类型
+
+**问题：** _get_factor_name_from_col 中正则每次调用都重新编译。
+
+### 错误实现
+
+```python
+def _get_factor_name_from_col(self, col: str) -> str:
+    import re  # 错误：import 在方法体内部
+    match = re.match(r'(.+?)_\d+[a-z]?$', col)  # 错误：每次调用都编译
+```
+
+**问题：**
+- import 在方法体内部（违反 PEP 8）
+- 正则每次调用都编译（性能开销）
+
+### 正确实现
+
+```python
+import re  # 正确：import 在文件顶部
+
+class WeightMethodBase(ABC):
+    # 正确：正则预编译为类属性（一次编译，多次使用）
+    _FACTOR_SUFFIX_PATTERN = re.compile(r'(.+?)_\d+[a-z]?$')
+    
+    def _get_factor_name_from_col(self, col: str) -> str:
+        match = self._FACTOR_SUFFIX_PATTERN.match(col)  # 直接使用预编译正则
+```
+
+**优势：**
+- import 在文件顶部（PEP 8 规范）
+- 正则预编译为类属性（一次编译）
+- 每次调用直接使用预编译正则（无编译开销）
+
+---

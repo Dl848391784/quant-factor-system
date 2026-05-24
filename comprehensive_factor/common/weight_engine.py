@@ -18,6 +18,7 @@
 import numpy as np
 import pandas as pd
 import logging
+import re  # v1.11 修复：移至文件顶部（PEP 8 规范）
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 from comprehensive_factor.common.logger_config import get_logger
@@ -40,6 +41,9 @@ class WeightMethodBase(ABC):
     # 反向映射：列名 → 因子名
     COL_TO_FACTOR_NAME_MAP = {v: k for k, v in FACTOR_NAME_TO_COL_MAP.items()}
     
+    # v1.11 修复：正则预编译（避免每次调用都重新编译）
+    _FACTOR_SUFFIX_PATTERN = re.compile(r'(.+?)_\d+[a-z]?$')  # 支持 _5, _6, _1d 等
+    
     def _get_factor_name_from_col(self, col: str) -> str:
         """从因子列名提取因子名（用于 IC 结果匹配）
         
@@ -57,10 +61,8 @@ class WeightMethodBase(ABC):
         if col in self.COL_TO_FACTOR_NAME_MAP:
             return self.COL_TO_FACTOR_NAME_MAP[col]
         
-        # 回退：移除数字后缀（如 '_5', '_6', '_9', '_20'）
-        # 使用正则移除所有数字后缀，而非硬编码特定后缀
-        import re
-        match = re.match(r'(.+?)_\d+[a-z]?$', col)  # 支持 _5, _6, _1d 等
+        # 回退：使用预编译正则移除数字后缀
+        match = self._FACTOR_SUFFIX_PATTERN.match(col)
         if match:
             return match.group(1)
         
@@ -88,7 +90,7 @@ class WeightMethodBase(ABC):
         logger: logging.Logger,
         method_name: str = "加权"
     ) -> pd.Series:
-        """应用权重计算综合因子（向量化实现）
+        """应用权重计算综合因子（向量化实现 + NaN动态权重调整）
         
         Args:
             factor_df: 因子 DataFrame
@@ -99,6 +101,10 @@ class WeightMethodBase(ABC):
         
         Returns:
             综合因子 Series
+        
+        v1.11 修复：NaN 动态权重调整
+        - 原实现：sum(axis=1) 将 NaN 计为 0，导致综合因子偏低
+        - 修复：动态调整有效权重，使有效因子的权重之和始终为 1
         """
         # 使用标准化因子列
         std_cols = [f'{col}_std' for col in factor_cols]
@@ -115,10 +121,25 @@ class WeightMethodBase(ABC):
         # 构建 DataFrame（标准化因子列）
         std_df = factor_df[std_cols]
         
-        # 向量化加权：DataFrame * 权重向量，然后按列求和
-        composite = std_df.multiply(weight_values, axis=1).sum(axis=1)
+        # v1.11 修复：NaN 动态权重调整
+        # 识别有效值（非 NaN）位置
+        valid_mask = ~std_df.isna()
         
-        logger.info("%s完成: 权重 %s", method_name, weights)
+        # 计算每行的有效权重之和（用于归一化）
+        # 每行有效权重 = weight_values * valid_mask，然后求和
+        valid_weight_sum = (valid_mask.multiply(weight_values, axis=1)).sum(axis=1)
+        
+        # 构建 DataFrame：每列乘以权重，然后除以有效权重之和（归一化）
+        weighted_df = std_df.multiply(weight_values, axis=1)
+        
+        # 归一化：weighted_df / valid_weight_sum（使权重之和为 1）
+        # valid_weight_sum 为 0 时（全 NaN），保持 NaN
+        composite = weighted_df.divide(valid_weight_sum.replace(0, np.nan), axis=0).sum(axis=1, skipna=False)
+        
+        # 全 NaN 行保持 NaN（而非 0）
+        composite = composite.where(valid_weight_sum > 0, np.nan)
+        
+        logger.info("%s完成: 权重 %s，NaN处理=动态权重归一化", method_name, weights)
         
         return composite
     
@@ -409,14 +430,17 @@ class RollingICIRWeightMethod(WeightMethodBase):
         factor_df = factor_df.copy()
         factor_df['date_sorted'] = pd.to_datetime(factor_df['date'])
         
+        # v1.11 修复：lambda 延迟绑定问题
+        # 原实现：lambda 捕获循环变量 rolling_icir_series，循环结束后指向最后一个因子
+        # 修复：使用 pandas.Series.map 直接映射（无需 lambda，无延迟绑定）
+        
         # 将滚动 ICIR 映射到 factor_df（每个日期的所有股票共享同一个滚动 ICIR）
         for col in factor_cols:
             if col in rolling_icir_dict and len(rolling_icir_dict[col]) > 0:
-                # 按日期映射：同一天所有股票使用同一个滚动 ICIR
+                # 方法1：使用 pandas.Series.map 直接映射（无 lambda，无延迟绑定）
                 rolling_icir_series = rolling_icir_dict[col]
-                factor_df[f'{col}_rolling_icir'] = factor_df['date_sorted'].map(
-                    lambda d: rolling_icir_series.get(pd.Timestamp(d), np.nan)
-                )
+                # Series.map(Series) 会用 date_sorted 的值在 rolling_icir_series 索引中查找
+                factor_df[f'{col}_rolling_icir'] = factor_df['date_sorted'].map(rolling_icir_series)
             else:
                 factor_df[f'{col}_rolling_icir'] = np.nan
         
