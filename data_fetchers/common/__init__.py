@@ -50,11 +50,15 @@ from .cache_manager import (
 )
 
 from .stock_utils import (
+    get_module_logger,
     is_main_board_stock,
     load_main_board_stock_list,
     get_stock_codes_only,
     filter_stocks_by_date,
     get_stock_name_map,
+    MAIN_BOARD_PREFIXES,
+    EXCLUDED_PREFIXES,
+    EXCLUDED_NAME_KEYWORDS,
 )
 
 # http_client 需要 requests 模块，可选导入
@@ -122,4 +126,7 @@ __all__ = [
     'get_stock_codes_only',
     'filter_stocks_by_date',
     'get_stock_name_map',
+    'MAIN_BOARD_PREFIXES',
+    'EXCLUDED_PREFIXES',
+    'EXCLUDED_NAME_KEYWORDS',
 ]

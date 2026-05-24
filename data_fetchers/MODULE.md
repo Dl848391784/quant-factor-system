@@ -1,6 +1,6 @@
 # data_fetchers 模块规范
 
-> 版本: v2.22
+> 版本: v2.23
 > 创建时间: 2026-05-19
 > 更新时间: 2026-05-25
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
@@ -252,6 +252,18 @@ data_fetchers/
    - **失败清理机制**：写入失败时自动删除临时文件，避免残留
    - **版本历史补全**：cache_manager.py 新增 v1.0-v1.12 版本演进说明
    - **修复原因**：代码bug（错误信息误导、非原子操作风险、失败留损坏文件）
+
+26. v2.23（2026-05-25 21:40）：
+   - **stock_utils.py 优化**：遵循 PROJECT.md 公共模块规范
+   - **logger 参数化**：新增 `get_module_logger` 函数 + `load_main_board_stock_list` 接收 logger 参数
+   - **verbose 参数改为 logger**：`verbose: bool` → `logger: Optional[logging.Logger]`
+   - **__all__ 导出**：明确定义 9 个公共 API（6 个函数 + 3 个常量）
+   - **模块级导入优化**：`load_main_board_stock_list` 使用条件导入（__main__ 绝对导入，其他相对导入）
+   - **docstring 补充**：所有函数新增 Example，`is_main_board_stock` 补充剔除规则示例
+   - **__main__ 测试规范化**：print → logger + try/finally + setup_logger + 7 项测试
+   - **常量导出**：`MAIN_BOARD_PREFIXES`、`EXCLUDED_PREFIXES`、`EXCLUDED_NAME_KEYWORDS` 导出为公共 API
+   - **版本历史补全**：stock_utils.py 新增 v1.0-v1.1 版本演进说明
+   - **修复原因**：公共模块规范合规化（logger 参数化、__all__ 导出、测试规范化）
 
 ---
 
