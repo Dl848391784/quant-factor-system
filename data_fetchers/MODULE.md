@@ -137,6 +137,12 @@ data_fetchers/
    - **__init__.py 导出修复**：新增 `get_module_logger`、`read_cache`、`write_cache`、`cache_exists`、`delete_cache` 导出
    - **测试用例同步**：新增 TC022-TC024（gzip 损坏、空文件、权限错误）
    - **流程文档更新**：版本历史 v1.6
+12. v2.9（2026-05-24 22:40）：
+   - **测试代码日志规范化**：替换 24处 print 为 logger.info/logger.debug
+   - **新增 setup_test_logger 函数**：遵循 PROJECT.md 第780-839行规范
+   - **日志文件输出**：data_fetchers/logs/cache_manager_YYYY-MM-DD.log
+   - **导入 datetime**：setup_logger 需要
+   - **流程文档更新**：版本历史 v1.7
 
 ---
 
