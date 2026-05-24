@@ -1,6 +1,6 @@
 # data_fetchers 模块规范
 
-> 版本: v2.31
+> 版本: v2.32
 > 创建时间: 2026-05-19
 > 更新时间: 2026-05-25
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
@@ -352,6 +352,14 @@ data_fetchers/
    - **load_main_board_stock_list Note 补充**：补充 Note 章节"自动使用缓存路径、空股票列表返回空列表并打印警告"
    - **版本历史补全**：stock_utils.py 新增 v1.9 版本演进说明
    - **修复原因**：规范遗漏（导入顺序不规范、MAX_STOCK_DATE 缺少 Note、load_main_board_stock_list Raises 不完整）
+
+10. **stock_utils.py v1.10 (2026-05-25)** — 第十轮深度优化
+   - **is_main_board_stock docstring 中文逗号修复**：`),必须` → `），必须`（与其他 docstring 保持一致）
+   - **辅助函数 Raises 精确化**：移除"元素不是字典类型"描述（实际是过滤而非抛异常）
+   - **_get_imported_functions() 调用合并**：load_main_board_stock_list 统一在函数开头初始化（避免重复调用）
+   - **load_main_board_stock_list 非字典元素统计补全**：新增 invalid_elements 统计 + WARNING 日志（与其他辅助函数保持一致）
+   - **版本历史补全**：stock_utils.py 新增 v1.10 版本演进说明
+   - **修复原因**：代码bug（重复调用效率低、非字典元素统计缺失）+ 规范遗漏（docstring 格式不规范、Raises 描述不精确）
 
 ---
 

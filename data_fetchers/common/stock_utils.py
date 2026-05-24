@@ -9,12 +9,13 @@
 - v1.1 (2026-05-25): logger 参数化、__all__ 导出、模块级导入、docstring 补充
 - v1.2 (2026-05-25): 类型注解精确化、条件导入缓存、性能优化、防御性编程
 - v1.3 (2026-05-25): 辅助函数性能优化、日期范围验证、常量数据来源注释、边界检查补全
-- v1.4 (2026-05-25): 筛选逻辑优化、类型安全检查、重复调用优化、日期格式正则验证
+- v1.4 (2026-05-25): 篛选逻辑优化、类型安全检查、重复调用优化、日期格式正则验证
 - v1.5 (2026-05-25): 参数类型安全检查、线程锁保护、日期边界验证、数据格式验证
 - v1.6 (2026-05-25): 日期边界动态获取、异常链保留、元素类型安全检查、公开日期常量
 - v1.7 (2026-05-25): logger 参数类型验证、缓存函数 None 检查、docstring 结构规范化
 - v1.8 (2026-05-25): filter_stocks_by_date Note 补充、测试清理顺序修复、http_client 同步更新
 - v1.9 (2026-05-25): 导入顺序 PEP 8 合规化、MAX_STOCK_DATE Note 补充、load_main_board_stock_list Raises 补全
+- v1.10 (2026-05-25): is_main_board_stock docstring 中文逗号修复、辅助函数 Raises 精确化、_get_imported_functions() 调用合并、load_main_board_stock_list 非字典元素统计补全
 
 作者: 云瑶
 日期: 2026-05-24
@@ -179,7 +180,7 @@ def is_main_board_stock(code: str, name: str) -> bool:
     
     Args:
         code: 股票代码（如 "600000"），必须非空且为字符串类型
-        name: 股票名称（如 "浦发银行"),必须非空且为字符串类型
+        name: 股票名称（如 "浦发银行"），必须非空且为字符串类型
         
     Returns:
         bool: True 表示主板股票，False 表示应剔除
@@ -273,12 +274,16 @@ def load_main_board_stock_list(
     """
     logger = get_module_logger(logger)
     
-    # 使用默认路径（使用缓存的导入函数）
+    # 使用缓存的导入函数（统一初始化，避免重复调用）
+    _get_imported_functions()
+    # 类型安全检查：确保缓存函数已初始化
+    if _get_stock_list_file is None:
+        raise RuntimeError("路径获取函数未初始化，请检查模块导入")
+    if _read_json_cache is None:
+        raise RuntimeError("缓存读取函数未初始化，请检查模块导入")
+    
+    # 使用默认路径
     if stock_list_file is None:
-        _get_imported_functions()
-        # 类型安全检查：确保缓存函数已初始化
-        if _get_stock_list_file is None:
-            raise RuntimeError("路径获取函数未初始化，请检查模块导入")
         stock_list_file = _get_stock_list_file()
     else:
         stock_list_file = Path(stock_list_file)  # 统一转换为 Path
@@ -286,11 +291,7 @@ def load_main_board_stock_list(
     if not stock_list_file.exists():
         raise FileNotFoundError(f"股票列表缓存不存在: {stock_list_file}")
     
-    # 加载缓存（使用缓存的导入函数）
-    _get_imported_functions()
-    # 类型安全检查：确保缓存函数已初始化
-    if _read_json_cache is None:
-        raise RuntimeError("缓存读取函数未初始化，请检查模块导入")
+    # 加载缓存
     try:
         data = _read_json_cache(stock_list_file, logger=logger)
     except (json.JSONDecodeError, ValueError) as e:
@@ -312,16 +313,29 @@ def load_main_board_stock_list(
         logger.warning("股票列表缓存为空: %s", stock_list_file)
         return []
     
-    # 性能优化：列表推导式筛选主板股票
-    main_board_stocks = [
-        stock for stock in stocks
-        if isinstance(stock, dict) and is_main_board_stock(stock.get('code', ''), stock.get('name', ''))
-    ]
+    # 性能优化：筛选主板股票 + 统计非字典元素
+    main_board_stocks = []
+    invalid_elements = 0
+    for stock in stocks:
+        # 元素类型检查：必须是字典类型
+        if not isinstance(stock, dict):
+            invalid_elements += 1
+            continue
+        if is_main_board_stock(stock.get('code', ''), stock.get('name', '')):
+            main_board_stocks.append(stock)
     
     # 统计信息
     total_count = len(stocks)
     main_count = len(main_board_stocks)
     excluded_count = total_count - main_count
+    
+    # 非字典元素警告（与其他辅助函数保持一致）
+    if invalid_elements > 0:
+        logger.warning(
+            "股票筛选时发现 %d 个非字典元素，已过滤",
+            invalid_elements
+        )
+    
     logger.info(
         "股票筛选完成: 总数 %d, 主板 %d, 剔除 %d",
         total_count, main_count, excluded_count
@@ -342,7 +356,7 @@ def get_stock_codes_only(stock_list: List[Dict[str, Any]], logger: Optional[logg
         List[str]: 股票代码列表（过滤空代码）
         
     Raises:
-        TypeError: stock_list 不是列表类型，或元素不是字典类型
+        TypeError: stock_list 不是列表类型
         
     Note:
         自动过滤空代码和非字典元素，避免后续处理问题
@@ -417,7 +431,7 @@ def filter_stocks_by_date(
         List[Dict[str, Any]]: 筛选后的股票列表
         
     Raises:
-        TypeError: stock_list 不是列表类型，或元素不是字典类型
+        TypeError: stock_list 不是列表类型
         ValueError: 日期为空、日期格式不正确、日期范围无效或超出合理边界
         
     Note:
@@ -511,7 +525,7 @@ def get_stock_name_map(stock_list: List[Dict[str, Any]], logger: Optional[loggin
         Dict[str, str]: {股票代码: 票名称}（过滤空代码和空名称）
         
     Raises:
-        TypeError: stock_list 不是列表类型，或元素不是字典类型
+        TypeError: stock_list 不是列表类型
         
     Note:
         自动过滤空代码、空名称和非字典元素
@@ -751,6 +765,7 @@ if __name__ == '__main__':
         test_logger.info("  Dict[str, Any] 类型注解已应用")
         test_logger.info("  Union[Path, str] 类型注解已应用")
         test_logger.info("  Raises TypeError 已实现（参数 + 元素类型安全检查）")
+        test_logger.info("  Raises 描述精确化（过滤而非抛异常）")
         test_logger.info("  日期格式正则验证已实现")
         test_logger.info("  日期边界动态获取已实现（MAX_STOCK_DATE() 函数）")
         test_logger.info("  线程锁保护已实现（双重检查锁定模式）")
@@ -758,7 +773,8 @@ if __name__ == '__main__':
         test_logger.info("  异常链已保留（load_main_board_stock_list）")
         test_logger.info("  logger 参数类型验证已实现（get_module_logger）")
         test_logger.info("  缓存函数 None 检查已实现（load_main_board_stock_list）")
-        test_logger.info("  filter_stocks_by_date Note 已补充（与其他辅助函数一致）")
+        test_logger.info("  _get_imported_functions() 调用合并（避免重复）")
+        test_logger.info("  load_main_board_stock_list 非字典元素统计已补全")
         test_logger.info("  测试清理顺序已修复（先打印再关闭处理器）")
         
         test_logger.info("\n" + "=" * 50)
