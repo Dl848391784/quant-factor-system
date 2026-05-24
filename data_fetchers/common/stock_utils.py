@@ -9,12 +9,14 @@
 - v1.1 (2026-05-25): logger 参数化、__all__ 导出、模块级导入、docstring 补充
 - v1.2 (2026-05-25): 类型注解精确化、条件导入缓存、性能优化、防御性编程
 - v1.3 (2026-05-25): 辅助函数性能优化、日期范围验证、常量数据来源注释、边界检查补全
+- v1.4 (2026-05-25): 筛选逻辑优化、类型安全检查、重复调用优化、日期格式正则验证
 
 作者: 云瑶
 日期: 2026-05-24
 """
 
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -57,6 +59,9 @@ EXCLUDED_PREFIXES = ('30', '688', '8', '4')
 # - SST/S*ST：历史遗留格式（已基本不使用）
 # - 退市：已退市股票标记
 EXCLUDED_NAME_KEYWORDS = ('ST', '*ST', '退市', 'SST', 'S*ST')
+
+# 日期格式正则（YYYY-MM-DD）
+_DATE_PATTERN = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
 # 模块级缓存导入函数（避免每次调用判断 __name__）
 # 在模块加载时确定导入方式，后续调用直接使用缓存的函数
@@ -181,12 +186,10 @@ def load_main_board_stock_list(
         ValueError: JSON 解析失败
         
     Example:
-        # 使用默认路径
         >>> stocks = load_main_board_stock_list()
         >>> len(stocks)
         3010
         
-        # 使用自定义路径
         >>> stocks = load_main_board_stock_list(
         ...     Path('/custom/path/stock_list.json'),
         ...     logger=my_logger
@@ -212,14 +215,16 @@ def load_main_board_stock_list(
     
     stocks = data.get('stocks', [])
     
-    # 筛选主板股票
-    main_board_stocks = []
-    for stock in stocks:
-        code = stock.get('code', '')
-        name = stock.get('name', '')
-        
-        if is_main_board_stock(code, name):
-            main_board_stocks.append(stock)
+    # 防御性编程：空数据处理
+    if not stocks:
+        logger.warning("股票列表缓存为空: %s", stock_list_file)
+        return []
+    
+    # 性能优化：列表推导式筛选主板股票
+    main_board_stocks = [
+        stock for stock in stocks
+        if is_main_board_stock(stock.get('code', ''), stock.get('name', ''))
+    ]
     
     # 统计信息
     total_count = len(stocks)
@@ -253,8 +258,12 @@ def get_stock_codes_only(stock_list: List[Dict[str, Any]], logger: Optional[logg
     Example:
         >>> stocks = [{'code': '600000', 'name': '浦发银行'}, {'code': '', 'name': '异常'}]
         >>> codes = get_stock_codes_only(stocks)
-        ['600000']  # 空代码已过滤
+        ['600000']
     """
+    # 类型安全检查
+    if not isinstance(stock_list, list):
+        raise TypeError(f"stock_list 必须是列表类型，实际类型: {type(stock_list).__name__}")
+    
     logger = get_module_logger(logger)
     
     # 防御性编程：空列表边界检查
@@ -262,8 +271,12 @@ def get_stock_codes_only(stock_list: List[Dict[str, Any]], logger: Optional[logg
         logger.debug("提取股票代码：输入列表为空，返回空列表")
         return []
     
-    # 性能优化：列表推导式 + 过滤空代码
-    codes = [stock.get('code', '') for stock in stock_list if stock.get('code', '')]
+    # 性能优化：列表推导式 + 变量缓存避免重复调用
+    codes = []
+    for stock in stock_list:
+        code = stock.get('code', '')
+        if code:  # 过滤空代码
+            codes.append(code)
     
     # 统计过滤数量
     total_count = len(stock_list)
@@ -300,7 +313,8 @@ def filter_stocks_by_date(
         List[Dict[str, Any]]: 筛选后的股票列表
         
     Raises:
-        ValueError: 日期为空或日期范围无效（start_date > end_date）
+        TypeError: stock_list 不是列表类型
+        ValueError: 日期为空、日期格式不正确或日期范围无效（start_date > end_date）
         
     Example:
         >>> stocks = [{'code': '600000', 'list_date': '2020-06-01'}]
@@ -308,23 +322,26 @@ def filter_stocks_by_date(
         >>> len(filtered)
         1
     """
+    # 类型安全检查
+    if not isinstance(stock_list, list):
+        raise TypeError(f"stock_list 必须是列表类型，实际类型: {type(stock_list).__name__}")
+    
     logger = get_module_logger(logger)
     
     # 防御性编程：验证日期格式
     if not start_date or not end_date:
         raise ValueError("开始日期和结束日期不能为空")
     
+    # 日期格式正则验证（YYYY-MM-DD）
+    if not _DATE_PATTERN.match(start_date):
+        raise ValueError(f"开始日期格式不正确: {start_date}（预期 YYYY-MM-DD）")
+    if not _DATE_PATTERN.match(end_date):
+        raise ValueError(f"结束日期格式不正确: {end_date}（预期 YYYY-MM-DD）")
+    
     # 日期范围验证：start_date <= end_date
     if start_date > end_date:
         raise ValueError(
             f"日期范围无效: start_date ({start_date}) > end_date ({end_date})"
-        )
-    
-    # 简单格式验证（YYYY-MM-DD）
-    if len(start_date) != 10 or len(end_date) != 10:
-        logger.warning(
-            "日期格式可能不正确: start_date=%s, end_date=%s（预期 YYYY-MM-DD）",
-            start_date, end_date
         )
     
     # 防御性编程：空列表边界检查
@@ -366,8 +383,12 @@ def get_stock_name_map(stock_list: List[Dict[str, Any]], logger: Optional[loggin
     Example:
         >>> stocks = [{'code': '600000', 'name': '浦发银行'}, {'code': '', 'name': '异常'}]
         >>> name_map = get_stock_name_map(stocks)
-        {'600000': '浦发银行'}  # 空代码已过滤
+        {'600000': '浦发银行'}
     """
+    # 类型安全检查
+    if not isinstance(stock_list, list):
+        raise TypeError(f"stock_list 必须是列表类型，实际类型: {type(stock_list).__name__}")
+    
     logger = get_module_logger(logger)
     
     # 防御性编程：空列表边界检查
@@ -375,12 +396,13 @@ def get_stock_name_map(stock_list: List[Dict[str, Any]], logger: Optional[loggin
         logger.debug("构建名称映射：输入列表为空，返回空字典")
         return {}
     
-    # 性能优化：字典推导式 + 过滤空值
-    name_map = {
-        stock.get('code', ''): stock.get('name', '')
-        for stock in stock_list
-        if stock.get('code', '') and stock.get('name', '')
-    }
+    # 性能优化：字典构建 + 变量缓存避免重复调用
+    name_map = {}
+    for stock in stock_list:
+        code = stock.get('code', '')
+        name = stock.get('name', '')
+        if code and name:  # 过滤空代码和空名称
+            name_map[code] = name
     
     # 统计过滤数量
     total_count = len(stock_list)
@@ -452,7 +474,7 @@ if __name__ == '__main__':
         except FileNotFoundError as e:
             test_logger.warning("  文件不存在: %s", e)
         
-        # 测试 3: get_stock_codes_only（含空代码过滤 + 空列表边界）
+        # 测试 3: get_stock_codes_only（含空代码过滤 + 空列表边界 + 类型验证）
         test_logger.info("\n[测试 3] get_stock_codes_only...")
         test_stocks_with_empty = [
             {'code': '600000', 'name': '浦发银行'},
@@ -464,8 +486,14 @@ if __name__ == '__main__':
         # 空列表测试
         empty_codes = get_stock_codes_only([], logger=test_logger)
         test_logger.info("  空列表测试: %s (预期空列表)", empty_codes)
+        # 类型错误测试
+        try:
+            invalid_codes = get_stock_codes_only('not_a_list')
+            test_logger.warning("  类型验证失败: 应抛出 TypeError")
+        except TypeError as e:
+            test_logger.info("  类型验证: %s (预期抛出 TypeError)", e)
         
-        # 测试 4: get_stock_name_map（含空值过滤 + 空列表边界）
+        # 测试 4: get_stock_name_map（含空值过滤 + 空列表边界 + 类型验证）
         test_logger.info("\n[测试 4] get_stock_name_map...")
         test_stocks_empty_name = [
             {'code': '600000', 'name': '浦发银行'},
@@ -477,8 +505,14 @@ if __name__ == '__main__':
         # 空列表测试
         empty_map = get_stock_name_map([], logger=test_logger)
         test_logger.info("  空列表测试: %s (预期空字典)", empty_map)
+        # 类型错误测试
+        try:
+            invalid_map = get_stock_name_map('not_a_list')
+            test_logger.warning("  类型验证失败: 应抛出 TypeError")
+        except TypeError as e:
+            test_logger.info("  类型验证: %s (预期抛出 TypeError)", e)
         
-        # 测试 5: filter_stocks_by_date（含日期范围验证 + 空列表边界）
+        # 测试 5: filter_stocks_by_date（含日期格式验证 + 日期范围验证 + 空列表边界）
         test_logger.info("\n[测试 5] filter_stocks_by_date...")
         test_date_stocks = [{'code': '600000', 'list_date': '2020-06-01'}]
         filtered = filter_stocks_by_date(test_date_stocks, '2020-01-01', '2020-12-31', logger=test_logger)
@@ -486,12 +520,24 @@ if __name__ == '__main__':
         # 空列表测试
         empty_filtered = filter_stocks_by_date([], '2020-01-01', '2020-12-31', logger=test_logger)
         test_logger.info("  空列表测试: %d 只股票 (预期 0)", len(empty_filtered))
+        # 日期格式错误测试
+        try:
+            invalid_format = filter_stocks_by_date(test_date_stocks, '2020-1-1', '2020-12-31')
+            test_logger.warning("  日期格式验证失败: 应抛出 ValueError")
+        except ValueError as e:
+            test_logger.info("  日期格式验证: %s (预期抛出 ValueError)", e)
         # 日期范围错误测试
         try:
-            invalid_filtered = filter_stocks_by_date(test_date_stocks, '2020-12-31', '2020-01-01')
+            invalid_range = filter_stocks_by_date(test_date_stocks, '2020-12-31', '2020-01-01')
             test_logger.warning("  日期范围验证失败: 应抛出 ValueError")
         except ValueError as e:
             test_logger.info("  日期范围验证: %s (预期抛出 ValueError)", e)
+        # 类型错误测试
+        try:
+            invalid_type = filter_stocks_by_date('not_a_list', '2020-01-01', '2020-12-31')
+            test_logger.warning("  类型验证失败: 应抛出 TypeError")
+        except TypeError as e:
+            test_logger.info("  类型验证: %s (预期抛出 TypeError)", e)
         
         # 测试 6: get_module_logger
         test_logger.info("\n[测试 6] get_module_logger...")
@@ -511,10 +557,11 @@ if __name__ == '__main__':
         test_logger.info("\n[测试 8] 类型注解验证...")
         test_logger.info("  Dict[str, Any] 类型注解已应用")
         test_logger.info("  Union[Path, str] 类型注解已应用")
-        test_logger.info("  Raises TypeError 补全")
+        test_logger.info("  Raises TypeError 已实现（类型安全检查）")
+        test_logger.info("  日期格式正则验证已实现")
         
         test_logger.info("\n" + "=" * 50)
-        test_logger.info("测试完成（共 8 项测试，含边界测试 + 日期范围验证）")
+        test_logger.info("测试完成（共 8 项测试，含类型验证 + 日期格式验证）")
         test_logger.info("=" * 50)
     finally:
         test_logger.info("测试清理完成")
