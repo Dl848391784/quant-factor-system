@@ -17,17 +17,26 @@ from typing import Any, Dict, List, Optional, Union
 __all__ = [
     # 日志函数
     'get_module_logger',
-    # 缓存读写函数
+    # 统一缓存 API
+    'read_cache',
+    'write_cache',
+    # 缓存读写函数（gzip/json）
     'read_gzip_cache',
     'write_gzip_cache',
     'read_json_cache',
     'write_json_cache',
     'append_to_cache',
     'get_cache_file_info',
+    # 辅助函数
+    'cache_exists',
+    'delete_cache',
 ]
 
 # 模块级 fallback logger（遵循 PROJECT.md 第783-857行规范）
 _MODULE_LOGGER = None
+
+# 大文件阈值（MB）
+_LARGE_FILE_THRESHOLD_MB = 100
 
 
 def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger:
@@ -85,6 +94,16 @@ def _read_cache_impl(
     """
     if not path.exists():
         raise FileNotFoundError(f"缓存文件不存在: {path}")
+    
+    # 大文件监控
+    file_size_mb = path.stat().st_size / (1024 * 1024)
+    if file_size_mb > _LARGE_FILE_THRESHOLD_MB:
+        logger.warning(
+            "大缓存文件读取: %.2f MB\n"
+            "文件路径: %s\n"
+            "可能影响性能，建议检查数据量",
+            file_size_mb, path
+        )
     
     try:
         if use_gzip:
@@ -335,6 +354,117 @@ def get_cache_file_info(
     return info
 
 
+def read_cache(
+    path: Union[Path, str],
+    logger: Optional[logging.Logger] = None
+) -> Dict[str, Any]:
+    """
+    读取缓存（自动判断 gzip/json）
+    
+    根据文件后缀自动判断是否为 gzip 文件，统一读取接口。
+    
+    Args:
+        path: 缓存文件路径（.json 或 .json.gz），支持 Path 或 str
+        logger: 调用方传入的 logger（可选）
+        
+    Returns:
+        Dict: JSON 数据
+        
+    Raises:
+        FileNotFoundError: 文件不存在
+        ValueError: JSON 解析失败
+        
+    Example:
+        # 统一接口，无需手动判断文件类型
+        data = read_cache('data.json.gz')
+        data = read_cache('data.json')
+    """
+    path = Path(path)
+    use_gzip = _is_gzip_file(path)
+    return _read_cache_impl(path, use_gzip, get_module_logger(logger))
+
+
+def write_cache(
+    path: Union[Path, str],
+    data: Dict[str, Any],
+    ensure_dir: bool = True,
+    logger: Optional[logging.Logger] = None
+) -> None:
+    """
+    写入缓存（自动判断 gzip/json）
+    
+    根据文件后缀自动判断是否为 gzip 文件，统一写入接口。
+    
+    Args:
+        path: 缓存文件路径（.json 或 .json.gz），支持 Path 或 str
+        data: 要写入的数据
+        ensure_dir: 是否自动创建目录（默认 True）
+        logger: 调用方传入的 logger（可选）
+        
+    Raises:
+        OSError: 文件写入失败
+        
+    Example:
+        # 统一接口，无需手动判断文件类型
+        write_cache('data.json.gz', {'key': 'value'})
+        write_cache('data.json', {'key': 'value'})
+    """
+    path = Path(path)
+    use_gzip = _is_gzip_file(path)
+    _write_cache_impl(path, data, use_gzip, ensure_dir=ensure_dir, logger=get_module_logger(logger))
+
+
+def cache_exists(path: Union[Path, str]) -> bool:
+    """
+    检查缓存文件是否存在
+    
+    Args:
+        path: 缓存文件路径，支持 Path 或 str
+        
+    Returns:
+        bool: 文件是否存在
+        
+    Example:
+        if cache_exists('data.json.gz'):
+            data = read_cache('data.json.gz')
+    """
+    return Path(path).exists()
+
+
+def delete_cache(
+    path: Union[Path, str],
+    logger: Optional[logging.Logger] = None
+) -> bool:
+    """
+    删除缓存文件
+    
+    Args:
+        path: 缓存文件路径，支持 Path 或 str
+        logger: 调用方传入的 logger（可选）
+        
+    Returns:
+        bool: 是否成功删除（文件不存在时返回 False）
+        
+    Example:
+        if delete_cache('data.json.gz'):
+            print("缓存已删除")
+    """
+    path = Path(path)
+    logger = get_module_logger(logger)
+    
+    if not path.exists():
+        logger.debug("缓存文件不存在，无需删除: %s", path)
+        return False
+    
+    try:
+        path.unlink()
+        logger.info("缓存文件已删除: %s", path)
+        return True
+    except Exception as e:
+        logger.exception("删除缓存文件失败: %s", path)
+        raise
+
+
 if __name__ == '__main__':
     # 测试缓存读写（遵循 PROJECT.md 日志规范）
     
@@ -363,6 +493,27 @@ if __name__ == '__main__':
     info = get_cache_file_info(test_path, logger=test_logger)
     print(f"文件信息: {info}")
     
+    # 测试统一 API
+    print("\n测试统一缓存 API...")
+    test_unified_path_gz = test_dir / 'test_unified.json.gz'
+    test_unified_path_json = test_dir / 'test_unified.json'
+    
+    write_cache(test_unified_path_gz, {'gzip': True}, logger=test_logger)
+    write_cache(test_unified_path_json, {'gzip': False}, logger=test_logger)
+    
+    gzip_data = read_cache(test_unified_path_gz, logger=test_logger)
+    json_data = read_cache(test_unified_path_json, logger=test_logger)
+    print(f"gzip 数据: {gzip_data}")
+    print(f"json 数据: {json_data}")
+    
+    # 测试辅助函数
+    print("\n测试辅助函数...")
+    print(f"cache_exists(test_unified.json.gz): {cache_exists(test_unified_path_gz)}")
+    print(f"cache_exists(not_exist.json): {cache_exists(test_dir / 'not_exist.json')}")
+    
+    print(f"delete_cache(test_unified.json.gz): {delete_cache(test_unified_path_gz, logger=test_logger)}")
+    print(f"delete_cache(not_exist.json): {delete_cache(test_dir / 'not_exist.json', logger=test_logger)}")
+    
     # 测试 append_to_cache
     print("\n测试 append_to_cache...")
     test_append_path = test_dir / 'test_append.json'
@@ -388,6 +539,7 @@ if __name__ == '__main__':
     
     # 清理测试文件
     test_path.unlink()
+    test_unified_path_json.unlink()
     test_append_path.unlink()
     test_invalid_path.unlink()
     print("\n测试完成，已清理测试文件")
