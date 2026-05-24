@@ -24,14 +24,10 @@ from typing import List
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from comprehensive_factor.common.composite_runner import (
-    run_composite_backtest,
     create_cli_entrypoint,
     CompositeLayerConfig
 )
-from comprehensive_factor.common.logger_config import get_logger
 from comprehensive_factor.common.data_loader import DEFAULT_CACHE_DIR
-
-logger = get_logger(__name__)
 
 
 # ============================================================================
@@ -43,26 +39,23 @@ class ICWeightLayerConfig(CompositeLayerConfig):
     """IC均值加权综合因子配置
     
     因子组合：
-    - rsi_6: RSI 因子（ic_mean ≈ -0.032）
-    - volume_ratio_5: 量比因子（ic_mean ≈ -0.058）
+    - rsi_6: RSI 因子（ic_mean = -0.037, |ic_mean| = 0.037）
+    - volume_ratio_5: 量比因子（ic_mean = -0.031, |ic_mean| = 0.031）
     
     加权逻辑：
     - |ic_mean| 越高权重越大
-    - volume_ratio 权重 ≈ 0.058 / (0.058 + 0.032) ≈ 0.64
-    - rsi 权重 ≈ 0.032 / (0.058 + 0.032) ≈ 0.36
+    - 实际权重（来自 factor_ic/result/*.json，2024-03-27~2026-05-14，545天）：
+      - rsi 权重 = 0.037 / (0.037 + 0.031) ≈ 0.55
+      - volume_ratio 权重 = 0.031 / (0.037 + 0.031) ≈ 0.45
     
     对比ICIR加权：
-    - IC加权忽略波动性（ic_std）
-    - ICIR加权同时考虑均值和波动
+    - IC加权忽略波动性（ic_std），仅基于均值绝对值
+    - ICIR加权同时考虑均值和波动（|ic_mean| / ic_std）
     
-    综合因子方向：反向因子
+    综合因子方向：反向因子（因子值越大，未来收益越低）
     """
     
-    # 因子组合
-    factor_list: List[str] = field(default_factory=lambda: ['rsi', 'volume_ratio'])
-    factor_cols: List[str] = field(default_factory=lambda: ['rsi_6', 'volume_ratio_5'])
-    
-    # 分层参数
+    # 分层参数（继承父类的 factor_list, factor_cols）
     n_layers: int = 5
     factor_direction: str = 'negative'
     long_layers: List[int] = field(default_factory=lambda: [1, 2])
@@ -75,10 +68,13 @@ class ICWeightLayerConfig(CompositeLayerConfig):
 # CLI 入口
 # ============================================================================
 
+# 创建默认配置实例用于CLI参数
+_default_config = ICWeightLayerConfig()
+
 main = create_cli_entrypoint(
     weight_method='ic_weight',
-    factor_list=['rsi', 'volume_ratio'],
-    factor_cols=['rsi_6', 'volume_ratio_5'],
+    factor_list=_default_config.factor_list,
+    factor_cols=_default_config.factor_cols,
     config_class=ICWeightLayerConfig,
     return_period='1d',
     cache_dir=str(DEFAULT_CACHE_DIR)
