@@ -1946,3 +1946,252 @@ def validate_factor(..., logger: Optional[logging.Logger] = None):
 **死代码判断：**
 - logger 参数接收 + 初始化 → 但无调用 → 死代码
 - 死代码 → 删除参数 或 添加调用
+
+---
+
+## 滚动 ICIR 时间轴计算规范（v1.10 新增）
+
+> 本节定义滚动 ICIR 的正确计算方式，避免按 asset 分组的逻辑错误。
+
+### 问题类型
+
+**问题：** RollingICIRWeightMethod 按 asset 分组计算滚动 ICIR，逻辑根本性错误。
+
+### 错误实现
+
+```python
+# 错误：按 asset 分组后在股票截面上滚动
+factor_df.groupby('asset')[ic_col].transform(
+    lambda x: x.rolling(window).mean() / x.rolling(window).std()
+)
+```
+
+**错误原因：**
+- IC 是每日截面相关性（因子值与未来收益的相关性）
+- 同一日期所有股票的 IC 值相同
+- 按 asset 分组是多余的（所有股票 IC 序列相同）
+- 滚动计算应在时间轴上进行
+
+### 正确实现
+
+```python
+# 正确：直接在时间轴上滚动
+# IC 时间序列：每日截面 IC 值组成的时间序列
+ic_series = ic_df.set_index('date')['ic'].sort_index()
+
+# 时间轴滚动计算
+rolling_mean = ic_series.rolling(window=self.window, min_periods=self.window // 3).mean()
+rolling_std = ic_series.rolling(window=self.window, min_periods=self.window // 3).std()
+rolling_icir = rolling_mean / rolling_std.replace(0, np.nan)
+```
+
+**正确逻辑：**
+- IC 时间序列：每日截面 IC 值 → 一条时间序列
+- 滚动 ICIR：在时间轴上计算（mean/std）
+- 映射到 factor_df：同一天所有股票共享同一个滚动 ICIR
+
+---
+
+## 因子名反向映射规范（v1.10 新增）
+
+> 本节定义因子列名到 IC 结果因子名的反向映射规范。
+
+### 问题类型
+
+**问题：** ICIRWeightMethod 和 ICWeightMethod 硬编码 `_5`、`_6` 后缀移除。
+
+### 错误实现
+
+```python
+# 错误：硬编码特定后缀
+factor_name = col.replace('_5', '').replace('_6', '')
+```
+
+**问题：**
+- 不支持其他后缀（`_20`, `_1d`, `_9`）
+- 新增因子需要修改代码
+
+### 正确实现
+
+```python
+# 正确：使用反向映射 + 正则回退
+class WeightMethodBase(ABC):
+    FACTOR_NAME_TO_COL_MAP = {
+        'rsi': 'rsi_6',
+        'volume_ratio': 'volume_ratio_5',
+        ...
+    }
+    COL_TO_FACTOR_NAME_MAP = {v: k for k, v in FACTOR_NAME_TO_COL_MAP.items()}
+    
+    def _get_factor_name_from_col(self, col: str) -> str:
+        # 优先使用反向映射
+        if col in self.COL_TO_FACTOR_NAME_MAP:
+            return self.COL_TO_FACTOR_NAME_MAP[col]
+        
+        # 回退：正则移除数字后缀
+        match = re.match(r'(.+?)_\d+[a-z]?$', col)  # 支持 _5, _6, _1d 等
+        if match:
+            return match.group(1)
+        
+        # 最终回退：原列名
+        return col
+```
+
+**优势：**
+- 精确匹配优先（反向映射）
+- 正则支持任意数字后缀
+- 新增因子只需更新映射表
+
+---
+
+## factor_cols 空值校验规范（v1.10 新增）
+
+> 本节定义 factor_cols 空值校验规范，避免 IndexError。
+
+### 问题类型
+
+**问题：** EqualWeightMethod.calculate 在 factor_cols 为空时触发 IndexError（`std_cols[0]`）。
+
+### 校验规范
+
+```python
+# 基类公共方法
+def _validate_factor_cols(self, factor_cols: List[str], logger: logging.Logger) -> None:
+    if not factor_cols or len(factor_cols) == 0:
+        raise ValueError("因子列 factor_cols 为空，无法计算加权")
+
+# 子类调用
+def calculate(self, factor_df, factor_cols, ...):
+    self._validate_factor_cols(factor_cols, self.logger)
+    ...
+```
+
+**校验位置：**
+- calculate 方法入口
+- get_weights 方法入口
+- WeightEngine.calculate 入口
+
+---
+
+## 除零保护规范（v1.10 新增）
+
+> 本节定义权重计算中的除零保护规范。
+
+### 问题类型
+
+**问题：** ICIRWeightMethod 和 ICWeightMethod 的 total_icir/total_ic 为 0 时产生 ZeroDivisionError。
+
+### 除零保护规范
+
+```python
+# 除零保护
+total_icir = sum(icir_values.values())
+if total_icir == 0:
+    logger.warning("所有因子 ICIR 绝对值均为 0，回退等权")
+    n_factors = len(factor_cols)
+    return {col: 1.0 / n_factors for col in factor_cols}
+
+weights = {col: icir_values[col] / total_icir for col in factor_cols}
+```
+
+**触发条件：**
+- 所有因子 ICIR 缺失（被置为 1.0）→ 不触发（total > 0）
+- 所有因子 ICIR 绝对值均为 0 → 触发除零
+
+**处理方式：**
+- 检测 total == 0
+- 回退等权
+- 记录警告日志
+
+---
+
+## 无效参数警告规范（v1.10 新增）
+
+> 本节定义无效参数的警告提示规范。
+
+### 问题类型
+
+**问题：** WeightEngine 中 window 参数仅对 rolling_icir_weight 有效，其他方式静默忽略。
+
+### 警告规范
+
+```python
+class WeightEngine:
+    WINDOW_VALID_METHODS = ['rolling_icir_weight']
+    
+    def __init__(self, weight_method, window=60, ...):
+        # 修复：window 参数仅对 rolling_icir_weight 有效
+        if window != 60 and weight_method not in self.WINDOW_VALID_METHODS:
+            logger.warning(
+                "window=%d 参数对 %s 加权方式无效，仅 rolling_icir_weight 支持窗口参数",
+                window, weight_method
+            )
+```
+
+**警告条件：**
+- window != 60（非默认值）
+- weight_method 不在 WINDOW_VALID_METHODS 中
+
+**处理方式：**
+- 记录警告日志
+- 继续执行（不中断）
+- 调用方知情
+
+---
+
+## 向量化加权实现规范（v1.10 新增）
+
+> 本节定义向量化加权实现规范，替代循环实现。
+
+### 问题类型
+
+**问题：** 三个静态加权类的 calculate 方法存在重复的循环加权代码。
+
+### 向量化实现
+
+```python
+# 基类公共方法
+def _apply_weights(
+    self,
+    factor_df: pd.DataFrame,
+    factor_cols: List[str],
+    weights: Dict[str, float],
+    logger: logging.Logger,
+    method_name: str = "加权"
+) -> pd.Series:
+    # 向量化加权求和（而非循环）
+    std_cols = [f'{col}_std' for col in factor_cols]
+    weight_values = np.array([weights[col] for col in factor_cols])
+    std_df = factor_df[std_cols]
+    
+    # DataFrame * 权重向量，然后按列求和
+    composite = std_df.multiply(weight_values, axis=1).sum(axis=1)
+    
+    return composite
+```
+
+**性能对比：**
+| 实现 | 方式 | 性能 |
+|------|------|------|
+| 循环 | `composite + factor_df[col] * weight` | O(n) 次循环 |
+| 向量化 | `DataFrame.multiply().sum()` | 单次矩阵运算 |
+
+**适用场景：**
+- 静态权重（权重不随时间变化）
+- 每日动态权重（滚动 ICIR）需单独处理
+
+---
+
+| 版本 | 日期 | 变更内容 |
+|------|------|----------|
+| v1.0 | 2026-05-24 | 初始设计：目录结构、脚本命名、加权方式、公共模块、输出规范 |
+| v1.1 | 2026-05-24 | 新增公共入口防御性编程规范（必需列校验、返回值解包校验、父类 validate 调用规范） |
+| v1.2 | 2026-05-24 | 新增因子名到列名映射规范、动态权重保存规范、NaN相关性处理规范 |
+| v1.3 | 2026-05-24 | 新增模块级代码规范、函数入口类型统一规范、composite_factor NaN检查规范、CLI异常退出码规范 |
+| v1.4 | 2026-05-24 | 新增校验前置规范、DataFrame空值检查规范、权重元信息分离规范、CLI异常堆栈保留规范 |
+| v1.5 | 2026-05-24 | 新增标准化列名接口约定规范、标准化NaN处理规范（单样本场景返回NaN而非0） |
+| v1.6 | 2026-05-24 | 新增函数前置条件校验、数据类型校验、缺失因子返回、数据一致性强校验、死代码移除、字段回退验证规范 |
+| v1.7 | 2026-05-24 | 新增Union-Find算法、正则因子名解析、关键指标缺失判定、筛选完整性标记、ICIR缺失处理规范 |
+| v1.8 | 2026-05-24 | 新增Union-Find迭代实现、正则跳过非标准文件、logger参数传递、文件读取异常处理、因子名匹配校验、set替代list性能规范 |
+| v1.9 | 2026-05-24 | 新增import位置规范、thresholds入口统一处理、logger参数使用规范 |
+| v1.10 | 2026-05-24 | 新增滚动ICIR时间轴计算、因子名反向映射、factor_cols空值校验、除零保护、无效参数警告、向量化加权实现规范 |

@@ -26,6 +26,102 @@ from comprehensive_factor.common.logger_config import get_logger
 class WeightMethodBase(ABC):
     """加权方法基类"""
     
+    # 因子名到数据列名的映射（反向映射用于 IC 结果匹配）
+    # v1.10 新增：提取公共映射，避免硬编码后缀
+    FACTOR_NAME_TO_COL_MAP = {
+        'rsi': 'rsi_6',
+        'volume_ratio': 'volume_ratio_5',
+        'kdj_j': 'kdj_j_9',
+        'bollinger_pb': 'bollinger_pb_20',
+        'turnover_surge': 'turnover_surge_5',
+        'main_inflow_ratio': 'main_inflow_ratio_1d'
+    }
+    
+    # 反向映射：列名 → 因子名
+    COL_TO_FACTOR_NAME_MAP = {v: k for k, v in FACTOR_NAME_TO_COL_MAP.items()}
+    
+    def _get_factor_name_from_col(self, col: str) -> str:
+        """从因子列名提取因子名（用于 IC 结果匹配）
+        
+        Args:
+            col: 因子列名（如 'volume_ratio_5'）
+        
+        Returns:
+            因子名（如 'volume_ratio'）
+        
+        Priority:
+            1. 使用反向映射（精确匹配）
+            2. 回退：移除常见后缀模式
+        """
+        # 优先使用反向映射
+        if col in self.COL_TO_FACTOR_NAME_MAP:
+            return self.COL_TO_FACTOR_NAME_MAP[col]
+        
+        # 回退：移除数字后缀（如 '_5', '_6', '_9', '_20'）
+        # 使用正则移除所有数字后缀，而非硬编码特定后缀
+        import re
+        match = re.match(r'(.+?)_\d+[a-z]?$', col)  # 支持 _5, _6, _1d 等
+        if match:
+            return match.group(1)
+        
+        # 最终回退：原列名
+        return col
+    
+    def _validate_factor_cols(self, factor_cols: List[str], logger: logging.Logger) -> None:
+        """校验因子列非空
+        
+        Args:
+            factor_cols: 因子列列表
+            logger: 日志对象
+        
+        Raises:
+            ValueError: 因子列为空时
+        """
+        if not factor_cols or len(factor_cols) == 0:
+            raise ValueError("因子列 factor_cols 为空，无法计算加权")
+    
+    def _apply_weights(
+        self,
+        factor_df: pd.DataFrame,
+        factor_cols: List[str],
+        weights: Dict[str, float],
+        logger: logging.Logger,
+        method_name: str = "加权"
+    ) -> pd.Series:
+        """应用权重计算综合因子（向量化实现）
+        
+        Args:
+            factor_df: 因子 DataFrame
+            factor_cols: 因子列名（原始列名）
+            weights: 权重字典 {因子列: 权重}
+            logger: 日志对象
+            method_name: 加权方式名称（日志用）
+        
+        Returns:
+            综合因子 Series
+        """
+        # 使用标准化因子列
+        std_cols = [f'{col}_std' for col in factor_cols]
+        
+        # 校验列存在性
+        missing_cols = [col for col in std_cols if col not in factor_df.columns]
+        if missing_cols:
+            raise ValueError(f"标准化因子列缺失: {missing_cols}")
+        
+        # 向量化加权求和（而非循环）
+        # 构建权重向量
+        weight_values = np.array([weights[col] for col in factor_cols])
+        
+        # 构建 DataFrame（标准化因子列）
+        std_df = factor_df[std_cols]
+        
+        # 向量化加权：DataFrame * 权重向量，然后按列求和
+        composite = std_df.multiply(weight_values, axis=1).sum(axis=1)
+        
+        logger.info("%s完成: 权重 %s", method_name, weights)
+        
+        return composite
+    
     @abstractmethod
     def calculate(
         self,
@@ -78,20 +174,14 @@ class EqualWeightMethod(WeightMethodBase):
         ic_daily_data: Optional[Dict[str, pd.DataFrame]] = None
     ) -> pd.Series:
         """等权加权计算"""
-        n_factors = len(factor_cols)
-        weight = 1.0 / n_factors
+        # 修复：入口校验因子列非空
+        self._validate_factor_cols(factor_cols, self.logger)
         
-        # 使用标准化因子列
-        std_cols = [f'{col}_std' for col in factor_cols]
+        # 计算权重
+        weights = self.get_weights(factor_cols, ic_results)
         
-        # 加权求和
-        composite = factor_df[std_cols[0]] * weight
-        for col in std_cols[1:]:
-            composite = composite + factor_df[col] * weight
-        
-        self.logger.info("等权加权完成: %d 个因子，权重 %.4f", n_factors, weight)
-        
-        return composite
+        # 修复：使用基类公共方法（向量化实现）
+        return self._apply_weights(factor_df, factor_cols, weights, self.logger, "等权加权")
     
     def get_weights(
         self,
@@ -99,6 +189,10 @@ class EqualWeightMethod(WeightMethodBase):
         ic_results: Optional[Dict[str, Dict]] = None
     ) -> Dict[str, float]:
         """获取等权重"""
+        # 修复：校验因子列非空
+        if not factor_cols or len(factor_cols) == 0:
+            raise ValueError("因子列 factor_cols 为空，无法计算等权")
+        
         n_factors = len(factor_cols)
         weight = 1.0 / n_factors
         return {col: weight for col in factor_cols}
@@ -126,20 +220,14 @@ class ICIRWeightMethod(WeightMethodBase):
         if ic_results is None:
             raise ValueError("ICIR加权需要 ic_results 参数")
         
+        # 修复：入口校验因子列非空
+        self._validate_factor_cols(factor_cols, self.logger)
+        
         # 计算权重
         weights = self.get_weights(factor_cols, ic_results)
         
-        # 使用标准化因子列
-        std_cols = [f'{col}_std' for col in factor_cols]
-        
-        # 加权求和
-        composite = factor_df[std_cols[0]] * weights[factor_cols[0]]
-        for col, std_col in zip(factor_cols[1:], std_cols[1:]):
-            composite = composite + factor_df[std_col] * weights[col]
-        
-        self.logger.info("ICIR加权完成: 权重 %s", weights)
-        
-        return composite
+        # 修复：使用基类公共方法（向量化实现）
+        return self._apply_weights(factor_df, factor_cols, weights, self.logger, "ICIR加权")
     
     def get_weights(
         self,
@@ -152,23 +240,31 @@ class ICIRWeightMethod(WeightMethodBase):
         - 反向因子ICIR为负（如 volume_ratio ICIR ≈ -1.97）
         - 取绝对值后加权：|ICIR| 高的因子权重大
         """
+        # 修复：校验因子列非空
+        if not factor_cols or len(factor_cols) == 0:
+            raise ValueError("因子列 factor_cols 为空，无法计算ICIR权重")
+        
         # 提取 ICIR 值（取绝对值）
         icir_values = {}
         for col in factor_cols:
-            # 因子列名可能与 IC 文件名不同（如 volume_ratio_5 vs volume_ratio）
-            # 尝试多种匹配方式
-            factor_name = col.replace('_5', '').replace('_6', '')  # 移除周期后缀
+            # 修复：使用基类公共方法提取因子名（而非硬编码后缀）
+            factor_name = self._get_factor_name_from_col(col)
             
             if factor_name in ic_results and 'icir' in ic_results[factor_name]:
                 icir_values[col] = abs(ic_results[factor_name]['icir'])
             elif col in ic_results and 'icir' in ic_results[col]:
                 icir_values[col] = abs(ic_results[col]['icir'])
             else:
-                self.logger.warning("因子 %s 缺失 ICIR，使用等权", col)
+                self.logger.warning("因子 %s 缺失 ICIR，使用等权默认值 1.0", col)
                 icir_values[col] = 1.0  # 缺失时使用等权
         
-        # 计算权重
+        # 修复：除零保护 - total_icir 为 0 时回退等权
         total_icir = sum(icir_values.values())
+        if total_icir == 0:
+            self.logger.warning("所有因子 ICIR 绝对值均为 0，回退等权")
+            n_factors = len(factor_cols)
+            return {col: 1.0 / n_factors for col in factor_cols}
+        
         weights = {col: icir_values[col] / total_icir for col in factor_cols}
         
         return weights
@@ -196,20 +292,14 @@ class ICWeightMethod(WeightMethodBase):
         if ic_results is None:
             raise ValueError("IC加权需要 ic_results 参数")
         
+        # 修复：入口校验因子列非空
+        self._validate_factor_cols(factor_cols, self.logger)
+        
         # 计算权重
         weights = self.get_weights(factor_cols, ic_results)
         
-        # 使用标准化因子列
-        std_cols = [f'{col}_std' for col in factor_cols]
-        
-        # 加权求和
-        composite = factor_df[std_cols[0]] * weights[factor_cols[0]]
-        for col, std_col in zip(factor_cols[1:], std_cols[1:]):
-            composite = composite + factor_df[std_col] * weights[col]
-        
-        self.logger.info("IC加权完成: 权重 %s", weights)
-        
-        return composite
+        # 修复：使用基类公共方法（向量化实现）
+        return self._apply_weights(factor_df, factor_cols, weights, self.logger, "IC加权")
     
     def get_weights(
         self,
@@ -217,21 +307,31 @@ class ICWeightMethod(WeightMethodBase):
         ic_results: Dict[str, Dict]
     ) -> Dict[str, float]:
         """获取IC权重"""
+        # 修复：校验因子列非空
+        if not factor_cols or len(factor_cols) == 0:
+            raise ValueError("因子列 factor_cols 为空，无法计算IC权重")
+        
         # 提取 IC 均值（取绝对值）
         ic_values = {}
         for col in factor_cols:
-            factor_name = col.replace('_5', '').replace('_6', '')
+            # 修复：使用基类公共方法提取因子名（而非硬编码后缀）
+            factor_name = self._get_factor_name_from_col(col)
             
             if factor_name in ic_results and 'ic_mean' in ic_results[factor_name]:
                 ic_values[col] = abs(ic_results[factor_name]['ic_mean'])
             elif col in ic_results and 'ic_mean' in ic_results[col]:
                 ic_values[col] = abs(ic_results[col]['ic_mean'])
             else:
-                self.logger.warning("因子 %s 缺失 IC 均值，使用等权", col)
+                self.logger.warning("因子 %s 缺失 IC 均值，使用等权默认值 1.0", col)
                 ic_values[col] = 1.0
         
-        # 计算权重
+        # 修复：除零保护 - total_ic 为 0 时回退等权
         total_ic = sum(ic_values.values())
+        if total_ic == 0:
+            self.logger.warning("所有因子 IC 均值绝对值均为 0，回退等权")
+            n_factors = len(factor_cols)
+            return {col: 1.0 / n_factors for col in factor_cols}
+        
         weights = {col: ic_values[col] / total_ic for col in factor_cols}
         
         return weights
@@ -243,6 +343,9 @@ class RollingICIRWeightMethod(WeightMethodBase):
     每日计算滚动窗口内的 ICIR，动态调整权重。
     
     weight_i_t = |rolling_icir_i_t| / sum(|rolling_icir_j_t|)
+    
+    v1.10 修复：滚动 ICIR 应在时间轴上计算，而非按 asset 分组。
+    IC 是每日截面相关性，同一日期所有股票的 IC 值相同。
     """
     
     def __init__(self, window: int = 60, logger: Optional[logging.Logger] = None):
@@ -260,43 +363,82 @@ class RollingICIRWeightMethod(WeightMethodBase):
         if ic_daily_data is None:
             raise ValueError("滚动ICIR加权需要 ic_daily_data 参数")
         
-        # 合并 IC 每日数据到 factor_df
-        factor_df = factor_df.copy()
+        # 修复：入口校验因子列非空
+        self._validate_factor_cols(factor_cols, self.logger)
+        
+        # 获取唯一日期序列（用于时间轴滚动）
+        dates = factor_df['date'].unique()
+        dates_sorted = sorted(dates)
+        
+        # 构建每日 IC 数据（时间序列）
+        # IC 是每日截面相关性，结构：{因子名: DataFrame(date, ic)}
+        ic_series_dict = {}  # {因子列: IC时间序列}
         
         for col in factor_cols:
-            factor_name = col.replace('_5', '').replace('_6', '')
+            # 修复：使用基类公共方法提取因子名
+            factor_name = self._get_factor_name_from_col(col)
             
             if factor_name in ic_daily_data:
                 ic_df = ic_daily_data[factor_name]
-                # 重命名 ic 列
-                ic_df = ic_df.rename(columns={'ic': f'{col}_ic'})
-                factor_df = factor_df.merge(ic_df[['date', f'{col}_ic']], on='date', how='left')
+                # 确保 ic_df 有 date 和 ic 列
+                if 'date' in ic_df.columns and 'ic' in ic_df.columns:
+                    ic_series_dict[col] = ic_df.set_index('date')['ic'].sort_index()
+                else:
+                    self.logger.warning("因子 %s IC 数据缺少 date 或 ic 列", col)
+                    ic_series_dict[col] = pd.Series(dtype=float)
             else:
                 self.logger.warning("因子 %s 缺失 IC 每日数据", col)
-                factor_df[f'{col}_ic'] = np.nan
+                ic_series_dict[col] = pd.Series(dtype=float)
         
-        # 每日计算滚动 ICIR
+        # 修复：在时间轴上计算滚动 ICIR（而非按 asset 分组）
+        # 滚动 ICIR = 滚动IC均值 / 滚动IC标准差
+        rolling_icir_dict = {}  # {因子列: 滚动ICIR时间序列}
+        
+        for col, ic_series in ic_series_dict.items():
+            if len(ic_series) > 0:
+                # 时间轴滚动计算（每个因子一条 IC 时间序列）
+                rolling_mean = ic_series.rolling(window=self.window, min_periods=self.window // 3).mean()
+                rolling_std = ic_series.rolling(window=self.window, min_periods=self.window // 3).std()
+                rolling_icir = rolling_mean / rolling_std.replace(0, np.nan)
+                rolling_icir_dict[col] = rolling_icir
+            else:
+                # 缺失 IC 数据，使用 NaN
+                rolling_icir_dict[col] = pd.Series(dtype=float)
+        
+        # 构建 factor_df 的日期索引
+        factor_df = factor_df.copy()
+        factor_df['date_sorted'] = pd.to_datetime(factor_df['date'])
+        
+        # 将滚动 ICIR 映射到 factor_df（每个日期的所有股票共享同一个滚动 ICIR）
         for col in factor_cols:
-            ic_col = f'{col}_ic'
-            
-            # 滚动 ICIR = 滚动IC均值 / 滚动IC标准差
-            factor_df[f'{col}_rolling_icir'] = factor_df.groupby('asset')[ic_col].transform(
-                lambda x: x.rolling(window=self.window, min_periods=self.window // 3).mean() /
-                          x.rolling(window=self.window, min_periods=self.window // 3).std()
-            )
+            if col in rolling_icir_dict and len(rolling_icir_dict[col]) > 0:
+                # 按日期映射：同一天所有股票使用同一个滚动 ICIR
+                rolling_icir_series = rolling_icir_dict[col]
+                factor_df[f'{col}_rolling_icir'] = factor_df['date_sorted'].map(
+                    lambda d: rolling_icir_series.get(pd.Timestamp(d), np.nan)
+                )
+            else:
+                factor_df[f'{col}_rolling_icir'] = np.nan
         
         # 每日计算权重并加权
-        std_cols = [f'{col}_std' for col in factor_cols]
         rolling_icir_cols = [f'{col}_rolling_icir' for col in factor_cols]
         
         # 每日权重 = |rolling_icir| / sum(|rolling_icir|)
         factor_df['weight_sum'] = factor_df[rolling_icir_cols].abs().sum(axis=1)
         
+        # 修复：除零保护 - weight_sum 为 0 时回退等权
+        weight_sum_safe = factor_df['weight_sum'].replace(0, np.nan)
+        
+        # 使用基类公共方法计算加权（需要构建每日权重）
+        std_cols = [f'{col}_std' for col in factor_cols]
+        
+        # 向量化加权：每日动态权重
         composite = pd.Series(0.0, index=factor_df.index)
-        for std_col, rolling_col, col in zip(std_cols, rolling_icir_cols, factor_cols):
-            # 权重 = |rolling_icir| / sum，避免除零
-            weight = factor_df[rolling_col].abs() / factor_df['weight_sum'].replace(0, np.nan)
-            weight = weight.fillna(1.0 / len(factor_cols))  # 除零时回退等权
+        
+        for col, std_col, rolling_col in zip(factor_cols, std_cols, rolling_icir_cols):
+            # 每日权重 = |rolling_icir| / weight_sum（安全除零）
+            weight = factor_df[rolling_col].abs() / weight_sum_safe
+            weight = weight.fillna(1.0 / len(factor_cols))  # 除零或缺失时回退等权
             composite = composite + factor_df[std_col] * weight
         
         self.logger.info("滚动ICIR加权完成: 窗口 %d 日", self.window)
@@ -309,6 +451,10 @@ class RollingICIRWeightMethod(WeightMethodBase):
         ic_results: Optional[Dict[str, Dict]] = None
     ) -> Dict[str, float]:
         """滚动ICIR权重无法静态获取，返回等权作为默认"""
+        # 修复：校验因子列非空
+        if not factor_cols or len(factor_cols) == 0:
+            raise ValueError("因子列 factor_cols 为空，无法计算权重")
+        
         n_factors = len(factor_cols)
         return {col: 1.0 / n_factors for col in factor_cols}
 
@@ -326,6 +472,9 @@ class WeightEngine:
         'rolling_icir_weight': RollingICIRWeightMethod
     }
     
+    # v1.10 新增：window 参数适用的加权方式列表
+    WINDOW_VALID_METHODS = ['rolling_icir_weight']
+    
     def __init__(
         self,
         weight_method: str,
@@ -336,6 +485,13 @@ class WeightEngine:
             raise ValueError(f"不支持的加权方式: {weight_method}，支持: {list(self.METHOD_MAP.keys())}")
         
         self.logger = logger or get_logger(__name__)
+        
+        # 修复：window 参数仅对 rolling_icir_weight 有效，其他方式提示警告
+        if window != 60 and weight_method not in self.WINDOW_VALID_METHODS:
+            self.logger.warning(
+                "window=%d 参数对 %s 加权方式无效，仅 rolling_icir_weight 支持窗口参数",
+                window, weight_method
+            )
         
         # 创建加权方法实例
         method_class = self.METHOD_MAP[weight_method]
@@ -355,6 +511,10 @@ class WeightEngine:
         ic_daily_data: Optional[Dict[str, pd.DataFrame]] = None
     ) -> pd.Series:
         """计算综合因子"""
+        # 修复：入口校验因子列非空
+        if not factor_cols or len(factor_cols) == 0:
+            raise ValueError("因子列 factor_cols 为空，无法计算综合因子")
+        
         return self.method.calculate(factor_df, factor_cols, ic_results, ic_daily_data)
     
     def get_weights(
