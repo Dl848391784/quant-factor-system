@@ -12,6 +12,7 @@
 - v1.4 (2026-05-25): 筛选逻辑优化、类型安全检查、重复调用优化、日期格式正则验证
 - v1.5 (2026-05-25): 参数类型安全检查、线程锁保护、日期边界验证、数据格式验证
 - v1.6 (2026-05-25): 日期边界动态获取、异常链保留、元素类型安全检查、公开日期常量
+- v1.7 (2026-05-25): logger 参数类型验证、缓存函数 None 检查、docstring 结构规范化
 
 作者: 云瑶
 日期: 2026-05-24
@@ -133,10 +134,13 @@ def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger
     不传 logger 时使用模块级 fallback logger（模块加载时已初始化）。
     
     Args:
-        logger: 调用方传入的 logger（可选）
+        logger: 调用方传入的 logger（可选），必须是 logging.Logger 类型
         
     Returns:
-        Logger 对象
+        logging.Logger: Logger 对象
+        
+    Raises:
+        TypeError: logger 参数不是 logging.Logger 类型
         
     Example:
         >>> logger = get_module_logger()
@@ -148,6 +152,9 @@ def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger
         >>> logger.name
         'my_module'
     """
+    # 类型安全检查：logger 必须是 Logger 类型或 None
+    if logger is not None and not isinstance(logger, logging.Logger):
+        raise TypeError(f"logger 必须是 logging.Logger 类型，实际类型: {type(logger).__name__}")
     if logger is not None:
         return logger
     return _MODULE_LOGGER
@@ -255,6 +262,9 @@ def load_main_board_stock_list(
     # 使用默认路径（使用缓存的导入函数）
     if stock_list_file is None:
         _get_imported_functions()
+        # 类型安全检查：确保缓存函数已初始化
+        if _get_stock_list_file is None:
+            raise RuntimeError("路径获取函数未初始化，请检查模块导入")
         stock_list_file = _get_stock_list_file()
     else:
         stock_list_file = Path(stock_list_file)  # 统一转换为 Path
@@ -264,6 +274,9 @@ def load_main_board_stock_list(
     
     # 加载缓存（使用缓存的导入函数）
     _get_imported_functions()
+    # 类型安全检查：确保缓存函数已初始化
+    if _read_json_cache is None:
+        raise RuntimeError("缓存读取函数未初始化，请检查模块导入")
     try:
         data = _read_json_cache(stock_list_file, logger=logger)
     except (json.JSONDecodeError, ValueError) as e:
@@ -323,6 +336,7 @@ def get_stock_codes_only(stock_list: List[Dict[str, Any]], logger: Optional[logg
     Example:
         >>> stocks = [{'code': '600000', 'name': '浦发银行'}, {'code': '', 'name': '异常'}]
         >>> codes = get_stock_codes_only(stocks)
+        >>> codes
         ['600000']
     """
     # 类型安全检查
@@ -488,6 +502,7 @@ def get_stock_name_map(stock_list: List[Dict[str, Any]], logger: Optional[loggin
     Example:
         >>> stocks = [{'code': '600000', 'name': '浦发银行'}, {'code': '', 'name': '异常'}]
         >>> name_map = get_stock_name_map(stocks)
+        >>> name_map
         {'600000': '浦发银行'}
     """
     # 类型安全检查
@@ -697,6 +712,13 @@ if __name__ == '__main__':
         custom_logger = get_module_logger(test_logger)
         test_logger.info("  Custom logger name: %s", custom_logger.name)
         
+        # 类型错误测试（logger 参数）
+        try:
+            invalid_logger = get_module_logger('not_a_logger')
+            test_logger.warning("  类型验证失败: 应抛出 TypeError")
+        except TypeError as e:
+            test_logger.info("  logger 类型验证: %s (预期抛出 TypeError)", e)
+        
         # 测试 7: 常量导出（含数据来源注释验证 + 日期边界常量）
         test_logger.info("\n[测试 7] 公共常量...")
         test_logger.info("  MAIN_BOARD_PREFIXES: %s", MAIN_BOARD_PREFIXES)
@@ -707,7 +729,7 @@ if __name__ == '__main__':
         test_logger.info("  常量数据来源注释已补全")
         test_logger.info("  日期边界动态获取已实现（MAX_STOCK_DATE 为函数）")
         
-# 测试 8: 验证汇总
+        # 测试 8: 验证汇总
         test_logger.info("\n[测试 8] 验证汇总...")
         test_logger.info("  Dict[str, Any] 类型注解已应用")
         test_logger.info("  Union[Path, str] 类型注解已应用")
@@ -717,9 +739,15 @@ if __name__ == '__main__':
         test_logger.info("  线程锁保护已实现（双重检查锁定模式）")
         test_logger.info("  常量不可变性注释已补全（使用元组）")
         test_logger.info("  异常链已保留（load_main_board_stock_list）")
+        test_logger.info("  logger 参数类型验证已实现（get_module_logger）")
+        test_logger.info("  缓存函数 None 检查已实现（load_main_board_stock_list）")
         
         test_logger.info("\n" + "=" * 50)
         test_logger.info("测试完成（共 8 项测试，含类型验证 + 日期边界验证 + 线程安全验证）")
         test_logger.info("=" * 50)
     finally:
+        # 清理测试资源（关闭日志处理器）
+        for handler in test_logger.handlers:
+            handler.close()
+            test_logger.removeHandler(handler)
         test_logger.info("测试清理完成")

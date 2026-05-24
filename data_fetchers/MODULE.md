@@ -1,6 +1,6 @@
 # data_fetchers 模块规范
 
-> 版本: v2.28
+> 版本: v2.29
 > 创建时间: 2026-05-19
 > 更新时间: 2026-05-25
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
@@ -327,6 +327,16 @@ data_fetchers/
    - **测试扩展**：元素类型过滤验证测试（验证过滤行为而非抛异常）
    - **版本历史补全**：stock_utils.py 新增 v1.6 版本演进说明
    - **修复原因**：代码bug（日期边界过期风险、元素类型安全未实现）+ 规范遗漏（异常链未保留、docstring示例格式不规范）
+
+7. **stock_utils.py v1.7 (2026-05-25)** — 第七轮深度优化
+   - **logger 参数类型验证**：`get_module_logger` 新增 `isinstance(logger, logging.Logger)` 检查
+   - **缓存函数 None 检查**：`load_main_board_stock_list` 新增 `_read_json_cache is None` 和 `_get_stock_list_file is None` 检查
+   - **docstring Example 格式规范**：辅助函数 Example 补充返回值显示（`>>> codes` 和 `>>> name_map`）
+   - **测试代码注释缩进修复**：`# 测试 8` 移到正确位置
+   - **测试清理逻辑补全**：`finally` 块新增日志处理器关闭和移除
+   - **logger 类型验证测试**：新增 logger 参数类型错误测试
+   - **版本历史补全**：stock_utils.py 新增 v1.7 版本演进说明
+   - **修复原因**：代码bug（缓存函数 None 未检查、测试代码缩进错误）+ 规范遗漏（logger 参数类型未验证、docstring Example 格式不规范）
 
 ---
 
