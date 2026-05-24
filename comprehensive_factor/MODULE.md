@@ -1824,3 +1824,125 @@ return list(selected_factors_set), dropped_factors
 | v1.6 | 2026-05-24 | 新增函数前置条件校验、数据类型校验、缺失因子返回、数据一致性强校验、死代码移除、字段回退验证规范 |
 | v1.7 | 2026-05-24 | 新增Union-Find算法、正则因子名解析、关键指标缺失判定、筛选完整性标记、ICIR缺失处理规范 |
 | v1.8 | 2026-05-24 | 新增Union-Find迭代实现、正则跳过非标准文件、logger参数传递、文件读取异常处理、因子名匹配校验、set替代list性能规范 |
+| v1.9 | 2026-05-24 | 新增import位置规范、thresholds入口统一处理、logger参数使用规范 |
+
+---
+
+## import 位置规范（v1.9 新增）
+
+> 本节定义 import 语句的位置规范，遵循 PEP 8 标准。
+
+### 问题类型
+
+**问题：** import re 放在函数体内部而非模块顶层，违反 PEP 8。
+
+### import 位置规范
+
+**规范要求（PEP 8）：**
+- 所有 import 语句应放在模块顶层
+- import 顺序：标准库 → 第三方库 → 本地库
+- 每组之间空一行
+
+**正确示例：**
+```python
+import json
+import logging
+import re  # 修复：移至模块顶层（PEP 8 规范）
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional
+
+from comprehensive_factor.common.logger_config import get_logger
+```
+
+**错误示例：**
+```python
+def load_all_factor_results(...):
+    logger.info("加载 IC 结果: %s", ic_result_dir)
+    import re  # 错误：在函数体内部导入
+    
+    ic_pattern = re.compile(...)
+```
+
+**例外情况：**
+- 条件导入（可选依赖）
+- 避免循环导入（极少数情况）
+
+---
+
+## thresholds 入口统一处理规范（v1.9 新增）
+
+> 本节定义可选参数 thresholds 的入口统一处理规范。
+
+### 问题类型
+
+**问题：** select_factors 中 thresholds.get(...) 在 thresholds 为 None 时需要分散处理多处。
+
+### 入口统一处理规范
+
+**处理逻辑：**
+```python
+def select_factors(..., thresholds: Optional[Dict] = None, ...):
+    if logger is None:
+        logger = get_logger(__name__)
+    
+    # 修复：入口统一处理 thresholds 为 None 的情况
+    if thresholds is None:
+        thresholds = DEFAULT_THRESHOLDS
+    
+    # 后续代码直接使用 thresholds，无需反复判断 None
+    high_corr_groups = identify_high_corr_groups(
+        threshold=thresholds['high_corr_threshold'],  # 直接使用
+        ...
+    )
+```
+
+**优势：**
+- 入口统一处理 → 后续代码简洁
+- 避免分散的 `if thresholds else ...` 判断
+- 降低维护成本（修改一处而非多处）
+
+---
+
+## logger 参数使用规范（v1.9 新增）
+
+> 本节定义 logger 参数接收后的使用规范，避免死代码。
+
+### 问题类型
+
+**问题：** validate_factor 中 logger 参数接收并初始化，但函数体内无日志调用，是死代码。
+
+### logger 使用规范
+
+**使用原则：**
+- logger 参数接收 → 必须在关键分支使用
+- debug 日志 → 记录检查过程（便于排查）
+- warning/error 日志 → 记录异常情况
+
+**正确示例：**
+```python
+def validate_factor(..., logger: Optional[logging.Logger] = None):
+    if logger is None:
+        logger = get_logger(__name__)
+    
+    # 修复：关键指标缺失时记录日志
+    if ic_mean is None:
+        reasons.append("ic_mean 缺失（数据不完整）")
+        logger.debug("因子 %s: ic_mean 缺失", factor_name)
+    elif abs(ic_mean) < thresholds['ic_mean_abs_min']:
+        reasons.append(f"|ic_mean|={abs(ic_mean):.3f}<...")
+        logger.debug("因子 %s: |ic_mean|=%.3f 不达标", factor_name, abs(ic_mean))
+```
+
+**日志级别选择：**
+| 情况 | 级别 |
+|------|------|
+| 正常检查过程 | debug |
+| 指标缺失 | debug |
+| 指标不达标 | debug |
+| 因子无效 | warning（调用方处理） |
+
+**死代码判断：**
+- logger 参数接收 + 初始化 → 但无调用 → 死代码
+- 死代码 → 删除参数 或 添加调用

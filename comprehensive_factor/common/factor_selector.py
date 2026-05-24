@@ -24,6 +24,7 @@
 
 import json
 import logging
+import re  # 修复：移至模块顶层（PEP 8 规范）
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -104,7 +105,6 @@ def load_all_factor_results(
     
     # 加载 IC 结果
     logger.info("加载 IC 结果: %s", ic_result_dir)
-    import re  # 修复：使用正则提取因子名
     
     # 正则模式：ic_<因子名>_<收益周期>_analysis_result.json
     # 例：ic_rsi_1d_analysis_result.json → rsi
@@ -220,11 +220,13 @@ def validate_factor(
     ic_metrics = factor_data.get('ic_metrics', {})
     ic_mean = ic_metrics.get('ic_mean', None)
     
-    # 修复：关键指标缺失时标记为无效
+    # 修复：关键指标缺失时标记为无效，并记录日志
     if ic_mean is None:
         reasons.append("ic_mean 缺失（数据不完整）")
+        logger.debug("因子 %s: ic_mean 缺失", factor_name)
     elif abs(ic_mean) < thresholds['ic_mean_abs_min']:
         reasons.append(f"|ic_mean|={abs(ic_mean):.3f}<{thresholds['ic_mean_abs_min']}")
+        logger.debug("因子 %s: |ic_mean|=%.3f 不达标", factor_name, abs(ic_mean))
     
     # 2. p-value 检查（可选，缺失时跳过）
     p_value = ic_metrics.get('p_value', None)
@@ -234,11 +236,13 @@ def validate_factor(
     # 3. ICIR 检查
     icir = ic_metrics.get('icir', None)
     
-    # 修复：关键指标缺失时标记为无效
+    # 修复：关键指标缺失时标记为无效，并记录日志
     if icir is None:
         reasons.append("icir 缺失（数据不完整）")
+        logger.debug("因子 %s: icir 缺失", factor_name)
     elif abs(icir) < thresholds['icir_abs_min']:
         reasons.append(f"|icir|={abs(icir):.3f}<{thresholds['icir_abs_min']}")
+        logger.debug("因子 %s: |icir|=%.3f 不达标", factor_name, abs(icir))
     
     # 4. 单调性检查（可选）
     backtest = factor_data.get('backtest', {})
@@ -537,6 +541,10 @@ def select_factors(
     if logger is None:
         logger = get_logger(__name__)
     
+    # 修复：入口统一处理 thresholds 为 None 的情况
+    if thresholds is None:
+        thresholds = DEFAULT_THRESHOLDS
+    
     logger.info("=" * 40)
     logger.info("因子筛选流程")
     logger.info("=" * 40)
@@ -570,7 +578,7 @@ def select_factors(
         high_corr_groups = identify_high_corr_groups(
             valid_factors=valid_factors,
             corr_matrix=corr_matrix,
-            threshold=thresholds.get('high_corr_threshold', 0.7) if thresholds else 0.7,
+            threshold=thresholds['high_corr_threshold'],  # 修复：入口已处理 None，直接使用
             logger=logger
         )
         
