@@ -131,6 +131,12 @@ data_fetchers/
    - **更新所有写入函数签名**：`write_gzip_cache`、`write_json_cache`、`write_cache` 新增参数
    - **测试代码增强**：新增压缩级别 + 可读格式测试
    - **流程文档更新**：版本历史 v1.5
+11. v2.8（2026-05-24 22:20）：
+   - **异常处理精确化**：捕获 `BadGzipFile`、`PermissionError`、`OSError`
+   - **空文件处理**：大小为 0 返回空字典 {}
+   - **__init__.py 导出修复**：新增 `get_module_logger`、`read_cache`、`write_cache`、`cache_exists`、`delete_cache` 导出
+   - **测试用例同步**：新增 TC022-TC024（gzip 损坏、空文件、权限错误）
+   - **流程文档更新**：版本历史 v1.6
 
 ---
 

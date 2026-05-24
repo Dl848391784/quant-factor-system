@@ -14,6 +14,9 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+# gzip 异常类型（用于精确捕获 gzip 文件损坏）
+BadGzipFile = gzip.BadGzipFile
+
 __all__ = [
     # 日志函数
     'get_module_logger',
@@ -102,8 +105,14 @@ def _read_cache_impl(
     if not path.exists():
         raise FileNotFoundError(f"缓存文件不存在: {path}")
     
+    # 空文件处理（边界情况）
+    file_size = path.stat().st_size
+    if file_size == 0:
+        logger.warning("缓存文件为空（大小为 0）: %s", path)
+        return {}  # 空文件返回空字典
+    
     # 大文件监控
-    file_size_mb = path.stat().st_size / (1024 * 1024)
+    file_size_mb = file_size / (1024 * 1024)
     if file_size_mb > _LARGE_FILE_THRESHOLD_MB:
         logger.warning(
             "大缓存文件读取: %.2f MB\n"
@@ -132,9 +141,18 @@ def _read_cache_impl(
             path, e.lineno, e.colno, e.msg
         )
         raise ValueError(f"JSON解析失败: {path}, 位置 {e.pos}") from e
+    except BadGzipFile as e:
+        logger.error("gzip 文件损坏: %s", path)
+        raise ValueError(f"gzip 文件损坏: {path}") from e
+    except PermissionError as e:
+        logger.error("文件权限错误: %s", path)
+        raise PermissionError(f"无权限读取缓存文件: {path}") from e
+    except OSError as e:
+        logger.error("文件系统错误: %s", path)
+        raise OSError(f"读取缓存失败（磁盘空间不足或文件系统错误）: {path}") from e
     except Exception as e:
-        logger.exception("读取缓存失败: %s", path)
-        raise
+        logger.exception("读取缓存失败（未知错误）: %s", path)
+        raise RuntimeError(f"读取缓存失败（未知错误）: {path}") from e
 
 
 def _write_cache_impl(
@@ -189,9 +207,15 @@ def _write_cache_impl(
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=json_indent, separators=separators, sort_keys=json_sort_keys)
         logger.debug("成功写入缓存: %s", path)
+    except PermissionError as e:
+        logger.error("文件权限错误: %s", path)
+        raise PermissionError(f"无权限写入缓存文件: {path}") from e
+    except OSError as e:
+        logger.error("文件系统错误: %s", path)
+        raise OSError(f"写入缓存失败（磁盘空间不足或文件系统错误）: {path}") from e
     except Exception as e:
-        logger.exception("写入缓存失败: %s", path)
-        raise
+        logger.exception("写入缓存失败（未知错误）: %s", path)
+        raise RuntimeError(f"写入缓存失败（未知错误）: {path}") from e
 
 
 def read_gzip_cache(
@@ -519,9 +543,15 @@ def delete_cache(
         path.unlink()
         logger.info("缓存文件已删除: %s", path)
         return True
+    except PermissionError as e:
+        logger.error("文件权限错误: %s", path)
+        raise PermissionError(f"无权限删除缓存文件: {path}") from e
+    except OSError as e:
+        logger.error("文件系统错误: %s", path)
+        raise OSError(f"删除缓存失败（磁盘空间不足或文件系统错误）: {path}") from e
     except Exception as e:
-        logger.exception("删除缓存文件失败: %s", path)
-        raise
+        logger.exception("删除缓存失败（未知错误）: %s", path)
+        raise RuntimeError(f"删除缓存失败（未知错误）: {path}") from e
 
 
 if __name__ == '__main__':

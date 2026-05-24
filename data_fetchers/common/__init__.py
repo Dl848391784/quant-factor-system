@@ -35,12 +35,17 @@ from .paths import (
 )
 
 from .cache_manager import (
+    get_module_logger,
+    read_cache,
+    write_cache,
     read_gzip_cache,
     write_gzip_cache,
     read_json_cache,
     write_json_cache,
     append_to_cache,
     get_cache_file_info,
+    cache_exists,
+    delete_cache,
 )
 
 from .stock_utils import (
@@ -87,12 +92,17 @@ __all__ = [
     'Paths',
     'paths',
     # cache_manager
+    'get_module_logger',
+    'read_cache',
+    'write_cache',
     'read_gzip_cache',
     'write_gzip_cache',
     'read_json_cache',
     'write_json_cache',
     'append_to_cache',
     'get_cache_file_info',
+    'cache_exists',
+    'delete_cache',
     # http_client
     'create_retry_session',
     'create_eastmoney_session',

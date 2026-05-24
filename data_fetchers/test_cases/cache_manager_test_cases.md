@@ -1,8 +1,8 @@
 # cache_manager.py 测试用例
 
-> 版本: v1.3
+> 版本: v1.4
 > 创建时间: 2026-05-24 21:10 北京时间
-> 最后更新: 2026-05-24 21:55 北京时间
+> 最后更新: 2026-05-24 22:20 北京时间
 > 脚本位置: data_fetchers/common/cache_manager.py
 
 ---
@@ -15,6 +15,7 @@
 | v1.1 | 2026-05-24 21:45 | 第四轮优化：防御性编程测试用例 |
 | v1.2 | 2026-05-24 21:50 | 第五轮优化：统一缓存 API + 辅助函数测试用例 |
 | v1.3 | 2026-05-24 21:55 | 第六轮优化：gzip 压缩级别 + JSON 格式选项测试用例 |
+| v1.4 | 2026-05-24 22:20 | 第七轮优化：异常处理精确化 + 空文件处理测试用例 |
 
 ## 测试概述
 
@@ -639,4 +640,133 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
 ---
 
-*最后更新: 2026-05-24 21:55 北京时间*
+## 第七轮优化测试用例（v1.4）
+
+### TC022: gzip 文件损坏处理
+
+**测试目标：** 验证 gzip 文件损坏时捕获 ValueError。
+
+**测试步骤：**
+1. 创建无效 gzip 文件（写入非 gzip 内容）
+2. 调用 `read_gzip_cache`
+3. 验证捕获 ValueError
+
+**预期结果：**
+- 抛出 ValueError（而非 BadGzipFile）
+- 错误信息包含 "gzip 文件损坏"
+
+**测试代码：**
+```python
+from data_fetchers.common import read_gzip_cache
+from pathlib import Path
+import tempfile
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    corrupt_gzip = Path(tmpdir) / 'corrupt.json.gz'
+    
+    # 写入无效 gzip 内容
+    with open(corrupt_gzip, 'wb') as f:
+        f.write(b'invalid gzip content')
+    
+    try:
+        read_gzip_cache(corrupt_gzip)
+    except ValueError as e:
+        assert 'gzip 文件损坏' in str(e)
+```
+
+---
+
+### TC023: 空文件处理
+
+**测试目标：** 验证空文件（大小为 0）返回空字典 {}。
+
+**测试步骤：**
+1. 创建空文件（大小为 0）
+2. 调用 `read_json_cache`
+3. 验证返回 {}
+
+**预期结果：**
+- 返回空字典 {}
+- 输出 WARNING 日志
+
+**测试代码：**
+```python
+from data_fetchers.common import read_json_cache
+from pathlib import Path
+import tempfile
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    empty_file = Path(tmpdir) / 'empty.json'
+    empty_file.touch()  # 创建空文件
+    
+    result = read_json_cache(empty_file)
+    assert result == {}
+```
+
+---
+
+### TC024: 权限错误处理
+
+**测试目标：** 验证文件权限错误时捕获 PermissionError。
+
+**测试步骤：**
+1. 创建文件并修改权限（只读）
+2. 调用 `write_json_cache`
+3. 验证捕获 PermissionError
+
+**预期结果：**
+- 抛出 PermissionError
+- 错误信息包含 "无权限写入缓存文件"
+
+**测试代码：**
+```python
+from data_fetchers.common import write_json_cache
+from pathlib import Path
+import tempfile
+import os
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    readonly_file = Path(tmpdir) / 'readonly.json'
+    readonly_file.touch()
+    os.chmod(readonly_file, 0o444)  # 只读权限
+    
+    try:
+        write_json_cache(readonly_file, {'data': 'test'})
+    except PermissionError as e:
+        assert '无权限写入缓存文件' in str(e)
+```
+
+---
+
+## 测试汇总（v1.4）
+
+| 测试编号 | 测试类型 | 测试目标 | 版本 |
+|---------|---------|---------|------|
+| TC001 | 功能 | gzip 缓存读写一致性 | v1.0 |
+| TC002 | 功能 | json 缓存读写一致性 | v1.0 |
+| TC003 | 功能 | 增量追加数据 | v1.0 |
+| TC004 | 功能 | 获取缓存文件信息 | v1.0 |
+| TC005 | 边界 | 文件不存在异常 | v1.0 |
+| TC006 | 边界 | JSON 格式错误异常 | v1.0 |
+| TC007 | 边界 | 空数据写入 | v1.0 |
+| TC008 | 参数 | path 类型支持 | v1.0 |
+| TC009 | 参数 | logger 参数传递 | v1.0 |
+| TC010 | 参数 | logger fallback | v1.0 |
+| TC011 | 日志 | get_cache_file_info 日志 | v1.0 |
+| TC012 | 异常 | JSONDecodeError 包装 | v1.0 |
+| TC013 | 功能 | 统一缓存 API - gzip | v1.2 |
+| TC014 | 功能 | 统一缓存 API - json | v1.2 |
+| TC015 | 功能 | 缓存存在性检查 | v1.2 |
+| TC016 | 功能 | 缓存删除函数 | v1.2 |
+| TC017 | 性能 | 大文件监控 | v1.2 |
+| TC018 | 参数 | gzip 压缩级别控制 | v1.3 |
+| TC019 | 参数 | JSON 可读格式 | v1.3 |
+| TC020 | 参数 | JSON 键排序 | v1.3 |
+| TC021 | 验证 | 缓存数据类型验证 | v1.3 |
+| TC022 | 异常 | gzip 文件损坏处理 | v1.4 |
+| TC023 | 边界 | 空文件处理 | v1.4 |
+| TC024 | 异常 | 权限错误处理 | v1.4 |
+
+---
+
+*最后更新: 2026-05-24 22:20 北京时间*
