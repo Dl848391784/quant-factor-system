@@ -10,6 +10,7 @@ HTTP 客户端模块
 - v1.2 (2026-05-25): 新增 get_module_logger，__all__ 导出，docstring Example 补充
 - v1.3 (2026-05-25): 模块级常量补全，请求头数据来源注释，返回类型修复
 - v1.4 (2026-05-25): 安全性修复（MappingProxyType 不可变常量、缩小异常捕获范围、安全访问 response.text）
+- v1.5 (2026-05-25): get_module_logger 类型验证同步（与 stock_utils.py 保持一致）
 
 作者: 云瑶
 日期: 2026-05-24
@@ -92,19 +93,27 @@ def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger
     不传 logger 时使用模块级 fallback logger（模块加载时已初始化）。
     
     Args:
-        logger: 调用方传入的 logger（可选）
+        logger: 调用方传入的 logger（可选），必须是 logging.Logger 类型
         
     Returns:
-        Logger 对象
+        logging.Logger: Logger 对象
+        
+    Raises:
+        TypeError: logger 参数不是 logging.Logger 类型
         
     Example:
-        # 使用 fallback logger
-        logger = get_module_logger()
+        >>> logger = get_module_logger()
+        >>> logger.name
+        'data_fetchers.common.http_client'
         
-        # 使用调用方 logger（推荐）
-        my_logger = logging.getLogger('my_module')
-        logger = get_module_logger(my_logger)
+        >>> my_logger = logging.getLogger('my_module')
+        >>> logger = get_module_logger(my_logger)
+        >>> logger.name
+        'my_module'
     """
+    # 类型安全检查：logger 必须是 Logger 类型或 None
+    if logger is not None and not isinstance(logger, logging.Logger):
+        raise TypeError(f"logger 必须是 logging.Logger 类型，实际类型: {type(logger).__name__}")
     if logger is not None:
         return logger
     return _MODULE_LOGGER

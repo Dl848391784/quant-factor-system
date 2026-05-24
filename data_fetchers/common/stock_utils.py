@@ -13,6 +13,7 @@
 - v1.5 (2026-05-25): 参数类型安全检查、线程锁保护、日期边界验证、数据格式验证
 - v1.6 (2026-05-25): 日期边界动态获取、异常链保留、元素类型安全检查、公开日期常量
 - v1.7 (2026-05-25): logger 参数类型验证、缓存函数 None 检查、docstring 结构规范化
+- v1.8 (2026-05-25): filter_stocks_by_date Note 补充、测试清理顺序修复、http_client 同步更新
 
 作者: 云瑶
 日期: 2026-05-24
@@ -406,6 +407,9 @@ def filter_stocks_by_date(
         TypeError: stock_list 不是列表类型，或元素不是字典类型
         ValueError: 日期为空、日期格式不正确、日期范围无效或超出合理边界
         
+    Note:
+        自动过滤非字典元素和日期字段为空的元素
+        
     Example:
         >>> stocks = [{'code': '600000', 'list_date': '2020-06-01'}]
         >>> filtered = filter_stocks_by_date(stocks, '2020-01-01', '2020-12-31')
@@ -741,13 +745,16 @@ if __name__ == '__main__':
         test_logger.info("  异常链已保留（load_main_board_stock_list）")
         test_logger.info("  logger 参数类型验证已实现（get_module_logger）")
         test_logger.info("  缓存函数 None 检查已实现（load_main_board_stock_list）")
+        test_logger.info("  filter_stocks_by_date Note 已补充（与其他辅助函数一致）")
+        test_logger.info("  测试清理顺序已修复（先打印再关闭处理器）")
         
         test_logger.info("\n" + "=" * 50)
         test_logger.info("测试完成（共 8 项测试，含类型验证 + 日期边界验证 + 线程安全验证）")
         test_logger.info("=" * 50)
     finally:
+        # 先打印清理日志，再关闭处理器（避免日志丢失）
+        test_logger.info("测试清理完成")
         # 清理测试资源（关闭日志处理器）
         for handler in test_logger.handlers:
             handler.close()
             test_logger.removeHandler(handler)
-        test_logger.info("测试清理完成")
