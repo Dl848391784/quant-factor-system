@@ -14,13 +14,14 @@
 - v1.6 (2026-05-25): 日期边界动态获取、异常链保留、元素类型安全检查、公开日期常量
 - v1.7 (2026-05-25): logger 参数类型验证、缓存函数 None 检查、docstring 结构规范化
 - v1.8 (2026-05-25): filter_stocks_by_date Note 补充、测试清理顺序修复、http_client 同步更新
+- v1.9 (2026-05-25): 导入顺序 PEP 8 合规化、MAX_STOCK_DATE Note 补充、load_main_board_stock_list Raises 补全
 
 作者: 云瑶
 日期: 2026-05-24
 """
 
-import logging
 import json
+import logging
 import re
 import threading
 from datetime import datetime
@@ -89,6 +90,11 @@ def MAX_STOCK_DATE() -> str:
     
     Returns:
         str: 当前日期（YYYY-MM-DD 格式）
+        
+    Note:
+        - 动态获取当前日期，长时间运行程序不会过期
+        - MIN_STOCK_DATE 是允许的最小日期（A股市场起始日）
+        - 日期边界：1990-12-19 ~ 当前日期
         
     Example:
         >>> MAX_STOCK_DATE()
@@ -247,6 +253,13 @@ def load_main_board_stock_list(
     Raises:
         FileNotFoundError: 股票列表缓存不存在
         ValueError: JSON 解析失败或数据格式错误
+        TypeError: logger 参数不是 logging.Logger 类型
+        RuntimeError: 缓存函数未初始化（模块导入错误）
+        
+    Note:
+        - 自动使用缓存路径（默认 cache/stock_list.json）
+        - 空股票列表返回空列表并打印警告
+        - 使用 is_main_board_stock 篛选规则（剔除创业板/科创板/北交所/ST）
         
     Example:
         >>> stocks = load_main_board_stock_list()

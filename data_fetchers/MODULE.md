@@ -1,6 +1,6 @@
 # data_fetchers 模块规范
 
-> 版本: v2.30
+> 版本: v2.31
 > 创建时间: 2026-05-19
 > 更新时间: 2026-05-25
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
@@ -344,6 +344,14 @@ data_fetchers/
    - **http_client.py 同步更新**：get_module_logger 新增类型验证（与 stock_utils.py 保持一致）
    - **版本历史补全**：stock_utils.py 新增 v1.8 版本演进说明，http_client.py 新增 v1.5 版本演进说明
    - **修复原因**：代码bug（测试清理顺序导致日志丢失）+ 规范遗漏（filter_stocks_by_date 缺少 Note、http_client.py get_module_logger 未同步）
+
+9. **stock_utils.py v1.9 (2026-05-25)** — 第九轮深度优化
+   - **导入顺序 PEP 8 合规化**：标准库导入按字母顺序排列（json, logging, re, threading）
+   - **MAX_STOCK_DATE Note 补充**：补充 Note 章节"动态获取当前日期，长时间运行程序不会过期"
+   - **load_main_board_stock_list Raises 补全**：补充 RuntimeError（缓存函数未初始化）和 TypeError（logger 参数类型错误）
+   - **load_main_board_stock_list Note 补充**：补充 Note 章节"自动使用缓存路径、空股票列表返回空列表并打印警告"
+   - **版本历史补全**：stock_utils.py 新增 v1.9 版本演进说明
+   - **修复原因**：规范遗漏（导入顺序不规范、MAX_STOCK_DATE 缺少 Note、load_main_board_stock_list Raises 不完整）
 
 ---
 
