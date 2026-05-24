@@ -254,7 +254,953 @@ if corr > 0.7:
 
 ---
 
-## 公共模块复用（强制）
+## 公共入口防御性编程规范（v1.1 新增）
+
+> 本节定义 composite_runner.py 公共入口的防御性校验规范，避免隐含假设导致的静默崩溃。
+
+### 必需列校验规范
+
+**问题类型：** factor_df 列名依赖隐含假设，未做校验导致 KeyError 延迟暴露。
+
+**规范要求：**
+```python
+# 在访问 DataFrame 列前，必须校验列存在性
+required_cols = ['date', 'asset']
+for col in required_cols:
+    if col not in factor_df.columns:
+        raise ValueError(
+            f"factor_df 缺少必需列 '{col}'，当前列: {list(factor_df.columns)}"
+        )
+
+# 因子列校验（factor_cols 参数传入）
+for col in factor_cols:
+    if col not in factor_df.columns:
+        raise ValueError(
+            f"factor_df 缺少因子列 '{col}'，当前列: {list(factor_df.columns)}"
+        )
+```
+
+**校验时机：**
+- 加载因子数据后，立即校验必需列（date/asset）
+- 计算综合因子后，校验因子列存在性
+- 保存输出前，校验输出必需列
+
+**错误信息要求：**
+- 必须包含缺失列名
+- 必须包含当前列列表（便于调试）
+- 错误信息友好，避免 KeyError 静默崩溃
+
+### 返回值解包校验规范
+
+**问题类型：** 函数返回值解包可能出错，用 `_` 丢弃返回值但未校验数量和类型。
+
+**规范要求：**
+```python
+# 不要直接解包，先校验返回值
+result = load_factor_return_data(cache_dir=cache_dir, logger=logger)
+
+# 校验返回值数量和类型
+if result is None:
+    raise ValueError("函数返回 None，期望 (factor_df, return_df)")
+
+if not isinstance(result, tuple) or len(result) != 2:
+    raise ValueError(
+        f"返回值数量错误，期望 2 个，实际: {len(result) if isinstance(result, tuple) else '非tuple'}"
+    )
+
+# 安全解包
+_, return_df = result
+
+# 校验解包后的值
+if return_df is None:
+    raise ValueError("return_df 为 None，数据加载失败")
+
+if 'forward_return_1d' not in return_df.columns:
+    raise ValueError(
+        f"return_df 缺少 'forward_return_1d' 列，当前列: {list(return_df.columns)}"
+    )
+```
+
+**适用场景：**
+- load_factor_return_data() 返回值解包
+- 其他跨模块调用函数返回值解包
+
+**防御性校验层级：**
+1. 返回值本身校验（None 检查）
+2. 返回值类型和数量校验（tuple + len）
+3. 解包后值校验（DataFrame 列校验）
+
+### 父类 validate() 方法调用规范
+
+**问题类型：** CompositeLayerConfig 继承 LayerConfigBase，调用 super().validate() 时需确认父类方法存在。
+
+**规范要求：**
+```python
+# 父类 LayerConfigBase 已定义 validate() 方法（backtest/common/layered_backtest_runner.py 第 100-123 行）
+# 子类 validate() 必须调用父类校验（确保基础校验不遗漏）
+
+def validate(self) -> None:
+    """校验配置完整性"""
+    super().validate()  # 调用父类校验（n_layers、factor_direction、layer 编号校验）
+    
+    # 子类特有校验
+    if not self.factor_list:
+        raise ValueError("factor_list 不能为空")
+    
+    if len(self.factor_list) != len(self.factor_cols):
+        raise ValueError("factor_list 与 factor_cols 数量不一致")
+```
+
+**父类校验内容（LayerConfigBase.validate）：**
+- n_layers ≥ 2
+- factor_direction ∈ ['positive', 'negative']
+- long_layers/short_layers 非空
+- layer 编号在 [1, n_layers] 范围内
+
+---
+
+## 因子名到列名映射规范（v1.1 新增）
+
+> 本节定义 factor_list（因子逻辑名）与 factor_cols（数据列名）的映射规范，避免 auto_select 逻辑遗漏。
+
+### 映射必要性
+
+**问题类型：** factor_list 是因子逻辑名（如 'rsi'），factor_cols 是缓存数据列名（如 'rsi_6'），直接等号赋值会导致 load_factor_values 找不到对应列。
+
+**映射来源：**
+- factor_ic 脚本命名：`ic_<因子名>_<周期>.py`（如 `ic_rsi_1d.py`）
+- 缓存数据列名：因子名 + 参数（如 `rsi_6`，6 为 RSI 周期参数）
+- 命名差异：逻辑名不带参数，列名带参数
+
+### 映射表定义位置
+
+**定义位置：** `comprehensive_factor/common/factor_selector.py` 的 `FACTOR_NAME_TO_COL_MAP`
+
+**当前硬编码映射（临时方案）：**
+```python
+FACTOR_NAME_TO_COL_MAP = {
+    'rsi': 'rsi_6',
+    'volume_ratio': 'volume_ratio_5',
+    'kdj_j': 'kdj_j_9',
+    'bollinger_pb': 'bollinger_pb_20',
+    'turnover_surge': 'turnover_surge_5',
+    'main_inflow_ratio': 'main_inflow_ratio_1d'
+}
+```
+
+**后续改进方向：**
+- 从配置文件读取（如 `config/factor_mapping.yaml`）
+- 支持动态参数（如 `rsi_{window}`）
+- 支持因子版本管理（如 `rsi_v2_6`）
+
+### select_factors 返回结构（v1.1 更新）
+
+**新增字段：**
+```json
+{
+  "selected": ["volume_ratio", "rsi"],
+  "factor_cols": ["volume_ratio_5", "rsi_6"],  // 新增：映射后的列名列表
+  "unmapped_factors": [],  // 新增：未找到映射的因子列表
+  "valid_count": 2,
+  "total_count": 5,
+  ...
+}
+```
+
+**未映射因子处理：**
+- 未找到映射时，使用因子名作为列名（兼容处理）
+- 记录到 `unmapped_factors` 列表，并输出警告日志
+- 调用方应检查 `unmapped_factors`，决定是否终止流程
+
+---
+
+## 动态权重保存规范（v1.1 新增）
+
+> 本节定义动态权重（rolling_icir_weight）的保存规范，避免语义误导。
+
+### 问题类型
+
+**问题：** RollingICIRWeightMethod 每日动态计算权重，无法用固定字典表达。如果保存 `get_weights()` 返回的等权默认值，会产生误导。
+
+**静态权重 vs 动态权重：**
+
+| 加权方式 | 权重类型 | get_weights() 返回 | 正确保存方式 |
+|---------|---------|-------------------|-------------|
+| equal_weight | 静态 | 固定等权字典 | 直接保存 |
+| icir_weight | 静态 | 固定 ICIR 比例字典 | 直接保存 |
+| ic_weight | 静态 | 固定 IC 比例字典 | 直接保存 |
+| rolling_icir_weight | **动态** | 等权默认（误导） | 标记为动态权重，不保存静态值 |
+
+### 动态权重保存格式
+
+**正确做法：**
+```python
+if weight_method == 'rolling_icir_weight':
+    # 标记为动态权重，不保存静态值
+    weights = {
+        '_dynamic': True,
+        '_method': 'rolling_icir_weight',
+        '_window': 60
+    }
+else:
+    # 静态权重直接保存
+    weights = weight_engine.get_weights(factor_cols, ic_results)
+```
+
+**输出示例：**
+```json
+{
+  "weights": {
+    "_dynamic": true,
+    "_method": "rolling_icir_weight",
+    "_window": 60
+  }
+}
+```
+
+**语义说明：**
+- `_dynamic: true` 表示权重每日动态计算
+- `_method` 记录加权方式
+- `_window` 记录滚动窗口参数
+- 用户需从 daily 输出中提取每日权重（因子计算时已嵌入）
+
+---
+
+## NaN 相关性处理规范（v1.1 新增）
+
+> 本节定义因子相关性 NaN 的显式处理规范，避免静默跳过异常情况。
+
+### 问题类型
+
+**问题：** 缺失值过多导致相关系数为 NaN，`abs(NaN) > 0.7` 返回 False（IEEE754），静默跳过异常情况。
+
+**NaN 来源：**
+- 因子缺失值过多（覆盖率低于阈值）
+- 截面标准化后全部为 NaN（无有效数据）
+- 计算异常（零方差导致 corr 无法计算）
+
+### 显式处理规范
+
+**校验代码：**
+```python
+if pd.isna(corr_val):
+    nan_corr_pairs.append({
+        'factor_a': factor_cols[i],
+        'factor_b': factor_cols[j],
+        'reason': 'NaN（缺失值过多导致相关性无法计算）'
+    })
+    logger.warning(
+        "相关性 NaN 警告: %s vs %s，缺失值过多导致相关性无法计算",
+        factor_cols[i], factor_cols[j]
+    )
+    continue  # 跳过 NaN，不判断高相关性
+```
+
+**输出新增字段：**
+```json
+{
+  "high_corr_pairs": [{"factor_a": "rsi", "factor_b": "bollinger_pb", "corr": 0.94}],
+  "nan_corr_pairs": [{"factor_a": "kdj_j", "factor_b": "main_inflow", "reason": "NaN（缺失值过多）"}]
+}
+```
+
+**处理建议：**
+- NaN 相关性因子应检查数据覆盖率
+- 覆盖率低于阈值（如 60%）的因子应标记为无效
+- 因子筛选时应提前排除数据缺失严重的因子
+
+---
+
+## 模块级代码规范（v1.2 新增）
+
+> 本节定义模块级代码（import 时执行的代码）的规范，避免副作用风险。
+
+### sys.path.insert 规范
+
+**问题类型：** 模块级 sys.path.insert 在每次 import 时都会执行，多次 import 可能导致路径重复污染。
+
+**错误写法：**
+```python
+# ❌ 每次 import 都会执行，可能导致重复插入
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+```
+
+**正确写法：**
+```python
+# ✓ 添加重复插入检查，避免多次 import 时路径重复污染
+_project_root = str(Path(__file__).parent.parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+```
+
+**适用场景：**
+- 跨模块导入（如 comprehensive_factor 导入 backtest 模块）
+- 项目根目录添加到 sys.path
+
+**注意事项：**
+- sys.path.insert 位置 0 会优先搜索，影响 import 顺序
+- 重复插入同一路径不会报错，但会污染 sys.path
+- 检查方式：`if path_str not in sys.path:`
+
+---
+
+## 函数入口类型统一规范（v1.2 新增）
+
+> 本节定义函数入口参数类型统一转换规范，避免内部冗余转换。
+
+### output_dir 类型转换规范
+
+**问题类型：** 参数签名声明 str，但内部多处调用 Path() 转换，冗余且不一致。
+
+**错误写法：**
+```python
+def run_composite_backtest(
+    output_dir: Optional[str] = None  # 签名声明 str
+):
+    ...
+    Path(output_dir).mkdir(...)       # 多次转换
+    output_file = Path(output_dir) / 'xxx.json'  # 再次转换
+    daily_file = Path(output_dir) / 'xxx.gz'     # 又一次转换
+```
+
+**正确写法：**
+```python
+def run_composite_backtest(
+    output_dir: Union[str, Path, None] = None  # 签名支持两种类型
+):
+    # 入口统一转换，后续无需再调用 Path()
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+    
+    ...
+    output_dir.mkdir(...)             # 直接调用 Path 方法
+    output_file = output_dir / 'xxx.json'       # 直接使用 / 运算符
+    daily_file = output_dir / 'xxx.gz'          # 无需冗余转换
+```
+
+**类型签名建议：**
+- 支持 str 或 Path：`Union[str, Path, None]`
+- 入口统一转换为 Path：便于后续直接调用 Path 方法
+- 文档说明：在 docstring 中注明"支持 str 或 Path，入口统一转换"
+
+**适用参数：**
+- `output_dir`：输出目录路径
+- `cache_dir`：缓存目录路径
+- `ic_result_dir`：IC结果目录路径
+- 其他路径参数均可采用此模式
+
+---
+
+## composite_factor NaN 检查规范（v1.2 新增）
+
+> 本节定义综合因子全 NaN 的检查规范，避免分层回测静默失效。
+
+### 问题类型
+
+**问题：** 所有因子值缺失时，composite_factor 全为 NaN，后续分层回测无法进行（无法计算 percentile）。
+
+**NaN 来源：**
+- 所有因子值缺失（factor_cols 配置错误或数据缺失）
+- 标准化后全为 NaN（原始数据覆盖率过低）
+- 加权计算异常（weight_engine.calculate 返回全 NaN）
+
+### 检查规范
+
+**校验代码：**
+```python
+# 添加综合因子到 factor_df
+factor_df['composite_factor'] = composite_factor
+
+# 检查 composite_factor 全为 NaN 的情况
+valid_composite_count = factor_df['composite_factor'].notna().sum()
+if valid_composite_count == 0:
+    raise ValueError(
+        "composite_factor 全为 NaN，无法进行分层回测\n"
+        "可能原因：\n"
+        "  1. 所有因子值缺失（检查 factor_cols 是否正确）\n"
+        "  2. 标准化后全为 NaN（检查原始数据覆盖率）\n"
+        "  3. 加权计算异常（检查 weight_engine.calculate()）"
+    )
+```
+
+**错误信息要求：**
+- 明确说明"无法进行分层回测"
+- 提供可能原因列表（便于排查）
+- 包含建议检查点
+
+**检查时机：**
+- 在添加 composite_factor 到 factor_df 后立即检查
+- 在调用分层回测引擎前
+
+---
+
+## CLI 异常退出码规范（v1.2 新增）
+
+> 本节定义 CLI 异常处理退出码规范，确保 shell 能正确识别执行状态。
+
+### 问题类型
+
+**问题：** raise 重新抛出异常后，进程退出码取决于调用方（shell 可能返回非零，但不确定），应显式设置。
+
+**错误写法：**
+```python
+try:
+    result = run_composite_backtest(...)
+    logger.info("回测完成")
+except Exception as e:
+    logger.error("回测执行异常: %s", e)
+    raise  # 退出码不确定
+```
+
+**正确写法：**
+```python
+try:
+    result = run_composite_backtest(...)
+    logger.info("回测完成，退出码 0")
+    sys.exit(0)  # 显式设置成功退出码
+except Exception as e:
+    logger.error("回测执行异常: %s", e)
+    logger.error("退出码 1（异常终止）")
+    sys.exit(1)  # 显式设置失败退出码
+```
+
+**退出码语义：**
+- 0：成功完成
+- 1：异常终止（通用错误）
+- 2：参数错误（可选）
+- 其他：特定错误码（按需定义）
+
+**适用场景：**
+- CLI 脚本入口（create_cli_entrypoint 返回的 main 函数）
+- 被 shell 调用的脚本（如 cron job）
+
+**shell 退出码检查示例：**
+```bash
+python composite_icir_weight_1d.py
+if [ $? -eq 0 ]; then
+    echo "执行成功"
+else
+    echo "执行失败，退出码: $?"
+fi
+```
+
+---
+
+## 校验前置规范（v1.3 新增）
+
+> 本节定义列校验的执行时机规范，避免校验位置错误导致无效计算。
+
+### 问题类型
+
+**问题：** 列校验放在 composite_factor 计算之后，如果列不存在，calculate 已经执行但结果无效，浪费计算资源。应校验前置，放在 standardize 之后、calculate 之前。
+
+### 校验时机规范
+
+**校验顺序：**
+```
+加载因子数据 → 标准化因子 → 【列校验】 → 计算相关性 → 计算综合因子 → ...
+```
+
+**校验层级：**
+1. 必需列校验：`['date', 'asset']`
+2. 因子列校验：`factor_cols`（用户传入）
+3. 标准化因子列校验：`*_std`（standardize_factors 生成）
+
+**校验代码位置：**
+```python
+# 4. 标准化因子
+factor_df = standardize_factors(factor_df, factor_cols, logger)
+
+# 校验前置：在 calculate 之前校验
+required_cols = ['date', 'asset']
+for col in required_cols:
+    if col not in factor_df.columns:
+        raise ValueError(f"factor_df 缺少必需列 '{col}'")
+
+# 校验因子列存在性
+for col in factor_cols:
+    if col not in factor_df.columns:
+        raise ValueError(f"factor_df 缺少因子列 '{col}'")
+
+# 校验标准化因子列存在性（standardize_factors 生成 *_std 列）
+std_cols = [f'{col}_std' for col in factor_cols]
+for col in std_cols:
+    if col not in factor_df.columns:
+        raise ValueError(f"factor_df 缺少标准化因子列 '{col}'")
+
+# 5. 计算因子相关性（校验通过后才执行）
+...
+```
+
+**校验前置的意义：**
+- 避免无效计算：列不存在时立即报错，不执行 calculate
+- 快速失败：尽早暴露问题，减少调试时间
+- 资源节约：避免浪费计算资源
+
+---
+
+## DataFrame 空值检查规范（v1.3 新增）
+
+> 本节定义 DataFrame 空值检查规范，包括 None 和空 DataFrame 两种情况。
+
+### 问题类型
+
+**问题：** 只检查 None 和列存在性，未检查空 DataFrame（有列名但无数据）。空 DataFrame 会导致回测引擎静默产生空结果。
+
+### 空值类型对比
+
+| 类型 | 检查方式 | 说明 |
+|------|---------|------|
+| None | `df is None` | 数据加载失败 |
+| 空DataFrame | `len(df) == 0` | 有列名但无数据（静默问题） |
+| 缺失列 | `col not in df.columns` | 列不存在 |
+
+### 检查规范
+
+**完整检查代码：**
+```python
+_, return_df = factor_return_result
+
+# 1. None 检查
+if return_df is None:
+    raise ValueError("return_df 为 None，收益数据加载失败")
+
+# 2. 空 DataFrame 检查
+if len(return_df) == 0:
+    raise ValueError(
+        "return_df 为空 DataFrame（有列名但无数据），无法进行分层回测\n"
+        "可能原因：\n"
+        "  1. 缓存数据文件为空\n"
+        "  2. 数据加载异常"
+    )
+
+# 3. 列存在性检查
+if 'forward_return_1d' not in return_df.columns:
+    raise ValueError("return_df 缺少 'forward_return_1d' 列")
+```
+
+**错误信息要求：**
+- 区分三种空值类型
+- 提供可能原因列表
+- 包含当前列列表（便于调试）
+
+---
+
+## 权重元信息分离规范（v1.3 新增）
+
+> 本节定义权重元信息与权重数据的分离规范，避免序列化风险。
+
+### 问题类型
+
+**问题：** 动态权重字典混入非权重字段（如 `_dynamic`），后续序列化存在风险。
+
+**错误写法：**
+```python
+weights = {'_dynamic': True, '_method': 'rolling_icir_weight', '_window': 60}
+# 问题：'_dynamic' 等字段不是因子权重，混入权重字典语义不清
+```
+
+**正确写法：**
+```python
+# 权重数据（动态权重时为空字典）
+weights = {}
+
+# 权重元信息（与权重数据分离）
+weight_meta = {
+    'is_dynamic': True,
+    'method': 'rolling_icir_weight',
+    'window': 60,
+    'note': '权重每日动态计算，不保存静态值'
+}
+```
+
+### 输出结构规范
+
+**输出字段：**
+```json
+{
+  "weights": {"rsi": 0.4, "volume_ratio": 0.6},  // 权重数据（动态权重时为空）
+  "weight_meta": {                               // 权重元信息（分离）
+    "is_dynamic": false,
+    "method": "icir_weight"
+  }
+}
+```
+
+**语义说明：**
+- `weights`：因子权重数据（因子名 → 权重值）
+- `weight_meta`：权重元信息（is_dynamic、method、window等）
+
+**序列化优势：**
+- 字典字段语义清晰
+- 无需特殊处理 `_` 前缀字段
+- 易于下游解析和使用
+
+---
+
+## CLI 异常堆栈保留规范（v1.3 新增）
+
+> 本节定义 CLI 异常处理堆栈信息保留规范，便于排查问题。
+
+### 问题类型
+
+**问题：** `logger.error("异常: %s", e)` 只打印异常消息，丢失堆栈信息，难以排查根因。
+
+### 堆栈保留方式
+
+**方式1：traceback.format_exc()**
+```python
+import traceback
+
+try:
+    result = run_composite_backtest(...)
+except Exception as e:
+    logger.error("回测执行异常: %s", e)
+    logger.error("异常堆栈:\n%s", traceback.format_exc())  # 打印完整堆栈
+    sys.exit(1)
+```
+
+**方式2：logger.exception()**
+```python
+try:
+    result = run_composite_backtest(...)
+except Exception as e:
+    logger.exception("回测执行异常: %s", e)  # 自动打印堆栈
+    sys.exit(1)
+```
+
+**推荐方式：** 方式1（traceback.format_exc()），可控制堆栈打印位置和格式。
+
+**堆栈信息用途：**
+- 定位异常发生位置（文件、行号）
+- 分析调用链（函数调用顺序）
+- 查看异常上下文（局部变量值）
+
+---
+
+## 标准化列名接口约定规范（v1.5 新增）
+
+> 本节定义 standardize_factors 函数与 WeightEngine 接口的列名转换约定，避免维护者误判为 bug。
+
+### 问题类型
+
+**问题：** standardize_factors 新增 `_std` 后缀的标准化列，但 WeightEngine.calculate() 接收原始列名 factor_cols，易被误判为"列名不匹配 bug"。
+
+### 接口约定说明
+
+**实际上这不是 bug，而是设计约定：**
+
+1. **standardize_factors 接口约定：**
+   - 输入列名：原始因子列名（如 `'rsi_6'`, `'volume_ratio_5'`）
+   - 输出列名：新增 `_std` 后缀（如 `'rsi_6_std'`, `'volume_ratio_5_std'`）
+   - 返回 DataFrame：保留原始列 + 新增标准化列
+
+2. **WeightEngine.calculate() 接口约定：**
+   - 参数 `factor_cols`：接收原始列名（不是 `_std` 列）
+   - 内部自动转换：`std_cols = [f'{col}_std' for col in factor_cols]`
+   - 使用标准化列计算：`factor_df[std_cols]`
+
+**接口设计原因：**
+- 用户视角：传入因子名（`factor_cols=['rsi_6']`），无需关心标准化细节
+- 内部视角：自动转换列名，使用标准化值计算
+- 分离关注点：标准化是内部实现，接口简洁清晰
+
+**代码示例（weight_engine.py）：**
+```python
+class EqualWeightMethod(WeightMethodBase):
+    def calculate(self, factor_df, factor_cols, ...):
+        # 内部自动转换为 _std 列
+        std_cols = [f'{col}_std' for col in factor_cols]
+        
+        # 使用标准化列计算
+        composite = factor_df[std_cols[0]] * weight
+        ...
+```
+
+**维护提醒：**
+- 不要修改 WeightEngine.calculate() 接口，传入原始列名是正确的
+- 不要在调用方预先转换列名，WeightEngine 内部已处理
+- 查看函数注释了解接口约定（factor_loader.py:241-257）
+
+---
+
+## 标准化 NaN 处理规范（v1.5 新增）
+
+> 本节定义截面标准化时 NaN 值的处理规范，避免单样本场景下的错误行为。
+
+### 问题类型
+
+**问题：** `lambda x: (x - x.mean()) / x.std() if x.std() > 0 else 0` 在单样本场景下：
+1. `x.std(ddof=1)` 单样本返回 NaN（不是 0）
+2. 条件 `x.std() > 0` 对 NaN 返回 False
+3. 整组被置为 0（包括原本 NaN 的行）
+4. 后置 `.loc` 还原 NaN，逻辑冗余且易出错
+
+### NaN 处理规范
+
+**正确行为：**
+
+1. **原始 NaN 保持 NaN**：原因子值为 NaN 时，标准化后仍为 NaN
+2. **单样本标准化为 NaN**：某日只有单只股票有有效值时，标准化结果为 NaN（样本标准差无法计算）
+3. **有效值不足警告**：count <= 1 时记录警告日志，便于排查数据质量问题
+
+**修复代码：**
+```python
+# 计算每日截面统计
+daily_stats = factor_df.groupby('date')[col].agg(['mean', 'std', 'count'])
+
+# 检查有效值数量不足的情况
+low_count_mask = daily_stats['count'] <= 1
+low_count_dates = list(daily_stats.index[low_count_mask])
+if low_count_dates:
+    logger.warning(
+        "因子 %s 在 %d 个日期有效值数量 <=1，标准化结果将为 NaN: %s",
+        col, len(low_count_dates), low_count_dates[:5]
+    )
+
+# 使用 transform 计算标准化值
+# 注意：x.std(ddof=1) 单样本时返回 NaN，是正确行为
+factor_df[std_col] = factor_df.groupby('date')[col].transform(
+    lambda x: (x - x.mean()) / x.std() if x.std() > 0 else np.nan
+)
+
+# NaN 处理：原因子值为 NaN 时标准化后仍为 NaN
+factor_df.loc[factor_df[col].isna(), std_col] = np.nan
+```
+
+**行为对比：**
+
+| 场景 | 原代码行为 | 修复后行为 |
+|------|-----------|-----------|
+| 单样本有效值 | 整组置为 0 | 返回 NaN（正确） |
+| 原始 NaN | 后置还原 | 直接保持 NaN |
+| 有效值不足 | 静默错误 | 记录警告日志 |
+
+**修复意义：**
+- 单样本场景返回 NaN 符合统计学原理（样本标准差未定义）
+- 警告日志帮助发现数据质量问题（如某日只有 1 只股票交易）
+- 避免无效标准化值被错误使用
+
+---
+
+## 函数前置条件校验规范（v1.6 新增）
+
+> 本节定义函数前置条件校验规范，避免依赖隐式假设导致的 KeyError。
+
+### 问题类型
+
+**问题：** calc_factor_correlation 依赖 _std 列，但未校验前置条件。如果调用方没先调用 standardize_factors，会抛出不明确的 KeyError。
+
+### 校验规范
+
+**前置条件校验代码：**
+```python
+def calc_factor_correlation(factor_df, factor_cols, logger):
+    std_cols = [f'{col}_std' for col in factor_cols]
+    
+    # 前置校验：_std 列必须存在
+    for std_col in std_cols:
+        if std_col not in factor_df.columns:
+            raise ValueError(
+                f"factor_df 缺少标准化因子列 '{std_col}'\n"
+                "可能原因：\n"
+                "  1. 调用方未先调用 standardize_factors()\n"
+                "  2. standardize_factors 参数 factor_cols 与 calc_factor_correlation 不一致\n"
+                "调用顺序：load_factor_values → standardize_factors → calc_factor_correlation"
+            )
+    
+    # 计算相关性
+    ...
+```
+
+**校验原则：**
+- 依赖其他函数生成的列时，必须校验存在性
+- 错误信息包含可能原因列表 + 正确调用顺序
+- 避免隐式假设（"调用方一定会先调用 X"）
+
+---
+
+## 数据类型校验规范（v1.6 新增）
+
+> 本节定义 DataFrame 关键列的数据类型校验规范。
+
+### 问题类型
+
+**问题：** load_factor_values 未校验 date、asset 列类型，类型不一致可能导致 groupby、merge 等操作异常。
+
+### 类型校验规范
+
+**关键列类型要求：**
+| 列名 | 期望类型 | 异常后果 |
+|------|---------|---------|
+| date | str | groupby('date') 失败 |
+| asset | str | merge on='asset' 失败 |
+
+**校验代码：**
+```python
+def load_factor_values(...):
+    factor_df = pd.DataFrame(factor_data['data'])
+    
+    # 校验列类型
+    if len(factor_df) > 0:
+        first_date = factor_df['date'].iloc[0]
+        if not isinstance(first_date, str):
+            raise TypeError(
+                f"date 列应为 str，实际为 {type(first_date).__name__}\n"
+                f"首行值: {first_date}\n"
+                "可能原因：JSON 文件中 date 字段为数字而非字符串"
+            )
+        
+        first_asset = factor_df['asset'].iloc[0]
+        if not isinstance(first_asset, str):
+            raise TypeError(...)
+    
+    return factor_df
+```
+
+**校验时机：** 数据加载后、返回前。
+
+---
+
+## 缺失因子返回规范（v1.6 新增）
+
+> 本节定义函数返回缺失因子列表的规范，避免调用方不知道哪些因子缺失。
+
+### 问题类型
+
+**问题1：** load_ic_results 静默跳过缺失因子，调用方不知道哪些因子缺失，后续 WeightEngine 可能 KeyError。
+
+**问题2：** load_ic_daily 静默跳过缺失因子，滚动ICIR 计算时部分因子缺失。
+
+### 返回值规范
+
+**返回 Tuple[结果, 缺失列表]：**
+```python
+def load_ic_results(factor_names, ...) -> Tuple[Dict[str, Dict], List[str]]:
+    ic_results = {}
+    missing_factors = []
+    
+    for factor_name in factor_names:
+        if not ic_file.exists():
+            missing_factors.append(factor_name)
+            continue
+        
+        ic_results[factor_name] = ...
+    
+    return ic_results, missing_factors
+```
+
+**调用方处理：**
+```python
+ic_results, missing_ic_factors = load_ic_results(...)
+if missing_ic_factors:
+    logger.warning("部分因子 IC 结果缺失，权重计算将回退等权: %s", missing_ic_factors)
+```
+
+**设计原则：**
+- 返回缺失列表，让调用方决定如何处理（警告/报错/回退）
+- 不静默跳过，避免下游 KeyError
+
+---
+
+## 数据一致性强校验规范（v1.6 新增）
+
+> 本节定义数据一致性校验规范，避免静默截断导致的错位数据。
+
+### 问题类型
+
+**问题：** load_ic_daily 日期与 IC 值数量不一致时静默截断，可能导致错位数据对齐到错误日期。
+
+### 校验规范
+
+**强校验（抛出错误而非截断）：**
+```python
+if len(dates) != len(ic_values):
+    raise ValueError(
+        f"日期与IC值数量不一致: dates={len(dates)}, ic_values={len(ic_values)}\n"
+        "可能原因：\n"
+        "  1. IC 计算过程中部分日期缺失数据\n"
+        "  2. JSON 文件写入异常\n"
+        "建议：重新运行 IC 分析脚本生成完整的 IC 结果文件"
+    )
+```
+
+**设计原则：**
+- 数据一致性问题是严重错误，不应静默截断
+- 截断可能导致错位数据，产生错误的计算结果
+- 强校验帮助发现上游数据生成问题
+
+---
+
+## 死代码移除规范（v1.6 新增）
+
+> 本节定义死代码识别和移除规范。
+
+### 问题类型
+
+**问题：** load_ic_daily 生成 ic_sign 列，但后续 WeightEngine 未使用（搜索验证），且 v 可能是 None 导致 TypeError。
+
+### 死代码识别方法
+
+**识别步骤：**
+1. 搜索列名使用：`grep "ic_sign"` → 无下游使用
+2. 检查计算逻辑：`v > 0` 时 v 可能是 None
+3. 确认移除不影响功能
+
+**移除代码：**
+```python
+# 原代码（死代码 + TypeError 风险）
+daily_df = pd.DataFrame({
+    'date': dates,
+    'ic': ic_values,
+    'ic_sign': [1 if v > 0 else -1 if v < 0 else 0 for v in ic_values]  # 死代码
+})
+
+# 修复后
+ic_values_cleaned = [v if v is not None else np.nan for v in ic_values]
+daily_df = pd.DataFrame({
+    'date': dates,
+    'ic': ic_values_cleaned  # 移除 ic_sign
+})
+```
+
+**移除原则：**
+- 未被下游使用的列 = 死代码，应移除
+- 计算逻辑有健壮性问题时，移除而非修复（如果功能不需要）
+- 函数注释说明移除原因，避免后续重复添加
+
+---
+
+## 字段回退验证规范（v1.6 新增）
+
+> 本节定义 JSON 字段回退时的验证规范。
+
+### 问题类型
+
+**问题：** load_ic_results 从 ic_metrics 回退到 summary，但 summary 结构可能与 ic_metrics 不一致，缺少必需字段。
+
+### 回退验证规范
+
+**必需字段定义：**
+```python
+REQUIRED_IC_FIELDS = ['ic_mean', 'icir']  # 静态权重计算必需
+```
+
+**回退时验证：**
+```python
+if 'ic_metrics' in ic_data:
+    extracted_data = ic_data['ic_metrics']
+elif 'summary' in ic_data:
+    extracted_data = ic_data['summary']
+    # 检查必需字段是否存在
+    missing_fields = [f for f in REQUIRED_IC_FIELDS if f not in extracted_data]
+    if missing_fields:
+        logger.warning("summary 字段缺失必需字段: %s", missing_fields)
+```
+
+**验证原则：**
+- 回退字段结构可能不同，必须验证必需字段
+- 缺失必需字段时记录警告（不跳过，让下游处理回退）
 
 **遵循 PROJECT.md 模块边界规范：只复用 comprehensive_factor/common/ 下的模块。**
 
@@ -432,3 +1378,9 @@ result = run_layered_backtest(
 | 版本 | 日期 | 变更内容 |
 |------|------|---------|
 | v1.0 | 2026-05-24 | 初始设计：目录结构、脚本命名、加权方式、公共模块、输出规范 |
+| v1.1 | 2026-05-24 | 新增公共入口防御性编程规范（必需列校验、返回值解包校验、父类 validate 调用规范） |
+| v1.2 | 2026-05-24 | 新增因子名到列名映射规范、动态权重保存规范、NaN相关性处理规范 |
+| v1.3 | 2026-05-24 | 新增模块级代码规范、函数入口类型统一规范、composite_factor NaN检查规范、CLI异常退出码规范 |
+| v1.4 | 2026-05-24 | 新增校验前置规范、DataFrame空值检查规范、权重元信息分离规范、CLI异常堆栈保留规范 |
+| v1.5 | 2026-05-24 | 新增标准化列名接口约定规范、标准化NaN处理规范（单样本场景返回NaN而非0） |
+| v1.6 | 2026-05-24 | 新增函数前置条件校验、数据类型校验、缺失因子返回、数据一致性强校验、死代码移除、字段回退验证规范 |

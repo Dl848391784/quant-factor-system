@@ -48,6 +48,19 @@ DEFAULT_THRESHOLDS = {
 }
 
 
+# 因子名到数据列名的映射（v1.1 新增）
+# 说明：factor_list 是因子逻辑名（如 'rsi'），factor_cols 是缓存数据列名（如 'rsi_6'）
+# 后续应从配置文件读取，此处为硬编码临时方案
+FACTOR_NAME_TO_COL_MAP = {
+    'rsi': 'rsi_6',
+    'volume_ratio': 'volume_ratio_5',
+    'kdj_j': 'kdj_j_9',
+    'bollinger_pb': 'bollinger_pb_20',
+    'turnover_surge': 'turnover_surge_5',
+    'main_inflow_ratio': 'main_inflow_ratio_1d'
+}
+
+
 def load_all_factor_results(
     ic_result_dir: Optional[Path] = None,
     backtest_result_dir: Optional[Path] = None,
@@ -410,8 +423,22 @@ def select_factors(
         logger.warning("缺少相关性矩阵，跳过高相关筛选")
     
     # 构建输出
+    # 映射因子逻辑名到数据列名
+    factor_cols = []
+    unmapped_factors = []
+    for factor_name in selected_factors:
+        if factor_name in FACTOR_NAME_TO_COL_MAP:
+            factor_cols.append(FACTOR_NAME_TO_COL_MAP[factor_name])
+        else:
+            # 未找到映射，使用因子名作为列名（兼容处理）
+            factor_cols.append(factor_name)
+            unmapped_factors.append(factor_name)
+            logger.warning("因子 '%s' 未找到列名映射，使用因子名作为列名", factor_name)
+    
     result = {
         'selected': selected_factors,
+        'factor_cols': factor_cols,  # 新增：数据列名映射结果
+        'unmapped_factors': unmapped_factors,  # 新增：未映射的因子列表
         'valid_count': len(valid_factors),
         'total_count': len(all_factors),
         'invalid': invalid_factors,
@@ -423,5 +450,6 @@ def select_factors(
     
     logger.info("筛选完成: 选中 %d 个因子", len(selected_factors))
     logger.info("选中因子: %s", selected_factors)
+    logger.info("对应列名: %s", factor_cols)
     
     return result

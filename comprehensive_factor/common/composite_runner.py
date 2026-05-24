@@ -25,7 +25,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, List, Callable
+from typing import Dict, Optional, List, Callable, Union
 from dataclasses import dataclass, field
 
 # 导入公共模块
@@ -41,7 +41,11 @@ from comprehensive_factor.common.factor_loader import (
 from comprehensive_factor.common.weight_engine import WeightEngine
 
 # 导入 backtest 公共模块（跨模块调用，但通过函数接口）
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+# 修复：添加重复插入检查，避免多次 import 时路径重复污染
+_project_root = str(Path(__file__).parent.parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
 from backtest.common.layered_backtest import LayeredBacktestEngine
 from backtest.common.layered_backtest_runner import LayerConfigBase, load_factor_return_data
 from backtest.common.convert_types import convert_to_native_types as backtest_convert
@@ -98,7 +102,7 @@ def run_composite_backtest(
     cache_dir: Optional[str] = None,
     ic_result_dir: Optional[str] = None,
     backtest_result_dir: Optional[str] = None,
-    output_dir: Optional[str] = None,
+    output_dir: Union[str, Path, None] = None,    # 修复：支持 str 或 Path，入口统一转换
     auto_select: bool = False,                    # 是否自动筛选因子
     thresholds: Optional[Dict] = None,            # 筛选阈值配置
     verbose: bool = True,
@@ -115,7 +119,7 @@ def run_composite_backtest(
         cache_dir: 缓存目录
         ic_result_dir: IC结果目录
         backtest_result_dir: 回测结果目录
-        output_dir: 输出目录
+        output_dir: 输出目录（支持 str 或 Path，入口统一转换为 Path）
         auto_select: 是否自动筛选因子（Step 2自动化）
         thresholds: 筛选阈值配置（如未提供则使用默认值）
         verbose: 是否打印详细信息
@@ -126,6 +130,14 @@ def run_composite_backtest(
     """
     if logger is None:
         logger = get_logger(__name__)
+    
+    # 修复：入口统一转换类型，处理所有情况（包括 None）
+    if output_dir is None:
+        # 默认输出目录
+        project_root = Path(__file__).parent.parent.parent
+        output_dir = project_root / 'comprehensive_factor' / 'result'
+    else:
+        output_dir = Path(output_dir)
     
     # 创建默认配置（如果未传入）
     if config is None:
@@ -161,13 +173,19 @@ def run_composite_backtest(
         # 根据筛选结果设置 factor_list
         factor_list = selection_result['selected']
         
-        # factor_cols 需要根据缓存数据的实际列名调整
-        # 例如：'rsi' → 'rsi_6', 'volume_ratio' → 'volume_ratio_5'
-        # 这里简化处理：factor_cols = factor_list
-        if factor_cols is None:
-            factor_cols = factor_list
+        # 使用 select_factors 返回的 factor_cols 映射（已从 FACTOR_NAME_TO_COL_MAP 获取）
+        # 修复：不再直接赋值 factor_cols = factor_list，避免列名不匹配
+        factor_cols = selection_result.get('factor_cols', factor_list)
         
-        logger.info("自动筛选完成: %s", factor_list)
+        # 检查未映射因子警告
+        unmapped = selection_result.get('unmapped_factors', [])
+        if unmapped:
+            logger.warning(
+                "以下因子未找到列名映射，可能导致数据加载失败: %s",
+                unmapped
+            )
+        
+        logger.info("自动筛选完成: %s → %s", factor_list, factor_cols)
     
     # 如果仍未指定，使用默认配置
     if factor_list is None:
@@ -200,12 +218,19 @@ def run_composite_backtest(
     
     # 2. 加载 IC 结果
     logger.info("加载 IC 结果...")
-    ic_results = load_ic_results(
+    ic_results, missing_ic_factors = load_ic_results(
         factor_names=factor_list,
         ic_result_dir=ic_result_dir,
         return_period=return_period,
         logger=logger
     )
+    
+    # 修复：检查缺失因子，避免后续计算 KeyError
+    if missing_ic_factors:
+        logger.warning(
+            "部分因子 IC 结果缺失，权重计算将回退等权: %s",
+            missing_ic_factors
+        )
     
     # 3. 加载 IC 每日数据（滚动ICIR需要）
     ic_daily_data = None
@@ -222,17 +247,63 @@ def run_composite_backtest(
     logger.info("标准化因子值...")
     factor_df = standardize_factors(factor_df, factor_cols, logger)
     
+    # 修复：列校验前置，放在 standardize 之后、calculate 之前
+    # 校验必需列存在性（防御性编程）
+    required_cols = ['date', 'asset']
+    for col in required_cols:
+        if col not in factor_df.columns:
+            raise ValueError(
+                f"factor_df 缺少必需列 '{col}'，当前列: {list(factor_df.columns)}"
+            )
+    
+    # 校验因子列存在性
+    for col in factor_cols:
+        if col not in factor_df.columns:
+            raise ValueError(
+                f"factor_df 缺少因子列 '{col}'，当前列: {list(factor_df.columns)}"
+            )
+    
+    # 校验标准化因子列存在性（standardize_factors 生成 *_std 列）
+    std_cols = [f'{col}_std' for col in factor_cols]
+    for col in std_cols:
+        if col not in factor_df.columns:
+            raise ValueError(
+                f"factor_df 缺少标准化因子列 '{col}'，当前列: {list(factor_df.columns)}\n"
+                "可能原因：standardize_factors 未正确生成标准化列"
+            )
+    
     # 5. 计算因子相关性
     logger.info("计算因子相关性...")
     corr_matrix = calc_factor_correlation(factor_df, factor_cols, logger)
     
     # 检查高相关性因子
     high_corr_pairs = []
+    nan_corr_pairs = []  # 新增：NaN相关性记录（缺失值过多导致的异常）
+    
     for i in range(len(factor_cols)):
         for j in range(i + 1, len(factor_cols)):
             corr_val = corr_matrix.loc[factor_cols[i], factor_cols[j]]
+            
+            # 修复：显式处理 NaN（缺失值过多导致的异常相关性）
+            if pd.isna(corr_val):
+                nan_corr_pairs.append({
+                    'factor_a': factor_cols[i],
+                    'factor_b': factor_cols[j],
+                    'reason': 'NaN（缺失值过多导致相关性无法计算）'
+                })
+                logger.warning(
+                    "相关性 NaN 警告: %s vs %s，缺失值过多导致相关性无法计算",
+                    factor_cols[i], factor_cols[j]
+                )
+                continue  # 跳过 NaN，不判断高相关性
+            
+            # 正常相关性判断
             if abs(corr_val) > 0.7:
-                high_corr_pairs.append((factor_cols[i], factor_cols[j], corr_val))
+                high_corr_pairs.append({
+                    'factor_a': factor_cols[i],
+                    'factor_b': factor_cols[j],
+                    'corr': float(corr_val)  # 显式转为 float，避免 numpy 类型
+                })
                 logger.warning(
                     "高相关因子警告: %s vs %s, corr=%.2f，建议只选其一",
                     factor_cols[i], factor_cols[j], corr_val
@@ -256,13 +327,46 @@ def run_composite_backtest(
     # 添加综合因子到 factor_df
     factor_df['composite_factor'] = composite_factor
     
-    # 7. 获取权重
-    weights = weight_engine.get_weights(factor_cols, ic_results)
+    # 修复：检查 composite_factor 全为 NaN 的情况
+    valid_composite_count = factor_df['composite_factor'].notna().sum()
+    if valid_composite_count == 0:
+        raise ValueError(
+            "composite_factor 全为 NaN，无法进行分层回测\n"
+            "可能原因：\n"
+            "  1. 所有因子值缺失（检查 factor_cols 是否正确）\n"
+            "  2. 标准化后全为 NaN（检查原始数据覆盖率）\n"
+            "  3. 加权计算异常（检查 weight_engine.calculate()）"
+        )
+    
+    # 7. 获取权重（修复：元信息与权重数据分离）
+    # 区分静态权重和动态权重
+    if weight_method == 'rolling_icir_weight':
+        # 滚动ICIR权重是每日动态计算的，无法用固定字典表达
+        # 修复：将元信息与权重数据分离，避免序列化风险
+        weights = {}  # 权重字典为空（动态权重不保存静态值）
+        weight_meta = {
+            'is_dynamic': True,
+            'method': 'rolling_icir_weight',
+            'window': config.rolling_window,
+            'note': '权重每日动态计算，不保存静态值'
+        }
+        logger.info("滚动ICIR加权: 权重每日动态计算（窗口 %d 日），不保存静态权重", config.rolling_window)
+    else:
+        # 静态权重方法（equal_weight、icir_weight、ic_weight）
+        weights = weight_engine.get_weights(factor_cols, ic_results)
+        weight_meta = {
+            'is_dynamic': False,
+            'method': weight_method
+        }
+        logger.info("静态权重获取完成: %s", weights)
     
     if verbose:
         logger.info("因子权重:")
-        for col, w in weights.items():
-            logger.info("  %s: %.4f", col, w)
+        if weight_meta['is_dynamic']:
+            logger.info("  %s（每日动态计算，窗口 %d 日）", weight_meta['method'], weight_meta['window'])
+        else:
+            for col, w in weights.items():
+                logger.info("  %s: %.4f", col, w)
         
         logger.info("数据统计:")
         logger.info("  日期范围: %s ~ %s", factor_df['date'].min(), factor_df['date'].max())
@@ -274,11 +378,41 @@ def run_composite_backtest(
     # 8. 调用 backtest 分层回测
     logger.info("调用 backtest 分层回测...")
     
-    # 加载收益数据
-    _, return_df = load_factor_return_data(
+    # 加载收益数据（防御性校验返回值）
+    factor_return_result = load_factor_return_data(
         cache_dir=cache_dir,
         logger=logger
     )
+    
+    # 校验返回值数量和类型
+    if factor_return_result is None:
+        raise ValueError("load_factor_return_data 返回 None，期望 (factor_df, return_df)")
+    
+    if not isinstance(factor_return_result, tuple) or len(factor_return_result) != 2:
+        raise ValueError(
+            f"load_factor_return_data 返回值数量错误，期望 2 个，实际: "
+            f"{len(factor_return_result) if isinstance(factor_return_result, tuple) else '非tuple'}"
+        )
+    
+    _, return_df = factor_return_result
+    
+    if return_df is None:
+        raise ValueError("return_df 为 None，收益数据加载失败")
+    
+    # 修复：检查空 DataFrame（有列名但无数据）
+    if len(return_df) == 0:
+        raise ValueError(
+            "return_df 为空 DataFrame（有列名但无数据），无法进行分层回测\n"
+            "可能原因：\n"
+            "  1. 缓存数据文件为空（检查 return_data.json.gz）\n"
+            "  2. 数据加载异常（检查 load_factor_return_data()）\n"
+            f"  当前列: {list(return_df.columns)}"
+        )
+    
+    if 'forward_return_1d' not in return_df.columns:
+        raise ValueError(
+            f"return_df 缺少 'forward_return_1d' 列，当前列: {list(return_df.columns)}"
+        )
     
     # 创建回测引擎（直接传入已计算的综合因子）
     logger.info("创建回测引擎...")
@@ -311,13 +445,10 @@ def run_composite_backtest(
     logger.info(report)
     
     # 9. 保存综合因子结果
-    if output_dir is None:
-        project_root = Path(__file__).parent.parent.parent
-        output_dir = project_root / 'comprehensive_factor' / 'result'
+    # output_dir 已在入口统一转换（包括 None 默认值），无需再次处理
+    output_dir.mkdir(parents=True, exist_ok=True)
     
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-    
-    output_file = Path(output_dir) / f'composite_{weight_method}_{return_period}.json'
+    output_file = output_dir / f'composite_{weight_method}_{return_period}.json'
     
     # 构建输出数据
     output_data = {
@@ -326,7 +457,8 @@ def run_composite_backtest(
             'return_period': return_period,
             'factor_list': factor_list,
             'factor_cols': factor_cols,
-            'weights': weights,
+            'weights': weights,           # 权重数据（动态权重时为空字典）
+            'weight_meta': weight_meta,   # 新增：权重元信息（与权重数据分离）
             'ic_results': {
                 name: {
                     'ic_mean': ic_results.get(name, {}).get('ic_mean'),
@@ -336,10 +468,8 @@ def run_composite_backtest(
                 for name in factor_list
             },
             'correlation_matrix': backtest_convert(corr_matrix.to_dict()),
-            'high_corr_pairs': [
-                {'factor_a': pair[0], 'factor_b': pair[1], 'corr': pair[2]}
-                for pair in high_corr_pairs
-            ],
+            'high_corr_pairs': high_corr_pairs,  # 已改为字典列表格式
+            'nan_corr_pairs': nan_corr_pairs,  # 新增：NaN相关性记录
             'n_factors': len(factor_cols),
             'n_days': result.get('meta', {}).get('n_days_total', 0)
         },
@@ -368,17 +498,25 @@ def run_composite_backtest(
     logger.info("综合因子结果已保存: %s", output_file)
     
     # 10. 保存综合因子每日明细
+    # 校验输出必需列（防御性编程）
+    output_cols = ['date', 'asset', 'composite_factor'] + factor_cols
+    missing_cols = [col for col in output_cols if col not in factor_df.columns]
+    if missing_cols:
+        raise ValueError(
+            f"factor_df 缺少输出必需列: {missing_cols}, 当前列: {list(factor_df.columns)}"
+        )
+    
     daily_output = {
         'meta': {
             'weight_method': weight_method,
-            'columns': ['date', 'asset', 'composite_factor'] + factor_cols
+            'columns': output_cols
         },
         'data': backtest_convert(
-            factor_df[['date', 'asset', 'composite_factor'] + factor_cols].to_dict('records')
+            factor_df[output_cols].to_dict('records')
         )
     }
     
-    daily_file = Path(output_dir) / f'composite_{weight_method}_{return_period}_daily.json.gz'
+    daily_file = output_dir / f'composite_{weight_method}_{return_period}_daily.json.gz'
     
     with gzip.open(daily_file, 'wt', encoding='utf-8') as f:
         json.dump(daily_output, f, indent=2, ensure_ascii=False)
@@ -452,9 +590,14 @@ def create_cli_entrypoint(
             logger.info("多空年化收益: %.2f%%", ls_stats.get('long_short_return_annual', 0) * 100)
             logger.info("多空夏普比率: %.2f", ls_stats.get('long_short_sharpe', 0))
             logger.info("回测完成，退出码 0")
+            sys.exit(0)  # 显式设置成功退出码
             
         except Exception as e:
+            # 修复：保留异常堆栈信息，便于排查
+            import traceback
             logger.error("回测执行异常: %s", e)
-            raise
+            logger.error("异常堆栈:\n%s", traceback.format_exc())
+            logger.error("退出码 1（异常终止）")
+            sys.exit(1)  # 显式设置失败退出码
     
     return main

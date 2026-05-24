@@ -43,6 +43,10 @@ def load_factor_values(
     
     Returns:
         包含 date, asset, 因子列的 DataFrame
+    
+    Note:
+        - 校验 date、asset 列的数据类型（date 为 str，asset 为 str）
+        - 类型不一致可能导致后续计算异常（如 groupby 失败）
     """
     if logger is None:
         from comprehensive_factor.common.logger_config import get_logger
@@ -74,7 +78,36 @@ def load_factor_values(
         if col not in factor_df.columns:
             raise ValueError(f"因子数据中缺少 {col} 列")
     
-    logger.info("因子数据: %d 条记录", len(factor_df))
+    # 修复：校验 date、asset 列的数据类型
+    # date 列应为 str 类型（日期字符串），asset 列应为 str 类型（股票代码）
+    # 类型不一致可能导致 groupby、merge 等操作异常
+    
+    # 检查 date 列类型
+    if len(factor_df) > 0:
+        first_date = factor_df['date'].iloc[0]
+        first_asset = factor_df['asset'].iloc[0]
+        
+        if not isinstance(first_date, str):
+            raise TypeError(
+                f"date 列数据类型应为 str，实际为 {type(first_date).__name__}\n"
+                f"首行 date 值: {first_date}\n"
+                "可能原因：\n"
+                "  1. JSON 文件中 date 字段为数字而非字符串\n"
+                "  2. 数据生成脚本类型转换异常\n"
+                "建议：检查 factor_data.json.gz 生成逻辑"
+            )
+        
+        if not isinstance(first_asset, str):
+            raise TypeError(
+                f"asset 列数据类型应为 str，实际为 {type(first_asset).__name__}\n"
+                f"首行 asset 值: {first_asset}\n"
+                "可能原因：\n"
+                "  1. JSON 文件中 asset 字段为数字而非字符串\n"
+                "  2. 数据生成脚本类型转换异常\n"
+                "建议：检查 factor_data.json.gz 生成逻辑"
+            )
+    
+    logger.info("因子数据: %d 条记录，类型校验通过", len(factor_df))
     
     return factor_df[['date', 'asset'] + factor_cols].copy()
 
@@ -84,7 +117,7 @@ def load_ic_results(
     ic_result_dir: Optional[Path] = None,
     return_period: str = '1d',
     logger: Optional[logging.Logger] = None
-) -> Dict[str, Dict]:
+) -> Tuple[Dict[str, Dict], List[str]]:
     """从 factor_ic/result/ 加载 IC 统计结果
     
     Args:
@@ -94,11 +127,17 @@ def load_ic_results(
         logger: 日志对象
     
     Returns:
-        Dict[因子名, IC统计结果]
-        {
-            'rsi': {'ic_mean': -0.032, 'icir': -0.45, 'ic_std': 0.07, ...},
-            'volume_ratio': {'ic_mean': -0.058, 'icir': -1.97, ...}
-        }
+        Tuple[ic_results, missing_factors]
+        - ic_results: Dict[因子名, IC统计结果]
+          {
+              'rsi': {'ic_mean': -0.032, 'icir': -0.45, 'ic_std': 0.07, ...},
+              'volume_ratio': {'ic_mean': -0.058, 'icir': -1.97, ...}
+          }
+        - missing_factors: 缺失因子列表（调用方可据此判断）
+    
+    Note:
+        - 返回缺失因子列表，避免调用方不知道哪些因子缺失
+        - ic_metrics/summary 字段回退时验证必需字段（ic_mean/icir）
     """
     if logger is None:
         from comprehensive_factor.common.logger_config import get_logger
@@ -110,6 +149,10 @@ def load_ic_results(
     ic_result_dir = Path(ic_result_dir)
     
     ic_results = {}
+    missing_factors = []  # 修复：记录缺失因子列表
+    
+    # 必需字段：用于静态权重计算
+    REQUIRED_IC_FIELDS = ['ic_mean', 'icir']
     
     for factor_name in factor_names:
         # IC结果文件命名: ic_<因子名>_<收益周期>_analysis_result.json
@@ -117,6 +160,7 @@ def load_ic_results(
         
         if not ic_file.exists():
             logger.warning("IC结果文件不存在: %s，跳过该因子", ic_file)
+            missing_factors.append(factor_name)
             continue
         
         logger.info("加载 IC 结果: %s", ic_file)
@@ -125,20 +169,62 @@ def load_ic_results(
             ic_data = json.load(f)
         
         # 提取 ic_metrics 字段（IC统计结果）
+        # 修复：字段回退时验证必需字段
+        extracted_data = None
+        field_source = None
+        
         if 'ic_metrics' in ic_data:
-            ic_results[factor_name] = ic_data['ic_metrics']
+            extracted_data = ic_data['ic_metrics']
+            field_source = 'ic_metrics'
         elif 'summary' in ic_data:
-            ic_results[factor_name] = ic_data['summary']
-        else:
-            logger.warning("IC结果文件缺失 'ic_metrics' 字段: %s", ic_file)
-            ic_results[factor_name] = {}
+            # summary 字段结构可能与 ic_metrics 不同
+            # 验证必需字段存在性
+            extracted_data = ic_data['summary']
+            field_source = 'summary'
+            
+            # 检查必需字段是否存在
+            missing_fields = [f for f in REQUIRED_IC_FIELDS if f not in extracted_data]
+            if missing_fields:
+                logger.warning(
+                    "IC结果文件 '%s' 字段缺失必需字段: %s，文件: %s",
+                    field_source, missing_fields, ic_file
+                )
+        
+        if extracted_data is None:
+            logger.warning(
+                "IC结果文件缺失 'ic_metrics' 和 'summary' 字段: %s",
+                ic_file
+            )
+            missing_factors.append(factor_name)
+            continue
+        
+        # 修复：验证必需字段（ic_mean, icir）存在性
+        missing_required = [f for f in REQUIRED_IC_FIELDS if f not in extracted_data]
+        if missing_required:
+            logger.warning(
+                "因子 %s IC 结果缺失必需字段: %s（来源: %s），文件: %s",
+                factor_name, missing_required, field_source, ic_file
+            )
+            # 不跳过该因子，但记录警告（下游使用时会回退等权）
+        
+        ic_results[factor_name] = extracted_data
+    
+    # 修复：返回缺失因子列表信息
+    if missing_factors:
+        logger.warning(
+            "部分因子 IC 结果缺失: %s，共 %d 个",
+            missing_factors, len(missing_factors)
+        )
     
     if not ic_results:
-        raise ValueError(f"未找到任何 IC 结果文件，路径: {ic_result_dir}")
+        raise ValueError(
+            f"未找到任何 IC 结果文件，路径: {ic_result_dir}\n"
+            f"缺失因子: {missing_factors}"
+        )
     
-    logger.info("加载 IC 结果: %d 个因子", len(ic_results))
+    logger.info("加载 IC 结果: %d 个因子（缺失 %d 个）", len(ic_results), len(missing_factors))
     
-    return ic_results
+    return ic_results, missing_factors
 
 
 def load_ic_daily(
@@ -161,9 +247,13 @@ def load_ic_daily(
     Returns:
         Dict[因子名, IC每日DataFrame]
         {
-            'rsi': DataFrame(columns=['date', 'ic', 'ic_sign', ...]),
+            'rsi': DataFrame(columns=['date', 'ic']),
             'volume_ratio': DataFrame(...)
         }
+    
+    Note:
+        - ic_sign 列已移除（死代码，未在后续计算中使用）
+        - 日期与IC值数量不一致时抛出错误（不再静默截断）
     """
     if logger is None:
         from comprehensive_factor.common.logger_config import get_logger
@@ -175,6 +265,7 @@ def load_ic_daily(
     ic_result_dir = Path(ic_result_dir)
     
     ic_daily_data = {}
+    missing_factors = []  # 修复：记录缺失因子列表
     
     for factor_name in factor_names:
         # IC结果文件命名: ic_<因子名>_<收益周期>_analysis_result.json
@@ -182,6 +273,7 @@ def load_ic_daily(
         
         if not ic_file.exists():
             logger.warning("IC结果文件不存在: %s，跳过该因子", ic_file)
+            missing_factors.append(factor_name)
             continue
         
         logger.info("加载 IC 每日序列: %s", ic_file)
@@ -192,35 +284,53 @@ def load_ic_daily(
         # 提取 ic_values 和 dates/valid_dates 字段
         if 'ic_values' not in ic_data:
             logger.warning("IC结果文件缺失 'ic_values' 字段: %s", ic_file)
+            missing_factors.append(factor_name)
             continue
         
         # 使用 valid_dates（有效日期）或 dates
         dates = ic_data.get('valid_dates', ic_data.get('dates', []))
         ic_values = ic_data.get('ic_values', [])
         
+        # 修复：日期与IC值数量不一致时抛出错误（不再静默截断）
+        # 原代码截断可能导致错位数据对齐到错误日期，产生错误的滚动ICIR
         if len(dates) != len(ic_values):
-            logger.warning(
-                "日期与IC值数量不一致: dates=%d, ic_values=%d, 文件: %s",
-                len(dates), len(ic_values), ic_file
+            raise ValueError(
+                f"日期与IC值数量不一致: dates={len(dates)}, ic_values={len(ic_values)}\n"
+                f"文件: {ic_file}\n"
+                "可能原因：\n"
+                "  1. IC 计算过程中部分日期缺失数据\n"
+                "  2. JSON 文件写入异常\n"
+                "  3. valid_dates 与 ic_values 字段对齐问题\n"
+                "建议：重新运行 IC 分析脚本生成完整的 IC 结果文件"
             )
-            # 使用较短的那个
-            min_len = min(len(dates), len(ic_values))
-            dates = dates[:min_len]
-            ic_values = ic_values[:min_len]
         
-        # 构建 DataFrame
+        # 修复：防御性处理 ic_values 中可能的 None 值
+        # 原代码 v > 0 时 v 可能是 None，导致 TypeError
+        # 同时移除 ic_sign 列（死代码，未在后续计算中使用）
+        ic_values_cleaned = [v if v is not None else np.nan for v in ic_values]
+        
+        # 构建 DataFrame（移除 ic_sign 列）
         daily_df = pd.DataFrame({
             'date': dates,
-            'ic': ic_values,
-            'ic_sign': [1 if v > 0 else -1 if v < 0 else 0 for v in ic_values]
+            'ic': ic_values_cleaned
         })
         
         ic_daily_data[factor_name] = daily_df
     
-    if not ic_daily_data:
-        raise ValueError(f"未找到任何 IC 每日数据，路径: {ic_result_dir}")
+    # 修复：返回缺失因子列表信息
+    if missing_factors:
+        logger.warning(
+            "部分因子 IC 每日数据缺失: %s，共 %d 个",
+            missing_factors, len(missing_factors)
+        )
     
-    logger.info("加载 IC 每日序列: %d 个因子", len(ic_daily_data))
+    if not ic_daily_data:
+        raise ValueError(
+            f"未找到任何 IC 每日数据，路径: {ic_result_dir}\n"
+            f"缺失因子: {missing_factors}"
+        )
+    
+    logger.info("加载 IC 每日序列: %d 个因子（缺失 %d 个）", len(ic_daily_data), len(missing_factors))
     
     return ic_daily_data
 
@@ -241,6 +351,16 @@ def standardize_factors(
     
     Returns:
         标准化后的 DataFrame（新增标准化因子列，命名: <因子列>_std）
+    
+    接口约定（MODULE.md 规范）：
+        - 输入列名：原始因子列名（如 'rsi_6', 'volume_ratio_5'）
+        - 输出列名：新增 '_std' 后缀（如 'rsi_6_std', 'volume_ratio_5_std'）
+        - WeightEngine.calculate() 接收原始列名，内部自动转换为 _std 列
+    
+    NaN 处理规范：
+        1. 原始 NaN 保持 NaN（不参与标准化计算）
+        2. 单只股票有有效值时，标准化结果为 NaN（样本标准差无法计算）
+        3. 有效值数量 <=1 时记录警告日志
     """
     if logger is None:
         from comprehensive_factor.common.logger_config import get_logger
@@ -251,12 +371,28 @@ def standardize_factors(
     for col in factor_cols:
         std_col = f'{col}_std'
         
-        # 每日截面标准化
+        # 修复：使用显式计算替代 lambda，避免条件判断与 NaN 处理冲突
+        # 计算每日截面均值和标准差
+        daily_stats = factor_df.groupby('date')[col].agg(['mean', 'std', 'count'])
+        
+        # 检查有效值数量不足的情况（count <= 1 的日期）
+        low_count_mask = daily_stats['count'] <= 1
+        # type: ignore[reportArgumentType] — pandas Index 是可迭代对象，LSP 类型推断不准确
+        low_count_dates = list(daily_stats.index[low_count_mask])  # type: ignore
+        if low_count_dates:
+            logger.warning(
+                "因子 %s 在 %d 个日期有效值数量 <=1，标准化结果将为 NaN: %s",
+                col, len(low_count_dates), low_count_dates[:5]  # 只显示前5个
+            )
+        
+        # 使用 transform 计算标准化值（保持索引对齐）
+        # 注意：x.std(ddof=1) 单样本时返回 NaN，是正确行为
         factor_df[std_col] = factor_df.groupby('date')[col].transform(
-            lambda x: (x - x.mean()) / x.std() if x.std() > 0 else 0
+            lambda x: (x - x.mean()) / x.std() if x.std() > 0 else np.nan
         )
         
         # NaN 处理：原因子值为 NaN 时标准化后仍为 NaN
+        # 使用 fillna 保持原本 NaN 的位置，而非 .loc 后置还原
         factor_df.loc[factor_df[col].isna(), std_col] = np.nan
     
     logger.info("因子标准化完成: %d 个因子", len(factor_cols))
@@ -272,12 +408,21 @@ def calc_factor_correlation(
     """计算因子相关性矩阵
     
     Args:
-        factor_df: 因子 DataFrame
-        factor_cols: 因子列名
+        factor_df: 因子 DataFrame（必须包含标准化因子列 *_std）
+        factor_cols: 因子列名（原始列名，会自动转换为 _std 列）
         logger: 日志对象
     
     Returns:
         相关性矩阵 DataFrame
+    
+    Precondition:
+        factor_df 必须包含 *_std 列（由 standardize_factors 生成）
+        如果 _std 列不存在，抛出 ValueError
+    
+    接口约定（MODULE.md 规范）：
+        - 输入列名：原始因子列名（与 WeightEngine.calculate() 一致）
+        - 内部转换：std_cols = [f'{col}_std' for col in factor_cols]
+        - 调用方必须在调用此函数前先调用 standardize_factors()
     """
     if logger is None:
         from comprehensive_factor.common.logger_config import get_logger
@@ -285,6 +430,18 @@ def calc_factor_correlation(
     
     # 使用标准化后的因子计算相关性（更稳定）
     std_cols = [f'{col}_std' for col in factor_cols]
+    
+    # 修复：前置校验 _std 列存在性
+    for std_col in std_cols:
+        if std_col not in factor_df.columns:
+            raise ValueError(
+                f"factor_df 缺少标准化因子列 '{std_col}'，当前列: {list(factor_df.columns)}\n"
+                "可能原因：\n"
+                "  1. 调用方未先调用 standardize_factors()\n"
+                "  2. standardize_factors 参数 factor_cols 与 calc_factor_correlation 不一致\n"
+                "  3. factor_df 数据被意外修改或过滤\n"
+                "调用顺序：load_factor_values → standardize_factors → calc_factor_correlation"
+            )
     
     corr_matrix = factor_df[std_cols].corr()
     
