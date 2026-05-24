@@ -1,6 +1,6 @@
 # data_fetchers 模块规范
 
-> 版本: v2.27
+> 版本: v2.28
 > 创建时间: 2026-05-19
 > 更新时间: 2026-05-25
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
@@ -316,6 +316,17 @@ data_fetchers/
    - **测试扩展**：8项测试（含参数类型验证 + 日期边界验证）
    - **版本历史补全**：stock_utils.py 新增 v1.5 版本演进说明
    - **修复原因**：代码bug（参数类型安全未实现、线程竞争）+ 规范遗漏（日期边界验证缺失、常量不可变性注释缺失）
+
+6. **stock_utils.py v1.6 (2026-05-25)** — 第六轮深度优化
+   - **日期边界动态获取**：`_MAX_DATE` 改为 `MAX_STOCK_DATE()` 函数（避免长时间运行程序过期）
+   - **日期常量公开**：`_MIN_DATE` → `MIN_STOCK_DATE`（公开常量，供外部查询）
+   - **异常链保留**：`load_main_board_stock_list` 使用 `from e` 保留原始异常链
+   - **元素类型安全检查**：3个辅助函数新增 `isinstance(stock, dict)` 检查，过滤非字典元素
+   - **stocks列表类型验证**：`load_main_board_stock_list` 新增 `isinstance(stocks, list)` 检查
+   - **docstring TypeError示例格式**：使用 `# doctest: +IGNORE_EXCEPTION_DETAIL` 规范格式
+   - **测试扩展**：元素类型过滤验证测试（验证过滤行为而非抛异常）
+   - **版本历史补全**：stock_utils.py 新增 v1.6 版本演进说明
+   - **修复原因**：代码bug（日期边界过期风险、元素类型安全未实现）+ 规范遗漏（异常链未保留、docstring示例格式不规范）
 
 ---
 

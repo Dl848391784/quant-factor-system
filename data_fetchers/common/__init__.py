@@ -59,6 +59,8 @@ from .stock_utils import (
     MAIN_BOARD_PREFIXES,
     EXCLUDED_PREFIXES,
     EXCLUDED_NAME_KEYWORDS,
+    MIN_STOCK_DATE,
+    MAX_STOCK_DATE,
 )
 
 # http_client 需要 requests 模块，可选导入
@@ -129,4 +131,6 @@ __all__ = [
     'MAIN_BOARD_PREFIXES',
     'EXCLUDED_PREFIXES',
     'EXCLUDED_NAME_KEYWORDS',
+    'MIN_STOCK_DATE',
+    'MAX_STOCK_DATE',
 ]
