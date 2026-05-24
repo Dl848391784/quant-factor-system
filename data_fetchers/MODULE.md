@@ -1,6 +1,6 @@
 # data_fetchers 模块规范
 
-> 版本: v2.33
+> 版本: v2.34
 > 创建时间: 2026-05-19
 > 更新时间: 2026-05-25
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
@@ -370,6 +370,15 @@ data_fetchers/
    - **__all__ 导出更新**：新增 `get_max_stock_date`，保留 `MAX_STOCK_DATE` 别名（deprecated）
    - **版本历史补全**：stock_utils.py 新增 v2.0 版本演进说明
    - **修复原因**：代码bug（DCL模式复杂、空代码统计逻辑混乱、date_value 缺少格式验证）+ 规范遗漏（MAX_STOCK_DATE 命名违反最小惊讶原则）
+
+12. **stock_utils.py v2.1 (2026-05-25)** — 第十二轮深度优化
+   - **excluded_count 统计精确化**：只包含非主板股票（不含非字典元素），避免重复统计
+   - **日期合法性验证**：新增 `_validate_date()` 函数使用 `datetime.strptime` 验证日历合法性（如 2020-13-01 或 2020-02-30）
+   - **双重验证机制**：先正则验证格式（YYYY-MM-DD 必须为2位月份/日期），再 datetime.strptime 验证日历合法性
+   - **finally 块迭代安全**：先复制 `test_logger.handlers` 列表，避免迭代中修改列表的经典 Bug
+   - **前缀长度预期注释**：补充各前缀精确长度预期（30为2字符、688为3字符、8/4为1字符）+ 覆盖盲区说明
+   - **版本历史补全**：stock_utils.py 新增 v2.1 版本演进说明
+   - **修复原因**：代码bug（excluded_count 统计含义模糊、datetime.strptime 接受单数字月份/日期、finally迭代Bug）+ 规范遗漏（前缀长度预期注释缺失）
 
 ---
 

@@ -55,16 +55,24 @@ __all__ = [
 # 直接初始化，避免延迟初始化的多线程安全问题
 _MODULE_LOGGER = logging.getLogger('data_fetchers.common.stock_utils')
 
-# 主板股票代码前缀（沪市60、深市00）
-# 数据来源：中国证券交易所规则，主板代码前缀固定
+# 主板代码前缀（沪市60、深市00）
+# 数据来源：中国证券交易所规则，各板块代码前缀定义
+# - 沪市主板：60开头（6位代码，前2位为60）
+# - 深市主板：00开头（6位代码，前2位为00）
+# 前缀长度预期：均为2字符，精确匹配股票代码前2位
 # 注意：使用元组（tuple）确保不可变，防止外部修改影响所有调用
 MAIN_BOARD_PREFIXES = ('60', '00')
 
 # 剔除的代码前缀（创业板30、科创板688、北交所8/4）
 # 数据来源：中国证券交易所规则，各板块代码前缀定义
-# - 创业板：深市30开头（2009年设立）
-# - 科创板：沪市688开头（2019年设立）
-# - 北交所：8开头（新三板精选层）、4开头（两网公司）
+# - 创业板：深市30开头（6位代码，前2位为30）
+# - 科创板：沪市688开头（6位代码，前3位为688）
+# - 北交所：83/87/8开头（6位代码，前2位为83/87，或前1位为8）
+#           注意：使用单字符'8'可覆盖所有北交所代码（83/87/80/88等）
+# - 两网公司：4开头（历史遗留，前1位为4）
+# 前缀长度预期：30为2字符、688为3字符、8/4为1字符，根据板块规则精确匹配
+# 覆盖盲区说明：单字符'8'和'4'可能匹配到非北交所/两网公司代码，
+#               但A股市场不存在此类冲突代码，因此前缀匹配安全
 # 注意：使用元组（tuple）确保不可变，防止外部修改影响所有调用
 EXCLUDED_PREFIXES = ('30', '688', '8', '4')
 
@@ -79,6 +87,34 @@ EXCLUDED_NAME_KEYWORDS = ('ST', '*ST', '退市', 'SST', 'S*ST')
 
 # 日期格式正则（YYYY-MM-DD）
 _DATE_PATTERN = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
+def _validate_date(date_str: str) -> bool:
+    """
+    验证日期字符串是否为合法日期（格式 + 合法性）
+    
+    Args:
+        date_str: 日期字符串（预期 YYYY-MM-DD 格式）
+        
+    Returns:
+        bool: True 为合法日期，False 为非法日期
+        
+    Note:
+        使用 datetime.strptime 验证日期合法性，如 2020-13-01 或 2020-02-30
+        会被正确识别为非法日期
+        
+    Example:
+        >>> _validate_date('2020-01-01')
+        True
+        >>> _validate_date('2020-13-01')  # 非法月份
+        False
+        >>> _validate_date('2020-02-30')  # 非法日期
+        False
+    """
+    try:
+        datetime.strptime(date_str, '%Y-%m-%d')
+        return True
+    except ValueError:
+        return False
 
 # 日期边界常量（A股市场始于1990年12月19日）
 # 数据来源：上海证券交易所成立于1990年11月26日，开业于1990年12月19日
@@ -309,7 +345,8 @@ def load_main_board_stock_list(
     # 统计信息
     total_count = len(stocks)
     main_count = len(main_board_stocks)
-    excluded_count = total_count - main_count
+    # excluded_count 只包含非主板股票（不含非字典元素），避免重复统计
+    excluded_count = total_count - main_count - invalid_elements
     
     # 非字典元素警告（与其他辅助函数保持一致）
     if invalid_elements > 0:
@@ -319,8 +356,8 @@ def load_main_board_stock_list(
         )
     
     logger.info(
-        "股票筛选完成: 总数 %d, 主板 %d, 剔除 %d",
-        total_count, main_count, excluded_count
+        "股票筛选完成: 总数 %d, 主板 %d, 剔除 %d（不含非字典元素 %d）",
+        total_count, main_count, excluded_count, invalid_elements
     )
     
     return main_board_stocks
@@ -438,15 +475,21 @@ def filter_stocks_by_date(
     
     logger = get_module_logger(logger)
     
-    # 防御性编程：验证日期格式
+    # 防御性编程：验证日期格式 + 合法性
     if not start_date or not end_date:
         raise ValueError("开始日期和结束日期不能为空")
     
-    # 日期格式正则验证（YYYY-MM-DD）
+    # 日期格式正则验证（YYYY-MM-DD，必须为2位月份和日期）
     if not _DATE_PATTERN.match(start_date):
-        raise ValueError(f"开始日期格式不正确: {start_date}（预期 YYYY-MM-DD）")
+        raise ValueError(f"开始日期格式不正确: {start_date}（预期 YYYY-MM-DD 格式，如 2020-01-01）")
     if not _DATE_PATTERN.match(end_date):
-        raise ValueError(f"结束日期格式不正确: {end_date}（预期 YYYY-MM-DD）")
+        raise ValueError(f"结束日期格式不正确: {end_date}（预期 YYYY-MM-DD 格式，如 2020-01-01）")
+    
+    # 日期合法性验证：日历合法性（如 2020-13-01 或 2020-02-30 为非法）
+    if not _validate_date(start_date):
+        raise ValueError(f"开始日期不是合法日期: {start_date}（日历上不存在该日期）")
+    if not _validate_date(end_date):
+        raise ValueError(f"结束日期不是合法日期: {end_date}（日历上不存在该日期）")
     
     # 日期边界验证：A股市场始于1990-12-19
     if start_date < MIN_STOCK_DATE:
@@ -481,12 +524,12 @@ def filter_stocks_by_date(
             invalid_elements += 1
             continue
         date_value = stock.get(date_field, '')
-        # 日期格式验证：必须为 YYYY-MM-DD 格式
+        # 日期合法性验证：必须为合法日期（格式 + 日历合法性）
         if not date_value:
             continue  # 空日期字段直接过滤
-        if not _DATE_PATTERN.match(date_value):
+        if not _validate_date(date_value):
             invalid_dates += 1
-            continue  # 格式不正确则过滤
+            continue  # 非法日期则过滤
         if start_date <= date_value <= end_date:
             filtered.append(stock)
     
@@ -498,7 +541,7 @@ def filter_stocks_by_date(
     
     if invalid_dates > 0:
         logger.warning(
-            "按日期筛选股票时发现 %d 个日期格式不正确的元素，已过滤",
+            "按日期筛选股票时发现 %d 个非法日期，已过滤（如 2020-13-01 或 2020-02-30）",
             invalid_dates
         )
     
@@ -758,13 +801,13 @@ if __name__ == '__main__':
         test_logger.info("  常量数据来源注释已补全")
         test_logger.info("  日期边界动态获取已实现（get_max_stock_date() 函数）")
         
-        # 测试 8: 验证汇总
+# 测试 8: 验证汇总
         test_logger.info("\n[测试 8] 验证汇总...")
         test_logger.info("  Dict[str, Any] 类型注解已应用")
         test_logger.info("  Union[Path, str] 类型注解已应用")
         test_logger.info("  Raises TypeError 已实现（参数 + 元素类型安全检查）")
         test_logger.info("  Raises 描述精确化（过滤而非抛异常）")
-        test_logger.info("  日期格式正则验证已实现（start_date/end_date/date_value）")
+        test_logger.info("  日期合法性验证已实现（datetime.strptime，如 2020-13-01 为非法）")
         test_logger.info("  日期边界动态获取已实现（get_max_stock_date() 函数）")
         test_logger.info("  常量不可变性注释已补全（使用元组）")
         test_logger.info("  异常链已保留（load_main_board_stock_list）")
@@ -772,7 +815,10 @@ if __name__ == '__main__':
         test_logger.info("  模块级导入简化（try/except ImportError，移除 DCL）")
         test_logger.info("  MAX_STOCK_DATE 命名改为 get_max_stock_date（最小惊讶原则）")
         test_logger.info("  空代码统计直接计数（而非减法计算）")
+        test_logger.info("  excluded_count 精确化（不含 invalid_elements）")
+        test_logger.info("  前缀长度预期注释已补全（覆盖盲区说明）")
         test_logger.info("  测试清理顺序已修复（先打印再关闭处理器）")
+        test_logger.info("  finally 块迭代安全（先复制 handlers 列表）")
         
         test_logger.info("\n" + "=" * 50)
         test_logger.info("测试完成（共 8 项测试，含类型验证 + 日期边界验证 + 线程安全验证）")
@@ -781,6 +827,7 @@ if __name__ == '__main__':
         # 先打印清理日志，再关闭处理器（避免日志丢失）
         test_logger.info("测试清理完成")
         # 清理测试资源（关闭日志处理器）
-        for handler in test_logger.handlers:
+        # 注意：先复制 handlers 列表，避免迭代中修改列表的经典 Bug
+        for handler in list(test_logger.handlers):
             handler.close()
             test_logger.removeHandler(handler)
