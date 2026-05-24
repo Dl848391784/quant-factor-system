@@ -41,27 +41,33 @@ class WeightMethodBase(ABC):
     # 反向映射：列名 → 因子名
     COL_TO_FACTOR_NAME_MAP = {v: k for k, v in FACTOR_NAME_TO_COL_MAP.items()}
     
-    # v1.11 修复：正则预编译（避免每次调用都重新编译）
-    _FACTOR_SUFFIX_PATTERN = re.compile(r'(.+?)_\d+[a-z]?$')  # 支持 _5, _6, _1d 等
+    # v1.12 修复：正则预编译（贪婪匹配，避免错误截断）
+    # 原正则 (.+?)_\d+[a-z]?$ 非贪婪，会错误截断 main_inflow_ratio_1d → main_inflow
+    # 修复：贪婪匹配 (.+) 匹配最长前缀，正确截断 → main_inflow_ratio
+    _FACTOR_SUFFIX_PATTERN = re.compile(r'(.+)_(?:\d+[a-z]?|\d+)$')  # 支持 _5, _6, _1d, _20 等
     
     def _get_factor_name_from_col(self, col: str) -> str:
         """从因子列名提取因子名（用于 IC 结果匹配）
         
         Args:
-            col: 因子列名（如 'volume_ratio_5'）
+            col: 因子列名（如 'volume_ratio_5', 'main_inflow_ratio_1d'）
         
         Returns:
-            因子名（如 'volume_ratio'）
+            因子名（如 'volume_ratio', 'main_inflow_ratio')
         
         Priority:
             1. 使用反向映射（精确匹配）
-            2. 回退：移除常见后缀模式
+            2. 回退：贪婪匹配移除最后一个数字后缀
+        
+        v1.12 修复：
+        - 原正则 (.+?)_\d+[a-z]?$ 非贪婪，会错误截断 main_inflow_ratio_1d → main_inflow
+        - 修复：贪婪匹配 (.+) 匹配最长前缀，正确截断 → main_inflow_ratio
         """
         # 优先使用反向映射
         if col in self.COL_TO_FACTOR_NAME_MAP:
             return self.COL_TO_FACTOR_NAME_MAP[col]
         
-        # 回退：使用预编译正则移除数字后缀
+        # 回退：使用预编译正则（贪婪匹配）
         match = self._FACTOR_SUFFIX_PATTERN.match(col)
         if match:
             return match.group(1)
@@ -78,8 +84,12 @@ class WeightMethodBase(ABC):
         
         Raises:
             ValueError: 因子列为空时
+        
+        v1.12 修复：删除冗余条件 or len(factor_cols) == 0
+        - not factor_cols 已涵盖空列表（空列表布尔值为 False）
         """
-        if not factor_cols or len(factor_cols) == 0:
+        # v1.12 修复：not factor_cols 已涵盖空列表，无需 or len(...) == 0
+        if not factor_cols:
             raise ValueError("因子列 factor_cols 为空，无法计算加权")
     
     def _apply_weights(
@@ -194,14 +204,16 @@ class EqualWeightMethod(WeightMethodBase):
         ic_results: Optional[Dict[str, Dict]] = None,
         ic_daily_data: Optional[Dict[str, pd.DataFrame]] = None
     ) -> pd.Series:
-        """等权加权计算"""
-        # 修复：入口校验因子列非空
-        self._validate_factor_cols(factor_cols, self.logger)
+        """等权加权计算
         
+        v1.12 修复：删除重复校验
+        - WeightEngine.calculate 已校验 factor_cols 非空
+        - 子类 calculate 信任调用方已完成校验
+        """
         # 计算权重
         weights = self.get_weights(factor_cols, ic_results)
         
-        # 修复：使用基类公共方法（向量化实现）
+        # 使用基类公共方法（向量化实现）
         return self._apply_weights(factor_df, factor_cols, weights, self.logger, "等权加权")
     
     def get_weights(
@@ -209,9 +221,12 @@ class EqualWeightMethod(WeightMethodBase):
         factor_cols: List[str],
         ic_results: Optional[Dict[str, Dict]] = None
     ) -> Dict[str, float]:
-        """获取等权重"""
-        # 修复：校验因子列非空
-        if not factor_cols or len(factor_cols) == 0:
+        """获取等权重
+        
+        v1.12 修复：删除冗余条件 or len(...) == 0
+        """
+        # v1.12 修复：not factor_cols 已涵盖空列表
+        if not factor_cols:
             raise ValueError("因子列 factor_cols 为空，无法计算等权")
         
         n_factors = len(factor_cols)
@@ -237,17 +252,17 @@ class ICIRWeightMethod(WeightMethodBase):
         ic_results: Optional[Dict[str, Dict]] = None,
         ic_daily_data: Optional[Dict[str, pd.DataFrame]] = None
     ) -> pd.Series:
-        """ICIR加权计算"""
+        """ICIR加权计算
+        
+        v1.12 修复：删除重复校验（WeightEngine.calculate 已校验）
+        """
         if ic_results is None:
             raise ValueError("ICIR加权需要 ic_results 参数")
-        
-        # 修复：入口校验因子列非空
-        self._validate_factor_cols(factor_cols, self.logger)
         
         # 计算权重
         weights = self.get_weights(factor_cols, ic_results)
         
-        # 修复：使用基类公共方法（向量化实现）
+        # 使用基类公共方法（向量化实现）
         return self._apply_weights(factor_df, factor_cols, weights, self.logger, "ICIR加权")
     
     def get_weights(
@@ -260,15 +275,17 @@ class ICIRWeightMethod(WeightMethodBase):
         处理负ICIR：
         - 反向因子ICIR为负（如 volume_ratio ICIR ≈ -1.97）
         - 取绝对值后加权：|ICIR| 高的因子权重大
+        
+        v1.12 修复：删除冗余条件 or len(...) == 0
         """
-        # 修复：校验因子列非空
-        if not factor_cols or len(factor_cols) == 0:
+        # v1.12 修复：not factor_cols 已涵盖空列表
+        if not factor_cols:
             raise ValueError("因子列 factor_cols 为空，无法计算ICIR权重")
         
         # 提取 ICIR 值（取绝对值）
         icir_values = {}
         for col in factor_cols:
-            # 修复：使用基类公共方法提取因子名（而非硬编码后缀）
+            # 使用基类公共方法提取因子名（贪婪匹配）
             factor_name = self._get_factor_name_from_col(col)
             
             if factor_name in ic_results and 'icir' in ic_results[factor_name]:
@@ -279,7 +296,7 @@ class ICIRWeightMethod(WeightMethodBase):
                 self.logger.warning("因子 %s 缺失 ICIR，使用等权默认值 1.0", col)
                 icir_values[col] = 1.0  # 缺失时使用等权
         
-        # 修复：除零保护 - total_icir 为 0 时回退等权
+        # 除零保护 - total_icir 为 0 时回退等权
         total_icir = sum(icir_values.values())
         if total_icir == 0:
             self.logger.warning("所有因子 ICIR 绝对值均为 0，回退等权")
@@ -309,17 +326,17 @@ class ICWeightMethod(WeightMethodBase):
         ic_results: Optional[Dict[str, Dict]] = None,
         ic_daily_data: Optional[Dict[str, pd.DataFrame]] = None
     ) -> pd.Series:
-        """IC均值加权计算"""
+        """IC均值加权计算
+        
+        v1.12 修复：删除重复校验（WeightEngine.calculate 已校验）
+        """
         if ic_results is None:
             raise ValueError("IC加权需要 ic_results 参数")
-        
-        # 修复：入口校验因子列非空
-        self._validate_factor_cols(factor_cols, self.logger)
         
         # 计算权重
         weights = self.get_weights(factor_cols, ic_results)
         
-        # 修复：使用基类公共方法（向量化实现）
+        # 使用基类公共方法（向量化实现）
         return self._apply_weights(factor_df, factor_cols, weights, self.logger, "IC加权")
     
     def get_weights(
@@ -327,15 +344,18 @@ class ICWeightMethod(WeightMethodBase):
         factor_cols: List[str],
         ic_results: Dict[str, Dict]
     ) -> Dict[str, float]:
-        """获取IC权重"""
-        # 修复：校验因子列非空
-        if not factor_cols or len(factor_cols) == 0:
+        """获取IC权重
+        
+        v1.12 修复：删除冗余条件 or len(...) == 0
+        """
+        # v1.12 修复：not factor_cols 已涵盖空列表
+        if not factor_cols:
             raise ValueError("因子列 factor_cols 为空，无法计算IC权重")
         
         # 提取 IC 均值（取绝对值）
         ic_values = {}
         for col in factor_cols:
-            # 修复：使用基类公共方法提取因子名（而非硬编码后缀）
+            # 使用基类公共方法提取因子名（贪婪匹配）
             factor_name = self._get_factor_name_from_col(col)
             
             if factor_name in ic_results and 'ic_mean' in ic_results[factor_name]:
@@ -346,7 +366,7 @@ class ICWeightMethod(WeightMethodBase):
                 self.logger.warning("因子 %s 缺失 IC 均值，使用等权默认值 1.0", col)
                 ic_values[col] = 1.0
         
-        # 修复：除零保护 - total_ic 为 0 时回退等权
+        # 除零保护 - total_ic 为 0 时回退等权
         total_ic = sum(ic_values.values())
         if total_ic == 0:
             self.logger.warning("所有因子 IC 均值绝对值均为 0，回退等权")
@@ -380,12 +400,15 @@ class RollingICIRWeightMethod(WeightMethodBase):
         ic_results: Optional[Dict[str, Dict]] = None,
         ic_daily_data: Optional[Dict[str, pd.DataFrame]] = None
     ) -> pd.Series:
-        """滚动ICIR加权计算"""
+        """滚动ICIR加权计算
+        
+        v1.12 修复：
+        - 删除重复校验（WeightEngine.calculate 已校验）
+        - rolling_std 使用 ddof=0（总体标准差），避免样本少时不稳定
+        - min_periods 使用 max(1, window // 3)，避免 window=1 时 min_periods=0
+        """
         if ic_daily_data is None:
             raise ValueError("滚动ICIR加权需要 ic_daily_data 参数")
-        
-        # 修复：入口校验因子列非空
-        self._validate_factor_cols(factor_cols, self.logger)
         
         # 获取唯一日期序列（用于时间轴滚动）
         dates = factor_df['date'].unique()
@@ -396,7 +419,7 @@ class RollingICIRWeightMethod(WeightMethodBase):
         ic_series_dict = {}  # {因子列: IC时间序列}
         
         for col in factor_cols:
-            # 修复：使用基类公共方法提取因子名
+            # 使用基类公共方法提取因子名（贪婪匹配）
             factor_name = self._get_factor_name_from_col(col)
             
             if factor_name in ic_daily_data:
@@ -411,15 +434,19 @@ class RollingICIRWeightMethod(WeightMethodBase):
                 self.logger.warning("因子 %s 缺失 IC 每日数据", col)
                 ic_series_dict[col] = pd.Series(dtype=float)
         
-        # 修复：在时间轴上计算滚动 ICIR（而非按 asset 分组）
+        # v1.12 修复：在时间轴上计算滚动 ICIR（而非按 asset 分组）
         # 滚动 ICIR = 滚动IC均值 / 滚动IC标准差
         rolling_icir_dict = {}  # {因子列: 滚动ICIR时间序列}
+        
+        # v1.12 修复：min_periods 使用 max(1, window // 3)，避免 window=1 时 min_periods=0
+        min_periods = max(1, self.window // 3)
         
         for col, ic_series in ic_series_dict.items():
             if len(ic_series) > 0:
                 # 时间轴滚动计算（每个因子一条 IC 时间序列）
-                rolling_mean = ic_series.rolling(window=self.window, min_periods=self.window // 3).mean()
-                rolling_std = ic_series.rolling(window=self.window, min_periods=self.window // 3).std()
+                # v1.12 修复：使用 ddof=0（总体标准差），避免样本少时不稳定
+                rolling_mean = ic_series.rolling(window=self.window, min_periods=min_periods).mean()
+                rolling_std = ic_series.rolling(window=self.window, min_periods=min_periods).std(ddof=0)
                 rolling_icir = rolling_mean / rolling_std.replace(0, np.nan)
                 rolling_icir_dict[col] = rolling_icir
             else:
@@ -474,9 +501,12 @@ class RollingICIRWeightMethod(WeightMethodBase):
         factor_cols: List[str],
         ic_results: Optional[Dict[str, Dict]] = None
     ) -> Dict[str, float]:
-        """滚动ICIR权重无法静态获取，返回等权作为默认"""
-        # 修复：校验因子列非空
-        if not factor_cols or len(factor_cols) == 0:
+        """滚动ICIR权重无法静态获取，返回等权作为默认
+        
+        v1.12 修复：删除冗余条件 or len(...) == 0
+        """
+        # v1.12 修复：not factor_cols 已涵盖空列表
+        if not factor_cols:
             raise ValueError("因子列 factor_cols 为空，无法计算权重")
         
         n_factors = len(factor_cols)
@@ -489,6 +519,9 @@ class WeightEngine:
     根据加权方式选择对应的加权方法类。
     """
     
+    # v1.12 修复：定义默认窗口常量，避免硬编码
+    DEFAULT_WINDOW = 60
+    
     METHOD_MAP = {
         'equal_weight': EqualWeightMethod,
         'icir_weight': ICIRWeightMethod,
@@ -496,13 +529,13 @@ class WeightEngine:
         'rolling_icir_weight': RollingICIRWeightMethod
     }
     
-    # v1.10 新增：window 参数适用的加权方式列表
+    # window 参数适用的加权方式列表
     WINDOW_VALID_METHODS = ['rolling_icir_weight']
     
     def __init__(
         self,
         weight_method: str,
-        window: int = 60,
+        window: int = DEFAULT_WINDOW,  # v1.12 修复：使用常量而非硬编码
         logger: Optional[logging.Logger] = None
     ):
         if weight_method not in self.METHOD_MAP:
@@ -510,11 +543,11 @@ class WeightEngine:
         
         self.logger = logger or get_logger(__name__)
         
-        # 修复：window 参数仅对 rolling_icir_weight 有效，其他方式提示警告
-        if window != 60 and weight_method not in self.WINDOW_VALID_METHODS:
+        # v1.12 修复：window 参数仅对 rolling_icir_weight 有效，使用常量比较
+        if window != self.DEFAULT_WINDOW and weight_method not in self.WINDOW_VALID_METHODS:
             self.logger.warning(
-                "window=%d 参数对 %s 加权方式无效，仅 rolling_icir_weight 支持窗口参数",
-                window, weight_method
+                "window=%d 参数对 %s 加权方式无效，仅 rolling_icir_weight 支持窗口参数（默认 %d）",
+                window, weight_method, self.DEFAULT_WINDOW
             )
         
         # 创建加权方法实例

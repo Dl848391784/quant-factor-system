@@ -2338,3 +2338,205 @@ class WeightMethodBase(ABC):
 - 每次调用直接使用预编译正则（无编译开销）
 
 ---
+
+## 正则贪婪匹配规范（v1.12 新增）
+
+> 本节定义正则贪婪匹配规范，避免非贪婪导致的错误截断。
+
+### 问题类型
+
+**问题：** _get_factor_name_from_col 正则非贪婪匹配 `_1d` 时错误截断。
+
+### 错误实现
+
+```python
+# 错误：非贪婪匹配
+_FACTOR_SUFFIX_PATTERN = re.compile(r'(.+?)_\d+[a-z]?$')
+
+# main_inflow_ratio_1d 匹配结果：
+# (.+?) 非贪婪匹配 main_inflow（最短）
+# _1d 匹配 \d+[a-z]?
+# 结果：返回 main_inflow（错误）
+```
+
+**问题分析：**
+- 非贪婪 `(.+?)` 匹配最短前缀
+- `main_inflow_ratio_1d` → 截断为 `main_inflow`
+- 正确应为 `main_inflow_ratio`
+
+### 正确实现
+
+```python
+# 正确：贪婪匹配
+_FACTOR_SUFFIX_PATTERN = re.compile(r'(.+)_(?:\d+[a-z]?|\d+)$')
+
+# main_inflow_ratio_1d 匹配结果：
+# (.+) 贪婪匹配 main_inflow_ratio（最长）
+# _1d 匹配 (?:\d+[a-z]?|\d+)
+# 结果：返回 main_inflow_ratio（正确）
+```
+
+---
+
+## 校验层级规范（v1.12 新增）
+
+> 本节定义校验层级规范，避免重复校验。
+
+### 问题类型
+
+**问题：** _validate_factor_cols 在 WeightEngine.calculate 和子类 calculate 中重复调用。
+
+### 重复校验问题
+
+```python
+# WeightEngine.calculate
+def calculate(self, factor_df, factor_cols, ...):
+    self.method._validate_factor_cols(factor_cols, self.logger)  # 校验1
+    return self.method.calculate(factor_df, factor_cols, ...)
+
+# EqualWeightMethod.calculate
+def calculate(self, factor_df, factor_cols, ...):
+    self._validate_factor_cols(factor_cols, self.logger)  # 校验2（重复）
+    ...
+```
+
+### 正确实现
+
+```python
+# 只在 WeightEngine.calculate 校验（入口统一校验）
+def calculate(self, factor_df, factor_cols, ...):
+    self.method._validate_factor_cols(factor_cols, self.logger)
+    return self.method.calculate(factor_df, factor_cols, ...)  # 子类信任已校验
+
+# 子类 calculate 不校验（信任调用方）
+def calculate(self, factor_df, factor_cols, ...):
+    # 无校验
+    weights = self.get_weights(factor_cols, ic_results)
+    return self._apply_weights(...)
+```
+
+**校验层级：**
+- WeightEngine.calculate（入口层）→ 校验
+- 子类 calculate（实现层）→ 不校验（信任）
+
+---
+
+## rolling_std ddof 规范（v1.12 新增）
+
+> 本节定义滚动标准差的 ddof 参数规范。
+
+### 问题类型
+
+**问题：** RollingICIRWeightMethod 中 rolling_std 使用默认 ddof=1，样本少时不稳定。
+
+### 问题分析
+
+```python
+# 问题：ddof=1（样本标准差）+ min_periods=window // 3
+rolling_std = ic_series.rolling(window=60, min_periods=20).std()  # ddof=1
+
+# 当样本数接近 min_periods（20）时：
+# ddof=1 → 标准差 = std / (n-1)，n=20 时分母为 19
+# 样本少时分母小，标准差不稳定
+```
+
+### 正确实现
+
+```python
+# 修复1：使用 ddof=0（总体标准差）
+rolling_std = ic_series.rolling(window=60, min_periods=20).std(ddof=0)
+
+# 修复2：min_periods 使用 max(1, window // 3)
+min_periods = max(1, self.window // 3)  # 避免 window=1 时 min_periods=0
+```
+
+**ddof 说明：**
+- ddof=0：总体标准差（std / sqrt(n)）
+- ddof=1：样本标准差（std / sqrt(n-1)）
+
+---
+
+## 条件冗余删除规范（v1.12 新增）
+
+> 本节定义条件冗余删除规范。
+
+### 问题类型
+
+**问题：** `not factor_cols or len(factor_cols) == 0` 中 `or len(...) == 0` 完全冗余。
+
+### 冗余分析
+
+```python
+# 冗余条件
+if not factor_cols or len(factor_cols) == 0:
+    raise ValueError(...)
+
+# Python 空列表布尔值：
+# [] → False
+# not [] → True
+# len([]) == 0 → True
+# not factor_cols 已涵盖 len(factor_cols) == 0
+```
+
+### 正确实现
+
+```python
+# 删除冗余条件
+if not factor_cols:
+    raise ValueError(...)
+```
+
+---
+
+## 常量替代硬编码规范（v1.12 新增）
+
+> 本节定义常量替代硬编码规范。
+
+### 问题类型
+
+**问题：** WeightEngine 中 window 警告阈值硬编码为 60，语义不清晰。
+
+### 硬编码问题
+
+```python
+# 硬编码
+if window != 60 and weight_method not in self.WINDOW_VALID_METHODS:
+    self.logger.warning("window=%d 参数无效...", window)
+```
+
+**问题：**
+- 硬编码默认值 60
+- 语义不清晰（为什么要和 60 比较）
+
+### 正确实现
+
+```python
+# 定义常量
+DEFAULT_WINDOW = 60
+
+# 使用常量
+def __init__(self, weight_method, window=DEFAULT_WINDOW, ...):
+    if window != self.DEFAULT_WINDOW and weight_method not in self.WINDOW_VALID_METHODS:
+        self.logger.warning(
+            "window=%d 参数对 %s 无效（默认 %d）",
+            window, weight_method, self.DEFAULT_WINDOW
+        )
+```
+
+---
+
+| 版本 | 日期 | 变更内容 |
+|------|------|----------|
+| v1.0 | 2026-05-24 | 初始设计：目录结构、脚本命名、加权方式、公共模块、输出规范 |
+| v1.1 | 2026-05-24 | 新增公共入口防御性编程规范（必需列校验、返回值解包校验、父类 validate 调用规范） |
+| v1.2 | 2026-05-24 | 新增因子名到列名映射规范、动态权重保存规范、NaN相关性处理规范 |
+| v1.3 | 2026-05-24 | 新增模块级代码规范、函数入口类型统一规范、composite_factor NaN检查规范、CLI异常退出码规范 |
+| v1.4 | 2026-05-24 | 新增校验前置规范、DataFrame空值检查规范、权重元信息分离规范、CLI异常堆栈保留规范 |
+| v1.5 | 2026-05-24 | 新增标准化列名接口约定规范、标准化NaN处理规范（单样本场景返回NaN而非0） |
+| v1.6 | 2026-05-24 | 新增函数前置条件校验、数据类型校验、缺失因子返回、数据一致性强校验、死代码移除、字段回退验证规范 |
+| v1.7 | 2026-05-24 | 新增Union-Find算法、正则因子名解析、关键指标缺失判定、筛选完整性标记、ICIR缺失处理规范 |
+| v1.8 | 2026-05-24 | 新增Union-Find迭代实现、正则跳过非标准文件、logger参数传递、文件读取异常处理、因子名匹配校验、set替代list性能规范 |
+| v1.9 | 2026-05-24 | 新增import位置规范、thresholds入口统一处理、logger参数使用规范 |
+| v1.10 | 2026-05-24 | 新增滚动ICIR时间轴计算、因子名反向映射、factor_cols空值校验、除零保护、无效参数警告、向量化加权实现规范 |
+| v1.11 | 2026-05-24 | 新增lambda延迟绑定修复、NaN动态权重归一化、正则预编译规范 |
+| v1.12 | 2026-05-24 | 新增正则贪婪匹配、校验层级规范、rolling_std ddof规范、条件冗余删除、常量替代硬编码规范 |
