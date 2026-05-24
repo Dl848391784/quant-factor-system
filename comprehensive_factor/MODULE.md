@@ -2525,6 +2525,110 @@ def __init__(self, weight_method, window=DEFAULT_WINDOW, ...):
 
 ---
 
+## CLI 入口最小导入规范（v1.13 新增）
+
+> 本节定义 CLI 脚本的导入规范，遵循最小导入原则，避免冗余导入。
+
+### 问题类型
+
+**问题：** 导入了函数但未直接使用，违反最小导入原则。
+
+**错误写法：**
+```python
+# ❌ 导入但未直接使用
+from comprehensive_factor.common.composite_runner import (
+    run_composite_backtest,  # 未直接调用（create_cli_entrypoint 内部已封装）
+    create_cli_entrypoint,
+    CompositeLayerConfig
+)
+
+from comprehensive_factor.common.logger_config import get_logger
+logger = get_logger(__name__)  # 导入但未使用（create_cli_entrypoint 会创建自己的 logger）
+```
+
+**正确写法：**
+```python
+# ✓ 只导入实际使用的函数
+from comprehensive_factor.common.composite_runner import (
+    create_cli_entrypoint,
+    CompositeLayerConfig
+)
+
+from comprehensive_factor.common.data_loader import DEFAULT_CACHE_DIR
+# 不导入 logger（create_cli_entrypoint 内部会处理日志）
+```
+
+**最小导入原则：**
+- 只导入脚本中直接使用的模块和函数
+- 公共入口（create_cli_entrypoint）内部已封装逻辑，无需导入其依赖的函数
+- logger 由公共入口管理，脚本层无需手动创建
+
+**适用场景：**
+- 综合因子分层回测脚本（composite_<加权方式>_1d.py）
+- 所有使用 create_cli_entrypoint 的脚本
+
+---
+
+## Config 默认值单一数据源规范（v1.13 新增）
+
+> 本节定义 CLI 入口参数读取规范，避免配置硬编码重复导致不一致风险。
+
+### 问题类型
+
+**问题：** Config 类定义了默认值，但 CLI 入口重复硬编码相同配置，违反 DRY 原则。
+
+**错误写法：**
+```python
+# ❌ Config 类定义
+@dataclass
+class EqualWeightLayerConfig(CompositeLayerConfig):
+    factor_list: List[str] = field(default_factory=lambda: ['rsi', 'volume_ratio'])
+    factor_cols: List[str] = field(default_factory=lambda: ['rsi_6', 'volume_ratio_5'])
+
+# ❌ CLI 入口重复硬编码
+main = create_cli_entrypoint(
+    factor_list=['rsi', 'volume_ratio'],        # 与 Config 重复
+    factor_cols=['rsi_6', 'volume_ratio_5'],    # 与 Config 重复
+    config_class=EqualWeightLayerConfig
+)
+```
+
+**风险：**
+- Config 默认值修改后，CLI 入口未同步更新
+- 两处配置不一致，静默产生错误行为
+- 维护者需同时修改多处，增加维护成本
+
+**正确写法：**
+```python
+# ✓ Config 类定义（单一数据源）
+@dataclass
+class EqualWeightLayerConfig(CompositeLayerConfig):
+    factor_list: List[str] = field(default_factory=lambda: ['rsi', 'volume_ratio'])
+    factor_cols: List[str] = field(default_factory=lambda: ['rsi_6', 'volume_ratio_5'])
+
+# ✓ CLI 入口从 Config 读取默认值
+_default_config = EqualWeightLayerConfig()
+
+main = create_cli_entrypoint(
+    factor_list=_default_config.factor_list,    # 从 Config 读取
+    factor_cols=_default_config.factor_cols,    # 从 Config 读取
+    config_class=EqualWeightLayerConfig
+)
+```
+
+**单一数据源原则：**
+- Config 类是配置的唯一来源
+- CLI 入口从 Config 实例读取默认值
+- 修改配置只需改一处（Config 类）
+- 保证一致性，降低维护成本
+
+**适用参数：**
+- `factor_list`：因子名称列表
+- `factor_cols`：因子列名列表
+- 其他 Config 定义的默认参数
+
+---
+
 | 版本 | 日期 | 变更内容 |
 |------|------|----------|
 | v1.0 | 2026-05-24 | 初始设计：目录结构、脚本命名、加权方式、公共模块、输出规范 |
@@ -2540,3 +2644,4 @@ def __init__(self, weight_method, window=DEFAULT_WINDOW, ...):
 | v1.10 | 2026-05-24 | 新增滚动ICIR时间轴计算、因子名反向映射、factor_cols空值校验、除零保护、无效参数警告、向量化加权实现规范 |
 | v1.11 | 2026-05-24 | 新增lambda延迟绑定修复、NaN动态权重归一化、正则预编译规范 |
 | v1.12 | 2026-05-24 | 新增正则贪婪匹配、校验层级规范、rolling_std ddof规范、条件冗余删除、常量替代硬编码规范 |
+| v1.13 | 2026-05-24 | 新增CLI入口最小导入规范、Config默认值单一数据源规范 |

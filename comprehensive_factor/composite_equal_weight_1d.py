@@ -10,6 +10,8 @@
 规范:
 - 遵循 PROJECT.md 公共模块强制复用规范
 - 命名遵循 MODULE.md: composite_<加权方式>_<收益周期>.py
+- 遵循 MODULE.md CLI入口最小导入规范：只导入实际使用的函数
+- 遵循 MODULE.md Config默认值单一数据源规范：CLI入口参数从Config读取
 
 作者: 云瑶
 创建日期: 2026-05-24
@@ -24,14 +26,10 @@ from typing import List
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from comprehensive_factor.common.composite_runner import (
-    run_composite_backtest,
     create_cli_entrypoint,
     CompositeLayerConfig
 )
-from comprehensive_factor.common.logger_config import get_logger
 from comprehensive_factor.common.data_loader import DEFAULT_CACHE_DIR
-
-logger = get_logger(__name__)
 
 
 # ============================================================================
@@ -69,10 +67,13 @@ class EqualWeightLayerConfig(CompositeLayerConfig):
 # CLI 入口
 # ============================================================================
 
+# 从 Config 类读取默认值，单一数据源（遵循 MODULE.md 规范）
+_default_config = EqualWeightLayerConfig()
+
 main = create_cli_entrypoint(
     weight_method='equal_weight',
-    factor_list=['rsi', 'volume_ratio'],
-    factor_cols=['rsi_6', 'volume_ratio_5'],
+    factor_list=_default_config.factor_list,
+    factor_cols=_default_config.factor_cols,
     config_class=EqualWeightLayerConfig,
     return_period='1d',
     cache_dir=str(DEFAULT_CACHE_DIR)
