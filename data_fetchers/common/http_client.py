@@ -9,6 +9,7 @@ HTTP 客户端模块
 - v1.1 (2026-05-25): 新增 request_with_retry，logger 参数化，异常处理精确化
 - v1.2 (2026-05-25): 新增 get_module_logger，__all__ 导出，docstring Example 补充
 - v1.3 (2026-05-25): 模块级常量补全，请求头数据来源注释，返回类型修复
+- v1.4 (2026-05-25): 安全性修复（MappingProxyType 不可变常量、缩小异常捕获范围、安全访问 response.text）
 
 作者: 云瑶
 日期: 2026-05-24
@@ -17,6 +18,8 @@ HTTP 客户端模块
 import json
 import logging
 import time
+import types
+from collections.abc import Mapping
 import requests
 from requests.adapters import HTTPAdapter
 from typing import Dict, Optional, Any, Union, Tuple, List
@@ -58,23 +61,27 @@ _DEFAULT_ALLOWED_METHODS = ["GET"]
 # 默认东财 API 请求头（数据来源：浏览器开发者工具抓包，2026-05-24）
 # 用途：模拟浏览器访问东财 API，避免被拦截
 # 注意：User-Agent 中的 Chrome 版本号（120.0.0.0）需要定期更新（建议每季度检查）
-DEFAULT_EASTMONEY_HEADERS = {
+# 使用 MappingProxyType 包装，防止外部修改影响所有调用
+_EASTMONEY_HEADERS_DICT = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://quote.eastmoney.com/",
     "Accept": "*/*",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     "Connection": "keep-alive",
 }
+DEFAULT_EASTMONEY_HEADERS = types.MappingProxyType(_EASTMONEY_HEADERS_DICT)
 
 # 新浪 API 请求头（数据来源：浏览器开发者工具抓包，2026-05-24）
 # 用途：模拟浏览器访问新浪财经 API，避免被拦截
 # 注意：User-Agent 中的 Chrome 版本号（120.0.0.0）需要定期更新（建议每季度检查）
-DEFAULT_SINA_HEADERS = {
+# 使用 MappingProxyType 包装，防止外部修改影响所有调用
+_SINA_HEADERS_DICT = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "http://vip.stock.finance.sina.com.cn/",
     "Accept": "*/*",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 }
+DEFAULT_SINA_HEADERS = types.MappingProxyType(_SINA_HEADERS_DICT)
 
 
 def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger:
@@ -104,7 +111,7 @@ def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger
 
 
 def create_retry_session(
-    headers: Optional[Dict[str, str]] = None,
+    headers: Optional[Mapping[str, str]] = None,
     total_retries: int = _DEFAULT_TOTAL_RETRIES,
     backoff_factor: float = _DEFAULT_BACKOFF_FACTOR,
     pool_connections: int = _DEFAULT_POOL_CONNECTIONS,
@@ -116,7 +123,7 @@ def create_retry_session(
     创建带重试机制的 HTTP Session
     
     Args:
-        headers: 自定义请求头（默认 None，使用 requests 默认 User-Agent）
+        headers: 自定义请求头（默认 None，支持 Dict 或 MappingProxyType）
         total_retries: 总重试次数（默认 3）
         backoff_factor: 退避因子（默认 1.0）
         pool_connections: 连接池大小（默认 10）
@@ -166,12 +173,25 @@ def create_retry_session(
         'backoff_factor': backoff_factor,
         'status_forcelist': _DEFAULT_RETRY_STATUS_CODES,
     }
+    
+    # urllib3 版本兼容处理：只捕获 allowed_methods 参数错误
+    # 其他参数错误（如拼写错误）正常抛出，避免隐藏真正的 bug
+    retry_strategy = None
     try:
         # urllib3 >= 2.0 使用 allowed_methods
         retry_strategy = Retry(**retry_params, allowed_methods=allowed_methods)
-    except TypeError:
-        # urllib3 < 2.0 使用 method_whitelist
-        retry_strategy = Retry(**retry_params, method_whitelist=allowed_methods)
+    except TypeError as e:
+        # 检查是否是 allowed_methods 参数错误（urllib3 版本不兼容）
+        if 'allowed_methods' in str(e) or 'got an unexpected keyword argument' in str(e):
+            # urllib3 < 2.0 使用 method_whitelist
+            retry_strategy = Retry(**retry_params, method_whitelist=allowed_methods)
+            logger.debug("urllib3 版本兼容: 使用 method_whitelist 参数")
+        else:
+            # 其他 TypeError 正常抛出（如参数拼写错误）
+            raise
+    
+    if retry_strategy is None:
+        raise RuntimeError("创建 Retry 策略失败")
     
     # 配置适配器
     adapter = HTTPAdapter(
@@ -367,14 +387,18 @@ def request_with_retry(
                     "错误: %s",
                     attempt + 1, max_attempts, url, method, e
                 )
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, requests.exceptions.JSONDecodeError) as e:
             # JSON 解析失败，记录详细信息
+            # 使用 getattr 安全访问 response.text，避免 streaming 模式问题
+            response_text = getattr(response, 'text', None)
+            preview = response_text[:200] if response_text and len(response_text) > 0 else 'N/A'
             logger.error(
                 "JSON 解析失败\n"
                 "URL: %s\n"
                 "方法: %s\n"
-                "响应内容前200字符: %s",
-                url, method, response.text[:200] if response and response.text else 'N/A'
+                "响应内容前200字符: %s\n"
+                "错误类型: %s",
+                url, method, preview, type(e).__name__
             )
             raise  # 直接抛出，不重试
         except Exception as e:
@@ -461,13 +485,25 @@ if __name__ == '__main__':
         custom_logger = get_module_logger(test_logger)
         test_logger.info("Custom logger name: %s", custom_logger.name)
         
-        # 测试 5: 默认常量
-        test_logger.info("\n[测试 5] 默认常量...")
-        test_logger.info("_DEFAULT_TOTAL_RETRIES: %d", _DEFAULT_TOTAL_RETRIES)
-        test_logger.info("_DEFAULT_TIMEOUT: %d", _DEFAULT_TIMEOUT)
-        test_logger.info("_DEFAULT_RETRY_STATUS_CODES: %s", _DEFAULT_RETRY_STATUS_CODES)
-        test_logger.info("_DEFAULT_ALLOWED_METHODS: %s", _DEFAULT_ALLOWED_METHODS)
+        # 测试 5: 公共常量不可变性
+        test_logger.info("\n[测试 5] 公共常量不可变性...")
+        # 测试 DEFAULT_EASTMONEY_HEADERS 不可修改（MappingProxyType）
+        try:
+            DEFAULT_EASTMONEY_HEADERS['User-Agent'] = 'modified'
+            test_logger.error("DEFAULT_EASTMONEY_HEADERS 可修改（不符合预期）")
+        except TypeError:
+            test_logger.info("DEFAULT_EASTMONEY_HEADERS 不可修改（MappingProxyType 正常）")
+        
+        # 测试 DEFAULT_SINA_HEADERS 不可修改
+        try:
+            DEFAULT_SINA_HEADERS['User-Agent'] = 'modified'
+            test_logger.error("DEFAULT_SINA_HEADERS 可修改（不符合预期）")
+        except TypeError:
+            test_logger.info("DEFAULT_SINA_HEADERS 不可修改（MappingProxyType 正常）")
+        
+        # 验证常量内容
         test_logger.info("DEFAULT_EASTMONEY_HEADERS keys: %s", list(DEFAULT_EASTMONEY_HEADERS.keys()))
+        test_logger.info("DEFAULT_SINA_HEADERS keys: %s", list(DEFAULT_SINA_HEADERS.keys()))
         
         # 测试 6: allowed_methods 参数
         test_logger.info("\n[测试 6] allowed_methods 参数...")

@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.1
+> 版本: v2.21
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-24
+> 更新时间: 2026-05-25
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -233,6 +233,16 @@ data_fetchers/
    - **create_retry_session 默认 headers 修复**：默认 None（不再使用东财请求头），调用方必须显式传入
    - **__main__ 测试扩展**：新增测试 7（headers=None）+ 测试 8（method 参数验证）
    - **修复原因**：代码bug（日志缺失、默认headers不合理）、规范遗漏（方法参数缺失、退避策略未说明）
+
+24. v2.21（2026-05-25 21:30）：
+   - **http_client.py 第六轮优化**：安全性修复（5 个问题）
+   - **JSON 解析异常捕获补全**：同时捕获 `json.JSONDecodeError` 和 `requests.exceptions.JSONDecodeError`
+   - **Retry 异常缩小捕获范围**：只捕获 allowed_methods 参数错误，其他 TypeError 正常抛出
+   - **response.text 安全访问**：使用 `getattr` 避免 streaming 模式问题，空字符串正确显示 N/A
+   - **DEFAULT_*_HEADERS 不可变**：使用 `MappingProxyType` 包装，防止外部修改影响所有调用
+   - **headers 类型注解修复**：`Dict[str, str]` → `Mapping[str, str]`（支持 MappingProxyType）
+   - **__main__ 测试重构**：移除私有常量测试，改为验证公共常量不可变性
+   - **修复原因**：代码bug（异常捕获不完整、安全访问缺失、可变常量）、规范遗漏（测试代码不规范）
 
 ---
 
