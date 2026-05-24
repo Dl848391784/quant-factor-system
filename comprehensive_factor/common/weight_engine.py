@@ -273,8 +273,12 @@ class ICIRWeightMethod(WeightMethodBase):
         """获取ICIR权重
         
         处理负ICIR：
-        - 反向因子ICIR为负（如 volume_ratio ICIR ≈ -1.97）
-        - 取绝对值后加权：|ICIR| 高的因子权重大
+        - ICIR = IC均值/IC标准差，反映因子的预测稳定性
+        - ICIR 绝对值越高，因子预测能力越稳定，权重越大
+        
+        实际 ICIR 值（见 factor_ic/result/*.json）：
+        - volume_ratio: ICIR=0.3058（2024-03-27~2026-05-14）
+        - rsi: ICIR=0.2519
         
         v1.12 修复：删除冗余条件 or len(...) == 0
         """
