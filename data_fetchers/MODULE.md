@@ -1,6 +1,6 @@
 # data_fetchers 模块规范
 
-> 版本: v2.34
+> 版本: v2.35
 > 创建时间: 2026-05-19
 > 更新时间: 2026-05-25
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
@@ -33,7 +33,7 @@
 
 | 函数 | 文件 | 用途 |
 |------|------|------|
-| `generate_all_factors(verbose)` | factor_generator.py | 生成所有因子数据 |
+|| `generate_all_factors(logger)` | factor_generator.py | 生成所有因子数据 |
 | `fetch_ohlcv_data(start_date, end_date)` | fetch_ohlcv.py（待创建） | 拉取 OHLCV 数据 |
 | `fetch_turnover_data()` | fetch_turnover.py | 拉取换手率数据 |
 | `fetch_main_inflow_data()` | fetch_main_inflow.py | 拉取主力资金流数据 |
@@ -380,6 +380,19 @@ data_fetchers/
    - **版本历史补全**：stock_utils.py 新增 v2.1 版本演进说明
    - **修复原因**：代码bug（excluded_count 统计含义模糊、datetime.strptime 接受单数字月份/日期、finally迭代Bug）+ 规范遗漏（前缀长度预期注释缺失）
 
+13. **factor_generator.py v1.1 (2026-05-25)** — 第一轮公共模块规范化
+   - **logger 参数化**：`generate_all_factors` 参数 `verbose: bool` → `logger: Optional[logging.Logger]`
+   - **新增 get_module_logger**：遵循 PROJECT.md 公共模块日志规范
+   - **新增 __all__ 导出**：导出 `generate_all_factors` + `get_module_logger`
+   - **类型注解精确化**：`Optional[Path]` → `Optional[Union[Path, str]]`，返回值 `Dict` → `Dict[str, Any]`
+   - **移除 sys.path.insert**：改用标准导入方式（函数内导入因子计算函数）
+   - **异常处理补全**：文件加载 + JSON 解析 + 原子写入
+   - **原子写入**：使用临时文件 + `os.replace` 遵循 PROJECT.md 文件写入规范
+   - **CLI 日志规范化**：使用 `setup_logger` + try/finally 资源清理
+   - **docstring 补全**：Args/Returns/Raises/Note/Example 全部补齐
+   - **__init__.py 导出**：新增模块级导出
+   - **修复原因**：代码bug（print vs logger、sys.path.insert、缺少异常处理）+ 规范遗漏（缺少 __all__、logger 参数、docstring Raises）
+
 ---
 
 data_fetchers 模块负责：
@@ -627,11 +640,15 @@ python data_fetchers/factor_generator.py
 
 **Python：**
 ```python
-from data_fetchers.factor_generator import generate_all_factors
+import logging
+from data_fetchers.factor_generator import generate_all_factors, get_module_logger
 
-metadata = generate_all_factors(
-    verbose=True  # 打印进度
-)
+# 使用模块默认 logger
+metadata = generate_all_factors()
+
+# 使用自定义 logger
+logger = logging.getLogger('my_app')
+metadata = generate_all_factors(logger=logger)
 ```
 
 ### 数据一致性验证
