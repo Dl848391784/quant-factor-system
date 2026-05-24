@@ -4,6 +4,21 @@
 
 统一 gzip + JSON 缓存的读写操作。
 
+版本历史：
+- v1.0 (2026-05-24): 初始版本
+- v1.1 (2026-05-24): 接收 logger 参数，异常处理精确化
+- v1.2 (2026-05-24): 公共函数重构，__all__ 导出
+- v1.3 (2026-05-24): 统一缓存 API + 辅助函数
+- v1.4 (2026-05-24): 压缩级别控制 + JSON 格式选项
+- v1.5 (2026-05-24): 异常处理精确化（BadGzipFile、空文件处理）
+- v1.6 (2026-05-24): 测试代码日志规范化
+- v1.7 (2026-05-24): 创建 logger_config.py，复用 setup_logger
+- v1.8 (2026-05-24): 修复 get_module_logger global 声明
+- v1.9 (2026-05-24): 删除冗余导入（datetime）
+- v1.10 (2026-05-24): 类型注解修复 + append_to_cache 冗余检查消除
+- v1.11 (2026-05-25): 线程安全修复 + docstring 补充 + 测试清理健壮化
+- v1.12 (2026-05-25): 原子写入修复 + 错误信息精确化
+
 作者: 云瑶
 日期: 2026-05-24
 """
@@ -11,6 +26,7 @@
 import gzip
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -132,14 +148,17 @@ def _read_cache_impl(
     except json.JSONDecodeError as e:
         # 遵循 references/backtest-module-optimization-patterns.md Section 1.2
         # 避免传递完整 JSON 文档字符串导致内存翻倍
+        # 区分 gzip/json 文件，提供更精确的错误信息
+        file_type = "gzip JSON" if use_gzip else "JSON"
         logger.error(
-            "JSON 解析失败\n"
+            "%s 文件内容解析失败\n"
             "文件路径: %s\n"
             "错误位置: 行 %d, 列 %d\n"
-            "错误信息: %s",
-            path, e.lineno, e.colno, e.msg
+            "错误信息: %s\n"
+            "提示: 若文件非 JSON 格式，请检查文件类型是否正确",
+            file_type, path, e.lineno, e.colno, e.msg
         )
-        raise ValueError(f"JSON解析失败: {path}, 位置 {e.pos}") from e
+        raise ValueError(f"{file_type}文件内容解析失败: {path}, 位置 {e.pos}") from e
     except BadGzipFile as e:
         logger.error("gzip 文件损坏: %s", path)
         raise ValueError(f"gzip 文件损坏: {path}") from e
@@ -165,7 +184,10 @@ def _write_cache_impl(
     json_sort_keys: bool = False
 ) -> None:
     """
-    写入缓存的公共实现
+    写入缓存的公共实现（原子写入）
+    
+    使用临时文件写入，成功后原子替换目标文件。
+    避免写入中途崩溃导致目标文件损坏。
     
     Args:
         path: 文件路径（已转换为 Path）
@@ -198,22 +220,39 @@ def _write_cache_impl(
     else:
         separators = None  # 使用默认分隔符
     
+    # 临时文件路径（同目录，保证 os.replace 同文件系统原子操作）
+    temp_path = path.with_suffix(path.suffix + '.tmp')
+    
     try:
+        # 写入临时文件
         if use_gzip:
-            with gzip.open(path, 'wt', encoding='utf-8', compresslevel=compresslevel) as f:
+            with gzip.open(temp_path, 'wt', encoding='utf-8', compresslevel=compresslevel) as f:
                 json.dump(data, f, ensure_ascii=False, indent=json_indent, separators=separators, sort_keys=json_sort_keys)
         else:
-            with open(path, 'w', encoding='utf-8') as f:
+            with open(temp_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=json_indent, separators=separators, sort_keys=json_sort_keys)
-        logger.debug("成功写入缓存: %s", path)
+        
+        # 原子替换目标文件（os.replace 是原子操作，同文件系统）
+        os.replace(temp_path, path)
+        logger.debug("成功写入缓存（原子操作）: %s", path)
+        
     except PermissionError as e:
         logger.error("文件权限错误: %s", path)
+        # 清理临时文件
+        if temp_path.exists():
+            temp_path.unlink()
         raise PermissionError(f"无权限写入缓存文件: {path}") from e
     except OSError as e:
         logger.error("文件系统错误: %s", path)
+        # 清理临时文件
+        if temp_path.exists():
+            temp_path.unlink()
         raise OSError(f"写入缓存失败（磁盘空间不足或文件系统错误）: {path}") from e
     except Exception as e:
         logger.exception("写入缓存失败（未知错误）: %s", path)
+        # 清理临时文件
+        if temp_path.exists():
+            temp_path.unlink()
         raise RuntimeError(f"写入缓存失败（未知错误）: {path}") from e
 
 
