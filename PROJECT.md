@@ -71,10 +71,44 @@ factor_ic_analyzer/
 ```
 
 **数据流向：**
-1. data_fetchers 拉取数据 → cache 存储
-2. factor_ic 读取 cache → 计算 IC → 输出 result
-3. backtest 读取 cache → 分层回测 → 输出 result
-4. comprehensive_factor 读取 factor_ic result + cache → 加权计算综合因子 → 调用 backtest 分层回测
+1. data_fetchers 拉取数据 → cache 存储（原始行情数据）
+2. data_fetchers/factor_generator 计算 → result 存储（扩展因子数据）
+3. factor_ic 读取 data_fetchers/result → 计算 IC → 输出 factor_ic/result
+4. backtest 读取 cache → 分层回测 → 输出 result
+5. comprehensive_factor 读取 factor_ic result + cache → 加权计算综合因子 → 调用 backtest 分层回测
+
+### 跨模块数据路径规范（2026-05-26新增）
+
+**各模块数据输出/输入路径：**
+
+| 模块 | 输出目录 | 输出文件 | 依赖模块读取位置 |
+|-----|---------|---------|----------------|
+| data_fetchers/fetch_factor_cache | cache/factor_data/ | factor_data.json.gz, return_data.json.gz | 基础数据源 |
+| data_fetchers/fetch_turnover | cache/factor_data/ | turnover_rate_data.json.gz | 基础数据源 |
+| data_fetchers/factor_generator | **data_fetchers/result/** | **factor_data_extended.json.gz** | **factor_ic.data_loader** |
+| factor_ic | factor_ic/result/ | ic_<因子名>_analysis_result.json | comprehensive_factor |
+
+**变更同步检查清单（强制）：**
+
+```
+□ 模块输出路径变更 → 同步更新 PROJECT.md 跨模块数据路径表
+□ 模块输出路径变更 → 同步更新依赖模块的 MODULE.md 数据来源描述
+□ 模块输出路径变更 → 同步更新依赖模块的代码路径配置（如 data_loader.py）
+□ 【关键】修改路径配置前 → 先验证新数据文件结构（包含哪些列），避免冗余设计
+□ 变更后在 PROJECT.md 版本历史记录此次跨模块同步
+□ 变更后运行依赖模块的测试用例验证数据读取正常
+```
+
+**历史教训（2026-05-26）：**
+- data_fetchers/factor_generator 输出路径从 cache 改为 result 目录
+- 但 factor_ic/data_loader.py 未同步更新，导致 factor_ic 脚本读取旧路径数据
+- 原因：PROJECT.md 缺少跨模块数据路径变更同步规范
+
+**修改路径配置前必须验证数据结构（2026-05-26新增）：**
+- 错误做法：修改路径配置时做"向后兼容"假设（假设某些列还在旧目录）
+- 正确做法：先验证新数据文件包含哪些列，确认所有需要的数据都在新路径中
+- 案例：factor_data_extended.json.gz 已包含 turnover_rate，但修改时仍保留 additional_factor_files 的冗余设计
+- 原因：未先验证数据结构，直接做假设性设计
 
 **模块边界规范（2026-05-23新增）：**
 
@@ -966,6 +1000,7 @@ def cleanup_old_logs(logs_dir: Path, keep_days: int = 30):
 
 | 版本 | 日期 | 更新内容 |
 |------|------|---------|
+| v2.5 | 2026-05-26 | 新增"跨模块数据路径规范"：数据输出/输入路径表、变更同步检查清单、历史教训；同步更新数据流向描述 |
 | v2.4 | 2026-05-22 | 迁移 factor_ic 特定规范至 MODULE.md（公共模块强制复用、公共模块日志传递），新增文档层级规范 |
 | v2.3 | 2026-05-20 | 新增"日志规范"章节：框架选择（logging）、级别规范、路径规范、命名规范、格式规范、异常记录规范、使用姿势示例 |
 | v2.2 | 2026-05-20 | 新增"代码风格规范"章节（import、注释缩进、异常链、死代码清理等） |
@@ -975,4 +1010,4 @@ def cleanup_old_logs(logs_dir: Path, keep_days: int = 30):
 
 ---
 
-*最后更新: 2026-05-22*
+*最后更新: 2026-05-26*

@@ -192,7 +192,8 @@
 factor_ic 模块负责计算各类因子的 IC（Information Coefficient）值，用于评估因子对未来收益的预测能力。
 
 **模块定位：**
-- 输入：来自 data_fetchers 的缓存数据（cache/factor_data/）
+- 输入：来自 data_fetchers/result/factor_data_extended.json.gz（因子数据，遵循 PROJECT.md 跨模块数据路径规范）
+- 输入：来自 cache/factor_data/return_data.json.gz（收益数据）
 - 输出：IC 分析结果（factor_ic/result/）
 - 依赖：不自行拉取数据，只处理已缓存数据
 
@@ -240,6 +241,8 @@ factor_ic 模块负责计算各类因子的 IC（Information Coefficient）值�
 **脚本命名：** `ic_<因子名>_<收益周期>.py`（如 `ic_rsi_1d.py`）
 
 **数据来源：** 必须来自 `data_fetchers/` 缓存，禁止在脚本中拉取数据。
+- 因子数据：`data_fetchers/result/factor_data_extended.json.gz`（遵循 PROJECT.md 跨模块数据路径规范）
+- 收益数据：`cache/factor_data/return_data.json.gz`
 
 **输出路径：** `factor_ic/result/ic_<因子名>_<周期>_analysis_result.json`
 
@@ -3756,4 +3759,4 @@ return factor_df, return_df, {'period_start': raw_period_start, ...}
 - 流程文档：factor_ic/docs/ic_<因子名>_<周期>_flow.md
 - 公共函数：factor_ic/common/ 模块
 
-*最后更新: 2026-05-19*
+*最后更新: 2026-05-26（同步更新数据来源路径，遵循 PROJECT.md 跨模块数据路径规范）*

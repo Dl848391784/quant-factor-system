@@ -10,8 +10,13 @@
 5. dropna 过滤缺失值
 6. 日期对齐验证（可选）
 
+数据来源（2026-05-26更新，遵循 PROJECT.md 跨模块数据路径规范）：
+- 因子数据：data_fetchers/result/factor_data_extended.json.gz（包含所有因子）
+- 收益数据：cache/factor_data/return_data.json.gz（原始数据源）
+
 作者: 云瑶
 日期: 2026-05-22
+最后修改: 2026-05-26（路径配置同步更新）
 """
 
 import gzip
@@ -22,10 +27,16 @@ from typing import Tuple, List, Optional, Dict
 
 from .logger_config import get_logger
 
-# 默认缓存路径
-DEFAULT_CACHE_DIR = Path(__file__).parent.parent.parent / 'cache' / 'factor_data'
-DEFAULT_FACTOR_CACHE = DEFAULT_CACHE_DIR / 'factor_data.json.gz'
-DEFAULT_RETURN_CACHE = DEFAULT_CACHE_DIR / 'return_data.json.gz'
+# ============================================================================
+# 默认路径配置（遵循 PROJECT.md 跨模块数据路径规范）
+# ============================================================================
+# 因子数据路径：来自 data_fetchers/result/factor_data_extended.json.gz（包含所有因子）
+DEFAULT_FACTOR_DATA_DIR = Path(__file__).parent.parent.parent / 'data_fetchers' / 'result'
+DEFAULT_FACTOR_CACHE = DEFAULT_FACTOR_DATA_DIR / 'factor_data_extended.json.gz'
+
+# 收益数据路径：来自 cache/factor_data/return_data.json.gz
+DEFAULT_RETURN_CACHE_DIR = Path(__file__).parent.parent.parent / 'cache' / 'factor_data'
+DEFAULT_RETURN_CACHE = DEFAULT_RETURN_CACHE_DIR / 'return_data.json.gz'
 
 
 def load_factor_return_data(
@@ -79,12 +90,9 @@ def load_factor_return_data(
             factor_cols=['close', 'high', 'low']
         )
         
-        # 换手率突增（需要额外文件）
+        # 换手率突增（turnover_rate 已在 factor_data_extended.json.gz 中）
         factor_df, return_df, raw_metadata = load_factor_return_data(
-            factor_cols=['close'],
-            additional_factor_files={
-                'turnover_rate': DEFAULT_CACHE_DIR / 'turnover_rate_data.json.gz'
-            }
+            factor_cols=['close', 'turnover_rate']
         )
     """
     if logger is None:
@@ -345,8 +353,12 @@ def _convert_date_column(df: pd.DataFrame, name: str) -> pd.DataFrame:
 
 
 def get_cache_dir() -> Path:
-    """获取缓存目录路径"""
-    return DEFAULT_CACHE_DIR
+    """获取收益缓存目录路径（cache/factor_data/）
+    
+    注意：因子数据已迁移至 data_fetchers/result/factor_data_extended.json.gz
+    此函数仅返回收益数据目录，用于向后兼容。
+    """
+    return DEFAULT_RETURN_CACHE_DIR
 
 
 def get_factor_cache_path() -> Path:

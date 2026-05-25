@@ -4,8 +4,12 @@
 
 遵循 PROJECT.md 公共模块强制复用规范：
 - 主流程使用 run_complex_factor_ic()（禁止手写三模式分支）
-- 数据加载使用 load_factor_return_data(additional_factor_files)（禁止手写 gzip/json 加载）
+- 数据加载使用 load_factor_return_data()（禁止手写 gzip/json 加载）
 - 仅实现因子特有计算逻辑（换手率突增公式）
+
+数据来源（2026-05-26更新，遵循 PROJECT.md 跨模块数据路径规范）：
+- 因子数据：data_fetchers/result/factor_data_extended.json.gz（包含 turnover_rate）
+- 收益数据：cache/factor_data/return_data.json.gz
 
 代码量：~100行（仅换手率计算），而非 ~300行手写主流程。
 
@@ -19,7 +23,7 @@
 
 作者: 云瑶
 重构日期: 2026-05-21
-修订日期: 2026-05-23（中间变量规范 + 除零防护 + 异常检测顺序修正）
+修订日期: 2026-05-26（移除 additional_factor_files，数据来源更新）
 原版作者: 云舟
 原版日期: 2026-05-08
 """
@@ -35,7 +39,6 @@ import numpy as np
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
-from factor_ic.common.data_loader import DEFAULT_CACHE_DIR
 from factor_ic.common.logger_config import get_logger
 
 logger = get_logger(__name__)
@@ -177,15 +180,13 @@ def main():
     args = parser.parse_args()
     
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
+    # 数据来源：data_fetchers/result/factor_data_extended.json.gz（已包含 turnover_rate）
     result = run_complex_factor_ic(
         factor_name='turnover_surge',
         factor_col='turnover_surge',
-        factor_cols=['close'],  # turnover_rate 通过 additional_factor_files 加载
+        factor_cols=['close', 'turnover_rate'],  # turnover_rate 已在 factor_data_extended 中
         custom_factor_calculation=calculate_turnover_surge,
         custom_factor_calculation_params={'surge_window': args.surge_window},
-        additional_factor_files={
-            'turnover_rate': DEFAULT_CACHE_DIR / 'turnover_rate_data.json.gz'
-        },
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger
