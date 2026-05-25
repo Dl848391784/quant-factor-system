@@ -4,7 +4,7 @@
 
 作者: 云舟
 日期: 2026-05-27
-版本: v1.1
+版本: v1.3
 
 功能: 获取申万行业分类数据并缓存
 数据源: akshare - 申万行业分类
@@ -12,6 +12,7 @@
 改进历史:
 - v1.1 (2026-05-27): 优化 - 添加版本号常量、Dict→dict、iterrows→to_dict、__main__用logger
 - v1.2 (2026-05-27): Bug修复 - docstring Returns Dict→dict（5处）、mkdir用RESULT_DIR、meta添加version字段
+- v1.3 (2026-05-27): Bug修复 - 文档头版本号同步、第355行Dict→dict、异常日志加类型名、Counter顶部导入、原子写入异常处理
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -23,9 +24,10 @@ import json
 import logging
 from pathlib import Path
 from datetime import datetime
+from collections import Counter
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = '1.2'
+_OUTPUT_VERSION = '1.3'
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +140,7 @@ def fetch_stock_industry_sw() -> dict:
         return industry_map
         
     except Exception as e:
-        logger.error(f"[行业数据] 获取失败: {e}")
+        logger.error(f"[行业数据] 获取失败 [{type(e).__name__}]: {e}")
         return {}
 
 
@@ -176,7 +178,7 @@ def load_stock_industry() -> dict:
             return industries
             
         except Exception as e:
-            logger.warning(f"[行业数据] 缓存加载失败: {e}")
+            logger.warning(f"[行业数据] 缓存加载失败 [{type(e).__name__}]: {e}")
     
     # 缓存不存在，重新获取
     return refresh_industry_cache()
@@ -211,12 +213,15 @@ def refresh_industry_cache() -> dict:
     # 确保输出目录存在（MODULE.md 约束 #2：输出到 result 目录）
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
     
-    # 原子写入
+    # 原子写入（异常处理保证清理）
     temp_path = INDUSTRY_CACHE_PATH.with_suffix('.tmp')
-    with open(temp_path, 'w', encoding='utf-8') as f:
-        json.dump(cache_data, f, ensure_ascii=False, indent=2)
-    
-    temp_path.rename(INDUSTRY_CACHE_PATH)
+    try:
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            json.dump(cache_data, f, ensure_ascii=False, indent=2)
+        temp_path.rename(INDUSTRY_CACHE_PATH)
+    except OSError as e:
+        temp_path.unlink(missing_ok=True)
+        raise RuntimeError(f"缓存写入失败 [{type(e).__name__}]: {e}") from e
     logger.info(f"[行业数据] 缓存已更新: {INDUSTRY_CACHE_PATH} (v{_OUTPUT_VERSION})")
     
     return industry_map
@@ -264,7 +269,7 @@ def load_local_industry_backup() -> dict:
             return industry_map
             
         except Exception as e:
-            logger.warning(f"[行业数据] 本地备用加载失败: {e}")
+            logger.warning(f"[行业数据] 本地备用加载失败 [{type(e).__name__}]: {e}")
     
     return {}
 
@@ -352,9 +357,8 @@ def get_industry_distribution(stocks: list) -> dict:
         stocks: 股票代码列表
         
     Returns:
-        Dict: {行业名称: 数量}
+        dict: {行业名称: 数量}
     """
-    from collections import Counter
     industry_count = Counter()
     
     for code in stocks:
@@ -362,6 +366,21 @@ def get_industry_distribution(stocks: list) -> dict:
         industry_count[industry] += 1
     
     return dict(industry_count)
+
+
+# 公共接口导出列表（MODULE.md 约束）
+__all__ = [
+    'fetch_stock_industry_sw',
+    'load_stock_industry',
+    'refresh_industry_cache',
+    'get_industry_map',
+    'get_stock_industry',
+    'get_industry_distribution',
+    'infer_industry_from_name',
+    'SW_INDUSTRY_CODE_MAP',
+    'INDUSTRY_CACHE_PATH',
+    '_OUTPUT_VERSION',
+]
 
 
 if __name__ == '__main__':
