@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.69
+> 版本: v2.70
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 16:00 北京时间
+> 更新时间: 2026-05-26 17:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -16,9 +16,9 @@
 - 字段值不可为 None
 - 结果输出到 result 目录
 
-**本模块特定约束（11条）：**
+**本模块特定约束（16条）：**
 
-|| # | 约束 | 说明 |
+||| # | 约束 | 说明 |
 |---|------|------|
 | 1 | 脚本命名：`fetch_<数据源>.py` | 如 fetch_turnover.py、fetch_main_inflow.py |
 | 2 | 输出到 result 目录 | 与 factor_ic 等模块保持一致（cache 为数据源原始缓存） |
@@ -31,6 +31,11 @@
 | 9 | N-way merge 去重使用 batch_idx | heap 元素为 `(key, batch_idx, stream)`，而非 `(key, stream_idx, stream)` |
 | 10 | itertuples 前验证列存在 | `hasattr(row, 'col')` 对同一 DataFrame 所有行结果相同，无效防御性检查 |
 | 11 | 大文件分阶段加载 | 避免 two large lists 同时存在于内存中，先处理第一个并 del 再加载第二个 |
+| 12 | 数据验证综合判断 | 不仅检查天数达标，还需检查关键字段非空比例 >= 80% |
+| 13 | peek_key 检查 exhausted | `if self.exhausted or self.idx >= len(self.records)`，语义一致性 |
+| 14 | get_memory_usage_mb Windows 兜底 | `import resource` 在 Windows 下会抛 ModuleNotFoundError，需 try-except 兜底返回 0.0 |
+| 15 | main docstring 无 Returns | None 返回类型的函数不需要 Returns 节 |
+| 16 | version 字段提取为常量 | 禁止硬编码版本号，提取为 `_OUTPUT_VERSION` 常量便于维护 |
 
 ### 关键函数签名
 
@@ -656,6 +661,17 @@ data_fetchers/
    - **新增约束 #10**：itertuples 前验证列存在（hasattr 对同一 DataFrame 无效）
    - **新增约束 #11**：大文件分阶段加载（避免内存峰值）
    - **规范补充原因**：代码审查发现无效防御性检查、内存峰值问题
+
+71. **fetch_factor_cache.py v3.14 (2026-05-26)** — Bug修复（5项）
+   - **validate_final_data 数据有效性验证**：增加 RSI 非空比例 >= 80% 检查，综合判断（天数 + 数据有效性）
+   - **peek_key 检查 exhausted**：`if self.exhausted or self.idx >= len(self.records)`，语义一致性
+   - **get_memory_usage_mb Windows 兜底**：`import resource` try-except 兜底返回 0.0
+   - **main docstring 删除冗余 Returns**：None 返回类型不需要 Returns 节
+   - **version 字段提取为常量**：`_OUTPUT_VERSION = '3.14'`，两处引用统一
+
+72. **MODULE.md v2.70 (2026-05-26)** — 规范补充
+   - **新增约束 #12-#16**：数据验证综合判断、peek_key 检查 exhausted、Windows 兜底、docstring 无 Returns、version 常量
+   - **规范补充原因**：代码审查发现验证逻辑宽松、语义不一致、跨平台兼容性缺失、版本号维护困难
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
