@@ -33,6 +33,10 @@
   - 导入顺序修正：requests 移至标准库之后（遵循 PEP 8）
   - ensure_cache_dir/ensure_result_dir 调用时传递 logger 参数（遵循约束 33）
 
+- v2.3 (2026-05-27 07:00): 第四轮优化
+  - load_cache 异常捕获扩大：JSONDecodeError → Exception（遵循约束 55）
+  - 潜在风险覆盖：PermissionError、IsADirectoryError、OSError 等
+
 作者: 云舟
 日期: 2026-04-02
 """
@@ -69,7 +73,7 @@ __all__ = [
 # ============================================================
 
 # 输出版本（遵循 MODULE.md 约束 16）
-_OUTPUT_VERSION = '2.4'
+_OUTPUT_VERSION = '2.5'
 
 # 新浪财经 API 端点
 SINA_API_URL = 'http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData'
@@ -239,7 +243,7 @@ def fetch_stocks_from_sina(
     
     logger.info("从新浪财经 API 获取主板股票...")
     
-    # 使用公共模块创建 Session
+    # 使用公共模块创建 Session（确保资源释放）
     session = create_sina_session(logger=logger)
     
     all_stocks: List[Dict[str, Any]] = []
@@ -649,7 +653,9 @@ def load_cache() -> Optional[Dict[str, Any]]:
     try:
         with open(CACHE_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except json.JSONDecodeError as e:
+    except Exception as e:
+        # 捕获所有异常（遵循 MODULE.md 约束 55）
+        # 包括：json.JSONDecodeError、PermissionError、IsADirectoryError、OSError 等
         logger.error(f"加载缓存失败: [{type(e).__name__}]: {e}")
         return None
 

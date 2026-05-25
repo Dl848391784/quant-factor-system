@@ -527,6 +527,11 @@ data_fetchers/
    - **ensure_cache_dir/ensure_result_dir 调用时传递 logger**：遵循 MODULE.md 约束 33（函数签名与调用一致）
    - **修复原因**：导入顺序违规、调用方参数遗漏
 
+24. **fetch_stock_list.py v2.3 (2026-05-27 07:05)** — 第四轮优化
+   - **load_cache 异常捕获扩大**：`json.JSONDecodeError` → `Exception`（遵循 MODULE.md 约束 55）
+   - **潜在风险覆盖**：PermissionError、IsADirectoryError、OSError 等文件读取异常
+   - **修复原因**：异常捕获范围过小，文件读取可能抛出多种异常
+
 20. **factor_generator.py v1.9 (2026-05-25)** — 第八轮深度优化
    - **冗余导入清理**：移除条件导入块的 `_Path`（第44行），直接使用顶部导入的 `Path`
    - **注释行号修正**：setup_logger 导入位置改为第369-374行（删除1行后位置变化）
