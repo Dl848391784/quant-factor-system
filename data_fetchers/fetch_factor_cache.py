@@ -16,6 +16,7 @@
 - v3.5 (2026-05-26): 版本历史格式规范化、sys.path移除、公共模块导入、docstring补充、流程文档+测试用例创建
 - v3.6 (2026-05-26): print → logger 迁移完成（74处全量替换）、logger参数化（6个核心函数）、main函数日志初始化
 - v3.7 (2026-05-26): 导入顺序PEP8规范化、BatchStream类docstring补充、类型注解完善、路径配置使用公共模块
+- v3.8 (2026-05-26): os.path → Path 对象全量替换（9处os.path.join、2处os.path.exists、4处os.path.getsize、3处os.remove→unlink）
 
 作者: 云舟
 日期: 2026-04-04
@@ -132,8 +133,8 @@ def save_batch_cache_sorted(batch_idx: int, factor_df, return_df, logger: loggin
         - 使用流式写入避免 to_dict('records') 内存峰值
     """
     logger = logger or _MODULE_LOGGER
-    factor_path = os.path.join(CACHE_DIR, f'batch_{batch_idx}_factor.json.gz')
-    return_path = os.path.join(CACHE_DIR, f'batch_{batch_idx}_return.json.gz')
+    factor_path = CACHE_DIR / f'batch_{batch_idx}_factor.json.gz'
+    return_path = CACHE_DIR / f'batch_{batch_idx}_return.json.gz'
     
     # 格式化并排序（按 date, asset）
     factor_df['date'] = factor_df['date'].astype(str)
@@ -179,8 +180,8 @@ def save_batch_cache_sorted(batch_idx: int, factor_df, return_df, logger: loggin
             f.write('  ' + json.dumps(record, ensure_ascii=False))
         f.write('\n]')
     
-    factor_size_mb = os.path.getsize(factor_path) / (1024 * 1024)
-    return_size_mb = os.path.getsize(return_path) / (1024 * 1024)
+    factor_size_mb = factor_path.stat().st_size / (1024 * 1024)  # Path.stat() 替代 os.path.getsize()
+    return_size_mb = return_path.stat().st_size / (1024 * 1024)
     
     logger.info(f"  ✓ 保存批次 {batch_idx}: 因子 {factor_size_mb:.2f}MB, 收益 {return_size_mb:.2f}MB")
     logger.info(f"  当前内存: {get_memory_info_str()}")
@@ -315,8 +316,8 @@ def n_way_merge_deduplicate(total_batches: int, data_type: str = 'factor', logge
     valid_batch_indices = []
     
     for batch_idx in range(total_batches):
-        path = os.path.join(CACHE_DIR, f'batch_{batch_idx}_{data_type}.json.gz')
-        if os.path.exists(path):
+        path = CACHE_DIR / f'batch_{batch_idx}_{data_type}.json.gz'
+        if path.exists():
             stream = BatchStream(batch_idx, data_type)
             if not stream.is_exhausted():
                 streams.append(stream)
@@ -337,7 +338,7 @@ def n_way_merge_deduplicate(total_batches: int, data_type: str = 'factor', logge
             heapq.heappush(heap, (key, i, stream))
     
     # 合并结果（暂时存内存，流式写入文件）
-    output_path = os.path.join(CACHE_DIR, f'merged_{data_type}.json.gz')
+    output_path = CACHE_DIR / f'merged_{data_type}.json.gz'
     merged_records = []
     last_key = None
     last_record = None
@@ -571,8 +572,8 @@ def format_final_output(factor_merged_path, return_merged_path, logger: logging.
     logger.info(f"  收益记录: {len(return_records)}")
     
     # 写入最终格式化的文件
-    factor_final_path = os.path.join(CACHE_DIR, 'factor_data.json.gz')
-    return_final_path = os.path.join(CACHE_DIR, 'return_data.json.gz')
+    factor_final_path = CACHE_DIR / 'factor_data.json.gz'
+    return_final_path = CACHE_DIR / 'return_data.json.gz'
     
     # 因子数据
     with gzip.open(factor_final_path, 'wt', encoding='utf-8') as f:
@@ -631,11 +632,11 @@ def format_final_output(factor_merged_path, return_merged_path, logger: logging.
     del factor_records, return_records
     gc.collect()
     
-    os.remove(factor_merged_path)
-    os.remove(return_merged_path)
+    Path(factor_merged_path).unlink()  # Path.unlink() 替代 os.remove()
+    Path(return_merged_path).unlink()
     
-    factor_size_mb = os.path.getsize(factor_final_path) / (1024 * 1024)
-    return_size_mb = os.path.getsize(return_final_path) / (1024 * 1024)
+    factor_size_mb = factor_final_path.stat().st_size / (1024 * 1024)
+    return_size_mb = return_final_path.stat().st_size / (1024 * 1024)
     
     logger.info(f"  ✓ 最终文件已保存:")
     logger.info(f"    因子: {factor_final_path} ({factor_size_mb:.2f} MB)")
@@ -659,7 +660,7 @@ def validate_final_data(logger: logging.Logger = None) -> bool:
     logger.info("[验证阶段] 验证数据完整性...")
     logger.info("=" * 60)
     
-    factor_path = os.path.join(CACHE_DIR, 'factor_data.json.gz')
+    factor_path = CACHE_DIR / 'factor_data.json.gz'
     
     with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
         data = json.load(f)
@@ -706,9 +707,9 @@ def cleanup_batch_files(total_batches: int, logger: logging.Logger = None) -> in
     deleted = 0
     for batch_idx in range(total_batches):
         for t in ['factor', 'return']:
-            path = os.path.join(CACHE_DIR, f'batch_{batch_idx}_{t}.json.gz')
-            if os.path.exists(path):
-                os.remove(path)
+            path = CACHE_DIR / f'batch_{batch_idx}_{t}.json.gz'
+            if path.exists():
+                path.unlink()  # Path.unlink() 替代 os.remove()
                 deleted += 1
     
     logger.info(f"  ✓ 已删除 {deleted} 个临时文件")
@@ -837,7 +838,7 @@ def main():
         'fields': ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5']
     }
     
-    with open(os.path.join(CACHE_DIR, 'regenerate_stats.json'), 'w') as f:
+    with open(CACHE_DIR / 'regenerate_stats.json', 'w') as f:
         json.dump(stats, f, indent=2)
 
 
