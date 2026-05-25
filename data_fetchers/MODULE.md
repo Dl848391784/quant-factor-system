@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.62
+> 版本: v2.63
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 06:00 北京时间
+> 更新时间: 2026-05-26 07:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -596,7 +596,14 @@ data_fetchers/
 54. **MODULE.md v2.61 (2026-05-26)** — 版本更新
    - **第二轮优化进度**：print → logger 迁移进行中
 
-56. **fetch_factor_cache.py v3.6 (2026-05-26)** — print → logger 迁移完成
+57. **fetch_factor_cache.py v3.7 (2026-05-26)** — 代码规范化
+   - **导入顺序**：PEP 8 规范（标准库→第三方→本地→公共模块）
+   - **BatchStream 类**：完整 docstring + 类型注解（6个方法）
+   - **路径配置**：使用公共模块 get_cache_dir() 替代硬编码
+   - **类型注解**：使用 Path 对象替代 os.path.join
+
+58. **MODULE.md v2.63 (2026-05-26)** — 版本更新
+   - **v3.7版本记录**：代码规范化完成
    - **完成状态**：74处全量替换，无剩余
    - **logger参数化**：6个核心函数（save_batch_cache_sorted、n_way_merge_deduplicate、fetch_batch_stocks、format_final_output、validate_final_data、cleanup_batch_files）
    - **main函数日志初始化**：setup_logger + logs_dir 规范

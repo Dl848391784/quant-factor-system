@@ -15,45 +15,53 @@
 - v3.4_with_ohlc (2026-04-09): 新增 open/high/low 字段，支持选股回测计算一字涨停、封死涨停等指标
 - v3.5 (2026-05-26): 版本历史格式规范化、sys.path移除、公共模块导入、docstring补充、流程文档+测试用例创建
 - v3.6 (2026-05-26): print → logger 迁移完成（74处全量替换）、logger参数化（6个核心函数）、main函数日志初始化
+- v3.7 (2026-05-26): 导入顺序PEP8规范化、BatchStream类docstring补充、类型注解完善、路径配置使用公共模块
 
 作者: 云舟
 日期: 2026-04-04
 """
 
-import sys
-import os
-import logging
-
-from real_data_loader import RealDataLoader
-from datetime import datetime
-import json
-import gzip
+# 标准库导入（PEP 8 规范：按字母顺序分组）
 import gc
+import gzip
+import heapq
+import json
+import logging
+import os
+import sys
 import time
-import heapq  # 用于N-way merge
+from datetime import datetime
+from pathlib import Path
 
-# 公共模块导入
+# 第三方库导入
+import pandas as pd
+
+# 本地模块导入
+from real_data_loader import RealDataLoader
+
+# 公共模块导入（条件导入：脚本直接运行时可能路径未配置）
 try:
-    from data_fetchers.common import setup_logger, get_logs_dir
+    from data_fetchers.common import setup_logger, get_logs_dir, get_cache_dir
 except ImportError:
-    # 条件导入：脚本直接运行时可能路径未配置
-    from common import setup_logger, get_logs_dir
+    from common import setup_logger, get_logs_dir, get_cache_dir
 
 # ============================================================================
 # 模块级 fallback logger（遵循 PROJECT.md 公共模块日志规范）
 # ============================================================================
 _MODULE_LOGGER = logging.getLogger('data_fetchers.fetch_factor_cache')
 
-# 配置
+# ============================================================================
+# 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
+# ============================================================================
 N_DAYS = 500  # 目标交易日数
 BATCH_SIZE = 250  # 每批股票数量（从400降低到250，减少单批峰值）
 FETCH_DAYS = int(N_DAYS * 1.5) + 30  # 实际拉取天数
 MEMORY_THRESHOLD_MB = 900  # 内存警告阈值（MB）- 缓存加载后约700MB
 MEMORY_PAUSE_SECONDS = 15  # 内存超阈值时的暂停时间
 
-# 路径配置 - 使用项目根目录下的 cache/factor_data
-CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'cache', 'factor_data')
-os.makedirs(CACHE_DIR, exist_ok=True)
+# 路径配置（使用公共模块路径函数）
+CACHE_DIR = get_cache_dir() / 'factor_data'
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def get_memory_usage_mb() -> float:
@@ -183,20 +191,48 @@ def save_batch_cache_sorted(batch_idx: int, factor_df, return_df, logger: loggin
 
 
 class BatchStream:
-    """批次数据流式读取器"""
-    def __init__(self, batch_idx, data_type='factor'):
-        self.path = os.path.join(CACHE_DIR, f'batch_{batch_idx}_{data_type}.json.gz')
-        self.records = []
-        self.idx = 0
-        self.exhausted = False
+    """
+    批次数据流式读取器
+    
+    用于 N-way merge 时逐条读取批次数据，避免一次性加载所有批次
+    
+    Attributes:
+        path: 批次文件路径（Path 对象）
+        records: 当前加载的记录列表
+        idx: 当前记录索引
+        exhausted: 是否已耗尽
+    
+    Note:
+        - 批次文件已按 (date, asset) 排序
+        - 每次加载全部记录（批次文件不大，约几MB）
+    """
+    
+    def __init__(self, batch_idx: int, data_type: str = 'factor'):
+        """
+        初始化批次数据流
+        
+        Args:
+            batch_idx: 批次索引（从0开始）
+            data_type: 数据类型（'factor' 或 'return'）
+        """
+        self.path = CACHE_DIR / f'batch_{batch_idx}_{data_type}.json.gz'
+        self.records: list = []
+        self.idx: int = 0
+        self.exhausted: bool = False
         self._load_next_chunk()
     
-    def _load_next_chunk(self):
-        """加载下一个数据块"""
+    def _load_next_chunk(self) -> None:
+        """
+        加载下一个数据块
+        
+        Note:
+            - 批次文件不大（约几MB），直接加载全部记录
+            - 加载后标记 exhausted 状态
+        """
         if self.exhausted:
             return
         
-        if not os.path.exists(self.path):
+        if not self.path.exists():
             self.exhausted = True
             return
         
@@ -207,27 +243,48 @@ class BatchStream:
         self.idx = 0
         self.exhausted = len(self.records) == 0
     
-    def peek_key(self):
-        """获取当前记录的key (date, asset)"""
+    def peek_key(self) -> tuple[str, str] | None:
+        """
+        获取当前记录的 key (date, asset)
+        
+        Returns:
+            tuple[str, str] | None: (date, asset) 或 None（已耗尽）
+        """
         if self.idx >= len(self.records):
             return None
         rec = self.records[self.idx]
         return (rec['date'], rec['asset'])
     
-    def pop_record(self):
-        """弹出当前记录"""
+    def pop_record(self) -> dict | None:
+        """
+        弹出当前记录
+        
+        Returns:
+            dict | None: 当前记录字典或 None（已耗尽）
+        """
         if self.idx >= len(self.records):
             return None
         rec = self.records[self.idx]
         self.idx += 1
         return rec
     
-    def is_exhausted(self):
-        """是否已耗尽"""
-        return self.idx >= len(self.records) and self.exhausted
+    def is_exhausted(self) -> bool:
+        """
+        是否已耗尽
+        
+        Returns:
+            bool: True 表示已耗尽所有记录
+        """
+        return self.exhausted and self.idx >= len(self.records)
     
-    def cleanup(self):
-        """清理内存"""
+    def cleanup(self) -> None:
+        """
+        清理资源
+        
+        Note:
+            - 释放 records 内存
+            - 标记 exhausted 状态
+        """
         self.records = []
         self.exhausted = True
         gc.collect()
