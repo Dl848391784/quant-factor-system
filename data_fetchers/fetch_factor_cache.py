@@ -29,6 +29,7 @@
 - v3.18 (2026-05-26): Bug修复 - n_way_merge显式收集相同key记录后选最大batch_idx、datetime.now()只调用一次、save_batch_cache_sorted移除copy改为文档说明
 - v3.19 (2026-05-26): Bug修复 - validate_final_data流式读取避免内存峰值、format_final_output只保留标量而非列表、模块级注释合并到常量定义、cleanup_batch_files增加merged兜底、n_way_merge移除冗余赋值
 - v3.20 (2026-05-26): Bug修复 - validate_final_data初始化默认值+健壮meta解析、n_way_merge增加counter打破heap平局
+- v3.21 (2026-05-26): Bug修复 - is_exhausted逻辑修正(and→or)、_load_next_chunk改名_load_all、main删除format返回值冗余、save_batch_cache_sorted补充接口契约说明
 
 作者: 云舟
 日期: 2026-04-04
@@ -60,7 +61,7 @@ except ImportError:
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.20'
+_OUTPUT_VERSION = '3.21'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -159,6 +160,10 @@ def save_batch_cache_sorted(
     Note:
         此函数会就地修改 date 列为字符串类型（astype(str)）
         调用方不应再依赖原 DataFrame 的 date 列（如需保留，请在调用前自行 copy）
+        
+        接口契约：
+        - 输入 DataFrame 的 date 列可以是 datetime 或字符串类型
+        - 输出 JSON 文件的 date 字段为字符串格式 '%Y-%m-%d'
     """
     logger = logger or _MODULE_LOGGER
     factor_path = CACHE_DIR / f'batch_{batch_idx}_factor.json.gz'
@@ -269,15 +274,16 @@ class BatchStream:
         self.records: list = []
         self.idx: int = 0
         self.exhausted: bool = False
-        self._load_next_chunk()
+        self._load_all()
     
-    def _load_next_chunk(self) -> None:
+    def _load_all(self) -> None:
         """
-        加载下一个数据块
+        加载全部数据（一次性加载）
         
         Note:
             - 批次文件不大（约几MB），直接加载全部记录
             - 加载后标记 exhausted 状态
+            - 此方法仅调用一次，不应重复调用
         """
         if self.exhausted:
             return
@@ -325,7 +331,7 @@ class BatchStream:
         Returns:
             bool: True 表示已耗尽所有记录
         """
-        return self.exhausted and self.idx >= len(self.records)
+        return self.exhausted or self.idx >= len(self.records)
     
     def cleanup(self) -> None:
         """
@@ -987,11 +993,11 @@ def main() -> None:
             logger.warning("  ! 无有效数据")
             return
         
-        # 格式化最终输出
-        n_days, n_assets, n_records = format_final_output(factor_merged_path, return_merged_path, logger)
+        # 格式化最终输出（返回值仅用于日志，统计信息由 validate_final_data 提供）
+        format_final_output(factor_merged_path, return_merged_path, logger)
         
-        # 验证
-        is_valid, actual_days, actual_assets, actual_records = validate_final_data(logger)
+        # 验证（提供最终统计信息）
+        is_valid, n_days, n_assets, n_records = validate_final_data(logger)
         
         elapsed = time.time() - global_start
         
@@ -1006,9 +1012,9 @@ def main() -> None:
         # 保存统计
         stats = {
             'version': _OUTPUT_VERSION,
-            'n_days': actual_days,
-            'n_assets': actual_assets,
-            'n_records': actual_records,
+            'n_days': n_days,
+            'n_assets': n_assets,
+            'n_records': n_records,
             'elapsed_seconds': elapsed,
             'is_valid': is_valid,
             'memory_monitor': 'proc_self_status',
