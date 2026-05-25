@@ -347,46 +347,46 @@ def n_way_merge_deduplicate(
     total_batches: int,
     data_type: str = 'factor',
     logger: logging.Logger = None
-def n_way_merge_deduplicate(total_batches: int, data_type: str, logger: logging.Logger = None) -> tuple[Path | None, int]:
+) -> tuple[Path | None, int]:
     """
-    N-way merge 合并批次数据（外部排序）
-    
-    去重策略：相同 key 时，选择 batch_idx 最大的记录（后拉取的数据优先）
+    N-way merge 合并已排序的批次数据，去重
     
     Args:
         total_batches: 总批次数
-        data_type: 'factor' 或 'return'
-        logger: 日志记录器
+        data_type: 数据类型（'factor' 或 'return'）
+        logger: 日志记录器（可选，默认使用模块级 logger）
     
     Returns:
-        tuple[Path | None, int]: (输出文件路径, 记录数) 或 (None, 0) 如果无数据
+        tuple[Path | None, int]: (output_path, count) 输出文件路径和记录数
+    
+    Note:
+        - 使用 heap 进行N-way merge，每个批次只保持当前记录在内存中
+        - 去重策略：相同的 (date, asset) 只保留最后一次出现的值
     """
     logger = logger or _MODULE_LOGGER
-    logger.info(f"[N-way Merge] 合并 {data_type} 数据...")
+    logger.info(f"[{data_type}] 开始 N-way merge...")
+    logger.info(f"  当前内存: {get_memory_info_str()}")
     
-    # 找出有效的批次文件
-    valid_batch_indices = []
-    for batch_idx in range(total_batches):
-        batch_path = CACHE_DIR / f'batch_{batch_idx}_{data_type}.json.gz'
-        if batch_path.exists():
-            valid_batch_indices.append(batch_idx)
-    
-    if not valid_batch_indices:
-        logger.warning("  无有效批次文件")
-        return None, 0
-    
-    logger.info(f"  有效批次: {len(valid_batch_indices)} / {total_batches}")
-    
-    # 创建 BatchStream 对象
+    # 创建所有批次的流
     streams = []
-    for batch_idx in valid_batch_indices:
-        batch_path = CACHE_DIR / f'batch_{batch_idx}_{data_type}.json.gz'
-        stream = BatchStream(batch_path, batch_idx)
-        streams.append(stream)
+    valid_batch_indices = []
     
-    # N-way merge 使用 heap
-    # heap元素: (key, batch_idx, stream)
-    # 使用正值 batch_idx 作为排序键
+    for batch_idx in range(total_batches):
+        path = CACHE_DIR / f'batch_{batch_idx}_{data_type}.json.gz'
+        if path.exists():
+            stream = BatchStream(batch_idx, data_type)
+            if not stream.is_exhausted():
+                streams.append(stream)
+                valid_batch_indices.append(batch_idx)
+    
+    if not streams:
+        logger.info("  无有效批次")
+        return (None, 0)
+    
+    logger.info(f"  有效批次数: {len(streams)}")
+    logger.info(f"  有效批次索引: {valid_batch_indices}")
+    
+    # 去重策略：收集相同 key 的所有记录，最后选 batch_idx 最大的
     heap = []
     for stream in streams:
         key = stream.peek_key()
