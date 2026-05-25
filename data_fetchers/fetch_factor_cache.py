@@ -38,6 +38,7 @@
 - v3.27 (2026-05-26): 代码改进 - BatchStream.pop_record更新exhausted+添加__lt__、del注释修正、combined增加copy、del data而非del full、main用_接收未使用返回值
 - v3.28 (2026-05-26): Bug修复 - validate_final_data第二次改为真正的流式行扫描，避免两次json.load内存峰值翻倍
 - v3.29 (2026-05-27): Bug修复 - format_final_output一次遍历提取日期范围+释放set内存、main校验return_merged_path避免TypeError
+- v3.30 (2026-05-27): 代码改进 - format_final_output n_records定义移到日志前、cleanup_batch_files docstring修正为try/except
 
 作者: 云舟
 日期: 2026-04-04
@@ -69,7 +70,7 @@ except ImportError:
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.29'
+_OUTPUT_VERSION = '3.30'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -693,6 +694,7 @@ def format_final_output(
     del date_set, asset_set
     gc.collect()
     
+    n_records = len(factor_records)  # 用于日志
     logger.info(f"  交易日数: {n_days}")
     logger.info(f"  股票数量: {n_assets}")
     logger.info(f"  因子记录: {n_records}")
@@ -920,7 +922,7 @@ def cleanup_batch_files(total_batches: int, logger: logging.Logger = None) -> in
     Note:
         merged_*.json.gz 已在 format_final_output 中删除，
         此函数仅清理 batch_*.json.gz 批次文件
-        使用 try/finally 保证尽可能清理，即使中途出错也继续
+        使用 try/except 捕获异常继续清理，而非 try/finally（保证尽可能清理）
     """
     logger = logger or _MODULE_LOGGER
     logger.info("[清理阶段] 删除临时批次文件...")
@@ -928,7 +930,7 @@ def cleanup_batch_files(total_batches: int, logger: logging.Logger = None) -> in
     deleted = 0
     errors = []
     
-    # 清理批次文件（try/finally 保证尽可能清理）
+    # 清理批次文件（try/except 捕获异常继续清理）
     for batch_idx in range(total_batches):
         for t in ['factor', 'return']:
             path = CACHE_DIR / f'batch_{batch_idx}_{t}.json.gz'
