@@ -26,6 +26,7 @@
 - v3.15 (2026-05-26): Bug修复 - n_way_merge去重逻辑修正（使用正值batch_idx而非负值，变量名改为batch_idx消除语义混乱）
 - v3.16 (2026-05-26): Bug修复 - main版本号改用_OUTPUT_VERSION、format_final_output固定生成时间、save_batch_cache_sorted入口copy()、validate_final_data均匀抽样
 - v3.17 (2026-05-26): Bug修复 - _OUTPUT_VERSION移到import之后（PEP8）、pop_record检查exhausted、sys导入移除、cleanup_batch_files用try/finally
+- v3.18 (2026-05-26): Bug修复 - n_way_merge显式收集相同key记录后选最大batch_idx、datetime.now()只调用一次、save_batch_cache_sorted移除copy改为文档说明
 
 作者: 云舟
 日期: 2026-04-04
@@ -57,7 +58,7 @@ except ImportError:
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
 
 # 输出文件版本号（与模块版本一致）
-_OUTPUT_VERSION = '3.17'
+_OUTPUT_VERSION = '3.18'
 
 # ============================================================================
 # 模块级 fallback（遵循 PROJECT.md 公共模块日志规范）
@@ -157,14 +158,17 @@ def save_batch_cache_sorted(
     
     Raises:
         ValueError: DataFrame 缺少必需列
+    
+    Note:
+        此函数会就地修改 date 列为字符串类型（astype(str)）
+        调用方不应再依赖原 DataFrame 的 date 列（如需保留，请在调用前自行 copy）
     """
     logger = logger or _MODULE_LOGGER
     factor_path = CACHE_DIR / f'batch_{batch_idx}_factor.json.gz'
     return_path = CACHE_DIR / f'batch_{batch_idx}_return.json.gz'
     
-    # 函数入口先 copy()，防止修改调用方的 DataFrame 引用
-    factor_df = factor_df.copy()
-    return_df = return_df.copy()
+    # 注意：此函数会就地修改 date 列为字符串类型
+    # 调用方不应再依赖原 DataFrame 的 date 列（如需保留，请在调用前 copy）
     
     # 写入前验证必需列存在
     required_factor_cols = ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5']
@@ -343,50 +347,46 @@ def n_way_merge_deduplicate(
     total_batches: int,
     data_type: str = 'factor',
     logger: logging.Logger = None
-) -> tuple[Path | None, int]:
+def n_way_merge_deduplicate(total_batches: int, data_type: str, logger: logging.Logger = None) -> tuple[Path | None, int]:
     """
-    N-way merge 合并已排序的批次数据，去重
+    N-way merge 合并批次数据（外部排序）
+    
+    去重策略：相同 key 时，选择 batch_idx 最大的记录（后拉取的数据优先）
     
     Args:
         total_batches: 总批次数
-        data_type: 数据类型（'factor' 或 'return'）
-        logger: 日志记录器（可选，默认使用模块级 logger）
+        data_type: 'factor' 或 'return'
+        logger: 日志记录器
     
     Returns:
-        tuple[Path | None, int]: (output_path, count) 输出文件路径和记录数
-    
-    Note:
-        - 使用 heap 进行N-way merge，每个批次只保持当前记录在内存中
-        - 去重策略：相同的 (date, asset) 只保留最后一次出现的值
+        tuple[Path | None, int]: (输出文件路径, 记录数) 或 (None, 0) 如果无数据
     """
     logger = logger or _MODULE_LOGGER
-    logger.info(f"[{data_type}] 开始 N-way merge...")
-    logger.info(f"  当前内存: {get_memory_info_str()}")
+    logger.info(f"[N-way Merge] 合并 {data_type} 数据...")
     
-    # 创建所有批次的流
-    streams = []
+    # 找出有效的批次文件
     valid_batch_indices = []
-    
     for batch_idx in range(total_batches):
-        path = CACHE_DIR / f'batch_{batch_idx}_{data_type}.json.gz'
-        if path.exists():
-            stream = BatchStream(batch_idx, data_type)
-            if not stream.is_exhausted():
-                streams.append(stream)
-                valid_batch_indices.append(batch_idx)
+        batch_path = CACHE_DIR / f'batch_{batch_idx}_{data_type}.json.gz'
+        if batch_path.exists():
+            valid_batch_indices.append(batch_idx)
     
-    if not streams:
-        logger.info("  无有效批次")
-        return (None, 0)
+    if not valid_batch_indices:
+        logger.warning("  无有效批次文件")
+        return None, 0
     
-    logger.info(f"  有效批次数: {len(streams)}")
-    logger.info(f"  有效批次索引: {valid_batch_indices}")
+    logger.info(f"  有效批次: {len(valid_batch_indices)} / {total_batches}")
+    
+    # 创建 BatchStream 对象
+    streams = []
+    for batch_idx in valid_batch_indices:
+        batch_path = CACHE_DIR / f'batch_{batch_idx}_{data_type}.json.gz'
+        stream = BatchStream(batch_path, batch_idx)
+        streams.append(stream)
     
     # N-way merge 使用 heap
     # heap元素: (key, batch_idx, stream)
     # 使用正值 batch_idx 作为排序键
-    # 去重策略：相同 key 时，高 batch_idx 后弹出（heapq 先弹最小值）
-    #          后弹出的 last_record = record 赋值最后执行，最终写入高 batch_idx 的记录
     heap = []
     for stream in streams:
         key = stream.peek_key()
@@ -396,10 +396,18 @@ def n_way_merge_deduplicate(
     # 合并结果（流式写入文件，不存内存）
     output_path = CACHE_DIR / f'merged_{data_type}.json.gz'
     last_key = None
-    last_record = None
+    # 收集相同 key 的所有记录，最后选 batch_idx 最大的
+    same_key_records = []  # [(batch_idx, record), ...]
     count = 0
     
     logger.info("  开始合并...")
+    
+    def write_record(record: dict, f, count: int) -> int:
+        """写入一条记录，返回新的 count"""
+        if count > 0:
+            f.write(',\n')
+        f.write('  ' + json.dumps(record, ensure_ascii=False))
+        return count + 1
     
     with gzip.open(output_path, 'wt', encoding='utf-8') as f:
         f.write('[\n')  # JSON数组开始
@@ -408,37 +416,36 @@ def n_way_merge_deduplicate(
             key, batch_idx, stream = heapq.heappop(heap)
             record = stream.pop_record()
             
-            # 去重：相同key时，后写入覆盖前写入
-            # 由于批次已排序，我们用"相同key替换"策略
+            # 去重：收集相同 key 的所有记录，最后选 batch_idx 最大的
             if last_key == key:
-                # 相同key，替换为新值（批次顺序即为优先级）
-                last_record = record
+                # 相同key，继续收集
+                same_key_records.append((batch_idx, record))
             else:
-                # 不同key，写入上一个记录
-                if last_record is not None:
-                    if count > 0:
-                        f.write(',\n')
-                    f.write('  ' + json.dumps(last_record, ensure_ascii=False))
-                    count += 1
+                # 不同key，处理上一个 key 的所有记录
+                if same_key_records:
+                    # 按 batch_idx 降序排序，选最大的
+                    same_key_records.sort(key=lambda x: x[0], reverse=True)
+                    best_record = same_key_records[0][1]
+                    count = write_record(best_record, f, count)
                     
                     if count % 50000 == 0:
                         gc.collect()
                         logger.info(f"    已写入 {count} 条，内存: {get_memory_info_str()}")
                 
+                # 开始新 key
                 last_key = key
-                last_record = record
+                same_key_records = [(batch_idx, record)]
             
             # 从该stream取下一个记录
             next_key = stream.peek_key()
             if next_key:
                 heapq.heappush(heap, (next_key, batch_idx, stream))
         
-        # 写入最后一条记录
-        if last_record is not None:
-            if count > 0:
-                f.write(',\n')
-            f.write('  ' + json.dumps(last_record, ensure_ascii=False))
-            count += 1
+        # 处理最后一个 key 的所有记录
+        if same_key_records:
+            same_key_records.sort(key=lambda x: x[0], reverse=True)
+            best_record = same_key_records[0][1]
+            count = write_record(best_record, f, count)
         
         f.write('\n]')  # JSON数组结束
     
@@ -622,9 +629,10 @@ def format_final_output(
     logger = logger or _MODULE_LOGGER
     logger.info("格式化最终输出文件...")
     
-    # 固定生成时间（避免两次 datetime.now() 不一致）
-    generated_at = datetime.now().isoformat()
-    last_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 固定生成时间（只调用一次 datetime.now()，生成两个格式）
+    now = datetime.now()
+    generated_at = now.isoformat()
+    last_updated = now.strftime("%Y-%m-%d %H:%M:%S")
     
     # ============ 第一阶段：处理因子数据 ============
     # 读取合并后的因子数据获取元信息
