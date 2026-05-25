@@ -49,16 +49,17 @@ DEFAULT_THRESHOLDS = {
 }
 
 
-# 因子名到数据列名的映射（v1.1 新增）
+# 因子名到数据列名的映射（v1.2 修正）
 # 说明：factor_list 是因子逻辑名（如 'rsi'），factor_cols 是缓存数据列名（如 'rsi_6'）
-# 后续应从配置文件读取，此处为硬编码临时方案
+# 注意：列名必须与 factor_ic_data.json.gz 中的实际列名一致
+# 可用因子列（2026-05-26）：rsi_6, volume_ratio_5, turnover_rate, bollinger_pb, kdj_j, turnover_surge
 FACTOR_NAME_TO_COL_MAP = {
     'rsi': 'rsi_6',
     'volume_ratio': 'volume_ratio_5',
-    'kdj_j': 'kdj_j_9',
-    'bollinger_pb': 'bollinger_pb_20',
-    'turnover_surge': 'turnover_surge_5',
-    'main_inflow_ratio': 'main_inflow_ratio_1d'
+    'kdj_j': 'kdj_j',           # v1.2 修正：数据源中是 kdj_j，不是 kdj_j_9
+    'bollinger_pb': 'bollinger_pb',  # v1.2 修正：数据源中是 bollinger_pb，不是 bollinger_pb_20
+    'turnover_surge': 'turnover_surge',  # v1.2 修正：数据源中是 turnover_surge，不是 turnover_surge_5
+    # 注意：main_inflow_ratio_1d 不存在于当前数据源中
 }
 
 

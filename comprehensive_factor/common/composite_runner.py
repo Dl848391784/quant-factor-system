@@ -162,13 +162,43 @@ def run_composite_backtest(
         
         logger.info("启用自动因子筛选...")
         
-        # 加载所有因子数据用于计算相关性
-        # 注意：这需要 factor_data.json.gz 包含所有因子列
-        # 如果缓存数据不完整，只能使用手动配置
+        # v2.8: 先加载所有因子数据用于计算相关性矩阵
+        # 修复：select_factors 需要 corr_matrix 进行高相关筛选
+        logger.info("加载所有因子数据用于相关性计算...")
         
+        # 获取所有候选因子列名（从 FACTOR_NAME_TO_COL_MAP）
+        all_factor_names = list(select_factors.__globals__.get('FACTOR_NAME_TO_COL_MAP', {}).keys())
+        all_factor_cols = list(select_factors.__globals__.get('FACTOR_NAME_TO_COL_MAP', {}).values())
+        
+        # 加载所有因子数据
+        all_factor_df = load_factor_values(
+            factor_cols=all_factor_cols,
+            data_source=data_source,
+            logger=logger
+        )
+        
+        # v2.8: 先标准化因子，再计算相关性
+        logger.info("标准化所有因子值...")
+        all_factor_df = standardize_factors(all_factor_df, all_factor_cols, logger)
+        
+        # 计算相关性矩阵
+        logger.info("计算所有因子相关性矩阵...")
+        all_corr_matrix = calc_factor_correlation(all_factor_df, all_factor_cols, logger)
+        
+        # v2.8: 转换相关性矩阵索引从列名到因子逻辑名
+        # 原因：select_factors 的 valid_factors 使用因子逻辑名（如 'rsi'）
+        #       corr_matrix 使用数据列名（如 'rsi_6'），需要映射
+        col_to_name_map = {v: k for k, v in select_factors.__globals__.get('FACTOR_NAME_TO_COL_MAP', {}).items()}
+        all_corr_matrix_renamed = all_corr_matrix.rename(
+            index=col_to_name_map,
+            columns=col_to_name_map
+        )
+        
+        # 调用 select_factors（传入相关性矩阵）
         selection_result = select_factors(
             ic_result_dir=Path(ic_result_dir) if ic_result_dir else None,
             backtest_result_dir=Path(backtest_result_dir) if backtest_result_dir else None,
+            corr_matrix=all_corr_matrix_renamed,  # v2.8: 传入重命名后的相关性矩阵
             thresholds=thresholds,
             logger=logger
         )
@@ -535,29 +565,32 @@ def run_composite_backtest(
 
 def create_cli_entrypoint(
     weight_method: str,
-    factor_list: List[str],
-    factor_cols: List[str],
-    config_class: type,
+    config_class: type,                         # v2.8: 移至前面（无默认值参数必须在前）
+    factor_list: Optional[List[str]] = None,    # v2.8: 改为 Optional，支持自动筛选
+    factor_cols: Optional[List[str]] = None,    # v2.8: 改为 Optional，支持自动筛选
     return_period: str = '1d',
     data_source: Optional[Union[str, Path]] = None,
-    ic_result_dir: Optional[str] = None
+    ic_result_dir: Optional[str] = None,
+    backtest_result_dir: Optional[str] = None   # v2.8: 新增，自动筛选需要
 ) -> Callable[[], None]:
     """创建 CLI 入口函数
     
     Args:
         weight_method: 加权方式
-        factor_list: 因子名称列表
-        factor_cols: 因子列名列表
         config_class: Config 类
+        factor_list: 因子名称列表（可选，如为None则需启用 --auto_select）
+        factor_cols: 因子列名列表（可选，如为None则需启用 --auto_select）
         return_period: 收益周期
         data_source: 数据源文件路径
         ic_result_dir: IC结果目录
+        backtest_result_dir: 回测结果目录（自动筛选需要）
     
     Returns:
         CLI 入口函数
     
-    更新历史（2026-05-27）：
+    更新历史：
         - v2.7: 移除 cache_dir 参数，改为统一数据源 data_source
+        - v2.8: 新增 --auto_select 参数，支持自动因子筛选
     """
     def main():
         import argparse
@@ -567,23 +600,41 @@ def create_cli_entrypoint(
                             help='数据源文件路径')
         parser.add_argument('--ic_result_dir', type=str, default=ic_result_dir,
                             help='IC结果目录路径')
+        parser.add_argument('--backtest_result_dir', type=str, default=backtest_result_dir,
+                            help='回测结果目录路径（自动筛选需要）')
         parser.add_argument('--output_dir', type=str, default=None)
+        parser.add_argument('--auto_select', action='store_true',
+                            help='启用自动因子筛选（基于ICIR和相关性）')
         parser.add_argument('--quiet', action='store_true')
         
         args = parser.parse_args()
         
         logger = get_logger(__name__)
         
+        # v2.8: 自动筛选逻辑
+        use_auto_select = args.auto_select
+        if use_auto_select and factor_list is not None:
+            logger.warning(
+                "--auto_select 启用时，硬编码 factor_list=%s 将被忽略，使用自动筛选结果",
+                factor_list
+            )
+        
+        # 确定最终的 factor_list（自动筛选时传入 None）
+        final_factor_list = None if use_auto_select else factor_list
+        final_factor_cols = None if use_auto_select else factor_cols
+        
         try:
             result = run_composite_backtest(
                 weight_method=weight_method,
-                factor_list=factor_list,
-                factor_cols=factor_cols,
+                factor_list=final_factor_list,
+                factor_cols=final_factor_cols,
                 config=config_class(),
                 return_period=return_period,
                 data_source=args.data_source,
                 ic_result_dir=args.ic_result_dir,
+                backtest_result_dir=args.backtest_result_dir,
                 output_dir=args.output_dir,
+                auto_select=use_auto_select,
                 verbose=not args.quiet,
                 logger=logger
             )

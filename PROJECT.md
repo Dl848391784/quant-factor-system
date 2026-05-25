@@ -1020,6 +1020,7 @@ def cleanup_old_logs(logs_dir: Path, keep_days: int = 30):
 
 | 版本 | 日期 | 更新内容 |
 |------|------|---------|
+| v2.8 | 2026-05-26 | comprehensive_factor 新增 --auto_select CLI 参数，支持自动因子筛选（基于 ICIR 和高相关性）；修复 FACTOR_NAME_TO_COL_MAP 列名映射；修正 create_cli_entrypoint 参数顺序 |
 | v2.7 | 2026-05-27 | 扩展跨模块数据路径规范表：添加 backtest 和 comprehensive_factor 数据来源；明确统一数据源架构迁移历史 |
 | v2.6 | 2026-05-27 | 重构数据架构：factor_data_extended → factor_ic_data（统一数据源语义）；合并收益数据到 factor_ic_data.json.gz；更新跨模块数据路径规范、数据结构说明、语义统一原则 |
 | v2.5 | 2026-05-26 | 新增"跨模块数据路径规范"：数据输出/输入路径表、变更同步检查清单、历史教训；同步更新数据流向描述 |
@@ -1032,4 +1033,4 @@ def cleanup_old_logs(logs_dir: Path, keep_days: int = 30):
 
 ---
 
-*最后更新: 2026-05-27*
+*最后更新: 2026-05-26*

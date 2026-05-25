@@ -73,9 +73,9 @@ _default_config = ICWeightLayerConfig()
 
 main = create_cli_entrypoint(
     weight_method='ic_weight',
+    config_class=ICWeightLayerConfig,  # v2.8: config_class 移至 factor_list 前面
     factor_list=_default_config.factor_list,
     factor_cols=_default_config.factor_cols,
-    config_class=ICWeightLayerConfig,
     return_period='1d',
     data_source=str(DEFAULT_DATA_SOURCE)
 )
