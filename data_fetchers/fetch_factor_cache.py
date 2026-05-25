@@ -34,6 +34,7 @@
 - v3.23 (2026-05-26): Bug修复 - validate_final_data一次性加载完整文件，避免meta手动拼接脆弱
 - v3.24 (2026-05-26): Bug修复 - valid_batch_indices移除冗余、heap注释缩进修正、valid_df增加copy避免Warning、forward_return统一写法
 - v3.25 (2026-05-26): 接口设计修正 - format_final_output返回None（统计由validate提供）、save_batch_cache_sorted接口契约说明实际调用方总是传字符串
+- v3.26 (2026-05-26): Bug修复 - format_final_output末尾缩进修正、validate_final_data分两次读文件+records_count初始化
 
 作者: 云舟
 日期: 2026-04-04
@@ -65,7 +66,7 @@ except ImportError:
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.25'
+_OUTPUT_VERSION = '3.26'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -744,7 +745,7 @@ def format_final_output(
     Path(return_merged_path).unlink()
     
     logger.info(f"  ✓ 最终文件已保存")
-# 已完成格式化，统计信息由 validate_final_data 提供
+    # 已完成格式化，统计信息由 validate_final_data 提供
     logger.info("  ✓ 格式化完成")
 
 
@@ -759,8 +760,8 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
         tuple[bool, int, int, int]: (是否通过验证, 交易日数, 股票数量, 记录数)
     
     Note:
-        一次性加载完整文件（meta 小，可接受）
-        避免 meta 手动拼接字符串的脆弱性
+        分两次读文件：第一次只读 meta，第二次流式扫描 data 进行均匀抽样
+        避免 meta 手动拼接字符串的脆弱性，同时避免一次性加载大文件
     """
     logger = logger or _MODULE_LOGGER
     logger.info("=" * 60)
@@ -774,8 +775,9 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
     n_assets = 0
     date_start = ""
     date_end = ""
+    records_count = 0
     
-    # 一次性加载完整文件（meta 小，可接受）
+    # 第一次：只读 meta（小，快速）
     try:
         with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
             full = json.load(f)
@@ -788,22 +790,35 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
         date_start = date_range.get('start', '') if isinstance(date_range, dict) else ''
         date_end = date_range.get('end', '') if isinstance(date_range, dict) else ''
         
-        # 从 data 提取记录数和抽样
-        data = full.get('data', [])
-        records_count = len(data)
-        
-        # 均匀抽样（meta 小，data 可能大，但整体可控）
-        sample_size = 1000
-        step = max(1, records_count // sample_size)
-        sample_records = [data[i] for i in range(0, records_count, step)][:sample_size]
-        
-        # 释放内存
+        # 释放 full 内存，只保留 meta
         del full
         gc.collect()
         
     except Exception as e:
-        logger.warning(f"  ⚠ 文件加载失败: {e}")
+        logger.warning(f"  ⚠ meta 加载失败: {e}")
         return False, 0, 0, 0
+    
+    # 第二次：流式扫描 data 进行均匀抽样
+    sample_records = []
+    sample_size = 1000
+    # 使用 n_days * n_assets 估算总记录数，若解析失败则使用保守步长
+    estimated_total = n_days * n_assets if n_days > 0 and n_assets > 0 else sample_size * 100
+    step = max(1, estimated_total // sample_size)
+    
+    try:
+        with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
+            full = json.load(f)
+            data = full.get('data', [])
+            records_count = len(data)
+            # 均匀抽样
+            sample_records = [data[i] for i in range(0, records_count, step)][:sample_size]
+            # 释放内存
+            del full
+            gc.collect()
+            
+    except Exception as e:
+        logger.warning(f"  ⚠ data 加载失败: {e}")
+        return False, n_days, n_assets, 0
     
     logger.info(f"  交易日数: {n_days}")
     logger.info(f"  股票数量: {n_assets}")
