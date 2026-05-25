@@ -37,6 +37,7 @@
 - v3.26 (2026-05-26): Bug修复 - format_final_output末尾缩进修正、validate_final_data分两次读文件+records_count初始化
 - v3.27 (2026-05-26): 代码改进 - BatchStream.pop_record更新exhausted+添加__lt__、del注释修正、combined增加copy、del data而非del full、main用_接收未使用返回值
 - v3.28 (2026-05-26): Bug修复 - validate_final_data第二次改为真正的流式行扫描，避免两次json.load内存峰值翻倍
+- v3.29 (2026-05-27): Bug修复 - format_final_output一次遍历提取日期范围+释放set内存、main校验return_merged_path避免TypeError
 
 作者: 云舟
 日期: 2026-04-04
@@ -68,7 +69,7 @@ except ImportError:
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.28'
+_OUTPUT_VERSION = '3.29'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -666,15 +667,31 @@ def format_final_output(
     with gzip.open(factor_merged_path, 'rt', encoding='utf-8') as f:
         factor_records = json.load(f)
     
-    # 提取日期范围和资产数量（用于两个文件的 meta）
-    date_start = min(r['date'] for r in factor_records)
-    date_end = max(r['date'] for r in factor_records)
-    n_days = len(set(r['date'] for r in factor_records))
-    n_assets = len(set(r['asset'] for r in factor_records))
+    # 提取日期范围和资产数量（一次遍历，避免四次遍历和两份 set 内存峰值）
+    date_set = set()
+    asset_set = set()
+    first_date = None
+    last_date = None
+    
+    for r in factor_records:
+        date = r['date']
+        asset = r['asset']
+        date_set.add(date)
+        asset_set.add(asset)
+        if first_date is None or date < first_date:
+            first_date = date
+        if last_date is None or date > last_date:
+            last_date = date
+    
+    date_start = first_date
+    date_end = last_date
+    n_days = len(date_set)
+    n_assets = len(asset_set)
     n_records = len(factor_records)
     
-    # 立即释放 dates_list 和 assets_list 的内存（只保留标量）
-    # 注：return 文件只需要 date_start, date_end, n_assets，不需要完整列表
+    # 立即释放 set 内存（只保留标量）
+    del date_set, asset_set
+    gc.collect()
     
     logger.info(f"  交易日数: {n_days}")
     logger.info(f"  股票数量: {n_assets}")
@@ -1026,8 +1043,9 @@ def main() -> None:
         factor_merged_path, _ = n_way_merge_deduplicate(total_batches, 'factor', logger)
         return_merged_path, _ = n_way_merge_deduplicate(total_batches, 'return', logger)
         
-        if not factor_merged_path:
-            logger.warning("  ! 无有效数据")
+        # 校验两个合并路径
+        if not factor_merged_path or not return_merged_path:
+            logger.warning("  ! 无有效数据（factor 或 return 合并失败）")
             return
         
         # 格式化最终输出（返回值仅用于日志，统计信息由 validate_final_data 提供）
