@@ -31,6 +31,7 @@
 - v3.20 (2026-05-26): Bug修复 - validate_final_data初始化默认值+健壮meta解析、n_way_merge增加counter打破heap平局
 - v3.21 (2026-05-26): Bug修复 - is_exhausted逻辑修正(and→or)、_load_next_chunk改名_load_all、main删除format返回值冗余、save_batch_cache_sorted补充接口契约说明
 - v3.22 (2026-05-26): Bug修复 - cleanup_batch_files增加try保证继续清理、get_memory_info_str用is not None判断vmrss、write_record闭包捕获f统一参数
+- v3.23 (2026-05-26): Bug修复 - validate_final_data一次性加载完整文件，避免meta手动拼接脆弱
 
 作者: 云舟
 日期: 2026-04-04
@@ -62,7 +63,7 @@ except ImportError:
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.22'
+_OUTPUT_VERSION = '3.23'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -748,13 +749,17 @@ def format_final_output(
 
 def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, int]:
     """
-    验证最终数据文件的完整性（流式读取 meta + 均匀抽样 data）
+    验证最终数据文件的完整性
     
     Args:
         logger: 日志记录器
     
     Returns:
         tuple[bool, int, int, int]: (是否通过验证, 交易日数, 股票数量, 记录数)
+    
+    Note:
+        一次性加载完整文件（meta 小，可接受）
+        避免 meta 手动拼接字符串的脆弱性
     """
     logger = logger or _MODULE_LOGGER
     logger.info("=" * 60)
@@ -769,69 +774,35 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
     date_start = ""
     date_end = ""
     
-    # 第一阶段：流式读取 meta 部分
-    meta_lines = []
-    in_meta = False
-    
-    with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
-        for line in f:
-            # 检测 meta 开始
-            if '"meta": {' in line:
-                in_meta = True
-                continue
-            # 检测 meta 结束（data 开始）
-            if in_meta and '"data": [' in line:
-                break
-            # 收集 meta 行
-            if in_meta:
-                meta_lines.append(line)
-    
-    # 解析 meta（使用 json.loads 解析完整 meta 对象）
-    if meta_lines:
-        meta_text = '{\n' + '\n'.join(meta_lines).rstrip().rstrip(',') + '\n}'
-        try:
-            meta = json.loads(meta_text)
-            n_days = meta.get('n_days', 0)
-            n_assets = meta.get('n_assets', 0)
-            date_range = meta.get('date_range', {})
-            date_start = date_range.get('start', '')
-            date_end = date_range.get('end', '')
-        except json.JSONDecodeError as e:
-            logger.info(f"  ⚠ meta 解析失败: {e}")
-    
-    # 第二阶段：流式读取 data 进行均匀抽样
-    records_count = 0
-    sample_records = []
-    sample_size = 1000
-    # 使用 n_days * n_assets 估算总记录数，若解析失败则使用保守步长
-    estimated_total = n_days * n_assets if n_days > 0 and n_assets > 0 else sample_size * 100
-    step = max(1, estimated_total // sample_size)
-    
-    with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
-        in_data = False
-        for line in f:
-            line = line.strip()
-            # 检测 data 开始
-            if '"data": [' in line:
-                in_data = True
-                continue
-            # 检测 data 结束
-            if in_data and line == ']':
-                break
-            # 解析 data 中的记录
-            if in_data and line.startswith('{'):
-                clean_line = line.rstrip(',')
-                try:
-                    record = json.loads(clean_line)
-                    records_count += 1
-                    # 均匀抽样：每隔 step 条取一条
-                    if records_count % step == 0 and len(sample_records) < sample_size:
-                        sample_records.append(record)
-                except json.JSONDecodeError:
-                    continue
-    
-    # 释放内存
-    gc.collect()
+    # 一次性加载完整文件（meta 小，可接受）
+    try:
+        with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
+            full = json.load(f)
+        
+        # 从 meta 提取信息
+        meta = full.get('meta', {})
+        n_days = meta.get('n_days', 0)
+        n_assets = meta.get('n_assets', 0)
+        date_range = meta.get('date_range', {})
+        date_start = date_range.get('start', '') if isinstance(date_range, dict) else ''
+        date_end = date_range.get('end', '') if isinstance(date_range, dict) else ''
+        
+        # 从 data 提取记录数和抽样
+        data = full.get('data', [])
+        records_count = len(data)
+        
+        # 均匀抽样（meta 小，data 可能大，但整体可控）
+        sample_size = 1000
+        step = max(1, records_count // sample_size)
+        sample_records = [data[i] for i in range(0, records_count, step)][:sample_size]
+        
+        # 释放内存
+        del full
+        gc.collect()
+        
+    except Exception as e:
+        logger.warning(f"  ⚠ 文件加载失败: {e}")
+        return False, 0, 0, 0
     
     logger.info(f"  交易日数: {n_days}")
     logger.info(f"  股票数量: {n_assets}")
