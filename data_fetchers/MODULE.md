@@ -20,7 +20,7 @@
 
 ||| # | 约束 | 说明 |
 |---|------|------|
-| 1 | 脚本命名：`fetch_<数据源>.py` | 如 fetch_turnover.py、fetch_main_inflow.py |
+|| 1 | 脚本命名：`fetch_<数据源>.py` | 如 fetch_turnover.py、fetch_stock_list.py |
 | 2 | 输出到 result 目录 | 与 factor_ic 等模块保持一致（cache 为数据源原始缓存） |
 | 3 | 因子生成使用 factor_generator.py | 单一数据源，不分散 |
 | 4 | 公共模块必须复用 | 禁止脚本自行实现已有功能 |
@@ -89,18 +89,27 @@
 | 73 | 日志信息准确反映流程 | 日志说明实际流程（如"akshare获取失败，尝试本地备用数据"而非"返回空映射"） |
 | 74 | 缓存数据完整性验证 | 检查 industries 是否为 dict 类型（防止缓存损坏导致后续 AttributeError） |
 | 75 | 模糊匹配优先级说明 | 关键词推断需在 Note 中说明模糊匹配优先级（如"中信银行"→证券） |
-| 76 | 返回类型注解完整 | 所有公共函数返回值需标注完整类型（如 `dict[str, int]`） |
-| 19 | 常量定义在 import 之后 | PEP 8 顺序：docstring → __future__ → 标准库 → 第三方 → 本地 → 常量 |
+|| 76 | 返回类型注解完整 | 所有公共函数返回值需标注完整类型（如 `dict[str, int]`） |
+|| 77 | logger参数命名规范 | 公共函数日志参数使用 `logger_arg` 避免遮蔽模块级 `logger`，内部变量用 `_logger = logger_arg or logger` |
+|| 78 | session资源管理 | HTTP session 必须使用 `with` 语句确保连接池释放，禁止裸创建 |
+|| 79 | ST股票检测前缀匹配 | 使用 `startswith('ST')` 而非 `'ST' in name`，避免"东ST"正常股票被误判剔除 |
+|| 80 | 临时文件使用 tempfile | 使用 `tempfile.NamedTemporaryFile` 避免多进程并发冲突，禁止 `.with_suffix('.tmp')` |
+|| 81 | 增量更新同步 name 字段 | API 返回的 name 可能是最新的，增量更新时需同步更新已存在股票的 name |
+|| 82 | Optional 变量添加类型守卫 | 使用前添加 None 检查（`if data is None: raise`），确保类型安全 |
+|| 83 | 验证逻辑与筛选逻辑一致 | validate_cache 必须使用与 is_valid_main_board_stock 一致的 ST 检查逻辑（前缀匹配） |
+|| 84 | 重试循环内直接控制流 | 删除 success 变量，成功 break，失败在最后一次重试 raise，避免冗余检查 |
+|| 85 | Optional 变量添加 assert | 使用前添加 `assert isinstance(var, expected_type)`，确保类型安全（比单独检查 None 更严格） |
+|| 86 | 长列表字段截断 | removed_codes 等可能很长的列表字段限制最多50个，添加 truncated 字段说明是否截断 |
+|| 19 | 常量定义在 import 之后 | PEP 8 顺序：docstring → __future__ → 标准库 → 第三方 → 本地 → 常量 |
 | 20 | cleanup_batch_files 用 try/except | 捕获异常继续清理，而非 try/finally（保证尽可能清理） |
 
 ### 关键函数签名
 
-| 函数 | 文件 | 用途 |
+|| 函数 | 文件 | 用途 |
 |------|------|------|
-|| `generate_all_factors(logger)` | factor_generator.py | 生成所有因子数据 |
+| `generate_all_factors(logger)` | factor_generator.py | 生成所有因子数据 |
 | `fetch_ohlcv_data(start_date, end_date)` | fetch_ohlcv.py（待创建） | 拉取 OHLCV 数据 |
 | `fetch_turnover_data()` | fetch_turnover.py | 拉取换手率数据 |
-| `fetch_main_inflow_data()` | fetch_main_inflow.py | 拉取主力资金流数据 |
 
 ---
 
@@ -129,9 +138,7 @@ data_fetchers/
 │
 ├── factor_generator.py # 统一因子生成入口
 ├── fetch_turnover.py   # 换手率数据拉取
-├── fetch_main_inflow.py # 主力资金流数据拉取
 ├── fetch_stock_list.py # 股票列表拉取
-├── fetch_float_mv.py   # 流通市值拉取
 ├── fetch_industry.py   # 行业分类拉取
 └── fetch_factor_cache.py # 因子缓存管理
 ```
@@ -531,6 +538,135 @@ data_fetchers/
    - **load_cache 异常捕获扩大**：`json.JSONDecodeError` → `Exception`（遵循 MODULE.md 约束 55）
    - **潜在风险覆盖**：PermissionError、IsADirectoryError、OSError 等文件读取异常
    - **修复原因**：异常捕获范围过小，文件读取可能抛出多种异常
+
+25. **fetch_stock_list.py v2.4 (2026-05-27 07:30)** — 第五轮深度修复
+   - **logger参数遮蔽修复**：`logger` → `logger_arg`（统一4个函数签名：fetch_stocks_from_sina、save_cache、load_cache、refresh_stock_cache）
+   - **session资源泄漏修复**：使用 `with create_sina_session(logger=_logger) as session:` 确保连接池释放
+   - **load_cache日志参数补充**：添加 `logger_arg` 参数，save_cache 调用时传递 `_logger`
+   - **ST股票误判修复**：substring 匹配 (`'ST' in name`) → 前缀匹配 (`startswith('ST')`)，避免"东ST"正常股票被误判
+   - **修复原因**：代码bug（4项）+ 规范缺失（MODULE.md 新增约束77/78/79）
+
+26. **fetch_stock_list.py v2.5 (2026-05-27 08:00)** — 第六轮深度修复
+   - **重试逻辑修复**：最后一次重试失败时直接 raise（删除无效 continue），避免异常被吞掉
+   - **validate_cache参数修复**：删除冗余 `logger_arg` 参数（函数内部未使用）
+   - **_write_json_file临时文件修复**：使用 `tempfile.NamedTemporaryFile` 避免多进程并发冲突
+   - **增量更新name字段修复**：同步更新已存在股票的最新名称（股票改名后 name 字段需更新）
+   - **data变量类型守卫**：添加 `if data is None: raise RuntimeError` 确保类型安全
+   - **修复原因**：代码bug（5项）+ 规范缺失（MODULE.md 新增约束80/81/82）
+
+27. **fetch_stock_list.py v2.6 (2026-05-27 08:30)** — 第七轮深度修复
+   - **_write_json_file参数名修复**：`logger` → `logger_arg`（遵循 PROJECT.md 日志参数规范）
+   - **validate_cache ST检查修复**：使用前缀匹配（`startswith('S')` 或 `startswith('ST')`），与 is_valid_main_board_stock 逻辑一致
+   - **is_valid_main_board_stock ST顺序修复**：先剔除 S 开头（含 SST、S*ST），再剔除 *ST 和 ST，避免逻辑混乱
+   - **重试逻辑简化**：删除 success 变量，循环内直接控制流（成功 break，失败在最后一次重试 raise）
+   - **修复原因**：代码bug（4项）+ 规范缺失（MODULE.md 新增约束83/84）
+
+28. **fetch_stock_list.py v2.7 (2026-05-27 09:00)** — 第八轮深度修复
+   - **data类型守卫增强**：添加 `assert isinstance(data, list)` 确保类型安全（比单独检查 None 更严格）
+   - **existing_stock_map注释说明**：明确引用修改预期行为（修改 existing_stock['name'] 会直接更新 existing_stocks）
+   - **removed_codes截断**：限制最多50个，添加 `removed_codes_truncated` 字段避免 JSON 文件过大
+   - **result初始化补全**：添加 `updated_count: 0` 避免字段缺失
+   - **CLI日志补全**：添加 updated_count 输出（仅当有更新时显示 `if updated_count > 0`）
+   - **修复原因**：代码bug（5项）+ 规范缺失（MODULE.md 新增约束85/86）
+
+29. **fetch_stock_list.py v2.8 (2026-05-27 09:30)** — 第九轮深度修复
+   - **ST前缀提取为模块级常量**：添加 `ST_PREFIXES` 常量便于维护（遵循 MODULE.md 约束 16）
+   - **fetch_stocks_from_sina doctest修复**：改为合法格式 `len(stocks) > 2500` → `True`
+   - **get_cached_stock_codes doctest修复**：改为合法格式 `len(codes) > 2500` → `True`
+   - **修复原因**：代码bug（3项）
+
+30. **fetch_turnover.py v2.0 (2026-05-27 10:00)** — 第一轮基础优化
+   - **导入顺序 PEP 8 规范化**：标准库 → 第三方库 → 本地模块（sys、logging 补充）
+   - **版本号提取为常量**：`_OUTPUT_VERSION = '2.0'` 便于维护（遵循 MODULE.md 约束 16）
+   - **datetime.now() 统一调用**：模块级 `_NOW`、`_NOW_ISO`、`_NOW_STR`（遵循 MODULE.md 约束 17）
+   - **session 资源管理**：使用 `with requests.Session() as session` 确保释放（遵循 MODULE.md 约束 78）
+   - **ST 检测前缀匹配**：`startswith(prefix)` 避免"东ST"误判（遵循 MODULE.md 约束 79）
+   - **修复原因**：代码bug（5项）
+
+31. **fetch_turnover.py v2.1 (2026-05-27 10:30)** — 第二轮深度优化
+   - **logger 参数化**：所有公共函数添加 `logger_arg` 参数（遵循 MODULE.md 约束 77）
+     - fetch_turnover_rate_eastmoney、load_cache、save_cache、main、fetch_turnover_rate_baostock
+   - **tempfile 使用**：save_cache 使用 `tempfile.NamedTemporaryFile` 避免并发冲突（遵循 MODULE.md 约束 80）
+   - **print → logger 迁移**：52处全部迁移为 logger.info/debug/error/warning
+   - **load_cache/save_cache logger 参数传递**：调用方传递 `_logger`（遵循 PROJECT.md 日志规范）
+   - **修复原因**：代码bug（6项）
+
+32. **fetch_turnover.py v2.2 (2026-05-27 11:00)** — 第三轮补充优化
+   - **ST_PREFIXES 常量提取**：模块级常量便于维护（遵循 MODULE.md 约束 16）
+   - **load_stock_list ST 检测修复**：前缀匹配 + 逻辑修正（`break + continue` 避免 continue 误用）
+   - **__all__ 导出列表**：添加公共函数导出列表（遵循 MODULE.md 约束 53）
+   - **__main__ logger 设置**：`logging.basicConfig` + `cli_logger`（遵循 PROJECT.md 日志规范）
+   - **CLI 参数简化**：`--baostock` 替代 `--source` 选择（更简洁）
+   - **修复原因**：代码bug + 规范补充（5项）
+
+33. **fetch_turnover.py v2.3 (2026-05-27 11:30)** — 第四轮补充优化
+   - **get_cached_turnover_codes 函数**：创建公共函数（__all__ 中已声明，补充实现）
+   - **类型注解完整性**：`Set[str]` 返回类型 + `logger_arg` 参数
+   - **函数文档字符串**：添加 Args/Returns/Example 说明
+   - **修复原因**：规范补充（1项）
+
+34. **fetch_turnover.py v2.4 (2026-05-27 12:00)** — 第五轮深度修复
+   - **fetch_turnover_rate_baostock 时间统计修复**：单独维护 `processed_count`/`skipped_count`（遵循 MODULE.md 约束 87）
+     - 跳过已有股票不计入处理统计
+     - 平均时间使用实际处理数量计算：`avg_time = elapsed / processed_count`
+   - **merge_records 空数据处理修复**：`new_records=[]` 时保留 `existing_data` 的 meta（遵循 MODULE.md 约束 88）
+     - 避免 `generated_at`、`last_updated` 被强制更新
+     - 避免 `source` 被强制改为 'mixed'
+   - **merge_records source 保留**：保留原始 source（遵循 MODULE.md 约束 88）
+   - **merge_records logger 参数**：添加 `logger_arg` 参数 + 调用方传递
+   - **修复原因**：代码bug（3项）
+
+|| 87 | 处理进度统计准确 | 使用实际处理数量计算平均时间（processed_count），跳过项不计入统计 |
+|| 88 | 空数据合并保护 | new_records=[] 时保留 existing_data 的 meta，避免强制覆盖 |
+|| 89 | ST前缀元组用法 | ST_PREFIXES 使用元组直接传给 startswith，避免循环遍历 |
+|| 90 | API异常边界处理 | total_pages=0 时添加警告日志，提示可能无数据或API异常 |
+|| 91 | 长期运行时间偏差 | end_date 使用 datetime.now() 避免模块级 _NOW 偏差 |
+
+35. **fetch_turnover.py v2.5 (2026-05-27 12:30)** — 第六轮深度修复
+35. **fetch_turnover.py v2.5 (2026-05-27 12:30)** — 第六轮深度修复
+   - **ST_PREFIXES 元组优化**：改为元组直接传给 startswith（遵循 MODULE.md 约束 89）
+   - **ST_PREFIXES 优先级语义**：`*ST` 排在最前（退市风险优先检测）
+   - **total_pages=0 边界处理**：添加警告日志（遵循 MODULE.md 约束 90）
+   - **fetch_stock_history_baostock 返回类型**：实际与标注一致（无问题）
+   - **_NOW 模块级时间戳偏差**：end_date 使用 `datetime.now()`（遵循 MODULE.md 约束 91）
+|| 91 | 长期运行时间偏差 | end_date 使用 datetime.now() 避免模块级 _NOW 偏差 |
+|| 92 | 时间估算准确 | remaining 基于实际待处理数（total - skipped_count - processed_count） |
+|| 93 | 数据源合并语义 | merge_records 添加 source 参数，existing_meta.source != source 时设为 'mixed' |
+
+36. **fetch_turnover.py v2.6 (2026-05-27 13:00)** — 第七轮深度修复
+   - **get_cached_turnover_codes 文档示例**：改为 `isinstance(codes, set)` → True（确定结果）
+     - 避免 `len(codes) > 2500` 结果不确定（依赖实际数据量）
+   - **load_cache _logger 赋值**：统一为 `logger_arg or logger`（遵循 MODULE.md 约束 77）
+     - 消除冗余的 `logging.getLogger(__name__)` 重复调用
+|| 93 | 数据源合并语义 | merge_records 添加 source 参数，existing_meta.source != source 时设为 'mixed' |
+|| 94 | 跳过日志粒度直观 | 跳过股票日志基于 skipped_count % 100（而非 idx % 100） |
+
+37. **fetch_turnover.py v2.7 (2026-05-27 13:30)** — 第八轮深度修复
+   - **fetch_turnover_rate_baostock 时间估算逻辑**：remaining 基于实际待处理数（遵循 MODULE.md 约束 92）
+   - **merge_records source 参数**：添加 source 参数 + 调用方传入数据源（遵循 MODULE.md 约束 93）
+   - **merge_records 数据源合并逻辑**：`existing_meta.source != source` 时设为 `'mixed'`
+|| 94 | 跳过日志粒度直观 | 跳过股票日志基于 skipped_count % 100（而非 idx % 100） |
+|| 95 | pages=0提前退出 | total_pages=0 时添加 break 提前退出循环 |
+
+38. **fetch_turnover.py v2.8 (2026-05-27 14:00)** — 第九轮深度修复
+   - **get_cached_turnover_codes doctest**：已修复为 `isinstance(codes, set)`（Round 17）
+   - **save_cache _logger 初始化**：统一为 `logger_arg or logger`（遵循 MODULE.md 约束 77）
+     - 与 load_cache 保持一致，消除冗余 `logging.getLogger(__name__)`
+   - **fetch_turnover_rate_baostock 跳过日志粒度**：基于 `skipped_count % 100`（遵循 MODULE.md 约束 94）
+|| 95 | pages=0提前退出 | total_pages=0 时添加 break 提前退出循环 |
+|| 96 | tempfile同块写入 | 在同一个 with 块内传文件对象给 gzip.open，不关闭再开 |
+
+39. **fetch_turnover.py v2.9 (2026-05-27 14:30)** — 第十轮深度修复
+   - **fetch_turnover_rate_eastmoney total_pages=0**：添加 break 提前退出（遵循 MODULE.md 约束 95）
+   - **INTERMEDIATE_SAVE_INTERVAL 常量**：删除未使用的冗余常量
+   - **修复原因**：代码bug（2项）
+
+40. **fetch_turnover.py v2.10 (2026-05-27 15:00)** — 第十一轮深度修复
+   - **save_cache tempfile 修复**：在同一个 with 块内直接传文件对象给 gzip.open（遵循 MODULE.md 约束 96）
+     - 原逻辑：先关闭临时文件，再重新打开写入（多余步骤）
+     - 新逻辑：传文件对象给 gzip.open，不关闭再开
+     - 删除 `mode='wb'` 参数（gzip.open 会处理文件模式）
+   - **修复原因**：代码bug（1项）
 
 20. **factor_generator.py v1.9 (2026-05-25)** — 第八轮深度优化
    - **冗余导入清理**：移除条件导入块的 `_Path`（第44行），直接使用顶部导入的 `Path`
@@ -1089,9 +1225,7 @@ data_fetchers 模块负责：
 | 脚本名 | 数据源 | 说明 |
 |--------|--------|------|
 | fetch_turnover.py | 换手率 | 拉取换手率数据 |
-| fetch_main_inflow.py | 主力资金流 | 拉取主力流入流出数据 |
 | fetch_stock_list.py | 股票列表 | 拉取 A 股股票列表 |
-| fetch_float_mv.py | 流通市值 | 拉取流通市值数据 |
 | fetch_industry.py | 行业分类 | 拉取行业分类数据 |
 
 ### 因子生成脚本

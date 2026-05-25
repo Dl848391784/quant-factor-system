@@ -41,8 +41,7 @@ factor_ic_analyzer/
 │   ├── test_cases/         # 测试用例
 │   ├── factor_generator.py # 统一因子生成入口
 │   ├── fetch_turnover.py   # 换手率数据拉取
-│   ├── fetch_main_inflow.py # 主力资金流数据拉取
-│   └── ...                 # 其他数据拉取脚本
+│   ├── fetch_stock_list.py # 股票列表拉取
 │
 ├── common/                 # 项目级公共模块
 ├── cache/                  # 缓存目录

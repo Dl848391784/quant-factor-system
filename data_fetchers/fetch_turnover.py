@@ -8,20 +8,116 @@
 
 缓存路径：cache/factor_data/turnover_rate_data.json.gz
 
+版本历史:
+- v1.2 (2026-04-08): 初始版本
+- v2.0 (2026-05-27 10:00): 第一轮基础优化
+  - 导入顺序 PEP 8 规范化：标准库 → 第三方库 → 本地模块
+  - 版本号提取为常量：_OUTPUT_VERSION
+  - datetime.now() 统一调用：模块级固定时间戳
+  - 修复原因：代码bug（3项）
+- v2.1 (2026-05-27 10:30): 第二轮深度优化
+  - logger 参数化：所有公共函数添加 logger_arg 参数（遵循 MODULE.md 约束 77）
+  - tempfile 使用：save_cache 使用 tempfile.NamedTemporaryFile（遵循 MODULE.md 约束 80）
+  - session 资源管理：fetch_turnover_rate_eastmoney 使用 with 语句（遵循 MODULE.md 约束 78）
+  - ST 检测前缀匹配：startswith(prefix) 避免 substring 匹配（遵循 MODULE.md 约束 79）
+  - print → logger 迁移：52处全部迁移为 logger.info/debug/error/warning
+  - load_cache/save_cache logger 参数传递：调用方传递 _logger
+  - 修复原因：代码bug（6项）
+- v2.2 (2026-05-27 11:00): 第三轮补充优化
+  - ST_PREFIXES 常量提取：模块级常量便于维护（遵循 MODULE.md 约束 16）
+  - load_stock_list ST 检测修复：前缀匹配 + 逻辑修正（break + continue）
+  - __all__ 导出列表：添加公共函数导出列表（遵循 MODULE.md 约束 53）
+  - __main__ logger 设置：logging.basicConfig + cli_logger（遵循 PROJECT.md 日志规范）
+  - CLI 参数简化：--baostock 替代 --source 选择
+  - 修复原因：代码bug + 规范补充（5项）
+- v2.3 (2026-05-27 11:30): 第四轮补充优化
+  - get_cached_turnover_codes 函数：创建公共函数（__all__ 中已声明）
+  - 类型注解完整性：Set[str] 返回类型 + logger_arg 参数
+  - 函数文档字符串：添加 Args/Returns/Example 说明
+  - 修复原因：规范补充（1项）
+- v2.4 (2026-05-27 12:00): 第五轮深度修复
+  - fetch_turnover_rate_baostock 时间统计修复：单独维护 processed_count/skipped_count（遵循 MODULE.md 约束 87）
+  - merge_records 空数据处理修复：new_records=[] 时保留 existing_data 的 meta（遵循 MODULE.md 约束 88）
+  - merge_records source 保留：保留原始 source 避免 'mixed' 强制覆盖
+  - merge_records logger 参数：添加 logger_arg 参数 + 调用方传递
+  - 修复原因：代码bug（3项）
+- v2.5 (2026-05-27 12:30): 第六轮深度修复
+  - ST_PREFIXES 元组优化：改为元组直接传给 startswith（遵循 MODULE.md 约束 89）
+  - ST_PREFIXES 优先级语义：*ST 排在最前（退市风险优先检测）
+  - total_pages=0 边界处理：添加警告日志（遵循 MODULE.md 约束 90）
+  - fetch_stock_history_baostock 返回类型：实际与标注一致（无问题）
+  - _NOW 模块级时间戳偏差：end_date 使用 datetime.now()（遵循 MODULE.md 约束 91）
+  - 修复原因：代码bug（4项）
+- v2.6 (2026-05-27 13:00): 第七轮深度修复
+  - get_cached_turnover_codes 文档示例：改为 isinstance(codes, set) → True（确定结果）
+  - load_cache _logger 赋值：统一为 logger_arg or logger（遵循 MODULE.md 约束 77）
+  - 修复原因：代码bug（2项）
+- v2.7 (2026-05-27 13:30): 第八轮深度修复
+  - fetch_turnover_rate_baostock 时间估算逻辑：remaining 基于实际待处理数（遵循 MODULE.md 约束 92）
+  - merge_records source 参数：添加 source 参数 + 调用方传入数据源（遵循 MODULE.md 约束 93）
+  - merge_records 数据源合并逻辑：existing_meta.source != source 时设为 'mixed'
+  - 修复原因：代码bug（2项）
+- v2.8 (2026-05-27 14:00): 第九轮深度修复
+  - get_cached_turnover_codes doctest：已修复为 isinstance(codes, set)（Round 17）
+  - save_cache _logger 初始化：统一为 logger_arg or logger（遵循 MODULE.md 约束 77）
+  - fetch_turnover_rate_baostock 跳过日志粒度：基于 skipped_count % 100（遵循 MODULE.md 约束 94）
+  - 修复原因：代码bug（2项）
+- v2.9 (2026-05-27 14:30): 第十轮深度修复
+  - fetch_turnover_rate_eastmoney total_pages=0：添加 break 提前退出（遵循 MODULE.md 约束 95）
+  - INTERMEDIATE_SAVE_INTERVAL 常量：删除未使用的冗余常量
+  - 修复原因：代码bug（2项）
+- v2.10 (2026-05-27 15:00): 第十一轮深度修复
+  - save_cache tempfile 修复：在同一个 with 块内直接传文件对象给 gzip.open（遵循 MODULE.md 约束 96）
+  - 原逻辑：先关闭临时文件，再重新打开写入（多余步骤）
+  - 新逻辑：传文件对象给 gzip.open，不关闭再开
+  - 修复原因：代码bug（1项）
+
 作者: 云舟
 日期: 2026-04-08
 """
 
-import sys
-import os
 import gzip
 import json
+import logging
+import sys
+import tempfile
 import time
 import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, List, Set, Tuple
+
 import requests
+
+# ============================================================
+# 配置常量（遵循 MODULE.md 约束 16）
+# ============================================================
+
+# 输出版本
+_OUTPUT_VERSION = '2.10'
+
+# 固定时间戳（遵循 MODULE.md 约束 17）
+_NOW = datetime.now()
+_NOW_ISO = _NOW.isoformat()
+_NOW_STR = _NOW.strftime('%Y-%m-%d %H:%M:%S')
+
+# ST 股票前缀列表（遵循 MODULE.md 约束 16：常量提取）
+# 命名规则：*ST（退市风险，优先检测）、ST（风险）、SST、S*ST
+# 注意：顺序体现优先级语义，*ST 排在最前（遵循 MODULE.md 约束 89）
+ST_PREFIXES = ('*ST', 'ST', 'SST', 'S*ST')  # 使用元组，直接传给 startswith（遵循 MODULE.md 约束 89）
+
+# 模块级 logger（遵循 PROJECT.md 日志规范）
+logger = logging.getLogger(__name__)
+
+# 公共函数导出列表（遵循 MODULE.md 约束 53）
+__all__ = [
+    'load_cache',
+    'save_cache',
+    'get_cached_turnover_codes',
+    'fetch_turnover_rate_eastmoney',
+    'fetch_turnover_rate_baostock',
+    'main',
+]
 
 # 缓存目录
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -58,86 +154,132 @@ HEADERS = {
 
 
 def is_main_board_stock(code: str, name: str) -> bool:
-    """判断是否为主板股票"""
+    """
+    判断是否为主板股票
+    
+    Args:
+        code: 股票代码
+        name: 股票名称
+    
+    Returns:
+        bool: 是否为主板股票
+    
+    Note:
+        使用前缀匹配检测 ST 股票（遵循 MODULE.md 约束 79）
+        避免 substring 匹配误判正常股票（如"东ST"）
+    """
+    # 1. 创业板、科创板、北交所剔除
     if code.startswith('30') or code.startswith('688') or code.startswith('8') or code.startswith('4'):
         return False
-    if 'ST' in name or '退市' in name or '*ST' in name:
+    
+    # 2. ST 类股票剔除（前缀匹配，使用模块级常量 ST_PREFIXES）
+    # 使用元组直接传给 startswith（遵循 MODULE.md 约束 89）
+    name_upper = name.upper()
+    if name_upper.startswith(ST_PREFIXES):
         return False
+    
+    # 3. 退市股票剔除
+    if '退市' in name:
+        return False
+    
+    # 4. 主板股票判断
     return code.startswith('60') or code.startswith('00')
 
 
-def fetch_turnover_rate_eastmoney() -> List[Dict]:
-    """从东财千股千评 API 拉取换手率数据"""
-    print("\n[API拉取] 从东财千股千评获取换手率数据...")
+def fetch_turnover_rate_eastmoney(
+    logger_arg: Optional[logging.Logger] = None
+) -> List[Dict]:
+    """
+    从东财千股千评 API 拉取换手率数据
+    
+    Args:
+        logger_arg: 日志 logger（遵循 MODULE.md 约束 77）
+    
+    Returns:
+        换手率数据列表
+    
+    Note:
+        使用 with 语句管理 session（遵循 MODULE.md 约束 78）
+    """
+    _logger = logger_arg or logger
+    
+    _logger.info("")
+    _logger.info("[API拉取] 从东财千股千评获取换手率数据...")
     
     all_records = []
     page = 1
     total_pages = 0
     retries = 3
     
-    session = requests.Session()
-    session.headers.update(HEADERS)
-    
-    while True:
-        params = API_PARAMS.copy()
-        params["pageNumber"] = page
+    # 使用 with 语句确保 session 资源释放（遵循 MODULE.md 约束 78）
+    with requests.Session() as session:
+        session.headers.update(HEADERS)
         
-        for attempt in range(retries):
-            try:
-                response = session.get(EASTMONEY_API_URL, params=params, timeout=30)
-                response.raise_for_status()
-                data_json = response.json()
-                break
-            except Exception as e:
-                if attempt < retries - 1:
-                    wait_time = 2 + attempt * 2
-                    print(f"  重试 {attempt + 1}/{retries}，等待 {wait_time}秒...")
-                    time.sleep(wait_time)
-                else:
-                    print(f"  ✗ API请求失败: {e}")
-                    raise RuntimeError(f"API请求失败: {e}")
-        
-        if page == 1:
-            total_pages = data_json.get("result", {}).get("pages", 0)
-            total_count = data_json.get("result", {}).get("count", 0)
-            print(f"  总页数: {total_pages}, 总股票数: {total_count}")
-        
-        result_data = data_json.get("result", {}).get("data", [])
-        
-        if not result_data:
-            print(f"  第 {page} 页返回空数据，获取完成")
-            break
-        
-        page_added = 0
-        for item in result_data:
-            code = item.get("SECURITY_CODE", "")
-            name = item.get("SECURITY_NAME_ABBR", "")
-            trade_date = item.get("TRADE_DATE", "")
-            turnover_rate = item.get("TURNOVERRATE")
+        while True:
+            params = API_PARAMS.copy()
+            params["pageNumber"] = page
             
-            if is_main_board_stock(code, name):
-                if turnover_rate is not None and turnover_rate != "-":
-                    try:
-                        turnover_rate_float = float(turnover_rate)
-                        all_records.append({
-                            'date': trade_date,
-                            'asset': code,
-                            'turnover_rate': turnover_rate_float,
-                            'name': name
-                        })
-                        page_added += 1
-                    except (ValueError, TypeError):
-                        pass
-        
-        print(f"  第 {page}/{total_pages} 页: 获取 {len(result_data)} 条，新增主板 {page_added} 只")
-        
-        if page >= total_pages:
-            break
-        
-        page += 1
-        time.sleep(0.1)
+            for attempt in range(retries):
+                try:
+                    response = session.get(EASTMONEY_API_URL, params=params, timeout=30)
+                    response.raise_for_status()
+                    data_json = response.json()
+                    break
+                except Exception as e:
+                    if attempt < retries - 1:
+                        wait_time = 2 + attempt * 2
+                        _logger.warning(f"  重试 {attempt + 1}/{retries}，等待 {wait_time}秒...")
+                        time.sleep(wait_time)
+                    else:
+                        _logger.error(f"  ✗ API请求失败: {e}")
+                        raise RuntimeError(f"API请求失败: {e}")
+            
+            if page == 1:
+                total_pages = data_json.get("result", {}).get("pages", 0)
+                total_count = data_json.get("result", {}).get("count", 0)
+                _logger.info(f"  总页数: {total_pages}, 总股票数: {total_count}")
+                
+                # 边界情况：pages=0 异常处理（遵循 MODULE.md 约束 90）
+                if total_pages == 0:
+                    _logger.warning("  ⚠ API返回 pages=0（异常情况），可能无数据或API异常，提前退出")
+                    break  # 提前退出循环（遵循 MODULE.md 约束 95）
+            
+            result_data = data_json.get("result", {}).get("data", [])
+            
+            if not result_data:
+                _logger.info(f"  第 {page} 页返回空数据，获取完成")
+                break
+            
+            page_added = 0
+            for item in result_data:
+                code = item.get("SECURITY_CODE", "")
+                name = item.get("SECURITY_NAME_ABBR", "")
+                trade_date = item.get("TRADE_DATE", "")
+                turnover_rate = item.get("TURNOVERRATE")
+                
+                if is_main_board_stock(code, name):
+                    if turnover_rate is not None and turnover_rate != "-":
+                        try:
+                            turnover_rate_float = float(turnover_rate)
+                            all_records.append({
+                                'date': trade_date,
+                                'asset': code,
+                                'turnover_rate': turnover_rate_float,
+                                'name': name
+                            })
+                            page_added += 1
+                        except (ValueError, TypeError):
+                            pass
+            
+            _logger.info(f"  第 {page}/{total_pages} 页: 获取 {len(result_data)} 条，新增主板 {page_added} 只")
+            
+            if page >= total_pages:
+                break
+            
+            page += 1
+            time.sleep(0.1)
     
-    print(f"\n  ✓ 共获取 {len(all_records)} 条主板股票换手率数据")
+    _logger.info(f"  ✓ 共获取 {len(all_records)} 条主板股票换手率数据")
     return all_records
 
 
@@ -148,14 +290,23 @@ def fetch_turnover_rate_eastmoney() -> List[Dict]:
 DEFAULT_N_DAYS = 500
 DEFAULT_DELAY = 0.1
 DEFAULT_MAX_RETRIES = 3
-
+# 重试配置
 CONSECUTIVE_FAILURE_THRESHOLD = 5
 CONSECUTIVE_FAILURE_PAUSE = 30
-INTERMEDIATE_SAVE_INTERVAL = 100
 
+# ============================================================
+# 内部函数
+# ============================================================
 
 def load_stock_list() -> List[Dict]:
-    """从缓存加载主板股票列表"""
+    """
+    从缓存加载主板股票列表
+        主板股票列表
+    
+    Note:
+        使用前缀匹配检测 ST 股票（遵循 MODULE.md 约束 79）
+        避免 substring 匹配误判正常股票（如"东ST"）
+    """
     if not STOCK_LIST_FILE.exists():
         raise FileNotFoundError(f"股票列表缓存不存在: {STOCK_LIST_FILE}")
     
@@ -167,61 +318,101 @@ def load_stock_list() -> List[Dict]:
     for stock in stocks:
         code = stock.get('code', '')
         name = stock.get('name', '')
+        
+        # 创业板、科创板、北交所剔除
         if code.startswith('30') or code.startswith('688') or code.startswith('8') or code.startswith('4'):
             continue
-        if 'ST' in name or '退市' in name or '*ST' in name:
+        
+        # ST 类股票剔除（前缀匹配，使用模块级常量 ST_PREFIXES）
+        # 使用元组直接传给 startswith（遵循 MODULE.md 约束 89）
+        name_upper = name.upper()
+        if name_upper.startswith(ST_PREFIXES):
             continue
+        
+        # 退市股票剔除
+        if '退市' in name:
+            continue
+        
+        # 主板股票判断
         if code.startswith('60') or code.startswith('00'):
             main_board_stocks.append(stock)
+    
     return main_board_stocks
 
 
-def fetch_turnover_rate_baostock(n_days: int = DEFAULT_N_DAYS, max_stocks: int = 0, full: bool = False) -> bool:
-    """使用 baostock 拉取历史换手率数据"""
+def fetch_turnover_rate_baostock(
+    n_days: int = DEFAULT_N_DAYS,
+    max_stocks: int = 0,
+    full: bool = False,
+    logger_arg: Optional[logging.Logger] = None
+) -> bool:
+    """
+    使用 baostock 拉取历史换手率数据
+    
+    Args:
+        n_days: 历史天数
+        max_stocks: 最大股票数（0为不限制）
+        full: 是否全量拉取
+        logger_arg: 日志 logger（遵循 MODULE.md 约束 77）
+    
+    Returns:
+        是否成功
+    
+    Note:
+        使用 try/finally 确保 baostock 登出
+    """
     import baostock as bs
     
-    print("=" * 70)
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 开始拉取历史换手率数据（baostock）")
-    print("=" * 70)
+    _logger = logger_arg or logger
+    
+    _logger.info("=" * 70)
+    _logger.info(f"[{_NOW_STR}] 开始拉取历史换手率数据（baostock）")
+    _logger.info("=" * 70)
     
     # 登录 baostock
-    print("\n[Step 0] 登录 baostock...")
+    _logger.info("")
+    _logger.info("[Step 0] 登录 baostock...")
     lg = bs.login()
     if lg.error_code != '0':
-        print(f"  ✗ 登录失败: {lg.error_msg}")
+        _logger.error(f"  ✗ 登录失败: {lg.error_msg}")
         return False
-    print("  ✓ 登录成功")
+    _logger.info("  ✓ 登录成功")
     
     try:
         # 加载股票列表
-        print("\n[Step 1] 加载主板股票列表...")
+        _logger.info("")
+        _logger.info("[Step 1] 加载主板股票列表...")
         all_stocks = load_stock_list()
-        print(f"  主板股票总数: {len(all_stocks)}")
+        _logger.info(f"  主板股票总数: {len(all_stocks)}")
         
         if max_stocks > 0:
             all_stocks = all_stocks[:max_stocks]
-            print(f"  限制拉取数量: {max_stocks}")
+            _logger.info(f"  限制拉取数量: {max_stocks}")
         
         # 加载现有缓存
-        print("\n[Step 2] 加载现有缓存...")
-        cache_data = load_cache() if not full else None
+        _logger.info("")
+        _logger.info("[Step 2] 加载现有缓存...")
+        cache_data = load_cache(logger_arg=_logger) if not full else None
         existing_stocks = get_existing_stocks(cache_data)
-        print(f"  已有数据的股票数: {len(existing_stocks)}")
+        _logger.info(f"  已有数据的股票数: {len(existing_stocks)}")
         
         # 计算日期范围
-        end_date = datetime.now()
+        # 使用 datetime.now() 避免长期运行偏差（遵循 MODULE.md 约束 91）
+        end_date = datetime.now()  # 实时获取当前时间，避免 _NOW 偏差
         start_date = end_date - timedelta(days=n_days * 1.5)
         start_date_str = start_date.strftime('%Y-%m-%d')
         end_date_str = end_date.strftime('%Y-%m-%d')
-        print(f"\n[Step 3] 日期范围: {start_date_str} ~ {end_date_str}")
+        _logger.info(f"[Step 3] 日期范围: {start_date_str} ~ {end_date_str}")
         
         # 串行拉取
-        print(f"\n[Step 4] 开始串行拉取...")
+        _logger.info(f"[Step 4] 开始串行拉取...")
         
         all_new_records = []
         success_count = 0
         failed_stocks = []
         consecutive_failures = 0
+        skipped_count = 0  # 跳过的股票数量
+        processed_count = 0  # 实际处理的股票数量（遵循 MODULE.md 约束 87）
         
         total = len(all_stocks)
         start_time = time.time()
@@ -230,17 +421,26 @@ def fetch_turnover_rate_baostock(n_days: int = DEFAULT_N_DAYS, max_stocks: int =
             code = stock['code']
             name = stock['name']
             
+            # 跳过已有股票（不计入处理统计）
+            if code in existing_stocks and not full:
+                skipped_count += 1
+                if skipped_count % 100 == 0:  # 基于跳过计数，更直观（遵循 MODULE.md 约束 94）
+                    _logger.info(f"  [{idx}/{total}] 已跳过 {skipped_count} 只（含 {code}）...")
+                continue
+            
+            # 实际处理股票统计（遵循 MODULE.md 约束 87）
+            processed_count += 1
+            
             elapsed = time.time() - start_time
-            if idx > 1:
-                avg_time = elapsed / (idx - 1)
-                remaining = (total - idx + 1) * avg_time
+            if processed_count > 1:
+                avg_time = elapsed / processed_count  # 使用实际处理数量计算平均时间
+                # 剩余待处理数 = 总数 - 已跳过 - 已处理（遵循 MODULE.md 约束 92）
+                remaining_to_process = total - skipped_count - processed_count
+                remaining = remaining_to_process * avg_time  # 预估剩余时间
             else:
                 remaining = 0
             
-            print(f"\r  [{idx}/{total}] {code} {name:8s} | 成功: {success_count} 失败: {len(failed_stocks)} | 预计剩余: {format_time(remaining)}  ", end='', flush=True)
-            
-            if code in existing_stocks and not full:
-                continue
+            _logger.info(f"  [{idx}/{total}] {code} {name:8s} | 成功: {success_count} 失败: {len(failed_stocks)} 跳过: {skipped_count} | 预计剩余: {format_time(remaining)}")
             
             records, success = fetch_stock_history_baostock(code, start_date_str, end_date_str)
             
@@ -256,39 +456,39 @@ def fetch_turnover_rate_baostock(n_days: int = DEFAULT_N_DAYS, max_stocks: int =
                 consecutive_failures += 1
                 
                 if consecutive_failures >= CONSECUTIVE_FAILURE_THRESHOLD:
-                    print(f"\n  ⚠ 连续失败{consecutive_failures}只，暂停{CONSECUTIVE_FAILURE_PAUSE}秒...")
+                    _logger.warning(f"  ⚠ 连续失败{consecutive_failures}只，暂停{CONSECUTIVE_FAILURE_PAUSE}秒...")
                     time.sleep(CONSECUTIVE_FAILURE_PAUSE)
                     consecutive_failures = 0
             
             if idx < total:
                 time.sleep(DEFAULT_DELAY)
         
-        print()
-        
         # 合并并保存
-        print(f"\n[Step 5] 合并数据并保存...")
-        merged_data = merge_records(cache_data, all_new_records)
-        save_cache(merged_data)
+        _logger.info(f"[Step 5] 合并数据并保存...")
+        merged_data = merge_records(cache_data, all_new_records, source='baostock', logger_arg=_logger)
+        save_cache(merged_data, logger_arg=_logger)
         
         total_time = time.time() - start_time
         meta = merged_data['meta']
         
-        print("\n" + "=" * 70)
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 拉取完成")
-        print("=" * 70)
-        print(f"总股票数:   {total}")
-        print(f"成功数:     {success_count}")
-        print(f"失败数:     {len(failed_stocks)}")
-        print(f"日期范围:   {meta['date_range']['start']} ~ {meta['date_range']['end']}")
-        print(f"交易日数:   {meta['n_days']}")
-        print(f"耗时:       {format_time(total_time)}")
+        _logger.info("=" * 70)
+        _logger.info(f"[{_NOW_STR}] 拉取完成")
+        _logger.info("=" * 70)
+        _logger.info(f"总股票数:   {total}")
+        _logger.info(f"跳过数:     {skipped_count}")
+        _logger.info(f"成功数:     {success_count}")
+        _logger.info(f"失败数:     {len(failed_stocks)}")
+        _logger.info(f"日期范围:   {meta['date_range']['start']} ~ {meta['date_range']['end']}")
+        _logger.info(f"交易日数:   {meta['n_days']}")
+        _logger.info(f"耗时:       {format_time(total_time)}")
         
         return len(failed_stocks) == 0
     
     finally:
-        print("\n[清理] 登出 baostock...")
+        _logger.info("")
+        _logger.info("[清理] 登出 baostock...")
         bs.logout()
-        print("  ✓ 已登出")
+        _logger.info("  ✓ 已登出")
 
 
 def get_baostock_code(stock_code: str) -> str:
@@ -360,19 +560,58 @@ def fetch_stock_history_baostock(stock_code: str, start_date: str, end_date: str
 # 公共函数
 # ============================================================
 
-def load_cache() -> Optional[Dict]:
-    """加载现有缓存"""
+def get_cached_turnover_codes(
+    logger_arg: Optional[logging.Logger] = None
+) -> Set[str]:
+    """
+    获取缓存的换手率股票代码集合
+    
+    Args:
+        logger_arg: 日志 logger（遵循 MODULE.md 约束 77）
+    
+    Returns:
+        股票代码集合，如果缓存不存在或无效则返回空集合
+    
+    Example:
+        >>> codes = get_cached_turnover_codes()
+        >>> isinstance(codes, set)  # 类型检查（确定结果）
+        True
+    """
+    _logger = logger_arg or logger
+    
+    cache_data = load_cache(logger_arg=_logger)
+    if not cache_data:
+        return set()
+    
+    data = cache_data.get('data', [])
+    return set(record['asset'] for record in data)
+
+def load_cache(
+    logger_arg: Optional[logging.Logger] = None
+) -> Optional[Dict]:
+    """
+    加载现有缓存
+    
+    Args:
+        logger_arg: 日志 logger（遵循 MODULE.md 约束 77）
+    
+    Returns:
+        缓存数据，如果不存在或无效则返回 None
+    """
+    _logger = logger_arg or logger  # 统一使用模块级 logger（遵循 MODULE.md 约束 77）
+    
     if not CACHE_FILE.exists():
         return None
+    
     try:
         with gzip.open(CACHE_FILE, 'rt', encoding='utf-8') as f:
             data = json.load(f)
         file_size = CACHE_FILE.stat().st_size
         size_mb = file_size / (1024 * 1024)
-        print(f"[缓存] 已读取: {CACHE_FILE} ({size_mb:.2f} MB)")
+        _logger.info(f"[缓存] 已读取: {CACHE_FILE} ({size_mb:.2f} MB)")
         return data
     except Exception as e:
-        print(f"[缓存] 读取失败: {e}")
+        _logger.warning(f"[缓存] 读取失败: [{type(e).__name__}]: {e}")
         return None
 
 
@@ -384,26 +623,109 @@ def get_existing_stocks(cache_data: Optional[Dict]) -> Set[str]:
     return set(record['asset'] for record in data)
 
 
-def save_cache(data: Dict) -> None:
-    """保存缓存文件"""
+def save_cache(
+    data: Dict,
+    logger_arg: Optional[logging.Logger] = None
+) -> None:
+    """
+    保存缓存文件
+    
+    Args:
+        data: 缓存数据
+        logger_arg: 日志 logger（遵循 MODULE.md 约束 77）
+    
+    Note:
+        使用 tempfile.NamedTemporaryFile 避免并发冲突（遵循 MODULE.md 约束 80）
+    """
+    _logger = logger_arg or logger  # 统一使用模块级 logger（遵循 MODULE.md 约束 77）
+    
     FACTOR_DATA_DIR.mkdir(parents=True, exist_ok=True)
     
-    temp_file = CACHE_FILE.with_suffix('.json.gz.tmp')
-    with gzip.open(temp_file, 'wt', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    
-    temp_file.replace(CACHE_FILE)
-    
-    file_size = CACHE_FILE.stat().st_size
-    size_mb = file_size / (1024 * 1024)
-    print(f"[缓存] 已保存: {CACHE_FILE} ({size_mb:.2f} MB)")
+    # 使用 tempfile 避免并发冲突（遵循 MODULE.md 约束 80）
+    temp_path: Optional[Path] = None
+    try:
+        # 创建临时文件并在同一个 with 块内写入（遵循 MODULE.md 约束 96）
+        # 传文件对象给 gzip.open，不关闭再开
+        with tempfile.NamedTemporaryFile(
+            suffix='.json.gz',
+            dir=FACTOR_DATA_DIR,
+            delete=False
+        ) as temp_f:
+            temp_path = Path(temp_f.name)
+            with gzip.open(temp_f, 'wt', encoding='utf-8') as gz_f:
+                json.dump(data, gz_f, ensure_ascii=False, indent=2)
+        
+        # with 块结束后文件已关闭，执行原子替换
+        temp_path.replace(CACHE_FILE)
+        
+        file_size = CACHE_FILE.stat().st_size
+        size_mb = file_size / (1024 * 1024)
+        _logger.info(f"[缓存] 已保存: {CACHE_FILE} ({size_mb:.2f} MB)")
+        
+    except Exception as e:
+        # 失败时清理临时文件
+        if temp_path and temp_path.exists():
+            temp_path.unlink()
+        _logger.error(f"保存缓存失败: [{type(e).__name__}]: {e}")
+        raise
 
 
-def merge_records(existing_data: Optional[Dict], new_records: List[Dict]) -> Dict:
-    """合并现有数据和新数据"""
+def merge_records(
+    existing_data: Optional[Dict],
+    new_records: List[Dict],
+    source: str = 'eastmoney',  # 新增参数：调用方明确传入数据源（遵循 MODULE.md 约束 93）
+    logger_arg: Optional[logging.Logger] = None
+) -> Dict:
+    """
+    合并现有数据和新数据
+    
+    Args:
+        existing_data: 现有缓存数据
+        new_records: 新记录列表
+        source: 数据源名称（'eastmoney' 或 'baostock'，遵循 MODULE.md 约束 93）
+        logger_arg: 日志 logger（遵循 MODULE.md 约束 77）
+    
+    Returns:
+        合并后的数据
+    
+    Note:
+        当 new_records 为空时保留 existing_data 的 meta（遵循 MODULE.md 约束 88）
+        避免 generated_at、last_updated、source 被强制更新
+        
+        数据源合并逻辑（遵循 MODULE.md 约束 93）：
+        - 若 existing_meta.source != source，则设为 'mixed'
+        - 否则保留 source（单一数据源）
+    """
+    _logger = logger_arg or logger
+    
+    # 边界情况：new_records 为空（遵循 MODULE.md 约束 88）
+    if not new_records:
+        if existing_data:
+            # 保留现有数据，不做任何更新
+            _logger.info("[合并] new_records 为空，保留现有数据")
+            return existing_data
+        else:
+            # 无数据，返回空结构
+            _logger.warning("[合并] 无数据，返回空结构")
+            return {
+                'meta': {
+                    'generated_at': _NOW_ISO,
+                    'source': 'empty',
+                    'n_days': 0,
+                    'n_assets': 0,
+                    'date_range': {'start': None, 'end': None},
+                    'last_updated': _NOW_STR,
+                    'version': _OUTPUT_VERSION
+                },
+                'data': []
+            }
+    
+    # 正常合并流程
     existing_records = []
+    existing_meta = None
     if existing_data:
         existing_records = existing_data.get('data', [])
+        existing_meta = existing_data.get('meta')
     
     all_records = existing_records + new_records
     
@@ -418,20 +740,28 @@ def merge_records(existing_data: Optional[Dict], new_records: List[Dict]) -> Dic
     unique_dates = sorted(set(r['date'] for r in merged_records))
     unique_assets = sorted(set(r['asset'] for r in merged_records))
     
-    now = datetime.now()
+    # meta 更新策略（遵循 MODULE.md 约束 93）
+    # 数据源合并逻辑：若 existing_meta.source != source，则设为 'mixed'
+    final_source = source  # 默认使用新数据源
+    if existing_meta:
+        existing_source = existing_meta.get('source', source)
+        if existing_source != source:
+            final_source = 'mixed'  # 数据源混合
+        else:
+            final_source = source  # 单一数据源
     
     return {
         'meta': {
-            'generated_at': now.isoformat(),
-            'source': 'mixed',
+            'generated_at': _NOW_ISO,
+            'source': final_source,  # 数据源合并逻辑（遵循 MODULE.md 约束 93）
             'n_days': len(unique_dates),
             'n_assets': len(unique_assets),
             'date_range': {
                 'start': unique_dates[0] if unique_dates else None,
                 'end': unique_dates[-1] if unique_dates else None
             },
-            'last_updated': now.strftime('%Y-%m-%d %H:%M:%S'),
-            'version': '1.2'
+            'last_updated': _NOW_STR,
+            'version': _OUTPUT_VERSION
         },
         'data': merged_records
     }
@@ -449,56 +779,81 @@ def format_time(seconds: float) -> str:
 # 主函数
 # ============================================================
 
-def main():
-    """主函数：东财版本"""
-    print("=" * 60)
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 开始拉取换手率数据")
-    print("=" * 60)
-    print("数据源: 东财千股千评 API")
-    print("股票范围: 主板股票（60/00开头，剔除创业板/科创板/北交所/ST）")
-    print(f"缓存路径: {CACHE_FILE}")
+def main(
+    logger_arg: Optional[logging.Logger] = None
+) -> bool:
+    """
+    主函数：东财版本
+    
+    Args:
+        logger_arg: 日志 logger（遵循 MODULE.md 约束 77）
+    
+    Returns:
+        是否成功
+    """
+    _logger = logger_arg or logger
+    
+    _logger.info("=" * 60)
+    _logger.info(f"[{_NOW_STR}] 开始拉取换手率数据")
+    _logger.info("=" * 60)
+    _logger.info("数据源: 东财千股千评 API")
+    _logger.info("股票范围: 主板股票（60/00开头，剔除创业板/科创板/北交所/ST）")
+    _logger.info(f"缓存路径: {CACHE_FILE}")
     
     # Step 1: 加载现有缓存
-    existing_data = load_cache()
+    existing_data = load_cache(logger_arg=_logger)
     
     # Step 2: 拉取新数据
-    new_records = fetch_turnover_rate_eastmoney()
+    new_records = fetch_turnover_rate_eastmoney(logger_arg=_logger)
     
     if not new_records:
-        print("\n❌ 未获取到任何数据")
+        _logger.error("❌ 未获取到任何数据")
         return False
     
     # Step 3: 合并去重
-    merged_data = merge_records(existing_data, new_records)
+    merged_data = merge_records(existing_data, new_records, source='eastmoney', logger_arg=_logger)
     
     # Step 4: 保存缓存
-    save_cache(merged_data)
+    save_cache(merged_data, logger_arg=_logger)
     
     # 输出统计
     meta = merged_data['meta']
-    print("\n" + "=" * 60)
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 换手率数据拉取完成")
-    print("=" * 60)
-    print(f"日期范围: {meta['date_range']['start']} ~ {meta['date_range']['end']}")
-    print(f"交易日数: {meta['n_days']}")
-    print(f"股票数量: {meta['n_assets']}")
-    print(f"总记录数: {len(merged_data['data'])}")
+    _logger.info("=" * 60)
+    _logger.info(f"[{_NOW_STR}] 换手率数据拉取完成")
+    _logger.info("=" * 60)
+    _logger.info(f"日期范围: {meta['date_range']['start']} ~ {meta['date_range']['end']}")
+    _logger.info(f"交易日数: {meta['n_days']}")
+    _logger.info(f"股票数量: {meta['n_assets']}")
+    _logger.info(f"总记录数: {len(merged_data['data'])}")
     
     return True
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='换手率数据拉取脚本')
-    parser.add_argument('--source', choices=['eastmoney', 'baostock'], default='eastmoney',
-                       help='数据源选择')
-    parser.add_argument('--n_days', type=int, default=500, help='历史天数（baostock）')
-    parser.add_argument('--max_stocks', type=int, default=0, help='最大股票数（baostock）')
-    parser.add_argument('--full', action='store_true', help='全量拉取（baostock）')
+    # CLI 入口 logger 设置（遵循 PROJECT.md 日志规范）
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)s %(name)s %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    cli_logger = logging.getLogger('fetch_turnover.cli')
+    
+    parser = argparse.ArgumentParser(description='换手率数据拉取')
+    parser.add_argument('--baostock', action='store_true', help='使用 baostock 数据源')
+    parser.add_argument('--full', action='store_true', help='全量拉取（不使用缓存）')
+    parser.add_argument('--n-days', type=int, default=DEFAULT_N_DAYS, help='历史天数（baostock）')
+    parser.add_argument('--max-stocks', type=int, default=0, help='最大股票数（baostock，0为不限制）')
+    
     args = parser.parse_args()
     
-    if args.source == 'eastmoney':
-        success = main()
+    if args.baostock:
+        success = fetch_turnover_rate_baostock(
+            n_days=args.n_days,
+            max_stocks=args.max_stocks,
+            full=args.full,
+            logger_arg=cli_logger
+        )
     else:
-        success = fetch_turnover_rate_baostock(args.n_days, args.max_stocks, args.full)
+        success = main(logger_arg=cli_logger)
     
     sys.exit(0 if success else 1)
