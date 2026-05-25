@@ -4,7 +4,7 @@
 
 作者: 云舟
 日期: 2026-05-27
-版本: v1.6
+版本: v1.7
 
 功能: 获取申万行业分类数据并缓存
 数据源: akshare - 申万行业分类
@@ -16,6 +16,7 @@
 - v1.4 (2026-05-27): Bug修复 - SW_INDUSTRY_CODE_MAP添加近似映射注释+TODO、原子写入捕获所有异常+日志位置修正、全局缓存线程安全（DCL双重检查）
 - v1.5 (2026-05-27): Bug修复 - 日期解析异常warning日志、关键词映射移除歧义(新能)、__all__移除私有名称(_OUTPUT_VERSION)
 - v1.6 (2026-05-27): Bug修复 - DataFrame列名校验、备用数据路径提取常量+参数注入
+- v1.7 (2026-05-27): Bug修复 - threading重复导入删除、关键词重叠消除(光伏/风电只在电力)、注释修正(中信在证券)、备用数据写入缓存
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -31,7 +32,7 @@ from datetime import datetime
 from collections import Counter
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = '1.6'
+_OUTPUT_VERSION = '1.7'
 
 logger = logging.getLogger(__name__)
 
@@ -256,12 +257,13 @@ def refresh_industry_cache() -> dict:
     return industry_map
 
 
-def load_local_industry_backup(stock_list_path: Path | None = None) -> dict:
+def load_local_industry_backup(stock_list_path: Path | None = None, write_cache: bool = True) -> dict:
     """
     加载本地备用行业数据（当 akshare 不可用时）
     
     Args:
         stock_list_path: 股票列表文件路径（默认使用 STOCK_LIST_BACKUP_PATH）
+        write_cache: 是否写入缓存文件（默认 True，避免每次重复读文件）
         
     Returns:
         dict: 基本的行业映射（主要行业分类）
@@ -299,12 +301,47 @@ def load_local_industry_backup(stock_list_path: Path | None = None) -> dict:
                 }
             
             logger.info(f"[行业数据] 本地备用分类完成: {len(industry_map)} 只股票")
+            
+            # 写入缓存（避免每次重复读文件）
+            if write_cache and industry_map:
+                _write_backup_cache(industry_map)
+            
             return industry_map
             
         except Exception as e:
             logger.warning(f"[行业数据] 本地备用加载失败 [{type(e).__name__}]: {e}")
     
     return {}
+
+
+def _write_backup_cache(industry_map: dict) -> None:
+    """
+    写入备用数据缓存（私有函数）
+    
+    Args:
+        industry_map: 行业映射数据
+    """
+    cache_data = {
+        'meta': {
+            'version': _OUTPUT_VERSION,
+            'source': 'local_backup',
+            'level': '一级',
+            'updated_at': datetime.now().strftime('%Y-%m-%d'),
+            'total_count': len(industry_map)
+        },
+        'industries': industry_map
+    }
+    
+    RESULT_DIR.mkdir(parents=True, exist_ok=True)
+    temp_path = INDUSTRY_CACHE_PATH.with_suffix('.tmp')
+    try:
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            json.dump(cache_data, f, ensure_ascii=False, indent=2)
+        temp_path.rename(INDUSTRY_CACHE_PATH)
+        logger.info(f"[行业数据] 备用缓存已写入: {INDUSTRY_CACHE_PATH}")
+    except Exception as e:
+        temp_path.unlink(missing_ok=True)
+        logger.warning(f"[行业数据] 备用缓存写入失败 [{type(e).__name__}]: {e}")
 
 
 def infer_industry_from_name(name: str) -> str:
@@ -319,14 +356,14 @@ def infer_industry_from_name(name: str) -> str:
     """
     # 常见行业关键词映射
     # 注意：关键词需避免歧义，遍历顺序决定匹配优先级
-    # - 已移除歧义关键词：新能（改为具体关键词：新能源、光伏、风电）
-    # - 保留关键词：信达、中信（特定金融机构名称，非歧义）
+    # - 已消除重复关键词：光伏/风电只在电力中，新能源使用锂电/电池/太阳能
+    # - 具体关键词优先：中信→证券（而非混入银行）
     industry_keywords = {
+        '证券': ['证券', '券商', '中信'],  # 中信：中信证券特定名称（具体优先）
         '银行': ['银行', '金融'],
-        '证券': ['证券', '券商', '中信'],  # 中信：中信证券特定名称
         '保险': ['保险', '人寿', '平安'],
-        '电力': ['电力', '电能', '水电', '火电', '风电', '光伏'],
-        '新能源': ['新能源', '光伏', '锂电', '电池', '风电', '太阳能'],  # 移除歧义的 '新能'
+        '电力': ['电力', '电能', '水电', '火电', '风电', '光伏'],  # 光伏/风电只在电力
+        '新能源': ['新能源', '锂电', '电池', '太阳能'],  # 移除重复的 光伏/风电
         '房地产': ['地产', '房产', '万科', '保利', '城建'],
         '医药': ['医药', '生物', '制药', '药业', '医疗'],
         '科技': ['科技', '电子', '芯片', '半导体', '软件'],
@@ -355,7 +392,7 @@ def infer_industry_from_name(name: str) -> str:
 
 
 # 模块级缓存（线程安全：使用 threading.Lock）
-import threading
+# 注意：threading 已在顶部导入（第28行），此处不再重复导入
 _industry_cache = None
 _cache_lock = threading.Lock()
 
