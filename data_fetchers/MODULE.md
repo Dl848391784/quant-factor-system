@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.59
+> 版本: v2.60
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 04:00 北京时间
+> 更新时间: 2026-05-26 04:30 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -21,7 +21,7 @@
 | # | 约束 | 说明 |
 |---|------|------|
 | 1 | 脚本命名：`fetch_<数据源>.py` | 如 fetch_turnover.py、fetch_main_inflow.py |
-| 2 | 输出到 cache 目录 | 不输出到脚本同级目录 |
+| 2 | 输出到 result 目录 | 与 factor_ic 等模块保持一致（cache 为数据源原始缓存） |
 | 3 | 因子生成使用 factor_generator.py | 单一数据源，不分散 |
 | 4 | 公共模块必须复用 | 禁止脚本自行实现已有功能 |
 | 5 | pandas 3.0 使用 transform | 避免 rolling 返回 MultiIndex |
@@ -589,7 +589,13 @@ data_fetchers/
    - **流程文档创建**：docs/fetch_factor_cache_flow.md
    - **测试用例创建**：test_cases/fetch_factor_cache_test_cases.md
 
-51. **MODULE.md v2.59 (2026-05-26)** — 规范补充
+52. **factor_generator.py v1.26 (2026-05-26)** — 规范合规修复
+   - **输出路径修正**：从 cache/factor_data/ 改为 data_fetchers/result/
+   - **输入输出分离**：输入使用 cache（数据源原始缓存），输出使用 result（遵循 MODULE.md 约束 #2）
+
+53. **MODULE.md v2.60 (2026-05-26)** — 规范修正
+   - **约束 #2 修正**：从"输出到 cache 目录"改为"输出到 result 目录"
+   - **语义明确**：cache 为数据源原始缓存，result 为处理后的输出结果
    - **修复原因**：docstring 描述与实际行为不符 + 错误信息不完整
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充

@@ -36,6 +36,7 @@
 - v1.23 (2026-05-26): 代码结构优化（tuple类型注解改为tuple[str, ...]更精确表达字符串元组）
 - v1.24 (2026-05-26): Bug修复+代码结构优化（turnover_df内存释放、docstring Example标记非运行示例、元组转列表pandas兼容）
 - v1.25 (2026-05-26): Bug修复+文档修正（_calc_pct类型注解补充兼容类型说明、docstring Raises删除输入数据为空场景、兜底块错误信息补充异常详情）
+- v1.26 (2026-05-26): 规范合规修复（输出路径改为result目录，遵循MODULE.md约束#2：与factor_ic等模块保持一致）
 
 作者: 云瑶
 """
@@ -85,7 +86,11 @@ __all__ = [
 # 默认路径配置（私有常量）
 # ============================================================================
 
+# 输入数据路径（cache 目录：数据源原始缓存）
 _DEFAULT_CACHE_DIR = Path(__file__).parent.parent / 'cache' / 'factor_data'
+
+# 输出数据路径（result 目录：遵循 MODULE.md 约束 #2）
+_DEFAULT_RESULT_DIR = Path(__file__).parent / 'result'
 
 # 扩展因子列名（元组防止意外修改）
 _EXTENDED_FACTOR_COLS: tuple[str, ...] = ('bollinger_pb', 'kdj_j', 'turnover_surge')
@@ -225,7 +230,7 @@ def generate_all_factors(
     # 默认路径
     factor_data_path = Path(factor_data_path) if factor_data_path else _DEFAULT_CACHE_DIR / 'factor_data.json.gz'
     turnover_data_path = Path(turnover_data_path) if turnover_data_path else _DEFAULT_CACHE_DIR / 'turnover_rate_data.json.gz'
-    output_path = Path(output_path) if output_path else _DEFAULT_CACHE_DIR / 'factor_data_extended.json.gz'
+    output_path = Path(output_path) if output_path else _DEFAULT_RESULT_DIR / 'factor_data_extended.json.gz'
     
     logger.info("=" * 40)
     logger.info("统一因子生成模块")
