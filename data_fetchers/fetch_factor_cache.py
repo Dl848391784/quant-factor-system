@@ -36,6 +36,7 @@
 - v3.25 (2026-05-26): 接口设计修正 - format_final_output返回None（统计由validate提供）、save_batch_cache_sorted接口契约说明实际调用方总是传字符串
 - v3.26 (2026-05-26): Bug修复 - format_final_output末尾缩进修正、validate_final_data分两次读文件+records_count初始化
 - v3.27 (2026-05-26): 代码改进 - BatchStream.pop_record更新exhausted+添加__lt__、del注释修正、combined增加copy、del data而非del full、main用_接收未使用返回值
+- v3.28 (2026-05-26): Bug修复 - validate_final_data第二次改为真正的流式行扫描，避免两次json.load内存峰值翻倍
 
 作者: 云舟
 日期: 2026-04-04
@@ -67,7 +68,7 @@ except ImportError:
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.27'
+_OUTPUT_VERSION = '3.28'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -777,8 +778,10 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
         tuple[bool, int, int, int]: (是否通过验证, 交易日数, 股票数量, 记录数)
     
     Note:
-        分两次读文件：第一次只读 meta，第二次流式扫描 data 进行均匀抽样
-        避免 meta 手动拼接字符串的脆弱性，同时避免一次性加载大文件
+        分两次读文件：
+        - 第一次：加载完整文件提取 meta 和 records_count，立即释放
+        - 第二次：流式行扫描 data，只解析抽样的行（不加载整个文件）
+        避免 meta 手动拼接字符串的脆弱性，同时避免内存峰值翻倍
     """
     logger = logger or _MODULE_LOGGER
     logger.info("=" * 60)
@@ -794,7 +797,7 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
     date_end = ""
     records_count = 0
     
-    # 第一次：只读 meta（小，快速）
+    # 第一次：加载完整文件提取 meta 和 records_count，立即释放
     try:
         with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
             full = json.load(f)
@@ -807,35 +810,50 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
         date_start = date_range.get('start', '') if isinstance(date_range, dict) else ''
         date_end = date_range.get('end', '') if isinstance(date_range, dict) else ''
         
-        # 释放 full 内存，只保留 meta
+        # 从 data 提取 records_count（不保留 data）
+        records_count = len(full.get('data', []))
+        
+        # 立即释放 full 内存
         del full
         gc.collect()
         
     except Exception as e:
-        logger.warning(f"  ⚠ meta 加载失败: {e}")
+        logger.warning(f"  ⚠ 文件加载失败: {e}")
         return False, 0, 0, 0
     
-    # 第二次：流式扫描 data 进行均匀抽样
+    # 第二次：流式行扫描，只解析抽样的行（不加载整个文件）
     sample_records = []
     sample_size = 1000
-    # 使用 n_days * n_assets 估算总记录数，若解析失败则使用保守步长
-    estimated_total = n_days * n_assets if n_days > 0 and n_assets > 0 else sample_size * 100
-    step = max(1, estimated_total // sample_size)
+    step = max(1, records_count // sample_size) if records_count > 0 else 1
+    current_idx = 0
     
     try:
         with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
-            full = json.load(f)
-            data = full.get('data', [])
-            records_count = len(data)
-            # 均匀抽样
-            sample_records = [data[i] for i in range(0, records_count, step)][:sample_size]
-            # 释放内存（del data，而非 del full）
-            del data
-            del full
-            gc.collect()
-            
+            in_data = False
+            for line in f:
+                stripped = line.strip()
+                
+                # 检测进入 data 数组
+                if '"data": [' in stripped:
+                    in_data = True
+                    continue
+                
+                # 检测离开 data 数组
+                if in_data and stripped in (']', '],'):
+                    break
+                
+                # 流式解析 JSON 对象（只解析抽样的行）
+                if in_data and stripped.startswith('{'):
+                    try:
+                        if current_idx % step == 0 and len(sample_records) < sample_size:
+                            # 去除末尾逗号后解析
+                            sample_records.append(json.loads(stripped.rstrip(',')))
+                        current_idx += 1
+                    except json.JSONDecodeError:
+                        continue  # 跳过解析失败的行
+        
     except Exception as e:
-        logger.warning(f"  ⚠ data 加载失败: {e}")
+        logger.warning(f"  ⚠ 流式扫描失败: {e}")
         return False, n_days, n_assets, 0
     
     logger.info(f"  交易日数: {n_days}")
