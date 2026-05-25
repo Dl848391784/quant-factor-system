@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.74
+> 版本: v2.75
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 19:00 北京时间
+> 更新时间: 2026-05-26 19:30 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -29,8 +29,8 @@
 | 7 | 日志输出到 logs 目录 | 不散落在项目根目录 |
 | 8 | 流程文档配套 | docs/<脚本名>_flow.md |
 | 9 | N-way merge 去重使用正值 batch_idx | heap 元素为 `(key, batch_idx, stream)`，使用正值让高 batch_idx 后弹出（去重替换逻辑） |
-| 10 | itertuples 前验证列存在 | `hasattr(row, 'col')` 对同一 DataFrame 所有行结果相同，无效防御性检查 |
-| 11 | 大文件分阶段加载 | 避免 two large lists 同时存在于内存中，先处理第一个并 del 再加载第二个 |
+| 10 | 大文件流式读取验证 | 避免 json.load 全量加载只为抽样，改为流式迭代 |
+| 11 | meta 信息只保留标量 | date_start/date_end/n_assets，而非完整 dates_list/assets_list |
 | 12 | 数据验证综合判断 | 不仅检查天数达标，还需检查关键字段非空比例 >= 80% |
 | 13 | peek_key/pop_record 检查 exhausted | `if self.exhausted or self.idx >= len(self.records)`，语义一致性（两个方法对称） |
 | 14 | get_memory_usage_mb Windows 兜底 | `import resource` 在 Windows 下会抛 ModuleNotFoundError，需 try-except 兜底返回 0.0 |
@@ -39,6 +39,8 @@
 | 17 | datetime.now() 只调用一次 | 固定时间戳后生成两个格式，避免不一致 |
 | 18 | 抽样检查均匀抽样 | 避免 `[:1000]` 取前1000条偏差，改为均匀抽样 |
 | 21 | N-way merge 显式收集后选最大 | 收集相同 key 所有记录后按 batch_idx 降序选最大，不依赖弹出顺序 |
+| 22 | cleanup 增加兜底清理 | merged_*.json.gz 可能残留，cleanup_batch_files 应增加兜底 |
+| 23 | 模块级注释合并到常量 | 注释应紧贴常量定义，避免空泛的注释块 |
 | 19 | 常量定义在 import 之后 | PEP 8 顺序：docstring → __future__ → 标准库 → 第三方 → 本地 → 常量 |
 | 20 | cleanup_batch_files 用 try/finally | 保证临时文件清理（无论成功或失败） |
 
@@ -718,6 +720,18 @@ data_fetchers/
    - **约束 #17 修正**：datetime.now() 只调用一次（而非"固定时间戳"）
    - **新增约束 #21**：N-way merge 显式收集后选最大
    - **规范修正原因**：copy 导致内存峰值翻倍，文档说明更灵活；弹出顺序依赖不可靠
+
+81. **fetch_factor_cache.py v3.19 (2026-05-26)** — Bug修复（5项）
+   - **validate_final_data 流式读取**：避免 json.load 全量加载只为抽样，改为流式迭代
+   - **format_final_output 只保留标量**：date_start/date_end/n_assets，而非完整 dates_list/assets_list
+   - **模块级注释合并到常量**：注释紧贴 _MODULE_LOGGER 和 _OUTPUT_VERSION 定义
+   - **cleanup_batch_files 增加兜底**：merged_*.json.gz 可能残留，增加兜底清理
+   - **n_way_merge 移除冗余赋值**：`streams = []` 在函数返回前无实际效果
+
+82. **MODULE.md v2.75 (2026-05-26)** — 规范修正
+   - **约束 #10-#11 修正**：大文件流式读取验证、meta 信息只保留标量
+   - **新增约束 #22-#23**：cleanup 增加兜底清理、模块级注释合并到常量
+   - **规范修正原因**：全量加载只为抽样浪费内存；完整列表用于 meta 信息冗余
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
