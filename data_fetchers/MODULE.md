@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.79
+> 版本: v2.80
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 21:30 北京时间
+> 更新时间: 2026-05-26 22:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -48,7 +48,8 @@
 | 27 | 返回值避免冗余 | format_final_output 返回值仅用于日志，统计信息由 validate_final_data 提供 |
 | 28 | 函数接口契约说明 | 说明输入/输出类型，避免调用方重复转换 |
 | 29 | vmrss 判断用 is not None | `if vmrss is not None` 而非 `if vmrss`（0 是 falsy） |
-| 30 | 内嵌函数闭包捕获一致 | 定义在 with 块内闭包捕获 f，而非定义在外部又传入 f 参数 |
+| 31 | DataFrame 链式操作用 copy() | 避免 SettingWithCopyWarning，每次过滤后 .copy() |
+| 32 | forward_return 统一写法 | `x.shift(-N) / x - 1` 比 `x.pct_change().shift(-1)` 更直观 |
 | 19 | 常量定义在 import 之后 | PEP 8 顺序：docstring → __future__ → 标准库 → 第三方 → 本地 → 常量 |
 | 20 | cleanup_batch_files 用 try/finally | 保证临时文件清理（无论成功或失败） |
 
@@ -780,6 +781,16 @@ data_fetchers/
 90. **MODULE.md v2.79 (2026-05-26)** — 规范修正
    - **约束 #10/#25 修正**：大文件验证一次性加载（而非流式读取 meta）
    - **规范修正原因**：meta 手动拼接字符串脆弱，直接 json.load 更健壮
+
+91. **fetch_factor_cache.py v3.24 (2026-05-26)** — Bug修复（4项）
+   - **valid_batch_indices 移除**：收集了但从未使用，删除冗余变量
+   - **heap 注释缩进修正**：注释缩进从 0 改为 4，与代码对齐
+   - **valid_df 增加 copy()**：避免 SettingWithCopyWarning，每次过滤后 .copy()
+   - **forward_return 统一写法**：`x.shift(-1) / x - 1` 比 `x.pct_change().shift(-1)` 更直观
+
+92. **MODULE.md v2.80 (2026-05-26)** — 规范补充
+   - **新增约束 #31-#32**：DataFrame 链式操作用 copy()、forward_return 统一写法
+   - **规范补充原因**：SettingWithCopyWarning 导致赋值失败风险；pct_change().shift(-1) 不直观
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
