@@ -24,13 +24,14 @@
 - v3.13 (2026-05-26): Bug修复 - 冗余导入删除、未使用变量删除、hasattr无效检查改为列存在验证、format_final_output内存峰值改为分阶段加载
 - v3.14 (2026-05-26): Bug修复 - validate_final_data增加数据有效性验证（RSI非空比例>=80%）、peek_key检查exhausted、get_memory_usage_mb Windows兜底、main docstring删除冗余Returns、version字段提取为_OUTPUT_VERSION常量
 - v3.15 (2026-05-26): Bug修复 - n_way_merge去重逻辑修正（使用正值batch_idx而非负值，变量名改为batch_idx消除语义混乱）
+- v3.16 (2026-05-26): Bug修复 - main版本号改用_OUTPUT_VERSION、format_final_output固定生成时间、save_batch_cache_sorted入口copy()、validate_final_data均匀抽样
 
 作者: 云舟
 日期: 2026-04-04
 """
 
 # 输出文件版本号（与模块版本一致）
-_OUTPUT_VERSION = '3.15'
+_OUTPUT_VERSION = '3.16'
 
 # 标准库导入（PEP 8 规范：按字母顺序分组）
 import gc
@@ -157,6 +158,10 @@ def save_batch_cache_sorted(
     logger = logger or _MODULE_LOGGER
     factor_path = CACHE_DIR / f'batch_{batch_idx}_factor.json.gz'
     return_path = CACHE_DIR / f'batch_{batch_idx}_return.json.gz'
+    
+    # 函数入口先 copy()，防止修改调用方的 DataFrame 引用
+    factor_df = factor_df.copy()
+    return_df = return_df.copy()
     
     # 写入前验证必需列存在
     required_factor_cols = ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5']
@@ -614,6 +619,10 @@ def format_final_output(
     logger = logger or _MODULE_LOGGER
     logger.info("格式化最终输出文件...")
     
+    # 固定生成时间（避免两次 datetime.now() 不一致）
+    generated_at = datetime.now().isoformat()
+    last_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
     # ============ 第一阶段：处理因子数据 ============
     # 读取合并后的因子数据获取元信息
     with gzip.open(factor_merged_path, 'rt', encoding='utf-8') as f:
@@ -636,7 +645,7 @@ def format_final_output(
     with gzip.open(factor_final_path, 'wt', encoding='utf-8') as f:
         f.write('{\n')
         f.write('  "meta": {\n')
-        f.write(f'    "generated_at": "{datetime.now().isoformat()}",\n')
+        f.write(f'    "generated_at": "{generated_at}",\n')
         f.write('    "source": "sina_api_batch_external_merge",\n')
         f.write(f'    "n_days": {n_days},\n')
         f.write(f'    "n_assets": {n_assets},\n')
@@ -644,7 +653,7 @@ def format_final_output(
         f.write(f'      "start": "{dates_list[0]}",\n')
         f.write(f'      "end": "{dates_list[-1]}"\n')
         f.write('    },\n')
-        f.write(f'    "last_updated": "{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}",\n')
+        f.write(f'    "last_updated": "{last_updated}",\n')
         f.write(f'    "version": "{_OUTPUT_VERSION}",\n')
         f.write('    "fields": ["date", "asset", "open", "close", "high", "low", "rsi_6", "volume_ratio_5"]\n')
         f.write('  },\n')
@@ -678,7 +687,7 @@ def format_final_output(
     with gzip.open(return_final_path, 'wt', encoding='utf-8') as f:
         f.write('{\n')
         f.write('  "meta": {\n')
-        f.write(f'    "generated_at": "{datetime.now().isoformat()}",\n')
+        f.write(f'    "generated_at": "{generated_at}",\n')
         f.write('    "source": "sina_api_batch_external_merge",\n')
         f.write(f'    "n_days": {n_days},\n')
         f.write(f'    "n_assets": {n_assets},\n')
@@ -686,7 +695,7 @@ def format_final_output(
         f.write(f'      "start": "{dates_list[0]}",\n')
         f.write(f'      "end": "{dates_list[-1]}"\n')
         f.write('    },\n')
-        f.write(f'    "last_updated": "{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}",\n')
+        f.write(f'    "last_updated": "{last_updated}",\n')
         f.write(f'    "version": "{_OUTPUT_VERSION}",\n')
         f.write('    "fields": ["date", "asset", "forward_return_1d", "forward_return_3d", "forward_return_5d"],\n')
         f.write('    "note": "3日和5日收益最后几天会有NaN"\n')
@@ -747,8 +756,12 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
     logger.info(f"  总记录数: {n_records}")
     logger.info(f"  日期范围: {meta['date_range']['start']} ~ {meta['date_range']['end']}")
     
-    # 抽样检查
-    sample = data['data'][:1000]
+    # 抽样检查（均匀抽样，避免前1000条偏差）
+    total_records = len(data['data'])
+    sample_size = min(1000, total_records)
+    # 均匀抽样：每隔 N 条取一条
+    step = max(1, total_records // sample_size)
+    sample = [data['data'][i] for i in range(0, total_records, step)][:sample_size]
     rsi_vals = [r['rsi_6'] for r in sample if r.get('rsi_6') is not None]
     if rsi_vals:
         logger.info(f"  RSI(6)样本范围: [{min(rsi_vals):.2f}, {max(rsi_vals):.2f}]")
@@ -822,7 +835,7 @@ def main() -> None:
     logger.info("=" * 70)
     logger.info(f"分批拉取 {N_DAYS} 天因子数据 (外部排序版本)")
     logger.info("=" * 70)
-    logger.info(f"  版本: 3.10")
+    logger.info(f"  版本: {_OUTPUT_VERSION}")
     logger.info(f"  目标交易日数: {N_DAYS}")
     logger.info(f"  每批股票数量: {BATCH_SIZE}")
     logger.info(f"  内存阈值: {MEMORY_THRESHOLD_MB} MB")
