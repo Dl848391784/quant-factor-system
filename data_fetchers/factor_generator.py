@@ -34,6 +34,7 @@
 - v1.21 (2026-05-25): Bug修复（docstring Example格式修正：注释放在>>>行、返回值行无注释、增加isinstance示例）
 - v1.22 (2026-05-25): 代码结构优化（清理output_cols冗余别名、mkdir和temp_path职责分离、base_data/turnover_data内存释放、missing_cols错误信息改进）
 - v1.23 (2026-05-26): 代码结构优化（tuple类型注解改为tuple[str, ...]更精确表达字符串元组）
+- v1.24 (2026-05-26): Bug修复+代码结构优化（turnover_df内存释放、docstring Example标记非运行示例、元组转列表pandas兼容）
 
 作者: 云瑶
 """
@@ -207,8 +208,9 @@ def generate_all_factors(
         - JSONDecodeError 已内部捕获并转换为 ValueError，调用方不会收到 JSONDecodeError
         
     Example:
+        # 以下为示例用法，非实际运行（generate_all_factors 需要输入数据文件）
         >>> from data_fetchers.factor_generator import generate_all_factors
-        >>> metadata = generate_all_factors()
+        >>> metadata = generate_all_factors()  # 需要 cache/factor_data/*.json.gz
         >>> metadata['factor_columns']  # 返回列表副本，防止外部修改
         ['bollinger_pb', 'kdj_j', 'turnover_surge']
         >>> isinstance(metadata['elapsed_seconds'], float)
@@ -301,6 +303,9 @@ def generate_all_factors(
         how='left'
     )
     
+    # 显式释放 turnover_df 内存（merge 完成后不再需要）
+    del turnover_df
+    
     # 检查换手率缺失情况
     turnover_missing = int(factor_df['turnover_rate'].isna().sum())
     if turnover_missing > 0:
@@ -345,7 +350,7 @@ def generate_all_factors(
             f"请检查因子计算函数的输出列名是否与 _EXTENDED_FACTOR_COLS 一致"
         )
     
-    output_df = factor_df[_OUTPUT_COLS].copy()
+    output_df = factor_df[list(_OUTPUT_COLS)].copy()  # 元组转列表，pandas 列选择需要列表
     
     # 显式释放 factor_df 内存（可能包含中间列，比 output_df 更多）
     del factor_df

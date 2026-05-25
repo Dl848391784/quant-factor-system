@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.56
+> 版本: v2.57
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 01:00 北京时间
+> 更新时间: 2026-05-26 02:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -564,6 +564,17 @@ data_fetchers/
 
 45. **MODULE.md v2.56 (2026-05-26)** — 规范补充
    - **tuple 类型注解规范**：使用 `tuple[str, ...]` 表达字符串元组，而非 `tuple`
+
+46. **factor_generator.py v1.24 (2026-05-26)** — Bug修复 + 代码结构优化
+   - **内存释放**：`del turnover_df`（merge 完成后不再需要）
+   - **docstring 语义修正**：Example 标记非运行示例（需要输入数据文件）
+   - **pandas 兼容性**：`list(_OUTPUT_COLS)`（元组转列表，列选择需要列表）
+   - **修复原因**：内存泄漏 + docstring 语义问题 + pandas 元组索引兼容性
+
+47. **MODULE.md v2.57 (2026-05-26)** — 规范补充
+   - **DataFrame 内存释放规范**：merge 完成后立即释放（不再需要的 DataFrame）
+   - **docstring Example 规范**：标记非运行示例（需要外部依赖的函数）
+   - **pandas 列选择规范**：元组常量需转列表（`list(tuple)`）
 
 ---
 
@@ -1399,6 +1410,82 @@ _EXTENDED_FACTOR_COLS: tuple = ('bollinger_pb', 'kdj_j', 'turnover_surge')  # �
 - 使用 `tuple[str, ...]` 表达字符串元组
 - Python 3.9+ 支持泛型元组
 - 类型检查器可推断元素类型
+
+### DataFrame 内存释放规范（2026-05-26 新增）
+
+**问题背景：**
+- merge 完成后，源 DataFrame 仍驻留内存
+- 直到函数结束才释放，内存占用持续
+
+**正确用法：**
+```python
+# ✅ 正确：merge 完成后立即释放
+factor_df = factor_df.merge(turnover_df[['date', 'asset', 'turnover_rate']], ...)
+del turnover_df  # merge 完成后立即释放
+
+# ❌ 错误：turnover_df 驻留内存直到函数结束
+factor_df = factor_df.merge(turnover_df[['date', 'asset', 'turnover_rate']], ...)
+# turnover_df 未释放，内存持续占用
+```
+
+**适用场景：**
+- merge 完成后源 DataFrame 不再需要
+- 大数据量场景
+- 内存敏感场景
+
+### docstring Example 规范（2026-05-26 新增）
+
+**问题背景：**
+- Example 中的函数调用会实际执行完整流程
+- 需要外部依赖（数据文件）才能运行
+- doctest 会失败（缺少依赖）
+
+**正确用法：**
+```python
+# ✅ 正确：标记非运行示例
+Example:
+    # 以下为示例用法，非实际运行（generate_all_factors 需要输入数据文件）
+    >>> from data_fetchers.factor_generator import generate_all_factors
+    >>> metadata = generate_all_factors()  # 需要 cache/factor_data/*.json.gz
+
+# ❌ 错误：未标记非运行示例（doctest 会失败）
+Example:
+    >>> from data_fetchers.factor_generator import generate_all_factors
+    >>> metadata = generate_all_factors()  # 缺少数据文件，doctest 失败
+```
+
+**原则：**
+- 需要外部依赖的函数应标记非运行示例
+- 补充依赖说明（需要哪些文件）
+- 避免 doctest 失败
+
+### pandas 列选择规范（2026-05-26 新增）
+
+**问题背景：**
+- pandas DataFrame 列选择使用元组有兼容性问题
+- 元组可能被视为 MultiIndex 而非列名列表
+- 需转换为列表才能正确选择列
+
+**正确用法：**
+```python
+# ✅ 正确：元组转列表
+_OUTPUT_COLS: tuple[str, ...] = ('date', 'asset', 'open', 'close')
+output_df = df[list(_OUTPUT_COLS)].copy()  # 元组转列表
+
+# ❌ 错误：直接使用元组（兼容性问题）
+_OUTPUT_COLS: tuple[str, ...] = ('date', 'asset', 'open', 'close')
+output_df = df[_OUTPUT_COLS].copy()  # 可能被视为 MultiIndex
+
+# ✅ 正确：迭代不受影响（for col in tuple 正常工作）
+for col in _OUTPUT_COLS:  # 元组迭代正常
+    if col not in df.columns:
+        ...
+```
+
+**原则：**
+- DataFrame 列选择使用 `list(tuple)` 转换
+- 元组迭代不受影响（for col in tuple 正常）
+- 常量定义使用元组（防止修改），使用时转为列表
 
 ### paths.py 使用规范
 
