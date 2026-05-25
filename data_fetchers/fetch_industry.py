@@ -1,27 +1,40 @@
 #!/usr/bin/env python3
 """
 股票行业分类数据获取模块
-作者: 云舟 🛠️
-功能: 获取申万行业分类数据并缓存
 
+作者: 云舟
+日期: 2026-05-27
+版本: v1.1
+
+功能: 获取申万行业分类数据并缓存
 数据源: akshare - 申万行业分类
 
-改进 1: 行业分散约束支持模块
+改进历史:
+- v1.1 (2026-05-27): 优化 - 添加版本号常量、Dict→dict、iterrows→to_dict、__main__用logger
+
+约束合规:
+- 输出到 result 目录（MODULE.md 约束 #2）
+- 版本号提取为常量（MODULE.md 约束 #16）
+- __main__ 使用 logger（PROJECT.md 日志规范）
 """
 
 import json
 import logging
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional
+
+# 版本号常量（MODULE.md 约束 #16）
+_OUTPUT_VERSION = '1.1'
 
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).parent.parent  # 项目根目录
+# 项目根目录（使用公共路径）
+BASE_DIR = Path(__file__).parent.parent
+RESULT_DIR = BASE_DIR / 'result'
 CACHE_DIR = BASE_DIR / 'cache'
 
-# 行业数据缓存路径
-INDUSTRY_CACHE_PATH = CACHE_DIR / 'stock_industry.json'
+# 行业数据缓存路径（输出到 result 目录，MODULE.md 约束 #2）
+INDUSTRY_CACHE_PATH = RESULT_DIR / 'stock_industry.json'
 
 
 # 申万2021版行业代码映射（一级代码 -> 行业名称）
@@ -68,7 +81,7 @@ SW_INDUSTRY_CODE_MAP = {
 }
 
 
-def fetch_stock_industry_sw() -> Dict:
+def fetch_stock_industry_sw() -> dict:
     """
     获取申万行业分类数据
     
@@ -76,12 +89,12 @@ def fetch_stock_industry_sw() -> Dict:
     获取股票的最新行业分类历史数据
     
     Returns:
-        Dict: {股票代码: {name, industry, industry_code}}
+        dict: {股票代码: {name, industry, industry_code}}
     """
     try:
         import akshare as ak
         
-        logger.info("[行业数据] 开始获取申万行业分类...")
+        logger.info(f"[行业数据 v{_OUTPUT_VERSION}] 开始获取申万行业分类...")
         
         # 获取申万行业分类历史数据（新版本API）
         industry_df = ak.stock_industry_clf_hist_sw()
@@ -96,12 +109,13 @@ def fetch_stock_industry_sw() -> Dict:
         stock_names_df['code'] = stock_names_df['code'].astype(str).str.zfill(6)
         stock_names_dict = dict(zip(stock_names_df['code'], stock_names_df['name']))
         
-        # 构建股票→行业映射
+        # 构建股票→行业映射（使用 to_dict 替代 iterrows，性能优化）
         industry_map = {}
         
-        for _, row in industry_df_latest.iterrows():
-            code = str(row.get('symbol', '')).strip()
-            industry_code = str(row.get('industry_code', '')).strip()
+        # 转为字典遍历（避免 iterrows 性能问题）
+        for row_dict in industry_df_latest.to_dict('records'):
+            code = str(row_dict.get('symbol', '')).strip()
+            industry_code = str(row_dict.get('industry_code', '')).strip()
             
             # 从行业代码提取一级行业（前2位）
             first_level = industry_code[:2] if len(industry_code) >= 2 else ''
@@ -127,7 +141,7 @@ def fetch_stock_industry_sw() -> Dict:
         return {}
 
 
-def load_stock_industry() -> Dict:
+def load_stock_industry() -> dict:
     """
     加载股票行业数据（优先从缓存）
     
@@ -167,7 +181,7 @@ def load_stock_industry() -> Dict:
     return refresh_industry_cache()
 
 
-def refresh_industry_cache() -> Dict:
+def refresh_industry_cache() -> dict:
     """
     刷新行业数据缓存
     
@@ -206,7 +220,7 @@ def refresh_industry_cache() -> Dict:
     return industry_map
 
 
-def load_local_industry_backup() -> Dict:
+def load_local_industry_backup() -> dict:
     """
     加载本地备用行业数据（当 akshare 不可用时）
     
@@ -300,7 +314,7 @@ def infer_industry_from_name(name: str) -> str:
 # 模块级缓存
 _industry_cache = None
 
-def get_industry_map() -> Dict:
+def get_industry_map() -> dict:
     """
     获取行业映射（带模块级缓存）
     
@@ -328,7 +342,7 @@ def get_stock_industry(code: str) -> str:
     return stock_info.get('industry', '未知')
 
 
-def get_industry_distribution(stocks: list) -> Dict:
+def get_industry_distribution(stocks: list) -> dict:
     """
     获取股票列表的行业分布
     
@@ -349,18 +363,23 @@ def get_industry_distribution(stocks: list) -> Dict:
 
 
 if __name__ == '__main__':
-    # 测试：获取并打印行业数据
-    print("[测试] 开始获取行业数据...")
+    # 测试：获取并打印行业数据（使用 logger，遵循 PROJECT.md 日志规范）
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s | %(levelname)-8s | %(name)s | %(message)s'
+    )
+    
+    logger.info(f"[测试] 开始获取行业数据 (v{_OUTPUT_VERSION})...")
     industry_map = refresh_industry_cache()
-    print(f"行业数据: {len(industry_map)} 只股票")
+    logger.info(f"行业数据: {len(industry_map)} 只股票")
     
     # 打印示例
     for code, info in list(industry_map.items())[:5]:
-        print(f"  {code}: {info['name']} -> {info['industry']}")
+        logger.info(f"  {code}: {info['name']} -> {info['industry']}")
     
     # 测试行业分布统计
     test_codes = ['000001', '603693', '001258', '000002', '600519']
-    print("\n测试行业分布:")
+    logger.info("测试行业分布:")
     for code in test_codes:
         industry = get_stock_industry(code)
-        print(f"  {code}: {industry}")
+        logger.info(f"  {code}: {industry}")
