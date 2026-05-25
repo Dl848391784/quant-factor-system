@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.83
+> 版本: v2.84
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 23:30 北京时间
+> 更新时间: 2026-05-27 00:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -29,7 +29,7 @@
 | 7 | 日志输出到 logs 目录 | 不散落在项目根目录 |
 | 8 | 流程文档配套 | docs/<脚本名>_flow.md |
 | 9 | N-way merge 去重使用正值 batch_idx | heap 元素为 `(key, batch_idx, counter, stream)`，counter 打破平局 |
-| 10 | 大文件验证分两次读 | 第一次只读 meta，第二次流式扫描 data 进行均匀抽样 |
+| 10 | 大文件验证分两次读 | 第一次加载完整提取 meta+records_count并释放，第二次流式行扫描只解析抽样行 |
 | 11 | meta 信息只保留标量 | date_start/date_end/n_assets，而非完整 dates_list/assets_list |
 | 12 | 数据验证综合判断 | 不仅检查天数达标，还需检查关键字段非空比例 >= 80% |
 | 13 | peek_key/pop_record 检查 exhausted | `if self.exhausted or self.idx >= len(self.records)`，语义一致性（两个方法对称） |
@@ -830,6 +830,13 @@ data_fetchers/
 98. **MODULE.md v2.83 (2026-05-26)** — 规范补充
    - **新增约束 #36-#41**：BatchStream.__lt__、pop_record 更新 exhausted、del 注释准确、sort_values 后 copy()、del 释放顺序、未使用返回值用 _
    - **规范补充原因**：heap 对象不可比较风险；状态不一致；注释误导；CoW 风险；内存释放顺序错误；未使用变量混淆
+
+99. **fetch_factor_cache.py v3.28 (2026-05-27)** — Bug修复（1项）
+   - **validate_final_data 真正流式扫描**：第二次改为流式行扫描，只解析抽样的行，避免两次 json.load 内存峰值翻倍
+
+100. **MODULE.md v2.84 (2026-05-27)** — 规范修正
+   - **约束 #10 修正**：明确第二次是"流式行扫描只解析抽样行"，而非"流式扫描 data"
+   - **规范修正原因**：两次 json.load 整个大文件导致内存峰值翻倍，"分两次读"目标未实现
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
