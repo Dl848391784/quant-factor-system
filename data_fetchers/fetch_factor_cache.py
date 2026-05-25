@@ -32,6 +32,7 @@
 - v3.21 (2026-05-26): Bug修复 - is_exhausted逻辑修正(and→or)、_load_next_chunk改名_load_all、main删除format返回值冗余、save_batch_cache_sorted补充接口契约说明
 - v3.22 (2026-05-26): Bug修复 - cleanup_batch_files增加try保证继续清理、get_memory_info_str用is not None判断vmrss、write_record闭包捕获f统一参数
 - v3.23 (2026-05-26): Bug修复 - validate_final_data一次性加载完整文件，避免meta手动拼接脆弱
+- v3.24 (2026-05-26): Bug修复 - valid_batch_indices移除冗余、heap注释缩进修正、valid_df增加copy避免Warning、forward_return统一写法
 
 作者: 云舟
 日期: 2026-04-04
@@ -63,7 +64,7 @@ except ImportError:
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.23'
+_OUTPUT_VERSION = '3.24'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -374,7 +375,6 @@ def n_way_merge_deduplicate(
     
     # 创建所有批次的流
     streams = []
-    valid_batch_indices = []
     
     for batch_idx in range(total_batches):
         path = CACHE_DIR / f'batch_{batch_idx}_{data_type}.json.gz'
@@ -382,13 +382,14 @@ def n_way_merge_deduplicate(
             stream = BatchStream(batch_idx, data_type)
             if not stream.is_exhausted():
                 streams.append(stream)
-                valid_batch_indices.append(batch_idx)
     
     if not streams:
         logger.info("  无有效批次")
         return (None, 0)
     
-# N-way merge 使用 heap
+    logger.info(f"  有效批次: {len(streams)}/{total_batches}")
+    
+    # N-way merge 使用 heap
     # heap元素: (key, batch_idx, counter, stream)
     # counter 为唯一递增计数器，打破同批次内相同 key 的平局
     counter = 0
@@ -571,7 +572,7 @@ def fetch_batch_stocks(
     combined['volume_ratio_5'] = combined['volume_ratio_5'].fillna(1.0).clip(0.1, 10)
     
     combined['forward_return_1d'] = combined.groupby('asset')['close'].transform(
-        lambda x: x.pct_change().shift(-1)
+        lambda x: x.shift(-1) / x - 1
     )
     combined['forward_return_3d'] = combined.groupby('asset')['close'].transform(
         lambda x: x.shift(-3) / x - 1
@@ -580,7 +581,7 @@ def fetch_batch_stocks(
         lambda x: x.shift(-5) / x - 1
     )
 
-    valid_df = combined.dropna(subset=['rsi_6', 'volume_ratio_5'])
+    valid_df = combined.dropna(subset=['rsi_6', 'volume_ratio_5']).copy()
     
     del combined
     gc.collect()
@@ -588,7 +589,7 @@ def fetch_batch_stocks(
     # pandas 3.0 兼容性修复：使用 cumcount 替代 groupby().apply(tail)
     # 避免 group_keys=False 导致分组列被移除
     valid_df['row_num'] = valid_df.groupby('asset').cumcount(ascending=False)
-    valid_df = valid_df[valid_df['row_num'] < N_DAYS].drop('row_num', axis=1)
+    valid_df = valid_df[valid_df['row_num'] < N_DAYS].copy().drop('row_num', axis=1)
     
     valid_df['date'] = valid_df['date'].dt.strftime('%Y-%m-%d')
     valid_df['open'] = valid_df['open'].round(2)
