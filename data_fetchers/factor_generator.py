@@ -29,6 +29,7 @@
 - v1.16 (2026-05-25): 代码结构优化（_BASE_COLS+_OUTPUT_COLS常量统一output_cols引用关系、__main__块移除sys重复导入、_calc_pct函数语义修正为通用百分比计算）
 - v1.17 (2026-05-25): Bug修复（output_path父目录不存在时创建、dates字段从output_df取数据来源更清晰、docstring示例值改为范围说明）
 - v1.18 (2026-05-25): Bug修复（版本历史描述修正v1.12日志换行符为规范补充而非修复、_EXTENDED_FACTOR_COLS返回副本防止外部修改）
+- v1.19 (2026-05-25): 代码结构优化（常量改为元组防止意外修改、docstring示例补充注释说明返回列表副本、factor_df显式释放内存）
 
 作者: 云瑶
 """
@@ -80,14 +81,14 @@ __all__ = [
 
 _DEFAULT_CACHE_DIR = Path(__file__).parent.parent / 'cache' / 'factor_data'
 
-# 扩展因子列名（硬编码替代，便于维护）
-_EXTENDED_FACTOR_COLS = ['bollinger_pb', 'kdj_j', 'turnover_surge']
+# 扩展因子列名（元组防止意外修改）
+_EXTENDED_FACTOR_COLS: tuple = ('bollinger_pb', 'kdj_j', 'turnover_surge')
 
-# 基础列名（索引字段 + 行情数据 + 基础因子）
-_BASE_COLS = ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5']
+# 基础列名（元组防止意外修改）
+_BASE_COLS: tuple = ('date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5')
 
-# 输出列名（基础列 + 扩展因子）
-_OUTPUT_COLS = _BASE_COLS + _EXTENDED_FACTOR_COLS
+# 输出列名（基础列 + 扩展因子，元组防止意外修改）
+_OUTPUT_COLS: tuple = _BASE_COLS + _EXTENDED_FACTOR_COLS
 
 
 # ============================================================================
@@ -192,7 +193,7 @@ def generate_all_factors(
         >>> from data_fetchers.factor_generator import generate_all_factors
         >>> metadata = generate_all_factors()
         >>> metadata['factor_columns']
-        ['bollinger_pb', 'kdj_j', 'turnover_surge']
+        ['bollinger_pb', 'kdj_j', 'turnover_surge']  # 返回列表副本
         >>> metadata['elapsed_seconds']  # 实际耗时，单位秒（范围：0.0 ~ 数百秒，取决于数据量）
         """
     start_time = datetime.now()
@@ -326,6 +327,9 @@ def generate_all_factors(
         raise KeyError(f"输出列不存在: {missing_cols}")
     
     output_df = factor_df[output_cols].copy()
+    
+    # 显式释放 factor_df 内存（可能包含中间列，比 output_df 更多）
+    del factor_df
     
     # ========== Step 7: 保存输出 ==========
     logger.info("Step 7: 保存输出...")

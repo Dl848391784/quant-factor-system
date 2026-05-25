@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.51
+> 版本: v2.52
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-25 20:00 北京时间
+> 更新时间: 2026-05-25 21:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -516,6 +516,16 @@ data_fetchers/
    - **版本历史描述修正**：v1.12 "logger换行符修复" 改为 "MODULE.md日志换行符规范补充"（错误日志允许多行格式化，符合规范）
    - **可变对象返回副本**：`list(_EXTENDED_FACTOR_COLS)` 防止外部修改模块内部状态
    - **修复原因**：版本历史描述不准确 + 可变对象引用风险
+
+36. **factor_generator.py v1.19 (2026-05-25)** — 代码结构优化
+   - **常量改为元组**：`_EXTENDED_FACTOR_COLS: tuple`、`_BASE_COLS: tuple`、`_OUTPUT_COLS: tuple`（防止意外修改）
+   - **docstring 示例补充注释**：`# 返回列表副本`（说明实际返回类型）
+   - **内存释放**：`del factor_df`（显式释放中间列内存）
+   - **优化原因**：代码结构优化（元组防止修改 + 内存管理）
+
+37. **MODULE.md v2.52 (2026-05-25)** — 规范补充
+   - **常量类型规范**：模块级常量列表应使用元组防止意外修改
+   - **内存释放规范**：大 DataFrame 使用完毕后显式释放（`del df`）
 
 ---
 
@@ -1073,6 +1083,58 @@ metadata['factor_columns'] = _EXTENDED_FACTOR_COLS  # 返回引用
 - 返回副本而非引用
 - 防止外部修改模块内部状态
 - 使用 `list()`、`dict()`、`.copy()` 等方法
+
+### 常量类型规范（2026-05-25 新增）
+
+**问题背景：**
+- 模块级常量列表是可变对象
+- 意外修改会导致模块状态变化
+- 元组是不可变对象，防止意外修改
+
+**正确用法：**
+```python
+# ✅ 正确：使用元组防止意外修改
+_EXTENDED_FACTOR_COLS: tuple = ('bollinger_pb', 'kdj_j', 'turnover_surge')
+_BASE_COLS: tuple = ('date', 'asset', 'open', 'close', 'high', 'low')
+_OUTPUT_COLS: tuple = _BASE_COLS + _EXTENDED_FACTOR_COLS  # 元组相加仍是元组
+
+# ❌ 错误：使用列表，可能被意外修改
+_EXTENDED_FACTOR_COLS = ['bollinger_pb', 'kdj_j', 'turnover_surge']
+_EXTENDED_FACTOR_COLS.append('new')  # 模块状态被修改
+```
+
+**原则：**
+- 模块级常量列表应使用元组
+- 元组不可变，防止意外修改
+- 返回副本时使用 `list(tuple)` 转换
+
+### 内存释放规范（2026-05-25 新增）
+
+**问题背景：**
+- 大 DataFrame 可能包含中间列（比输出更多）
+- 使用完毕后仍占用内存
+- 显式释放可减少内存占用
+
+**正确用法：**
+```python
+# ✅ 正确：显式释放不再需要的 DataFrame
+output_df = factor_df[output_cols].copy()
+del factor_df  # 显式释放内存
+
+# ❌ 错误：factor_df 仍占用内存（可能包含中间列）
+output_df = factor_df[output_cols].copy()
+# factor_df 未释放，内存持续占用
+```
+
+**适用场景：**
+- factor_df 包含中间列（比 output_df 更多）
+- 大数据处理完毕后
+- 内存敏感场景
+
+**原则：**
+- 显式释放不再需要的变量
+- 使用 `del var` 释放内存
+- 在变量使用完毕后立即释放
 
 ### paths.py 使用规范
 
