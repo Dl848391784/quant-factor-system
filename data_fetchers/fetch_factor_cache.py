@@ -28,6 +28,7 @@
 - v3.17 (2026-05-26): Bug修复 - _OUTPUT_VERSION移到import之后（PEP8）、pop_record检查exhausted、sys导入移除、cleanup_batch_files用try/finally
 - v3.18 (2026-05-26): Bug修复 - n_way_merge显式收集相同key记录后选最大batch_idx、datetime.now()只调用一次、save_batch_cache_sorted移除copy改为文档说明
 - v3.19 (2026-05-26): Bug修复 - validate_final_data流式读取避免内存峰值、format_final_output只保留标量而非列表、模块级注释合并到常量定义、cleanup_batch_files增加merged兜底、n_way_merge移除冗余赋值
+- v3.20 (2026-05-26): Bug修复 - validate_final_data初始化默认值+健壮meta解析、n_way_merge增加counter打破heap平局
 
 作者: 云舟
 日期: 2026-04-04
@@ -59,7 +60,7 @@ except ImportError:
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.19'
+_OUTPUT_VERSION = '3.20'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -379,15 +380,16 @@ def n_way_merge_deduplicate(
         logger.info("  无有效批次")
         return (None, 0)
     
-    logger.info(f"  有效批次数: {len(streams)}")
-    logger.info(f"  有效批次索引: {valid_batch_indices}")
-    
-    # 去重策略：收集相同 key 的所有记录，最后选 batch_idx 最大的
+# N-way merge 使用 heap
+    # heap元素: (key, batch_idx, counter, stream)
+    # counter 为唯一递增计数器，打破同批次内相同 key 的平局
+    counter = 0
     heap = []
     for stream in streams:
         key = stream.peek_key()
         if key:
-            heapq.heappush(heap, (key, stream.batch_idx, stream))
+            heapq.heappush(heap, (key, stream.batch_idx, counter, stream))
+            counter += 1
     
     # 合并结果（流式写入文件，不存内存）
     output_path = CACHE_DIR / f'merged_{data_type}.json.gz'
@@ -409,7 +411,7 @@ def n_way_merge_deduplicate(
         f.write('[\n')  # JSON数组开始
         
         while heap:
-            key, batch_idx, stream = heapq.heappop(heap)
+            key, batch_idx, _, stream = heapq.heappop(heap)
             record = stream.pop_record()
             
             # 去重：收集相同 key 的所有记录，最后选 batch_idx 最大的
@@ -435,7 +437,8 @@ def n_way_merge_deduplicate(
             # 从该stream取下一个记录
             next_key = stream.peek_key()
             if next_key:
-                heapq.heappush(heap, (next_key, batch_idx, stream))
+                heapq.heappush(heap, (next_key, batch_idx, counter, stream))
+                counter += 1
         
         # 处理最后一个 key 的所有记录
         if same_key_records:
@@ -737,7 +740,7 @@ def format_final_output(
 
 def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, int]:
     """
-    验证最终数据文件的完整性（流式读取，避免内存峰值）
+    验证最终数据文件的完整性（流式读取 meta + 均匀抽样 data）
     
     Args:
         logger: 日志记录器
@@ -752,61 +755,72 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
     
     factor_path = CACHE_DIR / 'factor_data.json.gz'
     
-    # 流式读取：先读取 meta，再流式迭代 data 进行抽样
-    meta = None
+    # 初始化默认值（防止解析失败时未初始化）
+    n_days = 0
+    n_assets = 0
+    date_start = ""
+    date_end = ""
+    
+    # 第一阶段：流式读取 meta 部分
+    meta_lines = []
+    in_meta = False
+    
+    with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
+        for line in f:
+            # 检测 meta 开始
+            if '"meta": {' in line:
+                in_meta = True
+                continue
+            # 检测 meta 结束（data 开始）
+            if in_meta and '"data": [' in line:
+                break
+            # 收集 meta 行
+            if in_meta:
+                meta_lines.append(line)
+    
+    # 解析 meta（使用 json.loads 解析完整 meta 对象）
+    if meta_lines:
+        meta_text = '{\n' + '\n'.join(meta_lines).rstrip().rstrip(',') + '\n}'
+        try:
+            meta = json.loads(meta_text)
+            n_days = meta.get('n_days', 0)
+            n_assets = meta.get('n_assets', 0)
+            date_range = meta.get('date_range', {})
+            date_start = date_range.get('start', '')
+            date_end = date_range.get('end', '')
+        except json.JSONDecodeError as e:
+            logger.info(f"  ⚠ meta 解析失败: {e}")
+    
+    # 第二阶段：流式读取 data 进行均匀抽样
     records_count = 0
     sample_records = []
     sample_size = 1000
-    step = None  # 均匀抽样步长，在读取第一条后确定
+    # 使用 n_days * n_assets 估算总记录数，若解析失败则使用保守步长
+    estimated_total = n_days * n_assets if n_days > 0 and n_assets > 0 else sample_size * 100
+    step = max(1, estimated_total // sample_size)
     
     with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
-        # 手动解析 JSON 结构：{"meta": {...}, "data": [...]}
         in_data = False
-        current_record = None
-        
         for line in f:
             line = line.strip()
-            
-            # 检测 meta 结束、data 开始
+            # 检测 data 开始
             if '"data": [' in line:
                 in_data = True
                 continue
+            # 检测 data 结束
             if in_data and line == ']':
-                break  # data 数组结束
-            
-            if not in_data:
-                # 收集 meta 信息（简单解析）
-                if '"n_days":' in line:
-                    n_days = int(line.split(':')[1].strip().rstrip(','))
-                if '"n_assets":' in line:
-                    n_assets = int(line.split(':')[1].strip().rstrip(','))
-                if '"date_range":' in line:
-                    # 下一行是 start
+                break
+            # 解析 data 中的记录
+            if in_data and line.startswith('{'):
+                clean_line = line.rstrip(',')
+                try:
+                    record = json.loads(clean_line)
+                    records_count += 1
+                    # 均匀抽样：每隔 step 条取一条
+                    if records_count % step == 0 and len(sample_records) < sample_size:
+                        sample_records.append(record)
+                except json.JSONDecodeError:
                     continue
-                if '"start":' in line and 'date_range' not in line:
-                    date_start = line.split('"')[3]
-                if '"end":' in line:
-                    date_end = line.split('"')[3]
-            else:
-                # 解析 data 中的记录
-                if line.startswith('{'):
-                    # 去除逗号，解析 JSON 对象
-                    clean_line = line.rstrip(',')
-                    try:
-                        record = json.loads(clean_line)
-                        records_count += 1
-                        
-                        # 均匀抽样：第一条记录时确定步长
-                        if step is None:
-                            # 假设总记录数约为 n_days * n_assets
-                            estimated_total = n_days * n_assets
-                            step = max(1, estimated_total // sample_size)
-                        
-                        # 每隔 step 条取一条
-                        if records_count % step == 0 and len(sample_records) < sample_size:
-                            sample_records.append(record)
-                    except json.JSONDecodeError:
-                        continue
     
     # 释放内存
     gc.collect()
