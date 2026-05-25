@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.45
+> 版本: v2.46
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-25 14:30 北京时间
+> 更新时间: 2026-05-25 15:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -462,6 +462,16 @@ data_fetchers/
    - **日志换行符规范**：新增章节说明换行符使用场景（错误日志多行格式化允许、__main__ 测试块视觉分隔允许、一般 info 日志不建议）
    - **规范补充原因**：用户发现 logger.info 中 `\n` 换行符可能产生 handler 解析问题，需明确允许/禁止场景
 
+25. **factor_generator.py v1.13 (2026-05-25)** — Bug修复
+   - **缩进错误修正**：Step 8 注释缩进从 0 修正为 4（脱离函数体风险）
+   - **numpy.int64 类型转换**：bollinger_valid/kdj_valid/surge_valid 显式转换为 int（JSON 序列化兼容）
+   - **__main__ 块重构**：改为 CLI 入口调用 main()，测试代码移至 test_cases/test_factor_generator.py（测试与 CLI 分离）
+   - **修复原因**：代码 bug（缩进格式错误、类型不匹配、__main__ 结构不合理）
+
+26. **test_cases/test_factor_generator.py (2026-05-25)** — 新增测试脚本
+   - **测试与 CLI 分离**：独立测试脚本，与 __main__ CLI 入口分离
+   - **测试内容**：函数定义验证、get_module_logger 验证、generate_all_factors 验证、返回字段验证、因子列验证、有效记录数验证
+
 ---
 
 data_fetchers 模块负责：
@@ -710,6 +720,33 @@ if __name__ == '__main__':
 **适用场景：**
 - 模块自测试（__main__ 测试块）
 - CLI 入口测试
+
+**__main__ 块结构规范（2026-05-25 补充）：**
+
+原则：`__main__` 块应作为 CLI 入口调用 `main()` 函数，测试代码应移至独立测试脚本。
+
+```python
+# ✅ 正确：__main__ 块作为 CLI 入口
+if __name__ == '__main__':
+    import sys
+    sys.exit(main())
+
+# ❌ 错误：__main__ 块直接运行测试代码
+if __name__ == '__main__':
+    test_logger = setup_logger(...)
+    metadata = generate_all_factors(logger=test_logger)
+    # ... 60行测试代码 ...
+```
+
+**测试代码位置规范：**
+- 测试脚本应放在 `test_cases/test_xxx.py`
+- 示例：`data_fetchers/test_cases/test_factor_generator.py`
+- 测试脚本独立运行，与 CLI 入口分离
+
+**为何必须分离：**
+1. `__main__` 块应保持简洁，便于 CLI 调用
+2. 测试代码复杂时会影响 CLI 入口可读性
+3. 测试脚本可独立执行，便于 CI/CD 集成
 
 ### 条件导入位置规范（2026-05-25 新增）
 

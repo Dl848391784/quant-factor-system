@@ -23,6 +23,7 @@
 - v1.10 (2026-05-25): 导入冗余清理（合并 gzip 导入、移除 main() 函数内冗余 logging 导入）
 - v1.11 (2026-05-25): Bug修复（条件导入合并到顶部、__main__循环导入修复、PermissionError重复捕获简化、temp_path后缀处理修复）
 - v1.12 (2026-05-25): Bug修复（output_cols注释修正OHLCV顺序、dates排序补充注释、total_records除零保护、版本历史移除硬编码行号、argparse版本描述修正、logger换行符修复）
+- v1.13 (2026-05-25): Bug修复（缩进错误修正Step8注释、numpy.int64类型转换JSON兼容、__main__块改为CLI入口调用main()、测试代码移至test_cases/test_factor_generator.py）
 
 作者: 云瑶
 """
@@ -249,7 +250,7 @@ def generate_all_factors(
     
     factor_df = calculate_bollinger_pb(factor_df)
     
-    bollinger_valid = factor_df['bollinger_pb'].notna().sum()
+    bollinger_valid = int(factor_df['bollinger_pb'].notna().sum())
     logger.info("  有效 bollinger_pb: %d (%.2f%%)", bollinger_valid, bollinger_valid / len(factor_df) * 100)
     
     # ========== Step 4: 计算 kdj_j ==========
@@ -257,7 +258,7 @@ def generate_all_factors(
     
     factor_df = calculate_kdj_j(factor_df)
     
-    kdj_valid = factor_df['kdj_j'].notna().sum()
+    kdj_valid = int(factor_df['kdj_j'].notna().sum())
     logger.info("  有效 kdj_j: %d (%.2f%%)", kdj_valid, kdj_valid / len(factor_df) * 100)
     
     # ========== Step 5: 计算 turnover_surge ==========
@@ -265,7 +266,7 @@ def generate_all_factors(
     
     factor_df = calculate_turnover_surge(factor_df)
     
-    surge_valid = factor_df['turnover_surge'].notna().sum()
+    surge_valid = int(factor_df['turnover_surge'].notna().sum())
     logger.info("  有效 turnover_surge: %d (%.2f%%)", surge_valid, surge_valid / len(factor_df) * 100)
     
     # ========== Step 6: 格式化输出 ==========
@@ -324,7 +325,7 @@ def generate_all_factors(
     end_time = datetime.now()
     elapsed_seconds = (end_time - start_time).total_seconds()
     
-# ========== Step 8: 返回元数据 ==========
+    # ========== Step 8: 返回元数据 ==========
     # metadata 字段说明：
     # - generated_at: 生成时间（格式 YYYY-MM-DD HH:MM:SS）
     # - elapsed_seconds: 运行耗时（秒，精度 .2f）
@@ -417,72 +418,10 @@ def main() -> int:
 
 
 # ============================================================================
-# __main__ 测试
+# __main__ CLI 入口
 # ============================================================================
 
 if __name__ == '__main__':
-    # 测试模式：使用真实数据进行验证
-    # 注意：setup_logger 已在顶部条件导入块导入，sys.path 已处理
-    
-    # 设置测试 logger（遵循 PROJECT.md 第780-839行规范，使用真实模块名）
-    test_logger = setup_logger('data_fetchers.factor_generator', level=logging.INFO)
-    
-    test_logger.info("=" * 40)
-    test_logger.info("factor_generator.py 自测试")
-    test_logger.info("=" * 40)
-    
-    try:
-        # 测试 1: 函数定义验证（直接使用已定义的函数，避免循环导入）
-        test_logger.info("\n[测试 1] 函数定义验证...")
-        test_logger.info("  generate_all_factors 已定义")
-        test_logger.info("  get_module_logger 已定义")
-        
-        # 测试 2: get_module_logger 验证
-        test_logger.info("\n[测试 2] get_module_logger 验证...")
-        module_logger = get_module_logger()
-        test_logger.info("  模块 logger 名称: %s", module_logger.name)
-        assert module_logger.name == 'data_fetchers.factor_generator', "logger 名称不正确"
-        test_logger.info("  logger 名称验证通过")
-        
-        # 测试 3: generate_all_factors 验证（使用真实数据）
-        test_logger.info("\n[测试 3] generate_all_factors 验证...")
-        test_logger.info("  使用真实数据进行测试...")
-        
-        metadata = generate_all_factors(logger=test_logger)
-        
-        # 验证返回字段
-        test_logger.info("\n[测试 4] 返回字段验证...")
-        required_fields = [
-            'generated_at', 'elapsed_seconds', 'total_records',
-            'valid_records', 'valid_records_percent', 'factor_columns',
-            'input_sources', 'output_path'
-        ]
-        for field in required_fields:
-            assert field in metadata, f"缺少必需字段: {field}"
-            test_logger.info("  字段 %s 存在: %s", field, metadata[field])
-        
-        # 验证因子列
-        test_logger.info("\n[测试 5] 因子列验证...")
-        expected_factors = ['bollinger_pb', 'kdj_j', 'turnover_surge']
-        assert metadata['factor_columns'] == expected_factors, "因子列不正确"
-        test_logger.info("  因子列验证通过: %s", metadata['factor_columns'])
-        
-        # 验证有效记录数
-        test_logger.info("\n[测试 6] 有效记录数验证...")
-        for factor, count in metadata['valid_records'].items():
-            test_logger.info("  %s 有效记录数: %d", factor, count)
-            assert count > 0, f"{factor} 有效记录数为 0"
-        
-        test_logger.info("\n" + "=" * 40)
-        test_logger.info("所有测试通过")
-        test_logger.info("运行耗时: %.2f 秒", metadata['elapsed_seconds'])
-        test_logger.info("=" * 40)
-        
-    except Exception as e:
-        test_logger.error("测试失败: %s", str(e))
-        raise
-    finally:
-        # 清理测试 logger 处理器
-        for handler in list(test_logger.handlers):
-            handler.close()
-            test_logger.removeHandler(handler)
+    # CLI 入口：调用 main() 函数，测试代码已移至 test_cases/test_factor_generator.py
+    import sys
+    sys.exit(main())
