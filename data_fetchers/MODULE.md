@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.70
+> 版本: v2.71
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 17:00 北京时间
+> 更新时间: 2026-05-26 17:30 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -28,7 +28,7 @@
 | 6 | 函数入口 DataFrame 先 copy() | 防止副作用 |
 | 7 | 日志输出到 logs 目录 | 不散落在项目根目录 |
 | 8 | 流程文档配套 | docs/<脚本名>_flow.md |
-| 9 | N-way merge 去重使用 batch_idx | heap 元素为 `(key, batch_idx, stream)`，而非 `(key, stream_idx, stream)` |
+| 9 | N-way merge 去重使用正值 batch_idx | heap 元素为 `(key, batch_idx, stream)`，使用正值让高 batch_idx 后弹出（去重替换逻辑） |
 | 10 | itertuples 前验证列存在 | `hasattr(row, 'col')` 对同一 DataFrame 所有行结果相同，无效防御性检查 |
 | 11 | 大文件分阶段加载 | 避免 two large lists 同时存在于内存中，先处理第一个并 del 再加载第二个 |
 | 12 | 数据验证综合判断 | 不仅检查天数达标，还需检查关键字段非空比例 >= 80% |
@@ -672,6 +672,14 @@ data_fetchers/
 72. **MODULE.md v2.70 (2026-05-26)** — 规范补充
    - **新增约束 #12-#16**：数据验证综合判断、peek_key 检查 exhausted、Windows 兜底、docstring 无 Returns、version 常量
    - **规范补充原因**：代码审查发现验证逻辑宽松、语义不一致、跨平台兼容性缺失、版本号维护困难
+
+73. **fetch_factor_cache.py v3.15 (2026-05-26)** — Bug修复（2项）
+   - **n_way_merge 去重逻辑修正**：使用正值 `batch_idx`（而非负值），让高 batch_idx 后弹出，最终保留高 batch_idx 记录
+   - **变量名语义修正**：`stream_idx` → `batch_idx`，消除"流索引"vs"负批次号"的语义混乱
+
+74. **MODULE.md v2.71 (2026-05-26)** — 规范修正
+   - **约束 #9 修正**："N-way merge 去重使用正值 batch_idx"（而非"使用 batch_idx"）
+   - **修正原因**：负值会导致高 batch_idx 先弹出，与去重替换逻辑矛盾
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
