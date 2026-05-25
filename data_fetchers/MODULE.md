@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.85
+> 版本: v2.86
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-27 00:30 北京时间
+> 更新时间: 2026-05-27 01:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -59,7 +59,7 @@
 | 43 | set 内存立即释放 | 提取完元信息后立即 del date_set, asset_set |
 | 44 | 合并路径双校验 | factor_merged_path 和 return_merged_path 都校验，避免 None 路径触发 TypeError |
 | 19 | 常量定义在 import 之后 | PEP 8 顺序：docstring → __future__ → 标准库 → 第三方 → 本地 → 常量 |
-| 20 | cleanup_batch_files 用 try/finally | 保证临时文件清理（无论成功或失败） |
+| 20 | cleanup_batch_files 用 try/except | 捕获异常继续清理，而非 try/finally（保证尽可能清理） |
 
 ### 关键函数签名
 
@@ -847,6 +847,14 @@ data_fetchers/
 102. **MODULE.md v2.85 (2026-05-27)** — 规范补充
    - **新增约束 #42-#44**：一次遍历提取元信息、set 内存立即释放、合并路径双校验
    - **规范补充原因**：四次遍历内存峰值（两份 set 同时存在）；return_merged_path 为 None 触发 TypeError
+
+103. **fetch_factor_cache.py v3.30 (2026-05-27)** — 代码改进（2项）
+   - **format_final_output n_records 定义**：移到日志前，明确仅用于日志
+   - **cleanup_batch_files docstring 修正**：描述为 try/except（而非 try/finally），与实际实现一致
+
+104. **MODULE.md v2.86 (2026-05-27)** — 规范修正
+   - **约束 #20 修正**：cleanup_batch_files 用 try/except（而非 try/finally）
+   - **规范修正原因**：docstring 描述与实现不一致，try/except 捕获异常继续清理，try/finally 保证执行清理块
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
