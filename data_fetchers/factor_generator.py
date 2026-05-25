@@ -22,12 +22,13 @@
 - v1.9 (2026-05-25): 冗余导入清理（移除条件导入块的 _Path）
 - v1.10 (2026-05-25): 导入冗余清理（合并 gzip 导入、移除 main() 函数内冗余 logging 导入）
 - v1.11 (2026-05-25): Bug修复（条件导入合并到顶部、__main__循环导入修复、PermissionError重复捕获简化、temp_path后缀处理修复）
-- v1.12 (2026-05-25): Bug修复（output_cols注释修正OHLCV顺序、dates排序补充注释、total_records除零保护、版本历史移除硬编码行号、argparse版本描述修正、logger换行符修复）
+- v1.12 (2026-05-25): Bug修复（output_cols注释修正OHLCV顺序、dates排序补充注释、total_records除零保护、版本历史移除硬编码行号、argparse版本描述修正）+ MODULE.md日志换行符规范补充（错误日志允许多行格式化）
 - v1.13 (2026-05-25): Bug修复（缩进错误修正Step8注释、numpy.int64类型转换JSON兼容、__main__块改为CLI入口调用main()、测试代码移至test_cases/test_factor_generator.py）
 - v1.14 (2026-05-25): Bug修复（除零保护统一使用_calc_pct模块级函数、_EXTENDED_FACTOR_COLS常量替代硬编码切片、docstring补充空数据异常声明、turnover_missing显式int转换）
 - v1.15 (2026-05-25): Bug修复（docstring移除JSONDecodeError声明、temp_path.unlink改用missing_ok=True消除TOCTOU竞争窗口）
 - v1.16 (2026-05-25): 代码结构优化（_BASE_COLS+_OUTPUT_COLS常量统一output_cols引用关系、__main__块移除sys重复导入、_calc_pct函数语义修正为通用百分比计算）
 - v1.17 (2026-05-25): Bug修复（output_path父目录不存在时创建、dates字段从output_df取数据来源更清晰、docstring示例值改为范围说明）
+- v1.18 (2026-05-25): Bug修复（版本历史描述修正v1.12日志换行符为规范补充而非修复、_EXTENDED_FACTOR_COLS返回副本防止外部修改）
 
 作者: 云瑶
 """
@@ -386,7 +387,7 @@ def generate_all_factors(
             'kdj_j': _calc_pct(kdj_valid, total_records),
             'turnover_surge': _calc_pct(surge_valid, total_records),
         },
-        'factor_columns': _EXTENDED_FACTOR_COLS,  # 扩展因子列（硬编码常量）
+        'factor_columns': list(_EXTENDED_FACTOR_COLS),  # 扩展因子列（返回副本，防止外部修改）
         'input_sources': {
             'factor_data': str(factor_data_path),
             'turnover_data': str(turnover_data_path)

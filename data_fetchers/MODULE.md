@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.50
+> 版本: v2.51
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-25 19:00 北京时间
+> 更新时间: 2026-05-25 20:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -511,6 +511,11 @@ data_fetchers/
 34. **MODULE.md v2.50 (2026-05-25)** — 规范补充
    - **输出目录创建规范**：写入前确保父目录存在，`mkdir(parents=True, exist_ok=True)`
    - **docstring 示例规范**：避免过于具体的示例值，改为范围说明或注释
+
+35. **factor_generator.py v1.18 (2026-05-25)** — Bug修复
+   - **版本历史描述修正**：v1.12 "logger换行符修复" 改为 "MODULE.md日志换行符规范补充"（错误日志允许多行格式化，符合规范）
+   - **可变对象返回副本**：`list(_EXTENDED_FACTOR_COLS)` 防止外部修改模块内部状态
+   - **修复原因**：版本历史描述不准确 + 可变对象引用风险
 
 ---
 
@@ -1039,6 +1044,35 @@ with open(temp_path, 'w') as f:  # 父目录不存在时报错
 - 避免过于具体的假设值
 - 改为范围说明或注释
 - 适用于不确定的值（耗时、数据量等）
+
+### 可变对象返回副本规范（2026-05-25 新增）
+
+**问题背景：**
+- 模块级常量（列表、字典等）是可变对象
+- 直接返回引用，调用方可修改
+- 修改会影响模块内部状态（意外副作用）
+
+**正确用法：**
+```python
+# ✅ 正确：返回副本，防止外部修改
+_EXTENDED_FACTOR_COLS = ['bollinger_pb', 'kdj_j', 'turnover_surge']
+metadata['factor_columns'] = list(_EXTENDED_FACTOR_COLS)  # 返回副本
+
+# ❌ 错误：返回引用，外部可修改模块内部状态
+_EXTENDED_FACTOR_COLS = ['bollinger_pb', 'kdj_j', 'turnover_surge']
+metadata['factor_columns'] = _EXTENDED_FACTOR_COLS  # 返回引用
+# 调用方: cols = metadata['factor_columns']; cols.append('new')  # 修改了模块常量
+```
+
+**适用场景：**
+- 模块级列表常量返回
+- 模块级字典常量返回
+- 任何可变对象返回给外部
+
+**原则：**
+- 返回副本而非引用
+- 防止外部修改模块内部状态
+- 使用 `list()`、`dict()`、`.copy()` 等方法
 
 ### paths.py 使用规范
 
