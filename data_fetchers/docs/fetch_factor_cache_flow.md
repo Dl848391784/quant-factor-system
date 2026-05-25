@@ -1,0 +1,176 @@
+# fetch_factor_cache.py 流程文档
+
+> 版本: v1.0
+> 创建时间: 2026-05-26
+> 更新时间: 2026-05-26 03:30 北京时间
+
+---
+
+## 概述
+
+**脚本用途：** 分批拉取500天因子数据，使用外部排序流式合并实现极致内存优化。
+
+**核心策略：**
+1. 将股票分成多批（每批250只）
+2. 每批拉取后立即保存到独立的 gzip 文件
+3. 外部排序合并：N-way merge 合并已排序的批次
+4. 内存峰值：仅一个批次数据 + N个最小记录
+
+---
+
+## 整体架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      main()                                  │
+│  1. 获取股票列表                                             │
+│  2. 分批拉取数据                                             │
+│  3. N-way merge 合并                                         │
+│  4. 格式化最终输出                                           │
+│  5. 验证数据完整性                                           │
+│  6. 清理临时文件                                             │
+└─────────────────────────────────────────────────────────────┘
+        │                    │                    │
+        ▼                    ▼                    ▼
+  fetch_batch_stocks   n_way_merge_deduplicate  format_final_output
+        │                    │                    │
+        ▼                    ▼                    ▼
+  save_batch_cache_sorted  BatchStream          validate_final_data
+```
+
+---
+
+## 流程步骤
+
+### Step 1: 获取股票列表
+
+```python
+loader = RealDataLoader(enable_cache=True, use_mock=False, use_local=False, retries=3)
+stock_list = loader.get_main_board_stocks(max_stocks=0)
+```
+
+**输出：**
+- 主板股票列表（约5000只）
+
+---
+
+### Step 2: 分批拉取数据
+
+```python
+batches = [stock_list[i:i+BATCH_SIZE] for i in range(0, total_stocks, BATCH_SIZE)]
+for batch_idx, stock_batch in enumerate(batches):
+    factor_df, return_df = fetch_batch_stocks(loader, stock_batch, batch_idx, total_batches)
+    save_batch_cache_sorted(batch_idx, factor_df, return_df)
+```
+
+**关键函数：**
+- `fetch_batch_stocks()`: 拉取一批股票数据
+- `save_batch_cache_sorted()`: 保存单批次数据到临时文件（预先排序）
+
+**内存管理：**
+- 每个子批次后强制 GC
+- 内存超阈值时暂停（MEMORY_THRESHOLD_MB = 900MB）
+
+---
+
+### Step 3: N-way merge 合并
+
+```python
+factor_merged_path, factor_count = n_way_merge_deduplicate(total_batches, 'factor')
+return_merged_path, return_count = n_way_merge_deduplicate(total_batches, 'return')
+```
+
+**关键类：**
+- `BatchStream`: 批次数据流式读取器
+
+**合并策略：**
+- 使用 heap 进行 N-way merge
+- 去重：相同 (date, asset) 只保留最后一次出现的值
+
+---
+
+### Step 4: 格式化最终输出
+
+```python
+n_days, n_assets, n_records = format_final_output(factor_merged_path, return_merged_path)
+```
+
+**输出文件：**
+- `factor_data.json.gz`: 因子数据
+- `return_data.json.gz`: 收益数据
+
+**数据结构：**
+```json
+{
+  "meta": {
+    "generated_at": "2026-04-09T...",
+    "source": "sina_api_batch_external_merge",
+    "n_days": 500,
+    "n_assets": 5000,
+    "date_range": { "start": "...", "end": "..." },
+    "version": "3.4_with_ohlc",
+    "fields": ["date", "asset", "open", "close", "high", "low", "rsi_6", "volume_ratio_5"]
+  },
+  "data": [...]
+}
+```
+
+---
+
+### Step 5: 验证数据完整性
+
+```python
+is_valid, actual_days, actual_assets, actual_records = validate_final_data()
+```
+
+**验证项：**
+- 交易日数 >= N_DAYS * 0.9
+- RSI(6) 样本范围检查
+
+---
+
+### Step 6: 清理临时文件
+
+```python
+cleanup_batch_files(total_batches)
+```
+
+**删除文件：**
+- `batch_{idx}_factor.json.gz`
+- `batch_{idx}_return.json.gz`
+
+---
+
+## 配置参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| N_DAYS | 500 | 目标交易日数 |
+| BATCH_SIZE | 250 | 每批股票数量 |
+| FETCH_DAYS | int(N_DAYS * 1.5) + 30 | 实际拉取天数 |
+| MEMORY_THRESHOLD_MB | 900 | 内存警告阈值 |
+| MEMORY_PAUSE_SECONDS | 15 | 内存超阈值暂停时间 |
+
+---
+
+## 输出目录
+
+```
+cache/factor_data/
+├── factor_data.json.gz      # 最终因子数据
+├── return_data.json.gz      # 最终收益数据
+├── regenerate_stats.json    # 运行统计
+└── batch_*.json.gz          # 临时批次文件（合并后删除）
+```
+
+---
+
+## 版本历史
+
+- v3.4_with_ohlc (2026-04-09): 新增 open/high/low 字段，支持选股回测
+- v3.3 (2026-04-04): 外部排序 N-way merge，峰值内存优化
+- v1.0 (2026-05-26): 流程文档创建
+
+---
+
+*最后更新: 2026-05-26 03:30 北京时间*

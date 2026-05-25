@@ -3,7 +3,7 @@
 分批拉取500天因子数据 - 外部排序流式合并（极致内存优化）
 
 策略：
-1. 将股票分成多批（每批400只）
+1. 将股票分成多批（每批250只）
 2. 每批拉取后立即保存到独立的 gzip 文件
 3. 外部排序合并：
    - 每批次数据已按 (date, asset) 排序
@@ -11,20 +11,16 @@
    - 去重时只保留最新值（同key后写入覆盖前写入）
 4. 内存峰值：仅一个批次数据 + N个最小记录（N=批次数）
 
-版本: 3.4_with_ohlc
+版本历史：
+- v3.4_with_ohlc (2026-04-09): 新增 open/high/low 字段，支持选股回测计算一字涨停、封死涨停等指标
+- v3.5 (2026-05-26): 日志规范迁移（print → logger）、版本历史格式规范化、docstring 补充
+
 作者: 云舟
 日期: 2026-04-04
-更新: 2026-04-09
-修复: 
-  - 使用/proc/self/status获取真实RSS内存（修复监控不准确）
-  - 外部排序N-way merge，峰值内存仅为单批次大小（修复合并OOM）
-  - 新增 open/high/low 字段，支持选股回测计算一字涨停、封死涨停等指标
 """
 
 import sys
 import os
-# 添加项目根目录到路径，以便导入 real_data_loader
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from real_data_loader import RealDataLoader
 from datetime import datetime
@@ -33,6 +29,13 @@ import gzip
 import gc
 import time
 import heapq  # 用于N-way merge
+
+# 公共模块导入
+try:
+    from data_fetchers.common import setup_logger, get_logs_dir
+except ImportError:
+    # 条件导入：脚本直接运行时可能路径未配置
+    from common import setup_logger, get_logs_dir
 
 # 配置
 N_DAYS = 500  # 目标交易日数
@@ -46,8 +49,18 @@ CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'cache', 'f
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 
-def get_memory_usage_mb():
-    """获取当前进程真实RSS内存（MB）- 从 /proc/self/status"""
+def get_memory_usage_mb() -> float:
+    """
+    获取当前进程真实RSS内存（MB）- 从 /proc/self/status
+    
+    Returns:
+        float: RSS内存大小（MB），Linux下从/proc/self/status读取，
+               其他系统使用resource.getrusage()
+    
+    Note:
+        - Linux: 读取VmRSS字段（实际物理内存使用）
+        - 其他系统: 使用ru_maxrss（最大RSS值，可能不准确）
+    """
     try:
         with open('/proc/self/status', 'r') as f:
             for line in f:
@@ -59,8 +72,17 @@ def get_memory_usage_mb():
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
 
 
-def get_memory_info_str():
-    """获取详细内存信息"""
+def get_memory_info_str() -> str:
+    """
+    获取详细内存信息字符串
+    
+    Returns:
+        str: 格式化的内存信息，如 "RSS=700.5MB, VM=900.0MB"
+    
+    Note:
+        - Linux: 同时读取VmRSS和VmSize
+        - 其他系统: 仅返回RSS信息
+    """
     try:
         with open('/proc/self/status', 'r') as f:
             vmrss = vmsize = None
@@ -76,8 +98,23 @@ def get_memory_info_str():
     return f"RSS={get_memory_usage_mb():.1f}MB"
 
 
-def save_batch_cache_sorted(batch_idx, factor_df, return_df):
-    """保存单批次数据到临时文件（预先排序，流式写入）"""
+def save_batch_cache_sorted(batch_idx: int, factor_df, return_df) -> None:
+    """
+    保存单批次数据到临时文件（预先排序，流式写入）
+    
+    Args:
+        batch_idx: 批次索引（从0开始）
+        factor_df: 因子数据DataFrame，包含 date/asset/open/close/high/low/rsi_6/volume_ratio_5
+        return_df: 收益数据DataFrame，包含 date/asset/forward_return_1d/3d/5d
+    
+    Side Effects:
+        - 创建 batch_{batch_idx}_factor.json.gz 和 batch_{batch_idx}_return.json.gz
+        - 释放 factor_df 和 return_df 内存
+    
+    Note:
+        - 数据按 (date, asset) 排序，便于后续 N-way merge
+        - 使用流式写入避免 to_dict('records') 内存峰值
+    """
     factor_path = os.path.join(CACHE_DIR, f'batch_{batch_idx}_factor.json.gz')
     return_path = os.path.join(CACHE_DIR, f'batch_{batch_idx}_return.json.gz')
     

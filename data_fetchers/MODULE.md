@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.58
+> 版本: v2.59
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 03:00 北京时间
+> 更新时间: 2026-05-26 04:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -576,10 +576,20 @@ data_fetchers/
    - **docstring Example 规范**：标记非运行示例（需要外部依赖的函数）
    - **pandas 列选择规范**：元组常量需转列表（`list(tuple)`）
 
-48. **factor_generator.py v1.25 (2026-05-26)** — Bug修复 + 文档修正
-   - **类型注解补充说明**：`_calc_pct` 补充兼容类型说明（int、numpy.int64、float）
-   - **docstring Raises 修正**：删除"输入数据为空"场景（代码无对应检查）
-   - **兜底块错误信息补充**：增加 `type(e).__name__`: `{e}`（异常详情）
+49. **factor_generator.py v1.25 (2026-05-26)** — Bug修复 + 文档修正
+   - **类型注解兼容性**：_calc_pct 补充兼容类型说明（int、numpy.int64、float）
+   - **docstring Raises修正**：删除"输入数据为空"场景（代码无对应检查）
+   - **兜底块异常信息**：补充 `{type(e).__name__}: {e}`
+
+50. **fetch_factor_cache.py v3.5 (2026-05-26)** — 代码结构优化（第一轮）
+   - **版本历史规范化**：采用标准格式（版本号 + 日期 + 描述）
+   - **sys.path.insert移除**：删除冗余路径配置
+   - **公共模块导入**：添加 setup_logger、get_logs_dir 导入
+   - **docstring补充**：get_memory_usage_mb、get_memory_info_str、save_batch_cache_sorted
+   - **流程文档创建**：docs/fetch_factor_cache_flow.md
+   - **测试用例创建**：test_cases/fetch_factor_cache_test_cases.md
+
+51. **MODULE.md v2.59 (2026-05-26)** — 规范补充
    - **修复原因**：docstring 描述与实际行为不符 + 错误信息不完整
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
