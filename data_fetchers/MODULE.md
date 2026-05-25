@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.86
+> 版本: v2.87
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-27 01:00 北京时间
+> 更新时间: 2026-05-27 02:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -58,6 +58,7 @@
 | 42 | 一次遍历提取元信息 | 避免 min/max/set 四次遍历，一次遍历同时收集 date_set/asset_set/first_date/last_date |
 | 43 | set 内存立即释放 | 提取完元信息后立即 del date_set, asset_set |
 | 44 | 合并路径双校验 | factor_merged_path 和 return_merged_path 都校验，避免 None 路径触发 TypeError |
+| 45 | 返回值与调用方一致 | 未使用的返回值不计算，函数签名与调用方匹配（避免 `_` 接收） |
 | 19 | 常量定义在 import 之后 | PEP 8 顺序：docstring → __future__ → 标准库 → 第三方 → 本地 → 常量 |
 | 20 | cleanup_batch_files 用 try/except | 捕获异常继续清理，而非 try/finally（保证尽可能清理） |
 
@@ -852,9 +853,18 @@ data_fetchers/
    - **format_final_output n_records 定义**：移到日志前，明确仅用于日志
    - **cleanup_batch_files docstring 修正**：描述为 try/except（而非 try/finally），与实际实现一致
 
-104. **MODULE.md v2.86 (2026-05-27)** — 规范修正
+105. **MODULE.md v2.86 (2026-05-27)** — 规范修正
    - **约束 #20 修正**：cleanup_batch_files 用 try/except（而非 try/finally）
-   - **规范修正原因**：docstring 描述与实现不一致，try/except 捕获异常继续清理，try/finally 保证执行清理块
+   - **规范修正原因**：docstring 描述与实现不一致
+
+106. **fetch_factor_cache.py v3.31 (2026-05-27)** — Bug修复
+   - **n_way_merge_deduplicate 返回值简化**：只返回 merged_path（而非 `(merged_path, count)`）
+   - **调用方适配**：不再用 `_` 接收第二个返回值
+   - **修复原因**：count 未被使用，统计信息由 validate_final_data 提供（单一来源）
+
+107. **MODULE.md v2.87 (2026-05-27)** — 规范补充
+   - **新增约束 #45**：返回值与调用方一致
+   - **规范补充原因**：返回值未被使用但函数做了计算，浪费资源，try/except 捕获异常继续清理，try/finally 保证执行清理块
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
