@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.54
+> 版本: v2.55
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-25 23:00 北京时间
+> 更新时间: 2026-05-26 00:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -545,6 +545,18 @@ data_fetchers/
 
 41. **MODULE.md v2.54 (2026-05-25)** — 规范补充
    - **docstring Example 格式规范**：注释放在 `>>>` 行，返回值行无注释
+
+42. **factor_generator.py v1.22 (2026-05-25)** — 代码结构优化
+   - **冗余别名清理**：`output_cols = _OUTPUT_COLS` 改为直接使用 `_OUTPUT_COLS`
+   - **职责分离**：mkdir 单独 try 块处理（异常信息更精确）
+   - **内存释放**：`del base_data`、`del turnover_data`（JSON 加载的大对象）
+   - **错误信息改进**：missing_cols 增加 `_EXTENDED_FACTOR_COLS` 提示（排错路径更短）
+   - **优化原因**：代码结构问题（冗余别名 + 职责混乱 + 内存泄漏 + 错误信息模糊）
+
+43. **MODULE.md v2.55 (2026-05-25)** — 规范补充
+   - **冗余别名规范**：直接使用常量，无需局部别名
+   - **职责分离规范**：mkdir 单独处理，与文件写入异常分离
+   - **错误信息规范**：增加上下文提示，缩短排错路径
 
 ---
 
@@ -1269,6 +1281,95 @@ True
 - 注释放在 `>>>` 行末
 - 返回值行无注释
 - 保持格式简洁
+
+### 冗余别名规范（2026-05-26 新增）
+
+**问题背景：**
+- 局部变量作为常量的别名（`output_cols = _OUTPUT_COLS`）
+- 增加代码复杂度，无实际作用
+- 维护时需修改多处（常量 + 别名）
+
+**正确用法：**
+```python
+# ✅ 正确：直接使用常量
+missing_cols = [col for col in _OUTPUT_COLS if col not in df.columns]
+output_df = df[_OUTPUT_COLS].copy()
+
+# ❌ 错误：冗余别名
+output_cols = _OUTPUT_COLS  # 无意义的别名
+missing_cols = [col for col in output_cols if col not in df.columns]
+output_df = df[output_cols].copy()
+```
+
+**原则：**
+- 直接使用模块级常量
+- 避免无意义的局部别名
+- 减少代码复杂度
+
+### 职责分离规范（2026-05-26 新增）
+
+**问题背景：**
+- mkdir 和文件写入在同一个 try 块
+- temp_path 定义在 try 块外，unlink 存在路径未初始化风险
+- 异常信息不够精确（无法区分目录创建失败 vs 文件写入失败）
+
+**正确用法：**
+```python
+# ✅ 正确：mkdir 单独处理，职责分离
+try:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+except OSError as e:
+    raise RuntimeError(f"创建输出目录失败: {output_path.parent}, ...") from e
+
+temp_path = output_path.parent / (output_path.name + '.tmp')  # mkdir 成功后才定义
+try:
+    with gzip.open(temp_path, 'wt') as f:
+        json.dump(data, f)
+    os.replace(temp_path, output_path)
+except OSError as e:
+    temp_path.unlink(missing_ok=True)
+    raise RuntimeError(f"文件系统错误: {output_path}, ...") from e
+
+# ❌ 错误：mkdir 和写入混在一起
+temp_path = output_path.parent / (output_path.name + '.tmp')  # mkdir 未执行就定义
+try:
+    output_path.parent.mkdir(parents=True, exist_ok=True)  # 混在一起
+    with gzip.open(temp_path, 'wt') as f:
+        json.dump(data, f)
+except OSError as e:
+    temp_path.unlink(missing_ok=True)  # temp_path 可能未初始化
+```
+
+**原则：**
+- mkdir 单独 try 块处理
+- 异常信息区分职责（目录创建 vs 文件写入）
+- temp_path 在 mkdir 成功后定义
+
+### 错误信息规范（2026-05-26 新增）
+
+**问题背景：**
+- 错误信息过于模糊（"输出列不存在"）
+- 缺少上下文提示，排错路径长
+- 无法快速定位问题根源
+
+**正确用法：**
+```python
+# ✅ 正确：增加上下文提示
+if missing_cols:
+    raise KeyError(
+        f"输出列不存在: {missing_cols}，"
+        f"请检查因子计算函数的输出列名是否与 _EXTENDED_FACTOR_COLS 一致"
+    )
+
+# ❌ 错误：错误信息过于模糊
+if missing_cols:
+    raise KeyError(f"输出列不存在: {missing_cols}")  # 缺少上下文
+```
+
+**原则：**
+- 错误信息应包含上下文提示
+- 提供排错建议（指向可能的问题根源）
+- 缩短排错路径
 
 ### paths.py 使用规范
 

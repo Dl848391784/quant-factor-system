@@ -32,6 +32,7 @@
 - v1.19 (2026-05-25): 代码结构优化（常量改为元组防止意外修改、docstring示例补充注释说明返回列表副本、factor_df显式释放内存）
 - v1.20 (2026-05-25): 代码结构优化（mkdir移入try块统一异常处理、_OUTPUT_COLS注释移到常量定义处、_calc_pct docstring补充示例、main()异常日志增加类型名）
 - v1.21 (2026-05-25): Bug修复（docstring Example格式修正：注释放在>>>行、返回值行无注释、增加isinstance示例）
+- v1.22 (2026-05-25): 代码结构优化（清理output_cols冗余别名、mkdir和temp_path职责分离、base_data/turnover_data内存释放、missing_cols错误信息改进）
 
 作者: 云瑶
 """
@@ -252,6 +253,9 @@ def generate_all_factors(
     factor_df = pd.DataFrame(base_data['data'])
     factor_df['date'] = pd.to_datetime(factor_df['date'])
     
+    # 显式释放 base_data 内存（JSON 加载的大对象）
+    del base_data
+    
     logger.info("  基础数据记录数: %d", len(factor_df))
     logger.info("  基础因子列: rsi_6, volume_ratio_5")
     
@@ -283,6 +287,9 @@ def generate_all_factors(
     turnover_df = pd.DataFrame(turnover_data['data'])
     # 使用 format='mixed' 处理不同日期格式（有的带时间，有的不带）
     turnover_df['date'] = pd.to_datetime(turnover_df['date'], format='mixed')
+    
+    # 显式释放 turnover_data 内存（JSON 加载的大对象）
+    del turnover_data
     
     logger.info("  换手率数据记录数: %d", len(turnover_df))
     
@@ -329,15 +336,15 @@ def generate_all_factors(
     
     factor_df['date'] = factor_df['date'].dt.strftime('%Y-%m-%d')
     
-    # 保留所有因子列（使用模块级常量 _OUTPUT_COLS）
-    output_cols = _OUTPUT_COLS
-    
-    # 检查列是否存在
-    missing_cols = [col for col in output_cols if col not in factor_df.columns]
+    # 检查列是否存在（直接使用模块级常量 _OUTPUT_COLS）
+    missing_cols = [col for col in _OUTPUT_COLS if col not in factor_df.columns]
     if missing_cols:
-        raise KeyError(f"输出列不存在: {missing_cols}")
+        raise KeyError(
+            f"输出列不存在: {missing_cols}，"
+            f"请检查因子计算函数的输出列名是否与 _EXTENDED_FACTOR_COLS 一致"
+        )
     
-    output_df = factor_df[output_cols].copy()
+    output_df = factor_df[_OUTPUT_COLS].copy()
     
     # 显式释放 factor_df 内存（可能包含中间列，比 output_df 更多）
     del factor_df
@@ -352,11 +359,15 @@ def generate_all_factors(
         'data': output_df.to_dict('records')
     }
     
+    # 确保父目录存在（职责分离：mkdir 单独处理，异常信息更精确）
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise RuntimeError(f"创建输出目录失败: {output_path.parent}, {type(e).__name__}: {e}") from e
+    
     # 使用临时文件 + os.replace 原子写入（遵循 PROJECT.md 文件写入规范）
     temp_path = output_path.parent / (output_path.name + '.tmp')
     try:
-        # 确保父目录存在（在 try 块内创建，异常时可统一处理）
-        output_path.parent.mkdir(parents=True, exist_ok=True)
         with gzip.open(temp_path, 'wt') as f:
             json.dump(output_data, f)
         os.replace(temp_path, output_path)
