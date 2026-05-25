@@ -31,6 +31,7 @@
 - v1.18 (2026-05-25): Bug修复（版本历史描述修正v1.12日志换行符为规范补充而非修复、_EXTENDED_FACTOR_COLS返回副本防止外部修改）
 - v1.19 (2026-05-25): 代码结构优化（常量改为元组防止意外修改、docstring示例补充注释说明返回列表副本、factor_df显式释放内存）
 - v1.20 (2026-05-25): 代码结构优化（mkdir移入try块统一异常处理、_OUTPUT_COLS注释移到常量定义处、_calc_pct docstring补充示例、main()异常日志增加类型名）
+- v1.21 (2026-05-25): Bug修复（docstring Example格式修正：注释放在>>>行、返回值行无注释、增加isinstance示例）
 
 作者: 云瑶
 """
@@ -206,9 +207,10 @@ def generate_all_factors(
     Example:
         >>> from data_fetchers.factor_generator import generate_all_factors
         >>> metadata = generate_all_factors()
-        >>> metadata['factor_columns']
-        ['bollinger_pb', 'kdj_j', 'turnover_surge']  # 返回列表副本
-        >>> metadata['elapsed_seconds']  # 实际耗时，单位秒（范围：0.0 ~ 数百秒，取决于数据量）
+        >>> metadata['factor_columns']  # 返回列表副本，防止外部修改
+        ['bollinger_pb', 'kdj_j', 'turnover_surge']
+        >>> isinstance(metadata['elapsed_seconds'], float)
+        True
         """
     start_time = datetime.now()
     logger = get_module_logger(logger)

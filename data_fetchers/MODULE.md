@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.53
+> 版本: v2.54
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-25 22:00 北京时间
+> 更新时间: 2026-05-25 23:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -538,6 +538,13 @@ data_fetchers/
    - **mkdir 位置规范**：应在 try 块内创建目录，异常时可统一处理
    - **常量注释规范**：常量结构说明应放在定义处，而非使用处
    - **异常日志规范**：应包含异常类型名（`type(e).__name__`）便于追溯
+
+40. **factor_generator.py v1.21 (2026-05-25)** — Bug修复
+   - **docstring Example 格式修正**：注释放在 `>>>` 行而非返回值行、增加 `isinstance` 示例
+   - **修复原因**：docstring 格式不规范（注释位置错误 + 缺少类型验证示例）
+
+41. **MODULE.md v2.54 (2026-05-25)** — 规范补充
+   - **docstring Example 格式规范**：注释放在 `>>>` 行，返回值行无注释
 
 ---
 
@@ -1236,6 +1243,32 @@ except Exception as e:
 - 异常日志应包含异常类型名
 - 使用 `type(e).__name__` 获取类型名
 - 便于追溯问题根源
+
+### docstring Example 格式规范（2026-05-25 新增）
+
+**问题背景：**
+- 注释放在返回值行而非 `>>>` 行
+- 格式不规范，影响 doctest 可读性
+
+**正确用法：**
+```python
+# ✅ 正确：注释放在 >>> 行，返回值行无注释
+>>> metadata['factor_columns']  # 返回列表副本，防止外部修改
+['bollinger_pb', 'kdj_j', 'turnover_surge']
+>>> isinstance(metadata['elapsed_seconds'], float)
+True
+
+# ❌ 错误：注释放在返回值行
+>>> metadata['factor_columns']
+['bollinger_pb', 'kdj_j', 'turnover_surge']  # 返回列表副本
+>>> metadata['elapsed_seconds']  # 实际耗时
+# 缺少返回值行
+```
+
+**原则：**
+- 注释放在 `>>>` 行末
+- 返回值行无注释
+- 保持格式简洁
 
 ### paths.py 使用规范
 
