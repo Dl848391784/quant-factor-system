@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.48
+> 版本: v2.49
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-25 17:00 北京时间
+> 更新时间: 2026-05-25 18:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -492,6 +492,16 @@ data_fetchers/
    - **临时文件清理规范**：`unlink(missing_ok=True)` 原子操作，避免 TOCTOU 竞争窗口
    - **docstring Raises 规范**：声明异常应与实际抛出一致，已捕获转换的异常不应声明
 
+31. **factor_generator.py v1.16 (2026-05-25)** — 代码结构优化
+   - **常量统一**：新增 `_BASE_COLS` 和 `_OUTPUT_COLS` 常量，output_cols 使用 `_OUTPUT_COLS` 引用（消除维护隐患）
+   - **sys 重复导入**：移除 __main__ 块中 sys 重复导入（顶部条件块已导入）
+   - **_calc_pct 语义**：修正为通用百分比计算函数（参数名 count/total，docstring 补充通用语义说明）
+   - **修复原因**：代码结构问题（常量关系不清晰、重复导入、函数语义不准确）
+
+32. **MODULE.md v2.49 (2026-05-25)** — 规范补充
+   - **常量引用关系规范**：相关常量应建立引用关系，避免各自硬编码导致维护遗漏
+   - **条件块导入规范**：顶部条件块已导入的模块，__main__ 块无需重复导入
+
 ---
 
 data_fetchers 模块负责：
@@ -908,6 +918,66 @@ def generate_all_factors(...):
 - Raises 声明应与实际抛出一致
 - 已捕获转换的异常不应声明
 - 补充 Note 说明内部转换逻辑
+
+### 常量引用关系规范（2026-05-25 新增）
+
+**问题背景：**
+- 多个常量各自硬编码相同内容，没有引用关系
+- 新增内容时需同时修改多处，极易遗漏
+- 维护隐患：一处修改遗漏会导致不一致
+
+**正确用法：**
+```python
+# ✅ 正确：建立引用关系，一处定义多处使用
+_EXTENDED_FACTOR_COLS = ['bollinger_pb', 'kdj_j', 'turnover_surge']
+_BASE_COLS = ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5']
+_OUTPUT_COLS = _BASE_COLS + _EXTENDED_FACTOR_COLS
+
+output_cols = _OUTPUT_COLS  # 引用，非硬编码
+metadata['factor_columns'] = _EXTENDED_FACTOR_COLS  # 同一常量引用
+
+# ❌ 错误：各自硬编码，没有引用关系
+_EXTENDED_FACTOR_COLS = ['bollinger_pb', 'kdj_j', 'turnover_surge']
+output_cols = ['date', 'asset', ..., 'bollinger_pb', 'kdj_j', 'turnover_surge']  # 硬编码
+metadata['factor_columns'] = ['bollinger_pb', 'kdj_j', 'turnover_surge']  # 硬编码
+```
+
+**原则：**
+- 相关常量应建立引用关系
+- 新增内容只需修改一处
+- 消除维护隐患
+
+### 条件块导入规范（2026-05-25 新增）
+
+**问题背景：**
+- 顶部条件块已导入模块
+- __main__ 块重复导入同一模块
+- 冗余代码，增加维护负担
+
+**正确用法：**
+```python
+# ✅ 正确：顶部条件块导入，__main__ 块直接使用
+if __name__ == '__main__':
+    import sys
+    sys.path.insert(0, str(project_root))
+    from xxx import func_a
+else:
+    from .xxx import func_a
+
+# 底部 __main__ CLI 入口
+if __name__ == '__main__':
+    sys.exit(main())  # sys 已在顶部导入，直接使用
+
+# ❌ 错误：__main__ 块重复导入
+if __name__ == '__main__':
+    import sys  # 顶部已导入，重复
+    sys.exit(main())
+```
+
+**原则：**
+- 条件块导入的模块在同一执行路径内可见
+- 无需在 __main__ 块重复导入
+- 减少冗余代码
 
 ### paths.py 使用规范
 

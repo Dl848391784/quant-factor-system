@@ -26,6 +26,7 @@
 - v1.13 (2026-05-25): Bug修复（缩进错误修正Step8注释、numpy.int64类型转换JSON兼容、__main__块改为CLI入口调用main()、测试代码移至test_cases/test_factor_generator.py）
 - v1.14 (2026-05-25): Bug修复（除零保护统一使用_calc_pct模块级函数、_EXTENDED_FACTOR_COLS常量替代硬编码切片、docstring补充空数据异常声明、turnover_missing显式int转换）
 - v1.15 (2026-05-25): Bug修复（docstring移除JSONDecodeError声明、temp_path.unlink改用missing_ok=True消除TOCTOU竞争窗口）
+- v1.16 (2026-05-25): 代码结构优化（_BASE_COLS+_OUTPUT_COLS常量统一output_cols引用关系、__main__块移除sys重复导入、_calc_pct函数语义修正为通用百分比计算）
 
 作者: 云瑶
 """
@@ -80,25 +81,35 @@ _DEFAULT_CACHE_DIR = Path(__file__).parent.parent / 'cache' / 'factor_data'
 # 扩展因子列名（硬编码替代，便于维护）
 _EXTENDED_FACTOR_COLS = ['bollinger_pb', 'kdj_j', 'turnover_surge']
 
+# 基础列名（索引字段 + 行情数据 + 基础因子）
+_BASE_COLS = ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5']
+
+# 输出列名（基础列 + 扩展因子）
+_OUTPUT_COLS = _BASE_COLS + _EXTENDED_FACTOR_COLS
+
 
 # ============================================================================
 # 模块级私有辅助函数
 # ============================================================================
 
-def _calc_pct(valid_count: int, total_count: int) -> float:
+def _calc_pct(count: int, total: int) -> float:
     """
-    计算有效记录百分比（除零保护）
+    计算百分比（除零保护）
     
     Args:
-        valid_count: 有效记录数
-        total_count: 总记录数
+        count: 记录数（有效/缺失/其他）
+        total: 总记录数
         
     Returns:
         float: 百分比（0.0-100.0），空数据时返回 0.0
+        
+    Note:
+        - 通用百分比计算函数，可用于有效记录、缺失记录等场景
+        - 调用时语义由调用方决定（有效记录百分比、缺失记录百分比等）
     """
-    if total_count <= 0:
+    if total <= 0:
         return 0.0
-    return round(valid_count / total_count * 100, 2)
+    return round(count / total * 100, 2)
 
 
 # ============================================================================
@@ -301,15 +312,12 @@ def generate_all_factors(
     factor_df['date'] = factor_df['date'].dt.strftime('%Y-%m-%d')
     
     # 保留所有因子列（顺序：date/asset + 行情数据 + 基础因子 + 扩展因子）
-    # output_cols[0:2]  = date, asset（索引字段）
-    # output_cols[2:6]  = open, close, high, low（行情数据，非标准 OHLCV 顺序）
-    # output_cols[6:8]  = rsi_6, volume_ratio_5（基础因子，来自输入）
-    # output_cols[8:]   = bollinger_pb, kdj_j, turnover_surge（扩展因子，本次计算）
-    output_cols = [
-        'date', 'asset', 'open', 'close', 'high', 'low',
-        'rsi_6', 'volume_ratio_5',
-        'bollinger_pb', 'kdj_j', 'turnover_surge'
-    ]
+    # _OUTPUT_COLS = _BASE_COLS + _EXTENDED_FACTOR_COLS
+    # _OUTPUT_COLS[0:2]  = date, asset（索引字段）
+    # _OUTPUT_COLS[2:6]  = open, close, high, low（行情数据，非标准 OHLCV 顺序）
+    # _OUTPUT_COLS[6:8]  = rsi_6, volume_ratio_5（基础因子，来自输入）
+    # _OUTPUT_COLS[8:]   = bollinger_pb, kdj_j, turnover_surge（扩展因子，本次计算，对应 _EXTENDED_FACTOR_COLS）
+    output_cols = _OUTPUT_COLS
     
     # 检查列是否存在
     missing_cols = [col for col in output_cols if col not in factor_df.columns]
@@ -443,5 +451,5 @@ def main() -> int:
 
 if __name__ == '__main__':
     # CLI 入口：调用 main() 函数，测试代码已移至 test_cases/test_factor_generator.py
-    import sys
+    # 注意：sys 已在顶部条件块导入，无需重复导入
     sys.exit(main())
