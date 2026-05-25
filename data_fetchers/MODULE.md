@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.61
+> 版本: v2.62
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 05:00 北京时间
+> 更新时间: 2026-05-26 06:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -596,10 +596,11 @@ data_fetchers/
 54. **MODULE.md v2.61 (2026-05-26)** — 版本更新
    - **第二轮优化进度**：print → logger 迁移进行中
 
-55. **fetch_factor_cache.py v3.6 (2026-05-26)** — print → logger 迁移（部分完成）
-   - **已完成**：模块级 logger + 3个核心函数（save_batch_cache_sorted、n_way_merge_deduplicate、fetch_batch_stocks、format_final_output）
-   - **已替换**：约30个 print → logger.info/logger.warning
-   - **待完成**：main 函数中剩余44个 print（验证阶段、清理阶段、主流程）
+56. **fetch_factor_cache.py v3.6 (2026-05-26)** — print → logger 迁移完成
+   - **完成状态**：74处全量替换，无剩余
+   - **logger参数化**：6个核心函数（save_batch_cache_sorted、n_way_merge_deduplicate、fetch_batch_stocks、format_final_output、validate_final_data、cleanup_batch_files）
+   - **main函数日志初始化**：setup_logger + logs_dir 规范
+   - **docstring补充**：所有核心函数完整 Args/Returns/Note
    - **约束 #2 修正**：从"输出到 cache 目录"改为"输出到 result 目录"
    - **语义明确**：cache 为数据源原始缓存，result 为处理后的输出结果
    - **修复原因**：docstring 描述与实际行为不符 + 错误信息不完整

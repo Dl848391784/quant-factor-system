@@ -14,7 +14,7 @@
 版本历史：
 - v3.4_with_ohlc (2026-04-09): 新增 open/high/low 字段，支持选股回测计算一字涨停、封死涨停等指标
 - v3.5 (2026-05-26): 版本历史格式规范化、sys.path移除、公共模块导入、docstring补充、流程文档+测试用例创建
-- v3.6 (2026-05-26): print → logger 迁移（74处）、logger参数化
+- v3.6 (2026-05-26): print → logger 迁移完成（74处全量替换）、logger参数化（6个核心函数）、main函数日志初始化
 
 作者: 云舟
 日期: 2026-04-04
@@ -580,18 +580,27 @@ def format_final_output(factor_merged_path, return_merged_path, logger: logging.
     factor_size_mb = os.path.getsize(factor_final_path) / (1024 * 1024)
     return_size_mb = os.path.getsize(return_final_path) / (1024 * 1024)
     
-    print(f"\n  ✓ 最终文件已保存:")
-    print(f"    因子: {factor_final_path} ({factor_size_mb:.2f} MB)")
-    print(f"    收益: {return_final_path} ({return_size_mb:.2f} MB)")
+    logger.info(f"  ✓ 最终文件已保存:")
+    logger.info(f"    因子: {factor_final_path} ({factor_size_mb:.2f} MB)")
+    logger.info(f"    收益: {return_final_path} ({return_size_mb:.2f} MB)")
     
     return len(dates_list), len(assets_list), len(factor_records) if 'factor_records' in dir() else 0
 
 
-def validate_final_data():
-    """验证最终数据"""
-    print(f"\n{'='*60}")
-    print("[验证阶段] 验证数据完整性...")
-    print(f"{'='*60}")
+def validate_final_data(logger: logging.Logger = None) -> bool:
+    """
+    验证最终数据完整性
+    
+    Args:
+        logger: 日志记录器（可选，默认使用模块级 logger）
+    
+    Returns:
+        bool: 数据是否有效（交易日数 >= N_DAYS）
+    """
+    logger = logger or _MODULE_LOGGER
+    logger.info("=" * 60)
+    logger.info("[验证阶段] 验证数据完整性...")
+    logger.info("=" * 60)
     
     factor_path = os.path.join(CACHE_DIR, 'factor_data.json.gz')
     
@@ -603,29 +612,39 @@ def validate_final_data():
     n_assets = meta['n_assets']
     n_records = len(data['data'])
     
-    print(f"\n  交易日数: {n_days}")
-    print(f"  股票数量: {n_assets}")
-    print(f"  总记录数: {n_records}")
-    print(f"  日期范围: {meta['date_range']['start']} ~ {meta['date_range']['end']}")
+    logger.info(f"  交易日数: {n_days}")
+    logger.info(f"  股票数量: {n_assets}")
+    logger.info(f"  总记录数: {n_records}")
+    logger.info(f"  日期范围: {meta['date_range']['start']} ~ {meta['date_range']['end']}")
     
     # 抽样检查
     sample = data['data'][:1000]
     rsi_vals = [r['rsi_6'] for r in sample if r.get('rsi_6') is not None]
     if rsi_vals:
-        print(f"  RSI(6)样本范围: [{min(rsi_vals):.2f}, {max(rsi_vals):.2f}]")
+        logger.info(f"  RSI(6)样本范围: [{min(rsi_vals):.2f}, {max(rsi_vals):.2f}]")
     
     del data, sample
     gc.collect()
     
     is_valid = n_days >= N_DAYS * 0.9
-    print(f"\n  {'✓ 通过' if is_valid else '⚠ 交易日数不足'}")
+    logger.info(f"  {'✓ 通过' if is_valid else '⚠ 交易日数不足'}")
     
     return is_valid, n_days, n_assets, n_records
 
 
-def cleanup_batch_files(total_batches):
-    """清理临时批次文件"""
-    print(f"\n[清理阶段] 删除临时批次文件...")
+def cleanup_batch_files(total_batches: int, logger: logging.Logger = None) -> int:
+    """
+    清理临时批次文件
+    
+    Args:
+        total_batches: 总批次数
+        logger: 日志记录器（可选，默认使用模块级 logger）
+    
+    Returns:
+        int: 删除的文件数量
+    """
+    logger = logger or _MODULE_LOGGER
+    logger.info("[清理阶段] 删除临时批次文件...")
     
     deleted = 0
     for batch_idx in range(total_batches):
@@ -635,61 +654,77 @@ def cleanup_batch_files(total_batches):
                 os.remove(path)
                 deleted += 1
     
-    print(f"  ✓ 已删除 {deleted} 个临时文件")
+    logger.info(f"  ✓ 已删除 {deleted} 个临时文件")
+    return deleted
 
 
 def main():
-    """主函数"""
-    print(f"\n{'='*70}")
-    print(f"分批拉取 {N_DAYS} 天因子数据 (外部排序版本)")
-    print(f"{'='*70}")
-    print(f"  版本: 3.4_with_ohlc")
-    print(f"  目标交易日数: {N_DAYS}")
-    print(f"  每批股票数量: {BATCH_SIZE}")
-    print(f"  内存阈值: {MEMORY_THRESHOLD_MB} MB")
-    print(f"  开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"  初始内存: {get_memory_info_str()}")
+    """
+    主函数 - 分批拉取N天因子数据
+    
+    流程：
+    1. 初始化 RealDataLoader
+    2. 获取主板股票列表
+    3. 分批拉取数据（每批BATCH_SIZE只股票）
+    4. N-way merge 合并批次数据
+    5. 格式化输出最终文件
+    6. 验证数据完整性
+    7. 清理临时文件
+    """
+    # 初始化 logger（遵循 PROJECT.md 日志规范：输出到 logs 目录）
+    log_dir = get_logs_dir()
+    logger = setup_logger('fetch_factor_cache', logs_dir=log_dir)
+    
+    logger.info("=" * 70)
+    logger.info(f"分批拉取 {N_DAYS} 天因子数据 (外部排序版本)")
+    logger.info("=" * 70)
+    logger.info(f"  版本: 3.6")
+    logger.info(f"  目标交易日数: {N_DAYS}")
+    logger.info(f"  每批股票数量: {BATCH_SIZE}")
+    logger.info(f"  内存阈值: {MEMORY_THRESHOLD_MB} MB")
+    logger.info(f"  开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"  初始内存: {get_memory_info_str()}")
     
     global_start = time.time()
     
     loader = RealDataLoader(enable_cache=True, use_mock=False, use_local=False, retries=3)
     
-    print(f"\n[获取股票列表]...")
+    logger.info("[获取股票列表]...")
     stock_list = loader.get_main_board_stocks(max_stocks=0)
     
     if not stock_list:
-        print(f"  ! 未获取到股票列表")
+        logger.warning("  ! 未获取到股票列表")
         return
     
     total_stocks = len(stock_list)
-    print(f"  ✓ 获取到 {total_stocks} 只主板股票")
+    logger.info(f"  ✓ 获取到 {total_stocks} 只主板股票")
     
     batches = [stock_list[i:i+BATCH_SIZE] for i in range(0, total_stocks, BATCH_SIZE)]
     total_batches = len(batches)
     
-    print(f"\n[分批策略] 总批次: {total_batches}")
+    logger.info(f"[分批策略] 总批次: {total_batches}")
     
     successful = 0
     
     for batch_idx, stock_batch in enumerate(batches):
         mem_mb = get_memory_usage_mb()
-        print(f"\n  当前内存: {get_memory_info_str()}")
+        logger.info(f"  当前内存: {get_memory_info_str()}")
         
         if mem_mb > MEMORY_THRESHOLD_MB:
-            print(f"  ⚠ 内存超阈值 ({mem_mb:.1f}MB > {MEMORY_THRESHOLD_MB}MB)，暂停 {MEMORY_PAUSE_SECONDS}s...")
+            logger.warning(f"  ⚠ 内存超阈值 ({mem_mb:.1f}MB > {MEMORY_THRESHOLD_MB}MB)，暂停 {MEMORY_PAUSE_SECONDS}s...")
             gc.collect()
             time.sleep(MEMORY_PAUSE_SECONDS)
             mem_mb = get_memory_usage_mb()
-            print(f"  GC后内存: {get_memory_info_str()}")
+            logger.info(f"  GC后内存: {get_memory_info_str()}")
         
-        factor_df, return_df = fetch_batch_stocks(loader, stock_batch, batch_idx, total_batches)
+        factor_df, return_df = fetch_batch_stocks(loader, stock_batch, batch_idx, total_batches, logger)
         
         if factor_df is not None and len(factor_df) > 0:
-            save_batch_cache_sorted(batch_idx, factor_df, return_df)
+            save_batch_cache_sorted(batch_idx, factor_df, return_df, logger)
             successful += 1
             # save_batch_cache_sorted 已释放 factor_df, return_df
         else:
-            print(f"  ⚠ 批次 {batch_idx + 1} 失败")
+            logger.warning(f"  ⚠ 批次 {batch_idx + 1} 失败")
             if factor_df is not None:
                 del factor_df
             if return_df is not None:
@@ -697,41 +732,41 @@ def main():
         
         # 批次间强制垃圾回收
         gc.collect()
-        print(f"  批次完成后内存: {get_memory_info_str()}")
+        logger.info(f"  批次完成后内存: {get_memory_info_str()}")
         time.sleep(5)  # 批次间休息时间增加
     
-    print(f"\n{'='*70}")
-    print(f"拉取完成: 成功 {successful}/{total_batches} 批次")
-    print(f"{'='*70}")
+    logger.info("=" * 70)
+    logger.info(f"拉取完成: 成功 {successful}/{total_batches} 批次")
+    logger.info("=" * 70)
     
     # N-way merge 合并
-    print(f"\n[合并阶段] N-way merge 外部排序...")
+    logger.info("[合并阶段] N-way merge 外部排序...")
     
-    factor_merged_path, factor_count = n_way_merge_deduplicate(total_batches, 'factor')
-    return_merged_path, return_count = n_way_merge_deduplicate(total_batches, 'return')
+    factor_merged_path, factor_count = n_way_merge_deduplicate(total_batches, 'factor', logger)
+    return_merged_path, return_count = n_way_merge_deduplicate(total_batches, 'return', logger)
     
     if not factor_merged_path:
-        print(f"  ! 无有效数据")
+        logger.warning("  ! 无有效数据")
         return
     
     # 格式化最终输出
-    n_days, n_assets, n_records = format_final_output(factor_merged_path, return_merged_path)
+    n_days, n_assets, n_records = format_final_output(factor_merged_path, return_merged_path, logger)
     
     # 验证
-    is_valid, actual_days, actual_assets, actual_records = validate_final_data()
+    is_valid, actual_days, actual_assets, actual_records = validate_final_data(logger)
     
     # 清理
-    cleanup_batch_files(total_batches)
+    cleanup_batch_files(total_batches, logger)
     
     elapsed = time.time() - global_start
     
-    print(f"\n{'='*70}")
-    print(f"全部完成!")
-    print(f"{'='*70}")
-    print(f"  结束时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"  总耗时: {elapsed:.1f}s ({elapsed/60:.1f}min)")
-    print(f"  数据验证: {'通过' if is_valid else '警告'}")
-    print(f"  最终内存: {get_memory_info_str()}")
+    logger.info("=" * 70)
+    logger.info("全部完成!")
+    logger.info("=" * 70)
+    logger.info(f"  结束时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"  总耗时: {elapsed:.1f}s ({elapsed/60:.1f}min)")
+    logger.info(f"  数据验证: {'通过' if is_valid else '警告'}")
+    logger.info(f"  最终内存: {get_memory_info_str()}")
     
     # 保存统计
     stats = {
