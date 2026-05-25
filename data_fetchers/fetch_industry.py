@@ -4,7 +4,7 @@
 
 作者: 云舟
 日期: 2026-05-27
-版本: v2.2
+版本: v2.3
 
 功能: 获取申万行业分类数据并缓存
 数据源: akshare - 申万行业分类
@@ -22,6 +22,7 @@
 - v2.0 (2026-05-27): Bug修复 - SW_INDUSTRY_CODE_MAP核对申万2021官方标准（移除错误映射，不存在的一级代码映射到'其他'）
 - v2.1 (2026-05-27): Bug修复 - 日志信息修正（"akshare获取失败，尝试本地备用数据"）、备用缓存写入策略docstring说明（非致命错误，与主缓存策略不同）
 - v2.2 (2026-05-27): Bug修复 - load_stock_industry缓存数据完整性验证（industries类型检查，防止后续AttributeError）
+- v2.3 (2026-05-27): Bug修复 - datetime.now()只调用一次（固定时间戳）、infer_industry_from_name添加Note说明模糊匹配、get_industry_distribution添加返回类型注解
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -37,7 +38,7 @@ from datetime import datetime
 from collections import Counter
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = '2.2'
+_OUTPUT_VERSION = '2.3'
 
 logger = logging.getLogger(__name__)
 
@@ -245,13 +246,17 @@ def refresh_industry_cache() -> dict:
         # 尝试使用本地备用数据
         return load_local_industry_backup()
     
+    # 固定时间戳（MODULE.md 约束 #17：datetime.now() 只调用一次）
+    now = datetime.now()
+    updated_at = now.strftime('%Y-%m-%d')
+    
     # 写入缓存
     cache_data = {
         'meta': {
             'version': _OUTPUT_VERSION,
             'source': 'sw_category',
             'level': '一级',
-            'updated_at': datetime.now().strftime('%Y-%m-%d'),
+            'updated_at': updated_at,
             'total_count': len(industry_map)
         },
         'industries': industry_map
@@ -351,12 +356,16 @@ def _write_backup_cache(industry_map: dict) -> None:
         - 与 refresh_industry_cache 主缓存写入策略不同（主缓存失败抛异常）
         - 此设计决策已在 MODULE.md 约束 #72 中明确说明
     """
+    # 固定时间戳（MODULE.md 约束 #17：datetime.now() 只调用一次）
+    now = datetime.now()
+    updated_at = now.strftime('%Y-%m-%d')
+    
     cache_data = {
         'meta': {
             'version': _OUTPUT_VERSION,
             'source': 'local_backup',
             'level': '一级',
-            'updated_at': datetime.now().strftime('%Y-%m-%d'),
+            'updated_at': updated_at,
             'total_count': len(industry_map)
         },
         'industries': industry_map
@@ -384,6 +393,12 @@ def infer_industry_from_name(name: str) -> str:
         
     Returns:
         str: 推断的行业名称
+    
+    Note:
+        关键词匹配是**模糊匹配**（包含检测），优先级由字典遍历顺序决定：
+        - "中信银行" → "证券"（匹配"中信"而非"银行"，因为证券优先）
+        - "新能源电力" → "证券"（匹配"新能源"而非"电力"，因为新能源优先）
+        - 推断准确性低于 akshare 数据，仅作备用
     """
     # 常见行业关键词映射
     # 注意：关键词需避免歧义，遍历顺序决定匹配优先级
@@ -458,7 +473,7 @@ def get_stock_industry(code: str) -> str:
     return stock_info.get('industry', '未知')
 
 
-def get_industry_distribution(stocks: list) -> dict:
+def get_industry_distribution(stocks: list) -> dict[str, int]:
     """
     获取股票列表的行业分布
     
@@ -466,7 +481,7 @@ def get_industry_distribution(stocks: list) -> dict:
         stocks: 股票代码列表
         
     Returns:
-        dict: {行业名称: 数量}
+        dict[str, int]: {行业名称: 数量}
     """
     industry_count = Counter()
     
