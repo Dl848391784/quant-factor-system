@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.71
+> 版本: v2.72
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 17:30 北京时间
+> 更新时间: 2026-05-26 18:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -25,7 +25,7 @@
 | 3 | 因子生成使用 factor_generator.py | 单一数据源，不分散 |
 | 4 | 公共模块必须复用 | 禁止脚本自行实现已有功能 |
 | 5 | pandas 3.0 使用 transform | 避免 rolling 返回 MultiIndex |
-| 6 | 函数入口 DataFrame 先 copy() | 防止副作用 |
+| 6 | 函数入口 DataFrame 先 copy() | 防止副作用（包括 save_batch_cache_sorted） |
 | 7 | 日志输出到 logs 目录 | 不散落在项目根目录 |
 | 8 | 流程文档配套 | docs/<脚本名>_flow.md |
 | 9 | N-way merge 去重使用正值 batch_idx | heap 元素为 `(key, batch_idx, stream)`，使用正值让高 batch_idx 后弹出（去重替换逻辑） |
@@ -36,6 +36,8 @@
 | 14 | get_memory_usage_mb Windows 兜底 | `import resource` 在 Windows 下会抛 ModuleNotFoundError，需 try-except 兜底返回 0.0 |
 | 15 | main docstring 无 Returns | None 返回类型的函数不需要 Returns 节 |
 | 16 | version 字段提取为常量 | 禁止硬编码版本号，提取为 `_OUTPUT_VERSION` 常量便于维护 |
+| 17 | datetime.now() 固定时间戳 | 避免多次调用导致 generated_at 和 last_updated 不一致 |
+| 18 | 抽样检查均匀抽样 | 避免 `[:1000]` 取前1000条偏差，改为均匀抽样 |
 
 ### 关键函数签名
 
@@ -680,6 +682,17 @@ data_fetchers/
 74. **MODULE.md v2.71 (2026-05-26)** — 规范修正
    - **约束 #9 修正**："N-way merge 去重使用正值 batch_idx"（而非"使用 batch_idx"）
    - **修正原因**：负值会导致高 batch_idx 先弹出，与去重替换逻辑矛盾
+
+75. **fetch_factor_cache.py v3.16 (2026-05-26)** — Bug修复（4项）
+   - **main 版本号改用 _OUTPUT_VERSION**：`logger.info(f"  版本: {_OUTPUT_VERSION}")`（而非硬编码 3.10）
+   - **format_final_output 固定生成时间**：入口处 `generated_at = datetime.now().isoformat()`，避免两次调用不一致
+   - **save_batch_cache_sorted 入口 copy()**：防止修改调用方 DataFrame 引用
+   - **validate_final_data 均匀抽样**：`step = total_records // sample_size`，避免 `[:1000]` 取前1000条偏差
+
+76. **MODULE.md v2.72 (2026-05-26)** — 规范补充
+   - **新增约束 #17-#18**：datetime.now() 固定时间戳、抽样检查均匀抽样
+   - **约束 #6 补充说明**：包括 save_batch_cache_sorted
+   - **规范补充原因**：代码审查发现版本号维护困难、时间戳不一致、抽样偏差
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
