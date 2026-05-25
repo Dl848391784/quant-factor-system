@@ -39,6 +39,7 @@
 - v3.28 (2026-05-26): Bug修复 - validate_final_data第二次改为真正的流式行扫描，避免两次json.load内存峰值翻倍
 - v3.29 (2026-05-27): Bug修复 - format_final_output一次遍历提取日期范围+释放set内存、main校验return_merged_path避免TypeError
 - v3.30 (2026-05-27): 代码改进 - format_final_output n_records定义移到日志前、cleanup_batch_files docstring修正为try/except
+- v3.31 (2026-05-27): Bug修复 - n_way_merge_deduplicate返回值简化(只返回merged_path，count由调用方用_接收但未使用)
 
 作者: 云舟
 日期: 2026-04-04
@@ -70,7 +71,7 @@ except ImportError:
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.30'
+_OUTPUT_VERSION = '3.31'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -376,7 +377,7 @@ def n_way_merge_deduplicate(
     total_batches: int,
     data_type: str = 'factor',
     logger: logging.Logger = None
-) -> tuple[Path | None, int]:
+) -> Path | None:
     """
     N-way merge 合并已排序的批次数据，去重
     
@@ -386,11 +387,12 @@ def n_way_merge_deduplicate(
         logger: 日志记录器（可选，默认使用模块级 logger）
     
     Returns:
-        tuple[Path | None, int]: (output_path, count) 输出文件路径和记录数
+        Path | None: 输出文件路径（无有效数据时返回 None）
     
     Note:
-        - 使用 heap 进行N-way merge，每个批次只保持当前记录在内存中
-        - 去重策略：相同的 (date, asset) 只保留最后一次出现的值
+        - 使用 heap 进行 N-way merge，每个批次保持当前记录在内存中
+        - 去重策略：相同的 (date, asset) 只保留 batch_idx 最大的记录
+        - 返回 merged_path，合并记录数由 validate_final_data 统计
     """
     logger = logger or _MODULE_LOGGER
     logger.info(f"[{data_type}] 开始 N-way merge...")
@@ -408,7 +410,7 @@ def n_way_merge_deduplicate(
     
     if not streams:
         logger.info("  无有效批次")
-        return (None, 0)
+        return None
     
     logger.info(f"  有效批次: {len(streams)}/{total_batches}")
     
@@ -490,7 +492,7 @@ def n_way_merge_deduplicate(
         stream.cleanup()
     gc.collect()
     
-    return output_path, count
+    return output_path
 
 
 def fetch_batch_stocks(
@@ -1042,8 +1044,8 @@ def main() -> None:
     logger.info("[合并阶段] N-way merge 外部排序...")
     
     try:
-        factor_merged_path, _ = n_way_merge_deduplicate(total_batches, 'factor', logger)
-        return_merged_path, _ = n_way_merge_deduplicate(total_batches, 'return', logger)
+        factor_merged_path = n_way_merge_deduplicate(total_batches, 'factor', logger)
+        return_merged_path = n_way_merge_deduplicate(total_batches, 'return', logger)
         
         # 校验两个合并路径
         if not factor_merged_path or not return_merged_path:
