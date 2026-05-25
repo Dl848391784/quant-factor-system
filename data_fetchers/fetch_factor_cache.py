@@ -23,13 +23,14 @@
 - v3.12 (2026-05-26): Bug修复 - format_final_output 返回值（del后保存记录数）、n_way_merge_deduplicate 去重逻辑（使用batch_idx而非stream_idx）
 - v3.13 (2026-05-26): Bug修复 - 冗余导入删除、未使用变量删除、hasattr无效检查改为列存在验证、format_final_output内存峰值改为分阶段加载
 - v3.14 (2026-05-26): Bug修复 - validate_final_data增加数据有效性验证（RSI非空比例>=80%）、peek_key检查exhausted、get_memory_usage_mb Windows兜底、main docstring删除冗余Returns、version字段提取为_OUTPUT_VERSION常量
+- v3.15 (2026-05-26): Bug修复 - n_way_merge去重逻辑修正（使用正值batch_idx而非负值，变量名改为batch_idx消除语义混乱）
 
 作者: 云舟
 日期: 2026-04-04
 """
 
 # 输出文件版本号（与模块版本一致）
-_OUTPUT_VERSION = '3.14'
+_OUTPUT_VERSION = '3.15'
 
 # 标准库导入（PEP 8 规范：按字母顺序分组）
 import gc
@@ -375,14 +376,14 @@ def n_way_merge_deduplicate(
     
     # N-way merge 使用 heap
     # heap元素: (key, batch_idx, stream)
-    # 使用 batch_idx（原始批次号）而非 stream_idx（列表索引）
-    # 去重策略：相同 key 时，高 batch_idx 覆盖低 batch_idx（后拉取的数据优先）
+    # 使用正值 batch_idx 作为排序键
+    # 去重策略：相同 key 时，高 batch_idx 后弹出（heapq 先弹最小值）
+    #          后弹出的 last_record = record 赋值最后执行，最终写入高 batch_idx 的记录
     heap = []
     for stream in streams:
         key = stream.peek_key()
         if key:
-            # 使用 -batch_idx 作为排序键，让高 batch_idx 的数据在相同 key 时优先弹出
-            heapq.heappush(heap, (key, -stream.batch_idx, stream))
+            heapq.heappush(heap, (key, stream.batch_idx, stream))
     
     # 合并结果（流式写入文件，不存内存）
     output_path = CACHE_DIR / f'merged_{data_type}.json.gz'
@@ -396,7 +397,7 @@ def n_way_merge_deduplicate(
         f.write('[\n')  # JSON数组开始
         
         while heap:
-            key, stream_idx, stream = heapq.heappop(heap)
+            key, batch_idx, stream = heapq.heappop(heap)
             record = stream.pop_record()
             
             # 去重：相同key时，后写入覆盖前写入
@@ -422,7 +423,7 @@ def n_way_merge_deduplicate(
             # 从该stream取下一个记录
             next_key = stream.peek_key()
             if next_key:
-                heapq.heappush(heap, (next_key, stream_idx, stream))
+                heapq.heappush(heap, (next_key, batch_idx, stream))
         
         # 写入最后一条记录
         if last_record is not None:
