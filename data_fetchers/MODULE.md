@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.81
+> 版本: v2.82
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 22:30 北京时间
+> 更新时间: 2026-05-26 23:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -29,7 +29,7 @@
 | 7 | 日志输出到 logs 目录 | 不散落在项目根目录 |
 | 8 | 流程文档配套 | docs/<脚本名>_flow.md |
 | 9 | N-way merge 去重使用正值 batch_idx | heap 元素为 `(key, batch_idx, counter, stream)`，counter 打破平局 |
-| 10 | 大文件验证一次性加载 | 避免 meta 手动拼接脆弱，直接 json.load(full) 后提取 meta/data |
+| 10 | 大文件验证分两次读 | 第一次只读 meta，第二次流式扫描 data 进行均匀抽样 |
 | 11 | meta 信息只保留标量 | date_start/date_end/n_assets，而非完整 dates_list/assets_list |
 | 12 | 数据验证综合判断 | 不仅检查天数达标，还需检查关键字段非空比例 >= 80% |
 | 13 | peek_key/pop_record 检查 exhausted | `if self.exhausted or self.idx >= len(self.records)`，语义一致性（两个方法对称） |
@@ -42,15 +42,15 @@
 | 21 | N-way merge 显式收集后选最大 | 收集相同 key 所有记录后按 batch_idx 降序选最大，不依赖弹出顺序 |
 | 22 | cleanup 增加兜底清理 | merged_*.json.gz 可能残留，cleanup_batch_files 应增加兜底 |
 | 23 | 模块级注释合并到常量 | 注释应紧贴常量定义，避免空泛的注释块 |
-| 24 | 变量初始化默认值 | 防止解析失败时未初始化导致 NameError |
-| 25 | meta 解析用 json.loads | 避免手动字符串匹配脆弱，一次性加载 full 后提取 meta/data |
+| 24 | 变量初始化默认值 | 函数顶部初始化所有返回值变量，防止 NameError（包括 records_count） |
+| 25 | meta 解析用 json.loads | 避免手动字符串匹配脆弱，分两次加载（先 meta 后 data） |
 | 26 | 方法名语义清晰 | `_load_all` 表示一次性加载，而非 `_load_next_chunk` 暗示多次调用 |
 | 27 | 返回值避免冗余 | format_final_output 返回值仅用于日志，统计信息由 validate_final_data 提供 |
 | 28 | 函数接口契约说明 | 说明实际调用方行为，而非理想化"可以是 datetime 或字符串" |
 | 29 | vmrss 判断用 is not None | `if vmrss is not None` 而非 `if vmrss`（0 是 falsy） |
 | 31 | DataFrame 链式操作用 copy() | 避免 SettingWithCopyWarning，每次过滤后 .copy() |
 | 33 | 函数签名与调用一致 | 返回 None 则调用方不接收，返回 tuple 则调用方接收，避免返回值被丢弃 |
-| 34 | 统计信息单一来源 | format_final_output 不返回，由 validate_final_data 提供 |
+| 35 | 缩进一致性检查 | 注释缩进与代码对齐，避免 IndentationError |
 | 19 | 常量定义在 import 之后 | PEP 8 顺序：docstring → __future__ → 标准库 → 第三方 → 本地 → 常量 |
 | 20 | cleanup_batch_files 用 try/finally | 保证临时文件清理（无论成功或失败） |
 
@@ -801,6 +801,17 @@ data_fetchers/
    - **约束 #28 修正**：接口契约说明实际调用方行为
    - **新增约束 #33-#34**：函数签名与调用一致、统计信息单一来源
    - **规范补充原因**：接口契约理想化不匹配实际；返回值被丢弃但函数做了大量工作
+
+95. **fetch_factor_cache.py v3.26 (2026-05-26)** — Bug修复（3项）
+   - **format_final_output 缩进修正**：注释缩进从 0 改为 4，避免 IndentationError
+   - **validate_final_data 分两次读**：第一次只读 meta，第二次流式扫描 data，避免一次性加载大文件
+   - **records_count 初始化**：函数顶部初始化 records_count = 0，防止 NameError
+
+96. **MODULE.md v2.82 (2026-05-26)** — 规范修正
+   - **约束 #10/#25 修正**：分两次读文件（而非一次性加载）
+   - **约束 #24 修正**：函数顶部初始化所有返回值变量（包括 records_count）
+   - **新增约束 #35**：缩进一致性检查
+   - **规范修正原因**：一次性加载大文件内存峰值；records_count 未初始化；缩进错误导致 SyntaxError
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
