@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.64
+> 版本: v2.65
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 08:00 北京时间
+> 更新时间: 2026-05-26 09:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -608,8 +608,14 @@ data_fetchers/
    - **os.path.getsize**：4处 → Path.stat().st_size
    - **os.remove**：3处 → Path.unlink()
 
-60. **MODULE.md v2.64 (2026-05-26)** — 版本更新
-   - **v3.8版本记录**：Path 对象规范化完成
+61. **fetch_factor_cache.py v3.9 (2026-05-26)** — 类型注解完善
+   - **save_batch_cache_sorted**：factor_df: pd.DataFrame, return_df: pd.DataFrame
+   - **n_way_merge_deduplicate**：返回类型 tuple[Path | None, int]
+   - **fetch_batch_stocks**：loader: RealDataLoader, 返回类型 tuple[pd.DataFrame | None, pd.DataFrame | None]
+   - **format_final_output**：参数 Path | str, 返回类型 tuple[int, int, int]
+
+62. **MODULE.md v2.65 (2026-05-26)** — 版本更新
+   - **v3.9版本记录**：类型注解完善
    - **完成状态**：74处全量替换，无剩余
    - **logger参数化**：6个核心函数（save_batch_cache_sorted、n_way_merge_deduplicate、fetch_batch_stocks、format_final_output、validate_final_data、cleanup_batch_files）
    - **main函数日志初始化**：setup_logger + logs_dir 规范

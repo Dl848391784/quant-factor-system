@@ -17,6 +17,7 @@
 - v3.6 (2026-05-26): print → logger 迁移完成（74处全量替换）、logger参数化（6个核心函数）、main函数日志初始化
 - v3.7 (2026-05-26): 导入顺序PEP8规范化、BatchStream类docstring补充、类型注解完善、路径配置使用公共模块
 - v3.8 (2026-05-26): os.path → Path 对象全量替换（9处os.path.join、2处os.path.exists、4处os.path.getsize、3处os.remove→unlink）
+- v3.9 (2026-05-26): 函数类型注解完善（save_batch_cache_sorted、n_way_merge_deduplicate、fetch_batch_stocks、format_final_output）
 
 作者: 云舟
 日期: 2026-04-04
@@ -114,7 +115,12 @@ def get_memory_info_str() -> str:
     return f"RSS={get_memory_usage_mb():.1f}MB"
 
 
-def save_batch_cache_sorted(batch_idx: int, factor_df, return_df, logger: logging.Logger = None) -> None:
+def save_batch_cache_sorted(
+    batch_idx: int,
+    factor_df: pd.DataFrame,
+    return_df: pd.DataFrame,
+    logger: logging.Logger = None
+) -> None:
     """
     保存单批次数据到临时文件（预先排序，流式写入）
     
@@ -291,7 +297,11 @@ class BatchStream:
         gc.collect()
 
 
-def n_way_merge_deduplicate(total_batches: int, data_type: str = 'factor', logger: logging.Logger = None) -> tuple:
+def n_way_merge_deduplicate(
+    total_batches: int,
+    data_type: str = 'factor',
+    logger: logging.Logger = None
+) -> tuple[Path | None, int]:
     """
     N-way merge 合并已排序的批次数据，去重
     
@@ -301,7 +311,7 @@ def n_way_merge_deduplicate(total_batches: int, data_type: str = 'factor', logge
         logger: 日志记录器（可选，默认使用模块级 logger）
     
     Returns:
-        tuple: (output_path, count) 输出文件路径和记录数
+        tuple[Path | None, int]: (output_path, count) 输出文件路径和记录数
     
     Note:
         - 使用 heap 进行N-way merge，每个批次只保持当前记录在内存中
@@ -325,7 +335,7 @@ def n_way_merge_deduplicate(total_batches: int, data_type: str = 'factor', logge
     
     if not streams:
         logger.info("  无有效批次")
-        return ('', 0)
+        return (None, 0)
     
     logger.info(f"  有效批次数: {len(streams)}")
     
@@ -400,7 +410,13 @@ def n_way_merge_deduplicate(total_batches: int, data_type: str = 'factor', logge
     return output_path, count
 
 
-def fetch_batch_stocks(loader, stock_batch: list, batch_idx: int, total_batches: int, logger: logging.Logger = None) -> tuple:
+def fetch_batch_stocks(
+    loader: RealDataLoader,
+    stock_batch: list[str],
+    batch_idx: int,
+    total_batches: int,
+    logger: logging.Logger = None
+) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
     """
     拉取一批股票的数据
     
@@ -412,7 +428,7 @@ def fetch_batch_stocks(loader, stock_batch: list, batch_idx: int, total_batches:
         logger: 日志记录器（可选，默认使用模块级 logger）
     
     Returns:
-        tuple: (factor_df, return_df) 因子数据和收益数据 DataFrame
+        tuple[pd.DataFrame | None, pd.DataFrame | None]: (factor_df, return_df) 因子数据和收益数据 DataFrame
     """
     logger = logger or _MODULE_LOGGER
     logger.info("=" * 60)
@@ -540,7 +556,11 @@ def fetch_batch_stocks(loader, stock_batch: list, batch_idx: int, total_batches:
     return factor_df, return_df
 
 
-def format_final_output(factor_merged_path, return_merged_path, logger: logging.Logger = None):
+def format_final_output(
+    factor_merged_path: Path | str,
+    return_merged_path: Path | str,
+    logger: logging.Logger = None
+) -> tuple[int, int, int]:
     """
     将合并后的JSON数组格式化为完整JSON文件
     
@@ -550,7 +570,7 @@ def format_final_output(factor_merged_path, return_merged_path, logger: logging.
         logger: 日志记录器（可选，默认使用模块级 logger）
     
     Returns:
-        tuple: (factor_final_path, return_final_path, dates_list, assets_list)
+        tuple[int, int, int]: (n_days, n_assets, n_records) 交易日数、股票数、记录数
     """
     logger = logger or _MODULE_LOGGER
     logger.info("格式化最终输出文件...")
