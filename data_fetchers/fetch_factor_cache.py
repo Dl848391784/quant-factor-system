@@ -25,13 +25,11 @@
 - v3.14 (2026-05-26): Bug修复 - validate_final_data增加数据有效性验证（RSI非空比例>=80%）、peek_key检查exhausted、get_memory_usage_mb Windows兜底、main docstring删除冗余Returns、version字段提取为_OUTPUT_VERSION常量
 - v3.15 (2026-05-26): Bug修复 - n_way_merge去重逻辑修正（使用正值batch_idx而非负值，变量名改为batch_idx消除语义混乱）
 - v3.16 (2026-05-26): Bug修复 - main版本号改用_OUTPUT_VERSION、format_final_output固定生成时间、save_batch_cache_sorted入口copy()、validate_final_data均匀抽样
+- v3.17 (2026-05-26): Bug修复 - _OUTPUT_VERSION移到import之后（PEP8）、pop_record检查exhausted、sys导入移除、cleanup_batch_files用try/finally
 
 作者: 云舟
 日期: 2026-04-04
 """
-
-# 输出文件版本号（与模块版本一致）
-_OUTPUT_VERSION = '3.16'
 
 # 标准库导入（PEP 8 规范：按字母顺序分组）
 import gc
@@ -39,7 +37,6 @@ import gzip
 import heapq
 import json
 import logging
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -56,10 +53,16 @@ try:
 except ImportError:
     from common import setup_logger, get_logs_dir, get_cache_dir
 
+# 模块级常量（PEP 8：import 之后定义）
+_MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
+
+# 输出文件版本号（与模块版本一致）
+_OUTPUT_VERSION = '3.17'
+
 # ============================================================================
-# 模块级 fallback logger（遵循 PROJECT.md 公共模块日志规范）
+# 模块级 fallback（遵循 PROJECT.md 公共模块日志规范）
 # ============================================================================
-_MODULE_LOGGER = logging.getLogger('data_fetchers.fetch_factor_cache')
+# 当脚本直接运行时，logger 可能未初始化，提供 fallback
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -308,7 +311,7 @@ class BatchStream:
         Returns:
             dict | None: 当前记录字典或 None（已耗尽）
         """
-        if self.idx >= len(self.records):
+        if self.exhausted or self.idx >= len(self.records):
             return None
         rec = self.records[self.idx]
         self.idx += 1
@@ -899,46 +902,48 @@ def main() -> None:
     # N-way merge 合并
     logger.info("[合并阶段] N-way merge 外部排序...")
     
-    factor_merged_path, factor_count = n_way_merge_deduplicate(total_batches, 'factor', logger)
-    return_merged_path, return_count = n_way_merge_deduplicate(total_batches, 'return', logger)
+    try:
+        factor_merged_path, factor_count = n_way_merge_deduplicate(total_batches, 'factor', logger)
+        return_merged_path, return_count = n_way_merge_deduplicate(total_batches, 'return', logger)
+        
+        if not factor_merged_path:
+            logger.warning("  ! 无有效数据")
+            return
+        
+        # 格式化最终输出
+        n_days, n_assets, n_records = format_final_output(factor_merged_path, return_merged_path, logger)
+        
+        # 验证
+        is_valid, actual_days, actual_assets, actual_records = validate_final_data(logger)
+        
+        elapsed = time.time() - global_start
+        
+        logger.info("=" * 70)
+        logger.info("全部完成!")
+        logger.info("=" * 70)
+        logger.info(f"  结束时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"  总耗时: {elapsed:.1f}s ({elapsed/60:.1f}min)")
+        logger.info(f"  数据验证: {'通过' if is_valid else '警告'}")
+        logger.info(f"  最终内存: {get_memory_info_str()}")
+        
+        # 保存统计
+        stats = {
+            'version': _OUTPUT_VERSION,
+            'n_days': actual_days,
+            'n_assets': actual_assets,
+            'n_records': actual_records,
+            'elapsed_seconds': elapsed,
+            'is_valid': is_valid,
+            'memory_monitor': 'proc_self_status',
+            'fields': ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5']
+        }
+        
+        with open(CACHE_DIR / 'regenerate_stats.json', 'w') as f:
+            json.dump(stats, f, indent=2)
     
-    if not factor_merged_path:
-        logger.warning("  ! 无有效数据")
-        return
-    
-    # 格式化最终输出
-    n_days, n_assets, n_records = format_final_output(factor_merged_path, return_merged_path, logger)
-    
-    # 验证
-    is_valid, actual_days, actual_assets, actual_records = validate_final_data(logger)
-    
-    # 清理
-    cleanup_batch_files(total_batches, logger)
-    
-    elapsed = time.time() - global_start
-    
-    logger.info("=" * 70)
-    logger.info("全部完成!")
-    logger.info("=" * 70)
-    logger.info(f"  结束时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info(f"  总耗时: {elapsed:.1f}s ({elapsed/60:.1f}min)")
-    logger.info(f"  数据验证: {'通过' if is_valid else '警告'}")
-    logger.info(f"  最终内存: {get_memory_info_str()}")
-    
-    # 保存统计
-    stats = {
-        'version': _OUTPUT_VERSION,
-        'n_days': actual_days,
-        'n_assets': actual_assets,
-        'n_records': actual_records,
-        'elapsed_seconds': elapsed,
-        'is_valid': is_valid,
-        'memory_monitor': 'proc_self_status',
-        'fields': ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5']
-    }
-    
-    with open(CACHE_DIR / 'regenerate_stats.json', 'w') as f:
-        json.dump(stats, f, indent=2)
+    finally:
+        # 清理临时批次文件（无论成功或失败都清理）
+        cleanup_batch_files(total_batches, logger)
 
 
 if __name__ == '__main__':
