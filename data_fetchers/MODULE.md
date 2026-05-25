@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.68
+> 版本: v2.69
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 15:30 北京时间
+> 更新时间: 2026-05-26 16:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -16,7 +16,7 @@
 - 字段值不可为 None
 - 结果输出到 result 目录
 
-**本模块特定约束（9条）：**
+**本模块特定约束（11条）：**
 
 || # | 约束 | 说明 |
 |---|------|------|
@@ -29,6 +29,8 @@
 | 7 | 日志输出到 logs 目录 | 不散落在项目根目录 |
 | 8 | 流程文档配套 | docs/<脚本名>_flow.md |
 | 9 | N-way merge 去重使用 batch_idx | heap 元素为 `(key, batch_idx, stream)`，而非 `(key, stream_idx, stream)` |
+| 10 | itertuples 前验证列存在 | `hasattr(row, 'col')` 对同一 DataFrame 所有行结果相同，无效防御性检查 |
+| 11 | 大文件分阶段加载 | 避免 two large lists 同时存在于内存中，先处理第一个并 del 再加载第二个 |
 
 ### 关键函数签名
 
@@ -643,6 +645,17 @@ data_fetchers/
    - **新增约束 #9**：N-way merge 去重使用 batch_idx
    - **约束内容**：heap 元素为 `(key, batch_idx, stream)`，而非 `(key, stream_idx, stream)`
    - **规范补充原因**：原有实现使用 stream_idx 导致去重优先级错误（批次缺失时索引与批次号不对应）
+
+69. **fetch_factor_cache.py v3.13 (2026-05-26)** — Bug修复（4项）
+   - **冗余导入删除**：fetch_batch_stocks 内 `import pandas as pd` 删除（文件顶部已导入）
+   - **未使用变量删除**：`merged_records = []` 定义后从未使用，删除
+   - **hasattr 无效检查改为列存在验证**：itertuples 的 namedtuple 字段由 DataFrame 列名决定，hasattr 对所有行结果相同，改为写入前验证列存在
+   - **format_final_output 内存峰值优化**：改为分阶段加载，先处理因子数据并 del，再加载收益数据
+
+70. **MODULE.md v2.69 (2026-05-26)** — 规范补充
+   - **新增约束 #10**：itertuples 前验证列存在（hasattr 对同一 DataFrame 无效）
+   - **新增约束 #11**：大文件分阶段加载（避免内存峰值）
+   - **规范补充原因**：代码审查发现无效防御性检查、内存峰值问题
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）

@@ -21,6 +21,7 @@
 - v3.10 (2026-05-26): 移除未使用的 os 导入、修复 validate_final_data 返回类型注解（bool → tuple[bool, int, int, int]）
 - v3.11 (2026-05-26): main 函数返回类型注解（-> None）、版本号同步（3.6 → 3.10）
 - v3.12 (2026-05-26): Bug修复 - format_final_output 返回值（del后保存记录数）、n_way_merge_deduplicate 去重逻辑（使用batch_idx而非stream_idx）
+- v3.13 (2026-05-26): Bug修复 - 冗余导入删除、未使用变量删除、hasattr无效检查改为列存在验证、format_final_output内存峰值改为分阶段加载
 
 作者: 云舟
 日期: 2026-04-04
@@ -139,10 +140,26 @@ def save_batch_cache_sorted(
     Note:
         - 数据按 (date, asset) 排序，便于后续 N-way merge
         - 使用流式写入避免 to_dict('records') 内存峰值
+        - 在写入前验证必需列存在，避免 itertuples 时 AttributeError
+    
+    Raises:
+        ValueError: DataFrame 缺少必需列
     """
     logger = logger or _MODULE_LOGGER
     factor_path = CACHE_DIR / f'batch_{batch_idx}_factor.json.gz'
     return_path = CACHE_DIR / f'batch_{batch_idx}_return.json.gz'
+    
+    # 写入前验证必需列存在
+    required_factor_cols = ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5']
+    required_return_cols = ['date', 'asset', 'forward_return_1d', 'forward_return_3d', 'forward_return_5d']
+    
+    missing_factor_cols = [col for col in required_factor_cols if col not in factor_df.columns]
+    if missing_factor_cols:
+        raise ValueError(f"factor_df 缺少必需列: {missing_factor_cols}")
+    
+    missing_return_cols = [col for col in required_return_cols if col not in return_df.columns]
+    if missing_return_cols:
+        raise ValueError(f"return_df 缺少必需列: {missing_return_cols}")
     
     # 格式化并排序（按 date, asset）
     factor_df['date'] = factor_df['date'].astype(str)
@@ -158,15 +175,16 @@ def save_batch_cache_sorted(
         for i, row in enumerate(factor_df.itertuples(index=False)):
             if i > 0:
                 f.write(',\n')
+            # 列已在上方验证存在，直接访问字段（无需 hasattr）
             record = {
                 'date': row.date,
                 'asset': row.asset,
-                'open': round(row.open, 2) if hasattr(row, 'open') else None,
-                'close': round(row.close, 2) if hasattr(row, 'close') else None,
-                'high': round(row.high, 2) if hasattr(row, 'high') else None,
-                'low': round(row.low, 2) if hasattr(row, 'low') else None,
-                'rsi_6': round(row.rsi_6, 2) if hasattr(row, 'rsi_6') else None,
-                'volume_ratio_5': round(row.volume_ratio_5, 2) if hasattr(row, 'volume_ratio_5') else None
+                'open': round(row.open, 2),
+                'close': round(row.close, 2),
+                'high': round(row.high, 2),
+                'low': round(row.low, 2),
+                'rsi_6': round(row.rsi_6, 2),
+                'volume_ratio_5': round(row.volume_ratio_5, 2)
             }
             f.write('  ' + json.dumps(record, ensure_ascii=False))
         f.write('\n]')
@@ -178,12 +196,13 @@ def save_batch_cache_sorted(
         for i, row in enumerate(return_df.itertuples(index=False)):
             if i > 0:
                 f.write(',\n')
+            # 列已在上方验证存在，直接访问字段（无需 hasattr）
             record = {
                 'date': row.date,
                 'asset': row.asset,
-                'forward_return_1d': round(row.forward_return_1d, 6) if hasattr(row, 'forward_return_1d') else None,
-                'forward_return_3d': round(row.forward_return_3d, 6) if hasattr(row, 'forward_return_3d') else None,
-                'forward_return_5d': round(row.forward_return_5d, 6) if hasattr(row, 'forward_return_5d') else None
+                'forward_return_1d': round(row.forward_return_1d, 6),
+                'forward_return_3d': round(row.forward_return_3d, 6),
+                'forward_return_5d': round(row.forward_return_5d, 6)
             }
             f.write('  ' + json.dumps(record, ensure_ascii=False))
         f.write('\n]')
@@ -357,9 +376,8 @@ def n_way_merge_deduplicate(
             # 使用 -batch_idx 作为排序键，让高 batch_idx 的数据在相同 key 时优先弹出
             heapq.heappush(heap, (key, -stream.batch_idx, stream))
     
-    # 合并结果（暂时存内存，流式写入文件）
+    # 合并结果（流式写入文件，不存内存）
     output_path = CACHE_DIR / f'merged_{data_type}.json.gz'
-    merged_records = []
     last_key = None
     last_record = None
     count = 0
@@ -503,8 +521,6 @@ def fetch_batch_stocks(
     
     logger.info("  正在计算因子...")
     
-    import pandas as pd
-    
     all_data = list(all_data_dict.values())
     combined = pd.concat(all_data, ignore_index=True)
     
@@ -581,38 +597,40 @@ def format_final_output(
     
     Returns:
         tuple[int, int, int]: (n_days, n_assets, n_records) 交易日数、股票数、记录数
+    
+    Note:
+        - 内存优化：分阶段加载，先处理因子数据并释放，再处理收益数据
+        - 避免 two large lists 同时存在于内存中
     """
     logger = logger or _MODULE_LOGGER
     logger.info("格式化最终输出文件...")
     
-    # 读取合并后的数据获取元信息
+    # ============ 第一阶段：处理因子数据 ============
+    # 读取合并后的因子数据获取元信息
     with gzip.open(factor_merged_path, 'rt', encoding='utf-8') as f:
         factor_records = json.load(f)
     
-    with gzip.open(return_merged_path, 'rt', encoding='utf-8') as f:
-        return_records = json.load(f)
-    
-    # 提取日期和资产
+    # 提取日期和资产（用于两个文件的 meta）
     dates_list = sorted(set(r['date'] for r in factor_records))
     assets_list = sorted(set(r['asset'] for r in factor_records))
+    n_days = len(dates_list)
+    n_assets = len(assets_list)
+    n_records = len(factor_records)
     
-    logger.info(f"  交易日数: {len(dates_list)}")
-    logger.info(f"  股票数量: {len(assets_list)}")
-    logger.info(f"  因子记录: {len(factor_records)}")
-    logger.info(f"  收益记录: {len(return_records)}")
+    logger.info(f"  交易日数: {n_days}")
+    logger.info(f"  股票数量: {n_assets}")
+    logger.info(f"  因子记录: {n_records}")
     
-    # 写入最终格式化的文件
+    # 写入因子数据最终文件
     factor_final_path = CACHE_DIR / 'factor_data.json.gz'
-    return_final_path = CACHE_DIR / 'return_data.json.gz'
     
-    # 因子数据
     with gzip.open(factor_final_path, 'wt', encoding='utf-8') as f:
         f.write('{\n')
         f.write('  "meta": {\n')
         f.write(f'    "generated_at": "{datetime.now().isoformat()}",\n')
         f.write('    "source": "sina_api_batch_external_merge",\n')
-        f.write(f'    "n_days": {len(dates_list)},\n')
-        f.write(f'    "n_assets": {len(assets_list)},\n')
+        f.write(f'    "n_days": {n_days},\n')
+        f.write(f'    "n_assets": {n_assets},\n')
         f.write('    "date_range": {\n')
         f.write(f'      "start": "{dates_list[0]}",\n')
         f.write(f'      "end": "{dates_list[-1]}"\n')
@@ -631,14 +649,30 @@ def format_final_output(
         f.write('\n  ]\n')
         f.write('}\n')
     
-    # 收益数据
+    # 立即释放因子数据内存
+    del factor_records
+    gc.collect()
+    
+    factor_size_mb = factor_final_path.stat().st_size / (1024 * 1024)
+    logger.info(f"    因子文件: {factor_final_path} ({factor_size_mb:.2f} MB)")
+    
+    # ============ 第二阶段：处理收益数据 ============
+    # 读取合并后的收益数据（此时因子数据已释放）
+    with gzip.open(return_merged_path, 'rt', encoding='utf-8') as f:
+        return_records = json.load(f)
+    
+    logger.info(f"  收益记录: {len(return_records)}")
+    
+    # 写入收益数据最终文件
+    return_final_path = CACHE_DIR / 'return_data.json.gz'
+    
     with gzip.open(return_final_path, 'wt', encoding='utf-8') as f:
         f.write('{\n')
         f.write('  "meta": {\n')
         f.write(f'    "generated_at": "{datetime.now().isoformat()}",\n')
         f.write('    "source": "sina_api_batch_external_merge",\n')
-        f.write(f'    "n_days": {len(dates_list)},\n')
-        f.write(f'    "n_assets": {len(assets_list)},\n')
+        f.write(f'    "n_days": {n_days},\n')
+        f.write(f'    "n_assets": {n_assets},\n')
         f.write('    "date_range": {\n')
         f.write(f'      "start": "{dates_list[0]}",\n')
         f.write(f'      "end": "{dates_list[-1]}"\n')
@@ -658,24 +692,20 @@ def format_final_output(
         f.write('\n  ]\n')
         f.write('}\n')
     
-    # 保存记录数（在 del 之前）
-    n_records = len(factor_records)
-    
-    # 清理合并的临时文件和内存
-    del factor_records, return_records
+    # 立即释放收益数据内存
+    del return_records
     gc.collect()
     
-    Path(factor_merged_path).unlink()  # Path.unlink() 替代 os.remove()
+    return_size_mb = return_final_path.stat().st_size / (1024 * 1024)
+    logger.info(f"    收益文件: {return_final_path} ({return_size_mb:.2f} MB)")
+    
+    # 清理合并的临时文件
+    Path(factor_merged_path).unlink()
     Path(return_merged_path).unlink()
     
-    factor_size_mb = factor_final_path.stat().st_size / (1024 * 1024)
-    return_size_mb = return_final_path.stat().st_size / (1024 * 1024)
+    logger.info(f"  ✓ 最终文件已保存")
     
-    logger.info(f"  ✓ 最终文件已保存:")
-    logger.info(f"    因子: {factor_final_path} ({factor_size_mb:.2f} MB)")
-    logger.info(f"    收益: {return_final_path} ({return_size_mb:.2f} MB)")
-    
-    return len(dates_list), len(assets_list), n_records
+    return n_days, n_assets, n_records
 
 
 def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, int]:
