@@ -30,6 +30,7 @@
 - v3.19 (2026-05-26): Bug修复 - validate_final_data流式读取避免内存峰值、format_final_output只保留标量而非列表、模块级注释合并到常量定义、cleanup_batch_files增加merged兜底、n_way_merge移除冗余赋值
 - v3.20 (2026-05-26): Bug修复 - validate_final_data初始化默认值+健壮meta解析、n_way_merge增加counter打破heap平局
 - v3.21 (2026-05-26): Bug修复 - is_exhausted逻辑修正(and→or)、_load_next_chunk改名_load_all、main删除format返回值冗余、save_batch_cache_sorted补充接口契约说明
+- v3.22 (2026-05-26): Bug修复 - cleanup_batch_files增加try保证继续清理、get_memory_info_str用is not None判断vmrss、write_record闭包捕获f统一参数
 
 作者: 云舟
 日期: 2026-04-04
@@ -61,7 +62,7 @@ except ImportError:
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.21'
+_OUTPUT_VERSION = '3.22'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -123,8 +124,8 @@ def get_memory_info_str() -> str:
                     vmrss = int(line.split()[1]) / 1024
                 elif line.startswith('VmSize:'):
                     vmsize = int(line.split()[1]) / 1024
-            if vmrss:
-                return f"RSS={vmrss:.1f}MB" + (f", VM={vmsize:.1f}MB" if vmsize else "")
+            if vmrss is not None:
+                return f"RSS={vmrss:.1f}MB" + (f", VM={vmsize:.1f}MB" if vmsize is not None else "")
     except Exception:
         pass
     return f"RSS={get_memory_usage_mb():.1f}MB"
@@ -406,15 +407,16 @@ def n_way_merge_deduplicate(
     
     logger.info("  开始合并...")
     
-    def write_record(record: dict, f, count: int) -> int:
-        """写入一条记录，返回新的 count"""
-        if count > 0:
-            f.write(',\n')
-        f.write('  ' + json.dumps(record, ensure_ascii=False))
-        return count + 1
-    
     with gzip.open(output_path, 'wt', encoding='utf-8') as f:
         f.write('[\n')  # JSON数组开始
+        
+        # 内嵌函数：闭包捕获 f，只接收 record 和 count
+        def write_record(record: dict, count: int) -> int:
+            """写入一条记录，返回新的 count（闭包捕获 f）"""
+            if count > 0:
+                f.write(',\n')
+            f.write('  ' + json.dumps(record, ensure_ascii=False))
+            return count + 1
         
         while heap:
             key, batch_idx, _, stream = heapq.heappop(heap)
@@ -430,7 +432,7 @@ def n_way_merge_deduplicate(
                     # 按 batch_idx 降序排序，选最大的
                     same_key_records.sort(key=lambda x: x[0], reverse=True)
                     best_record = same_key_records[0][1]
-                    count = write_record(best_record, f, count)
+                    count = write_record(best_record, count)
                     
                     if count % 50000 == 0:
                         gc.collect()
@@ -450,7 +452,7 @@ def n_way_merge_deduplicate(
         if same_key_records:
             same_key_records.sort(key=lambda x: x[0], reverse=True)
             best_record = same_key_records[0][1]
-            count = write_record(best_record, f, count)
+            count = write_record(best_record, count)
         
         f.write('\n]')  # JSON数组结束
     
@@ -878,25 +880,37 @@ def cleanup_batch_files(total_batches: int, logger: logging.Logger = None) -> in
     Note:
         merged_*.json.gz 已在 format_final_output 中删除，
         此函数仅清理 batch_*.json.gz 批次文件
+        使用 try/finally 保证尽可能清理，即使中途出错也继续
     """
     logger = logger or _MODULE_LOGGER
     logger.info("[清理阶段] 删除临时批次文件...")
     
     deleted = 0
+    errors = []
+    
+    # 清理批次文件（try/finally 保证尽可能清理）
     for batch_idx in range(total_batches):
         for t in ['factor', 'return']:
             path = CACHE_DIR / f'batch_{batch_idx}_{t}.json.gz'
             if path.exists():
-                path.unlink()
-                deleted += 1
+                try:
+                    path.unlink()
+                    deleted += 1
+                except Exception as e:
+                    errors.append(f"{path}: {e}")
     
     # 清理可能残留的 merged 文件（format_final_output 已删除，此处兜底）
     for t in ['factor', 'return']:
         merged_path = CACHE_DIR / f'merged_{t}.json.gz'
         if merged_path.exists():
-            merged_path.unlink()
-            deleted += 1
+            try:
+                merged_path.unlink()
+                deleted += 1
+            except Exception as e:
+                errors.append(f"{merged_path}: {e}")
     
+    if errors:
+        logger.warning(f"  ⚠ 删除失败 {len(errors)} 个文件: {errors[:3]}...")
     logger.info(f"  ✓ 已删除 {deleted} 个临时文件")
     return deleted
 
