@@ -33,6 +33,7 @@
 - v3.22 (2026-05-26): Bug修复 - cleanup_batch_files增加try保证继续清理、get_memory_info_str用is not None判断vmrss、write_record闭包捕获f统一参数
 - v3.23 (2026-05-26): Bug修复 - validate_final_data一次性加载完整文件，避免meta手动拼接脆弱
 - v3.24 (2026-05-26): Bug修复 - valid_batch_indices移除冗余、heap注释缩进修正、valid_df增加copy避免Warning、forward_return统一写法
+- v3.25 (2026-05-26): 接口设计修正 - format_final_output返回None（统计由validate提供）、save_batch_cache_sorted接口契约说明实际调用方总是传字符串
 
 作者: 云舟
 日期: 2026-04-04
@@ -64,7 +65,7 @@ except ImportError:
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.24'
+_OUTPUT_VERSION = '3.25'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -165,7 +166,8 @@ def save_batch_cache_sorted(
         调用方不应再依赖原 DataFrame 的 date 列（如需保留，请在调用前自行 copy）
         
         接口契约：
-        - 输入 DataFrame 的 date 列可以是 datetime 或字符串类型
+        - 实际调用方总是传入字符串类型的 date 列
+        - astype(str) 为防御性编程，确保输出格式一致（兼容 datetime 或字符串输入）
         - 输出 JSON 文件的 date 字段为字符串格式 '%Y-%m-%d'
     """
     logger = logger or _MODULE_LOGGER
@@ -618,7 +620,7 @@ def format_final_output(
     factor_merged_path: Path | str,
     return_merged_path: Path | str,
     logger: logging.Logger = None
-) -> tuple[int, int, int]:
+) -> None:
     """
     将合并后的JSON数组格式化为完整JSON文件
     
@@ -627,12 +629,10 @@ def format_final_output(
         return_merged_path: 合并后的收益数据路径
         logger: 日志记录器（可选，默认使用模块级 logger）
     
-    Returns:
-        tuple[int, int, int]: (n_days, n_assets, n_records) 交易日数、股票数、记录数
-    
     Note:
         - 内存优化：分阶段加载，先处理因子数据并释放，再处理收益数据
         - 避免 two large lists 同时存在于内存中
+        - 统计信息（n_days/n_assets/n_records）由 validate_final_data 提供，不返回
     """
     logger = logger or _MODULE_LOGGER
     logger.info("格式化最终输出文件...")
@@ -744,8 +744,8 @@ def format_final_output(
     Path(return_merged_path).unlink()
     
     logger.info(f"  ✓ 最终文件已保存")
-    
-    return n_days, n_assets, n_records
+# 已完成格式化，统计信息由 validate_final_data 提供
+    logger.info("  ✓ 格式化完成")
 
 
 def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, int]:
