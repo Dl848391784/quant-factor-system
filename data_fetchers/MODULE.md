@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.66
+> 版本: v2.67
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 10:00 北京时间
+> 更新时间: 2026-05-26 11:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -618,8 +618,12 @@ data_fetchers/
    - **移除未使用导入**：os 模块（所有 os 调用已替换为 Path）
    - **类型注解修复**：validate_final_data 返回类型 bool → tuple[bool, int, int, int]
 
-64. **MODULE.md v2.66 (2026-05-26)** — 版本更新
-   - **v3.10版本记录**：代码清理完成
+65. **fetch_factor_cache.py v3.11 (2026-05-26)** — main 函数完善
+   - **返回类型注解**：main 函数 -> None
+   - **版本号同步**：main 函数日志中的版本号 3.6 → 3.10
+
+66. **MODULE.md v2.67 (2026-05-26)** — 版本更新
+   - **v3.11版本记录**：main 函数完善
    - **完成状态**：74处全量替换，无剩余
    - **logger参数化**：6个核心函数（save_batch_cache_sorted、n_way_merge_deduplicate、fetch_batch_stocks、format_final_output、validate_final_data、cleanup_batch_files）
    - **main函数日志初始化**：setup_logger + logs_dir 规范

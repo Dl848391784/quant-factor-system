@@ -19,6 +19,7 @@
 - v3.8 (2026-05-26): os.path → Path 对象全量替换（9处os.path.join、2处os.path.exists、4处os.path.getsize、3处os.remove→unlink）
 - v3.9 (2026-05-26): 函数类型注解完善（save_batch_cache_sorted、n_way_merge_deduplicate、fetch_batch_stocks、format_final_output）
 - v3.10 (2026-05-26): 移除未使用的 os 导入、修复 validate_final_data 返回类型注解（bool → tuple[bool, int, int, int]）
+- v3.11 (2026-05-26): main 函数返回类型注解（-> None）、版本号同步（3.6 → 3.10）
 
 作者: 云舟
 日期: 2026-04-04
@@ -736,7 +737,7 @@ def cleanup_batch_files(total_batches: int, logger: logging.Logger = None) -> in
     return deleted
 
 
-def main():
+def main() -> None:
     """
     主函数 - 分批拉取N天因子数据
     
@@ -748,6 +749,9 @@ def main():
     5. 格式化输出最终文件
     6. 验证数据完整性
     7. 清理临时文件
+    
+    Returns:
+        None: 此函数执行流程，不返回值
     """
     # 初始化 logger（遵循 PROJECT.md 日志规范：输出到 logs 目录）
     log_dir = get_logs_dir()
@@ -756,7 +760,7 @@ def main():
     logger.info("=" * 70)
     logger.info(f"分批拉取 {N_DAYS} 天因子数据 (外部排序版本)")
     logger.info("=" * 70)
-    logger.info(f"  版本: 3.6")
+    logger.info(f"  版本: 3.10")
     logger.info(f"  目标交易日数: {N_DAYS}")
     logger.info(f"  每批股票数量: {BATCH_SIZE}")
     logger.info(f"  内存阈值: {MEMORY_THRESHOLD_MB} MB")
