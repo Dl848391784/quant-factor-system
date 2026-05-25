@@ -2,10 +2,14 @@
 因子数据加载模块
 
 功能:
-1. 从 cache/factor_data/ 加载因子原始值
+1. 从统一数据源 factor_ic_data.json.gz 加载因子原始值
 2. 从 factor_ic/result/ 加载 IC 统计结果
 3. 从 factor_ic/result/ 加载 IC 每日序列（用于滚动ICIR）
 4. 合并多个因子数据到统一 DataFrame
+
+更新历史（2026-05-27）：
+- v2.7: 从统一数据源 factor_ic_data.json.gz 读取因子数据
+- 移除 DEFAULT_CACHE_DIR（改为 DEFAULT_DATA_SOURCE）
 
 设计参考:
 - factor_ic/common/data_loader.py
@@ -21,28 +25,32 @@ import logging
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 
-# 默认路径
-DEFAULT_CACHE_DIR = Path(__file__).parent.parent.parent / 'cache' / 'factor_data'
+# 统一数据源路径（遵循 PROJECT.md 跨模块数据路径规范）
+DEFAULT_DATA_SOURCE = Path(__file__).parent.parent.parent / 'data_fetchers' / 'result' / 'factor_ic_data.json.gz'
 DEFAULT_IC_RESULT_DIR = Path(__file__).parent.parent.parent / 'factor_ic' / 'result'
 
 
 def load_factor_values(
     factor_cols: List[str],
-    cache_dir: Optional[Path] = None,
+    data_source: Optional[Union[str, Path]] = None,
     logger: Optional[logging.Logger] = None
 ) -> pd.DataFrame:
-    """从缓存加载因子原始值
+    """从统一数据源加载因子原始值
     
     Args:
         factor_cols: 因子列名列表（如 ['rsi_6', 'volume_ratio_5']）
-        cache_dir: 缓存目录路径
+        data_source: 数据源文件路径（可选，默认使用 DEFAULT_DATA_SOURCE）
         logger: 日志对象
     
     Returns:
         包含 date, asset, 因子列的 DataFrame
+    
+    更新历史（2026-05-27）：
+        - v2.7: 从统一数据源 factor_ic_data.json.gz 读取
+        - 移除 cache_dir 参数（改为 data_source）
     
     Note:
         - 校验 date、asset 列的数据类型（date 为 str，asset 为 str）
@@ -52,40 +60,42 @@ def load_factor_values(
         from comprehensive_factor.common.logger_config import get_logger
         logger = get_logger(__name__)
     
-    if cache_dir is None:
-        cache_dir = DEFAULT_CACHE_DIR
+    if data_source is None:
+        data_source = DEFAULT_DATA_SOURCE
     
-    cache_dir = Path(cache_dir)
+    data_source = Path(data_source)
     
-    # 加载主因子数据
-    factor_path = cache_dir / 'factor_data.json.gz'
-    logger.info("加载因子数据: %s", factor_path)
+    # 加载统一数据源
+    logger.info("加载统一数据源: %s", data_source)
     
-    if not factor_path.exists():
-        raise FileNotFoundError(f"因子数据缓存文件不存在: {factor_path}")
+    if not data_source.exists():
+        raise FileNotFoundError(
+            f"统一数据源文件不存在: {data_source}\n"
+            f"请先运行 data_fetchers/factor_generator.py 生成数据"
+        )
     
-    with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
-        factor_data = json.load(f)
+    with gzip.open(data_source, 'rt', encoding='utf-8') as f:
+        data = json.load(f)
     
-    if 'data' not in factor_data:
-        raise KeyError(f"因子数据 JSON 结构缺失 'data' 字段: {factor_path}")
+    if 'data' not in data:
+        raise KeyError(f"数据源 JSON 结构缺失 'data' 字段: {data_source}")
     
-    factor_df = pd.DataFrame(factor_data['data'])
+    full_df = pd.DataFrame(data['data'])
     
-    # 校验因子列存在
+    # 校验必需列存在
     required_cols = ['date', 'asset'] + factor_cols
     for col in required_cols:
-        if col not in factor_df.columns:
-            raise ValueError(f"因子数据中缺少 {col} 列")
+        if col not in full_df.columns:
+            available_cols = [c for c in full_df.columns if c not in ['date', 'asset']]
+            raise ValueError(
+                f"数据源中缺少 '{col}' 列\n"
+                f"可用因子列: {available_cols}"
+            )
     
-    # 修复：校验 date、asset 列的数据类型
-    # date 列应为 str 类型（日期字符串），asset 列应为 str 类型（股票代码）
-    # 类型不一致可能导致 groupby、merge 等操作异常
-    
-    # 检查 date 列类型
-    if len(factor_df) > 0:
-        first_date = factor_df['date'].iloc[0]
-        first_asset = factor_df['asset'].iloc[0]
+    # 校验 date、asset 列的数据类型
+    if len(full_df) > 0:
+        first_date = full_df['date'].iloc[0]
+        first_asset = full_df['asset'].iloc[0]
         
         if not isinstance(first_date, str):
             raise TypeError(
@@ -94,7 +104,7 @@ def load_factor_values(
                 "可能原因：\n"
                 "  1. JSON 文件中 date 字段为数字而非字符串\n"
                 "  2. 数据生成脚本类型转换异常\n"
-                "建议：检查 factor_data.json.gz 生成逻辑"
+                "建议：检查 factor_ic_data.json.gz 生成逻辑"
             )
         
         if not isinstance(first_asset, str):
@@ -104,12 +114,12 @@ def load_factor_values(
                 "可能原因：\n"
                 "  1. JSON 文件中 asset 字段为数字而非字符串\n"
                 "  2. 数据生成脚本类型转换异常\n"
-                "建议：检查 factor_data.json.gz 生成逻辑"
+                "建议：检查 factor_ic_data.json.gz 生成逻辑"
             )
     
-    logger.info("因子数据: %d 条记录，类型校验通过", len(factor_df))
+    logger.info("因子数据: %d 条记录，类型校验通过", len(full_df))
     
-    return factor_df[['date', 'asset'] + factor_cols].copy()
+    return full_df[['date', 'asset'] + factor_cols].copy()
 
 
 def load_ic_results(

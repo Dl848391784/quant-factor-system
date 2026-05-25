@@ -1,0 +1,19 @@
+{
+  "meta": {
+    "last_updated": "2026-05-25T21:27:24.375386",
+    "source": "sina_api",
+    "total_count": 3011,
+    "sh_count": 1619,
+    "sz_count": 1392,
+    "added_count": 1,
+    "removed_count": 0,
+    "updated_count": 25,
+    "removed_codes": [],
+    "removed_codes_truncated": false,
+    "existing_count": 3010,
+    "api_pages": 66,
+    "version": "2.8"
+  },
+  "timestamp": "2026-05-25T21:27:24.375386",
+  "script": "fetch_stock_list"
+}

@@ -83,10 +83,17 @@ factor_ic_analyzer/
 
 | 模块 | 输出目录 | 输出文件 | 依赖模块读取位置 |
 |-----|---------|---------|----------------|
-| data_fetchers/fetch_factor_cache | cache/factor_data/ | factor_data.json.gz, return_data.json.gz | 基础数据源 |
-| data_fetchers/fetch_turnover | cache/factor_data/ | turnover_rate_data.json.gz | 基础数据源 |
-| data_fetchers/factor_generator | **data_fetchers/result/** | **factor_ic_data.json.gz** | **factor_ic.data_loader** |
+| data_fetchers/fetch_factor_cache | cache/factor_data/ | factor_data.json.gz, return_data.json.gz | 历史数据源（已迁移） |
+| data_fetchers/fetch_turnover | cache/factor_data/ | turnover_rate_data.json.gz | 历史数据源（已迁移） |
+| data_fetchers/factor_generator | **data_fetchers/result/** | **factor_ic_data.json.gz** | **factor_ic, backtest, comprehensive_factor 统一数据源** |
 | factor_ic | factor_ic/result/ | ic_<因子名>_analysis_result.json | comprehensive_factor |
+| backtest | backtest/result/ | <因子名>_layered_backtest.json | **读取 factor_ic_data.json.gz** |
+| comprehensive_factor | comprehensive_factor/result/ | composite_<加权方式>_1d.json | **读取 factor_ic_data.json.gz + factor_ic/result/** |
+
+**数据架构迁移历史（2026-05-27）：**
+- v2.6: 收益数据合并到 factor_ic_data.json.gz，实现单文件读取架构
+- 统一数据源：factor_ic_data.json.gz 包含行情+因子+收益数据
+- 所有下游模块（factor_ic, backtest, comprehensive_factor）应读取同一数据源
 
 **factor_ic_data.json.gz 数据结构（2026-05-27更新）：**
 - 行情数据：open, close, high, low
@@ -1013,6 +1020,7 @@ def cleanup_old_logs(logs_dir: Path, keep_days: int = 30):
 
 | 版本 | 日期 | 更新内容 |
 |------|------|---------|
+| v2.7 | 2026-05-27 | 扩展跨模块数据路径规范表：添加 backtest 和 comprehensive_factor 数据来源；明确统一数据源架构迁移历史 |
 | v2.6 | 2026-05-27 | 重构数据架构：factor_data_extended → factor_ic_data（统一数据源语义）；合并收益数据到 factor_ic_data.json.gz；更新跨模块数据路径规范、数据结构说明、语义统一原则 |
 | v2.5 | 2026-05-26 | 新增"跨模块数据路径规范"：数据输出/输入路径表、变更同步检查清单、历史教训；同步更新数据流向描述 |
 | v2.4 | 2026-05-22 | 迁移 factor_ic 特定规范至 MODULE.md（公共模块强制复用、公共模块日志传递），新增文档层级规范 |

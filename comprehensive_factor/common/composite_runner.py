@@ -99,7 +99,7 @@ def run_composite_backtest(
     factor_cols: Optional[List[str]] = None,      # 可选，如为None则自动筛选
     config: Optional['CompositeLayerConfig'] = None,
     return_period: str = '1d',
-    cache_dir: Optional[str] = None,
+    data_source: Optional[Union[str, Path]] = None,
     ic_result_dir: Optional[str] = None,
     backtest_result_dir: Optional[str] = None,
     output_dir: Union[str, Path, None] = None,    # 修复：支持 str 或 Path，入口统一转换
@@ -116,7 +116,7 @@ def run_composite_backtest(
         factor_cols: 因子列名列表（用于加载因子值），如为None且auto_select=True则自动筛选
         config: 分层配置对象
         return_period: 收益周期
-        cache_dir: 缓存目录
+        data_source: 数据源文件路径（可选，默认使用 DEFAULT_DATA_SOURCE）
         ic_result_dir: IC结果目录
         backtest_result_dir: 回测结果目录
         output_dir: 输出目录（支持 str 或 Path，入口统一转换为 Path）
@@ -127,6 +127,9 @@ def run_composite_backtest(
     
     Returns:
         回测结果字典
+    
+    更新历史（2026-05-27）：
+        - v2.7: 移除 cache_dir 参数，改为统一数据源 data_source
     """
     if logger is None:
         logger = get_logger(__name__)
@@ -212,7 +215,7 @@ def run_composite_backtest(
     logger.info("加载因子数据...")
     factor_df = load_factor_values(
         factor_cols=factor_cols,
-        cache_dir=cache_dir,
+        data_source=data_source,
         logger=logger
     )
     
@@ -380,7 +383,7 @@ def run_composite_backtest(
     
     # 加载收益数据（防御性校验返回值）
     factor_return_result = load_factor_return_data(
-        cache_dir=cache_dir,
+        data_source=data_source,
         logger=logger
     )
     
@@ -536,7 +539,7 @@ def create_cli_entrypoint(
     factor_cols: List[str],
     config_class: type,
     return_period: str = '1d',
-    cache_dir: Optional[str] = None,
+    data_source: Optional[Union[str, Path]] = None,
     ic_result_dir: Optional[str] = None
 ) -> Callable[[], None]:
     """创建 CLI 入口函数
@@ -547,18 +550,21 @@ def create_cli_entrypoint(
         factor_cols: 因子列名列表
         config_class: Config 类
         return_period: 收益周期
-        cache_dir: 缓存目录
+        data_source: 数据源文件路径
         ic_result_dir: IC结果目录
     
     Returns:
         CLI 入口函数
+    
+    更新历史（2026-05-27）：
+        - v2.7: 移除 cache_dir 参数，改为统一数据源 data_source
     """
     def main():
         import argparse
         
         parser = argparse.ArgumentParser(description=f'综合因子分层回测 [{weight_method}]')
-        parser.add_argument('--cache_dir', type=str, default=cache_dir,
-                            help='缓存目录路径')
+        parser.add_argument('--data_source', type=str, default=data_source,
+                            help='数据源文件路径')
         parser.add_argument('--ic_result_dir', type=str, default=ic_result_dir,
                             help='IC结果目录路径')
         parser.add_argument('--output_dir', type=str, default=None)
@@ -575,7 +581,7 @@ def create_cli_entrypoint(
                 factor_cols=factor_cols,
                 config=config_class(),
                 return_period=return_period,
-                cache_dir=args.cache_dir,
+                data_source=args.data_source,
                 ic_result_dir=args.ic_result_dir,
                 output_dir=args.output_dir,
                 verbose=not args.quiet,

@@ -127,132 +127,99 @@ class LayerConfigBase:
 # ============================================================================
 
 def load_factor_return_data(
-    cache_dir: Optional[str] = None,
-    additional_data_files: Optional[Dict[str, str]] = None,
+    data_source: Optional[Union[str, Path]] = None,
     required_factor_cols: Optional[List[str]] = None,
     logger: Optional[logging.Logger] = None
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """从缓存加载因子和收益数据
+    """从统一数据源加载因子和收益数据
     
     参数:
-        cache_dir: 缓存目录路径
-        additional_data_files: 额外数据文件映射 {字段名: 文件路径}
+        data_source: 数据源文件路径（默认使用 DEFAULT_DATA_SOURCE）
         required_factor_cols: 因子数据必需字段列表
         logger: 日志对象
     
     返回:
         (factor_df, return_df)
     
+    更新历史（2026-05-27）：
+        - v2.7: 从统一数据源 factor_ic_data.json.gz 读取
+        - 移除 additional_data_files 参数（统一数据源已包含所有字段）
+        - 移除 cache_dir 参数（改为 data_source）
+    
     注意:
-        - 遵循 PROJECT.md 数据完整性校验规范
-        - 支持额外数据源合并（如 turnover_rate）
+        - 遵循 PROJECT.md 跨模块数据路径规范
+        - factor_ic_data.json.gz 包含行情+因子+收益数据，单文件读取
     """
+    from backtest.common.data_loader import DEFAULT_DATA_SOURCE
+    
     if logger is None:
         logger = get_logger(__name__)
     
-    if cache_dir is None:
-        # 默认缓存目录
-        cache_dir = Path(__file__).parent.parent.parent / 'cache' / 'factor_data'
+    # 使用默认数据源
+    if data_source is None:
+        data_source = DEFAULT_DATA_SOURCE
     
-    cache_dir = Path(cache_dir)
+    data_source = Path(data_source)
     
-    # 加载主因子数据
-    factor_path = cache_dir / 'factor_data.json.gz'
-    logger.info("加载因子数据: %s", factor_path)
+    # 加载统一数据源
+    logger.info("加载统一数据源: %s", data_source)
     
-    if not factor_path.exists():
-        raise FileNotFoundError(f"因子数据缓存文件不存在: {factor_path}")
-    
-    try:
-        with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
-            factor_data = json.load(f)
-    except json.JSONDecodeError as e:
-        # 不传递 e.doc（完整文档字符串），避免内存翻倍
-        raise ValueError(
-            f"因子数据 JSON 解析失败: {factor_path}, 位置 {e.pos}: {e.msg}"
-        ) from e
-    
-    if 'data' not in factor_data:
-        raise KeyError(
-            f"因子数据 JSON 结构缺失 'data' 字段: {factor_path}, "
-            f"顶层字段: {list(factor_data.keys())}"
+    if not data_source.exists():
+        raise FileNotFoundError(
+            f"统一数据源文件不存在: {data_source}\n"
+            f"请先运行 data_fetchers/factor_generator.py 生成数据"
         )
     
-    factor_df = pd.DataFrame(factor_data['data'])
-    logger.info("因子数据: %d 条记录", len(factor_df))
+    try:
+        with gzip.open(data_source, 'rt', encoding='utf-8') as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"数据源 JSON 解析失败: {data_source}, 位置 {e.pos}: {e.msg}"
+        ) from e
     
-    # 加载额外数据源（如 turnover_rate）
-    if additional_data_files:
-        for col_name, file_path in additional_data_files.items():
-            extra_path = Path(file_path)
-            logger.info("加载额外数据 (%s): %s", col_name, extra_path)
-            
-            if not extra_path.exists():
-                raise FileNotFoundError(f"额外数据文件不存在: {extra_path}")
-            
-            try:
-                with gzip.open(extra_path, 'rt', encoding='utf-8') as f:
-                    extra_data = json.load(f)
-            except json.JSONDecodeError as e:
-                # 不传递 e.doc（完整文档字符串），避免内存翻倍
-                raise ValueError(
-                    f"额外数据 JSON 解析失败: {extra_path}, 位置 {e.pos}: {e.msg}"
-                ) from e
-            
-            if 'data' not in extra_data:
-                raise KeyError(
-                    f"额外数据 JSON 结构缺失 'data' 字段: {extra_path}, "
-                    f"顶层字段: {list(extra_data.keys())}"
-                )
-            
-            extra_df = pd.DataFrame(extra_data['data'])
-            
-            # 校验必需字段
-            for req_col in ['date', 'asset', col_name]:
-                if req_col not in extra_df.columns:
-                    raise ValueError(f"额外数据中缺少 {req_col} 列")
-            
-            # 合并到主因子数据
-            factor_df = factor_df.merge(
-                extra_df[['date', 'asset', col_name]],
-                on=['date', 'asset'],
-                how='left'
-            )
-            logger.info("合并 %s 数据后: %d 条记录", col_name, len(factor_df))
+    if 'data' not in data:
+        raise KeyError(
+            f"数据源 JSON 结构缺失 'data' 字段: {data_source}, "
+            f"顶层字段: {list(data.keys())}"
+        )
+    
+    full_df = pd.DataFrame(data['data'])
+    logger.info("统一数据源: %d 条记录，%d 列", len(full_df), len(full_df.columns))
+    
+    # 分离因子数据和收益数据
+    # factor_ic_data.json.gz 字段分类（遵循 PROJECT.md 数据结构说明）：
+    # - 行情数据：open, close, high, low
+    # - 基础因子：rsi_6, volume_ratio_5, turnover_rate
+    # - 扩展因子：bollinger_pb, kdj_j, turnover_surge
+    # - 收益数据：forward_return_1d, forward_return_3d, forward_return_5d
+    # - 索引字段：date, asset
+    
+    return_cols = ['date', 'asset', 'forward_return_1d', 'forward_return_3d', 'forward_return_5d']
+    
+    # 检查收益列是否存在
+    for col in ['forward_return_1d', 'forward_return_3d', 'forward_return_5d']:
+        if col not in full_df.columns:
+            raise ValueError(f"数据源中缺少收益列 '{col}'，当前列: {list(full_df.columns)}")
+    
+    # 分离 return_df
+    return_df = full_df[return_cols].copy()
+    logger.info("收益数据: %d 条记录", len(return_df))
+    
+    # factor_df 包含所有非收益列（保留行情+因子数据）
+    factor_cols = [col for col in full_df.columns if col not in ['forward_return_1d', 'forward_return_3d', 'forward_return_5d']]
+    factor_df = full_df[factor_cols].copy()
+    logger.info("因子数据: %d 条记录，%d 列", len(factor_df), len(factor_cols))
     
     # 校验必需字段
     if required_factor_cols:
         for col in required_factor_cols:
             if col not in factor_df.columns:
-                raise ValueError(f"因子数据中缺少 {col} 列")
-    
-    # 加载收益数据
-    return_path = cache_dir / 'return_data.json.gz'
-    logger.info("加载收益数据: %s", return_path)
-    
-    if not return_path.exists():
-        raise FileNotFoundError(f"收益数据缓存文件不存在: {return_path}")
-    
-    try:
-        with gzip.open(return_path, 'rt', encoding='utf-8') as f:
-            return_data = json.load(f)
-    except json.JSONDecodeError as e:
-        # 不传递 e.doc（完整文档字符串），避免内存翻倍
-        raise ValueError(
-            f"收益数据 JSON 解析失败: {return_path}, 位置 {e.pos}: {e.msg}"
-        ) from e
-    
-    if 'data' not in return_data:
-        raise KeyError(
-            f"收益数据 JSON 结构缺失 'data' 字段: {return_path}, "
-            f"顶层字段: {list(return_data.keys())}"
-        )
-    
-    return_df = pd.DataFrame(return_data['data'])
-    logger.info("收益数据: %d 条记录", len(return_df))
-    
-    if 'forward_return_1d' not in return_df.columns:
-        raise ValueError("收益数据中缺少 forward_return_1d 列")
+                available_cols = [c for c in factor_df.columns if c not in ['date', 'asset']]
+                raise ValueError(
+                    f"因子数据中缺少 '{col}' 列\n"
+                    f"可用因子列: {available_cols}"
+                )
     
     return factor_df, return_df
 
@@ -266,9 +233,8 @@ def run_layered_backtest(
     factor_col: str,
     config: LayerConfigBase,
     factor_calculator: Optional[Callable] = None,
-    additional_data_files: Optional[Dict[str, str]] = None,
     required_factor_cols: Optional[List[str]] = None,
-    cache_dir: Optional[str] = None,
+    data_source: Optional[Union[str, Path]] = None,
     output_dir: Optional[str] = None,
     verbose: bool = True,
     logger: Optional[logging.Logger] = None
@@ -279,10 +245,9 @@ def run_layered_backtest(
         factor_name: 因子名称（用于输出文件命名）
         factor_col: 因子列名（在 factor_df 中）
         config: 分层配置对象（继承 LayerConfigBase）
-        factor_calculator: 因子计算函数（可选，若因子已在缓存中则不需要）
-        additional_data_files: 额外数据文件映射（可选）
+        factor_calculator: 因子计算函数（可选，若因子已在数据源中则不需要）
         required_factor_cols: 因子数据必需字段列表（可选）
-        cache_dir: 缓存目录（可选，默认 cache/factor_data/）
+        data_source: 数据源文件路径（可选，默认使用 DEFAULT_DATA_SOURCE）
         output_dir: 输出目录（默认 backtest/result/）
         verbose: 是否打印详细信息
         logger: 日志对象
@@ -290,21 +255,22 @@ def run_layered_backtest(
     返回:
         回测结果字典
     
+    更新历史（2026-05-27）：
+        - v2.7: 移除 cache_dir 和 additional_data_files 参数，改为统一数据源
+    
     使用示例:
-        # 简单因子（已在缓存中）
+        # 简单因子（已在数据源中）
         result = run_layered_backtest(
             factor_name='volume_ratio',
             factor_col='volume_ratio_5',
             config=VolumeRatioLayerConfig()
         )
         
-        # 需要计算的因子
+        # 需要计算的因子（turnover_surge 已在数据源中）
         result = run_layered_backtest(
             factor_name='turnover_surge',
             factor_col='turnover_surge',
             config=TurnoverSurgeLayerConfig(),
-            factor_calculator=calculate_turnover_surge,
-            additional_data_files={'turnover_rate': 'path/to/turnover_rate.json.gz'},
             required_factor_cols=['turnover_rate', 'close']
         )
     """
@@ -327,10 +293,9 @@ def run_layered_backtest(
         logger.info("  最小股票数: %d", config.min_stocks_per_layer)
         logger.info("  交易成本率: %.2f%%", config.trade_cost_rate * 100)
     
-    # 加载数据（透传 cache_dir）
+    # 加载数据（从统一数据源）
     factor_df, return_df = load_factor_return_data(
-        cache_dir=cache_dir,
-        additional_data_files=additional_data_files,
+        data_source=data_source,
         required_factor_cols=required_factor_cols,
         logger=logger
     )
@@ -464,11 +429,13 @@ def create_cli_entrypoint(
     factor_col: str,
     config_class: type,
     factor_calculator: Optional[Callable] = None,
-    additional_data_files: Optional[Dict[str, str]] = None,
     required_factor_cols: Optional[List[str]] = None,
-    cache_dir: Optional[str] = None
+    data_source: Optional[Union[str, Path]] = None
 ) -> Callable[[], None]:
     """创建 CLI 入口函数
+    
+    更新历史（2026-05-27）：
+        - v2.7: 移除 cache_dir 和 additional_data_files 参数，改为统一数据源
     
     使用方式:
         main = create_cli_entrypoint(
@@ -484,8 +451,8 @@ def create_cli_entrypoint(
         import argparse
         
         parser = argparse.ArgumentParser(description=f'{factor_name} 分层回测')
-        parser.add_argument('--cache_dir', type=str, default=cache_dir,
-                            help='缓存目录路径')
+        parser.add_argument('--data_source', type=str, default=data_source,
+                            help='数据源文件路径')
         parser.add_argument('--output_dir', type=str, default=None)
         parser.add_argument('--quiet', action='store_true')
         
@@ -499,9 +466,8 @@ def create_cli_entrypoint(
                 factor_col=factor_col,
                 config=config_class(),
                 factor_calculator=factor_calculator,
-                additional_data_files=additional_data_files,
                 required_factor_cols=required_factor_cols,
-                cache_dir=args.cache_dir,
+                data_source=args.data_source,
                 output_dir=args.output_dir,
                 verbose=not args.quiet,
                 logger=logger

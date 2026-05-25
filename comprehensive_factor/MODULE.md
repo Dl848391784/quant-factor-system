@@ -1338,13 +1338,17 @@ class CompositeLayerConfig:
 
 ## 因子数据来源规范
 
-**因子值加载路径：**
+**因子值加载路径（v2.7 更新）：**
 
 | 数据类型 | 来源路径 | 加载方式 |
 |---------|---------|---------|
-| 因子原始值 | `cache/factor_data/factor_data.json.gz` | `factor_loader.load_factor_values()` |
+| 因子原始值 | `data_fetchers/result/factor_ic_data.json.gz` | `factor_loader.load_factor_values()` |
 | IC统计结果 | `factor_ic/result/*.json` | `factor_loader.load_ic_results()` |
 | IC每日序列 | `factor_ic/result/*_daily.json.gz` | `factor_loader.load_ic_daily()` |
+
+**统一数据源架构（2026-05-27）：**
+- 所有因子、行情、收益数据均在 `factor_ic_data.json.gz` 中
+- 参数 `cache_dir` 已改为 `data_source`
 
 ---
 
@@ -2554,7 +2558,7 @@ from comprehensive_factor.common.composite_runner import (
     CompositeLayerConfig
 )
 
-from comprehensive_factor.common.data_loader import DEFAULT_CACHE_DIR
+from comprehensive_factor.common.data_loader import DEFAULT_DATA_SOURCE
 # 不导入 logger（create_cli_entrypoint 内部会处理日志）
 ```
 

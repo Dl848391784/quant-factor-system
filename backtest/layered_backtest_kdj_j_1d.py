@@ -198,8 +198,8 @@ def calculate_kdj_j(
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='KDJ_J 分层回测')
-    parser.add_argument('--cache_dir', type=str, default=None,
-                        help='缓存目录路径')
+    parser.add_argument('--data_source', type=str, default=None,
+                        help='数据源文件路径')
     parser.add_argument('--output_dir', type=str, default=None)
     parser.add_argument('--quiet', action='store_true')
     # argparse 参数命名说明：
@@ -218,13 +218,14 @@ def main():
         def factor_calc(df):
             return calculate_kdj_j(df, n=args.kdj_n, m1=args.kdj_m1, m2=args.kdj_m2, log_handler=logger)
         
+        # 更新历史（2026-05-27）：v2.7 移除 cache_dir 参数，改为 data_source
         result = run_layered_backtest(
             factor_name='kdj_j',
             factor_col='kdj_j',
             config=KDJJLayerConfig(),
             factor_calculator=factor_calc,
             required_factor_cols=['close', 'high', 'low'],
-            cache_dir=args.cache_dir,
+            data_source=args.data_source,
             output_dir=args.output_dir,
             verbose=not args.quiet,
             logger=logger

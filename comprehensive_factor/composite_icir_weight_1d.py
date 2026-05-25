@@ -37,7 +37,7 @@ from comprehensive_factor.common.composite_runner import (
     create_cli_entrypoint,
     CompositeLayerConfig
 )
-from comprehensive_factor.common.data_loader import DEFAULT_CACHE_DIR
+from comprehensive_factor.common.data_loader import DEFAULT_DATA_SOURCE
 
 
 # ============================================================================
@@ -86,7 +86,7 @@ main = create_cli_entrypoint(
     factor_cols=_default_config.factor_cols,
     config_class=ICIRWeightLayerConfig,
     return_period='1d',
-    cache_dir=str(DEFAULT_CACHE_DIR)
+    data_source=str(DEFAULT_DATA_SOURCE)
 )
 
 if __name__ == '__main__':

@@ -13,6 +13,9 @@
 - 遵循 MODULE.md CLI入口最小导入规范：只导入实际使用的函数
 - 遵循 MODULE.md Config默认值单一数据源规范：CLI入口参数从Config读取
 
+更新历史（2026-05-27）：
+- v2.7: cache_dir 改为 data_source，读取统一数据源
+
 作者: 云瑶
 创建日期: 2026-05-24
 """
@@ -29,7 +32,7 @@ from comprehensive_factor.common.composite_runner import (
     create_cli_entrypoint,
     CompositeLayerConfig
 )
-from comprehensive_factor.common.data_loader import DEFAULT_CACHE_DIR
+from comprehensive_factor.common.data_loader import DEFAULT_DATA_SOURCE
 
 
 # ============================================================================
@@ -72,7 +75,7 @@ main = create_cli_entrypoint(
     factor_cols=_default_config.factor_cols,
     config_class=EqualWeightLayerConfig,
     return_period='1d',
-    cache_dir=str(DEFAULT_CACHE_DIR)
+    data_source=str(DEFAULT_DATA_SOURCE)
 )
 
 if __name__ == '__main__':

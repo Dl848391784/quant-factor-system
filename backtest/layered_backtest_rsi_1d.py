@@ -327,8 +327,8 @@ def calculate_rsi(
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='RSI 分层回测')
-    parser.add_argument('--cache_dir', type=str, default=None,
-                        help='缓存目录路径')
+    parser.add_argument('--data_source', type=str, default=None,
+                        help='数据源文件路径')
     parser.add_argument('--output_dir', type=str, default=None,
                         help='输出目录路径')
     parser.add_argument('--quiet', action='store_true',
@@ -346,16 +346,17 @@ def main():
             log_handler=logger
         )
         
+        # 更新历史（2026-05-27）：v2.7 移除 cache_dir 参数，改为 data_source
         result = run_layered_backtest(
             factor_name='rsi',
             factor_col='rsi',
             config=RSILayerConfig(),
             factor_calculator=factor_calc,
             required_factor_cols=['close'],
-            cache_dir=args.cache_dir,
+            data_source=args.data_source,
             output_dir=args.output_dir,
             verbose=not args.quiet,
-            logger=logger  # 符合 MODULE.md 第382行规范：参数名统一为 logger
+            logger=logger
         )
         
         if result['meta']['n_days_total'] == 0:

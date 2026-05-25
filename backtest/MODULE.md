@@ -62,7 +62,7 @@ backtest 模块负责对因子 IC 结果进行分层回测，评估因子的实�
 | 日志配置 | `backtest.common.logger_config` | get_logger 函数 |
 | 分层回测引擎 | `backtest.common.layered_backtest` | LayeredBacktestEngine 类 |
 | 分层回测入口 | `backtest.common.layered_backtest_runner` | run_layered_backtest 公共入口 |
-| 数据路径 | `backtest.common.data_loader` | DEFAULT_CACHE_DIR |
+| 数据路径 | `backtest.common.data_loader` | DEFAULT_DATA_SOURCE（统一数据源） |
 
 ### 禁止手写的逻辑
 
@@ -729,7 +729,7 @@ df['rsi'] = 100 - (100 / (1 + df['rs']))  # 无后续覆盖，逻辑漏洞
 **预计算因子列（数据已在缓存中）应指定 required_factor_cols 作为防御性校验。**
 
 **使用场景：**
-- 因子列已在 `factor_data.json.gz` 中预存（如 volume_ratio_5）
+- 因子列已在 `factor_ic_data.json.gz` 统一数据源中预存（如 volume_ratio_5）
 - 无需 factor_calculator 实时计算
 
 **正确写法：**
@@ -1346,7 +1346,7 @@ def main():
 **必须支持的 CLI 参数：**
 | 参数 | 用途 | 默认值 |
 |------|------|--------|
-| `--cache_dir` | 缓存目录路径 | None（使用 DEFAULT_CACHE_DIR） |
+| `--data_source` | 数据源文件路径 | None（使用 DEFAULT_DATA_SOURCE） |
 | `--output_dir` | 输出目录路径 | None（使用默认路径） |
 | `--quiet` | 静默模式 | False |
 
@@ -1356,8 +1356,8 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description='因子分层回测')
-    parser.add_argument('--cache_dir', type=str, default=None,
-                        help='缓存目录路径')
+    parser.add_argument('--data_source', type=str, default=None,
+                        help='数据源文件路径')
     parser.add_argument('--output_dir', type=str, default=None)
     parser.add_argument('--quiet', action='store_true')
     args = parser.parse_args()
@@ -1379,37 +1379,27 @@ def main():
 - cache_dir 支持自定义缓存路径，便于多环境部署
 - output_dir 支持自定义输出路径，便于结果归档
 
-### additional_data_files 动态构建规范
+### 统一数据源架构（v2.7 更新）
 
-**additional_data_files 的路径必须使用 args.cache_dir 动态构建，而非硬编码 DEFAULT_CACHE_DIR。**
+**自 2026-05-27 起，所有模块统一从 `data_fetchers/result/factor_ic_data.json.gz` 读取数据。**
 
-**原因：**
-- DEFAULT_CACHE_DIR 在模块导入时即被求值，无法响应用户指定的 --cache_dir
-- 附加数据文件应与主缓存目录保持一致
+**数据结构：**
+- 因子列：rsi_6, volume_ratio_5, turnover_rate, bollinger_pb, kdj_j, turnover_surge
+- 行情数据：open, close, high, low
+- 收益数据：forward_return_1d, forward_return_3d, forward_return_5d
+
+**移除的参数：**
+- `cache_dir` → 改为 `data_source`
+- `additional_data_files` → 已废弃（所有数据在统一数据源中）
 
 **正确写法：**
 ```python
 result = run_layered_backtest(
     ...
-    additional_data_files={
-        'turnover_rate': str(Path(args.cache_dir) / 'turnover_rate_data.json.gz')
-    },
-    cache_dir=args.cache_dir,
+    data_source=args.data_source,
     ...
 )
 ```
-
-**错误写法：**
-```python
-# 硬编码 DEFAULT_CACHE_DIR，--cache_dir 参数对附加数据无效
-result = run_layered_backtest(
-    ...
-    additional_data_files={'turnover_rate': str(DEFAULT_CACHE_DIR / 'turnover_rate_data.json.gz')},
-    cache_dir=args.cache_dir,
-    ...
-)
-```
-- 参数透传保证 CLI 参数生效
 
 ---
 

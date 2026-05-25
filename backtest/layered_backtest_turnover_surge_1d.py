@@ -32,7 +32,7 @@ from backtest.common.layered_backtest_runner import (
     LayerConfigBase
 )
 from backtest.common.logger_config import get_logger
-from backtest.common.data_loader import DEFAULT_CACHE_DIR
+from backtest.common.data_loader import DEFAULT_DATA_SOURCE
 
 logger = get_logger(__name__)
 
@@ -175,8 +175,8 @@ def main():
     # - 命令行使用 --surge-window（连字符）
     # - Python 访问使用 args.surge_window（下划线，argparse 自动转换）
     # - 这是 argparse 标准行为，dest 参数可自定义内部名称
-    parser.add_argument('--cache_dir', type=str, default=str(DEFAULT_CACHE_DIR),
-                        help='缓存目录路径')
+    parser.add_argument('--data_source', type=str, default=str(DEFAULT_DATA_SOURCE),
+                        help='数据源文件路径')
     parser.add_argument('--output_dir', type=str, default=None)
     parser.add_argument('--quiet', action='store_true')
     parser.add_argument('--surge-window', type=int, default=DEFAULT_SURGE_WINDOW,
@@ -191,19 +191,18 @@ def main():
             log_handler=logger
         )
         
+        # 更新历史（2026-05-27）：v2.7 移除 additional_data_files 和 cache_dir
+        # turnover_surge 因子已预计算在统一数据源中，但保留 factor_calculator 以支持自定义窗口
         result = run_layered_backtest(
             factor_name='turnover_surge',
             factor_col='turnover_surge',
             config=TurnoverSurgeLayerConfig(),
             factor_calculator=factor_calc,
-            additional_data_files={
-                'turnover_rate': str(Path(args.cache_dir) / 'turnover_rate_data.json.gz')
-            },
             required_factor_cols=['turnover_rate', 'close'],
-            cache_dir=args.cache_dir,
+            data_source=args.data_source,
             output_dir=args.output_dir,
             verbose=not args.quiet,
-            logger=logger  # 符合 MODULE.md 第382行规范：参数名统一为 logger
+            logger=logger
         )
         
         if result['meta']['n_days_total'] == 0:

@@ -14,10 +14,10 @@
 - 量比<1: 成交量低于均值（缩量）
 - 量比>1: 成交量高于均值（放量）
 
-数据来源：
-- 缓存数据：DEFAULT_CACHE_DIR/factor_data.json.gz（默认为项目根目录/cache/factor_data）
+数据来源（更新历史 2026-05-27）：
+- 统一数据源：data_fetchers/result/factor_ic_data.json.gz
 - 因子列：volume_ratio_5（已预计算）
-- 注：可通过 --cache_dir 参数指定其他缓存目录
+- 注：可通过 --data_source 参数指定其他数据源
 
 输出：
 - 分层回测结果：backtest/result/volume_ratio_layered_backtest.json
@@ -25,7 +25,7 @@
 - 注：可通过 --output_dir 参数指定其他输出目录
 
 CLI 参数：
-- --cache_dir: 缓存目录路径（默认：None，使用 DEFAULT_CACHE_DIR）
+- --data_source: 数据源文件路径（默认：None，使用 DEFAULT_DATA_SOURCE）
 - --output_dir: 输出目录路径（默认：None，使用 backtest/result）
 - --quiet: 静默模式（默认：False）
 
@@ -36,6 +36,7 @@ CLI 参数：
 作者: 云瑶
 创建日期: 2026-05-23
 重构日期: 2026-05-23（使用公共入口）
+更新日期: 2026-05-27（统一数据源）
 """
 
 # 标准库
