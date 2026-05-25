@@ -35,6 +35,7 @@
 - v1.22 (2026-05-25): 代码结构优化（清理output_cols冗余别名、mkdir和temp_path职责分离、base_data/turnover_data内存释放、missing_cols错误信息改进）
 - v1.23 (2026-05-26): 代码结构优化（tuple类型注解改为tuple[str, ...]更精确表达字符串元组）
 - v1.24 (2026-05-26): Bug修复+代码结构优化（turnover_df内存释放、docstring Example标记非运行示例、元组转列表pandas兼容）
+- v1.25 (2026-05-26): Bug修复+文档修正（_calc_pct类型注解补充兼容类型说明、docstring Raises删除输入数据为空场景、兜底块错误信息补充异常详情）
 
 作者: 云瑶
 """
@@ -110,8 +111,8 @@ def _calc_pct(count: int, total: int) -> float:
     计算百分比（除零保护）
     
     Args:
-        count: 记录数（分子，如有效记录数、缺失记录数等）
-        total: 总记录数（分母）
+        count: 记录数（分子，如有效记录数、缺失记录数等），支持 int 或兼容类型
+        total: 总记录数（分母），支持 int 或兼容类型
         
     Returns:
         float: 百分比（0.0-100.0），空数据时返回 0.0
@@ -127,6 +128,8 @@ def _calc_pct(count: int, total: int) -> float:
     Note:
         - 通用百分比计算函数，可用于有效记录、缺失记录等场景
         - 参数语义由调用方决定（count 是分子，total 是分母）
+        - 类型注解为 int，但实际接受 int、numpy.int64、float 等兼容类型
+        - Python 运行时不强制类型检查，注解仅为静态分析提供参考
     """
     if total <= 0:
         return 0.0
@@ -195,8 +198,8 @@ def generate_all_factors(
         
     Raises:
         FileNotFoundError: 输入数据文件不存在
-        ValueError: 数据格式不正确（缺少 'data' 字段）、JSON 解析失败、gzip 文件损坏、或输入数据为空
-        KeyError: 必需字段不存在
+        ValueError: 数据格式不正确（缺少 'data' 字段）、JSON 解析失败、gzip 文件损坏
+        KeyError: 必需字段不存在（输出列不存在）
         RuntimeError: 文件系统错误（磁盘/权限/IO）或未知保存错误
         
     Note:
@@ -384,7 +387,7 @@ def generate_all_factors(
     except Exception as e:
         # 未知错误（兜底）
         temp_path.unlink(missing_ok=True)  # 原子操作，消除 TOCTOU 竞争窗口
-        raise RuntimeError(f"未知错误保存失败: {output_path}") from e
+        raise RuntimeError(f"未知错误保存失败: {output_path}, {type(e).__name__}: {e}") from e
     
     logger.info("  输出路径: %s", output_path)
     logger.info("  输出记录数: %d", len(output_df))

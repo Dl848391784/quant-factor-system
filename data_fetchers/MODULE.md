@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.57
+> 版本: v2.58
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 02:00 北京时间
+> 更新时间: 2026-05-26 03:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -575,6 +575,17 @@ data_fetchers/
    - **DataFrame 内存释放规范**：merge 完成后立即释放（不再需要的 DataFrame）
    - **docstring Example 规范**：标记非运行示例（需要外部依赖的函数）
    - **pandas 列选择规范**：元组常量需转列表（`list(tuple)`）
+
+48. **factor_generator.py v1.25 (2026-05-26)** — Bug修复 + 文档修正
+   - **类型注解补充说明**：`_calc_pct` 补充兼容类型说明（int、numpy.int64、float）
+   - **docstring Raises 修正**：删除"输入数据为空"场景（代码无对应检查）
+   - **兜底块错误信息补充**：增加 `type(e).__name__`: `{e}`（异常详情）
+   - **修复原因**：docstring 描述与实际行为不符 + 错误信息不完整
+
+49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
+   - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
+   - **docstring Raises 规范**：描述应与实际抛出一致，不应描述未实现的场景
+   - **兜底块异常信息规范**：应包含异常类型和详情（便于追溯）
 
 ---
 
@@ -1486,6 +1497,78 @@ for col in _OUTPUT_COLS:  # 元组迭代正常
 - DataFrame 列选择使用 `list(tuple)` 转换
 - 元组迭代不受影响（for col in tuple 正常）
 - 常量定义使用元组（防止修改），使用时转为列表
+
+### 类型注解兼容性规范（2026-05-26 新增）
+
+**问题背景：**
+- 类型注解为 int，但实际可能传入 numpy.int64 或 float
+- 静态类型检查器可能报警告
+- Python 运行时不强制类型检查
+
+**正确用法：**
+```python
+# ✅ 正确：在 Note 中补充兼容类型说明
+def _calc_pct(count: int, total: int) -> float:
+    """
+    ...
+    Note:
+        - 类型注解为 int，但实际接受 int、numpy.int64、float 等兼容类型
+        - Python 运行时不强制类型检查，注解仅为静态分析提供参考
+    """
+
+# ❌ 错误：未说明兼容类型（静态分析可能警告）
+def _calc_pct(count: int, total: int) -> float:
+    """..."""  # 未说明兼容类型
+```
+
+**原则：**
+- 类型注解为 int，但可接受兼容类型
+- 在 Note 中补充兼容类型说明
+- Python 运行时不强制类型检查
+
+### docstring Raises 规范（2026-05-26 新增）
+
+**问题背景：**
+- docstring Raises 描述未实现的场景
+- 与实际行为不符，误导调用方
+
+**正确用法：**
+```python
+# ✅ 正确：描述与实际一致
+Raises:
+    ValueError: 数据格式不正确（缺少 'data' 字段）、JSON 解析失败
+
+# ❌ 错误：描述未实现的场景
+Raises:
+    ValueError: ...、或输入数据为空  # 代码无对应检查，不会抛出
+```
+
+**原则：**
+- Raises 描述应与实际抛出一致
+- 不应描述未实现的场景
+- 删除不符合实际行为的描述
+
+### 兜底块异常信息规范（2026-05-26 新增）
+
+**问题背景：**
+- 兜底块异常信息不完整
+- 缺少异常类型和详情，难以追溯
+
+**正确用法：**
+```python
+# ✅ 正确：包含异常类型和详情
+except Exception as e:
+    raise RuntimeError(f"未知错误: {path}, {type(e).__name__}: {e}") from e
+
+# ❌ 错误：缺少异常类型和详情
+except Exception as e:
+    raise RuntimeError(f"未知错误: {path}") from e  # 缺少异常详情
+```
+
+**原则：**
+- 兜底块应包含异常类型（`type(e).__name__`）
+- 包含异常详情（`str(e)`）
+- 便于追溯问题根源
 
 ### paths.py 使用规范
 
