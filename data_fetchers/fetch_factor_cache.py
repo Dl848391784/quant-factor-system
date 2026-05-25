@@ -18,6 +18,7 @@
 - v3.7 (2026-05-26): 导入顺序PEP8规范化、BatchStream类docstring补充、类型注解完善、路径配置使用公共模块
 - v3.8 (2026-05-26): os.path → Path 对象全量替换（9处os.path.join、2处os.path.exists、4处os.path.getsize、3处os.remove→unlink）
 - v3.9 (2026-05-26): 函数类型注解完善（save_batch_cache_sorted、n_way_merge_deduplicate、fetch_batch_stocks、format_final_output）
+- v3.10 (2026-05-26): 移除未使用的 os 导入、修复 validate_final_data 返回类型注解（bool → tuple[bool, int, int, int]）
 
 作者: 云舟
 日期: 2026-04-04
@@ -29,7 +30,6 @@ import gzip
 import heapq
 import json
 import logging
-import os
 import sys
 import time
 from datetime import datetime
@@ -665,7 +665,7 @@ def format_final_output(
     return len(dates_list), len(assets_list), len(factor_records) if 'factor_records' in dir() else 0
 
 
-def validate_final_data(logger: logging.Logger = None) -> bool:
+def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, int]:
     """
     验证最终数据完整性
     
@@ -673,7 +673,7 @@ def validate_final_data(logger: logging.Logger = None) -> bool:
         logger: 日志记录器（可选，默认使用模块级 logger）
     
     Returns:
-        bool: 数据是否有效（交易日数 >= N_DAYS）
+        tuple[bool, int, int, int]: (is_valid, n_days, n_assets, n_records) 数据有效性、交易日数、股票数、记录数
     """
     logger = logger or _MODULE_LOGGER
     logger.info("=" * 60)
