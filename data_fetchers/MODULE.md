@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.77
+> 版本: v2.78
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 20:30 北京时间
+> 更新时间: 2026-05-26 21:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -47,6 +47,8 @@
 | 26 | 方法名语义清晰 | `_load_all` 表示一次性加载，而非 `_load_next_chunk` 暗示多次调用 |
 | 27 | 返回值避免冗余 | format_final_output 返回值仅用于日志，统计信息由 validate_final_data 提供 |
 | 28 | 函数接口契约说明 | 说明输入/输出类型，避免调用方重复转换 |
+| 29 | vmrss 判断用 is not None | `if vmrss is not None` 而非 `if vmrss`（0 是 falsy） |
+| 30 | 内嵌函数闭包捕获一致 | 定义在 with 块内闭包捕获 f，而非定义在外部又传入 f 参数 |
 | 19 | 常量定义在 import 之后 | PEP 8 顺序：docstring → __future__ → 标准库 → 第三方 → 本地 → 常量 |
 | 20 | cleanup_batch_files 用 try/finally | 保证临时文件清理（无论成功或失败） |
 
@@ -760,6 +762,16 @@ data_fetchers/
    - **新增约束 #14**：is_exhausted 逻辑用 or
    - **新增约束 #26-#28**：方法名语义清晰、返回值避免冗余、函数接口契约说明
    - **规范修正原因**：逻辑错误导致提前返回 False；方法名误导；返回值冗余；接口契约不清晰
+
+87. **fetch_factor_cache.py v3.22 (2026-05-26)** — Bug修复（3项）
+   - **cleanup_batch_files 增加 try**：中途出错也继续清理，收集 errors 并 warning
+   - **get_memory_info_str 用 is not None**：`if vmrss is not None` 而非 `if vmrss`（0 是 falsy）
+   - **write_record 闭包捕获 f**：定义在 with 块内闭包捕获，而非定义在外部又传入参数
+
+88. **MODULE.md v2.78 (2026-05-26)** — 规范修正
+   - **约束 #20 修正**：用 try 保证继续清理（而非 try/finally）
+   - **新增约束 #29-#30**：vmrss 判断用 is not None、内嵌函数闭包捕获一致
+   - **规范修正原因**：中途出错导致部分文件残留；0 是 falsy 导致跳过；参数传入与闭包捕获不一致
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
