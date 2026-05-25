@@ -4,7 +4,7 @@
 
 作者: 云舟
 日期: 2026-05-27
-版本: v2.0
+版本: v2.1
 
 功能: 获取申万行业分类数据并缓存
 数据源: akshare - 申万行业分类
@@ -20,6 +20,7 @@
 - v1.8 (2026-05-27): Bug修复 - 缓存过期刷新失败降级用旧缓存、SW_INDUSTRY_CODE_MAP注释修正+移除TODO、load_local_industry_backup注释修正(名称关键词而非代码特征)
 - v1.9 (2026-05-27): Bug修复 - SW_INDUSTRY_CODE_MAP注释诚实化（承认未核对官方标准，恢复TODO，注释改为"二级归属待核实"）
 - v2.0 (2026-05-27): Bug修复 - SW_INDUSTRY_CODE_MAP核对申万2021官方标准（移除错误映射，不存在的一级代码映射到'其他'）
+- v2.1 (2026-05-27): Bug修复 - 日志信息修正（"akshare获取失败，尝试本地备用数据"）、备用缓存写入策略docstring说明（非致命错误，与主缓存策略不同）
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -35,7 +36,7 @@ from datetime import datetime
 from collections import Counter
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = '2.0'
+_OUTPUT_VERSION = '2.1'
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +233,7 @@ def refresh_industry_cache() -> dict:
     industry_map = fetch_stock_industry_sw()
     
     if not industry_map:
-        logger.warning("[行业数据] 获取失败，返回空映射")
+        logger.warning("[行业数据] akshare 获取失败，尝试本地备用数据...")
         # 尝试使用本地备用数据
         return load_local_industry_backup()
     
@@ -334,6 +335,13 @@ def _write_backup_cache(industry_map: dict) -> None:
     
     Args:
         industry_map: 行业映射数据
+    
+    Note:
+        备用缓存写入失败为**非致命错误**（warning 即可）：
+        - 备用数据本身就低于 akshare 数据准确性
+        - 写入失败不影响当前返回，下次调用会重新读备用数据
+        - 与 refresh_industry_cache 主缓存写入策略不同（主缓存失败抛异常）
+        - 此设计决策已在 MODULE.md 约束 #72 中明确说明
     """
     cache_data = {
         'meta': {
@@ -354,8 +362,9 @@ def _write_backup_cache(industry_map: dict) -> None:
         temp_path.rename(INDUSTRY_CACHE_PATH)
         logger.info(f"[行业数据] 备用缓存已写入: {INDUSTRY_CACHE_PATH}")
     except Exception as e:
+        # 备用缓存写入失败为非致命错误（warning 即可）
         temp_path.unlink(missing_ok=True)
-        logger.warning(f"[行业数据] 备用缓存写入失败 [{type(e).__name__}]: {e}")
+        logger.warning(f"[行业数据] 备用缓存写入失败 [{type(e).__name__}]: {e}（非致命，下次将重新读备用数据）")
 
 
 def infer_industry_from_name(name: str) -> str:
