@@ -33,6 +33,7 @@
 - v1.20 (2026-05-25): 代码结构优化（mkdir移入try块统一异常处理、_OUTPUT_COLS注释移到常量定义处、_calc_pct docstring补充示例、main()异常日志增加类型名）
 - v1.21 (2026-05-25): Bug修复（docstring Example格式修正：注释放在>>>行、返回值行无注释、增加isinstance示例）
 - v1.22 (2026-05-25): 代码结构优化（清理output_cols冗余别名、mkdir和temp_path职责分离、base_data/turnover_data内存释放、missing_cols错误信息改进）
+- v1.23 (2026-05-26): 代码结构优化（tuple类型注解改为tuple[str, ...]更精确表达字符串元组）
 
 作者: 云瑶
 """
@@ -85,10 +86,10 @@ __all__ = [
 _DEFAULT_CACHE_DIR = Path(__file__).parent.parent / 'cache' / 'factor_data'
 
 # 扩展因子列名（元组防止意外修改）
-_EXTENDED_FACTOR_COLS: tuple = ('bollinger_pb', 'kdj_j', 'turnover_surge')
+_EXTENDED_FACTOR_COLS: tuple[str, ...] = ('bollinger_pb', 'kdj_j', 'turnover_surge')
 
 # 基础列名（元组防止意外修改）
-_BASE_COLS: tuple = ('date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5')
+_BASE_COLS: tuple[str, ...] = ('date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5')
 
 # 输出列名（基础列 + 扩展因子，元组防止意外修改）
 # 结构说明：
@@ -96,7 +97,7 @@ _BASE_COLS: tuple = ('date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', '
 # _OUTPUT_COLS[2:6]  = open, close, high, low（行情数据，非标准 OHLCV 顺序）
 # _OUTPUT_COLS[6:8]  = rsi_6, volume_ratio_5（基础因子，来自输入）
 # _OUTPUT_COLS[8:]   = bollinger_pb, kdj_j, turnover_surge（扩展因子，本次计算）
-_OUTPUT_COLS: tuple = _BASE_COLS + _EXTENDED_FACTOR_COLS
+_OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS
 
 
 # ============================================================================
