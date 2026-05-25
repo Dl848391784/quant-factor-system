@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.36
+> 版本: v2.45
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-25
+> 更新时间: 2026-05-25 14:30 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -400,6 +400,68 @@ data_fetchers/
    - **版本历史补全**：factor_generator.py 新增 v1.3 版本演进说明
    - **修复原因**：规范遗漏（常量命名不规范、导入顺序不规范、导入位置违反规范）
 
+15. **factor_generator.py v1.4 (2026-05-25)** — 第三轮深度优化
+   - **流程文档创建**：`docs/factor_generator_flow.md`（整体架构 + 8步流程 + 输出结构 + 版本历史）
+   - **测试用例创建**：`test_cases/factor_generator_test_cases.md`（10项正常测试 + 3项异常测试）
+   - **output_cols 注释补全**：索引含义说明（0:6=基础OHLCV，6:8=基础因子，8:=扩展因子）
+   - **valid_records_percent 补全**：新增百分比统计字段（与日志输出保持一致）
+   - **MODULE.md 版本历史更新**：新增 v2.28 版本记录
+   - **修复原因**：规范遗漏（流程文档缺失、测试用例缺失、输出注释缺失、返回值统计不完整）
+
+16. **factor_generator.py v1.5 (2026-05-25)** — 第四轮深度优化
+   - **条件导入合并简化**：移除 __main__ 测试重复 sys.path.insert（减少8行代码）
+   - **异常处理精确化**：区分 OSError/PermissionError/IOError（遵循 patterns.md）
+   - **metadata 字段注释补全**：generated_at、elapsed_seconds、valid_records_percent 等8字段含义
+   - **修复原因**：代码冗余（sys.path.insert 重复）、异常处理宽泛、返回值注释缺失
+
+17. **factor_generator.py v1.6 (2026-05-25)** — 第五轮深度优化
+   - **JSONDecodeError 内存优化**：提取 lineno/colno/msg 信息，避免 e.doc 内存翻倍（遵循 patterns.md）
+   - **CLI 入口规范**：main() 返回退出码（0成功/1失败），而非 metadata
+   - **__main__ 测试补全**：required_fields 新增 valid_records_percent 字段验证
+   - **条件导入合并简化**：移除 CLI 入口块重复 sys.path.insert（减少6行代码）
+   - **修复原因**：内存优化遗漏、CLI 规范缺失、测试覆盖不完整、代码冗余
+
+18. **factor_generator.py v1.7 (2026-05-25)** — 第六轮深度优化
+   - **注释行号修正**：setup_logger 导入位置改为第364-367行（原注释说第333-341行）
+   - **docstring RuntimeError 补全**：文件系统错误异常说明（第297-306行会抛出）
+   - **main() 返回类型注解**：添加 `-> int`（符合 CLI 入口规范）
+   - **修复原因**：注释不一致、docstring Raises 缺失、类型注解缺失
+
+19. **factor_generator.py v1.8 (2026-05-25)** — 第七轮深度优化
+   - **gzip.BadGzipFile 异常处理补全**：gzip 文件损坏错误处理（第177-179行、208-210行）
+   - **docstring ValueError 补全**：补充 gzip 文件损坏异常说明
+   - **注释行号修正**：sys.path.insert 位置改为第42-53行（删除1行后位置变化）
+   - **修复原因**：gzip 异常处理缺失、注释行号不准确
+
+20. **factor_generator.py v1.9 (2026-05-25)** — 第八轮深度优化
+   - **冗余导入清理**：移除条件导入块的 `_Path`（第44行），直接使用顶部导入的 `Path`
+   - **注释行号修正**：setup_logger 导入位置改为第369-374行（删除1行后位置变化）
+   - **修复原因**：冗余导入、注释行号不准确
+
+21. **factor_generator.py v1.10 (2026-05-25)** — 第九轮深度优化
+   - **gzip 导入合并**：移除 `from gzip import BadGzipFile`，改用 `gzip.BadGzipFile`（符合 PEP 8 导入规范）
+   - **main() 函数内冗余导入清理**：移除 `import logging`（使用模块级导入）
+   - **修复原因**：导入冗余
+
+22. **factor_generator.py v1.11 (2026-05-25)** — Bug修复
+   - **条件导入合并**：将 setup_logger 导入合并到顶部条件块（删除中间冗余的条件导入块）
+   - **__main__ 循环导入修复**：删除 `from data_fetchers.factor_generator import ...`（直接使用已定义的函数）
+   - **PermissionError 重复捕获简化**：`except (OSError, PermissionError, IOError)` → `except OSError`（PermissionError 是 OSError 子类）
+   - **temp_path 后缀处理修复**：`with_suffix('.tmp')` → `parent / (name + '.tmp')`（避免替换 .gz 后缀）
+   - **修复原因**：代码 bug（条件导入位置错误、循环导入、异常重复捕获、临时文件名错误）
+
+23. **factor_generator.py v1.12 (2026-05-25)** — Bug修复 + 规范补充
+   - **output_cols 注释修正**：`output_cols[0:6] = OHLCV` → `output_cols[0:2]=date/asset, output_cols[2:6]=open/close/high/low`（非标准 OHLCV 顺序）
+   - **dates 排序注释补充**：说明 YYYY-MM-DD 字符串排序正确（字典序与日期序一致）
+   - **total_records 除零保护**：空数据时百分比返回 0.0（`calc_pct` 函数）
+   - **版本历史移除硬编码行号**：改为描述性注释（避免行号不准确误导）
+   - **argparse 版本描述修正**：v1.3 版本历史补充说明 argparse 为 CLI 入口特有导入，保留函数内导入
+   - **修复原因**：代码 bug（注释不符、除零风险）+ 规范遗漏（日期排序说明、日志换行符规范）
+
+24. **MODULE.md v2.45 (2026-05-25)** — 规范补充
+   - **日志换行符规范**：新增章节说明换行符使用场景（错误日志多行格式化允许、__main__ 测试块视觉分隔允许、一般 info 日志不建议）
+   - **规范补充原因**：用户发现 logger.info 中 `\n` 换行符可能产生 handler 解析问题，需明确允许/禁止场景
+
 ---
 
 data_fetchers 模块负责：
@@ -531,10 +593,155 @@ data = read_gzip_cache(cache_file)  # 自动创建模块级 logger
 2. 符合 PROJECT.md 公共模块日志规范
 3. 模块级 fallback logger 作为兼容方案
 
+### 日志换行符规范（2026-05-25 新增）
+
+**原则：** logging 模块的格式化器通常不期望消息内含换行，某些 handler（如 RotatingFileHandler）处理含换行的日志可能产生解析问题。
+
+**允许使用换行符的场景：**
+
+1. **错误日志多行格式化**
+   - 复杂错误（如 JSON 解析失败）允许多行格式化输出以提高可读性
+   - 示例：
+     ```python
+     logger.error(
+         "JSON 解析失败\n"
+         "文件路径: %s\n"
+         "错误位置: 行 %d, 列 %d\n"
+         "错误信息: %s",
+         file_path, e.lineno, e.colno, e.msg
+     )
+     ```
+
+2. **__main__ 测试块视觉分隔**
+   - 自测试输出允许多行分隔符以提高可读性
+   - 示例：
+     ```python
+     test_logger.info("\n[测试 1] 函数定义验证...")
+     test_logger.info("\n" + "=" * 40)
+     ```
+
+**不建议使用换行符的场景：**
+
+1. **一般 info 级别日志**
+   - 避免 info 日志中使用 `\n` 换行符
+   - 某些 handler（如 RotatingFileHandler）解析含换行的日志可能产生问题
+   - 示例（禁止）：
+     ```python
+     # ❌ info 日志中使用换行符
+     logger.info("数据加载完成\n记录数: %d", count)
+     
+     # ✅ 改为单行格式
+     logger.info("数据加载完成，记录数: %d", count)
+     ```
+
 **JSON 解析异常处理：**
 - 抛出 `ValueError` 而非 `json.JSONDecodeError`
 - 避免传递完整 JSON 文档导致内存翻倍
 - 参考 `references/backtest-module-optimization-patterns.md Section 1.2`
+
+### 临时文件命名规范（2026-05-25 新增）
+
+**问题背景：**
+- `Path.with_suffix('.tmp')` 会替换最后一个后缀
+- 对于 `.json.gz` 文件，会变成 `.json.tmp`（丢失 `.gz` 后缀）
+- 导致临时文件名与原文件名不一致
+
+**正确用法：**
+```python
+# ✅ 正确：追加 .tmp 后缀，保留原文件名
+temp_path = output_path.parent / (output_path.name + '.tmp')
+# factor_data.json.gz → factor_data.json.gz.tmp
+
+# ❌ 错误：替换最后一个后缀
+temp_path = output_path.with_suffix('.tmp')
+# factor_data.json.gz → factor_data.json.tmp（丢失 .gz）
+```
+
+**适用场景：**
+- 原子写入（临时文件 + os.replace）
+- gzip 压缩文件写入
+- 多后缀文件（如 `.tar.gz`、`.json.gz`）
+
+### 异常捕获规范（2026-05-25 新增）
+
+**问题背景：**
+- `PermissionError` 是 `OSError` 的子类
+- `IOError` 在 Python 3 中已合并到 `OSError`
+- 重复捕获会导致代码冗余
+
+**正确用法：**
+```python
+# ✅ 正确：OSError 涵盖 PermissionError 和 IOError
+except OSError as e:
+    # 文件系统错误（磁盘/权限/IO）
+    ...
+
+# ❌ 错误：重复捕获子类
+except (OSError, PermissionError, IOError) as e:
+    # PermissionError 是 OSError 子类，冗余
+    ...
+```
+
+**OSError 子类关系：**
+- `PermissionError` ⊆ `OSError`
+- `FileNotFoundError` ⊆ `OSError`
+- `IOError` = `OSError`（Python 3 合并）
+
+### __main__ 测试块规范（2026-05-25 新增）
+
+**问题背景：**
+- `if __name__ == '__main__'` 时，模块名是 `__main__`
+- `from data_fetchers.xxx import ...` 会触发重新导入
+- 导致模块被执行两次，产生循环/重复行为
+
+**正确用法：**
+```python
+# ✅ 正确：直接使用已定义的函数
+if __name__ == '__main__':
+    # 函数已在模块中定义，直接使用
+    metadata = generate_all_factors(logger=test_logger)
+
+# ❌ 错误：重新导入自己（循环导入）
+if __name__ == '__main__':
+    from data_fetchers.factor_generator import generate_all_factors  # 触发重新导入
+    metadata = generate_all_factors(logger=test_logger)
+```
+
+**适用场景：**
+- 模块自测试（__main__ 测试块）
+- CLI 入口测试
+
+### 条件导入位置规范（2026-05-25 新增）
+
+**问题背景：**
+- PEP 8 规范：导入应在文件顶部
+- 多个 `if __name__ == '__main__'` 块分散在文件中间违反规范
+
+**正确用法：**
+```python
+# ✅ 正确：所有条件导入合并到顶部
+if __name__ == '__main__':
+    import sys
+    from xxx import func_a
+    from xxx import func_b
+else:
+    from .xxx import func_a
+    from .xxx import func_b
+
+# ❌ 错误：条件导入分散在文件中间
+if __name__ == '__main__':
+    import sys
+    from xxx import func_a
+else:
+    from .xxx import func_a
+
+# ... 几十行代码后 ...
+
+if __name__ == '__main__':
+    from xxx import func_b  # 违反 PEP 8 导入位置规范
+else:
+    from .xxx import func_b
+```
 
 ### paths.py 使用规范
 
@@ -820,4 +1027,4 @@ factor_df['middle'] = middle  # 成功赋值
 
 ---
 
-*最后更新: 2026-05-25 03:15*
+*最后更新: 2026-05-25 10:30 北京时间*
