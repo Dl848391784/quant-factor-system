@@ -4,7 +4,7 @@
 
 作者: 云舟
 日期: 2026-05-27
-版本: v1.4
+版本: v1.5
 
 功能: 获取申万行业分类数据并缓存
 数据源: akshare - 申万行业分类
@@ -14,6 +14,7 @@
 - v1.2 (2026-05-27): Bug修复 - docstring Returns Dict→dict（5处）、mkdir用RESULT_DIR、meta添加version字段
 - v1.3 (2026-05-27): Bug修复 - 文档头版本号同步、第355行Dict→dict、异常日志加类型名、Counter顶部导入、原子写入异常处理
 - v1.4 (2026-05-27): Bug修复 - SW_INDUSTRY_CODE_MAP添加近似映射注释+TODO、原子写入捕获所有异常+日志位置修正、全局缓存线程安全（DCL双重检查）
+- v1.5 (2026-05-27): Bug修复 - 日期解析异常warning日志、关键词映射移除歧义(新能)、__all__移除私有名称(_OUTPUT_VERSION)
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -29,7 +30,7 @@ from datetime import datetime
 from collections import Counter
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = '1.4'
+_OUTPUT_VERSION = '1.5'
 
 logger = logging.getLogger(__name__)
 
@@ -177,8 +178,9 @@ def load_stock_industry() -> dict:
                     if days_old > 7:
                         logger.info(f"[行业数据] 缓存已过期 {days_old} 天，重新获取...")
                         return refresh_industry_cache()
-                except ValueError:
-                    pass  # 日期解析失败，使用缓存
+                except ValueError as e:
+                    # 日期格式异常，使用现有缓存（而非静默 pass）
+                    logger.warning(f"[行业数据] 日期格式异常 {updated_at!r}: {e}，使用现有缓存")
             
             logger.info(f"[行业数据] 从缓存加载: {len(industries)} 只股票")
             return industries
@@ -293,12 +295,15 @@ def infer_industry_from_name(name: str) -> str:
         str: 推断的行业名称
     """
     # 常见行业关键词映射
+    # 注意：关键词需避免歧义，遍历顺序决定匹配优先级
+    # - 已移除歧义关键词：新能（改为具体关键词：新能源、光伏、风电）
+    # - 保留关键词：信达、中信（特定金融机构名称，非歧义）
     industry_keywords = {
-        '银行': ['银行', '金融', '信达', '华创'],
-        '证券': ['证券', '券商', '中信'],
+        '银行': ['银行', '金融'],
+        '证券': ['证券', '券商', '中信'],  # 中信：中信证券特定名称
         '保险': ['保险', '人寿', '平安'],
-        '电力': ['电力', '电能', '新能', '水电', '火电', '风电', '光伏'],
-        '新能源': ['新能', '光伏', '锂电', '电池', '风电', '太阳能'],
+        '电力': ['电力', '电能', '水电', '火电', '风电', '光伏'],
+        '新能源': ['新能源', '光伏', '锂电', '电池', '风电', '太阳能'],  # 移除歧义的 '新能'
         '房地产': ['地产', '房产', '万科', '保利', '城建'],
         '医药': ['医药', '生物', '制药', '药业', '医疗'],
         '科技': ['科技', '电子', '芯片', '半导体', '软件'],
@@ -382,6 +387,7 @@ def get_industry_distribution(stocks: list) -> dict:
 
 
 # 公共接口导出列表（MODULE.md 约束）
+# 注意：以 _ 开头的名称表示模块私有，不应放入 __all__
 __all__ = [
     'fetch_stock_industry_sw',
     'load_stock_industry',
@@ -392,7 +398,6 @@ __all__ = [
     'infer_industry_from_name',
     'SW_INDUSTRY_CODE_MAP',
     'INDUSTRY_CACHE_PATH',
-    '_OUTPUT_VERSION',
 ]
 
 
