@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.80
+> 版本: v2.81
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 22:00 北京时间
+> 更新时间: 2026-05-26 22:30 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -46,10 +46,11 @@
 | 25 | meta 解析用 json.loads | 避免手动字符串匹配脆弱，一次性加载 full 后提取 meta/data |
 | 26 | 方法名语义清晰 | `_load_all` 表示一次性加载，而非 `_load_next_chunk` 暗示多次调用 |
 | 27 | 返回值避免冗余 | format_final_output 返回值仅用于日志，统计信息由 validate_final_data 提供 |
-| 28 | 函数接口契约说明 | 说明输入/输出类型，避免调用方重复转换 |
+| 28 | 函数接口契约说明 | 说明实际调用方行为，而非理想化"可以是 datetime 或字符串" |
 | 29 | vmrss 判断用 is not None | `if vmrss is not None` 而非 `if vmrss`（0 是 falsy） |
 | 31 | DataFrame 链式操作用 copy() | 避免 SettingWithCopyWarning，每次过滤后 .copy() |
-| 32 | forward_return 统一写法 | `x.shift(-N) / x - 1` 比 `x.pct_change().shift(-1)` 更直观 |
+| 33 | 函数签名与调用一致 | 返回 None 则调用方不接收，返回 tuple 则调用方接收，避免返回值被丢弃 |
+| 34 | 统计信息单一来源 | format_final_output 不返回，由 validate_final_data 提供 |
 | 19 | 常量定义在 import 之后 | PEP 8 顺序：docstring → __future__ → 标准库 → 第三方 → 本地 → 常量 |
 | 20 | cleanup_batch_files 用 try/finally | 保证临时文件清理（无论成功或失败） |
 
@@ -791,6 +792,15 @@ data_fetchers/
 92. **MODULE.md v2.80 (2026-05-26)** — 规范补充
    - **新增约束 #31-#32**：DataFrame 链式操作用 copy()、forward_return 统一写法
    - **规范补充原因**：SettingWithCopyWarning 导致赋值失败风险；pct_change().shift(-1) 不直观
+
+93. **fetch_factor_cache.py v3.25 (2026-05-26)** — 接口设计修正（2项）
+   - **format_final_output 返回 None**：删除返回值，统计信息由 validate_final_data 提供（单一来源）
+   - **save_batch_cache_sorted 接口契约**：说明"实际调用方总是传字符串"，而非理想化"可以是 datetime 或字符串"
+
+94. **MODULE.md v2.81 (2026-05-26)** — 规范补充
+   - **约束 #28 修正**：接口契约说明实际调用方行为
+   - **新增约束 #33-#34**：函数签名与调用一致、统计信息单一来源
+   - **规范补充原因**：接口契约理想化不匹配实际；返回值被丢弃但函数做了大量工作
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
