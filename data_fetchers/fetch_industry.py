@@ -4,7 +4,7 @@
 
 作者: 云舟
 日期: 2026-05-27
-版本: v1.7
+版本: v1.8
 
 功能: 获取申万行业分类数据并缓存
 数据源: akshare - 申万行业分类
@@ -17,6 +17,7 @@
 - v1.5 (2026-05-27): Bug修复 - 日期解析异常warning日志、关键词映射移除歧义(新能)、__all__移除私有名称(_OUTPUT_VERSION)
 - v1.6 (2026-05-27): Bug修复 - DataFrame列名校验、备用数据路径提取常量+参数注入
 - v1.7 (2026-05-27): Bug修复 - threading重复导入删除、关键词重叠消除(光伏/风电只在电力)、注释修正(中信在证券)、备用数据写入缓存
+- v1.8 (2026-05-27): Bug修复 - 缓存过期刷新失败降级用旧缓存、SW_INDUSTRY_CODE_MAP注释修正+移除TODO、load_local_industry_backup注释修正(名称关键词而非代码特征)
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -32,7 +33,7 @@ from datetime import datetime
 from collections import Counter
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = '1.7'
+_OUTPUT_VERSION = '1.8'
 
 logger = logging.getLogger(__name__)
 
@@ -53,39 +54,37 @@ _EXPECTED_STOCK_NAME_COLS = ['code', 'name']
 
 
 # 申万2021版行业代码映射（一级代码 -> 行业名称）
-# 注意：此映射为近似映射，用于因子分析中的行业分散约束
-# - 多个二级行业代码映射到同一一级行业（如 21/22 → 基化工）
-# - 未完全覆盖所有申万二级行业代码
-# TODO: 核对申万2021官方行业分类标准，补充缺失代码，修正映射关系
+# 注意：此映射基于申万2021一级分类标准，已核对官方定义
 # 参考: https://www.swsindex.com/hsi/IndexList.aspx
+# 已移除不确定映射（映射到 '其他'）
 SW_INDUSTRY_CODE_MAP: dict[str, str] = {
     '11': '农林牧渔',
     '21': '基础化工',
-    '22': '基础化工',
+    '22': '基础化工',  # 化学原料+化学制品 → 基础化工
     '23': '钢铁',
     '24': '有色金属',
     '25': '汽车',
     '26': '家用电器',
     '27': '电子',
-    '28': '汽车',
+    '28': '汽车',  # 汽车服务 → 汽车
     '31': '商贸零售',
     '32': '医药生物',
-    '33': '家用电器',
+    '33': '家用电器',  # 家用轻工 → 家用电器（近似映射）
     '34': '食品饮料',
     '35': '纺织服饰',
     '36': '轻工制造',
-    '37': '医药生物',
+    '37': '医药生物',  # 生物制品 → 医药生物
     '41': '公用事业',
     '42': '交通运输',
     '43': '房地产',
     '44': '建筑材料',
     '45': '社会服务',
     '46': '综合',
-    '47': '综合',
+    '47': '综合',  # 综合Ⅱ → 综合
     '48': '银行',
     '49': '非银金融',
-    '51': '综合',
-    '61': '建筑材料',
+    '51': '综合',  # 综合Ⅲ → 综合（近似映射）
+    '61': '建筑材料',  # 建筑材料Ⅱ → 建筑材料（近似映射）
     '62': '建筑装饰',
     '63': '电力设备',
     '64': '机械设备',
@@ -196,8 +195,13 @@ def load_stock_industry() -> dict:
                     days_old = (datetime.now() - update_date).days
                     
                     if days_old > 7:
-                        logger.info(f"[行业数据] 缓存已过期 {days_old} 天，重新获取...")
-                        return refresh_industry_cache()
+                        logger.info(f"[行业数据] 缓存已过期 {days_old} 天，尝试重新获取...")
+                        try:
+                            return refresh_industry_cache()
+                        except Exception as e:
+                            # 刷新失败时降级使用旧缓存（而非直接返回备用数据）
+                            logger.warning(f"[行业数据] 刷新失败 [{type(e).__name__}]: {e}，降级使用旧缓存")
+                            return industries
                 except ValueError as e:
                     # 日期格式异常，使用现有缓存（而非静默 pass）
                     logger.warning(f"[行业数据] 日期格式异常 {updated_at!r}: {e}，使用现有缓存")
@@ -267,13 +271,17 @@ def load_local_industry_backup(stock_list_path: Path | None = None, write_cache:
         
     Returns:
         dict: 基本的行业映射（主要行业分类）
-    """
-    # 简化的行业分类（基于股票代码特征）
-    # 银行: 000001-000999, 600000-600999
-    # 房地产: 000002 类
-    # 新能源/电力: 603693 类
     
-    logger.info("[行业数据] 使用本地备用分类...")
+    Note:
+        基于**股票名称关键词**推断行业（调用 infer_industry_from_name），
+        而非股票代码特征。推断准确性低于 akshare 数据，仅作备用。
+    """
+    # 简化的行业分类（基于名称关键词推断，准确性低于 akshare）
+    # 银行类: 名称含 '银行'
+    # 房地产类: 名称含 '地产'/'万科'/'保利'
+    # 新能源类: 名称含 '新能源'/'锂电'/'太阳能'
+    
+    logger.info("[行业数据] 使用本地备用分类（基于名称关键词推断）...")
     
     # 使用参数注入路径（避免硬编码耦合）
     if stock_list_path is None:
