@@ -29,17 +29,22 @@
   - validate_cache logger 参数化（遵循 PROJECT.md 日志参数规范）
   - set 类型注解完整化 `set[str]`
 
+- v2.2 (2026-05-27 06:45): 第三轮优化
+  - 导入顺序修正：requests 移至标准库之后（遵循 PEP 8）
+  - ensure_cache_dir/ensure_result_dir 调用时传递 logger 参数（遵循约束 33）
+
 作者: 云舟
 日期: 2026-04-02
 """
 
 import json
 import logging
-import requests  # 新浪财经 API HTTP 请求
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+import requests  # 新浪财经 API HTTP 请求（第三方库，遵循 PEP 8）
 
 # 公共模块导入
 from data_fetchers.common.logger_config import setup_logger
@@ -64,7 +69,7 @@ __all__ = [
 # ============================================================
 
 # 输出版本（遵循 MODULE.md 约束 16）
-_OUTPUT_VERSION = '2.3'
+_OUTPUT_VERSION = '2.4'
 
 # 新浪财经 API 端点
 SINA_API_URL = 'http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData'
@@ -511,8 +516,8 @@ def save_cache(
     if logger is None:
         logger = _get_logger()
     
-    ensure_cache_dir()
-    ensure_result_dir()
+    ensure_cache_dir(logger)
+    ensure_result_dir(logger)
     
     # 遵循 MODULE.md 约束 17：datetime.now() 只调用一次
     now = datetime.now()

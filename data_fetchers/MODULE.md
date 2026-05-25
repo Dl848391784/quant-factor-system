@@ -522,6 +522,11 @@ data_fetchers/
    - **ensure_cache_dir/ensure_result_dir logger 参数化**：新增 `logger_arg` 参数
    - **修复原因**：深度审查发现 6 项遗漏问题
 
+23. **fetch_stock_list.py v2.2 (2026-05-27 06:50)** — 第三轮优化
+   - **导入顺序修正**：requests 移至标准库之后（遵循 PEP 8：标准库 → 第三方 → 本地）
+   - **ensure_cache_dir/ensure_result_dir 调用时传递 logger**：遵循 MODULE.md 约束 33（函数签名与调用一致）
+   - **修复原因**：导入顺序违规、调用方参数遗漏
+
 20. **factor_generator.py v1.9 (2026-05-25)** — 第八轮深度优化
    - **冗余导入清理**：移除条件导入块的 `_Path`（第44行），直接使用顶部导入的 `Path`
    - **注释行号修正**：setup_logger 导入位置改为第369-374行（删除1行后位置变化）
