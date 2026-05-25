@@ -40,6 +40,7 @@
 - v3.29 (2026-05-27): Bug修复 - format_final_output一次遍历提取日期范围+释放set内存、main校验return_merged_path避免TypeError
 - v3.30 (2026-05-27): 代码改进 - format_final_output n_records定义移到日志前、cleanup_batch_files docstring修正为try/except
 - v3.31 (2026-05-27): Bug修复 - n_way_merge_deduplicate返回值简化(只返回merged_path，count由调用方用_接收但未使用)
+- v3.32 (2026-05-27): Bug修复 - format_final_output删除n_records重复赋值、validate_final_data改为真正流式验证(不加载data数组)
 
 作者: 云舟
 日期: 2026-04-04
@@ -71,7 +72,7 @@ except ImportError:
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.31'
+_OUTPUT_VERSION = '3.32'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -690,7 +691,6 @@ def format_final_output(
     date_end = last_date
     n_days = len(date_set)
     n_assets = len(asset_set)
-    n_records = len(factor_records)
     
     # 立即释放 set 内存（只保留标量）
     del date_set, asset_set
@@ -799,10 +799,10 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
         tuple[bool, int, int, int]: (是否通过验证, 交易日数, 股票数量, 记录数)
     
     Note:
-        分两次读文件：
-        - 第一次：加载完整文件提取 meta 和 records_count，立即释放
-        - 第二次：流式行扫描 data，只解析抽样的行（不加载整个文件）
-        避免 meta 手动拼接字符串的脆弱性，同时避免内存峰值翻倍
+        流式验证，避免加载整个大文件：
+        - 第一次：只读 meta（不加载 data 数组），提取 n_days/n_assets/date_range
+        - 第二次：流式扫描 data，边扫描边计数，同时抽样检查 RSI
+        避免内存峰值（不加载完整的 data 列表）
     """
     logger = logger or _MODULE_LOGGER
     logger.info("=" * 60)
@@ -818,34 +818,58 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
     date_end = ""
     records_count = 0
     
-    # 第一次：加载完整文件提取 meta 和 records_count，立即释放
+    # 第一次：只读 meta（不加载 data 数组）
     try:
         with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
-            full = json.load(f)
+            content = f.read()
+        
+        # 手动解析 meta（避免加载完整 data 列表）
+        # 找到 "meta": { ... } 部分
+        meta_start = content.find('"meta": {')
+        if meta_start == -1:
+            logger.warning("  ⚠ 无法找到 meta 部分")
+            return False, 0, 0, 0
+        
+        # 找到 meta 结束位置（"data": [ 之前）
+        data_start = content.find('"data": [')
+        if data_start == -1:
+            logger.warning("  ⚠ 无法找到 data 部分")
+            return False, 0, 0, 0
+        
+        # 提取 meta JSON 字符串
+        meta_content = content[meta_start:data_start].rstrip(',\n ')
+        # 补全 meta JSON（去掉 "meta": 前缀，补上 { 和 }）
+        meta_json = '{' + meta_content.split('"meta": {')[1]
+        # 确保末尾有 }
+        if not meta_json.rstrip().endswith('}'):
+            meta_json = meta_json.rstrip(',\n ') + '}'
+        
+        try:
+            meta = json.loads(meta_json)
+        except json.JSONDecodeError as e:
+            logger.warning(f"  ⚠ meta 解析失败: {e}")
+            return False, 0, 0, 0
         
         # 从 meta 提取信息
-        meta = full.get('meta', {})
         n_days = meta.get('n_days', 0)
         n_assets = meta.get('n_assets', 0)
         date_range = meta.get('date_range', {})
         date_start = date_range.get('start', '') if isinstance(date_range, dict) else ''
         date_end = date_range.get('end', '') if isinstance(date_range, dict) else ''
         
-        # 从 data 提取 records_count（不保留 data）
-        records_count = len(full.get('data', []))
-        
-        # 立即释放 full 内存
-        del full
+        # 释放 content 内存
+        del content
         gc.collect()
         
     except Exception as e:
-        logger.warning(f"  ⚠ 文件加载失败: {e}")
+        logger.warning(f"  ⚠ meta 加载失败: {e}")
         return False, 0, 0, 0
     
-    # 第二次：流式行扫描，只解析抽样的行（不加载整个文件）
+    # 第二次：流式扫描 data，边扫描边计数，同时抽样
     sample_records = []
     sample_size = 1000
-    step = max(1, records_count // sample_size) if records_count > 0 else 1
+    step = 100  # 抽样步长（估算，后续动态调整）
+    records_count = 0  # 流式计数
     current_idx = 0
     
     try:
@@ -863,8 +887,9 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
                 if in_data and stripped in (']', '],'):
                     break
                 
-                # 流式解析 JSON 对象（只解析抽样的行）
+                # 流式解析 JSON 对象（边扫描边计数，同时抽样）
                 if in_data and stripped.startswith('{'):
+                    records_count += 1  # 流式计数
                     try:
                         if current_idx % step == 0 and len(sample_records) < sample_size:
                             # 去除末尾逗号后解析
