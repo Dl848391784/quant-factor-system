@@ -13,7 +13,8 @@
 
 版本历史：
 - v3.4_with_ohlc (2026-04-09): 新增 open/high/low 字段，支持选股回测计算一字涨停、封死涨停等指标
-- v3.5 (2026-05-26): 日志规范迁移（print → logger）、版本历史格式规范化、docstring 补充
+- v3.5 (2026-05-26): 版本历史格式规范化、sys.path移除、公共模块导入、docstring补充、流程文档+测试用例创建
+- v3.6 (2026-05-26): print → logger 迁移（74处）、logger参数化
 
 作者: 云舟
 日期: 2026-04-04
@@ -21,6 +22,7 @@
 
 import sys
 import os
+import logging
 
 from real_data_loader import RealDataLoader
 from datetime import datetime
@@ -36,6 +38,11 @@ try:
 except ImportError:
     # 条件导入：脚本直接运行时可能路径未配置
     from common import setup_logger, get_logs_dir
+
+# ============================================================================
+# 模块级 fallback logger（遵循 PROJECT.md 公共模块日志规范）
+# ============================================================================
+_MODULE_LOGGER = logging.getLogger('data_fetchers.fetch_factor_cache')
 
 # 配置
 N_DAYS = 500  # 目标交易日数
@@ -98,7 +105,7 @@ def get_memory_info_str() -> str:
     return f"RSS={get_memory_usage_mb():.1f}MB"
 
 
-def save_batch_cache_sorted(batch_idx: int, factor_df, return_df) -> None:
+def save_batch_cache_sorted(batch_idx: int, factor_df, return_df, logger: logging.Logger = None) -> None:
     """
     保存单批次数据到临时文件（预先排序，流式写入）
     
@@ -106,6 +113,7 @@ def save_batch_cache_sorted(batch_idx: int, factor_df, return_df) -> None:
         batch_idx: 批次索引（从0开始）
         factor_df: 因子数据DataFrame，包含 date/asset/open/close/high/low/rsi_6/volume_ratio_5
         return_df: 收益数据DataFrame，包含 date/asset/forward_return_1d/3d/5d
+        logger: 日志记录器（可选，默认使用模块级 logger）
     
     Side Effects:
         - 创建 batch_{batch_idx}_factor.json.gz 和 batch_{batch_idx}_return.json.gz
@@ -115,6 +123,7 @@ def save_batch_cache_sorted(batch_idx: int, factor_df, return_df) -> None:
         - 数据按 (date, asset) 排序，便于后续 N-way merge
         - 使用流式写入避免 to_dict('records') 内存峰值
     """
+    logger = logger or _MODULE_LOGGER
     factor_path = os.path.join(CACHE_DIR, f'batch_{batch_idx}_factor.json.gz')
     return_path = os.path.join(CACHE_DIR, f'batch_{batch_idx}_return.json.gz')
     
@@ -126,7 +135,7 @@ def save_batch_cache_sorted(batch_idx: int, factor_df, return_df) -> None:
     return_df = return_df.sort_values(['date', 'asset']).reset_index(drop=True)
     
     # 流式写入因子数据（避免 to_dict('records') 内存峰值）
-    print(f"    保存因子数据...")
+    logger.info("  保存因子数据...")
     with gzip.open(factor_path, 'wt', encoding='utf-8') as f:
         f.write('[\n')
         for i, row in enumerate(factor_df.itertuples(index=False)):
@@ -146,7 +155,7 @@ def save_batch_cache_sorted(batch_idx: int, factor_df, return_df) -> None:
         f.write('\n]')
     
     # 流式写入收益数据
-    print(f"    保存收益数据...")
+    logger.info("  保存收益数据...")
     with gzip.open(return_path, 'wt', encoding='utf-8') as f:
         f.write('[\n')
         for i, row in enumerate(return_df.itertuples(index=False)):
@@ -165,8 +174,8 @@ def save_batch_cache_sorted(batch_idx: int, factor_df, return_df) -> None:
     factor_size_mb = os.path.getsize(factor_path) / (1024 * 1024)
     return_size_mb = os.path.getsize(return_path) / (1024 * 1024)
     
-    print(f"    ✓ 保存批次 {batch_idx}: 因子 {factor_size_mb:.2f}MB, 收益 {return_size_mb:.2f}MB")
-    print(f"    当前内存: {get_memory_info_str()}")
+    logger.info(f"  ✓ 保存批次 {batch_idx}: 因子 {factor_size_mb:.2f}MB, 收益 {return_size_mb:.2f}MB")
+    logger.info(f"  当前内存: {get_memory_info_str()}")
     
     # 立即释放 DataFrame 内存
     del factor_df, return_df
@@ -224,15 +233,25 @@ class BatchStream:
         gc.collect()
 
 
-def n_way_merge_deduplicate(total_batches, data_type='factor'):
+def n_way_merge_deduplicate(total_batches: int, data_type: str = 'factor', logger: logging.Logger = None) -> tuple:
     """
     N-way merge 合并已排序的批次数据，去重
     
-    使用 heap 进行N-way merge，每个批次只保持当前记录在内存中
-    去重策略：相同的 (date, asset) 只保留最后一次出现的值
+    Args:
+        total_batches: 总批次数
+        data_type: 数据类型（'factor' 或 'return'）
+        logger: 日志记录器（可选，默认使用模块级 logger）
+    
+    Returns:
+        tuple: (output_path, count) 输出文件路径和记录数
+    
+    Note:
+        - 使用 heap 进行N-way merge，每个批次只保持当前记录在内存中
+        - 去重策略：相同的 (date, asset) 只保留最后一次出现的值
     """
-    print(f"\n  [{data_type}] 开始 N-way merge...")
-    print(f"    当前内存: {get_memory_info_str()}")
+    logger = logger or _MODULE_LOGGER
+    logger.info(f"[{data_type}] 开始 N-way merge...")
+    logger.info(f"  当前内存: {get_memory_info_str()}")
     
     # 创建所有批次的流
     streams = []
@@ -247,10 +266,10 @@ def n_way_merge_deduplicate(total_batches, data_type='factor'):
                 valid_batch_indices.append(batch_idx)
     
     if not streams:
-        print(f"    无有效批次")
-        return []
+        logger.info("  无有效批次")
+        return ('', 0)
     
-    print(f"    有效批次数: {len(streams)}")
+    logger.info(f"  有效批次数: {len(streams)}")
     
     # N-way merge 使用 heap
     # heap元素: (key, batch_idx, stream)
@@ -267,7 +286,7 @@ def n_way_merge_deduplicate(total_batches, data_type='factor'):
     last_record = None
     count = 0
     
-    print(f"    开始合并...")
+    logger.info("  开始合并...")
     
     with gzip.open(output_path, 'wt', encoding='utf-8') as f:
         f.write('[\n')  # JSON数组开始
@@ -291,7 +310,7 @@ def n_way_merge_deduplicate(total_batches, data_type='factor'):
                     
                     if count % 50000 == 0:
                         gc.collect()
-                        print(f"      已写入 {count} 条，内存: {get_memory_info_str()}")
+                        logger.info(f"    已写入 {count} 条，内存: {get_memory_info_str()}")
                 
                 last_key = key
                 last_record = record
@@ -310,9 +329,9 @@ def n_way_merge_deduplicate(total_batches, data_type='factor'):
         
         f.write('\n]')  # JSON数组结束
     
-    print(f"    合并完成: {count} 条记录")
-    print(f"    输出文件: {output_path}")
-    print(f"    当前内存: {get_memory_info_str()}")
+    logger.info(f"  合并完成: {count} 条记录")
+    logger.info(f"  输出文件: {output_path}")
+    logger.info(f"  当前内存: {get_memory_info_str()}")
     
     # 清理streams
     for stream in streams:
@@ -323,13 +342,26 @@ def n_way_merge_deduplicate(total_batches, data_type='factor'):
     return output_path, count
 
 
-def fetch_batch_stocks(loader, stock_batch, batch_idx, total_batches):
-    """拉取一批股票的数据"""
-    print(f"\n{'='*60}")
-    print(f"[批次 {batch_idx + 1}/{total_batches}] 开始拉取...")
-    print(f"  股票数量: {len(stock_batch)}")
-    print(f"  当前内存: {get_memory_info_str()}")
-    print(f"{'='*60}")
+def fetch_batch_stocks(loader, stock_batch: list, batch_idx: int, total_batches: int, logger: logging.Logger = None) -> tuple:
+    """
+    拉取一批股票的数据
+    
+    Args:
+        loader: RealDataLoader 实例
+        stock_batch: 股票代码列表
+        batch_idx: 当前批次索引（从0开始）
+        total_batches: 总批次数
+        logger: 日志记录器（可选，默认使用模块级 logger）
+    
+    Returns:
+        tuple: (factor_df, return_df) 因子数据和收益数据 DataFrame
+    """
+    logger = logger or _MODULE_LOGGER
+    logger.info("=" * 60)
+    logger.info(f"[批次 {batch_idx + 1}/{total_batches}] 开始拉取...")
+    logger.info(f"  股票数量: {len(stock_batch)}")
+    logger.info(f"  当前内存: {get_memory_info_str()}")
+    logger.info("=" * 60)
     
     batch_start_time = time.time()
     
@@ -348,8 +380,8 @@ def fetch_batch_stocks(loader, stock_batch, batch_idx, total_batches):
         thread_a_stocks = sub_stocks[:len(sub_stocks) // 2]
         thread_b_stocks = sub_stocks[len(sub_stocks) // 2:]
         
-        print(f"  [子批次 {sub_idx + 1}/{num_sub_batches}] 拉取 {sub_start + 1}-{sub_end}...")
-        print(f"    当前内存: {get_memory_info_str()}")
+        logger.info(f"  [子批次 {sub_idx + 1}/{num_sub_batches}] 拉取 {sub_start + 1}-{sub_end}...")
+        logger.info(f"    当前内存: {get_memory_info_str()}")
         
         sub_results = loader._fetch_stock_batch_parallel(
             thread_a_stocks,
@@ -371,7 +403,7 @@ def fetch_batch_stocks(loader, stock_batch, batch_idx, total_batches):
         # 内存监控：超过阈值时暂停
         mem_mb = get_memory_usage_mb()
         if mem_mb > MEMORY_THRESHOLD_MB:
-            print(f"    ⚠ 内存超阈值 ({mem_mb:.1f}MB > {MEMORY_THRESHOLD_MB}MB)，暂停 {MEMORY_PAUSE_SECONDS}s...")
+            logger.warning(f"  ⚠ 内存超阈值 ({mem_mb:.1f}MB > {MEMORY_THRESHOLD_MB}MB)，暂停 {MEMORY_PAUSE_SECONDS}s...")
             gc.collect()
             time.sleep(MEMORY_PAUSE_SECONDS)
         
@@ -379,13 +411,13 @@ def fetch_batch_stocks(loader, stock_batch, batch_idx, total_batches):
             time.sleep(2)
     
     batch_elapsed = time.time() - batch_start_time
-    print(f"\n  ✓ 批次 {batch_idx + 1} 拉取完成: 成功 {success_count}, 失败 {fail_count}, 耗时 {batch_elapsed:.1f}s")
+    logger.info(f"  ✓ 批次 {batch_idx + 1} 拉取完成: 成功 {success_count}, 失败 {fail_count}, 耗时 {batch_elapsed:.1f}s")
     
     if not all_data_dict:
-        print(f"  ! 无有效数据")
+        logger.warning("  ! 无有效数据")
         return None, None
     
-    print(f"  正在计算因子...")
+    logger.info("  正在计算因子...")
     
     import pandas as pd
     
@@ -445,14 +477,25 @@ def fetch_batch_stocks(loader, stock_batch, batch_idx, total_batches):
     del valid_df
     gc.collect()
     
-    print(f"    因子记录: {len(factor_df)}, 收益记录: {len(return_df)}")
+    logger.info(f"  因子记录: {len(factor_df)}, 收益记录: {len(return_df)}")
     
     return factor_df, return_df
 
 
-def format_final_output(factor_merged_path, return_merged_path):
-    """将合并后的JSON数组格式化为完整JSON文件"""
-    print(f"\n  格式化最终输出文件...")
+def format_final_output(factor_merged_path, return_merged_path, logger: logging.Logger = None):
+    """
+    将合并后的JSON数组格式化为完整JSON文件
+    
+    Args:
+        factor_merged_path: 合并后的因子数据路径
+        return_merged_path: 合并后的收益数据路径
+        logger: 日志记录器（可选，默认使用模块级 logger）
+    
+    Returns:
+        tuple: (factor_final_path, return_final_path, dates_list, assets_list)
+    """
+    logger = logger or _MODULE_LOGGER
+    logger.info("格式化最终输出文件...")
     
     # 读取合并后的数据获取元信息
     with gzip.open(factor_merged_path, 'rt', encoding='utf-8') as f:
@@ -465,10 +508,10 @@ def format_final_output(factor_merged_path, return_merged_path):
     dates_list = sorted(set(r['date'] for r in factor_records))
     assets_list = sorted(set(r['asset'] for r in factor_records))
     
-    print(f"    交易日数: {len(dates_list)}")
-    print(f"    股票数量: {len(assets_list)}")
-    print(f"    因子记录: {len(factor_records)}")
-    print(f"    收益记录: {len(return_records)}")
+    logger.info(f"  交易日数: {len(dates_list)}")
+    logger.info(f"  股票数量: {len(assets_list)}")
+    logger.info(f"  因子记录: {len(factor_records)}")
+    logger.info(f"  收益记录: {len(return_records)}")
     
     # 写入最终格式化的文件
     factor_final_path = os.path.join(CACHE_DIR, 'factor_data.json.gz')
