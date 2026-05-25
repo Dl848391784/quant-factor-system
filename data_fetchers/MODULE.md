@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.84
+> 版本: v2.85
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-27 00:00 北京时间
+> 更新时间: 2026-05-27 00:30 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -55,7 +55,9 @@
 | 38 | del 注释准确描述 | "减少引用计数"而非"释放内存"（真正释放依赖 GC） |
 | 39 | sort_values 后 copy() | 避免 CoW 风险，链式操作用 copy() |
 | 40 | del 释放顺序正确 | del data 后 del full，而非只 del full |
-| 41 | 未使用返回值用 _ 接收 | 明确表示不使用，避免混淆 |
+| 42 | 一次遍历提取元信息 | 避免 min/max/set 四次遍历，一次遍历同时收集 date_set/asset_set/first_date/last_date |
+| 43 | set 内存立即释放 | 提取完元信息后立即 del date_set, asset_set |
+| 44 | 合并路径双校验 | factor_merged_path 和 return_merged_path 都校验，避免 None 路径触发 TypeError |
 | 19 | 常量定义在 import 之后 | PEP 8 顺序：docstring → __future__ → 标准库 → 第三方 → 本地 → 常量 |
 | 20 | cleanup_batch_files 用 try/finally | 保证临时文件清理（无论成功或失败） |
 
@@ -837,6 +839,14 @@ data_fetchers/
 100. **MODULE.md v2.84 (2026-05-27)** — 规范修正
    - **约束 #10 修正**：明确第二次是"流式行扫描只解析抽样行"，而非"流式扫描 data"
    - **规范修正原因**：两次 json.load 整个大文件导致内存峰值翻倍，"分两次读"目标未实现
+
+101. **fetch_factor_cache.py v3.29 (2026-05-27)** — Bug修复（2项）
+   - **format_final_output 一次遍历**：合并 min/max/set 四次遍历为一次，同时释放 set 内存
+   - **main 双校验合并路径**：factor_merged_path 和 return_merged_path 都校验，避免 None 路径触发 TypeError
+
+102. **MODULE.md v2.85 (2026-05-27)** — 规范补充
+   - **新增约束 #42-#44**：一次遍历提取元信息、set 内存立即释放、合并路径双校验
+   - **规范补充原因**：四次遍历内存峰值（两份 set 同时存在）；return_merged_path 为 None 触发 TypeError
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
