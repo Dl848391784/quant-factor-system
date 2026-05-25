@@ -27,6 +27,7 @@
 - v3.16 (2026-05-26): Bug修复 - main版本号改用_OUTPUT_VERSION、format_final_output固定生成时间、save_batch_cache_sorted入口copy()、validate_final_data均匀抽样
 - v3.17 (2026-05-26): Bug修复 - _OUTPUT_VERSION移到import之后（PEP8）、pop_record检查exhausted、sys导入移除、cleanup_batch_files用try/finally
 - v3.18 (2026-05-26): Bug修复 - n_way_merge显式收集相同key记录后选最大batch_idx、datetime.now()只调用一次、save_batch_cache_sorted移除copy改为文档说明
+- v3.19 (2026-05-26): Bug修复 - validate_final_data流式读取避免内存峰值、format_final_output只保留标量而非列表、模块级注释合并到常量定义、cleanup_batch_files增加merged兜底、n_way_merge移除冗余赋值
 
 作者: 云舟
 日期: 2026-04-04
@@ -55,15 +56,10 @@ except ImportError:
     from common import setup_logger, get_logs_dir, get_cache_dir
 
 # 模块级常量（PEP 8：import 之后定义）
+# _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
+# _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-
-# 输出文件版本号（与模块版本一致）
-_OUTPUT_VERSION = '3.18'
-
-# ============================================================================
-# 模块级 fallback（遵循 PROJECT.md 公共模块日志规范）
-# ============================================================================
-# 当脚本直接运行时，logger 可能未初始化，提供 fallback
+_OUTPUT_VERSION = '3.19'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -453,10 +449,9 @@ def n_way_merge_deduplicate(
     logger.info(f"  输出文件: {output_path}")
     logger.info(f"  当前内存: {get_memory_info_str()}")
     
-    # 清理streams
+    # 清理streams（释放批次文件内存）
     for stream in streams:
         stream.cleanup()
-    streams = []
     gc.collect()
     
     return output_path, count
@@ -639,12 +634,15 @@ def format_final_output(
     with gzip.open(factor_merged_path, 'rt', encoding='utf-8') as f:
         factor_records = json.load(f)
     
-    # 提取日期和资产（用于两个文件的 meta）
-    dates_list = sorted(set(r['date'] for r in factor_records))
-    assets_list = sorted(set(r['asset'] for r in factor_records))
-    n_days = len(dates_list)
-    n_assets = len(assets_list)
+    # 提取日期范围和资产数量（用于两个文件的 meta）
+    date_start = min(r['date'] for r in factor_records)
+    date_end = max(r['date'] for r in factor_records)
+    n_days = len(set(r['date'] for r in factor_records))
+    n_assets = len(set(r['asset'] for r in factor_records))
     n_records = len(factor_records)
+    
+    # 立即释放 dates_list 和 assets_list 的内存（只保留标量）
+    # 注：return 文件只需要 date_start, date_end, n_assets，不需要完整列表
     
     logger.info(f"  交易日数: {n_days}")
     logger.info(f"  股票数量: {n_assets}")
@@ -661,8 +659,8 @@ def format_final_output(
         f.write(f'    "n_days": {n_days},\n')
         f.write(f'    "n_assets": {n_assets},\n')
         f.write('    "date_range": {\n')
-        f.write(f'      "start": "{dates_list[0]}",\n')
-        f.write(f'      "end": "{dates_list[-1]}"\n')
+        f.write(f'      "start": "{date_start}",\n')
+        f.write(f'      "end": "{date_end}"\n')
         f.write('    },\n')
         f.write(f'    "last_updated": "{last_updated}",\n')
         f.write(f'    "version": "{_OUTPUT_VERSION}",\n')
@@ -703,8 +701,8 @@ def format_final_output(
         f.write(f'    "n_days": {n_days},\n')
         f.write(f'    "n_assets": {n_assets},\n')
         f.write('    "date_range": {\n')
-        f.write(f'      "start": "{dates_list[0]}",\n')
-        f.write(f'      "end": "{dates_list[-1]}"\n')
+        f.write(f'      "start": "{date_start}",\n')
+        f.write(f'      "end": "{date_end}"\n')
         f.write('    },\n')
         f.write(f'    "last_updated": "{last_updated}",\n')
         f.write(f'    "version": "{_OUTPUT_VERSION}",\n')
@@ -739,13 +737,13 @@ def format_final_output(
 
 def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, int]:
     """
-    验证最终数据完整性
+    验证最终数据文件的完整性（流式读取，避免内存峰值）
     
     Args:
-        logger: 日志记录器（可选，默认使用模块级 logger）
+        logger: 日志记录器
     
     Returns:
-        tuple[bool, int, int, int]: (is_valid, n_days, n_assets, n_records) 数据有效性、交易日数、股票数、记录数
+        tuple[bool, int, int, int]: (是否通过验证, 交易日数, 股票数量, 记录数)
     """
     logger = logger or _MODULE_LOGGER
     logger.info("=" * 60)
@@ -754,35 +752,81 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
     
     factor_path = CACHE_DIR / 'factor_data.json.gz'
     
-    with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
-        data = json.load(f)
+    # 流式读取：先读取 meta，再流式迭代 data 进行抽样
+    meta = None
+    records_count = 0
+    sample_records = []
+    sample_size = 1000
+    step = None  # 均匀抽样步长，在读取第一条后确定
     
-    meta = data['meta']
-    n_days = meta['n_days']
-    n_assets = meta['n_assets']
-    n_records = len(data['data'])
+    with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
+        # 手动解析 JSON 结构：{"meta": {...}, "data": [...]}
+        in_data = False
+        current_record = None
+        
+        for line in f:
+            line = line.strip()
+            
+            # 检测 meta 结束、data 开始
+            if '"data": [' in line:
+                in_data = True
+                continue
+            if in_data and line == ']':
+                break  # data 数组结束
+            
+            if not in_data:
+                # 收集 meta 信息（简单解析）
+                if '"n_days":' in line:
+                    n_days = int(line.split(':')[1].strip().rstrip(','))
+                if '"n_assets":' in line:
+                    n_assets = int(line.split(':')[1].strip().rstrip(','))
+                if '"date_range":' in line:
+                    # 下一行是 start
+                    continue
+                if '"start":' in line and 'date_range' not in line:
+                    date_start = line.split('"')[3]
+                if '"end":' in line:
+                    date_end = line.split('"')[3]
+            else:
+                # 解析 data 中的记录
+                if line.startswith('{'):
+                    # 去除逗号，解析 JSON 对象
+                    clean_line = line.rstrip(',')
+                    try:
+                        record = json.loads(clean_line)
+                        records_count += 1
+                        
+                        # 均匀抽样：第一条记录时确定步长
+                        if step is None:
+                            # 假设总记录数约为 n_days * n_assets
+                            estimated_total = n_days * n_assets
+                            step = max(1, estimated_total // sample_size)
+                        
+                        # 每隔 step 条取一条
+                        if records_count % step == 0 and len(sample_records) < sample_size:
+                            sample_records.append(record)
+                    except json.JSONDecodeError:
+                        continue
+    
+    # 释放内存
+    gc.collect()
     
     logger.info(f"  交易日数: {n_days}")
     logger.info(f"  股票数量: {n_assets}")
-    logger.info(f"  总记录数: {n_records}")
-    logger.info(f"  日期范围: {meta['date_range']['start']} ~ {meta['date_range']['end']}")
+    logger.info(f"  总记录数: {records_count}")
+    logger.info(f"  日期范围: {date_start} ~ {date_end}")
     
-    # 抽样检查（均匀抽样，避免前1000条偏差）
-    total_records = len(data['data'])
-    sample_size = min(1000, total_records)
-    # 均匀抽样：每隔 N 条取一条
-    step = max(1, total_records // sample_size)
-    sample = [data['data'][i] for i in range(0, total_records, step)][:sample_size]
-    rsi_vals = [r['rsi_6'] for r in sample if r.get('rsi_6') is not None]
+    # 抽样检查 RSI
+    rsi_vals = [r['rsi_6'] for r in sample_records if r.get('rsi_6') is not None]
     if rsi_vals:
         logger.info(f"  RSI(6)样本范围: [{min(rsi_vals):.2f}, {max(rsi_vals):.2f}]")
     
     # 验证数据有效性：检查关键字段非空比例
     valid_rsi_count = len(rsi_vals)
-    total_sample_count = len(sample)
+    total_sample_count = len(sample_records)
     rsi_valid_ratio = valid_rsi_count / total_sample_count if total_sample_count > 0 else 0.0
     
-    del data, sample
+    del sample_records
     gc.collect()
     
     # 综合验证：交易日数达标 + 关键字段非空比例 >= 80%
@@ -797,19 +841,23 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
     if is_valid:
         logger.info(f"  ✓ 通过验证 (RSI有效比例: {rsi_valid_ratio:.1%})")
     
-    return is_valid, n_days, n_assets, n_records
+    return is_valid, n_days, n_assets, records_count
 
 
 def cleanup_batch_files(total_batches: int, logger: logging.Logger = None) -> int:
     """
-    清理临时批次文件
+    清理临时文件（批次文件 + merged 合并文件）
     
     Args:
         total_batches: 总批次数
-        logger: 日志记录器（可选，默认使用模块级 logger）
+        logger: 日志记录器
     
     Returns:
         int: 删除的文件数量
+    
+    Note:
+        merged_*.json.gz 已在 format_final_output 中删除，
+        此函数仅清理 batch_*.json.gz 批次文件
     """
     logger = logger or _MODULE_LOGGER
     logger.info("[清理阶段] 删除临时批次文件...")
@@ -819,8 +867,15 @@ def cleanup_batch_files(total_batches: int, logger: logging.Logger = None) -> in
         for t in ['factor', 'return']:
             path = CACHE_DIR / f'batch_{batch_idx}_{t}.json.gz'
             if path.exists():
-                path.unlink()  # Path.unlink() 替代 os.remove()
+                path.unlink()
                 deleted += 1
+    
+    # 清理可能残留的 merged 文件（format_final_output 已删除，此处兜底）
+    for t in ['factor', 'return']:
+        merged_path = CACHE_DIR / f'merged_{t}.json.gz'
+        if merged_path.exists():
+            merged_path.unlink()
+            deleted += 1
     
     logger.info(f"  ✓ 已删除 {deleted} 个临时文件")
     return deleted
