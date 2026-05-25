@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.72
+> 版本: v2.73
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 18:00 北京时间
+> 更新时间: 2026-05-26 18:30 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -32,12 +32,14 @@
 | 10 | itertuples 前验证列存在 | `hasattr(row, 'col')` 对同一 DataFrame 所有行结果相同，无效防御性检查 |
 | 11 | 大文件分阶段加载 | 避免 two large lists 同时存在于内存中，先处理第一个并 del 再加载第二个 |
 | 12 | 数据验证综合判断 | 不仅检查天数达标，还需检查关键字段非空比例 >= 80% |
-| 13 | peek_key 检查 exhausted | `if self.exhausted or self.idx >= len(self.records)`，语义一致性 |
+| 13 | peek_key/pop_record 检查 exhausted | `if self.exhausted or self.idx >= len(self.records)`，语义一致性（两个方法对称） |
 | 14 | get_memory_usage_mb Windows 兜底 | `import resource` 在 Windows 下会抛 ModuleNotFoundError，需 try-except 兜底返回 0.0 |
 | 15 | main docstring 无 Returns | None 返回类型的函数不需要 Returns 节 |
 | 16 | version 字段提取为常量 | 禁止硬编码版本号，提取为 `_OUTPUT_VERSION` 常量便于维护 |
 | 17 | datetime.now() 固定时间戳 | 避免多次调用导致 generated_at 和 last_updated 不一致 |
 | 18 | 抽样检查均匀抽样 | 避免 `[:1000]` 取前1000条偏差，改为均匀抽样 |
+| 19 | 常量定义在 import 之后 | PEP 8 顺序：docstring → __future__ → 标准库 → 第三方 → 本地 → 常量 |
+| 20 | cleanup_batch_files 用 try/finally | 保证临时文件清理（无论成功或失败） |
 
 ### 关键函数签名
 
@@ -693,6 +695,17 @@ data_fetchers/
    - **新增约束 #17-#18**：datetime.now() 固定时间戳、抽样检查均匀抽样
    - **约束 #6 补充说明**：包括 save_batch_cache_sorted
    - **规范补充原因**：代码审查发现版本号维护困难、时间戳不一致、抽样偏差
+
+77. **fetch_factor_cache.py v3.17 (2026-05-26)** — Bug修复（4项）
+   - **_OUTPUT_VERSION 移到 import 之后**：遵循 PEP 8 模块级代码顺序规范
+   - **pop_record 检查 exhausted**：与 peek_key 对称，避免 exhausted=True 时仍返回数据
+   - **sys 导入移除**：未使用，v3.10 移除 os 但漏了 sys
+   - **cleanup_batch_files 用 try/finally**：保证临时文件清理（无论成功或失败）
+
+78. **MODULE.md v2.73 (2026-05-26)** — 规范补充
+   - **约束 #13 修正**：peek_key/pop_record 检查 exhausted（两个方法对称）
+   - **新增约束 #19-#20**：常量定义在 import 之后、cleanup_batch_files 用 try/finally
+   - **规范补充原因**：代码审查发现 PEP 8 顺序违规、方法不对称、临时文件清理不保证
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
