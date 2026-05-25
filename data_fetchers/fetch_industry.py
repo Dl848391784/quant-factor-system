@@ -4,7 +4,7 @@
 
 作者: 云舟
 日期: 2026-05-27
-版本: v2.1
+版本: v2.2
 
 功能: 获取申万行业分类数据并缓存
 数据源: akshare - 申万行业分类
@@ -21,6 +21,7 @@
 - v1.9 (2026-05-27): Bug修复 - SW_INDUSTRY_CODE_MAP注释诚实化（承认未核对官方标准，恢复TODO，注释改为"二级归属待核实"）
 - v2.0 (2026-05-27): Bug修复 - SW_INDUSTRY_CODE_MAP核对申万2021官方标准（移除错误映射，不存在的一级代码映射到'其他'）
 - v2.1 (2026-05-27): Bug修复 - 日志信息修正（"akshare获取失败，尝试本地备用数据"）、备用缓存写入策略docstring说明（非致命错误，与主缓存策略不同）
+- v2.2 (2026-05-27): Bug修复 - load_stock_industry缓存数据完整性验证（industries类型检查，防止后续AttributeError）
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -36,7 +37,7 @@ from datetime import datetime
 from collections import Counter
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = '2.1'
+_OUTPUT_VERSION = '2.2'
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,13 @@ def load_stock_industry() -> dict:
                 data = json.load(f)
             
             industries = data.get('industries', {})
+            
+            # 数据完整性验证（防止缓存文件损坏导致后续 AttributeError）
+            if not isinstance(industries, dict):
+                logger.warning(f"[行业数据] 缓存数据类型异常: industries 为 {type(industries).__name__}，期望 dict")
+                # 删除损坏缓存，重新获取
+                INDUSTRY_CACHE_PATH.unlink(missing_ok=True)
+                return refresh_industry_cache()
             
             # 检查缓存是否过期（超过7天更新）
             meta = data.get('meta', {})
