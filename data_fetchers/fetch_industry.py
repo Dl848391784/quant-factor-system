@@ -11,6 +11,7 @@
 
 改进历史:
 - v1.1 (2026-05-27): 优化 - 添加版本号常量、Dict→dict、iterrows→to_dict、__main__用logger
+- v1.2 (2026-05-27): Bug修复 - docstring Returns Dict→dict（5处）、mkdir用RESULT_DIR、meta添加version字段
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -24,7 +25,7 @@ from pathlib import Path
 from datetime import datetime
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = '1.1'
+_OUTPUT_VERSION = '1.2'
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,7 @@ def load_stock_industry() -> dict:
     加载股票行业数据（优先从缓存）
     
     Returns:
-        Dict: {股票代码: {name, industry, industry_code}}
+        dict: {股票代码: {name, industry, industry_code}}
     """
     # 优先从缓存加载
     if INDUSTRY_CACHE_PATH.exists():
@@ -186,7 +187,7 @@ def refresh_industry_cache() -> dict:
     刷新行业数据缓存
     
     Returns:
-        Dict: {股票代码: {name, industry, industry_code}}
+        dict: {股票代码: {name, industry, industry_code}}
     """
     industry_map = fetch_stock_industry_sw()
     
@@ -198,6 +199,7 @@ def refresh_industry_cache() -> dict:
     # 写入缓存
     cache_data = {
         'meta': {
+            'version': _OUTPUT_VERSION,
             'source': 'sw_category',
             'level': '一级',
             'updated_at': datetime.now().strftime('%Y-%m-%d'),
@@ -206,8 +208,8 @@ def refresh_industry_cache() -> dict:
         'industries': industry_map
     }
     
-    # 确保缓存目录存在
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    # 确保输出目录存在（MODULE.md 约束 #2：输出到 result 目录）
+    RESULT_DIR.mkdir(parents=True, exist_ok=True)
     
     # 原子写入
     temp_path = INDUSTRY_CACHE_PATH.with_suffix('.tmp')
@@ -215,7 +217,7 @@ def refresh_industry_cache() -> dict:
         json.dump(cache_data, f, ensure_ascii=False, indent=2)
     
     temp_path.rename(INDUSTRY_CACHE_PATH)
-    logger.info(f"[行业数据] 缓存已更新: {INDUSTRY_CACHE_PATH}")
+    logger.info(f"[行业数据] 缓存已更新: {INDUSTRY_CACHE_PATH} (v{_OUTPUT_VERSION})")
     
     return industry_map
 
@@ -225,7 +227,7 @@ def load_local_industry_backup() -> dict:
     加载本地备用行业数据（当 akshare 不可用时）
     
     Returns:
-        Dict: 基本的行业映射（主要行业分类）
+        dict: 基本的行业映射（主要行业分类）
     """
     # 简化的行业分类（基于股票代码特征）
     # 银行: 000001-000999, 600000-600999
@@ -319,7 +321,7 @@ def get_industry_map() -> dict:
     获取行业映射（带模块级缓存）
     
     Returns:
-        Dict: {股票代码: {name, industry, industry_code}}
+        dict: {股票代码: {name, industry, industry_code}}
     """
     global _industry_cache
     if _industry_cache is None:
