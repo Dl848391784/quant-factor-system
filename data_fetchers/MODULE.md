@@ -497,6 +497,23 @@ data_fetchers/
    - **注释行号修正**：sys.path.insert 位置改为第42-53行（删除1行后位置变化）
    - **修复原因**：gzip 异常处理缺失、注释行号不准确
 
+21. **fetch_stock_list.py v2.0 (2026-05-27)** — 公共模块规范化
+   - **输出目录迁移**：cache → result（遵循 MODULE.md 约束 2）
+   - **日志规范化**：复用 logger_config.py 的 setup_logger（遵循 PROJECT.md 第561-700行）
+   - **日志文件命名**：`stock_cache.log` → `fetch_stock_list_YYYY-MM-DD.log`
+   - **日志格式**：添加 `%(name)s` 字段
+   - **CLI 日志规范化**：print → logger（遵循 PROJECT.md 第780-839行）
+   - **类型注解补全**：所有公共函数添加完整类型注解
+   - **__all__ 导出**：明确定义 5 个公共 API
+   - **版本号常量提取**：`_OUTPUT_VERSION = '2.2'`（遵循 MODULE.md 约束 16）
+   - **datetime.now() 统一调用**：只调用一次，派生两个格式（遵循 MODULE.md 约束 17）
+   - **Path 对象迁移**：os.path → Path
+   - **公共模块复用**：logger_config.py、http_client.py、paths.py
+   - **原子写入**：使用临时文件 + replace
+   - **流程文档创建**：docs/fetch_stock_list_flow.md
+   - **测试用例创建**：test_cases/fetch_stock_list_test_cases.md
+   - **修复原因**：MODULE.md 规范违规（8项）+ PROJECT.md 规范违规（4项）
+
 20. **factor_generator.py v1.9 (2026-05-25)** — 第八轮深度优化
    - **冗余导入清理**：移除条件导入块的 `_Path`（第44行），直接使用顶部导入的 `Path`
    - **注释行号修正**：setup_logger 导入位置改为第369-374行（删除1行后位置变化）

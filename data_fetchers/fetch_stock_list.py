@@ -11,31 +11,52 @@
 
 剔除：创业板(30)、科创板(688)、北交所(8/4开头)、ST股票
 
+版本历史：
+- v1.0 (2026-04-02): 初始版本
+- v2.0 (2026-05-27): 公共模块规范化
+  - 输出目录迁移：cache → result（遵循 MODULE.md 约束 2）
+  - 日志规范化：复用 logger_config.py（遵循 PROJECT.md 第561-700行）
+  - CLI 日志规范化：print → logger（遵循 PROJECT.md 第780-839行）
+  - 类型注解补全 + __all__ 导出（遵循 MODULE.md 约束 53）
+  - 版本号常量提取（遵循 MODULE.md 约束 16）
+  - datetime.now() 统一调用（遵循 MODULE.md 约束 17）
+  - Path 对象迁移 + 公共模块复用（遵循 MODULE.md 约束 62）
+
 作者: 云舟
 日期: 2026-04-02
 """
 
-import os
 import json
-import time
 import logging
-import requests
+import time
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+# 公共模块导入
+from data_fetchers.common.logger_config import setup_logger
+from data_fetchers.common.http_client import create_sina_session
+from data_fetchers.common.paths import (
+    get_module_result_dir,
+    get_module_logs_dir,
+    get_cache_dir,
+)
+
+__all__ = [
+    'refresh_stock_cache',
+    'load_cache',
+    'get_cached_stock_codes',
+    'is_valid_main_board_stock',
+    'determine_market',
+]
 
 
 # ============================================================
 # 配置常量
 # ============================================================
 
-# 缓存文件路径 - 使用项目根目录
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
-CACHE_DIR = os.path.join(_PROJECT_ROOT, 'cache')
-CACHE_FILE = os.path.join(CACHE_DIR, 'stock_list.json')
-
-# 日志文件路径
-LOG_DIR = os.path.join(_PROJECT_ROOT, 'logs')
-LOG_FILE = os.path.join(LOG_DIR, 'stock_cache.log')
+# 输出版本（遵循 MODULE.md 约束 16）
+_OUTPUT_VERSION = '2.2'
 
 # 新浪财经 API 端点
 SINA_API_URL = 'http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData'
@@ -53,38 +74,35 @@ EXPECTED_SZ_MIN = 1200   # 深市主板最低预期
 
 
 # ============================================================
-# 日志配置
+# 日志配置（复用公共模块）
 # ============================================================
 
-def setup_logger() -> logging.Logger:
-    """配置日志记录器"""
-    # 确保日志目录存在
-    if not os.path.exists(LOG_DIR):
-        os.makedirs(LOG_DIR, exist_ok=True)
-    
-    logger = logging.getLogger('stock_cache')
-    logger.setLevel(logging.INFO)
-    
-    # 避免重复添加 handler
-    if not logger.handlers:
-        # 文件 handler
-        file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
-        file_handler.setLevel(logging.INFO)
-        file_formatter = logging.Formatter('[%(asctime)s] %(levelname)s  %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-        file_handler.setFormatter(file_formatter)
-        logger.addHandler(file_handler)
-        
-        # 控制台 handler
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        console_formatter = logging.Formatter('%(message)s')
-        console_handler.setFormatter(console_formatter)
-        logger.addHandler(console_handler)
-    
-    return logger
+# 获取脚本名（不含 .py）
+_SCRIPT_NAME = Path(__file__).stem
+
+# 日志文件路径（遵循 PROJECT.md 第621-668行规范）
+_LOGS_DIR = get_module_logs_dir()
+
+# 输出文件路径（遵循 MODULE.md 约束 2：输出到 result 目录）
+_RESULT_DIR = get_module_result_dir()
+RESULT_FILE = _RESULT_DIR / 'stock_list_meta.json'
+
+# 缓存文件路径（股票列表数据仍保留在 cache 目录，供其他模块使用）
+CACHE_FILE = get_cache_dir() / 'stock_list.json'
 
 
-logger = setup_logger()
+def _get_logger() -> logging.Logger:
+    """
+    获取日志记录器（复用公共模块）
+    
+    Returns:
+        配置好的 Logger 对象
+    """
+    return setup_logger(_SCRIPT_NAME, logs_dir=_LOGS_DIR)
+
+
+# 模块级 logger（仅在模块内部使用）
+logger = _get_logger()
 
 
 # ============================================================
@@ -102,6 +120,12 @@ def is_valid_main_board_stock(code: str, name: str) -> bool:
     Returns:
         True: 有效主板股票，应保留
         False: 应剔除
+    
+    Example:
+        >>> is_valid_main_board_stock('600000', '浦发银行')
+        True
+        >>> is_valid_main_board_stock('300001', '特锐德')
+        False  # 创业板
     """
     # 剔除规则 - 先判断剔除条件
     
@@ -157,6 +181,12 @@ def determine_market(code: str) -> str:
     
     Returns:
         'sh': 沪市, 'sz': 深市, 'unknown': 未知
+    
+    Example:
+        >>> determine_market('600000')
+        'sh'
+        >>> determine_market('000001')
+        'sz'
     """
     if code.startswith('60'):
         return 'sh'
@@ -170,29 +200,36 @@ def determine_market(code: str) -> str:
 # API 数据获取
 # ============================================================
 
-def fetch_stocks_from_sina() -> List[Dict]:
+def fetch_stocks_from_sina(
+    logger: Optional[logging.Logger] = None
+) -> Tuple[List[Dict[str, Any]], int]:
     """
     从新浪财经 API 获取股票列表（分页获取所有数据）
     
+    Args:
+        logger: 日志记录器（可选，默认使用模块级 logger）
+    
     Returns:
-        股票信息列表 [{'code': str, 'name': str}, ...]
+        Tuple[List[Dict], int]: (股票信息列表, API请求页数)
+        股票信息格式：[{'code': str, 'name': str, 'market': str}, ...]
     
     Raises:
         RuntimeError: API 获取失败
+    
+    Example:
+        >>> stocks, pages = fetch_stocks_from_sina()
+        >>> len(stocks)  # 约 3000 只主板股票
+        3000+
     """
+    if logger is None:
+        logger = _get_logger()
+    
     logger.info("从新浪财经 API 获取主板股票...")
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': '*/*',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Referer': 'http://finance.sina.com.cn/',
-    }
+    # 使用公共模块创建 Session
+    session = create_sina_session(logger=logger)
     
-    session = requests.Session()
-    session.headers.update(headers)
-    
-    all_stocks = []
+    all_stocks: List[Dict[str, Any]] = []
     
     # 新浪API节点说明：
     # sh_a - 沪市A股
@@ -223,7 +260,7 @@ def fetch_stocks_from_sina() -> List[Dict]:
             }
             
             success = False
-            data = None
+            data: Optional[List[Dict[str, Any]]] = None
             
             for attempt in range(API_RETRIES):
                 try:
@@ -303,8 +340,8 @@ def fetch_stocks_from_sina() -> List[Dict]:
         time.sleep(API_DELAY)
     
     # 去重
-    seen = set()
-    unique_stocks = []
+    seen: set = set()
+    unique_stocks: List[Dict[str, Any]] = []
     for s in all_stocks:
         if s['code'] not in seen:
             seen.add(s['code'])
@@ -325,7 +362,7 @@ def fetch_stocks_from_sina() -> List[Dict]:
 # 数据完整性验证
 # ============================================================
 
-def validate_cache(cache_data: Dict) -> Dict:
+def validate_cache(cache_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     验证缓存数据完整性
     
@@ -338,10 +375,15 @@ def validate_cache(cache_data: Dict) -> Dict:
             'passed': bool,
             'warnings': List[str],
             'errors': List[str],
-            'stats': Dict
+            'stats': Dict[str, int]
         }
+    
+    Example:
+        >>> result = validate_cache(cache_data)
+        >>> result['passed']
+        True
     """
-    result = {
+    result: Dict[str, Any] = {
         'passed': True,
         'warnings': [],
         'errors': [],
@@ -414,14 +456,24 @@ def validate_cache(cache_data: Dict) -> Dict:
 # 缓存文件操作
 # ============================================================
 
-def ensure_cache_dir():
+def ensure_cache_dir() -> None:
     """确保缓存目录存在"""
-    if not os.path.exists(CACHE_DIR):
-        os.makedirs(CACHE_DIR, exist_ok=True)
-        logger.info(f"创建缓存目录: {CACHE_DIR}")
+    cache_dir = get_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"确保缓存目录存在: {cache_dir}")
 
 
-def save_cache(new_stocks: List[Dict], api_pages: int) -> Dict:
+def ensure_result_dir() -> None:
+    """确保结果目录存在"""
+    _RESULT_DIR.mkdir(parents=True, exist_ok=True)
+    logger.info(f"确保结果目录存在: {_RESULT_DIR}")
+
+
+def save_cache(
+    new_stocks: List[Dict[str, Any]],
+    api_pages: int,
+    logger: Optional[logging.Logger] = None
+) -> Dict[str, Any]:
     """
     增量更新股票列表到持久化文件
     
@@ -432,14 +484,26 @@ def save_cache(new_stocks: List[Dict], api_pages: int) -> Dict:
     Args:
         new_stocks: 从 API 获取的新股票列表
         api_pages: API 请求页数
+        logger: 日志记录器（可选）
     
     Returns:
-        缓存数据字典，包含 'added_count'、'removed_count'、'removed_codes' 字段
-    """
-    ensure_cache_dir()
+        缓存数据字典，包含统计信息
     
+    Example:
+        >>> cache_data = save_cache(stocks, api_pages)
+        >>> cache_data['meta']['total_count']
+        3000+
+    """
+    if logger is None:
+        logger = _get_logger()
+    
+    ensure_cache_dir()
+    ensure_result_dir()
+    
+    # 遵循 MODULE.md 约束 17：datetime.now() 只调用一次
     now = datetime.now()
     today = now.strftime('%Y-%m-%d')
+    timestamp = now.isoformat()
     
     # 加载现有数据
     existing_data = load_cache()
@@ -453,7 +517,7 @@ def save_cache(new_stocks: List[Dict], api_pages: int) -> Dict:
     existing_stock_codes = set(s['code'] for s in existing_stocks)
     
     # 找出新增的股票（API有但文件没有）
-    added_stocks = []
+    added_stocks: List[Dict[str, Any]] = []
     for stock in new_stocks:
         if stock['code'] not in existing_stock_codes:
             added_stocks.append({
@@ -482,10 +546,10 @@ def save_cache(new_stocks: List[Dict], api_pages: int) -> Dict:
     sh_count = len([s for s in all_stocks if s['market'] == 'sh'])
     sz_count = len([s for s in all_stocks if s['market'] == 'sz'])
     
-    # 构建持久化数据
-    cache_data = {
+    # 构建缓存数据（股票列表保留在 cache 目录）
+    cache_data: Dict[str, Any] = {
         'meta': {
-            'last_updated': now.isoformat(),
+            'last_updated': timestamp,
             'source': 'sina_api',
             'total_count': len(all_stocks),
             'sh_count': sh_count,
@@ -495,40 +559,79 @@ def save_cache(new_stocks: List[Dict], api_pages: int) -> Dict:
             'removed_codes': removed_codes,
             'existing_count': len(existing_stocks),
             'api_pages': api_pages,
-            'version': '2.1'
+            'version': _OUTPUT_VERSION
         },
         'stocks': all_stocks,
         'codes': [s['code'] for s in all_stocks]
     }
     
-    # 写入文件
-    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(cache_data, f, ensure_ascii=False, indent=2)
+    # 写入缓存文件（cache 目录）
+    _write_json_file(CACHE_FILE, cache_data, logger)
     
-    logger.info(f"持久化文件已保存: {CACHE_FILE}")
+    # 写入结果元信息文件（result 目录）
+    result_data: Dict[str, Any] = {
+        'meta': cache_data['meta'],
+        'timestamp': timestamp,
+        'script': _SCRIPT_NAME,
+    }
+    _write_json_file(RESULT_FILE, result_data, logger)
     
-    # 返回数据包含新增/删除信息
-    cache_data['_added_count'] = added_count
-    cache_data['_removed_count'] = removed_count
-    cache_data['_removed_codes'] = removed_codes
+    logger.info(f"缓存文件已保存: {CACHE_FILE}")
+    logger.info(f"结果元信息已保存: {RESULT_FILE}")
+    
     return cache_data
 
 
-def load_cache() -> Optional[Dict]:
+def _write_json_file(
+    path: Path,
+    data: Dict[str, Any],
+    logger: logging.Logger
+) -> None:
+    """
+    原子写入 JSON 文件
+    
+    Args:
+        path: 文件路径
+        data: JSON 数据
+        logger: 日志记录器
+    
+    Raises:
+        OSError: 文件写入失败
+    """
+    temp_path = path.with_suffix('.tmp')
+    try:
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        # 原子替换
+        temp_path.replace(path)
+    except OSError as e:
+        # 失败时清理临时文件
+        if temp_path.exists():
+            temp_path.unlink()
+        logger.error(f"写入文件失败: {path}, [{type(e).__name__}]: {e}")
+        raise
+
+
+def load_cache() -> Optional[Dict[str, Any]]:
     """
     加载缓存文件
     
     Returns:
         缓存数据字典，如果不存在则返回 None
+    
+    Example:
+        >>> cache_data = load_cache()
+        >>> if cache_data:
+        ...     print(cache_data['meta']['total_count'])
     """
-    if not os.path.exists(CACHE_FILE):
+    if not CACHE_FILE.exists():
         return None
     
     try:
         with open(CACHE_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except Exception as e:
-        logger.error(f"加载缓存失败: {e}")
+    except json.JSONDecodeError as e:
+        logger.error(f"加载缓存失败: [{type(e).__name__}]: {e}")
         return None
 
 
@@ -538,6 +641,11 @@ def get_cached_stock_codes() -> List[str]:
     
     Returns:
         股票代码列表，如果缓存不存在或无效则返回空列表
+    
+    Example:
+        >>> codes = get_cached_stock_codes()
+        >>> len(codes)  # 约 3000 只
+        3000+
     """
     cache_data = load_cache()
     if cache_data and 'codes' in cache_data:
@@ -549,7 +657,9 @@ def get_cached_stock_codes() -> List[str]:
 # 主函数
 # ============================================================
 
-def refresh_stock_cache() -> Dict:
+def refresh_stock_cache(
+    logger: Optional[logging.Logger] = None
+) -> Dict[str, Any]:
     """
     增量更新股票列表持久化文件
     
@@ -557,6 +667,9 @@ def refresh_stock_cache() -> Dict:
     新增：API有但文件没有 → 添加
     删除：文件有但API没有 → 删除（退市/ST）
     保留：两边都有 → 保留
+    
+    Args:
+        logger: 日志记录器（可选，默认使用模块级 logger）
     
     Returns:
         {
@@ -570,16 +683,25 @@ def refresh_stock_cache() -> Dict:
             "sz_count": int,
             "message": str,
             "cache_file": str,
+            "result_file": str,
             "warnings": List[str]
         }
     
     Raises:
-        StockCacheError: 缓存刷新失败
+        RuntimeError: 缓存刷新失败
+    
+    Example:
+        >>> result = refresh_stock_cache()
+        >>> result['success']
+        True
     """
+    if logger is None:
+        logger = _get_logger()
+    
     logger.info("开始增量更新股票列表")
     start_time = time.time()
     
-    result = {
+    result: Dict[str, Any] = {
         'success': False,
         'total_count': 0,
         'added_count': 0,
@@ -589,16 +711,17 @@ def refresh_stock_cache() -> Dict:
         'sh_count': 0,
         'sz_count': 0,
         'message': '',
-        'cache_file': CACHE_FILE,
+        'cache_file': str(CACHE_FILE),
+        'result_file': str(RESULT_FILE),
         'warnings': []
     }
     
     try:
         # Step 1: 从 API 获取数据
-        stocks, api_pages = fetch_stocks_from_sina()
+        stocks, api_pages = fetch_stocks_from_sina(logger)
         
         # Step 2: 增量更新持久化文件
-        cache_data = save_cache(stocks, api_pages)
+        cache_data = save_cache(stocks, api_pages, logger)
         
         # Step 3: 验证完整性
         validation = validate_cache(cache_data)
@@ -616,9 +739,9 @@ def refresh_stock_cache() -> Dict:
         # Step 4: 返回结果
         elapsed_time = time.time() - start_time
         
-        added_count = cache_data.get('_added_count', 0)
-        removed_count = cache_data.get('_removed_count', 0)
-        removed_codes = cache_data.get('_removed_codes', [])
+        added_count = cache_data['meta'].get('added_count', 0)
+        removed_count = cache_data['meta'].get('removed_count', 0)
+        removed_codes = cache_data['meta'].get('removed_codes', [])
         existing_count = cache_data['meta'].get('existing_count', 0)
         
         result['success'] = True
@@ -630,7 +753,7 @@ def refresh_stock_cache() -> Dict:
         result['sh_count'] = validation['stats']['sh_count']
         result['sz_count'] = validation['stats']['sz_count']
         
-        logger.info(f"验证通过，写入持久化文件")
+        logger.info("验证通过，写入持久化文件")
         logger.info(f"增量更新完成，耗时 {elapsed_time:.1f} 秒")
         logger.info(f"  新增 {added_count} 只股票")
         if removed_count > 0:
@@ -650,10 +773,10 @@ def refresh_stock_cache() -> Dict:
         
     except Exception as e:
         elapsed_time = time.time() - start_time
-        error_msg = f"增量更新股票列表失败: {e}"
+        error_msg = f"增量更新股票列表失败: [{type(e).__name__}]: {e}"
         logger.error(error_msg)
         result['message'] = error_msg
-        raise RuntimeError(error_msg)
+        raise RuntimeError(error_msg) from e
 
 
 # ============================================================
@@ -662,41 +785,46 @@ def refresh_stock_cache() -> Dict:
 
 if __name__ == '__main__':
     import sys
+    import requests  # fetch_stocks_from_sina 需要
     
-    print("=" * 60)
-    print("股票列表增量更新工具")
-    print("=" * 60)
+    # 使用公共模块 logger
+    cli_logger = _get_logger()
+    
+    cli_logger.info("=" * 60)
+    cli_logger.info("股票列表增量更新工具")
+    cli_logger.info("=" * 60)
     
     try:
-        result = refresh_stock_cache()
+        result = refresh_stock_cache(cli_logger)
         
-        print("\n" + "=" * 60)
-        print("更新结果")
-        print("=" * 60)
-        print(f"  状态: {'成功 ✓' if result['success'] else '失败 ✗'}")
-        print(f"  新增: {result['added_count']} 只")
+        cli_logger.info("=" * 60)
+        cli_logger.info("更新结果")
+        cli_logger.info("=" * 60)
+        cli_logger.info(f"  状态: {'成功 ✓' if result['success'] else '失败 ✗'}")
+        cli_logger.info(f"  新增: {result['added_count']} 只")
         if result['removed_count'] > 0:
-            print(f"  删除: {result['removed_count']} 只（退市/ST）")
+            cli_logger.info(f"  删除: {result['removed_count']} 只（退市/ST）")
             removed_display = ', '.join(result['removed_codes'][:10])
             if result['removed_count'] > 10:
                 removed_display += f"... 等共{result['removed_count']}只"
-            print(f"    删除代码: {removed_display}")
-        print(f"  现有: {result['existing_count']} 只")
-        print(f"  总数: {result['total_count']}")
-        print(f"  沪市主板: {result['sh_count']}")
-        print(f"  深市主板: {result['sz_count']}")
-        print(f"  持久化文件: {result['cache_file']}")
-        print(f"  消息: {result['message']}")
+            cli_logger.info(f"    删除代码: {removed_display}")
+        cli_logger.info(f"  现有: {result['existing_count']} 只")
+        cli_logger.info(f"  总数: {result['total_count']}")
+        cli_logger.info(f"  沪市主板: {result['sh_count']}")
+        cli_logger.info(f"  深市主板: {result['sz_count']}")
+        cli_logger.info(f"  缓存文件: {result['cache_file']}")
+        cli_logger.info(f"  结果文件: {result['result_file']}")
+        cli_logger.info(f"  消息: {result['message']}")
         
         if result['warnings']:
-            print("\n警告:")
+            cli_logger.warning("警告:")
             for warning in result['warnings']:
-                print(f"  ⚠️ {warning}")
+                cli_logger.warning(f"  ⚠️ {warning}")
         
-        print("=" * 60)
+        cli_logger.info("=" * 60)
         sys.exit(0)
         
     except Exception as e:
-        print(f"\n❌ 错误: {e}")
-        print("=" * 60)
+        cli_logger.error(f"错误: [{type(e).__name__}]: {e}")
+        cli_logger.info("=" * 60)
         sys.exit(1)
