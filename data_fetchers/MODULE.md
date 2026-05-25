@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.76
+> 版本: v2.77
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 20:00 北京时间
+> 更新时间: 2026-05-26 20:30 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -33,6 +33,7 @@
 | 11 | meta 信息只保留标量 | date_start/date_end/n_assets，而非完整 dates_list/assets_list |
 | 12 | 数据验证综合判断 | 不仅检查天数达标，还需检查关键字段非空比例 >= 80% |
 | 13 | peek_key/pop_record 检查 exhausted | `if self.exhausted or self.idx >= len(self.records)`，语义一致性（两个方法对称） |
+| 14 | is_exhausted 逻辑用 or | `return self.exhausted or self.idx >= len(self.records)`（而非 and） |
 | 14 | get_memory_usage_mb Windows 兜底 | `import resource` 在 Windows 下会抛 ModuleNotFoundError，需 try-except 兜底返回 0.0 |
 | 15 | main docstring 无 Returns | None 返回类型的函数不需要 Returns 节 |
 | 16 | version 字段提取为常量 | 禁止硬编码版本号，提取为 `_OUTPUT_VERSION` 常量便于维护 |
@@ -43,6 +44,9 @@
 | 23 | 模块级注释合并到常量 | 注释应紧贴常量定义，避免空泛的注释块 |
 | 24 | 变量初始化默认值 | 防止解析失败时未初始化导致 NameError |
 | 25 | meta 解析用 json.loads | 避免手动字符串匹配脆弱，收集 meta 行后用 json.loads 解析 |
+| 26 | 方法名语义清晰 | `_load_all` 表示一次性加载，而非 `_load_next_chunk` 暗示多次调用 |
+| 27 | 返回值避免冗余 | format_final_output 返回值仅用于日志，统计信息由 validate_final_data 提供 |
+| 28 | 函数接口契约说明 | 说明输入/输出类型，避免调用方重复转换 |
 | 19 | 常量定义在 import 之后 | PEP 8 顺序：docstring → __future__ → 标准库 → 第三方 → 本地 → 常量 |
 | 20 | cleanup_batch_files 用 try/finally | 保证临时文件清理（无论成功或失败） |
 
@@ -745,6 +749,17 @@ data_fetchers/
    - **约束 #9 修正**：heap 元素增加 counter 打破平局
    - **新增约束 #24-#25**：变量初始化默认值、meta 解析用 json.loads
    - **规范修正原因**：变量未初始化导致 NameError；手动字符串匹配脆弱
+
+85. **fetch_factor_cache.py v3.21 (2026-05-26)** — Bug修复（4项）
+   - **is_exhausted 逻辑修正**：`return self.exhausted or self.idx >= len(self.records)`（而非 and）
+   - **_load_next_chunk 改名**：改为 `_load_all`，语义更清晰（一次性加载，而非暗示多次调用）
+   - **main 返回值冗余**：删除 format_final_output 返回值使用，统计信息由 validate_final_data 提供
+   - **save_batch_cache_sorted 接口契约**：补充 Note 说明输入/输出类型
+
+86. **MODULE.md v2.77 (2026-05-26)** — 规范修正
+   - **新增约束 #14**：is_exhausted 逻辑用 or
+   - **新增约束 #26-#28**：方法名语义清晰、返回值避免冗余、函数接口契约说明
+   - **规范修正原因**：逻辑错误导致提前返回 False；方法名误导；返回值冗余；接口契约不清晰
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
