@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.82
+> 版本: v2.83
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 23:00 北京时间
+> 更新时间: 2026-05-26 23:30 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -50,7 +50,12 @@
 | 29 | vmrss 判断用 is not None | `if vmrss is not None` 而非 `if vmrss`（0 是 falsy） |
 | 31 | DataFrame 链式操作用 copy() | 避免 SettingWithCopyWarning，每次过滤后 .copy() |
 | 33 | 函数签名与调用一致 | 返回 None 则调用方不接收，返回 tuple 则调用方接收，避免返回值被丢弃 |
-| 35 | 缩进一致性检查 | 注释缩进与代码对齐，避免 IndentationError |
+| 36 | BatchStream 提供 __lt__ | 用于 heap 比较，防御性编程 |
+| 37 | pop_record 更新 exhausted | 弹出后立即更新状态，保持一致性 |
+| 38 | del 注释准确描述 | "减少引用计数"而非"释放内存"（真正释放依赖 GC） |
+| 39 | sort_values 后 copy() | 避免 CoW 风险，链式操作用 copy() |
+| 40 | del 释放顺序正确 | del data 后 del full，而非只 del full |
+| 41 | 未使用返回值用 _ 接收 | 明确表示不使用，避免混淆 |
 | 19 | 常量定义在 import 之后 | PEP 8 顺序：docstring → __future__ → 标准库 → 第三方 → 本地 → 常量 |
 | 20 | cleanup_batch_files 用 try/finally | 保证临时文件清理（无论成功或失败） |
 
@@ -812,6 +817,19 @@ data_fetchers/
    - **约束 #24 修正**：函数顶部初始化所有返回值变量（包括 records_count）
    - **新增约束 #35**：缩进一致性检查
    - **规范修正原因**：一次性加载大文件内存峰值；records_count 未初始化；缩进错误导致 SyntaxError
+
+97. **fetch_factor_cache.py v3.27 (2026-05-26)** — 代码改进（7项）
+   - **BatchStream.pop_record 更新 exhausted**：弹出后立即更新状态
+   - **BatchStream.__lt__ 添加**：用于 heap 比较的防御性编程
+   - **del 注释修正**：准确描述为"减少引用计数"而非"释放内存"
+   - **combined 增加 copy()**：sort_values 后避免 CoW 风险
+   - **del data 而非 del full**：释放内存顺序正确
+   - **main 用 _ 接收**：未使用返回值明确表示不使用
+   - **n_records 保留用于日志**：命名合理，格式化前的记录数
+
+98. **MODULE.md v2.83 (2026-05-26)** — 规范补充
+   - **新增约束 #36-#41**：BatchStream.__lt__、pop_record 更新 exhausted、del 注释准确、sort_values 后 copy()、del 释放顺序、未使用返回值用 _
+   - **规范补充原因**：heap 对象不可比较风险；状态不一致；注释误导；CoW 风险；内存释放顺序错误；未使用变量混淆
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
