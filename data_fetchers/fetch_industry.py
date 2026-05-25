@@ -4,7 +4,7 @@
 
 作者: 云舟
 日期: 2026-05-27
-版本: v1.3
+版本: v1.4
 
 功能: 获取申万行业分类数据并缓存
 数据源: akshare - 申万行业分类
@@ -13,6 +13,7 @@
 - v1.1 (2026-05-27): 优化 - 添加版本号常量、Dict→dict、iterrows→to_dict、__main__用logger
 - v1.2 (2026-05-27): Bug修复 - docstring Returns Dict→dict（5处）、mkdir用RESULT_DIR、meta添加version字段
 - v1.3 (2026-05-27): Bug修复 - 文档头版本号同步、第355行Dict→dict、异常日志加类型名、Counter顶部导入、原子写入异常处理
+- v1.4 (2026-05-27): Bug修复 - SW_INDUSTRY_CODE_MAP添加近似映射注释+TODO、原子写入捕获所有异常+日志位置修正、全局缓存线程安全（DCL双重检查）
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -22,12 +23,13 @@
 
 import json
 import logging
+import threading
 from pathlib import Path
 from datetime import datetime
 from collections import Counter
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = '1.3'
+_OUTPUT_VERSION = '1.4'
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +43,12 @@ INDUSTRY_CACHE_PATH = RESULT_DIR / 'stock_industry.json'
 
 
 # 申万2021版行业代码映射（一级代码 -> 行业名称）
-# 基于实际股票验证建立
-SW_INDUSTRY_CODE_MAP = {
+# 注意：此映射为近似映射，用于因子分析中的行业分散约束
+# - 多个二级行业代码映射到同一一级行业（如 21/22 → 基化工）
+# - 未完全覆盖所有申万二级行业代码
+# TODO: 核对申万2021官方行业分类标准，补充缺失代码，修正映射关系
+# 参考: https://www.swsindex.com/hsi/IndexList.aspx
+SW_INDUSTRY_CODE_MAP: dict[str, str] = {
     '11': '农林牧渔',
     '21': '基础化工',
     '22': '基础化工',
@@ -219,10 +225,12 @@ def refresh_industry_cache() -> dict:
         with open(temp_path, 'w', encoding='utf-8') as f:
             json.dump(cache_data, f, ensure_ascii=False, indent=2)
         temp_path.rename(INDUSTRY_CACHE_PATH)
-    except OSError as e:
+        # rename 成功后才打印日志
+        logger.info(f"[行业数据] 缓存已更新: {INDUSTRY_CACHE_PATH} (v{_OUTPUT_VERSION})")
+    except Exception as e:
+        # 捕获所有异常（包括 OSError 子类和其他如 RuntimeError）
         temp_path.unlink(missing_ok=True)
         raise RuntimeError(f"缓存写入失败 [{type(e).__name__}]: {e}") from e
-    logger.info(f"[行业数据] 缓存已更新: {INDUSTRY_CACHE_PATH} (v{_OUTPUT_VERSION})")
     
     return industry_map
 
@@ -318,19 +326,24 @@ def infer_industry_from_name(name: str) -> str:
     return '其他'
 
 
-# 模块级缓存
+# 模块级缓存（线程安全：使用 threading.Lock）
+import threading
 _industry_cache = None
+_cache_lock = threading.Lock()
 
 def get_industry_map() -> dict:
     """
-    获取行业映射（带模块级缓存）
+    获取行业映射（带模块级缓存，线程安全）
     
     Returns:
         dict: {股票代码: {name, industry, industry_code}}
     """
     global _industry_cache
     if _industry_cache is None:
-        _industry_cache = load_stock_industry()
+        with _cache_lock:
+            # 双重检查：锁内再次判断，避免重复加载
+            if _industry_cache is None:
+                _industry_cache = load_stock_industry()
     return _industry_cache
 
 
