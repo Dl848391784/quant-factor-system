@@ -27,6 +27,7 @@
 - v1.14 (2026-05-25): Bug修复（除零保护统一使用_calc_pct模块级函数、_EXTENDED_FACTOR_COLS常量替代硬编码切片、docstring补充空数据异常声明、turnover_missing显式int转换）
 - v1.15 (2026-05-25): Bug修复（docstring移除JSONDecodeError声明、temp_path.unlink改用missing_ok=True消除TOCTOU竞争窗口）
 - v1.16 (2026-05-25): 代码结构优化（_BASE_COLS+_OUTPUT_COLS常量统一output_cols引用关系、__main__块移除sys重复导入、_calc_pct函数语义修正为通用百分比计算）
+- v1.17 (2026-05-25): Bug修复（output_path父目录不存在时创建、dates字段从output_df取数据来源更清晰、docstring示例值改为范围说明）
 
 作者: 云瑶
 """
@@ -191,9 +192,8 @@ def generate_all_factors(
         >>> metadata = generate_all_factors()
         >>> metadata['factor_columns']
         ['bollinger_pb', 'kdj_j', 'turnover_surge']
-        >>> metadata['elapsed_seconds']
-        120.5
-    """
+        >>> metadata['elapsed_seconds']  # 实际耗时，单位秒（范围：0.0 ~ 数百秒，取决于数据量）
+        """
     start_time = datetime.now()
     logger = get_module_logger(logger)
     
@@ -330,12 +330,15 @@ def generate_all_factors(
     logger.info("Step 7: 保存输出...")
     
     # dates 字段：字符串排序对 YYYY-MM-DD 格式正确（字典序与日期序一致）
+    # 从 output_df 取 dates，数据来源更清晰
     output_data = {
-        'dates': sorted(factor_df['date'].unique().tolist()),
+        'dates': sorted(output_df['date'].unique().tolist()),
         'data': output_df.to_dict('records')
     }
     
     # 使用临时文件 + os.replace 原子写入（遵循 PROJECT.md 文件写入规范）
+    # 确保父目录存在（避免 FileNotFoundError）
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = output_path.parent / (output_path.name + '.tmp')
     try:
         with gzip.open(temp_path, 'wt') as f:

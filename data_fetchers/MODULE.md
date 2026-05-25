@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.49
+> 版本: v2.50
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-25 18:00 北京时间
+> 更新时间: 2026-05-25 19:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -502,6 +502,16 @@ data_fetchers/
    - **常量引用关系规范**：相关常量应建立引用关系，避免各自硬编码导致维护遗漏
    - **条件块导入规范**：顶部条件块已导入的模块，__main__ 块无需重复导入
 
+33. **factor_generator.py v1.17 (2026-05-25)** — Bug修复 + 文档优化
+   - **父目录创建**：`output_path.parent.mkdir(parents=True, exist_ok=True)`（避免 FileNotFoundError）
+   - **dates 字段来源**：从 `output_df['date']` 取（数据来源更清晰）
+   - **docstring 示例值**：改为范围说明（`# 实际耗时，单位秒（范围：0.0 ~ 数百秒，取决于数据量）`）
+   - **修复原因**：代码 bug（目录不存在风险）+ 文档问题（示例值过于具体）
+
+34. **MODULE.md v2.50 (2026-05-25)** — 规范补充
+   - **输出目录创建规范**：写入前确保父目录存在，`mkdir(parents=True, exist_ok=True)`
+   - **docstring 示例规范**：避免过于具体的示例值，改为范围说明或注释
+
 ---
 
 data_fetchers 模块负责：
@@ -978,6 +988,57 @@ if __name__ == '__main__':
 - 条件块导入的模块在同一执行路径内可见
 - 无需在 __main__ 块重复导入
 - 减少冗余代码
+
+### 输出目录创建规范（2026-05-25 新增）
+
+**问题背景：**
+- 输出文件父目录可能不存在
+- 直接写入会导致 FileNotFoundError
+- 需在写入前确保目录存在
+
+**正确用法：**
+```python
+# ✅ 正确：写入前确保父目录存在
+output_path.parent.mkdir(parents=True, exist_ok=True)
+temp_path = output_path.parent / (output_path.name + '.tmp')
+
+# ❌ 错误：未创建父目录，可能导致 FileNotFoundError
+temp_path = output_path.parent / (output_path.name + '.tmp')
+with open(temp_path, 'w') as f:  # 父目录不存在时报错
+    json.dump(data, f)
+```
+
+**参数说明：**
+- `parents=True`：创建所有必要的父目录
+- `exist_ok=True`：目录已存在时不报错
+
+**适用场景：**
+- 文件写入前
+- 临时文件创建前
+- 任何需要确保目录存在的场景
+
+### docstring 示例规范（2026-05-25 新增）
+
+**问题背景：**
+- 过于具体的示例值（如 `120.5`）可能误导用户
+- 实际运行值可能与示例差距悬殊（单元测试耗时 < 1ms）
+- docstring 应反映真实场景而非假设值
+
+**正确用法：**
+```python
+# ✅ 正确：范围说明或注释
+>>> metadata['elapsed_seconds']  # 实际耗时，单位秒（范围：0.0 ~ 数百秒，取决于数据量）
+
+# ❌ 错误：过于具体的示例值
+>>> metadata['elapsed_seconds']
+120.5  # 单元测试可能耗时 < 1ms，差距悬殊
+```
+
+**原则：**
+- 示例值应反映真实场景
+- 避免过于具体的假设值
+- 改为范围说明或注释
+- 适用于不确定的值（耗时、数据量等）
 
 ### paths.py 使用规范
 
