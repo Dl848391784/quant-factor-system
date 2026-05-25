@@ -22,10 +22,14 @@
 - v3.11 (2026-05-26): main 函数返回类型注解（-> None）、版本号同步（3.6 → 3.10）
 - v3.12 (2026-05-26): Bug修复 - format_final_output 返回值（del后保存记录数）、n_way_merge_deduplicate 去重逻辑（使用batch_idx而非stream_idx）
 - v3.13 (2026-05-26): Bug修复 - 冗余导入删除、未使用变量删除、hasattr无效检查改为列存在验证、format_final_output内存峰值改为分阶段加载
+- v3.14 (2026-05-26): Bug修复 - validate_final_data增加数据有效性验证（RSI非空比例>=80%）、peek_key检查exhausted、get_memory_usage_mb Windows兜底、main docstring删除冗余Returns、version字段提取为_OUTPUT_VERSION常量
 
 作者: 云舟
 日期: 2026-04-04
 """
+
+# 输出文件版本号（与模块版本一致）
+_OUTPUT_VERSION = '3.14'
 
 # 标准库导入（PEP 8 规范：按字母顺序分组）
 import gc
@@ -75,11 +79,12 @@ def get_memory_usage_mb() -> float:
     
     Returns:
         float: RSS内存大小（MB），Linux下从/proc/self/status读取，
-               其他系统使用resource.getrusage()
+               其他系统使用resource.getrusage()，Windows返回0.0
     
     Note:
         - Linux: 读取VmRSS字段（实际物理内存使用）
-        - 其他系统: 使用ru_maxrss（最大RSS值，可能不准确）
+        - macOS/Unix: 使用ru_maxrss（最大RSS值，可能不准确）
+        - Windows: 返回0.0（不支持）
     """
     try:
         with open('/proc/self/status', 'r') as f:
@@ -88,8 +93,11 @@ def get_memory_usage_mb() -> float:
                     return int(line.split()[1]) / 1024  # kB -> MB
     except Exception:
         pass
-    import resource
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    try:
+        import resource
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    except Exception:
+        return 0.0  # Windows 或其他不支持的环境
 
 
 def get_memory_info_str() -> str:
@@ -282,7 +290,7 @@ class BatchStream:
         Returns:
             tuple[str, str] | None: (date, asset) 或 None（已耗尽）
         """
-        if self.idx >= len(self.records):
+        if self.exhausted or self.idx >= len(self.records):
             return None
         rec = self.records[self.idx]
         return (rec['date'], rec['asset'])
@@ -636,7 +644,7 @@ def format_final_output(
         f.write(f'      "end": "{dates_list[-1]}"\n')
         f.write('    },\n')
         f.write(f'    "last_updated": "{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}",\n')
-        f.write('    "version": "3.4_with_ohlc",\n')
+        f.write(f'    "version": "{_OUTPUT_VERSION}",\n')
         f.write('    "fields": ["date", "asset", "open", "close", "high", "low", "rsi_6", "volume_ratio_5"]\n')
         f.write('  },\n')
         f.write('  "data": [\n')
@@ -678,7 +686,7 @@ def format_final_output(
         f.write(f'      "end": "{dates_list[-1]}"\n')
         f.write('    },\n')
         f.write(f'    "last_updated": "{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}",\n')
-        f.write('    "version": "3.4_with_ohlc",\n')
+        f.write(f'    "version": "{_OUTPUT_VERSION}",\n')
         f.write('    "fields": ["date", "asset", "forward_return_1d", "forward_return_3d", "forward_return_5d"],\n')
         f.write('    "note": "3日和5日收益最后几天会有NaN"\n')
         f.write('  },\n')
@@ -744,11 +752,25 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
     if rsi_vals:
         logger.info(f"  RSI(6)样本范围: [{min(rsi_vals):.2f}, {max(rsi_vals):.2f}]")
     
+    # 验证数据有效性：检查关键字段非空比例
+    valid_rsi_count = len(rsi_vals)
+    total_sample_count = len(sample)
+    rsi_valid_ratio = valid_rsi_count / total_sample_count if total_sample_count > 0 else 0.0
+    
     del data, sample
     gc.collect()
     
-    is_valid = n_days >= N_DAYS * 0.9
-    logger.info(f"  {'✓ 通过' if is_valid else '⚠ 交易日数不足'}")
+    # 综合验证：交易日数达标 + 关键字段非空比例 >= 80%
+    days_valid = n_days >= N_DAYS * 0.9
+    data_valid = rsi_valid_ratio >= 0.8
+    is_valid = days_valid and data_valid
+    
+    if not days_valid:
+        logger.info(f"  ⚠ 交易日数不足 ({n_days}/{N_DAYS})")
+    if not data_valid:
+        logger.info(f"  ⚠ 数据有效性不足 (RSI有效比例: {rsi_valid_ratio:.1%} < 80%)")
+    if is_valid:
+        logger.info(f"  ✓ 通过验证 (RSI有效比例: {rsi_valid_ratio:.1%})")
     
     return is_valid, n_days, n_assets, n_records
 
@@ -791,9 +813,6 @@ def main() -> None:
     5. 格式化输出最终文件
     6. 验证数据完整性
     7. 清理临时文件
-    
-    Returns:
-        None: 此函数执行流程，不返回值
     """
     # 初始化 logger（遵循 PROJECT.md 日志规范：输出到 logs 目录）
     log_dir = get_logs_dir()
@@ -894,7 +913,7 @@ def main() -> None:
     
     # 保存统计
     stats = {
-        'version': '3.4_with_ohlc',
+        'version': _OUTPUT_VERSION,
         'n_days': actual_days,
         'n_assets': actual_assets,
         'n_records': actual_records,
