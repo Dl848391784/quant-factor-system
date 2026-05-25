@@ -192,8 +192,7 @@
 factor_ic 模块负责计算各类因子的 IC（Information Coefficient）值，用于评估因子对未来收益的预测能力。
 
 **模块定位：**
-- 输入：来自 data_fetchers/result/factor_data_extended.json.gz（因子数据，遵循 PROJECT.md 跨模块数据路径规范）
-- 输入：来自 cache/factor_data/return_data.json.gz（收益数据）
+- 输入：来自 data_fetchers/result/factor_ic_data.json.gz（统一数据源，包含因子和收益数据）
 - 输出：IC 分析结果（factor_ic/result/）
 - 依赖：不自行拉取数据，只处理已缓存数据
 

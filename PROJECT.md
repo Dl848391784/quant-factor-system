@@ -77,7 +77,7 @@ factor_ic_analyzer/
 4. backtest 读取 cache → 分层回测 → 输出 result
 5. comprehensive_factor 读取 factor_ic result + cache → 加权计算综合因子 → 调用 backtest 分层回测
 
-### 跨模块数据路径规范（2026-05-26新增）
+### 跨模块数据路径规范（2026-05-26新增，2026-05-27更新）
 
 **各模块数据输出/输入路径：**
 
@@ -85,8 +85,15 @@ factor_ic_analyzer/
 |-----|---------|---------|----------------|
 | data_fetchers/fetch_factor_cache | cache/factor_data/ | factor_data.json.gz, return_data.json.gz | 基础数据源 |
 | data_fetchers/fetch_turnover | cache/factor_data/ | turnover_rate_data.json.gz | 基础数据源 |
-| data_fetchers/factor_generator | **data_fetchers/result/** | **factor_data_extended.json.gz** | **factor_ic.data_loader** |
+| data_fetchers/factor_generator | **data_fetchers/result/** | **factor_ic_data.json.gz** | **factor_ic.data_loader** |
 | factor_ic | factor_ic/result/ | ic_<因子名>_analysis_result.json | comprehensive_factor |
+
+**factor_ic_data.json.gz 数据结构（2026-05-27更新）：**
+- 行情数据：open, close, high, low
+- 基础因子：rsi_6, volume_ratio_5, turnover_rate
+- 扩展因子：bollinger_pb, kdj_j, turnover_surge
+- 收益数据：forward_return_1d, forward_return_3d, forward_return_5d（已合并）
+- 索引字段：date, asset
 
 **变更同步检查清单（强制）：**
 
@@ -109,6 +116,12 @@ factor_ic_analyzer/
 - 正确做法：先验证新数据文件包含哪些列，确认所有需要的数据都在新路径中
 - 案例：factor_data_extended.json.gz 已包含 turnover_rate，但修改时仍保留 additional_factor_files 的冗余设计
 - 原因：未先验证数据结构，直接做假设性设计
+
+**数据架构语义统一（2026-05-27新增）：**
+- factor_ic_data.json.gz = factor_ic 需要的统一数据源
+- 不区分"原始数据"与"处理后数据"，统一为 factor_ic 提供所需数据
+- close 等 OHLC 数据是原始行情，但 factor_ic 需要使用，因此也包含在内
+- 收益数据 forward_return_1d/3d/5d 也合并进来，避免多文件读取
 
 **模块边界规范（2026-05-23新增）：**
 
@@ -1000,6 +1013,7 @@ def cleanup_old_logs(logs_dir: Path, keep_days: int = 30):
 
 | 版本 | 日期 | 更新内容 |
 |------|------|---------|
+| v2.6 | 2026-05-27 | 重构数据架构：factor_data_extended → factor_ic_data（统一数据源语义）；合并收益数据到 factor_ic_data.json.gz；更新跨模块数据路径规范、数据结构说明、语义统一原则 |
 | v2.5 | 2026-05-26 | 新增"跨模块数据路径规范"：数据输出/输入路径表、变更同步检查清单、历史教训；同步更新数据流向描述 |
 | v2.4 | 2026-05-22 | 迁移 factor_ic 特定规范至 MODULE.md（公共模块强制复用、公共模块日志传递），新增文档层级规范 |
 | v2.3 | 2026-05-20 | 新增"日志规范"章节：框架选择（logging）、级别规范、路径规范、命名规范、格式规范、异常记录规范、使用姿势示例 |
@@ -1010,4 +1024,4 @@ def cleanup_old_logs(logs_dir: Path, keep_days: int = 30):
 
 ---
 
-*最后更新: 2026-05-26*
+*最后更新: 2026-05-27*

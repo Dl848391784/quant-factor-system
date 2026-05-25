@@ -95,16 +95,21 @@ _DEFAULT_RESULT_DIR = Path(__file__).parent / 'result'
 # 扩展因子列名（元组防止意外修改）
 _EXTENDED_FACTOR_COLS: tuple[str, ...] = ('bollinger_pb', 'kdj_j', 'turnover_surge')
 
-# 基础列名（元组防止意外修改）
-_BASE_COLS: tuple[str, ...] = ('date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5')
+# 收益数据列名（元组防止意外修改）
+_RETURN_COLS: tuple[str, ...] = ('forward_return_1d', 'forward_return_3d', 'forward_return_5d')
 
-# 输出列名（基础列 + 扩展因子，元组防止意外修改）
+# 基础列名（元组防止意外修改）
+# 包含：索引字段 + 行情数据 + 基础因子 + 换手率（从换手率数据合并）
+_BASE_COLS: tuple[str, ...] = ('date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5', 'turnover_rate')
+
+# 输出列名（基础列 + 扩展因子 + 收益数据，元组防止意外修改）
 # 结构说明：
-# _OUTPUT_COLS[0:2]  = date, asset（索引字段）
-# _OUTPUT_COLS[2:6]  = open, close, high, low（行情数据，非标准 OHLCV 顺序）
-# _OUTPUT_COLS[6:8]  = rsi_6, volume_ratio_5（基础因子，来自输入）
-# _OUTPUT_COLS[8:]   = bollinger_pb, kdj_j, turnover_surge（扩展因子，本次计算）
-_OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS
+# _OUTPUT_COLS[0:2]   = date, asset（索引字段）
+# _OUTPUT_COLS[2:6]   = open, close, high, low（行情数据）
+# _OUTPUT_COLS[6:9]   = rsi_6, volume_ratio_5, turnover_rate（基础因子，来自输入）
+# _OUTPUT_COLS[9:12]  = bollinger_pb, kdj_j, turnover_surge（扩展因子，本次计算）
+# _OUTPUT_COLS[12:]   = forward_return_1d, forward_return_3d, forward_return_5d（收益数据，从 return_data 合并）
+_OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS
 
 
 # ============================================================================
@@ -186,16 +191,18 @@ def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger
 def generate_all_factors(
     factor_data_path: Optional[Union[Path, str]] = None,
     turnover_data_path: Optional[Union[Path, str]] = None,
+    return_data_path: Optional[Union[Path, str]] = None,
     output_path: Optional[Union[Path, str]] = None,
     logger: Optional[logging.Logger] = None
 ) -> Dict[str, Any]:
     """
-    生成所有因子数据
+    生成所有因子数据（含收益数据）
     
     Args:
         factor_data_path: 基础因子数据路径（默认 factor_data.json.gz）
         turnover_data_path: 换手率数据路径（默认 turnover_rate_data.json.gz）
-        output_path: 输出路径（默认 factor_data_extended.json.gz）
+        return_data_path: 收益数据路径（默认 return_data.json.gz）
+        output_path: 输出路径（默认 factor_ic_data.json.gz）
         logger: 调用方传入的 logger（可选）
         
     Returns:
@@ -208,7 +215,7 @@ def generate_all_factors(
         RuntimeError: 文件系统错误（磁盘/权限/IO）或未知保存错误
         
     Note:
-        - 输出到 cache/factor_data/factor_data_extended.json.gz
+        - 输出到 data_fetchers/result/factor_ic_data.json.gz
         - 复用 factor_ic 计算函数（遵循强制复用规范）
         - 公共模块接收 logger 参数，日志可追溯调用方
         - 运行耗时统计方便性能分析
@@ -223,14 +230,15 @@ def generate_all_factors(
         ['bollinger_pb', 'kdj_j', 'turnover_surge']
         >>> isinstance(metadata['elapsed_seconds'], float)
         True
-        """
+    """
     start_time = datetime.now()
     logger = get_module_logger(logger)
     
     # 默认路径
     factor_data_path = Path(factor_data_path) if factor_data_path else _DEFAULT_CACHE_DIR / 'factor_data.json.gz'
     turnover_data_path = Path(turnover_data_path) if turnover_data_path else _DEFAULT_CACHE_DIR / 'turnover_rate_data.json.gz'
-    output_path = Path(output_path) if output_path else _DEFAULT_RESULT_DIR / 'factor_data_extended.json.gz'
+    return_data_path = Path(return_data_path) if return_data_path else _DEFAULT_CACHE_DIR / 'return_data.json.gz'
+    output_path = Path(output_path) if output_path else _DEFAULT_RESULT_DIR / 'factor_ic_data.json.gz'
     
     logger.info("=" * 40)
     logger.info("统一因子生成模块")
@@ -321,6 +329,57 @@ def generate_all_factors(
     
     logger.info("  合并后记录数: %d", len(factor_df))
     
+    # ========== Step 2b: 加载收益数据 ==========
+    logger.info("Step 2b: 加载收益数据...")
+    
+    try:
+        with gzip.open(return_data_path, 'rt') as f:
+            return_data = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"收益数据文件不存在: {return_data_path}")
+    except gzip.BadGzipFile as e:
+        raise ValueError(f"gzip 文件损坏: {return_data_path}") from e
+    except json.JSONDecodeError as e:
+        # JSONDecodeError 内存优化：提取关键信息，避免 e.doc 内存翻倍
+        logger.error(
+            "JSON 解析失败\n"
+            "文件路径: %s\n"
+            "错误位置: 行 %d, 列 %d\n"
+            "错误信息: %s",
+            return_data_path, e.lineno, e.colno, e.msg
+        )
+        raise ValueError(f"JSON解析失败: {return_data_path}, 位置 {e.pos}") from e
+    
+    # 数据验证：检查 'data' 字段存在
+    if 'data' not in return_data:
+        raise ValueError(f"收益数据缺少 'data' 字段: {return_data_path}")
+    
+    return_df = pd.DataFrame(return_data['data'])
+    return_df['date'] = pd.to_datetime(return_df['date'], format='mixed')
+    
+    # 显式释放 return_data 内存（JSON 加载的大对象）
+    del return_data
+    
+    logger.info("  收益数据记录数: %d", len(return_df))
+    
+    # 合并收益数据
+    factor_df = factor_df.merge(
+        return_df[['date', 'asset'] + list(_RETURN_COLS)],
+        on=['date', 'asset'],
+        how='left'
+    )
+    
+    # 显式释放 return_df 内存（merge 完成后不再需要）
+    del return_df
+    
+    # 检查收益数据缺失情况
+    for col in _RETURN_COLS:
+        return_missing = int(factor_df[col].isna().sum())
+        if return_missing > 0:
+            logger.warning("  %s 缺失记录数: %d (%.2f%%)", col, return_missing, _calc_pct(return_missing, len(factor_df)))
+    
+    logger.info("  合并收益后记录数: %d", len(factor_df))
+    
     # ========== Step 3: 计算 bollinger_pb ==========
     logger.info("Step 3: 计算布林带 %B 因子...")
     
@@ -345,8 +404,8 @@ def generate_all_factors(
     surge_valid = int(factor_df['turnover_surge'].notna().sum())
     logger.info("  有效 turnover_surge: %d (%.2f%%)", surge_valid, _calc_pct(surge_valid, len(factor_df)))
     
-    # ========== Step 6: 格式化输出 ==========
-    logger.info("Step 6: 格式化输出...")
+    # ========== Step 7: 格式化输出 ==========
+    logger.info("Step 7: 格式化输出...")
     
     factor_df['date'] = factor_df['date'].dt.strftime('%Y-%m-%d')
     
@@ -363,8 +422,8 @@ def generate_all_factors(
     # 显式释放 factor_df 内存（可能包含中间列，比 output_df 更多）
     del factor_df
     
-    # ========== Step 7: 保存输出 ==========
-    logger.info("Step 7: 保存输出...")
+    # ========== Step 8: 保存输出 ==========
+    logger.info("Step 8: 保存输出...")
     
     # dates 字段：字符串排序对 YYYY-MM-DD 格式正确（字典序与日期序一致）
     # 从 output_df 取 dates，数据来源更清晰
@@ -401,7 +460,7 @@ def generate_all_factors(
     end_time = datetime.now()
     elapsed_seconds = (end_time - start_time).total_seconds()
     
-    # ========== Step 8: 返回元数据 ==========
+    # ========== Step 9: 返回元数据 ==========
     # metadata 字段说明：
     # - generated_at: 生成时间（格式 YYYY-MM-DD HH:MM:SS）
     # - elapsed_seconds: 运行耗时（秒，精度 .2f）
@@ -409,6 +468,7 @@ def generate_all_factors(
     # - valid_records: 各因子有效记录数（绝对值）
     # - valid_records_percent: 各因子有效记录百分比（与日志输出一致，便于质量评估）
     # - factor_columns: 扩展因子列名（不含基础列和基础因子）
+    # - return_columns: 收益数据列名
     # - input_sources: 输入数据源路径
     # - output_path: 输出文件路径
     total_records = len(output_df)
@@ -428,9 +488,11 @@ def generate_all_factors(
             'turnover_surge': _calc_pct(surge_valid, total_records),
         },
         'factor_columns': list(_EXTENDED_FACTOR_COLS),  # 扩展因子列（返回副本，防止外部修改）
+        'return_columns': list(_RETURN_COLS),  # 收益数据列（返回副本，防止外部修改）
         'input_sources': {
             'factor_data': str(factor_data_path),
-            'turnover_data': str(turnover_data_path)
+            'turnover_data': str(turnover_data_path),
+            'return_data': str(return_data_path)
         },
         'output_path': str(output_path)
     }
@@ -453,9 +515,10 @@ def main() -> int:
     """CLI 主入口"""
     import argparse
     
-    parser = argparse.ArgumentParser(description='统一因子生成模块')
+    parser = argparse.ArgumentParser(description='统一因子生成模块（含收益数据）')
     parser.add_argument('--factor_data', type=str, default=None, help='基础因子数据路径')
     parser.add_argument('--turnover_data', type=str, default=None, help='换手率数据路径')
+    parser.add_argument('--return_data', type=str, default=None, help='收益数据路径')
     parser.add_argument('--output', type=str, default=None, help='输出路径')
     parser.add_argument('--quiet', action='store_true', help='静默模式（只输出 ERROR 级别日志）')
     
@@ -468,12 +531,14 @@ def main() -> int:
     # 参数路径转换
     factor_data_path = Path(args.factor_data) if args.factor_data else None
     turnover_data_path = Path(args.turnover_data) if args.turnover_data else None
+    return_data_path = Path(args.return_data) if args.return_data else None
     output_path = Path(args.output) if args.output else None
     
     try:
         metadata = generate_all_factors(
             factor_data_path=factor_data_path,
             turnover_data_path=turnover_data_path,
+            return_data_path=return_data_path,
             output_path=output_path,
             logger=logger
         )

@@ -30,11 +30,13 @@ from .logger_config import get_logger
 # ============================================================================
 # 默认路径配置（遵循 PROJECT.md 跨模块数据路径规范）
 # ============================================================================
-# 因子数据路径：来自 data_fetchers/result/factor_data_extended.json.gz（包含所有因子）
+# 因子数据路径：来自 data_fetchers/result/factor_ic_data.json.gz
+# 包含：行情数据 + 基础因子 + 扩展因子 + 收益数据（forward_return_1d/3d/5d）
 DEFAULT_FACTOR_DATA_DIR = Path(__file__).parent.parent.parent / 'data_fetchers' / 'result'
-DEFAULT_FACTOR_CACHE = DEFAULT_FACTOR_DATA_DIR / 'factor_data_extended.json.gz'
+DEFAULT_FACTOR_CACHE = DEFAULT_FACTOR_DATA_DIR / 'factor_ic_data.json.gz'
 
-# 收益数据路径：来自 cache/factor_data/return_data.json.gz
+# 收益数据路径（保留向后兼容，已合并到 factor_ic_data.json.gz）
+# 用于增量场景或单独加载收益数据
 DEFAULT_RETURN_CACHE_DIR = Path(__file__).parent.parent.parent / 'cache' / 'factor_data'
 DEFAULT_RETURN_CACHE = DEFAULT_RETURN_CACHE_DIR / 'return_data.json.gz'
 
