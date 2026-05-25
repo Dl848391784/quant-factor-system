@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.67
+> 版本: v2.68
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 11:00 北京时间
+> 更新时间: 2026-05-26 15:30 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -16,9 +16,9 @@
 - 字段值不可为 None
 - 结果输出到 result 目录
 
-**本模块特定约束（8条）：**
+**本模块特定约束（9条）：**
 
-| # | 约束 | 说明 |
+|| # | 约束 | 说明 |
 |---|------|------|
 | 1 | 脚本命名：`fetch_<数据源>.py` | 如 fetch_turnover.py、fetch_main_inflow.py |
 | 2 | 输出到 result 目录 | 与 factor_ic 等模块保持一致（cache 为数据源原始缓存） |
@@ -28,6 +28,7 @@
 | 6 | 函数入口 DataFrame 先 copy() | 防止副作用 |
 | 7 | 日志输出到 logs 目录 | 不散落在项目根目录 |
 | 8 | 流程文档配套 | docs/<脚本名>_flow.md |
+| 9 | N-way merge 去重使用 batch_idx | heap 元素为 `(key, batch_idx, stream)`，而非 `(key, stream_idx, stream)` |
 
 ### 关键函数签名
 
@@ -631,6 +632,17 @@ data_fetchers/
    - **约束 #2 修正**：从"输出到 cache 目录"改为"输出到 result 目录"
    - **语义明确**：cache 为数据源原始缓存，result 为处理后的输出结果
    - **修复原因**：docstring 描述与实际行为不符 + 错误信息不完整
+
+67. **fetch_factor_cache.py v3.12 (2026-05-26)** — Bug修复
+   - **format_final_output 返回值修复**：在 `del factor_records` 前保存记录数 `n_records = len(factor_records)`
+   - **n_way_merge_deduplicate 去重逻辑修复**：heap 元素使用 `batch_idx`（原始批次号）而非 `stream_idx`（列表索引）
+   - **BatchStream 类补充属性**：新增 `batch_idx` 和 `data_type` 属性，用于去重优先级判断
+   - **修复原因**：代码 bug（del 后变量名不存在、去重优先级错误）
+
+68. **MODULE.md v2.68 (2026-05-26)** — 规范补充
+   - **新增约束 #9**：N-way merge 去重使用 batch_idx
+   - **约束内容**：heap 元素为 `(key, batch_idx, stream)`，而非 `(key, stream_idx, stream)`
+   - **规范补充原因**：原有实现使用 stream_idx 导致去重优先级错误（批次缺失时索引与批次号不对应）
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）

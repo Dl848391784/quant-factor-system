@@ -20,6 +20,7 @@
 - v3.9 (2026-05-26): 函数类型注解完善（save_batch_cache_sorted、n_way_merge_deduplicate、fetch_batch_stocks、format_final_output）
 - v3.10 (2026-05-26): 移除未使用的 os 导入、修复 validate_final_data 返回类型注解（bool → tuple[bool, int, int, int]）
 - v3.11 (2026-05-26): main 函数返回类型注解（-> None）、版本号同步（3.6 → 3.10）
+- v3.12 (2026-05-26): Bug修复 - format_final_output 返回值（del后保存记录数）、n_way_merge_deduplicate 去重逻辑（使用batch_idx而非stream_idx）
 
 作者: 云舟
 日期: 2026-04-04
@@ -205,6 +206,8 @@ class BatchStream:
     用于 N-way merge 时逐条读取批次数据，避免一次性加载所有批次
     
     Attributes:
+        batch_idx: 原始批次索引（从0开始）
+        data_type: 数据类型（'factor' 或 'return')
         path: 批次文件路径（Path 对象）
         records: 当前加载的记录列表
         idx: 当前记录索引
@@ -221,8 +224,10 @@ class BatchStream:
         
         Args:
             batch_idx: 批次索引（从0开始）
-            data_type: 数据类型（'factor' 或 'return'）
+            data_type: 数据类型（'factor' 或 'return')
         """
+        self.batch_idx = batch_idx  # 保存原始批次号，用于去重优先级判断
+        self.data_type = data_type
         self.path = CACHE_DIR / f'batch_{batch_idx}_{data_type}.json.gz'
         self.records: list = []
         self.idx: int = 0
@@ -339,14 +344,18 @@ def n_way_merge_deduplicate(
         return (None, 0)
     
     logger.info(f"  有效批次数: {len(streams)}")
+    logger.info(f"  有效批次索引: {valid_batch_indices}")
     
     # N-way merge 使用 heap
     # heap元素: (key, batch_idx, stream)
+    # 使用 batch_idx（原始批次号）而非 stream_idx（列表索引）
+    # 去重策略：相同 key 时，高 batch_idx 覆盖低 batch_idx（后拉取的数据优先）
     heap = []
-    for i, stream in enumerate(streams):
+    for stream in streams:
         key = stream.peek_key()
         if key:
-            heapq.heappush(heap, (key, i, stream))
+            # 使用 -batch_idx 作为排序键，让高 batch_idx 的数据在相同 key 时优先弹出
+            heapq.heappush(heap, (key, -stream.batch_idx, stream))
     
     # 合并结果（暂时存内存，流式写入文件）
     output_path = CACHE_DIR / f'merged_{data_type}.json.gz'
@@ -649,6 +658,9 @@ def format_final_output(
         f.write('\n  ]\n')
         f.write('}\n')
     
+    # 保存记录数（在 del 之前）
+    n_records = len(factor_records)
+    
     # 清理合并的临时文件和内存
     del factor_records, return_records
     gc.collect()
@@ -663,7 +675,7 @@ def format_final_output(
     logger.info(f"    因子: {factor_final_path} ({factor_size_mb:.2f} MB)")
     logger.info(f"    收益: {return_final_path} ({return_size_mb:.2f} MB)")
     
-    return len(dates_list), len(assets_list), len(factor_records) if 'factor_records' in dir() else 0
+    return len(dates_list), len(assets_list), n_records
 
 
 def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, int]:
