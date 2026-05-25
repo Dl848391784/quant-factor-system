@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.47
+> 版本: v2.48
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-25 16:00 北京时间
+> 更新时间: 2026-05-25 17:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -483,6 +483,15 @@ data_fetchers/
    - **除零保护规范**：模块级私有函数 `_calc_pct` 模式，避免函数内嵌套定义
    - **硬编码常量规范**：扩展因子列应使用常量定义，避免切片索引脆弱性
 
+29. **factor_generator.py v1.15 (2026-05-25)** — Bug修复 + 文档修正
+   - **docstring 修正**：移除 `json.JSONDecodeError` 声明（已内部捕获转换为 ValueError），补充说明调用方不会收到 JSONDecodeError
+   - **TOCTOU 竞争窗口修复**：`temp_path.unlink(missing_ok=True)` 替代 `exists() + unlink()`，消除 Time-of-check-to-time-of-use 竞争
+   - **修复原因**：代码 bug（文档不准确、并发安全风险）
+
+30. **MODULE.md v2.48 (2026-05-25)** — 规范补充
+   - **临时文件清理规范**：`unlink(missing_ok=True)` 原子操作，避免 TOCTOU 竞争窗口
+   - **docstring Raises 规范**：声明异常应与实际抛出一致，已捕获转换的异常不应声明
+
 ---
 
 data_fetchers 模块负责：
@@ -841,6 +850,64 @@ metadata['factor_columns'] = output_cols[8:]  # 依赖顺序
 - 扩展因子列名
 - 固定字段列表
 - 任何不应依赖顺序的常量列表
+
+### 临时文件清理规范（2026-05-25 新增）
+
+**问题背景：**
+- `exists() + unlink()` 存在 TOCTOU（Time-of-check-to-time-of-use）竞争窗口
+- 检查文件存在与删除文件之间存在时间差，并发场景可能产生 FileNotFoundError
+
+**正确用法：**
+```python
+# ✅ 正确：原子操作，消除 TOCTOU 竞争窗口
+temp_path.unlink(missing_ok=True)
+
+# ❌ 错误：TOCTOU 竞争窗口
+if temp_path.exists():
+    temp_path.unlink()  # 竞争窗口：exists() 后文件可能被其他进程删除
+```
+
+**适用场景：**
+- 异常处理中的临时文件清理
+- 原子写入失败后的清理
+- 任何需要安全删除可能不存在文件的场景
+
+**Python 版本要求：**
+- Python 3.8+ 支持 `missing_ok=True`
+
+### docstring Raises 规范（2026-05-25 新增）
+
+**问题背景：**
+- Raises 声明的异常应与实际抛出一致
+- 已内部捕获转换的异常不应声明（调用方永远不会收到）
+
+**正确用法：**
+```python
+# ✅ 正确：只声明调用方可能收到的异常
+def generate_all_factors(...):
+    """
+    Raises:
+        FileNotFoundError: 输入数据文件不存在
+        ValueError: JSON 解析失败（已内部捕获转换）
+        RuntimeError: 文件系统错误
+    """
+    try:
+        data = json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(...) from e  # 转换，调用方收到 ValueError
+
+# ❌ 错误：声明已转换的异常
+def generate_all_factors(...):
+    """
+    Raises:
+        json.JSONDecodeError: JSON 解析失败  # 调用方永远不会收到
+    """
+```
+
+**原则：**
+- Raises 声明应与实际抛出一致
+- 已捕获转换的异常不应声明
+- 补充 Note 说明内部转换逻辑
 
 ### paths.py 使用规范
 

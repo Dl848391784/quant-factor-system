@@ -25,6 +25,7 @@
 - v1.12 (2026-05-25): Bug修复（output_cols注释修正OHLCV顺序、dates排序补充注释、total_records除零保护、版本历史移除硬编码行号、argparse版本描述修正、logger换行符修复）
 - v1.13 (2026-05-25): Bug修复（缩进错误修正Step8注释、numpy.int64类型转换JSON兼容、__main__块改为CLI入口调用main()、测试代码移至test_cases/test_factor_generator.py）
 - v1.14 (2026-05-25): Bug修复（除零保护统一使用_calc_pct模块级函数、_EXTENDED_FACTOR_COLS常量替代硬编码切片、docstring补充空数据异常声明、turnover_missing显式int转换）
+- v1.15 (2026-05-25): Bug修复（docstring移除JSONDecodeError声明、temp_path.unlink改用missing_ok=True消除TOCTOU竞争窗口）
 
 作者: 云瑶
 """
@@ -162,8 +163,7 @@ def generate_all_factors(
         
     Raises:
         FileNotFoundError: 输入数据文件不存在
-        json.JSONDecodeError: JSON 解析失败
-        ValueError: 数据格式不正确（缺少 'data' 字段）、JSON 解析失败位置信息、gzip 文件损坏、或输入数据为空
+        ValueError: 数据格式不正确（缺少 'data' 字段）、JSON 解析失败、gzip 文件损坏、或输入数据为空
         KeyError: 必需字段不存在
         RuntimeError: 文件系统错误（磁盘/权限/IO）或未知保存错误
         
@@ -173,6 +173,7 @@ def generate_all_factors(
         - 公共模块接收 logger 参数，日志可追溯调用方
         - 运行耗时统计方便性能分析
         - 空数据场景：所有百分比计算均有除零保护，返回 0.0
+        - JSONDecodeError 已内部捕获并转换为 ValueError，调用方不会收到 JSONDecodeError
         
     Example:
         >>> from data_fetchers.factor_generator import generate_all_factors
@@ -334,13 +335,11 @@ def generate_all_factors(
         os.replace(temp_path, output_path)
     except OSError as e:
         # 文件系统错误（磁盘/权限/IO，PermissionError 是 OSError 子类）
-        if temp_path.exists():
-            temp_path.unlink()
+        temp_path.unlink(missing_ok=True)  # 原子操作，消除 TOCTOU 竞争窗口
         raise RuntimeError(f"文件系统错误: {output_path}, {type(e).__name__}: {e}") from e
     except Exception as e:
         # 未知错误（兜底）
-        if temp_path.exists():
-            temp_path.unlink()
+        temp_path.unlink(missing_ok=True)  # 原子操作，消除 TOCTOU 竞争窗口
         raise RuntimeError(f"未知错误保存失败: {output_path}") from e
     
     logger.info("  输出路径: %s", output_path)
