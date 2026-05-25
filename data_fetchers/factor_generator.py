@@ -24,6 +24,7 @@
 - v1.11 (2026-05-25): Bug修复（条件导入合并到顶部、__main__循环导入修复、PermissionError重复捕获简化、temp_path后缀处理修复）
 - v1.12 (2026-05-25): Bug修复（output_cols注释修正OHLCV顺序、dates排序补充注释、total_records除零保护、版本历史移除硬编码行号、argparse版本描述修正、logger换行符修复）
 - v1.13 (2026-05-25): Bug修复（缩进错误修正Step8注释、numpy.int64类型转换JSON兼容、__main__块改为CLI入口调用main()、测试代码移至test_cases/test_factor_generator.py）
+- v1.14 (2026-05-25): Bug修复（除零保护统一使用_calc_pct模块级函数、_EXTENDED_FACTOR_COLS常量替代硬编码切片、docstring补充空数据异常声明、turnover_missing显式int转换）
 
 作者: 云瑶
 """
@@ -74,6 +75,29 @@ __all__ = [
 # ============================================================================
 
 _DEFAULT_CACHE_DIR = Path(__file__).parent.parent / 'cache' / 'factor_data'
+
+# 扩展因子列名（硬编码替代，便于维护）
+_EXTENDED_FACTOR_COLS = ['bollinger_pb', 'kdj_j', 'turnover_surge']
+
+
+# ============================================================================
+# 模块级私有辅助函数
+# ============================================================================
+
+def _calc_pct(valid_count: int, total_count: int) -> float:
+    """
+    计算有效记录百分比（除零保护）
+    
+    Args:
+        valid_count: 有效记录数
+        total_count: 总记录数
+        
+    Returns:
+        float: 百分比（0.0-100.0），空数据时返回 0.0
+    """
+    if total_count <= 0:
+        return 0.0
+    return round(valid_count / total_count * 100, 2)
 
 
 # ============================================================================
@@ -139,7 +163,7 @@ def generate_all_factors(
     Raises:
         FileNotFoundError: 输入数据文件不存在
         json.JSONDecodeError: JSON 解析失败
-        ValueError: 数据格式不正确（缺少 'data' 字段）、JSON 解析失败位置信息、或 gzip 文件损坏
+        ValueError: 数据格式不正确（缺少 'data' 字段）、JSON 解析失败位置信息、gzip 文件损坏、或输入数据为空
         KeyError: 必需字段不存在
         RuntimeError: 文件系统错误（磁盘/权限/IO）或未知保存错误
         
@@ -148,6 +172,7 @@ def generate_all_factors(
         - 复用 factor_ic 计算函数（遵循强制复用规范）
         - 公共模块接收 logger 参数，日志可追溯调用方
         - 运行耗时统计方便性能分析
+        - 空数据场景：所有百分比计算均有除零保护，返回 0.0
         
     Example:
         >>> from data_fetchers.factor_generator import generate_all_factors
@@ -239,9 +264,9 @@ def generate_all_factors(
     )
     
     # 检查换手率缺失情况
-    turnover_missing = factor_df['turnover_rate'].isna().sum()
+    turnover_missing = int(factor_df['turnover_rate'].isna().sum())
     if turnover_missing > 0:
-        logger.warning("  换手率缺失记录数: %d (%.2f%%)", turnover_missing, turnover_missing / len(factor_df) * 100)
+        logger.warning("  换手率缺失记录数: %d (%.2f%%)", turnover_missing, _calc_pct(turnover_missing, len(factor_df)))
     
     logger.info("  合并后记录数: %d", len(factor_df))
     
@@ -251,7 +276,7 @@ def generate_all_factors(
     factor_df = calculate_bollinger_pb(factor_df)
     
     bollinger_valid = int(factor_df['bollinger_pb'].notna().sum())
-    logger.info("  有效 bollinger_pb: %d (%.2f%%)", bollinger_valid, bollinger_valid / len(factor_df) * 100)
+    logger.info("  有效 bollinger_pb: %d (%.2f%%)", bollinger_valid, _calc_pct(bollinger_valid, len(factor_df)))
     
     # ========== Step 4: 计算 kdj_j ==========
     logger.info("Step 4: 计算 KDJ_J 因子...")
@@ -259,7 +284,7 @@ def generate_all_factors(
     factor_df = calculate_kdj_j(factor_df)
     
     kdj_valid = int(factor_df['kdj_j'].notna().sum())
-    logger.info("  有效 kdj_j: %d (%.2f%%)", kdj_valid, kdj_valid / len(factor_df) * 100)
+    logger.info("  有效 kdj_j: %d (%.2f%%)", kdj_valid, _calc_pct(kdj_valid, len(factor_df)))
     
     # ========== Step 5: 计算 turnover_surge ==========
     logger.info("Step 5: 计算换手率突增因子...")
@@ -267,7 +292,7 @@ def generate_all_factors(
     factor_df = calculate_turnover_surge(factor_df)
     
     surge_valid = int(factor_df['turnover_surge'].notna().sum())
-    logger.info("  有效 turnover_surge: %d (%.2f%%)", surge_valid, surge_valid / len(factor_df) * 100)
+    logger.info("  有效 turnover_surge: %d (%.2f%%)", surge_valid, _calc_pct(surge_valid, len(factor_df)))
     
     # ========== Step 6: 格式化输出 ==========
     logger.info("Step 6: 格式化输出...")
@@ -337,10 +362,6 @@ def generate_all_factors(
     # - output_path: 输出文件路径
     total_records = len(output_df)
     
-    # 除零保护：空数据时百分比返回 0.0
-    def calc_pct(valid_count):
-        return round(valid_count / total_records * 100, 2) if total_records > 0 else 0.0
-    
     metadata = {
         'generated_at': end_time.strftime('%Y-%m-%d %H:%M:%S'),
         'elapsed_seconds': round(elapsed_seconds, 2),
@@ -351,11 +372,11 @@ def generate_all_factors(
             'turnover_surge': surge_valid,
         },
         'valid_records_percent': {
-            'bollinger_pb': calc_pct(bollinger_valid),
-            'kdj_j': calc_pct(kdj_valid),
-            'turnover_surge': calc_pct(surge_valid),
+            'bollinger_pb': _calc_pct(bollinger_valid, total_records),
+            'kdj_j': _calc_pct(kdj_valid, total_records),
+            'turnover_surge': _calc_pct(surge_valid, total_records),
         },
-        'factor_columns': output_cols[8:],  # 扩展因子列（不含基础列和基础因子）
+        'factor_columns': _EXTENDED_FACTOR_COLS,  # 扩展因子列（硬编码常量）
         'input_sources': {
             'factor_data': str(factor_data_path),
             'turnover_data': str(turnover_data_path)

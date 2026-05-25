@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.46
+> 版本: v2.47
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-25 15:00 北京时间
+> 更新时间: 2026-05-25 16:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -472,6 +472,17 @@ data_fetchers/
    - **测试与 CLI 分离**：独立测试脚本，与 __main__ CLI 入口分离
    - **测试内容**：函数定义验证、get_module_logger 验证、generate_all_factors 验证、返回字段验证、因子列验证、有效记录数验证
 
+27. **factor_generator.py v1.14 (2026-05-25)** — Bug修复 + 代码结构优化
+   - **除零保护统一**：使用模块级私有函数 `_calc_pct`，替代函数内嵌套定义
+   - **硬编码常量**：新增 `_EXTENDED_FACTOR_COLS` 常量替代 `output_cols[8:]` 切片
+   - **docstring 补充**：Raises 补充空数据异常声明，Note 补充除零保护说明
+   - **turnover_missing 类型**：显式 `int()` 转换
+   - **修复原因**：代码 bug（除零风险未统一保护、硬编码切片脆弱、函数结构混乱）
+
+28. **MODULE.md v2.47 (2026-05-25)** — 规范补充
+   - **除零保护规范**：模块级私有函数 `_calc_pct` 模式，避免函数内嵌套定义
+   - **硬编码常量规范**：扩展因子列应使用常量定义，避免切片索引脆弱性
+
 ---
 
 data_fetchers 模块负责：
@@ -779,6 +790,57 @@ if __name__ == '__main__':
 else:
     from .xxx import func_b
 ```
+
+### 除零保护规范（2026-05-25 新增）
+
+**问题背景：**
+- 百分比计算 `count / total * 100` 在空数据时抛 `ZeroDivisionError`
+- 函数内嵌套定义辅助函数导致作用域混乱
+
+**正确用法：**
+```python
+# ✅ 正确：模块级私有函数，作用域清晰
+def _calc_pct(valid_count: int, total_count: int) -> float:
+    if total_count <= 0:
+        return 0.0
+    return round(valid_count / total_count * 100, 2)
+
+# 调用方式
+logger.info("有效记录: %d (%.2f%%)", valid, _calc_pct(valid, total))
+
+# ❌ 错误：函数内嵌套定义
+def generate_all_factors(...):
+    # ...几十行代码...
+    def calc_pct(valid_count):  # 作用域混乱
+        return round(valid_count / total * 100, 2) if total > 0 else 0.0
+```
+
+**适用场景：**
+- 有效记录百分比计算
+- 缺失记录百分比计算
+- 任何需要除零保护的百分比计算
+
+### 硬编码常量规范（2026-05-25 新增）
+
+**问题背景：**
+- `output_cols[8:]` 等切片索引依赖列表顺序，脆弱
+- 列顺序变化会导致索引错误
+
+**正确用法：**
+```python
+# ✅ 正确：常量定义，明确语义
+_EXTENDED_FACTOR_COLS = ['bollinger_pb', 'kdj_j', 'turnover_surge']
+metadata['factor_columns'] = _EXTENDED_FACTOR_COLS
+
+# ❌ 错误：切片索引，脆弱
+output_cols = ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5', ...]
+metadata['factor_columns'] = output_cols[8:]  # 依赖顺序
+```
+
+**适用场景：**
+- 扩展因子列名
+- 固定字段列表
+- 任何不应依赖顺序的常量列表
 
 ### paths.py 使用规范
 
