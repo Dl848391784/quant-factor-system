@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.73
+> 版本: v2.74
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 18:30 北京时间
+> 更新时间: 2026-05-26 19:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -25,7 +25,7 @@
 | 3 | 因子生成使用 factor_generator.py | 单一数据源，不分散 |
 | 4 | 公共模块必须复用 | 禁止脚本自行实现已有功能 |
 | 5 | pandas 3.0 使用 transform | 避免 rolling 返回 MultiIndex |
-| 6 | 函数入口 DataFrame 先 copy() | 防止副作用（包括 save_batch_cache_sorted） |
+| 6 | 函数修改 DataFrame 需文档说明 | 在 Note 节说明就地修改的列（如 `astype(str)`），不强制 copy |
 | 7 | 日志输出到 logs 目录 | 不散落在项目根目录 |
 | 8 | 流程文档配套 | docs/<脚本名>_flow.md |
 | 9 | N-way merge 去重使用正值 batch_idx | heap 元素为 `(key, batch_idx, stream)`，使用正值让高 batch_idx 后弹出（去重替换逻辑） |
@@ -36,8 +36,9 @@
 | 14 | get_memory_usage_mb Windows 兜底 | `import resource` 在 Windows 下会抛 ModuleNotFoundError，需 try-except 兜底返回 0.0 |
 | 15 | main docstring 无 Returns | None 返回类型的函数不需要 Returns 节 |
 | 16 | version 字段提取为常量 | 禁止硬编码版本号，提取为 `_OUTPUT_VERSION` 常量便于维护 |
-| 17 | datetime.now() 固定时间戳 | 避免多次调用导致 generated_at 和 last_updated 不一致 |
+| 17 | datetime.now() 只调用一次 | 固定时间戳后生成两个格式，避免不一致 |
 | 18 | 抽样检查均匀抽样 | 避免 `[:1000]` 取前1000条偏差，改为均匀抽样 |
+| 21 | N-way merge 显式收集后选最大 | 收集相同 key 所有记录后按 batch_idx 降序选最大，不依赖弹出顺序 |
 | 19 | 常量定义在 import 之后 | PEP 8 顺序：docstring → __future__ → 标准库 → 第三方 → 本地 → 常量 |
 | 20 | cleanup_batch_files 用 try/finally | 保证临时文件清理（无论成功或失败） |
 
@@ -706,6 +707,17 @@ data_fetchers/
    - **约束 #13 修正**：peek_key/pop_record 检查 exhausted（两个方法对称）
    - **新增约束 #19-#20**：常量定义在 import 之后、cleanup_batch_files 用 try/finally
    - **规范补充原因**：代码审查发现 PEP 8 顺序违规、方法不对称、临时文件清理不保证
+
+79. **fetch_factor_cache.py v3.18 (2026-05-26)** — Bug修复（3项）
+   - **n_way_merge 显式收集后选最大**：收集相同 key 所有记录后按 batch_idx 降序选最大，不依赖弹出顺序
+   - **datetime.now() 只调用一次**：`now = datetime.now()` 后生成 `generated_at` 和 `last_updated` 两个格式
+   - **save_batch_cache_sorted 移除 copy**：改为文档说明就地修改 date 列，避免内存峰值翻倍
+
+80. **MODULE.md v2.74 (2026-05-26)** — 规范修正
+   - **约束 #6 修正**：函数修改 DataFrame 需文档说明（不强制 copy）
+   - **约束 #17 修正**：datetime.now() 只调用一次（而非"固定时间戳"）
+   - **新增约束 #21**：N-way merge 显式收集后选最大
+   - **规范修正原因**：copy 导致内存峰值翻倍，文档说明更灵活；弹出顺序依赖不可靠
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
