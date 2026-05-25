@@ -35,6 +35,7 @@
 - v3.24 (2026-05-26): Bug修复 - valid_batch_indices移除冗余、heap注释缩进修正、valid_df增加copy避免Warning、forward_return统一写法
 - v3.25 (2026-05-26): 接口设计修正 - format_final_output返回None（统计由validate提供）、save_batch_cache_sorted接口契约说明实际调用方总是传字符串
 - v3.26 (2026-05-26): Bug修复 - format_final_output末尾缩进修正、validate_final_data分两次读文件+records_count初始化
+- v3.27 (2026-05-26): 代码改进 - BatchStream.pop_record更新exhausted+添加__lt__、del注释修正、combined增加copy、del data而非del full、main用_接收未使用返回值
 
 作者: 云舟
 日期: 2026-04-04
@@ -66,7 +67,7 @@ except ImportError:
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.26'
+_OUTPUT_VERSION = '3.27'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -242,7 +243,7 @@ def save_batch_cache_sorted(
     logger.info(f"  ✓ 保存批次 {batch_idx}: 因子 {factor_size_mb:.2f}MB, 收益 {return_size_mb:.2f}MB")
     logger.info(f"  当前内存: {get_memory_info_str()}")
     
-    # 立即释放 DataFrame 内存
+    # 减少 DataFrame 引用计数（真正释放依赖 GC）
     del factor_df, return_df
     gc.collect()
 
@@ -264,6 +265,7 @@ class BatchStream:
     Note:
         - 批次文件已按 (date, asset) 排序
         - 每次加载全部记录（批次文件不大，约几MB）
+        - 提供 __lt__ 方法用于 heap 比较
     """
     
     def __init__(self, batch_idx: int, data_type: str = 'factor'):
@@ -325,10 +327,25 @@ class BatchStream:
             dict | None: 当前记录字典或 None（已耗尽）
         """
         if self.exhausted or self.idx >= len(self.records):
+            self.exhausted = True  # 确保状态一致
             return None
         rec = self.records[self.idx]
         self.idx += 1
+        # 更新 exhausted 状态（弹完最后一条后标记耗尽）
+        self.exhausted = self.idx >= len(self.records)
         return rec
+    
+    def __lt__(self, other: 'BatchStream') -> bool:
+        """
+        用于 heap 比较（按 batch_idx）
+        
+        Args:
+            other: 另一个 BatchStream 对象
+        
+        Returns:
+            bool: self.batch_idx < other.batch_idx
+        """
+        return self.batch_idx < other.batch_idx
     
     def is_exhausted(self) -> bool:
         """
@@ -563,7 +580,7 @@ def fetch_batch_stocks(
     gc.collect()
     
     combined['date'] = pd.to_datetime(combined['date'])
-    combined = combined.sort_values(['asset', 'date'])
+    combined = combined.sort_values(['asset', 'date']).copy()  # 避免 CoW 风险
     
     combined['rsi_6'] = combined.groupby('asset')['close'].transform(
         lambda x: loader._calculate_rsi_vectorized(x, period=6)
@@ -812,7 +829,8 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
             records_count = len(data)
             # 均匀抽样
             sample_records = [data[i] for i in range(0, records_count, step)][:sample_size]
-            # 释放内存
+            # 释放内存（del data，而非 del full）
+            del data
             del full
             gc.collect()
             
@@ -987,8 +1005,8 @@ def main() -> None:
     logger.info("[合并阶段] N-way merge 外部排序...")
     
     try:
-        factor_merged_path, factor_count = n_way_merge_deduplicate(total_batches, 'factor', logger)
-        return_merged_path, return_count = n_way_merge_deduplicate(total_batches, 'return', logger)
+        factor_merged_path, _ = n_way_merge_deduplicate(total_batches, 'factor', logger)
+        return_merged_path, _ = n_way_merge_deduplicate(total_batches, 'return', logger)
         
         if not factor_merged_path:
             logger.warning("  ! 无有效数据")
