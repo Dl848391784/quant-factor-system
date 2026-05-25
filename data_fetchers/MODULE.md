@@ -514,6 +514,14 @@ data_fetchers/
    - **测试用例创建**：test_cases/fetch_stock_list_test_cases.md
    - **修复原因**：MODULE.md 规范违规（8项）+ PROJECT.md 规范违规（4项）
 
+22. **fetch_stock_list.py v2.1 (2026-05-27 06:35)** — 第二轮优化
+   - **requests 导入顶部化**：从 `__main__` 内移动到模块顶部（遵循 MODULE.md 约束 51）
+   - **原子写入异常捕获扩大**：OSError → Exception（遵循 MODULE.md 约束 55）
+   - **validate_cache logger 参数化**：新增 `logger_arg` 参数（遵循 PROJECT.md 日志参数规范）
+   - **set 类型注解完整化**：`set` → `set[str]`
+   - **ensure_cache_dir/ensure_result_dir logger 参数化**：新增 `logger_arg` 参数
+   - **修复原因**：深度审查发现 6 项遗漏问题
+
 20. **factor_generator.py v1.9 (2026-05-25)** — 第八轮深度优化
    - **冗余导入清理**：移除条件导入块的 `_Path`（第44行），直接使用顶部导入的 `Path`
    - **注释行号修正**：setup_logger 导入位置改为第369-374行（删除1行后位置变化）

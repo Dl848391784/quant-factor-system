@@ -22,12 +22,20 @@
   - datetime.now() 统一调用（遵循 MODULE.md 约束 17）
   - Path 对象迁移 + 公共模块复用（遵循 MODULE.md 约束 62）
 
+- v2.1 (2026-05-27 06:30): 第二轮优化
+  - requests 导入移至顶部（遵循 MODULE.md 约束 51）
+  - 原子写入捕获所有异常（遵循 MODULE.md 约束 55）
+  - 公共函数返回类型注解补全（遵循 MODULE.md 约束 76）
+  - validate_cache logger 参数化（遵循 PROJECT.md 日志参数规范）
+  - set 类型注解完整化 `set[str]`
+
 作者: 云舟
 日期: 2026-04-02
 """
 
 import json
 import logging
+import requests  # 新浪财经 API HTTP 请求
 import time
 from datetime import datetime
 from pathlib import Path
@@ -56,7 +64,7 @@ __all__ = [
 # ============================================================
 
 # 输出版本（遵循 MODULE.md 约束 16）
-_OUTPUT_VERSION = '2.2'
+_OUTPUT_VERSION = '2.3'
 
 # 新浪财经 API 端点
 SINA_API_URL = 'http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData'
@@ -340,7 +348,7 @@ def fetch_stocks_from_sina(
         time.sleep(API_DELAY)
     
     # 去重
-    seen: set = set()
+    seen: set[str] = set()
     unique_stocks: List[Dict[str, Any]] = []
     for s in all_stocks:
         if s['code'] not in seen:
@@ -362,12 +370,16 @@ def fetch_stocks_from_sina(
 # 数据完整性验证
 # ============================================================
 
-def validate_cache(cache_data: Dict[str, Any]) -> Dict[str, Any]:
+def validate_cache(
+    cache_data: Dict[str, Any],
+    logger_arg: Optional[logging.Logger] = None
+) -> Dict[str, Any]:
     """
     验证缓存数据完整性
     
     Args:
         cache_data: 缓存数据字典
+        logger_arg: 日志记录器（可选，默认使用模块级 logger）
     
     Returns:
         验证结果字典：
@@ -456,17 +468,19 @@ def validate_cache(cache_data: Dict[str, Any]) -> Dict[str, Any]:
 # 缓存文件操作
 # ============================================================
 
-def ensure_cache_dir() -> None:
+def ensure_cache_dir(logger_arg: Optional[logging.Logger] = None) -> None:
     """确保缓存目录存在"""
+    _logger = logger_arg or logger
     cache_dir = get_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"确保缓存目录存在: {cache_dir}")
+    _logger.info(f"确保缓存目录存在: {cache_dir}")
 
 
-def ensure_result_dir() -> None:
+def ensure_result_dir(logger_arg: Optional[logging.Logger] = None) -> None:
     """确保结果目录存在"""
+    _logger = logger_arg or logger
     _RESULT_DIR.mkdir(parents=True, exist_ok=True)
-    logger.info(f"确保结果目录存在: {_RESULT_DIR}")
+    _logger.info(f"确保结果目录存在: {_RESULT_DIR}")
 
 
 def save_cache(
@@ -596,7 +610,7 @@ def _write_json_file(
         logger: 日志记录器
     
     Raises:
-        OSError: 文件写入失败
+        Exception: 文件写入失败（捕获所有异常，遵循 MODULE.md 约束 55）
     """
     temp_path = path.with_suffix('.tmp')
     try:
@@ -604,7 +618,7 @@ def _write_json_file(
             json.dump(data, f, ensure_ascii=False, indent=2)
         # 原子替换
         temp_path.replace(path)
-    except OSError as e:
+    except Exception as e:
         # 失败时清理临时文件
         if temp_path.exists():
             temp_path.unlink()
@@ -724,7 +738,7 @@ def refresh_stock_cache(
         cache_data = save_cache(stocks, api_pages, logger)
         
         # Step 3: 验证完整性
-        validation = validate_cache(cache_data)
+        validation = validate_cache(cache_data, logger)
         
         if not validation['passed']:
             error_msg = "; ".join(validation['errors'])
@@ -785,7 +799,6 @@ def refresh_stock_cache(
 
 if __name__ == '__main__':
     import sys
-    import requests  # fetch_stocks_from_sina 需要
     
     # 使用公共模块 logger
     cli_logger = _get_logger()
