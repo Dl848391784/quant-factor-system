@@ -4,7 +4,7 @@
 
 作者: 云舟
 日期: 2026-05-27
-版本: v1.5
+版本: v1.6
 
 功能: 获取申万行业分类数据并缓存
 数据源: akshare - 申万行业分类
@@ -15,6 +15,7 @@
 - v1.3 (2026-05-27): Bug修复 - 文档头版本号同步、第355行Dict→dict、异常日志加类型名、Counter顶部导入、原子写入异常处理
 - v1.4 (2026-05-27): Bug修复 - SW_INDUSTRY_CODE_MAP添加近似映射注释+TODO、原子写入捕获所有异常+日志位置修正、全局缓存线程安全（DCL双重检查）
 - v1.5 (2026-05-27): Bug修复 - 日期解析异常warning日志、关键词映射移除歧义(新能)、__all__移除私有名称(_OUTPUT_VERSION)
+- v1.6 (2026-05-27): Bug修复 - DataFrame列名校验、备用数据路径提取常量+参数注入
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -30,7 +31,7 @@ from datetime import datetime
 from collections import Counter
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = '1.5'
+_OUTPUT_VERSION = '1.6'
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,13 @@ CACHE_DIR = BASE_DIR / 'cache'
 
 # 行业数据缓存路径（输出到 result 目录，MODULE.md 约束 #2）
 INDUSTRY_CACHE_PATH = RESULT_DIR / 'stock_industry.json'
+
+# 备用数据路径（避免跨模块硬编码耦合）
+STOCK_LIST_BACKUP_PATH = CACHE_DIR / 'stock_list.json'
+
+# akshare API 期望列名（防御性校验）
+_EXPECTED_INDUSTRY_COLS = ['symbol', 'industry_code', 'start_date']
+_EXPECTED_STOCK_NAME_COLS = ['code', 'name']
 
 
 # 申万2021版行业代码映射（一级代码 -> 行业名称）
@@ -109,6 +117,11 @@ def fetch_stock_industry_sw() -> dict:
         # 获取申万行业分类历史数据（新版本API）
         industry_df = ak.stock_industry_clf_hist_sw()
         
+        # 列名校验（防御性编程）
+        missing_cols = [col for col in _EXPECTED_INDUSTRY_COLS if col not in industry_df.columns]
+        if missing_cols:
+            raise KeyError(f"申万行业分类缺少必需列: {missing_cols}, 实际列: {list(industry_df.columns)}")
+        
         # 获取每只股票的最新行业分类（按start_date降序）
         industry_df_latest = industry_df.sort_values('start_date', ascending=False).drop_duplicates(
             subset='symbol', keep='first'
@@ -116,6 +129,12 @@ def fetch_stock_industry_sw() -> dict:
         
         # 获取股票名称映射
         stock_names_df = ak.stock_info_a_code_name()
+        
+        # 列名校验（防御性编程）
+        missing_name_cols = [col for col in _EXPECTED_STOCK_NAME_COLS if col not in stock_names_df.columns]
+        if missing_name_cols:
+            raise KeyError(f"股票名称数据缺少必需列: {missing_name_cols}, 实际列: {list(stock_names_df.columns)}")
+        
         stock_names_df['code'] = stock_names_df['code'].astype(str).str.zfill(6)
         stock_names_dict = dict(zip(stock_names_df['code'], stock_names_df['name']))
         
@@ -237,10 +256,13 @@ def refresh_industry_cache() -> dict:
     return industry_map
 
 
-def load_local_industry_backup() -> dict:
+def load_local_industry_backup(stock_list_path: Path | None = None) -> dict:
     """
     加载本地备用行业数据（当 akshare 不可用时）
     
+    Args:
+        stock_list_path: 股票列表文件路径（默认使用 STOCK_LIST_BACKUP_PATH）
+        
     Returns:
         dict: 基本的行业映射（主要行业分类）
     """
@@ -251,8 +273,9 @@ def load_local_industry_backup() -> dict:
     
     logger.info("[行业数据] 使用本地备用分类...")
     
-    # 从 stock_list.json 加载股票基本信息
-    stock_list_path = CACHE_DIR / 'stock_list.json'
+    # 使用参数注入路径（避免硬编码耦合）
+    if stock_list_path is None:
+        stock_list_path = STOCK_LIST_BACKUP_PATH
     if stock_list_path.exists():
         try:
             with open(stock_list_path, 'r', encoding='utf-8') as f:
@@ -396,8 +419,10 @@ __all__ = [
     'get_stock_industry',
     'get_industry_distribution',
     'infer_industry_from_name',
+    'load_local_industry_backup',  # 新增：参数注入路径
     'SW_INDUSTRY_CODE_MAP',
     'INDUSTRY_CACHE_PATH',
+    'STOCK_LIST_BACKUP_PATH',  # 新增：备用数据路径常量
 ]
 
 
