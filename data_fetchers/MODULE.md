@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.78
+> 版本: v2.79
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-26 21:00 北京时间
+> 更新时间: 2026-05-26 21:30 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -29,7 +29,7 @@
 | 7 | 日志输出到 logs 目录 | 不散落在项目根目录 |
 | 8 | 流程文档配套 | docs/<脚本名>_flow.md |
 | 9 | N-way merge 去重使用正值 batch_idx | heap 元素为 `(key, batch_idx, counter, stream)`，counter 打破平局 |
-| 10 | 大文件流式读取验证 | 避免 json.load 全量加载只为抽样，改为流式迭代 |
+| 10 | 大文件验证一次性加载 | 避免 meta 手动拼接脆弱，直接 json.load(full) 后提取 meta/data |
 | 11 | meta 信息只保留标量 | date_start/date_end/n_assets，而非完整 dates_list/assets_list |
 | 12 | 数据验证综合判断 | 不仅检查天数达标，还需检查关键字段非空比例 >= 80% |
 | 13 | peek_key/pop_record 检查 exhausted | `if self.exhausted or self.idx >= len(self.records)`，语义一致性（两个方法对称） |
@@ -43,7 +43,7 @@
 | 22 | cleanup 增加兜底清理 | merged_*.json.gz 可能残留，cleanup_batch_files 应增加兜底 |
 | 23 | 模块级注释合并到常量 | 注释应紧贴常量定义，避免空泛的注释块 |
 | 24 | 变量初始化默认值 | 防止解析失败时未初始化导致 NameError |
-| 25 | meta 解析用 json.loads | 避免手动字符串匹配脆弱，收集 meta 行后用 json.loads 解析 |
+| 25 | meta 解析用 json.loads | 避免手动字符串匹配脆弱，一次性加载 full 后提取 meta/data |
 | 26 | 方法名语义清晰 | `_load_all` 表示一次性加载，而非 `_load_next_chunk` 暗示多次调用 |
 | 27 | 返回值避免冗余 | format_final_output 返回值仅用于日志，统计信息由 validate_final_data 提供 |
 | 28 | 函数接口契约说明 | 说明输入/输出类型，避免调用方重复转换 |
@@ -772,6 +772,14 @@ data_fetchers/
    - **约束 #20 修正**：用 try 保证继续清理（而非 try/finally）
    - **新增约束 #29-#30**：vmrss 判断用 is not None、内嵌函数闭包捕获一致
    - **规范修正原因**：中途出错导致部分文件残留；0 是 falsy 导致跳过；参数传入与闭包捕获不一致
+
+89. **fetch_factor_cache.py v3.23 (2026-05-26)** — Bug修复（1项）
+   - **validate_final_data 一次性加载**：直接 json.load(full) 后提取 meta/data，避免 meta 手动拼接脆弱
+   - **简化代码**：删除两阶段流式读取，改为一次性加载（meta 小，可接受）
+
+90. **MODULE.md v2.79 (2026-05-26)** — 规范修正
+   - **约束 #10/#25 修正**：大文件验证一次性加载（而非流式读取 meta）
+   - **规范修正原因**：meta 手动拼接字符串脆弱，直接 json.load 更健壮
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
