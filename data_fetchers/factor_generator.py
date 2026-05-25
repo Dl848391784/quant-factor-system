@@ -30,6 +30,7 @@
 - v1.17 (2026-05-25): Bug修复（output_path父目录不存在时创建、dates字段从output_df取数据来源更清晰、docstring示例值改为范围说明）
 - v1.18 (2026-05-25): Bug修复（版本历史描述修正v1.12日志换行符为规范补充而非修复、_EXTENDED_FACTOR_COLS返回副本防止外部修改）
 - v1.19 (2026-05-25): 代码结构优化（常量改为元组防止意外修改、docstring示例补充注释说明返回列表副本、factor_df显式释放内存）
+- v1.20 (2026-05-25): 代码结构优化（mkdir移入try块统一异常处理、_OUTPUT_COLS注释移到常量定义处、_calc_pct docstring补充示例、main()异常日志增加类型名）
 
 作者: 云瑶
 """
@@ -88,6 +89,11 @@ _EXTENDED_FACTOR_COLS: tuple = ('bollinger_pb', 'kdj_j', 'turnover_surge')
 _BASE_COLS: tuple = ('date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5')
 
 # 输出列名（基础列 + 扩展因子，元组防止意外修改）
+# 结构说明：
+# _OUTPUT_COLS[0:2]  = date, asset（索引字段）
+# _OUTPUT_COLS[2:6]  = open, close, high, low（行情数据，非标准 OHLCV 顺序）
+# _OUTPUT_COLS[6:8]  = rsi_6, volume_ratio_5（基础因子，来自输入）
+# _OUTPUT_COLS[8:]   = bollinger_pb, kdj_j, turnover_surge（扩展因子，本次计算）
 _OUTPUT_COLS: tuple = _BASE_COLS + _EXTENDED_FACTOR_COLS
 
 
@@ -100,15 +106,23 @@ def _calc_pct(count: int, total: int) -> float:
     计算百分比（除零保护）
     
     Args:
-        count: 记录数（有效/缺失/其他）
-        total: 总记录数
+        count: 记录数（分子，如有效记录数、缺失记录数等）
+        total: 总记录数（分母）
         
     Returns:
         float: 百分比（0.0-100.0），空数据时返回 0.0
         
+    Example:
+        >>> _calc_pct(80, 100)  # 有效记录百分比
+        80.0
+        >>> _calc_pct(20, 100)  # 缺失记录百分比
+        20.0
+        >>> _calc_pct(50, 0)    # 空数据，返回 0.0
+        0.0
+        
     Note:
         - 通用百分比计算函数，可用于有效记录、缺失记录等场景
-        - 调用时语义由调用方决定（有效记录百分比、缺失记录百分比等）
+        - 参数语义由调用方决定（count 是分子，total 是分母）
     """
     if total <= 0:
         return 0.0
@@ -313,12 +327,7 @@ def generate_all_factors(
     
     factor_df['date'] = factor_df['date'].dt.strftime('%Y-%m-%d')
     
-    # 保留所有因子列（顺序：date/asset + 行情数据 + 基础因子 + 扩展因子）
-    # _OUTPUT_COLS = _BASE_COLS + _EXTENDED_FACTOR_COLS
-    # _OUTPUT_COLS[0:2]  = date, asset（索引字段）
-    # _OUTPUT_COLS[2:6]  = open, close, high, low（行情数据，非标准 OHLCV 顺序）
-    # _OUTPUT_COLS[6:8]  = rsi_6, volume_ratio_5（基础因子，来自输入）
-    # _OUTPUT_COLS[8:]   = bollinger_pb, kdj_j, turnover_surge（扩展因子，本次计算，对应 _EXTENDED_FACTOR_COLS）
+    # 保留所有因子列（使用模块级常量 _OUTPUT_COLS）
     output_cols = _OUTPUT_COLS
     
     # 检查列是否存在
@@ -342,10 +351,10 @@ def generate_all_factors(
     }
     
     # 使用临时文件 + os.replace 原子写入（遵循 PROJECT.md 文件写入规范）
-    # 确保父目录存在（避免 FileNotFoundError）
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = output_path.parent / (output_path.name + '.tmp')
     try:
+        # 确保父目录存在（在 try 块内创建，异常时可统一处理）
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         with gzip.open(temp_path, 'wt') as f:
             json.dump(output_data, f)
         os.replace(temp_path, output_path)
@@ -444,7 +453,7 @@ def main() -> int:
         logger.info("执行成功，退出码: 0")
         return 0
     except Exception as e:
-        logger.error("执行失败: %s", str(e))
+        logger.error("执行失败 [%s]: %s", type(e).__name__, str(e))
         return 1
     finally:
         # 清理 logger 处理器

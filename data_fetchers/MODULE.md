@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v2.52
+> 版本: v2.53
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-25 21:00 北京时间
+> 更新时间: 2026-05-25 22:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -526,6 +526,18 @@ data_fetchers/
 37. **MODULE.md v2.52 (2026-05-25)** — 规范补充
    - **常量类型规范**：模块级常量列表应使用元组防止意外修改
    - **内存释放规范**：大 DataFrame 使用完毕后显式释放（`del df`）
+
+38. **factor_generator.py v1.20 (2026-05-25)** — 代码结构优化
+   - **mkdir 位置调整**：移入 try 块统一异常处理（与原子写入语义一致）
+   - **注释位置优化**：_OUTPUT_COLS 索引切片说明移到常量定义处（注释与定义不分离）
+   - **docstring 补充示例**：_calc_pct 补充参数含义示例（count/total 语义清晰）
+   - **异常日志改进**：main() 增加 `type(e).__name__`（异常类型可追溯）
+   - **优化原因**：代码结构问题（异常处理不一致 + 注释分离 + 参数语义模糊 + 日志信息不足）
+
+39. **MODULE.md v2.53 (2026-05-25)** — 规范补充
+   - **mkdir 位置规范**：应在 try 块内创建目录，异常时可统一处理
+   - **常量注释规范**：常量结构说明应放在定义处，而非使用处
+   - **异常日志规范**：应包含异常类型名（`type(e).__name__`）便于追溯
 
 ---
 
@@ -1135,6 +1147,95 @@ output_df = factor_df[output_cols].copy()
 - 显式释放不再需要的变量
 - 使用 `del var` 释放内存
 - 在变量使用完毕后立即释放
+
+### mkdir 位置规范（2026-05-25 新增）
+
+**问题背景：**
+- mkdir 在 try 块外调用，异常无法统一处理
+- 与原子写入语义冲突（写入失败时无法捕获目录创建异常）
+
+**正确用法：**
+```python
+# ✅ 正确：mkdir 在 try 块内，异常可统一处理
+temp_path = output_path.parent / (output_path.name + '.tmp')
+try:
+    output_path.parent.mkdir(parents=True, exist_ok=True)  # 在 try 块内
+    with open(temp_path, 'w') as f:
+        json.dump(data, f)
+    os.replace(temp_path, output_path)
+except OSError as e:
+    temp_path.unlink(missing_ok=True)
+    raise RuntimeError(...)
+
+# ❌ 错误：mkdir 在 try 块外，异常无法统一处理
+output_path.parent.mkdir(parents=True, exist_ok=True)  # 在 try 块外
+temp_path = output_path.parent / (output_path.name + '.tmp')
+try:
+    with open(temp_path, 'w') as f:
+        json.dump(data, f)
+except OSError as e:
+    # mkdir 异常无法捕获
+```
+
+**原则：**
+- mkdir 应在 try 块内调用
+- 异常可统一处理
+- 与原子写入语义一致
+
+### 常量注释规范（2026-05-25 新增）
+
+**问题背景：**
+- 常量结构说明放在使用处（函数内）
+- 定义处无注释，维护困难
+- 注释与定义分离，修改时易遗漏
+
+**正确用法：**
+```python
+# ✅ 正确：注释放在定义处
+_OUTPUT_COLS: tuple = _BASE_COLS + _EXTENDED_FACTOR_COLS
+# 结构说明：
+# _OUTPUT_COLS[0:2]  = date, asset（索引字段）
+# _OUTPUT_COLS[2:6]  = open, close, high, low（行情数据）
+# ...
+
+# 使用处只需简短说明
+output_cols = _OUTPUT_COLS  # 使用模块级常量
+
+# ❌ 错误：注释放在使用处
+_OUTPUT_COLS: tuple = _BASE_COLS + _EXTENDED_FACTOR_COLS  # 定义处无注释
+
+def func():
+    # _OUTPUT_COLS[0:2]  = date, asset  # 注释分离
+    # _OUTPUT_COLS[2:6]  = open, close, high, low
+    output_cols = _OUTPUT_COLS
+```
+
+**原则：**
+- 常量结构说明应放在定义处
+- 使用处只需简短说明
+- 注释与定义不分离
+
+### 异常日志规范（2026-05-25 新增）
+
+**问题背景：**
+- 异常日志只包含错误消息
+- 缺少异常类型，难以追溯问题
+
+**正确用法：**
+```python
+# ✅ 正确：包含异常类型名
+except Exception as e:
+    logger.error("执行失败 [%s]: %s", type(e).__name__, str(e))
+
+# ❌ 错误：缺少异常类型
+except Exception as e:
+    logger.error("执行失败: %s", str(e))
+```
+
+**原则：**
+- 异常日志应包含异常类型名
+- 使用 `type(e).__name__` 获取类型名
+- 便于追溯问题根源
 
 ### paths.py 使用规范
 
