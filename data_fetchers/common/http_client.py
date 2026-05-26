@@ -27,6 +27,9 @@ HTTP 客户端模块
 - v1.9 (2026-05-27): 扩展性与429处理（2个问题）：
     1. 数据源注册表：新增 _SOURCE_CONFIGS 注册表和 create_session(source) 统一入口
     2. 429 Retry-After：request_with_retry 处理 429 状态码时读取 Retry-After 头
+- v1.10 (2026-05-27): 命名冲突修复（2个问题）：
+    1. session(...) 与变量名 session 冲突：重命名为 source_session(...)
+    2. docstring Example 变量名冲突：as session 改为 as sess
 
 作者: 云瑶
 日期: 2026-05-24
@@ -54,9 +57,9 @@ __all__ = [
     'create_session',  # 统一入口（注册表驱动）
     'create_eastmoney_session',  # 保留向后兼容
     'create_sina_session',  # 保留向后兼容
-    # Session 上下文管理器（自动管理生命周期，推荐使用）
+ # Session 上下文管理器（自动管理生命周期，推荐使用）
     'retry_session',
-    'session',  # 统一入口上下文管理器
+    'source_session',  # 统一入口上下文管理器（避免与变量名 session 冲突）
     'eastmoney_session',
     'sina_session',
     # 请求函数
@@ -633,9 +636,9 @@ def retry_session(
         requests.Session: 配置好的 Session（自动关闭）
         
     Example:
-        >>> with retry_session(headers=DEFAULT_EASTMONEY_HEADERS) as session:
-        >>>     response = session.get('https://api.eastmoney.com/...')
-        >>> # session 自动关闭，无需手动调用 session.close()
+        >>> with retry_session(headers=DEFAULT_EASTMONEY_HEADERS) as sess:
+        >>>     response = sess.get('https://api.eastmoney.com/...')
+        >>> # sess 自动关闭，无需手动调用 sess.close()
     """
     session = create_retry_session(
         headers=headers,
@@ -666,9 +669,9 @@ def eastmoney_session(
         requests.Session: 配置好的东财 Session（自动关闭）
         
     Example:
-        >>> with eastmoney_session(logger=my_logger) as session:
-        >>>     response = session.get('https://api.eastmoney.com/...')
-        >>> # session 自动关闭
+        >>> with eastmoney_session(logger=my_logger) as sess:
+        >>>     response = sess.get('https://api.eastmoney.com/...')
+        >>> # sess 自动关闭
     """
     session = create_eastmoney_session(logger=logger)
     try:
@@ -691,9 +694,9 @@ def sina_session(
         requests.Session: 配置好的新浪 Session（自动关闭）
         
     Example:
-        >>> with sina_session(logger=my_logger) as session:
-        >>>     response = session.get('http://vip.stock.finance.sina.com.cn/...')
-        >>> # session 自动关闭
+        >>> with sina_session(logger=my_logger) as sess:
+        >>>     response = sess.get('http://vip.stock.finance.sina.com.cn/...')
+        >>> # sess 自动关闭
     """
     session = create_sina_session(logger=logger)
     try:
@@ -703,7 +706,7 @@ def sina_session(
 
 
 @contextlib.contextmanager
-def session(
+def source_session(
     source: str,
     total_retries: int = _DEFAULT_TOTAL_RETRIES,
     backoff_factor: float = _DEFAULT_BACKOFF_FACTOR,
@@ -731,9 +734,9 @@ def session(
         ValueError: 数据源不存在
         
     Example:
-        >>> with session('eastmoney', logger=my_logger) as session:
-        >>>     response = session.get('https://api.eastmoney.com/...')
-        >>> # session 自动关闭
+        >>> with source_session('eastmoney', logger=my_logger) as sess:
+        >>>     response = sess.get('https://api.eastmoney.com/...')
+        >>> # sess 自动关闭
     """
     sess = create_session(
         source=source,
