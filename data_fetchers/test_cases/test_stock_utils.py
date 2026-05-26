@@ -210,6 +210,17 @@ class TestFilterStocksByDate:
         test_stocks = [{'code': '600000', 'list_date': '2020-06-01'}]
         with pytest.raises(ValueError, match="开始日期不是合法日期"):
             filter_stocks_by_date(test_stocks, '2020-13-01', '2020-12-31')
+    
+    def test_type_error_date_not_string(self):
+        """测试日期参数不是字符串类型"""
+        test_stocks = [{'code': '600000', 'list_date': '2020-06-01'}]
+        # start_date 为 None
+        with pytest.raises(TypeError, match="日期参数必须是字符串类型"):
+            filter_stocks_by_date(test_stocks, None, '2020-12-31')
+        # end_date 为 datetime 对象
+        from datetime import datetime
+        with pytest.raises(TypeError, match="日期参数必须是字符串类型"):
+            filter_stocks_by_date(test_stocks, '2020-01-01', datetime(2020, 12, 31))
 
 
 class TestGetModuleLogger:

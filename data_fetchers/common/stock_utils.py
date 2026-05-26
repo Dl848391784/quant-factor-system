@@ -22,6 +22,7 @@
 - v2.3 (2026-05-27): MAX_STOCK_DATE 快照值修复、filter_stocks_by_date 正则预检补充、get_stock_name_map empty_count 直接计数、load_main_board_stock_list OSError 捕获补充
 - v2.4 (2026-05-27): EXCLUDED_NAME_KEYWORDS 精简（'ST' 覆盖所有变体）、相对导入 PEP 8 合规化、filter_stocks_by_date 字典序注释补充、_validate_date 使用场景区分
 - v2.5 (2026-05-27): load_main_board_stock_list Raises 文档修正（删除 RuntimeError、补充 OSError 包装说明）、EXCLUDED_PREFIXES 精简（'8' 覆盖 '688'）、filter_stocks_by_date 验证顺序调整（范围先于边界）、get_stock_codes_only/get_stock_name_map 类型检查补充
+- v2.6 (2026-05-27): 5项修复——1) get_stock_codes_only warning 日志口径统一（total_count → valid_dict_count）；2) get_stock_name_map warning 日志口径统一；3) load_main_board_stock_list FileNotFoundError 排除（OSError → PermissionError）；4) filter_stocks_by_date 参数类型检查补充（isinstance）；5) DRY 重构：提取 _filter_valid_dicts 公共函数（3处复用）
 
 作者: 云瑶
 日期: 2026-05-24
@@ -93,6 +94,41 @@ EXCLUDED_NAME_KEYWORDS = ('ST', '退市')
 
 # 日期格式正则（YYYY-MM-DD）
 _DATE_PATTERN = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
+def _filter_valid_dicts(
+    stock_list: List[Any],
+    logger: logging.Logger,
+    func_name: str,
+) -> tuple[List[Dict[str, Any]], int]:
+    """
+    过滤非字典元素并返回合法字典列表
+    
+    Args:
+        stock_list: 股票列表（可能含非字典元素）
+        logger: Logger 对象
+        func_name: 调用方函数名（用于日志）
+        
+    Returns:
+        tuple: (合法字典列表, 非字典元素数量)
+        
+    Note:
+        私有函数，统一处理非字典元素过滤 + warning 日志
+    """
+    valid_dicts = []
+    invalid_elements = 0
+    for item in stock_list:
+        if not isinstance(item, dict):
+            invalid_elements += 1
+            continue
+        valid_dicts.append(item)
+    
+    if invalid_elements > 0:
+        logger.warning(
+            "%s时发现 %d 个非字典元素，已过滤",
+            func_name, invalid_elements
+        )
+    
+    return valid_dicts, invalid_elements
 
 def _validate_date(date_str: str) -> bool:
     """
@@ -308,9 +344,12 @@ def load_main_board_stock_list(
     # 加载缓存
     try:
         data = read_json_cache(stock_list_file, logger=logger)
-    except (json.JSONDecodeError, ValueError, OSError) as e:
+    except FileNotFoundError:
+        # IO 层 FileNotFoundError 正常向上抛出（已通过 exists() 检查的除外）
+        raise
+    except (json.JSONDecodeError, ValueError, PermissionError) as e:
         # 保留异常链，便于追溯原始错误
-        # OSError 包括 PermissionError、FileNotFoundError（部分场景）等 IO 异常
+        # PermissionError 等 IO 异常转换为 ValueError
         raise ValueError(f"股票列表缓存解析失败: {stock_list_file}") from e
     
     # 数据格式验证：必须包含 stocks 字段
@@ -328,14 +367,12 @@ def load_main_board_stock_list(
         logger.warning("股票列表缓存为空: %s", stock_list_file)
         return []
     
-    # 性能优化：筛选主板股票 + 统计非字典元素
+    # 使用公共函数过滤非字典元素
+    valid_dicts, invalid_elements = _filter_valid_dicts(stocks, logger, "股票筛选")
+    
+    # 性能优化：筛选主板股票
     main_board_stocks = []
-    invalid_elements = 0
-    for stock in stocks:
-        # 元素类型检查：必须是字典类型
-        if not isinstance(stock, dict):
-            invalid_elements += 1
-            continue
+    for stock in valid_dicts:
         if is_main_board_stock(stock.get('code', ''), stock.get('name', '')):
             main_board_stocks.append(stock)
     
@@ -343,14 +380,7 @@ def load_main_board_stock_list(
     total_count = len(stocks)
     main_count = len(main_board_stocks)
     # excluded_count 只包含非主板股票（不含非字典元素），避免重复统计
-    excluded_count = total_count - main_count - invalid_elements
-    
-    # 非字典元素警告（与其他辅助函数保持一致）
-    if invalid_elements > 0:
-        logger.warning(
-            "股票筛选时发现 %d 个非字典元素，已过滤",
-            invalid_elements
-        )
+    excluded_count = len(valid_dicts) - main_count
     
     logger.info(
         "股票筛选完成: 总数 %d, 主板 %d, 剔除 %d（不含非字典元素 %d）",
@@ -394,16 +424,14 @@ def get_stock_codes_only(stock_list: List[Dict[str, Any]], logger: Optional[logg
         logger.debug("提取股票代码：输入列表为空，返回空列表")
         return []
     
+    # 使用公共函数过滤非字典元素
+    valid_dicts, invalid_elements = _filter_valid_dicts(stock_list, logger, "提取股票代码")
+    
     # 类型安全检查 + 性能优化
     codes = []
-    invalid_elements = 0
     empty_codes = 0
     invalid_types = 0  # 非字符串类型 code
-    for stock in stock_list:
-        # 元素类型检查：必须是字典类型
-        if not isinstance(stock, dict):
-            invalid_elements += 1
-            continue
+    for stock in valid_dicts:
         code = stock.get('code', '')
         # 类型检查：code 必须是字符串
         if not isinstance(code, str):
@@ -415,14 +443,8 @@ def get_stock_codes_only(stock_list: List[Dict[str, Any]], logger: Optional[logg
             empty_codes += 1
     
     # 统计信息
-    total_count = len(stock_list)
+    valid_dict_count = len(valid_dicts)  # 有效字典元素数
     valid_count = len(codes)
-    
-    if invalid_elements > 0:
-        logger.warning(
-            "提取股票代码时发现 %d 个非字典元素，已过滤",
-            invalid_elements
-        )
     
     if invalid_types > 0:
         logger.warning(
@@ -432,8 +454,8 @@ def get_stock_codes_only(stock_list: List[Dict[str, Any]], logger: Optional[logg
     
     if empty_codes > 0:
         logger.warning(
-            "提取股票代码时发现 %d 个空代码，已过滤（总数 %d，有效 %d）",
-            empty_codes, total_count, valid_count
+            "提取股票代码时发现 %d 个空代码，已过滤（有效字典 %d，有效代码 %d）",
+            empty_codes, valid_dict_count, valid_count
         )
     
     return codes
@@ -481,6 +503,12 @@ def filter_stocks_by_date(
     if not isinstance(stock_list, list):
         raise TypeError(f"stock_list 必须是列表类型，实际类型: {type(stock_list).__name__}")
     
+    # 参数类型检查：日期必须是字符串
+    if not isinstance(start_date, str) or not isinstance(end_date, str):
+        raise TypeError(
+            f"日期参数必须是字符串类型，实际 start_date={type(start_date).__name__}, end_date={type(end_date).__name__}"
+        )
+    
     logger = get_module_logger(logger)
     
     # 防御性编程：验证日期格式 + 合法性
@@ -522,16 +550,14 @@ def filter_stocks_by_date(
         logger.debug("按日期筛选股票：输入列表为空，返回空列表")
         return []
     
+    # 使用公共函数过滤非字典元素
+    valid_dicts, invalid_elements = _filter_valid_dicts(stock_list, logger, "按日期筛选股票")
+    
     # 类型安全检查 + 性能优化
     filtered = []
-    invalid_elements = 0
     invalid_dates = 0
     invalid_formats = 0  # 格式异常（如 "2020/01/01"）
-    for stock in stock_list:
-        # 元素类型检查：必须是字典类型
-        if not isinstance(stock, dict):
-            invalid_elements += 1
-            continue
+    for stock in valid_dicts:
         date_value = stock.get(date_field, '')
         # 日期合法性验证：必须为合法日期（格式 + 日历合法性）
         if not date_value:
@@ -545,12 +571,6 @@ def filter_stocks_by_date(
             continue  # 非法日期则过滤
         if start_date <= date_value <= end_date:  # YYYY-MM-DD 格式字典序等价于时间序
             filtered.append(stock)
-    
-    if invalid_elements > 0:
-        logger.warning(
-            "按日期筛选股票时发现 %d 个非字典元素，已过滤",
-            invalid_elements
-        )
     
     if invalid_formats > 0:
         logger.warning(
@@ -606,16 +626,14 @@ def get_stock_name_map(stock_list: List[Dict[str, Any]], logger: Optional[loggin
         logger.debug("构建名称映射：输入列表为空，返回空字典")
         return {}
     
+    # 使用公共函数过滤非字典元素
+    valid_dicts, invalid_elements = _filter_valid_dicts(stock_list, logger, "构建名称映射")
+    
     # 类型安全检查 + 性能优化
     name_map = {}
-    invalid_elements = 0
     empty_count = 0  # 直接计数空代码/空名称
     invalid_types = 0  # 非字符串类型 code/name
-    for stock in stock_list:
-        # 元素类型检查：必须是字典类型
-        if not isinstance(stock, dict):
-            invalid_elements += 1
-            continue
+    for stock in valid_dicts:
         code = stock.get('code', '')
         name = stock.get('name', '')
         # 类型检查：code 和 name 必须都是字符串
@@ -628,14 +646,8 @@ def get_stock_name_map(stock_list: List[Dict[str, Any]], logger: Optional[loggin
             empty_count += 1
     
     # 统计信息
-    total_count = len(stock_list)
+    valid_dict_count = len(valid_dicts)  # 有效字典元素数
     valid_count = len(name_map)
-    
-    if invalid_elements > 0:
-        logger.warning(
-            "构建名称映射时发现 %d 个非字典元素，已过滤",
-            invalid_elements
-        )
     
     if invalid_types > 0:
         logger.warning(
@@ -645,8 +657,8 @@ def get_stock_name_map(stock_list: List[Dict[str, Any]], logger: Optional[loggin
     
     if empty_count > 0:
         logger.warning(
-            "构建名称映射时发现 %d 个空代码或空名称，已过滤（总数 %d，有效 %d）",
-            empty_count, total_count, valid_count
+            "构建名称映射时发现 %d 个空代码或空名称，已过滤（有效字典 %d，有效映射 %d）",
+            empty_count, valid_dict_count, valid_count
         )
     
     return name_map
