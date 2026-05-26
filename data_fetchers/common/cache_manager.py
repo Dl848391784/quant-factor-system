@@ -59,6 +59,11 @@
     3. _read_cache_impl 合并两段 try 块，FileNotFoundError 只捕获一次（覆盖 stat 和 open）
     4. _read_cache_impl 移除 e.pos==0 分支（存在误判），统一按普通 JSON 格式错误处理
     5. delete_cache 移除 except Exception 兜底（Path.unlink 只抛 OSError，意外异常应自然传播）
+|- v1.20 (2026-05-27): 四项语义精确化修复：
+    1. _atomic_write 使用布尔标志 replaced 替代 temp_path=None（语义更清晰）
+    2. _write_cache_impl ENOENT 错误信息改为"目标路径不存在或临时文件丢失"（避免错误定位）
+    3. read_gzip_cache/read_json_cache/read_cache Raises 移除"文件内容为空/被截断"过时描述
+    4. write_gzip_cache/write_json_cache/write_cache Raises 补充 FileNotFoundError（目录不存在场景）
 
 作者: 云瑶
 日期: 2026-05-24
@@ -182,15 +187,15 @@ def _atomic_write(path: Path) -> Generator[Path, None, None]:
     os.close(fd)  # 关闭文件描述符，后续使用 Path
     temp_path = Path(temp_path_str)
     
+    replaced = False  # 布尔标志标记替换状态
     try:
         yield temp_path
         # 正常退出：原子替换目标文件
         os.replace(temp_path, path)
-        # 替换成功，标记临时文件已清理（避免 finally 再次清理）
-        temp_path = None
+        replaced = True  # 替换成功，标记已完成
     finally:
-        # 异常退出：清理临时文件
-        if temp_path is not None:
+        # 异常退出或替换失败：清理临时文件
+        if not replaced:
             try:
                 temp_path.unlink(missing_ok=True)
             except OSError:
@@ -360,9 +365,9 @@ def _write_cache_impl(
     except OSError as e:
         # 通过 errno 区分不同的 OSError 场景
         if e.errno == errno.ENOENT:
-            # 目录不存在（mkstemp 无法创建临时文件）
-            logger.error("目标路径不存在: %s, errno=%d", path.parent, e.errno)
-            raise FileNotFoundError(f"目标路径不存在: {path.parent}") from e
+            # 目录不存在或临时文件丢失
+            logger.warning(f"目标路径不存在或临时文件丢失: {path}")
+            raise FileNotFoundError(f"写入缓存失败，路径不存在: {path}") from e
         else:
             # 其他 OSError：磁盘空间不足、文件被占用等
             logger.error("文件系统错误: %s, errno=%d", path, e.errno)
@@ -392,7 +397,7 @@ def read_gzip_cache(
         
     Raises:
         FileNotFoundError: 文件不存在
-        ValueError: JSON 解析失败或文件内容为空/被截断
+        ValueError: JSON 解析失败（格式错误或 gzip 文件损坏）
         PermissionError: 无权限读取文件
         OSError: 文件系统错误
         RuntimeError: 未知错误
@@ -427,6 +432,7 @@ def write_gzip_cache(
         
     Raises:
         TypeError: 数据类型错误（非 dict）或数据包含不可序列化类型
+        FileNotFoundError: 目标目录不存在（ensure_dir=False 时）
         PermissionError: 无权限写入文件
         OSError: 文件写入失败（磁盘空间不足或文件系统错误）
         RuntimeError: 未知错误
@@ -453,7 +459,7 @@ def read_json_cache(
         
     Raises:
         FileNotFoundError: 文件不存在
-        ValueError: JSON 解析失败或文件内容为空/被截断
+        ValueError: JSON 解析失败（格式错误）
         PermissionError: 无权限读取文件
         OSError: 文件系统错误
         RuntimeError: 未知错误
@@ -484,6 +490,7 @@ def write_json_cache(
         
     Raises:
         TypeError: 数据类型错误（非 dict）或数据包含不可序列化类型
+        FileNotFoundError: 目标目录不存在（ensure_dir=False 时）
         PermissionError: 无权限写入文件
         OSError: 文件写入失败（磁盘空间不足或文件系统错误）
         RuntimeError: 未知错误
@@ -655,7 +662,7 @@ def read_cache(
         
     Raises:
         FileNotFoundError: 文件不存在
-        ValueError: JSON 解析失败或文件内容为空/被截断
+        ValueError: JSON 解析失败（格式错误或 gzip 文件损坏）
         PermissionError: 无权限读取文件
         OSError: 文件系统错误
         RuntimeError: 未知错误
@@ -701,6 +708,7 @@ def write_cache(
         
     Raises:
         TypeError: 数据类型错误（非 dict）或数据包含不可序列化类型
+        FileNotFoundError: 目标目录不存在（ensure_dir=False 时）
         PermissionError: 无权限写入文件
         OSError: 文件写入失败（磁盘空间不足或文件系统错误）
         RuntimeError: 未知错误
