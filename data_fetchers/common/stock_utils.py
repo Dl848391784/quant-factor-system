@@ -20,6 +20,7 @@
 - v2.1 (2026-05-27): __main__ → pytest 测试迁移（210行删除）、创建 test_stock_utils.py（7个测试类 + 26个测试用例）
 - v2.2 (2026-05-27): 条件导入简化（删除 __main__ 分支死代码，仅保留相对导入）
 - v2.3 (2026-05-27): MAX_STOCK_DATE 快照值修复、filter_stocks_by_date 正则预检补充、get_stock_name_map empty_count 直接计数、load_main_board_stock_list OSError 捕获补充
+- v2.4 (2026-05-27): EXCLUDED_NAME_KEYWORDS 精简（'ST' 覆盖所有变体）、相对导入 PEP 8 合规化、filter_stocks_by_date 字典序注释补充、_validate_date 使用场景区分
 
 作者: 云瑶
 日期: 2026-05-24
@@ -31,6 +32,10 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+
+# 相对导入（PEP 8：imports 应在标准库导入之后、常量之前）
+from .paths import get_stock_list_file
+from .cache_manager import read_json_cache
 
 __all__ = [
     # 股票判断函数
@@ -81,12 +86,11 @@ EXCLUDED_PREFIXES = ('30', '688', '8', '4')
 
 # 剔除的名称关键词（ST类股票）
 # 数据来源：中国证券交易所规则，风险警示股票命名规范
-# - ST：特别处理（连续两年亏损）
-# - *ST：退市风险警示（连续三年亏损）
-# - SST/S*ST：历史遗留格式（已基本不使用）
+# - ST：特别处理（连续两年亏损），'ST' 子串匹配已覆盖 *ST、SST、S*ST 等所有变体
 # - 退市：已退市股票标记
+# 精简说明：'ST' 已覆盖所有含 ST 的变体，无需单独列出 *ST/SST/S*ST
 # 注意：使用元组（tuple）确保不可变，防止外部修改影响所有调用
-EXCLUDED_NAME_KEYWORDS = ('ST', '*ST', '退市', 'SST', 'S*ST')
+EXCLUDED_NAME_KEYWORDS = ('ST', '退市')
 
 # 日期格式正则（YYYY-MM-DD）
 _DATE_PATTERN = re.compile(r'^\d{4}-\d{2}-\d{2}$')
@@ -104,6 +108,10 @@ def _validate_date(date_str: str) -> bool:
     Note:
         使用 datetime.strptime 验证日期合法性，如 2020-13-01 或 2020-02-30
         会被正确识别为非法日期
+        
+    使用场景区分:
+        - 入参校验（抛异常路径）：调用方在 if not _validate_date(x) 后主动抛 ValueError
+        - 数据过滤（静默丢弃路径）：调用方直接 continue 跳过非法日期
         
     Example:
         >>> _validate_date('2020-01-01')
@@ -148,10 +156,6 @@ def get_max_stock_date() -> str:
 # 保持向后兼容的别名（deprecated，将在未来版本移除）
 # 注意：这是模块加载时的快照值，非动态值。长时间运行程序可能过期。
 MAX_STOCK_DATE = get_max_stock_date()
-
-# 模块级导入（相对导入，用于模块被 import 时）
-from .paths import get_stock_list_file
-from .cache_manager import read_json_cache
 
 
 def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger:
@@ -530,7 +534,7 @@ def filter_stocks_by_date(
         if not _validate_date(date_value):
             invalid_dates += 1
             continue  # 非法日期则过滤
-        if start_date <= date_value <= end_date:
+        if start_date <= date_value <= end_date:  # YYYY-MM-DD 格式字典序等价于时间序
             filtered.append(stock)
     
     if invalid_elements > 0:
