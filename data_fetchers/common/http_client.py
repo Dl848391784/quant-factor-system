@@ -24,6 +24,9 @@ HTTP 客户端模块
     2. 常量防御一致：_DEFAULT_ALLOWED_METHODS 改为不可变 tuple，与其他常量风格一致
     3. 返回类型精确：定义 JsonValue 类型别名，替代过于宽泛的 Any
     4. 生命周期管理：新增 retry_session/eastmoney_session/sina_session 上下文管理器
+- v1.9 (2026-05-27): 扩展性与429处理（2个问题）：
+    1. 数据源注册表：新增 _SOURCE_CONFIGS 注册表和 create_session(source) 统一入口
+    2. 429 Retry-After：request_with_retry 处理 429 状态码时读取 Retry-After 头
 
 作者: 云瑶
 日期: 2026-05-24
@@ -48,10 +51,12 @@ JsonValue = Union[Dict[str, Any], List[Any], str, int, float, bool, None]
 __all__ = [
     # Session 创建函数（手动管理生命周期）
     'create_retry_session',
-    'create_eastmoney_session',
-    'create_sina_session',
+    'create_session',  # 统一入口（注册表驱动）
+    'create_eastmoney_session',  # 保留向后兼容
+    'create_sina_session',  # 保留向后兼容
     # Session 上下文管理器（自动管理生命周期，推荐使用）
     'retry_session',
+    'session',  # 统一入口上下文管理器
     'eastmoney_session',
     'sina_session',
     # 请求函数
@@ -61,6 +66,8 @@ __all__ = [
     # 请求头常量（供外部复用）
     'DEFAULT_EASTMONEY_HEADERS',
     'DEFAULT_SINA_HEADERS',
+    # 数据源注册（供外部查询可用数据源）
+    'get_available_sources',
     # 类型别名（供外部类型注解使用）
     'JsonValue',
 ]
@@ -108,6 +115,14 @@ _SINA_HEADERS_DICT = {
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 }
 DEFAULT_SINA_HEADERS = types.MappingProxyType(_SINA_HEADERS_DICT)
+
+# 数据源配置注册表（新增数据源只需在此处添加一行）
+# key: 数据源名称（用于 create_session(source) 参数）
+# value: 默认请求头 MappingProxyType
+_SOURCE_CONFIGS: Dict[str, Mapping[str, str]] = {
+    'eastmoney': DEFAULT_EASTMONEY_HEADERS,
+    'sina': DEFAULT_SINA_HEADERS,
+}
 
 
 def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger:
@@ -314,6 +329,77 @@ def create_sina_session(
     return create_retry_session(headers=DEFAULT_SINA_HEADERS, logger=logger)
 
 
+def get_available_sources() -> List[str]:
+    """
+    获取可用的数据源列表
+    
+    Returns:
+        List[str]: 数据源名称列表
+        
+    Example:
+        >>> get_available_sources()
+        ['eastmoney', 'sina']
+    """
+    return list(_SOURCE_CONFIGS.keys())
+
+
+def create_session(
+    source: str,
+    total_retries: int = _DEFAULT_TOTAL_RETRIES,
+    backoff_factor: float = _DEFAULT_BACKOFF_FACTOR,
+    pool_connections: int = _DEFAULT_POOL_CONNECTIONS,
+    pool_maxsize: int = _DEFAULT_POOL_MAXSIZE,
+    allowed_methods: Optional[List[str]] = None,
+    logger: Optional[logging.Logger] = None,
+) -> requests.Session:
+    """
+    创建数据源 Session（注册表驱动，统一入口）
+    
+    新增数据源只需在 _SOURCE_CONFIGS 注册表添加一行，
+    无需新增函数，避免模块随数据源数量线性膨胀。
+    
+    Args:
+        source: 数据源名称（eastmoney/sina，可通过 get_available_sources() 查询）
+        total_retries: 总重试次数（默认 3）
+        backoff_factor: 退避因子（默认 1.0）
+        pool_connections: 连接池大小（默认 10）
+        pool_maxsize: 最大连接数（默认 10）
+        allowed_methods: 允许重试的 HTTP 方法（默认 ["GET"]）
+        logger: 调用方传入的 logger（可选）
+        
+    Returns:
+        requests.Session: 配置好的 Session
+        
+    Raises:
+        ValueError: 数据源不存在
+        
+    Example:
+        # 查询可用数据源
+        >>> get_available_sources()
+        ['eastmoney', 'sina']
+        
+        # 创建东财 Session
+        >>> session = create_session('eastmoney', logger=my_logger)
+        
+        # 创建新浪 Session
+        >>> session = create_session('sina', total_retries=5)
+    """
+    if source not in _SOURCE_CONFIGS:
+        available = get_available_sources()
+        raise ValueError(f"数据源不存在: {source}，可用: {available}")
+    
+    headers = _SOURCE_CONFIGS[source]
+    return create_retry_session(
+        headers=headers,
+        total_retries=total_retries,
+        backoff_factor=backoff_factor,
+        pool_connections=pool_connections,
+        pool_maxsize=pool_maxsize,
+        allowed_methods=allowed_methods,
+        logger=logger,
+    )
+
+
 def _calc_wait_time(attempt: int, delay: float) -> float:
     """
     计算线性递增退避等待时间
@@ -429,10 +515,38 @@ def request_with_retry(
             response.raise_for_status()
             return response.json()
         except requests.HTTPError as e:
-            # HTTP 状态码错误，通常不需要重试
+            # HTTP 状态码错误
+            # 429 状态码（限流）特殊处理：读取 Retry-After 头后重试
+            status_code = response.status_code if response else None
+            
+            if status_code == 429 and attempt < max_attempts - 1:
+                # 读取 Retry-After 头（服务器要求的最短等待时间）
+                retry_after = response.headers.get('Retry-After') if response else None
+                
+                if retry_after is not None:
+                    # Retry-After 可能是秒数（数字）或日期（RFC 2822）
+                    # 简化处理：只解析数字格式，非数字格式回退到线性退避
+                    try:
+                        wait_time = float(retry_after)
+                    except ValueError:
+                        # 非数字格式（如日期），回退到线性退避
+                        wait_time = _calc_wait_time(attempt, delay)
+                    
+                    logger.warning(
+                        "请求被限流 (429) (尝试 %d/%d)\n"
+                        "URL: %s\n"
+                        "方法: %s\n"
+                        "Retry-After: %s\n"
+                        "等待 %.1f秒后重试...",
+                        attempt + 1, max_attempts, url, method, retry_after, wait_time
+                    )
+                    time.sleep(wait_time)
+                    continue  # 继续下一次尝试
+            
+            # 非 429 或超过最大尝试次数，直接抛出
             logger.error("HTTP 错误: %s\nURL: %s\n方法: %s\n状态码: %s", 
-                         e, url, method, response.status_code if response else 'N/A')
-            raise  # 直接抛出，不重试
+                         e, url, method, status_code if status_code else 'N/A')
+            raise
         except requests.Timeout as e:
             last_error = e
             if attempt < max_attempts - 1:
@@ -586,5 +700,53 @@ def sina_session(
         yield session
     finally:
         session.close()
+
+
+@contextlib.contextmanager
+def session(
+    source: str,
+    total_retries: int = _DEFAULT_TOTAL_RETRIES,
+    backoff_factor: float = _DEFAULT_BACKOFF_FACTOR,
+    pool_connections: int = _DEFAULT_POOL_CONNECTIONS,
+    pool_maxsize: int = _DEFAULT_POOL_MAXSIZE,
+    allowed_methods: Optional[List[str]] = None,
+    logger: Optional[logging.Logger] = None,
+) -> Iterator[requests.Session]:
+    """
+    数据源 Session 上下文管理器（注册表驱动，自动资源清理）
+    
+    Args:
+        source: 数据源名称（eastmoney/sina）
+        total_retries: 总重试次数（默认 3）
+        backoff_factor: 退避因子（默认 1.0）
+        pool_connections: 连接池大小（默认 10）
+        pool_maxsize: 最大连接数（默认 10）
+        allowed_methods: 允许重试的 HTTP 方法（默认 ["GET"]）
+        logger: 调用方传入的 logger（可选）
+        
+    Yields:
+        requests.Session: 配置好的 Session（自动关闭）
+        
+    Raises:
+        ValueError: 数据源不存在
+        
+    Example:
+        >>> with session('eastmoney', logger=my_logger) as session:
+        >>>     response = session.get('https://api.eastmoney.com/...')
+        >>> # session 自动关闭
+    """
+    sess = create_session(
+        source=source,
+        total_retries=total_retries,
+        backoff_factor=backoff_factor,
+        pool_connections=pool_connections,
+        pool_maxsize=pool_maxsize,
+        allowed_methods=allowed_methods,
+        logger=logger,
+    )
+    try:
+        yield sess
+    finally:
+        sess.close()
 
 
