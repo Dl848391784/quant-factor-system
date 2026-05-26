@@ -45,7 +45,7 @@
     5. append_to_cache docstring 补充 TypeError 说明
     6. 测试代码 open() 添加 encoding='utf-8'（避免 Windows GBK 问题）
     7. cache_exists Example 改为推荐直接调用 read_cache（避免 TOCTOU 竞态）
-|- v1.18 (2026-05-26): 七项健壮性与文档修复：
+- v1.18 (2026-05-26): 七项健壮性与文档修复：
     1. _write_cache_impl 消除 ensure_dir=False TOCTOU 竞态（删除前置检查，通过 errno.ENOENT 识别目录不存在）
     2. _write_cache_impl 异常捕获分组（TypeError 在前，文件系统异常子类在前父类在后）
     3. get_cache_file_info Returns 补充完整字段说明（path/exists/size_mb/modified_time/error）
@@ -53,17 +53,22 @@
     5. append_to_cache 入口添加 new_data 类型校验（严格执行类型契约）
     6. _read_cache_impl JSONDecodeError 通过 e.pos==0 检测文件截断，提供精确错误信息
     7. 测试代码 finally 添加 test_dir.rmdir() 清理空目录
-|- v1.19 (2026-05-27): 五项架构重构：
+- v1.19 (2026-05-27): 五项架构重构：
     1. 新增 _atomic_write contextmanager 封装原子写入临时文件生命周期
     2. _write_cache_impl 使用 contextmanager，临时文件清理统一在 finally 块（消除四块重复）
     3. _read_cache_impl 合并两段 try 块，FileNotFoundError 只捕获一次（覆盖 stat 和 open）
     4. _read_cache_impl 移除 e.pos==0 分支（存在误判），统一按普通 JSON 格式错误处理
     5. delete_cache 移除 except Exception 兜底（Path.unlink 只抛 OSError，意外异常应自然传播）
-|- v1.20 (2026-05-27): 四项语义精确化修复：
+- v1.20 (2026-05-27): 四项语义精确化修复：
     1. _atomic_write 使用布尔标志 replaced 替代 temp_path=None（语义更清晰）
     2. _write_cache_impl ENOENT 错误信息改为"目标路径不存在或临时文件丢失"（避免错误定位）
     3. read_gzip_cache/read_json_cache/read_cache Raises 移除"文件内容为空/被截断"过时描述
     4. write_gzip_cache/write_json_cache/write_cache Raises 补充 FileNotFoundError（目录不存在场景）
+- v1.21 (2026-05-27): 四项日志与文档修复：
+    1. _write_cache_impl ENOENT 日志改为 % 格式 + error 级别（统一风格）
+    2. _atomic_write Raises 补充 os.replace 异常来源（跨文件系统等）
+    3. append_to_cache Raises 补充 FileNotFoundError（极端场景）
+    4. 版本历史 v1.18~v1.20 移除多余 | 字符（统一 - 格式）
 
 作者: 云瑶
 日期: 2026-05-24
@@ -166,7 +171,7 @@ def _atomic_write(path: Path) -> Generator[Path, None, None]:
         Path: 临时文件路径（用于写入）
         
     Raises:
-        OSError: 目录不存在（errno.ENOENT）或文件系统错误
+        OSError: mkstemp 目录不存在（errno.ENOENT）或 os.replace 失败（跨文件系统等）
         PermissionError: 无权限写入
         
     Example:
@@ -366,7 +371,7 @@ def _write_cache_impl(
         # 通过 errno 区分不同的 OSError 场景
         if e.errno == errno.ENOENT:
             # 目录不存在或临时文件丢失
-            logger.warning(f"目标路径不存在或临时文件丢失: {path}")
+            logger.error("目标路径不存在或临时文件丢失: %s, errno=%d", path, e.errno)
             raise FileNotFoundError(f"写入缓存失败，路径不存在: {path}") from e
         else:
             # 其他 OSError：磁盘空间不足、文件被占用等
@@ -524,6 +529,7 @@ def append_to_cache(
         
     Raises:
         TypeError: new_data 类型错误（非 list）或数据包含不可序列化类型
+        FileNotFoundError: 极端场景下路径丢失（如临时文件被外部删除）
         ValueError: JSON 解析失败（文件存在但损坏）
         PermissionError: 无权限读取或写入文件
         OSError: 磁盘空间不足或文件系统错误
