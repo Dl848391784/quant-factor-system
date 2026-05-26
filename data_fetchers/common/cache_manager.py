@@ -33,6 +33,10 @@
     2. TypeError 单独捕获（json.dump 不可序列化数据），保留精确错误
     3. _read_cache_impl 消除 TOCTOU 竞态（移除提前 exists 检查，FileNotFoundError 透传）
     4. get_cache_file_info 消除双重检查（直接 stat() + 异常判断存在性）
+- v1.16 (2026-05-26): 三项健壮性修复：
+    1. delete_cache 消除 TOCTOU 竞态（直接 unlink + FileNotFoundError 单独捕获）
+    2. tempfile.mkstemp 纳入 try 块 + ensure_dir=False 目录检查
+    3. 删除死代码 _JSON_READABLE_INDENT（从未被引用）
 
 作者: 云瑶
 日期: 2026-05-24
@@ -79,7 +83,6 @@ _DEFAULT_GZIP_COMPRESSLEVEL = 6
 
 # JSON 序列化选项
 _JSON_COMPACT_SEPARATORS = (',', ':')  # 紧凑格式
-_JSON_READABLE_INDENT = 2               # 可读格式缩进
 
 
 def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger:
@@ -248,20 +251,29 @@ def _write_cache_impl(
     else:
         separators = None  # 使用默认分隔符
     
-    # 生成唯一临时文件路径（线程安全）
-    # 使用 tempfile.mkstemp 确保多进程/线程并发写入时临时文件不冲突
-    # 注意：path.stem 对 .json.gz 文件返回 'data.json'（含点号），不干净
-    # 使用 path.name.split('.')[0] 取真正的基础名
-    base_name = path.name.split('.')[0]
-    fd, temp_path_str = tempfile.mkstemp(
-        suffix='.tmp',
-        prefix=base_name + '_',
-        dir=path.parent
-    )
-    os.close(fd)  # 关闭文件描述符，后续使用 Path
-    temp_path = Path(temp_path_str)
+    # 消除 tempfile.mkstemp 跳出 try 块的问题
+    # ensure_dir=False 且目录不存在时，mkstemp 会抛出无上下文的 FileNotFoundError
+    # 在 mkstemp 前显式检查目录存在性，提供明确错误信息
+    if not ensure_dir and not path.parent.exists():
+        raise FileNotFoundError(f"目标目录不存在且 ensure_dir=False: {path.parent}")
+    
+    # 临时文件路径初始化（用于 except 块清理）
+    temp_path: Optional[Path] = None
     
     try:
+        # 生成唯一临时文件路径（线程安全）
+        # 使用 tempfile.mkstemp 确保多进程/线程并发写入时临时文件不冲突
+        # 注意：path.stem 对 .json.gz 文件返回 'data.json'（含点号），不干净
+        # 使用 path.name.split('.')[0] 取真正的基础名
+        base_name = path.name.split('.')[0]
+        fd, temp_path_str = tempfile.mkstemp(
+            suffix='.tmp',
+            prefix=base_name + '_',
+            dir=path.parent
+        )
+        os.close(fd)  # 关闭文件描述符，后续使用 Path
+        temp_path = Path(temp_path_str)
+        
         # 写入临时文件
         if use_gzip:
             with gzip.open(temp_path, 'wt', encoding='utf-8', compresslevel=compresslevel) as f:
@@ -277,10 +289,11 @@ def _write_cache_impl(
     except PermissionError as e:
         logger.error("文件权限错误: %s", path)
         # 清理临时文件（消除 TOCTOU 竞态，防止清理失败掩盖原始异常）
-        try:
-            temp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        if temp_path:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         raise PermissionError(f"无权限写入缓存文件: {path}") from e
     except TypeError as e:
         # json.dump 遇到不可序列化数据时抛出 TypeError（如 datetime、自定义对象）
@@ -291,26 +304,29 @@ def _write_cache_impl(
             path, str(e)
         )
         # 清理临时文件
-        try:
-            temp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        if temp_path:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         raise TypeError(f"缓存数据包含不可序列化类型: {path}, {e}") from e
     except OSError as e:
         logger.error("文件系统错误: %s", path)
         # 清理临时文件
-        try:
-            temp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        if temp_path:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         raise OSError(f"写入缓存失败（磁盘空间不足或文件系统错误）: {path}") from e
     except Exception as e:
         logger.exception("写入缓存失败（未知错误）: %s", path)
         # 清理临时文件
-        try:
-            temp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        if temp_path:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         raise RuntimeError(f"写入缓存失败（未知错误）: {path}") from e
 
 
@@ -670,14 +686,15 @@ def delete_cache(
     path = Path(path)
     logger = get_module_logger(logger)
     
-    if not path.exists():
-        logger.debug("缓存文件不存在，无需删除: %s", path)
-        return False
-    
+    # 消除 TOCTOU 竞态：直接 unlink()，不再提前检查 exists()
+    # FileNotFoundError 单独捕获返回 False，避免被 OSError 吞掉
     try:
         path.unlink()
         logger.info("缓存文件已删除: %s", path)
         return True
+    except FileNotFoundError:
+        logger.debug("缓存文件不存在，无需删除: %s", path)
+        return False
     except PermissionError as e:
         logger.error("文件权限错误: %s", path)
         raise PermissionError(f"无权限删除缓存文件: {path}") from e
