@@ -18,6 +18,11 @@
 - v1.10 (2026-05-24): 类型注解修复 + append_to_cache 冗余检查消除
 - v1.11 (2026-05-25): 线程安全修复 + docstring 补充 + 测试清理健壮化
 - v1.12 (2026-05-25): 原子写入修复 + 错误信息精确化
+- v1.13 (2026-05-26): 四项安全修复：
+    1. _is_gzip_file 语义精确化（检查 .json.gz 双后缀，排除 .csv.gz）
+    2. 临时文件使用 tempfile.mkstemp 生成唯一路径，并发安全
+    3. 临时文件清理消除 TOCTOU 竞态（missing_ok=True + try/except OSError）
+    4. 类型契约严格执行（非 dict 数据抛 TypeError）
 
 作者: 云瑶
 日期: 2026-05-24
@@ -27,6 +32,7 @@ import gzip
 import json
 import logging
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -86,15 +92,21 @@ def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger
 
 def _is_gzip_file(path: Path) -> bool:
     """
-    判断是否为 gzip 文件
+    判断是否为 gzip 压缩的 JSON 文件
+    
+    检查文件后缀是否为 .json.gz（双后缀）。
+    注意：本函数仅适用于 .json.gz 文件，非 JSON 的 gzip 文件
+    （如 .csv.gz、.gz）会被排除，避免误判。
     
     Args:
         path: 文件路径
         
     Returns:
-        bool: 是否为 gzip 文件（后缀为 .gz）
+        bool: 是否为 .json.gz 文件
     """
-    return path.suffix == '.gz'
+    suffixes = path.suffixes
+    # 检查双后缀 ['.json', '.gz']
+    return len(suffixes) >= 2 and suffixes[-2:] == ['.json', '.gz']
 
 
 def _read_cache_impl(
@@ -175,7 +187,7 @@ def _read_cache_impl(
 
 def _write_cache_impl(
     path: Path,
-    data: Any,
+    data: Dict[str, Any],
     use_gzip: bool,
     ensure_dir: bool,
     logger: logging.Logger,
@@ -191,7 +203,7 @@ def _write_cache_impl(
     
     Args:
         path: 文件路径（已转换为 Path）
-        data: 要写入的数据
+        data: 要写入的数据（必须是 dict）
         use_gzip: 是否使用 gzip 压缩
         ensure_dir: 是否自动创建目录
         logger: Logger 对象
@@ -200,15 +212,14 @@ def _write_cache_impl(
         json_sort_keys: 是否排序 JSON 键
         
     Raises:
+        TypeError: 数据类型错误（非 dict）
         OSError: 文件写入失败
     """
-    # 验证数据类型
+    # 严格执行类型契约
     if not isinstance(data, dict):
-        logger.warning(
-            "缓存数据类型异常: 预期 dict，实际 %s\n"
-            "文件路径: %s\n"
-            "继续写入（JSON 支持非字典数据）",
-            type(data).__name__, path
+        raise TypeError(
+            f"缓存数据类型错误: 预期 dict，实际 {type(data).__name__}\n"
+            f"文件路径: {path}"
         )
     
     if ensure_dir:
@@ -220,8 +231,15 @@ def _write_cache_impl(
     else:
         separators = None  # 使用默认分隔符
     
-    # 临时文件路径（同目录，保证 os.replace 同文件系统原子操作）
-    temp_path = path.with_suffix(path.suffix + '.tmp')
+    # 生成唯一临时文件路径（线程安全）
+    # 使用 tempfile.mkstemp 确保多进程/线程并发写入时临时文件不冲突
+    fd, temp_path_str = tempfile.mkstemp(
+        suffix='.tmp',
+        prefix=path.stem + '_',
+        dir=path.parent
+    )
+    os.close(fd)  # 关闭文件描述符，后续使用 Path
+    temp_path = Path(temp_path_str)
     
     try:
         # 写入临时文件
@@ -238,21 +256,27 @@ def _write_cache_impl(
         
     except PermissionError as e:
         logger.error("文件权限错误: %s", path)
-        # 清理临时文件
-        if temp_path.exists():
-            temp_path.unlink()
+        # 清理临时文件（消除 TOCTOU 竞态，防止清理失败掩盖原始异常）
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
         raise PermissionError(f"无权限写入缓存文件: {path}") from e
     except OSError as e:
         logger.error("文件系统错误: %s", path)
         # 清理临时文件
-        if temp_path.exists():
-            temp_path.unlink()
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
         raise OSError(f"写入缓存失败（磁盘空间不足或文件系统错误）: {path}") from e
     except Exception as e:
         logger.exception("写入缓存失败（未知错误）: %s", path)
         # 清理临时文件
-        if temp_path.exists():
-            temp_path.unlink()
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
         raise RuntimeError(f"写入缓存失败（未知错误）: {path}") from e
 
 
@@ -263,8 +287,11 @@ def read_gzip_cache(
     """
     读取 gzip 压缩的 JSON 缓存
     
+    注意：仅支持 .json.gz 后缀文件。其他 gzip 文件（如 .csv.gz）
+    不会被识别，请使用相应的解析器。
+    
     Args:
-        path: 缓存文件路径（.json.gz），支持 Path 或 str
+        path: 缓存文件路径（必须为 .json.gz 后缀），支持 Path 或 str
         logger: 调用方传入的 logger（可选）
         
     Returns:
@@ -289,9 +316,13 @@ def write_gzip_cache(
     """
     写入 gzip 压缩的 JSON 缓存
     
+    注意：仅支持 .json.gz 后缀文件。
+    
+    线程安全：使用唯一临时文件名，支持多进程/线程并发写入。
+    
     Args:
-        path: 缓存文件路径（.json.gz），支持 Path 或 str
-        data: 要写入的数据
+        path: 缓存文件路径（必须为 .json.gz 后缀），支持 Path 或 str
+        data: 要写入的数据（必须是 dict）
         ensure_dir: 是否自动创建目录（默认 True）
         logger: 调用方传入的 logger（可选）
         compresslevel: gzip 压缩级别（1-9，默认 6）
@@ -299,6 +330,7 @@ def write_gzip_cache(
         json_sort_keys: 是否排序 JSON 键
         
     Raises:
+        TypeError: 数据类型错误（非 dict）
         OSError: 文件写入失败
     """
     _write_cache_impl(
@@ -339,15 +371,18 @@ def write_json_cache(
     """
     写入普通 JSON 缓存（非压缩）
     
+    线程安全：使用唯一临时文件名，支持多进程/线程并发写入。
+    
     Args:
         path: 缓存文件路径（.json），支持 Path 或 str
-        data: 要写入的数据
+        data: 要写入的数据（必须是 dict）
         ensure_dir: 是否自动创建目录（默认 True）
         logger: 调用方传入的 logger（可选）
         json_indent: JSON 缩进（None=紧凑，数字=可读）
         json_sort_keys: 是否排序 JSON 键
         
     Raises:
+        TypeError: 数据类型错误（非 dict）
         OSError: 文件写入失败
     """
     _write_cache_impl(
@@ -474,7 +509,12 @@ def read_cache(
     """
     读取缓存（自动判断 gzip/json）
     
-    根据文件后缀自动判断是否为 gzip 文件，统一读取接口。
+    根据文件后缀自动判断：
+    - .json.gz：使用 gzip 解压
+    - .json：普通 JSON 文件
+    
+    注意：gzip 文件必须是 .json.gz 双后缀。
+    其他 gzip 文件（如 .csv.gz、.gz）不会被识别。
     
     Args:
         path: 缓存文件路径（.json 或 .json.gz），支持 Path 或 str
@@ -489,8 +529,8 @@ def read_cache(
         
     Example:
         # 统一接口，无需手动判断文件类型
-        data = read_cache('data.json.gz')
-        data = read_cache('data.json')
+        data = read_cache('data.json.gz')  # gzip JSON
+        data = read_cache('data.json')     # 普通 JSON
     """
     path = Path(path)
     use_gzip = _is_gzip_file(path)
@@ -509,11 +549,17 @@ def write_cache(
     """
     写入缓存（自动判断 gzip/json）
     
-    根据文件后缀自动判断是否为 gzip 文件，统一写入接口。
+    根据文件后缀自动判断：
+    - .json.gz：使用 gzip 压缩
+    - .json：普通 JSON 文件
+    
+    注意：gzip 文件必须是 .json.gz 双后缀。
+    
+    线程安全：使用唯一临时文件名，支持多进程/线程并发写入。
     
     Args:
         path: 缓存文件路径（.json 或 .json.gz），支持 Path 或 str
-        data: 要写入的数据
+        data: 要写入的数据（必须是 dict）
         ensure_dir: 是否自动创建目录（默认 True）
         logger: 调用方传入的 logger（可选）
         compresslevel: gzip 压缩级别（1-9，默认 6）
@@ -521,12 +567,13 @@ def write_cache(
         json_sort_keys: 是否排序 JSON 键
         
     Raises:
+        TypeError: 数据类型错误（非 dict）
         OSError: 文件写入失败
         
     Example:
         # 统一接口，无需手动判断文件类型
-        write_cache('data.json.gz', {'key': 'value'})
-        write_cache('data.json', {'key': 'value'})
+        write_cache('data.json.gz', {'key': 'value'})  # gzip JSON
+        write_cache('data.json', {'key': 'value'})     # 普通 JSON
         
         # 可读格式
         write_cache('data.json', {'key': 'value'}, json_indent=2)
