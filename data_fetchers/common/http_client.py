@@ -11,6 +11,9 @@ HTTP 客户端模块
 - v1.3 (2026-05-25): 模块级常量补全，请求头数据来源注释，返回类型修复
 - v1.4 (2026-05-25): 安全性修复（MappingProxyType 不可变常量、缩小异常捕获范围、安全访问 response.text）
 - v1.5 (2026-05-25): get_module_logger 类型验证同步（与 stock_utils.py 保持一致）
+- v1.6 (2026-05-27): 测试规范迁移：
+    1. 导入顺序修复（PEP 8：标准库 → 第三方库，typing 移到 requests 之前）
+    2. 删除 __main__ 测试代码，迁移到 pytest 测试文件 test_http_client.py（16 个测试用例）
 
 作者: 云瑶
 日期: 2026-05-24
@@ -21,9 +24,10 @@ import logging
 import time
 import types
 from collections.abc import Mapping
+from typing import Dict, Optional, Any, Union, Tuple, List
+
 import requests
 from requests.adapters import HTTPAdapter
-from typing import Dict, Optional, Any, Union, Tuple, List
 from urllib3.util.retry import Retry
 
 __all__ = [
@@ -437,115 +441,3 @@ def request_with_retry(
     raise RuntimeError(f"请求失败: {url}, 方法: {method}") from last_error
 
 
-if __name__ == '__main__':
-    # 配置测试日志（复用 logger_config.py 的 setup_logger）
-    # 遵循 PROJECT.md 第780-839行规范
-    import sys
-    from pathlib import Path as _Path
-    sys.path.insert(0, str(_Path(__file__).parent.parent.parent))
-    
-    from data_fetchers.common.logger_config import setup_logger
-    
-    test_logger = setup_logger(
-        'http_client',  # 脚本名称
-        level=logging.DEBUG,  # 测试用 DEBUG
-        console_level=logging.INFO  # 控制台用 INFO
-    )
-    
-    # 初始化变量（避免 finally 中未绑定）
-    session = None
-    sina_session = None
-    custom_session = None
-    post_session = None
-    default_session = None
-    
-    try:
-        test_logger.info("=" * 50)
-        test_logger.info("http_client.py 测试开始")
-        test_logger.info("=" * 50)
-        
-        # 测试 1: 创建东财 Session
-        test_logger.info("\n[测试 1] 创建东财 Session...")
-        session = create_eastmoney_session(logger=test_logger)
-        test_logger.info("Session headers: %s", session.headers.get('User-Agent'))
-        test_logger.info("Referer: %s", session.headers.get('Referer'))
-        
-        # 测试 2: 创建新浪 Session
-        test_logger.info("\n[测试 2] 创建新浪 Session...")
-        sina_session = create_sina_session(logger=test_logger)
-        test_logger.info("Session headers: %s", sina_session.headers.get('Referer'))
-        
-        # 测试 3: 自定义 Session
-        test_logger.info("\n[测试 3] 自定义 Session...")
-        custom_headers = {"X-Custom": "test-value"}
-        custom_session = create_retry_session(
-            headers=custom_headers,
-            total_retries=5,
-            pool_connections=20,
-            logger=test_logger
-        )
-        test_logger.info("Custom header: %s", custom_session.headers.get('X-Custom'))
-        test_logger.info("Default User-Agent: %s", custom_session.headers.get('User-Agent'))
-        
-        # 测试 4: get_module_logger
-        test_logger.info("\n[测试 4] get_module_logger...")
-        fallback_logger = get_module_logger()
-        test_logger.info("Fallback logger name: %s", fallback_logger.name)
-        custom_logger = get_module_logger(test_logger)
-        test_logger.info("Custom logger name: %s", custom_logger.name)
-        
-        # 测试 5: 公共常量不可变性
-        test_logger.info("\n[测试 5] 公共常量不可变性...")
-        # 测试 DEFAULT_EASTMONEY_HEADERS 不可修改（MappingProxyType）
-        try:
-            DEFAULT_EASTMONEY_HEADERS['User-Agent'] = 'modified'
-            test_logger.error("DEFAULT_EASTMONEY_HEADERS 可修改（不符合预期）")
-        except TypeError:
-            test_logger.info("DEFAULT_EASTMONEY_HEADERS 不可修改（MappingProxyType 正常）")
-        
-        # 测试 DEFAULT_SINA_HEADERS 不可修改
-        try:
-            DEFAULT_SINA_HEADERS['User-Agent'] = 'modified'
-            test_logger.error("DEFAULT_SINA_HEADERS 可修改（不符合预期）")
-        except TypeError:
-            test_logger.info("DEFAULT_SINA_HEADERS 不可修改（MappingProxyType 正常）")
-        
-        # 验证常量内容
-        test_logger.info("DEFAULT_EASTMONEY_HEADERS keys: %s", list(DEFAULT_EASTMONEY_HEADERS.keys()))
-        test_logger.info("DEFAULT_SINA_HEADERS keys: %s", list(DEFAULT_SINA_HEADERS.keys()))
-        
-        # 测试 6: allowed_methods 参数
-        test_logger.info("\n[测试 6] allowed_methods 参数...")
-        post_session = create_retry_session(
-            headers=DEFAULT_EASTMONEY_HEADERS,
-            allowed_methods=['GET', 'POST'],
-            logger=test_logger
-        )
-        test_logger.info("POST Session 创建成功（支持 GET/POST 重试）")
-        
-        # 测试 7: create_retry_session 默认 headers=None
-        test_logger.info("\n[测试 7] create_retry_session 默认 headers=None...")
-        default_session = create_retry_session(logger=test_logger)
-        test_logger.info("Default User-Agent: %s", default_session.headers.get('User-Agent'))
-        test_logger.info("（应为 python-requests/x.x.x，不再默认东财请求头）")
-        
-        # 测试 8: request_with_retry method 参数验证
-        test_logger.info("\n[测试 8] request_with_retry method 参数验证...")
-        # 验证 ValueError
-        try:
-            request_with_retry(session, 'http://example.com', method='INVALID')
-        except ValueError as e:
-            test_logger.info("正确抛出 ValueError: %s", e)
-        
-        test_logger.info("\n" + "=" * 50)
-        test_logger.info("测试完成（共 8 项测试）")
-        test_logger.info("=" * 50)
-        
-        # 注意：异常场景测试（HTTPError/Timeout/ConnectionError）需要真实 API 环境
-        # 建议在集成测试中覆盖，__main__ 仅测试模块功能
-    finally:
-        # 关闭 Session 释放连接池（安全检查）
-        for s in [session, sina_session, custom_session, post_session, default_session]:
-            if s is not None:
-                s.close()
-        test_logger.info("已关闭 Session 连接")
