@@ -28,6 +28,7 @@ Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
 - v3.31 (2026-05-27): Bug修复 - n_way_merge_deduplicate返回值简化(只返回merged_path，count由调用方用_接收但未使用)
 - v3.32 (2026-05-27): Bug修复 - format_final_output删除n_records重复赋值、validate_final_data改为真正流式验证(不加载data数组)
 - v3.33 (2026-05-27): 6项修复——1) Python>=3.8版本声明；2) 作者标识修正（云舟→云瑶）；3) 条件导入使用前提说明；4) 列验证提取公共函数_validate_dataframe_columns；5) validate_final_data第一次改为流式解析meta（避免content=f.read()内存峰值）；6) 版本历史精简（只保留最近10条）
+- v3.34 (2026-05-27): 4项修复——1) fetch_batch_stocks去重（保证单批次内无重复key）；2) BatchStream._load_all加断言（禁止重复调用）；3) format_final_output改用流式处理（避免json.load全量加载）；4) validate_final_data验证n_records一致（补充meta字段）
 
 作者: 云瑶
 日期: 2026-04-04
@@ -60,7 +61,7 @@ except ImportError:
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.33'
+_OUTPUT_VERSION = '3.34'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -300,10 +301,10 @@ class BatchStream:
         Note:
             - 批次文件不大（约几MB），直接加载全部记录
             - 加载后标记 exhausted 状态
-            - 此方法仅调用一次，不应重复调用
+            - 此方法仅调用一次，禁止重复调用
         """
-        if self.exhausted:
-            return
+        # 断言：禁止重复调用（构造函数只调用一次）
+        assert self.idx == 0 and not self.records, "_load_all 禁止重复调用"
         
         if not self.path.exists():
             self.exhausted = True
@@ -621,6 +622,10 @@ def fetch_batch_stocks(
     valid_df['row_num'] = valid_df.groupby('asset').cumcount(ascending=False)
     valid_df = valid_df[valid_df['row_num'] < N_DAYS].copy().drop('row_num', axis=1)
     
+    # 去重：保证单批次内没有重复 (date, asset) key
+    # 从根源消除 N-way merge 时 stream 内重复问题
+    valid_df = valid_df.drop_duplicates(subset=['date', 'asset'], keep='first')
+    
     valid_df['date'] = valid_df['date'].dt.strftime('%Y-%m-%d')
     valid_df['open'] = valid_df['open'].round(2)
     valid_df['close'] = valid_df['close'].round(2)
@@ -658,9 +663,9 @@ def format_final_output(
         logger: 日志记录器（可选，默认使用模块级 logger）
     
     Note:
-        - 内存优化：分阶段加载，先处理因子数据并释放，再处理收益数据
-        - 避免 two large lists 同时存在于内存中
-        - 统计信息（n_days/n_assets/n_records）由 validate_final_data 提供，不返回
+        - 流式处理：两遍读取，第一遍提取统计信息，第二遍逐行写出
+        - 避免 json.load() 全量加载到内存（百万级记录内存峰值）
+        - meta 包含 n_records 字段，供 validate_final_data 验证
     """
     logger = logger or _MODULE_LOGGER
     logger.info("格式化最终输出文件...")
@@ -671,114 +676,135 @@ def format_final_output(
     last_updated = now.strftime("%Y-%m-%d %H:%M:%S")
     
     # ============ 第一阶段：处理因子数据 ============
-    # 读取合并后的因子数据获取元信息
-    with gzip.open(factor_merged_path, 'rt', encoding='utf-8') as f:
-        factor_records = json.load(f)
-    
-    # 提取日期范围和资产数量（一次遍历，避免四次遍历和两份 set 内存峰值）
+    # 第一遍：流式读取提取统计信息（不加载完整 list）
     date_set = set()
     asset_set = set()
     first_date = None
     last_date = None
+    n_records = 0
     
-    for r in factor_records:
-        date = r['date']
-        asset = r['asset']
-        date_set.add(date)
-        asset_set.add(asset)
-        if first_date is None or date < first_date:
-            first_date = date
-        if last_date is None or date > last_date:
-            last_date = date
+    with gzip.open(factor_merged_path, 'rt', encoding='utf-8') as f:
+        # merged 文件是 JSON 数组：[{...}, {...}, ...]
+        # 每条记录一行（save_batch_cache_sorted 写入格式）
+        for line in f:
+            stripped = line.strip()
+            if stripped.startswith('{'):
+                # 解析单条记录
+                try:
+                    rec = json.loads(stripped.rstrip(','))
+                    date = rec['date']
+                    asset = rec['asset']
+                    date_set.add(date)
+                    asset_set.add(asset)
+                    if first_date is None or date < first_date:
+                        first_date = date
+                    if last_date is None or date > last_date:
+                        last_date = date
+                    n_records += 1
+                except json.JSONDecodeError:
+                    continue
     
     date_start = first_date
     date_end = last_date
     n_days = len(date_set)
     n_assets = len(asset_set)
     
-    # 立即释放 set 内存（只保留标量）
+    # 立即释放 set 内存
     del date_set, asset_set
     gc.collect()
     
-    n_records = len(factor_records)  # 用于日志
     logger.info(f"  交易日数: {n_days}")
     logger.info(f"  股票数量: {n_assets}")
     logger.info(f"  因子记录: {n_records}")
     
-    # 写入因子数据最终文件
+    # 第二遍：流式读取并逐行写出（写入完整 JSON 结构）
     factor_final_path = CACHE_DIR / 'factor_data.json.gz'
     
-    with gzip.open(factor_final_path, 'wt', encoding='utf-8') as f:
-        f.write('{\n')
-        f.write('  "meta": {\n')
-        f.write(f'    "generated_at": "{generated_at}",\n')
-        f.write('    "source": "sina_api_batch_external_merge",\n')
-        f.write(f'    "n_days": {n_days},\n')
-        f.write(f'    "n_assets": {n_assets},\n')
-        f.write('    "date_range": {\n')
-        f.write(f'      "start": "{date_start}",\n')
-        f.write(f'      "end": "{date_end}"\n')
-        f.write('    },\n')
-        f.write(f'    "last_updated": "{last_updated}",\n')
-        f.write(f'    "version": "{_OUTPUT_VERSION}",\n')
-        f.write('    "fields": ["date", "asset", "open", "close", "high", "low", "rsi_6", "volume_ratio_5"]\n')
-        f.write('  },\n')
-        f.write('  "data": [\n')
+    with gzip.open(factor_final_path, 'wt', encoding='utf-8') as out_f:
+        # 写入 meta
+        out_f.write('{\n')
+        out_f.write('  "meta": {\n')
+        out_f.write(f'    "generated_at": "{generated_at}",\n')
+        out_f.write('    "source": "sina_api_batch_external_merge",\n')
+        out_f.write(f'    "n_days": {n_days},\n')
+        out_f.write(f'    "n_assets": {n_assets},\n')
+        out_f.write(f'    "n_records": {n_records},\n')  # 补充 n_records
+        out_f.write('    "date_range": {\n')
+        out_f.write(f'      "start": "{date_start}",\n')
+        out_f.write(f'      "end": "{date_end}"\n')
+        out_f.write('    },\n')
+        out_f.write(f'    "last_updated": "{last_updated}",\n')
+        out_f.write(f'    "version": "{_OUTPUT_VERSION}",\n')
+        out_f.write('    "fields": ["date", "asset", "open", "close", "high", "low", "rsi_6", "volume_ratio_5"],\n')
+        out_f.write('    "format_note": "每条记录单行写入，便于流式解析"\n')
+        out_f.write('  },\n')
+        out_f.write('  "data": [\n')
         
-        for i, rec in enumerate(factor_records):
-            if i > 0:
-                f.write(',\n')
-            f.write('    ' + json.dumps(rec, ensure_ascii=False))
+        # 流式写出数据
+        with gzip.open(factor_merged_path, 'rt', encoding='utf-8') as in_f:
+            is_first = True
+            for line in in_f:
+                stripped = line.strip()
+                if stripped.startswith('{'):
+                    if not is_first:
+                        out_f.write(',\n')
+                    out_f.write('    ' + stripped.rstrip(','))
+                    is_first = False
         
-        f.write('\n  ]\n')
-        f.write('}\n')
-    
-    # 立即释放因子数据内存
-    del factor_records
-    gc.collect()
+        out_f.write('\n  ]\n')
+        out_f.write('}\n')
     
     factor_size_mb = factor_final_path.stat().st_size / (1024 * 1024)
     logger.info(f"    因子文件: {factor_final_path} ({factor_size_mb:.2f} MB)")
     
     # ============ 第二阶段：处理收益数据 ============
-    # 读取合并后的收益数据（此时因子数据已释放）
+    # 第一遍：流式读取提取统计信息
+    n_return_records = 0
+    
     with gzip.open(return_merged_path, 'rt', encoding='utf-8') as f:
-        return_records = json.load(f)
+        for line in f:
+            stripped = line.strip()
+            if stripped.startswith('{'):
+                n_return_records += 1
     
-    logger.info(f"  收益记录: {len(return_records)}")
+    logger.info(f"  收益记录: {n_return_records}")
     
-    # 写入收益数据最终文件
+    # 第二遍：流式读取并逐行写出
     return_final_path = CACHE_DIR / 'return_data.json.gz'
     
-    with gzip.open(return_final_path, 'wt', encoding='utf-8') as f:
-        f.write('{\n')
-        f.write('  "meta": {\n')
-        f.write(f'    "generated_at": "{generated_at}",\n')
-        f.write('    "source": "sina_api_batch_external_merge",\n')
-        f.write(f'    "n_days": {n_days},\n')
-        f.write(f'    "n_assets": {n_assets},\n')
-        f.write('    "date_range": {\n')
-        f.write(f'      "start": "{date_start}",\n')
-        f.write(f'      "end": "{date_end}"\n')
-        f.write('    },\n')
-        f.write(f'    "last_updated": "{last_updated}",\n')
-        f.write(f'    "version": "{_OUTPUT_VERSION}",\n')
-        f.write('    "fields": ["date", "asset", "forward_return_1d", "forward_return_3d", "forward_return_5d"],\n')
-        f.write('    "note": "3日和5日收益最后几天会有NaN"\n')
-        f.write('  },\n')
-        f.write('  "data": [\n')
+    with gzip.open(return_final_path, 'wt', encoding='utf-8') as out_f:
+        # 写入 meta（复用因子数据的统计信息）
+        out_f.write('{\n')
+        out_f.write('  "meta": {\n')
+        out_f.write(f'    "generated_at": "{generated_at}",\n')
+        out_f.write('    "source": "sina_api_batch_external_merge",\n')
+        out_f.write(f'    "n_days": {n_days},\n')
+        out_f.write(f'    "n_assets": {n_assets},\n')
+        out_f.write(f'    "n_records": {n_return_records},\n')  # 补充 n_records
+        out_f.write('    "date_range": {\n')
+        out_f.write(f'      "start": "{date_start}",\n')
+        out_f.write(f'      "end": "{date_end}"\n')
+        out_f.write('    },\n')
+        out_f.write(f'    "last_updated": "{last_updated}",\n')
+        out_f.write(f'    "version": "{_OUTPUT_VERSION}",\n')
+        out_f.write('    "fields": ["date", "asset", "forward_return_1d", "forward_return_3d", "forward_return_5d"],\n')
+        out_f.write('    "note": "3日和5日收益最后几天会有NaN"\n')
+        out_f.write('  },\n')
+        out_f.write('  "data": [\n')
         
-        for i, rec in enumerate(return_records):
-            if i > 0:
-                f.write(',\n')
-            f.write('    ' + json.dumps(rec, ensure_ascii=False))
+        # 流式写出数据
+        with gzip.open(return_merged_path, 'rt', encoding='utf-8') as in_f:
+            is_first = True
+            for line in in_f:
+                stripped = line.strip()
+                if stripped.startswith('{'):
+                    if not is_first:
+                        out_f.write(',\n')
+                    out_f.write('    ' + stripped.rstrip(','))
+                    is_first = False
         
-        f.write('\n  ]\n')
-        f.write('}\n')
-    
-    # 立即释放收益数据内存
-    del return_records
-    gc.collect()
+        out_f.write('\n  ]\n')
+        out_f.write('}\n')
     
     return_size_mb = return_final_path.stat().st_size / (1024 * 1024)
     logger.info(f"    收益文件: {return_final_path} ({return_size_mb:.2f} MB)")
@@ -788,7 +814,6 @@ def format_final_output(
     Path(return_merged_path).unlink()
     
     logger.info(f"  ✓ 最终文件已保存")
-    # 已完成格式化，统计信息由 validate_final_data 提供
     logger.info("  ✓ 格式化完成")
 
 
@@ -863,6 +888,7 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
         # 从 meta 提取信息
         n_days = meta.get('n_days', 0)
         n_assets = meta.get('n_assets', 0)
+        n_records_in_meta = meta.get('n_records', 0)  # 新增：从 meta 提取 n_records
         date_range = meta.get('date_range', {})
         date_start = date_range.get('start', '') if isinstance(date_range, dict) else ''
         date_end = date_range.get('end', '') if isinstance(date_range, dict) else ''
@@ -930,17 +956,20 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
     del sample_records
     gc.collect()
     
-    # 综合验证：交易日数达标 + 关键字段非空比例 >= 80%
+    # 综合验证：交易日数达标 + 关键字段非空比例 >= 80% + 记录数一致
     days_valid = n_days >= N_DAYS * 0.9
     data_valid = rsi_valid_ratio >= 0.8
-    is_valid = days_valid and data_valid
+    records_valid = (records_count == n_records_in_meta) or (n_records_in_meta == 0)  # 兼容旧版本无 n_records
+    is_valid = days_valid and data_valid and records_valid
     
     if not days_valid:
         logger.info(f"  ⚠ 交易日数不足 ({n_days}/{N_DAYS})")
     if not data_valid:
         logger.info(f"  ⚠ 数据有效性不足 (RSI有效比例: {rsi_valid_ratio:.1%} < 80%)")
+    if not records_valid and n_records_in_meta > 0:
+        logger.info(f"  ⚠ 记录数不一致 (流式统计: {records_count}, meta声明: {n_records_in_meta})")
     if is_valid:
-        logger.info(f"  ✓ 通过验证 (RSI有效比例: {rsi_valid_ratio:.1%})")
+        logger.info(f"  ✓ 通过验证 (RSI有效比例: {rsi_valid_ratio:.1%}, 记录数一致: {records_count})")
     
     return is_valid, n_days, n_assets, records_count
 
