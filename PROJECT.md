@@ -231,11 +231,27 @@ factor_ic_analyzer/
 | 文件类型 | 位置 | 命名规则 | 示例 |
 |---------|------|---------|------|
 | 流程文档 | `<模块目录>/docs/` | `<脚本名>_flow.md` | `factor_ic/docs/ic_rsi_1d_flow.md` |
-| 测试用例 | `<模块目录>/test_cases/` | `<脚本名>_test_cases.md` | `factor_ic/test_cases/ic_rsi_1d_test_cases.md` |
+| pytest 测试文件 | `<模块目录>/test_cases/` | `test_<脚本名>.py` | `factor_ic/test_cases/test_ic_rsi_1d.py` |
 
 **命名说明：**
 - `<脚本名>` = 脚本文件名去掉 `.py` 后缀
-- 例如：`ic_rsi_1d.py` → 流程文档 `ic_rsi_1d_flow.md`，测试用例 `ic_rsi_1d_test_cases.md`
+- 例如：`ic_rsi_1d.py` → 流程文档 `ic_rsi_1d_flow.md`，pytest 测试文件 `test_ic_rsi_1d.py`
+
+### 测试代码规范（2026-05-27新增）
+
+**核心原则：测试用例必须是 pytest 可执行文件，禁止在 `__main__` 块写测试代码。**
+
+```
+□ 禁止在脚本 `__main__` 块写测试代码
+□ 测试用例必须是 pytest 可执行文件（.py 格式）
+□ 修改代码后必须跑完整测试用例：pytest <模块>/test_cases/ -v
+□ 新建脚本时同步创建 pytest 测试文件
+□ pytest 测试文件使用 tempfile.TemporaryDirectory 管理临时文件
+```
+
+**历史教训（2026-05-27）：**
+- `cache_manager.py` 的 `__main__` 块包含测试代码，无法自动运行、无法集成 CI
+- 正确做法：将测试代码转换为 pytest 文件 `test_cases/test_cache_manager.py`
 
 ### 强制规则
 

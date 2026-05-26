@@ -226,7 +226,7 @@ def _read_cache_impl(
         logger.error("gzip 文件损坏: %s", path)
         raise ValueError(f"gzip 文件损坏: {path}") from e
     except PermissionError as e:
-        logger.error("文件权限错误: %s", path)
+        logger.error("文件权限错误: %s, errno=%d", path, e.errno)
         raise PermissionError(f"无权限读取缓存文件: {path}") from e
     except OSError as e:
         logger.error("文件系统错误: %s", path)
@@ -333,7 +333,7 @@ def _write_cache_impl(
         raise TypeError(f"缓存数据包含不可序列化类型: {path}, {e}") from e
     # === 文件系统异常（子类在前，父类在后）===
     except PermissionError as e:
-        logger.error("文件权限错误: %s", path)
+        logger.error("文件权限错误: %s, errno=%d", path, e.errno)
         # 清理临时文件（消除 TOCTOU 竞态，防止清理失败掩盖原始异常）
         if temp_path:
             try:
@@ -343,10 +343,17 @@ def _write_cache_impl(
         raise PermissionError(f"无权限写入缓存文件: {path}") from e
     except OSError as e:
         # 通过 errno 区分不同的 OSError 场景
-        if e.errno == errno.ENOENT and not ensure_dir:
-            # 目录不存在（mkstemp 在 dir=path.parent 时抛出）
-            logger.error("目标目录不存在: %s", path.parent)
-            raise FileNotFoundError(f"目标目录不存在且 ensure_dir=False: {path.parent}") from e
+        if e.errno == errno.ENOENT:
+            # 目标路径不存在（目录不存在、符号链接断裂、临时文件找不到等）
+            # 统一抛出 FileNotFoundError，提供精确错误信息
+            # 清理临时文件（与其他分支保持一致）
+            if temp_path:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            logger.error("目标路径不存在: %s, errno=%d", path.parent, e.errno)
+            raise FileNotFoundError(f"目标路径不存在: {path.parent}") from e
         else:
             # 其他 OSError：磁盘空间不足、文件被占用等
             logger.error("文件系统错误: %s, errno=%d", path, e.errno)
@@ -650,7 +657,10 @@ def read_cache(
         
     Raises:
         FileNotFoundError: 文件不存在
-        ValueError: JSON 解析失败
+        ValueError: JSON 解析失败或文件内容为空/被截断
+        PermissionError: 无权限读取文件
+        OSError: 文件系统错误
+        RuntimeError: 未知错误
         
     Example:
         # 统一接口，无需手动判断文件类型
@@ -692,8 +702,10 @@ def write_cache(
         json_sort_keys: 是否排序 JSON 键
         
     Raises:
-        TypeError: 数据类型错误（非 dict）
-        OSError: 文件写入失败
+        TypeError: 数据类型错误（非 dict）或数据包含不可序列化类型
+        PermissionError: 无权限写入文件
+        OSError: 文件写入失败（磁盘空间不足或文件系统错误）
+        RuntimeError: 未知错误
         
     Example:
         # 统一接口，无需手动判断文件类型
@@ -781,122 +793,3 @@ def delete_cache(
         logger.exception("删除缓存失败（未知错误）: %s", path)
         raise RuntimeError(f"删除缓存失败（未知错误）: {path}") from e
 
-
-if __name__ == '__main__':
-    # 配置测试日志（复用 logger_config.py 的 setup_logger）
-    # 遵循 PROJECT.md 第780-839行规范
-    # __main__ 中需要添加项目根目录到 sys.path
-    import sys
-    from pathlib import Path as _Path
-    sys.path.insert(0, str(_Path(__file__).parent.parent.parent))
-    
-    from data_fetchers.common.logger_config import setup_logger
-    
-    test_logger = setup_logger(
-        'cache_manager',  # 脚本名称
-        level=logging.DEBUG,  # 测试用 DEBUG
-        console_level=logging.INFO  # 控制台用 INFO
-    )
-    
-    # 测试路径直接定义
-    test_dir = Path(__file__).parent.parent.parent / 'cache' / 'test'
-    test_dir.mkdir(parents=True, exist_ok=True)
-    
-    # 定义所有测试文件路径（便于统一清理）
-    test_path = test_dir / 'test_cache.json.gz'
-    test_unified_path_gz = test_dir / 'test_unified.json.gz'
-    test_unified_path_json = test_dir / 'test_unified.json'
-    test_options_path = test_dir / 'test_options.json.gz'
-    test_readable_path = test_dir / 'test_readable.json'
-    test_append_path = test_dir / 'test_append.json'
-    test_invalid_path = test_dir / 'test_invalid.json'
-    
-    # 使用 try/finally 确保测试文件清理（健壮性）
-    try:
-        test_data = {'test': [1, 2, 3], 'dates': ['2024-01-01']}
-        
-        test_logger.info("写入测试缓存...")
-        write_gzip_cache(test_path, test_data, logger=test_logger)
-        
-        test_logger.info("读取测试缓存...")
-        loaded = read_gzip_cache(test_path, logger=test_logger)
-        test_logger.info("读取结果: %s", loaded)
-        
-        test_logger.info("获取缓存信息...")
-        info = get_cache_file_info(test_path, logger=test_logger)
-        test_logger.info("文件信息: %s", info)
-        
-        # 测试统一 API
-        test_logger.info("测试统一缓存 API...")
-        write_cache(test_unified_path_gz, {'gzip': True}, logger=test_logger)
-        write_cache(test_unified_path_json, {'gzip': False}, logger=test_logger)
-        
-        gzip_data = read_cache(test_unified_path_gz, logger=test_logger)
-        json_data = read_cache(test_unified_path_json, logger=test_logger)
-        test_logger.info("gzip 数据: %s", gzip_data)
-        test_logger.info("json 数据: %s", json_data)
-        
-        # 测试新增参数
-        test_logger.info("测试新增参数（压缩级别 + JSON 格式选项）...")
-        # 压缩级别测试（级别 1，最快）
-        write_gzip_cache(test_options_path, {'compresslevel': 1}, compresslevel=1, logger=test_logger)
-        test_logger.info("压缩级别 1 写入成功")
-        
-        # 可读格式测试（indent=2）
-        write_json_cache(test_readable_path, {'key1': 'value1', 'key2': 'value2'}, json_indent=2, json_sort_keys=True, logger=test_logger)
-        test_logger.info("可读格式写入成功")
-        
-        # 验证可读格式（显式指定 encoding='utf-8'，与写入时一致，避免 Windows GBK 问题）
-        with open(test_readable_path, 'r', encoding='utf-8') as f:
-            readable_content = f.read()
-        test_logger.info("可读格式内容:\n%s", readable_content)
-        
-        # 测试辅助函数
-        test_logger.info("测试辅助函数...")
-        test_logger.info("cache_exists(test_unified.json.gz): %s", cache_exists(test_unified_path_gz))
-        test_logger.info("cache_exists(not_exist.json): %s", cache_exists(test_dir / 'not_exist.json'))
-        
-        test_logger.info("delete_cache(test_unified.json.gz): %s", delete_cache(test_unified_path_gz, logger=test_logger))
-        test_logger.info("delete_cache(not_exist.json): %s", delete_cache(test_dir / 'not_exist.json', logger=test_logger))
-        
-        # 测试 append_to_cache
-        test_logger.info("测试 append_to_cache...")
-        append_to_cache(test_append_path, [1, 2], key='data', logger=test_logger)
-        append_to_cache(test_append_path, [3, 4], key='data', logger=test_logger)
-        append_result = read_json_cache(test_append_path, logger=test_logger)
-        test_logger.info("追加结果: %s", append_result)
-        
-        # 测试错误场景
-        test_logger.info("测试错误场景...")
-        try:
-            read_gzip_cache(test_dir / 'not_exist.json.gz', logger=test_logger)
-        except FileNotFoundError as e:
-            test_logger.info("捕获预期异常 FileNotFoundError: %s", e)
-        
-        # 测试防御性编程（数据结构异常）
-        test_logger.info("测试防御性编程...")
-        write_json_cache(test_invalid_path, {'data': {'nested': 'dict'}}, logger=test_logger)
-        append_to_cache(test_invalid_path, [5, 6], key='data', logger=test_logger)
-        invalid_result = read_json_cache(test_invalid_path, logger=test_logger)
-        test_logger.info("异常数据修复结果: %s", invalid_result)
-        
-        test_logger.info("测试完成")
-    finally:
-        # 清理测试文件（finally 确保无论成功或失败都执行）
-        # 使用 unlink(missing_ok=True) 保证幂等，避免重复删除报错
-        for test_file in [test_path, test_unified_path_gz, test_unified_path_json,
-                          test_options_path, test_readable_path, test_append_path, test_invalid_path]:
-            try:
-                test_file.unlink(missing_ok=True)
-            except OSError:
-                pass  # 忽略清理失败，不影响测试结果
-        
-        # 清理测试目录（仅在目录为空时删除，非空或不存在时静默忽略）
-        # 避免 CI 环境或多次运行后造成垃圾目录堆积
-        try:
-            test_dir.rmdir()
-            test_logger.info("已清理测试目录: %s", test_dir)
-        except OSError:
-            pass  # 目录非空或不存在，静默忽略
-        
-        test_logger.info("已清理测试文件")

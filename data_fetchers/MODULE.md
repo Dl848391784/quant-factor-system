@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v3.01
+> 版本: v3.02
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-27 05:00 北京时间
+> 更新时间: 2026-05-27 12:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -132,9 +132,9 @@ data_fetchers/
 ├── logs/               # 日志目录
 │   └── .gitkeep
 │
-├── test_cases/         # 测试用例
+├── test_cases/         # pytest 测试文件（2026-05-27更新）
 │   ├── __init__.py
-│   └── <脚本名>_test_cases.md
+│   └── test_<脚本名>.py  # pytest 可执行文件
 │
 ├── factor_generator.py # 统一因子生成入口
 ├── fetch_turnover.py   # 换手率数据拉取
@@ -597,7 +597,16 @@ data_fetchers/
    - **__all__ 导出列表**：添加公共函数导出列表（遵循 MODULE.md 约束 53）
    - **__main__ logger 设置**：`logging.basicConfig` + `cli_logger`（遵循 PROJECT.md 日志规范）
    - **CLI 参数简化**：`--baostock` 替代 `--source` 选择（更简洁）
-   - **修复原因**：代码bug + 规范补充（5项）
+
+33. **测试规范迁移 (2026-05-27 12:00)** — pytest 测试框架迁移
+   - **PROJECT.md 测试规范更新**：测试用例从 `.md` 文档改为 pytest 可执行文件（`.py`）
+   - **MODULE.md 目录结构更新**：test_cases/ 从 `<脚本名>_test_cases.md` 改为 `test_<脚本名>.py`
+   - **MODULE.md 版本更新**：v3.01 → v3.02
+   - **cache_manager.py __main__ 块删除**：禁止脚本内嵌测试代码（遵循 PROJECT.md 新规范）
+   - **pytest 测试文件创建**：`test_cases/test_cache_manager.py`（从 __main__ 块转换）
+   - **cache_manager_test_cases.md 删除**：不再需要 .md 测试场景文档
+   - **测试命名规则**：`test_<脚本名>.py`（遵循 pytest 约定）
+   - **修复原因**：规范缺失（PROJECT.md 缺少 pytest 规范、MODULE.md 目录结构不规范、__main__ 块测试代码无法自动运行）
 
 33. **fetch_turnover.py v2.3 (2026-05-27 11:30)** — 第四轮补充优化
    - **get_cached_turnover_codes 函数**：创建公共函数（__all__ 中已声明，补充实现）
