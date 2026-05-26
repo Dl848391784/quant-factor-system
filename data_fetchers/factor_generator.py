@@ -6,6 +6,10 @@
 
 Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
 
+使用前提：
+- 运行前需将 project_root 加入 PYTHONPATH，或以项目根目录为工作目录执行
+- 否则 else 分支的 factor_ic 绝对导入会触发 ModuleNotFoundError
+
 遵循 PROJECT.md 规范：
 - 输出到 cache/factor_data/
 - 复用公共模块计算函数（遵循强制复用规范）
@@ -41,6 +45,7 @@ Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
 - v1.26 (2026-05-26): 规范合规修复（输出路径改为result目录，遵循MODULE.md约束#2：与factor_ic等模块保持一致）
 - v1.27 (2026-05-27): 4项修复——1) 条件导入else分支注释补充（说明factor_ic跨包必须用绝对导入）；2) Step编号修正（7→6、8→7、9→8）；3) sys移至顶层导入（PEP 8合规）；4) _DEFAULT_CACHE_DIR注释补充路径层级说明
 - v1.28 (2026-05-27): 4项修复——1) 模块docstring声明Python>=3.8（gzip.BadGzipFile）；2) output_df显式释放内存（与既有风格一致）；3) json.dump设置ensure_ascii=False（中文不转义）；4) argparse移至顶层导入（PEP 8合规）
+- v1.29 (2026-05-27): 5项修复——1) Step编号重排（2b→3，后续顺延4-9）；2) 使用前提说明补充（PYTHONPATH要求）；3) output_df提前释放（output_data构建后立即del）；4) gzip.open显式encoding='utf-8'（跨平台一致性）；5) JSONDecodeError捕获移除logger.error（行列信息合并到ValueError）
 
 作者: 云瑶
 """
@@ -265,14 +270,10 @@ def generate_all_factors(
         raise ValueError(f"gzip 文件损坏: {factor_data_path}") from e
     except json.JSONDecodeError as e:
         # JSONDecodeError 内存优化：提取关键信息，避免 e.doc 内存翻倍
-        logger.error(
-            "JSON 解析失败\n"
-            "文件路径: %s\n"
-            "错误位置: 行 %d, 列 %d\n"
-            "错误信息: %s",
-            factor_data_path, e.lineno, e.colno, e.msg
-        )
-        raise ValueError(f"JSON解析失败: {factor_data_path}, 位置 {e.pos}") from e
+        # 将行列信息合并到异常消息，由调用方统一决定是否记录日志
+        raise ValueError(
+            f"JSON解析失败: {factor_data_path}, 行 {e.lineno}, 列 {e.colno}, 信息: {e.msg}"
+        ) from e
     
     # 数据验证：检查 'data' 字段存在
     if 'data' not in base_data:
@@ -299,14 +300,10 @@ def generate_all_factors(
         raise ValueError(f"gzip 文件损坏: {turnover_data_path}") from e
     except json.JSONDecodeError as e:
         # JSONDecodeError 内存优化：提取关键信息，避免 e.doc 内存翻倍
-        logger.error(
-            "JSON 解析失败\n"
-            "文件路径: %s\n"
-            "错误位置: 行 %d, 列 %d\n"
-            "错误信息: %s",
-            turnover_data_path, e.lineno, e.colno, e.msg
-        )
-        raise ValueError(f"JSON解析失败: {turnover_data_path}, 位置 {e.pos}") from e
+        # 将行列信息合并到异常消息，由调用方统一决定是否记录日志
+        raise ValueError(
+            f"JSON解析失败: {turnover_data_path}, 行 {e.lineno}, 列 {e.colno}, 信息: {e.msg}"
+        ) from e
     
     # 数据验证：检查 'data' 字段存在
     if 'data' not in turnover_data:
@@ -338,8 +335,8 @@ def generate_all_factors(
     
     logger.info("  合并后记录数: %d", len(factor_df))
     
-    # ========== Step 2b: 加载收益数据 ==========
-    logger.info("Step 2b: 加载收益数据...")
+    # ========== Step 3: 加载收益数据 ==========
+    logger.info("Step 3: 加载收益数据...")
     
     try:
         with gzip.open(return_data_path, 'rt') as f:
@@ -350,14 +347,10 @@ def generate_all_factors(
         raise ValueError(f"gzip 文件损坏: {return_data_path}") from e
     except json.JSONDecodeError as e:
         # JSONDecodeError 内存优化：提取关键信息，避免 e.doc 内存翻倍
-        logger.error(
-            "JSON 解析失败\n"
-            "文件路径: %s\n"
-            "错误位置: 行 %d, 列 %d\n"
-            "错误信息: %s",
-            return_data_path, e.lineno, e.colno, e.msg
-        )
-        raise ValueError(f"JSON解析失败: {return_data_path}, 位置 {e.pos}") from e
+        # 将行列信息合并到异常消息，由调用方统一决定是否记录日志
+        raise ValueError(
+            f"JSON解析失败: {return_data_path}, 行 {e.lineno}, 列 {e.colno}, 信息: {e.msg}"
+        ) from e
     
     # 数据验证：检查 'data' 字段存在
     if 'data' not in return_data:
@@ -389,32 +382,32 @@ def generate_all_factors(
     
     logger.info("  合并收益后记录数: %d", len(factor_df))
     
-    # ========== Step 3: 计算 bollinger_pb ==========
-    logger.info("Step 3: 计算布林带 %B 因子...")
+    # ========== Step 4: 计算 bollinger_pb ==========
+    logger.info("Step 4: 计算布林带 %B 因子...")
     
     factor_df = calculate_bollinger_pb(factor_df)
     
     bollinger_valid = int(factor_df['bollinger_pb'].notna().sum())
     logger.info("  有效 bollinger_pb: %d (%.2f%%)", bollinger_valid, _calc_pct(bollinger_valid, len(factor_df)))
     
-    # ========== Step 4: 计算 kdj_j ==========
-    logger.info("Step 4: 计算 KDJ_J 因子...")
+    # ========== Step 5: 计算 kdj_j ==========
+    logger.info("Step 5: 计算 KDJ_J 因子...")
     
     factor_df = calculate_kdj_j(factor_df)
     
     kdj_valid = int(factor_df['kdj_j'].notna().sum())
     logger.info("  有效 kdj_j: %d (%.2f%%)", kdj_valid, _calc_pct(kdj_valid, len(factor_df)))
     
-    # ========== Step 5: 计算 turnover_surge ==========
-    logger.info("Step 5: 计算换手率突增因子...")
+    # ========== Step 6: 计算 turnover_surge ==========
+    logger.info("Step 6: 计算换手率突增因子...")
     
     factor_df = calculate_turnover_surge(factor_df)
     
     surge_valid = int(factor_df['turnover_surge'].notna().sum())
     logger.info("  有效 turnover_surge: %d (%.2f%%)", surge_valid, _calc_pct(surge_valid, len(factor_df)))
     
-    # ========== Step 6: 格式化输出 ==========
-    logger.info("Step 6: 格式化输出...")
+    # ========== Step 7: 格式化输出 ==========
+    logger.info("Step 7: 格式化输出...")
     
     factor_df['date'] = factor_df['date'].dt.strftime('%Y-%m-%d')
     
@@ -431,8 +424,8 @@ def generate_all_factors(
     # 显式释放 factor_df 内存（可能包含中间列，比 output_df 更多）
     del factor_df
     
-    # ========== Step 7: 保存输出 ==========
-    logger.info("Step 7: 保存输出...")
+    # ========== Step 8: 保存输出 ==========
+    logger.info("Step 8: 保存输出...")
     
     # dates 字段：字符串排序对 YYYY-MM-DD 格式正确（字典序与日期序一致）
     # 从 output_df 取 dates，数据来源更清晰
@@ -440,6 +433,10 @@ def generate_all_factors(
         'dates': sorted(output_df['date'].unique().tolist()),
         'data': output_df.to_dict('records')
     }
+    
+    # output_data 构建后 output_df 已无用，立即取值并释放
+    total_records = len(output_df)
+    del output_df  # 显式释放内存（与 base_data/turnover_df/return_df/factor_df 保持一致）
     
     # 确保父目录存在（职责分离：mkdir 单独处理，异常信息更精确）
     try:
@@ -450,7 +447,7 @@ def generate_all_factors(
     # 使用临时文件 + os.replace 原子写入（遵循 PROJECT.md 文件写入规范）
     temp_path = output_path.parent / (output_path.name + '.tmp')
     try:
-        with gzip.open(temp_path, 'wt') as f:
+        with gzip.open(temp_path, 'wt', encoding='utf-8') as f:
             json.dump(output_data, f, ensure_ascii=False)  # 中文不转义，压缩率更高
         os.replace(temp_path, output_path)
     except OSError as e:
@@ -463,13 +460,13 @@ def generate_all_factors(
         raise RuntimeError(f"未知错误保存失败: {output_path}, {type(e).__name__}: {e}") from e
     
     logger.info("  输出路径: %s", output_path)
-    logger.info("  输出记录数: %d", len(output_df))
+    logger.info("  输出记录数: %d", total_records)
     
     # 计算运行耗时
     end_time = datetime.now()
     elapsed_seconds = (end_time - start_time).total_seconds()
     
-    # ========== Step 8: 返回元数据 ==========
+    # ========== Step 9: 返回元数据 ==========
     # metadata 字段说明：
     # - generated_at: 生成时间（格式 YYYY-MM-DD HH:MM:SS）
     # - elapsed_seconds: 运行耗时（秒，精度 .2f）
@@ -480,8 +477,6 @@ def generate_all_factors(
     # - return_columns: 收益数据列名
     # - input_sources: 输入数据源路径
     # - output_path: 输出文件路径
-    total_records = len(output_df)
-    del output_df  # 显式释放内存（与 base_data/turnover_df/return_df/factor_df 保持一致）
     
     metadata = {
         'generated_at': end_time.strftime('%Y-%m-%d %H:%M:%S'),
