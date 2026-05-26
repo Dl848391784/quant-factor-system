@@ -14,6 +14,11 @@ HTTP 客户端模块
 - v1.6 (2026-05-27): 测试规范迁移：
     1. 导入顺序修复（PEP 8：标准库 → 第三方库，typing 移到 requests 之前）
     2. 删除 __main__ 测试代码，迁移到 pytest 测试文件 test_http_client.py（16 个测试用例）
+- v1.7 (2026-05-27): 重试机制修复（4个问题）：
+    1. 双重重试叠加：create_retry_session 与 request_with_retry 互斥警告，docstring 明确用法
+    2. 退避时间计算：抽取 _calc_wait_time() 函数，修正线性递增逻辑（attempt=0→1×delay）
+    3. 死代码清理：删除 if response is None 检查（requests 永不返回 None）
+    4. 重复日志修复：删除三处 else 子句，最终失败统一由循环后 logger.error 记录
 
 作者: 云瑶
 日期: 2026-05-24
@@ -133,7 +138,22 @@ def create_retry_session(
     logger: Optional[logging.Logger] = None,
 ) -> requests.Session:
     """
-    创建带重试机制的 HTTP Session
+    创建带重试机制的 HTTP Session（urllib3 层自动重试）
+    
+    ⚠️ 互斥警告：此函数与 request_with_retry() 互斥，二选一使用：
+    
+    方案 A（推荐用于标准 HTTP 错误）：
+        session = create_retry_session(total_retries=3)
+        response = session.get(url)  # urllib3 自动重试 3 次
+    
+    方案 B（用于需解析响应内容判断重试的场景）：
+        session = create_retry_session(total_retries=0)  # 禁用 urllib3 重试
+        data = request_with_retry(session, url, max_attempts=3)  # 应用层重试
+    
+    错误用法（双重重试叠加）：
+        session = create_retry_session(total_retries=3)
+        data = request_with_retry(session, url, max_attempts=3)
+        # 最坏情况：3×(1+3)=12 次请求，行为不透明
     
     Args:
         headers: 自定义请求头（默认 None，支持 Dict 或 MappingProxyType）
@@ -263,6 +283,28 @@ def create_sina_session(
     return create_retry_session(headers=DEFAULT_SINA_HEADERS, logger=logger)
 
 
+def _calc_wait_time(attempt: int, delay: float) -> float:
+    """
+    计算线性递增退避等待时间
+    
+    Args:
+        attempt: 当前尝试次数（从 0 开始）
+        delay: 基础延迟（秒）
+        
+    Returns:
+        等待时间（秒）
+        
+    Example:
+        >>> _calc_wait_time(0, 1.0)  # 第 1 次失败后等待 1 秒
+        1.0
+        >>> _calc_wait_time(1, 1.0)  # 第 2 次失败后等待 2 秒
+        2.0
+        >>> _calc_wait_time(2, 1.0)  # 第 3 次失败后等待 3 秒
+        3.0
+    """
+    return (attempt + 1) * delay
+
+
 def request_with_retry(
     session: requests.Session,
     url: str,
@@ -276,14 +318,18 @@ def request_with_retry(
     logger: Optional[logging.Logger] = None,
 ) -> Any:
     """
-    带手动重试的请求（用于 API 可能返回非 HTTP 错误的情况）
+    带手动重试的请求（应用层重试，用于需解析响应内容判断重试的场景）
     
-    注意：此函数使用**线性递增退避策略**（delay + attempt * delay），
-    与 urllib3 Retry 的指数退避（backoff_factor * 2^attempt）不同。
+    ⚠️ 互斥警告：此函数与 create_retry_session(total_retries>0) 互斥。
+    若 session 已配置 urllib3 重试，叠加此函数会导致双重重试。
+    正确用法：create_retry_session(total_retries=0) 禁用 urllib3 重试后使用此函数。
+    
+    退避策略：线性递增（attempt=0 等待 1×delay，attempt=1 等待 2×delay...）
+    与 urllib3 Retry 的指数退避（backoff_factor × 2^attempt）不同。
     线性退避适合快速恢复的临时故障，指数退避适合服务器压力场景。
     
     Args:
-        session: HTTP Session
+        session: HTTP Session（应使用 create_retry_session(total_retries=0) 创建）
         url: 请求 URL
         method: HTTP 方法（GET/POST/PUT/DELETE，默认 GET）
         params: URL 查询参数（GET 请求）
@@ -305,12 +351,13 @@ def request_with_retry(
         json.JSONDecodeError: JSON 解析失败
         
     Example:
-        # GET 请求
-        session = create_retry_session(headers=DEFAULT_EASTMONEY_HEADERS)
+        # 应用层重试（需解析响应内容）
+        session = create_retry_session(total_retries=0)  # 禁用 urllib3 重试
         data = request_with_retry(
             session,
             'https://api.eastmoney.com/...',
             params={'code': '000001'},
+            max_attempts=3,
             logger=my_logger
         )
         
@@ -333,7 +380,7 @@ def request_with_retry(
     method = method.upper()
     
     for attempt in range(max_attempts):
-        response = None  # 初始化变量，避免 except 中未绑定
+        response: Optional[requests.Response] = None
         try:
             # 根据方法类型选择请求方式
             if method == 'GET':
@@ -347,10 +394,7 @@ def request_with_retry(
             else:
                 raise ValueError(f"未实现的 HTTP 方法: {method}")
             
-            # response 必定不为 None（requests 总是返回 Response 对象）
-            if response is None:
-                raise RuntimeError(f"请求返回 None: {url}, 方法: {method}")
-            
+            # requests 总是返回 Response 对象，不会返回 None（此处仅类型注解需要）
             response.raise_for_status()
             return response.json()
         except requests.HTTPError as e:
@@ -360,8 +404,8 @@ def request_with_retry(
             raise  # 直接抛出，不重试
         except requests.Timeout as e:
             last_error = e
-            wait_time = delay + attempt * delay  # 线性递增退避
             if attempt < max_attempts - 1:
+                wait_time = _calc_wait_time(attempt, delay)
                 logger.warning(
                     "请求超时 (尝试 %d/%d)\n"
                     "URL: %s\n"
@@ -370,19 +414,10 @@ def request_with_retry(
                     attempt + 1, max_attempts, url, method, wait_time
                 )
                 time.sleep(wait_time)
-            else:
-                # 最后一次失败，记录警告日志
-                logger.warning(
-                    "请求超时 (最终尝试 %d/%d)\n"
-                    "URL: %s\n"
-                    "方法: %s\n"
-                    "错误: %s",
-                    attempt + 1, max_attempts, url, method, e
-                )
         except requests.ConnectionError as e:
             last_error = e
-            wait_time = delay + attempt * delay  # 线性递增退避
             if attempt < max_attempts - 1:
+                wait_time = _calc_wait_time(attempt, delay)
                 logger.warning(
                     "连接错误 (尝试 %d/%d): %s\n"
                     "URL: %s\n"
@@ -391,15 +426,6 @@ def request_with_retry(
                     attempt + 1, max_attempts, e, url, method, wait_time
                 )
                 time.sleep(wait_time)
-            else:
-                # 最后一次失败，记录警告日志
-                logger.warning(
-                    "连接错误 (最终尝试 %d/%d)\n"
-                    "URL: %s\n"
-                    "方法: %s\n"
-                    "错误: %s",
-                    attempt + 1, max_attempts, url, method, e
-                )
         except (json.JSONDecodeError, requests.exceptions.JSONDecodeError) as e:
             # JSON 解析失败，记录详细信息
             # 使用 getattr 安全访问 response.text，避免 streaming 模式问题
@@ -417,8 +443,8 @@ def request_with_retry(
         except Exception as e:
             # 其他未知错误
             last_error = e
-            wait_time = delay + attempt * delay  # 线性递增退避
             if attempt < max_attempts - 1:
+                wait_time = _calc_wait_time(attempt, delay)
                 logger.warning(
                     "请求失败 (尝试 %d/%d): %s\n"
                     "URL: %s\n"
@@ -427,16 +453,8 @@ def request_with_retry(
                     attempt + 1, max_attempts, e, url, method, wait_time
                 )
                 time.sleep(wait_time)
-            else:
-                # 最后一次失败，记录警告日志
-                logger.warning(
-                    "请求失败 (最终尝试 %d/%d)\n"
-                    "URL: %s\n"
-                    "方法: %s\n"
-                    "错误: %s",
-                    attempt + 1, max_attempts, url, method, e
-                )
     
+    # 所有尝试失败，统一记录 error 日志
     logger.error("请求最终失败: %s\n方法: %s\n最后错误: %s", url, method, last_error)
     raise RuntimeError(f"请求失败: {url}, 方法: {method}") from last_error
 
