@@ -37,6 +37,7 @@
 - v1.24 (2026-05-26): Bug修复+代码结构优化（turnover_df内存释放、docstring Example标记非运行示例、元组转列表pandas兼容）
 - v1.25 (2026-05-26): Bug修复+文档修正（_calc_pct类型注解补充兼容类型说明、docstring Raises删除输入数据为空场景、兜底块错误信息补充异常详情）
 - v1.26 (2026-05-26): 规范合规修复（输出路径改为result目录，遵循MODULE.md约束#2：与factor_ic等模块保持一致）
+- v1.27 (2026-05-27): 4项修复——1) 条件导入else分支注释补充（说明factor_ic跨包必须用绝对导入）；2) Step编号修正（7→6、8→7、9→8）；3) sys移至顶层导入（PEP 8合规）；4) _DEFAULT_CACHE_DIR注释补充路径层级说明
 
 作者: 云瑶
 """
@@ -44,6 +45,7 @@ import gzip
 import json
 import logging
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
@@ -55,7 +57,6 @@ import pandas as pd
 # 注意：sys.path.insert 是必要的，因为脚本需要能够直接运行
 # 遵循 stock_utils.py 的条件导入模式
 if __name__ == '__main__':
-    import sys
     project_root = Path(__file__).parent.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
@@ -64,6 +65,8 @@ if __name__ == '__main__':
     from factor_ic.ic_turnover_surge_1d import calculate_turnover_surge
     from data_fetchers.common.logger_config import setup_logger
 else:
+    # factor_ic 与 data_fetchers 是同级目录（两个独立包）
+    # Python 相对导入不能跨包，必须使用绝对导入
     from factor_ic.ic_bollinger_pb_1d import calculate_bollinger_pb
     from factor_ic.ic_kdj_j_1d import calculate_kdj_j
     from factor_ic.ic_turnover_surge_1d import calculate_turnover_surge
@@ -87,9 +90,11 @@ __all__ = [
 # ============================================================================
 
 # 输入数据路径（cache 目录：数据源原始缓存）
+# parent=data_fetchers/, parent.parent=project_root/
 _DEFAULT_CACHE_DIR = Path(__file__).parent.parent / 'cache' / 'factor_data'
 
 # 输出数据路径（result 目录：遵循 MODULE.md 约束 #2）
+# parent=data_fetchers/, 输出到 data_fetchers/result/
 _DEFAULT_RESULT_DIR = Path(__file__).parent / 'result'
 
 # 扩展因子列名（元组防止意外修改）
@@ -404,8 +409,8 @@ def generate_all_factors(
     surge_valid = int(factor_df['turnover_surge'].notna().sum())
     logger.info("  有效 turnover_surge: %d (%.2f%%)", surge_valid, _calc_pct(surge_valid, len(factor_df)))
     
-    # ========== Step 7: 格式化输出 ==========
-    logger.info("Step 7: 格式化输出...")
+    # ========== Step 6: 格式化输出 ==========
+    logger.info("Step 6: 格式化输出...")
     
     factor_df['date'] = factor_df['date'].dt.strftime('%Y-%m-%d')
     
@@ -422,8 +427,8 @@ def generate_all_factors(
     # 显式释放 factor_df 内存（可能包含中间列，比 output_df 更多）
     del factor_df
     
-    # ========== Step 8: 保存输出 ==========
-    logger.info("Step 8: 保存输出...")
+    # ========== Step 7: 保存输出 ==========
+    logger.info("Step 7: 保存输出...")
     
     # dates 字段：字符串排序对 YYYY-MM-DD 格式正确（字典序与日期序一致）
     # 从 output_df 取 dates，数据来源更清晰
@@ -460,7 +465,7 @@ def generate_all_factors(
     end_time = datetime.now()
     elapsed_seconds = (end_time - start_time).total_seconds()
     
-    # ========== Step 9: 返回元数据 ==========
+    # ========== Step 8: 返回元数据 ==========
     # metadata 字段说明：
     # - generated_at: 生成时间（格式 YYYY-MM-DD HH:MM:SS）
     # - elapsed_seconds: 运行耗时（秒，精度 .2f）
