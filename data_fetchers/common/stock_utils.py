@@ -18,6 +18,7 @@
 - v1.10 (2026-05-25): is_main_board_stock docstring 中文逗号修复、辅助函数 Raises 精确化、_get_imported_functions() 调用合并、load_main_board_stock_list 非字典元素统计补全
 - v2.0 (2026-05-25): DCL模式简化（模块级 try/except ImportError）、MAX_STOCK_DATE 命名改为 get_max_stock_date（最小惊讶原则）、空代码统计直接计数（而非减法计算）、date_value 格式验证补全
 - v2.1 (2026-05-27): __main__ → pytest 测试迁移（210行删除）、创建 test_stock_utils.py（7个测试类 + 26个测试用例）
+- v2.2 (2026-05-27): 条件导入简化（删除 __main__ 分支死代码，仅保留相对导入）
 
 作者: 云瑶
 日期: 2026-05-24
@@ -146,19 +147,9 @@ def get_max_stock_date() -> str:
 # 保持向后兼容的别名（deprecated，将在未来版本移除）
 MAX_STOCK_DATE = get_max_stock_date
 
-# 模块级导入（简化 DCL 模式）
-# __main__ 场景需要先设置 sys.path，因此使用条件导入
-if __name__ == '__main__':
-    # __main__ 场景：需要先设置 sys.path 再导入
-    import sys
-    from pathlib import Path as _Path
-    sys.path.insert(0, str(_Path(__file__).parent.parent.parent))
-    from data_fetchers.common.paths import get_stock_list_file
-    from data_fetchers.common.cache_manager import read_json_cache
-else:
-    # 模块导入场景：使用相对导入
-    from .paths import get_stock_list_file
-    from .cache_manager import read_json_cache
+# 模块级导入（相对导入，用于模块被 import 时）
+from .paths import get_stock_list_file
+from .cache_manager import read_json_cache
 
 
 def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger:
