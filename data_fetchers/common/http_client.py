@@ -30,6 +30,10 @@ HTTP 客户端模块
 - v1.10 (2026-05-27): 命名冲突修复（2个问题）：
     1. session(...) 与变量名 session 冲突：重命名为 source_session(...)
     2. docstring Example 变量名冲突：as session 改为 as sess
+- v1.11 (2026-05-27): 异常处理与防御性修复（3个问题）：
+    1. 429 last_error 未赋值：最后一次失败由循环后统一 RuntimeError 处理
+    2. fallback 版本号误导：改为 '0.0.0' 确保走旧版本分支
+    3. 上下文管理器 UnboundLocalError：sess 变量名统一 + try 前赋值
 
 作者: 云瑶
 日期: 2026-05-24
@@ -185,7 +189,8 @@ def _create_retry_strategy(
     """
     # 直接检测 urllib3 版本号，避免异常消息字符串匹配的不确定性
     # urllib3.__version__ 是公开属性，Pyright 静态分析不认可但运行时有效
-    version_str = getattr(urllib3, '__version__', '1.26.0')  # fallback 为 1.x 常见版本
+    # fallback='0.0.0' 仅用于极端异常场景，确保走旧版本分支（method_whitelist）
+    version_str = getattr(urllib3, '__version__', '0.0.0')
     major_version = int(version_str.split('.')[0])
     
     if major_version >= 2:
@@ -520,6 +525,7 @@ def request_with_retry(
         except requests.HTTPError as e:
             # HTTP 状态码错误
             # 429 状态码（限流）特殊处理：读取 Retry-After 头后重试
+            last_error = e  # 记录错误，最后一次失败由循环后统一处理
             status_code = response.status_code if response else None
             
             if status_code == 429 and attempt < max_attempts - 1:
@@ -546,10 +552,11 @@ def request_with_retry(
                     time.sleep(wait_time)
                     continue  # 继续下一次尝试
             
-            # 非 429 或超过最大尝试次数，直接抛出
-            logger.error("HTTP 错误: %s\nURL: %s\n方法: %s\n状态码: %s", 
-                         e, url, method, status_code if status_code else 'N/A')
-            raise
+            # 非 429 直接抛出；429 最后一次失败由循环后统一处理
+            if status_code != 429:
+                logger.error("HTTP 错误: %s\nURL: %s\n方法: %s\n状态码: %s", 
+                             e, url, method, status_code if status_code else 'N/A')
+                raise
         except requests.Timeout as e:
             last_error = e
             if attempt < max_attempts - 1:
@@ -640,7 +647,7 @@ def retry_session(
         >>>     response = sess.get('https://api.eastmoney.com/...')
         >>> # sess 自动关闭，无需手动调用 sess.close()
     """
-    session = create_retry_session(
+    sess = create_retry_session(
         headers=headers,
         total_retries=total_retries,
         backoff_factor=backoff_factor,
@@ -650,9 +657,9 @@ def retry_session(
         logger=logger,
     )
     try:
-        yield session
+        yield sess
     finally:
-        session.close()
+        sess.close()
 
 
 @contextlib.contextmanager
@@ -673,11 +680,11 @@ def eastmoney_session(
         >>>     response = sess.get('https://api.eastmoney.com/...')
         >>> # sess 自动关闭
     """
-    session = create_eastmoney_session(logger=logger)
+    sess = create_eastmoney_session(logger=logger)
     try:
-        yield session
+        yield sess
     finally:
-        session.close()
+        sess.close()
 
 
 @contextlib.contextmanager
@@ -698,11 +705,11 @@ def sina_session(
         >>>     response = sess.get('http://vip.stock.finance.sina.com.cn/...')
         >>> # sess 自动关闭
     """
-    session = create_sina_session(logger=logger)
+    sess = create_sina_session(logger=logger)
     try:
-        yield session
+        yield sess
     finally:
-        session.close()
+        sess.close()
 
 
 @contextlib.contextmanager
