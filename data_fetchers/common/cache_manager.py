@@ -45,11 +45,20 @@
     5. append_to_cache docstring 补充 TypeError 说明
     6. 测试代码 open() 添加 encoding='utf-8'（避免 Windows GBK 问题）
     7. cache_exists Example 改为推荐直接调用 read_cache（避免 TOCTOU 竞态）
+- v1.18 (2026-05-26): 七项健壮性与文档修复：
+    1. _write_cache_impl 消除 ensure_dir=False TOCTOU 竞态（删除前置检查，通过 errno.ENOENT 识别目录不存在）
+    2. _write_cache_impl 异常捕获分组（TypeError 在前，文件系统异常子类在前父类在后）
+    3. get_cache_file_info Returns 补充完整字段说明（path/exists/size_mb/modified_time/error）
+    4. read_gzip_cache/read_json_cache/write_gzip_cache/write_json_cache Raises 补全所有异常类型
+    5. append_to_cache 入口添加 new_data 类型校验（严格执行类型契约）
+    6. _read_cache_impl JSONDecodeError 通过 e.pos==0 检测文件截断，提供精确错误信息
+    7. 测试代码 finally 添加 test_dir.rmdir() 清理空目录
 
 作者: 云瑶
 日期: 2026-05-24
 """
 
+import errno
 import gzip
 import json
 import logging
@@ -189,17 +198,29 @@ def _read_cache_impl(
     except json.JSONDecodeError as e:
         # 遵循 references/backtest-module-optimization-patterns.md Section 1.2
         # 避免传递完整 JSON 文档字符串导致内存翻倍
-        # 区分 gzip/json 文件，提供更精确的错误信息
+        # 通过 e.pos == 0 检测空文件/截断场景，提供精确错误信息
         file_type = "gzip JSON" if use_gzip else "JSON"
-        logger.error(
-            "%s 文件内容解析失败\n"
-            "文件路径: %s\n"
-            "错误位置: 行 %d, 列 %d\n"
-            "错误信息: %s\n"
-            "提示: 若文件非 JSON 格式，请检查文件类型是否正确",
-            file_type, path, e.lineno, e.colno, e.msg
-        )
-        raise ValueError(f"{file_type}文件内容解析失败: {path}, 位置 {e.pos}") from e
+        if e.pos == 0:
+            # 文件在 stat() 和 json.load() 之间被截断为空
+            # stat() 检测到非空，但读取时内容已为空
+            logger.error(
+                "%s 文件内容为空或在读取过程中被截断\n"
+                "文件路径: %s\n"
+                "提示: 可能是并发写入或进程崩溃导致",
+                file_type, path
+            )
+            raise ValueError(f"{file_type}文件内容为空或在读取过程中被截断: {path}") from e
+        else:
+            # 普通 JSON 格式错误
+            logger.error(
+                "%s 文件内容解析失败\n"
+                "文件路径: %s\n"
+                "错误位置: 行 %d, 列 %d\n"
+                "错误信息: %s\n"
+                "提示: 若文件非 JSON 格式，请检查文件类型是否正确",
+                file_type, path, e.lineno, e.colno, e.msg
+            )
+            raise ValueError(f"{file_type}文件内容解析失败: {path}, 位置 {e.pos}") from e
     except BadGzipFile as e:
         # 仅 use_gzip=True 时可触发（gzip.open 才会抛此异常）
         logger.error("gzip 文件损坏: %s", path)
@@ -261,11 +282,9 @@ def _write_cache_impl(
     else:
         separators = None  # 使用默认分隔符
     
-    # 消除 tempfile.mkstemp 跳出 try 块的问题
-    # ensure_dir=False 且目录不存在时，mkstemp 会抛出无上下文的 FileNotFoundError
-    # 在 mkstemp 前显式检查目录存在性，提供明确错误信息
-    if not ensure_dir and not path.parent.exists():
-        raise FileNotFoundError(f"目标目录不存在且 ensure_dir=False: {path.parent}")
+    # 消除 TOCTOU 竞态：删除前置目录存在性检查，将 mkstemp 纳入 try 块
+    # ensure_dir=False 时，目录不存在会导致 mkstemp 抛出 OSError(errno.ENOENT)
+    # 通过 errno 识别目录不存在场景，提供精确错误信息
     
     # 临时文件路径初始化（用于 except 块清理）
     temp_path: Optional[Path] = None
@@ -296,15 +315,7 @@ def _write_cache_impl(
         os.replace(temp_path, path)
         logger.debug("成功写入缓存（原子操作）: %s", path)
         
-    except PermissionError as e:
-        logger.error("文件权限错误: %s", path)
-        # 清理临时文件（消除 TOCTOU 竞态，防止清理失败掩盖原始异常）
-        if temp_path:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-        raise PermissionError(f"无权限写入缓存文件: {path}") from e
+    # === 数据类型异常 ===
     except TypeError as e:
         # json.dump 遇到不可序列化数据时抛出 TypeError（如 datetime、自定义对象）
         logger.error(
@@ -320,15 +331,32 @@ def _write_cache_impl(
             except OSError:
                 pass
         raise TypeError(f"缓存数据包含不可序列化类型: {path}, {e}") from e
-    except OSError as e:
-        logger.error("文件系统错误: %s", path)
-        # 清理临时文件
+    # === 文件系统异常（子类在前，父类在后）===
+    except PermissionError as e:
+        logger.error("文件权限错误: %s", path)
+        # 清理临时文件（消除 TOCTOU 竞态，防止清理失败掩盖原始异常）
         if temp_path:
             try:
                 temp_path.unlink(missing_ok=True)
             except OSError:
                 pass
-        raise OSError(f"写入缓存失败（磁盘空间不足或文件系统错误）: {path}") from e
+        raise PermissionError(f"无权限写入缓存文件: {path}") from e
+    except OSError as e:
+        # 通过 errno 区分不同的 OSError 场景
+        if e.errno == errno.ENOENT and not ensure_dir:
+            # 目录不存在（mkstemp 在 dir=path.parent 时抛出）
+            logger.error("目标目录不存在: %s", path.parent)
+            raise FileNotFoundError(f"目标目录不存在且 ensure_dir=False: {path.parent}") from e
+        else:
+            # 其他 OSError：磁盘空间不足、文件被占用等
+            logger.error("文件系统错误: %s, errno=%d", path, e.errno)
+            # 清理临时文件
+            if temp_path:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            raise OSError(f"写入缓存失败（磁盘空间不足或文件系统错误）: {path}") from e
     except Exception as e:
         logger.exception("写入缓存失败（未知错误）: %s", path)
         # 清理临时文件
@@ -359,7 +387,10 @@ def read_gzip_cache(
         
     Raises:
         FileNotFoundError: 文件不存在
-        ValueError: JSON 解析失败（避免内存翻倍）
+        ValueError: JSON 解析失败或文件内容为空/被截断
+        PermissionError: 无权限读取文件
+        OSError: 文件系统错误
+        RuntimeError: 未知错误
     """
     return _read_cache_impl(Path(path), use_gzip=True, logger=get_module_logger(logger))
 
@@ -390,8 +421,10 @@ def write_gzip_cache(
         json_sort_keys: 是否排序 JSON 键
         
     Raises:
-        TypeError: 数据类型错误（非 dict）
-        OSError: 文件写入失败
+        TypeError: 数据类型错误（非 dict）或数据包含不可序列化类型
+        PermissionError: 无权限写入文件
+        OSError: 文件写入失败（磁盘空间不足或文件系统错误）
+        RuntimeError: 未知错误
     """
     _write_cache_impl(
         Path(path), data, use_gzip=True, ensure_dir=ensure_dir, logger=get_module_logger(logger),
@@ -415,7 +448,10 @@ def read_json_cache(
         
     Raises:
         FileNotFoundError: 文件不存在
-        ValueError: JSON 解析失败（避免内存翻倍）
+        ValueError: JSON 解析失败或文件内容为空/被截断
+        PermissionError: 无权限读取文件
+        OSError: 文件系统错误
+        RuntimeError: 未知错误
     """
     return _read_cache_impl(Path(path), use_gzip=False, logger=get_module_logger(logger))
 
@@ -442,8 +478,10 @@ def write_json_cache(
         json_sort_keys: 是否排序 JSON 键
         
     Raises:
-        TypeError: 数据类型错误（非 dict）
-        OSError: 文件写入失败
+        TypeError: 数据类型错误（非 dict）或数据包含不可序列化类型
+        PermissionError: 无权限写入文件
+        OSError: 文件写入失败（磁盘空间不足或文件系统错误）
+        RuntimeError: 未知错误
     """
     _write_cache_impl(
         Path(path), data, use_gzip=False, ensure_dir=ensure_dir, logger=get_module_logger(logger),
@@ -465,7 +503,7 @@ def append_to_cache(
     
     Args:
         path: 缓存文件路径，支持 Path 或 str
-        new_data: 要追加的数据列表
+        new_data: 要追加的数据列表（必须是 list 类型）
         key: 数据存储的 key（默认 'data'）
         logger: 调用方传入的 logger（可选）
         
@@ -473,12 +511,19 @@ def append_to_cache(
         int: 追加后的总数据量
         
     Raises:
+        TypeError: new_data 类型错误（非 list）或数据包含不可序列化类型
         ValueError: JSON 解析失败（文件存在但损坏）
         PermissionError: 无权限读取或写入文件
-        TypeError: 内部构造数据类型错误（理论上不应触发，内部已保证传入 dict）
         OSError: 磁盘空间不足或文件系统错误
         RuntimeError: 未知错误
     """
+    # 严格执行类型契约：new_data 必须是 list
+    if not isinstance(new_data, list):
+        raise TypeError(
+            f"new_data 参数类型错误: 预期 list，实际 {type(new_data).__name__}\n"
+            f"文件路径: {path}"
+        )
+    
     path = Path(path)  # 统一转换为 Path
     logger = get_module_logger(logger)
     use_gzip = _is_gzip_file(path)  # 使用统一判断函数
@@ -546,7 +591,12 @@ def get_cache_file_info(
         logger: 调用方传入的 logger（可选）
         
     Returns:
-        Dict: 文件信息（存在、大小、修改时间等）
+        Dict[str, Any]: 文件信息字典，包含以下字段：
+        - path (str): 文件路径
+        - exists (bool): 文件是否存在（True/False）
+        - size_mb (float): 文件大小（MB），不存在时为 0
+        - modified_time (float|None): 最后修改时间戳，不存在时为 None
+        - error (str|None): 错误状态，None 表示正常，'permission_denied' 表示无权限
     """
     path = Path(path)  # 统一转换为 Path
     logger = get_module_logger(logger)
@@ -840,4 +890,13 @@ if __name__ == '__main__':
                 test_file.unlink(missing_ok=True)
             except OSError:
                 pass  # 忽略清理失败，不影响测试结果
+        
+        # 清理测试目录（仅在目录为空时删除，非空或不存在时静默忽略）
+        # 避免 CI 环境或多次运行后造成垃圾目录堆积
+        try:
+            test_dir.rmdir()
+            test_logger.info("已清理测试目录: %s", test_dir)
+        except OSError:
+            pass  # 目录非空或不存在，静默忽略
+        
         test_logger.info("已清理测试文件")
