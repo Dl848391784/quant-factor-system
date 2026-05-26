@@ -29,6 +29,7 @@ Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
 - v3.32 (2026-05-27): Bug修复 - format_final_output删除n_records重复赋值、validate_final_data改为真正流式验证(不加载data数组)
 - v3.33 (2026-05-27): 6项修复——1) Python>=3.8版本声明；2) 作者标识修正（云舟→云瑶）；3) 条件导入使用前提说明；4) 列验证提取公共函数_validate_dataframe_columns；5) validate_final_data第一次改为流式解析meta（避免content=f.read()内存峰值）；6) 版本历史精简（只保留最近10条）
 - v3.34 (2026-05-27): 4项修复——1) fetch_batch_stocks去重（保证单批次内无重复key）；2) BatchStream._load_all加断言（禁止重复调用）；3) format_final_output改用流式处理（避免json.load全量加载）；4) validate_final_data验证n_records一致（补充meta字段）
+- v3.35 (2026-05-27): 4项修复——1) cleanup_batch_files日志截断改为总数+debug完整；2) get_memory_usage_mb macOS单位修正（bytes→MB而非KB→MB）；3) return_df排除forward_return NaN（避免下游计算错误）；4) write_record提取为模块级函数_write_json_record（避免闭包）
 
 作者: 云瑶
 日期: 2026-04-04
@@ -61,7 +62,7 @@ except ImportError:
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.34'
+_OUTPUT_VERSION = '3.35'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -86,7 +87,7 @@ def _validate_dataframe_columns(
     验证 DataFrame 是否包含必需列
     
     Args:
-        df: 待验证的 DataFrame
+        df: DataFrame 对象
         required_cols: 必需列名列表
         df_name: DataFrame 名称（用于错误消息）
     
@@ -96,6 +97,28 @@ def _validate_dataframe_columns(
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
         raise ValueError(f"{df_name} 缺少必需列: {missing_cols}")
+
+
+def _write_json_record(f, record: dict, count: int) -> int:
+    """
+    写入一条 JSON 记录到 gzip 文件
+    
+    Args:
+        f: gzip 文件句柄（已打开）
+        record: 要写入的记录字典
+        count: 已写入的记录数
+    
+    Returns:
+        int: 新的记录数（count + 1）
+    
+    Note:
+        - 每条记录写入一行，便于流式解析
+        - count > 0 时写入逗号分隔符
+    """
+    if count > 0:
+        f.write(',\n')
+    f.write('  ' + json.dumps(record, ensure_ascii=False))
+    return count + 1
 
 
 def get_memory_usage_mb() -> float:
@@ -109,6 +132,8 @@ def get_memory_usage_mb() -> float:
     Note:
         - Linux: 读取VmRSS字段（实际物理内存使用）
         - macOS/Unix: 使用ru_maxrss（最大RSS值，可能不准确）
+          macOS下ru_maxrss单位是bytes，需除以1024*1024
+          Linux下ru_maxrss单位是KB，需除以1024
         - Windows: 返回0.0（不支持）
     """
     try:
@@ -120,7 +145,13 @@ def get_memory_usage_mb() -> float:
         pass
     try:
         import resource
-        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+        import sys
+        maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # macOS: ru_maxrss 单位是 bytes；Linux: 单位是 KB
+        if sys.platform == 'darwin':
+            return maxrss / (1024 * 1024)  # bytes -> MB
+        else:
+            return maxrss / 1024  # KB -> MB
     except Exception:
         return 0.0  # Windows 或其他不支持的环境
 
@@ -443,14 +474,6 @@ def n_way_merge_deduplicate(
     with gzip.open(output_path, 'wt', encoding='utf-8') as f:
         f.write('[\n')  # JSON数组开始
         
-        # 内嵌函数：闭包捕获 f，只接收 record 和 count
-        def write_record(record: dict, count: int) -> int:
-            """写入一条记录，返回新的 count（闭包捕获 f）"""
-            if count > 0:
-                f.write(',\n')
-            f.write('  ' + json.dumps(record, ensure_ascii=False))
-            return count + 1
-        
         while heap:
             key, batch_idx, _, stream = heapq.heappop(heap)
             record = stream.pop_record()
@@ -465,7 +488,7 @@ def n_way_merge_deduplicate(
                     # 按 batch_idx 降序排序，选最大的
                     same_key_records.sort(key=lambda x: x[0], reverse=True)
                     best_record = same_key_records[0][1]
-                    count = write_record(best_record, count)
+                    count = _write_json_record(f, best_record, count)
                     
                     if count % 50000 == 0:
                         gc.collect()
@@ -485,7 +508,7 @@ def n_way_merge_deduplicate(
         if same_key_records:
             same_key_records.sort(key=lambda x: x[0], reverse=True)
             best_record = same_key_records[0][1]
-            count = write_record(best_record, count)
+            count = _write_json_record(f, best_record, count)
         
         f.write('\n]')  # JSON数组结束
     
@@ -639,7 +662,11 @@ def fetch_batch_stocks(
 
     # 包含 open/high/low 用于选股回测计算一字涨停、封死涨停等
     factor_df = valid_df[['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5']].copy()
+    
+    # return_df: 排除 forward_return 为 NaN 的记录（每只股票末尾几天的 shift 产生）
+    # 避免下游读取方未处理产生计算错误
     return_df = valid_df[['date', 'asset', 'forward_return_1d', 'forward_return_3d', 'forward_return_5d']].copy()
+    return_df = return_df.dropna(subset=['forward_return_1d'])
     
     del valid_df
     gc.collect()
@@ -1018,7 +1045,10 @@ def cleanup_batch_files(total_batches: int, logger: logging.Logger = None) -> in
                 errors.append(f"{merged_path}: {e}")
     
     if errors:
-        logger.warning(f"  ⚠ 删除失败 {len(errors)} 个文件: {errors[:3]}...")
+        # 日志截断提示：显示总数 + 前3个错误，完整列表记录到 debug
+        logger.warning(f"  ⚠ 删除失败 {len(errors)} 个文件，示例: {errors[:3]}{'...' if len(errors) > 3 else ''}")
+        for err in errors:
+            logger.debug(f"    删除失败详情: {err}")
     logger.info(f"  ✓ 已删除 {deleted} 个临时文件")
     return deleted
 
