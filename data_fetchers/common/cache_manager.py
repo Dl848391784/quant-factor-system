@@ -37,6 +37,14 @@
     1. delete_cache 消除 TOCTOU 竞态（直接 unlink + FileNotFoundError 单独捕获）
     2. tempfile.mkstemp 纳入 try 块 + ensure_dir=False 目录检查
     3. 删除死代码 _JSON_READABLE_INDENT（从未被引用）
+- v1.17 (2026-05-26): 七项安全与文档修复：
+    1. append_to_cache 消除 TOCTOU 竞态（移除 path.exists 检查，直接捕获 FileNotFoundError）
+    2. _read_cache_impl stat() FileNotFoundError 保留异常链（添加 from e）
+    3. get_cache_file_info 增加 error 字段区分"文件不存在"和"无权限"
+    4. _read_cache_impl 异常捕获顺序添加注释说明（FileNotFoundError 必须在 OSError 之前）
+    5. append_to_cache docstring 补充 TypeError 说明
+    6. 测试代码 open() 添加 encoding='utf-8'（避免 Windows GBK 问题）
+    7. cache_exists Example 改为推荐直接调用 read_cache（避免 TOCTOU 竞态）
 
 作者: 云瑶
 日期: 2026-05-24
@@ -146,8 +154,9 @@ def _read_cache_impl(
     # 不再提前检查 path.exists()，避免检查-读取间隙文件被删除
     try:
         file_size = path.stat().st_size
-    except FileNotFoundError:
-        raise FileNotFoundError(f"缓存文件不存在: {path}")
+    except FileNotFoundError as e:
+        # FileNotFoundError 是 OSError 子类，必须放在 OSError 之前，否则会被 OSError 捕获
+        raise FileNotFoundError(f"缓存文件不存在: {path}") from e
     
     # 空文件处理（边界情况）
     if file_size == 0:
@@ -173,6 +182,7 @@ def _read_cache_impl(
                 data = json.load(f)
         logger.debug("成功读取缓存: %s", path)
         return data
+    # FileNotFoundError 是 OSError 子类，必须放在 OSError 之前，否则会被 OSError 捕获
     except FileNotFoundError as e:
         # 文件在 stat 后被删除，透传真实错误（TOCTOU 场景）
         raise FileNotFoundError(f"缓存文件不存在: {path}") from e
@@ -465,6 +475,7 @@ def append_to_cache(
     Raises:
         ValueError: JSON 解析失败（文件存在但损坏）
         PermissionError: 无权限读取或写入文件
+        TypeError: 内部构造数据类型错误（理论上不应触发，内部已保证传入 dict）
         OSError: 磁盘空间不足或文件系统错误
         RuntimeError: 未知错误
     """
@@ -472,9 +483,12 @@ def append_to_cache(
     logger = get_module_logger(logger)
     use_gzip = _is_gzip_file(path)  # 使用统一判断函数
     
-    # 读取现有缓存
+    # 消除 TOCTOU 竞态：直接调用 _read_cache_impl，捕获 FileNotFoundError 作为"文件不存在"信号
+    # 不再提前检查 path.exists()，避免检查-读取间隙文件被删除
     existing: Dict[str, Any] = {}
-    if path.exists():
+    existing_data: List[Any] = []
+    
+    try:
         existing = _read_cache_impl(path, use_gzip, logger)
         existing_data = existing.get(key, [])
         
@@ -488,7 +502,10 @@ def append_to_cache(
                 key, type(existing_data).__name__, path
             )
             existing_data = []
-    else:
+    except FileNotFoundError:
+        # 文件不存在，初始化为空（正常情况，不记录 warning）
+        logger.debug("缓存文件不存在，将创建新缓存: %s", path)
+        existing = {}
         existing_data = []
     
     # 合并数据
@@ -535,11 +552,13 @@ def get_cache_file_info(
     logger = get_module_logger(logger)
     
     # 消除双重检查 TOCTOU 竞态：直接调用 stat()，通过异常判断是否存在
+    # 增加 'error' 字段区分"文件不存在"和"文件存在但无权限"
     info = {
         'path': str(path),
         'exists': False,
         'size_mb': 0,
         'modified_time': None,
+        'error': None,  # None=正常，'permission_denied'=无权限
     }
     
     try:
@@ -551,6 +570,8 @@ def get_cache_file_info(
     except FileNotFoundError:
         logger.warning("缓存文件不存在: %s", path)
     except PermissionError:
+        # 设置 error 字段，使调用方可以区分"文件不存在"和"无权限"
+        info['error'] = 'permission_denied'
         logger.warning("无权限获取缓存文件信息: %s", path)
     
     return info
@@ -654,8 +675,13 @@ def cache_exists(path: Union[Path, str]) -> bool:
         bool: 文件是否存在
         
     Example:
-        if cache_exists('data.json.gz'):
+        # 推荐模式：直接调用 read_cache，捕获 FileNotFoundError
+        # 避免 TOCTOU 竞态：cache_exists 和 read_cache 之间文件可能被删除
+        try:
             data = read_cache('data.json.gz')
+        except FileNotFoundError:
+            # 文件不存在时的处理逻辑
+            data = {}
     """
     return Path(path).exists()
 
@@ -770,8 +796,8 @@ if __name__ == '__main__':
         write_json_cache(test_readable_path, {'key1': 'value1', 'key2': 'value2'}, json_indent=2, json_sort_keys=True, logger=test_logger)
         test_logger.info("可读格式写入成功")
         
-        # 验证可读格式
-        with open(test_readable_path, 'r') as f:
+        # 验证可读格式（显式指定 encoding='utf-8'，与写入时一致，避免 Windows GBK 问题）
+        with open(test_readable_path, 'r', encoding='utf-8') as f:
             readable_content = f.read()
         test_logger.info("可读格式内容:\n%s", readable_content)
         
