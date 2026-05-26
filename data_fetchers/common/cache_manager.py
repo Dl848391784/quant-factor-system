@@ -23,6 +23,11 @@
     2. 临时文件使用 tempfile.mkstemp 生成唯一路径，并发安全
     3. 临时文件清理消除 TOCTOU 竞态（missing_ok=True + try/except OSError）
     4. 类型契约严格执行（非 dict 数据抛 TypeError）
+- v1.14 (2026-05-26): 四项代码质量修复：
+    1. append_to_cache 删除硬编码行号，改为逻辑性描述
+    2. delete_cache OSError 错误信息精确化（"文件被占用"而非"磁盘空间不足"）
+    3. __main__ finally 清理列表补全 test_unified_path_gz + 幂等删除
+    4. BadGzipFile except 添加触发条件注释（仅 use_gzip=True）
 
 作者: 云瑶
 日期: 2026-05-24
@@ -172,6 +177,7 @@ def _read_cache_impl(
         )
         raise ValueError(f"{file_type}文件内容解析失败: {path}, 位置 {e.pos}") from e
     except BadGzipFile as e:
+        # 仅 use_gzip=True 时可触发（gzip.open 才会抛此异常）
         logger.error("gzip 文件损坏: %s", path)
         raise ValueError(f"gzip 文件损坏: {path}") from e
     except PermissionError as e:
@@ -449,7 +455,7 @@ def append_to_cache(
     result = {key: merged_data}
     
     # 保留其他字段（如 dates）
-    # existing 在第 348 行已处理：文件不存在时为 {}
+    # existing 已在上方处理：文件不存在时初始化为 {}，遍历安全
     for k, v in existing.items():
         if k != key:
             result[k] = v
@@ -645,7 +651,7 @@ def delete_cache(
         raise PermissionError(f"无权限删除缓存文件: {path}") from e
     except OSError as e:
         logger.error("文件系统错误: %s", path)
-        raise OSError(f"删除缓存失败（磁盘空间不足或文件系统错误）: {path}") from e
+        raise OSError(f"删除缓存失败（文件系统错误，如文件被占用）: {path}") from e
     except Exception as e:
         logger.exception("删除缓存失败（未知错误）: %s", path)
         raise RuntimeError(f"删除缓存失败（未知错误）: {path}") from e
@@ -752,8 +758,11 @@ if __name__ == '__main__':
         test_logger.info("测试完成")
     finally:
         # 清理测试文件（finally 确保无论成功或失败都执行）
-        for test_file in [test_path, test_unified_path_json, test_options_path,
-                          test_readable_path, test_append_path, test_invalid_path]:
-            if test_file.exists():
-                test_file.unlink()
+        # 使用 unlink(missing_ok=True) 保证幂等，避免重复删除报错
+        for test_file in [test_path, test_unified_path_gz, test_unified_path_json,
+                          test_options_path, test_readable_path, test_append_path, test_invalid_path]:
+            try:
+                test_file.unlink(missing_ok=True)
+            except OSError:
+                pass  # 忽略清理失败，不影响测试结果
         test_logger.info("已清理测试文件")
