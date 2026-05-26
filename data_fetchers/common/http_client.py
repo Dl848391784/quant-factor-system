@@ -34,6 +34,11 @@ HTTP 客户端模块
     1. 429 last_error 未赋值：最后一次失败由循环后统一 RuntimeError 处理
     2. fallback 版本号误导：改为 '0.0.0' 确保走旧版本分支
     3. 上下文管理器 UnboundLocalError：sess 变量名统一 + try 前赋值
+- v1.12 (2026-05-27): 429处理与文档修复（4个问题）：
+    1. 429无Retry-After：补充else分支使用线性退避，确保等待逻辑不跳过
+    2. Raises文档不符：HTTPError 补充"仅限非429"，RuntimeError 补充"含429限流重试耗尽"
+    3. __all__缩进不一致：Session上下文管理器注释对齐（2空格→4空格）
+    4. 类型注解保留：response初始化非死代码，是防御性代码（Pyright需要）
 
 作者: 云瑶
 日期: 2026-05-24
@@ -61,7 +66,7 @@ __all__ = [
     'create_session',  # 统一入口（注册表驱动）
     'create_eastmoney_session',  # 保留向后兼容
     'create_sina_session',  # 保留向后兼容
- # Session 上下文管理器（自动管理生命周期，推荐使用）
+    # Session 上下文管理器（自动管理生命周期，推荐使用）
     'retry_session',
     'source_session',  # 统一入口上下文管理器（避免与变量名 session 冲突）
     'eastmoney_session',
@@ -469,8 +474,8 @@ def request_with_retry(
         JsonValue: JSON 反序列化结果（dict/list/str/int/float/bool/None）
         
     Raises:
-        RuntimeError: 所有尝试失败（保留原始异常链）
-        requests.HTTPError: HTTP 状态码错误
+        RuntimeError: 所有尝试失败（含 429 限流重试耗尽），保留原始异常链
+        requests.HTTPError: HTTP 状态码错误（仅限非 429 错误）
         requests.Timeout: 请求超时
         requests.ConnectionError: 连接错误
         json.JSONDecodeError: JSON 解析失败
@@ -505,7 +510,7 @@ def request_with_retry(
     method = method.upper()
     
     for attempt in range(max_attempts):
-        response: Optional[requests.Response] = None
+        response: Optional[requests.Response] = None  # 类型注解 + 防御性初始化
         try:
             # 根据方法类型选择请求方式
             if method == 'GET':
@@ -519,7 +524,6 @@ def request_with_retry(
             else:
                 raise ValueError(f"未实现的 HTTP 方法: {method}")
             
-            # requests 总是返回 Response 对象，不会返回 None（此处仅类型注解需要）
             response.raise_for_status()
             return response.json()
         except requests.HTTPError as e:
@@ -532,6 +536,7 @@ def request_with_retry(
                 # 读取 Retry-After 头（服务器要求的最短等待时间）
                 retry_after = response.headers.get('Retry-After') if response else None
                 
+                # 计算 wait_time：有 Retry-After 用其值，否则回退线性退避
                 if retry_after is not None:
                     # Retry-After 可能是秒数（数字）或日期（RFC 2822）
                     # 简化处理：只解析数字格式，非数字格式回退到线性退避
@@ -540,17 +545,20 @@ def request_with_retry(
                     except ValueError:
                         # 非数字格式（如日期），回退到线性退避
                         wait_time = _calc_wait_time(attempt, delay)
-                    
-                    logger.warning(
-                        "请求被限流 (429) (尝试 %d/%d)\n"
-                        "URL: %s\n"
-                        "方法: %s\n"
-                        "Retry-After: %s\n"
-                        "等待 %.1f秒后重试...",
-                        attempt + 1, max_attempts, url, method, retry_after, wait_time
-                    )
-                    time.sleep(wait_time)
-                    continue  # 继续下一次尝试
+                else:
+                    # 无 Retry-After 头，使用线性退避
+                    wait_time = _calc_wait_time(attempt, delay)
+                
+                logger.warning(
+                    "请求被限流 (429) (尝试 %d/%d)\n"
+                    "URL: %s\n"
+                    "方法: %s\n"
+                    "Retry-After: %s\n"
+                    "等待 %.1f秒后重试...",
+                    attempt + 1, max_attempts, url, method, retry_after if retry_after else 'N/A', wait_time
+                )
+                time.sleep(wait_time)
+                continue  # 继续下一次尝试
             
             # 非 429 直接抛出；429 最后一次失败由循环后统一处理
             if status_code != 429:
