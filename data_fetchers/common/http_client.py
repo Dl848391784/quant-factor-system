@@ -39,6 +39,9 @@ HTTP 客户端模块
     2. Raises文档不符：HTTPError 补充"仅限非429"，RuntimeError 补充"含429限流重试耗尽"
     3. __all__缩进不一致：Session上下文管理器注释对齐（2空格→4空格）
     4. 类型注解保留：response初始化非死代码，是防御性代码（Pyright需要）
+- v1.13 (2026-05-27): 条件判断风格统一（2个问题）：
+    1. retry_after判断不一致：改为 `is not None` 与上方统一，避免空字符串边界歧义
+    2. len()冗余条件：`response_text and len(...) > 0` 简化为 `response_text`
 
 作者: 云瑶
 日期: 2026-05-24
@@ -555,7 +558,7 @@ def request_with_retry(
                     "方法: %s\n"
                     "Retry-After: %s\n"
                     "等待 %.1f秒后重试...",
-                    attempt + 1, max_attempts, url, method, retry_after if retry_after else 'N/A', wait_time
+                    attempt + 1, max_attempts, url, method, retry_after if retry_after is not None else 'N/A', wait_time
                 )
                 time.sleep(wait_time)
                 continue  # 继续下一次尝试
@@ -593,7 +596,7 @@ def request_with_retry(
             # JSON 解析失败，记录详细信息
             # 使用 getattr 安全访问 response.text，避免 streaming 模式问题
             response_text = getattr(response, 'text', None)
-            preview = response_text[:200] if response_text and len(response_text) > 0 else 'N/A'
+            preview = response_text[:200] if response_text else 'N/A'
             logger.error(
                 "JSON 解析失败\n"
                 "URL: %s\n"
