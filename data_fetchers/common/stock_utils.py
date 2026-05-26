@@ -19,6 +19,7 @@
 - v2.0 (2026-05-25): DCL模式简化（模块级 try/except ImportError）、MAX_STOCK_DATE 命名改为 get_max_stock_date（最小惊讶原则）、空代码统计直接计数（而非减法计算）、date_value 格式验证补全
 - v2.1 (2026-05-27): __main__ → pytest 测试迁移（210行删除）、创建 test_stock_utils.py（7个测试类 + 26个测试用例）
 - v2.2 (2026-05-27): 条件导入简化（删除 __main__ 分支死代码，仅保留相对导入）
+- v2.3 (2026-05-27): MAX_STOCK_DATE 快照值修复、filter_stocks_by_date 正则预检补充、get_stock_name_map empty_count 直接计数、load_main_board_stock_list OSError 捕获补充
 
 作者: 云瑶
 日期: 2026-05-24
@@ -145,7 +146,8 @@ def get_max_stock_date() -> str:
     return datetime.now().strftime('%Y-%m-%d')
 
 # 保持向后兼容的别名（deprecated，将在未来版本移除）
-MAX_STOCK_DATE = get_max_stock_date
+# 注意：这是模块加载时的快照值，非动态值。长时间运行程序可能过期。
+MAX_STOCK_DATE = get_max_stock_date()
 
 # 模块级导入（相对导入，用于模块被 import 时）
 from .paths import get_stock_list_file
@@ -304,8 +306,9 @@ def load_main_board_stock_list(
     # 加载缓存
     try:
         data = read_json_cache(stock_list_file, logger=logger)
-    except (json.JSONDecodeError, ValueError) as e:
+    except (json.JSONDecodeError, ValueError, OSError) as e:
         # 保留异常链，便于追溯原始错误
+        # OSError 包括 PermissionError、FileNotFoundError（部分场景）等 IO 异常
         raise ValueError(f"股票列表缓存解析失败: {stock_list_file}") from e
     
     # 数据格式验证：必须包含 stocks 字段
@@ -510,6 +513,7 @@ def filter_stocks_by_date(
     filtered = []
     invalid_elements = 0
     invalid_dates = 0
+    invalid_formats = 0  # 格式异常（如 "2020/01/01"）
     for stock in stock_list:
         # 元素类型检查：必须是字典类型
         if not isinstance(stock, dict):
@@ -519,6 +523,10 @@ def filter_stocks_by_date(
         # 日期合法性验证：必须为合法日期（格式 + 日历合法性）
         if not date_value:
             continue  # 空日期字段直接过滤
+        # 格式预检：先做正则验证，与入参的双重验证逻辑保持一致
+        if not _DATE_PATTERN.match(date_value):
+            invalid_formats += 1
+            continue  # 格式异常则过滤
         if not _validate_date(date_value):
             invalid_dates += 1
             continue  # 非法日期则过滤
@@ -529,6 +537,12 @@ def filter_stocks_by_date(
         logger.warning(
             "按日期筛选股票时发现 %d 个非字典元素，已过滤",
             invalid_elements
+        )
+    
+    if invalid_formats > 0:
+        logger.warning(
+            "按日期筛选股票时发现 %d 个格式异常日期，已过滤（如 2020/01/01）",
+            invalid_formats
         )
     
     if invalid_dates > 0:
@@ -582,6 +596,7 @@ def get_stock_name_map(stock_list: List[Dict[str, Any]], logger: Optional[loggin
     # 类型安全检查 + 性能优化
     name_map = {}
     invalid_elements = 0
+    empty_count = 0  # 直接计数空代码/空名称
     for stock in stock_list:
         # 元素类型检查：必须是字典类型
         if not isinstance(stock, dict):
@@ -591,11 +606,12 @@ def get_stock_name_map(stock_list: List[Dict[str, Any]], logger: Optional[loggin
         name = stock.get('name', '')
         if code and name:  # 过滤空代码和空名称
             name_map[code] = name
+        else:  # 空代码或空名称
+            empty_count += 1
     
-    # 统计过滤数量
+    # 统计信息
     total_count = len(stock_list)
     valid_count = len(name_map)
-    empty_count = total_count - valid_count
     
     if invalid_elements > 0:
         logger.warning(
@@ -603,10 +619,10 @@ def get_stock_name_map(stock_list: List[Dict[str, Any]], logger: Optional[loggin
             invalid_elements
         )
     
-    if empty_count > invalid_elements:  # 空代码/空名称数量（不含非字典元素）
+    if empty_count > 0:
         logger.warning(
             "构建名称映射时发现 %d 个空代码或空名称，已过滤（总数 %d，有效 %d）",
-            empty_count - invalid_elements, total_count, valid_count
+            empty_count, total_count, valid_count
         )
     
     return name_map

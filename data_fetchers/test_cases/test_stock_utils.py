@@ -262,10 +262,12 @@ class TestConstants:
         assert re.match(r'^\d{4}-\d{2}-\d{2}$', max_date)
 
     def test_max_stock_date_alias(self):
-        """测试 deprecated 别名"""
-        # MAX_STOCK_DATE 是函数别名
-        assert callable(MAX_STOCK_DATE)
-        assert MAX_STOCK_DATE() == get_max_stock_date()
+        """测试 deprecated 别名（快照值）"""
+        # MAX_STOCK_DATE 是模块加载时的快照值（字符串）
+        assert isinstance(MAX_STOCK_DATE, str)
+        # 格式验证
+        import re
+        assert re.match(r'^\d{4}-\d{2}-\d{2}$', MAX_STOCK_DATE)
 
 
 # ============== pytest fixtures ==============
