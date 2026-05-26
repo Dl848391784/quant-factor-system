@@ -23,12 +23,7 @@ from pathlib import Path
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-# 条件导入 setup_logger（CLI/测试环境）
-try:
-    from data_fetchers.common.http_client import setup_logger
-except ImportError:
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from data_fetchers.common.http_client import setup_logger
+from data_fetchers.common.logger_config import setup_logger
 
 from data_fetchers.factor_generator import generate_all_factors, get_module_logger
 
