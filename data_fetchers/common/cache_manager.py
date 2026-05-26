@@ -45,7 +45,7 @@
     5. append_to_cache docstring 补充 TypeError 说明
     6. 测试代码 open() 添加 encoding='utf-8'（避免 Windows GBK 问题）
     7. cache_exists Example 改为推荐直接调用 read_cache（避免 TOCTOU 竞态）
-- v1.18 (2026-05-26): 七项健壮性与文档修复：
+|- v1.18 (2026-05-26): 七项健壮性与文档修复：
     1. _write_cache_impl 消除 ensure_dir=False TOCTOU 竞态（删除前置检查，通过 errno.ENOENT 识别目录不存在）
     2. _write_cache_impl 异常捕获分组（TypeError 在前，文件系统异常子类在前父类在后）
     3. get_cache_file_info Returns 补充完整字段说明（path/exists/size_mb/modified_time/error）
@@ -53,6 +53,12 @@
     5. append_to_cache 入口添加 new_data 类型校验（严格执行类型契约）
     6. _read_cache_impl JSONDecodeError 通过 e.pos==0 检测文件截断，提供精确错误信息
     7. 测试代码 finally 添加 test_dir.rmdir() 清理空目录
+|- v1.19 (2026-05-27): 五项架构重构：
+    1. 新增 _atomic_write contextmanager 封装原子写入临时文件生命周期
+    2. _write_cache_impl 使用 contextmanager，临时文件清理统一在 finally 块（消除四块重复）
+    3. _read_cache_impl 合并两段 try 块，FileNotFoundError 只捕获一次（覆盖 stat 和 open）
+    4. _read_cache_impl 移除 e.pos==0 分支（存在误判），统一按普通 JSON 格式错误处理
+    5. delete_cache 移除 except Exception 兜底（Path.unlink 只抛 OSError，意外异常应自然传播）
 
 作者: 云瑶
 日期: 2026-05-24
@@ -64,8 +70,9 @@ import json
 import logging
 import os
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Generator, List, Optional, Union
 
 # gzip 异常类型（用于精确捕获 gzip 文件损坏）
 BadGzipFile = gzip.BadGzipFile
@@ -139,6 +146,57 @@ def _is_gzip_file(path: Path) -> bool:
     return len(suffixes) >= 2 and suffixes[-2:] == ['.json', '.gz']
 
 
+
+@contextmanager
+def _atomic_write(path: Path) -> Generator[Path, None, None]:
+    """
+    原子写入临时文件上下文管理器
+    
+    创建临时文件，正常退出时原子替换目标文件，异常退出时清理临时文件。
+    
+    Args:
+        path: 目标文件路径
+        
+    Yields:
+        Path: 临时文件路径（用于写入）
+        
+    Raises:
+        OSError: 目录不存在（errno.ENOENT）或文件系统错误
+        PermissionError: 无权限写入
+        
+    Example:
+        with _atomic_write(target_path) as temp_path:
+            # 写入临时文件
+            with open(temp_path, 'w') as f:
+                f.write(content)
+            # 正常退出时自动原子替换
+    """
+    # 生成唯一临时文件路径（线程安全）
+    # 使用 path.name.split('.')[0] 取干净基础名
+    base_name = path.name.split('.')[0]
+    fd, temp_path_str = tempfile.mkstemp(
+        suffix='.tmp',
+        prefix=base_name + '_',
+        dir=path.parent
+    )
+    os.close(fd)  # 关闭文件描述符，后续使用 Path
+    temp_path = Path(temp_path_str)
+    
+    try:
+        yield temp_path
+        # 正常退出：原子替换目标文件
+        os.replace(temp_path, path)
+        # 替换成功，标记临时文件已清理（避免 finally 再次清理）
+        temp_path = None
+    finally:
+        # 异常退出：清理临时文件
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass  # 清理失败不影响原始异常传播
+
+
 def _read_cache_impl(
     path: Path,
     use_gzip: bool,
@@ -159,70 +217,58 @@ def _read_cache_impl(
         FileNotFoundError: 文件不存在
         ValueError: JSON 解析失败
     """
-    # 消除 TOCTOU 竞态：直接尝试读取，捕获 FileNotFoundError 透传
-    # 不再提前检查 path.exists()，避免检查-读取间隙文件被删除
+    file_type = "gzip JSON" if use_gzip else "JSON"
+    
+    # 统一 try 块：stat()、空文件检查、大文件警告、json.load() 全部纳入
+    # FileNotFoundError 只捕获一次，同时覆盖 stat() 和 open() 两个场景
     try:
         file_size = path.stat().st_size
-    except FileNotFoundError as e:
-        # FileNotFoundError 是 OSError 子类，必须放在 OSError 之前，否则会被 OSError 捕获
-        raise FileNotFoundError(f"缓存文件不存在: {path}") from e
-    
-    # 空文件处理（边界情况）
-    if file_size == 0:
-        logger.warning("缓存文件为空（大小为 0）: %s", path)
-        return {}  # 空文件返回空字典
-    
-    # 大文件监控
-    file_size_mb = file_size / (1024 * 1024)
-    if file_size_mb > _LARGE_FILE_THRESHOLD_MB:
-        logger.warning(
-            "大缓存文件读取: %.2f MB\n"
-            "文件路径: %s\n"
-            "可能影响性能，建议检查数据量",
-            file_size_mb, path
-        )
-    
-    try:
+        
+        # 空文件处理（边界情况）
+        if file_size == 0:
+            logger.warning("缓存文件为空（大小为 0）: %s", path)
+            return {}  # 空文件返回空字典
+        
+        # 大文件监控
+        file_size_mb = file_size / (1024 * 1024)
+        if file_size_mb > _LARGE_FILE_THRESHOLD_MB:
+            logger.warning(
+                "大缓存文件读取: %.2f MB\n"
+                "文件路径: %s\n"
+                "可能影响性能，建议检查数据量",
+                file_size_mb, path
+            )
+        
+        # 读取文件内容
         if use_gzip:
             with gzip.open(path, 'rt', encoding='utf-8') as f:
                 data = json.load(f)
         else:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+        
         logger.debug("成功读取缓存: %s", path)
         return data
-    # FileNotFoundError 是 OSError 子类，必须放在 OSError 之前，否则会被 OSError 捕获
+        
+    # FileNotFoundError 是 OSError 子类，必须放在 OSError 之前
     except FileNotFoundError as e:
-        # 文件在 stat 后被删除，透传真实错误（TOCTOU 场景）
+        # 覆盖 stat() 和 open() 两种场景
         raise FileNotFoundError(f"缓存文件不存在: {path}") from e
     except json.JSONDecodeError as e:
         # 遵循 references/backtest-module-optimization-patterns.md Section 1.2
         # 避免传递完整 JSON 文档字符串导致内存翻倍
-        # 通过 e.pos == 0 检测空文件/截断场景，提供精确错误信息
-        file_type = "gzip JSON" if use_gzip else "JSON"
-        if e.pos == 0:
-            # 文件在 stat() 和 json.load() 之间被截断为空
-            # stat() 检测到非空，但读取时内容已为空
-            logger.error(
-                "%s 文件内容为空或在读取过程中被截断\n"
-                "文件路径: %s\n"
-                "提示: 可能是并发写入或进程崩溃导致",
-                file_type, path
-            )
-            raise ValueError(f"{file_type}文件内容为空或在读取过程中被截断: {path}") from e
-        else:
-            # 普通 JSON 格式错误
-            logger.error(
-                "%s 文件内容解析失败\n"
-                "文件路径: %s\n"
-                "错误位置: 行 %d, 列 %d\n"
-                "错误信息: %s\n"
-                "提示: 若文件非 JSON 格式，请检查文件类型是否正确",
-                file_type, path, e.lineno, e.colno, e.msg
-            )
-            raise ValueError(f"{file_type}文件内容解析失败: {path}, 位置 {e.pos}") from e
+        # 移除 e.pos == 0 分支（存在误判），统一按普通 JSON 格式错误处理
+        logger.error(
+            "%s 文件内容解析失败\n"
+            "文件路径: %s\n"
+            "错误位置: 行 %d, 列 %d\n"
+            "错误信息: %s\n"
+            "提示: 若文件非 JSON 格式，请检查文件类型是否正确",
+            file_type, path, e.lineno, e.colno, e.msg
+        )
+        raise ValueError(f"{file_type}文件内容解析失败: {path}, 行 {e.lineno} 列 {e.colno}") from e
     except BadGzipFile as e:
-        # 仅 use_gzip=True 时可触发（gzip.open 才会抛此异常）
+        # 仅 use_gzip=True 时可触发
         logger.error("gzip 文件损坏: %s", path)
         raise ValueError(f"gzip 文件损坏: {path}") from e
     except PermissionError as e:
@@ -232,6 +278,7 @@ def _read_cache_impl(
         logger.error("文件系统错误: %s", path)
         raise OSError(f"读取缓存失败（文件系统错误）: {path}") from e
     except Exception as e:
+        # 未知错误兜底（多步骤操作可能抛出意外异常）
         logger.exception("读取缓存失败（未知错误）: %s", path)
         raise RuntimeError(f"读取缓存失败（未知错误）: {path}") from e
 
@@ -282,96 +329,47 @@ def _write_cache_impl(
     else:
         separators = None  # 使用默认分隔符
     
-    # 消除 TOCTOU 竞态：删除前置目录存在性检查，将 mkstemp 纳入 try 块
-    # ensure_dir=False 时，目录不存在会导致 mkstemp 抛出 OSError(errno.ENOENT)
-    # 通过 errno 识别目录不存在场景，提供精确错误信息
-    
-    # 临时文件路径初始化（用于 except 块清理）
-    temp_path: Optional[Path] = None
-    
+    # 使用 _atomic_write contextmanager 管理临时文件生命周期
+    # 正常退出时原子替换，异常退出时自动清理临时文件
     try:
-        # 生成唯一临时文件路径（线程安全）
-        # 使用 tempfile.mkstemp 确保多进程/线程并发写入时临时文件不冲突
-        # 注意：path.stem 对 .json.gz 文件返回 'data.json'（含点号），不干净
-        # 使用 path.name.split('.')[0] 取真正的基础名
-        base_name = path.name.split('.')[0]
-        fd, temp_path_str = tempfile.mkstemp(
-            suffix='.tmp',
-            prefix=base_name + '_',
-            dir=path.parent
-        )
-        os.close(fd)  # 关闭文件描述符，后续使用 Path
-        temp_path = Path(temp_path_str)
+        with _atomic_write(path) as temp_path:
+            # 写入临时文件
+            if use_gzip:
+                with gzip.open(temp_path, 'wt', encoding='utf-8', compresslevel=compresslevel) as f:
+                    json.dump(data, f, ensure_ascii=False, indent=json_indent, separators=separators, sort_keys=json_sort_keys)
+            else:
+                with open(temp_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=json_indent, separators=separators, sort_keys=json_sort_keys)
         
-        # 写入临时文件
-        if use_gzip:
-            with gzip.open(temp_path, 'wt', encoding='utf-8', compresslevel=compresslevel) as f:
-                json.dump(data, f, ensure_ascii=False, indent=json_indent, separators=separators, sort_keys=json_sort_keys)
-        else:
-            with open(temp_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=json_indent, separators=separators, sort_keys=json_sort_keys)
-        
-        # 原子替换目标文件（os.replace 是原子操作，同文件系统）
-        os.replace(temp_path, path)
         logger.debug("成功写入缓存（原子操作）: %s", path)
         
     # === 数据类型异常 ===
     except TypeError as e:
-        # json.dump 遇到不可序列化数据时抛出 TypeError（如 datetime、自定义对象）
+        # json.dump 遇到不可序列化数据时抛出 TypeError
         logger.error(
             "数据包含不可序列化类型\n"
             "文件路径: %s\n"
             "错误信息: %s",
             path, str(e)
         )
-        # 清理临时文件
-        if temp_path:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
         raise TypeError(f"缓存数据包含不可序列化类型: {path}, {e}") from e
     # === 文件系统异常（子类在前，父类在后）===
     except PermissionError as e:
         logger.error("文件权限错误: %s, errno=%d", path, e.errno)
-        # 清理临时文件（消除 TOCTOU 竞态，防止清理失败掩盖原始异常）
-        if temp_path:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
         raise PermissionError(f"无权限写入缓存文件: {path}") from e
     except OSError as e:
         # 通过 errno 区分不同的 OSError 场景
         if e.errno == errno.ENOENT:
-            # 目标路径不存在（目录不存在、符号链接断裂、临时文件找不到等）
-            # 统一抛出 FileNotFoundError，提供精确错误信息
-            # 清理临时文件（与其他分支保持一致）
-            if temp_path:
-                try:
-                    temp_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
+            # 目录不存在（mkstemp 无法创建临时文件）
             logger.error("目标路径不存在: %s, errno=%d", path.parent, e.errno)
             raise FileNotFoundError(f"目标路径不存在: {path.parent}") from e
         else:
             # 其他 OSError：磁盘空间不足、文件被占用等
             logger.error("文件系统错误: %s, errno=%d", path, e.errno)
-            # 清理临时文件
-            if temp_path:
-                try:
-                    temp_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
             raise OSError(f"写入缓存失败（磁盘空间不足或文件系统错误）: {path}") from e
     except Exception as e:
+        # 未知错误兜底（多步骤操作可能抛出意外异常）
         logger.exception("写入缓存失败（未知错误）: %s", path)
-        # 清理临时文件
-        if temp_path:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
         raise RuntimeError(f"写入缓存失败（未知错误）: {path}") from e
 
 
@@ -789,7 +787,6 @@ def delete_cache(
     except OSError as e:
         logger.error("文件系统错误: %s", path)
         raise OSError(f"删除缓存失败（文件系统错误，如文件被占用）: {path}") from e
-    except Exception as e:
-        logger.exception("删除缓存失败（未知错误）: %s", path)
-        raise RuntimeError(f"删除缓存失败（未知错误）: {path}") from e
+    # 注意：不保留 except Exception 兜底
+    # Path.unlink() 只会抛 OSError 及其子类，意外异常应自然向上传播
 
