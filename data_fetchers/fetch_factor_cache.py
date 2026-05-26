@@ -2,6 +2,12 @@
 """
 分批拉取500天因子数据 - 外部排序流式合并（极致内存优化）
 
+Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
+
+使用前提：
+- 运行前需将 project_root 加入 PYTHONPATH，或以项目根目录为工作目录执行
+- 否则 else 分支的 common 绝对导入会触发 ImportError
+
 策略：
 1. 将股票分成多批（每批250只）
 2. 每批拉取后立即保存到独立的 gzip 文件
@@ -12,27 +18,7 @@
 4. 内存峰值：仅一个批次数据 + N个最小记录（N=批次数）
 
 版本历史：
-- v3.4_with_ohlc (2026-04-09): 新增 open/high/low 字段，支持选股回测计算一字涨停、封死涨停等指标
-- v3.5 (2026-05-26): 版本历史格式规范化、sys.path移除、公共模块导入、docstring补充、流程文档+测试用例创建
-- v3.6 (2026-05-26): print → logger 迁移完成（74处全量替换）、logger参数化（6个核心函数）、main函数日志初始化
-- v3.7 (2026-05-26): 导入顺序PEP8规范化、BatchStream类docstring补充、类型注解完善、路径配置使用公共模块
-- v3.8 (2026-05-26): os.path → Path 对象全量替换（9处os.path.join、2处os.path.exists、4处os.path.getsize、3处os.remove→unlink）
-- v3.9 (2026-05-26): 函数类型注解完善（save_batch_cache_sorted、n_way_merge_deduplicate、fetch_batch_stocks、format_final_output）
-- v3.10 (2026-05-26): 移除未使用的 os 导入、修复 validate_final_data 返回类型注解（bool → tuple[bool, int, int, int]）
-- v3.11 (2026-05-26): main 函数返回类型注解（-> None）、版本号同步（3.6 → 3.10）
-- v3.12 (2026-05-26): Bug修复 - format_final_output 返回值（del后保存记录数）、n_way_merge_deduplicate 去重逻辑（使用batch_idx而非stream_idx）
-- v3.13 (2026-05-26): Bug修复 - 冗余导入删除、未使用变量删除、hasattr无效检查改为列存在验证、format_final_output内存峰值改为分阶段加载
-- v3.14 (2026-05-26): Bug修复 - validate_final_data增加数据有效性验证（RSI非空比例>=80%）、peek_key检查exhausted、get_memory_usage_mb Windows兜底、main docstring删除冗余Returns、version字段提取为_OUTPUT_VERSION常量
-- v3.15 (2026-05-26): Bug修复 - n_way_merge去重逻辑修正（使用正值batch_idx而非负值，变量名改为batch_idx消除语义混乱）
-- v3.16 (2026-05-26): Bug修复 - main版本号改用_OUTPUT_VERSION、format_final_output固定生成时间、save_batch_cache_sorted入口copy()、validate_final_data均匀抽样
-- v3.17 (2026-05-26): Bug修复 - _OUTPUT_VERSION移到import之后（PEP8）、pop_record检查exhausted、sys导入移除、cleanup_batch_files用try/finally
-- v3.18 (2026-05-26): Bug修复 - n_way_merge显式收集相同key记录后选最大batch_idx、datetime.now()只调用一次、save_batch_cache_sorted移除copy改为文档说明
-- v3.19 (2026-05-26): Bug修复 - validate_final_data流式读取避免内存峰值、format_final_output只保留标量而非列表、模块级注释合并到常量定义、cleanup_batch_files增加merged兜底、n_way_merge移除冗余赋值
-- v3.20 (2026-05-26): Bug修复 - validate_final_data初始化默认值+健壮meta解析、n_way_merge增加counter打破heap平局
-- v3.21 (2026-05-26): Bug修复 - is_exhausted逻辑修正(and→or)、_load_next_chunk改名_load_all、main删除format返回值冗余、save_batch_cache_sorted补充接口契约说明
-- v3.22 (2026-05-26): Bug修复 - cleanup_batch_files增加try保证继续清理、get_memory_info_str用is not None判断vmrss、write_record闭包捕获f统一参数
-- v3.23 (2026-05-26): Bug修复 - validate_final_data一次性加载完整文件，避免meta手动拼接脆弱
-- v3.24 (2026-05-26): Bug修复 - valid_batch_indices移除冗余、heap注释缩进修正、valid_df增加copy避免Warning、forward_return统一写法
+- v3.24 (2026-05-26): valid_batch_indices移除冗余、heap注释缩进修正、valid_df增加copy避免Warning、forward_return统一写法
 - v3.25 (2026-05-26): 接口设计修正 - format_final_output返回None（统计由validate提供）、save_batch_cache_sorted接口契约说明实际调用方总是传字符串
 - v3.26 (2026-05-26): Bug修复 - format_final_output末尾缩进修正、validate_final_data分两次读文件+records_count初始化
 - v3.27 (2026-05-26): 代码改进 - BatchStream.pop_record更新exhausted+添加__lt__、del注释修正、combined增加copy、del data而非del full、main用_接收未使用返回值
@@ -41,8 +27,9 @@
 - v3.30 (2026-05-27): 代码改进 - format_final_output n_records定义移到日志前、cleanup_batch_files docstring修正为try/except
 - v3.31 (2026-05-27): Bug修复 - n_way_merge_deduplicate返回值简化(只返回merged_path，count由调用方用_接收但未使用)
 - v3.32 (2026-05-27): Bug修复 - format_final_output删除n_records重复赋值、validate_final_data改为真正流式验证(不加载data数组)
+- v3.33 (2026-05-27): 6项修复——1) Python>=3.8版本声明；2) 作者标识修正（云舟→云瑶）；3) 条件导入使用前提说明；4) 列验证提取公共函数_validate_dataframe_columns；5) validate_final_data第一次改为流式解析meta（避免content=f.read()内存峰值）；6) 版本历史精简（只保留最近10条）
 
-作者: 云舟
+作者: 云瑶
 日期: 2026-04-04
 """
 
@@ -63,6 +50,7 @@ import pandas as pd
 from real_data_loader import RealDataLoader
 
 # 公共模块导入（条件导入：脚本直接运行时可能路径未配置）
+# 使用前提：project_root 已加入 PYTHONPATH 或以项目根目录为工作目录执行
 try:
     from data_fetchers.common import setup_logger, get_logs_dir, get_cache_dir
 except ImportError:
@@ -72,7 +60,7 @@ except ImportError:
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.32'
+_OUTPUT_VERSION = '3.33'
 
 # ============================================================================
 # 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
@@ -86,6 +74,27 @@ MEMORY_PAUSE_SECONDS = 15  # 内存超阈值时的暂停时间
 # 路径配置（使用公共模块路径函数）
 CACHE_DIR = get_cache_dir() / 'factor_data'
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _validate_dataframe_columns(
+    df: pd.DataFrame,
+    required_cols: list[str],
+    df_name: str
+) -> None:
+    """
+    验证 DataFrame 是否包含必需列
+    
+    Args:
+        df: 待验证的 DataFrame
+        required_cols: 必需列名列表
+        df_name: DataFrame 名称（用于错误消息）
+    
+    Raises:
+        ValueError: DataFrame 缺少必需列
+    """
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"{df_name} 缺少必需列: {missing_cols}")
 
 
 def get_memory_usage_mb() -> float:
@@ -188,13 +197,8 @@ def save_batch_cache_sorted(
     required_factor_cols = ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5']
     required_return_cols = ['date', 'asset', 'forward_return_1d', 'forward_return_3d', 'forward_return_5d']
     
-    missing_factor_cols = [col for col in required_factor_cols if col not in factor_df.columns]
-    if missing_factor_cols:
-        raise ValueError(f"factor_df 缺少必需列: {missing_factor_cols}")
-    
-    missing_return_cols = [col for col in required_return_cols if col not in return_df.columns]
-    if missing_return_cols:
-        raise ValueError(f"return_df 缺少必需列: {missing_return_cols}")
+    _validate_dataframe_columns(factor_df, required_factor_cols, 'factor_df')
+    _validate_dataframe_columns(return_df, required_return_cols, 'return_df')
     
     # 格式化并排序（按 date, asset）
     factor_df['date'] = factor_df['date'].astype(str)
@@ -818,34 +822,40 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
     date_end = ""
     records_count = 0
     
-    # 第一次：只读 meta（不加载 data 数组）
+    # 第一次：流式解析 meta（不加载整个文件）
+    # JSON 结构: { "meta": {...}, "data": [...] }
+    # 策略：逐行读取直到找到完整的 meta 部分
     try:
+        meta_lines = []
+        brace_count = 0
+        in_meta = False
+        
         with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
-            content = f.read()
+            for line in f:
+                stripped = line.strip()
+                
+                # 检测进入 meta
+                if '"meta":' in stripped:
+                    in_meta = True
+                    # 开始收集 meta 内容（从 { 开始）
+                    meta_start = stripped.find('{')
+                    if meta_start != -1:
+                        meta_lines.append(stripped[meta_start:])
+                        brace_count = 1
+                    continue
+                
+                # 收集 meta 内容直到 brace_count == 0
+                if in_meta:
+                    meta_lines.append(stripped)
+                    brace_count += stripped.count('{') - stripped.count('}')
+                    if brace_count == 0:
+                        # meta 结束，停止收集
+                        break
         
-        # 手动解析 meta（避免加载完整 data 列表）
-        # 找到 "meta": { ... } 部分
-        meta_start = content.find('"meta": {')
-        if meta_start == -1:
-            logger.warning("  ⚠ 无法找到 meta 部分")
-            return False, 0, 0, 0
-        
-        # 找到 meta 结束位置（"data": [ 之前）
-        data_start = content.find('"data": [')
-        if data_start == -1:
-            logger.warning("  ⚠ 无法找到 data 部分")
-            return False, 0, 0, 0
-        
-        # 提取 meta JSON 字符串
-        meta_content = content[meta_start:data_start].rstrip(',\n ')
-        # 补全 meta JSON（去掉 "meta": 前缀，补上 { 和 }）
-        meta_json = '{' + meta_content.split('"meta": {')[1]
-        # 确保末尾有 }
-        if not meta_json.rstrip().endswith('}'):
-            meta_json = meta_json.rstrip(',\n ') + '}'
-        
+        # 解析 meta JSON
+        meta_content = '\n'.join(meta_lines)
         try:
-            meta = json.loads(meta_json)
+            meta = json.loads(meta_content)
         except json.JSONDecodeError as e:
             logger.warning(f"  ⚠ meta 解析失败: {e}")
             return False, 0, 0, 0
@@ -857,12 +867,12 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
         date_start = date_range.get('start', '') if isinstance(date_range, dict) else ''
         date_end = date_range.get('end', '') if isinstance(date_range, dict) else ''
         
-        # 释放 content 内存
-        del content
+        # 释放临时内存
+        del meta_lines, meta_content
         gc.collect()
         
     except Exception as e:
-        logger.warning(f"  ⚠ meta 加载失败: {e}")
+        logger.warning(f"  ⚠ meta 流式解析失败: {e}")
         return False, 0, 0, 0
     
     # 第二次：流式扫描 data，边扫描边计数，同时抽样
