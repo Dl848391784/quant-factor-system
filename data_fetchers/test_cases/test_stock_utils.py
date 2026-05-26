@@ -240,8 +240,8 @@ class TestConstants:
         assert isinstance(MAIN_BOARD_PREFIXES, tuple)  # 不可变
 
     def test_excluded_prefixes(self):
-        """测试剔除前缀常量"""
-        assert EXCLUDED_PREFIXES == ('30', '688', '8', '4')
+        """测试剔除前缀常量（精简后：'8' 覆盖 '688'）"""
+        assert EXCLUDED_PREFIXES == ('30', '8', '4')
         assert isinstance(EXCLUDED_PREFIXES, tuple)
 
     def test_excluded_name_keywords(self):

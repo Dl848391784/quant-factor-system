@@ -21,6 +21,7 @@
 - v2.2 (2026-05-27): 条件导入简化（删除 __main__ 分支死代码，仅保留相对导入）
 - v2.3 (2026-05-27): MAX_STOCK_DATE 快照值修复、filter_stocks_by_date 正则预检补充、get_stock_name_map empty_count 直接计数、load_main_board_stock_list OSError 捕获补充
 - v2.4 (2026-05-27): EXCLUDED_NAME_KEYWORDS 精简（'ST' 覆盖所有变体）、相对导入 PEP 8 合规化、filter_stocks_by_date 字典序注释补充、_validate_date 使用场景区分
+- v2.5 (2026-05-27): load_main_board_stock_list Raises 文档修正（删除 RuntimeError、补充 OSError 包装说明）、EXCLUDED_PREFIXES 精简（'8' 覆盖 '688'）、filter_stocks_by_date 验证顺序调整（范围先于边界）、get_stock_codes_only/get_stock_name_map 类型检查补充
 
 作者: 云瑶
 日期: 2026-05-24
@@ -71,18 +72,16 @@ _MODULE_LOGGER = logging.getLogger('data_fetchers.common.stock_utils')
 # 注意：使用元组（tuple）确保不可变，防止外部修改影响所有调用
 MAIN_BOARD_PREFIXES = ('60', '00')
 
-# 剔除的代码前缀（创业板30、科创板688、北交所8/4）
+# 剔除的代码前缀（创业板30、北交所8/4）
 # 数据来源：中国证券交易所规则，各板块代码前缀定义
 # - 创业板：深市30开头（6位代码，前2位为30）
-# - 科创板：沪市688开头（6位代码，前3位为688）
+# - 科创板：沪市688开头，已被单字符'8'覆盖（688以8开头）
 # - 北交所：83/87/8开头（6位代码，前2位为83/87，或前1位为8）
-#           注意：使用单字符'8'可覆盖所有北交所代码（83/87/80/88等）
+#           注意：使用单字符'8'可覆盖所有北交所代码及科创板代码
 # - 两网公司：4开头（历史遗留，前1位为4）
-# 前缀长度预期：30为2字符、688为3字符、8/4为1字符，根据板块规则精确匹配
-# 覆盖盲区说明：单字符'8'和'4'可能匹配到非北交所/两网公司代码，
-#               但A股市场不存在此类冲突代码，因此前缀匹配安全
+# 精简说明：单字符'8'已覆盖科创板(688)和北交所(83/87/80/88等)，无需单独列出'688'
 # 注意：使用元组（tuple）确保不可变，防止外部修改影响所有调用
-EXCLUDED_PREFIXES = ('30', '688', '8', '4')
+EXCLUDED_PREFIXES = ('30', '8', '4')
 
 # 剔除的名称关键词（ST类股票）
 # 数据来源：中国证券交易所规则，风险警示股票命名规范
@@ -277,9 +276,8 @@ def load_main_board_stock_list(
         
     Raises:
         FileNotFoundError: 股票列表缓存不存在
-        ValueError: JSON 解析失败或数据格式错误
+        ValueError: JSON 解析失败、数据格式错误或 IO 异常（含 PermissionError 等包装）
         TypeError: logger 参数不是 logging.Logger 类型
-        RuntimeError: 缓存函数未初始化（模块导入错误）
         
     Note:
         - 自动使用缓存路径（默认 cache/stock_list.json）
@@ -400,12 +398,17 @@ def get_stock_codes_only(stock_list: List[Dict[str, Any]], logger: Optional[logg
     codes = []
     invalid_elements = 0
     empty_codes = 0
+    invalid_types = 0  # 非字符串类型 code
     for stock in stock_list:
         # 元素类型检查：必须是字典类型
         if not isinstance(stock, dict):
             invalid_elements += 1
             continue
         code = stock.get('code', '')
+        # 类型检查：code 必须是字符串
+        if not isinstance(code, str):
+            invalid_types += 1
+            continue
         if code:  # 有效代码
             codes.append(code)
         else:  # 空代码
@@ -419,6 +422,12 @@ def get_stock_codes_only(stock_list: List[Dict[str, Any]], logger: Optional[logg
         logger.warning(
             "提取股票代码时发现 %d 个非字典元素，已过滤",
             invalid_elements
+        )
+    
+    if invalid_types > 0:
+        logger.warning(
+            "提取股票代码时发现 %d 个非字符串类型 code，已过滤",
+            invalid_types
         )
     
     if empty_codes > 0:
@@ -490,6 +499,12 @@ def filter_stocks_by_date(
     if not _validate_date(end_date):
         raise ValueError(f"结束日期不是合法日期: {end_date}（日历上不存在该日期）")
     
+    # 日期范围验证：start_date <= end_date（先验范围，避免边界错误语义混乱）
+    if start_date > end_date:
+        raise ValueError(
+            f"日期范围无效: start_date ({start_date}) > end_date ({end_date})"
+        )
+    
     # 日期边界验证：A股市场始于1990-12-19
     if start_date < MIN_STOCK_DATE:
         raise ValueError(
@@ -500,12 +515,6 @@ def filter_stocks_by_date(
     if end_date > max_date:
         raise ValueError(
             f"结束日期超出合理边界: {end_date}（当前日期 {max_date}）"
-        )
-    
-    # 日期范围验证：start_date <= end_date
-    if start_date > end_date:
-        raise ValueError(
-            f"日期范围无效: start_date ({start_date}) > end_date ({end_date})"
         )
     
     # 防御性编程：空列表边界检查
@@ -601,6 +610,7 @@ def get_stock_name_map(stock_list: List[Dict[str, Any]], logger: Optional[loggin
     name_map = {}
     invalid_elements = 0
     empty_count = 0  # 直接计数空代码/空名称
+    invalid_types = 0  # 非字符串类型 code/name
     for stock in stock_list:
         # 元素类型检查：必须是字典类型
         if not isinstance(stock, dict):
@@ -608,6 +618,10 @@ def get_stock_name_map(stock_list: List[Dict[str, Any]], logger: Optional[loggin
             continue
         code = stock.get('code', '')
         name = stock.get('name', '')
+        # 类型检查：code 和 name 必须都是字符串
+        if not isinstance(code, str) or not isinstance(name, str):
+            invalid_types += 1
+            continue
         if code and name:  # 过滤空代码和空名称
             name_map[code] = name
         else:  # 空代码或空名称
@@ -621,6 +635,12 @@ def get_stock_name_map(stock_list: List[Dict[str, Any]], logger: Optional[loggin
         logger.warning(
             "构建名称映射时发现 %d 个非字典元素，已过滤",
             invalid_elements
+        )
+    
+    if invalid_types > 0:
+        logger.warning(
+            "构建名称映射时发现 %d 个非字符串类型 code/name，已过滤",
+            invalid_types
         )
     
     if empty_count > 0:
