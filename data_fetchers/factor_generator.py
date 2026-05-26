@@ -4,6 +4,8 @@
 
 职责：生成所有因子数据到缓存，提供单一数据源
 
+Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
+
 遵循 PROJECT.md 规范：
 - 输出到 cache/factor_data/
 - 复用公共模块计算函数（遵循强制复用规范）
@@ -38,9 +40,11 @@
 - v1.25 (2026-05-26): Bug修复+文档修正（_calc_pct类型注解补充兼容类型说明、docstring Raises删除输入数据为空场景、兜底块错误信息补充异常详情）
 - v1.26 (2026-05-26): 规范合规修复（输出路径改为result目录，遵循MODULE.md约束#2：与factor_ic等模块保持一致）
 - v1.27 (2026-05-27): 4项修复——1) 条件导入else分支注释补充（说明factor_ic跨包必须用绝对导入）；2) Step编号修正（7→6、8→7、9→8）；3) sys移至顶层导入（PEP 8合规）；4) _DEFAULT_CACHE_DIR注释补充路径层级说明
+- v1.28 (2026-05-27): 4项修复——1) 模块docstring声明Python>=3.8（gzip.BadGzipFile）；2) output_df显式释放内存（与既有风格一致）；3) json.dump设置ensure_ascii=False（中文不转义）；4) argparse移至顶层导入（PEP 8合规）
 
 作者: 云瑶
 """
+import argparse
 import gzip
 import json
 import logging
@@ -447,7 +451,7 @@ def generate_all_factors(
     temp_path = output_path.parent / (output_path.name + '.tmp')
     try:
         with gzip.open(temp_path, 'wt') as f:
-            json.dump(output_data, f)
+            json.dump(output_data, f, ensure_ascii=False)  # 中文不转义，压缩率更高
         os.replace(temp_path, output_path)
     except OSError as e:
         # 文件系统错误（磁盘/权限/IO，PermissionError 是 OSError 子类）
@@ -477,6 +481,7 @@ def generate_all_factors(
     # - input_sources: 输入数据源路径
     # - output_path: 输出文件路径
     total_records = len(output_df)
+    del output_df  # 显式释放内存（与 base_data/turnover_df/return_df/factor_df 保持一致）
     
     metadata = {
         'generated_at': end_time.strftime('%Y-%m-%d %H:%M:%S'),
@@ -518,8 +523,6 @@ def generate_all_factors(
 
 def main() -> int:
     """CLI 主入口"""
-    import argparse
-    
     parser = argparse.ArgumentParser(description='统一因子生成模块（含收益数据）')
     parser.add_argument('--factor_data', type=str, default=None, help='基础因子数据路径')
     parser.add_argument('--turnover_data', type=str, default=None, help='换手率数据路径')
