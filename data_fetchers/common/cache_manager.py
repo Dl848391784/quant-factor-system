@@ -28,6 +28,11 @@
     2. delete_cache OSError 错误信息精确化（"文件被占用"而非"磁盘空间不足"）
     3. __main__ finally 清理列表补全 test_unified_path_gz + 幂等删除
     4. BadGzipFile except 添加触发条件注释（仅 use_gzip=True）
+- v1.15 (2026-05-26): 四项健壮性修复：
+    1. tempfile.mkstemp prefix 使用 path.name.split('.')[0] 取干净基础名
+    2. TypeError 单独捕获（json.dump 不可序列化数据），保留精确错误
+    3. _read_cache_impl 消除 TOCTOU 竞态（移除提前 exists 检查，FileNotFoundError 透传）
+    4. get_cache_file_info 消除双重检查（直接 stat() + 异常判断存在性）
 
 作者: 云瑶
 日期: 2026-05-24
@@ -134,11 +139,14 @@ def _read_cache_impl(
         FileNotFoundError: 文件不存在
         ValueError: JSON 解析失败
     """
-    if not path.exists():
+    # 消除 TOCTOU 竞态：直接尝试读取，捕获 FileNotFoundError 透传
+    # 不再提前检查 path.exists()，避免检查-读取间隙文件被删除
+    try:
+        file_size = path.stat().st_size
+    except FileNotFoundError:
         raise FileNotFoundError(f"缓存文件不存在: {path}")
     
     # 空文件处理（边界情况）
-    file_size = path.stat().st_size
     if file_size == 0:
         logger.warning("缓存文件为空（大小为 0）: %s", path)
         return {}  # 空文件返回空字典
@@ -162,6 +170,9 @@ def _read_cache_impl(
                 data = json.load(f)
         logger.debug("成功读取缓存: %s", path)
         return data
+    except FileNotFoundError as e:
+        # 文件在 stat 后被删除，透传真实错误（TOCTOU 场景）
+        raise FileNotFoundError(f"缓存文件不存在: {path}") from e
     except json.JSONDecodeError as e:
         # 遵循 references/backtest-module-optimization-patterns.md Section 1.2
         # 避免传递完整 JSON 文档字符串导致内存翻倍
@@ -185,7 +196,7 @@ def _read_cache_impl(
         raise PermissionError(f"无权限读取缓存文件: {path}") from e
     except OSError as e:
         logger.error("文件系统错误: %s", path)
-        raise OSError(f"读取缓存失败（磁盘空间不足或文件系统错误）: {path}") from e
+        raise OSError(f"读取缓存失败（文件系统错误）: {path}") from e
     except Exception as e:
         logger.exception("读取缓存失败（未知错误）: %s", path)
         raise RuntimeError(f"读取缓存失败（未知错误）: {path}") from e
@@ -239,9 +250,12 @@ def _write_cache_impl(
     
     # 生成唯一临时文件路径（线程安全）
     # 使用 tempfile.mkstemp 确保多进程/线程并发写入时临时文件不冲突
+    # 注意：path.stem 对 .json.gz 文件返回 'data.json'（含点号），不干净
+    # 使用 path.name.split('.')[0] 取真正的基础名
+    base_name = path.name.split('.')[0]
     fd, temp_path_str = tempfile.mkstemp(
         suffix='.tmp',
-        prefix=path.stem + '_',
+        prefix=base_name + '_',
         dir=path.parent
     )
     os.close(fd)  # 关闭文件描述符，后续使用 Path
@@ -268,6 +282,20 @@ def _write_cache_impl(
         except OSError:
             pass
         raise PermissionError(f"无权限写入缓存文件: {path}") from e
+    except TypeError as e:
+        # json.dump 遇到不可序列化数据时抛出 TypeError（如 datetime、自定义对象）
+        logger.error(
+            "数据包含不可序列化类型\n"
+            "文件路径: %s\n"
+            "错误信息: %s",
+            path, str(e)
+        )
+        # 清理临时文件
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise TypeError(f"缓存数据包含不可序列化类型: {path}, {e}") from e
     except OSError as e:
         logger.error("文件系统错误: %s", path)
         # 清理临时文件
@@ -490,20 +518,24 @@ def get_cache_file_info(
     path = Path(path)  # 统一转换为 Path
     logger = get_module_logger(logger)
     
+    # 消除双重检查 TOCTOU 竞态：直接调用 stat()，通过异常判断是否存在
     info = {
         'path': str(path),
-        'exists': path.exists(),
+        'exists': False,
         'size_mb': 0,
         'modified_time': None,
     }
     
-    if path.exists():
+    try:
         stat = path.stat()
+        info['exists'] = True
         info['size_mb'] = stat.st_size / (1024 * 1024)
         info['modified_time'] = stat.st_mtime
         logger.debug("获取缓存文件信息: %s, 大小 %.4f MB", path, info['size_mb'])
-    else:
+    except FileNotFoundError:
         logger.warning("缓存文件不存在: %s", path)
+    except PermissionError:
+        logger.warning("无权限获取缓存文件信息: %s", path)
     
     return info
 
