@@ -51,8 +51,10 @@ import pandas as pd
 # 本地模块导入
 try:
     from data_fetchers.data_loader import RealDataLoader
+    from data_fetchers.factor_calculator import calculate_rsi
 except ImportError:
     from data_loader import RealDataLoader
+    from factor_calculator import calculate_rsi
 
 # 公共模块导入（条件导入：脚本直接运行时可能路径未配置）
 # 使用前提：project_root 已加入 PYTHONPATH 或以项目根目录为工作目录执行
@@ -621,7 +623,7 @@ def fetch_batch_stocks(
     combined = combined.sort_values(['asset', 'date']).copy()  # 避免 CoW 风险
     
     combined['rsi_6'] = combined.groupby('asset')['close'].transform(
-        lambda x: loader._calculate_rsi_vectorized(x, period=6)
+        lambda x: calculate_rsi(x, period=6)
     )
     
     combined['volume_ratio_5'] = combined.groupby('asset')['volume'].transform(

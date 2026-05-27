@@ -62,65 +62,6 @@ warnings.filterwarnings('ignore')
 # 模块级常量
 # ============================================================================
 
-# EPSILON 用于判断 avg_loss 是否接近零（避免 division by zero 或极小值）
-# RSI 理论范围 [0, 100]，avg_loss 为价格变动绝对值，量级约价格*0.01~0.05
-# 1e-10 作为零值阈值，相对 avg_loss 量级极小（约 1e-8 倍），判断合理
-EPSILON = 1e-10
-
-
-# ============================================================================
-# 模块级 Wilder 平滑函数（可被单元测试直接覆盖）
-# ============================================================================
-
-def _wilder_smoothing_rsi(series: pd.Series, n: int) -> pd.Series:
-    """Wilder 平滑：前 n-1 天 NaN，第 n 天 SMA 种子，第 n+1 天起 EWM 递推
-    
-    Args:
-        series: 单资产的序列（gain 或 loss）
-        n: 窗口期
-    
-    Returns:
-        Wilder 平滑均值序列
-    
-    Note:
-        Wilder (1978) 标准实现：
-        1. 前 n-1 天为 NaN（数据不足以计算 SMA）
-        2. 第 n 天（索引 n-1）使用 SMA 值作为 EWM 种子
-           - SMA = series.iloc[:n].mean()
-        3. 第 n+1 天及之后使用 EWM 递推
-           - 公式：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
-           - alpha = 1/n
-           - NaN 传播：若当天输入为 NaN，结果也为 NaN
-        
-        与 pandas ewm(adjust=False) 的差异：
-        - pandas ewm(adjust=False) 从第 1 个观测值就开始计算
-        - Wilder 标准要求前 n-1 天为 NaN，第 n 天用 SMA
-    """
-    alpha = 1.0 / n
-    
-    # 初始化全 NaN 序列
-    result = pd.Series(float('nan'), index=series.index, dtype=float)
-    
-    # 防御性检查：序列长度不足
-    if len(series) < n:
-        return result
-    
-    # 第 n 天（索引 n-1）：SMA 种子
-    seed = series.iloc[:n].mean()
-    if pd.isna(seed):  # 防御：前 n 天全为 NaN 时无法计算种子
-        return result
-    result.iloc[n - 1] = seed
-    
-    # 第 n+1 天起（索引 n 到 len-1）：EWM 递推
-    for i in range(n, len(series)):
-        if pd.isna(series.iloc[i]):  # 当天值为 NaN：传播 NaN
-            result.iloc[i] = float('nan')
-        else:
-            result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * result.iloc[i - 1]
-    
-    return result
-
-
 class RealDataLoader:
     """真实 A股数据加载器（多线程版本）"""
     
