@@ -2525,3 +2525,15 @@ factor_df['middle'] = middle  # 成功赋值
 ---
 
 *最后更新: 2026-05-25 10:30 北京时间*
+---
+
+## factor_calculator.py 版本历史
+
+| 版本 | 时间 | 更新内容 |
+|-----|------|---------|
+| v1.0 | 2026-05-27 17:00 | 初始创建：导入规范化、logger参数化（约束77）、类型注解精确化（约束76）、__all__修复（约束60）、docstring补全（Example章节） |
+| v1.0 | 2026-05-27 17:00 | 配套文件：docs/factor_calculator_flow.md、test_cases/test_factor_calculator.py |
+
+---
+
+*最后更新: 2026-05-27 17:00 北京时间*

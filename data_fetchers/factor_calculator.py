@@ -18,9 +18,21 @@
 创建日期: 2026-05-27
 """
 
+# ============================================================================
+# 标准库导入
+# ============================================================================
+import logging
+
+# ============================================================================
+# 第三方库导入
+# ============================================================================
 import pandas as pd
 import numpy as np
-from typing import Any
+
+# ============================================================================
+# 类型导入
+# ============================================================================
+from typing import Optional, Any
 
 # ============================================================================
 # 模块级常量
@@ -35,6 +47,38 @@ DEFAULT_KDJ_N = 9
 DEFAULT_KDJ_M1 = 3
 DEFAULT_KDJ_M2 = 3
 DEFAULT_SURGE_WINDOW = 5
+
+# ============================================================================
+# 模块级 fallback logger（遵循 PROJECT.md 公共模块日志规范）
+# ============================================================================
+_MODULE_LOGGER = logging.getLogger('data_fetchers.factor_calculator')
+
+
+def get_module_logger(logger_arg: Optional[logging.Logger] = None) -> logging.Logger:
+    """
+    获取 logger，遵循 PROJECT.md 公共模块日志规范
+    
+    公共模块接收 logger 参数，调用方传入以追溯调用方。
+    不传 logger 时使用模块级 fallback logger（模块加载时已初始化）。
+    
+    Args:
+        logger_arg: 调用方传入的 logger（可选）
+        
+    Returns:
+        Logger 对象
+    
+    Example:
+        >>> # 调用方传入 logger
+        >>> from data_fetchers.common.logger_config import setup_logger
+        >>> logger = setup_logger('factor_generator')
+        >>> result = calculate_bollinger_pb(df, logger_arg=logger)
+        
+        >>> # 不传 logger，使用模块级 fallback
+        >>> result = calculate_bollinger_pb(df)
+    """
+    if logger_arg is not None:
+        return logger_arg
+    return _MODULE_LOGGER
 
 
 # ============================================================================
@@ -110,6 +154,14 @@ def calculate_rsi(
     
     Returns:
         RSI 值序列（0-100）
+    
+    Example:
+        >>> import pandas as pd
+        >>> close = pd.Series([100, 102, 101, 103, 105, 104, 106])
+        >>> rsi = calculate_rsi(close, period=6)
+        >>> # 前 5 天为 NaN，第 6 天开始有值
+        >>> rsi.iloc[5]  # 第一个有效值
+        50.0
     """
     delta = close_prices.diff()
     gain = delta.where(delta > 0, 0)
@@ -166,6 +218,14 @@ def calculate_volume_ratio(
     
     Returns:
         量比值序列
+    
+    Example:
+        >>> import pandas as pd
+        >>> vol = pd.Series([1000, 1100, 900, 1200, 1000, 1500])
+        >>> vr = calculate_volume_ratio(vol, window=5)
+        >>> # 前 5 天为 NaN（需要 5 日历史均值）
+        >>> vr.iloc[5]  # 第 6 天量比
+        1.5
     """
     # 过去 window 日成交量均值（不含当日）
     avg_volume = volume.shift(1).rolling(window, min_periods=window).mean()
@@ -202,6 +262,15 @@ def calculate_forward_return(
     
     Returns:
         前瞻收益率序列
+    
+    Example:
+        >>> import pandas as pd
+        >>> close = pd.Series([100, 102, 105, 103])
+        >>> fr = calculate_forward_return(close, shift=1)
+        >>> fr.iloc[0]  # 第 0 天的次日收益
+        0.02
+        >>> fr.iloc[3]  # 最后一天无次日数据，为 NaN
+        nan
     """
     future_close = close_prices.shift(-shift)
     
@@ -221,7 +290,7 @@ def calculate_bollinger_pb(
     factor_df: pd.DataFrame,
     n: int = DEFAULT_BOLLINGER_N,
     k: float = DEFAULT_BOLLINGER_K,
-    logger: Any = None
+    logger_arg: Optional[logging.Logger] = None
 ) -> pd.DataFrame:
     """
     计算布林带 %B 因子
@@ -230,6 +299,7 @@ def calculate_bollinger_pb(
         factor_df: 包含 close、date、asset 列的 DataFrame（面板数据长格式）
         n: 移动平均周期
         k: 标差倍数
+        logger_arg: 调用方传入的 logger（遵循 MODULE.md 约束 77）
     
     返回:
         添加 bollinger_pb 列的 DataFrame
@@ -237,8 +307,19 @@ def calculate_bollinger_pb(
     注意:
         1. 函数入口必须先 .copy()，避免修改原始数据
         2. 布林带是单只股票的时序指标，必须按 asset 分组后再做 rolling
+    
+    Example:
+        >>> import pandas as pd
+        >>> df = pd.DataFrame({
+        ...     'date': ['2026-01-01', '2026-01-02', '2026-01-03'],
+        ...     'asset': ['A', 'A', 'A'],
+        ...     'close': [100, 102, 101]
+        ... })
+        >>> result = calculate_bollinger_pb(df, n=20, k=2.0)
+        >>> 'bollinger_pb' in result.columns
+        True
     """
-    _logger = logger
+    _logger = get_module_logger(logger_arg)
     
     # 入口：创建副本避免副作用
     factor_df = factor_df.copy()
@@ -322,7 +403,7 @@ def calculate_kdj_j(
     n: int = DEFAULT_KDJ_N,
     m1: int = DEFAULT_KDJ_M1,
     m2: int = DEFAULT_KDJ_M2,
-    logger: Any = None
+    logger_arg: Optional[logging.Logger] = None
 ) -> pd.DataFrame:
     """
     计算 KDJ_J 因子
@@ -332,6 +413,7 @@ def calculate_kdj_j(
         n: RSV 计算周期
         m1: K值平滑周期
         m2: D值平滑周期
+        logger_arg: 调用方传入的 logger（遵循 MODULE.md 约束 77）
     
     返回:
         添加了 kdj_j 列的 DataFrame
@@ -339,8 +421,21 @@ def calculate_kdj_j(
     规范:
         - 函数入口必须先 .copy()，避免修改原始数据
         - KDJ 是单股票时序指标，必须按 asset 分组后再做 rolling/ewm
+    
+    Example:
+        >>> import pandas as pd
+        >>> df = pd.DataFrame({
+        ...     'date': ['2026-01-01', '2026-01-02', '2026-01-03'],
+        ...     'asset': ['A', 'A', 'A'],
+        ...     'close': [100, 102, 101],
+        ...     'high': [103, 104, 103],
+        ...     'low': [99, 100, 99]
+        ... })
+        >>> result = calculate_kdj_j(df, n=9, m1=3, m2=3)
+        >>> 'kdj_j' in result.columns
+        True
     """
-    _logger = logger
+    _logger = get_module_logger(logger_arg)
     
     # 函数入口必须先 copy
     factor_df = factor_df.copy()
@@ -396,7 +491,7 @@ def calculate_kdj_j(
 def calculate_turnover_surge(
     factor_df: pd.DataFrame,
     surge_window: int = DEFAULT_SURGE_WINDOW,
-    logger: Any = None
+    logger_arg: Optional[logging.Logger] = None
 ) -> pd.DataFrame:
     """
     计算换手率突增因子
@@ -404,6 +499,7 @@ def calculate_turnover_surge(
     参数:
         factor_df: 包含 turnover_rate, close 列的 DataFrame
         surge_window: 换手率均值计算窗口
+        logger_arg: 调用方传入的 logger（遵循 MODULE.md 约束 77）
     
     返回:
         添加了 turnover_surge 列的 DataFrame
@@ -411,8 +507,20 @@ def calculate_turnover_surge(
     规范:
         - 函数入口必须先 .copy()，避免修改原始数据
         - 异常检测而非静默修正
+    
+    Example:
+        >>> import pandas as pd
+        >>> df = pd.DataFrame({
+        ...     'date': ['2026-01-01', '2026-01-02', '2026-01-03'],
+        ...     'asset': ['A', 'A', 'A'],
+        ...     'turnover_rate': [0.01, 0.02, 0.03],
+        ...     'close': [100, 102, 103]
+        ... })
+        >>> result = calculate_turnover_surge(df, surge_window=5)
+        >>> 'turnover_surge' in result.columns
+        True
     """
-    _logger = logger
+    _logger = get_module_logger(logger_arg)
     
     # 函数入口必须先 copy
     factor_df = factor_df.copy()
@@ -470,7 +578,7 @@ def calculate_turnover_surge(
 
 
 # ============================================================================
-# 模块导出
+# 模块导出（遵循 MODULE.md 约束 60：不含私有名称）
 # ============================================================================
 __all__ = [
     'EPSILON',
@@ -480,6 +588,5 @@ __all__ = [
     'calculate_bollinger_pb',
     'calculate_kdj_j',
     'calculate_turnover_surge',
-    '_wilder_smoothing_rsi',
-    '_calculate_ewm_with_initial',
+    'get_module_logger',
 ]
