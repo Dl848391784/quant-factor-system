@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v3.02
+> 版本: v3.03
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-27 12:00 北京时间
+> 更新时间: 2026-05-27 14:30 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -621,6 +621,18 @@ data_fetchers/
    - **测试命名规则**：`test_<脚本名>.py`（遵循 pytest 约定）
    - **修复原因**：规范缺失（PROJECT.md 缺少 pytest 规范、MODULE.md 目录结构不规范、__main__ 块测试代码无法自动运行）
 
+34. **batch_processor.py v1.0 (2026-05-27 14:30)** — 公共模块规范化
+   - **文件头版本历史**：添加 v1.0 初始版本说明
+   - **logger 参数命名**：`logger` → `logger_arg`（遵循 MODULE.md 约束 77）
+   - **cleanup_batch_files 异常日志**：添加 `[{type(e).__name__}]: {e}`（遵循 MODULE.md 约束 50）
+   - **docstring Example 章节**：4个公共函数添加使用示例
+   - **docstring Raises 章节**：4个公共函数添加异常说明
+   - **导入顺序验证**：符合 PEP 8（标准库→第三方库→本地模块）
+   - **流程文档创建**：`docs/batch_processor_flow.md`（遵循 MODULE.md 约束 8）
+   - **pytest 测试文件**：`test_cases/test_batch_processor.py`（16个测试用例）
+   - **MODULE.md 版本更新**：v3.02 → v3.03
+   - **修复原因**：规范缺失（8项）
+
 33. **fetch_turnover.py v2.3 (2026-05-27 11:30)** — 第四轮补充优化
    - **get_cached_turnover_codes 函数**：创建公共函数（__all__ 中已声明，补充实现）
    - **类型注解完整性**：`Set[str]` 返回类型 + `logger_arg` 参数
@@ -1204,17 +1216,19 @@ data_fetchers/
 135. **MODULE.md v3.01 (2026-05-27)** — 规范补充
    - **新增约束 #75-#76**：模糊匹配优先级说明、返回类型注解完整
 
-136. **dataframe_utils.py v1.0-v1.4 (2026-05-27)** — 公共模块新增
+136. **dataframe_utils.py v1.0-v1.5 (2026-05-27)** — 公共模块新增
    - **v1.0**: 首次创建，validate_dataframe_columns 函数
    - **v1.1**: logger 参数化，错误信息包含可用列
    - **v1.2**: 导入顺序PEP8规范化，删除未使用导入，添加边界处理
    - **v1.3**: docstring Example 完善，正常+异常场景分离
    - **v1.4**: MODULE.md 版本历史同步，测试边界完善（TC009/TC010）
+   - **v1.5**: __all__ 放置位置PEP8规范化，df_name 参数支持 None，类型注解更新
 
-137. **test_dataframe_utils.py v1.0-v1.2 (2026-05-27)** — 测试文件新增
+137. **test_dataframe_utils.py v1.0-v1.3 (2026-05-27)** — 测试文件新增
    - **v1.0**: 首次创建，覆盖正常/异常/边界场景（TC001-TC008）
    - **v1.1**: 导入顺序PEP8规范化，测试日志命名合规化
    - **v1.2**: 新增 TC009/TC010 测试边界（df_name空字符串、列名大小写敏感）
+   - **v1.3**: 删除 __main__ 块，新增 TC011（df_name 为 None）
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）

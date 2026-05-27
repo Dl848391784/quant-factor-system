@@ -10,6 +10,7 @@ DataFrame 工具模块测试用例
 - v1.0 (2026-05-27): 首次创建，覆盖正常/异常/边界场景
 - v1.1 (2026-05-27): 导入顺序PEP8规范化，测试日志命名合规化
 - v1.2 (2026-05-27): 新增 TC009/TC010 测试边界（df_name空字符串、列名大小写敏感）
+- v1.3 (2026-05-27): 删除 __main__ 块，新增 TC011（df_name 为 None）
 """
 
 # 标准库导入
@@ -133,7 +134,10 @@ class TestValidateDataframeColumns:
         error_msg = str(exc_info.value)
         # 验证大小写敏感，'date' 应在缺失列表中
         assert "date" in error_msg.lower()  # 错误信息中应包含缺失列名
-
-
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+    
+    def test_df_name_none_uses_default(self):
+        """TC011: 边界场景 - df_name 参数为 None，使用默认值"""
+        df = pd.DataFrame({'date': ['2024-01-01'], 'close': [100.0]})
+        
+        # df_name 为 None 时，函数应使用默认值而非抛出异常
+        validate_dataframe_columns(df, ['date', 'close'], None)

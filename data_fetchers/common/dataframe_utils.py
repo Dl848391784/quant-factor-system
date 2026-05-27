@@ -17,6 +17,7 @@ DataFrame 工具模块
 - v1.2 (2026-05-27): 导入顺序PEP8规范化，删除未使用导入，添加边界处理
 - v1.3 (2026-05-27): docstring Example 完善，正常+异常场景分离
 - v1.4 (2026-05-27): MODULE.md 版本历史同步，测试边界完善
+- v1.5 (2026-05-27): __all__ 放置位置PEP8规范化，df_name 边界校验，docstring 完善
 """
 
 # 标准库导入
@@ -26,11 +27,14 @@ from typing import Optional
 # 第三方库导入
 import pandas as pd
 
+# 模块公共 API
+__all__ = ['validate_dataframe_columns']
+
 
 def validate_dataframe_columns(
     df: pd.DataFrame,
     required_cols: list[str],
-    df_name: str,
+    df_name: Optional[str] = None,
     logger: Optional[logging.Logger] = None
 ) -> None:
     """
@@ -42,7 +46,7 @@ def validate_dataframe_columns(
     Args:
         df: DataFrame 对象（不能为 None）
         required_cols: 必需列名列表（不能为空）
-        df_name: DataFrame 名称（用于错误消息）
+        df_name: DataFrame 名称（用于错误消息，可选，默认为 "<未命名DataFrame>"）
         logger: 日志记录器（可选，遵循 PROJECT.md 第783-857行规范）
     
     Raises:
@@ -52,9 +56,15 @@ def validate_dataframe_columns(
     Example:
         >>> import pandas as pd
         >>> from data_fetchers.common.dataframe_utils import validate_dataframe_columns
+        >>> 
         >>> # 正常场景：所有必需列存在
         >>> df = pd.DataFrame({'date': ['2024-01-01'], 'close': [100.0], 'volume': [1000]})
         >>> validate_dataframe_columns(df, ['date', 'close', 'volume'], 'stock_data')
+        >>> 
+        >>> # 正常场景：使用自定义 logger
+        >>> import logging
+        >>> logger = logging.getLogger('my_module')
+        >>> validate_dataframe_columns(df, ['date', 'close'], 'stock_data', logger=logger)
         >>> 
         >>> # 异常场景：缺少必需列（预期抛出 ValueError）
         >>> df_missing = pd.DataFrame({'date': ['2024-01-01'], 'close': [100.0]})
@@ -80,6 +90,11 @@ def validate_dataframe_columns(
         logger.error(f"required_cols 参数为空列表: {df_name}")
         raise ValueError(f"{df_name} 的 required_cols 不能为空列表")
     
+    # 边界处理：df_name 参数校验（建议非空，但不强制）
+    if df_name is None:
+        df_name = "<未命名DataFrame>"
+        logger.warning("df_name 参数为 None，已使用默认值")
+    
     # 验证必需列存在
     missing_cols = [col for col in required_cols if col not in df.columns]
     
@@ -98,7 +113,3 @@ def validate_dataframe_columns(
     
     # 验证通过日志
     logger.debug(f"{df_name} 列名校验通过: {required_cols}")
-
-
-# 模块级常量
-__all__ = ['validate_dataframe_columns']
