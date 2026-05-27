@@ -14,11 +14,15 @@ DataFrame 工具模块
 版本历史:
 - v1.0 (2026-05-27): 首次创建，validate_dataframe_columns 函数
 - v1.1 (2026-05-27): logger 参数化，错误信息包含可用列
+- v1.2 (2026-05-27): 导入顺序PEP8规范化，删除未使用导入，添加边界处理
 """
 
+# 标准库导入
 import logging
+from typing import Optional
+
+# 第三方库导入
 import pandas as pd
-from typing import Any, Optional
 
 
 def validate_dataframe_columns(
@@ -34,13 +38,14 @@ def validate_dataframe_columns(
     错误信息包含可用列，便于用户定位问题。
     
     Args:
-        df: DataFrame 对象
-        required_cols: 必需列名列表
+        df: DataFrame 对象（不能为 None）
+        required_cols: 必需列名列表（不能为空）
         df_name: DataFrame 名称（用于错误消息）
         logger: 日志记录器（可选，遵循 PROJECT.md 第783-857行规范）
     
     Raises:
-        ValueError: DataFrame 缺少必需列，错误信息包含可用列列表
+        TypeError: df 参数为 None
+        ValueError: required_cols 为空列表，或 DataFrame 缺少必需列
     
     Example:
         >>> import pandas as pd
@@ -57,6 +62,16 @@ def validate_dataframe_columns(
     # logger 参数化（遵循 PROJECT.md 规范）
     if logger is None:
         logger = logging.getLogger(__name__)
+    
+    # 边界处理：df 参数校验
+    if df is None:
+        logger.error(f"DataFrame 参数为 None: {df_name}")
+        raise TypeError(f"{df_name} 参数不能为 None")
+    
+    # 边界处理：required_cols 参数校验
+    if not required_cols:
+        logger.error(f"required_cols 参数为空列表: {df_name}")
+        raise ValueError(f"{df_name} 的 required_cols 不能为空列表")
     
     # 验证必需列存在
     missing_cols = [col for col in required_cols if col not in df.columns]
