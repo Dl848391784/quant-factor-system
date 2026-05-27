@@ -136,7 +136,7 @@ def calculate_kdj_j(
     n: int = DEFAULT_N,
     m1: int = DEFAULT_M1,
     m2: int = DEFAULT_M2,
-    log_handler: Any = None
+    log_handler: Any = logger  # 问题2修复：默认值设为模块级 logger
 ) -> pd.DataFrame:
     """计算 KDJ_J 因子
     
@@ -145,11 +145,16 @@ def calculate_kdj_j(
         n: RSV 计算周期，默认 9
         m1: K 值平滑周期，默认 3
         m2: D 值平滑周期，默认 3
-        log_handler: 日志对象（可选，避免遮蔽模块级 logger）
+        log_handler: 日志对象，默认为模块级 logger
     
     Returns:
         包含 kdj_j 列的 DataFrame
     """
+    # 问题1修复：入口日志，记录参数和输入数据规模
+    stock_count = factor_df['asset'].nunique()
+    date_range = f"{factor_df['date'].min()} ~ {factor_df['date'].max()}"
+    log_handler.info(f"开始计算KDJ_J因子: n={n}, m1={m1}, m2={m2}, 股票数={stock_count}, 日期范围={date_range}")
+    
     df = factor_df.copy()
     df = df.sort_values(['asset', 'date'])
     
@@ -186,11 +191,14 @@ def calculate_kdj_j(
     # 计算 J
     df['kdj_j'] = 3 * df['k'] - 2 * df['d']
     
+    # 问题1修复：J值计算完成后记录非空行数
+    kdj_j_valid = df['kdj_j'].notna().sum()
+    log_handler.info(f"KDJ_J因子计算完成，有效值行数: {kdj_j_valid}")
+    
     # 因子数据范围校验（遵循 MODULE.md 第505行规范）
     kdj_j_min = df['kdj_j'].min()
     kdj_j_max = df['kdj_j'].max()
-    if log_handler:
-        log_handler.info("KDJ_J 因子范围: %.2f ~ %.2f", kdj_j_min, kdj_j_max)
+    log_handler.info(f"KDJ_J 因子范围: {kdj_j_min:.2f} ~ {kdj_j_max:.2f}")
     
     return df
 
@@ -218,6 +226,8 @@ def main():
         def factor_calc(df):
             return calculate_kdj_j(df, n=args.kdj_n, m1=args.kdj_m1, m2=args.kdj_m2, log_handler=logger)
         
+        logger.info(f"启动KDJ_J分层回测: n={args.kdj_n}, m1={args.kdj_m1}, m2={args.kdj_m2}")
+        
         # 更新历史（2026-05-27）：v2.7 移除 cache_dir 参数，改为 data_source
         result = run_layered_backtest(
             factor_name='kdj_j',
@@ -232,22 +242,61 @@ def main():
         )
         
         if result['meta']['n_days_total'] == 0:
-            logger.error("回测无有效数据，退出码 1")
+            # 问题7修复：去掉"退出码 1"字样
+            logger.error("回测无有效数据，程序终止")
             sys.exit(1)
-        logger.info("回测完成，退出码 0")
+        
+        # 问题3修复：输出完整回测结果
+        logger.info("=" * 60 + " 回测结果摘要 " + "=" * 60)
+        
+        # 元信息
+        meta = result.get('meta', {})
+        logger.info(f"因子名称: {meta.get('factor_name', 'unknown')}")
+        logger.info(f"回测天数: {meta.get('n_days_total', 0)}")
+        logger.info(f"分层数量: {meta.get('n_layers', 0)}")
+        
+        # 分层收益
+        layer_returns = result.get('layer_returns', {})
+        if layer_returns:
+            logger.info("--- 分层累计收益 ---")
+            for layer_name, ret in layer_returns.items():
+                logger.info(f"{layer_name}: {ret:.2%}")
+        
+        # 多空组合收益
+        long_short = result.get('long_short_return', {})
+        if long_short:
+            logger.info("--- 多空组合 ---")
+            logger.info(f"多头收益: {long_short.get('long_return', 0):.2%}")
+            logger.info(f"空头收益: {long_short.get('short_return', 0):.2%}")
+            logger.info(f"多空收益: {long_short.get('ls_return', 0):.2%}")
+        
+        # 风险指标
+        risk_metrics = result.get('risk_metrics', {})
+        if risk_metrics:
+            logger.info("--- 风险指标 ---")
+            logger.info(f"夏普比率: {risk_metrics.get('sharpe_ratio', 0):.2f}")
+            logger.info(f"最大回撤: {risk_metrics.get('max_drawdown', 0):.2%}")
+            logger.info(f"年化收益: {risk_metrics.get('annual_return', 0):.2%}")
+            logger.info(f"年化波动: {risk_metrics.get('annual_volatility', 0):.2%}")
+        
+        # 问题6修复：结束日志合并到结果摘要末尾
+        logger.info("=" * 128 + " 回测完成 ")
         sys.exit(0)
         
-    except FileNotFoundError as e:
-        logger.error("数据文件不存在: %s", e)
+    except FileNotFoundError:
+        # 问题5修复：改用 logger.exception 输出完整堆栈
+        logger.exception("数据文件不存在")
         sys.exit(2)
-    except KeyError as e:
-        logger.error("数据结构错误: %s", e)
+    except KeyError:
+        # 问题4修复：改用 logger.exception 输出完整堆栈
+        logger.exception("数据结构错误，缺少必要字段")
         sys.exit(3)
-    except ValueError as e:
-        logger.error("参数错误: %s", e)
+    except ValueError:
+        # 问题5修复：改用 logger.exception 输出完整堆栈
+        logger.exception("参数错误")
         sys.exit(4)
-    except Exception as e:
-        logger.exception("回测执行异常: %s", e)
+    except Exception:
+        logger.exception("回测执行异常")
         sys.exit(5)
 
 

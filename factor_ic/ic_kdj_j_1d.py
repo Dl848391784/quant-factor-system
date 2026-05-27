@@ -142,6 +142,11 @@ def calculate_kdj_j(
     # 函数入口必须先 copy，避免副作用
     factor_df = factor_df.copy()
     
+    # 问题2修复：入口日志，记录参数和输入数据规模
+    stock_count = factor_df['asset'].nunique()
+    date_range = f"{factor_df['date'].min()} ~ {factor_df['date'].max()}"
+    logger.info(f"开始计算KDJ_J因子: n={n}, m1={m1}, m2={m2}, 股票数={stock_count}, 日期范围={date_range}")
+    
     # 先按 asset+date 排序，确保 rolling/ewm 在正确时序上计算
     factor_df = factor_df.sort_values(['asset', 'date'])
     
@@ -172,6 +177,11 @@ def calculate_kdj_j(
     
     # 异常位置设为 50（中性值，KDJ 标准处理）
     rsv = rsv.where(~narrow_range_mask, 50.0)
+    
+    # 问题3修复：过窄区间统计日志
+    narrow_count = narrow_range_mask.sum()
+    if narrow_count > 0:
+        logger.warning(f"检测到 {narrow_count} 个高低价区间过窄（< {EPSILON}），RSV已置为中性值 50")
     
     # 计算 K 和 D（使用局部变量，避免污染输出）
     # 使用临时列名计算，最后只保留 kdj_j
@@ -207,6 +217,9 @@ def main():
     
     args = parser.parse_args()
     
+    # 问题4修复：调用前日志，记录启动参数
+    logger.info(f"启动KDJ_J因子IC计算: n={args.n}, m1={args.m1}, m2={args.m2}, min_stocks={args.min_stocks}, force_full={args.force_full}")
+    
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
         factor_name='kdj_j',
@@ -219,15 +232,27 @@ def main():
         _logger=logger
     )
     
+    # 调用完成日志
+    logger.info("KDJ_J因子IC计算完成")
+    
     # 使用 .get() 防御性访问结果（遵循 MODULE.md 日志访问规范）
     ic_metrics = result.get('ic_metrics', {})
-    logger.info("=" * 60)
-    logger.info("结果摘要:")
+    
+    # 问题1、6、7修复：完整指标输出，合并分隔符和标题
+    logger.info("=" * 60 + " 结果摘要 " + "=" * 60)
     logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
     logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
+    logger.info(f"计算参数: n={args.n}, m1={args.m1}, m2={args.m2}")
+    logger.info("--- IC指标 ---")
     logger.info(f"IC 均值: {ic_metrics.get('ic_mean', 0):.4f}")
+    logger.info(f"IC 标准差: {ic_metrics.get('ic_std', 0):.4f}")
     logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
-    logger.info("=" * 60)
+    logger.info(f"IC > 0 占比: {ic_metrics.get('ic_positive_ratio', 0):.2%}")
+    logger.info("--- 数据范围 ---")
+    logger.info(f"日期范围: {result.get('date_range', 'unknown')}")
+    logger.info(f"处理股票数: {result.get('stock_count', 'unknown')}")
+    logger.info(f"IC计算次数: {ic_metrics.get('ic_count', 0)}")
+    logger.info("=" * 128)
     
     return result
 
@@ -235,9 +260,11 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except RuntimeError as e:
-        logger.exception("计算失败")  # 使用 .exception() 保留完整堆栈
+    except RuntimeError:
+        # 问题5修复：去掉未使用的 as e，改为具体错误描述
+        logger.exception("KDJ_J因子IC计算失败")
         sys.exit(1)
-    except Exception as e:
-        logger.exception("未预期的错误")  # 使用 .exception() 保留完整堆栈
+    except Exception:
+        # 问题5修复：去掉未使用的 as e
+        logger.exception("未预期的错误")
         sys.exit(1)

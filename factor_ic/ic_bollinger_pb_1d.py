@@ -76,6 +76,11 @@ def calculate_bollinger_pb(
         3. 直接对整个 factor_df['close'] 做 rolling 会把不同股票价格混在一起，
            产生完全错误的布林带
     """
+    # 入口日志：记录参数和输入数据规模
+    stock_count = factor_df['asset'].nunique()
+    date_range = f"{factor_df['date'].min()} ~ {factor_df['date'].max()}"
+    logger.info(f"开始计算布林带%B因子: n={n}, k={k}, 股票数={stock_count}, 日期范围={date_range}")
+    
     # 入口：创建副本避免副作用
     factor_df = factor_df.copy()
     
@@ -123,6 +128,11 @@ def calculate_bollinger_pb(
     if abnormal_count > 0:
         logger.warning(f"检测到 {abnormal_count} 个异常布林带宽度（负值），已标记为 np.nan")
     
+    # 过窄带宽统计日志（问题4修复）
+    narrow_count = narrow_band_mask.sum()
+    if narrow_count > 0:
+        logger.warning(f"检测到 {narrow_count} 个过窄布林带宽度（< {EPSILON}），已置为中性值 0.5")
+    
     factor_df['bollinger_pb'] = bollinger_pb
     
     return factor_df
@@ -144,6 +154,9 @@ def main():
     
     args = parser.parse_args()
     
+    # 问题5修复：调用前日志
+    logger.info(f"启动布林带%B因子IC计算: n={args.n}, k={args.k}, min_stocks={args.min_stocks}, force_full={args.force_full}")
+    
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
         factor_name='bollinger_pb',
@@ -156,15 +169,27 @@ def main():
         _logger=logger
     )
     
+    # 问题5修复：调用后日志
+    logger.info("布林带%B因子IC计算完成")
+    
     # 使用 .get() 防御性访问结果
     ic_metrics = result.get('ic_metrics', {})
-    logger.info("=" * 60)
-    logger.info("结果摘要:")
+    
+    # 问题1、6、7修复：完整指标输出，合并分隔符和标题
+    logger.info("=" * 60 + " 结果摘要 " + "=" * 60)
     logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
     logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
+    logger.info(f"计算参数: n={args.n}, k={args.k}")
+    logger.info("--- IC指标 ---")
     logger.info(f"IC 均值: {ic_metrics.get('ic_mean', 0):.4f}")
+    logger.info(f"IC 标准差: {ic_metrics.get('ic_std', 0):.4f}")
     logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
-    logger.info("=" * 60)
+    logger.info(f"IC > 0 占比: {ic_metrics.get('ic_positive_ratio', 0):.2%}")
+    logger.info("--- 数据范围 ---")
+    logger.info(f"日期范围: {result.get('date_range', 'unknown')}")
+    logger.info(f"处理股票数: {result.get('stock_count', 'unknown')}")
+    logger.info(f"IC计算次数: {ic_metrics.get('ic_count', 0)}")
+    logger.info("=" * 128)
     
     return result
 
@@ -173,7 +198,8 @@ if __name__ == '__main__':
     try:
         main()
     except RuntimeError:
-        logger.exception("计算失败")
+        # 问题2修复：具体错误描述
+        logger.exception("布林带%B因子IC计算失败")
         sys.exit(1)
     except Exception:
         logger.exception("未预期的错误")

@@ -71,6 +71,23 @@ def _calc_rolling(series: pd.Series, window: int, method: str = 'mean') -> pd.Se
 class BollingerPBLayerConfig(LayerConfigBase):
     """BOLLINGER_PB 分层配置"""
     
+    # thresholds 设计说明：
+    # - 5个阈值点 [0.5, 0.8, 1.0, 1.2] 形成 5 层（len(thresholds) = 4，默认生成 5 层）
+    # - 边界处理：%B < 0 归 Layer 1（越界），%B > 2 归 Layer 5（越界）
+    # - Layer 划分：
+    #   - Layer1: %B < 0.5（含越界值<0，价格远低于下轨，超卖层）
+    #   - Layer2: 0.5 ≤ %B < 0.8（接近下轨，偏弱层）
+    #   - Layer3: 0.8 ≤ %B < 1.0（中轨偏下，中性层）
+    #   - Layer4: 1.0 ≤ %B < 1.2（中轨偏上，偏强层）
+    #   - Layer5: %B ≥ 1.2（含边界1.2，含越界值>2，价格远高于上轨，超买层）
+    # - %B 理论范围无上下限（取决于价格偏离布林带程度），典型范围 [-0.5, 2.5]
+    
+    # layer_names 与 thresholds 对应（5层）：
+    # - Layer 1: %B < 0.5（超卖，越界值<0归入此层）→ 做多（反向因子）
+    # - Layer 2: 0.5 ≤ %B < 0.8（偏弱）→ 做多（反向因子）
+    # - Layer 3: 0.8 ≤ %B < 1.0（中性）→ 不参与多空组合
+    # - Layer 4: 1.0 ≤ %B < 1.2（偏强）→ 做空（反向因子）
+    # - Layer 5: %B ≥ 1.2（超买，越界值>2归入此层）→ 做空（反向因子）
     
     layer_names: TypingDict[str, str] = field(default_factory=lambda: {
         '1': '超卖层(PB<0.5)',
@@ -101,14 +118,14 @@ class BollingerPBLayerConfig(LayerConfigBase):
 def calculate_bollinger_pb(
     factor_df: pd.DataFrame,
     n: int = DEFAULT_N,
-    log_handler: Any = None
+    log_handler: Any = logger  # 问题2修复：默认值设为模块级 logger
 ) -> pd.DataFrame:
     """计算 BOLLINGER_PB 因子
     
     Args:
         factor_df: 包含 close 列的 DataFrame
         n: 滚动窗口期，默认 20
-        log_handler: 日志对象（可选，避免遮蔽模块级 logger）
+        log_handler: 日志对象，默认为模块级 logger
     
     Returns:
         包含 bollinger_pb 列的 DataFrame
@@ -120,6 +137,11 @@ def calculate_bollinger_pb(
         - %B = 0.5: 价格在中轨
         - %B > 1: 价格高于上轨
     """
+    # 问题1修复：入口日志，记录参数和输入数据规模
+    stock_count = factor_df['asset'].nunique()
+    date_range = f"{factor_df['date'].min()} ~ {factor_df['date'].max()}"
+    log_handler.info(f"开始计算布林带%B因子: n={n}, 股票数={stock_count}, 日期范围={date_range}")
+    
     df = factor_df.copy()
     df = df.sort_values(['asset', 'date'])
     
@@ -142,7 +164,8 @@ def calculate_bollinger_pb(
     # 边界处理：band_width 接近零时使用默认值 0.5（价格在中轨）
     # 使用 EPSILON 判断避免浮点精度问题（如 1e-15 导致 %B 极端值）
     zero_band_mask = (band_width.notna()) & (band_width.abs() < EPSILON)
-    if zero_band_mask.sum() > 0 and log_handler:
+    # 问题2修复：去掉 and log_handler 短路条件
+    if zero_band_mask.sum() > 0:
         log_handler.warning(
             "band_width 接近零的记录数: %d (%.2f%%)，使用默认值 0.5",
             zero_band_mask.sum(), zero_band_mask.sum() / len(df) * 100
@@ -161,14 +184,16 @@ def calculate_bollinger_pb(
     # %B > 2: 价格远高于上轨（超买），归入 Layer 5（runner 边界处理）
     # 这些是正常业务场景，不需要过滤，但记录统计信息供分析
     negative_mask = (df['bollinger_pb'].notna()) & (df['bollinger_pb'] < 0)
-    if negative_mask.sum() > 0 and log_handler:
+    # 问题2修复：去掉 and log_handler 短路条件
+    if negative_mask.sum() > 0:
         log_handler.info(
             "bollinger_pb 越界统计: %%B<0 的记录数: %d (%.2f%%)，将归入 Layer1（超卖层）",
             negative_mask.sum(), negative_mask.sum() / len(df) * 100
         )
     
     above_max_mask = (df['bollinger_pb'].notna()) & (df['bollinger_pb'] > 2)
-    if above_max_mask.sum() > 0 and log_handler:
+    # 问题2修复：去掉 and log_handler 短路条件
+    if above_max_mask.sum() > 0:
         log_handler.info(
             "bollinger_pb 越界统计: %%B>2 的记录数: %d (%.2f%%)，将归入 Layer5（超买层）",
             above_max_mask.sum(), above_max_mask.sum() / len(df) * 100
@@ -178,16 +203,17 @@ def calculate_bollinger_pb(
     # 全 NaN 防御：检查是否有有效数据
     pb_values = df['bollinger_pb'].dropna()
     if len(pb_values) == 0:
-        if log_handler:
-            log_handler.warning("bollinger_pb 全部为 NaN，无法计算范围")
-        # 全 NaN 时提前返回，避免输出误导性的 "0.00 ~ 0.00" 日志
-        return df
+        # 问题3修复：改为 error 并抛出 ValueError，阻断无效数据进入回测
+        log_handler.error("bollinger_pb 全部为 NaN，无法进行回测")
+        raise ValueError("bollinger_pb 因子计算结果全为 NaN，无法进行有效回测")
+    
+    # 计算完成日志
+    pb_valid = df['bollinger_pb'].notna().sum()
+    log_handler.info(f"布林带%B因子计算完成，有效值行数: {pb_valid}")
     
     pb_min = pb_values.min()
     pb_max = pb_values.max()
-    
-    if log_handler:
-        log_handler.info("bollinger_pb 因子范围: %.2f ~ %.2f", pb_min, pb_max)
+    log_handler.info(f"bollinger_pb 因子范围: {pb_min:.2f} ~ {pb_max:.2f}")
     
     return df
 
@@ -214,6 +240,8 @@ def main():
             log_handler=logger
         )
         
+        logger.info(f"启动布林带%B分层回测: n={args.bollinger_n}")
+        
         # 更新历史（2026-05-27）：v2.7 移除 cache_dir 参数，改为 data_source
         result = run_layered_backtest(
             factor_name='bollinger_pb',
@@ -228,22 +256,61 @@ def main():
         )
         
         if result['meta']['n_days_total'] == 0:
-            logger.error("回测无有效数据，退出码 1")
+            # 问题8修复：去掉"退出码 1"字样
+            logger.error("回测无有效数据，程序终止")
             sys.exit(1)
-        logger.info("回测完成，退出码 0")
+        
+        # 问题5修复：输出完整回测结果
+        logger.info("=" * 60 + " 回测结果摘要 " + "=" * 60)
+        
+        # 元信息
+        meta = result.get('meta', {})
+        logger.info(f"因子名称: {meta.get('factor_name', 'unknown')}")
+        logger.info(f"回测天数: {meta.get('n_days_total', 0)}")
+        logger.info(f"分层数量: {meta.get('n_layers', 0)}")
+        
+        # 分层收益
+        layer_returns = result.get('layer_returns', {})
+        if layer_returns:
+            logger.info("--- 分层累计收益 ---")
+            for layer_name, ret in layer_returns.items():
+                logger.info(f"{layer_name}: {ret:.2%}")
+        
+        # 多空组合收益
+        long_short = result.get('long_short_return', {})
+        if long_short:
+            logger.info("--- 多空组合 ---")
+            logger.info(f"多头收益: {long_short.get('long_return', 0):.2%}")
+            logger.info(f"空头收益: {long_short.get('short_return', 0):.2%}")
+            logger.info(f"多空收益: {long_short.get('ls_return', 0):.2%}")
+        
+        # 风险指标
+        risk_metrics = result.get('risk_metrics', {})
+        if risk_metrics:
+            logger.info("--- 风险指标 ---")
+            logger.info(f"夏普比率: {risk_metrics.get('sharpe_ratio', 0):.2f}")
+            logger.info(f"最大回撤: {risk_metrics.get('max_drawdown', 0):.2%}")
+            logger.info(f"年化收益: {risk_metrics.get('annual_return', 0):.2%}")
+            logger.info(f"年化波动: {risk_metrics.get('annual_volatility', 0):.2%}")
+        
+        # 问题7修复：结束日志合并到结果摘要末尾
+        logger.info("=" * 128 + " 回测完成 ")
         sys.exit(0)
         
-    except FileNotFoundError as e:
-        logger.error("数据文件不存在: %s", e)
+    except FileNotFoundError:
+        # 问题6修复：改用 logger.exception 输出完整堆栈
+        logger.exception("数据文件不存在")
         sys.exit(2)
-    except KeyError as e:
-        logger.error("数据字段缺失: %s", e)
+    except KeyError:
+        # 问题6修复：改用 logger.exception 输出完整堆栈
+        logger.exception("数据字段缺失，缺少必要列")
         sys.exit(3)
-    except ValueError as e:
-        logger.error("数据值异常: %s", e)
+    except ValueError:
+        # 问题6修复：改用 logger.exception 输出完整堆栈
+        logger.exception("数据值异常")
         sys.exit(4)
-    except Exception as e:
-        logger.exception("回测执行异常: %s", e)
+    except Exception:
+        logger.exception("回测执行异常")
         sys.exit(5)
 
 

@@ -15,6 +15,7 @@
 
 更新历史（2026-05-27）：
 - v2.7: cache_dir 改为 data_source，读取统一数据源
+- v2.8: 补充异常捕获日志和启动节点日志
 
 作者: 云瑶
 创建日期: 2026-05-24
@@ -33,6 +34,9 @@ from comprehensive_factor.common.composite_runner import (
     CompositeLayerConfig
 )
 from comprehensive_factor.common.data_loader import DEFAULT_DATA_SOURCE
+from comprehensive_factor.common.logger_config import get_logger
+
+logger = get_logger(__name__)
 
 
 # ============================================================================
@@ -66,17 +70,42 @@ class EqualWeightLayerConfig(CompositeLayerConfig):
 # CLI 入口
 # ============================================================================
 
-# 从 Config 类读取默认值，单一数据源（遵循 MODULE.md 规范）
-_default_config = EqualWeightLayerConfig()
+# 问题1修复：_default_config 实例化失败时捕获异常并记录日志
+try:
+    # 从 Config 类读取默认值，单一数据源（遵循 MODULE.md 规范）
+    _default_config = EqualWeightLayerConfig()
+except Exception:
+    logger.exception("EqualWeightLayerConfig 实例化失败")
+    raise
 
-main = create_cli_entrypoint(
-    weight_method='equal_weight',
-    config_class=EqualWeightLayerConfig,  # v2.8: config_class 移至 factor_list 前面
-    factor_list=_default_config.factor_list,
-    factor_cols=_default_config.factor_cols,
-    return_period='1d',
-    data_source=str(DEFAULT_DATA_SOURCE)
-)
+# 问题2修复：create_cli_entrypoint 调用失败时捕获异常并记录日志
+try:
+    main = create_cli_entrypoint(
+        weight_method='equal_weight',
+        config_class=EqualWeightLayerConfig,  # v2.8: config_class 移至 factor_list 前面
+        factor_list=_default_config.factor_list,
+        factor_cols=_default_config.factor_cols,
+        return_period='1d',
+        data_source=str(DEFAULT_DATA_SOURCE)
+    )
+except Exception:
+    logger.exception("create_cli_entrypoint 构建CLI入口失败")
+    raise
 
 if __name__ == '__main__':
-    main()
+    # 问题4修复：脚本启动时输出关键配置日志
+    logger.info("=" * 60 + " 等权综合因子分层回测启动 " + "=" * 60)
+    logger.info(f"权重方法: equal_weight")
+    logger.info(f"因子列表: {_default_config.factor_list}")
+    logger.info(f"因子列: {_default_config.factor_cols}")
+    logger.info(f"收益周期: 1d")
+    logger.info(f"数据源: {DEFAULT_DATA_SOURCE}")
+    logger.info(f"分层参数: n_layers={_default_config.n_layers}, factor_direction={_default_config.factor_direction}")
+    logger.info(f"多空组合: long_layers={_default_config.long_layers}, short_layers={_default_config.short_layers}")
+    
+    # 问题3修复：main() 调用时捕获异常并记录日志
+    try:
+        main()
+    except Exception:
+        logger.exception("等权综合因子回测执行失败")
+        sys.exit(1)

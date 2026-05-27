@@ -55,6 +55,9 @@ def main():
     
     args = parser.parse_args()
     
+    # 问题2修复：调用前日志，记录启动参数
+    logger.info(f"启动量比因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+    
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_simple_factor_ic(
         factor_name='volume_ratio',
@@ -64,15 +67,26 @@ def main():
         _logger=logger
     )
     
+    # 调用完成日志
+    logger.info("量比因子IC计算完成")
+    
     # 使用 .get() 防御性访问结果
     ic_metrics = result.get('ic_metrics', {})
-    logger.info("=" * 60)
-    logger.info("结果摘要:")
+    
+    # 问题1、4、5修复：完整指标输出，合并分隔符和标题
+    logger.info("=" * 60 + " 结果摘要 " + "=" * 60)
     logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
     logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
+    logger.info("--- IC指标 ---")
     logger.info(f"IC 均值: {ic_metrics.get('ic_mean', 0):.4f}")
+    logger.info(f"IC 标准差: {ic_metrics.get('ic_std', 0):.4f}")
     logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
-    logger.info("=" * 60)
+    logger.info(f"IC > 0 占比: {ic_metrics.get('ic_positive_ratio', 0):.2%}")
+    logger.info("--- 数据范围 ---")
+    logger.info(f"日期范围: {result.get('date_range', 'unknown')}")
+    logger.info(f"处理股票数: {result.get('stock_count', 'unknown')}")
+    logger.info(f"IC计算次数: {ic_metrics.get('ic_count', 0)}")
+    logger.info("=" * 128)
     
     return result
 
@@ -81,8 +95,9 @@ if __name__ == '__main__':
     try:
         main()
     except RuntimeError:
-        logger.exception("计算失败")  # 使用 .exception() 保留完整堆栈
+        # 问题3修复：改为具体错误描述
+        logger.exception("量比因子IC计算失败")
         sys.exit(1)
     except Exception:
-        logger.exception("未预期的错误")  # 使用 .exception() 保留完整堆栈
+        logger.exception("未预期的错误")
         sys.exit(1)
