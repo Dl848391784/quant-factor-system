@@ -46,6 +46,11 @@ Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
 - v1.27 (2026-05-27): 4项修复——1) 条件导入else分支注释补充（说明factor_ic跨包必须用绝对导入）；2) Step编号修正（7→6、8→7、9→8）；3) sys移至顶层导入（PEP 8合规）；4) _DEFAULT_CACHE_DIR注释补充路径层级说明
 - v1.28 (2026-05-27): 4项修复——1) 模块docstring声明Python>=3.8（gzip.BadGzipFile）；2) output_df显式释放内存（与既有风格一致）；3) json.dump设置ensure_ascii=False（中文不转义）；4) argparse移至顶层导入（PEP 8合规）
 - v1.29 (2026-05-27): 5项修复——1) Step编号重排（2b→3，后续顺延4-9）；2) 使用前提说明补充（PYTHONPATH要求）；3) output_df提前释放（output_data构建后立即del）；4) gzip.open显式encoding='utf-8'（跨平台一致性）；5) JSONDecodeError捕获移除logger.error（行列信息合并到ValueError）
+- v1.30 (2026-05-27): 4项日志精确化修复：
+    1. Step 1/2/3 gzip.BadGzipFile 捕获块补充 logger.error（文件路径+异常原因）
+    2. Step 8 OSError/Exception 捕获块补充 logger.error（输出路径+异常类型+原因）
+    3. Step 8 mkdir OSError 捕获块补充 logger.error（目录路径+异常类型+原因）
+    4. main() 成功分支补充执行摘要日志（total_records、elapsed_seconds、output_path）
 
 作者: 云瑶
 """
@@ -98,9 +103,10 @@ __all__ = [
 # 默认路径配置（私有常量）
 # ============================================================================
 
-# 输入数据路径（cache 目录：数据源原始缓存）
-# parent=data_fetchers/, parent.parent=project_root/
-_DEFAULT_CACHE_DIR = Path(__file__).parent.parent / 'cache' / 'factor_data'
+# 输入数据路径（result 目录：统一数据源，遵循 PROJECT.md 跨模块数据路径规范）
+# 数据由 fetch_factor_cache.py 和 fetch_turnover.py 输出到 result 目录
+# parent=data_fetchers/, 输入路径为 data_fetchers/result/
+_DEFAULT_CACHE_DIR = Path(__file__).parent / 'result'
 
 # 输出数据路径（result 目录：遵循 MODULE.md 约束 #2）
 # parent=data_fetchers/, 输出到 data_fetchers/result/
@@ -267,6 +273,7 @@ def generate_all_factors(
     except FileNotFoundError:
         raise FileNotFoundError(f"基础因子数据文件不存在: {factor_data_path}")
     except gzip.BadGzipFile as e:
+        logger.error("gzip 文件损坏: %s, 原因: %s", factor_data_path, str(e))
         raise ValueError(f"gzip 文件损坏: {factor_data_path}") from e
     except json.JSONDecodeError as e:
         # JSONDecodeError 内存优化：提取关键信息，避免 e.doc 内存翻倍
@@ -297,6 +304,7 @@ def generate_all_factors(
     except FileNotFoundError:
         raise FileNotFoundError(f"换手率数据文件不存在: {turnover_data_path}")
     except gzip.BadGzipFile as e:
+        logger.error("gzip 文件损坏: %s, 原因: %s", turnover_data_path, str(e))
         raise ValueError(f"gzip 文件损坏: {turnover_data_path}") from e
     except json.JSONDecodeError as e:
         # JSONDecodeError 内存优化：提取关键信息，避免 e.doc 内存翻倍
@@ -344,6 +352,7 @@ def generate_all_factors(
     except FileNotFoundError:
         raise FileNotFoundError(f"收益数据文件不存在: {return_data_path}")
     except gzip.BadGzipFile as e:
+        logger.error("gzip 文件损坏: %s, 原因: %s", return_data_path, str(e))
         raise ValueError(f"gzip 文件损坏: {return_data_path}") from e
     except json.JSONDecodeError as e:
         # JSONDecodeError 内存优化：提取关键信息，避免 e.doc 内存翻倍
@@ -442,6 +451,7 @@ def generate_all_factors(
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
     except OSError as e:
+        logger.error("创建输出目录失败: %s, 原因: %s (%s)", output_path.parent, type(e).__name__, str(e))
         raise RuntimeError(f"创建输出目录失败: {output_path.parent}, {type(e).__name__}: {e}") from e
     
     # 使用临时文件 + os.replace 原子写入（遵循 PROJECT.md 文件写入规范）
@@ -452,10 +462,12 @@ def generate_all_factors(
         os.replace(temp_path, output_path)
     except OSError as e:
         # 文件系统错误（磁盘/权限/IO，PermissionError 是 OSError 子类）
+        logger.error("文件系统错误保存失败: %s, 原因: %s (%s)", output_path, type(e).__name__, str(e))
         temp_path.unlink(missing_ok=True)  # 原子操作，消除 TOCTOU 竞争窗口
         raise RuntimeError(f"文件系统错误: {output_path}, {type(e).__name__}: {e}") from e
     except Exception as e:
         # 未知错误（兜底）
+        logger.error("未知错误保存失败: %s, 原因: %s (%s)", output_path, type(e).__name__, str(e))
         temp_path.unlink(missing_ok=True)  # 原子操作，消除 TOCTOU 竞争窗口
         raise RuntimeError(f"未知错误保存失败: {output_path}, {type(e).__name__}: {e}") from e
     
@@ -545,6 +557,9 @@ def main() -> int:
             output_path=output_path,
             logger=logger
         )
+        # CLI 入口执行摘要（关键元数据）
+        logger.info("执行摘要: 总记录数=%d, 耗时=%.2f秒, 输出路径=%s",
+                    metadata['total_records'], metadata['elapsed_seconds'], metadata['output_path'])
         logger.info("执行成功，退出码: 0")
         return 0
     except Exception as e:

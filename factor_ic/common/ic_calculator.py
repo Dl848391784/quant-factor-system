@@ -132,9 +132,11 @@ def calculate_ic_with_direction_verification(
     
     # ========== 输入验证 ==========
     if factor_df.empty:
+        logger.error(f"输入验证失败: factor_df 不能为空, factor_col={factor_col}")
         raise ValueError("factor_df 不能为空")
     
     if return_df.empty:
+        logger.error(f"输入验证失败: return_df 不能为空, return_col={return_col}")
         raise ValueError("return_df 不能为空")
     
     required_factor_cols = [date_col, asset_col, factor_col]
@@ -142,10 +144,20 @@ def calculate_ic_with_direction_verification(
     
     for col in required_factor_cols:
         if col not in factor_df.columns:
+            logger.error(
+                f"输入验证失败: factor_df 缺少列 '{col}', "
+                f"当前列: {factor_df.columns.tolist()}, "
+                f"期望列: {required_factor_cols}"
+            )
             raise KeyError(f"factor_df 缺少列: '{col}'")
     
     for col in required_return_cols:
         if col not in return_df.columns:
+            logger.error(
+                f"输入验证失败: return_df 缺少列 '{col}', "
+                f"当前列: {return_df.columns.tolist()}, "
+                f"期望列: {required_return_cols}"
+            )
             raise KeyError(f"return_df 缺少列: '{col}'")
     
     # ========== 数据合并 ==========
@@ -157,11 +169,22 @@ def calculate_ic_with_direction_verification(
     )
     
     if merged.empty:
+        logger.error(
+            f"数据合并失败: factor_df 和 return_df 无法匹配, "
+            f"factor_df 行数={len(factor_df)}, "
+            f"return_df 行数={len(return_df)}, "
+            f"factor_col={factor_col}, return_col={return_col}"
+        )
         raise ValueError("factor_df 和 return_df 无法匹配")
     
     merged = merged.dropna(subset=[factor_col, return_col])
     
     if merged.empty:
+        logger.error(
+            f"数据合并失败: 合并后数据全部为缺失值, "
+            f"原始合并行数={len(merged)}, "
+            f"factor_col={factor_col}, return_col={return_col}"
+        )
         raise ValueError("合并后数据全部为缺失值")
     
     # ========== 按日期计算正向 IC ==========
@@ -175,6 +198,11 @@ def calculate_ic_with_direction_verification(
             ic_list.append({'date': date, 'ic': ic_value})
     
     if not ic_list:
+        logger.error(
+            f"IC计算失败: 没有有效的交易日, "
+            f"每交易日股票数 < {min_stocks}, "
+            f"原始数据日期数={len(merged.groupby(date_col))}"
+        )
         raise ValueError(f"没有有效的交易日（每交易日股票数 < {min_stocks}）")
     
     ic_df = pd.DataFrame(ic_list)
@@ -854,7 +882,8 @@ def industry_neutral_rank(
     factor_col: str,
     industry_col: str = 'industry',
     date_col: str = 'date',
-    min_industry_stocks: int = 5
+    min_industry_stocks: int = 5,
+    logger=None
 ) -> pd.DataFrame:
     """
     截面内按行业分别排名
@@ -865,6 +894,7 @@ def industry_neutral_rank(
         industry_col: 行业分类列名
         date_col: 日期列名
         min_industry_stocks: 每个行业最少股票数，低于此值的行业跳过
+        logger: 日志记录器（由调用方传入，默认使用模块 logger）
         
     返回:
         factor_df 增加 'industry_rank' 列（行业内百分位排名）
@@ -872,8 +902,16 @@ def industry_neutral_rank(
     规范:
         PROJECT.md 行业中性化处理 - 行业内排名方式
     """
+    if logger is None:
+        logger = get_logger(__name__)
+    
     # 检查行业列是否存在
     if industry_col not in factor_df.columns:
+        logger.error(
+            f"行业中性化失败: 因子数据缺少行业分类列 '{industry_col}', "
+            f"当前列: {factor_df.columns.tolist()}, "
+            f"factor_col={factor_col}"
+        )
         raise ValueError(
             f"因子数据缺少行业分类列 '{industry_col}'\n"
             f"当前列: {factor_df.columns.tolist()}\n"
@@ -906,7 +944,8 @@ def industry_neutral_residual(
     industry_col: str = 'industry',
     date_col: str = 'date',
     asset_col: str = 'asset',
-    min_industry_stocks: int = 5
+    min_industry_stocks: int = 5,
+    logger=None
 ) -> pd.DataFrame:
     """
     截面回归去除行业效应
@@ -918,6 +957,7 @@ def industry_neutral_residual(
         date_col: 日期列名
         asset_col: 资产列名
         min_industry_stocks: 每个行业最少股票数
+        logger: 日志记录器（由调用方传入，默认使用模块 logger）
         
     返回:
         DataFrame 包含 date, asset, neutral_factor 列（回归残差）
@@ -927,8 +967,16 @@ def industry_neutral_residual(
     """
     from sklearn.linear_model import LinearRegression
     
+    if logger is None:
+        logger = get_logger(__name__)
+    
     # 检查行业列是否存在
     if industry_col not in factor_df.columns:
+        logger.error(
+            f"行业中性化失败: 因子数据缺少行业分类列 '{industry_col}', "
+            f"当前列: {factor_df.columns.tolist()}, "
+            f"factor_col={factor_col}"
+        )
         raise ValueError(
             f"因子数据缺少行业分类列 '{industry_col}'\n"
             f"当前列: {factor_df.columns.tolist()}\n"

@@ -69,6 +69,15 @@
     2. _atomic_write Raises 补充 os.replace 异常来源（跨文件系统等）
     3. append_to_cache Raises 补充 FileNotFoundError（极端场景）
     4. 版本历史 v1.18~v1.20 移除多余 | 字符（统一 - 格式）
+- v1.22 (2026-05-27): 八项日志精确化修复：
+    1. _read_cache_impl OSError 日志补充 errno + strerror
+    2. _read_cache_impl BadGzipFile 日志补充原因描述
+    3. _write_cache_impl OSError 非 ENOENT 分支日志补充 strerror
+    4. delete_cache PermissionError/OSError 日志补充 errno + strerror
+    5. get_cache_file_info PermissionError 添加 as e 并补充 strerror
+    6. append_to_cache 读取成功后添加数据量 debug 日志
+    7. _write_cache_impl ensure_dir 创建目录添加 debug 日志
+    8. get_cache_file_info FileNotFoundError warning 删除（文件不存在是正常返回路径）
 
 作者: 云瑶
 日期: 2026-05-24
@@ -279,13 +288,13 @@ def _read_cache_impl(
         raise ValueError(f"{file_type}文件内容解析失败: {path}, 行 {e.lineno} 列 {e.colno}") from e
     except BadGzipFile as e:
         # 仅 use_gzip=True 时可触发
-        logger.error("gzip 文件损坏: %s", path)
+        logger.error("gzip 文件损坏: %s, 原因: %s", path, str(e))
         raise ValueError(f"gzip 文件损坏: {path}") from e
     except PermissionError as e:
         logger.error("文件权限错误: %s, errno=%d", path, e.errno)
         raise PermissionError(f"无权限读取缓存文件: {path}") from e
     except OSError as e:
-        logger.error("文件系统错误: %s", path)
+        logger.error("文件系统错误: %s, errno=%d, 原因: %s", path, e.errno, e.strerror)
         raise OSError(f"读取缓存失败（文件系统错误）: {path}") from e
     except Exception as e:
         # 未知错误兜底（多步骤操作可能抛出意外异常）
@@ -332,6 +341,7 @@ def _write_cache_impl(
     
     if ensure_dir:
         path.parent.mkdir(parents=True, exist_ok=True)
+        logger.debug("创建目录（ensure_dir=True）: %s", path.parent)
     
     # JSON 序列化参数
     if json_indent is None:
@@ -375,7 +385,7 @@ def _write_cache_impl(
             raise FileNotFoundError(f"写入缓存失败，路径不存在: {path}") from e
         else:
             # 其他 OSError：磁盘空间不足、文件被占用等
-            logger.error("文件系统错误: %s, errno=%d", path, e.errno)
+            logger.error("文件系统错误: %s, errno=%d, 原因: %s", path, e.errno, e.strerror)
             raise OSError(f"写入缓存失败（磁盘空间不足或文件系统错误）: {path}") from e
     except Exception as e:
         # 未知错误兜底（多步骤操作可能抛出意外异常）
@@ -554,6 +564,8 @@ def append_to_cache(
     try:
         existing = _read_cache_impl(path, use_gzip, logger)
         existing_data = existing.get(key, [])
+        # 读取成功后记录已有数据量（重要操作节点日志）
+        logger.debug("读取现有缓存成功: %s, key '%s' 已有 %d 条数据", path, key, len(existing_data))
         
         # 防御性编程：验证数据类型
         if not isinstance(existing_data, list):
@@ -636,11 +648,13 @@ def get_cache_file_info(
         info['modified_time'] = stat.st_mtime
         logger.debug("获取缓存文件信息: %s, 大小 %.4f MB", path, info['size_mb'])
     except FileNotFoundError:
-        logger.warning("缓存文件不存在: %s", path)
-    except PermissionError:
+        # 文件不存在是正常返回路径（exists=False），无需 warning 日志
+        # 调用方通过返回值判断即可，避免误报噪音
+        pass
+    except PermissionError as e:
         # 设置 error 字段，使调用方可以区分"文件不存在"和"无权限"
         info['error'] = 'permission_denied'
-        logger.warning("无权限获取缓存文件信息: %s", path)
+        logger.warning("无权限获取缓存文件信息: %s, 原因: %s", path, e.strerror)
     
     return info
 
@@ -796,10 +810,10 @@ def delete_cache(
         logger.debug("缓存文件不存在，无需删除: %s", path)
         return False
     except PermissionError as e:
-        logger.error("文件权限错误: %s", path)
+        logger.error("文件权限错误: %s, errno=%d, 原因: %s", path, e.errno, e.strerror)
         raise PermissionError(f"无权限删除缓存文件: {path}") from e
     except OSError as e:
-        logger.error("文件系统错误: %s", path)
+        logger.error("文件系统错误: %s, errno=%d, 原因: %s", path, e.errno, e.strerror)
         raise OSError(f"删除缓存失败（文件系统错误，如文件被占用）: {path}") from e
     # 注意：不保留 except Exception 兜底
     # Path.unlink() 只会抛 OSError 及其子类，意外异常应自然向上传播

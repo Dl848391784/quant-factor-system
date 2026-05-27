@@ -88,6 +88,10 @@ def calculate_turnover_surge(
     # 函数入口必须先 copy，避免副作用
     factor_df = factor_df.copy()
     
+    # 重要操作节点日志
+    unique_assets = factor_df['asset'].nunique()
+    logger.info(f"换手率突增计算启动 [surge_window={surge_window}, 输入数据={len(factor_df)}行/{unique_assets}只股票]")
+    
     # ========== Step 1: 计算换手率均值（局部变量）==========
     # avg_turnover: 过去 surge_window 日换手率均值（不含当日）
     # 因子定义：换手率突增 = 当日换手率 / 过去几日换手率均值
@@ -154,6 +158,11 @@ def calculate_turnover_surge(
         (daily_return > 0)
     )
     
+    # 业务筛选日志：输出满足条件的记录数量及比例
+    valid_count = condition.sum()
+    valid_ratio = valid_count / len(factor_df) if len(factor_df) > 0 else 0
+    logger.info(f"业务筛选: 满足条件(surge>1 & return>0)的记录 {valid_count} 行 ({valid_ratio:.2%})")
+    
     # 不满足条件的股票因子值设为 NaN
     turnover_surge = turnover_surge.where(condition, np.nan)
     
@@ -179,6 +188,9 @@ def main():
     
     args = parser.parse_args()
     
+    # 启动节点日志
+    logger.info(f"换手率突增因子 IC 计算启动 [surge_window={args.surge_window}, min_stocks={args.min_stocks}, force_full={args.force_full}]")
+    
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     # 数据来源：data_fetchers/result/factor_data_extended.json.gz（已包含 turnover_rate）
     result = run_complex_factor_ic(
@@ -194,13 +206,20 @@ def main():
     
     # 使用 .get() 防御性访问结果
     ic_metrics = result.get('ic_metrics', {})
+    sample_stats = result.get('sample_stats', {})
+    period = result.get('period', {})
+    
     logger.info("=" * 60)
-    logger.info("结果摘要:")
+    logger.info("结果摘要")
+    logger.info("=" * 60)
     logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
     logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
+    logger.info(f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}")
+    logger.info(f"有效天数: {sample_stats.get('valid_days', 0)} 天")
     logger.info(f"IC 均值: {ic_metrics.get('ic_mean', 0):.4f}")
+    logger.info(f"IC 标准差: {ic_metrics.get('ic_std', 0):.4f}")
     logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
-    logger.info("=" * 60)
+    logger.info(f"IC>0 占比: {result.get('positive_ratio', 0):.2%}")
     
     return result
 
@@ -209,8 +228,8 @@ if __name__ == '__main__':
     try:
         main()
     except RuntimeError:
-        logger.exception("计算失败")  # 使用 .exception() 保留完整堆栈
+        logger.exception("换手率突增因子 IC 计算失败")
         sys.exit(1)
     except Exception:
-        logger.exception("未预期的错误")  # 使用 .exception() 保留完整堆栈
+        logger.exception("换手率突增因子 IC 计算失败（未预期错误）")
         sys.exit(1)

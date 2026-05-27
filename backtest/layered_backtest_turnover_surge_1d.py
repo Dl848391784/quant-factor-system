@@ -109,20 +109,27 @@ class TurnoverSurgeLayerConfig(LayerConfigBase):
 def calculate_turnover_surge(
     factor_df: pd.DataFrame,
     surge_window: int = DEFAULT_SURGE_WINDOW,
-    log_handler: Any = None
+    log_handler: Any = logger
 ) -> pd.DataFrame:
     """计算换手率突增因子
     
     Args:
         factor_df: 包含 turnover_rate, close 列的 DataFrame
         surge_window: 计算平均换手率的窗口期，默认 5
-        log_handler: 日志对象（可选，避免遮蔽模块级 logger）
+        log_handler: 日志对象（默认使用模块级 logger）
     
     Returns:
         包含 turnover_surge 列的 DataFrame
+    
+    Raises:
+        ValueError: 当 turnover_surge 全为 NaN 时
     """
     df = factor_df.copy()
     df = df.sort_values(['asset', 'date'])
+    
+    # 入口日志：记录参数与数据规模
+    unique_assets = df['asset'].nunique()
+    log_handler.info(f"换手率突增计算启动 [surge_window={surge_window}, 输入数据={len(df)}行/{unique_assets}只股票]")
     
     # 计算历史平均换手率（用 partial 显式传参，避免 lambda 闭包）
     avg_turnover = df.groupby('asset')['turnover_rate'].transform(
@@ -131,10 +138,9 @@ def calculate_turnover_surge(
     
     # 边界处理：avg_turnover 接近零时标记为 NaN（避免 division by zero 或极小值）
     zero_avg_mask = (avg_turnover.notna()) & (avg_turnover.abs() < EPSILON)
-    if zero_avg_mask.sum() > 0 and log_handler:
+    if zero_avg_mask.sum() > 0:
         log_handler.warning(
-            "avg_turnover 接近零的记录数: %d (%.2f%%)，标记为 NaN",
-            zero_avg_mask.sum(), zero_avg_mask.sum() / len(df) * 100
+            f"avg_turnover 接近零的记录数: {zero_avg_mask.sum()} ({zero_avg_mask.sum() / len(df) * 100:.2f}%)，标记为 NaN"
         )
     
     # 使用 np.nan 替代 pd.NA（float64 Series 更兼容）
@@ -143,26 +149,22 @@ def calculate_turnover_surge(
     
     # 边界处理：负值标记为 NaN（换手率突增应为正）
     negative_mask = df['turnover_surge'] < 0
-    if negative_mask.sum() > 0 and log_handler:
+    if negative_mask.sum() > 0:
         log_handler.warning(
-            "turnover_surge 负值记录数: %d (%.2f%%)，标记为 NaN",
-            negative_mask.sum(), negative_mask.sum() / len(df) * 100
+            f"turnover_surge 负值记录数: {negative_mask.sum()} ({negative_mask.sum() / len(df) * 100:.2f}%)，标记为 NaN"
         )
-        df.loc[negative_mask, 'turnover_surge'] = np.nan  # 使用 np.nan 替代 pd.NA
+        df.loc[negative_mask, 'turnover_surge'] = np.nan  # 使用 np.nan 替代 pd.LA
     
     # 因子数据范围校验（遵循 MODULE.md 第505行规范）
     # 全 NaN 防御：检查是否有有效数据
     surge_values = df['turnover_surge'].dropna()
     if len(surge_values) == 0:
-        if log_handler:
-            log_handler.warning("turnover_surge 全部为 NaN，无法计算范围")
-        surge_min, surge_max = np.nan, np.nan
-    else:
-        surge_min = surge_values.min()
-        surge_max = surge_values.max()
+        log_handler.error("turnover_surge 全为 NaN，无法进入回测流程")
+        raise ValueError("turnover_surge 因子全为 NaN，请检查输入数据是否包含 turnover_rate 列")
     
-    if log_handler:
-        log_handler.info("turnover_surge 因子范围: %.2f ~ %.2f", surge_min, surge_max)
+    surge_min = surge_values.min()
+    surge_max = surge_values.max()
+    log_handler.info(f"turnover_surge 因子范围: {surge_min:.2f} ~ {surge_max:.2f}")
     
     return df
 
@@ -206,22 +208,42 @@ def main():
         )
         
         if result['meta']['n_days_total'] == 0:
-            logger.error("回测无有效数据，退出码 1")
+            logger.error("回测无有效数据，程序终止")
             sys.exit(1)
-        logger.info("回测完成，退出码 0")
+        
+        # 结果摘要日志（遵循分层回测脚本必须输出完整结果的规范）
+        logger.info("=" * 60)
+        logger.info("回测结果摘要")
+        logger.info("=" * 60)
+        logger.info(f"因子名称: {result['meta']['factor_name']}")
+        logger.info(f"回测周期: {result['meta']['n_days_total']} 天")
+        
+        # 各分层收益
+        layer_returns = result.get('layer_returns', {})
+        for layer_name, ret in layer_returns.items():
+            logger.info(f"Layer {layer_name} 累计收益: {ret:.4f}")
+        
+        # 多空组合收益
+        long_short = result.get('long_short', {})
+        if long_short:
+            logger.info(f"多空组合累计收益: {long_short.get('cumulative_return', 0):.4f}")
+            logger.info(f"夏普比率: {long_short.get('sharpe_ratio', 0):.2f}")
+            logger.info(f"最大回撤: {long_short.get('max_drawdown', 0):.2%}")
+        
+        logger.info("回测完成")
         sys.exit(0)
         
-    except FileNotFoundError as e:
-        logger.error("数据文件不存在: %s", e)
+    except FileNotFoundError:
+        logger.exception("数据文件不存在")
         sys.exit(2)
-    except KeyError as e:
-        logger.error("数据结构错误: %s", e)
+    except KeyError:
+        logger.exception("数据结构错误")
         sys.exit(3)
-    except ValueError as e:
-        logger.error("参数错误: %s", e)
+    except ValueError:
+        logger.exception("参数错误")
         sys.exit(4)
-    except Exception as e:
-        logger.exception("回测执行异常: %s", e)
+    except Exception:
+        logger.exception("回测执行异常")
         sys.exit(5)
 
 

@@ -54,18 +54,18 @@ from real_data_loader import RealDataLoader
 # 公共模块导入（条件导入：脚本直接运行时可能路径未配置）
 # 使用前提：project_root 已加入 PYTHONPATH 或以项目根目录为工作目录执行
 try:
-    from data_fetchers.common import setup_logger, get_logs_dir, get_cache_dir
+    from data_fetchers.common import setup_logger, get_logs_dir, get_cache_dir, get_module_result_dir
 except ImportError:
-    from common import setup_logger, get_logs_dir, get_cache_dir
+    from common import setup_logger, get_logs_dir, get_cache_dir, get_module_result_dir
 
 # 模块级常量（PEP 8：import 之后定义）
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
 # _OUTPUT_VERSION: 输出文件版本号，与模块版本一致
 _MODULE_LOGGER = logging.getLogger('fetch_factor_cache')
-_OUTPUT_VERSION = '3.35'
+_OUTPUT_VERSION = '3.36'
 
 # ============================================================================
-# 配置常量（遵循 MODULE.md 约束 #2：cache 为数据源原始缓存）
+# 配置常量（遵循 MODULE.md 约束 #2：输出到 result 目录）
 # ============================================================================
 N_DAYS = 500  # 目标交易日数
 BATCH_SIZE = 250  # 每批股票数量（从400降低到250，减少单批峰值）
@@ -73,9 +73,10 @@ FETCH_DAYS = int(N_DAYS * 1.5) + 30  # 实际拉取天数
 MEMORY_THRESHOLD_MB = 900  # 内存警告阈值（MB）- 缓存加载后约700MB
 MEMORY_PAUSE_SECONDS = 15  # 内存超阈值时的暂停时间
 
-# 路径配置（使用公共模块路径函数）
-CACHE_DIR = get_cache_dir() / 'factor_data'
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
+# 输出路径（遵循 MODULE.md 约束 #2：输出到 result 目录）
+# 使用公共模块路径函数，避免硬编码路径（遵循 MODULE.md 约束 62）
+RESULT_DIR = get_module_result_dir()
+RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _validate_dataframe_columns(
@@ -219,8 +220,8 @@ def save_batch_cache_sorted(
         - 输出 JSON 文件的 date 字段为字符串格式 '%Y-%m-%d'
     """
     logger = logger or _MODULE_LOGGER
-    factor_path = CACHE_DIR / f'batch_{batch_idx}_factor.json.gz'
-    return_path = CACHE_DIR / f'batch_{batch_idx}_return.json.gz'
+    factor_path = RESULT_DIR / f'batch_{batch_idx}_factor.json.gz'
+    return_path = RESULT_DIR / f'batch_{batch_idx}_return.json.gz'
     
     # 注意：此函数会就地修改 date 列为字符串类型
     # 调用方不应再依赖原 DataFrame 的 date 列（如需保留，请在调用前 copy）
@@ -319,7 +320,7 @@ class BatchStream:
         """
         self.batch_idx = batch_idx  # 保存原始批次号，用于去重优先级判断
         self.data_type = data_type
-        self.path = CACHE_DIR / f'batch_{batch_idx}_{data_type}.json.gz'
+        self.path = RESULT_DIR / f'batch_{batch_idx}_{data_type}.json.gz'
         self.records: list = []
         self.idx: int = 0
         self.exhausted: bool = False
@@ -439,7 +440,7 @@ def n_way_merge_deduplicate(
     streams = []
     
     for batch_idx in range(total_batches):
-        path = CACHE_DIR / f'batch_{batch_idx}_{data_type}.json.gz'
+        path = RESULT_DIR / f'batch_{batch_idx}_{data_type}.json.gz'
         if path.exists():
             stream = BatchStream(batch_idx, data_type)
             if not stream.is_exhausted():
@@ -463,7 +464,7 @@ def n_way_merge_deduplicate(
             counter += 1
     
     # 合并结果（流式写入文件，不存内存）
-    output_path = CACHE_DIR / f'merged_{data_type}.json.gz'
+    output_path = RESULT_DIR / f'merged_{data_type}.json.gz'
     last_key = None
     # 收集相同 key 的所有记录，最后选 batch_idx 最大的
     same_key_records = []  # [(batch_idx, record), ...]
@@ -745,7 +746,7 @@ def format_final_output(
     logger.info(f"  因子记录: {n_records}")
     
     # 第二遍：流式读取并逐行写出（写入完整 JSON 结构）
-    factor_final_path = CACHE_DIR / 'factor_data.json.gz'
+    factor_final_path = RESULT_DIR / 'factor_data.json.gz'
     
     with gzip.open(factor_final_path, 'wt', encoding='utf-8') as out_f:
         # 写入 meta
@@ -797,7 +798,7 @@ def format_final_output(
     logger.info(f"  收益记录: {n_return_records}")
     
     # 第二遍：流式读取并逐行写出
-    return_final_path = CACHE_DIR / 'return_data.json.gz'
+    return_final_path = RESULT_DIR / 'return_data.json.gz'
     
     with gzip.open(return_final_path, 'wt', encoding='utf-8') as out_f:
         # 写入 meta（复用因子数据的统计信息）
@@ -865,7 +866,7 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
     logger.info("[验证阶段] 验证数据完整性...")
     logger.info("=" * 60)
     
-    factor_path = CACHE_DIR / 'factor_data.json.gz'
+    factor_path = RESULT_DIR / 'factor_data.json.gz'
     
     # 初始化默认值（防止解析失败时未初始化）
     n_days = 0
@@ -1026,7 +1027,7 @@ def cleanup_batch_files(total_batches: int, logger: logging.Logger = None) -> in
     # 清理批次文件（try/except 捕获异常继续清理）
     for batch_idx in range(total_batches):
         for t in ['factor', 'return']:
-            path = CACHE_DIR / f'batch_{batch_idx}_{t}.json.gz'
+            path = RESULT_DIR / f'batch_{batch_idx}_{t}.json.gz'
             if path.exists():
                 try:
                     path.unlink()
@@ -1036,7 +1037,7 @@ def cleanup_batch_files(total_batches: int, logger: logging.Logger = None) -> in
     
     # 清理可能残留的 merged 文件（format_final_output 已删除，此处兜底）
     for t in ['factor', 'return']:
-        merged_path = CACHE_DIR / f'merged_{t}.json.gz'
+        merged_path = RESULT_DIR / f'merged_{t}.json.gz'
         if merged_path.exists():
             try:
                 merged_path.unlink()
@@ -1053,7 +1054,7 @@ def cleanup_batch_files(total_batches: int, logger: logging.Logger = None) -> in
     return deleted
 
 
-def main() -> None:
+def main() -> bool:
     """
     主函数 - 分批拉取N天因子数据
     
@@ -1089,7 +1090,7 @@ def main() -> None:
     
     if not stock_list:
         logger.warning("  ! 未获取到股票列表")
-        return
+        return False
     
     total_stocks = len(stock_list)
     logger.info(f"  ✓ 获取到 {total_stocks} 只主板股票")
@@ -1144,7 +1145,7 @@ def main() -> None:
         # 校验两个合并路径
         if not factor_merged_path or not return_merged_path:
             logger.warning("  ! 无有效数据（factor 或 return 合并失败）")
-            return
+            return False
         
         # 格式化最终输出（返回值仅用于日志，统计信息由 validate_final_data 提供）
         format_final_output(factor_merged_path, return_merged_path, logger)
@@ -1174,8 +1175,17 @@ def main() -> None:
             'fields': ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5']
         }
         
-        with open(CACHE_DIR / 'regenerate_stats.json', 'w') as f:
+        with open(RESULT_DIR / 'regenerate_stats.json', 'w') as f:
             json.dump(stats, f, indent=2)
+        
+        # 返回成功状态（遵循 PROJECT.md 编码规范：脚本必须有退出码）
+        logger.info("执行完成，退出码: 0")
+        return True
+    
+    except Exception as e:
+        logger.exception("执行失败: %s", e)
+        logger.info("执行失败，退出码: 1")
+        return False
     
     finally:
         # 清理临时批次文件（无论成功或失败都清理）
@@ -1183,4 +1193,6 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    main()
+    import sys
+    success = main()
+    sys.exit(0 if success else 1)

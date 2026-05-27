@@ -14,9 +14,14 @@
 - 因子数据：data_fetchers/result/factor_data_extended.json.gz（包含所有因子）
 - 收益数据：cache/factor_data/return_data.json.gz（原始数据源）
 
+日志精确化规范（2026-05-28）：
+- gzip.open + json.load 添加 try/except 捕获 BadGzipFile/JSONDecodeError/OSError
+- _convert_date_column 无效日期时补充 logger.error 记录数据名称和示例
+- 日期不对齐明细数据降级为 debug（避免 info 噪音）
+
 作者: 云瑶
 日期: 2026-05-22
-最后修改: 2026-05-26（路径配置同步更新）
+最后修改: 2026-05-28（日志精确化修复）
 """
 
 import gzip
@@ -110,8 +115,12 @@ def load_factor_return_data(
     if not factor_cache_path.exists():
         raise FileNotFoundError(f"因子缓存不存在: {factor_cache_path}")
     
-    with gzip.open(factor_cache_path, 'rt', encoding='utf-8') as f:
-        factor_data = json.load(f)
+    try:
+        with gzip.open(factor_cache_path, 'rt', encoding='utf-8') as f:
+            factor_data = json.load(f)
+    except (gzip.BadGzipFile, json.JSONDecodeError, OSError) as e:
+        logger.error(f"因子数据读取失败 [{factor_cache_path}] [{type(e).__name__}]: {e}")
+        raise
     
     # ========== JSON 结构验证 ==========
     # 验证 'data' 键存在，防止 JSON 格式错误导致 KeyError
@@ -135,8 +144,12 @@ def load_factor_return_data(
     if not return_cache_path.exists():
         raise FileNotFoundError(f"收益缓存不存在: {return_cache_path}")
     
-    with gzip.open(return_cache_path, 'rt', encoding='utf-8') as f:
-        return_data = json.load(f)
+    try:
+        with gzip.open(return_cache_path, 'rt', encoding='utf-8') as f:
+            return_data = json.load(f)
+    except (gzip.BadGzipFile, json.JSONDecodeError, OSError) as e:
+        logger.error(f"收益数据读取失败 [{return_cache_path}] [{type(e).__name__}]: {e}")
+        raise
     
     # ========== JSON 结构验证 ==========
     # 验证 'data' 键存在，防止 JSON 格式错误导致 KeyError
@@ -159,8 +172,8 @@ def load_factor_return_data(
     # ========== 日期类型统一转换 ==========
     # 从 JSON 加载后，日期可能是多种格式（字符串、datetime、timestamp）
     # 统一转换为字符串格式 "YYYY-MM-DD"，确保 isin 操作类型匹配
-    factor_df = _convert_date_column(factor_df, '因子')
-    return_df = _convert_date_column(return_df, '收益')
+    factor_df = _convert_date_column(factor_df, '因子', logger=logger)
+    return_df = _convert_date_column(return_df, '收益', logger=logger)
     
     # ========== 在所有 merge 前，快照原始数据范围 ==========
     # raw_metadata 应基于原始缓存数据，而非 inner join 后的数据
@@ -182,8 +195,12 @@ def load_factor_return_data(
             if not file_path.exists():
                 raise FileNotFoundError(f"额外因子缓存不存在: {file_path}")
             
-            with gzip.open(file_path, 'rt', encoding='utf-8') as f:
-                additional_data = json.load(f)
+            try:
+                with gzip.open(file_path, 'rt', encoding='utf-8') as f:
+                    additional_data = json.load(f)
+            except (gzip.BadGzipFile, json.JSONDecodeError, OSError) as e:
+                logger.error(f"额外因子数据读取失败 [{file_path}] [{type(e).__name__}]: {e}")
+                raise
             
             # ========== JSON 结构验证 ==========
             # 验证 'data' 键存在，防止 JSON 格式错误导致 KeyError
@@ -194,7 +211,7 @@ def load_factor_return_data(
                 )
             
             additional_df = pd.DataFrame(additional_data['data'])
-            additional_df = _convert_date_column(additional_df, f'额外因子({col_name})')
+            additional_df = _convert_date_column(additional_df, f'额外因子({col_name})', logger=logger)
             
             # 类型转换
             if col_name in additional_df.columns:
@@ -297,10 +314,10 @@ def load_factor_return_data(
             missing_in_factor = return_dates - factor_dates
             
             logger.warning("因子数据和收益数据日期不对齐")
-            logger.info(f"因子数据日期数: {len(factor_dates)}")
-            logger.info(f"收益数据日期数: {len(return_dates)}")
-            logger.info(f"因子数据缺失日期数: {len(missing_in_factor)}")
-            logger.info(f"收益数据缺失日期数: {len(missing_in_return)}")
+            logger.debug(f"因子数据日期数: {len(factor_dates)}")
+            logger.debug(f"收益数据日期数: {len(return_dates)}")
+            logger.debug(f"因子数据缺失日期数: {len(missing_in_factor)}")
+            logger.debug(f"收益数据缺失日期数: {len(missing_in_return)}")
             
             # 选择交集日期（保证数据对齐）
             common_dates = factor_dates & return_dates
@@ -319,13 +336,14 @@ def load_factor_return_data(
     }
 
 
-def _convert_date_column(df: pd.DataFrame, name: str) -> pd.DataFrame:
+def _convert_date_column(df: pd.DataFrame, name: str, logger=None) -> pd.DataFrame:
     """
     日期类型统一转换（YYYY-MM-DD）
     
     参数:
         df: DataFrame
         name: 数据名称（用于错误消息）
+        logger: 日志记录器（由调用方传入，默认使用模块 logger）
     
     返回:
         转换后的 DataFrame
@@ -333,6 +351,9 @@ def _convert_date_column(df: pd.DataFrame, name: str) -> pd.DataFrame:
     异常:
         ValueError: 日期格式无效
     """
+    if logger is None:
+        logger = get_logger(__name__)
+    
     if 'date' not in df.columns:
         return df
     
@@ -344,6 +365,9 @@ def _convert_date_column(df: pd.DataFrame, name: str) -> pd.DataFrame:
     
     if nat_count > 0:
         invalid_samples = df['date'][date_series.isna()].head(5).tolist()
+        logger.error(
+            f"[{name}数据] 发现 {nat_count} 个无效日期格式，示例: {invalid_samples}"
+        )
         raise ValueError(
             f"{name}数据中存在 {nat_count} 个无效日期格式\n"
             f"无效日期示例: {invalid_samples}\n"

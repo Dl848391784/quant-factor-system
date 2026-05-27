@@ -42,6 +42,10 @@ HTTP 客户端模块
 - v1.13 (2026-05-27): 条件判断风格统一（2个问题）：
     1. retry_after判断不一致：改为 `is not None` 与上方统一，避免空字符串边界歧义
     2. len()冗余条件：`response_text and len(...) > 0` 简化为 `response_text`
+- v1.14 (2026-05-27): 三项日志精确化修复：
+    1. request_with_retry Timeout 日志补充异常描述（与 ConnectionError 风格一致）
+    2. request_with_retry 最后一次失败（Timeout/ConnectionError/Exception）补充 warning 日志
+    3. create_session 添加 debug 日志记录数据源名称（与 create_retry_session 形成完整链路）
 
 作者: 云瑶
 日期: 2026-05-24
@@ -405,6 +409,9 @@ def create_session(
         raise ValueError(f"数据源不存在: {source}，可用: {available}")
     
     headers = _SOURCE_CONFIGS[source]
+    logger = get_module_logger(logger)
+    logger.debug("创建数据源 Session: source=%s", source)
+    
     return create_retry_session(
         headers=headers,
         total_retries=total_retries,
@@ -573,13 +580,21 @@ def request_with_retry(
             if attempt < max_attempts - 1:
                 wait_time = _calc_wait_time(attempt, delay)
                 logger.warning(
-                    "请求超时 (尝试 %d/%d)\n"
+                    "请求超时 (尝试 %d/%d): %s\n"
                     "URL: %s\n"
                     "方法: %s\n"
                     "等待 %.1f秒后重试...",
-                    attempt + 1, max_attempts, url, method, wait_time
+                    attempt + 1, max_attempts, e, url, method, wait_time
                 )
                 time.sleep(wait_time)
+            else:
+                # 最后一次失败记录详细日志（循环后统一 error 丢失"第几次尝试"上下文）
+                logger.warning(
+                    "请求超时（最后一次尝试 %d/%d）: %s\n"
+                    "URL: %s\n"
+                    "方法: %s",
+                    attempt + 1, max_attempts, e, url, method
+                )
         except requests.ConnectionError as e:
             last_error = e
             if attempt < max_attempts - 1:
@@ -592,6 +607,14 @@ def request_with_retry(
                     attempt + 1, max_attempts, e, url, method, wait_time
                 )
                 time.sleep(wait_time)
+            else:
+                # 最后一次失败记录详细日志（循环后统一 error 丢失"第几次尝试"上下文）
+                logger.warning(
+                    "连接错误（最后一次尝试 %d/%d）: %s\n"
+                    "URL: %s\n"
+                    "方法: %s",
+                    attempt + 1, max_attempts, e, url, method
+                )
         except (json.JSONDecodeError, requests.exceptions.JSONDecodeError) as e:
             # JSON 解析失败，记录详细信息
             # 使用 getattr 安全访问 response.text，避免 streaming 模式问题
@@ -619,6 +642,14 @@ def request_with_retry(
                     attempt + 1, max_attempts, e, url, method, wait_time
                 )
                 time.sleep(wait_time)
+            else:
+                # 最后一次失败记录详细日志（循环后统一 error 丢失"第几次尝试"上下文）
+                logger.warning(
+                    "请求失败（最后一次尝试 %d/%d）: %s\n"
+                    "URL: %s\n"
+                    "方法: %s",
+                    attempt + 1, max_attempts, e, url, method
+                )
     
     # 所有尝试失败，统一记录 error 日志
     logger.error("请求最终失败: %s\n方法: %s\n最后错误: %s", url, method, last_error)

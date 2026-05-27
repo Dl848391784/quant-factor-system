@@ -30,6 +30,8 @@ from .paths import (
     get_factor_data_dir,
     get_stock_list_file,
     get_logs_dir,
+    get_module_logs_dir,
+    get_module_result_dir,
     Paths,
     paths,
 )
@@ -99,6 +101,8 @@ __all__ = [
     'get_factor_data_dir',
     'get_stock_list_file',
     'get_logs_dir',
+    'get_module_logs_dir',
+    'get_module_result_dir',
     'Paths',
     'paths',
     # logger_config

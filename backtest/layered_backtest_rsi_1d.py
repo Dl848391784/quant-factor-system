@@ -56,12 +56,13 @@ def _calc_delta(series: pd.Series) -> pd.Series:
     return series.diff()
 
 
-def _wilder_smoothing(series: pd.Series, n: int) -> pd.Series:
+def _wilder_smoothing(series: pd.Series, n: int, log_handler: Any = logger) -> pd.Series:
     """Wilder 平滑：前 n-1 天 NaN，第 n 天 SMA 种子，第 n+1 天起 EWM 递推
     
     Args:
         series: 单资产的序列（gain 或 loss）
         n: 窗口期
+        log_handler: 日志对象（默认使用模块级 logger）
     
     Returns:
         Wilder 平滑均值序列
@@ -84,11 +85,20 @@ def _wilder_smoothing(series: pd.Series, n: int) -> pd.Series:
     
     # 防御性检查：序列长度不足
     if len(series) < n:
+        # 尝试获取资产标识（从 index name 或 series.name）
+        asset_id = series.name if hasattr(series, 'name') and series.name else 'unknown'
+        log_handler.warning(
+            f"Wilder 平滑序列长度不足 [asset={asset_id}, len={len(series)}, required={n}]，返回全 NaN"
+        )
         return pd.Series(float('nan'), index=series.index, dtype=float)
     
     # 第 n 天（索引 n-1）：SMA 种子
     seed = series.iloc[:n].mean()
     if pd.isna(seed):  # 防御：前 n 天全为 NaN 时无法计算种子
+        asset_id = series.name if hasattr(series, 'name') and series.name else 'unknown'
+        log_handler.warning(
+            f"Wilder 平滑种子为 NaN [asset={asset_id}, 前{n}天全为 NaN]，返回全 NaN"
+        )
         return pd.Series(float('nan'), index=series.index, dtype=float)
     
     # 向量化 EWM 递推（替代显式循环）
@@ -109,8 +119,14 @@ def _wilder_smoothing(series: pd.Series, n: int) -> pd.Series:
 
 @dataclass
 class RSILayerConfig(LayerConfigBase):
-    """RSI 分层配置"""
+    """RSI 分层配置
     
+    thresholds 设计说明：
+    - 4个阈值点 [0, 30, 50, 70] 形成 4 层
+    - Layer 划分：Layer1: [0, 30), Layer2: [30, 50), Layer3: [50, 70), Layer4: [70, 100]
+    - 边界处理：RSI<0 归 Layer 1（越界），RSI>100 归 Layer 4（越界）
+    - RSI 为反向因子（超卖做多，超买做空）
+    """
     
     layer_names: TypingDict[str, str] = field(default_factory=lambda: {
         '1': '超卖层(RSI<30)',
@@ -171,17 +187,20 @@ class RSILayerConfig(LayerConfigBase):
 def calculate_rsi(
     factor_df: pd.DataFrame,
     n: int = DEFAULT_N,
-    log_handler: Any = None
+    log_handler: Any = logger
 ) -> pd.DataFrame:
     """计算 RSI 因子
     
     Args:
         factor_df: 包含 close 列的 DataFrame
         n: 滚动窗口期，默认 6
-        log_handler: 日志对象（可选，避免遮蔽模块级 logger）
+        log_handler: 日志对象（默认使用模块级 logger）
     
     Returns:
         包含 rsi 列的 DataFrame
+    
+    Raises:
+        ValueError: 当 RSI 全为 NaN 时
     
     Note:
         Wilder (1978) RSI 计算方法：
@@ -203,6 +222,10 @@ def calculate_rsi(
     """
     df = factor_df.copy()
     df = df.sort_values(['asset', 'date'])
+    
+    # 入口日志：记录参数与数据规模
+    unique_assets = df['asset'].nunique()
+    log_handler.info(f"RSI 计算启动 [n={n}, 输入数据={len(df)}行/{unique_assets}只股票]")
     
     # 计算价格变化
     df['delta'] = df.groupby('asset')['close'].transform(_calc_delta)
@@ -258,20 +281,17 @@ def calculate_rsi(
     
     # 同时接近零：avg_gain=0 且 avg_loss=0 → RSI=50
     both_zero_mask = zero_loss_mask & zero_gain_mask
-    if both_zero_mask.sum() > 0 and log_handler:
+    if both_zero_mask.sum() > 0:
         # 数据质量问题：可能表示停牌或价格冻结
         log_handler.warning(
-            "avg_gain=avg_loss=0 的记录数: %d (%.2f%%)，RSI 设为 50（无涨无跌）。"
-            "可能原因：停牌、价格冻结、数据质量问题，建议检查。",
-            both_zero_mask.sum(), both_zero_mask.sum() / len(df) * 100
+            f"avg_gain=avg_loss=0 的记录数: {both_zero_mask.sum()} ({both_zero_mask.sum() / len(df) * 100:.2f}%)，RSI 设为 50（无涨无跌）。可能原因：停牌、价格冻结、数据质量问题，建议检查。"
         )
     
     # 只有 avg_loss 接近零（avg_gain > 0）: RSI=100（超买）
     only_zero_loss_mask = zero_loss_mask & ~zero_gain_mask
-    if only_zero_loss_mask.sum() > 0 and log_handler:
+    if only_zero_loss_mask.sum() > 0:
         log_handler.warning(
-            "avg_loss 接近零但 avg_gain>0 的记录数: %d (%.2f%%)，RSI 设为 100（超买）",
-            only_zero_loss_mask.sum(), only_zero_loss_mask.sum() / len(df) * 100
+            f"avg_loss 接近零但 avg_gain>0 的记录数: {only_zero_loss_mask.sum()} ({only_zero_loss_mask.sum() / len(df) * 100:.2f}%)，RSI 设为 100（超买）"
         )
     
     # 计算 RS 和 RSI（避免中间污染值）
@@ -293,33 +313,27 @@ def calculate_rsi(
     # RSI < 0: 计算误差导致越界，归入 Layer 1（runner 边界处理）
     # RSI > 100: 计算误差导致越界，归入 Layer 4（runner 边界处理）
     below_min_mask = (df['rsi'].notna()) & (df['rsi'] < 0)
-    if below_min_mask.sum() > 0 and log_handler:
+    if below_min_mask.sum() > 0:
         log_handler.info(
-            "RSI 越界统计: RSI<0 的记录数: %d (%.2f%%)，将归入 Layer1（超卖层）",
-            below_min_mask.sum(), below_min_mask.sum() / len(df) * 100
+            f"RSI 越界统计: RSI<0 的记录数: {below_min_mask.sum()} ({below_min_mask.sum() / len(df) * 100:.2f}%)，将归入 Layer1（超卖层）"
         )
     
     above_max_mask = (df['rsi'].notna()) & (df['rsi'] > 100)
-    if above_max_mask.sum() > 0 and log_handler:
+    if above_max_mask.sum() > 0:
         log_handler.info(
-            "RSI 越界统计: RSI>100 的记录数: %d (%.2f%%)，将归入 Layer4（超买层）",
-            above_max_mask.sum(), above_max_mask.sum() / len(df) * 100
+            f"RSI 越界统计: RSI>100 的记录数: {above_max_mask.sum()} ({above_max_mask.sum() / len(df) * 100:.2f}%)，将归入 Layer4（超买层）"
         )
     
     # 因子数据范围校验（遵循 MODULE.md 第505行规范）
     # 全 NaN 防御：检查是否有有效数据
     rsi_values = df['rsi'].dropna()
     if len(rsi_values) == 0:
-        if log_handler:
-            log_handler.warning("RSI 全部为 NaN，无法计算范围")
-        # 全 NaN 时提前返回，避免输出误导性的 "0.00 ~ 0.00" 日志
-        return df
+        log_handler.error("RSI 全为 NaN，无法进入回测流程")
+        raise ValueError("RSI 因子全为 NaN，请检查输入数据是否包含 close 列")
     
     rsi_min = rsi_values.min()
     rsi_max = rsi_values.max()
-    
-    if log_handler:
-        log_handler.info("RSI 因子范围: %.2f ~ %.2f", rsi_min, rsi_max)
+    log_handler.info(f"RSI 因子范围: {rsi_min:.2f} ~ {rsi_max:.2f}")
     
     return df
 
@@ -360,22 +374,42 @@ def main():
         )
         
         if result['meta']['n_days_total'] == 0:
-            logger.error("回测无有效数据，退出码 1")
+            logger.error("回测无有效数据，程序终止")
             sys.exit(1)
-        logger.info("回测完成，退出码 0")
+        
+        # 结果摘要日志（遵循分层回测脚本必须输出完整结果的规范）
+        logger.info("=" * 60)
+        logger.info("回测结果摘要")
+        logger.info("=" * 60)
+        logger.info(f"因子名称: {result['meta']['factor_name']}")
+        logger.info(f"回测周期: {result['meta']['n_days_total']} 天")
+        
+        # 各分层收益
+        layer_returns = result.get('layer_returns', {})
+        for layer_name, ret in layer_returns.items():
+            logger.info(f"Layer {layer_name} 累计收益: {ret:.4f}")
+        
+        # 多空组合收益
+        long_short = result.get('long_short', {})
+        if long_short:
+            logger.info(f"多空组合累计收益: {long_short.get('cumulative_return', 0):.4f}")
+            logger.info(f"夏普比率: {long_short.get('sharpe_ratio', 0):.2f}")
+            logger.info(f"最大回撤: {long_short.get('max_drawdown', 0):.2%}")
+        
+        logger.info("回测完成")
         sys.exit(0)
         
-    except FileNotFoundError as e:
-        logger.error("数据文件不存在: %s", e)
+    except FileNotFoundError:
+        logger.exception("数据文件不存在")
         sys.exit(2)
-    except KeyError as e:
-        logger.error("数据字段缺失: %s", e)
+    except KeyError:
+        logger.exception("数据字段缺失")
         sys.exit(3)
-    except ValueError as e:
-        logger.error("数据值异常: %s", e)
+    except ValueError:
+        logger.exception("数据值异常")
         sys.exit(4)
-    except Exception as e:
-        logger.exception("回测执行异常: %s", e)
+    except Exception:
+        logger.exception("回测执行异常")
         sys.exit(5)
 
 

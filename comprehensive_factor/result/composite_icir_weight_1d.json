@@ -3,41 +3,41 @@
     "weight_method": "icir_weight",
     "return_period": "1d",
     "factor_list": [
-      "turnover_surge",
-      "bollinger_pb"
+      "bollinger_pb",
+      "turnover_surge"
     ],
     "factor_cols": [
-      "turnover_surge",
-      "bollinger_pb"
+      "bollinger_pb",
+      "turnover_surge"
     ],
     "weights": {
-      "turnover_surge": 0.6373626373626373,
-      "bollinger_pb": 0.3626373626373626
+      "bollinger_pb": 0.3626373626373626,
+      "turnover_surge": 0.6373626373626373
     },
     "weight_meta": {
       "is_dynamic": false,
       "method": "icir_weight"
     },
     "ic_results": {
-      "turnover_surge": {
-        "ic_mean": -0.053953,
-        "icir": 0.5104,
-        "ic_std": 0.105714
-      },
       "bollinger_pb": {
         "ic_mean": -0.04083,
         "icir": 0.2904,
         "ic_std": 0.140591
+      },
+      "turnover_surge": {
+        "ic_mean": -0.053953,
+        "icir": 0.5104,
+        "ic_std": 0.105714
       }
     },
     "correlation_matrix": {
-      "turnover_surge": {
-        "turnover_surge": 1.0,
-        "bollinger_pb": 0.3517720999880287
-      },
       "bollinger_pb": {
-        "turnover_surge": 0.3517720999880287,
-        "bollinger_pb": 1.0
+        "bollinger_pb": 1.0,
+        "turnover_surge": 0.3517720999880287
+      },
+      "turnover_surge": {
+        "bollinger_pb": 0.3517720999880287,
+        "turnover_surge": 1.0
       }
     },
     "high_corr_pairs": [],
@@ -182,5 +182,5 @@
     "min_stocks_per_layer": 10,
     "rolling_window": 60
   },
-  "created_at": "2026-05-26T00:53:26.651503"
+  "created_at": "2026-05-26T19:12:54.304312"
 }

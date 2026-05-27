@@ -12,9 +12,14 @@
 - 先截断格式，再去重排序（防止截断后产生重复）
 - 统一使用 _normalize_dates 公共函数，确保逻辑一致性
 
+日志精确化规范（2026-05-28）：
+- 所有异常捕获块日志需包含异常类型名 type(e).__name__
+- check_data_completeness 每个模式判断分支需补充操作节点日志
+- 日志格式统一：[{factor_name}] 操作描述: 结果（关键数值）
+
 作者: 云舟
 日期: 2026-05-07
-最后修改: 2026-05-23（修复日期处理、语义模糊、类型不一致）
+最后修改: 2026-05-28（日志精确化修复）
 """
 
 from pathlib import Path
@@ -130,7 +135,7 @@ def get_factor_data_dates(logger=None) -> Tuple[List[str], Optional[str]]:
         
         return dates, latest_date
     except Exception as e:
-        logger.warning(f"读取 factor_data 失败: {e}")
+        logger.warning(f"读取 factor_data 失败 [{type(e).__name__}]: {e}")
         return [], None
 
 
@@ -194,7 +199,7 @@ def get_cache_latest_date(factor_name: str, logger=None) -> Optional[str]:
         
         return latest_date
     except Exception as e:
-        logger.warning(f"读取缓存失败 {factor_name}: {e}")
+        logger.warning(f"读取缓存失败 [{factor_name}] [{type(e).__name__}]: {e}")
         return None
 
 
@@ -257,6 +262,7 @@ def check_data_completeness(
     
     if not all_dates:
         # 数据源不可用
+        logger.warning(f"[{factor_name}] 数据完整性判断: skip（数据源不可用）")
         return 'skip', [], info
     
     # 检查缓存最新日期
@@ -271,12 +277,14 @@ def check_data_completeness(
         # missing_dates = all_dates（语义：全部需要计算，而非"缺失"）
         missing_dates = all_dates
         info['missing_count'] = len(missing_dates)
+        logger.info(f"[{factor_name}] 数据完整性判断: full（缓存不存在，需计算 {len(missing_dates)} 天）")
         return 'full', missing_dates, info
     
     if cache_latest is None:
         # 文件存在但读取失败，需要全量计算
         missing_dates = all_dates
         info['missing_count'] = len(missing_dates)
+        logger.warning(f"[{factor_name}] 数据完整性判断: full（缓存读取失败，需计算 {len(missing_dates)} 天）")
         return 'full', missing_dates, info
     
     # 计算缺失日期（大于缓存最新日期）
@@ -285,9 +293,11 @@ def check_data_completeness(
     
     if len(missing_dates) > 0:
         # 有缺失日期，可增量更新
+        logger.info(f"[{factor_name}] 数据完整性判断: incremental（缓存至 {cache_latest}，需补充 {len(missing_dates)} 天）")
         return 'incremental', missing_dates, info
     else:
         # 数据已最新
+        logger.debug(f"[{factor_name}] 数据完整性判断: skip（数据已最新，缓存至 {cache_latest}）")
         return 'skip', [], info
 
 
@@ -374,6 +384,7 @@ def get_cache_info(factor_name: str, logger=None) -> Dict[str, Any]:
         info['latest_date'] = latest_date
         
     except Exception as e:
+        logger.warning(f"读取缓存信息失败 [{factor_name}] [{type(e).__name__}]: {e}")
         info['error'] = str(e)
     
     return info

@@ -28,6 +28,9 @@ from comprehensive_factor.common.composite_runner import (
     CompositeLayerConfig
 )
 from comprehensive_factor.common.data_loader import DEFAULT_DATA_SOURCE
+from comprehensive_factor.common.logger_config import get_logger
+
+logger = get_logger(__name__)
 
 
 # ============================================================================
@@ -84,10 +87,16 @@ class RollingICIRWeightLayerConfig(CompositeLayerConfig):
         """
         # 滚动参数校验
         if self.min_periods > self.rolling_window:
+            logger.error(
+                f"滚动窗口参数校验失败: min_periods ({self.min_periods}) > rolling_window ({self.rolling_window})"
+            )
             raise ValueError(
                 f"min_periods ({self.min_periods}) 必须小于等于 rolling_window ({self.rolling_window})"
             )
         if self.min_periods < 1:
+            logger.error(
+                f"滚动窗口参数校验失败: min_periods ({self.min_periods}) < 1"
+            )
             raise ValueError("min_periods 必须大于等于 1")
 
 
@@ -95,17 +104,43 @@ class RollingICIRWeightLayerConfig(CompositeLayerConfig):
 # CLI 入口
 # ============================================================================
 
-# 创建默认配置实例用于CLI参数
-_default_config = RollingICIRWeightLayerConfig()
+# 创建默认配置实例用于CLI参数（异常捕获 + 日志）
+try:
+    _default_config = RollingICIRWeightLayerConfig()
+except Exception as e:
+    logger.error(f"RollingICIRWeightLayerConfig 实例化失败 [{type(e).__name__}]: {e}")
+    raise
 
-main = create_cli_entrypoint(
-    weight_method='rolling_icir_weight',
-    config_class=RollingICIRWeightLayerConfig,  # v2.8: config_class 移至 factor_list 前面
-    factor_list=_default_config.factor_list,
-    factor_cols=_default_config.factor_cols,
-    return_period='1d',
-    data_source=str(DEFAULT_DATA_SOURCE)
-)
+# 创建 CLI 入口（异常捕获 + 日志）
+try:
+    main = create_cli_entrypoint(
+        weight_method='rolling_icir_weight',
+        config_class=RollingICIRWeightLayerConfig,  # v2.8: config_class 移至 factor_list 前面
+        factor_list=_default_config.factor_list,
+        factor_cols=_default_config.factor_cols,
+        return_period='1d',
+        data_source=str(DEFAULT_DATA_SOURCE)
+    )
+except Exception as e:
+    logger.error(f"create_cli_entrypoint 构建失败 [{type(e).__name__}]: {e}")
+    raise
 
 if __name__ == '__main__':
-    main()
+    # 启动节点日志：输出关键配置信息
+    logger.info("=" * 60)
+    logger.info("滚动ICIR加权综合因子分层回测启动")
+    logger.info("=" * 60)
+    logger.info(f"权重方法: rolling_icir_weight")
+    logger.info(f"因子列表: {_default_config.factor_list}")
+    logger.info(f"因子列名: {_default_config.factor_cols}")
+    logger.info(f"收益周期: 1d")
+    logger.info(f"数据源: {DEFAULT_DATA_SOURCE}")
+    logger.info(f"滚动窗口: {_default_config.rolling_window}")
+    logger.info(f"最小周期: {_default_config.min_periods}")
+    
+    # 运行入口（异常兜底 + 日志）
+    try:
+        main()
+    except Exception as e:
+        logger.error(f"滚动ICIR加权综合因子回测执行失败 [{type(e).__name__}]: {e}")
+        sys.exit(1)

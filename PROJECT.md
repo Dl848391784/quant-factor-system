@@ -83,15 +83,22 @@ factor_ic_analyzer/
 
 | 模块 | 输出目录 | 输出文件 | 依赖模块读取位置 |
 |-----|---------|---------|----------------|
-| data_fetchers/fetch_factor_cache | cache/factor_data/ | factor_data.json.gz, return_data.json.gz | 历史数据源（已迁移） |
-| data_fetchers/fetch_turnover | cache/factor_data/ | turnover_rate_data.json.gz | 历史数据源（已迁移） |
-| data_fetchers/factor_generator | **data_fetchers/result/** | **factor_ic_data.json.gz** | **factor_ic, backtest, comprehensive_factor 统一数据源** |
+| data_fetchers/fetch_factor_cache | **data_fetchers/result/** | **factor_data.json.gz, return_data.json.gz** | **factor_generator 统一输入源** |
+| data_fetchers/fetch_turnover | **data_fetchers/result/** | **turnover_rate_data.json.gz** | **factor_generator 统一输入源** |
+| data_fetchers/factor_generator | data_fetchers/result/ | factor_ic_data.json.gz | factor_ic, backtest, comprehensive_factor 统一数据源 |
+| factor_ic | factor_ic/result/ | ic_<因子名>_analysis_result.json | comprehensive_factor |
+| backtest | backtest/result/ | <因子名>_layered_backtest.json | 读取 factor_ic_data.json.gz |
+| comprehensive_factor | comprehensive_factor/result/ | composite_<加权方式>_1d.json | 读取 factor_ic_data.json.gz + factor_ic/result/ |
 | factor_ic | factor_ic/result/ | ic_<因子名>_analysis_result.json | comprehensive_factor |
 | backtest | backtest/result/ | <因子名>_layered_backtest.json | **读取 factor_ic_data.json.gz** |
 | comprehensive_factor | comprehensive_factor/result/ | composite_<加权方式>_1d.json | **读取 factor_ic_data.json.gz + factor_ic/result/** |
 
 **数据架构迁移历史（2026-05-27）：**
 - v2.6: 收益数据合并到 factor_ic_data.json.gz，实现单文件读取架构
+- v2.7: fetch_factor_cache/fetch_turnover 输出路径统一迁移到 result 目录
+  - 所有 data_fetchers 模块输出统一到 data_fetchers/result/
+  - factor_generator.py 输入路径同步更新为 result 目录
+  - 实现模块内数据闭环：fetch → result → generator → result
 - 统一数据源：factor_ic_data.json.gz 包含行情+因子+收益数据
 - 所有下游模块（factor_ic, backtest, comprehensive_factor）应读取同一数据源
 
@@ -624,6 +631,46 @@ def load_data_from_cache(...) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
 def load_data_from_cache(...):  # 错误！缺少返回类型注解
     return factor_df, return_df, raw_metadata
 ```
+
+### 脚本退出码规范（2026-05-26新增）
+
+**所有脚本统一使用 0/1 退出码：**
+
+```
+0 = 成功
+1 = 失败
+```
+
+**错误定位方式：** 查看脚本执行日志（stdout/stderr），日志系统会记录详细错误信息。
+
+```python
+# ✓ 正确：简单退出码 + 详细日志
+import sys
+import logging
+
+logger = logging.getLogger(__name__)
+
+def main():
+    try:
+        # 业务逻辑
+        result = process_data()
+        logger.info("处理完成")
+        return 0
+    except FileNotFoundError as e:
+        logger.error(f"数据文件不存在: {e}")
+        return 1
+    except Exception as e:
+        logger.exception(f"执行失败: {e}")  # 记录完整堆栈
+        return 1
+
+if __name__ == '__main__':
+    sys.exit(main())
+```
+
+**为何只用 0/1：**
+- 日志系统已提供详细错误信息
+- 复杂退出码增加脚本实现负担
+- 失败原因通过日志定位更准确
 
 ---
 

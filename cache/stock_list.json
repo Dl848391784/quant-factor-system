@@ -1,18 +1,18 @@
 {
   "meta": {
-    "last_updated": "2026-05-25T21:27:24.375386",
+    "last_updated": "2026-05-26T19:01:37.714120",
     "source": "sina_api",
-    "total_count": 3011,
-    "sh_count": 1619,
+    "total_count": 3012,
+    "sh_count": 1620,
     "sz_count": 1392,
-    "added_count": 1,
+    "added_count": 0,
     "removed_count": 0,
-    "updated_count": 25,
+    "updated_count": 0,
     "removed_codes": [],
     "removed_codes_truncated": false,
-    "existing_count": 3010,
+    "existing_count": 3012,
     "api_pages": 66,
-    "version": "2.8"
+    "version": "2.13"
   },
   "stocks": [
     {
@@ -8771,7 +8771,7 @@
     },
     {
       "code": "600103",
-      "name": "XD青山纸",
+      "name": "青山纸业",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -8825,7 +8825,7 @@
     },
     {
       "code": "600114",
-      "name": "XD东睦股",
+      "name": "东睦股份",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -9479,7 +9479,7 @@
     },
     {
       "code": "600273",
-      "name": "XD嘉化能",
+      "name": "嘉化能源",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -9881,7 +9881,7 @@
     },
     {
       "code": "600371",
-      "name": "万向德农",
+      "name": "XD万向德",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -9935,7 +9935,7 @@
     },
     {
       "code": "600382",
-      "name": "XD广东明",
+      "name": "广东明珠",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -10073,7 +10073,7 @@
     },
     {
       "code": "600419",
-      "name": "天润乳业",
+      "name": "XD天润乳",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -10337,7 +10337,7 @@
     },
     {
       "code": "600497",
-      "name": "驰宏锌锗",
+      "name": "XD驰宏锌",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -10823,7 +10823,7 @@
     },
     {
       "code": "600598",
-      "name": "北大荒",
+      "name": "XD北大荒",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -11327,7 +11327,7 @@
     },
     {
       "code": "600711",
-      "name": "盛屯矿业",
+      "name": "XD盛屯矿",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -12479,7 +12479,7 @@
     },
     {
       "code": "600982",
-      "name": "宁波能源",
+      "name": "XD宁波能",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -12653,7 +12653,7 @@
     },
     {
       "code": "601018",
-      "name": "XD宁波港",
+      "name": "宁波港",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -14429,7 +14429,7 @@
     },
     {
       "code": "603100",
-      "name": "XD川仪股",
+      "name": "川仪股份",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -14975,7 +14975,7 @@
     },
     {
       "code": "603213",
-      "name": "XD镇洋发",
+      "name": "镇洋发展",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -16079,7 +16079,7 @@
     },
     {
       "code": "603568",
-      "name": "伟明环保",
+      "name": "DR伟明环",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -16193,7 +16193,7 @@
     },
     {
       "code": "603606",
-      "name": "东方电缆",
+      "name": "DR东方电",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -16217,7 +16217,7 @@
     },
     {
       "code": "603610",
-      "name": "麒盛科技",
+      "name": "XD麒盛科",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -16610,6 +16610,12 @@
       "name": "良品铺子",
       "market": "sh",
       "updated_at": "2026-04-02"
+    },
+    {
+      "code": "603721",
+      "name": "XD*ST天",
+      "market": "sh",
+      "added_at": "2026-05-26"
     },
     {
       "code": "603722",
@@ -17045,7 +17051,7 @@
     },
     {
       "code": "603889",
-      "name": "DR新澳股",
+      "name": "新澳股份",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -17345,13 +17351,13 @@
     },
     {
       "code": "603985",
-      "name": "恒润股份",
+      "name": "XD恒润股",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
     {
       "code": "603986",
-      "name": "兆易创新",
+      "name": "XD兆易创",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -17405,7 +17411,7 @@
     },
     {
       "code": "603997",
-      "name": "继峰股份",
+      "name": "XD继峰股",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -17597,7 +17603,7 @@
     },
     {
       "code": "605100",
-      "name": "XR华丰股",
+      "name": "华丰股份",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -17675,7 +17681,7 @@
     },
     {
       "code": "605155",
-      "name": "西大门",
+      "name": "XD西大门",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -17705,7 +17711,7 @@
     },
     {
       "code": "605168",
-      "name": "三人行",
+      "name": "XD三人行",
       "market": "sh",
       "updated_at": "2026-04-02"
     },
@@ -20849,6 +20855,7 @@
     "603716",
     "603717",
     "603719",
+    "603721",
     "603722",
     "603725",
     "603726",

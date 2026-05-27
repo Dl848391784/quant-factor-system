@@ -101,7 +101,7 @@
 || 85 | Optional 变量添加 assert | 使用前添加 `assert isinstance(var, expected_type)`，确保类型安全（比单独检查 None 更严格） |
 || 86 | 长列表字段截断 | removed_codes 等可能很长的列表字段限制最多50个，添加 truncated 字段说明是否截断 |
 || 19 | 常量定义在 import 之后 | PEP 8 顺序：docstring → __future__ → 标准库 → 第三方 → 本地 → 常量 |
-| 20 | cleanup_batch_files 用 try/except | 捕获异常继续清理，而非 try/finally（保证尽可能清理） |
+|| 20 | cleanup_batch_files 用 try/except | 捕获异常继续清理，而非 try/finally（保证尽可能清理） |
 
 ### 关键函数签名
 
@@ -120,6 +120,7 @@ data_fetchers/
 ├── MODULE.md           # 本文件（模块规范）
 ├── common/             # 公共函数
 │   ├── __init__.py
+│   ├── logger_config.py # 日志配置
 │   └── data_source_base.py  # 数据源基类（待创建）
 │
 ├── docs/               # 流程文档

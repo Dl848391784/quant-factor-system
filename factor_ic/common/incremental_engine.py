@@ -76,7 +76,8 @@ def get_cache_latest_date(cache_path: Path) -> Optional[str]:
         
         return dates[-1] if dates else None
     
-    except Exception:
+    except Exception as e:
+        logger.warning(f"读取缓存最新日期失败 [{cache_path}] [{type(e).__name__}]: {e}")
         return None
 
 
@@ -100,8 +101,12 @@ def read_existing_cache(cache_path: Path) -> Tuple[Optional[Dict], List[str], Li
     if not cache_path.exists():
         return None, [], []
     
-    with open(cache_path, 'r', encoding='utf-8') as f:
-        existing_data = json.load(f)
+    try:
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            existing_data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.error(f"读取现有缓存失败 [{cache_path}] [{type(e).__name__}]: {e}")
+        raise
     
     existing_dates = existing_data.get('dates', [])
     existing_ic_values = existing_data.get('ic_values', [])
@@ -293,7 +298,8 @@ def recalculate_statistics(
     valid_ic = [all_ic_values[i] for i in valid_indices]
     
     if not valid_ic:
-        logger.warning("无有效 IC 值，返回空统计")
+        none_count = len([v for v in all_ic_values if v is None])
+        logger.warning(f"无有效 IC 值，返回空统计（总数据量: {len(all_ic_values)}，None 值: {none_count}）")
         return {
             'ic_mean': 0.0,
             'ic_std': 0.0,
@@ -395,7 +401,7 @@ def incremental_update_ic(
         return existing_data  # 直接返回缓存
     
     logger.info(f"缺失日期: {len(missing_dates)} 天")
-    logger.info(f"示例: {missing_dates[:5]}")
+    logger.debug(f"示例: {missing_dates[:5]}")
     
     # 3. 计算缺失日期 IC
     logger.info("[3/6] 计算缺失日期 IC...")
@@ -498,8 +504,12 @@ def incremental_update_ic(
     
     # 保存
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(convert_to_native_types(result), f, ensure_ascii=False, indent=2)
+    try:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(convert_to_native_types(result), f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        logger.error(f"保存增量更新结果失败 [{output_path}] [{type(e).__name__}]: {e}")
+        raise
     
     logger.info(f"✓ 增量更新完成！新增 {len(new_dates)} 天，总计 {len(all_dates)} 天")
     logger.info(f"✓ IC 均值: {stats['ic_mean']:.4f}")

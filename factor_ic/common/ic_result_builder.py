@@ -69,6 +69,7 @@ def build_ic_result(
     
     # 入口校验：ic_series 为空时不应调用此函数
     if ic_series is None or len(ic_series) == 0:
+        logger.error(f"ic_series 为空，因子: {factor_name}，应调用 build_error_result 而非 build_ic_result")
         raise ValueError("ic_series 为空，应调用 build_error_result 而非 build_ic_result")
     
     # 五维度判断（直接使用公共模块返回）
@@ -203,6 +204,7 @@ def build_sample_stats(
         KeyError: factor_df 缺少 'date' 列
     """
     if 'date' not in factor_df.columns:
+        logger.error("factor_df 缺少 'date' 列，当前列: %s", list(factor_df.columns))
         raise KeyError("factor_df 必须包含 'date' 列，当前列: %s" % list(factor_df.columns))
     
     # 统一使用 round(x, 1) 保留一位小数，与 build_ic_result 中的 raw_metadata 值精度一致
@@ -451,9 +453,9 @@ def save_ic_result(result: Dict, output_path: Optional[Path] = None) -> Path:
             json.dump(convert_to_native_types(result), f, indent=2, ensure_ascii=False)
         logger.info(f"  ✓ 结果已保存: {output_path}")
     except PermissionError as e:
-        logger.error(f"保存失败（权限错误）: {output_path} - {e}")
+        logger.error(f"保存失败（权限错误）: {output_path} - {type(e).__name__}: {e}")
         raise
     except OSError as e:
-        logger.error(f"保存失败（磁盘满/路径错误）: {output_path} - {e}")
+        logger.error(f"保存失败（磁盘满/路径错误）: {output_path} - {type(e).__name__}: {e}")
         raise
     return output_path
