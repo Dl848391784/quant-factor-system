@@ -8,11 +8,17 @@ DataFrame 工具模块测试用例
 创建日期: 2026-05-27
 版本历史:
 - v1.0 (2026-05-27): 首次创建，覆盖正常/异常/边界场景
+- v1.1 (2026-05-27): 导入顺序PEP8规范化，测试日志命名合规化
 """
 
+# 标准库导入
+import logging
+
+# 第三方库导入
 import pytest
 import pandas as pd
-import logging
+
+# 本地模块导入
 from data_fetchers.common.dataframe_utils import validate_dataframe_columns
 
 
@@ -67,8 +73,8 @@ class TestValidateDataframeColumns:
         """TC005: 日志参数化 - 自定义 logger"""
         df = pd.DataFrame({'date': ['2024-01-01'], 'close': [100.0]})
         
-        # 创建测试 logger
-        test_logger = logging.getLogger('test_dataframe_utils')
+        # 创建测试 logger（使用真实模块名，遵循 PROJECT.md 日志规范）
+        test_logger = logging.getLogger('data_fetchers.common.dataframe_utils')
         
         # 不应抛出异常
         validate_dataframe_columns(df, ['date', 'close'], 'stock_data', logger=test_logger)

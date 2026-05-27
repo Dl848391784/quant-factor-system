@@ -15,6 +15,7 @@ DataFrame 工具模块
 - v1.0 (2026-05-27): 首次创建，validate_dataframe_columns 函数
 - v1.1 (2026-05-27): logger 参数化，错误信息包含可用列
 - v1.2 (2026-05-27): 导入顺序PEP8规范化，删除未使用导入，添加边界处理
+- v1.3 (2026-05-27): docstring Example 完善，正常+异常场景分离
 """
 
 # 标准库导入
@@ -50,8 +51,13 @@ def validate_dataframe_columns(
     Example:
         >>> import pandas as pd
         >>> from data_fetchers.common.dataframe_utils import validate_dataframe_columns
-        >>> df = pd.DataFrame({'date': ['2024-01-01'], 'close': [100.0]})
+        >>> # 正常场景：所有必需列存在
+        >>> df = pd.DataFrame({'date': ['2024-01-01'], 'close': [100.0], 'volume': [1000]})
         >>> validate_dataframe_columns(df, ['date', 'close', 'volume'], 'stock_data')
+        >>> 
+        >>> # 异常场景：缺少必需列（预期抛出 ValueError）
+        >>> df_missing = pd.DataFrame({'date': ['2024-01-01'], 'close': [100.0]})
+        >>> validate_dataframe_columns(df_missing, ['date', 'close', 'volume'], 'stock_data')
         ValueError: stock_data 缺少必需列: ['volume']
                     可用列: ['date', 'close']
     
