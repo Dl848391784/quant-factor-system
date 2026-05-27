@@ -108,7 +108,11 @@
 || 函数 | 文件 | 用途 |
 |------|------|------|
 | `generate_all_factors(logger)` | factor_generator.py | 生成所有因子数据 |
-| `fetch_ohlcv_data(start_date, end_date)` | fetch_ohlcv.py（待创建） | 拉取 OHLCV 数据 |
+| `calculate_rsi(df, period)` | factor_calculator.py | 计算 RSI 因子 |
+| `calculate_bollinger_pb(df, n, k)` | factor_calculator.py | 计算布林带 %B 因子 |
+| `calculate_kdj_j(df, n, m1, m2)` | factor_calculator.py | 计算 KDJ_J 因子 |
+| `calculate_turnover_surge(df, window)` | factor_calculator.py | 计算换手率突增因子 |
+| `n_way_merge_deduplicate(batches, type)` | batch_processor.py | N-way 合并批次数据 |
 | `fetch_turnover_data()` | fetch_turnover.py | 拉取换手率数据 |
 
 ---
@@ -121,9 +125,15 @@ data_fetchers/
 ├── common/             # 公共函数
 │   ├── __init__.py
 │   ├── logger_config.py # 日志配置
-│   └── data_source_base.py  # 数据源基类（待创建）
+│   ├── paths.py         # 路径配置
+│   ├── cache_manager.py # 缓存管理
+│   ├── http_client.py   # HTTP 客户端
+│   ├── stock_utils.py   # 股票筛选
+│   ├── memory_utils.py  # 内存监控（2026-05-27新增）
+│   └── dataframe_utils.py # DataFrame 验证（2026-05-27新增）
 │
 ├── docs/               # 流程文档
+│   ├── plans/           # 重构计划（2026-05-27新增）
 │   ├── factor_generator_flow.md
 │   └── fetch_<数据源>_flow.md
 │
@@ -138,6 +148,8 @@ data_fetchers/
 │   └── test_<脚本名>.py  # pytest 可执行文件
 │
 ├── factor_generator.py # 统一因子生成入口
+├── factor_calculator.py # 统一因子计算（2026-05-27新增）
+├── batch_processor.py   # 批次处理+N-way合并（2026-05-27新增）
 ├── fetch_turnover.py   # 换手率数据拉取
 ├── fetch_stock_list.py # 股票列表拉取
 ├── fetch_industry.py   # 行业分类拉取

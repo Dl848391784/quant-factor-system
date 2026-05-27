@@ -53,12 +53,12 @@ def get_factor_data_dir() -> Path:
 
 def get_stock_list_file() -> Path:
     """
-    获取股票列表缓存文件路径
+    获取股票列表结果文件路径
     
     Returns:
-        Path: cache/stock_list.json 文件路径
+        Path: data_fetchers/result/stock_list.json 文件路径（遵循 MODULE.md 约束 2）
     """
-    return get_cache_dir() / 'stock_list.json'
+    return get_module_result_dir() / 'stock_list.json'
 
 
 def get_logs_dir() -> Path:
@@ -140,6 +140,6 @@ if __name__ == '__main__':
     print("项目根目录:", Path(__file__).parent.parent.parent)
     print("缓存目录:", Path(__file__).parent.parent.parent / 'cache')
     print("因子数据目录:", Path(__file__).parent.parent.parent / 'cache' / 'factor_data')
-    print("股票列表文件:", Path(__file__).parent.parent.parent / 'cache' / 'stock_list.json')
+    print("股票列表文件:", Path(__file__).parent.parent / 'result' / 'stock_list.json')
     print("日志目录:", Path(__file__).parent.parent.parent / 'logs')
     print("模块日志目录:", Path(__file__).parent.parent / 'logs')

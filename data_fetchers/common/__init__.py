@@ -65,6 +65,15 @@ from .stock_utils import (
     MAX_STOCK_DATE,
 )
 
+from .memory_utils import (
+    get_memory_usage_mb,
+    get_memory_info_str,
+)
+
+from .dataframe_utils import (
+    validate_dataframe_columns,
+)
+
 # http_client 需要 requests 模块，可选导入
 try:
     from .http_client import (
@@ -137,4 +146,9 @@ __all__ = [
     'EXCLUDED_NAME_KEYWORDS',
     'MIN_STOCK_DATE',
     'MAX_STOCK_DATE',
+    # memory_utils
+    'get_memory_usage_mb',
+    'get_memory_info_str',
+    # dataframe_utils
+    'validate_dataframe_columns',
 ]

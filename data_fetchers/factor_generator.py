@@ -74,16 +74,20 @@ if __name__ == '__main__':
     project_root = Path(__file__).parent.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-    from factor_ic.ic_bollinger_pb_1d import calculate_bollinger_pb
-    from factor_ic.ic_kdj_j_1d import calculate_kdj_j
-    from factor_ic.ic_turnover_surge_1d import calculate_turnover_surge
+    # 重构后统一从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
+    from data_fetchers.factor_calculator import (
+        calculate_bollinger_pb,
+        calculate_kdj_j,
+        calculate_turnover_surge,
+    )
     from data_fetchers.common.logger_config import setup_logger
 else:
-    # factor_ic 与 data_fetchers 是同级目录（两个独立包）
-    # Python 相对导入不能跨包，必须使用绝对导入
-    from factor_ic.ic_bollinger_pb_1d import calculate_bollinger_pb
-    from factor_ic.ic_kdj_j_1d import calculate_kdj_j
-    from factor_ic.ic_turnover_surge_1d import calculate_turnover_surge
+    # 重构后统一从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
+    from .factor_calculator import (
+        calculate_bollinger_pb,
+        calculate_kdj_j,
+        calculate_turnover_surge,
+    )
     from .common.logger_config import setup_logger
 
 # ============================================================================

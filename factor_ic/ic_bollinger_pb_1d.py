@@ -4,9 +4,9 @@
 
 遵循 PROJECT.md 公共模块强制复用规范：
 - 主流程使用 run_complex_factor_ic()（禁止手写三模式分支）
-- 仅实现因子特有计算逻辑（布林带公式）
+- 因子计算逻辑复用 data_fetchers.factor_calculator（遵循 MODULE.md 约束 #3）
 
-代码量：~80行（仅布林带计算），而非 ~300行手写主流程。
+代码量：~60行（仅 CLI 入口），因子计算逻辑已统一到 factor_calculator.py。
 
 因子定义：
 - Middle Band = SMA(Close, N)
@@ -19,7 +19,7 @@
 - K = 2.0（标差倍数）
 
 作者: 云瑶
-重构日期: 2026-05-22
+重构日期: 2026-05-27（因子计算逻辑迁移到 factor_calculator.py）
 原版作者: 云舟
 原版日期: 2026-04-07
 """
@@ -31,111 +31,24 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
-import numpy as np
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
 from factor_ic.common.logger_config import get_logger
 
+# 重构后：从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
+from data_fetchers.factor_calculator import (
+    calculate_bollinger_pb,
+    DEFAULT_BOLLINGER_N as DEFAULT_N,  # 移动平均周期
+    DEFAULT_BOLLINGER_K as DEFAULT_K,  # 标差倍数
+)
+
 logger = get_logger(__name__)
 
 # ============================================================================
-# 参数统一管理
+# 参数统一管理（部分从 factor_calculator 导入）
 # ============================================================================
 DEFAULT_MIN_STOCKS = 10
-DEFAULT_N = 20     # 移动平均周期
-DEFAULT_K = 2.0    # 标差倍数
-
-# 模块级常量（避免除零阈值）
-EPSILON = 1e-10
-
-
-# ============================================================================
-# 布林带 %B 计算（因子特有逻辑）
-# ============================================================================
-
-def calculate_bollinger_pb(
-    factor_df: pd.DataFrame,
-    n: int = DEFAULT_N,
-    k: float = DEFAULT_K
-) -> pd.DataFrame:
-    """
-    计算布林带 %B 因子（因子特有逻辑）
-    
-    参数:
-        factor_df: 包含 close、date、asset 列的 DataFrame（面板数据长格式）
-        n: 移动平均周期
-        k: 标差倍数
-    
-    返回:
-        添加 bollinger_pb 列的 DataFrame
-    
-    注意:
-        1. 函数入口必须先 .copy()，避免修改原始数据
-        2. 布林带是单只股票的时序指标，必须按 asset 分组后再做 rolling
-        3. 直接对整个 factor_df['close'] 做 rolling 会把不同股票价格混在一起，
-           产生完全错误的布林带
-    """
-    # 入口日志：记录参数和输入数据规模
-    stock_count = factor_df['asset'].nunique()
-    date_range = f"{factor_df['date'].min()} ~ {factor_df['date'].max()}"
-    logger.info(f"开始计算布林带%B因子: n={n}, k={k}, 股票数={stock_count}, 日期范围={date_range}")
-    
-    # 入口：创建副本避免副作用
-    factor_df = factor_df.copy()
-    
-    # 按股票分组计算移动平均和标准差（布林带是单股票时序指标）
-    # 先按 asset 分组，再按 date 排序，确保 rolling 计算正确
-    factor_df = factor_df.sort_values(['asset', 'date'])
-    
-    # 按 asset 分组计算滚动统计（使用 transform 避免 pandas 3.0 索引问题）
-    middle = factor_df.groupby('asset', group_keys=False)['close'].transform(
-        lambda x: x.rolling(window=n).mean()
-    )
-    std_dev = factor_df.groupby('asset', group_keys=False)['close'].transform(
-        lambda x: x.rolling(window=n).std()
-    )
-    
-    # 计算布林带
-    upper = middle + k * std_dev
-    lower = middle - k * std_dev
-    
-    # 计算 %B
-    # 边界处理：布林带宽度理论上恒 >= 0（upper - lower = 2 * k * std_dev）
-    band_width = upper - lower
-    
-    # 异常检测：明确分离异常类型（集合关系清晰）
-    # - abnormal_mask: band_width < 0（异常负值，数据质量问题）
-    # - narrow_band_mask: 0 <= band_width < EPSILON（过窄带宽，接近零）
-    # 集合关系：abnormal_mask 与 narrow_band_mask 互斥（负值 vs 正值）
-    # 不存在交集：负值不可能同时 >= 0
-    abnormal_mask = band_width < 0
-    narrow_band_mask = (band_width >= 0) & (band_width < EPSILON)
-    
-    # 安全带宽计算：先排除异常（mask 将异常设为 NaN），再 clip（避免冗余计算）
-    # 逻辑清晰：异常数据不参与 clip，NaN 保留到最终输出
-    safe_band_width = band_width.mask(abnormal_mask).clip(lower=EPSILON)
-    bollinger_pb = (factor_df['close'] - lower) / safe_band_width
-    
-    # 异常处理：按优先级顺序处理，先低后高，高优先级覆盖低优先级
-    # 优先级1（低）：过窄带宽（正常范围内）→ 0.5（中性值）
-    # 优先级2（高）：异常负值 → np.nan（浮点 Series 缺失值）
-    bollinger_pb = bollinger_pb.where(~narrow_band_mask, 0.5)  # 过窄 → 0.5
-    bollinger_pb = bollinger_pb.where(~abnormal_mask, np.nan)   # 异常负值 → np.nan
-    
-    # 异常统计日志
-    abnormal_count = abnormal_mask.sum()
-    if abnormal_count > 0:
-        logger.warning(f"检测到 {abnormal_count} 个异常布林带宽度（负值），已标记为 np.nan")
-    
-    # 过窄带宽统计日志（问题4修复）
-    narrow_count = narrow_band_mask.sum()
-    if narrow_count > 0:
-        logger.warning(f"检测到 {narrow_count} 个过窄布林带宽度（< {EPSILON}），已置为中性值 0.5")
-    
-    factor_df['bollinger_pb'] = bollinger_pb
-    
-    return factor_df
 
 
 # ============================================================================
@@ -154,7 +67,7 @@ def main():
     
     args = parser.parse_args()
     
-    # 问题5修复：调用前日志
+    # 调用前日志
     logger.info(f"启动布林带%B因子IC计算: n={args.n}, k={args.k}, min_stocks={args.min_stocks}, force_full={args.force_full}")
     
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
@@ -169,13 +82,13 @@ def main():
         _logger=logger
     )
     
-    # 问题5修复：调用后日志
+    # 调用后日志
     logger.info("布林带%B因子IC计算完成")
     
     # 使用 .get() 防御性访问结果
     ic_metrics = result.get('ic_metrics', {})
     
-    # 问题1、6、7修复：完整指标输出，合并分隔符和标题
+    # 完整指标输出
     logger.info("=" * 60 + " 结果摘要 " + "=" * 60)
     logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
     logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
@@ -198,7 +111,6 @@ if __name__ == '__main__':
     try:
         main()
     except RuntimeError:
-        # 问题2修复：具体错误描述
         logger.exception("布林带%B因子IC计算失败")
         sys.exit(1)
     except Exception:

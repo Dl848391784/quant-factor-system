@@ -304,19 +304,19 @@ def load_main_board_stock_list(
     从缓存文件加载股票列表，筛选出主板股票。
     
     Args:
-        stock_list_file: 股票列表缓存文件路径（默认使用 cache/stock_list.json），支持 Path 或 str
+        stock_list_file: 股票列表文件路径（默认使用 data_fetchers/result/stock_list.json），支持 Path 或 str
         logger: 调用方传入的 logger（可选）
         
     Returns:
         List[Dict[str, Any]]: 主板股票列表，每项包含 {code, name, ...}
         
     Raises:
-        FileNotFoundError: 股票列表缓存不存在
+        FileNotFoundError: 股票列表文件不存在
         ValueError: JSON 解析失败、数据格式错误或 IO 异常（含 PermissionError 等包装）
         TypeError: logger 参数不是 logging.Logger 类型
         
     Note:
-        - 自动使用缓存路径（默认 cache/stock_list.json）
+        - 自动使用 result 目录路径（遵循 MODULE.md 约束 2）
         - 空股票列表返回空列表并打印警告
         - 使用 is_main_board_stock 篛选规则（剔除创业板/科创板/北交所/ST）
         

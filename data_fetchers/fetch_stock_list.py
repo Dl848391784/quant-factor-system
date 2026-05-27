@@ -108,7 +108,15 @@
   - validate_cache 格式检查注释补全：说明抽查范围局限性，删除冗余 enumerate 变量 i
   - 修复原因：验证失败返回空数据（1项）+ 返回数据截断无提示（1项）+ 冗余变量（1项）
 
-作者: 云舟
+- v2.14 (2026-05-27 12:30): 输出目录规范化
+  - 输出文件统一到 result 目录（遵循 MODULE.md 约束 2）
+  - 删除 cache 目录输出（违反规范）
+  - 合并 CACHE_FILE 和 RESULT_FILE 为 OUTPUT_FILE
+  - 删除 ensure_cache_dir 函数（不再需要）
+  - 删除 get_cache_dir 导入（不再需要）
+  - 修复原因：违反 MODULE.md 约束 2（输出到 result 目录）
+
+作者: 云瑶
 日期: 2026-04-02
 """
 
@@ -122,14 +130,13 @@ from typing import Any
 import requests  # 新浪财经 API HTTP 请求（第三方库，遵循 PEP 8）
 
 # 公共模块导入
-from data_fetchers.common.logger_config import setup_logger
-from data_fetchers.common.http_client import create_sina_session
-from data_fetchers.common.paths import (
-    get_module_result_dir,
+from data_fetchers.common import (
+    setup_logger,
     get_module_logs_dir,
-    get_cache_dir,
+    get_module_result_dir,
+    write_json_cache,
 )
-from data_fetchers.common.cache_manager import write_json_cache
+from data_fetchers.common.http_client import create_sina_session
 
 __all__ = [
     'refresh_stock_cache',
@@ -145,7 +152,7 @@ __all__ = [
 # ============================================================
 
 # 输出版本（遵循 MODULE.md 约束 16）
-_OUTPUT_VERSION = '2.13'
+_OUTPUT_VERSION = '2.14'
 
 # 新浪财经 API 端点
 SINA_API_URL = 'http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData'
@@ -181,10 +188,7 @@ _LOGS_DIR = get_module_logs_dir()
 
 # 输出文件路径（遵循 MODULE.md 约束 2：输出到 result 目录）
 _RESULT_DIR = get_module_result_dir()
-RESULT_FILE = _RESULT_DIR / 'stock_list_meta.json'
-
-# 缓存文件路径（股票列表数据仍保留在 cache 目录，供其他模块使用）
-CACHE_FILE = get_cache_dir() / 'stock_list.json'
+OUTPUT_FILE = _RESULT_DIR / 'stock_list.json'
 
 
 def _get_logger() -> logging.Logger:
@@ -597,14 +601,6 @@ def validate_cache(
 # 缓存文件操作
 # ============================================================
 
-def ensure_cache_dir(logger_arg: logging.Logger | None = None) -> None:
-    """确保缓存目录存在"""
-    _logger = logger_arg or logger
-    cache_dir = get_cache_dir()
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    _logger.info(f"确保缓存目录存在: {cache_dir}")
-
-
 def ensure_result_dir(logger_arg: logging.Logger | None = None) -> None:
     """确保结果目录存在"""
     _logger = logger_arg or logger
@@ -640,7 +636,6 @@ def save_cache(
     # 遵循 PROJECT.md 日志参数规范：使用 logger_arg 避免遮蔽模块级 logger
     _logger = logger_arg or logger
     
-    ensure_cache_dir(_logger)
     ensure_result_dir(_logger)
     
     # 遵循 MODULE.md 约束 17：datetime.now() 只调用一次
@@ -735,18 +730,9 @@ def save_cache(
     }
     
     # 写入缓存文件（cache 目录，使用公共模块原子写入）
-    write_json_cache(CACHE_FILE, cache_data, json_indent=2, logger=_logger)
+    write_json_cache(OUTPUT_FILE, cache_data, json_indent=2, logger=_logger)
     
-    # 写入结果元信息文件（result 目录，使用公共模块原子写入）
-    result_data: dict[str, Any] = {
-        'meta': cache_data['meta'],
-        'timestamp': timestamp,
-        'script': _SCRIPT_NAME,
-    }
-    write_json_cache(RESULT_FILE, result_data, json_indent=2, logger=_logger)
-    
-    _logger.info(f"缓存文件已保存: {CACHE_FILE}")
-    _logger.info(f"结果元信息已保存: {RESULT_FILE}")
+    _logger.info(f"结果文件已保存: {OUTPUT_FILE}")
     
     return cache_data
 
@@ -771,11 +757,11 @@ def load_cache(
     # 遵循 PROJECT.md 日志参数规范：使用 logger_arg 避免遮蔽模块级 logger
     _logger = logger_arg or logger
     
-    if not CACHE_FILE.exists():
+    if not OUTPUT_FILE.exists():
         return None
     
     try:
-        with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+        with open(OUTPUT_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
         # 类型校验：确保返回的是 dict 类型（遵循 MODULE.md 约束 87）
@@ -870,8 +856,7 @@ def refresh_stock_cache(
         'sh_count': 0,
         'sz_count': 0,
         'message': '',
-        'cache_file': str(CACHE_FILE),
-        'result_file': str(RESULT_FILE),
+        'output_file': str(OUTPUT_FILE),
         'warnings': []
     }
     

@@ -49,14 +49,17 @@ from pathlib import Path
 import pandas as pd
 
 # 本地模块导入
-from real_data_loader import RealDataLoader
+try:
+    from data_fetchers.data_loader import RealDataLoader
+except ImportError:
+    from data_loader import RealDataLoader
 
 # 公共模块导入（条件导入：脚本直接运行时可能路径未配置）
 # 使用前提：project_root 已加入 PYTHONPATH 或以项目根目录为工作目录执行
 try:
-    from data_fetchers.common import setup_logger, get_logs_dir, get_cache_dir, get_module_result_dir
+    from data_fetchers.common import setup_logger, get_logs_dir, get_module_result_dir, get_stock_list_file, read_json_cache
 except ImportError:
-    from common import setup_logger, get_logs_dir, get_cache_dir, get_module_result_dir
+    from common import setup_logger, get_logs_dir, get_module_result_dir, get_stock_list_file, read_json_cache
 
 # 模块级常量（PEP 8：import 之后定义）
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
@@ -1086,14 +1089,24 @@ def main() -> bool:
     loader = RealDataLoader(enable_cache=True, use_mock=False, use_local=False, retries=3)
     
     logger.info("[获取股票列表]...")
-    stock_list = loader.get_main_board_stocks(max_stocks=0)
+    
+    # 从 result/stock_list.json 读取股票列表（遵循 MODULE.md 约束 2）
+    stock_list_file = get_stock_list_file()
+    stock_data = read_json_cache(stock_list_file, logger=logger)
+    
+    if stock_data is None:
+        logger.warning(f"  ! 股票列表文件不存在: {stock_list_file}")
+        return False
+    
+    # 提取股票代码列表
+    stock_list = stock_data.get('codes', [])
     
     if not stock_list:
-        logger.warning("  ! 未获取到股票列表")
+        logger.warning("  ! 股票列表为空")
         return False
     
     total_stocks = len(stock_list)
-    logger.info(f"  ✓ 获取到 {total_stocks} 只主板股票")
+    logger.info(f"  ✓ 从缓存获取到 {total_stocks} 只主板股票")
     
     batches = [stock_list[i:i+BATCH_SIZE] for i in range(0, total_stocks, BATCH_SIZE)]
     total_batches = len(batches)

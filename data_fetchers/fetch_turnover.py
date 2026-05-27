@@ -165,16 +165,16 @@ __all__ = [
 # 输出路径（遵循 MODULE.md 约束 #2：输出到 result 目录）
 # 使用公共模块路径函数，避免硬编码路径（遵循 MODULE.md 约束 62）
 try:
-    from data_fetchers.common.paths import get_module_result_dir, get_cache_dir
+    from data_fetchers.common.paths import get_module_result_dir, get_stock_list_file
 except ImportError:
     # __main__ 模块使用绝对导入（遵循 PROJECT.md 导入规范）
-    from common.paths import get_module_result_dir, get_cache_dir
+    from common.paths import get_module_result_dir, get_stock_list_file
 
 RESULT_DIR = get_module_result_dir()
 CACHE_FILE = RESULT_DIR / 'turnover_rate_data.json.gz'
 
-# 股票列表缓存路径（仍保留在 cache 目录，供其他模块使用）
-STOCK_LIST_FILE = get_cache_dir() / 'stock_list.json'
+# 股票列表路径（遵循 MODULE.md 约束 2：使用 result 目录）
+STOCK_LIST_FILE = get_stock_list_file()
 
 # ============================================================
 # 东财千股千评 API 版本
