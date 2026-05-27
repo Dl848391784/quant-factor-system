@@ -11,6 +11,7 @@ DataFrame 工具模块测试用例
 - v1.1 (2026-05-27): 导入顺序PEP8规范化，测试日志命名合规化
 - v1.2 (2026-05-27): 新增 TC009/TC010 测试边界（df_name空字符串、列名大小写敏感）
 - v1.3 (2026-05-27): 删除 __main__ 块，新增 TC011（df_name 为 None）
+- v1.4 (2026-05-27): 新增 TC012/TC013 验证默认值在错误信息中的使用
 """
 
 # 标准库导入
@@ -141,3 +142,25 @@ class TestValidateDataframeColumns:
         
         # df_name 为 None 时，函数应使用默认值而非抛出异常
         validate_dataframe_columns(df, ['date', 'close'], None)
+    
+    def test_df_name_none_in_error_message(self):
+        """TC012: 边界场景 - df_name 为 None 时错误信息使用默认值"""
+        df = pd.DataFrame({'date': ['2024-01-01'], 'close': [100.0]})
+        
+        with pytest.raises(ValueError) as exc_info:
+            validate_dataframe_columns(df, ['date', 'close', 'volume'], None)
+        
+        error_msg = str(exc_info.value)
+        # 验证错误信息中使用默认值而非 None
+        assert "<未命名DataFrame>" in error_msg
+        assert "缺少必需列" in error_msg
+    
+    def test_df_none_with_none_df_name(self):
+        """TC013: 边界场景 - df 为 None 且 df_name 也为 None"""
+        with pytest.raises(TypeError) as exc_info:
+            validate_dataframe_columns(None, ['date', 'close'], None)
+        
+        error_msg = str(exc_info.value)
+        # 验证错误信息中使用默认值而非 None
+        assert "<未命名DataFrame>" in error_msg
+        assert "不能为 None" in error_msg

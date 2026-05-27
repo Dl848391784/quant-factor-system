@@ -18,6 +18,7 @@ DataFrame 工具模块
 - v1.3 (2026-05-27): docstring Example 完善，正常+异常场景分离
 - v1.4 (2026-05-27): MODULE.md 版本历史同步，测试边界完善
 - v1.5 (2026-05-27): __all__ 放置位置PEP8规范化，df_name 边界校验，docstring 完善
+- v1.6 (2026-05-27): 模块级常量定义，错误信息优化，文件末尾换行符
 """
 
 # 标准库导入
@@ -29,6 +30,9 @@ import pandas as pd
 
 # 模块公共 API
 __all__ = ['validate_dataframe_columns']
+
+# 模块级常量
+_DEFAULT_DF_NAME = "<未命名DataFrame>"
 
 
 def validate_dataframe_columns(
@@ -46,7 +50,7 @@ def validate_dataframe_columns(
     Args:
         df: DataFrame 对象（不能为 None）
         required_cols: 必需列名列表（不能为空）
-        df_name: DataFrame 名称（用于错误消息，可选，默认为 "<未命名DataFrame>"）
+        df_name: DataFrame 名称（用于错误消息，可选，默认使用模块常量）
         logger: 日志记录器（可选，遵循 PROJECT.md 第783-857行规范）
     
     Raises:
@@ -80,6 +84,11 @@ def validate_dataframe_columns(
     if logger is None:
         logger = logging.getLogger(__name__)
     
+    # 边界处理：df_name 参数校验（优先处理，确保后续错误信息友好）
+    if df_name is None:
+        df_name = _DEFAULT_DF_NAME
+        logger.info(f"df_name 参数为 None，已使用默认值: {df_name}")
+    
     # 边界处理：df 参数校验
     if df is None:
         logger.error(f"DataFrame 参数为 None: {df_name}")
@@ -90,13 +99,8 @@ def validate_dataframe_columns(
         logger.error(f"required_cols 参数为空列表: {df_name}")
         raise ValueError(f"{df_name} 的 required_cols 不能为空列表")
     
-    # 边界处理：df_name 参数校验（建议非空，但不强制）
-    if df_name is None:
-        df_name = "<未命名DataFrame>"
-        logger.warning("df_name 参数为 None，已使用默认值")
-    
-    # 验证必需列存在
-    missing_cols = [col for col in required_cols if col not in df.columns]
+    # 验证必需列存在（使用集合操作优化性能）
+    missing_cols = list(set(required_cols) - set(df.columns))
     
     if missing_cols:
         # 构建友好错误信息（包含可用列）
