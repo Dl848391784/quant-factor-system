@@ -11,7 +11,7 @@ Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
 - 否则 else 分支的 factor_ic 绝对导入会触发 ModuleNotFoundError
 
 遵循 PROJECT.md 规范：
-- 输出到 cache/factor_data/
+- 输出到 data_fetchers/result/
 - 复用公共模块计算函数（遵循强制复用规范）
 - 公共模块接收 logger 参数（遵循 PROJECT.md 公共模块日志规范）
 
@@ -51,6 +51,14 @@ Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
     2. Step 8 OSError/Exception 捕获块补充 logger.error（输出路径+异常类型+原因）
     3. Step 8 mkdir OSError 捕获块补充 logger.error（目录路径+异常类型+原因）
     4. main() 成功分支补充执行摘要日志（total_records、elapsed_seconds、output_path）
+- v1.31 (2026-05-27): 4项修复：
+    1. Step 1/2/3 gzip.open 读取补充 encoding='utf-8'（跨平台一致性，与写入对称）
+    2. 删除 main() finally 块（logger 共享风险，Python 进程退出自动清理）
+    3. Step 4/5/6 因子计算函数补充 logger_arg=logger（日志统一输出到调用方 logger）
+    4. 合并 _DEFAULT_CACHE_DIR/_DEFAULT_RESULT_DIR 为单一常量（消除虚假语义差异）
+- v1.32 (2026-05-27): 2项文档修复：
+    1. 模块 docstring 输出路径修正：cache/factor_data/ → data_fetchers/result/
+    2. generate_all_factors Note 修正：factor_ic → factor_calculator（与实际导入一致）
 
 作者: 云瑶
 """
@@ -107,13 +115,10 @@ __all__ = [
 # 默认路径配置（私有常量）
 # ============================================================================
 
-# 输入数据路径（result 目录：统一数据源，遵循 PROJECT.md 跨模块数据路径规范）
-# 数据由 fetch_factor_cache.py 和 fetch_turnover.py 输出到 result 目录
-# parent=data_fetchers/, 输入路径为 data_fetchers/result/
-_DEFAULT_CACHE_DIR = Path(__file__).parent / 'result'
-
-# 输出数据路径（result 目录：遵循 MODULE.md 约束 #2）
-# parent=data_fetchers/, 输出到 data_fetchers/result/
+# 输入输出数据路径（result 目录：统一数据源，遵循 PROJECT.md 跨模块数据路径规范）
+# 数据由 fetch_factor_cache.py 和 fetch_turnover.py 输出到 result 目录，本模块从该目录读取并输出
+# parent=data_fetchers/, 路径为 data_fetchers/result/
+# 注：输入输出路径相同，若未来需分离可再拆分常量
 _DEFAULT_RESULT_DIR = Path(__file__).parent / 'result'
 
 # 扩展因子列名（元组防止意外修改）
@@ -240,7 +245,7 @@ def generate_all_factors(
         
     Note:
         - 输出到 data_fetchers/result/factor_ic_data.json.gz
-        - 复用 factor_ic 计算函数（遵循强制复用规范）
+        - 复用 factor_calculator 计算函数（遵循强制复用规范）
         - 公共模块接收 logger 参数，日志可追溯调用方
         - 运行耗时统计方便性能分析
         - 空数据场景：所有百分比计算均有除零保护，返回 0.0
@@ -259,9 +264,9 @@ def generate_all_factors(
     logger = get_module_logger(logger)
     
     # 默认路径
-    factor_data_path = Path(factor_data_path) if factor_data_path else _DEFAULT_CACHE_DIR / 'factor_data.json.gz'
-    turnover_data_path = Path(turnover_data_path) if turnover_data_path else _DEFAULT_CACHE_DIR / 'turnover_rate_data.json.gz'
-    return_data_path = Path(return_data_path) if return_data_path else _DEFAULT_CACHE_DIR / 'return_data.json.gz'
+    factor_data_path = Path(factor_data_path) if factor_data_path else _DEFAULT_RESULT_DIR / 'factor_data.json.gz'
+    turnover_data_path = Path(turnover_data_path) if turnover_data_path else _DEFAULT_RESULT_DIR / 'turnover_rate_data.json.gz'
+    return_data_path = Path(return_data_path) if return_data_path else _DEFAULT_RESULT_DIR / 'return_data.json.gz'
     output_path = Path(output_path) if output_path else _DEFAULT_RESULT_DIR / 'factor_ic_data.json.gz'
     
     logger.info("=" * 40)
@@ -272,7 +277,7 @@ def generate_all_factors(
     logger.info("Step 1: 加载基础因子数据...")
     
     try:
-        with gzip.open(factor_data_path, 'rt') as f:
+        with gzip.open(factor_data_path, 'rt', encoding='utf-8') as f:
             base_data = json.load(f)
     except FileNotFoundError:
         raise FileNotFoundError(f"基础因子数据文件不存在: {factor_data_path}")
@@ -303,7 +308,7 @@ def generate_all_factors(
     logger.info("Step 2: 加载换手率数据...")
     
     try:
-        with gzip.open(turnover_data_path, 'rt') as f:
+        with gzip.open(turnover_data_path, 'rt', encoding='utf-8') as f:
             turnover_data = json.load(f)
     except FileNotFoundError:
         raise FileNotFoundError(f"换手率数据文件不存在: {turnover_data_path}")
@@ -351,7 +356,7 @@ def generate_all_factors(
     logger.info("Step 3: 加载收益数据...")
     
     try:
-        with gzip.open(return_data_path, 'rt') as f:
+        with gzip.open(return_data_path, 'rt', encoding='utf-8') as f:
             return_data = json.load(f)
     except FileNotFoundError:
         raise FileNotFoundError(f"收益数据文件不存在: {return_data_path}")
@@ -398,7 +403,7 @@ def generate_all_factors(
     # ========== Step 4: 计算 bollinger_pb ==========
     logger.info("Step 4: 计算布林带 %B 因子...")
     
-    factor_df = calculate_bollinger_pb(factor_df)
+    factor_df = calculate_bollinger_pb(factor_df, logger_arg=logger)
     
     bollinger_valid = int(factor_df['bollinger_pb'].notna().sum())
     logger.info("  有效 bollinger_pb: %d (%.2f%%)", bollinger_valid, _calc_pct(bollinger_valid, len(factor_df)))
@@ -406,7 +411,7 @@ def generate_all_factors(
     # ========== Step 5: 计算 kdj_j ==========
     logger.info("Step 5: 计算 KDJ_J 因子...")
     
-    factor_df = calculate_kdj_j(factor_df)
+    factor_df = calculate_kdj_j(factor_df, logger_arg=logger)
     
     kdj_valid = int(factor_df['kdj_j'].notna().sum())
     logger.info("  有效 kdj_j: %d (%.2f%%)", kdj_valid, _calc_pct(kdj_valid, len(factor_df)))
@@ -414,7 +419,7 @@ def generate_all_factors(
     # ========== Step 6: 计算 turnover_surge ==========
     logger.info("Step 6: 计算换手率突增因子...")
     
-    factor_df = calculate_turnover_surge(factor_df)
+    factor_df = calculate_turnover_surge(factor_df, logger_arg=logger)
     
     surge_valid = int(factor_df['turnover_surge'].notna().sum())
     logger.info("  有效 turnover_surge: %d (%.2f%%)", surge_valid, _calc_pct(surge_valid, len(factor_df)))
@@ -569,11 +574,6 @@ def main() -> int:
     except Exception as e:
         logger.error("执行失败 [%s]: %s", type(e).__name__, str(e))
         return 1
-    finally:
-        # 清理 logger 处理器
-        for handler in list(logger.handlers):
-            handler.close()
-            logger.removeHandler(handler)
 
 
 # ============================================================================

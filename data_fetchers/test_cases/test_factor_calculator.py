@@ -20,7 +20,6 @@ from pathlib import Path
 
 # 导入被测模块
 from data_fetchers.factor_calculator import (
-    EPSILON,
     calculate_rsi,
     calculate_volume_ratio,
     calculate_forward_return,
@@ -61,6 +60,33 @@ def sample_factor_df():
 
 
 @pytest.fixture
+def large_factor_df():
+    """大样本因子 DataFrame（足够计算大窗口参数）"""
+    # 30 天数据，每只股票
+    dates = [f'2026-01-{i:02d}' for i in range(1, 31)]
+    assets = ['A'] * 30 + ['B'] * 30
+    dates_all = dates + dates
+    # 生成随机价格数据
+    closes_a = [100 + i * 0.5 + (i % 3 - 1) * 0.2 for i in range(30)]
+    closes_b = [200 + i * 0.5 + (i % 3 - 1) * 0.2 for i in range(30)]
+    highs_a = [c + 3 for c in closes_a]
+    lows_a = [c - 1 for c in closes_a]
+    highs_b = [c + 3 for c in closes_b]
+    lows_b = [c - 1 for c in closes_b]
+    turnover_a = [0.01 + i * 0.001 for i in range(30)]
+    turnover_b = [0.01 + i * 0.001 for i in range(30)]
+    
+    return pd.DataFrame({
+        'date': dates_all,
+        'asset': assets,
+        'close': closes_a + closes_b,
+        'high': highs_a + highs_b,
+        'low': lows_a + lows_b,
+        'turnover_rate': turnover_a + turnover_b
+    })
+
+
+@pytest.fixture
 def test_logger():
     """测试 logger"""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -89,11 +115,14 @@ class TestCalculateRSI:
         assert (valid_rsi >= 0).all() and (valid_rsi <= 100).all()
     
     def test_missing_values_filled_with_50(self, sample_close_prices):
-        """测试缺失值填充为中性值 50"""
+        """测试缺失值保留为 NaN（调用方自行决定处理）"""
         rsi = calculate_rsi(sample_close_prices, period=6)
-        # 前 period-1 天应为 NaN（使用 fillna(50) 后应为 50）
-        # 但实际逻辑是 Wilder 标准的前 n-1 天 NaN，然后 fillna(50)
-        assert rsi.iloc[0] == 50  # 第一天被 fillna
+        # 前 period-1 天应为 NaN（Wilder 标准，数据不足）
+        # v1.4 修复：不再 fillna，让调用方自行决定如何处理
+        assert pd.isna(rsi.iloc[0])  # 第一天是 NaN（数据不足）
+        assert pd.isna(rsi.iloc[4])  # 第 5 天仍是 NaN（数据不足）
+        # 第 period 天（索引 period-1）开始有值
+        assert not pd.isna(rsi.iloc[5])  # 第 6 天有值
     
     def test_custom_period(self, sample_close_prices):
         """测试自定义周期"""
@@ -113,9 +142,10 @@ class TestCalculateRSI:
         constant = pd.Series([100] * 10)
         rsi = calculate_rsi(constant, period=6)
         # 无波动时 RSI 应为 50（中性）
+        # v1.4 修复：前 period-1 天为 NaN，从第 period 天起为 50
         valid_rsi = rsi.dropna()
-        # fillna(50) 后全部应为 50
-        assert (rsi == 50).all()
+        assert (valid_rsi == 50).all()  # 有效值全部为 50
+        assert pd.isna(rsi.iloc[0])  # 第一天是 NaN
 
 
 # ============================================================================
@@ -223,12 +253,17 @@ class TestCalculateBollingerPB:
         result = calculate_bollinger_pb(sample_factor_df, n=20, k=2.0, logger_arg=test_logger)
         assert 'bollinger_pb' in result.columns
     
-    def test_custom_n_and_k(self, sample_factor_df):
-        """测试自定义 n 和 k"""
-        result_20_2 = calculate_bollinger_pb(sample_factor_df, n=20, k=2.0)
-        result_10_1 = calculate_bollinger_pb(sample_factor_df, n=10, k=1.5)
-        # 不同参数结果不同
-        assert not result_20_2['bollinger_pb'].equals(result_10_1['bollinger_pb'])
+    def test_custom_n_and_k(self, large_factor_df):
+        """测试自定义 n 和 k（使用大样本数据）"""
+        result_20_2 = calculate_bollinger_pb(large_factor_df, n=20, k=2.0)
+        result_10_1 = calculate_bollinger_pb(large_factor_df, n=10, k=1.5)
+        # 不同参数结果不同（取有效值比较，前 n-1 天为 NaN）
+        valid_20_2 = result_20_2['bollinger_pb'].dropna()
+        valid_10_1 = result_10_1['bollinger_pb'].dropna()
+        # 两者都应有有效值
+        assert len(valid_20_2) > 0 and len(valid_10_1) > 0
+        # 有效值部分应该不同（窗口越大，值越平滑）
+        assert not valid_20_2.head(10).equals(valid_10_1.head(10))
 
 
 # ============================================================================
@@ -258,12 +293,17 @@ class TestCalculateKDJJ:
         result = calculate_kdj_j(sample_factor_df, n=9, m1=3, m2=3, logger_arg=test_logger)
         assert 'kdj_j' in result.columns
     
-    def test_custom_params(self, sample_factor_df):
-        """测试自定义参数"""
-        result_9_3_3 = calculate_kdj_j(sample_factor_df, n=9, m1=3, m2=3)
-        result_14_5_5 = calculate_kdj_j(sample_factor_df, n=14, m1=5, m2=5)
-        # 不同参数结果不同
-        assert not result_9_3_3['kdj_j'].equals(result_14_5_5['kdj_j'])
+    def test_custom_params(self, large_factor_df):
+        """测试自定义参数（使用大样本数据）"""
+        result_9_3_3 = calculate_kdj_j(large_factor_df, n=9, m1=3, m2=3)
+        result_14_5_5 = calculate_kdj_j(large_factor_df, n=14, m1=5, m2=5)
+        # 不同参数结果不同（取有效值比较，前 n-1 天为 NaN）
+        valid_9_3_3 = result_9_3_3['kdj_j'].dropna()
+        valid_14_5_5 = result_14_5_5['kdj_j'].dropna()
+        # 两者都应有有效值
+        assert len(valid_9_3_3) > 0 and len(valid_14_5_5) > 0
+        # 有效值部分应该不同
+        assert not valid_9_3_3.head(10).equals(valid_14_5_5.head(10))
 
 
 # ============================================================================
@@ -293,12 +333,17 @@ class TestCalculateTurnoverSurge:
         result = calculate_turnover_surge(sample_factor_df, surge_window=5, logger_arg=test_logger)
         assert 'turnover_surge' in result.columns
     
-    def test_custom_window(self, sample_factor_df):
-        """测试自定义窗口"""
-        result_5 = calculate_turnover_surge(sample_factor_df, surge_window=5)
-        result_10 = calculate_turnover_surge(sample_factor_df, surge_window=10)
-        # 不同窗口结果不同
-        assert not result_5['turnover_surge'].equals(result_10['turnover_surge'])
+    def test_custom_window(self, large_factor_df):
+        """测试自定义窗口（使用大样本数据）"""
+        result_5 = calculate_turnover_surge(large_factor_df, surge_window=5)
+        result_10 = calculate_turnover_surge(large_factor_df, surge_window=10)
+        # 不同参数结果不同（取有效值比较）
+        valid_5 = result_5['turnover_surge'].dropna()
+        valid_10 = result_10['turnover_surge'].dropna()
+        # 两者都应有有效值
+        assert len(valid_5) > 0 and len(valid_10) > 0
+        # 有效值部分应该不同
+        assert not valid_5.head(10).equals(valid_10.head(10))
 
 
 # ============================================================================
@@ -323,24 +368,6 @@ class TestGetModuleLogger:
         """测试传入 None"""
         result = get_module_logger(None)
         assert isinstance(result, logging.Logger)
-
-
-# ============================================================================
-# EPSILON 常量测试
-# ============================================================================
-
-class TestEPSILON:
-    """EPSILON 常量测试"""
-    
-    def test_epsilon_value(self):
-        """测试 EPSILON 值"""
-        assert EPSILON == 1e-10
-    
-    def test_epsilon_usage(self):
-        """测试 EPSILON 用于防除零"""
-        # EPSILON 应用于边界判断
-        assert 0 < EPSILON
-        assert EPSILON < 1
 
 
 # ============================================================================

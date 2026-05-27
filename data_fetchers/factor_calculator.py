@@ -36,6 +36,19 @@
   - 提取魔法数字常量（`_RSI_NEUTRAL_VALUE`、`_RSI_MAX_VALUE`、`_BOLLINGER_NEUTRAL_VALUE`、`_KD_NEUTRAL_VALUE`）
   - 提取业务阈值常量（`_TURNOVER_SURGE_THRESHOLD`、`_DAILY_RETURN_THRESHOLD`）
   - 消除所有硬编码字符串和魔法数字
+- v1.4 (2026-05-27): 第五轮深度优化（8个问题修复）
+  - 问题1（已不存在）：if _logger: 无效判断在当前代码中不存在
+  - 问题2：删除 calculate_rsi 末尾 fillna，保留前 period 天 NaN 让调用方自行处理
+  - 问题3：calculate_rsi/volume_ratio/forward_return 三个 Series 函数入口添加 .copy()
+  - 问题4：_calculate_ewm_with_initial 删除 ignore_index=True，保留原始索引
+  - 问题5：EPSILON → _EPSILON 私有化并从 __all__ 移除
+  - 问题6：calculate_bollinger_pb safe_band_width 计算改用 where+clip（mask 对 NaN 无效）
+  - 问题7：calculate_bollinger_pb 异常处理顺序调整（先 abnormal 后 narrow）
+  - 问题8：calculate_turnover_surge 业务筛选日志改为 debug 级别（非异常统计）
+- v1.5 (2026-05-27): 删除换手率突增筛选条件
+  - 移除 `_TURNOVER_SURGE_THRESHOLD` 和 `_DAILY_RETURN_THRESHOLD` 常量
+  - 移除涨跌幅计算和业务筛选逻辑（surge>1 且 return>0）
+  - 所有有效计算的因子值均保留，不再筛选
 
 作者: 云瑶
 创建日期: 2026-05-27
@@ -61,7 +74,6 @@ from typing import Optional
 # 模块导出（遵循 MODULE.md 约束 60：不含私有名称）
 # ============================================================================
 __all__ = [
-    'EPSILON',
     'calculate_rsi',
     'calculate_volume_ratio',
     'calculate_forward_return',
@@ -69,6 +81,16 @@ __all__ = [
     'calculate_kdj_j',
     'calculate_turnover_surge',
     'get_module_logger',
+    # 公共常量别名（向下兼容 ic_kdj_j 等脚本的导入）
+    'DEFAULT_RSI_PERIOD',
+    'DEFAULT_BOLLINGER_N',
+    'DEFAULT_BOLLINGER_K',
+    'DEFAULT_KDJ_N',
+    'DEFAULT_KDJ_M1',
+    'DEFAULT_KDJ_M2',
+    'DEFAULT_SURGE_WINDOW',
+    'DEFAULT_VOLUME_RATIO_WINDOW',
+    'DEFAULT_FORWARD_RETURN_SHIFT',
 ]
 
 # ============================================================================
@@ -76,15 +98,14 @@ __all__ = [
 # ============================================================================
 
 # 数值阈值
-EPSILON = 1e-10  # 避免除零阈值
+_EPSILON = 1e-10  # 避免除零阈值（私有常量，非公共 API）
 
 # 因子计算基准值
 _RSI_NEUTRAL_VALUE = 50.0  # RSI 中性值（avg_loss=0 且 avg_gain=0 时）
 _RSI_MAX_VALUE = 100  # RSI 最大值（超买）
 _BOLLINGER_NEUTRAL_VALUE = 0.5  # 布林带 %B 中性值（带宽过窄时）
 _KD_NEUTRAL_VALUE = 50.0  # K/D 值中性初始值
-_TURNOVER_SURGE_THRESHOLD = 1.0  # 换手率突增阈值
-_DAILY_RETURN_THRESHOLD = 0.0  # 日收益率阈值（必须上涨）
+
 
 # 输入列名常量（DataFrame 列名）
 _COL_CLOSE = 'close'
@@ -109,6 +130,17 @@ _DEFAULT_KDJ_M2 = 3
 _DEFAULT_SURGE_WINDOW = 5
 _DEFAULT_VOLUME_RATIO_WINDOW = 5
 _DEFAULT_FORWARD_RETURN_SHIFT = 1
+
+# 公共常量别名（向下兼容 ic_kdj_j 等脚本的导入）
+DEFAULT_RSI_PERIOD = _DEFAULT_RSI_PERIOD
+DEFAULT_BOLLINGER_N = _DEFAULT_BOLLINGER_N
+DEFAULT_BOLLINGER_K = _DEFAULT_BOLLINGER_K
+DEFAULT_KDJ_N = _DEFAULT_KDJ_N
+DEFAULT_KDJ_M1 = _DEFAULT_KDJ_M1
+DEFAULT_KDJ_M2 = _DEFAULT_KDJ_M2
+DEFAULT_SURGE_WINDOW = _DEFAULT_SURGE_WINDOW
+DEFAULT_VOLUME_RATIO_WINDOW = _DEFAULT_VOLUME_RATIO_WINDOW
+DEFAULT_FORWARD_RETURN_SHIFT = _DEFAULT_FORWARD_RETURN_SHIFT
 
 # ============================================================================
 # 模块级 fallback logger（遵循 PROJECT.md 公共模块日志规范）
@@ -225,6 +257,9 @@ def calculate_rsi(
         >>> rsi.iloc[5]  # 第一个有效值
         50.0
     """
+    # 入口：创建副本避免副作用（遵循模块规范）
+    close_prices = close_prices.copy()
+    
     delta = close_prices.diff()
     gain = delta.where(delta > 0, 0)
     loss = (-delta).where(delta < 0, 0)
@@ -234,8 +269,8 @@ def calculate_rsi(
     avg_loss = _wilder_smoothing_rsi(loss, period)
     
     # 边界处理：avg_loss 接近零时
-    zero_loss_mask = avg_loss.notna() & (avg_loss.abs() < EPSILON)
-    zero_gain_mask = avg_gain.notna() & (avg_gain.abs() < EPSILON)
+    zero_loss_mask = avg_loss.notna() & (avg_loss.abs() < _EPSILON)
+    zero_gain_mask = avg_gain.notna() & (avg_gain.abs() < _EPSILON)
     
     # 同时为零：avg_gain=0 且 avg_loss=0 → RSI=50（中性）
     both_zero_mask = zero_loss_mask & zero_gain_mask
@@ -244,7 +279,7 @@ def calculate_rsi(
     only_zero_loss_mask = zero_loss_mask & ~zero_gain_mask
     
     # RS 计算
-    safe_avg_loss = avg_loss.where(avg_loss >= EPSILON)
+    safe_avg_loss = avg_loss.where(avg_loss >= _EPSILON)
     rs = avg_gain / safe_avg_loss
     
     # RSI 计算
@@ -254,8 +289,7 @@ def calculate_rsi(
     rsi.loc[only_zero_loss_mask] = _RSI_MAX_VALUE
     rsi.loc[both_zero_mask] = _RSI_NEUTRAL_VALUE
     
-    # 缺失值填充为中性值
-    rsi = rsi.fillna(_RSI_NEUTRAL_VALUE)
+    # 保留前 period 天的 NaN，让调用方自行决定如何处理
     rsi = rsi.clip(0, _RSI_MAX_VALUE)
     
     return rsi
@@ -289,11 +323,14 @@ def calculate_volume_ratio(
         >>> vr.iloc[5]  # 第 6 天量比
         1.5
     """
+    # 入口：创建副本避免副作用（遵循模块规范）
+    volume = volume.copy()
+    
     # 过去 window 日成交量均值（不含当日）
     avg_volume = volume.shift(1).rolling(window, min_periods=window).mean()
     
     # 防除零：avg_volume 接近零时标记为 NaN
-    zero_avg_mask = avg_volume.notna() & (avg_volume.abs() < EPSILON)
+    zero_avg_mask = avg_volume.notna() & (avg_volume.abs() < _EPSILON)
     safe_avg_volume = avg_volume.where(~zero_avg_mask, np.nan)
     
     volume_ratio = volume / safe_avg_volume
@@ -334,10 +371,13 @@ def calculate_forward_return(
         >>> fr.iloc[3]  # 最后一天无次日数据，为 NaN
         nan
     """
+    # 入口：创建副本避免副作用（遵循模块规范）
+    close_prices = close_prices.copy()
+    
     future_close = close_prices.shift(-shift)
     
     # 防除零
-    safe_close = close_prices.where(close_prices > EPSILON, np.nan)
+    safe_close = close_prices.where(close_prices > _EPSILON, np.nan)
     
     forward_return = (future_close - close_prices) / safe_close
     
@@ -405,22 +445,22 @@ def calculate_bollinger_pb(
     
     # 异常检测
     abnormal_mask = band_width < 0
-    narrow_band_mask = (band_width >= 0) & (band_width < EPSILON)
+    narrow_band_mask = (band_width >= 0) & (band_width < _EPSILON)
     
-    safe_band_width = band_width.mask(abnormal_mask).clip(lower=EPSILON)
+    # safe_band_width：异常值置为 NaN，正常值 clip 防除零
+    safe_band_width = band_width.where(~abnormal_mask, np.nan).clip(lower=_EPSILON)
     bollinger_pb = (factor_df[_COL_CLOSE] - lower) / safe_band_width
     
-    # 异常处理
-    bollinger_pb = bollinger_pb.where(~narrow_band_mask, _BOLLINGER_NEUTRAL_VALUE)
+    # 异常处理：先处理严重异常（abnormal），再处理边界情况（narrow）
     bollinger_pb = bollinger_pb.where(~abnormal_mask, np.nan)
+    bollinger_pb = bollinger_pb.where(~narrow_band_mask, _BOLLINGER_NEUTRAL_VALUE)
     
-    if _logger:
-        abnormal_count = abnormal_mask.sum()
-        if abnormal_count > 0:
-            _logger.warning(f"检测到 {abnormal_count} 个异常布林带宽度（负值），已标记为 np.nan")
-        narrow_count = narrow_band_mask.sum()
-        if narrow_count > 0:
-            _logger.warning(f"检测到 {narrow_count} 个过窄布林带宽度（< {EPSILON}），已置为中性值 {_BOLLINGER_NEUTRAL_VALUE}")
+    abnormal_count = abnormal_mask.sum()
+    if abnormal_count > 0:
+        _logger.warning(f"检测到 {abnormal_count} 个异常布林带宽度（负值），已标记为 np.nan")
+    narrow_count = narrow_band_mask.sum()
+    if narrow_count > 0:
+        _logger.warning(f"检测到 {narrow_count} 个过窄布林带宽度（< {_EPSILON}），已置为中性值 {_BOLLINGER_NEUTRAL_VALUE}")
     
     factor_df[_COL_BOLLINGER_PB] = bollinger_pb
     
@@ -456,14 +496,15 @@ def _calculate_ewm_with_initial(
     if len(series) == 0 or series.isna().all():
         return series
     
-    # 在第一个有效值前插入虚拟 initial_value
+    # 在第一个有效值前插入虚拟 initial_value（保留原始索引）
     series_with_initial = pd.concat([
         pd.Series([initial_value], index=[-1]),
         series
-    ], ignore_index=True)
+    ])
     
     result_with_initial = series_with_initial.ewm(alpha=alpha, adjust=False, ignore_na=True).mean()
     
+    # 取除虚拟初始值外的结果（iloc[1:] 跳过 index=-1 的虚拟值）
     result_series = result_with_initial.iloc[1:]
     result_series.index = series.index
     
@@ -532,17 +573,16 @@ def calculate_kdj_j(
     
     denom = high_max - low_min
     
-    narrow_range_mask = denom < EPSILON
-    safe_denom = denom.where(~narrow_range_mask, EPSILON)
+    narrow_range_mask = denom < _EPSILON
+    safe_denom = denom.where(~narrow_range_mask, _EPSILON)
     rsv = (factor_df[_COL_CLOSE] - low_min) / safe_denom * _RSI_MAX_VALUE
     
     # 异常位置设为中性值
     rsv = rsv.where(~narrow_range_mask, _KD_NEUTRAL_VALUE)
     
-    if _logger:
-        narrow_count = narrow_range_mask.sum()
-        if narrow_count > 0:
-            _logger.warning(f"检测到 {narrow_count} 个高低价区间过窄（< {EPSILON}），RSV已置为中性值 {_KD_NEUTRAL_VALUE}")
+    narrow_count = narrow_range_mask.sum()
+    if narrow_count > 0:
+        _logger.warning(f"检测到 {narrow_count} 个高低价区间过窄（< {_EPSILON}），RSV已置为中性值 {_KD_NEUTRAL_VALUE}")
     
     # 计算 K 和 D
     k = rsv.groupby(factor_df[_COL_ASSET]).transform(
@@ -606,47 +646,22 @@ def calculate_turnover_surge(
     )
     
     # 检测 avg_turnover 异常值
-    zero_avg_mask = (avg_turnover.notna()) & (avg_turnover.abs() < EPSILON)
+    zero_avg_mask = (avg_turnover.notna()) & (avg_turnover.abs() < _EPSILON)
     
-    if _logger:
-        zero_avg_count = zero_avg_mask.sum()
-        if zero_avg_count > 0:
-            _logger.warning(f"检测到 {zero_avg_count} 个 avg_turnover 接近零，已标记为 np.nan")
+    zero_avg_count = zero_avg_mask.sum()
+    if zero_avg_count > 0:
+        _logger.warning(f"检测到 {zero_avg_count} 个 avg_turnover 接近零，已标记为 np.nan")
     
     safe_avg_turnover = avg_turnover.where(~zero_avg_mask, np.nan)
     turnover_surge = factor_df[_COL_TURNOVER_RATE] / safe_avg_turnover
     
     # 异常负值检测
     abnormal_mask = turnover_surge < 0
-    if _logger:
-        abnormal_count = abnormal_mask.sum()
-        if abnormal_count > 0:
-            _logger.warning(f"检测到 {abnormal_count} 个异常换手率突增（负值），已标记为 np.nan")
+    abnormal_count = abnormal_mask.sum()
+    if abnormal_count > 0:
+        _logger.warning(f"检测到 {abnormal_count} 个异常换手率突增（负值），已标记为 np.nan")
     turnover_surge = turnover_surge.where(~abnormal_mask, np.nan)
-    
-    # 计算涨跌幅
-    prev_close = factor_df.groupby(_COL_ASSET)[_COL_CLOSE].transform(lambda x: x.shift(1))
-    
-    abnormal_prev_close_mask = (prev_close.notna()) & (prev_close <= EPSILON)
-    if _logger:
-        abnormal_prev_close_count = abnormal_prev_close_mask.sum()
-        if abnormal_prev_close_count > 0:
-            _logger.warning(f"检测到 {abnormal_prev_close_count} 个异常前收盘价，已标记为 np.nan")
-    
-    safe_prev_close = prev_close.mask(prev_close.isna() | (prev_close <= EPSILON))
-    daily_return = (factor_df[_COL_CLOSE] - safe_prev_close) / safe_prev_close
-    
-    # 应用业务筛选条件
-    condition = (turnover_surge > _TURNOVER_SURGE_THRESHOLD) & (daily_return > _DAILY_RETURN_THRESHOLD)
-    
-    if _logger:
-        valid_count = condition.sum()
-        valid_ratio = valid_count / len(factor_df) if len(factor_df) > 0 else 0
-        _logger.info(f"业务筛选: 满足条件(surge>{_TURNOVER_SURGE_THRESHOLD} & return>{_DAILY_RETURN_THRESHOLD})的记录 {valid_count} 行 ({valid_ratio:.2%})")
-    
-    # 不满足条件的股票因子值设为 NaN
-    turnover_surge = turnover_surge.where(condition, np.nan)
-    
+
     factor_df[_COL_TURNOVER_SURGE] = turnover_surge
     
     return factor_df

@@ -475,6 +475,7 @@ def format_final_output(
     factor_merged_path: Path | str,
     return_merged_path: Path | str,
     result_dir: Path | None = None,
+    output_version: str | None = None,
     logger_arg: logging.Logger | None = None
 ) -> None:
     """
@@ -484,6 +485,7 @@ def format_final_output(
         factor_merged_path: 合并后的因子数据路径
         return_merged_path: 合并后的收益数据路径
         result_dir: 结果目录（可选）
+        output_version: 输出版本号（可选，默认使用模块级 _OUTPUT_VERSION）
         logger_arg: 日志记录器（遵循 MODULE.md 约束 77）
     
     Note:
@@ -496,7 +498,8 @@ def format_final_output(
         >>> # 假设已合并生成 merged_factor.json.gz 和 merged_return.json.gz
         >>> format_final_output(
         ...     Path('result/merged_factor.json.gz'),
-        ...     Path('result/merged_return.json.gz')
+        ...     Path('result/merged_return.json.gz'),
+        ...     output_version='3.36'
         ... )  # 输出 factor_data.json.gz 和 return_data.json.gz
     
     Raises:
@@ -505,6 +508,7 @@ def format_final_output(
     """
     _logger = logger_arg or logging.getLogger(__name__)
     _result_dir = result_dir or RESULT_DIR
+    _version = output_version or _OUTPUT_VERSION  # 使用传入版本号或默认版本号
     
     # 统一转换为 Path（遵循 MODULE.md 参数类型约定）
     factor_merged_path = Path(factor_merged_path)
@@ -611,7 +615,7 @@ def format_final_output(
             out_f.write(f'      "end": "{last_date}"\n')
             out_f.write('    },\n')
             out_f.write(f'    "last_updated": "{last_updated}",\n')
-            out_f.write(f'    "version": "{_OUTPUT_VERSION}",\n')
+            out_f.write(f'    "version": "{_version}",\n')
             out_f.write('    "fields": ["date", "asset", "open", "close", "high", "low", "rsi_6", "volume_ratio_5"],\n')
             out_f.write('    "format_note": "每条记录单行写入，便于流式解析"\n')
             out_f.write('  },\n')
@@ -645,7 +649,7 @@ def format_final_output(
             out_f.write(f'      "end": "{return_last_date}"\n')  # 使用收益数据的统计值
             out_f.write('    },\n')
             out_f.write(f'    "last_updated": "{last_updated}",\n')
-            out_f.write(f'    "version": "{_OUTPUT_VERSION}",\n')
+            out_f.write(f'    "version": "{_version}",\n')
             out_f.write('    "fields": ["date", "asset", "forward_return_1d", "forward_return_3d", "forward_return_5d"],\n')
             out_f.write('    "note": "3日和5日收益最后几天会有NaN"\n')
             out_f.write('  },\n')

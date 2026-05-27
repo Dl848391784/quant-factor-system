@@ -32,6 +32,9 @@ Stage 4: 综合因子
   18. composite_ic_weight_1d.py
   19. composite_rolling_icir_weight_1d.py
 
+Stage 5: 汇总报告
+  20. generate_factor_summary_report.py
+
 版本历史：
 - v1.0 (2026-05-27): 初始版本，完全串行执行，退出码检查，脚本级别重试
 
@@ -98,6 +101,9 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask('composite_icir', 'comprehensive_factor/composite_icir_weight_1d.py', 4, ['--auto_select']),
     ScriptTask('composite_ic', 'comprehensive_factor/composite_ic_weight_1d.py', 4, ['--auto_select']),
     ScriptTask('composite_rolling_icir', 'comprehensive_factor/composite_rolling_icir_weight_1d.py', 4, ['--auto_select']),
+    
+    # Stage 5: 汇总报告
+    ScriptTask('summary_report', 'scripts/generate_factor_summary_report.py', 5, []),
 ]
 
 # ============================================================================
@@ -301,8 +307,8 @@ def main() -> int:
     )
     
     parser.add_argument(
-        '--start-stage', type=int, default=0, choices=[0, 1, 2, 3, 4],
-        help='从哪个阶段开始执行（0=数据拉取, 1=数据整合, 2=IC计算, 3=回测, 4=综合因子）'
+        '--start-stage', type=int, default=0, choices=[0, 1, 2, 3, 4, 5],
+        help='从哪个阶段开始执行（0=数据拉取, 1=数据整合, 2=IC计算, 3=回测, 4=综合因子, 5=汇总报告）'
     )
     
     parser.add_argument(

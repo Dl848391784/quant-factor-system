@@ -988,8 +988,7 @@ if __name__ == '__main__':
     cli_logger.info(f"  总数: {result['total_count']}")
     cli_logger.info(f"  沪市主板: {result['sh_count']}")
     cli_logger.info(f"  深市主板: {result['sz_count']}")
-    cli_logger.info(f"  缓存文件: {result['cache_file']}")
-    cli_logger.info(f"  结果文件: {result['result_file']}")
+    cli_logger.info(f"  输出文件: {result['output_file']}")
     cli_logger.info(f"  消息: {result['message']}")
     
     if result['warnings']:
