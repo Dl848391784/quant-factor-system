@@ -19,6 +19,7 @@ DataFrame 工具模块
 - v1.4 (2026-05-27): MODULE.md 版本历史同步，测试边界完善
 - v1.5 (2026-05-27): __all__ 放置位置PEP8规范化，df_name 边界校验，docstring 完善
 - v1.6 (2026-05-27): 模块级常量定义，错误信息优化，文件末尾换行符
+- v1.7 (2026-05-27): df 类型检查改用 isinstance，删除冗余日志，优化 debug 输出
 """
 
 # 标准库导入
@@ -48,13 +49,13 @@ def validate_dataframe_columns(
     错误信息包含可用列，便于用户定位问题。
     
     Args:
-        df: DataFrame 对象（不能为 None）
+        df: DataFrame 对象（必须是 pandas.DataFrame 类型）
         required_cols: 必需列名列表（不能为空）
         df_name: DataFrame 名称（用于错误消息，可选，默认使用模块常量）
         logger: 日志记录器（可选，遵循 PROJECT.md 第783-857行规范）
     
     Raises:
-        TypeError: df 参数为 None
+        TypeError: df 参数不是 pandas.DataFrame 类型
         ValueError: required_cols 为空列表，或 DataFrame 缺少必需列
     
     Example:
@@ -75,6 +76,10 @@ def validate_dataframe_columns(
         >>> validate_dataframe_columns(df_missing, ['date', 'close', 'volume'], 'stock_data')
         ValueError: stock_data 缺少必需列: ['volume']
                     可用列: ['date', 'close']
+        >>> 
+        >>> # 异常场景：df 不是 DataFrame（预期抛出 TypeError）
+        >>> validate_dataframe_columns('invalid', ['date'], 'test')
+        TypeError: test 参数必须是 pandas.DataFrame 类型
     
     Note:
         日志记录缺失列信息，便于后续审计追溯。
@@ -87,20 +92,19 @@ def validate_dataframe_columns(
     # 边界处理：df_name 参数校验（优先处理，确保后续错误信息友好）
     if df_name is None:
         df_name = _DEFAULT_DF_NAME
-        logger.info(f"df_name 参数为 None，已使用默认值: {df_name}")
     
-    # 边界处理：df 参数校验
-    if df is None:
-        logger.error(f"DataFrame 参数为 None: {df_name}")
-        raise TypeError(f"{df_name} 参数不能为 None")
+    # 边界处理：df 参数类型校验（使用 isinstance 确保类型正确）
+    if not isinstance(df, pd.DataFrame):
+        logger.error(f"DataFrame 参数类型错误: {df_name}, 实际类型: {type(df).__name__}")
+        raise TypeError(f"{df_name} 参数必须是 pandas.DataFrame 类型")
     
     # 边界处理：required_cols 参数校验
     if not required_cols:
         logger.error(f"required_cols 参数为空列表: {df_name}")
         raise ValueError(f"{df_name} 的 required_cols 不能为空列表")
     
-    # 验证必需列存在（使用集合操作优化性能）
-    missing_cols = list(set(required_cols) - set(df.columns))
+    # 验证必需列存在（使用列表推导式保持原始顺序）
+    missing_cols = [col for col in required_cols if col not in df.columns]
     
     if missing_cols:
         # 构建友好错误信息（包含可用列）
@@ -115,5 +119,5 @@ def validate_dataframe_columns(
         
         raise ValueError(error_msg)
     
-    # 验证通过日志
-    logger.debug(f"{df_name} 列名校验通过: {required_cols}")
+    # 验证通过日志（只记录关键信息，避免冗长输出）
+    logger.debug(f"{df_name} 列名校验通过，共 {len(required_cols)} 列")

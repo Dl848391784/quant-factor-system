@@ -12,6 +12,7 @@ DataFrame 工具模块测试用例
 - v1.2 (2026-05-27): 新增 TC009/TC010 测试边界（df_name空字符串、列名大小写敏感）
 - v1.3 (2026-05-27): 删除 __main__ 块，新增 TC011（df_name 为 None）
 - v1.4 (2026-05-27): 新增 TC012/TC013 验证默认值在错误信息中的使用
+- v1.5 (2026-05-27): 更新 TC003/TC013 适配 isinstance 类型检查，新增 TC014/TC015 验证非DataFrame类型
 """
 
 # 标准库导入
@@ -57,11 +58,14 @@ class TestValidateDataframeColumns:
         assert "close" in error_msg
     
     def test_df_none_raises_type_error(self):
-        """TC003: 边界场景 - df 参数为 None"""
+        """TC003: 边界场景 - df 参数为 None（非 DataFrame 类型）"""
         with pytest.raises(TypeError) as exc_info:
             validate_dataframe_columns(None, ['date', 'close'], 'stock_data')
         
-        assert "不能为 None" in str(exc_info.value)
+        error_msg = str(exc_info.value)
+        # 验证错误信息提示类型错误（而非简单的 None 检查）
+        assert "必须" in error_msg
+        assert "DataFrame" in error_msg
     
     def test_empty_required_cols_raises_value_error(self):
         """TC004: 边界场景 - required_cols 为空列表"""
@@ -161,6 +165,39 @@ class TestValidateDataframeColumns:
             validate_dataframe_columns(None, ['date', 'close'], None)
         
         error_msg = str(exc_info.value)
-        # 验证错误信息中使用默认值而非 None
+        # 验证错误信息中使用默认值和类型错误提示
         assert "<未命名DataFrame>" in error_msg
-        assert "不能为 None" in error_msg
+        assert "必须" in error_msg
+        assert "DataFrame" in error_msg
+    
+    def test_df_string_raises_type_error(self):
+        """TC014: 边界场景 - df 参数为字符串（非 DataFrame 类型）"""
+        with pytest.raises(TypeError) as exc_info:
+            validate_dataframe_columns('invalid_string', ['date'], 'test')
+        
+        error_msg = str(exc_info.value)
+        # 验证错误信息提示类型错误
+        assert "必须" in error_msg
+        assert "DataFrame" in error_msg
+    
+    def test_df_int_raises_type_error(self):
+        """TC015: 边界场景 - df 参数为整数（非 DataFrame 类型）"""
+        with pytest.raises(TypeError) as exc_info:
+            validate_dataframe_columns(123, ['date'], 'test')
+        
+        error_msg = str(exc_info.value)
+        # 验证错误信息提示类型错误
+        assert "必须" in error_msg
+        assert "DataFrame" in error_msg
+    
+    def test_missing_cols_preserves_order(self):
+        """TC016: 缺失列顺序保持原始顺序"""
+        df = pd.DataFrame({'close': [100.0]})
+        
+        with pytest.raises(ValueError) as exc_info:
+            # required_cols 顺序为 ['date', 'volume', 'high']
+            validate_dataframe_columns(df, ['date', 'volume', 'high'], 'test')
+        
+        error_msg = str(exc_info.value)
+        # 验证缺失列顺序与 required_cols 顺序一致
+        assert "['date', 'volume', 'high']" in error_msg

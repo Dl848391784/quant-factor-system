@@ -1,8 +1,8 @@
 # data_fetchers 模块规范
 
-> 版本: v3.04
+> 版本: v3.06
 > 创建时间: 2026-05-19
-> 更新时间: 2026-05-27 15:00 北京时间
+> 更新时间: 2026-05-27 16:00 北京时间
 > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
 
 ---
@@ -638,6 +638,21 @@ data_fetchers/
    - **`_write_json_record` 类型注解**：`Any` → `TextIO`（更精确的类型）
    - **修复原因**：类型注解不精确、公共类 docstring 不完整（2项）
 
+36. **batch_processor.py v1.2 (2026-05-27 15:30)** — 第三轮深度优化
+   - **函数签名类型注解完整化**：`Path = None` → `Path | None = None`（4个公共函数）
+   - **logger_arg 类型注解**：`logging.Logger = None` → `logging.Logger | None = None`
+   - **`self.records` 类型注解**：`list` → `list[dict]`（更精确）
+   - **format_final_output 入口处统一转换**：`Path(xxx).unlink()` → 入口处统一转换为 Path
+   - **异常处理日志**：`except json.JSONDecodeError: continue` → 添加 debug 日志
+   - **修复原因**：类型注解不完整、静默 fallback、冗余转换（4项）
+
+37. **batch_processor.py v1.3 (2026-05-27 16:00)** — 第四轮深度优化
+   - **新增模块级常量 `_DATA_TYPES`**：避免硬编码 `['factor', 'return']`（2处使用）
+   - **`_write_json_record` 添加 Example**：内部函数补充使用示例
+   - **删除冗余赋值**：`date_start = first_date` → 直接使用 `first_date`（代码简洁）
+   - **`cleanup_batch_files` 使用常量**：`for t in [...]` → `for data_type in _DATA_TYPES`
+   - **修复原因**：硬编码重复、冗余赋值、内部函数文档不完整（4项）
+
 33. **fetch_turnover.py v2.3 (2026-05-27 11:30)** — 第四轮补充优化
    - **get_cached_turnover_codes 函数**：创建公共函数（__all__ 中已声明，补充实现）
    - **类型注解完整性**：`Set[str]` 返回类型 + `logger_arg` 参数
@@ -1221,7 +1236,7 @@ data_fetchers/
 135. **MODULE.md v3.01 (2026-05-27)** — 规范补充
    - **新增约束 #75-#76**：模糊匹配优先级说明、返回类型注解完整
 
-136. **dataframe_utils.py v1.0-v1.6 (2026-05-27)** — 公共模块新增
+136. **dataframe_utils.py v1.0-v1.7 (2026-05-27)** — 公共模块新增
    - **v1.0**: 首次创建，validate_dataframe_columns 函数
    - **v1.1**: logger 参数化，错误信息包含可用列
    - **v1.2**: 导入顺序PEP8规范化，删除未使用导入，添加边界处理
@@ -1229,13 +1244,15 @@ data_fetchers/
    - **v1.4**: MODULE.md 版本历史同步，测试边界完善（TC009/TC010）
    - **v1.5**: __all__ 放置位置PEP8规范化，df_name 参数支持 None，类型注解更新
    - **v1.6**: 模块级常量定义，df_name 边界校验顺序优化，日志级别调整，集合操作优化
+   - **v1.7**: df 类型检查改用 isinstance，删除冗余 info 日志，优化 debug 输出格式，缺失列顺序保持原始顺序
 
-137. **test_dataframe_utils.py v1.0-v1.4 (2026-05-27)** — 测试文件新增
+137. **test_dataframe_utils.py v1.0-v1.5 (2026-05-27)** — 测试文件新增
    - **v1.0**: 首次创建，覆盖正常/异常/边界场景（TC001-TC008）
    - **v1.1**: 导入顺序PEP8规范化，测试日志命名合规化
    - **v1.2**: 新增 TC009/TC010 测试边界（df_name空字符串、列名大小写敏感）
    - **v1.3**: 删除 __main__ 块，新增 TC011（df_name 为 None）
    - **v1.4**: 新增 TC012/TC013 验证默认值在错误信息中的使用
+   - **v1.5**: 更新 TC003/TC013 适配 isinstance 类型检查，新增 TC014/TC015/TC016 验证非DataFrame类型和顺序保持
 
 49. **MODULE.md v2.58 (2026-05-26)** — 规范补充
    - **类型注解兼容性规范**：补充兼容类型说明（Python 运行时不强制类型检查）
