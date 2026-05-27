@@ -131,7 +131,8 @@ class RealDataLoader:
         retries: int = 3,
         use_local: bool = False,
         use_mock: bool = False,
-        enable_cache: bool = True
+        enable_cache: bool = True,
+        logger: Optional[logging.Logger] = None
     ):
         """
         初始化数据加载器
@@ -144,7 +145,9 @@ class RealDataLoader:
             use_local: 使用本地CSV数据
             use_mock: 使用模拟数据（测试用）- ⚠️ 量化系统不应使用模拟数据
             enable_cache: 启用缓存
+            logger: 外部传入的 logger（可选）
         """
+        self._logger = get_module_logger(logger)
         self.stock_list = None
         self.price_data = None
         self.timeout = timeout
@@ -159,17 +162,15 @@ class RealDataLoader:
         
         # ⚠️ 警告：量化系统不应使用模拟数据
         if self.use_mock:
-            self._logger.warning(f"⚠️ 警告：正在使用模拟数据！量化系统必须使用真实数据进行分析。")
-            self._logger.warning(f"⚠️ 警告：模拟数据仅供测试使用，分析结果无实际意义。")
+            self._logger.warning("⚠️ 正在使用模拟数据！量化系统必须使用真实数据进行分析。")
+            self._logger.warning("⚠️ 模拟数据仅供测试使用，分析结果无实际意义。")
         
         # 确保缓存目录存在
         if self.enable_cache:
-            if not os.path.exists(self.CACHE_DIR):
-                os.makedirs(self.CACHE_DIR, exist_ok=True)
-                self._logger.info(f"[缓存] 创建缓存目录: {self.CACHE_DIR}")
-            if not os.path.exists(self.FACTOR_CACHE_DIR):
-                os.makedirs(self.FACTOR_CACHE_DIR, exist_ok=True)
-                self._logger.info(f"[缓存] 创建因子缓存目录: {self.FACTOR_CACHE_DIR}")
+            cache_dir = CACHE_DIR if HAS_COMMON_MODULES else os.path.expanduser('~/projects/factor_ic_analyzer/cache')
+            if not os.path.exists(cache_dir):
+                os.makedirs(cache_dir, exist_ok=True)
+                self._logger.info(f"[缓存] 创建缓存目录: {cache_dir}")
         
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -1413,7 +1414,7 @@ class RealDataLoader:
             thread_b_stocks = stock_list[min(mid_idx, batch_end_idx):batch_end_idx] if mid_idx < batch_end_idx else []
             
             batch_start_time = time.time()
-            print(f"\n  [批次 {batch_idx + 1}/{num_batches}] "
+            self._logger.info(f"\n  [批次 {batch_idx + 1}/{num_batches}] "
                   f"股票 {batch_start_idx + 1}-{batch_end_idx} "
                   f"(线程A: {len(thread_a_stocks)}只, 线程B: {len(thread_b_stocks)}只)")
             
@@ -1437,7 +1438,7 @@ class RealDataLoader:
             # 进度显示
             rate = completed / total_elapsed if total_elapsed > 0 else 0
             eta = (total_stocks - completed) / rate if rate > 0 else 0
-            print(f"    进度: {completed}/{total_stocks} "
+            self._logger.info(f"    进度: {completed}/{total_stocks} "
                   f"(成功: {success_count}, 失败: {fail_count}) "
                   f"[批次耗时: {batch_elapsed:.1f}s, 总耗时: {total_elapsed:.1f}s, ETA: {eta:.0f}s]")
             

@@ -1259,6 +1259,19 @@ data_fetchers/
    - **docstring Raises 规范**：描述应与实际抛出一致，不应描述未实现的场景
    - **兜底块异常信息规范**：应包含异常类型和详情（便于追溯）
 
+50. **data_loader.py v2.0 (2026-05-27)** — 简化重构
+   - **版本历史添加**：首次记录重大重构
+   - **移除模块级函数**：load_real_data、load_factor_light、load_return_light、load_cached_data_combined_light（不再被外部调用）
+   - **移除 __main__ 测试代码**：遵循 PROJECT.md 禁止 __main__ 块规范
+   - **移除 calculate_rsi 类方法**：已迁移到 factor_calculator.py
+   - **logger 参数化**：198处 print 替换为 self._logger（info/warning）
+   - **公共模块导入**：paths.py、logger_config.py、factor_calculator.py
+   - **get_module_logger 函数**：DCL 模式初始化，支持外部传入 logger
+   - **__init__ logger 参数**：新增 logger 参数，self._logger 初始化
+   - **类常量移除**：STOCK_LIST_URL、KLINE_URL、CACHE_DIR 等改为模块级常量
+   - **代码行数减少**：2584行 → 2285行（减少299行）
+   - **Git diff**：109增/410删（净减301行）
+
 ---
 
 data_fetchers 模块负责：
@@ -2535,6 +2548,7 @@ factor_df['middle'] = middle  # 成功赋值
 | v1.0 | 2026-05-27 17:00 | 配套文件：docs/factor_calculator_flow.md、test_cases/test_factor_calculator.py |
 | v1.1 | 2026-05-27 19:30 | 第二轮深度优化：版本历史添加、常量命名私有化（DEFAULT_* → _DEFAULT_*）、__all__移到导入后位置 |
 | v1.2 | 2026-05-27 20:00 | 第三轮深度优化：内部函数`_calculate_ewm_with_initial` docstring补全、新增私有常量（volume_ratio_window、forward_return_shift）、消除硬编码默认值 |
+| v1.3 | 2026-05-27 21:00 | 第四轮深度优化：提取列名常量（6输入+3输出）、提取魔法数字常量（4个基准值+2个阈值）、消除硬编码字符串和魔法数字 |
 
 ---
 

@@ -30,6 +30,12 @@
   - 内部函数 `_calculate_ewm_with_initial` docstring 补全（Args/Returns/Note）
   - 新增私有常量 `_DEFAULT_VOLUME_RATIO_WINDOW`、`_DEFAULT_FORWARD_RETURN_SHIFT`
   - 消除硬编码默认值（window=5、shift=1）
+- v1.3 (2026-05-27): 第四轮深度优化
+  - 提取输入列名常量（`_COL_CLOSE`、`_COL_DATE`、`_COL_ASSET`、`_COL_HIGH`、`_COL_LOW`、`_COL_TURNOVER_RATE`）
+  - 提取输出列名常量（`_COL_BOLLINGER_PB`、`_COL_KDJ_J`、`_COL_TURNOVER_SURGE`）
+  - 提取魔法数字常量（`_RSI_NEUTRAL_VALUE`、`_RSI_MAX_VALUE`、`_BOLLINGER_NEUTRAL_VALUE`、`_KD_NEUTRAL_VALUE`）
+  - 提取业务阈值常量（`_TURNOVER_SURGE_THRESHOLD`、`_DAILY_RETURN_THRESHOLD`）
+  - 消除所有硬编码字符串和魔法数字
 
 作者: 云瑶
 创建日期: 2026-05-27
@@ -68,7 +74,30 @@ __all__ = [
 # ============================================================================
 # 模块级常量
 # ============================================================================
+
+# 数值阈值
 EPSILON = 1e-10  # 避免除零阈值
+
+# 因子计算基准值
+_RSI_NEUTRAL_VALUE = 50.0  # RSI 中性值（avg_loss=0 且 avg_gain=0 时）
+_RSI_MAX_VALUE = 100  # RSI 最大值（超买）
+_BOLLINGER_NEUTRAL_VALUE = 0.5  # 布林带 %B 中性值（带宽过窄时）
+_KD_NEUTRAL_VALUE = 50.0  # K/D 值中性初始值
+_TURNOVER_SURGE_THRESHOLD = 1.0  # 换手率突增阈值
+_DAILY_RETURN_THRESHOLD = 0.0  # 日收益率阈值（必须上涨）
+
+# 输入列名常量（DataFrame 列名）
+_COL_CLOSE = 'close'
+_COL_DATE = 'date'
+_COL_ASSET = 'asset'
+_COL_HIGH = 'high'
+_COL_LOW = 'low'
+_COL_TURNOVER_RATE = 'turnover_rate'
+
+# 输出列名常量（因子输出列名）
+_COL_BOLLINGER_PB = 'bollinger_pb'
+_COL_KDJ_J = 'kdj_j'
+_COL_TURNOVER_SURGE = 'turnover_surge'
 
 # 默认参数（私有常量，遵循 cache_manager.py 规范）
 _DEFAULT_RSI_PERIOD = 6
@@ -222,12 +251,12 @@ def calculate_rsi(
     rsi = 100 - (100 / (1 + rs))
     
     # 边界处理覆盖
-    rsi.loc[only_zero_loss_mask] = 100
-    rsi.loc[both_zero_mask] = 50
+    rsi.loc[only_zero_loss_mask] = _RSI_MAX_VALUE
+    rsi.loc[both_zero_mask] = _RSI_NEUTRAL_VALUE
     
     # 缺失值填充为中性值
-    rsi = rsi.fillna(50)
-    rsi = rsi.clip(0, 100)
+    rsi = rsi.fillna(_RSI_NEUTRAL_VALUE)
+    rsi = rsi.clip(0, _RSI_MAX_VALUE)
     
     return rsi
 
@@ -358,12 +387,12 @@ def calculate_bollinger_pb(
     factor_df = factor_df.copy()
     
     # 按 asset 分组计算滚动统计
-    factor_df = factor_df.sort_values(['asset', 'date'])
+    factor_df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
     
-    middle = factor_df.groupby('asset', group_keys=False)['close'].transform(
+    middle = factor_df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].transform(
         lambda x: x.rolling(window=n).mean()
     )
-    std_dev = factor_df.groupby('asset', group_keys=False)['close'].transform(
+    std_dev = factor_df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].transform(
         lambda x: x.rolling(window=n).std()
     )
     
@@ -379,10 +408,10 @@ def calculate_bollinger_pb(
     narrow_band_mask = (band_width >= 0) & (band_width < EPSILON)
     
     safe_band_width = band_width.mask(abnormal_mask).clip(lower=EPSILON)
-    bollinger_pb = (factor_df['close'] - lower) / safe_band_width
+    bollinger_pb = (factor_df[_COL_CLOSE] - lower) / safe_band_width
     
     # 异常处理
-    bollinger_pb = bollinger_pb.where(~narrow_band_mask, 0.5)
+    bollinger_pb = bollinger_pb.where(~narrow_band_mask, _BOLLINGER_NEUTRAL_VALUE)
     bollinger_pb = bollinger_pb.where(~abnormal_mask, np.nan)
     
     if _logger:
@@ -391,9 +420,9 @@ def calculate_bollinger_pb(
             _logger.warning(f"检测到 {abnormal_count} 个异常布林带宽度（负值），已标记为 np.nan")
         narrow_count = narrow_band_mask.sum()
         if narrow_count > 0:
-            _logger.warning(f"检测到 {narrow_count} 个过窄布林带宽度（< {EPSILON}），已置为中性值 0.5")
+            _logger.warning(f"检测到 {narrow_count} 个过窄布林带宽度（< {EPSILON}），已置为中性值 {_BOLLINGER_NEUTRAL_VALUE}")
     
-    factor_df['bollinger_pb'] = bollinger_pb
+    factor_df[_COL_BOLLINGER_PB] = bollinger_pb
     
     return factor_df
 
@@ -487,17 +516,17 @@ def calculate_kdj_j(
     factor_df = factor_df.copy()
     
     # 按 asset+date 排序
-    factor_df = factor_df.sort_values(['asset', 'date'])
+    factor_df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
     
     # ewm alpha 参数
     alpha_k = 1 / m1
     alpha_d = 1 / m2
     
     # 计算 RSV
-    low_min = factor_df.groupby('asset', group_keys=False)['low'].transform(
+    low_min = factor_df.groupby(_COL_ASSET, group_keys=False)[_COL_LOW].transform(
         lambda x: x.rolling(n, min_periods=n).min()
     )
-    high_max = factor_df.groupby('asset', group_keys=False)['high'].transform(
+    high_max = factor_df.groupby(_COL_ASSET, group_keys=False)[_COL_HIGH].transform(
         lambda x: x.rolling(n, min_periods=n).max()
     )
     
@@ -505,27 +534,27 @@ def calculate_kdj_j(
     
     narrow_range_mask = denom < EPSILON
     safe_denom = denom.where(~narrow_range_mask, EPSILON)
-    rsv = (factor_df['close'] - low_min) / safe_denom * 100
+    rsv = (factor_df[_COL_CLOSE] - low_min) / safe_denom * _RSI_MAX_VALUE
     
-    # 异常位置设为 50
-    rsv = rsv.where(~narrow_range_mask, 50.0)
+    # 异常位置设为中性值
+    rsv = rsv.where(~narrow_range_mask, _KD_NEUTRAL_VALUE)
     
     if _logger:
         narrow_count = narrow_range_mask.sum()
         if narrow_count > 0:
-            _logger.warning(f"检测到 {narrow_count} 个高低价区间过窄（< {EPSILON}），RSV已置为中性值 50")
+            _logger.warning(f"检测到 {narrow_count} 个高低价区间过窄（< {EPSILON}），RSV已置为中性值 {_KD_NEUTRAL_VALUE}")
     
     # 计算 K 和 D
-    k = rsv.groupby(factor_df['asset']).transform(
-        lambda x: _calculate_ewm_with_initial(x, alpha_k, 50.0)
+    k = rsv.groupby(factor_df[_COL_ASSET]).transform(
+        lambda x: _calculate_ewm_with_initial(x, alpha_k, _KD_NEUTRAL_VALUE)
     )
     
-    d = k.groupby(factor_df['asset']).transform(
-        lambda x: _calculate_ewm_with_initial(x, alpha_d, 50.0)
+    d = k.groupby(factor_df[_COL_ASSET]).transform(
+        lambda x: _calculate_ewm_with_initial(x, alpha_d, _KD_NEUTRAL_VALUE)
     )
     
     # 计算 J
-    factor_df['kdj_j'] = 3 * k - 2 * d
+    factor_df[_COL_KDJ_J] = 3 * k - 2 * d
     
     return factor_df
 
@@ -572,7 +601,7 @@ def calculate_turnover_surge(
     factor_df = factor_df.copy()
     
     # 计算换手率均值（不含当日）
-    avg_turnover = factor_df.groupby('asset')['turnover_rate'].transform(
+    avg_turnover = factor_df.groupby(_COL_ASSET)[_COL_TURNOVER_RATE].transform(
         lambda x: x.shift(1).rolling(surge_window, min_periods=surge_window).mean()
     )
     
@@ -585,7 +614,7 @@ def calculate_turnover_surge(
             _logger.warning(f"检测到 {zero_avg_count} 个 avg_turnover 接近零，已标记为 np.nan")
     
     safe_avg_turnover = avg_turnover.where(~zero_avg_mask, np.nan)
-    turnover_surge = factor_df['turnover_rate'] / safe_avg_turnover
+    turnover_surge = factor_df[_COL_TURNOVER_RATE] / safe_avg_turnover
     
     # 异常负值检测
     abnormal_mask = turnover_surge < 0
@@ -596,7 +625,7 @@ def calculate_turnover_surge(
     turnover_surge = turnover_surge.where(~abnormal_mask, np.nan)
     
     # 计算涨跌幅
-    prev_close = factor_df.groupby('asset')['close'].transform(lambda x: x.shift(1))
+    prev_close = factor_df.groupby(_COL_ASSET)[_COL_CLOSE].transform(lambda x: x.shift(1))
     
     abnormal_prev_close_mask = (prev_close.notna()) & (prev_close <= EPSILON)
     if _logger:
@@ -605,19 +634,19 @@ def calculate_turnover_surge(
             _logger.warning(f"检测到 {abnormal_prev_close_count} 个异常前收盘价，已标记为 np.nan")
     
     safe_prev_close = prev_close.mask(prev_close.isna() | (prev_close <= EPSILON))
-    daily_return = (factor_df['close'] - safe_prev_close) / safe_prev_close
+    daily_return = (factor_df[_COL_CLOSE] - safe_prev_close) / safe_prev_close
     
     # 应用业务筛选条件
-    condition = (turnover_surge > 1) & (daily_return > 0)
+    condition = (turnover_surge > _TURNOVER_SURGE_THRESHOLD) & (daily_return > _DAILY_RETURN_THRESHOLD)
     
     if _logger:
         valid_count = condition.sum()
         valid_ratio = valid_count / len(factor_df) if len(factor_df) > 0 else 0
-        _logger.info(f"业务筛选: 满足条件(surge>1 & return>0)的记录 {valid_count} 行 ({valid_ratio:.2%})")
+        _logger.info(f"业务筛选: 满足条件(surge>{_TURNOVER_SURGE_THRESHOLD} & return>{_DAILY_RETURN_THRESHOLD})的记录 {valid_count} 行 ({valid_ratio:.2%})")
     
     # 不满足条件的股票因子值设为 NaN
     turnover_surge = turnover_surge.where(condition, np.nan)
     
-    factor_df['turnover_surge'] = turnover_surge
+    factor_df[_COL_TURNOVER_SURGE] = turnover_surge
     
     return factor_df
