@@ -2534,6 +2534,7 @@ factor_df['middle'] = middle  # 成功赋值
 | v1.0 | 2026-05-27 17:00 | 初始创建：导入规范化、logger参数化（约束77）、类型注解精确化（约束76）、__all__修复（约束60）、docstring补全（Example章节） |
 | v1.0 | 2026-05-27 17:00 | 配套文件：docs/factor_calculator_flow.md、test_cases/test_factor_calculator.py |
 | v1.1 | 2026-05-27 19:30 | 第二轮深度优化：版本历史添加、常量命名私有化（DEFAULT_* → _DEFAULT_*）、__all__移到导入后位置 |
+| v1.2 | 2026-05-27 20:00 | 第三轮深度优化：内部函数`_calculate_ewm_with_initial` docstring补全、新增私有常量（volume_ratio_window、forward_return_shift）、消除硬编码默认值 |
 
 ---
 

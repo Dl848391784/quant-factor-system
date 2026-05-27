@@ -26,6 +26,10 @@
   - 版本历史添加（参考 cache_manager.py）
   - 常量命名私有化 DEFAULT_* → _DEFAULT_*
   - __all__ 移到导入后位置（遵循 cache_manager.py 规范）
+- v1.2 (2026-05-27): 第三轮深度优化
+  - 内部函数 `_calculate_ewm_with_initial` docstring 补全（Args/Returns/Note）
+  - 新增私有常量 `_DEFAULT_VOLUME_RATIO_WINDOW`、`_DEFAULT_FORWARD_RETURN_SHIFT`
+  - 消除硬编码默认值（window=5、shift=1）
 
 作者: 云瑶
 创建日期: 2026-05-27
@@ -74,6 +78,8 @@ _DEFAULT_KDJ_N = 9
 _DEFAULT_KDJ_M1 = 3
 _DEFAULT_KDJ_M2 = 3
 _DEFAULT_SURGE_WINDOW = 5
+_DEFAULT_VOLUME_RATIO_WINDOW = 5
+_DEFAULT_FORWARD_RETURN_SHIFT = 1
 
 # ============================================================================
 # 模块级 fallback logger（遵循 PROJECT.md 公共模块日志规范）
@@ -232,7 +238,7 @@ def calculate_rsi(
 
 def calculate_volume_ratio(
     volume: pd.Series,
-    window: int = 5
+    window: int = _DEFAULT_VOLUME_RATIO_WINDOW
 ) -> pd.Series:
     """
     计算量比因子
@@ -276,7 +282,7 @@ def calculate_volume_ratio(
 
 def calculate_forward_return(
     close_prices: pd.Series,
-    shift: int = 1
+    shift: int = _DEFAULT_FORWARD_RETURN_SHIFT
 ) -> pd.Series:
     """
     计算前瞻收益率
@@ -404,6 +410,19 @@ def _calculate_ewm_with_initial(
     """计算 EWM 递推值（正确处理 NaN 前缀版本）
     
     公共函数：统一处理 K 值和 D 值的 EWM 递推计算
+    
+    Args:
+        series: 输入序列（RSV 或 K 值）
+        alpha: EWM 衰减因子（1/m，m 为平滑周期）
+        initial_value: 初始值（K/D 使用 50.0 作为中性值）
+    
+    Returns:
+        EWM 递推结果序列
+    
+    Note:
+        - 在第一个有效值前插入虚拟 initial_value 作为 EWM 种子
+        - 使用 ewm(adjust=False, ignore_na=True) 确保正确传播 NaN
+        - 恢复原始 NaN 位置，避免虚拟初始值污染结果
     """
     if len(series) == 0 or series.isna().all():
         return series

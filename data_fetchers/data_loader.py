@@ -1,65 +1,113 @@
 #!/usr/bin/env python3
 """
-真实 A股数据加载器（分批并发版本 + 数据完整性校验）
+真实 A股数据加载器（简化版）
 
-支持多种数据源：
-1. 新浪财经 API（网络）
-2. 本地CSV文件
-3. 模拟数据（测试用）
+职责：从 API 获取股票历史数据（OHLCV）
+
+版本历史：
+- v1.0 (2026-04-01): 首次创建（云舟）
+- v2.0 (2026-05-27): 简化重构
+  - 移除模块级函数（load_real_data 等）
+  - 移除 __main__ 测试代码
+  - 移除因子计算逻辑（已迁移到 factor_calculator.py）
+  - 使用公共模块（cache_manager.py、paths.py）
 
 主板股票定义：
 - 沪市主板：60 开头
 - 深市主板：00 开头
 
 剔除：创业板(30)、科创板(688)、北交所(8/4开头)、ST股票
-
-分批并发策略（避免API限流）：
-- 每批次启动2个线程并行
-- 线程A处理前50只股票
-- 线程B处理后50只股票
-- 等前两线程完成后，再启动下一批
-- 批次间添加2秒延迟
-- 支持重试机制
-
-目标：
-- 获取所有主板股票（约3000+只）
-- 沪市主板：60开头
-- 深市主板：00开头
-- 剔除：创业板(30)、科创板(688)、北交所、ST股票
-
-数据完整性保障：
-- 每日生成股票清单缓存
-- 获取完成后完整性校验
-- 自动补全缺失股票
-- 最终验证输出统计
-
-依赖: pip install requests pandas numpy
-
-作者: 云舟
-日期: 2026-04-01
 """
 
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Tuple, Optional, List, Dict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+# 标准库导入
+import gc
+import gzip
+import json
+import logging
+import os
+import random  # 模拟数据生成需要
+import threading
 import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Tuple, Optional, List, Dict, Any
+
+# 第三方库导入
+import numpy as np
+import pandas as pd
 import requests
-import threading
-import gzip
-import json
-import gc
-import os
-import random
-import json
-import gzip
+
+# 本地模块导入（条件导入：脚本直接运行时可能路径未配置）
+try:
+    from data_fetchers.common.paths import CACHE_DIR, RESULT_DIR, FACTOR_IC_DATA_PATH
+    from data_fetchers.common.logger_config import setup_logger
+    from data_fetchers.factor_calculator import calculate_rsi, calculate_volume_ratio, calculate_forward_return
+    HAS_COMMON_MODULES = True
+except ImportError:
+    HAS_COMMON_MODULES = False
+    # 兜底：使用硬编码路径
+    CACHE_DIR = os.path.expanduser('~/projects/factor_ic_analyzer/cache')
+    RESULT_DIR = os.path.expanduser('~/projects/factor_ic_analyzer/data_fetchers/result')
+    FACTOR_IC_DATA_PATH = os.path.join(RESULT_DIR, 'factor_ic_data.json.gz')
+    # 兜底：factor_calculator 函数未导入时，后续调用会报错
+    calculate_rsi = None  # type: ignore
+    calculate_volume_ratio = None  # type: ignore
+    calculate_forward_return = None  # type: ignore
+
 warnings.filterwarnings('ignore')
 
 # ============================================================================
 # 模块级常量
+# ============================================================================
+
+# 新浪财经 API 端点
+STOCK_LIST_URL = 'http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData'
+KLINE_URL = 'https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData'
+
+# 本地数据路径（兜底）
+_LOCAL_DATA_DIR = os.path.expanduser('~/projects/factor_ic_analyzer/data')
+
+# ============================================================================
+# Logger 配置
+# ============================================================================
+
+def get_module_logger(logger_arg: Optional[logging.Logger] = None) -> logging.Logger:
+    """获取模块 logger
+    
+    Args:
+        logger_arg: 外部传入的 logger（可选）
+    
+    Returns:
+        logging.Logger: 模块 logger
+    
+    Note:
+        - 如果 logger_arg 为 None，返回模块默认 logger
+        - 模块默认 logger 在首次调用时初始化（DCL 模式）
+    """
+    global _MODULE_LOGGER
+    if logger_arg is not None:
+        if not isinstance(logger_arg, logging.Logger):
+            raise TypeError(f"logger 参数必须是 logging.Logger 类型，实际: {type(logger_arg)}")
+        return logger_arg
+    if _MODULE_LOGGER is None:
+        if HAS_COMMON_MODULES:
+            _MODULE_LOGGER = setup_logger('data_fetchers.data_loader')
+        else:
+            _MODULE_LOGGER = logging.getLogger('data_fetchers.data_loader')
+            if not _MODULE_LOGGER.handlers:
+                handler = logging.StreamHandler()
+                handler.setFormatter(logging.Formatter('%(asctime)s | %(levelname)-8s | %(name)s | %(message)s'))
+                _MODULE_LOGGER.addHandler(handler)
+                _MODULE_LOGGER.setLevel(logging.INFO)
+    return _MODULE_LOGGER
+
+_MODULE_LOGGER: Optional[logging.Logger] = None
+
+
+# ============================================================================
+# RealDataLoader 类
 # ============================================================================
 
 class RealDataLoader:
@@ -111,17 +159,17 @@ class RealDataLoader:
         
         # ⚠️ 警告：量化系统不应使用模拟数据
         if self.use_mock:
-            print("⚠️ 警告：正在使用模拟数据！量化系统必须使用真实数据进行分析。")
-            print("⚠️ 警告：模拟数据仅供测试使用，分析结果无实际意义。")
+            self._logger.warning(f"⚠️ 警告：正在使用模拟数据！量化系统必须使用真实数据进行分析。")
+            self._logger.warning(f"⚠️ 警告：模拟数据仅供测试使用，分析结果无实际意义。")
         
         # 确保缓存目录存在
         if self.enable_cache:
             if not os.path.exists(self.CACHE_DIR):
                 os.makedirs(self.CACHE_DIR, exist_ok=True)
-                print(f"[缓存] 创建缓存目录: {self.CACHE_DIR}")
+                self._logger.info(f"[缓存] 创建缓存目录: {self.CACHE_DIR}")
             if not os.path.exists(self.FACTOR_CACHE_DIR):
                 os.makedirs(self.FACTOR_CACHE_DIR, exist_ok=True)
-                print(f"[缓存] 创建因子缓存目录: {self.FACTOR_CACHE_DIR}")
+                self._logger.info(f"[缓存] 创建因子缓存目录: {self.FACTOR_CACHE_DIR}")
         
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -154,7 +202,7 @@ class RealDataLoader:
     
     def _get_mock_stock_list(self, max_stocks: int) -> List[Dict]:
         """生成模拟股票列表（仅主板）"""
-        print("[获取股票列表] 生成模拟数据...")
+        self._logger.info(f"[获取股票列表] 生成模拟数据...")
         
         stocks = []
         # 沪市主板 60开头
@@ -174,7 +222,7 @@ class RealDataLoader:
             stocks = stocks[:max_stocks]
         
         stocks.sort(key=lambda x: x['code'])
-        print(f"  ✓ 生成 {len(stocks)} 只模拟主板股票")
+        self._logger.info(f"  ✓ 生成 {len(stocks)} 只模拟主板股票")
         return stocks
     
     def _get_local_stock_list(self, max_stocks: int) -> List[Dict]:
@@ -203,7 +251,7 @@ class RealDataLoader:
         if max_stocks > 0:
             stocks = stocks[:max_stocks]
         
-        print(f"  ✓ 从本地读取 {len(stocks)} 只主板股票")
+        self._logger.info(f"  ✓ 从本地读取 {len(stocks)} 只主板股票")
         return stocks
     
     def _get_api_stock_list(self, max_stocks: int) -> List[Dict]:
@@ -214,7 +262,7 @@ class RealDataLoader:
 
         注意：新浪API每页最多返回约80-100条数据，需要分页获取
         """
-        print("[获取股票列表] 从新浪财经 API 获取主板股票...")
+        self._logger.info(f"[获取股票列表] 从新浪财经 API 获取主板股票...")
 
         # 新浪API请求头
         headers = {
@@ -239,7 +287,7 @@ class RealDataLoader:
 
         try:
             for node_info in nodes:
-                print(f"  获取 {node_info['desc']}...")
+                self._logger.info(f"  获取 {node_info['desc']}...")
 
                 page = 1
                 node_stocks_count = 0
@@ -264,7 +312,7 @@ class RealDataLoader:
                             # 添加随机延迟，避免被限流
                             if attempt > 0:
                                 delay = 2 + attempt * 2
-                                print(f"    重试 {attempt}/{self.retries}，等待 {delay}秒...")
+                                self._logger.info(f"    重试 {attempt}/{self.retries}，等待 {delay}秒...")
                                 time.sleep(delay)
 
                             response = self.session.get(
@@ -284,7 +332,7 @@ class RealDataLoader:
                             if attempt < self.retries - 1:
                                 continue
                             else:
-                                print(f"    ! 获取失败: {e}")
+                                self._logger.warning(f"    ! 获取失败: {e}")
 
                     if not success:
                         raise RuntimeError(f"获取 {node_info['desc']} 第 {page} 页数据失败，已重试 {self.retries} 次")
@@ -292,7 +340,7 @@ class RealDataLoader:
                     # 检查返回数据
                     if not data or not isinstance(data, list) or len(data) == 0:
                         # 返回空数据，表示已获取完毕
-                        print(f"    第 {page} 页返回空数据，{node_info['desc']} 获取完成")
+                        self._logger.info(f"    第 {page} 页返回空数据，{node_info['desc']} 获取完成")
                         break
 
                     # 处理本页数据
@@ -311,11 +359,11 @@ class RealDataLoader:
                                 page_added += 1
 
                     node_stocks_count += page_added
-                    print(f"    第 {page} 页: 获取 {len(data)} 条，新增主板 {page_added} 只")
+                    self._logger.info(f"    第 {page} 页: 获取 {len(data)} 条，新增主板 {page_added} 只")
 
                     # 如果返回数据少于页面大小，说明已到最后一页
                     if len(data) < page_size:
-                        print(f"    最后一页，{node_info['desc']} 获取完成")
+                        self._logger.info(f"    最后一页，{node_info['desc']} 获取完成")
                         break
 
                     page += 1
@@ -323,7 +371,7 @@ class RealDataLoader:
                     # 页间延迟，避免请求过快
                     time.sleep(0.1)
 
-                print(f"    ✓ {node_info['desc']} 共获取 {node_stocks_count} 只主板股票")
+                self._logger.info(f"    ✓ {node_info['desc']} 共获取 {node_stocks_count} 只主板股票")
 
                 # 节点间延迟
                 time.sleep(0.5)
@@ -344,7 +392,7 @@ class RealDataLoader:
             if len(unique_stocks) == 0:
                 raise RuntimeError("API获取失败，未获取到任何主板股票。请检查网络连接或稍后重试。")
 
-            print(f"  ✓ 获取到 {len(unique_stocks)} 只主板非ST股票（去重后）")
+            self._logger.info(f"  ✓ 获取到 {len(unique_stocks)} 只主板非ST股票（去重后）")
             return unique_stocks
 
         except RuntimeError:
@@ -396,7 +444,7 @@ class RealDataLoader:
         with open(cache_path, 'w', encoding='utf-8') as f:
             json.dump(cache_data, f, ensure_ascii=False, indent=2)
 
-        print(f"[缓存] 股票清单已保存: {cache_path} ({len(stock_list)}只)")
+        self._logger.info(f"[缓存] 股票清单已保存: {cache_path} ({len(stock_list)}只)")
     
     def _load_stock_list_cache(self) -> Optional[List[Dict]]:
         """从缓存加载股票清单（兼容 stock_cache.py 的缓存格式）"""
@@ -432,14 +480,14 @@ class RealDataLoader:
                 today = datetime.now().strftime('%Y-%m-%d')
 
                 if cache_date != today:
-                    print(f"[缓存] 缓存日期 {cache_date} 不是今天 {today}，将重新获取")
+                    self._logger.info(f"[缓存] 缓存日期 {cache_date} 不是今天 {today}，将重新获取")
                     return None
 
-            print(f"[缓存] 从缓存加载股票清单: {len(stocks)}只")
+            self._logger.info(f"[缓存] 从缓存加载股票清单: {len(stocks)}只")
             return stocks
 
         except Exception as e:
-            print(f"[缓存] 读取缓存失败: {e}")
+            self._logger.warning(f"[缓存] 读取缓存失败: {e}")
             return None
     
     def _get_factor_cache_path(self) -> str:
@@ -609,7 +657,7 @@ class RealDataLoader:
             meta = data.get('meta', {})
             
             if len(records) == 0:
-                print(f"[缓存] ✗ 警告：缓存数据为空，跳过保存！路径: {cache_path}")
+                self._logger.warning(f"[缓存] ✗ 警告：缓存数据为空，跳过保存！路径: {cache_path}")
                 return
             
             # 验证 meta.n_days 与实际数据一致性
@@ -618,7 +666,7 @@ class RealDataLoader:
             actual_n_days = len(actual_dates)
             
             if meta_n_days > 0 and meta_n_days != actual_n_days:
-                print(f"[缓存] ⚠ 警告：元数据 n_days ({meta_n_days}) 与实际数据天数 ({actual_n_days}) 不一致，已自动修正")
+                self._logger.warning(f"[缓存] ⚠ 警告：元数据 n_days ({meta_n_days}) 与实际数据天数 ({actual_n_days}) 不一致，已自动修正")
                 # 修正元数据
                 meta['n_days'] = actual_n_days
             
@@ -629,10 +677,10 @@ class RealDataLoader:
             # 显示文件大小
             file_size = os.path.getsize(cache_path)
             size_mb = file_size / (1024 * 1024)
-            print(f"[缓存] 已保存压缩缓存: {cache_path} ({size_mb:.2f} MB)")
+            self._logger.info(f"[缓存] 已保存压缩缓存: {cache_path} ({size_mb:.2f} MB)")
             
         except Exception as e:
-            print(f"[缓存] 保存缓存失败: {e}")
+            self._logger.warning(f"[缓存] 保存缓存失败: {e}")
     
     def _load_cache_gzip(self, cache_path: str) -> Optional[dict]:
         """使用 gzip 解压读取缓存文件
@@ -653,12 +701,12 @@ class RealDataLoader:
             
             file_size = os.path.getsize(cache_path)
             size_mb = file_size / (1024 * 1024)
-            print(f"[缓存] 已读取压缩缓存: {cache_path} ({size_mb:.2f} MB)")
+            self._logger.info(f"[缓存] 已读取压缩缓存: {cache_path} ({size_mb:.2f} MB)")
             
             return data
             
         except Exception as e:
-            print(f"[缓存] 读取缓存失败: {e}")
+            self._logger.warning(f"[缓存] 读取缓存失败: {e}")
             return None
     
     def validate_cache(
@@ -695,7 +743,7 @@ class RealDataLoader:
             return_n_days = return_meta.get('n_days', 0)
             
             if factor_n_days < n_days or return_n_days < n_days:
-                print(f"[校验] 交易日数不足: factor={factor_n_days}, return={return_n_days}, 需求={n_days}")
+                self._logger.info(f"[校验] 交易日数不足: factor={factor_n_days}, return={return_n_days}, 需求={n_days}")
                 return False
             
             # 检查股票数量（覆盖率 >= 90%）
@@ -705,7 +753,7 @@ class RealDataLoader:
             min_coverage = int(expected_assets * 0.9)
             
             if factor_n_assets < min_coverage or return_n_assets < min_coverage:
-                print(f"[校验] 股票覆盖率不足: factor={factor_n_assets}, return={return_n_assets}, 最低要求={min_coverage}")
+                self._logger.info(f"[校验] 股票覆盖率不足: factor={factor_n_assets}, return={return_n_assets}, 最低要求={min_coverage}")
                 return False
             
             # 检查数据完整性
@@ -713,7 +761,7 @@ class RealDataLoader:
             return_records = return_data.get('data', [])
             
             if len(factor_records) == 0 or len(return_records) == 0:
-                print(f"[校验] 数据记录为空")
+                self._logger.info(f"[校验] 数据记录为空")
                 return False
             
             # 检查日期范围
@@ -721,7 +769,7 @@ class RealDataLoader:
             return_date_range = return_meta.get('date_range', {})
             
             if not factor_date_range or not return_date_range:
-                print(f"[校验] 日期范围缺失")
+                self._logger.info(f"[校验] 日期范围缺失")
                 return False
             
             # 检查因子值范围（RSI 应在 0-100 之间）
@@ -734,10 +782,10 @@ class RealDataLoader:
                 rsi_max = max(rsi_values)
                 
                 if rsi_min < 0 or rsi_max > 100:
-                    print(f"[校验] 因子值异常: RSI范围 [{rsi_min:.2f}, {rsi_max:.2f}]")
+                    self._logger.warning(f"[校验] 因子值异常: RSI范围 [{rsi_min:.2f}, {rsi_max:.2f}]")
                     return False
             else:
-                print(f"[校验] 因子数据为空")
+                self._logger.info(f"[校验] 因子数据为空")
                 return False
             
             # 检查收益率范围（通常在 -0.2 ~ 0.2 之间）
@@ -750,26 +798,26 @@ class RealDataLoader:
             
             # 极端异常值检查（单日涨跌幅超过 50% 极罕见）
                 if return_min < -0.5 or return_max > 0.5:
-                    print(f"[校验] 收益率异常: 范围 [{return_min:.4f}, {return_max:.4f}]")
+                    self._logger.warning(f"[校验] 收益率异常: 范围 [{return_min:.4f}, {return_max:.4f}]")
                     return False
             else:
-                print(f"[校验] 收益数据为空")
+                self._logger.info(f"[校验] 收益数据为空")
                 return False
             
             # 所有检查通过
-            print(f"[校验] ✓ 缓存数据有效")
-            print(f"  交易日数: {factor_n_days}")
-            print(f"  股票数量: {factor_n_assets}")
-            print(f"  日期范围: {factor_date_range.get('start')} ~ {factor_date_range.get('end')}")
+            self._logger.info(f"[校验] ✓ 缓存数据有效")
+            self._logger.info(f"  交易日数: {factor_n_days}")
+            self._logger.info(f"  股票数量: {factor_n_assets}")
+            self._logger.info(f"  日期范围: {factor_date_range.get('start')} ~ {factor_date_range.get('end')}")
             if len(factor_records) > 0:
-                print(f"  RSI范围: [{rsi_min:.2f}, {rsi_max:.2f}]")
+                self._logger.info(f"  RSI范围: [{rsi_min:.2f}, {rsi_max:.2f}]")
             if len(return_records) > 0:
-                print(f"  收益范围: [{return_min:.4f}, {return_max:.4f}]")
+                self._logger.info(f"  收益范围: [{return_min:.4f}, {return_max:.4f}]")
             
             return True
             
         except Exception as e:
-            print(f"[校验] 缓存校验异常: {e}")
+            self._logger.warning(f"[校验] 缓存校验异常: {e}")
             return False
     
     def _verify_data_completeness(
@@ -824,8 +872,8 @@ class RealDataLoader:
         success_count = 0
         fail_count = 0
         
-        print(f"\n[补全机制] 开始补全 {len(missing_codes)} 只缺失股票...")
-        print(f"  策略: 逐个请求，间隔 {delay}秒")
+        self._logger.info(f"\n[补全机制] 开始补全 {len(missing_codes)} 只缺失股票...")
+        self._logger.info(f"  策略: 逐个请求，间隔 {delay}秒")
         
         for i, code in enumerate(sorted(missing_codes), 1):
             name = code_to_name.get(code, '未知')
@@ -837,13 +885,13 @@ class RealDataLoader:
                     if df is not None and len(df) >= 15:
                         complemented_data[code] = df
                         success_count += 1
-                        print(f"  [{i}/{len(missing_codes)}] ✓ {code} ({name}) - 补全成功")
+                        self._logger.info(f"  [{i}/{len(missing_codes)}] ✓ {code} ({name}) - 补全成功")
                     else:
                         if attempt < self.retries - 1:
                             time.sleep(delay * (attempt + 1))
                         else:
                             fail_count += 1
-                            print(f"  [{i}/{len(missing_codes)}] ✗ {code} ({name}) - 数据不足")
+                            self._logger.warning(f"  [{i}/{len(missing_codes)}] ✗ {code} ({name}) - 数据不足")
                     break
                     
                 except Exception as e:
@@ -851,13 +899,13 @@ class RealDataLoader:
                         time.sleep(delay * (attempt + 1))
                     else:
                         fail_count += 1
-                        print(f"  [{i}/{len(missing_codes)}] ✗ {code} ({name}) - 错误: {e}")
+                        self._logger.warning(f"  [{i}/{len(missing_codes)}] ✗ {code} ({name}) - 错误: {e}")
             
             # 请求间隔，避免API限流
             if i < len(missing_codes):
                 time.sleep(delay)
         
-        print(f"\n[补全机制] 完成: 成功 {success_count}, 失败 {fail_count}")
+        self._logger.warning(f"\n[补全机制] 完成: 成功 {success_count}, 失败 {fail_count}")
         return complemented_data
     
     def _final_verification(
@@ -879,30 +927,30 @@ class RealDataLoader:
         total_attempted = success_count + fail_count
         success_rate = (success_count / expected_count * 100) if expected_count > 0 else 0
         
-        print(f"\n{'='*60}")
-        print("【最终验证结果】")
-        print(f"{'='*60}")
-        print(f"  预期股票总数: {expected_count}")
-        print(f"  成功获取数量: {success_count}")
-        print(f"  失败数量:     {fail_count}")
-        print(f"  成功率:       {success_rate:.2f}%")
+        self._logger.info(f"\n{'='*60}")
+        self._logger.info(f"【最终验证结果】")
+        self._logger.info(f"{'='*60}")
+        self._logger.info(f"  预期股票总数: {expected_count}")
+        self._logger.info(f"  成功获取数量: {success_count}")
+        self._logger.warning(f"  失败数量:     {fail_count}")
+        self._logger.info(f"  成功率:       {success_rate:.2f}%")
         
         if still_missing:
-            print(f"\n  仍然缺失的股票 ({len(still_missing)}只):")
+            self._logger.info(f"\n  仍然缺失的股票 ({len(still_missing)}只):")
             if len(still_missing) <= 20:
-                print(f"    {', '.join(sorted(still_missing))}")
+                self._logger.info(f"    {', '.join(sorted(still_missing))}")
             else:
                 missing_list = sorted(still_missing)
-                print(f"    {', '.join(missing_list[:10])} ... (共{len(still_missing)}只)")
+                self._logger.info(f"    {', '.join(missing_list[:10])} ... (共{len(still_missing)}只)")
         
         if success_rate >= 100:
-            print(f"\n  ★ 数据完整性: 100% - 所有股票均已获取！")
+            self._logger.info(f"\n  ★ 数据完整性: 100% - 所有股票均已获取！")
         elif success_rate >= 99:
-            print(f"\n  ◆ 数据完整性: {success_rate:.2f}% - 接近完整")
+            self._logger.info(f"\n  ◆ 数据完整性: {success_rate:.2f}% - 接近完整")
         else:
-            print(f"\n  ○ 数据完整性: {success_rate:.2f}% - 存在缺失")
+            self._logger.info(f"\n  ○ 数据完整性: {success_rate:.2f}% - 存在缺失")
         
-        print(f"{'='*60}")
+        self._logger.info(f"{'='*60}")
     
     def get_stock_history(
         self, 
@@ -1172,20 +1220,20 @@ class RealDataLoader:
         if start_date is None:
             start_date = (datetime.now() - timedelta(days=int(n_days * 1.5) + 30)).strftime('%Y-%m-%d')
         
-        print(f"\n{'='*60}")
-        print("开始加载真实数据（分批并发版本 + 完整性保障 + 缓存优化）")
-        print(f"{'='*60}")
-        print(f"  日期范围: {start_date} ~ {end_date}")
-        print(f"  目标交易日数: {n_days}")
-        print(f"  并发策略: 每批2线程，每线程{batch_size}只股票")
-        print(f"  完整性保障: {'启用' if enable_complement else '禁用'}")
-        print(f"  缓存策略: {'启用' if self.enable_cache else '禁用'}（gzip压缩）")
+        self._logger.info(f"\n{'='*60}")
+        self._logger.info(f"开始加载真实数据（分批并发版本 + 完整性保障 + 缓存优化）")
+        self._logger.info(f"{'='*60}")
+        self._logger.info(f"  日期范围: {start_date} ~ {end_date}")
+        self._logger.info(f"  目标交易日数: {n_days}")
+        self._logger.info(f"  并发策略: 每批2线程，每线程{batch_size}只股票")
+        self._logger.info(f"  完整性保障: {'启用' if enable_complement else '禁用'}")
+        self._logger.info(f"  缓存策略: {'启用' if self.enable_cache else '禁用'}（gzip压缩）")
         if self.use_mock:
-            print("  数据源: 模拟数据")
+            self._logger.info(f"  数据源: 模拟数据")
         elif self.use_local:
-            print("  数据源: 本地文件")
+            self._logger.info(f"  数据源: 本地文件")
         else:
-            print("  数据源: 新浪财经API")
+            self._logger.info(f"  数据源: 新浪财经API")
         
         # ========== Step 0: 增量缓存检查 ==========
         factor_cache_path = self._get_factor_cache_path()
@@ -1197,12 +1245,12 @@ class RealDataLoader:
         need_fetch_start_date = None  # 需要拉取的起始日期
         
         if self.enable_cache and max_stocks == 0:
-            print(f"\n[增量缓存检查] 检查现有缓存...")
-            print(f"  因子缓存: {factor_cache_path}")
-            print(f"  收益缓存: {return_cache_path}")
+            self._logger.info(f"\n[增量缓存检查] 检查现有缓存...")
+            self._logger.info(f"  因子缓存: {factor_cache_path}")
+            self._logger.info(f"  收益缓存: {return_cache_path}")
             
             if os.path.exists(factor_cache_path) and os.path.exists(return_cache_path):
-                print(f"  ✓ 缓存文件存在")
+                self._logger.info(f"  ✓ 缓存文件存在")
                 
                 # 加载缓存
                 factor_cache_data = self._load_cache_gzip(factor_cache_path)
@@ -1213,7 +1261,7 @@ class RealDataLoader:
                     cache_start_date, cache_end_date = self._get_cache_date_range(factor_cache_data)
                     
                     if cache_start_date and cache_end_date:
-                        print(f"  缓存日期范围: {cache_start_date} ~ {cache_end_date}")
+                        self._logger.info(f"  缓存日期范围: {cache_start_date} ~ {cache_end_date}")
                         
                         # 【修复】优先校验缓存数据是否满足交易日数要求
                         # 不再强制要求 cache_end_date >= today_str
@@ -1226,17 +1274,17 @@ class RealDataLoader:
                         # 判断缓存是否有效（满足交易日数要求）
                         if cache_n_days >= n_days:
                             # 缓存满足交易日数要求
-                            print(f"  ✓ 缓存交易日数满足要求: {cache_n_days} >= {n_days}")
+                            self._logger.info(f"  ✓ 缓存交易日数满足要求: {cache_n_days} >= {n_days}")
                             
                             # 校验缓存有效性
                             if self.validate_cache(factor_cache_data, return_cache_data, n_days):
-                                print(f"\n[缓存] ✓ 使用缓存数据，跳过API拉取")
+                                self._logger.info(f"\n[缓存] ✓ 使用缓存数据，跳过API拉取")
                                 
                                 # 如果缓存日期落后，提示用户
                                 if cache_end_date < today_str:
                                     days_behind = (datetime.now() - datetime.strptime(cache_end_date, '%Y-%m-%d')).days
-                                    print(f"  ⚠ 缓存数据落后 {days_behind} 天（{cache_end_date} vs {today_str}）")
-                                    print(f"  如需最新数据，请手动触发全量更新")
+                                    self._logger.warning(f"  ⚠ 缓存数据落后 {days_behind} 天（{cache_end_date} vs {today_str}）")
+                                    self._logger.info(f"  如需最新数据，请手动触发全量更新")
                                 
                                 # 直接从缓存构建 DataFrame
                                 factor_df = pd.DataFrame(factor_cache_data['data'])
@@ -1251,31 +1299,31 @@ class RealDataLoader:
                                 # 输出统计信息
                                 dates = sorted(factor_df['date'].unique())
                                 assets = factor_df['asset'].unique()
-                                print(f"\n{'='*60}")
-                                print("数据加载完成（来自缓存）")
-                                print(f"{'='*60}")
-                                print(f"  交易日数: {len(dates)}")
-                                print(f"  股票数量: {len(assets)}")
-                                print(f"  总记录数: {len(factor_df)}")
-                                print(f"  日期范围: {dates[0]} ~ {dates[-1]}")
-                                print(f"  加载耗时: <5秒（缓存读取）")
-                                print(f"{'='*60}")
+                                self._logger.info(f"\n{'='*60}")
+                                self._logger.info(f"数据加载完成（来自缓存）")
+                                self._logger.info(f"{'='*60}")
+                                self._logger.info(f"  交易日数: {len(dates)}")
+                                self._logger.info(f"  股票数量: {len(assets)}")
+                                self._logger.info(f"  总记录数: {len(factor_df)}")
+                                self._logger.info(f"  日期范围: {dates[0]} ~ {dates[-1]}")
+                                self._logger.info(f"  加载耗时: <5秒（缓存读取）")
+                                self._logger.info(f"{'='*60}")
                                 
                                 return factor_df, return_df
                             else:
-                                print(f"  ✗ 缓存校验失败，将全量拉取")
+                                self._logger.warning(f"  ✗ 缓存校验失败，将全量拉取")
                                 cache_start_date = None
                                 cache_end_date = None
                         else:
                             # 缓存交易日数不足，需要增量更新
-                            print(f"  缓存交易日数不足: {cache_n_days} < {n_days}")
+                            self._logger.info(f"  缓存交易日数不足: {cache_n_days} < {n_days}")
                             
                             # 检查是否可以增量更新
                             factor_records = factor_cache_data.get('data', [])
                             return_records = return_cache_data.get('data', [])
                             
                             if len(factor_records) > 0 and len(return_records) > 0:
-                                print(f"  需要增量更新: {cache_end_date} -> {today_str}")
+                                self._logger.info(f"  需要增量更新: {cache_end_date} -> {today_str}")
                                 existing_cache = {
                                     'factor': factor_cache_data,
                                     'return': return_cache_data
@@ -1283,15 +1331,15 @@ class RealDataLoader:
                                 # 计算增量起始日期（缓存结束日期的下一天）
                                 need_fetch_start_date = cache_end_date
                             else:
-                                print(f"  ✗ 缓存数据为空，将全量拉取")
+                                self._logger.warning(f"  ✗ 缓存数据为空，将全量拉取")
                                 cache_start_date = None
                                 cache_end_date = None
                     else:
-                        print(f"  ✗ 缓存日期范围无效，将全量拉取")
+                        self._logger.warning(f"  ✗ 缓存日期范围无效，将全量拉取")
                 else:
-                    print(f"  ✗ 缓存读取失败，将全量拉取")
+                    self._logger.warning(f"  ✗ 缓存读取失败，将全量拉取")
             else:
-                print(f"  ✗ 缓存文件不存在，将全量拉取")
+                self._logger.warning(f"  ✗ 缓存文件不存在，将全量拉取")
         
         # ========== Step 1: 获取股票清单 ==========
         stock_list = None
@@ -1307,7 +1355,7 @@ class RealDataLoader:
             if self.enable_cache and max_stocks == 0:
                 self._save_stock_list_cache(stock_list)
         else:
-            print(f"[缓存] 使用缓存中的股票清单")
+            self._logger.info(f"[缓存] 使用缓存中的股票清单")
         
         total_stocks = len(stock_list)
         
@@ -1318,23 +1366,23 @@ class RealDataLoader:
         stocks_per_batch = batch_size * 2  # 每批200只
         num_batches = (total_stocks + stocks_per_batch - 1) // stocks_per_batch
         
-        print(f"\n[获取行情数据] 分批并发获取...")
-        print(f"  总股票数: {total_stocks}")
+        self._logger.info(f"\n[获取行情数据] 分批并发获取...")
+        self._logger.info(f"  总股票数: {total_stocks}")
         
         # 增量更新：只拉取少量数据
         if need_fetch_start_date and existing_cache:
             # 增量模式：只拉取 15 天数据（足够计算 RSI）
             fetch_days = 15
-            print(f"  增量拉取模式: 只拉取最近 {fetch_days} 天数据")
-            print(f"  增量起始日期: {need_fetch_start_date}")
+            self._logger.info(f"  增量拉取模式: 只拉取最近 {fetch_days} 天数据")
+            self._logger.info(f"  增量起始日期: {need_fetch_start_date}")
         else:
             # 全量拉取模式
             stocks_per_batch = batch_size * 2  # 每批200只
             num_batches = (total_stocks + stocks_per_batch - 1) // stocks_per_batch
             fetch_days = int(n_days * 1.5) + 30
-            print(f"  全量拉取模式: 拉取 {fetch_days} 天数据")
-            print(f"  每批数量: {stocks_per_batch}只（2线程 x {batch_size}只）")
-            print(f"  总批次数: {num_batches}")
+            self._logger.info(f"  全量拉取模式: 拉取 {fetch_days} 天数据")
+            self._logger.info(f"  每批数量: {stocks_per_batch}只（2线程 x {batch_size}只）")
+            self._logger.info(f"  总批次数: {num_batches}")
         
         stocks_per_batch = batch_size * 2
         num_batches = (total_stocks + stocks_per_batch - 1) // stocks_per_batch
@@ -1396,33 +1444,33 @@ class RealDataLoader:
             # 批次间延迟（最后一批不延迟）
             if batch_idx < num_batches - 1:
                 delay = 2.0  # 2秒延迟，避免API限流
-                print(f"    等待 {delay}秒 后开始下一批...")
+                self._logger.info(f"    等待 {delay}秒 后开始下一批...")
                 time.sleep(delay)
         
         elapsed_time = time.time() - start_time
-        print(f"\n  ✓ 第一阶段获取完成，总耗时 {elapsed_time:.1f} 秒")
-        print(f"  ✓ 成功: {success_count} 只，失败: {fail_count} 只")
+        self._logger.info(f"\n  ✓ 第一阶段获取完成，总耗时 {elapsed_time:.1f} 秒")
+        self._logger.warning(f"  ✓ 成功: {success_count} 只，失败: {fail_count} 只")
         
         # ========== Step 3: 完整性校验 ==========
-        print(f"\n[完整性校验] 检查数据完整性...")
+        self._logger.info(f"\n[完整性校验] 检查数据完整性...")
         missing_codes, success_codes = self._verify_data_completeness(stock_list, all_data_dict)
         
         initial_missing_count = len(missing_codes)
         initial_success_count = len(success_codes)
         
         if initial_missing_count > 0:
-            print(f"  发现缺失股票: {initial_missing_count} 只")
+            self._logger.info(f"  发现缺失股票: {initial_missing_count} 只")
             if initial_missing_count <= 20:
-                print(f"  缺失代码: {', '.join(sorted(missing_codes))}")
+                self._logger.info(f"  缺失代码: {', '.join(sorted(missing_codes))}")
         else:
-            print(f"  ✓ 数据完整，无缺失股票")
+            self._logger.info(f"  ✓ 数据完整，无缺失股票")
         
         # ========== Step 4: 补全机制 ==========
         complement_success = 0
         complement_fail = 0
         
         if enable_complement and initial_missing_count > 0:
-            print(f"\n[补全机制] 开始补全 {initial_missing_count} 只缺失股票...")
+            self._logger.info(f"\n[补全机制] 开始补全 {initial_missing_count} 只缺失股票...")
             
             complement_data = self._complement_missing_stocks(
                 missing_codes,
@@ -1439,7 +1487,7 @@ class RealDataLoader:
             complement_fail = initial_missing_count - complement_success
             
             # ========== Step 5: 再次校验 ==========
-            print(f"\n[二次校验] 验证补全结果...")
+            self._logger.info(f"\n[二次校验] 验证补全结果...")
             final_missing, final_success = self._verify_data_completeness(stock_list, all_data_dict)
             
             final_success_count = len(final_success)
@@ -1464,11 +1512,11 @@ class RealDataLoader:
         all_data = list(all_data_dict.values())
         
         # ========== Step 7: 合并数据并计算因子（向量化优化版） ==========
-        print(f"\n[数据处理] 合并并计算因子（向量化优化版）...")
+        self._logger.info(f"\n[数据处理] 合并并计算因子（向量化优化版）...")
         step_start = time.time()
         
         combined = pd.concat(all_data, ignore_index=True)
-        print(f"  合并完成，总记录数: {len(combined)}")
+        self._logger.info(f"  合并完成，总记录数: {len(combined)}")
         
         # 日期筛选
         if need_fetch_start_date and existing_cache:
@@ -1476,21 +1524,21 @@ class RealDataLoader:
             incremental_start = pd.to_datetime(need_fetch_start_date) - timedelta(days=7)
             end_dt = pd.to_datetime(end_date)
             combined = combined[(combined['date'] >= incremental_start) & (combined['date'] <= end_dt)]
-            print(f"  增量模式日期筛选: {incremental_start.strftime('%Y-%m-%d')} ~ {end_date}")
-            print(f"  筛选后记录数: {len(combined)}")
+            self._logger.info(f"  增量模式日期筛选: {incremental_start.strftime('%Y-%m-%d')} ~ {end_date}")
+            self._logger.info(f"  筛选后记录数: {len(combined)}")
         else:
             # 全量模式：使用原始日期范围
             start_dt = pd.to_datetime(start_date)
             end_dt = pd.to_datetime(end_date)
             combined = combined[(combined['date'] >= start_dt) & (combined['date'] <= end_dt)]
-            print(f"  全量模式日期筛选: {start_date} ~ {end_date}")
-            print(f"  筛选后记录数: {len(combined)}")
+            self._logger.info(f"  全量模式日期筛选: {start_date} ~ {end_date}")
+            self._logger.info(f"  筛选后记录数: {len(combined)}")
         
         # ========== Step 7.1: 计算涨跌停价（用于后续动态过滤） ==========
         # 新策略：缓存完整数据，不在此处剔除异常股票
         # 异常股票的过滤移至 IC 计算、分层回测阶段动态执行
         
-        print(f"\n[数据状态预处理] 计算涨跌停价...")
+        self._logger.info(f"\n[数据状态预处理] 计算涨跌停价...")
         
         # 加载股票名称映射（用于后续判断 ST）
         code_to_name = {}
@@ -1501,9 +1549,9 @@ class RealDataLoader:
                     stock_cache = json.load(f)
                 stocks_list = stock_cache.get('stocks', [])
                 code_to_name = {s['code']: s['name'] for s in stocks_list}
-                print(f"  加载股票名称映射: {len(code_to_name)} 只股票")
+                self._logger.info(f"  加载股票名称映射: {len(code_to_name)} 只股票")
             except Exception as e:
-                print(f"  ⚠ 加载股票名称映射失败: {e}")
+                self._logger.warning(f"  ⚠ 加载股票名称映射失败: {e}")
         
         # 按股票分组排序
         combined = combined.sort_values(['asset', 'date'])
@@ -1522,7 +1570,7 @@ class RealDataLoader:
         # 缓存每只股票每日的交易状态信息
         # 包含：volume, close, prev_close, limit_up_price, limit_down_price
         
-        print(f"\n[状态缓存] 保存交易状态数据...")
+        self._logger.info(f"\n[状态缓存] 保存交易状态数据...")
         status_df = combined[['date', 'asset', 'volume', 'close', 'prev_close', 'limit_up_price', 'limit_down_price']].copy()
         
         # 格式化日期
@@ -1569,14 +1617,14 @@ class RealDataLoader:
             }
             
             self._save_cache_gzip(status_cache_path, status_cache_data)
-            print(f"  ✓ 状态缓存已保存: {status_cache_path}")
+            self._logger.info(f"  ✓ 状态缓存已保存: {status_cache_path}")
         
         # ========== Step 7.3: 保留完整数据（不再剔除异常股票） ==========
         # 新策略：缓存完整原始数据，异常股票在 IC 计算、分层回测时动态过滤
         
-        print(f"\n[数据缓存策略] 保留完整数据，异常股票将在后续动态过滤")
-        print(f"  当前数据量: {len(combined):,} 条")
-        print(f"  包含所有股票（含停牌、ST、涨停、跌停）")
+        self._logger.warning(f"\n[数据缓存策略] 保留完整数据，异常股票将在后续动态过滤")
+        self._logger.info(f"  当前数据量: {len(combined):,} 条")
+        self._logger.info(f"  包含所有股票（含停牌、ST、涨停、跌停）")
         
         # 注意：不再剔除异常股票，保留 prev_close, limit_up_price, limit_down_price
         # 这些列将在后续因子计算中被清理
@@ -1586,13 +1634,13 @@ class RealDataLoader:
         combined = combined.sort_values(['asset', 'date'])
         
         # 2. 向量化计算 RSI（使用 groupby + transform）
-        print(f"\n[因子计算] 计算 RSI(6)...")
+        self._logger.info(f"\n[因子计算] 计算 RSI(6)...")
         combined['rsi_6'] = combined.groupby('asset')['close'].transform(
-            lambda x: self._calculate_rsi_vectorized(x, period=6)
+            lambda x: calculate_rsi(x, period=6)
         )
         
         # 2.1. 向量化计算量比(5)（当日成交量 / 过去5日平均成交量）
-        print(f"  计算量比(5)...")
+        self._logger.info(f"  计算量比(5)...")
         combined['volume_ratio_5'] = combined.groupby('asset')['volume'].transform(
             lambda x: x / x.rolling(window=5).mean()
         )
@@ -1604,11 +1652,11 @@ class RealDataLoader:
         vr_min = combined['volume_ratio_5'].min()
         vr_max = combined['volume_ratio_5'].max()
         vr_mean = combined['volume_ratio_5'].mean()
-        print(f"  量比范围: [{vr_min:.2f}, {vr_max:.2f}]")
-        print(f"  量比均值: {vr_mean:.2f}")
+        self._logger.info(f"  量比范围: [{vr_min:.2f}, {vr_max:.2f}]")
+        self._logger.info(f"  量比均值: {vr_mean:.2f}")
         
         # 3. 向量化计算 forward_return
-        print(f"  计算前瞻收益...")
+        self._logger.info(f"  计算前瞻收益...")
         # 按股票分组计算收益率，然后 shift(-1) 得到前瞻收益
         combined['forward_return'] = combined.groupby('asset')['close'].transform(
             lambda x: x.pct_change().shift(-1)
@@ -1616,26 +1664,26 @@ class RealDataLoader:
         
         # 4. 去除缺失值（因子或收益缺失）
         valid_df = combined.dropna(subset=['rsi_6', 'volume_ratio_5', 'forward_return'])
-        print(f"  去除缺失值后记录数: {len(valid_df)}")
+        self._logger.info(f"  去除缺失值后记录数: {len(valid_df)}")
         
         # 5. 限制每只股票的数据范围
         if need_fetch_start_date and existing_cache:
             # 增量模式：只保留新增日期的数据（need_fetch_start_date 之后）
-            print(f"  增量模式: 只保留 {need_fetch_start_date} 之后的数据...")
+            self._logger.info(f"  增量模式: 只保留 {need_fetch_start_date} 之后的数据...")
             new_date_threshold = pd.to_datetime(need_fetch_start_date)
             valid_df = valid_df[valid_df['date'] >= new_date_threshold]
-            print(f"  增量数据记录数: {len(valid_df)}")
+            self._logger.info(f"  增量数据记录数: {len(valid_df)}")
         else:
             # 全量模式：限制每只股票最多保留 n_days 条数据
-            print(f"  全量模式: 限制每只股票最多 {n_days} 天数据...")
+            self._logger.info(f"  全量模式: 限制每只股票最多 {n_days} 天数据...")
             # pandas 3.0 兼容性修复：使用 cumcount 替代 groupby().apply(tail)
             # 避免 group_keys=False 导致分组列被移除
             valid_df['row_num'] = valid_df.groupby('asset').cumcount(ascending=False)
             valid_df = valid_df[valid_df['row_num'] < n_days].drop('row_num', axis=1)
-            print(f"  限制后记录数: {len(valid_df)}")
+            self._logger.info(f"  限制后记录数: {len(valid_df)}")
         
         # 6. 格式化输出（向量化）
-        print(f"  格式化输出...")
+        self._logger.info(f"  格式化输出...")
         valid_df['date'] = valid_df['date'].dt.strftime('%Y-%m-%d')
         valid_df['open'] = valid_df['open'].round(2)
         valid_df['close'] = valid_df['close'].round(2)
@@ -1656,18 +1704,18 @@ class RealDataLoader:
         gc.collect()
         
         step_elapsed = time.time() - step_start
-        print(f"  因子计算耗时: {step_elapsed:.2f} 秒")
+        self._logger.info(f"  因子计算耗时: {step_elapsed:.2f} 秒")
         
         # ========== Step 8: 保存缓存（增量合并） ==========
         if self.enable_cache and max_stocks == 0:
-            print(f"\n[缓存保存] 保存数据到缓存文件...")
+            self._logger.info(f"\n[缓存保存] 保存数据到缓存文件...")
             
             factor_cache_path = self._get_factor_cache_path()
             return_cache_path = self._get_return_cache_path()
             
             if existing_cache:
                 # 增量更新：合并现有数据和新数据
-                print(f"  增量更新模式: 合并现有数据和新数据")
+                self._logger.info(f"  增量更新模式: 合并现有数据和新数据")
                 factor_cache_data, return_cache_data = self._merge_cache_data(
                     existing_cache,
                     factor_df,
@@ -1712,8 +1760,8 @@ class RealDataLoader:
             
             # 显示合并/保存信息
             meta = factor_cache_data['meta']
-            print(f"  日期范围: {meta['date_range']['start']} ~ {meta['date_range']['end']}")
-            print(f"  交易日数: {meta['n_days']}, 股票数量: {meta['n_assets']}")
+            self._logger.info(f"  日期范围: {meta['date_range']['start']} ~ {meta['date_range']['end']}")
+            self._logger.info(f"  交易日数: {meta['n_days']}, 股票数量: {meta['n_assets']}")
             
             # 使用 gzip 压缩保存
             self._save_cache_gzip(factor_cache_path, factor_cache_data)
@@ -1721,84 +1769,18 @@ class RealDataLoader:
         
         dates = sorted(factor_df['date'].unique())
         assets = factor_df['asset'].unique()
-        print(f"\n{'='*60}")
-        print("数据加载完成")
-        print(f"{'='*60}")
-        print(f"  交易日数: {len(dates)}")
-        print(f"  股票数量: {len(assets)}")
-        print(f"  总记录数: {len(factor_df)}")
-        print(f"  日期范围: {dates[0]} ~ {dates[-1]}")
+        self._logger.info(f"\n{'='*60}")
+        self._logger.info(f"数据加载完成")
+        self._logger.info(f"{'='*60}")
+        self._logger.info(f"  交易日数: {len(dates)}")
+        self._logger.info(f"  股票数量: {len(assets)}")
+        self._logger.info(f"  总记录数: {len(factor_df)}")
+        self._logger.info(f"  日期范围: {dates[0]} ~ {dates[-1]}")
         
         return factor_df, return_df
     
-    def calculate_rsi(
-        self, 
-        close_prices: pd.Series, 
-        period: int = 6
-    ) -> pd.Series:
-        """计算 RSI 指标"""
-        return self._calculate_rsi_vectorized(close_prices, period)
-    
-    def _calculate_rsi_vectorized(
-        self,
-        close_prices: pd.Series,
-        period: int = 6
-    ) -> pd.Series:
-        """
-        向量化计算 RSI 指标
-        
-        使用 Wilder 标准（前 period 天 SMA 种子，之后 EWM 递推），
-        避免 Python 循环，提升性能。
-        
-        边界处理（遵循 Wilder 1978 标准）：
-        1. avg_loss=0 且 avg_gain>0 → RSI=100（超买）
-        2. avg_loss=0 且 avg_gain=0 → RSI=50（中性）
-        3. avg_loss>0 → 正常计算 RS
-        
-        注意：
-        - 使用模块级函数 _wilder_smoothing_rsi（可被单元测试覆盖）
-        - avg_loss 接近零时，直接除法会产生 inf，需分场景处理
-        - avg_loss 和 avg_gain 理论上非负，使用 .abs() 是防御性代码
-        - 使用模块级常量 EPSILON（定义在文件开头）
-        """
-        delta = close_prices.diff()
-        gain = delta.where(delta > 0, 0)
-        loss = (-delta).where(delta < 0, 0)
-        
-        # Wilder 标准 RSI 计算（调用模块级函数）
-        avg_gain = _wilder_smoothing_rsi(gain, period)
-        avg_loss = _wilder_smoothing_rsi(loss, period)
-        
-        # 边界处理：avg_loss 接近零时
-        # 防御性代码：使用 .abs() 防止数值误差产生负值
-        zero_loss_mask = avg_loss.notna() & (avg_loss.abs() < EPSILON)
-        zero_gain_mask = avg_gain.notna() & (avg_gain.abs() < EPSILON)
-        
-        # 同时为零：avg_gain=0 且 avg_loss=0 → RSI=50（中性）
-        both_zero_mask = zero_loss_mask & zero_gain_mask
-        
-        # 只有 avg_loss 接近零（avg_gain>0）→ RSI=100（超买）
-        only_zero_loss_mask = zero_loss_mask & ~zero_gain_mask
-        
-        # RS 计算（避免中间污染值）
-        # 边界判断统一使用 >= EPSILON（对齐 zero_loss_mask 的 < EPSILON）
-        safe_avg_loss = avg_loss.where(avg_loss >= EPSILON)
-        rs = avg_gain / safe_avg_loss
-        
-        # RSI 计算：直接赋值，无需 .where 冗余（rs 为 NaN 时，计算结果自动为 NaN）
-        rsi = 100 - (100 / (1 + rs))
-        
-        # 边界处理覆盖（必须在 RS 计算后）
-        rsi.loc[only_zero_loss_mask] = 100  # avg_loss=0, avg_gain>0 → 超买
-        rsi.loc[both_zero_mask] = 50         # avg_loss=0, avg_gain=0 → 中性
-        
-        # 处理缺失值和边界值
-        # 缺失值填充为中性值（遵循 MODULE.md 边界处理规范）
-        rsi = rsi.fillna(50)
-        # clip 确保范围在 0-100（计算误差可能导致越界）
-        rsi = rsi.clip(0, 100)
-        
-        return rsi
+    # NOTE: calculate_rsi 已迁移到 factor_calculator.py
+    # 如需计算 RSI，请使用：from data_fetchers.factor_calculator import calculate_rsi
     
     def _load_status_cache(self) -> Optional[dict]:
         """加载交易状态缓存"""
@@ -1849,14 +1831,14 @@ class RealDataLoader:
         Returns:
             (filtered_factor_df, filtered_return_df, filter_stats)
         """
-        print(f"\n[动态过滤异常股票] 开始处理...")
+        self._logger.warning(f"\n[动态过滤异常股票] 开始处理...")
         
         # 加载状态缓存
         if status_cache is None:
             status_cache = self._load_status_cache()
         
         if status_cache is None:
-            print(f"  ⚠ 交易状态缓存不存在，跳过动态过滤")
+            self._logger.warning(f"  ⚠ 交易状态缓存不存在，跳过动态过滤")
             return factor_df, return_df, {'total_removed': 0}
         
         # 加载股票名称映射
@@ -1866,7 +1848,7 @@ class RealDataLoader:
         # 从状态缓存构建 DataFrame
         status_records = status_cache.get('data', [])
         if not status_records:
-            print(f"  ⚠ 状态缓存数据为空，跳过动态过滤")
+            self._logger.warning(f"  ⚠ 状态缓存数据为空，跳过动态过滤")
             return factor_df, return_df, {'total_removed': 0}
         
         status_df = pd.DataFrame(status_records)
@@ -1877,7 +1859,7 @@ class RealDataLoader:
         
         # 合并因子和收益数据
         merged = pd.merge(factor_df, return_df, on=['date', 'asset'], how='inner')
-        print(f"  合并后数据量: {len(merged)} 条")
+        self._logger.info(f"  合并后数据量: {len(merged)} 条")
         
         # 合并状态信息
         merged_with_status = pd.merge(
@@ -1936,20 +1918,20 @@ class RealDataLoader:
         filter_stats['total_removed'] = original_count - len(merged_with_status)
         
         # 输出过滤统计
-        print(f"\n{'='*60}")
-        print("【动态过滤异常股票统计】")
-        print(f"{'='*60}")
-        print(f"  原始记录数:     {original_count:,}")
-        print(f"  过滤记录数:     {filter_stats['total_removed']:,}")
-        print(f"  剩余记录数:     {len(merged_with_status):,}")
-        print(f"  过滤比例:       {filter_stats['total_removed']/original_count*100:.2f}%")
-        print(f"")
-        print(f"  过滤明细:")
-        print(f"    停牌股票:     {filter_stats['suspended']:,} 条")
-        print(f"    ST股票:       {filter_stats['st_stocks']:,} 条")
-        print(f"    涨停股票:     {filter_stats['limit_up']:,} 条")
-        print(f"    跌停股票:     {filter_stats['limit_down']:,} 条")
-        print(f"{'='*60}")
+        self._logger.info(f"\n{'='*60}")
+        self._logger.warning(f"【动态过滤异常股票统计】")
+        self._logger.info(f"{'='*60}")
+        self._logger.info(f"  原始记录数:     {original_count:,}")
+        self._logger.info(f"  过滤记录数:     {filter_stats['total_removed']:,}")
+        self._logger.info(f"  剩余记录数:     {len(merged_with_status):,}")
+        self._logger.info(f"  过滤比例:       {filter_stats['total_removed']/original_count*100:.2f}%")
+        self._logger.info(f"")
+        self._logger.info(f"  过滤明细:")
+        self._logger.info(f"    停牌股票:     {filter_stats['suspended']:,} 条")
+        self._logger.info(f"    ST股票:       {filter_stats['st_stocks']:,} 条")
+        self._logger.info(f"    涨停股票:     {filter_stats['limit_up']:,} 条")
+        self._logger.info(f"    跌停股票:     {filter_stats['limit_down']:,} 条")
+        self._logger.info(f"{'='*60}")
         
         # 构建过滤后的因子和收益 DataFrame
         filtered_factor_df = merged_with_status[['date', 'asset', factor_col]].copy()
@@ -2016,9 +1998,9 @@ class RealDataLoader:
         Returns:
             IC DataFrame
         """
-        print(f"\n[计算 Rank IC] 基于 {factor_col} 因子...")
-        print(f"  动态过滤: {'启用' if enable_filter else '禁用'}")
-        print(f"  去极值: {'启用' if enable_winsorize else '禁用'}")
+        self._logger.info(f"\n[计算 Rank IC] 基于 {factor_col} 因子...")
+        self._logger.info(f"  动态过滤: {'启用' if enable_filter else '禁用'}")
+        self._logger.info(f"  去极值: {'启用' if enable_winsorize else '禁用'}")
         
         # 动态过滤异常股票
         if enable_filter:
@@ -2026,14 +2008,14 @@ class RealDataLoader:
                 factor_df, return_df, factor_col, return_col
             )
             if len(factor_df) == 0:
-                print("  ! 过滤后数据为空，无法计算 IC")
+                self._logger.warning(f"  ! 过滤后数据为空，无法计算 IC")
                 return pd.DataFrame()
         
         merged = pd.merge(factor_df, return_df, on=['date', 'asset'], how='inner')
         
         # 去极值处理（逐日进行）
         if enable_winsorize:
-            print(f"\n[去极值处理] 对每日因子值进行分位数法去极值...")
+            self._logger.info(f"\n[去极值处理] 对每日因子值进行分位数法去极值...")
             winsorize_stats_list = []
             
             # 对每一天的因子值独立进行去极值
@@ -2054,22 +2036,22 @@ class RealDataLoader:
             # 输出去极值统计信息
             total_truncated = winsorize_stats_df['total_truncated'].sum()
             avg_truncated = winsorize_stats_df['total_truncated'].mean()
-            print(f"\n{'='*60}")
-            print("【去极值统计信息】")
-            print(f"{'='*60}")
-            print(f"  总截断股票数: {total_truncated:,}")
-            print(f"  日均截断股票数: {avg_truncated:.1f}")
-            print(f"  日均截断比例: {avg_truncated / winsorize_stats_df['n_stocks'].mean() * 100:.2f}%")
-            print(f"  因子下界范围: [{winsorize_stats_df['lower_bound'].min():.2f}, {winsorize_stats_df['lower_bound'].max():.2f}]")
-            print(f"  因子上界范围: [{winsorize_stats_df['upper_bound'].min():.2f}, {winsorize_stats_df['upper_bound'].max():.2f}]")
-            print(f"{'='*60}")
+            self._logger.info(f"\n{'='*60}")
+            self._logger.info(f"【去极值统计信息】")
+            self._logger.info(f"{'='*60}")
+            self._logger.info(f"  总截断股票数: {total_truncated:,}")
+            self._logger.info(f"  日均截断股票数: {avg_truncated:.1f}")
+            self._logger.info(f"  日均截断比例: {avg_truncated / winsorize_stats_df['n_stocks'].mean() * 100:.2f}%")
+            self._logger.info(f"  因子下界范围: [{winsorize_stats_df['lower_bound'].min():.2f}, {winsorize_stats_df['lower_bound'].max():.2f}]")
+            self._logger.info(f"  因子上界范围: [{winsorize_stats_df['upper_bound'].min():.2f}, {winsorize_stats_df['upper_bound'].max():.2f}]")
+            self._logger.info(f"{'='*60}")
             
             # 使用去极值后的因子值计算 IC
             factor_col_for_ic = 'factor_winsorized'
         else:
             factor_col_for_ic = factor_col
         
-        print(f"\n  计算每日 IC...")
+        self._logger.info(f"\n  计算每日 IC...")
         
         ic_results = []
         
@@ -2091,7 +2073,7 @@ class RealDataLoader:
         ic_df = pd.DataFrame(ic_results)
         
         if len(ic_df) == 0:
-            print("  ! 无法计算 IC，数据不足")
+            self._logger.warning(f"  ! 无法计算 IC，数据不足")
             return pd.DataFrame()
         
         mean_ic = ic_df['ic'].mean()
@@ -2099,17 +2081,17 @@ class RealDataLoader:
         icir = mean_ic / std_ic if std_ic > 0 else 0
         positive_ratio = (ic_df['ic'] > 0).mean()
         
-        print(f"\n{'='*60}")
-        print("RSI(6) Rank IC 统计（去极值后）")
-        print(f"{'='*60}")
-        print(f"  样本日期数: {len(ic_df)}")
-        print(f"  平均 IC: {mean_ic:.4f}")
-        print(f"  IC 标准差: {std_ic:.4f}")
-        print(f"  ICIR: {icir:.4f}")
-        print(f"  IC > 0 比例: {positive_ratio:.2%}")
-        print(f"  IC 最大值: {ic_df['ic'].max():.4f}")
-        print(f"  IC 最小值: {ic_df['ic'].min():.4f}")
-        print(f"{'='*60}")
+        self._logger.info(f"\n{'='*60}")
+        self._logger.info(f"RSI(6) Rank IC 统计（去极值后）")
+        self._logger.info(f"{'='*60}")
+        self._logger.info(f"  样本日期数: {len(ic_df)}")
+        self._logger.info(f"  平均 IC: {mean_ic:.4f}")
+        self._logger.info(f"  IC 标准差: {std_ic:.4f}")
+        self._logger.info(f"  ICIR: {icir:.4f}")
+        self._logger.info(f"  IC > 0 比例: {positive_ratio:.2%}")
+        self._logger.info(f"  IC 最大值: {ic_df['ic'].max():.4f}")
+        self._logger.info(f"  IC 最小值: {ic_df['ic'].min():.4f}")
+        self._logger.info(f"{'='*60}")
         
         return ic_df
     
@@ -2243,7 +2225,7 @@ class RealDataLoader:
             stock_df = combined[combined['asset'] == asset].copy()
             stock_df = stock_df.sort_values('date')
             
-            stock_df['rsi_6'] = self.calculate_rsi(stock_df['close'], period=6)
+            stock_df['rsi_6'] = calculate_rsi(stock_df['close'], period=6)
             # 计算量比(5)
             stock_df['volume_ratio_5'] = stock_df['volume'] / stock_df['volume'].rolling(window=5).mean()
             stock_df['volume_ratio_5'] = stock_df['volume_ratio_5'].fillna(1.0)
@@ -2287,299 +2269,16 @@ class RealDataLoader:
         return factor_df, return_df, stats
 
 
-def load_real_data(
-    n_days: int = 250,
-    max_stocks: int = 0,
-    max_workers: int = 2,
-    calculate_ic: bool = True,
-    use_mock: bool = False,
-    use_local: bool = False,
-    enable_complement: bool = True
-) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[pd.DataFrame]]:
-    """
-    分批并发加载真实数据（避免API限流 + 数据完整性保障）
-    
-    并发策略：
-    - 每批次2个线程并行
-    - 每线程处理50只股票（默认）
-    - 批次间串行执行，间隔2秒
-    
-    完整性保障：
-    - 每日缓存股票清单
-    - 获取完成后完整性校验
-    - 自动补全缺失股票
-    - 最终验证输出统计
-    
-    股票范围：
-    - 沪市主板：60开头
-    - 深市主板：00开头
-    - 剔除：创业板(30)、科创板(688)、北交所、ST股票
-    - 总数：约3000+只
-    
-    Args:
-        n_days: 交易日数量
-        max_stocks: 最大股票数量（0表示获取全部主板股票，约3000+只）
-        max_workers: 已废弃，现使用固定分批策略
-        calculate_ic: 是否计算 Rank IC
-        use_mock: 使用模拟数据
-        use_local: 使用本地数据
-        enable_complement: 是否启用补全机制（默认True）
-        
-    Returns:
-        (factor_df, return_df, ic_df)
-    """
-    loader = RealDataLoader(
-        max_workers=max_workers,
-        use_mock=use_mock,
-        use_local=use_local
-    )
-    factor_df, return_df = loader.load_data(
-        n_days=n_days, 
-        max_stocks=max_stocks,
-        enable_complement=enable_complement
-    )
-    
-    ic_df = None
-    if calculate_ic:
-        ic_df = loader.calculate_rank_ic(factor_df, return_df)
-    
-    return factor_df, return_df, ic_df
-
-
-def load_factor_light(
-    factor_col: str = 'rsi_6',
-    max_days: int = 500,
-    use_category: bool = True
-) -> Optional[pd.DataFrame]:
-    """
-    轻量级因子数据加载（只加载特定因子）
-    
-    内存优化策略：
-    1. 只加载必要列（date, asset, factor_col）
-    2. 使用 category 类型优化内存
-    3. 支持限制天数
-    
-    Args:
-        factor_col: 因子列名（如 'rsi_6', 'volume_ratio_5', 'return_3d'）
-        max_days: 最大加载天数（默认 500）
-        use_category: 是否使用 category 类型（默认 True）
-        
-    Returns:
-        只包含指定因子的 DataFrame，或 None（缓存不存在）
-    """
-    import gc
-    
-    cache_dir = Path('/home/admin/projects/factor_ic_analyzer/cache/factor_data')
-    factor_path = cache_dir / 'factor_data.json.gz'
-    
-    if not factor_path.exists():
-        print(f"[轻量加载] 缓存文件不存在: {factor_path}")
-        return None
-    
-    try:
-        print(f"[轻量加载] 加载因子 {factor_col}（最近 {max_days} 天）...")
-        
-        with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
-            factor_data = json.load(f)
-        
-        # 提取所有日期
-        all_dates = sorted(set(r.get('date') for r in factor_data.get('data', [])))
-        
-        # 只保留最近 max_days 天
-        if len(all_dates) > max_days:
-            recent_dates = set(all_dates[-max_days:])
-            # 只提取必要列
-            factor_records = [
-                {'date': r['date'], 'asset': r['asset'], factor_col: r.get(factor_col)}
-                for r in factor_data.get('data', []) if r.get('date') in recent_dates
-            ]
-        else:
-            factor_records = [
-                {'date': r['date'], 'asset': r['asset'], factor_col: r.get(factor_col)}
-                for r in factor_data.get('data', [])
-            ]
-        
-        # 释放中间变量
-        del factor_data, all_dates
-        if 'recent_dates' in dir():
-            del recent_dates
-        gc.collect()
-        
-        # 构建 DataFrame
-        factor_df = pd.DataFrame(factor_records)
-        del factor_records
-        gc.collect()
-        
-        # 过滤无效数据
-        factor_df = factor_df.dropna(subset=[factor_col])
-        
-        # 使用 category 类型优化内存
-        if use_category:
-            factor_df['date'] = factor_df['date'].astype('category')
-            factor_df['asset'] = factor_df['asset'].astype('category')
-        
-        # 输出内存占用
-        mem_mb = factor_df.memory_usage(deep=True).sum() / 1024 / 1024
-        print(f"[轻量加载] factor_df: {len(factor_df)} 行, {mem_mb:.2f} MB")
-        
-        return factor_df
-        
-    except Exception as e:
-        print(f"[轻量加载] 加载失败: {e}")
-        return None
-
-
-def load_return_light(
-    max_days: int = 500,
-    use_category: bool = True,
-    return_col: str = 'forward_return_1d'
-) -> Optional[pd.DataFrame]:
-    """
-    轻量级收益数据加载（只加载必要列）
-    
-    内存优化策略：
-    1. 只加载必要列（date, asset, return_col）
-    2. 使用 category 类型优化内存
-    3. 支持限制天数
-    
-    Args:
-        max_days: 最大加载天数（默认 500）
-        use_category: 是否使用 category 类型（默认 True）
-        return_col: 收益列名（默认 'forward_return_1d'）
-        
-    Returns:
-        只包含必要列的 DataFrame，或 None（缓存不存在）
-    """
-    import gc
-    
-    cache_dir = Path('/home/admin/projects/factor_ic_analyzer/cache/factor_data')
-    return_path = cache_dir / 'return_data.json.gz'
-    
-    if not return_path.exists():
-        print(f"[轻量加载] 缓存文件不存在: {return_path}")
-        return None
-    
-    try:
-        print(f"[轻量加载] 加载收益数据（最近 {max_days} 天）...")
-        
-        with gzip.open(return_path, 'rt', encoding='utf-8') as f:
-            return_data = json.load(f)
-        
-        # 提取所有日期（从因子数据缓存获取）
-        factor_path = cache_dir / 'factor_data.json.gz'
-        all_dates = []
-        if factor_path.exists():
-            with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
-                factor_data = json.load(f)
-            all_dates = sorted(set(r.get('date') for r in factor_data.get('data', [])))
-            del factor_data
-        
-        # 只保留最近 max_days 天
-        if len(all_dates) > max_days:
-            recent_dates = set(all_dates[-max_days:])
-            return_records = [
-                {'date': r['date'], 'asset': r['asset'], return_col: r.get(return_col)}
-                for r in return_data.get('data', []) if r.get('date') in recent_dates
-            ]
-        else:
-            return_records = [
-                {'date': r['date'], 'asset': r['asset'], return_col: r.get(return_col)}
-                for r in return_data.get('data', [])
-            ]
-        
-        # 释放中间变量
-        del return_data, all_dates
-        if 'recent_dates' in dir():
-            del recent_dates
-        gc.collect()
-        
-        # 构建 DataFrame
-        return_df = pd.DataFrame(return_records)
-        del return_records
-        gc.collect()
-        
-        # 过滤无效数据
-        return_df = return_df.dropna(subset=[return_col])
-        
-        # 使用 category 类型优化内存
-        if use_category:
-            return_df['date'] = return_df['date'].astype('category')
-            return_df['asset'] = return_df['asset'].astype('category')
-        
-        # 列名兼容性映射
-        if return_col == 'forward_return_1d' and 'forward_return' not in return_df.columns:
-            return_df['forward_return'] = return_df['forward_return_1d']
-        
-        # 输出内存占用
-        mem_mb = return_df.memory_usage(deep=True).sum() / 1024 / 1024
-        print(f"[轻量加载] return_df: {len(return_df)} 行, {mem_mb:.2f} MB")
-        
-        return return_df
-        
-    except Exception as e:
-        print(f"[轻量加载] 加载失败: {e}")
-        return None
-
-
-def load_cached_data_combined_light(
-    factor_col: str = 'rsi_6',
-    max_days: int = 500,
-    use_category: bool = True
-) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
-    """
-    轻量级组合加载（因子 + 收益）
-    
-    内存优化策略：
-    1. 分别轻量加载因子和收益
-    2. 只加载必要列
-    3. 使用 category 类型
-    
-    Args:
-        factor_col: 因子列名（默认 'rsi_6'）
-        max_days: 最大加载天数（默认 500）
-        use_category: 是否使用 category 类型（默认 True）
-        
-    Returns:
-        (factor_df, return_df) 或 (None, None)
-    """
-    import gc
-    
-    # 轻量加载因子
-    factor_df = load_factor_light(factor_col, max_days, use_category)
-    
-    # 轻量加载收益
-    return_df = load_return_light(max_days, use_category)
-    
-    if factor_df is None or return_df is None:
-        return None, None
-    
-    # 输出总内存
-    factor_mem = factor_df.memory_usage(deep=True).sum() / 1024 / 1024
-    return_mem = return_df.memory_usage(deep=True).sum() / 1024 / 1024
-    print(f"[轻量加载] 总内存: {factor_mem + return_mem:.2f} MB")
-    
-    return factor_df, return_df
-
-
-if __name__ == '__main__':
-    print("测试多线程真实数据加载器...")
-    print("=" * 60)
-    
-    # 全量数据加载（保存缓存）
-    factor_df, return_df, ic_df = load_real_data(
-        n_days=250,
-        max_stocks=0,  # 0表示全量获取
-        max_workers=8,
-        calculate_ic=True,
-        use_mock=True
-    )
-    
-    print("\n因子数据预览:")
-    print(factor_df.head(10))
-    
-    print("\n收益数据预览:")
-    print(return_df.head(10))
-    
-    if ic_df is not None:
-        print("\nIC 数据预览:")
-        print(ic_df.head(10))
+# ============================================================================
+# 模块级函数已移除（不再使用）
+# ============================================================================
+# NOTE: 以下模块级函数已废弃，不再被外部调用：
+# - load_real_data
+# - load_factor_light
+# - load_return_light
+# - load_cached_data_combined_light
+# 
+# 如需加载因子数据，请使用：
+# - fetch_factor_cache.py（批量获取因子）
+# - factor_generator.py（计算因子）
+# ============================================================================
