@@ -14,6 +14,19 @@
 - 公共模块函数接收 logger 参数
 - 函数入口必须先 .copy()，避免修改原始数据
 
+版本历史：
+- v1.0 (2026-05-27): 初始版本
+  - 导入分组规范化（标准库/第三方库/类型导入）
+  - logger 参数化（使用 logger_arg 命名）
+  - __all__ 修复（移除私有函数）
+  - docstring Example 补全（6个公共函数）
+  - 流程文档创建 docs/factor_calculator_flow.md
+  - 测试文件创建 test_cases/test_factor_calculator.py
+- v1.1 (2026-05-27): 第二轮深度优化
+  - 版本历史添加（参考 cache_manager.py）
+  - 常量命名私有化 DEFAULT_* → _DEFAULT_*
+  - __all__ 移到导入后位置（遵循 cache_manager.py 规范）
+
 作者: 云瑶
 创建日期: 2026-05-27
 """
@@ -32,21 +45,35 @@ import numpy as np
 # ============================================================================
 # 类型导入
 # ============================================================================
-from typing import Optional, Any
+from typing import Optional
+
+# ============================================================================
+# 模块导出（遵循 MODULE.md 约束 60：不含私有名称）
+# ============================================================================
+__all__ = [
+    'EPSILON',
+    'calculate_rsi',
+    'calculate_volume_ratio',
+    'calculate_forward_return',
+    'calculate_bollinger_pb',
+    'calculate_kdj_j',
+    'calculate_turnover_surge',
+    'get_module_logger',
+]
 
 # ============================================================================
 # 模块级常量
 # ============================================================================
 EPSILON = 1e-10  # 避免除零阈值
 
-# 默认参数
-DEFAULT_RSI_PERIOD = 6
-DEFAULT_BOLLINGER_N = 20
-DEFAULT_BOLLINGER_K = 2.0
-DEFAULT_KDJ_N = 9
-DEFAULT_KDJ_M1 = 3
-DEFAULT_KDJ_M2 = 3
-DEFAULT_SURGE_WINDOW = 5
+# 默认参数（私有常量，遵循 cache_manager.py 规范）
+_DEFAULT_RSI_PERIOD = 6
+_DEFAULT_BOLLINGER_N = 20
+_DEFAULT_BOLLINGER_K = 2.0
+_DEFAULT_KDJ_N = 9
+_DEFAULT_KDJ_M1 = 3
+_DEFAULT_KDJ_M2 = 3
+_DEFAULT_SURGE_WINDOW = 5
 
 # ============================================================================
 # 模块级 fallback logger（遵循 PROJECT.md 公共模块日志规范）
@@ -136,7 +163,7 @@ def _wilder_smoothing_rsi(series: pd.Series, n: int) -> pd.Series:
 
 def calculate_rsi(
     close_prices: pd.Series,
-    period: int = DEFAULT_RSI_PERIOD
+    period: int = _DEFAULT_RSI_PERIOD
 ) -> pd.Series:
     """
     向量化计算 RSI 指标
@@ -288,8 +315,8 @@ def calculate_forward_return(
 
 def calculate_bollinger_pb(
     factor_df: pd.DataFrame,
-    n: int = DEFAULT_BOLLINGER_N,
-    k: float = DEFAULT_BOLLINGER_K,
+    n: int = _DEFAULT_BOLLINGER_N,
+    k: float = _DEFAULT_BOLLINGER_K,
     logger_arg: Optional[logging.Logger] = None
 ) -> pd.DataFrame:
     """
@@ -400,9 +427,9 @@ def _calculate_ewm_with_initial(
 
 def calculate_kdj_j(
     factor_df: pd.DataFrame,
-    n: int = DEFAULT_KDJ_N,
-    m1: int = DEFAULT_KDJ_M1,
-    m2: int = DEFAULT_KDJ_M2,
+    n: int = _DEFAULT_KDJ_N,
+    m1: int = _DEFAULT_KDJ_M1,
+    m2: int = _DEFAULT_KDJ_M2,
     logger_arg: Optional[logging.Logger] = None
 ) -> pd.DataFrame:
     """
@@ -490,7 +517,7 @@ def calculate_kdj_j(
 
 def calculate_turnover_surge(
     factor_df: pd.DataFrame,
-    surge_window: int = DEFAULT_SURGE_WINDOW,
+    surge_window: int = _DEFAULT_SURGE_WINDOW,
     logger_arg: Optional[logging.Logger] = None
 ) -> pd.DataFrame:
     """
@@ -575,18 +602,3 @@ def calculate_turnover_surge(
     factor_df['turnover_surge'] = turnover_surge
     
     return factor_df
-
-
-# ============================================================================
-# 模块导出（遵循 MODULE.md 约束 60：不含私有名称）
-# ============================================================================
-__all__ = [
-    'EPSILON',
-    'calculate_rsi',
-    'calculate_volume_ratio',
-    'calculate_forward_return',
-    'calculate_bollinger_pb',
-    'calculate_kdj_j',
-    'calculate_turnover_surge',
-    'get_module_logger',
-]
