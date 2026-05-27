@@ -13,6 +13,10 @@
 - 使用 Python 标准库 logging 模块
 - 公共模块函数接收 logger 参数
 
+版本历史：
+- v1.0 (2026-05-27): 初始版本，创建 BatchStream 类、save_batch_cache_sorted、
+    n_way_merge_deduplicate、format_final_output、cleanup_batch_files
+
 作者: 云瑶
 创建日期: 2026-05-27
 """
@@ -156,7 +160,7 @@ def save_batch_cache_sorted(
     factor_df: pd.DataFrame,
     return_df: pd.DataFrame,
     result_dir: Path = None,
-    logger: logging.Logger = None
+    logger_arg: logging.Logger = None
 ) -> None:
     """
     保存单批次数据到临时文件（预先排序，流式写入）
@@ -166,9 +170,9 @@ def save_batch_cache_sorted(
         factor_df: 因子数据DataFrame，包含 date/asset/open/close/high/low/rsi_6/volume_ratio_5
         return_df: 收益数据DataFrame，包含 date/asset/forward_return_1d/3d/5d
         result_dir: 结果目录（可选）
-        logger: 日志记录器
+        logger_arg: 日志记录器（遵循 MODULE.md 约束 77）
     """
-    logger = logger or logging.getLogger(__name__)
+    _logger = logger_arg or logging.getLogger(__name__)
     _result_dir = result_dir or RESULT_DIR
     
     factor_path = _result_dir / f'batch_{batch_idx}_factor.json.gz'
@@ -189,7 +193,7 @@ def save_batch_cache_sorted(
     return_df = return_df.sort_values(['date', 'asset']).reset_index(drop=True)
     
     # 流式写入因子数据
-    logger.info("  保存因子数据...")
+    _logger.info("  保存因子数据...")
     with gzip.open(factor_path, 'wt', encoding='utf-8') as f:
         f.write('[\n')
         for i, row in enumerate(factor_df.itertuples(index=False)):
@@ -209,7 +213,7 @@ def save_batch_cache_sorted(
         f.write('\n]')
     
     # 流式写入收益数据
-    logger.info("  保存收益数据...")
+    _logger.info("  保存收益数据...")
     with gzip.open(return_path, 'wt', encoding='utf-8') as f:
         f.write('[\n')
         for i, row in enumerate(return_df.itertuples(index=False)):
@@ -228,8 +232,8 @@ def save_batch_cache_sorted(
     factor_size_mb = factor_path.stat().st_size / (1024 * 1024)
     return_size_mb = return_path.stat().st_size / (1024 * 1024)
     
-    logger.info(f"  ✓ 保存批次 {batch_idx}: 因子 {factor_size_mb:.2f}MB, 收益 {return_size_mb:.2f}MB")
-    logger.info(f"  当前内存: {get_memory_info_str()}")
+    _logger.info(f"  ✓ 保存批次 {batch_idx}: 因子 {factor_size_mb:.2f}MB, 收益 {return_size_mb:.2f}MB")
+    _logger.info(f"  当前内存: {get_memory_info_str()}")
     
     del factor_df, return_df
     gc.collect()
@@ -243,7 +247,7 @@ def n_way_merge_deduplicate(
     total_batches: int,
     data_type: str = 'factor',
     result_dir: Path = None,
-    logger: logging.Logger = None
+    logger_arg: logging.Logger = None
 ) -> Path | None:
     """
     N-way merge 合并已排序的批次数据，去重
@@ -252,16 +256,16 @@ def n_way_merge_deduplicate(
         total_batches: 总批次数
         data_type: 数据类型（'factor' 或 'return'）
         result_dir: 结果目录（可选）
-        logger: 日志记录器
+        logger_arg: 日志记录器（遵循 MODULE.md 约束 77）
     
     Returns:
         Path | None: 输出文件路径（无有效数据时返回 None）
     """
-    logger = logger or logging.getLogger(__name__)
+    _logger = logger_arg or logging.getLogger(__name__)
     _result_dir = result_dir or RESULT_DIR
     
-    logger.info(f"[{data_type}] 开始 N-way merge...")
-    logger.info(f"  当前内存: {get_memory_info_str()}")
+    _logger.info(f"[{data_type}] 开始 N-way merge...")
+    _logger.info(f"  当前内存: {get_memory_info_str()}")
     
     # 创建所有批次的流
     streams = []
@@ -273,10 +277,10 @@ def n_way_merge_deduplicate(
                 streams.append(stream)
     
     if not streams:
-        logger.info("  无有效批次")
+        _logger.info("  无有效批次")
         return None
     
-    logger.info(f"  有效批次: {len(streams)}/{total_batches}")
+    _logger.info(f"  有效批次: {len(streams)}/{total_batches}")
     
     # N-way merge 使用 heap
     counter = 0
@@ -293,7 +297,7 @@ def n_way_merge_deduplicate(
     same_key_records = []
     count = 0
     
-    logger.info("  开始合并...")
+    _logger.info("  开始合并...")
     
     with gzip.open(output_path, 'wt', encoding='utf-8') as f:
         f.write('[\n')
@@ -312,7 +316,7 @@ def n_way_merge_deduplicate(
                     
                     if count % 50000 == 0:
                         gc.collect()
-                        logger.info(f"    已写入 {count} 条，内存: {get_memory_info_str()}")
+                        _logger.info(f"    已写入 {count} 条，内存: {get_memory_info_str()}")
                 
                 last_key = key
                 same_key_records = [(batch_idx, record)]
@@ -329,9 +333,9 @@ def n_way_merge_deduplicate(
         
         f.write('\n]')
     
-    logger.info(f"  合并完成: {count} 条记录")
-    logger.info(f"  输出文件: {output_path}")
-    logger.info(f"  当前内存: {get_memory_info_str()}")
+    _logger.info(f"  合并完成: {count} 条记录")
+    _logger.info(f"  输出文件: {output_path}")
+    _logger.info(f"  当前内存: {get_memory_info_str()}")
     
     for stream in streams:
         stream.cleanup()

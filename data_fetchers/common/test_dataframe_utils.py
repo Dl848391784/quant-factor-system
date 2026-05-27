@@ -9,6 +9,7 @@ DataFrame 工具模块测试用例
 版本历史:
 - v1.0 (2026-05-27): 首次创建，覆盖正常/异常/边界场景
 - v1.1 (2026-05-27): 导入顺序PEP8规范化，测试日志命名合规化
+- v1.2 (2026-05-27): 新增 TC009/TC010 测试边界（df_name空字符串、列名大小写敏感）
 """
 
 # 标准库导入
@@ -111,6 +112,27 @@ class TestValidateDataframeColumns:
         
         # 多余列不影响校验
         validate_dataframe_columns(df, ['date', 'close'], 'stock_data')
+    
+    def test_df_name_empty_string(self):
+        """TC009: 边界场景 - df_name 参数为空字符串"""
+        df = pd.DataFrame({'date': ['2024-01-01'], 'close': [100.0]})
+        
+        # df_name 为空字符串是允许的，错误信息中会显示空字符串
+        validate_dataframe_columns(df, ['date', 'close'], '')
+    
+    def test_column_name_case_sensitive(self):
+        """TC010: 列名大小写敏感 - 列名大小写不匹配视为缺失"""
+        df = pd.DataFrame({
+            'Date': ['2024-01-01'],  # 大写 D
+            'close': [100.0]
+        })
+        
+        with pytest.raises(ValueError) as exc_info:
+            validate_dataframe_columns(df, ['date', 'close'], 'stock_data')  # 小写 d
+        
+        error_msg = str(exc_info.value)
+        # 验证大小写敏感，'date' 应在缺失列表中
+        assert "date" in error_msg.lower()  # 错误信息中应包含缺失列名
 
 
 if __name__ == '__main__':
