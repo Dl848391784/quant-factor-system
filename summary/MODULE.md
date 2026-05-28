@@ -292,3 +292,15 @@ rsi                -0.045     0.51      0.089       498
    - 简化排序逻辑（backtest_sorted 使用字典映射代替 index() 查找）
    - 函数拆分重构（新增 _generate_ic_section/_generate_backtest_section/_generate_composite_section/_generate_comparison_section）
    - generate_report 从约146行缩减到约60行，职责更清晰
+
+7. v1.6（2026-05-28）：
+   - merge_factors.py 研发规范优化（v1.0 → v1.1）
+   - 添加 __version__ 常量和版本历史
+   - 添加导入分组注释（标准库/第三方）
+   - 创建 setup_logger 函数，替换 basicConfig
+   - 重构路径配置，使用 PROJECT_ROOT 和 DATA_PATHS
+   - 补充函数返回类型注解（load_main_data/load_parquet_factor/merge_factors → Optional[pd.DataFrame]）
+   - 补全 docstring（Args/Returns）
+   - 添加异常处理（gzip.BadGzipFile/json.JSONDecodeError/OSError）
+   - 添加魔法数字注释说明（total_factors = columns - 2）
+   - 创建 pytest 测试文件 test_cases/test_merge_factors.py（20个测试用例）
