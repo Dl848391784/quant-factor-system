@@ -27,7 +27,7 @@
     v1.6: 2026-05-28 第五轮深度审查：修复10个问题（因子名清洗、单位转换注释、异常精确化、采样偏差警告、剔除原因推断、数据加载保护、对比展示逻辑、文件写入异常、窗口参数读取、总耗时日志）
 """
 
-__version__ = '1.7'
+__version__ = '1.8'
 __author__ = 'factor_ic_analyzer'
 
 # 标准库导入
@@ -542,12 +542,16 @@ def _extract_corr_pairs(corr_matrix: pd.DataFrame, factor_names: List[str],
     return pairs
 
 
-def generate_correlation_section(corr_matrix: Optional[pd.DataFrame], ic_results: List[Dict]) -> List[str]:
+def generate_correlation_section(corr_matrix: Optional[pd.DataFrame], ic_results: List[Dict], selection_result: Optional[Dict] = None) -> List[str]:
     """生成因子相关性部分
     
+    v1.8 (2026-05-28): 新增 selection_result 参数，显示筛选时发现的高相关因子对，
+                       解决"选中因子矩阵无高相关"与"筛选结果显示高相关剔除"的矛盾
+    
     Args:
-        corr_matrix: 因子相关性矩阵（可为 None）
+        corr_matrix: 因子相关性矩阵（仅选中因子，可为 None）
         ic_results: IC 结果列表（用于排序因子名）
+        selection_result: 筛选详细结果（包含 high_corr_dropped 字段）
         
     Returns:
         报告文本行列表
@@ -569,6 +573,10 @@ def generate_correlation_section(corr_matrix: Optional[pd.DataFrame], ic_results
     lines.append("三、因子相关性矩阵")
     lines.append("-" * 70)
     
+    # 说明：此矩阵仅显示选中因子
+    if factor_names:
+        lines.append(f"（选中因子相关性矩阵，共 {len(factor_names)} 个因子）")
+    
     # 表头
     header = f"{'因子':<12}"
     for name in factor_names:
@@ -586,24 +594,34 @@ def generate_correlation_section(corr_matrix: Optional[pd.DataFrame], ic_results
     
     lines.append("-" * 70)
     
-    # 高相关因子对（使用辅助函数）
+    # 选中因子之间的高相关因子对
     high_corr_pairs = _extract_corr_pairs(corr_matrix, factor_names, CORR_THRESHOLD_HIGH, CORR_MAX)
     
     if high_corr_pairs:
-        lines.append(f"高相关因子对（|corr| > {CORR_THRESHOLD_HIGH:.1f}，建议剔除其中一个）：")
+        lines.append(f"选中因子中高相关因子对（|corr| > {CORR_THRESHOLD_HIGH:.1f}，建议剔除其中一个）：")
         for pair in high_corr_pairs:
             lines.append(f"  - {pair[0]} vs {pair[1]}: {format_float(pair[2], 2)}")
     else:
-        lines.append(f"无高相关因子对（所有因子相关性 < {CORR_THRESHOLD_HIGH:.1f}）")
+        lines.append(f"选中因子中无高相关因子对（所有因子相关性 < {CORR_THRESHOLD_HIGH:.1f}）")
     
-    # 中等相关因子对（使用辅助函数）
+    # 中等相关因子对
     med_corr_pairs = _extract_corr_pairs(corr_matrix, factor_names, CORR_THRESHOLD_MEDIUM, CORR_THRESHOLD_HIGH)
     
     if med_corr_pairs:
         lines.append("")
-        lines.append(f"中等相关因子对（{CORR_THRESHOLD_MEDIUM:.1f} < |corr| <= {CORR_THRESHOLD_HIGH:.1f}）：")
+        lines.append(f"选中因子中中等相关因子对（{CORR_THRESHOLD_MEDIUM:.1f} < |corr| <= {CORR_THRESHOLD_HIGH:.1f}）：")
         for pair in med_corr_pairs:
             lines.append(f"  - {pair[0]} vs {pair[1]}: {format_float(pair[2], 2)}")
+    
+    # v1.8: 显示筛选过程中发现的高相关因子对
+    if selection_result:
+        high_corr_dropped = selection_result.get('high_corr_dropped', {})
+        if high_corr_dropped:
+            lines.append("")
+            lines.append("=" * 70)
+            lines.append("筛选过程中发现的高相关因子对（已剔除）：")
+            for factor_name, reason in high_corr_dropped.items():
+                lines.append(f"  - {factor_name}: {reason}")
     
     lines.append("-" * 70)
     
@@ -977,7 +995,14 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     lines.extend(_generate_backtest_section(ic_results, backtest_results))
     
     # 第三部分：因子相关性矩阵
-    lines.extend(generate_correlation_section(corr_matrix, ic_results))
+    # v1.8: 从 composite_results 提取 selection_result
+    selection_result = None
+    if composite_results:
+        for item in composite_results:
+            if item.get('weight_method') == 'icir_weight':
+                selection_result = item.get('selection_result')
+                break
+    lines.extend(generate_correlation_section(corr_matrix, ic_results, selection_result))
     
     # 第四部分：因子筛选结果
     lines.append("")

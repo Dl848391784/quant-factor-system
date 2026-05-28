@@ -40,7 +40,7 @@ class TestVersion:
     
     def test_version_defined(self):
         """验证版本常量存在"""
-        assert __version__ == '1.7'
+        assert __version__ == '1.8'
 
 
 class TestHelperFunctions:
