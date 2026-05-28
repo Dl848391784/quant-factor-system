@@ -308,8 +308,10 @@ def identify_high_corr_groups(
     corr_matrix: pd.DataFrame,
     threshold: Optional[float] = None,
     logger: Optional[logging.Logger] = None
-) -> List[List[str]]:
+) -> Tuple[List[List[str]], List[Tuple[str, str, float]]]:
     """识别高相关因子组
+    
+    v2.5 (2026-05-28): 返回 (groups, high_corr_pairs)，保存相关系数值供下游使用
     
     使用 Union-Find（并查集）算法识别高相关因子组。
     正确处理跨组合并（A-B, B-C, C-D 应合并为一个大组）。
@@ -321,8 +323,9 @@ def identify_high_corr_groups(
         logger: 日志对象
     
     Returns:
-        高相关因子组列表
-        [['rsi', 'bollinger_pb', 'kdj_j'], ['volume_ratio', 'turnover_surge']]
+        (高相关因子组列表, 高相关因子对列表)
+        groups: [['rsi', 'bollinger_pb', 'kdj_j'], ['volume_ratio', 'turnover_surge']]
+        high_corr_pairs: [('rsi', 'bollinger_pb', 0.85), ...]
     
     Algorithm:
         使用 Union-Find 算法：
@@ -362,7 +365,7 @@ def identify_high_corr_groups(
         
         if len(factor_names) == 0:
             logger.error("所有因子都不在相关性矩阵中，返回空组")
-            return []
+            return [], []  # v2.5: 返回 tuple
     
     # Union-Find 数据结构
     parent = {name: name for name in factor_names}  # 每个因子初始指向自己
@@ -415,20 +418,25 @@ def identify_high_corr_groups(
     
     logger.info("高相关因子组: %d 组（共 %d 对高相关）", len(groups), len(high_corr_pairs))
     
-    return groups
+    # v2.5: 返回 (groups, high_corr_pairs)，保存相关系数值
+    return groups, high_corr_pairs
 
 
 def select_best_from_groups(
     high_corr_groups: List[List[str]],
+    high_corr_pairs: List[Tuple[str, str, float]],
     valid_factors: Dict[str, Dict],
     logger: Optional[logging.Logger] = None
 ) -> Tuple[List[str], Dict[str, str]]:
     """从高相关组中选择最优因子
     
+    v2.5 (2026-05-28): 新增 high_corr_pairs 参数，在剔除原因中包含具体相关系数
+    
     保留规则：组内保留 |ICIR| 最高的因子
     
     Args:
         high_corr_groups: 高相关因子组
+        high_corr_pairs: 高相关因子对列表（含相关系数）
         valid_factors: 有效因子数据
         logger: 日志对象
     
@@ -441,6 +449,12 @@ def select_best_from_groups(
     """
     if logger is None:
         logger = get_logger(__name__)
+    
+    # v2.5: 构建相关系数查找表 {(factor_a, factor_b): corr_value}
+    corr_lookup: Dict[Tuple[str, str], float] = {}
+    for fa, fb, corr in high_corr_pairs:
+        corr_lookup[(fa, fb)] = corr
+        corr_lookup[(fb, fa)] = corr  # 双向查找
     
     # 修复：使用 set 替代 list，避免 O(n²) 复杂度
     # list.remove() + in 检查 都是 O(n)，嵌套循环总体 O(n²)
@@ -479,7 +493,10 @@ def select_best_from_groups(
                 if factor_name != best_factor and factor_name in selected_factors_set:
                     # 修复：使用 discard 替代 remove（O(1) vs O(n)）
                     selected_factors_set.discard(factor_name)
-                    dropped_factors[factor_name] = f"与{best_factor}高相关，icir 缺失无法比较"
+                    # v2.5: 包含相关系数
+                    corr_val = corr_lookup.get((factor_name, best_factor), None)
+                    corr_str = f"corr={corr_val:.2f}" if corr_val is not None else ""
+                    dropped_factors[factor_name] = f"与{best_factor}高相关({corr_str}), icir缺失无法比较"
         else:
             # 找出 ICIR 最高的因子（只比较有 icir 的因子）
             best_factor = max(valid_icir_values.keys(), key=lambda k: valid_icir_values[k])
@@ -491,14 +508,18 @@ def select_best_from_groups(
                     if factor_name in selected_factors_set:
                         selected_factors_set.discard(factor_name)
                         
+                        # v2.5: 获取相关系数
+                        corr_val = corr_lookup.get((factor_name, best_factor), None)
+                        corr_str = f"corr={corr_val:.2f}" if corr_val is not None else ""
+                        
                         # 修复：区分 icir 缺失和 ICIR 较低
                         if factor_name in missing_icir_factors:
                             dropped_factors[factor_name] = (
-                                f"与{best_factor}高相关，icir 缺失（{best_factor} |ICIR|={valid_icir_values[best_factor]:.2f}）"
+                                f"与{best_factor}高相关({corr_str}), icir缺失({best_factor}|ICIR|={valid_icir_values[best_factor]:.2f})"
                             )
                         else:
                             dropped_factors[factor_name] = (
-                                f"与{best_factor}高相关，|ICIR|={icir_values[factor_name]:.2f}<{valid_icir_values[best_factor]:.2f}"
+                                f"与{best_factor}高相关({corr_str}), |ICIR|={icir_values[factor_name]:.2f}<{valid_icir_values[best_factor]:.2f}"
                             )
                         
                         logger.info("丢弃高相关因子: %s（保留 %s，ICIR 更高）", factor_name, best_factor)
@@ -575,8 +596,12 @@ def select_factors(
     selection_complete = True  # 筛选是否完整（corr_matrix 存在时完整）
     selection_warnings = []    # 筛选过程中的警告
     
+    # v2.5: high_corr_pairs 保存相关系数值
+    high_corr_pairs: List[Tuple[str, str, float]] = []
+    
     if corr_matrix is not None and len(valid_factors) > 0:
-        high_corr_groups = identify_high_corr_groups(
+        # v2.5: identify_high_corr_groups 现在返回 (groups, pairs)
+        high_corr_groups, high_corr_pairs = identify_high_corr_groups(
             valid_factors=valid_factors,
             corr_matrix=corr_matrix,
             threshold=thresholds['high_corr_threshold'],  # 修复：入口已处理 None，直接使用
@@ -584,8 +609,10 @@ def select_factors(
         )
         
         # Step 4: 选择最优因子
+        # v2.5: 传入 high_corr_pairs，在原因中包含相关系数
         selected_factors, high_corr_dropped = select_best_from_groups(
             high_corr_groups=high_corr_groups,
+            high_corr_pairs=high_corr_pairs,
             valid_factors=valid_factors,
             logger=logger
         )

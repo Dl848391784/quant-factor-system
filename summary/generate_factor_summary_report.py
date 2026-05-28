@@ -662,6 +662,13 @@ def get_factor_selection_info(composite_results: List[Dict], ic_results: List[Di
             lines.append(f"  - 选中因子: {', '.join(factor_info)}")
             break
     
+    # v1.8: 显示筛选阈值
+    if selection_result:
+        thresholds = selection_result.get('thresholds', {})
+        if thresholds:
+            high_corr_threshold = thresholds.get('high_corr_threshold', 0.7)
+            lines.append(f"  - 高相关阈值: {high_corr_threshold:.1f}")
+    
     # v1.7: 优先使用 selection_result 中的真实原因
     all_factors = [r['factor_name'] for r in ic_results]
     excluded_factors = [f for f in all_factors if f not in selected_factors]
