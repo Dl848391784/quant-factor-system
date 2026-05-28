@@ -314,3 +314,15 @@ rsi                -0.045     0.51      0.089       498
    - 添加 argparse 命令行参数支持（--factors/--output/--list-factors/--version）
    - 新增 list_available_factors 函数
    - 创建流程文档 docs/merge_factors_flow.md
+
+9. v1.8（2026-05-28）：
+   - merge_factors.py 第三轮深度审查（v1.2 → v1.3）
+   - 删除未使用导入（typing.Tuple）
+   - 删除未使用常量（OUTPUT_FILES['json']）
+   - 修复日志文件名含时间戳问题（固定为 merge_factors.log）
+   - 添加合并进度显示（[i/N] 加载/合并因子）
+   - 动态生成 metadata source 字段（包含实际合并因子数和名称）
+   - 新增数据验证函数 validate_merged_data（检查记录数、必需列、原始列、新增因子）
+   - 支持从配置文件读取因子列表（--config 参数，优先级：命令行 > 配置文件 > 默认）
+   - 新增 load_config 函数
+   - metadata 新增 merged_factors 字段记录实际成功合并的因子

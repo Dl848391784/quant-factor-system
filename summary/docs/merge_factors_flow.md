@@ -1,9 +1,9 @@
 # merge_factors.py 流程文档
 
-> 版本: v1.2
+> 版本: v1.3
 > 创建时间: 2026-05-28
 > 最后更新: 2026-05-28
-> 脚本版本: merge_factors.py v1.2
+> 脚本版本: merge_factors.py v1.3
 
 ---
 

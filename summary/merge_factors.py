@@ -14,14 +14,16 @@
     python summary/merge_factors.py --factors A_FA_N0112 B_atr_pct  # 指定因子
     python summary/merge_factors.py --list-factors      # 列出可用因子
     python summary/merge_factors.py --output ./output   # 指定输出目录
+    python summary/merge_factors.py --config factors.json  # 从配置文件读取因子列表
 
 版本历史：
     v1.0: 基础版本（硬编码路径）
     v1.1: 2026-05-28 符合研发规范：添加版本常量、setup_logger、返回类型注解、异常处理、pytest测试
     v1.2: 2026-05-28 第二轮深度审查：精确化异常处理、删除未使用变量、函数拆分、argparse支持、流程文档
+    v1.3: 2026-05-28 第三轮深度审查：删除未使用导入/常量、固定日志文件名、进度显示、数据验证、配置文件支持
 """
 
-__version__ = '1.2'
+__version__ = '1.3'
 __author__ = 'factor_ic_analyzer'
 
 # 标准库导入
@@ -32,7 +34,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 # 第三方库导入
 import pandas as pd
@@ -45,9 +47,10 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 DATA_PATHS = {
     'factor_data': 'data_fetchers/result',
     'factors': 'data_fetchers/result/factors',
+    'config': 'summary/config',
 }
 
-# 14个新因子列表（默认值，可通过命令行覆盖）
+# 默认因子列表（可通过配置文件覆盖）
 DEFAULT_FACTORS = [
     'A_FA_N0112', 'A_FA_N0322', 'A_FA_N0340',
     'B_atr_pct', 'B_bollinger_width_20', 'B_cci_overbought',
@@ -58,7 +61,6 @@ DEFAULT_FACTORS = [
 
 # 输出文件名常量
 OUTPUT_FILES = {
-    'json': 'factor_data_merged.json.gz',
     'metadata': 'factor_data_merged_metadata.json',
     'parquet': 'factor_data_merged.parquet',
 }
@@ -68,6 +70,9 @@ REQUIRED_COLUMNS = ['date', 'asset']
 
 # 预期因子值列名（按优先级排序）
 FACTOR_VALUE_COLUMNS = ['factor_value', 'value', 'val']
+
+# 默认配置文件名
+DEFAULT_CONFIG_FILE = 'merge_factors_config.json'
 
 
 def setup_logger(name: str = 'merge_factors') -> logging.Logger:
@@ -82,11 +87,11 @@ def setup_logger(name: str = 'merge_factors') -> logging.Logger:
     logger = logging.getLogger(name)
     
     if not logger.handlers:
-        # 日志文件路径
+        # 日志文件路径（固定文件名，避免产生大量日志文件）
         log_dir = PROJECT_ROOT / 'summary' / 'logs'
         log_dir.mkdir(parents=True, exist_ok=True)
         
-        log_file = log_dir / f'merge_factors_{datetime.now().strftime("%Y-%m-%d")}.log'
+        log_file = log_dir / 'merge_factors.log'
         
         # 文件处理器
         file_handler = logging.FileHandler(log_file, encoding='utf-8')
@@ -106,6 +111,43 @@ def setup_logger(name: str = 'merge_factors') -> logging.Logger:
         logger.setLevel(logging.DEBUG)
     
     return logger
+
+
+def load_config(config_file: Optional[Path], logger: logging.Logger) -> Optional[List[str]]:
+    """从配置文件加载因子列表
+    
+    Args:
+        config_file: 配置文件路径
+        logger: 日志记录器
+        
+    Returns:
+        因子列表，或 None（配置文件不存在或解析失败）
+    """
+    if config_file is None:
+        return None
+    
+    if not config_file.exists():
+        logger.warning(f"配置文件不存在: {config_file}")
+        return None
+    
+    try:
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        
+        factors = config.get('factors', [])
+        if factors:
+            logger.info(f"从配置文件加载因子列表: {config_file} ({len(factors)} 个)")
+            return factors
+        
+        logger.warning(f"配置文件缺少 'factors' 字段: {config_file}")
+        return None
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"配置文件 JSON 解析失败: {e}")
+        return None
+    except OSError as e:
+        logger.error(f"配置文件读取失败: {e}")
+        return None
 
 
 def load_main_data(logger: logging.Logger) -> Optional[pd.DataFrame]:
@@ -248,9 +290,63 @@ def merge_single_factor(
     return merged_df
 
 
+def validate_merged_data(
+    merged_df: pd.DataFrame,
+    original_df: pd.DataFrame,
+    merged_factors: List[str],
+    logger: logging.Logger
+) -> Dict[str, bool]:
+    """验证合并后的数据完整性
+    
+    Args:
+        merged_df: 合并后的 DataFrame
+        original_df: 原始主数据 DataFrame
+        merged_factors: 成功合并的因子列表
+        logger: 日志记录器
+        
+    Returns:
+        验证结果字典 {检查项: 是否通过}
+    """
+    results = {}
+    
+    # 1. 检查记录数不变
+    results['records_count'] = len(merged_df) == len(original_df)
+    if not results['records_count']:
+        logger.error(f"验证失败: 记录数变化 {len(original_df)} → {len(merged_df)}")
+    
+    # 2. 检查必需列完整
+    results['required_columns'] = all(col in merged_df.columns for col in REQUIRED_COLUMNS)
+    if not results['required_columns']:
+        logger.error(f"验证失败: 缺少必需列 {REQUIRED_COLUMNS}")
+    
+    # 3. 检查原始列保留
+    original_cols = original_df.columns.tolist()
+    results['original_columns'] = all(col in merged_df.columns for col in original_cols)
+    if not results['original_columns']:
+        missing = [c for c in original_cols if c not in merged_df.columns]
+        logger.error(f"验证失败: 原始列丢失 {missing}")
+    
+    # 4. 检查新增因子列存在
+    results['new_factors'] = all(f in merged_df.columns for f in merged_factors)
+    if not results['new_factors']:
+        missing = [f for f in merged_factors if f not in merged_df.columns]
+        logger.error(f"验证失败: 新因子列丢失 {missing}")
+    
+    # 汇总
+    all_passed = all(results.values())
+    if all_passed:
+        logger.info(f"数据验证通过: {len(merged_df)} 条记录, {len(merged_df.columns)} 列")
+    else:
+        failed = [k for k, v in results.items() if not v]
+        logger.warning(f"数据验证部分失败: {failed}")
+    
+    return results
+
+
 def save_merged_data(
     merged_df: pd.DataFrame,
     output_dir: Path,
+    merged_factors: List[str],
     logger: logging.Logger
 ) -> bool:
     """保存合并后的数据
@@ -258,6 +354,7 @@ def save_merged_data(
     Args:
         merged_df: 合并后的 DataFrame
         output_dir: 输出目录
+        merged_factors: 成功合并的因子列表
         logger: 日志记录器
         
     Returns:
@@ -277,16 +374,18 @@ def save_merged_data(
         logger.info(f"  Parquet文件: {output_parquet}")
         logger.info(f"  文件大小: {file_size_mb:.2f} MB")
         
-        # 保存元数据
-        # 减2是因为 date 和 asset 不是因子列
+        # 保存元数据（动态生成 source）
         total_factors = len(merged_df.columns) - len(REQUIRED_COLUMNS)
+        
+        source_desc = f"factor_data.json.gz + {len(merged_factors)} new factors ({', '.join(merged_factors[:5])}{'...' if len(merged_factors) > 5 else ''})"
         
         metadata = {
             'created_at': datetime.now().isoformat(),
             'total_records': len(merged_df),
             'total_factors': total_factors,
+            'merged_factors': merged_factors,
             'factors': merged_df.columns.tolist(),
-            'source': 'factor_data.json.gz + new factors',
+            'source': source_desc,
             'script_version': __version__,
         }
         
@@ -325,6 +424,7 @@ def merge_factors(
     
     logger.info("=" * 60)
     logger.info(f"开始合并因子数据 (版本 {__version__})")
+    logger.info(f"目标因子数: {len(factors)}")
     logger.info("=" * 60)
     
     # 1. 加载主数据源
@@ -337,35 +437,50 @@ def merge_factors(
     logger.info(f"开始加载 {len(factors)} 个新因子...")
     factor_dfs: Dict[str, pd.DataFrame] = {}
     
-    for factor_name in factors:
+    for i, factor_name in enumerate(factors, 1):
+        # 进度显示
+        logger.info(f"[{i}/{len(factors)}] 加载 {factor_name}...")
         df = load_parquet_factor(factor_name, logger)
         if df is not None:
             factor_dfs[factor_name] = df
     
-    logger.info(f"成功加载 {len(factor_dfs)} 个因子")
+    logger.info(f"成功加载 {len(factor_dfs)} / {len(factors)} 个因子")
     
     if not factor_dfs:
         logger.warning("没有成功加载任何因子，返回原始主数据")
         return main_df
     
-    # 3. 逐个合并因子
+    # 3. 逐个合并因子（带进度显示）
     merged_df = main_df.copy()
+    merged_factors: List[str] = []
     logger.info("开始合并因子到主数据...")
     
-    for factor_name, factor_df in factor_dfs.items():
+    for i, (factor_name, factor_df) in enumerate(factor_dfs.items(), 1):
+        # 进度显示
+        logger.info(f"[{i}/{len(factor_dfs)}] 合并 {factor_name}...")
         merged_df = merge_single_factor(merged_df, factor_df, factor_name, logger)
+        
+        # 检查是否成功合并
+        if factor_name in merged_df.columns:
+            merged_factors.append(factor_name)
     
-    # 4. 汇总统计
+    # 4. 数据验证
+    logger.info("=" * 60)
+    logger.info("数据验证...")
+    validation_results = validate_merged_data(merged_df, main_df, merged_factors, logger)
+    
+    # 5. 汇总统计
     logger.info("=" * 60)
     logger.info("合并完成统计:")
     logger.info(f"  原始列数: {len(main_df.columns)}")
     logger.info(f"  合并后列数: {len(merged_df.columns)}")
+    logger.info(f"  成功合并因子数: {len(merged_factors)} / {len(factors)}")
     logger.info(f"  新增因子数: {len(merged_df.columns) - len(main_df.columns)}")
     logger.info(f"  总记录数: {len(merged_df):,}")
     logger.debug(f"  所有列: {merged_df.columns.tolist()}")
     
-    # 5. 保存合并后的数据
-    if save_merged_data(merged_df, out_dir, logger):
+    # 6. 保存合并后的数据
+    if save_merged_data(merged_df, out_dir, merged_factors, logger):
         logger.info("✓ 保存完成")
     else:
         logger.warning("保存失败，但合并数据仍可用")
@@ -411,6 +526,7 @@ def parse_args() -> argparse.Namespace:
   python summary/merge_factors.py --factors A_FA_N0112 B_atr_pct  # 指定因子
   python summary/merge_factors.py --list-factors         # 列出可用因子
   python summary/merge_factors.py --output ./output      # 指定输出目录
+  python summary/merge_factors.py --config factors.json  # 从配置文件读取因子列表
         """
     )
     
@@ -426,6 +542,13 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help='指定输出目录（默认: data_fetchers/result）'
+    )
+    
+    parser.add_argument(
+        '--config', '-c',
+        type=Path,
+        default=None,
+        help=f'从配置文件读取因子列表（默认: summary/config/{DEFAULT_CONFIG_FILE}）'
     )
     
     parser.add_argument(
@@ -453,10 +576,21 @@ def main() -> None:
         list_available_factors(logger)
         sys.exit(0)
     
+    # 确定因子列表（优先级：命令行 > 配置文件 > 默认）
+    factor_list = args.factors
+    
+    if factor_list is None and args.config is not None:
+        factor_list = load_config(args.config, logger)
+    
+    if factor_list is None:
+        # 尝试默认配置文件
+        default_config = PROJECT_ROOT / DATA_PATHS['config'] / DEFAULT_CONFIG_FILE
+        factor_list = load_config(default_config, logger)
+    
     # 合并因子
     merged_df = merge_factors(
         logger,
-        factor_list=args.factors,
+        factor_list=factor_list,
         output_dir=args.output
     )
     
