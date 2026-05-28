@@ -1,0 +1,4 @@
+# 此目录存放 summary 模块的流程文档
+#
+# 文档命名规则：<脚本名>_flow.md
+# 例如：generate_factor_summary_report_flow.md

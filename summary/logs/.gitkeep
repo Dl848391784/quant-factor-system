@@ -1,0 +1,4 @@
+# 此目录存放 summary 模块的日志文件
+#
+# 日志命名规则：<脚本名>_YYYY-MM-DD.log
+# 例如：generate_factor_summary_report_2026-05-28.log

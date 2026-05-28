@@ -272,3 +272,13 @@ rsi                -0.045     0.51      0.089       498
    - 补充返回类型注解（get_monotonicity_symbol、get_weight_method_display、format_weights、generate_correlation_section）
    - 创建流程文档 docs/generate_factor_summary_report_flow.md
    - 创建 pytest 测试文件 test_cases/test_generate_factor_summary_report.py（25个测试用例）
+
+5. v1.4（2026-05-28）：
+   - generate_factor_summary_report.py 第三轮深度审查（v1.3 → v1.4）
+   - 补全异常处理（load_json_file 添加 PermissionError/IsADirectoryError/OSError）
+   - 重构重复代码（新增 _extract_corr_pairs 辅助函数，消除高/中等相关因子对提取重复）
+   - 删除未使用参数（load_ic_results/load_backtest_results/load_composite_results 移除 date 参数）
+   - 添加边界保护（generate_report max() 添加空列表检测）
+   - 补全 docstring（merge_factor_data/format_percentage/format_float）
+   - 优化性能（get_factor_selection_info 避免重复读取文件，直接使用 composite_results 数据）
+   - load_composite_results 新增 factor_list 和 weights 字段

@@ -43,6 +43,15 @@ factor_ic_analyzer/
 │   ├── fetch_turnover.py   # 换手率数据拉取
 │   ├── fetch_stock_list.py # 股票列表拉取
 │
+├── summary/                # 数据汇总模块
+│   ├── MODULE.md           # 数据汇总规范
+│   ├── docs/               # 流程文档
+│   ├── logs/               # 日志目录
+│   ├── result/             # 汇总报告输出目录
+│   ├── test_cases/         # 测试用例
+│   ├── generate_factor_summary_report.py  # 因子分析汇总报告
+│   └── merge_factors.py                   # 因子数据合并
+│
 ├── common/                 # 项目级公共模块
 ├── cache/                  # 缓存目录
 ├── tests/                  # 项目级测试目录
@@ -67,7 +76,15 @@ factor_ic_analyzer/
                 │   backtest  │         │comprehensive│         │  backtest   │
                 │ (分层回测)  │◀────────│  _factor    │────────▶│ (分层回测)  │
                 └─────────────┘         │ (综合因子)  │         └─────────────┘
-                                        └─────────────┘
+                      │                 └─────────────┘                 │
+                      │                       │                       │
+                      └───────────────────────┼───────────────────────┘
+                                              │
+                                              ▼
+                                      ┌─────────────┐
+                                      │   summary   │
+                                      │  (数据汇总) │
+                                      └─────────────┘
 ```
 
 **数据流向：**
@@ -76,22 +93,21 @@ factor_ic_analyzer/
 3. factor_ic 读取 data_fetchers/result → 计算 IC → 输出 factor_ic/result
 4. backtest 读取 cache → 分层回测 → 输出 result
 5. comprehensive_factor 读取 factor_ic result + cache → 加权计算综合因子 → 调用 backtest 分层回测
+6. summary 读取 factor_ic/result + backtest/result + comprehensive_factor/result → 生成汇总报告
 
 ### 跨模块数据路径规范（2026-05-26新增，2026-05-27更新）
 
 **各模块数据输出/输入路径：**
 
-| 模块 | 输出目录 | 输出文件 | 依赖模块读取位置 |
-|-----|---------|---------|----------------|
-| data_fetchers/fetch_factor_cache | **data_fetchers/result/** | **factor_data.json.gz, return_data.json.gz** | **factor_generator 统一输入源** |
-| data_fetchers/fetch_turnover | **data_fetchers/result/** | **turnover_rate_data.json.gz** | **factor_generator 统一输入源** |
-| data_fetchers/factor_generator | data_fetchers/result/ | factor_ic_data.json.gz | factor_ic, backtest, comprehensive_factor 统一数据源 |
-| factor_ic | factor_ic/result/ | ic_<因子名>_analysis_result.json | comprehensive_factor |
-| backtest | backtest/result/ | <因子名>_layered_backtest.json | 读取 factor_ic_data.json.gz |
-| comprehensive_factor | comprehensive_factor/result/ | composite_<加权方式>_1d.json | 读取 factor_ic_data.json.gz + factor_ic/result/ |
-| factor_ic | factor_ic/result/ | ic_<因子名>_analysis_result.json | comprehensive_factor |
-| backtest | backtest/result/ | <因子名>_layered_backtest.json | **读取 factor_ic_data.json.gz** |
-| comprehensive_factor | comprehensive_factor/result/ | composite_<加权方式>_1d.json | **读取 factor_ic_data.json.gz + factor_ic/result/** |
+|| 模块 | 输出目录 | 输出文件 | 依赖模块读取位置 |
+||-----|---------|---------|----------------|
+|| data_fetchers/fetch_factor_cache | **data_fetchers/result/** | **factor_data.json.gz, return_data.json.gz** | **factor_generator 统一输入源** |
+|| data_fetchers/fetch_turnover | **data_fetchers/result/** | **turnover_rate_data.json.gz** | **factor_generator 统一输入源** |
+|| data_fetchers/factor_generator | data_fetchers/result/ | factor_ic_data.json.gz | factor_ic, backtest, comprehensive_factor, summary 统一数据源 |
+|| factor_ic | factor_ic/result/ | ic_<因子名>_analysis_result.json | comprehensive_factor, summary |
+|| backtest | backtest/result/ | <因子名>_layered_backtest.json | summary |
+|| comprehensive_factor | comprehensive_factor/result/ | composite_<加权方式>_1d.json | summary |
+|| summary | summary/result/ | factor_summary_report_YYYY-MM-DD.txt | 读取各模块 result 目录 |
 
 **数据架构迁移历史（2026-05-27）：**
 - v2.6: 收益数据合并到 factor_ic_data.json.gz，实现单文件读取架构
@@ -164,7 +180,8 @@ factor_ic_analyzer/
 | factor_ic | factor_ic/MODULE.md | IC 计算脚本命名、输出格式、增量模式、参数传递 |
 | backtest | backtest/MODULE.md | 分层回测规则、统计指标、公共模块复用 |
 | comprehensive_factor | comprehensive_factor/MODULE.md | 综合因子加权方式、因子组合、输出格式、调用backtest规范 |
-|| data_fetchers | data_fetchers/MODULE.md | 数据源定义、缓存格式、脚本命名、公共模块复用、因子生成规范 |
+| data_fetchers | data_fetchers/MODULE.md | 数据源定义、缓存格式、脚本命名、公共模块复用、因子生成规范 |
+| summary | summary/MODULE.md | 数据汇总、报告生成、因子合并、跨模块数据采集 |
 
 ---
 

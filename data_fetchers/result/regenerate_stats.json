@@ -1,0 +1,19 @@
+{
+  "version": "4.0",
+  "n_days": 0,
+  "n_assets": 0,
+  "n_records": 1486394,
+  "elapsed_seconds": 1009.1679406166077,
+  "is_valid": false,
+  "memory_monitor": "proc_self_status",
+  "fields": [
+    "date",
+    "asset",
+    "open",
+    "close",
+    "high",
+    "low",
+    "rsi_6",
+    "volume_ratio_5"
+  ]
+}

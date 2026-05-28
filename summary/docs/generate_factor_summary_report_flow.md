@@ -1,9 +1,9 @@
 # generate_factor_summary_report.py 流程文档
 
-> 版本: v1.3
-> 生成时间: 2026-05-28 18:45
-> 实测数据时间: 2026-05-28 18:45 北京时间
-> 脚本版本: generate_factor_summary_report.py v1.3
+> 版本: v1.4
+> 创建时间: 2026-05-28
+> 最后更新: 2026-05-28
+> 脚本版本: generate_factor_summary_report.py v1.4
 
 ---
 

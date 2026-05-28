@@ -1,0 +1,4 @@
+# 此目录存放 summary 模块的测试用例
+#
+# 测试命名规则：test_<脚本名>.py
+# 例如：test_generate_factor_summary_report.py

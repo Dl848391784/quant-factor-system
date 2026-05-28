@@ -22,9 +22,10 @@
     v1.1: 2026-05-28 迁移到 logging 模块，遵循 PROJECT.md 日志规范
     v1.2: 2026-05-28 修复 logger 传递缺失、函数签名不一致、删除硬编码结论
     v1.3: 2026-05-28 深度审查：删除未使用参数、补充返回类型注解、创建流程文档和pytest测试
+    v1.4: 2026-05-28 第三轮深度审查：异常处理补全、重复代码重构、边界保护、避免重复读取文件
 """
 
-__version__ = '1.3'
+__version__ = '1.4'
 __author__ = 'factor_ic_analyzer'
 
 # 标准库导入
@@ -133,13 +134,15 @@ def load_json_file(path: Path, logger: logging.Logger) -> Optional[Dict]:
     except json.JSONDecodeError as e:
         logger.warning(f"JSON 解析错误: {path}, 位置 {e.pos}, 原因: {e.msg}")
         return None
+    except (PermissionError, IsADirectoryError, OSError) as e:
+        logger.warning(f"文件读取错误: {path}, 类型 {type(e).__name__}, 原因: {e}")
+        return None
 
 
-def load_ic_results(date: str, logger: logging.Logger) -> List[Dict]:
+def load_ic_results(logger: logging.Logger) -> List[Dict]:
     """加载所有单因子 IC 分析结果
     
     Args:
-        date: 日期字符串
         logger: 日志记录器
         
     Returns:
@@ -171,11 +174,10 @@ def load_ic_results(date: str, logger: logging.Logger) -> List[Dict]:
     return results
 
 
-def load_backtest_results(date: str, logger: logging.Logger) -> List[Dict]:
+def load_backtest_results(logger: logging.Logger) -> List[Dict]:
     """加载所有单因子分层回测结果
     
     Args:
-        date: 日期字符串
         logger: 日志记录器
         
     Returns:
@@ -316,11 +318,10 @@ def calculate_factor_correlation(logger: logging.Logger, force_full: bool = Fals
         return None
 
 
-def load_composite_results(date: str, logger: logging.Logger) -> List[Dict]:
+def load_composite_results(logger: logging.Logger) -> List[Dict]:
     """加载综合因子四种权重回测结果
     
     Args:
-        date: 日期字符串
         logger: 日志记录器
         
     Returns:
@@ -360,6 +361,8 @@ def load_composite_results(date: str, logger: logging.Logger) -> List[Dict]:
                 'monotonicity_quality': quality,
                 'monotonicity_symbol': quality_symbol,
                 'weight_str': weight_str,
+                'factor_list': meta.get('factor_list', []),  # 新增：因子列表
+                'weights': weights,  # 新增：权重字典
             })
     
     return results
@@ -427,13 +430,52 @@ def format_weights(weights: Dict) -> str:
 
 
 def format_percentage(value: float, decimals: int = 2) -> str:
-    """格式化百分比"""
+    """格式化百分比
+    
+    Args:
+        value: 数值
+        decimals: 小数位数
+        
+    Returns:
+        格式化的百分比字符串
+    """
     return f"{value:.{decimals}f}%"
 
 
 def format_float(value: float, decimals: int = 4) -> str:
-    """格式化浮点数"""
+    """格式化浮点数
+    
+    Args:
+        value: 数值
+        decimals: 小数位数
+        
+    Returns:
+        格式化的浮点数字符串
+    """
     return f"{value:.{decimals}f}"
+
+
+def _extract_corr_pairs(corr_matrix: pd.DataFrame, factor_names: List[str], 
+                         min_threshold: float, max_threshold: float) -> List[tuple]:
+    """提取指定阈值范围内的因子相关性对
+    
+    Args:
+        corr_matrix: 相关性矩阵
+        factor_names: 因子名列表
+        min_threshold: 最小阈值（|corr| > min_threshold）
+        max_threshold: 最大阈值（|corr| <= max_threshold）
+        
+    Returns:
+        因子对列表 [(factor1, factor2, corr_value), ...]
+    """
+    pairs = []
+    for i, row_name in enumerate(factor_names):
+        for j, col_name in enumerate(factor_names):
+            if i < j:
+                val = abs(corr_matrix.loc[row_name, col_name])
+                if min_threshold < val <= max_threshold:
+                    pairs.append((row_name, col_name, val))
+    return pairs
 
 
 def generate_correlation_section(corr_matrix: Optional[pd.DataFrame], ic_results: List[Dict]) -> List[str]:
@@ -480,14 +522,8 @@ def generate_correlation_section(corr_matrix: Optional[pd.DataFrame], ic_results
     
     lines.append("-" * 70)
     
-    # 高相关因子对
-    high_corr_pairs = []
-    for i, row_name in enumerate(factor_names):
-        for j, col_name in enumerate(factor_names):
-            if i < j:
-                val = abs(corr_matrix.loc[row_name, col_name])
-                if val > 0.7:
-                    high_corr_pairs.append((row_name, col_name, val))
+    # 高相关因子对（使用辅助函数）
+    high_corr_pairs = _extract_corr_pairs(corr_matrix, factor_names, 0.7, 1.0)
     
     if high_corr_pairs:
         lines.append("高相关因子对（|corr| > 0.7，建议剔除其中一个）：")
@@ -496,14 +532,8 @@ def generate_correlation_section(corr_matrix: Optional[pd.DataFrame], ic_results
     else:
         lines.append("无高相关因子对（所有因子相关性 < 0.7）")
     
-    # 中等相关因子对
-    med_corr_pairs = []
-    for i, row_name in enumerate(factor_names):
-        for j, col_name in enumerate(factor_names):
-            if i < j:
-                val = abs(corr_matrix.loc[row_name, col_name])
-                if 0.5 < val <= 0.7:
-                    med_corr_pairs.append((row_name, col_name, val))
+    # 中等相关因子对（使用辅助函数）
+    med_corr_pairs = _extract_corr_pairs(corr_matrix, factor_names, 0.5, 0.7)
     
     if med_corr_pairs:
         lines.append("")
@@ -534,27 +564,24 @@ def get_factor_selection_info(composite_results: List[Dict], ic_results: List[Di
     lines = []
     lines.append("auto_select 模式结果:")
     
-    # 从综合因子权重中推断选中的因子
+    # 直接使用传入的 composite_results 数据（已在 load_composite_results 加载）
     selected_factors = []
+    weights = {}
     for item in composite_results:
         if item['weight_method'] == 'icir_weight':
-            comp_file = PROJECT_ROOT / DATA_PATHS['comprehensive_result'] / 'composite_icir_weight_1d.json'
-            data = load_json_file(comp_file, logger)
-            if data:
-                meta = data.get('meta', {})
-                selected_factors = meta.get('factor_list', [])
-                weights = meta.get('weights', {})
-                
-                factor_info = []
-                for f in selected_factors:
-                    weight = weights.get(f, 0)
-                    ic_item = next((r for r in ic_results if r['factor_name'] == f), None)
-                    if ic_item:
-                        factor_info.append(f"{f}(ICIR={ic_item['icir']:.2f},权重={weight*100:.1f}%)")
-                    else:
-                        factor_info.append(f"{f}(权重={weight*100:.1f}%)")
-                
-                lines.append(f"  - 选中因子: {', '.join(factor_info)}")
+            selected_factors = item.get('factor_list', [])
+            weights = item.get('weights', {})
+            
+            factor_info = []
+            for f in selected_factors:
+                weight = weights.get(f, 0)
+                ic_item = next((r for r in ic_results if r['factor_name'] == f), None)
+                if ic_item:
+                    factor_info.append(f"{f}(ICIR={ic_item['icir']:.2f},权重={weight*100:.1f}%)")
+                else:
+                    factor_info.append(f"{f}(权重={weight*100:.1f}%)")
+            
+            lines.append(f"  - 选中因子: {', '.join(factor_info)}")
             break
     
     # 推断剔除的因子
@@ -587,7 +614,15 @@ def get_factor_selection_info(composite_results: List[Dict], ic_results: List[Di
 
 
 def merge_factor_data(ic_results: List[Dict], backtest_results: List[Dict]) -> List[Dict]:
-    """合并 IC 和回测数据"""
+    """合并 IC 和回测数据
+    
+    Args:
+        ic_results: IC 结果列表
+        backtest_results: 回测结果列表
+        
+    Returns:
+        合并后的数据列表
+    """
     merged = []
     
     for ic_item in ic_results:
@@ -616,13 +651,13 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     
     # 加载所有数据
     logger.info("加载 IC 结果...")
-    ic_results = load_ic_results(date, logger)
+    ic_results = load_ic_results(logger)
     
     logger.info("加载回测结果...")
-    backtest_results = load_backtest_results(date, logger)
+    backtest_results = load_backtest_results(logger)
     
     logger.info("加载综合因子结果...")
-    composite_results = load_composite_results(date, logger)
+    composite_results = load_composite_results(logger)
     
     # 计算因子相关性矩阵
     corr_matrix = calculate_factor_correlation(logger, force_full=force_full_correlation)
@@ -712,6 +747,12 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     lines.append("")
     lines.append("六、综合因子 vs 单因子对比")
     lines.append("-" * 70)
+    
+    # 边界保护：空列表时跳过对比
+    if not factor_data or not composite_results:
+        lines.append("数据不足，无法生成对比表")
+        lines.append("-" * 70)
+        return '\n'.join(lines)
     
     best_single = max(factor_data, key=lambda x: x.get('icir', 0))
     best_composite = max(composite_results, key=lambda x: x['long_short_sharpe'])

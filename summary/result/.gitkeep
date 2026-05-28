@@ -1,0 +1,4 @@
+# 此目录存放 summary 模块的输出结果
+#
+# 文件命名规则：<报告名>_YYYY-MM-DD.txt
+# 例如：factor_summary_report_2026-05-28.txt

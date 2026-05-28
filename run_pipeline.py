@@ -37,6 +37,7 @@ Stage 5: 汇总报告
 
 版本历史：
 - v1.0 (2026-05-27): 初始版本，完全串行执行，退出码检查，脚本级别重试
+- v1.1 (2026-05-27): fetch_turnover 添加 --baostock 参数，获取历史换手率数据
 
 作者: 云瑶
 """
@@ -76,7 +77,7 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     # Stage 0: 基础数据拉取
     ScriptTask('fetch_stock_list', 'data_fetchers/fetch_stock_list.py', 0, []),
     ScriptTask('fetch_factor_cache', 'data_fetchers/fetch_factor_cache.py', 0, []),
-    ScriptTask('fetch_turnover', 'data_fetchers/fetch_turnover.py', 0, []),
+    ScriptTask('fetch_turnover', 'data_fetchers/fetch_turnover.py', 0, ['--baostock']),
     ScriptTask('fetch_industry', 'data_fetchers/fetch_industry.py', 0, []),  # 行业分类数据
     
     # Stage 1: 数据整合
