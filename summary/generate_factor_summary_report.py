@@ -21,9 +21,10 @@
     v1.0: 基础版本（使用 print）
     v1.1: 2026-05-28 迁移到 logging 模块，遵循 PROJECT.md 日志规范
     v1.2: 2026-05-28 修复 logger 传递缺失、函数签名不一致、删除硬编码结论
+    v1.3: 2026-05-28 深度审查：删除未使用参数、补充返回类型注解、创建流程文档和pytest测试
 """
 
-__version__ = '1.2'
+__version__ = '1.3'
 __author__ = 'factor_ic_analyzer'
 
 # 标准库导入
@@ -210,14 +211,13 @@ def load_backtest_results(date: str, logger: logging.Logger) -> List[Dict]:
     return results
 
 
-def calculate_factor_correlation(ic_results: List[Dict], logger: logging.Logger, force_full: bool = False) -> Optional[pd.DataFrame]:
+def calculate_factor_correlation(logger: logging.Logger, force_full: bool = False) -> Optional[pd.DataFrame]:
     """计算所有因子之间的相关性矩阵
     
     尝试从综合因子结果文件中读取相关性数据。
     如果 force_full=True 或综合因子结果中没有相关性数据，则从因子数据文件中实时计算。
     
     Args:
-        ic_results: IC 结果列表
         logger: 日志记录器
         force_full: 是否强制计算所有因子之间的相关性（忽略缓存）
     
@@ -366,7 +366,14 @@ def load_composite_results(date: str, logger: logging.Logger) -> List[Dict]:
 
 
 def get_monotonicity_symbol(quality: str) -> str:
-    """获取单调性质量符号"""
+    """获取单调性质量符号
+    
+    Args:
+        quality: 单调性质量值（good/moderate/poor/unknown）
+        
+    Returns:
+        单调性质量符号
+    """
     symbols = {
         'good': '✓良好',
         'moderate': '△一般',
@@ -377,7 +384,14 @@ def get_monotonicity_symbol(quality: str) -> str:
 
 
 def get_weight_method_display(method: str) -> str:
-    """获取权重方法显示名称"""
+    """获取权重方法显示名称
+    
+    Args:
+        method: 权重方法名
+        
+    Returns:
+        权重方法显示名称
+    """
     displays = {
         'ic_weight': 'IC加权',
         'icir_weight': 'ICIR加权',
@@ -388,7 +402,14 @@ def get_weight_method_display(method: str) -> str:
 
 
 def format_weights(weights: Dict) -> str:
-    """格式化权重字符串"""
+    """格式化权重字符串
+    
+    Args:
+        weights: 权重字典（因子名 → 权重值）
+        
+    Returns:
+        格式化的权重字符串（如 "ts:60%, bp:40%"）
+    """
     factor_abbr = {
         'turnover_surge': 'ts',
         'bollinger_pb': 'bp',
@@ -415,8 +436,16 @@ def format_float(value: float, decimals: int = 4) -> str:
     return f"{value:.{decimals}f}"
 
 
-def generate_correlation_section(corr_matrix: pd.DataFrame, ic_results: List[Dict]) -> List[str]:
-    """生成因子相关性部分"""
+def generate_correlation_section(corr_matrix: Optional[pd.DataFrame], ic_results: List[Dict]) -> List[str]:
+    """生成因子相关性部分
+    
+    Args:
+        corr_matrix: 因子相关性矩阵（可为 None）
+        ic_results: IC 结果列表（用于排序因子名）
+        
+    Returns:
+        报告文本行列表
+    """
     lines = []
     
     if corr_matrix is None:
@@ -596,7 +625,7 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     composite_results = load_composite_results(date, logger)
     
     # 计算因子相关性矩阵
-    corr_matrix = calculate_factor_correlation(ic_results, logger, force_full=force_full_correlation)
+    corr_matrix = calculate_factor_correlation(logger, force_full=force_full_correlation)
     
     # 合并 IC 和回测数据
     factor_data = merge_factor_data(ic_results, backtest_results)

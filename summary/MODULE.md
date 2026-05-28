@@ -265,3 +265,10 @@ rsi                -0.045     0.51      0.089       498
    - 替换 print → logger（main 函数）
    - 删除硬编码结论注释（违反"因子方向不可预判"规范）
    - 所有 docstring 补充 Args/Returns 说明
+
+4. v1.3（2026-05-28）：
+   - generate_factor_summary_report.py 深度审查优化（v1.2 → v1.3）
+   - 删除 calculate_factor_correlation 未使用参数 ic_results
+   - 补充返回类型注解（get_monotonicity_symbol、get_weight_method_display、format_weights、generate_correlation_section）
+   - 创建流程文档 docs/generate_factor_summary_report_flow.md
+   - 创建 pytest 测试文件 test_cases/test_generate_factor_summary_report.py（25个测试用例）
