@@ -3,7 +3,7 @@
 > 版本: v1.4
 > 创建时间: 2026-05-28
 > 最后更新: 2026-05-28
-> 脚本版本: generate_factor_summary_report.py v1.4
+> 脚本版本: generate_factor_summary_report.py v1.5
 
 ---
 

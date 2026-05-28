@@ -23,9 +23,10 @@
     v1.2: 2026-05-28 修复 logger 传递缺失、函数签名不一致、删除硬编码结论
     v1.3: 2026-05-28 深度审查：删除未使用参数、补充返回类型注解、创建流程文档和pytest测试
     v1.4: 2026-05-28 第三轮深度审查：异常处理补全、重复代码重构、边界保护、避免重复读取文件
+    v1.5: 2026-05-28 第四轮深度审查：魔法数字提取为常量、类型注解精确化、函数拆分重构
 """
 
-__version__ = '1.4'
+__version__ = '1.5'
 __author__ = 'factor_ic_analyzer'
 
 # 标准库导入
@@ -36,7 +37,7 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 # 第三方库导入
 import pandas as pd
@@ -61,6 +62,18 @@ FACTOR_COL_TO_NAME_MAP = {
     'bollinger_pb': 'bollinger_pb',
     'turnover_surge': 'turnover_surge',
 }
+
+# 相关性阈值常量
+CORR_THRESHOLD_HIGH = 0.7  # 高相关阈值
+CORR_THRESHOLD_MEDIUM = 0.5  # 中等相关阈值
+CORR_MAX = 1.0  # 最大相关性
+
+# 因子筛选阈值常量
+ICIR_THRESHOLD = 0.15  # ICIR 筛选阈值
+RETURN_THRESHOLD = 3.0  # 多空年化收益阈值（%）
+
+# 相关性计算采样常量
+MAX_STOCKS_SAMPLE = 100  # 相关性计算采样股票数量
 
 
 def setup_logger(name: str = 'generate_factor_summary_report') -> logging.Logger:
@@ -195,7 +208,6 @@ def load_backtest_results(logger: logging.Logger) -> List[Dict]:
             monotonicity = data.get('monotonicity', {})
             
             # 单调性质量判定
-            corr = monotonicity.get('correlation', 0)
             quality = monotonicity.get('quality', 'unknown')
             quality_symbol = get_monotonicity_symbol(quality)
             
@@ -203,7 +215,7 @@ def load_backtest_results(logger: logging.Logger) -> List[Dict]:
                 'factor_name': factor_name,
                 'long_short_return_annual': long_short.get('long_short_return_annual', 0) * 100,
                 'long_short_sharpe': long_short.get('long_short_sharpe', 0),
-                'monotonicity_correlation': corr,
+                'monotonicity_correlation': monotonicity.get('correlation', 0),
                 'monotonicity_quality': quality,
                 'monotonicity_symbol': quality_symbol,
             })
@@ -265,7 +277,7 @@ def calculate_factor_correlation(logger: logging.Logger, force_full: bool = Fals
             # 从 data 数组中提取因子值
             data_list = []
             stock_count = 0
-            max_stocks = 100  # 只读取 100 只股票的数据
+            max_stocks = MAX_STOCKS_SAMPLE  # 相关性计算采样股票数量
             
             for line in f:
                 if stock_count >= max_stocks:
@@ -331,6 +343,7 @@ def load_composite_results(logger: logging.Logger) -> List[Dict]:
     results = []
     
     weight_methods = ['ic_weight', 'icir_weight', 'rolling_icir_weight', 'equal_weight']
+    file_count = 0
     
     for method in weight_methods:
         file = comp_dir / f'composite_{method}_1d.json'
@@ -364,7 +377,9 @@ def load_composite_results(logger: logging.Logger) -> List[Dict]:
                 'factor_list': meta.get('factor_list', []),  # 新增：因子列表
                 'weights': weights,  # 新增：权重字典
             })
+            file_count += 1
     
+    logger.info(f"加载综合因子结果: {file_count} 种权重方法")
     return results
 
 
@@ -456,7 +471,7 @@ def format_float(value: float, decimals: int = 4) -> str:
 
 
 def _extract_corr_pairs(corr_matrix: pd.DataFrame, factor_names: List[str], 
-                         min_threshold: float, max_threshold: float) -> List[tuple]:
+                         min_threshold: float, max_threshold: float) -> List[Tuple[str, str, float]]:
     """提取指定阈值范围内的因子相关性对
     
     Args:
@@ -523,21 +538,21 @@ def generate_correlation_section(corr_matrix: Optional[pd.DataFrame], ic_results
     lines.append("-" * 70)
     
     # 高相关因子对（使用辅助函数）
-    high_corr_pairs = _extract_corr_pairs(corr_matrix, factor_names, 0.7, 1.0)
+    high_corr_pairs = _extract_corr_pairs(corr_matrix, factor_names, CORR_THRESHOLD_HIGH, CORR_MAX)
     
     if high_corr_pairs:
-        lines.append("高相关因子对（|corr| > 0.7，建议剔除其中一个）：")
+        lines.append(f"高相关因子对（|corr| > {CORR_THRESHOLD_HIGH:.1f}，建议剔除其中一个）：")
         for pair in high_corr_pairs:
             lines.append(f"  - {pair[0]} vs {pair[1]}: {format_float(pair[2], 2)}")
     else:
-        lines.append("无高相关因子对（所有因子相关性 < 0.7）")
+        lines.append(f"无高相关因子对（所有因子相关性 < {CORR_THRESHOLD_HIGH:.1f}）")
     
     # 中等相关因子对（使用辅助函数）
-    med_corr_pairs = _extract_corr_pairs(corr_matrix, factor_names, 0.5, 0.7)
+    med_corr_pairs = _extract_corr_pairs(corr_matrix, factor_names, CORR_THRESHOLD_MEDIUM, CORR_THRESHOLD_HIGH)
     
     if med_corr_pairs:
         lines.append("")
-        lines.append("中等相关因子对（0.5 < |corr| <= 0.7）：")
+        lines.append(f"中等相关因子对（{CORR_THRESHOLD_MEDIUM:.1f} < |corr| <= {CORR_THRESHOLD_HIGH:.1f}）：")
         for pair in med_corr_pairs:
             lines.append(f"  - {pair[0]} vs {pair[1]}: {format_float(pair[2], 2)}")
     
@@ -595,10 +610,10 @@ def get_factor_selection_info(composite_results: List[Dict], ic_results: List[Di
             bt_item = next((r for r in backtest_results if r['factor_name'] == f), None)
             
             reason = ""
-            if ic_item and ic_item['icir'] < 0.15:
-                reason = "ICIR<0.15"
-            if bt_item and bt_item['long_short_return_annual'] < 3:
-                reason += (", " if reason else "") + "多空收益<3%"
+            if ic_item and ic_item['icir'] < ICIR_THRESHOLD:
+                reason = f"ICIR<{ICIR_THRESHOLD}"
+            if bt_item and bt_item['long_short_return_annual'] < RETURN_THRESHOLD:
+                reason += (", " if reason else "") + f"多空收益<{RETURN_THRESHOLD}%"
             
             if not reason:
                 reason = "高相关性剔除"
@@ -636,6 +651,159 @@ def merge_factor_data(ic_results: List[Dict], backtest_results: List[Dict]) -> L
     return merged
 
 
+def _generate_ic_section(ic_results: List[Dict]) -> List[str]:
+    """生成单因子 IC 数据汇总部分
+    
+    Args:
+        ic_results: IC 结果列表
+        
+    Returns:
+        报告文本行列表
+    """
+    lines = []
+    lines.append("")
+    lines.append("一、单因子 IC 数据汇总")
+    lines.append("-" * 70)
+    lines.append(f"{'因子':<18} {'IC均值':>10} {'ICIR':>8} {'IC标准差':>10} {'有效天数':>8}")
+    lines.append("-" * 70)
+    
+    for item in ic_results:
+        lines.append(
+            f"{item['factor_name']:<18} "
+            f"{format_float(item['ic_mean']):>10} "
+            f"{format_float(item['icir']):>8} "
+            f"{format_float(item['ic_std']):>10} "
+            f"{item['valid_days']:>8}"
+        )
+    
+    lines.append("-" * 70)
+    ic_order = ', '.join([f"{r['factor_name']}({r['icir']:.2f})" for r in ic_results[:5]])
+    lines.append(f"IC排序(ICIR降序): {ic_order}")
+    
+    return lines
+
+
+def _generate_backtest_section(ic_results: List[Dict], backtest_results: List[Dict]) -> List[str]:
+    """生成单因子分层回测数据汇总部分
+    
+    Args:
+        ic_results: IC 结果列表（用于排序）
+        backtest_results: 回测结果列表
+        
+    Returns:
+        报告文本行列表
+    """
+    lines = []
+    lines.append("")
+    lines.append("二、单因子分层回测数据汇总")
+    lines.append("-" * 70)
+    lines.append(f"{'因子':<18} {'多空年化收益':>12} {'夏普比率':>8} {'单调性系数':>10} {'单调性质量':>10}")
+    lines.append("-" * 70)
+    
+    # 按 IC 结果顺序排序回测结果
+    factor_order_map = {r['factor_name']: i for i, r in enumerate(ic_results)}
+    backtest_sorted = sorted(
+        backtest_results,
+        key=lambda x: factor_order_map.get(x['factor_name'], 999)
+    )
+    
+    for item in backtest_sorted:
+        lines.append(
+            f"{item['factor_name']:<18} "
+            f"{format_percentage(item['long_short_return_annual']):>12} "
+            f"{format_float(item['long_short_sharpe'], 2):>8} "
+            f"{format_float(item['monotonicity_correlation']):>10} "
+            f"{item['monotonicity_symbol']:>10}"
+        )
+    
+    lines.append("-" * 70)
+    
+    return lines
+
+
+def _generate_composite_section(composite_results: List[Dict]) -> List[str]:
+    """生成综合因子四种权重回测数据汇总部分
+    
+    Args:
+        composite_results: 综合因子回测结果列表
+        
+    Returns:
+        报告文本行列表
+    """
+    lines = []
+    lines.append("")
+    lines.append("五、综合因子四种权重回测数据汇总")
+    lines.append("-" * 70)
+    lines.append(f"{'权重方法':<20} {'多空年化收益':>12} {'夏普比率':>8} {'单调性系数':>10} {'单调性质量':>10} {'因子权重':<20}")
+    lines.append("-" * 70)
+    
+    for item in composite_results:
+        lines.append(
+            f"{item['weight_method_display']:<20} "
+            f"{format_percentage(item['long_short_return_annual']):>12} "
+            f"{format_float(item['long_short_sharpe'], 2):>8} "
+            f"{format_float(item['monotonicity_correlation']):>10} "
+            f"{item['monotonicity_symbol']:>10} "
+            f"{item['weight_str']:<20}"
+        )
+    
+    lines.append("-" * 70)
+    
+    return lines
+
+
+def _generate_comparison_section(factor_data: List[Dict], composite_results: List[Dict]) -> List[str]:
+    """生成综合因子 vs 单因子对比部分
+    
+    Args:
+        factor_data: 合并后的因子数据列表
+        composite_results: 综合因子回测结果列表
+        
+    Returns:
+        报告文本行列表
+    """
+    lines = []
+    lines.append("")
+    lines.append("六、综合因子 vs 单因子对比")
+    lines.append("-" * 70)
+    
+    # 边界保护：空列表时跳过对比
+    if not factor_data or not composite_results:
+        lines.append("数据不足，无法生成对比表")
+        lines.append("-" * 70)
+        return lines
+    
+    best_single = max(factor_data, key=lambda x: x.get('icir', 0))
+    best_composite = max(composite_results, key=lambda x: x['long_short_sharpe'])
+    
+    lines.append(f"{'对比项':<20} {best_single['factor_name']+'单因子':>20} {best_composite['weight_method_display']+'综合因子':>20}")
+    lines.append("-" * 70)
+    lines.append(
+        f"{'多空年化收益':<20} "
+        f"{format_percentage(best_single.get('long_short_return_annual', 0)):>20} "
+        f"{format_percentage(best_composite['long_short_return_annual']):>20}"
+    )
+    lines.append(
+        f"{'夏普比率':<20} "
+        f"{format_float(best_single.get('long_short_sharpe', 0), 2):>20} "
+        f"{format_float(best_composite['long_short_sharpe'], 2):>20}"
+    )
+    lines.append(
+        f"{'单调性系数':<20} "
+        f"{format_float(best_single.get('monotonicity_correlation', 0)):>20} "
+        f"{format_float(best_composite['monotonicity_correlation']):>20}"
+    )
+    lines.append(
+        f"{'单调性质量':<20} "
+        f"{best_single.get('monotonicity_symbol', ''):>20} "
+        f"{best_composite['monotonicity_symbol']:>20}"
+    )
+    
+    lines.append("-" * 70)
+    
+    return lines
+
+
 def generate_report(date: str, logger: logging.Logger, force_full_correlation: bool = False) -> str:
     """生成完整的汇总报告
     
@@ -671,50 +839,12 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     lines.append("=" * 70)
     
     # 第一部分：单因子 IC 数据汇总
-    lines.append("")
-    lines.append("一、单因子 IC 数据汇总")
-    lines.append("-" * 70)
-    lines.append(f"{'因子':<18} {'IC均值':>10} {'ICIR':>8} {'IC标准差':>10} {'有效天数':>8}")
-    lines.append("-" * 70)
-    
-    for item in ic_results:
-        lines.append(
-            f"{item['factor_name']:<18} "
-            f"{format_float(item['ic_mean']):>10} "
-            f"{format_float(item['icir']):>8} "
-            f"{format_float(item['ic_std']):>10} "
-            f"{item['valid_days']:>8}"
-        )
-    
-    lines.append("-" * 70)
-    ic_order = ', '.join([f"{r['factor_name']}({r['icir']:.2f})" for r in ic_results[:5]])
-    lines.append(f"IC排序(ICIR降序): {ic_order}")
+    lines.extend(_generate_ic_section(ic_results))
     
     # 第二部分：单因子分层回测数据汇总
-    lines.append("")
-    lines.append("二、单因子分层回测数据汇总")
-    lines.append("-" * 70)
-    lines.append(f"{'因子':<18} {'多空年化收益':>12} {'夏普比率':>8} {'单调性系数':>10} {'单调性质量':>10}")
-    lines.append("-" * 70)
+    lines.extend(_generate_backtest_section(ic_results, backtest_results))
     
-    factor_order = [r['factor_name'] for r in ic_results]
-    backtest_sorted = sorted(
-        backtest_results,
-        key=lambda x: factor_order.index(x['factor_name']) if x['factor_name'] in factor_order else 999
-    )
-    
-    for item in backtest_sorted:
-        lines.append(
-            f"{item['factor_name']:<18} "
-            f"{format_percentage(item['long_short_return_annual']):>12} "
-            f"{format_float(item['long_short_sharpe'], 2):>8} "
-            f"{format_float(item['monotonicity_correlation']):>10} "
-            f"{item['monotonicity_symbol']:>10}"
-        )
-    
-    lines.append("-" * 70)
-    
-    # 第三部分：因子相关性矩阵（新增）
+    # 第三部分：因子相关性矩阵
     lines.extend(generate_correlation_section(corr_matrix, ic_results))
     
     # 第四部分：因子筛选结果
@@ -725,62 +855,10 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     lines.append(selection_info)
     
     # 第五部分：综合因子四种权重回测数据汇总
-    lines.append("")
-    lines.append("五、综合因子四种权重回测数据汇总")
-    lines.append("-" * 70)
-    lines.append(f"{'权重方法':<20} {'多空年化收益':>12} {'夏普比率':>8} {'单调性系数':>10} {'单调性质量':>10} {'因子权重':<20}")
-    lines.append("-" * 70)
-    
-    for item in composite_results:
-        lines.append(
-            f"{item['weight_method_display']:<20} "
-            f"{format_percentage(item['long_short_return_annual']):>12} "
-            f"{format_float(item['long_short_sharpe'], 2):>8} "
-            f"{format_float(item['monotonicity_correlation']):>10} "
-            f"{item['monotonicity_symbol']:>10} "
-            f"{item['weight_str']:<20}"
-        )
-    
-    lines.append("-" * 70)
+    lines.extend(_generate_composite_section(composite_results))
     
     # 第六部分：综合因子 vs 单因子对比
-    lines.append("")
-    lines.append("六、综合因子 vs 单因子对比")
-    lines.append("-" * 70)
-    
-    # 边界保护：空列表时跳过对比
-    if not factor_data or not composite_results:
-        lines.append("数据不足，无法生成对比表")
-        lines.append("-" * 70)
-        return '\n'.join(lines)
-    
-    best_single = max(factor_data, key=lambda x: x.get('icir', 0))
-    best_composite = max(composite_results, key=lambda x: x['long_short_sharpe'])
-    
-    lines.append(f"{'对比项':<20} {best_single['factor_name']+'单因子':>20} {best_composite['weight_method_display']+'综合因子':>20}")
-    lines.append("-" * 70)
-    lines.append(
-        f"{'多空年化收益':<20} "
-        f"{format_percentage(best_single.get('long_short_return_annual', 0)):>20} "
-        f"{format_percentage(best_composite['long_short_return_annual']):>20}"
-    )
-    lines.append(
-        f"{'夏普比率':<20} "
-        f"{format_float(best_single.get('long_short_sharpe', 0), 2):>20} "
-        f"{format_float(best_composite['long_short_sharpe'], 2):>20}"
-    )
-    lines.append(
-        f"{'单调性系数':<20} "
-        f"{format_float(best_single.get('monotonicity_correlation', 0)):>20} "
-        f"{format_float(best_composite['monotonicity_correlation']):>20}"
-    )
-    lines.append(
-        f"{'单调性质量':<20} "
-        f"{best_single.get('monotonicity_symbol', ''):>20} "
-        f"{best_composite['monotonicity_symbol']:>20}"
-    )
-    
-    lines.append("-" * 70)
+    lines.extend(_generate_comparison_section(factor_data, composite_results))
     
     return '\n'.join(lines)
 

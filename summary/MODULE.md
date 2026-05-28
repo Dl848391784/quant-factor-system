@@ -282,3 +282,13 @@ rsi                -0.045     0.51      0.089       498
    - 补全 docstring（merge_factor_data/format_percentage/format_float）
    - 优化性能（get_factor_selection_info 避免重复读取文件，直接使用 composite_results 数据）
    - load_composite_results 新增 factor_list 和 weights 字段
+
+6. v1.5（2026-05-28）：
+   - generate_factor_summary_report.py 第四轮深度审查（v1.4 → v1.5）
+   - 提取魔法数字为常量（CORR_THRESHOLD_HIGH/MEDIUM/MAX, ICIR_THRESHOLD, RETURN_THRESHOLD, MAX_STOCKS_SAMPLE）
+   - 导入 Tuple 类型，修复 _extract_corr_pairs 返回类型注解为 List[Tuple[str, str, float]]
+   - 删除未使用变量（load_backtest_results 移除冗余 corr 变量）
+   - 添加 load_composite_results 日志计数
+   - 简化排序逻辑（backtest_sorted 使用字典映射代替 index() 查找）
+   - 函数拆分重构（新增 _generate_ic_section/_generate_backtest_section/_generate_composite_section/_generate_comparison_section）
+   - generate_report 从约146行缩减到约60行，职责更清晰
