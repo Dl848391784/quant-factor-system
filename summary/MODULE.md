@@ -304,3 +304,13 @@ rsi                -0.045     0.51      0.089       498
    - 添加异常处理（gzip.BadGzipFile/json.JSONDecodeError/OSError）
    - 添加魔法数字注释说明（total_factors = columns - 2）
    - 创建 pytest 测试文件 test_cases/test_merge_factors.py（20个测试用例）
+
+8. v1.7（2026-05-28）：
+   - merge_factors.py 第二轮深度审查（v1.1 → v1.2）
+   - 精确化异常处理（load_parquet_factor: OSError/EmptyDataError/ValueError）
+   - 删除未使用变量（before_rows）
+   - 函数拆分重构（新增 detect_value_column/merge_single_factor/save_merged_data）
+   - 修复列名推断逻辑风险（新增 FACTOR_VALUE_COLUMNS 优先级列表，排除 REQUIRED_COLUMNS）
+   - 添加 argparse 命令行参数支持（--factors/--output/--list-factors/--version）
+   - 新增 list_available_factors 函数
+   - 创建流程文档 docs/merge_factors_flow.md
