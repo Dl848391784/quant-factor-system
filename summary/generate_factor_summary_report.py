@@ -24,9 +24,10 @@
     v1.3: 2026-05-28 深度审查：删除未使用参数、补充返回类型注解、创建流程文档和pytest测试
     v1.4: 2026-05-28 第三轮深度审查：异常处理补全、重复代码重构、边界保护、避免重复读取文件
     v1.5: 2026-05-28 第四轮深度审查：魔法数字提取为常量、类型注解精确化、函数拆分重构
+    v1.6: 2026-05-28 第五轮深度审查：修复10个问题（因子名清洗、单位转换注释、异常精确化、采样偏差警告、剔除原因推断、数据加载保护、对比展示逻辑、文件写入异常、窗口参数读取、总耗时日志）
 """
 
-__version__ = '1.5'
+__version__ = '1.6'
 __author__ = 'factor_ic_analyzer'
 
 # 标准库导入
@@ -34,6 +35,7 @@ import argparse
 import gzip
 import json
 import logging
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -74,6 +76,11 @@ RETURN_THRESHOLD = 3.0  # 多空年化收益阈值（%）
 
 # 相关性计算采样常量
 MAX_STOCKS_SAMPLE = 100  # 相关性计算采样股票数量
+
+# 数据单位说明
+# 原始数据中 long_short_return_annual 为小数形式（如 0.15 表示 15%）
+# 转换公式：百分比 = 小数 * 100
+RETURN_DATA_IS_DECIMAL = True  # 标记原始数据格式，若上游变更需修改此处
 
 
 def setup_logger(name: str = 'generate_factor_summary_report') -> logging.Logger:
@@ -168,7 +175,10 @@ def load_ic_results(logger: logging.Logger) -> List[Dict]:
     for file in ic_dir.glob('ic_*_analysis_result.json'):
         data = load_json_file(file, logger)
         if data:
-            factor_name = data.get('factor_name', '').replace('_1d', '')
+            factor_name = data.get('factor_name', '')
+            # 只移除末尾的 _1d 后缀（避免误删中间的 _1d）
+            if factor_name.endswith('_1d'):
+                factor_name = factor_name[:-3]
             ic_metrics = data.get('ic_metrics', {})
             sample_stats = data.get('sample_stats', {})
             
@@ -213,7 +223,7 @@ def load_backtest_results(logger: logging.Logger) -> List[Dict]:
             
             results.append({
                 'factor_name': factor_name,
-                'long_short_return_annual': long_short.get('long_short_return_annual', 0) * 100,
+                'long_short_return_annual': convert_return_to_percentage(long_short.get('long_short_return_annual', 0)),
                 'long_short_sharpe': long_short.get('long_short_sharpe', 0),
                 'monotonicity_correlation': monotonicity.get('correlation', 0),
                 'monotonicity_quality': quality,
@@ -266,6 +276,11 @@ def calculate_factor_correlation(logger: logging.Logger, force_full: bool = Fals
     
     logger.info("从因子数据文件计算相关性（可能较慢）...")
     start_time = time.time()
+    
+    # 采样说明：使用头部截断采样（取文件前100只股票）
+    # 注意：文件排列顺序可能有规律性偏差（如按市值排序），可能影响相关性计算结果
+    # 如需更准确结果，应使用随机采样或完整数据集
+    logger.warning("使用头部截断采样（前%d只股票），可能存在规律性偏差", MAX_STOCKS_SAMPLE)
     
     try:
         # 数据文件结构：每行一个股票，data 数组包含所有日期数据
@@ -325,8 +340,18 @@ def calculate_factor_correlation(logger: logging.Logger, force_full: bool = Fals
             
             return corr_df
     
-    except Exception as e:
-        logger.error(f"计算因子相关性失败: {type(e).__name__}: {e}")
+    # 显式列出可预期的异常类型（不捕获 KeyboardInterrupt、SystemExit 等）
+    except (OSError, gzip.BadGzipFile) as e:
+        logger.error("文件读取错误: %s: %s", type(e).__name__, e)
+        return None
+    except json.JSONDecodeError as e:
+        logger.error("JSON 解析错误: 位置 %d, 原因: %s", e.pos, e.msg)
+        return None
+    except pd.errors.EmptyDataError as e:
+        logger.error("数据为空: %s", e)
+        return None
+    except ValueError as e:
+        logger.error("数据格式错误: %s", e)
         return None
 
 
@@ -357,7 +382,10 @@ def load_composite_results(logger: logging.Logger) -> List[Dict]:
             
             # 格式化权重字符串
             if method == 'rolling_icir_weight':
-                weight_str = '动态权重(60日)'
+                # 从 meta.weight_meta 读取实际窗口参数（而非硬编码）
+                weight_meta = meta.get('weight_meta', {})
+                rolling_window = weight_meta.get('window', 60)  # 默认60日
+                weight_str = f'动态权重({rolling_window}日)'
             else:
                 weight_str = format_weights(weights)
             
@@ -368,7 +396,7 @@ def load_composite_results(logger: logging.Logger) -> List[Dict]:
             results.append({
                 'weight_method': method,
                 'weight_method_display': get_weight_method_display(method),
-                'long_short_return_annual': long_short.get('long_short_return_annual', 0) * 100,
+                'long_short_return_annual': convert_return_to_percentage(long_short.get('long_short_return_annual', 0)),
                 'long_short_sharpe': long_short.get('long_short_sharpe', 0),
                 'monotonicity_correlation': monotonicity.get('correlation', 0),
                 'monotonicity_quality': quality,
@@ -448,13 +476,33 @@ def format_percentage(value: float, decimals: int = 2) -> str:
     """格式化百分比
     
     Args:
-        value: 数值
+        value: 数值（已转换为百分比，如 15.5 表示 15.5%）
         decimals: 小数位数
         
     Returns:
         格式化的百分比字符串
     """
     return f"{value:.{decimals}f}%"
+
+
+def convert_return_to_percentage(decimal_value: float) -> float:
+    """将小数形式的收益率转换为百分比
+    
+    原始数据中 long_short_return_annual 为小数形式（如 0.15 表示 15%）。
+    此函数统一转换逻辑，避免多处重复 * 100。
+    
+    Args:
+        decimal_value: 小数形式的收益率（如 0.15）
+        
+    Returns:
+        百分比形式的收益率（如 15.0）
+    
+    Note:
+        若上游数据格式变更（已经是百分比），需修改 RETURN_DATA_IS_DECIMAL 常量
+    """
+    if RETURN_DATA_IS_DECIMAL:
+        return decimal_value * 100
+    return decimal_value  # 数据已是百分比，直接返回
 
 
 def format_float(value: float, decimals: int = 4) -> str:
@@ -616,7 +664,7 @@ def get_factor_selection_info(composite_results: List[Dict], ic_results: List[Di
                 reason += (", " if reason else "") + f"多空收益<{RETURN_THRESHOLD}%"
             
             if not reason:
-                reason = "高相关性剔除"
+                reason = "原因未知"  # 无法从当前数据推断真实剔除原因
             
             excluded_info.append(f"{f}({reason})")
         
@@ -753,7 +801,9 @@ def _generate_composite_section(composite_results: List[Dict]) -> List[str]:
 
 
 def _generate_comparison_section(factor_data: List[Dict], composite_results: List[Dict]) -> List[str]:
-    """生成综合因子 vs 单因子对比部分
+    """生成综合因子与单因子对比部分
+    
+    展示四种权重方法的回测指标和选中单因子的回测指标，只做收集展示不做选择。
     
     Args:
         factor_data: 合并后的因子数据列表
@@ -764,40 +814,81 @@ def _generate_comparison_section(factor_data: List[Dict], composite_results: Lis
     """
     lines = []
     lines.append("")
-    lines.append("六、综合因子 vs 单因子对比")
+    lines.append("六、综合因子与单因子对比")
     lines.append("-" * 70)
     
     # 边界保护：空列表时跳过对比
-    if not factor_data or not composite_results:
-        lines.append("数据不足，无法生成对比表")
+    if not composite_results:
+        lines.append("综合因子数据不足，无法生成对比表")
         lines.append("-" * 70)
         return lines
     
-    best_single = max(factor_data, key=lambda x: x.get('icir', 0))
-    best_composite = max(composite_results, key=lambda x: x['long_short_sharpe'])
-    
-    lines.append(f"{'对比项':<20} {best_single['factor_name']+'单因子':>20} {best_composite['weight_method_display']+'综合因子':>20}")
+    # ========================================
+    # 第一部分：综合因子四种权重方法回测数据
+    # ========================================
+    lines.append("")
+    lines.append("【综合因子四种权重方法回测数据】")
     lines.append("-" * 70)
-    lines.append(
-        f"{'多空年化收益':<20} "
-        f"{format_percentage(best_single.get('long_short_return_annual', 0)):>20} "
-        f"{format_percentage(best_composite['long_short_return_annual']):>20}"
-    )
-    lines.append(
-        f"{'夏普比率':<20} "
-        f"{format_float(best_single.get('long_short_sharpe', 0), 2):>20} "
-        f"{format_float(best_composite['long_short_sharpe'], 2):>20}"
-    )
-    lines.append(
-        f"{'单调性系数':<20} "
-        f"{format_float(best_single.get('monotonicity_correlation', 0)):>20} "
-        f"{format_float(best_composite['monotonicity_correlation']):>20}"
-    )
-    lines.append(
-        f"{'单调性质量':<20} "
-        f"{best_single.get('monotonicity_symbol', ''):>20} "
-        f"{best_composite['monotonicity_symbol']:>20}"
-    )
+    lines.append(f"{'权重方法':<20} {'多空年化收益':>12} {'夏普比率':>8} {'单调性系数':>10} {'单调性质量':>10}")
+    lines.append("-" * 70)
+    
+    for item in composite_results:
+        lines.append(
+            f"{item['weight_method_display']:<20} "
+            f"{format_percentage(item['long_short_return_annual']):>12} "
+            f"{format_float(item['long_short_sharpe'], 2):>8} "
+            f"{format_float(item['monotonicity_correlation']):>10} "
+            f"{item['monotonicity_symbol']:>10}"
+        )
+    
+    lines.append("-" * 70)
+    
+    # ========================================
+    # 第二部分：选中单因子回测数据
+    # ========================================
+    lines.append("")
+    lines.append("【选中单因子回测数据】")
+    lines.append("-" * 70)
+    
+    # 从 composite_results 中获取选中的因子列表（使用 icir_weight 方法的 factor_list）
+    selected_factors = []
+    for item in composite_results:
+        if item['weight_method'] == 'icir_weight':
+            selected_factors = item.get('factor_list', [])
+            break
+    
+    if not selected_factors:
+        lines.append("未找到选中因子列表")
+        lines.append("-" * 70)
+        return lines
+    
+    if not factor_data:
+        lines.append("单因子数据不足，无法展示选中因子")
+        lines.append("-" * 70)
+        return lines
+    
+    # 表头
+    lines.append(f"{'因子名':<18} {'多空年化收益':>12} {'夏普比率':>8} {'单调性系数':>10} {'单调性质量':>10} {'权重':>8}")
+    lines.append("-" * 70)
+    
+    # 展示选中的单因子
+    for factor_name in selected_factors:
+        factor_item = next((f for f in factor_data if f['factor_name'] == factor_name), None)
+        if factor_item:
+            # 获取权重（从 composite_results 中）
+            weight_item = next((c for c in composite_results if c['weight_method'] == 'icir_weight'), None)
+            weight = weight_item.get('weights', {}).get(factor_name, 0) if weight_item else 0
+            
+            lines.append(
+                f"{factor_name:<18} "
+                f"{format_percentage(factor_item.get('long_short_return_annual', 0)):>12} "
+                f"{format_float(factor_item.get('long_short_sharpe', 0), 2):>8} "
+                f"{format_float(factor_item.get('monotonicity_correlation', 0)):>10} "
+                f"{factor_item.get('monotonicity_symbol', ''):>10} "
+                f"{weight*100:>6.1f}%"  # 权重百分比，右对齐宽度6
+            )
+        else:
+            lines.append(f"{factor_name:<18} 数据缺失")
     
     lines.append("-" * 70)
     
@@ -827,7 +918,15 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     logger.info("加载综合因子结果...")
     composite_results = load_composite_results(logger)
     
-    # 计算因子相关性矩阵
+    # 数据加载失败保护：关键数据为空时抛出明确错误
+    if not ic_results:
+        logger.error("IC 结果数据为空，无法生成报告")
+        raise ValueError("IC 结果数据为空，请检查 factor_ic/result 目录是否有数据文件")
+    if not backtest_results:
+        logger.error("回测结果数据为空，无法生成报告")
+        raise ValueError("回测结果数据为空，请检查 backtest/result 目录是否有数据文件")
+    
+    logger.info(f"数据加载完成: IC结果 {len(ic_results)} 个, 回测结果 {len(backtest_results)} 个, 综合因子 {len(composite_results)} 种权重方法")
     corr_matrix = calculate_factor_correlation(logger, force_full=force_full_correlation)
     
     # 合并 IC 和回测数据
@@ -867,6 +966,9 @@ def main():
     """主函数"""
     # 初始化日志记录器
     logger = setup_logger('generate_factor_summary_report')
+    
+    # 记录开始时间（用于计算总耗时）
+    start_time = time.time()
     logger.info(f"开始生成汇总报告 (版本 {__version__})")
     
     parser = argparse.ArgumentParser(description='生成因子分析数据汇总报告')
@@ -888,8 +990,17 @@ def main():
         result_dir.mkdir(parents=True, exist_ok=True)
         output_path = result_dir / f'factor_summary_report_{date}.txt'
     
-    output_path.write_text(report, encoding='utf-8')
-    logger.info(f"报告已保存到: {output_path}")
+    # 文件写入异常处理
+    try:
+        output_path.write_text(report, encoding='utf-8')
+        logger.info(f"报告已保存到: {output_path}")
+    except OSError as e:
+        logger.error("文件写入失败: %s, 原因: %s", output_path, e)
+        sys.exit(1)
+    
+    # 记录总耗时
+    elapsed = time.time() - start_time
+    logger.info(f"报告生成完成，总耗时: {elapsed:.2f}秒")
 
 
 if __name__ == '__main__':

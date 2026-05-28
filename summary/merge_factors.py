@@ -21,9 +21,20 @@
     v1.1: 2026-05-28 符合研发规范：添加版本常量、setup_logger、返回类型注解、异常处理、pytest测试
     v1.2: 2026-05-28 第二轮深度审查：精确化异常处理、删除未使用变量、函数拆分、argparse支持、流程文档
     v1.3: 2026-05-28 第三轮深度审查：删除未使用导入/常量、固定日志文件名、进度显示、数据验证、配置文件支持
+    v1.4: 2026-05-28 第四轮深度审查（10项修复）：
+        - load_main_data JSON顶层结构兼容处理，空数据时warning并返回None
+        - 捕获pd.DataFrame异常(ValueError)
+        - parquet异常类型修正(EmptyDataError无效，改为Exception)
+        - detect_value_column取第一个非必需列而非最后一个
+        - merge_single_factor合并前去重防止行数膨胀
+        - merge_factors单次循环避免内存峰值
+        - 添加因子列表来源日志(未指定时使用默认列表)
+        - main函数明确打印因子列表来源
+        - 删除冗余source_desc字段，改为source_file
+        - list_available_factors单次输出避免刷屏
 """
 
-__version__ = '1.3'
+__version__ = '1.4'
 __author__ = 'factor_ic_analyzer'
 
 # 标准库导入
@@ -169,7 +180,22 @@ def load_main_data(logger: logging.Logger) -> Optional[pd.DataFrame]:
     
     try:
         with gzip.open(main_data_file, 'rt', encoding='utf-8') as f:
-            data = json.load(f).get('data', [])
+            raw_data = json.load(f)
+        
+        # 检查 JSON 结构：期望顶层是 dict 且包含 'data' 键
+        if isinstance(raw_data, dict):
+            data = raw_data.get('data', [])
+            if not data:
+                logger.warning("主数据源 JSON 'data' 字段为空或不存在")
+                return None
+        elif isinstance(raw_data, list):
+            # 顶层直接是数组（兼容处理）
+            data = raw_data
+            logger.warning("主数据源 JSON 顶层为数组而非 dict，已兼容处理")
+        else:
+            logger.error(f"主数据源 JSON 结构异常: {type(raw_data).__name__}")
+            return None
+        
         df = pd.DataFrame(data)
         logger.info(f"主数据源加载完成: {len(df)} 条记录, {len(df.columns)} 列")
         logger.debug(f"主数据列: {df.columns.tolist()}")
@@ -180,8 +206,9 @@ def load_main_data(logger: logging.Logger) -> Optional[pd.DataFrame]:
     except json.JSONDecodeError as e:
         logger.error(f"主数据源 JSON 解析失败: {e}")
         return None
-    except OSError as e:
-        logger.error(f"主数据源文件读取失败: {e}")
+    except (OSError, ValueError) as e:
+        # ValueError: pd.DataFrame(data) 数据结构不合法（如嵌套结构不一致）
+        logger.error(f"主数据源数据格式错误: {e}")
         return None
 
 
@@ -209,11 +236,10 @@ def load_parquet_factor(factor_name: str, logger: logging.Logger) -> Optional[pd
     except OSError as e:
         logger.error(f"因子 {factor_name} 文件读取错误: {e}")
         return None
-    except pd.errors.EmptyDataError as e:
-        logger.error(f"因子 {factor_name} 数据为空: {e}")
-        return None
-    except ValueError as e:
-        logger.error(f"因子 {factor_name} 数据格式错误: {e}")
+    except Exception as e:
+        # parquet 空文件或损坏可能抛出 pyarrow.lib.ArrowInvalid 等异常
+        # pd.errors.EmptyDataError 仅适用于 CSV 等文本格式，parquet 不抛出此异常
+        logger.error(f"因子 {factor_name} 数据解析错误 ({type(e).__name__}): {e}")
         return None
 
 
@@ -235,11 +261,11 @@ def detect_value_column(factor_df: pd.DataFrame, factor_name: str, logger: loggi
         if col in columns:
             return col
     
-    # 排除必需列后，取最后一个非必需列
+    # 排除必需列后，取第一个非必需列（最后一列可能是时间戳等辅助字段）
     non_required_cols = [c for c in columns if c not in REQUIRED_COLUMNS]
     
     if non_required_cols:
-        value_col = non_required_cols[-1]
+        value_col = non_required_cols[0]  # 取第一个而非最后一个
         logger.debug(f"因子 {factor_name} 使用推断列名: {value_col}")
         return value_col
     
@@ -277,6 +303,12 @@ def merge_single_factor(
     # 重命名因子值列为因子名
     factor_df_renamed = factor_df[REQUIRED_COLUMNS + [value_col]].copy()
     factor_df_renamed.columns = REQUIRED_COLUMNS + [factor_name]
+    
+    # 去重检查：若因子文件中 date + asset 存在重复行，合并后行数会膨胀
+    original_len = len(factor_df_renamed)
+    factor_df_renamed = factor_df_renamed.drop_duplicates(subset=REQUIRED_COLUMNS, keep='first')
+    if len(factor_df_renamed) < original_len:
+        logger.warning(f"因子 {factor_name} 存在重复键（{original_len} → {len(factor_df_renamed)}），已去重")
     
     # 合并
     merged_df = merged_df.merge(factor_df_renamed, on=REQUIRED_COLUMNS, how='left')
@@ -374,18 +406,16 @@ def save_merged_data(
         logger.info(f"  Parquet文件: {output_parquet}")
         logger.info(f"  文件大小: {file_size_mb:.2f} MB")
         
-        # 保存元数据（动态生成 source）
+        # 保存元数据（merged_factors 已包含完整因子列表，无需冗余的 source 描述）
         total_factors = len(merged_df.columns) - len(REQUIRED_COLUMNS)
-        
-        source_desc = f"factor_data.json.gz + {len(merged_factors)} new factors ({', '.join(merged_factors[:5])}{'...' if len(merged_factors) > 5 else ''})"
         
         metadata = {
             'created_at': datetime.now().isoformat(),
             'total_records': len(merged_df),
             'total_factors': total_factors,
-            'merged_factors': merged_factors,
+            'merged_factors': merged_factors,  # 完整因子列表
             'factors': merged_df.columns.tolist(),
-            'source': source_desc,
+            'source_file': 'factor_data.json.gz',  # 仅记录数据源文件名
             'script_version': __version__,
         }
         
@@ -420,6 +450,8 @@ def merge_factors(
     """
     # 使用默认值
     factors = factor_list if factor_list is not None else DEFAULT_FACTORS
+    if factor_list is None:
+        logger.info(f"未指定因子列表，使用内置默认列表（{len(factors)} 个因子）")
     out_dir = output_dir if output_dir is not None else PROJECT_ROOT / DATA_PATHS['factor_data']
     
     logger.info("=" * 60)
@@ -433,36 +465,37 @@ def merge_factors(
         logger.error("主数据源加载失败，无法继续合并")
         return None
     
-    # 2. 加载所有新因子
-    logger.info(f"开始加载 {len(factors)} 个新因子...")
-    factor_dfs: Dict[str, pd.DataFrame] = {}
-    
-    for i, factor_name in enumerate(factors, 1):
-        # 进度显示
-        logger.info(f"[{i}/{len(factors)}] 加载 {factor_name}...")
-        df = load_parquet_factor(factor_name, logger)
-        if df is not None:
-            factor_dfs[factor_name] = df
-    
-    logger.info(f"成功加载 {len(factor_dfs)} / {len(factors)} 个因子")
-    
-    if not factor_dfs:
-        logger.warning("没有成功加载任何因子，返回原始主数据")
-        return main_df
-    
-    # 3. 逐个合并因子（带进度显示）
+    # 2. 单次循环：加载后立即合并再释放（避免内存峰值）
     merged_df = main_df.copy()
     merged_factors: List[str] = []
-    logger.info("开始合并因子到主数据...")
+    loaded_count = 0
+    logger.info(f"开始处理 {len(factors)} 个因子（加载后立即合并）...")
     
-    for i, (factor_name, factor_df) in enumerate(factor_dfs.items(), 1):
-        # 进度显示
-        logger.info(f"[{i}/{len(factor_dfs)}] 合并 {factor_name}...")
+    for i, factor_name in enumerate(factors, 1):
+        logger.info(f"[{i}/{len(factors)}] 处理 {factor_name}...")
+        
+        # 加载因子
+        factor_df = load_parquet_factor(factor_name, logger)
+        if factor_df is None:
+            continue
+        
+        loaded_count += 1
+        
+        # 立即合并
         merged_df = merge_single_factor(merged_df, factor_df, factor_name, logger)
         
         # 检查是否成功合并
         if factor_name in merged_df.columns:
             merged_factors.append(factor_name)
+        
+        # 释放因子 DataFrame 内存（合并后不再需要）
+        del factor_df
+    
+    logger.info(f"成功加载 {loaded_count} / {len(factors)} 个因子")
+    
+    if not merged_factors:
+        logger.warning("没有成功合并任何因子，返回原始主数据")
+        return main_df
     
     # 4. 数据验证
     logger.info("=" * 60)
@@ -504,9 +537,13 @@ def list_available_factors(logger: logging.Logger) -> List[str]:
         return []
     
     available = [f.stem for f in factors_dir.glob('*.parquet')]
-    logger.info(f"可用因子 ({len(available)} 个):")
-    for factor in sorted(available):
-        logger.info(f"  - {factor}")
+    
+    if available:
+        # 单次输出因子列表，避免逐行刷屏
+        sorted_factors = sorted(available)
+        logger.info(f"可用因子 ({len(available)} 个): {', '.join(sorted_factors)}")
+    else:
+        logger.warning("因子目录中没有 parquet 文件")
     
     return available
 
@@ -578,14 +615,26 @@ def main() -> None:
     
     # 确定因子列表（优先级：命令行 > 配置文件 > 默认）
     factor_list = args.factors
+    source_desc = None  # 因子列表来源描述
     
-    if factor_list is None and args.config is not None:
+    if factor_list is not None:
+        source_desc = f"命令行参数 ({len(factor_list)} 个)"
+    elif args.config is not None:
         factor_list = load_config(args.config, logger)
-    
-    if factor_list is None:
+        if factor_list is not None:
+            source_desc = f"配置文件 {args.config} ({len(factor_list)} 个)"
+    else:
         # 尝试默认配置文件
         default_config = PROJECT_ROOT / DATA_PATHS['config'] / DEFAULT_CONFIG_FILE
         factor_list = load_config(default_config, logger)
+        if factor_list is not None:
+            source_desc = f"默认配置文件 {DEFAULT_CONFIG_FILE} ({len(factor_list)} 个)"
+    
+    # 明确打印因子列表来源
+    if source_desc:
+        logger.info(f"因子列表来源: {source_desc}")
+    else:
+        logger.info(f"因子列表来源: 内置默认列表 ({len(DEFAULT_FACTORS)} 个)")
     
     # 合并因子
     merged_df = merge_factors(
