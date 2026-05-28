@@ -545,13 +545,12 @@ def _extract_corr_pairs(corr_matrix: pd.DataFrame, factor_names: List[str],
 def generate_correlation_section(corr_matrix: Optional[pd.DataFrame], ic_results: List[Dict], selection_result: Optional[Dict] = None) -> List[str]:
     """生成因子相关性部分
     
-    v1.8 (2026-05-28): 新增 selection_result 参数，显示筛选时发现的高相关因子对，
-                       解决"选中因子矩阵无高相关"与"筛选结果显示高相关剔除"的矛盾
+    v1.8 (2026-05-28): 新增 selection_result 参数（预留），添加选中因子说明
     
     Args:
         corr_matrix: 因子相关性矩阵（仅选中因子，可为 None）
         ic_results: IC 结果列表（用于排序因子名）
-        selection_result: 筛选详细结果（包含 high_corr_dropped 字段）
+        selection_result: 筛选详细结果（预留，暂不使用）
         
     Returns:
         报告文本行列表
@@ -612,16 +611,6 @@ def generate_correlation_section(corr_matrix: Optional[pd.DataFrame], ic_results
         lines.append(f"选中因子中中等相关因子对（{CORR_THRESHOLD_MEDIUM:.1f} < |corr| <= {CORR_THRESHOLD_HIGH:.1f}）：")
         for pair in med_corr_pairs:
             lines.append(f"  - {pair[0]} vs {pair[1]}: {format_float(pair[2], 2)}")
-    
-    # v1.8: 显示筛选过程中发现的高相关因子对
-    if selection_result:
-        high_corr_dropped = selection_result.get('high_corr_dropped', {})
-        if high_corr_dropped:
-            lines.append("")
-            lines.append("=" * 70)
-            lines.append("筛选过程中发现的高相关因子对（已剔除）：")
-            for factor_name, reason in high_corr_dropped.items():
-                lines.append(f"  - {factor_name}: {reason}")
     
     lines.append("-" * 70)
     
