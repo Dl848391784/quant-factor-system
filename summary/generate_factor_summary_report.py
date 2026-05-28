@@ -27,7 +27,7 @@
     v1.6: 2026-05-28 第五轮深度审查：修复10个问题（因子名清洗、单位转换注释、异常精确化、采样偏差警告、剔除原因推断、数据加载保护、对比展示逻辑、文件写入异常、窗口参数读取、总耗时日志）
 """
 
-__version__ = '1.6'
+__version__ = '1.7'
 __author__ = 'factor_ic_analyzer'
 
 # 标准库导入
@@ -402,8 +402,9 @@ def load_composite_results(logger: logging.Logger) -> List[Dict]:
                 'monotonicity_quality': quality,
                 'monotonicity_symbol': quality_symbol,
                 'weight_str': weight_str,
-                'factor_list': meta.get('factor_list', []),  # 新增：因子列表
-                'weights': weights,  # 新增：权重字典
+                'factor_list': meta.get('factor_list', []),
+                'weights': weights,
+                'selection_result': meta.get('selection_result'),  # v1.7: 筛选详细结果
             })
             file_count += 1
     
@@ -612,6 +613,9 @@ def generate_correlation_section(corr_matrix: Optional[pd.DataFrame], ic_results
 def get_factor_selection_info(composite_results: List[Dict], ic_results: List[Dict], backtest_results: List[Dict], logger: logging.Logger) -> str:
     """获取因子筛选信息
     
+    v1.7 (2026-05-28): 优先读取 selection_result 中的真实筛选原因，
+                       解决"原因未知"问题（需要 composite_runner.py v2.9 配合）
+    
     Args:
         composite_results: 综合因子回测结果列表
         ic_results: IC 结果列表
@@ -630,10 +634,14 @@ def get_factor_selection_info(composite_results: List[Dict], ic_results: List[Di
     # 直接使用传入的 composite_results 数据（已在 load_composite_results 加载）
     selected_factors = []
     weights = {}
+    selection_result = None  # v1.7: 筛选详细结果
+    
     for item in composite_results:
         if item['weight_method'] == 'icir_weight':
             selected_factors = item.get('factor_list', [])
             weights = item.get('weights', {})
+            # v1.7: 读取 selection_result（composite_runner.py v2.9 新增）
+            selection_result = item.get('selection_result')
             
             factor_info = []
             for f in selected_factors:
@@ -647,24 +655,49 @@ def get_factor_selection_info(composite_results: List[Dict], ic_results: List[Di
             lines.append(f"  - 选中因子: {', '.join(factor_info)}")
             break
     
-    # 推断剔除的因子
+    # v1.7: 优先使用 selection_result 中的真实原因
     all_factors = [r['factor_name'] for r in ic_results]
     excluded_factors = [f for f in all_factors if f not in selected_factors]
     
     if excluded_factors:
         excluded_info = []
+        
+        # 构建剔除原因字典（从 selection_result 获取真实原因）
+        exclude_reasons: Dict[str, str] = {}
+        
+        if selection_result:
+            # 从 invalid 字段获取无效因子原因
+            invalid = selection_result.get('invalid', {})
+            for factor_name, reasons in invalid.items():
+                exclude_reasons[factor_name] = '; '.join(reasons) if isinstance(reasons, list) else str(reasons)
+            
+            # 从 high_corr_dropped 字段获取高相关剔除原因
+            high_corr_dropped = selection_result.get('high_corr_dropped', {})
+            for factor_name, reason in high_corr_dropped.items():
+                exclude_reasons[factor_name] = str(reason)
+            
+            logger.debug("从 selection_result 读取真实筛选原因: %d 条", len(exclude_reasons))
+        
+        # 对每个剔除因子查找原因
         for f in excluded_factors:
-            ic_item = next((r for r in ic_results if r['factor_name'] == f), None)
-            bt_item = next((r for r in backtest_results if r['factor_name'] == f), None)
-            
-            reason = ""
-            if ic_item and ic_item['icir'] < ICIR_THRESHOLD:
-                reason = f"ICIR<{ICIR_THRESHOLD}"
-            if bt_item and bt_item['long_short_return_annual'] < RETURN_THRESHOLD:
-                reason += (", " if reason else "") + f"多空收益<{RETURN_THRESHOLD}%"
-            
-            if not reason:
-                reason = "原因未知"  # 无法从当前数据推断真实剔除原因
+            if f in exclude_reasons:
+                # 使用真实原因
+                reason = exclude_reasons[f]
+                logger.debug("因子 %s 剔除原因: %s", f, reason)
+            else:
+                # 回退推断逻辑（兼容旧版本输出文件）
+                ic_item = next((r for r in ic_results if r['factor_name'] == f), None)
+                bt_item = next((r for r in backtest_results if r['factor_name'] == f), None)
+                
+                reason = ""
+                if ic_item and ic_item['icir'] < ICIR_THRESHOLD:
+                    reason = f"ICIR<{ICIR_THRESHOLD}"
+                if bt_item and bt_item['long_short_return_annual'] < RETURN_THRESHOLD:
+                    reason += (", " if reason else "") + f"多空收益<{RETURN_THRESHOLD}%"
+                
+                if not reason:
+                    reason = "原因未知（selection_result 未记录）"
+                    logger.warning("因子 %s 剔除原因未知，建议重新执行综合因子脚本", f)
             
             excluded_info.append(f"{f}({reason})")
         

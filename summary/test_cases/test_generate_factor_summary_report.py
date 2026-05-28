@@ -40,7 +40,7 @@ class TestVersion:
     
     def test_version_defined(self):
         """验证版本常量存在"""
-        assert __version__ == '1.3'
+        assert __version__ == '1.7'
 
 
 class TestHelperFunctions:
@@ -267,7 +267,7 @@ class TestReportStructure:
             
             logger = setup_logger('test')
             
-            ic_results = load_ic_results('2026-05-28', logger)
+            ic_results = load_ic_results(logger)  # v1.7: 函数签名已变更，不需要日期参数
             assert len(ic_results) >= 1
             assert ic_results[0]['factor_name'] == 'rsi'
 

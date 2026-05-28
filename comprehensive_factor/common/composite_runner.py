@@ -14,6 +14,11 @@
 
 作者: 云瑶
 创建日期: 2026-05-24
+
+版本历史:
+    v2.7: 2026-05-27 移除 cache_dir 参数，改为统一数据源 data_source
+    v2.8: 2026-05-28 新增 --auto_select 参数，支持自动因子筛选
+    v2.9: 2026-05-28 新增 selection_result 字段保存筛选详细原因（解决"原因未知"问题）
 """
 
 import os
@@ -484,6 +489,8 @@ def run_composite_backtest(
     output_file = output_dir / f'composite_{weight_method}_{return_period}.json'
     
     # 构建输出数据
+    # v2.9: 新增 selection_result 字段，保存因子筛选的详细原因（invalid + high_corr_dropped）
+    # 解决 generate_factor_summary_report.py 显示"原因未知"的问题
     output_data = {
         'meta': {
             'weight_method': weight_method,
@@ -492,6 +499,7 @@ def run_composite_backtest(
             'factor_cols': factor_cols,
             'weights': weights,           # 权重数据（动态权重时为空字典）
             'weight_meta': weight_meta,   # 新增：权重元信息（与权重数据分离）
+            'selection_result': selection_result if auto_select else None,  # v2.9: 筛选详细结果
             'ic_results': {
                 name: {
                     'ic_mean': ic_results.get(name, {}).get('ic_mean'),
