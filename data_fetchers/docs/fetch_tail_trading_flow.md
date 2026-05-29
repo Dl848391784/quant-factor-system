@@ -1,8 +1,8 @@
 # 尾盘数据拉取流程文档
 
-> 版本: v1.3
+> 版本: v1.4
 > 创建时间: 2026-05-29 11:17 北京时间
-> 更新时间: 2026-05-29 14:00 北京时间
+> 更新时间: 2026-05-29 15:00 北京时间
 
 ## 概述
 
@@ -12,7 +12,8 @@
 
 | 版本 | 时间 | 修改内容 |
 |------|------|----------|
-| v1.3 | 2026-05-29 14:00 | 第三轮深度优化：datetime.now()替换为_NOW_STR（main结束日志）、异常处理精确化（main/CLI入口）、docstring Raises修复（fetch_tail_trading_for_stock/main）、输出版本号同步更新、注释引用常量名 |
+| v1.4 | 2026-05-29 15:00 | 第四轮深度优化：修复变量名覆盖bug（time→kline_time）、删除未使用导入（Path）、异常处理精确化（Exception→ValueError）、API常量命名规范化、修复增量拉取逻辑（保留缓存） |
+| v1.3 | 2026-05-29 14:00 | 第三轮深度优化：datetime.now()替换为_NOW_STR（main结束日志）、异常处理精确化（main/CLI入口）、docstring Raises修复、输出版本号同步更新、注释引用常量名 |
 | v1.2 | 2026-05-29 13:30 | 第二轮深度优化：params魔法数字替换为常量、datetime.now()替换为_NOW_STR、删除未使用常量DEFAULT_HISTORY_DAYS、异常处理精确化（load_cache/save_cache）、常量命名规范化（CACHE_FILE→_CACHE_FILE） |
 | v1.1 | 2026-05-29 11:50 | 优化：补充API常量（API_KLT等）、异常处理精确化（区分网络/解析异常）、main docstring删除Returns节 |
 | v1.0 | 2026-05-29 11:30 | 初始版本：复用公共模块、支持全量/增量模式 |

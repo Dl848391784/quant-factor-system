@@ -8,6 +8,12 @@
 输出路径：data_fetchers/result/tail_trading_data.json.gz（遵循 MODULE.md 约束 #2）
 
 版本历史:
+- v1.4 (2026-05-29 15:00): 第四轮深度优化
+  - 修复变量名覆盖 bug（time → kline_time，避免覆盖导入的 time 模块）
+  - 删除未使用导入（Path）
+  - 异常处理精确化（fetch_tail_trading_for_stock: Exception → ValueError）
+  - API常量命名规范化（EASTMONEY_API_URL → _EASTMONEY_API_URL）
+  - 修复增量拉取逻辑（full=False 时若拉取失败但已有缓存，保留缓存）
 - v1.3 (2026-05-29 14:00): 第三轮深度优化
   - datetime.now() 替换为 _NOW_STR 固定时间戳（第660行 main 结束日志）
   - 异常处理精确化（main/CLI入口：requests.RequestException + json.JSONDecodeError + OSError）
@@ -39,7 +45,6 @@ import sys
 import time
 import argparse
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 import requests
@@ -84,7 +89,7 @@ _RESULT_DIR = get_module_result_dir()
 _CACHE_FILE = _RESULT_DIR / 'tail_trading_data.json.gz'  # 缓存文件路径（私有常量）
 
 # API 配置
-EASTMONEY_API_URL = 'http://push2his.eastmoney.com/api/qt/stock/kline/get'
+_EASTMONEY_API_URL = 'http://push2his.eastmoney.com/api/qt/stock/kline/get'  # API地址（私有常量）
 API_KLT = 5                  # K线类型：5分钟K线（遵循 MODULE.md 约束 #16）
 API_FQT = 1                  # 前复权
 API_LMT_FULL = 500           # 全量模式最大条数（约12天）
@@ -255,7 +260,7 @@ def fetch_tail_trading_for_stock(
         # 使用 request_with_retry 发送请求（遵循 MODULE.md 约束 #78）
         response_data = request_with_retry(
             session=session,
-            url=EASTMONEY_API_URL,
+            url=_EASTMONEY_API_URL,
             params=params,
             logger=_logger
         )
@@ -295,13 +300,13 @@ def fetch_tail_trading_for_stock(
                 datetime_part = parts[0].split(' ')
                 if len(datetime_part) >= 2:
                     date = datetime_part[0]
-                    time = datetime_part[1]
+                    kline_time = datetime_part[1]  # 使用 kline_time 避免覆盖 time 模块
                 else:
                     continue  # 格式异常，跳过
                 
                 parsed_klines.append({
                     'date': date,
-                    'time': time,
+                    'time': kline_time,
                     'open': float(parts[1]),
                     'close': float(parts[2]),
                     'high': float(parts[3]),
@@ -345,8 +350,8 @@ def fetch_tail_trading_for_stock(
     except json.JSONDecodeError as e:
         _logger.warning(f"[{code}] JSON解析失败: [{type(e).__name__}]: {e}")
         return []
-    except Exception as e:
-        _logger.error(f"[{code}] 未预期异常: [{type(e).__name__}]: {e}")
+    except ValueError as e:
+        _logger.warning(f"[{code}] 数据解析失败: [{type(e).__name__}]: {e}")
         return []
 
 
@@ -645,9 +650,15 @@ def main(
         logger_arg=_logger
     )
     
+    # 数据拉取结果处理（遵循 MODULE.md 约束 #88）
     if not new_records:
-        _logger.error("未获取到任何数据")
-        return False
+        if not full and existing_data:
+            _logger.warning("增量拉取失败，保留现有缓存")
+            save_cache(existing_data, logger_arg=_logger)
+            return True
+        else:
+            _logger.error("未获取到任何数据")
+            return False
     
     # Step 4: 合并去重
     merged_data = merge_records(
