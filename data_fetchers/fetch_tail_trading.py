@@ -8,6 +8,12 @@
 输出路径：data_fetchers/result/tail_trading_data.json.gz（遵循 MODULE.md 约束 #2）
 
 版本历史:
+- v1.3 (2026-05-29 14:00): 第三轮深度优化
+  - datetime.now() 替换为 _NOW_STR 固定时间戳（第660行 main 结束日志）
+  - 异常处理精确化（main/CLI入口：requests.RequestException + json.JSONDecodeError + OSError）
+  - docstring Raises 修复（fetch_tail_trading_for_stock: 删除错误 Raises，添加 Note 说明；main: RuntimeError → OSError）
+  - 输出版本号同步更新（_OUTPUT_VERSION = '1.2'）
+  - 注释引用常量名（DEFAULT_REQUEST_DELAY 替代具体值 200ms）
 - v1.2 (2026-05-29 13:30): 第二轮深度优化
   - params 中魔法数字替换为常量（API_KLT, API_FQT, API_LMT_FULL, API_LMT_INCREMENTAL）
   - datetime.now() 替换为 _NOW_STR 固定时间戳（遵循 MODULE.md 约束 #17）
@@ -65,8 +71,8 @@ from common.http_client import (
 # 配置常量（遵循 MODULE.md 约束 #16）
 # ============================================================
 
-# 输出版本
-_OUTPUT_VERSION = '1.0'
+# 输出版本（遵循 MODULE.md 约束 #18）
+_OUTPUT_VERSION = '1.2'
 
 # 固定时间戳（遵循 MODULE.md 约束 #17）
 _NOW = datetime.now()
@@ -223,8 +229,8 @@ def fetch_tail_trading_for_stock(
         - tail_low: 尾盘最低价
         - tail_close: 尾盘收盘价
         
-    Raises:
-        RuntimeError: API请求失败时抛出
+    Note:
+        API请求失败或数据解析失败时返回空列表，不抛出异常
     """
     _logger = logger_arg or logger
     
@@ -363,7 +369,7 @@ def fetch_tail_trading_batch(
         尾盘数据记录列表
         
     Note:
-        - 请求间隔200ms，避免限流
+        - 请求间隔 DEFAULT_REQUEST_DELAY 秒，避免限流
         - 每100股打印进度日志
     """
     _logger = logger_arg or logger
@@ -595,7 +601,7 @@ def main(
         logger_arg: 日志 logger（遵循 MODULE.md 约束 #77）
         
     Raises:
-        RuntimeError: 数据拉取失败时抛出
+        OSError: 缓存文件写入失败时抛出
         
     Note:
         返回值仅用于 CLI 入口判断执行状态，调用方不应依赖返回值做业务判断
@@ -622,7 +628,7 @@ def main(
         
         _logger.info(f"有效股票数: {len(valid_codes)} 支")
         
-    except Exception as e:
+    except (requests.RequestException, json.JSONDecodeError, OSError) as e:
         _logger.error(f"加载股票列表失败: [{type(e).__name__}]: {e}")
         return False
     
@@ -657,7 +663,7 @@ def main(
     # 输出统计
     meta = merged_data['meta']
     _logger.info("=" * 60)
-    _logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 尾盘数据拉取完成")
+    _logger.info(f"[{_NOW_STR}] 尾盘数据拉取完成")
     _logger.info("=" * 60)
     _logger.info(f"日期范围: {meta['date_range']['start']} ~ {meta['date_range']['end']}")
     _logger.info(f"交易日数: {meta['n_days']}")
@@ -703,6 +709,6 @@ if __name__ == '__main__':
         if not success:
             sys.exit(1)
             
-    except Exception as e:
+    except (requests.RequestException, json.JSONDecodeError, OSError) as e:
         cli_logger.error(f"执行失败: [{type(e).__name__}]: {e}")
         sys.exit(1)

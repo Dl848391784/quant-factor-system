@@ -177,7 +177,7 @@ class TestOutputVersion:
     def test_output_version_defined(self):
         """版本常量已定义"""
         assert hasattr(fetch_tail_trading, '_OUTPUT_VERSION')
-        assert fetch_tail_trading._OUTPUT_VERSION == '1.0'
+        assert fetch_tail_trading._OUTPUT_VERSION == '1.2'  # v1.3 代码版本
 
 
 if __name__ == '__main__':
