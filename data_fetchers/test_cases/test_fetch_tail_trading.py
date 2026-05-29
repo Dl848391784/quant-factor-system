@@ -216,7 +216,7 @@ class TestOutputVersion:
     def test_output_version_defined(self):
         """版本常量已定义"""
         assert hasattr(fetch_tail_trading, '_OUTPUT_VERSION')
-        assert fetch_tail_trading._OUTPUT_VERSION == '2.0'  # v2.0 字段结构重构
+        assert fetch_tail_trading._OUTPUT_VERSION == '2.1'  # v2.1 第六轮深度优化
 
 
 class TestConstants:

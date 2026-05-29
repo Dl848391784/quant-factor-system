@@ -8,6 +8,10 @@
 输出路径：data_fetchers/result/tail_trading_data.json.gz（遵循 MODULE.md 约束 #2）
 
 版本历史:
+- v2.2 (2026-05-29 18:00): 第六轮深度优化
+  - 输出版本号同步：_OUTPUT_VERSION 从 '2.0' 更新为 '2.1'（遵循 Pitfall 169）
+  - 异常处理精确化：main/CLI 入口删除 requests.RequestException（遵循 Pitfall 175）
+  - 虚假引用删除：merge_records Note 节删除不存在的 MODULE.md 约束 #93（遵循 Pitfall 174）
 - v2.1 (2026-05-29 17:00): 第五轮深度优化
   - 注释修正：第161行尾盘时段注释（14:30→14:00）
   - 异常处理修正：load_cache 捕获本地文件异常（删除 requests.RequestException）
@@ -85,7 +89,7 @@ from common.http_client import (
 # ============================================================
 
 # 输出版本（遵循 MODULE.md 约束 #18）
-_OUTPUT_VERSION = '2.0'  # v2.0: 字段结构重构（尾盘时段扩展、新增 prices/volumes）
+_OUTPUT_VERSION = '2.1'  # v2.1: 第六轮深度优化（输出版本号同步、异常处理精确化、虚假引用删除）
 
 # 固定时间戳（遵循 MODULE.md 约束 #17）
 _NOW = datetime.now()
@@ -505,7 +509,7 @@ def merge_records(
         
     Note:
         - 去重策略：以 (date, asset) 作为 key
-        - 数据源合并逻辑：遵循 MODULE.md 约束 #93
+        - 数据源合并逻辑：优先使用现有缓存的 source，若新旧数据源不同则标记为 'mixed'
     """
     _logger = logger_arg or logger
     
@@ -555,7 +559,7 @@ def merge_records(
     unique_dates = sorted(set(r.get('date') for r in merged_records if r.get('date')))
     unique_assets = sorted(set(r.get('asset') for r in merged_records if r.get('asset')))
     
-    # 数据源合并逻辑（遵循 MODULE.md 约束 #93）
+    # 数据源合并逻辑：优先使用现有缓存的 source，若新旧数据源不同则标记为 'mixed'
     final_source = source
     if existing_meta:
         existing_source = existing_meta.get('source', source)
@@ -629,7 +633,7 @@ def main(
         
         _logger.info(f"有效股票数: {len(valid_codes)} 支")
         
-    except (requests.RequestException, json.JSONDecodeError, OSError) as e:
+    except (json.JSONDecodeError, OSError) as e:
         _logger.error(f"加载股票列表失败: [{type(e).__name__}]: {e}")
         return False
     
@@ -716,6 +720,6 @@ if __name__ == '__main__':
         if not success:
             sys.exit(1)
             
-    except (requests.RequestException, json.JSONDecodeError, OSError) as e:
+    except (json.JSONDecodeError, OSError) as e:
         cli_logger.error(f"执行失败: [{type(e).__name__}]: {e}")
         sys.exit(1)
