@@ -8,6 +8,10 @@
 输出路径：data_fetchers/result/tail_trading_data.json.gz（遵循 MODULE.md 约束 #2）
 
 版本历史:
+- v2.0 (2026-05-29 16:30): 字段结构重构
+  - 尾盘时段从 14:30-15:00（7根K线）扩展到 14:00-15:00（13根K线）
+  - 新增 prices/volumes 数组（13个收盘价和成交量）
+  - 删除冗余字段：tail_volume、tail_volume_pct、tail_close
 - v1.4 (2026-05-29 15:00): 第四轮深度优化
   - 修复变量名覆盖 bug（time → kline_time，避免覆盖导入的 time 模块）
   - 删除未使用导入（Path）
@@ -77,7 +81,7 @@ from common.http_client import (
 # ============================================================
 
 # 输出版本（遵循 MODULE.md 约束 #18）
-_OUTPUT_VERSION = '1.2'
+_OUTPUT_VERSION = '2.0'  # v2.0: 字段结构重构（尾盘时段扩展、新增 prices/volumes）
 
 # 固定时间戳（遵循 MODULE.md 约束 #17）
 _NOW = datetime.now()
@@ -96,9 +100,9 @@ API_LMT_FULL = 500           # 全量模式最大条数（约12天）
 API_LMT_INCREMENTAL = 50     # 增量模式最大条数（约1天）
 
 # 尾盘时段定义（5分钟K线）
-TAIL_PERIOD_START = '14:30'  # 尾盘开始时间
+TAIL_PERIOD_START = '14:00'  # 尾盘开始时间（v2.0: 扩展到14:00）
 TAIL_PERIOD_END = '15:00'    # 尾盘结束时间（收盘）
-TAIL_KLINE_COUNT = 7         # 尾盘K线数量（14:30-15:00共7根5分钟K线）
+TAIL_KLINE_COUNT = 13        # 尾盘K线数量（14:00-15:00共13根5分钟K线）
 
 # 默认参数
 DEFAULT_REQUEST_DELAY = 0.2  # 请求间隔（秒），遵循 MODULE.md 约束 #78
@@ -146,10 +150,10 @@ def _filter_tail_klines(klines: list[dict[str, Any]]) -> list[dict[str, Any]]:
         klines: K线数据列表，每条包含 time, open, close, high, low, volume
         
     Returns:
-        尾盘时段（14:30-15:00）的K线列表
+        尾盘时段（14:00-15:00）的K线列表
         
     Note:
-        尾盘时段共7根5分钟K线：14:30, 14:35, 14:40, 14:45, 14:50, 14:55, 15:00
+        尾盘时段共13根5分钟K线：14:00, 14:05, 14:10, 14:15, 14:20, 14:25, 14:30, 14:35, 14:40, 14:45, 14:50, 14:55, 15:00
     """
     tail_klines = []
     for kline in klines:
@@ -168,44 +172,38 @@ def _calculate_tail_metrics(
     计算尾盘指标
     
     Args:
-        tail_klines: 尾盘K线数据列表
-        day_volume: 全天成交量
+        tail_klines: 尾盘K线数据列表（14:00-15:00共13根5分钟K线）
+        day_volume: 全天成交量（v2.0: 保留参数用于未来扩展，当前未使用）
         
     Returns:
         尾盘指标字典，包含：
-        - tail_volume: 尾盘成交量
-        - tail_volume_pct: 尾盘成交量占比
+        - prices: 14:00-15:00 的13个收盘价（按时间升序）
+        - volumes: 14:00-15:00 的13个成交量（按时间升序）
         - tail_high: 尾盘最高价
         - tail_low: 尾盘最低价
-        - tail_close: 尾盘收盘价
         
     Note:
-        若尾盘K线数量不足，返回 None
+        若尾盘K线数量不足13根，返回 None
     """
     if len(tail_klines) < TAIL_KLINE_COUNT:
         return None
     
-    # 计算尾盘成交量
-    tail_volume = sum(kline.get('volume', 0) for kline in tail_klines)
+    # 按时间排序（确保 prices/volumes 按时间升序）
+    sorted_klines = sorted(tail_klines, key=lambda x: x.get('time', ''))
     
-    # 计算尾盘成交量占比
-    tail_volume_pct = 0.0
-    if day_volume > 0:
-        tail_volume_pct = tail_volume / day_volume
+    # 提取收盘价和成交量数组
+    prices = [round(kline.get('close', 0), 2) for kline in sorted_klines]
+    volumes = [int(kline.get('volume', 0)) for kline in sorted_klines]
     
     # 计算尾盘最高价和最低价
-    tail_high = max(kline.get('high', 0) for kline in tail_klines)
-    tail_low = min(kline.get('low', 0) for kline in tail_klines)
-    
-    # 尾盘收盘价（最后一根K线的收盘价）
-    tail_close = tail_klines[-1].get('close', 0)
+    tail_high = round(max(kline.get('high', 0) for kline in sorted_klines), 2)
+    tail_low = round(min(kline.get('low', 0) for kline in sorted_klines), 2)
     
     return {
-        'tail_volume': int(tail_volume),
-        'tail_volume_pct': round(tail_volume_pct, 4),
-        'tail_high': round(tail_high, 2),
-        'tail_low': round(tail_low, 2),
-        'tail_close': round(tail_close, 2),
+        'prices': prices,
+        'volumes': volumes,
+        'tail_high': tail_high,
+        'tail_low': tail_low,
     }
 
 
@@ -228,11 +226,10 @@ def fetch_tail_trading_for_stock(
         尾盘数据记录列表，每条包含：
         - date: 交易日期
         - asset: 股票代码
-        - tail_volume: 尾盘成交量
-        - tail_volume_pct: 尾盘成交量占比
+        - prices: 14:00-15:00 的13个收盘价（按时间升序）
+        - volumes: 14:00-15:00 的13个成交量（按时间升序）
         - tail_high: 尾盘最高价
         - tail_low: 尾盘最低价
-        - tail_close: 尾盘收盘价
         
     Note:
         API请求失败或数据解析失败时返回空列表，不抛出异常
@@ -617,7 +614,7 @@ def main(
     _logger.info(f"[{_NOW_STR}] 开始拉取尾盘数据")
     _logger.info("=" * 60)
     _logger.info("数据源: 东方财富5分钟K线 API")
-    _logger.info("尾盘时段: 14:30-15:00（共7根5分钟K线）")
+    _logger.info("尾盘时段: 14:00-15:00（共13根5分钟K线）")
     _logger.info(f"缓存路径: {_CACHE_FILE}")
     
     # Step 1: 加载股票列表

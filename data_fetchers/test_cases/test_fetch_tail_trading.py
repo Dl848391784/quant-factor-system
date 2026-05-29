@@ -3,8 +3,8 @@
 
 测试覆盖：
 1. K线解析逻辑
-2. 尾盘时段筛选
-3. 指标计算逻辑
+2. 尾盘时段筛选（14:00-15:00共13根K线）
+3. 指标计算逻辑（prices/volumes/tail_high/tail_low）
 4. 缓存读写（增量/全量）
 """
 
@@ -29,14 +29,14 @@ class TestParseKline:
 
     def test_parse_normal_kline(self):
         """正常格式解析"""
-        kline_str = "2026-05-28 14:30,10.64,10.65,10.65,10.63,11019,11724350.00"
+        kline_str = "2026-05-28 14:00,10.64,10.65,10.65,10.63,11019,11724350.00"
         parts = kline_str.split(',')
         
         # 验证分离日期时间
         datetime_part = parts[0].split(' ')
         assert len(datetime_part) == 2
         assert datetime_part[0] == '2026-05-28'
-        assert datetime_part[1] == '14:30'
+        assert datetime_part[1] == '14:00'
         
         # 验证字段映射
         assert float(parts[1]) == 10.64  # open
@@ -60,28 +60,34 @@ class TestTailKlineFilter:
     """测试尾盘时段筛选"""
 
     def test_filter_tail_klines(self):
-        """筛选14:30-15:00时段"""
-        # 构造测试数据
+        """筛选14:00-15:00时段（13根K线）"""
+        # 构造测试数据（v2.0: 14:00-15:00共13根）
         klines = [
-            {'date': '2026-05-28', 'time': '14:25', 'volume': 1000},
-            {'date': '2026-05-28', 'time': '14:30', 'volume': 2000},
-            {'date': '2026-05-28', 'time': '14:35', 'volume': 3000},
-            {'date': '2026-05-28', 'time': '14:40', 'volume': 4000},
-            {'date': '2026-05-28', 'time': '14:45', 'volume': 5000},
-            {'date': '2026-05-28', 'time': '14:50', 'volume': 6000},
-            {'date': '2026-05-28', 'time': '14:55', 'volume': 7000},
-            {'date': '2026-05-28', 'time': '15:00', 'volume': 8000},
-            {'date': '2026-05-28', 'time': '15:05', 'volume': 9000},  # 超出范围
+            {'date': '2026-05-28', 'time': '13:55', 'volume': 1000},  # 超出范围（前）
+            {'date': '2026-05-28', 'time': '14:00', 'volume': 2000},
+            {'date': '2026-05-28', 'time': '14:05', 'volume': 3000},
+            {'date': '2026-05-28', 'time': '14:10', 'volume': 4000},
+            {'date': '2026-05-28', 'time': '14:15', 'volume': 5000},
+            {'date': '2026-05-28', 'time': '14:20', 'volume': 6000},
+            {'date': '2026-05-28', 'time': '14:25', 'volume': 7000},
+            {'date': '2026-05-28', 'time': '14:30', 'volume': 8000},
+            {'date': '2026-05-28', 'time': '14:35', 'volume': 9000},
+            {'date': '2026-05-28', 'time': '14:40', 'volume': 10000},
+            {'date': '2026-05-28', 'time': '14:45', 'volume': 11000},
+            {'date': '2026-05-28', 'time': '14:50', 'volume': 12000},
+            {'date': '2026-05-28', 'time': '14:55', 'volume': 13000},
+            {'date': '2026-05-28', 'time': '15:00', 'volume': 14000},
+            {'date': '2026-05-28', 'time': '15:05', 'volume': 15000},  # 超出范围（后）
         ]
         
         # 调用筛选函数
         tail_klines = fetch_tail_trading._filter_tail_klines(klines)
         
-        # 验证结果（应包含14:30-15:00共7根）
-        assert len(tail_klines) == 7
+        # 验证结果（应包含14:00-15:00共13根）
+        assert len(tail_klines) == 13
         for kline in tail_klines:
             time = kline['time']
-            assert time >= '14:30' and time <= '15:00'
+            assert time >= '14:00' and time <= '15:00'
 
     def test_filter_empty_klines(self):
         """空列表筛选"""
@@ -93,58 +99,91 @@ class TestTailMetrics:
     """测试尾盘指标计算"""
 
     def test_calculate_tail_metrics(self):
-        """计算尾盘成交量占比"""
-        # 构造测试数据（需要7条K线，因为TAIL_KLINE_COUNT=7）
+        """计算尾盘指标（prices/volumes/tail_high/tail_low）"""
+        # 构造测试数据（v2.0: 需要13条K线）
         tail_klines = [
-            {'volume': 1000, 'high': 10.5, 'low': 10.4, 'close': 10.45},
-            {'volume': 2000, 'high': 10.6, 'low': 10.5, 'close': 10.55},
-            {'volume': 3000, 'high': 10.7, 'low': 10.6, 'close': 10.65},
-            {'volume': 4000, 'high': 10.8, 'low': 10.7, 'close': 10.75},
-            {'volume': 5000, 'high': 10.9, 'low': 10.8, 'close': 10.85},
-            {'volume': 6000, 'high': 11.0, 'low': 10.9, 'close': 10.95},
-            {'volume': 7000, 'high': 11.1, 'low': 11.0, 'close': 11.05},  # 第7条
+            {'time': '14:00', 'volume': 1000, 'high': 10.5, 'low': 10.4, 'close': 10.45},
+            {'time': '14:05', 'volume': 2000, 'high': 10.6, 'low': 10.5, 'close': 10.55},
+            {'time': '14:10', 'volume': 3000, 'high': 10.7, 'low': 10.6, 'close': 10.65},
+            {'time': '14:15', 'volume': 4000, 'high': 10.8, 'low': 10.7, 'close': 10.75},
+            {'time': '14:20', 'volume': 5000, 'high': 10.9, 'low': 10.8, 'close': 10.85},
+            {'time': '14:25', 'volume': 6000, 'high': 11.0, 'low': 10.9, 'close': 10.95},
+            {'time': '14:30', 'volume': 7000, 'high': 11.1, 'low': 11.0, 'close': 11.05},
+            {'time': '14:35', 'volume': 8000, 'high': 11.2, 'low': 11.1, 'close': 11.15},
+            {'time': '14:40', 'volume': 9000, 'high': 11.3, 'low': 11.2, 'close': 11.25},
+            {'time': '14:45', 'volume': 10000, 'high': 11.4, 'low': 11.3, 'close': 11.35},
+            {'time': '14:50', 'volume': 11000, 'high': 11.5, 'low': 11.4, 'close': 11.45},
+            {'time': '14:55', 'volume': 12000, 'high': 11.6, 'low': 11.5, 'close': 11.55},
+            {'time': '15:00', 'volume': 13000, 'high': 11.7, 'low': 11.6, 'close': 11.65},  # 第13条
         ]
-        day_volume = 50000  # 全天成交量
+        day_volume = 100000  # 全天成交量（v2.0: 参数保留但未使用）
         
         # 调用计算函数
         metrics = fetch_tail_trading._calculate_tail_metrics(tail_klines, day_volume)
         
         # 验证结果
         assert metrics is not None
-        assert 'tail_volume' in metrics
-        assert 'tail_volume_pct' in metrics
+        assert 'prices' in metrics
+        assert 'volumes' in metrics
         assert 'tail_high' in metrics
         assert 'tail_low' in metrics
-        assert 'tail_close' in metrics
         
-        # 尾盘成交量 = 1000 + ... + 7000 = 28000
-        assert metrics['tail_volume'] == 28000
+        # prices 应有13个值，按时间升序
+        assert len(metrics['prices']) == 13
+        assert metrics['prices'][0] == 10.45  # 14:00
+        assert metrics['prices'][12] == 11.65  # 15:00
         
-        # 尾盘成交量占比 = 28000 / 50000 = 0.56
-        assert metrics['tail_volume_pct'] == 0.56
+        # volumes 应有13个值
+        assert len(metrics['volumes']) == 13
+        assert metrics['volumes'][0] == 1000  # 14:00
+        assert metrics['volumes'][12] == 13000  # 15:00
         
-        # 最高价 = max(10.5, ..., 11.1) = 11.1
-        assert metrics['tail_high'] == 11.1
+        # 最高价 = max(10.5, ..., 11.7) = 11.7
+        assert metrics['tail_high'] == 11.7
         
-        # 最低价 = min(10.4, ..., 11.0) = 10.4
+        # 最低价 = min(10.4, ..., 11.6) = 10.4
         assert metrics['tail_low'] == 10.4
-        
-        # 收盘价 = 最后一根的收盘价 = 11.05
-        assert metrics['tail_close'] == 11.05
 
     def test_calculate_metrics_insufficient_klines(self):
-        """尾盘K线数量不足时返回None"""
+        """尾盘K线数量不足13根时返回None"""
         tail_klines = [
-            {'volume': 1000, 'high': 10.5, 'low': 10.4, 'close': 10.45},
-            {'volume': 2000, 'high': 10.6, 'low': 10.5, 'close': 10.55},
-            # 只有2条，不足7条
+            {'time': '14:00', 'volume': 1000, 'high': 10.5, 'low': 10.4, 'close': 10.45},
+            {'time': '14:05', 'volume': 2000, 'high': 10.6, 'low': 10.5, 'close': 10.55},
+            # 只有2条，不足13条
         ]
-        day_volume = 50000
+        day_volume = 100000
         
         metrics = fetch_tail_trading._calculate_tail_metrics(tail_klines, day_volume)
         
         # K线数量不足时返回None
         assert metrics is None
+
+    def test_calculate_metrics_sorted_by_time(self):
+        """验证 prices/volumes 按时间升序排列"""
+        # 构造乱序数据
+        tail_klines = [
+            {'time': '14:30', 'volume': 7000, 'close': 11.05},
+            {'time': '14:00', 'volume': 1000, 'close': 10.45},
+            {'time': '14:15', 'volume': 4000, 'close': 10.75},
+            {'time': '14:05', 'volume': 2000, 'close': 10.55},
+            {'time': '14:10', 'volume': 3000, 'close': 10.65},
+            {'time': '14:20', 'volume': 5000, 'close': 10.85},
+            {'time': '14:25', 'volume': 6000, 'close': 10.95},
+            {'time': '14:35', 'volume': 8000, 'close': 11.15},
+            {'time': '14:40', 'volume': 9000, 'close': 11.25},
+            {'time': '14:45', 'volume': 10000, 'close': 11.35},
+            {'time': '14:50', 'volume': 11000, 'close': 11.45},
+            {'time': '14:55', 'volume': 12000, 'close': 11.55},
+            {'time': '15:00', 'volume': 13000, 'close': 11.65},
+        ]
+        day_volume = 100000
+        
+        metrics = fetch_tail_trading._calculate_tail_metrics(tail_klines, day_volume)
+        
+        assert metrics is not None
+        # 验证排序：prices[0] 应为 14:00 的收盘价
+        assert metrics['prices'][0] == 10.45  # 14:00
+        assert metrics['prices'][12] == 11.65  # 15:00
 
 
 class TestMarketCode:
@@ -177,7 +216,19 @@ class TestOutputVersion:
     def test_output_version_defined(self):
         """版本常量已定义"""
         assert hasattr(fetch_tail_trading, '_OUTPUT_VERSION')
-        assert fetch_tail_trading._OUTPUT_VERSION == '1.2'  # v1.3 代码版本
+        assert fetch_tail_trading._OUTPUT_VERSION == '2.0'  # v2.0 字段结构重构
+
+
+class TestConstants:
+    """测试常量定义"""
+
+    def test_tail_period_start(self):
+        """尾盘开始时间"""
+        assert fetch_tail_trading.TAIL_PERIOD_START == '14:00'
+
+    def test_tail_kline_count(self):
+        """尾盘K线数量"""
+        assert fetch_tail_trading.TAIL_KLINE_COUNT == 13
 
 
 if __name__ == '__main__':
