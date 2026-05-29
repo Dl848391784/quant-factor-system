@@ -31,11 +31,11 @@ import gc
 from .logger_config import get_logger
 
 
-# 默认路径配置
+# 默认路径配置（遵循 PROJECT.md 跨模块数据路径规范）
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 CACHE_DIR = BASE_DIR / 'cache'
 FACTOR_IC_DIR = CACHE_DIR / 'factor_ic'
-FACTOR_DATA_DIR = CACHE_DIR / 'factor_data'
+FACTOR_DATA_DIR = BASE_DIR / 'data_fetchers' / 'result'  # 更新为正确路径
 FACTOR_IC_RESULT_DIR = BASE_DIR / 'factor_ic' / 'result'  # 规范输出目录
 
 
@@ -109,7 +109,7 @@ def get_factor_data_dates(logger=None) -> Tuple[List[str], Optional[str]]:
     if logger is None:
         logger = get_logger(__name__)
     
-    factor_path = FACTOR_DATA_DIR / 'factor_data.json.gz'
+    factor_path = FACTOR_DATA_DIR / 'factor_ic_data.json.gz'
     
     if not factor_path.exists():
         return [], None

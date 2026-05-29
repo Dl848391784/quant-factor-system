@@ -1,0 +1,151 @@
+{
+  "meta": {
+    "n_layers": 5,
+    "factor_direction": "negative",
+    "long_layers": [
+      1,
+      2
+    ],
+    "short_layers": [
+      4,
+      5
+    ],
+    "min_stocks_per_layer": 2,
+    "trade_cost_rate": 0.003,
+    "layer_method": "percentile",
+    "thresholds": null,
+    "n_days_total": 515,
+    "n_assets_total": 3006,
+    "factor_name": "amplitude",
+    "layer_names": {
+      "1": "低振幅层(波动平稳)",
+      "2": "偏低振幅层",
+      "3": "中振幅层",
+      "4": "偏高振幅层",
+      "5": "高振幅层(波动剧烈)"
+    }
+  },
+  "layer_stats": {
+    "layer_1": {
+      "n_days": 515,
+      "n_stocks_avg": 576.8155339805825,
+      "daily_return_mean": 0.000985213856131325,
+      "daily_return_std": 0.011662323724154258,
+      "cumulative_return": 0.5944914334052918,
+      "annual_return": 0.24827389174509393,
+      "annual_volatility": 0.18513364969944485,
+      "sharpe_ratio": 1.3410522190220637,
+      "max_drawdown": -0.16859271093181502,
+      "turnover_avg": 0.5113538495181175
+    },
+    "layer_2": {
+      "n_days": 515,
+      "n_stocks_avg": 577.209708737864,
+      "daily_return_mean": 0.0010018982140335734,
+      "daily_return_std": 0.013490974067911714,
+      "cumulative_return": 0.5891971978843114,
+      "annual_return": 0.2524783499364605,
+      "annual_volatility": 0.21416257396629487,
+      "sharpe_ratio": 1.1789097658874599,
+      "max_drawdown": -0.17094138035614387,
+      "turnover_avg": 0.7212672258381111
+    },
+    "layer_3": {
+      "n_days": 515,
+      "n_stocks_avg": 577.221359223301,
+      "daily_return_mean": 0.0012308156323494032,
+      "daily_return_std": 0.014456225398872067,
+      "cumulative_return": 0.7731637649541354,
+      "annual_return": 0.3101655393520496,
+      "annual_volatility": 0.22948546381266605,
+      "sharpe_ratio": 1.351569437989521,
+      "max_drawdown": -0.18194310658609084,
+      "turnover_avg": 0.7459564041733836
+    },
+    "layer_4": {
+      "n_days": 515,
+      "n_stocks_avg": 577.209708737864,
+      "daily_return_mean": 0.0012392626646855925,
+      "daily_return_std": 0.015432889328511515,
+      "cumulative_return": 0.7676578781729537,
+      "annual_return": 0.3122941915007693,
+      "annual_volatility": 0.24498952304654442,
+      "sharpe_ratio": 1.2747246805384327,
+      "max_drawdown": -0.18811248879016387,
+      "turnover_avg": 0.7202258622043043
+    },
+    "layer_5": {
+      "n_days": 515,
+      "n_stocks_avg": 577.5883495145631,
+      "daily_return_mean": 0.00018618560107678397,
+      "daily_return_std": 0.016404377174102862,
+      "cumulative_return": 0.02651041367803386,
+      "annual_return": 0.04691877147134956,
+      "annual_volatility": 0.26041141449348415,
+      "sharpe_ratio": 0.18017171621531794,
+      "max_drawdown": -0.29332529729358864,
+      "turnover_avg": 0.5026310869143626
+    }
+  },
+  "long_short": {
+    "long_return_daily": 0.0009935560350824491,
+    "long_return_annual": 0.2474591174911759,
+    "short_return_daily": 0.0007127241328811881,
+    "short_return_annual": 0.17751397878913444,
+    "long_short_return_daily": 0.00028083190220126123,
+    "long_short_return_annual": 0.06994513870204151,
+    "long_short_sharpe": 0.6064537521570338,
+    "long_short_volatility": 0.1153346622941333,
+    "turnover_long_avg": 0.6171497005191355,
+    "turnover_short_avg": 0.6132031480689091,
+    "n_days": 509,
+    "n_days_total": 515,
+    "coverage": 0.9883495145631068
+  },
+  "monotonicity": {
+    "correlation": -0.49765055528645374,
+    "quality": "moderate",
+    "layer_returns": [
+      0.000985213856131325,
+      0.0010018982140335734,
+      0.0012308156323494032,
+      0.0012392626646855925,
+      0.00018618560107678397
+    ]
+  },
+  "trading_cost_analysis": {
+    "cost_rate": 0.003,
+    "long_turnover": 0.6171497005191355,
+    "short_turnover": 0.6132031480689091,
+    "long_daily_cost": 0.0018514491015574066,
+    "short_daily_cost": 0.0036792188884134545,
+    "long_gross_daily_return": 0.0009935560350824491,
+    "long_net_daily_return": -0.0008578930664749575,
+    "short_gross_daily_return": 0.0007127241328811881,
+    "short_net_daily_return": -0.002966494755532266,
+    "long_short_gross_daily": 0.000280831902201261,
+    "long_short_net_daily": 0.0021086016890573085
+  },
+  "config": {
+    "n_layers": 5,
+    "layer_names": {
+      "1": "低振幅层(波动平稳)",
+      "2": "偏低振幅层",
+      "3": "中振幅层",
+      "4": "偏高振幅层",
+      "5": "高振幅层(波动剧烈)"
+    },
+    "factor_direction": "negative",
+    "long_layers": [
+      1,
+      2
+    ],
+    "short_layers": [
+      4,
+      5
+    ],
+    "trade_cost_rate": 0.003,
+    "min_stocks_per_layer": 10
+  },
+  "created_at": "2026-05-29T19:13:58.251198"
+}

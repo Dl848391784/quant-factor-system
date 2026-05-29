@@ -53,6 +53,10 @@
   - 添加 `calculate_price_position()` 函数
   - 添加 `_COL_PRICE_POSITION` 和 `_DEFAULT_PRICE_POSITION_EPSILON` 常量
   - 边界处理：振幅为零时设为 0.5（中位）
+v1.7 (2026-05-29): 新增振幅因子
+  - 添加 `calculate_amplitude()` 函数
+  - 添加 `_COL_AMPLITUDE` 和 `_DEFAULT_AMPLITUDE_EPSILON` 常量
+  - 边界处理：close=0 时设为 NaN（无效数据）
 
 作者: 云瑶
 创建日期: 2026-05-27
@@ -85,6 +89,7 @@ __all__ = [
     'calculate_kdj_j',
     'calculate_turnover_surge',
     'calculate_price_position',  # v1.6 新增
+    'calculate_amplitude',  # v1.7 新增
     'get_module_logger',
     # 公共常量别名（向下兼容 ic_kdj_j 等脚本的导入）
     'DEFAULT_RSI_PERIOD',
@@ -125,6 +130,7 @@ _COL_BOLLINGER_PB = 'bollinger_pb'
 _COL_KDJ_J = 'kdj_j'
 _COL_TURNOVER_SURGE = 'turnover_surge'
 _COL_PRICE_POSITION = 'price_position'
+_COL_AMPLITUDE = 'amplitude'
 
 # 默认参数（私有常量，遵循 cache_manager.py 规范）
 _DEFAULT_RSI_PERIOD = 6
@@ -137,6 +143,7 @@ _DEFAULT_SURGE_WINDOW = 5
 _DEFAULT_VOLUME_RATIO_WINDOW = 5
 _DEFAULT_FORWARD_RETURN_SHIFT = 1
 _DEFAULT_PRICE_POSITION_EPSILON = 1e-10  # 防止除零
+_DEFAULT_AMPLITUDE_EPSILON = 1e-10  # 防止除零
 
 # 公共常量别名（向下兼容 ic_kdj_j 等脚本的导入）
 DEFAULT_RSI_PERIOD = _DEFAULT_RSI_PERIOD
@@ -746,5 +753,80 @@ def calculate_price_position(
     )
 
     logger_arg.info(f"price_position 计算完成，共 {len(df)} 条记录")
+
+    return df
+
+
+# ============================================================================
+# 振幅因子计算
+# ============================================================================
+
+def calculate_amplitude(
+    factor_df: pd.DataFrame,
+    logger_arg: Optional[logging.Logger] = None
+) -> pd.DataFrame:
+    """
+    计算振幅因子
+
+    公式: amplitude = (high - low) / close
+
+    含义: 当日振幅相对于收盘价的比率，反映价格波动强度
+    - 值越大 → 波动越剧烈
+    - 值越小 → 波动平稳
+    - 范围: 理论 [0, +∞)，实际通常 [0, 0.15]（A股振幅上限15%）
+
+    Args:
+        factor_df: 包含 high, low, close 列的 DataFrame
+        logger_arg: 日志记录器（可选，默认使用模块 logger）
+
+    Returns:
+        添加 amplitude 列的 DataFrame
+
+    边界处理:
+        - close = 0 时，设为 NaN（无效数据）
+        - high = low 时，振幅为 0（一字涨停/跌停）
+
+    Example:
+        >>> df = pd.DataFrame({
+        ...     'close': [10.0, 12.0, 0.0],
+        ...     'high': [12.0, 13.0, 11.0],
+        ...     'low': [9.0, 11.0, 9.0]
+        ... })
+        >>> result = calculate_amplitude(df)
+        >>> 'amplitude' in result.columns
+        True
+        >>> result['amplitude'].iloc[0]  # (12-9)/10 = 0.3
+        0.3
+        >>> pd.isna(result['amplitude'].iloc[2])  # close=0 → NaN
+        True
+    """
+    if logger_arg is None:
+        logger_arg = logging.getLogger(__name__)
+
+    # 入口 copy（遵循 MODULE.md 约束）
+    df = factor_df.copy()
+
+    # 计算振幅
+    range_val = df[_COL_HIGH] - df[_COL_LOW]
+
+    # 检查 close 为零的情况
+    zero_close_mask = np.abs(df[_COL_CLOSE]) < _DEFAULT_AMPLITUDE_EPSILON
+
+    if zero_close_mask.any():
+        zero_count = zero_close_mask.sum()
+        logger_arg.warning(
+            f"检测到 {zero_count} 个收盘价为零的记录，"
+            f"amplitude 设为 NaN（无效数据）"
+        )
+
+    # 计算振幅因子
+    # close=0 → NaN，否则计算 (high - low) / close
+    df[_COL_AMPLITUDE] = np.where(
+        zero_close_mask,
+        np.nan,  # 收盘价为零设为 NaN
+        range_val / df[_COL_CLOSE]
+    )
+
+    logger_arg.info(f"amplitude 计算完成，共 {len(df)} 条记录")
 
     return df
