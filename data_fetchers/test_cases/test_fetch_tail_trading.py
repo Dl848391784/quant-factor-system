@@ -115,11 +115,11 @@ class TestTailMetrics:
             {'time': '14:50', 'volume': 11000, 'high': 11.5, 'low': 11.4, 'close': 11.45},
             {'time': '14:55', 'volume': 12000, 'high': 11.6, 'low': 11.5, 'close': 11.55},
             {'time': '15:00', 'volume': 13000, 'high': 11.7, 'low': 11.6, 'close': 11.65},  # 第13条
-        ]
-        day_volume = 100000  # 全天成交量（v2.0: 参数保留但未使用）
-        
+]
+        # v2.1: day_volume 参数已删除
+    
         # 调用计算函数
-        metrics = fetch_tail_trading._calculate_tail_metrics(tail_klines, day_volume)
+        metrics = fetch_tail_trading._calculate_tail_metrics(tail_klines)
         
         # 验证结果
         assert metrics is not None
@@ -149,11 +149,11 @@ class TestTailMetrics:
         tail_klines = [
             {'time': '14:00', 'volume': 1000, 'high': 10.5, 'low': 10.4, 'close': 10.45},
             {'time': '14:05', 'volume': 2000, 'high': 10.6, 'low': 10.5, 'close': 10.55},
-            # 只有2条，不足13条
+# 只有2条，不足13条
         ]
-        day_volume = 100000
-        
-        metrics = fetch_tail_trading._calculate_tail_metrics(tail_klines, day_volume)
+        # v2.1: day_volume 参数已删除
+    
+        metrics = fetch_tail_trading._calculate_tail_metrics(tail_klines)
         
         # K线数量不足时返回None
         assert metrics is None
@@ -174,11 +174,11 @@ class TestTailMetrics:
             {'time': '14:45', 'volume': 10000, 'close': 11.35},
             {'time': '14:50', 'volume': 11000, 'close': 11.45},
             {'time': '14:55', 'volume': 12000, 'close': 11.55},
-            {'time': '15:00', 'volume': 13000, 'close': 11.65},
+{'time': '15:00', 'volume': 13000, 'close': 11.65},
         ]
-        day_volume = 100000
-        
-        metrics = fetch_tail_trading._calculate_tail_metrics(tail_klines, day_volume)
+        # v2.1: day_volume 参数已删除
+    
+        metrics = fetch_tail_trading._calculate_tail_metrics(tail_klines)
         
         assert metrics is not None
         # 验证排序：prices[0] 应为 14:00 的收盘价

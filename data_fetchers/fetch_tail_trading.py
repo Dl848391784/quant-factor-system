@@ -2,12 +2,16 @@
 """
 尾盘数据拉取脚本
 
-拉取尾盘（14:30-15:00）的5分钟K线数据，用于构建尾盘因子。
+拉取尾盘（14:00-15:00）的5分钟K线数据，用于构建尾盘因子。
 数据源：东方财富5分钟K线 API
 
 输出路径：data_fetchers/result/tail_trading_data.json.gz（遵循 MODULE.md 约束 #2）
 
 版本历史:
+- v2.1 (2026-05-29 17:00): 第五轮深度优化
+  - 注释修正：第161行尾盘时段注释（14:30→14:00）
+  - 异常处理修正：load_cache 捕获本地文件异常（删除 requests.RequestException）
+  - 删除未使用参数：_calculate_tail_metrics 的 day_volume 参数
 - v2.0 (2026-05-29 16:30): 字段结构重构
   - 尾盘时段从 14:30-15:00（7根K线）扩展到 14:00-15:00（13根K线）
   - 新增 prices/volumes 数组（13个收盘价和成交量）
@@ -158,22 +162,20 @@ def _filter_tail_klines(klines: list[dict[str, Any]]) -> list[dict[str, Any]]:
     tail_klines = []
     for kline in klines:
         time_str = kline.get('time', '')
-        # 过滤尾盘时段（14:30-15:00）
+        # 过滤尾盘时段（14:00-15:00）
         if time_str >= TAIL_PERIOD_START and time_str <= TAIL_PERIOD_END:
             tail_klines.append(kline)
     return tail_klines
 
 
 def _calculate_tail_metrics(
-    tail_klines: list[dict[str, Any]],
-    day_volume: float
+    tail_klines: list[dict[str, Any]]
 ) -> dict[str, Any] | None:
     """
     计算尾盘指标
     
     Args:
         tail_klines: 尾盘K线数据列表（14:00-15:00共13根5分钟K线）
-        day_volume: 全天成交量（v2.0: 保留参数用于未来扩展，当前未使用）
         
     Returns:
         尾盘指标字典，包含：
@@ -322,14 +324,11 @@ def fetch_tail_trading_for_stock(
         # 计算每日尾盘指标
         records = []
         for date, day_klines in date_groups.items():
-            # 计算全天成交量
-            day_volume = sum(kline.get('volume', 0) for kline in day_klines)
-            
             # 过滤尾盘K线
             tail_klines = _filter_tail_klines(day_klines)
             
             # 计算尾盘指标
-            tail_metrics = _calculate_tail_metrics(tail_klines, day_volume)
+            tail_metrics = _calculate_tail_metrics(tail_klines)
             
             if tail_metrics:
                 records.append({
@@ -453,7 +452,7 @@ def load_cache(
         _logger.info(f"加载缓存成功: {len(data.get('data', []))} 条记录")
         return data
         
-    except (requests.RequestException, json.JSONDecodeError) as e:
+    except (json.JSONDecodeError, OSError) as e:
         _logger.warning(f"加载缓存失败: [{type(e).__name__}]: {e}")
         return None
 
