@@ -8,6 +8,10 @@
 输出路径：data_fetchers/result/tail_trading_data.json.gz（遵循 MODULE.md 约束 #2）
 
 版本历史:
+- v1.1 (2026-05-29 11:50): 规范合规优化
+  - 补充 API 配置常量（API_KLT, API_FQT, API_LMT_FULL, API_LMT_INCREMENTAL）
+  - 异常处理精确化（区分 requests.RequestException 和 json.JSONDecodeError）
+  - main 函数 docstring 删除 Returns 节（遵循 MODULE.md 约束 #15）
 - v1.0 (2026-05-29 11:30): 初始版本
   - 复用公共模块：http_client, cache_manager, stock_utils, paths
   - 支持全量模式（历史12天）和增量模式（最新一天）
@@ -17,6 +21,7 @@
 日期: 2026-05-29
 """
 
+import json
 import logging
 import sys
 import time
@@ -25,6 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import requests
 from requests import Session
 
 # ============================================================
@@ -67,6 +73,10 @@ CACHE_FILE = _RESULT_DIR / 'tail_trading_data.json.gz'
 
 # API 配置
 EASTMONEY_API_URL = 'http://push2his.eastmoney.com/api/qt/stock/kline/get'
+API_KLT = 5                  # K线类型：5分钟K线（遵循 MODULE.md 约束 #16）
+API_FQT = 1                  # 前复权
+API_LMT_FULL = 500           # 全量模式最大条数（约12天）
+API_LMT_INCREMENTAL = 50     # 增量模式最大条数（约1天）
 
 # 尾盘时段定义（5分钟K线）
 TAIL_PERIOD_START = '14:30'  # 尾盘开始时间
@@ -318,8 +328,14 @@ def fetch_tail_trading_for_stock(
         _logger.debug(f"[{code}] 获取 {len(records)} 天尾盘数据")
         return records
         
+    except requests.RequestException as e:
+        _logger.warning(f"[{code}] 网络请求失败: [{type(e).__name__}]: {e}")
+        return []
+    except json.JSONDecodeError as e:
+        _logger.warning(f"[{code}] JSON解析失败: [{type(e).__name__}]: {e}")
+        return []
     except Exception as e:
-        _logger.error(f"[{code}] API请求失败: [{type(e).__name__}]: {e}")
+        _logger.error(f"[{code}] 未预期异常: [{type(e).__name__}]: {e}")
         return []
 
 
@@ -569,15 +585,15 @@ def main(
     主函数：拉取尾盘数据
     
     Args:
-        full: 全量模式（拉取历史12天）
+        full: 全量模式（拉取历史12天），否则增量模式（拉取最新一天）
         max_stocks: 最大股票数（用于测试，0为不限制）
         logger_arg: 日志 logger（遵循 MODULE.md 约束 #77）
         
-    Returns:
-        是否成功
-        
     Raises:
         RuntimeError: 数据拉取失败时抛出
+        
+    Note:
+        返回值仅用于 CLI 入口判断执行状态，调用方不应依赖返回值做业务判断
     """
     _logger = logger_arg or logger
     
