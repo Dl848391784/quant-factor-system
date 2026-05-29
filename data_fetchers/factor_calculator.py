@@ -49,6 +49,10 @@
   - 移除 `_TURNOVER_SURGE_THRESHOLD` 和 `_DAILY_RETURN_THRESHOLD` 常量
   - 移除涨跌幅计算和业务筛选逻辑（surge>1 且 return>0）
   - 所有有效计算的因子值均保留，不再筛选
+- v1.6 (2026-05-29): 新增全天价格位置因子
+  - 添加 `calculate_price_position()` 函数
+  - 添加 `_COL_PRICE_POSITION` 和 `_DEFAULT_PRICE_POSITION_EPSILON` 常量
+  - 边界处理：振幅为零时设为 0.5（中位）
 
 作者: 云瑶
 创建日期: 2026-05-27
@@ -80,6 +84,7 @@ __all__ = [
     'calculate_bollinger_pb',
     'calculate_kdj_j',
     'calculate_turnover_surge',
+    'calculate_price_position',  # v1.6 新增
     'get_module_logger',
     # 公共常量别名（向下兼容 ic_kdj_j 等脚本的导入）
     'DEFAULT_RSI_PERIOD',
@@ -119,6 +124,7 @@ _COL_TURNOVER_RATE = 'turnover_rate'
 _COL_BOLLINGER_PB = 'bollinger_pb'
 _COL_KDJ_J = 'kdj_j'
 _COL_TURNOVER_SURGE = 'turnover_surge'
+_COL_PRICE_POSITION = 'price_position'
 
 # 默认参数（私有常量，遵循 cache_manager.py 规范）
 _DEFAULT_RSI_PERIOD = 6
@@ -130,6 +136,7 @@ _DEFAULT_KDJ_M2 = 3
 _DEFAULT_SURGE_WINDOW = 5
 _DEFAULT_VOLUME_RATIO_WINDOW = 5
 _DEFAULT_FORWARD_RETURN_SHIFT = 1
+_DEFAULT_PRICE_POSITION_EPSILON = 1e-10  # 防止除零
 
 # 公共常量别名（向下兼容 ic_kdj_j 等脚本的导入）
 DEFAULT_RSI_PERIOD = _DEFAULT_RSI_PERIOD
@@ -663,5 +670,81 @@ def calculate_turnover_surge(
     turnover_surge = turnover_surge.where(~abnormal_mask, np.nan)
 
     factor_df[_COL_TURNOVER_SURGE] = turnover_surge
-    
+
     return factor_df
+
+
+# ============================================================================
+# 全天价格位置因子
+# ============================================================================
+
+_COL_PRICE_POSITION = 'price_position'
+_DEFAULT_PRICE_POSITION_EPSILON = 1e-10  # 防止除零
+
+
+def calculate_price_position(
+    factor_df: pd.DataFrame,
+    logger_arg: Optional[logging.Logger] = None
+) -> pd.DataFrame:
+    """
+    计算全天价格位置因子
+
+    公式: Price Position = (Close - Low) / (High - Low)
+
+    含义: 收盘价在全天振幅中的相对位置
+    - 0 = 收盘价等于最低价（全天最低收盘）
+    - 1 = 收盘价等于最高价（全天最高收盘）
+    - 0.5 = 收盘价在振幅中位
+
+    Args:
+        factor_df: 包含 close, high, low 列的 DataFrame
+        logger_arg: 日志记录器（可选，默认使用模块 logger）
+
+    Returns:
+        添加 price_position 列的 DataFrame
+
+    边界处理:
+        - High - Low = 0 时，使用 epsilon 防止除零，设为 0.5（中位）
+        - 正常结果值在 [0, 1] 范围
+
+    Example:
+        >>> df = pd.DataFrame({
+        ...     'close': [10.0, 12.0, 11.0],
+        ...     'high': [12.0, 13.0, 11.0],
+        ...     'low': [9.0, 11.0, 11.0]
+        ... })
+        >>> result = calculate_price_position(df)
+        >>> 'price_position' in result.columns
+        True
+        >>> result['price_position'].iloc[0]  # (10-9)/(12-9) = 0.333
+        0.333...
+    """
+    if logger_arg is None:
+        logger_arg = logging.getLogger(__name__)
+
+    # 入口 copy（遵循 MODULE.md 约束）
+    df = factor_df.copy()
+
+    # 计算振幅
+    range_val = df[_COL_HIGH] - df[_COL_LOW]
+
+    # 防止除零
+    zero_range_mask = np.abs(range_val) < _DEFAULT_PRICE_POSITION_EPSILON
+
+    if zero_range_mask.any():
+        zero_count = zero_range_mask.sum()
+        logger_arg.warning(
+            f"检测到 {zero_count} 个振幅为零的记录（high=low），"
+            f"price_position 设为 0.5（中位）"
+        )
+
+    # 计算价格位置
+    df[_COL_PRICE_POSITION] = np.where(
+        zero_range_mask,
+        0.5,  # 振幅为零时设为中位
+        (df[_COL_CLOSE] - df[_COL_LOW]) / range_val
+    )
+
+    logger_arg.info(f"price_position 计算完成，共 {len(df)} 条记录")
+
+    return df
