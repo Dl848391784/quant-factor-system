@@ -8,6 +8,12 @@
 输出路径：data_fetchers/result/tail_trading_data.json.gz（遵循 MODULE.md 约束 #2）
 
 版本历史:
+- v1.2 (2026-05-29 13:30): 第二轮深度优化
+  - params 中魔法数字替换为常量（API_KLT, API_FQT, API_LMT_FULL, API_LMT_INCREMENTAL）
+  - datetime.now() 替换为 _NOW_STR 固定时间戳（遵循 MODULE.md 约束 #17）
+  - 删除未使用常量 DEFAULT_HISTORY_DAYS
+  - 异常处理精确化（load_cache: requests.RequestException + json.JSONDecodeError; save_cache: OSError）
+  - 常量命名规范化（CACHE_FILE → _CACHE_FILE）
 - v1.1 (2026-05-29 11:50): 规范合规优化
   - 补充 API 配置常量（API_KLT, API_FQT, API_LMT_FULL, API_LMT_INCREMENTAL）
   - 异常处理精确化（区分 requests.RequestException 和 json.JSONDecodeError）
@@ -69,7 +75,7 @@ _NOW_STR = _NOW.strftime('%Y-%m-%d %H:%M:%S')
 
 # 输出文件路径
 _RESULT_DIR = get_module_result_dir()
-CACHE_FILE = _RESULT_DIR / 'tail_trading_data.json.gz'
+_CACHE_FILE = _RESULT_DIR / 'tail_trading_data.json.gz'  # 缓存文件路径（私有常量）
 
 # API 配置
 EASTMONEY_API_URL = 'http://push2his.eastmoney.com/api/qt/stock/kline/get'
@@ -84,7 +90,6 @@ TAIL_PERIOD_END = '15:00'    # 尾盘结束时间（收盘）
 TAIL_KLINE_COUNT = 7         # 尾盘K线数量（14:30-15:00共7根5分钟K线）
 
 # 默认参数
-DEFAULT_HISTORY_DAYS = 12    # 默认历史天数（API限制约12天）
 DEFAULT_REQUEST_DELAY = 0.2  # 请求间隔（秒），遵循 MODULE.md 约束 #78
 
 # ============================================================
@@ -225,20 +230,20 @@ def fetch_tail_trading_for_stock(
     
     market_id, pure_code = _parse_market_code(code)
     
-    # 构建API参数
+    # 构建API参数（使用常量）
     params = {
         'secid': f'{market_id}.{pure_code}',
         'fields1': 'f1,f2,f3,f4,f5,f6',
         'fields2': 'f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61',
-        'klt': 5,           # 5分钟K线
-        'fqt': 1,           # 前复权
+        'klt': API_KLT,           # 5分钟K线（常量）
+        'fqt': API_FQT,           # 前复权（常量）
         'end': '20500101',
-        'lmt': 500,         # 最大500条（约12天）
+        'lmt': API_LMT_FULL,      # 全量模式最大条数（常量）
     }
     
     # 增量模式：只拉取最近一天的数据
     if not full:
-        params['lmt'] = 50  # 最近50条（约1天）
+        params['lmt'] = API_LMT_INCREMENTAL  # 增量模式条数（常量）
     
     try:
         # 使用 request_with_retry 发送请求（遵循 MODULE.md 约束 #78）
@@ -425,12 +430,12 @@ def load_cache(
     """
     _logger = logger_arg or logger
     
-    if not CACHE_FILE.exists():
+    if not _CACHE_FILE.exists():
         _logger.info("缓存文件不存在，将进行全量拉取")
         return None
     
     try:
-        data = read_cache(CACHE_FILE, logger=_logger)
+        data = read_cache(_CACHE_FILE, logger=_logger)
         
         # 类型校验（遵循 MODULE.md 约束 #87）
         if not isinstance(data, dict):
@@ -440,7 +445,7 @@ def load_cache(
         _logger.info(f"加载缓存成功: {len(data.get('data', []))} 条记录")
         return data
         
-    except Exception as e:
+    except (requests.RequestException, json.JSONDecodeError) as e:
         _logger.warning(f"加载缓存失败: [{type(e).__name__}]: {e}")
         return None
 
@@ -465,10 +470,10 @@ def save_cache(
     _RESULT_DIR.mkdir(parents=True, exist_ok=True)
     
     try:
-        write_cache(CACHE_FILE, data, logger=_logger)
-        _logger.info(f"保存缓存成功: {CACHE_FILE}")
+        write_cache(_CACHE_FILE, data, logger=_logger)
+        _logger.info(f"保存缓存成功: {_CACHE_FILE}")
         
-    except Exception as e:
+    except OSError as e:
         _logger.error(f"保存缓存失败: [{type(e).__name__}]: {e}")
         raise
 
@@ -511,7 +516,7 @@ def merge_records(
                     'n_days': 0,
                     'n_assets': 0,
                     'date_range': {'start': None, 'end': None},
-                    'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'last_updated': _NOW_STR,  # 固定时间戳（遵循 MODULE.md 约束 #17）
                     'version': _OUTPUT_VERSION,
                 },
                 'data': []
@@ -565,7 +570,7 @@ def merge_records(
                 'start': unique_dates[0] if unique_dates else None,
                 'end': unique_dates[-1] if unique_dates else None
             },
-            'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'last_updated': _NOW_STR,  # 固定时间戳（遵循 MODULE.md 约束 #17）
             'version': _OUTPUT_VERSION,
         },
         'data': merged_records
@@ -602,7 +607,7 @@ def main(
     _logger.info("=" * 60)
     _logger.info("数据源: 东方财富5分钟K线 API")
     _logger.info("尾盘时段: 14:30-15:00（共7根5分钟K线）")
-    _logger.info(f"缓存路径: {CACHE_FILE}")
+    _logger.info(f"缓存路径: {_CACHE_FILE}")
     
     # Step 1: 加载股票列表
     try:

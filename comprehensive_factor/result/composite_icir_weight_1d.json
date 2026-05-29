@@ -24,7 +24,7 @@
       ],
       "unmapped_factors": [],
       "valid_count": 2,
-      "total_count": 5,
+      "total_count": 6,
       "invalid": {
         "rsi": [
           "|monotonicity_corr|=0.27<0.4"
@@ -32,6 +32,9 @@
         "bollinger_pb": [
           "|monotonicity_corr|=0.14<0.4",
           "long_short_return=1.6%<3%"
+        ],
+        "overnight_ret": [
+          "|ic_mean|=0.021<0.03"
         ],
         "kdj_j": [
           "|ic_mean|=0.022<0.03",
@@ -55,7 +58,7 @@
         "long_short_return_min": 0.03,
         "high_corr_threshold": 0.7
       },
-      "selection_reason": "从5个因子中筛选1个",
+      "selection_reason": "从6个因子中筛选1个",
       "selection_complete": true,
       "selection_warnings": []
     },
@@ -213,5 +216,5 @@
     "min_stocks_per_layer": 10,
     "rolling_window": 60
   },
-  "created_at": "2026-05-28T23:32:42.180425"
+  "created_at": "2026-05-29T00:07:11.067751"
 }
