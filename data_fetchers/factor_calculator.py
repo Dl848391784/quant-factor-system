@@ -61,6 +61,10 @@ v1.8 (2026-05-29): 新增3日累计涨幅因子
   - 添加 `calculate_return_3d()` 函数
   - 添加 `_COL_RETURN_3D` 和 `_DEFAULT_RETURN_3D_WINDOW` 常量
   - 边界处理：前3日数据设为 NaN（历史不足）
+v1.9 (2026-05-29): 新增5日累计涨幅因子
+  - 添加 `calculate_return_5d()` 函数
+  - 添加 `_COL_RETURN_5D` 和 `_DEFAULT_RETURN_5D_WINDOW` 常量
+  - 边界处理：前5日数据设为 NaN（历史不足）
 
 作者: 云瑶
 创建日期: 2026-05-27
@@ -95,6 +99,7 @@ __all__ = [
     'calculate_price_position',  # v1.6 新增
     'calculate_amplitude',  # v1.7 新增
     'calculate_return_3d',  # v1.8 新增
+    'calculate_return_5d',  # v1.9 新增
     'get_module_logger',
     # 公共常量别名（向下兼容 ic_kdj_j 等脚本的导入）
     'DEFAULT_RSI_PERIOD',
@@ -137,6 +142,7 @@ _COL_TURNOVER_SURGE = 'turnover_surge'
 _COL_PRICE_POSITION = 'price_position'
 _COL_AMPLITUDE = 'amplitude'
 _COL_RETURN_3D = 'return_3d'
+_COL_RETURN_5D = 'return_5d'
 
 # 默认参数（私有常量，遵循 cache_manager.py 规范）
 _DEFAULT_RSI_PERIOD = 6
@@ -151,6 +157,7 @@ _DEFAULT_FORWARD_RETURN_SHIFT = 1
 _DEFAULT_PRICE_POSITION_EPSILON = 1e-10  # 防止除零
 _DEFAULT_AMPLITUDE_EPSILON = 1e-10  # 防止除零
 _DEFAULT_RETURN_3D_WINDOW = 3  # 3日累计涨幅窗口
+_DEFAULT_RETURN_5D_WINDOW = 5  # 5日累计涨幅窗口
 
 # 公共常量别名（向下兼容 ic_kdj_j 等脚本的导入）
 DEFAULT_RSI_PERIOD = _DEFAULT_RSI_PERIOD
@@ -915,5 +922,85 @@ def calculate_return_3d(
     )
 
     logger_arg.info(f"return_3d (window={window}) 计算完成，共 {len(df)} 条记录")
+
+    return df
+
+
+# ============================================================================
+# 5日累计涨幅因子计算
+# ============================================================================
+
+def calculate_return_5d(
+    factor_df: pd.DataFrame,
+    window: int = None,
+    logger_arg: Optional[logging.Logger] = None
+) -> pd.DataFrame:
+    """
+    计算 N 日累计涨幅因子（默认5日）
+
+    公式: return_Nd = close[t] / close[t-N] - 1
+
+    含义: 过去 N 日累计涨跌幅
+    - 正值 → 上涨
+    - 负值 → 下跌
+    - 0 → 无变化
+    - 范围: 理论 [-∞, +∞)，A股日涨跌幅±10%，5日累计约±50%
+
+    Args:
+        factor_df: 包含 close, asset, date 列的 DataFrame
+        window: 计算窗口（默认5日）
+        logger_arg: 日志记录器（可选，默认使用模块 logger）
+
+    Returns:
+        添加 return_5d 列的 DataFrame
+
+    边界处理:
+        - 前N日数据设为 NaN（历史数据不足）
+        - close[t-N] = 0 时设为 NaN（无效数据）
+
+    规范:
+        - 函数入口必须先 .copy()，避免修改原始数据
+        - 必须按 asset 分组后再做 shift（单股票时序指标）
+
+    Example:
+        >>> df = pd.DataFrame({
+        ...     'date': ['2026-01-01', '2026-01-02', '2026-01-03', '2026-01-04', '2026-01-05', '2026-01-06'],
+        ...     'asset': ['A', 'A', 'A', 'A', 'A', 'A'],
+        ...     'close': [100.0, 102.0, 101.0, 103.0, 105.0, 108.0]
+        ... })
+        >>> result = calculate_return_5d(df, window=5)
+        >>> 'return_5d' in result.columns
+        True
+        >>> pd.isna(result['return_5d'].iloc[0])  # 前5日无数据
+        True
+        >>> result['return_5d'].iloc[5]  # (108/100 - 1) = 0.08
+        0.08
+    """
+    if logger_arg is None:
+        logger_arg = logging.getLogger(__name__)
+
+    if window is None:
+        window = _DEFAULT_RETURN_5D_WINDOW
+
+    # 入口 copy（遵循 MODULE.md 约束）
+    df = factor_df.copy()
+
+    # 按 asset+date 排序
+    df = df.sort_values([_COL_ASSET, _COL_DATE])
+
+    # 按 asset 分组，shift(window) 获取历史收盘价
+    close_shifted = df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].shift(window)
+
+    # 计算 N 日累计涨幅: close[t] / close[t-N] - 1
+    # close_shifted 为 NaN 或 0 时，结果设为 NaN
+    invalid_mask = close_shifted.isna() | (close_shifted.abs() < _EPSILON)
+
+    df[_COL_RETURN_5D] = np.where(
+        invalid_mask,
+        np.nan,
+        df[_COL_CLOSE] / close_shifted - 1
+    )
+
+    logger_arg.info(f"return_5d (window={window}) 计算完成，共 {len(df)} 条记录")
 
     return df
