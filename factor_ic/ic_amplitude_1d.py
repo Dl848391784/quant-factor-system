@@ -27,6 +27,7 @@
 """
 
 import sys
+import argparse
 from pathlib import Path
 
 # 添加项目路径
@@ -53,7 +54,6 @@ DEFAULT_MIN_STOCKS = 10
 
 def main():
     """CLI 主入口"""
-    import argparse
     
     parser = argparse.ArgumentParser(description='振幅因子 IC 计算器')
     parser.add_argument('--force-full', action='store_true', help='强制全量计算')
@@ -76,16 +76,15 @@ def main():
         _logger=logger
     )
     
-    # 保底处理：公共模块异常返回 None 时防御失效
+    # 保底处理：公共模块异常返回 None 时抛出 RuntimeError
     if result is None:
-        result = {}
-        logger.warning("run_complex_factor_ic 返回 None，启用保底处理")
+        raise RuntimeError("run_complex_factor_ic 返回 None")
     
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get('ic_metrics') or {}
     sample_stats = result.get('sample_stats') or {}
     period = result.get('period') or {}
-    # ic_distribution_consistency 包含 positive_ratio 子字段（统一层级）
+    # 字段名来源于 MODULE.md 第56行输出结构模板
     ic_distribution = result.get('ic_distribution_consistency') or {}
     
     logger.info("=" * 60)
@@ -100,7 +99,7 @@ def main():
     if ic_mean is not None:
         logger.info(f"IC 均值: {ic_mean:.4f}")
     else:
-        logger.info("IC 均值: N/A（数据加载失败）")
+        logger.info("IC 均值: N/A（计算结果为空）")
     ic_std = ic_metrics.get('ic_std')
     if ic_std is not None:
         logger.info(f"IC 标准差: {ic_std:.4f}")
@@ -116,6 +115,10 @@ def main():
         logger.info(f"IC>0 占比: {positive_ratio:.2%}")
     else:
         logger.info("IC>0 占比: N/A")
+    
+    # 异常状态整体感知日志（运维巡检用）
+    if ic_mean is None:
+        logger.warning("本次IC计算结果为空，请检查数据源或参数配置")
     
     # 计算完成确认日志（移到结果摘要后）
     logger.info("振幅因子IC计算完成")
