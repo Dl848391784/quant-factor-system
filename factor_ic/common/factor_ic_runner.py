@@ -18,7 +18,7 @@
 
 作者: 云瑶
 日期: 2026-05-22
-最后修改: 2026-05-23（修复模式判断顺序、职责划分、参数修正逻辑）
+最后修改: 2026-05-31（重构为单文件模式，删除双文件加载逻辑）
 """
 
 import json
@@ -30,8 +30,8 @@ from typing import Dict, List, Optional, Callable, Any
 from .logger_config import get_logger
 logger = get_logger(__name__)
 
-# 导入数据加载
-from .data_loader import load_factor_return_data, get_factor_cache_path, get_return_cache_path
+# 导入数据加载（单文件模式）
+from .data_loader import load_factor_return_data, get_data_cache_path
 
 # 导入 IC 计算
 from .ic_calculator import calculate_ic_with_direction_verification, calculate_ic_statistics
@@ -58,8 +58,7 @@ def run_factor_ic_analysis(
     min_stocks: int = 10,
     force_full: bool = False,
     output_path: Optional[Path] = None,
-    factor_cache_path: Optional[Path] = None,
-    return_cache_path: Optional[Path] = None,
+    data_cache_path: Optional[Path] = None,
     additional_factor_files: Optional[Dict[str, Path]] = None,
     custom_factor_calculation: Optional[Callable] = None,
     custom_factor_calculation_params: Optional[Dict[str, Any]] = None,
@@ -77,8 +76,7 @@ def run_factor_ic_analysis(
         min_stocks: 最小股票数阈值
         force_full: 是否强制全量计算
         output_path: 输出文件路径（默认自动生成）
-        factor_cache_path: 因子缓存路径（默认自动检测）
-        return_cache_path: 收益缓存路径（默认自动检测）
+        data_cache_path: 数据缓存路径（默认使用 factor_ic_data.json.gz）
         additional_factor_files: 额外因子文件（如换手率数据）
         custom_factor_calculation: 自定义因子计算函数（可选）
             - 用于需要预处理因子值的场景（如 KDJ 计算）
@@ -130,11 +128,8 @@ def run_factor_ic_analysis(
     if output_path is None:
         output_path = get_ic_output_path(factor_name, return_period)
     
-    if factor_cache_path is None:
-        factor_cache_path = get_factor_cache_path()
-    
-    if return_cache_path is None:
-        return_cache_path = get_return_cache_path()
+    if data_cache_path is None:
+        data_cache_path = get_data_cache_path()
     
     if factor_cols is None:
         factor_cols = [factor_col]
@@ -151,7 +146,7 @@ def run_factor_ic_analysis(
             # 追加到末尾，保持原有顺序
             factor_cols = factor_cols + [factor_col]
     
-    data_source = str(factor_cache_path)
+    data_source = str(data_cache_path)
     
     # ========== 判断模式（不需要加载数据）==========
     # 使用 check_data_completeness 判断模式，避免 SKIP 模式也加载全量数据
@@ -195,8 +190,7 @@ def run_factor_ic_analysis(
         factor_df, return_df, raw_metadata = load_factor_return_data(
             factor_cols=factor_cols,
             return_col=return_col,
-            factor_cache_path=factor_cache_path,
-            return_cache_path=return_cache_path,
+            data_cache_path=data_cache_path,
             additional_factor_files=additional_factor_files,
             logger=_logger
         )

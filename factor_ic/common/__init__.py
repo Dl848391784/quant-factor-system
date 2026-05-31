@@ -4,8 +4,8 @@
 # 数据完整性检查
 from .data_completeness import check_data_completeness, check_incremental_update
 
-# 数据加载
-from .data_loader import load_factor_return_data, get_cache_dir, get_factor_cache_path, get_return_cache_path
+# 数据加载（单文件模式）
+from .data_loader import load_factor_return_data, get_data_cache_path, get_data_dir
 
 # IC 计算
 from .ic_calculator import calculate_ic_with_direction_verification, calculate_single_day_ic, calculate_ic_statistics
@@ -23,9 +23,8 @@ __all__ = [
     'check_data_completeness',
     'check_incremental_update',
     'load_factor_return_data',
-    'get_cache_dir',
-    'get_factor_cache_path',
-    'get_return_cache_path',
+    'get_data_cache_path',
+    'get_data_dir',
     'calculate_ic_with_direction_verification',
     'calculate_single_day_ic',
     'calculate_ic_statistics',

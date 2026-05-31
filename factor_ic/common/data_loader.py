@@ -8,21 +8,20 @@
 3. 列存在验证（显示可用列）
 4. dropna 前记录 raw_metadata
 5. dropna 过滤缺失值
-6. 日期对齐验证（可选）
+6. 从单文件提取收益数据
 
-数据来源（2026-05-31更新，修复路径配置）：
-- 因子数据：data_fetchers/result/factor_ic_data.json.gz（包含所有因子）
-- 收益数据：data_fetchers/result/return_data.json.gz（单独加载）
-- 注：factor_ic_data.json.gz 内含 forward_return_1d/3d/5d，但数据加载器采用双文件分离加载模式
+数据来源（2026-05-31重构，单文件模式）：
+- 统一数据源：data_fetchers/result/factor_ic_data.json.gz
+- 包含：行情数据 + 基础因子 + 扩展因子 + 收益数据（forward_return_1d/3d/5d）
+- 删除冗余文件：return_data.json.gz（收益已内置于 factor_ic_data.json.gz）
 
 日志精确化规范（2026-05-28）：
 - gzip.open + json.load 添加 try/except 捕获 BadGzipFile/JSONDecodeError/OSError
 - _convert_date_column 无效日期时补充 logger.error 记录数据名称和示例
-- 日期不对齐明细数据降级为 debug（避免 info 噪音）
 
 作者: 云瑶
 日期: 2026-05-22
-最后修改: 2026-05-28（日志精确化修复）
+最后修改: 2026-05-31（重构为单文件模式，删除双文件加载逻辑）
 """
 
 import gzip
@@ -36,38 +35,30 @@ from .logger_config import get_logger
 # ============================================================================
 # 默认路径配置（遵循 PROJECT.md 跨模块数据路径规范）
 # ============================================================================
-# 因子数据路径：来自 data_fetchers/result/factor_ic_data.json.gz
+# 统一数据源：data_fetchers/result/factor_ic_data.json.gz
 # 包含：行情数据 + 基础因子 + 扩展因子 + 收益数据（forward_return_1d/3d/5d）
-DEFAULT_FACTOR_DATA_DIR = Path(__file__).parent.parent.parent / 'data_fetchers' / 'result'
-DEFAULT_FACTOR_CACHE = DEFAULT_FACTOR_DATA_DIR / 'factor_ic_data.json.gz'
-
-# 收益数据路径（已合并到 factor_ic_data.json.gz，但保留单独加载能力）
-# 用于增量场景或单独加载收益数据
-DEFAULT_RETURN_CACHE_DIR = Path(__file__).parent.parent.parent / 'data_fetchers' / 'result'
-DEFAULT_RETURN_CACHE = DEFAULT_RETURN_CACHE_DIR / 'return_data.json.gz'
+DEFAULT_DATA_DIR = Path(__file__).parent.parent.parent / 'data_fetchers' / 'result'
+DEFAULT_DATA_CACHE = DEFAULT_DATA_DIR / 'factor_ic_data.json.gz'
 
 
 def load_factor_return_data(
     factor_cols: List[str],
     return_col: str = 'forward_return_1d',
-    factor_cache_path: Optional[Path] = None,
-    return_cache_path: Optional[Path] = None,
+    data_cache_path: Optional[Path] = None,
     dropna_cols: Optional[List[str]] = None,
-    validate_date_alignment: bool = True,
     additional_factor_files: Optional[Dict[str, Path]] = None,
     logger=None
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
     """
-    从缓存加载因子数据和收益数据
+    从统一数据源加载因子数据和收益数据（单文件模式）
     
     参数:
         factor_cols: 需加载的因子列（如 ['rsi_6'] 或 ['close', 'high', 'low']）
             - 必须包含 'date' 和 'asset' 列（自动添加）
         return_col: 收益列名，默认 'forward_return_1d'
-        factor_cache_path: 因子缓存路径（默认使用 DEFAULT_FACTOR_CACHE）
-        return_cache_path: 收益缓存路径（默认使用 DEFAULT_RETURN_CACHE）
+            - 可选: 'forward_return_1d', 'forward_return_3d', 'forward_return_5d'
+        data_cache_path: 数据缓存路径（默认使用 DEFAULT_DATA_CACHE）
         dropna_cols: dropna 过滤列（默认 = factor_cols，不含 date/asset）
-        validate_date_alignment: 是否验证日期对齐（默认 True）
         additional_factor_files: 额外因子文件（如换手率数据）
             - 格式: {'turnover_rate': Path(...)}
             - 会合并到主因子数据
@@ -76,7 +67,7 @@ def load_factor_return_data(
     返回:
         (factor_df, return_df, raw_metadata)
         - factor_df: 过滤后的因子数据 DataFrame
-        - return_df: 过滤后的收益数据 DataFrame
+        - return_df: 过滤后的收益数据 DataFrame（仅含 date/asset/return_col）
         - raw_metadata: 原始数据元信息字典
             - period_start: 原始缓存最小日期
             - period_end: 原始缓存最大日期
@@ -98,98 +89,61 @@ def load_factor_return_data(
             factor_cols=['close', 'high', 'low']
         )
         
-        # 换手率突增（turnover_rate 已在 factor_data_extended.json.gz 中）
+        # 5日收益周期
         factor_df, return_df, raw_metadata = load_factor_return_data(
-            factor_cols=['close', 'turnover_rate']
+            factor_cols=['rsi_6'],
+            return_col='forward_return_5d'
         )
     """
     if logger is None:
         logger = get_logger(__name__)
     
-    logger.info("[数据加载] 从缓存读取数据...")
+    logger.info("[数据加载] 从统一数据源读取数据...")
     
     # 确定缓存路径
-    factor_cache_path = factor_cache_path or DEFAULT_FACTOR_CACHE
-    return_cache_path = return_cache_path or DEFAULT_RETURN_CACHE
+    data_cache_path = data_cache_path or DEFAULT_DATA_CACHE
     
-    # ========== 加载因子数据 ==========
-    if not factor_cache_path.exists():
-        raise FileNotFoundError(f"因子缓存不存在: {factor_cache_path}")
+    # ========== 加载统一数据源 ==========
+    if not data_cache_path.exists():
+        raise FileNotFoundError(f"数据缓存不存在: {data_cache_path}")
     
     try:
-        with gzip.open(factor_cache_path, 'rt', encoding='utf-8') as f:
-            factor_data = json.load(f)
+        with gzip.open(data_cache_path, 'rt', encoding='utf-8') as f:
+            data = json.load(f)
     except (gzip.BadGzipFile, json.JSONDecodeError, OSError) as e:
-        logger.error(f"因子数据读取失败 [{factor_cache_path}] [{type(e).__name__}]: {e}")
+        logger.error(f"数据读取失败 [{data_cache_path}] [{type(e).__name__}]: {e}")
         raise
     
     # ========== JSON 结构验证 ==========
-    # 验证 'data' 键存在，防止 JSON 格式错误导致 KeyError
-    if 'data' not in factor_data:
+    if 'data' not in data:
         raise KeyError(
-            f"因子缓存文件 '{factor_cache_path}' 缺少 'data' 键\n"
-            f"JSON 结构: {list(factor_data.keys())}"
+            f"数据缓存文件 '{data_cache_path}' 缺少 'data' 键\n"
+            f"JSON 结构: {list(data.keys())}"
         )
     
-    factor_df = pd.DataFrame(factor_data['data'])
+    df = pd.DataFrame(data['data'])
     
     # ========== 基础列验证（加载后立即验证） ==========
-    # 验证基础列存在，防止后续操作因列缺失而抛出难以定位的 KeyError
     for col in ['date', 'asset']:
-        if col not in factor_df.columns:
-            raise KeyError(f"因子数据缺少必需列: '{col}'，无法继续处理")
+        if col not in df.columns:
+            raise KeyError(f"数据缺少必需列: '{col}'，无法继续处理")
     
-    logger.info(f"因子数据: {len(factor_df)} 行, {factor_df['asset'].nunique()} 只股票")
-    
-    # ========== 加载收益数据 ==========
-    if not return_cache_path.exists():
-        raise FileNotFoundError(f"收益缓存不存在: {return_cache_path}")
-    
-    try:
-        with gzip.open(return_cache_path, 'rt', encoding='utf-8') as f:
-            return_data = json.load(f)
-    except (gzip.BadGzipFile, json.JSONDecodeError, OSError) as e:
-        logger.error(f"收益数据读取失败 [{return_cache_path}] [{type(e).__name__}]: {e}")
-        raise
-    
-    # ========== JSON 结构验证 ==========
-    # 验证 'data' 键存在，防止 JSON 格式错误导致 KeyError
-    if 'data' not in return_data:
-        raise KeyError(
-            f"收益缓存文件 '{return_cache_path}' 缺少 'data' 键\n"
-            f"JSON 结构: {list(return_data.keys())}"
-        )
-    
-    return_df = pd.DataFrame(return_data['data'])
-    
-    # ========== 基础列验证（加载后立即验证） ==========
-    # 验证基础列存在，防止后续操作因列缺失而抛出难以定位的 KeyError
-    for col in ['date', 'asset']:
-        if col not in return_df.columns:
-            raise KeyError(f"收益数据缺少必需列: '{col}'，无法继续处理")
-    
-    logger.info(f"收益数据: {len(return_df)} 行, {return_df['asset'].nunique()} 只股票")
+    logger.info(f"原始数据: {len(df)} 行, {df['asset'].nunique()} 只股票")
     
     # ========== 日期类型统一转换 ==========
-    # 从 JSON 加载后，日期可能是多种格式（字符串、datetime、timestamp）
-    # 统一转换为字符串格式 "YYYY-MM-DD"，确保 isin 操作类型匹配
-    factor_df = _convert_date_column(factor_df, '因子', logger=logger)
-    return_df = _convert_date_column(return_df, '收益', logger=logger)
+    df = _convert_date_column(df, '统一数据源', logger=logger)
     
-    # ========== 在所有 merge 前，快照原始数据范围 ==========
-    # raw_metadata 应基于原始缓存数据，而非 inner join 后的数据
-    raw_period_start = str(factor_df['date'].min())
-    raw_period_end = str(factor_df['date'].max())
-    raw_total_days = factor_df['date'].nunique()
-    raw_avg_stocks_per_day = round(factor_df.groupby('date').size().mean(), 1)
+    # ========== 快照原始数据范围（dropna 前） ==========
+    raw_period_start = str(df['date'].min())
+    raw_period_end = str(df['date'].max())
+    raw_total_days = df['date'].nunique()
+    raw_avg_stocks_per_day = round(df.groupby('date').size().mean(), 1)
     
     logger.info(f"原始数据范围: {raw_period_start} ~ {raw_period_end}, {raw_total_days} 个交易日")
     logger.info(f"原始平均每日股票数: {raw_avg_stocks_per_day}")
     
     # ========== 加载额外因子文件（如有） ==========
-    # 在修改因子列列表之前，创建 factor_cols 的副本（防止引用污染）
-    # 使用 list() 创建新列表对象，确保后续操作不影响调用方传入的原始列表
-    all_factor_cols = list(factor_cols)  # 真正的副本，不污染调用方
+    all_factor_cols = list(factor_cols)  # 创建副本，防止引用污染
     
     if additional_factor_files:
         for col_name, file_path in additional_factor_files.items():
@@ -203,8 +157,6 @@ def load_factor_return_data(
                 logger.error(f"额外因子数据读取失败 [{file_path}] [{type(e).__name__}]: {e}")
                 raise
             
-            # ========== JSON 结构验证 ==========
-            # 验证 'data' 键存在，防止 JSON 格式错误导致 KeyError
             if 'data' not in additional_data:
                 raise KeyError(
                     f"额外因子文件 '{file_path}' 缺少 'data' 键\n"
@@ -214,30 +166,25 @@ def load_factor_return_data(
             additional_df = pd.DataFrame(additional_data['data'])
             additional_df = _convert_date_column(additional_df, f'额外因子({col_name})', logger=logger)
             
-            # 类型转换
             if col_name in additional_df.columns:
                 additional_df[col_name] = pd.to_numeric(additional_df[col_name], errors='coerce')
             else:
-                # 列不存在时提供友好错误信息
                 available_cols = sorted([c for c in additional_df.columns if c not in ['date', 'asset']])
                 raise KeyError(
                     f"额外因子文件 '{file_path}' 缺少指定列: '{col_name}'\n"
                     f"可用列: {available_cols}"
                 )
             
-            # 合并到主因子数据
-            rows_before = len(factor_df)
-            factor_df = pd.merge(
-                factor_df,
+            rows_before = len(df)
+            df = pd.merge(
+                df,
                 additional_df[['date', 'asset', col_name]],
                 on=['date', 'asset'],
                 how='inner'
             )
-            rows_after = len(factor_df)
+            rows_after = len(df)
             rows_lost = rows_before - rows_after
             
-            # 打印合并结果，告知用户数据丢失情况
-            # 防止 rows_before == 0 时除零错误
             if rows_lost > 0:
                 if rows_before > 0:
                     loss_pct = rows_lost / rows_before * 100
@@ -247,51 +194,38 @@ def load_factor_return_data(
             else:
                 logger.info(f"合并 {col_name} 后: {rows_after} 行（无数据丢失）")
         
-        # 更新因子列列表（包含额外列）
-        # 使用 extend 而非覆盖赋值，保持语义清晰
-        # 排除已存在于 all_factor_cols 的列，防止重复
         additional_cols = [k for k in additional_factor_files.keys() if k not in all_factor_cols]
         all_factor_cols.extend(additional_cols)
     
     # ========== 列存在验证 ==========
-    # 必须包含 date 和 asset
-    required_base_cols = ['date', 'asset']
-    for col in required_base_cols:
-        if col not in factor_df.columns:
-            raise KeyError(f"因子数据缺少必需列: '{col}'")
+    for col in ['date', 'asset']:
+        if col not in df.columns:
+            raise KeyError(f"数据缺少必需列: '{col}'")
     
-    # 验证因子列
-    missing_factor_cols = [col for col in all_factor_cols if col not in factor_df.columns]
+    missing_factor_cols = [col for col in all_factor_cols if col not in df.columns]
     if missing_factor_cols:
-        available_cols = sorted([c for c in factor_df.columns if c not in ['date', 'asset']])
+        available_cols = sorted([c for c in df.columns if c not in ['date', 'asset']])
         raise KeyError(
-            f"因子数据缺少必需列: {missing_factor_cols}\n"
+            f"数据缺少必需列: {missing_factor_cols}\n"
             f"可用因子列: {available_cols}"
         )
     
-    # 验证收益列
-    if return_col not in return_df.columns:
-        available_cols = sorted([c for c in return_df.columns if c not in ['date', 'asset']])
+    if return_col not in df.columns:
+        available_return_cols = [c for c in df.columns if 'forward_return' in c]
         raise KeyError(
-            f"收益列 '{return_col}' 不存在于缓存数据中\n"
-            f"可用收益列: {available_cols}"
+            f"收益列 '{return_col}' 不存在于数据中\n"
+            f"可用收益列: {available_return_cols}"
         )
     
-    # ========== 选择需要的列 ==========
-    # 去重并保持顺序：date/asset 基础列已自动添加，排除用户传入的重复项
+    # ========== 分离因子和收益数据 ==========
     select_cols = list(dict.fromkeys(['date', 'asset'] + all_factor_cols))
-    factor_df = factor_df[select_cols].copy()
-    
-    # 收益列保持原始名称（由 return_col 参数决定）
-    return_df = return_df[['date', 'asset', return_col]].copy()
+    factor_df = df[select_cols].copy()
+    return_df = df[['date', 'asset', return_col]].copy()
     
     # ========== 过滤缺失值 ==========
-    # dropna_cols 默认为原始 factor_cols（不含额外列和基础列）
-    # 就近计算，语义清晰：排除 date/asset 基础列
     if dropna_cols is None:
         dropna_cols = [c for c in factor_cols if c not in ['date', 'asset']]
     
-    # 验证 dropna_cols 中的列是否存在于 factor_df
     missing_dropna_cols = [col for col in dropna_cols if col not in factor_df.columns]
     if missing_dropna_cols:
         available_cols = sorted([c for c in factor_df.columns if c not in ['date', 'asset']])
@@ -305,28 +239,17 @@ def load_factor_return_data(
     
     logger.info(f"过滤缺失值后: 因子 {len(factor_df)} 行（过滤列: {dropna_cols}），收益 {len(return_df)} 行")
     
-    # ========== 日期对齐验证（可选） ==========
-    if validate_date_alignment:
-        factor_dates = set(factor_df['date'].unique())
-        return_dates = set(return_df['date'].unique())
-        
-        if factor_dates != return_dates:
-            missing_in_return = factor_dates - return_dates
-            missing_in_factor = return_dates - factor_dates
-            
-            logger.warning("因子数据和收益数据日期不对齐")
-            logger.debug(f"因子数据日期数: {len(factor_dates)}")
-            logger.debug(f"收益数据日期数: {len(return_dates)}")
-            logger.debug(f"因子数据缺失日期数: {len(missing_in_factor)}")
-            logger.debug(f"收益数据缺失日期数: {len(missing_in_return)}")
-            
-            # 选择交集日期（保证数据对齐）
-            common_dates = factor_dates & return_dates
-            factor_df = factor_df[factor_df['date'].isin(common_dates)].reset_index(drop=True)
-            return_df = return_df[return_df['date'].isin(common_dates)].reset_index(drop=True)
-            
-            # 更新日志统计：显示对齐后的行数变化
-            logger.info(f"对齐后: {len(common_dates)} 个日期, 因子 {len(factor_df)} 行, 收益 {len(return_df)} 行")
+    # ========== 日期对齐（单文件内数据天然对齐） ==========
+    # 取日期交集确保因子和收益数据对齐
+    factor_dates = list(factor_df['date'].unique())
+    return_dates = list(return_df['date'].unique())
+    
+    if set(factor_dates) != set(return_dates):
+        logger.warning("因子数据和收益数据日期不对齐（单文件内）")
+        common_dates = list(set(factor_dates) & set(return_dates))
+        factor_df = factor_df[factor_df['date'].isin(common_dates)].reset_index(drop=True)
+        return_df = return_df[return_df['date'].isin(common_dates)].reset_index(drop=True)
+        logger.info(f"对齐后: {len(common_dates)} 个日期, 因子 {len(factor_df)} 行, 收益 {len(return_df)} 行")
     
     # ========== 返回结果 ==========
     return factor_df, return_df, {
@@ -358,7 +281,6 @@ def _convert_date_column(df: pd.DataFrame, name: str, logger=None) -> pd.DataFra
     if 'date' not in df.columns:
         return df
     
-    # 使用 .copy() 创建副本，确保不修改原始 DataFrame（遵循最小惊讶原则）
     df = df.copy()
     
     date_series = pd.to_datetime(df['date'], errors='coerce')
@@ -367,10 +289,10 @@ def _convert_date_column(df: pd.DataFrame, name: str, logger=None) -> pd.DataFra
     if nat_count > 0:
         invalid_samples = df['date'][date_series.isna()].head(5).tolist()
         logger.error(
-            f"[{name}数据] 发现 {nat_count} 个无效日期格式，示例: {invalid_samples}"
+            f"[{name}] 发现 {nat_count} 个无效日期格式，示例: {invalid_samples}"
         )
         raise ValueError(
-            f"{name}数据中存在 {nat_count} 个无效日期格式\n"
+            f"{name}中存在 {nat_count} 个无效日期格式\n"
             f"无效日期示例: {invalid_samples}\n"
             f"请检查缓存数据源是否包含脏数据"
         )
@@ -379,20 +301,11 @@ def _convert_date_column(df: pd.DataFrame, name: str, logger=None) -> pd.DataFra
     return df
 
 
-def get_cache_dir() -> Path:
-    """获取收益缓存目录路径（cache/factor_data/）
-    
-    注意：因子数据已迁移至 data_fetchers/result/factor_data_extended.json.gz
-    此函数仅返回收益数据目录，用于向后兼容。
-    """
-    return DEFAULT_RETURN_CACHE_DIR
+def get_data_cache_path() -> Path:
+    """获取统一数据源缓存路径"""
+    return DEFAULT_DATA_CACHE
 
 
-def get_factor_cache_path() -> Path:
-    """获取因子缓存文件路径"""
-    return DEFAULT_FACTOR_CACHE
-
-
-def get_return_cache_path() -> Path:
-    """获取收益缓存文件路径"""
-    return DEFAULT_RETURN_CACHE
+def get_data_dir() -> Path:
+    """获取数据目录路径"""
+    return DEFAULT_DATA_DIR
