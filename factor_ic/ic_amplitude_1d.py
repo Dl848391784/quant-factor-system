@@ -78,23 +78,39 @@ def main():
     # 调用后日志
     logger.info("振幅因子IC计算完成")
     
-    # 使用 .get() 防御性访问结果
-    ic_metrics = result.get('ic_metrics', {})
+    # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
+    ic_metrics = result.get('ic_metrics') or {}
+    sample_stats = result.get('sample_stats') or {}
+    period = result.get('period') or {}
     
-    # 完整指标输出
-    logger.info("=" * 60 + " 结果摘要 " + "=" * 60)
+    logger.info("=" * 60)
+    logger.info("结果摘要")
+    logger.info("=" * 60)
     logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
     logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
+    logger.info(f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}")
+    logger.info(f"有效天数: {sample_stats.get('valid_days', 0)} 天")
     logger.info("--- IC指标 ---")
-    logger.info(f"IC 均值: {ic_metrics.get('ic_mean', 0):.4f}")
-    logger.info(f"IC 标准差: {ic_metrics.get('ic_std', 0):.4f}")
-    logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
-    logger.info(f"IC > 0 占比: {ic_metrics.get('ic_positive_ratio', 0):.2%}")
-    logger.info("--- 数据范围 ---")
-    logger.info(f"日期范围: {result.get('date_range', 'unknown')}")
-    logger.info(f"处理股票数: {result.get('stock_count', 'unknown')}")
-    logger.info(f"IC计算次数: {ic_metrics.get('ic_count', 0)}")
-    logger.info("=" * 128)
+    ic_mean = ic_metrics.get('ic_mean')
+    if ic_mean is not None:
+        logger.info(f"IC 均值: {ic_mean:.4f}")
+    else:
+        logger.info("IC 均值: N/A（数据加载失败）")
+    ic_std = ic_metrics.get('ic_std')
+    if ic_std is not None:
+        logger.info(f"IC 标准差: {ic_std:.4f}")
+    else:
+        logger.info("IC 标准差: N/A")
+    icir = ic_metrics.get('icir')
+    if icir is not None:
+        logger.info(f"ICIR: {icir:.2f}")
+    else:
+        logger.info("ICIR: N/A")
+    positive_ratio = result.get('positive_ratio')
+    if positive_ratio is not None:
+        logger.info(f"IC>0 占比: {positive_ratio:.2%}")
+    else:
+        logger.info("IC>0 占比: N/A")
     
     return result
 
