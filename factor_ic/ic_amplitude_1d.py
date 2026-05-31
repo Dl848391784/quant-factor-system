@@ -21,6 +21,9 @@
 
 作者: 云瑶
 创建日期: 2026-05-29
+版本历史:
+  v1.0 (2026-05-29): 初始版本，复用 factor_calculator.calculate_amplitude
+  v1.1 (2026-05-31): 优化日志字段名 + 防御性 None 处理 + 删除未使用导入
 """
 
 import sys
@@ -28,8 +31,6 @@ from pathlib import Path
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import pandas as pd
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
@@ -118,9 +119,9 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except RuntimeError:
-        logger.exception("振幅因子IC计算失败")
+    except RuntimeError as e:
+        logger.exception(f"振幅因子IC计算失败: {e}")
         sys.exit(1)
-    except Exception:
-        logger.exception("未预期的错误")
+    except Exception as e:
+        logger.exception(f"未预期的错误: {e}")
         sys.exit(1)
