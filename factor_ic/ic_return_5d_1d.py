@@ -21,15 +21,18 @@
 
 作者: 云瑶
 创建日期: 2026-05-29
+版本历史:
+  v1.0 (2026-05-29): 初始版本，复用 factor_calculator.calculate_return_5d
+  v1.1 (2026-05-31): 优化日志字段名 + 防御性 None 处理 + 删除未使用导入 + 异常处理改进
+  v1.2 (2026-05-31): 深度优化 - 创建流程文档 + 创建测试用例 + MODULE.md 版本同步
 """
 
 import sys
+import argparse
 from pathlib import Path
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import pandas as pd
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
@@ -52,7 +55,6 @@ DEFAULT_MIN_STOCKS = 10
 
 def main():
     """CLI 主入口"""
-    import argparse
     
     parser = argparse.ArgumentParser(description='5日累计涨幅因子 IC 计算器')
     parser.add_argument('--force-full', action='store_true', help='强制全量计算')
@@ -69,19 +71,22 @@ def main():
         factor_col='return_5d',
         factor_cols=['close', 'asset', 'date'],  # 需要三列进行计算
         custom_factor_calculation=calculate_return_5d,
-        custom_factor_calculation_params={},  # return_5d 无额外参数
+        # return_5d 无额外参数（公共模块默认 params=None，内部会转为 {}）
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger
     )
     
-    # 调用后日志
-    logger.info("5日累计涨幅因子IC计算完成")
+    # 保底处理：公共模块异常返回 None 时抛出 RuntimeError
+    if result is None:
+        raise RuntimeError("run_complex_factor_ic 返回 None")
     
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get('ic_metrics') or {}
     sample_stats = result.get('sample_stats') or {}
     period = result.get('period') or {}
+    # 字段名来源于 MODULE.md 第56行输出结构模板
+    ic_distribution = result.get('ic_distribution_consistency') or {}
     
     logger.info("=" * 60)
     logger.info("结果摘要")
@@ -95,7 +100,7 @@ def main():
     if ic_mean is not None:
         logger.info(f"IC 均值: {ic_mean:.4f}")
     else:
-        logger.info("IC 均值: N/A（数据加载失败）")
+        logger.info("IC 均值: N/A（计算结果为空）")
     ic_std = ic_metrics.get('ic_std')
     if ic_std is not None:
         logger.info(f"IC 标准差: {ic_std:.4f}")
@@ -106,11 +111,18 @@ def main():
         logger.info(f"ICIR: {icir:.2f}")
     else:
         logger.info("ICIR: N/A")
-    positive_ratio = result.get('positive_ratio')
+    positive_ratio = ic_distribution.get('positive_ratio')
     if positive_ratio is not None:
         logger.info(f"IC>0 占比: {positive_ratio:.2%}")
     else:
         logger.info("IC>0 占比: N/A")
+    
+    # 异常状态整体感知日志（运维巡检用）
+    if ic_mean is None:
+        logger.warning("本次IC计算结果为空，请检查数据源或参数配置")
+        logger.info("5日累计涨幅因子IC计算完成（结果异常，请关注上方警告）")
+    else:
+        logger.info("5日累计涨幅因子IC计算完成")
     
     return result
 
@@ -118,9 +130,11 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except RuntimeError:
-        logger.exception("5日累计涨幅因子IC计算失败")
+    except RuntimeError as e:
+        # 已知业务异常，使用 error()（不打印完整堆栈）
+        logger.error(f"5日累计涨幅因子IC计算失败: {e}")
         sys.exit(1)
-    except Exception:
+    except Exception as e:
+        # 未预期异常，使用 exception()（自动打印完整堆栈，无需重复传 e）
         logger.exception("未预期的错误")
         sys.exit(1)
