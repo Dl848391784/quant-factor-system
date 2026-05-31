@@ -10,9 +10,10 @@
 5. dropna 过滤缺失值
 6. 日期对齐验证（可选）
 
-数据来源（2026-05-26更新，遵循 PROJECT.md 跨模块数据路径规范）：
-- 因子数据：data_fetchers/result/factor_data_extended.json.gz（包含所有因子）
-- 收益数据：cache/factor_data/return_data.json.gz（原始数据源）
+数据来源（2026-05-31更新，修复路径配置）：
+- 因子数据：data_fetchers/result/factor_ic_data.json.gz（包含所有因子）
+- 收益数据：data_fetchers/result/return_data.json.gz（单独加载）
+- 注：factor_ic_data.json.gz 内含 forward_return_1d/3d/5d，但数据加载器采用双文件分离加载模式
 
 日志精确化规范（2026-05-28）：
 - gzip.open + json.load 添加 try/except 捕获 BadGzipFile/JSONDecodeError/OSError
@@ -40,9 +41,9 @@ from .logger_config import get_logger
 DEFAULT_FACTOR_DATA_DIR = Path(__file__).parent.parent.parent / 'data_fetchers' / 'result'
 DEFAULT_FACTOR_CACHE = DEFAULT_FACTOR_DATA_DIR / 'factor_ic_data.json.gz'
 
-# 收益数据路径（保留向后兼容，已合并到 factor_ic_data.json.gz）
+# 收益数据路径（已合并到 factor_ic_data.json.gz，但保留单独加载能力）
 # 用于增量场景或单独加载收益数据
-DEFAULT_RETURN_CACHE_DIR = Path(__file__).parent.parent.parent / 'cache' / 'factor_data'
+DEFAULT_RETURN_CACHE_DIR = Path(__file__).parent.parent.parent / 'data_fetchers' / 'result'
 DEFAULT_RETURN_CACHE = DEFAULT_RETURN_CACHE_DIR / 'return_data.json.gz'
 
 
