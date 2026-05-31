@@ -119,9 +119,9 @@ def main():
     # 异常状态整体感知日志（运维巡检用）
     if ic_mean is None:
         logger.warning("本次IC计算结果为空，请检查数据源或参数配置")
-    
-    # 计算完成确认日志（移到结果摘要后）
-    logger.info("振幅因子IC计算完成")
+        logger.info("振幅因子IC计算完成（结果异常，请关注上方警告）")
+    else:
+        logger.info("振幅因子IC计算完成")
     
     return result
 
@@ -134,6 +134,6 @@ if __name__ == '__main__':
         logger.error(f"振幅因子IC计算失败: {e}")
         sys.exit(1)
     except Exception as e:
-        # 未预期异常，使用 exception()（打印完整堆栈）
-        logger.exception(f"未预期的错误: {e}")
+        # 未预期异常，使用 exception()（自动打印完整堆栈，无需重复传 e）
+        logger.exception("未预期的错误")
         sys.exit(1)
