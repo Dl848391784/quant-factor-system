@@ -26,8 +26,6 @@ data_fetchers 公共模块
 
 from .paths import (
     get_project_root,
-    get_cache_dir,
-    get_factor_data_dir,
     get_stock_list_file,
     get_logs_dir,
     get_module_logs_dir,
@@ -106,8 +104,6 @@ except ImportError:
 __all__ = [
     # paths
     'get_project_root',
-    'get_cache_dir',
-    'get_factor_data_dir',
     'get_stock_list_file',
     'get_logs_dir',
     'get_module_logs_dir',

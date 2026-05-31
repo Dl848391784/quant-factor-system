@@ -1,7 +1,7 @@
 # factor_ic 模块规范
 
-> 版本: v3.17
-> 最后更新: 2026-05-29 (新增 return_5d 因子脚本)
+> 版本: v3.14
+> 最后更新: 2026-05-31 (新增 return_5d 因子实测数据完整流程文档)
 
 ## 快速参考
 
@@ -182,6 +182,11 @@
     - 从 PROJECT.md 迁移"公共模块强制复用规范"章节（约130行）
     - 从 PROJECT.md 迁移"公共模块日志传递规范"章节（约75行）
     - 新增文档层级判断约束（新增规范时必须判断层级）
+26. v3.14（2026-05-31）：
+    - 新增 ic_return_5d_1d.py 因子脚本（5日累计涨跌幅）
+    - 流程文档实测数据完整（ic_return_5d_1d_flow.md）
+    - 测试用例完整（test_ic_return_5d_1d.py）
+    - 实测结果：IC=-0.0337, ICIR=0.21, 统计显著，反向因子
 
 # 一、概述与基础
 
@@ -238,8 +243,9 @@ factor_ic 模块负责计算各类因子的 IC（Information Coefficient）值�
 **脚本命名：** `ic_<因子名>_<收益周期>.py`（如 `ic_rsi_1d.py`）
 
 **数据来源：** 必须来自 `data_fetchers/` 缓存，禁止在脚本中拉取数据。
-- 因子数据：`data_fetchers/result/factor_data_extended.json.gz`（遵循 PROJECT.md 跨模块数据路径规范）
-- 收益数据：`cache/factor_data/return_data.json.gz`
+- 因子数据：`data_fetchers/result/factor_ic_data.json.gz`（遵循 PROJECT.md 跨模块数据路径规范）
+- 收益数据：已内置于 `data_fetchers/result/factor_ic_data.json.gz`（forward_return_1d/3d/5d）
+- ❌ 禁止从 `return_data.json.gz` 获取收益数据（仅用于备份）
 
 **输出路径：** `factor_ic/result/ic_<因子名>_<周期>_analysis_result.json`
 
