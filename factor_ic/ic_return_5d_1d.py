@@ -23,12 +23,22 @@
 创建日期: 2026-05-29
 版本历史:
   v1.0 (2026-05-29): 初始版本，复用 factor_calculator.calculate_return_5d
-  v1.1 (2026-05-31): 优化日志字段名 + 防御性 None 处理 + 删除未使用导入 + 异常处理改进
-  v1.2 (2026-05-31): 深度优化 - 创建流程文档 + 创建测试用例 + MODULE.md 版本同步
+  v1.1 (2026-05-31): 
+    - 优化日志字段名（ic_distribution_consistency）
+    - 防御性 None 处理（.get() + or {}）
+    - 删除未使用导入（无额外依赖）
+    - 异常处理改进（RuntimeError vs Exception 分开）
+  v1.2 (2026-05-31): 
+    - 创建流程文档（ic_return_5d_1d_flow.md）
+    - 创建测试用例（test_ic_return_5d_1d.py）
+    - MODULE.md 版本同步（新增 v3.14）
+  v1.3 (2026-05-31): 
+    - argparse 导入位置修正（移至 main() 内部，遵循 PEP 8）
+    - 版本历史完善（详细说明变更内容）
+    - 异常处理一致性（RuntimeError logger.error, Exception logger.exception）
 """
 
 import sys
-import argparse
 from pathlib import Path
 
 # 添加项目路径
@@ -55,6 +65,7 @@ DEFAULT_MIN_STOCKS = 10
 
 def main():
     """CLI 主入口"""
+    import argparse  # PEP 8: argparse 仅在 main() 内使用
     
     parser = argparse.ArgumentParser(description='5日累计涨幅因子 IC 计算器')
     parser.add_argument('--force-full', action='store_true', help='强制全量计算')
