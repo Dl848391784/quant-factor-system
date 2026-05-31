@@ -70,19 +70,23 @@ def main():
         factor_col='amplitude',
         factor_cols=['high', 'low', 'close'],  # 需要三列进行计算
         custom_factor_calculation=calculate_amplitude,
-        custom_factor_calculation_params={},  # amplitude 无额外参数
+        # amplitude 无额外参数（公共模块默认 params=None，内部会转为 {}）
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger
     )
     
-    # 调用后日志
-    logger.info("振幅因子IC计算完成")
+    # 保底处理：公共模块异常返回 None 时防御失效
+    if result is None:
+        result = {}
+        logger.warning("run_complex_factor_ic 返回 None，启用保底处理")
     
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get('ic_metrics') or {}
     sample_stats = result.get('sample_stats') or {}
     period = result.get('period') or {}
+    # ic_distribution_consistency 包含 positive_ratio 子字段（统一层级）
+    ic_distribution = result.get('ic_distribution_consistency') or {}
     
     logger.info("=" * 60)
     logger.info("结果摘要")
@@ -107,11 +111,14 @@ def main():
         logger.info(f"ICIR: {icir:.2f}")
     else:
         logger.info("ICIR: N/A")
-    positive_ratio = result.get('positive_ratio')
+    positive_ratio = ic_distribution.get('positive_ratio')
     if positive_ratio is not None:
         logger.info(f"IC>0 占比: {positive_ratio:.2%}")
     else:
         logger.info("IC>0 占比: N/A")
+    
+    # 计算完成确认日志（移到结果摘要后）
+    logger.info("振幅因子IC计算完成")
     
     return result
 
@@ -120,8 +127,10 @@ if __name__ == '__main__':
     try:
         main()
     except RuntimeError as e:
-        logger.exception(f"振幅因子IC计算失败: {e}")
+        # 已知业务异常，使用 error()（不打印完整堆栈）
+        logger.error(f"振幅因子IC计算失败: {e}")
         sys.exit(1)
     except Exception as e:
+        # 未预期异常，使用 exception()（打印完整堆栈）
         logger.exception(f"未预期的错误: {e}")
         sys.exit(1)
