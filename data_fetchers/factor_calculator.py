@@ -1133,7 +1133,8 @@ def calculate_rsi_df(
     
     # 按 asset 分组，对每组应用 Series 版本的 calculate_rsi
     def calc_rsi_for_asset(group):
-        return calculate_rsi(group[_COL_CLOSE], period=n)
+        # group 已经是 close 列的 Series 片段
+        return calculate_rsi(group, period=n)
     
     df['rsi'] = df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].transform(calc_rsi_for_asset)
     

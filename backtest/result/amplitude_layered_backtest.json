@@ -17,13 +17,13 @@
     "n_days_total": 515,
     "n_assets_total": 3006,
     "factor_name": "amplitude",
-    "layer_names": {
-      "1": "低振幅层(波动平稳)",
-      "2": "偏低振幅层",
-      "3": "中振幅层",
-      "4": "偏高振幅层",
-      "5": "高振幅层(波动剧烈)"
-    }
+    "layer_names": [
+      "lowest",
+      "lower",
+      "normal",
+      "higher",
+      "highest"
+    ]
   },
   "layer_stats": {
     "layer_1": {
@@ -128,13 +128,13 @@
   },
   "config": {
     "n_layers": 5,
-    "layer_names": {
-      "1": "低振幅层(波动平稳)",
-      "2": "偏低振幅层",
-      "3": "中振幅层",
-      "4": "偏高振幅层",
-      "5": "高振幅层(波动剧烈)"
-    },
+    "layer_names": [
+      "lowest",
+      "lower",
+      "normal",
+      "higher",
+      "highest"
+    ],
     "factor_direction": "negative",
     "long_layers": [
       1,
@@ -147,5 +147,5 @@
     "trade_cost_rate": 0.003,
     "min_stocks_per_layer": 10
   },
-  "created_at": "2026-06-01T11:47:59.851877"
+  "created_at": "2026-06-01T14:45:34.668112"
 }

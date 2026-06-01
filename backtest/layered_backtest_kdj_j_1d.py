@@ -5,10 +5,6 @@ KDJ-J因子分层回测脚本
 因子定义：
 - 含义: KDJ指标中的J值
 
-策略逻辑：
-- 反向因子：低值层做多，高值层做空
-- 正向因子：高值层做多，低值层做空
-
 分层模式：percentile 5层（每层约20%）
 
 因子元数据派生机制（基类 LayerConfigBase）：
@@ -33,16 +29,21 @@ class KdjJLayerConfig(LayerConfigBase):
     factor_name: ClassVar[str] = 'kdj_j'
     
     layer_names: ClassVar[Sequence[str]] = (
+        'lowest',
+        'lower',
+        'normal',
+        'higher',
+        'highest'
+    )
+    
+    layer_descriptions: ClassVar[Sequence[str]] = (
         '极低层(J值极低)',
         '偏低层(J值偏低)',
         '正常层(J值适中)',
         '偏高层(J值偏高)',
-        '极高层(J值极高)',
+        '极高层(J值极高)'
     )
 
 
 if __name__ == '__main__':
-    factor_cli_main(
-        config_cls=KdjJLayerConfig,
-        factor_calculator=calculate_kdj_j
-    )
+    factor_cli_main(KdjJLayerConfig, calculate_kdj_j)

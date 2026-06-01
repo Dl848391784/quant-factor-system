@@ -5,10 +5,6 @@
 因子定义：
 - 含义: 过去N日价格波动幅度
 
-策略逻辑：
-- 反向因子：低值层做多，高值层做空
-- 正向因子：高值层做多，低值层做空
-
 分层模式：percentile 5层（每层约20%）
 
 因子元数据派生机制（基类 LayerConfigBase）：
@@ -33,6 +29,10 @@ class AmplitudeLayerConfig(LayerConfigBase):
     factor_name: ClassVar[str] = 'amplitude'
     
     layer_names: ClassVar[Sequence[str]] = (
+        'lowest', 'lower', 'normal', 'higher', 'highest'
+    )
+    
+    layer_descriptions: ClassVar[Sequence[str]] = (
         '极低层(振幅最小)',
         '偏低层(振幅较小)',
         '正常层(振幅适中)',

@@ -5,75 +5,81 @@ test_layered_backtest_overnight_ret_1d 测试用例
 测试脚本: backtest/layered_backtest_overnight_ret_1d.py
 因子计算: data_fetchers/factor_calculator.py::calculate_overnight_return
 流程文档: backtest/docs/layered_backtest_overnight_ret_1d_flow.md
-测试用例文档: backtest/test_cases/overnight_ret_layered_backtest_test_cases.md
-规范文档: PROJECT.md
-
-运行: pytest backtest/test_cases/test_layered_backtest_overnight_ret_1d.py -v
 """
 
-import pytest
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+import pytest
+import json
 import pandas as pd
 import numpy as np
-import json
-import tempfile
-
-# 添加项目路径
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from typing import get_args, Literal
 
 from backtest.layered_backtest_overnight_ret_1d import OvernightRetLayerConfig
 from data_fetchers.factor_calculator import calculate_overnight_return
 
 
 class TestOvernightRetLayerConfig:
-    """测试配置类属性"""
-    
-    def test_factor_direction_positive(self):
-        """因子方向应为正向（IC 均值 0.021187 > 0）"""
+    """配置类属性验证"""
+
+    def test_factor_name_classvar(self):
+        """TC001-01: factor_name 类属性"""
+        assert OvernightRetLayerConfig.factor_name == 'overnight_ret'
+
+    def test_layer_names_classvar(self):
+        """TC001-02: layer_names 类属性为纯标签"""
+        assert len(OvernightRetLayerConfig.layer_names) == 5
+        assert OvernightRetLayerConfig.layer_names[0] == 'lowest'
+        assert OvernightRetLayerConfig.layer_names[4] == 'highest'
+
+    def test_layer_descriptions_classvar(self):
+        """TC001-03: layer_descriptions 含中文描述"""
+        assert len(OvernightRetLayerConfig.layer_descriptions) == 5
+        assert OvernightRetLayerConfig.layer_descriptions[0] == '极低层(隔夜跌幅最大)'
+        assert OvernightRetLayerConfig.layer_descriptions[4] == '极高层(隔夜涨幅最大)'
+
+    def test_ic_source_default(self):
+        """TC001-04: ic_source 默认路径"""
+        config = OvernightRetLayerConfig()
+        assert config.ic_source_resolved == 'factor_ic/result/ic_overnight_ret_1d_analysis_result.json'
+
+    def test_ic_meta_direction_positive(self):
+        """TC001-05: factor_direction = positive（从 IC 文件派生）"""
         config = OvernightRetLayerConfig()
         assert config.factor_direction == 'positive'
-    
-    def test_layer_names_count(self):
-        """分层数应为 5 层"""
+
+    def test_n_layers_derived(self):
+        """TC001-06: n_layers 由 len(layer_names) 派生"""
         config = OvernightRetLayerConfig()
-        assert len(config.layer_names) == 5
-    
+        assert config.n_layers == len(OvernightRetLayerConfig.layer_names)
+
+    def test_layer_names_dict_generated(self):
+        """TC001-07: layer_names_dict 使用 layer_descriptions"""
+        config = OvernightRetLayerConfig()
+        assert '1' in config.layer_names_dict
+        assert '5' in config.layer_names_dict
+        assert config.layer_names_dict['1'] == '极低层(隔夜跌幅最大)'
+        assert config.layer_names_dict['5'] == '极高层(隔夜涨幅最大)'
+
     def test_layer_names_semantic(self):
-        """layer_names 应包含语义描述，不包含固定阈值"""
-        config = OvernightRetLayerConfig()
-        # 检查是否包含语义描述
-        for layer_id, name in config.layer_names.items():
-            assert '极' in name or '偏' in name or '正常' in name
-            # 确保不包含百分比阈值（如 0-20%）
-            assert '%' not in name or 'percentile' in name.lower()
-    
+        """TC001-08: layer_descriptions 语义描述"""
+        for desc in OvernightRetLayerConfig.layer_descriptions:
+            assert '跌' in desc or '涨' in desc or '变化' in desc
+
     def test_layer_names_no_fixed_threshold(self):
-        """layer_names 不应包含固定阈值（如 overnight<-2%）"""
-        config = OvernightRetLayerConfig()
-        for layer_id, name in config.layer_names.items():
-            # 确保不包含固定数值阈值
-            assert '<-' not in name
-            assert '>' not in name
-            # 确保不包含误导性的百分比数值（如 -2%）
-            if '%' in name:
-                # 只允许 percentile 模式的语义描述
-                assert 'percentile' in name.lower() or '分位' in name
+        """TC001-09: layer_names 纯标签无固定阈值"""
+        for name in OvernightRetLayerConfig.layer_names:
+            # 纯标签不含数字阈值
+            assert not any(c.isdigit() for c in name)
 
     def test_factor_direction_literal_type(self):
-        """参数校验测试：factor_direction 只能是 'positive' 或 'negative'"""
-        # 正确值应通过
-        config_pos = OvernightRetLayerConfig()
-        assert config_pos.factor_direction in ['positive', 'negative']
-        
-        # Literal 类型会阻止非法值赋值（运行时检查）
-        # 验证配置类定义正确
-        from typing import get_args
-        annotation = OvernightRetLayerConfig.__annotations__.get('factor_direction')
-        if annotation:
-            allowed_values = get_args(annotation)
-            assert 'positive' in allowed_values
-            assert 'negative' in allowed_values
+        """TC001-10: factor_direction 类型约束"""
+        valid_values = get_args(Literal['positive', 'negative'])
+        config = OvernightRetLayerConfig()
+        assert config.factor_direction in valid_values
 
 
 class TestCalculateOvernightReturn:
