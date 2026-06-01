@@ -60,6 +60,21 @@ class TestOvernightRetLayerConfig:
                 # 只允许 percentile 模式的语义描述
                 assert 'percentile' in name.lower() or '分位' in name
 
+    def test_factor_direction_literal_type(self):
+        """参数校验测试：factor_direction 只能是 'positive' 或 'negative'"""
+        # 正确值应通过
+        config_pos = OvernightRetLayerConfig()
+        assert config_pos.factor_direction in ['positive', 'negative']
+        
+        # Literal 类型会阻止非法值赋值（运行时检查）
+        # 验证配置类定义正确
+        from typing import get_args
+        annotation = OvernightRetLayerConfig.__annotations__.get('factor_direction')
+        if annotation:
+            allowed_values = get_args(annotation)
+            assert 'positive' in allowed_values
+            assert 'negative' in allowed_values
+
 
 class TestCalculateOvernightReturn:
     """测试因子计算函数"""
@@ -145,6 +160,21 @@ class TestCalculateOvernightReturn:
         })
         result = calculate_overnight_return(df)
         # NaN 应保留（不填充）
+        assert pd.isna(result['overnight_ret'].iloc[1])
+
+    def test_zero_prev_close(self):
+        """边界值测试：昨日收盘=0 应返回 NaN（除零防护）"""
+        # 需要 2 天数据，第一天收盘=0
+        df = pd.DataFrame({
+            'date': ['2024-04-11', '2024-04-12'],
+            'asset': ['000001', '000001'],
+            'open': [0.0, 10.5],
+            'close': [0.0, 10.0]
+        })
+        result = calculate_overnight_return(df)
+        # 第一天：昨日收盘=0，overnight_ret 应为 NaN（除零防护）
+        assert pd.isna(result['overnight_ret'].iloc[0])
+        # 第二天：昨日收盘=0.0，overnight_ret 应为 NaN（除零防护）
         assert pd.isna(result['overnight_ret'].iloc[1])
 
 

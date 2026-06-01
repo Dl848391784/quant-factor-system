@@ -1,9 +1,10 @@
 # backtest 模块规范
 
-> 版本: v1.13
+> 版本: v1.14
 > 创建时间: 2026-05-22
-> 最后更新: 2026-06-01 (overnight_ret Round 4 pytest测试补充)
+> 最后更新: 2026-06-01 (overnight_ret Round 5 测试覆盖完善)
 > 更新记录: 
+>   v1.14 (2026-06-01): overnight_ret Round 5 测试覆盖完善（边界值测试+参数校验测试，19项测试全部通过）
 >   v1.13 (2026-06-01): overnight_ret Round 4 pytest测试补充（修复测试覆盖缺失，17项测试全部通过）
 >   v1.12 (2026-06-01): overnight_ret Round 3 文档精简（简化类 docstring，移除冗余 IC 信息）
 >   v1.11 (2026-06-01): overnight_ret Round 2 深度优化（layer_names语义修正、实测范围补充、测试状态更新）
