@@ -181,16 +181,8 @@ def factor_cli_main(
     # 记录开始时间（计算回测耗时）
     start_time = perf_counter()
     
-    # 配置实例
+    # 配置实例（基类 __post_init__ 已打印启动日志）
     config = config_cls()
-    
-    # 启动时打印因子关键上下文（问题5修复）
-    if not args.quiet:
-        logger.info("=" * 40)
-        logger.info(f"因子: {factor_name}")
-        logger.info(f"方向: {config.factor_direction}")
-        logger.info(f"分层: {config.n_layers} 层 (percentile)")
-        logger.info("=" * 40)
     
     # 因子列名默认值
     if factor_col is None:

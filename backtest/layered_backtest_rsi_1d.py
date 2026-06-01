@@ -1,163 +1,43 @@
 #!/usr/bin/env python3
 """
-RSI 因子分层回测脚本
-
-使用 factor_cli_main 公共入口，薄封装仅声明因子特异配置。
+RSI因子分层回测脚本
 
 因子定义：
-- 公式: RSI = 100 - 100 / (1 + RS)，RS = avg_gain / avg_loss
-- 含义: 相对强弱指数，衡量超买超卖
-- 范围: [0, 100]，>70 超买，<30 超卖
-
-IC 分析结果：
-- IC 均值: 负相关（反转）
-- 高 RSI → 低未来收益
+- 含义: 相对强弱指数
 
 策略逻辑：
-- 低 RSI 层做多（超卖反弹）
-- 高 RSI 层做空（超买回落）
+- 反向因子：低值层做多，高值层做空
+- 正向因子：高值层做多，低值层做空
 
-分层说明（thresholds 模式，4层）：
-- Layer1: RSI < 30（超卖，做多）
-- Layer2: 30 ≤ RSI < 50（偏弱，做多）
-- Layer3: 50 ≤ RSI < 70（偏强，做空）
-- Layer4: RSI ≥ 70（超买，做空）
+分层模式：percentile 4层（每层约25%）
 
 作者: 云瑶
-创建日期: 2026-05-23
-版本历史:
-  v2.0 (2026-06-01): 使用 factor_cli_main 公共入口
-  v3.0 (2026-06-01): 采用完整更新模式，从 IC 结果派生配置
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, ClassVar, Any, Callable
-from functools import partial
-import argparse
+from typing import Dict, ClassVar
 
 from backtest.common.layered_backtest_runner import LayerConfigBase
 from backtest.common.factor_cli import factor_cli_main
 from data_fetchers.factor_calculator import calculate_rsi_df
 
-DEFAULT_N = 6
-
 
 @dataclass
-class RSILayerConfig(LayerConfigBase):
-    """RSI 因子分层配置
+class RsiLayerConfig(LayerConfigBase):
+    """RSI因子分层配置"""
     
-    因子元数据：
-    - factor_name: 因子名称（单一来源）
-    - ic_source: IC 分析结果 JSON 路径（单一来源，按需懒加载）
-    
-    分层配置：
-    - layer_names: 分层命名（业务语义描述）
-    - n_layers: 由 len(layer_names) 派生（避免双重声明）
-    - factor_direction: 由 ic_meta['direction'] 派生（避免双重声明）
-    
-    多空组合由基类按 factor_direction 自动派生。
-    """
-    
-    # === 因子元数据（单一来源） ===
     factor_name: ClassVar[str] = 'rsi'
-    ic_source: ClassVar[str] = 'factor_ic/result/ic_rsi_1d_analysis_result.json'
     
-    # === 分层配置（4层） ===
     layer_names: Dict[str, str] = field(default_factory=lambda: {
         '1': '超卖层(RSI<30)',
-        '2': '偏弱层(30≤RSI<50)',
-        '3': '偏强层(50≤RSI<70)',
-        '4': '超买层(RSI≥70)'
+        '2': '偏低层(RSI 30-40)',
+        '3': '中性层(RSI 40-60)',
+        '4': '偏高层(RSI 60-70)'
     })
-    
-    def __post_init__(self):
-        """初始化后处理：校验并派生配置
-        
-        校验：
-        - layer_names 长度 >= 2
-        
-        派生：
-        - n_layers: 由 len(layer_names) 派生
-        - factor_direction: 由 ic_meta['direction'] 派生（按需懒加载）
-        - long_layers/short_layers: 由基类 _derive_long_short() 派生
-        """
-        # 校验 layer_names 长度
-        n = len(self.layer_names)
-        if n < 2:
-            raise ValueError(f"layer_names 至少需要 2 层，当前: {n}")
-        
-        # 派生 n_layers（删除冗余声明）
-        self.n_layers = n
-        
-        # 派生 factor_direction（从 ic_meta 按需加载）
-        ic_meta = self._load_ic_meta()
-        self.factor_direction = ic_meta.get('direction', 'negative')
-        
-        # 调用基类派生多空组合
-        super().__post_init__()
-    
-    def _load_ic_meta(self) -> Dict[str, Any]:
-        """按需懒加载 IC 分析结果
-        
-        从 ic_source JSON 文件读取，避免硬编码数值漂移。
-        
-        返回：
-            IC 元数据字典（含 direction、ic_mean、icir 等）
-        
-        注意：
-            IC 结果文件可能没有 'direction' 字段，需从 ic_mean 符号派生。
-        """
-        import json
-        from pathlib import Path
-        
-        # 项目根目录
-        project_root = Path(__file__).parent.parent
-        ic_file = project_root / self.ic_source
-        
-        if not ic_file.exists():
-            raise FileNotFoundError(
-                f"IC 分析结果文件不存在: {ic_file}\n"
-                f"请先运行对应的 IC 分析脚本生成结果"
-            )
-        
-        with open(ic_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        # 提取 IC 元数据
-        ic_metrics = data.get('ic_metrics', {})
-        if not ic_metrics:
-            # 旧格式：顶层字段
-            ic_metrics = data
-        
-        # 派生 direction（若缺失则从 ic_mean 符号推断）
-        direction = data.get('direction')
-        if direction is None:
-            ic_mean = ic_metrics.get('ic_mean', 0)
-            direction = 'negative' if ic_mean < 0 else 'positive'
-        
-        return {
-            'direction': direction,
-            'ic_mean': ic_metrics.get('ic_mean'),
-            'icir': ic_metrics.get('icir'),
-            'p_value': ic_metrics.get('p_value'),
-        }
-
-
-def add_rsi_args(parser: argparse.ArgumentParser) -> None:
-    """添加自定义 CLI 参数"""
-    parser.add_argument('--rsi-n', type=int, default=DEFAULT_N,
-                        help=f'RSI 计算窗口，默认 {DEFAULT_N}')
-
-
-def setup_rsi_calculator(args: argparse.Namespace, calc) -> Callable:
-    """包装 factor_calculator"""
-    return partial(calc, n=args.rsi_n)
 
 
 if __name__ == '__main__':
     factor_cli_main(
-        config_cls=RSILayerConfig,
-        factor_calculator=calculate_rsi_df,
-        add_cli_args=add_rsi_args,
-        setup_calculator=setup_rsi_calculator
+        config_cls=RsiLayerConfig,
+        factor_calculator=calculate_rsi_df
     )

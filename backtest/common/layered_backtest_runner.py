@@ -50,15 +50,58 @@ import logging
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from typing import Dict, Optional, Callable, List, Union, Tuple
+from typing import Dict, Literal, Optional, Callable, List, Union, Tuple, ClassVar, Any
 from pathlib import Path
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
+import importlib.resources
 
 # 导入公共模块
 from backtest.common.logger_config import get_logger
 from backtest.common.convert_types import convert_to_native_types
 from backtest.common.layered_backtest import LayeredBacktestEngine
+
+
+# ============================================================================
+# 项目根目录获取（可移植方式）
+# ============================================================================
+
+def _get_project_root() -> Path:
+    """获取项目根目录（可移植方式）
+    
+    优先级：
+    1. 环境变量 FACTOR_IC_ROOT
+    2. 配置文件 factor_ic_root.txt（当前目录或父目录）
+    3. backtest 模块上两级（从 common/ 模块位置推导）
+    
+    返回：
+        项目根目录 Path 对象
+    """
+    # 1. 环境变量
+    env_root = os.environ.get('FACTOR_IC_ROOT')
+    if env_root:
+        return Path(env_root)
+    
+    # 2. 配置文件
+    for search_dir in [Path.cwd(), Path.cwd().parent]:
+        config_file = search_dir / 'factor_ic_root.txt'
+        if config_file.exists():
+            return Path(config_file.read_text().strip())
+    
+    # 3. 从模块位置推导（backtest/common/layered_backtest_runner.py 上两级）
+    # __file__ = .../backtest/common/layered_backtest_runner.py
+    # parent = backtest/common/
+    # parent.parent = backtest/
+    # parent.parent.parent = 项目根目录
+    try:
+        module_path = Path(__file__).resolve()
+        return module_path.parent.parent.parent
+    except Exception:
+        # 最后兜底：当前工作目录
+        return Path.cwd()
+
+
+PROJECT_ROOT = _get_project_root()
 
 
 # ============================================================================
@@ -69,46 +112,149 @@ from backtest.common.layered_backtest import LayeredBacktestEngine
 class LayerConfigBase:
     """分层配置基类
     
-    子类只需定义因子特有参数：
-    - n_layers: 分层数量（默认5层，每层20%）
+    子类只需声明：
+    - factor_name: ClassVar[str]（因子名称）
     - layer_names: 分层命名（业务描述）
-    - factor_direction: 因子方向 ('positive' / 'negative')
-    - long_layers: 多头组合
-    - short_layers: 空头组合
     
-    设计变更（v1.5，2026-05-23）：
-    - 删除 layer_thresholds（固定阈值已废弃）
-    - 新增 n_layers（percentile 分层强制参数）
-    - 原因：fixed_threshold 在极端行情时分层不稳定
+    派生逻辑（基类自动处理）：
+    - ic_source: 按 factor_name 拼接默认路径
+    - n_layers: 由 len(layer_names) 派生
+    - factor_direction: 从 IC 结果文件按需加载
+    - long_layers/short_layers: 由 n_layers 和 factor_direction 派生
     """
     
-    # percentile 分层参数（强制）
-    n_layers: int = 5  # 默认5层，每层20%
+    # === 因子元数据（子类必须声明 factor_name） ===
+    factor_name: ClassVar[str] = ''  # 子类必须覆盖
     
-    # 分层命名（业务描述，不含阈值）
+    # === 分层配置（子类声明 layer_names） ===
     layer_names: Dict[str, str] = field(default_factory=dict)
     
-    # 因子方向和多空组合
-    factor_direction: str = 'negative'
-    long_layers: List[int] = field(default_factory=lambda: [1, 2])
-    short_layers: List[int] = field(default_factory=lambda: [4, 5])
-    
-    # 通用参数
+    # === 通用参数（有默认值） ===
+    long_layers: Optional[List[int]] = None
+    short_layers: Optional[List[int]] = None
     trade_cost_rate: float = 0.003
     min_stocks_per_layer: int = 10
+    
+    # === 派生字段（无默认值，field(init=False)） ===
+    ic_source: str = field(init=False)
+    n_layers: int = field(init=False)
+    factor_direction: Literal['positive', 'negative'] = field(init=False)
+    
+    def __post_init__(self):
+        """初始化后处理：派生配置 + 打印日志"""
+        logger = get_logger(self.factor_name or 'backtest')
+        
+        # 1. 校验 factor_name
+        if not self.factor_name:
+            raise ValueError(
+                f"子类必须声明 factor_name ClassVar，"
+                f"当前类: {self.__class__.__name__}"
+            )
+        
+        # 2. 拼接 ic_source（基类自动设置）
+        self.ic_source = f'factor_ic/result/ic_{self.factor_name}_1d_analysis_result.json'
+        
+        # 3. 校验 layer_names
+        n = len(self.layer_names)
+        if n < 2:
+            raise ValueError(f"layer_names 至少需要 2 层，当前: {n}")
+        
+        # 4. 派生 n_layers
+        self.n_layers = n
+        
+        # 5. 加载 IC 元数据，派生 factor_direction
+        ic_meta = self._load_ic_meta()
+        self.factor_direction = ic_meta['direction']  # 禁止隐式默认值
+        
+        # 6. 派生多空组合
+        if self.long_layers is None or self.short_layers is None:
+            self.long_layers, self.short_layers = self._derive_long_short()
+        
+        # 7. 打印配置日志（问题7修复）
+        logger.info("=" * 40)
+        logger.info(f"因子: {self.factor_name}")
+        logger.info(f"方向: {self.factor_direction} (ic_mean={ic_meta['ic_mean']:.4f})")
+        logger.info(f"分层: {self.n_layers} 层 (percentile)")
+        logger.info(f"IC文件: {self.ic_source}")
+        logger.info("=" * 40)
+    
+    def _load_ic_meta(self) -> Dict[str, Any]:
+        """加载 IC 分析结果（基类通用方法）
+        
+        从 ic_source JSON 文件读取，统一从 ic_metrics 子字段取值。
+        
+        返回：
+            {'direction': str, 'ic_mean': float, 'icir': float, 'p_value': float}
+        
+        异常：
+            FileNotFoundError: IC 文件不存在
+            KeyError: direction 字段缺失（禁止隐式默认值）
+        """
+        ic_file = PROJECT_ROOT / self.ic_source
+        
+        if not ic_file.exists():
+            raise FileNotFoundError(
+                f"IC 分析结果文件不存在: {ic_file}\n"
+                f"请先运行 factor_ic/{self.factor_name}_1d.py 生成 IC 分析结果"
+            )
+        
+        with open(ic_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # 统一从 ic_metrics 子字段读取（问题5修复）
+        ic_metrics = data.get('ic_metrics')
+        if ic_metrics is None:
+            raise KeyError(
+                f"IC 结果文件缺少 'ic_metrics' 字段: {ic_file}\n"
+                f"顶层字段: {list(data.keys())}"
+            )
+        
+        # 提取必需字段
+        ic_mean = ic_metrics.get('ic_mean')
+        if ic_mean is None:
+            raise KeyError(f"ic_metrics 缺少 'ic_mean' 字段")
+        
+        # direction 从 ic_mean 符号派生（问题5修复：统一来源）
+        direction = 'negative' if ic_mean < 0 else 'positive'
+        
+        return {
+            'direction': direction,
+            'ic_mean': float(ic_mean),
+            'icir': float(ic_metrics.get('icir', 0)),
+            'p_value': ic_metrics.get('p_value'),
+        }
+    
+    def _derive_long_short(self) -> Tuple[List[int], List[int]]:
+        """根据 n_layers 和 factor_direction 派生多空组合
+        
+        规则：
+        - 正向因子：多头取高层，空头取低层
+        - 反向因子：多头取低层，空头取高层
+        - 多头/空头各取约 40%（向下取整，至少 1 层）
+        """
+        if self.n_layers == 1:
+            return [1], [1]
+        
+        n_long = max(1, int(self.n_layers * 0.4))
+        n_short = max(1, int(self.n_layers * 0.4))
+        
+        if self.factor_direction == 'positive':
+            long_layers = list(range(self.n_layers - n_long + 1, self.n_layers + 1))
+            short_layers = list(range(1, n_short + 1))
+        else:
+            long_layers = list(range(1, n_long + 1))
+            short_layers = list(range(self.n_layers - n_short + 1, self.n_layers + 1))
+        
+        return long_layers, short_layers
     
     def validate(self) -> None:
         """校验配置完整性"""
         if self.n_layers < 2:
             raise ValueError(f"n_layers 至少需要 2 层，当前: {self.n_layers}")
         
-        if self.factor_direction not in ['positive', 'negative']:
-            raise ValueError(f"factor_direction 必须是 'positive' 或 'negative', 当前: {self.factor_direction}")
-        
         if not self.long_layers or not self.short_layers:
             raise ValueError("long_layers 和 short_layers 不能为空")
         
-        # 校验层编号上界（前置校验，避免错误延迟到 engine.run）
         for layer_id in self.long_layers:
             if layer_id > self.n_layers or layer_id < 1:
                 raise ValueError(

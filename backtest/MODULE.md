@@ -1,9 +1,10 @@
 # backtest 模块规范
 
-> 版本: v1.20
+> 版本: v1.21
 > 创建时间: 2026-05-22
-> 最后更新: 2026-06-01 (架构简化：factor_cli_main 参数签名重构)
+> 最后更新: 2026-06-01 (架构重构：薄封装理想形态)
 > 更新记录: 
+>   v1.21 (2026-06-01): 10项架构重构 — _load_ic_meta上移基类、PROJECT_ROOT可移植获取、禁止direction隐式默认值、删除旧格式兼容分支、统一ic_metrics来源、import提到顶部、基类打印启动日志、删除冗余docstring、ic_source自动拼接、理想形态(factor_name+layer_names+factor_cli_main)
 >   v1.20 (2026-06-01): factor_cli_main 参数签名简化，删除 factor_name/description 参数，从 config_cls 按需派生；启动日志打印因子关键上下文；Config 类新增 factor_name/ic_source ClassVar，__post_init__ 派生 n_layers/factor_direction；_load_ic_meta 从 ic_mean 符号派生 direction
 >   v1.19 (2026-06-01): return_5d Round 2 IC数值修正（ic_mean/icir/p_value对齐实际分析结果）
 >   v1.18 (2026-06-01): return_5d Round 1 架构修复（移除sys.path+显式n_layers+layer_names语义化+ic_meta集中+配套文档创建）
@@ -114,12 +115,20 @@ from backtest.common.layered_backtest_runner import LayerConfigBase
 
 @dataclass
 class MyFactorLayerConfig(LayerConfigBase):
-    # 只需定义因子特有参数
-    layer_thresholds: List[float] = field(default_factory=lambda: [0, 0.5, 1.0, 1.5, 2.0, 5.0])
-    factor_direction: str = 'negative'
-    long_layers: List[int] = field(default_factory=lambda: [1, 2])
-    short_layers: List[int] = field(default_factory=lambda: [4, 5])
-    # ... 其他因子特有参数
+    """my_factor 因子分层配置
+    
+    理想形态（v1.21）：子类只需声明 factor_name + layer_names
+    基类自动派生：ic_source、n_layers、factor_direction、long_layers、short_layers
+    """
+    
+    # === 因子元数据（子类只需声明 factor_name） ===
+    factor_name: ClassVar[str] = 'my_factor'
+    
+    # === 分层配置 ===
+    layer_names: Dict[str, str] = field(default_factory=lambda: {
+        '1': '低值层', '2': '偏低层', '3': '中位层',
+        '4': '偏高层', '5': '高值层'
+    })
 ```
 
 2. **调用公共入口**
@@ -140,7 +149,7 @@ result = run_layered_backtest(
 3. **CLI 入口**（使用 factor_cli_main 公共函数）
 ```python
 from dataclasses import dataclass, field
-from typing import Dict, ClassVar, Any
+from typing import Dict, ClassVar
 
 from backtest.common.layered_backtest_runner import LayerConfigBase
 from backtest.common.factor_cli import factor_cli_main
@@ -148,73 +157,55 @@ from data_fetchers.factor_calculator import calculate_my_factor
 
 @dataclass
 class MyFactorLayerConfig(LayerConfigBase):
-    """my_factor 因子分层配置
+    """my_factor 因子分层配置"""
     
-    因子元数据：
-    - factor_name: 因子名称（单一来源）
-    - ic_source: IC 分析结果 JSON 路径（单一来源，按需懒加载）
-    
-    分层配置：
-    - layer_names: 分层命名（业务语义描述）
-    - n_layers: 由 len(layer_names) 派生（避免双重声明）
-    - factor_direction: 由 ic_meta['direction'] 派生（避免双重声明）
-    """
-    
-    # === 因子元数据（单一来源） ===
+    # === 因子元数据 ===
     factor_name: ClassVar[str] = 'my_factor'
-    ic_source: ClassVar[str] = 'factor_ic/result/ic_my_factor_1d_analysis_result.json'
     
     # === 分层配置 ===
     layer_names: Dict[str, str] = field(default_factory=lambda: {
         '1': '低值层', '2': '偏低层', '3': '中位层',
         '4': '偏高层', '5': '高值层'
     })
-    
-    def __post_init__(self):
-        """初始化后处理：校验并派生配置"""
-        n = len(self.layer_names)
-        if n < 2:
-            raise ValueError(f"layer_names 至少需要 2 层，当前: {n}")
-        self.n_layers = n
-        ic_meta = self._load_ic_meta()
-        self.factor_direction = ic_meta.get('direction', 'negative')
-        super().__post_init__()
-    
-    def _load_ic_meta(self) -> Dict[str, Any]:
-        """按需懒加载 IC 分析结果"""
-        import json
-        from pathlib import Path
-        
-        project_root = Path(__file__).parent.parent
-        ic_file = project_root / self.ic_source
-        
-        if not ic_file.exists():
-            raise FileNotFoundError(f"IC 分析结果文件不存在: {ic_file}")
-        
-        with open(ic_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        ic_metrics = data.get('ic_metrics', {})
-        if not ic_metrics:
-            ic_metrics = data
-        
-        direction = data.get('direction')
-        if direction is None:
-            ic_mean = ic_metrics.get('ic_mean', 0)
-            direction = 'negative' if ic_mean < 0 else 'positive'
-        
-        return {
-            'direction': direction,
-            'ic_mean': ic_metrics.get('ic_mean'),
-            'icir': ic_metrics.get('icir'),
-            'p_value': ic_metrics.get('p_value'),
-        }
 
 if __name__ == '__main__':
     factor_cli_main(
         config_cls=MyFactorLayerConfig,
         factor_calculator=calculate_my_factor
     )
+```
+
+**v1.21 理想形态对比（删除冗余代码）：**
+
+| 旧版 (v1.20) | 新版 (v1.21) |
+|-------------|-------------|
+| factor_name ClassVar | factor_name ClassVar |
+| ic_source ClassVar（手动声明） | ❌ 删除（基类自动拼接） |
+| layer_names Dict | layer_names Dict |
+| __post_init__ 方法 | ❌ 删除（基类处理） |
+| _load_ic_meta 方法 | ❌ 删除（基类上移） |
+| import json/pathlib（函数内） | ❌ 删除（基类顶部） |
+| Path(__file__).parent.parent | ❌ 删除（基类可移植） |
+| 50+ 行 | **15 行** |
+
+**基类自动处理的功能：**
+
+| 派生字段 | 派生逻辑 |
+|---------|---------|
+| `ic_source` | `f'factor_ic/result/ic_{factor_name}_1d_analysis_result.json'` |
+| `n_layers` | `len(layer_names)` |
+| `factor_direction` | 从 ic_metrics.ic_mean 符号派生（禁止隐式默认值） |
+| `long_layers` | 按 factor_direction 自动派生（约40%层数） |
+| `short_layers` | 按 factor_direction 自动派生（约40%层数） |
+
+**启动日志（基类 __post_init__ 自动打印）：**
+```
+========================================
+因子: my_factor
+方向: negative (ic_mean=-0.0337)
+分层: 5 层 (percentile)
+IC文件: factor_ic/result/ic_my_factor_1d_analysis_result.json
+========================================
 ```
 
 **v3.0 更新说明：**
