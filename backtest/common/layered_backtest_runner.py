@@ -535,7 +535,7 @@ def run_layered_backtest(
     logger.info("=" * 40)
     for layer_id in range(1, config.n_layers + 1):
         layer_key = str(layer_id)
-        name = config.layer_names.get(layer_key, f'Layer{layer_id}')
+        name = config.layer_names_dict.get(layer_key, f'Layer{layer_id}')
         logger.info("  Layer%d (%s): percentile %d-%d%%", 
             layer_id, name, 
             (layer_id-1)*100//config.n_layers, 

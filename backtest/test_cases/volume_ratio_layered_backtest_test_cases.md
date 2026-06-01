@@ -1,150 +1,150 @@
 # 量比分层回测测试用例
 
-**测试日期**: 2026-05-23
+**测试日期**: 2026-06-01
 **因子名称**: volume_ratio_1d
-**测试状态**: 待编写
+**测试状态**: ✓ 全部通过（18项）
 
 ---
 
-## 1. 正常数据场景
+## 1. 配置类验证（TestVolumeRatioLayerConfig）
 
-### 1.1 分层收益计算正确
+### TC001-01: factor_name 类属性
+- 输入: VolumeRatioLayerConfig.factor_name
+- 预期: 'volume_ratio'
+- 状态: ✓ PASS
 
-**测试输入**:
-- 因子数据: 1482714 条记录，2999 只股票
-- 因子列: volume_ratio_5（已在缓存中）
-- 收益数据: forward_return_1d
-- 分层阈值: [0, 0.5, 1.0, 1.5, 2.0, 5.0]
-- 因子方向: negative（反向因子）
+### TC001-02: layer_names 类属性为 Sequence[str]
+- 输入: VolumeRatioLayerConfig.layer_names
+- 预期: len=5, layer_names[0]='极低层(量比极低)'
+- 状态: ✓ PASS
 
-**预期输出**:
-- 5 个分层，每层有完整统计指标
-- Layer 1→5 收益单调递增（反向因子）
-- 多空组合收益计算正确
+### TC001-03: ic_source 默认路径
+- 输入: VolumeRatioLayerConfig().ic_source_resolved
+- 预期: 'factor_ic/result/ic_volume_ratio_1d_analysis_result.json'
+- 状态: ✓ PASS
 
-**验证步骤**:
+### TC001-04: factor_direction = negative（从 IC 文件派生）
+- 输入: VolumeRatioLayerConfig().factor_direction
+- 预期: 'negative'（ic_mean=-0.0346）
+- 状态: ✓ PASS
+
+### TC001-05: n_layers 由 len(layer_names) 派生
+- 输入: VolumeRatioLayerConfig().n_layers
+- 预期: 5
+- 状态: ✓ PASS
+
+### TC001-06: layer_names_dict 运行时生成
+- 输入: VolumeRatioLayerConfig().layer_names_dict
+- 预期: {'1': '极低层(量比极低)', ..., '5': '极高层(量比极高)'}
+- 状态: ✓ PASS
+
+### TC001-07: layer_names 语义描述
+- 输入: VolumeRatioLayerConfig().layer_names
+- 预期: 每项包含'量比'
+- 状态: ✓ PASS
+
+### TC001-08: layer_names 无固定阈值
+- 输入: VolumeRatioLayerConfig().layer_names
+- 预期: percentile模式无固定阈值
+- 状态: ✓ PASS
+
+### TC001-09: factor_direction = negative
+- 输入: VolumeRatioLayerConfig().factor_direction
+- 预期: 'negative'
+- 状态: ✓ PASS
+
+### TC001-10: factor_direction 类型约束
+- 输入: VolumeRatioLayerConfig().factor_direction
+- 预期: Literal['positive', 'negative'] 中之一
+- 状态: ✓ PASS
+
+### TC001-11: long_layers/short_layers 由 factor_direction 派生
+- 输入: VolumeRatioLayerConfig().long_layers, short_layers
+- 预期: long=[1,2], short=[4,5]（反向因子）
+- 状态: ✓ PASS
+
+---
+
+## 2. 预计算因子特性验证（TestVolumeRatioPrecomputed）
+
+### TC002-01: 预计算因子无需 calculator
+- 输入: hasattr(VolumeRatioLayerConfig, 'factor_calculator')
+- 预期: False
+- 状态: ✓ PASS
+
+---
+
+## 3. 回测结果验证（TestLayeredBacktestResult）
+
+### TC003-01: 结果文件存在
+- 输入: Path('backtest/result/volume_ratio_layered_backtest.json')
+- 预期: exists()
+- 状态: ✓ PASS
+
+### TC003-02: 结果结构完整
+- 输入: result.keys()
+- 预期: ['meta', 'layer_stats', 'monotonicity', 'long_short']
+- 状态: ✓ PASS
+
+### TC003-03: meta 字段
+- 输入: result['meta']
+- 预期: factor_name='volume_ratio', factor_direction='negative', n_layers=5
+- 状态: ✓ PASS
+
+### TC003-04: layer_stats 完整
+- 输入: len(result['layer_stats'])
+- 预期: 5
+- 状态: ✓ PASS
+
+---
+
+## 4. 执行集成验证（TestLayeredBacktestExecution）
+
+### TC004-01: 配置类可实例化
+- 输入: VolumeRatioLayerConfig()
+- 预期: n_layers=5, factor_direction='negative'
+- 状态: ✓ PASS
+
+### TC004-02: factor_direction 决定多空组合
+- 输入: VolumeRatioLayerConfig().factor_direction
+- 预期: 'negative'（反向因子）
+- 状态: ✓ PASS
+
+---
+
+## 5. 特殊场景说明
+
+### 5.1 factor_col 与 factor_name 不同
+
+数据源列名为 `volume_ratio_5`，与 `factor_name='volume_ratio'` 不同。
+
+脚本调用时需指定：
 ```python
-# 加载结果
-result = json.load(open('backtest/result/volume_ratio_layered_backtest.json'))
+factor_cli_main(
+    config_cls=VolumeRatioLayerConfig,
+    factor_col='volume_ratio_5',
+    required_factor_cols=['volume_ratio_5']
+)
+```
 
-# 验证分层数量
-assert result['meta']['n_layers'] == 5
+### 5.2 预计算因子特点
 
-# 验证每层统计完整
-for layer_id in range(1, 6):
-    stats = result['layer_stats'].get(f'layer_{layer_id}')
-    assert stats is not None
-    assert 'n_stocks_avg' in stats
-    assert 'annual_return' in stats
-    assert 'sharpe_ratio' in stats
+- 无需 factor_calculator 参数
+- 必须指定 factor_col 和 required_factor_cols
 
-# 验证单调性（反向因子）
-monotonicity = result['monotonicity']
-assert monotonicity['quality'] in ['excellent', 'good', 'fair']
-assert monotonicity['correlation'] < 0  # 反向因子负相关
+---
+
+## 6. 测试文件位置
+
+```
+backtest/test_cases/test_layered_backtest_volume_ratio_1d.py
 ```
 
 ---
 
-## 2. 边界数据场景
+## 7. 变更历史
 
-### 2.1 数据量不足
-
-**测试输入**:
-- 因子数据: 少于 min_stocks_per_layer（10）
-- 分层阈值: [0, 0.5, 1.0, 1.5, 2.0, 5.0]
-
-**预期输出**:
-- n_days_total = 0
-- 空数据提示信息
-- 结构完整（layer_stats 存在但值为空）
-
-**验证步骤**:
-```python
-result = run_volume_ratio_layered_backtest(...)
-assert result['meta']['n_days_total'] == 0
-assert 'layer_stats' in result
-assert result['layer_stats']['layer_1']['n_stocks_avg'] == 0
-```
-
-### 2.2 volume_ratio_5 列缺失
-
-**测试输入**:
-- factor_data.json.gz 中缺少 volume_ratio_5 列
-
-**预期输出**:
-- ValueError 异常
-- 退出码 4
-
----
-
-## 3. 异常数据场景
-
-### 3.1 NaN 处理
-
-**测试输入**:
-- 因子数据含 NaN 值
-
-**预期输出**:
-- NaN 被过滤，不影响分层计算
-- 输出 JSON 不含 NaN（转为 None）
-
-**验证步骤**:
-```python
-import json
-result = json.load(open('backtest/result/volume_ratio_layered_backtest.json'))
-# JSON 加载成功，无 ValueError（NaN 已处理）
-```
-
-### 3.2 量比极端值
-
-**测试输入**:
-- volume_ratio_5 > 5（极端放量）
-
-**预期输出**:
-- 归入 Layer 5（边界处理）
-- 边界警告日志
-
----
-
-## 4. 数据来源验证
-
-### 4.1 volume_ratio_5 已在缓存
-
-**测试输入**:
-- factor_data.json.gz 文件
-
-**预期输出**:
-- 包含 volume_ratio_5 列
-- 无需额外计算
-
-**验证步骤**:
-```python
-import gzip, json
-with gzip.open('cache/factor_data/factor_data.json.gz', 'rt') as f:
-    data = json.load(f)
-    assert 'volume_ratio_5' in data['data'][0]
-```
-
----
-
-## 5. 实际测试结果
-
-| 测试场景 | 输入 | 输出 | 状态 |
-|---------|------|------|------|
-| 正常数据 | 1482714 条记录 | 510 天回测 | ✓ |
-| volume_ratio_5 范围 | 缓存数据 | 0.1 ~ 4.97 | ✓ |
-| 分层阈值 | [0, 0.5, 1, 1.5, 2, 5] | 5层划分 | ✓ |
-| 多空收益 | 反向因子 | 多头 97.42%, 空头 -24.05% | ✓ |
-| 多空夏普 | 多空组合 | 6.41 (卓越) | ✓ |
-| 单调性 | Layer1→5 | 相关系数 -0.8924 (good) | ✓ |
-| 数据来源 | 缓存已有 | 无需额外加载 | ✓ |
-
----
-
-## 6. 待补充测试
-
-- [ ] 单元测试文件 `test_volume_ratio_layered_backtest.py`
-- [ ] 边界值测试（thresholds 越界）
-- [ ] 参数校验测试（factor_direction 非法值）
-- [ ] 与 turnover_surge 因子对比测试
+| 日期 | 版本 | 变更内容 |
+|------|------|----------|
+| 2026-06-01 | v1.1 | 创建 pytest 测试文件，18项测试全部通过 |
+| 2026-05-23 | v1.0 | 初始测试用例文档（待编写） |

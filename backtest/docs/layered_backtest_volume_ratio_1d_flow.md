@@ -1,8 +1,9 @@
 # 量比因子分层回测流程文档
 
 **创建日期**: 2026-05-23
+**最后更新**: 2026-06-01 (v1.22架构适配)
 **因子名称**: volume_ratio_1d
-**因子方向**: 反向因子（ic_mean = -0.0310）
+**因子方向**: 反向因子（ic_mean = -0.0346）
 
 ---
 
@@ -17,7 +18,8 @@ volume_ratio_5 = 当日成交量 / 过去 5 日平均成交量
 ```
 
 其中：
-- 数据已在缓存中，无需额外计算
+- 数据已在统一数据源 factor_ic_data.json.gz 中预计算
+- 因子列名: volume_ratio_5
 - 因子值恒 ≥ 0
 
 ### 1.2 因子特性
@@ -34,9 +36,9 @@ volume_ratio_5 = 当日成交量 / 过去 5 日平均成交量
 
 ```json
 {
-  "ic_mean": -0.031017,
-  "factor_direction": "反向因子：分层回测时做多低值组、做空高值组",
-  "statistical_significance": true
+  "ic_mean": -0.034561,
+  "icir": 0.3264,
+  "p_value": 3.55e-15
 }
 ```
 
@@ -46,28 +48,24 @@ volume_ratio_5 = 当日成交量 / 过去 5 日平均成交量
 
 ## 2. 分层配置
 
-### 2.1 分层阈值
+### 2.1 分层模式
 
-```python
-layer_thresholds = [0, 0.5, 1.0, 1.5, 2.0, 5.0]
-```
+**percentile 5层（每层20%）** - 遵循 PROJECT.md v1.5 规范
 
-**分层定义**:
-
-| Layer | 阈值范围 | 名称 | 含义 |
-|-------|----------|------|------|
-| 1 | ratio < 0.5 | 极缩量层 | 成交量远低于均值 |
-| 2 | 0.5 ≤ ratio < 1 | 缩量层 | 成交量低于均值 |
-| 3 | 1 ≤ ratio < 1.5 | 正常层 | 成交量接近均值 |
-| 4 | 1.5 ≤ ratio < 2 | 放量层 | 成交量偏高 |
-| 5 | ratio ≥ 2 | 极放量层 | 成交量极放量 |
+| Layer | percentile范围 | 名称 | 含义 |
+|-------|---------------|------|------|
+| 1 | 0-20% | 极低层(量比极低) | 成交量远低于均值（缩量） |
+| 2 | 20-40% | 偏低层(量比偏低) | 成交量低于均值 |
+| 3 | 40-60% | 正常层(量比适中) | 成交量接近均值 |
+| 4 | 60-80% | 偏高层(量比偏高) | 成交量偏高 |
+| 5 | 80-100% | 极高层(量比极高) | 成交量极放量 |
 
 ### 2.2 多空组合
 
 ```python
-factor_direction = 'negative'  # 反向因子
-long_layers = [1, 2]   # 做多缩量组
-short_layers = [4, 5]  # 做空放量组
+factor_direction = 'negative'  # 反向因子（ic_mean < 0）
+long_layers = [1, 2]   # 做多缩量组（低值层）
+short_layers = [4, 5]  # 做空放量组（高值层）
 ```
 
 **策略逻辑**: 
@@ -87,14 +85,13 @@ short_layers = [4, 5]  # 做空放量组
 
 ### 3.1 数据来源
 
-量比因子数据已在缓存中，只需加载两个数据源：
+量比因子数据已在统一数据源中预计算：
 
 | 数据源 | 文件 | 必需字段 |
 |--------|------|---------|
-| 主因子数据 | factor_data.json.gz | date, asset, volume_ratio_5 |
-| 收益数据 | return_data.json.gz | date, asset, forward_return_1d |
+| 统一数据源 | factor_ic_data.json.gz | date, asset, volume_ratio_5, forward_return_1d |
 
-**注意**: volume_ratio_5 已在 factor_data.json.gz 中，无需额外计算。
+**注意**: volume_ratio_5 已预计算，无需 factor_calculator。
 
 ---
 
@@ -106,11 +103,33 @@ short_layers = [4, 5]  # 做空放量组
 backtest/layered_backtest_volume_ratio_1d.py
 ```
 
-### 4.2 核心特点
+### 4.2 核心特点（v1.22 理想形态）
 
-- **无因子计算**: volume_ratio_5 已在缓存，直接使用
-- **反向因子配置**: factor_direction='negative'
-- **简洁实现**: 仅 ~330 行（相比 turnover_surge 无额外数据加载）
+- **薄声明**: 仅定义 factor_name + layer_names ClassVar
+- **预计算因子**: 无需 factor_calculator，指定 factor_col='volume_ratio_5'
+- **反向因子配置**: factor_direction='negative'（基类从 IC 文件派生）
+
+```python
+class VolumeRatioLayerConfig(LayerConfigBase):
+    """量比因子分层配置"""
+    
+    factor_name: ClassVar[str] = 'volume_ratio'
+    
+    layer_names: ClassVar[Sequence[str]] = (
+        '极低层(量比极低)',
+        '偏低层(量比偏低)',
+        '正常层(量比适中)',
+        '偏高层(量比偏高)',
+        '极高层(量比极高)'
+    )
+
+if __name__ == '__main__':
+    factor_cli_main(
+        config_cls=VolumeRatioLayerConfig,
+        factor_col='volume_ratio_5',
+        required_factor_cols=['volume_ratio_5']
+    )
+```
 
 ---
 
@@ -125,19 +144,18 @@ backtest/layered_backtest_volume_ratio_1d.py
 | 回测结果 | `backtest/result/volume_ratio_layered_backtest.json` |
 | 每日明细 | `backtest/result/volume_ratio_layered_backtest_daily.json.gz` |
 
-### 5.2 回测结果摘要
+### 5.2 回测结果摘要（2026-06-01 运行）
 
 | 指标 | 值 |
 |------|-----|
-| 回测天数 | 510 天 |
-| 股票数量 | 2999 只 |
-| volume_ratio_5 范围 | 0.1 ~ 4.97 |
-| 分层阈值 | [0, 0.5, 1.0, 1.5, 2.0, 5.0] |
-| 多头年化收益 | 97.42% |
-| 空头年化收益 | -24.05% |
-| 多空年化收益 | 121.46% |
-| 多空夏普比率 | 6.41 (优异) |
-| 单调性相关系数 | -0.8924 (good) |
+| 回测天数 | 515 天 |
+| 股票数量 | 577 只/层 |
+| 分层模式 | percentile 5层 |
+| 多头年化收益 | 30.93% |
+| 空头年化收益 | 12.88% |
+| 多空年化收益 | 18.06% |
+| 多空夏普比率 | 2.25 |
+| 单调性相关系数 | -0.8963 (good) |
 
 ---
 
@@ -145,22 +163,16 @@ backtest/layered_backtest_volume_ratio_1d.py
 
 ### 6.1 单调性分析
 
-- 单调性相关系数 -0.8924（good）
-- 反向因子单调性良好：Layer 1→5 收益递增（符合预期）
+- 单调性相关系数 -0.8963（good）
+- 反向因子单调性良好：Layer 1→5 收益递减（符合预期）
+- Layer 1 (极缩量) 累计收益 87%，Layer 5 (极放量) 累计收益 3%
 
-### 6.2 多空组合分析
+### 6.2 结论
 
-- 多头（Layer 1,2）：年化收益 97.42%，表现优异
-- 空头（Layer 4,5）：年化收益 -24.05%（反向因子空头亏损）
-- 多空组合：121.46%，夏普比 6.41（表现卓越）
-
-### 6.3 结论
-
-量比因子表现卓越：
-- 多空夏普比高达 6.41，超过 turnover_surge 的 4.89
+量比因子表现良好：
 - 单调性良好，分层效果显著
-- IC 虽绝对值较小（-0.031），但分层收益差异巨大
-- 缩量组（Layer 1,2）表现尤为突出
+- 缩量组（Layer 1,2）表现优于放量组
+- IC 绝对值较小（-0.03），但分层收益差异明显
 
 ---
 
@@ -186,32 +198,9 @@ backtest/layered_backtest_volume_ratio_1d.py
 
 ---
 
-## 8. 与其他因子对比
-
-| 因子 | IC 均值 | 多空夏普比 | 单调性 |
-|------|---------|-----------|--------|
-| volume_ratio | -0.031 | 6.41 | -0.8924 (good) |
-| turnover_surge | -0.053 | 4.89 | -0.9573 (good) |
-| kdj_j | -0.015 | -2.00 | 0.6416 (poor) |
-
-**结论**: 量比因子虽 IC 绝对值最小，但分层效果最好，夏普比最高。
-
----
-
-## 9. 注意事项
-
-### 9.1 数据已在缓存
-
-volume_ratio_5 已在 factor_data.json.gz 中，无需额外计算或加载。
-
-### 9.2 因子方向
-
-IC 结果显示为反向因子，与 MEMORY 中记录的"正向因子"不符。遵循 PROJECT.md 规范：因子方向不可预判，必须根据实际 IC 测试结果确定。
-
----
-
-## 10. 变更历史
+## 8. 变更历史
 
 | 日期 | 版本 | 变更内容 |
 |------|------|----------|
+| 2026-06-01 | v1.22 | 适配 ClassVar[Sequence[str]] 架构，指定 factor_col='volume_ratio_5' |
 | 2026-05-23 | v1.0 | 初始版本，创建量比分层回测脚本 |
