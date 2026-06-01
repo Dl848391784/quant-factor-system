@@ -29,12 +29,18 @@ factor_ic_analyzer/
 ├── comprehensive_factor/   # 综合因子模块
 ├── data_fetchers/          # 数据获取模块
 ├── summary/                # 数据汇总模块
+├── scripts/                # 自动化检查脚本
+├── tests/                  # 测试目录
+│   └ integration/          # 集成测试
+├── designs/                # design.md 存放目录
 ├── paths.py                # 跨模块路径单一来源
 ├── schemas/                # JSON Schema 校验文件
 ├── temporary/              # 临时文件目录
-├── designs/                # design.md 存放目录
+├── pyproject.toml          # 项目配置（ruff/pytest/import-linter）
 └── PROJECT.md              # 本文件
 ```
+
+**安装方式**：`pip install -e .`（需要 pyproject.toml 中的 `[project]` 配置）
 
 ---
 
@@ -58,21 +64,29 @@ factor_ic_analyzer/
 
 ---
 
-## 任务粒度指引 [experimental]
+## 硬规则（违反即拒收）[experimental]
 
-**单次任务必须改动不超过 3 个文件、不超过 200 行代码。**
+| # | 规则 | 检查工具 | 执行阶段 |
+|---|------|----------|----------|
+| 1 | 模块边界：只能复用自己目录的 common/ | import-linter | CI |
+| 2 | 输出位置：`<模块>/result/` | AST 静态分析（脚本：`scripts/check_path_literals.py`） | pre-commit |
+| 3 | 临时文件：放 `temporary/` | pre-commit grep | pre-commit |
+| 4 | 字段非空：None 必须显式设置 + 记录原因 | JSON Schema（待实施） | 待实施 |
+| 5 | 因子方向：根据实际 IC 确定 | pytest 断言 | CI |
+| 6 | 异常链：`raise ... from e` | ruff B904 | pre-commit + CI |
+| 7 | 路径导入：`from paths import` | AST 静态分析（脚本：`scripts/check_path_import.py`） | pre-commit |
+| 8 | Design-First：2+文件需 design.md | CI check_design_first.py | CI |
+| 9 | 任务粒度：≤3 文件、≤200 行 | pre-commit check_task_size.py | pre-commit |
 
-超出必须拆分：
-- 4+ 个文件 → 拆成 2 次任务
-- 200+ 行代码 → 拆成 2 次任务
+---
 
-大任务幻觉率指数上升，拆分是硬规则。
+## 建议（软约束）[experimental]
 
-**自动检查配置**：
-- 脚本：`scripts/check_task_size.py`
-- 阈值硬编码：`MAX_FILES = 3`, `MAX_LINES = 200`
-- pre-commit 调用：`python scripts/check_task_size.py`
-- 配置位置：`.pre-commit-config.yaml`
+| # | 建议 | 当前状态 | 自动化计划 |
+|---|------|----------|------------|
+| 1 | 退出码统一 0/1 | 手动检查 | 待 CI 脚本 |
+| 2 | 配套文件同步创建 | 人工审核 | 待 PR 模板 |
+| 3 | 日志格式统一 | 手动检查 | 待 import-linter |
 
 ---
 
@@ -95,40 +109,14 @@ from paths import FACTOR_IC_DATA  # paths.py 在根目录
 
 **注意**：绝对路径示例（如 `/home/admin/projects/...`）仅供本地开发参考，正式代码禁止硬编码。
 
-| 路径常量 | 用途 | "未导入"检查 | "硬编码字面量"检查 |
-|---------|------|-------------|-------------------|
-| FACTOR_IC_DATA | 统一数据源 | import-linter | pre-commit grep |
-| DATA_FETCHERS_RESULT | data_fetchers 输出目录 | import-linter | pre-commit grep |
-| FACTOR_IC_RESULT | IC 输出目录 | import-linter | pre-commit grep |
-| BACKTEST_RESULT | 回测输出目录 | import-linter | pre-commit grep |
-| COMPREHENSIVE_FACTOR_RESULT | 综合因子输出目录 | import-linter | pre-commit grep |
-| SUMMARY_RESULT | 汇总报告输出目录 | import-linter | pre-commit grep |
-
----
-
-## 硬规则（违反即拒收）[experimental]
-
-| # | 规则 | 检查工具 | 执行阶段 |
-|---|------|----------|----------|
-| 1 | 模块边界：只能复用自己目录的 common/ | import-linter | CI |
-| 2 | 输出位置：`<模块>/result/` | pre-commit grep（pattern: `"[^"]*result/"`） | pre-commit |
-| 3 | 临时文件：放 `temporary/` | pre-commit grep | pre-commit |
-| 4 | 字段非空：None 必须显式设置 + 记录原因 | JSON Schema | CI |
-| 5 | 因子方向：根据实际 IC 确定 | pytest 断言 | CI |
-| 6 | 异常链：`raise ... from e` | ruff B904 | pre-commit + CI |
-| 7 | 路径导入：`from paths import` | import-linter | CI |
-| 8 | Design-First：2+文件需 design.md | CI check_design_first.py | CI |
-
----
-
-## 建议（软约束）[experimental]
-
-| # | 建议 | 当前状态 | 自动化计划 |
-|---|------|----------|------------|
-| 1 | 退出码统一 0/1 | 手动检查 | 待 CI 脚本 |
-| 2 | 配套文件同步创建 | 人工审核 | 待 PR 模板 |
-| 3 | 任务粒度拆分 | pre-commit hook | 已配置 |
-| 4 | 日志格式统一 | 手动检查 | 待 import-linter |
+| 路径常量 | 用途 | "未导入"检查（AST） | "硬编码字面量"检查（AST） |
+|---------|------|---------------------|--------------------------|
+| FACTOR_IC_DATA | 统一数据源 | scripts/check_path_import.py | scripts/check_path_literals.py |
+| DATA_FETCHERS_RESULT | data_fetchers 输出目录 | scripts/check_path_import.py | scripts/check_path_literals.py |
+| FACTOR_IC_RESULT | IC 输出目录 | scripts/check_path_import.py | scripts/check_path_literals.py |
+| BACKTEST_RESULT | 回测输出目录 | scripts/check_path_import.py | scripts/check_path_literals.py |
+| COMPREHENSIVE_FACTOR_RESULT | 综合因子输出目录 | scripts/check_path_import.py | scripts/check_path_literals.py |
+| SUMMARY_RESULT | 汇总报告输出目录 | scripts/check_path_import.py | scripts/check_path_literals.py |
 
 ---
 
@@ -160,7 +148,8 @@ from paths import FACTOR_IC_DATA  # paths.py 在根目录
    - 这是整体代码覆盖率要求，低于 70% CI 失败
 
 2. **必测场景清单**：必须全部存在对应测试函数
-   - CI 检查函数名清单存在（非 100% 实现，但必须存在函数定义）
+   - CI 检查：`scripts/check_required_test_scenarios.py`
+   - 检查逻辑：扫描所有测试文件，确认函数名清单存在
    - 每个场景至少有一个测试函数覆盖
 
 | 类别 | 具体测试场景 | pytest 函数名示例 |
@@ -194,8 +183,8 @@ from paths import FACTOR_IC_DATA  # paths.py 在根目录
 - 脚本：`scripts/validate_output_schemas.py`
 - CI 调用：`python scripts/validate_output_schemas.py`
 
-**状态**：规则 #4 当前标记为"实施中"，校验函数 `validate_and_save_output` 待创建。
-- 创建前：规则生效但无自动检查，依赖人工 review
+**状态**：规则 #4 当前为"待实施"，校验函数 `validate_and_save_output` 待创建。
+- 创建前：规则无自动检查，依赖人工 review
 - 创建后：所有输出保存必须调用 `validate_and_save_output(data, schema_path, output_path)`
 
 ---
@@ -208,7 +197,7 @@ from paths import FACTOR_IC_DATA  # paths.py 在根目录
 ✗ factor_ic 脚本复用 backtest/common/（禁止）
 ```
 
-**检查工具**：import-linter（配置：`.pyproject.toml` → `[tool.importlinter]`）
+**检查工具**：import-linter（配置：`pyproject.toml` → `[tool.importlinter]`）
 
 ---
 
@@ -235,16 +224,18 @@ lint → schema → test → commit
 ```
 
 pre-commit hooks（具体实现）：
-1. `ruff check --fix`（配置：`.pyproject.toml` → `[tool.ruff]`）
-2. `ruff format`（配置：`.pyproject.toml` → `[tool.ruff.format]`）
-3. 文件数/行数阈值检查（脚本：`scripts/check_task_size.py`，阈值：MAX_FILES=3, MAX_LINES=200）
-4. 路径字面量 grep（脚本：`scripts/check_path_literals.py`，pattern：`['"]\w+/result/`）
+1. `ruff check --fix`（配置：`pyproject.toml` → `[tool.ruff]`）
+2. `ruff format`（配置：`pyproject.toml` → `[tool.ruff.format]`）
+3. 任务粒度检查（脚本：`scripts/check_task_size.py`，阈值：MAX_FILES=3, MAX_LINES=200）
+4. 路径字面量检查（脚本：`scripts/check_path_literals.py`，AST 静态分析）
+5. 路径导入检查（脚本：`scripts/check_path_import.py`，AST 静态分析）
 
 CI 任务（具体实现）：
-1. `pytest --cov-fail-under=70`（配置：`.pyproject.toml` → `[tool.pytest]`）
+1. `pytest --cov-fail-under=70`（配置：`pyproject.toml` → `[tool.pytest.ini_options]`）
 2. JSON Schema 校验（脚本：`scripts/validate_output_schemas.py`）
-3. `import-linter`（配置：`.pyproject.toml` → `[tool.importlinter]`）
+3. `import-linter`（配置：`pyproject.toml` → `[tool.importlinter]`）
 4. Design-First 检查（脚本：`scripts/check_design_first.py`）
+5. 必测场景检查（脚本：`scripts/check_required_test_scenarios.py`）
 
 ---
 
@@ -255,14 +246,14 @@ CI 任务（具体实现）：
 ```markdown
 ## 规范引用
 - 本次改动涉及的规则编号：#1, #5, #7
-- 对应 PROJECT.md 行号：86-99（硬规则表）
+- 对应 PROJECT.md 行号：YY-ZZ（请替换为实际行号）
 - 验证方式：pytest / ruff / import-linter
 ```
 
-（以上为示例，请替换为实际行号）
+（以上为示例，"YY-ZZ"是占位符，请替换为实际行号）
 
 CI 脚本校验（`scripts/validate_pr_reference.py`）：
-1. 规则编号在硬规则表中存在（1-8）
+1. 规则编号在硬规则表中存在（1-9）
 2. 行号在 PROJECT.md 中真实存在
 
 ---
