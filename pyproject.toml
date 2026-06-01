@@ -1,0 +1,89 @@
+[project]
+name = "factor_ic_analyzer"
+version = "1.22.0"
+description = "量化因子 IC 分析与分层回测系统"
+requires-python = ">=3.11"
+
+[tool.ruff]
+# 目标 Python 版本
+target-version = "py311"
+
+# 每行最大字符数
+line-length = 120
+
+# 排除的目录
+exclude = [
+    ".git",
+    ".pytest_cache",
+    "__pycache__",
+    "*.egg-info",
+    "build",
+    "dist",
+]
+
+# 源代码目录
+src = ["factor_ic", "backtest", "data_fetchers"]
+
+[tool.ruff.lint]
+# 启用的规则集
+# 参考 PROJECT.md 代码风格规范
+select = [
+    # PEP8 基础规则
+    "E",      # pycodestyle errors
+    "F",      # Pyflakes
+    "W",      # pycodestyle warnings
+    
+    # import 规范（对应 PROJECT.md import 规范）
+    "I",      # isort - 所有 import 必须在文件顶部
+    
+    # 异常处理规范（对应 PROJECT.md 异常处理规范）
+    "B904",   # raise-without-from-inside-except - 必须使用 `from e` 保留异常链
+    
+    # 代码质量
+    "UP",     # pyupgrade - 使用现代 Python 语法
+    "C4",     # flake8-comprehensions - 列表/字典推导式优化
+    "SIM",    # flake8-simplify - 简化代码
+]
+
+# 忽略的规则
+ignore = [
+    "E501",   # 行长度（已在 line-length 配置）
+    "W505",   # docstring 行长度
+]
+
+[tool.ruff.lint.isort]
+# import 排序配置
+# 对应 PROJECT.md import 规范：所有 import 在文件顶部
+known-first-party = ["factor_ic", "backtest", "data_fetchers", "common"]
+force-single-line = false
+lines-after-imports = 2
+
+[tool.ruff.lint.per-file-ignores]
+# 测试文件允许更宽松的规则
+"test_*.py" = ["F401"]  # 允许未使用的 import（pytest fixture）
+
+[tool.ruff.format]
+# 格式化配置
+# 对应 PROJECT.md 字典结构缩进规范
+indent-style = "space"
+quote-style = "double"
+docstring-code-format = true
+
+[tool.pytest.ini_options]
+testpaths = ["test_cases"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.coverage.run]
+source = ["factor_ic", "backtest", "data_fetchers"]
+omit = ["test_cases/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
