@@ -18,11 +18,11 @@
     "n_assets_total": 3006,
     "factor_name": "volume_ratio",
     "layer_names": [
-      "极低层(量比极低)",
-      "偏低层(量比偏低)",
-      "正常层(量比适中)",
-      "偏高层(量比偏高)",
-      "极高层(量比极高)"
+      "lowest",
+      "lower",
+      "normal",
+      "higher",
+      "highest"
     ]
   },
   "layer_stats": {
@@ -129,11 +129,11 @@
   "config": {
     "n_layers": 5,
     "layer_names": [
-      "极低层(量比极低)",
-      "偏低层(量比偏低)",
-      "正常层(量比适中)",
-      "偏高层(量比偏高)",
-      "极高层(量比极高)"
+      "lowest",
+      "lower",
+      "normal",
+      "higher",
+      "highest"
     ],
     "factor_direction": "negative",
     "long_layers": [
@@ -147,5 +147,5 @@
     "trade_cost_rate": 0.003,
     "min_stocks_per_layer": 10
   },
-  "created_at": "2026-06-01T14:04:30.779865"
+  "created_at": "2026-06-01T14:24:09.797576"
 }

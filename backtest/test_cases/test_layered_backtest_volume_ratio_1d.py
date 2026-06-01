@@ -27,9 +27,14 @@ class TestVolumeRatioLayerConfig:
         assert VolumeRatioLayerConfig.factor_name == 'volume_ratio'
 
     def test_layer_names_classvar(self):
-        """TC001-02: layer_names 类属性为 Sequence[str]"""
+        """TC001-02: layer_names 类属性为纯标签"""
         assert len(VolumeRatioLayerConfig.layer_names) == 5
-        assert VolumeRatioLayerConfig.layer_names[0] == '极低层(量比极低)'
+        assert VolumeRatioLayerConfig.layer_names[0] == 'lowest'
+    
+    def test_layer_descriptions_classvar(self):
+        """TC001-03: layer_descriptions 含中文描述"""
+        assert len(VolumeRatioLayerConfig.layer_descriptions) == 5
+        assert VolumeRatioLayerConfig.layer_descriptions[0] == '极低层(量比极低)'
 
     def test_ic_source_default(self):
         """TC001-03: ic_source 默认路径"""
@@ -49,25 +54,24 @@ class TestVolumeRatioLayerConfig:
         assert config.n_layers == len(VolumeRatioLayerConfig.layer_names)
 
     def test_layer_names_dict_generated(self):
-        """TC001-06: layer_names_dict 运行时生成"""
+        """TC001-06: layer_names_dict 使用 layer_descriptions"""
         config = VolumeRatioLayerConfig()
         assert '1' in config.layer_names_dict
         assert '5' in config.layer_names_dict
         assert config.layer_names_dict['1'] == '极低层(量比极低)'
-
+    
     def test_layer_names_semantic(self):
-        """TC001-07: layer_names 语义描述"""
+        """TC001-07: layer_descriptions 语义描述"""
         config = VolumeRatioLayerConfig()
-        # 应包含"量比"相关描述
-        for name in config.layer_names:
-            assert '量比' in name
-
+        # layer_descriptions 应包含"量比"相关描述
+        for desc in config.__class__.layer_descriptions:
+            assert '量比' in desc
+    
     def test_layer_names_no_fixed_threshold(self):
-        """TC001-08: layer_names 无固定阈值"""
-        config = VolumeRatioLayerConfig()
-        for name in config.layer_names:
-            # percentile 模式禁止固定阈值（如 0.5, 1.0）
-            assert not any(c.isdigit() and ('.' in name or '比' in name and c.isdigit()) for c in name if '量比' not in name[:4])
+        """TC001-08: layer_names 纯标签无固定阈值"""
+        for name in VolumeRatioLayerConfig.layer_names:
+            # 纯标签不含数字阈值
+            assert not any(c.isdigit() for c in name)
 
     def test_factor_direction_negative(self):
         """TC001-09: factor_direction = negative"""

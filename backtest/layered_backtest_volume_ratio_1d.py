@@ -10,9 +10,10 @@
 分层模式：percentile 5层（每层20%）
 
 因子元数据派生机制（基类 LayerConfigBase）：
+- factor_col_resolved: 从 factor_col ClassVar 派生，默认=factor_name
 - factor_direction: 从 ic_source IC 文件加载，ic_mean < 0 为 negative
 - n_layers: 由 len(layer_names) 派生
-- long_layers/short_layers: 由 n_layers 和 factor_direction 派生
+- layer_names_dict: 优先使用 layer_descriptions，否则回退 layer_names
 """
 
 from typing import ClassVar, Sequence
@@ -24,17 +25,25 @@ from backtest.common.factor_cli import factor_cli_main
 class VolumeRatioLayerConfig(LayerConfigBase):
     """量比因子分层配置
     
-    薄声明：仅定义因子名称与分层命名，逻辑完全下沉基类。
+    薄声明：因子元数据集中在 ClassVar，逻辑完全下沉基类。
     
     特点：
-    - volume_ratio_5 已在数据源中预计算，无需 factor_calculator
+    - factor_col 显式声明为 volume_ratio_5（预计算因子，数据源列名 ≠ factor_name）
+    - layer_names 纯标签（用于目录/列名），layer_descriptions 含中文（用于日志）
     """
     
     factor_name: ClassVar[str] = 'volume_ratio'
-    # ic_source: ClassVar[str] = 'factor_ic/result/ic_volume_ratio_1d_analysis_result.json'
-    #   可选显式声明以暴露派生路径；未声明时基类按 factor_name 拼接默认路径
+    factor_col: ClassVar[str] = 'volume_ratio_5'
     
     layer_names: ClassVar[Sequence[str]] = (
+        'lowest',
+        'lower',
+        'normal',
+        'higher',
+        'highest'
+    )
+    
+    layer_descriptions: ClassVar[Sequence[str]] = (
         '极低层(量比极低)',
         '偏低层(量比偏低)',
         '正常层(量比适中)',
@@ -44,10 +53,4 @@ class VolumeRatioLayerConfig(LayerConfigBase):
 
 
 if __name__ == '__main__':
-    # 预计算因子：无需 factor_calculator
-    # 数据源列名: volume_ratio_5（与 factor_name 不同）
-    factor_cli_main(
-        config_cls=VolumeRatioLayerConfig,
-        factor_col='volume_ratio_5',
-        required_factor_cols=['volume_ratio_5']
-    )
+    factor_cli_main(VolumeRatioLayerConfig)

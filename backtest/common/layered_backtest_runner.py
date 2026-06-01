@@ -113,37 +113,44 @@ class LayerConfigBase:
     """分层配置基类
     
     子类只需声明：
-    - factor_name: ClassVar[str]（因子名称）
-    - ic_source: ClassVar[str]（IC 文件路径，可选，默认按 factor_name 拼接）
-    - layer_names: ClassVar[Sequence[str]]（分层命名，按层序 1-based）
+    - factor_name: ClassVar[str]（因子名称，用于日志、结果文件命名）
+    - factor_col: ClassVar[str]（数据源列名，默认=factor_name，预计算因子需显式声明）
+    - layer_names: ClassVar[Sequence[str]]（分层标签，纯英文/拼音，用于目录/列名）
+    - layer_descriptions: ClassVar[Sequence[str]]（分层描述，含中文，用于日志显示）
     
     派生逻辑（基类自动处理）：
     - ic_source: 若子类未声明，按 factor_name 拼接默认路径
     - n_layers: 由 len(layer_names) 派生
     - factor_direction: 从 IC 结果文件加载（ic_mean < 0 为 negative，否则 positive）
     - long_layers/short_layers: 由 n_layers 和 factor_direction 派生
-    - layer_names_dict: 运行时转换为 {层号: 名称} 格式供日志显示
+    - layer_names_dict: 运行时转换为 {层号: 描述} 格式供日志显示
     
     示例：
         class Return5dLayerConfig(LayerConfigBase):
             factor_name: ClassVar[str] = 'return_5d'
-            layer_names: ClassVar[Sequence[str]] = [
+            layer_names: ClassVar[Sequence[str]] = (
+                'lowest', 'lower', 'normal', 'higher', 'highest'
+            )
+            layer_descriptions: ClassVar[Sequence[str]] = (
                 '极低层(5日涨幅最小)',
                 '偏低层(5日小幅下跌)',
                 '正常层(5日变化不大)',
                 '偏高层(5日小幅上涨)',
                 '极高层(5日涨幅最大)'
-            ]
+            )
     """
     
     # === 因子元数据（子类必须声明 factor_name） ===
     factor_name: ClassVar[str] = ''  # 子类必须覆盖
+    factor_col: ClassVar[str] = ''   # 子类可选，默认=factor_name
     ic_source: ClassVar[str] = ''    # 子类可选，默认按 factor_name 拼接
-    layer_names: ClassVar[Sequence[str]] = ()  # 子类必须覆盖，按层序 1-based
+    layer_names: ClassVar[Sequence[str]] = ()  # 子类必须覆盖，纯标签（用于目录/列名）
+    layer_descriptions: ClassVar[Sequence[str]] = ()  # 子类可选，含中文描述（用于日志）
     
     # === 运行时派生（实例字段，field(init=False)） ===
     ic_source_resolved: str = field(init=False)  # 实际使用的 IC 文件路径
-    layer_names_dict: Dict[str, str] = field(init=False)  # 层号→名称映射
+    layer_names_dict: Dict[str, str] = field(init=False)  # 层号→描述映射
+    factor_col_resolved: str = field(init=False)  # 实际使用的数据列名
     n_layers: int = field(init=False)
     
     # === 通用参数（有默认值） ===
@@ -174,18 +181,32 @@ class LayerConfigBase:
         else:
             self.ic_source_resolved = f'factor_ic/result/ic_{self.factor_name}_1d_analysis_result.json'
         
-        # 3. 校验 layer_names
+        # 3. 派生 factor_col_resolved（子类声明优先，否则回退 factor_name）
+        cls_factor_col = self.__class__.factor_col
+        if cls_factor_col:
+            self.factor_col_resolved = cls_factor_col
+        else:
+            self.factor_col_resolved = self.factor_name
+        
+        # 4. 校验 layer_names
         n = len(self.layer_names)
         if n < 2:
             raise ValueError(f"layer_names 至少需要 2 层，当前: {n}")
         
-        # 4. 派生 n_layers
+        # 5. 派生 n_layers
         self.n_layers = n
         
-        # 5. 生成 layer_names_dict（层序 1-based）
-        self.layer_names_dict = {
-            str(i + 1): name for i, name in enumerate(self.layer_names)
-        }
+        # 6. 生成 layer_names_dict（层序 1-based）
+        #    优先使用 layer_descriptions（含中文，用于日志），否则回退 layer_names
+        descriptions = self.__class__.layer_descriptions
+        if descriptions and len(descriptions) == n:
+            self.layer_names_dict = {
+                str(i + 1): desc for i, desc in enumerate(descriptions)
+            }
+        else:
+            self.layer_names_dict = {
+                str(i + 1): name for i, name in enumerate(self.layer_names)
+            }
         
         # 6. 加载 IC 元数据，派生 factor_direction
         ic_meta = self._load_ic_meta()

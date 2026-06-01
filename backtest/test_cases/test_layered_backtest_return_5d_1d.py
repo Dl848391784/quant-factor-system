@@ -30,9 +30,14 @@ class TestReturn5dLayerConfig:
         assert Return5dLayerConfig.factor_name == 'return_5d'
 
     def test_layer_names_classvar(self):
-        """TC001-02: layer_names 类属性为 Sequence[str]"""
+        """TC001-02: layer_names 类属性为纯标签"""
         assert len(Return5dLayerConfig.layer_names) == 5
-        assert Return5dLayerConfig.layer_names[0] == '极低层(5日涨幅最小)'
+        assert Return5dLayerConfig.layer_names[0] == 'lowest'
+    
+    def test_layer_descriptions_classvar(self):
+        """TC001-03: layer_descriptions 含中文描述"""
+        assert len(Return5dLayerConfig.layer_descriptions) == 5
+        assert Return5dLayerConfig.layer_descriptions[0] == '极低层(5日涨幅最小)'
 
     def test_ic_source_default(self):
         """TC001-03: ic_source 默认路径"""
@@ -52,25 +57,23 @@ class TestReturn5dLayerConfig:
         assert config.n_layers == len(Return5dLayerConfig.layer_names)
 
     def test_layer_names_dict_generated(self):
-        """TC001-06: layer_names_dict 运行时生成"""
+        """TC001-06: layer_names_dict 使用 layer_descriptions"""
         config = Return5dLayerConfig()
         assert '1' in config.layer_names_dict
         assert '5' in config.layer_names_dict
         assert config.layer_names_dict['1'] == '极低层(5日涨幅最小)'
-
+    
     def test_layer_names_semantic(self):
-        """TC001-07: layer_names 语义描述"""
-        config = Return5dLayerConfig()
-        # 应包含"涨幅"相关描述
-        for name in config.layer_names:  # 直接迭代 tuple
-            assert '涨' in name or '下跌' in name or '变化' in name
-
+        """TC001-07: layer_descriptions 语义描述"""
+        # layer_descriptions 应包含"涨幅"相关描述
+        for desc in Return5dLayerConfig.layer_descriptions:
+            assert '涨' in desc or '下跌' in desc or '变化' in desc
+    
     def test_layer_names_no_fixed_threshold(self):
-        """TC001-08: layer_names 无固定阈值"""
-        config = Return5dLayerConfig()
-        for name in config.layer_names:  # 直接迭代 tuple
-            # percentile 模式禁止固定阈值（如-8%, 4%）
-            assert not any(c.isdigit() and '%' in name for c in name)
+        """TC001-08: layer_names 纯标签无固定阈值"""
+        for name in Return5dLayerConfig.layer_names:
+            # 纯标签不含数字阈值
+            assert not any(c.isdigit() for c in name)
 
     def test_factor_direction_negative(self):
         """TC001-09: factor_direction = negative"""

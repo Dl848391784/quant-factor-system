@@ -93,15 +93,13 @@ def factor_cli_main(
     config_cls: Type[LayerConfigBase],
     factor_calculator: Optional[Callable] = None,  # 允许 None（预计算因子）
     *,
-    factor_col: Optional[str] = None,  # 缺省时回退到 config_cls.factor_name
-    required_factor_cols: Optional[list[str]] = None,
     add_cli_args: Optional[Callable[[argparse.ArgumentParser], None]] = None,
     setup_calculator: Optional[Callable[[argparse.Namespace, Callable], Callable]] = None,
 ) -> None:
     """因子分层回测 CLI 公共入口
     
-    设计变更（v2.2，2026-06-01）：
-    - 删除 factor_name 和 description 参数，从 config_cls 按需派生
+    设计变更（v2.3，2026-06-01）：
+    - 删除 factor_col 和 required_factor_cols 参数，从 config_cls 按需派生
     - 收敛"因子描述配置"到 LayerConfigBase 子类，压扁封装
     - 启动时打印 INFO 日志包含 factor_name/direction/n_layers
     
@@ -109,8 +107,6 @@ def factor_cli_main(
         config_cls: 分层配置类（LayerConfigBase 子类，需有 factor_name ClassVar）
         factor_calculator: 因子计算函数（预计算因子传 None）
         
-        factor_col: 因子列名（默认 = config_cls.factor_name）
-        required_factor_cols: 因子计算所需列（默认从 calculator.required_cols 读取）
         add_cli_args: 添加自定义 CLI 参数的函数
         setup_calculator: 根据 args 包装 calculator 的函数（如 partial）
     
@@ -123,13 +119,14 @@ def factor_cli_main(
         5: 未预期异常
     
     Example:
-        # 简单脚本
+        # 简单脚本（因子列名 = factor_name）
         factor_cli_main(Return5dLayerConfig, calculate_return_5d)
         
-        # 预计算因子（无需计算）
-        factor_cli_main(VolumeRatioLayerConfig, None,
-                        factor_col='volume_ratio_5',
-                        required_factor_cols=['volume_ratio_5'])
+        # 预计算因子（factor_col 显式声明在配置类）
+        class VolumeRatioLayerConfig(LayerConfigBase):
+            factor_name: ClassVar[str] = 'volume_ratio'
+            factor_col: ClassVar[str] = 'volume_ratio_5'
+        factor_cli_main(VolumeRatioLayerConfig)
         
         # 复杂脚本（自定义参数）
         def add_args(p):
@@ -184,12 +181,15 @@ def factor_cli_main(
     # 配置实例（基类 __post_init__ 已打印启动日志）
     config = config_cls()
     
-    # 因子列名默认值
-    if factor_col is None:
-        factor_col = factor_name
+    # 因子列名从 config 派生（优先 factor_col，否则 factor_name）
+    factor_col = config.factor_col_resolved
     
-    # required_factor_cols 默认从函数属性读取
-    if required_factor_cols is None and factor_calculator is not None:
+    # required_factor_cols 派生：
+    #   1. 预计算因子：factor_col 本身就是所需列
+    #   2. 需计算因子：从 calculator.required_cols 读取
+    if factor_calculator is None:
+        required_factor_cols = [factor_col]
+    else:
         required_factor_cols = getattr(factor_calculator, 'required_cols', None)
     
     # 包装 calculator（如 partial）

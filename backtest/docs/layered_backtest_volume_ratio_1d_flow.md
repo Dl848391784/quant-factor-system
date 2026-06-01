@@ -1,7 +1,7 @@
 # 量比因子分层回测流程文档
 
 **创建日期**: 2026-05-23
-**最后更新**: 2026-06-01 (v1.22架构适配)
+**最后更新**: 2026-06-01 (v1.24架构适配：factor_col ClassVar + layer_names/layer_descriptions分离)
 **因子名称**: volume_ratio_1d
 **因子方向**: 反向因子（ic_mean = -0.0346）
 
@@ -104,32 +104,29 @@ short_layers = [4, 5]  # 做空放量组（高值层）
 backtest/layered_backtest_volume_ratio_1d.py
 ```
 
-### 4.2 核心特点（v1.22 理想形态）
+### 4.2 核心特点（v1.24 理想形态）
 
-- **薄声明**: 仅定义 factor_name + layer_names ClassVar
-- **预计算因子**: 无需 factor_calculator，指定 factor_col='volume_ratio_5'
-- **反向因子配置**: factor_direction='negative'（基类从 IC 文件派生）
+- **薄声明**: factor_name/factor_col/layer_names/layer_descriptions 全部 ClassVar
+- **预计算因子**: factor_col='volume_ratio_5' 显式声明（数据列名 ≠ factor_name）
+- **layer_names**: 纯标签（lowest/lower/...），用于目录/列名
+- **layer_descriptions**: 含中文（极低层(量比极低)/...），用于日志显示
+- **CLI 调用**: 只传 config_cls，元数据全部在配置类中
 
 ```python
 class VolumeRatioLayerConfig(LayerConfigBase):
-    """量比因子分层配置"""
-    
     factor_name: ClassVar[str] = 'volume_ratio'
+    factor_col: ClassVar[str] = 'volume_ratio_5'
     
     layer_names: ClassVar[Sequence[str]] = (
-        '极低层(量比极低)',
-        '偏低层(量比偏低)',
-        '正常层(量比适中)',
-        '偏高层(量比偏高)',
-        '极高层(量比极高)'
+        'lowest', 'lower', 'normal', 'higher', 'highest'
+    )
+    layer_descriptions: ClassVar[Sequence[str]] = (
+        '极低层(量比极低)', '偏低层(量比偏低)', 
+        '正常层(量比适中)', '偏高层(量比偏高)', '极高层(量比极高)'
     )
 
 if __name__ == '__main__':
-    factor_cli_main(
-        config_cls=VolumeRatioLayerConfig,
-        factor_col='volume_ratio_5',
-        required_factor_cols=['volume_ratio_5']
-    )
+    factor_cli_main(VolumeRatioLayerConfig)
 ```
 
 ---
