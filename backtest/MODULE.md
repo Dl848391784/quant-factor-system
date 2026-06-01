@@ -1,9 +1,10 @@
 # backtest 模块规范
 
-> 版本: v1.16
+> 版本: v1.17
 > 创建时间: 2026-05-22
-> 最后更新: 2026-06-01 (overnight_ret Round 7 docstring描述修正)
+> 最后更新: 2026-06-01 (overnight_ret Round 8 元数据集中)
 > 更新记录: 
+>   v1.17 (2026-06-01): overnight_ret Round 8 元数据集中（ic_meta字段+factor_name类属性+docstring简化）
 >   v1.16 (2026-06-01): overnight_ret Round 7 docstring描述修正（删除压缩至~30行误导性描述）
 >   v1.15 (2026-06-01): overnight_ret Round 6 架构缺陷修复（6项：私有方法泄露、隐式耦合、sys.path依赖、版本历史膨胀、重复注释、日志覆盖验证）
 >   v1.14 (2026-06-01): overnight_ret Round 5 测试覆盖完善（边界值测试+参数校验测试，19项测试全部通过）
