@@ -4,10 +4,16 @@
 所有代码必须 import 此文件获取路径，禁止使用字符串字面量。
 违反此规则会导致改一处忘另一处，必翻车。
 
-使用方法：
+完整导入语句：
+    # 项目根目录下直接导入
     from paths import FACTOR_IC_DATA, FACTOR_IC_RESULT
+    
+    # 或在子目录中需要添加 sys.path
+    import sys
+    sys.path.insert(0, '/home/admin/projects/factor_ic_analyzer')
+    from paths import FACTOR_IC_DATA
 
-稳定性：[stable] 2026-06-01
+稳定性：[experimental] 2026-06-01（待实战验证）
 """
 
 from pathlib import Path

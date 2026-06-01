@@ -2,6 +2,11 @@
 """
 检查任务粒度：不超过 3 个文件、不超过 200 行代码
 对应 PROJECT.md 任务粒度指引
+
+阈值硬编码在此脚本中：
+- MAX_FILES = 3
+- MAX_LINES = 200
+配置位置：PROJECT.md 行号 55-67
 """
 
 import subprocess
