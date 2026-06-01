@@ -32,6 +32,7 @@ factor_ic_analyzer/
 ├── paths.py                # 跨模块路径单一来源
 ├── schemas/                # JSON Schema 校验文件
 ├── temporary/              # 临时文件目录
+├── designs/                # design.md 存放目录
 └── PROJECT.md              # 本文件
 ```
 
@@ -43,14 +44,17 @@ factor_ic_analyzer/
 
 ```
 设计阶段：
-□ 输出 design.md（改哪些文件、改哪些接口、加哪些测试）
+□ 在 designs/ 目录创建 design.md（改哪些文件、改哪些接口、加哪些测试）
 □ 用户审核通过
 □ 才能动手写代码
 
 违反此规则 = 直接退回，不 review。
 ```
 
-**自动检查**：CI 脚本检查涉及 2+ 文件的 PR 是否包含 design.md 文件链接。
+**自动检查**：
+- 脚本：`scripts/check_design_first.py`
+- 检查逻辑：PR 涉及 2+ 文件改动时，仓库 designs/ 目录下必须存在对应的 design.md 文件
+- CI 调用：`python scripts/check_design_first.py`
 
 ---
 
@@ -76,51 +80,55 @@ factor_ic_analyzer/
 
 **所有代码必须 `from paths import ...` 获取路径，禁止字符串字面量。**
 
-**完整导入语句**：
+**正确导入方式**：
 ```python
-# 项目根目录下直接导入
-from paths import FACTOR_IC_DATA, FACTOR_IC_RESULT, BACKTEST_RESULT
+# 方式 1：通过 pip install -e . 安装项目后使用包导入
+from factor_ic_analyzer.paths import FACTOR_IC_DATA
 
-# 或在子目录中（需要确保 paths.py 在项目根目录）
-import sys
-sys.path.insert(0, '/home/admin/projects/factor_ic_analyzer')
+# 方式 2：通过 PYTHONPATH 环境变量
+# export PYTHONPATH=/path/to/factor_ic_analyzer
 from paths import FACTOR_IC_DATA
+
+# 方式 3：项目根目录下的脚本可直接导入
+from paths import FACTOR_IC_DATA  # paths.py 在根目录
 ```
 
-| 路径常量 | 用途 | 检查工具 |
-|---------|------|----------|
-| FACTOR_IC_DATA | 统一数据源（行情+因子+收益） | pre-commit grep |
-| DATA_FETCHERS_RESULT | data_fetchers 输出目录 | pre-commit grep |
-| FACTOR_IC_RESULT | IC 输出目录 | pre-commit grep |
-| BACKTEST_RESULT | 回测输出目录 | pre-commit grep |
-| COMPREHENSIVE_FACTOR_RESULT | 综合因子输出目录 | pre-commit grep |
-| SUMMARY_RESULT | 汇总报告输出目录 | pre-commit grep |
+**注意**：绝对路径示例（如 `/home/admin/projects/...`）仅供本地开发参考，正式代码禁止硬编码。
+
+| 路径常量 | 用途 | "未导入"检查 | "硬编码字面量"检查 |
+|---------|------|-------------|-------------------|
+| FACTOR_IC_DATA | 统一数据源 | import-linter | pre-commit grep |
+| DATA_FETCHERS_RESULT | data_fetchers 输出目录 | import-linter | pre-commit grep |
+| FACTOR_IC_RESULT | IC 输出目录 | import-linter | pre-commit grep |
+| BACKTEST_RESULT | 回测输出目录 | import-linter | pre-commit grep |
+| COMPREHENSIVE_FACTOR_RESULT | 综合因子输出目录 | import-linter | pre-commit grep |
+| SUMMARY_RESULT | 汇总报告输出目录 | import-linter | pre-commit grep |
 
 ---
 
 ## 硬规则（违反即拒收）[experimental]
 
-| # | 规则 | 检查工具 |
-|---|------|----------|
-| 1 | 模块边界：只能复用自己目录的 common/ | import-linter |
-| 2 | 输出位置：`<模块>/result/` | pre-commit grep |
-| 3 | 临时文件：放 `temporary/` | pre-commit grep |
-| 4 | 字段非空：None 必须显式设置 + 记录原因 | JSON Schema |
-| 5 | 因子方向：根据实际 IC 确定 | pytest 断言 |
-| 6 | 异常链：`raise ... from e` | ruff B904 |
-| 7 | 路径导入：`from paths import` | pre-commit grep |
+| # | 规则 | 检查工具 | 执行阶段 |
+|---|------|----------|----------|
+| 1 | 模块边界：只能复用自己目录的 common/ | import-linter | CI |
+| 2 | 输出位置：`<模块>/result/` | pre-commit grep（pattern: `"[^"]*result/"`） | pre-commit |
+| 3 | 临时文件：放 `temporary/` | pre-commit grep | pre-commit |
+| 4 | 字段非空：None 必须显式设置 + 记录原因 | JSON Schema | CI |
+| 5 | 因子方向：根据实际 IC 确定 | pytest 断言 | CI |
+| 6 | 异常链：`raise ... from e` | ruff B904 | pre-commit + CI |
+| 7 | 路径导入：`from paths import` | import-linter | CI |
+| 8 | Design-First：2+文件需 design.md | CI check_design_first.py | CI |
 
 ---
 
 ## 建议（软约束）[experimental]
 
-| # | 建议 | 当前状态 | 未来自动化 |
+| # | 建议 | 当前状态 | 自动化计划 |
 |---|------|----------|------------|
 | 1 | 退出码统一 0/1 | 手动检查 | 待 CI 脚本 |
 | 2 | 配套文件同步创建 | 人工审核 | 待 PR 模板 |
-| 3 | Design-First 流程 | CI 检查 design.md | 已配置 |
-| 4 | 任务粒度拆分 | pre-commit hook | 已配置 |
-| 5 | 日志格式统一 | 手动检查 | 待 import-linter |
+| 3 | 任务粒度拆分 | pre-commit hook | 已配置 |
+| 4 | 日志格式统一 | 手动检查 | 待 import-linter |
 
 ---
 
@@ -138,14 +146,22 @@ from paths import FACTOR_IC_DATA
 | 路径迁移未同步 | `tests/integration/test_path_migration.py` | `test_no_legacy_path_in_loader` |
 | 字段冗余设计 | `tests/integration/test_redundant_fields.py` | `test_no_legacy_additional_factor_files` |
 | 收益数据获取错误 | `tests/integration/test_return_data_source.py` | `test_return_data_from_factor_ic_data` |
+| 变更同步遗漏 | `tests/integration/test_change_sync.py` | `test_project_md_updated_on_path_change` |
+| 向后兼容假设 | `tests/integration/test_backward_compat.py` | `test_no_assumption_on_old_columns` |
+| 文档层级写错 | `tests/integration/test_doc_layer.py` | `test_module_md_for_module_specific` |
 
 ---
 
 ## 测试覆盖规范 [experimental]
 
-**最低覆盖率阈值：pytest --cov-fail-under=70**
+**两个独立要求，必须同时满足：**
 
-**必测场景清单（具体示例）：**
+1. **覆盖率阈值**：`pytest --cov-fail-under=70`
+   - 这是整体代码覆盖率要求，低于 70% CI 失败
+
+2. **必测场景清单**：必须全部存在对应测试函数
+   - CI 检查函数名清单存在（非 100% 实现，但必须存在函数定义）
+   - 每个场景至少有一个测试函数覆盖
 
 | 类别 | 具体测试场景 | pytest 函数名示例 |
 |------|-------------|------------------|
@@ -177,18 +193,10 @@ from paths import FACTOR_IC_DATA
 - 工具：`jsonschema` Python 包
 - 脚本：`scripts/validate_output_schemas.py`
 - CI 调用：`python scripts/validate_output_schemas.py`
-- 代码入口：`validate_and_save_output(data, schema_path, output_path)` 函数
 
-**必须校验函数**（待创建）：
-```python
-def validate_and_save_output(data: dict, schema_path: Path, output_path: Path) -> None:
-    """校验并保存输出，失败抛错"""
-    with open(schema_path) as f:
-        schema = json.load(f)
-    jsonschema.validate(data, schema)  # 失败抛 ValidationError
-    with open(output_path, 'w') as f:
-        json.dump(data, f)
-```
+**状态**：规则 #4 当前标记为"实施中"，校验函数 `validate_and_save_output` 待创建。
+- 创建前：规则生效但无自动检查，依赖人工 review
+- 创建后：所有输出保存必须调用 `validate_and_save_output(data, schema_path, output_path)`
 
 ---
 
@@ -200,7 +208,7 @@ def validate_and_save_output(data: dict, schema_path: Path, output_path: Path) -
 ✗ factor_ic 脚本复用 backtest/common/（禁止）
 ```
 
-**检查工具**：import-linter 禁止跨模块 import。
+**检查工具**：import-linter（配置：`.pyproject.toml` → `[tool.importlinter]`）
 
 ---
 
@@ -226,16 +234,17 @@ def validate_and_save_output(data: dict, schema_path: Path, output_path: Path) -
 lint → schema → test → commit
 ```
 
-pre-commit hooks：
-1. ruff check --fix
-2. ruff format
-3. 文件数/行数阈值检查（阈值：3 文件，200 行）
-4. 路径字面量 grep
+pre-commit hooks（具体实现）：
+1. `ruff check --fix`（配置：`.pyproject.toml` → `[tool.ruff]`）
+2. `ruff format`（配置：`.pyproject.toml` → `[tool.ruff.format]`）
+3. 文件数/行数阈值检查（脚本：`scripts/check_task_size.py`，阈值：MAX_FILES=3, MAX_LINES=200）
+4. 路径字面量 grep（脚本：`scripts/check_path_literals.py`，pattern：`['"]\w+/result/`）
 
-CI 任务：
-1. pytest --cov-fail-under=70
-2. JSON Schema 校验（调用 `scripts/validate_output_schemas.py`）
-3. import-linter
+CI 任务（具体实现）：
+1. `pytest --cov-fail-under=70`（配置：`.pyproject.toml` → `[tool.pytest]`）
+2. JSON Schema 校验（脚本：`scripts/validate_output_schemas.py`）
+3. `import-linter`（配置：`.pyproject.toml` → `[tool.importlinter]`）
+4. Design-First 检查（脚本：`scripts/check_design_first.py`）
 
 ---
 
@@ -252,10 +261,9 @@ CI 任务：
 
 （以上为示例，请替换为实际行号）
 
-CI 脚本校验：
-1. 规则编号在硬规则表中存在（1-7）
+CI 脚本校验（`scripts/validate_pr_reference.py`）：
+1. 规则编号在硬规则表中存在（1-8）
 2. 行号在 PROJECT.md 中真实存在
-3. 对应规则与本次 diff 涉及的文件类型匹配
 
 ---
 

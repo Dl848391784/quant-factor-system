@@ -54,7 +54,7 @@ class TestChangeSync:
         pass
 
 
-class TestBackwardCompatAssumption:
+class TestBackwardCompat:
     """向后兼容假设教训测试"""
 
     def test_no_assumption_on_old_columns(self):

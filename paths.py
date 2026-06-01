@@ -4,14 +4,19 @@
 所有代码必须 import 此文件获取路径，禁止使用字符串字面量。
 违反此规则会导致改一处忘另一处，必翻车。
 
-完整导入语句：
-    # 项目根目录下直接导入
-    from paths import FACTOR_IC_DATA, FACTOR_IC_RESULT
+正确导入方式：
+    # 方式 1：通过 pip install -e . 安装项目后使用包导入
+    from factor_ic_analyzer.paths import FACTOR_IC_DATA
     
-    # 或在子目录中需要添加 sys.path
-    import sys
-    sys.path.insert(0, '/home/admin/projects/factor_ic_analyzer')
+    # 方式 2：通过 PYTHONPATH 环境变量
+    # export PYTHONPATH=/path/to/factor_ic_analyzer
     from paths import FACTOR_IC_DATA
+    
+    # 方式 3：项目根目录下的脚本可直接导入
+    from paths import FACTOR_IC_DATA  # paths.py 在根目录
+
+注意：绝对路径示例（如 /home/admin/projects/...）仅供本地开发参考，
+正式代码禁止硬编码，应使用包安装或 PYTHONPATH 方式。
 
 稳定性：[experimental] 2026-06-01（待实战验证）
 """
@@ -61,8 +66,15 @@ SUMMARY_LOGS = PROJECT_ROOT / "summary" / "logs"
 TEMPORARY_DIR = PROJECT_ROOT / "temporary"
 
 # ============================================================================
+# design.md 目录
+# ============================================================================
+
+DESIGNS_DIR = PROJECT_ROOT / "designs"
+
+# ============================================================================
 # 路径变更检查（机器强制）
 # ============================================================================
+
 
 def validate_path_exists(path: Path, description: str) -> None:
     """
@@ -76,6 +88,7 @@ def validate_path_exists(path: Path, description: str) -> None:
             f"描述: {description}\n"
             f"请检查路径配置或执行数据生成脚本"
         )
+
 
 # ============================================================================
 # 所有路径定义（用于 import-linter 检查）
@@ -97,5 +110,6 @@ __all__ = [
     "COMPREHENSIVE_FACTOR_LOGS",
     "SUMMARY_LOGS",
     "TEMPORARY_DIR",
+    "DESIGNS_DIR",
     "validate_path_exists",
 ]

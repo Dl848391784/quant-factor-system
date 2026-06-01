@@ -8,11 +8,12 @@
 - [ ] #5 因子方向
 - [ ] #6 异常链
 - [ ] #7 路径导入
+- [ ] #8 Design-First
 
 **对应 PROJECT.md 行号：**
 - 规则 #X: 行号 YY-ZZ
 
-示例：规则 #7 路径导入 → 对应 PROJECT.md 行号 69-82（跨模块路径章节）
+示例：规则 #7 路径导入 → 对应 PROJECT.md 行号 75-98（跨模块路径章节）
 （以上为示例，请替换为实际行号）
 
 **验证方式：**
@@ -44,7 +45,7 @@ pytest output:
 
 ## Design.md 链接（涉及 2+ 文件时必填）
 
-- design.md 文件路径: `[链接]`
+- design.md 文件路径: `designs/<filename>.md`
 
 （如涉及 2+ 文件但未创建 design.md，请说明原因）
 
