@@ -17,13 +17,13 @@
     "n_days_total": 515,
     "n_assets_total": 3006,
     "factor_name": "price_position",
-    "layer_names": {
-      "1": "低位层(收盘近最低)",
-      "2": "偏低位层",
-      "3": "中位层",
-      "4": "偏高位层",
-      "5": "高位层(收盘近最高)"
-    }
+    "layer_names": [
+      "lowest",
+      "lower",
+      "normal",
+      "higher",
+      "highest"
+    ]
   },
   "layer_stats": {
     "layer_1": {
@@ -128,13 +128,13 @@
   },
   "config": {
     "n_layers": 5,
-    "layer_names": {
-      "1": "低位层(收盘近最低)",
-      "2": "偏低位层",
-      "3": "中位层",
-      "4": "偏高位层",
-      "5": "高位层(收盘近最高)"
-    },
+    "layer_names": [
+      "lowest",
+      "lower",
+      "normal",
+      "higher",
+      "highest"
+    ],
     "factor_direction": "negative",
     "long_layers": [
       1,
@@ -147,5 +147,5 @@
     "trade_cost_rate": 0.003,
     "min_stocks_per_layer": 10
   },
-  "created_at": "2026-06-01T10:45:15.700553"
+  "created_at": "2026-06-01T14:37:03.355226"
 }
