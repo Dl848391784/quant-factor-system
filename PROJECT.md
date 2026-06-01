@@ -4,6 +4,22 @@
 
 ---
 
+## 本文档与 AGENTS.md 的关系 [stable]
+
+| 文档 | 加载方式 | 内容定位 | 何时读取 |
+|------|----------|----------|----------|
+| AGENTS.md | 对话自动加载（ambient） | 精华索引、硬规则速查表 | 每次对话自动注入 |
+| PROJECT.md | 按需主动读取 | 详细参考、背景说明、完整规范 | 下列触发条件 |
+
+**必须主动读取 PROJECT.md 的触发条件：**
+- 新增模块 / 新增脚本类型
+- 修改跨模块数据契约（路径、文件名、字段）
+- 不确定规范应该写在哪一层
+- 用户提到"为什么这样设计"
+- 涉及 2+ 文件改动需要写 design.md
+
+---
+
 ## 目录结构 [stable]
 
 ```
@@ -21,7 +37,7 @@ factor_ic_analyzer/
 
 ---
 
-## Design-First 流程 [stable]（新增）
+## Design-First 流程 [experimental]（新增）
 
 **涉及 2 个以上文件的改动必须先提交 design.md 通过审核才能动手。**
 
@@ -36,15 +52,17 @@ factor_ic_analyzer/
 
 ---
 
-## 任务粒度指引 [stable]（新增）
+## 任务粒度指引 [experimental]（新增）
 
-**单次任务建议改动不超过 3 个文件、不超过 200 行代码。**
+**单次任务必须改动不超过 3 个文件、不超过 200 行代码。**
 
 超出必须拆分：
-- 5 个文件 → 拆成 2 次任务
-- 400 行代码 → 拆成 2 次任务
+- 4+ 个文件 → 拆成 2 次任务
+- 200+ 行代码 → 拆成 2 次任务
 
 大任务幻觉率指数上升，拆分是硬规则。
+
+**自动检查**：pre-commit hook 统计 `git diff --stat`，超阈值即阻止提交。
 
 ---
 
@@ -52,54 +70,77 @@ factor_ic_analyzer/
 
 **所有代码必须 `from paths import ...` 获取路径，禁止字符串字面量。**
 
-| 路径常量 | 用途 | 检查工具 |
+|| 路径常量 | 用途 | 检查工具 |
 |---------|------|----------|
-| FACTOR_IC_DATA | 统一数据源 | import-linter |
+| FACTOR_IC_DATA | 统一数据源（行情+因子+收益） | import-linter |
+| DATA_FETCHERS_RESULT | data_fetchers 输出目录 | import-linter |
 | FACTOR_IC_RESULT | IC 输出目录 | import-linter |
 | BACKTEST_RESULT | 回测输出目录 | import-linter |
+| COMPREHENSIVE_FACTOR_RESULT | 综合因子输出目录 | import-linter |
+| SUMMARY_RESULT | 汇总报告输出目录 | import-linter |
 
 **违反检测**：grep 字符串字面量 `"result/"`、`"data_fetchers/result"` 等。
 
 ---
 
-## 硬规则（违反即拒收）[stable]
+## 硬规则（违反即拒收）
 
-| # | 规则 | 检查工具 | 稳定性 |
+|| # | 规则 | 检查工具 | 稳定性 |
 |---|------|----------|--------|
 | 1 | 模块边界：只能复用自己目录的 common/ | import-linter | [stable] |
-| 2 | 输出位置：`<模块>/result/` | grep `"result/"` | [stable] |
-| 3 | 临时文件：放 `temporary/` | grep 临时脚本 | [stable] |
+| 2 | 输出位置：`<模块>/result/` | pre-commit grep | [stable] |
+| 3 | 临时文件：放 `temporary/` | pre-commit grep | [stable] |
 | 4 | 字段非空：None 必须显式设置 + 记录原因 | JSON Schema | [stable] |
 | 5 | 因子方向：根据实际 IC 确定 | pytest 断言 | [stable] |
-| 6 | 退出码：0/1 | 手动检查 | [stable] |
-| 7 | 测试位置：`<模块>/test_cases/` | pytest 发现 | [stable] |
-| 8 | 配套文件：新建脚本同步创建流程文档 + pytest | 人工审核 | [stable] |
-| 9 | 日志格式：统一使用模块 logger_config | ruff | [stable] |
-| 10 | 异常链：`raise ... from e` | ruff B904 | [stable] |
-| 11 | 路径导入：`from paths import` | import-linter | [stable] |
-| 12 | Design-First：2+文件先提交 design.md | 人工审核 | [stable] |
+| 6 | 测试位置：`<模块>/test_cases/` | pytest 发现 | [stable] |
+| 7 | 日志格式：使用模块 logger_config | ruff | [stable] |
+| 8 | 异常链：`raise ... from e` | ruff B904 | [stable] |
+| 9 | 路径导入：`from paths import` | import-linter | [stable] |
 
 ---
 
-## 测试覆盖规范 [stable]（新增）
+## 建议（软约束）
+
+|| # | 建议 | 当前状态 | 未来自动化 |
+|---|------|----------|------------|
+| 1 | 退出码统一 0/1 | 手动检查 | 待 CI 脚本 |
+| 2 | 配套文件同步创建 | 人工审核 | 待 PR 模板 |
+| 3 | Design-First 流程 | 人工审核 | 待 PR 模板 |
+| 4 | 任务粒度拆分 | 手动检查 | pre-commit hook（已配置） |
+
+---
+
+## 测试覆盖规范 [experimental]（新增）
 
 **最低覆盖率阈值：pytest --cov-fail-under=70**
 
-**必测场景清单：**
-- 输入边界（空数据、极端值）
-- 输出 schema（JSON Schema 校验）
-- 异常路径（FileNotFoundError、JSONDecodeError）
+**必测场景清单（具体示例）：**
+
+| 类别 | 具体测试场景 | pytest 函数名示例 |
+|------|-------------|------------------|
+| 输入边界 | 空 DataFrame（0 行） | `test_empty_df` |
+| 输入边界 | 单股票 DataFrame（1 asset） | `test_single_stock_df` |
+| 输入边界 | 单日 DataFrame（1 date） | `test_single_date_df` |
+| 输入边界 | 全 NaN DataFrame | `test_nan_only_df` |
+| 输出 schema | JSON Schema 校验通过 | `test_output_schema_valid` |
+| 输出 schema | 必须字段存在 | `test_required_fields_present` |
+| 异常路径 | FileNotFoundError | `test_file_not_found` |
+| 异常路径 | JSONDecodeError | `test_invalid_json` |
+| 异常路径 | 数据列缺失 | `test_missing_column` |
 
 ---
 
-## 输出结构校验 [stable]
+## 输出结构校验 [experimental]
 
 **各模块输出必须通过 JSON Schema 校验。**
 
-```
-factor_ic/schemas/ic_analysis_result.schema.json
-backtest/schemas/layered_backtest_result.schema.json
-```
+|| 模块 | Schema 文件路径 |
+|------|----------------|
+| factor_ic | `factor_ic/schemas/ic_analysis_result.schema.json` |
+| backtest | `backtest/schemas/layered_backtest_result.schema.json` |
+| comprehensive_factor | `comprehensive_factor/schemas/composite_factor.schema.json` |
+| data_fetchers | `data_fetchers/schemas/factor_data.schema.json` |
+| summary | `summary/schemas/summary_report.schema.json` |
 
 保存结果前强制校验，失败即抛错。
 
@@ -117,45 +158,69 @@ backtest/schemas/layered_backtest_result.schema.json
 
 ---
 
-## 历史教训 → 集成测试 [stable]
+## 历史教训 → 集成测试 [experimental]
 
-| 教训 | 集成测试 | CI 强制 |
-|------|----------|--------|
-| 路径迁移未同步 | test_path_migration_sync | ✓ |
-| 字段冗余设计 | test_no_redundant_fields | ✓ |
+|| 教训 | 集成测试文件 | CI 强制 |
+|------|-------------|--------|
+| 路径迁移未同步 | `tests/integration/test_path_migration_sync.py` | ✓ |
+| 字段冗余设计 | `tests/integration/test_no_redundant_fields.py` | ✓ |
+| 收益数据获取错误 | `tests/integration/test_return_data_source.py` | ✓ |
+| 变更同步遗漏 | `tests/integration/test_change_sync.py` | ✓ |
+| 向后兼容假设 | `tests/integration/test_backward_compat_assumption.py` | ✓ |
+| 文档层级写错 | `tests/integration/test_doc_layer.py` | ✓ |
 
 ---
 
 ## 版本历史
 
-| 版本 | 日期 | 更新内容 | 稳定性标注 |
+|| 版本 | 日期 | 更新内容 | 稳定性标注 |
 |------|------|---------|-----------|
-| v3.0 | 2026-06-01 | 大重构：合并 checklist、绑定工具检查、新增 Design-First 和任务粒度、稳定性标注、paths.py、JSON Schema | [stable] |
+| v3.0 | 2026-06-01 | 大重构 | [experimental] |
 | v2.x | 2026-05-xx | 旧版本（已重构） | [deprecated] |
+
+**稳定性定义：**
+- `[stable]`：经过 2-4 周实战验证，规则可靠
+- `[experimental]`：新增内容，待验证
+- `[deprecated]`：已废弃
 
 ---
 
-## 提交前模板（合并版）[stable]
+## 提交前模板
 
-**执行顺序：lint → schema → test → commit**
+**强制执行：`.pre-commit-config.yaml` + `.github/workflows/ci.yml`**
 
 ```
-□ ruff check --fix .                     [自动修复]
-□ ruff format .                          [格式化]
-□ ruff check .                           [检查剩余问题]
-□ mypy .                                 [类型检查]
-□ pytest --cov-fail-under=70             [测试覆盖率]
-□ JSON Schema 校验输出                   [schema校验]
-□ 引用本次任务相关规范行号               [取证]
-□ git commit                             [提交]
+lint → schema → test → commit
 ```
 
-**取证要求**：提交消息必须引用规范行号，如：
-```
-"修改因子方向逻辑，遵循 PROJECT.md 规则 #5（行号 35-37）"
+pre-commit hooks：
+1. ruff check --fix
+2. ruff format
+3. 文件数/行数阈值检查
+4. 路径字面量 grep
+
+CI 任务：
+1. pytest --cov-fail-under=70
+2. JSON Schema 校验
+3. import-linter
+
+---
+
+## PR 模板必填字段
+
+**取证机制**：PR 模板强制填写，CI 校验引用规范存在。
+
+```markdown
+## 规范引用
+- 本次改动涉及的规则编号：#1, #5, #9
+- 对应 PROJECT.md 行号：XX-YY
+- 验证方式：pytest / ruff / import-linter
 ```
 
-答不出来 = 退回。
+CI 脚本校验：
+1. 规则编号在硬规则表中存在
+2. 行号在 PROJECT.md 中真实存在
+3. 对应规则与本次 diff 涉及的文件类型匹配
 
 ---
 

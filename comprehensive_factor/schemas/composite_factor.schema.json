@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Composite Factor Result",
+  "description": "comprehensive_factor 模块输出结构校验 Schema",
+  "type": "object",
+  "required": ["meta", "weight_method", "factors_used", "composite_metrics"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["composite_name", "weight_method", "n_factors"],
+      "properties": {
+        "composite_name": { "type": "string" },
+        "weight_method": { "type": "string" },
+        "n_factors": { "type": "integer" }
+      }
+    },
+    "weight_method": {
+      "type": "string",
+      "enum": ["equal_weight", "icir_weight", "auto_select"]
+    },
+    "factors_used": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "composite_metrics": {
+      "type": "object",
+      "required": ["composite_ic_mean", "composite_icir"],
+      "properties": {
+        "composite_ic_mean": { "type": ["number", "null"] },
+        "composite_icir": { "type": ["number", "null"] }
+      }
+    }
+  },
+  "additionalProperties": true
+}

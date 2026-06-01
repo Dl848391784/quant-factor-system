@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Factor Data Output",
+  "description": "data_fetchers 模块输出结构校验 Schema",
+  "type": "object",
+  "required": ["data", "meta"],
+  "properties": {
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["date", "asset"],
+        "properties": {
+          "date": { "type": "string" },
+          "asset": { "type": "string" },
+          "open": { "type": ["number", "null"] },
+          "close": { "type": ["number", "null"] },
+          "high": { "type": ["number", "null"] },
+          "low": { "type": ["number", "null"] }
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "required": ["source", "fetch_date"],
+      "properties": {
+        "source": { "type": "string" },
+        "fetch_date": { "type": "string" },
+        "n_records": { "type": "integer" }
+      }
+    }
+  },
+  "additionalProperties": true
+}

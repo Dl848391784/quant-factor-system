@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Summary Report Output",
+  "description": "summary 模块输出结构校验 Schema",
+  "type": "object",
+  "required": ["report_type", "generated_date", "sections"],
+  "properties": {
+    "report_type": {
+      "type": "string",
+      "enum": ["factor_summary", "backtest_summary", "composite_summary"]
+    },
+    "generated_date": {
+      "type": "string"
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "content"],
+        "properties": {
+          "title": { "type": "string" },
+          "content": { "type": "string" }
+        }
+      }
+    },
+    "factors_analyzed": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": true
+}

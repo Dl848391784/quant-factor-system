@@ -1,0 +1,38 @@
+repos:
+  # ruff - Python linter & formatter
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # 文件数/行数阈值检查
+  - repo: local
+    hooks:
+      - id: check-task-size
+        name: Check task size (≤3 files, ≤200 lines)
+        entry: python scripts/check_task_size.py
+        language: python
+        pass_filenames: false
+        stages: [pre-commit]
+
+  # 路径字面量 grep
+  - repo: local
+    hooks:
+      - id: check-path-literals
+        name: Check path literals (use paths.py)
+        entry: python scripts/check_path_literals.py
+        language: python
+        types: [python]
+        stages: [pre-commit]
+
+  # 临时文件位置检查
+  - repo: local
+    hooks:
+      - id: check-temp-files
+        name: Check temp files location
+        entry: python scripts/check_temp_files.py
+        language: python
+        pass_filenames: false
+        stages: [pre-commit]
