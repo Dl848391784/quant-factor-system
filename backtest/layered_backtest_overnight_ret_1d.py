@@ -29,22 +29,10 @@ IC 分析结果（2026-05-28，factor_ic/result/ic_overnight_ret_1d_analysis_res
 
 作者: 云瑶
 创建日期: 2026-05-28
-版本历史:
-  v2.0 (2026-06-01): 使用 factor_cli_main 公共入口
-  v2.1 (2026-06-01): 修正 factor_direction 为 'positive'（遵循 IC 分析结果）
-  v2.2 (2026-06-01): 修正 layer_names 语义描述（移除误导性固定阈值），补充实测范围
-  v2.3 (2026-06-01): 简化类 docstring（移除与模块 docstring 重复的 IC 分析结果）
-  v2.4 (2026-06-01): 补充 pytest 测试文件（修复测试覆盖缺失）
-  v2.5 (2026-06-01): 补充边界值测试和参数校验测试（19项测试全部通过）
 """
 
-import sys
-from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Dict, Literal
-
-if __name__ == '__main__':
-    sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backtest.common.layered_backtest_runner import LayerConfigBase
 from backtest.common.factor_cli import factor_cli_main
@@ -55,10 +43,12 @@ from data_fetchers.factor_calculator import calculate_overnight_return
 class OvernightRetLayerConfig(LayerConfigBase):
     """隔夜收益因子分层配置（正向因子）
     
-    多空组合由基类 _derive_long_short() 自动派生：
+    多空组合由基类按 factor_direction 自动派生：
     - 多头: Layer4-5（隔夜涨幅大）
     - 空头: Layer1-2（隔夜跌幅大）
     """
+    
+    n_layers: int = 5  # 显式声明层数，避免与 layer_names 隐式耦合
     
     layer_names: Dict[str, str] = field(default_factory=lambda: {
         '1': '极低层(隔夜跌幅最大)',
@@ -68,7 +58,7 @@ class OvernightRetLayerConfig(LayerConfigBase):
         '5': '极高层(隔夜涨幅最大)'
     })
     
-    factor_direction: Literal['positive', 'negative'] = 'positive'  # IC 均值 0.021187 > 0
+    factor_direction: Literal['positive', 'negative'] = 'positive'
 
 
 if __name__ == '__main__':
