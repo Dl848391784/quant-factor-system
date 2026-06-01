@@ -78,11 +78,12 @@
 
 由 `pyproject.toml` 中的 ruff + mypy 强制执行。**本文件不重复**这些机器能管的规则。
 
-日志使用 `common/logging_setup.py`，统一配置：
-- **路径**：必须输出到 `<模块>/logs/`
-- **命名**：`<脚本名>_YYYY-MM-DD.log`
+日志使用各模块的 `common/logger_config.py`：
+- **路径**：`<模块>/logs/`
+- **命名**：`<脚本名>_YYYY-MM-DD.log`（或固定文件名）
 - **格式**：`%(asctime)s | %(levelname)-8s | %(name)s | %(message)s`
 - **级别**：INFO（生产），DEBUG（开发）
+- **导入**：`from <模块>.common.logger_config import get_logger` 或 `setup_logger`
 
 异常处理两条铁律：
 - 异常链必须 `raise ... from e`，不能丢弃原始异常
