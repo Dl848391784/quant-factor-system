@@ -34,6 +34,7 @@ IC 分析结果（2026-05-28，factor_ic/result/ic_overnight_ret_1d_analysis_res
   v2.1 (2026-06-01): 修正 factor_direction 为 'positive'（遵循 IC 分析结果）
   v2.2 (2026-06-01): 修正 layer_names 语义描述（移除误导性固定阈值），补充实测范围
   v2.3 (2026-06-01): 简化类 docstring（移除与模块 docstring 重复的 IC 分析结果）
+  v2.4 (2026-06-01): 补充 pytest 测试文件（修复测试覆盖缺失）
 """
 
 import sys
