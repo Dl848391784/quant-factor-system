@@ -77,7 +77,12 @@
 ## 6. 代码风格 / 日志
 
 由 `pyproject.toml` 中的 ruff + mypy 强制执行。**本文件不重复**这些机器能管的规则。
-日志使用 Python 标准库 `logging`，配置见 `common/logging_setup.py`（统一格式、文件路径、级别）。
+
+日志使用 `common/logging_setup.py`，统一配置：
+- **路径**：必须输出到 `<模块>/logs/`
+- **命名**：`<脚本名>_YYYY-MM-DD.log`
+- **格式**：`%(asctime)s | %(levelname)-8s | %(name)s | %(message)s`
+- **级别**：INFO（生产），DEBUG（开发）
 
 异常处理两条铁律：
 - 异常链必须 `raise ... from e`，不能丢弃原始异常
