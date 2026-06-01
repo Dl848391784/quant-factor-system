@@ -7,10 +7,6 @@
 - 含义: 成交量相对历史均值的比率
 - 理论范围: ≥ 0（无上界）
 
-策略逻辑（反向因子）：
-- 低值层做多（缩量组）
-- 高值层做空（放量组）
-
 分层模式：percentile 5层（每层20%）
 
 因子元数据派生机制（基类 LayerConfigBase）：
@@ -32,10 +28,11 @@ class VolumeRatioLayerConfig(LayerConfigBase):
     
     特点：
     - volume_ratio_5 已在数据源中预计算，无需 factor_calculator
-    - 反向因子：做多缩量组，做空放量组
     """
     
     factor_name: ClassVar[str] = 'volume_ratio'
+    # ic_source: ClassVar[str] = 'factor_ic/result/ic_volume_ratio_1d_analysis_result.json'
+    #   可选显式声明以暴露派生路径；未声明时基类按 factor_name 拼接默认路径
     
     layer_names: ClassVar[Sequence[str]] = (
         '极低层(量比极低)',
