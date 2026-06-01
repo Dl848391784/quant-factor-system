@@ -1,9 +1,10 @@
 # backtest 模块规范
 
-> 版本: v1.18
+> 版本: v1.19
 > 创建时间: 2026-05-22
 > 最后更新: 2026-06-01 (return_5d Round 1 架构修复+配套文档)
 > 更新记录: 
+>   v1.19 (2026-06-01): return_5d Round 2 IC数值修正（ic_mean/icir/p_value对齐实际分析结果）
 >   v1.18 (2026-06-01): return_5d Round 1 架构修复（移除sys.path+显式n_layers+layer_names语义化+ic_meta集中+配套文档创建）
 >   v1.17 (2026-06-01): overnight_ret Round 8 元数据集中（ic_meta字段+factor_name类属性+docstring简化）
 >   v1.16 (2026-06-01): overnight_ret Round 7 docstring描述修正（删除压缩至~30行误导性描述）

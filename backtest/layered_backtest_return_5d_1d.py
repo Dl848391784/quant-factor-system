@@ -49,11 +49,11 @@ class Return5dLayerConfig(LayerConfigBase):
     factor_name: ClassVar[str] = 'return_5d'
     
     ic_meta: ClassVar[Dict[str, Any]] = {
-        'date': '2026-05-29',
+        'date': '2026-05-31',
         'source': 'factor_ic/result/ic_return_5d_1d_analysis_result.json',
-        'ic_mean': -0.0591,  # 负相关（动量反转）
-        'icir': 0.2106,
-        'p_value': 7.87e-07,
+        'ic_mean': -0.033657,  # 负相关（动量反转）
+        'icir': 0.215,
+        'p_value': 3.61e-08,
         'direction': 'negative',  # ic_mean < 0
     }
     
