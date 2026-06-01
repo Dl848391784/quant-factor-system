@@ -73,6 +73,8 @@ docstring-code-format = true
 testpaths = ["test_cases"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+# 测试覆盖率阈值（对应 PROJECT.md 测试覆盖规范）
+# 注意：需要安装 pytest-cov
 addopts = "-v --tb=short"
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"

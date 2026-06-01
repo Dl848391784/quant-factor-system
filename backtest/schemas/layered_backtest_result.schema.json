@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Layered Backtest Result",
+  "description": "backtest 模块输出结构校验 Schema",
+  "type": "object",
+  "required": ["meta", "layer_stats"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["factor_name", "n_layers", "n_days_total"],
+      "properties": {
+        "factor_name": { "type": "string" },
+        "n_layers": { "type": "integer" },
+        "n_days_total": { "type": "integer" }
+      }
+    },
+    "layer_stats": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["n_stocks_avg", "annual_return"],
+        "properties": {
+          "n_stocks_avg": { "type": ["number", "null"] },
+          "annual_return": { "type": ["number", "null"] }
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}

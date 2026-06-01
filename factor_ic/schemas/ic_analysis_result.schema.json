@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "IC Analysis Result",
+  "description": "factor_ic 模块输出结构校验 Schema",
+  "type": "object",
+  "required": [
+    "factor_name",
+    "factor_col",
+    "return_period",
+    "ic_metrics",
+    "sample_stats",
+    "direction_verification",
+    "statistical_significance"
+  ],
+  "properties": {
+    "factor_name": {
+      "type": "string",
+      "description": "因子名称，如 rsi_1d"
+    },
+    "factor_col": {
+      "type": "string",
+      "description": "因子列名，如 rsi_6"
+    },
+    "return_period": {
+      "type": "string",
+      "description": "收益周期，如 1d"
+    },
+    "ic_metrics": {
+      "type": "object",
+      "required": ["ic_mean", "ic_std", "icir"],
+      "properties": {
+        "ic_mean": { "type": ["number", "null"] },
+        "ic_std": { "type": ["number", "null"] },
+        "icir": { "type": ["number", "null"] }
+      }
+    },
+    "sample_stats": {
+      "type": "object",
+      "required": ["total_days", "valid_days"],
+      "properties": {
+        "total_days": { "type": "integer" },
+        "valid_days": { "type": "integer" }
+      }
+    },
+    "direction_verification": {
+      "type": "object",
+      "required": ["ic_mean_sign", "factor_direction"],
+      "properties": {
+        "ic_mean_sign": { "type": "string", "enum": ["positive", "negative", "zero"] },
+        "factor_direction": { "type": "string", "enum": ["positive", "negative"] }
+      }
+    },
+    "statistical_significance": {
+      "type": "object",
+      "required": ["p_value", "is_significant"],
+      "properties": {
+        "p_value": { "type": ["number", "null"] },
+        "is_significant": { "type": "boolean" }
+      }
+    }
+  },
+  "additionalProperties": true
+}
