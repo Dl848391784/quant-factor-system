@@ -50,7 +50,7 @@ import logging
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from typing import Dict, Literal, Optional, Callable, List, Union, Tuple, ClassVar, Any
+from typing import Dict, Literal, Optional, Callable, List, Union, Tuple, ClassVar, Any, Sequence
 from pathlib import Path
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
@@ -114,20 +114,37 @@ class LayerConfigBase:
     
     子类只需声明：
     - factor_name: ClassVar[str]（因子名称）
-    - layer_names: 分层命名（业务描述）
+    - ic_source: ClassVar[str]（IC 文件路径，可选，默认按 factor_name 拼接）
+    - layer_names: ClassVar[Sequence[str]]（分层命名，按层序 1-based）
     
     派生逻辑（基类自动处理）：
-    - ic_source: 按 factor_name 拼接默认路径
+    - ic_source: 若子类未声明，按 factor_name 拼接默认路径
     - n_layers: 由 len(layer_names) 派生
-    - factor_direction: 从 IC 结果文件按需加载
+    - factor_direction: 从 IC 结果文件加载（ic_mean < 0 为 negative，否则 positive）
     - long_layers/short_layers: 由 n_layers 和 factor_direction 派生
+    - layer_names_dict: 运行时转换为 {层号: 名称} 格式供日志显示
+    
+    示例：
+        class Return5dLayerConfig(LayerConfigBase):
+            factor_name: ClassVar[str] = 'return_5d'
+            layer_names: ClassVar[Sequence[str]] = [
+                '极低层(5日涨幅最小)',
+                '偏低层(5日小幅下跌)',
+                '正常层(5日变化不大)',
+                '偏高层(5日小幅上涨)',
+                '极高层(5日涨幅最大)'
+            ]
     """
     
     # === 因子元数据（子类必须声明 factor_name） ===
     factor_name: ClassVar[str] = ''  # 子类必须覆盖
+    ic_source: ClassVar[str] = ''    # 子类可选，默认按 factor_name 拼接
+    layer_names: ClassVar[Sequence[str]] = ()  # 子类必须覆盖，按层序 1-based
     
-    # === 分层配置（子类声明 layer_names） ===
-    layer_names: Dict[str, str] = field(default_factory=dict)
+    # === 运行时派生（实例字段，field(init=False)） ===
+    ic_source_resolved: str = field(init=False)  # 实际使用的 IC 文件路径
+    layer_names_dict: Dict[str, str] = field(init=False)  # 层号→名称映射
+    n_layers: int = field(init=False)
     
     # === 通用参数（有默认值） ===
     long_layers: Optional[List[int]] = None
@@ -136,8 +153,6 @@ class LayerConfigBase:
     min_stocks_per_layer: int = 10
     
     # === 派生字段（无默认值，field(init=False)） ===
-    ic_source: str = field(init=False)
-    n_layers: int = field(init=False)
     factor_direction: Literal['positive', 'negative'] = field(init=False)
     
     def __post_init__(self):
@@ -151,8 +166,13 @@ class LayerConfigBase:
                 f"当前类: {self.__class__.__name__}"
             )
         
-        # 2. 拼接 ic_source（基类自动设置）
-        self.ic_source = f'factor_ic/result/ic_{self.factor_name}_1d_analysis_result.json'
+        # 2. 拼接 ic_source_resolved（子类声明优先，否则默认路径）
+        #    子类可显式声明 ic_source 以暴露派生路径
+        cls_ic_source = self.__class__.ic_source
+        if cls_ic_source:
+            self.ic_source_resolved = cls_ic_source
+        else:
+            self.ic_source_resolved = f'factor_ic/result/ic_{self.factor_name}_1d_analysis_result.json'
         
         # 3. 校验 layer_names
         n = len(self.layer_names)
@@ -162,20 +182,25 @@ class LayerConfigBase:
         # 4. 派生 n_layers
         self.n_layers = n
         
-        # 5. 加载 IC 元数据，派生 factor_direction
+        # 5. 生成 layer_names_dict（层序 1-based）
+        self.layer_names_dict = {
+            str(i + 1): name for i, name in enumerate(self.layer_names)
+        }
+        
+        # 6. 加载 IC 元数据，派生 factor_direction
         ic_meta = self._load_ic_meta()
         self.factor_direction = ic_meta['direction']  # 禁止隐式默认值
         
-        # 6. 派生多空组合
+        # 7. 派生多空组合
         if self.long_layers is None or self.short_layers is None:
             self.long_layers, self.short_layers = self._derive_long_short()
         
-        # 7. 打印配置日志（问题7修复）
+        # 8. 打印配置日志
         logger.info("=" * 40)
         logger.info(f"因子: {self.factor_name}")
         logger.info(f"方向: {self.factor_direction} (ic_mean={ic_meta['ic_mean']:.4f})")
         logger.info(f"分层: {self.n_layers} 层 (percentile)")
-        logger.info(f"IC文件: {self.ic_source}")
+        logger.info(f"IC文件: {self.ic_source_resolved}")
         logger.info("=" * 40)
     
     def _load_ic_meta(self) -> Dict[str, Any]:
@@ -190,7 +215,7 @@ class LayerConfigBase:
             FileNotFoundError: IC 文件不存在
             KeyError: direction 字段缺失（禁止隐式默认值）
         """
-        ic_file = PROJECT_ROOT / self.ic_source
+        ic_file = PROJECT_ROOT / self.ic_source_resolved
         
         if not ic_file.exists():
             raise FileNotFoundError(

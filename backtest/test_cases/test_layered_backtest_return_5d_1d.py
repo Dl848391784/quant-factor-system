@@ -29,46 +29,56 @@ class TestReturn5dLayerConfig:
         """TC001-01: factor_name 类属性"""
         assert Return5dLayerConfig.factor_name == 'return_5d'
 
-    def test_ic_meta_complete(self):
-        """TC001-02: ic_meta 字段完整性"""
-        required_keys = ['date', 'source', 'ic_mean', 'icir', 'p_value', 'direction']
-        assert all(k in Return5dLayerConfig.ic_meta for k in required_keys)
+    def test_layer_names_classvar(self):
+        """TC001-02: layer_names 类属性为 Sequence[str]"""
+        assert len(Return5dLayerConfig.layer_names) == 5
+        assert Return5dLayerConfig.layer_names[0] == '极低层(5日涨幅最小)'
+
+    def test_ic_source_default(self):
+        """TC001-03: ic_source 默认路径"""
+        config = Return5dLayerConfig()
+        # 未显式声明时，基类按 factor_name 拼接默认路径
+        assert config.ic_source_resolved == 'factor_ic/result/ic_return_5d_1d_analysis_result.json'
 
     def test_ic_meta_direction_negative(self):
-        """TC001-03: ic_meta.direction = negative"""
-        assert Return5dLayerConfig.ic_meta['direction'] == 'negative'
-
-    def test_n_layers_explicit(self):
-        """TC001-04: n_layers 显式声明"""
+        """TC001-04: factor_direction = negative（从 IC 文件派生）"""
         config = Return5dLayerConfig()
-        assert config.n_layers == 5
+        # ic_mean < 0 时 direction = negative
+        assert config.factor_direction == 'negative'
 
-    def test_layer_names_count(self):
-        """TC001-05: layer_names 数量 = n_layers"""
+    def test_n_layers_derived(self):
+        """TC001-05: n_layers 由 len(layer_names) 派生"""
         config = Return5dLayerConfig()
-        assert len(config.layer_names) == config.n_layers
+        assert config.n_layers == len(Return5dLayerConfig.layer_names)
+
+    def test_layer_names_dict_generated(self):
+        """TC001-06: layer_names_dict 运行时生成"""
+        config = Return5dLayerConfig()
+        assert '1' in config.layer_names_dict
+        assert '5' in config.layer_names_dict
+        assert config.layer_names_dict['1'] == '极低层(5日涨幅最小)'
 
     def test_layer_names_semantic(self):
-        """TC001-06: layer_names 语义描述"""
+        """TC001-07: layer_names 语义描述"""
         config = Return5dLayerConfig()
         # 应包含"涨幅"相关描述
-        for name in config.layer_names.values():
+        for name in config.layer_names:  # 直接迭代 tuple
             assert '涨' in name or '下跌' in name or '变化' in name
 
     def test_layer_names_no_fixed_threshold(self):
-        """TC001-07: layer_names 无固定阈值"""
+        """TC001-08: layer_names 无固定阈值"""
         config = Return5dLayerConfig()
-        for name in config.layer_names.values():
+        for name in config.layer_names:  # 直接迭代 tuple
             # percentile 模式禁止固定阈值（如-8%, 4%）
             assert not any(c.isdigit() and '%' in name for c in name)
 
     def test_factor_direction_negative(self):
-        """TC001-08: factor_direction = negative"""
+        """TC001-09: factor_direction = negative"""
         config = Return5dLayerConfig()
         assert config.factor_direction == 'negative'
 
     def test_factor_direction_literal_type(self):
-        """TC001-09: factor_direction 类型约束"""
+        """TC001-10: factor_direction 类型约束"""
         valid_values = get_args(Literal['positive', 'negative'])
         config = Return5dLayerConfig()
         assert config.factor_direction in valid_values

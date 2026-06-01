@@ -242,7 +242,7 @@ def factor_cli_main(
         stats = layer_stats[layer_key]
         # layer_key 格式: 'layer_1', 'layer_2', ...
         layer_id = layer_key.replace('layer_', '')
-        display_name = config.layer_names.get(layer_id, f'Layer{layer_id}')
+        display_name = config.layer_names_dict.get(layer_id, f'Layer{layer_id}')
         cumulative_return = stats.get('cumulative_return') or 0.0
         logger.info(f"Layer {layer_id} ({display_name}) 累计收益: {cumulative_return:.4f}")
     

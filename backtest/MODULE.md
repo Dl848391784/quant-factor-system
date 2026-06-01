@@ -1,9 +1,10 @@
 # backtest 模块规范
 
-> 版本: v1.21
+> 版本: v1.22
 > 创建时间: 2026-05-22
-> 最后更新: 2026-06-01 (架构重构：薄封装理想形态)
+> 最后更新: 2026-06-01 (v1.22: layer_names改为Sequence[str]+ClassVar统一+删除@dataclass)
 > 更新记录: 
+>   v1.22 (2026-06-01): layer_names改为ClassVar[Sequence[str]]（语义对齐：有序列表无冗余键），删除@dataclass装饰器与field(default_factory)，factor_name/ic_source/layer_names统一为ClassVar声明风格，基类新增ic_source_resolved实例属性与layer_names_dict运行时转换
 >   v1.21 (2026-06-01): 10项架构重构 — _load_ic_meta上移基类、PROJECT_ROOT可移植获取、禁止direction隐式默认值、删除旧格式兼容分支、统一ic_metrics来源、import提到顶部、基类打印启动日志、删除冗余docstring、ic_source自动拼接、理想形态(factor_name+layer_names+factor_cli_main)
 >   v1.20 (2026-06-01): factor_cli_main 参数签名简化，删除 factor_name/description 参数，从 config_cls 按需派生；启动日志打印因子关键上下文；Config 类新增 factor_name/ic_source ClassVar，__post_init__ 派生 n_layers/factor_direction；_load_ic_meta 从 ic_mean 符号派生 direction
 >   v1.19 (2026-06-01): return_5d Round 2 IC数值修正（ic_mean/icir/p_value对齐实际分析结果）
@@ -111,24 +112,36 @@ backtest 模块负责对因子 IC 结果进行分层回测，评估因子的实�
 
 1. **定义 Config 类**（继承 `LayerConfigBase`）
 ```python
+from typing import ClassVar, Sequence
 from backtest.common.layered_backtest_runner import LayerConfigBase
 
-@dataclass
 class MyFactorLayerConfig(LayerConfigBase):
     """my_factor 因子分层配置
     
-    理想形态（v1.21）：子类只需声明 factor_name + layer_names
-    基类自动派生：ic_source、n_layers、factor_direction、long_layers、short_layers
+    理想形态（v1.22）：子类只需声明 ClassVar 元数据
+    - factor_name: ClassVar[str]（必须）
+    - ic_source: ClassVar[str]（可选，默认按 factor_name 拼接）
+    - layer_names: ClassVar[Sequence[str]]（必须，按层序 1-based）
+    
+    基类运行时派生：
+    - ic_source_resolved: 实际使用的 IC 文件路径
+    - n_layers: 由 len(layer_names) 派生
+    - layer_names_dict: {层号: 名称} 格式供日志显示
+    - factor_direction: 从 IC 文件加载（ic_mean < 0 为 negative）
+    - long_layers/short_layers: 由 n_layers 和 factor_direction 派生
     """
     
-    # === 因子元数据（子类只需声明 factor_name） ===
     factor_name: ClassVar[str] = 'my_factor'
+    # ic_source 可选声明以暴露派生路径
+    # ic_source: ClassVar[str] = 'factor_ic/result/ic_my_factor_1d_analysis_result.json'
     
-    # === 分层配置 ===
-    layer_names: Dict[str, str] = field(default_factory=lambda: {
-        '1': '低值层', '2': '偏低层', '3': '中位层',
-        '4': '偏高层', '5': '高值层'
-    })
+    layer_names: ClassVar[Sequence[str]] = (
+        '低值层',
+        '偏低层',
+        '中位层',
+        '偏高层',
+        '高值层'
+    )
 ```
 
 2. **调用公共入口**
@@ -141,32 +154,35 @@ result = run_layered_backtest(
     config=MyFactorLayerConfig(),
     # 可选参数：
     factor_calculator=my_calculate_func,  # 若因子需实时计算
-    additional_data_files={'turnover_rate': str(Path(args.cache_dir) / 'turnover_rate_data.json.gz')},  # 动态构建路径
     logger=logger
 )
 ```
 
 3. **CLI 入口**（使用 factor_cli_main 公共函数）
 ```python
-from dataclasses import dataclass, field
-from typing import Dict, ClassVar
+from typing import ClassVar, Sequence
 
 from backtest.common.layered_backtest_runner import LayerConfigBase
 from backtest.common.factor_cli import factor_cli_main
 from data_fetchers.factor_calculator import calculate_my_factor
 
-@dataclass
+
 class MyFactorLayerConfig(LayerConfigBase):
-    """my_factor 因子分层配置"""
+    """my_factor 因子分层配置
     
-    # === 因子元数据 ===
+    薄声明：仅定义因子名称与分层命名，逻辑完全下沉基类。
+    """
+    
     factor_name: ClassVar[str] = 'my_factor'
     
-    # === 分层配置 ===
-    layer_names: Dict[str, str] = field(default_factory=lambda: {
-        '1': '低值层', '2': '偏低层', '3': '中位层',
-        '4': '偏高层', '5': '高值层'
-    })
+    layer_names: ClassVar[Sequence[str]] = (
+        '低值层',
+        '偏低层',
+        '中位层',
+        '偏高层',
+        '高值层'
+    )
+
 
 if __name__ == '__main__':
     factor_cli_main(
@@ -175,18 +191,18 @@ if __name__ == '__main__':
     )
 ```
 
-**v1.21 理想形态对比（删除冗余代码）：**
+**v1.22 理想形态对比（ClassVar统一）：**
 
-| 旧版 (v1.20) | 新版 (v1.21) |
+| 旧版 (v1.21) | 新版 (v1.22) |
 |-------------|-------------|
-| factor_name ClassVar | factor_name ClassVar |
-| ic_source ClassVar（手动声明） | ❌ 删除（基类自动拼接） |
-| layer_names Dict | layer_names Dict |
-| __post_init__ 方法 | ❌ 删除（基类处理） |
-| _load_ic_meta 方法 | ❌ 删除（基类上移） |
-| import json/pathlib（函数内） | ❌ 删除（基类顶部） |
-| Path(__file__).parent.parent | ❌ 删除（基类可移植） |
-| 50+ 行 | **15 行** |
+| `@dataclass` 装饰器 | ❌ 删除（纯 ClassVar 无需 dataclass） |
+| `layer_names: Dict[str, str]` | `layer_names: ClassVar[Sequence[str]]` |
+| `field(default_factory=lambda: {...})` | ❌ 删除（改为 tuple 直接赋值） |
+| `factor_name: ClassVar[str]` | `factor_name: ClassVar[str]`（不变） |
+| `ic_source: ClassVar[str]` | `ic_source: ClassVar[str]`（可选声明） |
+| 键 '1'..'5' 冗余索引 | ❌ 删除（按位置派生 1-based 层号） |
+| 缺层漏写风险 | ❌ 消除（Sequence 强制连续） |
+| 20+ 行 | **12 行** |
 
 **基类自动处理的功能：**
 
