@@ -17,7 +17,13 @@
     "n_days_total": 514,
     "n_assets_total": 3006,
     "factor_name": "overnight_ret",
-    "layer_names": {}
+    "layer_names": {
+      "1": "极低层(overnight<-2%)",
+      "2": "偏低层(-2%≤overnight<0)",
+      "3": "正常层(0≤overnight<1%)",
+      "4": "偏高层(1%≤overnight<2%)",
+      "5": "极高层(overnight≥2%)"
+    }
   },
   "layer_stats": {
     "layer_1": {
@@ -122,7 +128,13 @@
   },
   "config": {
     "n_layers": 5,
-    "layer_names": {},
+    "layer_names": {
+      "1": "极低层(overnight<-2%)",
+      "2": "偏低层(-2%≤overnight<0)",
+      "3": "正常层(0≤overnight<1%)",
+      "4": "偏高层(1%≤overnight<2%)",
+      "5": "极高层(overnight≥2%)"
+    },
     "factor_direction": "positive",
     "long_layers": [
       4,
@@ -135,5 +147,5 @@
     "trade_cost_rate": 0.003,
     "min_stocks_per_layer": 10
   },
-  "created_at": "2026-05-29T00:02:31.491260"
+  "created_at": "2026-06-01T11:37:24.082090"
 }

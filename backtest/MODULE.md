@@ -1,10 +1,12 @@
 # backtest 模块规范
 
-> 版本: v1.9
+> 版本: v1.10
 > 创建时间: 2026-05-22
-> 最后更新: 2026-05-29 (新增 return_5d 分层回测脚本)
-> 更新记录: v1.9 (2026-05-29): 新增 return_5d 分层回测脚本
-> 修订日期: 2026-05-29
+> 最后更新: 2026-06-01 (overnight_ret 因子方向修正)
+> 更新记录: 
+>   v1.10 (2026-06-01): overnight_ret 因子方向修正（negative→positive），补充流程文档和测试用例
+>   v1.9 (2026-05-29): 新增 return_5d 分层回测脚本
+> 修订日期: 2026-06-01
 
 ---
 
@@ -125,34 +127,46 @@ result = run_layered_backtest(
 )
 ```
 
-3. **CLI 入口**（使用工厂函数）
+3. **CLI 入口**（使用 factor_cli_main 公共函数）
 ```python
-from backtest.common.layered_backtest_runner import create_cli_entrypoint
+from backtest.common.layered_backtest_runner import LayerConfigBase
+from backtest.common.factor_cli import factor_cli_main
+from data_fetchers.factor_calculator import calculate_my_factor
 
-main = create_cli_entrypoint(
-    factor_name='my_factor',
-    factor_col='my_factor_value',
-    config_class=MyFactorLayerConfig
-)
+@dataclass
+class MyFactorLayerConfig(LayerConfigBase):
+    layer_names: Dict[str, str] = field(default_factory=lambda: {
+        '1': '低值层', '2': '偏低层', '3': '中位层',
+        '4': '偏高层', '5': '高值层'
+    })
+    factor_direction: str = 'negative'
+    long_layers: List[int] = field(default_factory=lambda: [1, 2])
+    short_layers: List[int] = field(default_factory=lambda: [4, 5])
 
 if __name__ == '__main__':
-    main()
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    factor_cli_main(
+        factor_name='my_factor',
+        config_cls=MyFactorLayerConfig,
+        factor_calculator=calculate_my_factor
+    )
 ```
 
-### 代码量对比
+### 代码量对比（v2.0 更新）
 
 | 方式 | 行数 | 适用场景 |
 |------|------|---------|
-| 旧方式（手写全部逻辑） | ~350-500 | 不推荐 |
-| 新方式（使用公共入口） | **~60-180** | 强制使用 |
+| 旧方式（手写全部逻辑） | ~200-400 | 已废弃 |
+| 新方式（factor_cli_main） | **~50-80** | 强制使用 |
 
-### 示例脚本
+### 示例脚本（v2.0 更新）
 
-| 因子类型 | 示例文件 | 特点 |
-|---------|---------|------|
-| 简单因子（数据已在缓存） | `layered_backtest_volume_ratio_1d.py` | 134行（原始374行→重构66行→补充文档134行），无需额外数据和计算 |
-| 复杂因子（需额外数据） | `layered_backtest_turnover_surge_1d.py` | 136行，需加载换手率数据 + 因子计算 |
-| 复杂因子（需因子计算） | `layered_backtest_kdj_j_1d.py` | 163行，需计算 KDJ_J |
+| 因子类型 | 示例文件 | 行数 | 特点 |
+|---------|---------|------|------|
+| 简单因子 | `layered_backtest_amplitude_1d.py` | 70 | 无自定义参数 |
+| 预计算因子 | `layered_backtest_volume_ratio_1d.py` | 58 | factor_calculator=None |
+| 自定义参数 | `layered_backtest_rsi_1d.py` | 83 | --rsi-n 参数 |
+| 自定义参数 | `layered_backtest_turnover_surge_1d.py` | 81 | --surge-window 参数 |
 
 **分层数说明：**
 - `n_layers = len(layer_thresholds) - 1`
