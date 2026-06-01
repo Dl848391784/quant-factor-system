@@ -2,416 +2,162 @@
 """
 RSI 因子分层回测脚本
 
-使用公共入口 run_layered_backtest。
+使用 factor_cli_main 公共入口，薄封装仅声明因子特异配置。
 
-规范:
-- 遵循 PROJECT.md 公共模块强制复用规范
-- 命名遵循 MODULE.md: layered_backtest_<因子名>_<收益周期>.py
+因子定义：
+- 公式: RSI = 100 - 100 / (1 + RS)，RS = avg_gain / avg_loss
+- 含义: 相对强弱指数，衡量超买超卖
+- 范围: [0, 100]，>70 超买，<30 超卖
+
+IC 分析结果：
+- IC 均值: 负相关（反转）
+- 高 RSI → 低未来收益
+
+策略逻辑：
+- 低 RSI 层做多（超卖反弹）
+- 高 RSI 层做空（超买回落）
+
+分层说明（thresholds 模式，4层）：
+- Layer1: RSI < 30（超卖，做多）
+- Layer2: 30 ≤ RSI < 50（偏弱，做多）
+- Layer3: 50 ≤ RSI < 70（偏强，做空）
+- Layer4: RSI ≥ 70（超买，做空）
 
 作者: 云瑶
-重构日期: 2026-05-23（使用公共入口）
+创建日期: 2026-05-23
+版本历史:
+  v2.0 (2026-06-01): 使用 factor_cli_main 公共入口
+  v3.0 (2026-06-01): 采用完整更新模式，从 IC 结果派生配置
 """
 
-# 标准库
-import sys
-from pathlib import Path
 from dataclasses import dataclass, field
+from typing import Dict, ClassVar, Any, Callable
 from functools import partial
-from typing import List, Dict as TypingDict, Any
+import argparse
 
-# 第三方库
-import pandas as pd
-
-# 本地模块
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from backtest.common.layered_backtest_runner import (
-    run_layered_backtest,
-    LayerConfigBase
-)
-from backtest.common.logger_config import get_logger
-
-logger = get_logger(__name__)
+from backtest.common.layered_backtest_runner import LayerConfigBase
+from backtest.common.factor_cli import factor_cli_main
+from data_fetchers.factor_calculator import calculate_rsi_df
 
 DEFAULT_N = 6
-# EPSILON 用于判断 avg_loss 是否接近零（避免 division by zero 或极小值）
-# RSI 理论范围 [0, 100]，avg_loss 为价格变动绝对值，量级约价格*0.01~0.05
-# 1e-10 作为零值阈值，相对 avg_loss 量级极小（约 1e-8 倍），判断合理
-EPSILON = 1e-10
-
-
-def _calc_delta(series: pd.Series) -> pd.Series:
-    """计算价格变化（groupby transform 专用，显式传参避免闭包）
-    
-    Args:
-        series: 单资产的收盘价序列
-    
-    Returns:
-        价格变化序列（第一天为 NaN）
-    
-    Note:
-        - diff() 计算与前一天的差值
-        - 第一天无前值，结果为 NaN
-    """
-    return series.diff()
-
-
-def _wilder_smoothing(series: pd.Series, n: int, log_handler: Any = logger) -> pd.Series:
-    """Wilder 平滑：前 n-1 天 NaN，第 n 天 SMA 种子，第 n+1 天起 EWM 递推
-    
-    Args:
-        series: 单资产的序列（gain 或 loss）
-        n: 窗口期
-        log_handler: 日志对象（默认使用模块级 logger）
-    
-    Returns:
-        Wilder 平滑均值序列
-    
-    Note:
-        Wilder (1978) 标准实现：
-        1. 前 n-1 天为 NaN（数据不足以计算 SMA）
-        2. 第 n 天（索引 n-1）使用 SMA 值作为 EWM 种子
-           - SMA = series.iloc[:n].mean()
-        3. 第 n+1 天及之后使用 EWM 递推
-           - 公式：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
-           - alpha = 1/n
-           - NaN 传播：若当天输入为 NaN，结果也为 NaN
-        
-        与 pandas ewm(adjust=False) 的差异：
-        - pandas ewm(adjust=False) 从第 1 个观测值就开始计算
-        - Wilder 标准要求前 n-1 天为 NaN，第 n 天用 SMA
-    """
-    alpha = 1.0 / n
-    
-    # 防御性检查：序列长度不足
-    if len(series) < n:
-        # 尝试获取资产标识（从 index name 或 series.name）
-        asset_id = series.name if hasattr(series, 'name') and series.name else 'unknown'
-        log_handler.warning(
-            f"Wilder 平滑序列长度不足 [asset={asset_id}, len={len(series)}, required={n}]，返回全 NaN"
-        )
-        return pd.Series(float('nan'), index=series.index, dtype=float)
-    
-    # 第 n 天（索引 n-1）：SMA 种子
-    seed = series.iloc[:n].mean()
-    if pd.isna(seed):  # 防御：前 n 天全为 NaN 时无法计算种子
-        asset_id = series.name if hasattr(series, 'name') and series.name else 'unknown'
-        log_handler.warning(
-            f"Wilder 平滑种子为 NaN [asset={asset_id}, 前{n}天全为 NaN]，返回全 NaN"
-        )
-        return pd.Series(float('nan'), index=series.index, dtype=float)
-    
-    # 向量化 EWM 递推（替代显式循环）
-    # 使用 ignore_na=True：NaN 不参与 ewm 计算，但仍需手动传播
-    ewm_result = series.ewm(alpha=alpha, adjust=False, ignore_na=True).mean()
-    
-    # 构建结果：前 n-1 天 NaN，第 n 天 SMA 种子，第 n+1 天起 ewm 结果
-    result = pd.Series(float('nan'), index=series.index, dtype=float)
-    result.iloc[n - 1] = seed  # 手动设置 SMA 种子（ewm 计算起点不同）
-    result.iloc[n:] = ewm_result.iloc[n:]  # 第 n+1 天起使用 ewm 递推结果
-    
-    # NaN 传播：ewm(ignore_na=True) 会跳过 NaN，需手动强制传播
-    # 使用 .where() 避免 ChainedAssignmentError（Copy-on-Write）
-    result.iloc[n:] = ewm_result.iloc[n:].where(series.iloc[n:].notna(), float('nan'))
-    
-    return result
 
 
 @dataclass
 class RSILayerConfig(LayerConfigBase):
-    """RSI 分层配置
+    """RSI 因子分层配置
     
-    thresholds 设计说明：
-    - 4个阈值点 [0, 30, 50, 70] 形成 4 层
-    - Layer 划分：Layer1: [0, 30), Layer2: [30, 50), Layer3: [50, 70), Layer4: [70, 100]
-    - 边界处理：RSI<0 归 Layer 1（越界），RSI>100 归 Layer 4（越界）
-    - RSI 为反向因子（超卖做多，超买做空）
+    因子元数据：
+    - factor_name: 因子名称（单一来源）
+    - ic_source: IC 分析结果 JSON 路径（单一来源，按需懒加载）
+    
+    分层配置：
+    - layer_names: 分层命名（业务语义描述）
+    - n_layers: 由 len(layer_names) 派生（避免双重声明）
+    - factor_direction: 由 ic_meta['direction'] 派生（避免双重声明）
+    
+    多空组合由基类按 factor_direction 自动派生。
     """
     
-    layer_names: TypingDict[str, str] = field(default_factory=lambda: {
+    # === 因子元数据（单一来源） ===
+    factor_name: ClassVar[str] = 'rsi'
+    ic_source: ClassVar[str] = 'factor_ic/result/ic_rsi_1d_analysis_result.json'
+    
+    # === 分层配置（4层） ===
+    layer_names: Dict[str, str] = field(default_factory=lambda: {
         '1': '超卖层(RSI<30)',
         '2': '偏弱层(30≤RSI<50)',
         '3': '偏强层(50≤RSI<70)',
         '4': '超买层(RSI≥70)'
     })
     
-    factor_direction: str = 'negative'
-    long_layers: List[int] = field(default_factory=lambda: [1, 2])
-    short_layers: List[int] = field(default_factory=lambda: [3, 4])
-    
-    # ========== 策略说明（均值回归）==========
-    # RSI 经典均值回归策略：
-    # - RSI < 30（超卖）→ 价格可能反弹，做多（Layer1）
-    # - RSI > 70（超买）→ 价格可能回落，做空（Layer4）
-    # 
-    # Layer2/Layer3 扩展说明：
-    # - Layer2（30≤RSI<50，偏弱）→ 偏离中性偏弱，可能反弹，做多
-    # - Layer3（50≤RSI<70，偏强）→ 偏离中性偏强，可能回落，做空
-    # 
-    # factor_direction='negative' 意味着：
-    # - 低 RSI（超卖/偏弱）→ 做多（long_layers=[1,2]）
-    # - 高 RSI（超买/偏强）→ 做空（short_layers=[3,4]）
-    # 
-    # 注意：这是均值回归策略，而非趋势跟随策略。
-    # 趋势跟随策略会在 RSI 50~70（上涨趋势延续）时做多，
-    # 但均值回归策略认为偏离中性后可能回归，故做空。
-    # 若需趋势跟随策略，请调整 factor_direction='positive'。
-    
-    # 格式遵循 MODULE.md 第451行规范：完整区间 [lower, upper)，必须包含下界
-    # 最大边界使用 ≥，说明越界值处理
-    #
-    # runner 分层逻辑说明（fixed_threshold 模式）：
-    # - 低于最小阈值（RSI<0）→ 归入 Layer1（边界处理）
-    # - 边界内循环归层：
-    #   - Layer1: [0, 30) 区间（0 ≤ RSI < 30）
-    #   - Layer2: [30, 50) 区间（30 ≤ RSI < 50）
-    #   - Layer3: [50, 70) 区间（50 ≤ RSI < 70）
-    #   - Layer4: [70, 100] 区间（最后一层右闭：70 ≤ RSI ≤ 100）
-    # - 高于最大阈值（RSI>100）→ 归入 Layer4（边界处理）
-    #
-    # 关键边界点说明：
-    # - RSI=30 → 归入 Layer2（runner 使用 [30,50) 区间，左闭右开）
-    # - RSI=70 → 归入 Layer4（runner 最后一层右闭：[70,100]）
-    # - 与 layer_names 描述一致，不存在"碰巧正确"问题
-    layer_threshold_desc: TypingDict[str, str] = field(default_factory=lambda: {
-        '1': 'RSI < 30 (含越界值<0，超卖层，做多)',   # 含越界值 RSI < 0
-        '2': '30 ≤ RSI < 50 (偏弱层，做多)',
-        '3': '50 ≤ RSI < 70 (偏强层，做空)',
-        '4': 'RSI ≥ 70 (含边界70，含越界值>100，超买层，做空)'  # 含越界值 RSI > 100
-    })
-    
-    # 配置元数据：记录默认 RSI 窗口（CLI 可通过 --rsi-n 覆盖）
-    rsi_n: int = DEFAULT_N
-
-
-def calculate_rsi(
-    factor_df: pd.DataFrame,
-    n: int = DEFAULT_N,
-    log_handler: Any = logger
-) -> pd.DataFrame:
-    """计算 RSI 因子
-    
-    Args:
-        factor_df: 包含 close 列的 DataFrame
-        n: 滚动窗口期，默认 6
-        log_handler: 日志对象（默认使用模块级 logger）
-    
-    Returns:
-        包含 rsi 列的 DataFrame
-    
-    Raises:
-        ValueError: 当 RSI 全为 NaN 时
-    
-    Note:
-        Wilder (1978) RSI 计算方法：
-        1. 前 n-1 天为 NaN（数据不足以计算 SMA）
-        2. 第 n 天（索引 n-1）使用 SMA 值作为 EWM 种子
-           - SMA = rolling(n).mean() 的第一个有效值
-        3. 第 n+1 天及之后使用 EWM 递推
-           - 公式：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
-           - alpha = 1/n
+    def __post_init__(self):
+        """初始化后处理：校验并派生配置
         
-        与 pandas ewm(adjust=False) 的差异：
-        - pandas ewm(adjust=False) 从第 1 个观测值就开始计算
-        - Wilder 标准要求前 n-1 天为 NaN，第 n 天用 SMA
+        校验：
+        - layer_names 长度 >= 2
         
-        RSI 公式：
-        - RSI = 100 - 100 / (1 + RS)，RS = avg_gain / avg_loss
-        - RSI 理论范围 [0, 100]，实际数据可能因计算误差越界
-        - avg_loss 接近零时，RS → ∞，RSI → 100
-    """
-    df = factor_df.copy()
-    df = df.sort_values(['asset', 'date'])
+        派生：
+        - n_layers: 由 len(layer_names) 派生
+        - factor_direction: 由 ic_meta['direction'] 派生（按需懒加载）
+        - long_layers/short_layers: 由基类 _derive_long_short() 派生
+        """
+        # 校验 layer_names 长度
+        n = len(self.layer_names)
+        if n < 2:
+            raise ValueError(f"layer_names 至少需要 2 层，当前: {n}")
+        
+        # 派生 n_layers（删除冗余声明）
+        self.n_layers = n
+        
+        # 派生 factor_direction（从 ic_meta 按需加载）
+        ic_meta = self._load_ic_meta()
+        self.factor_direction = ic_meta.get('direction', 'negative')
+        
+        # 调用基类派生多空组合
+        super().__post_init__()
     
-    # 入口日志：记录参数与数据规模
-    unique_assets = df['asset'].nunique()
-    log_handler.info(f"RSI 计算启动 [n={n}, 输入数据={len(df)}行/{unique_assets}只股票]")
-    
-    # 计算价格变化
-    df['delta'] = df.groupby('asset')['close'].transform(_calc_delta)
-    
-    # 分离上涨和下跌
-    df['gain'] = df['delta'].where(df['delta'] > 0, 0)
-    df['loss'] = df['delta'].where(df['delta'] < 0, 0).abs()
-    
-    # Wilder 标准 RSI 计算（前 n 天 SMA 种子，之后 EWM 递推）
-    # 使用 rolling 计算 SMA，之后用 EWM 递推（alpha=1/n）
-    # 注意：pandas ewm(adjust=False) 从第一个观测值就开始计算，
-    # 但 Wilder 标准要求前 n 天用 SMA 种子，之后才 EWM 递推
-    # 
-    # 实现方式：
-    # 1. 前 n 天使用 rolling(n).mean() 计算 SMA
-    #    - 前 n-1 天：NaN（数据不足）
-    #    - 第 n-1 天：SMA 值作为 EWM 种子
-    # 2. 第 n 天及之后：手动 EWM 递推
-    #    - 公式：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
-    #    - alpha = 1/n
-    
-    # 使用独立函数替代 lambda 闭包（遵循 MODULE.md 规范）
-    calc_avg = partial(_wilder_smoothing, n=n)
-    
-    # 计算平均上涨和下跌
-    df['avg_gain'] = df.groupby('asset')['gain'].transform(calc_avg)
-    df['avg_loss'] = df.groupby('asset')['loss'].transform(calc_avg)
-    
-    # ========== 边界处理：avg_loss 接近零时 ==========
-    # avg_loss 接近零时的 RSI 计算（遵循 Wilder 1978 标准）
-    # 
-    # 边界情况分类：
-    # 1. avg_loss > EPSILON 且 avg_gain > 0: 正常计算 RS，RSI ∈ [0, 100]
-    # 2. avg_loss > EPSILON 且 avg_gain = 0: RS = 0，RSI = 0（超卖）
-    # 3. avg_loss = 0 且 avg_gain > 0: RS → ∞，RSI = 100（超买）
-    # 4. avg_loss = 0 且 avg_gain = 0: 无涨无跌，RSI = 50（中性）
-    #    - 场景：连续多天价格不变（delta=0），或停牌/价格冻结
-    #    - gain=0 且 loss=0，导致 avg_gain=0 且 avg_loss=0
-    #    - 此时 RSI 应为 50（无涨无跌），而非 100（超买）
-    #
-    # delta=0 归属说明：
-    # - delta=0（价格不变）时，gain=0 且 loss=0
-    # - 这是正确的处理：既不是上涨也不是下跌
-    # - 但连续多天 delta=0 会累积导致 avg_gain=0 且 avg_loss=0
-    
-    # 防御性代码说明：
-    # avg_loss 和 avg_gain 理论上非负（delta.abs() 后 EWM）
-    # 使用 .abs() 是防御性代码，防止数值误差或异常数据产生负值
-    
-    # 边界判断：使用 .abs() 防御负值（理论上不应出现）
-    zero_loss_mask = (df['avg_loss'].notna()) & (df['avg_loss'].abs() < EPSILON)
-    zero_gain_mask = (df['avg_gain'].notna()) & (df['avg_gain'].abs() < EPSILON)
-    
-    # 同时接近零：avg_gain=0 且 avg_loss=0 → RSI=50
-    both_zero_mask = zero_loss_mask & zero_gain_mask
-    if both_zero_mask.sum() > 0:
-        # 数据质量问题：可能表示停牌或价格冻结
-        log_handler.warning(
-            f"avg_gain=avg_loss=0 的记录数: {both_zero_mask.sum()} ({both_zero_mask.sum() / len(df) * 100:.2f}%)，RSI 设为 50（无涨无跌）。可能原因：停牌、价格冻结、数据质量问题，建议检查。"
-        )
-    
-    # 只有 avg_loss 接近零（avg_gain > 0）: RSI=100（超买）
-    only_zero_loss_mask = zero_loss_mask & ~zero_gain_mask
-    if only_zero_loss_mask.sum() > 0:
-        log_handler.warning(
-            f"avg_loss 接近零但 avg_gain>0 的记录数: {only_zero_loss_mask.sum()} ({only_zero_loss_mask.sum() / len(df) * 100:.2f}%)，RSI 设为 100（超买）"
-        )
-    
-    # 计算 RS 和 RSI（避免中间污染值）
-    # 使用 safe_avg_loss 避免 EPSILON 替换导致的数值污染
-    # 边界判断统一使用 >= EPSILON（对齐 zero_loss_mask 的 < EPSILON）
-    safe_avg_loss = df['avg_loss'].where(df['avg_loss'] >= EPSILON)
-    df['rs'] = df['avg_gain'] / safe_avg_loss
-    
-    # RSI 计算：直接赋值，无需 .where 冗余（rs 为 NaN 时，计算结果自动为 NaN）
-    df['rsi'] = 100 - (100 / (1 + df['rs']))
-    
-    # 边界处理覆盖（逻辑清晰，无中间污染值）
-    # avg_loss=0 且 avg_gain>0 → RSI=100（超买）
-    df.loc[only_zero_loss_mask, 'rsi'] = 100
-    # avg_loss=0 且 avg_gain=0 → RSI=50（中性）
-    df.loc[both_zero_mask, 'rsi'] = 50
-    
-    # ========== 因子值统计（正常业务场景记录）==========
-    # RSI < 0: 计算误差导致越界，归入 Layer 1（runner 边界处理）
-    # RSI > 100: 计算误差导致越界，归入 Layer 4（runner 边界处理）
-    below_min_mask = (df['rsi'].notna()) & (df['rsi'] < 0)
-    if below_min_mask.sum() > 0:
-        log_handler.info(
-            f"RSI 越界统计: RSI<0 的记录数: {below_min_mask.sum()} ({below_min_mask.sum() / len(df) * 100:.2f}%)，将归入 Layer1（超卖层）"
-        )
-    
-    above_max_mask = (df['rsi'].notna()) & (df['rsi'] > 100)
-    if above_max_mask.sum() > 0:
-        log_handler.info(
-            f"RSI 越界统计: RSI>100 的记录数: {above_max_mask.sum()} ({above_max_mask.sum() / len(df) * 100:.2f}%)，将归入 Layer4（超买层）"
-        )
-    
-    # 因子数据范围校验（遵循 MODULE.md 第505行规范）
-    # 全 NaN 防御：检查是否有有效数据
-    rsi_values = df['rsi'].dropna()
-    if len(rsi_values) == 0:
-        log_handler.error("RSI 全为 NaN，无法进入回测流程")
-        raise ValueError("RSI 因子全为 NaN，请检查输入数据是否包含 close 列")
-    
-    rsi_min = rsi_values.min()
-    rsi_max = rsi_values.max()
-    log_handler.info(f"RSI 因子范围: {rsi_min:.2f} ~ {rsi_max:.2f}")
-    
-    return df
+    def _load_ic_meta(self) -> Dict[str, Any]:
+        """按需懒加载 IC 分析结果
+        
+        从 ic_source JSON 文件读取，避免硬编码数值漂移。
+        
+        返回：
+            IC 元数据字典（含 direction、ic_mean、icir 等）
+        
+        注意：
+            IC 结果文件可能没有 'direction' 字段，需从 ic_mean 符号派生。
+        """
+        import json
+        from pathlib import Path
+        
+        # 项目根目录
+        project_root = Path(__file__).parent.parent
+        ic_file = project_root / self.ic_source
+        
+        if not ic_file.exists():
+            raise FileNotFoundError(
+                f"IC 分析结果文件不存在: {ic_file}\n"
+                f"请先运行对应的 IC 分析脚本生成结果"
+            )
+        
+        with open(ic_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # 提取 IC 元数据
+        ic_metrics = data.get('ic_metrics', {})
+        if not ic_metrics:
+            # 旧格式：顶层字段
+            ic_metrics = data
+        
+        # 派生 direction（若缺失则从 ic_mean 符号推断）
+        direction = data.get('direction')
+        if direction is None:
+            ic_mean = ic_metrics.get('ic_mean', 0)
+            direction = 'negative' if ic_mean < 0 else 'positive'
+        
+        return {
+            'direction': direction,
+            'ic_mean': ic_metrics.get('ic_mean'),
+            'icir': ic_metrics.get('icir'),
+            'p_value': ic_metrics.get('p_value'),
+        }
 
 
-def main():
-    import argparse
-    parser = argparse.ArgumentParser(description='RSI 分层回测')
-    parser.add_argument('--data_source', type=str, default=None,
-                        help='数据源文件路径')
-    parser.add_argument('--output_dir', type=str, default=None,
-                        help='输出目录路径')
-    parser.add_argument('--quiet', action='store_true',
-                        help='静默模式')
+def add_rsi_args(parser: argparse.ArgumentParser) -> None:
+    """添加自定义 CLI 参数"""
     parser.add_argument('--rsi-n', type=int, default=DEFAULT_N,
                         help=f'RSI 计算窗口，默认 {DEFAULT_N}')
-    args = parser.parse_args()
-    
-    try:
-        # 使用 functools.partial 替代闭包，显式传参避免隐式捕获
-        # 透传 log_handler 参数（遵循 bollinger_pb 模式）
-        factor_calc = partial(
-            calculate_rsi,
-            n=args.rsi_n,
-            log_handler=logger
-        )
-        
-        # 更新历史（2026-05-27）：v2.7 移除 cache_dir 参数，改为 data_source
-        result = run_layered_backtest(
-            factor_name='rsi',
-            factor_col='rsi',
-            config=RSILayerConfig(),
-            factor_calculator=factor_calc,
-            required_factor_cols=['close'],
-            data_source=args.data_source,
-            output_dir=args.output_dir,
-            verbose=not args.quiet,
-            logger=logger
-        )
-        
-        if result['meta']['n_days_total'] == 0:
-            logger.error("回测无有效数据，程序终止")
-            sys.exit(1)
-        
-        # 结果摘要日志（遵循分层回测脚本必须输出完整结果的规范）
-        logger.info("=" * 60)
-        logger.info("回测结果摘要")
-        logger.info("=" * 60)
-        logger.info(f"因子名称: {result['meta']['factor_name']}")
-        logger.info(f"回测周期: {result['meta']['n_days_total']} 天")
-        
-        # 各分层收益
-        layer_returns = result.get('layer_returns', {})
-        for layer_name, ret in layer_returns.items():
-            logger.info(f"Layer {layer_name} 累计收益: {ret:.4f}")
-        
-        # 多空组合收益
-        long_short = result.get('long_short', {})
-        if long_short:
-            logger.info(f"多空组合累计收益: {long_short.get('cumulative_return', 0):.4f}")
-            logger.info(f"夏普比率: {long_short.get('sharpe_ratio', 0):.2f}")
-            logger.info(f"最大回撤: {long_short.get('max_drawdown', 0):.2%}")
-        
-        logger.info("回测完成")
-        sys.exit(0)
-        
-    except FileNotFoundError:
-        logger.exception("数据文件不存在")
-        sys.exit(2)
-    except KeyError:
-        logger.exception("数据字段缺失")
-        sys.exit(3)
-    except ValueError:
-        logger.exception("数据值异常")
-        sys.exit(4)
-    except Exception:
-        logger.exception("回测执行异常")
-        sys.exit(5)
+
+
+def setup_rsi_calculator(args: argparse.Namespace, calc) -> Callable:
+    """包装 factor_calculator"""
+    return partial(calc, n=args.rsi_n)
 
 
 if __name__ == '__main__':
-    main()
+    factor_cli_main(
+        config_cls=RSILayerConfig,
+        factor_calculator=calculate_rsi_df,
+        add_cli_args=add_rsi_args,
+        setup_calculator=setup_rsi_calculator
+    )

@@ -2,148 +2,136 @@
 """
 3日累计涨幅因子分层回测脚本
 
-使用公共入口 run_layered_backtest。
+使用 factor_cli_main 公共入口，薄封装仅声明因子特异配置。
 
-规范:
-- 遵循 PROJECT.md 公共模块强制复用规范
-- 命名遵循 MODULE.md: layered_backtest_<因子名>_<收益周期>.py
-
-因子说明:
-- 公式: Return_3d = close[t] / close[t-3] - 1
+因子定义：
+- 公式: return_3d = close[t] / close[t-3] - 1
 - 含义: 过去3日累计涨跌幅
-- 范围: [-∞, +∞)，A股日涨跌幅±10%，3日累计约±30%
-  - 正值 → 上涨
-  - 负值 → 下跌
+- 范围: [-0.3, 0.3]（A股日涨跌幅±10%）
 
-IC 分析结果:
-- IC 均值: -0.0260（负相关）
-- ICIR: 0.17
-- t 统计量: -4.36（统计显著）
-- 因子方向: negative
-- 有效天数: 511
-- 经济显著性: none（|IC均值|<0.03）
-
-策略逻辑:
-- 反向因子：高涨幅股票未来收益较低（动量反转）
-- 低涨幅层做多，高涨幅层做空
+IC 分析结果：
+- IC 均值: 负相关（动量反转）
+- 策略: 低涨幅层做多，高涨幅层做空
 
 作者: 云瑶
 创建日期: 2026-05-29
+版本历史:
+  v2.0 (2026-06-01): 使用 factor_cli_main 公共入口
+  v3.0 (2026-06-01): 采用完整更新模式，从 IC 结果派生配置
 """
 
-# 标准库
-import sys
-from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List, Dict as TypingDict
+from typing import Dict, ClassVar, Any
 
-# 本地模块
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from backtest.common.layered_backtest_runner import (
-    run_layered_backtest,
-    LayerConfigBase
-)
-from backtest.common.logger_config import get_logger
+from backtest.common.layered_backtest_runner import LayerConfigBase
+from backtest.common.factor_cli import factor_cli_main
 from data_fetchers.factor_calculator import calculate_return_3d
-
-logger = get_logger(__name__)
 
 
 @dataclass
 class Return3dLayerConfig(LayerConfigBase):
-    """3日累计涨幅因子分层配置
+    """3日收益因子分层配置
     
-    分层说明（percentile 模式，5层，每层20%）:
-    - Layer1: 涨幅最低 0-20%（近期下跌最多）
-    - Layer2: 涨幅较低 20-40%
-    - Layer3: 涨幅中位 40-60%
-    - Layer4: 涨幅较高 60-80%
-    - Layer5: 涨幅最高 80-100%（近期上涨最多）
+    因子元数据：
+    - factor_name: 因子名称（单一来源）
+    - ic_source: IC 分析结果 JSON 路径（单一来源，按需懒加载）
     
-    因子方向（根据 IC 结果确定）:
-    - IC 均值 -0.0260（负相关）
-    - 高涨幅 → 低收益（动量反转效应）
-    - 低涨幅层做多，高涨幅层做空
+    分层配置：
+    - layer_names: 分层命名（业务语义描述）
+    - n_layers: 由 len(layer_names) 派生（避免双重声明）
+    - factor_direction: 由 ic_meta['direction'] 派生（避免双重声明）
+    
+    多空组合由基类按 factor_direction 自动派生。
     """
     
-    layer_names: TypingDict[str, str] = field(default_factory=lambda: {
-        '1': '低涨幅层(近期下跌)',
-        '2': '偏低涨幅层',
-        '3': '中涨幅层',
-        '4': '偏高涨幅层',
-        '5': '高涨幅层(近期上涨)'
+    # === 因子元数据（单一来源） ===
+    factor_name: ClassVar[str] = 'return_3d'
+    ic_source: ClassVar[str] = 'factor_ic/result/ic_return_3d_1d_analysis_result.json'
+    
+    # === 分层配置 ===
+    layer_names: Dict[str, str] = field(default_factory=lambda: {
+        '1': '极低层(ret3d<-5%)',
+        '2': '偏低层(-5%≤ret3d<0)',
+        '3': '正常层(0≤ret3d<3%)',
+        '4': '偏高层(3%≤ret3d<5%)',
+        '5': '极高层(ret3d≥5%)'
     })
     
-    factor_direction: str = 'negative'  # IC 均值 -0.0260
-    long_layers: List[int] = field(default_factory=lambda: [1, 2])  # 低涨幅层做多
-    short_layers: List[int] = field(default_factory=lambda: [4, 5])  # 高涨幅层做空
-
-
-def main():
-    """分层回测主入口"""
-    import argparse
-    parser = argparse.ArgumentParser(description='3日累计涨幅因子分层回测')
-    parser.add_argument('--data_source', type=str, default=None,
-                        help='数据源文件路径')
-    parser.add_argument('--output_dir', type=str, default=None,
-                        help='输出目录路径')
-    parser.add_argument('--quiet', action='store_true',
-                        help='静默模式')
-    args = parser.parse_args()
+    def __post_init__(self):
+        """初始化后处理：校验并派生配置
+        
+        校验：
+        - layer_names 长度 >= 2
+        
+        派生：
+        - n_layers: 由 len(layer_names) 派生
+        - factor_direction: 由 ic_meta['direction'] 派生（按需懒加载）
+        - long_layers/short_layers: 由基类 _derive_long_short() 派生
+        """
+        # 校验 layer_names 长度
+        n = len(self.layer_names)
+        if n < 2:
+            raise ValueError(f"layer_names 至少需要 2 层，当前: {n}")
+        
+        # 派生 n_layers（删除冗余声明）
+        self.n_layers = n
+        
+        # 派生 factor_direction（从 ic_meta 按需加载）
+        ic_meta = self._load_ic_meta()
+        self.factor_direction = ic_meta.get('direction', 'negative')
+        
+        # 调用基类派生多空组合
+        super().__post_init__()
     
-    try:
-        result = run_layered_backtest(
-            factor_name='return_3d',
-            factor_col='return_3d',
-            config=Return3dLayerConfig(),
-            factor_calculator=calculate_return_3d,
-            required_factor_cols=['close', 'asset', 'date'],
-            data_source=args.data_source,
-            output_dir=args.output_dir,
-            verbose=not args.quiet,
-            logger=logger
-        )
+    def _load_ic_meta(self) -> Dict[str, Any]:
+        """按需懒加载 IC 分析结果
         
-        if result['meta']['n_days_total'] == 0:
-            logger.error("回测无有效数据，程序终止")
-            sys.exit(1)
+        从 ic_source JSON 文件读取，避免硬编码数值漂移。
         
-        # 结果摘要日志
-        logger.info("=" * 60)
-        logger.info("回测结果摘要")
-        logger.info("=" * 60)
-        logger.info(f"因子名称: {result['meta']['factor_name']}")
-        logger.info(f"回测周期: {result['meta']['n_days_total']} 天")
+        返回：
+            IC 元数据字典（含 direction、ic_mean、icir 等）
         
-        # 各分层收益
-        layer_returns = result.get('layer_returns', {})
-        for layer_name, ret in layer_returns.items():
-            logger.info(f"Layer {layer_name} 累计收益: {ret:.4f}")
+        注意：
+            IC 结果文件可能没有 'direction' 字段，需从 ic_mean 符号派生。
+        """
+        import json
+        from pathlib import Path
         
-        # 多空组合收益
-        long_short = result.get('long_short', {})
-        if long_short:
-            logger.info(f"多空组合累计收益: {long_short.get('cumulative_return', 0):.4f}")
-            logger.info(f"夏普比率: {long_short.get('sharpe_ratio', 0):.2f}")
-            logger.info(f"最大回撤: {long_short.get('max_drawdown', 0):.2%}")
+        # 项目根目录
+        project_root = Path(__file__).parent.parent
+        ic_file = project_root / self.ic_source
         
-        logger.info("回测完成")
-        sys.exit(0)
+        if not ic_file.exists():
+            raise FileNotFoundError(
+                f"IC 分析结果文件不存在: {ic_file}\n"
+                f"请先运行对应的 IC 分析脚本生成结果"
+            )
         
-    except FileNotFoundError:
-        logger.exception("数据文件不存在")
-        sys.exit(2)
-    except KeyError:
-        logger.exception("数据字段缺失")
-        sys.exit(3)
-    except ValueError:
-        logger.exception("数据值异常")
-        sys.exit(4)
-    except Exception:
-        logger.exception("回测执行异常")
-        sys.exit(5)
+        with open(ic_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # 提取 IC 元数据
+        ic_metrics = data.get('ic_metrics', {})
+        if not ic_metrics:
+            # 旧格式：顶层字段
+            ic_metrics = data
+        
+        # 派生 direction（若缺失则从 ic_mean 符号推断）
+        direction = data.get('direction')
+        if direction is None:
+            ic_mean = ic_metrics.get('ic_mean', 0)
+            direction = 'negative' if ic_mean < 0 else 'positive'
+        
+        return {
+            'direction': direction,
+            'ic_mean': ic_metrics.get('ic_mean'),
+            'icir': ic_metrics.get('icir'),
+            'p_value': ic_metrics.get('p_value'),
+        }
 
 
 if __name__ == '__main__':
-    main()
+    factor_cli_main(
+        config_cls=Return3dLayerConfig,
+        factor_calculator=calculate_return_3d
+    )
