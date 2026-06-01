@@ -15,7 +15,7 @@
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   cache/    │────▶│ run_complex │────▶│ calculate_kdj_j │
+│   result/   │────▶│ run_complex │────▶│ calculate_kdj_j │
 │ factor_data │     │ factor_ic   │     │    (自定义)      │
 └─────────────┘     └─────────────┘     └─────────────┘
                           │                   │

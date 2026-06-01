@@ -4,9 +4,9 @@
 
 执行顺序：
 Stage 0: 基础数据拉取
-  1. fetch_stock_list.py        → cache/stock_list.json
-  2. fetch_factor_cache.py      → cache/factor_data/factor_data.json.gz, return_data.json.gz
-  3. fetch_turnover.py          → cache/factor_data/turnover_rate_data.json.gz
+  1. fetch_stock_list.py        → data_fetchers/result/stock_list.json
+  2. fetch_factor_cache.py      → cache/factor_data/factor_data.json.gz（收益数据已内置于 factor_ic_data.json.gz）
+  3. fetch_turnover.py          → data_fetchers/result/turnover_rate_data.json.gz
   4. fetch_industry.py          → result/stock_industry.json
 
 Stage 1: 数据整合

@@ -442,7 +442,7 @@ def run_composite_backtest(
         raise ValueError(
             "return_df 为空 DataFrame（有列名但无数据），无法进行分层回测\n"
             "可能原因：\n"
-            "  1. 缓存数据文件为空（检查 return_data.json.gz）\n"
+            "  1. 缓存数据文件为空（检查 factor_ic_data.json.gz）\n"
             "  2. 数据加载异常（检查 load_factor_return_data()）\n"
             f"  当前列: {list(return_df.columns)}"
         )

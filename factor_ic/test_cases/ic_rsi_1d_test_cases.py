@@ -400,7 +400,7 @@ class TestCacheDependency:
     """测试数据依赖规范"""
     
     def test_cache_directory_exists(self):
-        """缓存目录 cache/factor_data/ 应存在"""
+        """缓存目录 data_fetchers/result/ 应存在"""
         cache_dir = Path(__file__).parent.parent.parent / 'cache' / 'factor_data'
         # 如果不存在，测试跳过（实际运行时需要缓存数据）
         if not cache_dir.exists():
@@ -434,11 +434,10 @@ class TestIntegration:
     @pytest.fixture
     def cache_data_exists(self):
         """检查缓存数据是否存在"""
-        cache_dir = Path(__file__).parent.parent.parent / 'cache' / 'factor_data'
-        factor_cache = cache_dir / 'factor_data.json.gz'
-        return_cache = cache_dir / 'return_data.json.gz'
+        result_dir = Path(__file__).parent.parent.parent / 'data_fetchers' / 'result'
+        data_cache = result_dir / 'factor_ic_data.json.gz'
         
-        return factor_cache.exists() and return_cache.exists()
+        return data_cache.exists()
     
     def test_run_ic_calculation(self, cache_data_exists):
         """运行 IC 计算（需要缓存数据）"""
@@ -698,7 +697,6 @@ class TestAlgorithmEquivalence:
     pytest factor_ic/test_cases/ic_rsi_1d_test_cases.py -v -m "not cache"
 
 前置条件:
-    1. 缓存数据: cache/factor_data/factor_data.json.gz
-    2. 缓存数据: cache/factor_data/return_data.json.gz
-    3. 数据包含 rsi_6 和 forward_return_1d 列
+    1. 缓存数据: data_fetchers/result/factor_ic_data.json.gz
+    2. 数据包含 rsi_6 和 forward_return_1d 列
 """

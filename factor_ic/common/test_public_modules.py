@@ -81,7 +81,7 @@ return_col='forward_return_1d',
             ic_result=ic_result,
             raw_metadata=raw_metadata,
             factor_name='test_rsi_1d',
-            data_source='cache/factor_data/factor_data.json.gz',
+            data_source='data_fetchers/result/factor_ic_data.json.gz',
             factor_col='rsi_6'
         )
         print(f"✓ 构建成功")

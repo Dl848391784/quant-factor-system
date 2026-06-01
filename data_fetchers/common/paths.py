@@ -4,8 +4,13 @@
 
 统一项目路径获取方式，避免硬编码绝对路径。
 
+数据路径架构（2026-05-31更新）：
+- 统一数据源：data_fetchers/result/factor_ic_data.json.gz
+- cache/ 目录已废弃，所有数据输出到 result/ 目录
+
 作者: 云瑶
 日期: 2026-05-24
+最后修改: 2026-05-31
 """
 
 from pathlib import Path
@@ -29,26 +34,6 @@ def get_project_root() -> Path:
         # data_fetchers/common/paths.py → data_fetchers/ → factor_ic_analyzer/
         _PROJECT_ROOT = Path(__file__).parent.parent.parent
     return _PROJECT_ROOT
-
-
-def get_cache_dir() -> Path:
-    """
-    获取缓存目录
-    
-    Returns:
-        Path: cache/ 目录路径
-    """
-    return get_project_root() / 'cache'
-
-
-def get_factor_data_dir() -> Path:
-    """
-    获取因子数据目录
-    
-    Returns:
-        Path: cache/factor_data/ 目录路径
-    """
-    return get_cache_dir() / 'factor_data'
 
 
 def get_stock_list_file() -> Path:
@@ -85,6 +70,8 @@ def get_module_result_dir() -> Path:
     """
     获取模块级结果目录（data_fetchers/result）
     
+    统一数据源路径，所有因子数据、收益数据、换手率数据都在此目录。
+    
     Returns:
         Path: data_fetchers/result/ 目录路径
     """
@@ -114,20 +101,16 @@ class Paths:
         return get_project_root()
     
     @property
-    def cache_dir(self) -> Path:
-        return get_cache_dir()
-    
-    @property
-    def factor_data_dir(self) -> Path:
-        return get_factor_data_dir()
-    
-    @property
     def stock_list_file(self) -> Path:
         return get_stock_list_file()
     
     @property
     def logs_dir(self) -> Path:
         return get_logs_dir()
+    
+    @property
+    def module_result_dir(self) -> Path:
+        return get_module_result_dir()
 
 
 # 全局路径实例
@@ -136,10 +119,8 @@ paths = Paths()
 
 if __name__ == '__main__':
     # 测试路径获取
-    # 注意：作为独立脚本运行时，路径计算会不同
-    print("项目根目录:", Path(__file__).parent.parent.parent)
-    print("缓存目录:", Path(__file__).parent.parent.parent / 'cache')
-    print("因子数据目录:", Path(__file__).parent.parent.parent / 'cache' / 'factor_data')
-    print("股票列表文件:", Path(__file__).parent.parent / 'result' / 'stock_list.json')
-    print("日志目录:", Path(__file__).parent.parent.parent / 'logs')
-    print("模块日志目录:", Path(__file__).parent.parent / 'logs')
+    print("项目根目录:", get_project_root())
+    print("模块结果目录:", get_module_result_dir())
+    print("股票列表文件:", get_stock_list_file())
+    print("日志目录:", get_logs_dir())
+    print("模块日志目录:", get_module_logs_dir())

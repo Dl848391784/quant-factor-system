@@ -6,7 +6,7 @@
 - 主流程使用 run_complex_factor_ic()（禁止手写三模式分支）
 - 因子计算逻辑复用 data_fetchers.factor_calculator（遵循 MODULE.md 约束 #3）
 
-代码量：~60行（仅 CLI 入口），因子计算逻辑已统一到 factor_calculator.py。
+代码量：~170行（CLI 入口 + 结果摘要 + 异常处理），因子计算逻辑已统一到 factor_calculator.py。
 
 因子定义：
 - Return_3d = close[t] / close[t-3] - 1
@@ -21,15 +21,27 @@
 
 作者: 云瑶
 创建日期: 2026-05-29
+版本历史:
+  v1.0 (2026-05-29): 初始版本，复用 factor_calculator.calculate_return_3d
+  v1.1 (2026-06-01):
+    - argparse 导入移至文件顶部（遵循 PEP 8）
+    - 删除启动日志（公共模块已有等效日志）
+    - 新增 result 为 None 保底处理
+    - 新增 ic_distribution_consistency 字段读取（对齐 MODULE.md 第56行）
+    - positive_ratio 取值位置修正（从 ic_distribution 取而非 result）
+    - N/A 日志信息补充原因（ic_std/icir/positive_ratio）
+    - 异常告警层级补充（ic_mean/ic_std/icir/positive_ratio warning）
+    - 异常处理简化（删除 RuntimeError 分支）
+    - factor_cols 顺序依赖注释确认（公共模块按列名取列）
+    - 代码量注释更新（~170行，反映实际行数）
 """
 
+import argparse
 import sys
 from pathlib import Path
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import pandas as pd
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
@@ -52,36 +64,39 @@ DEFAULT_MIN_STOCKS = 10
 
 def main():
     """CLI 主入口"""
-    import argparse
-    
     parser = argparse.ArgumentParser(description='3日累计涨幅因子 IC 计算器')
     parser.add_argument('--force-full', action='store_true', help='强制全量计算')
     parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数')
     
     args = parser.parse_args()
     
-    # 调用前日志
-    logger.info(f"启动3日累计涨幅因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
-    
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
+    # 注意：公共模块内部已有启动日志，此处不再重复打印
+    # 注意：factor_cols 必须包含 asset, date 列（groupby 和 shift 依赖）
+    # 已确认：公共模块按列名取列（data_loader.py 第205-222行），顺序无关
     result = run_complex_factor_ic(
         factor_name='return_3d',
         factor_col='return_3d',
-        factor_cols=['close', 'asset', 'date'],  # 需要三列进行计算
+        factor_cols=['close', 'asset', 'date'],  # 必须包含 asset, date
         custom_factor_calculation=calculate_return_3d,
-        custom_factor_calculation_params={},  # return_3d 无额外参数
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger
     )
     
-    # 调用后日志
-    logger.info("3日累计涨幅因子IC计算完成")
+    # 保底处理：公共模块异常返回 None 时直接退出
+    # 注意：这是可预期的业务失败，不是运行时错误，直接退出更语义清晰
+    if result is None:
+        logger.error("run_complex_factor_ic 返回 None")
+        sys.exit(1)
     
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get('ic_metrics') or {}
     sample_stats = result.get('sample_stats') or {}
     period = result.get('period') or {}
+    # 字段名 ic_distribution_consistency 来源于 MODULE.md 第56行输出结构
+    # 语义：正比例与方向一致/矛盾判断（MODULE.md 第77行），非单纯分布统计
+    ic_distribution = result.get('ic_distribution_consistency') or {}
     
     logger.info("=" * 60)
     logger.info("结果摘要")
@@ -91,26 +106,55 @@ def main():
     logger.info(f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}")
     logger.info(f"有效天数: {sample_stats.get('valid_days', 0)} 天")
     logger.info("--- IC指标 ---")
+    
     ic_mean = ic_metrics.get('ic_mean')
     if ic_mean is not None:
         logger.info(f"IC 均值: {ic_mean:.4f}")
     else:
-        logger.info("IC 均值: N/A（数据加载失败）")
+        logger.info("IC 均值: N/A（本次计算结果为空，请检查数据源）")
+    
     ic_std = ic_metrics.get('ic_std')
     if ic_std is not None:
         logger.info(f"IC 标准差: {ic_std:.4f}")
     else:
-        logger.info("IC 标准差: N/A")
+        logger.info("IC 标准差: N/A（数据不足或全为相同值）")
+    
     icir = ic_metrics.get('icir')
     if icir is not None:
         logger.info(f"ICIR: {icir:.2f}")
     else:
-        logger.info("ICIR: N/A")
-    positive_ratio = result.get('positive_ratio')
+        logger.info("ICIR: N/A（IC 标准差为 0 或数据不足）")
+    
+    positive_ratio = ic_distribution.get('positive_ratio')
     if positive_ratio is not None:
         logger.info(f"IC>0 占比: {positive_ratio:.2%}")
     else:
-        logger.info("IC>0 占比: N/A")
+        logger.info("IC>0 占比: N/A（字段名错误或数据缺失）")
+    
+    # 异常状态整体感知日志（运维巡检用）
+    # ic_mean 为 None 表示整个 IC 计算结果为空，是最严重情况
+    has_warning = False
+    if ic_mean is None:
+        logger.warning("本次IC计算结果为空，请检查数据源或参数配置")
+        has_warning = True
+    # ic_std 为 None 表示 IC 标准差无法计算，根因在此层而非 icir 层
+    elif ic_std is None:
+        logger.warning("IC标准差无法计算（数据不足或全为相同值），请检查因子数据分布")
+        has_warning = True
+    # icir 为 None 表示 ICIR 无法计算（通常因 ic_std=0 或数据不足）
+    elif icir is None:
+        logger.warning("ICIR无法计算（IC标准差为0或数据不足），请检查因子数据分布")
+        has_warning = True
+    
+    # positive_ratio 为 None 表示分布一致性判断缺失（独立检查，不与上方 elif 链耦合）
+    if positive_ratio is None:
+        logger.warning("IC>0占比无法获取（字段名错误或数据缺失），请检查公共模块输出结构")
+        has_warning = True
+    
+    if has_warning:
+        logger.info("3日累计涨幅因子IC计算完成（存在异常，请关注上方警告）")
+    else:
+        logger.info("3日累计涨幅因子IC计算完成")
     
     return result
 
@@ -118,9 +162,7 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except RuntimeError:
-        logger.exception("3日累计涨幅因子IC计算失败")
-        sys.exit(1)
-    except Exception:
+    except Exception as e:
+        # 未预期异常，使用 exception()（自动打印完整堆栈，无需重复传 e）
         logger.exception("未预期的错误")
         sys.exit(1)

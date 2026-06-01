@@ -846,6 +846,11 @@ def calculate_amplitude(
     return df
 
 
+# 振幅因子所需输入列（供调用方读取，避免硬编码耦合）
+# pyright: ignore[reportFunctionMemberAccess]
+calculate_amplitude.required_cols = ['close', 'high', 'low']  # type: ignore[attr-defined]
+
+
 # ============================================================================
 # 3日累计涨幅因子计算
 # ============================================================================
@@ -1004,3 +1009,137 @@ def calculate_return_5d(
     logger_arg.info(f"return_5d (window={window}) 计算完成，共 {len(df)} 条记录")
 
     return df
+
+
+# ============================================================================
+# 因子所需输入列（供调用方读取，避免硬编码耦合）
+# ============================================================================
+
+# 已添加：calculate_amplitude.required_cols = ['close', 'high', 'low']
+
+calculate_price_position.required_cols = ['close', 'high', 'low']  # type: ignore[attr-defined]
+
+calculate_return_3d.required_cols = ['close', 'asset', 'date']  # type: ignore[attr-defined]
+
+calculate_return_5d.required_cols = ['close', 'asset', 'date']  # type: ignore[attr-defined]
+
+calculate_turnover_surge.required_cols = ['turnover_rate', 'close']  # type: ignore[attr-defined]
+
+
+# ============================================================================
+# 隔夜收益率因子计算
+# ============================================================================
+
+_COL_OPEN = 'open'
+_COL_OVERNIGHT_RET = 'overnight_ret'
+
+
+def calculate_overnight_return(
+    factor_df: pd.DataFrame,
+    logger_arg: Optional[logging.Logger] = None
+) -> pd.DataFrame:
+    """计算隔夜收益率因子
+    
+    公式: overnight_ret = (今日开盘价 - 昨日收盘价) / 昨日收盘价
+    
+    参数:
+        factor_df: 包含 open, close, asset, date 列的 DataFrame
+        logger_arg: 调用方传入的 logger
+    
+    返回:
+        添加 overnight_ret 列的 DataFrame
+    
+    边界处理:
+        - 第一天数据为 NaN（无昨日收盘价）
+        - prev_close < EPSILON 时设为 NaN（除零防护）
+    
+    Example:
+        >>> df = pd.DataFrame({
+        ...     'asset': ['A', 'A'],
+        ...     'date': ['2026-05-01', '2026-05-02'],
+        ...     'open': [10.0, 10.5],
+        ...     'close': [10.2, 10.8]
+        ... })
+        >>> result = calculate_overnight_return(df)
+        >>> pd.isna(result['overnight_ret'].iloc[0])  # 第一天无昨日收盘价
+        True
+        >>> result['overnight_ret'].iloc[1]  # (10.5-10.2)/10.2
+        0.0294...
+    """
+    if logger_arg is None:
+        logger_arg = logging.getLogger(__name__)
+    
+    df = factor_df.copy()
+    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    
+    # 按资产分组计算昨日收盘价
+    prev_close = df.groupby(_COL_ASSET)[_COL_CLOSE].shift(1)
+    
+    # 计算隔夜收益率
+    df[_COL_OVERNIGHT_RET] = (df[_COL_OPEN] - prev_close) / prev_close
+    
+    # 除零防护
+    zero_mask = prev_close.abs() < _EPSILON
+    if zero_mask.any():
+        df.loc[zero_mask, _COL_OVERNIGHT_RET] = np.nan
+        logger_arg.warning(f"发现 {zero_mask.sum()} 个异常收盘价（<{_EPSILON}），已设为 NaN")
+    
+    logger_arg.info(f"overnight_ret 计算完成，共 {len(df)} 条记录")
+    
+    return df
+
+
+calculate_overnight_return.required_cols = ['open', 'close']  # type: ignore[attr-defined]
+
+calculate_bollinger_pb.required_cols = ['close']  # type: ignore[attr-defined]
+
+calculate_kdj_j.required_cols = ['close', 'high', 'low']  # type: ignore[attr-defined]
+
+
+# ============================================================================
+# RSI DataFrame 版本（用于分层回测）
+# ============================================================================
+
+def calculate_rsi_df(
+    factor_df: pd.DataFrame,
+    n: int = _DEFAULT_RSI_PERIOD,
+    logger_arg: Optional[logging.Logger] = None
+) -> pd.DataFrame:
+    """计算 RSI 因子（DataFrame 版本）
+    
+    参数:
+        factor_df: 包含 close, asset, date 列的 DataFrame
+        n: RSI 计算周期
+        logger_arg: 调用方传入的 logger
+    
+    返回:
+        添加 rsi 列的 DataFrame
+    
+    Example:
+        >>> df = pd.DataFrame({
+        ...     'asset': ['A', 'A', 'A', 'A', 'A', 'A'],
+        ...     'date': ['2026-01-01', '2026-01-02', ...],
+        ...     'close': [100, 102, 101, 103, 105, 104]
+        ... })
+        >>> result = calculate_rsi_df(df, n=6)
+        >>> 'rsi' in result.columns
+        True
+    """
+    if logger_arg is None:
+        logger_arg = logging.getLogger(__name__)
+    
+    df = factor_df.copy()
+    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    
+    # 按 asset 分组，对每组应用 Series 版本的 calculate_rsi
+    def calc_rsi_for_asset(group):
+        return calculate_rsi(group[_COL_CLOSE], period=n)
+    
+    df['rsi'] = df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].transform(calc_rsi_for_asset)
+    
+    logger_arg.info(f"rsi (n={n}) 计算完成，共 {len(df)} 条记录")
+    
+    return df
+
+
+calculate_rsi_df.required_cols = ['close']  # type: ignore[attr-defined]

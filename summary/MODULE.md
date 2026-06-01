@@ -48,7 +48,6 @@ summary/
 | 分层回测结果 | backtest | `backtest/result/` | `<因子名>_layered_backtest.json` |
 | 综合因子结果 | comprehensive_factor | `comprehensive_factor/result/` | `composite_<加权方式>_1d.json` |
 | 因子数据 | data_fetchers | `data_fetchers/result/` | `factor_ic_data.json.gz` |
-| 因子数据缓存 | cache | `cache/factor_data/` | `factor_data.json.gz` |
 
 ### 数据流向
 
@@ -122,13 +121,13 @@ python summary/generate_factor_summary_report.py [--date YYYY-MM-DD] [--output r
 **功能：** 合并多个因子数据到主数据源
 
 **输入：**
-- 主数据源（cache/factor_data/factor_data.json.gz）
+- 主数据源（data_fetchers/result/factor_ic_data.json.gz）
 - 新因子文件（cache/factor_data/factors/*.parquet）
 
 **输出：**
-- 合并后数据（cache/factor_data/factor_data_merged.json.gz）
-- 合并后数据 Parquet 格式（cache/factor_data/factor_data_merged.parquet）
-- 元数据文件（cache/factor_data/factor_data_merged_metadata.json）
+- 合并后数据（data_fetchers/result/factor_ic_data.json.gz）
+- 合并后数据 Parquet 格式（data_fetchers/result/factor_ic_data.parquet）
+- 元数据文件（data_fetchers/result/factor_ic_data_metadata.json）
 
 **合并流程：**
 1. 加载主数据源

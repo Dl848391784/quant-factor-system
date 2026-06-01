@@ -254,7 +254,7 @@ def generate_all_factors(
     Example:
         # 以下为示例用法，非实际运行（generate_all_factors 需要输入数据文件）
         >>> from data_fetchers.factor_generator import generate_all_factors
-        >>> metadata = generate_all_factors()  # 需要 cache/factor_data/*.json.gz
+        >>> metadata = generate_all_factors()  # 需要 data_fetchers/result/*.json.gz
         >>> metadata['factor_columns']  # 返回列表副本，防止外部修改
         ['bollinger_pb', 'kdj_j', 'turnover_surge']
         >>> isinstance(metadata['elapsed_seconds'], float)

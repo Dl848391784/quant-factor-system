@@ -15,8 +15,8 @@
 
 **目标架构**：
 ```
-data_fetchers/factor_generator.py  → cache/factor_data/  → factor_ic/ic_xxx.py
-    (统一因子计算)                    (单一数据源)           (读取缓存)
+data_fetchers/factor_generator.py  → data_fetchers/result/  → factor_ic/ic_xxx.py
+    (统一因子计算)                    (统一数据源)           (读取缓存)
 ```
 
 ---
@@ -126,7 +126,7 @@ rsi_6, volume_ratio_5, bollinger_pb_20, kdj_j_9, turnover_surge_5
 
 **理由**: 符合 PROJECT.md 模块依赖关系
 ```
-data_fetchers → cache → factor_ic
+data_fetchers → result → factor_ic
 ```
 
 ### 决策2: 是否保留 IC 脚本中的因子计算函数？

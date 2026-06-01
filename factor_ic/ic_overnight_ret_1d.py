@@ -1,35 +1,74 @@
 #!/usr/bin/env python3
 """
-隔夜收益率因子 IC 计算器 - 1日收益周期
-
-使用公共模块主入口 run_complex_factor_ic，代码量约 60 行。
-
-功能：
-1. 从缓存数据计算隔夜收益率因子的 IC
-2. 隔夜收益率定义：overnight_ret = (今日开盘价 - 昨日收盘价) / 昨日收盘价
-3. 支持全量计算、增量更新和跳过三种模式
-4. 五维度独立判断（统计显著性、因子方向、经济显著性、ICIR稳定性、IC分布一致性）
-
-实现方式：
-- 使用 run_complex_factor_ic() 公共模块主入口
-- 自定义因子计算函数 calculate_overnight_return
+隔夜收益率因子 IC 计算器 - 使用公共模块主入口
 
 遵循 PROJECT.md 公共模块强制复用规范：
 - 主流程使用 run_complex_factor_ic()（禁止手写三模式分支）
-- 仅实现因子特有计算逻辑
+- 因子计算逻辑独立实现（calculate_overnight_return）
+
+代码量：~120行（CLI 入口 + 结果摘要 + 异常处理），因子计算约80行。
+
+因子定义：
+- overnight_ret = (今日开盘价 - 昨日收盘价) / 昨日收盘价
+- 含义：隔夜涨跌幅（收盘到开盘的价格变化）
+  - 正值 → 隔夜上涨（开盘高于昨收）
+  - 负值 → 隔夜下跌（开盘低于昨收）
+  - 范围：理论 [-∞, +∞)，A股日涨跌幅±10%
+
+边界处理：
+- 第一天数据设为 NaN（无昨日收盘价）
+- 昨日收盘价 < EPSILON 时设为 NaN（除零防护）
+- 按资产分组计算（每只股票独立）
 
 作者: 云瑶
 创建日期: 2026-05-28
+版本历史:
+  v1.0 (2026-05-28): 初始版本，实现隔夜收益率因子 IC 计算
+  v1.1 (2026-05-31): 
+    - argparse 导入移至文件顶部（遵循 PEP 8）
+    - 删除启动日志（公共模块已有等效日志）
+    - 新增 result 为 None 保底处理
+    - 防御性访问改为 .get() + or {}（处理键存在但值为 None）
+    - 新增 ic_distribution_consistency 字段读取（对齐 MODULE.md 第56行）
+    - ic_mean/ic_std/icir 为 None 时补充 warning
+    - positive_ratio 为 None 时补充 warning（独立 if 语句）
+    - 异常处理简化（删除冗余 RuntimeError 分支）
+    - 代码量注释更新（反映实际行数）
+  v1.2 (2026-05-31): 
+    - calculate_overnight_return 函数 logger 改为使用 __name__（避免硬编码）
+    - 函数内 logger 变量改名为 log（避免遮蔽模块级 logger）
+  v1.3 (2026-05-31): 
+    - 代码量注释更新（~100行 + ~70行，反映实际行数）
+  v1.4 (2026-06-01):
+    - calculate_overnight_return 函数签名修正（删除 logger_arg 参数）
+      - 原因：公共模块调用 custom_factor_calculation(factor_df, **params) 不传 logger
+      - 改为直接使用模块级 logger
+    - Docstring 示例补充 factor_cols=['open', 'close', 'asset', 'date']
+    - 除零防护逻辑完善：
+      - 原逻辑 prev_close < EPSILON 漏检负数收盘价
+      - 新逻辑：(prev_close.abs() < EPSILON) | (prev_close < 0)
+      - 分别输出 warning（极小值 vs 负数，语义清晰）
+    - valid_count/total_count 除零防护（空 DataFrame 场景）
+    - factor_cols 补充 asset, date 列（groupby 和 shift 依赖）
+    - N/A 日志信息补充原因（消除与 warning 信息断层）
+    - 代码量注释更新（~120行 + ~80行，反映实际行数）
+  v1.5 (2026-06-01):
+    - mask 互斥条件修正（negative_mask = prev_close < 0 & ~near_zero_mask）
+      - 原因：负数收盘价可能被重复处理两次
+    - 删除无意义的 log = logger 赋值（直接使用模块级 logger）
+    - icir N/A 原因注释修正（"IC 标准差为 0 或数据不足"）
+    - factor_cols 顺序依赖注释确认（公共模块按列名取列，data_loader.py 第205-222行）
 """
 
+import argparse
 import sys
 from pathlib import Path
 
-# 添加项目路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import pandas as pd
 import numpy as np
+
+# 添加项目路径
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
@@ -48,16 +87,18 @@ EPSILON = 1e-10  # 避免除零阈值
 # 因子计算函数
 # ============================================================================
 
-def calculate_overnight_return(factor_df, logger_arg=None):
+def calculate_overnight_return(factor_df):
     """
     计算隔夜收益率因子
     
     公式: overnight_ret = (今日开盘价 - 昨日收盘价) / 昨日收盘价
     
     Args:
-        factor_df: 包含 open, close 列的 DataFrame
-            - 必须包含 'asset', 'date', 'open', 'close' 列
-        logger_arg: 日志记录器（由调用方传入）
+        factor_df: 包含 open, close, asset, date 列的 DataFrame
+            - 'asset': 资产代码（用于分组）
+            - 'date': 交易日期
+            - 'open': 开盘价
+            - 'close': 收盘价
     
     Returns:
         DataFrame，新增 'overnight_ret' 列
@@ -65,25 +106,26 @@ def calculate_overnight_return(factor_df, logger_arg=None):
     Note:
         - 遵循 MODULE.md 约束 #4：函数入口先 copy()
         - 第一天数据为 NaN（无昨日收盘价）
-        - 除零防护：prev_close < EPSILON 时设为 NaN
+        - 除零防护：|prev_close| < EPSILON 或 prev_close < 0 时设为 NaN
         - 按资产分组计算（每只股票独立）
         
     Example:
-        >>> # 正常调用
+        >>> # 通过公共模块调用（推荐）
+        >>> from factor_ic.common.factor_ic_runner import run_complex_factor_ic
         >>> result = run_complex_factor_ic(
-        >>>     factor_name='overnight_ret',
-        >>>     factor_col='overnight_ret',
-        >>>     factor_cols=['open', 'close'],
-        >>>     custom_factor_calculation=calculate_overnight_return
-        >>> )
+        ...     factor_name='overnight_ret',
+        ...     factor_col='overnight_ret',
+        ...     factor_cols=['open', 'close', 'asset', 'date'],  # 必须包含 asset, date
+        ...     custom_factor_calculation=calculate_overnight_return
+        ... )
         >>> 
-        >>> # 独立调用（用于测试）
+        >>> # 独立调用（用于测试，需确保数据包含 asset, date 列）
         >>> factor_df = pd.DataFrame({
-        >>>     'asset': ['A', 'A', 'B', 'B'],
-        >>>     'date': ['2026-05-01', '2026-05-02', '2026-05-01', '2026-05-02'],
-        >>>     'open': [10.0, 10.5, 20.0, 21.0],
-        >>>     'close': [10.2, 10.8, 20.5, 21.5]
-        >>> })
+        ...     'asset': ['A', 'A', 'B', 'B'],
+        ...     'date': ['2026-05-01', '2026-05-02', '2026-05-01', '2026-05-02'],
+        ...     'open': [10.0, 10.5, 20.0, 21.0],
+        ...     'close': [10.2, 10.8, 20.5, 21.5]
+        ... })
         >>> result_df = calculate_overnight_return(factor_df)
         >>> print(result_df['overnight_ret'])
         >>> # asset A: NaN, 0.0294 (第一天NaN，第二天=(10.5-10.2)/10.2)
@@ -92,9 +134,6 @@ def calculate_overnight_return(factor_df, logger_arg=None):
     # 遵循 MODULE.md 约束 #4：函数入口先 copy()
     factor_df = factor_df.copy()
     
-    # 获取 logger（遵循 PROJECT.md 公共模块日志规范）
-    logger = logger_arg if logger_arg is not None else get_logger('factor_ic.ic_overnight_ret_1d')
-    
     # 按资产分组计算（每只股票独立）
     # 计算公式：overnight_ret = (open - close.shift(1)) / close.shift(1)
     prev_close = factor_df.groupby('asset')['close'].shift(1)
@@ -102,19 +141,39 @@ def calculate_overnight_return(factor_df, logger_arg=None):
     # 计算隔夜收益率
     factor_df['overnight_ret'] = (factor_df['open'] - prev_close) / prev_close
     
-    # 除零防护：prev_close 极小或为 0 时设为 NaN
-    abnormal_mask = prev_close < EPSILON
-    if abnormal_mask.any():
-        abnormal_count = abnormal_mask.sum()
+    # 除零防护：检测极小值和负数收盘价（数据污染场景）
+    # 条件 1: |prev_close| < EPSILON → 除零风险
+    # 条件 2: prev_close < 0 → 数据污染（负数收盘价）
+    # 注意：两个 mask 必须互斥，避免负数收盘价被重复处理
+    near_zero_mask = prev_close.abs() < EPSILON
+    negative_mask = (prev_close < 0) & ~near_zero_mask  # 排除已处理的极小值
+    
+    # 分别处理两种异常（语义清晰，日志可追溯）
+    if near_zero_mask.any():
+        near_zero_count = near_zero_mask.sum()
         logger.warning(
-            f"发现 {abnormal_count} 个异常收盘价（< {EPSILON}），"
-            f"隔夜收益率已设为 NaN"
+            f"发现 {near_zero_count} 个极小收盘价（|close| < {EPSILON}），"
+            f"存在除零风险，隔夜收益率已设为 NaN"
         )
-        factor_df.loc[abnormal_mask, 'overnight_ret'] = np.nan
+        factor_df.loc[near_zero_mask, 'overnight_ret'] = np.nan
+    
+    if negative_mask.any():
+        negative_count = negative_mask.sum()
+        logger.warning(
+            f"发现 {negative_count} 个负数收盘价（close < 0），"
+            f"数据污染场景，隔夜收益率已设为 NaN"
+        )
+        factor_df.loc[negative_mask, 'overnight_ret'] = np.nan
     
     # 统计计算结果
     valid_count = factor_df['overnight_ret'].notna().sum()
     total_count = len(factor_df)
+    
+    # 除零防护：空 DataFrame 时跳过比例计算
+    if total_count == 0:
+        logger.warning("传入空 DataFrame，隔夜收益率计算跳过")
+        return factor_df
+    
     logger.info(
         f"隔夜收益率计算完成\n"
         f"有效值: {valid_count} / {total_count} ({valid_count/total_count:.2%})"
@@ -129,35 +188,39 @@ def calculate_overnight_return(factor_df, logger_arg=None):
 
 def main():
     """CLI 主入口"""
-    import argparse
-    
     parser = argparse.ArgumentParser(description='隔夜收益率因子 IC 计算器')
     parser.add_argument('--force-full', action='store_true', help='强制全量计算')
     parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数')
     
     args = parser.parse_args()
     
-    # 启动节点日志
-    logger.info(
-        f"隔夜收益率因子 IC 计算启动 "
-        f"[min_stocks={args.min_stocks}, force_full={args.force_full}]"
-    )
-    
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
+    # 注意：公共模块内部已有启动日志，此处不再重复打印
+    # 注意：factor_cols 必须包含 asset, date 列（groupby 和 shift 依赖）
+    # 已确认：公共模块按列名取列（data_loader.py 第205-222行），顺序无关
     result = run_complex_factor_ic(
         factor_name='overnight_ret',
         factor_col='overnight_ret',
-        factor_cols=['open', 'close'],
+        factor_cols=['open', 'close', 'asset', 'date'],  # 必须包含 asset, date
         custom_factor_calculation=calculate_overnight_return,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger
     )
     
-    # 使用 .get() 防御性访问结果
-    ic_metrics = result.get('ic_metrics', {})
-    sample_stats = result.get('sample_stats', {})
-    period = result.get('period', {})
+    # 保底处理：公共模块异常返回 None 时直接退出
+    # 注意：这是可预期的业务失败，不是运行时错误，直接退出更语义清晰
+    if result is None:
+        logger.error("run_complex_factor_ic 返回 None")
+        sys.exit(1)
+    
+    # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
+    ic_metrics = result.get('ic_metrics') or {}
+    sample_stats = result.get('sample_stats') or {}
+    period = result.get('period') or {}
+    # 字段名 ic_distribution_consistency 来源于 MODULE.md 第56行输出结构
+    # 语义：正比例与方向一致/矛盾判断（MODULE.md 第77行），非单纯分布统计
+    ic_distribution = result.get('ic_distribution_consistency') or {}
     
     logger.info("=" * 60)
     logger.info("结果摘要")
@@ -166,10 +229,56 @@ def main():
     logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
     logger.info(f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}")
     logger.info(f"有效天数: {sample_stats.get('valid_days', 0)} 天")
-    logger.info(f"IC 均值: {ic_metrics.get('ic_mean', 0):.4f}")
-    logger.info(f"IC 标准差: {ic_metrics.get('ic_std', 0):.4f}")
-    logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
-    logger.info(f"IC>0 占比: {result.get('positive_ratio', 0):.2%}")
+    logger.info("--- IC指标 ---")
+    
+    ic_mean = ic_metrics.get('ic_mean')
+    if ic_mean is not None:
+        logger.info(f"IC 均值: {ic_mean:.4f}")
+    else:
+        logger.info("IC 均值: N/A（本次计算结果为空，请检查数据源）")
+    
+    ic_std = ic_metrics.get('ic_std')
+    if ic_std is not None:
+        logger.info(f"IC 标准差: {ic_std:.4f}")
+    else:
+        logger.info("IC 标准差: N/A（数据不足或全为相同值）")
+    
+    icir = ic_metrics.get('icir')
+    if icir is not None:
+        logger.info(f"ICIR: {icir:.2f}")
+    else:
+        logger.info("ICIR: N/A（IC 标准差为 0 或数据不足）")
+    
+    positive_ratio = ic_distribution.get('positive_ratio')
+    if positive_ratio is not None:
+        logger.info(f"IC>0 占比: {positive_ratio:.2%}")
+    else:
+        logger.info("IC>0 占比: N/A（字段名错误或数据缺失）")
+    
+    # 异常状态整体感知日志（运维巡检用）
+    # ic_mean 为 None 表示整个 IC 计算结果为空，是最严重情况
+    has_warning = False
+    if ic_mean is None:
+        logger.warning("本次IC计算结果为空，请检查数据源或参数配置")
+        has_warning = True
+    # ic_std 为 None 表示 IC 标准差无法计算，根因在此层而非 icir 层
+    elif ic_std is None:
+        logger.warning("IC标准差无法计算（数据不足或全为相同值），请检查因子数据分布")
+        has_warning = True
+    # icir 为 None 表示 ICIR 无法计算（通常因 ic_std=0 或数据不足）
+    elif icir is None:
+        logger.warning("ICIR无法计算（IC标准差为0，因子数据无波动），请检查因子数据分布")
+        has_warning = True
+    
+    # positive_ratio 为 None 表示分布一致性判断缺失（独立检查，不与上方 elif 链耦合）
+    if positive_ratio is None:
+        logger.warning("IC>0占比无法获取（字段名错误或数据缺失），请检查公共模块输出结构")
+        has_warning = True
+    
+    if has_warning:
+        logger.info("隔夜收益率因子IC计算完成（存在异常，请关注上方警告）")
+    else:
+        logger.info("隔夜收益率因子IC计算完成")
     
     return result
 
@@ -177,9 +286,7 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except RuntimeError:
-        logger.exception("隔夜收益率因子 IC 计算失败")
-        sys.exit(1)
-    except Exception:
-        logger.exception("隔夜收益率因子 IC 计算失败（未预期错误）")
+    except Exception as e:
+        # 未预期异常，使用 exception()（自动打印完整堆栈，无需重复传 e）
+        logger.exception("未预期的错误")
         sys.exit(1)
