@@ -24,7 +24,7 @@ class TestVolumeRatioLayerConfig:
 
     def test_factor_name_classvar(self):
         """TC001-01: factor_name 类属性"""
-        assert VolumeRatioLayerConfig.factor_name == 'volume_ratio'
+        assert VolumeRatioLayerConfig.factor_name == 'volume_ratio_5'
 
     def test_layer_names_classvar(self):
         """TC001-02: layer_names 类属性为纯标签"""
@@ -37,9 +37,9 @@ class TestVolumeRatioLayerConfig:
         assert VolumeRatioLayerConfig.layer_descriptions[0] == '极低层(量比极低)'
 
     def test_ic_source_default(self):
-        """TC001-03: ic_source 默认路径"""
+        """TC001-04: ic_source 显式声明覆盖默认路径"""
         config = VolumeRatioLayerConfig()
-        # 未显式声明时，基类按 factor_name 拼接默认路径
+        # 显式声明时，使用声明的路径（而非默认拼接）
         assert config.ic_source_resolved == 'factor_ic/result/ic_volume_ratio_1d_analysis_result.json'
 
     def test_ic_meta_direction_negative(self):

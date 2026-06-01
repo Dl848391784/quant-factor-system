@@ -7,8 +7,6 @@
 - 含义: 成交量相对历史均值的比率
 - 理论范围: ≥ 0（无上界）
 
-分层模式：percentile 5层（每层20%）
-
 因子元数据派生机制（基类 LayerConfigBase）：
 - factor_col_resolved: 从 factor_col ClassVar 派生，默认=factor_name
 - factor_direction: 从 ic_source IC 文件加载，ic_mean < 0 为 negative
@@ -32,8 +30,9 @@ class VolumeRatioLayerConfig(LayerConfigBase):
     - layer_names 纯标签（用于目录/列名），layer_descriptions 含中文（用于日志）
     """
     
-    factor_name: ClassVar[str] = 'volume_ratio'
+    factor_name: ClassVar[str] = 'volume_ratio_5'
     factor_col: ClassVar[str] = 'volume_ratio_5'
+    ic_source: ClassVar[str] = 'factor_ic/result/ic_volume_ratio_1d_analysis_result.json'  # IC文件路径覆盖
     
     layer_names: ClassVar[Sequence[str]] = (
         'lowest',
