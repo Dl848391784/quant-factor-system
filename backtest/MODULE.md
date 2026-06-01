@@ -1,9 +1,10 @@
 # backtest 模块规范
 
-> 版本: v1.10
+> 版本: v1.11
 > 创建时间: 2026-05-22
-> 最后更新: 2026-06-01 (overnight_ret 因子方向修正)
+> 最后更新: 2026-06-01 (overnight_ret Round 2 深度优化)
 > 更新记录: 
+>   v1.11 (2026-06-01): overnight_ret Round 2 深度优化（layer_names语义修正、实测范围补充、测试状态更新）
 >   v1.10 (2026-06-01): overnight_ret 因子方向修正（negative→positive），补充流程文档和测试用例
 >   v1.9 (2026-05-29): 新增 return_5d 分层回测脚本
 > 修订日期: 2026-06-01
