@@ -33,6 +33,7 @@ IC 分析结果（2026-05-28，factor_ic/result/ic_overnight_ret_1d_analysis_res
   v2.0 (2026-06-01): 使用 factor_cli_main 公共入口
   v2.1 (2026-06-01): 修正 factor_direction 为 'positive'（遵循 IC 分析结果）
   v2.2 (2026-06-01): 修正 layer_names 语义描述（移除误导性固定阈值），补充实测范围
+  v2.3 (2026-06-01): 简化类 docstring（移除与模块 docstring 重复的 IC 分析结果）
 """
 
 import sys
@@ -50,11 +51,11 @@ from data_fetchers.factor_calculator import calculate_overnight_return
 
 @dataclass
 class OvernightRetLayerConfig(LayerConfigBase):
-    """隔夜收益因子分层配置
+    """隔夜收益因子分层配置（正向因子）
     
     多空组合由基类 _derive_long_short() 自动派生：
-    - 正向因子（factor_direction='positive'）：多头取高层（Layer4-5），空头取低层（Layer1-2）
-    - IC 分析结果: ic_mean=0.021187 > 0，正向因子
+    - 多头: Layer4-5（隔夜涨幅大）
+    - 空头: Layer1-2（隔夜跌幅大）
     """
     
     layer_names: Dict[str, str] = field(default_factory=lambda: {
