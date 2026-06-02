@@ -247,7 +247,7 @@ def save_batch_cache_sorted(
     
     Args:
         batch_idx: 批次索引（从0开始）
-        factor_df: 因子数据DataFrame，包含 date/asset/open/close/high/low/rsi_6/volume_ratio_5
+        factor_df: 因子数据DataFrame，包含 date/asset/open/close/high/low/rsi_6/volume_ratio_5/volume
         return_df: 收益数据DataFrame，包含 date/asset/forward_return_1d/3d/5d
         result_dir: 结果目录（可选）
         logger_arg: 日志记录器（遵循 MODULE.md 约束 77）
@@ -287,7 +287,7 @@ def save_batch_cache_sorted(
     return_path = _result_dir / f'batch_{batch_idx}_return.json.gz'
     
     # 写入前验证必需列
-    required_factor_cols = ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5']
+    required_factor_cols = ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5', 'volume']
     required_return_cols = ['date', 'asset', 'forward_return_1d', 'forward_return_3d', 'forward_return_5d']
     
     validate_dataframe_columns(factor_df, required_factor_cols, 'factor_df')
@@ -314,7 +314,8 @@ def save_batch_cache_sorted(
                 'high': round(row.high, 2),
                 'low': round(row.low, 2),
                 'rsi_6': round(row.rsi_6, 2),
-                'volume_ratio_5': round(row.volume_ratio_5, 2)
+                'volume_ratio_5': round(row.volume_ratio_5, 2),
+                'volume': int(row.volume)
             }
             count = _write_json_record(f, record, count)
         f.write('\n]')
