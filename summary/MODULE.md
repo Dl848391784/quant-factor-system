@@ -1,6 +1,6 @@
 # summary 模块规范
 
-> 版本: v2.0
+> 版本: v2.1
 > 创建时间: 2026-05-28
 > 最后更新: 2026-06-02
 
@@ -69,6 +69,20 @@ summary/
 │  _factor    │     
 └─────────────┘     
 ```
+
+### 模块依赖（v2.1 新增）
+
+**generate_factor_summary_report.py 依赖根目录 factor_definitions 模块获取因子定义信息。**
+
+```python
+# 导入方式
+from factor_definitions import FACTOR_DEFINITIONS, get_factor_definition
+```
+
+依赖原因：
+- 因子定义（计算公式、业务含义）是项目级公共信息
+- 新增因子时只需在 factor_definitions.py 添加定义，无需修改 summary 模块
+- 符合 PROJECT.md "跨模块数据契约"定位
 
 ---
 

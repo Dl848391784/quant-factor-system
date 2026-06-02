@@ -52,7 +52,7 @@ class TestVersion:
 
     def test_version_defined(self):
         """验证版本常量存在"""
-        assert __version__ == "1.9"
+        assert __version__ == "2.1"
 
 
 class TestHelperFunctions:
@@ -199,17 +199,20 @@ class TestDataFreshnessCheck:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            with patch("summary.generate_factor_summary_report.PROJECT_ROOT", root), patch(
-                "summary.generate_factor_summary_report.DATA_CHECK_SOURCES",
-                {
-                    "test_source": {
-                        "path": "nonexistent/file.json.gz",
-                        "description": "测试数据",
-                        "date_field": "dates",
-                        "format": "line_json",
-                        "is_gzip": True,
-                    }
-                },
+            with (
+                patch("summary.generate_factor_summary_report.PROJECT_ROOT", root),
+                patch(
+                    "summary.generate_factor_summary_report.DATA_CHECK_SOURCES",
+                    {
+                        "test_source": {
+                            "path": "nonexistent/file.json.gz",
+                            "description": "测试数据",
+                            "date_field": "dates",
+                            "format": "line_json",
+                            "is_gzip": True,
+                        }
+                    },
+                ),
             ):
                 results = check_data_freshness("2026-06-02", logger)
 
@@ -231,17 +234,20 @@ class TestDataFreshnessCheck:
             with gzip.open(file_path, "wt", encoding="utf-8") as f:
                 f.write(json.dumps(test_data) + "\n")
 
-            with patch("summary.generate_factor_summary_report.PROJECT_ROOT", root), patch(
-                "summary.generate_factor_summary_report.DATA_CHECK_SOURCES",
-                {
-                    "test_source": {
-                        "path": "data_fetchers/result/test_data.json.gz",
-                        "description": "测试数据",
-                        "date_field": "dates",
-                        "format": "line_json",
-                        "is_gzip": True,
-                    }
-                },
+            with (
+                patch("summary.generate_factor_summary_report.PROJECT_ROOT", root),
+                patch(
+                    "summary.generate_factor_summary_report.DATA_CHECK_SOURCES",
+                    {
+                        "test_source": {
+                            "path": "data_fetchers/result/test_data.json.gz",
+                            "description": "测试数据",
+                            "date_field": "dates",
+                            "format": "line_json",
+                            "is_gzip": True,
+                        }
+                    },
+                ),
             ):
                 # 期望日期为 2026-06-01（T-1）
                 results = check_data_freshness("2026-06-02", logger)
@@ -265,17 +271,20 @@ class TestDataFreshnessCheck:
             with gzip.open(file_path, "wt", encoding="utf-8") as f:
                 f.write(json.dumps(test_data) + "\n")
 
-            with patch("summary.generate_factor_summary_report.PROJECT_ROOT", root), patch(
-                "summary.generate_factor_summary_report.DATA_CHECK_SOURCES",
-                {
-                    "test_source": {
-                        "path": "data_fetchers/result/test_data.json.gz",
-                        "description": "测试数据",
-                        "date_field": "dates",
-                        "format": "line_json",
-                        "is_gzip": True,
-                    }
-                },
+            with (
+                patch("summary.generate_factor_summary_report.PROJECT_ROOT", root),
+                patch(
+                    "summary.generate_factor_summary_report.DATA_CHECK_SOURCES",
+                    {
+                        "test_source": {
+                            "path": "data_fetchers/result/test_data.json.gz",
+                            "description": "测试数据",
+                            "date_field": "dates",
+                            "format": "line_json",
+                            "is_gzip": True,
+                        }
+                    },
+                ),
             ):
                 results = check_data_freshness("2026-06-02", logger)
 
@@ -298,17 +307,20 @@ class TestDataFreshnessCheck:
             with gzip.open(file_path, "wt", encoding="utf-8") as f:
                 f.write(json.dumps(test_data))
 
-            with patch("summary.generate_factor_summary_report.PROJECT_ROOT", root), patch(
-                "summary.generate_factor_summary_report.DATA_CHECK_SOURCES",
-                {
-                    "test_source": {
-                        "path": "data_fetchers/result/test_data.json.gz",
-                        "description": "测试数据",
-                        "date_field": "meta.date_range.end",
-                        "format": "full_json",
-                        "is_gzip": True,
-                    }
-                },
+            with (
+                patch("summary.generate_factor_summary_report.PROJECT_ROOT", root),
+                patch(
+                    "summary.generate_factor_summary_report.DATA_CHECK_SOURCES",
+                    {
+                        "test_source": {
+                            "path": "data_fetchers/result/test_data.json.gz",
+                            "description": "测试数据",
+                            "date_field": "meta.date_range.end",
+                            "format": "full_json",
+                            "is_gzip": True,
+                        }
+                    },
+                ),
             ):
                 results = check_data_freshness("2026-06-02", logger)
 
@@ -330,13 +342,16 @@ class TestDerivedDataFreshnessCheck:
             (root / "backtest" / "result").mkdir(parents=True)
             (root / "comprehensive_factor" / "result").mkdir(parents=True)
 
-            with patch("summary.generate_factor_summary_report.PROJECT_ROOT", root), patch(
-                "summary.generate_factor_summary_report.DATA_PATHS",
-                {
-                    "ic_result": "factor_ic/result",
-                    "backtest_result": "backtest/result",
-                    "comprehensive_result": "comprehensive_factor/result",
-                },
+            with (
+                patch("summary.generate_factor_summary_report.PROJECT_ROOT", root),
+                patch(
+                    "summary.generate_factor_summary_report.DATA_PATHS",
+                    {
+                        "ic_result": "factor_ic/result",
+                        "backtest_result": "backtest/result",
+                        "comprehensive_result": "comprehensive_factor/result",
+                    },
+                ),
             ):
                 results = check_derived_data_freshness("2026-06-02", logger)
 
@@ -361,8 +376,8 @@ class TestDerivedDataFreshnessCheck:
             (root / "backtest" / "result").mkdir(parents=True)
             (root / "comprehensive_factor" / "result").mkdir(parents=True)
 
-            # 创建 IC 结果文件
-            ic_data = {"ic_series": [{"date": "2026-06-01"}]}
+            # 创建 IC 结果文件（使用顶层 dates 数组格式）
+            ic_data = {"dates": ["2026-06-01"], "ic_values": []}
             ic_file = root / "factor_ic" / "result" / "ic_test_1d_analysis_result.json"
             ic_file.write_text(json.dumps(ic_data))
 
@@ -374,13 +389,16 @@ class TestDerivedDataFreshnessCheck:
             comp_file = root / "comprehensive_factor" / "result" / "composite_icir_weight_1d.json"
             comp_file.write_text("{}")
 
-            with patch("summary.generate_factor_summary_report.PROJECT_ROOT", root), patch(
-                "summary.generate_factor_summary_report.DATA_PATHS",
-                {
-                    "ic_result": "factor_ic/result",
-                    "backtest_result": "backtest/result",
-                    "comprehensive_result": "comprehensive_factor/result",
-                },
+            with (
+                patch("summary.generate_factor_summary_report.PROJECT_ROOT", root),
+                patch(
+                    "summary.generate_factor_summary_report.DATA_PATHS",
+                    {
+                        "ic_result": "factor_ic/result",
+                        "backtest_result": "backtest/result",
+                        "comprehensive_result": "comprehensive_factor/result",
+                    },
+                ),
             ):
                 results = check_derived_data_freshness("2026-06-02", logger)
 
