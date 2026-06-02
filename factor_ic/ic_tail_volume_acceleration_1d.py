@@ -33,6 +33,9 @@
   v1.1 (2026-06-02): Round 1 优化 - 导入分组注释、版本历史完善、main()返回值
   v1.2 (2026-06-02): Round 2 优化 - 内部函数类型注解完善（list | np.ndarray）
   v1.3 (2026-06-02): Round 3 优化 - 边界处理防御性编程确认（isinstance替代pd.isna，无宽泛Exception）
+  v1.4 (2026-06-02): Round 4 优化 - main()添加返回值（对照 ic_tail_price_slope_1d.py）
+  v1.5 (2026-06-02): Round 5 优化 - docstring Example 完善（添加异常场景说明）
+  v1.6 (2026-06-02): Round 6 优化 - 内部函数添加 debug 日志（对照 ic_tail_price_slope_1d.py）
 """
 
 # 标准库导入
@@ -128,9 +131,11 @@ def _calc_volume_acceleration(volumes: list | np.ndarray) -> float:
     if not isinstance(volumes, list):
         return np.nan
     if len(volumes) < 13:
+        logger.debug("volumes 数组长度不足 13: %d", len(volumes))
         return np.nan
     # 检查是否包含 NaN/None
     if any(v is None or (isinstance(v, float) and np.isnan(v)) for v in volumes):
+        logger.debug("volumes 包含 NaN/None 值")
         return np.nan
 
     # 前半段成交量总和（索引 0-5）
@@ -140,6 +145,7 @@ def _calc_volume_acceleration(volumes: list | np.ndarray) -> float:
 
     # 除零防护
     if front_volume < EPSILON:
+        logger.debug("前半段成交量接近零: %.10f", front_volume)
         return np.nan
 
     return back_volume / front_volume
@@ -169,14 +175,16 @@ def calculate_tail_volume_acceleration(factor_df: pd.DataFrame) -> pd.DataFrame:
         - 数据完整性：volumes 数组长度不足 13 时设为 NaN
 
     Example:
-        >>> # 通过公共模块调用（推荐）
-        >>> from factor_ic.common.factor_ic_runner import run_complex_factor_ic
-        >>> result = run_complex_factor_ic(
-        ...     factor_name="tail_volume_acceleration",
-        ...     factor_col="tail_volume_acceleration",
-        ...     factor_cols=["date", "asset"],
-        ...     custom_factor_calculation=calculate_tail_volume_acceleration,
-        ... )
+            >>> # 正常场景：通过公共模块调用（推荐）
+            >>> from factor_ic.common.factor_ic_runner import run_complex_factor_ic
+            >>> result = run_complex_factor_ic(
+            ...     factor_name="tail_volume_acceleration",
+            ...     factor_col="tail_volume_acceleration",
+            ...     factor_cols=["date", "asset"],
+            ...     custom_factor_calculation=calculate_tail_volume_acceleration,
+            ... )
+            >>> # 异常场景：尾盘数据文件不存在（返回全 NaN 因子值，不中断计算）
+            >>> # 系统自动 fallback，日志记录 FileNotFoundError
     """
     # 遵循 MODULE.md 约束 #4：函数入口先 copy()
     factor_df = factor_df.copy()
@@ -307,6 +315,8 @@ def main():
     logger.info("=" * 40)
     logger.info("计算完成")
     logger.info("=" * 40)
+
+    return result
 
 
 if __name__ == "__main__":

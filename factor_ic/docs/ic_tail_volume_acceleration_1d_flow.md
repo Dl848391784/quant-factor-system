@@ -1,8 +1,8 @@
 # 尾盘量能加速度因子 IC 计算流程文档
 
-> 版本: v1.3
+> 版本: v1.6
 > 创建时间: 2026-06-02
-> 更新时间: 2026-06-02 19:02 北京时间
+> 更新时间: 2026-06-02 19:18 北京时间
 
 ---
 
@@ -156,3 +156,6 @@ python factor_ic/ic_tail_volume_acceleration_1d.py --min-stocks 50
 | v1.1 | 2026-06-02 18:56 | Round 1 优化 - 导入分组注释、版本历史完善、main()返回值 |
 | v1.2 | 2026-06-02 18:56 | Round 2 优化 - 内部函数类型注解完善（list | np.ndarray） |
 | v1.3 | 2026-06-02 19:02 | Round 3 优化 - 边界处理防御性编程确认（isinstance替代pd.isna，无宽泛Exception） |
+| v1.4 | 2026-06-02 19:18 | Round 4 优化 - main()添加返回值（对照 ic_tail_price_slope_1d.py） |
+| v1.5 | 2026-06-02 19:18 | Round 5 优化 - docstring Example 完善（添加异常场景说明） |
+| v1.6 | 2026-06-02 19:18 | Round 6 优化 - 内部函数添加 debug 日志（对照 ic_tail_price_slope_1d.py） |
