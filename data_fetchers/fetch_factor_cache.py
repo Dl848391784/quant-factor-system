@@ -232,7 +232,8 @@ def fetch_batch_stocks(
     valid_df['forward_return_5d'] = valid_df['forward_return_5d'].round(6)
 
     # 包含 open/high/low 用于选股回测计算一字涨停、封死涨停等
-    factor_df = valid_df[['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5']].copy()
+    # 包含 volume 用于尾盘量比计算（尾盘量价强度因子需要）
+    factor_df = valid_df[['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5', 'volume']].copy()
     
     # return_df: 排除 forward_return 为 NaN 的记录（每只股票末尾几天的 shift 产生）
     # 避免下游读取方未处理产生计算错误
@@ -527,7 +528,7 @@ def main() -> bool:
             'elapsed_seconds': elapsed,
             'is_valid': is_valid,
             'memory_monitor': 'proc_self_status',
-            'fields': ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5']
+            'fields': ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5', 'volume']
         }
         
         with open(RESULT_DIR / 'regenerate_stats.json', 'w') as f:

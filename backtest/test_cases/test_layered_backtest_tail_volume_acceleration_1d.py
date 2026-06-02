@@ -10,6 +10,7 @@ test_layered_backtest_tail_volume_acceleration_1d 测试用例
   v1.0 (2026-06-02): 初始版本，创建测试用例
   v1.1 (2026-06-02): Round 5 优化 - 测试文件版本历史同步
   v1.2 (2026-06-02): Round 5 优化 - 版本历史与分层回测脚本同步（v1.3）
+  v1.3 (2026-06-02): Round 5 优化 - 版本历史与分层回测脚本同步（v1.6）
 """
 
 import sys
@@ -41,6 +42,7 @@ class TestLayerConfig:
     def test_layer_names_sequence(self):
         """TC001-03: layer_names 是序列类型"""
         from collections.abc import Sequence
+
         assert isinstance(TailVolumeAccelerationLayerConfig.layer_names, Sequence)
 
     def test_layer_descriptions_defined(self):
@@ -72,11 +74,13 @@ class TestLayerConfigInheritance:
     def test_inherits_from_base(self):
         """TC002-01: 继承自 LayerConfigBase"""
         from backtest.common.layered_backtest_runner import LayerConfigBase
+
         assert issubclass(TailVolumeAccelerationLayerConfig, LayerConfigBase)
 
     def test_has_classvar_annotations(self):
         """TC002-02: 使用 ClassVar 类型注解"""
         from typing import ClassVar, get_type_hints
+
         hints = get_type_hints(TailVolumeAccelerationLayerConfig)
         # ClassVar 应出现在类型提示中
         assert "factor_name" in hints or hasattr(TailVolumeAccelerationLayerConfig, "__annotations__")
@@ -88,11 +92,13 @@ class TestScriptIntegration:
     def test_script_imports(self):
         """TC003-01: 脚本可导入"""
         from backtest.layered_backtest_tail_volume_acceleration_1d import factor_cli_main
+
         assert callable(factor_cli_main)
 
     def test_factor_calculator_import(self):
         """TC003-02: 因子计算函数可导入"""
         from factor_ic.ic_tail_volume_acceleration_1d import calculate_tail_volume_acceleration
+
         assert callable(calculate_tail_volume_acceleration)
 
 
