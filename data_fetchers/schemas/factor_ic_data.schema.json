@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Factor IC Data Output",
+  "description": "factor_generator.py 输出结构校验 Schema（统一数据源）",
+  "type": "object",
+  "required": ["dates", "data"],
+  "properties": {
+    "dates": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "所有日期列表（YYYY-MM-DD 格式，已排序）"
+    },
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["date", "asset"],
+        "properties": {
+          "date": { "type": "string", "description": "日期（YYYY-MM-DD）" },
+          "asset": { "type": "string", "description": "股票代码" },
+          "open": { "type": ["number", "null"], "description": "开盘价" },
+          "close": { "type": ["number", "null"], "description": "收盘价" },
+          "high": { "type": ["number", "null"], "description": "最高价" },
+          "low": { "type": ["number", "null"], "description": "最低价" },
+          "rsi_6": { "type": ["number", "null"], "description": "6日RSI" },
+          "volume_ratio_5": { "type": ["number", "null"], "description": "5日量比" },
+          "turnover_rate": { "type": ["number", "null"], "description": "换手率" },
+          "volume": { "type": ["number", "null"], "description": "成交量" },
+          "bollinger_pb": { "type": ["number", "null"], "description": "布林带 %B" },
+          "kdj_j": { "type": ["number", "null"], "description": "KDJ J值" },
+          "turnover_surge": { "type": ["number", "null"], "description": "换手率突增因子" },
+          "amplitude": { "type": ["number", "null"], "description": "振幅因子" },
+          "price_position": { "type": ["number", "null"], "description": "价格位置因子" },
+          "tail_price_position": { "type": ["number", "null"], "description": "尾盘价格位置因子（v1.33新增）" },
+          "tail_price_slope": { "type": ["number", "null"], "description": "尾盘趋势斜率因子（v1.33新增）" },
+          "tail_price_volume_intensity": { "type": ["number", "null"], "description": "尾盘量价强度因子（v1.33新增）" },
+          "forward_return_1d": { "type": ["number", "null"], "description": "1日前瞻收益" },
+          "forward_return_3d": { "type": ["number", "null"], "description": "3日前瞻收益" },
+          "forward_return_5d": { "type": ["number", "null"], "description": "5日前瞻收益" }
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}
