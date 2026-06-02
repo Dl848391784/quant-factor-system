@@ -61,3 +61,11 @@ test_venv/
 *_analysis_result.json
 *_result.json
 rsi_ic_data.json
+
+# Large result files (>100MB, use Git LFS or exclude)
+data_fetchers/result/*.json.gz
+data_fetchers/result/*.parquet
+comprehensive_factor/result/*.json.gz
+comprehensive_factor/result/*.parquet
+backtest/result/*.json.gz
+backtest/result/*.parquet
