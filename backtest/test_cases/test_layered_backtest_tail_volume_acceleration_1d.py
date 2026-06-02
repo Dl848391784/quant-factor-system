@@ -9,10 +9,12 @@ test_layered_backtest_tail_volume_acceleration_1d 测试用例
 版本历史:
   v1.0 (2026-06-02): 初始版本，创建测试用例
   v1.1 (2026-06-02): Round 5 优化 - 测试文件版本历史同步
+  v1.2 (2026-06-02): Round 5 优化 - 版本历史与分层回测脚本同步（v1.3）
 """
 
 import sys
 from pathlib import Path
+
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
