@@ -132,16 +132,16 @@ _EXTENDED_FACTOR_COLS: tuple[str, ...] = ('bollinger_pb', 'kdj_j', 'turnover_sur
 _RETURN_COLS: tuple[str, ...] = ('forward_return_1d', 'forward_return_3d', 'forward_return_5d')
 
 # 基础列名（元组防止意外修改）
-# 包含：索引字段 + 行情数据 + 基础因子 + 换手率（从换手率数据合并）
-_BASE_COLS: tuple[str, ...] = ('date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5', 'turnover_rate')
+# 包含：索引字段 + 行情数据 + 基础因子 + 换手率（从换手率数据合并）+ 成交量（尾盘量比计算需要）
+_BASE_COLS: tuple[str, ...] = ('date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5', 'turnover_rate', 'volume')
 
 # 输出列名（基础列 + 扩展因子 + 收益数据，元组防止意外修改）
 # 结构说明：
 # _OUTPUT_COLS[0:2]   = date, asset（索引字段）
 # _OUTPUT_COLS[2:6]   = open, close, high, low（行情数据）
-# _OUTPUT_COLS[6:9]   = rsi_6, volume_ratio_5, turnover_rate（基础因子，来自输入）
-# _OUTPUT_COLS[9:14]  = bollinger_pb, kdj_j, turnover_surge, amplitude, price_position（扩展因子，本次计算）
-# _OUTPUT_COLS[14:]   = forward_return_1d, forward_return_3d, forward_return_5d（收益数据，从 return_data 合并）
+# _OUTPUT_COLS[6:10]  = rsi_6, volume_ratio_5, turnover_rate, volume（基础因子，来自输入）
+# _OUTPUT_COLS[10:15] = bollinger_pb, kdj_j, turnover_surge, amplitude, price_position（扩展因子，本次计算）
+# _OUTPUT_COLS[15:]   = forward_return_1d, forward_return_3d, forward_return_5d（收益数据，从 return_data 合并）
 _OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS
 
 
