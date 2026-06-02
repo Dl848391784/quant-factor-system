@@ -1,9 +1,9 @@
 # generate_factor_summary_report.py 流程文档
 
-> 版本: v1.4
+> 版本: v1.5
 > 创建时间: 2026-05-28
-> 最后更新: 2026-05-28
-> 脚本版本: generate_factor_summary_report.py v1.5
+> 最后更新: 2026-06-02
+> 脚本版本: generate_factor_summary_report.py v1.9
 
 ---
 
@@ -28,18 +28,24 @@
 │                    generate_factor_summary_report.py              │
 ├──────────────────────────────────────────────────────────────────┤
 │  输入层                                                           │
-│  ├── load_ic_results(date, logger)                               │
+│  ├── check_data_freshness(date, logger)                          │
+│  │   → 检查基础数据源新鲜度（v1.9 新增）                           │
+│  ├── check_derived_data_freshness(date, logger)                  │
+│  │   → 检查衍生数据存在性（v1.9 新增）                             │
+│  ├── load_ic_results(logger)                                     │
 │  │   → 读取 factor_ic/result/ic_*_analysis_result.json           │
-│  ├── load_backtest_results(date, logger)                         │
+│  ├── load_backtest_results(logger)                               │
 │  │   → 读取 backtest/result/*_layered_backtest.json              │
-│  ├── load_composite_results(date, logger)                        │
+│  ├── load_composite_results(logger)                              │
 │  │   → 读取 comprehensive_factor/result/composite_*_1d.json      │
-│  └── calculate_factor_correlation(ic_results, logger, force_full)│
+│  └── calculate_factor_correlation(logger, force_full)            │
 │      → 从综合因子结果读取相关性，或从因子数据计算                   │
 ├──────────────────────────────────────────────────────────────────┤
 │  处理层                                                           │
 │  ├── merge_factor_data(ic_results, backtest_results)             │
 │  │   → 合并 IC 和回测数据                                         │
+│  ├── _generate_data_check_section(data_results, derived_results) │
+│  │   → 生成数据完整性检查部分（v1.9 新增）                         │
 │  ├── generate_correlation_section(corr_matrix, ic_results)       │
 │  │   → 生成相关性矩阵部分                                         │
 │  └── get_factor_selection_info(composite_results, ic_results,   │
@@ -57,6 +63,66 @@
 
 ## 详细流程步骤
 
+### Step 0: 数据完整性检查（v1.9 新增）
+
+**触发时机：** generate_report() 函数开始时，在加载 IC/回测数据之前
+
+```python
+logger.info("执行数据完整性检查...")
+data_results = check_data_freshness(date, logger)
+derived_results = check_derived_data_freshness(date, logger)
+```
+
+**检查内容：**
+
+| 检查类型 | 数据源 | 日期字段路径 | 文件格式 |
+|---------|--------|-------------|----------|
+| 基础数据 | factor_ic_data.json.gz | dates[-1] | line_json（gzip） |
+| 基础数据 | factor_data.json.gz | meta.date_range.end | full_json（gzip） |
+| 基础数据 | turnover_rate_data.json.gz | meta.date_range.end | full_json（gzip） |
+| 衍生数据 | IC 结果文件 | ic_series[-1].date | JSON |
+| 衍生数据 | 回测结果文件 | 文件存在性检查 | — |
+| 衍生数据 | 综合因子结果文件 | 文件存在性检查 | — |
+
+**期望标准：** 最新日期 = T-1（前一天）
+
+**状态判定：**
+
+| 状态 | 条件 | 符号 |
+|------|------|------|
+| ok | actual_date == expected_date | ✓正常 |
+| warning | actual_date != expected_date（可能非交易日） | △延迟 |
+| error | 文件不存在 | ✗缺失 |
+| error | 文件损坏或格式错误 | ✗读取失败 |
+| error | 无法解析日期字段 | ✗无日期 |
+
+**报告展示：** 第零部分展示检查结果表格
+
+**输出示例：**
+```
+零、数据完整性检查
+----------------------------------------------------------------------
+期望数据日期: 2026-06-01 (T-1)
+
+【基础数据源】
+数据源               描述                     最新日期     状态
+----------------------------------------------------------------------
+factor_ic_data       主数据源(行情+因子+收益)    2026-06-01    ✓正常
+factor_data          基础因子数据               2026-06-01    ✓正常
+turnover_data        换手率数据                 2026-06-01    ✓正常
+----------------------------------------------------------------------
+
+【衍生数据】
+数据源               描述                     文件数量     状态
+----------------------------------------------------------------------
+ic_results           IC分析结果                    10     ✓正常(10因子)
+backtest_results     分层回测结果                  10     ✓正常(10因子)
+composite_results    综合因子结果                   4     ✓正常(4权重)
+----------------------------------------------------------------------
+
+汇总: ✓ 所有数据源已更新至 T-1
+```
+
 ### Step 1: 初始化日志
 
 ```python
@@ -69,7 +135,7 @@ logger.info(f"开始生成汇总报告 (版本 {__version__})")
 ### Step 2: 加载 IC 结果
 
 ```python
-ic_results = load_ic_results(date, logger)
+ic_results = load_ic_results(logger)
 ```
 
 **输入：** `factor_ic/result/ic_*_analysis_result.json`
@@ -95,7 +161,7 @@ ic_results = load_ic_results(date, logger)
 ### Step 3: 加载回测结果
 
 ```python
-backtest_results = load_backtest_results(date, logger)
+backtest_results = load_backtest_results(logger)
 ```
 
 **输入：** `backtest/result/*_layered_backtest.json`
@@ -119,7 +185,7 @@ backtest_results = load_backtest_results(date, logger)
 ### Step 4: 加载综合因子结果
 
 ```python
-composite_results = load_composite_results(date, logger)
+composite_results = load_composite_results(logger)
 ```
 
 **输入：** `comprehensive_factor/result/composite_*_1d.json`
@@ -135,7 +201,7 @@ composite_results = load_composite_results(date, logger)
 ### Step 5: 计算因子相关性
 
 ```python
-corr_matrix = calculate_factor_correlation(ic_results, logger, force_full=force_full_correlation)
+corr_matrix = calculate_factor_correlation(logger, force_full=force_full_correlation)
 ```
 
 **优先策略：** 从综合因子结果的 meta.correlation_matrix 读取
@@ -160,6 +226,7 @@ output_path.write_text(report, encoding='utf-8')
 ```
 
 **报告结构：**
+0. 数据完整性检查（v1.9 新增）
 1. 单因子 IC 数据汇总表
 2. 单因子分层回测数据汇总表
 3. 因子相关性矩阵
@@ -194,11 +261,45 @@ output_path.write_text(report, encoding='utf-8')
 
 | 异常场景 | 处理方式 |
 |---------|---------|
+| 数据文件不存在 | 返回 error 状态，记录 logger.warning |
 | IC 结果文件不存在 | logger.debug 记录，跳过 |
 | 回测结果文件不存在 | logger.debug 记录，跳过 |
 | 综合因子结果不存在 | 返回空列表 |
 | 因子数据文件不存在 | 相关性矩阵设为 None |
 | JSON 解析错误 | logger.warning 记录，返回 None |
+| gzip 文件损坏 | 返回 error 状态，记录 logger.error |
+
+---
+
+## 数据完整性检查配置（v1.9 新增）
+
+**DATA_CHECK_SOURCES 配置：**
+
+```python
+DATA_CHECK_SOURCES = {
+    'factor_ic_data': {
+        'path': 'data_fetchers/result/factor_ic_data.json.gz',
+        'description': '主数据源(行情+因子+收益)',
+        'date_field': 'dates',  # 从顶层 dates 数组获取最新日期
+        'format': 'line_json',  # 每行一个 JSON 对象
+        'is_gzip': True,
+    },
+    'factor_data': {
+        'path': 'data_fetchers/result/factor_data.json.gz',
+        'description': '基础因子数据',
+        'date_field': 'meta.date_range.end',
+        'format': 'full_json',
+        'is_gzip': True,
+    },
+    'turnover_data': {
+        'path': 'data_fetchers/result/turnover_rate_data.json.gz',
+        'description': '换手率数据',
+        'date_field': 'meta.date_range.end',
+        'format': 'full_json',
+        'is_gzip': True,
+    },
+}
+```
 
 ---
 
@@ -209,3 +310,10 @@ output_path.write_text(report, encoding='utf-8')
    - 记录数据流向和处理逻辑
    - 定义报告结构（6个部分）
    - 补充 CLI 参数说明
+
+2. v1.5（2026-06-02）：
+   - 新增 Step 0 数据完整性检查流程
+   - 更新整体架构图（新增 check_data_freshness/check_derived_data_freshness）
+   - 新增数据完整性检查配置说明
+   - 补充异常处理场景（gzip 文件损坏）
+   - 同步脚本版本 v1.9
