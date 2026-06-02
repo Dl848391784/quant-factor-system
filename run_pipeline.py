@@ -24,31 +24,40 @@ Stage 2: IC计算
   14. ic_return_3d_1d.py
   15. ic_return_5d_1d.py
   16. ic_overnight_ret_1d.py
+  17. ic_tail_price_position.py (新增 2026-06-02)
+  18. ic_tail_price_slope_1d.py (新增 2026-06-02)
+  19. ic_tail_price_volume_intensity.py (新增 2026-06-02)
+  20. ic_tail_volume_acceleration_1d.py (新增 2026-06-02)
 
 Stage 3: 分层回测
-  17. layered_backtest_rsi_1d.py
-  18. layered_backtest_volume_ratio_1d.py
-  19. layered_backtest_kdj_j_1d.py
-  20. layered_backtest_bollinger_pb_1d.py
-  21. layered_backtest_turnover_surge_1d.py
-  22. layered_backtest_amplitude_1d.py
-  23. layered_backtest_price_position_1d.py
-  24. layered_backtest_return_3d_1d.py
-  25. layered_backtest_return_5d_1d.py
-  26. layered_backtest_overnight_ret_1d.py
+  21. layered_backtest_rsi_1d.py
+  22. layered_backtest_volume_ratio_1d.py
+  23. layered_backtest_kdj_j_1d.py
+  24. layered_backtest_bollinger_pb_1d.py
+  25. layered_backtest_turnover_surge_1d.py
+  26. layered_backtest_amplitude_1d.py
+  27. layered_backtest_price_position_1d.py
+  28. layered_backtest_return_3d_1d.py
+  29. layered_backtest_return_5d_1d.py
+  30. layered_backtest_overnight_ret_1d.py
+  31. layered_backtest_tail_price_position_1d.py (新增 2026-06-02)
+  32. layered_backtest_tail_price_slope_1d.py (新增 2026-06-02)
+  33. layered_backtest_tail_price_volume_intensity_1d.py (新增 2026-06-02)
+  34. layered_backtest_tail_volume_acceleration_1d.py (新增 2026-06-02)
 
 Stage 4: 综合因子
-  27. composite_equal_weight_1d.py
-  28. composite_icir_weight_1d.py
-  29. composite_ic_weight_1d.py
-  30. composite_rolling_icir_weight_1d.py
+  35. composite_equal_weight_1d.py
+  36. composite_icir_weight_1d.py
+  37. composite_ic_weight_1d.py
+  38. composite_rolling_icir_weight_1d.py
 
 Stage 5: 汇总报告
-  31. generate_factor_summary_report.py
+  39. generate_factor_summary_report.py
 
 版本历史：
 - v1.0 (2026-05-27): 初始版本，完全串行执行，退出码检查，脚本级别重试
 - v1.1 (2026-05-27): fetch_turnover 添加 --baostock 参数，获取历史换手率数据
+- v1.2 (2026-06-02): 新增 4 个尾盘因子（tail_price_position, tail_price_slope, tail_price_volume_intensity, tail_volume_acceleration）
 
 作者: 云瑶
 """
@@ -107,6 +116,11 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask('ic_return_3d', 'factor_ic/ic_return_3d_1d.py', 2, []),
     ScriptTask('ic_return_5d', 'factor_ic/ic_return_5d_1d.py', 2, []),
     ScriptTask('ic_overnight_ret', 'factor_ic/ic_overnight_ret_1d.py', 2, []),
+    # 尾盘因子 IC 计算（2026-06-02 新增）
+    ScriptTask('ic_tail_price_position', 'factor_ic/ic_tail_price_position.py', 2, []),
+    ScriptTask('ic_tail_price_slope', 'factor_ic/ic_tail_price_slope_1d.py', 2, []),
+    ScriptTask('ic_tail_price_volume_intensity', 'factor_ic/ic_tail_price_volume_intensity.py', 2, []),
+    ScriptTask('ic_tail_volume_acceleration', 'factor_ic/ic_tail_volume_acceleration_1d.py', 2, []),
     
     # Stage 3: 分层回测
     ScriptTask('backtest_rsi', 'backtest/layered_backtest_rsi_1d.py', 3, []),
@@ -119,6 +133,11 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask('backtest_return_3d', 'backtest/layered_backtest_return_3d_1d.py', 3, []),
     ScriptTask('backtest_return_5d', 'backtest/layered_backtest_return_5d_1d.py', 3, []),
     ScriptTask('backtest_overnight_ret', 'backtest/layered_backtest_overnight_ret_1d.py', 3, []),
+    # 尾盘因子分层回测（2026-06-02 新增）
+    ScriptTask('backtest_tail_price_position', 'backtest/layered_backtest_tail_price_position_1d.py', 3, []),
+    ScriptTask('backtest_tail_price_slope', 'backtest/layered_backtest_tail_price_slope_1d.py', 3, []),
+    ScriptTask('backtest_tail_price_volume_intensity', 'backtest/layered_backtest_tail_price_volume_intensity_1d.py', 3, []),
+    ScriptTask('backtest_tail_volume_acceleration', 'backtest/layered_backtest_tail_volume_acceleration_1d.py', 3, []),
     
     # Stage 4: 综合因子（启用自动筛选）
     ScriptTask('composite_equal', 'comprehensive_factor/composite_equal_weight_1d.py', 4, ['--auto_select']),
