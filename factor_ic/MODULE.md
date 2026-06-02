@@ -1,7 +1,7 @@
 # factor_ic 模块规范
 
-> 版本: v3.15
-> 最后更新: 2026-05-31 (Round 2 深度审查完成)
+> 版本: v3.16
+> 最后更新: 2026-06-02
 
 ## 快速参考
 
@@ -191,6 +191,11 @@
     - argparse 导入位置修正（移至 main() 内部，遵循 PEP 8）
     - 版本历史完善（详细说明每版本变更内容）
     - 深度审查完成（参照 ic_volume_ratio_1d.py 对比优化）
+28. v3.16（2026-06-02）：
+    - 新增"新因子数据校验规范"章节
+    - 新因子计算 IC 前必须校验：必需列存在、日期范围、有效数据量、收益数据
+    - 校验失败时停止并提示用户（抛出 ValueError 附带详细信息）
+    - 提供示例代码和提示格式模板
 
 # 一、概述与基础
 
@@ -241,6 +246,60 @@ factor_ic 模块负责计算各类因子的 IC（Information Coefficient）值�
   2. `additional_factor_files` 指定额外缓存文件，列会合并到 `factor_df`
   3. 合并后的 `factor_df` 传递给 `custom_factor_calculation`
   4. 自定义计算函数可访问所有合并列（`factor_cols` + `additional_factor_files`）
+
+**新因子数据校验规范（v3.16 新增）：**
+
+新添加的因子计算 IC 时，必须先校验所需数据是否满足。若不满足，停止计算并向用户提示。
+
+校验内容：
+
+| 校验项 | 校验方式 | 不满足时行为 |
+|-------|---------|------------|
+| 必需列存在 | `factor_df.columns` 包含 `factor_cols` | 停止 + 提示缺失列名 |
+| 数据日期范围 | `dates` 覆盖计算周期 | 停止 + 提示日期范围不足 |
+| 有效数据量 | 有效数据行数 ≥ 100 | 停止 + 提示数据量不足 |
+| 收益数据存在 | `forward_return_1d` 列存在且非空 | 停止 + 提示收益数据缺失 |
+
+校验时机：
+1. **数据加载后立即校验**（在 `custom_factor_calculation` 执行前）
+2. 校验失败时**抛出 ValueError 并附带详细提示**
+3. 提示信息必须包含：缺失内容、期望值、实际值
+
+示例提示格式：
+```
+✗ 数据校验失败：因子 'xxx' 所需数据不满足
+  - 缺失列: ['turnover_rate']（factor_cols=['close', 'turnover_rate']）
+  - 实际列: ['date', 'asset', 'close', 'open']
+  - 请检查 data_fetchers/result/factor_ic_data.json.gz 是否包含所需列
+```
+
+实现方式（在 `custom_factor_calculation` 函数入口处）：
+
+```python
+def calculate_xxx(factor_df, logger=None):
+    """因子计算（含数据校验）"""
+    # 1. 数据校验（v3.16 新增）
+    required_cols = ['close', 'turnover_rate']
+    missing_cols = [col for col in required_cols if col not in factor_df.columns]
+    if missing_cols:
+        raise ValueError(
+            f"数据校验失败：缺失必需列 {missing_cols}\n"
+            f"实际列: {list(factor_df.columns)}\n"
+            f"请检查数据源是否包含所需列"
+        )
+    
+    # 2. 有效数据量校验
+    valid_rows = factor_df[required_cols].dropna().shape[0]
+    if valid_rows < 100:
+        raise ValueError(
+            f"数据校验失败：有效数据量不足\n"
+            f"期望 ≥ 100 行，实际 {valid_rows} 行\n"
+            f"请检查数据源质量"
+        )
+    
+    # 3. 继续因子计算...
+    ...
+```
 
 ### factor_ic目录规范
 
