@@ -1,13 +1,13 @@
-     1|# data_fetchers 模块规范
-     2|
-     3|> 版本: v3.06
-     4|> 创建时间: 2026-05-19
-     5|> 更新时间: 2026-05-27 16:00 北京时间
-     6|> 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
-     7|
-     8|---
-     9|
-    10|## 快速参考
+     # data_fetchers 模块规范
+
+     > 版本: v3.07
+     > 创建时间: 2026-05-19
+     > 更新时间: 2026-06-02 15:25 北京时间
+     > 重构时间: 2026-05-24（补充目录结构+命名规则+公共模块规范+公共模块实现）
+
+     ---
+
+     ## 快速参考
     11|
     12|### 必须遵守的约束
     13|
@@ -47,8 +47,43 @@
     47|| 26 | 方法名语义清晰 | `_load_all` 表示一次性加载，而非 `_load_next_chunk` 暗示多次调用 |
     48|| 27 | 返回值避免冗余 | format_final_output 返回值仅用于日志，统计信息由 validate_final_data 提供 |
     49|| 28 | 函数接口契约说明 | 说明实际调用方行为，而非理想化"可以是 datetime 或字符串" |
-    50|| 29 | vmrss 判断用 is not None | `if vmrss is not None` 而非 `if vmrss`（0 是 falsy） |
-    51|| 31 | DataFrame 链式操作用 copy() | 避免 SettingWithCopyWarning，每次过滤后 .copy() |
+    || 29 | vmrss 判断用 is not None | `if vmrss is not None` 而非 `if vmrss`（0 是 falsy） |
+    || 30 | **新增输出字段完整链路检查** | 修改输出字段需同步 3 处：fetch_xxx.py 输出列 + batch_processor.py 保存逻辑 + factor_generator.py _BASE_COLS（详见约束 30 展开） |
+    |
+
+    ### 约束 30 展开：新增输出字段完整链路检查清单
+
+    **问题背景（2026-06-02）**：添加 `volume` 字段到因子数据，经历 3 次修改 + 3 次脚本运行：
+    1. 第一次：`fetch_factor_cache.py` 添加 volume 列 → 运行 → volume 未保存
+    2. 第二次：`batch_processor.py` 添加保存逻辑 → 运行 → factor_ic_data 未包含
+    3. 第三次：`factor_generator.py` 添加 _BASE_COLS → 运行 → 验证通过
+
+    **效率问题**：每次只改一处，运行才发现下游遗漏，导致重复跑脚本。
+
+    **完整链路检查清单**（新增字段必须一次性检查所有 3 处）：
+
+    | 阶段 | 文件 | 修改位置 | 检查命令 |
+    |------|------|----------|----------|
+    | **数据获取** | `fetch_factor_cache.py` | 第 235 行输出字段列表 + 第 530 行 metadata fields | `grep -n "'volume'" fetch_factor_cache.py` |
+    | **数据保存** | `batch_processor.py` | 第 290 行 `required_factor_cols` + 第 318 行 record 构建 | `grep -n "'volume'" batch_processor.py` |
+    | **数据合并** | `factor_generator.py` | 第 136 行 `_BASE_COLS` 元组 | `grep -n "'volume'" factor_generator.py` |
+
+    **执行流程**：
+    ```
+    1. 修改 3 个文件（同步修改，不分批）
+    2. 运行 fetch_factor_cache.py --full
+    3. 运行 factor_generator.py（合并数据）
+    4. 验证最终输出：zcat factor_ic_data.json.gz | head -20 | grep volume
+    ```
+
+    **预防措施**：
+    - 修改输出字段前，先 grep 搜索所有相关文件
+    - 使用"模块链输出列同步"检查清单（见 superpowers-workflow skill Pitfall 表）
+    - 新增字段时创建 TODO 列表，逐项核对
+
+    **典型案例**：
+    - `volume` 字段添加（2026-06-02）：3 处修改 + 3 次运行
+    - 详见 `references/module-chain-column-synchronization-pitfall.md`
     52|| 33 | 函数签名与调用一致 | 返回 None 则调用方不接收，返回 tuple 则调用方接收，避免返回值被丢弃 |
     53|| 36 | BatchStream 提供 __lt__ | 用于 heap 比较，防御性编程 |
     54|| 37 | pop_record 更新 exhausted | 弹出后立即更新状态，保持一致性 |
