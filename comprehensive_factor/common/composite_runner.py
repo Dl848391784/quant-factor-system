@@ -28,6 +28,7 @@ import gzip
 import logging
 import pandas as pd
 import numpy as np
+from typing import ClassVar, List, Dict, Optional, Any, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, List, Callable, Union
@@ -71,12 +72,64 @@ class CompositeLayerConfig(LayerConfigBase):
     - factor_list: 因子名称列表
     - factor_cols: 因子列名列表
     - rolling_window: 滚动ICIR窗口
+    
+    注意：
+    - 子类必须声明 factor_name ClassVar（继承自 LayerConfigBase 的要求）
+    - factor_name 用于日志和结果文件命名
+    - 综合因子不加载单独 IC 文件，factor_direction 固定为 'negative'
     """
+    
+    # === 因子元数据（子类必须声明，满足 LayerConfigBase 要求） ===
+    factor_name: ClassVar[str] = 'composite'  # 子类应覆盖，如 'ic_weight_composite'
+    factor_col: ClassVar[str] = ''  # 综合因子无单列，由 weight_method 决定
+    layer_names: ClassVar[Sequence[str]] = ('lowest', 'lower', 'normal', 'higher', 'highest')
+    layer_descriptions: ClassVar[Sequence[str]] = (
+        '极低层(综合因子值最小)',
+        '偏低层(综合因子值偏小)',
+        '正常层(综合因子值中等)',
+        '偏高层(综合因子值偏大)',
+        '极高层(综合因子值最大)'
+    )
     
     # 因子组合参数
     factor_list: List[str] = field(default_factory=lambda: ['rsi', 'volume_ratio'])
     factor_cols: List[str] = field(default_factory=lambda: ['rsi_6', 'volume_ratio_5'])
     rolling_window: int = 60
+    
+    def __post_init__(self):
+        """综合因子特殊处理：跳过 IC 文件加载，固定 factor_direction"""
+        # 1. 校验 factor_name
+        if not self.factor_name:
+            raise ValueError(
+                f"子类必须声明 factor_name ClassVar，当前类: {self.__class__.__name__}"
+            )
+        
+        # 2. 综合因子不加载 IC 文件，factor_direction 固定为 'negative'
+        self.factor_direction = 'negative'
+        self.ic_source_resolved = ''  # 综合因子无单独 IC 文件
+        
+        # 3. 派生 factor_col_resolved
+        cls_factor_col = self.__class__.factor_col
+        self.factor_col_resolved = cls_factor_col if cls_factor_col else self.factor_name
+        
+        # 4. 校验 layer_names
+        n = len(self.layer_names)
+        if n < 2:
+            raise ValueError(f"layer_names 至少需要 2 层，当前: {n}")
+        self.n_layers = n
+        
+        # 5. 生成 layer_names_dict
+        descriptions = self.__class__.layer_descriptions
+        if descriptions and len(descriptions) == n:
+            self.layer_names_dict = {str(i + 1): desc for i, desc in enumerate(descriptions)}
+        else:
+            self.layer_names_dict = {str(i + 1): name for i, name in enumerate(self.layer_names)}
+        
+        # 6. 派生多空组合
+        if self.long_layers is None or self.short_layers is None:
+            # 综合因子默认反向：低值做多，高值做空
+            self.long_layers = [1, 2]
+            self.short_layers = [4, 5]
     
     def validate(self) -> None:
         """校验配置完整性"""

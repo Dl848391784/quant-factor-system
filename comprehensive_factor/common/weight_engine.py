@@ -466,14 +466,20 @@ class RollingICIRWeightMethod(WeightMethodBase):
         # 修复：使用 pandas.Series.map 直接映射（无需 lambda，无延迟绑定）
 
 # 将滚动 ICIR 映射到 factor_df（每个日期的所有股票共享同一个滚动 ICIR）
+        # v1.13 修复：日期类型不匹配 bug
+        # - rolling_icir_dict[col] 的索引是字符串日期（如 '2024-03-27'）
+        # - factor_df['date_sorted'] 是 datetime 类型
+        # - datetime 与字符串无法匹配，导致 map 返回 NaN，回退等权
+        # - 修复：将 rolling_icir_series 索引也转换为 datetime 类型
         for col in factor_cols:
             if col in rolling_icir_dict and len(rolling_icir_dict[col]) > 0:
-                # 方法1：使用 pandas.Series.map 直接映射（无 lambda，无延迟绑定）
                 rolling_icir_series = rolling_icir_dict[col]
-                # v1.13 修复：日期类型不匹配导致 map 失败
-                # - rolling_icir_series 索引是字符串日期（来自 IC 文件）
-                # - factor_df['date_sorted'] 是 datetime 类型
-                # - 类型不匹配时 Series.map 返回 NaN，导致权重回退等权
+                # v1.13 修复：索引类型转换（字符串 → datetime）
+                rolling_icir_series_dt = rolling_icir_series.copy()
+                rolling_icir_series_dt.index = pd.to_datetime(rolling_icir_series_dt.index)
+                factor_df[f'{col}_rolling_icir'] = factor_df['date_sorted'].map(rolling_icir_series_dt)
+            else:
+                factor_df[f'{col}_rolling_icir'] = np.nan
                 # 修复：将 rolling_icir_series 索引转换为 datetime，与 date_sorted 类型一致
                 rolling_icir_series_dt = rolling_icir_series.copy()
                 rolling_icir_series_dt.index = pd.to_datetime(rolling_icir_series_dt.index)

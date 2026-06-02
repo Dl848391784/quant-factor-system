@@ -1,10 +1,10 @@
 {
   "version": "4.0",
-  "n_days": 0,
-  "n_assets": 0,
-  "n_records": 1486394,
-  "elapsed_seconds": 1009.1679406166077,
-  "is_valid": false,
+  "n_days": 545,
+  "n_assets": 3008,
+  "n_records": 1487085,
+  "elapsed_seconds": 998.4381458759308,
+  "is_valid": true,
   "memory_monitor": "proc_self_status",
   "fields": [
     "date",

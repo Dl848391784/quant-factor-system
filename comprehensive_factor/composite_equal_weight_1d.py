@@ -24,7 +24,7 @@
 import sys
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List
+from typing import ClassVar, List, Sequence
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -56,6 +56,17 @@ class EqualWeightLayerConfig(CompositeLayerConfig):
     综合因子方向：反向因子（低值预期高收益）
     - 缩量（volume_ratio低）+ 超卖（rsi低） → 预期高收益
     """
+    
+    # === 因子元数据（必须声明，满足 LayerConfigBase 要求） ===
+    factor_name: ClassVar[str] = 'equal_weight_composite'
+    layer_names: ClassVar[Sequence[str]] = ('lowest', 'lower', 'normal', 'higher', 'highest')
+    layer_descriptions: ClassVar[Sequence[str]] = (
+        '极低层(综合因子值最小)',
+        '偏低层(综合因子值偏小)',
+        '正常层(综合因子值中等)',
+        '偏高层(综合因子值偏大)',
+        '极高层(综合因子值最大)'
+    )
     
     # 分层参数（覆盖父类默认值，因子组合参数继承父类）
     n_layers: int = 5

@@ -87,6 +87,8 @@ if __name__ == '__main__':
         calculate_bollinger_pb,
         calculate_kdj_j,
         calculate_turnover_surge,
+        calculate_amplitude,
+        calculate_price_position,
     )
     from data_fetchers.common.logger_config import setup_logger
 else:
@@ -95,6 +97,8 @@ else:
         calculate_bollinger_pb,
         calculate_kdj_j,
         calculate_turnover_surge,
+        calculate_amplitude,
+        calculate_price_position,
     )
     from .common.logger_config import setup_logger
 
@@ -122,7 +126,7 @@ __all__ = [
 _DEFAULT_RESULT_DIR = Path(__file__).parent / 'result'
 
 # 扩展因子列名（元组防止意外修改）
-_EXTENDED_FACTOR_COLS: tuple[str, ...] = ('bollinger_pb', 'kdj_j', 'turnover_surge')
+_EXTENDED_FACTOR_COLS: tuple[str, ...] = ('bollinger_pb', 'kdj_j', 'turnover_surge', 'amplitude', 'price_position')
 
 # 收益数据列名（元组防止意外修改）
 _RETURN_COLS: tuple[str, ...] = ('forward_return_1d', 'forward_return_3d', 'forward_return_5d')
@@ -136,8 +140,8 @@ _BASE_COLS: tuple[str, ...] = ('date', 'asset', 'open', 'close', 'high', 'low', 
 # _OUTPUT_COLS[0:2]   = date, asset（索引字段）
 # _OUTPUT_COLS[2:6]   = open, close, high, low（行情数据）
 # _OUTPUT_COLS[6:9]   = rsi_6, volume_ratio_5, turnover_rate（基础因子，来自输入）
-# _OUTPUT_COLS[9:12]  = bollinger_pb, kdj_j, turnover_surge（扩展因子，本次计算）
-# _OUTPUT_COLS[12:]   = forward_return_1d, forward_return_3d, forward_return_5d（收益数据，从 return_data 合并）
+# _OUTPUT_COLS[9:14]  = bollinger_pb, kdj_j, turnover_surge, amplitude, price_position（扩展因子，本次计算）
+# _OUTPUT_COLS[14:]   = forward_return_1d, forward_return_3d, forward_return_5d（收益数据，从 return_data 合并）
 _OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS
 
 
@@ -424,8 +428,24 @@ def generate_all_factors(
     surge_valid = int(factor_df['turnover_surge'].notna().sum())
     logger.info("  有效 turnover_surge: %d (%.2f%%)", surge_valid, _calc_pct(surge_valid, len(factor_df)))
     
-    # ========== Step 7: 格式化输出 ==========
-    logger.info("Step 7: 格式化输出...")
+    # ========== Step 7: 计算 amplitude ==========
+    logger.info("Step 7: 计算振幅因子...")
+    
+    factor_df = calculate_amplitude(factor_df, logger_arg=logger)
+    
+    amplitude_valid = int(factor_df['amplitude'].notna().sum())
+    logger.info("  有效 amplitude: %d (%.2f%%)", amplitude_valid, _calc_pct(amplitude_valid, len(factor_df)))
+    
+    # ========== Step 8: 计算 price_position ==========
+    logger.info("Step 8: 计算价格位置因子...")
+    
+    factor_df = calculate_price_position(factor_df, logger_arg=logger)
+    
+    position_valid = int(factor_df['price_position'].notna().sum())
+    logger.info("  有效 price_position: %d (%.2f%%)", position_valid, _calc_pct(position_valid, len(factor_df)))
+    
+    # ========== Step 9: 格式化输出 ==========
+    logger.info("Step 9: 格式化输出...")
     
     factor_df['date'] = factor_df['date'].dt.strftime('%Y-%m-%d')
     

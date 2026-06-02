@@ -18,7 +18,7 @@ IC加权综合因子分层回测脚本
 import sys
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List
+from typing import ClassVar, List, Sequence
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -57,6 +57,17 @@ class ICWeightLayerConfig(CompositeLayerConfig):
     
     综合因子方向：反向因子（因子值越大，未来收益越低）
     """
+    
+    # === 因子元数据（必须声明，满足 LayerConfigBase 要求） ===
+    factor_name: ClassVar[str] = 'ic_weight_composite'
+    layer_names: ClassVar[Sequence[str]] = ('lowest', 'lower', 'normal', 'higher', 'highest')
+    layer_descriptions: ClassVar[Sequence[str]] = (
+        '极低层(综合因子值最小)',
+        '偏低层(综合因子值偏小)',
+        '正常层(综合因子值中等)',
+        '偏高层(综合因子值偏大)',
+        '极高层(综合因子值最大)'
+    )
     
     # 分层参数（继承父类的 factor_list, factor_cols）
     n_layers: int = 5

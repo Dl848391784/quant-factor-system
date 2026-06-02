@@ -310,6 +310,9 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
                     brace_count += stripped.count('{') - stripped.count('}')
                     if brace_count == 0:
                         # meta 结束，解析并提取信息
+                        # 去掉最后一行的尾部逗号（meta 后面有逗号因为还有 data 字段）
+                        if meta_lines and meta_lines[-1].endswith(','):
+                            meta_lines[-1] = meta_lines[-1].rstrip(',')
                         meta_content = '\n'.join(meta_lines)
                         try:
                             meta = json.loads(meta_content)

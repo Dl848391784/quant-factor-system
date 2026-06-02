@@ -3,8 +3,8 @@
     "version": "2.8",
     "source": "local_backup",
     "level": "一级",
-    "updated_at": "2026-05-28",
-    "total_count": 3011
+    "updated_at": "2026-06-02",
+    "total_count": 3012
   },
   "industries": {
     "000001": {
@@ -992,6 +992,11 @@
       "industry": "新能源",
       "industry_code": "local"
     },
+    "000691": {
+      "name": "亚太实业",
+      "industry": "其他",
+      "industry_code": "local"
+    },
     "000692": {
       "name": "惠天热电",
       "industry": "其他",
@@ -1753,7 +1758,7 @@
       "industry_code": "local"
     },
     "000953": {
-      "name": "河化股份",
+      "name": "中哲精化",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -2063,8 +2068,8 @@
       "industry_code": "local"
     },
     "001237": {
-      "name": "C惠康",
-      "industry": "其他",
+      "name": "惠康科技",
+      "industry": "科技",
       "industry_code": "local"
     },
     "001238": {
@@ -7568,7 +7573,7 @@
       "industry_code": "local"
     },
     "600176": {
-      "name": "XD中国巨",
+      "name": "中国巨石",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -7898,8 +7903,8 @@
       "industry_code": "local"
     },
     "600276": {
-      "name": "XD恒瑞医",
-      "industry": "其他",
+      "name": "恒瑞医药",
+      "industry": "医药",
       "industry_code": "local"
     },
     "600278": {
@@ -8008,8 +8013,8 @@
       "industry_code": "local"
     },
     "600309": {
-      "name": "XD万华化",
-      "industry": "其他",
+      "name": "万华化学",
+      "industry": "化工",
       "industry_code": "local"
     },
     "600310": {
@@ -9398,7 +9403,7 @@
       "industry_code": "local"
     },
     "600702": {
-      "name": "XD舍得酒",
+      "name": "舍得酒业",
       "industry": "消费",
       "industry_code": "local"
     },
@@ -9633,7 +9638,7 @@
       "industry_code": "local"
     },
     "600760": {
-      "name": "XD中航沈",
+      "name": "中航沈飞",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -10003,7 +10008,7 @@
       "industry_code": "local"
     },
     "600857": {
-      "name": "宁波中百",
+      "name": "XD宁波中",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -10423,7 +10428,7 @@
       "industry_code": "local"
     },
     "600988": {
-      "name": "XD赤峰黄",
+      "name": "赤峰黄金",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -10473,7 +10478,7 @@
       "industry_code": "local"
     },
     "601000": {
-      "name": "XD唐山港",
+      "name": "唐山港",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -10713,7 +10718,7 @@
       "industry_code": "local"
     },
     "601126": {
-      "name": "XD四方股",
+      "name": "四方股份",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -11198,7 +11203,7 @@
       "industry_code": "local"
     },
     "601678": {
-      "name": "滨化股份",
+      "name": "XD滨化股",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -11533,7 +11538,7 @@
       "industry_code": "local"
     },
     "601975": {
-      "name": "XD招商南",
+      "name": "招商南油",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -11603,8 +11608,8 @@
       "industry_code": "local"
     },
     "603004": {
-      "name": "鼎龙科技",
-      "industry": "科技",
+      "name": "XD鼎龙科",
+      "industry": "其他",
       "industry_code": "local"
     },
     "603005": {
@@ -11648,7 +11653,7 @@
       "industry_code": "local"
     },
     "603014": {
-      "name": "威高血净",
+      "name": "XD威高血",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -11673,7 +11678,7 @@
       "industry_code": "local"
     },
     "603019": {
-      "name": "中科曙光",
+      "name": "XD中科曙",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -11743,7 +11748,7 @@
       "industry_code": "local"
     },
     "603036": {
-      "name": "XD如通股",
+      "name": "如通股份",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -12038,8 +12043,8 @@
       "industry_code": "local"
     },
     "603105": {
-      "name": "芯能科技",
-      "industry": "科技",
+      "name": "XD芯能科",
+      "industry": "其他",
       "industry_code": "local"
     },
     "603106": {
@@ -12178,7 +12183,7 @@
       "industry_code": "local"
     },
     "603136": {
-      "name": "天目湖",
+      "name": "XD天目湖",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -12578,8 +12583,8 @@
       "industry_code": "local"
     },
     "603236": {
-      "name": "移远通信",
-      "industry": "通信",
+      "name": "DR移远通",
+      "industry": "其他",
       "industry_code": "local"
     },
     "603237": {
@@ -12588,12 +12593,12 @@
       "industry_code": "local"
     },
     "603238": {
-      "name": "诺邦股份",
+      "name": "XD诺邦股",
       "industry": "其他",
       "industry_code": "local"
     },
     "603239": {
-      "name": "浙江仙通",
+      "name": "XD浙江仙",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -12693,7 +12698,7 @@
       "industry_code": "local"
     },
     "603279": {
-      "name": "景津装备",
+      "name": "XD景津装",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -12713,7 +12718,7 @@
       "industry_code": "local"
     },
     "603283": {
-      "name": "赛腾股份",
+      "name": "DR赛腾股",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -13198,7 +13203,7 @@
       "industry_code": "local"
     },
     "603435": {
-      "name": "C嘉德",
+      "name": "嘉德利",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -13603,7 +13608,7 @@
       "industry_code": "local"
     },
     "603650": {
-      "name": "彤程新材",
+      "name": "XD彤程新",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -13623,8 +13628,8 @@
       "industry_code": "local"
     },
     "603658": {
-      "name": "安图生物",
-      "industry": "医药",
+      "name": "XD安图生",
+      "industry": "其他",
       "industry_code": "local"
     },
     "603659": {
@@ -13818,7 +13823,7 @@
       "industry_code": "local"
     },
     "603713": {
-      "name": "XD密尔克",
+      "name": "密尔克卫",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -13873,7 +13878,7 @@
       "industry_code": "local"
     },
     "603737": {
-      "name": "三棵树",
+      "name": "DR三棵树",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -13948,7 +13953,7 @@
       "industry_code": "local"
     },
     "603786": {
-      "name": "科博达",
+      "name": "XD科博达",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -13998,7 +14003,7 @@
       "industry_code": "local"
     },
     "603806": {
-      "name": "XD福斯特",
+      "name": "福斯特",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -14388,7 +14393,7 @@
       "industry_code": "local"
     },
     "603966": {
-      "name": "DR法兰泰",
+      "name": "法兰泰克",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -14478,7 +14483,7 @@
       "industry_code": "local"
     },
     "603991": {
-      "name": "至正股份",
+      "name": "领先股份",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -14488,7 +14493,7 @@
       "industry_code": "local"
     },
     "603993": {
-      "name": "XD洛阳钼",
+      "name": "洛阳钼业",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -14513,7 +14518,7 @@
       "industry_code": "local"
     },
     "605001": {
-      "name": "威奥股份",
+      "name": "XD威奥股",
       "industry": "其他",
       "industry_code": "local"
     },
@@ -14983,7 +14988,7 @@
       "industry_code": "local"
     },
     "605389": {
-      "name": "DR长龄液",
+      "name": "长龄液压",
       "industry": "其他",
       "industry_code": "local"
     },

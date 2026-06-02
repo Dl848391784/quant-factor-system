@@ -8,32 +8,43 @@ Stage 0: 基础数据拉取
   2. fetch_factor_cache.py      → cache/factor_data/factor_data.json.gz（收益数据已内置于 factor_ic_data.json.gz）
   3. fetch_turnover.py          → data_fetchers/result/turnover_rate_data.json.gz
   4. fetch_industry.py          → result/stock_industry.json
+  5. fetch_tail_trading.py      → data_fetchers/result/tail_trading_data.json.gz（尾盘5分钟K线数据）
 
 Stage 1: 数据整合
-  5. factor_generator.py        → data_fetchers/result/factor_ic_data.json.gz
+  6. factor_generator.py        → data_fetchers/result/factor_ic_data.json.gz
 
 Stage 2: IC计算
-  6. ic_rsi_1d.py
-  7. ic_volume_ratio_1d.py
-  8. ic_kdj_j_1d.py
-  9. ic_bollinger_pb_1d.py
-  10. ic_turnover_surge_1d.py
+  7. ic_rsi_1d.py
+  8. ic_volume_ratio_1d.py
+  9. ic_kdj_j_1d.py
+  10. ic_bollinger_pb_1d.py
+  11. ic_turnover_surge_1d.py
+  12. ic_amplitude_1d.py
+  13. ic_price_position_1d.py
+  14. ic_return_3d_1d.py
+  15. ic_return_5d_1d.py
+  16. ic_overnight_ret_1d.py
 
 Stage 3: 分层回测
-  11. layered_backtest_rsi_1d.py
-  12. layered_backtest_volume_ratio_1d.py
-  13. layered_backtest_kdj_j_1d.py
-  14. layered_backtest_bollinger_pb_1d.py
-  15. layered_backtest_turnover_surge_1d.py
+  17. layered_backtest_rsi_1d.py
+  18. layered_backtest_volume_ratio_1d.py
+  19. layered_backtest_kdj_j_1d.py
+  20. layered_backtest_bollinger_pb_1d.py
+  21. layered_backtest_turnover_surge_1d.py
+  22. layered_backtest_amplitude_1d.py
+  23. layered_backtest_price_position_1d.py
+  24. layered_backtest_return_3d_1d.py
+  25. layered_backtest_return_5d_1d.py
+  26. layered_backtest_overnight_ret_1d.py
 
 Stage 4: 综合因子
-  16. composite_equal_weight_1d.py
-  17. composite_icir_weight_1d.py
-  18. composite_ic_weight_1d.py
-  19. composite_rolling_icir_weight_1d.py
+  27. composite_equal_weight_1d.py
+  28. composite_icir_weight_1d.py
+  29. composite_ic_weight_1d.py
+  30. composite_rolling_icir_weight_1d.py
 
 Stage 5: 汇总报告
-  20. generate_factor_summary_report.py
+  31. generate_factor_summary_report.py
 
 版本历史：
 - v1.0 (2026-05-27): 初始版本，完全串行执行，退出码检查，脚本级别重试
@@ -71,6 +82,7 @@ class ScriptTask(NamedTuple):
     script: str         # 脚本相对路径
     stage: int          # 所属阶段
     args: list[str]     # 命令行参数（可选）
+    timeout: int | None = None  # 独立超时时间（秒），None 则使用默认 SCRIPT_TIMEOUT
 
 # 完整执行流程（按顺序）
 PIPELINE_SCRIPTS: list[ScriptTask] = [
@@ -79,6 +91,7 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask('fetch_factor_cache', 'data_fetchers/fetch_factor_cache.py', 0, []),
     ScriptTask('fetch_turnover', 'data_fetchers/fetch_turnover.py', 0, ['--baostock']),
     ScriptTask('fetch_industry', 'data_fetchers/fetch_industry.py', 0, []),  # 行业分类数据
+    ScriptTask('fetch_tail_trading', 'data_fetchers/fetch_tail_trading.py', 0, [], timeout=10800),  # 尾盘5分钟K线数据（3小时超时，因每批停顿80秒）
     
     # Stage 1: 数据整合
     ScriptTask('factor_generator', 'data_fetchers/factor_generator.py', 1, []),
@@ -89,6 +102,11 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask('ic_kdj_j', 'factor_ic/ic_kdj_j_1d.py', 2, []),
     ScriptTask('ic_bollinger_pb', 'factor_ic/ic_bollinger_pb_1d.py', 2, []),
     ScriptTask('ic_turnover_surge', 'factor_ic/ic_turnover_surge_1d.py', 2, []),
+    ScriptTask('ic_amplitude', 'factor_ic/ic_amplitude_1d.py', 2, []),
+    ScriptTask('ic_price_position', 'factor_ic/ic_price_position_1d.py', 2, []),
+    ScriptTask('ic_return_3d', 'factor_ic/ic_return_3d_1d.py', 2, []),
+    ScriptTask('ic_return_5d', 'factor_ic/ic_return_5d_1d.py', 2, []),
+    ScriptTask('ic_overnight_ret', 'factor_ic/ic_overnight_ret_1d.py', 2, []),
     
     # Stage 3: 分层回测
     ScriptTask('backtest_rsi', 'backtest/layered_backtest_rsi_1d.py', 3, []),
@@ -96,6 +114,11 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask('backtest_kdj_j', 'backtest/layered_backtest_kdj_j_1d.py', 3, []),
     ScriptTask('backtest_bollinger_pb', 'backtest/layered_backtest_bollinger_pb_1d.py', 3, []),
     ScriptTask('backtest_turnover_surge', 'backtest/layered_backtest_turnover_surge_1d.py', 3, []),
+    ScriptTask('backtest_amplitude', 'backtest/layered_backtest_amplitude_1d.py', 3, []),
+    ScriptTask('backtest_price_position', 'backtest/layered_backtest_price_position_1d.py', 3, []),
+    ScriptTask('backtest_return_3d', 'backtest/layered_backtest_return_3d_1d.py', 3, []),
+    ScriptTask('backtest_return_5d', 'backtest/layered_backtest_return_5d_1d.py', 3, []),
+    ScriptTask('backtest_overnight_ret', 'backtest/layered_backtest_overnight_ret_1d.py', 3, []),
     
     # Stage 4: 综合因子（启用自动筛选）
     ScriptTask('composite_equal', 'comprehensive_factor/composite_equal_weight_1d.py', 4, ['--auto_select']),
@@ -104,7 +127,7 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask('composite_rolling_icir', 'comprehensive_factor/composite_rolling_icir_weight_1d.py', 4, ['--auto_select']),
     
     # Stage 5: 汇总报告
-    ScriptTask('summary_report', 'scripts/generate_factor_summary_report.py', 5, []),
+    ScriptTask('summary_report', 'summary/generate_factor_summary_report.py', 5, []),
 ]
 
 # ============================================================================
@@ -139,6 +162,9 @@ def run_script(task: ScriptTask, retry_count: int = 0) -> bool:
     print(f"{prefix} 开始执行...")
     print(f"{prefix} 脚本路径: {script_path}")
     
+    # 计算实际超时时间（优先使用任务独立超时，否则使用默认值）
+    actual_timeout = task.timeout if task.timeout is not None else SCRIPT_TIMEOUT
+    
     start_time = time.time()
     
     try:
@@ -148,7 +174,7 @@ def run_script(task: ScriptTask, retry_count: int = 0) -> bool:
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
-            timeout=SCRIPT_TIMEOUT,
+            timeout=actual_timeout,
             env={**dict(os.environ), 'PYTHONPATH': str(PROJECT_ROOT)}
         )
         
@@ -176,7 +202,7 @@ def run_script(task: ScriptTask, retry_count: int = 0) -> bool:
     
     except subprocess.TimeoutExpired:
         elapsed = time.time() - start_time
-        print(f"{prefix} ✗ 执行超时 (耗时 {elapsed:.1f}s > {SCRIPT_TIMEOUT}s)")
+        print(f"{prefix} ✗ 执行超时 (耗时 {elapsed:.1f}s > {actual_timeout}s)")
         return False
     
     except Exception as e:
