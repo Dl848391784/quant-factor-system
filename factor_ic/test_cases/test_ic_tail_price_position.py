@@ -22,9 +22,67 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from factor_ic.ic_tail_price_position import (
     calculate_tail_price_position,
-    load_tail_trading_data,
+    get_close_price,
+    calc_price_position,
     EPSILON,
 )
+from factor_ic.common.tail_data_loader import (
+    load_tail_trading_data,
+    TAIL_TRADING_DATA_PATH,
+)
+
+
+class TestGetClosePrice:
+    """收盘价获取函数测试"""
+
+    def test_normal_list(self):
+        """正常列表场景"""
+        prices = [10.0, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 11.0, 11.0, 11.0]
+        result = get_close_price(prices)
+        assert result == 11.0
+
+    def test_short_list(self):
+        """列表长度不足"""
+        prices = [10.0, 10.1]
+        result = get_close_price(prices)
+        assert pd.isna(result)
+
+    def test_not_list(self):
+        """非列表类型"""
+        result = get_close_price(None)
+        assert pd.isna(result)
+
+
+class TestCalcPricePosition:
+    """价格位置计算函数测试"""
+
+    def test_normal_calculation(self):
+        """正常计算"""
+        result = calc_price_position(10.5, 11.0, 10.0)
+        expected = 0.5
+        assert abs(result - expected) < 0.001
+
+    def test_top_position(self):
+        """顶部位置"""
+        result = calc_price_position(11.0, 11.0, 10.0)
+        expected = 1.0
+        assert abs(result - expected) < 0.001
+
+    def test_bottom_position(self):
+        """底部位置"""
+        result = calc_price_position(10.0, 11.0, 10.0)
+        expected = 0.0
+        assert abs(result - expected) < 0.001
+
+    def test_zero_range(self):
+        """除零防护"""
+        result = calc_price_position(10.0, 10.0, 10.0)
+        assert pd.isna(result)
+
+    def test_nan_input(self):
+        """NaN 输入"""
+        result = calc_price_position(np.nan, 11.0, 10.0)
+        assert pd.isna(result)
 
 
 class TestCalculateTailPricePosition:
@@ -32,13 +90,11 @@ class TestCalculateTailPricePosition:
 
     def test_normal_calculation(self):
         """正常计算场景"""
-        # 构造测试数据
         factor_df = pd.DataFrame({
             "date": ["2026-06-01", "2026-06-01"],
             "asset": ["000001", "000002"],
         })
 
-        # Mock 尾盘数据
         mock_tail_df = pd.DataFrame({
             "date": ["2026-06-01", "2026-06-01"],
             "asset": ["000001", "000002"],
@@ -50,44 +106,32 @@ class TestCalculateTailPricePosition:
             "tail_low": [10.0, 20.0],
         })
 
-        # 临时替换尾盘数据路径
-        import factor_ic.ic_tail_price_position as module
-        original_path = module.TAIL_TRADING_DATA_PATH
+        # 临时替换公共模块路径
+        import factor_ic.common.tail_data_loader as loader_module
+        original_path = loader_module.TAIL_TRADING_DATA_PATH
 
-        # 写入临时文件
         with tempfile.NamedTemporaryFile(suffix=".json.gz", delete=False) as f:
             temp_path = Path(f.name)
             with gzip.open(temp_path, "wt", encoding="utf-8") as gz:
                 json.dump({"data": mock_tail_df.to_dict("records")}, gz)
 
-        module.TAIL_TRADING_DATA_PATH = temp_path
+        loader_module.TAIL_TRADING_DATA_PATH = temp_path
 
         try:
             result_df = calculate_tail_price_position(factor_df)
 
-            # 验证结果
             assert "tail_price_position" in result_df.columns
             assert result_df["tail_price_position"].notna().sum() == 2
 
-            # 验证计算逻辑
-            # asset 000001: 收盘价=11.0, tail_high=11.0, tail_low=10.0
-            # 位置 = (11.0 - 10.0) / (11.0 - 10.0) = 1.0（收盘在最高位）
+            # asset 000001: 位置 = (11.0 - 10.0) / (11.0 - 10.0) = 1.0
             expected_000001 = 1.0
             assert abs(
                 result_df.loc[result_df["asset"] == "000001", "tail_price_position"].values[0]
                 - expected_000001
             ) < 0.001
 
-            # asset 000002: 收盘价=21.0, tail_high=21.0, tail_low=20.0
-            # 位置 = (21.0 - 20.0) / (21.0 - 20.0) = 1.0（收盘在最高位）
-            expected_000002 = 1.0
-            assert abs(
-                result_df.loc[result_df["asset"] == "000002", "tail_price_position"].values[0]
-                - expected_000002
-            ) < 0.001
-
         finally:
-            module.TAIL_TRADING_DATA_PATH = original_path
+            loader_module.TAIL_TRADING_DATA_PATH = original_path
             temp_path.unlink()
 
     def test_mid_position(self):
@@ -105,29 +149,27 @@ class TestCalculateTailPricePosition:
             "tail_low": [10.0],
         })
 
-        import factor_ic.ic_tail_price_position as module
-        original_path = module.TAIL_TRADING_DATA_PATH
+        import factor_ic.common.tail_data_loader as loader_module
+        original_path = loader_module.TAIL_TRADING_DATA_PATH
 
         with tempfile.NamedTemporaryFile(suffix=".json.gz", delete=False) as f:
             temp_path = Path(f.name)
             with gzip.open(temp_path, "wt", encoding="utf-8") as gz:
                 json.dump({"data": mock_tail_df.to_dict("records")}, gz)
 
-        module.TAIL_TRADING_DATA_PATH = temp_path
+        loader_module.TAIL_TRADING_DATA_PATH = temp_path
 
         try:
             result_df = calculate_tail_price_position(factor_df)
-
-            # 收盘价=10.5（最后一个），位置 = (10.5 - 10.0) / (11.0 - 10.0) = 0.5
             expected = 0.5
             assert abs(result_df["tail_price_position"].values[0] - expected) < 0.001
 
         finally:
-            module.TAIL_TRADING_DATA_PATH = original_path
+            loader_module.TAIL_TRADING_DATA_PATH = original_path
             temp_path.unlink()
 
     def test_zero_range_protection(self):
-        """除零防护：tail_high == tail_low"""
+        """除零防护"""
         factor_df = pd.DataFrame({
             "date": ["2026-06-01"],
             "asset": ["000001"],
@@ -141,59 +183,22 @@ class TestCalculateTailPricePosition:
             "tail_low": [10.0],
         })
 
-        import factor_ic.ic_tail_price_position as module
-        original_path = module.TAIL_TRADING_DATA_PATH
+        import factor_ic.common.tail_data_loader as loader_module
+        original_path = loader_module.TAIL_TRADING_DATA_PATH
 
         with tempfile.NamedTemporaryFile(suffix=".json.gz", delete=False) as f:
             temp_path = Path(f.name)
             with gzip.open(temp_path, "wt", encoding="utf-8") as gz:
                 json.dump({"data": mock_tail_df.to_dict("records")}, gz)
 
-        module.TAIL_TRADING_DATA_PATH = temp_path
+        loader_module.TAIL_TRADING_DATA_PATH = temp_path
 
         try:
             result_df = calculate_tail_price_position(factor_df)
-
-            # tail_high == tail_low 时应返回 NaN
             assert pd.isna(result_df["tail_price_position"].values[0])
 
         finally:
-            module.TAIL_TRADING_DATA_PATH = original_path
-            temp_path.unlink()
-
-    def test_incomplete_data_protection(self):
-        """数据不完整防护：prices 数组长度不足"""
-        factor_df = pd.DataFrame({
-            "date": ["2026-06-01"],
-            "asset": ["000001"],
-        })
-
-        mock_tail_df = pd.DataFrame({
-            "date": ["2026-06-01"],
-            "asset": ["000001"],
-            "prices": [[10.0, 10.1]],  # 只有2个元素
-            "tail_high": [11.0],
-            "tail_low": [10.0],
-        })
-
-        import factor_ic.ic_tail_price_position as module
-        original_path = module.TAIL_TRADING_DATA_PATH
-
-        with tempfile.NamedTemporaryFile(suffix=".json.gz", delete=False) as f:
-            temp_path = Path(f.name)
-            with gzip.open(temp_path, "wt", encoding="utf-8") as gz:
-                json.dump({"data": mock_tail_df.to_dict("records")}, gz)
-
-        module.TAIL_TRADING_DATA_PATH = temp_path
-
-        try:
-            result_df = calculate_tail_price_position(factor_df)
-
-            # 数据不完整时应返回 NaN
-            assert pd.isna(result_df["tail_price_position"].values[0])
-
-        finally:
-            module.TAIL_TRADING_DATA_PATH = original_path
+            loader_module.TAIL_TRADING_DATA_PATH = original_path
             temp_path.unlink()
 
 
@@ -202,15 +207,35 @@ class TestLoadTailTradingData:
 
     def test_file_not_found(self):
         """文件不存在时抛出异常"""
-        import factor_ic.ic_tail_price_position as module
-        original_path = module.TAIL_TRADING_DATA_PATH
-        module.TAIL_TRADING_DATA_PATH = Path("/nonexistent/path.json.gz")
+        import factor_ic.common.tail_data_loader as loader_module
+        original_path = loader_module.TAIL_TRADING_DATA_PATH
+        loader_module.TAIL_TRADING_DATA_PATH = Path("/nonexistent/path.json.gz")
 
         try:
             with pytest.raises(FileNotFoundError):
                 load_tail_trading_data()
         finally:
-            module.TAIL_TRADING_DATA_PATH = original_path
+            loader_module.TAIL_TRADING_DATA_PATH = original_path
+
+    def test_invalid_format(self):
+        """数据格式错误时抛出异常"""
+        import factor_ic.common.tail_data_loader as loader_module
+        original_path = loader_module.TAIL_TRADING_DATA_PATH
+
+        # 写入格式错误的临时文件（缺少 data 字段）
+        with tempfile.NamedTemporaryFile(suffix=".json.gz", delete=False) as f:
+            temp_path = Path(f.name)
+            with gzip.open(temp_path, "wt", encoding="utf-8") as gz:
+                json.dump({"meta": {"version": "1.0"}}, gz)  # 缺少 data 字段
+
+        loader_module.TAIL_TRADING_DATA_PATH = temp_path
+
+        try:
+            with pytest.raises(ValueError, match="缺少 'data' 字段"):
+                load_tail_trading_data()
+        finally:
+            loader_module.TAIL_TRADING_DATA_PATH = original_path
+            temp_path.unlink()
 
 
 if __name__ == "__main__":

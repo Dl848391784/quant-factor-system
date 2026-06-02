@@ -236,3 +236,5 @@ merged_df['tail_price_position'] = merged_df.apply(
 ## 版本历史
 
 1. v1.0 (2026-06-02): 初始版本，创建流程文档
+2. v1.1 (2026-06-02): 优化 - lint修复、测试文件创建（5个测试用例）
+3. v1.2 (2026-06-02): 优化 - 抽取独立函数(get_close_price/calc_price_position)、公共模块复用(tail_data_loader)、异常处理注释补充、测试补充至13个

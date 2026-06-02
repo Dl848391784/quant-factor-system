@@ -33,11 +33,10 @@
 版本历史:
   v1.0 (2026-06-02): 初始版本，实现尾盘价格位置因子 IC 计算
   v1.1 (2026-06-02): 优化 - 流程文档创建、lint修复、测试文件创建（5个测试用例）
+  v1.2 (2026-06-02): 优化 - 抽取独立函数(get_close_price/calc_price_position)、公共模块复用(tail_data_loader)、异常处理注释补充、测试补充至13个
 """
 
 import argparse
-import gzip
-import json
 import sys
 from pathlib import Path
 
@@ -49,10 +48,9 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
-from paths import DATA_FETCHERS_RESULT  # 遵循 PROJECT.md H7 规则
-
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
 from factor_ic.common.logger_config import get_logger
+from factor_ic.common.tail_data_loader import load_tail_trading_data  # 公共模块复用
 
 
 logger = get_logger(__name__)
@@ -63,44 +61,65 @@ logger = get_logger(__name__)
 DEFAULT_MIN_STOCKS = 10
 EPSILON = 1e-10  # 避免除零阈值
 
-# 尾盘数据路径（遵循 PROJECT.md H7 规则：使用 paths.py 单一来源）
-TAIL_TRADING_DATA_PATH = DATA_FETCHERS_RESULT / "tail_trading_data.json.gz"
-
-
-# ============================================================================
-# 辅助函数：加载尾盘数据
-# ============================================================================
-
-
-def load_tail_trading_data() -> pd.DataFrame:
-    """
-    加载尾盘数据
-
-    Returns:
-        DataFrame，包含 date, asset, prices, volumes, tail_high, tail_low 列
-
-    Raises:
-        FileNotFoundError: 尾盘数据文件不存在
-        ValueError: 尾盘数据格式错误
-    """
-    if not TAIL_TRADING_DATA_PATH.exists():
-        raise FileNotFoundError(f"尾盘数据文件不存在: {TAIL_TRADING_DATA_PATH}")
-
-    with gzip.open(TAIL_TRADING_DATA_PATH, "rt", encoding="utf-8") as f:
-        data = json.load(f)
-
-    if "data" not in data:
-        raise ValueError("尾盘数据格式错误：缺少 'data' 字段")
-
-    df = pd.DataFrame(data["data"])
-
-    logger.info("尾盘数据加载完成: %d 条记录", len(df))
-    return df
-
 
 # ============================================================================
 # 因子计算函数
 # ============================================================================
+
+
+def get_close_price(prices: list | None) -> float:
+    """
+    获取尾盘收盘价（prices[-1])
+
+    Args:
+        prices: 尾盘价格列表（13根5分钟K线收盘价）
+
+    Returns:
+        尾盘收盘价，或 NaN（数据不完整时）
+
+    Note:
+        - prices 不是列表时返回 NaN
+        - prices 长度不足 13 时返回 NaN（数据不完整）
+    """
+    if not isinstance(prices, list):
+        return np.nan
+    if len(prices) < 13:
+        return np.nan
+    return prices[-1]
+
+
+def calc_price_position(
+    close_price: float,
+    tail_high: float,
+    tail_low: float,
+) -> float:
+    """
+    计算尾盘价格位置
+
+    公式:
+    - 尾盘价格位置 = (收盘价 - 尾盘最低价) / (尾盘最高价 - 尾盘最低价)
+
+    Args:
+        close_price: 尾盘收盘价
+        tail_high: 尾盘最高价
+        tail_low: 尾盘最低价
+
+    Returns:
+        尾盘价格位置，理论范围 [0, 1]，或 NaN（边界情况）
+
+    Note:
+        - 任一参数为 NaN 时返回 NaN
+        - tail_high == tail_low 时返回 NaN（价格区间为零）
+    """
+    # 处理 NaN/None
+    if pd.isna(close_price) or pd.isna(tail_high) or pd.isna(tail_low):
+        return np.nan
+    # 除零防护：价格区间为零
+    price_range = tail_high - tail_low
+    if abs(price_range) < EPSILON:
+        return np.nan
+    # 计算位置
+    return (close_price - tail_low) / price_range
 
 
 def calculate_tail_price_position(factor_df: pd.DataFrame) -> pd.DataFrame:
@@ -141,10 +160,16 @@ def calculate_tail_price_position(factor_df: pd.DataFrame) -> pd.DataFrame:
 
     # 加载尾盘数据
     # 设计意图：文件不存在时返回全 NaN（fallback），而非抛出异常中断计算
+    # 原因：尾盘数据可能因上游 fetch_tail_trading.py 未运行而缺失，
+    #       但因子 IC 计算不应因此中断，应记录日志并返回空因子值
     try:
         tail_df = load_tail_trading_data()
     except FileNotFoundError as e:
         logger.error("尾盘数据文件不存在，返回全 NaN: %s", e)
+        factor_df["tail_price_position"] = np.nan
+        return factor_df
+    except ValueError as e:
+        logger.error("尾盘数据格式错误，返回全 NaN: %s", e)
         factor_df["tail_price_position"] = np.nan
         return factor_df
 
@@ -165,28 +190,10 @@ def calculate_tail_price_position(factor_df: pd.DataFrame) -> pd.DataFrame:
         len(factor_df),
     )
 
-    # 计算收盘价（prices[-1])
-    def get_close_price(prices):
-        if not isinstance(prices, list):
-            return np.nan
-        if len(prices) < 13:
-            return np.nan
-        return prices[-1]
-
+    # 计算收盘价（使用抽取的独立函数）
     merged_df["tail_close"] = merged_df["prices"].apply(get_close_price)
 
-    # 计算尾盘价格位置
-    def calc_price_position(close_price, tail_high, tail_low):
-        # 处理 NaN/None
-        if pd.isna(close_price) or pd.isna(tail_high) or pd.isna(tail_low):
-            return np.nan
-        # 除零防护：价格区间为零
-        price_range = tail_high - tail_low
-        if abs(price_range) < EPSILON:
-            return np.nan
-        # 计算位置
-        return (close_price - tail_low) / price_range
-
+    # 计算尾盘价格位置（使用抽取的独立函数）
     merged_df["tail_price_position"] = merged_df.apply(
         lambda row: calc_price_position(row["tail_close"], row["tail_high"], row["tail_low"]),
         axis=1,
