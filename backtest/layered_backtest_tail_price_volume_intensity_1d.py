@@ -22,6 +22,7 @@
 创建日期: 2026-06-02
 版本历史:
   v1.0 (2026-06-02): 初始版本，实现尾盘量价强度因子分层回测
+  v1.1 (2026-06-02): 优化 - 创建测试文件 test_layered_backtest_tail_price_volume_intensity_1d.py
 """
 
 import sys
