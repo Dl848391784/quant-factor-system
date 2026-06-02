@@ -5,6 +5,30 @@
 
 ---
 
+## 0. 开发流程（必须遵循）
+
+**涉及代码改动时，必须加载 `superpowers-workflow` skill 并遵循 4 阶段流程：**
+
+```
+Plan → Execute → Review → Debug
+```
+
+| 阶段 | 核心动作 | 必做项 |
+|------|---------|--------|
+| **Plan** | 先探索再规划 | 读 PROJECT.md + MODULE.md；涉及 2+ 文件先提交 design.md；任务粒度 ≤3 文件 ≤200 行 |
+| **Execute** | 分步执行验证 | 每步完成后验证；运行脚本检查实际输出；同步更新流程文档 + 时间标注 |
+| **Review** | 两阶段评审 | ruff → pytest → Spec Compliance（对照规范）→ Code Quality |
+| **Debug** | 系统性调试 | 测试失败时加载 `systematic-debugging` skill，找根因再修复 |
+
+**加载命令**：`skill_view(name='superpowers-workflow')`
+
+**弱模型防御机制**（不可跳过）：
+- Design-First：涉及 2+ 文件改动，必须先提交 design.md 通过审核才能动手
+- 任务粒度约束：单次任务 ≤3 文件、≤200 行代码，超出必须拆分
+- 规范引用取证：commit 消息必须引用规范行号（如"遵循 PROJECT.md 规则 #5（行 35-37）"）
+
+---
+
 ## 1. 跨模块数据路径（不可违反）
 
 | 模块 | 输出目录 | 输出文件 | 下游读取 |

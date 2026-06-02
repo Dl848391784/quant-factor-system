@@ -1,6 +1,6 @@
 # summary 模块规范
 
-> 版本: v1.9
+> 版本: v2.0
 > 创建时间: 2026-05-28
 > 最后更新: 2026-06-02
 
@@ -85,7 +85,7 @@ summary/
 
 ### 基础数据源检查
 
-**check_data_freshness(date, logger) 检查基础数据源新鲜度。**
+**check_data_freshness(date, logger) 检查基础数据源新鲜度和完成度。**
 
 检查配置 DATA_CHECK_SOURCES：
 
@@ -95,27 +95,63 @@ summary/
 | factor_data | factor_data.json.gz | meta.date_range.end | full_json |
 | turnover_data | turnover_rate_data.json.gz | meta.date_range.end | full_json |
 
+**数据完成度检查（v2.0 新增）：**
+
+基础数据源不仅要检查最新日期是否存在，还要统计最新日期的股票数占比：
+
+```
+完成度 = 最新日期股票数 / 总股票数
+```
+
+例如：总股票数 3000 支，最新日期只有 300 支股票数据 → 完成度 10% → 状态为 △不完整
+
+| 完成度阈值 | 状态判定 | 符号 |
+|-----------|---------|------|
+| ≥ 95% | ok | ✓正常 |
+| 70% ~ 95% | warning | △不完整 |
+| < 70% | error | ✗严重缺失 |
+
+检查方法：
+1. 从 factor_ic_data.json.gz 读取最新日期（dates[-1]）
+2. 统计该日期下的股票数（读取该日期对应的数据行）
+3. 对比 expected_stocks（从 factor_data.json.gz meta.total_stocks 获取，约 3000）
+4. 计算完成度百分比
+
 ### 衍生数据检查
 
-**check_derived_data_freshness(date, logger) 检查衍生数据存在性。**
+**check_derived_data_freshness(date, logger) 检查衍生数据存在性和数据完整性。**
 
 检查内容：
 
 | 数据类型 | 检查方式 | 状态判定 |
 |---------|---------|---------|
-| IC 结果 | 文件存在 + ic_series[-1].date 匹配 | ok/warning/error |
-| 回测结果 | 文件存在 + 数量统计 | ok/error |
-| 综合因子结果 | 文件存在 + 数量统计 | ok/error |
+| IC 结果 | 文件存在 + dates[-1] 匹配 + 数据非空 | ok/warning/error |
+| 回测结果 | 文件存在 + 数量统计 + 数据非空 | ok/error |
+| 综合因子结果 | 文件存在 + 数量统计 + 数据非空 | ok/error |
+
+**数据存在性检查（v2.0 新增）：**
+
+衍生数据不仅要检查文件是否生成，还要验证文件中数据是否存在：
+
+| 数据类型 | 检查字段 | 非空标准 |
+|---------|---------|---------|
+| IC 结果 | dates, ic_values | len(dates) > 0, len(ic_values) > 0 |
+| 回测结果 | layers, long_short | len(layers) > 0, long_short 非空 |
+| 综合因子结果 | weights, factor_list | len(weights) > 0, len(factor_list) > 0 |
+
+若文件存在但数据为空 → 状态为 ✗数据空
 
 ### 状态判定标准
 
 | 状态 | 条件 | 符号 |
 |------|------|------|
-| ok | actual_date == expected_date (T-1) | ✓正常 |
-| warning | actual_date != expected_date | △延迟 |
+| ok | actual_date == expected_date + 完成度 ≥ 95% + 数据非空 | ✓正常 |
+| warning | actual_date != expected_date 或 完成度 70%~95% | △延迟/△不完整 |
 | error | 文件不存在 | ✗缺失 |
 | error | 文件损坏或格式错误 | ✗读取失败 |
 | error | 无法解析日期字段 | ✗无日期 |
+| error | 数据为空（dates/ic_values 等长度为 0） | ✗数据空 |
+| error | 完成度 < 70% | ✗严重缺失 |
 
 ### 报告展示
 
@@ -128,18 +164,111 @@ summary/
 期望数据日期: 2026-06-01 (T-1)
 
 【基础数据源】
-数据源               描述                     最新日期     状态
+数据源               描述                     最新日期     完成度    状态
 ----------------------------------------------------------------------
-factor_ic_data       主数据源(行情+因子+收益)    2026-06-01    ✓正常
+factor_ic_data       主数据源(行情+因子+收益)    2026-06-01   100%     ✓正常
 ...
 
 【衍生数据】
-数据源               描述                     文件数量     状态
+数据源               描述                     文件数量     数据状态    状态
 ----------------------------------------------------------------------
-ic_results           IC分析结果                    10     ✓正常(10因子)
+ic_results           IC分析结果                    10     数据完整    ✓正常(10因子)
 ...
 
 汇总: ✓ 所有数据源已更新至 T-1
+```
+
+---
+
+## 因子数据汇总规范（v2.0 新增）
+
+### 单因子 IC 数据汇总
+
+**_generate_ic_section(ic_results) 必须汇总所有因子，新增因子自动适配。**
+
+要求：
+1. **自动发现因子**：从 `factor_ic/result/ic_*_analysis_result.json` 文件列表动态获取因子名
+2. **不遗漏因子**：禁止硬编码因子列表，必须从文件列表推断
+3. **排序规则**：按 ICIR 降序排列
+4. **数量一致性**：报告显示的因子数 = factor_ic/result 目录下的文件数
+
+检查方法：
+```bash
+# 因子数量一致性检查
+factor_count=$(ls factor_ic/result/ic_*_analysis_result.json | wc -l)
+grep -c "^因子" summary/result/factor_summary_report_*.txt | expect $factor_count
+```
+
+### 单因子分层回测数据汇总
+
+**_generate_backtest_section(ic_results, backtest_results) 必须汇总所有因子。**
+
+要求：
+1. **自动发现因子**：从 `backtest/result/*_layered_backtest.json` 文件列表动态获取
+2. **不遗漏因子**：禁止硬编码因子列表
+3. **排序规则**：按 IC 结果的 ICIR 排序（回测数据跟随 IC 排序）
+4. **数量一致性**：报告显示的因子数 = backtest/result 目录下的文件数
+
+### 因子筛选结果展示
+
+**get_factor_selection_info(...) 必须展示所有因子及其筛选状态。**
+
+要求：
+1. **展示所有因子**：选中因子 + 剔除因子都要展示，不遗漏
+2. **自动适配**：新增因子自动加入筛选结果，无需手动修改代码
+3. **剔除原因透明**：每个剔除因子必须展示具体剔除原因（ICIR 不足、高相关、单调性差等）
+
+输出格式：
+```
+四、因子筛选结果
+----------------------------------------------------------------------
+auto_select 模式结果:
+  - 选中因子: amplitude(ICIR=0.36), turnover_surge(ICIR=0.32)
+  - 剔除因子: volume_ratio(高相关), bollinger_pb(单调性差), ...
+----------------------------------------------------------------------
+筛选后因子列表: ['amplitude', 'turnover_surge']
+```
+
+---
+
+## 综合因子权重完整性规范（v2.0 新增）
+
+### 四种权重必须包含
+
+**综合因子四种权重回测数据汇总必须包含以下四种方式：**
+
+| 权重方法 | 文件名 | 必须存在 |
+|---------|--------|---------|
+| IC 加权 | composite_ic_weight_1d.json | ✓ |
+| ICIR 加权 | composite_icir_weight_1d.json | ✓ |
+| Rolling ICIR 加权 | composite_rolling_icir_weight_1d.json | ✓ |
+| 等权 | composite_equal_weight_1d.json | ✓ |
+
+检查方法：
+```bash
+ls comprehensive_factor/result/composite_*_1d.json | wc -l | expect 4
+```
+
+若缺失任一权重 → 报告显示 ✗权重缺失，并提示缺失的权重方法
+
+### 数据相近提示
+
+**四种权重的回测数据相近时必须提示，可能存在 bug。**
+
+相近判定标准：
+
+| 指标 | 相近阈值 | 提示 |
+|------|---------|------|
+| 多空年化收益 | 差值 < 0.5% | △收益相近，检查权重计算 |
+| 夏普比率 | 差值 < 0.1 | △夏普相近，检查权重计算 |
+| 单调性系数 | 差值 < 0.05 | △单调性相近，检查权重计算 |
+
+例外：若选中因子只有 1 个（单因子），则四种权重结果必然相同，相近是合理的，不提示。
+
+提示格式：
+```
+⚠ 权重方法 IC加权 与 ICIR加权 数据相近（收益差 0.3%），可能存在计算 bug
+  若选中因子为单因子，相近是合理的
 ```
 
 ---
@@ -435,3 +564,12 @@ rsi                -0.045     0.51      0.089       498
    - 新增 get_expected_t_minus_1() 计算期望日期
    - 更新流程文档 generate_factor_summary_report_flow.md v1.5
    - 新增测试用例 9 个（数据完整性检查相关）
+
+11. v2.0（2026-06-02）：
+   - MODULE.md 规范扩展（v1.9 → v2.0）
+   - 新增【基础数据源】数据完成度检查规范（股票数占比，阈值分级）
+   - 新增【衍生数据】数据存在性检查规范（dates/ic_values 非空验证）
+   - 新增"因子数据汇总规范"章节（单因子 IC/回测自动适配）
+   - 新增"综合因子权重完整性规范"章节（四种权重必须包含，相近数据提示）
+   - 因子筛选结果展示规范（选中/剔除因子不遗漏，剔除原因透明）
+   - 状态判定标准扩展（完成度分级、数据空判定）
