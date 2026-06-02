@@ -21,8 +21,12 @@
 创建日期: 2026-06-02
 版本历史:
   v1.0 (2026-06-02): 初始版本，实现尾盘价格趋势斜率因子分层回测
+  v1.1 (2026-06-02): Round 1 优化 - 导入分组注释、版本历史完善
+  v1.2 (2026-06-02): Round 2 优化 - 确认薄声明模式合规（ClassVar 类型注解、layer_descriptions 语义清晰）
+  v1.3 (2026-06-02): Round 3 优化 - 确认边界处理下沉基类（基类已实现三级优先级兜底）
 """
 
+# 标准库导入
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -32,6 +36,7 @@ from typing import ClassVar
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# 本地模块导入
 from backtest.common.factor_cli import factor_cli_main
 from backtest.common.layered_backtest_runner import LayerConfigBase
 from factor_ic.ic_tail_price_slope_1d import calculate_tail_price_slope
@@ -57,7 +62,4 @@ class TailPriceSlopeLayerConfig(LayerConfigBase):
 
 
 if __name__ == "__main__":
-    factor_cli_main(
-        config_cls=TailPriceSlopeLayerConfig,
-        factor_calculator=calculate_tail_price_slope
-    )
+    factor_cli_main(config_cls=TailPriceSlopeLayerConfig, factor_calculator=calculate_tail_price_slope)

@@ -8,6 +8,7 @@ test_layered_backtest_tail_price_slope_1d 测试用例
 
 版本历史:
   v1.0 (2026-06-02): 初始版本，创建测试用例
+  v1.1 (2026-06-02): Round 1-3 优化同步 - 版本历史与主脚本同步
 """
 
 import sys
