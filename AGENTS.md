@@ -5,6 +5,20 @@
 
 ---
 
+## ⚠️ 入口守门员（每次必做）
+
+**开始任何开发任务前，必须按顺序执行：**
+
+```
+1. 加载 skill：skill_view(name='superpowers-workflow')
+2. 查询知识图谱：sqlite3 .codegraph/codegraph.db "SELECT ..."
+```
+
+**禁止跳过**：即使任务看似简单，也必须先了解代码结构和规范流程。
+**违规后果**：未加载 skill 或未查询 codegraph 直接改代码 = 流程违规，必须回退重做。
+
+---
+
 ## 0. 开发流程（必须遵循）
 
 **涉及代码改动时，必须加载 `superpowers-workflow` skill 并遵循 4 阶段流程：**
