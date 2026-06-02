@@ -480,12 +480,6 @@ class RollingICIRWeightMethod(WeightMethodBase):
                 factor_df[f'{col}_rolling_icir'] = factor_df['date_sorted'].map(rolling_icir_series_dt)
             else:
                 factor_df[f'{col}_rolling_icir'] = np.nan
-                # 修复：将 rolling_icir_series 索引转换为 datetime，与 date_sorted 类型一致
-                rolling_icir_series_dt = rolling_icir_series.copy()
-                rolling_icir_series_dt.index = pd.to_datetime(rolling_icir_series_dt.index)
-                factor_df[f'{col}_rolling_icir'] = factor_df['date_sorted'].map(rolling_icir_series_dt)
-            else:
-                factor_df[f'{col}_rolling_icir'] = np.nan
 
         # 每日计算权重并加权
         rolling_icir_cols = [f'{col}_rolling_icir' for col in factor_cols]
