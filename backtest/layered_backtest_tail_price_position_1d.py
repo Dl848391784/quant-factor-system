@@ -23,6 +23,7 @@
 版本历史:
   v1.0 (2026-06-02): 初始版本，实现尾盘价格位置因子分层回测
   v1.1 (2026-06-02): 优化 - 创建流程文档、测试文件 test_layered_backtest_tail_price_position_1d.py（8个测试用例）
+  v1.2 (2026-06-02): 优化 - 测试补充至13个（新增ic_source_resolved/factor_col_resolved/layer_names_dict/默认参数验证）
 """
 
 import sys
