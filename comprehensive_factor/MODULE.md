@@ -1,6 +1,6 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.5
+> 版本: v2.6
 > 最后更新: 2026-06-03
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
@@ -1702,6 +1702,7 @@ if not factor_cols or len(factor_cols) == 0:
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v2.6 | 2026-06-03 | weight_selector.py v1.4: select_best_method() 添加空字典检查；流程文档 + 测试用例文档 + 边界测试 |
 | v2.5 | 2026-06-03 | stock_selector.py v1.2: top_n 默认值改为 3 + 因子列表从 composite 结果读取（非硬编码）；MODULE.md 补充因子来源规范 + 示例更新 |
 | v2.4 | 2026-06-03 | run_pipeline.py v1.3: 新增 Stage 5 权重选择 + Stage 6 股票选股；generate_factor_summary_report.py v2.2: 新增第七、八部分 |
 | v2.3 | 2026-06-03 | stock_selector.py v1.1: 添加版本历史、模块级 logger、完善类型注解 |

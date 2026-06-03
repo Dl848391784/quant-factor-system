@@ -11,12 +11,17 @@ weight_selector.py 测试用例
 
 版本历史：
 - v1.0 (2026-06-03): 初始测试用例
+- v1.1 (2026-06-03): 新增边界条件测试类（空字典、单方法、零权重）
 """
 
 # 标准库导入
 import json
 import sys
 from pathlib import Path
+
+# 第三方库导入
+import pytest
+
 
 # 根目录模块导入 sys.path 处理
 PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
@@ -27,13 +32,13 @@ if str(PROJECT_ROOT) not in sys.path:
 from comprehensive_factor.weight_selector import (
     DEFAULT_CONFIG,
     EPSILON,
+    __version__,
+    calculate_weighted_score,
     extract_metrics,
+    generate_output,
     load_composite_results,
     normalize_minmax,
-    calculate_weighted_score,
     select_best_method,
-    generate_output,
-    __version__,
 )
 
 
@@ -104,7 +109,7 @@ class TestConfigAttributes:
 
     def test_version_format(self):
         """验证版本号格式正确"""
-        assert __version__ == "1.3"
+        assert __version__ == "1.4"
 
 
 class TestMetricExtraction:
@@ -261,3 +266,53 @@ class TestOutputStructure:
         )
         assert "ranking" in output
         assert len(output["ranking"]) == len(scores)
+
+
+class TestBoundaryConditions:
+    """边界条件测试（v1.4 新增）"""
+
+    def test_select_best_method_empty_dict(self):
+        """验证空字典抛出 ValueError"""
+        with pytest.raises(ValueError, match="final_scores 不能为空"):
+            select_best_method({})
+
+    def test_normalize_minmax_single_method(self):
+        """验证单个方法归一化（所有指标得1.0）"""
+        # 构造单方法数据
+        single_result = {
+            "equal_weight": {
+                "backtest_result": {
+                    "long_short": {
+                        "long_short_return_annual": 0.1,
+                        "long_short_sharpe": 1.5,
+                        "turnover_long_avg": 0.3,
+                        "turnover_short_avg": 0.4,
+                    },
+                    "monotonicity": {"correlation": 0.8},
+                    "trading_cost_analysis": {"long_short_net_daily": 0.001},
+                    "layer_stats": {
+                        "layer_1": {"annual_return": 0.15, "sharpe_ratio": 2.0, "max_drawdown": -0.05},
+                        "layer_2": {"annual_return": 0.12, "sharpe_ratio": 1.8, "max_drawdown": -0.04},
+                    },
+                }
+            }
+        }
+        metrics_data = extract_metrics(single_result)
+        normalized = normalize_minmax(metrics_data, DEFAULT_CONFIG["metrics"])
+
+        # 单方法时 diff=0 → EPSILON容差 → 全给1.0
+        for metric, score in normalized["equal_weight"].items():
+            assert score == 1.0
+
+    def test_calculate_weighted_score_zero_weight(self):
+        """验证权重为零场景"""
+        # 构造权重为零的配置
+        zero_weight_config = {
+            "metric1": {"direction": "higher_better", "weight": 0.0},
+            "metric2": {"direction": "higher_better", "weight": 0.0},
+        }
+        normalized_scores = {"method1": {"metric1": 0.5, "metric2": 0.5}}
+
+        scores = calculate_weighted_score(normalized_scores, zero_weight_config)
+        # total_weight=0 → return 0.0
+        assert scores["method1"] == 0.0

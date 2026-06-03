@@ -16,6 +16,7 @@
 - v1.1 (2026-06-03): print→logger迁移，遵循PROJECT.md日志规范
 - v1.2 (2026-06-03): 类型注解完善，docstring规范化
 - v1.3 (2026-06-03): 边界处理优化（异常处理、EPSILON精度容差）
+- v1.4 (2026-06-03): select_best_method() 添加空字典检查（防御性编程）
 
 作者: 云瑶
 """
@@ -42,7 +43,7 @@ from backtest.common.logger_config import get_logger  # noqa: E402
 # =============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "1.3"
+__version__ = "1.4"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -283,7 +284,14 @@ def select_best_method(final_scores: dict[str, float]) -> tuple[str, float, list
             - best_method: 最优方法名
             - best_score: 最优得分
             - ranked_methods: 排名列表 [(method, score), ...]
+
+    Raises:
+        ValueError: final_scores 为空字典
     """
+    # 防御性检查（遵循 MODULE.md 约束 M31: 校验前置）
+    if not final_scores:
+        raise ValueError("final_scores 不能为空")
+
     ranked = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
     best_method, best_score = ranked[0]
     return best_method, best_score, ranked
