@@ -12,6 +12,10 @@ Step 1-5: 单因子分析 → 因子筛选 → 标准化 → 加权计算 → �
 Step 6: 权重方式选择 (weight_selector.py)
 Step 7: 股票选股 (stock_selector.py) ← 本脚本
 
+版本历史:
+- v1.0 (2026-06-03): 初始版本，实现股票选股功能
+- v1.1 (2026-06-03): 添加版本历史、模块级 logger、完善类型注解
+
 作者: 云瑶
 创建日期: 2026-06-03
 """
@@ -23,7 +27,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -44,6 +48,17 @@ from comprehensive_factor.common.factor_loader import (  # noqa: E402
 )
 from comprehensive_factor.common.logger_config import get_logger  # noqa: E402
 from comprehensive_factor.common.weight_engine import WeightEngine  # noqa: E402
+
+
+# ============================================================================
+# 模块级常量
+# ============================================================================
+
+# 版本号（遵循 PROJECT.md 规范）
+__version__ = "1.1"
+
+# logger 实例（遵循 PROJECT.md 第380-500行日志规范）
+_logger = get_logger(__name__)
 
 
 # ============================================================================
@@ -146,18 +161,29 @@ class StockSelectorConfig:
 EPSILON = 1e-10
 
 
-def load_weight_config(weight_result_path: Path | str, logger: logging.Logger | None = None) -> dict:
+def load_weight_config(
+    weight_result_path: Path | str,
+    logger: logging.Logger | None = None,
+) -> dict[str, Any]:
     """加载权重选择结果
 
     Args:
         weight_result_path: 权重选择结果文件路径（Path 或 str）
+        logger: 日志对象（默认使用模块级 _logger）
+
+    Returns:
+        权重配置字典，结构：
+        {
+            "best_selection": {"method": str, "composite_score": float, ...},
+            ...
+        }
 
     Raises:
         FileNotFoundError: 权重配置文件不存在
         ValueError: JSON 结构不完整
     """
     if logger is None:
-        logger = get_logger(__name__)
+        logger = _logger
 
     weight_result_path = Path(weight_result_path)
 
@@ -199,7 +225,7 @@ def get_latest_date(factor_df: pd.DataFrame, logger: logging.Logger | None = Non
 
     Args:
         factor_df: 因子 DataFrame（包含 date 列）
-        logger: 日志对象
+        logger: 日志对象（默认使用模块级 _logger）
 
     Returns:
         最新日期字符串（YYYY-MM-DD 格式）
@@ -208,7 +234,7 @@ def get_latest_date(factor_df: pd.DataFrame, logger: logging.Logger | None = Non
         ValueError: date 列为空或数据为空
     """
     if logger is None:
-        logger = get_logger(__name__)
+        logger = _logger
 
     if len(factor_df) == 0:
         raise ValueError("factor_df 为空，无法获取最新日期")
@@ -232,7 +258,7 @@ def sort_and_select(
     top_n: int,
     factor_direction: str,
     logger: logging.Logger | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """排序并选出 Top N 股票
 
     Args:
@@ -240,7 +266,7 @@ def sort_and_select(
         factor_df: 因子 DataFrame（包含 asset 列）
         top_n: 选股数量
         factor_direction: 因子方向 ('positive' 或 'negative')
-        logger: 日志对象
+        logger: 日志对象（默认使用模块级 _logger）
 
     Returns:
         选股结果列表，结构：
@@ -255,7 +281,7 @@ def sort_and_select(
         - 缺失值（NaN）不参与排序，排在最后
     """
     if logger is None:
-        logger = get_logger(__name__)
+        logger = _logger
 
     # 构建 DataFrame（包含综合因子值）
     result_df = factor_df.copy()
@@ -321,12 +347,12 @@ def sort_and_select(
 
 
 def build_result(
-    top_stocks: list[dict],
+    top_stocks: list[dict[str, Any]],
     config: StockSelectorConfig,
-    weight_config: dict,
+    weight_config: dict[str, Any],
     total_stocks: int,
     logger: logging.Logger | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """构建输出结果
 
     Args:
@@ -334,13 +360,13 @@ def build_result(
         config: 配置对象
         weight_config: 权重配置
         total_stocks: 总股票数
-        logger: 日志对象
+        logger: 日志对象（默认使用模块级 _logger）
 
     Returns:
         输出结果字典，结构见输出模板
     """
     if logger is None:
-        logger = get_logger(__name__)
+        logger = _logger
 
     best_selection = weight_config["best_selection"]
 
@@ -370,7 +396,7 @@ def build_result(
 
 
 def save_result(
-    result: dict,
+    result: dict[str, Any],
     output_dir: Path | str,
     logger: logging.Logger | None = None,
 ) -> Path:
@@ -379,7 +405,7 @@ def save_result(
     Args:
         result: 结果字典
         output_dir: 输出目录（Path 或 str）
-        logger: 日志对象
+        logger: 日志对象（默认使用模块级 _logger）
 
     Returns:
         输出文件路径
@@ -389,7 +415,7 @@ def save_result(
         - 遵循 MODULE.md M4: 输出到 comprehensive_factor/result/
     """
     if logger is None:
-        logger = get_logger(__name__)
+        logger = _logger
 
     # 转换为 Path
     output_dir = Path(output_dir)
@@ -412,7 +438,7 @@ def save_result(
 def select_stocks(
     config: StockSelectorConfig,
     logger: logging.Logger | None = None,
-) -> tuple[dict, Path]:
+) -> tuple[dict[str, Any], Path]:
     """股票选股主函数
 
     流程:
@@ -429,7 +455,7 @@ def select_stocks(
 
     Args:
         config: 配置对象
-        logger: 日志对象
+        logger: 日志对象（默认使用模块级 _logger）
 
     Returns:
         Tuple[result_dict, output_file_path]
@@ -439,7 +465,7 @@ def select_stocks(
         FileNotFoundError: 文件不存在
     """
     if logger is None:
-        logger = get_logger(__name__)
+        logger = _logger
 
     logger.info("=" * 60)
     logger.info("股票选股流程启动")
@@ -546,7 +572,7 @@ def create_cli_entrypoint(config_class: type[StockSelectorConfig]) -> Callable[[
 
     def main() -> int:
         """CLI 主函数"""
-        logger = get_logger(__name__)
+        logger = _logger
 
         parser = argparse.ArgumentParser(description="股票选股脚本 - 使用最优权重方法计算综合因子并选出 Top N 股票")
 
