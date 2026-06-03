@@ -1,6 +1,6 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.0 (大重构)
+> 版本: v2.2
 > 最后更新: 2026-06-03
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
@@ -15,6 +15,7 @@
 - [模块概述](#模块概述)
 - [综合因子构建完整流程](#综合因子构建完整流程)
 - [权重选择脚本](#权重选择脚本)
+- [股票选股脚本](#股票选股脚本)
 - [输出结构模板](#输出结构模板)
 
 ### 二、规则索引 (M1-M55,按类别)
@@ -95,6 +96,15 @@ Step 6: 权重方式选择 (weight_selector.py)
   ├─ Min-Max归一化（方向统一化）
   ├─ 等权综合得分
   └─ 输出最优权重方法
+                              ↓
+Step 7: 股票选股 (stock_selector.py)
+  ├─ 加载最优权重配置（weight_selection_result.json）
+  ├─ 加载当日因子数据（factor_ic_data.json.gz）
+  ├─ 标准化因子值
+  ├─ 加载 IC 每日序列（滚动ICIR需要）
+  ├─ 计算综合因子值（使用最优权重方法）
+  ├─ 按因子方向排序（反向升序/正向降序）
+  └─ 输出 Top N 股票列表
 ```
 
 ---
@@ -121,6 +131,72 @@ Step 6: 权重方式选择 (weight_selector.py)
 ```
 
 **输出**: `result/weight_selection_result.json`
+
+---
+
+## 股票选股脚本
+
+**脚本**: `stock_selector.py`
+
+**功能**: 使用最优权重方法计算股票综合因子值并选出 Top N
+
+**流程**:
+```
+1. 加载最优权重配置（weight_selection_result.json）
+2. 加载当日因子数据（factor_ic_data.json.gz）
+3. 确定选股日期（默认取最新日期）
+4. 过滤数据（只保留选股日期）
+5. 标准化因子（截面标准化）
+6. 加载 IC 数据（根据权重方法）
+7. 计算综合因子（使用最优权重方法）
+8. 排序选出 Top N
+9. 输出结果
+```
+
+**排序规则**:
+- **反向因子** (`factor_direction=negative`): 升序排序（综合因子值越小越好）
+- **正向因子** (`factor_direction=positive`): 降序排序（综合因子值越大越好）
+
+**输出**: `result/stock_selection_result.json`
+
+```json
+{
+  "meta": {
+    "selection_date": "2026-06-01",
+    "weight_method": "rolling_icir_weight",
+    "composite_score": 0.8137,
+    "factor_direction": "negative",
+    "top_n": 10,
+    "total_stocks": 3006,
+    "valid_stocks": 10,
+    "created_at": "2026-06-03T17:56:28"
+  },
+  "top_stocks": [
+    {
+      "rank": 1,
+      "code": "002173",
+      "composite_value": -1.802,
+      "factor_values": {"rsi_6": 12.58, "volume_ratio_5": 0.2}
+    },
+    ...
+  ],
+  "weight_config": {
+    "method": "rolling_icir_weight",
+    "window": 60,
+    "factor_list": ["rsi", "volume_ratio"],
+    "factor_cols": ["rsi_6", "volume_ratio_5"]
+  }
+}
+```
+
+**CLI 参数**:
+```bash
+python stock_selector.py \
+    --top_n 10 \
+    --selection_date 2026-06-01 \
+    --factor_direction negative \
+    --rolling_window 60
+```
 
 ---
 
