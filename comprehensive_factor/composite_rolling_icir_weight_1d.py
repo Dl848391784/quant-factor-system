@@ -16,19 +16,17 @@
 """
 
 import sys
-from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List
+from pathlib import Path
+
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from comprehensive_factor.common.composite_runner import (
-    create_cli_entrypoint,
-    CompositeLayerConfig
-)
+from comprehensive_factor.common.composite_runner import CompositeLayerConfig, create_cli_entrypoint
 from comprehensive_factor.common.data_loader import DEFAULT_DATA_SOURCE
 from comprehensive_factor.common.logger_config import get_logger
+
 
 logger = get_logger(__name__)
 
@@ -65,18 +63,18 @@ class RollingICIRWeightLayerConfig(CompositeLayerConfig):
     
     综合因子方向：反向因子（因子值越大，未来收益越低）
     """
-    
+
     # 滚动窗口参数（继承父类的 factor_list, factor_cols, rolling_window）
     min_periods: int = 20  # 显式定义，与实现一致（max(1, window // 3)）
-    
+
     # 分层参数
     n_layers: int = 5
     factor_direction: str = 'negative'
-    long_layers: List[int] = field(default_factory=lambda: [1, 2])
-    short_layers: List[int] = field(default_factory=lambda: [4, 5])
+    long_layers: list[int] = field(default_factory=lambda: [1, 2])
+    short_layers: list[int] = field(default_factory=lambda: [4, 5])
     trade_cost_rate: float = 0.003
     min_stocks_per_layer: int = 10
-    
+
     def __post_init__(self):
         """滚动加权参数校验
         
@@ -130,14 +128,14 @@ if __name__ == '__main__':
     logger.info("=" * 60)
     logger.info("滚动ICIR加权综合因子分层回测启动")
     logger.info("=" * 60)
-    logger.info(f"权重方法: rolling_icir_weight")
+    logger.info("权重方法: rolling_icir_weight")
     logger.info(f"因子列表: {_default_config.factor_list}")
     logger.info(f"因子列名: {_default_config.factor_cols}")
-    logger.info(f"收益周期: 1d")
+    logger.info("收益周期: 1d")
     logger.info(f"数据源: {DEFAULT_DATA_SOURCE}")
     logger.info(f"滚动窗口: {_default_config.rolling_window}")
     logger.info(f"最小周期: {_default_config.min_periods}")
-    
+
     # 运行入口（异常兜底 + 日志）
     try:
         main()

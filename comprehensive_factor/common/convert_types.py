@@ -9,9 +9,10 @@
 创建日期: 2026-05-24
 """
 
+from datetime import date, datetime
+
 import numpy as np
 import pandas as pd
-from datetime import datetime, date
 
 
 def convert_to_native_types(obj):
@@ -25,27 +26,27 @@ def convert_to_native_types(obj):
     """
     if obj is None:
         return None
-    
+
     # numpy 整数/浮点数
     if isinstance(obj, (np.integer, np.int64, np.int32, np.int16, np.int8)):
         return int(obj)
     if isinstance(obj, (np.floating, np.float64, np.float32, np.float16)):
         return float(obj)
-    
+
     # numpy bool
     if isinstance(obj, np.bool_):
         return bool(obj)
-    
+
     # numpy 数组
     if isinstance(obj, np.ndarray):
         return [convert_to_native_types(item) for item in obj.tolist()]
-    
+
     # pandas Series/DataFrame
     if isinstance(obj, pd.Series):
         return [convert_to_native_types(item) for item in obj.tolist()]
     if isinstance(obj, pd.DataFrame):
         return obj.applymap(convert_to_native_types).to_dict(orient='records')
-    
+
     # datetime/date
     if isinstance(obj, datetime):
         return obj.isoformat()
@@ -53,14 +54,14 @@ def convert_to_native_types(obj):
         return obj.isoformat()
     if isinstance(obj, pd.Timestamp):
         return obj.isoformat()
-    
+
     # dict（递归处理）
     if isinstance(obj, dict):
         return {k: convert_to_native_types(v) for k, v in obj.items()}
-    
+
     # list/tuple（递归处理）
     if isinstance(obj, (list, tuple)):
         return [convert_to_native_types(item) for item in obj]
-    
+
     # 其他类型直接返回
     return obj

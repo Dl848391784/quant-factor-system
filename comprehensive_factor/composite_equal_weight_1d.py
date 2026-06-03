@@ -22,19 +22,19 @@
 """
 
 import sys
-from pathlib import Path
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import ClassVar, List, Sequence
+from pathlib import Path
+from typing import ClassVar
+
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from comprehensive_factor.common.composite_runner import (
-    create_cli_entrypoint,
-    CompositeLayerConfig
-)
+from comprehensive_factor.common.composite_runner import CompositeLayerConfig, create_cli_entrypoint
 from comprehensive_factor.common.data_loader import DEFAULT_DATA_SOURCE
 from comprehensive_factor.common.logger_config import get_logger
+
 
 logger = get_logger(__name__)
 
@@ -56,7 +56,7 @@ class EqualWeightLayerConfig(CompositeLayerConfig):
     综合因子方向：反向因子（低值预期高收益）
     - 缩量（volume_ratio低）+ 超卖（rsi低） → 预期高收益
     """
-    
+
     # === 因子元数据（必须声明，满足 LayerConfigBase 要求） ===
     factor_name: ClassVar[str] = 'equal_weight_composite'
     layer_names: ClassVar[Sequence[str]] = ('lowest', 'lower', 'normal', 'higher', 'highest')
@@ -67,12 +67,12 @@ class EqualWeightLayerConfig(CompositeLayerConfig):
         '偏高层(综合因子值偏大)',
         '极高层(综合因子值最大)'
     )
-    
+
     # 分层参数（覆盖父类默认值，因子组合参数继承父类）
     n_layers: int = 5
     factor_direction: str = 'negative'
-    long_layers: List[int] = field(default_factory=lambda: [1, 2])
-    short_layers: List[int] = field(default_factory=lambda: [4, 5])
+    long_layers: list[int] = field(default_factory=lambda: [1, 2])
+    short_layers: list[int] = field(default_factory=lambda: [4, 5])
     trade_cost_rate: float = 0.003
     min_stocks_per_layer: int = 10
 
@@ -106,14 +106,14 @@ except Exception:
 if __name__ == '__main__':
     # 问题4修复：脚本启动时输出关键配置日志
     logger.info("=" * 60 + " 等权综合因子分层回测启动 " + "=" * 60)
-    logger.info(f"权重方法: equal_weight")
+    logger.info("权重方法: equal_weight")
     logger.info(f"因子列表: {_default_config.factor_list}")
     logger.info(f"因子列: {_default_config.factor_cols}")
-    logger.info(f"收益周期: 1d")
+    logger.info("收益周期: 1d")
     logger.info(f"数据源: {DEFAULT_DATA_SOURCE}")
     logger.info(f"分层参数: n_layers={_default_config.n_layers}, factor_direction={_default_config.factor_direction}")
     logger.info(f"多空组合: long_layers={_default_config.long_layers}, short_layers={_default_config.short_layers}")
-    
+
     # 问题3修复：main() 调用时捕获异常并记录日志
     try:
         main()

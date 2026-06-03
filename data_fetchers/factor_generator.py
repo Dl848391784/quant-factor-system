@@ -77,6 +77,15 @@ Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
     3. 在 _calculate_tail_factors() 中添加 tail_volume_acceleration 计算
     4. 公式：sum(volumes[7:13]) / sum(volumes[0:6])（后半段/前半段）
     5. 遵循数据层架构原则：因子数据预计算存储到统一数据源
+- v1.36 (2026-06-03): 新增两个缺失因子：
+    1. 新增 intraday_intensity 到 _EXTENDED_FACTOR_COLS（日内价格强度）
+    2. 新增 tail_volume_shrink 到 _EXTENDED_FACTOR_COLS（尾盘缩量程度）
+    3. 新增 _calc_intraday_intensity() 函数（(close-open)/(high-low)）
+    4. 新增 _calc_tail_volume_shrink() 函数（尾盘成交量总和/全天成交量）
+    5. 在 generate_all_factors 中添加 Step 10 计算 intraday_intensity
+    6. 在 _calculate_tail_factors 中添加 tail_volume_shrink 计算
+    7. 更新 metadata valid_records 包含 intraday_intensity/tail_volume_acceleration/tail_volume_shrink
+    8. 遵循数据层架构原则：因子数据预计算存储到统一数据源
 
 作者: 云瑶
 """
@@ -151,6 +160,8 @@ _DEFAULT_RESULT_DIR = Path(__file__).parent / "result"
 # v1.33 新增尾盘因子：tail_price_position, tail_price_slope, tail_price_volume_intensity
 # v1.34 新增隔夜收益率因子：overnight_ret（跳空幅度）
 # v1.35 新增尾盘量能加速度因子：tail_volume_acceleration（后半段/前半段成交量比）
+# v1.36 新增日内强度因子：intraday_intensity（收盘价在振幅中的相对位置）
+# v1.36 新增尾盘缩量程度因子：tail_volume_shrink（尾盘成交量总和/全天成交量）
 _EXTENDED_FACTOR_COLS: tuple[str, ...] = (
     "bollinger_pb",
     "kdj_j",
@@ -158,10 +169,12 @@ _EXTENDED_FACTOR_COLS: tuple[str, ...] = (
     "amplitude",
     "price_position",
     "overnight_ret",
+    "intraday_intensity",
     "tail_price_position",
     "tail_price_slope",
     "tail_price_volume_intensity",
     "tail_volume_acceleration",
+    "tail_volume_shrink",
 )
 
 # 收益数据列名（元组防止意外修改）
@@ -202,6 +215,50 @@ _TAIL_TRADING_DATA_PATH = _DEFAULT_RESULT_DIR / "tail_trading_data.json.gz"
 # 尾盘因子计算参数
 EPSILON = 1e-10  # 避免除零阈值
 _TAIL_KLINE_COUNT = 13  # 尾盘5分钟K线数量（14:00-15:00共13根K线）
+
+# ============================================================================
+# 日内因子计算函数（基于 OHLC 数据）
+# ============================================================================
+
+
+def _calc_intraday_intensity(
+    open_price: float | None, close_price: float | None, high: float | None, low: float | None
+) -> float:
+    """
+    计算日内价格强度（收盘价在振幅中的相对位置）
+
+    公式:
+    - 日内价格强度 = (close - open) / (high - low)
+
+    Args:
+        open_price: 开盘价
+        close_price: 收盘价
+        high: 最高价
+        low: 最低价
+
+    Returns:
+        日内价格强度值，理论范围 [-1, 1]，或 NaN（数据不完整/除零）
+
+    Note:
+        - 正值表示收盘价高于开盘价（上涨），负值表示下跌
+        - 数值越大表示上涨强度越强，数值越小表示下跌强度越强
+        - 遵循 MODULE.md 约束 #5：类型守卫先用 isinstance 再用 pd.isna
+    """
+    import numpy as np
+
+    # 类型守卫：检查 None
+    if open_price is None or close_price is None or high is None or low is None:
+        return np.nan
+    # 类型守卫：参数必须是数值
+    if not all(isinstance(p, (int, float)) for p in [open_price, close_price, high, low]):
+        return np.nan
+
+    price_range = high - low
+    if abs(price_range) < EPSILON:
+        return np.nan
+
+    return (close_price - open_price) / price_range
+
 
 # ============================================================================
 # 尾盘因子计算函数（从 factor_ic/ic_tail_price_*.py 迁移）
@@ -416,6 +473,47 @@ def _calc_tail_volume_acceleration(volumes: list | None) -> float:
     return back_volume / front_volume
 
 
+def _calc_tail_volume_shrink(volumes: list | None, total_volume: float | None) -> float:
+    """
+    计算尾盘缩量程度（尾盘成交量总和/全天成交量）
+
+    公式:
+    - 尾盘缩量程度 = sum(volumes) / total_volume
+
+    Args:
+        volumes: 13根5分钟K线成交量列表（14:00-15:00）
+        total_volume: 全天成交量
+
+    Returns:
+        尾盘缩量程度值，理论范围 [0, 1]，或 NaN（数据不完整/除零）
+
+    Note:
+        - 数值越小表示尾盘缩量越明显
+        - 遵循 MODULE.md 约束 #5：类型守卫先用 isinstance 再用 pd.isna
+    """
+    import numpy as np
+
+    # 类型守卫：检查 None
+    if volumes is None or total_volume is None:
+        return np.nan
+    if not isinstance(volumes, list):
+        return np.nan
+    if len(volumes) < _TAIL_KLINE_COUNT:
+        return np.nan
+    # 类型守卫：total_volume 必须是数值
+    if not isinstance(total_volume, (int, float)):
+        return np.nan
+    if abs(float(total_volume)) < EPSILON:
+        return np.nan
+
+    # 检查 volumes 是否包含 NaN/None
+    if any(v is None or (isinstance(v, float) and np.isnan(v)) for v in volumes):
+        return np.nan
+
+    tail_volume = sum(volumes)
+    return tail_volume / float(total_volume)
+
+
 def _calculate_tail_factors(factor_df: pd.DataFrame, logger: logging.Logger) -> pd.DataFrame:
     """
     计算所有尾盘因子（合并计算，避免重复加载尾盘数据）
@@ -425,7 +523,7 @@ def _calculate_tail_factors(factor_df: pd.DataFrame, logger: logging.Logger) -> 
         logger: 日志记录器
 
     Returns:
-        DataFrame，新增 tail_price_position, tail_price_slope, tail_price_volume_intensity, tail_volume_acceleration 列
+        DataFrame，新增 tail_price_position, tail_price_slope, tail_price_volume_intensity, tail_volume_acceleration, tail_volume_shrink 列
 
     Note:
         - 遵循 MODULE.md 约束 #4：函数入口先 copy()
@@ -443,6 +541,7 @@ def _calculate_tail_factors(factor_df: pd.DataFrame, logger: logging.Logger) -> 
         factor_df["tail_price_slope"] = np.nan
         factor_df["tail_price_volume_intensity"] = np.nan
         factor_df["tail_volume_acceleration"] = np.nan
+        factor_df["tail_volume_shrink"] = np.nan
         return factor_df
 
     # 确保日期格式一致
@@ -476,17 +575,30 @@ def _calculate_tail_factors(factor_df: pd.DataFrame, logger: logging.Logger) -> 
         )
         # 计算尾盘量能加速度（后半段/前半段成交量比）
         merged_df["tail_volume_acceleration"] = merged_df["volumes"].apply(_calc_tail_volume_acceleration)
+        # 计算尾盘缩量程度（尾盘成交量总和/全天成交量）
+        merged_df["tail_volume_shrink"] = merged_df.apply(
+            lambda row: _calc_tail_volume_shrink(row["volumes"], row["volume"]), axis=1
+        )
     else:
         import numpy as np
 
         merged_df["tail_price_volume_intensity"] = np.nan
         merged_df["tail_volume_acceleration"] = np.nan
-        logger.warning("尾盘数据缺少 'volumes' 列，tail_price_volume_intensity/tail_volume_acceleration 将为 NaN")
+        merged_df["tail_volume_shrink"] = np.nan
+        logger.warning(
+            "尾盘数据缺少 'volumes' 列，tail_price_volume_intensity/tail_volume_acceleration/tail_volume_shrink 将为 NaN"
+        )
 
     # 统计有效因子数量
     import numpy as np
 
-    for col in ["tail_price_position", "tail_price_slope", "tail_price_volume_intensity", "tail_volume_acceleration"]:
+    for col in [
+        "tail_price_position",
+        "tail_price_slope",
+        "tail_price_volume_intensity",
+        "tail_volume_acceleration",
+        "tail_volume_shrink",
+    ]:
         valid_count = merged_df[col].notna().sum()
         total_count = len(merged_df)
         logger.info(
@@ -498,7 +610,13 @@ def _calculate_tail_factors(factor_df: pd.DataFrame, logger: logging.Logger) -> 
         )
 
     # 返回只包含原列 + 因子列的 DataFrame
-    result_cols = list(factor_df.columns) + ["tail_price_position", "tail_price_slope", "tail_price_volume_intensity", "tail_volume_acceleration"]
+    result_cols = list(factor_df.columns) + [
+        "tail_price_position",
+        "tail_price_slope",
+        "tail_price_volume_intensity",
+        "tail_volume_acceleration",
+        "tail_volume_shrink",
+    ]
     return merged_df[result_cols]
 
 
@@ -800,14 +918,26 @@ def generate_all_factors(
     overnight_valid = int(factor_df["overnight_ret"].notna().sum())
     logger.info("  有效 overnight_ret: %d (%.2f%%)", overnight_valid, _calc_pct(overnight_valid, len(factor_df)))
 
-    # ========== Step 10: 计算尾盘因子 ==========
-    logger.info("Step 10: 计算尾盘因子...")
+    # ========== Step 10: 计算 intraday_intensity（日内价格强度） ==========
+    logger.info("Step 10: 计算日内价格强度因子...")
+
+    factor_df["intraday_intensity"] = factor_df.apply(
+        lambda row: _calc_intraday_intensity(row["open"], row["close"], row["high"], row["low"]), axis=1
+    )
+
+    intraday_valid = int(factor_df["intraday_intensity"].notna().sum())
+    logger.info("  有效 intraday_intensity: %d (%.2f%%)", intraday_valid, _calc_pct(intraday_valid, len(factor_df)))
+
+    # ========== Step 11: 计算尾盘因子 ==========
+    logger.info("Step 11: 计算尾盘因子...")
 
     factor_df = _calculate_tail_factors(factor_df, logger)
 
     tail_position_valid = int(factor_df["tail_price_position"].notna().sum())
     tail_slope_valid = int(factor_df["tail_price_slope"].notna().sum())
     tail_intensity_valid = int(factor_df["tail_price_volume_intensity"].notna().sum())
+    tail_acceleration_valid = int(factor_df["tail_volume_acceleration"].notna().sum())
+    tail_shrink_valid = int(factor_df["tail_volume_shrink"].notna().sum())
     logger.info(
         "  有效 tail_price_position: %d (%.2f%%)", tail_position_valid, _calc_pct(tail_position_valid, len(factor_df))
     )
@@ -817,11 +947,19 @@ def generate_all_factors(
         tail_intensity_valid,
         _calc_pct(tail_intensity_valid, len(factor_df)),
     )
+    logger.info(
+        "  有效 tail_volume_acceleration: %d (%.2f%%)",
+        tail_acceleration_valid,
+        _calc_pct(tail_acceleration_valid, len(factor_df)),
+    )
+    logger.info(
+        "  有效 tail_volume_shrink: %d (%.2f%%)", tail_shrink_valid, _calc_pct(tail_shrink_valid, len(factor_df))
+    )
 
-    # ========== Step 11: 格式化输出 ==========
-    logger.info("Step 11: 格式化输出...")
+    # ========== Step 12: 格式化输出 ==========
+    logger.info("Step 12: 格式化输出...")
 
-    # date 列可能在 Step 10 已转换为字符串，需检查类型
+    # date 列可能在 Step 11 已转换为字符串，需检查类型
     if pd.api.types.is_datetime64_any_dtype(factor_df["date"]):
         factor_df["date"] = factor_df["date"].dt.strftime("%Y-%m-%d")
 
@@ -835,8 +973,8 @@ def generate_all_factors(
     # 显式释放 factor_df 内存（可能包含中间列，比 output_df 更多）
     del factor_df
 
-    # ========== Step 12: 保存输出 ==========
-    logger.info("Step 12: 保存输出...")
+    # ========== Step 13: 保存输出 ==========
+    logger.info("Step 13: 保存输出...")
 
     # dates 字段：字符串排序对 YYYY-MM-DD 格式正确（字典序与日期序一致）
     # 从 output_df 取 dates，数据来源更清晰
@@ -877,7 +1015,7 @@ def generate_all_factors(
     end_time = datetime.now()
     elapsed_seconds = (end_time - start_time).total_seconds()
 
-    # ========== Step 12: 返回元数据 ==========
+    # ========== Step 14: 返回元数据 ==========
     # metadata 字段说明：
     # - generated_at: 生成时间（格式 YYYY-MM-DD HH:MM:SS）
     # - elapsed_seconds: 运行耗时（秒，精度 .2f）
@@ -900,9 +1038,12 @@ def generate_all_factors(
             "amplitude": amplitude_valid,
             "price_position": position_valid,
             "overnight_ret": overnight_valid,
+            "intraday_intensity": intraday_valid,
             "tail_price_position": tail_position_valid,
             "tail_price_slope": tail_slope_valid,
             "tail_price_volume_intensity": tail_intensity_valid,
+            "tail_volume_acceleration": tail_acceleration_valid,
+            "tail_volume_shrink": tail_shrink_valid,
         },
         "valid_records_percent": {
             "bollinger_pb": _calc_pct(bollinger_valid, total_records),
@@ -911,9 +1052,12 @@ def generate_all_factors(
             "amplitude": _calc_pct(amplitude_valid, total_records),
             "price_position": _calc_pct(position_valid, total_records),
             "overnight_ret": _calc_pct(overnight_valid, total_records),
+            "intraday_intensity": _calc_pct(intraday_valid, total_records),
             "tail_price_position": _calc_pct(tail_position_valid, total_records),
             "tail_price_slope": _calc_pct(tail_slope_valid, total_records),
             "tail_price_volume_intensity": _calc_pct(tail_intensity_valid, total_records),
+            "tail_volume_acceleration": _calc_pct(tail_acceleration_valid, total_records),
+            "tail_volume_shrink": _calc_pct(tail_shrink_valid, total_records),
         },
         "factor_columns": list(_EXTENDED_FACTOR_COLS),  # 扩展因子列（返回副本，防止外部修改）
         "return_columns": list(_RETURN_COLS),  # 收益数据列（返回副本，防止外部修改）
