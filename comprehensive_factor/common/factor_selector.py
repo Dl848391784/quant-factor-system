@@ -74,8 +74,6 @@ FACTOR_NAME_TO_COL_MAP = {
     "tail_volume_shrink": "tail_volume_shrink",
     # 其他因子
     "intraday_intensity": "intraday_intensity",
-    "return_5d": "return_5d",
-    "return_3d": "return_3d",
 }
 
 
