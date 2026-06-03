@@ -7,7 +7,7 @@
 3. 识别高相关组并筛选（保留 ICIR 最高的）
 4. 输出筛选结果供综合因子计算使用
 
-阈值标准（业界惯例）:
+阈值标准（业界惯例):
 - |ic_mean| < 0.03 → 无效（预测能力弱）
 - p_value > 0.05 → 无效（统计不显著）
 - |icir| < 0.2 → 无效（稳定性差）
@@ -20,6 +20,9 @@
 
 作者: 云瑶
 创建日期: 2026-05-24
+
+版本历史:
+    v1.4 (2026-06-03): FACTOR_NAME_TO_COL_MAP 补全16个因子（解决筛选遗漏问题）
 """
 
 import json
@@ -53,18 +56,26 @@ DEFAULT_THRESHOLDS = {
 # 可用因子列（2026-06-02）：rsi_6, volume_ratio_5, turnover_rate, bollinger_pb, kdj_j, turnover_surge,
 #                           amplitude, price_position, tail_price_position, tail_price_slope, tail_price_volume_intensity
 FACTOR_NAME_TO_COL_MAP = {
+    # 基础因子（内置列名带后缀）
     "rsi": "rsi_6",
     "volume_ratio": "volume_ratio_5",
-    "kdj_j": "kdj_j",  # v1.2 修正：数据源中是 kdj_j，不是 kdj_j_9
-    "bollinger_pb": "bollinger_pb",  # v1.2 修正：数据源中是 bollinger_pb，不是 bollinger_pb_20
-    "turnover_surge": "turnover_surge",  # v1.2 修正：数据源中是 turnover_surge，不是 turnover_surge_5
-    # v1.3 新增（2026-06-02）：尾盘因子和振幅/价格位置因子
+    # 扩展因子（列名不带后缀）
+    "kdj_j": "kdj_j",
+    "bollinger_pb": "bollinger_pb",
+    "turnover_surge": "turnover_surge",
     "amplitude": "amplitude",
     "price_position": "price_position",
+    "overnight_ret": "overnight_ret",
+    # 尾盘因子（v1.3 2026-06-02）
     "tail_price_position": "tail_price_position",
     "tail_price_slope": "tail_price_slope",
     "tail_price_volume_intensity": "tail_price_volume_intensity",
-    # 注意：main_inflow_ratio_1d 不存在于当前数据源中
+    "tail_volume_acceleration": "tail_volume_acceleration",
+    "tail_volume_shrink": "tail_volume_shrink",
+    # 其他因子
+    "intraday_intensity": "intraday_intensity",
+    "return_5d": "return_5d",
+    "return_3d": "return_3d",
 }
 
 
