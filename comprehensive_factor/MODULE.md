@@ -1,6 +1,6 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.4
+> 版本: v2.5
 > 最后更新: 2026-06-03
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
@@ -140,17 +140,23 @@ Step 7: 股票选股 (stock_selector.py)
 
 **功能**: 使用最优权重方法计算股票综合因子值并选出 Top N
 
+**因子列表来源**（遵循数据层架构原则）:
+- 因子列表从最优权重方法的 composite 结果中读取（`composite_{method}_weight_{return_period}.json`）
+- 不应硬编码默认值（如 `rsi/volume_ratio`），因为筛选后的因子由 comprehensive_factor 模块决定
+- **数据流**：`factor_selector.py` 篮选因子 → `composite_runner.py` 保存筛选结果 → `stock_selector.py` 读取筛选结果
+
 **流程**:
 ```
 1. 加载最优权重配置（weight_selection_result.json）
-2. 加载当日因子数据（factor_ic_data.json.gz）
-3. 确定选股日期（默认取最新日期）
-4. 过滤数据（只保留选股日期）
-5. 标准化因子（截面标准化）
-6. 加载 IC 数据（根据权重方法）
-7. 计算综合因子（使用最优权重方法）
-8. 排序选出 Top N
-9. 输出结果
+2. 从最优权重 composite 结果读取因子列表（factor_list/factor_cols）
+3. 加载当日因子数据（factor_ic_data.json.gz）
+4. 确定选股日期（默认取最新日期）
+5. 过滤数据（只保留选股日期）
+6. 标准化因子（截面标准化）
+7. 加载 IC 数据（根据权重方法）
+8. 计算综合因子（使用最优权重方法）
+9. 排序选出 Top N
+10. 输出结果
 ```
 
 **排序规则**:
@@ -163,28 +169,28 @@ Step 7: 股票选股 (stock_selector.py)
 {
   "meta": {
     "selection_date": "2026-06-01",
-    "weight_method": "rolling_icir_weight",
-    "composite_score": 0.8137,
+    "weight_method": "icir_weight",
+    "composite_score": 0.7273,
     "factor_direction": "negative",
-    "top_n": 10,
+    "top_n": 3,
     "total_stocks": 3006,
-    "valid_stocks": 10,
-    "created_at": "2026-06-03T17:56:28"
+    "valid_stocks": 3,
+    "created_at": "2026-06-03T22:25:39"
   },
   "top_stocks": [
     {
       "rank": 1,
-      "code": "002173",
-      "composite_value": -1.802,
-      "factor_values": {"rsi_6": 12.58, "volume_ratio_5": 0.2}
+      "code": "003004",
+      "composite_value": -3.1497,
+      "factor_values": {"tail_price_position": 0.85, "turnover_surge": 1.2}
     },
     ...
   ],
   "weight_config": {
-    "method": "rolling_icir_weight",
-    "window": 60,
-    "factor_list": ["rsi", "volume_ratio"],
-    "factor_cols": ["rsi_6", "volume_ratio_5"]
+    "method": "icir_weight",
+    "window": null,
+    "factor_list": ["tail_price_position", "tail_price_volume_intensity", "turnover_surge", "amplitude"],
+    "factor_cols": ["tail_price_position", "tail_price_volume_intensity", "turnover_surge", "amplitude"]
   }
 }
 ```
@@ -192,11 +198,15 @@ Step 7: 股票选股 (stock_selector.py)
 **CLI 参数**:
 ```bash
 python stock_selector.py \
-    --top_n 10 \
+    --top_n 3 \
     --selection_date 2026-06-01 \
     --factor_direction negative \
     --rolling_window 60
 ```
+
+**Note**:
+- `top_n` 默认值改为 3（用户需求），而非 10
+- `factor_list/factor_cols` 从 composite 结果动态读取，示例中显示的是实际筛选后的因子名
 
 ---
 
@@ -1692,6 +1702,7 @@ if not factor_cols or len(factor_cols) == 0:
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v2.5 | 2026-06-03 | stock_selector.py v1.2: top_n 默认值改为 3 + 因子列表从 composite 结果读取（非硬编码）；MODULE.md 补充因子来源规范 + 示例更新 |
 | v2.4 | 2026-06-03 | run_pipeline.py v1.3: 新增 Stage 5 权重选择 + Stage 6 股票选股；generate_factor_summary_report.py v2.2: 新增第七、八部分 |
 | v2.3 | 2026-06-03 | stock_selector.py v1.1: 添加版本历史、模块级 logger、完善类型注解 |
 | v2.2 | 2026-06-03 | Step 7 股票选股流程图 + stock_selector.py v1.0 开发完成 |
