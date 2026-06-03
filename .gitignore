@@ -1,71 +1,56 @@
+# Result files
+backtest/result/
+comprehensive_factor/result/
+data_fetchers/result/
+factor_ic/result/
+summary/result/
+
+# Log files
+backtest/logs/
+data_fetchers/logs/
+factor_ic/logs/
+summary/logs/
+logs/
+
+# Test directories
+test/
+test_venv/
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-.venv/
-.venv_akshare_new/
-env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv*/
 venv/
 ENV/
-*.egg-info/
-dist/
-build/
-
-# Cache data files (large binary data)
-cache/factor_data/*.json.gz
-cache/factor_data/*.parquet
-cache/factor_data/factors/
-cache/v2/
-cache/v3/
-cache/*.json.gz
-cache/*_history.json.gz
-cache/stock_industry.json
-
-# Logs
-logs/*.log
-*.log
-
-# Checkpoints (backup directories)
-checkpoints/
-backups/
-
-# Database files
-*.db
-*.sqlite
-*.sqlite3
-data/*.db
-
-# Output files (generated)
-output/*.png
-output/*.json
+env/
 
 # IDE
-.idea/
 .vscode/
+.idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
-
-# Temp files
-*.tmp
-*.bak
-*.backup
-test_venv/
-
-# Results (generated)
-*_analysis_result.json
-*_result.json
-rsi_ic_data.json
-
-# Large result files (>100MB, use Git LFS or exclude)
-data_fetchers/result/*.json.gz
-data_fetchers/result/*.parquet
-comprehensive_factor/result/*.json.gz
-comprehensive_factor/result/*.parquet
-backtest/result/*.json.gz
-backtest/result/*.parquet
