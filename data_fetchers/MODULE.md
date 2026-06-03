@@ -952,6 +952,25 @@ factor_generator.py 的因子计算逻辑从 IC 脚本迁移:
 
 验证结果:均值差异 < 0.000001;有效数据数一致;因子计算逻辑完全一致。
 
+**下游模块依赖检查 (2026-06-03)**:
+
+**What**: `factor_generator.py` 的 `_OUTPUT_COLS` 必须完整覆盖下游模块(factor_ic、comprehensive_factor)所需的所有字段,禁止遗漏导致反复调试。
+
+**Why**: 
+- 遗漏字段 → factor_ic 脚本报错 → 修复 → 重新运行 factor_generator.py → 反复调试
+- 历史教训:volume 字段缺失导致 factor_ic 脚本运行失败,修复了 3 次
+
+**How**:
+新增因子或修改 `_OUTPUT_COLS` 时,必须检查:
+1. `factor_ic/ic_*.py` 脚本 `factor_cols` 参数所列字段
+2. `comprehensive_factor/` 脚本所需字段
+3. 确保 `_OUTPUT_COLS` 包含所有下游依赖字段
+
+**Verify**:
+- [ ] 新增因子前,先检查 factor_ic 脚本是否依赖此字段
+- [ ] 修改 `_OUTPUT_COLS` 后,运行 `python data_fetchers/factor_generator.py` 生成数据
+- [ ] 运行 factor_ic 脚本验证数据完整性(无 KeyError)
+
 ---
 
 ### 缓存格式

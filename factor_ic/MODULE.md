@@ -226,6 +226,40 @@ result = run_complex_factor_ic(
 
 ---
 
+## M1.1. IC 模块数据来源单一化
+
+**What**: `factor_ic/` 下的脚本**只负责 IC 计算**,所需数据必须由 `data_fetchers/factor_generator.py` 统一生成到 `factor_ic_data.json.gz` 中,禁止自行拉取或计算因子数据。
+
+**Why**: 
+1. **数据源统一**: `factor_ic_data.json.gz` 是跨模块共享的统一数据源,综合因子(comprehensive_factor)等下游模块也依赖此数据
+2. **职责分离**: factor_generator 负责数据合并与因子计算,factor_ic 只负责 IC 分析
+3. **避免重复计算**: 同一因子数据不应在多个模块重复计算
+
+**How**:
+- ✅ `factor_ic/` 脚本从 `data_fetchers/result/factor_ic_data.json.gz` 读取数据
+- ❌ `factor_ic/` 脚本自行调用 `fetch_factor_cache.py` 或 `fetch_turnover.py`
+- ❌ `factor_ic/` 脚本自行计算基础因子(rsi_6, volume_ratio_5 等)
+
+**Don't**:
+```python
+# ❌ 在 factor_ic 脚本中自行拉取数据
+from data_fetchers.fetch_factor_cache import fetch_factor_data
+raw_data = fetch_factor_data()  # 禁止
+
+# ✅ 正确做法:从统一数据源加载
+from factor_ic.common.data_loader import load_factor_return_data
+data = load_factor_return_data(factor_cols=['rsi_6', 'close'])
+```
+
+**When**: 开发任何新因子 IC 脚本前,确认所需字段已在 `factor_ic_data.json.gz` 中存在。
+
+**Verify**: 
+- [ ] `factor_ic/` 脚本不调用 `data_fetchers/fetch_*.py` 中的数据获取函数
+- [ ] 新增因子字段时,先在 `factor_generator.py` 中添加,再在 `factor_ic/` 中使用
+- [ ] 开发新因子 IC 脚本前,先检查 `factor_ic_data.json.gz` 中是否存在所需字段(避免反复调试)
+
+---
+
 ## M2. 公共模块强制复用
 
 **What**:`factor_ic/common/` 已封装的功能(主流程、数据加载、IC 计算、结果构建、保存、增量、模式判断)必须直接调用,禁止脚本自行实现。

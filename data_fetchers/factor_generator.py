@@ -66,6 +66,17 @@ Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
     4. 新增 Step 9 计算尾盘因子，Step 编号顺延至 10-12
     5. 更新 metadata valid_records 包含所有因子统计
     6. 遵循 PROJECT.md H1 规则：迁移函数而非跨模块导入
+- v1.34 (2026-06-03): 新增隔夜收益率因子（跳空幅度）：
+    1. 新增 overnight_ret 到 _EXTENDED_FACTOR_COLS
+    2. 新增 Step 9 计算 overnight_ret（调用 calculate_overnight_return）
+    3. Step 编号顺延：尾盘因子 Step 10，格式化 Step 11，保存 Step 12
+    4. 公式：(今日Open - 昨日Close) / 昨日Close（即跳空幅度）
+- v1.35 (2026-06-03): 新增尾盘量能加速度因子：
+    1. 新增 tail_volume_acceleration 到 _EXTENDED_FACTOR_COLS
+    2. 新增 _calc_tail_volume_acceleration() 函数（后半段/前半段成交量比）
+    3. 在 _calculate_tail_factors() 中添加 tail_volume_acceleration 计算
+    4. 公式：sum(volumes[7:13]) / sum(volumes[0:6])（后半段/前半段）
+    5. 遵循数据层架构原则：因子数据预计算存储到统一数据源
 
 作者: 云瑶
 """
@@ -97,6 +108,7 @@ if __name__ == "__main__":
         calculate_amplitude,
         calculate_bollinger_pb,
         calculate_kdj_j,
+        calculate_overnight_return,
         calculate_price_position,
         calculate_turnover_surge,
     )
@@ -107,6 +119,7 @@ else:
         calculate_amplitude,
         calculate_bollinger_pb,
         calculate_kdj_j,
+        calculate_overnight_return,
         calculate_price_position,
         calculate_turnover_surge,
     )
@@ -136,15 +149,19 @@ _DEFAULT_RESULT_DIR = Path(__file__).parent / "result"
 
 # 扩展因子列名（元组防止意外修改）
 # v1.33 新增尾盘因子：tail_price_position, tail_price_slope, tail_price_volume_intensity
+# v1.34 新增隔夜收益率因子：overnight_ret（跳空幅度）
+# v1.35 新增尾盘量能加速度因子：tail_volume_acceleration（后半段/前半段成交量比）
 _EXTENDED_FACTOR_COLS: tuple[str, ...] = (
     "bollinger_pb",
     "kdj_j",
     "turnover_surge",
     "amplitude",
     "price_position",
+    "overnight_ret",
     "tail_price_position",
     "tail_price_slope",
     "tail_price_volume_intensity",
+    "tail_volume_acceleration",
 )
 
 # 收益数据列名（元组防止意外修改）
@@ -355,6 +372,50 @@ def _calc_tail_price_volume_intensity(prices: list | None, volumes: list | None,
     return price_change * volume_ratio
 
 
+def _calc_tail_volume_acceleration(volumes: list | None) -> float:
+    """
+    计算尾盘量能加速度（后半段/前半段成交量比）
+
+    公式:
+    - 前半段成交量总和 = sum(volumes[0:6])  # 14:00-14:25
+    - 后半段成交量总和 = sum(volumes[7:13])  # 14:35-15:00
+    - 量能加速度 = 后半段 / 前半段
+
+    Args:
+        volumes: 13根5分钟K线成交量列表
+
+    Returns:
+        量能加速度值，或 NaN（数据不完整/除零）
+
+    Note:
+        - 14:30（索引6）不属于任何一段
+        - 遵循 MODULE.md 约束 #5：类型守卫先用 isinstance 再用 pd.isna
+    """
+    import numpy as np
+
+    # 类型守卫：检查 None/非列表类型
+    if volumes is None:
+        return np.nan
+    if not isinstance(volumes, list):
+        return np.nan
+    if len(volumes) < 13:
+        return np.nan
+    # 检查是否包含 NaN/None
+    if any(v is None or (isinstance(v, float) and np.isnan(v)) for v in volumes):
+        return np.nan
+
+    # 前半段成交量总和（索引 0-5）
+    front_volume = sum(volumes[0:6])
+    # 后半段成交量总和（索引 7-12）
+    back_volume = sum(volumes[7:13])
+
+    # 除零防护
+    if front_volume < EPSILON:
+        return np.nan
+
+    return back_volume / front_volume
+
+
 def _calculate_tail_factors(factor_df: pd.DataFrame, logger: logging.Logger) -> pd.DataFrame:
     """
     计算所有尾盘因子（合并计算，避免重复加载尾盘数据）
@@ -364,7 +425,7 @@ def _calculate_tail_factors(factor_df: pd.DataFrame, logger: logging.Logger) -> 
         logger: 日志记录器
 
     Returns:
-        DataFrame，新增 tail_price_position, tail_price_slope, tail_price_volume_intensity 列
+        DataFrame，新增 tail_price_position, tail_price_slope, tail_price_volume_intensity, tail_volume_acceleration 列
 
     Note:
         - 遵循 MODULE.md 约束 #4：函数入口先 copy()
@@ -381,6 +442,7 @@ def _calculate_tail_factors(factor_df: pd.DataFrame, logger: logging.Logger) -> 
         factor_df["tail_price_position"] = np.nan
         factor_df["tail_price_slope"] = np.nan
         factor_df["tail_price_volume_intensity"] = np.nan
+        factor_df["tail_volume_acceleration"] = np.nan
         return factor_df
 
     # 确保日期格式一致
@@ -412,16 +474,19 @@ def _calculate_tail_factors(factor_df: pd.DataFrame, logger: logging.Logger) -> 
         merged_df["tail_price_volume_intensity"] = merged_df.apply(
             lambda row: _calc_tail_price_volume_intensity(row["prices"], row["volumes"], row["volume"]), axis=1
         )
+        # 计算尾盘量能加速度（后半段/前半段成交量比）
+        merged_df["tail_volume_acceleration"] = merged_df["volumes"].apply(_calc_tail_volume_acceleration)
     else:
         import numpy as np
 
         merged_df["tail_price_volume_intensity"] = np.nan
-        logger.warning("尾盘数据缺少 'volumes' 列，tail_price_volume_intensity 将为 NaN")
+        merged_df["tail_volume_acceleration"] = np.nan
+        logger.warning("尾盘数据缺少 'volumes' 列，tail_price_volume_intensity/tail_volume_acceleration 将为 NaN")
 
     # 统计有效因子数量
     import numpy as np
 
-    for col in ["tail_price_position", "tail_price_slope", "tail_price_volume_intensity"]:
+    for col in ["tail_price_position", "tail_price_slope", "tail_price_volume_intensity", "tail_volume_acceleration"]:
         valid_count = merged_df[col].notna().sum()
         total_count = len(merged_df)
         logger.info(
@@ -433,7 +498,7 @@ def _calculate_tail_factors(factor_df: pd.DataFrame, logger: logging.Logger) -> 
         )
 
     # 返回只包含原列 + 因子列的 DataFrame
-    result_cols = list(factor_df.columns) + ["tail_price_position", "tail_price_slope", "tail_price_volume_intensity"]
+    result_cols = list(factor_df.columns) + ["tail_price_position", "tail_price_slope", "tail_price_volume_intensity", "tail_volume_acceleration"]
     return merged_df[result_cols]
 
 
@@ -727,8 +792,16 @@ def generate_all_factors(
     position_valid = int(factor_df["price_position"].notna().sum())
     logger.info("  有效 price_position: %d (%.2f%%)", position_valid, _calc_pct(position_valid, len(factor_df)))
 
-    # ========== Step 9: 计算尾盘因子 ==========
-    logger.info("Step 9: 计算尾盘因子...")
+    # ========== Step 9: 计算 overnight_ret（隔夜收益率/跳空幅度） ==========
+    logger.info("Step 9: 计算隔夜收益率因子（跳空幅度）...")
+
+    factor_df = calculate_overnight_return(factor_df, logger_arg=logger)
+
+    overnight_valid = int(factor_df["overnight_ret"].notna().sum())
+    logger.info("  有效 overnight_ret: %d (%.2f%%)", overnight_valid, _calc_pct(overnight_valid, len(factor_df)))
+
+    # ========== Step 10: 计算尾盘因子 ==========
+    logger.info("Step 10: 计算尾盘因子...")
 
     factor_df = _calculate_tail_factors(factor_df, logger)
 
@@ -745,10 +818,10 @@ def generate_all_factors(
         _calc_pct(tail_intensity_valid, len(factor_df)),
     )
 
-    # ========== Step 10: 格式化输出 ==========
-    logger.info("Step 10: 格式化输出...")
+    # ========== Step 11: 格式化输出 ==========
+    logger.info("Step 11: 格式化输出...")
 
-    # date 列可能在 Step 9 已转换为字符串，需检查类型
+    # date 列可能在 Step 10 已转换为字符串，需检查类型
     if pd.api.types.is_datetime64_any_dtype(factor_df["date"]):
         factor_df["date"] = factor_df["date"].dt.strftime("%Y-%m-%d")
 
@@ -762,8 +835,8 @@ def generate_all_factors(
     # 显式释放 factor_df 内存（可能包含中间列，比 output_df 更多）
     del factor_df
 
-    # ========== Step 11: 保存输出 ==========
-    logger.info("Step 11: 保存输出...")
+    # ========== Step 12: 保存输出 ==========
+    logger.info("Step 12: 保存输出...")
 
     # dates 字段：字符串排序对 YYYY-MM-DD 格式正确（字典序与日期序一致）
     # 从 output_df 取 dates，数据来源更清晰
@@ -826,6 +899,7 @@ def generate_all_factors(
             "turnover_surge": surge_valid,
             "amplitude": amplitude_valid,
             "price_position": position_valid,
+            "overnight_ret": overnight_valid,
             "tail_price_position": tail_position_valid,
             "tail_price_slope": tail_slope_valid,
             "tail_price_volume_intensity": tail_intensity_valid,
@@ -836,6 +910,7 @@ def generate_all_factors(
             "turnover_surge": _calc_pct(surge_valid, total_records),
             "amplitude": _calc_pct(amplitude_valid, total_records),
             "price_position": _calc_pct(position_valid, total_records),
+            "overnight_ret": _calc_pct(overnight_valid, total_records),
             "tail_price_position": _calc_pct(tail_position_valid, total_records),
             "tail_price_slope": _calc_pct(tail_slope_valid, total_records),
             "tail_price_volume_intensity": _calc_pct(tail_intensity_valid, total_records),
