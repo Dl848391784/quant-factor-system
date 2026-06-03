@@ -218,6 +218,23 @@ except FileNotFoundError as e:
 
 ---
 
+## 因子开发规范 [stable]
+
+新增因子时必须修改的位置（按顺序执行）：
+
+| 序号 | 文件 | 位置 | 作用 |
+|------|------|------|------|
+| 1 | `data_fetchers/factor_generator.py` | `_EXTENDED_FACTOR_COLS` | 数据源因子列定义 |
+| 2 | `data_fetchers/factor_generator.py` | 因子计算函数 | 计算逻辑，结果存入 `factor_ic_data.json.gz`（统一数据源） |
+| 3 | `comprehensive_factor/common/factor_selector.py` | `FACTOR_NAME_TO_COL_MAP` | 因子名→列名映射（筛选层） |
+| 4 | `comprehensive_factor/common/weight_engine.py` | `FACTOR_NAME_TO_COL_MAP` | 因子名→列名映射（权重层） |
+| 5 | `data_fetchers/factor_definitions.py` | 因子定义 | 因子元数据（名称、类型、说明） |
+| 6 | `PROJECT.md` | 因子列表章节（本表） | 项目级因子清单 |
+
+**关键依赖**: 新增因子后必须重新运行 `factor_generator.py` 更新 `factor_ic_data.json.gz`，否则后续脚本无法读取新因子值。
+
+---
+
 ## 路线图：待实施 / 预留规则 [reference]
 
 **以下规则当前不在硬规则表中强制执行，不可作为 PR 取证依据。** 待对应工具交付或规则升级后，按 checklist 迁入 H 表。
