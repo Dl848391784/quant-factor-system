@@ -1,6 +1,6 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.3
+> 版本: v2.4
 > 最后更新: 2026-06-03
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
@@ -1692,7 +1692,8 @@ if not factor_cols or len(factor_cols) == 0:
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
-| v2.3 | 2026-06-03 | stock_selector.py v1.1: 添加版本历史、模块级 logger (_logger)、完善类型注解 (dict[str, Any]) |
+| v2.4 | 2026-06-03 | run_pipeline.py v1.3: 新增 Stage 5 权重选择 + Stage 6 股票选股；generate_factor_summary_report.py v2.2: 新增第七、八部分 |
+| v2.3 | 2026-06-03 | stock_selector.py v1.1: 添加版本历史、模块级 logger、完善类型注解 |
 | v2.2 | 2026-06-03 | Step 7 股票选股流程图 + stock_selector.py v1.0 开发完成 |
 | v2.1 | 2026-06-03 | weight_selector.py v1.3: print→logger迁移、类型注解完善、异常处理优化（JSONDecodeError捕获、EPSILON精度容差） |
 | v2.0 | 2026-06-03 | 大重构:65 章节去重合并为 55 条 M 编号规则,按 13 类别 (A-M) 组织;统一 W/W/H/D/W/V 框架;加目录索引;精简更新记录 |

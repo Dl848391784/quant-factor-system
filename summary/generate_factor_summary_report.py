@@ -28,9 +28,10 @@
     v1.9: 2026-06-02 新增数据完整性检查功能：在报告开头检查各数据源是否更新至 T-1
     v2.0: 2026-06-02 新增因子定义列展示
     v2.1: 2026-06-02 架构改进：因子定义迁移至 factor_definitions.py 统一模块
+    v2.2: 2026-06-03 新增权重选择和股票选股结果展示（第七、八部分）
 """
 
-__version__ = "2.1"
+__version__ = "2.2"
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -43,6 +44,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+
 # 项目根目录（用于 sys.path 和路径常量）
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 
@@ -51,10 +53,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # 第三方库导入
-import pandas as pd
+import pandas as pd  # noqa: E402
 
 # 项目模块导入
-from factor_definitions import FACTOR_DEFINITIONS
+from factor_definitions import FACTOR_DEFINITIONS  # noqa: E402
 
 
 # 数据路径配置
@@ -63,6 +65,8 @@ DATA_PATHS = {
     "backtest_result": "backtest/result",
     "comprehensive_result": "comprehensive_factor/result",
     "factor_data": "data_fetchers/result",
+    "weight_selection": "comprehensive_factor/result/weight_selection_result.json",
+    "stock_selection": "comprehensive_factor/result/stock_selection_result.json",
 }
 
 # 数据完整性检查配置
@@ -798,6 +802,71 @@ def load_composite_results(logger: logging.Logger) -> list[dict]:
     return results
 
 
+def load_weight_selection_result(logger: logging.Logger) -> dict | None:
+    """加载权重选择结果
+
+    v2.2 (2026-06-03): 新增权重选择结果加载
+
+    Args:
+        logger: 日志记录器
+
+    Returns:
+        权重选择结果字典，结构：
+        {
+            "best_selection": {"method": str, "composite_score": float, ...},
+            "all_methods": [...],
+            "scoring_metrics": [...],
+            ...
+        }
+        或 None（文件不存在）
+    """
+    weight_file = PROJECT_ROOT / DATA_PATHS["weight_selection"]
+
+    if not weight_file.exists():
+        logger.debug("权重选择结果文件不存在: %s", weight_file)
+        return None
+
+    data = load_json_file(weight_file, logger)
+    if data:
+        logger.info("加载权重选择结果: 最优方法=%s, 综合得分=%.4f",
+                    data.get("best_selection", {}).get("method", "N/A"),
+                    data.get("best_selection", {}).get("composite_score", 0))
+    return data
+
+
+def load_stock_selection_result(logger: logging.Logger) -> dict | None:
+    """加载股票选股结果
+
+    v2.2 (2026-06-03): 新增股票选股结果加载
+
+    Args:
+        logger: 日志记录器
+
+    Returns:
+        股票选股结果字典，结构：
+        {
+            "meta": {"selection_date": str, "weight_method": str, "top_n": int, ...},
+            "top_stocks": [{"rank": int, "code": str, "composite_value": float, ...}],
+            ...
+        }
+        或 None（文件不存在）
+    """
+    stock_file = PROJECT_ROOT / DATA_PATHS["stock_selection"]
+
+    if not stock_file.exists():
+        logger.debug("股票选股结果文件不存在: %s", stock_file)
+        return None
+
+    data = load_json_file(stock_file, logger)
+    if data:
+        meta = data.get("meta", {})
+        logger.info("加载股票选股结果: 选股日期=%s, Top N=%d, 最优权重=%s",
+                    meta.get("selection_date", "N/A"),
+                    meta.get("top_n", 0),
+                    meta.get("weight_method", "N/A"))
+    return data
+
+
 def get_monotonicity_symbol(quality: str) -> str:
     """获取单调性质量符号
 
@@ -1245,6 +1314,143 @@ def _generate_composite_section(composite_results: list[dict]) -> list[str]:
     return lines
 
 
+def _generate_weight_selection_section(weight_result: dict | None) -> list[str]:
+    """生成权重选择结果展示部分
+
+    v2.2 (2026-06-03): 新增权重选择结果展示
+
+    Args:
+        weight_result: 权重选择结果字典（可为 None）
+
+    Returns:
+        报告文本行列表
+    """
+    lines = []
+    lines.append("")
+    lines.append("七、权重选择结果")
+    lines.append("-" * 70)
+
+    if weight_result is None:
+        lines.append("权重选择结果文件不存在，请先运行 weight_selector.py")
+        lines.append("-" * 70)
+        return lines
+
+    best_selection = weight_result.get("best_selection", {})
+    all_methods = weight_result.get("all_methods", [])
+
+    # 最优方法信息
+    best_method = best_selection.get("method", "N/A")
+    best_score = best_selection.get("composite_score", 0)
+
+    lines.append(f"最优权重方法: {get_weight_method_display(best_method)}")
+    lines.append(f"综合得分: {format_float(best_score, 4)}")
+    lines.append(f"选股日期: {weight_result.get('meta', {}).get('created_at', 'N/A')[:10]}")
+    lines.append("")
+
+    # 各方法排名表格
+    if all_methods:
+        lines.append("【各权重方法排名】")
+        lines.append(f"{'排名':>4} {'权重方法':<20} {'综合得分':>10}")
+        lines.append("-" * 70)
+
+        for i, item in enumerate(all_methods, 1):
+            method_display = get_weight_method_display(item.get("method", "N/A"))
+            score = item.get("composite_score", 0)
+            lines.append(f"{i:>4} {method_display:<20} {format_float(score, 4):>10}")
+
+        lines.append("-" * 70)
+
+    # 评分指标说明
+    scoring_metrics = weight_result.get("scoring_metrics", [])
+    if scoring_metrics:
+        lines.append("")
+        lines.append("【评分指标】")
+        lines.append(f"共 {len(scoring_metrics)} 个指标，Min-Max归一化后等权加权")
+        lines.append("指标列表: " + ", ".join(scoring_metrics))
+
+    lines.append("-" * 70)
+
+    return lines
+
+
+def _generate_stock_selection_section(stock_result: dict | None) -> list[str]:
+    """生成股票选股结果展示部分
+
+    v2.2 (2026-06-03): 新增股票选股结果展示
+
+    Args:
+        stock_result: 股票选股结果字典（可为 None）
+
+    Returns:
+        报告文本行列表
+    """
+    lines = []
+    lines.append("")
+    lines.append("八、股票选股结果")
+    lines.append("-" * 70)
+
+    if stock_result is None:
+        lines.append("股票选股结果文件不存在，请先运行 stock_selector.py")
+        lines.append("-" * 70)
+        return lines
+
+    meta = stock_result.get("meta", {})
+    top_stocks = stock_result.get("top_stocks", [])
+
+    # 元信息展示
+    lines.append(f"选股日期: {meta.get('selection_date', 'N/A')}")
+    lines.append(f"最优权重方法: {get_weight_method_display(meta.get('weight_method', 'N/A'))}")
+    lines.append(f"权重综合得分: {format_float(meta.get('composite_score', 0), 4)}")
+    lines.append(f"因子方向: {meta.get('factor_direction', 'N/A')}（{'反向' if meta.get('factor_direction') == 'negative' else '正向'}）")
+    lines.append(f"选出股票数: {meta.get('top_n', 0)} 只（共 {meta.get('total_stocks', 0)} 只股票）")
+    lines.append("")
+
+    # Top N 股票表格
+    if top_stocks:
+        lines.append(f"【Top {len(top_stocks)} 股票】")
+        lines.append(f"{'排名':>4} {'股票代码':<10} {'综合因子值':>12} {'因子值详情':<40}")
+        lines.append("-" * 70)
+
+        for item in top_stocks:
+            rank = item.get("rank", 0)
+            code = item.get("code", "N/A")
+            composite_value = item.get("composite_value", 0)
+
+            # 因子值详情（截取显示）
+            factor_values = item.get("factor_values", {})
+            factor_str = ""
+            if factor_values:
+                parts = []
+                for k, v in factor_values.items():
+                    if v is not None:
+                        parts.append(f"{k}={format_float(v, 2)}")
+                factor_str = ", ".join(parts[:3])  # 只显示前3个因子值
+                if len(parts) > 3:
+                    factor_str += "..."
+            else:
+                factor_str = "无因子值"
+
+            lines.append(f"{rank:>4} {code:<10} {format_float(composite_value, 3):>12} {factor_str:<40}")
+
+        lines.append("-" * 70)
+
+    # 权重配置信息
+    weight_config = stock_result.get("weight_config", {})
+    if weight_config:
+        lines.append("")
+        lines.append("【权重配置】")
+        lines.append(f"权重方法: {get_weight_method_display(weight_config.get('method', 'N/A'))}")
+        if weight_config.get("method") == "rolling_icir_weight":
+            lines.append(f"滚动窗口: {weight_config.get('window', 'N/A')} 日")
+        factor_list = weight_config.get("factor_list", [])
+        if factor_list:
+            lines.append(f"因子列表: {', '.join(factor_list)}")
+
+    lines.append("-" * 70)
+
+    return lines
+
+
 def _generate_comparison_section(factor_data: list[dict], composite_results: list[dict]) -> list[str]:
     """生成综合因子与单因子对比部分
 
@@ -1345,6 +1551,8 @@ def _generate_comparison_section(factor_data: list[dict], composite_results: lis
 def generate_report(date: str, logger: logging.Logger, force_full_correlation: bool = False) -> str:
     """生成完整的汇总报告
 
+    v2.2 (2026-06-03): 新增权重选择和股票选股结果展示
+
     Args:
         date: 日期字符串
         logger: 日志记录器
@@ -1370,6 +1578,13 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     logger.info("加载综合因子结果...")
     composite_results = load_composite_results(logger)
 
+    # v2.2: 加载权重选择和股票选股结果
+    logger.info("加载权重选择结果...")
+    weight_result = load_weight_selection_result(logger)
+
+    logger.info("加载股票选股结果...")
+    stock_result = load_stock_selection_result(logger)
+
     # 数据加载失败保护：关键数据为空时抛出明确错误
     if not ic_results:
         logger.error("IC 结果数据为空，无法生成报告")
@@ -1379,7 +1594,10 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
         raise ValueError("回测结果数据为空，请检查 backtest/result 目录是否有数据文件")
 
     logger.info(
-        f"数据加载完成: IC结果 {len(ic_results)} 个, 回测结果 {len(backtest_results)} 个, 综合因子 {len(composite_results)} 种权重方法"
+        "数据加载完成: IC结果 %d 个, 回测结果 %d 个, 综合因子 %d 种权重方法",
+        len(ic_results),
+        len(backtest_results),
+        len(composite_results),
     )
     corr_matrix = calculate_factor_correlation(logger, force_full=force_full_correlation)
 
@@ -1422,6 +1640,12 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
 
     # 第六部分：综合因子 vs 单因子对比
     lines.extend(_generate_comparison_section(factor_data, composite_results))
+
+    # v2.2: 第七部分：权重选择结果（新增）
+    lines.extend(_generate_weight_selection_section(weight_result))
+
+    # v2.2: 第八部分：股票选股结果（新增）
+    lines.extend(_generate_stock_selection_section(stock_result))
 
     return "\n".join(lines)
 
