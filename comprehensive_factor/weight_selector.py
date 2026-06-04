@@ -21,13 +21,13 @@
 - v1.6 (2026-06-04): 10项深度修复（不可变配置递归+统计策略统一+异常捕获）
 - v1.7 (2026-06-04): 9项新修复（Python兼容性+契约校验+降级路径+日志精简+动态列宽）
 - v1.8 (2026-06-04): SRP拆分→4类协作（ResultLoader+MetricExtractor+Scorer+ReportFormatter）
+- v1.9 (2026-06-04): 5项修复（严格契约+删除未用变量+配置漂移+short_name配置驱动+单方法场景）
 
 作者: 云瑶
 """
 
 # 标准库导入
 import argparse
-import copy
 import json
 import logging
 import sys
@@ -50,7 +50,7 @@ from backtest.common.logger_config import get_logger  # noqa: E402
 # =============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "1.8"
+__version__ = "1.9"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -88,54 +88,63 @@ def _freeze_config(obj: dict | list) -> MappingProxyType | tuple:
 
 # 内部可变配置（用于构建，不会被外部直接访问）
 _DEFAULT_CONFIG_INTERNAL = {
-    # 评价指标配置
+    # 评价指标配置（问题 4 修复：添加 short_name）
     "metrics": {
         # 收益类指标（越大越好）
         "long_short_return_annual": {
             "direction": "higher_better",
             "weight": 1.0,
             "description": "多空年化收益",
+            "short_name": "ls_ret_ann",
         },
         "long_short_sharpe": {
             "direction": "higher_better",
             "weight": 1.0,
             "description": "多空夏普比率",
+            "short_name": "ls_sharpe",
         },
         "long_return_annual": {
             "direction": "higher_better",
             "weight": 1.0,
             "description": "多头年化收益",
+            "short_name": "l_ret_ann",
         },
         "long_sharpe": {
             "direction": "higher_better",
             "weight": 1.0,
             "description": "多头夏普比率",
+            "short_name": "l_sharpe",
         },
         "monotonicity_abs": {
             "direction": "higher_better",
             "weight": 1.0,
             "description": "单调性相关性绝对值",
+            "short_name": "mono_abs",
         },
         "long_short_net_daily": {
             "direction": "higher_better",
             "weight": 1.0,
             "description": "成本后日收益",
+            "short_name": "ls_net",
         },
         # 成本风险类指标（越小越好）
         "turnover_long_avg": {
             "direction": "lower_better",
             "weight": 1.0,
             "description": "多头换手率",
+            "short_name": "to_long",
         },
         "turnover_short_avg": {
             "direction": "lower_better",
             "weight": 1.0,
             "description": "空头换手率",
+            "short_name": "to_short",
         },
         "max_drawdown": {
             "direction": "lower_better",
             "weight": 1.0,
             "description": "最大回撤（绝对值越小越好）",
+            "short_name": "max_dd",
         },
     },
     # 权重方式列表（转为 tuple）
@@ -155,6 +164,60 @@ _DEFAULT_CONFIG_INTERNAL = {
 
 # 不可变配置
 DEFAULT_CONFIG = _freeze_config(_DEFAULT_CONFIG_INTERNAL)
+
+
+# =============================================================================
+# 配置值对象（问题 3 修复：消除配置漂移风险）
+# =============================================================================
+
+
+class WeightSelectorConfig:
+    """
+    权重选择器配置（不可变值对象）
+
+    职责：封装 metric_configs 和 long_layers，确保三类引用同一份配置。
+    三类（MetricExtractor、Scorer、ReportFormatter）通过 config 属性访问，
+    单测时只需注入一处。
+    """
+
+    __slots__ = ("_metrics", "_long_layers")
+
+    def __init__(self, metrics: MappingProxyType, long_layers: tuple[str, ...]):
+        """
+        初始化配置值对象
+
+        Args:
+            metrics: 不可变指标配置
+            long_layers: 多头分层列表（tuple）
+        """
+        self._metrics = metrics
+        self._long_layers = long_layers
+
+    @classmethod
+    def from_dict(cls, metric_configs: dict[str, dict], long_layers: list[str]) -> "WeightSelectorConfig":
+        """
+        从可变配置创建不可变值对象
+
+        Args:
+            metric_configs: 可变指标配置字典
+            long_layers: 多头分层列表
+
+        Returns:
+            WeightSelectorConfig 实例
+        """
+        frozen_metrics = _freeze_config(metric_configs)
+        frozen_layers = tuple(long_layers)
+        return cls(metrics=frozen_metrics, long_layers=frozen_layers)
+
+    @property
+    def metrics(self) -> MappingProxyType:
+        """获取不可变指标配置"""
+        return self._metrics
+
+    @property
+    def long_layers(self) -> tuple[str, ...]:
+        """获取多头分层列表"""
+        return self._long_layers
 
 
 # =============================================================================
@@ -205,13 +268,13 @@ class ResultLoader:
             raise FileNotFoundError(f"结果目录不存在: {result_dir}")
 
         results = {}
-        missing_files = []
+        # 问题 2 修复：删除未使用的 missing_files，与 corrupted_files 对齐
         corrupted_files = []
 
         for method in weight_methods:
             filepath = result_dir / f"composite_{method}_{return_period}.json"
             if not filepath.exists():
-                missing_files.append(str(filepath))
+                # 循环内 warning（与 corrupted_files 处理方式一致）
                 self._logger.warning(f"文件不存在: {filepath}")
                 continue
 
@@ -241,31 +304,28 @@ class MetricExtractor:
 
     def __init__(
         self,
-        metric_configs: dict[str, dict],
-        long_layers: list[str] | None = None,
+        config: WeightSelectorConfig,
         logger: logging.Logger | None = None,
     ):
         """
-        初始化指标提取器
+        初始化指标提取器（问题 3 修复：接收 config 对象）
 
         Args:
-            metric_configs: 指标配置字典
-            long_layers: 多头分层列表（默认：["layer_1", "layer_2"]）
+            config: 权重选择器配置（不可变值对象）
             logger: 日志器（可选）
         """
-        self._metric_configs = copy.deepcopy(metric_configs)
-        self._long_layers = long_layers or ["layer_1", "layer_2"]
+        self._config = config
         self._logger = logger or _logger
 
     @property
     def metric_configs(self) -> MappingProxyType:
         """获取指标配置"""
-        return MappingProxyType(self._metric_configs)
+        return self._config.metrics
 
     @property
     def long_layers(self) -> tuple[str, ...]:
         """获取多头分层列表"""
-        return tuple(self._long_layers)
+        return self._config.long_layers
 
     def extract(self, results: dict[str, dict]) -> dict[str, dict[str, float]]:
         """
@@ -314,13 +374,13 @@ class MetricExtractor:
 
                 # 提取多头分层数据
                 long_layer_data = []
-                for layer_name in self._long_layers:
+                for layer_name in self._config.long_layers:
                     layer_data = layer_stats.get(layer_name, {})
                     if layer_data:
                         long_layer_data.append(layer_data)
 
                 if not long_layer_data:
-                    raise ValueError(f"多头分层数据缺失: {self._long_layers}")
+                    raise ValueError(f"多头分层数据缺失: {self._config.long_layers}")
 
                 # 检查层内必需字段
                 for layer in long_layer_data:
@@ -363,15 +423,15 @@ class Scorer:
     职责：归一化指标、计算加权得分、选择最优方法。
     """
 
-    def __init__(self, metric_configs: dict[str, dict], logger: logging.Logger | None = None):
+    def __init__(self, config: WeightSelectorConfig, logger: logging.Logger | None = None):
         """
-        初始化评分器
+        初始化评分器（问题 3 修复：接收 config 对象）
 
         Args:
-            metric_configs: 指标配置字典
+            config: 权重选择器配置（不可变值对象）
             logger: 日志器（可选）
         """
-        self._metric_configs = copy.deepcopy(metric_configs)
+        self._config = config
         self._logger = logger or _logger
 
     def normalize(self, metrics_data: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
@@ -390,7 +450,7 @@ class Scorer:
         methods = list(metrics_data.keys())
         normalized_scores = {method: {} for method in methods}
 
-        for metric_name, config in self._metric_configs.items():
+        for metric_name, config in self._config.metrics.items():
             values = [metrics_data[m][metric_name] for m in methods]
             min_val = min(values)
             max_val = max(values)
@@ -426,7 +486,8 @@ class Scorer:
             weighted_sum = 0.0
 
             for metric_name, score in scores.items():
-                weight = self._metric_configs.get(metric_name, {}).get("weight", 1.0)
+                # 问题 1 修复：直接访问，与 normalize 保持同档校验强度
+                weight = self._config.metrics[metric_name]["weight"]
                 weighted_sum += score * weight
                 total_weight += weight
 
@@ -472,15 +533,15 @@ class ReportFormatter:
     职责：生成 JSON 输出结构、格式化日志摘要。
     """
 
-    def __init__(self, metric_configs: dict[str, dict], logger: logging.Logger | None = None):
+    def __init__(self, config: WeightSelectorConfig, logger: logging.Logger | None = None):
         """
-        初始化报告格式化器
+        初始化报告格式化器（问题 3 修复：接收 config 对象）
 
         Args:
-            metric_configs: 指标配置字典
+            config: 权重选择器配置（不可变值对象）
             logger: 日志器（可选）
         """
-        self._metric_configs = copy.deepcopy(metric_configs)
+        self._config = config
         self._logger = logger or _logger
 
     def generate_output(
@@ -522,7 +583,7 @@ class ReportFormatter:
             "meta": {
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "total_methods": len(final_scores),
-                "total_metrics": len(self._metric_configs),
+                "total_metrics": len(self._config.metrics),
                 "normalization_method": "min-max",
                 "weight_strategy": "equal-weight",
             },
@@ -538,7 +599,7 @@ class ReportFormatter:
                     "weight": v["weight"],
                     "description": v.get("description", ""),
                 }
-                for k, v in self._metric_configs.items()
+                for k, v in self._config.metrics.items()
             },
         }
 
@@ -560,7 +621,7 @@ class ReportFormatter:
             ranked_methods: 排名列表
             normalized_scores: 归一化得分
         """
-        metrics_list = list(self._metric_configs.keys())
+        metrics_list = list(self._config.metrics.keys())
 
         # 动态计算方法列宽
         max_method_len = max(len(m) for m, _ in ranked_methods) if ranked_methods else 25
@@ -569,13 +630,8 @@ class ReportFormatter:
         # 表头
         header = f"{'排名':>4} {'方法':<{method_col_width}}"
         for m in metrics_list:
-            short_name = (
-                m.replace("long_short_", "ls_")
-                .replace("long_", "l_")
-                .replace("turnover_", "to_")
-                .replace("monotonicity_", "mono_")
-                .replace("max_drawdown", "max_dd")
-            )
+            # 问题 4 修复：使用配置驱动的 short_name
+            short_name = self._config.metrics[m]["short_name"]
             header += f" {short_name:>10}"
         header += f" {'综合得分':>10}"
 
@@ -643,15 +699,17 @@ def main():
 
         _logger.info(f"result_dir={result_dir} | output={output_path}")
 
-        # 解冻配置（MappingProxyType → dict）
-        metric_configs = {k: dict(v) for k, v in DEFAULT_CONFIG["metrics"].items()}
-        long_layers = list(DEFAULT_CONFIG["long_layers"])
+        # 创建不可变配置值对象（问题 3 修复：消除配置漂移风险）
+        config = WeightSelectorConfig.from_dict(
+            metric_configs={k: dict(v) for k, v in DEFAULT_CONFIG["metrics"].items()},
+            long_layers=list(DEFAULT_CONFIG["long_layers"]),
+        )
 
         # 组装 4 类（问题 7 修复：SRP 拆分）
         loader = ResultLoader()
-        extractor = MetricExtractor(metric_configs=metric_configs, long_layers=long_layers)
-        scorer = Scorer(metric_configs=metric_configs)
-        formatter = ReportFormatter(metric_configs=metric_configs)
+        extractor = MetricExtractor(config=config)
+        scorer = Scorer(config=config)
+        formatter = ReportFormatter(config=config)
 
         # 1. 加载结果文件
         results = loader.load(
@@ -678,16 +736,26 @@ def main():
         metrics_data = extractor.extract(results)
         _logger.debug(f"提取 {len(extractor.metric_configs)} 个指标")
 
-        # 3. 归一化
-        _logger.debug("Min-Max归一化...")
-        normalized_scores = scorer.normalize(metrics_data)
+        # 问题 5 修复：单方法场景直接跳过评分流程
+        if len(metrics_data) == 1:
+            only_method = list(metrics_data.keys())[0]
+            _logger.warning(f"仅 1 个方法 {only_method}，跳过评分流程")
+            best_method = only_method
+            best_score = 1.0
+            ranked_methods = [(only_method, 1.0)]
+            normalized_scores = {only_method: dict.fromkeys(config.metrics, 1.0)}
+            final_scores = {only_method: 1.0}
+        else:
+            # 3. 归一化
+            _logger.debug("Min-Max归一化...")
+            normalized_scores = scorer.normalize(metrics_data)
 
-        # 4. 计算综合得分
-        _logger.debug("计算综合得分（等权）...")
-        final_scores = scorer.calculate_weighted(normalized_scores)
+            # 4. 计算综合得分
+            _logger.debug("计算综合得分（等权）...")
+            final_scores = scorer.calculate_weighted(normalized_scores)
 
-        # 5. 选择最优方法
-        best_method, best_score, ranked_methods = scorer.select_best(final_scores)
+            # 5. 选择最优方法
+            best_method, best_score, ranked_methods = scorer.select_best(final_scores)
 
         # 6. 输出摘要
         formatter.log_summary(best_method, best_score, ranked_methods, normalized_scores)
