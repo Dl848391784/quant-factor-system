@@ -24,6 +24,7 @@ Step 7: 股票选股 (stock_selector.py) ← 本脚本
 - v1.5 (2026-06-04): 4项修复（CLI过滤None参数+删除空__post_init__+删除重复import+修正注释）
 - v1.6 (2026-06-04): 3项修复（调用validate+删除dead config字段+改进日期错误信息）
 - v1.7 (2026-06-04): 2项修复（available_dates类型一致性+total_stocks语义精确）
+- v1.8 (2026-06-04): 1项修复（mask过滤避免引入临时列污染上游对象）
 
 作者: 云瑶
 创建日期: 2026-06-03
@@ -63,7 +64,7 @@ from comprehensive_factor.common.weight_engine import WeightEngine  # noqa: E402
 # ============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "1.7"
+__version__ = "1.8"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -593,10 +594,9 @@ def select_stocks(
         )
 
     logger.info("过滤选股日期: %s", selection_date)
-    # 问题 1 修复：date 列归一化为 str 后比较
-    factor_df["date_str"] = factor_df["date"].apply(lambda d: pd.Timestamp(d).strftime("%Y-%m-%d"))
-    factor_df = factor_df[factor_df["date_str"] == selection_date].copy()
-    factor_df.drop(columns=["date_str"], inplace=True)
+    # 问题 1 修复：合并为一行 mask 过滤，避免引入临时列污染上游对象
+    mask = factor_df["date"].apply(lambda d: pd.Timestamp(d).strftime("%Y-%m-%d")) == selection_date
+    factor_df = factor_df[mask].copy()
 
     # 问题 2 修复：变量名改为 stocks_on_date，避免误解为"全部股票数"
     stocks_on_date = len(factor_df)
