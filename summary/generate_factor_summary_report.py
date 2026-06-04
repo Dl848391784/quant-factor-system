@@ -29,9 +29,10 @@
     v2.0: 2026-06-02 新增因子定义列展示
     v2.1: 2026-06-02 架构改进：因子定义迁移至 factor_definitions.py 统一模块
     v2.2: 2026-06-03 新增权重选择和股票选股结果展示（第七、八部分）
+    v2.3: 2026-06-04 修复字段名同步：total_stocks → stocks_on_date（对齐 stock_selector v1.7）
 """
 
-__version__ = "2.2"
+__version__ = "2.3"
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -828,9 +829,11 @@ def load_weight_selection_result(logger: logging.Logger) -> dict | None:
 
     data = load_json_file(weight_file, logger)
     if data:
-        logger.info("加载权重选择结果: 最优方法=%s, 综合得分=%.4f",
-                    data.get("best_selection", {}).get("method", "N/A"),
-                    data.get("best_selection", {}).get("composite_score", 0))
+        logger.info(
+            "加载权重选择结果: 最优方法=%s, 综合得分=%.4f",
+            data.get("best_selection", {}).get("method", "N/A"),
+            data.get("best_selection", {}).get("composite_score", 0),
+        )
     return data
 
 
@@ -860,10 +863,12 @@ def load_stock_selection_result(logger: logging.Logger) -> dict | None:
     data = load_json_file(stock_file, logger)
     if data:
         meta = data.get("meta", {})
-        logger.info("加载股票选股结果: 选股日期=%s, Top N=%d, 最优权重=%s",
-                    meta.get("selection_date", "N/A"),
-                    meta.get("top_n", 0),
-                    meta.get("weight_method", "N/A"))
+        logger.info(
+            "加载股票选股结果: 选股日期=%s, Top N=%d, 最优权重=%s",
+            meta.get("selection_date", "N/A"),
+            meta.get("top_n", 0),
+            meta.get("weight_method", "N/A"),
+        )
     return data
 
 
@@ -1401,8 +1406,10 @@ def _generate_stock_selection_section(stock_result: dict | None) -> list[str]:
     lines.append(f"选股日期: {meta.get('selection_date', 'N/A')}")
     lines.append(f"最优权重方法: {get_weight_method_display(meta.get('weight_method', 'N/A'))}")
     lines.append(f"权重综合得分: {format_float(meta.get('composite_score', 0), 4)}")
-    lines.append(f"因子方向: {meta.get('factor_direction', 'N/A')}（{'反向' if meta.get('factor_direction') == 'negative' else '正向'}）")
-    lines.append(f"选出股票数: {meta.get('top_n', 0)} 只（共 {meta.get('total_stocks', 0)} 只股票）")
+    lines.append(
+        f"因子方向: {meta.get('factor_direction', 'N/A')}（{'反向' if meta.get('factor_direction') == 'negative' else '正向'}）"
+    )
+    lines.append(f"选出股票数: {meta.get('top_n', 0)} 只（共 {meta.get('stocks_on_date', 0)} 只股票）")
     lines.append("")
 
     # Top N 股票表格
