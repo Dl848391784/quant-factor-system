@@ -30,9 +30,10 @@
     v2.1: 2026-06-02 架构改进：因子定义迁移至 factor_definitions.py 统一模块
     v2.2: 2026-06-03 新增权重选择和股票选股结果展示（第七、八部分）
     v2.3: 2026-06-04 修复字段名同步：total_stocks → stocks_on_date（对齐 stock_selector v1.7）
+    v2.4: 2026-06-04 因子值详情改为全部显示，移除截断逻辑
 """
 
-__version__ = "2.3"
+__version__ = "2.4"
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -1423,7 +1424,7 @@ def _generate_stock_selection_section(stock_result: dict | None) -> list[str]:
             code = item.get("code", "N/A")
             composite_value = item.get("composite_value", 0)
 
-            # 因子值详情（截取显示）
+            # 因子值详情（全部显示）
             factor_values = item.get("factor_values", {})
             factor_str = ""
             if factor_values:
@@ -1431,13 +1432,11 @@ def _generate_stock_selection_section(stock_result: dict | None) -> list[str]:
                 for k, v in factor_values.items():
                     if v is not None:
                         parts.append(f"{k}={format_float(v, 2)}")
-                factor_str = ", ".join(parts[:3])  # 只显示前3个因子值
-                if len(parts) > 3:
-                    factor_str += "..."
+                factor_str = ", ".join(parts)  # 显示全部因子值
             else:
                 factor_str = "无因子值"
 
-            lines.append(f"{rank:>4} {code:<10} {format_float(composite_value, 3):>12} {factor_str:<40}")
+            lines.append(f"{rank:>4} {code:<10} {format_float(composite_value, 3):>12} {factor_str}")
 
         lines.append("-" * 70)
 
