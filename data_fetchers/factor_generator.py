@@ -86,6 +86,12 @@ Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
     6. 在 _calculate_tail_factors 中添加 tail_volume_shrink 计算
     7. 更新 metadata valid_records 包含 intraday_intensity/tail_volume_acceleration/tail_volume_shrink
     8. 遵循数据层架构原则：因子数据预计算存储到统一数据源
+- v1.37 (2026-06-04): 新增当日涨跌幅因子（遵循 PROJECT.md 因子开发规范）：
+    1. 新增 past_return_1d 到 _EXTENDED_FACTOR_COLS（当日涨跌幅）
+    2. 新增 Step 3.5 计算 past_return_1d（调用 calculate_past_return_1d）
+    3. 导入 calculate_past_return_1d 函数
+    4. 公式：close[t] / close[t-1] - 1（当日涨跌幅）
+    5. 遵循 PROJECT.md 规范：因子计算在 data_fetchers 完成，存储到统一数据源
 
 作者: 云瑶
 """
@@ -118,6 +124,7 @@ if __name__ == "__main__":
         calculate_bollinger_pb,
         calculate_kdj_j,
         calculate_overnight_return,
+        calculate_past_return_1d,  # 当日涨跌幅
         calculate_price_position,
         calculate_turnover_surge,
     )
@@ -129,6 +136,7 @@ else:
         calculate_bollinger_pb,
         calculate_kdj_j,
         calculate_overnight_return,
+        calculate_past_return_1d,  # 当日涨跌幅
         calculate_price_position,
         calculate_turnover_surge,
     )
@@ -163,6 +171,7 @@ _DEFAULT_RESULT_DIR = Path(__file__).parent / "result"
 # v1.36 新增日内强度因子：intraday_intensity（收盘价在振幅中的相对位置）
 # v1.36 新增尾盘缩量程度因子：tail_volume_shrink（尾盘成交量总和/全天成交量）
 _EXTENDED_FACTOR_COLS: tuple[str, ...] = (
+    "past_return_1d",  # 当日涨跌幅（遵循 PROJECT.md 规则：因子计算在 data_fetchers 完成）
     "bollinger_pb",
     "kdj_j",
     "turnover_surge",
@@ -869,6 +878,14 @@ def generate_all_factors(
             )
 
     logger.info("  合并收益后记录数: %d", len(factor_df))
+
+    # ========== Step 3.5: 计算 past_return_1d（当日涨跌幅） ==========
+    logger.info("Step 3.5: 计算当日涨跌幅因子...")
+
+    factor_df = calculate_past_return_1d(factor_df, logger_arg=logger)
+
+    past_return_valid = int(factor_df["past_return_1d"].notna().sum())
+    logger.info("  有效 past_return_1d: %d (%.2f%%)", past_return_valid, _calc_pct(past_return_valid, len(factor_df)))
 
     # ========== Step 4: 计算 bollinger_pb ==========
     logger.info("Step 4: 计算布林带 %B 因子...")
