@@ -19,6 +19,7 @@
 - v1.4 (2026-06-03): select_best_method() 添加空字典检查（防御性编程）
 - v1.5 (2026-06-04): 10项Bug修复（架构重构→类封装）
 - v1.6 (2026-06-04): 10项深度修复（不可变配置递归+统计策略统一+异常捕获）
+- v1.7 (2026-06-04): 9项新修复（Python兼容性+契约校验+降级路径+日志精简+动态列宽）
 
 作者: 云瑶
 """
@@ -29,7 +30,7 @@ import copy
 import json
 import logging
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from types import MappingProxyType
 
@@ -48,7 +49,7 @@ from backtest.common.logger_config import get_logger  # noqa: E402
 # =============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "1.6"
+__version__ = "1.7"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -64,7 +65,7 @@ EPSILON = 1e-10
 
 def _freeze_config(obj: dict | list) -> MappingProxyType | tuple:
     """
-    递归冻结配置对象（问题 1 修复）
+    递归冻结配置对象
 
     将 dict 转为 MappingProxyType，list 转为 tuple，
     确保嵌套结构真正不可变。
@@ -76,12 +77,12 @@ def _freeze_config(obj: dict | list) -> MappingProxyType | tuple:
         不可变的 MappingProxyType 或 tuple
     """
     if isinstance(obj, dict):
-        # 递归冻结所有子 dict
-        frozen_dict = {k: _freeze_config(v) if isinstance(v, dict | list) else v for k, v in obj.items()}
+        # 问题 2 修复：isinstance 元组写法兼容 Python < 3.10
+        frozen_dict = {k: _freeze_config(v) if isinstance(v, (dict, list)) else v for k, v in obj.items()}
         return MappingProxyType(frozen_dict)
     elif isinstance(obj, list):
-        # 递归冻结所有子 list，转为 tuple
-        return tuple(_freeze_config(item) if isinstance(item, dict | list) else item for item in obj)
+        # 问题 2 修复：同上
+        return tuple(_freeze_config(item) if isinstance(item, (dict, list)) else item for item in obj)
     else:
         return obj
 
@@ -164,16 +165,14 @@ DEFAULT_CONFIG = _freeze_config(_DEFAULT_CONFIG_INTERNAL)
 
 class WeightSelector:
     """
-    权重选择器类（问题 7 修复：封装配置，减少参数穿透）
+    权重选择器类
 
     将 metric_configs 作为构造参数注入，避免四个函数间重复传参。
     便于单元测试和配置管理。
 
-    问题 6 修复：load_composite_results 移入类，统一职责。
-
     使用方式:
         selector = WeightSelector(metric_configs=DEFAULT_CONFIG["metrics"])
-        results = selector.load_composite_results(result_dir, weight_methods, return_period)
+        results = WeightSelector.load_composite_results(result_dir, weight_methods, return_period, strict=True)
         metrics_data = selector.extract_metrics(results)
         normalized_scores = selector.normalize_minmax(metrics_data)
         final_scores = selector.calculate_weighted_score(normalized_scores)
@@ -187,7 +186,6 @@ class WeightSelector:
         metric_configs: dict[str, dict],
         long_layers: list[str] | None = None,
         logger: logging.Logger | None = None,
-        strict: bool = False,
     ):
         """
         初始化权重选择器
@@ -196,13 +194,11 @@ class WeightSelector:
             metric_configs: 指标配置字典
             long_layers: 多头分层列表（默认：["layer_1", "layer_2"]）
             logger: 日志器（可选）
-            strict: 严格模式，JSON 解析失败时抛异常而非跳过（问题 8 修复）
         """
         # 使用 copy.deepcopy 确保配置不被意外修改
         self._metric_configs = copy.deepcopy(metric_configs)
         self._long_layers = long_layers or ["layer_1", "layer_2"]
         self._logger = logger or _logger
-        self._strict = strict
 
     @classmethod
     def load_composite_results(
@@ -279,13 +275,16 @@ class WeightSelector:
         """
         从综合因子结果中提取评价指标
 
-        统计策略（问题 3 修复：统一为均值策略）：
+        统计策略：
         - long_return_annual: 多头各层年化收益均值
         - long_sharpe: 多头各层夏普均值
-        - max_drawdown: 多头各层回撤绝对值均值（统一为均值而非 max）
+        - max_drawdown: 多头各层回撤绝对值均值
 
         缺失数据处理（问题 4 修复）：
-        - 必需字段缺失时抛 ValueError，不静默赋 0
+        - 所有参与打分的字段均为必需，缺失时抛 ValueError
+        - 非必需字段：无（评分公平性要求所有字段存在）
+
+        问题 6 修复：单方法失败时 warning 跳过，所有方法都失败时再抛错
 
         Args:
             results: 综合因子结果字典
@@ -294,79 +293,119 @@ class WeightSelector:
             Dict[weight_method, Dict[metric_name, value]]
 
         Raises:
-            ValueError: 必需字段缺失
+            ValueError: 所有方法提取失败
         """
         metrics_data = {}
-        required_fields = ["long_short_return_annual", "long_short_sharpe"]
+        # 问题 4 修复：所有参与打分的字段均为必需
+        required_fields = [
+            "long_short_return_annual",
+            "long_short_sharpe",
+            "turnover_long_avg",
+            "turnover_short_avg",
+        ]
+
+        failed_methods = []
 
         for method, data in results.items():
-            backtest = data.get("backtest_result", {})
-            if not backtest:
-                raise ValueError(f"[{method}] backtest_result 字段缺失")
+            # 问题 6 修复：单方法失败时 warning 跳过
+            try:
+                backtest = data.get("backtest_result", {})
+                if not backtest:
+                    raise ValueError("backtest_result 字段缺失")
 
-            long_short = backtest.get("long_short", {})
-            monotonicity = backtest.get("monotonicity", {})
-            trading = backtest.get("trading_cost_analysis", {})
-            layer_stats = backtest.get("layer_stats", {})
+                long_short = backtest.get("long_short", {})
+                monotonicity = backtest.get("monotonicity", {})
+                trading = backtest.get("trading_cost_analysis", {})
+                layer_stats = backtest.get("layer_stats", {})
 
-            # 问题 4 修复：检查必需字段
-            for field in required_fields:
-                if field not in long_short:
-                    raise ValueError(f"[{method}] 必需字段缺失: {field}")
+                # 检查必需字段
+                for field in required_fields:
+                    if field not in long_short:
+                        raise ValueError(f"必需字段缺失: {field}")
 
-            # 提取多头分层数据
-            long_layer_data = []
-            for layer_name in self._long_layers:
-                layer_data = layer_stats.get(layer_name, {})
-                if layer_data:
-                    long_layer_data.append(layer_data)
+                # long_short_net_daily 也是必需字段（参与打分）
+                if "long_short_net_daily" not in trading:
+                    raise ValueError("必需字段缺失: long_short_net_daily")
 
-            # 问题 3 修复：统一为均值策略（包括 max_drawdown）
-            # 问题 4 修复：缺失时抛异常而非赋 0
-            if not long_layer_data:
-                raise ValueError(f"[{method}] 多头分层数据缺失: {self._long_layers}")
+                # monotonicity.correlation 必需
+                if "correlation" not in monotonicity:
+                    raise ValueError("必需字段缺失: monotonicity.correlation")
 
-            long_return_annual = sum(layer.get("annual_return", 0) for layer in long_layer_data) / len(long_layer_data)
-            long_sharpe = sum(layer.get("sharpe_ratio", 0) for layer in long_layer_data) / len(long_layer_data)
-            # 问题 3 修复：max_drawdown 改为均值策略，保持统计一致性
-            max_drawdown = sum(abs(layer.get("max_drawdown", 0)) for layer in long_layer_data) / len(long_layer_data)
+                # 提取多头分层数据
+                long_layer_data = []
+                for layer_name in self._long_layers:
+                    layer_data = layer_stats.get(layer_name, {})
+                    if layer_data:
+                        long_layer_data.append(layer_data)
 
-            # 提取指标值（问题 4 修复：使用 .get() 的默认值仅用于非必需字段）
-            metrics_data[method] = {
-                "long_short_return_annual": long_short["long_short_return_annual"],
-                "long_short_sharpe": long_short["long_short_sharpe"],
-                "long_return_annual": long_return_annual,
-                "long_sharpe": long_sharpe,
-                "monotonicity_abs": abs(monotonicity.get("correlation", 0)),
-                "long_short_net_daily": trading.get("long_short_net_daily", 0),
-                "turnover_long_avg": long_short.get("turnover_long_avg", 0),
-                "turnover_short_avg": long_short.get("turnover_short_avg", 0),
-                "max_drawdown": max_drawdown,
-            }
+                if not long_layer_data:
+                    raise ValueError(f"多头分层数据缺失: {self._long_layers}")
+
+                # 检查层内必需字段
+                for layer in long_layer_data:
+                    for field in ["annual_return", "sharpe_ratio", "max_drawdown"]:
+                        if field not in layer:
+                            raise ValueError(f"多头层必需字段缺失: {field}")
+
+                long_return_annual = sum(layer["annual_return"] for layer in long_layer_data) / len(long_layer_data)
+                long_sharpe = sum(layer["sharpe_ratio"] for layer in long_layer_data) / len(long_layer_data)
+                max_drawdown = sum(abs(layer["max_drawdown"]) for layer in long_layer_data) / len(long_layer_data)
+
+                # 问题 3 修复：所有字段严格校验，不再使用 .get() 默认值
+                metrics_data[method] = {
+                    "long_short_return_annual": long_short["long_short_return_annual"],
+                    "long_short_sharpe": long_short["long_short_sharpe"],
+                    "long_return_annual": long_return_annual,
+                    "long_sharpe": long_sharpe,
+                    "monotonicity_abs": abs(monotonicity["correlation"]),
+                    "long_short_net_daily": trading["long_short_net_daily"],
+                    "turnover_long_avg": long_short["turnover_long_avg"],
+                    "turnover_short_avg": long_short["turnover_short_avg"],
+                    "max_drawdown": max_drawdown,
+                }
+            except (ValueError, KeyError) as e:
+                # 问题 6 修复：warning 跳过该方法
+                self._logger.warning(f"[{method}] 提取失败，跳过: {e}")
+                failed_methods.append(method)
+
+        # 问题 6 修复：所有方法都失败时抛错
+        if not metrics_data:
+            raise ValueError(f"所有方法提取失败: {failed_methods}")
+
+        if failed_methods:
+            self._logger.warning(f"部分方法提取失败: {failed_methods}，剩余 {len(metrics_data)} 个有效方法")
 
         return metrics_data
 
     def normalize_minmax(self, metrics_data: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
         """
-        Min-Max归一化
+        Min-Max归一化（问题 3 修复：直接访问，让契约生效）
+
+        前置契约：extract_metrics 已校验所有字段存在，
+        normalize_minmax 直接访问，缺失即暴露 KeyError。
 
         Args:
             metrics_data: 原始指标数据
 
         Returns:
             Dict[weight_method, Dict[metric_name, normalized_score]]
+
+        Raises:
+            KeyError: 字段缺失（契约违反）
         """
         methods = list(metrics_data.keys())
         normalized_scores = {method: {} for method in methods}
 
         for metric_name, config in self._metric_configs.items():
-            values = [metrics_data[m].get(metric_name, 0) for m in methods]
+            # 问题 3 修复：直接访问而非 .get()，让契约生效
+            values = [metrics_data[m][metric_name] for m in methods]
             min_val = min(values)
             max_val = max(values)
 
             diff = max_val - min_val
             for method in methods:
-                val = metrics_data[method].get(metric_name, 0)
+                # 问题 3 修复：直接访问
+                val = metrics_data[method][metric_name]
                 if abs(diff) < EPSILON:
                     norm_score = 1.0
                 elif config["direction"] == "higher_better":
@@ -470,7 +509,7 @@ class WeightSelector:
 
         output = {
             "meta": {
-                "created_at": datetime.now(UTC).isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
                 "total_methods": len(final_scores),
                 "total_metrics": len(self._metric_configs),
                 "normalization_method": "min-max",
@@ -502,7 +541,7 @@ class WeightSelector:
         normalized_scores: dict[str, dict[str, float]],
     ) -> None:
         """
-        输出摘要信息到日志（问题 9 修复：合并分隔线，精简输出）
+        输出摘要信息到日志
 
         Args:
             best_method: 最优方法
@@ -510,11 +549,14 @@ class WeightSelector:
             ranked_methods: 排名列表
             normalized_scores: 归一化得分
         """
-        # 问题 9 修复：合并为单条带标题的摘要日志
         metrics_list = list(self._metric_configs.keys())
 
+        # 问题 8 修复：动态计算方法列宽
+        max_method_len = max(len(m) for m, _ in ranked_methods) if ranked_methods else 25
+        method_col_width = max(max_method_len, 10)  # 最小 10 字符
+
         # 表头
-        header = f"{'排名':>4} {'方法':<25}"
+        header = f"{'排名':>4} {'方法':<{method_col_width}}"
         for m in metrics_list:
             short_name = (
                 m.replace("long_short_", "ls_")
@@ -526,20 +568,19 @@ class WeightSelector:
             header += f" {short_name:>10}"
         header += f" {'综合得分':>10}"
 
-        self._logger.info("=" * 60)
+        # 问题 10 修复：删除冗余分隔线，文字标题已具备分隔语义
         self._logger.info("权重选择器 - 综合得分排名")
         self._logger.info(header)
         self._logger.info("-" * 60)
 
-        # 排名行
+        # 排名行（问题 8 修复：使用动态列宽）
         for rank, (method, score) in enumerate(ranked_methods, 1):
-            row = f"{rank:>4} {method:<25}"
+            row = f"{rank:>4} {method:<{method_col_width}}"
             for m in metrics_list:
                 row += f" {normalized_scores[method].get(m, 0):>10.4f}"
             row += f" {score:>10.4f}"
             self._logger.info(row)
 
-        # 问题 10 修复：删除结尾分隔线，"最优..."作为天然收尾
         self._logger.info(f"最优权重方法: {best_method} | 综合得分: {best_score:.4f}")
 
 
@@ -592,16 +633,12 @@ def main():
         _logger.info(f"result_dir={result_dir} | output={output_path}")
 
         # 创建权重选择器实例
-        # 问题 1 修复：DEFAULT_CONFIG["metrics"] 返回 MappingProxyType，需转为 dict
-        # 问题 1 修复：DEFAULT_CONFIG["weight_methods"] 和 "long_layers" 返回 tuple，需转为 list
         selector = WeightSelector(
             metric_configs={k: dict(v) for k, v in DEFAULT_CONFIG["metrics"].items()},  # 解冻 metrics
             long_layers=list(DEFAULT_CONFIG["long_layers"]),  # tuple → list
-            strict=args.strict,
         )
 
-        # 加载数据（问题 6 修复：使用类方法）
-        _logger.info("加载综合因子结果...")
+        # 加载数据（问题 5 修复：strict 只在 load_composite_results）
         results = WeightSelector.load_composite_results(
             result_dir=result_dir,
             weight_methods=DEFAULT_CONFIG["weight_methods"],  # tuple
@@ -621,17 +658,17 @@ def main():
             missing_methods = [m for m in expected_methods if m not in results]
             _logger.warning(f"部分权重方式结果缺失 ({len(results)}/{len(expected_methods)}): {missing_methods}")
 
-        # 提取指标
-        _logger.info("提取评价指标...")
+        # 提取指标（问题 9 修复：过程日志降为 DEBUG）
+        _logger.debug("提取评价指标...")
         metrics_data = selector.extract_metrics(results)
-        _logger.info(f"提取 {len(selector.metric_configs)} 个指标")
+        _logger.debug(f"提取 {len(selector.metric_configs)} 个指标")
 
-        # 归一化
-        _logger.info("Min-Max归一化...")
+        # 归一化（问题 9 修复：过程日志降为 DEBUG）
+        _logger.debug("Min-Max归一化...")
         normalized_scores = selector.normalize_minmax(metrics_data)
 
-        # 计算综合得分
-        _logger.info("计算综合得分（等权）...")
+        # 计算综合得分（问题 9 修复：过程日志降为 DEBUG）
+        _logger.debug("计算综合得分（等权）...")
         final_scores = selector.calculate_weighted_score(normalized_scores)
 
         # 选择最优方法

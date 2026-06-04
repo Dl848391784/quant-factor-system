@@ -3,6 +3,17 @@ name = "factor_ic_analyzer"
 version = "1.22.0"
 description = "量化因子 IC 分析与分层回测系统"
 requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "baostock>=0.8.9",
+    "akshare>=1.10",
+    "requests>=2.28",
+    "loguru>=0.7",
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.1.0",
+]
 
 [tool.ruff]
 target-version = "py311"
@@ -31,6 +42,7 @@ select = [
 ignore = [
     "E501",
     "W505",
+    "UP017",  # datetime.UTC alias (Python < 3.11 compatibility)
 ]
 
 [tool.ruff.lint.isort]

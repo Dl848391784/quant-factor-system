@@ -337,11 +337,12 @@ except FileNotFoundError as e:
 
 ## 版本历史 [reference]
 
-| 版本 | 日期 | 更新内容 | 稳定性标注 |
-|------|------|---------|-----------|
-| v3.1 | 2026-06-03 | 加 AI 协作模式（harness 中立）/ 规则冲突仲裁 / 路线图节；H 规则加目的行；歧义修正（H9 AND 语义、design.md 文件名映射、新增模块定义）；删除 PROJECT.md 中复制 yaml 的必测场景表；教训防御表按机制分类；flag paths.py 导入路径疑问 | [experimental] |
-| v3.0 | 2026-06-01 | 大重构 | [experimental] |
-| v2.x | 2026-05-xx | 旧版本（已重构） | [deprecated] |
+|| 版本 | 日期 | 更新内容 | 稳定性标注 |
+||------|------|---------|-----------|
+|| v3.2 | 2026-06-04 | 新增"Run Pipeline 执行排查流程"章节：执行顺序与日志位置表、排查步骤（标准化流程）、常见异常快速定位表 | [stable] |
+|| v3.1 | 2026-06-03 | 加 AI 协作模式（harness 中立）/ 规则冲突仲裁 / 路线图节；H 规则加目的行；歧义修正（H9 AND 语义、design.md 文件名映射、新增模块定义）；删除 PROJECT.md 中复制 yaml 的必测场景表；教训防御表按机制分类；flag paths.py 导入路径疑问 | [experimental] |
+|| v3.0 | 2026-06-01 | 大重构 | [experimental] |
+|| v2.x | 2026-05-xx | 旧版本（已重构） | [deprecated] |
 
 **稳定性定义与升级流程：**
 
@@ -412,6 +413,99 @@ CI 脚本校验（`scripts/validate_pr_reference.py`）：
 **校验失败示例**：
 - 若 PR 描述写"引用 H11"，validate_pr_reference.py 抛错：`错误：H11 当前为待实施状态（见路线图），不可作为取证依据。`
 - 若 PR 描述写"引用 H4"，validate_pr_reference.py 抛错：`错误：H4 为预留规则（见路线图，规则定义见 S4），不可作为取证依据。`
+
+---
+
+## Run Pipeline 执行排查流程 [stable]
+
+**当用户询问 Run_pipeline 脚本执行情况时，按以下步骤排查：**
+
+### 执行顺序与日志位置
+
+Run_pipeline 按 8 个阶段顺序执行，每个阶段对应独立的日志目录：
+
+|| 阶段 | 阶段名称 | 脚本数 | 日志目录 | 日志文件命名模式 |
+||------|---------|--------|----------|-----------------|
+|| Stage 0 | 基础数据拉取 | 5 | `logs/` + `data_fetchers/logs/` | `fetch_*_2026-MM-DD.log` |
+|| Stage 1 | 数据整合 | 1 | `data_fetchers/logs/` | `factor_generator_2026-MM-DD.log` |
+|| Stage 2 | IC计算 | 14 | `factor_ic/logs/` | `ic_*_2026-MM-DD.log`, `__main___2026-MM-DD.log` |
+|| Stage 3 | 分层回测 | 14 | `backtest/logs/` | `*_2026-MM-DD.log` |
+|| Stage 4 | 综合因子 | 4 | `comprehensive_factor/logs/` | `composite_*_2026-MM-DD.log` |
+|| Stage 5 | 权重选择 | 1 | `comprehensive_factor/logs/` | `weight_selector_2026-MM-DD.log` |
+|| Stage 6 | 股票选股 | 1 | `comprehensive_factor/logs/` | `stock_selector_2026-MM-DD.log` |
+|| Stage 7 | 汇总报告 | 1 | `summary/logs/` | `generate_*_2026-MM-DD.log` |
+
+### 排查步骤（标准化流程）
+
+**步骤 1：确认执行日期**
+- 获取当日日期（如 `2026-06-04`）
+- 用户问"今天凌晨执行情况"→ 查询当天日志
+
+**步骤 2：按阶段顺序检查日志**
+
+依次检查以下日志目录中当日生成的日志文件：
+
+```bash
+# Stage 0: 基础数据拉取（logs/ 目录）
+ls -la logs/*_2026-MM-DD.log
+ls -la data_fetchers/logs/*_2026-MM-DD.log
+
+# Stage 1: 数据整合
+ls -la data_fetchers/logs/factor_generator_2026-MM-DD.log
+
+# Stage 2: IC计算
+ls -la factor_ic/logs/*_2026-MM-DD.log
+
+# Stage 3: 分层回测
+ls -la backtest/logs/*_2026-MM-DD.log
+
+# Stage 4-6: 综合因子模块
+ls -la comprehensive_factor/logs/*_2026-MM-DD.log
+
+# Stage 7: 汇总报告
+ls -la summary/logs/*_2026-MM-DD.log
+```
+
+**步骤 3：检索异常与警告**
+
+使用 grep 扫描所有当日日志：
+
+```bash
+grep -r "ERROR\|Exception\|Traceback\|FAIL\|失败" \
+  logs/*_2026-MM-DD.log \
+  data_fetchers/logs/*_2026-MM-DD.log \
+  factor_ic/logs/*_2026-MM-DD.log \
+  backtest/logs/*_2026-MM-DD.log \
+  comprehensive_factor/logs/*_2026-MM-DD.log \
+  summary/logs/*_2026-MM-DD.log 2>/dev/null
+```
+
+**步骤 4：汇总报告**
+
+输出格式：
+
+| 模块 | 时间 | 状态 | 关键指标 |
+|------|------|------|----------|
+| 模块名 | HH:MM-HH:MM | ✅/⚠️/❌ | 耗时、记录数、验证结果 |
+
+**异常分类**：
+- **ERROR**：执行失败，需立即关注
+- **WARNING**：数据缺失/不完整，需评估影响
+- **INFO 级别的失败计数**：如 `失败 3` 通常在容忍范围内
+
+### 常见异常快速定位
+
+|| 异常信息 | 可能原因 | 排查方向 |
+||---------|---------|----------|
+|| `cannot reindex on an axis with duplicate labels` | 数据索引重复 | 检查数据文件中是否存在重复的 (date, stock_code) 组合 |
+|| `SSL: CERTIFICATE_VERIFY_FAILED` | 外部数据源证书问题 | akshare 等外部 API 问题，不影响核心流程 |
+|| `Max retries exceeded` | 网络超时/数据源不可达 | 检查网络连接或数据源状态 |
+|| `数据完整性判断: full` | 无缓存/缓存过期 | 正常情况，全量计算模式 |
+|| `缺失记录数: N (X%)` | 数据源部分缺失 | 评估缺失比例是否在容忍范围 |
+
+### 执行顺序完整清单（run_pipeline.py v1.3）
+
+详见 `run_pipeline.py` 文件头部注释或 `PIPELINE_SCRIPTS` 常量定义。
 
 ---
 
@@ -500,5 +594,5 @@ jobs:
 
 ---
 
-*最后更新: 2026-06-03*
+*最后更新: 2026-06-04*
 
