@@ -22,6 +22,7 @@ Step 7: 股票选股 (stock_selector.py) ← 本脚本
 - v1.3 (2026-06-04): 10项修复（EPSILON判断错误+assert守卫失效+类型不一致+N/A字符串+config就地修改+validate必填检查+_std后缀依赖+factor_cols参数+CLI缺参数+日志冗余）
 - v1.4 (2026-06-04): 6项修复（composite_score兜底+get_latest_date格式+__post_init__路径校验+日志冗余+datetime.now时区+索引契约防御校验）
 - v1.5 (2026-06-04): 4项修复（CLI过滤None参数+删除空__post_init__+删除重复import+修正注释）
+- v1.6 (2026-06-04): 3项修复（调用validate+删除dead config字段+改进日期错误信息）
 
 作者: 云瑶
 创建日期: 2026-06-03
@@ -61,7 +62,7 @@ from comprehensive_factor.common.weight_engine import WeightEngine  # noqa: E402
 # ============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "1.5"
+__version__ = "1.6"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -95,9 +96,8 @@ class StockSelectorConfig:
         - 参考 MODULE.md M79: 综合因子低值预期高收益
     """
 
-    # === 因子参数 ===
-    factor_list: list[str] = field(default_factory=lambda: DEFAULT_FACTOR_LIST)
-    factor_cols: list[str] = field(default_factory=lambda: DEFAULT_FACTOR_COLS)
+    # 问题 2 修复：删除 factor_list/factor_cols 字段
+    # 运行时从 composite 结果读取，是 dead config
 
     # === 选股参数 ===
     top_n: int = 3  # 选出前 N 只股票（用户需求：Top 3）
@@ -545,6 +545,9 @@ def select_stocks(
     # 问题 10 修复：合并流程启停日志为单条 INFO
     logger.info("股票选股流程启动")
 
+    # 问题 1 修复：调用 validate() 校验配置完整性
+    config.validate()
+
     # Step 1: 加载最优权重配置（优先获取因子列表）
     # 问题 3 修复：__post_init__ 已处理路径默认值，无需运行时校验
     weight_config = load_weight_config(config.weight_result_path, logger)
@@ -575,11 +578,17 @@ def select_stocks(
         selection_date = get_latest_date(factor_df, logger)
 
     # Step 6: 过滤数据（只保留选股日期）
+    # 问题 3 修复：先检查可用日期，再过滤
+    available_dates = sorted(factor_df["date"].unique().tolist())
+    if selection_date not in available_dates:
+        raise ValueError(
+            f"选股日期 {selection_date} 无数据\n"
+            f"可用日期范围: {available_dates[0]} ~ {available_dates[-1]}\n"
+            f"共 {len(available_dates)} 个日期"
+        )
+
     logger.info("过滤选股日期: %s", selection_date)
     factor_df = factor_df[factor_df["date"] == selection_date].copy()
-
-    if len(factor_df) == 0:
-        raise ValueError(f"选股日期 {selection_date} 无数据\n可用日期范围: 请检查 factor_ic_data.json.gz")
 
     total_stocks = len(factor_df)
     logger.info("选股日期股票数: %d", total_stocks)
