@@ -22,6 +22,7 @@
 - v1.7 (2026-06-04): 9项新修复（Python兼容性+契约校验+降级路径+日志精简+动态列宽）
 - v1.8 (2026-06-04): SRP拆分→4类协作（ResultLoader+MetricExtractor+Scorer+ReportFormatter）
 - v1.9 (2026-06-04): 5项修复（严格契约+删除未用变量+配置漂移+short_name配置驱动+单方法场景）
+- v1.10 (2026-06-04): 纠错修复-单方法场景删除冗余特判，保留 warning 提示
 
 作者: 云瑶
 """
@@ -50,7 +51,7 @@ from backtest.common.logger_config import get_logger  # noqa: E402
 # =============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "1.9"
+__version__ = "1.10"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -736,26 +737,20 @@ def main():
         metrics_data = extractor.extract(results)
         _logger.debug(f"提取 {len(extractor.metric_configs)} 个指标")
 
-        # 问题 5 修复：单方法场景直接跳过评分流程
+        # 单方法场景提示（流程仍正常走 normalize/score/select）
         if len(metrics_data) == 1:
-            only_method = list(metrics_data.keys())[0]
-            _logger.warning(f"仅 1 个方法 {only_method}，跳过评分流程")
-            best_method = only_method
-            best_score = 1.0
-            ranked_methods = [(only_method, 1.0)]
-            normalized_scores = {only_method: dict.fromkeys(config.metrics, 1.0)}
-            final_scores = {only_method: 1.0}
-        else:
-            # 3. 归一化
-            _logger.debug("Min-Max归一化...")
-            normalized_scores = scorer.normalize(metrics_data)
+            _logger.warning("仅 1 个方法，评分结果无比较意义")
 
-            # 4. 计算综合得分
-            _logger.debug("计算综合得分（等权）...")
-            final_scores = scorer.calculate_weighted(normalized_scores)
+        # 3. 归一化
+        _logger.debug("Min-Max归一化...")
+        normalized_scores = scorer.normalize(metrics_data)
 
-            # 5. 选择最优方法
-            best_method, best_score, ranked_methods = scorer.select_best(final_scores)
+        # 4. 计算综合得分
+        _logger.debug("计算综合得分（等权）...")
+        final_scores = scorer.calculate_weighted(normalized_scores)
+
+        # 5. 选择最优方法
+        best_method, best_score, ranked_methods = scorer.select_best(final_scores)
 
         # 6. 输出摘要
         formatter.log_summary(best_method, best_score, ranked_methods, normalized_scores)
