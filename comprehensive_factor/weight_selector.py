@@ -20,6 +20,7 @@
 - v1.5 (2026-06-04): 10项Bug修复（架构重构→类封装）
 - v1.6 (2026-06-04): 10项深度修复（不可变配置递归+统计策略统一+异常捕获）
 - v1.7 (2026-06-04): 9项新修复（Python兼容性+契约校验+降级路径+日志精简+动态列宽）
+- v1.8 (2026-06-04): SRP拆分→4类协作（ResultLoader+MetricExtractor+Scorer+ReportFormatter）
 
 作者: 云瑶
 """
@@ -49,7 +50,7 @@ from backtest.common.logger_config import get_logger  # noqa: E402
 # =============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "1.7"
+__version__ = "1.8"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -77,11 +78,9 @@ def _freeze_config(obj: dict | list) -> MappingProxyType | tuple:
         不可变的 MappingProxyType 或 tuple
     """
     if isinstance(obj, dict):
-        # 问题 2 修复：isinstance 元组写法兼容 Python < 3.10
         frozen_dict = {k: _freeze_config(v) if isinstance(v, (dict, list)) else v for k, v in obj.items()}
         return MappingProxyType(frozen_dict)
     elif isinstance(obj, list):
-        # 问题 2 修复：同上
         return tuple(_freeze_config(item) if isinstance(item, (dict, list)) else item for item in obj)
     else:
         return obj
@@ -154,81 +153,54 @@ _DEFAULT_CONFIG_INTERNAL = {
     "return_period": "1d",
 }
 
-# 不可变配置（问题 1 修复：递归冻结嵌套结构）
+# 不可变配置
 DEFAULT_CONFIG = _freeze_config(_DEFAULT_CONFIG_INTERNAL)
 
 
 # =============================================================================
-# 核心函数
+# 核心类（问题 7 修复：SRP 拆分）
 # =============================================================================
 
 
-class WeightSelector:
+class ResultLoader:
     """
-    权重选择器类
+    结果加载器（IO 层）
 
-    将 metric_configs 作为构造参数注入，避免四个函数间重复传参。
-    便于单元测试和配置管理。
-
-    使用方式:
-        selector = WeightSelector(metric_configs=DEFAULT_CONFIG["metrics"])
-        results = WeightSelector.load_composite_results(result_dir, weight_methods, return_period, strict=True)
-        metrics_data = selector.extract_metrics(results)
-        normalized_scores = selector.normalize_minmax(metrics_data)
-        final_scores = selector.calculate_weighted_score(normalized_scores)
-        best_method, best_score, ranked = selector.select_best_method(final_scores)
-        output = selector.generate_output(metrics_data, normalized_scores, final_scores, ...)
-        selector.log_summary(best_method, best_score, ranked, normalized_scores)
+    职责：加载综合因子结果文件，处理文件缺失和 JSON 解析异常。
     """
 
-    def __init__(
-        self,
-        metric_configs: dict[str, dict],
-        long_layers: list[str] | None = None,
-        logger: logging.Logger | None = None,
-    ):
+    def __init__(self, logger: logging.Logger | None = None):
         """
-        初始化权重选择器
+        初始化结果加载器
 
         Args:
-            metric_configs: 指标配置字典
-            long_layers: 多头分层列表（默认：["layer_1", "layer_2"]）
             logger: 日志器（可选）
         """
-        # 使用 copy.deepcopy 确保配置不被意外修改
-        self._metric_configs = copy.deepcopy(metric_configs)
-        self._long_layers = long_layers or ["layer_1", "layer_2"]
         self._logger = logger or _logger
 
-    @classmethod
-    def load_composite_results(
-        cls,
+    def load(
+        self,
         result_dir: Path,
         weight_methods: tuple[str, ...],
         return_period: str,
-        logger: logging.Logger | None = None,
         strict: bool = False,
     ) -> dict[str, dict]:
         """
-        加载综合因子结果文件（问题 6 修复：移入类）
+        加载综合因子结果文件
 
         Args:
             result_dir: 结果目录
             weight_methods: 权重方式列表（tuple）
             return_period: 返回周期
-            logger: 日志器（可选）
-            strict: 严格模式，JSON 解析失败时抛异常（问题 8 修复）
+            strict: 严格模式，JSON 解析失败时抛异常
 
         Returns:
             Dict[weight_method, result_data]
 
         Raises:
             FileNotFoundError: 结果目录不存在
-            json.JSONDecodeError: strict=True 且 JSON 解析失败（问题 8 修复）
+            json.JSONDecodeError: strict=True 且 JSON 解析失败
         """
-        if logger is None:
-            logger = _logger
-
         if not result_dir.exists():
             raise FileNotFoundError(f"结果目录不存在: {result_dir}")
 
@@ -240,51 +212,64 @@ class WeightSelector:
             filepath = result_dir / f"composite_{method}_{return_period}.json"
             if not filepath.exists():
                 missing_files.append(str(filepath))
-                logger.warning(f"文件不存在: {filepath}")
+                self._logger.warning(f"文件不存在: {filepath}")
                 continue
 
             try:
                 with open(filepath, encoding="utf-8") as f:
                     results[method] = json.load(f)
-                logger.debug(f"成功加载: {filepath}")
+                self._logger.debug(f"成功加载: {filepath}")
             except json.JSONDecodeError as e:
                 corrupted_files.append(str(filepath))
-                # 问题 8 修复：strict 模式直接抛异常
                 if strict:
                     raise
-                logger.error(f"JSON解析失败: {filepath}, 位置 {e.pos}")
+                self._logger.error(f"JSON解析失败: {filepath}, 位置 {e.pos}")
                 continue
 
-        # 问题 8 修复：单独统计损坏文件并以更高级别告警
         if corrupted_files:
-            logger.warning(f"检测到 {len(corrupted_files)} 个 JSON 损坏文件（无法解析）: {corrupted_files}")
+            self._logger.warning(f"检测到 {len(corrupted_files)} 个 JSON 损坏文件: {corrupted_files}")
 
         return results
 
+
+class MetricExtractor:
+    """
+    指标提取器（业务层）
+
+    职责：从综合因子结果中提取评价指标，处理字段缺失异常。
+    """
+
+    def __init__(
+        self,
+        metric_configs: dict[str, dict],
+        long_layers: list[str] | None = None,
+        logger: logging.Logger | None = None,
+    ):
+        """
+        初始化指标提取器
+
+        Args:
+            metric_configs: 指标配置字典
+            long_layers: 多头分层列表（默认：["layer_1", "layer_2"]）
+            logger: 日志器（可选）
+        """
+        self._metric_configs = copy.deepcopy(metric_configs)
+        self._long_layers = long_layers or ["layer_1", "layer_2"]
+        self._logger = logger or _logger
+
     @property
     def metric_configs(self) -> MappingProxyType:
-        """获取指标配置（问题 5 修复：返回不可变 MappingProxyType）"""
+        """获取指标配置"""
         return MappingProxyType(self._metric_configs)
 
     @property
     def long_layers(self) -> tuple[str, ...]:
-        """获取多头分层列表（问题 1 修复：返回 tuple）"""
+        """获取多头分层列表"""
         return tuple(self._long_layers)
 
-    def extract_metrics(self, results: dict[str, dict]) -> dict[str, dict[str, float]]:
+    def extract(self, results: dict[str, dict]) -> dict[str, dict[str, float]]:
         """
         从综合因子结果中提取评价指标
-
-        统计策略：
-        - long_return_annual: 多头各层年化收益均值
-        - long_sharpe: 多头各层夏普均值
-        - max_drawdown: 多头各层回撤绝对值均值
-
-        缺失数据处理（问题 4 修复）：
-        - 所有参与打分的字段均为必需，缺失时抛 ValueError
-        - 非必需字段：无（评分公平性要求所有字段存在）
-
-        问题 6 修复：单方法失败时 warning 跳过，所有方法都失败时再抛错
 
         Args:
             results: 综合因子结果字典
@@ -296,7 +281,6 @@ class WeightSelector:
             ValueError: 所有方法提取失败
         """
         metrics_data = {}
-        # 问题 4 修复：所有参与打分的字段均为必需
         required_fields = [
             "long_short_return_annual",
             "long_short_sharpe",
@@ -307,7 +291,6 @@ class WeightSelector:
         failed_methods = []
 
         for method, data in results.items():
-            # 问题 6 修复：单方法失败时 warning 跳过
             try:
                 backtest = data.get("backtest_result", {})
                 if not backtest:
@@ -323,11 +306,9 @@ class WeightSelector:
                     if field not in long_short:
                         raise ValueError(f"必需字段缺失: {field}")
 
-                # long_short_net_daily 也是必需字段（参与打分）
                 if "long_short_net_daily" not in trading:
                     raise ValueError("必需字段缺失: long_short_net_daily")
 
-                # monotonicity.correlation 必需
                 if "correlation" not in monotonicity:
                     raise ValueError("必需字段缺失: monotonicity.correlation")
 
@@ -351,7 +332,6 @@ class WeightSelector:
                 long_sharpe = sum(layer["sharpe_ratio"] for layer in long_layer_data) / len(long_layer_data)
                 max_drawdown = sum(abs(layer["max_drawdown"]) for layer in long_layer_data) / len(long_layer_data)
 
-                # 问题 3 修复：所有字段严格校验，不再使用 .get() 默认值
                 metrics_data[method] = {
                     "long_short_return_annual": long_short["long_short_return_annual"],
                     "long_short_sharpe": long_short["long_short_sharpe"],
@@ -364,11 +344,9 @@ class WeightSelector:
                     "max_drawdown": max_drawdown,
                 }
             except (ValueError, KeyError) as e:
-                # 问题 6 修复：warning 跳过该方法
                 self._logger.warning(f"[{method}] 提取失败，跳过: {e}")
                 failed_methods.append(method)
 
-        # 问题 6 修复：所有方法都失败时抛错
         if not metrics_data:
             raise ValueError(f"所有方法提取失败: {failed_methods}")
 
@@ -377,12 +355,28 @@ class WeightSelector:
 
         return metrics_data
 
-    def normalize_minmax(self, metrics_data: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
-        """
-        Min-Max归一化（问题 3 修复：直接访问，让契约生效）
 
-        前置契约：extract_metrics 已校验所有字段存在，
-        normalize_minmax 直接访问，缺失即暴露 KeyError。
+class Scorer:
+    """
+    评分器（数学层）
+
+    职责：归一化指标、计算加权得分、选择最优方法。
+    """
+
+    def __init__(self, metric_configs: dict[str, dict], logger: logging.Logger | None = None):
+        """
+        初始化评分器
+
+        Args:
+            metric_configs: 指标配置字典
+            logger: 日志器（可选）
+        """
+        self._metric_configs = copy.deepcopy(metric_configs)
+        self._logger = logger or _logger
+
+    def normalize(self, metrics_data: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
+        """
+        Min-Max归一化
 
         Args:
             metrics_data: 原始指标数据
@@ -397,14 +391,12 @@ class WeightSelector:
         normalized_scores = {method: {} for method in methods}
 
         for metric_name, config in self._metric_configs.items():
-            # 问题 3 修复：直接访问而非 .get()，让契约生效
             values = [metrics_data[m][metric_name] for m in methods]
             min_val = min(values)
             max_val = max(values)
 
             diff = max_val - min_val
             for method in methods:
-                # 问题 3 修复：直接访问
                 val = metrics_data[method][metric_name]
                 if abs(diff) < EPSILON:
                     norm_score = 1.0
@@ -417,7 +409,7 @@ class WeightSelector:
 
         return normalized_scores
 
-    def calculate_weighted_score(self, normalized_scores: dict[str, dict[str, float]]) -> dict[str, float]:
+    def calculate_weighted(self, normalized_scores: dict[str, dict[str, float]]) -> dict[str, float]:
         """
         计算加权综合得分
 
@@ -442,9 +434,9 @@ class WeightSelector:
 
         return final_scores
 
-    def select_best_method(self, final_scores: dict[str, float]) -> tuple[str, float, list[tuple[str, float]]]:
+    def select_best(self, final_scores: dict[str, float]) -> tuple[str, float, list[tuple[str, float]]]:
         """
-        选择最优方法（问题 9 修复：并列检测与告警）
+        选择最优方法
 
         Args:
             final_scores: 综合得分
@@ -461,7 +453,7 @@ class WeightSelector:
         ranked = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
         best_method, best_score = ranked[0]
 
-        # 问题 9 修复：检测并列第一
+        # 检测并列第一
         if len(ranked) >= 2:
             second_score = ranked[1][1]
             if abs(best_score - second_score) < EPSILON:
@@ -471,6 +463,25 @@ class WeightSelector:
                 )
 
         return best_method, best_score, ranked
+
+
+class ReportFormatter:
+    """
+    报告格式化器（输出层）
+
+    职责：生成 JSON 输出结构、格式化日志摘要。
+    """
+
+    def __init__(self, metric_configs: dict[str, dict], logger: logging.Logger | None = None):
+        """
+        初始化报告格式化器
+
+        Args:
+            metric_configs: 指标配置字典
+            logger: 日志器（可选）
+        """
+        self._metric_configs = copy.deepcopy(metric_configs)
+        self._logger = logger or _logger
 
     def generate_output(
         self,
@@ -551,9 +562,9 @@ class WeightSelector:
         """
         metrics_list = list(self._metric_configs.keys())
 
-        # 问题 8 修复：动态计算方法列宽
+        # 动态计算方法列宽
         max_method_len = max(len(m) for m, _ in ranked_methods) if ranked_methods else 25
-        method_col_width = max(max_method_len, 10)  # 最小 10 字符
+        method_col_width = max(max_method_len, 10)
 
         # 表头
         header = f"{'排名':>4} {'方法':<{method_col_width}}"
@@ -568,12 +579,11 @@ class WeightSelector:
             header += f" {short_name:>10}"
         header += f" {'综合得分':>10}"
 
-        # 问题 10 修复：删除冗余分隔线，文字标题已具备分隔语义
         self._logger.info("权重选择器 - 综合得分排名")
         self._logger.info(header)
         self._logger.info("-" * 60)
 
-        # 排名行（问题 8 修复：使用动态列宽）
+        # 排名行
         for rank, (method, score) in enumerate(ranked_methods, 1):
             row = f"{rank:>4} {method:<{method_col_width}}"
             for m in metrics_list:
@@ -591,11 +601,13 @@ class WeightSelector:
 
 def main():
     """
-    主函数（问题 7 修复：顶层 try/except 捕获所有异常）
+    主函数（组装 4 类协作）
 
-    异常处理策略：
-    - 所有未捕获异常通过 _logger.exception 记录
-    - 统一退出码 sys.exit(1)，便于调度系统识别失败
+    流程：
+    1. ResultLoader 加载结果文件
+    2. MetricExtractor 提取评价指标
+    3. Scorer 归一化、加权、选最优
+    4. ReportFormatter 生成输出、日志摘要
     """
     parser = argparse.ArgumentParser(description="权重选择器 - 从多种权重方式中选择最优权重")
     parser.add_argument(
@@ -619,11 +631,10 @@ def main():
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="严格模式，JSON 解析失败时抛异常而非跳过（问题 8 修复）",
+        help="严格模式，JSON 解析失败时抛异常而非跳过",
     )
     args = parser.parse_args()
 
-    # 问题 7 修复：顶层 try/except
     try:
         # 确定路径
         script_dir = Path(__file__).parent
@@ -632,16 +643,20 @@ def main():
 
         _logger.info(f"result_dir={result_dir} | output={output_path}")
 
-        # 创建权重选择器实例
-        selector = WeightSelector(
-            metric_configs={k: dict(v) for k, v in DEFAULT_CONFIG["metrics"].items()},  # 解冻 metrics
-            long_layers=list(DEFAULT_CONFIG["long_layers"]),  # tuple → list
-        )
+        # 解冻配置（MappingProxyType → dict）
+        metric_configs = {k: dict(v) for k, v in DEFAULT_CONFIG["metrics"].items()}
+        long_layers = list(DEFAULT_CONFIG["long_layers"])
 
-        # 加载数据（问题 5 修复：strict 只在 load_composite_results）
-        results = WeightSelector.load_composite_results(
+        # 组装 4 类（问题 7 修复：SRP 拆分）
+        loader = ResultLoader()
+        extractor = MetricExtractor(metric_configs=metric_configs, long_layers=long_layers)
+        scorer = Scorer(metric_configs=metric_configs)
+        formatter = ReportFormatter(metric_configs=metric_configs)
+
+        # 1. 加载结果文件
+        results = loader.load(
             result_dir=result_dir,
-            weight_methods=DEFAULT_CONFIG["weight_methods"],  # tuple
+            weight_methods=DEFAULT_CONFIG["weight_methods"],
             return_period=args.return_period,
             strict=args.strict,
         )
@@ -652,33 +667,33 @@ def main():
 
         _logger.info(f"加载 {len(results)} 个权重方式")
 
-        # 校验加载结果完整性
+        # 校验完整性
         expected_methods = DEFAULT_CONFIG["weight_methods"]
         if len(results) < len(expected_methods):
             missing_methods = [m for m in expected_methods if m not in results]
             _logger.warning(f"部分权重方式结果缺失 ({len(results)}/{len(expected_methods)}): {missing_methods}")
 
-        # 提取指标（问题 9 修复：过程日志降为 DEBUG）
+        # 2. 提取指标
         _logger.debug("提取评价指标...")
-        metrics_data = selector.extract_metrics(results)
-        _logger.debug(f"提取 {len(selector.metric_configs)} 个指标")
+        metrics_data = extractor.extract(results)
+        _logger.debug(f"提取 {len(extractor.metric_configs)} 个指标")
 
-        # 归一化（问题 9 修复：过程日志降为 DEBUG）
+        # 3. 归一化
         _logger.debug("Min-Max归一化...")
-        normalized_scores = selector.normalize_minmax(metrics_data)
+        normalized_scores = scorer.normalize(metrics_data)
 
-        # 计算综合得分（问题 9 修复：过程日志降为 DEBUG）
+        # 4. 计算综合得分
         _logger.debug("计算综合得分（等权）...")
-        final_scores = selector.calculate_weighted_score(normalized_scores)
+        final_scores = scorer.calculate_weighted(normalized_scores)
 
-        # 选择最优方法
-        best_method, best_score, ranked_methods = selector.select_best_method(final_scores)
+        # 5. 选择最优方法
+        best_method, best_score, ranked_methods = scorer.select_best(final_scores)
 
-        # 输出摘要
-        selector.log_summary(best_method, best_score, ranked_methods, normalized_scores)
+        # 6. 输出摘要
+        formatter.log_summary(best_method, best_score, ranked_methods, normalized_scores)
 
-        # 生成输出
-        output = selector.generate_output(
+        # 7. 生成输出
+        output = formatter.generate_output(
             metrics_data=metrics_data,
             normalized_scores=normalized_scores,
             final_scores=final_scores,
@@ -687,7 +702,7 @@ def main():
             ranked_methods=ranked_methods,
         )
 
-        # 保存结果
+        # 8. 保存结果
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(output, f, ensure_ascii=False, indent=2)
@@ -695,7 +710,6 @@ def main():
         _logger.info(f"结果已保存: {output_path}")
 
     except Exception as e:
-        # 问题 7 修复：捕获所有异常，统一退出码
         _logger.exception(f"权重选择器执行失败: {e}")
         sys.exit(1)
 
