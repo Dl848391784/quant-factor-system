@@ -23,6 +23,7 @@ Step 7: 股票选股 (stock_selector.py) ← 本脚本
 - v1.4 (2026-06-04): 6项修复（composite_score兜底+get_latest_date格式+__post_init__路径校验+日志冗余+datetime.now时区+索引契约防御校验）
 - v1.5 (2026-06-04): 4项修复（CLI过滤None参数+删除空__post_init__+删除重复import+修正注释）
 - v1.6 (2026-06-04): 3项修复（调用validate+删除dead config字段+改进日期错误信息）
+- v1.7 (2026-06-04): 2项修复（available_dates类型一致性+total_stocks语义精确）
 
 作者: 云瑶
 创建日期: 2026-06-03
@@ -62,7 +63,7 @@ from comprehensive_factor.common.weight_engine import WeightEngine  # noqa: E402
 # ============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "1.6"
+__version__ = "1.7"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -420,7 +421,7 @@ def build_result(
     top_stocks: list[dict[str, Any]],
     config: StockSelectorConfig,
     weight_config: dict[str, Any],
-    total_stocks: int,
+    stocks_on_date: int,  # 问题 2 修复：选股日期当天股票数
     factor_list: list[str],  # 问题 5 修复：运行时变量
     factor_cols: list[str],  # 问题 5 修复：运行时变量
     selection_date: str,  # 问题 5 修复：运行时变量
@@ -432,7 +433,10 @@ def build_result(
         top_stocks: 选股结果列表
         config: 配置对象
         weight_config: 权重配置
-        total_stocks: 总股票数
+        stocks_on_date: 选股日期当天股票数（问题 2 修复：语义精确）
+        factor_list: 因子列表
+        factor_cols: 因子列名列表
+        selection_date: 选股日期
         logger: 日志对象（默认使用模块级 _logger）
 
     Returns:
@@ -451,7 +455,8 @@ def build_result(
             "composite_score": best_selection["composite_score"],
             "factor_direction": config.factor_direction,
             "top_n": config.top_n,
-            "total_stocks": total_stocks,
+            # 问题 2 修复：字段名改为 stocks_on_date，语义精确
+            "stocks_on_date": stocks_on_date,
             "valid_stocks": len(top_stocks),
             # 问题 5 修复：显式带时区，跨机部署时间戳更稳
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -578,8 +583,8 @@ def select_stocks(
         selection_date = get_latest_date(factor_df, logger)
 
     # Step 6: 过滤数据（只保留选股日期）
-    # 问题 3 修复：先检查可用日期，再过滤
-    available_dates = sorted(factor_df["date"].unique().tolist())
+    # 问题 1 修复：available_dates 归一化为 str，与 selection_date 同格式比较
+    available_dates = sorted({pd.Timestamp(d).strftime("%Y-%m-%d") for d in factor_df["date"].unique()})
     if selection_date not in available_dates:
         raise ValueError(
             f"选股日期 {selection_date} 无数据\n"
@@ -588,10 +593,14 @@ def select_stocks(
         )
 
     logger.info("过滤选股日期: %s", selection_date)
-    factor_df = factor_df[factor_df["date"] == selection_date].copy()
+    # 问题 1 修复：date 列归一化为 str 后比较
+    factor_df["date_str"] = factor_df["date"].apply(lambda d: pd.Timestamp(d).strftime("%Y-%m-%d"))
+    factor_df = factor_df[factor_df["date_str"] == selection_date].copy()
+    factor_df.drop(columns=["date_str"], inplace=True)
 
-    total_stocks = len(factor_df)
-    logger.info("选股日期股票数: %d", total_stocks)
+    # 问题 2 修复：变量名改为 stocks_on_date，避免误解为"全部股票数"
+    stocks_on_date = len(factor_df)
+    logger.info("选股日期股票数: %d", stocks_on_date)
 
     # Step 7: 标准化因子（截面标准化）
     # 注意：单日数据标准化时，每日截面就是当日所有股票
@@ -626,8 +635,9 @@ def select_stocks(
     )
 
     # Step 11: 构建结果（问题 5 修复：传递运行时变量）
+    # 问题 2 修复：total_stocks → stocks_on_date
     result = build_result(
-        top_stocks, config, weight_config, total_stocks, factor_list, factor_cols, selection_date, logger
+        top_stocks, config, weight_config, stocks_on_date, factor_list, factor_cols, selection_date, logger
     )
 
     # Step 12: 保存结果
