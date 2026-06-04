@@ -16,7 +16,7 @@
 - [模块概述](#模块概述)
 - [输出结构模板](#输出结构模板)
 
-### 二、规则索引 (M1-M52,按类别)
+### 二、规则索引 (M1-M53,按类别)
 
 | 类别 | 编号 | 主题 |
 |------|------|------|
@@ -30,7 +30,8 @@
 | **H. 数据校验** | M31-M34 | 因子范围 / 因子列存在 / required_factor_cols / 数据完整性 |
 | **I. CLI 与异常** | M35-M40 | 退出码 / 参数透传 / 单层模式 / JSON 解析异常 / 多空 groupby 替代 / 闭包捕获 |
 | **J. 输出契约** | M41-M42 | 空数据返回结构一致 / 空数据报告提示 |
-| **K. 代码风格与函数设计** | M43-M52 | 命名 / 类型注解 / 导入分组 / pathlib / 静态方法调用 / 显式传参 / 模块级函数 / 性能 / Config 字段 / layer_names 分离 |
+|| **K. 代码风格与函数设计** | M43-M52 | 命名 / 类型注解 / 导入分组 / pathlib / 静态方法调用 / 显式传参 / 模块级函数 / 性能 / Config 字段 / layer_names 分离 |
+|| **L. 预计算因子** | M53 | 预计算因子禁止重复传递 factor_calculator |
 
 ### 三、附录
 - [更新记录](#更新记录)
@@ -1449,10 +1450,69 @@ layer_names = {
 
 ---
 
+## M53. 预计算因子禁止重复传递 factor_calculator
+
+**What**: 预计算因子（数据已在 `factor_ic_data.json.gz` 统一数据源中）分层回测脚本**禁止**传递 `factor_calculator` 参数。
+
+**Why**: 
+- 统一数据源已包含预计算因子列（如 `tail_price_position`）
+- 重复传递 `factor_calculator` 会添加同名列，导致 DataFrame 列名重复
+- 列名重复后，布尔索引 `df[factor_col].notna()` 返回 DataFrame（而非 Series）
+- pandas 内部 `reindex` 操作失败：`ValueError: cannot reindex on an axis with duplicate labels`
+
+**How**:
+
+```python
+# ✓ 正确：预计算因子不传递 factor_calculator
+class TailPricePositionLayerConfig(LayerConfigBase):
+    factor_name: ClassVar[str] = 'tail_price_position'
+    layer_names: ClassVar[Sequence[str]] = (
+        '极低层', '偏低层', '正常层', '偏高层', '极高层',
+    )
+
+if __name__ == "__main__":
+    factor_cli_main(config_cls=TailPricePositionLayerConfig)  # 无 factor_calculator
+
+# ✗ 错误：预计算因子传递 factor_calculator
+from factor_ic.ic_tail_price_position import calculate_tail_price_position
+
+if __name__ == "__main__":
+    factor_cli_main(
+        config_cls=TailPricePositionLayerConfig,
+        factor_calculator=calculate_tail_price_position,  # ❌ 导致列名重复
+    )
+```
+
+**Don't**:
+- ❌ 预计算因子脚本导入 `calculate_xxx` 函数
+- ❌ 预计算因子脚本传递 `factor_calculator` 参数
+- ❌ 同一因子列在数据源和 `factor_calculator` 中双重定义
+
+**When**: 判断是否为预计算因子：
+- 数据源 `factor_ic_data.json.gz` 已包含该因子列 → 预计算因子
+- 数据源不包含 → 需要传递 `factor_calculator` 动态计算
+
+**Verify**: 
+```bash
+# 检查因子是否在数据源中预计算
+python -c "import json, gzip; data=json.load(gzip.open('data_fetchers/result/factor_ic_data.json.gz','rt')); print('factor_cols:', data['meta']['factor_cols'])"
+
+# 检查分层回测脚本是否传递 factor_calculator
+grep -n "factor_calculator" backtest/layered_backtest_tail*.py
+```
+
+**典型案例**（2026-06-04）:
+- 5 个尾盘因子回测脚本（`layered_backtest_tail_price_position_1d.py` 等）传递了 `factor_calculator`
+- 导致列名重复、`reindex` 失败
+- 修复：移除 `factor_calculator` 参数及相关导入
+
+---
+
 ## 更新记录
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v2.1 | 2026-06-04 | 新增 M53（预计算因子禁止重复传递 factor_calculator）+ L 类别;修复 5 个尾盘因子回测脚本的列名重复 bug |
 | v2.0 | 2026-06-03 | 大重构:50 章节去重合并为 52 条 M 编号规则,按 11 类别 (A-K) 组织;统一 W/W/H/D/W/V 框架;加目录索引;精简更新记录 |
 | v1.22 | 2026-06-01 | ClassVar 统一 (`layer_names` 改 `Sequence[str]`,删 `@dataclass` 与 `field`,`factor_name`/`ic_source`/`layer_names` 统一 ClassVar 风格,基类新增 `ic_source_resolved` + `layer_names_dict`) |
 | v1.21 | 2026-06-01 | 10 项架构重构:`_load_ic_meta` 上移基类、`PROJECT_ROOT` 可移植获取、禁 direction 隐式默认值、删旧格式兼容分支、统一 ic_metrics 来源、import 提顶部、基类启动日志、删冗余 docstring、ic_source 自动拼接、理想形态 (`factor_name`+`layer_names`+`factor_cli_main`) |

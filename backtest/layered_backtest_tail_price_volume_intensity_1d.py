@@ -15,14 +15,19 @@
 - long_layers/short_layers: 由 n_layers 和 factor_direction 派生
 
 数据依赖：
-- factor_ic_data.json.gz（主数据源，含全天成交量 volume）
-- tail_trading_data.json.gz（尾盘5分钟K线数据）
+- factor_ic_data.json.gz（主数据源，已预计算尾盘因子列）
+
+设计说明（2026-06-04）：
+- 尾盘因子在 factor_generator.py 中已预计算并写入统一数据源
+- 分层回测不传递 factor_calculator 参数，直接读取数据源中的预计算因子列
+- 历史问题：传递 factor_calculator 会重复添加因子列，导致列名重复、reindex 失败
 
 作者: 云瑶
 创建日期: 2026-06-02
 版本历史:
   v1.0 (2026-06-02): 初始版本，实现尾盘量价强度因子分层回测
   v1.1 (2026-06-02): 优化 - 创建测试文件 test_layered_backtest_tail_price_volume_intensity_1d.py
+  v1.2 (2026-06-04): Bug修复 - 移除 factor_calculator 参数，避免重复列名导致的 reindex 错误
 """
 
 import sys
@@ -34,9 +39,9 @@ from typing import ClassVar
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# 本地模块导入
 from backtest.common.factor_cli import factor_cli_main
 from backtest.common.layered_backtest_runner import LayerConfigBase
-from factor_ic.ic_tail_price_volume_intensity import calculate_tail_price_volume_intensity
 
 
 class TailPriceVolumeIntensityLayerConfig(LayerConfigBase):
@@ -59,6 +64,6 @@ class TailPriceVolumeIntensityLayerConfig(LayerConfigBase):
 
 
 if __name__ == "__main__":
-    factor_cli_main(
-        config_cls=TailPriceVolumeIntensityLayerConfig, factor_calculator=calculate_tail_price_volume_intensity
-    )
+    # 尾盘因子是预计算因子，已在 factor_ic_data.json.gz 中
+    # 不传递 factor_calculator，直接使用数据源中的因子列
+    factor_cli_main(config_cls=TailPriceVolumeIntensityLayerConfig)

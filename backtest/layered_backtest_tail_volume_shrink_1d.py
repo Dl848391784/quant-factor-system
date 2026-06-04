@@ -15,8 +15,12 @@
 - long_layers/short_layers: 由 n_layers 和 factor_direction 派生
 
 数据依赖：
-- factor_ic_data.json.gz（主数据源）
-- tail_trading_data.json.gz（尾盘5分钟K线数据）
+- factor_ic_data.json.gz（主数据源，已预计算尾盘因子列）
+
+设计说明（2026-06-04）：
+- 尾盘因子在 factor_generator.py 中已预计算并写入统一数据源
+- 分层回测不传递 factor_calculator 参数，直接读取数据源中的预计算因子列
+- 历史问题：传递 factor_calculator 会重复添加因子列，导致列名重复、reindex 失败
 
 作者: 云瑶
 创建日期: 2026-06-03
@@ -27,6 +31,7 @@
   v1.3 (2026-06-03): Round 3 优化 - ClassVar 类型注解确认（Sequence[str]）
   v1.4 (2026-06-03): Round 4 优化 - 边界处理下沉基类确认（薄声明模式无额外代码）
   v1.5 (2026-06-03): Round 5 优化 - Spec Compliance 确认（对照 tail_volume_acceleration 脚本合规）
+  v1.6 (2026-06-04): Bug修复 - 移除 factor_calculator 参数，避免重复列名导致的 reindex 错误
 """
 
 # ============================================================================
@@ -44,7 +49,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backtest.common.factor_cli import factor_cli_main
 from backtest.common.layered_backtest_runner import LayerConfigBase
-from factor_ic.ic_tail_volume_shrink_1d import calculate_tail_volume_shrink
 
 
 class TailVolumeShrinkLayerConfig(LayerConfigBase):
@@ -78,7 +82,6 @@ class TailVolumeShrinkLayerConfig(LayerConfigBase):
 
 
 if __name__ == "__main__":
-    factor_cli_main(
-        config_cls=TailVolumeShrinkLayerConfig,
-        factor_calculator=calculate_tail_volume_shrink,
-    )
+    # 尾盘因子是预计算因子，已在 factor_ic_data.json.gz 中
+    # 不传递 factor_calculator，直接使用数据源中的因子列
+    factor_cli_main(config_cls=TailVolumeShrinkLayerConfig)

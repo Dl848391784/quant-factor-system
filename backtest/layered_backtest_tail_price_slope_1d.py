@@ -14,8 +14,12 @@
 - long_layers/short_layers: 由 n_layers 和 factor_direction 派生
 
 数据依赖：
-- factor_ic_data.json.gz（主数据源）
-- tail_trading_data.json.gz（尾盘5分钟K线数据）
+- factor_ic_data.json.gz（主数据源，已预计算尾盘因子列）
+
+设计说明（2026-06-04）：
+- 尾盘因子在 factor_generator.py 中已预计算并写入统一数据源
+- 分层回测不传递 factor_calculator 参数，直接读取数据源中的预计算因子列
+- 历史问题：传递 factor_calculator 会重复添加因子列，导致列名重复、reindex 失败
 
 作者: 云瑶
 创建日期: 2026-06-02
@@ -24,6 +28,7 @@
   v1.1 (2026-06-02): Round 1 优化 - 导入分组注释、版本历史完善
   v1.2 (2026-06-02): Round 2 优化 - 确认薄声明模式合规（ClassVar 类型注解、layer_descriptions 语义清晰）
   v1.3 (2026-06-02): Round 3 优化 - 确认边界处理下沉基类（基类已实现三级优先级兜底）
+  v1.4 (2026-06-04): Bug修复 - 移除 factor_calculator 参数，避免重复列名导致的 reindex 错误
 """
 
 # 标准库导入
@@ -39,7 +44,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # 本地模块导入
 from backtest.common.factor_cli import factor_cli_main
 from backtest.common.layered_backtest_runner import LayerConfigBase
-from factor_ic.ic_tail_price_slope_1d import calculate_tail_price_slope
 
 
 class TailPriceSlopeLayerConfig(LayerConfigBase):
@@ -62,4 +66,6 @@ class TailPriceSlopeLayerConfig(LayerConfigBase):
 
 
 if __name__ == "__main__":
-    factor_cli_main(config_cls=TailPriceSlopeLayerConfig, factor_calculator=calculate_tail_price_slope)
+    # 尾盘因子是预计算因子，已在 factor_ic_data.json.gz 中
+    # 不传递 factor_calculator，直接使用数据源中的因子列
+    factor_cli_main(config_cls=TailPriceSlopeLayerConfig)
