@@ -21,6 +21,7 @@ Step 7: 股票选股 (stock_selector.py) ← 本脚本
      遵循数据层架构原则：因子筛选结果由 comprehensive_factor 决定
 - v1.3 (2026-06-04): 10项修复（EPSILON判断错误+assert守卫失效+类型不一致+N/A字符串+config就地修改+validate必填检查+_std后缀依赖+factor_cols参数+CLI缺参数+日志冗余）
 - v1.4 (2026-06-04): 6项修复（composite_score兜底+get_latest_date格式+__post_init__路径校验+日志冗余+datetime.now时区+索引契约防御校验）
+- v1.5 (2026-06-04): 4项修复（CLI过滤None参数+删除空__post_init__+删除重复import+修正注释）
 
 作者: 云瑶
 创建日期: 2026-06-03
@@ -60,7 +61,7 @@ from comprehensive_factor.common.weight_engine import WeightEngine  # noqa: E402
 # ============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "1.4"
+__version__ = "1.5"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -103,7 +104,7 @@ class StockSelectorConfig:
     factor_direction: str = "negative"  # 综合因子方向（反向）
     rolling_window: int = 60  # 滚动 ICIR 窗口
 
-    # === 数据路径 ===（问题 3 修复：使用 field(default=...) 避免字段顺序问题）
+    # === 数据路径 ===（问题 4 修复：default_factory 保证延迟求值）
     data_source: Path = field(default_factory=lambda: DEFAULT_DATA_SOURCE)
     ic_result_dir: Path = field(default_factory=lambda: DEFAULT_IC_RESULT_DIR)
     weight_result_path: Path = field(default_factory=lambda: DEFAULT_WEIGHT_RESULT_PATH)
@@ -115,9 +116,7 @@ class StockSelectorConfig:
     # === 其他 ===
     return_period: str = "1d"  # 收益周期
 
-    def __post_init__(self) -> None:
-        """路径类型确认（问题 3 修复：field(default_factory) 已处理默认值）"""
-        # 无需额外处理，field(default_factory) 已设置默认值
+    # 问题 2 修复：删除空 __post_init__，dataclass 不需要
 
     def validate(self) -> None:
         """校验配置完整性（遵循 MODULE.md H 规则）
@@ -299,8 +298,7 @@ def get_latest_date(factor_df: pd.DataFrame, logger: logging.Logger | None = Non
 
     # 问题 2 修复：显式控制输出格式为 YYYY-MM-DD
     # 避免 Timestamp 输出 "2024-01-15 00:00:00" 带时间
-    import pandas as pd
-
+    # 问题 3 修复：删除函数内重复 import（文件顶部已导入）
     latest_date_str = pd.Timestamp(latest_date).strftime("%Y-%m-%d")
 
     logger.info("数据最新日期: %s（共 %d 个日期）", latest_date_str, len(dates_sorted))
@@ -728,18 +726,21 @@ def create_cli_entrypoint(config_class: type[StockSelectorConfig]) -> Callable[[
 
         args = parser.parse_args()
 
-        # 构建配置
-        config = config_class(
-            top_n=args.top_n,
-            selection_date=args.selection_date,
-            factor_direction=args.factor_direction,
-            rolling_window=args.rolling_window,
-            return_period=args.return_period,  # 问题 9 修复：透传 return_period
-            data_source=args.data_source,
-            ic_result_dir=args.ic_result_dir,
-            weight_result_path=args.weight_result_path,
-            output_dir=args.output_dir,
-        )
+        # 构建配置（问题 1 修复：过滤 None 参数，让 default_factory 生效）
+        candidate_kwargs = {
+            "top_n": args.top_n,
+            "selection_date": args.selection_date,
+            "factor_direction": args.factor_direction,
+            "rolling_window": args.rolling_window,
+            "return_period": args.return_period,
+            "data_source": args.data_source,
+            "ic_result_dir": args.ic_result_dir,
+            "weight_result_path": args.weight_result_path,
+            "output_dir": args.output_dir,
+        }
+        # 过滤 None，让 default_factory 在省略参数时生效
+        kwargs = {k: v for k, v in candidate_kwargs.items() if v is not None}
+        config = config_class(**kwargs)
 
         # 执行选股
         try:
