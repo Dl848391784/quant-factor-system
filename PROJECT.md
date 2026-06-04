@@ -337,8 +337,10 @@ except FileNotFoundError as e:
 
 ## 版本历史 [reference]
 
-|| 版本 | 日期 | 更新内容 | 稳定性标注 |
-||------|------|---------|-----------|
+|| 版本 | 日期 | 更新内容 | 稳定性标注 ||
+||------|------|---------|-----------||
+|| v3.4 | 2026-06-04 | 扩展"Run Pipeline 执行排查流程"步骤 3：检查所有时间序列数据文件日期新鲜度（factor_ic_data + turnover_rate + tail_trading），明确不需要检查的文件类型 | [stable] ||
+|| v3.3 | 2026-06-04 | 补充"Run Pipeline 执行排查流程"中 data_fetchers 数据日期新鲜度检查（步骤 3），关联 Pitfall 162 | [stable] ||
 || v3.2 | 2026-06-04 | 新增"Run Pipeline 执行排查流程"章节：执行顺序与日志位置表、排查步骤（标准化流程）、常见异常快速定位表 | [stable] |
 || v3.1 | 2026-06-03 | 加 AI 协作模式（harness 中立）/ 规则冲突仲裁 / 路线图节；H 规则加目的行；歧义修正（H9 AND 语义、design.md 文件名映射、新增模块定义）；删除 PROJECT.md 中复制 yaml 的必测场景表；教训防御表按机制分类；flag paths.py 导入路径疑问 | [experimental] |
 || v3.0 | 2026-06-01 | 大重构 | [experimental] |
@@ -466,7 +468,79 @@ ls -la comprehensive_factor/logs/*_2026-MM-DD.log
 ls -la summary/logs/*_2026-MM-DD.log
 ```
 
-**步骤 3：检索异常与警告**
+**步骤 3：检查 data_fetchers 数据日期新鲜度**
+
+**⚠️ 关键检查点**：必须验证每个 data_fetchers 脚本拉取的数据日期是否到了 T-1（前一日），否则后续模块可能使用过期数据。
+
+检查方法（按脚本输出文件逐一检查）：
+
+```bash
+# 检查 factor_ic_data.json.gz 中最新日期（factor_generator.py 输出，依赖多个上游数据）
+python -c "
+import pandas as pd
+import gzip
+import json
+from datetime import datetime, timedelta
+
+with gzip.open('data_fetchers/result/factor_ic_data.json.gz', 'rt') as f:
+    data = json.load(f)
+df = pd.DataFrame(data['data'])
+latest_date = df['date'].max()
+yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+print(f'factor_ic_data.json.gz:')
+print(f'  数据最新日期: {latest_date}')
+print(f'  期望日期(T-1): {yesterday}')
+print(f'  新鲜度判定: {\"✅ 符合\" if latest_date >= yesterday else \"❌ 过期\"}')
+"
+
+# 检查 turnover_rate_data.json.gz 中最新日期（fetch_turnover.py 输出）
+python -c "
+import pandas as pd
+import gzip
+import json
+from datetime import datetime, timedelta
+
+with gzip.open('data_fetchers/result/turnover_rate_data.json.gz', 'rt') as f:
+    data = json.load(f)
+df = pd.DataFrame(data['data'])
+latest_date = df['date'].max()
+yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+print(f'turnover_rate_data.json.gz:')
+print(f'  数据最新日期: {latest_date}')
+print(f'  期望日期(T-1): {yesterday}')
+print(f'  新鲜度判定: {\"✅ 符合\" if latest_date >= yesterday else \"❌ 过期\"}')
+"
+
+# 检查 tail_trading_data.json.gz 中最新日期（fetch_tail_trading.py 输出）
+python -c "
+import pandas as pd
+import gzip
+import json
+from datetime import datetime, timedelta
+
+with gzip.open('data_fetchers/result/tail_trading_data.json.gz', 'rt') as f:
+    data = json.load(f)
+df = pd.DataFrame(data['data'])
+latest_date = df['date'].max()
+yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+print(f'tail_trading_data.json.gz:')
+print(f'  数据最新日期: {latest_date}')
+print(f'  期望日期(T-1): {yesterday}')
+print(f'  新鲜度判定: {\"✅ 符合\" if latest_date >= yesterday else \"❌ 过期\"}')
+"
+```
+
+**判定标准**：
+- `latest_date >= T-1` → ✅ 数据新鲜，可继续排查后续模块
+- `latest_date < T-1` → ❌ 数据过期，需检查对应 data_fetchers 脚本执行情况
+
+**不需要检查日期新鲜度的文件**：
+- `stock_list.json`（股票列表，非时间序列）
+- `stock_industry.json`（行业分类，非时间序列）
+
+**相关历史教训**：Pitfall 162（见 AGENTS.md）——跳过逻辑必须检查日期新鲜度（`latest_date >= T-1`），而非只检查实体存在。
+
+**步骤 4：检索异常与警告**
 
 使用 grep 扫描所有当日日志：
 
@@ -480,7 +554,7 @@ grep -r "ERROR\|Exception\|Traceback\|FAIL\|失败" \
   summary/logs/*_2026-MM-DD.log 2>/dev/null
 ```
 
-**步骤 4：汇总报告**
+**步骤 5：汇总报告**
 
 输出格式：
 
