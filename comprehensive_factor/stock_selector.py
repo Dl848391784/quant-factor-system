@@ -19,6 +19,7 @@ Step 7: 股票选股 (stock_selector.py) ← 本脚本
   1. top_n 默认值从 10 改为 3（用户需求）
   2. 因子列表从 composite 结果读取，而非硬编码 rsi/volume_ratio
      遵循数据层架构原则：因子筛选结果由 comprehensive_factor 决定
+- v1.3 (2026-06-04): 10项修复（EPSILON判断错误+assert守卫失效+类型不一致+N/A字符串+config就地修改+validate必填检查+_std后缀依赖+factor_cols参数+CLI缺参数+日志冗余）
 
 作者: 云瑶
 创建日期: 2026-06-03
@@ -33,7 +34,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
-import numpy as np
 import pandas as pd
 
 
@@ -59,7 +59,7 @@ from comprehensive_factor.common.weight_engine import WeightEngine  # noqa: E402
 # ============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "1.2"
+__version__ = "1.3"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -132,18 +132,13 @@ class StockSelectorConfig:
         self.output_dir = Path(self.output_dir)
 
     def validate(self) -> None:
-        """校验配置完整性（遵循 MODULE.md H 规则）"""
-        if not self.factor_list:
-            raise ValueError("factor_list 不能为空")
+        """校验配置完整性（遵循 MODULE.md H 规则）
 
-        if not self.factor_cols:
-            raise ValueError("factor_cols 不能为空")
-
-        if len(self.factor_list) != len(self.factor_cols):
-            raise ValueError(
-                f"factor_list ({len(self.factor_list)}) 与 factor_cols ({len(self.factor_cols)}) 数量不一致"
-            )
-
+        Note:
+            - factor_list/factor_cols 是运行时变量（从 composite 结果读取）
+            - 问题 6 修复：移除必填检查，由 select_stocks 显式校验
+        """
+        # factor_list/factor_cols 移除必填检查（运行时填充）
         if self.top_n <= 0:
             raise ValueError(f"top_n 必须大于 0，当前: {self.top_n}")
 
@@ -209,10 +204,14 @@ def load_weight_config(
     if "method" not in best_selection:
         raise ValueError(f"best_selection 缺失 'method' 字段\n当前字段: {list(best_selection.keys())}")
 
+    # 问题 4 修复：composite_score 纳入 required_fields，走严格契约
+    if "composite_score" not in best_selection:
+        raise ValueError(f"best_selection 缺失 'composite_score' 字段\n当前字段: {list(best_selection.keys())}")
+
     logger.info(
         "最优权重方法: %s，综合得分: %.4f",
         best_selection["method"],
-        best_selection.get("composite_score", "N/A"),
+        best_selection["composite_score"],
     )
 
     return weight_config
@@ -310,9 +309,12 @@ def get_latest_date(factor_df: pd.DataFrame, logger: logging.Logger | None = Non
     dates_sorted = sorted(dates)
     latest_date = dates_sorted[-1]
 
-    logger.info("数据最新日期: %s（共 %d 个日期）", latest_date, len(dates_sorted))
+    # 问题 3 修复：统一返回 str，避免 Timestamp/str 类型不一致
+    latest_date_str = str(latest_date)
 
-    return latest_date
+    logger.info("数据最新日期: %s（共 %d 个日期）", latest_date_str, len(dates_sorted))
+
+    return latest_date_str
 
 
 def sort_and_select(
@@ -320,6 +322,7 @@ def sort_and_select(
     factor_df: pd.DataFrame,
     top_n: int,
     factor_direction: str,
+    factor_cols: list[str],  # 问题 7 修复：显式传入，去掉对 "_std" 后缀的猜测
     logger: logging.Logger | None = None,
 ) -> list[dict[str, Any]]:
     """排序并选出 Top N 股票
@@ -383,16 +386,13 @@ def sort_and_select(
     # 构建结果列表
     result_list = []
     for rank_idx, (_, row) in enumerate(top_stocks.iterrows(), start=1):
-        # 提取因子值
+        # 提取因子值（问题 7 修复：只输出显式列名集合）
         factor_values = {}
-        # 获取配置中的因子列（从 factor_df 列名推断）
-        for col in factor_df.columns:
-            if col in ["date", "asset", "composite_factor"] or col.endswith("_std"):
-                continue
+        for col in factor_cols:
             if col in row:
                 val = row[col]
-                # 处理 NaN（遵循 MODULE.md M49）
-                if pd.isna(val) or (isinstance(val, float) and np.abs(val) < EPSILON):
+                # 问题 1 修复：只判 pd.isna，EPSILON 不该用于数值合法性判断
+                if pd.isna(val):
                     factor_values[col] = None
                 else:
                     factor_values[col] = convert_to_native_types(val)
@@ -414,6 +414,9 @@ def build_result(
     config: StockSelectorConfig,
     weight_config: dict[str, Any],
     total_stocks: int,
+    factor_list: list[str],  # 问题 5 修复：运行时变量
+    factor_cols: list[str],  # 问题 5 修复：运行时变量
+    selection_date: str,  # 问题 5 修复：运行时变量
     logger: logging.Logger | None = None,
 ) -> dict[str, Any]:
     """构建输出结果
@@ -435,7 +438,7 @@ def build_result(
 
     result = {
         "meta": {
-            "selection_date": config.selection_date,
+            "selection_date": selection_date,
             "weight_method": best_selection["method"],
             "composite_score": best_selection.get("composite_score"),
             "factor_direction": config.factor_direction,
@@ -448,12 +451,12 @@ def build_result(
         "weight_config": {
             "method": best_selection["method"],
             "window": config.rolling_window if best_selection["method"] == "rolling_icir_weight" else None,
-            "factor_list": config.factor_list,
-            "factor_cols": config.factor_cols,
+            "factor_list": factor_list,
+            "factor_cols": factor_cols,
         },
     }
 
-    logger.info("结果构建完成: 选股日期=%s，Top N=%d", config.selection_date, len(top_stocks))
+    logger.info("结果构建完成: 选股日期=%s，Top N=%d", selection_date, len(top_stocks))
 
     return result
 
@@ -530,46 +533,49 @@ def select_stocks(
     if logger is None:
         logger = _logger
 
-    logger.info("=" * 60)
+    # 问题 10 修复：合并流程启停日志为单条 INFO
     logger.info("股票选股流程启动")
-    logger.info("=" * 60)
 
     # Step 1: 加载最优权重配置（优先获取因子列表）
-    # config.__post_init__ 已将 weight_result_path 转换为 Path，断言非 None
-    assert config.weight_result_path is not None, "weight_result_path 应已初始化"
+    # 问题 2 修复：assert 改为 if None raise RuntimeError（-O 模式失效）
+    if config.weight_result_path is None:
+        raise RuntimeError("weight_result_path 应已初始化")
     weight_config = load_weight_config(config.weight_result_path, logger)
     best_method = weight_config["best_selection"]["method"]
 
     # Step 2: 从最优权重 composite 结果中读取选中的因子列表
     # 遵循数据层架构原则：因子筛选结果由 comprehensive_factor 模块决定
-    assert config.output_dir is not None, "output_dir 应已初始化"
+    # 问题 5 修复：用局部变量持有运行时值，不修改 config
+    if config.output_dir is None:
+        raise RuntimeError("output_dir 应已初始化")
     output_dir_path = cast(Path, config.output_dir)
     factor_list, factor_cols = load_selected_factors_from_composite(
         weight_config, output_dir_path, config.return_period, logger
     )
-    # 覆盖 config 的默认因子列表
-    config.factor_list = factor_list
-    config.factor_cols = factor_cols
 
-    # Step 3: 校验配置（在填充因子列表后校验）
-    config.validate()
+    # Step 3: 校验因子列表（运行时校验）
+    if not factor_list or not factor_cols:
+        raise ValueError("从 composite 结果读取的因子列表为空")
+    if len(factor_list) != len(factor_cols):
+        raise ValueError(f"factor_list ({len(factor_list)}) 与 factor_cols ({len(factor_cols)}) 数量不一致")
 
     # Step 4: 加载因子数据
     logger.info("加载因子数据...")
-    factor_df_raw = load_factor_values(config.factor_cols, config.data_source, logger)
+    factor_df_raw = load_factor_values(factor_cols, config.data_source, logger)
     # 类型转换：load_factor_values 返回 DataFrame（pandas DataFrame 构造返回类型不稳定）
     factor_df = cast(pd.DataFrame, factor_df_raw)
 
     # Step 5: 确定选股日期
-    if config.selection_date is None:
-        config.selection_date = get_latest_date(factor_df, logger)
+    selection_date = config.selection_date  # 问题 5 修复：用局部变量持有
+    if selection_date is None:
+        selection_date = get_latest_date(factor_df, logger)
 
     # Step 6: 过滤数据（只保留选股日期）
-    logger.info("过滤选股日期: %s", config.selection_date)
-    factor_df = factor_df[factor_df["date"] == config.selection_date].copy()
+    logger.info("过滤选股日期: %s", selection_date)
+    factor_df = factor_df[factor_df["date"] == selection_date].copy()
 
     if len(factor_df) == 0:
-        raise ValueError(f"选股日期 {config.selection_date} 无数据\n可用日期范围: 请检查 factor_ic_data.json.gz")
+        raise ValueError(f"选股日期 {selection_date} 无数据\n可用日期范围: 请检查 factor_ic_data.json.gz")
 
     total_stocks = len(factor_df)
     logger.info("选股日期股票数: %d", total_stocks)
@@ -577,7 +583,7 @@ def select_stocks(
     # Step 7: 标准化因子（截面标准化）
     # 注意：单日数据标准化时，每日截面就是当日所有股票
     logger.info("标准化因子...")
-    factor_df = standardize_factors(factor_df, config.factor_cols, logger)
+    factor_df = standardize_factors(factor_df, factor_cols, logger)
 
     # Step 8: 加载 IC 数据（根据权重方法）
     ic_results = None
@@ -586,38 +592,43 @@ def select_stocks(
     if best_method == "rolling_icir_weight":
         # 滚动 ICIR 需要历史 IC 序列
         logger.info("加载 IC 每日序列（滚动 ICIR 需要）...")
-        assert config.ic_result_dir is not None, "ic_result_dir 应已初始化"
-        # 类型转换：config.__post_init__ 已将路径转换为 Path
+        if config.ic_result_dir is None:
+            raise RuntimeError("ic_result_dir 应已初始化")
         ic_result_dir_path = cast(Path, config.ic_result_dir)
-        ic_daily_data = load_ic_daily(config.factor_list, ic_result_dir_path, config.return_period, logger)
+        ic_daily_data = load_ic_daily(factor_list, ic_result_dir_path, config.return_period, logger)
     elif best_method in ("icir_weight", "ic_weight"):
         # 静态权重需要 IC 统计结果
         logger.info("加载 IC 统计结果（静态权重需要）...")
-        assert config.ic_result_dir is not None, "ic_result_dir 应已初始化"
-        # 类型转换：config.__post_init__ 已将路径转换为 Path
+        if config.ic_result_dir is None:
+            raise RuntimeError("ic_result_dir 应已初始化")
         ic_result_dir_path = cast(Path, config.ic_result_dir)
-        ic_results, _ = load_ic_results(config.factor_list, ic_result_dir_path, config.return_period, logger)
+        ic_results, _ = load_ic_results(factor_list, ic_result_dir_path, config.return_period, logger)
 
     # Step 9: 计算综合因子
     logger.info("计算综合因子（权重方法: %s）...", best_method)
     weight_engine = WeightEngine(weight_method=best_method, window=config.rolling_window, logger=logger)
-    composite_factor = weight_engine.calculate(factor_df, config.factor_cols, ic_results, ic_daily_data)
+    composite_factor = weight_engine.calculate(factor_df, factor_cols, ic_results, ic_daily_data)
 
     # Step 10: 排序选出 Top N
     logger.info("排序选股（Top N: %d，方向: %s）...", config.top_n, config.factor_direction)
-    top_stocks = sort_and_select(composite_factor, factor_df, config.top_n, config.factor_direction, logger)
+    # 问题 7 修复：传递 factor_cols 参数
+    top_stocks = sort_and_select(
+        composite_factor, factor_df, config.top_n, config.factor_direction, factor_cols, logger
+    )
 
-    # Step 11: 构建结果
-    result = build_result(top_stocks, config, weight_config, total_stocks, logger)
+    # Step 11: 构建结果（问题 5 修复：传递运行时变量）
+    result = build_result(
+        top_stocks, config, weight_config, total_stocks, factor_list, factor_cols, selection_date, logger
+    )
 
     # Step 12: 保存结果
-    assert config.output_dir is not None, "output_dir 应已初始化"
+    if config.output_dir is None:
+        raise RuntimeError("output_dir 应已初始化")
     output_dir_path = cast(Path, config.output_dir)
     output_file = save_result(result, output_dir_path, logger)
 
-    logger.info("=" * 60)
+    # 问题 10 修复：合并流程完成日志为单条 INFO
     logger.info("股票选股流程完成")
-    logger.info("=" * 60)
 
     return result, output_file
 
@@ -680,6 +691,14 @@ def create_cli_entrypoint(config_class: type[StockSelectorConfig]) -> Callable[[
             help="滚动 ICIR 窗口（默认: 60）",
         )
 
+        # 问题 9 修复：添加 --return_period 参数
+        parser.add_argument(
+            "--return_period",
+            type=str,
+            default="1d",
+            help="收益周期（默认: 1d）",
+        )
+
         # 数据路径
         parser.add_argument(
             "--data_source",
@@ -717,6 +736,7 @@ def create_cli_entrypoint(config_class: type[StockSelectorConfig]) -> Callable[[
             selection_date=args.selection_date,
             factor_direction=args.factor_direction,
             rolling_window=args.rolling_window,
+            return_period=args.return_period,  # 问题 9 修复：透传 return_period
             data_source=args.data_source,
             ic_result_dir=args.ic_result_dir,
             weight_result_path=args.weight_result_path,
