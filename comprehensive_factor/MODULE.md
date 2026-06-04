@@ -1,7 +1,7 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.6
-> 最后更新: 2026-06-03
+> 版本: v2.7
+> 最后更新: 2026-06-04
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
 >
@@ -321,6 +321,29 @@ result = run_layered_backtest(
 **What**:
 - 结果输出到 `comprehensive_factor/result/<脚本名>.json`
 - 日志输出到 `comprehensive_factor/logs/*.log`,通过 `from comprehensive_factor.common.logger_config import get_logger`
+
+**Why**: 日志持久化便于排查问题，与 factor_ic/backtest 模块保持一致。
+
+**How**:
+```python
+# 脚本中只需一行调用，日志自动输出到文件
+from comprehensive_factor.common.logger_config import get_logger
+
+logger = get_logger(__name__)  # 自动输出到 logs/<module>_YYYY-MM-DD.log
+logger.info("脚本启动")
+```
+
+**日志配置模块职责**（logger_config.py）:
+- 自动创建 `comprehensive_factor/logs/` 目录
+- 自动生成日志文件名：`{module_name}_YYYY-MM-DD.log`
+- 默认输出到文件（无需调用方传入参数）
+- 日志格式：`%(asctime)s | %(levelname)-8s | %(name)s | %(message)s`
+- 与 factor_ic/common/logger_config.py 保持一致
+
+**Don't**:
+- 调用方传入 `log_file` 参数（v2.0 已废弃）
+- 使用 print 替代 logger
+- 公共模块独立创建 logger（应接收调用方传入的 logger 参数）
 
 **新加权方式扩展 checklist**:
 ```
@@ -1702,6 +1725,7 @@ if not factor_cols or len(factor_cols) == 0:
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v2.7 | 2026-06-04 | logger_config.py v2.0: 重写对齐 factor_ic 实现，自动文件输出；M4 扩展日志配置模块职责规范 |
 | v2.6 | 2026-06-03 | weight_selector.py v1.4: select_best_method() 添加空字典检查；流程文档 + 测试用例文档 + 边界测试 |
 | v2.5 | 2026-06-03 | stock_selector.py v1.2: top_n 默认值改为 3 + 因子列表从 composite 结果读取（非硬编码）；MODULE.md 补充因子来源规范 + 示例更新 |
 | v2.4 | 2026-06-03 | run_pipeline.py v1.3: 新增 Stage 5 权重选择 + Stage 6 股票选股；generate_factor_summary_report.py v2.2: 新增第七、八部分 |
@@ -1731,5 +1755,5 @@ if not factor_cols or len(factor_cols) == 0:
 
 ---
 
-*最后更新: 2026-06-03*
+*最后更新: 2026-06-04*
 
