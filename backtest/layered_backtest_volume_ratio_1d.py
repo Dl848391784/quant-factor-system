@@ -26,11 +26,12 @@ class VolumeRatioLayerConfig(LayerConfigBase):
     薄声明：因子元数据集中在 ClassVar，逻辑完全下沉基类。
     
     特点：
-    - factor_col 显式声明为 volume_ratio_5（预计算因子，数据源列名 ≠ factor_name）
+    - factor_name=volume_ratio（IC 文件命名对应）
+    - factor_col=volume_ratio_5（数据源列名，预计算因子）
     - layer_names 纯标签（用于目录/列名），layer_descriptions 含中文（用于日志）
     """
     
-    factor_name: ClassVar[str] = 'volume_ratio_5'
+    factor_name: ClassVar[str] = 'volume_ratio'
     factor_col: ClassVar[str] = 'volume_ratio_5'
     ic_source: ClassVar[str] = 'factor_ic/result/ic_volume_ratio_1d_analysis_result.json'  # IC文件路径覆盖
     

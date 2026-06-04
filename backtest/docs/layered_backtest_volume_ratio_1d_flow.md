@@ -199,7 +199,8 @@ if __name__ == '__main__':
 ## 8. 变更历史
 
 || 日期 | 版本 | 变更内容 |
-||------|------|----------|
-|| 2026-06-01 | v1.23 | 移除 docstring 中 factor_direction 预判，添加 ic_source 注释说明 |
-|| 2026-06-01 | v1.22 | 适配 ClassVar[Sequence[str]] 架构，指定 factor_col='volume_ratio_5' |
-|| 2026-05-23 | v1.0 | 初始版本，创建量比分层回测脚本 |
+|------|------|----------|
+| 2026-06-04 | v1.24 | 统一 factor_name='volume_ratio'（IC 文件命名对应），修复筛选器 volume_ratio_5 缺失 ic_mean/icir |
+| 2026-06-01 | v1.23 | 移除 docstring 中 factor_direction 预判，添加 ic_source 注释说明 |
+| 2026-06-01 | v1.22 | 适配 ClassVar[Sequence[str]] 架构，指定 factor_col='volume_ratio_5' |
+| 2026-05-23 | v1.0 | 初始版本，创建量比分层回测脚本 |
