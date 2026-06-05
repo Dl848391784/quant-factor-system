@@ -35,9 +35,10 @@
     v2.6: 2026-06-05 修复9项问题：权重来源说明、日期不一致、高相关剔除边界、数据天数异常、overnight_ret方向异常、因子名统一、高相关对展示、权重标签区分、ICIR相等显示格式
     v2.7: 2026-06-05 修复第八节 factor_values 列名显示问题（volume_ratio_5 → volume_ratio）
     v2.8: 2026-06-05 修复高相关剔除显示精度（.2f → .3f），添加评分逻辑说明
+    v2.9: 2026-06-05 修复评分说明字段名错误（normalized_scores → metric_scores）
 """
 
-__version__ = "2.8"
+__version__ = "2.9"
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -1446,17 +1447,18 @@ def _generate_weight_selection_section(weight_result: dict | None) -> list[str]:
         icir_rank = next((r for r in ranking if r["method"] == "icir_weight"), None)
         if ic_rank and icir_rank:
             # 比较 ICIR加权与 IC加权的核心指标
-            ic_return = ic_rank.get("normalized_scores", {}).get("long_short_return_annual", 0)
-            icir_return = icir_rank.get("normalized_scores", {}).get("long_short_return_annual", 0)
-            ic_sharpe = ic_rank.get("normalized_scores", {}).get("long_short_sharpe", 0)
-            icir_sharpe = icir_rank.get("normalized_scores", {}).get("long_short_sharpe", 0)
-            ic_monotonicity = ic_rank.get("normalized_scores", {}).get("monotonicity_abs", 0)
-            icir_monotonicity = icir_rank.get("normalized_scores", {}).get("monotonicity_abs", 0)
+            # v2.9: 修复字段名错误 normalized_scores → metric_scores
+            ic_return = ic_rank.get("metric_scores", {}).get("long_short_return_annual", 0)
+            icir_return = icir_rank.get("metric_scores", {}).get("long_short_return_annual", 0)
+            ic_sharpe = ic_rank.get("metric_scores", {}).get("long_short_sharpe", 0)
+            icir_sharpe = icir_rank.get("metric_scores", {}).get("long_short_sharpe", 0)
+            ic_monotonicity = ic_rank.get("metric_scores", {}).get("monotonicity_abs", 0)
+            icir_monotonicity = icir_rank.get("metric_scores", {}).get("monotonicity_abs", 0)
 
             # 如果 ICIR加权核心指标更好但排名低于 IC加权，说明换手率拖累
             if (icir_return >= ic_return and icir_sharpe >= ic_sharpe and icir_monotonicity >= ic_monotonicity):
-                ic_turnover_long = ic_rank.get("normalized_scores", {}).get("turnover_long_avg", 0)
-                icir_turnover_long = icir_rank.get("normalized_scores", {}).get("turnover_long_avg", 0)
+                ic_turnover_long = ic_rank.get("metric_scores", {}).get("turnover_long_avg", 0)
+                icir_turnover_long = icir_rank.get("metric_scores", {}).get("turnover_long_avg", 0)
                 lines.append("")
                 lines.append("【评分说明】")
                 lines.append(f"ICIR加权在收益/夏普/单调性指标优于IC加权，但换手率逆向指标归一化得分较低")
