@@ -32,13 +32,14 @@
         logger.info("数据加载完成")
         return data
 
+作者: 云瑶
 更新历史：
+- v2.1 (2026-06-05): 修复 __main__ 模式下日志文件名问题，使用 inspect 从调用栈获取实际脚本名
 - v2.0 (2026-06-04): 重写对齐 factor_ic 实现，自动文件输出，废弃 log_file 参数
 - v1.0 (2026-05-24): 初始版本
-
-作者: 云瑶
 """
 
+import inspect
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -77,14 +78,27 @@ def get_logger(name: str, log_dir: Path | None = None) -> logging.Logger:
 
     log_dir.mkdir(exist_ok=True)
 
-    # 日志文件命名：<模块名>_YYYY-MM-DD.log
-    # 从 name 中提取模块名（如 comprehensive_factor.common.data_loader → data_loader）
-    module_name = name.split(".")[-1]
+    # 日志文件命名：<脚本名>_YYYY-MM-DD.log
+    # 当 name == "__main__" 时，从调用栈获取实际文件名（遵循 PROJECT.md 第 436 行规范）
+    # 否则从 name 中提取模块名（如 comprehensive_factor.common.data_loader → data_loader）
+    if name == "__main__":
+        # 获取调用方文件路径
+        caller_frame = inspect.currentframe()
+        if caller_frame is not None and caller_frame.f_back is not None:
+            caller_file = caller_frame.f_back.f_code.co_filename
+            module_name = Path(caller_file).stem  # 文件名不含扩展名
+        else:
+            module_name = "unknown"  # 无法获取调用方时使用 fallback
+    else:
+        module_name = name.split(".")[-1]
     date_str = datetime.now().strftime("%Y-%m-%d")
     log_file = log_dir / f"{module_name}_{date_str}.log"
 
     # 日志格式：%(asctime)s | %(levelname)-8s | %(name)s | %(message)s
-    formatter = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
     # 控制台处理器（INFO 及以上）
     console_handler = logging.StreamHandler()
@@ -109,7 +123,7 @@ def set_log_level(level: str):
     动态调整日志级别
 
     参数:
-        level: 日志级别字符串（'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
+        level: 日志级别字符串（'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'）
 
     使用示例:
         set_log_level('DEBUG')  # 开发阶段查看所有细节
