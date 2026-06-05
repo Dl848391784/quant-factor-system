@@ -228,7 +228,7 @@ except FileNotFoundError as e:
 | 2 | `data_fetchers/factor_generator.py` | 因子计算函数 | 计算逻辑，结果存入 `factor_ic_data.json.gz`（统一数据源） |
 | 3 | `comprehensive_factor/common/factor_selector.py` | `FACTOR_NAME_TO_COL_MAP` | 因子名→列名映射（筛选层） |
 | 4 | `comprehensive_factor/common/weight_engine.py` | `FACTOR_NAME_TO_COL_MAP` | 因子名→列名映射（权重层） |
-| 5 | `data_fetchers/factor_definitions.py` | 因子定义 | 因子元数据（名称、类型、说明） |
+| 5 | `factor_definitions.py`（项目根目录） | `FACTOR_DEFINITIONS` | 因子定义（名称、公式、含义），汇总报告因子说明显示 |
 | 6 | `PROJECT.md` | 因子列表章节（本表） | 项目级因子清单 |
 
 **关键依赖**: 新增因子后必须重新运行 `factor_generator.py` 更新 `factor_ic_data.json.gz`，否则后续脚本无法读取新因子值。
