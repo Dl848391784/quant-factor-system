@@ -81,6 +81,7 @@ FACTOR_DEFINITIONS: dict[str, str] = {
     "return_5d": "5日累计涨幅: close[t]/close[t-5]-1",
     "past_return_1d": "过去1日涨幅: close[t]/close[t-1]-1, 与forward_return_1d对称",
     "overnight_ret": "隔夜收益: (今日开盘-昨日收盘)/昨日收盘",
+    "momentum_strength": "动量强度: return_5d/std(return_1d,5日), 5日涨幅/5日波动率",
     # -------------------------------------------------------------------------
     # 尾盘因子（来自 factor_ic/ic_tail_*_1d.py）
     # -------------------------------------------------------------------------

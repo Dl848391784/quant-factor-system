@@ -1,56 +1,37 @@
-# Result files
-backtest/result/
-comprehensive_factor/result/
-data_fetchers/result/
-factor_ic/result/
-summary/result/
-
-# Log files
-backtest/logs/
-data_fetchers/logs/
-factor_ic/logs/
-summary/logs/
-logs/
-
-# Test directories
-test/
-test_venv/
-
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual environments
-.venv*/
+.venv/
 venv/
 ENV/
-env/
 
 # IDE
-.vscode/
 .idea/
+.vscode/
 *.swp
 *.swo
 *~
 
+# Results and data files
+*.json.gz
+*.parquet
+*.csv
+data/
+results/
+output/
+
+# Logs
+*.log
+logs/
+
 # OS
 .DS_Store
 Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp

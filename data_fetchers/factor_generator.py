@@ -92,6 +92,14 @@ Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
     3. 导入 calculate_past_return_1d 函数
     4. 公式：close[t] / close[t-1] - 1（当日涨跌幅）
     5. 遵循 PROJECT.md 规范：因子计算在 data_fetchers 完成，存储到统一数据源
+- v1.38 (2026-06-05): 新增动量强度因子（遵循 PROJECT.md 因子开发规范）：
+    1. 新增 return_5d 到 _EXTENDED_FACTOR_COLS（5日累计涨幅，momentum_strength 前置依赖）
+    2. 新增 momentum_strength 到 _EXTENDED_FACTOR_COLS（动量强度因子）
+    3. 导入 calculate_return_5d 和 calculate_momentum_strength 函数
+    4. 新增 Step 8.5 计算 return_5d（调用 calculate_return_5d）
+    5. 新增 Step 8.6 计算 momentum_strength（调用 calculate_momentum_strength）
+    6. 公式：momentum_strength = return_5d / std(return_1d, 5日)
+    7. 遵循 PROJECT.md 规范：因子计算在 data_fetchers 完成，存储到统一数据源
 
 作者: 云瑶
 """
@@ -123,9 +131,11 @@ if __name__ == "__main__":
         calculate_amplitude,
         calculate_bollinger_pb,
         calculate_kdj_j,
+        calculate_momentum_strength,  # v1.37 新增
         calculate_overnight_return,
         calculate_past_return_1d,  # 当日涨跌幅
         calculate_price_position,
+        calculate_return_5d,  # v1.37 新增：5日累计涨幅
         calculate_turnover_surge,
     )
 else:
@@ -135,9 +145,11 @@ else:
         calculate_amplitude,
         calculate_bollinger_pb,
         calculate_kdj_j,
+        calculate_momentum_strength,  # v1.37 新增
         calculate_overnight_return,
         calculate_past_return_1d,  # 当日涨跌幅
         calculate_price_position,
+        calculate_return_5d,  # v1.37 新增：5日累计涨幅
         calculate_turnover_surge,
     )
 
@@ -168,8 +180,7 @@ _DEFAULT_RESULT_DIR = Path(__file__).parent / "result"
 # v1.33 新增尾盘因子：tail_price_position, tail_price_slope, tail_price_volume_intensity
 # v1.34 新增隔夜收益率因子：overnight_ret（跳空幅度）
 # v1.35 新增尾盘量能加速度因子：tail_volume_acceleration（后半段/前半段成交量比）
-# v1.36 新增日内强度因子：intraday_intensity（收盘价在振幅中的相对位置）
-# v1.36 新增尾盘缩量程度因子：tail_volume_shrink（尾盘成交量总和/全天成交量）
+# v1.37 新增动量强度因子：momentum_strength（5日涨幅/5日波动率）
 _EXTENDED_FACTOR_COLS: tuple[str, ...] = (
     "past_return_1d",  # 当日涨跌幅（遵循 PROJECT.md 规则：因子计算在 data_fetchers 完成）
     "bollinger_pb",
@@ -177,6 +188,8 @@ _EXTENDED_FACTOR_COLS: tuple[str, ...] = (
     "turnover_surge",
     "amplitude",
     "price_position",
+    "return_5d",  # v1.37 新增：5日累计涨幅（momentum_strength 的前置依赖）
+    "momentum_strength",  # v1.37 新增：动量强度因子
     "overnight_ret",
     "intraday_intensity",
     "tail_price_position",
@@ -926,6 +939,22 @@ def generate_all_factors(
 
     position_valid = int(factor_df["price_position"].notna().sum())
     logger.info("  有效 price_position: %d (%.2f%%)", position_valid, _calc_pct(position_valid, len(factor_df)))
+
+    # ========== Step 8.5: 计算 return_5d（5日累计涨幅） ==========
+    logger.info("Step 8.5: 计算5日累计涨幅因子...")
+
+    factor_df = calculate_return_5d(factor_df, logger_arg=logger)
+
+    return_5d_valid = int(factor_df["return_5d"].notna().sum())
+    logger.info("  有效 return_5d: %d (%.2f%%)", return_5d_valid, _calc_pct(return_5d_valid, len(factor_df)))
+
+    # ========== Step 8.6: 计算 momentum_strength（动量强度） ==========
+    logger.info("Step 8.6: 计算动量强度因子...")
+
+    factor_df = calculate_momentum_strength(factor_df, logger_arg=logger)
+
+    momentum_valid = int(factor_df["momentum_strength"].notna().sum())
+    logger.info("  有效 momentum_strength: %d (%.2f%%)", momentum_valid, _calc_pct(momentum_valid, len(factor_df)))
 
     # ========== Step 9: 计算 overnight_ret（隔夜收益率/跳空幅度） ==========
     logger.info("Step 9: 计算隔夜收益率因子（跳空幅度）...")

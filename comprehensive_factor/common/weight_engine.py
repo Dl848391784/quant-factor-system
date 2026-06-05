@@ -29,13 +29,16 @@ class WeightMethodBase(ABC):
 
     # 因子名到数据列名的映射（反向映射用于 IC 结果匹配）
     # v1.10 新增：提取公共映射，避免硬编码后缀
+    # v1.37 新增：return_5d, momentum_strength（动量强度因子）
     FACTOR_NAME_TO_COL_MAP = {
         'rsi': 'rsi_6',
         'volume_ratio': 'volume_ratio_5',
         'kdj_j': 'kdj_j_9',
         'bollinger_pb': 'bollinger_pb_20',
         'turnover_surge': 'turnover_surge_5',
-        'main_inflow_ratio': 'main_inflow_ratio_1d'
+        'main_inflow_ratio': 'main_inflow_ratio_1d',
+        'return_5d': 'return_5d',
+        'momentum_strength': 'momentum_strength',
     }
 
     # 反向映射：列名 → 因子名

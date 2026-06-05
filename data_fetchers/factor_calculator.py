@@ -65,6 +65,11 @@ v1.9 (2026-05-29): 新增5日累计涨幅因子
   - 添加 `calculate_return_5d()` 函数
   - 添加 `_COL_RETURN_5D` 和 `_DEFAULT_RETURN_5D_WINDOW` 常量
   - 边界处理：前5日数据设为 NaN（历史不足）
+v1.10 (2026-06-05): 新增动量强度因子
+  - 添加 `calculate_momentum_strength()` 函数
+  - 添加 `_COL_MOMENTUM_STRENGTH` 和 `_DEFAULT_MOMENTUM_STRENGTH_WINDOW` 常量
+  - 公式：momentum_strength = return_5d / std(return_1d, 5日)
+  - 边界处理：std=0 → NaN（除零保护），前5日 → NaN（rolling window 不足）
 
 作者: 云瑶
 创建日期: 2026-05-27
@@ -90,28 +95,29 @@ import pandas as pd
 # 模块导出（遵循 MODULE.md 约束 60：不含私有名称）
 # ============================================================================
 __all__ = [
-    'calculate_rsi',
-    'calculate_volume_ratio',
-    'calculate_forward_return',
-    'calculate_bollinger_pb',
-    'calculate_kdj_j',
-    'calculate_turnover_surge',
-    'calculate_price_position',  # v1.6 新增
-    'calculate_amplitude',  # v1.7 新增
-    'calculate_past_return_1d',  # v1.10 新增
-    'calculate_return_3d',  # v1.8 新增
-    'calculate_return_5d',  # v1.9 新增
-    'get_module_logger',
+    "calculate_rsi",
+    "calculate_volume_ratio",
+    "calculate_forward_return",
+    "calculate_bollinger_pb",
+    "calculate_kdj_j",
+    "calculate_turnover_surge",
+    "calculate_price_position",  # v1.6 新增
+    "calculate_amplitude",  # v1.7 新增
+    "calculate_past_return_1d",  # v1.10 新增
+    "calculate_return_3d",  # v1.8 新增
+    "calculate_return_5d",  # v1.9 新增
+    "calculate_momentum_strength",  # v1.10 新增
+    "get_module_logger",
     # 公共常量别名（向下兼容 ic_kdj_j 等脚本的导入）
-    'DEFAULT_RSI_PERIOD',
-    'DEFAULT_BOLLINGER_N',
-    'DEFAULT_BOLLINGER_K',
-    'DEFAULT_KDJ_N',
-    'DEFAULT_KDJ_M1',
-    'DEFAULT_KDJ_M2',
-    'DEFAULT_SURGE_WINDOW',
-    'DEFAULT_VOLUME_RATIO_WINDOW',
-    'DEFAULT_FORWARD_RETURN_SHIFT',
+    "DEFAULT_RSI_PERIOD",
+    "DEFAULT_BOLLINGER_N",
+    "DEFAULT_BOLLINGER_K",
+    "DEFAULT_KDJ_N",
+    "DEFAULT_KDJ_M1",
+    "DEFAULT_KDJ_M2",
+    "DEFAULT_SURGE_WINDOW",
+    "DEFAULT_VOLUME_RATIO_WINDOW",
+    "DEFAULT_FORWARD_RETURN_SHIFT",
 ]
 
 # ============================================================================
@@ -129,22 +135,22 @@ _KD_NEUTRAL_VALUE = 50.0  # K/D 值中性初始值
 
 
 # 输入列名常量（DataFrame 列名）
-_COL_CLOSE = 'close'
-_COL_DATE = 'date'
-_COL_ASSET = 'asset'
-_COL_HIGH = 'high'
-_COL_LOW = 'low'
-_COL_TURNOVER_RATE = 'turnover_rate'
+_COL_CLOSE = "close"
+_COL_DATE = "date"
+_COL_ASSET = "asset"
+_COL_HIGH = "high"
+_COL_LOW = "low"
+_COL_TURNOVER_RATE = "turnover_rate"
 
 # 输出列名常量（因子输出列名）
-_COL_BOLLINGER_PB = 'bollinger_pb'
-_COL_KDJ_J = 'kdj_j'
-_COL_TURNOVER_SURGE = 'turnover_surge'
-_COL_PRICE_POSITION = 'price_position'
-_COL_AMPLITUDE = 'amplitude'
-_COL_PAST_RETURN_1D = 'past_return_1d'
-_COL_RETURN_3D = 'return_3d'
-_COL_RETURN_5D = 'return_5d'
+_COL_BOLLINGER_PB = "bollinger_pb"
+_COL_KDJ_J = "kdj_j"
+_COL_TURNOVER_SURGE = "turnover_surge"
+_COL_PRICE_POSITION = "price_position"
+_COL_AMPLITUDE = "amplitude"
+_COL_PAST_RETURN_1D = "past_return_1d"
+_COL_RETURN_3D = "return_3d"
+_COL_RETURN_5D = "return_5d"
 
 # 默认参数（私有常量，遵循 cache_manager.py 规范）
 _DEFAULT_RSI_PERIOD = 6
@@ -176,28 +182,28 @@ DEFAULT_FORWARD_RETURN_SHIFT = _DEFAULT_FORWARD_RETURN_SHIFT
 # ============================================================================
 # 模块级 fallback logger（遵循 PROJECT.md 公共模块日志规范）
 # ============================================================================
-_MODULE_LOGGER = logging.getLogger('data_fetchers.factor_calculator')
+_MODULE_LOGGER = logging.getLogger("data_fetchers.factor_calculator")
 
 
 def get_module_logger(logger_arg: logging.Logger | None = None) -> logging.Logger:
     """
     获取 logger，遵循 PROJECT.md 公共模块日志规范
-    
+
     公共模块接收 logger 参数，调用方传入以追溯调用方。
     不传 logger 时使用模块级 fallback logger（模块加载时已初始化）。
-    
+
     Args:
         logger_arg: 调用方传入的 logger（可选）
-        
+
     Returns:
         Logger 对象
-    
+
     Example:
         >>> # 调用方传入 logger
         >>> from data_fetchers.common.logger_config import setup_logger
-        >>> logger = setup_logger('factor_generator')
+        >>> logger = setup_logger("factor_generator")
         >>> result = calculate_bollinger_pb(df, logger_arg=logger)
-        
+
         >>> # 不传 logger，使用模块级 fallback
         >>> result = calculate_bollinger_pb(df)
     """
@@ -210,16 +216,17 @@ def get_module_logger(logger_arg: logging.Logger | None = None) -> logging.Logge
 # RSI 计算（Wilder 标准）
 # ============================================================================
 
+
 def _wilder_smoothing_rsi(series: pd.Series, n: int) -> pd.Series:
     """Wilder 平滑：前 n-1 天 NaN，第 n 天 SMA 种子，第 n+1 天起 EWM 递推
-    
+
     Args:
         series: 单资产的序列（gain 或 loss）
         n: 窗口期
-    
+
     Returns:
         Wilder 平滑均值序列
-    
+
     Note:
         Wilder (1978) 标准实现：
         1. 前 n-1 天为 NaN（数据不足以计算 SMA）
@@ -229,7 +236,7 @@ def _wilder_smoothing_rsi(series: pd.Series, n: int) -> pd.Series:
            - 公式：avg_t = alpha * val_t + (1-alpha) * avg_{t-1}
            - alpha = 1/n
            - NaN 传播：若当天输入为 NaN，结果也为 NaN
-        
+
         与 pandas ewm(adjust=False) 的差异：
         - pandas ewm(adjust=False) 从第 1 个观测值就开始计算
         - Wilder 标准要求前 n-1 天为 NaN，第 n 天用 SMA
@@ -237,7 +244,7 @@ def _wilder_smoothing_rsi(series: pd.Series, n: int) -> pd.Series:
     alpha = 1.0 / n
 
     # 初始化全 NaN 序列
-    result = pd.Series(float('nan'), index=series.index, dtype=float)
+    result = pd.Series(float("nan"), index=series.index, dtype=float)
 
     # 防御性检查：序列长度不足
     if len(series) < n:
@@ -252,34 +259,31 @@ def _wilder_smoothing_rsi(series: pd.Series, n: int) -> pd.Series:
     # 第 n+1 天起（索引 n 到 len-1）：EWM 递推
     for i in range(n, len(series)):
         if pd.isna(series.iloc[i]):  # 当天值为 NaN：传播 NaN
-            result.iloc[i] = float('nan')
+            result.iloc[i] = float("nan")
         else:
             result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * result.iloc[i - 1]
 
     return result
 
 
-def calculate_rsi(
-    close_prices: pd.Series,
-    period: int = _DEFAULT_RSI_PERIOD
-) -> pd.Series:
+def calculate_rsi(close_prices: pd.Series, period: int = _DEFAULT_RSI_PERIOD) -> pd.Series:
     """
     向量化计算 RSI 指标
-    
+
     使用 Wilder 标准（前 period 天 SMA 种子，之后 EWM 递推）
-    
+
     边界处理（遵循 Wilder 1978 标准）：
     1. avg_loss=0 且 avg_gain>0 → RSI=100（超买）
     2. avg_loss=0 且 avg_gain=0 → RSI=50（中性）
     3. avg_loss>0 → 正常计算 RS
-    
+
     Args:
         close_prices: 收盘价序列
         period: RSI 计算周期
-    
+
     Returns:
         RSI 值序列（0-100）
-    
+
     Example:
         >>> import pandas as pd
         >>> close = pd.Series([100, 102, 101, 103, 105, 104, 106])
@@ -330,22 +334,20 @@ def calculate_rsi(
 # Volume Ratio 计算（量比）
 # ============================================================================
 
-def calculate_volume_ratio(
-    volume: pd.Series,
-    window: int = _DEFAULT_VOLUME_RATIO_WINDOW
-) -> pd.Series:
+
+def calculate_volume_ratio(volume: pd.Series, window: int = _DEFAULT_VOLUME_RATIO_WINDOW) -> pd.Series:
     """
     计算量比因子
-    
+
     量比 = 当日成交量 / 过去 window 日成交量均值
-    
+
     Args:
         volume: 成交量序列
         window: 计算窗口
-    
+
     Returns:
         量比值序列
-    
+
     Example:
         >>> import pandas as pd
         >>> vol = pd.Series([1000, 1100, 900, 1200, 1000, 1500])
@@ -377,22 +379,20 @@ def calculate_volume_ratio(
 # Forward Return 计算（前瞻收益）
 # ============================================================================
 
-def calculate_forward_return(
-    close_prices: pd.Series,
-    shift: int = _DEFAULT_FORWARD_RETURN_SHIFT
-) -> pd.Series:
+
+def calculate_forward_return(close_prices: pd.Series, shift: int = _DEFAULT_FORWARD_RETURN_SHIFT) -> pd.Series:
     """
     计算前瞻收益率
-    
+
     forward_return = (close_{t+shift} - close_t) / close_t
-    
+
     Args:
         close_prices: 收盘价序列
         shift: 前瞻天数
-    
+
     Returns:
         前瞻收益率序列
-    
+
     Example:
         >>> import pandas as pd
         >>> close = pd.Series([100, 102, 105, 103])
@@ -419,37 +419,36 @@ def calculate_forward_return(
 # Bollinger %B 计算（布林带）
 # ============================================================================
 
+
 def calculate_bollinger_pb(
     factor_df: pd.DataFrame,
     n: int = _DEFAULT_BOLLINGER_N,
     k: float = _DEFAULT_BOLLINGER_K,
-    logger_arg: logging.Logger | None = None
+    logger_arg: logging.Logger | None = None,
 ) -> pd.DataFrame:
     """
     计算布林带 %B 因子
-    
+
     参数:
         factor_df: 包含 close、date、asset 列的 DataFrame（面板数据长格式）
         n: 移动平均周期
         k: 标差倍数
         logger_arg: 调用方传入的 logger（遵循 MODULE.md 约束 77）
-    
+
     返回:
         添加 bollinger_pb 列的 DataFrame
-    
+
     注意:
         1. 函数入口必须先 .copy()，避免修改原始数据
         2. 布林带是单只股票的时序指标，必须按 asset 分组后再做 rolling
-    
+
     Example:
         >>> import pandas as pd
-        >>> df = pd.DataFrame({
-        ...     'date': ['2026-01-01', '2026-01-02', '2026-01-03'],
-        ...     'asset': ['A', 'A', 'A'],
-        ...     'close': [100, 102, 101]
-        ... })
+        >>> df = pd.DataFrame(
+        ...     {"date": ["2026-01-01", "2026-01-02", "2026-01-03"], "asset": ["A", "A", "A"], "close": [100, 102, 101]}
+        ... )
         >>> result = calculate_bollinger_pb(df, n=20, k=2.0)
-        >>> 'bollinger_pb' in result.columns
+        >>> "bollinger_pb" in result.columns
         True
     """
     _logger = get_module_logger(logger_arg)
@@ -460,12 +459,8 @@ def calculate_bollinger_pb(
     # 按 asset 分组计算滚动统计
     factor_df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
-    middle = factor_df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].transform(
-        lambda x: x.rolling(window=n).mean()
-    )
-    std_dev = factor_df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].transform(
-        lambda x: x.rolling(window=n).std()
-    )
+    middle = factor_df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].transform(lambda x: x.rolling(window=n).mean())
+    std_dev = factor_df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].transform(lambda x: x.rolling(window=n).std())
 
     # 计算布林带
     upper = middle + k * std_dev
@@ -491,7 +486,9 @@ def calculate_bollinger_pb(
         _logger.warning(f"检测到 {abnormal_count} 个异常布林带宽度（负值），已标记为 np.nan")
     narrow_count = narrow_band_mask.sum()
     if narrow_count > 0:
-        _logger.warning(f"检测到 {narrow_count} 个过窄布林带宽度（< {_EPSILON}），已置为中性值 {_BOLLINGER_NEUTRAL_VALUE}")
+        _logger.warning(
+            f"检测到 {narrow_count} 个过窄布林带宽度（< {_EPSILON}），已置为中性值 {_BOLLINGER_NEUTRAL_VALUE}"
+        )
 
     factor_df[_COL_BOLLINGER_PB] = bollinger_pb
 
@@ -502,23 +499,20 @@ def calculate_bollinger_pb(
 # KDJ J 计算（随机指标）
 # ============================================================================
 
-def _calculate_ewm_with_initial(
-    series: pd.Series,
-    alpha: float,
-    initial_value: float
-) -> pd.Series:
+
+def _calculate_ewm_with_initial(series: pd.Series, alpha: float, initial_value: float) -> pd.Series:
     """计算 EWM 递推值（正确处理 NaN 前缀版本）
-    
+
     公共函数：统一处理 K 值和 D 值的 EWM 递推计算
-    
+
     Args:
         series: 输入序列（RSV 或 K 值）
         alpha: EWM 衰减因子（1/m，m 为平滑周期）
         initial_value: 初始值（K/D 使用 50.0 作为中性值）
-    
+
     Returns:
         EWM 递推结果序列
-    
+
     Note:
         - 在第一个有效值前插入虚拟 initial_value 作为 EWM 种子
         - 使用 ewm(adjust=False, ignore_na=True) 确保正确传播 NaN
@@ -528,10 +522,7 @@ def _calculate_ewm_with_initial(
         return series
 
     # 在第一个有效值前插入虚拟 initial_value（保留原始索引）
-    series_with_initial = pd.concat([
-        pd.Series([initial_value], index=[-1]),
-        series
-    ])
+    series_with_initial = pd.concat([pd.Series([initial_value], index=[-1]), series])
 
     result_with_initial = series_with_initial.ewm(alpha=alpha, adjust=False, ignore_na=True).mean()
 
@@ -540,7 +531,7 @@ def _calculate_ewm_with_initial(
     result_series.index = series.index
 
     # 恢复原始 NaN 位置
-    result_series = result_series.where(series.notna(), float('nan'))
+    result_series = result_series.where(series.notna(), float("nan"))
 
     return result_series
 
@@ -550,36 +541,38 @@ def calculate_kdj_j(
     n: int = _DEFAULT_KDJ_N,
     m1: int = _DEFAULT_KDJ_M1,
     m2: int = _DEFAULT_KDJ_M2,
-    logger_arg: logging.Logger | None = None
+    logger_arg: logging.Logger | None = None,
 ) -> pd.DataFrame:
     """
     计算 KDJ_J 因子
-    
+
     参数:
         factor_df: 包含 close, high, low, date, asset 列的 DataFrame
         n: RSV 计算周期
         m1: K值平滑周期
         m2: D值平滑周期
         logger_arg: 调用方传入的 logger（遵循 MODULE.md 约束 77）
-    
+
     返回:
         添加了 kdj_j 列的 DataFrame
-    
+
     规范:
         - 函数入口必须先 .copy()，避免修改原始数据
         - KDJ 是单股票时序指标，必须按 asset 分组后再做 rolling/ewm
-    
+
     Example:
         >>> import pandas as pd
-        >>> df = pd.DataFrame({
-        ...     'date': ['2026-01-01', '2026-01-02', '2026-01-03'],
-        ...     'asset': ['A', 'A', 'A'],
-        ...     'close': [100, 102, 101],
-        ...     'high': [103, 104, 103],
-        ...     'low': [99, 100, 99]
-        ... })
+        >>> df = pd.DataFrame(
+        ...     {
+        ...         "date": ["2026-01-01", "2026-01-02", "2026-01-03"],
+        ...         "asset": ["A", "A", "A"],
+        ...         "close": [100, 102, 101],
+        ...         "high": [103, 104, 103],
+        ...         "low": [99, 100, 99],
+        ...     }
+        ... )
         >>> result = calculate_kdj_j(df, n=9, m1=3, m2=3)
-        >>> 'kdj_j' in result.columns
+        >>> "kdj_j" in result.columns
         True
     """
     _logger = get_module_logger(logger_arg)
@@ -620,9 +613,7 @@ def calculate_kdj_j(
         lambda x: _calculate_ewm_with_initial(x, alpha_k, _KD_NEUTRAL_VALUE)
     )
 
-    d = k.groupby(factor_df[_COL_ASSET]).transform(
-        lambda x: _calculate_ewm_with_initial(x, alpha_d, _KD_NEUTRAL_VALUE)
-    )
+    d = k.groupby(factor_df[_COL_ASSET]).transform(lambda x: _calculate_ewm_with_initial(x, alpha_d, _KD_NEUTRAL_VALUE))
 
     # 计算 J
     factor_df[_COL_KDJ_J] = 3 * k - 2 * d
@@ -634,36 +625,37 @@ def calculate_kdj_j(
 # Turnover Surge 计算（换手率突增）
 # ============================================================================
 
+
 def calculate_turnover_surge(
-    factor_df: pd.DataFrame,
-    surge_window: int = _DEFAULT_SURGE_WINDOW,
-    logger_arg: logging.Logger | None = None
+    factor_df: pd.DataFrame, surge_window: int = _DEFAULT_SURGE_WINDOW, logger_arg: logging.Logger | None = None
 ) -> pd.DataFrame:
     """
     计算换手率突增因子
-    
+
     参数:
         factor_df: 包含 turnover_rate, close 列的 DataFrame
         surge_window: 换手率均值计算窗口
         logger_arg: 调用方传入的 logger（遵循 MODULE.md 约束 77）
-    
+
     返回:
         添加了 turnover_surge 列的 DataFrame
-    
+
     规范:
         - 函数入口必须先 .copy()，避免修改原始数据
         - 异常检测而非静默修正
-    
+
     Example:
         >>> import pandas as pd
-        >>> df = pd.DataFrame({
-        ...     'date': ['2026-01-01', '2026-01-02', '2026-01-03'],
-        ...     'asset': ['A', 'A', 'A'],
-        ...     'turnover_rate': [0.01, 0.02, 0.03],
-        ...     'close': [100, 102, 103]
-        ... })
+        >>> df = pd.DataFrame(
+        ...     {
+        ...         "date": ["2026-01-01", "2026-01-02", "2026-01-03"],
+        ...         "asset": ["A", "A", "A"],
+        ...         "turnover_rate": [0.01, 0.02, 0.03],
+        ...         "close": [100, 102, 103],
+        ...     }
+        ... )
         >>> result = calculate_turnover_surge(df, surge_window=5)
-        >>> 'turnover_surge' in result.columns
+        >>> "turnover_surge" in result.columns
         True
     """
     _logger = get_module_logger(logger_arg)
@@ -702,14 +694,11 @@ def calculate_turnover_surge(
 # 全天价格位置因子
 # ============================================================================
 
-_COL_PRICE_POSITION = 'price_position'
+_COL_PRICE_POSITION = "price_position"
 _DEFAULT_PRICE_POSITION_EPSILON = 1e-10  # 防止除零
 
 
-def calculate_price_position(
-    factor_df: pd.DataFrame,
-    logger_arg: logging.Logger | None = None
-) -> pd.DataFrame:
+def calculate_price_position(factor_df: pd.DataFrame, logger_arg: logging.Logger | None = None) -> pd.DataFrame:
     """
     计算全天价格位置因子
 
@@ -732,15 +721,11 @@ def calculate_price_position(
         - 正常结果值在 [0, 1] 范围
 
     Example:
-        >>> df = pd.DataFrame({
-        ...     'close': [10.0, 12.0, 11.0],
-        ...     'high': [12.0, 13.0, 11.0],
-        ...     'low': [9.0, 11.0, 11.0]
-        ... })
+        >>> df = pd.DataFrame({"close": [10.0, 12.0, 11.0], "high": [12.0, 13.0, 11.0], "low": [9.0, 11.0, 11.0]})
         >>> result = calculate_price_position(df)
-        >>> 'price_position' in result.columns
+        >>> "price_position" in result.columns
         True
-        >>> result['price_position'].iloc[0]  # (10-9)/(12-9) = 0.333
+        >>> result["price_position"].iloc[0]  # (10-9)/(12-9) = 0.333
         0.333...
     """
     if logger_arg is None:
@@ -757,16 +742,13 @@ def calculate_price_position(
 
     if zero_range_mask.any():
         zero_count = zero_range_mask.sum()
-        logger_arg.warning(
-            f"检测到 {zero_count} 个振幅为零的记录（high=low），"
-            f"price_position 设为 0.5（中位）"
-        )
+        logger_arg.warning(f"检测到 {zero_count} 个振幅为零的记录（high=low），price_position 设为 0.5（中位）")
 
     # 计算价格位置
     df[_COL_PRICE_POSITION] = np.where(
         zero_range_mask,
         0.5,  # 振幅为零时设为中位
-        (df[_COL_CLOSE] - df[_COL_LOW]) / range_val
+        (df[_COL_CLOSE] - df[_COL_LOW]) / range_val,
     )
 
     logger_arg.info(f"price_position 计算完成，共 {len(df)} 条记录")
@@ -778,10 +760,8 @@ def calculate_price_position(
 # 振幅因子计算
 # ============================================================================
 
-def calculate_amplitude(
-    factor_df: pd.DataFrame,
-    logger_arg: logging.Logger | None = None
-) -> pd.DataFrame:
+
+def calculate_amplitude(factor_df: pd.DataFrame, logger_arg: logging.Logger | None = None) -> pd.DataFrame:
     """
     计算振幅因子
 
@@ -804,17 +784,13 @@ def calculate_amplitude(
         - high = low 时，振幅为 0（一字涨停/跌停）
 
     Example:
-        >>> df = pd.DataFrame({
-        ...     'close': [10.0, 12.0, 0.0],
-        ...     'high': [12.0, 13.0, 11.0],
-        ...     'low': [9.0, 11.0, 9.0]
-        ... })
+        >>> df = pd.DataFrame({"close": [10.0, 12.0, 0.0], "high": [12.0, 13.0, 11.0], "low": [9.0, 11.0, 9.0]})
         >>> result = calculate_amplitude(df)
-        >>> 'amplitude' in result.columns
+        >>> "amplitude" in result.columns
         True
-        >>> result['amplitude'].iloc[0]  # (12-9)/10 = 0.3
+        >>> result["amplitude"].iloc[0]  # (12-9)/10 = 0.3
         0.3
-        >>> pd.isna(result['amplitude'].iloc[2])  # close=0 → NaN
+        >>> pd.isna(result["amplitude"].iloc[2])  # close=0 → NaN
         True
     """
     if logger_arg is None:
@@ -831,17 +807,14 @@ def calculate_amplitude(
 
     if zero_close_mask.any():
         zero_count = zero_close_mask.sum()
-        logger_arg.warning(
-            f"检测到 {zero_count} 个收盘价为零的记录，"
-            f"amplitude 设为 NaN（无效数据）"
-        )
+        logger_arg.warning(f"检测到 {zero_count} 个收盘价为零的记录，amplitude 设为 NaN（无效数据）")
 
     # 计算振幅因子
     # close=0 → NaN，否则计算 (high - low) / close
     df[_COL_AMPLITUDE] = np.where(
         zero_close_mask,
         np.nan,  # 收盘价为零设为 NaN
-        range_val / df[_COL_CLOSE]
+        range_val / df[_COL_CLOSE],
     )
 
     logger_arg.info(f"amplitude 计算完成，共 {len(df)} 条记录")
@@ -851,17 +824,16 @@ def calculate_amplitude(
 
 # 振幅因子所需输入列（供调用方读取，避免硬编码耦合）
 # pyright: ignore[reportFunctionMemberAccess]
-calculate_amplitude.required_cols = ['close', 'high', 'low']  # type: ignore[attr-defined]
+calculate_amplitude.required_cols = ["close", "high", "low"]  # type: ignore[attr-defined]
 
 
 # ============================================================================
 # 1日涨幅因子计算
 # ============================================================================
 
+
 def calculate_past_return_1d(
-    factor_df: pd.DataFrame,
-    window: int = None,
-    logger_arg: logging.Logger | None = None
+    factor_df: pd.DataFrame, window: int = None, logger_arg: logging.Logger | None = None
 ) -> pd.DataFrame:
     """
     计算 N 日涨幅因子（默认1日）
@@ -897,13 +869,13 @@ def calculate_past_return_1d(
         ...     'close': [100.0, 102.0, 101.0]
                ... })
                >>> result = calculate_past_return_1d(df, window=1)
-               >>> 'past_return_1d' in result.columns
+               >>> "past_return_1d" in result.columns
                True
-               >>> pd.isna(result['past_return_1d'].iloc[0])  # 第一日无数据
+               >>> pd.isna(result["past_return_1d"].iloc[0])  # 第一日无数据
                True
-               >>> result['past_return_1d'].iloc[1]  # (102/100 - 1) = 0.02
+               >>> result["past_return_1d"].iloc[1]  # (102/100 - 1) = 0.02
                0.02
-               >>> result['past_return_1d'].iloc[2]  # (101/102 - 1) = -0.0098...
+               >>> result["past_return_1d"].iloc[2]  # (101/102 - 1) = -0.0098...
                -0.00980392156862745
     """
     if logger_arg is None:
@@ -925,11 +897,7 @@ def calculate_past_return_1d(
     # close_shifted 为 NaN 或 0 时，结果设为 NaN
     invalid_mask = close_shifted.isna() | (close_shifted.abs() < _EPSILON)
 
-    df[_COL_PAST_RETURN_1D] = np.where(
-        invalid_mask,
-        np.nan,
-        df[_COL_CLOSE] / close_shifted - 1
-    )
+    df[_COL_PAST_RETURN_1D] = np.where(invalid_mask, np.nan, df[_COL_CLOSE] / close_shifted - 1)
 
     logger_arg.info(f"past_return_1d (window={window}) 计算完成，共 {len(df)} 条记录")
 
@@ -940,10 +908,9 @@ def calculate_past_return_1d(
 # 3日累计涨幅因子计算
 # ============================================================================
 
+
 def calculate_return_3d(
-    factor_df: pd.DataFrame,
-    window: int = None,
-    logger_arg: logging.Logger | None = None
+    factor_df: pd.DataFrame, window: int = None, logger_arg: logging.Logger | None = None
 ) -> pd.DataFrame:
     """
     计算 N 日累计涨幅因子（默认3日）
@@ -973,17 +940,19 @@ def calculate_return_3d(
         - 必须按 asset 分组后再做 shift（单股票时序指标）
 
     Example:
-        >>> df = pd.DataFrame({
-        ...     'date': ['2026-01-01', '2026-01-02', '2026-01-03', '2026-01-04'],
-        ...     'asset': ['A', 'A', 'A', 'A'],
-        ...     'close': [100.0, 102.0, 101.0, 105.0]
-        ... })
+        >>> df = pd.DataFrame(
+        ...     {
+        ...         "date": ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"],
+        ...         "asset": ["A", "A", "A", "A"],
+        ...         "close": [100.0, 102.0, 101.0, 105.0],
+        ...     }
+        ... )
         >>> result = calculate_return_3d(df, window=3)
-        >>> 'return_3d' in result.columns
+        >>> "return_3d" in result.columns
         True
-        >>> pd.isna(result['return_3d'].iloc[0])  # 前3日无数据
+        >>> pd.isna(result["return_3d"].iloc[0])  # 前3日无数据
         True
-        >>> result['return_3d'].iloc[3]  # (105/100 - 1) = 0.05
+        >>> result["return_3d"].iloc[3]  # (105/100 - 1) = 0.05
         0.05
     """
     if logger_arg is None:
@@ -1005,11 +974,7 @@ def calculate_return_3d(
     # close_shifted 为 NaN 或 0 时，结果设为 NaN
     invalid_mask = close_shifted.isna() | (close_shifted.abs() < _EPSILON)
 
-    df[_COL_RETURN_3D] = np.where(
-        invalid_mask,
-        np.nan,
-        df[_COL_CLOSE] / close_shifted - 1
-    )
+    df[_COL_RETURN_3D] = np.where(invalid_mask, np.nan, df[_COL_CLOSE] / close_shifted - 1)
 
     logger_arg.info(f"return_3d (window={window}) 计算完成，共 {len(df)} 条记录")
 
@@ -1020,10 +985,9 @@ def calculate_return_3d(
 # 5日累计涨幅因子计算
 # ============================================================================
 
+
 def calculate_return_5d(
-    factor_df: pd.DataFrame,
-    window: int = None,
-    logger_arg: logging.Logger | None = None
+    factor_df: pd.DataFrame, window: int = None, logger_arg: logging.Logger | None = None
 ) -> pd.DataFrame:
     """
     计算 N 日累计涨幅因子（默认5日）
@@ -1053,17 +1017,19 @@ def calculate_return_5d(
         - 必须按 asset 分组后再做 shift（单股票时序指标）
 
     Example:
-        >>> df = pd.DataFrame({
-        ...     'date': ['2026-01-01', '2026-01-02', '2026-01-03', '2026-01-04', '2026-01-05', '2026-01-06'],
-        ...     'asset': ['A', 'A', 'A', 'A', 'A', 'A'],
-        ...     'close': [100.0, 102.0, 101.0, 103.0, 105.0, 108.0]
-        ... })
+        >>> df = pd.DataFrame(
+        ...     {
+        ...         "date": ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04", "2026-01-05", "2026-01-06"],
+        ...         "asset": ["A", "A", "A", "A", "A", "A"],
+        ...         "close": [100.0, 102.0, 101.0, 103.0, 105.0, 108.0],
+        ...     }
+        ... )
         >>> result = calculate_return_5d(df, window=5)
-        >>> 'return_5d' in result.columns
+        >>> "return_5d" in result.columns
         True
-        >>> pd.isna(result['return_5d'].iloc[0])  # 前5日无数据
+        >>> pd.isna(result["return_5d"].iloc[0])  # 前5日无数据
         True
-        >>> result['return_5d'].iloc[5]  # (108/100 - 1) = 0.08
+        >>> result["return_5d"].iloc[5]  # (108/100 - 1) = 0.08
         0.08
     """
     if logger_arg is None:
@@ -1085,11 +1051,7 @@ def calculate_return_5d(
     # close_shifted 为 NaN 或 0 时，结果设为 NaN
     invalid_mask = close_shifted.isna() | (close_shifted.abs() < _EPSILON)
 
-    df[_COL_RETURN_5D] = np.where(
-        invalid_mask,
-        np.nan,
-        df[_COL_CLOSE] / close_shifted - 1
-    )
+    df[_COL_RETURN_5D] = np.where(invalid_mask, np.nan, df[_COL_CLOSE] / close_shifted - 1)
 
     logger_arg.info(f"return_5d (window={window}) 计算完成，共 {len(df)} 条记录")
 
@@ -1102,55 +1064,145 @@ def calculate_return_5d(
 
 # 已添加：calculate_amplitude.required_cols = ['close', 'high', 'low']
 
-calculate_price_position.required_cols = ['close', 'high', 'low']  # type: ignore[attr-defined]
+calculate_price_position.required_cols = ["close", "high", "low"]  # type: ignore[attr-defined]
 
-calculate_past_return_1d.required_cols = ['close', 'asset', 'date']  # type: ignore[attr-defined]
+calculate_past_return_1d.required_cols = ["close", "asset", "date"]  # type: ignore[attr-defined]
 
-calculate_return_3d.required_cols = ['close', 'asset', 'date']  # type: ignore[attr-defined]
+calculate_return_3d.required_cols = ["close", "asset", "date"]  # type: ignore[attr-defined]
 
-calculate_return_5d.required_cols = ['close', 'asset', 'date']  # type: ignore[attr-defined]
+calculate_return_5d.required_cols = ["close", "asset", "date"]  # type: ignore[attr-defined]
 
-calculate_turnover_surge.required_cols = ['turnover_rate', 'close']  # type: ignore[attr-defined]
+calculate_turnover_surge.required_cols = ["turnover_rate", "close"]  # type: ignore[attr-defined]
+
+# ============================================================================
+# 动量强度因子计算（v1.10 新增）
+# ============================================================================
+
+_COL_MOMENTUM_STRENGTH = "momentum_strength"
+_DEFAULT_MOMENTUM_STRENGTH_WINDOW = 5  # 5日滚动窗口
+
+
+def calculate_momentum_strength(
+    factor_df: pd.DataFrame, window: int | None = None, logger_arg: logging.Logger | None = None
+) -> pd.DataFrame:
+    """
+    计算动量强度因子
+
+    公式: momentum_strength = return_5d / std(return_1d, window)
+
+    含义: 衡量5日累计涨幅相对于日收益率波动率的比率
+    - 高值 → 持续上涨趋势（动量强，波动小）
+    - 低值 → 震荡或下跌（动量弱，波动大）
+    - 范围: 理论 [-∞, +∞)，极端值需关注
+
+    Args:
+        factor_df: 包含 close, return_5d, asset, date 列的 DataFrame
+        window: 滚动标准差窗口（默认5日）
+        logger_arg: 日志记录器（可选，默认使用模块 logger）
+
+    Returns:
+        添加 momentum_strength 列的 DataFrame
+
+    边界处理:
+        - std = 0 时设为 NaN（除零保护）
+        - return_5d = NaN 时结果为 NaN（历史不足）
+        - 前 window 日数据设为 NaN（rolling window 不足）
+
+    规范:
+        - 函数入口必须先 .copy()，避免修改原始数据（遵循 MODULE.md 约束 M11）
+        - 必须按 asset 分组后再做 rolling（单股票时序指标）
+
+    Example:
+        >>> df = pd.DataFrame(
+        ...     {
+        ...         "date": ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04", "2026-01-05", "2026-01-06"],
+        ...         "asset": ["A", "A", "A", "A", "A", "A"],
+        ...         "close": [100.0, 102.0, 101.0, 103.0, 105.0, 108.0],
+        ...         "return_5d": [np.nan, np.nan, np.nan, np.nan, np.nan, 0.08],
+        ...     }
+        ... )
+        >>> result = calculate_momentum_strength(df, window=5)
+        >>> "momentum_strength" in result.columns
+        True
+        >>> pd.isna(result["momentum_strength"].iloc[0])  # 前5日无数据
+        True
+    """
+    if logger_arg is None:
+        logger_arg = logging.getLogger(__name__)
+
+    if window is None:
+        window = _DEFAULT_MOMENTUM_STRENGTH_WINDOW
+
+    # 入口 copy（遵循 MODULE.md 约束 M11）
+    df = factor_df.copy()
+
+    # 按 asset+date 排序
+    df = df.sort_values([_COL_ASSET, _COL_DATE])
+
+    # 计算日收益率 return_1d（临时列）
+    # 公式: close[t] / close[t-1] - 1
+    close_shifted = df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].shift(1)
+    invalid_close_mask = close_shifted.isna() | (close_shifted.abs() < _EPSILON)
+    df["_return_1d_temp"] = np.where(invalid_close_mask, np.nan, df[_COL_CLOSE] / close_shifted - 1)
+
+    # 计算 5 日滚动标准差（按 asset 分组）
+    df["_return_1d_std_5"] = df.groupby(_COL_ASSET, group_keys=False)["_return_1d_temp"].transform(
+        lambda x: x.rolling(window=window, min_periods=window).std()
+    )
+
+    # 计算动量强度: return_5d / std(return_1d, 5)
+    # std 为 NaN 或接近 0 时，结果设为 NaN
+    invalid_std_mask = df["_return_1d_std_5"].isna() | (df["_return_1d_std_5"].abs() < _EPSILON)
+    invalid_return_mask = df["return_5d"].isna()
+
+    df[_COL_MOMENTUM_STRENGTH] = np.where(
+        invalid_std_mask | invalid_return_mask, np.nan, df["return_5d"] / df["_return_1d_std_5"]
+    )
+
+    # 清理临时列
+    del df["_return_1d_temp"]
+    del df["_return_1d_std_5"]
+
+    logger_arg.info(f"momentum_strength (window={window}) 计算完成，共 {len(df)} 条记录")
+
+    return df
+
+
+calculate_momentum_strength.required_cols = ["close", "return_5d", "asset", "date"]  # type: ignore[attr-defined]
 
 
 # ============================================================================
 # 隔夜收益率因子计算
 # ============================================================================
 
-_COL_OPEN = 'open'
-_COL_OVERNIGHT_RET = 'overnight_ret'
+_COL_OPEN = "open"
+_COL_OVERNIGHT_RET = "overnight_ret"
 
 
-def calculate_overnight_return(
-    factor_df: pd.DataFrame,
-    logger_arg: logging.Logger | None = None
-) -> pd.DataFrame:
+def calculate_overnight_return(factor_df: pd.DataFrame, logger_arg: logging.Logger | None = None) -> pd.DataFrame:
     """计算隔夜收益率因子
-    
+
     公式: overnight_ret = (今日开盘价 - 昨日收盘价) / 昨日收盘价
-    
+
     参数:
         factor_df: 包含 open, close, asset, date 列的 DataFrame
         logger_arg: 调用方传入的 logger
-    
+
     返回:
         添加 overnight_ret 列的 DataFrame
-    
+
     边界处理:
         - 第一天数据为 NaN（无昨日收盘价）
         - prev_close < EPSILON 时设为 NaN（除零防护）
-    
+
     Example:
-        >>> df = pd.DataFrame({
-        ...     'asset': ['A', 'A'],
-        ...     'date': ['2026-05-01', '2026-05-02'],
-        ...     'open': [10.0, 10.5],
-        ...     'close': [10.2, 10.8]
-        ... })
+        >>> df = pd.DataFrame(
+        ...     {"asset": ["A", "A"], "date": ["2026-05-01", "2026-05-02"], "open": [10.0, 10.5], "close": [10.2, 10.8]}
+        ... )
         >>> result = calculate_overnight_return(df)
-        >>> pd.isna(result['overnight_ret'].iloc[0])  # 第一天无昨日收盘价
+        >>> pd.isna(result["overnight_ret"].iloc[0])  # 第一天无昨日收盘价
         True
-        >>> result['overnight_ret'].iloc[1]  # (10.5-10.2)/10.2
+        >>> result["overnight_ret"].iloc[1]  # (10.5-10.2)/10.2
         0.0294...
     """
     if logger_arg is None:
@@ -1176,40 +1228,41 @@ def calculate_overnight_return(
     return df
 
 
-calculate_overnight_return.required_cols = ['open', 'close']  # type: ignore[attr-defined]
+calculate_overnight_return.required_cols = ["open", "close"]  # type: ignore[attr-defined]
 
-calculate_bollinger_pb.required_cols = ['close']  # type: ignore[attr-defined]
+calculate_bollinger_pb.required_cols = ["close"]  # type: ignore[attr-defined]
 
-calculate_kdj_j.required_cols = ['close', 'high', 'low']  # type: ignore[attr-defined]
+calculate_kdj_j.required_cols = ["close", "high", "low"]  # type: ignore[attr-defined]
 
 
 # ============================================================================
 # RSI DataFrame 版本（用于分层回测）
 # ============================================================================
 
+
 def calculate_rsi_df(
-    factor_df: pd.DataFrame,
-    n: int = _DEFAULT_RSI_PERIOD,
-    logger_arg: logging.Logger | None = None
+    factor_df: pd.DataFrame, n: int = _DEFAULT_RSI_PERIOD, logger_arg: logging.Logger | None = None
 ) -> pd.DataFrame:
     """计算 RSI 因子（DataFrame 版本）
-    
+
     参数:
         factor_df: 包含 close, asset, date 列的 DataFrame
         n: RSI 计算周期
         logger_arg: 调用方传入的 logger
-    
+
     返回:
         添加 rsi 列的 DataFrame
-    
+
     Example:
-        >>> df = pd.DataFrame({
-        ...     'asset': ['A', 'A', 'A', 'A', 'A', 'A'],
-        ...     'date': ['2026-01-01', '2026-01-02', ...],
-        ...     'close': [100, 102, 101, 103, 105, 104]
-        ... })
+        >>> df = pd.DataFrame(
+        ...     {
+        ...         "asset": ["A", "A", "A", "A", "A", "A"],
+        ...         "date": ["2026-01-01", "2026-01-02", ...],
+        ...         "close": [100, 102, 101, 103, 105, 104],
+        ...     }
+        ... )
         >>> result = calculate_rsi_df(df, n=6)
-        >>> 'rsi' in result.columns
+        >>> "rsi" in result.columns
         True
     """
     if logger_arg is None:
@@ -1223,11 +1276,11 @@ def calculate_rsi_df(
         # group 已经是 close 列的 Series 片段
         return calculate_rsi(group, period=n)
 
-    df['rsi'] = df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].transform(calc_rsi_for_asset)
+    df["rsi"] = df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].transform(calc_rsi_for_asset)
 
     logger_arg.info(f"rsi (n={n}) 计算完成，共 {len(df)} 条记录")
 
     return df
 
 
-calculate_rsi_df.required_cols = ['close']  # type: ignore[attr-defined]
+calculate_rsi_df.required_cols = ["close"]  # type: ignore[attr-defined]
