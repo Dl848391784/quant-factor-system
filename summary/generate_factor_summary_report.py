@@ -36,9 +36,10 @@
     v2.7: 2026-06-05 修复第八节 factor_values 列名显示问题（volume_ratio_5 → volume_ratio）
     v2.8: 2026-06-05 修复高相关剔除显示精度（.2f → .3f），添加评分逻辑说明
     v2.9: 2026-06-05 修复评分说明字段名错误（normalized_scores → metric_scores）
+    v2.10: 2026-06-05 Rolling ICIR加权展示最后一日具体权重
 """
 
-__version__ = "2.9"
+__version__ = "2.10"
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -816,7 +817,12 @@ def load_composite_results(logger: logging.Logger) -> list[dict]:
                 # 从 meta.weight_meta 读取实际窗口参数（而非硬编码）
                 weight_meta = meta.get("weight_meta", {})
                 rolling_window = weight_meta.get("window", 60)  # 默认60日
-                weight_str = f"动态权重({rolling_window}日)"
+                # v2.10: 读取最后一日权重并展示
+                last_day_weights = weight_meta.get("last_day_weights", {})
+                if last_day_weights:
+                    weight_str = format_weights(last_day_weights) + f" (最新,{rolling_window}日滚动)"
+                else:
+                    weight_str = f"动态权重({rolling_window}日)"
             else:
                 weight_str = format_weights(weights)
 

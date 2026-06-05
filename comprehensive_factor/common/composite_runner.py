@@ -434,13 +434,39 @@ def run_composite_backtest(
         # 滚动ICIR权重是每日动态计算的，无法用固定字典表达
         # 修复：将元信息与权重数据分离，避免序列化风险
         weights = {}  # 权重字典为空（动态权重不保存静态值）
+        
+        # v2.10: 从 factor_df 中提取最后一日权重，供报告展示
+        last_day_weights = {}
+        rolling_icir_cols = [f'{col}_rolling_icir' for col in factor_cols]
+        
+        # 获取最后一日（最新日期）的数据
+        latest_date = factor_df['date'].max()
+        latest_data = factor_df[factor_df['date'] == latest_date]
+        
+        if len(latest_data) > 0 and all(col in factor_df.columns for col in rolling_icir_cols):
+            # 取第一行（同一日期所有行的 rolling_icir 值相同）
+            first_row = latest_data.iloc[0]
+            rolling_icir_vals = {col: abs(first_row.get(f'{col}_rolling_icir', 0)) for col in factor_cols}
+            total_icir = sum(rolling_icir_vals.values())
+            
+            if total_icir > 0:
+                for col, icir_val in rolling_icir_vals.items():
+                    last_day_weights[col] = icir_val / total_icir
+            else:
+                # 回退等权
+                for col in factor_cols:
+                    last_day_weights[col] = 1.0 / len(factor_cols)
+        
         weight_meta = {
             'is_dynamic': True,
             'method': 'rolling_icir_weight',
             'window': config.rolling_window,
-            'note': '权重每日动态计算，不保存静态值'
+            'note': '权重每日动态计算，不保存静态值',
+            'last_day_weights': last_day_weights  # v2.10: 新增最后一日权重
         }
         logger.info("滚动ICIR加权: 权重每日动态计算（窗口 %d 日），不保存静态权重", config.rolling_window)
+        if last_day_weights:
+            logger.info("最后一日权重: %s", {k: f"{v:.2%}" for k, v in last_day_weights.items()})
     else:
         # 静态权重方法（equal_weight、icir_weight、ic_weight）
         weights = weight_engine.get_weights(factor_cols, ic_results)
