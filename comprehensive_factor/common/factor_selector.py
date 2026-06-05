@@ -40,6 +40,7 @@ DEFAULT_BACKTEST_RESULT_DIR = Path(__file__).parent.parent.parent / "backtest" /
 
 
 # 默认阈值（业界惯例）
+# v2.6: 修复高相关剔除显示格式：当ICIR相等时使用 '=' 而非 '<'
 DEFAULT_THRESHOLDS = {
     "ic_mean_abs_min": 0.03,  # |IC均值| 最小值（经济显著性）
     "p_value_max": 0.05,  # p-value 最大值（统计显著性）
@@ -55,6 +56,7 @@ DEFAULT_THRESHOLDS = {
 # 注意：列名必须与 factor_ic_data.json.gz 中的实际列名一致
 # 可用因子列（2026-06-02）：rsi_6, volume_ratio_5, turnover_rate, bollinger_pb, kdj_j, turnover_surge,
 #                           amplitude, price_position, tail_price_position, tail_price_slope, tail_price_volume_intensity
+#                           return_5d, momentum_strength（v1.37 2026-06-05）
 FACTOR_NAME_TO_COL_MAP = {
     # 基础因子（内置列名带后缀）
     "rsi": "rsi_6",
@@ -66,6 +68,9 @@ FACTOR_NAME_TO_COL_MAP = {
     "amplitude": "amplitude",
     "price_position": "price_position",
     "overnight_ret": "overnight_ret",
+    # 动量因子（v1.37 2026-06-05）
+    "return_5d": "return_5d",
+    "momentum_strength": "momentum_strength",
     # 尾盘因子（v1.3 2026-06-02）
     "tail_price_position": "tail_price_position",
     "tail_price_slope": "tail_price_slope",
@@ -512,8 +517,12 @@ def select_best_from_groups(
                                 f"与{best_factor}高相关({corr_str}), icir缺失({best_factor}|ICIR|={valid_icir_values[best_factor]:.2f})"
                             )
                         else:
+                            # v2.6: 修复问题4 - 当 ICIR 相等时显示 '=' 而非 '<'
+                            icir_val = icir_values[factor_name]
+                            best_icir_val = valid_icir_values[best_factor]
+                            icir_cmp = "=" if icir_val == best_icir_val else "<"
                             dropped_factors[factor_name] = (
-                                f"与{best_factor}高相关({corr_str}), |ICIR|={icir_values[factor_name]:.2f}<{valid_icir_values[best_factor]:.2f}"
+                                f"与{best_factor}高相关({corr_str}), |ICIR|={icir_val:.2f}{icir_cmp}{best_icir_val:.2f}"
                             )
 
                         logger.info("丢弃高相关因子: %s（保留 %s，ICIR 更高）", factor_name, best_factor)

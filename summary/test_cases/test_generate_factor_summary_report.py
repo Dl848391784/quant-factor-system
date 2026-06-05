@@ -52,7 +52,7 @@ class TestVersion:
 
     def test_version_defined(self):
         """验证版本常量存在"""
-        assert __version__ == "2.1"
+        assert __version__ == "2.6"
 
 
 class TestHelperFunctions:

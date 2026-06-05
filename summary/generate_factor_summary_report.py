@@ -31,9 +31,11 @@
     v2.2: 2026-06-03 新增权重选择和股票选股结果展示（第七、八部分）
     v2.3: 2026-06-04 修复字段名同步：total_stocks → stocks_on_date（对齐 stock_selector v1.7）
     v2.4: 2026-06-04 因子值详情改为全部显示，移除截断逻辑
+    v2.5: 2026-06-05 修复权重显示矛盾：weights 字典键是因子列名而非因子名，添加 FACTOR_NAME_TO_COL_MAP 映射表
+    v2.6: 2026-06-05 修复9项问题：权重来源说明、日期不一致、高相关剔除边界、数据天数异常、overnight_ret方向异常、因子名统一、高相关对展示、权重标签区分、ICIR相等显示格式
 """
 
-__version__ = "2.4"
+__version__ = "2.6"
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -108,6 +110,32 @@ FACTOR_COL_TO_NAME_MAP = {
     "return_3d": "return_3d",
     "return_5d": "return_5d",
     "overnight_ret": "overnight_ret",
+}
+
+# v2.5: 因子名到列名映射（用于权重查找，weights 字典使用列名作为键）
+# 来源：comprehensive_factor/common/factor_selector.py FACTOR_NAME_TO_COL_MAP
+FACTOR_NAME_TO_COL_MAP = {
+    # 基础因子（内置列名带后缀）
+    "rsi": "rsi_6",
+    "volume_ratio": "volume_ratio_5",
+    # 扩展因子（列名不带后缀）
+    "kdj_j": "kdj_j",
+    "bollinger_pb": "bollinger_pb",
+    "turnover_surge": "turnover_surge",
+    "amplitude": "amplitude",
+    "price_position": "price_position",
+    "overnight_ret": "overnight_ret",
+    "return_3d": "return_3d",
+    "return_5d": "return_5d",
+    "momentum_strength": "momentum_strength",
+    # 尾盘因子
+    "tail_price_position": "tail_price_position",
+    "tail_price_slope": "tail_price_slope",
+    "tail_price_volume_intensity": "tail_price_volume_intensity",
+    "tail_volume_acceleration": "tail_volume_acceleration",
+    "tail_volume_shrink": "tail_volume_shrink",
+    # 其他因子
+    "intraday_intensity": "intraday_intensity",
 }
 
 # 相关性阈值常量
@@ -598,6 +626,9 @@ def load_backtest_results(logger: logging.Logger) -> list[dict]:
         data = load_json_file(file, logger)
         if data:
             factor_name = file.stem.replace("_layered_backtest", "")
+            # v2.6: 问题7修复 - 统一因子名，移除末尾 _1d 后缀
+            if factor_name.endswith("_1d"):
+                factor_name = factor_name[:-3]
             long_short = data.get("long_short", {})
             monotonicity = data.get("monotonicity", {})
 
@@ -922,7 +953,9 @@ def format_weights(weights: dict) -> str:
         weights: 权重字典（因子名 → 权重值）
 
     Returns:
-        格式化的权重字符串（如 "ts:60%, bp:40%"）
+        格式化的权重字符串（如 "ts:60%, bp:40%")
+
+    v2.6: 添加 tail_price_position/tail_price_volume_intensity 缩写区分（问题9修复）
     """
     factor_abbr = {
         "turnover_surge": "ts",
@@ -930,6 +963,19 @@ def format_weights(weights: dict) -> str:
         "volume_ratio": "vr",
         "rsi": "rsi",
         "kdj_j": "kdj",
+        "tail_price_position": "tp_pos",  # v2.6: 区分 tail_price 系因子
+        "tail_price_volume_intensity": "tp_vol",  # v2.6: 区分 tail_price 系因子
+        "tail_price_slope": "tp_slp",
+        "tail_volume_acceleration": "tv_acc",
+        "tail_volume_shrink": "tv_shr",
+        "momentum_strength": "mom",
+        "amplitude": "amp",
+        "overnight_ret": "on_ret",
+        "return_3d": "r3d",
+        "return_5d": "r5d",
+        "intraday_intensity": "in_int",
+        "price_position": "pp",
+        "past_return_1d": "pr1d",
     }
 
     parts = []
@@ -1063,6 +1109,18 @@ def generate_correlation_section(
 
     lines.append("-" * 70)
 
+    # v2.6: 问题8修复 - 展示剔除的高相关因子对
+    if selection_result:
+        high_corr_dropped = selection_result.get("high_corr_dropped", {})
+        if high_corr_dropped:
+            lines.append("")
+            lines.append("【剔除的高相关因子对】")
+            lines.append("以下因子因与选中因子高相关而被剔除：")
+            for factor_name, reason in high_corr_dropped.items():
+                # 解析剔除原因，提取相关系数
+                lines.append(f"  - {factor_name}: {reason}")
+            lines.append("-" * 70)
+
     # 选中因子之间的高相关因子对
     high_corr_pairs = _extract_corr_pairs(corr_matrix, factor_names, CORR_THRESHOLD_HIGH, CORR_MAX)
 
@@ -1124,7 +1182,9 @@ def get_factor_selection_info(
 
             factor_info = []
             for f in selected_factors:
-                weight = weights.get(f, 0)
+                # v2.5: weights 字典键是因子列名（如 volume_ratio_5），需先转换
+                factor_col = FACTOR_NAME_TO_COL_MAP.get(f, f)
+                weight = weights.get(factor_col, 0)
                 ic_item = next((r for r in ic_results if r["factor_name"] == f), None)
                 if ic_item:
                     factor_info.append(f"{f}(ICIR={ic_item['icir']:.2f},权重={weight * 100:.1f}%)")
@@ -1132,6 +1192,7 @@ def get_factor_selection_info(
                     factor_info.append(f"{f}(权重={weight * 100:.1f}%)")
 
             lines.append(f"  - 选中因子: {', '.join(factor_info)}")
+            lines.append("  - 注：权重来自ICIR加权方法")  # v2.6: 问题1修复 - 说明权重来源
             break
 
     # v1.8: 显示筛选阈值
@@ -1255,6 +1316,20 @@ def _generate_ic_section(ic_results: list[dict]) -> list[str]:
     ic_order = ", ".join([f"{r['factor_name']}({r['icir']:.2f})" for r in ic_results[:5]])
     lines.append(f"IC排序(ICIR降序): {ic_order}")
 
+    # v2.6: 问题5修复 - 异常数据说明
+    lines.append("")
+    lines.append("【异常数据说明】")
+    # 检查 tail_volume_shrink 有效天数异常
+    tvs_item = next((r for r in ic_results if r["factor_name"] == "tail_volume_shrink"), None)
+    if tvs_item and tvs_item["valid_days"] < 14:
+        lines.append(f"tail_volume_shrink 有效天数={tvs_item['valid_days']}天（其他尾盘因子均为14天），数据可能缺失")
+    # v2.6: 问题6修复 - overnight_ret 方向异常说明
+    or_item = next((r for r in ic_results if r["factor_name"] == "overnight_ret"), None)
+    if or_item and or_item["ic_mean"] > 0:
+        other_ic_means = [r["ic_mean"] for r in ic_results if r["factor_name"] != "overnight_ret" and r["ic_mean"] is not None]
+        if other_ic_means and all(ic < 0 for ic in other_ic_means[:5]):  # 检查前5个因子IC方向
+            lines.append(f"overnight_ret IC均值={or_item['ic_mean']:.4f}为正（其他因子均为负），方向异常")
+
     return lines
 
 
@@ -1356,7 +1431,7 @@ def _generate_weight_selection_section(weight_result: dict | None) -> list[str]:
 
     lines.append(f"最优权重方法: {get_weight_method_display(best_method)}")
     lines.append(f"综合得分: {format_float(best_score, 4)}")
-    lines.append(f"选股日期: {weight_result.get('meta', {}).get('created_at', 'N/A')[:10]}")
+    lines.append(f"计算日期: {weight_result.get('meta', {}).get('created_at', 'N/A')[:10]}")  # v2.6: 问题3修复 - 明确为计算日期
     lines.append("")
 
     # 各方法排名表格
@@ -1410,7 +1485,7 @@ def _generate_stock_selection_section(stock_result: dict | None) -> list[str]:
     top_stocks = stock_result.get("top_stocks", [])
 
     # 元信息展示
-    lines.append(f"选股日期: {meta.get('selection_date', 'N/A')}")
+    lines.append(f"选股日期: {meta.get('selection_date', 'N/A')}（使用T-1数据）")  # v2.6: 问题3修复 - 明确为使用数据的日期
     lines.append(f"最优权重方法: {get_weight_method_display(meta.get('weight_method', 'N/A'))}")
     lines.append(f"权重综合得分: {format_float(meta.get('composite_score', 0), 4)}")
     lines.append(
@@ -1534,6 +1609,7 @@ def _generate_comparison_section(factor_data: list[dict], composite_results: lis
     lines.append(
         f"{'因子名':<18} {'多空年化收益':>12} {'夏普比率':>8} {'单调性系数':>10} {'单调性质量':>10} {'权重':>8}"
     )
+    lines.append("注：权重来自ICIR加权方法")  # v2.6: 问题1修复 - 说明权重来源
     lines.append("-" * 70)
 
     # 展示选中的单因子
@@ -1541,8 +1617,10 @@ def _generate_comparison_section(factor_data: list[dict], composite_results: lis
         factor_item = next((f for f in factor_data if f["factor_name"] == factor_name), None)
         if factor_item:
             # 获取权重（从 composite_results 中）
+            # v2.5: weights 字典键是因子列名（如 volume_ratio_5），需先转换
             weight_item = next((c for c in composite_results if c["weight_method"] == "icir_weight"), None)
-            weight = weight_item.get("weights", {}).get(factor_name, 0) if weight_item else 0
+            factor_col = FACTOR_NAME_TO_COL_MAP.get(factor_name, factor_name)
+            weight = weight_item.get("weights", {}).get(factor_col, 0) if weight_item else 0
 
             lines.append(
                 f"{factor_name:<18} "
