@@ -9,10 +9,12 @@ test_layered_backtest_turnover_surge_1d 测试用例
 import sys
 from pathlib import Path
 
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from typing import Literal, get_args
+
 import pytest
-from typing import get_args, Literal
 
 from backtest.layered_backtest_turnover_surge_1d import TurnoverSurgeLayerConfig
 

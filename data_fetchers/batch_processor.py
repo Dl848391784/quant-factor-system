@@ -59,10 +59,12 @@ from typing import TextIO
 
 import pandas as pd
 
+from data_fetchers.common.dataframe_utils import validate_dataframe_columns
+from data_fetchers.common.memory_utils import get_memory_info_str
+
 # 本地模块导入
 from data_fetchers.common.paths import get_module_result_dir
-from data_fetchers.common.memory_utils import get_memory_info_str
-from data_fetchers.common.dataframe_utils import validate_dataframe_columns
+
 
 # ============================================================================
 # 模块导出
@@ -147,7 +149,7 @@ class BatchStream:
     Raises:
         json.JSONDecodeError: 批次文件 JSON 解析失败
     """
-    
+
     def __init__(self, batch_idx: int, data_type: str = 'factor', result_dir: Path | None = None):
         """
         初始化批次数据流
@@ -166,7 +168,7 @@ class BatchStream:
         self.exhausted: bool = False
         self.load_error: str | None = None  # 加载错误信息（供调用方检查）
         self._load_all()
-    
+
     def _load_all(self) -> None:
         """
         加载全部数据（一次性加载）
@@ -179,7 +181,7 @@ class BatchStream:
             self.exhausted = True
             self.load_error = "文件不存在"
             return
-        
+
         try:
             with gzip.open(self.path, 'rt', encoding='utf-8') as f:
                 self.records = json.load(f)
@@ -195,17 +197,17 @@ class BatchStream:
             self.exhausted = True
             self.load_error = f"读取失败: [{type(e).__name__}]: {e}"
             return
-        
+
         self.idx = 0
         self.exhausted = len(self.records) == 0
-    
+
     def peek_key(self) -> tuple[str, str] | None:
         """获取当前记录的 key (date, asset)"""
         if self.exhausted or self.idx >= len(self.records):
             return None
         rec = self.records[self.idx]
         return (rec['date'], rec['asset'])
-    
+
     def pop_record(self) -> dict | None:
         """弹出当前记录"""
         if self.exhausted or self.idx >= len(self.records):
@@ -215,15 +217,15 @@ class BatchStream:
         self.idx += 1
         self.exhausted = self.idx >= len(self.records)
         return rec
-    
+
     def __lt__(self, other: 'BatchStream') -> bool:
         """用于 heap 比较（按 batch_idx）"""
         return self.batch_idx < other.batch_idx
-    
+
     def is_exhausted(self) -> bool:
         """是否已耗尽"""
         return self.exhausted or self.idx >= len(self.records)
-    
+
     def cleanup(self) -> None:
         """清理资源"""
         self.records = []
@@ -282,24 +284,24 @@ def save_batch_cache_sorted(
     """
     _logger = logger_arg or logging.getLogger(__name__)
     _result_dir = result_dir or RESULT_DIR
-    
+
     factor_path = _result_dir / f'batch_{batch_idx}_factor.json.gz'
     return_path = _result_dir / f'batch_{batch_idx}_return.json.gz'
-    
+
     # 写入前验证必需列
     required_factor_cols = ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5', 'volume']
     required_return_cols = ['date', 'asset', 'forward_return_1d', 'forward_return_3d', 'forward_return_5d']
-    
+
     validate_dataframe_columns(factor_df, required_factor_cols, 'factor_df')
     validate_dataframe_columns(return_df, required_return_cols, 'return_df')
-    
+
     # 格式化并排序
     factor_df['date'] = factor_df['date'].astype(str)
     return_df['date'] = return_df['date'].astype(str)
-    
+
     factor_df = factor_df.sort_values(['date', 'asset']).reset_index(drop=True)
     return_df = return_df.sort_values(['date', 'asset']).reset_index(drop=True)
-    
+
     # 流式写入因子数据（使用 _write_json_record 辅助函数）
     _logger.info("  保存因子数据...")
     count = 0
@@ -319,7 +321,7 @@ def save_batch_cache_sorted(
             }
             count = _write_json_record(f, record, count)
         f.write('\n]')
-    
+
     # 流式写入收益数据（使用 _write_json_record 辅助函数）
     _logger.info("  保存收益数据...")
     count = 0
@@ -335,10 +337,10 @@ def save_batch_cache_sorted(
             }
             count = _write_json_record(f, record, count)
         f.write('\n]')
-    
+
     factor_size_mb = factor_path.stat().st_size / (1024 * 1024)
     return_size_mb = return_path.stat().st_size / (1024 * 1024)
-    
+
     _logger.info(f"  ✓ 保存批次 {batch_idx}: 因子 {factor_size_mb:.2f}MB, 收益 {return_size_mb:.2f}MB")
     _logger.info(f"  当前内存: {get_memory_info_str()}")
     # Note: 调用方若需释放大 DataFrame 应在自己的作用域中管理，此处不再做无效 del
@@ -380,10 +382,10 @@ def n_way_merge_deduplicate(
     """
     _logger = logger_arg or logging.getLogger(__name__)
     _result_dir = result_dir or RESULT_DIR
-    
+
     _logger.info(f"[{data_type}] 开始 N-way merge...")
     _logger.info(f"  当前内存: {get_memory_info_str()}")
-    
+
     # 创建所有批次的流
     streams = []
     load_errors = []  # 收集加载错误信息
@@ -396,16 +398,16 @@ def n_way_merge_deduplicate(
                 load_errors.append(f"batch_{batch_idx}_{data_type}: {stream.load_error}")
             elif not stream.is_exhausted():
                 streams.append(stream)
-    
+
     if load_errors:
         _logger.warning(f"  ⚠ {len(load_errors)} 个批次加载失败: {load_errors}")
-    
+
     if not streams:
         _logger.info("  无有效批次")
         return None
-    
+
     _logger.info(f"  有效批次: {len(streams)}/{total_batches}")
-    
+
     # N-way merge 使用 heap
     counter = 0
     heap = []
@@ -414,22 +416,22 @@ def n_way_merge_deduplicate(
         if key:
             heapq.heappush(heap, (key, stream.batch_idx, counter, stream))
             counter += 1
-    
+
     # 合并结果（流式写入文件）
     output_path = _result_dir / f'merged_{data_type}.json.gz'
     last_key = None
     same_key_records = []
     count = 0
-    
+
     _logger.info("  开始合并...")
-    
+
     with gzip.open(output_path, 'wt', encoding='utf-8') as f:
         f.write('[\n')
-        
+
         while heap:
             key, batch_idx, _, stream = heapq.heappop(heap)
             record = stream.pop_record()
-            
+
             if last_key == key:
                 same_key_records.append((batch_idx, record))
             else:
@@ -437,34 +439,34 @@ def n_way_merge_deduplicate(
                     same_key_records.sort(key=lambda x: x[0], reverse=True)
                     best_record = same_key_records[0][1]
                     count = _write_json_record(f, best_record, count)
-                    
+
                     if count % 50000 == 0:
                         gc.collect()
                         _logger.info(f"    已写入 {count} 条，内存: {get_memory_info_str()}")
-                
+
                 last_key = key
                 same_key_records = [(batch_idx, record)]
-            
+
             next_key = stream.peek_key()
             if next_key:
                 heapq.heappush(heap, (next_key, batch_idx, counter, stream))
                 counter += 1
-        
+
         if same_key_records:
             same_key_records.sort(key=lambda x: x[0], reverse=True)
             best_record = same_key_records[0][1]
             count = _write_json_record(f, best_record, count)
-        
+
         f.write('\n]')
-    
+
     _logger.info(f"  合并完成: {count} 条记录")
     _logger.info(f"  输出文件: {output_path}")
     _logger.info(f"  当前内存: {get_memory_info_str()}")
-    
+
     for stream in streams:
         stream.cleanup()
     gc.collect()
-    
+
     return output_path
 
 
@@ -510,17 +512,17 @@ def format_final_output(
     _logger = logger_arg or logging.getLogger(__name__)
     _result_dir = result_dir or RESULT_DIR
     _version = output_version or _OUTPUT_VERSION  # 使用传入版本号或默认版本号
-    
+
     # 统一转换为 Path（遵循 MODULE.md 参数类型约定）
     factor_merged_path = Path(factor_merged_path)
     return_merged_path = Path(return_merged_path)
-    
+
     _logger.info("格式化最终输出文件...")
-    
+
     now = datetime.now()
     generated_at = now.isoformat()
     last_updated = now.strftime("%Y-%m-%d %H:%M:%S")
-    
+
     # 处理因子数据：单次遍历，缓存行内容（避免二次 IO）
     date_set = set()
     asset_set = set()
@@ -528,7 +530,7 @@ def format_final_output(
     last_date = None
     n_records = 0
     factor_lines: list[str] = []  # 缓存有效行
-    
+
     with gzip.open(factor_merged_path, 'rt', encoding='utf-8') as f:
         for line in f:
             stripped = line.strip()
@@ -548,17 +550,17 @@ def format_final_output(
                 except json.JSONDecodeError as e:
                     _logger.debug(f"跳过无效JSON行: {stripped[:50]}... ({e})")
                     continue
-    
+
     n_days = len(date_set)
     n_assets = len(asset_set)
-    
+
     del date_set, asset_set
     gc.collect()
-    
+
     _logger.info(f"  交易日数: {n_days}")
     _logger.info(f"  股票数量: {n_assets}")
     _logger.info(f"  因子记录: {n_records}")
-    
+
     # 处理收益数据：单次遍历，缓存行内容（与因子数据逻辑对称）
     return_date_set = set()
     return_asset_set = set()
@@ -566,7 +568,7 @@ def format_final_output(
     return_last_date = None
     n_return_records = 0
     return_lines: list[str] = []  # 缓存有效行
-    
+
     with gzip.open(return_merged_path, 'rt', encoding='utf-8') as f:
         for line in f:
             stripped = line.strip()
@@ -586,21 +588,21 @@ def format_final_output(
                 except json.JSONDecodeError as e:
                     _logger.debug(f"跳过无效JSON行: {stripped[:50]}... ({e})")
                     continue
-    
+
     return_n_days = len(return_date_set)
     return_n_assets = len(return_asset_set)
-    
+
     del return_date_set, return_asset_set
     gc.collect()
-    
+
     _logger.info(f"  收益交易日数: {return_n_days}")
     _logger.info(f"  收益股票数量: {return_n_assets}")
     _logger.info(f"  收益记录: {n_return_records}")
-    
+
     # 写出两个最终文件（统一异常处理，确保一致性）
     factor_final_path = _result_dir / 'factor_data.json.gz'
     return_final_path = _result_dir / 'return_data.json.gz'
-    
+
     try:
         # 写入因子文件
         with gzip.open(factor_final_path, 'wt', encoding='utf-8') as out_f:
@@ -621,21 +623,21 @@ def format_final_output(
             out_f.write('    "format_note": "每条记录单行写入，便于流式解析"\n')
             out_f.write('  },\n')
             out_f.write('  "data": [\n')
-            
+
             for i, line_content in enumerate(factor_lines):
                 if i > 0:
                     out_f.write(',\n')
                 out_f.write('    ' + line_content)
-            
+
             out_f.write('\n  ]\n')
             out_f.write('}\n')
-        
+
         factor_size_mb = factor_final_path.stat().st_size / (1024 * 1024)
         _logger.info(f"    因子文件: {factor_final_path} ({factor_size_mb:.2f} MB)")
-        
+
         del factor_lines  # 释放缓存
         gc.collect()
-        
+
         # 写入收益文件
         with gzip.open(return_final_path, 'wt', encoding='utf-8') as out_f:
             out_f.write('{\n')
@@ -655,21 +657,21 @@ def format_final_output(
             out_f.write('    "note": "3日和5日收益最后几天会有NaN"\n')
             out_f.write('  },\n')
             out_f.write('  "data": [\n')
-            
+
             for i, line_content in enumerate(return_lines):
                 if i > 0:
                     out_f.write(',\n')
                 out_f.write('    ' + line_content)
-            
+
             out_f.write('\n  ]\n')
             out_f.write('}\n')
-        
+
         return_size_mb = return_final_path.stat().st_size / (1024 * 1024)
         _logger.info(f"    收益文件: {return_final_path} ({return_size_mb:.2f} MB)")
-        
-        _logger.info(f"  ✓ 最终文件已保存")
+
+        _logger.info("  ✓ 最终文件已保存")
         _logger.info("  ✓ 格式化完成")
-    
+
     except Exception as e:
         # 写文件失败：清理所有残缺文件（因子和收益），确保一致性
         _logger.error(f"  ✗ 写文件失败: [{type(e).__name__}]: {e}")
@@ -681,7 +683,7 @@ def format_final_output(
                 except Exception as cleanup_err:
                     _logger.warning(f"  清理残缺文件失败 {final_path}: {cleanup_err}")
         raise  # 重新抛出异常让调用方感知
-    
+
     finally:
         # 确保临时文件清理（无论成功或失败）
         if factor_merged_path.exists():
@@ -729,12 +731,12 @@ def cleanup_batch_files(
     """
     _logger = logger_arg or logging.getLogger(__name__)
     _result_dir = result_dir or RESULT_DIR
-    
+
     _logger.info("[清理阶段] 删除临时批次文件...")
-    
+
     deleted = 0
     errors = []
-    
+
     for batch_idx in range(total_batches):
         for data_type in _DATA_TYPES:
             path = _result_dir / f'batch_{batch_idx}_{data_type}.json.gz'
@@ -744,7 +746,7 @@ def cleanup_batch_files(
                     deleted += 1
                 except Exception as e:
                     errors.append(f"{path}: [{type(e).__name__}]: {e}")
-    
+
     for data_type in _DATA_TYPES:
         merged_path = _result_dir / f'merged_{data_type}.json.gz'
         if merged_path.exists():
@@ -753,7 +755,7 @@ def cleanup_batch_files(
                 deleted += 1
             except Exception as e:
                 errors.append(f"{merged_path}: [{type(e).__name__}]: {e}")
-    
+
     if errors:
         _logger.warning(f"  ⚠ 删除失败 {len(errors)} 个文件: {errors}")
     _logger.info(f"  ✓ 已删除 {deleted} 个临时文件")

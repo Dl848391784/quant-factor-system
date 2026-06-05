@@ -56,16 +56,17 @@ import json
 import logging
 import time
 import types
-from collections.abc import Mapping
-from typing import Dict, Optional, Any, Union, Tuple, List, Iterator
+from collections.abc import Iterator, Mapping
+from typing import Any, Union
 
 import requests
 import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+
 # JSON 反序列化结果类型别名（用于 request_with_retry 返回类型）
-JsonValue = Union[Dict[str, Any], List[Any], str, int, float, bool, None]
+JsonValue = Union[dict[str, Any], list[Any], str, int, float, bool, None]
 
 __all__ = [
     # Session 创建函数（手动管理生命周期）
@@ -108,7 +109,7 @@ _DEFAULT_DELAY = 1.0
 _DEFAULT_RETRY_STATUS_CODES = [429, 500, 502, 503, 504]
 
 # 默认允许重试的 HTTP 方法（不可变 tuple，防御性风格）
-_DEFAULT_ALLOWED_METHODS: Tuple[str, ...] = ("GET",)
+_DEFAULT_ALLOWED_METHODS: tuple[str, ...] = ("GET",)
 
 # 默认东财 API 请求头（数据来源：浏览器开发者工具抓包，2026-05-24）
 # 用途：模拟浏览器访问东财 API，避免被拦截
@@ -138,13 +139,13 @@ DEFAULT_SINA_HEADERS = types.MappingProxyType(_SINA_HEADERS_DICT)
 # 数据源配置注册表（新增数据源只需在此处添加一行）
 # key: 数据源名称（用于 create_session(source) 参数）
 # value: 默认请求头 MappingProxyType
-_SOURCE_CONFIGS: Dict[str, Mapping[str, str]] = {
+_SOURCE_CONFIGS: dict[str, Mapping[str, str]] = {
     'eastmoney': DEFAULT_EASTMONEY_HEADERS,
     'sina': DEFAULT_SINA_HEADERS,
 }
 
 
-def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger:
+def get_module_logger(logger: logging.Logger | None = None) -> logging.Logger:
     """
     获取 logger，遵循 PROJECT.md 公共模块日志规范
     
@@ -179,8 +180,8 @@ def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger
 
 
 def _create_retry_strategy(
-    retry_params: Dict[str, Any],
-    allowed_methods: List[str],
+    retry_params: dict[str, Any],
+    allowed_methods: list[str],
 ) -> Retry:
     """
     创建 urllib3 Retry 策略（根据版本自动选择参数名）
@@ -204,7 +205,7 @@ def _create_retry_strategy(
     # fallback='0.0.0' 仅用于极端异常场景，确保走旧版本分支（method_whitelist）
     version_str = getattr(urllib3, '__version__', '0.0.0')
     major_version = int(version_str.split('.')[0])
-    
+
     if major_version >= 2:
         # urllib3 >= 2.0 使用 allowed_methods
         return Retry(**retry_params, allowed_methods=allowed_methods)
@@ -214,13 +215,13 @@ def _create_retry_strategy(
 
 
 def create_retry_session(
-    headers: Optional[Mapping[str, str]] = None,
+    headers: Mapping[str, str] | None = None,
     total_retries: int = _DEFAULT_TOTAL_RETRIES,
     backoff_factor: float = _DEFAULT_BACKOFF_FACTOR,
     pool_connections: int = _DEFAULT_POOL_CONNECTIONS,
     pool_maxsize: int = _DEFAULT_POOL_MAXSIZE,
-    allowed_methods: Optional[List[str]] = None,
-    logger: Optional[logging.Logger] = None,
+    allowed_methods: list[str] | None = None,
+    logger: logging.Logger | None = None,
 ) -> requests.Session:
     """
     创建带重试机制的 HTTP Session（urllib3 层自动重试）
@@ -275,15 +276,15 @@ def create_retry_session(
     """
     logger = get_module_logger(logger)
     session = requests.Session()
-    
+
     # 设置请求头（默认 None，使用 requests 默认 User-Agent）
     if headers is not None:
         session.headers.update(headers)
-    
+
     # 允许重试的 HTTP 方法（tuple 转 list）
     if allowed_methods is None:
         allowed_methods = list(_DEFAULT_ALLOWED_METHODS)
-    
+
     # 创建重试策略（使用版本检测而非异常消息字符串匹配）
     retry_params = {
         'total': total_retries,
@@ -291,7 +292,7 @@ def create_retry_session(
         'status_forcelist': _DEFAULT_RETRY_STATUS_CODES,
     }
     retry_strategy = _create_retry_strategy(retry_params, allowed_methods)
-    
+
     # 配置适配器
     adapter = HTTPAdapter(
         max_retries=retry_strategy,
@@ -300,13 +301,13 @@ def create_retry_session(
     )
     session.mount("http://", adapter)
     session.mount("https://", adapter)
-    
+
     logger.debug("创建 HTTP Session: retries=%d, pool=%d, methods=%s", total_retries, pool_connections, allowed_methods)
     return session
 
 
 def create_eastmoney_session(
-    logger: Optional[logging.Logger] = None
+    logger: logging.Logger | None = None
 ) -> requests.Session:
     """
     创建东财 API Session（使用默认配置）
@@ -328,7 +329,7 @@ def create_eastmoney_session(
 
 
 def create_sina_session(
-    logger: Optional[logging.Logger] = None
+    logger: logging.Logger | None = None
 ) -> requests.Session:
     """
     创建新浪 API Session
@@ -349,7 +350,7 @@ def create_sina_session(
     return create_retry_session(headers=DEFAULT_SINA_HEADERS, logger=logger)
 
 
-def get_available_sources() -> List[str]:
+def get_available_sources() -> list[str]:
     """
     获取可用的数据源列表
     
@@ -369,8 +370,8 @@ def create_session(
     backoff_factor: float = _DEFAULT_BACKOFF_FACTOR,
     pool_connections: int = _DEFAULT_POOL_CONNECTIONS,
     pool_maxsize: int = _DEFAULT_POOL_MAXSIZE,
-    allowed_methods: Optional[List[str]] = None,
-    logger: Optional[logging.Logger] = None,
+    allowed_methods: list[str] | None = None,
+    logger: logging.Logger | None = None,
 ) -> requests.Session:
     """
     创建数据源 Session（注册表驱动，统一入口）
@@ -407,11 +408,11 @@ def create_session(
     if source not in _SOURCE_CONFIGS:
         available = get_available_sources()
         raise ValueError(f"数据源不存在: {source}，可用: {available}")
-    
+
     headers = _SOURCE_CONFIGS[source]
     logger = get_module_logger(logger)
     logger.debug("创建数据源 Session: source=%s", source)
-    
+
     return create_retry_session(
         headers=headers,
         total_retries=total_retries,
@@ -449,13 +450,13 @@ def request_with_retry(
     session: requests.Session,
     url: str,
     method: str = 'GET',
-    params: Optional[Dict[str, Any]] = None,
-    data: Optional[Dict[str, Any]] = None,
-    json_data: Optional[Dict[str, Any]] = None,
-    timeout: Union[int, Tuple[int, int]] = _DEFAULT_TIMEOUT,
+    params: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
+    json_data: dict[str, Any] | None = None,
+    timeout: int | tuple[int, int] = _DEFAULT_TIMEOUT,
     max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
     delay: float = _DEFAULT_DELAY,
-    logger: Optional[logging.Logger] = None,
+    logger: logging.Logger | None = None,
 ) -> JsonValue:
     """
     带手动重试的请求（应用层重试，用于需解析响应内容判断重试的场景）
@@ -511,16 +512,16 @@ def request_with_retry(
         )
     """
     logger = get_module_logger(logger)
-    last_error: Optional[Exception] = None
-    
+    last_error: Exception | None = None
+
     # 验证 method 参数
     valid_methods = ['GET', 'POST', 'PUT', 'DELETE']
     if method.upper() not in valid_methods:
         raise ValueError(f"不支持的 HTTP 方法: {method}，支持: {valid_methods}")
     method = method.upper()
-    
+
     for attempt in range(max_attempts):
-        response: Optional[requests.Response] = None  # 类型注解 + 防御性初始化
+        response: requests.Response | None = None  # 类型注解 + 防御性初始化
         try:
             # 根据方法类型选择请求方式
             if method == 'GET':
@@ -533,7 +534,7 @@ def request_with_retry(
                 response = session.delete(url, timeout=timeout)
             else:
                 raise ValueError(f"未实现的 HTTP 方法: {method}")
-            
+
             response.raise_for_status()
             return response.json()
         except requests.HTTPError as e:
@@ -541,11 +542,11 @@ def request_with_retry(
             # 429 状态码（限流）特殊处理：读取 Retry-After 头后重试
             last_error = e  # 记录错误，最后一次失败由循环后统一处理
             status_code = response.status_code if response else None
-            
+
             if status_code == 429 and attempt < max_attempts - 1:
                 # 读取 Retry-After 头（服务器要求的最短等待时间）
                 retry_after = response.headers.get('Retry-After') if response else None
-                
+
                 # 计算 wait_time：有 Retry-After 用其值，否则回退线性退避
                 if retry_after is not None:
                     # Retry-After 可能是秒数（数字）或日期（RFC 2822）
@@ -558,7 +559,7 @@ def request_with_retry(
                 else:
                     # 无 Retry-After 头，使用线性退避
                     wait_time = _calc_wait_time(attempt, delay)
-                
+
                 logger.warning(
                     "请求被限流 (429) (尝试 %d/%d)\n"
                     "URL: %s\n"
@@ -569,10 +570,10 @@ def request_with_retry(
                 )
                 time.sleep(wait_time)
                 continue  # 继续下一次尝试
-            
+
             # 非 429 直接抛出；429 最后一次失败由循环后统一处理
             if status_code != 429:
-                logger.error("HTTP 错误: %s\nURL: %s\n方法: %s\n状态码: %s", 
+                logger.error("HTTP 错误: %s\nURL: %s\n方法: %s\n状态码: %s",
                              e, url, method, status_code if status_code else 'N/A')
                 raise
         except requests.Timeout as e:
@@ -650,7 +651,7 @@ def request_with_retry(
                     "方法: %s",
                     attempt + 1, max_attempts, e, url, method
                 )
-    
+
     # 所有尝试失败，统一记录 error 日志
     logger.error("请求最终失败: %s\n方法: %s\n最后错误: %s", url, method, last_error)
     raise RuntimeError(f"请求失败: {url}, 方法: {method}") from last_error
@@ -658,13 +659,13 @@ def request_with_retry(
 
 @contextlib.contextmanager
 def retry_session(
-    headers: Optional[Mapping[str, str]] = None,
+    headers: Mapping[str, str] | None = None,
     total_retries: int = _DEFAULT_TOTAL_RETRIES,
     backoff_factor: float = _DEFAULT_BACKOFF_FACTOR,
     pool_connections: int = _DEFAULT_POOL_CONNECTIONS,
     pool_maxsize: int = _DEFAULT_POOL_MAXSIZE,
-    allowed_methods: Optional[List[str]] = None,
-    logger: Optional[logging.Logger] = None,
+    allowed_methods: list[str] | None = None,
+    logger: logging.Logger | None = None,
 ) -> Iterator[requests.Session]:
     """
     带自动资源清理的 HTTP Session 上下文管理器
@@ -706,7 +707,7 @@ def retry_session(
 
 @contextlib.contextmanager
 def eastmoney_session(
-    logger: Optional[logging.Logger] = None
+    logger: logging.Logger | None = None
 ) -> Iterator[requests.Session]:
     """
     东财 API Session 上下文管理器（自动资源清理）
@@ -731,7 +732,7 @@ def eastmoney_session(
 
 @contextlib.contextmanager
 def sina_session(
-    logger: Optional[logging.Logger] = None
+    logger: logging.Logger | None = None
 ) -> Iterator[requests.Session]:
     """
     新浪 API Session 上下文管理器（自动资源清理）
@@ -761,8 +762,8 @@ def source_session(
     backoff_factor: float = _DEFAULT_BACKOFF_FACTOR,
     pool_connections: int = _DEFAULT_POOL_CONNECTIONS,
     pool_maxsize: int = _DEFAULT_POOL_MAXSIZE,
-    allowed_methods: Optional[List[str]] = None,
-    logger: Optional[logging.Logger] = None,
+    allowed_methods: list[str] | None = None,
+    logger: logging.Logger | None = None,
 ) -> Iterator[requests.Session]:
     """
     数据源 Session 上下文管理器（注册表驱动，自动资源清理）

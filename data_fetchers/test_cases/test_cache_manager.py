@@ -17,29 +17,32 @@ cache_manager.py pytest 测试文件
 - v1.0 (2026-05-27): 从 __main__ 块转换，删除临时测试代码，创建 pytest 可执行文件
 """
 
-import pytest
-import logging
-import tempfile
 import gzip
-from pathlib import Path
-from unittest.mock import patch as mock_patch
+import logging
 
 # 添加项目根目录到 sys.path
 import sys
+import tempfile
+from pathlib import Path
+from unittest.mock import patch as mock_patch
+
+import pytest
+
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from data_fetchers.common.cache_manager import (
-    read_gzip_cache,
-    write_gzip_cache,
-    read_json_cache,
-    write_json_cache,
-    read_cache,
-    write_cache,
+    append_to_cache,
     cache_exists,
     delete_cache,
     get_cache_file_info,
-    append_to_cache,
     get_module_logger,
+    read_cache,
+    read_gzip_cache,
+    read_json_cache,
+    write_cache,
+    write_gzip_cache,
+    write_json_cache,
 )
 
 
@@ -121,7 +124,7 @@ class TestJsonCacheReadWrite:
         write_json_cache(test_path, test_data, json_indent=2, json_sort_keys=True, logger=test_logger)
 
         # 验证文件格式（显式指定 encoding='utf-8'）
-        with open(test_path, "r", encoding="utf-8") as f:
+        with open(test_path, encoding="utf-8") as f:
             content = f.read()
 
         # 验证有缩进和排序

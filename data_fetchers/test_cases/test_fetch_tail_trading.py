@@ -8,10 +8,12 @@
 4. 缓存读写（增量/全量）
 """
 
-import sys
 import os
-import pytest
+import sys
 from datetime import datetime
+
+import pytest
+
 
 # 调整 sys.path 以支持相对导入
 # 测试文件位于 data_fetchers/test_cases/
@@ -31,13 +33,13 @@ class TestParseKline:
         """正常格式解析"""
         kline_str = "2026-05-28 14:00,10.64,10.65,10.65,10.63,11019,11724350.00"
         parts = kline_str.split(',')
-        
+
         # 验证分离日期时间
         datetime_part = parts[0].split(' ')
         assert len(datetime_part) == 2
         assert datetime_part[0] == '2026-05-28'
         assert datetime_part[1] == '14:00'
-        
+
         # 验证字段映射
         assert float(parts[1]) == 10.64  # open
         assert float(parts[2]) == 10.65  # close
@@ -49,7 +51,7 @@ class TestParseKline:
         """包含额外字段的格式"""
         kline_str = "2026-05-28 15:00,10.64,10.66,10.66,10.64,23438,24971105.00,0.19,0.09"
         parts = kline_str.split(',')
-        
+
         # 前6个字段应正确解析
         datetime_part = parts[0].split(' ')
         assert datetime_part[0] == '2026-05-28'
@@ -79,10 +81,10 @@ class TestTailKlineFilter:
             {'date': '2026-05-28', 'time': '15:00', 'volume': 14000},
             {'date': '2026-05-28', 'time': '15:05', 'volume': 15000},  # 超出范围（后）
         ]
-        
+
         # 调用筛选函数
         tail_klines = fetch_tail_trading._filter_tail_klines(klines)
-        
+
         # 验证结果（应包含14:00-15:00共13根）
         assert len(tail_klines) == 13
         for kline in tail_klines:
@@ -117,30 +119,30 @@ class TestTailMetrics:
             {'time': '15:00', 'volume': 13000, 'high': 11.7, 'low': 11.6, 'close': 11.65},  # 第13条
 ]
         # v2.1: day_volume 参数已删除
-    
+
         # 调用计算函数
         metrics = fetch_tail_trading._calculate_tail_metrics(tail_klines)
-        
+
         # 验证结果
         assert metrics is not None
         assert 'prices' in metrics
         assert 'volumes' in metrics
         assert 'tail_high' in metrics
         assert 'tail_low' in metrics
-        
+
         # prices 应有13个值，按时间升序
         assert len(metrics['prices']) == 13
         assert metrics['prices'][0] == 10.45  # 14:00
         assert metrics['prices'][12] == 11.65  # 15:00
-        
+
         # volumes 应有13个值
         assert len(metrics['volumes']) == 13
         assert metrics['volumes'][0] == 1000  # 14:00
         assert metrics['volumes'][12] == 13000  # 15:00
-        
+
         # 最高价 = max(10.5, ..., 11.7) = 11.7
         assert metrics['tail_high'] == 11.7
-        
+
         # 最低价 = min(10.4, ..., 11.6) = 10.4
         assert metrics['tail_low'] == 10.4
 
@@ -152,9 +154,9 @@ class TestTailMetrics:
 # 只有2条，不足13条
         ]
         # v2.1: day_volume 参数已删除
-    
+
         metrics = fetch_tail_trading._calculate_tail_metrics(tail_klines)
-        
+
         # K线数量不足时返回None
         assert metrics is None
 
@@ -177,9 +179,9 @@ class TestTailMetrics:
 {'time': '15:00', 'volume': 13000, 'close': 11.65},
         ]
         # v2.1: day_volume 参数已删除
-    
+
         metrics = fetch_tail_trading._calculate_tail_metrics(tail_klines)
-        
+
         assert metrics is not None
         # 验证排序：prices[0] 应为 14:00 的收盘价
         assert metrics['prices'][0] == 10.45  # 14:00

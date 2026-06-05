@@ -31,7 +31,7 @@ def get_memory_usage_mb() -> float:
         - Windows: 返回0.0（不支持）
     """
     try:
-        with open('/proc/self/status', 'r') as f:
+        with open('/proc/self/status') as f:
             for line in f:
                 if line.startswith('VmRSS:'):
                     return int(line.split()[1]) / 1024  # kB -> MB
@@ -61,7 +61,7 @@ def get_memory_info_str() -> str:
         - 其他系统: 仅返回RSS信息
     """
     try:
-        with open('/proc/self/status', 'r') as f:
+        with open('/proc/self/status') as f:
             vmrss = vmsize = None
             for line in f:
                 if line.startswith('VmRSS:'):

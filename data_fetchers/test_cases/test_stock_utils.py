@@ -16,26 +16,28 @@ stock_utils.py 测试用例
 """
 
 import logging
-import pytest
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-import sys
+import pytest
+
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from data_fetchers.common.stock_utils import (
-    is_main_board_stock,
-    load_main_board_stock_list,
+    EXCLUDED_NAME_KEYWORDS,
+    EXCLUDED_PREFIXES,
+    MAIN_BOARD_PREFIXES,
+    MAX_STOCK_DATE,
+    MIN_STOCK_DATE,
+    filter_stocks_by_date,
+    get_max_stock_date,
+    get_module_logger,
     get_stock_codes_only,
     get_stock_name_map,
-    filter_stocks_by_date,
-    get_module_logger,
-    MAIN_BOARD_PREFIXES,
-    EXCLUDED_PREFIXES,
-    EXCLUDED_NAME_KEYWORDS,
-    MIN_STOCK_DATE,
-    get_max_stock_date,
-    MAX_STOCK_DATE,
+    is_main_board_stock,
+    load_main_board_stock_list,
 )
 
 
@@ -210,7 +212,7 @@ class TestFilterStocksByDate:
         test_stocks = [{'code': '600000', 'list_date': '2020-06-01'}]
         with pytest.raises(ValueError, match="开始日期不是合法日期"):
             filter_stocks_by_date(test_stocks, '2020-13-01', '2020-12-31')
-    
+
     def test_type_error_date_not_string(self):
         """测试日期参数不是字符串类型"""
         test_stocks = [{'code': '600000', 'list_date': '2020-06-01'}]

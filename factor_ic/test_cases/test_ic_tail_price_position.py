@@ -8,27 +8,29 @@
 - 数据合并逻辑
 """
 
-import pytest
-import numpy as np
-import pandas as pd
-from pathlib import Path
-import sys
 import gzip
 import json
+import sys
 import tempfile
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from factor_ic.common.tail_data_loader import (
+    TAIL_TRADING_DATA_PATH,
+    load_tail_trading_data,
+)
 from factor_ic.ic_tail_price_position import (
+    EPSILON,
+    calc_price_position,
     calculate_tail_price_position,
     get_close_price,
-    calc_price_position,
-    EPSILON,
-)
-from factor_ic.common.tail_data_loader import (
-    load_tail_trading_data,
-    TAIL_TRADING_DATA_PATH,
 )
 
 

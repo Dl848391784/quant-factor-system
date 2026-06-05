@@ -11,21 +11,22 @@ factor_calculator.py 测试用例
 创建时间: 2026-05-27 17:00 北京时间
 """
 
-import pytest
-import pandas as pd
-import numpy as np
 import logging
 import tempfile
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
+import pytest
+
 # 导入被测模块
 from data_fetchers.factor_calculator import (
-    calculate_rsi,
-    calculate_volume_ratio,
-    calculate_forward_return,
     calculate_bollinger_pb,
+    calculate_forward_return,
     calculate_kdj_j,
+    calculate_rsi,
     calculate_turnover_surge,
+    calculate_volume_ratio,
     get_module_logger,
 )
 
@@ -75,7 +76,7 @@ def large_factor_df():
     lows_b = [c - 1 for c in closes_b]
     turnover_a = [0.01 + i * 0.001 for i in range(30)]
     turnover_b = [0.01 + i * 0.001 for i in range(30)]
-    
+
     return pd.DataFrame({
         'date': dates_all,
         'asset': assets,
@@ -104,7 +105,7 @@ def test_logger():
 
 class TestCalculateRSI:
     """RSI 计算函数测试"""
-    
+
     def test_basic_calculation(self, sample_close_prices):
         """测试基本 RSI 计算"""
         rsi = calculate_rsi(sample_close_prices, period=6)
@@ -113,7 +114,7 @@ class TestCalculateRSI:
         # 验证范围 0-100
         valid_rsi = rsi.dropna()
         assert (valid_rsi >= 0).all() and (valid_rsi <= 100).all()
-    
+
     def test_missing_values_filled_with_50(self, sample_close_prices):
         """测试缺失值保留为 NaN（调用方自行决定处理）"""
         rsi = calculate_rsi(sample_close_prices, period=6)
@@ -123,20 +124,20 @@ class TestCalculateRSI:
         assert pd.isna(rsi.iloc[4])  # 第 5 天仍是 NaN（数据不足）
         # 第 period 天（索引 period-1）开始有值
         assert not pd.isna(rsi.iloc[5])  # 第 6 天有值
-    
+
     def test_custom_period(self, sample_close_prices):
         """测试自定义周期"""
         rsi_6 = calculate_rsi(sample_close_prices, period=6)
         rsi_14 = calculate_rsi(sample_close_prices, period=14)
         # 不同周期结果不同
         assert not rsi_6.equals(rsi_14)
-    
+
     def test_empty_series(self):
         """测试空序列"""
         empty = pd.Series([], dtype=float)
         rsi = calculate_rsi(empty, period=6)
         assert len(rsi) == 0
-    
+
     def test_constant_prices(self):
         """测试恒定价格（无波动）"""
         constant = pd.Series([100] * 10)
@@ -154,7 +155,7 @@ class TestCalculateRSI:
 
 class TestCalculateVolumeRatio:
     """量比计算函数测试"""
-    
+
     def test_basic_calculation(self, sample_volume):
         """测试基本量比计算"""
         vr = calculate_volume_ratio(sample_volume, window=5)
@@ -162,7 +163,7 @@ class TestCalculateVolumeRatio:
         assert isinstance(vr, pd.Series)
         # 前 window 天应为 NaN
         assert pd.isna(vr.iloc[0])
-    
+
     def test_surge_detection(self, sample_volume):
         """测试突增检测"""
         # 第 5 天成交量为 1500，前 5 天均值约 1050
@@ -170,14 +171,14 @@ class TestCalculateVolumeRatio:
         # 第 5 天量比应 > 1
         if not pd.isna(vr.iloc[5]):
             assert vr.iloc[5] > 1
-    
+
     def test_zero_volume_handling(self):
         """测试零成交量处理"""
         vol_with_zero = pd.Series([0, 1000, 1000, 1000, 1000, 1000])
         vr = calculate_volume_ratio(vol_with_zero, window=5)
         # 零成交量应产生 NaN
         assert pd.isna(vr.iloc[0])
-    
+
     def test_custom_window(self, sample_volume):
         """测试自定义窗口"""
         vr_5 = calculate_volume_ratio(sample_volume, window=5)
@@ -192,7 +193,7 @@ class TestCalculateVolumeRatio:
 
 class TestCalculateForwardReturn:
     """前瞻收益率计算测试"""
-    
+
     def test_basic_calculation(self, sample_close_prices):
         """测试基本前瞻收益率计算"""
         fr = calculate_forward_return(sample_close_prices, shift=1)
@@ -200,14 +201,14 @@ class TestCalculateForwardReturn:
         assert isinstance(fr, pd.Series)
         # 最后一天应为 NaN（无次日数据）
         assert pd.isna(fr.iloc[-1])
-    
+
     def test_positive_return(self, sample_close_prices):
         """测试正收益"""
         fr = calculate_forward_return(sample_close_prices, shift=1)
         # 第 0 天收盘 100，次日 102，收益 2%
         if not pd.isna(fr.iloc[0]):
             assert fr.iloc[0] == 0.02
-    
+
     def test_negative_return(self):
         """测试负收益"""
         close = pd.Series([100, 98, 95])
@@ -215,7 +216,7 @@ class TestCalculateForwardReturn:
         # 第 0 天收盘 100，次日 98，收益 -2%
         if not pd.isna(fr.iloc[0]):
             assert fr.iloc[0] == -0.02
-    
+
     def test_custom_shift(self, sample_close_prices):
         """测试自定义前瞻天数"""
         fr_1 = calculate_forward_return(sample_close_prices, shift=1)
@@ -232,7 +233,7 @@ class TestCalculateForwardReturn:
 
 class TestCalculateBollingerPB:
     """布林带 %B 计算测试"""
-    
+
     def test_basic_calculation(self, sample_factor_df):
         """测试基本布林带计算"""
         result = calculate_bollinger_pb(sample_factor_df, n=20, k=2.0)
@@ -240,19 +241,19 @@ class TestCalculateBollingerPB:
         assert isinstance(result, pd.DataFrame)
         # 验证新增列存在
         assert 'bollinger_pb' in result.columns
-    
+
     def test_original_df_not_modified(self, sample_factor_df):
         """测试原始 DataFrame 未被修改"""
         original_cols = sample_factor_df.columns.tolist()
         result = calculate_bollinger_pb(sample_factor_df, n=20, k=2.0)
         # 原始 DataFrame 列数未变
         assert sample_factor_df.columns.tolist() == original_cols
-    
+
     def test_logger_parameter(self, sample_factor_df, test_logger):
         """测试 logger 参数"""
         result = calculate_bollinger_pb(sample_factor_df, n=20, k=2.0, logger_arg=test_logger)
         assert 'bollinger_pb' in result.columns
-    
+
     def test_custom_n_and_k(self, large_factor_df):
         """测试自定义 n 和 k（使用大样本数据）"""
         result_20_2 = calculate_bollinger_pb(large_factor_df, n=20, k=2.0)
@@ -272,7 +273,7 @@ class TestCalculateBollingerPB:
 
 class TestCalculateKDJJ:
     """KDJ_J 计算测试"""
-    
+
     def test_basic_calculation(self, sample_factor_df):
         """测试基本 KDJ_J 计算"""
         result = calculate_kdj_j(sample_factor_df, n=9, m1=3, m2=3)
@@ -280,19 +281,19 @@ class TestCalculateKDJJ:
         assert isinstance(result, pd.DataFrame)
         # 验证新增列存在
         assert 'kdj_j' in result.columns
-    
+
     def test_original_df_not_modified(self, sample_factor_df):
         """测试原始 DataFrame 未被修改"""
         original_cols = sample_factor_df.columns.tolist()
         result = calculate_kdj_j(sample_factor_df, n=9, m1=3, m2=3)
         # 原始 DataFrame 列数未变
         assert sample_factor_df.columns.tolist() == original_cols
-    
+
     def test_logger_parameter(self, sample_factor_df, test_logger):
         """测试 logger 参数"""
         result = calculate_kdj_j(sample_factor_df, n=9, m1=3, m2=3, logger_arg=test_logger)
         assert 'kdj_j' in result.columns
-    
+
     def test_custom_params(self, large_factor_df):
         """测试自定义参数（使用大样本数据）"""
         result_9_3_3 = calculate_kdj_j(large_factor_df, n=9, m1=3, m2=3)
@@ -312,7 +313,7 @@ class TestCalculateKDJJ:
 
 class TestCalculateTurnoverSurge:
     """换手率突增计算测试"""
-    
+
     def test_basic_calculation(self, sample_factor_df):
         """测试基本换手率突增计算"""
         result = calculate_turnover_surge(sample_factor_df, surge_window=5)
@@ -320,19 +321,19 @@ class TestCalculateTurnoverSurge:
         assert isinstance(result, pd.DataFrame)
         # 验证新增列存在
         assert 'turnover_surge' in result.columns
-    
+
     def test_original_df_not_modified(self, sample_factor_df):
         """测试原始 DataFrame 未被修改"""
         original_cols = sample_factor_df.columns.tolist()
         result = calculate_turnover_surge(sample_factor_df, surge_window=5)
         # 原始 DataFrame 列数未变
         assert sample_factor_df.columns.tolist() == original_cols
-    
+
     def test_logger_parameter(self, sample_factor_df, test_logger):
         """测试 logger 参数"""
         result = calculate_turnover_surge(sample_factor_df, surge_window=5, logger_arg=test_logger)
         assert 'turnover_surge' in result.columns
-    
+
     def test_custom_window(self, large_factor_df):
         """测试自定义窗口（使用大样本数据）"""
         result_5 = calculate_turnover_surge(large_factor_df, surge_window=5)
@@ -352,18 +353,18 @@ class TestCalculateTurnoverSurge:
 
 class TestGetModuleLogger:
     """get_module_logger 函数测试"""
-    
+
     def test_with_logger(self, test_logger):
         """测试传入 logger"""
         result = get_module_logger(test_logger)
         assert result == test_logger
-    
+
     def test_without_logger(self):
         """测试不传入 logger（使用 fallback）"""
         result = get_module_logger()
         assert isinstance(result, logging.Logger)
         assert result.name == 'data_fetchers.factor_calculator'
-    
+
     def test_none_logger(self):
         """测试传入 None"""
         result = get_module_logger(None)
@@ -376,7 +377,7 @@ class TestGetModuleLogger:
 
 class TestEdgeCases:
     """边界场景测试"""
-    
+
     def test_single_day_data(self):
         """测试单日数据"""
         single_day = pd.DataFrame({
@@ -390,7 +391,7 @@ class TestEdgeCases:
         # 单日数据应能处理
         result = calculate_bollinger_pb(single_day, n=20, k=2.0)
         assert 'bollinger_pb' in result.columns
-    
+
     def test_missing_columns_bollinger(self):
         """测试缺失列（布林带）"""
         df_without_close = pd.DataFrame({
@@ -402,7 +403,7 @@ class TestEdgeCases:
         # 缺失 close 列应抛异常
         with pytest.raises(KeyError):
             calculate_bollinger_pb(df_without_close, n=20, k=2.0)
-    
+
     def test_missing_columns_kdj(self):
         """测试缺失列（KDJ）"""
         df_without_high = pd.DataFrame({

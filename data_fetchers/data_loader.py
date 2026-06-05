@@ -30,17 +30,17 @@
 """
 
 # 标准库导入
+import json
 import logging
 import os
-import time
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional, Tuple, List, Dict
-import json
 
 # 第三方库导入
 import pandas as pd
 import requests
+
 
 # 本地模块导入（条件导入）
 try:
@@ -83,7 +83,7 @@ else:
         _MODULE_LOGGER.setLevel(logging.INFO)
 
 
-def get_module_logger(logger_arg: Optional[logging.Logger] = None) -> logging.Logger:
+def get_module_logger(logger_arg: logging.Logger | None = None) -> logging.Logger:
     """获取模块 logger
     
     Args:
@@ -117,14 +117,14 @@ class RealDataLoader:
     - 缓存管理（请使用 common/cache_manager.py）
     - 因子计算（请使用 factor_calculator.py）
     """
-    
+
     def __init__(
         self,
         timeout: int = 30,
         retries: int = 3,
         use_local: bool = False,
         enable_cache: bool = True,
-        logger: Optional[logging.Logger] = None
+        logger: logging.Logger | None = None
     ):
         """初始化数据加载器
         
@@ -143,19 +143,19 @@ class RealDataLoader:
         self.session = requests.Session()
         self._lock = threading.Lock()
         self._request_count = 0
-        
+
         # session 级别 headers，供所有请求复用
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': '*/*',
             'Referer': 'http://finance.sina.com.cn/'
         })
-    
+
     def get_stock_history(
         self,
         stock_code: str,
         days: int = 400
-    ) -> Optional[pd.DataFrame]:
+    ) -> pd.DataFrame | None:
         """获取单只股票的历史行情
         
         Args:
@@ -169,8 +169,8 @@ class RealDataLoader:
         if self.use_local:
             return self._get_local_stock_history(stock_code, days)
         return self._get_api_stock_history(stock_code, days)
-    
-    def _get_local_stock_history(self, stock_code: str, days: int) -> Optional[pd.DataFrame]:
+
+    def _get_local_stock_history(self, stock_code: str, days: int) -> pd.DataFrame | None:
         """从本地文件读取K线数据
         
         Args:
@@ -181,25 +181,25 @@ class RealDataLoader:
             pd.DataFrame | None: K线数据，文件不存在或读取失败返回 None
         """
         data_file = os.path.join(LOCAL_DATA_DIR, f'{stock_code}.csv')
-        
+
         if not os.path.exists(data_file):
             return None
-        
+
         try:
             df = pd.read_csv(data_file)
             df['date'] = pd.to_datetime(df['date'])
             df['asset'] = stock_code
-            
+
             required_cols = ['date', 'open', 'high', 'low', 'close', 'volume', 'asset']
             df = df[required_cols]
-            
+
             return df.tail(days)
         except Exception as e:
             # CSV文件损坏、缺少必需列或列类型异常
             self._logger.warning(f"[LocalDataError] 读取本地CSV失败: stock_code={stock_code}, file={data_file}, error={e}")
             return None
-    
-    def _get_api_stock_history(self, stock_code: str, days: int) -> Optional[pd.DataFrame]:
+
+    def _get_api_stock_history(self, stock_code: str, days: int) -> pd.DataFrame | None:
         """从新浪财经API获取K线数据
         
         Args:
@@ -226,13 +226,13 @@ class RealDataLoader:
                 # 不支持的股票代码前缀，属于永久性失败
                 self._logger.warning(f"[PermanentFailure] 不支持的股票代码前缀: {stock_code}")
                 raise PermanentFailureError(f"不支持的股票代码前缀: {stock_code}")
-            
+
             params = {
                 'symbol': symbol,
                 'scale': 240,  # 日线
                 'datalen': days + 50
             }
-            
+
             # 使用 session 级别 headers，不再重复设置
             response = self.session.get(
                 KLINE_URL,
@@ -240,14 +240,14 @@ class RealDataLoader:
                 timeout=self.timeout
             )
             response.raise_for_status()
-            
+
             data = response.json()
-            
+
             # API 返回非列表可能是服务端临时故障，记录警告并返回 None 以触发重试
             if not data or not isinstance(data, list):
                 self._logger.warning(f"[APIResponseError] API返回非列表数据: stock_code={stock_code}, data_type={type(data)}")
                 return None
-            
+
             rows = []
             for item in data:
                 try:
@@ -261,44 +261,44 @@ class RealDataLoader:
                     })
                 except (ValueError, TypeError):
                     continue
-            
+
             if len(rows) < 15:
                 return None
-            
+
             df = pd.DataFrame(rows)
             df['date'] = pd.to_datetime(df['date'])
             df['asset'] = stock_code
-            
+
             cols = ['date', 'open', 'high', 'low', 'close', 'volume', 'asset']
             df = df[cols].sort_values('date').reset_index(drop=True)
-            
+
             return df.tail(days)
-        
+
         except PermanentFailureError:
             # 永久性失败，向上传播，让调用方跳过重试
             raise
-        
+
         except requests.RequestException as e:
             # 网络相关异常（超时、连接失败等）
             self._logger.warning(f"[NetworkError] 获取股票数据失败: stock_code={stock_code}, error={e}")
             return None
-        
+
         except json.JSONDecodeError as e:
             # JSON 解析错误
             self._logger.warning(f"[JSONError] 解析响应失败: stock_code={stock_code}, error={e}")
             return None
-        
+
         except Exception as e:
             # 其他未知异常
             self._logger.error(f"[UnexpectedError] 获取股票数据时发生未知错误: stock_code={stock_code}, error={e}")
             return None
-    
+
     def _fetch_single_stock_with_retry(
         self,
-        stock_info: Dict,
+        stock_info: dict,
         days: int,
         delay: float = 0.05
-    ) -> Tuple[str, Optional[pd.DataFrame]]:
+    ) -> tuple[str, pd.DataFrame | None]:
         """带重试机制获取单只股票数据
         
         Args:
@@ -310,13 +310,13 @@ class RealDataLoader:
             (股票代码, DataFrame | None)
         """
         code = stock_info['code']
-        
+
         with self._lock:
             self._request_count += 1
             request_id = self._request_count
-        
+
         time.sleep(delay * (1 + (request_id % 20) * 0.005))
-        
+
         for attempt in range(self.retries):
             try:
                 df = self.get_stock_history(code, days=days)
@@ -330,19 +330,19 @@ class RealDataLoader:
                 # 永久性失败，直接返回，跳过重试
                 self._logger.debug(f"跳过重试（永久性失败）: {code}, reason={e}")
                 return (code, None)
-            except Exception as e:
+            except Exception:
                 # 其他临时异常，重试
                 if attempt < self.retries - 1:
                     time.sleep(0.5 * (attempt + 1))
-        
+
         return (code, None)
-    
+
     def _fetch_stock_batch(
         self,
-        stock_batch: List[Dict],
+        stock_batch: list[dict],
         days: int,
-        progress_callback: Optional[callable] = None
-    ) -> List[Tuple[str, Optional[pd.DataFrame]]]:
+        progress_callback: callable | None = None
+    ) -> list[tuple[str, pd.DataFrame | None]]:
         """获取一批股票的数据（串行获取，带延迟）
         
         Args:
@@ -360,14 +360,14 @@ class RealDataLoader:
             if progress_callback:
                 progress_callback(result[0], result[1] is not None)
         return results
-    
+
     def _fetch_stock_batch_parallel(
         self,
-        stocks_for_thread_a: List[Dict],
-        stocks_for_thread_b: List[Dict],
+        stocks_for_thread_a: list[dict],
+        stocks_for_thread_b: list[dict],
         days: int,
-        progress_callback: Optional[callable] = None
-    ) -> List[Tuple[str, Optional[pd.DataFrame]]]:
+        progress_callback: callable | None = None
+    ) -> list[tuple[str, pd.DataFrame | None]]:
         """使用2个线程并行获取股票数据
         
         Args:
@@ -385,7 +385,7 @@ class RealDataLoader:
             - 并发数固定为 2，避免触发 API 频率限制
         """
         all_results = []
-        
+
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {
                 executor.submit(
@@ -401,7 +401,7 @@ class RealDataLoader:
                     progress_callback
                 ): 'thread_b'
             }
-            
+
             # 使用 as_completed 避免顺序阻塞等待
             for future in as_completed(futures):
                 thread_name = futures[future]
@@ -410,7 +410,7 @@ class RealDataLoader:
                     all_results.extend(results)
                 except Exception as e:
                     self._logger.error(f"[ThreadError] {thread_name} 执行失败: {e}")
-        
+
         return all_results
 
 

@@ -10,11 +10,13 @@ test_layered_backtest_price_position_1d 测试用例
 import sys
 from pathlib import Path
 
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-import pytest
 import json
-from typing import get_args, Literal
+from typing import Literal, get_args
+
+import pytest
 
 from backtest.layered_backtest_price_position_1d import PricePositionLayerConfig
 

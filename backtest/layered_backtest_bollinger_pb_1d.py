@@ -11,10 +11,11 @@
 - layer_names_dict: 优先使用 layer_descriptions，否则回退 layer_names
 """
 
-from typing import ClassVar, Sequence
+from collections.abc import Sequence
+from typing import ClassVar
 
-from backtest.common.layered_backtest_runner import LayerConfigBase
 from backtest.common.factor_cli import factor_cli_main
+from backtest.common.layered_backtest_runner import LayerConfigBase
 from data_fetchers.factor_calculator import calculate_bollinger_pb
 
 
@@ -23,9 +24,9 @@ class BollingerPbLayerConfig(LayerConfigBase):
     
     薄声明：因子元数据集中在 ClassVar，逻辑完全下沉基类。
     """
-    
+
     factor_name: ClassVar[str] = 'bollinger_pb'
-    
+
     layer_names: ClassVar[Sequence[str]] = (
         'lowest',
         'lower',
@@ -33,7 +34,7 @@ class BollingerPbLayerConfig(LayerConfigBase):
         'higher',
         'highest'
     )
-    
+
     layer_descriptions: ClassVar[Sequence[str]] = (
         '极低层(接近下轨)',
         '偏低层(低于中轨)',

@@ -38,16 +38,17 @@
 import json
 import logging
 import threading
-from pathlib import Path
-from datetime import datetime
 from collections import Counter
+from datetime import datetime
+from pathlib import Path
+
 
 # 公共模块导入（遵循 MODULE.md 约束 #4）
 # 条件导入：脚本直接运行时可能路径未配置
 try:
-    from data_fetchers.common import setup_logger, get_module_result_dir, get_stock_list_file, write_json_cache
+    from data_fetchers.common import get_module_result_dir, get_stock_list_file, setup_logger, write_json_cache
 except ImportError:
-    from common import setup_logger, get_module_result_dir, get_stock_list_file, write_json_cache
+    from common import get_module_result_dir, get_stock_list_file, setup_logger, write_json_cache
 
 # 版本号常量（MODULE.md 约束 #16）
 _OUTPUT_VERSION = '2.8'
@@ -131,65 +132,65 @@ def fetch_stock_industry_sw() -> dict:
     """
     try:
         import akshare as ak
-        
+
         logger.info(f"[行业数据 v{_OUTPUT_VERSION}] 开始获取申万行业分类...")
-        
+
         # 获取申万行业分类历史数据（新版本API）
         industry_df = ak.stock_industry_clf_hist_sw()
-        
+
         # 列名校验（防御性编程）
         missing_cols = [col for col in _EXPECTED_INDUSTRY_COLS if col not in industry_df.columns]
         if missing_cols:
             raise KeyError(f"申万行业分类缺少必需列: {missing_cols}, 实际列: {list(industry_df.columns)}")
-        
+
         # 日期格式转换（防御性编程）：确保 start_date 为 datetime 类型
         # 避免混合格式（如"20210101"和"2021-01-01"）导致排序错误
         import pandas as pd
         industry_df['start_date'] = pd.to_datetime(industry_df['start_date'])
-        
+
         # 获取每只股票的最新行业分类（按start_date降序）
         industry_df_latest = industry_df.sort_values('start_date', ascending=False).drop_duplicates(
             subset='symbol', keep='first'
         )
-        
+
         # 获取股票名称映射
         stock_names_df = ak.stock_info_a_code_name()
-        
+
         # 列名校验（防御性编程）
         missing_name_cols = [col for col in _EXPECTED_STOCK_NAME_COLS if col not in stock_names_df.columns]
         if missing_name_cols:
             raise KeyError(f"股票名称数据缺少必需列: {missing_name_cols}, 实际列: {list(stock_names_df.columns)}")
-        
+
         stock_names_df['code'] = stock_names_df['code'].astype(str).str.zfill(6)
         stock_names_dict = dict(zip(stock_names_df['code'], stock_names_df['name']))
-        
+
         # 构建股票→行业映射（使用 to_dict 替代 iterrows，性能优化）
         industry_map = {}
-        
+
         # 转为字典遍历（避免 iterrows 性能问题）
         for row_dict in industry_df_latest.to_dict('records'):
             code = str(row_dict.get('symbol', '')).strip()
             industry_code = str(row_dict.get('industry_code', '')).strip()
-            
+
             # 从行业代码提取一级行业（前2位）
             first_level = industry_code[:2] if len(industry_code) >= 2 else ''
-            
+
             # 映射到行业名称
             industry_name = SW_INDUSTRY_CODE_MAP.get(first_level, '其他')
-            
+
             # 获取股票名称
             stock_name = stock_names_dict.get(code, '')
-            
+
             if code:
                 industry_map[code] = {
                     'name': stock_name,
                     'industry': industry_name,
                     'industry_code': industry_code
                 }
-        
+
         logger.info(f"[行业数据] 获取完成: {len(industry_map)} 只股票")
         return industry_map
-        
+
     except Exception as e:
         # 记录日志后重新抛出异常，保留原始异常链（而非返回空 dict）
         # 让调用方（refresh_industry_cache）捕获并转为 RuntimeError
@@ -212,11 +213,11 @@ def load_stock_industry() -> dict:
     # 优先从缓存加载
     if INDUSTRY_CACHE_PATH.exists():
         try:
-            with open(INDUSTRY_CACHE_PATH, 'r', encoding='utf-8') as f:
+            with open(INDUSTRY_CACHE_PATH, encoding='utf-8') as f:
                 data = json.load(f)
-            
+
             industries = data.get('industries', {})
-            
+
             # 数据完整性验证（防止缓存文件损坏导致后续 AttributeError）
             if not isinstance(industries, dict):
                 logger.warning(f"[行业数据] 缓存数据类型异常: industries 为 {type(industries).__name__}，期望 dict")
@@ -229,16 +230,16 @@ def load_stock_industry() -> dict:
                 except Exception as e:
                     logger.warning(f"[行业数据] akshare 获取失败 [{type(e).__name__}]: {e}，降级备用数据（本地备用）")
                     return load_local_industry_backup()
-            
+
             # 检查缓存是否过期（超过7天更新）
             meta = data.get('meta', {})
             updated_at = meta.get('updated_at', '')
-            
+
             if updated_at:
                 try:
                     update_date = datetime.strptime(updated_at, _DATE_FORMAT)
                     days_old = (datetime.now() - update_date).days
-                    
+
                     if days_old > 7:
                         logger.info(f"[行业数据] 缓存已过期 {days_old} 天，尝试重新获取...")
                         try:
@@ -256,14 +257,14 @@ def load_stock_industry() -> dict:
                     logger.warning(f"[行业数据] 日期格式异常 {updated_at!r}: {e}，使用现有缓存")
                     logger.info(f"[行业数据] 从缓存加载: {len(industries)} 只股票")
                     return industries
-            
+
             # updated_at 不存在（空字符串），直接使用缓存
             logger.info(f"[行业数据] 缓存无更新时间标记，从缓存加载: {len(industries)} 只股票")
             return industries
-            
+
         except Exception as e:
             logger.warning(f"[行业数据] 缓存加载失败 [{type(e).__name__}]: {e}")
-    
+
     # 缓存不存在，显式降级：先尝试 akshare，失败后用备用数据
     logger.info("[行业数据] 缓存不存在，尝试获取 akshare 数据...")
     try:
@@ -296,16 +297,16 @@ def refresh_industry_cache() -> dict:
         # 记录详细日志（与 fetch_stock_industry_sw 中同类捕获风格保持一致）
         logger.error("[行业数据] akshare API 获取失败 [%s]: %s", type(e).__name__, str(e))
         raise RuntimeError(f"akshare 行业数据获取失败: {e}") from e
-    
+
     if not industry_map:
         # 极端情况：fetch_stock_industry_sw 返回空 dict（正常情况应抛出异常）
         logger.error("[行业数据] akshare 获取失败，返回空数据")
         raise RuntimeError("akshare 行业数据获取失败: 返回空 dict")
-    
+
     # 固定时间戳（MODULE.md 约束 #17：datetime.now() 只调用一次）
     now = datetime.now()
     updated_at = now.strftime(_DATE_FORMAT)
-    
+
     # 写入缓存
     cache_data = {
         'meta': {
@@ -317,14 +318,14 @@ def refresh_industry_cache() -> dict:
         },
         'industries': industry_map
     }
-    
+
     # 确保输出目录存在（MODULE.md 约束 #2：输出到 result 目录）
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     # 使用公共模块原子写入（遵循 MODULE.md 约束 #4）
     write_json_cache(INDUSTRY_CACHE_PATH, cache_data, json_indent=2)
     logger.info(f"[行业数据] 缓存已更新: {INDUSTRY_CACHE_PATH} (v{_OUTPUT_VERSION})")
-    
+
     return industry_map
 
 
@@ -347,48 +348,48 @@ def load_local_industry_backup(stock_list_path: Path | None = None, write_cache:
     # 银行类: 名称含 '银行'
     # 房地产类: 名称含 '地产'/'万科'/'保利'
     # 新能源类: 名称含 '新能源'/'锂电'/'太阳能'
-    
+
     logger.info("[行业数据] 使用本地备用分类（基于名称关键词推断）...")
-    
+
     # 使用参数注入路径（避免硬编码耦合）
     if stock_list_path is None:
         stock_list_path = STOCK_LIST_BACKUP_PATH
     if stock_list_path.exists():
         try:
-            with open(stock_list_path, 'r', encoding='utf-8') as f:
+            with open(stock_list_path, encoding='utf-8') as f:
                 stock_data = json.load(f)
-            
+
             stocks = stock_data.get('stocks', [])
             industry_map = {}
-            
+
             # 简化分类规则
             for stock in stocks:
                 code = stock.get('code', stock.get('asset', ''))
                 name = stock.get('name', '')
-                
+
                 # 基于名称推断行业
                 industry = infer_industry_from_name(name)
-                
+
                 industry_map[code] = {
                     'name': name,
                     'industry': industry,
                     'industry_code': 'local'
                 }
-            
+
             logger.info(f"[行业数据] 本地备用分类完成: {len(industry_map)} 只股票")
-            
+
             # 写入缓存（避免每次重复读文件）
             if write_cache and industry_map:
                 _write_backup_cache(industry_map)
-            
+
             return industry_map
-            
+
         except Exception as e:
             logger.warning(f"[行业数据] 本地备用加载失败 [{type(e).__name__}]: {e}")
     else:
         # 文件不存在：记录警告日志，方便调试（而非静默返回空 dict）
         logger.warning(f"[行业数据] 本地备用文件不存在: {stock_list_path}")
-    
+
     return {}
 
 
@@ -409,7 +410,7 @@ def _write_backup_cache(industry_map: dict) -> None:
     # 固定时间戳（MODULE.md 约束 #17：datetime.now() 只调用一次）
     now = datetime.now()
     updated_at = now.strftime(_DATE_FORMAT)
-    
+
     cache_data = {
         'meta': {
             'version': _OUTPUT_VERSION,
@@ -420,9 +421,9 @@ def _write_backup_cache(industry_map: dict) -> None:
         },
         'industries': industry_map
     }
-    
+
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     # 使用公共模块原子写入（遵循 MODULE.md 约束 #4）
     # 备用缓存写入失败为非致命错误（MODULE.md 约束 #72）
     try:
@@ -473,14 +474,14 @@ def infer_industry_from_name(name: str) -> str:
         '传媒': ['传媒', '出版', '影视'],
         '其他': []
     }
-    
+
     for industry, keywords in industry_keywords.items():
         if industry == '其他':
             continue
         for kw in keywords:
             if kw in name:
                 return industry
-    
+
     return '其他'
 
 
@@ -550,11 +551,11 @@ def get_industry_distribution(stocks: list) -> dict[str, int]:
         dict[str, int]: {行业名称: 数量}
     """
     industry_count = Counter()
-    
+
     for code in stocks:
         industry = get_stock_industry(code)
         industry_count[industry] += 1
-    
+
     return dict(industry_count)
 
 
@@ -593,11 +594,11 @@ def main() -> bool:
         False: 执行失败
     """
     cli_logger = _get_cli_logger()
-    
+
     cli_logger.info("=" * 60)
     cli_logger.info(f"股票行业分类数据拉取 v{_OUTPUT_VERSION}")
     cli_logger.info("=" * 60)
-    
+
     try:
         # 尝试从 akshare 获取
         industry_map = refresh_industry_cache()
@@ -605,24 +606,24 @@ def main() -> bool:
         cli_logger.info(f"  ✓ 缓存路径: {INDUSTRY_CACHE_PATH}")
         cli_logger.info("执行完成，退出码: 0")
         return True
-    
+
     except RuntimeError as e:
         # akshare 失败，尝试备用数据
         cli_logger.warning(f"  ⚠ akshare 获取失败: {e}")
         cli_logger.info("  尝试使用本地备用数据...")
-        
+
         try:
             backup_map = load_local_industry_backup(write_cache=True)
             cli_logger.info(f"  ✓ 备用数据加载成功: {len(backup_map)} 只股票")
             cli_logger.info(f"  ✓ 缓存路径: {INDUSTRY_CACHE_PATH}")
             cli_logger.info("执行完成（使用备用数据），退出码: 0")
             return True
-        
+
         except Exception as backup_e:
             cli_logger.error(f"  ✗ 备用数据也失败 [{type(backup_e).__name__}]: {backup_e}")
             cli_logger.error("执行失败，退出码: 1")
             return False
-    
+
     except Exception as e:
         cli_logger.exception(f"  ✗ 未预期的错误: {type(e).__name__}: {e}")
         cli_logger.error("执行失败，退出码: 1")

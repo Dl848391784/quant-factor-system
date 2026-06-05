@@ -14,10 +14,11 @@
 - layer_names_dict: 优先使用 layer_descriptions，否则回退 layer_names
 """
 
-from typing import ClassVar, Sequence
+from collections.abc import Sequence
+from typing import ClassVar
 
-from backtest.common.layered_backtest_runner import LayerConfigBase
 from backtest.common.factor_cli import factor_cli_main
+from backtest.common.layered_backtest_runner import LayerConfigBase
 
 
 class VolumeRatioLayerConfig(LayerConfigBase):
@@ -30,11 +31,11 @@ class VolumeRatioLayerConfig(LayerConfigBase):
     - factor_col=volume_ratio_5（数据源列名，预计算因子）
     - layer_names 纯标签（用于目录/列名），layer_descriptions 含中文（用于日志）
     """
-    
+
     factor_name: ClassVar[str] = 'volume_ratio'
     factor_col: ClassVar[str] = 'volume_ratio_5'
     ic_source: ClassVar[str] = 'factor_ic/result/ic_volume_ratio_1d_analysis_result.json'  # IC文件路径覆盖
-    
+
     layer_names: ClassVar[Sequence[str]] = (
         'lowest',
         'lower',
@@ -42,7 +43,7 @@ class VolumeRatioLayerConfig(LayerConfigBase):
         'higher',
         'highest'
     )
-    
+
     layer_descriptions: ClassVar[Sequence[str]] = (
         '极低层(量比极低)',
         '偏低层(量比偏低)',

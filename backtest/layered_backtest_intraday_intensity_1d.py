@@ -20,14 +20,16 @@
 """
 
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import ClassVar, Sequence
+from typing import ClassVar
+
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backtest.common.layered_backtest_runner import LayerConfigBase
 from backtest.common.factor_cli import factor_cli_main
+from backtest.common.layered_backtest_runner import LayerConfigBase
 
 # 导入因子计算函数（复杂因子需自定义计算）
 from factor_ic.ic_intraday_intensity_1d import calculate_intraday_intensity
@@ -43,11 +45,11 @@ class IntradayIntensityLayerConfig(LayerConfigBase):
     - 因子方向：反向因子（ic_mean < 0），做多低值组
     - layer_names 纯标签（用于目录/列名），layer_descriptions 含中文（用于日志）
     """
-    
+
     factor_name: ClassVar[str] = 'intraday_intensity_1d'
     factor_col: ClassVar[str] = 'intraday_intensity'  # 计算后的因子列名
     ic_source: ClassVar[str] = 'factor_ic/result/ic_intraday_intensity_1d_analysis_result.json'
-    
+
     # 5 层分层
     layer_names: ClassVar[Sequence[str]] = (
         'lowest',
@@ -56,7 +58,7 @@ class IntradayIntensityLayerConfig(LayerConfigBase):
         'higher',
         'highest'
     )
-    
+
     layer_descriptions: ClassVar[Sequence[str]] = (
         '极低层(日内强度极低，强势下跌)',
         '偏低层(日内强度偏低，下跌)',

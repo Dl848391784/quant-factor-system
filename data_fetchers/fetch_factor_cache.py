@@ -34,41 +34,46 @@ import json
 import logging
 import time
 from datetime import datetime
-from pathlib import Path
 
 # 第三方库导入
 import pandas as pd
 
+
 # 本地模块导入
 try:
     from data_fetchers.data_loader import RealDataLoader
-    from data_fetchers.factor_calculator import calculate_rsi, calculate_volume_ratio, calculate_forward_return
+    from data_fetchers.factor_calculator import calculate_forward_return, calculate_rsi, calculate_volume_ratio
 except ImportError:
     from data_loader import RealDataLoader
-    from factor_calculator import calculate_rsi, calculate_volume_ratio, calculate_forward_return
+    from factor_calculator import calculate_forward_return, calculate_rsi, calculate_volume_ratio
 
 # 公共模块导入（条件导入：脚本直接运行时可能路径未配置）
 # 使用前提：project_root 已加入 PYTHONPATH 或以项目根目录为工作目录执行
 try:
-    from data_fetchers.common import setup_logger, get_logs_dir, get_module_result_dir, get_stock_list_file, read_json_cache
-    from data_fetchers.common.memory_utils import get_memory_usage_mb, get_memory_info_str
     from data_fetchers.batch_processor import (
         BatchStream,
-        save_batch_cache_sorted,
-        n_way_merge_deduplicate,
-        format_final_output,
         cleanup_batch_files,
+        format_final_output,
+        n_way_merge_deduplicate,
+        save_batch_cache_sorted,
     )
+    from data_fetchers.common import (
+        get_logs_dir,
+        get_module_result_dir,
+        get_stock_list_file,
+        read_json_cache,
+        setup_logger,
+    )
+    from data_fetchers.common.memory_utils import get_memory_info_str, get_memory_usage_mb
 except ImportError:
-    from common import setup_logger, get_logs_dir, get_module_result_dir, get_stock_list_file, read_json_cache
-    from common.memory_utils import get_memory_usage_mb, get_memory_info_str
     from batch_processor import (
-        BatchStream,
-        save_batch_cache_sorted,
-        n_way_merge_deduplicate,
-        format_final_output,
         cleanup_batch_files,
+        format_final_output,
+        n_way_merge_deduplicate,
+        save_batch_cache_sorted,
     )
+    from common import get_logs_dir, get_module_result_dir, get_stock_list_file, read_json_cache, setup_logger
+    from common.memory_utils import get_memory_info_str, get_memory_usage_mb
 
 # 模块级常量（PEP 8：import 之后定义）
 # _MODULE_LOGGER: 模块级日志记录器，当脚本直接运行时可能未初始化
@@ -117,85 +122,85 @@ def fetch_batch_stocks(
     logger.info(f"  股票数量: {len(stock_batch)}")
     logger.info(f"  当前内存: {get_memory_info_str()}")
     logger.info("=" * 60)
-    
+
     batch_start_time = time.time()
-    
+
     all_data_dict = {}
     success_count = 0
     fail_count = 0
-    
+
     sub_batch_size = 35  # 子批次大小（从50降低到35）
     num_sub_batches = (len(stock_batch) + sub_batch_size - 1) // sub_batch_size
-    
+
     for sub_idx in range(num_sub_batches):
         sub_start = sub_idx * sub_batch_size
         sub_end = min(sub_start + sub_batch_size, len(stock_batch))
         sub_stocks = stock_batch[sub_start:sub_end]
-        
+
         # data_loader._fetch_stock_batch_parallel 期望 [{'code': str, 'name': str}, ...] 格式
         # 需要将字符串转换为字典格式
         thread_a_stocks = [{'code': s, 'name': ''} for s in sub_stocks[:len(sub_stocks) // 2]]
         thread_b_stocks = [{'code': s, 'name': ''} for s in sub_stocks[len(sub_stocks) // 2:]]
-        
+
         logger.info(f"  [子批次 {sub_idx + 1}/{num_sub_batches}] 拉取 {sub_start + 1}-{sub_end}...")
         logger.info(f"    当前内存: {get_memory_info_str()}")
-        
+
         sub_results = loader._fetch_stock_batch_parallel(
             thread_a_stocks,
             thread_b_stocks,
             FETCH_DAYS,
             None
         )
-        
+
         for code, df in sub_results:
             if df is not None and len(df) >= 15:
                 all_data_dict[code] = df
                 success_count += 1
             else:
                 fail_count += 1
-        
+
         # 每个子批次后强制垃圾回收
         gc.collect()
-        
+
         # 内存监控：超过阈值时暂停
         mem_mb = get_memory_usage_mb()
         if mem_mb > MEMORY_THRESHOLD_MB:
             logger.warning(f"  ⚠ 内存超阈值 ({mem_mb:.1f}MB > {MEMORY_THRESHOLD_MB}MB)，暂停 {MEMORY_PAUSE_SECONDS}s...")
             gc.collect()
             time.sleep(MEMORY_PAUSE_SECONDS)
-        
+
         if sub_idx < num_sub_batches - 1:
             time.sleep(2)
-    
+
     batch_elapsed = time.time() - batch_start_time
     logger.info(f"  ✓ 批次 {batch_idx + 1} 拉取完成: 成功 {success_count}, 失败 {fail_count}, 耗时 {batch_elapsed:.1f}s")
-    
+
     if not all_data_dict:
         logger.warning("  ! 无有效数据")
         return None, None
-    
+
     logger.info("  正在计算因子...")
-    
+
     all_data = list(all_data_dict.values())
     combined = pd.concat(all_data, ignore_index=True)
-    
+
     del all_data, all_data_dict
     gc.collect()
-    
+
     combined['date'] = pd.to_datetime(combined['date'])
     combined = combined.sort_values(['asset', 'date']).copy()  # 避免 CoW 风险
-    
+
     combined['rsi_6'] = combined.groupby('asset')['close'].transform(
         lambda x: calculate_rsi(x, period=6)
     )
-    
+
     combined['volume_ratio_5'] = combined.groupby('asset')['volume'].transform(
         lambda x: calculate_volume_ratio(x, window=5)
     )
     # 不填充 NaN，保留窗口期不足和数据异常的真实情况
     # 下游 valid_df.dropna(subset=['rsi_6', 'volume_ratio_5']) 会自然过滤
     combined['volume_ratio_5'] = combined['volume_ratio_5'].clip(0.1, 10)
-    
+
     combined['forward_return_1d'] = combined.groupby('asset')['close'].transform(
         lambda x: calculate_forward_return(x, shift=1)
     )
@@ -207,19 +212,19 @@ def fetch_batch_stocks(
     )
 
     valid_df = combined.dropna(subset=['rsi_6', 'volume_ratio_5']).copy()
-    
+
     del combined
     gc.collect()
-    
+
     # pandas 3.0 兼容性修复：使用 cumcount 替代 groupby().apply(tail)
     # 避免 group_keys=False 导致分组列被移除
     valid_df['row_num'] = valid_df.groupby('asset').cumcount(ascending=False)
     valid_df = valid_df[valid_df['row_num'] < N_DAYS].copy().drop('row_num', axis=1)
-    
+
     # 去重：保证单批次内没有重复 (date, asset) key
     # 从根源消除 N-way merge 时 stream 内重复问题
     valid_df = valid_df.drop_duplicates(subset=['date', 'asset'], keep='first')
-    
+
     valid_df['date'] = valid_df['date'].dt.strftime('%Y-%m-%d')
     valid_df['open'] = valid_df['open'].round(2)
     valid_df['close'] = valid_df['close'].round(2)
@@ -234,17 +239,17 @@ def fetch_batch_stocks(
     # 包含 open/high/low 用于选股回测计算一字涨停、封死涨停等
     # 包含 volume 用于尾盘量比计算（尾盘量价强度因子需要）
     factor_df = valid_df[['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5', 'volume']].copy()
-    
+
     # return_df: 排除 forward_return 为 NaN 的记录（每只股票末尾几天的 shift 产生）
     # 避免下游读取方未处理产生计算错误
     return_df = valid_df[['date', 'asset', 'forward_return_1d', 'forward_return_3d', 'forward_return_5d']].copy()
     return_df = return_df.dropna(subset=['forward_return_1d'])
-    
+
     del valid_df
     gc.collect()
-    
+
     logger.info(f"  因子记录: {len(factor_df)}, 收益记录: {len(return_df)}")
-    
+
     return factor_df, return_df
 
 
@@ -268,9 +273,9 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
     logger.info("=" * 60)
     logger.info("[验证阶段] 验证数据完整性...")
     logger.info("=" * 60)
-    
+
     factor_path = RESULT_DIR / 'factor_data.json.gz'
-    
+
     # 初始化默认值
     n_days = 0
     n_assets = 0
@@ -278,23 +283,23 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
     date_start = ""
     date_end = ""
     records_count = 0
-    
+
     # 抽样参数
     sample_records = []
     sample_size = 1000
     step = 100
-    
+
     # 解析状态
     in_meta = False
     in_data = False
     meta_lines = []
     brace_count = 0
-    
+
     try:
         with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
             for line in f:
                 stripped = line.strip()
-                
+
                 # ========== META 解析阶段 ==========
                 # 检测进入 meta
                 if '"meta":' in stripped and not in_meta and not in_data:
@@ -304,7 +309,7 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
                         meta_lines.append(stripped[meta_start:])
                         brace_count = 1
                     continue
-                
+
                 # 收集 meta 内容直到 brace_count == 0
                 if in_meta:
                     meta_lines.append(stripped)
@@ -331,17 +336,17 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
                         gc.collect()
                         in_meta = False
                     continue
-                
+
                 # ========== DATA 解析阶段 ==========
                 # 检测进入 data 数组
                 if '"data": [' in stripped and not in_data:
                     in_data = True
                     continue
-                
+
                 # 检测离开 data 数组
                 if in_data and stripped in (']', '],'):
                     break
-                
+
                 # 流式解析 data 记录
                 if in_data and stripped.startswith('{'):
                     records_count += 1
@@ -351,35 +356,35 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
                             sample_records.append(json.loads(stripped.rstrip(',')))
                         except json.JSONDecodeError:
                             pass  # 抽样解析失败不影响计数
-    
+
     except Exception as e:
         logger.warning(f"  ⚠ 文件扫描失败: {e}")
         return False, 0, 0, 0
-    
+
     logger.info(f"  交易日数: {n_days}")
     logger.info(f"  股票数量: {n_assets}")
     logger.info(f"  总记录数: {records_count}")
     logger.info(f"  日期范围: {date_start} ~ {date_end}")
-    
+
     # 抽样检查 RSI
     rsi_vals = [r['rsi_6'] for r in sample_records if r.get('rsi_6') is not None]
     if rsi_vals:
         logger.info(f"  RSI(6)样本范围: [{min(rsi_vals):.2f}, {max(rsi_vals):.2f}]")
-    
+
     # 验证数据有效性
     valid_rsi_count = len(rsi_vals)
     total_sample_count = len(sample_records)
     rsi_valid_ratio = valid_rsi_count / total_sample_count if total_sample_count > 0 else 0.0
-    
+
     del sample_records
     gc.collect()
-    
+
     # 综合验证
     days_valid = n_days >= N_DAYS * 0.9
     data_valid = rsi_valid_ratio >= 0.8
     records_valid = (records_count == n_records_in_meta) or (n_records_in_meta == 0)
     is_valid = days_valid and data_valid and records_valid
-    
+
     if not days_valid:
         logger.warning(f"  ⚠ 交易日数不足 ({n_days}/{N_DAYS})")
     if not data_valid:
@@ -388,7 +393,7 @@ def validate_final_data(logger: logging.Logger = None) -> tuple[bool, int, int, 
         logger.warning(f"  ⚠ 记录数不一致 (流式统计: {records_count}, meta声明: {n_records_in_meta})")
     if is_valid:
         logger.info(f"  ✓ 通过验证 (RSI有效比例: {rsi_valid_ratio:.1%}, 记录数一致: {records_count})")
-    
+
     return is_valid, n_days, n_assets, records_count
 
 
@@ -408,7 +413,7 @@ def main() -> bool:
     # 初始化 logger（遵循 PROJECT.md 日志规范：输出到 logs 目录）
     log_dir = get_logs_dir()
     logger = setup_logger('fetch_factor_cache', logs_dir=log_dir)
-    
+
     logger.info("=" * 70)
     logger.info(f"分批拉取 {N_DAYS} 天因子数据 (外部排序版本)")
     logger.info("=" * 70)
@@ -418,51 +423,51 @@ def main() -> bool:
     logger.info(f"  内存阈值: {MEMORY_THRESHOLD_MB} MB")
     logger.info(f"  开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"  初始内存: {get_memory_info_str()}")
-    
+
     global_start = time.time()
-    
+
     loader = RealDataLoader(enable_cache=True, use_local=False, retries=3)
-    
+
     logger.info("[获取股票列表]...")
-    
+
     # 从 result/stock_list.json 读取股票列表（遵循 MODULE.md 约束 2）
     stock_list_file = get_stock_list_file()
     stock_data = read_json_cache(stock_list_file, logger=logger)
-    
+
     if stock_data is None:
         logger.warning(f"  ! 股票列表文件不存在: {stock_list_file}")
         return False
-    
+
     # 提取股票代码列表
     stock_list = stock_data.get('codes', [])
-    
+
     if not stock_list:
         logger.warning("  ! 股票列表为空")
         return False
-    
+
     total_stocks = len(stock_list)
     logger.info(f"  ✓ 从缓存获取到 {total_stocks} 只主板股票")
-    
+
     batches = [stock_list[i:i+BATCH_SIZE] for i in range(0, total_stocks, BATCH_SIZE)]
     total_batches = len(batches)
-    
+
     logger.info(f"[分批策略] 总批次: {total_batches}")
-    
+
     successful = 0
-    
+
     for batch_idx, stock_batch in enumerate(batches):
         mem_mb = get_memory_usage_mb()
         logger.info(f"  当前内存: {get_memory_info_str()}")
-        
+
         if mem_mb > MEMORY_THRESHOLD_MB:
             logger.warning(f"  ⚠ 内存超阈值 ({mem_mb:.1f}MB > {MEMORY_THRESHOLD_MB}MB)，暂停 {MEMORY_PAUSE_SECONDS}s...")
             gc.collect()
             time.sleep(MEMORY_PAUSE_SECONDS)
             mem_mb = get_memory_usage_mb()
             logger.info(f"  GC后内存: {get_memory_info_str()}")
-        
+
         factor_df, return_df = fetch_batch_stocks(loader, stock_batch, batch_idx, total_batches, logger)
-        
+
         if factor_df is not None and return_df is not None and len(factor_df) > 0:
             save_batch_cache_sorted(batch_idx, factor_df, return_df, logger_arg=logger)
             successful += 1
@@ -475,28 +480,28 @@ def main() -> bool:
                 del factor_df
             if return_df is not None:
                 del return_df
-        
+
         # 批次间强制垃圾回收
         gc.collect()
         logger.info(f"  批次完成后内存: {get_memory_info_str()}")
         time.sleep(5)  # 批次间休息时间增加
-    
+
     logger.info("=" * 70)
     logger.info(f"拉取完成: 成功 {successful}/{total_batches} 批次")
     logger.info("=" * 70)
-    
+
     # N-way merge 合并
     logger.info("[合并阶段] N-way merge 外部排序...")
-    
+
     try:
         factor_merged_path = n_way_merge_deduplicate(total_batches, 'factor', logger_arg=logger)
         return_merged_path = n_way_merge_deduplicate(total_batches, 'return', logger_arg=logger)
-        
+
         # 校验两个合并路径
         if not factor_merged_path or not return_merged_path:
             logger.warning("  ! 无有效数据（factor 或 return 合并失败）")
             return False
-        
+
         # 格式化最终输出（传入版本号）
         format_final_output(
             factor_merged_path,
@@ -505,12 +510,12 @@ def main() -> bool:
             output_version=_OUTPUT_VERSION,
             logger_arg=logger
         )
-        
+
         # 验证（提供最终统计信息）
         is_valid, n_days, n_assets, n_records = validate_final_data(logger)
-        
+
         elapsed = time.time() - global_start
-        
+
         logger.info("=" * 70)
         logger.info("全部完成!")
         logger.info("=" * 70)
@@ -518,7 +523,7 @@ def main() -> bool:
         logger.info(f"  总耗时: {elapsed:.1f}s ({elapsed/60:.1f}min)")
         logger.info(f"  数据验证: {'通过' if is_valid else '警告'}")
         logger.info(f"  最终内存: {get_memory_info_str()}")
-        
+
         # 保存统计
         stats = {
             'version': _OUTPUT_VERSION,
@@ -530,19 +535,19 @@ def main() -> bool:
             'memory_monitor': 'proc_self_status',
             'fields': ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5', 'volume']
         }
-        
+
         with open(RESULT_DIR / 'regenerate_stats.json', 'w') as f:
             json.dump(stats, f, indent=2)
-        
+
         # 返回成功状态（遵循 PROJECT.md 编码规范：脚本必须有退出码）
         logger.info("执行完成，退出码: 0")
         return True
-    
+
     except Exception as e:
         logger.exception("执行失败: %s", e)
         logger.info("执行失败，退出码: 1")
         return False
-    
+
     finally:
         # 清理临时批次文件（无论成功或失败都清理）
         cleanup_batch_files(total_batches, result_dir=RESULT_DIR, logger_arg=logger)

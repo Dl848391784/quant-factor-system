@@ -95,19 +95,19 @@ def ensure_dir(dir_path: Path) -> Path:
 # 常用路径常量（延迟计算）
 class Paths:
     """路径常量类（便于静态引用）"""
-    
+
     @property
     def project_root(self) -> Path:
         return get_project_root()
-    
+
     @property
     def stock_list_file(self) -> Path:
         return get_stock_list_file()
-    
+
     @property
     def logs_dir(self) -> Path:
         return get_logs_dir()
-    
+
     @property
     def module_result_dir(self) -> Path:
         return get_module_result_dir()

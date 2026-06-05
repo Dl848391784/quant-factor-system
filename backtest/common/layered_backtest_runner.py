@@ -42,24 +42,24 @@ result = run_layered_backtest(
 创建日期: 2026-05-23
 """
 
+import gzip
+import json
+import logging
 import os
 import sys
-import json
-import gzip
-import logging
-import pandas as pd
-import numpy as np
-from datetime import datetime
-from typing import Dict, Literal, Optional, Callable, List, Union, Tuple, ClassVar, Any, Sequence
-from pathlib import Path
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from abc import ABC, abstractmethod
-import importlib.resources
+from datetime import datetime
+from pathlib import Path
+from typing import Any, ClassVar, Literal
+
+import pandas as pd
+
+from backtest.common.convert_types import convert_to_native_types
+from backtest.common.layered_backtest import LayeredBacktestEngine
 
 # 导入公共模块
 from backtest.common.logger_config import get_logger
-from backtest.common.convert_types import convert_to_native_types
-from backtest.common.layered_backtest import LayeredBacktestEngine
 
 
 # ============================================================================
@@ -81,13 +81,13 @@ def _get_project_root() -> Path:
     env_root = os.environ.get('FACTOR_IC_ROOT')
     if env_root:
         return Path(env_root)
-    
+
     # 2. 配置文件
     for search_dir in [Path.cwd(), Path.cwd().parent]:
         config_file = search_dir / 'factor_ic_root.txt'
         if config_file.exists():
             return Path(config_file.read_text().strip())
-    
+
     # 3. 从模块位置推导（backtest/common/layered_backtest_runner.py 上两级）
     # __file__ = .../backtest/common/layered_backtest_runner.py
     # parent = backtest/common/
@@ -139,40 +139,40 @@ class LayerConfigBase:
                 '极高层(5日涨幅最大)'
             )
     """
-    
+
     # === 因子元数据（子类必须声明 factor_name） ===
     factor_name: ClassVar[str] = ''  # 子类必须覆盖
     factor_col: ClassVar[str] = ''   # 子类可选，默认=factor_name
     ic_source: ClassVar[str] = ''    # 子类可选，默认按 factor_name 拼接
     layer_names: ClassVar[Sequence[str]] = ()  # 子类必须覆盖，纯标签（用于目录/列名）
     layer_descriptions: ClassVar[Sequence[str]] = ()  # 子类可选，含中文描述（用于日志）
-    
+
     # === 运行时派生（实例字段，field(init=False)） ===
     ic_source_resolved: str = field(init=False)  # 实际使用的 IC 文件路径
-    layer_names_dict: Dict[str, str] = field(init=False)  # 层号→描述映射
+    layer_names_dict: dict[str, str] = field(init=False)  # 层号→描述映射
     factor_col_resolved: str = field(init=False)  # 实际使用的数据列名
     n_layers: int = field(init=False)
-    
+
     # === 通用参数（有默认值） ===
-    long_layers: Optional[List[int]] = None
-    short_layers: Optional[List[int]] = None
+    long_layers: list[int] | None = None
+    short_layers: list[int] | None = None
     trade_cost_rate: float = 0.003
     min_stocks_per_layer: int = 10
-    
+
     # === 派生字段（无默认值，field(init=False)） ===
     factor_direction: Literal['positive', 'negative'] = field(init=False)
-    
+
     def __post_init__(self):
         """初始化后处理：派生配置 + 打印日志"""
         logger = get_logger(self.factor_name or 'backtest')
-        
+
         # 1. 校验 factor_name
         if not self.factor_name:
             raise ValueError(
                 f"子类必须声明 factor_name ClassVar，"
                 f"当前类: {self.__class__.__name__}"
             )
-        
+
         # 2. 拼接 ic_source_resolved（子类声明优先，否则默认路径）
         #    子类可显式声明 ic_source 以暴露派生路径
         cls_ic_source = self.__class__.ic_source
@@ -180,22 +180,22 @@ class LayerConfigBase:
             self.ic_source_resolved = cls_ic_source
         else:
             self.ic_source_resolved = f'factor_ic/result/ic_{self.factor_name}_1d_analysis_result.json'
-        
+
         # 3. 派生 factor_col_resolved（子类声明优先，否则回退 factor_name）
         cls_factor_col = self.__class__.factor_col
         if cls_factor_col:
             self.factor_col_resolved = cls_factor_col
         else:
             self.factor_col_resolved = self.factor_name
-        
+
         # 4. 校验 layer_names
         n = len(self.layer_names)
         if n < 2:
             raise ValueError(f"layer_names 至少需要 2 层，当前: {n}")
-        
+
         # 5. 派生 n_layers
         self.n_layers = n
-        
+
         # 6. 生成 layer_names_dict（层序 1-based）
         #    优先使用 layer_descriptions（含中文，用于日志），否则回退 layer_names
         descriptions = self.__class__.layer_descriptions
@@ -207,15 +207,15 @@ class LayerConfigBase:
             self.layer_names_dict = {
                 str(i + 1): name for i, name in enumerate(self.layer_names)
             }
-        
+
         # 6. 加载 IC 元数据，派生 factor_direction
         ic_meta = self._load_ic_meta()
         self.factor_direction = ic_meta['direction']  # 禁止隐式默认值
-        
+
         # 7. 派生多空组合
         if self.long_layers is None or self.short_layers is None:
             self.long_layers, self.short_layers = self._derive_long_short()
-        
+
         # 8. 打印配置日志
         logger.info("=" * 40)
         logger.info(f"因子: {self.factor_name}")
@@ -223,8 +223,8 @@ class LayerConfigBase:
         logger.info(f"分层: {self.n_layers} 层 (percentile)")
         logger.info(f"IC文件: {self.ic_source_resolved}")
         logger.info("=" * 40)
-    
-    def _load_ic_meta(self) -> Dict[str, Any]:
+
+    def _load_ic_meta(self) -> dict[str, Any]:
         """加载 IC 分析结果（基类通用方法）
         
         从 ic_source JSON 文件读取，统一从 ic_metrics 子字段取值。
@@ -237,16 +237,16 @@ class LayerConfigBase:
             KeyError: direction 字段缺失（禁止隐式默认值）
         """
         ic_file = PROJECT_ROOT / self.ic_source_resolved
-        
+
         if not ic_file.exists():
             raise FileNotFoundError(
                 f"IC 分析结果文件不存在: {ic_file}\n"
                 f"请先运行 factor_ic/{self.factor_name}_1d.py 生成 IC 分析结果"
             )
-        
-        with open(ic_file, 'r', encoding='utf-8') as f:
+
+        with open(ic_file, encoding='utf-8') as f:
             data = json.load(f)
-        
+
         # 统一从 ic_metrics 子字段读取（问题5修复）
         ic_metrics = data.get('ic_metrics')
         if ic_metrics is None:
@@ -254,23 +254,23 @@ class LayerConfigBase:
                 f"IC 结果文件缺少 'ic_metrics' 字段: {ic_file}\n"
                 f"顶层字段: {list(data.keys())}"
             )
-        
+
         # 提取必需字段
         ic_mean = ic_metrics.get('ic_mean')
         if ic_mean is None:
-            raise KeyError(f"ic_metrics 缺少 'ic_mean' 字段")
-        
+            raise KeyError("ic_metrics 缺少 'ic_mean' 字段")
+
         # direction 从 ic_mean 符号派生（问题5修复：统一来源）
         direction = 'negative' if ic_mean < 0 else 'positive'
-        
+
         return {
             'direction': direction,
             'ic_mean': float(ic_mean),
             'icir': float(ic_metrics.get('icir', 0)),
             'p_value': ic_metrics.get('p_value'),
         }
-    
-    def _derive_long_short(self) -> Tuple[List[int], List[int]]:
+
+    def _derive_long_short(self) -> tuple[list[int], list[int]]:
         """根据 n_layers 和 factor_direction 派生多空组合
         
         规则：
@@ -280,33 +280,33 @@ class LayerConfigBase:
         """
         if self.n_layers == 1:
             return [1], [1]
-        
+
         n_long = max(1, int(self.n_layers * 0.4))
         n_short = max(1, int(self.n_layers * 0.4))
-        
+
         if self.factor_direction == 'positive':
             long_layers = list(range(self.n_layers - n_long + 1, self.n_layers + 1))
             short_layers = list(range(1, n_short + 1))
         else:
             long_layers = list(range(1, n_long + 1))
             short_layers = list(range(self.n_layers - n_short + 1, self.n_layers + 1))
-        
+
         return long_layers, short_layers
-    
+
     def validate(self) -> None:
         """校验配置完整性"""
         if self.n_layers < 2:
             raise ValueError(f"n_layers 至少需要 2 层，当前: {self.n_layers}")
-        
+
         if not self.long_layers or not self.short_layers:
             raise ValueError("long_layers 和 short_layers 不能为空")
-        
+
         for layer_id in self.long_layers:
             if layer_id > self.n_layers or layer_id < 1:
                 raise ValueError(
                     f"long_layers 层编号 {layer_id} 越界，有效范围 [1, {self.n_layers}]"
                 )
-        
+
         for layer_id in self.short_layers:
             if layer_id > self.n_layers or layer_id < 1:
                 raise ValueError(
@@ -319,10 +319,10 @@ class LayerConfigBase:
 # ============================================================================
 
 def load_factor_return_data(
-    data_source: Optional[Union[str, Path]] = None,
-    required_factor_cols: Optional[List[str]] = None,
-    logger: Optional[logging.Logger] = None
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    data_source: str | Path | None = None,
+    required_factor_cols: list[str] | None = None,
+    logger: logging.Logger | None = None
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """从统一数据源加载因子和收益数据
     
     参数:
@@ -343,25 +343,25 @@ def load_factor_return_data(
         - factor_ic_data.json.gz 包含行情+因子+收益数据，单文件读取
     """
     from backtest.common.data_loader import DEFAULT_DATA_SOURCE
-    
+
     if logger is None:
         logger = get_logger(__name__)
-    
+
     # 使用默认数据源
     if data_source is None:
         data_source = DEFAULT_DATA_SOURCE
-    
+
     data_source = Path(data_source)
-    
+
     # 加载统一数据源
     logger.info("加载统一数据源: %s", data_source)
-    
+
     if not data_source.exists():
         raise FileNotFoundError(
             f"统一数据源文件不存在: {data_source}\n"
             f"请先运行 data_fetchers/factor_generator.py 生成数据"
         )
-    
+
     try:
         with gzip.open(data_source, 'rt', encoding='utf-8') as f:
             data = json.load(f)
@@ -369,16 +369,16 @@ def load_factor_return_data(
         raise ValueError(
             f"数据源 JSON 解析失败: {data_source}, 位置 {e.pos}: {e.msg}"
         ) from e
-    
+
     if 'data' not in data:
         raise KeyError(
             f"数据源 JSON 结构缺失 'data' 字段: {data_source}, "
             f"顶层字段: {list(data.keys())}"
         )
-    
+
     full_df = pd.DataFrame(data['data'])
     logger.info("统一数据源: %d 条记录，%d 列", len(full_df), len(full_df.columns))
-    
+
     # 分离因子数据和收益数据
     # factor_ic_data.json.gz 字段分类（遵循 PROJECT.md 数据结构说明）：
     # - 行情数据：open, close, high, low
@@ -386,23 +386,23 @@ def load_factor_return_data(
     # - 扩展因子：bollinger_pb, kdj_j, turnover_surge
     # - 收益数据：forward_return_1d, forward_return_3d, forward_return_5d
     # - 索引字段：date, asset
-    
+
     return_cols = ['date', 'asset', 'forward_return_1d', 'forward_return_3d', 'forward_return_5d']
-    
+
     # 检查收益列是否存在
     for col in ['forward_return_1d', 'forward_return_3d', 'forward_return_5d']:
         if col not in full_df.columns:
             raise ValueError(f"数据源中缺少收益列 '{col}'，当前列: {list(full_df.columns)}")
-    
+
     # 分离 return_df
     return_df = full_df[return_cols].copy()
     logger.info("收益数据: %d 条记录", len(return_df))
-    
+
     # factor_df 包含所有非收益列（保留行情+因子数据）
     factor_cols = [col for col in full_df.columns if col not in ['forward_return_1d', 'forward_return_3d', 'forward_return_5d']]
     factor_df = full_df[factor_cols].copy()
     logger.info("因子数据: %d 条记录，%d 列", len(factor_df), len(factor_cols))
-    
+
     # 校验必需字段
     if required_factor_cols:
         for col in required_factor_cols:
@@ -412,7 +412,7 @@ def load_factor_return_data(
                     f"因子数据中缺少 '{col}' 列\n"
                     f"可用因子列: {available_cols}"
                 )
-    
+
     return factor_df, return_df
 
 
@@ -424,13 +424,13 @@ def run_layered_backtest(
     factor_name: str,
     factor_col: str,
     config: LayerConfigBase,
-    factor_calculator: Optional[Callable] = None,
-    required_factor_cols: Optional[List[str]] = None,
-    data_source: Optional[Union[str, Path]] = None,
-    output_dir: Optional[str] = None,
+    factor_calculator: Callable | None = None,
+    required_factor_cols: list[str] | None = None,
+    data_source: str | Path | None = None,
+    output_dir: str | None = None,
     verbose: bool = True,
-    logger: Optional[logging.Logger] = None
-) -> Dict:
+    logger: logging.Logger | None = None
+) -> dict:
     """分层回测公共入口
     
     参数:
@@ -468,14 +468,14 @@ def run_layered_backtest(
     """
     if logger is None:
         logger = get_logger(__name__)
-    
+
     # 校验配置
     config.validate()
-    
+
     logger.info("=" * 40)
     logger.info("%s 分层回测", factor_name)
     logger.info("=" * 40)
-    
+
     if verbose:
         logger.info("配置信息:")
         logger.info("  分层数量: %d (percentile)", config.n_layers)
@@ -484,19 +484,19 @@ def run_layered_backtest(
         logger.info("  空头组合: Layer %s", config.short_layers)
         logger.info("  最小股票数: %d", config.min_stocks_per_layer)
         logger.info("  交易成本率: %.2f%%", config.trade_cost_rate * 100)
-    
+
     # 加载数据（从统一数据源）
     factor_df, return_df = load_factor_return_data(
         data_source=data_source,
         required_factor_cols=required_factor_cols,
         logger=logger
     )
-    
+
     # 因子计算（如果需要）
     if factor_calculator:
         logger.info("计算 %s 因子...", factor_name)
         factor_df = factor_calculator(factor_df)
-    
+
     # 校验因子列存在
     if factor_col not in factor_df.columns:
         available_cols = [c for c in factor_df.columns if c not in ['date', 'asset']]
@@ -504,7 +504,7 @@ def run_layered_backtest(
             f"因子列 '{factor_col}' 不存在于 factor_df 中，"
             f"可用因子列: {available_cols}"
         )
-    
+
     # 数据统计
     if verbose:
         logger.info("数据统计:")
@@ -514,9 +514,9 @@ def run_layered_backtest(
         if len(valid_factor) > 0:
             logger.info("  %s 范围: %.2f ~ %.2f", factor_col, valid_factor.min(), valid_factor.max())
             logger.info("  %s 均值: %.2f", factor_col, valid_factor.mean())
-    
+
     # percentile 分层无需阈值验证（自适应数据范围）
-    
+
     # 创建回测引擎
     logger.info("创建回测引擎...")
     engine = LayeredBacktestEngine(
@@ -527,11 +527,11 @@ def run_layered_backtest(
         date_col='date',
         asset_col='asset'
     )
-    
+
     # 执行分层回测
     logger.info("执行分层回测...")
     # percentile 模式：强制使用（v1.5 规范），每层固定比例
-    
+
     result = engine.run(
         layer_method='percentile',
         n_layers=config.n_layers,
@@ -541,15 +541,15 @@ def run_layered_backtest(
         min_stocks_per_layer=config.min_stocks_per_layer,
         trade_cost_rate=config.trade_cost_rate
     )
-    
+
     # 添加因子特定信息
     result['meta']['factor_name'] = factor_name
     result['meta']['layer_names'] = config.layer_names
-    
+
     # 生成报告
     report = engine.generate_report(result)
     logger.info(report)
-    
+
     # 分层说明
     logger.info("=" * 40)
     logger.info("%s 分层说明", factor_name)
@@ -557,20 +557,20 @@ def run_layered_backtest(
     for layer_id in range(1, config.n_layers + 1):
         layer_key = str(layer_id)
         name = config.layer_names_dict.get(layer_key, f'Layer{layer_id}')
-        logger.info("  Layer%d (%s): percentile %d-%d%%", 
-            layer_id, name, 
-            (layer_id-1)*100//config.n_layers, 
+        logger.info("  Layer%d (%s): percentile %d-%d%%",
+            layer_id, name,
+            (layer_id-1)*100//config.n_layers,
             layer_id*100//config.n_layers)
-    
+
     # 保存结果
     if output_dir is None:
         project_root = Path(__file__).parent.parent.parent
         output_dir = project_root / 'backtest' / 'result'
-    
+
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    
+
     output_file = Path(output_dir) / f'{factor_name}_layered_backtest.json'
-    
+
     output_data = {
         'meta': result['meta'],
         'layer_stats': result['layer_stats'],
@@ -588,12 +588,12 @@ def run_layered_backtest(
         },
         'created_at': datetime.now().isoformat()
     }
-    
+
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(convert_to_native_types(output_data), f, indent=2, ensure_ascii=False)
-    
+
     logger.info("结果已保存: %s", output_file)
-    
+
     # 保存每日明细
     daily_file = Path(output_dir) / f'{factor_name}_layered_backtest_daily.json.gz'
     daily_data = {
@@ -603,12 +603,12 @@ def run_layered_backtest(
         },
         'data': result['daily_records']
     }
-    
+
     with gzip.open(daily_file, 'wt', encoding='utf-8') as f:
         json.dump(convert_to_native_types(daily_data), f, indent=2, ensure_ascii=False)
-    
+
     logger.info("每日明细已保存: %s", daily_file)
-    
+
     return result
 
 
@@ -620,9 +620,9 @@ def create_cli_entrypoint(
     factor_name: str,
     factor_col: str,
     config_class: type,
-    factor_calculator: Optional[Callable] = None,
-    required_factor_cols: Optional[List[str]] = None,
-    data_source: Optional[Union[str, Path]] = None
+    factor_calculator: Callable | None = None,
+    required_factor_cols: list[str] | None = None,
+    data_source: str | Path | None = None
 ) -> Callable[[], None]:
     """创建 CLI 入口函数
     
@@ -641,17 +641,17 @@ def create_cli_entrypoint(
     """
     def main():
         import argparse
-        
+
         parser = argparse.ArgumentParser(description=f'{factor_name} 分层回测')
         parser.add_argument('--data_source', type=str, default=data_source,
                             help='数据源文件路径')
         parser.add_argument('--output_dir', type=str, default=None)
         parser.add_argument('--quiet', action='store_true')
-        
+
         args = parser.parse_args()
-        
+
         logger = get_logger(__name__)
-        
+
         try:
             result = run_layered_backtest(
                 factor_name=factor_name,
@@ -664,14 +664,14 @@ def create_cli_entrypoint(
                 verbose=not args.quiet,
                 logger=logger
             )
-            
+
             if result['meta']['n_days_total'] == 0:
                 logger.error("回测无有效数据，退出码 1")
                 sys.exit(1)
-            
+
             logger.info("回测完成，退出码 0")
             sys.exit(0)
-            
+
         except FileNotFoundError as e:
             logger.error("数据文件不存在: %s", e)
             sys.exit(2)
@@ -684,5 +684,5 @@ def create_cli_entrypoint(
         except Exception as e:
             logger.exception("回测执行异常: %s", e)
             sys.exit(5)
-    
+
     return main

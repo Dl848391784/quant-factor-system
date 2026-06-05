@@ -10,11 +10,10 @@
 日期: 2026-05-11
 """
 
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 from scipy import stats
-from typing import Dict, Optional, Tuple
-import math
 
 from .logger_config import get_logger
 
@@ -28,7 +27,7 @@ def calculate_ic_with_direction_verification(
     asset_col: str = 'asset',
     min_stocks: int = 10,
     logger=None
-) -> Dict:
+) -> dict:
     """
     计算因子 IC，五维度独立判断
     
@@ -129,19 +128,19 @@ def calculate_ic_with_direction_verification(
     """
     if logger is None:
         logger = get_logger(__name__)
-    
+
     # ========== 输入验证 ==========
     if factor_df.empty:
         logger.error(f"输入验证失败: factor_df 不能为空, factor_col={factor_col}")
         raise ValueError("factor_df 不能为空")
-    
+
     if return_df.empty:
         logger.error(f"输入验证失败: return_df 不能为空, return_col={return_col}")
         raise ValueError("return_df 不能为空")
-    
+
     required_factor_cols = [date_col, asset_col, factor_col]
     required_return_cols = [date_col, asset_col, return_col]
-    
+
     for col in required_factor_cols:
         if col not in factor_df.columns:
             logger.error(
@@ -150,7 +149,7 @@ def calculate_ic_with_direction_verification(
                 f"期望列: {required_factor_cols}"
             )
             raise KeyError(f"factor_df 缺少列: '{col}'")
-    
+
     for col in required_return_cols:
         if col not in return_df.columns:
             logger.error(
@@ -159,7 +158,7 @@ def calculate_ic_with_direction_verification(
                 f"期望列: {required_return_cols}"
             )
             raise KeyError(f"return_df 缺少列: '{col}'")
-    
+
     # ========== 数据合并 ==========
     merged = pd.merge(
         factor_df[[date_col, asset_col, factor_col]],
@@ -167,7 +166,7 @@ def calculate_ic_with_direction_verification(
         on=[date_col, asset_col],
         how='inner'
     )
-    
+
     if merged.empty:
         logger.error(
             f"数据合并失败: factor_df 和 return_df 无法匹配, "
@@ -176,9 +175,9 @@ def calculate_ic_with_direction_verification(
             f"factor_col={factor_col}, return_col={return_col}"
         )
         raise ValueError("factor_df 和 return_df 无法匹配")
-    
+
     merged = merged.dropna(subset=[factor_col, return_col])
-    
+
     if merged.empty:
         logger.error(
             f"数据合并失败: 合并后数据全部为缺失值, "
@@ -186,17 +185,17 @@ def calculate_ic_with_direction_verification(
             f"factor_col={factor_col}, return_col={return_col}"
         )
         raise ValueError("合并后数据全部为缺失值")
-    
+
     # ========== 按日期计算正向 IC ==========
     ic_list = []
-    
+
     for date, daily_data in merged.groupby(date_col):
         ic_value = calculate_single_day_ic(
             daily_data, factor_col, return_col, min_stocks
         )
         if ic_value is not None:
             ic_list.append({'date': date, 'ic': ic_value})
-    
+
     if not ic_list:
         logger.error(
             f"IC计算失败: 没有有效的交易日, "
@@ -204,20 +203,20 @@ def calculate_ic_with_direction_verification(
             f"原始数据日期数={len(merged.groupby(date_col))}"
         )
         raise ValueError(f"没有有效的交易日（每交易日股票数 < {min_stocks}）")
-    
+
     ic_df = pd.DataFrame(ic_list)
     ic_series = ic_df.set_index('date')['ic']
-    
+
     # 显式排序：确保 ic_series.index 按日期升序排列
     # 遵循 PROJECT.md 规范：ic_series.index 必须按日期排序
     # 原因：rolling 计算按位置顺序，若 index 乱序会导致 dates 与 rolling_ic_mean 对应错误
     # 注意：pandas groupby 默认 sort=True，但显式排序可消除隐式依赖风险
     ic_series = ic_series.sort_index()
-    
+
     # ========== 计算统计量 ==========
     # 使用 calculate_ic_statistics 公共函数，避免代码重复
     stats_result = calculate_ic_statistics(ic_series, logger)
-    
+
     # 从 stats_result 中提取结果（保持原有返回结构）
     ic_mean = stats_result['ic_mean']
     ic_std = stats_result['ic_std']
@@ -225,17 +224,17 @@ def calculate_ic_with_direction_verification(
     p_value = stats_result['p_value']
     p_value_str = stats_result['p_value_display']
     t_stat = stats_result['t_stat']
-    
+
     statistical_significance = stats_result['statistical_significance']
     factor_direction = stats_result['factor_direction']
     economic_significance = stats_result['economic_significance']
     icir_stability = stats_result['icir_stability']
     ic_distribution_consistency = stats_result['ic_distribution_consistency']
-    
+
     positive_ratio = stats_result['positive_ratio']
     n = stats_result['n_days']
     summary = stats_result['summary']
-    
+
     return {
         'ic_series': ic_series,
         'ic_mean': ic_mean,
@@ -244,14 +243,14 @@ def calculate_ic_with_direction_verification(
         'p_value': p_value,  # 保留原始值
         'p_value_display': p_value_str,  # 格式化显示值
         't_stat': round(t_stat, 4),
-        
+
         # 五维度判断（独立输出）
         'statistical_significance': statistical_significance,
         'factor_direction': factor_direction,
         'economic_significance': economic_significance,
         'icir_stability': icir_stability,
         'ic_distribution_consistency': ic_distribution_consistency,
-        
+
         'positive_ratio': positive_ratio,
         'n_days': n,
         'summary': summary
@@ -264,7 +263,7 @@ def calculate_single_day_ic(
     return_col: str = 'forward_return',
     min_stocks: int = 10,
     logger=None
-) -> Optional[float]:
+) -> float | None:
     """
     计算单日的 IC 值（核心算法函数）
     
@@ -292,33 +291,33 @@ def calculate_single_day_ic(
     """
     if logger is None:
         logger = get_logger(__name__)
-    
+
     # 股票数不足
     if len(daily_data) < min_stocks:
         return None
-    
+
     # 因子值全相同（无法定义相关性）
     if daily_data[factor_col].nunique() == 1:
         return 0.0
-    
+
     # 收益值全相同（无法定义相关性）
     if daily_data[return_col].nunique() == 1:
         return 0.0
-    
+
     # 使用 Spearman 秩相关计算正向 IC（不反转）
     ic_value = daily_data[factor_col].corr(
         daily_data[return_col],
         method='spearman'
     )
-    
+
     # NaN 处理
     if pd.isna(ic_value):
         return 0.0
-    
+
     return ic_value
 
 
-def _newey_west_t_stat(ic_series: pd.Series, lag: int = None) -> Tuple[float, float, int]:
+def _newey_west_t_stat(ic_series: pd.Series, lag: int = None) -> tuple[float, float, int]:
     """
     Newey-West 调整的 t 统计量
     
@@ -360,24 +359,24 @@ def _newey_west_t_stat(ic_series: pd.Series, lag: int = None) -> Tuple[float, fl
     """
     n = len(ic_series)
     ic_mean = ic_series.mean()
-    
+
     # 自动计算 lag（Newey-West 1994 准则）
     if lag is None:
         # NW(1994): lag = int(4 * (T/100)^(2/9))
         lag = int(4 * (n / 100) ** (2/9))
         # 设置上下限
         lag = max(1, min(lag, 10))
-    
+
     # 计算自协方差（Newey-West 公式：k=0 为方差，k>0 为对称自协方差）
     # 公式: nw_var = σ² + Σ_{k=1}^{L} 2·w_k·γ_k
     # 其中 γ_k 为 k阶自协方差，w_k = 1 - k/(L+1) 为 Bartlett 权重
     nw_var = np.var(ic_series, ddof=1)  # k=0: 样本方差
-    
+
     for k in range(1, lag + 1):  # k>0: 对称自协方差
         cov_k = np.cov(ic_series[:-k].values, ic_series[k:].values)[0, 1]
         weight = 1 - k / (lag + 1)
         nw_var += 2 * weight * cov_k  # 注意乘以 2（对称性：γ_k = γ_{-k}）
-    
+
     if nw_var <= 0:
         # 回退使用样本方差，并记录警告
         if logger:
@@ -386,19 +385,19 @@ def _newey_west_t_stat(ic_series: pd.Series, lag: int = None) -> Tuple[float, fl
                 f"回退使用样本方差，统计显著性判断可信度下降"
             )
         nw_var = np.var(ic_series, ddof=1)
-    
+
     # 调整后的标准误
     nw_se = np.sqrt(nw_var / n)
-    
+
     # t 统计量
     if nw_se == 0:
         t_stat = 0.0
     else:
         t_stat = ic_mean / nw_se
-    
+
     # p 值 (双尾)
     p_value = 2 * (1 - stats.norm.cdf(abs(t_stat)))
-    
+
     return t_stat, p_value, lag
 
 
@@ -408,7 +407,7 @@ def _assess_statistical_significance(
     nw_lag: int,
     p_threshold: float = 0.05,
     t_threshold: float = 1.96
-) -> Dict:
+) -> dict:
     """
     评估统计显著性
     
@@ -440,15 +439,15 @@ def _assess_statistical_significance(
     """
     # 仅使用 p_value 判断（与 |t| > 1.96 完全等价，简化无冗余）
     is_significant = bool(p_value < p_threshold)
-    
+
     # p_value 格式化
     p_value_str = _format_p_value(p_value)
-    
+
     if is_significant:
         conclusion = f"统计显著（p={p_value_str}<0.05）"
     else:
         conclusion = f"统计不显著（p={p_value_str}>=0.05）"
-    
+
     return {
         'p_value': p_value,  # 保留原始值
         'p_value_display': p_value_str,  # 格式化显示值
@@ -460,7 +459,7 @@ def _assess_statistical_significance(
     }
 
 
-def _assess_factor_direction(ic_mean: float) -> Dict:
+def _assess_factor_direction(ic_mean: float) -> dict:
     """
     评估因子方向（ic_mean符号）
     
@@ -490,7 +489,7 @@ def _assess_factor_direction(ic_mean: float) -> Dict:
         sign = 'zero'
         direction_usage = '方向不明：分层回测不建议使用'
         conclusion = f"因子方向不明（ic_mean={ic_mean:.4f}≈0），不建议用于分层回测"
-    
+
     return {
         'ic_mean': round(ic_mean, 6),
         'ic_mean_sign': sign,
@@ -503,7 +502,7 @@ def _assess_economic_significance(
     abs_ic_mean: float,
     weak_threshold: float = 0.03,
     strong_threshold: float = 0.05
-) -> Dict:
+) -> dict:
     """
     评估经济显著性
     
@@ -530,7 +529,7 @@ def _assess_economic_significance(
     else:
         level = 'none'
         conclusion = f"经济不显著（|ic_mean|={abs_ic_mean:.4f}<{weak_threshold}）"
-    
+
     return {
         'abs_ic_mean': round(abs_ic_mean, 6),
         'threshold_used': {'weak': weak_threshold, 'strong': strong_threshold},
@@ -545,7 +544,7 @@ def _assess_icir_stability(
     usable_threshold: float = 0.5,
     good_threshold: float = 1.0,
     excellent_threshold: float = 2.0
-) -> Dict:
+) -> dict:
     """
     评估 ICIR 稳定性
     
@@ -581,7 +580,7 @@ def _assess_icir_stability(
     else:
         level = 'none'
         conclusion = f"IC稳定性不足（ICIR={icir:.2f}<{usable_threshold})"
-    
+
     return {
         'icir': round(icir, 4),
         'threshold_used': {
@@ -595,7 +594,7 @@ def _assess_icir_stability(
     }
 
 
-def _assess_ic_distribution_consistency(positive_ratio: float, ic_mean_sign: str) -> Dict:
+def _assess_ic_distribution_consistency(positive_ratio: float, ic_mean_sign: str) -> dict:
     """
     评估 IC 分布一致性
     
@@ -616,7 +615,7 @@ def _assess_ic_distribution_consistency(positive_ratio: float, ic_mean_sign: str
         }
     """
     negative_ratio = 1 - positive_ratio
-    
+
     if ic_mean_sign == 'zero':
         return {
             'positive_ratio': round(positive_ratio, 4),
@@ -626,7 +625,7 @@ def _assess_ic_distribution_consistency(positive_ratio: float, ic_mean_sign: str
             'distribution_hint': f'IC分布均衡（正{positive_ratio:.1%}，负{negative_ratio:.1%}）',
             'conclusion': 'IC均值接近零，分布均衡'
         }
-    
+
     # 一致性判断（统一阈值：balanced 覆盖 [0.49, 0.51]，contradictory 条件互斥）
     # 条件顺序：balanced → consistent → contradictory → else（边界过渡）
     # 阈值说明：
@@ -664,7 +663,7 @@ def _assess_ic_distribution_consistency(positive_ratio: float, ic_mean_sign: str
         consistency_type = 'consistent'
         distribution_hint = f'IC分布偏向{ic_mean_sign}方向（边界过渡）'
         conclusion = f'一致：分布与方向{ic_mean_sign}吻合（边界过渡区间）'
-    
+
     return {
         'positive_ratio': round(positive_ratio, 4),
         'ic_mean_sign': ic_mean_sign,
@@ -703,7 +702,7 @@ def _format_p_value(p_value: float) -> str:
         return f"{p_value:.4f}"  # 小数格式
 
 
-def calculate_ic_statistics(ic_series: pd.Series, logger=None) -> Dict:
+def calculate_ic_statistics(ic_series: pd.Series, logger=None) -> dict:
     """
     从 IC 序列计算统计指标（不重新计算 IC）
     
@@ -744,52 +743,52 @@ def calculate_ic_statistics(ic_series: pd.Series, logger=None) -> Dict:
     """
     if logger is None:
         logger = get_logger(__name__)
-    
+
     ic_mean = ic_series.mean()
     ic_std = ic_series.std()
-    
+
     # 调用内部函数计算详细统计（自动选择 lag）
     t_stat, p_value, nw_lag = _newey_west_t_stat(ic_series)
-    
+
     # ICIR 使用绝对值（PROJECT.md 规范）
     icir = abs(ic_mean) / ic_std if ic_std > 0 else 0
-    
+
     n = len(ic_series)
     positive_count = (ic_series > 0).sum()
     positive_ratio = positive_count / n
-    
+
     # 五维度判断
     statistical_significance = _assess_statistical_significance(
         p_value, t_stat, nw_lag, p_threshold=0.05, t_threshold=1.96
     )
-    
+
     factor_direction = _assess_factor_direction(ic_mean)
-    
+
     economic_significance = _assess_economic_significance(
         abs(ic_mean), weak_threshold=0.03, strong_threshold=0.05
     )
-    
+
     # 维度4: ICIR 稳定性
     icir_stability = _assess_icir_stability(icir)
-    
+
     # 维度5: IC 分布一致性
     ic_distribution_consistency = _assess_ic_distribution_consistency(
         positive_ratio, factor_direction['ic_mean_sign']
     )
-    
+
     # 生成摘要
     # p_value 格式化
     p_value_str = _format_p_value(p_value)
-    
+
     # 滚动 IC 均值（PROJECT.md 规范）
     # window=20（约一个月交易日），min_periods=10（至少半窗口数据）
     rolling_ic_mean = ic_series.rolling(window=20, min_periods=10).mean()
     # 转换为列表，NaN 转为 None（JSON 序列化）
     rolling_ic_mean_list = [
-        round(v, 6) if pd.notna(v) else None 
+        round(v, 6) if pd.notna(v) else None
         for v in rolling_ic_mean.tolist()
     ]
-    
+
     # summary 格式规范：positive_ratio 独立描述，不嵌入一致性判断文字
     summary = (
         f"IC均值={ic_mean:.4f}, "
@@ -801,7 +800,7 @@ def calculate_ic_statistics(ic_series: pd.Series, logger=None) -> Dict:
         f"ICIR稳定={icir_stability['level']}, "
         f"正比例={positive_ratio:.1%}（IC>0天数占比）"
     )
-    
+
     return {
         'ic_mean': ic_mean,
         'ic_std': ic_std,
@@ -829,24 +828,24 @@ def calculate_ic_statistics(ic_series: pd.Series, logger=None) -> Dict:
 if __name__ == "__main__":
     # 简单测试
     import numpy as np
-    
+
     # 创建 logger（__main__ 测试场景）
     logger = get_logger(__name__)
-    
+
     np.random.seed(42)
     dates = pd.date_range('2025-01-01', periods=20, freq='D')
     assets = [f'00000{i}.SZ' for i in range(1, 11)]
-    
+
     factor_rows = []
     return_rows = []
-    
+
     for date in dates:
         for asset in assets:
             # RSI 随机生成
             rsi = np.random.uniform(20, 80)
             # 未来收益与 RSI 负相关（模拟反向因子）
             forward_return = -0.001 * rsi + np.random.normal(0, 0.02)
-            
+
             factor_rows.append({
                 'date': date,
                 'asset': asset,
@@ -857,14 +856,14 @@ if __name__ == "__main__":
                 'asset': asset,
                 'forward_return': forward_return
             })
-    
+
     factor_df = pd.DataFrame(factor_rows)
     return_df = pd.DataFrame(return_rows)
-    
+
     result = calculate_ic_with_direction_verification(
         factor_df, return_df, factor_col='rsi_6', logger=logger
     )
-    
+
     logger.info("=" * 60)
     logger.info("因子方向验证 IC 分析")
     logger.info("=" * 60)
@@ -904,7 +903,7 @@ def industry_neutral_rank(
     """
     if logger is None:
         logger = get_logger(__name__)
-    
+
     # 检查行业列是否存在
     if industry_col not in factor_df.columns:
         logger.error(
@@ -917,24 +916,24 @@ def industry_neutral_rank(
             f"当前列: {factor_df.columns.tolist()}\n"
             f"请先补充行业数据后再使用行业中性化"
         )
-    
+
     # 重置索引，确保索引唯一且连续，避免 SettingWithCopyWarning
     factor_df = factor_df.copy()
     factor_df = factor_df.reset_index(drop=True)
     factor_df['industry_rank'] = float('nan')
-    
+
     # 按日期和行业分组排名
     for date, day_data in factor_df.groupby(date_col):
         for industry, ind_data in day_data.groupby(industry_col):
             if len(ind_data) < min_industry_stocks:
                 # 股票数不足，跳过该行业
                 continue
-            
+
             # 计算行业内百分位排名
             # 使用 iloc 按位置写入，避免索引对齐问题
             rank_pct = ind_data[factor_col].rank(pct=True)
             factor_df.loc[ind_data.index, 'industry_rank'] = rank_pct
-    
+
     return factor_df
 
 
@@ -966,10 +965,10 @@ def industry_neutral_residual(
         PROJECT.md 行业中性化处理 - 回归残差方式
     """
     from sklearn.linear_model import LinearRegression
-    
+
     if logger is None:
         logger = get_logger(__name__)
-    
+
     # 检查行业列是否存在
     if industry_col not in factor_df.columns:
         logger.error(
@@ -982,28 +981,28 @@ def industry_neutral_residual(
             f"当前列: {factor_df.columns.tolist()}\n"
             f"请先补充行业数据后再使用行业中性化"
         )
-    
+
     results = []
-    
+
     for date, day_data in factor_df.groupby(date_col):
         # 过滤股票数不足的行业
         valid_industries = day_data.groupby(industry_col).filter(
             lambda x: len(x) >= min_industry_stocks
         )
-        
+
         if len(valid_industries) < min_industry_stocks:
             continue
-        
+
         # 构建行业哑变量
         industry_dummies = pd.get_dummies(valid_industries[industry_col])
-        
+
         # 回归
         model = LinearRegression()
         model.fit(industry_dummies, valid_industries[factor_col])
-        
+
         # 残差即为中性化因子
         residual = valid_industries[factor_col] - model.predict(industry_dummies)
-        
+
         # zip 返回二元组，用两个变量解包
         for asset, res in zip(valid_industries[asset_col].values, residual):
             results.append({
@@ -1011,5 +1010,5 @@ def industry_neutral_residual(
                 asset_col: asset,
                 'neutral_factor': round(res, 6)
             })
-    
+
     return pd.DataFrame(results)

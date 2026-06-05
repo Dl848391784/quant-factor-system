@@ -22,11 +22,11 @@
 最后修改: 2026-05-28（日志精确化修复）
 """
 
-from pathlib import Path
-from typing import Tuple, List, Optional, Dict, Any
+import gc
 import gzip
 import json
-import gc
+from pathlib import Path
+from typing import Any
 
 from .logger_config import get_logger
 
@@ -39,7 +39,7 @@ FACTOR_DATA_DIR = BASE_DIR / 'data_fetchers' / 'result'  # 更新为正确路径
 FACTOR_IC_RESULT_DIR = BASE_DIR / 'factor_ic' / 'result'  # 规范输出目录
 
 
-def _normalize_dates(dates: List[Any]) -> List[str]:
+def _normalize_dates(dates: list[Any]) -> list[str]:
     """
     日期标准化公共函数
     
@@ -61,10 +61,10 @@ def _normalize_dates(dates: List[Any]) -> List[str]:
     """
     if not dates:
         return []
-    
+
     # 1. 强制转换为字符串
     str_dates = [str(d) for d in dates]
-    
+
     # 2. 截断时间部分
     normalized = []
     for d in str_dates:
@@ -72,7 +72,7 @@ def _normalize_dates(dates: List[Any]) -> List[str]:
             normalized.append(d.split()[0])
         else:
             normalized.append(d)
-    
+
     # 3. 去重 + 4. 排序
     return sorted(set(normalized))
 
@@ -95,7 +95,7 @@ def get_ic_output_path(factor_name: str) -> Path:
     return FACTOR_IC_RESULT_DIR / f'ic_{factor_name}_analysis_result.json'
 
 
-def get_factor_data_dates(logger=None) -> Tuple[List[str], Optional[str]]:
+def get_factor_data_dates(logger=None) -> tuple[list[str], str | None]:
     """
     获取 factor_data.json.gz 的日期列表和最新日期
     
@@ -108,38 +108,38 @@ def get_factor_data_dates(logger=None) -> Tuple[List[str], Optional[str]]:
     """
     if logger is None:
         logger = get_logger(__name__)
-    
+
     factor_path = FACTOR_DATA_DIR / 'factor_ic_data.json.gz'
-    
+
     if not factor_path.exists():
         return [], None
-    
+
     try:
         with gzip.open(factor_path, 'rt', encoding='utf-8') as f:
             data = json.load(f)
-        
+
         meta = data.get('meta', {})
         dates = meta.get('dates', [])
-        
+
         if not dates:
             # 从数据记录中提取日期
             dates = [r['date'] for r in data.get('data', []) if r.get('date') is not None]
-        
+
         # 使用公共函数标准化日期（去重、排序、截断）
         dates = _normalize_dates(dates)
-        
+
         latest_date = dates[-1] if dates else None
-        
+
         del data
         gc.collect()
-        
+
         return dates, latest_date
     except Exception as e:
         logger.warning(f"读取 factor_data 失败 [{type(e).__name__}]: {e}")
         return [], None
 
 
-def _extract_dates_from_cache(data: Dict[str, Any]) -> Tuple[List[str], Optional[str]]:
+def _extract_dates_from_cache(data: dict[str, Any]) -> tuple[list[str], str | None]:
     """
     从缓存数据中提取日期列表和最新日期（公共函数）
     
@@ -155,23 +155,23 @@ def _extract_dates_from_cache(data: Dict[str, Any]) -> Tuple[List[str], Optional
     """
     # 优先读取顶层 dates 字段
     dates = data.get('dates', [])
-    
+
     if not dates:
         # 兼容旧格式：ic_series.dates
         ic_series = data.get('ic_series', {})
         dates = ic_series.get('dates', [])
-    
+
     if not dates:
         return [], None
-    
+
     # 使用公共函数标准化日期（去重、排序、截断）
     dates = _normalize_dates(dates)
-    
+
     latest_date = dates[-1] if dates else None
     return dates, latest_date
 
 
-def get_cache_latest_date(factor_name: str, logger=None) -> Optional[str]:
+def get_cache_latest_date(factor_name: str, logger=None) -> str | None:
     """
     获取因子IC缓存的最新日期
     
@@ -184,19 +184,19 @@ def get_cache_latest_date(factor_name: str, logger=None) -> Optional[str]:
     """
     if logger is None:
         logger = get_logger(__name__)
-    
+
     cache_file = FACTOR_IC_RESULT_DIR / f'ic_{factor_name}_analysis_result.json'
-    
+
     if not cache_file.exists():
         return None
-    
+
     try:
-        with open(cache_file, 'r', encoding='utf-8') as f:
+        with open(cache_file, encoding='utf-8') as f:
             result = json.load(f)
-        
+
         # 使用公共函数提取日期，确保逻辑一致性
         dates, latest_date = _extract_dates_from_cache(result)
-        
+
         return latest_date
     except Exception as e:
         logger.warning(f"读取缓存失败 [{factor_name}] [{type(e).__name__}]: {e}")
@@ -206,7 +206,7 @@ def get_cache_latest_date(factor_name: str, logger=None) -> Optional[str]:
 def check_data_completeness(
     factor_name: str,
     logger=None
-) -> Tuple[str, List[str], Dict[str, Any]]:
+) -> tuple[str, list[str], dict[str, Any]]:
     """
     检查因子IC数据的完整性
     
@@ -242,11 +242,11 @@ def check_data_completeness(
     """
     if logger is None:
         logger = get_logger(__name__)
-    
+
     cache_file = FACTOR_IC_RESULT_DIR / f'ic_{factor_name}_analysis_result.json'
-    
+
     # 初始化信息
-    info: Dict[str, Any] = {
+    info: dict[str, Any] = {
         'cache_file': str(cache_file),
         'cache_exists': cache_file.exists(),  # 基于文件存在性检查
         'cache_latest_date': None,
@@ -254,24 +254,24 @@ def check_data_completeness(
         'total_dates': 0,
         'missing_count': 0
     }
-    
+
     # 检查数据源
     all_dates, source_latest = get_factor_data_dates(logger=logger)
     info['source_latest_date'] = source_latest
     info['total_dates'] = len(all_dates)
-    
+
     if not all_dates:
         # 数据源不可用
         logger.warning(f"[{factor_name}] 数据完整性判断: skip（数据源不可用）")
         return 'skip', [], info
-    
+
     # 检查缓存最新日期
     cache_latest = get_cache_latest_date(factor_name, logger=logger)
     info['cache_latest_date'] = cache_latest
-    
+
     # 注意：cache_latest 为 None 可能是文件不存在或读取失败
     # cache_exists 已通过文件存在性检查确定
-    
+
     if not info['cache_exists']:
         # 缓存文件不存在，需要全量计算
         # missing_dates = all_dates（语义：全部需要计算，而非"缺失"）
@@ -279,18 +279,18 @@ def check_data_completeness(
         info['missing_count'] = len(missing_dates)
         logger.info(f"[{factor_name}] 数据完整性判断: full（缓存不存在，需计算 {len(missing_dates)} 天）")
         return 'full', missing_dates, info
-    
+
     if cache_latest is None:
         # 文件存在但读取失败，需要全量计算
         missing_dates = all_dates
         info['missing_count'] = len(missing_dates)
         logger.warning(f"[{factor_name}] 数据完整性判断: full（缓存读取失败，需计算 {len(missing_dates)} 天）")
         return 'full', missing_dates, info
-    
+
     # 计算缺失日期（大于缓存最新日期）
     missing_dates = [d for d in all_dates if d > cache_latest]
     info['missing_count'] = len(missing_dates)
-    
+
     if len(missing_dates) > 0:
         # 有缺失日期，可增量更新
         logger.info(f"[{factor_name}] 数据完整性判断: incremental（缓存至 {cache_latest}，需补充 {len(missing_dates)} 天）")
@@ -303,7 +303,7 @@ def check_data_completeness(
 
 def check_incremental_update(
     factor_name: str
-) -> Tuple[bool, List[str]]:
+) -> tuple[bool, list[str]]:
     """
     检查因子是否可以增量更新
     
@@ -328,9 +328,9 @@ def check_incremental_update(
         ...     print(f"可增量更新，缺失天数: {len(missing)}")
     """
     mode, missing_dates, info = check_data_completeness(factor_name)
-    
+
     can_incremental = (mode == 'incremental')
-    
+
     return can_incremental, missing_dates
 
 
@@ -338,7 +338,7 @@ def check_incremental_update(
 # 便捷函数
 # ============================================================
 
-def get_cache_info(factor_name: str, logger=None) -> Dict[str, Any]:
+def get_cache_info(factor_name: str, logger=None) -> dict[str, Any]:
     """
     获取因子IC缓存的信息摘要
     
@@ -352,9 +352,9 @@ def get_cache_info(factor_name: str, logger=None) -> Dict[str, Any]:
     """
     if logger is None:
         logger = get_logger(__name__)
-    
+
     cache_file = FACTOR_IC_RESULT_DIR / f'ic_{factor_name}_analysis_result.json'
-    
+
     info = {
         'factor_name': factor_name,
         'cache_file': str(cache_file),
@@ -364,29 +364,29 @@ def get_cache_info(factor_name: str, logger=None) -> Dict[str, Any]:
         'n_days': 0,
         'latest_date': None
     }
-    
+
     if not cache_file.exists():
         return info
-    
+
     try:
         # 文件大小
         info['file_size_mb'] = round(cache_file.stat().st_size / 1024 / 1024, 2)
-        
-        with open(cache_file, 'r', encoding='utf-8') as f:
+
+        with open(cache_file, encoding='utf-8') as f:
             data = json.load(f)
-        
+
         # IC指标（统一返回 dict，不存在时为空 dict）
         info['ic_metrics'] = data.get('ic_metrics') or {}
-        
+
         # 使用公共函数提取日期，确保逻辑一致性
         dates, latest_date = _extract_dates_from_cache(data)
         info['n_days'] = len(dates)
         info['latest_date'] = latest_date
-        
+
     except Exception as e:
         logger.warning(f"读取缓存信息失败 [{factor_name}] [{type(e).__name__}]: {e}")
         info['error'] = str(e)
-    
+
     return info
 
 
@@ -394,14 +394,14 @@ if __name__ == '__main__':
     """测试"""
     # 创建 logger（__main__ 测试场景）
     logger = get_logger(__name__)
-    
+
     logger.info("=" * 60)
     logger.info("数据完整性检查模块测试")
     logger.info("=" * 60)
-    
+
     # 测试几个因子
     test_factors = ['kdj_j', 'bollinger_pb', 'turnover_surge', 'rsi', 'volume_ratio']
-    
+
     for factor in test_factors:
         logger.info(f"【{factor}】")
         mode, missing, info = check_data_completeness(factor, logger=logger)

@@ -10,13 +10,15 @@ test_layered_backtest_return_5d_1d 测试用例
 import sys
 from pathlib import Path
 
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-import pytest
 import json
-import pandas as pd
+from typing import Literal, get_args
+
 import numpy as np
-from typing import get_args, Literal
+import pandas as pd
+import pytest
 
 from backtest.layered_backtest_return_5d_1d import Return5dLayerConfig
 from data_fetchers.factor_calculator import calculate_return_5d
@@ -33,7 +35,7 @@ class TestReturn5dLayerConfig:
         """TC001-02: layer_names 类属性为纯标签"""
         assert len(Return5dLayerConfig.layer_names) == 5
         assert Return5dLayerConfig.layer_names[0] == 'lowest'
-    
+
     def test_layer_descriptions_classvar(self):
         """TC001-03: layer_descriptions 含中文描述"""
         assert len(Return5dLayerConfig.layer_descriptions) == 5
@@ -62,13 +64,13 @@ class TestReturn5dLayerConfig:
         assert '1' in config.layer_names_dict
         assert '5' in config.layer_names_dict
         assert config.layer_names_dict['1'] == '极低层(5日涨幅最小)'
-    
+
     def test_layer_names_semantic(self):
         """TC001-07: layer_descriptions 语义描述"""
         # layer_descriptions 应包含"涨幅"相关描述
         for desc in Return5dLayerConfig.layer_descriptions:
             assert '涨' in desc or '下跌' in desc or '变化' in desc
-    
+
     def test_layer_names_no_fixed_threshold(self):
         """TC001-08: layer_names 纯标签无固定阈值"""
         for name in Return5dLayerConfig.layer_names:

@@ -13,16 +13,16 @@
 """
 
 import logging
-from pathlib import Path
 from datetime import datetime
-from typing import Optional
+from pathlib import Path
+
 
 __all__ = ['setup_logger']
 
 
 def setup_logger(
     script_name: str,
-    logs_dir: Optional[Path] = None,
+    logs_dir: Path | None = None,
     level: int = logging.INFO,
     console_level: int = logging.INFO
 ) -> logging.Logger:
@@ -56,19 +56,19 @@ def setup_logger(
     if logs_dir is None:
         logs_dir = Path(__file__).parent.parent / 'logs'
     logs_dir.mkdir(parents=True, exist_ok=True)  # 自动创建
-    
+
     # 日志文件名
     today = datetime.now().strftime('%Y-%m-%d')
     log_file = logs_dir / f"{script_name}_{today}.log"
-    
+
     # 创建 Logger
     logger = logging.getLogger(script_name)
     logger.setLevel(level)
-    
+
     # 防止重复添加 Handler（多次调用时）
     if logger.handlers:
         return logger
-    
+
     # 文件 Handler
     file_handler = logging.FileHandler(
         log_file,
@@ -76,11 +76,11 @@ def setup_logger(
         encoding='utf-8'
     )
     file_handler.setLevel(level)
-    
+
     # 控制台 Handler（可选，便于开发调试）
     console_handler = logging.StreamHandler()
     console_handler.setLevel(console_level)
-    
+
     # Formatter（遵循 PROJECT.md 规范）
     formatter = logging.Formatter(
         '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
@@ -88,9 +88,9 @@ def setup_logger(
     )
     file_handler.setFormatter(formatter)
     console_handler.setFormatter(formatter)
-    
+
     # 添加 Handler
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
-    
+
     return logger

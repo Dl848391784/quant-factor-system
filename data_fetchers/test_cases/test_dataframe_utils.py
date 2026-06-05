@@ -18,9 +18,10 @@ DataFrame 工具模块测试用例
 # 标准库导入
 import logging
 
+import pandas as pd
+
 # 第三方库导入
 import pytest
-import pandas as pd
 
 # 本地模块导入
 from data_fetchers.common.dataframe_utils import validate_dataframe_columns
@@ -28,7 +29,7 @@ from data_fetchers.common.dataframe_utils import validate_dataframe_columns
 
 class TestValidateDataframeColumns:
     """validate_dataframe_columns 函数测试类"""
-    
+
     def test_normal_case_all_columns_present(self):
         """TC001: 正常场景 - 所有必需列存在"""
         df = pd.DataFrame({
@@ -38,17 +39,17 @@ class TestValidateDataframeColumns:
         })
         # 不应抛出异常
         validate_dataframe_columns(df, ['date', 'close', 'volume'], 'stock_data')
-    
+
     def test_missing_columns_error_message(self):
         """TC002: 异常场景 - 缺少必需列，错误信息包含可用列"""
         df = pd.DataFrame({
             'date': ['2024-01-01'],
             'close': [100.0]
         })
-        
+
         with pytest.raises(ValueError) as exc_info:
             validate_dataframe_columns(df, ['date', 'close', 'volume'], 'stock_data')
-        
+
         error_msg = str(exc_info.value)
         # 验证错误信息包含缺失列和可用列
         assert "缺少必需列" in error_msg
@@ -56,58 +57,58 @@ class TestValidateDataframeColumns:
         assert "可用列" in error_msg
         assert "date" in error_msg
         assert "close" in error_msg
-    
+
     def test_df_none_raises_type_error(self):
         """TC003: 边界场景 - df 参数为 None（非 DataFrame 类型）"""
         with pytest.raises(TypeError) as exc_info:
             validate_dataframe_columns(None, ['date', 'close'], 'stock_data')
-        
+
         error_msg = str(exc_info.value)
         # 验证错误信息提示类型错误（而非简单的 None 检查）
         assert "必须" in error_msg
         assert "DataFrame" in error_msg
-    
+
     def test_empty_required_cols_raises_value_error(self):
         """TC004: 边界场景 - required_cols 为空列表"""
         df = pd.DataFrame({'date': ['2024-01-01']})
-        
+
         with pytest.raises(ValueError) as exc_info:
             validate_dataframe_columns(df, [], 'stock_data')
-        
+
         assert "不能为空列表" in str(exc_info.value)
-    
+
     def test_with_custom_logger(self):
         """TC005: 日志参数化 - 自定义 logger"""
         df = pd.DataFrame({'date': ['2024-01-01'], 'close': [100.0]})
-        
+
         # 创建测试 logger（使用真实模块名，遵循 PROJECT.md 日志规范）
         test_logger = logging.getLogger('data_fetchers.common.dataframe_utils')
-        
+
         # 不应抛出异常
         validate_dataframe_columns(df, ['date', 'close'], 'stock_data', logger=test_logger)
-    
+
     def test_partial_columns_missing(self):
         """TC006: 部分缺失 - 多个必需列中部分缺失"""
         df = pd.DataFrame({
             'date': ['2024-01-01'],
             'close': [100.0]
         })
-        
+
         with pytest.raises(ValueError) as exc_info:
             validate_dataframe_columns(df, ['date', 'close', 'volume', 'high'], 'stock_data')
-        
+
         error_msg = str(exc_info.value)
         # 验证多个缺失列都出现在错误信息中
         assert "volume" in error_msg
         assert "high" in error_msg
-    
+
     def test_empty_dataframe_with_columns(self):
         """TC007: 空DataFrame - 有列定义但无数据行"""
         df = pd.DataFrame(columns=['date', 'close'])  # 空数据但有列定义
-        
+
         # 列名校验只检查列名是否存在，不检查数据行数
         validate_dataframe_columns(df, ['date', 'close'], 'empty_data')
-    
+
     def test_extra_columns_not_required(self):
         """TC008: 多余列 - DataFrame 有非必需列，不影响校验"""
         df = pd.DataFrame({
@@ -115,89 +116,89 @@ class TestValidateDataframeColumns:
             'close': [100.0],
             'extra_col': ['extra_value']  # 非必需列
         })
-        
+
         # 多余列不影响校验
         validate_dataframe_columns(df, ['date', 'close'], 'stock_data')
-    
+
     def test_df_name_empty_string(self):
         """TC009: 边界场景 - df_name 参数为空字符串"""
         df = pd.DataFrame({'date': ['2024-01-01'], 'close': [100.0]})
-        
+
         # df_name 为空字符串是允许的，错误信息中会显示空字符串
         validate_dataframe_columns(df, ['date', 'close'], '')
-    
+
     def test_column_name_case_sensitive(self):
         """TC010: 列名大小写敏感 - 列名大小写不匹配视为缺失"""
         df = pd.DataFrame({
             'Date': ['2024-01-01'],  # 大写 D
             'close': [100.0]
         })
-        
+
         with pytest.raises(ValueError) as exc_info:
             validate_dataframe_columns(df, ['date', 'close'], 'stock_data')  # 小写 d
-        
+
         error_msg = str(exc_info.value)
         # 验证大小写敏感，'date' 应在缺失列表中
         assert "date" in error_msg.lower()  # 错误信息中应包含缺失列名
-    
+
     def test_df_name_none_uses_default(self):
         """TC011: 边界场景 - df_name 参数为 None，使用默认值"""
         df = pd.DataFrame({'date': ['2024-01-01'], 'close': [100.0]})
-        
+
         # df_name 为 None 时，函数应使用默认值而非抛出异常
         validate_dataframe_columns(df, ['date', 'close'], None)
-    
+
     def test_df_name_none_in_error_message(self):
         """TC012: 边界场景 - df_name 为 None 时错误信息使用默认值"""
         df = pd.DataFrame({'date': ['2024-01-01'], 'close': [100.0]})
-        
+
         with pytest.raises(ValueError) as exc_info:
             validate_dataframe_columns(df, ['date', 'close', 'volume'], None)
-        
+
         error_msg = str(exc_info.value)
         # 验证错误信息中使用默认值而非 None
         assert "<未命名DataFrame>" in error_msg
         assert "缺少必需列" in error_msg
-    
+
     def test_df_none_with_none_df_name(self):
         """TC013: 边界场景 - df 为 None 且 df_name 也为 None"""
         with pytest.raises(TypeError) as exc_info:
             validate_dataframe_columns(None, ['date', 'close'], None)
-        
+
         error_msg = str(exc_info.value)
         # 验证错误信息中使用默认值和类型错误提示
         assert "<未命名DataFrame>" in error_msg
         assert "必须" in error_msg
         assert "DataFrame" in error_msg
-    
+
     def test_df_string_raises_type_error(self):
         """TC014: 边界场景 - df 参数为字符串（非 DataFrame 类型）"""
         with pytest.raises(TypeError) as exc_info:
             validate_dataframe_columns('invalid_string', ['date'], 'test')
-        
+
         error_msg = str(exc_info.value)
         # 验证错误信息提示类型错误
         assert "必须" in error_msg
         assert "DataFrame" in error_msg
-    
+
     def test_df_int_raises_type_error(self):
         """TC015: 边界场景 - df 参数为整数（非 DataFrame 类型）"""
         with pytest.raises(TypeError) as exc_info:
             validate_dataframe_columns(123, ['date'], 'test')
-        
+
         error_msg = str(exc_info.value)
         # 验证错误信息提示类型错误
         assert "必须" in error_msg
         assert "DataFrame" in error_msg
-    
+
     def test_missing_cols_preserves_order(self):
         """TC016: 缺失列顺序保持原始顺序"""
         df = pd.DataFrame({'close': [100.0]})
-        
+
         with pytest.raises(ValueError) as exc_info:
             # required_cols 顺序为 ['date', 'volume', 'high']
             validate_dataframe_columns(df, ['date', 'volume', 'high'], 'test')
-        
+
         error_msg = str(exc_info.value)
         # 验证缺失列顺序与 required_cols 顺序一致
         assert "['date', 'volume', 'high']" in error_msg

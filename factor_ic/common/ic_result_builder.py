@@ -12,27 +12,28 @@ IC结果构建公共模块 - factor_ic 公共模块
 日期: 2026-05-22
 """
 
-import pandas as pd
-import numpy as np
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
+
+import pandas as pd
 
 # 导入类型转换函数
 from .convert_types import convert_to_native_types
 from .logger_config import get_logger
+
+
 logger = get_logger(__name__)
 
 
 def build_ic_result(
-    ic_result: Dict,
-    raw_metadata: Dict,
+    ic_result: dict,
+    raw_metadata: dict,
     factor_name: str,
     return_period: str = '1d',
     data_source: str = '',
     factor_col: str = '',
     update_mode: str = 'full'
-) -> Dict:
+) -> dict:
     """
     构建 IC 分析完整结果（符合 MODULE.md 输出结构统一性规范）
     
@@ -66,33 +67,33 @@ def build_ic_result(
     icir = ic_result['icir']
     positive_ratio = ic_result['positive_ratio']
     n_days = ic_result['n_days']
-    
+
     # 入口校验：ic_series 为空时不应调用此函数
     if ic_series is None or len(ic_series) == 0:
         logger.error(f"ic_series 为空，因子: {factor_name}，应调用 build_error_result 而非 build_ic_result")
         raise ValueError("ic_series 为空，应调用 build_error_result 而非 build_ic_result")
-    
+
     # 五维度判断（直接使用公共模块返回）
     statistical_significance = ic_result['statistical_significance']
     factor_direction_judgment = ic_result['factor_direction']
     economic_significance = ic_result['economic_significance']
     icir_stability = ic_result['icir_stability']
     ic_distribution_consistency = ic_result['ic_distribution_consistency']
-    
+
     # ========== 构建日期范围 ==========
     # 显式排序 ic_series.index，消除对调用方的隐式依赖
     # 确保 [0] 取最早日期、[-1] 取最晚日期
     dates_from_series = [str(d) for d in ic_series.sort_index().index]
     period_start = dates_from_series[0] if dates_from_series else raw_metadata.get('period_start', '')
     period_end = dates_from_series[-1] if dates_from_series else raw_metadata.get('period_end', '')
-    
+
     # ========== 构建 period ==========
     period = {
         'start': period_start,
         'end': period_end,
         'description': 'IC计算覆盖日期范围'
     }
-    
+
     # ========== 构建 ic_metrics ==========
     ic_metrics = {
         'ic_mean': round(float(ic_mean), 6),
@@ -101,7 +102,7 @@ def build_ic_result(
         'p_value': statistical_significance['p_value'],
         'p_value_display': statistical_significance['p_value_display']
     }
-    
+
     # ========== 构建 sample_stats ==========
     # 口径说明：avg_stocks_period 描述过滤后的统计范围
     # 注意：avg_stocks_per_day 来自 raw_metadata（data_loader 已计算）
@@ -115,18 +116,18 @@ def build_ic_result(
             'description': '过滤后每日平均股票数（dropna 后）'
         }
     }
-    
+
     # ========== 构建 IC 时间序列 ==========
     dates = [str(d) for d in ic_series.index]
     ic_values = [round(float(v), 6) for v in ic_series.values]
-    
+
     # 计算 rolling_ic_mean（20日窗口，min_periods=10）— 复用公共函数
     rolling_ic_mean = build_rolling_ic_mean(ic_series)
-    
+
     # ========== 构建 avg_stocks_per_day ==========
     # 从 raw_metadata 获取每日平均股票数
     avg_stocks_per_day = raw_metadata.get('avg_stocks_per_day', 0)
-    
+
     # ========== 构建 summary ==========
     summary = {
         'ic_performance': _format_ic_performance(ic_mean, icir),
@@ -139,7 +140,7 @@ def build_ic_result(
             icir_stability['is_stable']
         )
     }
-    
+
     # ========== 构建 factor_stats ==========
     factor_stats = {
         'factor_name': factor_name,
@@ -148,7 +149,7 @@ def build_ic_result(
         'total_days': raw_metadata['total_days'],
         'valid_days': n_days
     }
-    
+
     # ========== 组装完整结果 ==========
     result = {
         'factor_name': factor_name,
@@ -171,21 +172,21 @@ def build_ic_result(
         'update_mode': update_mode,
         'factor_col': factor_col  # 额外字段，用于追踪
     }
-    
+
     # 类型转换（确保 JSON 兼容）
     result = convert_to_native_types(result)
-    
+
     return result
 
 
 def build_sample_stats(
-    raw_metadata: Dict,
+    raw_metadata: dict,
     n_days: int,
     factor_df: pd.DataFrame,
     period_start: str,
     period_end: str,
     avg_stocks_description: str = '过滤后每日平均股票数（dropna 后）'
-) -> Dict:
+) -> dict:
     """
     构建样本统计字段
     
@@ -206,10 +207,10 @@ def build_sample_stats(
     if 'date' not in factor_df.columns:
         logger.error("factor_df 缺少 'date' 列，当前列: %s", list(factor_df.columns))
         raise KeyError("factor_df 必须包含 'date' 列，当前列: %s" % list(factor_df.columns))
-    
+
     # 统一使用 round(x, 1) 保留一位小数，与 build_ic_result 中的 raw_metadata 值精度一致
     avg_stocks_per_day = round(factor_df.groupby('date').size().mean(), 1)
-    
+
     return {
         'total_days': raw_metadata['total_days'],
         'valid_days': n_days,
@@ -226,7 +227,7 @@ def build_rolling_ic_mean(
     ic_series: pd.Series,
     window: int = 20,
     min_periods: int = 10
-) -> List[Optional[float]]:
+) -> list[float | None]:
     """
     计算滚动 IC 均值
     
@@ -250,7 +251,7 @@ def build_error_result(
     error_msg: str,
     return_period: str = '1d',
     data_source: str = ''
-) -> Dict:
+) -> dict:
     """
     构建错误情况下的默认结果（符合 MODULE.md 输出结构统一性规范）
     
@@ -364,7 +365,7 @@ def _format_ic_performance(ic_mean: float, icir: float) -> str:
         level = '中'
     else:
         level = '弱'
-    
+
     # ICIR 分级（ICIR 始终 >= 0）
     if icir >= 2.0:
         stability = '优秀'
@@ -374,7 +375,7 @@ def _format_ic_performance(ic_mean: float, icir: float) -> str:
         stability = '可用'
     else:
         stability = '不足'
-    
+
     return f'IC均值={ic_mean:.4f}（{level}），ICIR={icir:.2f}（{stability}）'
 
 
@@ -412,12 +413,12 @@ def get_ic_output_path(factor_name: str, return_period: str = '1d') -> Path:
     """
     result_dir = Path(__file__).parent.parent / 'result'
     result_dir.mkdir(parents=True, exist_ok=True)
-    
+
     output_filename = f"ic_{factor_name}_{return_period}_analysis_result.json"
     return result_dir / output_filename
 
 
-def save_ic_result(result: Dict, output_path: Optional[Path] = None) -> Path:
+def save_ic_result(result: dict, output_path: Path | None = None) -> Path:
     """
     保存 IC 结果到 JSON 文件
     
@@ -432,21 +433,21 @@ def save_ic_result(result: Dict, output_path: Optional[Path] = None) -> Path:
         输出前进行字段完整性校验
     """
     import json
-    
+
     if output_path is None:
         # 从 result 中提取因子信息生成路径
         factor_name = result.get('factor_name', 'unknown')
         return_period = result.get('factor_stats', {}).get('return_period', '1d')
-        
+
         # 使用 return_period 动态构造后缀，而非硬编码 _1d
         # 处理因子名已包含收益周期后缀的情况（如 rsi_1d → rsi）
         suffix = f'_{return_period}'
         factor_name_clean = factor_name[:-len(suffix)] if factor_name.endswith(suffix) else factor_name
         output_path = get_ic_output_path(factor_name_clean, return_period)
-    
+
     # 确保目录存在
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # 保存（统一转换，添加异常处理）
     try:
         with open(output_path, 'w', encoding='utf-8') as f:

@@ -57,15 +57,16 @@ import argparse
 import sys
 from pathlib import Path
 
+
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
+# 从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
+from data_fetchers.factor_calculator import calculate_return_5d
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
 from factor_ic.common.logger_config import get_logger
 
-# 从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
-from data_fetchers.factor_calculator import calculate_return_5d
 
 logger = get_logger(__name__)
 
@@ -84,9 +85,9 @@ def main():
     parser = argparse.ArgumentParser(description='5日累计涨幅因子 IC 计算器')
     parser.add_argument('--force-full', action='store_true', help='强制全量计算')
     parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数')
-    
+
     args = parser.parse_args()
-    
+
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     # 注意：公共模块内部已有启动日志，此处不再重复打印
     result = run_complex_factor_ic(
@@ -99,13 +100,13 @@ def main():
         force_full=args.force_full,
         _logger=logger
     )
-    
+
     # 保底处理：公共模块异常返回 None 时直接退出
     # 注意：这是可预期的业务失败，不是运行时错误，直接退出更语义清晰
     if result is None:
         logger.error("run_complex_factor_ic 返回 None")
         sys.exit(1)
-    
+
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get('ic_metrics') or {}
     sample_stats = result.get('sample_stats') or {}
@@ -113,7 +114,7 @@ def main():
     # 字段名 ic_distribution_consistency 来源于 MODULE.md 第56行输出结构
     # 语义：正比例与方向一致/矛盾判断（MODULE.md 第77行），非单纯分布统计
     ic_distribution = result.get('ic_distribution_consistency') or {}
-    
+
     logger.info("=" * 60)
     logger.info("结果摘要")
     logger.info("=" * 60)
@@ -142,7 +143,7 @@ def main():
         logger.info(f"IC>0 占比: {positive_ratio:.2%}")
     else:
         logger.info("IC>0 占比: N/A")
-    
+
     # 异常状态整体感知日志（运维巡检用）
     # ic_mean 为 None 表示整个 IC 计算结果为空，是最严重情况
     has_warning = False
@@ -157,24 +158,24 @@ def main():
     elif icir is None:
         logger.warning("ICIR无法计算（IC标准差为0，因子数据无波动），请检查因子数据分布")
         has_warning = True
-    
+
     # positive_ratio 为 None 表示分布一致性判断缺失（独立检查，不与上方 elif 链耦合）
     if positive_ratio is None:
         logger.warning("IC>0占比无法获取（字段名错误或数据缺失），请检查公共模块输出结构")
         has_warning = True
-    
+
     if has_warning:
         logger.info("5日累计涨幅因子IC计算完成（存在异常，请关注上方警告）")
     else:
         logger.info("5日累计涨幅因子IC计算完成")
-    
+
     return result
 
 
 if __name__ == '__main__':
     try:
         main()
-    except Exception as e:
+    except Exception:
         # 未预期异常，使用 exception()（自动打印完整堆栈，无需重复传 e）
         logger.exception("未预期的错误")
         sys.exit(1)

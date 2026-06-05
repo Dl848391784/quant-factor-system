@@ -26,12 +26,14 @@ RSI_1D IC 计算器（重构版 v2） - 1日收益周期
 import sys
 from pathlib import Path
 
+
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.factor_ic_runner import run_simple_factor_ic
 from factor_ic.common.logger_config import get_logger
+
 
 logger = get_logger(__name__)
 
@@ -48,16 +50,16 @@ DEFAULT_MIN_STOCKS = 10
 def main():
     """CLI 主入口"""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='RSI_1D IC 计算器（重构版 v2）')
     parser.add_argument('--force-full', action='store_true', help='强制全量计算')
     parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数')
-    
+
     args = parser.parse_args()
-    
+
     # 启动节点日志
     logger.info(f"RSI_1D 因子 IC 计算启动 [min_stocks={args.min_stocks}, force_full={args.force_full}]")
-    
+
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_simple_factor_ic(
         factor_name='rsi',
@@ -66,12 +68,12 @@ def main():
         force_full=args.force_full,
         _logger=logger
     )
-    
+
     # 使用 .get() 防御性访问结果
     ic_metrics = result.get('ic_metrics', {})
     sample_stats = result.get('sample_stats', {})
     period = result.get('period', {})
-    
+
     logger.info("=" * 60)
     logger.info("结果摘要")
     logger.info("=" * 60)
@@ -83,7 +85,7 @@ def main():
     logger.info(f"IC 标准差: {ic_metrics.get('ic_std', 0):.4f}")
     logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
     logger.info(f"IC>0 占比: {result.get('positive_ratio', 0):.2%}")
-    
+
     return result
 
 

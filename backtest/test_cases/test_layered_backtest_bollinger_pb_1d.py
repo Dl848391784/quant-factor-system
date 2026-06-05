@@ -10,11 +10,13 @@ test_layered_backtest_bollinger_pb_1d 测试用例
 import sys
 from pathlib import Path
 
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-import pytest
 import json
-from typing import get_args, Literal
+from typing import Literal, get_args
+
+import pytest
 
 from backtest.layered_backtest_bollinger_pb_1d import BollingerPbLayerConfig
 
@@ -30,7 +32,7 @@ class TestBollingerPbLayerConfig:
         """TC001-02: layer_names 类属性为纯标签"""
         assert len(BollingerPbLayerConfig.layer_names) == 5
         assert BollingerPbLayerConfig.layer_names[0] == 'lowest'
-    
+
     def test_layer_descriptions_classvar(self):
         """TC001-03: layer_descriptions 含中文描述"""
         assert len(BollingerPbLayerConfig.layer_descriptions) == 5
@@ -59,14 +61,14 @@ class TestBollingerPbLayerConfig:
         assert '1' in config.layer_names_dict
         assert '5' in config.layer_names_dict
         assert config.layer_names_dict['1'] == '极低层(接近下轨)'
-    
+
     def test_layer_names_semantic(self):
         """TC001-08: layer_descriptions 语义描述"""
         config = BollingerPbLayerConfig()
         # layer_descriptions 应包含布林带相关描述
         for desc in config.__class__.layer_descriptions:
             assert '轨' in desc
-    
+
     def test_layer_names_no_fixed_threshold(self):
         """TC001-09: layer_names 纯标签无固定阈值"""
         for name in BollingerPbLayerConfig.layer_names:

@@ -64,8 +64,8 @@ import argparse
 import sys
 from pathlib import Path
 
-import pandas as pd
 import numpy as np
+
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -73,6 +73,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
 from factor_ic.common.logger_config import get_logger
+
 
 logger = get_logger(__name__)
 
@@ -133,21 +134,21 @@ def calculate_overnight_return(factor_df):
     """
     # 遵循 MODULE.md 约束 #4：函数入口先 copy()
     factor_df = factor_df.copy()
-    
+
     # 按资产分组计算（每只股票独立）
     # 计算公式：overnight_ret = (open - close.shift(1)) / close.shift(1)
     prev_close = factor_df.groupby('asset')['close'].shift(1)
-    
+
     # 计算隔夜收益率
     factor_df['overnight_ret'] = (factor_df['open'] - prev_close) / prev_close
-    
+
     # 除零防护：检测极小值和负数收盘价（数据污染场景）
     # 条件 1: |prev_close| < EPSILON → 除零风险
     # 条件 2: prev_close < 0 → 数据污染（负数收盘价）
     # 注意：两个 mask 必须互斥，避免负数收盘价被重复处理
     near_zero_mask = prev_close.abs() < EPSILON
     negative_mask = (prev_close < 0) & ~near_zero_mask  # 排除已处理的极小值
-    
+
     # 分别处理两种异常（语义清晰，日志可追溯）
     if near_zero_mask.any():
         near_zero_count = near_zero_mask.sum()
@@ -156,7 +157,7 @@ def calculate_overnight_return(factor_df):
             f"存在除零风险，隔夜收益率已设为 NaN"
         )
         factor_df.loc[near_zero_mask, 'overnight_ret'] = np.nan
-    
+
     if negative_mask.any():
         negative_count = negative_mask.sum()
         logger.warning(
@@ -164,21 +165,21 @@ def calculate_overnight_return(factor_df):
             f"数据污染场景，隔夜收益率已设为 NaN"
         )
         factor_df.loc[negative_mask, 'overnight_ret'] = np.nan
-    
+
     # 统计计算结果
     valid_count = factor_df['overnight_ret'].notna().sum()
     total_count = len(factor_df)
-    
+
     # 除零防护：空 DataFrame 时跳过比例计算
     if total_count == 0:
         logger.warning("传入空 DataFrame，隔夜收益率计算跳过")
         return factor_df
-    
+
     logger.info(
         f"隔夜收益率计算完成\n"
         f"有效值: {valid_count} / {total_count} ({valid_count/total_count:.2%})"
     )
-    
+
     return factor_df
 
 
@@ -191,9 +192,9 @@ def main():
     parser = argparse.ArgumentParser(description='隔夜收益率因子 IC 计算器')
     parser.add_argument('--force-full', action='store_true', help='强制全量计算')
     parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数')
-    
+
     args = parser.parse_args()
-    
+
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     # 注意：公共模块内部已有启动日志，此处不再重复打印
     # 注意：factor_cols 必须包含 asset, date 列（groupby 和 shift 依赖）
@@ -207,13 +208,13 @@ def main():
         force_full=args.force_full,
         _logger=logger
     )
-    
+
     # 保底处理：公共模块异常返回 None 时直接退出
     # 注意：这是可预期的业务失败，不是运行时错误，直接退出更语义清晰
     if result is None:
         logger.error("run_complex_factor_ic 返回 None")
         sys.exit(1)
-    
+
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get('ic_metrics') or {}
     sample_stats = result.get('sample_stats') or {}
@@ -221,7 +222,7 @@ def main():
     # 字段名 ic_distribution_consistency 来源于 MODULE.md 第56行输出结构
     # 语义：正比例与方向一致/矛盾判断（MODULE.md 第77行），非单纯分布统计
     ic_distribution = result.get('ic_distribution_consistency') or {}
-    
+
     logger.info("=" * 60)
     logger.info("结果摘要")
     logger.info("=" * 60)
@@ -230,31 +231,31 @@ def main():
     logger.info(f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}")
     logger.info(f"有效天数: {sample_stats.get('valid_days', 0)} 天")
     logger.info("--- IC指标 ---")
-    
+
     ic_mean = ic_metrics.get('ic_mean')
     if ic_mean is not None:
         logger.info(f"IC 均值: {ic_mean:.4f}")
     else:
         logger.info("IC 均值: N/A（本次计算结果为空，请检查数据源）")
-    
+
     ic_std = ic_metrics.get('ic_std')
     if ic_std is not None:
         logger.info(f"IC 标准差: {ic_std:.4f}")
     else:
         logger.info("IC 标准差: N/A（数据不足或全为相同值）")
-    
+
     icir = ic_metrics.get('icir')
     if icir is not None:
         logger.info(f"ICIR: {icir:.2f}")
     else:
         logger.info("ICIR: N/A（IC 标准差为 0 或数据不足）")
-    
+
     positive_ratio = ic_distribution.get('positive_ratio')
     if positive_ratio is not None:
         logger.info(f"IC>0 占比: {positive_ratio:.2%}")
     else:
         logger.info("IC>0 占比: N/A（字段名错误或数据缺失）")
-    
+
     # 异常状态整体感知日志（运维巡检用）
     # ic_mean 为 None 表示整个 IC 计算结果为空，是最严重情况
     has_warning = False
@@ -269,24 +270,24 @@ def main():
     elif icir is None:
         logger.warning("ICIR无法计算（IC标准差为0，因子数据无波动），请检查因子数据分布")
         has_warning = True
-    
+
     # positive_ratio 为 None 表示分布一致性判断缺失（独立检查，不与上方 elif 链耦合）
     if positive_ratio is None:
         logger.warning("IC>0占比无法获取（字段名错误或数据缺失），请检查公共模块输出结构")
         has_warning = True
-    
+
     if has_warning:
         logger.info("隔夜收益率因子IC计算完成（存在异常，请关注上方警告）")
     else:
         logger.info("隔夜收益率因子IC计算完成")
-    
+
     return result
 
 
 if __name__ == '__main__':
     try:
         main()
-    except Exception as e:
+    except Exception:
         # 未预期异常，使用 exception()（自动打印完整堆栈，无需重复传 e）
         logger.exception("未预期的错误")
         sys.exit(1)

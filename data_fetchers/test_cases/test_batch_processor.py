@@ -16,24 +16,27 @@ batch_processor.py pytest 测试文件
 - v1.0 (2026-05-27): 初始版本，覆盖所有公共函数
 """
 
-import pytest
-import logging
-import tempfile
 import gzip
 import json
-from pathlib import Path
-from unittest.mock import patch as mock_patch
+import logging
 
 # 添加项目根目录到 sys.path
 import sys
+import tempfile
+from pathlib import Path
+from unittest.mock import patch as mock_patch
+
+import pytest
+
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from data_fetchers.batch_processor import (
     BatchStream,
-    save_batch_cache_sorted,
-    n_way_merge_deduplicate,
-    format_final_output,
     cleanup_batch_files,
+    format_final_output,
+    n_way_merge_deduplicate,
+    save_batch_cache_sorted,
 )
 
 

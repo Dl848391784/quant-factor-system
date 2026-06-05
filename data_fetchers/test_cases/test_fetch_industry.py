@@ -19,31 +19,34 @@ fetch_industry.py pytest 测试文件
 - v1.0 (2026-05-27): 初始版本，覆盖核心流程和约束合规验证
 """
 
-import pytest
 import json
 import logging
-import tempfile
-import threading
-import time
-from pathlib import Path
-from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
 
 # 添加项目根目录到 sys.path
 import sys
+import tempfile
+import threading
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from data_fetchers.fetch_industry import (
+    _OUTPUT_VERSION,
+    SW_INDUSTRY_CODE_MAP,
     fetch_stock_industry_sw,
-    load_stock_industry,
-    refresh_industry_cache,
+    get_industry_distribution,
     get_industry_map,
     get_stock_industry,
-    get_industry_distribution,
     infer_industry_from_name,
     load_local_industry_backup,
-    SW_INDUSTRY_CODE_MAP,
-    _OUTPUT_VERSION,
+    load_stock_industry,
+    refresh_industry_cache,
 )
 
 
@@ -93,10 +96,10 @@ def mock_cache_file(temp_dir):
             }
         }
     }
-    
+
     with open(cache_path, 'w', encoding='utf-8') as f:
         json.dump(cache_data, f, indent=2)
-    
+
     return cache_path
 
 
@@ -112,10 +115,10 @@ def mock_backup_file(temp_dir):
             {"code": "600519", "name": "贵州茅台"},
         ]
     }
-    
+
     with open(backup_path, 'w', encoding='utf-8') as f:
         json.dump(backup_data, f, indent=2)
-    
+
     return backup_path
 
 
@@ -129,14 +132,14 @@ class TestIndustryCodeMapping:
         assert SW_INDUSTRY_CODE_MAP['48'] == '银行'
         assert SW_INDUSTRY_CODE_MAP['43'] == '房地产'
         assert SW_INDUSTRY_CODE_MAP['71'] == '计算机'
-        
+
     def test_sw_industry_code_map_invalid_codes(self):
         """验证不存在的一级代码映射到'其他'"""
         # 验证不存在的代码映射到 '其他'
         assert SW_INDUSTRY_CODE_MAP['22'] == '其他'
         assert SW_INDUSTRY_CODE_MAP['28'] == '其他'
         assert SW_INDUSTRY_CODE_MAP['33'] == '其他'
-        
+
     def test_first_level_extraction(self):
         """验证从4位代码提取一级代码"""
         # 4801 → 48
@@ -153,31 +156,31 @@ class TestKeywordInference:
         assert infer_industry_from_name("平安银行") == '银行'
         assert infer_industry_from_name("浦发银行") == '银行'
         assert infer_industry_from_name("工商银行") == '银行'
-        
+
     def test_infer_real_estate(self):
         """验证房地产关键词推断"""
         assert infer_industry_from_name("万科A") == '房地产'
         assert infer_industry_from_name("保利地产") == '房地产'
         assert infer_industry_from_name("城建发展") == '房地产'
-        
+
     def test_infer_securities_priority(self):
         """验证证券优先级（中信→证券，而非银行）"""
         # 关键词优先级测试：中信 → 证券
         assert infer_industry_from_name("中信证券") == '证券'
         # 注意："中信银行" 也会匹配 "中信" → 证券（模糊匹配优先级）
-        
+
     def test_infer_new_energy_priority(self):
         """验证关键词优先级（电力优先于新能源）"""
         # 实际优先级：电力 > 新能源（电力关键词在前）
         # 这是因为关键词映射遍历顺序决定优先级
         assert infer_industry_from_name("新能源电力") == '电力'  # 实际行为
-        
+
     def test_infer_power(self):
         """验证电力关键词推断"""
         assert infer_industry_from_name("长江电力") == '电力'
         assert infer_industry_from_name("风电股份") == '电力'
         assert infer_industry_from_name("光伏科技") == '电力'
-        
+
     def test_infer_other(self):
         """验证未知行业返回'其他'"""
         assert infer_industry_from_name("未知公司") == '其他'
@@ -193,15 +196,15 @@ class TestCacheMechanism:
         # 正确配置 Mock
         mock_cache_path.__str__ = lambda: str(mock_cache_file)
         mock_cache_path.exists.return_value = True
-        
+
         # 不需要 mock refresh，因为缓存是新鲜的
         data = load_stock_industry()
-        
+
         # 验证返回数据正确
         assert isinstance(data, dict)
         assert '000001' in data
         assert data['000001']['industry'] == '银行'
-            
+
     @patch('data_fetchers.fetch_industry.INDUSTRY_CACHE_PATH')
     def test_expired_cache_refresh(self, mock_cache_path, mock_cache_file, test_logger):
         """TC003-2: 过期缓存触发刷新"""
@@ -219,25 +222,25 @@ class TestCacheMechanism:
                 "000001": {"name": "平安银行", "industry": "银行", "industry_code": "4801"}
             }
         }
-        
+
         with open(mock_cache_file, 'w', encoding='utf-8') as f:
             json.dump(cache_data, f, indent=2)
-        
+
         mock_cache_path.__str__ = lambda: str(mock_cache_file)
         mock_cache_path.exists = lambda: True
-        
+
         # Mock refresh 成功返回新数据
         new_data = {
             "000001": {"name": "平安银行", "industry": "银行", "industry_code": "4801"},
             "000002": {"name": "万科A", "industry": "房地产", "industry_code": "4301"}
         }
-        
+
         with patch('data_fetchers.fetch_industry.refresh_industry_cache', return_value=new_data):
             data = load_stock_industry()
-            
+
             # 验证刷新成功返回新数据
             assert '000002' in data
-            
+
     @patch('data_fetchers.fetch_industry.INDUSTRY_CACHE_PATH', new_callable=MagicMock)
     def test_corrupted_cache_recovery(self, mock_cache_path, mock_cache_file, test_logger):
         """TC003-3: 损坏缓存恢复"""
@@ -246,23 +249,23 @@ class TestCacheMechanism:
             "meta": {"version": "2.7"},
             "industries": ["000001", "000002"]  # 错误类型
         }
-        
+
         with open(mock_cache_file, 'w', encoding='utf-8') as f:
             json.dump(corrupted_data, f, indent=2)
-        
+
         # 正确配置 Mock
         mock_cache_path.__str__ = lambda: str(mock_cache_file)
         mock_cache_path.exists.return_value = True
         mock_cache_path.unlink = MagicMock()
-        
+
         # Mock refresh 返回有效数据
         valid_data = {
             "000001": {"name": "平安银行", "industry": "银行", "industry_code": "4801"}
         }
-        
+
         with patch('data_fetchers.fetch_industry.refresh_industry_cache', return_value=valid_data):
             data = load_stock_industry()
-            
+
             # 验证删除损坏缓存并重新获取
             # 注意：unlink 在异常分支调用，需验证调用情况
             # 验证返回数据正确
@@ -275,31 +278,31 @@ class TestBackupFallback:
     def test_load_local_backup_success(self, mock_backup_file, test_logger):
         """TC004-1: 本地备用数据加载成功"""
         data = load_local_industry_backup(stock_list_path=mock_backup_file, write_cache=False)
-        
+
         # 验证推断正确
         assert '000001' in data
         assert data['000001']['industry'] == '银行'  # 关键词推断
         assert data['000001']['industry_code'] == 'local'
-        
+
     def test_load_local_backup_missing_file(self, temp_dir, test_logger):
         """TC004-2: 备用文件不存在"""
         missing_path = temp_dir / "nonexistent.json"
         data = load_local_industry_backup(stock_list_path=missing_path, write_cache=False)
-        
+
         # 验证返回空字典
         assert data == {}
-        
+
     @patch('data_fetchers.fetch_industry.STOCK_LIST_BACKUP_PATH')
     def test_backup_write_cache_non_fatal(self, mock_backup_path, mock_backup_file):
         """TC004-3: 备用缓存写入失败为非致命错误"""
         mock_backup_path.__str__ = lambda: str(mock_backup_file)
         mock_backup_path.exists = lambda: True
-        
+
         # Mock write_json_cache 抛异常
         with patch('data_fetchers.fetch_industry.write_json_cache', side_effect=PermissionError("mock error")):
             # 应该不抛异常，而是 warning
             data = load_local_industry_backup(stock_list_path=mock_backup_file, write_cache=True)
-            
+
             # 验证仍然返回数据
             assert len(data) > 0
 
@@ -315,29 +318,29 @@ class TestModuleCacheThreadSafety:
         from data_fetchers.fetch_industry import _UNSET
         mock_cache.__class__ = object
         mock_cache._mock_name = '_UNSET'
-        
+
         # Mock load 返回固定数据
         mock_load.return_value = {
             "000001": {"name": "平安银行", "industry": "银行", "industry_code": "4801"}
         }
-        
+
         results = []
-        
+
         def worker():
             data = get_industry_map()
             results.append(data)
-        
+
         # 创建10个并发线程
         threads = [threading.Thread(target=worker) for _ in range(10)]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
-        
+
         # 验证：所有线程返回相同数据
         assert len(results) == 10
         assert all(r == results[0] for r in results)
-        
+
         # 验证：load_stock_industry 只调用一次（DCL）
         # 注意：由于锁竞争，可能调用次数不严格为1，但应远小于线程数
         assert mock_load.call_count <= 3  # 允许少量竞争导致的重复调用
@@ -352,14 +355,14 @@ class TestPublicAPITests:
         mock_get_map.return_value = {
             "000001": {"name": "平安银行", "industry": "银行", "industry_code": "4801"}
         }
-        
+
         result = get_stock_industry("000001")
         assert result == '银行'
-        
+
         # 未知股票
         result = get_stock_industry("999999")
         assert result == '未知'
-        
+
     @patch('data_fetchers.fetch_industry.get_industry_map')
     def test_get_industry_distribution(self, mock_get_map):
         """TC006-2: 获取行业分布"""
@@ -368,10 +371,10 @@ class TestPublicAPITests:
             "600000": {"industry": "银行"},
             "000002": {"industry": "房地产"},
         }
-        
+
         stocks = ["000001", "600000", "000002"]
         dist = get_industry_distribution(stocks)
-        
+
         assert dist['银行'] == 2
         assert dist['房地产'] == 1
 
@@ -382,43 +385,39 @@ class TestConstraintCompliance:
     def test_version_constant_exists(self):
         """TC007-1: 版本号提取为常量（MODULE.md 约束 #16）"""
         assert _OUTPUT_VERSION == '2.7'
-        
+
     def test_public_module_import(self):
         """TC007-2: 公共模块导入（MODULE.md 约束 #4）"""
         # 验证导入的公共模块函数存在
-        from data_fetchers.common import (
-            setup_logger,
-            get_module_result_dir,
-            get_stock_list_file,
-            write_json_cache
-        )
-        
+        from data_fetchers.common import get_module_result_dir, get_stock_list_file, setup_logger, write_json_cache
+
         assert callable(setup_logger)
         assert callable(get_module_result_dir)
         assert callable(get_stock_list_file)
         assert callable(write_json_cache)
-        
+
     def test_output_directory_compliance(self):
         """TC007-3: 输出到 result 目录（MODULE.md 约束 #2）"""
-        from data_fetchers.fetch_industry import RESULT_DIR, INDUSTRY_CACHE_PATH
-        
+        from data_fetchers.fetch_industry import INDUSTRY_CACHE_PATH, RESULT_DIR
+
         # 验证 result 目录
         assert 'result' in str(RESULT_DIR)
-        
+
         # 验证缓存文件路径
         assert INDUSTRY_CACHE_PATH.name == 'stock_industry.json'
         assert 'result' in str(INDUSTRY_CACHE_PATH)
-        
+
     def test_no_main_block(self):
         """TC007-4: 禁止 __main__ 测试代码（PROJECT.md 规范）"""
         import inspect
+
         import data_fetchers.fetch_industry as fetch_industry_module
-        
+
         # 验证文件末尾无 if __name__ == '__main__' 块
         source = inspect.getsource(fetch_industry_module)
         # 检查实际的 __main__ 块（而非历史记录中的文字）
         lines = source.split('\n')
-        
+
         # 查找实际的 __main__ 块
         has_main_block = False
         for i, line in enumerate(lines):
@@ -428,7 +427,7 @@ class TestConstraintCompliance:
                 if i + 1 < len(lines) and lines[i + 1].strip():
                     has_main_block = True
                     break
-        
+
         assert not has_main_block, "文件包含实际的 __main__ 块"
 
 
@@ -439,18 +438,18 @@ class TestEdgeCases:
         """TC008-1: 空缓存文件处理"""
         empty_cache = temp_dir / "empty.json"
         empty_cache.write_text('')
-        
+
         # 验证：空文件应返回空字典或触发 refresh
         with patch('data_fetchers.fetch_industry.INDUSTRY_CACHE_PATH', empty_cache):
             with patch('data_fetchers.fetch_industry.refresh_industry_cache', return_value={}):
                 data = load_stock_industry()
                 assert data == {}
-                
+
     def test_invalid_json_format(self, temp_dir):
         """TC008-2: JSON 格式错误"""
         invalid_cache = temp_dir / "invalid.json"
         invalid_cache.write_text('{"invalid": json}')
-        
+
         with patch('data_fetchers.fetch_industry.INDUSTRY_CACHE_PATH', invalid_cache):
             with patch('data_fetchers.fetch_industry.refresh_industry_cache', return_value={}):
                 data = load_stock_industry()

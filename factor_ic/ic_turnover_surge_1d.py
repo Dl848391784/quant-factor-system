@@ -21,20 +21,20 @@
 import sys
 from pathlib import Path
 
+
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import pandas as pd
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
+# 重构后：从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
+from data_fetchers.factor_calculator import (
+    DEFAULT_SURGE_WINDOW,
+    calculate_turnover_surge,
+)
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
 from factor_ic.common.logger_config import get_logger
 
-# 重构后：从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
-from data_fetchers.factor_calculator import (
-    calculate_turnover_surge,
-    DEFAULT_SURGE_WINDOW,
-)
 
 logger = get_logger(__name__)
 
@@ -51,17 +51,17 @@ DEFAULT_MIN_STOCKS = 10
 def main():
     """CLI 主入口"""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='换手率突增 IC 计算器')
     parser.add_argument('--force-full', action='store_true', help='强制全量计算')
     parser.add_argument('--surge-window', type=int, default=DEFAULT_SURGE_WINDOW, help='换手率均值计算窗口')
     parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数')
-    
+
     args = parser.parse_args()
-    
+
     # 启动节点日志
     logger.info(f"换手率突增因子 IC 计算启动 [surge_window={args.surge_window}, min_stocks={args.min_stocks}, force_full={args.force_full}]")
-    
+
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
         factor_name='turnover_surge',
@@ -73,12 +73,12 @@ def main():
         force_full=args.force_full,
         _logger=logger
     )
-    
+
     # 使用 .get() 防御性访问结果
     ic_metrics = result.get('ic_metrics', {})
     sample_stats = result.get('sample_stats', {})
     period = result.get('period', {})
-    
+
     logger.info("=" * 60)
     logger.info("结果摘要")
     logger.info("=" * 60)
@@ -90,7 +90,7 @@ def main():
     logger.info(f"IC 标准差: {ic_metrics.get('ic_std', 0):.4f}")
     logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
     logger.info(f"IC>0 占比: {result.get('positive_ratio', 0):.2%}")
-    
+
     return result
 
 

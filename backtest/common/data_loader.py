@@ -11,6 +11,7 @@ backtest 模块专用数据路径配置。
 
 from pathlib import Path
 
+
 # 统一数据源路径（遵循 PROJECT.md 跨模块数据路径规范）
 DEFAULT_DATA_SOURCE = Path(__file__).parent.parent.parent / 'data_fetchers' / 'result' / 'factor_ic_data.json.gz'
 

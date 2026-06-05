@@ -10,13 +10,15 @@ test_layered_backtest_overnight_ret_1d 测试用例
 import sys
 from pathlib import Path
 
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-import pytest
 import json
-import pandas as pd
+from typing import Literal, get_args
+
 import numpy as np
-from typing import get_args, Literal
+import pandas as pd
+import pytest
 
 from backtest.layered_backtest_overnight_ret_1d import OvernightRetLayerConfig
 from data_fetchers.factor_calculator import calculate_overnight_return
@@ -84,7 +86,7 @@ class TestOvernightRetLayerConfig:
 
 class TestCalculateOvernightReturn:
     """测试因子计算函数"""
-    
+
     def test_basic_calculation(self):
         """基本计算: overnight_ret = (open - close_prev) / close_prev"""
         # 需要 2 天数据：第一天无昨日收盘（NaN），第二天才有值
@@ -99,7 +101,7 @@ class TestCalculateOvernightReturn:
         assert pd.isna(result['overnight_ret'].iloc[0])
         # 第二天: overnight_ret = (10.5 - 10.0) / 10.0 = 0.05
         assert result['overnight_ret'].iloc[1] == pytest.approx(0.05, rel=1e-3)
-    
+
     def test_negative_return(self):
         """隔夜下跌: overnight_ret < 0"""
         # 需要 2 天数据
@@ -114,7 +116,7 @@ class TestCalculateOvernightReturn:
         assert pd.isna(result['overnight_ret'].iloc[0])
         # 第二天: overnight_ret = (9.5 - 10.0) / 10.0 = -0.05
         assert result['overnight_ret'].iloc[1] == pytest.approx(-0.05, rel=1e-3)
-    
+
     def test_extreme_positive(self):
         """极端正值: 隔夜涨停（open ≈ close_prev * 1.1）"""
         # 需要 2 天数据
@@ -129,7 +131,7 @@ class TestCalculateOvernightReturn:
         assert pd.isna(result['overnight_ret'].iloc[0])
         # 第二天: overnight_ret = (11.0 - 10.0) / 10.0 = 0.1（涨停）
         assert result['overnight_ret'].iloc[1] == pytest.approx(0.1, rel=1e-3)
-    
+
     def test_extreme_negative(self):
         """极端负值: 隔夜跌停（open ≈ close_prev * 0.9）"""
         # 需要 2 天数据
@@ -144,7 +146,7 @@ class TestCalculateOvernightReturn:
         assert pd.isna(result['overnight_ret'].iloc[0])
         # 第二天: overnight_ret = (9.0 - 10.0) / 10.0 = -0.1（跌停）
         assert result['overnight_ret'].iloc[1] == pytest.approx(-0.1, rel=1e-3)
-    
+
     def test_required_columns(self):
         """缺少必要列时应抛出异常"""
         df = pd.DataFrame({
@@ -155,7 +157,7 @@ class TestCalculateOvernightReturn:
         })
         with pytest.raises((KeyError, ValueError)):
             calculate_overnight_return(df)
-    
+
     def test_nan_handling(self):
         """NaN 值应保留或过滤"""
         df = pd.DataFrame({
@@ -186,31 +188,31 @@ class TestCalculateOvernightReturn:
 
 class TestLayeredBacktestResult:
     """测试分层回测结果"""
-    
+
     @pytest.fixture
     def result_path(self):
         """获取回测结果文件路径"""
         return Path(__file__).parent.parent / 'result' / 'overnight_ret_layered_backtest.json'
-    
+
     def test_result_file_exists(self, result_path):
         """结果文件应存在"""
         assert result_path.exists()
-    
+
     def test_result_structure(self, result_path):
         """结果 JSON 结构应完整"""
         with open(result_path) as f:
             result = json.load(f)
-        
+
         # 必须包含的顶层字段
         required_keys = ['meta', 'layer_stats', 'long_short', 'monotonicity']
         for key in required_keys:
             assert key in result
-    
+
     def test_meta_fields(self, result_path):
         """meta 字段应包含完整信息"""
         with open(result_path) as f:
             result = json.load(f)
-        
+
         meta = result['meta']
         assert 'factor_name' in meta
         assert meta['factor_name'] == 'overnight_ret'
@@ -218,26 +220,26 @@ class TestLayeredBacktestResult:
         assert meta['n_days_total'] > 0
         assert 'n_layers' in meta
         assert meta['n_layers'] == 5
-    
+
     def test_layer_stats_complete(self, result_path):
         """每层统计指标应完整"""
         with open(result_path) as f:
             result = json.load(f)
-        
+
         for layer_id in range(1, 6):
             layer_key = f'layer_{layer_id}'
             assert layer_key in result['layer_stats']
-            
+
             stats = result['layer_stats'][layer_key]
             required_stats = ['n_stocks_avg', 'annual_return', 'sharpe_ratio', 'max_drawdown']
             for stat in required_stats:
                 assert stat in stats
-    
+
     def test_monotonicity_positive_factor(self, result_path):
         """正向因子单调性相关系数应为正"""
         with open(result_path) as f:
             result = json.load(f)
-        
+
         monotonicity = result['monotonicity']
         # 正向因子：Layer1→5 收益应递增
         assert monotonicity['correlation'] > 0
@@ -246,23 +248,23 @@ class TestLayeredBacktestResult:
 
 class TestLayeredBacktestExecution:
     """测试分层回测执行"""
-    
+
     def test_config_integration(self):
         """配置类应能正确集成到 factor_cli_main"""
         config = OvernightRetLayerConfig()
-        
+
         # 检查继承关系
         from backtest.common.layered_backtest_runner import LayerConfigBase
         assert isinstance(config, LayerConfigBase)
-        
+
         # 检查必要属性
         assert hasattr(config, 'factor_direction')
         assert hasattr(config, 'layer_names')
-    
+
     def test_factor_direction_derives_long_short(self):
         """正向因子应派生出正确的多空组合"""
         config = OvernightRetLayerConfig()
-        
+
         # 正向因子：多头取高层，空头取低层
         # 这个测试依赖于基类的 _derive_long_short() 方法
         # 如果基类实现了自动派生，这里验证结果

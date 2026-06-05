@@ -26,11 +26,12 @@
 
 import gzip
 import json
-import pandas as pd
 from pathlib import Path
-from typing import Tuple, List, Optional, Dict
+
+import pandas as pd
 
 from .logger_config import get_logger
+
 
 # ============================================================================
 # 默认路径配置（遵循 PROJECT.md 跨模块数据路径规范）
@@ -42,13 +43,13 @@ DEFAULT_DATA_CACHE = DEFAULT_DATA_DIR / 'factor_ic_data.json.gz'
 
 
 def load_factor_return_data(
-    factor_cols: List[str],
+    factor_cols: list[str],
     return_col: str = 'forward_return_1d',
-    data_cache_path: Optional[Path] = None,
-    dropna_cols: Optional[List[str]] = None,
-    additional_factor_files: Optional[Dict[str, Path]] = None,
+    data_cache_path: Path | None = None,
+    dropna_cols: list[str] | None = None,
+    additional_factor_files: dict[str, Path] | None = None,
     logger=None
-) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
+) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """
     从统一数据源加载因子数据和收益数据（单文件模式）
     
@@ -97,75 +98,75 @@ def load_factor_return_data(
     """
     if logger is None:
         logger = get_logger(__name__)
-    
+
     logger.info("[数据加载] 从统一数据源读取数据...")
-    
+
     # 确定缓存路径
     data_cache_path = data_cache_path or DEFAULT_DATA_CACHE
-    
+
     # ========== 加载统一数据源 ==========
     if not data_cache_path.exists():
         raise FileNotFoundError(f"数据缓存不存在: {data_cache_path}")
-    
+
     try:
         with gzip.open(data_cache_path, 'rt', encoding='utf-8') as f:
             data = json.load(f)
     except (gzip.BadGzipFile, json.JSONDecodeError, OSError) as e:
         logger.error(f"数据读取失败 [{data_cache_path}] [{type(e).__name__}]: {e}")
         raise
-    
+
     # ========== JSON 结构验证 ==========
     if 'data' not in data:
         raise KeyError(
             f"数据缓存文件 '{data_cache_path}' 缺少 'data' 键\n"
             f"JSON 结构: {list(data.keys())}"
         )
-    
+
     df = pd.DataFrame(data['data'])
-    
+
     # ========== 基础列验证（加载后立即验证） ==========
     for col in ['date', 'asset']:
         if col not in df.columns:
             raise KeyError(f"数据缺少必需列: '{col}'，无法继续处理")
-    
+
     logger.info(f"原始数据: {len(df)} 行, {df['asset'].nunique()} 只股票")
-    
+
     # ========== 日期类型统一转换 ==========
     df = _convert_date_column(df, '统一数据源', logger=logger)
-    
+
     # ========== 快照原始数据范围（dropna 前） ==========
     raw_period_start = str(df['date'].min())
     raw_period_end = str(df['date'].max())
     raw_total_days = df['date'].nunique()
     raw_avg_stocks_per_day = round(df.groupby('date').size().mean(), 1)
-    
+
     logger.info(f"原始数据范围: {raw_period_start} ~ {raw_period_end}, {raw_total_days} 个交易日")
     logger.info(f"原始平均每日股票数: {raw_avg_stocks_per_day}")
-    
+
     # ========== 加载额外因子文件（如有） ==========
     all_factor_cols = list(factor_cols)  # 创建副本，防止引用污染
-    
+
     if additional_factor_files:
         for col_name, file_path in additional_factor_files.items():
             if not file_path.exists():
                 raise FileNotFoundError(f"额外因子缓存不存在: {file_path}")
-            
+
             try:
                 with gzip.open(file_path, 'rt', encoding='utf-8') as f:
                     additional_data = json.load(f)
             except (gzip.BadGzipFile, json.JSONDecodeError, OSError) as e:
                 logger.error(f"额外因子数据读取失败 [{file_path}] [{type(e).__name__}]: {e}")
                 raise
-            
+
             if 'data' not in additional_data:
                 raise KeyError(
                     f"额外因子文件 '{file_path}' 缺少 'data' 键\n"
                     f"JSON 结构: {list(additional_data.keys())}"
                 )
-            
+
             additional_df = pd.DataFrame(additional_data['data'])
             additional_df = _convert_date_column(additional_df, f'额外因子({col_name})', logger=logger)
-            
+
             if col_name in additional_df.columns:
                 additional_df[col_name] = pd.to_numeric(additional_df[col_name], errors='coerce')
             else:
@@ -174,7 +175,7 @@ def load_factor_return_data(
                     f"额外因子文件 '{file_path}' 缺少指定列: '{col_name}'\n"
                     f"可用列: {available_cols}"
                 )
-            
+
             rows_before = len(df)
             df = pd.merge(
                 df,
@@ -184,7 +185,7 @@ def load_factor_return_data(
             )
             rows_after = len(df)
             rows_lost = rows_before - rows_after
-            
+
             if rows_lost > 0:
                 if rows_before > 0:
                     loss_pct = rows_lost / rows_before * 100
@@ -193,15 +194,15 @@ def load_factor_return_data(
                     logger.info(f"合并 {col_name} 后: {rows_after} 行（丢失 {rows_lost} 行，原始数据为空）")
             else:
                 logger.info(f"合并 {col_name} 后: {rows_after} 行（无数据丢失）")
-        
+
         additional_cols = [k for k in additional_factor_files.keys() if k not in all_factor_cols]
         all_factor_cols.extend(additional_cols)
-    
+
     # ========== 列存在验证 ==========
     for col in ['date', 'asset']:
         if col not in df.columns:
             raise KeyError(f"数据缺少必需列: '{col}'")
-    
+
     missing_factor_cols = [col for col in all_factor_cols if col not in df.columns]
     if missing_factor_cols:
         available_cols = sorted([c for c in df.columns if c not in ['date', 'asset']])
@@ -209,23 +210,23 @@ def load_factor_return_data(
             f"数据缺少必需列: {missing_factor_cols}\n"
             f"可用因子列: {available_cols}"
         )
-    
+
     if return_col not in df.columns:
         available_return_cols = [c for c in df.columns if 'forward_return' in c]
         raise KeyError(
             f"收益列 '{return_col}' 不存在于数据中\n"
             f"可用收益列: {available_return_cols}"
         )
-    
+
     # ========== 分离因子和收益数据 ==========
     select_cols = list(dict.fromkeys(['date', 'asset'] + all_factor_cols))
     factor_df = df[select_cols].copy()
     return_df = df[['date', 'asset', return_col]].copy()
-    
+
     # ========== 过滤缺失值 ==========
     if dropna_cols is None:
         dropna_cols = [c for c in factor_cols if c not in ['date', 'asset']]
-    
+
     missing_dropna_cols = [col for col in dropna_cols if col not in factor_df.columns]
     if missing_dropna_cols:
         available_cols = sorted([c for c in factor_df.columns if c not in ['date', 'asset']])
@@ -233,24 +234,24 @@ def load_factor_return_data(
             f"dropna_cols 包含不存在的列: {missing_dropna_cols}\n"
             f"可用列: {available_cols}"
         )
-    
+
     factor_df = factor_df.dropna(subset=dropna_cols).reset_index(drop=True)
     return_df = return_df.dropna(subset=[return_col]).reset_index(drop=True)
-    
+
     logger.info(f"过滤缺失值后: 因子 {len(factor_df)} 行（过滤列: {dropna_cols}），收益 {len(return_df)} 行")
-    
+
     # ========== 日期对齐（单文件内数据天然对齐） ==========
     # 取日期交集确保因子和收益数据对齐
     factor_dates = list(factor_df['date'].unique())
     return_dates = list(return_df['date'].unique())
-    
+
     if set(factor_dates) != set(return_dates):
         logger.warning("因子数据和收益数据日期不对齐（单文件内）")
         common_dates = list(set(factor_dates) & set(return_dates))
         factor_df = factor_df[factor_df['date'].isin(common_dates)].reset_index(drop=True)
         return_df = return_df[return_df['date'].isin(common_dates)].reset_index(drop=True)
         logger.info(f"对齐后: {len(common_dates)} 个日期, 因子 {len(factor_df)} 行, 收益 {len(return_df)} 行")
-    
+
     # ========== 返回结果 ==========
     return factor_df, return_df, {
         'period_start': raw_period_start,
@@ -277,15 +278,15 @@ def _convert_date_column(df: pd.DataFrame, name: str, logger=None) -> pd.DataFra
     """
     if logger is None:
         logger = get_logger(__name__)
-    
+
     if 'date' not in df.columns:
         return df
-    
+
     df = df.copy()
-    
+
     date_series = pd.to_datetime(df['date'], errors='coerce')
     nat_count = date_series.isna().sum()
-    
+
     if nat_count > 0:
         invalid_samples = df['date'][date_series.isna()].head(5).tolist()
         logger.error(
@@ -296,7 +297,7 @@ def _convert_date_column(df: pd.DataFrame, name: str, logger=None) -> pd.DataFra
             f"无效日期示例: {invalid_samples}\n"
             f"请检查缓存数据源是否包含脏数据"
         )
-    
+
     df['date'] = date_series.dt.strftime('%Y-%m-%d')
     return df
 

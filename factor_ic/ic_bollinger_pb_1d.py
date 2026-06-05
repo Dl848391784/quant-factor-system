@@ -27,21 +27,26 @@
 import sys
 from pathlib import Path
 
+
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import pandas as pd
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic
-from factor_ic.common.logger_config import get_logger
+from data_fetchers.factor_calculator import (
+    DEFAULT_BOLLINGER_K as DEFAULT_K,  # 标差倍数
+)
+from data_fetchers.factor_calculator import (
+    DEFAULT_BOLLINGER_N as DEFAULT_N,  # 移动平均周期
+)
 
 # 重构后：从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
 from data_fetchers.factor_calculator import (
     calculate_bollinger_pb,
-    DEFAULT_BOLLINGER_N as DEFAULT_N,  # 移动平均周期
-    DEFAULT_BOLLINGER_K as DEFAULT_K,  # 标差倍数
 )
+from factor_ic.common.factor_ic_runner import run_complex_factor_ic
+from factor_ic.common.logger_config import get_logger
+
 
 logger = get_logger(__name__)
 
@@ -58,18 +63,18 @@ DEFAULT_MIN_STOCKS = 10
 def main():
     """CLI 主入口"""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='布林带%B IC 计算器')
     parser.add_argument('--force-full', action='store_true', help='强制全量计算')
     parser.add_argument('--n', type=int, default=DEFAULT_N, help='移动平均周期')
     parser.add_argument('--k', type=float, default=DEFAULT_K, help='标差倍数')
     parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数')
-    
+
     args = parser.parse_args()
-    
+
     # 调用前日志
     logger.info(f"启动布林带%B因子IC计算: n={args.n}, k={args.k}, min_stocks={args.min_stocks}, force_full={args.force_full}")
-    
+
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
         factor_name='bollinger_pb',
@@ -81,15 +86,15 @@ def main():
         force_full=args.force_full,
         _logger=logger
     )
-    
+
     # 调用后日志
     logger.info("布林带%B因子IC计算完成")
-    
+
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get('ic_metrics') or {}
     sample_stats = result.get('sample_stats') or {}
     period = result.get('period') or {}
-    
+
     logger.info("=" * 60)
     logger.info("结果摘要")
     logger.info("=" * 60)
@@ -119,7 +124,7 @@ def main():
         logger.info(f"IC>0 占比: {positive_ratio:.2%}")
     else:
         logger.info("IC>0 占比: N/A")
-    
+
     return result
 
 

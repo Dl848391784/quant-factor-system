@@ -10,11 +10,13 @@ test_layered_backtest_volume_ratio_1d 测试用例
 import sys
 from pathlib import Path
 
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-import pytest
 import json
-from typing import get_args, Literal
+from typing import Literal, get_args
+
+import pytest
 
 from backtest.layered_backtest_volume_ratio_1d import VolumeRatioLayerConfig
 
@@ -30,7 +32,7 @@ class TestVolumeRatioLayerConfig:
         """TC001-02: layer_names 类属性为纯标签"""
         assert len(VolumeRatioLayerConfig.layer_names) == 5
         assert VolumeRatioLayerConfig.layer_names[0] == 'lowest'
-    
+
     def test_layer_descriptions_classvar(self):
         """TC001-03: layer_descriptions 含中文描述"""
         assert len(VolumeRatioLayerConfig.layer_descriptions) == 5
@@ -59,14 +61,14 @@ class TestVolumeRatioLayerConfig:
         assert '1' in config.layer_names_dict
         assert '5' in config.layer_names_dict
         assert config.layer_names_dict['1'] == '极低层(量比极低)'
-    
+
     def test_layer_names_semantic(self):
         """TC001-07: layer_descriptions 语义描述"""
         config = VolumeRatioLayerConfig()
         # layer_descriptions 应包含"量比"相关描述
         for desc in config.__class__.layer_descriptions:
             assert '量比' in desc
-    
+
     def test_layer_names_no_fixed_threshold(self):
         """TC001-08: layer_names 纯标签无固定阈值"""
         for name in VolumeRatioLayerConfig.layer_names:

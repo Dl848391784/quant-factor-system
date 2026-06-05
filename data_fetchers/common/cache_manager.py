@@ -89,9 +89,11 @@ import json
 import logging
 import os
 import tempfile
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Union
+from typing import Any
+
 
 # gzip 异常类型（用于精确捕获 gzip 文件损坏）
 BadGzipFile = gzip.BadGzipFile
@@ -128,7 +130,7 @@ _DEFAULT_GZIP_COMPRESSLEVEL = 6
 _JSON_COMPACT_SEPARATORS = (',', ':')  # 紧凑格式
 
 
-def get_module_logger(logger: Optional[logging.Logger] = None) -> logging.Logger:
+def get_module_logger(logger: logging.Logger | None = None) -> logging.Logger:
     """
     获取 logger，遵循 PROJECT.md 公共模块日志规范
     
@@ -200,7 +202,7 @@ def _atomic_write(path: Path) -> Generator[Path, None, None]:
     )
     os.close(fd)  # 关闭文件描述符，后续使用 Path
     temp_path = Path(temp_path_str)
-    
+
     replaced = False  # 布尔标志标记替换状态
     try:
         yield temp_path
@@ -220,7 +222,7 @@ def _read_cache_impl(
     path: Path,
     use_gzip: bool,
     logger: logging.Logger
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     读取缓存的公共实现
     
@@ -237,17 +239,17 @@ def _read_cache_impl(
         ValueError: JSON 解析失败
     """
     file_type = "gzip JSON" if use_gzip else "JSON"
-    
+
     # 统一 try 块：stat()、空文件检查、大文件警告、json.load() 全部纳入
     # FileNotFoundError 只捕获一次，同时覆盖 stat() 和 open() 两个场景
     try:
         file_size = path.stat().st_size
-        
+
         # 空文件处理（边界情况）
         if file_size == 0:
             logger.warning("缓存文件为空（大小为 0）: %s", path)
             return {}  # 空文件返回空字典
-        
+
         # 大文件监控
         file_size_mb = file_size / (1024 * 1024)
         if file_size_mb > _LARGE_FILE_THRESHOLD_MB:
@@ -257,18 +259,18 @@ def _read_cache_impl(
                 "可能影响性能，建议检查数据量",
                 file_size_mb, path
             )
-        
+
         # 读取文件内容
         if use_gzip:
             with gzip.open(path, 'rt', encoding='utf-8') as f:
                 data = json.load(f)
         else:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, encoding='utf-8') as f:
                 data = json.load(f)
-        
+
         logger.debug("成功读取缓存: %s", path)
         return data
-        
+
     # FileNotFoundError 是 OSError 子类，必须放在 OSError 之前
     except FileNotFoundError as e:
         # 覆盖 stat() 和 open() 两种场景
@@ -304,12 +306,12 @@ def _read_cache_impl(
 
 def _write_cache_impl(
     path: Path,
-    data: Dict[str, Any],
+    data: dict[str, Any],
     use_gzip: bool,
     ensure_dir: bool,
     logger: logging.Logger,
     compresslevel: int = _DEFAULT_GZIP_COMPRESSLEVEL,
-    json_indent: Optional[int] = None,
+    json_indent: int | None = None,
     json_sort_keys: bool = False
 ) -> None:
     """
@@ -338,17 +340,17 @@ def _write_cache_impl(
             f"缓存数据类型错误: 预期 dict，实际 {type(data).__name__}\n"
             f"文件路径: {path}"
         )
-    
+
     if ensure_dir:
         path.parent.mkdir(parents=True, exist_ok=True)
         logger.debug("创建目录（ensure_dir=True）: %s", path.parent)
-    
+
     # JSON 序列化参数
     if json_indent is None:
         separators = _JSON_COMPACT_SEPARATORS
     else:
         separators = None  # 使用默认分隔符
-    
+
     # 使用 _atomic_write contextmanager 管理临时文件生命周期
     # 正常退出时原子替换，异常退出时自动清理临时文件
     try:
@@ -360,9 +362,9 @@ def _write_cache_impl(
             else:
                 with open(temp_path, 'w', encoding='utf-8') as f:
                     json.dump(data, f, ensure_ascii=False, indent=json_indent, separators=separators, sort_keys=json_sort_keys)
-        
+
         logger.debug("成功写入缓存（原子操作）: %s", path)
-        
+
     # === 数据类型异常 ===
     except TypeError as e:
         # json.dump 遇到不可序列化数据时抛出 TypeError
@@ -394,9 +396,9 @@ def _write_cache_impl(
 
 
 def read_gzip_cache(
-    path: Union[Path, str],
-    logger: Optional[logging.Logger] = None
-) -> Dict[str, Any]:
+    path: Path | str,
+    logger: logging.Logger | None = None
+) -> dict[str, Any]:
     """
     读取 gzip 压缩的 JSON 缓存
     
@@ -421,12 +423,12 @@ def read_gzip_cache(
 
 
 def write_gzip_cache(
-    path: Union[Path, str],
-    data: Dict[str, Any],
+    path: Path | str,
+    data: dict[str, Any],
     ensure_dir: bool = True,
-    logger: Optional[logging.Logger] = None,
+    logger: logging.Logger | None = None,
     compresslevel: int = _DEFAULT_GZIP_COMPRESSLEVEL,
-    json_indent: Optional[int] = None,
+    json_indent: int | None = None,
     json_sort_keys: bool = False
 ) -> None:
     """
@@ -459,9 +461,9 @@ def write_gzip_cache(
 
 
 def read_json_cache(
-    path: Union[Path, str],
-    logger: Optional[logging.Logger] = None
-) -> Dict[str, Any]:
+    path: Path | str,
+    logger: logging.Logger | None = None
+) -> dict[str, Any]:
     """
     读取普通 JSON 缓存（非压缩）
     
@@ -483,11 +485,11 @@ def read_json_cache(
 
 
 def write_json_cache(
-    path: Union[Path, str],
-    data: Dict[str, Any],
+    path: Path | str,
+    data: dict[str, Any],
     ensure_dir: bool = True,
-    logger: Optional[logging.Logger] = None,
-    json_indent: Optional[int] = None,
+    logger: logging.Logger | None = None,
+    json_indent: int | None = None,
     json_sort_keys: bool = False
 ) -> None:
     """
@@ -517,10 +519,10 @@ def write_json_cache(
 
 
 def append_to_cache(
-    path: Union[Path, str],
-    new_data: List[Any],
+    path: Path | str,
+    new_data: list[Any],
     key: str = 'data',
-    logger: Optional[logging.Logger] = None
+    logger: logging.Logger | None = None
 ) -> int:
     """
     增量追加数据到缓存
@@ -551,22 +553,22 @@ def append_to_cache(
             f"new_data 参数类型错误: 预期 list，实际 {type(new_data).__name__}\n"
             f"文件路径: {path}"
         )
-    
+
     path = Path(path)  # 统一转换为 Path
     logger = get_module_logger(logger)
     use_gzip = _is_gzip_file(path)  # 使用统一判断函数
-    
+
     # 消除 TOCTOU 竞态：直接调用 _read_cache_impl，捕获 FileNotFoundError 作为"文件不存在"信号
     # 不再提前检查 path.exists()，避免检查-读取间隙文件被删除
-    existing: Dict[str, Any] = {}
-    existing_data: List[Any] = []
-    
+    existing: dict[str, Any] = {}
+    existing_data: list[Any] = []
+
     try:
         existing = _read_cache_impl(path, use_gzip, logger)
         existing_data = existing.get(key, [])
         # 读取成功后记录已有数据量（重要操作节点日志）
         logger.debug("读取现有缓存成功: %s, key '%s' 已有 %d 条数据", path, key, len(existing_data))
-        
+
         # 防御性编程：验证数据类型
         if not isinstance(existing_data, list):
             logger.warning(
@@ -582,23 +584,23 @@ def append_to_cache(
         logger.debug("缓存文件不存在，将创建新缓存: %s", path)
         existing = {}
         existing_data = []
-    
+
     # 合并数据
     merged_data = existing_data + new_data
     total_count = len(merged_data)
-    
+
     # 构建新缓存结构
     result = {key: merged_data}
-    
+
     # 保留其他字段（如 dates）
     # existing 已在上方处理：文件不存在时初始化为 {}，遍历安全
     for k, v in existing.items():
         if k != key:
             result[k] = v
-    
+
     # 写入缓存
     _write_cache_impl(path, result, use_gzip, ensure_dir=True, logger=logger)
-    
+
     logger.info(
         "缓存追加完成: %s\n"
         "原有 %d 条\n"
@@ -610,9 +612,9 @@ def append_to_cache(
 
 
 def get_cache_file_info(
-    path: Union[Path, str],
-    logger: Optional[logging.Logger] = None
-) -> Dict[str, Any]:
+    path: Path | str,
+    logger: logging.Logger | None = None
+) -> dict[str, Any]:
     """
     获取缓存文件信息
     
@@ -630,7 +632,7 @@ def get_cache_file_info(
     """
     path = Path(path)  # 统一转换为 Path
     logger = get_module_logger(logger)
-    
+
     # 消除双重检查 TOCTOU 竞态：直接调用 stat()，通过异常判断是否存在
     # 增加 'error' 字段区分"文件不存在"和"文件存在但无权限"
     info = {
@@ -640,7 +642,7 @@ def get_cache_file_info(
         'modified_time': None,
         'error': None,  # None=正常，'permission_denied'=无权限
     }
-    
+
     try:
         stat = path.stat()
         info['exists'] = True
@@ -655,14 +657,14 @@ def get_cache_file_info(
         # 设置 error 字段，使调用方可以区分"文件不存在"和"无权限"
         info['error'] = 'permission_denied'
         logger.warning("无权限获取缓存文件信息: %s, 原因: %s", path, e.strerror)
-    
+
     return info
 
 
 def read_cache(
-    path: Union[Path, str],
-    logger: Optional[logging.Logger] = None
-) -> Dict[str, Any]:
+    path: Path | str,
+    logger: logging.Logger | None = None
+) -> dict[str, Any]:
     """
     读取缓存（自动判断 gzip/json）
     
@@ -698,12 +700,12 @@ def read_cache(
 
 
 def write_cache(
-    path: Union[Path, str],
-    data: Dict[str, Any],
+    path: Path | str,
+    data: dict[str, Any],
     ensure_dir: bool = True,
-    logger: Optional[logging.Logger] = None,
+    logger: logging.Logger | None = None,
     compresslevel: int = _DEFAULT_GZIP_COMPRESSLEVEL,
-    json_indent: Optional[int] = None,
+    json_indent: int | None = None,
     json_sort_keys: bool = False
 ) -> None:
     """
@@ -752,7 +754,7 @@ def write_cache(
     )
 
 
-def cache_exists(path: Union[Path, str]) -> bool:
+def cache_exists(path: Path | str) -> bool:
     """
     检查缓存文件是否存在
     
@@ -775,8 +777,8 @@ def cache_exists(path: Union[Path, str]) -> bool:
 
 
 def delete_cache(
-    path: Union[Path, str],
-    logger: Optional[logging.Logger] = None
+    path: Path | str,
+    logger: logging.Logger | None = None
 ) -> bool:
     """
     删除缓存文件
@@ -799,7 +801,7 @@ def delete_cache(
     """
     path = Path(path)
     logger = get_module_logger(logger)
-    
+
     # 消除 TOCTOU 竞态：直接 unlink()，不再提前检查 exists()
     # FileNotFoundError 单独捕获返回 False，避免被 OSError 吞掉
     try:

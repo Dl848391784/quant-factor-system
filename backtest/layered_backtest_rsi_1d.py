@@ -13,10 +13,11 @@ RSI因子分层回测脚本
 - long_layers/short_layers: 由 n_layers 和 factor_direction 派生
 """
 
-from typing import ClassVar, Sequence
+from collections.abc import Sequence
+from typing import ClassVar
 
-from backtest.common.layered_backtest_runner import LayerConfigBase
 from backtest.common.factor_cli import factor_cli_main
+from backtest.common.layered_backtest_runner import LayerConfigBase
 from data_fetchers.factor_calculator import calculate_rsi_df
 
 
@@ -25,16 +26,16 @@ class RsiLayerConfig(LayerConfigBase):
     
     薄声明：仅定义因子名称与分层命名，逻辑完全下沉基类。
     """
-    
+
     factor_name: ClassVar[str] = 'rsi'
-    
+
     layer_names: ClassVar[Sequence[str]] = (
         'oversold',
         'low',
         'normal',
         'high',
     )
-    
+
     layer_descriptions: ClassVar[Sequence[str]] = (
         '超卖层(RSI<30)',
         '偏低层(RSI 30-40)',

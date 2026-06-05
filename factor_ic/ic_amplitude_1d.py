@@ -26,19 +26,20 @@
   v1.1 (2026-05-31): 优化日志字段名 + 防御性 None 处理 + 删除未使用导入
 """
 
-import sys
 import argparse
+import sys
 from pathlib import Path
+
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
+# 从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
+from data_fetchers.factor_calculator import calculate_amplitude
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
 from factor_ic.common.logger_config import get_logger
 
-# 从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
-from data_fetchers.factor_calculator import calculate_amplitude
 
 logger = get_logger(__name__)
 
@@ -54,16 +55,16 @@ DEFAULT_MIN_STOCKS = 10
 
 def main():
     """CLI 主入口"""
-    
+
     parser = argparse.ArgumentParser(description='振幅因子 IC 计算器')
     parser.add_argument('--force-full', action='store_true', help='强制全量计算')
     parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数')
-    
+
     args = parser.parse_args()
-    
+
     # 调用前日志
     logger.info(f"启动振幅因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
-    
+
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
         factor_name='amplitude',
@@ -75,18 +76,18 @@ def main():
         force_full=args.force_full,
         _logger=logger
     )
-    
+
     # 保底处理：公共模块异常返回 None 时抛出 RuntimeError
     if result is None:
         raise RuntimeError("run_complex_factor_ic 返回 None")
-    
+
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get('ic_metrics') or {}
     sample_stats = result.get('sample_stats') or {}
     period = result.get('period') or {}
     # 字段名来源于 MODULE.md 第56行输出结构模板
     ic_distribution = result.get('ic_distribution_consistency') or {}
-    
+
     logger.info("=" * 60)
     logger.info("结果摘要")
     logger.info("=" * 60)
@@ -115,14 +116,14 @@ def main():
         logger.info(f"IC>0 占比: {positive_ratio:.2%}")
     else:
         logger.info("IC>0 占比: N/A")
-    
+
     # 异常状态整体感知日志（运维巡检用）
     if ic_mean is None:
         logger.warning("本次IC计算结果为空，请检查数据源或参数配置")
         logger.info("振幅因子IC计算完成（结果异常，请关注上方警告）")
     else:
         logger.info("振幅因子IC计算完成")
-    
+
     return result
 
 
@@ -133,7 +134,7 @@ if __name__ == '__main__':
         # 已知业务异常，使用 error()（不打印完整堆栈）
         logger.error(f"振幅因子IC计算失败: {e}")
         sys.exit(1)
-    except Exception as e:
+    except Exception:
         # 未预期异常，使用 exception()（自动打印完整堆栈，无需重复传 e）
         logger.exception("未预期的错误")
         sys.exit(1)

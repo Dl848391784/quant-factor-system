@@ -10,11 +10,13 @@ test_layered_backtest_rsi_1d 测试用例
 import sys
 from pathlib import Path
 
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-import pytest
 import json
-from typing import get_args, Literal
+from typing import Literal, get_args
+
+import pytest
 
 from backtest.layered_backtest_rsi_1d import RsiLayerConfig
 
@@ -33,7 +35,7 @@ class TestRsiLayerConfig:
         assert RsiLayerConfig.layer_names[1] == 'low'
         assert RsiLayerConfig.layer_names[2] == 'normal'
         assert RsiLayerConfig.layer_names[3] == 'high'
-    
+
     def test_layer_descriptions_classvar(self):
         """TC001-03: layer_descriptions 含中文描述"""
         assert len(RsiLayerConfig.layer_descriptions) == 4
@@ -66,14 +68,14 @@ class TestRsiLayerConfig:
         assert '4' in config.layer_names_dict
         assert config.layer_names_dict['1'] == '超卖层(RSI<30)'
         assert config.layer_names_dict['4'] == '偏高层(RSI 60-70)'
-    
+
     def test_layer_names_semantic(self):
         """TC001-08: layer_descriptions 语义描述"""
         config = RsiLayerConfig()
         # layer_descriptions 应包含"RSI"相关描述
         for desc in config.__class__.layer_descriptions:
             assert 'RSI' in desc or 'rsi' in desc.lower()
-    
+
     def test_layer_names_no_fixed_threshold(self):
         """TC001-09: layer_names 纯标签无固定阈值"""
         for name in RsiLayerConfig.layer_names:

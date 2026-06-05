@@ -24,10 +24,10 @@ DataFrame 工具模块
 
 # 标准库导入
 import logging
-from typing import Optional
 
 # 第三方库导入
 import pandas as pd
+
 
 # 模块公共 API
 __all__ = ['validate_dataframe_columns']
@@ -39,8 +39,8 @@ _DEFAULT_DF_NAME = "<未命名DataFrame>"
 def validate_dataframe_columns(
     df: pd.DataFrame,
     required_cols: list[str],
-    df_name: Optional[str] = None,
-    logger: Optional[logging.Logger] = None
+    df_name: str | None = None,
+    logger: logging.Logger | None = None
 ) -> None:
     """
     验证 DataFrame 是否包含必需列
@@ -88,24 +88,24 @@ def validate_dataframe_columns(
     # logger 参数化（遵循 PROJECT.md 规范）
     if logger is None:
         logger = logging.getLogger(__name__)
-    
+
     # 边界处理：df_name 参数校验（优先处理，确保后续错误信息友好）
     if df_name is None:
         df_name = _DEFAULT_DF_NAME
-    
+
     # 边界处理：df 参数类型校验（使用 isinstance 确保类型正确）
     if not isinstance(df, pd.DataFrame):
         logger.error(f"DataFrame 参数类型错误: {df_name}, 实际类型: {type(df).__name__}")
         raise TypeError(f"{df_name} 参数必须是 pandas.DataFrame 类型")
-    
+
     # 边界处理：required_cols 参数校验
     if not required_cols:
         logger.error(f"required_cols 参数为空列表: {df_name}")
         raise ValueError(f"{df_name} 的 required_cols 不能为空列表")
-    
+
     # 验证必需列存在（使用列表推导式保持原始顺序）
     missing_cols = [col for col in required_cols if col not in df.columns]
-    
+
     if missing_cols:
         # 构建友好错误信息（包含可用列）
         available_cols = list(df.columns)
@@ -113,11 +113,11 @@ def validate_dataframe_columns(
             f"{df_name} 缺少必需列: {missing_cols}\n"
             f"可用列: {available_cols}"
         )
-        
+
         # 日志记录（便于审计追溯）
         logger.error(f"DataFrame 列名校验失败: {df_name}, 缺失: {missing_cols}, 可用: {available_cols}")
-        
+
         raise ValueError(error_msg)
-    
+
     # 验证通过日志（只记录关键信息，避免冗长输出）
     logger.debug(f"{df_name} 列名校验通过，共 {len(required_cols)} 列")

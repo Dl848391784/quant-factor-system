@@ -24,64 +24,63 @@ data_fetchers 公共模块
 日期: 2026-05-24
 """
 
-from .paths import (
-    get_project_root,
-    get_stock_list_file,
-    get_logs_dir,
-    get_module_logs_dir,
-    get_module_result_dir,
-    Paths,
-    paths,
-)
-
-from .logger_config import setup_logger
 from .cache_manager import (
-    get_module_logger,
-    read_cache,
-    write_cache,
-    read_gzip_cache,
-    write_gzip_cache,
-    read_json_cache,
-    write_json_cache,
     append_to_cache,
-    get_cache_file_info,
     cache_exists,
     delete_cache,
-)
-
-from .stock_utils import (
+    get_cache_file_info,
     get_module_logger,
-    is_main_board_stock,
-    load_main_board_stock_list,
-    get_stock_codes_only,
-    filter_stocks_by_date,
-    get_stock_name_map,
-    MAIN_BOARD_PREFIXES,
-    EXCLUDED_PREFIXES,
-    EXCLUDED_NAME_KEYWORDS,
-    MIN_STOCK_DATE,
-    MAX_STOCK_DATE,
+    read_cache,
+    read_gzip_cache,
+    read_json_cache,
+    write_cache,
+    write_gzip_cache,
+    write_json_cache,
 )
-
-from .memory_utils import (
-    get_memory_usage_mb,
-    get_memory_info_str,
-)
-
 from .dataframe_utils import (
     validate_dataframe_columns,
 )
+from .logger_config import setup_logger
+from .memory_utils import (
+    get_memory_info_str,
+    get_memory_usage_mb,
+)
+from .paths import (
+    Paths,
+    get_logs_dir,
+    get_module_logs_dir,
+    get_module_result_dir,
+    get_project_root,
+    get_stock_list_file,
+    paths,
+)
+from .stock_utils import (
+    EXCLUDED_NAME_KEYWORDS,
+    EXCLUDED_PREFIXES,
+    MAIN_BOARD_PREFIXES,
+    MAX_STOCK_DATE,
+    MIN_STOCK_DATE,
+    filter_stocks_by_date,
+    get_module_logger,
+    get_stock_codes_only,
+    get_stock_name_map,
+    is_main_board_stock,
+    load_main_board_stock_list,
+)
+
 
 # http_client 需要 requests 模块，可选导入
 try:
     from .http_client import (
-        get_module_logger as http_get_module_logger,
-        create_retry_session,
-        create_eastmoney_session,
-        create_sina_session,
-        request_with_retry,
         DEFAULT_EASTMONEY_HEADERS,
         DEFAULT_SINA_HEADERS,
+        create_eastmoney_session,
+        create_retry_session,
+        create_sina_session,
+        request_with_retry,
+    )
+    from .http_client import (
+        get_module_logger as http_get_module_logger,
     )
     _HTTP_CLIENT_AVAILABLE = True
 except ImportError:

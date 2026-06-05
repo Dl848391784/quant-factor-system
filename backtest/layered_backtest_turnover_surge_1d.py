@@ -14,10 +14,11 @@
 - layer_names_dict: 优先使用 layer_descriptions，否则回退 layer_names
 """
 
-from typing import ClassVar, Sequence
+from collections.abc import Sequence
+from typing import ClassVar
 
-from backtest.common.layered_backtest_runner import LayerConfigBase
 from backtest.common.factor_cli import factor_cli_main
+from backtest.common.layered_backtest_runner import LayerConfigBase
 from data_fetchers.factor_calculator import calculate_turnover_surge
 
 
@@ -30,9 +31,9 @@ class TurnoverSurgeLayerConfig(LayerConfigBase):
     - turnover_surge 需实时计算（factor_calculator）
     - layer_names 纯标签（用于目录/列名），layer_descriptions 含中文（用于日志）
     """
-    
+
     factor_name: ClassVar[str] = 'turnover_surge'
-    
+
     layer_names: ClassVar[Sequence[str]] = (
         'lowest',
         'lower',
@@ -40,7 +41,7 @@ class TurnoverSurgeLayerConfig(LayerConfigBase):
         'higher',
         'highest'
     )
-    
+
     layer_descriptions: ClassVar[Sequence[str]] = (
         '极低层(换手率无突增)',
         '偏低层(换手率小幅突增)',

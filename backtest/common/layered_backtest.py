@@ -15,16 +15,18 @@
 import sys
 from pathlib import Path
 
+
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import pandas as pd
+from typing import Any
+
 import numpy as np
-from typing import Dict, List, Optional, Tuple, Any
-import warnings
+import pandas as pd
 
 # 导入公共日志模块（遵循 PROJECT.md 强制复用规范）
 from backtest.common.logger_config import get_logger
+
 
 logger = get_logger(__name__)
 
@@ -91,7 +93,7 @@ class LayeredBacktestEngine:
             short_layers=[4, 5]
         )
     """
-    
+
     def __init__(
         self,
         factor_df: pd.DataFrame,
@@ -100,7 +102,7 @@ class LayeredBacktestEngine:
         return_col: str = 'forward_return',
         date_col: str = 'date',
         asset_col: str = 'asset',
-        volume_col: Optional[str] = None
+        volume_col: str | None = None
     ):
         """
         初始化回测引擎
@@ -119,22 +121,22 @@ class LayeredBacktestEngine:
         self.date_col = date_col
         self.asset_col = asset_col
         self.volume_col = volume_col
-        
+
         # 合并数据
         self._merge_data(factor_df, return_df)
-        
+
     def _merge_data(self, factor_df: pd.DataFrame, return_df: pd.DataFrame):
         """合并因子和收益数据"""
         # 选择需要的列
         factor_cols = [self.date_col, self.asset_col, self.factor_col]
         if self.volume_col and self.volume_col in factor_df.columns:
             factor_cols.append(self.volume_col)
-        
+
         return_cols = [self.date_col, self.asset_col, self.return_col]
-        
+
         factor_subset = factor_df[factor_cols].copy()
         return_subset = return_df[return_cols].copy()
-        
+
         # 合并
         self.merged_df = pd.merge(
             factor_subset,
@@ -142,10 +144,10 @@ class LayeredBacktestEngine:
             on=[self.date_col, self.asset_col],
             how='inner'
         )
-        
+
         # 获取日期列表
         self.dates = sorted(self.merged_df[self.date_col].unique())
-        
+
         # 内存优化（v1.6 修正：因子列必须 float64，禁用 float32）
         # 因子列用于 percentile 分层，float32 精度损失会导致分层偏差
         # 收益列用于累计收益计算 (1+r).cumprod()，float64 防长时间序列误差累积
@@ -156,18 +158,18 @@ class LayeredBacktestEngine:
             self.merged_df[self.factor_col] = self.merged_df[self.factor_col].astype('float64')
         if self.return_col in self.merged_df.columns:
             self.merged_df[self.return_col] = self.merged_df[self.return_col].astype('float64')
-    
+
     def run(
         self,
         layer_method: str = 'percentile',
         n_layers: int = 5,
-        thresholds: Optional[List[float]] = None,
+        thresholds: list[float] | None = None,
         factor_direction: str = 'positive',
-        long_layers: Optional[List[int]] = None,
-        short_layers: Optional[List[int]] = None,
+        long_layers: list[int] | None = None,
+        short_layers: list[int] | None = None,
         min_stocks_per_layer: int = 10,
         trade_cost_rate: float = 0.003
-    ) -> Dict:
+    ) -> dict:
         """
         执行分层回测
         
@@ -215,19 +217,19 @@ class LayeredBacktestEngine:
             raise ValueError(
                 f"factor_direction 必须是 'positive' 或 'negative', 当前值: '{factor_direction}'"
             )
-        
+
         # 校验 layer_method
         valid_methods = ['percentile', 'fixed_threshold']
         if layer_method not in valid_methods:
             raise ValueError(
                 f"layer_method 必须是 'percentile' 或 'fixed_threshold', 当前值: '{layer_method}'"
             )
-        
+
         # 校验 thresholds（fixed_threshold 模式）
         if layer_method == 'fixed_threshold':
             if thresholds is None or len(thresholds) < 2:
                 raise ValueError(
-                    f"fixed_threshold 模式需要 thresholds 参数，且至少包含2个阈值点"
+                    "fixed_threshold 模式需要 thresholds 参数，且至少包含2个阈值点"
                 )
             # 校验阈值递增
             for i in range(len(thresholds) - 1):
@@ -235,14 +237,14 @@ class LayeredBacktestEngine:
                     raise ValueError(
                         f"thresholds 必须严格递增，第{i}个阈值 {thresholds[i]} >= 第{i+1}个阈值 {thresholds[i+1]}"
                     )
-        
+
         logger.info(f"开始分层回测: layer_method={layer_method}, factor_direction={factor_direction}")
-        
+
         # ========== 确定分层数量（先修正 n_layers）==========
         # 必须在设置默认多空层之前，避免层编号越界
         if layer_method == 'fixed_threshold' and thresholds:
             n_layers = len(thresholds) - 1
-        
+
         # ========== 设置默认多空组合（依赖已修正的 n_layers）==========
         # 多头：正向因子取高层，反向因子取低层
         # 空头：正向因子取低层，反向因子取高层
@@ -259,7 +261,7 @@ class LayeredBacktestEngine:
                 short_layers = [1]
             else:
                 short_layers = [1, 2] if factor_direction == 'positive' else [n_layers - 1, n_layers]
-        
+
         # ========== 校验多空层编号不越界 ==========
         max_layer = n_layers
         for layer_id in long_layers:
@@ -274,15 +276,15 @@ class LayeredBacktestEngine:
                     f"short_layers 越界: 层编号 {layer_id} 不在有效范围 [1, {max_layer}]，"
                     f"当前 n_layers={n_layers}，请检查 thresholds 参数"
                 )
-        
+
         # 每日处理（预先按日期分组，时间复杂度 O(n) 而非 O(n²)）
         # 原布尔索引每次全表扫描，groupby 一次分组后遍历
         daily_records = []
         prev_assignment = None
-        
+
         # 预先按日期分组（self.dates 已排序）
         grouped_by_date = self.merged_df.groupby(self.date_col)
-        
+
         for date in self.dates:
             # 获取当日数据（groupby 后，直接取组，无需全表扫描）
             try:
@@ -290,17 +292,17 @@ class LayeredBacktestEngine:
             except KeyError:
                 # 该日期无数据（如停牌日），跳过
                 continue
-            
+
             # 停牌过滤
             if self.volume_col and self.volume_col in day_data.columns:
                 day_data = day_data[day_data[self.volume_col] > 0]
-            
+
             # 过滤因子为NaN的数据
             day_data = day_data[day_data[self.factor_col].notna()]
-            
+
             if len(day_data) < min_stocks_per_layer:
                 continue
-            
+
             # 分层
             layer_assignment = self.get_layer_assignment(
                 date,
@@ -309,10 +311,10 @@ class LayeredBacktestEngine:
                 n_layers,
                 thresholds
             )
-            
+
             # 分层结果赋值（day_data 已 .copy()，此处赋值安全）
             day_data['_layer'] = layer_assignment
-            
+
             # 计算各层收益
             layer_returns = self.calculate_layer_returns(
                 date,
@@ -320,7 +322,7 @@ class LayeredBacktestEngine:
                 day_data[self.return_col],
                 min_stocks_per_layer
             )
-            
+
             # 计算换手率
             turnover_rates = self.calculate_turnover(
                 prev_assignment,
@@ -329,7 +331,7 @@ class LayeredBacktestEngine:
                     day_data['_layer']
                 ))
             )
-            
+
             # 记录每日结果
             for layer_id in range(1, n_layers + 1):
                 n_stocks = int((day_data['_layer'] == layer_id).sum())  # 转为int避免JSON序列化问题
@@ -343,15 +345,15 @@ class LayeredBacktestEngine:
                     'return': safe_return,
                     'turnover': float(turnover_rates.get(layer_id, 0.0))  # 转为float
                 })
-            
+
             prev_assignment = dict(zip(
                 day_data[self.asset_col].astype(str),
                 day_data['_layer']
             ))
-        
+
         # 构建结果DataFrame
         daily_df = pd.DataFrame(daily_records)
-        
+
         # 汇总统计
         result = self._aggregate_results(
             daily_df,
@@ -363,16 +365,16 @@ class LayeredBacktestEngine:
             layer_method,
             thresholds
         )
-        
+
         return result
-    
+
     def get_layer_assignment(
         self,
         date: str,
         factor_values: pd.Series,
         method: str,
         n_layers: int,
-        thresholds: Optional[List[float]]
+        thresholds: list[float] | None
     ) -> pd.Series:
         """
         计算股票分层归属
@@ -381,17 +383,17 @@ class LayeredBacktestEngine:
         """
         if method == 'percentile':
             # 百分位分层（method='first' 保证唯一秩）
-            # 
+            #
             # 精度要求：因子值必须以 float64 存储。float32 精度损失会导致：
             #   - 相邻因子值在存储时被截断为相同值
             #   - method='first' 虽能给相同值分配不同秩，但无法恢复原始顺序信息
             #   - 分层结果偏离预期（本应分层N的股票被错误归入分层M）
-            # 
+            #
             # 分层均匀性：当 N (股票数) 不能被 n_layers 整除时，
             #   - ceil(N/n_layers) 支股票会归入最后一层
             #   - 例如 N=3003, n_layers=5 → Layer1-4 各600支，Layer5 有603支
             #   - 这是 rank+ceil 算法的数学特性，非bug
-            # 
+            #
             # method='first' vs 'average'：
             #   - 'first': 相同值按出现顺序分配不同秩，保证分层覆盖所有股票
             #   - 'average': 相同值获得相同平均秩，可能导致某层股票过多
@@ -400,7 +402,7 @@ class LayeredBacktestEngine:
             layer_assignment = np.ceil(ranks * n_layers).astype(int)
             # 边界处理：rank=1.0 → ceil(5.0)=5, clip后归Layer5
             layer_assignment = layer_assignment.clip(1, n_layers)
-        
+
         elif method == 'fixed_threshold' and thresholds:
             # 固定阈值分层（最后一层右闭区间，其余右开）
             # 顺序依赖说明：
@@ -410,7 +412,7 @@ class LayeredBacktestEngine:
             # 使用显式 bool mask 替代哨兵值，避免歧义（v1.6 修正）
             layer_assignment = pd.Series(0, index=factor_values.index)  # 层号：0=未归层，1-n=已归层
             assigned = pd.Series(False, index=factor_values.index)     # 是否已归层的显式标记
-            
+
             # ========== 边界处理（必须在循环前执行）==========
             # 低于最小阈值：归入 Layer 1
             below_min_mask = factor_values < thresholds[0]
@@ -424,7 +426,7 @@ class LayeredBacktestEngine:
                 )
                 layer_assignment[below_min_mask] = 1
                 assigned[below_min_mask] = True
-            
+
             # 超最大阈值：归入最后一层
             above_max_mask = factor_values > thresholds[-1]
             if above_max_mask.any():
@@ -437,7 +439,7 @@ class LayeredBacktestEngine:
                 )
                 layer_assignment[above_max_mask] = n_layers
                 assigned[above_max_mask] = True
-            
+
             # ========== 边界内循环归层 ==========
             for i in range(len(thresholds) - 1):
                 lower = thresholds[i]
@@ -453,7 +455,7 @@ class LayeredBacktestEngine:
                 mask_unassigned = mask & ~assigned
                 layer_assignment[mask_unassigned] = i + 1
                 assigned[mask_unassigned] = True
-            
+
             # 断言：所有股票都已归层
             unassigned_mask = ~assigned
             if unassigned_mask.any():
@@ -462,19 +464,19 @@ class LayeredBacktestEngine:
                     f"请检查 thresholds 参数是否覆盖数据范围"
                 )
                 raise ValueError("fixed_threshold 分层逻辑错误：存在未归层的股票")
-        
+
         else:
             raise ValueError(f"Unknown layer method: {method}")
-        
+
         return layer_assignment
-    
+
     def calculate_layer_returns(
         self,
         date: str,
         layer_assignment: pd.Series,
         returns: pd.Series,
         min_stocks: int = 10
-    ) -> Dict[int, float]:
+    ) -> dict[int, float]:
         """
         计算各层收益（等权平均）
         
@@ -488,35 +490,35 @@ class LayeredBacktestEngine:
             各层收益字典 {layer_id: return}
         """
         layer_returns = {}
-        
+
         # 遍历顺序：从小到大，与后续 range(1, n_layers+1) 风格一致
         for layer_id in sorted(layer_assignment.dropna().unique()):
             if pd.isna(layer_id) or layer_id == 0:
                 continue
-            
+
             layer_mask = layer_assignment == layer_id
             layer_returns_vals = returns[layer_mask]
-            
+
             # 空层检查
             if len(layer_returns_vals) < min_stocks:
                 layer_returns[int(layer_id)] = np.nan
                 continue
-            
+
             # 过滤NaN收益
             valid_returns = layer_returns_vals.dropna()
-            
+
             if len(valid_returns) < min_stocks // 2:
                 layer_returns[int(layer_id)] = np.nan
             else:
                 layer_returns[int(layer_id)] = float(valid_returns.mean())  # 转为float
-        
+
         return layer_returns
-    
+
     def calculate_turnover(
         self,
-        prev_assignment: Optional[Dict[str, Any]],
-        curr_assignment: Dict[str, Any]
-    ) -> Dict[int, float]:
+        prev_assignment: dict[str, Any] | None,
+        curr_assignment: dict[str, Any]
+    ) -> dict[int, float]:
         """
         计算换手率
         
@@ -526,36 +528,36 @@ class LayeredBacktestEngine:
             layer_id 实际类型为 numpy.int64（来自 pd.Series），标注 Any 防误导
         """
         turnover_rates = {}
-        
+
         if prev_assignment is None:
             return turnover_rates
-        
+
         # 获取所有层
         all_layers = set(curr_assignment.values())
-        
+
         for layer_id in all_layers:
             # 当前层股票
             curr_stocks = {s for s, l in curr_assignment.items() if l == layer_id}
-            
+
             # 前一期该层股票
             prev_stocks = {s for s, l in prev_assignment.items() if l == layer_id}
-            
+
             # 新入股票
             new_stocks = curr_stocks - prev_stocks
-            
+
             # 换手率
             if len(curr_stocks) > 0:
                 turnover_rates[int(layer_id)] = float(len(new_stocks) / len(curr_stocks))
             else:
                 turnover_rates[int(layer_id)] = 0.0
-        
+
         return turnover_rates
-    
+
     @staticmethod
     def _calc_daily_ls(
         group: pd.DataFrame,
-        long_layers: List[int],
-        short_layers: List[int]
+        long_layers: list[int],
+        short_layers: list[int]
     ) -> pd.Series:
         """
         计算每日多空收益和换手率（静态方法，显式传参避免闭包捕获）
@@ -570,11 +572,11 @@ class LayeredBacktestEngine:
         """
         long_rets = group[group['layer'].isin(long_layers)]['return'].dropna()
         short_rets = group[group['layer'].isin(short_layers)]['return'].dropna()
-        
+
         # 换手率：按日期分组取均值，避免多头多层重复计次
         long_turnover_vals = group[group['layer'].isin(long_layers)]['turnover'].dropna()
         short_turnover_vals = group[group['layer'].isin(short_layers)]['turnover'].dropna()
-        
+
         if len(long_rets) > 0 and len(short_rets) > 0:
             return pd.Series({
                 'long_return': long_rets.mean(),
@@ -590,26 +592,26 @@ class LayeredBacktestEngine:
             'long_turnover': np.nan,
             'short_turnover': np.nan
         })
-    
+
     def _aggregate_results(
         self,
         daily_df: pd.DataFrame,
         n_layers: int,
-        long_layers: List[int],
-        short_layers: List[int],
+        long_layers: list[int],
+        short_layers: list[int],
         factor_direction: str,
         trade_cost_rate: float,
         layer_method: str,
-        thresholds: Optional[List[float]]
-    ) -> Dict:
+        thresholds: list[float] | None
+    ) -> dict:
         """汇总统计结果"""
-        
+
         # ========== 空数据前置检查 ==========
         # 若所有日期数据量均不足 min_stocks_per_layer，daily_df 为空
         if len(daily_df) == 0:
             logger.warning(
-                f"回测无有效数据：所有日期数据量均不足 min_stocks_per_layer，"
-                f"请检查数据范围或降低 min_stocks_per_layer 参数"
+                "回测无有效数据：所有日期数据量均不足 min_stocks_per_layer，"
+                "请检查数据范围或降低 min_stocks_per_layer 参数"
             )
             # 构造结构完整但值为 None 的 layer_stats（与正常返回结构一致）
             layer_stats = {}
@@ -645,19 +647,19 @@ class LayeredBacktestEngine:
                 'trading_cost_analysis': {},
                 'daily_records': []
             }
-        
+
         # 各层统计
         layer_stats = {}
         for layer_id in range(1, n_layers + 1):
             layer_data = daily_df[daily_df['layer'] == layer_id]
-            
+
             # 过滤NaN收益
             # 假设说明：NaN 日（停牌、数据缺失）不参与收益计算
             #   - dropna() 后索引可能不连续（部分交易日缺失）
             #   - cumprod() 对非连续索引有效：所有非 NaN 日收益连乘
             #   - 语义：忽略停牌日收益，反映实际可交易时段的累计表现
             valid_returns = layer_data['return'].dropna()
-            
+
             if len(valid_returns) == 0:
                 layer_stats[f'layer_{layer_id}'] = {
                     'n_days': int(len(layer_data)),
@@ -672,21 +674,21 @@ class LayeredBacktestEngine:
                     'turnover_avg': None
                 }
                 continue
-            
+
             daily_return_mean = valid_returns.mean()
             daily_return_std = valid_returns.std()
-            
+
             # 累计收益（假设：停牌日不参与计算，反映实际可交易时段表现）
             cum_returns = (1 + valid_returns).cumprod() - 1
             cumulative_return = cum_returns.iloc[-1] if len(cum_returns) > 0 else 0
-            
+
             # 年化收益和波动
             annual_return = daily_return_mean * 252
             annual_volatility = daily_return_std * np.sqrt(252)
-            
+
             # 夏普比率
             sharpe_ratio = annual_return / annual_volatility if annual_volatility > 0 else np.nan
-            
+
             # 最大回撤（除零保护：净值归零时回撤应为 -1.0，而非 0）
             cum_series = (1 + valid_returns).cumprod()
             rolling_max = cum_series.expanding().max()
@@ -696,11 +698,11 @@ class LayeredBacktestEngine:
                 drawdowns = np.where(rolling_max == 0, -1.0, drawdowns)  # 净值归零时回撤-1.0
             drawdowns = pd.Series(drawdowns, index=cum_series.index)
             max_drawdown = drawdowns.min()
-            
+
             # 换手率
             turnover_data = layer_data['turnover'].dropna()
             turnover_avg = turnover_data.mean() if len(turnover_data) > 0 else 0
-            
+
             layer_stats[f'layer_{layer_id}'] = {
                 'n_days': int(len(layer_data)),  # 转 int 避免 JSON 序列化问题
                 'n_stocks_avg': float(layer_data['n_stocks'].mean()),  # 转 float
@@ -713,7 +715,7 @@ class LayeredBacktestEngine:
                 'max_drawdown': float(max_drawdown),
                 'turnover_avg': float(turnover_avg)
             }
-        
+
         # 多空组合统计（v1.6 修正：保留所有日期，年化考虑覆盖率）
         # pandas ≥ 2.2 下 groupby.apply 可能产生多级索引，改用 concat 更稳定
         # 显式排序日期：保证时间序列顺序，便于后续累计收益计算
@@ -725,37 +727,37 @@ class LayeredBacktestEngine:
             # 保留所有日期（包括 NaN），用于计算总天数和覆盖率
             ls_series['date'] = date_val
             daily_ls_list.append(ls_series)
-        
+
         if len(daily_ls_list) > 0:
             long_short_df = pd.DataFrame(daily_ls_list)
         else:
             long_short_df = pd.DataFrame()  # 空 DataFrame
-        
+
         # 多空组合统计
         long_short_stats = {}
         if len(long_short_df) > 0:
             # 有效天数：用于均值计算（自动忽略 NaN）
             valid_days = long_short_df['long_short_return'].notna().sum()
             coverage = valid_days / total_days if total_days > 0 else 0
-            
+
             ls_mean = long_short_df['long_short_return'].mean()  # 有效天数均值
             ls_std = long_short_df['long_short_return'].std()
-            
+
             # 年化计算：考虑覆盖率（v1.6 修正）
             # 语义：如果某因子只有60%的交易日有数据，年化收益应乘以覆盖率
             ls_annual = ls_mean * 252 * coverage
             ls_vol = ls_std * np.sqrt(252)  # 波动率不需要覆盖率（假设NaN日波动为0）
-            
+
             # 安全转换：NaN → None（避免 json.dumps 抛 ValueError）
             def safe_float(val):
                 return None if pd.isna(val) else float(val)
-            
+
             # 年化计算考虑覆盖率（v1.6 修正）
             long_mean = long_short_df['long_return'].mean()
             short_mean = long_short_df['short_return'].mean()
             long_turnover_mean = long_short_df['long_turnover'].mean()
             short_turnover_mean = long_short_df['short_turnover'].mean()
-            
+
             long_short_stats = {
                 'long_return_daily': safe_float(long_mean),
                 'long_return_annual': safe_float(long_mean * 252 * coverage),
@@ -772,16 +774,16 @@ class LayeredBacktestEngine:
                 'n_days_total': int(total_days),  # 总天数（含NaN日）
                 'coverage': float(coverage)  # 数据覆盖率
             }
-        
+
         # 单调性检验
         monotonicity = self._calculate_monotonicity(layer_stats, n_layers, factor_direction)
-        
+
         # 交易成本分析
         trading_cost_analysis = self._calculate_trading_costs(
             long_short_stats,
             trade_cost_rate
         )
-        
+
         # 元数据
         meta = {
             'n_layers': n_layers,
@@ -796,7 +798,7 @@ class LayeredBacktestEngine:
             'n_days_total': int(len(daily_df['date'].unique())),  # 转 int 避免 JSON 序列化问题
             'n_assets_total': int(self.merged_df[self.asset_col].nunique())  # nunique统计实际出现的唯一值
         }
-        
+
         return {
             'meta': meta,
             'layer_stats': layer_stats,
@@ -805,13 +807,13 @@ class LayeredBacktestEngine:
             'trading_cost_analysis': trading_cost_analysis,
             'daily_records': daily_df.to_dict('records')
         }
-    
+
     def _calculate_monotonicity(
         self,
-        layer_stats: Dict,
+        layer_stats: dict,
         n_layers: int,
         factor_direction: str
-    ) -> Dict:
+    ) -> dict:
         """
         计算分层单调性
         
@@ -826,58 +828,58 @@ class LayeredBacktestEngine:
                 layer_returns.append(ret)
             else:
                 layer_returns.append(np.nan)
-        
+
         # 计算相关系数
         valid_idx = [i for i, r in enumerate(layer_returns) if not pd.isna(r)]
         if len(valid_idx) >= 2:
             layer_ids = np.array([i + 1 for i in valid_idx])
             returns = np.array([layer_returns[i] for i in valid_idx])
-            
+
             correlation = np.corrcoef(layer_ids, returns)[0, 1]
-            
+
             # 对于反向因子，期望负相关
             if factor_direction == 'negative':
                 monotonic_quality = 'good' if correlation < -0.5 else ('moderate' if correlation < 0 else 'poor')
             else:
                 monotonic_quality = 'good' if correlation > 0.5 else ('moderate' if correlation > 0 else 'poor')
-            
+
             return {
                 'correlation': float(correlation),
                 'quality': monotonic_quality,
                 'layer_returns': layer_returns
             }
-        
+
         return {
             'correlation': None,
             'quality': 'insufficient_data',
             'layer_returns': layer_returns
         }
-    
+
     def _calculate_trading_costs(
         self,
-        long_short_stats: Dict,
+        long_short_stats: dict,
         trade_cost_rate: float
-    ) -> Dict:
+    ) -> dict:
         """计算交易成本"""
         if not long_short_stats:
             return {}
-        
+
         # 安全取值：显式处理 NaN（v1.6 修正）
         # 换手率 NaN → 成本按 0 处理（语义：换手率未知时无法计算交易成本）
         long_turnover_raw = long_short_stats.get('turnover_long_avg')
         short_turnover_raw = long_short_stats.get('turnover_short_avg')
         long_turnover = 0.0 if pd.isna(long_turnover_raw) else float(long_turnover_raw)
         short_turnover = 0.0 if pd.isna(short_turnover_raw) else float(short_turnover_raw)
-        
+
         long_daily_ret = _coalesce(long_short_stats.get('long_return_daily'))
         short_daily_ret = _coalesce(long_short_stats.get('short_return_daily'))
-        
+
         # 多头交易成本（单边）
         long_daily_cost = long_turnover * trade_cost_rate
-        
+
         # 空头交易成本（双边，因为做空需要借券）
         short_daily_cost = short_turnover * trade_cost_rate * 2
-        
+
         return {
             'cost_rate': trade_cost_rate,
             'long_turnover': long_turnover,
@@ -892,15 +894,15 @@ class LayeredBacktestEngine:
             'long_short_gross_daily': long_daily_ret - short_daily_ret if not pd.isna(long_daily_ret) and not pd.isna(short_daily_ret) else None,
             'long_short_net_daily': (long_daily_ret - long_daily_cost) - (short_daily_ret - short_daily_cost) if not pd.isna(long_daily_ret) and not pd.isna(short_daily_ret) else None
         }
-    
-    def generate_report(self, result: Dict) -> str:
+
+    def generate_report(self, result: dict) -> str:
         """生成文本报告"""
         lines = []
         lines.append("=" * 70)
         lines.append("分层回测报告")
         lines.append("=" * 70)
         lines.append("")
-        
+
         # 元数据
         meta = result['meta']
         lines.append(f"分层数量: {meta['n_layers']}")
@@ -910,49 +912,49 @@ class LayeredBacktestEngine:
         lines.append(f"回测天数: {meta['n_days_total']}")
         lines.append(f"股票数量: {meta['n_assets_total']}")
         lines.append("")
-        
+
         # 分层收益统计
         lines.append("-" * 70)
         lines.append("一、分层收益统计")
         lines.append("-" * 70)
         lines.append(f"{'分层':<8} {'股票数':<10} {'日均收益':<12} {'年化收益':<12} {'夏普比':<10} {'换手率':<10}")
         lines.append("-" * 70)
-        
+
         # 统计有效层数（用于空数据提示）
         valid_layer_count = 0
         for layer_id in range(1, meta['n_layers'] + 1):
             stats = result['layer_stats'].get(f'layer_{layer_id}', {})
             if stats.get('n_stocks_avg', 0) == 0:
                 continue
-            
+
             valid_layer_count += 1
             n_stocks = stats.get('n_stocks_avg', 0)
             daily_ret = _coalesce(stats.get('daily_return_mean'))
             annual_ret = _coalesce(stats.get('annual_return'))
             sharpe = stats.get('sharpe_ratio')
             turnover = _coalesce(stats.get('turnover_avg'))
-            
+
             # 使用 _format_pct 处理 NaN（v1.6 修正）
             sharpe_str = f"{sharpe:.2f}" if sharpe is not None and not pd.isna(sharpe) else "N/A"
             daily_str = _format_pct(daily_ret, decimals=2)
             annual_str = _format_pct(annual_ret, decimals=2)
             turnover_str = _format_pct(turnover, decimals=1)
-            
+
             lines.append(f"Layer{layer_id:<3} {n_stocks:<10.0f} {daily_str:>10} {annual_str:>10} {sharpe_str:<10} {turnover_str:>8}")
-        
+
         # 空数据提示（所有层都无效时）
         if valid_layer_count == 0:
             lines.append("⚠ 无有效分层数据：所有日期数据量均不足 min_stocks_per_layer")
             lines.append("  建议：检查数据范围或降低 min_stocks_per_layer 参数")
-        
+
         lines.append("-" * 70)
         lines.append("")
-        
+
         # 多空组合表现
         lines.append("-" * 70)
         lines.append("二、多空组合表现")
         lines.append("-" * 70)
-        
+
         ls_stats = result.get('long_short', {})
         if ls_stats:
             long_daily = _coalesce(ls_stats.get('long_return_daily'))
@@ -961,7 +963,7 @@ class LayeredBacktestEngine:
             short_annual = _coalesce(ls_stats.get('short_return_annual'))
             ls_daily = _coalesce(ls_stats.get('long_short_return_daily'))
             ls_annual = _coalesce(ls_stats.get('long_short_return_annual'))
-            
+
             # 使用 _format_pct 处理 NaN（v1.6 修正）
             lines.append(f"多头日均收益: {_format_pct(long_daily, 4)}")
             lines.append(f"多头年化收益: {_format_pct(long_annual, 2)}")
@@ -976,21 +978,21 @@ class LayeredBacktestEngine:
         else:
             # 空数据提示
             lines.append("⚠ 无多空组合数据：缺少有效的多空层收益数据")
-        
+
         lines.append("-" * 70)
         lines.append("")
-        
+
         # 单调性
         lines.append("-" * 70)
         lines.append("三、单调性检验")
         lines.append("-" * 70)
-        
+
         mono = result.get('monotonicity', {})
         corr = mono.get('correlation')
         if corr is not None:
             lines.append(f"分层单调性相关系数: {corr:.4f}")
             lines.append(f"单调性质量: {mono.get('quality', 'unknown')}")
-            
+
             if meta['factor_direction'] == 'negative':
                 if corr < -0.5:
                     lines.append("✓ 反向因子单调性良好（Layer1 > Layer5）")
@@ -1011,15 +1013,15 @@ class LayeredBacktestEngine:
             lines.append(f"单调性质量: {quality}")
             if quality == 'no_data':
                 lines.append("⚠ 无单调性数据：缺少有效的分层收益数据")
-        
+
         lines.append("-" * 70)
         lines.append("")
-        
+
         # 交易成本分析
         lines.append("-" * 70)
         lines.append("四、交易成本分析")
         lines.append("-" * 70)
-        
+
         cost = result.get('trading_cost_analysis', {})
         if cost:
             cost_rate = _coalesce(cost.get('cost_rate'))
@@ -1039,7 +1041,7 @@ class LayeredBacktestEngine:
         else:
             # 空数据提示
             lines.append("⚠ 无交易成本数据：缺少有效的多空组合换手率数据")
-        
+
         lines.append("-" * 70)
-        
+
         return "\n".join(lines)

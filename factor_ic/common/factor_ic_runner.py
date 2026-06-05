@@ -22,31 +22,31 @@
 """
 
 import json
-import pandas as pd
+from collections.abc import Callable
 from pathlib import Path
-from typing import Dict, List, Optional, Callable, Any
+from typing import Any
 
 # 导入日志
 from .logger_config import get_logger
+
+
 logger = get_logger(__name__)
 
 # 导入数据加载（单文件模式）
-from .data_loader import load_factor_return_data, get_data_cache_path
-
-# 导入 IC 计算
-from .ic_calculator import calculate_ic_with_direction_verification, calculate_ic_statistics
-
-# 导入结果构建
-from .ic_result_builder import build_ic_result, build_error_result, save_ic_result, get_ic_output_path
-
-# 导入增量引擎
-from .incremental_engine import incremental_update_ic, UpdateMode
+# 导入类型转换
 
 # 导入数据完整性检查
 from .data_completeness import check_data_completeness
+from .data_loader import get_data_cache_path, load_factor_return_data
 
-# 导入类型转换
-from .convert_types import convert_to_native_types
+# 导入 IC 计算
+from .ic_calculator import calculate_ic_with_direction_verification
+
+# 导入结果构建
+from .ic_result_builder import build_error_result, build_ic_result, get_ic_output_path, save_ic_result
+
+# 导入增量引擎
+from .incremental_engine import incremental_update_ic
 
 
 def run_factor_ic_analysis(
@@ -54,16 +54,16 @@ def run_factor_ic_analysis(
     factor_col: str,
     return_period: str = '1d',
     return_col: str = 'forward_return_1d',
-    factor_cols: Optional[List[str]] = None,
+    factor_cols: list[str] | None = None,
     min_stocks: int = 10,
     force_full: bool = False,
-    output_path: Optional[Path] = None,
-    data_cache_path: Optional[Path] = None,
-    additional_factor_files: Optional[Dict[str, Path]] = None,
-    custom_factor_calculation: Optional[Callable] = None,
-    custom_factor_calculation_params: Optional[Dict[str, Any]] = None,
+    output_path: Path | None = None,
+    data_cache_path: Path | None = None,
+    additional_factor_files: dict[str, Path] | None = None,
+    custom_factor_calculation: Callable | None = None,
+    custom_factor_calculation_params: dict[str, Any] | None = None,
     _logger=None
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     因子 IC 分析统一主入口
     
@@ -119,18 +119,18 @@ def run_factor_ic_analysis(
     # 参数重命名避免遮蔽模块级 logger
     if _logger is None:
         _logger = get_logger(__name__)
-    
+
     _logger.info("=" * 60)
     _logger.info(f"因子 IC 分析: {factor_name}_{return_period}")
     _logger.info("=" * 60)
-    
+
     # ========== 确定路径 ==========
     if output_path is None:
         output_path = get_ic_output_path(factor_name, return_period)
-    
+
     if data_cache_path is None:
         data_cache_path = get_data_cache_path()
-    
+
     if factor_cols is None:
         factor_cols = [factor_col]
     else:
@@ -145,13 +145,13 @@ def run_factor_ic_analysis(
             )
             # 追加到末尾，保持原有顺序
             factor_cols = factor_cols + [factor_col]
-    
+
     data_source = str(data_cache_path)
-    
+
     # ========== 判断模式（不需要加载数据）==========
     # 使用 check_data_completeness 判断模式，避免 SKIP 模式也加载全量数据
     _logger.info("[模式判断] 判断更新模式...")
-    
+
     # force_full 强制全量模式
     if force_full:
         mode = 'full'
@@ -161,14 +161,14 @@ def run_factor_ic_analysis(
     else:
         mode, missing_dates, info = check_data_completeness(factor_name, logger=_logger)
         _logger.info(f"模式判断: {mode}")
-    
+
     # ========== SKIP 模式：直接返回缓存数据 ==========
     if mode == 'skip':
         _logger.info("[执行模式] 数据已最新，跳过计算")
-        
+
         # 直接读取缓存数据返回
         if output_path.exists():
-            with open(output_path, 'r', encoding='utf-8') as f:
+            with open(output_path, encoding='utf-8') as f:
                 cached_result = json.load(f)
             cached_result['update_mode'] = 'skip'
             _logger.info(f"✓ 返回缓存数据: {len(cached_result.get('dates', []))} 天")
@@ -182,10 +182,10 @@ def run_factor_ic_analysis(
                 return_period=return_period,
                 data_source=data_source
             )
-    
+
     # ========== 加载数据（仅在 FULL/INCREMENTAL 模式）==========
     _logger.info("[数据加载] 加载因子和收益数据...")
-    
+
     try:
         factor_df, return_df, raw_metadata = load_factor_return_data(
             factor_cols=factor_cols,
@@ -212,11 +212,11 @@ def run_factor_ic_analysis(
             return_period=return_period,
             data_source=data_source
         )
-    
+
     # ========== 增量模式处理 ==========
     if mode == 'incremental':
         _logger.info("[执行模式] 增量更新...")
-        
+
         # **重要修正**：复杂因子在增量模式也需要先执行自定义计算
         # 原因：factor_col 是计算后的因子列名，不存在于原始缓存数据中
         if custom_factor_calculation is not None:
@@ -224,7 +224,7 @@ def run_factor_ic_analysis(
             params = custom_factor_calculation_params or {}
             factor_df = custom_factor_calculation(factor_df, **params)
             _logger.info(f"处理后数据: {len(factor_df)} 行")
-        
+
         # 调用增量引擎（内部已保存结果）
         result = incremental_update_ic(
             output_path=output_path,
@@ -236,11 +236,11 @@ def run_factor_ic_analysis(
             return_col=return_col,
             min_stocks=min_stocks
         )
-        
+
         # **注意**：incremental_update_ic 内部已保存结果
         # 职责划分：增量引擎负责保存，factor_ic_runner 不再重复保存
         # 避免双重写入问题
-        
+
         # 检查增量引擎是否需要全量计算（缓存不存在或损坏）
         if result.get('update_mode') == 'need_full':
             _logger.warning("缓存不存在或损坏，转为全量计算")
@@ -251,21 +251,21 @@ def run_factor_ic_analysis(
             # incremental_update_ic 内部已调用 calculate_ic_statistics 计算五维度
             # 数据来源一致性：ic_values 和 dates 来自增量引擎合并后的全量数据
             return result
-    
+
     # ========== 全量模式 ==========
     # 注意：此分支也处理增量模式转全量模式的情况
     _logger.info("[执行模式] 全量计算...")
-    
+
     # 自定义因子计算（如有）
     if custom_factor_calculation is not None:
         _logger.info("[因子预处理] 执行自定义因子计算...")
         params = custom_factor_calculation_params or {}
         factor_df = custom_factor_calculation(factor_df, **params)
         _logger.info(f"处理后数据: {len(factor_df)} 行")
-    
+
     # 计算 IC（五维度判断）
     _logger.info("[IC 计算] 计算 IC（含五维度判断）...")
-    
+
     try:
         ic_result = calculate_ic_with_direction_verification(
             factor_df=factor_df,
@@ -277,7 +277,7 @@ def run_factor_ic_analysis(
             min_stocks=min_stocks,
             logger=_logger
         )
-        
+
         # 使用 .get() 防止 KeyError，保持与增量模式一致
         _logger.info(f"IC 均值: {ic_result.get('ic_mean', 0.0):.4f}")
         _logger.info(f"ICIR: {ic_result.get('icir', 0.0):.2f}")
@@ -285,7 +285,7 @@ def run_factor_ic_analysis(
         stats_sig = ic_result.get('statistical_significance') or {}
         t_stat = stats_sig.get('t_stat', 0.0)
         _logger.info(f"t 统计量: {t_stat:.2f}")
-        
+
     except Exception as e:
         _logger.error(f"IC 计算失败: {e}")
         return build_error_result(
@@ -294,10 +294,10 @@ def run_factor_ic_analysis(
             return_period=return_period,
             data_source=data_source
         )
-    
+
     # 构建完整结果
     _logger.info("[结果构建] 构建完整输出结构...")
-    
+
     result = build_ic_result(
         ic_result=ic_result,
         raw_metadata=raw_metadata,
@@ -307,16 +307,16 @@ def run_factor_ic_analysis(
         factor_col=factor_col,
         update_mode='full'
     )
-    
+
     # 保存
     save_ic_result(result, output_path)
-    
+
     _logger.info("=" * 60)
     # 使用 .get() 双重保护防止 KeyError（与日志访问规范一致）
     valid_days = result.get('sample_stats', {}).get('valid_days', 0)
     _logger.info(f"完成！共计算 {valid_days} 天有效 IC")
     _logger.info("=" * 60)
-    
+
     return result
 
 
@@ -327,7 +327,7 @@ def run_simple_factor_ic(
     factor_col: str,
     _logger=None,
     **kwargs
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     快捷函数：简单因子 IC 分析
     
@@ -356,11 +356,11 @@ def run_simple_factor_ic(
 def run_complex_factor_ic(
     factor_name: str,
     factor_col: str,
-    factor_cols: List[str],
+    factor_cols: list[str],
     custom_factor_calculation: Callable,
     _logger=None,
     **kwargs
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     快捷函数：复杂因子 IC 分析
     
@@ -408,16 +408,16 @@ def main():
         python -m factor_ic.common.factor_ic_runner --factor rsi --col rsi_6
     """
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='因子 IC 分析')
     parser.add_argument('--factor', required=True, help='因子名称')
     parser.add_argument('--col', required=True, help='因子列名')
     parser.add_argument('--period', default='1d', help='收益周期')
     parser.add_argument('--min-stocks', type=int, default=10, help='最小股票数')
     parser.add_argument('--force-full', action='store_true', help='强制全量计算')
-    
+
     args = parser.parse_args()
-    
+
     # CLI 使用模块级 logger
     result = run_simple_factor_ic(
         factor_name=args.factor,
@@ -427,7 +427,7 @@ def main():
         force_full=args.force_full,
         _logger=logger  # 传入模块级 logger（参数名 _logger，值是模块级 logger）
     )
-    
+
     # 使用模块级 logger（明确标识）
     logger.info(f"[CLI] 结果: {result.get('update_mode', 'unknown')}")
 

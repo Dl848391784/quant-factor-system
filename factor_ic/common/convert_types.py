@@ -45,11 +45,14 @@ NaN/Inf 检查规范（2026-05-23）：
 """
 
 import math
-import numpy as np
-import pandas as pd
 from typing import Any
 
+import numpy as np
+import pandas as pd
+
 from .logger_config import get_logger
+
+
 logger = get_logger(__name__)
 
 
@@ -75,29 +78,29 @@ def convert_to_native_types(obj: Any) -> Any:
     # None 直接返回
     if obj is None:
         return None
-    
+
     # 单例检查：必须在所有 isinstance 检查之前
     # 单例对象用 `is` 判断，不依赖类型继承，跨版本稳定
     if obj is pd.NaT:
         # pandas 缺失时间，转为 None
         return None
-    
+
     if obj is pd.NA:
         # pandas 扩展类型缺失值，转为 None
         return None
-    
+
     # 容器类型：递归处理
     if isinstance(obj, dict):
         # 字典的键和值都需要转换（键可能是 numpy 类型）
         return {convert_to_native_types(k): convert_to_native_types(v) for k, v in obj.items()}
-    
+
     elif isinstance(obj, list):
         return [convert_to_native_types(v) for v in obj]
-    
+
     elif isinstance(obj, tuple):
         # tuple 递归转换（numpy 操作如 np.where 返回 tuple）
         return tuple(convert_to_native_types(v) for v in obj)
-    
+
     # bool 检查必须在 integer 之前（Python bool 是 int 的子类）
     # 显式分开处理：防止分支顺序变化导致误判，意图清晰
     elif isinstance(obj, np.bool_):
@@ -106,46 +109,46 @@ def convert_to_native_types(obj: Any) -> Any:
     elif isinstance(obj, bool):
         # Python 布尔类型（必须在 integer 之前，因为 bool 是 int 的子类）
         return obj
-    
+
     elif isinstance(obj, np.integer):
         # np.integer 是所有 numpy 整数类型的抽象基类（int64/int32/int16/int8/uint64等）
         return int(obj)
-    
+
     elif isinstance(obj, np.floating):
         # np.floating 是所有 numpy 浮点类型的抽象基类（float64/float32/float16）
         # 处理 NaN 和 Inf
         if np.isnan(obj) or np.isinf(obj):
             return None
         return float(obj)
-    
+
     elif isinstance(obj, np.ndarray):
         # ndarray.tolist() 对 object dtype 不做元素转换，必须递归处理
         # 例如：np.array([np.int64(1), np.float64(2.5)], dtype=object).tolist()
         #       返回 [np.int64(1), np.float64(2.5)]，而非 [1, 2.5]
         # 因此必须递归调用 convert_to_native_types 处理每个元素
         return convert_to_native_types(obj.tolist())
-    
+
     elif isinstance(obj, pd.Series):
         # Series.tolist() 对扩展类型（如 Int64 dtype）可能残留 pd.NA：
         # - pd.Series([1, pd.NA], dtype='Int64').tolist() → [1, pd.NA]（非 None）
         # - 后续递归调用 convert_to_native_types 会处理 pd.NA
         # - 依赖关系：此分支 → obj is pd.NA 分支（勿删除）
         return convert_to_native_types(obj.tolist())
-    
+
     elif isinstance(obj, pd.DataFrame):
         # DataFrame 转为 list of dicts（每行一个 dict）
         return convert_to_native_types(obj.to_dict('records'))
-    
+
     elif isinstance(obj, pd.Timestamp):
         # pandas 时间戳转字符串（pd.NaT 已在前面单例检查处理）
         return str(obj)
-    
+
     elif isinstance(obj, float):
         # 处理 Python float 的 NaN 和 Inf
         if math.isnan(obj) or math.isinf(obj):
             return None
         return obj
-    
+
     else:
         return obj
 
@@ -162,7 +165,7 @@ if __name__ == '__main__':
             'value': np.float32(2.5)
         }
     }
-    
+
     result = convert_to_native_types(test_dict)
     logger.info("转换结果:")
     logger.info(f"  int: {result['int']} (type: {type(result['int']).__name__})")
@@ -170,7 +173,7 @@ if __name__ == '__main__':
     logger.info(f"  nan: {result['nan']} (应为 None)")
     logger.info(f"  array: {result['array']}")
     logger.info(f"  nested.value: {result['nested']['value']}")
-    
+
     # 测试 JSON 序列化
     import json
     json_str = json.dumps(result, ensure_ascii=False)

@@ -16,27 +16,30 @@ fetch_stock_list.py pytest 测试文件
 """
 
 import json
-import pytest
-from datetime import datetime, timedelta
-from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
 import logging
 
 # 导入测试目标
 import sys
+from datetime import datetime, timedelta
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
+
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from data_fetchers.fetch_stock_list import (
     _OUTPUT_VERSION,
-    ST_PREFIX_STAR,
-    ST_PREFIX_ST,
     ST_PREFIX_S,
-    is_valid_main_board_stock,
+    ST_PREFIX_ST,
+    ST_PREFIX_STAR,
     determine_market,
-    validate_cache,
-    load_cache,
     get_cached_stock_codes,
+    is_valid_main_board_stock,
+    load_cache,
     refresh_stock_cache,
+    validate_cache,
 )
 
 
@@ -187,7 +190,7 @@ class TestCacheValidation:
         cache_data = {
             'stocks': stocks,
         }
-        
+
         result = validate_cache(cache_data)
         assert result['passed'] is True
         assert len(result['warnings']) > 0
@@ -204,7 +207,7 @@ class TestCacheValidation:
             'market': 'sh'
         })
         cache_data = {'stocks': stocks}
-        
+
         result = validate_cache(cache_data)
         assert result['passed'] is False
         assert '发现ST股票混入' in result['errors'][0]
@@ -220,7 +223,7 @@ class TestCacheValidation:
             'market': 'sz'
         })
         cache_data = {'stocks': stocks}
-        
+
         result = validate_cache(cache_data)
         assert result['passed'] is False
         assert '发现创业板股票混入' in result['errors'][0]
@@ -247,7 +250,7 @@ class TestConstraintCompliance:
     def test_public_module_import(self):
         """TC006-3: 公共模块导入验证"""
         # 验证公共模块可导入
-        from data_fetchers.common import write_json_cache, setup_logger
+        from data_fetchers.common import setup_logger, write_json_cache
         assert callable(write_json_cache)
         assert callable(setup_logger)
 
@@ -270,7 +273,7 @@ class TestIncrementalUpdate:
             [{'code': '600000', 'name': '浦发银行', 'market': 'sh'}],
             1
         )
-        
+
         # Mock保存缓存
         mock_save.return_value = {
             'meta': {
@@ -281,7 +284,7 @@ class TestIncrementalUpdate:
             },
             'stocks': mock_fetch.return_value[0],
         }
-        
+
         # Mock验证通过
         with patch('data_fetchers.fetch_stock_list.validate_cache') as mock_validate:
             mock_validate.return_value = {
@@ -290,9 +293,9 @@ class TestIncrementalUpdate:
                 'errors': [],
                 'stats': {'total': 1, 'sh_count': 1, 'sz_count': 0}
             }
-            
+
             result = refresh_stock_cache(test_logger)
-            
+
             assert result['success'] is True
             assert result['total_count'] == 1
 
@@ -300,10 +303,10 @@ class TestIncrementalUpdate:
     def test_api_failure_returns_error_dict(self, mock_fetch, test_logger):
         """TC002-2: API失败返回错误字典（而非抛出异常）"""
         mock_fetch.side_effect = RuntimeError('API请求失败')
-        
+
         # refresh_stock_cache 现在总是返回字典，而非抛出异常（v2.11）
         result = refresh_stock_cache(test_logger)
-        
+
         assert result['success'] is False
         assert '增量更新股票列表失败' in result['message']
 
@@ -319,7 +322,7 @@ class TestExceptionHandling:
     def test_load_cache_file_not_exists(self, mock_path, test_logger):
         """TC007-1: 缓存文件不存在返回None"""
         mock_path.exists.return_value = False
-        
+
         result = load_cache(test_logger)
         assert result is None
 
@@ -327,7 +330,7 @@ class TestExceptionHandling:
     def test_load_cache_json_error(self, mock_path, test_logger):
         """TC007-2: JSON解析失败返回None"""
         mock_path.exists.return_value = True
-        
+
         # Mock文件读取抛出JSONDecodeError
         with patch('builtins.open', side_effect=json.JSONDecodeError('test', 'test', 0)):
             result = load_cache(test_logger)
@@ -337,7 +340,7 @@ class TestExceptionHandling:
     def test_get_cached_stock_codes_empty_cache(self, mock_load):
         """TC007-3: 空缓存返回空列表"""
         mock_load.return_value = None
-        
+
         result = get_cached_stock_codes()
         assert result == []
 
@@ -359,15 +362,15 @@ class TestNormalFlow:
         mock_load.return_value = {
             'stocks': [{'code': '600000', 'name': '旧名称', 'market': 'sh'}],
         }
-        
+
         # 调用save_cache
         from data_fetchers.fetch_stock_list import save_cache
-        
+
         result = save_cache(mock_stock_data, 1, test_logger)
-        
+
         # 验证调用write_json_cache
         assert mock_write.call_count == 2  # cache文件 + result文件
-        
+
         # 验证返回数据结构
         assert 'meta' in result
         assert 'stocks' in result
