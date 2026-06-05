@@ -652,6 +652,12 @@ def calculate_factor_correlation(logger: logging.Logger, force_full: bool = Fals
                 for col in corr_df.columns:
                     corr_df.loc[col, col] = 1.0
 
+                # 映射数据列名到因子逻辑名（遵循 FACTOR_COL_TO_NAME_MAP）
+                # 解决 volume_ratio_5 vs volume_ratio 命名不一致问题
+                factor_names = [FACTOR_COL_TO_NAME_MAP.get(c, c) for c in corr_df.columns]
+                corr_df.index = factor_names
+                corr_df.columns = factor_names
+
                 logger.info("从综合因子结果文件读取相关性数据（仅选中因子）")
                 return corr_df
 
