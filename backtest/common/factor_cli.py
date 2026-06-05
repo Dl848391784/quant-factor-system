@@ -55,15 +55,11 @@
 
 import argparse
 import sys
+from collections.abc import Callable
 from enum import IntEnum
-from pathlib import Path
 from time import perf_counter
-from typing import Callable, Literal, Optional, Type
 
-from backtest.common.layered_backtest_runner import (
-    run_layered_backtest,
-    LayerConfigBase
-)
+from backtest.common.layered_backtest_runner import LayerConfigBase, run_layered_backtest
 from backtest.common.logger_config import get_logger
 
 
@@ -90,11 +86,11 @@ def _die(logger, code: ExitCode, msg: str) -> None:
 
 
 def factor_cli_main(
-    config_cls: Type[LayerConfigBase],
-    factor_calculator: Optional[Callable] = None,  # 允许 None（预计算因子）
+    config_cls: type[LayerConfigBase],
+    factor_calculator: Callable | None = None,  # 允许 None（预计算因子）
     *,
-    add_cli_args: Optional[Callable[[argparse.ArgumentParser], None]] = None,
-    setup_calculator: Optional[Callable[[argparse.Namespace, Callable], Callable]] = None,
+    add_cli_args: Callable[[argparse.ArgumentParser], None] | None = None,
+    setup_calculator: Callable[[argparse.Namespace, Callable], Callable] | None = None,
 ) -> None:
     """因子分层回测 CLI 公共入口
     
@@ -146,7 +142,7 @@ def factor_cli_main(
             f"config_cls 需要定义 factor_name ClassVar，"
             f"当前类: {config_cls.__name__}"
         )
-    
+
     # CLI 描述自动生成
     description = f'{factor_name} 因子分层回测'
     # CLI 参数解析
@@ -159,31 +155,31 @@ def factor_cli_main(
                         help='输出目录路径')
     parser.add_argument('--quiet', action='store_true',
                         help='静默模式')
-    
+
     # 自定义参数
     if add_cli_args:
         add_cli_args(parser)
-    
+
     args = parser.parse_args()
-    
+
     # --quiet 控制日志级别（静默模式：WARNING 级别，只显示错误和警告）
     logger = get_logger(factor_name)
     if args.quiet:
         logger.setLevel('WARNING')
-    
+
     # 启动时回放 CLI 参数（事后可复现具体 data_source/output_dir 取值）
     if not args.quiet:
         logger.info(f"运行参数: {vars(args)}")
-    
+
     # 记录开始时间（计算回测耗时）
     start_time = perf_counter()
-    
+
     # 配置实例（基类 __post_init__ 已打印启动日志）
     config = config_cls()
-    
+
     # 因子列名从 config 派生（优先 factor_col，否则 factor_name）
     factor_col = config.factor_col_resolved
-    
+
     # required_factor_cols 派生：
     #   1. 预计算因子：factor_col 本身就是所需列
     #   2. 需计算因子：从 calculator.required_cols 读取
@@ -191,11 +187,11 @@ def factor_cli_main(
         required_factor_cols = [factor_col]
     else:
         required_factor_cols = getattr(factor_calculator, 'required_cols', None)
-    
+
     # 包装 calculator（如 partial）
     if setup_calculator and factor_calculator is not None:
         factor_calculator = setup_calculator(args, factor_calculator)  # type: ignore[arg-type]
-    
+
     # try 范围收窄：仅包裹 run_layered_backtest() 调用
     try:
         result = run_layered_backtest(
@@ -213,27 +209,27 @@ def factor_cli_main(
         _die(logger, ExitCode.FILE_NOT_FOUND, f"数据文件不存在: {e}")
     except (KeyError, ValueError) as e:
         _die(logger, ExitCode.DATA_STRUCTURE_ERROR, f"数据问题: {e}")
-    except Exception as e:
+    except Exception:
         logger.exception("未预期的错误")
         sys.exit(ExitCode.UNEXPECTED_ERROR)
-    
+
     # 结果摘要（移出 try 块）
-    
+
     # 保底处理
     if result is None:
         _die(logger, ExitCode.RESULT_NONE, "run_layered_backtest 返回 None")
-    
+
     # 检查有效数据
     meta = result.get('meta') or {}
     n_days_total = meta.get('n_days_total') or 0
     if n_days_total == 0:
         _die(logger, ExitCode.NO_DATA, "回测无有效数据，程序终止")
-    
+
     # 结果摘要
     logger.info("回测结果摘要")
     logger.info(f"因子名称: {factor_name}")  # 直接用变量，不从 meta 反查
     logger.info(f"回测周期: {n_days_total} 天")
-    
+
     # 各分层收益（按层序排序输出，避免依赖字典插入顺序）
     layer_stats = result.get('layer_stats') or {}
     # 排序：按 layer_key 中的数字部分排序（layer_1, layer_2, ... → 1, 2, ...）
@@ -245,42 +241,34 @@ def factor_cli_main(
         display_name = config.layer_names_dict.get(layer_id, f'Layer{layer_id}')
         cumulative_return = stats.get('cumulative_return') or 0.0
         logger.info(f"Layer {layer_id} ({display_name}) 累计收益: {cumulative_return:.4f}")
-    
+
     # 多空组合收益（显式区分键缺失 vs 真实零值）
     long_short = result.get('long_short') or {}
     if long_short:
-        # 累计收益（键缺失时打印 warning）
-        if 'cumulative_return' not in long_short:
-            logger.warning("多空组合缺少 cumulative_return 字段")
+        # 多空日均收益（规范定义字段）
+        if 'long_short_return_daily' in long_short:
+            val = long_short['long_short_return_daily']
+            if val is not None:
+                logger.info(f"多空日均收益: {val*100:.4f}%")
+
+        # 多空夏普比率（规范定义字段，键名修正）
+        if 'long_short_sharpe' not in long_short:
+            logger.warning("多空组合缺少 long_short_sharpe 字段")
         else:
-            val = long_short['cumulative_return']
+            val = long_short['long_short_sharpe']
             if val is None:
-                logger.warning("多空组合 cumulative_return 为 None")
+                logger.warning("多空组合 long_short_sharpe 为 None")
             else:
-                logger.info(f"多空组合累计收益: {val:.4f}")
-        
-        # 夏普比率（键缺失时打印 warning）
-        if 'sharpe_ratio' not in long_short:
-            logger.warning("多空组合缺少 sharpe_ratio 字段")
-        else:
-            val = long_short['sharpe_ratio']
-            if val is None:
-                logger.warning("多空组合 sharpe_ratio 为 None")
-            else:
-                logger.info(f"夏普比率: {val:.2f}")
-        
-        # 最大回撤（键缺失时打印 warning）
-        if 'max_drawdown' not in long_short:
-            logger.warning("多空组合缺少 max_drawdown 字段")
-        else:
-            val = long_short['max_drawdown']
-            if val is None:
-                logger.warning("多空组合 max_drawdown 为 None")
-            else:
-                logger.info(f"最大回撤: {val:.2%}")
+                logger.info(f"多空组合夏普比率: {val:.2f}")
+
+        # 数据覆盖率（规范定义字段）
+        if 'coverage' in long_short:
+            val = long_short['coverage']
+            if val is not None:
+                logger.info(f"数据覆盖率: {val*100:.1f}%")
     else:
         logger.warning("未生成多空组合指标")
-    
+
     # 回测耗时日志（分层回测属计算密集任务）
     elapsed = perf_counter() - start_time
     logger.info(f"回测耗时: {elapsed:.1f}s")

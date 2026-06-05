@@ -150,8 +150,11 @@ if __name__ == '__main__':
   "long_short": {
     "long_return_daily": <float>, "long_return_annual": <float>,
     "short_return_daily": <float>, "short_return_annual": <float>,
-    "ls_return_daily": <float>, "ls_return_annual": <float>,
-    "sharpe_ratio": <float>
+    "long_short_return_daily": <float>, "long_short_return_annual": <float>,
+    "long_short_sharpe": <float>,
+    "long_short_volatility": <float>,
+    "turnover_long_avg": <float>, "turnover_short_avg": <float>,
+    "n_days": <int>, "n_days_total": <int>, "coverage": <float>
   },
   "monotonicity": {
     "correlation": <float>, "quality": "<str>",
