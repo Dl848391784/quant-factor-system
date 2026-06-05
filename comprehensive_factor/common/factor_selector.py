@@ -41,6 +41,7 @@ DEFAULT_BACKTEST_RESULT_DIR = Path(__file__).parent.parent.parent / "backtest" /
 
 # 默认阈值（业界惯例）
 # v2.6: 修复高相关剔除显示格式：当ICIR相等时使用 '=' 而非 '<'
+# v2.7: 修复显示精度：使用 .3f 避免 0.32<0.32 视觉矛盾
 DEFAULT_THRESHOLDS = {
     "ic_mean_abs_min": 0.03,  # |IC均值| 最小值（经济显著性）
     "p_value_max": 0.05,  # p-value 最大值（统计显著性）
@@ -518,11 +519,13 @@ def select_best_from_groups(
                             )
                         else:
                             # v2.6: 修复问题4 - 当 ICIR 相等时显示 '=' 而非 '<'
+# v2.7: 修复显示精度 - 使用 .3f 避免 0.32<0.32 视觉矛盾
                             icir_val = icir_values[factor_name]
                             best_icir_val = valid_icir_values[best_factor]
-                            icir_cmp = "=" if icir_val == best_icir_val else "<"
+                            # 使用阈值容差判断相等（避免浮点精度问题）
+                            icir_cmp = "=" if abs(icir_val - best_icir_val) < 0.001 else "<"
                             dropped_factors[factor_name] = (
-                                f"与{best_factor}高相关({corr_str}), |ICIR|={icir_val:.2f}{icir_cmp}{best_icir_val:.2f}"
+                                f"与{best_factor}高相关({corr_str}), |ICIR|={icir_val:.3f}{icir_cmp}{best_icir_val:.3f}"
                             )
 
                         logger.info("丢弃高相关因子: %s（保留 %s，ICIR 更高）", factor_name, best_factor)

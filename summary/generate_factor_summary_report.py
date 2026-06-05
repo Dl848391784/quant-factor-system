@@ -33,9 +33,11 @@
     v2.4: 2026-06-04 因子值详情改为全部显示，移除截断逻辑
     v2.5: 2026-06-05 修复权重显示矛盾：weights 字典键是因子列名而非因子名，添加 FACTOR_NAME_TO_COL_MAP 映射表
     v2.6: 2026-06-05 修复9项问题：权重来源说明、日期不一致、高相关剔除边界、数据天数异常、overnight_ret方向异常、因子名统一、高相关对展示、权重标签区分、ICIR相等显示格式
+    v2.7: 2026-06-05 修复第八节 factor_values 列名显示问题（volume_ratio_5 → volume_ratio）
+    v2.8: 2026-06-05 修复高相关剔除显示精度（.2f → .3f），添加评分逻辑说明
 """
 
-__version__ = "2.6"
+__version__ = "2.8"
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -137,6 +139,9 @@ FACTOR_NAME_TO_COL_MAP = {
     # 其他因子
     "intraday_intensity": "intraday_intensity",
 }
+
+# v2.7: 列名到因子名反向映射（用于第八节 factor_values 展示）
+COL_TO_FACTOR_NAME_MAP = {v: k for k, v in FACTOR_NAME_TO_COL_MAP.items()}
 
 # 相关性阈值常量
 CORR_THRESHOLD_HIGH = 0.7  # 高相关阈值
@@ -1432,6 +1437,33 @@ def _generate_weight_selection_section(weight_result: dict | None) -> list[str]:
     lines.append(f"最优权重方法: {get_weight_method_display(best_method)}")
     lines.append(f"综合得分: {format_float(best_score, 4)}")
     lines.append(f"计算日期: {weight_result.get('meta', {}).get('created_at', 'N/A')[:10]}")  # v2.6: 问题3修复 - 明确为计算日期
+
+    # v2.7: 问题2修复 - 添加评分维度说明
+    ranking = weight_result.get("ranking", [])
+    if ranking:
+        # 检查是否存在 ICIR加权优于IC加权但选了IC加权的情况
+        ic_rank = next((r for r in ranking if r["method"] == "ic_weight"), None)
+        icir_rank = next((r for r in ranking if r["method"] == "icir_weight"), None)
+        if ic_rank and icir_rank:
+            # 比较 ICIR加权与 IC加权的核心指标
+            ic_return = ic_rank.get("normalized_scores", {}).get("long_short_return_annual", 0)
+            icir_return = icir_rank.get("normalized_scores", {}).get("long_short_return_annual", 0)
+            ic_sharpe = ic_rank.get("normalized_scores", {}).get("long_short_sharpe", 0)
+            icir_sharpe = icir_rank.get("normalized_scores", {}).get("long_short_sharpe", 0)
+            ic_monotonicity = ic_rank.get("normalized_scores", {}).get("monotonicity_abs", 0)
+            icir_monotonicity = icir_rank.get("normalized_scores", {}).get("monotonicity_abs", 0)
+
+            # 如果 ICIR加权核心指标更好但排名低于 IC加权，说明换手率拖累
+            if (icir_return >= ic_return and icir_sharpe >= ic_sharpe and icir_monotonicity >= ic_monotonicity):
+                ic_turnover_long = ic_rank.get("normalized_scores", {}).get("turnover_long_avg", 0)
+                icir_turnover_long = icir_rank.get("normalized_scores", {}).get("turnover_long_avg", 0)
+                lines.append("")
+                lines.append("【评分说明】")
+                lines.append(f"ICIR加权在收益/夏普/单调性指标优于IC加权，但换手率逆向指标归一化得分较低")
+                lines.append(f"  - IC加权换手率得分: {ic_turnover_long:.3f}")
+                lines.append(f"  - ICIR加权换手率得分: {icir_turnover_long:.3f}")
+                lines.append(f"  - 注：换手率越高越差（逆向指标），归一化后得分越低")
+
     lines.append("")
 
     # 各方法排名表格
@@ -1512,7 +1544,9 @@ def _generate_stock_selection_section(stock_result: dict | None) -> list[str]:
                 parts = []
                 for k, v in factor_values.items():
                     if v is not None:
-                        parts.append(f"{k}={format_float(v, 2)}")
+                        # v2.7: 问题3修复 - 列名转换为因子名（volume_ratio_5 → volume_ratio）
+                        factor_name = COL_TO_FACTOR_NAME_MAP.get(k, k)
+                        parts.append(f"{factor_name}={format_float(v, 2)}")
                 factor_str = ", ".join(parts)  # 显示全部因子值
             else:
                 factor_str = "无因子值"
