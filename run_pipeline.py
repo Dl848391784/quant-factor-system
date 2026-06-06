@@ -30,9 +30,10 @@ Stage 2: IC计算
   20. ic_tail_price_slope_1d.py (新增 2026-06-02)
   21. ic_tail_price_volume_intensity.py (新增 2026-06-02)
   22. ic_tail_volume_acceleration_1d.py (新增 2026-06-02)
+  23. ic_tail_volume_shrink_1d.py (新增 2026-06-06)
 
 Stage 3: 分层回测
-  23. layered_backtest_rsi_1d.py
+  24. layered_backtest_rsi_1d.py
   24. layered_backtest_volume_ratio_1d.py
   25. layered_backtest_kdj_j_1d.py
   26. layered_backtest_bollinger_pb_1d.py
@@ -48,21 +49,22 @@ Stage 3: 分层回测
   36. layered_backtest_tail_price_slope_1d.py (新增 2026-06-02)
   37. layered_backtest_tail_price_volume_intensity_1d.py (新增 2026-06-02)
   38. layered_backtest_tail_volume_acceleration_1d.py (新增 2026-06-02)
+  39. layered_backtest_tail_volume_shrink_1d.py (新增 2026-06-06)
 
 Stage 4: 综合因子
-  39. composite_equal_weight_1d.py
-  40. composite_icir_weight_1d.py
-  41. composite_ic_weight_1d.py
-  42. composite_rolling_icir_weight_1d.py
+  40. composite_equal_weight_1d.py
+  41. composite_icir_weight_1d.py
+  42. composite_ic_weight_1d.py
+  43. composite_rolling_icir_weight_1d.py
 
 Stage 5: 权重选择（新增 2026-06-03）
-  43. weight_selector.py         → comprehensive_factor/result/weight_selection_result.json
+  44. weight_selector.py         → comprehensive_factor/result/weight_selection_result.json
 
 Stage 6: 股票选股（新增 2026-06-03）
-  44. stock_selector.py          → comprehensive_factor/result/stock_selection_result.json
+  45. stock_selector.py          → comprehensive_factor/result/stock_selection_result.json
 
 Stage 7: 汇总报告
-  45. generate_factor_summary_report.py
+  46. generate_factor_summary_report.py
 
 版本历史：
 - v1.0 (2026-05-27): 初始版本，完全串行执行，退出码检查，脚本级别重试
@@ -71,6 +73,7 @@ Stage 7: 汇总报告
 - v1.3 (2026-06-03): 新增 Stage 5 权重选择和 Stage 6 股票选股
 - v1.4 (2026-06-04): 新增 past_return_1d 因子（IC + 分层回测）
 - v1.5 (2026-06-05): 新增 momentum_strength 因子（IC + 分层回测）
+- v1.6 (2026-06-06): 新增 tail_volume_shrink 因子（IC + 分层回测）
 
 作者: 云瑶
 """
@@ -139,6 +142,8 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask('ic_tail_price_slope', 'factor_ic/ic_tail_price_slope_1d.py', 2, []),
     ScriptTask('ic_tail_price_volume_intensity', 'factor_ic/ic_tail_price_volume_intensity.py', 2, []),
     ScriptTask('ic_tail_volume_acceleration', 'factor_ic/ic_tail_volume_acceleration_1d.py', 2, []),
+    # tail_volume_shrink 因子 IC 计算（2026-06-06 新增）
+    ScriptTask('ic_tail_volume_shrink', 'factor_ic/ic_tail_volume_shrink_1d.py', 2, []),
 
     # Stage 3: 分层回测
     ScriptTask('backtest_rsi', 'backtest/layered_backtest_rsi_1d.py', 3, []),
@@ -160,6 +165,8 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask('backtest_tail_price_slope', 'backtest/layered_backtest_tail_price_slope_1d.py', 3, []),
     ScriptTask('backtest_tail_price_volume_intensity', 'backtest/layered_backtest_tail_price_volume_intensity_1d.py', 3, []),
     ScriptTask('backtest_tail_volume_acceleration', 'backtest/layered_backtest_tail_volume_acceleration_1d.py', 3, []),
+    # tail_volume_shrink 因子分层回测（2026-06-06 新增）
+    ScriptTask('backtest_tail_volume_shrink', 'backtest/layered_backtest_tail_volume_shrink_1d.py', 3, []),
 
     # Stage 4: 综合因子（启用自动筛选）
     ScriptTask('composite_equal', 'comprehensive_factor/composite_equal_weight_1d.py', 4, ['--auto_select']),
