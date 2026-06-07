@@ -70,23 +70,24 @@ from data_fetchers.common.paths import get_module_result_dir
 # 模块导出
 # ============================================================================
 __all__ = [
-    'BatchStream',
-    'save_batch_cache_sorted',
-    'n_way_merge_deduplicate',
-    'format_final_output',
-    'cleanup_batch_files',
+    "BatchStream",
+    "save_batch_cache_sorted",
+    "n_way_merge_deduplicate",
+    "format_final_output",
+    "cleanup_batch_files",
 ]
 
 # ============================================================================
 # 模块级常量
 # ============================================================================
 RESULT_DIR = get_module_result_dir()
-_OUTPUT_VERSION = '2.14'
-_DATA_TYPES = ('factor', 'return')  # 数据类型列表（避免硬编码）
+_OUTPUT_VERSION = "2.14"
+_DATA_TYPES = ("factor", "return")  # 数据类型列表（避免硬编码）
 
 # ============================================================================
 # 辅助函数
 # ============================================================================
+
 
 def _write_json_record(f: TextIO, record: dict, count: int) -> int:
     """
@@ -105,26 +106,21 @@ def _write_json_record(f: TextIO, record: dict, count: int) -> int:
         >>> from io import StringIO
         >>> # 模拟 gzip 文件写入
         >>> f = StringIO()
-        >>> count = _write_json_record(f, {'date': '2026-05-27', 'asset': '000001'}, 0)
+        >>> count = _write_json_record(f, {"date": "2026-05-27", "asset": "000001"}, 0)
         >>> print(count)  # 1
-        >>> count = _write_json_record(f, {'date': '2026-05-27', 'asset': '000002'}, 1)
+        >>> count = _write_json_record(f, {"date": "2026-05-27", "asset": "000002"}, 1)
         >>> print(count)  # 2（第二条记录前有逗号分隔）
 
     Note:
         内部函数，不导出到 __all__
     """
     if count > 0:
-        f.write(',\n')
-    f.write('  ' + json.dumps(record, ensure_ascii=False))
+        f.write(",\n")
+    f.write("  " + json.dumps(record, ensure_ascii=False))
     return count + 1
 
 
-def _write_final_file(
-    output_path: Path,
-    meta: dict,
-    lines: list[str],
-    logger: logging.Logger | None = None
-) -> float:
+def _write_final_file(output_path: Path, meta: dict, lines: list[str], logger: logging.Logger | None = None) -> float:
     """
     写入最终格式化文件
 
@@ -152,19 +148,19 @@ def _write_final_file(
     Example:
         >>> from pathlib import Path
         >>> meta = {
-        ...     'generated_at': '2026-05-27T10:00:00',
-        ...     'source': 'test',
-        ...     'n_days': 10,
-        ...     'n_assets': 100,
-        ...     'n_records': 1000,
-        ...     'first_date': '2026-05-01',
-        ...     'last_date': '2026-05-27',
-        ...     'last_updated': '2026-05-27 10:00:00',
-        ...     'version': '1.0',
-        ...     'fields': ['date', 'asset', 'value'],
+        ...     "generated_at": "2026-05-27T10:00:00",
+        ...     "source": "test",
+        ...     "n_days": 10,
+        ...     "n_assets": 100,
+        ...     "n_records": 1000,
+        ...     "first_date": "2026-05-01",
+        ...     "last_date": "2026-05-27",
+        ...     "last_updated": "2026-05-27 10:00:00",
+        ...     "version": "1.0",
+        ...     "fields": ["date", "asset", "value"],
         ... }
         >>> lines = ['{"date": "2026-05-01", "asset": "000001", "value": 1.0}']
-        >>> size_mb = _write_final_file(Path('/tmp/test.json.gz'), meta, lines)
+        >>> size_mb = _write_final_file(Path("/tmp/test.json.gz"), meta, lines)
 
     Note:
         内部函数，不导出到 __all__
@@ -172,15 +168,15 @@ def _write_final_file(
     _logger = logger or logging.getLogger(__name__)
 
     # 处理 date_range null
-    first_date = meta.get('first_date')
-    last_date = meta.get('last_date')
+    first_date = meta.get("first_date")
+    last_date = meta.get("last_date")
     date_range_start = first_date if first_date is not None else "null"
     date_range_end = last_date if last_date is not None else "null"
     start_json = f'"{date_range_start}"' if date_range_start != "null" else "null"
     end_json = f'"{date_range_end}"' if date_range_end != "null" else "null"
 
-    with gzip.open(output_path, 'wt', encoding='utf-8') as out_f:
-        out_f.write('{\n')
+    with gzip.open(output_path, "wt", encoding="utf-8") as out_f:
+        out_f.write("{\n")
         out_f.write('  "meta": {\n')
         out_f.write(f'    "generated_at": "{meta["generated_at"]}",\n')
         out_f.write(f'    "source": "{meta["source"]}",\n')
@@ -190,33 +186,87 @@ def _write_final_file(
         out_f.write('    "date_range": {\n')
         out_f.write(f'      "start": {start_json},\n')
         out_f.write(f'      "end": {end_json}\n')
-        out_f.write('    },\n')
+        out_f.write("    },\n")
         out_f.write(f'    "last_updated": "{meta["last_updated"]}",\n')
         out_f.write(f'    "version": "{meta["version"]}",\n')
-        out_f.write(f'    "fields": {json.dumps(meta["fields"])},\n')
+        # fields 是必需字段，始终写入
+        out_f.write(f'    "fields": {json.dumps(meta["fields"])}\n')
         # 处理 extra meta（如 format_note 或 note）
-        extra_key = meta.get('extra_key')
-        extra_value = meta.get('extra_value')
-        if extra_key and extra_value:
-            out_f.write(f'    "{extra_key}": "{extra_value}"\n')
-        out_f.write('  },\n')
+        extra_key = meta.get("extra_key")
+        extra_value = meta.get("extra_value")
+        if extra_key and extra_value is not None:
+            # 使用 json.dumps 确保 extra_value 正确转义
+            extra_json = json.dumps(extra_value)
+            out_f.write(f',    "{extra_key}": {extra_json}\n')
+        out_f.write("  },\n")
         out_f.write('  "data": [\n')
 
         for i, line_content in enumerate(lines):
             if i > 0:
-                out_f.write(',\n')
-            out_f.write('    ' + line_content)
+                out_f.write(",\n")
+            out_f.write("    " + line_content)
 
-        out_f.write('\n  ]\n')
-        out_f.write('}\n')
+        out_f.write("\n  ]\n")
+        out_f.write("}\n")
 
     size_mb = output_path.stat().st_size / (1024 * 1024)
     return size_mb
 
 
+def _scan_merged_file(
+    merged_path: Path, logger: logging.Logger | None = None
+) -> tuple[int, int, str | None, str | None, int, list[str]]:
+    """
+    扫描合并后的 JSON 文件，提取统计信息和有效行
+
+    Args:
+        merged_path: 合并文件路径
+        logger: 日志记录器
+
+    Returns:
+        tuple: (n_days, n_assets, first_date, last_date, n_records, lines)
+
+    Note:
+        内部函数，不导出到 __all__
+    """
+    _logger = logger or logging.getLogger(__name__)
+    date_set = set()
+    asset_set = set()
+    first_date = None
+    last_date = None
+    n_records = 0
+    lines: list[str] = []
+
+    with gzip.open(merged_path, "rt", encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if stripped.startswith("{"):
+                try:
+                    rec = json.loads(stripped.rstrip(","))
+                    date = rec["date"]
+                    asset = rec["asset"]
+                    date_set.add(date)
+                    asset_set.add(asset)
+                    if first_date is None or date < first_date:
+                        first_date = date
+                    if last_date is None or date > last_date:
+                        last_date = date
+                    n_records += 1
+                    lines.append(stripped.rstrip(","))
+                except json.JSONDecodeError as e:
+                    _logger.debug(f"跳过无效JSON行: {stripped[:50]}... ({e})")
+                    continue
+
+    n_days = len(date_set)
+    n_assets = len(asset_set)
+
+    return n_days, n_assets, first_date, last_date, n_records, lines
+
+
 # ============================================================================
 # BatchStream 类：批次数据流式读取器
 # ============================================================================
+
 
 class BatchStream:
     """
@@ -235,7 +285,7 @@ class BatchStream:
     Example:
         >>> from data_fetchers.batch_processor import BatchStream
         >>> # 假设存在批次文件 result/batch_0_factor.json.gz
-        >>> stream = BatchStream(0, 'factor')
+        >>> stream = BatchStream(0, "factor")
         >>> key = stream.peek_key()  # 返回 ('2026-05-27', '000001')
         >>> record = stream.pop_record()  # 弹出第一条记录
         >>> print(stream.is_exhausted())  # False（还有记录）
@@ -245,7 +295,7 @@ class BatchStream:
         json.JSONDecodeError: 批次文件 JSON 解析失败
     """
 
-    def __init__(self, batch_idx: int, data_type: str = 'factor', result_dir: Path | None = None):
+    def __init__(self, batch_idx: int, data_type: str = "factor", result_dir: Path | None = None):
         """
         初始化批次数据流
 
@@ -257,7 +307,7 @@ class BatchStream:
         self.batch_idx = batch_idx
         self.data_type = data_type
         self._result_dir = result_dir or RESULT_DIR
-        self.path = self._result_dir / f'batch_{batch_idx}_{data_type}.json.gz'
+        self.path = self._result_dir / f"batch_{batch_idx}_{data_type}.json.gz"
         self.records: list[dict] = []
         self.idx: int = 0
         self.exhausted: bool = False
@@ -278,7 +328,7 @@ class BatchStream:
             return
 
         try:
-            with gzip.open(self.path, 'rt', encoding='utf-8') as f:
+            with gzip.open(self.path, "rt", encoding="utf-8") as f:
                 self.records = json.load(f)
         except json.JSONDecodeError as e:
             # 文件损坏：跳过该批次，不中断整个流程
@@ -301,7 +351,7 @@ class BatchStream:
         if self.exhausted or self.idx >= len(self.records):
             return None
         rec = self.records[self.idx]
-        return (rec['date'], rec['asset'])
+        return (rec["date"], rec["asset"])
 
     def pop_record(self) -> dict | None:
         """弹出当前记录"""
@@ -313,7 +363,7 @@ class BatchStream:
         self.exhausted = self.idx >= len(self.records)
         return rec
 
-    def __lt__(self, other: 'BatchStream') -> bool:
+    def __lt__(self, other: "BatchStream") -> bool:
         """用于 heap 比较（按 batch_idx）"""
         return self.batch_idx < other.batch_idx
 
@@ -331,12 +381,13 @@ class BatchStream:
 # 批次保存
 # ============================================================================
 
+
 def save_batch_cache_sorted(
     batch_idx: int,
     factor_df: pd.DataFrame,
     return_df: pd.DataFrame,
     result_dir: Path | None = None,
-    logger_arg: logging.Logger | None = None
+    logger_arg: logging.Logger | None = None,
 ) -> None:
     """
     保存单批次数据到临时文件（预先排序，流式写入）
@@ -354,23 +405,27 @@ def save_batch_cache_sorted(
     Example:
         >>> import pandas as pd
         >>> from data_fetchers.batch_processor import save_batch_cache_sorted
-        >>> factor_df = pd.DataFrame({
-        ...     'date': ['2026-05-27', '2026-05-27'],
-        ...     'asset': ['000001', '000002'],
-        ...     'open': [10.0, 20.0],
-        ...     'close': [10.5, 20.5],
-        ...     'high': [11.0, 21.0],
-        ...     'low': [9.5, 19.5],
-        ...     'rsi_6': [50.0, 60.0],
-        ...     'volume_ratio_5': [1.0, 1.5]
-        ... })
-        >>> return_df = pd.DataFrame({
-        ...     'date': ['2026-05-27', '2026-05-27'],
-        ...     'asset': ['000001', '000002'],
-        ...     'forward_return_1d': [0.01, 0.02],
-        ...     'forward_return_3d': [0.03, 0.06],
-        ...     'forward_return_5d': [0.05, 0.10]
-        ... })
+        >>> factor_df = pd.DataFrame(
+        ...     {
+        ...         "date": ["2026-05-27", "2026-05-27"],
+        ...         "asset": ["000001", "000002"],
+        ...         "open": [10.0, 20.0],
+        ...         "close": [10.5, 20.5],
+        ...         "high": [11.0, 21.0],
+        ...         "low": [9.5, 19.5],
+        ...         "rsi_6": [50.0, 60.0],
+        ...         "volume_ratio_5": [1.0, 1.5],
+        ...     }
+        ... )
+        >>> return_df = pd.DataFrame(
+        ...     {
+        ...         "date": ["2026-05-27", "2026-05-27"],
+        ...         "asset": ["000001", "000002"],
+        ...         "forward_return_1d": [0.01, 0.02],
+        ...         "forward_return_3d": [0.03, 0.06],
+        ...         "forward_return_5d": [0.05, 0.10],
+        ...     }
+        ... )
         >>> save_batch_cache_sorted(0, factor_df, return_df)  # 保存到 result/batch_0_factor.json.gz
 
     Raises:
@@ -379,61 +434,61 @@ def save_batch_cache_sorted(
     _logger = logger_arg or logging.getLogger(__name__)
     _result_dir = result_dir or RESULT_DIR
 
-    factor_path = _result_dir / f'batch_{batch_idx}_factor.json.gz'
-    return_path = _result_dir / f'batch_{batch_idx}_return.json.gz'
+    factor_path = _result_dir / f"batch_{batch_idx}_factor.json.gz"
+    return_path = _result_dir / f"batch_{batch_idx}_return.json.gz"
 
     # 写入前验证必需列
-    required_factor_cols = ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5', 'volume']
-    required_return_cols = ['date', 'asset', 'forward_return_1d', 'forward_return_3d', 'forward_return_5d']
+    required_factor_cols = ["date", "asset", "open", "close", "high", "low", "rsi_6", "volume_ratio_5", "volume"]
+    required_return_cols = ["date", "asset", "forward_return_1d", "forward_return_3d", "forward_return_5d"]
 
-    validate_dataframe_columns(factor_df, required_factor_cols, 'factor_df')
-    validate_dataframe_columns(return_df, required_return_cols, 'return_df')
+    validate_dataframe_columns(factor_df, required_factor_cols, "factor_df")
+    validate_dataframe_columns(return_df, required_return_cols, "return_df")
 
     # 格式化并排序（创建副本避免修改调用方原始 DataFrame）
     factor_df = factor_df.copy()
     return_df = return_df.copy()
 
-    factor_df['date'] = factor_df['date'].astype(str)
-    return_df['date'] = return_df['date'].astype(str)
+    factor_df["date"] = factor_df["date"].astype(str)
+    return_df["date"] = return_df["date"].astype(str)
 
-    factor_df = factor_df.sort_values(['date', 'asset']).reset_index(drop=True)
-    return_df = return_df.sort_values(['date', 'asset']).reset_index(drop=True)
+    factor_df = factor_df.sort_values(["date", "asset"]).reset_index(drop=True)
+    return_df = return_df.sort_values(["date", "asset"]).reset_index(drop=True)
 
     # 流式写入因子数据（使用 _write_json_record 辅助函数）
     _logger.info("  保存因子数据...")
     count = 0
-    with gzip.open(factor_path, 'wt', encoding='utf-8') as f:
-        f.write('[\n')
+    with gzip.open(factor_path, "wt", encoding="utf-8") as f:
+        f.write("[\n")
         for row in factor_df.itertuples(index=False):
             record = {
-                'date': row.date,
-                'asset': row.asset,
-                'open': round(row.open, 2),
-                'close': round(row.close, 2),
-                'high': round(row.high, 2),
-                'low': round(row.low, 2),
-                'rsi_6': round(row.rsi_6, 2),
-                'volume_ratio_5': round(row.volume_ratio_5, 2),
-                'volume': int(row.volume)
+                "date": row.date,
+                "asset": row.asset,
+                "open": round(row.open, 2),
+                "close": round(row.close, 2),
+                "high": round(row.high, 2),
+                "low": round(row.low, 2),
+                "rsi_6": round(row.rsi_6, 2),
+                "volume_ratio_5": round(row.volume_ratio_5, 2),
+                "volume": int(row.volume),
             }
             count = _write_json_record(f, record, count)
-        f.write('\n]')
+        f.write("\n]")
 
     # 流式写入收益数据（使用 _write_json_record 辅助函数）
     _logger.info("  保存收益数据...")
     count = 0
-    with gzip.open(return_path, 'wt', encoding='utf-8') as f:
-        f.write('[\n')
+    with gzip.open(return_path, "wt", encoding="utf-8") as f:
+        f.write("[\n")
         for row in return_df.itertuples(index=False):
             record = {
-                'date': row.date,
-                'asset': row.asset,
-                'forward_return_1d': round(row.forward_return_1d, 6),
-                'forward_return_3d': round(row.forward_return_3d, 6),
-                'forward_return_5d': round(row.forward_return_5d, 6)
+                "date": row.date,
+                "asset": row.asset,
+                "forward_return_1d": round(row.forward_return_1d, 6),
+                "forward_return_3d": round(row.forward_return_3d, 6),
+                "forward_return_5d": round(row.forward_return_5d, 6),
             }
             count = _write_json_record(f, record, count)
-        f.write('\n]')
+        f.write("\n]")
 
     factor_size_mb = factor_path.stat().st_size / (1024 * 1024)
     return_size_mb = return_path.stat().st_size / (1024 * 1024)
@@ -447,11 +502,12 @@ def save_batch_cache_sorted(
 # N-way 合并
 # ============================================================================
 
+
 def n_way_merge_deduplicate(
     total_batches: int,
-    data_type: str = 'factor',
+    data_type: str = "factor",
     result_dir: Path | None = None,
-    logger_arg: logging.Logger | None = None
+    logger_arg: logging.Logger | None = None,
 ) -> Path | None:
     """
     N-way merge 合并已排序的批次数据，去重
@@ -471,7 +527,7 @@ def n_way_merge_deduplicate(
     Example:
         >>> from data_fetchers.batch_processor import n_way_merge_deduplicate
         >>> # 假设已保存 3 个批次：batch_0_factor.json.gz, batch_1_factor.json.gz, batch_2_factor.json.gz
-        >>> merged_path = n_way_merge_deduplicate(3, 'factor')
+        >>> merged_path = n_way_merge_deduplicate(3, "factor")
         >>> print(merged_path)  # PosixPath('result/merged_factor.json.gz')
 
     Raises:
@@ -487,7 +543,7 @@ def n_way_merge_deduplicate(
     streams = []
     load_errors = []  # 收集加载错误信息
     for batch_idx in range(total_batches):
-        path = _result_dir / f'batch_{batch_idx}_{data_type}.json.gz'
+        path = _result_dir / f"batch_{batch_idx}_{data_type}.json.gz"
         if path.exists():
             stream = BatchStream(batch_idx, data_type, result_dir=_result_dir)
             if stream.load_error:
@@ -515,15 +571,15 @@ def n_way_merge_deduplicate(
             counter += 1
 
     # 合并结果（流式写入文件）
-    output_path = _result_dir / f'merged_{data_type}.json.gz'
+    output_path = _result_dir / f"merged_{data_type}.json.gz"
     last_key = None
     same_key_records = []
     count = 0
 
     _logger.info("  开始合并...")
 
-    with gzip.open(output_path, 'wt', encoding='utf-8') as f:
-        f.write('[\n')
+    with gzip.open(output_path, "wt", encoding="utf-8") as f:
+        f.write("[\n")
 
         while heap:
             key, batch_idx, _, stream = heapq.heappop(heap)
@@ -554,7 +610,7 @@ def n_way_merge_deduplicate(
             best_record = same_key_records[0][1]
             count = _write_json_record(f, best_record, count)
 
-        f.write('\n]')
+        f.write("\n]")
 
     _logger.info(f"  合并完成: {count} 条 → {output_path}, 内存: {get_memory_info_str()}")
 
@@ -569,12 +625,13 @@ def n_way_merge_deduplicate(
 # 最终格式化
 # ============================================================================
 
+
 def format_final_output(
     factor_merged_path: Path | str,
     return_merged_path: Path | str,
     result_dir: Path | None = None,
     output_version: str | None = None,
-    logger_arg: logging.Logger | None = None
+    logger_arg: logging.Logger | None = None,
 ) -> None:
     """
     将合并后的JSON数组格式化为完整JSON文件
@@ -595,9 +652,7 @@ def format_final_output(
         >>> from data_fetchers.batch_processor import format_final_output
         >>> # 假设已合并生成 merged_factor.json.gz 和 merged_return.json.gz
         >>> format_final_output(
-        ...     Path('result/merged_factor.json.gz'),
-        ...     Path('result/merged_return.json.gz'),
-        ...     output_version='3.36'
+        ...     Path("result/merged_factor.json.gz"), Path("result/merged_return.json.gz"), output_version="3.36"
         ... )  # 输出 factor_data.json.gz 和 return_data.json.gz
 
     Raises:
@@ -618,101 +673,35 @@ def format_final_output(
     generated_at = now.isoformat()
     last_updated = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    # 处理因子数据：单次遍历，缓存行内容（避免二次 IO）
-    date_set = set()
-    asset_set = set()
-    first_date = None
-    last_date = None
-    n_records = 0
-    factor_lines: list[str] = []  # 缓存有效行
+    # 处理因子数据：使用辅助函数扫描
+    n_days, n_assets, first_date, last_date, n_records, factor_lines = _scan_merged_file(factor_merged_path, _logger)
+    _logger.info(f"  因子统计: {n_days}日 × {n_assets}只, {n_records}条记录")
 
-    with gzip.open(factor_merged_path, 'rt', encoding='utf-8') as f:
-        for line in f:
-            stripped = line.strip()
-            if stripped.startswith('{'):
-                try:
-                    rec = json.loads(stripped.rstrip(','))
-                    date = rec['date']
-                    asset = rec['asset']
-                    date_set.add(date)
-                    asset_set.add(asset)
-                    if first_date is None or date < first_date:
-                        first_date = date
-                    if last_date is None or date > last_date:
-                        last_date = date
-                    n_records += 1
-                    factor_lines.append(stripped.rstrip(','))
-                except json.JSONDecodeError as e:
-                    _logger.debug(f"跳过无效JSON行: {stripped[:50]}... ({e})")
-                    continue
-
-    n_days = len(date_set)
-    n_assets = len(asset_set)
-
-    del date_set, asset_set
-    gc.collect()
-
-    _logger.info(f"  交易日数: {n_days}")
-    _logger.info(f"  股票数量: {n_assets}")
-    _logger.info(f"  因子记录: {n_records}")
-
-    # 处理收益数据：单次遍历，缓存行内容（与因子数据逻辑对称）
-    return_date_set = set()
-    return_asset_set = set()
-    return_first_date = None
-    return_last_date = None
-    n_return_records = 0
-    return_lines: list[str] = []  # 缓存有效行
-
-    with gzip.open(return_merged_path, 'rt', encoding='utf-8') as f:
-        for line in f:
-            stripped = line.strip()
-            if stripped.startswith('{'):
-                try:
-                    rec = json.loads(stripped.rstrip(','))
-                    date = rec['date']
-                    asset = rec['asset']
-                    return_date_set.add(date)
-                    return_asset_set.add(asset)
-                    if return_first_date is None or date < return_first_date:
-                        return_first_date = date
-                    if return_last_date is None or date > return_last_date:
-                        return_last_date = date
-                    n_return_records += 1
-                    return_lines.append(stripped.rstrip(','))
-                except json.JSONDecodeError as e:
-                    _logger.debug(f"跳过无效JSON行: {stripped[:50]}... ({e})")
-                    continue
-
-    return_n_days = len(return_date_set)
-    return_n_assets = len(return_asset_set)
-
-    del return_date_set, return_asset_set
-    gc.collect()
-
-    _logger.info(f"  收益交易日数: {return_n_days}")
-    _logger.info(f"  收益股票数量: {return_n_assets}")
-    _logger.info(f"  收益记录: {n_return_records}")
+    # 处理收益数据：使用辅助函数扫描
+    return_n_days, return_n_assets, return_first_date, return_last_date, n_return_records, return_lines = (
+        _scan_merged_file(return_merged_path, _logger)
+    )
+    _logger.info(f"  收益统计: {return_n_days}日 × {return_n_assets}只, {n_return_records}条记录")
 
     # 写出两个最终文件（统一异常处理，确保一致性）
-    factor_final_path = _result_dir / 'factor_data.json.gz'
-    return_final_path = _result_dir / 'return_data.json.gz'
+    factor_final_path = _result_dir / "factor_data.json.gz"
+    return_final_path = _result_dir / "return_data.json.gz"
 
     try:
         # 写入因子文件（使用 _write_final_file 辅助函数）
         factor_meta = {
-            'generated_at': generated_at,
-            'source': 'sina_api_batch_external_merge',
-            'n_days': n_days,
-            'n_assets': n_assets,
-            'n_records': n_records,
-            'first_date': first_date,
-            'last_date': last_date,
-            'last_updated': last_updated,
-            'version': _version,
-            'fields': ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5', 'volume'],
-            'extra_key': 'format_note',
-            'extra_value': '每条记录单行写入，便于流式解析',
+            "generated_at": generated_at,
+            "source": "sina_api_batch_external_merge",
+            "n_days": n_days,
+            "n_assets": n_assets,
+            "n_records": n_records,
+            "first_date": first_date,
+            "last_date": last_date,
+            "last_updated": last_updated,
+            "version": _version,
+            "fields": ["date", "asset", "open", "close", "high", "low", "rsi_6", "volume_ratio_5", "volume"],
+            "extra_key": "format_note",
+            "extra_value": "每条记录单行写入，便于流式解析",
         }
         factor_size_mb = _write_final_file(factor_final_path, factor_meta, factor_lines, _logger)
         _logger.info(f"    因子文件: {factor_final_path} ({factor_size_mb:.2f} MB)")
@@ -722,18 +711,18 @@ def format_final_output(
 
         # 写入收益文件（使用 _write_final_file 辅助函数）
         return_meta = {
-            'generated_at': generated_at,
-            'source': 'sina_api_batch_external_merge',
-            'n_days': return_n_days,
-            'n_assets': return_n_assets,
-            'n_records': n_return_records,
-            'first_date': return_first_date,
-            'last_date': return_last_date,
-            'last_updated': last_updated,
-            'version': _version,
-            'fields': ['date', 'asset', 'forward_return_1d', 'forward_return_3d', 'forward_return_5d'],
-            'extra_key': 'note',
-            'extra_value': '3日和5日收益最后几天会有NaN',
+            "generated_at": generated_at,
+            "source": "sina_api_batch_external_merge",
+            "n_days": return_n_days,
+            "n_assets": return_n_assets,
+            "n_records": n_return_records,
+            "first_date": return_first_date,
+            "last_date": return_last_date,
+            "last_updated": last_updated,
+            "version": _version,
+            "fields": ["date", "asset", "forward_return_1d", "forward_return_3d", "forward_return_5d"],
+            "extra_key": "note",
+            "extra_value": "3日和5日收益最后几天会有NaN",
         }
         return_size_mb = _write_final_file(return_final_path, return_meta, return_lines, _logger)
         _logger.info(f"    收益文件: {return_final_path} ({return_size_mb:.2f} MB)")
@@ -770,10 +759,9 @@ def format_final_output(
 # 清理临时文件
 # ============================================================================
 
+
 def cleanup_batch_files(
-    total_batches: int,
-    result_dir: Path | None = None,
-    logger_arg: logging.Logger | None = None
+    total_batches: int, result_dir: Path | None = None, logger_arg: logging.Logger | None = None
 ) -> int:
     """
     清理临时文件（批次文件 + merged 合并文件）
@@ -807,7 +795,7 @@ def cleanup_batch_files(
 
     for batch_idx in range(total_batches):
         for data_type in _DATA_TYPES:
-            path = _result_dir / f'batch_{batch_idx}_{data_type}.json.gz'
+            path = _result_dir / f"batch_{batch_idx}_{data_type}.json.gz"
             if path.exists():
                 try:
                     path.unlink()
@@ -816,7 +804,7 @@ def cleanup_batch_files(
                     errors.append(f"{path}: [{type(e).__name__}]: {e}")
 
     for data_type in _DATA_TYPES:
-        merged_path = _result_dir / f'merged_{data_type}.json.gz'
+        merged_path = _result_dir / f"merged_{data_type}.json.gz"
         if merged_path.exists():
             try:
                 merged_path.unlink()
