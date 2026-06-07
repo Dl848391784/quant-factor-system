@@ -120,7 +120,7 @@ def _write_json_record(f: TextIO, record: dict, count: int) -> int:
     return count + 1
 
 
-def _write_final_file(output_path: Path, meta: dict, lines: list[str], logger: logging.Logger | None = None) -> float:
+def _write_final_file(output_path: Path, meta: dict, lines: list[str]) -> float:
     """
     写入最终格式化文件
 
@@ -140,7 +140,6 @@ def _write_final_file(output_path: Path, meta: dict, lines: list[str], logger: l
             - extra_key: extra_meta 的键名（可选，如 'format_note' 或 'note'）
             - extra_value: extra_meta 的值（可选）
         lines: 数据行列表
-        logger: 日志记录器
 
     Returns:
         float: 文件大小 MB
@@ -165,8 +164,6 @@ def _write_final_file(output_path: Path, meta: dict, lines: list[str], logger: l
     Note:
         内部函数，不导出到 __all__
     """
-    _logger = logger or logging.getLogger(__name__)
-
     # 处理 date_range null
     first_date = meta.get("first_date")
     last_date = meta.get("last_date")
@@ -174,6 +171,11 @@ def _write_final_file(output_path: Path, meta: dict, lines: list[str], logger: l
     date_range_end = last_date if last_date is not None else "null"
     start_json = f'"{date_range_start}"' if date_range_start != "null" else "null"
     end_json = f'"{date_range_end}"' if date_range_end != "null" else "null"
+
+    # 检查是否有 extra meta
+    extra_key = meta.get("extra_key")
+    extra_value = meta.get("extra_value")
+    has_extra = extra_key and extra_value is not None
 
     with gzip.open(output_path, "wt", encoding="utf-8") as out_f:
         out_f.write("{\n")
@@ -189,15 +191,13 @@ def _write_final_file(output_path: Path, meta: dict, lines: list[str], logger: l
         out_f.write("    },\n")
         out_f.write(f'    "last_updated": "{meta["last_updated"]}",\n')
         out_f.write(f'    "version": "{meta["version"]}",\n')
-        # fields 是必需字段，始终写入
-        out_f.write(f'    "fields": {json.dumps(meta["fields"])}\n')
-        # 处理 extra meta（如 format_note 或 note）
-        extra_key = meta.get("extra_key")
-        extra_value = meta.get("extra_value")
-        if extra_key and extra_value is not None:
-            # 使用 json.dumps 确保 extra_value 正确转义
+        # fields 行末尾有条件加逗号（有 extra 时加）
+        fields_json = json.dumps(meta["fields"])
+        out_f.write(f'    "fields": {fields_json}{"," if has_extra else ""}\n')
+        # extra meta 行开头不带逗号，与上方逗号位置统一
+        if has_extra:
             extra_json = json.dumps(extra_value)
-            out_f.write(f',    "{extra_key}": {extra_json}\n')
+            out_f.write(f'    "{extra_key}": {extra_json}\n')
         out_f.write("  },\n")
         out_f.write('  "data": [\n')
 
@@ -703,7 +703,7 @@ def format_final_output(
             "extra_key": "format_note",
             "extra_value": "每条记录单行写入，便于流式解析",
         }
-        factor_size_mb = _write_final_file(factor_final_path, factor_meta, factor_lines, _logger)
+        factor_size_mb = _write_final_file(factor_final_path, factor_meta, factor_lines)
         _logger.info(f"    因子文件: {factor_final_path} ({factor_size_mb:.2f} MB)")
 
         del factor_lines  # 释放缓存
@@ -724,7 +724,7 @@ def format_final_output(
             "extra_key": "note",
             "extra_value": "3日和5日收益最后几天会有NaN",
         }
-        return_size_mb = _write_final_file(return_final_path, return_meta, return_lines, _logger)
+        return_size_mb = _write_final_file(return_final_path, return_meta, return_lines)
         _logger.info(f"    收益文件: {return_final_path} ({return_size_mb:.2f} MB)")
 
         _logger.info("  ✓ 格式化完成")
