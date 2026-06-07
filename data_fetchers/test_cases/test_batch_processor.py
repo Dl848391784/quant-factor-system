@@ -161,7 +161,8 @@ class TestSaveBatchCacheSorted:
             'high': [11.0, 21.0],
             'low': [9.5, 19.5],
             'rsi_6': [50.0, 60.0],
-            'volume_ratio_5': [1.0, 1.5]
+                        'volume_ratio_5': [1.0, 1.5],
+            'volume': [1000000.0, 2000000.0]
         })
 
         return_df = pd.DataFrame({
@@ -225,7 +226,8 @@ class TestNWayMergeDeduplicate:
                 'high': [11.0 + batch_idx],
                 'low': [9.5 + batch_idx],
                 'rsi_6': [50.0],
-                'volume_ratio_5': [1.0]
+                                'volume_ratio_5': [1.0],
+                'volume': [1000000.0]
             })
             return_df = pd.DataFrame({
                 'date': ['2026-05-27'],
@@ -260,7 +262,8 @@ class TestNWayMergeDeduplicate:
                 'high': [11.0],
                 'low': [9.5],
                 'rsi_6': [50.0],
-                'volume_ratio_5': [1.0]
+                                'volume_ratio_5': [1.0],
+                'volume': [1000000.0]
             })
             return_df = pd.DataFrame({
                 'date': ['2026-05-27'],
@@ -304,7 +307,8 @@ class TestFormatFinalOutput:
             'high': [11.0],
             'low': [9.5],
             'rsi_6': [50.0],
-            'volume_ratio_5': [1.0]
+                            'volume_ratio_5': [1.0],
+                'volume': [1000000.0]
         })
         return_df = pd.DataFrame({
             'date': ['2026-05-27'],
@@ -365,7 +369,8 @@ class TestCleanupBatchFiles:
             'high': [11.0],
             'low': [9.5],
             'rsi_6': [50.0],
-            'volume_ratio_5': [1.0]
+                            'volume_ratio_5': [1.0],
+                'volume': [1000000.0]
         })
         return_df = pd.DataFrame({
             'date': ['2026-05-27'],
@@ -422,7 +427,8 @@ class TestIntegration:
                 'high': [11.0 + batch_idx],
                 'low': [9.5 + batch_idx],
                 'rsi_6': [50.0],
-                'volume_ratio_5': [1.0]
+                                'volume_ratio_5': [1.0],
+                'volume': [1000000.0]
             })
             return_df = pd.DataFrame({
                 'date': ['2026-05-27'],

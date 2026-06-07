@@ -91,15 +91,15 @@ _DATA_TYPES = ('factor', 'return')  # 数据类型列表（避免硬编码）
 def _write_json_record(f: TextIO, record: dict, count: int) -> int:
     """
     流式写入单条 JSON 记录
-    
+
     Args:
         f: gzip 文件对象（TextIO）
         record: 记录字典
         count: 当前计数
-    
+
     Returns:
         int: 更新后的计数
-    
+
     Example:
         >>> import gzip
         >>> from io import StringIO
@@ -109,7 +109,7 @@ def _write_json_record(f: TextIO, record: dict, count: int) -> int:
         >>> print(count)  # 1
         >>> count = _write_json_record(f, {'date': '2026-05-27', 'asset': '000002'}, 1)
         >>> print(count)  # 2（第二条记录前有逗号分隔）
-    
+
     Note:
         内部函数，不导出到 __all__
     """
@@ -119,6 +119,101 @@ def _write_json_record(f: TextIO, record: dict, count: int) -> int:
     return count + 1
 
 
+def _write_final_file(
+    output_path: Path,
+    meta: dict,
+    lines: list[str],
+    logger: logging.Logger | None = None
+) -> float:
+    """
+    写入最终格式化文件
+
+    Args:
+        output_path: 输出文件路径
+        meta: meta 字典，包含以下字段：
+            - generated_at: ISO格式时间
+            - source: 数据源标识
+            - n_days: 交易日数
+            - n_assets: 股票数量
+            - n_records: 记录数
+            - first_date: 起始日期（可为 None）
+            - last_date: 结束日期（可为 None）
+            - last_updated: 更新时间字符串
+            - version: 版本号
+            - fields: 字段列表
+            - extra_key: extra_meta 的键名（可选，如 'format_note' 或 'note'）
+            - extra_value: extra_meta 的值（可选）
+        lines: 数据行列表
+        logger: 日志记录器
+
+    Returns:
+        float: 文件大小 MB
+
+    Example:
+        >>> from pathlib import Path
+        >>> meta = {
+        ...     'generated_at': '2026-05-27T10:00:00',
+        ...     'source': 'test',
+        ...     'n_days': 10,
+        ...     'n_assets': 100,
+        ...     'n_records': 1000,
+        ...     'first_date': '2026-05-01',
+        ...     'last_date': '2026-05-27',
+        ...     'last_updated': '2026-05-27 10:00:00',
+        ...     'version': '1.0',
+        ...     'fields': ['date', 'asset', 'value'],
+        ... }
+        >>> lines = ['{"date": "2026-05-01", "asset": "000001", "value": 1.0}']
+        >>> size_mb = _write_final_file(Path('/tmp/test.json.gz'), meta, lines)
+
+    Note:
+        内部函数，不导出到 __all__
+    """
+    _logger = logger or logging.getLogger(__name__)
+
+    # 处理 date_range null
+    first_date = meta.get('first_date')
+    last_date = meta.get('last_date')
+    date_range_start = first_date if first_date is not None else "null"
+    date_range_end = last_date if last_date is not None else "null"
+    start_json = f'"{date_range_start}"' if date_range_start != "null" else "null"
+    end_json = f'"{date_range_end}"' if date_range_end != "null" else "null"
+
+    with gzip.open(output_path, 'wt', encoding='utf-8') as out_f:
+        out_f.write('{\n')
+        out_f.write('  "meta": {\n')
+        out_f.write(f'    "generated_at": "{meta["generated_at"]}",\n')
+        out_f.write(f'    "source": "{meta["source"]}",\n')
+        out_f.write(f'    "n_days": {meta["n_days"]},\n')
+        out_f.write(f'    "n_assets": {meta["n_assets"]},\n')
+        out_f.write(f'    "n_records": {meta["n_records"]},\n')
+        out_f.write('    "date_range": {\n')
+        out_f.write(f'      "start": {start_json},\n')
+        out_f.write(f'      "end": {end_json}\n')
+        out_f.write('    },\n')
+        out_f.write(f'    "last_updated": "{meta["last_updated"]}",\n')
+        out_f.write(f'    "version": "{meta["version"]}",\n')
+        out_f.write(f'    "fields": {json.dumps(meta["fields"])},\n')
+        # 处理 extra meta（如 format_note 或 note）
+        extra_key = meta.get('extra_key')
+        extra_value = meta.get('extra_value')
+        if extra_key and extra_value:
+            out_f.write(f'    "{extra_key}": "{extra_value}"\n')
+        out_f.write('  },\n')
+        out_f.write('  "data": [\n')
+
+        for i, line_content in enumerate(lines):
+            if i > 0:
+                out_f.write(',\n')
+            out_f.write('    ' + line_content)
+
+        out_f.write('\n  ]\n')
+        out_f.write('}\n')
+
+    size_mb = output_path.stat().st_size / (1024 * 1024)
+    return size_mb
+
+
 # ============================================================================
 # BatchStream 类：批次数据流式读取器
 # ============================================================================
@@ -126,9 +221,9 @@ def _write_json_record(f: TextIO, record: dict, count: int) -> int:
 class BatchStream:
     """
     批次数据流式读取器
-    
+
     用于 N-way merge 时逐条读取批次数据，避免一次性加载所有批次
-    
+
     Attributes:
         batch_idx: 原始批次索引（从0开始）
         data_type: 数据类型（'factor' 或 'return')
@@ -136,7 +231,7 @@ class BatchStream:
         records: 当前加载的记录列表
         idx: 当前记录索引
         exhausted: 是否已耗尽
-    
+
     Example:
         >>> from data_fetchers.batch_processor import BatchStream
         >>> # 假设存在批次文件 result/batch_0_factor.json.gz
@@ -145,7 +240,7 @@ class BatchStream:
         >>> record = stream.pop_record()  # 弹出第一条记录
         >>> print(stream.is_exhausted())  # False（还有记录）
         >>> stream.cleanup()  # 清理资源
-    
+
     Raises:
         json.JSONDecodeError: 批次文件 JSON 解析失败
     """
@@ -153,7 +248,7 @@ class BatchStream:
     def __init__(self, batch_idx: int, data_type: str = 'factor', result_dir: Path | None = None):
         """
         初始化批次数据流
-        
+
         Args:
             batch_idx: 批次索引（从0开始）
             data_type: 数据类型（'factor' 或 'return')
@@ -172,7 +267,7 @@ class BatchStream:
     def _load_all(self) -> None:
         """
         加载全部数据（一次性加载）
-        
+
         Note:
             批次文件不大（约几MB），直接加载全部记录
             文件损坏时设置 exhausted=True、load_error=错误信息，跳过该批次，不中断整个流程
@@ -227,10 +322,9 @@ class BatchStream:
         return self.exhausted or self.idx >= len(self.records)
 
     def cleanup(self) -> None:
-        """清理资源"""
+        """清理资源（仅清空列表，不调用 gc.collect，在 merge 末尾统一调用）"""
         self.records = []
         self.exhausted = True
-        gc.collect()
 
 
 # ============================================================================
@@ -246,17 +340,17 @@ def save_batch_cache_sorted(
 ) -> None:
     """
     保存单批次数据到临时文件（预先排序，流式写入）
-    
+
     Args:
         batch_idx: 批次索引（从0开始）
         factor_df: 因子数据DataFrame，包含 date/asset/open/close/high/low/rsi_6/volume_ratio_5/volume
         return_df: 收益数据DataFrame，包含 date/asset/forward_return_1d/3d/5d
         result_dir: 结果目录（可选）
         logger_arg: 日志记录器（遵循 MODULE.md 约束 77）
-    
+
     Note:
         使用流式写入避免内存峰值，自动验证必需列存在
-    
+
     Example:
         >>> import pandas as pd
         >>> from data_fetchers.batch_processor import save_batch_cache_sorted
@@ -278,7 +372,7 @@ def save_batch_cache_sorted(
         ...     'forward_return_5d': [0.05, 0.10]
         ... })
         >>> save_batch_cache_sorted(0, factor_df, return_df)  # 保存到 result/batch_0_factor.json.gz
-    
+
     Raises:
         ValueError: factor_df 或 return_df 缺少必需列（由 validate_dataframe_columns 抛出）
     """
@@ -295,7 +389,10 @@ def save_batch_cache_sorted(
     validate_dataframe_columns(factor_df, required_factor_cols, 'factor_df')
     validate_dataframe_columns(return_df, required_return_cols, 'return_df')
 
-    # 格式化并排序
+    # 格式化并排序（创建副本避免修改调用方原始 DataFrame）
+    factor_df = factor_df.copy()
+    return_df = return_df.copy()
+
     factor_df['date'] = factor_df['date'].astype(str)
     return_df['date'] = return_df['date'].astype(str)
 
@@ -358,25 +455,25 @@ def n_way_merge_deduplicate(
 ) -> Path | None:
     """
     N-way merge 合并已排序的批次数据，去重
-    
+
     Args:
         total_batches: 总批次数
         data_type: 数据类型（'factor' 或 'return'）
         result_dir: 结果目录（可选）
         logger_arg: 日志记录器（遵循 MODULE.md 约束 77）
-    
+
     Returns:
         Path | None: 输出文件路径（无有效数据时返回 None）
-    
+
     Note:
         使用 heapq 实现 N-way merge，相同 key 按 batch_idx 降序选择最新数据
-    
+
     Example:
         >>> from data_fetchers.batch_processor import n_way_merge_deduplicate
         >>> # 假设已保存 3 个批次：batch_0_factor.json.gz, batch_1_factor.json.gz, batch_2_factor.json.gz
         >>> merged_path = n_way_merge_deduplicate(3, 'factor')
         >>> print(merged_path)  # PosixPath('result/merged_factor.json.gz')
-    
+
     Raises:
         json.JSONDecodeError: 批次文件 JSON 解析失败
     """
@@ -459,9 +556,7 @@ def n_way_merge_deduplicate(
 
         f.write('\n]')
 
-    _logger.info(f"  合并完成: {count} 条记录")
-    _logger.info(f"  输出文件: {output_path}")
-    _logger.info(f"  当前内存: {get_memory_info_str()}")
+    _logger.info(f"  合并完成: {count} 条 → {output_path}, 内存: {get_memory_info_str()}")
 
     for stream in streams:
         stream.cleanup()
@@ -483,18 +578,18 @@ def format_final_output(
 ) -> None:
     """
     将合并后的JSON数组格式化为完整JSON文件
-    
+
     Args:
         factor_merged_path: 合并后的因子数据路径
         return_merged_path: 合并后的收益数据路径
         result_dir: 结果目录（可选）
         output_version: 输出版本号（可选，默认使用模块级 _OUTPUT_VERSION）
         logger_arg: 日志记录器（遵循 MODULE.md 约束 77）
-    
+
     Note:
         输出文件格式：{meta: {...}, data: [...]}
         自动计算 meta 信息（n_days, n_assets, date_range）
-    
+
     Example:
         >>> from pathlib import Path
         >>> from data_fetchers.batch_processor import format_final_output
@@ -504,7 +599,7 @@ def format_final_output(
         ...     Path('result/merged_return.json.gz'),
         ...     output_version='3.36'
         ... )  # 输出 factor_data.json.gz 和 return_data.json.gz
-    
+
     Raises:
         FileNotFoundError: merged 文件不存在
         json.JSONDecodeError: merged 文件 JSON 解析失败
@@ -517,7 +612,7 @@ def format_final_output(
     factor_merged_path = Path(factor_merged_path)
     return_merged_path = Path(return_merged_path)
 
-    _logger.info("格式化最终输出文件...")
+    _logger.info(f"格式化最终输出文件: 因子={factor_merged_path}, 收益={return_merged_path}")
 
     now = datetime.now()
     generated_at = now.isoformat()
@@ -604,72 +699,45 @@ def format_final_output(
     return_final_path = _result_dir / 'return_data.json.gz'
 
     try:
-        # 写入因子文件
-        with gzip.open(factor_final_path, 'wt', encoding='utf-8') as out_f:
-            out_f.write('{\n')
-            out_f.write('  "meta": {\n')
-            out_f.write(f'    "generated_at": "{generated_at}",\n')
-            out_f.write('    "source": "sina_api_batch_external_merge",\n')
-            out_f.write(f'    "n_days": {n_days},\n')
-            out_f.write(f'    "n_assets": {n_assets},\n')
-            out_f.write(f'    "n_records": {n_records},\n')
-            out_f.write('    "date_range": {\n')
-            out_f.write(f'      "start": "{first_date}",\n')
-            out_f.write(f'      "end": "{last_date}"\n')
-            out_f.write('    },\n')
-            out_f.write(f'    "last_updated": "{last_updated}",\n')
-            out_f.write(f'    "version": "{_version}",\n')
-            out_f.write('    "fields": ["date", "asset", "open", "close", "high", "low", "rsi_6", "volume_ratio_5"],\n')
-            out_f.write('    "format_note": "每条记录单行写入，便于流式解析"\n')
-            out_f.write('  },\n')
-            out_f.write('  "data": [\n')
-
-            for i, line_content in enumerate(factor_lines):
-                if i > 0:
-                    out_f.write(',\n')
-                out_f.write('    ' + line_content)
-
-            out_f.write('\n  ]\n')
-            out_f.write('}\n')
-
-        factor_size_mb = factor_final_path.stat().st_size / (1024 * 1024)
+        # 写入因子文件（使用 _write_final_file 辅助函数）
+        factor_meta = {
+            'generated_at': generated_at,
+            'source': 'sina_api_batch_external_merge',
+            'n_days': n_days,
+            'n_assets': n_assets,
+            'n_records': n_records,
+            'first_date': first_date,
+            'last_date': last_date,
+            'last_updated': last_updated,
+            'version': _version,
+            'fields': ['date', 'asset', 'open', 'close', 'high', 'low', 'rsi_6', 'volume_ratio_5', 'volume'],
+            'extra_key': 'format_note',
+            'extra_value': '每条记录单行写入，便于流式解析',
+        }
+        factor_size_mb = _write_final_file(factor_final_path, factor_meta, factor_lines, _logger)
         _logger.info(f"    因子文件: {factor_final_path} ({factor_size_mb:.2f} MB)")
 
         del factor_lines  # 释放缓存
         gc.collect()
 
-        # 写入收益文件
-        with gzip.open(return_final_path, 'wt', encoding='utf-8') as out_f:
-            out_f.write('{\n')
-            out_f.write('  "meta": {\n')
-            out_f.write(f'    "generated_at": "{generated_at}",\n')
-            out_f.write('    "source": "sina_api_batch_external_merge",\n')
-            out_f.write(f'    "n_days": {return_n_days},\n')  # 使用收益数据的统计值
-            out_f.write(f'    "n_assets": {return_n_assets},\n')  # 使用收益数据的统计值
-            out_f.write(f'    "n_records": {n_return_records},\n')
-            out_f.write('    "date_range": {\n')
-            out_f.write(f'      "start": "{return_first_date}",\n')  # 使用收益数据的统计值
-            out_f.write(f'      "end": "{return_last_date}"\n')  # 使用收益数据的统计值
-            out_f.write('    },\n')
-            out_f.write(f'    "last_updated": "{last_updated}",\n')
-            out_f.write(f'    "version": "{_version}",\n')
-            out_f.write('    "fields": ["date", "asset", "forward_return_1d", "forward_return_3d", "forward_return_5d"],\n')
-            out_f.write('    "note": "3日和5日收益最后几天会有NaN"\n')
-            out_f.write('  },\n')
-            out_f.write('  "data": [\n')
-
-            for i, line_content in enumerate(return_lines):
-                if i > 0:
-                    out_f.write(',\n')
-                out_f.write('    ' + line_content)
-
-            out_f.write('\n  ]\n')
-            out_f.write('}\n')
-
-        return_size_mb = return_final_path.stat().st_size / (1024 * 1024)
+        # 写入收益文件（使用 _write_final_file 辅助函数）
+        return_meta = {
+            'generated_at': generated_at,
+            'source': 'sina_api_batch_external_merge',
+            'n_days': return_n_days,
+            'n_assets': return_n_assets,
+            'n_records': n_return_records,
+            'first_date': return_first_date,
+            'last_date': return_last_date,
+            'last_updated': last_updated,
+            'version': _version,
+            'fields': ['date', 'asset', 'forward_return_1d', 'forward_return_3d', 'forward_return_5d'],
+            'extra_key': 'note',
+            'extra_value': '3日和5日收益最后几天会有NaN',
+        }
+        return_size_mb = _write_final_file(return_final_path, return_meta, return_lines, _logger)
         _logger.info(f"    收益文件: {return_final_path} ({return_size_mb:.2f} MB)")
 
-        _logger.info("  ✓ 最终文件已保存")
         _logger.info("  ✓ 格式化完成")
 
     except Exception as e:
@@ -709,23 +777,23 @@ def cleanup_batch_files(
 ) -> int:
     """
     清理临时文件（批次文件 + merged 合并文件）
-    
+
     Args:
         total_batches: 总批次数
         result_dir: 结果目录（可选）
         logger_arg: 日志记录器（遵循 MODULE.md 约束 77）
-    
+
     Returns:
         int: 删除的文件数量
-    
+
     Note:
         删除 batch_*_*.json.gz 和 merged_*.json.gz 临时文件
-    
+
     Example:
         >>> from data_fetchers.batch_processor import cleanup_batch_files
         >>> deleted = cleanup_batch_files(3)  # 清理 3 个批次的所有临时文件
         >>> print(deleted)  # 删除的文件数量（如 8 = 3*2 + 2）
-    
+
     Raises:
         无（删除失败仅记录 warning 日志，不影响返回值）
     """
