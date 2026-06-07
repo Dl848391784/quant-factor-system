@@ -30,12 +30,16 @@
 """
 
 # 标准库导入
+import gc
+import gzip
 import json
 import logging
 import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from typing import Callable
 
 # 第三方库导入
 import pandas as pd
@@ -341,7 +345,7 @@ class RealDataLoader:
         self,
         stock_batch: list[dict],
         days: int,
-        progress_callback: callable | None = None
+        progress_callback: Callable | None = None
     ) -> list[tuple[str, pd.DataFrame | None]]:
         """获取一批股票的数据（串行获取，带延迟）
         
@@ -366,7 +370,7 @@ class RealDataLoader:
         stocks_for_thread_a: list[dict],
         stocks_for_thread_b: list[dict],
         days: int,
-        progress_callback: callable | None = None
+        progress_callback: Callable | None = None
     ) -> list[tuple[str, pd.DataFrame | None]]:
         """使用2个线程并行获取股票数据
         

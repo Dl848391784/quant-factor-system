@@ -22,6 +22,8 @@ ENV/
 data/
 results/
 output/
+**/result/
+*.json
 
 # Logs
 *.log
