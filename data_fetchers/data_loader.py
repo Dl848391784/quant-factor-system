@@ -210,7 +210,7 @@ class RealDataLoader:
             pd.DataFrame | None: K线数据，获取失败返回 None
 
         Raises:
-            PermanentFailureError: 永久性失败（不支持的股票代码前缀、API返回非列表）
+            PermanentFailureError: 不支持的股票代码前缀（仅60/00开头）
 
         Note:
             - 新浪API股票代码格式：sh600000（沪市）或 sz000001（深市）
@@ -263,6 +263,7 @@ class RealDataLoader:
                     continue
 
             if len(rows) < 15:
+                self._logger.debug(f"API返回有效数据不足: stock_code={stock_code}, rows={len(rows)}")
                 return None
 
             df = pd.DataFrame(rows)
