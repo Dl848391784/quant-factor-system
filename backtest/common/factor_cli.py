@@ -12,7 +12,6 @@
         if __name__ == '__main__':
             sys.path.insert(0, str(Path(__file__).parent.parent))
             factor_cli_main(
-                factor_name='amplitude',
                 config_cls=AmplitudeLayerConfig,
                 factor_calculator=calculate_amplitude
             )
@@ -25,7 +24,6 @@
             return partial(calc, n=args.rsi_n)
 
         factor_cli_main(
-            factor_name='rsi',
             config_cls=RSILayerConfig,
             factor_calculator=calculate_rsi,
             add_cli_args=add_rsi_args,
@@ -38,7 +36,8 @@
     2: 无有效数据（n_days_total == 0）
     3: 数据结构问题（KeyError/ValueError）
     4: 数据文件不存在（FileNotFoundError）
-    5: 未预期异常
+    5: RuntimeError（已知业务异常）
+    6: 未预期异常
 
 作者: 云瑶
 创建日期: 2026-06-01
@@ -71,7 +70,8 @@ class ExitCode(IntEnum):
     NO_DATA = 2
     DATA_STRUCTURE_ERROR = 3
     FILE_NOT_FOUND = 4
-    UNEXPECTED_ERROR = 5
+    RUNTIME_ERROR = 5  # 已知业务异常（数据请求失败、缓存读写失败等）
+    UNEXPECTED_ERROR = 6  # 未预期异常
 
 
 def _die(logger, code: ExitCode, msg: str) -> None:
@@ -113,7 +113,8 @@ def factor_cli_main(
         2: 无有效数据
         3: KeyError/ValueError
         4: FileNotFoundError
-        5: RuntimeError（已知业务异常）或未预期异常
+        5: RuntimeError（已知业务异常）
+        6: 未预期异常
 
     Example:
         # 简单脚本（因子列名 = factor_name）
@@ -216,7 +217,7 @@ def factor_cli_main(
         _die(logger, ExitCode.DATA_STRUCTURE_ERROR, f"数据问题: {e}")
     except RuntimeError as e:
         # 已知业务异常（数据请求失败、缓存读写失败等），error() 不打印完整堆栈
-        _die(logger, ExitCode.UNEXPECTED_ERROR, f"回测失败: {e}")
+        _die(logger, ExitCode.RUNTIME_ERROR, f"回测失败: {e}")
     except Exception:
         # 未预期异常，exception() 自动打印完整堆栈便于排查
         logger.exception("未预期的错误")
@@ -251,30 +252,38 @@ def factor_cli_main(
         cumulative_return = stats.get("cumulative_return") or 0.0
         logger.info(f"Layer {layer_id} ({display_name}) 累计收益: {cumulative_return:.4f}")
 
-    # 多空组合收益（显式区分键缺失 vs 真实零值）
-    long_short = result.get("long_short") or {}
-    if long_short:
-        # 多空日均收益（规范定义字段）
-        if "long_short_return_daily" in long_short:
-            val = long_short["long_short_return_daily"]
-            if val is not None:
-                logger.info(f"多空日均收益: {val * 100:.4f}%")
-
-        # 多空夏普比率（规范定义字段，键名修正）
-        if "long_short_sharpe" not in long_short:
-            logger.warning("多空组合缺少 long_short_sharpe 字段")
-        else:
-            val = long_short["long_short_sharpe"]
-            if val is None:
-                logger.warning("多空组合 long_short_sharpe 为 None")
+        # 多空组合收益（统一处理：键缺失/值为 None 时打 warning）
+        long_short = result.get("long_short") or {}
+        if long_short:
+            # 多空日均收益（规范定义字段）
+            if "long_short_return_daily" not in long_short:
+                logger.warning("多空组合缺少 long_short_return_daily 字段")
             else:
-                logger.info(f"多空组合夏普比率: {val:.2f}")
+                val = long_short["long_short_return_daily"]
+                if val is None:
+                    logger.warning("多空组合 long_short_return_daily 为 None")
+                else:
+                    logger.info(f"多空日均收益: {val * 100:.4f}%")
 
-        # 数据覆盖率（规范定义字段）
-        if "coverage" in long_short:
-            val = long_short["coverage"]
-            if val is not None:
-                logger.info(f"数据覆盖率: {val * 100:.1f}%")
+            # 多空夏普比率（规范定义字段）
+            if "long_short_sharpe" not in long_short:
+                logger.warning("多空组合缺少 long_short_sharpe 字段")
+            else:
+                val = long_short["long_short_sharpe"]
+                if val is None:
+                    logger.warning("多空组合 long_short_sharpe 为 None")
+                else:
+                    logger.info(f"多空组合夏普比率: {val:.2f}")
+
+            # 数据覆盖率（规范定义字段）
+            if "coverage" not in long_short:
+                logger.warning("多空组合缺少 coverage 字段")
+            else:
+                val = long_short["coverage"]
+                if val is None:
+                    logger.warning("多空组合 coverage 为 None")
+                else:
+                    logger.info(f"数据覆盖率: {val * 100:.1f}%")
     else:
         logger.warning("未生成多空组合指标")
 
