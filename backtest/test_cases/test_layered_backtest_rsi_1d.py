@@ -30,19 +30,21 @@ class TestRsiLayerConfig:
 
     def test_layer_names_classvar(self):
         """TC001-02: layer_names 类属性为纯标签"""
-        assert len(RsiLayerConfig.layer_names) == 4
+        assert len(RsiLayerConfig.layer_names) == 5
         assert RsiLayerConfig.layer_names[0] == 'oversold'
         assert RsiLayerConfig.layer_names[1] == 'low'
         assert RsiLayerConfig.layer_names[2] == 'normal'
         assert RsiLayerConfig.layer_names[3] == 'high'
+        assert RsiLayerConfig.layer_names[4] == 'overbought'
 
     def test_layer_descriptions_classvar(self):
-        """TC001-03: layer_descriptions 含中文描述"""
-        assert len(RsiLayerConfig.layer_descriptions) == 4
-        assert RsiLayerConfig.layer_descriptions[0] == '超卖层(RSI<30)'
-        assert RsiLayerConfig.layer_descriptions[1] == '偏低层(RSI 30-40)'
-        assert RsiLayerConfig.layer_descriptions[2] == '中性层(RSI 40-60)'
-        assert RsiLayerConfig.layer_descriptions[3] == '偏高层(RSI 60-70)'
+        """TC001-03: layer_descriptions 含相对语义描述（与 percentile 模式一致）"""
+        assert len(RsiLayerConfig.layer_descriptions) == 5
+        assert RsiLayerConfig.layer_descriptions[0] == '极低层(RSI极低)'
+        assert RsiLayerConfig.layer_descriptions[1] == '偏低层(RSI偏低)'
+        assert RsiLayerConfig.layer_descriptions[2] == '正常层(RSI适中)'
+        assert RsiLayerConfig.layer_descriptions[3] == '偏高层(RSI偏高)'
+        assert RsiLayerConfig.layer_descriptions[4] == '极高层(RSI极高)'
 
     def test_ic_source_default(self):
         """TC001-04: ic_source 默认路径"""
@@ -59,15 +61,15 @@ class TestRsiLayerConfig:
         """TC001-06: n_layers 由 len(layer_names) 派生"""
         config = RsiLayerConfig()
         assert config.n_layers == len(RsiLayerConfig.layer_names)
-        assert config.n_layers == 4
+        assert config.n_layers == 5
 
     def test_layer_names_dict_generated(self):
         """TC001-07: layer_names_dict 使用 layer_descriptions"""
         config = RsiLayerConfig()
         assert '1' in config.layer_names_dict
-        assert '4' in config.layer_names_dict
-        assert config.layer_names_dict['1'] == '超卖层(RSI<30)'
-        assert config.layer_names_dict['4'] == '偏高层(RSI 60-70)'
+        assert '5' in config.layer_names_dict
+        assert config.layer_names_dict['1'] == '极低层(RSI极低)'
+        assert config.layer_names_dict['5'] == '极高层(RSI极高)'
 
     def test_layer_names_semantic(self):
         """TC001-08: layer_descriptions 语义描述"""
@@ -100,7 +102,7 @@ class TestRsiLayerConfig:
         assert config.long_layers is not None
         assert config.short_layers is not None
         assert 1 in config.long_layers  # 低层做多
-        assert 4 in config.short_layers  # 高层做空
+        assert 5 in config.short_layers  # 高层做空
 
 
 class TestRsiCalculator:
@@ -142,7 +144,7 @@ class TestLayeredBacktestResult:
         meta = result['meta']
         assert meta['factor_name'] == 'rsi'
         assert meta['factor_direction'] == 'negative'
-        assert meta['n_layers'] == 4
+        assert meta['n_layers'] == 5
 
     def test_layer_stats_complete(self):
         """TC003-04: layer_stats 完整"""
@@ -151,7 +153,7 @@ class TestLayeredBacktestResult:
             pytest.skip("结果文件不存在")
 
         result = json.load(open(result_path))
-        assert len(result['layer_stats']) == 4  # 4层
+        assert len(result['layer_stats']) == 5  # 5层
 
 
 class TestLayeredBacktestExecution:
@@ -160,7 +162,7 @@ class TestLayeredBacktestExecution:
     def test_config_integration(self):
         """TC004-01: 配置类可实例化"""
         config = RsiLayerConfig()
-        assert config.n_layers == 4
+        assert config.n_layers == 5
         assert config.factor_direction == 'negative'
 
     def test_factor_direction_derives_long_short(self):
@@ -171,7 +173,7 @@ class TestLayeredBacktestExecution:
         assert config.long_layers is not None
         assert config.short_layers is not None
         assert 1 in config.long_layers
-        assert 4 in config.short_layers
+        assert 5 in config.short_layers
 
 
 if __name__ == '__main__':
