@@ -8,7 +8,7 @@
 使用方式：
     简单脚本（无自定义参数）：
         from backtest.common.factor_cli import factor_cli_main
-        
+
         if __name__ == '__main__':
             sys.path.insert(0, str(Path(__file__).parent.parent))
             factor_cli_main(
@@ -16,14 +16,14 @@
                 config_cls=AmplitudeLayerConfig,
                 factor_calculator=calculate_amplitude
             )
-    
+
     复杂脚本（有自定义参数如 --rsi-n）：
         def add_rsi_args(parser):
             parser.add_argument('--rsi-n', type=int, default=6)
-        
+
         def setup_rsi_calculator(args, calc):
             return partial(calc, n=args.rsi_n)
-        
+
         factor_cli_main(
             factor_name='rsi',
             config_cls=RSILayerConfig,
@@ -43,7 +43,7 @@
 作者: 云瑶
 创建日期: 2026-06-01
 版本历史:
-  v2.1 (2026-06-01): 
+  v2.1 (2026-06-01):
     - argparse 长选项改为 kebab-case（GNU 惯例）
     - 退出码改为 IntEnum（避免魔法数字）
     - 抽取 _die() 辅助函数收敛错误处理
@@ -65,6 +65,7 @@ from backtest.common.logger_config import get_logger
 
 class ExitCode(IntEnum):
     """退出码枚举（避免魔法数字，便于外部脚本/CI 解析）"""
+
     SUCCESS = 0
     RESULT_NONE = 1
     NO_DATA = 2
@@ -75,7 +76,7 @@ class ExitCode(IntEnum):
 
 def _die(logger, code: ExitCode, msg: str) -> None:
     """错误处理辅助函数：收敛 logger.error + sys.exit 模式
-    
+
     Args:
         logger: 日志对象
         code: 退出码（ExitCode 枚举）
@@ -93,68 +94,72 @@ def factor_cli_main(
     setup_calculator: Callable[[argparse.Namespace, Callable], Callable] | None = None,
 ) -> None:
     """因子分层回测 CLI 公共入口
-    
+
     设计变更（v2.3，2026-06-01）：
     - 删除 factor_col 和 required_factor_cols 参数，从 config_cls 按需派生
     - 收敛"因子描述配置"到 LayerConfigBase 子类，压扁封装
     - 启动时打印 INFO 日志包含 factor_name/direction/n_layers
-    
+
     Args:
         config_cls: 分层配置类（LayerConfigBase 子类，需有 factor_name ClassVar）
         factor_calculator: 因子计算函数（预计算因子传 None）
-        
+
         add_cli_args: 添加自定义 CLI 参数的函数
         setup_calculator: 根据 args 包装 calculator 的函数（如 partial）
-    
+
     退出码：
         0: 成功
         1: result 为 None
         2: 无有效数据
         3: KeyError/ValueError
         4: FileNotFoundError
-        5: 未预期异常
-    
+        5: RuntimeError（已知业务异常）或未预期异常
+
     Example:
         # 简单脚本（因子列名 = factor_name）
         factor_cli_main(Return5dLayerConfig, calculate_return_5d)
-        
+
         # 预计算因子（factor_col 显式声明在配置类）
         class VolumeRatioLayerConfig(LayerConfigBase):
             factor_name: ClassVar[str] = 'volume_ratio'
             factor_col: ClassVar[str] = 'volume_ratio_5'
         factor_cli_main(VolumeRatioLayerConfig)
-        
+
         # 复杂脚本（自定义参数）
         def add_args(p):
             p.add_argument('--rsi-n', type=int, default=6)
-        
+
         def setup(args, calc):
             from functools import partial
             return partial(calc, n=args.rsi_n)
-        
+
         factor_cli_main(RSILayerConfig, calculate_rsi,
                         add_cli_args=add_args, setup_calculator=setup)
     """
     # 从 config_cls 提取 factor_name（单一来源）
-    factor_name = getattr(config_cls, 'factor_name', None)
+    factor_name = getattr(config_cls, "factor_name", None)
     if factor_name is None:
-        raise ValueError(
-            f"config_cls 需要定义 factor_name ClassVar，"
-            f"当前类: {config_cls.__name__}"
-        )
+        raise ValueError(f"config_cls 需要定义 factor_name ClassVar，当前类: {config_cls.__name__}")
 
     # CLI 描述自动生成
-    description = f'{factor_name} 因子分层回测'
+    description = f"{factor_name} 因子分层回测"
     # CLI 参数解析
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('--data-source', type=str, default=None,
-                        dest='data_source',  # Python 属性名保持下划线
-                        help='数据源文件路径')
-    parser.add_argument('--output-dir', type=str, default=None,
-                        dest='output_dir',  # Python 属性名保持下划线
-                        help='输出目录路径')
-    parser.add_argument('--quiet', action='store_true',
-                        help='静默模式')
+    parser.add_argument(
+        "--data-source",
+        type=str,
+        default=None,
+        dest="data_source",  # Python 属性名保持下划线
+        help="数据源文件路径",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        dest="output_dir",  # Python 属性名保持下划线
+        help="输出目录路径",
+    )
+    parser.add_argument("--quiet", action="store_true", help="静默模式")
 
     # 自定义参数
     if add_cli_args:
@@ -165,7 +170,7 @@ def factor_cli_main(
     # --quiet 控制日志级别（静默模式：WARNING 级别，只显示错误和警告）
     logger = get_logger(factor_name)
     if args.quiet:
-        logger.setLevel('WARNING')
+        logger.setLevel("WARNING")
 
     # 启动时回放 CLI 参数（事后可复现具体 data_source/output_dir 取值）
     if not args.quiet:
@@ -186,7 +191,7 @@ def factor_cli_main(
     if factor_calculator is None:
         required_factor_cols = [factor_col]
     else:
-        required_factor_cols = getattr(factor_calculator, 'required_cols', None)
+        required_factor_cols = getattr(factor_calculator, "required_cols", None)
 
     # 包装 calculator（如 partial）
     if setup_calculator and factor_calculator is not None:
@@ -203,13 +208,17 @@ def factor_cli_main(
             data_source=args.data_source,
             output_dir=args.output_dir,
             verbose=not args.quiet,
-            logger=logger
+            logger=logger,
         )
     except FileNotFoundError as e:
         _die(logger, ExitCode.FILE_NOT_FOUND, f"数据文件不存在: {e}")
     except (KeyError, ValueError) as e:
         _die(logger, ExitCode.DATA_STRUCTURE_ERROR, f"数据问题: {e}")
+    except RuntimeError as e:
+        # 已知业务异常（数据请求失败、缓存读写失败等），error() 不打印完整堆栈
+        _die(logger, ExitCode.UNEXPECTED_ERROR, f"回测失败: {e}")
     except Exception:
+        # 未预期异常，exception() 自动打印完整堆栈便于排查
         logger.exception("未预期的错误")
         sys.exit(ExitCode.UNEXPECTED_ERROR)
 
@@ -220,8 +229,8 @@ def factor_cli_main(
         _die(logger, ExitCode.RESULT_NONE, "run_layered_backtest 返回 None")
 
     # 检查有效数据
-    meta = result.get('meta') or {}
-    n_days_total = meta.get('n_days_total') or 0
+    meta = result.get("meta") or {}
+    n_days_total = meta.get("n_days_total") or 0
     if n_days_total == 0:
         _die(logger, ExitCode.NO_DATA, "回测无有效数据，程序终止")
 
@@ -231,41 +240,41 @@ def factor_cli_main(
     logger.info(f"回测周期: {n_days_total} 天")
 
     # 各分层收益（按层序排序输出，避免依赖字典插入顺序）
-    layer_stats = result.get('layer_stats') or {}
+    layer_stats = result.get("layer_stats") or {}
     # 排序：按 layer_key 中的数字部分排序（layer_1, layer_2, ... → 1, 2, ...）
-    sorted_layer_keys = sorted(layer_stats.keys(), key=lambda k: int(k.replace('layer_', '')))
+    sorted_layer_keys = sorted(layer_stats.keys(), key=lambda k: int(k.replace("layer_", "")))
     for layer_key in sorted_layer_keys:
         stats = layer_stats[layer_key]
         # layer_key 格式: 'layer_1', 'layer_2', ...
-        layer_id = layer_key.replace('layer_', '')
-        display_name = config.layer_names_dict.get(layer_id, f'Layer{layer_id}')
-        cumulative_return = stats.get('cumulative_return') or 0.0
+        layer_id = layer_key.replace("layer_", "")
+        display_name = config.layer_names_dict.get(layer_id, f"Layer{layer_id}")
+        cumulative_return = stats.get("cumulative_return") or 0.0
         logger.info(f"Layer {layer_id} ({display_name}) 累计收益: {cumulative_return:.4f}")
 
     # 多空组合收益（显式区分键缺失 vs 真实零值）
-    long_short = result.get('long_short') or {}
+    long_short = result.get("long_short") or {}
     if long_short:
         # 多空日均收益（规范定义字段）
-        if 'long_short_return_daily' in long_short:
-            val = long_short['long_short_return_daily']
+        if "long_short_return_daily" in long_short:
+            val = long_short["long_short_return_daily"]
             if val is not None:
-                logger.info(f"多空日均收益: {val*100:.4f}%")
+                logger.info(f"多空日均收益: {val * 100:.4f}%")
 
         # 多空夏普比率（规范定义字段，键名修正）
-        if 'long_short_sharpe' not in long_short:
+        if "long_short_sharpe" not in long_short:
             logger.warning("多空组合缺少 long_short_sharpe 字段")
         else:
-            val = long_short['long_short_sharpe']
+            val = long_short["long_short_sharpe"]
             if val is None:
                 logger.warning("多空组合 long_short_sharpe 为 None")
             else:
                 logger.info(f"多空组合夏普比率: {val:.2f}")
 
         # 数据覆盖率（规范定义字段）
-        if 'coverage' in long_short:
-            val = long_short['coverage']
+        if "coverage" in long_short:
+            val = long_short["coverage"]
             if val is not None:
-                logger.info(f"数据覆盖率: {val*100:.1f}%")
+                logger.info(f"数据覆盖率: {val * 100:.1f}%")
     else:
         logger.warning("未生成多空组合指标")
 

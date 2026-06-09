@@ -14,34 +14,14 @@
 - factor_direction: 从 ic_source IC 文件加载，ic_mean < 0 为 negative
 - n_layers: 由 len(layer_names) 派生
 - long_layers/short_layers: 由 n_layers 和 factor_direction 派生
-
-作者: 云瑶
-创建日期: 2026-06-05
-版本历史:
-  v1.0 (2026-06-05): 初始版本，薄声明 + factor_cli_main 入口
-  v1.1 (2026-06-05): 优化规范合规性：
-    1. 添加导入分组注释规范化（本地模块分隔）
-    2. 添加模块级 __version__ 常量
-    3. 添加 __main__ try/except 块（RuntimeError + Exception 双分支）
-    4. 统一引号风格为单引号（与参考模板一致）
 """
 
 from collections.abc import Sequence
 from typing import ClassVar
 
-# ============================================================================
-# 本地模块导入
-# ============================================================================
 from backtest.common.factor_cli import factor_cli_main
 from backtest.common.layered_backtest_runner import LayerConfigBase
 from data_fetchers.factor_calculator import calculate_momentum_strength
-
-
-# ============================================================================
-# 模块级常量
-# ============================================================================
-
-__version__ = "1.1"
 
 
 class MomentumStrengthLayerConfig(LayerConfigBase):
@@ -64,19 +44,7 @@ class MomentumStrengthLayerConfig(LayerConfigBase):
 
 
 if __name__ == "__main__":
-    import sys
-
-    from backtest.common.logger_config import get_logger
-
-    _logger = get_logger(__name__)
-
-    try:
-        factor_cli_main(config_cls=MomentumStrengthLayerConfig, factor_calculator=calculate_momentum_strength)
-    except RuntimeError as e:
-        # 已知业务异常，使用 error()（不打印完整堆栈）
-        _logger.error(f"动量强度因子分层回测失败: {e}")
-        sys.exit(1)
-    except Exception:
-        # 未预期异常，使用 exception()（自动打印完整堆栈）
-        _logger.exception("未预期的错误")
-        sys.exit(1)
+    factor_cli_main(
+        config_cls=MomentumStrengthLayerConfig,
+        factor_calculator=calculate_momentum_strength,
+    )
