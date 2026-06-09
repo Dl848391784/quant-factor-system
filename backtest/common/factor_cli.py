@@ -252,38 +252,38 @@ def factor_cli_main(
         cumulative_return = stats.get("cumulative_return") or 0.0
         logger.info(f"Layer {layer_id} ({display_name}) 累计收益: {cumulative_return:.4f}")
 
-        # 多空组合收益（统一处理：键缺失/值为 None 时打 warning）
-        long_short = result.get("long_short") or {}
-        if long_short:
-            # 多空日均收益（规范定义字段）
-            if "long_short_return_daily" not in long_short:
-                logger.warning("多空组合缺少 long_short_return_daily 字段")
+    # 多空组合收益（统一处理：键缺失/值为 None 时打 warning）
+    long_short = result.get("long_short") or {}
+    if long_short:
+        # 多空日均收益（规范定义字段）
+        if "long_short_return_daily" not in long_short:
+            logger.warning("多空组合缺少 long_short_return_daily 字段")
+        else:
+            val = long_short["long_short_return_daily"]
+            if val is None:
+                logger.warning("多空组合 long_short_return_daily 为 None")
             else:
-                val = long_short["long_short_return_daily"]
-                if val is None:
-                    logger.warning("多空组合 long_short_return_daily 为 None")
-                else:
-                    logger.info(f"多空日均收益: {val * 100:.4f}%")
+                logger.info(f"多空日均收益: {val * 100:.4f}%")
 
-            # 多空夏普比率（规范定义字段）
-            if "long_short_sharpe" not in long_short:
-                logger.warning("多空组合缺少 long_short_sharpe 字段")
+        # 多空夏普比率（规范定义字段）
+        if "long_short_sharpe" not in long_short:
+            logger.warning("多空组合缺少 long_short_sharpe 字段")
+        else:
+            val = long_short["long_short_sharpe"]
+            if val is None:
+                logger.warning("多空组合 long_short_sharpe 为 None")
             else:
-                val = long_short["long_short_sharpe"]
-                if val is None:
-                    logger.warning("多空组合 long_short_sharpe 为 None")
-                else:
-                    logger.info(f"多空组合夏普比率: {val:.2f}")
+                logger.info(f"多空组合夏普比率: {val:.2f}")
 
-            # 数据覆盖率（规范定义字段）
-            if "coverage" not in long_short:
-                logger.warning("多空组合缺少 coverage 字段")
+        # 数据覆盖率（规范定义字段）
+        if "coverage" not in long_short:
+            logger.warning("多空组合缺少 coverage 字段")
+        else:
+            val = long_short["coverage"]
+            if val is None:
+                logger.warning("多空组合 coverage 为 None")
             else:
-                val = long_short["coverage"]
-                if val is None:
-                    logger.warning("多空组合 coverage 为 None")
-                else:
-                    logger.info(f"数据覆盖率: {val * 100:.1f}%")
+                logger.info(f"数据覆盖率: {val * 100:.1f}%")
     else:
         logger.warning("未生成多空组合指标")
 
