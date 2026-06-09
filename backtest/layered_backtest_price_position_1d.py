@@ -24,32 +24,29 @@ from data_fetchers.factor_calculator import calculate_price_position
 
 class PricePositionLayerConfig(LayerConfigBase):
     """价格位置因子分层配置
-    
+
     薄声明：因子元数据集中在 ClassVar，逻辑完全下沉基类。
-    
+
     特点：
     - price_position 需实时计算（factor_calculator）
+    - ic_source 显式声明：factor_name不含周期后缀，与数据列名一致，
+      IC文件路径需显式指定以确保定位准确
     - layer_names 纯标签（用于目录/列名），layer_descriptions 含中文（用于日志）
     """
 
-    factor_name: ClassVar[str] = 'price_position'
+    factor_name: ClassVar[str] = "price_position"
+    ic_source: ClassVar[str] = "factor_ic/result/ic_price_position_1d_analysis_result.json"
 
-    layer_names: ClassVar[Sequence[str]] = (
-        'lowest',
-        'lower',
-        'normal',
-        'higher',
-        'highest'
-    )
+    layer_names: ClassVar[Sequence[str]] = ("lowest", "lower", "normal", "higher", "highest")
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        '极低层(接近N日最低)',
-        '偏低层(低于中位)',
-        '正常层(在中位附近)',
-        '偏高层(高于中位)',
-        '极高层(接近N日最高)'
+        "极低层(接近N日最低)",
+        "偏低层(低于中位)",
+        "正常层(在中位附近)",
+        "偏高层(高于中位)",
+        "极高层(接近N日最高)",
     )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     factor_cli_main(PricePositionLayerConfig, calculate_price_position)
