@@ -83,7 +83,7 @@ class TestCoreFlow:
                 'n_assets': 100,
                 'date_range': {'start': '2026-05-26', 'end': '2026-05-27'},
                 'last_updated': '2026-05-27 19:00:00',
-                'version': '2.11'
+                'version': '2.18'
             },
             'data': [
                 {'date': '2026-05-27', 'asset': '600000', 'turnover_rate': 2.5}
@@ -134,14 +134,14 @@ class TestCoreFlow:
                 'n_assets': 100,
                 'date_range': {'start': '2026-05-26', 'end': '2026-05-27'},
                 'last_updated': '2026-05-27 19:00:00',
-                'version': '2.11'
+                'version': '2.18'
             },
             'data': []
         }
 
-        # Mock FACTOR_DATA_DIR
+        # Mock RESULT_DIR（遵循 PROJECT.md 路径规范：输出到 data_fetchers/result/）
         monkeypatch.setattr(
-            'data_fetchers.fetch_turnover.FACTOR_DATA_DIR',
+            'data_fetchers.fetch_turnover.RESULT_DIR',
             temp_cache_file.parent
         )
         monkeypatch.setattr(
@@ -155,7 +155,7 @@ class TestCoreFlow:
         assert temp_cache_file.exists()
         with gzip.open(temp_cache_file, 'rt', encoding='utf-8') as f:
             loaded = json.load(f)
-        assert loaded['meta']['version'] == '2.11'
+        assert loaded['meta']['version'] == '2.18'
 
 
 # ============================================================
@@ -380,7 +380,7 @@ class TestConstraintCompliance:
 
     def test_version_constant_exists(self):
         """TC005-1: 版本号提取为常量（MODULE.md 约束 #16）"""
-        assert _OUTPUT_VERSION == '2.11'
+        assert _OUTPUT_VERSION == '2.18'
 
     def test_st_prefixes_constant_exists(self):
         """TC005-2: ST前缀常量提取（MODULE.md 约束 #16）"""

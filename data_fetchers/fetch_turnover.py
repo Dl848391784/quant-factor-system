@@ -27,7 +27,7 @@
   - ST_PREFIXES 常量提取：模块级常量便于维护（遵循 MODULE.md 约束 16）
   - load_stock_list ST 检测修复：前缀匹配 + 逻辑修正（break + continue）
   - __all__ 导出列表：添加公共函数导出列表（遵循 MODULE.md 约束 53）
-  - __main__ logger 设置：logging.basicConfig + cli_logger（遵循 PROJECT.md 日志规范）
+  - __main__ logger 设置：logging.basicConfig + cli_logger → v2.18 已替换为 setup_logger
   - CLI 参数简化：--baostock 替代 --source 选择
   - 修复原因：代码bug + 规范补充（5项）
 - v2.3 (2026-05-27 11:30): 第四轮补充优化
@@ -113,6 +113,13 @@
   - 修复跳过逻辑：检查缓存中该股票的最新日期是否达到 T-1，而非只检查股票是否存在
   - 修复原因：代码bug（跳过逻辑只检查股票存在，导致换手率数据停更）
   - 根因：缓存中所有股票从 2026-05-27 后未更新，因跳过逻辑不检查日期
+- v2.18 (2026-06-10): 日志配置修复
+  - 替换 logging.basicConfig → setup_logger（遵循 PROJECT.md 第780-839行规范）
+  - 新增 _get_logger() 函数、_SCRIPT_NAME/_LOGS_DIR 常量
+  - 模块级 logger 改用 _get_logger()，日志写入 data_fetchers/logs/ 目录
+  - __main__ 入口改用 _get_logger() 替换 logging.getLogger('fetch_turnover.cli')
+  - 导入增加 get_module_logs_dir + setup_logger
+  - 修复原因：basicConfig 只输出到控制台，不写日志文件（违反 PROJECT.md 日志规范）
 
 作者: 云舟
 日期: 2026-04-08
@@ -137,7 +144,7 @@ import requests
 # ============================================================
 
 # 输出版本
-_OUTPUT_VERSION = '2.17'
+_OUTPUT_VERSION = '2.18'
 
 # 固定时间戳（遵循 MODULE.md 约束 17）
 _NOW = datetime.now()
@@ -155,9 +162,6 @@ _NOW_STR = _NOW.strftime('%Y-%m-%d %H:%M:%S')
 # 顺序说明：使用元组直接传给 startswith，元组内顺序不影响匹配结果
 ST_PREFIXES = ('*ST', 'ST', 'S')  # 使用元组，直接传给 startswith（遵循 MODULE.md 约束 89）
 
-# 模块级 logger（遵循 PROJECT.md 日志规范）
-logger = logging.getLogger(__name__)
-
 # 公共函数导出列表（遵循 MODULE.md 约束 53）
 __all__ = [
     'load_cache',
@@ -171,16 +175,33 @@ __all__ = [
 # 输出路径（遵循 MODULE.md 约束 #2：输出到 result 目录）
 # 使用公共模块路径函数，避免硬编码路径（遵循 MODULE.md 约束 62）
 try:
-    from data_fetchers.common.paths import get_module_result_dir, get_stock_list_file
+    from data_fetchers.common.logger_config import setup_logger
+    from data_fetchers.common.paths import get_module_logs_dir, get_module_result_dir, get_stock_list_file
 except ImportError:
     # __main__ 模块使用绝对导入（遵循 PROJECT.md 导入规范）
-    from common.paths import get_module_result_dir, get_stock_list_file
+    from common.logger_config import setup_logger
+    from common.paths import get_module_logs_dir, get_module_result_dir, get_stock_list_file
 
 RESULT_DIR = get_module_result_dir()
 CACHE_FILE = RESULT_DIR / 'turnover_rate_data.json.gz'
 
 # 股票列表路径（遵循 MODULE.md 约束 2：使用 result 目录）
 STOCK_LIST_FILE = get_stock_list_file()
+
+# ============================================================
+# 日志配置（遵循 PROJECT.md 第780-839行规范 + MODULE.md 日志目录规范）
+# ============================================================
+_SCRIPT_NAME = Path(__file__).stem
+_LOGS_DIR = get_module_logs_dir()
+
+
+def _get_logger() -> logging.Logger:
+    """获取日志记录器（复用公共模块 setup_logger）"""
+    return setup_logger(_SCRIPT_NAME, logs_dir=_LOGS_DIR)
+
+
+# 模块级 logger（写入 data_fetchers/logs/ 目录）
+logger = _get_logger()
 
 # ============================================================
 # 东财千股千评 API 版本
@@ -377,22 +398,8 @@ def load_stock_list() -> list[dict[str, Any]]:
         code = stock.get('code', '')
         name = stock.get('name', '')
 
-        # 创业板、科创板、北交所剔除
-        if code.startswith('30') or code.startswith('688') or code.startswith('8') or code.startswith('4'):
-            continue
-
-        # ST 类股票剔除（前缀匹配，使用模块级常量 ST_PREFIXES）
-        # 使用元组直接传给 startswith（遵循 MODULE.md 约束 89）
-        name_upper = name.upper()
-        if name_upper.startswith(ST_PREFIXES):
-            continue
-
-        # 退市股票剔除
-        if '退市' in name:
-            continue
-
-        # 主板股票判断
-        if code.startswith('60') or code.startswith('00'):
+        # 使用 is_main_board_stock 函数统一过滤逻辑（避免内联重复）
+        if is_main_board_stock(code, name):
             main_board_stocks.append(stock)
 
     return main_board_stocks
@@ -553,7 +560,6 @@ def fetch_turnover_rate_baostock(
         return len(failed_stocks) == 0
 
     finally:
-        _logger.info("")
         _logger.info("[清理] 登出 baostock...")
         bs.logout()
         _logger.info("  ✓ 已登出")
@@ -865,7 +871,12 @@ def merge_records(
         date_val = record.get('date')
         asset_val = record.get('asset')
         if date_val and asset_val:
-            key = (date_val, asset_val)
+            # 归一化 date 格式：东财返回 "2026-06-01 00:00:00"，baostock 返回 "2026-06-01"
+            # 与 get_stock_latest_dates 的处理保持一致
+            normalized_date = str(date_val).split()[0]
+            key = (normalized_date, asset_val)
+            # 同时归一化 record 中的 date 字段，避免 unique_dates/date_range 混存两种格式
+            record = {**record, 'date': normalized_date}
             record_map[key] = record
 
     merged_records = list(record_map.values())
@@ -973,13 +984,8 @@ def main(
 
 
 if __name__ == '__main__':
-    # CLI 入口 logger 设置（遵循 PROJECT.md 日志规范）
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s %(levelname)s %(name)s %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    cli_logger = logging.getLogger('fetch_turnover.cli')
+    # CLI 入口 logger 设置（使用 setup_logger 写入 data_fetchers/logs/ 目录）
+    cli_logger = _get_logger()
 
     parser = argparse.ArgumentParser(description='换手率数据拉取')
     parser.add_argument('--baostock', action='store_true', help='使用 baostock 数据源')

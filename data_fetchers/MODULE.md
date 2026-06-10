@@ -1056,7 +1056,13 @@ factor_generator.py 的因子计算逻辑从 IC 脚本迁移:
 | v1.2 | 2026-05-27 20:00 | 第三轮优化:内部函数 `_calculate_ewm_with_initial` docstring 补全、新增私有常量 (volume_ratio_window、forward_return_shift)、消除硬编码默认值 |
 | v1.3 | 2026-05-27 21:00 | 第四轮优化:提取列名常量 (6 输入 + 3 输出)、提取魔法数字常量 (4 个基准值 + 2 个阈值)、消除硬编码字符串和魔法数字 |
 
+### fetch_turnover.py 版本
+
+| 版本 | 时间 | 更新内容 |
+|-----|------|---------|
+| v2.18 | 2026-06-10 | 日志配置修复:替换 logging.basicConfig → setup_logger;新增 _get_logger()、_SCRIPT_NAME/_LOGS_DIR 常量;模块级 logger 写入 data_fetchers/logs/ 目录 |
+
 ---
 
-*最后更新: 2026-06-03*
+*最后更新: 2026-06-10*
 
