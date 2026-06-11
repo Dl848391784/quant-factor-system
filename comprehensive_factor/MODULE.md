@@ -1,6 +1,6 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.13
+> 版本: v2.20
 > 最后更新: 2026-06-10
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
@@ -190,7 +190,8 @@ Step 7: 股票选股 (stock_selector.py)
       "rank": 1,
       "code": "003004",
       "composite_value": -3.1497,
-      "factor_values": {"tail_price_position": 0.85, "turnover_surge": 1.2}
+      "factor_values": {"tail_price_position": 0.85, "turnover_surge": 1.2},
+      "factor_values_std": {"tail_price_position": -1.85, "turnover_surge": -2.20, "overnight_ret": -3.00}  // v1.3b: 标准化 z-score（Winsorize ±3σ），报告应显示此值而非原始值。v2.15: 正向因子(如 overnight_ret)的 z-score 已取反统一负向语义，报告展示时因子名加*标记+表头说明
     },
     ...
   ],
@@ -1819,6 +1820,14 @@ for factor_name, direction in direction_map.items():
 - `pytest comprehensive_factor/test_cases/test_direction_unify.py`
 - 检查 JSON 输出 `config.direction_map` 和 `config.flipped_factors` 存在且非空
 - 检查 stock_selector 使用 `direction_map` 执行方向统一化
+- 检查报告展示：取反因子的 z-score 列名加 `*` 标记（如 `overnight_ret*=-3.00`），表头有 `* = 已取反统一负向语义` 说明
+
+**展示语义说明** (v2.15):
+
+`factor_values_std` 中正向因子的 z-score 已取反，非原始 z-score。例如：
+- overnight_ret 原始 z-score=3.0（隔夜收益远高于均值）→ 取反后=-3.00（统一负向语义）
+- 报告展示为 `overnight_ret*=-3.00`，`*` 标记提醒读者这不是原始 z-score
+- 未取反因子（如 `amplitude=-1.97`）无 `*` 标记，就是原始 z-score
 
 ---
 
@@ -1827,6 +1836,11 @@ for factor_name, direction in direction_map.items():
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
 | v2.13 | 2026-06-10 | composite_runner.py v2.13: 新增 Step 3.5 方向统一化（正向因子 ic_mean>0 取反 -*_std 统一负向语义）；M56 规则 + N 类规则索引；输出结构模板补充 direction_map/flipped_factors；流程图更新 |
+| v2.17 | 2026-06-11 | weight_engine.py v1.18c: Pitfall #46 修复——_last_day_weights NaN→0% 问题（增量因子原则：不能因覆盖率低排除）；提取逻辑复用 calculate() fillna(1/n) 等权回退，4个tail系因子从0%→8.33%；composite_runner 同步更新 |
+| v2.18 | 2026-06-11 | generate_factor_summary_report.py v2.15: 正向因子取反后 z-score 加 `*` 标记 + 表头说明，消除解读歧义；M56 补充展示语义说明；conftest.py 测试期间抑制 console 日志 |
+| v2.19 | 2026-06-11 | generate_factor_summary_report.py v2.16: 权重展示修复——最优方法为 Rolling ICIR 时展示真实 last_day_weights 而非静态 ICIR 权重；权重来源说明动态化；tail_price_position 从18.4%(静态)→8.3%(Rolling最新日) |
+| v2.20 | 2026-06-11 | weight_engine.py v1.19: Rolling ICIR T-1 NaN 权重回退策略修复——用 IC 序列最后有效值填充 T-1 NaN，消除 momentum_strength 等因子等权膨胀 bug；generate_factor_summary_report.py v2.18: load_composite_results 添加 weight_meta 字段传递（修复报告权重=0.0%显示bug） |
+| v2.21 | 2026-06-11 | generate_factor_summary_report.py v2.17: 评分说明重构——展示所有4种方法的9维度完整评分明细而非只对比IC vs ICIR；最优方法(Rolling ICIR)换手率低分给出解释 |
 | v2.16 | 2026-06-11 | factor_loader.py v2.16: standardize_factors 新增 Winsorize 截断（±3σ），防止 momentum_strength 等比率类因子极端值导致 z-score 爆炸 |
 | v2.8 | 2026-06-10 | weight_engine.py v1.14: _apply_weights NaN 传播 Bug 修复（fillna(0)+divide+sum 替代 divide+sum(skipna=False)），让增量采集因子正常参与综合因子计算；M29 How/Don't 同步修正 |
 | v2.7 | 2026-06-04 | logger_config.py v2.0: 重写对齐 factor_ic 实现，自动文件输出；M4 扩展日志配置模块职责规范 |
@@ -1859,5 +1873,5 @@ for factor_name, direction in direction_map.items():
 
 ---
 
-*最后更新: 2026-06-04*
+*最后更新: 2026-06-11*
 

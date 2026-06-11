@@ -37,9 +37,16 @@
     v2.8: 2026-06-05 修复高相关剔除显示精度（.2f → .3f），添加评分逻辑说明
     v2.9: 2026-06-05 修复评分说明字段名错误（normalized_scores → metric_scores）
     v2.10: 2026-06-05 Rolling ICIR加权展示最后一日具体权重
+    v2.11: 2026-06-11 修复综合因子权重数据源：从 _last_day_weights 读取真实权重而非 get_weights() 等权回退
+    v2.12: 2026-06-11 增加覆盖率列
+    v2.13: 2026-06-11 区分"缺失(NaN)"和"真实≈0"（tail_price_volume_intensity 原始值=0 是真实数据而非缺失）
+    v2.14: 2026-06-11 因子值详情改为显示标准化值(z-score)而非原始值——原始值极端误导（如 momentum_strength=-9.08→z=-2.65）
+    v2.15: 2026-06-11 正向因子取反后z-score加*标记+表头说明，消除解读歧义（overnight_ret=-3.00是取反后值≠原始z-score）
+    v2.16: 2026-06-11 权重展示修复——最优方法为Rolling ICIR时展示真实last_day_weights而非静态ICIR权重；tail_price_position从18.4%(静态)→8.3%(Rolling最新日)；权重来源说明动态化
+    v2.17: 2026-06-11 评分说明重构——展示所有4种方法的9维度完整评分明细而非只对比IC vs ICIR；最优方法(Rolling ICIR)换手率低分给出解释
 """
 
-__version__ = "2.10"
+__version__ = "2.17"
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -632,10 +639,20 @@ def load_backtest_results(logger: logging.Logger) -> list[dict]:
     for file in backtest_dir.glob("*_layered_backtest.json"):
         data = load_json_file(file, logger)
         if data:
-            factor_name = file.stem.replace("_layered_backtest", "")
-            # v2.6: 问题7修复 - 统一因子名，移除末尾 _1d 后缀
-            if factor_name.endswith("_1d"):
-                factor_name = factor_name[:-3]
+            # v2.11: 修复 past_return_1d 被错误剥离为 past_return 的问题
+            # 根因：从文件 stem 剥离 _1d 会误删因子名中的 _1d（如 past_return_1d）
+            # 修复：优先从 JSON 数据读取 factor_name，回退时才从文件 stem 提取
+            # 注意：部分回测文件 factor_name 在 meta 子对象中（如 past_return_1d_layered_backtest.json）
+            factor_name_from_json = data.get("factor_name", "") or data.get("meta", {}).get("factor_name", "")
+            if factor_name_from_json:
+                # JSON 中的 factor_name 已是正确因子名（如 "past_return_1d"），无需剥离
+                factor_name = factor_name_from_json
+            else:
+                # 回退：从文件 stem 提取（兼容无 factor_name 字段的旧文件）
+                factor_name = file.stem.replace("_layered_backtest", "")
+                # 旧文件中 stem 可能包含数据周期后缀 _1d，需剥离
+                if factor_name.endswith("_1d"):
+                    factor_name = factor_name[:-3]
             long_short = data.get("long_short", {})
             monotonicity = data.get("monotonicity", {})
 
@@ -844,7 +861,10 @@ def load_composite_results(logger: logging.Logger) -> list[dict]:
                     "weight_str": weight_str,
                     "factor_list": meta.get("factor_list", []),
                     "weights": weights,
+                    "weight_meta": meta.get("weight_meta", {}),  # v2.18: Rolling ICIR 动态权重元信息
                     "selection_result": meta.get("selection_result"),  # v1.7: 筛选详细结果
+                    "direction_map": data.get("config", {}).get("direction_map", {}),  # v2.12: 方向映射
+                    "flipped_factors": data.get("config", {}).get("flipped_factors", []),  # v2.12: 取反因子
                 }
             )
             file_count += 1
@@ -1158,7 +1178,11 @@ def generate_correlation_section(
 
 
 def get_factor_selection_info(
-    composite_results: list[dict], ic_results: list[dict], backtest_results: list[dict], logger: logging.Logger
+    composite_results: list[dict],
+    ic_results: list[dict],
+    backtest_results: list[dict],
+    logger: logging.Logger,
+    best_weight_method: str = "icir_weight",
 ) -> str:
     """获取因子筛选信息
 
@@ -1184,28 +1208,78 @@ def get_factor_selection_info(
     selected_factors = []
     weights = {}
     selection_result = None  # v1.7: 筛选详细结果
+    weight_source_note = ""  # v2.16: 权重来源说明
 
-    for item in composite_results:
-        if item["weight_method"] == "icir_weight":
-            selected_factors = item.get("factor_list", [])
-            weights = item.get("weights", {})
-            # v1.7: 读取 selection_result（composite_runner.py v2.9 新增）
-            selection_result = item.get("selection_result")
+    # v2.16: 根据最优权重方法选择权重数据源
+    #   之前硬编码取 icir_weight 的静态权重 → Rolling ICIR 为最优时展示静态权重 → 严重误导
+    #   例：tail_price_position ICIR=0.80 → 静态权重18.4%，但 Rolling ICIR 最新日=8.3%（短样本NaN回退1/n）
+    #   修复：优先取最优方法的权重，Rolling ICIR 取 last_day_weights，其他方法取 meta.weights
+    best_method_item = next(
+        (item for item in composite_results if item.get("weight_method") == best_weight_method), None
+    )
 
-            factor_info = []
-            for f in selected_factors:
-                # v2.5: weights 字典键是因子列名（如 volume_ratio_5），需先转换
-                factor_col = FACTOR_NAME_TO_COL_MAP.get(f, f)
-                weight = weights.get(factor_col, 0)
-                ic_item = next((r for r in ic_results if r["factor_name"] == f), None)
-                if ic_item:
-                    factor_info.append(f"{f}(ICIR={ic_item['icir']:.2f},权重={weight * 100:.1f}%)")
+    if best_method_item:
+        # 从最优方法获取权重和因子列表
+        selection_result_item = best_method_item.get("selection_result")
+        if selection_result_item and selection_result_item.get("selected"):
+            selected_factors = selection_result_item["selected"]
+        else:
+            selected_factors = best_method_item.get("factor_list", [])
+
+        if best_weight_method == "rolling_icir_weight":
+            # v2.16: Rolling ICIR 使用 last_day_weights（真实最后一日动态权重）
+            weight_meta = best_method_item.get("weight_meta", {})
+            last_day_weights = weight_meta.get("last_day_weights", {})
+            if last_day_weights:
+                weights = last_day_weights
+                rolling_window = weight_meta.get("window", 60)
+                weight_source_note = f"权重来自Rolling ICIR加权最新日({rolling_window}日滚动窗口)"
+            else:
+                weights = best_method_item.get("weights", {})
+                weight_source_note = "权重来自Rolling ICIR加权(动态权重未保存,回退等权)"
+        else:
+            weights = best_method_item.get("weights", {})
+            weight_source_note = f"权重来自{get_weight_method_display(best_weight_method)}"
+
+        selection_result = selection_result_item
+
+        factor_info = []
+        for f in selected_factors:
+            factor_col = FACTOR_NAME_TO_COL_MAP.get(f, f)
+            weight = weights.get(factor_col, 0)
+            ic_item = next((r for r in ic_results if r["factor_name"] == f), None)
+            if ic_item:
+                factor_info.append(f"{f}(ICIR={ic_item['icir']:.2f},权重={weight * 100:.1f}%)")
+            else:
+                factor_info.append(f"{f}(权重={weight * 100:.1f}%)")
+
+        lines.append(f"  - 选中因子: {', '.join(factor_info)}")
+        lines.append(f"  - 注：{weight_source_note}")  # v2.16: 动态权重来源说明
+    else:
+        # 回退：最优方法无结果时仍取 icir_weight（兼容旧版）
+        for item in composite_results:
+            if item["weight_method"] == "icir_weight":
+                selection_result_item = item.get("selection_result")
+                if selection_result_item and selection_result_item.get("selected"):
+                    selected_factors = selection_result_item["selected"]
                 else:
-                    factor_info.append(f"{f}(权重={weight * 100:.1f}%)")
+                    selected_factors = item.get("factor_list", [])
+                weights = item.get("weights", {})
+                selection_result = selection_result_item
 
-            lines.append(f"  - 选中因子: {', '.join(factor_info)}")
-            lines.append("  - 注：权重来自ICIR加权方法")  # v2.6: 问题1修复 - 说明权重来源
-            break
+                factor_info = []
+                for f in selected_factors:
+                    factor_col = FACTOR_NAME_TO_COL_MAP.get(f, f)
+                    weight = weights.get(factor_col, 0)
+                    ic_item = next((r for r in ic_results if r["factor_name"] == f), None)
+                    if ic_item:
+                        factor_info.append(f"{f}(ICIR={ic_item['icir']:.2f},权重={weight * 100:.1f}%)")
+                    else:
+                        factor_info.append(f"{f}(权重={weight * 100:.1f}%)")
+
+                lines.append(f"  - 选中因子: {', '.join(factor_info)}")
+                lines.append("  - 注：权重来自ICIR加权方法(最优方法结果缺失,回退)")
+                break
 
     # v1.8: 显示筛选阈值
     if selection_result:
@@ -1218,33 +1292,31 @@ def get_factor_selection_info(
     all_factors = [r["factor_name"] for r in ic_results]
     excluded_factors = [f for f in all_factors if f not in selected_factors]
 
+    # 构建剔除原因字典（从 selection_result 获取真实原因）
+    exclude_reasons: dict[str, str] = {}
+
+    if selection_result:
+        # 从 invalid 字段获取无效因子原因
+        invalid = selection_result.get("invalid", {})
+        for factor_name, reasons in invalid.items():
+            exclude_reasons[factor_name] = "; ".join(reasons) if isinstance(reasons, list) else str(reasons)
+
+        # 从 high_corr_dropped 字段获取高相关剔除原因
+        high_corr_dropped = selection_result.get("high_corr_dropped", {})
+        for factor_name, reason in high_corr_dropped.items():
+            exclude_reasons[factor_name] = str(reason)
+
+        logger.debug("从 selection_result 读取真实筛选原因: %d 条", len(exclude_reasons))
+
     if excluded_factors:
         excluded_info = []
-
-        # 构建剔除原因字典（从 selection_result 获取真实原因）
-        exclude_reasons: dict[str, str] = {}
-
-        if selection_result:
-            # 从 invalid 字段获取无效因子原因
-            invalid = selection_result.get("invalid", {})
-            for factor_name, reasons in invalid.items():
-                exclude_reasons[factor_name] = "; ".join(reasons) if isinstance(reasons, list) else str(reasons)
-
-            # 从 high_corr_dropped 字段获取高相关剔除原因
-            high_corr_dropped = selection_result.get("high_corr_dropped", {})
-            for factor_name, reason in high_corr_dropped.items():
-                exclude_reasons[factor_name] = str(reason)
-
-            logger.debug("从 selection_result 读取真实筛选原因: %d 条", len(exclude_reasons))
 
         # 对每个剔除因子查找原因
         for f in excluded_factors:
             if f in exclude_reasons:
-                # 使用真实原因
                 reason = exclude_reasons[f]
                 logger.debug("因子 %s 剔除原因: %s", f, reason)
             else:
-                # 回退推断逻辑（兼容旧版本输出文件）
                 ic_item = next((r for r in ic_results if r["factor_name"] == f), None)
                 bt_item = next((r for r in backtest_results if r["factor_name"] == f), None)
 
@@ -1261,6 +1333,32 @@ def get_factor_selection_info(
             excluded_info.append(f"{f}({reason})")
 
         lines.append(f"  - 剔除因子: {', '.join(excluded_info)}")
+
+    # v2.12: 标注回测强劲但被剔除的因子（豁免规则需重跑pipeline生效）
+    # 检查是否有回测表现优秀但因 ic_mean/icir 不足被剔除的因子
+    strong_excluded = []
+    for f in excluded_factors:
+        bt_item = next((r for r in backtest_results if r["factor_name"] == f), None)
+        ic_item = next((r for r in ic_results if r["factor_name"] == f), None)
+        if bt_item and ic_item:
+            sharpe = bt_item.get("long_short_sharpe", 0)
+            mono = bt_item.get("monotonicity_correlation", 0)
+            ic_mean = ic_item.get("ic_mean", 0)
+            # 豁免条件：|夏普|>1.5 + |单调性|>0.5 + |ic_mean|>=0.005
+            if abs(sharpe) > 1.5 and abs(mono) > 0.5 and abs(ic_mean) >= 0.005:
+                reason = exclude_reasons.get(f, "")
+                if "|ic_mean|" in reason or "|icir|" in reason:
+                    strong_excluded.append(
+                        f"{f}(夏普={sharpe:.2f}, 单调性={mono:.2f} — 回测强劲因子豁免规则应生效，需重跑pipeline)"
+                    )
+
+    if strong_excluded:
+        lines.append("")
+        lines.append("  ⚠ 回测强劲因子被剔除说明：")
+        for info in strong_excluded:
+            lines.append(f"    - {info}")
+        lines.append("    豁免规则：|夏普|>1.5 + |单调性|>0.5 + |ic_mean|>=0.005 → 豁免 ic_mean/icir 阈值检查")
+        lines.append("    当前结果未生效可能因 pipeline 运行时使用了旧版筛选代码，重跑后豁免因子应入选")
 
     lines.append("-" * 70)
     lines.append(f"筛选后因子列表: {selected_factors}")
@@ -1288,7 +1386,7 @@ def merge_factor_data(ic_results: list[dict], backtest_results: list[dict]) -> l
     return merged
 
 
-def _generate_ic_section(ic_results: list[dict]) -> list[str]:
+def _generate_ic_section(ic_results: list[dict], backtest_results: list[dict] | None = None) -> list[str]:
     """生成单因子 IC 数据汇总部分
 
     v2.0 (2026-06-02): 新增因子定义列展示
@@ -1331,16 +1429,39 @@ def _generate_ic_section(ic_results: list[dict]) -> list[str]:
     # v2.6: 问题5修复 - 异常数据说明
     lines.append("")
     lines.append("【异常数据说明】")
+
+    # v2.11: 短样本因子警告——有效天数 < 30 的因子年化收益不可信
+    MIN_RELIABLE_DAYS = 30
+    short_sample_factors = [r for r in ic_results if r["valid_days"] < MIN_RELIABLE_DAYS]
+    if short_sample_factors:
+        lines.append(f"⚠ 短样本因子警告（有效天数<{MIN_RELIABLE_DAYS}天，年化收益不可信）:")
+        for item in short_sample_factors:
+            lines.append(
+                f"  - {item['factor_name']}: 有效天数={item['valid_days']}天，年化收益由极少交易日推算，极不稳定"
+            )
+        lines.append("  说明：年化收益 = (1+总收益)^(252/N) - 1，N很小时收益率被极端放大")
+
     # 检查 tail_volume_shrink 有效天数异常
     tvs_item = next((r for r in ic_results if r["factor_name"] == "tail_volume_shrink"), None)
     if tvs_item and tvs_item["valid_days"] < 14:
         lines.append(f"tail_volume_shrink 有效天数={tvs_item['valid_days']}天（其他尾盘因子均为14天），数据可能缺失")
-    # v2.6: 问题6修复 - overnight_ret 方向异常说明
+
+    # v2.11: overnight_ret 方向异常深度分析（问题3修复）
     or_item = next((r for r in ic_results if r["factor_name"] == "overnight_ret"), None)
     if or_item and or_item["ic_mean"] > 0:
-        other_ic_means = [r["ic_mean"] for r in ic_results if r["factor_name"] != "overnight_ret" and r["ic_mean"] is not None]
+        other_ic_means = [
+            r["ic_mean"] for r in ic_results if r["factor_name"] != "overnight_ret" and r["ic_mean"] is not None
+        ]
         if other_ic_means and all(ic < 0 for ic in other_ic_means[:5]):  # 检查前5个因子IC方向
+            # 查找 overnight_ret 的回测数据
+            bt_or = next((b for b in (backtest_results or []) if b["factor_name"] == "overnight_ret"), None)
+            or_sharpe = bt_or["long_short_sharpe"] if bt_or else "N/A"
+            or_mono = bt_or["monotonicity_correlation"] if bt_or else "N/A"
             lines.append(f"overnight_ret IC均值={or_item['ic_mean']:.4f}为正（其他因子均为负），方向异常")
+            lines.append("  深度分析：IC方向为正表示隔夜收益大的股票次日收益也大（正向预测），")
+            lines.append("           与多数因子（IC为负=因子值大的股票次日收益小）方向相反。")
+            lines.append(f"           回测夏普={or_sharpe}, 单调性={or_mono}——可能是有效的反向因子。")
+            lines.append("           反向因子在综合因子中需取反方向使用（做空因子值大的股票做多因子值小的股票）。")
 
     return lines
 
@@ -1410,6 +1531,21 @@ def _generate_composite_section(composite_results: list[dict]) -> list[str]:
 
     lines.append("-" * 70)
 
+    # v2.12: 方向处理说明——overnight_ret 取反使用
+    # 从第一个 composite_result 的 config 中读取 flipped_factors
+    flipped_factors = []
+    if composite_results:
+        first_item = composite_results[0]
+        flipped_factors = first_item.get("flipped_factors", [])
+
+    if flipped_factors:
+        lines.append("")
+        lines.append("【方向处理说明】")
+        lines.append(f"  正向因子（IC均值>0）已取反标准化值，统一为负向语义：{flipped_factors}")
+        for f in flipped_factors:
+            lines.append(f"  - {f}: IC均值>0(正向因子)，综合因子计算时标准化值取反，做空因子值大的股票")
+        lines.append("  说明：综合因子方向=negative（反向），取反后的正向因子与负向因子方向一致")
+
     return lines
 
 
@@ -1443,34 +1579,89 @@ def _generate_weight_selection_section(weight_result: dict | None) -> list[str]:
 
     lines.append(f"最优权重方法: {get_weight_method_display(best_method)}")
     lines.append(f"综合得分: {format_float(best_score, 4)}")
-    lines.append(f"计算日期: {weight_result.get('meta', {}).get('created_at', 'N/A')[:10]}")  # v2.6: 问题3修复 - 明确为计算日期
+    lines.append(
+        f"计算日期: {weight_result.get('meta', {}).get('created_at', 'N/A')[:10]}"
+    )  # v2.6: 问题3修复 - 明确为计算日期
 
-    # v2.7: 问题2修复 - 添加评分维度说明
+    # v2.7→v2.17: 评分说明重构——展示所有方法的完整评分明细，而非只对比IC vs ICIR
+    #   旧逻辑：最优方法为Rolling ICIR时，评分说明只对比IC和ICIR的换手率 → 逻辑跳跃
+    #   新逻辑：展示所有方法的各维度归一化得分表，让读者一目了然
     ranking = weight_result.get("ranking", [])
-    if ranking:
-        # 检查是否存在 ICIR加权优于IC加权但选了IC加权的情况
-        ic_rank = next((r for r in ranking if r["method"] == "ic_weight"), None)
-        icir_rank = next((r for r in ranking if r["method"] == "icir_weight"), None)
-        if ic_rank and icir_rank:
-            # 比较 ICIR加权与 IC加权的核心指标
-            # v2.9: 修复字段名错误 normalized_scores → metric_scores
-            ic_return = ic_rank.get("metric_scores", {}).get("long_short_return_annual", 0)
-            icir_return = icir_rank.get("metric_scores", {}).get("long_short_return_annual", 0)
-            ic_sharpe = ic_rank.get("metric_scores", {}).get("long_short_sharpe", 0)
-            icir_sharpe = icir_rank.get("metric_scores", {}).get("long_short_sharpe", 0)
-            ic_monotonicity = ic_rank.get("metric_scores", {}).get("monotonicity_abs", 0)
-            icir_monotonicity = icir_rank.get("metric_scores", {}).get("monotonicity_abs", 0)
+    metric_configs = weight_result.get("metric_configs", {})
 
-            # 如果 ICIR加权核心指标更好但排名低于 IC加权，说明换手率拖累
-            if (icir_return >= ic_return and icir_sharpe >= ic_sharpe and icir_monotonicity >= ic_monotonicity):
-                ic_turnover_long = ic_rank.get("metric_scores", {}).get("turnover_long_avg", 0)
-                icir_turnover_long = icir_rank.get("metric_scores", {}).get("turnover_long_avg", 0)
+    if ranking and metric_configs:
+        lines.append("")
+        lines.append("【评分明细】")
+        lines.append("各方法各维度归一化得分（Min-Max归一化，逆向指标已反转）")
+
+        # 构建维度展示名称映射
+        metric_display_names = {
+            "long_short_return_annual": "多空年化收益",
+            "long_short_sharpe": "多空夏普比率",
+            "long_return_annual": "多头年化收益",
+            "long_sharpe": "多头夏普比率",
+            "monotonicity_abs": "单调性",
+            "long_short_net_daily": "成本后日收益",
+            "turnover_long_avg": "多头换手率(逆向)",
+            "turnover_short_avg": "空头换手率(逆向)",
+            "max_drawdown": "最大回撤(逆向)",
+        }
+
+        # 确定展示维度（按 metric_configs 的顺序）
+        display_metrics = list(metric_configs.keys())
+        # v2.17: 对每个维度添加方向说明
+        metric_with_direction = []
+        for m in display_metrics:
+            direction = metric_configs[m].get("direction", "higher_better")
+            display_name = metric_display_names.get(m, m)
+            if direction == "lower_better":
+                metric_with_direction.append(f"{display_name}↓")
+            else:
+                metric_with_direction.append(f"{display_name}")
+
+        # 每个方法生成一行评分明细
+        for item in sorted(ranking, key=lambda x: x.get("composite_score", 0), reverse=True):
+            method_display = get_weight_method_display(item.get("method", "N/A"))
+            composite_score = item.get("composite_score", 0)
+            metric_scores = item.get("metric_scores", {})
+            is_best = item.get("method") == best_method
+
+            # 格式化各维度得分
+            score_parts = []
+            for m in display_metrics:
+                score = metric_scores.get(m, 0)
+                score_parts.append(f"{score:.2f}")
+
+            best_marker = " ★最优" if is_best else ""
+            lines.append(f"  {method_display:<20} 综合={composite_score:.4f}{best_marker}")
+            # v2.17: 展示各维度得分明细
+            for i, m in enumerate(display_metrics):
+                score = metric_scores.get(m, 0)
+                raw = item.get("raw_values", {}).get(m, None)
+                direction = metric_configs[m].get("direction", "higher_better")
+                display_name = metric_display_names.get(m, m)
+                raw_str = f"(原始值={raw:.4f})" if raw is not None else ""
+                best_star = " ★" if is_best and score >= 0.9 else ""
+                lines.append(f"    - {display_name}: {score:.3f} {raw_str}{best_star}")
+
+        # v2.17: 最优方法突出说明
+        best_rank = next((r for r in ranking if r.get("method") == best_method), None)
+        if best_rank and best_method == "rolling_icir_weight":
+            best_ms = best_rank.get("metric_scores", {})
+            best_rv = best_rank.get("raw_values", {})
+            # Rolling ICIR 换手率得分较低时给出说明
+            turnover_long = best_ms.get("turnover_long_avg", 0)
+            turnover_short = best_ms.get("turnover_short_avg", 0)
+            if turnover_long < 0.5 or turnover_short < 0.5:
                 lines.append("")
-                lines.append("【评分说明】")
-                lines.append(f"ICIR加权在收益/夏普/单调性指标优于IC加权，但换手率逆向指标归一化得分较低")
-                lines.append(f"  - IC加权换手率得分: {ic_turnover_long:.3f}")
-                lines.append(f"  - ICIR加权换手率得分: {icir_turnover_long:.3f}")
-                lines.append(f"  - 注：换手率越高越差（逆向指标），归一化后得分越低")
+                lines.append("  ★ Rolling ICIR加权换手率得分较低但综合得分最高：")
+                lines.append(
+                    f"    收益/夏普/单调性/成本后收益得分接近1.0，换手率得分({turnover_long:.2f}/{turnover_short:.2f})虽低"
+                )
+                lines.append("    但9维度等权加权后综合得分仍最高，换手率惩罚不足以抵消其他维度优势")
+                lines.append(
+                    f"    原始多头换手率={best_rv.get('turnover_long_avg', 0):.4f}, 空头换手率={best_rv.get('turnover_short_avg', 0):.4f}"
+                )
 
     lines.append("")
 
@@ -1525,41 +1716,104 @@ def _generate_stock_selection_section(stock_result: dict | None) -> list[str]:
     top_stocks = stock_result.get("top_stocks", [])
 
     # 元信息展示
-    lines.append(f"选股日期: {meta.get('selection_date', 'N/A')}（使用T-1数据）")  # v2.6: 问题3修复 - 明确为使用数据的日期
+    lines.append(
+        f"选股日期: {meta.get('selection_date', 'N/A')}（使用T-1数据）"
+    )  # v2.6: 问题3修复 - 明确为使用数据的日期
     lines.append(f"最优权重方法: {get_weight_method_display(meta.get('weight_method', 'N/A'))}")
     lines.append(f"权重综合得分: {format_float(meta.get('composite_score', 0), 4)}")
     lines.append(
         f"因子方向: {meta.get('factor_direction', 'N/A')}（{'反向' if meta.get('factor_direction') == 'negative' else '正向'}）"
     )
     lines.append(f"选出股票数: {meta.get('top_n', 0)} 只（共 {meta.get('stocks_on_date', 0)} 只股票）")
+
+    # v2.12: 方向处理说明——展示取反因子
+    flipped_factors = meta.get("flipped_factors", [])
+    if flipped_factors:
+        lines.append("")
+        lines.append("【方向处理说明】")
+        lines.append(f"  正向因子已取反标准化值，统一为负向语义：{flipped_factors}")
+        for f in flipped_factors:
+            lines.append(
+                f"  - {f}: IC均值>0(正向因子)，综合因子计算时标准化值取反（做空因子值大的股票做多因子值小的股票）"
+            )
+        lines.append("  说明：选股方向=negative（反向），因子值越小 → 综合因子越小 → 被选为Top股票")
+
     lines.append("")
 
     # Top N 股票表格
     if top_stocks:
         lines.append(f"【Top {len(top_stocks)} 股票】")
-        lines.append(f"{'排名':>4} {'股票代码':<10} {'综合因子值':>12} {'因子值详情':<40}")
+        # v2.12: 增加覆盖率列
+        # v2.14: 因子值详情改为显示标准化值(z-score)，而非原始值
+        # v2.15: 正向因子取反后z-score加*标记，消除解读歧义
+        header_note = "  * = 已取反统一负向语义" if flipped_factors else ""
+        lines.append(
+            f"{'排名':>4} {'股票代码':<10} {'综合因子值':>12} {'覆盖率':>6} {'因子标准化值(z-score)':<40}{header_note}"
+        )
         lines.append("-" * 70)
 
         for item in top_stocks:
             rank = item.get("rank", 0)
             code = item.get("code", "N/A")
             composite_value = item.get("composite_value", 0)
+            weight_coverage = item.get("weight_coverage", 1.0)  # v2.12: 因子覆盖率
 
             # 因子值详情（全部显示）
+            # v2.13: 区分"缺失(NaN)"和"真实≈0"——tail_price_volume_intensity等因子原始值为0是真实数据而非缺失
+            # v2.14: 显示标准化值（z-score）而非原始值——原始值极端误导（如 momentum_strength=-9.08→z=-2.65）
+            #   综合因子排名由标准化值驱动，原始值仅作参考
             factor_values = item.get("factor_values", {})
+            factor_values_std = item.get("factor_values_std", {})  # v1.3b: 标准化值
             factor_str = ""
-            if factor_values:
+            if factor_values_std:
+                # 优先显示标准化值（z-score），更准确反映排名驱动因素
+                parts = []
+                # v2.15: flipped_factors 集合用于标记取反因子
+                flipped_set = set(flipped_factors) if flipped_factors else set()
+                for k, v_std in factor_values_std.items():
+                    factor_name = COL_TO_FACTOR_NAME_MAP.get(k, k)
+                    # v2.15: 取反因子名后加*标记，消除解读歧义（z-score已取反≠原始z-score）
+                    display_name = f"{factor_name}*" if factor_name in flipped_set else factor_name
+                    v_raw = factor_values.get(k)
+                    if v_std is None:
+                        # 缺失(NaN): 原始数据无值，综合因子计算时被 fillna(0) 填充（z=0）
+                        # 区分"缺失(NaN)"和"真实≈0"（原始值确实为0）
+                        if v_raw is None:
+                            parts.append(f"{display_name}=缺失(NaN)")
+                        elif abs(v_raw) < 0.001:
+                            parts.append(f"{display_name}=≈0(真实)")
+                        else:
+                            parts.append(f"{display_name}=缺失(NaN)")
+                    elif abs(v_std) < 0.001:
+                        # z≈0: 标准化后接近均值（=无信号），但原始值可能很大或很小
+                        # 区分：原始值也≈0（真实≈0） vs 原始值大但标准化后≈0（均值附近）
+                        if v_raw is not None and abs(v_raw) < 0.001:
+                            parts.append(f"{display_name}=≈0(真实)")
+                        else:
+                            parts.append(f"{display_name}=0.00")
+                    else:
+                        # 正常标准化值（z-score），保留2位小数
+                        # Winsorize ±3σ 截断后范围 [-3.00, 3.00]
+                        # v2.15: 取反因子用 display_name 带*标记
+                        parts.append(f"{display_name}={format_float(v_std, 2)}")
+                factor_str = ", ".join(parts)  # 显示全部因子标准化值
+            elif factor_values:
+                # 回退：无标准化值时显示原始值（兼容旧版 JSON）
                 parts = []
                 for k, v in factor_values.items():
-                    if v is not None:
-                        # v2.7: 问题3修复 - 列名转换为因子名（volume_ratio_5 → volume_ratio）
-                        factor_name = COL_TO_FACTOR_NAME_MAP.get(k, k)
+                    factor_name = COL_TO_FACTOR_NAME_MAP.get(k, k)
+                    if v is None:
+                        parts.append(f"{factor_name}=缺失(NaN)")
+                    elif abs(v) < 0.001:
+                        parts.append(f"{factor_name}=≈0(真实)")
+                    else:
                         parts.append(f"{factor_name}={format_float(v, 2)}")
-                factor_str = ", ".join(parts)  # 显示全部因子值
+                factor_str = ", ".join(parts)
             else:
                 factor_str = "无因子值"
 
-            lines.append(f"{rank:>4} {code:<10} {format_float(composite_value, 3):>12} {factor_str}")
+            coverage_str = f"{weight_coverage * 100:.0f}%" if weight_coverage < 1 else "100%"
+            lines.append(f"{rank:>4} {code:<10} {format_float(composite_value, 3):>12} {coverage_str:>6} {factor_str}")
 
         lines.append("-" * 70)
 
@@ -1580,7 +1834,9 @@ def _generate_stock_selection_section(stock_result: dict | None) -> list[str]:
     return lines
 
 
-def _generate_comparison_section(factor_data: list[dict], composite_results: list[dict]) -> list[str]:
+def _generate_comparison_section(
+    factor_data: list[dict], composite_results: list[dict], best_weight_method: str = "icir_weight"
+) -> list[str]:
     """生成综合因子与单因子对比部分
 
     展示四种权重方法的回测指标和选中单因子的回测指标，只做收集展示不做选择。
@@ -1630,12 +1886,38 @@ def _generate_comparison_section(factor_data: list[dict], composite_results: lis
     lines.append("【选中单因子回测数据】")
     lines.append("-" * 70)
 
-    # 从 composite_results 中获取选中的因子列表（使用 icir_weight 方法的 factor_list）
+    # v2.16: 从最优方法获取选中因子列表和权重
+    # 优先使用 selection_result.selected（反映实际筛选结果），回退到 factor_list
     selected_factors = []
-    for item in composite_results:
-        if item["weight_method"] == "icir_weight":
-            selected_factors = item.get("factor_list", [])
-            break
+    comp_weights = {}  # v2.16: 当前最优方法的权重字典
+
+    best_item = next((item for item in composite_results if item.get("weight_method") == best_weight_method), None)
+
+    if best_item:
+        sel_res = best_item.get("selection_result")
+        if sel_res and sel_res.get("selected"):
+            selected_factors = sel_res["selected"]
+        else:
+            selected_factors = best_item.get("factor_list", [])
+
+        # v2.16: Rolling ICIR 使用 last_day_weights，其他方法使用 meta.weights
+        if best_weight_method == "rolling_icir_weight":
+            weight_meta = best_item.get("weight_meta", {})
+            last_day_weights = weight_meta.get("last_day_weights", {})
+            comp_weights = last_day_weights if last_day_weights else best_item.get("weights", {})
+        else:
+            comp_weights = best_item.get("weights", {})
+    else:
+        # 回退：取 icir_weight
+        for item in composite_results:
+            if item["weight_method"] == "icir_weight":
+                sel_res = item.get("selection_result")
+                if sel_res and sel_res.get("selected"):
+                    selected_factors = sel_res["selected"]
+                else:
+                    selected_factors = item.get("factor_list", [])
+                comp_weights = item.get("weights", {})
+                break
 
     if not selected_factors:
         lines.append("未找到选中因子列表")
@@ -1651,18 +1933,20 @@ def _generate_comparison_section(factor_data: list[dict], composite_results: lis
     lines.append(
         f"{'因子名':<18} {'多空年化收益':>12} {'夏普比率':>8} {'单调性系数':>10} {'单调性质量':>10} {'权重':>8}"
     )
-    lines.append("注：权重来自ICIR加权方法")  # v2.6: 问题1修复 - 说明权重来源
+    # v2.16: 权重来源说明——根据最优方法动态生成
+    if best_weight_method == "rolling_icir_weight":
+        lines.append("注：权重来自Rolling ICIR加权最新日（动态权重，每日变化）")
+    else:
+        lines.append(f"注：权重来自{get_weight_method_display(best_weight_method)}")
     lines.append("-" * 70)
 
     # 展示选中的单因子
     for factor_name in selected_factors:
         factor_item = next((f for f in factor_data if f["factor_name"] == factor_name), None)
         if factor_item:
-            # 获取权重（从 composite_results 中）
-            # v2.5: weights 字典键是因子列名（如 volume_ratio_5），需先转换
-            weight_item = next((c for c in composite_results if c["weight_method"] == "icir_weight"), None)
+            # v2.16: 从最优方法的权重获取（而非硬编码 icir_weight）
             factor_col = FACTOR_NAME_TO_COL_MAP.get(factor_name, factor_name)
-            weight = weight_item.get("weights", {}).get(factor_col, 0) if weight_item else 0
+            weight = comp_weights.get(factor_col, 0)  # v2.16: comp_weights 已根据最优方法确定
 
             lines.append(
                 f"{factor_name:<18} "
@@ -1676,6 +1960,64 @@ def _generate_comparison_section(factor_data: list[dict], composite_results: lis
             lines.append(f"{factor_name:<18} 数据缺失")
 
     lines.append("-" * 70)
+
+    # v2.11→v2.13: 综合因子收益低于单因子时的完整分析说明
+    # 检查选中因子是否存在短样本因子（有效天数差异导致年化收益不可比）
+    short_sample_selected = [
+        f for f in factor_data if f["factor_name"] in selected_factors and f.get("valid_days", 999) < 30
+    ]
+
+    # v2.13: 综合收益低于所有入选单因子时（不仅是短样本），增加方向抵消分析
+    composite_best_return = (
+        max(c.get("long_short_return_annual", 0) for c in composite_results) if composite_results else 0
+    )
+    selected_long_returns = [
+        f.get("long_short_return_annual", 0)
+        for f in factor_data
+        if f["factor_name"] in selected_factors and f.get("valid_days", 999) >= 30
+    ]
+    min_long_return = min(selected_long_returns) if selected_long_returns else 0
+
+    if short_sample_selected or (composite_best_return < min_long_return and min_long_return > 0):
+        lines.append("")
+        lines.append("⚠ 综合因子收益低于单因子分析:")
+
+        if short_sample_selected:
+            short_names = [f["factor_name"] for f in short_sample_selected]
+            short_days = [str(f.get("valid_days", "N/A")) for f in short_sample_selected]
+            long_names = [
+                f["factor_name"]
+                for f in factor_data
+                if f["factor_name"] in selected_factors and f.get("valid_days", 999) >= 30
+            ]
+            long_days = [
+                str(f.get("valid_days", "N/A"))
+                for f in factor_data
+                if f["factor_name"] in selected_factors and f.get("valid_days", 999) >= 30
+            ]
+            lines.append(
+                f"  1. 数据覆盖差异: 短样本因子({','.join(short_names)})仅{','.join(short_days)}天，年化收益极端放大"
+            )
+            lines.append(f"     长样本因子({','.join(long_names)})有{','.join(long_days)}天数据，收益更可靠")
+            lines.append("     综合因子覆盖全周期，短样本因子仅少数日期有数据，其余日期由其他因子主导")
+
+        if composite_best_return < min_long_return and min_long_return > 0:
+            lines.append(
+                f"  2. 方向抵消效应: 综合因子最优年化={composite_best_return:.1f}%，低于长样本单因子最低={min_long_return:.1f}%"
+            )
+            lines.append("     原因分析：正向因子(overnight_ret)取反后与负向因子方向统一，但因子间相关性导致")
+            lines.append("     部分信号重叠抵消。综合因子年化低于最优单因子是正常的——组合分散降低了极端收益")
+            lines.append("     同时也降低了极端风险（夏普比率可能更优）")
+
+        # v2.13: 说明overnight_ret方向处理是否正确
+        flipped_factors = []
+        if composite_results:
+            flipped_factors = composite_results[0].get("flipped_factors", [])
+        if flipped_factors:
+            lines.append(f"  3. overnight_ret方向处理: 已取反标准化值({flipped_factors})，无二次反向风险")
+            lines.append("     取反逻辑：IC均值>0 → 标准化值取反 → 与负向因子方向统一 → 做空因子值大的股票")
+        else:
+            lines.append("  3. overnight_ret方向处理: 未取反（若overnight_ret入选，需验证方向是否一致）")
 
     return lines
 
@@ -1745,7 +2087,7 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     lines.extend(_generate_data_check_section(data_results, derived_results))
 
     # 第一部分：单因子 IC 数据汇总
-    lines.extend(_generate_ic_section(ic_results))
+    lines.extend(_generate_ic_section(ic_results, backtest_results))
 
     # 第二部分：单因子分层回测数据汇总
     lines.extend(_generate_backtest_section(ic_results, backtest_results))
@@ -1760,18 +2102,25 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
                 break
     lines.extend(generate_correlation_section(corr_matrix, ic_results, selection_result))
 
+    # v2.16: 确定最优权重方法（从 weight_result 或 composite_results 推断）
+    best_weight_method = "icir_weight"  # 默认回退
+    if weight_result and weight_result.get("best_selection"):
+        best_weight_method = weight_result["best_selection"].get("method", "icir_weight")
+
     # 第四部分：因子筛选结果
     lines.append("")
     lines.append("四、因子筛选结果")
     lines.append("-" * 70)
-    selection_info = get_factor_selection_info(composite_results, ic_results, backtest_results, logger)
+    selection_info = get_factor_selection_info(
+        composite_results, ic_results, backtest_results, logger, best_weight_method
+    )
     lines.append(selection_info)
 
     # 第五部分：综合因子四种权重回测数据汇总
     lines.extend(_generate_composite_section(composite_results))
 
     # 第六部分：综合因子 vs 单因子对比
-    lines.extend(_generate_comparison_section(factor_data, composite_results))
+    lines.extend(_generate_comparison_section(factor_data, composite_results, best_weight_method))
 
     # v2.2: 第七部分：权重选择结果（新增）
     lines.extend(_generate_weight_selection_section(weight_result))
