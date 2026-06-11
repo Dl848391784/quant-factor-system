@@ -1055,6 +1055,8 @@ factor_generator.py 的因子计算逻辑从 IC 脚本迁移:
 | v1.1 | 2026-05-27 19:30 | 第二轮优化:版本历史添加、常量命名私有化 (DEFAULT_* → _DEFAULT_*)、__all__ 移到导入后位置 |
 | v1.2 | 2026-05-27 20:00 | 第三轮优化:内部函数 `_calculate_ewm_with_initial` docstring 补全、新增私有常量 (volume_ratio_window、forward_return_shift)、消除硬编码默认值 |
 | v1.3 | 2026-05-27 21:00 | 第四轮优化:提取列名常量 (6 输入 + 3 输出)、提取魔法数字常量 (4 个基准值 + 2 个阈值)、消除硬编码字符串和魔法数字 |
+| v1.37 | 2026-06-05 | 新增 momentum_strength 因子计算函数 |
+| v1.38 | 2026-06-11 | 修复 momentum_strength 极端值：分母下限保护 (clip std≥0.01)，防止均匀涨跌时比值爆炸；std=0 归入 invalid_mask 设 NaN |
 
 ### fetch_turnover.py 版本
 

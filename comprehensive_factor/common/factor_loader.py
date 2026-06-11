@@ -33,6 +33,87 @@ DEFAULT_DATA_SOURCE = Path(__file__).parent.parent.parent / "data_fetchers" / "r
 DEFAULT_IC_RESULT_DIR = Path(__file__).parent.parent.parent / "factor_ic" / "result"
 
 
+def load_full_data(data_source: str | Path | None = None, logger: logging.Logger | None = None) -> pd.DataFrame:
+    """一次加载统一数据源，返回完整 DataFrame（所有列）
+
+    用于 composite_runner 入口处一次性加载，后续步骤从中提取子集，
+    避免三次独立加载同一 216MB gzip 文件（每次解析 ~22s）。
+
+    Args:
+        data_source: 数据源文件路径（可选，默认使用 DEFAULT_DATA_SOURCE）
+        logger: 日志对象
+
+    Returns:
+        包含所有列的完整 DataFrame（date, asset, 行情, 因子, 收益）
+
+    更新历史（2026-06-09）：
+        - v2.10: 新增函数，消除 composite_runner 重复数据加载
+
+    Note:
+        - 校验 date、asset 列的数据类型（date 为 str，asset 为 str）
+        - 调用方负责从 full_df 提取所需子集，完成后应 del full_df 释放内存
+    """
+    if logger is None:
+        from comprehensive_factor.common.logger_config import get_logger
+
+        logger = get_logger(__name__)
+
+    if data_source is None:
+        data_source = DEFAULT_DATA_SOURCE
+
+    data_source = Path(data_source)
+
+    logger.info("加载统一数据源: %s", data_source)
+
+    if not data_source.exists():
+        raise FileNotFoundError(
+            f"统一数据源文件不存在: {data_source}\n请先运行 data_fetchers/factor_generator.py 生成数据"
+        )
+
+    with gzip.open(data_source, "rt", encoding="utf-8") as f:
+        data = json.load(f)
+
+    if "data" not in data:
+        raise KeyError(f"数据源 JSON 结构缺失 'data' 字段: {data_source}")
+
+    full_df = pd.DataFrame(data["data"])
+
+    # 显式释放 JSON 原始数据（内存优化）
+    del data
+    import gc
+
+    gc.collect()
+
+    # 校验 date、asset 列的数据类型
+    if len(full_df) > 0:
+        first_date = full_df["date"].iloc[0]
+        first_asset = full_df["asset"].iloc[0]
+
+        if not isinstance(first_date, str):
+            raise TypeError(
+                f"date 列数据类型应为 str，实际为 {type(first_date).__name__}\n"
+                f"首行 date 值: {first_date}\n"
+                "可能原因：\n"
+                "  1. JSON 文件中 date 字段为数字而非字符串\n"
+                "  2. 数据生成脚本类型转换异常\n"
+                "建议：检查 factor_ic_data.json.gz 生成逻辑"
+            )
+
+        if not isinstance(first_asset, str):
+            raise TypeError(
+                f"asset 列数据类型应为 str，实际为 {type(first_asset).__name__}\n"
+                f"首行 asset 值: {first_asset}\n"
+                "可能原因：\n"
+                "  1. JSON 文件中 asset 字段为数字而非字符串\n"
+                "  2. 数据生成脚本类型转换异常\n"
+                "建议：检查 factor_ic_data.json.gz 生成逻辑"
+            )
+
+    logger.info("统一数据源: %d 条记录，类型校验通过", len(full_df))
+
+    return full_df
+
+
 def load_factor_values(
     factor_cols: list[str], data_source: str | Path | None = None, logger: logging.Logger | None = None
 ) -> pd.DataFrame:
@@ -389,8 +470,12 @@ def standardize_factors(
 
         # 使用 transform 计算标准化值（保持索引对齐）
         # 注意：x.std(ddof=1) 单样本时返回 NaN，是正确行为
+        # v2.16 新增：Winsorize 截断（±3σ），防止极端原始值导致 z-score 爆炸
+        # 理由：momentum_strength 等比率类因子可能产生 ±50 的极端值，
+        #   标准化后 z-score 达 ±11.7σ，统计意义极弱（p<0.003），截断不损失有效信息
+        _WINSORIZE_SIGMA = 3.0
         factor_df[std_col] = factor_df.groupby("date")[col].transform(
-            lambda x: (x - x.mean()) / x.std() if x.std() > 0 else np.nan
+            lambda x: np.clip((x - x.mean()) / x.std(), -_WINSORIZE_SIGMA, _WINSORIZE_SIGMA) if x.std() > 0 else np.nan
         )
 
         # NaN 处理：原因子值为 NaN 时标准化后仍为 NaN

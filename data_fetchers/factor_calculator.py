@@ -107,6 +107,8 @@ __all__ = [
     "calculate_return_3d",  # v1.8 新增
     "calculate_return_5d",  # v1.9 新增
     "calculate_momentum_strength",  # v1.10 新增
+    "calculate_overnight_return",  # v1.11 新增
+    "calculate_rsi_df",  # v1.12 新增
     "get_module_logger",
     # 公共常量别名（向下兼容 ic_kdj_j 等脚本的导入）
     "DEFAULT_RSI_PERIOD",
@@ -694,9 +696,6 @@ def calculate_turnover_surge(
 # 全天价格位置因子
 # ============================================================================
 
-_COL_PRICE_POSITION = "price_position"
-_DEFAULT_PRICE_POSITION_EPSILON = 1e-10  # 防止除零
-
 
 def calculate_price_position(factor_df: pd.DataFrame, logger_arg: logging.Logger | None = None) -> pd.DataFrame:
     """
@@ -728,8 +727,7 @@ def calculate_price_position(factor_df: pd.DataFrame, logger_arg: logging.Logger
         >>> result["price_position"].iloc[0]  # (10-9)/(12-9) = 0.333
         0.333...
     """
-    if logger_arg is None:
-        logger_arg = logging.getLogger(__name__)
+    _logger = get_module_logger(logger_arg)
 
     # 入口 copy（遵循 MODULE.md 约束）
     df = factor_df.copy()
@@ -742,7 +740,7 @@ def calculate_price_position(factor_df: pd.DataFrame, logger_arg: logging.Logger
 
     if zero_range_mask.any():
         zero_count = zero_range_mask.sum()
-        logger_arg.warning(f"检测到 {zero_count} 个振幅为零的记录（high=low），price_position 设为 0.5（中位）")
+        _logger.warning(f"检测到 {zero_count} 个振幅为零的记录（high=low），price_position 设为 0.5（中位）")
 
     # 计算价格位置
     df[_COL_PRICE_POSITION] = np.where(
@@ -751,7 +749,7 @@ def calculate_price_position(factor_df: pd.DataFrame, logger_arg: logging.Logger
         (df[_COL_CLOSE] - df[_COL_LOW]) / range_val,
     )
 
-    logger_arg.info(f"price_position 计算完成，共 {len(df)} 条记录")
+    _logger.info(f"price_position 计算完成，共 {len(df)} 条记录")
 
     return df
 
@@ -793,8 +791,7 @@ def calculate_amplitude(factor_df: pd.DataFrame, logger_arg: logging.Logger | No
         >>> pd.isna(result["amplitude"].iloc[2])  # close=0 → NaN
         True
     """
-    if logger_arg is None:
-        logger_arg = logging.getLogger(__name__)
+    _logger = get_module_logger(logger_arg)
 
     # 入口 copy（遵循 MODULE.md 约束）
     df = factor_df.copy()
@@ -807,7 +804,7 @@ def calculate_amplitude(factor_df: pd.DataFrame, logger_arg: logging.Logger | No
 
     if zero_close_mask.any():
         zero_count = zero_close_mask.sum()
-        logger_arg.warning(f"检测到 {zero_count} 个收盘价为零的记录，amplitude 设为 NaN（无效数据）")
+        _logger.warning(f"检测到 {zero_count} 个收盘价为零的记录，amplitude 设为 NaN（无效数据）")
 
     # 计算振幅因子
     # close=0 → NaN，否则计算 (high - low) / close
@@ -817,7 +814,7 @@ def calculate_amplitude(factor_df: pd.DataFrame, logger_arg: logging.Logger | No
         range_val / df[_COL_CLOSE],
     )
 
-    logger_arg.info(f"amplitude 计算完成，共 {len(df)} 条记录")
+    _logger.info(f"amplitude 计算完成，共 {len(df)} 条记录")
 
     return df
 
@@ -878,8 +875,7 @@ def calculate_past_return_1d(
                >>> result["past_return_1d"].iloc[2]  # (101/102 - 1) = -0.0098...
                -0.00980392156862745
     """
-    if logger_arg is None:
-        logger_arg = logging.getLogger(__name__)
+    _logger = get_module_logger(logger_arg)
 
     if window is None:
         window = _DEFAULT_PAST_RETURN_1D_WINDOW
@@ -899,7 +895,7 @@ def calculate_past_return_1d(
 
     df[_COL_PAST_RETURN_1D] = np.where(invalid_mask, np.nan, df[_COL_CLOSE] / close_shifted - 1)
 
-    logger_arg.info(f"past_return_1d (window={window}) 计算完成，共 {len(df)} 条记录")
+    _logger.info(f"past_return_1d (window={window}) 计算完成，共 {len(df)} 条记录")
 
     return df
 
@@ -955,8 +951,7 @@ def calculate_return_3d(
         >>> result["return_3d"].iloc[3]  # (105/100 - 1) = 0.05
         0.05
     """
-    if logger_arg is None:
-        logger_arg = logging.getLogger(__name__)
+    _logger = get_module_logger(logger_arg)
 
     if window is None:
         window = _DEFAULT_RETURN_3D_WINDOW
@@ -976,7 +971,7 @@ def calculate_return_3d(
 
     df[_COL_RETURN_3D] = np.where(invalid_mask, np.nan, df[_COL_CLOSE] / close_shifted - 1)
 
-    logger_arg.info(f"return_3d (window={window}) 计算完成，共 {len(df)} 条记录")
+    _logger.info(f"return_3d (window={window}) 计算完成，共 {len(df)} 条记录")
 
     return df
 
@@ -1032,8 +1027,7 @@ def calculate_return_5d(
         >>> result["return_5d"].iloc[5]  # (108/100 - 1) = 0.08
         0.08
     """
-    if logger_arg is None:
-        logger_arg = logging.getLogger(__name__)
+    _logger = get_module_logger(logger_arg)
 
     if window is None:
         window = _DEFAULT_RETURN_5D_WINDOW
@@ -1053,7 +1047,7 @@ def calculate_return_5d(
 
     df[_COL_RETURN_5D] = np.where(invalid_mask, np.nan, df[_COL_CLOSE] / close_shifted - 1)
 
-    logger_arg.info(f"return_5d (window={window}) 计算完成，共 {len(df)} 条记录")
+    _logger.info(f"return_5d (window={window}) 计算完成，共 {len(df)} 条记录")
 
     return df
 
@@ -1080,6 +1074,7 @@ calculate_turnover_surge.required_cols = ["turnover_rate", "close"]  # type: ign
 
 _COL_MOMENTUM_STRENGTH = "momentum_strength"
 _DEFAULT_MOMENTUM_STRENGTH_WINDOW = 5  # 5日滚动窗口
+_MOMENTUM_STRENGTH_STD_MIN = 0.01  # 日收益率标准差下限（防止均匀涨跌时比值爆炸）
 
 
 def calculate_momentum_strength(
@@ -1127,8 +1122,7 @@ def calculate_momentum_strength(
         >>> pd.isna(result["momentum_strength"].iloc[0])  # 前5日无数据
         True
     """
-    if logger_arg is None:
-        logger_arg = logging.getLogger(__name__)
+    _logger = get_module_logger(logger_arg)
 
     if window is None:
         window = _DEFAULT_MOMENTUM_STRENGTH_WINDOW
@@ -1151,19 +1145,28 @@ def calculate_momentum_strength(
     )
 
     # 计算动量强度: return_5d / std(return_1d, 5)
-    # std 为 NaN 或接近 0 时，结果设为 NaN
-    invalid_std_mask = df["_return_1d_std_5"].isna() | (df["_return_1d_std_5"].abs() < _EPSILON)
+    # v1.38 修复：分母下限保护（防止均匀涨跌时比值爆炸）
+    # std 为 NaN 时设 NaN（历史不足）；std=0 时也设 NaN（完全无波动）
+    # std 极小但非零时 clip 到下限而非设 NaN
+    # 理由：连续5天均匀涨/跌 → std≈0.003 → return_5d/std ≈ ±50，极端异常
+    #   clip 到 0.01 后 → ±15 范围内，保留信号方向但限制极端幅度
+    invalid_std_mask = df["_return_1d_std_5"].isna() | (df["_return_1d_std_5"] < _EPSILON)
     invalid_return_mask = df["return_5d"].isna()
 
+    # 对有效 std 做 clip（下限 _MOMENTUM_STRENGTH_STD_MIN=0.01）
+    # std=0 或 NaN 的行已被 invalid_std_mask 排除，clip 只作用于有效极小值
+    df["_return_1d_std_5_safe"] = df["_return_1d_std_5"].clip(lower=_MOMENTUM_STRENGTH_STD_MIN)
+
     df[_COL_MOMENTUM_STRENGTH] = np.where(
-        invalid_std_mask | invalid_return_mask, np.nan, df["return_5d"] / df["_return_1d_std_5"]
+        invalid_std_mask | invalid_return_mask, np.nan, df["return_5d"] / df["_return_1d_std_5_safe"]
     )
 
     # 清理临时列
     del df["_return_1d_temp"]
     del df["_return_1d_std_5"]
+    del df["_return_1d_std_5_safe"]
 
-    logger_arg.info(f"momentum_strength (window={window}) 计算完成，共 {len(df)} 条记录")
+    _logger.info(f"momentum_strength (window={window}) 计算完成，共 {len(df)} 条记录")
 
     return df
 
@@ -1205,8 +1208,7 @@ def calculate_overnight_return(factor_df: pd.DataFrame, logger_arg: logging.Logg
         >>> result["overnight_ret"].iloc[1]  # (10.5-10.2)/10.2
         0.0294...
     """
-    if logger_arg is None:
-        logger_arg = logging.getLogger(__name__)
+    _logger = get_module_logger(logger_arg)
 
     df = factor_df.copy()
     df = df.sort_values([_COL_ASSET, _COL_DATE])
@@ -1214,16 +1216,15 @@ def calculate_overnight_return(factor_df: pd.DataFrame, logger_arg: logging.Logg
     # 按资产分组计算昨日收盘价
     prev_close = df.groupby(_COL_ASSET)[_COL_CLOSE].shift(1)
 
-    # 计算隔夜收益率
-    df[_COL_OVERNIGHT_RET] = (df[_COL_OPEN] - prev_close) / prev_close
+    # 除零防护：先检查 prev_close 是否接近零，再计算
+    invalid_mask = prev_close.abs() < _EPSILON
+    df[_COL_OVERNIGHT_RET] = np.where(invalid_mask, np.nan, (df[_COL_OPEN] - prev_close) / prev_close)
 
-    # 除零防护
-    zero_mask = prev_close.abs() < _EPSILON
-    if zero_mask.any():
-        df.loc[zero_mask, _COL_OVERNIGHT_RET] = np.nan
-        logger_arg.warning(f"发现 {zero_mask.sum()} 个异常收盘价（<{_EPSILON}），已设为 NaN")
+    # 记录异常情况
+    if invalid_mask.any():
+        _logger.warning(f"发现 {invalid_mask.sum()} 个异常收盘价（<{_EPSILON}），已设为 NaN")
 
-    logger_arg.info(f"overnight_ret 计算完成，共 {len(df)} 条记录")
+    _logger.info(f"overnight_ret 计算完成，共 {len(df)} 条记录")
 
     return df
 
@@ -1265,8 +1266,7 @@ def calculate_rsi_df(
         >>> "rsi" in result.columns
         True
     """
-    if logger_arg is None:
-        logger_arg = logging.getLogger(__name__)
+    _logger = get_module_logger(logger_arg)
 
     df = factor_df.copy()
     df = df.sort_values([_COL_ASSET, _COL_DATE])
@@ -1278,7 +1278,7 @@ def calculate_rsi_df(
 
     df["rsi"] = df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].transform(calc_rsi_for_asset)
 
-    logger_arg.info(f"rsi (n={n}) 计算完成，共 {len(df)} 条记录")
+    _logger.info(f"rsi (n={n}) 计算完成，共 {len(df)} 条记录")
 
     return df
 

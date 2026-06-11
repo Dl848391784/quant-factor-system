@@ -1,7 +1,7 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.7
-> 最后更新: 2026-06-04
+> 版本: v2.13
+> 最后更新: 2026-06-10
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
 >
@@ -35,6 +35,7 @@
 | **K. CLI 与异常** | M41-M45 | 退出码 / 堆栈保留 / 最小导入 / 文件读取异常 / logger 传递 |
 | **L. Config 设计** | M46-M48 | Config 类 + 继承 / 单一数据源 / List 必须 field |
 | **M. 代码风格与性能** | M49-M55 | 模块级代码 / PEP8 / Union-Find 迭代 / set 替代 list / lambda 延迟绑定 / rolling_std ddof / 注释数据来源 |
+| **N. 方向统一化** | M56 | 正向因子取反统一负向语义 / direction_map / flipped_factors |
 
 ### 三、附录
 - [更新记录](#更新记录)
@@ -81,12 +82,18 @@ Step 2: 因子筛选 (自动化,见 D 类规则)
 Step 3: 标准化 (M9)
   每日截面标准化: factor_std = (factor - μ) / σ
                               ↓
+Step 3.5: 方向统一化 (M56)
+  ├─ 从 ic_results 读取 ic_mean 判断因子方向
+  ├─ 正向因子 (ic_mean>0): 标准化值取反 (-*_std)，统一为负向语义
+  ├─ 负向因子 (ic_mean≤0): 保持不变
+  └─ 输出 direction_map + flipped_factors → 写入 JSON config
+                              ↓
 Step 4: 加权计算综合因子 (B 类规则)
   ├─ 等权 (equal_weight)
   ├─ ICIR 加权 (icir_weight)
   ├─ IC 加权 (ic_weight)
   └─ 滚动 ICIR 加权 (rolling_icir_weight)
-  → 得到 4 个综合因子
+  → 得到 4 个综合因子（统一为负向语义：低值=好信号）
                               ↓
 Step 5: 综合因子分层回测
   对 4 个综合因子分别做分层回测
@@ -101,6 +108,7 @@ Step 7: 股票选股 (stock_selector.py)
   ├─ 加载最优权重配置（weight_selection_result.json）
   ├─ 加载当日因子数据（factor_ic_data.json.gz）
   ├─ 标准化因子值
+  ├─ 方向统一化（正向因子取反，同 Step 3.5）
   ├─ 加载 IC 每日序列（滚动ICIR需要）
   ├─ 计算综合因子值（使用最优权重方法）
   ├─ 按因子方向排序（反向升序/正向降序）
@@ -228,6 +236,8 @@ python stock_selector.py \
   "backtest_result": {<复用 backtest 输出结构>},
   "config": {
     "n_layers": 5, "factor_direction": "negative",
+    "direction_map": {"rsi": "positive", "volume_ratio": "negative"},
+    "flipped_factors": ["rsi"],
     "long_layers": [1, 2], "short_layers": [4, 5],
     "trade_cost_rate": 0.003
   },
@@ -1010,11 +1020,13 @@ valid_mask = ~std_df.isna()
 # 每行的有效权重之和
 valid_weight_sum = (valid_mask.multiply(weight_values, axis=1)).sum(axis=1)
 
-# 加权后归一化
+# 加权后归一化（v1.14 修复：NaN 因子不传播到综合因子）
+# 原实现 divide + sum(skipna=False) 导致 NaN 传播，修复为 fillna(0) + divide + sum
 weighted_df = std_df.multiply(weight_values, axis=1)
-composite = weighted_df.divide(
+weighted_df_clean = weighted_df.fillna(0)  # NaN 加权值置为 0（跳过缺失因子）
+composite = weighted_df_clean.divide(
     valid_weight_sum.replace(0, np.nan), axis=0
-).sum(axis=1, skipna=False)
+).sum(axis=1)
 
 # 全 NaN 行保持 NaN
 composite = composite.where(valid_weight_sum > 0, np.nan)
@@ -1023,7 +1035,11 @@ composite = composite.where(valid_weight_sum > 0, np.nan)
 **Don't**:
 
 ```python
-# ❌ 默认 sum(skipna=True) 把 NaN 计 0
+# ❌ v1.11-v1.13 原实现：divide + sum(skipna=False) 导致 NaN 传播
+# NaN * weight = NaN → NaN / valid_weight_sum = NaN → sum(skipna=False) 全 NaN
+composite = weighted_df.divide(valid_weight_sum, axis=0).sum(axis=1, skipna=False)
+
+# ❌ 默认 sum(skipna=True) 把 NaN 计 0（权重稀释）
 composite = std_df.multiply(weight_values, axis=1).sum(axis=1)
 ```
 
@@ -1721,10 +1737,98 @@ if not factor_cols or len(factor_cols) == 0:
 
 ---
 
+# N. 方向统一化
+
+## M56. 因子方向统一化（正向因子取反）
+
+**What**: 加权计算前，正向因子（ic_mean > 0）的标准化值必须取反（`-*_std`），使所有因子统一为负向语义。综合因子统一为负向因子：低值 = 好信号（预期高收益）。
+
+**Why**:
+- 综合因子组合了多个方向不同的因子：负向因子（ic_mean < 0）如 turnover_surge（缩量=好信号），正向因子（ic_mean > 0）如 tail_price_position（值大=好信号）
+- 正向因子不取反时，其标准化正值表示好信号，但负向因子标准化负值表示好信号，两者加权后信号抵消
+- 取反后所有因子统一为负向语义：标准化负值 = 好信号，加权叠加增强而非抵消
+- 这与 Pitfall 40 一致：综合因子 `factor_direction='negative'`，`direction_map` 存入 meta 供下游（summary、stock_selector）读取
+
+**How**:
+
+```python
+# composite_runner.py Step 5 (代码行 387-429)
+direction_map = {}  # {factor_name: 'negative'|'positive'|'unknown'}
+flipped_factors = []
+
+for i, col in enumerate(factor_cols):
+    factor_name = factor_list[i] if i < len(factor_list) else col
+    ic_info = ic_results.get(factor_name, {})
+    ic_mean_val = ic_info.get('ic_mean', None)
+
+    if ic_mean_val is None:
+        direction_map[factor_name] = 'unknown'
+        continue  # IC 缺失，保持原值
+
+    std_col = f"{col}_std"
+    if ic_mean_val > 0:
+        direction_map[factor_name] = 'positive'
+        factor_df[std_col] = -factor_df[std_col]  # 取反
+        flipped_factors.append(factor_name)
+    else:
+        direction_map[factor_name] = 'negative'  # 保持不变
+
+# 写入 JSON config
+'config': {
+    'direction_map': direction_map,
+    'flipped_factors': flipped_factors,
+}
+```
+
+**Don't**:
+
+```python
+# ❌ 不取反，让正向和负向因子加权抵消
+composite = sum(factor_df[f'{col}_std'] * weight for col, weight in zip(factor_cols, weights))
+
+# ❌ 硬编码因子方向（不可扩展）
+if col == 'rsi':
+    factor_df[f'{col}_std'] = -factor_df[f'{col}_std']
+
+# ❌ direction_map 只存 'positive'/'negative'，不存 'unknown'（IC 缺失时无法区分）
+```
+
+**When**:
+- 必须遵守：所有综合因子加权计算场景（composite_runner + stock_selector）
+- 可豁免：单因子分析（factor_ic 模块各自独立分析方向）
+- 关键：stock_selector 必须执行相同的方向统一化步骤，否则综合因子值与回测时不一致
+
+**Examples**:
+
+```python
+# ✓ 正确：正向因子取反，统一负向语义
+# turnover_surge ic_mean=-0.05 → 'negative'，*_std 保持不变
+# tail_price_position ic_mean=0.03 → 'positive'，*_std 取反
+# 加权后 composite_factor 低值=好信号，factor_direction='negative'
+
+# ✓ stock_selector 中同步方向统一化
+direction_map = composite_result['config']['direction_map']
+for factor_name, direction in direction_map.items():
+    if direction == 'positive':
+        factor_df[f'{col}_std'] = -factor_df[f'{col}_std']
+
+# ✗ 错误：stock_selector 不做方向统一化，综合因子值与回测时不一致
+```
+
+**Verify**:
+- `pytest comprehensive_factor/test_cases/test_direction_unify.py`
+- 检查 JSON 输出 `config.direction_map` 和 `config.flipped_factors` 存在且非空
+- 检查 stock_selector 使用 `direction_map` 执行方向统一化
+
+---
+
 ## 更新记录
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v2.13 | 2026-06-10 | composite_runner.py v2.13: 新增 Step 3.5 方向统一化（正向因子 ic_mean>0 取反 -*_std 统一负向语义）；M56 规则 + N 类规则索引；输出结构模板补充 direction_map/flipped_factors；流程图更新 |
+| v2.16 | 2026-06-11 | factor_loader.py v2.16: standardize_factors 新增 Winsorize 截断（±3σ），防止 momentum_strength 等比率类因子极端值导致 z-score 爆炸 |
+| v2.8 | 2026-06-10 | weight_engine.py v1.14: _apply_weights NaN 传播 Bug 修复（fillna(0)+divide+sum 替代 divide+sum(skipna=False)），让增量采集因子正常参与综合因子计算；M29 How/Don't 同步修正 |
 | v2.7 | 2026-06-04 | logger_config.py v2.0: 重写对齐 factor_ic 实现，自动文件输出；M4 扩展日志配置模块职责规范 |
 | v2.6 | 2026-06-03 | weight_selector.py v1.4: select_best_method() 添加空字典检查；流程文档 + 测试用例文档 + 边界测试 |
 | v2.5 | 2026-06-03 | stock_selector.py v1.2: top_n 默认值改为 3 + 因子列表从 composite 结果读取（非硬编码）；MODULE.md 补充因子来源规范 + 示例更新 |
