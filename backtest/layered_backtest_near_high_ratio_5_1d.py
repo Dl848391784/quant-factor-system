@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
-近5日高低位置因子分层回测脚本
+5日近高比率因子分层回测脚本
 
 因子定义：
-- 公式: near_high_ratio_5 = (close - min(close,5日)) / (max(close,5日) - min(close,5日))
-- 含义: 收盘价在近5日价格区间中的相对位置，越高越接近5日高点
+- near_high_ratio_5 = close / max(high_5d)
+- 含义：当前价距5日最高价的接近程度，1=触及最高价，低值=远离最高价
+- 预计算因子，需传入 factor_calculator
 
-分层模式：percentile 5层（每层约20%）
+遵循 MODULE.md 薄声明规范：
+- Config 类仅声明 ClassVar 元数据，逻辑完全下沉基类
+- factor_direction 由 IC 文件自动派生（遵循 M15）
+- layer_descriptions 使用 percentile 相对语义（遵循 Pitfall #32）
 
-因子元数据派生机制（基类 LayerConfigBase）：
-- factor_direction: 从 ic_source IC 文件加载，ic_mean < 0 为 negative
-- n_layers: 由 len(layer_names) 派生
-- long_layers/short_layers: 由 n_layers 和 factor_direction 派生
+作者: 云瑶
+创建日期: 2026-06-12
 """
 
 from collections.abc import Sequence
@@ -23,23 +25,29 @@ from data_fetchers.factor_calculator import calculate_near_high_ratio_5
 
 
 class NearHighRatio5LayerConfig(LayerConfigBase):
-    """近5日高低位置因子分层配置
-
-    薄声明：仅定义因子名称与分层命名，逻辑完全下沉基类。
-    """
+    """5日近高比率因子分层配置（薄声明）"""
 
     factor_name: ClassVar[str] = "near_high_ratio_5"
 
-    layer_names: ClassVar[Sequence[str]] = ("lowest", "lower", "normal", "higher", "highest")
+    layer_names: ClassVar[Sequence[str]] = (
+        "lowest",
+        "lower",
+        "normal",
+        "higher",
+        "highest",
+    )
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        "极低层(接近5日低点)",
-        "偏低层(偏低位置)",
-        "正常层(中间位置)",
-        "偏高层(偏高位置)",
-        "极高层(接近5日高点)",
+        "极低层(远低于5日最高价)",
+        "偏低层(略低于5日最高价)",
+        "正常层(中等接近度)",
+        "偏高层(接近5日最高价)",
+        "极高层(触及或超越5日最高价)",
     )
 
 
 if __name__ == "__main__":
-    factor_cli_main(config_cls=NearHighRatio5LayerConfig, factor_calculator=calculate_near_high_ratio_5)
+    factor_cli_main(
+        config_cls=NearHighRatio5LayerConfig,
+        factor_calculator=calculate_near_high_ratio_5,
+    )

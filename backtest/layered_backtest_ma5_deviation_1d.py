@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
-5日均线偏离度因子分层回测脚本
+MA5偏离度因子分层回测脚本
 
 因子定义：
-- 公式: ma5_deviation = (close - MA5) / MA5
-- 含义: 收盘价相对5日均线偏离程度，在均线之上=多头区域
+- ma5_deviation = (close - MA5) / MA5
+- 含义：股价偏离5日均线程度，正值=高于均线，负值=低于均线
+- 预计算因子，需传入 factor_calculator
 
-分层模式：percentile 5层（每层约20%）
+遵循 MODULE.md 薄声明规范：
+- Config 类仅声明 ClassVar 元数据，逻辑完全下沉基类
+- factor_direction 由 IC 文件自动派生（遵循 M15）
+- layer_descriptions 使用 percentile 相对语义（遵循 Pitfall #32）
 
-因子元数据派生机制（基类 LayerConfigBase）：
-- factor_direction: 从 ic_source IC 文件加载，ic_mean < 0 为 negative
-- n_layers: 由 len(layer_names) 派生
-- long_layers/short_layers: 由 n_layers 和 factor_direction 派生
+作者: 云瑶
+创建日期: 2026-06-12
 """
 
 from collections.abc import Sequence
@@ -22,24 +24,30 @@ from backtest.common.layered_backtest_runner import LayerConfigBase
 from data_fetchers.factor_calculator import calculate_ma5_deviation
 
 
-class Ma5DeviationLayerConfig(LayerConfigBase):
-    """5日均线偏离度因子分层配置
-
-    薄声明：仅定义因子名称与分层命名，逻辑完全下沉基类。
-    """
+class MA5DeviationLayerConfig(LayerConfigBase):
+    """MA5偏离度因子分层配置（薄声明）"""
 
     factor_name: ClassVar[str] = "ma5_deviation"
 
-    layer_names: ClassVar[Sequence[str]] = ("lowest", "lower", "normal", "higher", "highest")
+    layer_names: ClassVar[Sequence[str]] = (
+        "lowest",
+        "lower",
+        "normal",
+        "higher",
+        "highest",
+    )
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        "极低层(偏离度极低，远低于均线)",
-        "偏低层(偏离度偏低，略低于均线)",
-        "正常层(偏离度适中，接近均线)",
-        "偏高层(偏离度偏高，略高于均线)",
-        "极高层(偏离度极高，远高于均线)",
+        "极低层(远低于均线，深度超卖)",
+        "偏低层(略低于均线)",
+        "正常层(接近均线)",
+        "偏高层(略高于均线)",
+        "极高层(远高于均线，深度超买)",
     )
 
 
 if __name__ == "__main__":
-    factor_cli_main(config_cls=Ma5DeviationLayerConfig, factor_calculator=calculate_ma5_deviation)
+    factor_cli_main(
+        config_cls=MA5DeviationLayerConfig,
+        factor_calculator=calculate_ma5_deviation,
+    )

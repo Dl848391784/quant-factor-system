@@ -1,7 +1,7 @@
 # backtest 模块规范
 
-> 版本: v2.0 (大重构)
-> 最后更新: 2026-06-03
+> 版本: v2.2
+> 最后更新: 2026-06-12
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
 >
@@ -79,7 +79,37 @@ backtest 模块负责对因子 IC 结果进行**分层回测**,评估因子的�
 - **输出**:`backtest/result/<因子>_layered_backtest.json` (分层收益、夏普、回撤等)
 - **依赖方向**:`data_fetchers → factor_ic → backtest`,单向无环
 
-**脚本命名**:`layered_backtest_<因子>_<收益周期>.py` (与 `ic_<因子>_<周期>.py` 配对)
+**脚本命名**:`layered_backtest_<因子名>_<收益周期>.py` (与 `ic_<因子>_<周期>.py` 配对)
+
+**回测脚本注册表**（截至 v2.2 2026-06-12）：
+
+| 因子名 | 回测脚本 | Config 类 | factor_calculator | ic_source |
+|--------|---------|----------|-------------------|-----------|
+| rsi | layered_backtest_rsi_1d.py | RSILayerConfig | — | 自动派生 |
+| volume_ratio | layered_backtest_volume_ratio_1d.py | VolumeRatioLayerConfig | — | 自动派生 |
+| bollinger_pb | layered_backtest_bollinger_pb_1d.py | BollingerPBLayerConfig | — | 自动派生 |
+| kdj_j | layered_backtest_kdj_j_1d.py | KDJJLayerConfig | — | 自动派生 |
+| turnover_surge | layered_backtest_turnover_surge_1d.py | TurnoverSurgeLayerConfig | — | 自动派生 |
+| amplitude | layered_backtest_amplitude_1d.py | AmplitudeLayerConfig | — | 自动派生 |
+| momentum_strength | layered_backtest_momentum_strength_1d.py | MomentumStrengthLayerConfig | calculate_momentum_strength | 自动派生 |
+| **industry_momentum_5d** | **layered_backtest_industry_momentum_5d_1d.py** | **IndustryMomentum5dLayerConfig** | **calculate_industry_momentum_5d** | **自动派生** |
+| **industry_turnover_trend** | **layered_backtest_industry_turnover_trend_1d.py** | **IndustryTurnoverTrendLayerConfig** | **calculate_industry_turnover_trend** | **自动派生** |
+| **industry_amplitude_trend** | **layered_backtest_industry_amplitude_trend_1d.py** | **IndustryAmplitudeTrendLayerConfig** | **calculate_industry_amplitude_trend** | **自动派生** |
+| **industry_roe_trend** | **layered_backtest_industry_roe_trend_1d.py** | **IndustryRoeTrendLayerConfig** | **calculate_industry_roe_trend** | **自动派生** |
+| **industry_earnings_growth** | **layered_backtest_industry_earnings_growth_1d.py** | **IndustryEarningsGrowthLayerConfig** | **calculate_industry_earnings_growth** | **自动派生** |
+| **industry_pe_trend** | **layered_backtest_industry_pe_trend_1d.py** | **IndustryPeTrendLayerConfig** | **calculate_industry_pe_trend** | **自动派生** |
+| **capital_flow_ratio_trend** | **layered_backtest_capital_flow_ratio_trend_1d.py** | **CapitalFlowRatioTrendLayerConfig** | **calculate_capital_flow_ratio_trend** | **自动派生** |
+| **capital_flow_intensity** | **layered_backtest_capital_flow_intensity_1d.py** | **CapitalFlowIntensityLayerConfig** | **calculate_capital_flow_intensity** | **自动派生** |
+| **amplitude_delta** | **layered_backtest_amplitude_delta_1d.py** | **AmplitudeDeltaLayerConfig** | **calculate_amplitude_delta** | **自动派生** |
+| **turnover_surge_delta** | **layered_backtest_turnover_surge_delta_1d.py** | **TurnoverSurgeDeltaLayerConfig** | **calculate_turnover_surge_delta** | **自动派生** |
+| **tail_price_position_delta** | **layered_backtest_tail_price_position_delta_1d.py** | **TailPricePositionDeltaLayerConfig** | **calculate_tail_price_position_delta** | **自动派生** |
+| **tail_volume_shrink_delta** | **layered_backtest_tail_volume_shrink_delta_1d.py** | **TailVolumeShrinkDeltaLayerConfig** | **calculate_tail_volume_shrink_delta** | **自动派生** |
+| **ma5_deviation** | **layered_backtest_ma5_deviation_1d.py** | **MA5DeviationLayerConfig** | **calculate_ma5_deviation** | **自动派生** |
+| **near_high_ratio_5** | **layered_backtest_near_high_ratio_5_1d.py** | **NearHighRatio5LayerConfig** | **calculate_near_high_ratio_5** | **自动派生** |
+| **positive_day_ratio_5** | **layered_backtest_positive_day_ratio_5_1d.py** | **PositiveDayRatio5LayerConfig** | **calculate_positive_day_ratio_5** | **自动派生** |
+| **volume_price_strength** | **layered_backtest_volume_price_strength_1d.py** | **VolumePriceStrengthLayerConfig** | **calculate_volume_price_strength** | **自动派生** |
+
+> 注：行业方向性因子、资金流因子、差分因子、技术因子均使用薄声明 Config + factor_calculator 传入方式（见 M53）。factor_direction 由 IC 文件自动派生，不可硬编码。
 
 **新因子开发模板** (v1.22 理想形态):
 
@@ -207,7 +237,7 @@ if __name__ == '__main__':
 |------|------|------|
 | 数据加载 | `run_layered_backtest()` 自动加载 | `gzip.open` + `json.load` 手写 |
 | 结果保存 | `run_layered_backtest()` 自动保存 | `json.dump` 手写 |
-| CLI 入口 | `factor_cli_main()` (新) / `create_cli_entrypoint()` (兼容) | `argparse` + 异常处理手写 |
+| CLI 入口 | `factor_cli_main()` (唯一入口) | `argparse` + 异常处理手写 |
 | Config 基类 | 继承 `LayerConfigBase` | 手写 property 方法 |
 | 分层回测 | 调用 `LayeredBacktestEngine` | 手写分层逻辑 |
 
@@ -960,12 +990,7 @@ if factor_col not in factor_df.columns:
 **How**:
 
 ```python
-main = create_cli_entrypoint(
-    factor_name='volume_ratio',
-    factor_col='volume_ratio_5',
-    config_class=VolumeRatioLayerConfig,
-    required_factor_cols=['volume_ratio_5'],  # 防御:数据加载阶段校验
-)
+factor_cli_main(VolumeRatioLayerConfig)  # 预计算因子，无需 factor_calculator
 ```
 
 ---
@@ -1515,6 +1540,7 @@ grep -n "factor_calculator" backtest/layered_backtest_tail*.py
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v2.2 | 2026-06-12 | 新增行业方向性因子回测脚本注册表（industry_momentum_5d / industry_turnover_trend / industry_amplitude_trend）；脚本注册表章节 |
 | v2.1 | 2026-06-04 | 新增 M53（预计算因子禁止重复传递 factor_calculator）+ L 类别;修复 5 个尾盘因子回测脚本的列名重复 bug |
 | v2.0 | 2026-06-03 | 大重构:50 章节去重合并为 52 条 M 编号规则,按 11 类别 (A-K) 组织;统一 W/W/H/D/W/V 框架;加目录索引;精简更新记录 |
 | v1.22 | 2026-06-01 | ClassVar 统一 (`layer_names` 改 `Sequence[str]`,删 `@dataclass` 与 `field`,`factor_name`/`ic_source`/`layer_names` 统一 ClassVar 风格,基类新增 `ic_source_resolved` + `layer_names_dict`) |
@@ -1538,5 +1564,5 @@ grep -n "factor_calculator" backtest/layered_backtest_tail*.py
 
 ---
 
-*最后更新: 2026-06-03*
+*最后更新: 2026-06-12*
 

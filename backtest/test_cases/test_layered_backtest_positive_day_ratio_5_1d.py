@@ -38,7 +38,7 @@ class TestPositiveDayRatio5LayerConfig:
     def test_layer_descriptions_classvar(self):
         """TC001-03: layer_descriptions 含中文描述"""
         assert len(PositiveDayRatio5LayerConfig.layer_descriptions) == 5
-        assert PositiveDayRatio5LayerConfig.layer_descriptions[0] == '极低层(阳线比例极低)'
+        assert PositiveDayRatio5LayerConfig.layer_descriptions[0] == '极低层(近5日持续下跌)'
 
     def test_ic_source_default(self):
         """TC001-04: ic_source 默认路径"""
@@ -60,12 +60,12 @@ class TestPositiveDayRatio5LayerConfig:
         config = PositiveDayRatio5LayerConfig()
         assert '1' in config.layer_names_dict
         assert '5' in config.layer_names_dict
-        assert config.layer_names_dict['1'] == '极低层(阳线比例极低)'
+        assert config.layer_names_dict['1'] == '极低层(近5日持续下跌)'
 
     def test_layer_names_semantic(self):
         """TC001-08: layer_descriptions 语义描述"""
         for desc in PositiveDayRatio5LayerConfig.layer_descriptions:
-            assert '阳线比例' in desc
+            assert '5日' in desc or '上涨' in desc or '下跌' in desc or '涨跌' in desc
 
     def test_layer_names_no_fixed_threshold(self):
         """TC001-09: layer_names 纯标签无固定阈值"""

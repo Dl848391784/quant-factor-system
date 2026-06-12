@@ -39,7 +39,7 @@ class TestVolumePriceStrengthLayerConfig:
     def test_layer_descriptions_classvar(self):
         """TC001-03: layer_descriptions 含中文描述"""
         assert len(VolumePriceStrengthLayerConfig.layer_descriptions) == 5
-        assert VolumePriceStrengthLayerConfig.layer_descriptions[0] == '极低层(量价齐升最弱)'
+        assert VolumePriceStrengthLayerConfig.layer_descriptions[0] == '极低层(放量下跌趋势强)'
 
     def test_ic_source_default(self):
         """TC001-04: ic_source 默认路径"""
@@ -61,12 +61,12 @@ class TestVolumePriceStrengthLayerConfig:
         config = VolumePriceStrengthLayerConfig()
         assert '1' in config.layer_names_dict
         assert '5' in config.layer_names_dict
-        assert config.layer_names_dict['1'] == '极低层(量价齐升最弱)'
+        assert config.layer_names_dict['1'] == '极低层(放量下跌趋势强)'
 
     def test_layer_names_semantic(self):
         """TC001-08: layer_descriptions 语义描述"""
         for desc in VolumePriceStrengthLayerConfig.layer_descriptions:
-            assert '量价齐升' in desc
+            assert '量价' in desc or '趋势' in desc
 
     def test_layer_names_no_fixed_threshold(self):
         """TC001-09: layer_names 纯标签无固定阈值"""

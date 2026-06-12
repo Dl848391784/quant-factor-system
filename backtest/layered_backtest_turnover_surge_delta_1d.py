@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-量价强度因子分层回测脚本
+换手率突增差分因子分层回测脚本
 
 因子定义：
-- volume_price_strength = (return * volume_ratio) 的5日均值
-- 含义：量价协同强度，正值=放量上涨趋势，负值=放量下跌趋势
+- turnover_surge_delta = turnover_surge(T) - turnover_surge(T-1)
+- 含义：换手率偏离程度的变化量，正值=偏离加剧，负值=偏离收敛
 - 预计算因子，需传入 factor_calculator
 
 遵循 MODULE.md 薄声明规范：
@@ -21,13 +21,13 @@ from typing import ClassVar
 
 from backtest.common.factor_cli import factor_cli_main
 from backtest.common.layered_backtest_runner import LayerConfigBase
-from data_fetchers.factor_calculator import calculate_volume_price_strength
+from data_fetchers.factor_calculator import calculate_turnover_surge_delta
 
 
-class VolumePriceStrengthLayerConfig(LayerConfigBase):
-    """量价强度因子分层配置（薄声明）"""
+class TurnoverSurgeDeltaLayerConfig(LayerConfigBase):
+    """换手率突增差分因子分层配置（薄声明）"""
 
-    factor_name: ClassVar[str] = "volume_price_strength"
+    factor_name: ClassVar[str] = "turnover_surge_delta"
 
     layer_names: ClassVar[Sequence[str]] = (
         "lowest",
@@ -38,16 +38,16 @@ class VolumePriceStrengthLayerConfig(LayerConfigBase):
     )
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        "极低层(放量下跌趋势强)",
-        "偏低层(量价偏弱)",
-        "正常层(量价中性)",
-        "偏高层(量价偏强)",
-        "极高层(放量上涨趋势强)",
+        "极低层(换手率偏离大幅收敛)",
+        "偏低层(换手率偏离略有收敛)",
+        "正常层(换手率偏离变化接近零)",
+        "偏高层(换手率偏离略有扩大)",
+        "极高层(换手率偏离大幅扩大)",
     )
 
 
 if __name__ == "__main__":
     factor_cli_main(
-        config_cls=VolumePriceStrengthLayerConfig,
-        factor_calculator=calculate_volume_price_strength,
+        config_cls=TurnoverSurgeDeltaLayerConfig,
+        factor_calculator=calculate_turnover_surge_delta,
     )
