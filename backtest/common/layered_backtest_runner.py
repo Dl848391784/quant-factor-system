@@ -323,6 +323,9 @@ def load_factor_return_data(
         - 2026-05-27 v2.7: 从统一数据源 factor_ic_data.json.gz 读取
         - 2026-06-13 v2.8: 改用 ijson 流式解析 + 列过滤，避免 json.load 全量加载导致 OOM
           (factor_ic_data.json.gz 解压后 2.17GB，json.load 物理内存峰值 4+GB 触发 OOM)
+        - 2026-06-13 v2.8.1: 修复 numeric_cols 误纳入 _INDEX_COLS 导致
+          float('YYYY-MM-DD') ValueError（return_3d / past_return_1d / return_5d /
+          ma5_deviation / near_high_ratio_5 等 required_cols 含 'date'/'asset' 的因子）
 
     注意:
         - 遵循 PROJECT.md 跨模块数据路径规范
@@ -362,8 +365,10 @@ def load_factor_return_data(
         keep_cols |= set(required_factor_cols)
 
     # 数值列白名单：return + factor（数据源中数值以 Decimal/字符串序列化，需提前 float 化）
-    # 不在该集合的列（date/asset）按原始 str 累积
-    numeric_cols: set[str] = set(_RETURN_COLS) | set(required_factor_cols or [])
+    # 显式排除 _INDEX_COLS：date/asset 是 str，部分因子（如 return_3d / past_return_1d /
+    # ma5_deviation 等）的 required_cols 含 'date'/'asset'，若纳入数值白名单将触发
+    # float('YYYY-MM-DD') ValueError（factor_cli 退出码 3 = DATA_STRUCTURE_ERROR）。
+    numeric_cols: set[str] = (set(_RETURN_COLS) | set(required_factor_cols or [])) - set(_INDEX_COLS)
 
     # 3) 流式遍历 data.item，按列累积 + 数值列即时 float 化
     #    关键设计:

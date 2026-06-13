@@ -229,5 +229,73 @@ class TestMemoryFootprint:
         assert ratio < 0.50, f"过滤后内存 {mem_filtered} 应 < 全量 {mem_full} 的 50%, 实际 ratio={ratio:.2f}"
 
 
+# ============================================================================
+# TC09: required_factor_cols 含索引列时不应被 float() 化（回归测试）
+# ============================================================================
+
+
+class TestIndexColsNotFloated:
+    """回归测试：required_factor_cols 含 'date'/'asset' 时不应触发 float('YYYY-MM-DD').
+
+    背景（2026-06-13 v2.8.1）：
+    - 部分因子的 calculator.required_cols 含索引列，例如：
+        * calculate_return_3d.required_cols      = ["close", "asset", "date"]
+        * calculate_past_return_1d.required_cols = ["close", "asset", "date"]
+        * calculate_return_5d.required_cols      = ["close", "asset", "date"]
+        * calculate_ma5_deviation.required_cols  = ["date", "asset", "close"]
+        * calculate_near_high_ratio_5.required_cols = ["date", "asset", "close"]
+    - factor_cli.py 把 required_cols 透传给 load_factor_return_data 的 required_factor_cols
+    - v2.8 引入"数值列即时 float() 化"逻辑后，date/asset 字符串误入数值白名单
+      → float('2024-05-22') ValueError → 退出码 3 (DATA_STRUCTURE_ERROR)
+
+    复现命令：python -m backtest.layered_backtest_return_3d_1d
+    日志：backtest/logs/return_3d_2026-06-13.log
+        "数据问题: could not convert string to float: '2024-05-22'"
+    """
+
+    def test_required_factor_cols_with_date_and_asset(self, fake_data_source):
+        """required_factor_cols 含 'date'/'asset' 时正常加载，不抛 ValueError"""
+        # 模拟 calculate_return_3d.required_cols = ["close", "asset", "date"]
+        # 注：fake fixture 没有 close 列，这里改用 fixture 已有的 rsi_6 替代
+        factor_df, return_df = load_factor_return_data(
+            data_source=fake_data_source,
+            required_factor_cols=["rsi_6", "asset", "date"],
+        )
+
+        # date/asset 列保持字符串语义，未被 float() 化
+        # 注：pandas 在不同版本可能推断为 object 或 StringDtype，统一用 dtype.kind 检查
+        # kind 'O' = object, 'U' = str/StringDtype；'f'/'i' = float/int 才是 bug
+        assert factor_df["date"].dtype.kind in ("O", "U"), (
+            f"date 列应保持字符串类型，实际 {factor_df['date'].dtype} (kind={factor_df['date'].dtype.kind})"
+        )
+        assert factor_df["asset"].dtype.kind in ("O", "U"), (
+            f"asset 列应保持字符串类型，实际 {factor_df['asset'].dtype} (kind={factor_df['asset'].dtype.kind})"
+        )
+
+        # 抽样验证 date 仍是 'YYYY-MM-DD' 字符串（值类型才是关键证据）
+        first_date = factor_df["date"].iloc[0]
+        assert isinstance(first_date, str), f"date 值应为 str，实际 {type(first_date)}"
+        assert len(first_date) == 10 and first_date[4] == "-", f"date 值应为 'YYYY-MM-DD'，实际 {first_date!r}"
+
+        # 业务因子列正常 float 化
+        assert factor_df["rsi_6"].dtype.kind == "f", f"rsi_6 应为 float dtype，实际 {factor_df['rsi_6'].dtype}"
+
+        # 索引列在 factor_df 中不重复（_INDEX_COLS 已包含 date/asset，required 含同名不应造成重复列）
+        assert list(factor_df.columns).count("date") == 1
+        assert list(factor_df.columns).count("asset") == 1
+
+    def test_required_factor_cols_only_index_cols(self, fake_data_source):
+        """required_factor_cols 仅含索引列时也不抛 ValueError（边界场景）"""
+        factor_df, return_df = load_factor_return_data(
+            data_source=fake_data_source,
+            required_factor_cols=["asset", "date"],
+        )
+        assert factor_df["date"].dtype.kind in ("O", "U")
+        assert factor_df["asset"].dtype.kind in ("O", "U")
+        # return_df 数值列照常 float 化
+        assert factor_df.shape[0] == 100
+        assert return_df.shape[0] == 100
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
