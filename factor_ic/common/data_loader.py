@@ -243,7 +243,7 @@ def load_factor_return_data(
             else:
                 logger.info(f"合并 {col_name} 后: {rows_after} 行（无数据丢失）")
 
-        additional_cols = [k for k in additional_factor_files.keys() if k not in all_factor_cols]
+        additional_cols = [k for k in additional_factor_files if k not in all_factor_cols]
         all_factor_cols.extend(additional_cols)
 
     # ========== 列存在验证 ==========
