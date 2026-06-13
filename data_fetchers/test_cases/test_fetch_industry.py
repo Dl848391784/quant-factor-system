@@ -38,7 +38,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from data_fetchers.fetch_industry import (
     _OUTPUT_VERSION,
+    _SW_TO_EM_MAP,
     SW_INDUSTRY_CODE_MAP,
+    fetch_stock_industry_em,
     fetch_stock_industry_sw,
     get_industry_distribution,
     get_industry_map,
@@ -72,7 +74,7 @@ def mock_cache_file(temp_dir):
     cache_path = temp_dir / "stock_industry.json"
     cache_data = {
         "meta": {
-            "version": "2.7",
+            "version": "3.0",
             "source": "sw_category",
             "level": "一级",
             "updated_at": datetime.now().strftime('%Y-%m-%d'),
@@ -212,7 +214,7 @@ class TestCacheMechanism:
         expired_date = (datetime.now() - timedelta(days=8)).strftime('%Y-%m-%d')
         cache_data = {
             "meta": {
-                "version": "2.7",
+                "version": "3.0",
                 "source": "sw_category",
                 "level": "一级",
                 "updated_at": expired_date,
@@ -384,7 +386,7 @@ class TestConstraintCompliance:
 
     def test_version_constant_exists(self):
         """TC007-1: 版本号提取为常量（MODULE.md 约束 #16）"""
-        assert _OUTPUT_VERSION == '2.7'
+        assert _OUTPUT_VERSION == '3.0'
 
     def test_public_module_import(self):
         """TC007-2: 公共模块导入（MODULE.md 约束 #4）"""
@@ -407,28 +409,20 @@ class TestConstraintCompliance:
         assert INDUSTRY_CACHE_PATH.name == 'stock_industry.json'
         assert 'result' in str(INDUSTRY_CACHE_PATH)
 
-    def test_no_main_block(self):
-        """TC007-4: 禁止 __main__ 测试代码（PROJECT.md 规范）"""
-        import inspect
-
+    def test_main_block_has_exit_code(self):
+        """TC007-4: __main__ 块必须有退出码（MODULE.md 约束 + PROJECT.md 编码规范）"""
         import data_fetchers.fetch_industry as fetch_industry_module
 
-        # 验证文件末尾无 if __name__ == '__main__' 块
-        source = inspect.getsource(fetch_industry_module)
-        # 检查实际的 __main__ 块（而非历史记录中的文字）
-        lines = source.split('\n')
+        # 直接检查模块属性而非 inspect.getsource（后者返回 unicode 编码）
+        source_path = fetch_industry_module.__file__
+        with open(source_path, encoding='utf-8') as f:
+            source = f.read()
 
-        # 查找实际的 __main__ 块
-        has_main_block = False
-        for i, line in enumerate(lines):
-            if line.strip().startswith('if __name__ ==') and "'__main__'" in line:
-                # 检查是否是注释或文档字符串中的文字
-                # 实际的 __main__ 块应该有后续代码行（非空）
-                if i + 1 < len(lines) and lines[i + 1].strip():
-                    has_main_block = True
-                    break
-
-        assert not has_main_block, "文件包含实际的 __main__ 块"
+        # 验证 __main__ 块存在且有 sys.exit 调用（退出码规范）
+        # ruff format 会将单引号标准化为双引号，两种都要检查
+        has_main = ("if __name__ == '__main__'" in source or 'if __name__ == "__main__"' in source)
+        assert has_main, "缺少 __main__ CLI 入口"
+        assert "sys.exit" in source, "__main__ 块缺少 sys.exit 退出码调用"
 
 
 class TestEdgeCases:
@@ -455,6 +449,114 @@ class TestEdgeCases:
                 data = load_stock_industry()
                 # 验证：格式错误触发 refresh
                 assert data == {}
+
+
+class TestEMSource:
+    """TC009: 东方财富数据源测试"""
+
+    def test_sw_to_em_map_complete(self):
+        """TC009-1: _SW_TO_EM_MAP 包含31个申万一级行业"""
+        assert len(_SW_TO_EM_MAP) == 31
+        # 验证映射值与键一致（1:1映射）
+        for sw_name, em_name in _SW_TO_EM_MAP.items():
+            assert sw_name == em_name, f"映射不一致: {sw_name} -> {em_name}"
+
+    def test_sw_to_em_map_values_match_sw_codes(self):
+        """TC009-2: _SW_TO_EM_MAP 的行业名称与 SW_INDUSTRY_CODE_MAP 有效分类一致"""
+        # SW_INDUSTRY_CODE_MAP 中非'其他'的行业名应全部出现在 _SW_TO_EM_MAP
+        sw_valid_names = {v for v in SW_INDUSTRY_CODE_MAP.values() if v != '其他'}
+        em_names = set(_SW_TO_EM_MAP.keys())
+        assert sw_valid_names == em_names, f"不一致: SW有效={sw_valid_names - em_names}, EM额外={em_names - sw_valid_names}"
+
+    @patch('akshare.stock_board_industry_cons_em')
+    def test_fetch_stock_industry_em_column_validation(self, mock_api):
+        """TC009-3: EM API 列名校验（防御性）"""
+        import pandas as pd
+
+        # Mock 返回缺少必需列的 DataFrame
+        mock_api.return_value = pd.DataFrame({'代码': ['000001'], '名称_错': ['平安银行']})
+
+        # 应抛出异常（列名校验 KeyError）
+        try:
+            fetch_stock_industry_em()
+            assert False, "应抛出异常但未抛出"
+        except Exception as e:
+            # KeyError 被 for 循环内的 except 捕获并 continue，
+            # 最终所有31个板块都失败 → RuntimeError
+            assert isinstance(e, RuntimeError), f"期望 RuntimeError，实际 {type(e).__name__}"
+
+    @patch('akshare.stock_board_industry_cons_em')
+    def test_fetch_stock_industry_em_all_fail_raises_runtime_error(self, mock_api):
+        """TC009-4: 所有31个板块获取失败 → RuntimeError"""
+        mock_api.side_effect = Exception("网络错误")
+
+        try:
+            fetch_stock_industry_em()
+            assert False, "应抛出 RuntimeError"
+        except RuntimeError as e:
+            assert '所有31个板块均获取失败' in str(e)
+
+    @patch('akshare.stock_board_industry_cons_em')
+    def test_fetch_stock_industry_em_partial_success(self, mock_api):
+        """TC009-5: 部分板块获取失败仍返回有效数据"""
+        import pandas as pd
+
+        # 只有第一个板块成功，其他失败
+        success_df = pd.DataFrame({'代码': ['000001'], '名称': ['平安银行']})
+        call_count = 0
+
+        def side_effect(symbol):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return success_df
+            raise Exception(f"板块 {symbol} 获取失败")
+
+        mock_api.side_effect = side_effect
+
+        result = fetch_stock_industry_em()
+        assert '000001' in result
+        assert result['000001']['industry'] == '农林牧渔'  # 第一个板块
+
+    @patch('data_fetchers.fetch_industry.fetch_stock_industry_em')
+    @patch('data_fetchers.fetch_industry.fetch_stock_industry_sw')
+    @patch('data_fetchers.fetch_industry.write_json_cache')
+    def test_refresh_industry_cache_em_priority(self, mock_write, mock_sw, mock_em):
+        """TC009-6: refresh_industry_cache 优先使用 EM 数据源"""
+        mock_em.return_value = {'000001': {'name': '平安银行', 'industry': '银行', 'industry_code': 'em_银行'}}
+        mock_sw.return_value = {'000001': {'name': '平安银行', 'industry': '银行', 'industry_code': '4801'}}
+
+        result = refresh_industry_cache()
+        # EM 成功时不应调用 SW
+        mock_sw.assert_not_called()
+        assert result['000001']['industry_code'] == 'em_银行'
+
+    @patch('data_fetchers.fetch_industry.fetch_stock_industry_em')
+    @patch('data_fetchers.fetch_industry.fetch_stock_industry_sw')
+    @patch('data_fetchers.fetch_industry.write_json_cache')
+    def test_refresh_industry_cache_sw_fallback(self, mock_write, mock_sw, mock_em):
+        """TC009-7: EM 失败时降级到 SW"""
+        mock_em.side_effect = Exception("EM SSL 错误")
+        mock_sw.return_value = {'000001': {'name': '平安银行', 'industry': '银行', 'industry_code': '4801'}}
+
+        result = refresh_industry_cache()
+        # EM 失败后应调用 SW
+        mock_sw.assert_called_once()
+        assert result['000001']['industry_code'] == '4801'
+
+    @patch('data_fetchers.fetch_industry.fetch_stock_industry_em')
+    @patch('data_fetchers.fetch_industry.fetch_stock_industry_sw')
+    @patch('data_fetchers.fetch_industry.write_json_cache')
+    def test_refresh_industry_cache_both_fail_raises_runtime_error(self, mock_write, mock_sw, mock_em):
+        """TC009-8: EM + SW 均失败 → RuntimeError"""
+        mock_em.side_effect = Exception("EM 失败")
+        mock_sw.side_effect = Exception("SW SSL 失败")
+
+        try:
+            refresh_industry_cache()
+            assert False, "应抛出 RuntimeError"
+        except RuntimeError as e:
+            assert '行业数据获取失败' in str(e)
 
 
 # 运行测试入口（仅用于 pytest 发现，非手动执行）

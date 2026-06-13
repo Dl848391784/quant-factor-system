@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""
+近5日高低位置因子 IC 计算器
+
+遵循 PROJECT.md 公共模块强制复用规范。
+因子定义：near_high_ratio_5 = (close-min(close,5))/(max(close,5)-min(close,5))
+含义：接近近5日高点=强势，方向性因子。遵循 H5: IC方向不预判。
+边界：前4天→NaN；涨跌停max=min→position=1.0（遵循 Pitfall #45）。
+
+作者: 云瑶
+创建日期: 2026-06-11
+版本历史:
+  v1.0 (2026-06-11): 初始版本，复用 factor_calculator.calculate_near_high_ratio_5
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+
+sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
+
+from data_fetchers.factor_calculator import calculate_near_high_ratio_5  # noqa: E402
+from factor_ic.common.factor_ic_runner import run_complex_factor_ic  # noqa: E402
+from factor_ic.common.logger_config import get_logger  # noqa: E402
+
+
+logger = get_logger(__name__)
+
+
+class FactorCalcError(Exception):
+    """因子计算业务异常"""
+
+    pass
+
+
+DEFAULT_MIN_STOCKS = 10
+
+
+def main():
+    """CLI 主入口"""
+    parser = argparse.ArgumentParser(description="近5日高低位置因子 IC 计算器")
+    parser.add_argument("--force-full", action="store_true", help="强制全量计算")
+    parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
+    args = parser.parse_args()
+
+    logger.info(f"启动近5日高低位置因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+
+    result = run_complex_factor_ic(
+        factor_name="near_high_ratio_5",
+        factor_col="near_high_ratio_5",
+        factor_cols=["date", "asset", "close"],
+        custom_factor_calculation=calculate_near_high_ratio_5,
+        min_stocks=args.min_stocks,
+        force_full=args.force_full,
+        _logger=logger,
+    )
+
+    if result is None:
+        raise FactorCalcError("run_complex_factor_ic 返回 None")
+
+    ic_metrics = result.get("ic_metrics") or {}
+    sample_stats = result.get("sample_stats") or {}
+    period = result.get("period") or {}
+    ic_distribution = result.get("ic_distribution_consistency") or {}
+
+    ic_mean = ic_metrics.get("ic_mean")
+    ic_std = ic_metrics.get("ic_std")
+    icir = ic_metrics.get("icir")
+    positive_ratio = ic_distribution.get("positive_ratio")
+
+    ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
+    ic_std_str = f"{ic_std:.4f}" if ic_std is not None else "N/A"
+    icir_str = f"{icir:.2f}" if icir is not None else "N/A"
+    positive_ratio_str = f"{positive_ratio:.2%}" if positive_ratio is not None else "N/A"
+
+    summary_lines = [
+        "=" * 60,
+        "结果摘要",
+        "=" * 60,
+        f"因子名称: {result.get('factor_name', 'unknown')}",
+        f"更新模式: {result.get('update_mode', 'unknown')}",
+        f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}",
+        f"有效天数: {sample_stats.get('valid_days', 0)} 天",
+        "--- IC指标 ---",
+        f"IC 均值: {ic_mean_str}",
+        f"IC 标准差: {ic_std_str}",
+        f"ICIR: {icir_str}",
+        f"IC>0 占比: {positive_ratio_str}",
+    ]
+    logger.info("\n" + "\n".join(summary_lines))
+
+    for field, name in [(ic_mean, "IC 均值"), (ic_std, "IC 标准差"), (icir, "ICIR"), (positive_ratio, "IC>0 占比")]:
+        if field is None:
+            logger.warning(f"{name}为空")
+
+    logger.info("近5日高低位置因子IC计算完成")
+    return result
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except FactorCalcError as e:
+        logger.error(f"近5日高低位置因子IC计算失败: {e}")
+        sys.exit(1)
+    except Exception:
+        logger.exception("未预期的错误")
+        sys.exit(1)

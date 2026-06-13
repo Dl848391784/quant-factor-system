@@ -38,6 +38,13 @@
     - 完成日志移至结果摘要后（语义更清晰）
     - 异常处理简化（删除 RuntimeError 分支）
     - 代码量注释更新（~165行，反映实际行数）
+  v2.2 (2026-06-08):
+    - 新增启动参数日志（便于追溯 CLI 入参）
+    - 新增自定义异常类 FactorCalcError（区分业务失败与非预期 RuntimeError）
+    - 补全四字段 warning（ic_mean/ic_std/icir/positive_ratio 为 None 时告警）
+    - 结果摘要合并为单条日志输出
+    - 修正注释原子性表述（删除"并发场景下日志原子性"误导性描述）
+    - 保底处理改为抛出 FactorCalcError（遵循异常处理规范）
 """
 
 import argparse
@@ -54,6 +61,14 @@ from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)
+
+# ============================================================================
+# 自定义异常类
+# ============================================================================
+
+class FactorCalcError(Exception):
+    """因子计算业务异常（用于区分已知业务失败和未预期 RuntimeError）"""
+    pass
 
 # ============================================================================
 # 参数统一管理
@@ -73,8 +88,10 @@ def main():
 
     args = parser.parse_args()
 
+    # 启动参数日志（便于追溯本次运行配置）
+    logger.info(f"启动量比因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
-    # 注意：公共模块内部已有启动日志，此处不再重复打印
     # 注意：run_simple_factor_ic 只需 factor_col，公共模块自动加载该列
     result = run_simple_factor_ic(
         factor_name='volume_ratio',
@@ -84,11 +101,9 @@ def main():
         _logger=logger
     )
 
-    # 保底处理：公共模块异常返回 None 时直接退出
-    # 注意：这是可预期的业务失败，不是运行时错误，直接退出更语义清晰
+    # 防御性检查：result 为 None 时抛出业务异常（遵循 PROJECT.md 异常处理规范）
     if result is None:
-        logger.error("run_simple_factor_ic 返回 None")
-        sys.exit(1)
+        raise FactorCalcError('run_simple_factor_ic 返回 None，数据加载或计算可能失败')
 
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get('ic_metrics') or {}
@@ -98,63 +113,46 @@ def main():
     # 语义：正比例与方向一致/矛盾判断（MODULE.md 第77行），非单纯分布统计
     ic_distribution = result.get('ic_distribution_consistency') or {}
 
-    logger.info("=" * 60)
-    logger.info("结果摘要")
-    logger.info("=" * 60)
-    logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
-    logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
-    logger.info(f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}")
-    logger.info(f"有效天数: {sample_stats.get('valid_days', 0)} 天")
-    logger.info("--- IC指标 ---")
-
+    # 构建结果摘要（合并为单条日志便于阅读）
     ic_mean = ic_metrics.get('ic_mean')
-    if ic_mean is not None:
-        logger.info(f"IC 均值: {ic_mean:.4f}")
-    else:
-        logger.info("IC 均值: N/A（本次计算结果为空，请检查数据源）")
-
     ic_std = ic_metrics.get('ic_std')
-    if ic_std is not None:
-        logger.info(f"IC 标准差: {ic_std:.4f}")
-    else:
-        logger.info("IC 标准差: N/A（数据不足或全为相同值）")
-
     icir = ic_metrics.get('icir')
-    if icir is not None:
-        logger.info(f"ICIR: {icir:.2f}")
-    else:
-        logger.info("ICIR: N/A（IC 标准差为 0 或数据不足）")
-
     positive_ratio = ic_distribution.get('positive_ratio')
-    if positive_ratio is not None:
-        logger.info(f"IC>0 占比: {positive_ratio:.2%}")
-    else:
-        logger.info("IC>0 占比: N/A（字段名错误或数据缺失）")
 
-    # 异常状态整体感知日志（运维巡检用）
-    # ic_mean 为 None 表示整个 IC 计算结果为空，是最严重情况
-    has_warning = False
+    # 格式化各字段（None 时显示 N/A）
+    ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
+    ic_std_str = f"{ic_std:.4f}" if ic_std is not None else "N/A"
+    icir_str = f"{icir:.2f}" if icir is not None else "N/A"
+    positive_ratio_str = f"{positive_ratio:.2%}" if positive_ratio is not None else "N/A"
+
+    summary_lines = [
+        "=" * 60,
+        "结果摘要",
+        "=" * 60,
+        f"因子名称: {result.get('factor_name', 'unknown')}",
+        f"更新模式: {result.get('update_mode', 'unknown')}",
+        f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}",
+        f"有效天数: {sample_stats.get('valid_days', 0)} 天",
+        "--- IC指标 ---",
+        f"IC 均值: {ic_mean_str}",
+        f"IC 标准差: {ic_std_str}",
+        f"ICIR: {icir_str}",
+        f"IC>0 占比: {positive_ratio_str}",
+    ]
+    logger.info("\n" + "\n".join(summary_lines))
+
+    # 异常状态告警（运维巡检用，遵循版本历史四字段告警约定）
     if ic_mean is None:
-        logger.warning("本次IC计算结果为空，请检查数据源或参数配置")
-        has_warning = True
-    # ic_std 为 None 表示 IC 标准差无法计算，根因在此层而非 icir 层
-    elif ic_std is None:
-        logger.warning("IC标准差无法计算（数据不足或全为相同值），请检查因子数据分布")
-        has_warning = True
-    # icir 为 None 表示 ICIR 无法计算（通常因 ic_std=0 或数据不足）
-    elif icir is None:
-        logger.warning("ICIR无法计算（IC标准差为0或数据不足），请检查因子数据分布")
-        has_warning = True
-
-    # positive_ratio 为 None 表示分布一致性判断缺失（独立检查，不与上方 elif 链耦合）
+        logger.warning("本次计算 IC 均值为空，请检查数据源")
+    if ic_std is None:
+        logger.warning("IC 标准差无法计算，请检查因子数据分布")
+    if icir is None:
+        logger.warning("ICIR 无法计算，请检查因子数据分布")
     if positive_ratio is None:
-        logger.warning("IC>0占比无法获取（字段名错误或数据缺失），请检查公共模块输出结构")
-        has_warning = True
+        logger.warning("IC>0 占比无法获取，请检查公共模块输出结构")
 
-    if has_warning:
-        logger.info("量比因子IC计算完成（存在异常，请关注上方警告）")
-    else:
-        logger.info("量比因子IC计算完成")
+    # 确认结果处理完成后才输出"计算完成"日志（避免中途失败造成误导）
+    logger.info("量比因子IC计算完成")
 
     return result
 
@@ -162,7 +160,11 @@ def main():
 if __name__ == '__main__':
     try:
         main()
+    except FactorCalcError as e:
+        # 已知业务异常，使用 error()（不打印完整堆栈，但保留错误内容）
+        logger.error(f"量比因子IC计算失败: {e}")
+        sys.exit(1)
     except Exception:
-        # 未预期异常，使用 exception()（自动打印完整堆栈，无需重复传 e）
+        # 未预期异常（含非预期 RuntimeError），使用 exception()（自动打印完整堆栈）
         logger.exception("未预期的错误")
         sys.exit(1)

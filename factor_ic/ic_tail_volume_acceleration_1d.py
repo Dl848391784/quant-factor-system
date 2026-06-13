@@ -40,8 +40,6 @@
 
 # 标准库导入
 import argparse
-import gzip
-import json
 import sys
 from pathlib import Path
 
@@ -54,10 +52,9 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 本地模块导入
-from paths import DATA_FETCHERS_RESULT  # 遵循 PROJECT.md H7 规则
-
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
 from factor_ic.common.logger_config import get_logger
+from factor_ic.common.tail_data_loader import load_tail_trading_data  # 公共模块复用
 
 
 logger = get_logger(__name__)
@@ -67,40 +64,6 @@ logger = get_logger(__name__)
 # ============================================================================
 DEFAULT_MIN_STOCKS = 10
 EPSILON = 1e-10  # 避免除零阈值
-
-# 尾盘数据路径（遵循 PROJECT.md H7 规则：使用 paths.py 单一来源）
-TAIL_TRADING_DATA_PATH = DATA_FETCHERS_RESULT / "tail_trading_data.json.gz"
-
-
-# ============================================================================
-# 辅助函数：加载尾盘数据
-# ============================================================================
-
-
-def load_tail_trading_data() -> pd.DataFrame:
-    """
-    加载尾盘数据
-
-    Returns:
-        DataFrame，包含 date, asset, prices, volumes 列
-
-    Raises:
-        FileNotFoundError: 尾盘数据文件不存在
-        ValueError: 尾盘数据格式错误
-    """
-    if not TAIL_TRADING_DATA_PATH.exists():
-        raise FileNotFoundError(f"尾盘数据文件不存在: {TAIL_TRADING_DATA_PATH}")
-
-    with gzip.open(TAIL_TRADING_DATA_PATH, "rt", encoding="utf-8") as f:
-        data = json.load(f)
-
-    if "data" not in data:
-        raise ValueError("尾盘数据格式错误：缺少 'data' 字段")
-
-    df = pd.DataFrame(data["data"])
-
-    logger.info("尾盘数据加载完成: %d 条记录", len(df))
-    return df
 
 
 # ============================================================================
@@ -224,8 +187,8 @@ def calculate_tail_volume_acceleration(factor_df: pd.DataFrame) -> pd.DataFrame:
         100 * valid_count / total_count if total_count > 0 else 0,
     )
 
-    # 返回只包含原列 + 因子列的 DataFrame
-    result_cols = list(factor_df.columns) + ["tail_volume_acceleration"]
+    # 返回只包含原列 + 因子列的 DataFrame（防止列名重复）
+    result_cols = [c for c in factor_df.columns if c != "tail_volume_acceleration"] + ["tail_volume_acceleration"]
     return merged_df[result_cols]
 
 
@@ -242,6 +205,9 @@ def main():
 
     args = parser.parse_args()
 
+    # 启动参数日志（便于追溯本次运行配置）
+    logger.info(f"启动尾盘量能加速度因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
         factor_name="tail_volume_acceleration",
@@ -253,71 +219,69 @@ def main():
         _logger=logger,
     )
 
-    # 保底处理：公共模块异常返回 None 时直接退出
+    # 防御性检查：result 为 None 时抛出异常（遵循 PROJECT.md 异常处理规范）
     if result is None:
-        logger.error("run_complex_factor_ic 返回 None")
-        sys.exit(1)
+        raise RuntimeError('run_complex_factor_ic 返回 None，数据加载或计算可能失败')
 
-    # 使用 .get() + or {} 防御性访问结果
+    # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get("ic_metrics") or {}
     sample_stats = result.get("sample_stats") or {}
     period = result.get("period") or {}
     ic_distribution = result.get("ic_distribution_consistency") or {}
 
-    logger.info("=" * 40)
-    logger.info("结果摘要")
-    logger.info("=" * 40)
-
-    # IC 指标
+    # 构建结果摘要（单次输出保证并发场景下日志原子性）
     ic_mean = ic_metrics.get("ic_mean")
     ic_std = ic_metrics.get("ic_std")
     icir = ic_metrics.get("icir")
-
-    if ic_mean is not None:
-        logger.info("  IC 均值: %.4f", ic_mean)
-    else:
-        logger.warning("  IC 均值: N/A（数据不足或计算异常）")
-
-    if ic_std is not None:
-        logger.info("  IC 标准差: %.4f", ic_std)
-    else:
-        logger.warning("  IC 标准差: N/A（IC 为常量或数据不足）")
-
-    if icir is not None:
-        logger.info("  ICIR: %.4f", icir)
-    else:
-        logger.warning("  ICIR: N/A（IC 标准差为 0 或数据不足）")
-
-    # 正比例统计
     positive_ratio = ic_distribution.get("positive_ratio")
-    if positive_ratio is not None:
-        logger.info("  正比例: %.2f%%", positive_ratio * 100)
-    else:
-        logger.warning("  正比例: N/A（数据不足）")
-
-    # 样本统计
     avg_stocks = sample_stats.get("avg_stocks_per_day")
     total_days = sample_stats.get("total_days")
-
-    if avg_stocks is not None:
-        logger.info("  平均股票数: %.1f", avg_stocks)
-
-    if total_days is not None:
-        logger.info("  总交易日数: %d", total_days)
-
-    # 时间范围
     start_date = period.get("start")
     end_date = period.get("end")
 
-    if start_date and end_date:
-        logger.info("  日期范围: %s ~ %s", start_date, end_date)
+    # 格式化各字段（None 时显示 N/A）
+    ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
+    ic_std_str = f"{ic_std:.4f}" if ic_std is not None else "N/A"
+    icir_str = f"{icir:.4f}" if icir is not None else "N/A"
+    positive_ratio_str = f"{positive_ratio * 100:.2f}%" if positive_ratio is not None else "N/A"
+    avg_stocks_str = f"{avg_stocks:.1f}" if avg_stocks is not None else "N/A"
+    total_days_str = f"{total_days}" if total_days is not None else "N/A"
+    date_range_str = f"{start_date} ~ {end_date}" if start_date and end_date else "N/A"
 
-    logger.info("=" * 40)
-    logger.info("计算完成")
-    logger.info("=" * 40)
+    summary_lines = [
+        "=" * 40,
+        "结果摘要",
+        "=" * 40,
+        f"因子名称: {result.get('factor_name', 'unknown')}",
+        f"更新模式: {result.get('update_mode', 'unknown')}",
+        f"  IC 均值: {ic_mean_str}",
+        f"  IC 标准差: {ic_std_str}",
+        f"  ICIR: {icir_str}",
+        f"  正比例: {positive_ratio_str}",
+        f"  平均股票数: {avg_stocks_str}",
+        f"  总交易日数: {total_days_str}",
+        f"  日期范围: {date_range_str}",
+        "=" * 40,
+        "计算完成",
+        "=" * 40,
+    ]
+    logger.info("\n" + "\n".join(summary_lines))
+
+    # ic_mean 为 None 时额外输出 warning，便于告警系统捕获异常运行
+    if ic_mean is None:
+        logger.warning("本次计算 IC 均值为空，请检查数据源")
 
     return result
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except RuntimeError as e:
+        # 已知业务异常，使用 error()（不打印完整堆栈，但保留错误内容）
+        logger.error(f"尾盘量能加速度因子IC计算失败: {e}")
+        sys.exit(1)
+    except Exception:
+        # 未预期异常，使用 exception()（自动打印完整堆栈）
+        logger.exception("未预期的错误")
+        sys.exit(1)

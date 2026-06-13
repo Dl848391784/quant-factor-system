@@ -1,7 +1,7 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.20
-> 最后更新: 2026-06-10
+> 版本: v2.22
+> 最后更新: 2026-06-12
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
 >
@@ -153,6 +153,12 @@ Step 7: 股票选股 (stock_selector.py)
 - 不应硬编码默认值（如 `rsi/volume_ratio`），因为筛选后的因子由 comprehensive_factor 模块决定
 - **数据流**：`factor_selector.py` 篮选因子 → `composite_runner.py` 保存筛选结果 → `stock_selector.py` 读取筛选结果
 
+**前置过滤**（v1.12 新增）:
+- **振幅过滤**: 振幅 < `min_amplitude`（默认1%）的股票被排除
+  - 原因：振幅<1%的股票通常是一字板或接近一字板的涨停股，实际不可买入（全天封板无成交机会）
+  - 若涨停打开可买入，往往意味着趋势反转，恰恰是卖点而非买点
+  - 振幅=0（一字板）占约0.1%股票，振幅<1%占约0.4%股票，排除比例极小
+
 **流程**:
 ```
 1. 加载最优权重配置（weight_selection_result.json）
@@ -163,9 +169,15 @@ Step 7: 股票选股 (stock_selector.py)
 6. 标准化因子（截面标准化）
 7. 加载 IC 数据（根据权重方法）
 8. 计算综合因子（使用最优权重方法）
-9. 排序选出 Top N
+9. 排序选出 Top N（含前置过滤：覆盖率过滤 + 振幅过滤）
 10. 输出结果
 ```
+
+**过滤顺序**:
+1. NaN 综合因子值过滤
+2. 因子覆盖率过滤（覆盖率 < 50% 排除，安全网）
+3. 振幅过滤（振幅 < min_amplitude 排除，排除不可交易的一字板涨停股）
+4. 排序 + Top N
 
 **排序规则**:
 - **反向因子** (`factor_direction=negative`): 升序排序（综合因子值越小越好）
@@ -180,10 +192,14 @@ Step 7: 股票选股 (stock_selector.py)
     "weight_method": "icir_weight",
     "composite_score": 0.7273,
     "factor_direction": "negative",
-    "top_n": 3,
-    "total_stocks": 3006,
-    "valid_stocks": 3,
-    "created_at": "2026-06-03T22:25:39"
+    "top_n": 10,
+    "stocks_on_date": 3006,
+    "valid_stocks": 10,
+    "created_at": "2026-06-03T22:25:39",
+    "direction_map": {...},
+    "flipped_factors": [...],
+    "min_amplitude": 0.01,
+    "excluded_by_amplitude": 8
   },
   "top_stocks": [
     {
@@ -191,7 +207,8 @@ Step 7: 股票选股 (stock_selector.py)
       "code": "003004",
       "composite_value": -3.1497,
       "factor_values": {"tail_price_position": 0.85, "turnover_surge": 1.2},
-      "factor_values_std": {"tail_price_position": -1.85, "turnover_surge": -2.20, "overnight_ret": -3.00}  // v1.3b: 标准化 z-score（Winsorize ±3σ），报告应显示此值而非原始值。v2.15: 正向因子(如 overnight_ret)的 z-score 已取反统一负向语义，报告展示时因子名加*标记+表头说明
+      "factor_values_std": {"tail_price_position": -1.85, "turnover_surge": -2.20, "overnight_ret": -3.00},
+      "weight_coverage": 1.0
     },
     ...
   ],
@@ -207,14 +224,16 @@ Step 7: 股票选股 (stock_selector.py)
 **CLI 参数**:
 ```bash
 python stock_selector.py \
-    --top_n 3 \
+    --top_n 10 \
+    --min_amplitude 0.01 \
     --selection_date 2026-06-01 \
     --factor_direction negative \
     --rolling_window 60
 ```
 
 **Note**:
-- `top_n` 默认值改为 3（用户需求），而非 10
+- `top_n` 默认值改为 10（v1.12: 从3改为10，扩大选股范围），而非 3
+- `min_amplitude` 默认值 0.01（1%），排除振幅<1%的一字板涨停股（v1.12新增）
 - `factor_list/factor_cols` 从 composite 结果动态读取，示例中显示的是实际筛选后的因子名
 
 ---
@@ -402,10 +421,14 @@ class WeightMethodBase(ABC):
     FACTOR_NAME_TO_COL_MAP = {
         'rsi': 'rsi_6',
         'volume_ratio': 'volume_ratio_5',
-        'kdj_j': 'kdj_j_9',
-        'bollinger_pb': 'bollinger_pb_20',
-        'turnover_surge': 'turnover_surge_5',
+        'kdj_j': 'kdj_j',
+        'bollinger_pb': 'bollinger_pb',
+        'turnover_surge': 'turnover_surge',
         'main_inflow_ratio': 'main_inflow_ratio_1d',
+        # 行业方向性因子（v1.42 2026-06-12 新增）
+        'industry_momentum_5d': 'industry_momentum_5d',
+        'industry_turnover_trend': 'industry_turnover_trend',
+        'industry_amplitude_trend': 'industry_amplitude_trend',
     }
     COL_TO_FACTOR_NAME_MAP = {v: k for k, v in FACTOR_NAME_TO_COL_MAP.items()}
 
@@ -718,12 +741,41 @@ if missing_in_index or missing_in_columns:
 FACTOR_NAME_TO_COL_MAP = {
     'rsi': 'rsi_6',
     'volume_ratio': 'volume_ratio_5',
-    'kdj_j': 'kdj_j_9',
-    'bollinger_pb': 'bollinger_pb_20',
-    'turnover_surge': 'turnover_surge_5',
-    'main_inflow_ratio': 'main_inflow_ratio_1d',
+    'kdj_j': 'kdj_j',
+    'bollinger_pb': 'bollinger_pb',
+    'turnover_surge': 'turnover_surge',
+    'amplitude': 'amplitude',
+    'price_position': 'price_position',
+    'overnight_ret': 'overnight_ret',
+    'return_5d': 'return_5d',
+    'momentum_strength': 'momentum_strength',
+    # 尾盘因子
+    'tail_price_position': 'tail_price_position',
+    'tail_price_slope': 'tail_price_slope',
+    'tail_price_volume_intensity': 'tail_price_volume_intensity',
+    'tail_volume_acceleration': 'tail_volume_acceleration',
+    'tail_volume_shrink': 'tail_volume_shrink',
+    # 方向性因子
+    'volume_price_strength': 'volume_price_strength',
+    'positive_day_ratio_5': 'positive_day_ratio_5',
+    'ma5_deviation': 'ma5_deviation',
+    'near_high_ratio_5': 'near_high_ratio_5',
+    # 差分因子
+    'tail_price_position_delta': 'tail_price_position_delta',
+    'tail_volume_shrink_delta': 'tail_volume_shrink_delta',
+    # 行业方向性因子（v1.42 2026-06-12 新增）
+    'industry_momentum_5d': 'industry_momentum_5d',
+    'industry_turnover_trend': 'industry_turnover_trend',
+    'industry_amplitude_trend': 'industry_amplitude_trend',
+    'intraday_intensity': 'intraday_intensity',
 }
 ```
+
+**行业方向性因子映射说明**（v1.42 2026-06-12 新增）：
+- **What**：3 个行业方向性因子（industry_momentum_5d / industry_turnover_trend / industry_amplitude_trend）的逻辑名与列名相同（列名不带参数后缀）
+- **How**：`factor_selector.py` 和 `weight_engine.py` 的 `FACTOR_NAME_TO_COL_MAP` 均已新增这 3 个映射条目（v1.42 2026-06-12）
+- **Don't**：不可遗漏任一文件的映射更新——factor_selector（筛选层）和 weight_engine（权重层）必须同步
+- **Verify**：`grep -n "industry_momentum_5d" comprehensive_factor/common/factor_selector.py comprehensive_factor/common/weight_engine.py` 应均返回映射条目
 
 **未映射因子**:用因子名作列名 (兼容),记录到 `unmapped_factors` 并 warning;调用方决定是否终止。
 
@@ -1841,6 +1893,8 @@ for factor_name, direction in direction_map.items():
 | v2.19 | 2026-06-11 | generate_factor_summary_report.py v2.16: 权重展示修复——最优方法为 Rolling ICIR 时展示真实 last_day_weights 而非静态 ICIR 权重；权重来源说明动态化；tail_price_position 从18.4%(静态)→8.3%(Rolling最新日) |
 | v2.20 | 2026-06-11 | weight_engine.py v1.19: Rolling ICIR T-1 NaN 权重回退策略修复——用 IC 序列最后有效值填充 T-1 NaN，消除 momentum_strength 等因子等权膨胀 bug；generate_factor_summary_report.py v2.18: load_composite_results 添加 weight_meta 字段传递（修复报告权重=0.0%显示bug） |
 | v2.21 | 2026-06-11 | generate_factor_summary_report.py v2.17: 评分说明重构——展示所有4种方法的9维度完整评分明细而非只对比IC vs ICIR；最优方法(Rolling ICIR)换手率低分给出解释 |
+| v2.22 | 2026-06-12 | 新增行业方向性因子映射说明（M17 FACTOR_NAME_TO_COL_MAP 新增3条）；M6 代码示例同步更新；映射说明章节（What/How/Don't/Verify） |
+| v2.22 | 2026-06-11 | stock_selector.py v1.12: 新增 min_amplitude 参数（默认0.01=1%，排除不可交易的一字板涨停股）+ top_n 默认值从3改为10；MODULE.md 选股规范更新（前置过滤、过滤顺序、输出模板、CLI参数） |
 | v2.16 | 2026-06-11 | factor_loader.py v2.16: standardize_factors 新增 Winsorize 截断（±3σ），防止 momentum_strength 等比率类因子极端值导致 z-score 爆炸 |
 | v2.8 | 2026-06-10 | weight_engine.py v1.14: _apply_weights NaN 传播 Bug 修复（fillna(0)+divide+sum 替代 divide+sum(skipna=False)），让增量采集因子正常参与综合因子计算；M29 How/Don't 同步修正 |
 | v2.7 | 2026-06-04 | logger_config.py v2.0: 重写对齐 factor_ic 实现，自动文件输出；M4 扩展日志配置模块职责规范 |
@@ -1873,5 +1927,5 @@ for factor_name, direction in direction_map.items():
 
 ---
 
-*最后更新: 2026-06-11*
+*最后更新: 2026-06-12*
 

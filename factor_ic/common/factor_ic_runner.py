@@ -33,7 +33,6 @@ from .logger_config import get_logger
 logger = get_logger(__name__)
 
 # 导入数据加载（单文件模式）
-# 导入类型转换
 
 # 导入数据完整性检查
 from .data_completeness import check_data_completeness
@@ -53,7 +52,7 @@ def run_factor_ic_analysis(
     factor_name: str,
     factor_col: str,
     return_period: str = '1d',
-    return_col: str = 'forward_return_1d',
+    return_col: str | None = None,
     factor_cols: list[str] | None = None,
     min_stocks: int = 10,
     force_full: bool = False,
@@ -66,12 +65,12 @@ def run_factor_ic_analysis(
 ) -> dict[str, Any]:
     """
     因子 IC 分析统一主入口
-    
+
     参数:
         factor_name: 因子名称（如 'rsi', 'volume_ratio'）
         factor_col: 主因子列名（如 'rsi_6', 'volume_ratio_5'）
         return_period: 收益周期（如 '1d'）
-        return_col: 收益列名（缓存中）
+        return_col: 收益列名（缓存中）；None 时自动推导为 forward_return_{return_period}
         factor_cols: 需加载的因子列列表（默认 = [factor_col]）
         min_stocks: 最小股票数阈值
         force_full: 是否强制全量计算
@@ -84,10 +83,10 @@ def run_factor_ic_analysis(
         custom_factor_calculation_params: 自定义因子计算参数
         _logger: 日志记录器（由调用方传入，默认使用模块 logger）
             - 参数名使用下划线前缀避免遮蔽模块级 logger
-    
+
     返回:
         IC 分析结果字典（符合 MODULE.md 输出结构统一性规范）
-    
+
     流程:
         1. 判断模式（全量/增量/跳过）- 使用 check_data_completeness，不需要加载数据
         2. SKIP 模式：直接返回缓存数据
@@ -95,19 +94,19 @@ def run_factor_ic_analysis(
         4. 执行计算
         5. 构建输出
         6. 保存结果
-    
+
     示例:
         # RSI 因子（直接用缓存列）
         result = run_factor_ic_analysis(
             factor_name='rsi',
             factor_col='rsi_6'
         )
-        
+
         # KDJ 因子（需要自定义计算）
         def calculate_kdj_j(factor_df):
             # ... KDJ 计算逻辑 ...
             return factor_df
-        
+
         result = run_factor_ic_analysis(
             factor_name='kdj_j',
             factor_col='kdj_j',
@@ -119,6 +118,12 @@ def run_factor_ic_analysis(
     # 参数重命名避免遮蔽模块级 logger
     if _logger is None:
         _logger = get_logger(__name__)
+
+    # 自动推导 return_col：若未指定，从 return_period 推导列名
+    # 消除隐式耦合：传 return_period='5d' 时自动使用 forward_return_5d，
+    # 不会因默认值 forward_return_1d 导致静默错误
+    if return_col is None:
+        return_col = f'forward_return_{return_period}'
 
     _logger.info("=" * 60)
     _logger.info(f"因子 IC 分析: {factor_name}_{return_period}")
@@ -150,16 +155,13 @@ def run_factor_ic_analysis(
 
     # ========== 判断模式（不需要加载数据）==========
     # 使用 check_data_completeness 判断模式，避免 SKIP 模式也加载全量数据
-    _logger.info("[模式判断] 判断更新模式...")
 
     # force_full 强制全量模式
     if force_full:
         mode = 'full'
-        missing_dates = []
-        info = {'cache_exists': False}
         _logger.info("模式判断: 强制全量计算")
     else:
-        mode, missing_dates, info = check_data_completeness(factor_name, logger=_logger)
+        mode, _, _ = check_data_completeness(factor_name, logger=_logger)
         _logger.info(f"模式判断: {mode}")
 
     # ========== SKIP 模式：直接返回缓存数据 ==========
@@ -168,20 +170,23 @@ def run_factor_ic_analysis(
 
         # 直接读取缓存数据返回
         if output_path.exists():
-            with open(output_path, encoding='utf-8') as f:
-                cached_result = json.load(f)
-            cached_result['update_mode'] = 'skip'
-            _logger.info(f"✓ 返回缓存数据: {len(cached_result.get('dates', []))} 天")
-            return cached_result
+            try:
+                with open(output_path, encoding='utf-8') as f:
+                    cached_result = json.load(f)
+                cached_result['update_mode'] = 'skip'
+                _logger.info(f"✓ 返回缓存数据: {len(cached_result.get('dates', []))} 天")
+                return cached_result
+            except (json.JSONDecodeError, OSError) as e:
+                # 缓存文件损坏，转为全量重算
+                _logger.warning(f"缓存文件损坏 [{output_path}]: {e}，转为全量计算")
+                mode = 'full'
+                # 继续执行下方的加载数据+全量计算逻辑
         else:
             # 缓存文件不存在（理论上不应该发生，因为 mode='skip' 需要缓存存在）
-            _logger.warning("缓存文件不存在，返回错误结构")
-            return build_error_result(
-                factor_name=f'{factor_name}_{return_period}',
-                error_msg='缓存文件不存在（mode=skip 状态异常）',
-                return_period=return_period,
-                data_source=data_source
-            )
+            # 统一策略：缓存不可用（不存在或损坏）均 fallback 全量重算，管道自愈而非中断
+            _logger.warning(f"缓存文件不存在 [{output_path}]，转为全量计算")
+            mode = 'full'
+            # 继续执行下方的加载数据+全量计算逻辑
 
     # ========== 加载数据（仅在 FULL/INCREMENTAL 模式）==========
     _logger.info("[数据加载] 加载因子和收益数据...")
@@ -214,6 +219,11 @@ def run_factor_ic_analysis(
         )
 
     # ========== 增量模式处理 ==========
+    # 标志位：追踪自定义因子计算是否已执行
+    # 原因：增量路径 fallback 到全量时，若已在增量路径执行了 custom_factor_calculation，
+    # 全量路径不应重复执行（数据已被变换，重复执行会导致错误）
+    _custom_factor_done = False
+
     if mode == 'incremental':
         _logger.info("[执行模式] 增量更新...")
 
@@ -222,46 +232,67 @@ def run_factor_ic_analysis(
         if custom_factor_calculation is not None:
             _logger.info("[因子预处理] 执行自定义因子计算...")
             params = custom_factor_calculation_params or {}
-            factor_df = custom_factor_calculation(factor_df, **params)
-            _logger.info(f"处理后数据: {len(factor_df)} 行")
+            try:
+                factor_df = custom_factor_calculation(factor_df, **params)
+                _logger.info(f"处理后数据: {len(factor_df)} 行")
+                _custom_factor_done = True
+            except Exception as e:
+                _logger.error(f"自定义因子计算失败: {e}")
+                return build_error_result(
+                    factor_name=f'{factor_name}_{return_period}',
+                    error_msg=f'自定义因子计算失败: {e}',
+                    return_period=return_period,
+                    data_source=data_source
+                )
 
-        # 调用增量引擎（内部已保存结果）
-        result = incremental_update_ic(
-            output_path=output_path,
-            factor_df_full=factor_df,
-            return_df_full=return_df,
-            raw_metadata=raw_metadata,
-            factor_name=f'{factor_name}_{return_period}',
-            factor_col=factor_col,
-            return_col=return_col,
-            min_stocks=min_stocks
-        )
+        try:
+            # 调用增量引擎（内部已保存结果）
+            # 传入 factor_df.copy() 隔离：incremental_update_ic 可能就地修改 DataFrame，
+            # fallback 到全量时不能使用被污染的数据
+            result = incremental_update_ic(
+                output_path=output_path,
+                factor_df_full=factor_df.copy(),
+                return_df_full=return_df.copy(),
+                raw_metadata=raw_metadata,
+                factor_name=f'{factor_name}_{return_period}',
+                factor_col=factor_col,
+                return_col=return_col,
+                min_stocks=min_stocks
+            )
 
-        # **注意**：incremental_update_ic 内部已保存结果
-        # 职责划分：增量引擎负责保存，factor_ic_runner 不再重复保存
-        # 避免双重写入问题
-
-        # 检查增量引擎是否需要全量计算（缓存不存在或损坏）
-        if result.get('update_mode') == 'need_full':
-            _logger.warning("缓存不存在或损坏，转为全量计算")
-            mode = 'full'
-            # 继续执行下方的全量模式代码
-        else:
             # 增量引擎已返回完整结果（包含五维度判断）
             # incremental_update_ic 内部已调用 calculate_ic_statistics 计算五维度
             # 数据来源一致性：ic_values 和 dates 来自增量引擎合并后的全量数据
+            valid_days = result.get('sample_stats', {}).get('valid_days', 0)
+            total_days = len(result.get('dates', []))
+            _logger.info(f"✓ 增量更新完成！共 {total_days} 天（{valid_days} 天有效 IC）")
             return result
+
+        except (RuntimeError, ValueError, KeyError) as e:
+            # 缓存不存在/损坏或计算异常，转为全量计算
+            _logger.warning(f"{e}，转为全量计算")
+            mode = 'full'
+            # 继续执行下方的全量模式代码
 
     # ========== 全量模式 ==========
     # 注意：此分支也处理增量模式转全量模式的情况
     _logger.info("[执行模式] 全量计算...")
 
-    # 自定义因子计算（如有）
-    if custom_factor_calculation is not None:
+    # 自定义因子计算（如有且未在增量路径执行过）
+    if custom_factor_calculation is not None and not _custom_factor_done:
         _logger.info("[因子预处理] 执行自定义因子计算...")
         params = custom_factor_calculation_params or {}
-        factor_df = custom_factor_calculation(factor_df, **params)
-        _logger.info(f"处理后数据: {len(factor_df)} 行")
+        try:
+            factor_df = custom_factor_calculation(factor_df, **params)
+            _logger.info(f"处理后数据: {len(factor_df)} 行")
+        except Exception as e:
+            _logger.error(f"自定义因子计算失败: {e}")
+            return build_error_result(
+                factor_name=f'{factor_name}_{return_period}',
+                error_msg=f'自定义因子计算失败: {e}',
+                return_period=return_period,
+                data_source=data_source
+            )
 
     # 计算 IC（五维度判断）
     _logger.info("[IC 计算] 计算 IC（含五维度判断）...")
@@ -296,7 +327,6 @@ def run_factor_ic_analysis(
         )
 
     # 构建完整结果
-    _logger.info("[结果构建] 构建完整输出结构...")
 
     result = build_ic_result(
         ic_result=ic_result,
@@ -330,16 +360,16 @@ def run_simple_factor_ic(
 ) -> dict[str, Any]:
     """
     快捷函数：简单因子 IC 分析
-    
+
     适用于直接使用缓存列的因子（如 RSI、量比）
-    
+
     参数:
         factor_name: 因子名称
         factor_col: 因子列名
         _logger: 日志记录器（由调用方传入，默认使用模块 logger）
             - 参数名使用下划线前缀避免遮蔽模块级 logger
         **kwargs: 其他参数（传递给 run_factor_ic_analysis）
-    
+
     示例:
         result = run_simple_factor_ic('rsi', 'rsi_6')
         result = run_simple_factor_ic('volume_ratio', 'volume_ratio_5')
@@ -363,9 +393,9 @@ def run_complex_factor_ic(
 ) -> dict[str, Any]:
     """
     快捷函数：复杂因子 IC 分析
-    
+
     适用于需要预处理因子值的场景（如 KDJ、布林带）
-    
+
     参数:
         factor_name: 因子名称
         factor_col: 最终因子列名
@@ -374,13 +404,13 @@ def run_complex_factor_ic(
         _logger: 日志记录器（由调用方传入，默认使用模块 logger）
             - 参数名使用下划线前缀避免遮蔽模块级 logger
         **kwargs: 其他参数
-    
+
     示例:
         def calculate_kdj_j(factor_df):
             # KDJ 计算逻辑
             ...
             return factor_df
-        
+
         result = run_complex_factor_ic(
             factor_name='kdj_j',
             factor_col='kdj_j',
@@ -403,7 +433,7 @@ def run_complex_factor_ic(
 def main():
     """
     CLI 主入口
-    
+
     用法:
         python -m factor_ic.common.factor_ic_runner --factor rsi --col rsi_6
     """

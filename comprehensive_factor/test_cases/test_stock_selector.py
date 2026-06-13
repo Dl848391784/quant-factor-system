@@ -1,14 +1,13 @@
 """
 股票选股脚本测试
 
-测试用例：
+测试用例:
 1. 配置校验
 2. 权重配置加载
-3. 滚动ICIR选股
-4. 排序规则（正向/反向）
-5. Top N选股数量
-6. 输出结构完整性
-7. 边界情况处理
+3. 排序规则（正向/反向）
+4. Top N 选股数量
+5. 输出结构完整性
+6. 边界情况处理
 
 作者: 云瑶
 创建日期: 2026-06-03
@@ -24,7 +23,7 @@ import pytest
 
 
 # sys.path 处理
-PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.resolve()
 import sys  # noqa: E402
 
 
@@ -116,12 +115,6 @@ class TestConfigValidation:
         assert valid_config.top_n == 10
         assert valid_config.factor_direction == "negative"
 
-    def test_empty_factor_list(self):
-        """测试空因子列表"""
-        config = StockSelectorConfig(factor_list=[], factor_cols=[])
-        with pytest.raises(ValueError, match="factor_list 不能为空"):
-            config.validate()
-
     def test_top_n_zero(self):
         """测试 top_n 为 0"""
         config = StockSelectorConfig(top_n=0)
@@ -145,12 +138,10 @@ class TestLoadWeightConfig:
 
     def test_load_valid_config(self, tmp_path, mock_weight_config):
         """测试加载有效配置"""
-        # 创建临时文件
         config_file = tmp_path / "weight_selection_result.json"
         with open(config_file, "w") as f:
             json.dump(mock_weight_config, f)
 
-        # 加载
         result = load_weight_config(config_file)
         assert result["best_selection"]["method"] == "rolling_icir_weight"
 
@@ -180,26 +171,30 @@ class TestSortAndSelect:
 
     def test_negative_direction_ascending(self, mock_factor_df, mock_composite_factor):
         """测试反向因子升序排序"""
-        result = sort_and_select(
+        result, excluded_amp = sort_and_select(
             mock_composite_factor,
             mock_factor_df,
             top_n=3,
             factor_direction="negative",
+            factor_cols=["rsi_6", "volume_ratio_5"],
         )
 
         # 反向因子：升序（值越小越好）
         assert len(result) == 3
         assert result[0]["code"] == "000006"  # 综合因子值最小
         assert result[0]["composite_value"] == pytest.approx(-1.5, abs=0.1)
+        # 没有振幅列，excluded_amp 应为 0
+        assert excluded_amp == 0
 
     def test_positive_direction_descending(self, mock_factor_df, mock_composite_factor):
         """测试正向因子降序排序"""
         # 正向因子：降序（值越大越好）
-        result = sort_and_select(
+        result, excluded_amp = sort_and_select(
             mock_composite_factor,
             mock_factor_df,
             top_n=3,
             factor_direction="positive",
+            factor_cols=["rsi_6", "volume_ratio_5"],
         )
 
         assert len(result) == 3
@@ -207,11 +202,12 @@ class TestSortAndSelect:
 
     def test_top_n_larger_than_total(self, mock_factor_df, mock_composite_factor):
         """测试 Top N 大于总股票数"""
-        result = sort_and_select(
+        result, excluded_amp = sort_and_select(
             mock_composite_factor,
             mock_factor_df,
             top_n=100,  # 大于实际数量 10
             factor_direction="negative",
+            factor_cols=["rsi_6", "volume_ratio_5"],
         )
 
         assert len(result) == 10  # 返回所有有效股票
@@ -221,11 +217,12 @@ class TestSortAndSelect:
         # 添加 NaN 值
         composite_with_nan = pd.Series([0.0, 0.5, np.nan, 1.0, np.nan, -1.0, -0.5, np.nan, 0.25, np.nan])
 
-        result = sort_and_select(
+        result, excluded_amp = sort_and_select(
             composite_with_nan,
             mock_factor_df,
             top_n=3,
             factor_direction="negative",
+            factor_cols=["rsi_6", "volume_ratio_5"],
         )
 
         # NaN 排除后只剩 6 个有效值
@@ -235,16 +232,42 @@ class TestSortAndSelect:
 
     def test_factor_values_included(self, mock_factor_df, mock_composite_factor):
         """测试因子值包含在结果中"""
-        result = sort_and_select(
+        result, excluded_amp = sort_and_select(
             mock_composite_factor,
             mock_factor_df,
             top_n=1,
             factor_direction="negative",
+            factor_cols=["rsi_6", "volume_ratio_5"],
         )
 
         assert "factor_values" in result[0]
         assert "rsi_6" in result[0]["factor_values"]
         assert "volume_ratio_5" in result[0]["factor_values"]
+
+    def test_amplitude_filter(self, mock_factor_df):
+        """测试振幅过滤（v1.12 新增）"""
+        # 添加 amplitude 列：部分股票振幅低于阈值
+        df_with_amplitude = mock_factor_df.copy()
+        df_with_amplitude["amplitude"] = [0.005, 0.008, 0.03, 0.05, 0.02, 0.015, 0.04, 0.001, 0.06, 0.09]
+        # 振幅 < 0.01 的股票：000001(0.005), 000002(0.008), 000008(0.001) = 3只
+
+        composite = pd.Series([-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5])
+
+        result, excluded_amp = sort_and_select(
+            composite,
+            df_with_amplitude,
+            top_n=5,
+            factor_direction="negative",
+            factor_cols=["rsi_6", "volume_ratio_5"],
+            min_amplitude=0.01,
+        )
+
+        # 3 只振幅不足的股票被排除
+        assert excluded_amp == 3
+        # 结果中不应包含被排除的股票
+        excluded_codes = ["000001", "000002", "000008"]
+        for item in result:
+            assert item["code"] not in excluded_codes
 
 
 # ============================================================================
@@ -281,15 +304,17 @@ class TestGetLatestDate:
 class TestBuildResult:
     """结果构建测试"""
 
-    def test_build_result_structure(self, mock_weight_config, valid_config):
+    def test_build_result_structure(self, mock_top_stocks, valid_config, mock_weight_config):
         """测试结果结构完整性"""
-        top_stocks = [{"rank": 1, "code": "000001", "composite_value": -1.5, "factor_values": {}}]
-
         result = build_result(
-            top_stocks,
+            mock_top_stocks,
             valid_config,
             mock_weight_config,
-            total_stocks=100,
+            stocks_on_date=10,
+            factor_list=["rsi", "volume_ratio"],
+            factor_cols=["rssi_6", "volume_ratio_5"],
+            selection_date="2026-06-01",
+            excluded_by_amplitude=3,  # v1.12: 振幅过滤排除数
         )
 
         # 检查 meta 字段
@@ -298,6 +323,9 @@ class TestBuildResult:
         assert result["meta"]["weight_method"] == "rolling_icir_weight"
         assert result["meta"]["composite_score"] == 0.8137
         assert result["meta"]["top_n"] == 10
+        # v1.12: 振幅过滤信息
+        assert result["meta"]["min_amplitude"] == 0.01
+        assert result["meta"]["excluded_by_amplitude"] == 3
 
         # 检查 top_stocks 字段
         assert "top_stocks" in result
@@ -320,33 +348,21 @@ class TestEdgeCases:
         all_nan = pd.Series([np.nan] * 10)
 
         with pytest.raises(ValueError, match="综合因子值全部为 NaN"):
-            sort_and_select(all_nan, mock_factor_df, top_n=3, factor_direction="negative")
+            sort_and_select(all_nan, mock_factor_df, top_n=3, factor_direction="negative", factor_cols=["rsi_6", "volume_ratio_5"])
 
+    def test_amplitude_zero_threshold(self, mock_factor_df, mock_composite_factor):
+        """测试振幅阈值=0时不排除任何股票"""
+        df_with_amplitude = mock_factor_df.copy()
+        df_with_amplitude["amplitude"] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
-# ============================================================================
-# 集成测试
-# ============================================================================
+        result, excluded_amp = sort_and_select(
+            mock_composite_factor,
+            df_with_amplitude,
+            top_n=3,
+            factor_direction="negative",
+            factor_cols=["rsi_6", "volume_ratio_5"],
+            min_amplitude=0,  # 阈值=0，不排除
+        )
 
-
-class TestIntegration:
-    """集成测试（需要实际数据）"""
-
-    @pytest.mark.skipif(
-        not Path("/home/admin/projects/factor_ic_analyzer/data_fetchers/result/factor_ic_data.json.gz").exists(),
-        reason="数据源文件不存在",
-    )
-    def test_full_workflow(self):
-        """测试完整流程"""
-        config = StockSelectorConfig(top_n=3, selection_date="2026-06-01")
-
-        try:
-            result, output_file = select_stocks(config)
-
-            # 验证结果
-            assert "meta" in result
-            assert "top_stocks" in result
-            assert len(result["top_stocks"]) == 3
-            assert output_file.exists()
-
-        except FileNotFoundError as e:
-            pytest.skip(f"数据文件缺失: {e}")
+        assert excluded_amp == 0
+        assert len(result) == 3

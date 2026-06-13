@@ -1,48 +1,105 @@
-# design.md: Rolling ICIR T-1 NaN 权重回退策略修复
+# Design: 选股前置最低振幅阈值 + Top N 从 3 改为 10
 
-# 遵循 PROJECT.md Design-First 流程
+> 日期: 2026-06-11
+> 状态: Plan
 
-## 问题
+## 背景
 
-选股日 T-1 没有次日收益 → 无法计算 IC → rolling ICIR 为 NaN → fillna(1/n) 篏因子等权。
-导致 momentum_strength 权重从 ICIR 的 2.2% 膨胀到 12.5%（+568%），使近期大跌股排名虚高。
+当前选股结果（Top 3）推荐的股票振幅均为 0.0 或接近 0.0，属于一字板涨停股：
+- 实际无法买入（全天封板无成交机会）
+- 若涨停打开则趋势反转，恰恰是卖点
 
-## 修复方案
+根本原因：因子体系偏好"低振幅+低换手率"特征，而一字板涨停股在这些因子上是"完美匹配"，但实际可操作性为零。
 
-**改动范围**: `weight_engine.py` 第 508 行附近 + `stock_selector.py` 无改动
+## 数据验证
 
-**修复逻辑**: 对 rolling ICIR NaN 做分层填充：
-1. **有足够 IC 数据的因子**（长样本因子如 amplitude/momentum_strength/turnover_surge/overnight_ret）：
-   - map 后仅 T-1 为 NaN → `ffill()` 用 T-2 的有效值向前填充
-2. **IC 数据不足的因子**（短样本 tail_* 系列，18天 < 60日窗口）：
-   - map 后整段时间全 NaN → `ffill()` 无法填充 → 仍 NaN → `fillna(1/n)` 兜底
+最新日期(2026-06-10)振幅分布：
+- 振幅=0: 4只（一字板涨停）
+- 振幅<0.01: 12只（0.4%，接近一字板）
+- 振幅<0.02: 238只（7.9%，偏小波动）
+- 振幅均值: 0.046, 中位数: 0.040
 
-代码改动位置: `weight_engine.py` 第 508-510 行之后，插入 ffill() 和分层的 fillna()
+## 变更方案
 
+### 变更 1：选股前置最低振幅阈值
+
+**阈值选择**: `min_amplitude = 0.01`（1%）
+- 排除振幅 <1% 的股票（12只/0.4%），这些基本是一字板或接近一字板
+- 不排除振幅 1%-2% 的正常低波动股（如238只中有226只振幅在1%-2%之间，正常可交易）
+- 阈值不宜过大（0.02会排除7.9%正常股）或过小（0只排除纯一字板，但接近一字板同样不可操作）
+
+**实现位置**: `sort_and_select()` 函数，在覆盖率过滤之后、排序之前
+
+**实现方式**:
 ```python
-# 当前代码（line 508-510）:
-factor_df[f"{col}_rolling_icir"] = factor_df["date_sorted"].map(rolling_icir_series_dt)
-# ... else:
-factor_df[f"{col}_rolling_icir"] = np.nan
+# 在 StockSelectorConfig 中新增:
+min_amplitude: float = 0.01  # 最低振幅阈值（排除不可交易的一字板涨停股）
 
-# 修复后:
-factor_df[f"{col}_rolling_icir"] = factor_df["date_sorted"].map(rolling_icir_series_dt)
-# T-1 无 IC 数据 → map 返回 NaN → ffill() 用最近有效值填充
-# 短样本因子(全 NaN) → ffill 无法填充 → 仍然 NaN → 下面 fillna(1/n) 兜底
-factor_df[f"{col}_rolling_icir"] = factor_df[f"{col}_rolling_icir"].ffill()
+# 在 sort_and_select() 中新增参数:
+min_amplitude: float = 0.01  # 最低振幅阈值
+
+# 过滤逻辑（在 valid_mask 构建阶段）:
+if min_amplitude > 0 and 'amplitude' in result_df.columns:
+    amplitude_mask = result_df['amplitude'] >= min_amplitude
+    excluded_by_amplitude = int(valid_mask.sum() - (valid_mask & amplitude_mask).sum())
+    if excluded_by_amplitude > 0:
+        logger.info(
+            "振幅过滤: 排除 %d 只股票（振幅 < %.2f%%，一字板或接近一字板涨停股不可买入）",
+            excluded_by_amplitude,
+            min_amplitude * 100,
+        )
+    valid_mask = valid_mask & amplitude_mask
 ```
 
-line 531 保持不变（`fillna(1/n)` 作为最终兜底，处理 ffill 无法填充的全 NaN 因子）
+**CLI 参数**:
+```python
+parser.add_argument(
+    "--min_amplitude",
+    type=float,
+    default=0.01,
+    help="最低振幅阈值（默认: 0.01=1%%，排除不可交易的一字板涨停股）",
+)
+```
 
-## 验证方案
+**结果 JSON 新增字段**:
+```json
+"meta": {
+    "min_amplitude": 0.01,
+    "excluded_by_amplitude": 8,  // 振幅过滤排除的股票数
+    ...
+}
+```
 
-1. 运行 stock_selector.py → 600779/002351 不再出现在 Top 3
-2. 检查报告权重与选股权重一致性
-3. pytest 稡拟 T-1 NaN → ffill 场景
+**报告展示**: 在"八、股票选股结果"中新增振幅过滤说明行
 
-## 涉及文件数: 1（weight_engine.py），行数约 2 行
+### 变更 2：Top N 从 3 改为 10
+
+**修改位置**:
+- `StockSelectorConfig.top_n`: 3 → 10
+- CLI `--top_n` default: 3 → 10
+- MODULE.md 示例更新
+
+## 涉及文件清单
+
+| 文件 | 改动类型 | 改动量 |
+|------|---------|--------|
+| comprehensive_factor/stock_selector.py | 新增 min_amplitude 参数 + 过滤逻辑 + top_n 默认值 | ~50行 |
+| comprehensive_factor/MODULE.md | 更新选股规范 + 输出模板 + 版本历史 | ~30行 |
+| summary/generate_factor_summary_report.py | 报告展示振幅过滤信息 | ~20行 |
+
+总计: 3 文件，~100行 ≤ 200行上限 ✓
 
 ## 规范引用
-- 遵循 MODULE.md M7（滚动 ICIR 时间轴计算）
-- 遵循 MODULE.md M40（滚动 ICIR 时间轴）
-- 遵循 AGENTS.md 陷阱 2（无冗余向后兼容假设）
+
+- PROJECT.md 规则 #5: 因子方向根据实际 IC 确定
+- PROJECT.md 规则 #2: 输出位置 `<模块>/result/`
+- AGENTS.md Design-First: 2+文件先提交 design.md
+- AGENTS.md 任务粒度: ≤3 文件 ≤200 行
+
+## 验证计划
+
+1. 运行 `python comprehensive_factor/stock_selector.py --top_n 10` 验证选股结果
+2. 确认振幅<0.01的股票被排除
+3. 运行 `python summary/generate_factor_summary_report.py` 验证报告展示
+4. pytest 验证测试通过
+5. ruff check + mypy 验证代码规范

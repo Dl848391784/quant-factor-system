@@ -102,44 +102,42 @@ def main():
     ic_metrics = result.get("ic_metrics") or {}
     sample_stats = result.get("sample_stats") or {}
     period = result.get("period") or {}
-    # 字段名来源于 MODULE.md 第56行输出结构模板
     ic_distribution = result.get("ic_distribution_consistency") or {}
 
-    _logger.info("=" * 60)
-    _logger.info("结果摘要")
-    _logger.info("=" * 60)
-    _logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
-    _logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
-    _logger.info(f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}")
-    _logger.info(f"有效天数: {sample_stats.get('valid_days', 0)} 天")
-    _logger.info("--- IC指标 ---")
+    # 构建结果摘要（单次输出保证并发场景下日志原子性）
     ic_mean = ic_metrics.get("ic_mean")
-    if ic_mean is not None:
-        _logger.info(f"IC均值: {ic_mean:.4f}")
-    else:
-        _logger.info("IC均值: N/A（计算结果为空）")
     ic_std = ic_metrics.get("ic_std")
-    if ic_std is not None:
-        _logger.info(f"IC标准差: {ic_std:.4f}")
-    else:
-        _logger.info("IC标准差: N/A")
     icir = ic_metrics.get("icir")
-    if icir is not None:
-        _logger.info(f"ICIR: {icir:.2f}")
-    else:
-        _logger.info("ICIR: N/A")
     positive_ratio = ic_distribution.get("positive_ratio")
-    if positive_ratio is not None:
-        _logger.info(f"IC>0占比: {positive_ratio:.2%}")
-    else:
-        _logger.info("IC>0占比: N/A")
+
+    # 格式化各字段（None 时显示 N/A）
+    ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
+    ic_std_str = f"{ic_std:.4f}" if ic_std is not None else "N/A"
+    icir_str = f"{icir:.2f}" if icir is not None else "N/A"
+    positive_ratio_str = f"{positive_ratio:.2%}" if positive_ratio is not None else "N/A"
+
+    summary_lines = [
+        "=" * 60,
+        "结果摘要",
+        "=" * 60,
+        f"因子名称: {result.get('factor_name', 'unknown')}",
+        f"更新模式: {result.get('update_mode', 'unknown')}",
+        f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}",
+        f"有效天数: {sample_stats.get('valid_days', 0)} 天",
+        "--- IC指标 ---",
+        f"IC均值: {ic_mean_str}",
+        f"IC标准差: {ic_std_str}",
+        f"ICIR: {icir_str}",
+        f"IC>0占比: {positive_ratio_str}",
+    ]
+    _logger.info("\n" + "\n".join(summary_lines))
 
     # 异常状态整体感知日志（运维巡检用）
     if ic_mean is None:
         _logger.warning("本次IC计算结果为空，请检查数据源或参数配置")
-        _logger.info("动量强度因子IC计算完成（结果异常，请关注上方警告）")
-    else:
-        _logger.info("动量强度因子IC计算完成")
+
+    # 确认结果处理完成后才输出"计算完成"日志
+    _logger.info("动量强度因子IC计算完成")
 
     return result
 

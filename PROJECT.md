@@ -231,6 +231,35 @@ except FileNotFoundError as e:
 | 5 | `factor_definitions.py`（项目根目录） | `FACTOR_DEFINITIONS` | 因子定义（名称、公式、含义），汇总报告因子说明显示 |
 | 6 | `PROJECT.md` | 因子列表章节（本表） | 项目级因子清单 |
 
+**因子分类一览**（按领域维度）：
+
+| 分类 | 因子名 | 列名 | 公式/含义 | IC方向 |
+|------|--------|------|----------|--------|
+| 基础因子 | rsi | rsi_6 | RSI(6日) | 负向(反转) |
+| 基础因子 | volume_ratio | volume_ratio_5 | 量比(5日) | — |
+| 扩展因子 | kdj_j | kdj_j | KDJ J值 | — |
+| 扩展因子 | bollinger_pb | bollinger_pb | 布林带%B | 负向(反转) |
+| 扩展因子 | turnover_surge | turnover_surge | 换手率突增 | 负向(反转) |
+| 扩展因子 | amplitude | amplitude | 振幅 | 负向(反转) |
+| 尾盘因子 | tail_price_position | tail_price_position | 尾盘价格位置 | — |
+| 尾盘因子 | tail_price_slope | tail_price_slope | 尾盘趋势斜率 | — |
+| 动量因子 | momentum_strength | momentum_strength | 动量强度 | — |
+| 方向性因子 | volume_price_strength | volume_price_strength | 量价齐升强度 | 待定 |
+| 方向性因子 | positive_day_ratio_5 | positive_day_ratio_5 | 近5日阳线比例 | 待定 |
+| 方向性因子 | ma5_deviation | ma5_deviation | 5日均线偏离度 | 待定 |
+| 方向性因子 | near_high_ratio_5 | near_high_ratio_5 | 近5日高低位置 | 待定 |
+| **行业方向性因子** | **industry_momentum_5d** | **industry_momentum_5d** | **行业5日动量：按(行业,日期)分组→mean(past_return_1d)→5日滚动均值，实测IC=+0.026** | **正向(行业趋势)** |
+| **行业方向性因子** | **industry_turnover_trend** | **industry_turnover_trend** | **行业换手率趋势：turnover_avg(t)/turnover_avg(t-1)-1，clip(lower=0.001)** | **待定** |
+| **行业方向性因子** | **industry_amplitude_trend** | **industry_amplitude_trend** | **行业振幅趋势：amplitude_avg(t)/amplitude_avg(t-1)-1，clip(lower=0.001)** | **待定** |
+
+**行业方向性因子说明**（v1.42 2026-06-12 新增）：
+- **What**：行业层面趋势维度补充因子，衡量行业整体动量/换手率变化/振幅变化
+- **Why**：个股因子只能捕捉截面差异，行业因子捕捉板块轮动信号（如行业整体上涨→行业配置偏向）
+- **How**：按(行业,日期)分组聚合→行业均值→比率型/滚动型因子→同行业个股赋相同值
+- **Don't**：不可假设行业因子IC方向——实测 industry_momentum_5d IC=+0.026（正向），但 turnover/amplitude_trend 方向待定（遵循 H5）
+- **When**：综合因子组合需要行业维度补充时使用
+- **Verify**：IC脚本实测IC值、回测分层单调性
+
 **关键依赖**: 新增因子后必须重新运行 `factor_generator.py` 更新 `factor_ic_data.json.gz`，否则后续脚本无法读取新因子值。
 
 ---
@@ -339,7 +368,8 @@ except FileNotFoundError as e:
 
 || 版本 | 日期 | 更新内容 | 稳定性标注 ||
 ||------|------|---------|-----------||
-|| v3.4 | 2026-06-04 | 扩展"Run Pipeline 执行排查流程"步骤 3：检查所有时间序列数据文件日期新鲜度（factor_ic_data + turnover_rate + tail_trading），明确不需要检查的文件类型 | [stable] ||
+||| v1.42 | 2026-06-12 | 新增行业方向性因子（industry_momentum_5d / industry_turnover_trend / industry_amplitude_trend）；因子分类一览表；行业方向性因子说明（What/Why/How/Don't/When/Verify） | [experimental] ||
+||| v3.4 | 2026-06-04 | 扩展"Run Pipeline 执行排查流程"步骤 3：检查所有时间序列数据文件日期新鲜度（factor_ic_data + turnover_rate + tail_trading），明确不需要检查的文件类型 | [stable] ||
 || v3.3 | 2026-06-04 | 补充"Run Pipeline 执行排查流程"中 data_fetchers 数据日期新鲜度检查（步骤 3），关联 Pitfall 162 | [stable] ||
 || v3.2 | 2026-06-04 | 新增"Run Pipeline 执行排查流程"章节：执行顺序与日志位置表、排查步骤（标准化流程）、常见异常快速定位表 | [stable] |
 || v3.1 | 2026-06-03 | 加 AI 协作模式（harness 中立）/ 规则冲突仲裁 / 路线图节；H 规则加目的行；歧义修正（H9 AND 语义、design.md 文件名映射、新增模块定义）；删除 PROJECT.md 中复制 yaml 的必测场景表；教训防御表按机制分类；flag paths.py 导入路径疑问 | [experimental] |
@@ -668,5 +698,5 @@ jobs:
 
 ---
 
-*最后更新: 2026-06-04*
+*最后更新: 2026-06-12*
 

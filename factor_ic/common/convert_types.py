@@ -58,16 +58,16 @@ logger = get_logger(__name__)
 
 def convert_to_native_types(obj: Any) -> Any:
     """
-    递归转换 numpy/pandas 类型为 Python 厬生类型
-    
+    递归转换 numpy/pandas 类型为 Python 原生类型
+
     解决 JSON 序列化时 numpy 类型无法直接序列化的问题。
-    
+
     Args:
         obj: 要转换的对象（可以是 dict, list, numpy 类型等）
-        
+
     Returns:
         转换后的 Python 原生类型对象
-        
+
     示例:
         >>> import numpy as np
         >>> convert_to_native_types({'value': np.float64(1.5)})

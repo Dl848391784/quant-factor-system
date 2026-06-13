@@ -204,8 +204,8 @@ def calculate_tail_price_volume_intensity(factor_df: pd.DataFrame) -> pd.DataFra
         100 * valid_count / total_count if total_count > 0 else 0,
     )
 
-    # 返回只包含原列 + 因子列的 DataFrame
-    result_cols = list(factor_df.columns) + ["tail_price_volume_intensity"]
+    # 返回只包含原列 + 因子列的 DataFrame（防止列名重复）
+    result_cols = [c for c in factor_df.columns if c != "tail_price_volume_intensity"] + ["tail_price_volume_intensity"]
     return merged_df[result_cols]
 
 
@@ -222,6 +222,9 @@ def main():
 
     args = parser.parse_args()
 
+    # 启动参数日志（便于追溯本次运行配置）
+    logger.info(f"启动尾盘量价强度因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
         factor_name="tail_price_volume_intensity",
@@ -233,69 +236,68 @@ def main():
         _logger=logger,
     )
 
-    # 保底处理：公共模块异常返回 None 时直接退出
+    # 防御性检查：result 为 None 时抛出异常（遵循 PROJECT.md 异常处理规范）
     if result is None:
-        logger.error("run_complex_factor_ic 返回 None")
-        sys.exit(1)
+        raise RuntimeError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
 
-    # 使用 .get() + or {} 防御性访问结果
+    # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get("ic_metrics") or {}
     sample_stats = result.get("sample_stats") or {}
     period = result.get("period") or {}
     ic_distribution = result.get("ic_distribution_consistency") or {}
 
-    logger.info("=" * 40)
-    logger.info("结果摘要")
-    logger.info("=" * 40)
-
-    # IC 指标
+    # 构建结果摘要（单次输出保证并发场景下日志原子性）
     ic_mean = ic_metrics.get("ic_mean")
     ic_std = ic_metrics.get("ic_std")
     icir = ic_metrics.get("icir")
-
-    if ic_mean is not None:
-        logger.info("  IC 均值: %.4f", ic_mean)
-    else:
-        logger.warning("  IC 均值: N/A（数据不足或计算异常）")
-
-    if ic_std is not None:
-        logger.info("  IC 标准差: %.4f", ic_std)
-    else:
-        logger.warning("  IC 标准差: N/A（IC 为常量或数据不足）")
-
-    if icir is not None:
-        logger.info("  ICIR: %.4f", icir)
-    else:
-        logger.warning("  ICIR: N/A（IC 标准差为 0 或数据不足）")
-
-    # 正比例统计
     positive_ratio = ic_distribution.get("positive_ratio")
-    if positive_ratio is not None:
-        logger.info("  正比例: %.2f%%", positive_ratio * 100)
-    else:
-        logger.warning("  正比例: N/A（数据不足）")
-
-    # 样本统计
     avg_stocks = sample_stats.get("avg_stocks_per_day")
     total_days = sample_stats.get("total_days")
-
-    if avg_stocks is not None:
-        logger.info("  平均股票数: %.1f", avg_stocks)
-
-    if total_days is not None:
-        logger.info("  总交易日数: %d", total_days)
-
-    # 时间范围
     start_date = period.get("start")
     end_date = period.get("end")
 
-    if start_date and end_date:
-        logger.info("  日期范围: %s ~ %s", start_date, end_date)
+    # 格式化各字段（None 时显示 N/A）
+    ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
+    ic_std_str = f"{ic_std:.4f}" if ic_std is not None else "N/A"
+    icir_str = f"{icir:.4f}" if icir is not None else "N/A"
+    positive_ratio_str = f"{positive_ratio:.2%}" if positive_ratio is not None else "N/A"
+    avg_stocks_str = f"{avg_stocks:.1f}" if avg_stocks is not None else "N/A"
+    total_days_str = str(total_days) if total_days is not None else "N/A"
+    date_range_str = f"{start_date} ~ {end_date}" if start_date and end_date else "N/A"
 
-    logger.info("=" * 40)
-    logger.info("计算完成")
-    logger.info("=" * 40)
+    summary_lines = [
+        "=" * 60,
+        "结果摘要",
+        "=" * 60,
+        f"因子名称: {result.get('factor_name', 'unknown')}",
+        f"更新模式: {result.get('update_mode', 'unknown')}",
+        f"日期范围: {date_range_str}",
+        f"总交易日数: {total_days_str}",
+        f"平均股票数: {avg_stocks_str}",
+        "--- IC指标 ---",
+        f"IC 均值: {ic_mean_str}",
+        f"IC 标准差: {ic_std_str}",
+        f"ICIR: {icir_str}",
+        f"正比例: {positive_ratio_str}",
+    ]
+    logger.info("\n" + "\n".join(summary_lines))
+
+    # ic_mean 为 None 时额外输出 warning，便于告警系统捕获异常运行
+    if ic_mean is None:
+        logger.warning("本次计算 IC 均值为空，请检查数据源")
+
+    # 确认结果处理完成后才输出"计算完成"日志（避免中途失败造成误导）
+    logger.info("尾盘量价强度因子IC计算完成")
+
+    return result
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except RuntimeError:
+        logger.exception("尾盘量价强度因子IC计算失败")
+        sys.exit(1)
+    except Exception:
+        logger.exception("未预期的错误")
+        sys.exit(1)

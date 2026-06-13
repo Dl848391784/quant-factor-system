@@ -1,7 +1,7 @@
 # backtest 模块规范
 
-> 版本: v2.2
-> 最后更新: 2026-06-12
+> 版本: v2.3
+> 最后更新: 2026-06-13
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
 >
@@ -16,7 +16,7 @@
 - [模块概述](#模块概述)
 - [输出结构模板](#输出结构模板)
 
-### 二、规则索引 (M1-M53,按类别)
+### 二、规则索引 (M1-M54,按类别)
 
 | 类别 | 编号 | 主题 |
 |------|------|------|
@@ -32,6 +32,7 @@
 | **J. 输出契约** | M41-M42 | 空数据返回结构一致 / 空数据报告提示 |
 || **K. 代码风格与函数设计** | M43-M52 | 命名 / 类型注解 / 导入分组 / pathlib / 静态方法调用 / 显式传参 / 模块级函数 / 性能 / Config 字段 / layer_names 分离 |
 || **L. 预计算因子** | M53 | 预计算因子禁止重复传递 factor_calculator |
+|| **M. 大规模数据加载** | M54 | 强制流式 ijson + 列白名单 (OOM 防御) |
 
 ### 三、附录
 - [更新记录](#更新记录)
@@ -1536,10 +1537,88 @@ grep -n "factor_calculator" backtest/layered_backtest_tail*.py
 
 ---
 
+## M54. 大规模数据加载强制流式 ijson + 列白名单
+
+**What**: 分层回测加载 `factor_ic_data.json.gz` (>300 MB 压缩 / >2 GB 解压) 时,**禁止使用** `json.load()` / `ijson.kvitems(f, "")`,必须用 `ijson.items(f, "data.item")` 流式遍历 + 列白名单过滤。
+
+**Why**:
+- `factor_ic_data.json.gz` 含 1.5M+ 行 × 44 列,`json.load()` 一次性物化为 Python 对象峰值可达 4.2 GB → SIGKILL
+- `ijson.kvitems(f, "")` 在 yajl2_c 后端下,yield "data" key 之前会**完整解析**其 value(等同 `json.load`),不能用作"顶层结构校验"
+- `ijson.items(f, "data.item")` 是真正的逐行流式 SAX,峰值仅一行的内存
+- 加载后 `full_df` 必须 `del`,因为 `return_df`/`factor_df` 已经 `.copy()` 出独立副本,保留原引用 = 内存翻倍
+
+**How**:
+```python
+# ✅ 推荐:流式 ijson + 列白名单 + 即时 del
+import gzip, ijson
+
+REQUIRED_COLS = {"date", "asset", "close", "factor_xxx", "forward_return_1d"}
+records = []
+with gzip.open(path, "rb") as f:
+    for record in ijson.items(f, "data.item"):
+        # 列过滤:只保留下游需要的列
+        records.append({k: record[k] for k in REQUIRED_COLS if k in record})
+
+if not records:
+    raise ValueError("'data' 字段为空")
+
+full_df = pd.DataFrame(records)
+del records  # 列表已转 DataFrame
+
+# 数值列即时 float 转换(避免后续 groupby/transform 混合 dtype 膨胀)
+for col in ["close", "factor_xxx", "forward_return_1d"]:
+    full_df[col] = pd.to_numeric(full_df[col], errors="coerce").astype("float64")
+
+return_df = full_df[["date", "asset", "forward_return_1d"]].copy()
+factor_df = full_df[["date", "asset", "close", "factor_xxx"]].copy()
+del full_df  # ⚠️ 必须 del,否则 return_df/factor_df + full_df 三份占用同时存活
+```
+
+**Don't**:
+```python
+# ❌ json.load 一次性物化 → 4 GB+ OOM
+import json, gzip
+with gzip.open(path, "rt") as f:
+    data = json.load(f)
+df = pd.DataFrame(data["data"])
+
+# ❌ ijson.kvitems(f, "") 顶层校验 → yajl2_c 后端等同 json.load
+with gzip.open(path, "rb") as f:
+    for key, value in ijson.kvitems(f, ""):  # 完整解析 value
+        if key == "data":
+            ...
+
+# ❌ copy 后保留 full_df → 内存翻倍
+return_df = full_df[["date", "asset", "forward_return_1d"]].copy()
+factor_df = full_df[["date", "asset", "close", "factor_xxx"]].copy()
+# full_df 未 del,继续吃 2 GB
+```
+
+**When**:
+- 任何加载 `factor_ic_data.json.gz` 的回测 / IC / summary 脚本
+- 任何加载 >100 MB JSON / JSON.gz 的场景
+- **不适用**:小配置文件 (< 10 MB)、IC 分析结果 (`ic_*_analysis_result.json`,通常 < 5 MB)
+
+**Verify**:
+- `grep -rn "json.load\|ijson.kvitems" backtest/ --include="*.py"` — 数据加载层不应出现
+- `grep -rn "ijson.items.*data.item" backtest/common/layered_backtest_runner.py` — 应存在
+- 实测:`/usr/bin/time -v python -m backtest.layered_backtest_<因子>_1d` 的 `Maximum resident set size` 应 < 1.5 GB
+
+**典型案例** (2026-06-13):
+- `layered_backtest_rsi_1d` 触发 OOM (anon-rss 4.21 GB,SIGKILL by oom-killer)
+- 双根因:① `json.load` 加载 `factor_ic_data.json.gz` (峰值 4 GB);② `ijson.kvitems(f, "")` 顶层校验等同全量加载
+- 修复:`runner.py` v2.8 → v2.9,移除顶层校验,改 `ijson.items(f, "data.item")` + 列白名单 + `del full_df`
+- 端到端:4.16 GB SIGKILL → 901 MB Exit 0 (降 78%),74 个分层回测脚本统一受益
+
+**关联规则**:本规则解决数据**加载层**的 OOM。计算层的 `groupby.transform` OOM 见 `data_fetchers/MODULE.md` R17。
+
+---
+
 ## 更新记录
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v2.3 | 2026-06-13 | 新增 M54（大规模数据加载强制流式 ijson + 列白名单）+ M 类别;源自 RSI 分层回测 OOM 修复 (4.16 GB → 901 MB) |
 | v2.2 | 2026-06-12 | 新增行业方向性因子回测脚本注册表（industry_momentum_5d / industry_turnover_trend / industry_amplitude_trend）；脚本注册表章节 |
 | v2.1 | 2026-06-04 | 新增 M53（预计算因子禁止重复传递 factor_calculator）+ L 类别;修复 5 个尾盘因子回测脚本的列名重复 bug |
 | v2.0 | 2026-06-03 | 大重构:50 章节去重合并为 52 条 M 编号规则,按 11 类别 (A-K) 组织;统一 W/W/H/D/W/V 框架;加目录索引;精简更新记录 |

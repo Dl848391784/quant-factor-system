@@ -31,40 +31,74 @@ Stage 2: IC计算
   21. ic_tail_price_volume_intensity.py (新增 2026-06-02)
   22. ic_tail_volume_acceleration_1d.py (新增 2026-06-02)
   23. ic_tail_volume_shrink_1d.py (新增 2026-06-06)
+  24. ic_volume_price_strength_1d.py (新增 2026-06-11)
+  25. ic_positive_day_ratio_5_1d.py (新增 2026-06-11)
+  26. ic_ma5_deviation_1d.py (新增 2026-06-11)
+  27. ic_near_high_ratio_5_1d.py (新增 2026-06-11)
+  28. ic_intraday_intensity_1d.py (补注册 2026-06-13)
+  29. ic_capital_flow_intensity_1d.py (补注册 2026-06-13)
+  30. ic_capital_flow_ratio_trend_1d.py (补注册 2026-06-13)
+  31. ic_industry_pe_trend_1d.py (补注册 2026-06-13)
+  32. ic_industry_earnings_growth_1d.py (补注册 2026-06-13)
+  33. ic_industry_roe_trend_1d.py (补注册 2026-06-13)
+  34. ic_industry_turnover_trend_1d.py (补注册 2026-06-13)
+  35. ic_industry_momentum_5d_1d.py (补注册 2026-06-13)
+  36. ic_industry_amplitude_trend_1d.py (补注册 2026-06-13)
+  37. ic_tail_price_position_delta_1d.py (新增 2026-06-11)
+  38. ic_tail_volume_shrink_delta_1d.py (新增 2026-06-11)
+  39. ic_turnover_surge_delta_1d.py (补注册 2026-06-13)
+  40. ic_amplitude_delta_1d.py (补注册 2026-06-13)
 
 Stage 3: 分层回测
-  24. layered_backtest_rsi_1d.py
-  24. layered_backtest_volume_ratio_1d.py
-  25. layered_backtest_kdj_j_1d.py
-  26. layered_backtest_bollinger_pb_1d.py
-  27. layered_backtest_turnover_surge_1d.py
-  28. layered_backtest_amplitude_1d.py
-  29. layered_backtest_price_position_1d.py
-  30. layered_backtest_return_3d_1d.py
-  31. layered_backtest_return_5d_1d.py
-  32. layered_backtest_overnight_ret_1d.py
-  33. layered_backtest_past_return_1d_1d.py (新增 2026-06-04)
-  34. layered_backtest_momentum_strength_1d.py (新增 2026-06-05)
-  35. layered_backtest_tail_price_position_1d.py (新增 2026-06-02)
-  36. layered_backtest_tail_price_slope_1d.py (新增 2026-06-02)
-  37. layered_backtest_tail_price_volume_intensity_1d.py (新增 2026-06-02)
-  38. layered_backtest_tail_volume_acceleration_1d.py (新增 2026-06-02)
-  39. layered_backtest_tail_volume_shrink_1d.py (新增 2026-06-06)
+  41. layered_backtest_rsi_1d.py
+  42. layered_backtest_volume_ratio_1d.py
+  43. layered_backtest_kdj_j_1d.py
+  44. layered_backtest_bollinger_pb_1d.py
+  45. layered_backtest_turnover_surge_1d.py
+  46. layered_backtest_amplitude_1d.py
+  47. layered_backtest_price_position_1d.py
+  48. layered_backtest_return_3d_1d.py
+  49. layered_backtest_return_5d_1d.py
+  50. layered_backtest_overnight_ret_1d.py
+  51. layered_backtest_past_return_1d_1d.py (新增 2026-06-04)
+  52. layered_backtest_momentum_strength_1d.py (新增 2026-06-05)
+  53. layered_backtest_tail_price_position_1d.py (新增 2026-06-02)
+  54. layered_backtest_tail_price_slope_1d.py (新增 2026-06-02)
+  55. layered_backtest_tail_price_volume_intensity_1d.py (新增 2026-06-02)
+  56. layered_backtest_tail_volume_acceleration_1d.py (新增 2026-06-02)
+  57. layered_backtest_tail_volume_shrink_1d.py (新增 2026-06-06)
+  58. layered_backtest_volume_price_strength_1d.py (补注册 2026-06-13)
+  59. layered_backtest_positive_day_ratio_5_1d.py (补注册 2026-06-13)
+  60. layered_backtest_ma5_deviation_1d.py (补注册 2026-06-13)
+  61. layered_backtest_near_high_ratio_5_1d.py (补注册 2026-06-13)
+  62. layered_backtest_intraday_intensity_1d.py (补注册 2026-06-13)
+  63. layered_backtest_capital_flow_intensity_1d.py (补注册 2026-06-13)
+  64. layered_backtest_capital_flow_ratio_trend_1d.py (补注册 2026-06-13)
+  65. layered_backtest_industry_pe_trend_1d.py (补注册 2026-06-13)
+  66. layered_backtest_industry_earnings_growth_1d.py (补注册 2026-06-13)
+  67. layered_backtest_industry_roe_trend_1d.py (补注册 2026-06-13)
+  68. layered_backtest_industry_turnover_trend_1d.py (补注册 2026-06-13)
+  69. layered_backtest_industry_momentum_5d_1d.py (补注册 2026-06-13)
+  70. layered_backtest_industry_amplitude_trend_1d.py (补注册 2026-06-13)
+  71. layered_backtest_tail_price_position_delta_1d.py (新增 2026-06-11)
+  72. layered_backtest_tail_volume_shrink_delta_1d.py (新增 2026-06-11)
+  73. layered_backtest_turnover_surge_delta_1d.py (补注册 2026-06-13)
+  74. layered_backtest_amplitude_delta_1d.py (补注册 2026-06-13)
 
 Stage 4: 综合因子
-  40. composite_equal_weight_1d.py
-  41. composite_icir_weight_1d.py
-  42. composite_ic_weight_1d.py
-  43. composite_rolling_icir_weight_1d.py
+  75. composite_equal_weight_1d.py
+  76. composite_icir_weight_1d.py
+  77. composite_ic_weight_1d.py
+  78. composite_rolling_icir_weight_1d.py
 
 Stage 5: 权重选择（新增 2026-06-03）
-  44. weight_selector.py         → comprehensive_factor/result/weight_selection_result.json
+  79. weight_selector.py         → comprehensive_factor/result/weight_selection_result.json
 
 Stage 6: 股票选股（新增 2026-06-03）
-  45. stock_selector.py          → comprehensive_factor/result/stock_selection_result.json
+  80. stock_selector.py          → comprehensive_factor/result/stock_selection_result.json
 
 Stage 7: 汇总报告
-  46. generate_factor_summary_report.py
+  81. generate_factor_summary_report.py
 
 版本历史：
 - v1.0 (2026-05-27): 初始版本，完全串行执行，退出码检查，脚本级别重试
@@ -74,10 +108,12 @@ Stage 7: 汇总报告
 - v1.4 (2026-06-04): 新增 past_return_1d 因子（IC + 分层回测）
 - v1.5 (2026-06-05): 新增 momentum_strength 因子（IC + 分层回测）
 - v1.6 (2026-06-06): 新增 tail_volume_shrink 因子（IC + 分层回测）
+- v1.7 (2026-06-13): 补注册 4 个方向性因子（volume_price_strength / positive_day_ratio_5 / ma5_deviation / near_high_ratio_5）的分层回测；补注册 intraday_intensity、capital_flow_intensity / capital_flow_ratio_trend、6 个 industry_* 因子、turnover_surge_delta / amplitude_delta 的 IC + 分层回测（脚本均已存在但漏注册到 pipeline）
 
 作者: 云瑶
 """
 
+import gc
 import os
 import subprocess
 import sys
@@ -94,99 +130,146 @@ from typing import NamedTuple
 PROJECT_ROOT = Path(__file__).parent.resolve()
 
 # 脚本执行配置
-MAX_RETRIES = 3          # 脚本级别最大重试次数
-RETRY_DELAY = 30         # 重试间隔（秒）
-SCRIPT_TIMEOUT = 1800    # 单个脚本最大执行时间（秒）= 30分钟
+MAX_RETRIES = 3  # 脚本级别最大重试次数
+RETRY_DELAY = 30  # 重试间隔（秒）
+SCRIPT_TIMEOUT = 1800  # 单个脚本最大执行时间（秒）= 30分钟
 
 # ============================================================================
 # 脚本定义
 # ============================================================================
 
+
 class ScriptTask(NamedTuple):
     """脚本任务定义"""
-    name: str           # 任务名称（用于日志）
-    script: str         # 脚本相对路径
-    stage: int          # 所属阶段
-    args: list[str]     # 命令行参数（可选）
+
+    name: str  # 任务名称（用于日志）
+    script: str  # 脚本相对路径
+    stage: int  # 所属阶段
+    args: list[str]  # 命令行参数（可选）
     timeout: int | None = None  # 独立超时时间（秒），None 则使用默认 SCRIPT_TIMEOUT
+
 
 # 完整执行流程（按顺序）
 PIPELINE_SCRIPTS: list[ScriptTask] = [
     # Stage 0: 基础数据拉取
-    ScriptTask('fetch_stock_list', 'data_fetchers/fetch_stock_list.py', 0, []),
-    ScriptTask('fetch_factor_cache', 'data_fetchers/fetch_factor_cache.py', 0, []),
-    ScriptTask('fetch_turnover', 'data_fetchers/fetch_turnover.py', 0, ['--baostock']),
-    ScriptTask('fetch_industry', 'data_fetchers/fetch_industry.py', 0, []),  # 行业分类数据
-    ScriptTask('fetch_tail_trading', 'data_fetchers/fetch_tail_trading.py', 0, [], timeout=10800),  # 尾盘5分钟K线数据（3小时超时，因每批停顿80秒）
-
+    ScriptTask("fetch_stock_list", "data_fetchers/fetch_stock_list.py", 0, []),
+    ScriptTask("fetch_factor_cache", "data_fetchers/fetch_factor_cache.py", 0, []),
+    ScriptTask("fetch_turnover", "data_fetchers/fetch_turnover.py", 0, ["--baostock"]),
+    ScriptTask("fetch_industry", "data_fetchers/fetch_industry.py", 0, []),  # 行业分类数据
+    ScriptTask(
+        "fetch_tail_trading", "data_fetchers/fetch_tail_trading.py", 0, [], timeout=10800
+    ),  # 尾盘5分钟K线数据（3小时超时，因每批停顿80秒）
     # Stage 1: 数据整合
-    ScriptTask('factor_generator', 'data_fetchers/factor_generator.py', 1, []),
-
+    ScriptTask("factor_generator", "data_fetchers/factor_generator.py", 1, []),
     # Stage 2: IC计算
-    ScriptTask('ic_rsi', 'factor_ic/ic_rsi_1d.py', 2, []),
-    ScriptTask('ic_volume_ratio', 'factor_ic/ic_volume_ratio_1d.py', 2, []),
-    ScriptTask('ic_kdj_j', 'factor_ic/ic_kdj_j_1d.py', 2, []),
-    ScriptTask('ic_bollinger_pb', 'factor_ic/ic_bollinger_pb_1d.py', 2, []),
-    ScriptTask('ic_turnover_surge', 'factor_ic/ic_turnover_surge_1d.py', 2, []),
-    ScriptTask('ic_amplitude', 'factor_ic/ic_amplitude_1d.py', 2, []),
-    ScriptTask('ic_price_position', 'factor_ic/ic_price_position_1d.py', 2, []),
-    ScriptTask('ic_return_3d', 'factor_ic/ic_return_3d_1d.py', 2, []),
-    ScriptTask('ic_return_5d', 'factor_ic/ic_return_5d_1d.py', 2, []),
-    ScriptTask('ic_overnight_ret', 'factor_ic/ic_overnight_ret_1d.py', 2, []),
+    ScriptTask("ic_rsi", "factor_ic/ic_rsi_1d.py", 2, []),
+    ScriptTask("ic_volume_ratio", "factor_ic/ic_volume_ratio_1d.py", 2, []),
+    ScriptTask("ic_kdj_j", "factor_ic/ic_kdj_j_1d.py", 2, []),
+    ScriptTask("ic_bollinger_pb", "factor_ic/ic_bollinger_pb_1d.py", 2, []),
+    ScriptTask("ic_turnover_surge", "factor_ic/ic_turnover_surge_1d.py", 2, []),
+    ScriptTask("ic_amplitude", "factor_ic/ic_amplitude_1d.py", 2, []),
+    ScriptTask("ic_price_position", "factor_ic/ic_price_position_1d.py", 2, []),
+    ScriptTask("ic_return_3d", "factor_ic/ic_return_3d_1d.py", 2, []),
+    ScriptTask("ic_return_5d", "factor_ic/ic_return_5d_1d.py", 2, []),
+    ScriptTask("ic_overnight_ret", "factor_ic/ic_overnight_ret_1d.py", 2, []),
     # past_return_1d 因子 IC 计算（2026-06-04 新增）
-    ScriptTask('ic_past_return_1d', 'factor_ic/ic_past_return_1d_1d.py', 2, []),
+    ScriptTask("ic_past_return_1d", "factor_ic/ic_past_return_1d_1d.py", 2, []),
     # momentum_strength 因子 IC 计算（2026-06-05 新增）
-    ScriptTask('ic_momentum_strength', 'factor_ic/ic_momentum_strength_1d.py', 2, []),
+    ScriptTask("ic_momentum_strength", "factor_ic/ic_momentum_strength_1d.py", 2, []),
     # 尾盘因子 IC 计算（2026-06-02 新增）
-    ScriptTask('ic_tail_price_position', 'factor_ic/ic_tail_price_position.py', 2, []),
-    ScriptTask('ic_tail_price_slope', 'factor_ic/ic_tail_price_slope_1d.py', 2, []),
-    ScriptTask('ic_tail_price_volume_intensity', 'factor_ic/ic_tail_price_volume_intensity.py', 2, []),
-    ScriptTask('ic_tail_volume_acceleration', 'factor_ic/ic_tail_volume_acceleration_1d.py', 2, []),
+    ScriptTask("ic_tail_price_position", "factor_ic/ic_tail_price_position.py", 2, []),
+    ScriptTask("ic_tail_price_slope", "factor_ic/ic_tail_price_slope_1d.py", 2, []),
+    ScriptTask("ic_tail_price_volume_intensity", "factor_ic/ic_tail_price_volume_intensity.py", 2, []),
+    ScriptTask("ic_tail_volume_acceleration", "factor_ic/ic_tail_volume_acceleration_1d.py", 2, []),
     # tail_volume_shrink 因子 IC 计算（2026-06-06 新增）
-    ScriptTask('ic_tail_volume_shrink', 'factor_ic/ic_tail_volume_shrink_1d.py', 2, []),
-
+    ScriptTask("ic_tail_volume_shrink", "factor_ic/ic_tail_volume_shrink_1d.py", 2, []),
+    # 方向性因子 IC（2026-06-11 新增，趋势维度补充）
+    ScriptTask("ic_volume_price_strength", "factor_ic/ic_volume_price_strength_1d.py", 2, []),
+    ScriptTask("ic_positive_day_ratio_5", "factor_ic/ic_positive_day_ratio_5_1d.py", 2, []),
+    ScriptTask("ic_ma5_deviation", "factor_ic/ic_ma5_deviation_1d.py", 2, []),
+    ScriptTask("ic_near_high_ratio_5", "factor_ic/ic_near_high_ratio_5_1d.py", 2, []),
+    # 日内强度因子 IC（2026-06-13 补注册）
+    ScriptTask("ic_intraday_intensity", "factor_ic/ic_intraday_intensity_1d.py", 2, []),
+    # 资金流因子 IC（2026-06-13 补注册）
+    ScriptTask("ic_capital_flow_intensity", "factor_ic/ic_capital_flow_intensity_1d.py", 2, []),
+    ScriptTask("ic_capital_flow_ratio_trend", "factor_ic/ic_capital_flow_ratio_trend_1d.py", 2, []),
+    # 行业因子 IC（2026-06-13 补注册）
+    ScriptTask("ic_industry_pe_trend", "factor_ic/ic_industry_pe_trend_1d.py", 2, []),
+    ScriptTask("ic_industry_earnings_growth", "factor_ic/ic_industry_earnings_growth_1d.py", 2, []),
+    ScriptTask("ic_industry_roe_trend", "factor_ic/ic_industry_roe_trend_1d.py", 2, []),
+    ScriptTask("ic_industry_turnover_trend", "factor_ic/ic_industry_turnover_trend_1d.py", 2, []),
+    ScriptTask("ic_industry_momentum_5d", "factor_ic/ic_industry_momentum_5d_1d.py", 2, []),
+    ScriptTask("ic_industry_amplitude_trend", "factor_ic/ic_industry_amplitude_trend_1d.py", 2, []),
+    # 差分因子 IC（2026-06-11 新增止跌信号维度，2026-06-13 补 turnover/amplitude delta）
+    ScriptTask("ic_tail_price_position_delta", "factor_ic/ic_tail_price_position_delta_1d.py", 2, []),
+    ScriptTask("ic_tail_volume_shrink_delta", "factor_ic/ic_tail_volume_shrink_delta_1d.py", 2, []),
+    ScriptTask("ic_turnover_surge_delta", "factor_ic/ic_turnover_surge_delta_1d.py", 2, []),
+    ScriptTask("ic_amplitude_delta", "factor_ic/ic_amplitude_delta_1d.py", 2, []),
     # Stage 3: 分层回测
-    ScriptTask('backtest_rsi', 'backtest/layered_backtest_rsi_1d.py', 3, []),
-    ScriptTask('backtest_volume_ratio', 'backtest/layered_backtest_volume_ratio_1d.py', 3, []),
-    ScriptTask('backtest_kdj_j', 'backtest/layered_backtest_kdj_j_1d.py', 3, []),
-    ScriptTask('backtest_bollinger_pb', 'backtest/layered_backtest_bollinger_pb_1d.py', 3, []),
-    ScriptTask('backtest_turnover_surge', 'backtest/layered_backtest_turnover_surge_1d.py', 3, []),
-    ScriptTask('backtest_amplitude', 'backtest/layered_backtest_amplitude_1d.py', 3, []),
-    ScriptTask('backtest_price_position', 'backtest/layered_backtest_price_position_1d.py', 3, []),
-    ScriptTask('backtest_return_3d', 'backtest/layered_backtest_return_3d_1d.py', 3, []),
-    ScriptTask('backtest_return_5d', 'backtest/layered_backtest_return_5d_1d.py', 3, []),
-    ScriptTask('backtest_overnight_ret', 'backtest/layered_backtest_overnight_ret_1d.py', 3, []),
+    ScriptTask("backtest_rsi", "backtest/layered_backtest_rsi_1d.py", 3, []),
+    ScriptTask("backtest_volume_ratio", "backtest/layered_backtest_volume_ratio_1d.py", 3, []),
+    ScriptTask("backtest_kdj_j", "backtest/layered_backtest_kdj_j_1d.py", 3, []),
+    ScriptTask("backtest_bollinger_pb", "backtest/layered_backtest_bollinger_pb_1d.py", 3, []),
+    ScriptTask("backtest_turnover_surge", "backtest/layered_backtest_turnover_surge_1d.py", 3, []),
+    ScriptTask("backtest_amplitude", "backtest/layered_backtest_amplitude_1d.py", 3, []),
+    ScriptTask("backtest_price_position", "backtest/layered_backtest_price_position_1d.py", 3, []),
+    ScriptTask("backtest_return_3d", "backtest/layered_backtest_return_3d_1d.py", 3, []),
+    ScriptTask("backtest_return_5d", "backtest/layered_backtest_return_5d_1d.py", 3, []),
+    ScriptTask("backtest_overnight_ret", "backtest/layered_backtest_overnight_ret_1d.py", 3, []),
     # past_return_1d 因子分层回测（2026-06-04 新增）
-    ScriptTask('backtest_past_return_1d', 'backtest/layered_backtest_past_return_1d_1d.py', 3, []),
+    ScriptTask("backtest_past_return_1d", "backtest/layered_backtest_past_return_1d_1d.py", 3, []),
     # momentum_strength 因子分层回测（2026-06-05 新增）
-    ScriptTask('backtest_momentum_strength', 'backtest/layered_backtest_momentum_strength_1d.py', 3, []),
+    ScriptTask("backtest_momentum_strength", "backtest/layered_backtest_momentum_strength_1d.py", 3, []),
     # 尾盘因子分层回测（2026-06-02 新增）
-    ScriptTask('backtest_tail_price_position', 'backtest/layered_backtest_tail_price_position_1d.py', 3, []),
-    ScriptTask('backtest_tail_price_slope', 'backtest/layered_backtest_tail_price_slope_1d.py', 3, []),
-    ScriptTask('backtest_tail_price_volume_intensity', 'backtest/layered_backtest_tail_price_volume_intensity_1d.py', 3, []),
-    ScriptTask('backtest_tail_volume_acceleration', 'backtest/layered_backtest_tail_volume_acceleration_1d.py', 3, []),
+    ScriptTask("backtest_tail_price_position", "backtest/layered_backtest_tail_price_position_1d.py", 3, []),
+    ScriptTask("backtest_tail_price_slope", "backtest/layered_backtest_tail_price_slope_1d.py", 3, []),
+    ScriptTask(
+        "backtest_tail_price_volume_intensity", "backtest/layered_backtest_tail_price_volume_intensity_1d.py", 3, []
+    ),
+    ScriptTask("backtest_tail_volume_acceleration", "backtest/layered_backtest_tail_volume_acceleration_1d.py", 3, []),
     # tail_volume_shrink 因子分层回测（2026-06-06 新增）
-    ScriptTask('backtest_tail_volume_shrink', 'backtest/layered_backtest_tail_volume_shrink_1d.py', 3, []),
-
-    # Stage 4: 综合因子（启用自动筛选）
-    ScriptTask('composite_equal', 'comprehensive_factor/composite_equal_weight_1d.py', 4, ['--auto_select']),
-    ScriptTask('composite_icir', 'comprehensive_factor/composite_icir_weight_1d.py', 4, ['--auto_select']),
-    ScriptTask('composite_ic', 'comprehensive_factor/composite_ic_weight_1d.py', 4, ['--auto_select']),
-    ScriptTask('composite_rolling_icir', 'comprehensive_factor/composite_rolling_icir_weight_1d.py', 4, ['--auto_select']),
-
+    ScriptTask("backtest_tail_volume_shrink", "backtest/layered_backtest_tail_volume_shrink_1d.py", 3, []),
+    # 方向性因子分层回测（2026-06-13 补注册，对应 2026-06-11 新增 IC）
+    ScriptTask("backtest_volume_price_strength", "backtest/layered_backtest_volume_price_strength_1d.py", 3, []),
+    ScriptTask("backtest_positive_day_ratio_5", "backtest/layered_backtest_positive_day_ratio_5_1d.py", 3, []),
+    ScriptTask("backtest_ma5_deviation", "backtest/layered_backtest_ma5_deviation_1d.py", 3, []),
+    ScriptTask("backtest_near_high_ratio_5", "backtest/layered_backtest_near_high_ratio_5_1d.py", 3, []),
+    # 日内强度因子分层回测（2026-06-13 补注册）
+    ScriptTask("backtest_intraday_intensity", "backtest/layered_backtest_intraday_intensity_1d.py", 3, []),
+    # 资金流因子分层回测（2026-06-13 补注册）
+    ScriptTask("backtest_capital_flow_intensity", "backtest/layered_backtest_capital_flow_intensity_1d.py", 3, []),
+    ScriptTask("backtest_capital_flow_ratio_trend", "backtest/layered_backtest_capital_flow_ratio_trend_1d.py", 3, []),
+    # 行业因子分层回测（2026-06-13 补注册）
+    ScriptTask("backtest_industry_pe_trend", "backtest/layered_backtest_industry_pe_trend_1d.py", 3, []),
+    ScriptTask("backtest_industry_earnings_growth", "backtest/layered_backtest_industry_earnings_growth_1d.py", 3, []),
+    ScriptTask("backtest_industry_roe_trend", "backtest/layered_backtest_industry_roe_trend_1d.py", 3, []),
+    ScriptTask("backtest_industry_turnover_trend", "backtest/layered_backtest_industry_turnover_trend_1d.py", 3, []),
+    ScriptTask("backtest_industry_momentum_5d", "backtest/layered_backtest_industry_momentum_5d_1d.py", 3, []),
+    ScriptTask("backtest_industry_amplitude_trend", "backtest/layered_backtest_industry_amplitude_trend_1d.py", 3, []),
+    # 差分因子分层回测（2026-06-11 新增止跌信号维度，2026-06-13 补 turnover/amplitude delta）
+    ScriptTask(
+        "backtest_tail_price_position_delta", "backtest/layered_backtest_tail_price_position_delta_1d.py", 3, []
+    ),
+    ScriptTask("backtest_tail_volume_shrink_delta", "backtest/layered_backtest_tail_volume_shrink_delta_1d.py", 3, []),
+    ScriptTask("backtest_turnover_surge_delta", "backtest/layered_backtest_turnover_surge_delta_1d.py", 3, []),
+    ScriptTask("backtest_amplitude_delta", "backtest/layered_backtest_amplitude_delta_1d.py", 3, []),
+    # Stage 4: 综合因子（auto_select 默认启用，无需传参；传 --auto_select 会触发 argparse unrecognized arguments 错误）
+    ScriptTask("composite_equal", "comprehensive_factor/composite_equal_weight_1d.py", 4, []),
+    ScriptTask("composite_icir", "comprehensive_factor/composite_icir_weight_1d.py", 4, []),
+    ScriptTask("composite_ic", "comprehensive_factor/composite_ic_weight_1d.py", 4, []),
+    ScriptTask("composite_rolling_icir", "comprehensive_factor/composite_rolling_icir_weight_1d.py", 4, []),
     # Stage 5: 权重选择（新增 2026-06-03）
-    ScriptTask('weight_selector', 'comprehensive_factor/weight_selector.py', 5, []),
-
+    ScriptTask("weight_selector", "comprehensive_factor/weight_selector.py", 5, []),
     # Stage 6: 股票选股（新增 2026-06-03）
-    ScriptTask('stock_selector', 'comprehensive_factor/stock_selector.py', 6, []),
-
+    ScriptTask("stock_selector", "comprehensive_factor/stock_selector.py", 6, []),
     # Stage 7: 汇总报告
-    ScriptTask('summary_report', 'summary/generate_factor_summary_report.py', 7, []),
+    ScriptTask("summary_report", "summary/generate_factor_summary_report.py", 7, []),
 ]
 
 # ============================================================================
 # 执行函数
 # ============================================================================
+
 
 def run_script(task: ScriptTask, retry_count: int = 0) -> bool:
     """
@@ -222,22 +305,16 @@ def run_script(task: ScriptTask, retry_count: int = 0) -> bool:
     start_time = time.time()
 
     try:
-        # 执行脚本（捕获输出）
+        # 执行脚本（流式输出，避免 capture_output 在内存中累积全量日志导致 OOM）
         result = subprocess.run(
             cmd,
             cwd=PROJECT_ROOT,
-            capture_output=True,
             text=True,
             timeout=actual_timeout,
-            env={**dict(os.environ), 'PYTHONPATH': str(PROJECT_ROOT)}
+            env={**dict(os.environ), "PYTHONPATH": str(PROJECT_ROOT)},
         )
 
         elapsed = time.time() - start_time
-
-        # 输出脚本日志（stdout）
-        if result.stdout:
-            for line in result.stdout.strip().split('\n'):
-                print(f"  {line}")
 
         # 检查退出码
         if result.returncode == 0:
@@ -245,13 +322,6 @@ def run_script(task: ScriptTask, retry_count: int = 0) -> bool:
             return True
         else:
             print(f"{prefix} ✗ 执行失败 (耗时 {elapsed:.1f}s, 退出码 {result.returncode})")
-
-            # 输出错误信息
-            if result.stderr:
-                print(f"{prefix} 错误输出:")
-                for line in result.stderr.strip().split('\n'):
-                    print(f"  {line}")
-
             return False
 
     except subprocess.TimeoutExpired:
@@ -265,11 +335,7 @@ def run_script(task: ScriptTask, retry_count: int = 0) -> bool:
         return False
 
 
-def run_pipeline(
-    start_stage: int = 0,
-    start_script: str | None = None,
-    skip_stages: list[int] | None = None
-) -> bool:
+def run_pipeline(start_stage: int = 0, start_script: str | None = None, skip_stages: list[int] | None = None) -> bool:
     """
     执行完整流程
 
@@ -352,6 +418,10 @@ def run_pipeline(
             print(f"[{task.name}] 等待 {RETRY_DELAY}s 后重试...")
             time.sleep(RETRY_DELAY)
 
+        # 每个脚本执行后主动回收内存 + 短暂等待，防止 OOM（7.3GB 机器）
+        gc.collect()
+        time.sleep(3)
+
     # 打印执行结果
     print()
     print("=" * 70)
@@ -376,41 +446,37 @@ def run_pipeline(
 # CLI 入口
 # ============================================================================
 
+
 def main() -> int:
     """CLI 入口"""
     global MAX_RETRIES, RETRY_DELAY  # 必须在函数开头声明
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='因子分析完整流程串行执行脚本',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
+        description="因子分析完整流程串行执行脚本", formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__
     )
 
     parser.add_argument(
-        '--start-stage', type=int, default=0, choices=[0, 1, 2, 3, 4, 5, 6, 7],
-        help='从哪个阶段开始执行（0=数据拉取, 1=数据整合, 2=IC计算, 3=回测, 4=综合因子, 5=权重选择, 6=股票选股, 7=汇总报告）'
+        "--start-stage",
+        type=int,
+        default=0,
+        choices=[0, 1, 2, 3, 4, 5, 6, 7],
+        help="从哪个阶段开始执行（0=数据拉取, 1=数据整合, 2=IC计算, 3=回测, 4=综合因子, 5=权重选择, 6=股票选股, 7=汇总报告）",
     )
 
     parser.add_argument(
-        '--start-script', type=str, default=None,
-        help='从哪个脚本开始执行（脚本名称，如 fetch_turnover）'
+        "--start-script", type=str, default=None, help="从哪个脚本开始执行（脚本名称，如 fetch_turnover）"
     )
 
     parser.add_argument(
-        '--skip-stages', type=int, nargs='*', default=[],
-        help='跳过的阶段（如 --skip-stages 0 1 跳过数据拉取和整合）'
+        "--skip-stages", type=int, nargs="*", default=[], help="跳过的阶段（如 --skip-stages 0 1 跳过数据拉取和整合）"
     )
 
     parser.add_argument(
-        '--max-retries', type=int, default=MAX_RETRIES,
-        help=f'脚本级别最大重试次数（默认 {MAX_RETRIES}）'
+        "--max-retries", type=int, default=MAX_RETRIES, help=f"脚本级别最大重试次数（默认 {MAX_RETRIES}）"
     )
 
-    parser.add_argument(
-        '--retry-delay', type=int, default=RETRY_DELAY,
-        help=f'重试间隔秒数（默认 {RETRY_DELAY}）'
-    )
+    parser.add_argument("--retry-delay", type=int, default=RETRY_DELAY, help=f"重试间隔秒数（默认 {RETRY_DELAY}）")
 
     args = parser.parse_args()
 
@@ -419,14 +485,10 @@ def main() -> int:
     RETRY_DELAY = args.retry_delay
 
     # 执行流程
-    success = run_pipeline(
-        start_stage=args.start_stage,
-        start_script=args.start_script,
-        skip_stages=args.skip_stages
-    )
+    success = run_pipeline(start_stage=args.start_stage, start_script=args.start_script, skip_stages=args.skip_stages)
 
     return 0 if success else 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

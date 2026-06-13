@@ -52,12 +52,23 @@ def load_tail_trading_data() -> pd.DataFrame:
         raise FileNotFoundError(f"尾盘数据文件不存在: {TAIL_TRADING_DATA_PATH}")
 
     with gzip.open(TAIL_TRADING_DATA_PATH, "rt", encoding="utf-8") as f:
-        data = json.load(f)
+        try:
+            data = json.load(f)
+        except (gzip.BadGzipFile, json.JSONDecodeError, OSError) as e:
+            raise ValueError(f"尾盘数据文件损坏或格式错误 [{TAIL_TRADING_DATA_PATH}]: {e}") from e
 
     if "data" not in data:
         raise ValueError("尾盘数据格式错误：缺少 'data' 字段")
 
     df = pd.DataFrame(data["data"])
+
+    # 列校验：确保必需列齐全，schema 变更时立即暴露而非延迟到下游
+    required_columns = ["date", "asset", "prices", "volumes", "tail_high", "tail_low"]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        raise ValueError(
+            f"尾盘数据缺少必需列: {missing_columns}，实际列: {df.columns.tolist()} [{TAIL_TRADING_DATA_PATH}]"
+        )
 
     logger.info("尾盘数据加载完成: %d 条记录", len(df))
     return df

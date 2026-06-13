@@ -52,12 +52,13 @@ DEFAULT_MIN_STOCKS = 10
 # CLI 入口
 # ============================================================================
 
+
 def main():
     """CLI 主入口"""
 
-    parser = argparse.ArgumentParser(description='全天价格位置因子 IC 计算器')
-    parser.add_argument('--force-full', action='store_true', help='强制全量计算')
-    parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数')
+    parser = argparse.ArgumentParser(description="全天价格位置因子 IC 计算器")
+    parser.add_argument("--force-full", action="store_true", help="强制全量计算")
+    parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
 
     args = parser.parse_args()
 
@@ -66,14 +67,14 @@ def main():
 
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
-        factor_name='price_position',
-        factor_col='price_position',
-        factor_cols=['high', 'low', 'close'],  # 需要三列进行计算
+        factor_name="price_position",
+        factor_col="price_position",
+        factor_cols=["high", "low", "close"],  # 需要三列进行计算
         custom_factor_calculation=calculate_price_position,
         # price_position 无额外参数（公共模块默认 params=None，内部会转为 {}）
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        _logger=logger
+        _logger=logger,
     )
 
     # 保底处理：公共模块异常返回 None 时抛出 RuntimeError
@@ -81,11 +82,11 @@ def main():
         raise RuntimeError("run_complex_factor_ic 返回 None")
 
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
-    ic_metrics = result.get('ic_metrics') or {}
-    sample_stats = result.get('sample_stats') or {}
-    period = result.get('period') or {}
+    ic_metrics = result.get("ic_metrics") or {}
+    sample_stats = result.get("sample_stats") or {}
+    period = result.get("period") or {}
     # 字段名来源于 MODULE.md 第56行输出结构模板
-    ic_distribution = result.get('ic_distribution_consistency') or {}
+    ic_distribution = result.get("ic_distribution_consistency") or {}
 
     logger.info("=" * 60)
     logger.info("结果摘要")
@@ -95,22 +96,22 @@ def main():
     logger.info(f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}")
     logger.info(f"有效天数: {sample_stats.get('valid_days', 0)} 天")
     logger.info("--- IC指标 ---")
-    ic_mean = ic_metrics.get('ic_mean')
+    ic_mean = ic_metrics.get("ic_mean")
     if ic_mean is not None:
         logger.info(f"IC 均值: {ic_mean:.4f}")
     else:
         logger.info("IC 均值: N/A（计算结果为空）")
-    ic_std = ic_metrics.get('ic_std')
+    ic_std = ic_metrics.get("ic_std")
     if ic_std is not None:
         logger.info(f"IC 标准差: {ic_std:.4f}")
     else:
         logger.info("IC 标准差: N/A")
-    icir = ic_metrics.get('icir')
+    icir = ic_metrics.get("icir")
     if icir is not None:
         logger.info(f"ICIR: {icir:.2f}")
     else:
         logger.info("ICIR: N/A")
-    positive_ratio = ic_distribution.get('positive_ratio')
+    positive_ratio = ic_distribution.get("positive_ratio")
     if positive_ratio is not None:
         logger.info(f"IC>0 占比: {positive_ratio:.2%}")
     else:
@@ -119,14 +120,14 @@ def main():
     # 异常状态整体感知日志（运维巡检用）
     if ic_mean is None:
         logger.warning("本次IC计算结果为空，请检查数据源或参数配置")
-        logger.info("全天价格位置因子IC计算完成（结果异常，请关注上方警告）")
-    else:
-        logger.info("全天价格位置因子IC计算完成")
+
+    # 确认结果处理完成后才输出"计算完成"日志
+    logger.info("全天价格位置因子IC计算完成")
 
     return result
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main()
     except RuntimeError as e:

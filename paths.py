@@ -45,6 +45,10 @@ SUMMARY_RESULT = PROJECT_ROOT / "summary" / "result"
 # 所有下游模块必须从此文件读取，禁止从其他文件读取收益数据
 FACTOR_IC_DATA = DATA_FETCHERS_RESULT / "factor_ic_data.json.gz"
 
+# 外部数据源（因子计算依赖，非统一数据源的一部分）
+FINANCIAL_DATA = DATA_FETCHERS_RESULT / "financial_data.json.gz"  # 财务指标数据（方案B基本面动量因子）
+FUND_FLOW_DATA = DATA_FETCHERS_RESULT / "fund_flow_data.json.gz"  # 资金流数据（方案C资金流因子，[experimental]）
+
 # 备份文件（仅用于数据备份/历史追溯，禁止作为运行时数据源）
 RETURN_DATA_BACKUP = DATA_FETCHERS_RESULT / "return_data.json.gz"
 FACTOR_DATA_BACKUP = DATA_FETCHERS_RESULT / "factor_data.json.gz"

@@ -850,7 +850,7 @@ def merge_records(
                     "n_days": 0,
                     "n_assets": 0,
                     "date_range": {"start": None, "end": None},
-                    "last_updated": _NOW_STR,  # 固定时间戳（遵循 MODULE.md 约束 #17）
+                    "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # 实际保存时间（遵循 MODULE.md 约束 #106）
                     "version": _OUTPUT_VERSION,
                     "failed_stocks": [],  # 无失败股票
                 },
@@ -888,7 +888,7 @@ def merge_records(
             "date_range": existing_meta.get("date_range", {"start": None, "end": None})
             if existing_meta
             else {"start": None, "end": None},
-            "last_updated": _NOW_STR,
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "version": _OUTPUT_VERSION,
             "failed_stocks": final_failed_stocks_list,
         }
@@ -969,7 +969,7 @@ def merge_records(
                 "start": unique_dates[0] if unique_dates else None,
                 "end": unique_dates[-1] if unique_dates else None,
             },
-            "last_updated": _NOW_STR,  # 固定时间戳（遵循 MODULE.md 约束 #17）
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # 实际保存时间（遵循 MODULE.md 约束 #106）
             "version": _OUTPUT_VERSION,
             "failed_stocks": final_failed_stocks_list,  # v3.1: 新增失败股票列表
         },

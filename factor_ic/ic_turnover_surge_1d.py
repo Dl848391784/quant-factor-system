@@ -18,6 +18,7 @@
 原版日期: 2026-05-08
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -48,53 +49,82 @@ DEFAULT_MIN_STOCKS = 10
 # CLI 入口
 # ============================================================================
 
+
 def main():
     """CLI 主入口"""
-    import argparse
-
-    parser = argparse.ArgumentParser(description='换手率突增 IC 计算器')
-    parser.add_argument('--force-full', action='store_true', help='强制全量计算')
-    parser.add_argument('--surge-window', type=int, default=DEFAULT_SURGE_WINDOW, help='换手率均值计算窗口')
-    parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数')
+    parser = argparse.ArgumentParser(description="换手率突增 IC 计算器")
+    parser.add_argument("--force-full", action="store_true", help="强制全量计算")
+    parser.add_argument("--surge-window", type=int, default=DEFAULT_SURGE_WINDOW, help="换手率均值计算窗口")
+    parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
 
     args = parser.parse_args()
 
     # 启动节点日志
-    logger.info(f"换手率突增因子 IC 计算启动 [surge_window={args.surge_window}, min_stocks={args.min_stocks}, force_full={args.force_full}]")
+    logger.info(
+        f"换手率突增因子 IC 计算启动 [surge_window={args.surge_window}, min_stocks={args.min_stocks}, force_full={args.force_full}]"
+    )
 
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
-        factor_name='turnover_surge',
-        factor_col='turnover_surge',
-        factor_cols=['close', 'turnover_rate'],
+        factor_name="turnover_surge",
+        factor_col="turnover_surge",
+        factor_cols=["close", "turnover_rate"],
         custom_factor_calculation=calculate_turnover_surge,
-        custom_factor_calculation_params={'surge_window': args.surge_window},
+        custom_factor_calculation_params={"surge_window": args.surge_window},
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        _logger=logger
+        _logger=logger,
     )
 
-    # 使用 .get() 防御性访问结果
-    ic_metrics = result.get('ic_metrics', {})
-    sample_stats = result.get('sample_stats', {})
-    period = result.get('period', {})
+    # 防御性检查：result 为 None 时抛出异常（遵循 PROJECT.md 异常处理规范）
+    if result is None:
+        raise RuntimeError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
 
-    logger.info("=" * 60)
-    logger.info("结果摘要")
-    logger.info("=" * 60)
-    logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
-    logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
-    logger.info(f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}")
-    logger.info(f"有效天数: {sample_stats.get('valid_days', 0)} 天")
-    logger.info(f"IC 均值: {ic_metrics.get('ic_mean', 0):.4f}")
-    logger.info(f"IC 标准差: {ic_metrics.get('ic_std', 0):.4f}")
-    logger.info(f"ICIR: {ic_metrics.get('icir', 0):.2f}")
-    logger.info(f"IC>0 占比: {result.get('positive_ratio', 0):.2%}")
+    # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
+    ic_metrics = result.get("ic_metrics") or {}
+    sample_stats = result.get("sample_stats") or {}
+    period = result.get("period") or {}
+    ic_distribution = result.get("ic_distribution_consistency") or {}
+
+    # 构建结果摘要（单次输出保证并发场景下日志原子性）
+    ic_mean = ic_metrics.get("ic_mean")
+    ic_std = ic_metrics.get("ic_std")
+    icir = ic_metrics.get("icir")
+    positive_ratio = ic_distribution.get("positive_ratio")
+
+    # 格式化各字段（None 时显示 N/A）
+    ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
+    ic_std_str = f"{ic_std:.4f}" if ic_std is not None else "N/A"
+    icir_str = f"{icir:.2f}" if icir is not None else "N/A"
+    positive_ratio_str = f"{positive_ratio:.2%}" if positive_ratio is not None else "N/A"
+
+    summary_lines = [
+        "=" * 60,
+        "结果摘要",
+        "=" * 60,
+        f"因子名称: {result.get('factor_name', 'unknown')}",
+        f"更新模式: {result.get('update_mode', 'unknown')}",
+        f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}",
+        f"有效天数: {sample_stats.get('valid_days', 0)} 天",
+        "--- IC指标 ---",
+        f"IC 均值: {ic_mean_str}",
+        f"IC 标准差: {ic_std_str}",
+        f"ICIR: {icir_str}",
+        f"IC>0 占比: {positive_ratio_str}",
+    ]
+    logger.info("\n" + "\n".join(summary_lines))
+
+    # ic_mean 为 None 时额外输出 warning，便于告警系统捕获异常运行
+    if ic_mean is None:
+        logger.warning("本次计算 IC 均值为空，请检查数据源")
+
+    # 确认结果处理完成后才输出"计算完成"日志（避免中途失败造成误导）
+    logger.info("换手率突增因子IC计算完成")
 
     return result
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main()
     except RuntimeError:

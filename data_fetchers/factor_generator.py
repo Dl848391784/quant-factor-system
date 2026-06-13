@@ -100,6 +100,28 @@ Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
     5. 新增 Step 8.6 计算 momentum_strength（调用 calculate_momentum_strength）
     6. 公式：momentum_strength = return_5d / std(return_1d, 5日)
     7. 遵循 PROJECT.md 规范：因子计算在 data_fetchers 完成，存储到统一数据源
+- v1.39 (2026-06-11): 涨跌停零波动处理（tail_price_position 公式分母为零不再是 NaN）：
+    1. _calc_price_position 新增 daily_close/high/low 参数，涨跌停时 position=1.0/0.0
+    2. 涨停：尾盘价格锁定涨停板 → 收盘价=区间最高点 → position=1.0（最强信号）
+    3. 跌停：尾盘价格锁定跌停板 → 收盘价=区间最低点 → position=0.0（最弱信号）
+    4. 极端罕见无交易非涨跌停 → position=0.5（中性）
+    5. 日线数据缺失无法判断方向 → 仍返回 NaN
+- v1.40 (2026-06-11): 新增止跌信号差分因子（4个，遵循 H5 因子方向不预判）：
+    1. 新增 amplitude_delta 到 _EXTENDED_FACTOR_COLS（振幅差分因子）
+    2. 新增 turnover_surge_delta 到 _EXTENDED_FACTOR_COLS（换手突增差分因子）
+    3. 新增 tail_price_position_delta 到 _EXTENDED_FACTOR_COLS（尾盘位置差分因子）
+    4. 新增 tail_volume_shrink_delta 到 _EXTENDED_FACTOR_COLS（尾盘缩量差分因子）
+    5. 新增 Step 11.5 计算4个差分因子（依赖原始因子已计算）
+    6. 公式：delta = factor(T) - factor(T-1)，按asset分组shift(1)
+    7. metadata valid_records/valid_records_percent 同步更新
+- v1.42 (2026-06-12): 新增行业级别方向性因子（Pattern 14）：
+    1. 新增 industry_momentum_5d 到 _EXTENDED_FACTOR_COLS（行业5日动量）
+    2. 新增 industry_turnover_trend 到 _EXTENDED_FACTOR_COLS（行业换手率趋势）
+    3. 新增 industry_amplitude_trend 到 _EXTENDED_FACTOR_COLS（行业振幅趋势）
+    4. 新增 Step 11.7 计算行业级别方向性因子
+    5. 公式：按(行业,日期)分组聚合→赋给同行业每只个股
+    6. 实测结论：个股方向性IC全负，行业层面IC=+0.026（方向性信号存在于行业而非个股）
+    7. 遵循 H5：IC方向不预判，行业因子作为行业配置维度补充
 
 作者: 云瑶
 """
@@ -108,12 +130,14 @@ import argparse
 import gzip
 import json
 import logging
+import math
 import os
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 
@@ -129,28 +153,60 @@ if __name__ == "__main__":
     from data_fetchers.common.logger_config import setup_logger
     from data_fetchers.factor_calculator import (
         calculate_amplitude,
+        calculate_amplitude_delta,  # v1.40 新增：振幅差分因子
         calculate_bollinger_pb,
+        calculate_industry_amplitude_trend,  # v1.42 新增：行业振幅趋势因子
+        calculate_industry_earnings_growth,  # v1.43 新增：行业盈利增长因子
+        calculate_industry_momentum_5d,  # v1.42 新增：行业5日动量因子
+        calculate_industry_pe_trend,  # v1.43 新增：行业PE趋势因子
+        calculate_industry_roe_trend,  # v1.43 新增：行业ROE趋势因子
+        calculate_industry_turnover_trend,  # v1.42 新增：行业换手率趋势因子
+        calculate_capital_flow_ratio_trend,  # v1.44 新增：资金流占比趋势因子（方案C）
+        calculate_capital_flow_intensity,  # v1.44 新增：资金流强度因子（方案C）
         calculate_kdj_j,
+        calculate_ma5_deviation,  # v1.41 新增：5日均线偏离度因子
         calculate_momentum_strength,  # v1.37 新增
+        calculate_near_high_ratio_5,  # v1.41 新增：近5日高低位置因子
         calculate_overnight_return,
         calculate_past_return_1d,  # 当日涨跌幅
+        calculate_positive_day_ratio_5,  # v1.41 新增：5日阳线比例因子
         calculate_price_position,
         calculate_return_5d,  # v1.37 新增：5日累计涨幅
+        calculate_tail_price_position_delta,  # v1.40 新增：尾盘位置差分因子
+        calculate_tail_volume_shrink_delta,  # v1.40 新增：尾盘缩量差分因子
         calculate_turnover_surge,
+        calculate_turnover_surge_delta,  # v1.40 新增：换手突增差分因子
+        calculate_volume_price_strength,  # v1.41 新增：量价齐升因子
     )
 else:
     # 重构后统一从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
     from .common.logger_config import setup_logger
     from .factor_calculator import (
         calculate_amplitude,
+        calculate_amplitude_delta,  # v1.40 新增：振幅差分因子
         calculate_bollinger_pb,
+        calculate_industry_amplitude_trend,  # v1.42 新增：行业振幅趋势因子
+        calculate_industry_earnings_growth,  # v1.43 新增：行业盈利增长因子
+        calculate_industry_momentum_5d,  # v1.42 新增：行业5日动量因子
+        calculate_industry_pe_trend,  # v1.43 新增：行业PE趋势因子
+        calculate_industry_roe_trend,  # v1.43 新增：行业ROE趋势因子
+        calculate_industry_turnover_trend,  # v1.42 新增：行业换手率趋势因子
+        calculate_capital_flow_ratio_trend,  # v1.44 新增：资金流占比趋势因子（方案C）
+        calculate_capital_flow_intensity,  # v1.44 新增：资金流强度因子（方案C）
         calculate_kdj_j,
+        calculate_ma5_deviation,  # v1.41 新增：5日均线偏离度因子
         calculate_momentum_strength,  # v1.37 新增
+        calculate_near_high_ratio_5,  # v1.41 新增：近5日高低位置因子
         calculate_overnight_return,
         calculate_past_return_1d,  # 当日涨跌幅
+        calculate_positive_day_ratio_5,  # v1.41 新增：5日阳线比例因子
         calculate_price_position,
         calculate_return_5d,  # v1.37 新增：5日累计涨幅
+        calculate_tail_price_position_delta,  # v1.40 新增：尾盘位置差分因子
+        calculate_tail_volume_shrink_delta,  # v1.40 新增：尾盘缩量差分因子
         calculate_turnover_surge,
+        calculate_turnover_surge_delta,  # v1.40 新增：换手突增差分因子
+        calculate_volume_price_strength,  # v1.41 新增：量价齐升因子
     )
 
 # ============================================================================
@@ -197,6 +253,22 @@ _EXTENDED_FACTOR_COLS: tuple[str, ...] = (
     "tail_price_volume_intensity",
     "tail_volume_acceleration",
     "tail_volume_shrink",
+    "amplitude_delta",  # v1.40 新增：振幅差分因子
+    "turnover_surge_delta",  # v1.40 新增：换手突增差分因子
+    "tail_price_position_delta",  # v1.40 新增：尾盘位置差分因子
+    "tail_volume_shrink_delta",  # v1.40 新增：尾盘缩量差分因子
+    "volume_price_strength",  # v1.41 新增：量价齐升因子
+    "positive_day_ratio_5",  # v1.41 新增：5日阳线比例因子
+    "ma5_deviation",  # v1.41 新增：5日均线偏离度因子
+    "near_high_ratio_5",  # v1.41 新增：近5日高低位置因子
+    "industry_momentum_5d",  # v1.42 新增：行业5日动量因子
+    "industry_turnover_trend",  # v1.42 新增：行业换手率趋势因子
+    "industry_amplitude_trend",  # v1.42 新增：行业振幅趋势因子
+    "industry_roe_trend",  # v1.43 新增：行业ROE趋势因子（方案B）
+    "industry_earnings_growth",  # v1.43 新增：行业盈利增长因子（方案B）
+    "industry_pe_trend",  # v1.43 新增：行业PE趋势因子（方案B）
+    "capital_flow_ratio_trend",  # v1.44 新增：资金流占比趋势因子（方案C）
+    "capital_flow_intensity",  # v1.44 新增：资金流强度因子（方案C）
 )
 
 # 收益数据列名（元组防止意外修改）
@@ -217,13 +289,8 @@ _BASE_COLS: tuple[str, ...] = (
     "volume",
 )
 
-# 输出列名（基础列 + 扩展因子 + 收益数据，元组防止意外修改）
-# 结构说明：
-# _OUTPUT_COLS[0:2]   = date, asset（索引字段）
-# _OUTPUT_COLS[2:6]   = open, close, high, low（行情数据）
-# _OUTPUT_COLS[6:10]  = rsi_6, volume_ratio_5, turnover_rate, volume（基础因子，来自输入）
-# _OUTPUT_COLS[10:15] = bollinger_pb, kdj_j, turnover_surge, amplitude, price_position（扩展因子，本次计算）
-# _OUTPUT_COLS[15:]   = forward_return_1d, forward_return_3d, forward_return_5d（收益数据，从 return_data 合并）
+# 输出列名：基础列 + 扩展因子 + 收益数据（元组防止意外修改）
+# 组成：_BASE_COLS(10) + _EXTENDED_FACTOR_COLS(15) + _RETURN_COLS(3)
 _OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS
 
 
@@ -266,8 +333,6 @@ def _calc_intraday_intensity(
         - 数值越大表示上涨强度越强，数值越小表示下跌强度越强
         - 遵循 MODULE.md 约束 #5：类型守卫先用 isinstance 再用 pd.isna
     """
-    import numpy as np
-
     # 类型守卫：检查 None
     if open_price is None or close_price is None or high is None or low is None:
         return np.nan
@@ -335,8 +400,6 @@ def _get_close_price(prices: list | None) -> float:
     Returns:
         尾盘收盘价，或 NaN（数据不完整时）
     """
-    import numpy as np
-
     if not isinstance(prices, list):
         return np.nan
     if len(prices) < _TAIL_KLINE_COUNT:
@@ -344,27 +407,65 @@ def _get_close_price(prices: list | None) -> float:
     return prices[-1]
 
 
-def _calc_price_position(close_price: float, tail_high: float, tail_low: float) -> float:
+def _calc_price_position(
+    close_price: float,
+    tail_high: float,
+    tail_low: float,
+    daily_close: float | None = None,
+    daily_high: float | None = None,
+    daily_low: float | None = None,
+) -> float:
     """
     计算尾盘价格位置
 
     公式:
     - 尾盘价格位置 = (收盘价 - 尾盘最低价) / (尾盘最高价 - 尾盘最低价)
+    - 理论范围 [0, 1]
+
+    涨跌停处理（v1.39）:
+    - 当 tail_high == tail_low（零波动）时，公式分母为零 → 0/0 无定义
+    - 涨停：尾盘价格锁定在涨停板，收盘价=区间最高点 → position = 1.0（最强信号）
+    - 跌停：尾盘价格锁定在跌停板，收盘价=区间最低点 → position = 0.0（最弱信号）
+    - 判断方法：close == daily_high → 涨停方向 → 1.0；close == daily_low → 跌停方向 → 0.0
+    - 极端罕见无交易且非涨跌停 → 0.5（中性，无信号）
 
     Args:
         close_price: 尾盘收盘价
         tail_high: 尾盘最高价
         tail_low: 尾盘最低价
+        daily_close: 日线收盘价（涨跌停判断需要，可选）
+        daily_high: 日线最高价（涨跌停判断需要，可选）
+        daily_low: 日线最低价（涨跌停判断需要，可选）
 
     Returns:
-        尾盘价格位置，理论范围 [0, 1]，或 NaN（边界情况）
+        尾盘价格位置，理论范围 [0, 1]，或 NaN（输入缺失）
     """
-    import numpy as np
-
     if pd.isna(close_price) or pd.isna(tail_high) or pd.isna(tail_low):
         return np.nan
     price_range = tail_high - tail_low
     if abs(price_range) < EPSILON:
+        # v1.39: 零波动不是缺失数据——涨跌停是极端明确的信号
+        # 涨停：收盘价在区间最高点 → position = 1.0
+        # 跌停：收盘价在区间最低点 → position = 0.0
+        # 判断依据：日线 close 与 high/low 的关系
+        if (
+            daily_close is not None
+            and not pd.isna(daily_close)
+            and daily_high is not None
+            and not pd.isna(daily_high)
+            and daily_low is not None
+            and not pd.isna(daily_low)
+        ):
+            if daily_close == daily_high:
+                # 涨停（含一字涨停）：收盘价=日线最高 → 尾盘位置=1.0
+                return 1.0
+            if daily_close == daily_low:
+                # 跌停（含一字跌停）：收盘价=日线最低 → 尾盘位置=0.0
+                return 0.0
+            # 极端罕见：零波动但非涨跌停（如尾盘无成交但日内有波动）
+            # 中性填充：position = 0.5
+            return 0.5
+        # 日线数据缺失时无法判断方向，仍返回 NaN
         return np.nan
     return (close_price - tail_low) / price_range
 
@@ -383,8 +484,6 @@ def _calc_tail_price_slope(prices: list | None) -> float:
     Returns:
         百分比斜率，或 NaN（数据不完整/除零）
     """
-    import numpy as np
-
     if not isinstance(prices, list):
         return np.nan
     if len(prices) < _TAIL_KLINE_COUNT:
@@ -424,8 +523,6 @@ def _calc_tail_price_volume_intensity(prices: list | None, volumes: list | None,
     Returns:
         尾盘量价强度，或 NaN（数据不完整/除零）
     """
-    import numpy as np
-
     # 类型守卫：检查 None
     if prices is None or volumes is None or total_volume is None:
         return np.nan
@@ -470,8 +567,6 @@ def _calc_tail_volume_acceleration(volumes: list | None) -> float:
         - 14:30（索引6）不属于任何一段
         - 遵循 MODULE.md 约束 #5：类型守卫先用 isinstance 再用 pd.isna
     """
-    import numpy as np
-
     # 类型守卫：检查 None/非列表类型
     if volumes is None:
         return np.nan
@@ -513,8 +608,6 @@ def _calc_tail_volume_shrink(volumes: list | None, total_volume: float | None) -
         - 数值越小表示尾盘缩量越明显
         - 遵循 MODULE.md 约束 #5：类型守卫先用 isinstance 再用 pd.isna
     """
-    import numpy as np
-
     # 类型守卫：检查 None
     if volumes is None or total_volume is None:
         return np.nan
@@ -557,8 +650,6 @@ def _calculate_tail_factors(factor_df: pd.DataFrame, logger: logging.Logger) -> 
     # 加载尾盘数据
     tail_df = _load_tail_trading_data(logger)
     if tail_df.empty:
-        import numpy as np
-
         factor_df["tail_price_position"] = np.nan
         factor_df["tail_price_slope"] = np.nan
         factor_df["tail_price_volume_intensity"] = np.nan
@@ -582,9 +673,17 @@ def _calculate_tail_factors(factor_df: pd.DataFrame, logger: logging.Logger) -> 
     # 计算尾盘收盘价
     merged_df["tail_close"] = merged_df["prices"].apply(_get_close_price)
 
-    # 计算尾盘价格位置
+    # 计算尾盘价格位置（v1.39: 传入日线 close/high/low 用于涨跌停判断）
     merged_df["tail_price_position"] = merged_df.apply(
-        lambda row: _calc_price_position(row["tail_close"], row["tail_high"], row["tail_low"]), axis=1
+        lambda row: _calc_price_position(
+            row["tail_close"],
+            row["tail_high"],
+            row["tail_low"],
+            daily_close=row.get("close"),
+            daily_high=row.get("high"),
+            daily_low=row.get("low"),
+        ),
+        axis=1,
     )
 
     # 计算尾盘趋势斜率
@@ -602,8 +701,6 @@ def _calculate_tail_factors(factor_df: pd.DataFrame, logger: logging.Logger) -> 
             lambda row: _calc_tail_volume_shrink(row["volumes"], row["volume"]), axis=1
         )
     else:
-        import numpy as np
-
         merged_df["tail_price_volume_intensity"] = np.nan
         merged_df["tail_volume_acceleration"] = np.nan
         merged_df["tail_volume_shrink"] = np.nan
@@ -612,8 +709,6 @@ def _calculate_tail_factors(factor_df: pd.DataFrame, logger: logging.Logger) -> 
         )
 
     # 统计有效因子数量
-    import numpy as np
-
     for col in [
         "tail_price_position",
         "tail_price_slope",
@@ -1002,6 +1097,119 @@ def generate_all_factors(
         "  有效 tail_volume_shrink: %d (%.2f%%)", tail_shrink_valid, _calc_pct(tail_shrink_valid, len(factor_df))
     )
 
+    # ========== Step 11.5: 计算止跌信号差分因子（Reversal Delta Factors） ==========
+    # v1.40 新增：差分因子依赖原始因子（必须在原始因子计算之后）
+    # 遵循 H5: 因子方向不预判，IC方向由数据决定
+    logger.info("Step 11.5: 计算止跌信号差分因子...")
+
+    # 振幅差分因子：amplitude(T) - amplitude(T-1)
+    factor_df = calculate_amplitude_delta(factor_df, logger_arg=logger)
+    amplitude_delta_valid = int(factor_df["amplitude_delta"].notna().sum())
+    logger.info(
+        "  有效 amplitude_delta: %d (%.2f%%)",
+        amplitude_delta_valid,
+        _calc_pct(amplitude_delta_valid, len(factor_df)),
+    )
+
+    # 换手突增差分因子：turnover_surge(T) - turnover_surge(T-1)
+    factor_df = calculate_turnover_surge_delta(factor_df, logger_arg=logger)
+    turnover_surge_delta_valid = int(factor_df["turnover_surge_delta"].notna().sum())
+    logger.info(
+        "  有效 turnover_surge_delta: %d (%.2f%%)",
+        turnover_surge_delta_valid,
+        _calc_pct(turnover_surge_delta_valid, len(factor_df)),
+    )
+
+    # 尾盘位置差分因子：tail_price_position(T) - tail_price_position(T-1)
+    factor_df = calculate_tail_price_position_delta(factor_df, logger_arg=logger)
+    tail_position_delta_valid = int(factor_df["tail_price_position_delta"].notna().sum())
+    logger.info(
+        "  有效 tail_price_position_delta: %d (%.2f%%)",
+        tail_position_delta_valid,
+        _calc_pct(tail_position_delta_valid, len(factor_df)),
+    )
+
+    # 尾盘缩量差分因子：tail_volume_shrink(T) - tail_volume_shrink(T-1)
+    factor_df = calculate_tail_volume_shrink_delta(factor_df, logger_arg=logger)
+    tail_shrink_delta_valid = int(factor_df["tail_volume_shrink_delta"].notna().sum())
+    logger.info(
+        "  有效 tail_volume_shrink_delta: %d (%.2f%%)",
+        tail_shrink_delta_valid,
+        _calc_pct(tail_shrink_delta_valid, len(factor_df)),
+    )
+
+    # ========== Step 11.6: 计算方向性因子（Directional Factors） ==========
+    logger.info("Step 11.6: 计算方向性因子...")
+
+    # 量价齐升强度因子
+    factor_df = calculate_volume_price_strength(factor_df, logger_arg=logger)
+    volume_price_strength_valid = int(factor_df["volume_price_strength"].notna().sum())
+
+    # 近5日阳线比例因子
+    factor_df = calculate_positive_day_ratio_5(factor_df, logger_arg=logger)
+    positive_day_ratio_5_valid = int(factor_df["positive_day_ratio_5"].notna().sum())
+
+    # 5日均线偏离度因子
+    factor_df = calculate_ma5_deviation(factor_df, logger_arg=logger)
+    ma5_deviation_valid = int(factor_df["ma5_deviation"].notna().sum())
+
+    # 近5日高低位置因子
+    factor_df = calculate_near_high_ratio_5(factor_df, logger_arg=logger)
+    near_high_ratio_5_valid = int(factor_df["near_high_ratio_5"].notna().sum())
+
+    # ========== Step 11.7: 计算行业级别方向性因子（Industry-Level Directional Factors） ==========
+    logger.info("Step 11.7: 计算行业级别方向性因子...")
+    # Note: 行业因子需要 industry 列做分组聚合。统一添加一次 industry 列，3个因子函数共用。
+    # industry 列不属于 _OUTPUT_COLS，Step 12 输出时自动排除。
+
+    # 行业5日动量因子
+    factor_df = calculate_industry_momentum_5d(factor_df, logger_arg=logger)
+    industry_momentum_5d_valid = int(factor_df["industry_momentum_5d"].notna().sum())
+
+    # 行业换手率趋势因子
+    factor_df = calculate_industry_turnover_trend(factor_df, logger_arg=logger)
+    industry_turnover_trend_valid = int(factor_df["industry_turnover_trend"].notna().sum())
+
+    # 行业振幅趋势因子
+    factor_df = calculate_industry_amplitude_trend(factor_df, logger_arg=logger)
+    industry_amplitude_trend_valid = int(factor_df["industry_amplitude_trend"].notna().sum())
+
+    # ========== Step 11.8: 计算行业基本面动量因子（方案B：Industry-Level Fundamental Momentum） ==========
+    logger.info("Step 11.8: 计算行业基本面动量因子...")
+    # Note: 基本面因子函数内部会添加 industry 列（与方案A相同逻辑），用于行业聚合赋个股。
+    # 数据来源: financial_data.json.gz（季度财务数据，merge_asof 前推填充对齐日频）
+
+    # 行业ROE趋势因子（行业ΔROE赋个股）
+    factor_df = calculate_industry_roe_trend(factor_df, logger_arg=logger)
+    industry_roe_trend_valid = int(factor_df["industry_roe_trend"].notna().sum())
+
+    # 行业盈利增长因子（行业净利润增长率赋个股）
+    factor_df = calculate_industry_earnings_growth(factor_df, logger_arg=logger)
+    industry_earnings_growth_valid = int(factor_df["industry_earnings_growth"].notna().sum())
+
+    # 行业PE趋势因子（行业ΔPE赋个股）
+    factor_df = calculate_industry_pe_trend(factor_df, logger_arg=logger)
+    industry_pe_trend_valid = int(factor_df["industry_pe_trend"].notna().sum())
+
+    # ========== Step 11.9: 计算资金流因子（方案C：Capital Flow Factors） ==========
+    logger.info("Step 11.9: 计算资金流因子...")
+    # Note: 资金流因子函数内部会添加 industry 列（与方案A/B相同逻辑）
+    # 数据来源: fund_flow_data.json.gz（约120交易日日频数据，精确匹配无需前推填充）
+    # ⚠️ 数据覆盖限制: 每只股票约120交易日（API限制），超过此范围的日期 → NaN
+
+    # 资金流占比趋势因子（行业Δ主力净流入占比赋个股）
+    factor_df = calculate_capital_flow_ratio_trend(factor_df, logger_arg=logger)
+    capital_flow_ratio_trend_valid = int(factor_df["capital_flow_ratio_trend"].notna().sum())
+
+    # 资金流强度因子（行业主力流入绝对额占比赋个股）
+    factor_df = calculate_capital_flow_intensity(factor_df, logger_arg=logger)
+    capital_flow_intensity_valid = int(factor_df["capital_flow_intensity"].notna().sum())
+
+    # 删除 industry 临时列（不属于 _OUTPUT_COLS，不应出现在最终输出中）
+    # Note: 方案A/B/C的因子函数都会添加 industry 列，统一在此删除
+    if "industry" in factor_df.columns:
+        factor_df = factor_df.drop(columns=["industry"])
+
     # ========== Step 12: 格式化输出 ==========
     logger.info("Step 12: 格式化输出...")
 
@@ -1024,11 +1232,9 @@ def generate_all_factors(
 
     # dates 字段：字符串排序对 YYYY-MM-DD 格式正确（字典序与日期序一致）
     # 从 output_df 取 dates，数据来源更清晰
-    output_data = {"dates": sorted(output_df["date"].unique().tolist()), "data": output_df.to_dict("records")}
+    dates_list = sorted(output_df["date"].unique().tolist())
 
-    # output_data 构建后 output_df 已无用，立即取值并释放
     total_records = len(output_df)
-    del output_df  # 显式释放内存（与 base_data/turnover_df/return_df/factor_df 保持一致）
 
     # 确保父目录存在（职责分离：mkdir 单独处理，异常信息更精确）
     try:
@@ -1038,10 +1244,57 @@ def generate_all_factors(
         raise RuntimeError(f"创建输出目录失败: {output_path.parent}, {type(e).__name__}: {e}") from e
 
     # 使用临时文件 + os.replace 原子写入（遵循 PROJECT.md 文件写入规范）
+    # ⚠️ 内存优化: 流式写入 JSON，避免 output_df.to_dict("records") 一次性创建4GB+字典
+    # 旧方法: json.dump({"dates": ..., "data": output_df.to_dict("records")}, f) → OOM
+    # 新方法: 分批写入 {"dates": ..., "data": [row1, row2, ...]} → 内存峰值仅每批行数
+    _BATCH_WRITE_SIZE = 50000  # 每批写入5万行，峰值约 50000 × 44列 × 100B ≈ 200MB
     temp_path = output_path.parent / (output_path.name + ".tmp")
     try:
         with gzip.open(temp_path, "wt", encoding="utf-8") as f:
-            json.dump(output_data, f, ensure_ascii=False)  # 中文不转义，压缩率更高
+            # 写入 JSON 头部
+            f.write("{\"dates\": ")
+            json.dump(dates_list, f, ensure_ascii=False)
+            f.write(", \"data\": [")
+
+            # ⚠️ NaN→null 处理：json.dump 默认把 float NaN 输出为 "NaN"（非法JSON值）
+            # Python json 模块的 JSONEncoder/iterencode 对嵌套 dict 中的 NaN 无法拦截
+            # pandas to_dict('records') 把 NaN 输出为 float('nan')，不是 None
+            # 唯一可靠方案: 在 to_dict 后遍历每条记录，NaN → None → json 输出为 null
+            def _nan_to_null(obj):
+                if isinstance(obj, float) and obj != obj:  # NaN (NaN != NaN)
+                    return None
+                if isinstance(obj, float) and (obj == float('inf') or obj == float('-inf')):
+                    return None
+                if isinstance(obj, dict):
+                    return {k: _nan_to_null(v) for k, v in obj.items()}
+                if isinstance(obj, list):
+                    return [_nan_to_null(item) for item in obj]
+                return obj
+
+            # 分批写入数据行（避免一次性 to_dict("records") 导致 OOM）
+            # ⚠️ 关键: 逐条输出每个记录，而不是 json.dump(batch_records)（输出整个数组）
+            # 因为 json.dump(batch_records) 会把每批输出为 [...]，逗号连接后变成 [[batch1], [batch2], ...]
+            # 正确格式应该是 [record1, record2, ...]，不能嵌套
+            total_rows = len(output_df)
+            first_record = True
+            for batch_start in range(0, total_rows, _BATCH_WRITE_SIZE):
+                batch_end = min(batch_start + _BATCH_WRITE_SIZE, total_rows)
+                batch_df = output_df.iloc[batch_start:batch_end]
+                batch_records = batch_df.to_dict("records")
+                # NaN→null 转换（确保 JSON 严格合规）
+                batch_records = _nan_to_null(batch_records)
+                # 逐条输出每个记录，逗号 + 换行分隔
+                for record in batch_records:
+                    if not first_record:
+                        f.write(",\n")
+                    json.dump(record, f, ensure_ascii=False)
+                    first_record = False
+                # 显式释放批次数据
+                del batch_df, batch_records
+
+            # 写入 JSON 尾部
+            f.write("]}")
+
         os.replace(temp_path, output_path)
     except OSError as e:
         # 文件系统错误（磁盘/权限/IO，PermissionError 是 OSError 子类）
@@ -1083,13 +1336,32 @@ def generate_all_factors(
             "turnover_surge": surge_valid,
             "amplitude": amplitude_valid,
             "price_position": position_valid,
+            "past_return_1d": past_return_valid,
             "overnight_ret": overnight_valid,
+            "return_5d": return_5d_valid,
+            "momentum_strength": momentum_valid,
             "intraday_intensity": intraday_valid,
             "tail_price_position": tail_position_valid,
             "tail_price_slope": tail_slope_valid,
             "tail_price_volume_intensity": tail_intensity_valid,
             "tail_volume_acceleration": tail_acceleration_valid,
             "tail_volume_shrink": tail_shrink_valid,
+            "amplitude_delta": amplitude_delta_valid,  # v1.40 新增
+            "turnover_surge_delta": turnover_surge_delta_valid,  # v1.40 新增
+            "tail_price_position_delta": tail_position_delta_valid,  # v1.40 新增
+            "tail_volume_shrink_delta": tail_shrink_delta_valid,  # v1.40 新增
+            "volume_price_strength": volume_price_strength_valid,  # v1.41 新增
+            "positive_day_ratio_5": positive_day_ratio_5_valid,  # v1.41 新增
+            "ma5_deviation": ma5_deviation_valid,  # v1.41 新增
+            "near_high_ratio_5": near_high_ratio_5_valid,  # v1.41 新增
+            "industry_momentum_5d": industry_momentum_5d_valid,  # v1.42 新增
+            "industry_turnover_trend": industry_turnover_trend_valid,  # v1.42 新增
+            "industry_amplitude_trend": industry_amplitude_trend_valid,  # v1.42 新增
+            "industry_roe_trend": industry_roe_trend_valid,  # v1.43 新增（方案B）
+            "industry_earnings_growth": industry_earnings_growth_valid,  # v1.43 新增（方案B）
+            "industry_pe_trend": industry_pe_trend_valid,  # v1.43 新增（方案B）
+            "capital_flow_ratio_trend": capital_flow_ratio_trend_valid,  # v1.44 新增（方案C）
+            "capital_flow_intensity": capital_flow_intensity_valid,  # v1.44 新增（方案C）
         },
         "valid_records_percent": {
             "bollinger_pb": _calc_pct(bollinger_valid, total_records),
@@ -1097,13 +1369,32 @@ def generate_all_factors(
             "turnover_surge": _calc_pct(surge_valid, total_records),
             "amplitude": _calc_pct(amplitude_valid, total_records),
             "price_position": _calc_pct(position_valid, total_records),
+            "past_return_1d": _calc_pct(past_return_valid, total_records),
             "overnight_ret": _calc_pct(overnight_valid, total_records),
+            "return_5d": _calc_pct(return_5d_valid, total_records),
+            "momentum_strength": _calc_pct(momentum_valid, total_records),
             "intraday_intensity": _calc_pct(intraday_valid, total_records),
             "tail_price_position": _calc_pct(tail_position_valid, total_records),
             "tail_price_slope": _calc_pct(tail_slope_valid, total_records),
             "tail_price_volume_intensity": _calc_pct(tail_intensity_valid, total_records),
             "tail_volume_acceleration": _calc_pct(tail_acceleration_valid, total_records),
             "tail_volume_shrink": _calc_pct(tail_shrink_valid, total_records),
+            "amplitude_delta": _calc_pct(amplitude_delta_valid, total_records),  # v1.40 新增
+            "turnover_surge_delta": _calc_pct(turnover_surge_delta_valid, total_records),  # v1.40 新增
+            "tail_price_position_delta": _calc_pct(tail_position_delta_valid, total_records),  # v1.40 新增
+            "tail_volume_shrink_delta": _calc_pct(tail_shrink_delta_valid, total_records),  # v1.40 新增
+            "volume_price_strength": _calc_pct(volume_price_strength_valid, total_records),  # v1.41 新增
+            "positive_day_ratio_5": _calc_pct(positive_day_ratio_5_valid, total_records),  # v1.41 新增
+            "ma5_deviation": _calc_pct(ma5_deviation_valid, total_records),  # v1.41 新增
+            "near_high_ratio_5": _calc_pct(near_high_ratio_5_valid, total_records),  # v1.41 新增
+            "industry_momentum_5d": _calc_pct(industry_momentum_5d_valid, total_records),  # v1.42 新增
+            "industry_turnover_trend": _calc_pct(industry_turnover_trend_valid, total_records),  # v1.42 新增
+            "industry_amplitude_trend": _calc_pct(industry_amplitude_trend_valid, total_records),  # v1.42 新增
+            "industry_roe_trend": _calc_pct(industry_roe_trend_valid, total_records),  # v1.43 新增（方案B）
+            "industry_earnings_growth": _calc_pct(industry_earnings_growth_valid, total_records),  # v1.43 新增（方案B）
+            "industry_pe_trend": _calc_pct(industry_pe_trend_valid, total_records),  # v1.43 新增（方案B）
+            "capital_flow_ratio_trend": _calc_pct(capital_flow_ratio_trend_valid, total_records),  # v1.44 新增（方案C）
+            "capital_flow_intensity": _calc_pct(capital_flow_intensity_valid, total_records),  # v1.44 新增（方案C）
         },
         "factor_columns": list(_EXTENDED_FACTOR_COLS),  # 扩展因子列（返回副本，防止外部修改）
         "return_columns": list(_RETURN_COLS),  # 收益数据列（返回副本，防止外部修改）

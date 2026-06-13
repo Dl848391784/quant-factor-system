@@ -24,7 +24,14 @@ factor_calculator.py 是因子计算统一模块，提供所有因子计算函�
 │  ├── calculate_forward_return(close_prices, shift) → pd.Series   │
 │  ├── calculate_bollinger_pb(df, n, k, logger_arg) → pd.DataFrame │
 │  ├── calculate_kdj_j(df, n, m1, m2, logger_arg) → pd.DataFrame   │
-│  └── calculate_turnover_surge(df, surge_window, logger_arg) → DataFrame │
+│  ├── calculate_turnover_surge(df, surge_window, logger_arg) → DataFrame │
+│  ├── calculate_price_position(df, logger_arg) → DataFrame        │
+│  ├── calculate_amplitude(df, logger_arg) → DataFrame             │
+│  ├── calculate_momentum_strength(df, logger_arg) → DataFrame     │
+│  ├── calculate_industry_momentum_5d(df, logger_arg) → DataFrame  │
+│  ├── calculate_industry_turnover_trend(df, logger_arg) → DataFrame │
+│  ├── calculate_industry_amplitude_trend(df, logger_arg) → DataFrame │
+│  └── calculate_near_high_ratio_5(df, logger_arg) → DataFrame     │
 ├─────────────────────────────────────────────────────────────────┤
 │  辅助函数                                                         │
 │  ├── _wilder_smoothing_rsi(series, n) → pd.Series（模块私有）      │
@@ -65,7 +72,21 @@ factor_calculator.py 是因子计算统一模块，提供所有因子计算函�
 | 版本 | 时间 | 更新内容 |
 |-----|------|---------|
 | v1.0 | 2026-05-27 17:00 | 初始创建：导入规范化、logger参数化、__all__修复、docstring补全 |
+| v1.41 | 2026-06-11 | 新增 price_position / amplitude / momentum_strength / near_high_ratio_5 |
+| v1.42 | 2026-06-12 | 新增行业方向性因子: industry_momentum_5d / industry_turnover_trend / industry_amplitude_trend |
 
 ---
 
-*文档生成时间: 2026-05-27 17:00 北京时间*
+## 行业方向性因子详情 (v1.42, 2026-06-12)
+
+| 因子函数 | 输出列名 | required_cols | 算法简述 | IC实测 |
+|----------|----------|---------------|----------|--------|
+| `calculate_industry_momentum_5d` | `industry_momentum_5d` | `past_return_1d, industry_code, date` | 按(industry_code,date)分组→mean(past_return_1d)→5日滚动均值 | +0.026 |
+| `calculate_industry_turnover_trend` | `industry_turnover_trend` | `turnover_avg, industry_code, date` | turnover_avg(t)/turnover_avg(t-1)-1, clip(lower=0.001) | 待测 |
+| `calculate_industry_amplitude_trend` | `industry_amplitude_trend` | `amplitude_avg, industry_code, date` | amplitude_avg(t)/amplitude_avg(t-1)-1, clip(lower=0.001) | 待测 |
+
+> 注：行业分组聚合后按行业回填至个股行，个股值=所属行业的行业级值。
+
+---
+
+*文档生成时间: 2026-06-12 北京时间*

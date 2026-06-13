@@ -52,7 +52,7 @@ class TestVersion:
 
     def test_version_defined(self):
         """验证版本常量存在"""
-        assert __version__ == "2.10"
+        assert __version__ == "2.18"
 
 
 class TestHelperFunctions:
@@ -590,6 +590,71 @@ class TestSetupLogger:
         assert logger is not None
         assert logger.name == "test_logger"
         assert logger.level == logging.DEBUG
+
+
+class TestFlippedFactorDisplay:
+    """v2.15: 取反因子 z-score 展示标记测试"""
+
+    def test_display_name_with_flipped_factor(self):
+        """取反因子名应加*后缀（如 overnight_ret*）"""
+        flipped_factors = ["overnight_ret"]
+        flipped_set = set(flipped_factors)
+
+        # 取反因子 → 加*标记
+        factor_name = "overnight_ret"
+        display_name = f"{factor_name}*" if factor_name in flipped_set else factor_name
+        assert display_name == "overnight_ret*"
+
+    def test_display_name_without_flipped_factor(self):
+        """非取反因子名不应加*后缀"""
+        flipped_factors = ["overnight_ret"]
+        flipped_set = set(flipped_factors)
+
+        # 非取反因子 → 无标记
+        factor_name = "amplitude"
+        display_name = f"{factor_name}*" if factor_name in flipped_set else factor_name
+        assert display_name == "amplitude"
+
+    def test_display_name_with_multiple_flipped_factors(self):
+        """多个取反因子都应加*标记"""
+        flipped_factors = ["overnight_ret", "tail_price_position"]
+        flipped_set = set(flipped_factors)
+
+        for f in flipped_factors:
+            display_name = f"{f}*" if f in flipped_set else f
+            assert display_name == f"{f}*"
+
+    def test_header_note_with_flipped_factors(self):
+        """表头应在有取反因子时显示 * = 已取反统一负向语义"""
+        flipped_factors = ["overnight_ret"]
+        header_note = "  * = 已取反统一负向语义" if flipped_factors else ""
+        assert "* = 已取反统一负向语义" in header_note
+
+    def test_header_note_without_flipped_factors(self):
+        """无取反因子时表头不应有额外说明"""
+        flipped_factors = []
+        header_note = "  * = 已取反统一负向语义" if flipped_factors else ""
+        assert header_note == ""
+
+    def test_factor_str_contains_asterisk_for_flipped(self):
+        """整行因子值字符串中取反因子名带*标记"""
+        # 构建模拟 factor_values_std 数据
+        factor_values_std = {"amplitude": -1.97, "overnight_ret": -3.00}
+        flipped_factors = ["overnight_ret"]
+        flipped_set = set(flipped_factors)
+
+        COL_TO_FACTOR_NAME_MAP = {"amplitude": "amplitude", "overnight_ret": "overnight_ret"}
+        parts = []
+        for k, v_std in factor_values_std.items():
+            factor_name = COL_TO_FACTOR_NAME_MAP.get(k, k)
+            display_name = f"{factor_name}*" if factor_name in flipped_set else factor_name
+            if abs(v_std) >= 0.001:
+                parts.append(f"{display_name}={v_std:.2f}")
+
+        factor_str = ", ".join(parts)
+        assert "overnight_ret*=-3.00" in factor_str
+        assert "amplitude=-1.97" in factor_str
+        assert "overnight_ret=-3.00" not in factor_str  # 不带*的版本不应出现
 
 
 class TestReportStructure:

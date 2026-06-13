@@ -30,12 +30,13 @@
 - **E. 计算与内存**
   - [R15. 百分比计算显式除零保护](#r15-百分比计算显式除零保护)
   - [R16. 大对象显式 del 释放](#r16-大对象显式-del-释放)
+  - [R17. 大规模面板禁用 `groupby.transform`,改用 `_per_asset_transform`](#r17-大规模面板禁用-groupbytransform改用-_per_asset_transform)
 - **F. 类型注解与文档**
-  - [R17. 泛型类型注解 (3.9+)](#r17-泛型类型注解-39)
-  - [R18. 类型注解兼容性 Note](#r18-类型注解兼容性-note)
-  - [R19. docstring Example 规范](#r19-docstring-example-规范)
+  - [R18. 泛型类型注解 (3.9+)](#r18-泛型类型注解-39)
+  - [R19. 类型注解兼容性 Note](#r19-类型注解兼容性-note)
+  - [R20. docstring Example 规范](#r20-docstring-example-规范)
 - **G. 框架兼容**
-  - [R20. pandas 3.0 用 transform](#r20-pandas-30-用-transform)
+  - [R21. pandas 3.0 用 transform](#r21-pandas-30-用-transform)
 
 ### 项目结构与约定
 - [paths.py 使用规范](#pathspy-使用规范)
@@ -675,9 +676,59 @@ factor_df = factor_df.merge(turnover_df[...], ...)
 
 ---
 
+#### R17. 大规模面板禁用 `groupby.transform`,改用 `_per_asset_transform`
+
+**What**:在大规模面板数据 (>1M 行 × >1k group) 上,`df.groupby(asset)[col].transform(fn)` 必须替换为 `data_fetchers.factor_calculator._per_asset_transform`。
+
+**Why**:
+- pandas 的 `groupby.transform` 内部为对齐 group 索引会构建多份中间结构 (group key 重复、临时索引、对齐缓冲),在 1.5M 行 × 1.4k asset 数据上峰值可达 4 GB+
+- 实测 `calculate_rsi_df` 旧实现在 RSI 分层回测中触发 OOM (anon-rss 4.21 GB,SIGKILL by oom-killer,2026-06-13)
+- `_per_asset_transform` 用 numpy 边界切片逐 asset 调用 fn,内存增量仅 ~36 MB (一份 float64 输出)
+
+**How**:
+```python
+from data_fetchers.factor_calculator import _per_asset_transform
+
+# ✅ 推荐:helper 假设 asset 已排序,内存友好
+factor_df = factor_df.sort_values(["asset", "date"])
+result_arr = _per_asset_transform(
+    asset_arr=factor_df["asset"].to_numpy(),
+    value_arr=factor_df["close"].to_numpy(),
+    fn=lambda s: s.rolling(window=20).mean(),
+)
+factor_df["bollinger_ma"] = result_arr
+```
+
+**Don't**:
+```python
+# ❌ 大面板上的 transform → OOM 风险
+factor_df["bollinger_ma"] = factor_df.groupby("asset", group_keys=False)["close"].transform(
+    lambda x: x.rolling(window=20).mean()
+)
+```
+
+**When**:
+- 任何 `groupby.transform(rolling/ewm/shift/diff/cumsum)` 调用,数据规模 >100k 行
+- 因子计算管线的 panel-level 滚动统计 (Bollinger / KDJ / RSI / Turnover / Momentum 等)
+- **不适用**:小数据 (< 10k 行) 或聚合操作 (`groupby.agg/sum/mean`,这类无对齐开销)
+
+**前置约束**:`asset_arr` 必须已按 asset 排序 (同 asset 行连续)。若调用方未排序,需在调用前 `sort_values(["asset", "date"])`,处理后用 `factor_df.loc[original_index]` 恢复原顺序 (参考 `calculate_turnover_surge` 实现)。
+
+**Verify**:
+- `pytest data_fetchers/test_cases/test_per_asset_transform.py` 验证 5 处实际重构点 (Bollinger / KDJ / Turnover / Momentum / RSI) 与 `groupby.transform` 位级等价
+- `grep -n "groupby.*transform" data_fetchers/factor_calculator.py` 不应再出现 (rolling / ewm 类),保留的只能是聚合用的 `transform("count")` 等
+- 实测:`/usr/bin/time -v python -m backtest.layered_backtest_rsi_1d` 的 `Maximum resident set size` 应 < 1.5 GB
+
+**典型案例** (2026-06-13):
+- `factor_calculator.py` 5 处 `groupby.transform`(`Bollinger pb` 滚动均值/标准差、`KDJ J` rolling min/max + EWM K/D、`turnover_surge` shift+rolling、`momentum_strength` rolling std)
+- RSI 分层回测 OOM (4.16 GB → 901 MB,降 78%) 后系统化重构,通过 `test_per_asset_transform.py` 11 个等价性测试保护
+- 新增 helper `_per_asset_transform` (factor_calculator.py:469) 作为统一入口
+
+---
+
 ### F. 类型注解与文档
 
-#### R17. 泛型类型注解 (3.9+)
+#### R18. 泛型类型注解 (3.9+)
 
 **What**:容器类型注解必须用泛型形式 `tuple[str, ...]` / `list[int]` / `dict[str, float]`,不用裸 `tuple` / `list` / `dict`。
 
@@ -702,7 +753,7 @@ _EXTENDED_FACTOR_COLS: tuple = ('bollinger_pb', 'kdj_j', 'turnover_surge')  # �
 
 ---
 
-#### R18. 类型注解兼容性 Note
+#### R19. 类型注解兼容性 Note
 
 **What**:当类型注解为 `int` 但实际接受 `numpy.int64` / `float` 等兼容类型时,在 docstring `Note:` 中显式说明。
 
@@ -735,7 +786,7 @@ def _calc_pct(count: int, total: int) -> float:
 
 ---
 
-#### R19. docstring Example 规范
+#### R20. docstring Example 规范
 
 **What**:docstring `Example:` 章节遵循三条:
 1. **注释位置**:注释放在 `>>>` 行末,不放在返回值行
@@ -784,7 +835,7 @@ Example:
 
 ### G. 框架兼容
 
-#### R20. pandas 3.0 用 transform
+#### R21. pandas 3.0 用 transform
 
 **What**:`groupby(...).rolling()` / `groupby(...).expanding()` 类操作必须用 `.transform(lambda x: x.rolling(...).mean())` 包裹,不直接赋值给 DataFrame 列。
 
@@ -809,7 +860,12 @@ middle = factor_df.groupby('asset', group_keys=False)['close'].rolling(window=n)
 factor_df['middle'] = middle  # TypeError: incompatible index (pandas 3.0)
 ```
 
-**When**:所有 groupby + 时间窗口聚合操作 (rolling / expanding / ewm)。
+**When**:所有 groupby + 时间窗口聚合操作 (rolling / expanding / ewm),**且数据规模较小** (< 100k 行)。
+
+**与 R17 的关系**:
+- R17 (大规模面板禁用 `groupby.transform`) 适用于 >100k 行的因子计算管线 — 优先级**高于** R21
+- R21 适用于小数据 + pandas 3.0 兼容性场景 (单元测试、配置类查询、小规模工具脚本)
+- 大规模场景:`_per_asset_transform` 同样返回 RangeIndex 兼容的 ndarray,不存在 R21 描述的索引问题
 
 **Verify**:
 - 人工 review:`grep -E "groupby.*\)\.rolling" *.py` 找未包 transform 的调用
@@ -908,6 +964,32 @@ factor_df['middle'] = middle  # TypeError: incompatible index (pandas 3.0)
 | Bollinger_PB | bollinger_pb | n=20, k=2.0 | close |
 | KDJ_J | kdj_j | n=9, m1=3, m2=3 | close, high, low |
 | Turnover_Surge | turnover_surge | window=5 | turnover_rate, close |
+| Industry_Momentum_5d | industry_momentum_5d | window=5 | close, stock_industry.json（行业映射） |
+| Industry_Turnover_Trend | industry_turnover_trend | — | turnover_rate, stock_industry.json（行业映射） |
+| Industry_Amplitude_Trend | industry_amplitude_trend | clip_lower=0.001 | amplitude, stock_industry.json（行业映射） |
+
+**行业方向性因子说明**（v1.42 2026-06-12 新增）：
+
+**What**：行业层面趋势维度补充因子，衡量行业整体动量/换手率变化/振幅变化。
+
+**How**：
+1. `_add_industry_column()` 从 `stock_industry.json` 添加行业列，未知行业赋 '其他'
+2. 按 (industry, date) 分组聚合 → 行业均值
+3. 比率型/滚动型因子计算 → 同行业个股赋相同值
+
+| 因子 | required_cols | 输出列名 | 公式 |
+|------|--------------|---------|------|
+| industry_momentum_5d | date, asset, close | industry_momentum_5d | 按(行业,日期)分组→mean(past_return_1d)→5日滚动均值 |
+| industry_turnover_trend | date, asset, turnover_rate | industry_turnover_trend | turnover_avg(t)/turnover_avg(t-1)-1，clip(lower=0.001) |
+| industry_amplitude_trend | date, asset, amplitude | industry_amplitude_trend | amplitude_avg(t)/amplitude_avg(t-1)-1，clip(lower=0.001) |
+
+**Don't**：行业股票数 < 5 时该日期该行业因子值设 NaN；分母极小时 clip 保护避免极端比值。
+
+**Why**：个股因子只捕捉截面差异，行业因子捕捉板块轮动信号。
+
+**When**：综合因子组合需要行业维度补充时使用。
+
+**Verify**：行业因子计算函数在 `factor_calculator.py` v1.15 中定义；IC 脚本实测 IC 值。
 
 **输出结构**:
 ```json
@@ -1014,10 +1096,16 @@ factor_generator.py 的因子计算逻辑从 IC 脚本迁移:
 | KDJ_J | m1 | 3 | K 值平滑周期 |
 | KDJ_J | m2 | 3 | D 值平滑周期 |
 | Turnover_Surge | window | 5 | 换手率均值窗口 |
+| Industry_Momentum_5d | window | 5 | 行业动量滚动窗口 |
+| Industry_Momentum_5d | min_stocks | 5 | 行业最小股票数（不足则NaN） |
+| Industry_Turnover_Trend | clip_lower | 0.001 | 分母保护下限 |
+| Industry_Turnover_Trend | min_stocks | 5 | 行业最小股票数 |
+| Industry_Amplitude_Trend | clip_lower | 0.001 | 分母保护下限 |
+| Industry_Amplitude_Trend | min_stocks | 5 | 行业最小股票数 |
 
 **计算规范 (遵循 PROJECT.md)**:
 - 函数入口必须 `.copy()` 避免副作用
-- 使用 `transform` 方法避免 pandas 3.0 索引问题 (见 R20)
+- 使用 `transform` 方法避免 pandas 3.0 索引问题 (见 R21)
 - 异常检测而非静默修正
 - 使用 EPSILON 避免除零 (见 R15)
 
@@ -1044,6 +1132,7 @@ factor_generator.py 的因子计算逻辑从 IC 脚本迁移:
 
 | 版本 | 日期 | 更新内容 |
 |------|------|---------|
+| v2.1 | 2026-06-13 | 新增 R17（大规模面板禁用 `groupby.transform`,改用 `_per_asset_transform`）;原 R17/R18/R19/R20 编号下移为 R18/R19/R20/R21;源自 RSI 分层回测 OOM 系统化修复 (5 处 transform 重构,11 个等价性测试保护) |
 | v2.0 | 2026-06-03 | 大重构:27 条规则去重合并到 20 条,按 7 类别 (A-G) 组织,每条套 What/Why/How/Don't/When/Verify 框架,加目录索引,后半部分项目文档整理 |
 | v1.x | 2026-05-25 ~ 2026-05-27 | 增量积累的代码 review 发现 (27 条规则) |
 
@@ -1057,6 +1146,7 @@ factor_generator.py 的因子计算逻辑从 IC 脚本迁移:
 | v1.3 | 2026-05-27 21:00 | 第四轮优化:提取列名常量 (6 输入 + 3 输出)、提取魔法数字常量 (4 个基准值 + 2 个阈值)、消除硬编码字符串和魔法数字 |
 | v1.37 | 2026-06-05 | 新增 momentum_strength 因子计算函数 |
 | v1.38 | 2026-06-11 | 修复 momentum_strength 极端值：分母下限保护 (clip std≥0.01)，防止均匀涨跌时比值爆炸；std=0 归入 invalid_mask 设 NaN |
+| v1.15 | 2026-06-12 | 新增行业方向性因子：calculate_industry_momentum_5d / calculate_industry_turnover_trend / calculate_industry_amplitude_trend；新增 _add_industry_column() 辅助函数；行业映射来自 stock_industry.json |
 
 ### fetch_turnover.py 版本
 
@@ -1066,5 +1156,5 @@ factor_generator.py 的因子计算逻辑从 IC 脚本迁移:
 
 ---
 
-*最后更新: 2026-06-10*
+*最后更新: 2026-06-12*
 

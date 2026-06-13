@@ -65,6 +65,8 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
+log_cli = false
+log_level = "WARNING"
 
 [tool.coverage.run]
 source = ["factor_ic", "backtest", "data_fetchers"]
