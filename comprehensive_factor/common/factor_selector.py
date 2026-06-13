@@ -27,6 +27,9 @@
         - p_value 小样本豁免：valid_days < 30 时跳过 p_value 检查（tail_price_slope 案例）
         - 反向因子识别：|ic_mean| 不足但回测强劲（夏普>1.5, 单调性>0.5）时豁免 ic_mean 阈值
         - load_all_factor_results 新增 sample_stats 提取（含 valid_days）
+    v1.6 (2026-06-13): 单一映射来源（方案 B）
+        - 删除本地 FACTOR_NAME_TO_COL_MAP 定义，改为从 factor_definitions 导入
+        - 详见 designs/factor_name_col_map_unification_design.md
 """
 
 import json
@@ -36,6 +39,10 @@ from pathlib import Path
 
 import pandas as pd
 from comprehensive_factor.common.logger_config import get_logger
+
+# v1.6: 单一映射来源（方案 B）
+# 调用方（composite_runner / run_pipeline 等）已将项目根加入 sys.path
+from factor_definitions import FACTOR_NAME_TO_COL_MAP
 
 
 # 默认路径
@@ -57,48 +64,9 @@ DEFAULT_THRESHOLDS = {
 }
 
 
-# 因子名到数据列名的映射（v1.2 → v1.3 扩展）
-# 说明：factor_list 是因子逻辑名（如 'rsi'），factor_cols 是缓存数据列名（如 'rsi_6'）
-# 注意：列名必须与 factor_ic_data.json.gz 中的实际列名一致
-# 可用因子列（2026-06-02）：rsi_6, volume_ratio_5, turnover_rate, bollinger_pb, kdj_j, turnover_surge,
-#                           amplitude, price_position, tail_price_position, tail_price_slope, tail_price_volume_intensity
-#                           return_5d, momentum_strength（v1.37 2026-06-05）
-#                           industry_momentum_5d, industry_turnover_trend, industry_amplitude_trend（v1.42 2026-06-12）
-FACTOR_NAME_TO_COL_MAP = {
-    # 基础因子（内置列名带后缀）
-    "rsi": "rsi_6",
-    "volume_ratio": "volume_ratio_5",
-    # 扩展因子（列名不带后缀）
-    "kdj_j": "kdj_j",
-    "bollinger_pb": "bollinger_pb",
-    "turnover_surge": "turnover_surge",
-    "amplitude": "amplitude",
-    "price_position": "price_position",
-    "overnight_ret": "overnight_ret",
-    # 动量因子（v1.37 2026-06-05）
-    "return_5d": "return_5d",
-    "momentum_strength": "momentum_strength",
-    # 尾盘因子（v1.3 2026-06-02）
-    "tail_price_position": "tail_price_position",
-    "tail_price_slope": "tail_price_slope",
-    "tail_price_volume_intensity": "tail_price_volume_intensity",
-    "tail_volume_acceleration": "tail_volume_acceleration",
-    "tail_volume_shrink": "tail_volume_shrink",
-    # 方向性因子（v1.41 2026-06-11，止跌信号+趋势维度补充）
-    "volume_price_strength": "volume_price_strength",
-    "positive_day_ratio_5": "positive_day_ratio_5",
-    "ma5_deviation": "ma5_deviation",
-    "near_high_ratio_5": "near_high_ratio_5",
-    # 差分因子（v1.40 2026-06-11）——数据源已有列，可直接读取
-    "tail_price_position_delta": "tail_price_position_delta",
-    "tail_volume_shrink_delta": "tail_volume_shrink_delta",
-    # 行业方向性因子（v1.42 2026-06-12，行业层面趋势维度补充）
-    "industry_momentum_5d": "industry_momentum_5d",
-    "industry_turnover_trend": "industry_turnover_trend",
-    "industry_amplitude_trend": "industry_amplitude_trend",
-    # 其他因子
-    "intraday_intensity": "intraday_intensity",
-}
+# v1.6: FACTOR_NAME_TO_COL_MAP 已从 factor_definitions 导入（单一映射来源）
+# 历史本地定义已删除；如需扩展因子映射，请改 factor_definitions.py
+# 详见：designs/factor_name_col_map_unification_design.md §3.2
 
 
 def load_all_factor_results(

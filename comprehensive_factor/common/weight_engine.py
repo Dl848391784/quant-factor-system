@@ -13,6 +13,15 @@
 
 作者: 云瑶
 创建日期: 2026-05-24
+
+版本历史:
+    v1.13 (2026-06-13): 单一映射来源（方案 B）
+        - 删除类内 FACTOR_NAME_TO_COL_MAP / COL_TO_FACTOR_NAME_MAP 字段
+        - 改为 class-level alias 引用 factor_definitions 模块级常量
+        - 修正历史 4 个错列名：kdj_j_9→kdj_j、bollinger_pb_20→bollinger_pb、
+          turnover_surge_5→turnover_surge；删除死条目 main_inflow_ratio_1d
+        - 正则后缀回退兜底保留
+        - 详见 designs/factor_name_col_map_unification_design.md §3.3
 """
 
 import logging
@@ -23,31 +32,26 @@ import numpy as np
 import pandas as pd
 from comprehensive_factor.common.logger_config import get_logger
 
+# v1.13: 单一映射来源（方案 B）
+# 调用方（composite_runner / run_pipeline 等）已将项目根加入 sys.path
+from factor_definitions import (
+    FACTOR_COL_TO_NAME_MAP as _MODULE_COL_TO_NAME_MAP,
+)
+from factor_definitions import (
+    FACTOR_NAME_TO_COL_MAP as _MODULE_NAME_TO_COL_MAP,
+)
+
 
 class WeightMethodBase(ABC):
     """加权方法基类"""
 
-    # 因子名到数据列名的映射（反向映射用于 IC 结果匹配）
-    # v1.10 新增：提取公共映射，避免硬编码后缀
-    # v1.37 新增：return_5d, momentum_strength（动量强度因子）
-    # v1.42 新增：行业方向性因子（行业层面趋势维度补充）
-    FACTOR_NAME_TO_COL_MAP = {
-        "rsi": "rsi_6",
-        "volume_ratio": "volume_ratio_5",
-        "kdj_j": "kdj_j_9",
-        "bollinger_pb": "bollinger_pb_20",
-        "turnover_surge": "turnover_surge_5",
-        "main_inflow_ratio": "main_inflow_ratio_1d",
-        "return_5d": "return_5d",
-        "momentum_strength": "momentum_strength",
-        # v1.42: 行业方向性因子（行业层面趋势维度补充）
-        "industry_momentum_5d": "industry_momentum_5d",
-        "industry_turnover_trend": "industry_turnover_trend",
-        "industry_amplitude_trend": "industry_amplitude_trend",
-    }
-
-    # 反向映射：列名 → 因子名
-    COL_TO_FACTOR_NAME_MAP = {v: k for k, v in FACTOR_NAME_TO_COL_MAP.items()}
+    # v1.13: 单一映射来源（方案 B）
+    # FACTOR_NAME_TO_COL_MAP / COL_TO_FACTOR_NAME_MAP 已迁移至 factor_definitions
+    # 这里保留 class-level alias 兼容子类/外部引用 self.FACTOR_NAME_TO_COL_MAP
+    # 历史 4 个错列名（kdj_j_9 / bollinger_pb_20 / turnover_surge_5 / main_inflow_ratio_1d）
+    # 已修正/删除；详见 designs/factor_name_col_map_unification_design.md §3.3
+    FACTOR_NAME_TO_COL_MAP = _MODULE_NAME_TO_COL_MAP
+    COL_TO_FACTOR_NAME_MAP = _MODULE_COL_TO_NAME_MAP
 
     # v1.12 修复：正则预编译（贪婪匹配，避免错误截断）
     # 原正则 (.+?)_\d+[a-z]?$ 非贪婪，会错误截断 main_inflow_ratio_1d → main_inflow
