@@ -189,6 +189,19 @@ def load_factor_return_data(
     logger.info(f"原始数据范围: {raw_period_start} ~ {raw_period_end}, {raw_total_days} 个交易日")
     logger.info(f"原始平均每日股票数: {raw_avg_stocks_per_day}")
 
+    # ========== 数值列类型规范化（Decimal/str → float） ==========
+    # 背景（2026-06-13）：统一数据源 factor_ic_data.json.gz 中 OHLC 等价格列以 Decimal
+    #   字符串形式存储，pandas 读取后 dtype=object（Decimal 实例）或 str。
+    #   下游复杂因子（calculate_kdj_j / calculate_bollinger_pb 等）在 IC 脚本运行期
+    #   计算时会触发 `Decimal - float` 类型不兼容错误，导致 update_mode=failed。
+    # 修复：在主数据加载完成后，对所有非键列（date/asset 除外）统一 pd.to_numeric，
+    #   与下方 additional_factor_files 的处理逻辑（第 ~227 行）保持对称。
+    #   对已是 numeric 的列是 no-op，安全；非数值字符串会被 coerce 为 NaN 由后续 dropna 过滤。
+    numeric_candidate_cols = [c for c in df.columns if c not in ("date", "asset")]
+    for col in numeric_candidate_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    logger.info(f"数值列类型规范化完成: 转换 {len(numeric_candidate_cols)} 列（pd.to_numeric, Decimal/str → float）")
+
     # ========== 加载额外因子文件（如有） ==========
     all_factor_cols = list(factor_cols)  # 创建副本，防止引用污染
 
