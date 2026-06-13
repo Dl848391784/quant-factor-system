@@ -603,32 +603,31 @@ def select_best_from_groups(
 
             # 丢弃其他因子（包括 icir 缺失的因子）
             for factor_name in group:
-                if factor_name != best_factor:
-                    # 修复：使用 in + discard（O(1) vs O(n)）
-                    if factor_name in selected_factors_set:
-                        selected_factors_set.discard(factor_name)
+                # SIM102: 合并嵌套 if（in 检查保证 discard O(1) 安全）
+                if factor_name != best_factor and factor_name in selected_factors_set:
+                    selected_factors_set.discard(factor_name)
 
-                        # v2.5: 获取相关系数
-                        corr_val = corr_lookup.get((factor_name, best_factor))
-                        corr_str = f"corr={corr_val:.2f}" if corr_val is not None else ""
+                    # v2.5: 获取相关系数
+                    corr_val = corr_lookup.get((factor_name, best_factor))
+                    corr_str = f"corr={corr_val:.2f}" if corr_val is not None else ""
 
-                        # 修复：区分 icir 缺失和 ICIR 较低
-                        if factor_name in missing_icir_factors:
-                            dropped_factors[factor_name] = (
-                                f"与{best_factor}高相关({corr_str}), icir缺失({best_factor}|ICIR|={valid_icir_values[best_factor]:.2f})"
-                            )
-                        else:
-                            # v2.6: 修复问题4 - 当 ICIR 相等时显示 '=' 而非 '<'
-                            # v2.7: 修复显示精度 - 使用 .3f 避免 0.32<0.32 视觉矛盾
-                            icir_val = icir_values[factor_name]
-                            best_icir_val = valid_icir_values[best_factor]
-                            # 使用阈值容差判断相等（避免浮点精度问题）
-                            icir_cmp = "=" if abs(icir_val - best_icir_val) < 0.001 else "<"
-                            dropped_factors[factor_name] = (
-                                f"与{best_factor}高相关({corr_str}), |ICIR|={icir_val:.3f}{icir_cmp}{best_icir_val:.3f}"
-                            )
+                    # 修复：区分 icir 缺失和 ICIR 较低
+                    if factor_name in missing_icir_factors:
+                        dropped_factors[factor_name] = (
+                            f"与{best_factor}高相关({corr_str}), icir缺失({best_factor}|ICIR|={valid_icir_values[best_factor]:.2f})"
+                        )
+                    else:
+                        # v2.6: 修复问题4 - 当 ICIR 相等时显示 '=' 而非 '<'
+                        # v2.7: 修复显示精度 - 使用 .3f 避免 0.32<0.32 视觉矛盾
+                        icir_val = icir_values[factor_name]
+                        best_icir_val = valid_icir_values[best_factor]
+                        # 使用阈值容差判断相等（避免浮点精度问题）
+                        icir_cmp = "=" if abs(icir_val - best_icir_val) < 0.001 else "<"
+                        dropped_factors[factor_name] = (
+                            f"与{best_factor}高相关({corr_str}), |ICIR|={icir_val:.3f}{icir_cmp}{best_icir_val:.3f}"
+                        )
 
-                        logger.info("丢弃高相关因子: %s（保留 %s，ICIR 更高）", factor_name, best_factor)
+                    logger.info("丢弃高相关因子: %s（保留 %s，ICIR 更高）", factor_name, best_factor)
 
     # 修复：返回 list 格式（兼容调用方）
     return list(selected_factors_set), dropped_factors

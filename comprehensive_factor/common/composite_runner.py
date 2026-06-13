@@ -50,19 +50,23 @@ from comprehensive_factor.common.factor_loader import (
 from comprehensive_factor.common.logger_config import get_logger
 from comprehensive_factor.common.weight_engine import ICIRWeightMethod, RollingICIRWeightMethod, WeightEngine
 
+# v2.17: 单一映射来源（方案 B）
+# factor_definitions 位于项目根（与 factor_selector / weight_engine 同模式：
+# 调用方已在 sys.path 中包含项目根），故可在 sys.path 注入之前 import
+from factor_definitions import FACTOR_COL_TO_NAME_MAP, FACTOR_NAME_TO_COL_MAP
+
 
 # 导入 backtest 公共模块（跨模块调用，但通过函数接口）
 # 修复：添加重复插入检查，避免多次 import 时路径重复污染
+# 注：backtest 不在常规 sys.path（comprehensive_factor 包外），需先注入项目根
 _project_root = str(Path(__file__).parent.parent.parent)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from backtest.common.convert_types import convert_to_native_types as backtest_convert
-from backtest.common.layered_backtest import LayeredBacktestEngine
-from backtest.common.layered_backtest_runner import LayerConfigBase
-
-# v2.17: 单一映射来源（方案 B）
-from factor_definitions import FACTOR_COL_TO_NAME_MAP, FACTOR_NAME_TO_COL_MAP
+# E402 noqa: 必须延后到 sys.path 注入之后（运行时依赖动态路径）
+from backtest.common.convert_types import convert_to_native_types as backtest_convert  # noqa: E402
+from backtest.common.layered_backtest import LayeredBacktestEngine  # noqa: E402
+from backtest.common.layered_backtest_runner import LayerConfigBase  # noqa: E402
 
 
 # ============================================================================

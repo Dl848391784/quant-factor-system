@@ -451,10 +451,6 @@ class RollingICIRWeightMethod(WeightMethodBase):
         if ic_daily_data is None:
             raise ValueError("滚动ICIR加权需要 ic_daily_data 参数")
 
-        # 获取唯一日期序列（用于时间轴滚动）
-        dates = factor_df["date"].unique()
-        dates_sorted = sorted(dates)
-
         # 构建每日 IC 数据（时间序列）
         # IC 是每日截面相关性，结构：{因子名: DataFrame(date, ic)}
         ic_series_dict = {}  # {因子列: IC时间序列}
