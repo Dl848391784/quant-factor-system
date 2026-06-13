@@ -142,6 +142,13 @@ def calculate_intraday_intensity(
     return factor_df
 
 
+# 因子计算所需列（供 backtest/common/factor_cli.py 透传给 load_factor_return_data 使用）
+# 缺失此属性会导致 required_factor_cols=None → 列过滤白名单仅含 [date, asset]
+# → calculator 找不到 OHLC 触发"数据校验失败：缺失必需列"。
+# 同模式：data_fetchers/factor_calculator.py::calculate_amplitude.required_cols
+calculate_intraday_intensity.required_cols = ["open", "close", "high", "low"]  # type: ignore[attr-defined]
+
+
 # ============================================================================
 # CLI 入口
 # ============================================================================
