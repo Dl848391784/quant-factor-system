@@ -25,8 +25,17 @@ class TestVolumeRatioLayerConfig:
     """配置类属性验证"""
 
     def test_factor_name_classvar(self):
-        """TC001-01: factor_name 类属性"""
-        assert VolumeRatioLayerConfig.factor_name == 'volume_ratio_5'
+        """TC001-01: factor_name 类属性
+
+        factor_name='volume_ratio' 是因子逻辑名（IC/回测结果 meta 与下游引用），
+        factor_col='volume_ratio_5' 是数据源列名（5 日均量比）。两者职责分离，
+        不应混淆。本测试仅校验 factor_name；factor_col 由其他测试覆盖。
+        """
+        assert VolumeRatioLayerConfig.factor_name == 'volume_ratio'
+
+    def test_factor_col_classvar(self):
+        """TC001-01b: factor_col 类属性 = 数据源列名"""
+        assert VolumeRatioLayerConfig.factor_col == 'volume_ratio_5'
 
     def test_layer_names_classvar(self):
         """TC001-02: layer_names 类属性为纯标签"""
@@ -119,7 +128,7 @@ class TestLayeredBacktestResult:
         if not result_path.exists():
             pytest.skip("结果文件不存在")
 
-        result = json.load(open(result_path))
+        result = json.loads(result_path.read_text())
         required_keys = ['meta', 'layer_stats', 'monotonicity', 'long_short']
         for k in required_keys:
             assert k in result
@@ -130,7 +139,7 @@ class TestLayeredBacktestResult:
         if not result_path.exists():
             pytest.skip("结果文件不存在")
 
-        result = json.load(open(result_path))
+        result = json.loads(result_path.read_text())
         meta = result['meta']
         assert meta['factor_name'] == 'volume_ratio'
         assert meta['factor_direction'] == 'negative'
@@ -142,7 +151,7 @@ class TestLayeredBacktestResult:
         if not result_path.exists():
             pytest.skip("结果文件不存在")
 
-        result = json.load(open(result_path))
+        result = json.loads(result_path.read_text())
         assert len(result['layer_stats']) == 5  # 5层
 
 
