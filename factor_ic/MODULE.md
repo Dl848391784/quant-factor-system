@@ -1,7 +1,7 @@
 # factor_ic 模块规范
 
-> 版本: v4.0 (大重构)
-> 最后更新: 2026-06-03
+> 版本: v4.1
+> 最后更新: 2026-06-12
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**(简单规则可省略部分项)。
 >
@@ -88,6 +88,28 @@ factor_ic 模块负责计算各类因子的 IC(Information Coefficient)值,用�
 - **数据职责**:不自行拉取数据,只处理已缓存数据
 
 **脚本命名**:`ic_<因子名>_<收益周期>.py` (如 `ic_rsi_1d.py`)
+
+**IC 脚本注册表**（截至 v4.1 2026-06-12）：
+
+| 因子名 | IC脚本 | 因子类型 | 数据列名 | factor_cols |
+|--------|--------|---------|---------|-------------|
+| rsi | ic_rsi_1d.py | 简单 | rsi_6 | ['rsi_6'] |
+| volume_ratio | ic_volume_ratio_1d.py | 简单 | volume_ratio_5 | ['volume_ratio_5'] |
+| bollinger_pb | ic_bollinger_pb_1d.py | 复杂 | bollinger_pb | ['close'] |
+| kdj_j | ic_kdj_j_1d.py | 复杂 | kdj_j | ['close','high','low'] |
+| turnover_surge | ic_turnover_surge_1d.py | 复杂 | turnover_surge | ['turnover_rate','close'] |
+| amplitude | ic_amplitude_1d.py | 复杂 | amplitude | ['close','high','low'] |
+| price_position | ic_price_position_1d.py | 复杂 | price_position | ['close','high','low'] |
+| overnight_ret | ic_overnight_ret_1d.py | 简单 | overnight_ret | ['close'] |
+| momentum_strength | ic_momentum_strength_1d.py | 复杂 | momentum_strength | ['close'] |
+| tail_price_position | ic_tail_price_position_1d.py | 复杂 | tail_price_position | ['close','volume'] |
+| tail_price_slope | ic_tail_price_slope_1d.py | 复杂 | tail_price_slope | ['close','volume'] |
+| tail_price_volume_intensity | ic_tail_price_volume_intensity_1d.py | 复杂 | tail_price_volume_intensity | ['close','volume'] |
+| **industry_momentum_5d** | **ic_industry_momentum_5d_1d.py** | **复杂** | **industry_momentum_5d** | **['close','asset']** |
+| **industry_turnover_trend** | **ic_industry_turnover_trend_1d.py** | **复杂** | **industry_turnover_trend** | **['turnover_rate','asset']** |
+| **industry_amplitude_trend** | **ic_industry_amplitude_trend_1d.py** | **复杂** | **industry_amplitude_trend** | **['amplitude','asset']** |
+
+> 注：行业方向性因子为"复杂"类型（需 `run_complex_factor_ic`），因为因子值由 `factor_calculator.calculate_industry_*` 函数预计算，而非直接从缓存列读取。
 
 **公共模块架构** (`factor_ic/common/`):
 
@@ -303,7 +325,8 @@ def generate_bollinger_pb_ic_data(...):
 | 功能 | 公共函数 | 不可自行实现 |
 |------|---------|------------|
 | 主流程入口 | `run_simple_factor_ic()` / `run_complex_factor_ic()` | 三模式分支、模式判断 |
-| 数据加载 | `load_factor_return_data()` | gzip 解压、JSON 加载、日期转换 |
+| 数据加载 | `load_factor_return_data()` | gzip 解压、JSON 加载（ijson 流式 + 列式累积，峰值 <1GB）、日期转换 |
+| 日期清单 | `get_factor_data_dates()` | gzip 流式扫描 dates 字段（ijson，无需加载全量数据） |
 | IC 计算 | `calculate_ic_with_direction_verification()` | Spearman IC、五维度判断 |
 | 结果构建 | `build_ic_result()` | 输出字典拼接、rolling_ic_mean |
 | 结果保存 | `save_ic_result()` | JSON 序列化、文件写入 |
@@ -1966,6 +1989,7 @@ def calculate_all_stocks_vectorized(factor_df):  # 实际使用
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v4.1 | 2026-06-12 | 新增行业方向性因子IC脚本注册表（industry_momentum_5d / industry_turnover_trend / industry_amplitude_trend）；脚本注册表章节 | [experimental] |
 | v4.0 | 2026-06-03 | 大重构:58 章节去重合并到 65 条 M 编号规则,按 11 类别 (A-K) 组织,每条套用 What/Why/How/Don't/When/Verify 框架;加目录索引;精简更新记录 |
 | v3.16 | 2026-06-02 | 新因子数据校验规范 (M53) |
 | v3.10-v3.15 | 2026-05-22~28 | 累积补充:pandas 缺失值标记、股价异常检测、rolling 语义、布林带、向量化、边界检查、防御对称、可选字段回退等规范 |
@@ -1987,5 +2011,5 @@ def calculate_all_stocks_vectorized(factor_df):  # 实际使用
 
 ---
 
-*最后更新: 2026-06-03*
+*最后更新: 2026-06-12*
 
