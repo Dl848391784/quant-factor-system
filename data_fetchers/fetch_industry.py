@@ -29,6 +29,7 @@
 - v2.7 (2026-05-27): Bug修复与维护性改进（4项） - 1)统一降级日志格式(旧缓存/本地备用后缀)；2)fetch_stock_industry_sw添加pd.to_datetime转换start_date；3)__all__移除路径常量(防止绕过封装)；4)异常链保留(raise from e)
 - v2.8 (2026-05-27): 日志精确化（4项） - 1)refresh_industry_cache RuntimeError捕获块补充异常日志；2)load_stock_industry缓存未过期分支补充操作节点日志(与缓存损坏/过期分支对称)；3)main备用数据失败日志补充异常类型名；4)main失败分支info→error级别
 - v3.0 (2026-06-12): 数据源切换 - 主数据源从申万宏源(akshare)切换为东方财富行业板块(akshare stock_board_industry_cons_em)，解决SSL证书验证失败问题（申万官网缺少中间证书）；降级链调整为 EM→SW→本地关键词推断；新增fetch_stock_industry_em()函数和_SW_TO_EM_MAP映射常量；meta.source新增'em_category'值
+- v3.1 (2026-06-14): SW 数据源恢复 + 防覆盖 + 重试 - 1) 自实现 _download_sw_industry_xls 用系统 CA bundle 调用 swsresearch.com（绕开 certifi 缺中间 CA 问题），SW 重新作为可用降级；2) _write_backup_cache 加防覆盖检查（meta.source ∈ {em_category, sw_category} 时拒绝写 local_backup），避免 2026-06-13 类型事故（EM+SW 双失败时静默覆盖真实数据）；3) 新增 _get_sw_ca_bundle/_SW_XLS_URL/_SYSTEM_CA_CANDIDATES 等常量；4) ak.stock_info_a_code_name 增加 3 次重试（深交所偶发 ConnectionReset by peer）
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -36,12 +37,14 @@
 - __main__ 使用 logger（PROJECT.md 日志规范）
 """
 
+import io
 import json
 import logging
 import threading
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 
 # 公共模块导入（遵循 MODULE.md 约束 #4）
@@ -52,7 +55,7 @@ except ImportError:
     from common import get_module_result_dir, get_stock_list_file, setup_logger, write_json_cache
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "3.0"
+_OUTPUT_VERSION = "3.1"
 
 # 日期格式常量（避免写入和解析格式不一致）
 _DATE_FORMAT = "%Y-%m-%d"
@@ -65,6 +68,21 @@ STOCK_LIST_BACKUP_PATH = get_stock_list_file()
 
 # 行业数据缓存路径（输出到 result 目录，MODULE.md 约束 #2）
 INDUSTRY_CACHE_PATH = RESULT_DIR / "stock_industry.json"
+
+# SW 数据源 SSL 修复（v3.1, 2026-06-14）
+# ----------------------------------------------------------------------------
+# 问题: certifi 默认 CA bundle 不含 GeoTrust G2 TLS CN RSA4096 SHA256 2022 CA1，
+#       导致 Python requests 调用 swsresearch.com 报 SSL: CERTIFICATE_VERIFY_FAILED。
+#       但系统 CA bundle (/etc/pki/tls/cert.pem) 完整，能正常验证。
+# 方案: 检测系统 CA bundle，如存在则在自定义 SW 拉取函数中使用，否则回退到 certifi。
+# 不影响其他 akshare 端点（如东方财富、申万行业代码映射），仅作用于 SW xls 下载。
+_SYSTEM_CA_CANDIDATES = [
+    "/etc/pki/tls/cert.pem",       # RHEL/CentOS/AliLinux
+    "/etc/ssl/certs/ca-certificates.crt",  # Debian/Ubuntu
+    "/etc/ssl/cert.pem",           # macOS/Alpine
+]
+_SW_XLS_URL = "https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls"
+_SW_HTTP_TIMEOUT = 30  # 秒
 
 # akshare API 期望列名（防御性校验）
 _EXPECTED_INDUSTRY_COLS = ["symbol", "industry_code", "start_date"]
@@ -233,12 +251,69 @@ def fetch_stock_industry_em() -> dict:
         raise
 
 
+def _get_sw_ca_bundle() -> str | bool:
+    """选择 SW 数据源使用的 CA bundle（v3.1, 2026-06-14）
+
+    Returns:
+        str: 系统 CA bundle 路径（如存在），requests 可直接用作 verify 参数
+        True: 都不存在时回退到 requests/certifi 默认（保留原行为，必然失败但不静默）
+
+    Why:
+        certifi 缺 GeoTrust G2 TLS CN 中间 CA，系统 CA 完整。优先用系统 CA。
+    """
+    for path in _SYSTEM_CA_CANDIDATES:
+        if Path(path).is_file():
+            return path
+    logger.warning("[行业数据] 未找到系统 CA bundle (%s)，回退 certifi（可能 SSL 失败）", _SYSTEM_CA_CANDIDATES)
+    return True
+
+
+def _download_sw_industry_xls() -> "Any":
+    """直接下载 SW 行业分类 xls（绕开 akshare 内部 SSL 限制，v3.1, 2026-06-14）
+
+    Returns:
+        pd.DataFrame: 列与 ak.stock_industry_clf_hist_sw() 兼容
+                     （symbol, industry_code, start_date, update_time）
+
+    Raises:
+        requests.RequestException: HTTP 错误或 SSL 失败
+        ValueError: xls 解析失败
+
+    Note:
+        akshare.stock_industry_clf_hist_sw 内部用 requests.get(url) 默认 verify=certifi，
+        在缺中间 CA 的环境下抛 SSLError。本函数用系统 CA bundle 重新实现下载，
+        其余逻辑（pd.read_excel + rename）与 akshare 1.18 行为一致。
+    """
+    import pandas as pd
+    import requests
+    from akshare.utils.cons import headers as ak_headers
+
+    ca_bundle = _get_sw_ca_bundle()
+    logger.info("[行业数据] SW xls 下载中: %s (verify=%s)", _SW_XLS_URL, ca_bundle)
+    response = requests.get(_SW_XLS_URL, headers=ak_headers, timeout=_SW_HTTP_TIMEOUT, verify=ca_bundle)
+    response.raise_for_status()
+
+    df = pd.read_excel(io.BytesIO(response.content), dtype={"股票代码": "str", "行业代码": "str"})
+    df.rename(
+        columns={
+            "股票代码": "symbol",
+            "计入日期": "start_date",
+            "行业代码": "industry_code",
+            "更新日期": "update_time",
+        },
+        inplace=True,
+    )
+    df["start_date"] = pd.to_datetime(df["start_date"], errors="coerce").dt.date
+    df["update_time"] = pd.to_datetime(df["update_time"], errors="coerce").dt.date
+    return df
+
+
 def fetch_stock_industry_sw() -> dict:
     """
     获取申万行业分类数据
 
-    使用 akshare 新版本 API: stock_industry_clf_hist_sw
-    获取股票的最新行业分类历史数据
+    数据获取: _download_sw_industry_xls()（v3.1, 2026-06-14 起绕开 akshare SSL 问题）
+    股票名称: ak.stock_info_a_code_name()（无 SSL 问题，仍用 akshare）
 
     Returns:
         dict: {股票代码: {name, industry, industry_code}}
@@ -248,8 +323,8 @@ def fetch_stock_industry_sw() -> dict:
 
         logger.info(f"[行业数据 v{_OUTPUT_VERSION}] 开始获取申万行业分类...")
 
-        # 获取申万行业分类历史数据（新版本API）
-        industry_df = ak.stock_industry_clf_hist_sw()
+        # 获取申万行业分类历史数据（v3.1: 自实现 xls 下载, 系统 CA bundle 解决 SSL 问题）
+        industry_df = _download_sw_industry_xls()
 
         # 列名校验（防御性编程）
         missing_cols = [col for col in _EXPECTED_INDUSTRY_COLS if col not in industry_df.columns]
@@ -267,8 +342,27 @@ def fetch_stock_industry_sw() -> dict:
             subset="symbol", keep="first"
         )
 
-        # 获取股票名称映射
-        stock_names_df = ak.stock_info_a_code_name()
+        # 获取股票名称映射（深交所偶发 ConnectionReset，重试 2 次）
+        stock_names_df = None
+        last_err: Exception | None = None
+        for attempt in range(3):
+            try:
+                stock_names_df = ak.stock_info_a_code_name()
+                break
+            except Exception as ne:
+                last_err = ne
+                logger.warning(
+                    "[行业数据] stock_info_a_code_name 第%d次失败 [%s]: %s%s",
+                    attempt + 1,
+                    type(ne).__name__,
+                    ne,
+                    "，重试..." if attempt < 2 else "，放弃",
+                )
+                if attempt < 2:
+                    import time as _t
+                    _t.sleep(2 * (attempt + 1))
+        if stock_names_df is None:
+            raise RuntimeError("ak.stock_info_a_code_name 重试 3 次仍失败") from last_err
 
         # 列名校验（防御性编程）
         missing_name_cols = [col for col in _EXPECTED_STOCK_NAME_COLS if col not in stock_names_df.columns]
@@ -532,7 +626,36 @@ def _write_backup_cache(industry_map: dict) -> None:
         - 写入失败不影响当前返回，下次调用会重新读备用数据
         - 与 refresh_industry_cache 主缓存写入策略不同（主缓存失败抛异常）
         - 此设计决策已在 MODULE.md 约束 #72 中明确说明
+
+        v3.1 防覆盖（2026-06-14）：
+        如果现有缓存 meta.source ∈ {em_category, sw_category}（真实数据源），
+        则拒绝用 local_backup 覆盖。这避免历史教训重演：
+        2026-06-13 事故中，EM+SW 同时失败时本函数静默覆盖了 6-12 拉取的 5585 只
+        真实数据，下游所有行业因子都污染成 75% 的"其他"。
     """
+    # v3.1 防覆盖检查：现有缓存如果是真实数据源，拒绝写入 local_backup
+    if INDUSTRY_CACHE_PATH.exists():
+        try:
+            with open(INDUSTRY_CACHE_PATH, encoding="utf-8") as f:
+                existing = json.load(f)
+            existing_source = existing.get("meta", {}).get("source", "")
+            existing_count = existing.get("meta", {}).get("total_count", 0)
+            if existing_source in {"em_category", "sw_category"}:
+                logger.warning(
+                    "[行业数据] 拒绝用 local_backup 覆盖真实缓存（现有: source=%s, %d 只）。"
+                    "本次降级仅返回内存数据，不持久化（防止 6-13 类型事故）。",
+                    existing_source,
+                    existing_count,
+                )
+                return
+        except Exception as e:
+            logger.warning(
+                "[行业数据] 读取现有缓存失败 [%s]: %s，无法判断是否为真实数据，跳过覆盖保护",
+                type(e).__name__,
+                e,
+            )
+            return
+
     # 固定时间戳（MODULE.md 约束 #17：datetime.now() 只调用一次）
     now = datetime.now()
     updated_at = now.strftime(_DATE_FORMAT)

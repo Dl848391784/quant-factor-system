@@ -1,8 +1,8 @@
 # fetch_industry 流程文档
 
-> 版本: v3.0
+> 版本: v3.1
 > 创建时间: 2026-05-27 14:20 北京时间
-> 更新时间: 2026-06-12 13:10 北京时间（v3.0 数据源切换更新）
+> 更新时间: 2026-06-14 11:10 北京时间（v3.1 SW SSL 修复 + 防覆盖）
 
 ---
 
@@ -262,6 +262,90 @@ get_industry_map()                   ← 公共接口（模块级缓存）
 
 ---
 
+## v3.1 SW SSL 修复 + 防覆盖（2026-06-14）
+
+### 背景：2026-06-13 行业数据污染事故
+
+**事件**: 2026-06-12 13:07 EM 拉取成功（5585 只）→ 2026-06-13 03:22 自动刷新时 EM
+（IP 被反爬封禁，TLS-then-RST）+ SW（akshare 内部 SSL 失败）双源同时失败 →
+`load_local_industry_backup` 触发 → `_write_backup_cache` **静默覆盖**了 6-12 的真实
+缓存为 3021 只的关键词推断版本（75.44% "其他"）→ 下游 `industry_pe_trend` 因子全部
+按错误行业分组计算，IC=-0.0148。
+
+**根因**:
+1. EM 不可达（外部）：阿里云出口 IP 被 `*.push2.eastmoney.com` 反爬封禁
+2. SW 不可用（环境）：Python `requests` 默认 `certifi` CA bundle 不含 `GeoTrust G2 TLS CN RSA4096 SHA256 2022 CA1` 中间 CA，但**系统 CA bundle (`/etc/pki/tls/cert.pem`) 完整可用**
+3. 设计缺陷（代码）：`_write_backup_cache` 无条件覆盖，没有"宁可保留旧真实数据也不写新假数据"的保护
+
+### 修复 1：SW 数据源恢复（绕开 akshare 内部 SSL 限制）
+
+新增 `_download_sw_industry_xls()`：直接用 `requests.get(verify=系统CA bundle)` 下载
+swsresearch.com 的 xls 文件，绕开 akshare 内部 `requests.get(url)`（默认 certifi）。
+
+**关键代码路径**:
+```
+fetch_stock_industry_sw()
+  └─ _download_sw_industry_xls()              # v3.1 新增
+       ├─ _get_sw_ca_bundle()                 # 选择系统 CA：/etc/pki/tls/cert.pem 等
+       ├─ requests.get(url, verify=ca_bundle, timeout=30)
+       └─ pd.read_excel + rename 列名
+  └─ ak.stock_info_a_code_name()              # 股票名称（仍走 akshare，3 次重试）
+```
+
+**CA bundle 候选优先级**: `/etc/pki/tls/cert.pem`（RHEL/CentOS/AliLinux）→
+`/etc/ssl/certs/ca-certificates.crt`（Debian/Ubuntu）→ `/etc/ssl/cert.pem`（macOS/Alpine）→
+回退 `True`（让 requests 用 certifi 默认，会失败但不静默）。
+
+**实测**: 2026-06-14 EM 仍封禁 → SW 拉取成功 5872 只股票，"其他" 26.3%（v3.0 是 0.0% 但
+基于 EM 的 5585 只，v3.1 SW 数据本身就有约 26% 二级代码不在 SW_INDUSTRY_CODE_MAP 中）。
+
+### 修复 2：防覆盖（避免事故重演）
+
+`_write_backup_cache()` 写入前检查现有缓存：
+
+```
+现有缓存 meta.source                  | 行为
+═════════════════════════════════════ |═════════════
+em_category / sw_category（真实数据） | 拒绝写入，仅返回内存数据
+local_backup（旧的关键词推断）        | 允许刷新
+不存在 / 损坏 / 读取失败              | 允许写入（首次 / 自我修复）
+```
+
+**保护策略**: 宁可让进程返回内存中的本地推断数据，也不持久化覆盖磁盘上已有的真实缓存。
+下次 EM 或 SW 恢复时，refresh_industry_cache 会拿到真数据并正常写入（不触发本保护）。
+
+### 修复 3：stock_info_a_code_name 重试
+
+`ak.stock_info_a_code_name()`（深交所 API）偶发 `ConnectionResetError`，加 3 次重试
+（间隔 2/4 秒），避免 SW 路径被一次抖动拖死。
+
+### v3.1 流程图变化
+
+```
+原 SW 调用: ak.stock_industry_clf_hist_sw()
+                │ (内部 requests.get, 默认 certifi → SSL fail)
+                ▼
+                X SSLError
+
+新 SW 调用: _download_sw_industry_xls()
+                ├─ _get_sw_ca_bundle() → /etc/pki/tls/cert.pem
+                ├─ requests.get(url, verify=ca_bundle)
+                └─ pd.read_excel → DataFrame
+                ▼
+                ✓ 5872 只数据
+```
+
+```
+原 backup 写入:                     新 backup 写入 (v3.1):
+_write_backup_cache(map)             _write_backup_cache(map)
+  └─ write_json_cache               ├─ 检查现有缓存 meta.source
+     (无条件覆盖)                    │   ├─ 真实数据源 → return（拒绝）
+                                    │   └─ 缺失/损坏/local → 继续
+                                    └─ write_json_cache（仅在允许时）
+```
+
+---
+
 ## 错误处理策略
 
 ### 错误分类与处理
@@ -451,6 +535,7 @@ if missing_cols:
 
 | 版本 | 日期 | 改进内容 |
 |-----|------|---------|
+| v3.1 | 2026-06-14 | SW SSL 修复 + 防覆盖 + 重试：1) 自实现 _download_sw_industry_xls 用系统 CA bundle 调用 swsresearch.com（绕开 certifi 缺中间 CA），SW 重新作为可用降级；2) _write_backup_cache 加防覆盖检查（meta.source ∈ {em_category, sw_category} 时拒绝写 local_backup），避免 2026-06-13 类型事故；3) ak.stock_info_a_code_name 增加 3 次重试（深交所偶发 ConnectionReset） |
 | v3.0 | 2026-06-12 | 数据源切换：主数据源从申万宏源(akshare)切换为东方财富行业板块(akshare stock_board_industry_cons_em)，解决SSL证书验证失败问题；降级链调整为 EM→SW→本地关键词推断；新增fetch_stock_industry_em()函数和_SW_TO_EM_MAP映射常量；meta.source新增'em_category'值 |
 | v2.8 | 2026-05-27 | 日志精确化：refresh异常日志、缓存未过期分支日志、main错误级别调整 |
 | v2.7 | 2026-05-27 | Bug修复与维护性改进：统一降级日志格式、pd.to_datetime转换、__all__移除路径常量、异常链保留 |
@@ -478,6 +563,7 @@ if missing_cols:
 7. 约束合规（TC007）——版本号、公共模块、输出目录、退出码
 8. 边界情况（TC008）
 9. 东方财富数据源（TC009）——映射完整性、列名校验、降级链EM→SW→RuntimeError
+10. SW SSL 修复 + 防覆盖（TC010, v3.1）——CA bundle 选择、_download_sw_industry_xls 验证、_write_backup_cache 拒绝覆盖真实数据
 
 ---
 

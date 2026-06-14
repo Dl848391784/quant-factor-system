@@ -17,6 +17,7 @@ fetch_industry.py pytest 测试文件
 
 版本历史：
 - v1.0 (2026-05-27): 初始版本，覆盖核心流程和约束合规验证
+- v1.1 (2026-06-14): TC010 新增 SW SSL 修复 + 防覆盖测试（6 个用例，对应 fetch_industry v3.1）
 """
 
 import json
@@ -386,7 +387,7 @@ class TestConstraintCompliance:
 
     def test_version_constant_exists(self):
         """TC007-1: 版本号提取为常量（MODULE.md 约束 #16）"""
-        assert _OUTPUT_VERSION == '3.0'
+        assert _OUTPUT_VERSION == '3.1'
 
     def test_public_module_import(self):
         """TC007-2: 公共模块导入（MODULE.md 约束 #4）"""
@@ -557,6 +558,142 @@ class TestEMSource:
             assert False, "应抛出 RuntimeError"
         except RuntimeError as e:
             assert '行业数据获取失败' in str(e)
+
+
+class TestSwSslWorkaround:
+    """TC010: v3.1 SW SSL 修复 + 防覆盖"""
+
+    def test_get_sw_ca_bundle_returns_existing_path(self):
+        """TC010-1: _get_sw_ca_bundle 返回真实存在的系统 CA 路径"""
+        from data_fetchers.fetch_industry import _SYSTEM_CA_CANDIDATES, _get_sw_ca_bundle
+
+        result = _get_sw_ca_bundle()
+        # 至少在 RHEL/Debian/Mac 任一环境下应返回字符串路径，且文件存在
+        if isinstance(result, str):
+            assert Path(result).is_file(), f"返回的 CA 路径不存在: {result}"
+            assert result in _SYSTEM_CA_CANDIDATES, f"返回的 CA 路径不在候选列表: {result}"
+        else:
+            # 系统无任何候选 CA，回退 True（让 requests 用 certifi 默认）
+            assert result is True
+
+    @patch('pathlib.Path.is_file', return_value=False)
+    def test_get_sw_ca_bundle_fallback_when_none_exist(self, _mock_is_file):
+        """TC010-2: 系统 CA 都不存在时回退 True（让 requests 用 certifi 默认）"""
+        from data_fetchers.fetch_industry import _get_sw_ca_bundle
+
+        result = _get_sw_ca_bundle()
+        assert result is True
+
+    def test_download_sw_industry_xls_uses_system_ca(self):
+        """TC010-3: _download_sw_industry_xls 使用系统 CA bundle 调用 requests
+
+        Why: 函数内部 import requests/pandas，所以 patch 必须作用在真实模块上而非
+        fetch_industry。验证 verify 参数传递路径，避免回归到 certifi 默认（会 SSL 失败）。
+        """
+        import pandas as pd
+        import requests
+
+        import data_fetchers.fetch_industry as fi
+
+        with patch.object(requests, 'get') as mocked_get, patch.object(pd, 'read_excel') as mocked_read:
+            mocked_resp = MagicMock()
+            mocked_resp.content = b'fake xls bytes'
+            mocked_resp.raise_for_status = MagicMock()
+            mocked_get.return_value = mocked_resp
+            mocked_read.return_value = pd.DataFrame({
+                '股票代码': ['000001'],
+                '计入日期': ['2021-07-30'],
+                '行业代码': ['480301'],
+                '更新日期': ['2024-09-27'],
+            })
+
+            df = fi._download_sw_industry_xls()
+
+            # verify 参数必须显式传入（系统 CA bundle 路径或 True）
+            assert mocked_get.called, "未调用 requests.get"
+            kwargs = mocked_get.call_args.kwargs
+            assert 'verify' in kwargs, "verify 参数必须显式传入，不能依赖 certifi 默认"
+            verify_arg = kwargs['verify']
+            assert verify_arg is True or (isinstance(verify_arg, str) and Path(verify_arg).is_file()), (
+                f"verify 应为 True 或真实存在的 CA 路径，实际: {verify_arg!r}"
+            )
+
+            # 列名 rename 验证
+            assert {'symbol', 'industry_code', 'start_date'}.issubset(df.columns)
+
+    def test_write_backup_cache_refuses_to_overwrite_real_cache(self, tmp_path, monkeypatch):
+        """TC010-4 (核心防御): 防覆盖 — 现有缓存为 sw_category 时拒绝写 local_backup
+
+        Why: 2026-06-13 事故复盘 — EM+SW 双失败时 _write_backup_cache 静默覆盖 5585 只
+        真实数据为 3021 只 'local'。此测试守护回归。
+        """
+        import data_fetchers.fetch_industry as fi
+
+        # 写一个"真实"缓存
+        real_cache_path = tmp_path / "stock_industry.json"
+        real_cache = {
+            "meta": {
+                "version": "3.1",
+                "source": "sw_category",
+                "level": "一级",
+                "updated_at": "2026-06-14",
+                "total_count": 5872,
+            },
+            "industries": {"000001": {"name": "平安银行", "industry": "银行", "industry_code": "480301"}},
+        }
+        real_cache_path.write_text(json.dumps(real_cache), encoding="utf-8")
+
+        monkeypatch.setattr(fi, "INDUSTRY_CACHE_PATH", real_cache_path)
+
+        # 尝试用 local_backup 覆盖
+        fake_backup = {f"{i:06d}": {"name": "", "industry": "其他", "industry_code": "local"} for i in range(100)}
+        fi._write_backup_cache(fake_backup)
+
+        # 缓存必须仍是真实版本
+        with open(real_cache_path, encoding="utf-8") as f:
+            after = json.load(f)
+        assert after["meta"]["source"] == "sw_category", "防覆盖失效，真实缓存被 local_backup 覆盖"
+        assert after["meta"]["total_count"] == 5872, "防覆盖失效，total_count 被改写"
+
+    def test_write_backup_cache_writes_when_no_existing_cache(self, tmp_path, monkeypatch):
+        """TC010-5: 防覆盖不影响首次写入 — 缓存不存在时 local_backup 应正常写入"""
+        import data_fetchers.fetch_industry as fi
+
+        cache_path = tmp_path / "stock_industry.json"
+        monkeypatch.setattr(fi, "INDUSTRY_CACHE_PATH", cache_path)
+        monkeypatch.setattr(fi, "RESULT_DIR", tmp_path)
+
+        fake_backup = {f"{i:06d}": {"name": "", "industry": "其他", "industry_code": "local"} for i in range(50)}
+        fi._write_backup_cache(fake_backup)
+
+        assert cache_path.exists(), "缓存不存在时应允许写入 local_backup"
+        with open(cache_path, encoding="utf-8") as f:
+            data = json.load(f)
+        assert data["meta"]["source"] == "local_backup"
+        assert data["meta"]["total_count"] == 50
+
+    def test_write_backup_cache_writes_when_existing_is_local_backup(self, tmp_path, monkeypatch):
+        """TC010-6: 现有缓存本身就是 local_backup 时允许覆盖（保持新鲜度）"""
+        import data_fetchers.fetch_industry as fi
+
+        cache_path = tmp_path / "stock_industry.json"
+        monkeypatch.setattr(fi, "INDUSTRY_CACHE_PATH", cache_path)
+        monkeypatch.setattr(fi, "RESULT_DIR", tmp_path)
+
+        # 写一个旧的 local_backup
+        cache_path.write_text(json.dumps({
+            "meta": {"version": "3.1", "source": "local_backup", "updated_at": "2026-06-01", "total_count": 10},
+            "industries": {},
+        }), encoding="utf-8")
+
+        # 用新的 local_backup 覆盖
+        fake = {f"{i:06d}": {"name": "", "industry": "其他", "industry_code": "local"} for i in range(20)}
+        fi._write_backup_cache(fake)
+
+        with open(cache_path, encoding="utf-8") as f:
+            data = json.load(f)
+        assert data["meta"]["source"] == "local_backup"
+        assert data["meta"]["total_count"] == 20, "local_backup → local_backup 应允许刷新"
 
 
 # 运行测试入口（仅用于 pytest 发现，非手动执行）
