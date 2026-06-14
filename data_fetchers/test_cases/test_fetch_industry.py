@@ -400,7 +400,7 @@ class TestConstraintCompliance:
 
     def test_version_constant_exists(self):
         """TC007-1: 版本号提取为常量（MODULE.md 约束 #16）"""
-        assert _OUTPUT_VERSION == '3.10'
+        assert _OUTPUT_VERSION == '3.11'
 
     def test_public_module_import(self):
         """TC007-2: 公共模块导入（MODULE.md 约束 #4）"""

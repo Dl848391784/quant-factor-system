@@ -39,6 +39,7 @@
 - v3.8 (2026-06-14): 日志级别校准与可操作性增强（2项） - 1) refresh_industry_cache 中 EM 返回空 dict 的日志由 warning 升级为 error，并附"fetch_stock_industry_em 应在空结果时 raise RuntimeError，此处返回空 dict 属内部逻辑错误"的说明（这条路径触发意味着内部契约破裂，warning 级别低于事件严重程度）；2) load_stock_industry 中"刷新失败降级旧缓存"日志的冗余括号文字（"旧缓存（旧缓存）"）改为"旧缓存（{days_old}天前）"，运维可据此判断旧缓存的可信度
 - v3.9 (2026-06-14): 异常诊断维度恢复与降级路径契约统一（4项） - 1) fetch_stock_industry_sw 单独捕获 _download_sw_industry_xls 的 requests.RequestException 与 ValueError/OSError 并分别打 error，让 SW 失败诊断保留"HTTP/SSL 失败 vs Excel 解析失败"两个维度（旧实现仅外层一条统一日志丢失维度）；2) _fallback_to_remote_or_backup 显式传 write_cache=True 并 docstring 注明"降级路径下也写缓存避免下次重复走完整链"是有意为之，与 main 调用风格一致；3) _fallback_to_remote_or_backup 删除重叠的"akshare 获取失败" warning（refresh_industry_cache 内部已有 EM warning + SW error 详尽记录，本层重复反而稀释信号），并在 docstring 加日志契约说明；4) main 由 except RuntimeError 改为 except Exception + isinstance(e, RuntimeError) 区分，让 load_local_industry_backup 解析失败时抛出的 JSONDecodeError/OSError 也能落入"未预期错误"分支（旧实现仅 RuntimeError 入备用降级分支，丢失非 RuntimeError 路径的语义）
 - v3.10 (2026-06-14): 重复日志消除、降级链一致性与运行时契约验证（5项） - 1) fetch_stock_industry_sw 外层 except 通过 isinstance 判断 e 是否为 (RequestException, ValueError, OSError)，若是则跳过重复 logger.error 直接 raise（v3.9 内层已记录细粒度 error，外层再打"akshare API 获取失败"会让同一事件出现两条 error 日志、稀释信号），仅对未预期异常（KeyError 列校验、RuntimeError 股票名重试耗尽等）保留外层兜底日志；同步 import requests 提到 try 之前避免外层 except 引用未定义；2) _write_backup_cache docstring 显式声明"本函数不向外抛异常"契约（防覆盖路径读失败 + 写入失败均吞掉为 warning），消除调用方阅读时的歧义；3) load_stock_industry 缓存加载异常分支补充 INDUSTRY_CACHE_PATH.unlink(missing_ok=True)，与"缓存损坏"分支（L504）行为一致——加载异常通常是 JSON 解析失败/文件损坏，不删会导致下次仍读到同一损坏文件；4) _fallback_to_remote_or_backup 在 load_local_industry_backup 返回空 dict（文件不存在）时补充 logger.warning("降级链已耗尽，返回空 dict（文件不存在）")，让调用方从日志判断整条降级链已耗尽（旧实现仅 load_local_industry_backup 内部一条"备用文件不存在" warning，调用层级看不出降级链全部失败）；5) get_industry_map 添加 `assert isinstance(_industry_cache, dict), ...` 运行时契约验证（仅 __debug__ 模式生效，生产无开销），若未来 load_stock_industry 被改为某些路径返回非 dict，此处会立刻暴露契约破裂而非静默 cast 透传
+- v3.11 (2026-06-14): 异常处理鲁棒性与日志契约对齐（5项） - 1) fetch_stock_industry_sw 外层 except 用受保护的局部 `from requests import RequestException as _ReqExc` 替代 `requests.RequestException`，避免极端情况下 requests 本身导入失败时（顶层 import requests 抛 ImportError 进入本 except 块）`requests` 名字未绑定触发 NameError 覆盖原始 ImportError 异常链；2) refresh_industry_cache 新增 `except ImportError as em_imp_e` 分支，把 EM 段 import 失败也包成 RuntimeError 经 SW 段降级，与 SW 段（外层 except Exception 已经把 ImportError 包成 RuntimeError）对称——旧实现 EM import 失败走 main 的"未预期错误"else 分支、SW import 失败走"备用降级"分支，同样依赖缺失运维行为不一致；3) _write_backup_cache docstring 补 `Raises: 无（吞掉所有异常）` 节，与 load_local_industry_backup 的 Raises 节格式对称，让两个函数契约从 docstring 一目了然；4) _fallback_to_remote_or_backup 第一个 except 块补 `logger.info("[行业数据] akshare 全部失败，降级到本地备用数据...")` 衔接日志，info 级别（决策通知而非异常状态），避免运维查日志时 refresh 内部 EM warning + SW error 后直接跳到 backup 日志中间无衔接；5) load_stock_industry 日期格式异常分支两条 logger 调用（warning + info）合并为单条 warning，与其他异常返回分支（缓存损坏/刷新失败/无更新时间标记）的单日志风格对齐
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -64,7 +65,7 @@ except ImportError:
     from common import get_module_result_dir, get_stock_list_file, setup_logger, write_json_cache
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "3.10"
+_OUTPUT_VERSION = "3.11"
 
 # 日期格式常量（避免写入和解析格式不一致）
 _DATE_FORMAT = "%Y-%m-%d"
@@ -436,7 +437,19 @@ def fetch_stock_industry_sw() -> dict:
         #   静默 raise（不再补外层日志，避免重复）
         # - 其他未预期异常（KeyError 列校验失败、RuntimeError 股票名重试耗尽等）→
         #   依旧打"akshare API 获取失败"作为兜底标记，保留诊断维度
-        if isinstance(e, (requests.RequestException, ValueError, OSError)):
+        #
+        # v3.11: requests 也可能在极端情况下导入失败（系统库缺失），此时上方
+        # `import requests` 自身会抛 ImportError 进入本 except 块，但 requests
+        # 名字未绑定，直接引用 `requests.RequestException` 会触发 NameError 覆盖
+        # 原始 ImportError 的异常链。用受保护的局部 import 重新解析，失败则降级
+        # 为"非 HTTP 错误"分支，让原始异常保持完整。
+        try:
+            from requests import RequestException as _ReqExc
+
+            _is_http = isinstance(e, _ReqExc)
+        except ImportError:
+            _is_http = False
+        if _is_http or isinstance(e, (ValueError, OSError)):
             raise  # 内层已记录，跳过重复 error
         logger.error(f"[行业数据] akshare API 获取失败 [{type(e).__name__}]: {e}")
         raise  # 重新抛出原始异常
@@ -475,6 +488,11 @@ def _fallback_to_remote_or_backup(reason: str) -> dict:
     except Exception:
         # v3.9: 不再补 "akshare 获取失败" warning——refresh_industry_cache 内部
         # 已有 EM warning + SW error 详尽记录，本层重复反而稀释信号
+        # v3.11: 但完全无日志会让运维看完 EM warning + SW error 后直接跳到
+        # backup 成功/失败日志，中间缺一条"决策通知"说明降级正在发生。
+        # 用 info 而非 warning：这是降级链的正常衔接节点，异常状态已由内层
+        # error 充分表达，本层只需告知"现在切换到本地备用数据路径"。
+        logger.info("[行业数据] akshare 全部失败，降级到本地备用数据...")
         try:
             # v3.9: write_cache=True 显式传参（虽与默认值相同），避免与 main 调用风格不一致
             backup_map = load_local_industry_backup(write_cache=True)
@@ -551,8 +569,13 @@ def load_stock_industry() -> dict:
                         return industries
                 except ValueError as e:
                     # 日期格式异常，使用现有缓存（而非静默 pass）
-                    logger.warning(f"[行业数据] 日期格式异常 {updated_at!r}: {e}，使用现有缓存")
-                    logger.info(f"[行业数据] 从缓存加载: {len(industries)} 只股票")
+                    # v3.11: 旧实现用 warning + info 两条日志，与其他正常返回分支
+                    # （仅一条 info）不对称且啰嗦。合并为单条 warning，与"缓存损坏"
+                    # / "刷新失败" / "缓存无更新时间标记" 等异常分支的单日志风格对齐。
+                    logger.warning(
+                        f"[行业数据] 日期格式异常 {updated_at!r} [{type(e).__name__}]: {e}，"
+                        f"使用现有缓存: {len(industries)} 只股票"
+                    )
                     return industries
 
             # updated_at 不存在（空字符串）：缓存缺时间戳是数据异常，warning 而非 info（v3.4）
@@ -621,6 +644,22 @@ def refresh_industry_cache() -> dict:
             )
             em_error_msg = "EM [返回空数据]"
             em_error_detail = "EM: 返回空数据（内部逻辑错误，应 raise RuntimeError）"
+    except ImportError as em_imp_e:
+        # v3.11: EM 段 import 失败（akshare/time 等）原本会以 ImportError 直接透传
+        # 到 main，落入 main 的"未预期错误"分支（else: cli_logger.exception），
+        # 而 SW 段的 import 失败被外层 except Exception 捕获并包成 RuntimeError，
+        # 进入 main 的"备用降级"分支。两条路径对 import 失败的处理不对称：
+        # 同样是依赖缺失，EM 走"放弃"、SW 走"降级备用"，运维行为不可预测。
+        # 修复：本段也将 ImportError 显式包成 RuntimeError，让两条 import 失败
+        # 路径都走"备用降级"分支（refresh_industry_cache 的契约：失败一律
+        # RuntimeError，docstring 也声明仅抛 RuntimeError）。
+        em_error_msg = f"EM [{type(em_imp_e).__name__}]"
+        em_error_detail = f"EM: {type(em_imp_e).__name__}: {em_imp_e}"
+        logger.warning(
+            "[行业数据] 东方财富依赖导入失败 [%s]: %s，尝试 SW 数据源...",
+            type(em_imp_e).__name__,
+            str(em_imp_e),
+        )
     except Exception as em_e:
         em_error_msg = f"EM [{type(em_e).__name__}]"
         em_error_detail = f"EM: {type(em_e).__name__}: {em_e}"
@@ -746,6 +785,12 @@ def _write_backup_cache(industry_map: dict) -> None:
 
     Args:
         industry_map: 行业映射数据
+
+    Raises:
+        无（v3.11 显式声明）：本函数吞掉所有异常并降级为 warning，调用方无需
+        try/except 包裹。与 load_local_industry_backup 的 Raises 节格式对称
+        （后者明确"文件存在但解析失败 → raise"），让两个函数的契约从 docstring
+        一目了然。
 
     Note:
         **本函数不向外抛异常**（v3.10 显式声明）：
