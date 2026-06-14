@@ -45,5 +45,4 @@ if __name__ == "__main__":
     factor_cli_main(
         config_cls=IndustryPeTrendLayerConfig,
         factor_calculator=calculate_industry_pe_trend,
-        required_factor_cols=["date", "asset", "close"],
     )
