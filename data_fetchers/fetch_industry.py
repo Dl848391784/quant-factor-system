@@ -38,6 +38,7 @@
 - v3.7 (2026-06-14): 重复日志消除、契约文档化与 DRY 重构（5项） - 1) fetch_stock_industry_em 删除最外层 except 包装，避免与内层 RuntimeError + 调用方 refresh_industry_cache 三处重复 logger.error；2) load_local_industry_backup docstring Returns 明确"文件不存在→空 dict / 解析失败→raise"两种返回行为对比，与 v3.5 双层 try/except 实现呼应；3) load_stock_industry 三处雷同降级链（缓存损坏 / 加载异常 / 缓存不存在）抽取为 _fallback_to_remote_or_backup(reason) 私有函数，三处分别传 reason 字符串区分日志入口；4) get_industry_map 删除不可达的 except 兜底块（load_stock_industry 已通过 _fallback_to_remote_or_backup 保证不抛异常），docstring 显式记录"不抛异常"契约；5) _get_sw_ca_bundle 返回类型从 str | bool 收紧为 str | Literal[True]，并在 docstring 强调 True 是 requests 库的约定（"使用 certifi 默认验证"），本模块不控制该路径的 CA 选择
 - v3.8 (2026-06-14): 日志级别校准与可操作性增强（2项） - 1) refresh_industry_cache 中 EM 返回空 dict 的日志由 warning 升级为 error，并附"fetch_stock_industry_em 应在空结果时 raise RuntimeError，此处返回空 dict 属内部逻辑错误"的说明（这条路径触发意味着内部契约破裂，warning 级别低于事件严重程度）；2) load_stock_industry 中"刷新失败降级旧缓存"日志的冗余括号文字（"旧缓存（旧缓存）"）改为"旧缓存（{days_old}天前）"，运维可据此判断旧缓存的可信度
 - v3.9 (2026-06-14): 异常诊断维度恢复与降级路径契约统一（4项） - 1) fetch_stock_industry_sw 单独捕获 _download_sw_industry_xls 的 requests.RequestException 与 ValueError/OSError 并分别打 error，让 SW 失败诊断保留"HTTP/SSL 失败 vs Excel 解析失败"两个维度（旧实现仅外层一条统一日志丢失维度）；2) _fallback_to_remote_or_backup 显式传 write_cache=True 并 docstring 注明"降级路径下也写缓存避免下次重复走完整链"是有意为之，与 main 调用风格一致；3) _fallback_to_remote_or_backup 删除重叠的"akshare 获取失败" warning（refresh_industry_cache 内部已有 EM warning + SW error 详尽记录，本层重复反而稀释信号），并在 docstring 加日志契约说明；4) main 由 except RuntimeError 改为 except Exception + isinstance(e, RuntimeError) 区分，让 load_local_industry_backup 解析失败时抛出的 JSONDecodeError/OSError 也能落入"未预期错误"分支（旧实现仅 RuntimeError 入备用降级分支，丢失非 RuntimeError 路径的语义）
+- v3.10 (2026-06-14): 重复日志消除、降级链一致性与运行时契约验证（5项） - 1) fetch_stock_industry_sw 外层 except 通过 isinstance 判断 e 是否为 (RequestException, ValueError, OSError)，若是则跳过重复 logger.error 直接 raise（v3.9 内层已记录细粒度 error，外层再打"akshare API 获取失败"会让同一事件出现两条 error 日志、稀释信号），仅对未预期异常（KeyError 列校验、RuntimeError 股票名重试耗尽等）保留外层兜底日志；同步 import requests 提到 try 之前避免外层 except 引用未定义；2) _write_backup_cache docstring 显式声明"本函数不向外抛异常"契约（防覆盖路径读失败 + 写入失败均吞掉为 warning），消除调用方阅读时的歧义；3) load_stock_industry 缓存加载异常分支补充 INDUSTRY_CACHE_PATH.unlink(missing_ok=True)，与"缓存损坏"分支（L504）行为一致——加载异常通常是 JSON 解析失败/文件损坏，不删会导致下次仍读到同一损坏文件；4) _fallback_to_remote_or_backup 在 load_local_industry_backup 返回空 dict（文件不存在）时补充 logger.warning("降级链已耗尽，返回空 dict（文件不存在）")，让调用方从日志判断整条降级链已耗尽（旧实现仅 load_local_industry_backup 内部一条"备用文件不存在" warning，调用层级看不出降级链全部失败）；5) get_industry_map 添加 `assert isinstance(_industry_cache, dict), ...` 运行时契约验证（仅 __debug__ 模式生效，生产无开销），若未来 load_stock_industry 被改为某些路径返回非 dict，此处会立刻暴露契约破裂而非静默 cast 透传
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -63,7 +64,7 @@ except ImportError:
     from common import get_module_result_dir, get_stock_list_file, setup_logger, write_json_cache
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "3.9"
+_OUTPUT_VERSION = "3.10"
 
 # 日期格式常量（避免写入和解析格式不一致）
 _DATE_FORMAT = "%Y-%m-%d"
@@ -325,10 +326,13 @@ def fetch_stock_industry_sw() -> dict:
         RuntimeError: 股票名称重试 3 次仍失败
         其他 Exception: 列校验等防御性失败，外层 except 兜底记录后 re-raise
     """
+    # v3.10: requests 提到 try 之前（函数顶部），让外层 except 也能引用
+    # RequestException 做类型判断（避免重复 error 日志）
+    import requests
+
     try:
         import akshare as ak
         import pandas as pd
-        import requests  # v3.9: 引入以便区分 _download_sw_industry_xls 的 RequestException
 
         logger.info(f"[行业数据 v{_OUTPUT_VERSION}] 开始获取申万行业分类...")
 
@@ -425,9 +429,15 @@ def fetch_stock_industry_sw() -> dict:
     except Exception as e:
         # 记录日志后重新抛出异常，保留原始异常链（而非返回空 dict）
         # 让调用方（refresh_industry_cache）捕获并转为 RuntimeError
-        # v3.9: 内层已对 HTTP/解析失败分别记录细粒度 error；这里再打一条
-        # "akshare API 获取失败"作为 SW 整体失败标记，便于日志按"akshare API"
-        # 关键字快速定位 SW 路径全部失败事件（非重复，提供不同抽象层视角）
+        # v3.10: 内层已对 _download_sw_industry_xls 的 HTTP/解析失败分别 error 记录，
+        # 这里若再打"akshare API 获取失败"，同一事件会出现两条 error 日志（内层细粒度
+        # + 外层一条），稀释信号且让事故复盘时难辨主因。改为：
+        # - isinstance(e, (RequestException, ValueError, OSError)) → 已被内层记录，
+        #   静默 raise（不再补外层日志，避免重复）
+        # - 其他未预期异常（KeyError 列校验失败、RuntimeError 股票名重试耗尽等）→
+        #   依旧打"akshare API 获取失败"作为兜底标记，保留诊断维度
+        if isinstance(e, (requests.RequestException, ValueError, OSError)):
+            raise  # 内层已记录，跳过重复 error
         logger.error(f"[行业数据] akshare API 获取失败 [{type(e).__name__}]: {e}")
         raise  # 重新抛出原始异常
 
@@ -467,7 +477,7 @@ def _fallback_to_remote_or_backup(reason: str) -> dict:
         # 已有 EM warning + SW error 详尽记录，本层重复反而稀释信号
         try:
             # v3.9: write_cache=True 显式传参（虽与默认值相同），避免与 main 调用风格不一致
-            return load_local_industry_backup(write_cache=True)
+            backup_map = load_local_industry_backup(write_cache=True)
         except Exception as backup_e:
             # v3.5: 区分备用解析失败 vs 文件不存在，前者会 raise 到这里
             logger.error(
@@ -475,6 +485,15 @@ def _fallback_to_remote_or_backup(reason: str) -> dict:
                 f"返回空 dict（下游需具备空数据兜底）"
             )
             return {}
+        # v3.10: 备用文件不存在场景下 load_local_industry_backup 内部仅打了
+        # "本地备用文件不存在" warning，调用方看不到"整条降级链已耗尽"。
+        # 在此补一条 warning 标记降级链全失败状态，便于运维快速判断。
+        # 用 warning 而非 error 的理由：备用文件不存在多属部署/初始化阶段的常见
+        # 状态（首次运行未铺备份），不是契约破裂级别的事件；真正的 error 在
+        # 上方"备用数据解析失败"分支已记录。
+        if not backup_map:
+            logger.warning("[行业数据] 降级链已耗尽，返回空 dict（文件不存在）")
+        return backup_map
 
 
 def load_stock_industry() -> dict:
@@ -545,6 +564,11 @@ def load_stock_industry() -> dict:
             # "缓存不存在"分支（旧控制流会输出"缓存不存在，尝试获取 akshare..."的
             # 误导日志，实际情况是缓存文件存在但 JSON 解析失败）
             logger.warning(f"[行业数据] 缓存加载失败 [{type(e).__name__}]: {e}")
+            # v3.10: 与上方"缓存损坏"分支（L504）保持一致——加载异常通常意味着
+            # JSON 解析失败/文件损坏，不删除会导致下次 load_stock_industry 仍读到
+            # 同一损坏文件再次 fail（即使 _fallback_to_remote_or_backup 内部
+            # refresh 成功写新缓存能覆盖，但失败路径下旧损坏文件会持续存在）
+            INDUSTRY_CACHE_PATH.unlink(missing_ok=True)
             # v3.7: 三处共用的降级链抽取为 _fallback_to_remote_or_backup
             return _fallback_to_remote_or_backup(reason="缓存加载异常")
 
@@ -724,6 +748,11 @@ def _write_backup_cache(industry_map: dict) -> None:
         industry_map: 行业映射数据
 
     Note:
+        **本函数不向外抛异常**（v3.10 显式声明）：
+        - 防覆盖路径中读取现有缓存失败：捕获并 warning，继续写入（v3.3）
+        - 写入失败：捕获并 warning，函数正常返回（非致命）
+        调用方（load_local_industry_backup）无需 try/except 包裹本调用。
+
         备用缓存写入失败为**非致命错误**（warning 即可）：
         - 备用数据本身就低于 akshare 数据准确性
         - 写入失败不影响当前返回，下次调用会重新读备用数据
@@ -875,6 +904,9 @@ def get_industry_map() -> dict:
         此处的 try/except 永远不会进入 except 分支。契约：
         **load_stock_industry 必返回 dict（可能为空），不抛任何异常**。
         若未来该契约改变，此处必须同步加回 try/except。
+
+        v3.10: 添加 assert 运行时哨兵验证上述契约。仅 __debug__ 生效（生产
+        无开销），契约破裂时立刻 AssertionError 而非静默 cast 出错位类型。
     """
     global _industry_cache
     if _industry_cache is _UNSET:
@@ -883,6 +915,14 @@ def get_industry_map() -> dict:
             if _industry_cache is _UNSET:
                 # load_stock_industry 契约保证：返回 dict 或空 dict，不抛异常
                 _industry_cache = load_stock_industry()
+                # v3.10: 契约破裂的运行时哨兵——仅在 __debug__ 模式（python 不带
+                # -O）下生效，不影响生产性能。如果未来 _fallback_to_remote_or_backup
+                # 或 load_stock_industry 被改为某些路径返回非 dict（例如返回 None
+                # 表示失败），这里会立刻 AssertionError 暴露契约破裂，避免静默将
+                # 非 dict 透传给下游 cast(dict, ...) 后产生隐性 AttributeError。
+                assert isinstance(_industry_cache, dict), (
+                    f"load_stock_industry 契约破裂: 返回 {type(_industry_cache).__name__}，期望 dict"
+                )
     # 退出 DCL 后 _industry_cache 必为 dict（_UNSET 已被替换为 dict 或 {}）
     return cast(dict, _industry_cache)
 
