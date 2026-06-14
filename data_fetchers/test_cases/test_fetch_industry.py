@@ -38,8 +38,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from data_fetchers.fetch_industry import (
+    _EM_INDUSTRY_NAMES,
     _OUTPUT_VERSION,
-    _SW_TO_EM_MAP,
     SW_INDUSTRY_CODE_MAP,
     fetch_stock_industry_em,
     fetch_stock_industry_sw,
@@ -295,6 +295,19 @@ class TestBackupFallback:
         # 验证返回空字典
         assert data == {}
 
+    def test_load_local_backup_corrupt_file_raises(self, temp_dir, test_logger):
+        """TC004-4 (v3.5): 备用文件损坏时抛异常（区分文件不存在 vs 解析失败）
+
+        旧行为：解析失败 → warning + return {}（与文件不存在的返回值无法区分）
+        新行为：解析失败 → raise（让调用方记录准确的降级原因）
+        """
+        import pytest
+        corrupt_path = temp_dir / "corrupt.json"
+        corrupt_path.write_text("{invalid json content", encoding="utf-8")
+
+        with pytest.raises(Exception):  # noqa: B017 - 任何 JSON/IO 解析异常都应抛出
+            load_local_industry_backup(stock_list_path=corrupt_path, write_cache=False)
+
     @patch('data_fetchers.fetch_industry.STOCK_LIST_BACKUP_PATH')
     def test_backup_write_cache_non_fatal(self, mock_backup_path, mock_backup_file):
         """TC004-3: 备用缓存写入失败为非致命错误"""
@@ -387,7 +400,7 @@ class TestConstraintCompliance:
 
     def test_version_constant_exists(self):
         """TC007-1: 版本号提取为常量（MODULE.md 约束 #16）"""
-        assert _OUTPUT_VERSION == '3.1'
+        assert _OUTPUT_VERSION == '3.9'
 
     def test_public_module_import(self):
         """TC007-2: 公共模块导入（MODULE.md 约束 #4）"""
@@ -455,19 +468,20 @@ class TestEdgeCases:
 class TestEMSource:
     """TC009: 东方财富数据源测试"""
 
-    def test_sw_to_em_map_complete(self):
-        """TC009-1: _SW_TO_EM_MAP 包含31个申万一级行业"""
-        assert len(_SW_TO_EM_MAP) == 31
-        # 验证映射值与键一致（1:1映射）
-        for sw_name, em_name in _SW_TO_EM_MAP.items():
-            assert sw_name == em_name, f"映射不一致: {sw_name} -> {em_name}"
-
-    def test_sw_to_em_map_values_match_sw_codes(self):
-        """TC009-2: _SW_TO_EM_MAP 的行业名称与 SW_INDUSTRY_CODE_MAP 有效分类一致"""
-        # SW_INDUSTRY_CODE_MAP 中非'其他'的行业名应全部出现在 _SW_TO_EM_MAP
+    def test_em_industry_names_complete(self):
+        """TC009-1: _EM_INDUSTRY_NAMES 包含31个申万一级行业（去重后）"""
+        assert len(_EM_INDUSTRY_NAMES) == 31
+        # _EM_INDUSTRY_NAMES 从 SW_INDUSTRY_CODE_MAP 派生（非'其他'+去重），
+        # 应与 SW 有效分类完全一致
         sw_valid_names = {v for v in SW_INDUSTRY_CODE_MAP.values() if v != '其他'}
-        em_names = set(_SW_TO_EM_MAP.keys())
-        assert sw_valid_names == em_names, f"不一致: SW有效={sw_valid_names - em_names}, EM额外={em_names - sw_valid_names}"
+        assert set(_EM_INDUSTRY_NAMES) == sw_valid_names, (
+            f"不一致: SW有效={sw_valid_names - set(_EM_INDUSTRY_NAMES)}, "
+            f"EM额外={set(_EM_INDUSTRY_NAMES) - sw_valid_names}"
+        )
+
+    def test_em_industry_names_no_duplicates(self):
+        """TC009-2: _EM_INDUSTRY_NAMES 无重复（dict.fromkeys 已去重）"""
+        assert len(_EM_INDUSTRY_NAMES) == len(set(_EM_INDUSTRY_NAMES))
 
     @patch('akshare.stock_board_industry_cons_em')
     def test_fetch_stock_industry_em_column_validation(self, mock_api):
