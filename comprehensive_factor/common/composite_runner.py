@@ -271,6 +271,12 @@ def run_composite_backtest(
             logger.warning("全量因子列缺失（将从 full_df 跳过）: %s", missing_all_cols)
         all_factor_df = full_df[required_all_cols].copy()
 
+        # v2.23: 修复 pre-existing bug —— 缺失列被从 all_factor_df 过滤后，
+        #   后续 standardize_factors / calc_factor_correlation 仍引用原 all_factor_cols
+        #   会触发 KeyError。改为只对实际可用的因子列做下游处理。
+        #   该 bug 在 v2.10~v2.22 被 OOM Kill 提前掩盖（加载阶段就崩），v2.23 修流式加载后才显形。
+        all_factor_cols = [c for c in all_factor_cols if c in full_df.columns]
+
         # v2.8: 先标准化因子，再计算相关性
         logger.info("标准化所有因子值...")
         all_factor_df = standardize_factors(all_factor_df, all_factor_cols, logger)

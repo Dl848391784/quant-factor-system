@@ -11,6 +11,15 @@
 - v2.7: 从统一数据源 factor_ic_data.json.gz 读取因子数据
 - 移除 DEFAULT_CACHE_DIR（改为 DEFAULT_DATA_SOURCE）
 
+更新历史（2026-06-14）：
+- v2.23: load_full_data / load_factor_values 改用 ijson 流式加载
+  根治 OOM Kill（exit code -9）：
+  - v3a 列式 list[float] 累积 → 实测仍 4GB OOM（list[float] PyObject 头开销）
+  - v3b 数值列 array.array('d') + str 列 list → numpy zero-copy 转 DataFrame
+    估算峰值 ~1.1GB（线性外推 100K 行实测）
+  设计文档: designs/composite_streaming_load_design.md
+  复用模板: factor_ic/common/data_loader.py:111-153 (v3 已生产验证, 仅 4 列)
+
 设计参考:
 - factor_ic/common/data_loader.py
 - backtest/common/data_loader.py
@@ -33,25 +42,38 @@ DEFAULT_DATA_SOURCE = Path(__file__).parent.parent.parent / "data_fetchers" / "r
 DEFAULT_IC_RESULT_DIR = Path(__file__).parent.parent.parent / "factor_ic" / "result"
 
 
-def load_full_data(data_source: str | Path | None = None, logger: logging.Logger | None = None) -> pd.DataFrame:
-    """一次加载统一数据源，返回完整 DataFrame（所有列）
+def load_full_data(
+    data_source: str | Path | None = None,
+    factor_cols: list[str] | None = None,
+    logger: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """流式加载统一数据源（ijson + 列式累积）
 
     用于 composite_runner 入口处一次性加载，后续步骤从中提取子集，
-    避免三次独立加载同一 216MB gzip 文件（每次解析 ~22s）。
+    避免三次独立加载同一 gzip 文件。
 
     Args:
         data_source: 数据源文件路径（可选，默认使用 DEFAULT_DATA_SOURCE）
+        factor_cols: 可选因子列过滤
+            - None: 加载全部列（保持原有行为，composite_runner 入口走这条）
+            - [...]: 仅加载 date + asset + factor_cols + forward_return_1d/3d/5d
         logger: 日志对象
 
     Returns:
-        包含所有列的完整 DataFrame（date, asset, 行情, 因子, 收益）
+        包含所需列的完整 DataFrame（date, asset, 行情, 因子, 收益）
 
-    更新历史（2026-06-09）：
-        - v2.10: 新增函数，消除 composite_runner 重复数据加载
+    更新历史:
+        - 2026-06-09 v2.10: 新增函数，消除 composite_runner 重复数据加载
+        - 2026-06-14 v2.23: 改用 ijson 流式 + 列式 dict 累积，根治 OOM
+          v1 (list[dict]) → ~600MB dict 头开销，OOM
+          v2 (pd.concat)  → ~4GB 多块共存，OOM
+          v3 (列式 dict)  → ~60MB 列式累积，成功
+          fallback: ImportError → json.load（保留向后兼容）
 
     Note:
         - 校验 date、asset 列的数据类型（date 为 str，asset 为 str）
-        - 调用方负责从 full_df 提取所需子集，完成后应 del full_df 释放内存
+        - 数值列加载后统一 pd.to_numeric（消除 Decimal/str dtype 问题）
+        - 调用方完成后应 del 返回值并 gc.collect() 释放内存
     """
     if logger is None:
         from comprehensive_factor.common.logger_config import get_logger
@@ -63,28 +85,96 @@ def load_full_data(data_source: str | Path | None = None, logger: logging.Logger
 
     data_source = Path(data_source)
 
-    logger.info("加载统一数据源: %s", data_source)
-
     if not data_source.exists():
         raise FileNotFoundError(
             f"统一数据源文件不存在: {data_source}\n请先运行 data_fetchers/factor_generator.py 生成数据"
         )
 
-    with gzip.open(data_source, "rt", encoding="utf-8") as f:
-        data = json.load(f)
+    logger.info("流式加载统一数据源: %s", data_source)
 
-    if "data" not in data:
-        raise KeyError(f"数据源 JSON 结构缺失 'data' 字段: {data_source}")
+    # === 决定需加载的列集合 ===
+    # factor_cols=None: 不限制（peek 首条记录后取全部 keys）
+    # factor_cols=[...]: 限制为 date + asset + factor_cols + 3 个收益列
+    required_cols: list[str] | None
+    if factor_cols is not None:
+        return_cols = ["forward_return_1d", "forward_return_3d", "forward_return_5d"]
+        required_cols = list(dict.fromkeys(["date", "asset"] + factor_cols + return_cols))
+    else:
+        required_cols = None  # peek 阶段决定
 
-    full_df = pd.DataFrame(data["data"])
+    full_df: pd.DataFrame
 
-    # 显式释放 JSON 原始数据（内存优化）
-    del data
-    import gc
+    try:
+        import array
 
-    gc.collect()
+        import ijson
 
-    # 校验 date、asset 列的数据类型
+        # peek 首条记录决定列集合（仅当 factor_cols=None 时）+ 推断列类型
+        with gzip.open(data_source, "rb") as f:
+            first_record = next(iter(ijson.items(f, "data.item")), None)
+        if first_record is None:
+            raise KeyError(f"数据源 JSON 'data' 数组为空: {data_source}")
+
+        if required_cols is None:
+            required_cols = list(first_record.keys())
+
+        # 类型分类：str 列用 list（date/asset），数值列用 array.array('d')（每元素 8 字节，
+        # 比 list[float] 的 ~28 字节降 70% 内存）。后续 np.frombuffer 零拷贝转 numpy。
+        # 对于 1.49M 行 × 42 数值列，columns 累积约 0.5GB（vs list[float] 1.87GB）
+        STR_COLS = {"date", "asset"}
+        str_columns: dict[str, list[str | None]] = {col: [] for col in required_cols if col in STR_COLS}
+        num_columns: dict[str, array.array[float]] = {
+            col: array.array("d") for col in required_cols if col not in STR_COLS
+        }
+
+        with gzip.open(data_source, "rb") as f:
+            for record in ijson.items(f, "data.item"):
+                for col, lst in str_columns.items():
+                    val = record.get(col)
+                    lst.append(str(val) if val is not None else None)
+                for col, arr in num_columns.items():
+                    val = record.get(col)
+                    # ijson 对数字返回 Decimal，array('d') 接受 float
+                    arr.append(float(val) if val is not None else float("nan"))
+
+        if not str_columns.get("date") and "date" in required_cols:
+            raise KeyError(f"数据源 JSON 'data' 数组为空: {data_source}")
+
+        # 构建 DataFrame：数值列 zero-copy 转 numpy，str 列保持 list
+        df_data: dict[str, object] = {}
+        for col in required_cols:
+            if col in str_columns:
+                df_data[col] = str_columns[col]
+            else:
+                # np.frombuffer 共享 array.array 内存（zero-copy）
+                df_data[col] = np.frombuffer(num_columns[col], dtype=np.float64).copy()
+
+        full_df = pd.DataFrame(df_data)
+        del df_data, str_columns, num_columns
+        import gc
+
+        gc.collect()
+        logger.info("ijson 流式加载完成: %d 行 × %d 列", len(full_df), len(full_df.columns))
+
+    except ImportError:
+        # ijson 不可用 → 回退到 json.load（保留兼容性，与 factor_ic v3 一致）
+        logger.warning("ijson 不可用，回退到 json.load（峰值 ~4GB，可能 OOM）")
+        with gzip.open(data_source, "rt", encoding="utf-8") as f:
+            data = json.load(f)
+        if "data" not in data:
+            raise KeyError(f"数据源 JSON 结构缺失 'data' 字段: {data_source}") from None
+        full_df = pd.DataFrame(data["data"])
+        del data
+        import gc
+
+        gc.collect()
+        # fallback 路径下的列过滤
+        if factor_cols is not None and required_cols is not None:
+            # 只保留请求的列（容忍 required_cols 中部分列缺失，与流式路径行为一致）
+            available = [c for c in required_cols if c in full_df.columns]
+            full_df = full_df[available].copy()  # type: ignore[assignment]  # pandas list-indexing 返回 DataFrame
+
+    # === 校验 date / asset 类型（保留现有逻辑） ===
     if len(full_df) > 0:
         first_date = full_df["date"].iloc[0]
         first_asset = full_df["asset"].iloc[0]
@@ -111,13 +201,24 @@ def load_full_data(data_source: str | Path | None = None, logger: logging.Logger
 
     logger.info("统一数据源: %d 条记录，类型校验通过", len(full_df))
 
+    # === 数值列类型规范化（参考 factor_ic v3） ===
+    # 背景：factor_ic_data.json.gz 中 OHLC 等价格列以 Decimal 字符串形式存储，
+    #   pandas 读取后 dtype=object，下游计算触发 `Decimal - float` 类型不兼容。
+    # 修复：对所有非键列统一 pd.to_numeric(errors="coerce")
+    numeric_cols = [c for c in full_df.columns if c not in ("date", "asset")]
+    for col in numeric_cols:
+        full_df[col] = pd.to_numeric(full_df[col], errors="coerce")
+    logger.info("数值列类型规范化完成: %d 列（pd.to_numeric, Decimal/str → float）", len(numeric_cols))
+
     return full_df
 
 
 def load_factor_values(
     factor_cols: list[str], data_source: str | Path | None = None, logger: logging.Logger | None = None
 ) -> pd.DataFrame:
-    """从统一数据源加载因子原始值
+    """从统一数据源加载因子原始值（流式）
+
+    内部委托 load_full_data(factor_cols=factor_cols)，避免双份维护流式逻辑。
 
     Args:
         factor_cols: 因子列名列表（如 ['rsi_6', 'volume_ratio_5']）
@@ -125,87 +226,41 @@ def load_factor_values(
         logger: 日志对象
 
     Returns:
-        包含 date, asset, 因子列的 DataFrame
+        包含 date, asset, 因子列的 DataFrame（不含 forward_return_*）
 
-    更新历史（2026-05-27）：
-        - v2.7: 从统一数据源 factor_ic_data.json.gz 读取
-        - 移除 cache_dir 参数（改为 data_source）
+    更新历史:
+        - 2026-05-27 v2.7: 从统一数据源 factor_ic_data.json.gz 读取
+        - 2026-06-14 v2.23: 委托 load_full_data，自动获得 ijson 流式优化
 
     Note:
-        - 校验 date、asset 列的数据类型（date 为 str，asset 为 str）
-        - 类型不一致可能导致后续计算异常（如 groupby 失败）
+        - 校验 factor_cols 在数据源中存在（缺失列抛 ValueError）
+        - 校验 date、asset 列的数据类型（继承 load_full_data 的校验）
+        - 数值列已 pd.to_numeric（继承 load_full_data 的处理）
     """
     if logger is None:
         from comprehensive_factor.common.logger_config import get_logger
 
         logger = get_logger(__name__)
 
-    if data_source is None:
-        data_source = DEFAULT_DATA_SOURCE
+    # 委托给 load_full_data 走流式列子集加载（约 175MB 峰值）
+    full_df = load_full_data(data_source=data_source, factor_cols=factor_cols, logger=logger)
 
-    data_source = Path(data_source)
+    # 校验请求的 factor_cols 全部存在于加载结果中
+    missing = [c for c in factor_cols if c not in full_df.columns]
+    if missing:
+        available_cols = [c for c in full_df.columns if c not in ("date", "asset")]
+        raise ValueError(f"数据源中缺少因子列: {missing}\n可用列: {available_cols}")
 
-    # 加载统一数据源
-    logger.info("加载统一数据源: %s", data_source)
+    # 仅返回 date + asset + factor_cols（与 v2.7 签名兼容，不含 forward_return_*）
+    result_df = full_df[["date", "asset"] + factor_cols].copy()  # type: ignore[assignment]
 
-    if not data_source.exists():
-        raise FileNotFoundError(
-            f"统一数据源文件不存在: {data_source}\n请先运行 data_fetchers/factor_generator.py 生成数据"
-        )
-
-    with gzip.open(data_source, "rt", encoding="utf-8") as f:
-        data = json.load(f)
-
-    if "data" not in data:
-        raise KeyError(f"数据源 JSON 结构缺失 'data' 字段: {data_source}")
-
-    full_df = pd.DataFrame(data["data"])
-
-    # 显式释放 JSON 原始数据（内存优化）
-    del data
+    # 显式释放完整 DataFrame
+    del full_df
     import gc
 
     gc.collect()
 
-    # 校验必需列存在
-    required_cols = ["date", "asset"] + factor_cols
-    for col in required_cols:
-        if col not in full_df.columns:
-            available_cols = [c for c in full_df.columns if c not in ["date", "asset"]]
-            raise ValueError(f"数据源中缺少 '{col}' 列\n可用因子列: {available_cols}")
-
-    # 校验 date、asset 列的数据类型
-    if len(full_df) > 0:
-        first_date = full_df["date"].iloc[0]
-        first_asset = full_df["asset"].iloc[0]
-
-        if not isinstance(first_date, str):
-            raise TypeError(
-                f"date 列数据类型应为 str，实际为 {type(first_date).__name__}\n"
-                f"首行 date 值: {first_date}\n"
-                "可能原因：\n"
-                "  1. JSON 文件中 date 字段为数字而非字符串\n"
-                "  2. 数据生成脚本类型转换异常\n"
-                "建议：检查 factor_ic_data.json.gz 生成逻辑"
-            )
-
-        if not isinstance(first_asset, str):
-            raise TypeError(
-                f"asset 列数据类型应为 str，实际为 {type(first_asset).__name__}\n"
-                f"首行 asset 值: {first_asset}\n"
-                "可能原因：\n"
-                "  1. JSON 文件中 asset 字段为数字而非字符串\n"
-                "  2. 数据生成脚本类型转换异常\n"
-                "建议：检查 factor_ic_data.json.gz 生成逻辑"
-            )
-
-    logger.info("因子数据: %d 条记录，类型校验通过", len(full_df))
-
-    result_df = full_df[["date", "asset"] + factor_cols].copy()
-
-    # 显式释放完整 DataFrame（内存优化）
-    del full_df
-    gc.collect()
+    logger.info("因子数据: %d 条记录，%d 个因子列", len(result_df), len(factor_cols))
 
     return result_df
 

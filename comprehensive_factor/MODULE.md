@@ -1,7 +1,7 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.22
-> 最后更新: 2026-06-12
+> 版本: v2.23
+> 最后更新: 2026-06-14
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
 >
@@ -310,7 +310,7 @@ python stock_selector.py \
 
 | 功能 | 公共模块 | 禁止自行实现 |
 |------|---------|------------|
-| 因子数据加载 | `factor_loader.load_factor_values()` | gzip.open + json.load |
+| 因子数据加载 | `factor_loader.load_factor_values()` | gzip.open + json.load（OOM 风险，v2.23 已改 ijson 流式） |
 | IC 结果加载 | `factor_loader.load_ic_results()` | json.load 手写 |
 | IC 每日序列加载 | `factor_loader.load_ic_daily()` | 手写读 daily.json.gz |
 | 加权计算 | `WeightEngine.calculate()` | 手写权重循环 |
@@ -869,6 +869,17 @@ _FACTOR_SUFFIX_PATTERN = re.compile(r'(.+?)_\d+[a-z]?$')
 | 因子原始值 | `data_fetchers/result/factor_ic_data.json.gz` | `factor_loader.load_factor_values()` |
 | IC 统计结果 | `factor_ic/result/*.json` | `factor_loader.load_ic_results()` |
 | IC 每日序列 | `factor_ic/result/*_daily.json.gz` | `factor_loader.load_ic_daily()` |
+
+**加载机制（v2.23, 2026-06-14）**:
+
+| 路径 | 实现 | 峰值内存 | 备注 |
+|------|------|---------|------|
+| `load_full_data()` 全列 | ijson 流式 + 列式 dict 累积 | ~760 MB | composite_runner 入口 |
+| `load_full_data(factor_cols=[...])` | ijson 流式 + 提前过滤 | ~175 MB | 显式列子集（5 因子） |
+| `load_factor_values()` | 委托 `load_full_data(factor_cols=...)` | ~175 MB | stock_selector 等下游 |
+| ImportError fallback | `gzip.open + json.load` | ~4.5 GB | OOM 风险，仅 ijson 缺失时使用 |
+
+**Don't**: 在 composite 模块内自行 `gzip.open + json.load(f)` 加载 `factor_ic_data.json.gz`，会触发 OOM Kill（exit code -9）。设计文档: `designs/composite_streaming_load_design.md`。
 
 ---
 

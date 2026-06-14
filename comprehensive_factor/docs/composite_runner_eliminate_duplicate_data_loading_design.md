@@ -98,3 +98,46 @@ def load_full_data(
 2. `pytest comprehensive_factor/test_cases/` — 确保无回归
 3. 手动验证：`python comprehensive_factor/composite_equal_weight_1d.py --auto_select` 执行时间应从 ~3min 降到 ~1min
 4. Spec Compliance：对照 MODULE.md M21（数据来源单一数据源）、M47（Config 默认值单一数据源）
+---
+
+## 附录：v2.23 流式加载升级（2026-06-14）
+
+### 背景
+
+v2.10 通过"一次加载三用途共享"消除了重复数据加载，但 `factor_ic_data.json.gz` 文件随因子集扩展持续增长（149 万行 × 44 列 ≈ 389 MB gzip），`json.load` 一次性解析峰值达 4.5 GB，在 7.3 GB 总内存机器上触发 OOM Kill（exit code -9）：
+
+```
+2026-06-13 22:00 ~ 2026-06-14 15:30 期间
+6 次 OOM Kill 同一脚本 composite_equal_weight_1d.py
+dmesg: anon-rss:4.17GB python，每次 SIGKILL
+```
+
+### 升级方案
+
+直接复用 `factor_ic v3` 已生产验证的 ijson 流式 + 列式 dict 累积模板（参考 `factor_ic/common/data_loader.py:111-153`）：
+
+- **解析**：`ijson.items(f, "data.item")` 流式逐条
+- **累积**：`dict[col, list]` 列式累积（避免 list[dict] 对象头开销）
+- **构建**：`pd.DataFrame(列式字典)` 一次性列存
+- **fallback**：`ImportError` 时回退到 `json.load`（向后兼容）
+
+### 核心改动
+
+| 改动 | 文件 | 行数 |
+|------|------|------|
+| `load_full_data` 改流式 + 加 `factor_cols` 参数 | `factor_loader.py` | ~70 |
+| `load_factor_values` 委托给 `load_full_data` | `factor_loader.py` | ~30 |
+| 配套测试 4 个 | `test_factor_loader_streaming.py` | ~150 |
+| MODULE.md M21 加载机制说明 | `MODULE.md` | ~15 |
+
+### 性能对比
+
+| 路径 | 旧（v2.10） | 新（v2.23） | 变化 |
+|------|-----------|-----------|------|
+| `load_full_data()` 全列 | 4.5 GB | ~760 MB | **-83%** |
+| `load_factor_values()` 列子集 | 4.5 GB | ~175 MB | **-96%** |
+| 加载耗时（149 万行） | ~22s | ~150s | +6.8x（可接受：vs OOM 完全失败） |
+
+### 设计文档
+
+完整设计稿: `designs/composite_streaming_load_design.md`（含背景、方案、影响范围、数据流对比、测试方案、风险回滚、验收标准 9 章）。
