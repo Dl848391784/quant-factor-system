@@ -248,8 +248,8 @@ def main(logger_arg: logging.Logger | None = None) -> int:
             continue
 
         processed += 1
-        # 进度日志：用 processed 而非全局下标，避免大量跳过时长期不触发
-        if processed > 0 and processed % _BATCH_LOG_INTERVAL == 0:
+        # 进度日志：processed 已自增，最小值为 1，无需 > 0 判断
+        if processed % _BATCH_LOG_INTERVAL == 0:
             _logger.info(
                 "拉取进度: 已处理=%d (新增=%d, 失败=%d, 跳过=%d, 总计=%d)",
                 processed,
@@ -296,7 +296,7 @@ def main(logger_arg: logging.Logger | None = None) -> int:
     meta: dict[str, Any] = {
         "version": _OUTPUT_VERSION,
         "fetched_at": fetched_at,
-        "stock_count": len({r.get("asset", "") for r in all_data}),
+        "stock_count": len(completed_set),
         "record_count": len(all_data),
         "fields": list(_FUND_FLOW_FIELD_MAP.values()) + ["total_volume"],
         "source": "akshare_stock_individual_fund_flow",
@@ -307,25 +307,21 @@ def main(logger_arg: logging.Logger | None = None) -> int:
         "failed_codes_last_run": sorted(failed_codes),
     }
 
-    # Step 6: 写入缓存（问题 #8：捕获写入异常，失败时返回 1）
+    # Step 6: 写入缓存（捕获写入异常，失败时返回 1）
     output_data = {"meta": meta, "data": all_data}
+    write_ok = False
     try:
         write_gzip_cache(CACHE_FILE, output_data, ensure_dir=True, logger=_logger)
-    except Exception as e:
-        _logger.exception(
-            "写入缓存失败: %s (%s)，路径=%s",
-            str(e)[:120],
-            type(e).__name__,
-            CACHE_FILE,
-        )
-        # 问题 #7 在异常路径也释放：避免错误返回前长时间持有大对象引用
+        write_ok = True
+    except Exception:
+        _logger.exception("写入缓存失败，路径=%s", CACHE_FILE)
+    finally:
+        # 释放大对象（遵循 R16）：无论写入成功或失败均执行
         del new_records, cache_data, all_data, output_data, meta
         gc.collect()
-        return 1
 
-    # 问题 #7：写入后同时释放 output_data 与 meta，确保 all_data 引用计数归零
-    del new_records, cache_data, all_data, output_data, meta
-    gc.collect()
+    if not write_ok:
+        return 1
 
     _logger.info("=== 资金流数据拉取完成 ===")
     return 0
