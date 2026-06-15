@@ -351,20 +351,20 @@ class TestNumpyScalarNaN:
 
 
 class TestCheckpointWrite:
-    """v1.0d Fix 2: 每 100 只股票做一次检查点写入"""
+    """v1.0d Fix 2: 检查点写入（v1.0l Fix 2: interval 100→500 减少全量序列化频率）"""
 
     def test_checkpoint_interval_constant(self):
-        """_CHECKPOINT_INTERVAL 常量应存在且为 100"""
+        """_CHECKPOINT_INTERVAL 常量应存在且为 500"""
         from data_fetchers.fetch_financial import _CHECKPOINT_INTERVAL
 
-        assert _CHECKPOINT_INTERVAL == 100
+        assert _CHECKPOINT_INTERVAL == 500
 
     def test_checkpoint_writes_on_interval(self):
-        """main 在拉取 100 只后应触发检查点写入"""
+        """main 在拉取 500 只后应触发检查点写入"""
         from data_fetchers.fetch_financial import main
 
-        # 构造 101 只股票
-        codes = [f"{i:06d}" for i in range(101)]
+        # 构造 501 只股票
+        codes = [f"{i:06d}" for i in range(501)]
         stock_list = [{"code": c, "name": f"stock_{c}"} for c in codes]
         mock_df = pd.DataFrame(
             {
@@ -387,7 +387,7 @@ class TestCheckpointWrite:
         assert mock_write.call_count >= 2
 
     def test_no_checkpoint_when_few_stocks(self):
-        """少于 100 只股票时不触发检查点（只最终写入一次）"""
+        """少于 500 只股票时不触发检查点（只最终写入一次）"""
         from data_fetchers.fetch_financial import main
 
         codes = [f"{i:06d}" for i in range(10)]
@@ -619,10 +619,10 @@ class TestCheckpointShallowCopy:
     """v1.0e/v1.0j: 检查点写入使用 stock_data 直接写入（v1.0j 起取消浅拷贝，先 update 再写）"""
 
     def test_checkpoint_does_not_mutate_stock_data_early(self):
-        """检查点写入时 stock_data 应包含前 100 只股票"""
+        """检查点写入时 stock_data 应包含前 500 只股票"""
         from data_fetchers.fetch_financial import main
 
-        codes = [f"{i:06d}" for i in range(101)]
+        codes = [f"{i:06d}" for i in range(501)]
         stock_list = [{"code": c, "name": f"stock_{c}"} for c in codes]
         mock_df = pd.DataFrame(
             {
@@ -647,11 +647,11 @@ class TestCheckpointShallowCopy:
         ):
             main()
 
-        # 检查点写入（第1次调用）的 data 应包含至少 100 只股票
+        # 检查点写入（第1次调用）的 data 应包含至少 500 只股票
         # v1.0j 起：先 update 再写，stock_data 包含截至检查点时的所有股票
         assert len(captured_data) >= 2
         checkpoint_data = captured_data[0]["data"]
-        assert len(checkpoint_data) >= 100  # 至少前 100 只
+        assert len(checkpoint_data) >= 500  # 至少前 500 只
 
 
 # ─── v1.0e Fix 3: 统一 pd.isna 前置检查 ───────────────────────
@@ -1158,10 +1158,10 @@ class TestParseReportDatePdTimestamp:
 
 
 class TestSuccessfullyFetchedCodesAcrossCheckpoints:
-    """v1.0k Fix 3: successfully_fetched_codes 跨检查点累积"""
+    """v1.0k Fix 3 / v1.0l Fix 4: successfully_fetched_codes 跨检查点累积，final_stale 计算仅用此集合"""
 
     def test_final_stale_uses_successfully_fetched_codes(self):
-        """增量模式下 final_stale 计算应使用跨检查点累积的集合"""
+        """增量模式下 final_stale 计算应使用跨检查点累积的集合（而非 stock_data.keys()）"""
         import ast
 
         from data_fetchers.fetch_financial import main
@@ -1182,9 +1182,11 @@ class TestSuccessfullyFetchedCodesAcrossCheckpoints:
                     and func.value.id == "successfully_fetched_codes"
                 ):
                     has_add_operation = True
-            # 检测 successfully_fetched_codes 在 BinOp 中的使用
-            if isinstance(node, ast.BinOp) and isinstance(node.left, ast.Name) and node.left.id == "successfully_fetched_codes":
-                has_final_stale_usage = True
+            # 检测 successfully_fetched_codes 在 BinOp 中的使用（左侧或右侧）
+            if isinstance(node, ast.BinOp):
+                for operand in (node.left, node.right):
+                    if isinstance(operand, ast.Name) and operand.id == "successfully_fetched_codes":
+                        has_final_stale_usage = True
         assert has_add_operation, "应有 successfully_fetched_codes.add(code) 累积操作"
         assert has_final_stale_usage, "final_stale 计算应使用 successfully_fetched_codes"
 
@@ -1215,6 +1217,93 @@ class TestRateLimitKeywordPrecision:
         from data_fetchers.fetch_financial import _is_rate_limit_error
 
         assert _is_rate_limit_error(RuntimeError("访问频率过快"))
+
+
+# ─── v1.0l Fix 1-4: 4 项缺陷修复的补充测试 ──────────────────────
+
+
+class TestStaleCodesFilterDelisted:
+    """v1.0l Fix 1: stale_codes_from_cache 与 all_codes 取交集过滤废弃代码"""
+
+    def test_stale_codes_intersected_with_all_codes(self):
+        """源码中 stale_codes_from_cache 应与 all_codes_set 取交集"""
+        from data_fetchers.fetch_financial import main
+
+        source = __import__("inspect").getsource(main)
+        # 检查源码文本中存在交集操作
+        assert "stale_codes_from_cache &= all_codes_set" in source, (
+            "应有 stale_codes_from_cache &= all_codes_set 取交集操作"
+        )
+
+
+class TestCheckpointInterval500:
+    """v1.0l Fix 2: _CHECKPOINT_INTERVAL 从 100 提高到 500"""
+
+    def test_checkpoint_interval_is_500(self):
+        """_CHECKPOINT_INTERVAL 应为 500"""
+        from data_fetchers.fetch_financial import _CHECKPOINT_INTERVAL
+
+        assert _CHECKPOINT_INTERVAL == 500
+
+
+class TestReportDateWarningMessage:
+    """v1.0l Fix 3: warning 文案明确说明"不符合YYYY-MM-DD格式或非合法日期\""""
+
+    def test_warning_message_contains_format_hint(self, caplog):
+        """warning 日志应包含 YYYY-MM-DD 格式说明"""
+        from data_fetchers.fetch_financial import fetch_financial_data_for_stock
+
+        with (
+            patch(
+                "data_fetchers.fetch_financial.ak.stock_financial_abstract_ths",
+                return_value=pd.DataFrame({"报告期": ["20240331"], "基本每股收益": [0.5], **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"}}),
+            ),
+            patch("data_fetchers.fetch_financial.time.sleep"),
+            caplog.at_level(logging.WARNING, logger="data_fetchers.fetch_financial"),
+        ):
+            result = fetch_financial_data_for_stock("000001")
+
+        # 应为空列表（所有记录被跳过）
+        assert result == []
+        # warning 消息应包含格式说明
+        msgs = [r for r in caplog.records if "YYYY-MM-DD" in r.message]
+        assert len(msgs) >= 1, "warning 应包含 YYYY-MM-DD 格式说明"
+
+
+class TestFinalStaleUsesOnlySuccessfullyFetchedCodes:
+    """v1.0l Fix 4: final_stale 计算仅用 successfully_fetched_codes（不含 stock_data.keys()）"""
+
+    def test_no_stock_data_keys_in_final_stale(self):
+        """final_stale 计算不应包含 stock_data.keys()"""
+        import ast
+
+        from data_fetchers.fetch_financial import main
+
+        source = __import__("inspect").getsource(main)
+        tree = ast.parse(source)
+        # 检查 successfully_fetched 使用位置附近是否还有 stock_data.keys() 的联合
+        # 找到 final_stale 赋值语句，确认其右侧不含 stock_data.keys()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == "final_stale":
+                        # 检查赋值右侧是否包含 stock_data.keys() 调用
+                        source_segment = ast.get_source_segment(source, node)
+                        if source_segment and "stock_data.keys()" in source_segment:
+                            pytest.fail("final_stale 计算不应包含 stock_data.keys()")
+
+    def test_refetched_count_uses_intersection(self):
+        """成功重拉计数应使用 stale_codes_from_cache & successfully_fetched_codes 交集"""
+        import ast
+
+        from data_fetchers.fetch_financial import main
+
+        source = __import__("inspect").getsource(main)
+        # 检查 successfully_refetched 变量存在且使用交集
+        assert "successfully_refetched" in source, "应有 successfully_refetched 变量"
+        assert "stale_codes_from_cache & successfully_fetched_codes" in source, (
+            "成功重拉计数应使用 stale_codes_from_cache & successfully_fetched_codes"
+        )
 
 
 # ─── v1.0g Fix 3: bool 子类拦截 ──────────────────────────────
@@ -1589,7 +1678,7 @@ class TestReportDateRegex:
 
         # 无效日期行被跳过，结果为空列表
         assert result == []
-        invalid_msgs = [r for r in caplog.records if "格式无效" in r.message]
+        invalid_msgs = [r for r in caplog.records if "YYYY-MM-DD" in r.message or "格式无效" in r.message]
         assert len(invalid_msgs) >= 1
 
 

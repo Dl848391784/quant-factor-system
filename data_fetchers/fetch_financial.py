@@ -70,6 +70,11 @@
   - Fix 3: 检查点 clear 后 final_stale 计算丢失前批成功码 → 新增 successfully_fetched_codes 集合跨检查点累积
   - Fix 4: _is_rate_limit_error 关键词 "限制" 过于宽泛 → "请求频率限制" / "访问频率"
   - Fix 5: fetch_financial_data_for_stock 删除 df=pd.DataFrame() 初始化，改用 for-else 结构确保 df 只在成功 break 后使用
+-v1.0l (2026-06-15): 4 项缺陷修复
+  - Fix 1: stale_codes_from_cache 与 all_codes 取交集，过滤已退市/改代码的废弃股票（避免无效请求和 codes_to_fetch 分母虚增）
+  - Fix 2: _CHECKPOINT_INTERVAL 100→500，减少全量序列化 stock_data 的 I/O 开销（每次检查点序列化规模与最终写入相当）
+  - Fix 3: 调用方 warning 文案"格式无效"→"不符合YYYY-MM-DD格式或非合法日期"（明确区分正则不匹配 vs 日期非法）
+  - Fix 4: final_stale 计算改用 successfully_fetched_codes（仅本次请求成功的），成功重拉计数不再虚报历史已有数据
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -109,7 +114,7 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0k"
+_OUTPUT_VERSION = "1.0l"
 
 # 模块级固定时间戳（仅标记脚本启动时间，meta 中使用 dt_cls.now() 取完成时间）
 _NOW = dt_cls.now()
@@ -134,7 +139,7 @@ _FINANCIAL_FIELD_MAP: dict[str, str] = {
 # 拉取速率控制
 _FETCH_DELAY = 0.3  # 每只股票拉取间隔（秒）
 _BATCH_LOG_INTERVAL = 50  # 每实际拉取50只股票输出一次进度日志
-_CHECKPOINT_INTERVAL = 100  # 每拉取100只股票做一次检查点写入
+_CHECKPOINT_INTERVAL = 500  # 每拉取500只股票做一次检查点写入（全量序列化 stock_data，频率过高 I/O 开销大）
 _RATE_LIMIT_RETRIES = 3  # 限流退避最大重试次数
 _RATE_LIMIT_BASE_DELAY = 2.0  # 限流退避基础延迟（秒），每次翻倍
 
@@ -378,7 +383,7 @@ def fetch_financial_data_for_stock(
         if report_date_str is None:
             if report_date_raw is not None:
                 _logger.warning(
-                    "报告期日期格式无效 (stock=%s, raw=%s), 跳过该记录",
+                    "报告期日期不符合YYYY-MM-DD格式或非合法日期 (stock=%s, raw=%s), 跳过该记录",
                     symbol,
                     str(report_date_raw)[:40],
                 )
@@ -566,6 +571,17 @@ def main(logger_arg: logging.Logger | None = None) -> int:
         if len(code) == 6 and code.isdigit():
             all_codes.append(code)
 
+    # 过滤 stale_codes_from_cache 中已退市/改代码的废弃代码
+    # （已不在当前 all_codes 中的代码不应被计入 codes_to_fetch 或尝试拉取）
+    all_codes_set = set(all_codes)
+    if stale_codes_from_cache and not stale_codes_from_cache.issubset(all_codes_set):
+        removed_stale = stale_codes_from_cache - all_codes_set
+        stale_codes_from_cache &= all_codes_set
+        _logger.info(
+            "stale_codes 中 %d 只股票已不在当前列表（退市/改代码），已过滤",
+            len(removed_stale),
+        )
+
     # 预计算待拉取股票数（固定分母，与循环内跳过逻辑保持一致）
     codes_to_fetch = sum(
         1 for c in all_codes if need_full_fetch or c not in cached_codes or c in stale_codes_from_cache
@@ -675,14 +691,15 @@ def main(logger_arg: logging.Logger | None = None) -> int:
     if need_full_fetch:
         final_stale = stale_codes
     elif stale_codes_from_cache:
-        # 增量模式：已成功拉取的不再 stale（用跨检查点累积集合，避免 clear 后丢失前批成功码）
-        successfully_fetched = successfully_fetched_codes | set(stock_data.keys())
-        final_stale = stale_codes_from_cache - successfully_fetched
+        # 增量模式：本次实际成功拉取的不再 stale
+        # 用 successfully_fetched_codes（仅本次请求成功的），而非 stock_data.keys()（含历史数据）
+        final_stale = stale_codes_from_cache - successfully_fetched_codes
+        successfully_refetched = stale_codes_from_cache & successfully_fetched_codes
         if final_stale != stale_codes_from_cache:
             _logger.info(
                 "stale_codes: 上次 %d 只 → 本次成功重拉 %d 只 → 剩余 %d 只仍失败",
                 len(stale_codes_from_cache),
-                len(stale_codes_from_cache - final_stale),
+                len(successfully_refetched),
                 len(final_stale),
             )
     if final_stale:
