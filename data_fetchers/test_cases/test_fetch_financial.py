@@ -1079,33 +1079,142 @@ class TestRateLimitErrorNoClassNameCheck:
         assert _is_rate_limit_error(RuntimeError("HTTP 429"))
 
 
-# ─── v1.0g Fix 2: 删除 for-else 冗余分支 ──────────────────────
+# ─── v1.0k Fix 5: for-else 结构确保 df 只在成功 break 后使用 ──────────
 
 
-class TestNoForElseBranch:
-    """v1.0g Fix 2: fetch_financial_data_for_stock 不应有 for-else 分支"""
+class TestForElseReturnsNone:
+    """v1.0k Fix 5: fetch_financial_data_for_stock 的 for-else 分支必须 return None
 
-    def test_no_for_else_in_fetch(self):
-        """源码中 fetch_financial_data_for_stock 不应包含 for-else"""
-        import inspect
+    for-else 用于处理所有重试均为限流且通过 continue 跳过的情况，
+    此时 df 未赋值，必须 return None 而非使用未绑定的 df。
+    """
+
+    def test_for_else_returns_none(self):
+        """源码中 for-else 分支必须 return None（不是其他返回值）"""
+        import ast
 
         from data_fetchers.fetch_financial import fetch_financial_data_for_stock
 
-        source = inspect.getsource(fetch_financial_data_for_stock)
-        # for-else 的 else 前面是 except 块的 return，不应有独立的 else 分支
-        lines = source.split("\n")
-        for_else_found = False
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if stripped == "else:" and i > 0:
-                # 检查是否是 for-else（前一个非空行应该是循环体内的代码）
-                for j in range(i - 1, -1, -1):
-                    prev = lines[j].strip()
-                    if prev and not prev.startswith("#"):
-                        if prev.startswith("return ") or prev.startswith("continue"):
-                            for_else_found = True
-                        break
-        assert not for_else_found, "不应存在 for-else 冗余分支"
+        source = __import__("inspect").getsource(fetch_financial_data_for_stock)
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.For) and node.orelse:
+                # for-else 分支存在，检查 else 块的内容
+                for stmt in node.orelse:
+                    if isinstance(stmt, ast.Return):
+                        # 必须是 return None
+                        assert (
+                            isinstance(stmt.value, ast.Constant) and stmt.value.value is None
+                        ), "for-else 分支的 return 必须是 return None"
+
+
+# ─── v1.0k Fix 1-4: 5 项缺陷修复的补充测试 ──────────────────────
+
+
+class TestParseReportDateInvalidCalendarDate:
+    """v1.0k Fix 1: _parse_report_date str 分支验证日期逻辑有效性"""
+
+    def test_invalid_calendar_date_returns_none(self):
+        """\"2024-02-31\" 通过正则但不是合法日期，应返回 None"""
+        from data_fetchers.fetch_financial import _parse_report_date
+
+        assert _parse_report_date("2024-02-31") is None
+
+    def test_valid_calendar_date_passes(self):
+        """合法日期 \"2024-03-31\" 应正常返回"""
+        from data_fetchers.fetch_financial import _parse_report_date
+
+        assert _parse_report_date("2024-03-31") == "2024-03-31"
+
+    def test_invalid_date_april_31(self):
+        """\"2024-04-31\" 通过正则但不是合法日期"""
+        from data_fetchers.fetch_financial import _parse_report_date
+
+        assert _parse_report_date("2024-04-31") is None
+
+
+class TestParseReportDatePdTimestamp:
+    """v1.0k Fix 2: _parse_report_date 兜底分支正确处理 pd.Timestamp"""
+
+    def test_pd_timestamp_formatted(self):
+        """pd.Timestamp 应通过 .strftime 格式化为 YYYY-MM-DD"""
+        from data_fetchers.fetch_financial import _parse_report_date
+
+        ts = pd.Timestamp("2024-03-31")
+        assert _parse_report_date(ts) == "2024-03-31"
+
+    def test_pd_timestamp_with_time(self):
+        """pd.Timestamp 含时间部分也能正确提取日期"""
+        from data_fetchers.fetch_financial import _parse_report_date
+
+        ts = pd.Timestamp("2024-03-31 00:00:00")
+        assert _parse_report_date(ts) == "2024-03-31"
+
+    def test_fallback_str_not_matching_regex_returns_none(self):
+        """兜底分支：非 pd.Timestamp 的对象，str() 后不匹配正则则返回 None"""
+        from data_fetchers.fetch_financial import _parse_report_date
+
+        assert _parse_report_date(object()) is None
+
+
+class TestSuccessfullyFetchedCodesAcrossCheckpoints:
+    """v1.0k Fix 3: successfully_fetched_codes 跨检查点累积"""
+
+    def test_final_stale_uses_successfully_fetched_codes(self):
+        """增量模式下 final_stale 计算应使用跨检查点累积的集合"""
+        import ast
+
+        from data_fetchers.fetch_financial import main
+
+        source = __import__("inspect").getsource(main)
+        tree = ast.parse(source)
+        # 检查源码中有 successfully_fetched_codes 的 .add() 操作和在 final_stale 计算中的使用
+        has_add_operation = False
+        has_final_stale_usage = False
+        for node in ast.walk(tree):
+            # 检测 successfully_fetched_codes.add(code) 形式的调用
+            if isinstance(node, ast.Call):
+                func = node.func
+                if (
+                    isinstance(func, ast.Attribute)
+                    and func.attr == "add"
+                    and isinstance(func.value, ast.Name)
+                    and func.value.id == "successfully_fetched_codes"
+                ):
+                    has_add_operation = True
+            # 检测 successfully_fetched_codes 在 BinOp 中的使用
+            if isinstance(node, ast.BinOp) and isinstance(node.left, ast.Name) and node.left.id == "successfully_fetched_codes":
+                has_final_stale_usage = True
+        assert has_add_operation, "应有 successfully_fetched_codes.add(code) 累积操作"
+        assert has_final_stale_usage, "final_stale 计算应使用 successfully_fetched_codes"
+
+
+class TestRateLimitKeywordPrecision:
+    """v1.0k Fix 4: _is_rate_limit_error 关键词精确化"""
+
+    def test_generic_restriction_not_matched(self):
+        """\"数据格式限制\" 不应被识别为限流"""
+        from data_fetchers.fetch_financial import _is_rate_limit_error
+
+        assert not _is_rate_limit_error(RuntimeError("数据格式限制"))
+
+    def test_access_restriction_not_matched(self):
+        """\"访问权限限制\" 不应被识别为限流"""
+        from data_fetchers.fetch_financial import _is_rate_limit_error
+
+        assert not _is_rate_limit_error(RuntimeError("访问权限限制"))
+
+    def test_request_frequency_limit_matched(self):
+        """\"请求频率限制\" 应被识别为限流"""
+        from data_fetchers.fetch_financial import _is_rate_limit_error
+
+        assert _is_rate_limit_error(RuntimeError("请求频率限制"))
+
+    def test_access_frequency_matched(self):
+        """\"访问频率\" 应被识别为限流"""
+        from data_fetchers.fetch_financial import _is_rate_limit_error
+
+        assert _is_rate_limit_error(RuntimeError("访问频率过快"))
 
 
 # ─── v1.0g Fix 3: bool 子类拦截 ──────────────────────────────

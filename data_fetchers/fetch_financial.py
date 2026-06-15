@@ -64,6 +64,12 @@
   - Fix 2: 检查点写入取消浅拷贝 {**stock_data, **new_stock_data}，先 update 再直接写 stock_data
   - Fix 3: Step 3 日志改为"股票总数/待请求/将跳过"三维信息，与 codes_to_fetch 一致
   - Fix 4: 全量模式+stale_codes_from_cache 非空时补充 info 日志说明将自动覆盖
+-v1.0k (2026-06-15): 5 项缺陷修复
+  - Fix 1: _parse_report_date str 分支增加 datetime.date.fromisoformat 日期有效性验证（"2024-02-31" 通过正则但不是合法日期）
+  - Fix 2: _parse_report_date 兜底分支处理 pd.Timestamp（.strftime 格式化）+ 正则校验（杜绝不规范的 "YYYY-MM-DD HH:MM:SS" 返回）
+  - Fix 3: 检查点 clear 后 final_stale 计算丢失前批成功码 → 新增 successfully_fetched_codes 集合跨检查点累积
+  - Fix 4: _is_rate_limit_error 关键词 "限制" 过于宽泛 → "请求频率限制" / "访问频率"
+  - Fix 5: fetch_financial_data_for_stock 删除 df=pd.DataFrame() 初始化，改用 for-else 结构确保 df 只在成功 break 后使用
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -103,7 +109,7 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0j"
+_OUTPUT_VERSION = "1.0k"
 
 # 模块级固定时间戳（仅标记脚本启动时间，meta 中使用 dt_cls.now() 取完成时间）
 _NOW = dt_cls.now()
@@ -259,12 +265,37 @@ def _parse_report_date(report_date_raw: Any) -> str | None:
         return report_date_raw.strftime("%Y-%m-%d")
     if isinstance(report_date_raw, str):
         if _REPORT_DATE_RE.match(report_date_raw):
+            # 正则只校验格式，需进一步验证日期逻辑有效性
+            # （如 "2024-02-31" 通过正则但不是合法日期，下游月份提取 31 会触发无效月份 warning）
+            try:
+                datetime.date.fromisoformat(report_date_raw)
+            except ValueError:
+                return None
             return report_date_raw
         return None
+    # pd.Timestamp 单独处理：str(pd.Timestamp(...)) 返回 "YYYY-MM-DD HH:MM:SS" 格式，
+    # 无法通过 _REPORT_DATE_RE 正则，需用 .strftime("%Y-%m-%d") 格式化
+    if isinstance(report_date_raw, pd.Timestamp):
+        formatted = report_date_raw.strftime("%Y-%m-%d")
+        if _REPORT_DATE_RE.match(formatted):
+            try:
+                datetime.date.fromisoformat(formatted)
+            except ValueError:
+                return None
+            return formatted
+        return None
+    # 其他类型：尝试转为字符串后校验
     try:
-        return str(report_date_raw)
+        fallback_str = str(report_date_raw)
     except Exception:
         return None
+    if _REPORT_DATE_RE.match(fallback_str):
+        try:
+            datetime.date.fromisoformat(fallback_str)
+        except ValueError:
+            return None
+        return fallback_str
+    return None
 
 
 def _is_rate_limit_error(exc: Exception) -> bool:
@@ -283,7 +314,7 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     if exc_name == "TooManyRequests":
         return True
     # 限流关键词（中英文）
-    rate_limit_keywords = ("rate limit", "too many", "频率", "限制", "throttl")
+    rate_limit_keywords = ("rate limit", "too many", "频率", "请求频率限制", "访问频率", "throttl")
     return any(kw in exc_msg for kw in rate_limit_keywords)
 
 
@@ -303,7 +334,6 @@ def fetch_financial_data_for_stock(
         数据为空返回空列表（该股票确实无财务数据）
     """
     _logger = logger_arg or logger
-    df = pd.DataFrame()  # 初始化：避免 Pyright possibly unbound 警告
     for attempt in range(1, _RATE_LIMIT_RETRIES + 1):
         try:
             df = ak.stock_financial_abstract_ths(symbol=symbol)
@@ -315,7 +345,11 @@ def fetch_financial_data_for_stock(
                 delay = _RATE_LIMIT_BASE_DELAY * (2 ** (attempt - 1))
                 _logger.warning(
                     "拉取 %s 触发限流 (第%d次), %0.1fs 后重试: %s (%s)",
-                    symbol, attempt, delay, str(e)[:80], type(e).__name__,
+                    symbol,
+                    attempt,
+                    delay,
+                    str(e)[:80],
+                    type(e).__name__,
                 )
                 time.sleep(delay)
                 continue
@@ -327,6 +361,9 @@ def fetch_financial_data_for_stock(
                 f" (重试{_RATE_LIMIT_RETRIES}次后仍失败)" if is_rate_limit else "",
             )
             return None
+    else:
+        # 所有重试均为限流且通过 continue 跳过，未 break 也未 return
+        return None
 
     if df.empty:
         _logger.info("%s 财务数据为空", symbol)
@@ -467,7 +504,9 @@ def main(logger_arg: logging.Logger | None = None) -> int:
         migrated_records = sum(len(v) for v in stock_data.values())
         _logger.info(
             "迁移完成: list %d 条 → dict %d 只股票 / %d 条记录",
-            len(raw_data), len(stock_data), migrated_records,
+            len(raw_data),
+            len(stock_data),
+            migrated_records,
         )
         if dropped_recs > 0:
             _logger.warning("迁移丢弃 %d 条 asset 为空的记录", dropped_recs)
@@ -529,13 +568,13 @@ def main(logger_arg: logging.Logger | None = None) -> int:
 
     # 预计算待拉取股票数（固定分母，与循环内跳过逻辑保持一致）
     codes_to_fetch = sum(
-        1 for c in all_codes
-        if need_full_fetch or c not in cached_codes or c in stale_codes_from_cache
+        1 for c in all_codes if need_full_fetch or c not in cached_codes or c in stale_codes_from_cache
     )
     _logger.info("股票总数=%d, 待请求=%d, 将跳过=%d", len(all_codes), codes_to_fetch, len(all_codes) - codes_to_fetch)
 
     # Step 4: 拉取数据
     new_stock_data: dict[str, list[dict[str, Any]]] = {}
+    successfully_fetched_codes: set[str] = set()  # 跨检查点累积所有成功拉取的股票代码
     skipped = 0
     failed = 0
     empty = 0
@@ -570,6 +609,7 @@ def main(logger_arg: logging.Logger | None = None) -> int:
                 stale_codes.add(code)
         elif result:
             new_stock_data[code] = result
+            successfully_fetched_codes.add(code)
             total_new_count += 1
         else:
             empty += 1
@@ -594,7 +634,9 @@ def main(logger_arg: logging.Logger | None = None) -> int:
             write_gzip_cache(CACHE_FILE, checkpoint_data, ensure_dir=True, logger=_logger)
             _logger.info(
                 "检查点写入: %s (%d 只股票, %d 条记录)",
-                CACHE_FILE, len(stock_data), checkpoint_meta["record_count"],
+                CACHE_FILE,
+                len(stock_data),
+                checkpoint_meta["record_count"],
             )
             new_stock_data.clear()
 
@@ -633,8 +675,8 @@ def main(logger_arg: logging.Logger | None = None) -> int:
     if need_full_fetch:
         final_stale = stale_codes
     elif stale_codes_from_cache:
-        # 增量模式：已成功拉取的（在 new_stock_data 或 stock_data 中）不再 stale
-        successfully_fetched = set(new_stock_data.keys()) | set(stock_data.keys())
+        # 增量模式：已成功拉取的不再 stale（用跨检查点累积集合，避免 clear 后丢失前批成功码）
+        successfully_fetched = successfully_fetched_codes | set(stock_data.keys())
         final_stale = stale_codes_from_cache - successfully_fetched
         if final_stale != stale_codes_from_cache:
             _logger.info(
@@ -656,7 +698,9 @@ def main(logger_arg: logging.Logger | None = None) -> int:
     write_gzip_cache(CACHE_FILE, output_data, ensure_dir=True, logger=_logger)
     _logger.info(
         "缓存写入完成: %s (%d 只股票, %d 条记录)",
-        CACHE_FILE, meta["stock_count"], meta["record_count"],
+        CACHE_FILE,
+        meta["stock_count"],
+        meta["record_count"],
     )
 
     # 显式释放大对象（遵循 R16）
