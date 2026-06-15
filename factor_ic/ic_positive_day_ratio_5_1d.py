@@ -21,20 +21,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
 
 from data_fetchers.factor_calculator import calculate_positive_day_ratio_5  # noqa: E402
+from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS  # noqa: E402
+from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic  # noqa: E402
 from factor_ic.common.logger_config import get_logger  # noqa: E402
 
 
 logger = get_logger(__name__)
-
-
-class FactorCalcError(Exception):
-    """因子计算业务异常"""
-
-    pass
-
-
-DEFAULT_MIN_STOCKS = 10
 
 
 def main():
