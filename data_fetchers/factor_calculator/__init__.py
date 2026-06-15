@@ -9,21 +9,25 @@ volume_price / industry / industry_financial / fund_flow），通过本
 ``__init__.py`` 重导出，保证 80+ 处外部 ``from data_fetchers.factor_calculator
 import ...`` 路径零修改。
 
-PR-3 阶段（当前，2026-06-15）
+PR-4a 阶段（当前，2026-06-15）
 ==============================
 - ``_common.py``：模块级常量 + fallback logger + ``get_module_logger`` + 4 个
-  半公开 helper—— PR-2a 完成；PR-2c 新增 5 个动量族常量
+  半公开 helper—— PR-2a 完成；PR-2c 新增 5 个动量族常量；
+  PR-4a 新增第 5 个共享 helper ``_add_industry_column``（行业类因子共用）
 - ``basic.py``：7 个基础技术指标因子—— PR-2b 完成
 - ``momentum.py``：7 个价格 / 动量族因子—— PR-2c 完成
-- **``delta.py``：4 个止跌信号差分族因子（``calculate_amplitude_delta`` /
-  ``calculate_turnover_surge_delta`` / ``calculate_tail_price_position_delta`` /
-  ``calculate_tail_volume_shrink_delta``）—— PR-3 新增**
-- **``volume_price.py``：4 个量价合成族因子（``calculate_volume_price_strength`` /
-  ``calculate_positive_day_ratio_5`` / ``calculate_ma5_deviation`` /
-  ``calculate_near_high_ratio_5``）—— PR-3 新增**
-- ``_legacy.py``：剩余 8 个 ``calculate_*`` 函数（PR-4 行业聚合族继续搬）；
-  顶部以 ``from .basic`` / ``.momentum`` / ``.delta`` / ``.volume_price`` 4 段
-  re-import 维持向后兼容
+- ``delta.py``：4 个止跌信号差分族因子—— PR-3 完成
+- ``volume_price.py``：4 个量价合成族因子—— PR-3 完成
+- **``industry.py``：3 个行业聚合（无外部 I/O）因子（``calculate_industry_momentum_5d``
+  / ``calculate_industry_turnover_trend`` / ``calculate_industry_amplitude_trend``）
+  —— PR-4a 新增**
+- ``_legacy.py``：剩余 5 个 ``calculate_*`` 函数（``calculate_industry_roe_trend`` /
+  ``calculate_industry_earnings_growth`` / ``calculate_industry_pe_trend`` /
+  ``calculate_capital_flow_ratio_trend`` / ``calculate_capital_flow_intensity``，
+  PR-4b 行业基本面 + 资金流继续搬，含 parquet I/O）；
+  顶部以 ``from .basic`` / ``.momentum`` / ``.delta`` / ``.volume_price`` /
+  ``.industry`` 5 段 re-import + ``from ._common import _add_industry_column``
+  维持向后兼容
 - 本 ``__init__.py`` 从 ``_common`` 直接重导出半公开 helper + 9 公共常量；
   从 ``_legacy`` ``import *`` 透出全量 ``calculate_*`` 函数（含已搬到子模块
   的函数，借由 _legacy re-import 路径透出，保持 ``__all__`` 单一来源）

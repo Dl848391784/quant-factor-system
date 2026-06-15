@@ -387,3 +387,51 @@ def _calculate_delta(
     )
 
     return df
+
+
+# ============================================================================
+# 行业列注入 helper（PR-4a 从 _legacy.py 搬入；被多个 industry 类因子复用）
+# ============================================================================
+
+
+def _add_industry_column(
+    df: pd.DataFrame,
+    _logger: logging.Logger,
+) -> pd.DataFrame:
+    """为 DataFrame 添加 industry 列（从 fetch_industry 映射）
+
+    Args:
+        df: 包含 asset 列的 DataFrame
+        _logger: 日志记录器
+
+    Returns:
+        DataFrame 新增 industry 列，未知股票赋 '其他'
+
+    Note:
+        使用 fetch_industry.get_industry_map() 获取行业映射，
+        避免重复加载（模块级缓存+线程安全）。
+        如果 industry 列已存在则跳过添加（避免重复添加）。
+    """
+    # 如果 industry 列已存在则跳过
+    if "industry" in df.columns:
+        return df
+
+    try:
+        from data_fetchers.fetch_industry import get_industry_map
+    except ImportError:
+        from fetch_industry import get_industry_map  # noqa: E402
+
+    industry_map = get_industry_map()
+
+    # 映射：asset → industry
+    df["industry"] = df[_COL_ASSET].map(lambda code: industry_map.get(str(code), {}).get("industry", "其他"))
+
+    unknown_count = int((df["industry"] == "其他").sum())
+    if unknown_count > 0:
+        _logger.warning(
+            "  行业未知股票数: %d (%.2f%%)",
+            unknown_count,
+            unknown_count / len(df) * 100 if len(df) > 0 else 0,
+        )
+
+    return df

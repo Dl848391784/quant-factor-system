@@ -100,6 +100,10 @@ import pandas as pd
 # ============================================================================
 # 包内底座 import（PR-2a：常量、logger、半公开 helper 已抽至 _common）
 # ============================================================================
+# ============================================================================
+# _add_industry_column helper：PR-4a 后已搬到 _common.py（行业类因子共享 helper）；
+# 本文件中仍保留的 5 个 industry/fund_flow 函数通过下方 import 继续使用。
+# ============================================================================
 from ._common import (  # noqa: F401  允许此模块 re-export 这些符号
     _BOLLINGER_NEUTRAL_VALUE,
     _COL_AMPLITUDE,
@@ -163,6 +167,7 @@ from ._common import (  # noqa: F401  允许此模块 re-export 这些符号
     DEFAULT_RSI_PERIOD,
     DEFAULT_SURGE_WINDOW,
     DEFAULT_VOLUME_RATIO_WINDOW,
+    _add_industry_column,  # noqa: F401
     _calculate_delta,
     _calculate_ewm_with_initial,
     _per_asset_transform,
@@ -192,6 +197,15 @@ from .delta import (  # noqa: F401
     calculate_tail_price_position_delta,
     calculate_tail_volume_shrink_delta,
     calculate_turnover_surge_delta,
+)
+
+# ============================================================================
+# 子模块 industry re-import（PR-4a：行业聚合 3 个因子已搬到 .industry）
+# ============================================================================
+from .industry import (  # noqa: F401
+    calculate_industry_amplitude_trend,
+    calculate_industry_momentum_5d,
+    calculate_industry_turnover_trend,
 )
 
 # ============================================================================
@@ -476,277 +490,20 @@ __all__ = [
 # ============================================================================
 
 
-def _add_industry_column(
-    df: pd.DataFrame,
-    _logger: logging.Logger,
-) -> pd.DataFrame:
-    """为 DataFrame 添加 industry 列（从 fetch_industry 映射）
-
-    Args:
-        df: 包含 asset 列的 DataFrame
-        _logger: 日志记录器
-
-    Returns:
-        DataFrame 新增 industry 列，未知股票赋 '其他'
-
-    Note:
-        使用 fetch_industry.get_industry_map() 获取行业映射，
-        避免重复加载（模块级缓存+线程安全）。
-        如果 industry 列已存在则跳过添加（避免重复添加）。
-    """
-    # 如果 industry 列已存在则跳过
-    if "industry" in df.columns:
-        return df
-
-    try:
-        from data_fetchers.fetch_industry import get_industry_map
-    except ImportError:
-        from fetch_industry import get_industry_map  # noqa: E402
-
-    industry_map = get_industry_map()
-
-    # 映射：asset → industry
-    df["industry"] = df[_COL_ASSET].map(lambda code: industry_map.get(str(code), {}).get("industry", "其他"))
-
-    unknown_count = int((df["industry"] == "其他").sum())
-    if unknown_count > 0:
-        _logger.warning(
-            "  行业未知股票数: %d (%.2f%%)",
-            unknown_count,
-            unknown_count / len(df) * 100 if len(df) > 0 else 0,
-        )
-
-    return df
+# (PR-4a) _add_industry_column: 已迁移至 ._common 模块（被多个 industry/fund_flow 函数共享）；
+# 由本文件顶部 `from ._common import _add_industry_column` 维持向后兼容。
 
 
-def calculate_industry_momentum_5d(
-    factor_df: pd.DataFrame,
-    *,
-    logger_arg: logging.Logger | None = None,
-) -> pd.DataFrame:
-    """计算行业5日动量因子
-
-    公式:
-      1. 添加 industry 列（从行业映射）
-      2. 计算个股 past_return_1d = close / prev_close - 1（按 asset 分组 shift）
-      3. 按 (industry, date) 分组 → mean(past_return_1d) → 5日滚动均值
-      4. 同行业所有股票赋相同行业动量值
-
-    含义:
-      - 高正值: 行业整体5日上涨趋势（行业配置偏向该行业）
-      - 高负值: 行业整体5日下跌趋势（行业配置规避该行业）
-      - 近零值: 行业整体横盘无趋势
-
-    边界处理:
-      - industry 未知 → 赋 '其他' 行业
-      - 行业股票数 < 5 → 该日期该行业因子值 NaN（min_periods=5）
-      - past_return_1d 为 NaN → 行业均值自动跳过（pandas mean NaN-safe）
-
-    遵循 H5: IC方向不预判
-    实测结论: 行业层面IC=+0.026（正值），方向性信号存在
-
-    required_cols: ["date", "asset", "close"]
-    """
-    _logger = get_module_logger(logger_arg)
-
-    df = factor_df.copy()
-
-    # Step 1: 添加 industry 列
-    _logger.info("  Step 1: 添加行业分类列...")
-    df = _add_industry_column(df, _logger)
-
-    # Step 2: 计算个股日收益率（按 asset 分组 shift）
-    _logger.info("  Step 2: 计算个股日收益率...")
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
-    prev_close = df.groupby(_COL_ASSET)[_COL_CLOSE].shift(1)
-    df["past_return_1d_calc"] = (df[_COL_CLOSE] / prev_close) - 1  # 中间列，最终删除
-
-    # Step 3: 按 (industry, date) 分组 → 5日滚动均值
-    _logger.info("  Step 3: 按行业分组计算5日动量...")
-    industry_daily_mean = df.groupby(["industry", _COL_DATE])["past_return_1d_calc"].mean().reset_index()
-    industry_daily_mean = industry_daily_mean.sort_values(["industry", _COL_DATE])
-
-    # 5日滚动均值（按行业分组）
-    industry_daily_mean[_COL_INDUSTRY_MOMENTUM_5D] = (
-        industry_daily_mean.groupby("industry")["past_return_1d_calc"]
-        .rolling(_DEFAULT_INDUSTRY_WINDOW, min_periods=_DEFAULT_MIN_INDUSTRY_STOCKS)
-        .mean()
-        .reset_index(level=0, drop=True)
-    )
-
-    # Step 4: 行业动量值赋给每只个股
-    _logger.info("  Step 4: 行业动量赋给个股...")
-    # 创建 industry → (date → momentum) 映射
-    momentum_map = industry_daily_mean.set_index(["industry", _COL_DATE])[_COL_INDUSTRY_MOMENTUM_5D]
-
-    # 将行业动量值赋给原始 df
-    df = df.sort_values([_COL_ASSET, _COL_DATE])  # 确保排序与原始一致
-    df[_COL_INDUSTRY_MOMENTUM_5D] = df.set_index(["industry", _COL_DATE]).index.map(
-        lambda idx: momentum_map.get(idx, float("nan"))
-    )
-
-    # 删除中间列
-    df = df.drop(columns=["past_return_1d_calc"])
-
-    valid_count = int(df[_COL_INDUSTRY_MOMENTUM_5D].notna().sum())
-    _logger.info(
-        "  有效 %s: %d (%.2f%%)",
-        _COL_INDUSTRY_MOMENTUM_5D,
-        valid_count,
-        valid_count / len(df) * 100 if len(df) > 0 else 0,
-    )
-
-    return df
+# (PR-4a) calculate_industry_momentum_5d: 已迁移至 .industry 子模块（design.md §5.6）；
+# 由本文件顶部 `from .industry import calculate_industry_momentum_5d` 维持向后兼容。
 
 
-calculate_industry_momentum_5d.required_cols = ["date", "asset", "close"]  # type: ignore[attr-defined]
+# (PR-4a) calculate_industry_turnover_trend: 已迁移至 .industry 子模块（design.md §5.6）；
+# 由本文件顶部 `from .industry import calculate_industry_turnover_trend` 维持向后兼容。
 
 
-def calculate_industry_turnover_trend(
-    factor_df: pd.DataFrame,
-    *,
-    logger_arg: logging.Logger | None = None,
-) -> pd.DataFrame:
-    """计算行业换手率趋势因子
-
-    公式:
-      1. 添加 industry 列
-      2. 按 (industry, date) 分组 → mean(turnover_rate) → 行业日均换手率
-      3. industry_turnover_trend = turnover_avg(t) / turnover_avg(t-1) - 1
-      4. 同行业所有股票赋相同行业换手趋势值
-
-    含义:
-      - 高正值: 行业换手率显著上升（市场关注度增加）
-      - 高负值: 行业换手率显著下降（市场关注度下降）
-      - 近零值: 行业换手率平稳
-
-    边界处理:
-      - industry 未知 → 赋 '其他'
-      - turnover_avg(t-1) 极小 → clip(lower=0.001) 避免极端比值（遵循 Pitfall #47）
-      - 行业股票数 < 5 → NaN
-
-    遵循 H5: IC方向不预判
-
-    required_cols: ["date", "asset", "turnover_rate"]
-    """
-    _logger = get_module_logger(logger_arg)
-
-    df = factor_df.copy()
-
-    # Step 1: 添加 industry 列
-    _logger.info("  Step 1: 添加行业分类列...")
-    df = _add_industry_column(df, _logger)
-
-    # Step 2: 按 (industry, date) 分组 → mean(turnover_rate)
-    _logger.info("  Step 2: 按行业分组计算日均换手率...")
-    industry_daily_turnover = df.groupby(["industry", _COL_DATE])[_COL_TURNOVER_RATE].mean().reset_index()
-    industry_daily_turnover = industry_daily_turnover.sort_values(["industry", _COL_DATE])
-
-    # Step 3: 计算换手率趋势 = today_avg / yesterday_avg - 1
-    _logger.info("  Step 3: 计算换手率趋势（比率型因子）...")
-    prev_avg = industry_daily_turnover.groupby("industry")[_COL_TURNOVER_RATE].shift(1)
-    # 分母保护：clip 避免极端比值（遵循 Pitfall #47）
-    prev_avg_safe = prev_avg.clip(lower=_DEFAULT_TREND_DENOMINATOR_MIN)
-    industry_daily_turnover[_COL_INDUSTRY_TURNOVER_TREND] = (
-        industry_daily_turnover[_COL_TURNOVER_RATE] / prev_avg_safe - 1
-    )
-    # 分母原值为0时，clip后仍会产生极端值 → 设NaN（无意义趋势）
-    industry_daily_turnover.loc[prev_avg == 0, _COL_INDUSTRY_TURNOVER_TREND] = float("nan")
-
-    # Step 4: 行业换手趋势赋给每只个股
-    _logger.info("  Step 4: 行业换手趋势赋给个股...")
-    trend_map = industry_daily_turnover.set_index(["industry", _COL_DATE])[_COL_INDUSTRY_TURNOVER_TREND]
-
-    df[_COL_INDUSTRY_TURNOVER_TREND] = df.set_index(["industry", _COL_DATE]).index.map(
-        lambda idx: trend_map.get(idx, float("nan"))
-    )
-
-    valid_count = int(df[_COL_INDUSTRY_TURNOVER_TREND].notna().sum())
-    _logger.info(
-        "  有效 %s: %d (%.2f%%)",
-        _COL_INDUSTRY_TURNOVER_TREND,
-        valid_count,
-        valid_count / len(df) * 100 if len(df) > 0 else 0,
-    )
-
-    return df
-
-
-calculate_industry_turnover_trend.required_cols = ["date", "asset", "turnover_rate"]  # type: ignore[attr-defined]
-
-
-def calculate_industry_amplitude_trend(
-    factor_df: pd.DataFrame,
-    *,
-    logger_arg: logging.Logger | None = None,
-) -> pd.DataFrame:
-    """计算行业振幅趋势因子
-
-    公式:
-      1. 添加 industry 列
-      2. 按 (industry, date) 分组 → mean(amplitude) → 行业日均振幅
-      3. industry_amplitude_trend = amplitude_avg(t) / amplitude_avg(t-1) - 1
-      4. 同行业所有股票赋相同行业振幅趋势值
-
-    含义:
-      - 高正值: 行业振幅显著上升（波动性增加）
-      - 高负值: 行业振幅显著下降（波动性收敛）
-      - 近零值: 行业振幅平稳
-
-    边界处理:
-      - industry 未知 → 赋 '其他'
-      - amplitude_avg(t-1) 极小 → clip(lower=0.01) 避免极端比值
-      - amplitude_avg(t-1) = 0 → NaN（涨跌停无意义趋势）
-      - 行业股票数 < 5 → NaN
-
-    遵循 H5: IC方向不预判
-
-    required_cols: ["date", "asset", "amplitude"]
-    """
-    _logger = get_module_logger(logger_arg)
-
-    df = factor_df.copy()
-
-    # Step 1: 添加 industry 列
-    _logger.info("  Step 1: 添加行业分类列...")
-    df = _add_industry_column(df, _logger)
-
-    # Step 2: 按 (industry, date) 分组 → mean(amplitude)
-    _logger.info("  Step 2: 按行业分组计算日均振幅...")
-    industry_daily_amplitude = df.groupby(["industry", _COL_DATE])[_COL_AMPLITUDE].mean().reset_index()
-    industry_daily_amplitude = industry_daily_amplitude.sort_values(["industry", _COL_DATE])
-
-    # Step 3: 计算振幅趋势 = today_avg / yesterday_avg - 1
-    _logger.info("  Step 3: 计算振幅趋势（比率型因子）...")
-    prev_avg = industry_daily_amplitude.groupby("industry")[_COL_AMPLITUDE].shift(1)
-    # 分母保护：振幅=0意味着涨跌停，clip 下限 0.01（遵循 Pitfall #47）
-    prev_avg_safe = prev_avg.clip(lower=_DEFAULT_AMPLITUDE_TREND_DENOMINATOR_MIN)
-    industry_daily_amplitude[_COL_INDUSTRY_AMPLITUDE_TREND] = (
-        industry_daily_amplitude[_COL_AMPLITUDE] / prev_avg_safe - 1
-    )
-    # 分母原值为0时 → NaN（涨跌停场景趋势无意义）
-    industry_daily_amplitude.loc[prev_avg == 0, _COL_INDUSTRY_AMPLITUDE_TREND] = float("nan")
-
-    # Step 4: 行业振幅趋势赋给每只个股
-    _logger.info("  Step 4: 行业振幅趋势赋给个股...")
-    trend_map = industry_daily_amplitude.set_index(["industry", _COL_DATE])[_COL_INDUSTRY_AMPLITUDE_TREND]
-
-    df[_COL_INDUSTRY_AMPLITUDE_TREND] = df.set_index(["industry", _COL_DATE]).index.map(
-        lambda idx: trend_map.get(idx, float("nan"))
-    )
-
-    valid_count = int(df[_COL_INDUSTRY_AMPLITUDE_TREND].notna().sum())
-    _logger.info(
-        "  有效 %s: %d (%.2f%%)",
-        _COL_INDUSTRY_AMPLITUDE_TREND,
-        valid_count,
-        valid_count / len(df) * 100 if len(df) > 0 else 0,
-    )
-
-    return df
-
-
-calculate_industry_amplitude_trend.required_cols = ["date", "asset", "amplitude"]  # type: ignore[attr-defined]
+# (PR-4a) calculate_industry_amplitude_trend: 已迁移至 .industry 子模块（design.md §5.6）；
+# 由本文件顶部 `from .industry import calculate_industry_amplitude_trend` 维持向后兼容。
 
 
 # ============================================================================
