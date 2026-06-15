@@ -88,10 +88,12 @@ def _validate_spec(spec: FactorSpec) -> None:
     if len(set(spec.required_columns)) != len(spec.required_columns):
         raise ValueError(f"FactorSpec({spec.factor_name}) required_columns 含重复列: {spec.required_columns}")
 
-    # 3. 全小写 + 下划线 + 点(允许 tail_price_position 等)
+    # 3. 全小写字母 + 数字 + 下划线 + 点(允许 rsi_6 / return_5d / forward_return_1d 等)
     for col in spec.required_columns:
-        if not all(c.islower() or c == "_" or c == "." for c in col):
-            raise ValueError(f"FactorSpec({spec.factor_name}) required_columns 列名 '{col}' 含非小写/下划线/点字符")
+        if not all(c.islower() or c.isdigit() or c == "_" or c == "." for c in col):
+            raise ValueError(
+                f"FactorSpec({spec.factor_name}) required_columns 列名 '{col}' 含非小写字母/数字/下划线/点字符"
+            )
 
     # 4. factor_col 在 required_columns 中
     if spec.factor_col not in spec.required_columns:

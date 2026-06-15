@@ -72,12 +72,30 @@ from data_fetchers.factor_calculator import (
     calculate_kdj_j,
 )
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.data_columns import JOIN_KEYS, OHLC
 from factor_ic.common.exceptions import FactorCalcError
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)
+
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# required_columns: JOIN_KEYS + OHLC + kdj_j（close/high/low 为 KDJ 计算输入）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="kdj_j",
+        factor_col="kdj_j",
+        required_columns=JOIN_KEYS + OHLC + ("kdj_j",),
+        calculation=calculate_kdj_j,
+        calc_params_fn=lambda a: {"n": a.n, "m1": a.m1, "m2": a.m2},
+        extra_log_params_fn=lambda a: {"n": a.n, "m1": a.m1, "m2": a.m2},
+    )
+)
 
 # ============================================================================
 # CLI 入口
@@ -111,16 +129,12 @@ def main():
     args = parser.parse_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full + extra_log_params）
-    # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
-    result = run_complex_factor_ic(
-        factor_name="kdj_j",
-        factor_col="kdj_j",
-        factor_cols=["close", "high", "low"],
-        custom_factor_calculation=calculate_kdj_j,
-        custom_factor_calculation_params={"n": args.n, "m1": args.m1, "m2": args.m2},
+    # 使用 FactorSpec 驱动入口（遵循 factor_cols_literal_constant_design.md §4.1）
+    result = run_factor_ic(
+        spec=SPEC,
+        args=args,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        extra_log_params={"n": args.n, "m1": args.m1, "m2": args.m2},
         _logger=logger,
     )
 

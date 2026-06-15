@@ -100,9 +100,22 @@ class TestRegisterFactorValidation:
             register_factor(_make_spec(required_columns=("date", "asset", "date")))
 
     def test_uppercase_column_raises(self):
-        """规则 3: 全小写 + 下划线 + 点。"""
+        """规则 3: 全小写字母 + 数字 + 下划线 + 点。"""
         with pytest.raises(ValueError, match="非小写"):
-            register_factor(_make_spec(required_columns=("date", "asset", "CLOSE")))
+            register_factor(
+                _make_spec(required_columns=("date", "asset", "CLOSE"))
+            )
+
+    def test_digit_in_column_name_allowed(self):
+        """数字在列名中允许(如 rsi_6 / return_5d)。"""
+        register_factor(
+            _make_spec(
+                factor_name="digit_factor",
+                factor_col="rsi_6",
+                required_columns=("date", "asset", "rsi_6"),
+            )
+        )
+        assert "digit_factor" in FACTOR_REGISTRY
 
     def test_factor_col_not_in_required_raises(self):
         """规则 4: factor_col 在 required_columns 中。"""

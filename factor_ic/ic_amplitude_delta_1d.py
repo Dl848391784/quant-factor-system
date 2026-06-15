@@ -33,13 +33,29 @@ sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
 # 从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
 from data_fetchers.factor_calculator import calculate_amplitude_delta  # noqa: E402
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS  # noqa: E402
+from factor_ic.common.data_columns import JOIN_KEYS  # noqa: E402
 from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic  # noqa: E402
+from factor_ic.common.factor_ic_runner import run_factor_ic  # noqa: E402
+from factor_ic.common.factor_spec import FactorSpec, register_factor  # noqa: E402
 from factor_ic.common.factor_summary_logger import log_factor_summary  # noqa: E402
 from factor_ic.common.logger_config import get_logger  # noqa: E402
 
 
 logger = get_logger(__name__)
+
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# required_columns: JOIN_KEYS + 上游因子列（amplitude 来自 factor_generator _EXTENDED_FACTOR_COLS）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="amplitude_delta",
+        factor_col="amplitude_delta",
+        required_columns=JOIN_KEYS + ("amplitude", "amplitude_delta"),
+        calculation=calculate_amplitude_delta,
+    )
+)
 
 # ============================================================================
 # CLI 入口
@@ -56,12 +72,9 @@ def main():
     args = parser.parse_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
-    # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
-    result = run_complex_factor_ic(
-        factor_name="amplitude_delta",
-        factor_col="amplitude_delta",
-        factor_cols=["date", "asset", "amplitude"],  # 需要原始因子列进行差分计算
-        custom_factor_calculation=calculate_amplitude_delta,
+    # 使用 FactorSpec 驱动入口（遵循 factor_cols_literal_constant_design.md §4.1）
+    result = run_factor_ic(
+        spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger,
