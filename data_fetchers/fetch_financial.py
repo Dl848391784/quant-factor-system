@@ -59,6 +59,11 @@
   - Fix 3: codes_to_fetch 改为遍历 all_codes 统计与实际跳过逻辑一致（含废弃股票代码场景）
   - Fix 4: _parse_percentage/_parse_numeric_with_unit val is False 冗余→由 isinstance(bool) 统一处理
   - Fix 5: _parse_report_date str 分支增加 YYYY-MM-DD 正则校验，不符合格式返回 None + warning
+- v1.0j (2026-06-15): 4 项缺陷修复
+  - Fix 1: 增量模式成功重拉的 stale 股票从 meta.stale_codes 移除（否则永远残留）
+  - Fix 2: 检查点写入取消浅拷贝 {**stock_data, **new_stock_data}，先 update 再直接写 stock_data
+  - Fix 3: Step 3 日志改为"股票总数/待请求/将跳过"三维信息，与 codes_to_fetch 一致
+  - Fix 4: 全量模式+stale_codes_from_cache 非空时补充 info 日志说明将自动覆盖
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -98,7 +103,7 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0i"
+_OUTPUT_VERSION = "1.0j"
 
 # 模块级固定时间戳（仅标记脚本启动时间，meta 中使用 dt_cls.now() 取完成时间）
 _NOW = dt_cls.now()
@@ -502,6 +507,11 @@ def main(logger_arg: logging.Logger | None = None) -> int:
                 "上次全量拉取有 %d 只股票 API 失败，本次增量模式强制重拉",
                 len(stale_codes_from_cache),
             )
+        elif need_full_fetch and stale_codes_from_cache:
+            _logger.info(
+                "上次全量拉取有 %d 只股票 API 失败，本次全量模式将自动覆盖",
+                len(stale_codes_from_cache),
+            )
 
     # Step 3: 加载股票列表
     try:
@@ -517,13 +527,12 @@ def main(logger_arg: logging.Logger | None = None) -> int:
         if len(code) == 6 and code.isdigit():
             all_codes.append(code)
 
-    _logger.info("需拉取 %d 只股票（缓存已有 %d）", len(all_codes), len(cached_codes))
-
     # 预计算待拉取股票数（固定分母，与循环内跳过逻辑保持一致）
     codes_to_fetch = sum(
         1 for c in all_codes
         if need_full_fetch or c not in cached_codes or c in stale_codes_from_cache
     )
+    _logger.info("股票总数=%d, 待请求=%d, 将跳过=%d", len(all_codes), codes_to_fetch, len(all_codes) - codes_to_fetch)
 
     # Step 4: 拉取数据
     new_stock_data: dict[str, list[dict[str, Any]]] = {}
@@ -565,30 +574,28 @@ def main(logger_arg: logging.Logger | None = None) -> int:
         else:
             empty += 1
 
-        # Fix 2: 检查点写入 — 每 100 只股票写一次缓存，防崩溃丢失
-        # 使用浅拷贝 {**stock_data, **new_stock_data} 避免提前 mutate stock_data
+        # 检查点写入 — 每 100 只股票写一次缓存，防崩溃丢失
+        # 先 update 再直接写 stock_data，避免浅拷贝导致内存峰值翻倍
         if fetch_count % _CHECKPOINT_INTERVAL == 0 and new_stock_data:
-            merged = {**stock_data, **new_stock_data}
+            stock_data.update(new_stock_data)
             checkpoint_meta: dict[str, Any] = {
                 "version": _OUTPUT_VERSION,
                 "fetched_at": dt_cls.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "last_full_fetch_date": dt_cls.now().strftime("%Y-%m-%d")
                 if need_full_fetch
                 else (last_full_date_str or dt_cls.now().strftime("%Y-%m-%d")),
-                "stock_count": len(merged),
-                "record_count": sum(len(v) for v in merged.values()),
+                "stock_count": len(stock_data),
+                "record_count": sum(len(v) for v in stock_data.values()),
                 "fields": list(_FINANCIAL_FIELD_MAP.values()) + ["annualized_eps"],
                 "source": "akshare_stock_financial_abstract_ths",
                 "checkpoint": True,
             }
-            checkpoint_data = {"meta": checkpoint_meta, "data": merged}
+            checkpoint_data = {"meta": checkpoint_meta, "data": stock_data}
             write_gzip_cache(CACHE_FILE, checkpoint_data, ensure_dir=True, logger=_logger)
             _logger.info(
                 "检查点写入: %s (%d 只股票, %d 条记录)",
-                CACHE_FILE, len(merged), checkpoint_meta["record_count"],
+                CACHE_FILE, len(stock_data), checkpoint_meta["record_count"],
             )
-            # 检查点后才合并到 stock_data，清空 new_stock_data 避免重复合并
-            stock_data.update(new_stock_data)
             new_stock_data.clear()
 
         # 速率控制
@@ -619,10 +626,30 @@ def main(logger_arg: logging.Logger | None = None) -> int:
         "fields": list(_FINANCIAL_FIELD_MAP.values()) + ["annualized_eps"],
         "source": "akshare_stock_financial_abstract_ths",
     }
-    # 全量模式下记录 API 失败的股票代码，供下次优先重拉
-    if stale_codes:
-        meta["stale_codes"] = sorted(stale_codes)
-        _logger.warning("本次全量拉取 %d 只股票 API 失败，已记录到 meta.stale_codes", len(stale_codes))
+    # 全量/增量模式统一处理 stale_codes：
+    # - 全量模式：stale_codes 为本次新失败的股票
+    # - 增量模式：stale_codes_from_cache 中成功重拉的需移除，仍失败的需保留
+    final_stale: set[str] = set()
+    if need_full_fetch:
+        final_stale = stale_codes
+    elif stale_codes_from_cache:
+        # 增量模式：已成功拉取的（在 new_stock_data 或 stock_data 中）不再 stale
+        successfully_fetched = set(new_stock_data.keys()) | set(stock_data.keys())
+        final_stale = stale_codes_from_cache - successfully_fetched
+        if final_stale != stale_codes_from_cache:
+            _logger.info(
+                "stale_codes: 上次 %d 只 → 本次成功重拉 %d 只 → 剩余 %d 只仍失败",
+                len(stale_codes_from_cache),
+                len(stale_codes_from_cache - final_stale),
+                len(final_stale),
+            )
+    if final_stale:
+        meta["stale_codes"] = sorted(final_stale)
+        _logger.warning(
+            "%s: %d 只股票 API 失败，已记录到 meta.stale_codes",
+            "全量拉取" if need_full_fetch else "增量拉取（含历史 stale）",
+            len(final_stale),
+        )
 
     # Step 7: 写入缓存
     output_data = {"meta": meta, "data": stock_data}

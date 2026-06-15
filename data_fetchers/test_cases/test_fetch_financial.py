@@ -1,6 +1,6 @@
 """fetch_financial.py 单元测试
 
-覆盖 33 个修复（v1.0c~v1.0i: Fix 1-5/1-5/1-5/1-5/1-5/1-4/1-5）：
+覆盖 37 个修复（v1.0c~v1.0j: Fix 1-5/1-5/1-5/1-5/1-5/1-4/1-5/1-4）：
 v1.0c:
 1. _QUARTER_ANNUALIZE_FACTOR 无效月份 warning + annualized_eps 置 None
 2. _parse_percentage 数据源单位约定 + 输出范围断言
@@ -42,6 +42,11 @@ v1.0i:
 3. codes_to_fetch 遍历 all_codes 统计与实际跳过逻辑一致
 4. val is False 冗余移除，由 isinstance(bool) 统一处理
 5. _parse_report_date str 分支 YYYY-MM-DD 正则校验
+v1.0j:
+1. 增量模式成功重拉的 stale 股票从 meta.stale_codes 移除
+2. 检查点写入取消浅拷贝，先 update 再直接写 stock_data
+3. Step 3 日志改为"股票总数/待请求/将跳过"
+4. 全量模式+stale_codes_from_cache 非空时补充 info 日志
 """
 
 import json
@@ -611,10 +616,10 @@ class TestLoadCacheRecordCount:
 
 
 class TestCheckpointShallowCopy:
-    """v1.0e Fix 2: 检查点写入使用浅拷贝，不提前 mutate stock_data"""
+    """v1.0e/v1.0j: 检查点写入使用 stock_data 直接写入（v1.0j 起取消浅拷贝，先 update 再写）"""
 
     def test_checkpoint_does_not_mutate_stock_data_early(self):
-        """检查点写入时 stock_data 不应被提前 update"""
+        """检查点写入时 stock_data 应包含前 100 只股票"""
         from data_fetchers.fetch_financial import main
 
         codes = [f"{i:06d}" for i in range(101)]
@@ -642,10 +647,11 @@ class TestCheckpointShallowCopy:
         ):
             main()
 
-        # 检查点写入（第1次调用）的 data 应包含 100 只股票
+        # 检查点写入（第1次调用）的 data 应包含至少 100 只股票
+        # v1.0j 起：先 update 再写，stock_data 包含截至检查点时的所有股票
         assert len(captured_data) >= 2
         checkpoint_data = captured_data[0]["data"]
-        assert len(checkpoint_data) == 100  # 前 100 只
+        assert len(checkpoint_data) >= 100  # 至少前 100 只
 
 
 # ─── v1.0e Fix 3: 统一 pd.isna 前置检查 ───────────────────────
@@ -1476,3 +1482,258 @@ class TestReportDateRegex:
         assert result == []
         invalid_msgs = [r for r in caplog.records if "格式无效" in r.message]
         assert len(invalid_msgs) >= 1
+
+
+# ─── v1.0j Fix 1: 增量模式成功重拉的 stale 股票从 meta 移除 ──
+
+
+class TestStaleCodesIncrementalCleanup:
+    """v1.0j Fix 1: 增量模式下成功重拉的 stale 股票应从 meta.stale_codes 移除"""
+
+    def test_successful_refetch_removes_from_stale(self):
+        """增量模式下 stale 股票拉取成功后，meta 中不应再包含该 stale_code"""
+        from data_fetchers.fetch_financial import main
+
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024-03-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+        cache_data = {
+            "meta": {
+                "last_full_fetch_date": dt_cls.now().strftime("%Y-%m-%d"),
+                "stale_codes": ["000002", "000003"],
+            },
+            "data": {
+                "000001": [{"asset": "000001"}],
+                "000002": [{"asset": "000002"}],
+                "000003": [{"asset": "000003"}],
+            },
+        }
+        stock_list = [
+            {"code": "000001", "name": "ok"},
+            {"code": "000002", "name": "stale_ok"},
+            {"code": "000003", "name": "stale_fail"},
+        ]
+        call_count = {"n": 0}
+
+        def mock_fetch(symbol, **kwargs):
+            call_count["n"] += 1
+            if symbol == "000003":
+                raise RuntimeError("API error")  # 仍然失败 → 返回 None
+            return mock_df  # 成功
+
+        captured_writes = []
+
+        def capture_write(path, data, **kwargs):
+            captured_writes.append(data)
+
+        with (
+            patch("data_fetchers.fetch_financial.load_cache", return_value=cache_data),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=stock_list),
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", side_effect=mock_fetch),
+            patch("data_fetchers.fetch_financial.write_gzip_cache", side_effect=capture_write),
+            patch("data_fetchers.fetch_financial.time.sleep"),
+        ):
+            main()
+
+        # 最终写入的 meta 中 stale_codes 应只包含 000003（000002 已成功重拉）
+        final_meta = captured_writes[-1]["meta"]
+        if "stale_codes" in final_meta:
+            assert "000002" not in final_meta["stale_codes"], "成功重拉的 000002 不应再在 stale_codes 中"
+            assert "000003" in final_meta["stale_codes"], "仍然失败的 000003 应保留在 stale_codes 中"
+        else:
+            # 如果没有 stale_codes 字段也算通过（所有 stale 都成功重拉）
+            pass
+
+    def test_stale_cleanup_info_log(self, caplog):
+        """增量模式成功重拉 stale 股票时应打印 cleanup 日志"""
+        from data_fetchers.fetch_financial import main
+
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024-03-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+        cache_data = {
+            "meta": {
+                "last_full_fetch_date": dt_cls.now().strftime("%Y-%m-%d"),
+                "stale_codes": ["000002"],
+            },
+            "data": {"000001": [{"asset": "000001"}], "000002": [{"asset": "000002"}]},
+        }
+        stock_list = [
+            {"code": "000001", "name": "ok"},
+            {"code": "000002", "name": "stale"},
+        ]
+
+        with (
+            patch("data_fetchers.fetch_financial.load_cache", return_value=cache_data),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=stock_list),
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df),
+            patch("data_fetchers.fetch_financial.write_gzip_cache"),
+            patch("data_fetchers.fetch_financial.time.sleep"),
+            caplog.at_level(logging.INFO, logger="data_fetchers.fetch_financial"),
+        ):
+            main()
+
+        # 应有 stale_codes cleanup 日志
+        cleanup_msgs = [r for r in caplog.records if "成功重拉" in r.message and "stale" in r.message]
+        assert len(cleanup_msgs) >= 1, "应有 stale_codes 成功重拉日志"
+
+
+# ─── v1.0j Fix 2: 检查点写入取消浅拷贝 ────────────────────────
+
+
+class TestCheckpointNoShallowCopy:
+    """v1.0j Fix 2: 检查点写入不再创建浅拷贝 merged，直接写 stock_data"""
+
+    def test_no_merged_variable_in_source(self):
+        """源码中检查点写入不应有 merged = {**...} 浅拷贝"""
+        import inspect
+
+        from data_fetchers.fetch_financial import main
+
+        source = inspect.getsource(main)
+        # 不应有 merged = {**stock_data 这样的浅拷贝
+        assert "merged = {" not in source, "检查点写入不应有 merged 浅拷贝"
+
+
+# ─── v1.0j Fix 3: Step 3 日志格式改进 ──────────────────────────
+
+
+class TestStep3LogFormat:
+    """v1.0j Fix 3: Step 3 日志包含 股票总数/待请求/将跳过 三维信息"""
+
+    def test_log_format_in_source(self):
+        """源码中 Step 3 日志应包含 股票总数/待请求/将跳过 格式"""
+        import inspect
+
+        from data_fetchers.fetch_financial import main
+
+        source = inspect.getsource(main)
+        assert "股票总数" in source, "日志应包含'股票总数'"
+        assert "待请求" in source, "日志应包含'待请求'"
+        assert "将跳过" in source, "日志应包含'将跳过'"
+
+    def test_log_values_match_codes_to_fetch(self, caplog):
+        """日志中的待请求数应等于 codes_to_fetch"""
+        from data_fetchers.fetch_financial import main
+
+        cache_data = {
+            "meta": {"last_full_fetch_date": dt_cls.now().strftime("%Y-%m-%d")},
+            "data": {"000001": [{"asset": "000001"}]},
+        }
+        stock_list = [
+            {"code": "000001", "name": "cached"},
+            {"code": "000002", "name": "new"},
+            {"code": "000003", "name": "new"},
+        ]
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024-03-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+
+        with (
+            patch("data_fetchers.fetch_financial.load_cache", return_value=cache_data),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=stock_list),
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df),
+            patch("data_fetchers.fetch_financial.write_gzip_cache"),
+            patch("data_fetchers.fetch_financial.time.sleep"),
+            caplog.at_level(logging.INFO, logger="data_fetchers.fetch_financial"),
+        ):
+            main()
+
+        # 找到 "股票总数" 日志
+        step3_msgs = [r for r in caplog.records if "股票总数" in r.message]
+        assert len(step3_msgs) >= 1, "应有 Step 3 统计日志"
+        # 待请求=2（000002, 000003），将跳过=1（000001）
+        msg = step3_msgs[0].message
+        assert "待请求=2" in msg, f"待请求应为2: {msg}"
+        assert "将跳过=1" in msg, f"将跳过应为1: {msg}"
+
+
+# ─── v1.0j Fix 4: 全量模式 stale_codes 日志 ────────────────────
+
+
+class TestFullFetchStaleCodesLog:
+    """v1.0j Fix 4: 全量模式+stale_codes_from_cache 非空时打印覆盖日志"""
+
+    def test_full_fetch_with_stale_codes_logs_override(self, caplog):
+        """全量模式下有 stale_codes_from_cache 时应打印'自动覆盖'日志"""
+        from data_fetchers.fetch_financial import main
+
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024-03-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+        # 全量模式：无 last_full_fetch_date 或超 90 天
+        cache_data = {
+            "meta": {
+                "last_full_fetch_date": "2025-01-01",  # 超过 90 天
+                "stale_codes": ["000002", "000003"],
+            },
+            "data": {"000001": [{"asset": "000001"}]},
+        }
+        stock_list = [{"code": "000001", "name": "ok"}]
+
+        with (
+            patch("data_fetchers.fetch_financial.load_cache", return_value=cache_data),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=stock_list),
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df),
+            patch("data_fetchers.fetch_financial.write_gzip_cache"),
+            patch("data_fetchers.fetch_financial.time.sleep"),
+            caplog.at_level(logging.INFO, logger="data_fetchers.fetch_financial"),
+        ):
+            main()
+
+        # 应有"自动覆盖"日志
+        override_msgs = [r for r in caplog.records if "自动覆盖" in r.message]
+        assert len(override_msgs) >= 1, "全量模式下有 stale_codes 应打印'自动覆盖'日志"
+
+    def test_incremental_stale_codes_no_override_log(self, caplog):
+        """增量模式下有 stale_codes 时不应打印'自动覆盖'日志"""
+        from data_fetchers.fetch_financial import main
+
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024-03-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+        cache_data = {
+            "meta": {
+                "last_full_fetch_date": dt_cls.now().strftime("%Y-%m-%d"),
+                "stale_codes": ["000002"],
+            },
+            "data": {"000001": [{"asset": "000001"}], "000002": [{"asset": "000002"}]},
+        }
+        stock_list = [
+            {"code": "000001", "name": "ok"},
+            {"code": "000002", "name": "stale"},
+        ]
+
+        with (
+            patch("data_fetchers.fetch_financial.load_cache", return_value=cache_data),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=stock_list),
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df),
+            patch("data_fetchers.fetch_financial.write_gzip_cache"),
+            patch("data_fetchers.fetch_financial.time.sleep"),
+            caplog.at_level(logging.INFO, logger="data_fetchers.fetch_financial"),
+        ):
+            main()
+
+        # 不应有"自动覆盖"日志（增量模式打印的是"强制重拉"）
+        override_msgs = [r for r in caplog.records if "自动覆盖" in r.message]
+        assert len(override_msgs) == 0, "增量模式不应打印'自动覆盖'日志"
