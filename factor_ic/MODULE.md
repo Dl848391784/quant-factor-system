@@ -452,6 +452,100 @@ log_factor_summary(result, "振幅差分因子")  # missing 1 required positiona
 
 ---
 
+## M3.2 入口启动日志收口至公共模块横幅
+
+**What**:`factor_ic/ic_*.py` 入口脚本**不再自行打印启动日志**,统一由公共模块 `factor_ic_runner` 在 `run_simple_factor_ic` / `run_complex_factor_ic` 内部打印横幅(含因子名/周期/min_stocks/force_full)。入口脚本如需追加因子专属参数(布林 n/k、KDJ n/m1/m2、版本号等),通过 `extra_log_params={"k": v}` 关键字参数显式声明,横幅自动追加"扩展参数"行。
+
+**Why**:34 个入口脚本原各自手写启动 `logger.info(...)`,文案漂移严重(「启动 XX 因子 IC 计算」/「XX 因子 IC 计算启动」/「[min_stocks=%s, force_full=%s]」),运维巡检抓不到统一关键字;且每个入口脚本要在解析参数后立即重复打印 "min_stocks/force_full"——这两个值本就是 runner 入参,完全可以由 runner 自身打印,入口只负责声明参数差异(`extra_log_params`)。本规范是 M2「公共模块强制复用」在启动节点的具体实施。
+
+**How**:
+
+```python
+# factor_ic/common/factor_ic_runner.py(已实施,见 commit 0709fe6)
+def run_complex_factor_ic(..., extra_log_params: dict[str, Any] | None = None, ...):
+    _logger.info("=" * 60)
+    _logger.info("因子 IC 分析: %s_%s", factor_name, return_period)
+    _logger.info("入口参数: min_stocks=%s, force_full=%s", min_stocks, force_full)
+    if extra_log_params:
+        extra_str = ", ".join(f"{k}={v!s}" for k, v in extra_log_params.items())
+        _logger.info("扩展参数: %s", extra_str)
+    _logger.info("=" * 60)
+
+# 入口脚本(无扩展参数,29 个)
+def main():
+    args = parser.parse_args()
+    # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
+    result = run_simple_factor_ic(
+        factor_name="rsi", factor_col="rsi_6",
+        min_stocks=args.min_stocks, force_full=args.force_full,
+        _logger=logger,
+    )
+
+# 入口脚本(含扩展参数,5 个:bollinger_pb / capital_flow_ratio_trend / kdj_j / turnover_surge / 任何后续因子)
+def main():
+    args = parser.parse_args()
+    # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full + extra_log_params）
+    result = run_complex_factor_ic(
+        factor_name="kdj_j", ...,
+        min_stocks=args.min_stocks, force_full=args.force_full,
+        extra_log_params={"n": args.n, "m1": args.m1, "m2": args.m2},
+        _logger=logger,
+    )
+```
+
+**Don't**:
+
+```python
+# ❌ 入口脚本自行打印启动日志,文案漂移 + 关键字不统一
+def main():
+    args = parser.parse_args()
+    logger.info(
+        "启动 KDJ_J 因子 IC 计算: n=%s, m1=%s, min_stocks=%s, force_full=%s",
+        args.n, args.m1, args.min_stocks, args.force_full,
+    )
+    result = run_complex_factor_ic(...)  # runner 内部还会再打一次横幅,关键节点重复
+
+# ❌ 把扩展参数硬编码进 factor_name / 因子专属字段,不走 extra_log_params
+result = run_complex_factor_ic(
+    factor_name=f"kdj_j_n{args.n}",  # 污染数据契约,扩展参数应进 extra_log_params
+    ...,
+)
+```
+
+**When**:
+
+| 场景 | 适用规范 | 说明 |
+|------|----------|------|
+| 入口脚本无因子专属启动参数 | M3.2(直接调 runner) | 例:`ic_rsi_1d`(只有 min_stocks/force_full) |
+| 入口脚本有因子专属启动参数 | M3.2(`extra_log_params=`) | 例:`ic_kdj_j_1d` 传 n/m1/m2 |
+| 公共模块横幅之外的运行节点日志 | 不在本规范范围 | 例:summary 输出(M3.1)、build_error_result 异常路径 |
+
+**Examples**:
+
+```python
+# ✓ 正确:无扩展参数,单行注释占位
+args = parser.parse_args()
+# 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
+result = run_simple_factor_ic(...)
+
+# ✓ 正确:含扩展参数,显式声明
+result = run_complex_factor_ic(
+    ...,
+    extra_log_params={"version": __version__},
+    _logger=logger,
+)
+
+# ✗ 错误:入口脚本保留 logger.info 启动块
+logger.info("启动 XXX 因子IC计算: ...")  # 与 runner 横幅重复
+```
+
+**Verify**:
+- `grep -rn '启动.*因子\|因子.*计算启动\|IC 计算启动\|IC计算启动' factor_ic/ic_*.py | wc -l` 必须为 `0`(34 脚本启动字面量已全部收口)
+- `grep -l '启动横幅由公共模块 factor_ic_runner 统一打印' factor_ic/ic_*.py | wc -l` 必须为 `34`(全部入口脚本均含标准占位注释)
+- `pytest factor_ic/test_cases/test_factor_ic_runner_startup_log.py` 8/8 通过(覆盖空 dict / 单参数 / 多参数 mixed / None / bool+float / force_full=True / min_stocks 自定义)
+
+---
+
 ## M4. 跨目录公共模块禁止调用
 
 **What**:公共模块仅在本目录内复用,禁止跨目录调用 (`factor_ic/` 脚本不可 `from backtest.common import`)。
@@ -2094,6 +2188,7 @@ def calculate_all_stocks_vectorized(factor_df):  # 实际使用
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v4.3 | 2026-06-15 | 新增 M3.2 入口启动日志收口至公共模块横幅(34 脚本统一,配套 `factor_ic_runner.extra_log_params` 参数) |
 | v4.2 | 2026-06-15 | 新增 M3.1 主职责日志输出公共函数:logger 强制必传(M3 特例细化,配套 `factor_summary_logger.py`) |
 | v4.1 | 2026-06-12 | 新增行业方向性因子IC脚本注册表(industry_momentum_5d / industry_turnover_trend / industry_amplitude_trend);脚本注册表章节 | [experimental] |
 | v4.0 | 2026-06-03 | 大重构:58 章节去重合并到 65 条 M 编号规则,按 11 类别 (A-K) 组织,每条套用 What/Why/How/Don't/When/Verify 框架;加目录索引;精简更新记录 |
