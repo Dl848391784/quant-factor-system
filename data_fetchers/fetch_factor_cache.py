@@ -23,6 +23,20 @@ Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
   - 导入 get_memory_usage_mb, get_memory_info_str 从 common.memory_utils
   - 仅保留独有逻辑: fetch_batch_stocks, validate_final_data, main
 
+修复编号索引（issue #N 在代码注释中引用，编号全局唯一不重复，跨版本可追溯）:
+  v1.1 (2026-06-15): #1~#8（meta 解析两阶段、cumcount 排序、mkdir 副作用、total_batches 初值、
+                              内存暂停 continue、子批次日志降级、del 后清理对称）
+  v1.2 (2026-06-15): #1（meta 解析重写为状态机收敛点）、#2（meta 归零块对称释放）、
+                     #3（format_final_output 后输出文件存在性兜底）、#9（末批 sleep 条件化，
+                     原标 #4 与 v1.1 mkdir 冲突，统一改 #9）、#5（successful==0 快速失败）
+  v1.3 (2026-06-15): #1（meta 阶段 B 守卫块注释完善）、#2（末批 sleep 注释加版本前缀）、
+                     #3（validate_final_data 入口前置文件存在性检查）、
+                     #10（内存超阈值 warning 加 [子批次 N/M] 编号，原标 #4 与 v1.1 mkdir 冲突，统一改 #10）
+  v1.4 (2026-06-15): #11（issue #4 编号冲突彻底消除：v1.2 末批 sleep 改 #9、v1.3 内存超阈值 warning 改 #10、
+                          建立本索引）、
+                     #12（meta 阶段 A brace_count<0 异常分支拦截，避免状态机锁死）、
+                     #13（n_records_in_meta 初值改 None，区分"meta 字段缺失"与"meta 解析失败"）
+
 作者: 云瑶
 日期: 2026-04-04
 """
@@ -159,7 +173,9 @@ def fetch_batch_stocks(
 
         # 内存监控：超过阈值时暂停
         # 修复 issue #6: 暂停后 continue 跳过本次固定 sleep(2)，避免双重等待累积
-        # 修复 issue #4（v1.3）: warning 日志补充子批次编号，使内存压力下进度仍可追踪
+        # 修复 issue #10（v1.3）: warning 日志补充子批次编号，使内存压力下进度仍可追踪
+        #   注：原 v1.3 注释引用 issue #4 与 v1.1 mkdir 副作用修复编号冲突，
+        #   v1.4 issue #11 统一改 issue #10，编号索引见文件头 docstring。
         mem_mb = get_memory_usage_mb()
         if mem_mb > MEMORY_THRESHOLD_MB:
             logger.warning(
@@ -298,9 +314,16 @@ def validate_final_data(logger: logging.Logger | None = None) -> tuple[bool, int
         return False, 0, 0, 0
 
     # 初始化默认值
+    # 修复 issue #13（v1.4）: n_records_in_meta 初值改 None，区分两种语义不同的场景：
+    #   (a) meta 中确实未提供 n_records 字段（合理豁免，None）；
+    #   (b) meta 解析失败导致变量保持初始值（应当告警，None 触发明确警告分支）。
+    #   原初值 0 与"meta 未提供该字段"语义重叠（旧 records_valid = ... or n_records_in_meta == 0），
+    #   meta 解析失败时会静默通过记录数校验。改为 None 后 records_valid 走
+    #   `n_records_in_meta is None or records_count == n_records_in_meta`，同时下方
+    #   `not records_valid and n_records_in_meta > 0` 判断也无需改动（None 不触发该分支）。
     n_days = 0
     n_assets = 0
-    n_records_in_meta = 0
+    n_records_in_meta: int | None = None
     date_start = ""
     date_end = ""
     records_count = 0
@@ -340,6 +363,22 @@ def validate_final_data(logger: logging.Logger | None = None) -> tuple[bool, int
                     meta_lines.append(sub)
                     brace_count = sub.count("{") - sub.count("}")
                     in_meta = True
+                    # 修复 issue #12（v1.4）: brace_count < 0 异常分支拦截
+                    #   场景：当前行截取子串中 } 多于 {（如格式异常的 JSON 片段或截断输入）。
+                    #   原代码仅判断 > 0 与隐含的 == 0，负数会 fall-through 到阶段 B，
+                    #   后续每行被 elif in_meta 捕获并继续累计负数 brace_count，永远无法归零，
+                    #   整个文件剩余内容被当 meta 消费而跳过 DATA 阶段，records_count=0，
+                    #   验证返回 False 但日志没有任何针对"brace_count 为负"的警告（静默失败）。
+                    #   修复：检测到负数立即 logger.warning 并重置状态机，确保后续 DATA 阶段仍可推进。
+                    if brace_count < 0:
+                        logger.warning(
+                            "  ⚠ meta 起始行 brace_count<0 (=%s)，输入格式异常，重置状态机跳过本行",
+                            brace_count,
+                        )
+                        in_meta = False
+                        meta_lines = []
+                        brace_count = 0
+                        continue
                     if brace_count > 0:
                         # 多行 meta：等后续行累计
                         continue
@@ -360,12 +399,17 @@ def validate_final_data(logger: logging.Logger | None = None) -> tuple[bool, int
                         meta = json.loads(meta_content)
                         n_days = meta.get("n_days", 0)
                         n_assets = meta.get("n_assets", 0)
-                        n_records_in_meta = meta.get("n_records", 0)
+                        # 修复 issue #13（v1.4）: 直接 .get(key) 不传默认值，meta 中无字段时返回 None，
+                        #   与下方 records_valid 判断 `n_records_in_meta is None` 语义一致。
+                        n_records_in_meta = meta.get("n_records")
                         date_range = meta.get("date_range", {})
                         date_start = date_range.get("start", "") if isinstance(date_range, dict) else ""
                         date_end = date_range.get("end", "") if isinstance(date_range, dict) else ""
                     except json.JSONDecodeError as e:
                         logger.warning("  ⚠ meta 解析失败: %s", e)
+                        # 修复 issue #13（v1.4）: meta 解析失败时显式保持 n_records_in_meta = None，
+                        #   使下游 records_valid 判断不会因初值 0 静默通过记录数校验。
+                        n_records_in_meta = None
                     # 释放 meta 解析临时内存（与 sample_records 的 del 释放原则保持一致）
                     del meta_content
                     del meta_lines
@@ -429,16 +473,19 @@ def validate_final_data(logger: logging.Logger | None = None) -> tuple[bool, int
     gc.collect()
 
     # 综合验证
+    # 修复 issue #13（v1.4）: records_valid 改为 `is None` 判断，区分"meta 字段缺失/解析失败"
+    #   （n_records_in_meta is None，豁免一致性校验）与"meta 声明记录数与流式统计不一致"
+    #   （n_records_in_meta 为整数且与 records_count 不等，触发 warning）。
     days_valid = n_days >= N_DAYS * 0.9
     data_valid = rsi_valid_ratio >= 0.8
-    records_valid = (records_count == n_records_in_meta) or (n_records_in_meta == 0)
+    records_valid = n_records_in_meta is None or records_count == n_records_in_meta
     is_valid = days_valid and data_valid and records_valid
 
     if not days_valid:
         logger.warning("  ⚠ 交易日数不足 (%s/%s)", n_days, N_DAYS)
     if not data_valid:
         logger.warning("  ⚠ 数据有效性不足 (RSI有效比例: %.1f%% < 80%%)", rsi_valid_ratio * 100)
-    if not records_valid and n_records_in_meta > 0:
+    if not records_valid and n_records_in_meta is not None and n_records_in_meta > 0:
         logger.warning("  ⚠ 记录数不一致 (流式统计: %s, meta声明: %s)", records_count, n_records_in_meta)
     if is_valid:
         logger.info("  ✓ 通过验证 (RSI有效比例: %.1f%%, 记录数一致: %s)", rsi_valid_ratio * 100, records_count)
@@ -545,10 +592,10 @@ def main() -> bool:
         # 批次间强制垃圾回收
         gc.collect()
         logger.info("  批次完成后内存: %s", get_memory_info_str())
-        # 修复 issue #4（v1.2，末批 sleep）: 末批跳过 sleep，避免无意义等待；
-        #   与子批次循环 `if sub_idx < num_sub_batches - 1: time.sleep(2)` 处理一致
-        #   注：v1.1 的 issue #4 是模块顶层 mkdir 副作用消除（见 line 94/445），
-        #   两轮修复编号同为 #4 但属不同问题，此注释明确版本以消歧。
+        # 修复 issue #9（v1.2）: 末批跳过 sleep，避免无意义等待；
+        #   与子批次循环 `if sub_idx < num_sub_batches - 1: time.sleep(2)` 处理一致。
+        #   注：原 v1.2 注释引用 issue #4 与 v1.1 mkdir 副作用修复编号冲突，
+        #   v1.4 issue #11 统一改 issue #9，编号索引见文件头 docstring。
         if batch_idx < total_batches - 1:
             time.sleep(5)  # 批次间休息时间增加
 

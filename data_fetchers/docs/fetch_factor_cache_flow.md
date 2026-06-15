@@ -1,6 +1,6 @@
 # fetch_factor_cache.py 流程文档
 
-> 版本: v1.3
+> 版本: v1.4
 > 创建时间: 2026-05-26
 > 更新时间: 2026-06-15 北京时间
 
@@ -167,11 +167,15 @@ cache/factor_data/
 
 ## 版本历史
 
+- v1.4 (2026-06-15): 3 项编号体系治理与状态机健壮性修复
+  - **修复 issue 编号冲突彻底消除**（issue #11）：v1.1/v1.2/v1.3 各自独立编号导致 issue #4 在三轮修复中分别指代"模块顶层 mkdir 副作用"、"末批 sleep 条件化"、"内存超阈值 warning 加子批次编号"三个不同问题。即使 v1.3 已用 `(v1.2，末批 sleep)` / `(v1.3)` 文字消歧，仍属于"用文字掩盖根本编号冲突"。本轮在文件头 docstring 建立**全局编号索引**（v1.1=#1~#8、v1.2=#1~#3+#9+#5、v1.3=#1~#3+#10、v1.4=#11~#13），将 v1.2 末批 sleep 改为 issue #9、v1.3 内存超阈值 warning 改为 issue #10，编号全局唯一不重复，跨版本可追溯
+  - **validate_final_data 阶段 A `brace_count<0` 异常分支拦截**（issue #12）：原阶段 A `brace_count = sub.count("{") - sub.count("}")` 后仅判断 `> 0` 与隐含 `== 0`，缺失负数分支。当 meta 起始行截取子串 `}` 多于 `{`（格式异常 JSON / 截断输入），负数会 fall-through 到阶段 B，后续每行被 `elif in_meta` 捕获并继续累计负数，永远无法归零收敛，整个文件剩余内容被当作 meta 行消费而跳过 DATA 阶段，records_count=0，validate 返回 False 但**日志无任何针对负数 brace_count 的警告**（静默失败）。修复：阶段 A 增加 `if brace_count < 0` 分支，记录 warning 并重置 `in_meta=False`/`meta_lines=[]`/`brace_count=0` 后 `continue`，确保后续 DATA 阶段仍可推进
+  - **`n_records_in_meta` 初值改 None 区分语义**（issue #13）：原 `records_valid = (records_count == n_records_in_meta) or (n_records_in_meta == 0)` 表达式中，`n_records_in_meta == 0` 同时覆盖两种语义截然不同的场景：(a) meta 中确实未提供 n_records 字段（合理豁免），(b) meta 解析失败导致变量保持初始值 0（应当告警）。两种场景无法区分 → meta 解析失败时静默通过记录数校验。修复：`n_records_in_meta: int | None = None` 初值改 None，`meta.get("n_records")` 不传默认值（缺失时返回 None），`json.JSONDecodeError` 分支显式赋 None；`records_valid = n_records_in_meta is None or records_count == n_records_in_meta` 让"字段缺失"与"解析失败"语义统一为 None；`if not records_valid and n_records_in_meta is not None and n_records_in_meta > 0` 守卫确保 None 不触发 `>` 误用
 - v1.3 (2026-06-15): 4 项注释精确化与可观测性补强
   - **validate_final_data 守卫块必要性说明**：阶段 B 末尾 `if in_meta: continue` 守卫块**非冗余** — 若 meta 多行某行的字段值合法包含 `"data": [` 字面子串（如 fields 描述），缺失此守卫会 fall-through 污染 in_data 状态。注释从"本行已消费"改为明确防污染说明（issue #1）
-  - **末批 sleep 修复注释消歧**：v1.1 issue #4 是模块顶层 mkdir 副作用，v1.2 issue #4 是末批 sleep — 同编号不同问题。给 v1.2 修复注释加 `(v1.2，末批 sleep)` 版本前缀并交叉引用 v1.1 的 mkdir 修复行号（issue #2）
+  - **末批 sleep 修复注释消歧**：v1.1 issue #4 是模块顶层 mkdir 副作用，v1.2 issue #4 是末批 sleep — 同编号不同问题。给 v1.2 修复注释加 `(v1.2，末批 sleep)` 版本前缀并交叉引用 v1.1 的 mkdir 修复行号（issue #2）。**注**：v1.4 issue #11 进一步将该问题统一改 issue #9，本条仅保留历史描述
   - **validate_final_data 文件不存在前置检查**：在 gzip.open 之前显式 `if not factor_path.exists()` 判断，用 logger.error 输出含完整路径的明确信息；与 IO 中途失败（保留 warning + path + 异常类型）两类错误区分处理（issue #3）
-  - **内存超阈值 warning 含子批次编号**：扩展 `⚠ 内存超阈值` warning 日志格式为 `⚠ [子批次 N/M] 内存超阈值 ...`，使内存压力下子批次粒度进度仍可追踪，与正常路径 logger.debug 输出对称（issue #4）
+  - **内存超阈值 warning 含子批次编号**：扩展 `⚠ 内存超阈值` warning 日志格式为 `⚠ [子批次 N/M] 内存超阈值 ...`，使内存压力下子批次粒度进度仍可追踪，与正常路径 logger.debug 输出对称（issue #4）。**注**：v1.4 issue #11 进一步将该问题统一改 issue #10，本条仅保留历史描述
 - v1.2 (2026-06-15): 5 项控制流与失败路径修复
   - **validate_final_data 状态机重写**：消除原 if/elif/独立-if 三段并存的歧义控制流，重写为清晰的两阶段状态机（阶段 A 进入 + 阶段 B 累计 + 共用归零收敛点），单行/多行 meta 路径对称（issue #1）
   - **meta 内存释放对称化**：归零块同步 `del meta_content + del meta_lines + meta_lines = []`，与 sample_records 的 del 释放原则一致；移除"list 占用可忽略"的不准确注释（issue #2）
