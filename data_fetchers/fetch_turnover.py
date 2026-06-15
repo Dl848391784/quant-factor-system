@@ -1016,5 +1016,6 @@ if __name__ == "__main__":
         cli_logger.info("执行完成，退出码: %s", 0 if success else 1)
         sys.exit(0 if success else 1)
     except Exception as e:
-        cli_logger.error("执行失败: [%s]: %s", type(e).__name__, e)
+        # data_fetchers MODULE.md R10: 类型名 + logger.exception 自动附堆栈
+        cli_logger.exception("执行失败: [%s]", type(e).__name__)
         sys.exit(1)

@@ -117,6 +117,7 @@ if __name__ == "__main__":
     # 运行入口
     try:
         main()
-    except Exception as e:
-        logger.error("滚动ICIR加权综合因子回测执行失败 [%s]: %s", type(e).__name__, e)
+    except Exception:
+        # M42: CLI 兜底用 logger.exception 自动附加堆栈
+        logger.exception("滚动ICIR加权综合因子回测执行失败")
         sys.exit(1)

@@ -83,6 +83,7 @@ if __name__ == "__main__":
 
     try:
         main()
-    except Exception as e:
-        logger.error("IC加权综合因子回测执行失败 [%s]: %s", type(e).__name__, e)
+    except Exception:
+        # M42: CLI 兜底用 logger.exception 自动附加堆栈
+        logger.exception("IC加权综合因子回测执行失败")
         sys.exit(1)

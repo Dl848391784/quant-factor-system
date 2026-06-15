@@ -1460,7 +1460,8 @@ def main() -> int:
         logger.info("执行成功，退出码: 0")
         return 0
     except Exception as e:
-        logger.error("执行失败 [%s]: %s", type(e).__name__, str(e))
+        # data_fetchers MODULE.md R10: 类型名 + logger.exception 自动附堆栈
+        logger.exception("执行失败 [%s]", type(e).__name__)
         return 1
 
 
