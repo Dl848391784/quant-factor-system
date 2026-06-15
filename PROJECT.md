@@ -160,6 +160,7 @@ dependencies = [
 | H8 | Design-First：2+ 文件需 design.md | 大改动先对齐再写，避免推倒重来 | CI `scripts/check_design_first.py` | CI |
 | H9 | 任务粒度：≤3 文件 **AND** ≤200 行（两者都需满足，违反任一即超粒度） | 控制单次改动规模，便于 review 和回退；超粒度走 Design-First | pre-commit `scripts/check_task_size.py` | pre-commit |
 | H10 | 测试覆盖率：不低于阶段性阈值（当前 60%，目标 70%） | 防止新代码无测试拉低基线 | pytest `--cov-fail-under=60`（当前阶段） | CI |
+| H11 | 日志格式：% 惰性格式化（禁止 f-string / + 拼接 / `exc_info=True`） | 性能（高 verbosity 时跳过格式化）+ 风格统一 + 与标准库 logging 结构化处理器（如 JSON）兼容 | ruff G004 / G003 / G201 | pre-commit + CI |
 
 **H2 正反例**：
 - ✅ 算输出（必须放 `<模块>/result/`）：分析结果 JSON、回测报告、汇总文件、对外暴露的数据产物
@@ -183,12 +184,58 @@ except FileNotFoundError as e:
     raise RuntimeError("加载失败") from e
 ```
 
+**H11 正反例**：
+```python
+# ❌ 反例 1：f-string（提前格式化，DEBUG 关闭时仍消耗 CPU）
+logger.info(f"加载 {len(rows)} 行数据")
+logger.error(f"读取失败 [{path}]: {e}")
+
+# ❌ 反例 2：+ 拼接
+logger.info("加载 " + str(len(rows)) + " 行数据")
+
+# ❌ 反例 3：exc_info=True（应用 logger.exception 自动捕获）
+logger.error("处理失败", exc_info=True)
+
+# ✅ 正例 1：% 惰性格式化（位置参数，logger 在确认级别启用后才格式化）
+logger.info("加载 %s 行数据", len(rows))
+logger.error("读取失败 [%s]: %s", path, e)
+
+# ✅ 正例 2：浮点数格式说明符
+logger.info("IC 均值: %.4f, ICIR: %.2f", ic_mean, icir)
+
+# ✅ 正例 3：异常自动捕获
+try:
+    process()
+except Exception:
+    logger.exception("处理失败")  # 自动附 traceback，等价于 error + exc_info=True
+
+# ⚠️ 字面量 % 需转义为 %%
+logger.info("Bollinger %%B 因子计算完成")
+```
+
+**H11 Why**：
+- **性能**：`logger.debug(f"... {expensive_call()} ...")` 即使 DEBUG 级别关闭也会执行 `expensive_call()`；惰性格式化由 logger 内部判断级别后才格式化，跳过被禁用的级别开销
+- **结构化日志**：标准库 logging 把 `msg` 和 `args` 分别保留在 `LogRecord` 上，下游 JSON Handler / 日志聚合系统可基于模板 + 参数做模板分组、参数提取；f-string 让模板和参数永久合并，丢失结构化能力
+- **风格统一**：项目已统一为 % 风格（factor_ic/ 39 文件 219 处全清），新代码必须保持一致
+
+**H11 Verify**：
+```bash
+ruff check --select G factor_ic/
+# 期望：All checks passed!
+```
+
+**H11 当前覆盖范围**：
+- ✅ 已强制：`factor_ic/`（含 31 个 ic_*.py + 8 个 common/*.py）
+- ⏳ 迁移中（per-file-ignores 暂放行）：`backtest/`、`comprehensive_factor/`、`data_fetchers/`、`summary/`、`temporary/`、`run_pipeline.py`、`factor_definitions.py`
+- 迁移路径：每模块完成后从 `pyproject.toml [tool.ruff.lint.per-file-ignores]` 中移除该模块的放行项
+
 **硬规则补充注释**：
 - H1：`factor_ic` 只能复用 `factor_ic/common/`，禁止复用 `backtest/common/` 等
 - H7：路径常量清单详见"附录：路径常量清单"
 - H8：详见"Design-First 流程"章节
 - H9：超粒度时不可强拆为多次 commit 绕过，必须走 Design-First 走审核
 - H10：阶段计划与设定依据见"测试覆盖规范"章节
+- H11：当前仅 `factor_ic/` 强制；其他模块在 `pyproject.toml [tool.ruff.lint.per-file-ignores]` 中暂放行，迁移完成后逐步移除
 
 ---
 

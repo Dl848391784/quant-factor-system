@@ -75,6 +75,7 @@ Plan → Execute → Review → Debug
 | 10 | 异常链：`raise ... from e` | ruff B904 |
 | 11 | 路径导入：`from paths import` | import-linter |
 | 12 | Design-First：2+文件先提交 design.md | 人工审核 |
+| 13 | 日志格式：% 惰性格式化（禁止 f-string / + 拼接 / `exc_info=True`）| ruff G004/G003/G201 |
 
 **所有路径必须从 `paths.py` 导入，禁止字符串字面量。**
 
