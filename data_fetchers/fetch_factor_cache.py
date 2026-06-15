@@ -36,6 +36,11 @@ Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
                           建立本索引）、
                      #12（meta 阶段 A brace_count<0 异常分支拦截，避免状态机锁死）、
                      #13（n_records_in_meta 初值改 None，区分"meta 字段缺失"与"meta 解析失败"）
+  v1.5 (2026-06-15): #14（缺失输出文件错误日志改打印路径+状态而非布尔值）、
+                     #15（meta 归零块 fall-through 取代 continue，处理 meta+data 同行紧凑格式）、
+                     #16（fetch_batch_stocks combined 排序加 kind="mergesort"，与 valid_df 一致）、
+                     #17（内存超阈值暂停后二次检测，仍超限跳过当前批次防 OOM）、
+                     #18（validate_final_data 增加 MIN_SAMPLE_COUNT=100 最小样本量下限）
 
 作者: 云瑶
 日期: 2026-04-04
@@ -215,7 +220,11 @@ def fetch_batch_stocks(
     gc.collect()
 
     combined["date"] = pd.to_datetime(combined["date"])
-    combined = combined.sort_values(["asset", "date"]).copy()  # 避免 CoW 风险
+    # 修复 issue #16（v1.5）: 显式 kind="mergesort" 保证稳定排序。
+    #   原 sort_values 默认 quicksort 在相同 (asset, date) 多行时顺序不确定，
+    #   后续 cumcount(ascending=False) 截取 N_DAYS 行的结果在不同运行间不一致。
+    #   与下方 valid_df.sort_values(..., kind="mergesort") 保持一致。
+    combined = combined.sort_values(["asset", "date"], kind="mergesort").copy()  # 避免 CoW 风险
 
     combined["rsi_6"] = combined.groupby("asset")["close"].transform(lambda x: calculate_rsi(x, period=6))
 
@@ -416,7 +425,13 @@ def validate_final_data(logger: logging.Logger | None = None) -> tuple[bool, int
                     meta_lines = []
                     gc.collect()
                     in_meta = False
-                    continue
+                    # 修复 issue #15（v1.5）: 归零块末尾不再 continue，改为 fall-through。
+                    #   原 continue 跳过本行剩余处理，但若归零行尾部还包含 `"data": [`
+                    #   子串（合法 JSON 中 meta 与 data 同行的紧凑格式），DATA 阶段进入
+                    #   检测会被跳过，状态机永远停留 in_meta=False / in_data=False 初始态，
+                    #   后续所有 data 记录被当普通行忽略。fall-through 后由下方守卫块
+                    #   `if in_meta: continue` 自动豁免（此处 in_meta 已设 False，不拦截），
+                    #   控制流自然进入 DATA 进入检测 `if '"data": [' in stripped`。
                 if in_meta:
                     # 修复 issue #1（v1.3）: 守卫块**必要**，非冗余。
                     #   阶段 B 累计行（elif in_meta）若 brace_count > 0 未归零，
@@ -476,14 +491,27 @@ def validate_final_data(logger: logging.Logger | None = None) -> tuple[bool, int
     # 修复 issue #13（v1.4）: records_valid 改为 `is None` 判断，区分"meta 字段缺失/解析失败"
     #   （n_records_in_meta is None，豁免一致性校验）与"meta 声明记录数与流式统计不一致"
     #   （n_records_in_meta 为整数且与 records_count 不等，触发 warning）。
+    # 修复 issue #18（v1.5）: 增加最小有效样本量检查。
+    #   原 data_valid = rsi_valid_ratio >= 0.8 在 total_sample_count 远小于 1000 时
+    #   仍以同一比例阈值判定，小样本下 80% 的统计意义不足（如 5 条样本中 4 条有效=80%
+    #   即过线）。增加 MIN_SAMPLE_COUNT=100 下限：低于下限强制 data_valid=False 并
+    #   记录 warning，避免小数据集误判通过。
+    MIN_SAMPLE_COUNT = 100  # 最小有效样本量下限（统计上 80% 比例需 ≥100 样本支撑）
     days_valid = n_days >= N_DAYS * 0.9
-    data_valid = rsi_valid_ratio >= 0.8
+    sample_size_sufficient = total_sample_count >= MIN_SAMPLE_COUNT
+    data_valid = sample_size_sufficient and rsi_valid_ratio >= 0.8
     records_valid = n_records_in_meta is None or records_count == n_records_in_meta
     is_valid = days_valid and data_valid and records_valid
 
     if not days_valid:
         logger.warning("  ⚠ 交易日数不足 (%s/%s)", n_days, N_DAYS)
-    if not data_valid:
+    if not sample_size_sufficient:
+        logger.warning(
+            "  ⚠ 抽样样本量不足 (%s < %s)，统计意义不足，data_valid 强制置 False",
+            total_sample_count,
+            MIN_SAMPLE_COUNT,
+        )
+    elif not data_valid:
         logger.warning("  ⚠ 数据有效性不足 (RSI有效比例: %.1f%% < 80%%)", rsi_valid_ratio * 100)
     if not records_valid and n_records_in_meta is not None and n_records_in_meta > 0:
         logger.warning("  ⚠ 记录数不一致 (流式统计: %s, meta声明: %s)", records_count, n_records_in_meta)
@@ -573,6 +601,20 @@ def main() -> bool:
             time.sleep(MEMORY_PAUSE_SECONDS)
             mem_mb = get_memory_usage_mb()
             logger.info("  GC后内存: %s", get_memory_info_str())
+            # 修复 issue #17（v1.5）: 暂停后二次阈值检测，防止持续超限累积无上限等待。
+            #   原代码暂停 15s 后无条件继续，若进程驻留内存高于阈值（如全局缓存膨胀、
+            #   外部依赖泄漏），每批次都会触发 15s 暂停 + 5s 批次间 sleep，
+            #   N 个批次共计 (15+5)*N 秒空转。二次检测：仍超限则记录 logger.error 并
+            #   跳过当前批次（continue），不进入 fetch_batch_stocks，避免 OOM 风险叠加。
+            if mem_mb > MEMORY_THRESHOLD_MB:
+                logger.error(
+                    "  ✗ GC 后内存仍超阈值 (%.1fMB > %sMB)，跳过批次 %s/%s 防止 OOM",
+                    mem_mb,
+                    MEMORY_THRESHOLD_MB,
+                    batch_idx + 1,
+                    total_batches,
+                )
+                continue
 
         factor_df, return_df = fetch_batch_stocks(loader, stock_batch, batch_idx, total_batches, logger)
 
@@ -635,11 +677,19 @@ def main() -> bool:
         #   误判 is_valid=True。提前返回避免误报。
         factor_final_path = RESULT_DIR / "factor_data.json.gz"
         return_final_path = RESULT_DIR / "return_data.json.gz"
-        if not factor_final_path.exists() or not return_final_path.exists():
+        # 修复 issue #14（v1.5）: 缺失文件错误日志改打印路径与状态而非布尔值。
+        #   原日志 `factor=%s` 传 `factor_final_path.exists()`（bool），导致显示
+        #   `factor=True/False` 无法定位具体缺失路径。改为按路径+状态字符串打印，
+        #   便于定位（运维场景常见：路径前缀错配、磁盘只读、上游契约变更）。
+        factor_exists = factor_final_path.exists()
+        return_exists = return_final_path.exists()
+        if not factor_exists or not return_exists:
             logger.error(
-                "  ✗ 格式化最终输出失败：缺少输出文件 (factor=%s, return=%s)",
-                factor_final_path.exists(),
-                return_final_path.exists(),
+                "  ✗ 格式化最终输出失败：缺少输出文件 factor=%s [%s], return=%s [%s]",
+                factor_final_path,
+                "存在" if factor_exists else "缺失",
+                return_final_path,
+                "存在" if return_exists else "缺失",
             )
             return False
 

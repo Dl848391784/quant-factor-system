@@ -1,6 +1,6 @@
 # fetch_factor_cache.py 流程文档
 
-> 版本: v1.4
+> 版本: v1.5
 > 创建时间: 2026-05-26
 > 更新时间: 2026-06-15 北京时间
 
@@ -167,6 +167,12 @@ cache/factor_data/
 
 ## 版本历史
 
+- v1.5 (2026-06-15): 5 项可观测性、状态机健壮性与统计可靠性修复
+  - **缺失输出文件错误日志改路径+状态而非布尔值**（issue #14）：原 `logger.error("...factor=%s, return=%s", factor_final_path.exists(), return_final_path.exists())` 直接将 bool 作为占位符参数，日志显示 `factor=True/False` 无法定位具体缺失路径。修复：先取 `factor_exists`/`return_exists` bool 缓存避免双次 stat，日志改为 `factor=%s [存在/缺失], return=%s [存在/缺失]` 格式，参数传路径对象 + 中文状态字符串，便于运维场景（路径前缀错配、磁盘只读、上游契约变更）定位
+  - **meta 归零块 fall-through 取代 continue 处理 meta+data 同行紧凑格式**（issue #15）：原归零块末尾 `continue` 跳过本行剩余处理，但若归零行尾部还包含 `"data": [` 子串（合法 JSON 中 meta 与 data 同行的紧凑格式如 `{"meta":{...}, "data": [...`），DATA 阶段进入检测会被跳过，状态机永远停留 `in_meta=False / in_data=False` 初始态，后续所有 data 记录被当作普通行忽略，records_count=0。修复：归零块解析完成 + `in_meta=False` 后**移除 continue**，让控制流自然 fall-through 到下方守卫块 `if in_meta: continue`（此时 in_meta 已 False 不拦截）和 DATA 阶段进入检测 `if '"data": [' in stripped`。行为验证：紧凑格式 records_count 从 0 → 15000
+  - **fetch_batch_stocks combined 排序加 kind="mergesort"**（issue #16）：原 `combined.sort_values(["asset", "date"]).copy()` 使用默认 quicksort（不稳定），相同 (asset, date) 多行的相对顺序不确定，后续 `cumcount(ascending=False)` 截取 N_DAYS 行的结果在不同运行间不一致。修复：显式 `kind="mergesort"`，与下方 `valid_df.sort_values(..., kind="mergesort")`（issue #3 v1.1 已修复）保持一致，保证截取结果可重现
+  - **内存超阈值暂停后二次阈值检测**（issue #17）：原代码暂停 15s + GC 后无条件继续，若进程驻留内存高于阈值（全局缓存膨胀、外部依赖泄漏），每批次都触发 15s 暂停 + 5s 批次间 sleep，N 个批次共 (15+5)*N 秒空转且无上限告警。修复：暂停后重取 `mem_mb` 并增加 `if mem_mb > MEMORY_THRESHOLD_MB` 二次检测，仍超限则 `logger.error("✗ GC 后内存仍超阈值...跳过批次 N/M 防止 OOM")` + `continue` 跳过当前批次，不进入 fetch_batch_stocks，避免 OOM 风险叠加
+  - **validate_final_data 增加 MIN_SAMPLE_COUNT=100 最小样本量下限**（issue #18）：原 `data_valid = rsi_valid_ratio >= 0.8` 在 `total_sample_count` 远小于 1000 时仍以同一比例阈值判定，小样本下 80% 的统计意义不足（5 条样本中 4 条有效=80% 即过线）。修复：新增 `MIN_SAMPLE_COUNT = 100` 下限常量、`sample_size_sufficient = total_sample_count >= MIN_SAMPLE_COUNT` 判断、`data_valid = sample_size_sufficient and rsi_valid_ratio >= 0.8` 强制 False。warning 分支用 if/elif 互斥：样本量不足时只触发 `⚠ 抽样样本量不足` warning，不再触发 `⚠ 数据有效性不足` warning。注：抽样实际样本数 ≈ records_count / step（step=100），records_count 约 1 万条以上才能满足 ≥100 样本下限
 - v1.4 (2026-06-15): 3 项编号体系治理与状态机健壮性修复
   - **修复 issue 编号冲突彻底消除**（issue #11）：v1.1/v1.2/v1.3 各自独立编号导致 issue #4 在三轮修复中分别指代"模块顶层 mkdir 副作用"、"末批 sleep 条件化"、"内存超阈值 warning 加子批次编号"三个不同问题。即使 v1.3 已用 `(v1.2，末批 sleep)` / `(v1.3)` 文字消歧，仍属于"用文字掩盖根本编号冲突"。本轮在文件头 docstring 建立**全局编号索引**（v1.1=#1~#8、v1.2=#1~#3+#9+#5、v1.3=#1~#3+#10、v1.4=#11~#13），将 v1.2 末批 sleep 改为 issue #9、v1.3 内存超阈值 warning 改为 issue #10，编号全局唯一不重复，跨版本可追溯
   - **validate_final_data 阶段 A `brace_count<0` 异常分支拦截**（issue #12）：原阶段 A `brace_count = sub.count("{") - sub.count("}")` 后仅判断 `> 0` 与隐含 `== 0`，缺失负数分支。当 meta 起始行截取子串 `}` 多于 `{`（格式异常 JSON / 截断输入），负数会 fall-through 到阶段 B，后续每行被 `elif in_meta` 捕获并继续累计负数，永远无法归零收敛，整个文件剩余内容被当作 meta 行消费而跳过 DATA 阶段，records_count=0，validate 返回 False 但**日志无任何针对负数 brace_count 的警告**（静默失败）。修复：阶段 A 增加 `if brace_count < 0` 分支，记录 warning 并重置 `in_meta=False`/`meta_lines=[]`/`brace_count=0` 后 `continue`，确保后续 DATA 阶段仍可推进
