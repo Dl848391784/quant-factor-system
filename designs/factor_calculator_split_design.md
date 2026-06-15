@@ -1,9 +1,27 @@
 # Design: factor_calculator.py 拆分重构
 
-> 创建时间: 2026-06-15 (待补) 北京时间
+> 创建时间: 2026-06-15 北京时间
 > 作者: 云瑶
-> 状态: **待审核 (Design-First, 遵循 PROJECT.md / AGENTS.md "0. 开发流程" 中的 Design-First 流程)**
+> 状态: **✅ 已完成（PR-1 ~ PR-5 全部 commit，2026-06-15）**
 > 触发原因: AGENTS.md 任务粒度约束（≤3 文件 ≤200 行）+ 涉及 80+ 外部 import 点，必须先通过 design.md 审核
+
+---
+
+## 实施总览（2026-06-15 完成）
+
+| PR | commit | 范围 | 文件变化 |
+|----|--------|------|----------|
+| PR-1   | `4eddd51` | 包骨架（__init__/_common/_legacy） | 新增 3 / 删除 1 |
+| PR-2a  | `cf40539` | _common 抽 4 helper + 列名常量 | _common.py +~430 |
+| PR-2b  | `d7c3702` | basic.py（7 基础因子） | +569 |
+| PR-2c  | `6dc416b` | momentum.py（7 动量族因子） | +604 |
+| PR-3   | `6226de0` | delta.py + volume_price.py（4+4） | +174/+262 |
+| PR-4a  | `604c3ad` | industry.py（3 行业聚合 + 1 helper） | +295 |
+| PR-4b  | `20b9409` | industry_financial + fund_flow（5+6 含 I/O） | +429/+339 |
+| PR-5   | （本次）  | 清理 temporary/ 基线 + design 完成标记 | — |
+
+**最终态**：单文件 2779 行 → 9 文件包结构（30 公共 + 11 helper / ~3424 行）；
+22 指纹基线全程未漂移（panel_hash=`ecd3e754e9b348cd`）；80+ 处下游 import 零修改。
 
 ---
 
