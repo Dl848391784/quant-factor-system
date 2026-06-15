@@ -30,88 +30,37 @@
   v1.1 (2026-06-15): 强化结果校验、差异化 warning 提示、启动日志带版本号、摘要逐行输出
   v1.2 (2026-06-15): 补 ic_metrics 类型守卫、valid_days 缺失语义化、耗时记录、保留 FactorCalcError 异常链堆栈
   v1.3 (2026-06-15): _safe_dict 提到模块级纯函数、补 NaN/Inf 守卫、异常告警分级（ERROR vs CRITICAL）
+  v1.4 (2026-06-15): _safe_dict/_format_finite/DEFAULT_MIN_STOCKS 抽取至 factor_ic.common.cli_helpers，
+                     本文件改为引用公共 API，消除跨脚本重复实现
 """
 
 import argparse
-import math
 import sys
 import time
 from pathlib import Path
-from typing import Any
 
 
 sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
 
 from data_fetchers.factor_calculator import calculate_capital_flow_ratio_trend  # noqa: E402
+from factor_ic.common.cli_helpers import (  # noqa: E402
+    DEFAULT_MIN_STOCKS,
+    format_finite,
+    safe_dict,
+)
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic  # noqa: E402
 from factor_ic.common.logger_config import get_logger  # noqa: E402
 
 
 logger = get_logger(__name__)
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 
 class FactorCalcError(Exception):
     """因子计算业务异常"""
 
     pass
-
-
-# 与公共模块 factor_ic_runner.run_factor_ic_analysis 默认值保持一致（=10）。
-# 跨模块统一配置收归是独立任务，本文件不重复定义新值。
-DEFAULT_MIN_STOCKS = 10
-
-
-def _safe_dict(data: Any, *, field_name: str = "<unknown>") -> dict:
-    """将任意值安全归一化为 dict。
-
-    用于 main() 中处理公共模块返回的辅助字段（sample_stats/period/ic_distribution）：
-    - None → 空 dict（字段缺失，正常情况）
-    - dict → 原样返回
-    - 其他类型 → 空 dict + warning（结构异常但不致命）
-
-    设计为模块级纯函数（接收 data 参数而非闭包捕获 result），便于：
-    1. 单元测试独立调用
-    2. 跨脚本复用而不依赖调用方上下文
-
-    Args:
-        data: 待归一化的值（通常来自 result.get(key)）
-        field_name: 用于 warning 日志的字段名标识
-
-    Returns:
-        dict（可能为空），保证调用方可安全 .get()
-    """
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        logger.warning(f"返回字段 '{field_name}' 期望 dict|None，实际 {type(data).__name__}，已 fallback 为空字典")
-        return {}
-    return data
-
-
-def _format_finite(value: Any, fmt: str) -> str:
-    """格式化数值，非有限值（None/NaN/Inf/非数）统一返回 'N/A'。
-
-    用于摘要日志：避免 float('nan') / float('inf') 静默以 'nan'/'inf' 字面量
-    流入摘要日志和下游消费者。
-
-    Args:
-        value: 待格式化的值
-        fmt: 格式说明（如 '.4f', '.2%'）
-
-    Returns:
-        格式化字符串或 'N/A'
-    """
-    if value is None:
-        return "N/A"
-    if not isinstance(value, (int, float)):
-        return "N/A"
-    if isinstance(value, bool):  # bool 是 int 子类，单独排除
-        return "N/A"
-    if not math.isfinite(value):
-        return "N/A"
-    return format(value, fmt)
 
 
 def main():
@@ -164,23 +113,27 @@ def main():
     ic_metrics: dict = _ic_metrics_value
 
     # 辅助字段（sample_stats/period/ic_distribution）允许缺失或为 None，软 fallback 为空 dict。
-    # 调用模块级 _safe_dict() 纯函数，便于独立测试与跨脚本复用。
-    sample_stats = _safe_dict(result.get("sample_stats"), field_name="sample_stats")
-    period = _safe_dict(result.get("period"), field_name="period")
-    ic_distribution = _safe_dict(result.get("ic_distribution_consistency"), field_name="ic_distribution_consistency")
+    # 调用 factor_ic.common.cli_helpers.safe_dict 公共 API，便于跨脚本复用与独立单测。
+    sample_stats = safe_dict(result.get("sample_stats"), field_name="sample_stats", logger=logger)
+    period = safe_dict(result.get("period"), field_name="period", logger=logger)
+    ic_distribution = safe_dict(
+        result.get("ic_distribution_consistency"),
+        field_name="ic_distribution_consistency",
+        logger=logger,
+    )
 
     ic_mean = ic_metrics.get("ic_mean")
     ic_std = ic_metrics.get("ic_std")
     icir = ic_metrics.get("icir")
     positive_ratio = ic_distribution.get("positive_ratio")
 
-    # 格式化前用 _format_finite 统一守卫 None / NaN / Inf：
+    # 格式化前用 format_finite 统一守卫 None / NaN / Inf：
     # 公共模块在样本不足或除零时可能返回 float('nan')/float('inf')，
     # 直接 f-string 会输出 'nan'/'inf' 字面量污染摘要日志和下游消费者。
-    ic_mean_str = _format_finite(ic_mean, ".4f")
-    ic_std_str = _format_finite(ic_std, ".4f")
-    icir_str = _format_finite(icir, ".2f")
-    positive_ratio_str = _format_finite(positive_ratio, ".2%")
+    ic_mean_str = format_finite(ic_mean, ".4f")
+    ic_std_str = format_finite(ic_std, ".4f")
+    icir_str = format_finite(icir, ".2f")
+    positive_ratio_str = format_finite(positive_ratio, ".2%")
 
     # 摘要逐行输出，避免单条多行字符串在结构化日志系统中造成字段污染。
     logger.info("=" * 60)
