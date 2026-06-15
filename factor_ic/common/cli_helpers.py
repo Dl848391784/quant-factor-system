@@ -4,6 +4,7 @@ CLI 辅助公共模块 - 因子 IC 入口脚本通用工具
 
 为 30+ 个 factor_ic/ic_*.py 入口脚本提供统一的：
 - 公共模块返回结构归一化（safe_dict）
+- 数值有效性谓词（is_finite_value）
 - 数值格式化（含 NaN/Inf 守卫，format_finite）
 - 默认参数常量（DEFAULT_MIN_STOCKS）
 
@@ -28,16 +29,18 @@ CLI 辅助公共模块 - 因子 IC 入口脚本通用工具
 创建日期: 2026-06-15
 版本历史:
   v1.0 (2026-06-15): 从 ic_capital_flow_ratio_trend_1d.py 抽取，公开 API
+  v1.1 (2026-06-15): 新增 is_finite_value 谓词，让业务层 warning 判定与
+                     表示层 format_finite 解耦
 """
 
 from __future__ import annotations
 
 import logging
 import math
-from typing import Any
+from typing import Any, TypeGuard
 
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 
 # ========== 常量 ==========
@@ -89,12 +92,53 @@ def safe_dict(
         return {}
     if not isinstance(data, dict):
         if logger is not None:
-            logger.warning(
-                f"返回字段 '{field_name}' 期望 dict|None，"
-                f"实际 {type(data).__name__}，已 fallback 为空字典"
-            )
+            logger.warning(f"返回字段 '{field_name}' 期望 dict|None，实际 {type(data).__name__}，已 fallback 为空字典")
         return {}
     return data
+
+
+def is_finite_value(value: Any) -> TypeGuard[float]:
+    """判断值是否为合法有限数值（None/NaN/±Inf/非数/bool 均视为无效）。
+
+    用于因子 IC 入口脚本在格式化前后的业务判定（如 warning 触发条件，
+    或量纲范围校验），与 format_finite() 的内部判定逻辑完全等价，但暴露
+    为独立 TypeGuard 谓词以避免业务层依赖"格式化结果 == 'N/A'"这种
+    表示层耦合：若 format_finite 的 fallback 字符串改动，warning 不会失效。
+
+    返回值标注 TypeGuard[float] 让调用点的类型检查器（mypy/pyright）能
+    自动收窄分支内的 value 类型为 float，使 `value <= 1.0` 等数值比较合法。
+    （int 实例同样满足 `isinstance(x, (int, float))` 并能与 float 安全比较，
+    标注为 float 是 numerics 谓词的常见简化做法。）
+
+    Args:
+        value: 待判定的值
+
+    Returns:
+        True: value 是合法的有限 int/float（含 0、负数、极小值）
+        False: value 是 None / NaN / ±Inf / 非数值类型 / bool
+
+    Examples:
+        >>> is_finite_value(0.0)
+        True
+        >>> is_finite_value(None)
+        False
+        >>> is_finite_value(float("nan"))
+        False
+        >>> is_finite_value(float("inf"))
+        False
+        >>> is_finite_value("0.5")
+        False
+        >>> is_finite_value(True)
+        False
+    """
+    if value is None:
+        return False
+    # bool 是 int 子类，单独排除（业务上不应被当作数值）
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, (int, float)):
+        return False
+    return math.isfinite(value)
 
 
 def format_finite(value: Any, fmt: str) -> str:
@@ -135,14 +179,8 @@ def format_finite(value: Any, fmt: str) -> str:
         >>> format_finite(-0.05, ".2%")
         '-5.00%'
     """
-    if value is None:
-        return "N/A"
-    # bool 是 int 子类，单独排除（格式化 True/False 无业务意义）
-    if isinstance(value, bool):
-        return "N/A"
-    if not isinstance(value, (int, float)):
-        return "N/A"
-    if not math.isfinite(value):
+    # 复用 is_finite_value 谓词，避免判定逻辑双重维护。
+    if not is_finite_value(value):
         return "N/A"
     return format(value, fmt)
 

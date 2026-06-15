@@ -31,7 +31,9 @@
   v1.2 (2026-06-15): 补 ic_metrics 类型守卫、valid_days 缺失语义化、耗时记录、保留 FactorCalcError 异常链堆栈
   v1.3 (2026-06-15): _safe_dict 提到模块级纯函数、补 NaN/Inf 守卫、异常告警分级（ERROR vs CRITICAL）
   v1.4 (2026-06-15): _safe_dict/_format_finite/DEFAULT_MIN_STOCKS 抽取至 factor_ic.common.cli_helpers，
-                     本文件改为引用公共 API，消除跨脚本重复实现
+                     公共 API 命名去下划线前缀（safe_dict/format_finite），消除跨脚本重复实现
+  v1.5 (2026-06-15): warning 判定改用 is_finite_value 谓词（解耦表示层 "N/A" 字符串）；
+                     positive_ratio 加 [0,1] 量纲范围校验；FactorCalcError 迁至 factor_ic.common.exceptions
 """
 
 import argparse
@@ -46,21 +48,17 @@ from data_fetchers.factor_calculator import calculate_capital_flow_ratio_trend  
 from factor_ic.common.cli_helpers import (  # noqa: E402
     DEFAULT_MIN_STOCKS,
     format_finite,
+    is_finite_value,
     safe_dict,
 )
+from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic  # noqa: E402
 from factor_ic.common.logger_config import get_logger  # noqa: E402
 
 
 logger = get_logger(__name__)
 
-__version__ = "1.4.0"
-
-
-class FactorCalcError(Exception):
-    """因子计算业务异常"""
-
-    pass
+__version__ = "1.5.0"
 
 
 def main():
@@ -127,6 +125,19 @@ def main():
     icir = ic_metrics.get("icir")
     positive_ratio = ic_distribution.get("positive_ratio")
 
+    # positive_ratio 量纲约定（来源: factor_ic.common.ic_calculator:722
+    # `positive_ratio = positive_count / n`）：必须为 [0, 1] 之间的小数。
+    # 此处作防御性范围校验：若公共模块契约变更（误返回 0–100 整数百分比），
+    # `.2%` 格式化结果会变成 "5230.00%" 等明显错误值且无任何告警。
+    # 落在 [0, 1] 之外时降级为 None，让下方 format_finite/is_finite_value 链
+    # 触发统一的"无效"warning，避免静默错误。
+    if is_finite_value(positive_ratio) and not (0.0 <= positive_ratio <= 1.0):
+        logger.warning(
+            f"positive_ratio={positive_ratio} 超出预期范围 [0, 1]，"
+            "可能是公共模块返回量纲变更（应为 0–1 小数）；本次摘要按 'N/A' 处理"
+        )
+        positive_ratio = None
+
     # 格式化前用 format_finite 统一守卫 None / NaN / Inf：
     # 公共模块在样本不足或除零时可能返回 float('nan')/float('inf')，
     # 直接 f-string 会输出 'nan'/'inf' 字面量污染摘要日志和下游消费者。
@@ -150,17 +161,19 @@ def main():
     logger.info(f"IC>0 占比: {positive_ratio_str}")
 
     # 字段级差异化提示，提升运维可观测性。
-    # 用 _format_finite 的判定结果（== "N/A"）统一覆盖 None/NaN/Inf/非数四种异常，
-    # 避免 NaN 静默通过 `is None` 守卫流入下游。
-    if ic_mean_str == "N/A":
+    # 用 is_finite_value 谓词基于原始值判定（None/NaN/±Inf/非数/bool 均视为无效），
+    # 避免 warning 依赖 format_finite 的字符串 fallback（"N/A"）—— 若公共模块表示层
+    # 字符串改动，业务告警不会失效。
+    if not is_finite_value(ic_mean):
         logger.warning("本次计算 IC 均值无效（None/NaN/Inf）：因子-收益对齐后样本不足或全部 NaN，请检查数据源覆盖范围")
-    if ic_std_str == "N/A":
+    if not is_finite_value(ic_std):
         logger.warning("IC 标准差无效（None/NaN/Inf）：因子值方差为零（全部相同）或截面样本不足，请检查因子计算逻辑")
-    if icir_str == "N/A":
+    if not is_finite_value(icir):
         logger.warning("ICIR 无效（None/NaN/Inf）：IC 标准差为零导致除零，或 IC 序列长度不足，请检查回测窗口")
-    if positive_ratio_str == "N/A":
+    if not is_finite_value(positive_ratio):
         logger.warning(
-            "IC>0 占比无效（None/NaN/Inf）：公共模块未输出 ic_distribution_consistency 字段或值非有限，请核对模块版本"
+            "IC>0 占比无效（None/NaN/Inf 或量纲越界）：公共模块未输出 ic_distribution_consistency 字段、"
+            "值非有限，或返回值不在预期 [0, 1] 范围内（详见上文 positive_ratio 范围校验日志），请核对模块版本"
         )
 
     elapsed = time.monotonic() - start_time
