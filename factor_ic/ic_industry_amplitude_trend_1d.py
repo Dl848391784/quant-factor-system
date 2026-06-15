@@ -32,6 +32,7 @@ from data_fetchers.factor_calculator import calculate_industry_amplitude_trend  
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS  # noqa: E402
 from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic  # noqa: E402
+from factor_ic.common.factor_summary_logger import log_factor_summary  # noqa: E402
 from factor_ic.common.logger_config import get_logger  # noqa: E402
 
 
@@ -64,45 +65,8 @@ def main():
     if result is None:
         raise FactorCalcError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
 
-    ic_metrics = result.get("ic_metrics") or {}
-    sample_stats = result.get("sample_stats") or {}
-    period = result.get("period") or {}
-    ic_distribution = result.get("ic_distribution_consistency") or {}
-
-    ic_mean = ic_metrics.get("ic_mean")
-    ic_std = ic_metrics.get("ic_std")
-    icir = ic_metrics.get("icir")
-    positive_ratio = ic_distribution.get("positive_ratio")
-
-    ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
-    ic_std_str = f"{ic_std:.4f}" if ic_std is not None else "N/A"
-    icir_str = f"{icir:.2f}" if icir is not None else "N/A"
-    positive_ratio_str = f"{positive_ratio:.2%}" if positive_ratio is not None else "N/A"
-
-    summary_lines = [
-        "=" * 60,
-        "结果摘要",
-        "=" * 60,
-        f"因子名称: {result.get('factor_name', 'unknown')}",
-        f"更新模式: {result.get('update_mode', 'unknown')}",
-        f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}",
-        f"有效天数: {sample_stats.get('valid_days', 0)} 天",
-        "--- IC指标 ---",
-        f"IC 均值: {ic_mean_str}",
-        f"IC 标准差: {ic_std_str}",
-        f"ICIR: {icir_str}",
-        f"IC>0 占比: {positive_ratio_str}",
-    ]
-    logger.info("\n%s", "\n".join(summary_lines))
-
-    if ic_mean is None:
-        logger.warning("本次计算 IC 均值为空，请检查数据源")
-    if ic_std is None:
-        logger.warning("IC 标准差无法计算，请检查因子数据分布")
-    if icir is None:
-        logger.warning("ICIR 无法计算，请检查因子数据分布")
-    if positive_ratio is None:
-        logger.warning("IC>0 占比无法获取，请检查公共模块输出结构")
+    # 输出 IC 摘要 + None 状态整合告警（公共模块,M3.1）
+    log_factor_summary(result, "行业振幅趋势因子", logger)
 
     logger.info("行业振幅趋势因子IC计算完成")
     return result
