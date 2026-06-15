@@ -27,7 +27,7 @@ KDJ_J 因子 IC 计算器 - 使用公共模块主入口
   v1.0 (2026-04-07): 初始版本，独立实现 KDJ_J 因子 IC 计算
   v2.0 (2026-05-27): 重构，使用 run_complex_factor_ic 公共模块
   v2.1 (2026-06-08):
-    - 新增自定义异常类 FactorCalcError（区分业务失败与非预期 RuntimeError）
+    - 引入外部自定义异常类 FactorCalcError（区分业务失败与非预期 RuntimeError，定义在 factor_ic.common.exceptions）
     - 新增 result 为 None 防御性检查
     - 修正 positive_ratio 取值位置（从 ic_distribution_consistency 子字典）
     - 结果摘要合并为单条日志输出
@@ -35,6 +35,11 @@ KDJ_J 因子 IC 计算器 - 使用公共模块主入口
     - "计算完成"日志移至结果处理末尾
     - argparse 导入移至文件顶部（遵循 PEP 8）
     - 代码量注释更新（~186行，反映实际行数）
+  v2.2 (2026-06-15):
+    - 删除冗余空注释块（自定义异常类分隔块本无内容）
+    - 去除 ic_distribution 注释中硬编码的 MODULE.md 行号（改引用语义）
+    - 合并四条 None 告警为单条汇总 warning（消除与结果摘要 N/A 的信息重复）
+    - 在 main() docstring 显式声明异常契约与返回值，消除函数签名歧义
 """
 
 import argparse
@@ -70,15 +75,27 @@ from factor_ic.common.logger_config import get_logger
 logger = get_logger(__name__)
 
 # ============================================================================
-# 自定义异常类
-# ============================================================================
-# ============================================================================
 # CLI 入口
 # ============================================================================
 
 
 def main():
-    """CLI 主入口"""
+    """KDJ_J 因子 IC 计算 CLI 主入口
+
+    Returns
+    -------
+    dict
+        run_complex_factor_ic 的完整结果字典（成功路径下保证非 None）。
+
+    Raises
+    ------
+    FactorCalcError
+        result 为 None 时抛出，表示数据加载或公共模块计算失败（业务异常）。
+        作为函数被外部模块导入调用时，调用方需自行处理本异常；
+        作为脚本（``python ic_kdj_j_1d.py``）运行时，由 ``__main__`` 块捕获并 ``sys.exit(1)``。
+    Exception
+        其他未预期异常会原样向上传播，不在本函数内吞掉。
+    """
     parser = argparse.ArgumentParser(description="KDJ_J IC 计算器")
     parser.add_argument("--force-full", action="store_true", help="强制全量计算")
     parser.add_argument("--n", type=int, default=DEFAULT_N, help="RSV 计算周期")
@@ -118,7 +135,7 @@ def main():
     ic_metrics = result.get("ic_metrics") or {}
     sample_stats = result.get("sample_stats") or {}
     period = result.get("period") or {}
-    # 字段名来源于 MODULE.md 第56行输出结构模板
+    # 字段名来源于 MODULE.md 输出结构模板章节（ic_distribution_consistency）
     ic_distribution = result.get("ic_distribution_consistency") or {}
 
     # 构建结果摘要（合并为单条日志便于阅读）
@@ -150,15 +167,22 @@ def main():
     ]
     logger.info("\n%s", "\n".join(summary_lines))
 
-    # 异常状态告警（运维巡检用，四字段均需告警）
-    if ic_mean is None:
-        logger.warning("本次计算 IC 均值为空，请检查数据源")
-    if ic_std is None:
-        logger.warning("IC 标准差无法计算，请检查因子数据分布")
-    if icir is None:
-        logger.warning("ICIR 无法计算，请检查因子数据分布")
-    if positive_ratio is None:
-        logger.warning("IC>0 占比无法获取，请检查公共模块输出结构")
+    # 异常状态告警（运维巡检用）：摘要中已用 N/A 显式呈现，此处仅在存在缺失字段时输出一条汇总，避免与摘要逐字段重复
+    missing_fields = [
+        name
+        for name, value in (
+            ("ic_mean", ic_mean),
+            ("ic_std", ic_std),
+            ("icir", icir),
+            ("positive_ratio", positive_ratio),
+        )
+        if value is None
+    ]
+    if missing_fields:
+        logger.warning(
+            "本次计算存在空值字段: %s，请检查数据源 / 因子分布 / 公共模块输出结构",
+            ", ".join(missing_fields),
+        )
 
     # 确认结果处理完成后才输出"计算完成"日志
     logger.info("KDJ_J因子IC计算完成")

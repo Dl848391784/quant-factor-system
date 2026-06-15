@@ -22,6 +22,12 @@
 重构日期: 2026-05-27（因子计算逻辑迁移到 factor_calculator.py）
 原版作者: 云舟
 原版日期: 2026-04-07
+版本历史:
+  v1.0 (2026-04-07): 初始版本，独立实现布林带%B 因子 IC 计算
+  v2.0 (2026-05-27): 重构，使用 run_complex_factor_ic 公共模块
+  v2.1 (2026-06-15):
+    - 完善 None 字段 warning 为四字段汇总单条（仅在有缺失字段时输出，避免与摘要 N/A 重复）
+    - 在 main() docstring 显式声明异常契约与返回值，消除函数签名歧义
 """
 
 import argparse
@@ -52,7 +58,22 @@ logger = get_logger(__name__)
 
 
 def main():
-    """CLI 主入口"""
+    """布林带%B 因子 IC 计算 CLI 主入口
+
+    Returns
+    -------
+    dict
+        run_complex_factor_ic 的完整结果字典（成功路径下保证非 None）。
+
+    Raises
+    ------
+    FactorCalcError
+        result 为 None 时抛出，表示数据加载或公共模块计算失败（业务异常）。
+        作为函数被外部模块导入调用时，调用方需自行处理本异常；
+        作为脚本（``python ic_bollinger_pb_1d.py``）运行时，由 ``__main__`` 块捕获并 ``sys.exit(1)``。
+    Exception
+        其他未预期异常会原样向上传播，不在本函数内吞掉。
+    """
     parser = argparse.ArgumentParser(description="布林带%B IC 计算器")
     parser.add_argument("--force-full", action="store_true", help="强制全量计算")
     parser.add_argument("--n", type=int, default=DEFAULT_N, help="移动平均周期")
@@ -120,9 +141,22 @@ def main():
     ]
     logger.info("\n%s", "\n".join(summary_lines))
 
-    # ic_mean 为 None 时额外输出 warning，便于告警系统捕获异常运行
-    if ic_mean is None:
-        logger.warning("本次计算 IC 均值为空，请检查数据源")
+    # 异常状态告警（运维巡检用）：摘要中已用 N/A 显式呈现，此处仅在存在缺失字段时输出一条汇总，避免与摘要逐字段重复
+    missing_fields = [
+        name
+        for name, value in (
+            ("ic_mean", ic_mean),
+            ("ic_std", ic_std),
+            ("icir", icir),
+            ("positive_ratio", positive_ratio),
+        )
+        if value is None
+    ]
+    if missing_fields:
+        logger.warning(
+            "本次计算存在空值字段: %s，请检查数据源 / 因子分布 / 公共模块输出结构",
+            ", ".join(missing_fields),
+        )
 
     # 确认结果处理完成后才输出"计算完成"日志（避免中途失败造成误导）
     logger.info("布林带%B因子IC计算完成")
