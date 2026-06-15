@@ -3,7 +3,7 @@
 布林带%B 因子 IC 计算器 - 使用公共模块主入口
 
 遵循 PROJECT.md 公共模块强制复用规范：
-- 主流程使用 run_complex_factor_ic()（禁止手写三模式分支）
+- 主流程使用 run_factor_ic()（禁止手写三模式分支）
 - 因子计算逻辑复用 data_fetchers.factor_calculator（遵循 MODULE.md 约束 #3）
 
 代码量：~60行（仅 CLI 入口），因子计算逻辑已统一到 factor_calculator.py。
@@ -24,7 +24,7 @@
 原版日期: 2026-04-07
 版本历史:
   v1.0 (2026-04-07): 初始版本，独立实现布林带%B 因子 IC 计算
-  v2.0 (2026-05-27): 重构，使用 run_complex_factor_ic 公共模块
+  v2.0 (2026-05-27): 重构，使用 run_factor_ic 公共模块
   v2.1 (2026-06-15):
     - 完善 None 字段 warning 为四字段汇总单条（仅在有缺失字段时输出，避免与摘要 N/A 重复）
     - 在 main() docstring 显式声明异常契约与返回值，消除函数签名歧义
@@ -68,10 +68,10 @@ SPEC = register_factor(
     FactorSpec(
         factor_name="bollinger_pb",
         factor_col="bollinger_pb",
-        required_columns=JOIN_KEYS + ("close", "bollinger_pb"),
+        required_columns=JOIN_KEYS + ("close",),
         calculation=calculate_bollinger_pb,
-        calc_params_fn=lambda a: {"n": a.n, "k": a.k},
-        extra_log_params_fn=lambda a: {"n": a.n, "k": a.k},
+        calc_params_fn=(_params_fn := lambda a: {"n": a.n, "k": a.k}),
+        extra_log_params_fn=_params_fn,
     )
 )
 # ============================================================================
@@ -85,7 +85,7 @@ def main():
     Returns
     -------
     dict
-        run_complex_factor_ic 的完整结果字典（成功路径下保证非 None）。
+        run_factor_ic 的完整结果字典（成功路径下保证非 None）。
 
     Raises
     ------
@@ -122,12 +122,13 @@ def main():
     ic_metrics = result.get("ic_metrics") or {}
     sample_stats = result.get("sample_stats") or {}
     period = result.get("period") or {}
+    ic_distribution_consistency = result.get("ic_distribution_consistency") or {}
 
     # 构建结果摘要（单次输出保证并发场景下日志原子性）
     ic_mean = ic_metrics.get("ic_mean")
     ic_std = ic_metrics.get("ic_std")
     icir = ic_metrics.get("icir")
-    positive_ratio = result.get("ic_distribution_consistency", {}).get("positive_ratio")
+    positive_ratio = ic_distribution_consistency.get("positive_ratio")
 
     # 格式化各字段（None 时显示 N/A）
     ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
@@ -143,7 +144,7 @@ def main():
         f"更新模式: {result.get('update_mode', 'unknown')}",
         f"计算参数: n={args.n}, k={args.k}",
         f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}",
-        f"有效天数: {sample_stats.get('valid_days', 0)} 天",
+        f"有效天数: {sample_stats.get('valid_days', 'N/A')} 天",
         "--- IC指标 ---",
         f"IC 均值: {ic_mean_str}",
         f"IC 标准差: {ic_std_str}",
@@ -180,7 +181,7 @@ if __name__ == "__main__":
         main()
     except FactorCalcError as e:
         # 业务异常：消息已足够定位，堆栈是噪音（MODULE.md M22 业务异常子类规则）
-        logger.error("布林带%%B因子IC计算失败: %s", e)
+        logger.error("布林带%B因子IC计算失败: %s", e)
         sys.exit(1)
     except Exception:
         # 未预期异常：必须打印堆栈以便定位
