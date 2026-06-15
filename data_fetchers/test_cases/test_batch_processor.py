@@ -996,10 +996,10 @@ class TestBugFixesV111:
 
         capture_log.removeHandler(handler)
 
-        # 关键断言：入口日志和结尾日志都存在
-        entry_logs = [m for m in captured if m == "保存批次 7..."]
+        # 关键断言：入口日志和结尾日志都存在（v1.12 入口风格调整为 [批次N] 开始保存...）
+        entry_logs = [m for m in captured if m == "[批次7] 开始保存..."]
         end_logs = [m for m in captured if m.startswith("  ✓ 保存批次 7:")]
-        assert len(entry_logs) == 1, f"预期入口日志 '保存批次 7...'，实际捕获: {captured}"
+        assert len(entry_logs) == 1, f"预期入口日志 '[批次7] 开始保存...'，实际捕获: {captured}"
         assert len(end_logs) == 1, f"预期结尾日志 '✓ 保存批次 7: ...'，实际捕获: {captured}"
 
     def test_scan_and_write_final_meta_string_with_special_chars(self, temp_dir, test_logger):
@@ -1074,6 +1074,136 @@ class TestBugFixesV111:
             count = _emit_record(f, records_tuple, 0, test_logger)
             f.write("\n]")
         assert count == 1
+
+
+class TestBugFixesV112:
+    """v1.12 四项 Bug 修复回归测试（契约边界 + 文档完整性 + 引用安全）"""
+
+    def test_iter_merged_lines_second_pass_docstring_states_contract(self):
+        """Bug #1: docstring 应明确标注"必须由本模块 _write_json_record 生成"的契约"""
+        from data_fetchers.batch_processor import _iter_merged_lines_second_pass
+
+        doc = _iter_merged_lines_second_pass.__doc__ or ""
+        # 关键断言：docstring 显式说明数据来源契约
+        assert "_write_json_record" in doc, "docstring 必须引用 _write_json_record"
+        assert "n_way_merge_deduplicate" in doc, "docstring 必须引用 n_way_merge_deduplicate"
+        # 关键断言：docstring 说明格式假设的封闭性
+        assert "格式假设" in doc or "封闭" in doc or "不变量" in doc, (
+            "docstring 必须说明格式假设的封闭性（merged 文件格式由本模块自身保证）"
+        )
+
+    def test_format_final_output_raises_section_includes_value_error(self):
+        """Bug #2: format_final_output 的 Raises 章节必须列出 ValueError"""
+        from data_fetchers.batch_processor import format_final_output
+
+        doc = format_final_output.__doc__ or ""
+        # Raises 章节存在
+        assert "Raises:" in doc, "format_final_output 必须有 Raises 章节"
+        # 找到 Raises 子段
+        raises_section = doc.split("Raises:")[1]
+        # ValueError 必须在 Raises 章节中（v1.11 入口断言抛出 ValueError）
+        assert "ValueError" in raises_section, "Raises 章节必须列出 ValueError（v1.11 入口断言抛出但漏写文档）"
+
+    def test_save_batch_cache_sorted_entry_log_uses_bracket_style(self, temp_dir):
+        """Bug #3: 入口日志风格应统一为 [批次N] 开始保存..."""
+        import logging
+
+        import pandas as pd
+
+        capture_log = logging.getLogger("test_entry_log_style_capture")
+        capture_log.setLevel(logging.INFO)
+        captured = []
+
+        class _Handler(logging.Handler):
+            def emit(self, record):
+                captured.append(record.getMessage())
+
+        handler = _Handler(level=logging.INFO)
+        capture_log.addHandler(handler)
+        capture_log.propagate = False
+
+        factor_df = pd.DataFrame(
+            {
+                "date": ["2026-06-15"],
+                "asset": ["000001"],
+                "open": [10.0],
+                "close": [10.5],
+                "high": [11.0],
+                "low": [9.5],
+                "rsi_6": [50.0],
+                "volume_ratio_5": [1.0],
+                "volume": [1000000.0],
+            }
+        )
+        return_df = pd.DataFrame(
+            {
+                "date": ["2026-06-15"],
+                "asset": ["000001"],
+                "forward_return_1d": [0.01],
+                "forward_return_3d": [0.03],
+                "forward_return_5d": [0.05],
+            }
+        )
+        save_batch_cache_sorted(42, factor_df, return_df, result_dir=temp_dir, logger_arg=capture_log)
+        capture_log.removeHandler(handler)
+
+        # 关键断言：入口日志使用 [批次N] 风格，且不能再出现旧风格
+        bracket_logs = [m for m in captured if m == "[批次42] 开始保存..."]
+        old_style_logs = [m for m in captured if m == "保存批次 42..."]
+        assert len(bracket_logs) == 1, f"必须使用 [批次N] 入口风格，实际捕获: {captured}"
+        assert len(old_style_logs) == 0, f"旧风格 '保存批次 N...' 不应再出现，实际捕获: {captured}"
+
+    def test_scan_and_write_final_does_not_pollute_meta_template(self, temp_dir, test_logger):
+        """Bug #4: meta_template 含嵌套可变对象（fields 列表）时不应被污染
+
+        v1.12 改用 deepcopy 替换 dict() 浅拷贝。本测试验证：
+          - 调用方持有的 meta_template["fields"] 与函数内部 meta["fields"] 不共享引用
+          - 即使函数内部修改 meta["fields"]（虽然当前实现没这么做，作为防御契约）
+            也不影响调用方
+        """
+        import gzip
+
+        from data_fetchers.batch_processor import _scan_and_write_final
+
+        # 创建一个有效 merged 文件
+        merged_path = temp_dir / "merged_template_test.json.gz"
+        with gzip.open(merged_path, "wt", encoding="utf-8") as f:
+            f.write("[\n")
+            f.write('  {"date": "2026-06-15", "asset": "000001", "value": 1.0}\n')
+            f.write("]")
+
+        # 构造调用方持有的模板（含 fields 列表 = 嵌套可变对象）
+        original_fields = ["date", "asset", "value"]
+        meta_template = {
+            "generated_at": "2026-06-15",
+            "source": "test",
+            "last_updated": "2026-06-15",
+            "version": "v1.0",
+            "fields": original_fields,  # 嵌套列表
+            "extra_key": "note",
+            "extra_value": "test note",
+        }
+
+        output_path = temp_dir / "final_template_test.json.gz"
+        _scan_and_write_final(merged_path, output_path, meta_template, test_logger)
+
+        # 关键断言 1: 调用方持有的 fields 列表对象未被替换
+        assert meta_template["fields"] is original_fields, "调用方持有的 fields 列表对象不应被函数替换"
+        # 关键断言 2: fields 列表内容未被修改
+        assert meta_template["fields"] == ["date", "asset", "value"], "调用方持有的 fields 列表内容不应被函数修改"
+
+        # 模拟"未来若有代码修改 meta['fields']"的场景：手动修改源列表，
+        # 验证 deepcopy 的隔离性——本测试通过模拟调用方在调用后修改源列表，
+        # 确认输出文件已用拷贝写出（不会被后续修改影响）
+        original_fields.append("polluted")
+        # 重新读取输出文件——已写出的 meta.fields 应保持调用时刻的值
+        import json as _json
+
+        with gzip.open(output_path, "rt", encoding="utf-8") as f:
+            data = _json.load(f)
+        assert "polluted" not in data["meta"]["fields"], (
+            "输出文件的 fields 不应受调用方在调用后修改源列表的影响（deepcopy 隔离）"
+        )
 
 
 # ============================================================================

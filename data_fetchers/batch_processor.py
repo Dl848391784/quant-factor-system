@@ -81,11 +81,17 @@
     - `_scan_and_write_final` 写 meta 时所有字符串字段（generated_at/source/last_updated/version/extra_key）统一用 `json.dumps(..., ensure_ascii=False)` 序列化，避免值含双引号/反斜杠/控制字符时破坏 JSON 结构（与 fields_json/extra_json 的处理方式保持一致）
     - `format_final_output` 入口处增加 `factor_merged_path == return_merged_path` 显式断言（抛 ValueError），避免两路径相同时 finally 块对同一文件做两次 unlink + `_scan_and_write_final` 写两个不同 schema 输出的隐式依赖
     - `_emit_record` 类型注解从 `list[tuple[int, dict]]` 改为 `Sequence[tuple[int, dict]]`，与 v1.10 docstring "只读使用" 语义对齐——`list` 类型暗示调用方可修改、`Sequence` 明确只读契约；`from collections.abc import Generator` 同步增补 `Sequence`
+- v1.12 (2026-06-15): 第十三轮 Bug 修复（契约边界 + 文档完整性 + 引用安全）
+    - `_iter_merged_lines_second_pass` docstring 重写：`merged_path` 参数显式标注"必须由本模块 `_write_json_record` + `n_way_merge_deduplicate` 生成"；新增"格式假设的封闭性"章节明确两条不变量（行末分隔符固定 `,\\n` + 字段值逗号必在双引号内），并说明本模块对外不导出 merged schema 给第三方，是凭 `endswith(",")` 而非 `json.loads` 判定的根本原因；添加格式变更时的同步审视提示
+    - `format_final_output` Raises 章节补充 `ValueError`（v1.11 入口断言抛出但漏写文档），与函数实际抛出的异常类型保持一致
+    - `save_batch_cache_sorted` 入口日志风格统一：从 `"保存批次 %s..."` 改为 `"[批次%s] 开始保存..."`，与 `n_way_merge_deduplicate` 的 `"[%s] 开始 N-way merge..."` 风格对齐——顶层入口日志不缩进、子步骤两空格缩进；同时避免与末尾 `"✓ 保存批次 N: ..."` 字面重复造成日志读阅歧义
+    - `_scan_and_write_final` 改用 `copy.deepcopy(meta_template)` 替换 `dict(meta_template)`：meta_template 含嵌套可变对象（如 fields 列表），浅拷贝下 `meta["fields"]` 与调用方持有的模板共享引用，未来若有代码修改 `meta["fields"]` 会污染模板；deepcopy 拷贝深度有限（meta 仅 1-2 层嵌套），性能开销可忽略；模块顶部增补 `import copy`
 
 作者: 云瑶
 创建日期: 2026-05-27
 """
 
+import copy
 import gc
 import gzip
 import heapq
@@ -168,7 +174,9 @@ def _iter_merged_lines_second_pass(merged_path: Path) -> Generator[str, None, No
     """轻量流式迭代合并文件的有效 JSON 行（不解析为 dict），仅供 `_scan_and_write_final` 第二遍写出使用。
 
     Args:
-        merged_path: 合并文件路径
+        merged_path: 合并文件路径——**必须**由本模块的 `_write_json_record` + `n_way_merge_deduplicate`
+            生成（即标准的 merged_factor.json.gz / merged_return.json.gz 格式）。
+            外部来源或手工编辑的 JSON 文件**不在契约保护范围内**。
 
     Yields:
         str: 与 `_iter_merged_records` 第一遍解析时返回的 line_content 完全一致的字符串
@@ -182,25 +190,16 @@ def _iter_merged_lines_second_pass(merged_path: Path) -> Generator[str, None, No
         本函数仅做行过滤+逗号剥离，**完全跳过 JSON 解析**——这是与第一遍的关键性能差异，
         也是命名 "lines" 而非 "records" 的语义体现。
 
-        **对称性保证（与 `_iter_merged_records` 行为一致）**：
-        第一遍 `_iter_merged_records` 的 line_content 在两段式判定中：
-          - `json.loads(stripped)` 成功 → yield stripped（保留原行末逗号）
-          - 失败时尝试 `json.loads(stripped[:-1])` 成功 → yield stripped[:-1]（剥逗号）
-        第二遍这里**不能凭 endswith(",") 无条件剥离**——若字段值末尾本身带逗号且整行
-        不带尾逗号，stripped 原样可解析、第一遍 yield 的是 stripped，第二遍若剥末位
-        字符就会破坏内容。
-        正确做法：仅当行末是 "," 时尝试剥离（merged 数组分隔符固定写为 ",\\n"），
-        但必须配合"第一遍是否真的剥过"判定——直接信任第一遍结果即可：
+        **格式假设的封闭性**：本函数依赖 merged 文件由 `_write_json_record` 生成的两条不变量：
+          - 每条记录单行 + 行末紧跟 ",\\n" 作为数组分隔符（最后一条无尾逗号）
+          - JSON 字段值中的逗号位于双引号内、行末分隔逗号位于双引号外，位置上不混淆
 
-          - 数组分隔符的尾逗号：第一遍 stripped 的 `json.loads` 失败、剥逗号成功，
-            yield stripped[:-1]；这里同样剥末尾逗号即可保持字节一致。
-          - 字段值末尾的真逗号：第一遍 stripped 原样 `json.loads` 成功，yield stripped；
-            但这种行不会有"行末分隔逗号"——因为合并文件由 `_write_json_record` 生成，
-            分隔符固定 ",\\n"，不会与字段值的逗号混淆位置（字段值的逗号在引号内、
-            行末分隔逗号在引号外）。
+        这两条不变量由 `_write_json_record`（写入端）+ `n_way_merge_deduplicate`（合并端）
+        共同保证，**且本模块对外不导出 merged 文件的 schema 给第三方**——这是函数可以
+        安全凭 `endswith(",")` 而非 `json.loads` 判定的根本原因。
 
-        **结论**：merged 文件由本模块自己生成，行末逗号唯一来源是数组分隔符；
-        本函数可安全凭 `stripped.endswith(",")` 决定剥离，无需任何 json.loads 校验。
+        若未来 merged 文件格式变更（如改为 NDJSON、引入多行格式、允许字段值包含未转义换行），
+        必须同步审视本函数的剥离逻辑。
 
         过滤规则：
         - 行首不是 "{" 的跳过（数组括号、空行等）
@@ -324,7 +323,11 @@ def _scan_and_write_final(
     del asset_set
 
     # 组装最终 meta（扫描结果 + 调用方提供的固定字段）
-    meta = dict(meta_template)
+    # v1.12: 改用 deepcopy 而非 dict()——meta_template 含嵌套可变对象（如 fields 列表），
+    # 浅拷贝下 meta["fields"] 与 meta_template["fields"] 仍指向同一列表，
+    # 后续若有代码修改 meta["fields"] 会污染调用方持有的模板对象。
+    # deepcopy 拷贝深度有限（meta 仅 1-2 层嵌套），性能开销可忽略。
+    meta = copy.deepcopy(meta_template)
     meta.update(
         {
             "n_days": n_days,
@@ -578,9 +581,10 @@ def save_batch_cache_sorted(
     _logger = logger_arg or logging.getLogger(__name__)
     _result_dir = result_dir or RESULT_DIR
 
-    # 入口日志：明确"开始"边界，与函数末尾的"✓ 保存批次 N: ..."形成首尾呼应，
-    # 调用方在日志流中可直接看到第几批次正在写入（而非只看到子步骤"保存因子数据"）
-    _logger.info("保存批次 %s...", batch_idx)
+    # 入口日志：用 `[批次N] 开始保存...` 标记区分起止边界，避免与末尾
+    # `  ✓ 保存批次 N: ...` 字面重复；同时与本模块 `n_way_merge_deduplicate`
+    # 的 `[%s] 开始 N-way merge...` 风格一致——顶层入口日志不缩进、子步骤两空格缩进
+    _logger.info("[批次%s] 开始保存...", batch_idx)
 
     factor_path = _result_dir / f"batch_{batch_idx}_factor.json.gz"
     return_path = _result_dir / f"batch_{batch_idx}_return.json.gz"
@@ -851,6 +855,8 @@ def format_final_output(
         ... )  # 输出 factor_data.json.gz 和 return_data.json.gz
 
     Raises:
+        ValueError: factor_merged_path 与 return_merged_path 路径相同（v1.11 新增前置契约：
+            因子和收益是不同字段集的配套数据，必须由独立的 merged 文件写出）
         FileNotFoundError: merged 文件不存在
         json.JSONDecodeError: merged 文件 JSON 解析失败
     """
