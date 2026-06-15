@@ -774,11 +774,16 @@ except FileNotFoundError as e:
 
 ---
 
-## M22. CLI 用 `logger.exception` 保留堆栈
+## M22. CLI 异常按类别选择 `logger.error` 或 `logger.exception`
 
-**What**:CLI 入口的 except 块用 `logger.exception()`,不用 `logger.error()`。
+**What**:CLI 入口的 except 块按异常类别选择日志方法:
+- **业务异常子类**(`FactorCalcError` 等可预期失败):`logger.error("...: %s", e)` 携带消息即可
+- **未预期异常**(`except Exception`):`logger.exception()` 自动附加完整堆栈
 
-**Why**:`logger.exception()` 自动附加堆栈信息,便于事后定位异常发生位置。
+**Why**:
+- 业务异常是可预期的失败场景(数据缺失、参数非法、上游返回 None 等),错误消息已足够定位,堆栈是噪音
+- 未预期异常(Bug、依赖故障)需要堆栈才能定位发生位置,必须用 `exception()`
+- 区分捕获却做相同处理 = 分支划分失去意义,必须让两个分支的行为差异体现分类捕获的价值
 
 **How**:
 
@@ -786,10 +791,12 @@ except FileNotFoundError as e:
 if __name__ == '__main__':
     try:
         main()
-    except RuntimeError as e:
-        logger.exception("计算失败")  # 自动附加堆栈
+    except FactorCalcError as e:
+        # 业务异常:消息已足够定位,堆栈是噪音
+        logger.error("计算失败: %s", e)
         sys.exit(1)
-    except Exception as e:
+    except Exception:
+        # 未预期异常:必须打印堆栈以便定位
         logger.exception("未预期的错误")
         sys.exit(1)
 ```
@@ -797,8 +804,29 @@ if __name__ == '__main__':
 **Don't**:
 
 ```python
+# ❌ 业务异常打堆栈(噪音):
+except FactorCalcError:
+    logger.exception("计算失败")
+
+# ❌ 未预期异常不打堆栈(信息缺失):
 except Exception as e:
-    logger.error(f"未预期的错误: {e}")  # ❌ 只有消息,无堆栈
+    logger.error(f"未预期的错误: {e}")
+
+# ❌ 两个分支行为完全相同(分类捕获失去意义):
+except FactorCalcError:
+    logger.exception("计算失败")
+    sys.exit(1)
+except Exception:
+    logger.exception("未预期的错误")
+    sys.exit(1)
+```
+
+**Verify**:
+```bash
+# 业务异常分支应用 logger.error
+grep -A2 "except FactorCalcError" factor_ic/ic_*.py | grep -E "logger\.(error|exception)"
+# 未预期异常分支应用 logger.exception
+grep -A2 "except Exception" factor_ic/ic_*.py | grep -E "logger\.(error|exception)"
 ```
 
 ---

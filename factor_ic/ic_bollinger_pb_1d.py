@@ -28,6 +28,10 @@
   v2.1 (2026-06-15):
     - 完善 None 字段 warning 为四字段汇总单条（仅在有缺失字段时输出，避免与摘要 N/A 重复）
     - 在 main() docstring 显式声明异常契约与返回值，消除函数签名歧义
+  v2.2 (2026-06-15):
+    - CLI 入口业务异常 FactorCalcError 改用 logger.error 携带消息即可，
+      不打印堆栈（堆栈对可预期业务失败是噪音）；仅未预期 Exception 保留 logger.exception
+      （遵循 MODULE.md M22 按异常类别分类的更新版规则）
 """
 
 import argparse
@@ -167,9 +171,11 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except FactorCalcError:
-        logger.exception("布林带%B因子IC计算失败")
+    except FactorCalcError as e:
+        # 业务异常：消息已足够定位，堆栈是噪音（MODULE.md M22 业务异常子类规则）
+        logger.error("布林带%%B因子IC计算失败: %s", e)
         sys.exit(1)
     except Exception:
+        # 未预期异常：必须打印堆栈以便定位
         logger.exception("未预期的错误")
         sys.exit(1)

@@ -31,6 +31,10 @@
     - 修正"保底处理：抛 RuntimeError"误导注释（实际抛 FactorCalcError）
     - 在 main() docstring 显式声明异常契约与返回值，消除函数签名歧义
     - CLI 入口异常处理对齐 MODULE.md M22（logger.exception 替代 logger.error，保留完整堆栈）
+  v1.3 (2026-06-15):
+    - 反转 v1.2 M22 修复：业务异常 FactorCalcError 改用 logger.error 携带消息即可，
+      不打印堆栈（堆栈对可预期业务失败是噪音）；仅未预期 Exception 保留 logger.exception
+      （同步澄清 MODULE.md M22：按异常类别分类选择日志方法，非统一 logger.exception）
 """
 
 import argparse
@@ -163,11 +167,11 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except FactorCalcError:
-        # MODULE.md M22：CLI 入口统一使用 logger.exception() 保留完整堆栈
-        logger.exception("全天价格位置因子IC计算失败")
+    except FactorCalcError as e:
+        # 业务异常：消息已足够定位，堆栈是噪音（MODULE.md M22 业务异常子类规则）
+        logger.error("全天价格位置因子IC计算失败: %s", e)
         sys.exit(1)
     except Exception:
-        # 未预期异常，使用 exception() 自动附加堆栈
+        # 未预期异常：必须打印堆栈以便定位
         logger.exception("未预期的错误")
         sys.exit(1)

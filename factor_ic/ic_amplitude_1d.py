@@ -6,8 +6,6 @@
 - 主流程使用 run_complex_factor_ic()（禁止手写三模式分支）
 - 因子计算逻辑复用 data_fetchers.factor_calculator（遵循 MODULE.md 约束 #3）
 
-代码量：~163行（CLI 入口 + 结果摘要 + 异常处理），因子计算使用公共模块 run_complex_factor_ic。
-
 因子定义：
 - Amplitude = (High - Low) / Close
 - 含义：当日振幅相对于收盘价的比率，反映价格波动强度
@@ -29,7 +27,6 @@
     - 补全四字段 warning（ic_mean/ic_std/icir/positive_ratio 为 None 时告警）
     - 结果摘要合并为单条日志输出
     - 保底处理改为抛出 FactorCalcError（遵循异常处理规范）
-    - 代码量注释更新（~163行，反映实际行数）
   v1.3 (2026-06-15):
     - 删除冗余空注释块（自定义异常类分隔块本无内容）
     - 删除调用方内部细节行内注释（公共模块 params 转换为 {} 属于公共模块文档职责）
@@ -37,6 +34,12 @@
     - 合并四条 None 告警为单条汇总 warning（消除与结果摘要 N/A 的信息重复）
     - 在 main() docstring 显式声明异常契约与返回值，消除函数签名歧义
     - CLI 入口异常处理对齐 MODULE.md M22（logger.exception 替代 logger.error，保留完整堆栈）
+  v1.4 (2026-06-15):
+    - 反转 v1.3 M22 修复：业务异常 FactorCalcError 改用 logger.error 携带消息即可，
+      不打印堆栈（堆栈对可预期业务失败是噪音）；仅未预期 Exception 保留 logger.exception
+      （同步澄清 MODULE.md M22：按异常类别分类选择日志方法，非统一 logger.exception）
+    - 删除 docstring 中易腐烂的代码行数列说明（可由 wc -l 实时获取）
+    - 结果摘要标题与分隔线合并为单行 "==== 结果摘要 ===="，减少日志行数占用
 """
 
 import argparse
@@ -129,9 +132,7 @@ def main():
     positive_ratio_str = f"{positive_ratio:.2%}" if positive_ratio is not None else "N/A"
 
     summary_lines = [
-        "=" * 60,
-        "结果摘要",
-        "=" * 60,
+        "==== 结果摘要 ====",
         f"因子名称: {result.get('factor_name', 'unknown')}",
         f"更新模式: {result.get('update_mode', 'unknown')}",
         f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}",
@@ -170,11 +171,11 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except FactorCalcError:
-        # MODULE.md M22：CLI 入口统一使用 logger.exception() 保留完整堆栈
-        logger.exception("振幅因子IC计算失败")
+    except FactorCalcError as e:
+        # 业务异常：消息已足够定位，堆栈是噪音（MODULE.md M22 业务异常子类规则）
+        logger.error("振幅因子IC计算失败: %s", e)
         sys.exit(1)
     except Exception:
-        # 未预期异常（含非预期 RuntimeError），使用 exception() 自动附加堆栈
+        # 未预期异常（含非预期 RuntimeError）：必须打印堆栈以便定位
         logger.exception("未预期的错误")
         sys.exit(1)
