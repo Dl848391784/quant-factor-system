@@ -66,6 +66,9 @@ def main():
     parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
     args = parser.parse_args()
 
+    # 启动上下文日志（问题4：模块顶层无启动日志，补充因子名称+关键参数便于追溯）
+    logger.info("资金流强度因子IC计算启动 | min_stocks=%d | force_full=%s", args.min_stocks, args.force_full)
+
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
     result = run_factor_ic(
         spec=SPEC,
@@ -74,13 +77,22 @@ def main():
         _logger=logger,
     )
 
+    # 问题1：覆盖 None / 非 dict / success=False 三种失败场景，避免静默跳过摘要
     if result is None:
-        raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
+        logger.error("run_factor_ic 返回 None，数据加载或计算可能失败")
+        sys.exit(1)
+    if not isinstance(result, dict):
+        logger.error("run_factor_ic 返回类型异常: 期望 dict，实际 %s", type(result).__name__)
+        sys.exit(1)
+    if not result.get("success", False):
+        logger.error("资金流强度因子IC计算失败: %s", result.get("error", "未知错误"))
+        sys.exit(1)
 
     # 输出 IC 摘要 + None 状态整合告警（公共模块,M3.1）
     log_factor_summary(result, "资金流强度因子", logger)
 
-    logger.info("资金流强度因子IC计算完成")
+    # 问题3：log_factor_summary 已输出完整结果摘要（含因子名/IC指标/日期范围），
+    # 隐含计算完成语义，删除冗余的"计算完成"日志保持单一完成信号
     return result
 
 
@@ -91,5 +103,6 @@ if __name__ == "__main__":
         logger.error("资金流强度因子IC计算失败: %s", e)
         sys.exit(1)
     except Exception:
-        logger.exception("未预期的错误")
+        # 问题5：附带因子名上下文，便于日志聚合检索定位出错阶段
+        logger.exception("资金流强度因子运行失败 (capital_flow_intensity)")
         sys.exit(1)
