@@ -30,6 +30,7 @@
     - 完善 None 字段 warning 为汇总单条（仅在有缺失字段时输出，避免与摘要 N/A 重复）
     - 修正"保底处理：抛 RuntimeError"误导注释（实际抛 FactorCalcError）
     - 在 main() docstring 显式声明异常契约与返回值，消除函数签名歧义
+    - CLI 入口异常处理对齐 MODULE.md M22（logger.exception 替代 logger.error，保留完整堆栈）
 """
 
 import argparse
@@ -162,11 +163,11 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except FactorCalcError as e:
-        # 已知业务异常，使用 error()（不打印完整堆栈）
-        logger.error("全天价格位置因子IC计算失败: %s", e)
+    except FactorCalcError:
+        # MODULE.md M22：CLI 入口统一使用 logger.exception() 保留完整堆栈
+        logger.exception("全天价格位置因子IC计算失败")
         sys.exit(1)
     except Exception:
-        # 未预期异常，使用 exception()（自动打印完整堆栈，无需重复传 e）
+        # 未预期异常，使用 exception() 自动附加堆栈
         logger.exception("未预期的错误")
         sys.exit(1)

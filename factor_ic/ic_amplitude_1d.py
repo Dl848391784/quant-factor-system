@@ -36,6 +36,7 @@
     - 去除 ic_distribution 注释中硬编码的 MODULE.md 行号（改引用语义）
     - 合并四条 None 告警为单条汇总 warning（消除与结果摘要 N/A 的信息重复）
     - 在 main() docstring 显式声明异常契约与返回值，消除函数签名歧义
+    - CLI 入口异常处理对齐 MODULE.md M22（logger.exception 替代 logger.error，保留完整堆栈）
 """
 
 import argparse
@@ -169,11 +170,11 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except FactorCalcError as e:
-        # 已知业务异常，使用 error()（不打印完整堆栈，但保留错误内容）
-        logger.error("振幅因子IC计算失败: %s", e)
+    except FactorCalcError:
+        # MODULE.md M22：CLI 入口统一使用 logger.exception() 保留完整堆栈
+        logger.exception("振幅因子IC计算失败")
         sys.exit(1)
     except Exception:
-        # 未预期异常（含非预期 RuntimeError），使用 exception()（自动打印完整堆栈）
+        # 未预期异常（含非预期 RuntimeError），使用 exception() 自动附加堆栈
         logger.exception("未预期的错误")
         sys.exit(1)
