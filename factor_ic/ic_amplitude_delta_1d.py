@@ -3,7 +3,7 @@
 振幅差分因子 IC 计算器 - 使用公共模块主入口
 
 遵循 PROJECT.md 公共模块强制复用规范：
-- 主流程使用 run_complex_factor_ic()（禁止手写三模式分支）
+- 主流程使用 run_factor_ic()（禁止手写三模式分支）
 - 因子计算逻辑复用 data_fetchers.factor_calculator（遵循 MODULE.md 约束 #3）
 
 因子定义：
@@ -29,13 +29,12 @@ from pathlib import Path
 # 添加项目路径（若脚本被移动或项目结构调整，下方断言将立即暴露问题）
 sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
 
-# 路径有效性断言：验证关键包可导入（防止 sys.path.insert 静默失效）
+# 路径有效性校验：验证关键包可导入（防止 sys.path.insert 静默失效）
 try:
     import factor_ic as _path_check  # noqa: E402, F401 — 路径有效性校验，不使用模块
 except ImportError as _path_err:
-    raise AssertionError(
-        f"无法定位 factor_ic 包，sys.path.insert 添加的路径可能无效: "
-        f"{Path(__file__).parent.parent}"
+    raise ImportError(
+        f"无法定位 factor_ic 包，sys.path.insert 添加的路径可能无效: {Path(__file__).parent.parent}"
     ) from _path_err
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
@@ -90,8 +89,8 @@ def main():
     )
 
     # 防御性检查：result 为 None 时抛出业务异常（遵循 PROJECT.md 异常处理规范）
+    # 不在此处 logger.error，由底部 except FactorCalcError 统一打印，避免双重日志
     if result is None:
-        logger.error("run_factor_ic 返回 None，数据加载或计算可能失败")
         raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
 
     # 输出 IC 摘要 + None 状态整合告警（公共模块,M3.1）
