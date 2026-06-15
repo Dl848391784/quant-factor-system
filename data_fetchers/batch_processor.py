@@ -67,6 +67,14 @@
     - `BatchStream._load_all` 末尾 `self.exhausted = len(self.records) == 0` 加注释明确"空文件是正常情况"
     - `save_batch_cache_sorted` Example docstring 的 factor_df 补充 `volume` 字段（required_factor_cols 包含但示例缺失会导致 doctest 失败）
     - `_scan_and_write_final` Note 章节明确"两遍 IO 取舍"：用 2x 文件 IO 换 0 份 lines 内存峰值
+- v1.10 (2026-06-15): 第十一轮 Bug 修复（对称性 + 防御性 + 语义精修）
+    - `_iter_merged_lines` 重命名为 `_iter_merged_lines_second_pass` 并改为与 `_iter_merged_records` 完全对称的两段式判定（先尝试原样 json.loads 再剥末尾逗号），消除"第一遍 stripped、第二遍 stripped[:-1]"的不对称剥离风险；函数名后缀强调"必须在第一遍验证后才使用"的契约
+    - `_iter_merged_records` docstring 同步更新对 `_iter_merged_lines_second_pass` 的引用与对称性约束说明
+    - `_scan_and_write_final` 第一遍统计后的 `del date_set/asset_set` 注释从"释放 set 内存"改写为"显式解绑让 GC 在第二遍 IO 开始前尽早回收"，避免维护者误解为必要的内存操作
+    - `format_final_output` 因子/收益日志顺序调整：统计 + 文件大小紧跟 `_scan_and_write_final` 调用之后，"两遍扫描-写出完成" 移到块末作为阶段终态标记，消除"完成→再统计"的语义错觉
+    - `n_way_merge_deduplicate` while 循环增加 `record is None` 守卫：理论上 heap 中的 key 已经过 peek_key 验证，但显式 None 检查防御未来多线程加载时的状态切换竞争，避免 None 污染 same_key_records
+    - `_emit_record` 用 `max(..., key=lambda x: x[0])` 替换原 `same_key_records.sort(reverse=True)[0]`：O(n) 替换 O(n log n)，且消除"原地排序但调用方丢弃列表"的副作用歧义；docstring 标注 same_key_records 为只读使用
+    - `save_batch_cache_sorted` Args/Note 章节明确 date 列类型契约：必须为 str 或 datetime64[ns]，禁止 CategoricalDtype（CategoricalDtype 的缺失值经 `astype(str)` 会变 `"<NA>"` 字符串导致下游 Schema 校验失败）
 
 作者: 云瑶
 创建日期: 2026-05-27
@@ -150,36 +158,50 @@ def _write_json_record(f: TextIO, record: dict, count: int) -> int:
     return count + 1
 
 
-def _iter_merged_lines(merged_path: Path) -> Generator[str, None, None]:
-    """轻量流式迭代合并文件的有效 JSON 行（不解析为 dict）。
+def _iter_merged_lines_second_pass(merged_path: Path) -> Generator[str, None, None]:
+    """轻量流式迭代合并文件的有效 JSON 行（不解析为 dict），仅供 `_scan_and_write_final` 第二遍写出使用。
 
     Args:
         merged_path: 合并文件路径
 
     Yields:
-        str: 已剥离行末逗号的有效 JSON 行内容（保证可被 json.loads 解析）
+        str: 与 `_iter_merged_records` 第一遍解析时返回的 line_content 完全一致的字符串
 
     Note:
-        内部生成器，不导出到 __all__
-        相比 `_iter_merged_records`：仅做行过滤+逗号剥离，不解析 dict、不查 KeyError，
-        用于"已确认有效（第一遍扫描通过）"的二次重读，避免重复解析浪费 CPU。
+        内部生成器，**禁止单独调用**——本函数是 `_scan_and_write_final` 的实现细节，
+        函数名后缀 `_second_pass` 用于强调"必须在第一遍 `_iter_merged_records` 验证后才使用"。
+        若跳过第一遍预扫描直接调用此函数，遇到无效 JSON 行会被静默跳过且行末逗号剥离逻辑
+        与第一遍可能产生不对称结果。
+
+        **对称性约束（必须与 `_iter_merged_records` 行为一致）**：
+        本函数采用与 `_iter_merged_records` 相同的两段式判定（先尝试原样 json.loads，
+        失败再剥离行末逗号），保证两遍生成的 line_content 字节级一致——避免"第一遍解析的
+        是 stripped、第二遍写出的是 stripped[:-1]" 这类不对称导致的写出 ≠ 验证内容。
 
         过滤规则：
         - 行首不是 "{" 的跳过（数组括号、空行等）
-        - 行末有逗号则剥离（merged 文件数组分隔符 ",\n"）
-
-        注意：本生成器不做 JSON 完整性校验，调用方需保证文件已通过 `_iter_merged_records`
-        预扫描（如 `_scan_and_write_final` 第一遍统计 meta 的过程）。
+        - 先尝试原样 json.loads，失败再剥 1 个末尾逗号重试
+        - 两次都失败则跳过（与 `_iter_merged_records` 一致的容错）
     """
     with gzip.open(merged_path, "rt", encoding="utf-8") as f:
         for line in f:
             stripped = line.strip()
             if not stripped.startswith("{"):
                 continue
-            if stripped.endswith(","):
-                yield stripped[:-1]
-            else:
+            # 与 _iter_merged_records 完全对称的两段式判定（仅判定不返回 dict）
+            try:
+                json.loads(stripped)
                 yield stripped
+            except json.JSONDecodeError:
+                if stripped.endswith(","):
+                    candidate = stripped[:-1]
+                    try:
+                        json.loads(candidate)
+                        yield candidate
+                    except json.JSONDecodeError:
+                        continue
+                else:
+                    continue
 
 
 def _iter_merged_records(merged_path: Path, logger: logging.Logger) -> Generator[tuple[str, dict], None, None]:
@@ -195,7 +217,9 @@ def _iter_merged_records(merged_path: Path, logger: logging.Logger) -> Generator
     Note:
         内部生成器，不导出到 __all__
         两段式 JSON 解析，避免 rstrip(",") 误剥离字段值末尾逗号。
-        若仅需 line_content 不需 dict，请使用更轻量的 `_iter_merged_lines`。
+        若仅需 line_content 不需 dict（且仅在第一遍验证之后），请使用对称的
+        `_iter_merged_lines_second_pass` —— 它复用相同的两段式判定保证 line_content
+        字节级一致，避免不对称剥离导致的写出 ≠ 验证内容。
     """
     with gzip.open(merged_path, "rt", encoding="utf-8") as f:
         for line in f:
@@ -253,8 +277,8 @@ def _scan_and_write_final(
 
           - 第一遍 `_iter_merged_records` 解析每行为 dict，统计 meta（date/asset 唯一集、
             n_records、first/last_date）。
-          - 第二遍 `_iter_merged_lines` **仅做行过滤+逗号剥离**，不解析 dict、不查 KeyError，
-            因为有效性已在第一遍由 `_iter_merged_records` 保证。
+          - 第二遍 `_iter_merged_lines_second_pass` 仅做行过滤+对称两段式判定，不解析 dict、
+            不查 KeyError；与第一遍使用相同的两段式逻辑保证 line_content 字节级一致。
 
         取舍：用 2x 文件 IO 换 0 份 lines 内存峰值。merged 文件已 gzip 压缩，IO 开销可接受；
         换来的内存收益在大盘场景（数百万记录）显著。性能问题排查请关注两次 IO 的耗时差异。
@@ -278,7 +302,8 @@ def _scan_and_write_final(
 
     n_days = len(date_set)
     n_assets = len(asset_set)
-    # 释放 set 内存（asset_set 在大盘可能数千只）
+    # 显式解绑两个集合的局部变量名，让 GC 在第二遍 IO 开始前尽早回收（asset_set 在大盘
+    # 可能数千只，提前解绑可降低写出阶段的内存峰值；len() 已在前一行读取，del 不影响统计）
     del date_set
     del asset_set
 
@@ -325,9 +350,9 @@ def _scan_and_write_final(
         out_f.write("  },\n")
         out_f.write('  "data": [\n')
 
-        # 流式写出 data 数组（第二遍 IO：用轻量 _iter_merged_lines，不再解析 dict）
+        # 流式写出 data 数组（第二遍 IO：用 _iter_merged_lines_second_pass 复用第一遍判定结果，不再解析 dict）
         first_record = True
-        for line_content in _iter_merged_lines(merged_path):
+        for line_content in _iter_merged_lines_second_pass(merged_path):
             if first_record:
                 first_record = False
             else:
@@ -481,13 +506,20 @@ def save_batch_cache_sorted(
 
     Args:
         batch_idx: 批次索引（从0开始）
-        factor_df: 因子数据DataFrame，包含 date/asset/open/close/high/low/rsi_6/volume_ratio_5/volume
-        return_df: 收益数据DataFrame，包含 date/asset/forward_return_1d/3d/5d
+        factor_df: 因子数据DataFrame，包含 date/asset/open/close/high/low/rsi_6/volume_ratio_5/volume。
+            **date 列类型约束**：必须为 `str` 或 `datetime64[ns]`（含 `pd.Timestamp` 元素），
+            禁止使用 `pd.CategoricalDtype` —— 内部用 `astype(str)` 序列化，CategoricalDtype 的
+            缺失值会被转为 `"<NA>"` 字符串而非保留为 NaN，下游 JSON Schema 校验会失败。
+            asset 列同样建议 `str` 类型，调用方需在传入前完成类型转换。
+        return_df: 收益数据DataFrame，包含 date/asset/forward_return_1d/3d/5d。
+            date/asset 列类型约束同 factor_df。
         result_dir: 结果目录（可选）
         logger_arg: 日志记录器（遵循 MODULE.md 约束 77）
 
     Note:
-        使用流式写入避免内存峰值，自动验证必需列存在
+        使用流式写入避免内存峰值，自动验证必需列存在。
+        本函数不主动做 date/asset 列的类型推断或转换 —— 类型契约由调用方保证，
+        函数内 `astype(str)` 仅在合规类型上执行（str→str 是 noop，datetime→ISO 字符串）。
 
     Example:
         >>> import pandas as pd
@@ -595,7 +627,7 @@ def _emit_record(
 
     Args:
         f: gzip 文件对象（TextIO）
-        same_key_records: 相同 key 的 (batch_idx, record) 列表
+        same_key_records: 相同 key 的 (batch_idx, record) 列表（**只读使用**，不会被修改）
         count: 当前已写出的记录数
         logger: 日志记录器
 
@@ -604,11 +636,14 @@ def _emit_record(
 
     Note:
         内部函数，不导出到 __all__
+        用 `max(..., key=...)` 取 batch_idx 最大者（最新批次胜出），O(n) 替换原 O(n log n) 的
+        全量排序，且不再原地修改 same_key_records——调用方在 _emit_record 返回后会立即将列表
+        替换为新单元素列表 [(batch_idx, record)]，原地排序的副作用本就被丢弃，max 写法消除了
+        "为什么排序的列表却没有被使用"的语义歧义。
     """
     if not same_key_records:
         return count
-    same_key_records.sort(key=lambda x: x[0], reverse=True)
-    best_record = same_key_records[0][1]
+    best_record = max(same_key_records, key=lambda x: x[0])[1]
     count = _write_json_record(f, best_record, count)
 
     # 防御性判断：count > 0 避免未来重构破坏不变量时 count=0 误触发
@@ -714,6 +749,16 @@ def n_way_merge_deduplicate(
         while heap:
             key, batch_idx, _, stream = heapq.heappop(heap)
             record = stream.pop_record()
+
+            # 防御 None：理论上 heap 中的 key 已经过 peek_key() 验证非空，pop_record 不应返回 None；
+            # 但 BatchStream 内部状态切换（exhausted）若与 heap 推入时机有竞争（如未来扩展为多线程加载），
+            # pop_record 可能返回 None。此处显式跳过，避免 None 污染 same_key_records 进入 _emit_record。
+            if record is None:
+                next_key = stream.peek_key()
+                if next_key:
+                    heapq.heappush(heap, (next_key, batch_idx, counter, stream))
+                    counter += 1
+                continue
 
             if last_key == key:
                 same_key_records.append((batch_idx, record))
@@ -825,7 +870,8 @@ def format_final_output(
         factor_size_mb, factor_stats = _scan_and_write_final(
             factor_merged_path, factor_final_path, factor_meta_template, _logger
         )
-        _logger.info("  [因子] 两遍扫描-写出完成")
+        # 统计与文件大小是 _scan_and_write_final 的直接产物，紧跟其后打印；
+        # "完成"日志放在最后作为阶段终态标记，避免"完成→再统计"的语义错觉
         _logger.info(
             "  因子统计: %s日 × %s只, %s条记录",
             factor_stats["n_days"],
@@ -833,6 +879,7 @@ def format_final_output(
             factor_stats["n_records"],
         )
         _logger.info("    因子文件: %s (%.2f MB)", factor_final_path, factor_size_mb)
+        _logger.info("  [因子] 两遍扫描-写出完成")
         gc.collect()  # 释放因子扫描期间的临时对象，再开始处理收益
 
         # 收益：因子已落盘，此时仅持有收益的扫描数据，内存峰值大幅降低
@@ -840,7 +887,7 @@ def format_final_output(
         return_size_mb, return_stats = _scan_and_write_final(
             return_merged_path, return_final_path, return_meta_template, _logger
         )
-        _logger.info("  [收益] 两遍扫描-写出完成")
+        # 同因子顺序：统计紧跟扫描，"完成"标终态
         _logger.info(
             "  收益统计: %s日 × %s只, %s条记录",
             return_stats["n_days"],
@@ -848,6 +895,7 @@ def format_final_output(
             return_stats["n_records"],
         )
         _logger.info("    收益文件: %s (%.2f MB)", return_final_path, return_size_mb)
+        _logger.info("  [收益] 两遍扫描-写出完成")
 
         _logger.info("  ✓ 格式化完成")
 
