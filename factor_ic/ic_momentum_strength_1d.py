@@ -46,8 +46,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from data_fetchers.factor_calculator import calculate_momentum_strength
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.logger_config import get_logger
 
 
@@ -59,6 +61,20 @@ __version__ = "1.1"
 
 # 使用模块级 _logger 模式（遵循 superpowers-workflow 最佳实践）
 _logger = get_logger(__name__)
+
+
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="momentum_strength",
+        factor_col="momentum_strength",
+        required_columns=JOIN_KEYS + ("close", "return_5d", "momentum_strength"),
+        calculation=calculate_momentum_strength,
+    )
+)
 # ============================================================================
 # CLI 入口
 # ============================================================================
@@ -74,14 +90,10 @@ def main():
     args = parser.parse_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
-    # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
+    # 使用 FactorSpec 驱动入口（遵循 factor_cols_literal_constant_design.md §4.1）
     # 注意：momentum_strength 需要 close（计算return_1d）和 return_5d
-    result = run_complex_factor_ic(
-        factor_name="momentum_strength",
-        factor_col="momentum_strength",
-        factor_cols=["close", "return_5d"],  # 需要 close 计算 return_1d，需要 return_5d
-        custom_factor_calculation=calculate_momentum_strength,
-        # momentum_strength 无额外参数（公共模块默认 params=None，内部会转为 {}）
+    result = run_factor_ic(
+        spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=_logger,

@@ -49,8 +49,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from paths import DATA_FETCHERS_RESULT  # 遵循 PROJECT.md H7 规则
 
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.logger_config import get_logger
 
 
@@ -99,37 +101,38 @@ def load_tail_trading_data() -> pd.DataFrame:
 
 def calculate_tail_price_volume_intensity(factor_df: pd.DataFrame) -> pd.DataFrame:
     """
-    计算尾盘量价强度因子
+        计算尾盘量价强度因子
 
-    公式:
-    - 尾盘涨跌幅 = (prices[-1] - prices[0]) / prices[0]
-    - 尾盘量比 = sum(volumes) / volume
-    - 尾盘量价强度 = 尾盘涨跌幅 × 尾盘量比
+        公式:
+        - 尾盘涨跌幅 = (prices[-1] - prices[0]) / prices[0]
+        - 尾盘量比 = sum(volumes) / volume
+        - 尾盘量价强度 = 尾盘涨跌幅 × 尾盘量比
 
-    Args:
-        factor_df: 包含 date, asset, volume 列的 DataFrame
-            - 'date': 交易日期
-            - 'asset': 资产代码
-            - 'volume': 全天成交量
+        Args:
+            factor_df: 包含 date, asset, volume 列的 DataFrame
+                - 'date': 交易日期
+                - 'asset': 资产代码
+                - 'volume': 全天成交量
 
-    Returns:
-        DataFrame，新增 'tail_price_volume_intensity' 列
+        Returns:
+            DataFrame，新增 'tail_price_volume_intensity' 列
 
-    Note:
-        - 遵循 MODULE.md 约束 #4：函数入口先 copy()
-        - 需要合并尾盘数据（tail_trading_data.json.gz）
-        - 除零防护：|prices[0]| < EPSILON 或 |volume| < EPSILON 时设为 NaN
-        - 数据完整性：volumes 数组长度不足 13 时设为 NaN
+        Note:
+            - 遵循 MODULE.md 约束 #4：函数入口先 copy()
+            - 需要合并尾盘数据（tail_trading_data.json.gz）
+            - 除零防护：|prices[0]| < EPSILON 或 |volume| < EPSILON 时设为 NaN
+            - 数据完整性：volumes 数组长度不足 13 时设为 NaN
 
-    Example:
-        >>> # 通过公共模块调用（推荐）
-        >>> from factor_ic.common.factor_ic_runner import run_complex_factor_ic
-        >>> result = run_complex_factor_ic(
-        ...     factor_name="tail_price_volume_intensity",
-        ...     factor_col="tail_price_volume_intensity",
-        ...     factor_cols=["date", "asset", "volume"],
-        ...     custom_factor_calculation=calculate_tail_price_volume_intensity,
-        ... )
+        Example:
+            >>> # 通过公共模块调用（推荐）
+            >>> from factor_ic.common.factor_ic_runner import run_factor_ic
+    from factor_ic.common.factor_spec import FactorSpec, register_factor
+            >>> result = run_factor_ic(
+            spec=SPEC,
+            min_stocks=args.min_stocks,
+            force_full=args.force_full,
+            _logger=logger,
+        )
     """
     # 遵循 MODULE.md 约束 #4：函数入口先 copy()
     factor_df = factor_df.copy()
@@ -211,6 +214,20 @@ def calculate_tail_price_volume_intensity(factor_df: pd.DataFrame) -> pd.DataFra
 # ============================================================================
 
 
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="tail_price_volume_intensity",
+        factor_col="tail_price_volume_intensity",
+        required_columns=JOIN_KEYS + ("volume", "tail_price_volume_intensity"),
+        calculation=calculate_tail_price_volume_intensity,
+    )
+)
+
+
 def main():
     """CLI 主入口"""
     parser = argparse.ArgumentParser(description="尾盘量价强度因子 IC 计算器")
@@ -220,12 +237,9 @@ def main():
     args = parser.parse_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
-    # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
-    result = run_complex_factor_ic(
-        factor_name="tail_price_volume_intensity",
-        factor_col="tail_price_volume_intensity",
-        factor_cols=["date", "asset", "volume"],
-        custom_factor_calculation=calculate_tail_price_volume_intensity,
+    # 使用 FactorSpec 驱动入口（遵循 factor_cols_literal_constant_design.md §4.1）
+    result = run_factor_ic(
+        spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger,

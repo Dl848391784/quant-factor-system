@@ -57,13 +57,27 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError
-from factor_ic.common.factor_ic_runner import run_simple_factor_ic
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.factor_summary_logger import log_factor_summary
 from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)
+
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="volume_ratio",
+        factor_col="volume_ratio_5",
+        required_columns=JOIN_KEYS + ("volume_ratio_5",),
+    )
+)
 # ============================================================================
 # CLI 入口
 # ============================================================================
@@ -78,11 +92,10 @@ def main():
     args = parser.parse_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
-    # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
-    # 注意：run_simple_factor_ic 只需 factor_col，公共模块自动加载该列
-    result = run_simple_factor_ic(
-        factor_name="volume_ratio",
-        factor_col="volume_ratio_5",
+    # 使用 FactorSpec 驱动入口（遵循 factor_cols_literal_constant_design.md §4.1）
+    # 注意：run_factor_ic 通过 SPEC 声明所需列，公共模块自动加载
+    result = run_factor_ic(
+        spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger,
@@ -90,7 +103,7 @@ def main():
 
     # 防御性检查：result 为 None 时抛出业务异常（遵循 PROJECT.md 异常处理规范）
     if result is None:
-        raise FactorCalcError("run_simple_factor_ic 返回 None，数据加载或计算可能失败")
+        raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
 
     # 输出 IC 摘要 + None 状态整合告警（公共模块,M3.1）
     log_factor_summary(result, "量比因子", logger)

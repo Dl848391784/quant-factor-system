@@ -58,8 +58,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from paths import DATA_FETCHERS_RESULT  # 遵循 PROJECT.md H7 规则
 
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.factor_summary_logger import log_factor_summary
 from factor_ic.common.logger_config import get_logger
 
@@ -160,39 +162,40 @@ def _calc_tail_volume_shrink(volumes: list | np.ndarray, daily_volume: float) ->
 
 def calculate_tail_volume_shrink(factor_df: pd.DataFrame) -> pd.DataFrame:
     """
-    计算尾盘缩量程度因子
+        计算尾盘缩量程度因子
 
-    公式:
-    - 尾盘成交量总和 = sum(volumes[0:13])  # 14:00-15:00
-    - 缩量程度 = 尾盘成交量总和 / 全天成交量
+        公式:
+        - 尾盘成交量总和 = sum(volumes[0:13])  # 14:00-15:00
+        - 缩量程度 = 尾盘成交量总和 / 全天成交量
 
-    Args:
-        factor_df: 包含 date, asset, volume 列的 DataFrame
-            - 'date': 交易日期
-            - 'asset': 资产代码
-            - 'volume': 全天成交量
+        Args:
+            factor_df: 包含 date, asset, volume 列的 DataFrame
+                - 'date': 交易日期
+                - 'asset': 资产代码
+                - 'volume': 全天成交量
 
-    Returns:
-        DataFrame,新增 'tail_volume_shrink' 列
+        Returns:
+            DataFrame,新增 'tail_volume_shrink' 列
 
-    Note:
-        - 遵循 MODULE.md 约束 #4:函数入口先 copy()
-        - 需要合并尾盘数据(tail_trading_data.json.gz)
-        - 除零防护:全天成交量 < EPSILON 时设为 NaN
-        - 数据完整性:volumes 数组长度不足 13 时设为 NaN
-        - 异常检查:缩量程度 > 1 时设为 NaN(数据异常)
+        Note:
+            - 遵循 MODULE.md 约束 #4:函数入口先 copy()
+            - 需要合并尾盘数据(tail_trading_data.json.gz)
+            - 除零防护:全天成交量 < EPSILON 时设为 NaN
+            - 数据完整性:volumes 数组长度不足 13 时设为 NaN
+            - 异常检查:缩量程度 > 1 时设为 NaN(数据异常)
 
-    Example:
-        >>> # 正常场景:通过公共模块调用(推荐)
-        >>> from factor_ic.common.factor_ic_runner import run_complex_factor_ic
-        >>> result = run_complex_factor_ic(
-        ...     factor_name="tail_volume_shrink",
-        ...     factor_col="tail_volume_shrink",
-        ...     factor_cols=["date", "asset", "volume"],
-        ...     custom_factor_calculation=calculate_tail_volume_shrink,
-        ... )
-        >>> # 异常场景:尾盘数据文件不存在(返回全 NaN 因子值,不中断计算)
-        >>> # 系统自动 fallback,日志记录 FileNotFoundError
+        Example:
+            >>> # 正常场景:通过公共模块调用(推荐)
+            >>> from factor_ic.common.factor_ic_runner import run_factor_ic
+    from factor_ic.common.factor_spec import FactorSpec, register_factor
+            >>> result = run_factor_ic(
+            spec=SPEC,
+            min_stocks=args.min_stocks,
+            force_full=args.force_full,
+            _logger=logger,
+        )
+            >>> # 异常场景:尾盘数据文件不存在(返回全 NaN 因子值,不中断计算)
+            >>> # 系统自动 fallback,日志记录 FileNotFoundError
     """
     # 遵循 MODULE.md 约束 #4:函数入口先 copy()
     factor_df = factor_df.copy()
@@ -243,6 +246,22 @@ def calculate_tail_volume_shrink(factor_df: pd.DataFrame) -> pd.DataFrame:
 # ============================================================================
 # CLI 入口
 # ============================================================================
+
+
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="tail_volume_shrink",
+        factor_col="tail_volume_shrink",
+        required_columns=JOIN_KEYS + ("volume", "tail_volume_shrink"),
+        calculation=calculate_tail_volume_shrink,
+    )
+)
+
+
 def main():
     """CLI 主入口"""
     parser = argparse.ArgumentParser(description="尾盘缩量程度因子 IC 计算器")
@@ -253,11 +272,8 @@ def main():
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
     # 使用公共模块主入口(遵循 PROJECT.md 强制复用规范)
-    result = run_complex_factor_ic(
-        factor_name="tail_volume_shrink",
-        factor_col="tail_volume_shrink",
-        factor_cols=["date", "asset", "volume"],  # 需要 volume 字段计算缩量程度
-        custom_factor_calculation=calculate_tail_volume_shrink,
+    result = run_factor_ic(
+        spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger,

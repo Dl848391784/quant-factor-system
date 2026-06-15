@@ -53,8 +53,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 本地模块导入
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.logger_config import get_logger
 from factor_ic.common.tail_data_loader import load_tail_trading_data  # 公共模块复用
 
@@ -113,38 +115,39 @@ def _calc_volume_acceleration(volumes: list | np.ndarray) -> float:
 
 def calculate_tail_volume_acceleration(factor_df: pd.DataFrame) -> pd.DataFrame:
     """
-    计算尾盘量能加速度因子
+        计算尾盘量能加速度因子
 
-    公式:
-    - 前半段成交量总和 = sum(volumes[0:6])  # 14:00-14:25
-    - 后半段成交量总和 = sum(volumes[7:13])  # 14:35-15:00
-    - 量能加速度 = 后半段 / 前半段
+        公式:
+        - 前半段成交量总和 = sum(volumes[0:6])  # 14:00-14:25
+        - 后半段成交量总和 = sum(volumes[7:13])  # 14:35-15:00
+        - 量能加速度 = 后半段 / 前半段
 
-    Args:
-        factor_df: 包含 date, asset 列的 DataFrame
-            - 'date': 交易日期
-            - 'asset': 资产代码
+        Args:
+            factor_df: 包含 date, asset 列的 DataFrame
+                - 'date': 交易日期
+                - 'asset': 资产代码
 
-    Returns:
-        DataFrame，新增 'tail_volume_acceleration' 列
+        Returns:
+            DataFrame，新增 'tail_volume_acceleration' 列
 
-    Note:
-        - 遵循 MODULE.md 约束 #4：函数入口先 copy()
-        - 需要合并尾盘数据（tail_trading_data.json.gz）
-        - 除零防护：前半段成交量总和 < EPSILON 时设为 NaN
-        - 数据完整性：volumes 数组长度不足 13 时设为 NaN
+        Note:
+            - 遵循 MODULE.md 约束 #4：函数入口先 copy()
+            - 需要合并尾盘数据（tail_trading_data.json.gz）
+            - 除零防护：前半段成交量总和 < EPSILON 时设为 NaN
+            - 数据完整性：volumes 数组长度不足 13 时设为 NaN
 
-    Example:
-            >>> # 正常场景：通过公共模块调用（推荐）
-            >>> from factor_ic.common.factor_ic_runner import run_complex_factor_ic
-            >>> result = run_complex_factor_ic(
-            ...     factor_name="tail_volume_acceleration",
-            ...     factor_col="tail_volume_acceleration",
-            ...     factor_cols=["date", "asset"],
-            ...     custom_factor_calculation=calculate_tail_volume_acceleration,
-            ... )
-            >>> # 异常场景：尾盘数据文件不存在（返回全 NaN 因子值，不中断计算）
-            >>> # 系统自动 fallback，日志记录 FileNotFoundError
+        Example:
+                >>> # 正常场景：通过公共模块调用（推荐）
+                >>> from factor_ic.common.factor_ic_runner import run_factor_ic
+    from factor_ic.common.factor_spec import FactorSpec, register_factor
+                >>> result = run_factor_ic(
+            spec=SPEC,
+            min_stocks=args.min_stocks,
+            force_full=args.force_full,
+            _logger=logger,
+        )
+                >>> # 异常场景：尾盘数据文件不存在（返回全 NaN 因子值，不中断计算）
+                >>> # 系统自动 fallback，日志记录 FileNotFoundError
     """
     # 遵循 MODULE.md 约束 #4：函数入口先 copy()
     factor_df = factor_df.copy()
@@ -194,6 +197,20 @@ def calculate_tail_volume_acceleration(factor_df: pd.DataFrame) -> pd.DataFrame:
 # ============================================================================
 
 
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="tail_volume_acceleration",
+        factor_col="tail_volume_acceleration",
+        required_columns=JOIN_KEYS + ("tail_volume_acceleration",),
+        calculation=calculate_tail_volume_acceleration,
+    )
+)
+
+
 def main():
     """CLI 主入口"""
     parser = argparse.ArgumentParser(description="尾盘量能加速度因子 IC 计算器")
@@ -203,12 +220,9 @@ def main():
     args = parser.parse_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
-    # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
-    result = run_complex_factor_ic(
-        factor_name="tail_volume_acceleration",
-        factor_col="tail_volume_acceleration",
-        factor_cols=["date", "asset"],  # 不需要 volume，只需 date/asset 匹配尾盘数据
-        custom_factor_calculation=calculate_tail_volume_acceleration,
+    # 使用 FactorSpec 驱动入口（遵循 factor_cols_literal_constant_design.md §4.1）
+    result = run_factor_ic(
+        spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger,

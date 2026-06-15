@@ -48,12 +48,27 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # 从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
 from data_fetchers.factor_calculator import calculate_return_3d
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)
+
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="return_3d",
+        factor_col="return_3d",
+        required_columns=JOIN_KEYS + ("close", "return_3d"),
+        calculation=calculate_return_3d,
+    )
+)
 # ============================================================================
 # CLI 入口
 # ============================================================================
@@ -68,14 +83,11 @@ def main():
     args = parser.parse_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
-    # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
+    # 使用 FactorSpec 驱动入口（遵循 factor_cols_literal_constant_design.md §4.1）
     # 注意：factor_cols 必须包含 asset, date 列（groupby 和 shift 依赖）
     # 已确认：公共模块按列名取列（data_loader.py 第205-222行），顺序无关
-    result = run_complex_factor_ic(
-        factor_name="return_3d",
-        factor_col="return_3d",
-        factor_cols=["close", "asset", "date"],  # 必须包含 asset, date
-        custom_factor_calculation=calculate_return_3d,
+    result = run_factor_ic(
+        spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger,

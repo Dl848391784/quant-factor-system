@@ -60,8 +60,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.logger_config import get_logger
 from factor_ic.common.tail_data_loader import load_tail_trading_data  # 公共模块复用
 
@@ -155,36 +157,37 @@ def calc_price_position(
 
 def calculate_tail_price_position(factor_df: pd.DataFrame) -> pd.DataFrame:
     """
-    计算尾盘价格位置因子
+        计算尾盘价格位置因子
 
-    公式:
-    - 收盘价 = prices[-1]（尾盘最后一根K线收盘价）
-    - 尾盘价格位置 = (收盘价 - tail_low) / (tail_high - tail_low)
+        公式:
+        - 收盘价 = prices[-1]（尾盘最后一根K线收盘价）
+        - 尾盘价格位置 = (收盘价 - tail_low) / (tail_high - tail_low)
 
-    Args:
-        factor_df: 包含 date, asset 列的 DataFrame
-            - 'date': 交易日期
-            - 'asset': 资产代码
+        Args:
+            factor_df: 包含 date, asset 列的 DataFrame
+                - 'date': 交易日期
+                - 'asset': 资产代码
 
-    Returns:
-        DataFrame，新增 'tail_price_position' 列
+        Returns:
+            DataFrame，新增 'tail_price_position' 列
 
-    Note:
-        - 遵循 MODULE.md 约束 #4：函数入口先 copy()
-        - 需要合并尾盘数据（tail_trading_data.json.gz）
-        - 除零防护：tail_high == tail_low 时设为 NaN
-        - 数据完整性：prices 数组长度不足 13 时设为 NaN
-        - 理论范围：[0, 1]
+        Note:
+            - 遵循 MODULE.md 约束 #4：函数入口先 copy()
+            - 需要合并尾盘数据（tail_trading_data.json.gz）
+            - 除零防护：tail_high == tail_low 时设为 NaN
+            - 数据完整性：prices 数组长度不足 13 时设为 NaN
+            - 理论范围：[0, 1]
 
-    Example:
-        >>> # 通过公共模块调用（推荐）
-        >>> from factor_ic.common.factor_ic_runner import run_complex_factor_ic
-        >>> result = run_complex_factor_ic(
-        ...     factor_name="tail_price_position",
-        ...     factor_col="tail_price_position",
-        ...     factor_cols=["date", "asset"],
-        ...     custom_factor_calculation=calculate_tail_price_position,
-        ... )
+        Example:
+            >>> # 通过公共模块调用（推荐）
+            >>> from factor_ic.common.factor_ic_runner import run_factor_ic
+    from factor_ic.common.factor_spec import FactorSpec, register_factor
+            >>> result = run_factor_ic(
+            spec=SPEC,
+            min_stocks=args.min_stocks,
+            force_full=args.force_full,
+            _logger=logger,
+        )
     """
     # 遵循 MODULE.md 约束 #4：函数入口先 copy()
     factor_df = factor_df.copy()
@@ -263,6 +266,20 @@ def calculate_tail_price_position(factor_df: pd.DataFrame) -> pd.DataFrame:
 # ============================================================================
 
 
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="tail_price_position",
+        factor_col="tail_price_position",
+        required_columns=JOIN_KEYS + ("tail_price_position",),
+        calculation=calculate_tail_price_position,
+    )
+)
+
+
 def main():
     """
     CLI 主入口
@@ -278,12 +295,9 @@ def main():
     args = parser.parse_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
-    # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
-    result = run_complex_factor_ic(
-        factor_name="tail_price_position",
-        factor_col="tail_price_position",
-        factor_cols=["date", "asset"],  # 不需要 volume
-        custom_factor_calculation=calculate_tail_price_position,
+    # 使用 FactorSpec 驱动入口（遵循 factor_cols_literal_constant_design.md §4.1）
+    result = run_factor_ic(
+        spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger,

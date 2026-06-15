@@ -22,12 +22,27 @@ sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
 
 from data_fetchers.factor_calculator import calculate_positive_day_ratio_5  # noqa: E402
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS  # noqa: E402
+from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic  # noqa: E402
+from factor_ic.common.factor_ic_runner import run_factor_ic  # noqa: E402
+from factor_ic.common.factor_spec import FactorSpec, register_factor  # noqa: E402
 from factor_ic.common.logger_config import get_logger  # noqa: E402
 
 
 logger = get_logger(__name__)
+
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="positive_day_ratio_5",
+        factor_col="positive_day_ratio_5",
+        required_columns=JOIN_KEYS + ("close", "positive_day_ratio_5"),
+        calculation=calculate_positive_day_ratio_5,
+    )
+)
 
 
 def main():
@@ -38,11 +53,8 @@ def main():
     args = parser.parse_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
-    result = run_complex_factor_ic(
-        factor_name="positive_day_ratio_5",
-        factor_col="positive_day_ratio_5",
-        factor_cols=["date", "asset", "close"],
-        custom_factor_calculation=calculate_positive_day_ratio_5,
+    result = run_factor_ic(
+        spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger,

@@ -30,13 +30,28 @@ sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
 
 from data_fetchers.factor_calculator import calculate_volume_price_strength  # noqa: E402
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS  # noqa: E402
+from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic  # noqa: E402
+from factor_ic.common.factor_ic_runner import run_factor_ic  # noqa: E402
+from factor_ic.common.factor_spec import FactorSpec, register_factor  # noqa: E402
 from factor_ic.common.factor_summary_logger import log_factor_summary  # noqa: E402
 from factor_ic.common.logger_config import get_logger  # noqa: E402
 
 
 logger = get_logger(__name__)
+
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="volume_price_strength",
+        factor_col="volume_price_strength",
+        required_columns=JOIN_KEYS + ("open", "close", "turnover_surge", "volume_price_strength"),
+        calculation=calculate_volume_price_strength,
+    )
+)
 
 
 def main():
@@ -47,11 +62,8 @@ def main():
     args = parser.parse_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
-    result = run_complex_factor_ic(
-        factor_name="volume_price_strength",
-        factor_col="volume_price_strength",
-        factor_cols=["open", "close", "turnover_surge"],
-        custom_factor_calculation=calculate_volume_price_strength,
+    result = run_factor_ic(
+        spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger,

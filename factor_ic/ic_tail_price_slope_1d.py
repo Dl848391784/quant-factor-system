@@ -62,8 +62,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from paths import DATA_FETCHERS_RESULT  # 遵循 PROJECT.md H7 规则
 
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.factor_summary_logger import log_factor_summary
 from factor_ic.common.logger_config import get_logger
 
@@ -117,37 +119,38 @@ def load_tail_trading_data() -> pd.DataFrame:
 
 def calculate_tail_price_slope(factor_df: pd.DataFrame) -> pd.DataFrame:
     """
-    计算尾盘价格趋势斜率因子
+        计算尾盘价格趋势斜率因子
 
-    公式:
-    - 线性回归:对 prices 数组做回归,得到 slope
-    - 百分比斜率:factor_value = slope / mean_price
+        公式:
+        - 线性回归:对 prices 数组做回归,得到 slope
+        - 百分比斜率:factor_value = slope / mean_price
 
-    Args:
-        factor_df: 包含 date, asset 列的 DataFrame
-            - 'date': 交易日期
-            - 'asset': 资产代码
+        Args:
+            factor_df: 包含 date, asset 列的 DataFrame
+                - 'date': 交易日期
+                - 'asset': 资产代码
 
-    Returns:
-        DataFrame,新增 'tail_price_slope' 列
+        Returns:
+            DataFrame,新增 'tail_price_slope' 列
 
-    Note:
-        - 遵循 MODULE.md 约束 #4:函数入口先 copy()
-        - 需要合并尾盘数据(tail_trading_data.json.gz)
-        - 除零防护:|mean_price| < EPSILON 时设为 NaN
-        - 数据完整性:prices 数组长度不足 13 时设为 NaN
+        Note:
+            - 遵循 MODULE.md 约束 #4:函数入口先 copy()
+            - 需要合并尾盘数据(tail_trading_data.json.gz)
+            - 除零防护:|mean_price| < EPSILON 时设为 NaN
+            - 数据完整性:prices 数组长度不足 13 时设为 NaN
 
-    Example:
-        >>> # 正常场景:通过公共模块调用(推荐)
-        >>> from factor_ic.common.factor_ic_runner import run_complex_factor_ic
-        >>> result = run_complex_factor_ic(
-        ...     factor_name="tail_price_slope",
-        ...     factor_col="tail_price_slope",
-        ...     factor_cols=["date", "asset"],
-        ...     custom_factor_calculation=calculate_tail_price_slope,
-        ... )
-        >>> # 异常场景:尾盘数据文件不存在(返回全 NaN 因子值,不中断计算)
-        >>> # 系统自动 fallback,日志记录 FileNotFoundError
+        Example:
+            >>> # 正常场景:通过公共模块调用(推荐)
+            >>> from factor_ic.common.factor_ic_runner import run_factor_ic
+    from factor_ic.common.factor_spec import FactorSpec, register_factor
+            >>> result = run_factor_ic(
+            spec=SPEC,
+            min_stocks=args.min_stocks,
+            force_full=args.force_full,
+            _logger=logger,
+        )
+            >>> # 异常场景:尾盘数据文件不存在(返回全 NaN 因子值,不中断计算)
+            >>> # 系统自动 fallback,日志记录 FileNotFoundError
     """
     # 遵循 MODULE.md 约束 #4:函数入口先 copy()
     factor_df = factor_df.copy()
@@ -249,6 +252,20 @@ def calculate_tail_price_slope(factor_df: pd.DataFrame) -> pd.DataFrame:
 # ============================================================================
 
 
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="tail_price_slope",
+        factor_col="tail_price_slope",
+        required_columns=JOIN_KEYS + ("tail_price_slope",),
+        calculation=calculate_tail_price_slope,
+    )
+)
+
+
 def main():
     """CLI 主入口"""
     parser = argparse.ArgumentParser(description="尾盘价格趋势斜率因子 IC 计算器")
@@ -259,11 +276,8 @@ def main():
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
     # 使用公共模块主入口(遵循 PROJECT.md 强制复用规范)
-    result = run_complex_factor_ic(
-        factor_name="tail_price_slope",
-        factor_col="tail_price_slope",
-        factor_cols=["date", "asset"],
-        custom_factor_calculation=calculate_tail_price_slope,
+    result = run_factor_ic(
+        spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger,

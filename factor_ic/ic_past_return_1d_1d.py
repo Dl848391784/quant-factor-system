@@ -51,13 +51,27 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
-from factor_ic.common.factor_ic_runner import run_simple_factor_ic  # noqa: E402
+from factor_ic.common.factor_ic_runner import run_factor_ic  # noqa: E402
+from factor_ic.common.factor_spec import FactorSpec, register_factor  # noqa: E402
 from factor_ic.common.factor_summary_logger import log_factor_summary  # noqa: E402
 from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)
+
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="past_return_1d",
+        factor_col="past_return_1d",
+        required_columns=JOIN_KEYS + ("past_return_1d",),
+    )
+)
 
 # ============================================================================
 # 自定义异常类
@@ -76,11 +90,10 @@ def main():
     args = parser.parse_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
-    # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
-    # 因子数据已在 factor_generator.py 预计算，使用 run_simple_factor_ic 直接读取
-    result = run_simple_factor_ic(
-        factor_name="past_return_1d",
-        factor_col="past_return_1d",
+    # 使用 FactorSpec 驱动入口（遵循 factor_cols_literal_constant_design.md §4.1）
+    # 因子数据已在 factor_generator.py 预计算，使用 run_factor_ic 直接读取
+    result = run_factor_ic(
+        spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger,
@@ -88,7 +101,7 @@ def main():
 
     # 防御性检查：result 为 None 时抛出业务异常（遵循 PROJECT.md 异常处理规范）
     if result is None:
-        raise FactorCalcError("run_simple_factor_ic 返回 None，数据加载或计算可能失败")
+        raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
 
     # 输出 IC 摘要 + None 状态整合告警（公共模块,M3.1）
     # 例外脚本：通过 extra_summary_lines 注入"因子方向"行（位于 IC 指标摘要末尾）

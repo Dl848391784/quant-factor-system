@@ -42,8 +42,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.data_columns import JOIN_KEYS, OHLC
 from factor_ic.common.exceptions import FactorCalcError
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.logger_config import get_logger
 
 
@@ -149,6 +151,20 @@ calculate_intraday_intensity.required_cols = ["open", "close", "high", "low"]  #
 # ============================================================================
 
 
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="intraday_intensity",
+        factor_col="intraday_intensity",
+        required_columns=JOIN_KEYS + OHLC + ("intraday_intensity",),
+        calculation=calculate_intraday_intensity,
+    )
+)
+
+
 def main():
     """CLI 主入口"""
     parser = argparse.ArgumentParser(description="日内价格强度因子 IC 计算器")
@@ -159,13 +175,10 @@ def main():
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
 
-    # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
+    # 使用 FactorSpec 驱动入口（遵循 factor_cols_literal_constant_design.md §4.1）
     # 注意：run_complex_factor_ic 需要 factor_cols 和 custom_factor_calculation
-    result = run_complex_factor_ic(
-        factor_name="intraday_intensity",
-        factor_col="intraday_intensity",
-        factor_cols=["open", "close", "high", "low"],
-        custom_factor_calculation=calculate_intraday_intensity,
+    result = run_factor_ic(
+        spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger,

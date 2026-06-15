@@ -72,8 +72,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.logger_config import get_logger
 
 
@@ -88,48 +90,49 @@ EPSILON = 1e-10  # 避免除零阈值
 
 def calculate_overnight_return(factor_df):
     """
-    计算隔夜收益率因子
+        计算隔夜收益率因子
 
-    公式: overnight_ret = (今日开盘价 - 昨日收盘价) / 昨日收盘价
+        公式: overnight_ret = (今日开盘价 - 昨日收盘价) / 昨日收盘价
 
-    Args:
-        factor_df: 包含 open, close, asset, date 列的 DataFrame
-            - 'asset': 资产代码（用于分组）
-            - 'date': 交易日期
-            - 'open': 开盘价
-            - 'close': 收盘价
+        Args:
+            factor_df: 包含 open, close, asset, date 列的 DataFrame
+                - 'asset': 资产代码（用于分组）
+                - 'date': 交易日期
+                - 'open': 开盘价
+                - 'close': 收盘价
 
-    Returns:
-        DataFrame，新增 'overnight_ret' 列
+        Returns:
+            DataFrame，新增 'overnight_ret' 列
 
-    Note:
-        - 遵循 MODULE.md 约束 #4：函数入口先 copy()
-        - 第一天数据为 NaN（无昨日收盘价）
-        - 除零防护：|prev_close| < EPSILON 或 prev_close < 0 时设为 NaN
-        - 按资产分组计算（每只股票独立）
+        Note:
+            - 遵循 MODULE.md 约束 #4：函数入口先 copy()
+            - 第一天数据为 NaN（无昨日收盘价）
+            - 除零防护：|prev_close| < EPSILON 或 prev_close < 0 时设为 NaN
+            - 按资产分组计算（每只股票独立）
 
-    Example:
-        >>> # 通过公共模块调用（推荐）
-        >>> from factor_ic.common.factor_ic_runner import run_complex_factor_ic
-        >>> result = run_complex_factor_ic(
-        ...     factor_name="overnight_ret",
-        ...     factor_col="overnight_ret",
-        ...     factor_cols=["open", "close", "asset", "date"],  # 必须包含 asset, date
-        ...     custom_factor_calculation=calculate_overnight_return,
-        ... )
-        >>> # 独立调用（用于测试，需确保数据包含 asset, date 列）
-        >>> factor_df = pd.DataFrame(
-        ...     {
-        ...         "asset": ["A", "A", "B", "B"],
-        ...         "date": ["2026-05-01", "2026-05-02", "2026-05-01", "2026-05-02"],
-        ...         "open": [10.0, 10.5, 20.0, 21.0],
-        ...         "close": [10.2, 10.8, 20.5, 21.5],
-        ...     }
-        ... )
-        >>> result_df = calculate_overnight_return(factor_df)
-        >>> print(result_df["overnight_ret"])
-        >>> # asset A: NaN, 0.0294 (第一天NaN，第二天=(10.5-10.2)/10.2)
-        >>> # asset B: NaN, 0.0244 (第一天NaN，第二天=(21.0-20.5)/20.5)
+        Example:
+            >>> # 通过公共模块调用（推荐）
+            >>> from factor_ic.common.factor_ic_runner import run_factor_ic
+    from factor_ic.common.factor_spec import FactorSpec, register_factor
+            >>> result = run_factor_ic(
+            spec=SPEC,
+            min_stocks=args.min_stocks,
+            force_full=args.force_full,
+            _logger=logger,
+        )
+            >>> # 独立调用（用于测试，需确保数据包含 asset, date 列）
+            >>> factor_df = pd.DataFrame(
+            ...     {
+            ...         "asset": ["A", "A", "B", "B"],
+            ...         "date": ["2026-05-01", "2026-05-02", "2026-05-01", "2026-05-02"],
+            ...         "open": [10.0, 10.5, 20.0, 21.0],
+            ...         "close": [10.2, 10.8, 20.5, 21.5],
+            ...     }
+            ... )
+            >>> result_df = calculate_overnight_return(factor_df)
+            >>> print(result_df["overnight_ret"])
+            >>> # asset A: NaN, 0.0294 (第一天NaN，第二天=(10.5-10.2)/10.2)
+            >>> # asset B: NaN, 0.0244 (第一天NaN，第二天=(21.0-20.5)/20.5)
     """
     # 遵循 MODULE.md 约束 #4：函数入口先 copy()
     factor_df = factor_df.copy()
@@ -185,6 +188,20 @@ def calculate_overnight_return(factor_df):
 # ============================================================================
 
 
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="overnight_ret",
+        factor_col="overnight_ret",
+        required_columns=JOIN_KEYS + ("open", "close", "overnight_ret"),
+        calculation=calculate_overnight_return,
+    )
+)
+
+
 def main():
     """CLI 主入口"""
     parser = argparse.ArgumentParser(description="隔夜收益率因子 IC 计算器")
@@ -194,14 +211,11 @@ def main():
     args = parser.parse_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
-    # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
+    # 使用 FactorSpec 驱动入口（遵循 factor_cols_literal_constant_design.md §4.1）
     # 注意：factor_cols 必须包含 asset, date 列（groupby 和 shift 依赖）
     # 已确认：公共模块按列名取列（data_loader.py 第205-222行），顺序无关
-    result = run_complex_factor_ic(
-        factor_name="overnight_ret",
-        factor_col="overnight_ret",
-        factor_cols=["open", "close", "asset", "date"],  # 必须包含 asset, date
-        custom_factor_calculation=calculate_overnight_return,
+    result = run_factor_ic(
+        spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger,

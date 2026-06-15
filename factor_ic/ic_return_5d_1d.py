@@ -73,13 +73,28 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # 从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
 from data_fetchers.factor_calculator import calculate_return_5d
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.factor_summary_logger import log_factor_summary
 from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)
+
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="return_5d",
+        factor_col="return_5d",
+        required_columns=JOIN_KEYS + ("close", "return_5d"),
+        calculation=calculate_return_5d,
+    )
+)
 
 # ============================================================================
 # 自定义异常类
@@ -98,13 +113,9 @@ def main():
     args = parser.parse_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
-    # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
-    result = run_complex_factor_ic(
-        factor_name="return_5d",
-        factor_col="return_5d",
-        factor_cols=["close", "asset", "date"],  # 需要三列进行计算
-        custom_factor_calculation=calculate_return_5d,
-        # return_5d 无额外参数（公共模块默认 params=None，内部会转为 {}）
+    # 使用 FactorSpec 驱动入口（遵循 factor_cols_literal_constant_design.md §4.1）
+    result = run_factor_ic(
+        spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
         _logger=logger,
