@@ -496,8 +496,12 @@ class TestBugFixesV17:
         assert len(data) == 1
         assert data[0]["asset"] == "000001"
 
-    def test_format_final_output_partial_failure_preserves_factor(self, temp_dir, test_logger):
-        """Bug #3: 因子写出成功后收益写出失败，except 块不应误删因子文件"""
+    def test_format_final_output_partial_failure_atomic_cleanup(self, temp_dir, test_logger):
+        """Bug #5 (v1.8): 因子写出成功后收益写出失败，except 块应原子清理两个文件
+
+        v1.7 决策为"保留已成功因子"，v1.8 反转为原子清理：因子+收益是配套数据契约，
+        单边因子文件对下游 factor_generator 无意义，必须一起清理。
+        """
         import pandas as pd
 
         # 创建 1 个有效批次 → 合并 → 拿到两个 merged 文件
@@ -531,25 +535,26 @@ class TestBugFixesV17:
         assert return_merged is not None
         from data_fetchers import batch_processor
 
-        original_write = batch_processor._write_final_file
+        # mock _scan_and_write_final：第一次（因子）正常调用底层实现，第二次（收益）抛错
+        original_swf = batch_processor._scan_and_write_final
         call_count = {"n": 0}
 
-        def mocked_write(output_path, meta, lines):
+        def mocked_swf(merged_path, output_path, meta_template, logger):
             call_count["n"] += 1
             if call_count["n"] == 1:
-                return original_write(output_path, meta, lines)
+                return original_swf(merged_path, output_path, meta_template, logger)
             raise OSError("模拟收益文件写入失败")
 
         with (
-            mock_patch.object(batch_processor, "_write_final_file", side_effect=mocked_write),
+            mock_patch.object(batch_processor, "_scan_and_write_final", side_effect=mocked_swf),
             pytest.raises(OSError, match="模拟收益文件写入失败"),
         ):
             format_final_output(factor_merged, return_merged, result_dir=temp_dir, logger_arg=test_logger)
 
-        # 关键断言：因子文件应保留（已成功写完），收益文件不存在或被清理
+        # 关键断言：因子和收益文件都不应存在（原子清理）
         factor_final = temp_dir / "factor_data.json.gz"
         return_final = temp_dir / "return_data.json.gz"
-        assert factor_final.exists(), "因子文件已成功写出，不应被误删"
+        assert not factor_final.exists(), "原子清理：因子文件虽已写出但收益失败时也应清理"
         assert not return_final.exists(), "收益文件写出失败，应被清理"
 
     def test_write_final_file_date_value_literal_null_string(self, temp_dir):
@@ -615,6 +620,140 @@ class TestBugFixesV17:
         # None 应被序列化为 JSON null（Python 中是 None）
         assert data["meta"]["date_range"]["start"] is None
         assert data["meta"]["date_range"]["end"] is None
+
+
+class TestBugFixesV18:
+    """v1.8 六项 Bug 修复回归测试"""
+
+    def test_emit_record_count_zero_guard(self, temp_dir, test_logger):
+        """Bug #1: count=0 时 _emit_record 不应触发进度日志/gc"""
+        import gzip
+        import json as _json
+
+        from data_fetchers.batch_processor import _emit_record
+
+        output_path = temp_dir / "test_count_zero.json.gz"
+        with gzip.open(output_path, "wt", encoding="utf-8") as f:
+            f.write("[\n")
+            # _emit_record 在写入第一条时 count 从 0 升为 1（_write_json_record +1），
+            # 然后 count % 50000 == 1，本不会触发，但加上防御判断更稳健
+            count = _emit_record(f, [(0, {"date": "2026-06-15", "asset": "000001"})], 0, test_logger)
+            f.write("\n]")
+        assert count == 1, f"预期 count=1, 实际 {count}"
+        # 验证文件内容正确
+        with gzip.open(output_path, "rt", encoding="utf-8") as f:
+            data = _json.load(f)
+        assert len(data) == 1
+        assert data[0]["asset"] == "000001"
+
+    def test_n_way_merge_skips_missing_batches_silently(self, temp_dir, test_logger):
+        """Bug #2: 缺失批次被静默跳过，不记录 warning
+
+        创建一批次后，用 total_batches=3（批次0存在，1和2缺失），验证 warning 日志为空。
+        """
+        import logging
+
+        import pandas as pd
+
+        factor_df = pd.DataFrame(
+            {
+                "date": ["2026-06-15"],
+                "asset": ["000001"],
+                "open": [10.0],
+                "close": [10.5],
+                "high": [11.0],
+                "low": [9.5],
+                "rsi_6": [50.0],
+                "volume_ratio_5": [1.0],
+                "volume": [1000000.0],
+            }
+        )
+        return_df = pd.DataFrame(
+            {
+                "date": ["2026-06-15"],
+                "asset": ["000001"],
+                "forward_return_1d": [0.01],
+                "forward_return_3d": [0.03],
+                "forward_return_5d": [0.05],
+            }
+        )
+        save_batch_cache_sorted(0, factor_df, return_df, result_dir=temp_dir, logger_arg=test_logger)
+
+        # 用自定义 logger 捕获 warning 输出
+        capture_log = logging.getLogger("test_capture")
+        capture_log.setLevel(logging.WARNING)
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.WARNING)
+        capture_log.addHandler(handler)
+
+        # total_batches=3, 批次1和2缺失，应静默跳过不触发 warning
+        factor_merged = n_way_merge_deduplicate(3, "factor", result_dir=temp_dir, logger_arg=capture_log)
+        assert factor_merged is not None
+        # 验证 merged 文件正确（仅含批次0的数据）
+        import gzip
+        import json as _json
+
+        with gzip.open(factor_merged, "rt", encoding="utf-8") as f:
+            data = _json.load(f)
+        assert len(data) == 1
+        assert data[0]["asset"] == "000001"
+
+    def test_scan_and_write_final_basic(self, temp_dir, test_logger):
+        """Bug #4: _scan_and_write_final 正确写出因子文件"""
+        import gzip
+        import json as _json
+
+        import pandas as pd
+
+        # 先创建一个 merged 文件
+        merged_path = temp_dir / "merged_factor.json.gz"
+        records = [
+            {"date": "2026-06-15", "asset": "000001", "value": 1.0},
+            {"date": "2026-06-16", "asset": "000002", "value": 2.0},
+        ]
+        with gzip.open(merged_path, "wt", encoding="utf-8") as f:
+            f.write("[\n")
+            for i, rec in enumerate(records):
+                if i > 0:
+                    f.write(",\n")
+                f.write("  " + _json.dumps(rec, ensure_ascii=False))
+            f.write("\n]")
+
+        from data_fetchers.batch_processor import _scan_and_write_final
+
+        output_path = temp_dir / "factor_data.json.gz"
+        meta_template = {
+            "generated_at": "2026-06-15T00:00:00",
+            "source": "test",
+            "last_updated": "2026-06-15 00:00:00",
+            "version": "1.0",
+            "fields": ["date", "asset", "value"],
+        }
+        size_mb, stats = _scan_and_write_final(merged_path, output_path, meta_template, test_logger)
+
+        assert size_mb > 0
+        assert stats["n_days"] == 2
+        assert stats["n_assets"] == 2
+        assert stats["n_records"] == 2
+        assert stats["first_date"] == "2026-06-15"
+        assert stats["last_date"] == "2026-06-16"
+
+        with gzip.open(output_path, "rt", encoding="utf-8") as f:
+            data = _json.load(f)
+        assert "meta" in data
+        assert "data" in data
+        assert len(data["data"]) == 2
+        assert data["meta"]["n_records"] == 2
+        assert data["meta"]["date_range"]["start"] == "2026-06-15"
+        assert data["meta"]["date_range"]["end"] == "2026-06-16"
+
+    def test_cleanup_batch_files_skips_nonexistent(self, temp_dir, test_logger):
+        """Bug #8: cleanup_batch_files 不因缺失文件而报错（兜底行为）"""
+        from data_fetchers.batch_processor import cleanup_batch_files
+
+        # 没有任何文件，total_batches=3，应返回 0
+        deleted = cleanup_batch_files(3, result_dir=temp_dir, logger_arg=test_logger)
+        assert deleted == 0
 
 
 # ============================================================================

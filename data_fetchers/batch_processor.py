@@ -50,6 +50,13 @@
     - `format_final_output` except 块用 `factor_written`/`return_written` 标志位精准识别"已成功写出"与"写到一半失败"，仅清理失败/未写完的文件，避免误删有效输出
     - `save_batch_cache_sorted` 删除 `factor_df.copy()`/`return_df.copy()`，改用 `.assign(date=...).sort_values(...).reset_index(...)` 链式调用避免双倍内存峰值
     - `_write_final_file` date_range null 处理消除 `"null"` 字符串中间变量，直接用 `is not None` 判断生成 JSON 字符串，避免 `first_date == "null"` 字符串歧义
+- v1.8 (2026-06-15): 第九轮 Bug 修复
+    - `_emit_record` 进度日志判断改为 `count > 0 and count % 50000 == 0`，防御 count=0 误触发
+    - 新增模块级常量 `_LOAD_ERROR_FILE_NOT_FOUND`：`BatchStream._load_all` 文件不存在时使用，`n_way_merge_deduplicate` 区分"业务正常缺失批次"与"实际加载错误"，仅后者记录 warning
+    - `n_way_merge_deduplicate` 在 load_error/空批次分支补充调用 `stream.cleanup()`，与正常 stream 末尾清理风格一致
+    - 新增 `_iter_merged_records` 流式生成器 + `_scan_and_write_final` 函数，将"扫描 merged 文件 + 写出最终文件"合并为单次遍历，`format_final_output` 改为先处理因子并落盘释放，再处理收益，避免两份 lines 同时驻留内存
+    - `format_final_output` except 块反转为原子清理：因子+收益是配套数据契约，任一失败都清理两个最终输出文件，避免下游读到单边数据
+    - `cleanup_batch_files` Example 注释更新：说明 merged 文件通常已在 `format_final_output` 中清理，本函数仅作兜底
 
 作者: 云瑶
 创建日期: 2026-05-27
@@ -90,6 +97,11 @@ __all__ = [
 RESULT_DIR = get_module_result_dir()
 _OUTPUT_VERSION = "2.14"
 _DATA_TYPES = ("factor", "return")  # 数据类型列表（避免硬编码）
+
+# load_error 标识常量：用于调用方区分"批次正常缺失"与"实际加载错误"
+# 文件不存在 → 业务正常（某批次未产生数据），调用方应静默跳过
+# JSON解析失败/读取失败 → 实际错误，调用方应记录 warning
+_LOAD_ERROR_FILE_NOT_FOUND = "文件不存在"
 
 # ============================================================================
 # 辅助函数
@@ -233,6 +245,7 @@ def _scan_merged_file(
 
     Note:
         内部函数，不导出到 __all__
+        高内存场景请使用 `_scan_and_write_final`，避免 lines 列表驻留内存
     """
     _logger = logger or logging.getLogger(__name__)
     date_set = set()
@@ -242,46 +255,182 @@ def _scan_merged_file(
     n_records = 0
     lines: list[str] = []
 
-    with gzip.open(merged_path, "rt", encoding="utf-8") as f:
-        for line in f:
-            stripped = line.strip()
-            if stripped.startswith("{"):
-                # 两段式解析：先尝试原样，失败再剥离行末逗号
-                # 避免 stripped.rstrip(",") 误剥离字段字符串值末尾的逗号
-                try:
-                    rec = json.loads(stripped)
-                    line_content = stripped
-                except json.JSONDecodeError:
-                    # 原样解析失败：可能是数组分隔符 ",\n" 残留，剥离最后一个逗号重试
-                    if stripped.endswith(","):
-                        try:
-                            rec = json.loads(stripped[:-1])
-                            line_content = stripped[:-1]
-                        except json.JSONDecodeError as e:
-                            _logger.debug("跳过无效JSON行: %s... (%s)", stripped[:50], e)
-                            continue
-                    else:
-                        _logger.debug("跳过无效JSON行: %s...", stripped[:50])
-                        continue
-                try:
-                    date = rec["date"]
-                    asset = rec["asset"]
-                except KeyError as e:
-                    _logger.debug("跳过缺少必需字段的记录: %s... (%s)", stripped[:50], e)
-                    continue
-                date_set.add(date)
-                asset_set.add(asset)
-                if first_date is None or date < first_date:
-                    first_date = date
-                if last_date is None or date > last_date:
-                    last_date = date
-                n_records += 1
-                lines.append(line_content)
+    for line_content, rec in _iter_merged_records(merged_path, _logger):
+        date = rec["date"]
+        asset = rec["asset"]
+        date_set.add(date)
+        asset_set.add(asset)
+        if first_date is None or date < first_date:
+            first_date = date
+        if last_date is None or date > last_date:
+            last_date = date
+        n_records += 1
+        lines.append(line_content)
 
     n_days = len(date_set)
     n_assets = len(asset_set)
 
     return n_days, n_assets, first_date, last_date, n_records, lines
+
+
+def _iter_merged_records(merged_path: Path, logger: logging.Logger):
+    """流式迭代合并文件的 (line_content, parsed_dict) 对。
+
+    Args:
+        merged_path: 合并文件路径
+        logger: 日志记录器
+
+    Yields:
+        tuple[str, dict]: (line_content, 解析后的记录字典)
+
+    Note:
+        内部生成器，不导出到 __all__
+        两段式 JSON 解析，避免 rstrip(",") 误剥离字段值末尾逗号
+    """
+    with gzip.open(merged_path, "rt", encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if not stripped.startswith("{"):
+                continue
+            # 两段式解析：先尝试原样，失败再剥离行末逗号
+            try:
+                rec = json.loads(stripped)
+                line_content = stripped
+            except json.JSONDecodeError:
+                if stripped.endswith(","):
+                    try:
+                        rec = json.loads(stripped[:-1])
+                        line_content = stripped[:-1]
+                    except json.JSONDecodeError as e:
+                        logger.debug("跳过无效JSON行: %s... (%s)", stripped[:50], e)
+                        continue
+                else:
+                    logger.debug("跳过无效JSON行: %s...", stripped[:50])
+                    continue
+            try:
+                _ = rec["date"]
+                _ = rec["asset"]
+            except KeyError as e:
+                logger.debug("跳过缺少必需字段的记录: %s... (%s)", stripped[:50], e)
+                continue
+            yield line_content, rec
+
+
+def _scan_and_write_final(
+    merged_path: Path,
+    output_path: Path,
+    meta_template: dict,
+    logger: logging.Logger,
+) -> tuple[float, dict]:
+    """流式扫描 merged 文件并直接写出最终文件，避免 lines 全量驻留内存。
+
+    Args:
+        merged_path: 合并文件路径
+        output_path: 最终输出文件路径
+        meta_template: meta 字典模板（不含 n_days/n_assets/n_records/first_date/last_date，
+                       这些由本函数扫描后填充）
+        logger: 日志记录器
+
+    Returns:
+        tuple: (size_mb, stats_dict) 文件大小 MB + 扫描统计信息字典
+               stats_dict 包含 n_days/n_assets/n_records/first_date/last_date
+
+    Note:
+        内部函数，不导出到 __all__
+        相比"先 _scan_merged_file 全量缓存 + 再 _write_final_file 写出"的两阶段实现，
+        本函数将扫描与写出合并为单次遍历，避免大数据量时 lines 列表占用大量内存。
+
+        注意：本函数采用两遍流式扫描——第一遍扫描统计 meta 字段（n_days/n_assets/n_records/
+        first_date/last_date），第二遍按行写出 data 数组。这样避免了 lines 列表全量驻留内存，
+        但 merged 文件需要 IO 两次。merged 文件已经是 gzip 压缩，IO 开销可接受。
+    """
+    # 第一遍：扫描 meta 统计
+    date_set: set = set()
+    asset_set: set = set()
+    first_date: str | None = None
+    last_date: str | None = None
+    n_records = 0
+    for _line_content, rec in _iter_merged_records(merged_path, logger):
+        date = rec["date"]
+        asset = rec["asset"]
+        date_set.add(date)
+        asset_set.add(asset)
+        if first_date is None or date < first_date:
+            first_date = date
+        if last_date is None or date > last_date:
+            last_date = date
+        n_records += 1
+
+    n_days = len(date_set)
+    n_assets = len(asset_set)
+    # 释放 set 内存（asset_set 在大盘可能数千只）
+    del date_set
+    del asset_set
+
+    # 组装最终 meta（扫描结果 + 调用方提供的固定字段）
+    meta = dict(meta_template)
+    meta.update(
+        {
+            "n_days": n_days,
+            "n_assets": n_assets,
+            "n_records": n_records,
+            "first_date": first_date,
+            "last_date": last_date,
+        }
+    )
+
+    # 第二遍：流式写出 meta + data
+    # 处理 date_range null（直接用 is not None 判断，避免 first_date 真实值恰好是 "null" 时的字符串歧义）
+    start_json = json.dumps(first_date) if first_date is not None else "null"
+    end_json = json.dumps(last_date) if last_date is not None else "null"
+
+    extra_key = meta.get("extra_key")
+    extra_value = meta.get("extra_value")
+    has_extra = extra_key and extra_value is not None
+
+    with gzip.open(output_path, "wt", encoding="utf-8") as out_f:
+        out_f.write("{\n")
+        out_f.write('  "meta": {\n')
+        out_f.write(f'    "generated_at": "{meta["generated_at"]}",\n')
+        out_f.write(f'    "source": "{meta["source"]}",\n')
+        out_f.write(f'    "n_days": {meta["n_days"]},\n')
+        out_f.write(f'    "n_assets": {meta["n_assets"]},\n')
+        out_f.write(f'    "n_records": {meta["n_records"]},\n')
+        out_f.write('    "date_range": {\n')
+        out_f.write(f'      "start": {start_json},\n')
+        out_f.write(f'      "end": {end_json}\n')
+        out_f.write("    },\n")
+        out_f.write(f'    "last_updated": "{meta["last_updated"]}",\n')
+        out_f.write(f'    "version": "{meta["version"]}",\n')
+        fields_json = json.dumps(meta["fields"])
+        out_f.write(f'    "fields": {fields_json}{"," if has_extra else ""}\n')
+        if has_extra:
+            extra_json = json.dumps(extra_value)
+            out_f.write(f'    "{extra_key}": {extra_json}\n')
+        out_f.write("  },\n")
+        out_f.write('  "data": [\n')
+
+        # 流式写出 data 数组（第二遍扫描）
+        first_record = True
+        for line_content, _rec in _iter_merged_records(merged_path, logger):
+            if first_record:
+                first_record = False
+            else:
+                out_f.write(",\n")
+            out_f.write("    " + line_content)
+
+        out_f.write("\n  ]\n")
+        out_f.write("}\n")
+
+    size_mb = output_path.stat().st_size / (1024 * 1024)
+    stats = {
+        "n_days": n_days,
+        "n_assets": n_assets,
+        "n_records": n_records,
+        "first_date": first_date,
+        "last_date": last_date,
+    }
+    return size_mb, stats
 
 
 # ============================================================================
@@ -345,7 +494,7 @@ class BatchStream:
         """
         if not self.path.exists():
             self.exhausted = True
-            self.load_error = "文件不存在"
+            self.load_error = _LOAD_ERROR_FILE_NOT_FOUND
             return
 
         try:
@@ -544,7 +693,9 @@ def _emit_record(
     best_record = same_key_records[0][1]
     count = _write_json_record(f, best_record, count)
 
-    if count % 50000 == 0:
+    # 防御性判断：count > 0 避免未来重构破坏不变量时 count=0 误触发
+    # （当前 _write_json_record 必 +1，count 进入此分支时 >=1，但显式判断更稳健）
+    if count > 0 and count % 50000 == 0:
         _logger = logger or logging.getLogger(__name__)
         gc.collect()
         _logger.info("    已写入 %s 条，内存: %s", count, get_memory_info_str())
@@ -594,15 +745,24 @@ def n_way_merge_deduplicate(
     _logger.info("  当前内存: %s", get_memory_info_str())
 
     # 创建所有批次的流（不预先检查 path.exists()，由 BatchStream._load_all 统一处理）
+    # 区分两类 load_error：
+    #   - 文件不存在 → 业务正常（该批次无数据），静默跳过
+    #   - JSON解析/读取失败 → 实际错误，记录 warning 供后续排查
     streams = []
-    load_errors = []  # 收集加载错误信息
+    load_errors = []  # 仅收集真实加载错误，不含"文件不存在"
     for batch_idx in range(total_batches):
         stream = BatchStream(batch_idx, data_type, result_dir=_result_dir)
         if stream.load_error:
-            # 批次加载失败（含文件不存在/损坏/读取失败），记录日志并跳过
-            load_errors.append(f"batch_{batch_idx}_{data_type}: {stream.load_error}")
+            if stream.load_error != _LOAD_ERROR_FILE_NOT_FOUND:
+                # 真实加载错误：记录 warning
+                load_errors.append(f"batch_{batch_idx}_{data_type}: {stream.load_error}")
+            # 文件不存在：静默跳过（业务正常）
+            stream.cleanup()  # 与正常 stream 末尾 cleanup 风格一致
         elif not stream.is_exhausted():
             streams.append(stream)
+        else:
+            # 正常但空批次：清理保持风格一致
+            stream.cleanup()
 
     if load_errors:
         _logger.warning("  ⚠ %s 个批次加载失败: %s", len(load_errors), load_errors)
@@ -717,83 +877,74 @@ def format_final_output(
     generated_at = now.isoformat()
     last_updated = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    # 处理因子数据：使用辅助函数扫描
-    n_days, n_assets, first_date, last_date, n_records, factor_lines = _scan_merged_file(factor_merged_path, _logger)
-    _logger.info("  因子统计: %s日 × %s只, %s条记录", n_days, n_assets, n_records)
-
-    # 处理收益数据：使用辅助函数扫描
-    return_n_days, return_n_assets, return_first_date, return_last_date, n_return_records, return_lines = (
-        _scan_merged_file(return_merged_path, _logger)
-    )
-    _logger.info("  收益统计: %s日 × %s只, %s条记录", return_n_days, return_n_assets, n_return_records)
-
-    # 写出两个最终文件（统一异常处理；用标志位区分各文件写出状态）
     factor_final_path = _result_dir / "factor_data.json.gz"
     return_final_path = _result_dir / "return_data.json.gz"
-    factor_written = False  # 因子文件是否已成功写完
-    return_written = False  # 收益文件是否已成功写完
+
+    # meta 模板（n_days/n_assets/n_records/first_date/last_date 由 _scan_and_write_final 扫描后填充）
+    factor_meta_template = {
+        "generated_at": generated_at,
+        "source": "sina_api_batch_external_merge",
+        "last_updated": last_updated,
+        "version": _version,
+        "fields": ["date", "asset", "open", "close", "high", "low", "rsi_6", "volume_ratio_5", "volume"],
+        "extra_key": "format_note",
+        "extra_value": "每条记录单行写入，便于流式解析",
+    }
+    return_meta_template = {
+        "generated_at": generated_at,
+        "source": "sina_api_batch_external_merge",
+        "last_updated": last_updated,
+        "version": _version,
+        "fields": ["date", "asset", "forward_return_1d", "forward_return_3d", "forward_return_5d"],
+        "extra_key": "note",
+        "extra_value": "3日和5日收益最后几天会有NaN",
+    }
 
     try:
-        # 写入因子文件（使用 _write_final_file 辅助函数）
-        factor_meta = {
-            "generated_at": generated_at,
-            "source": "sina_api_batch_external_merge",
-            "n_days": n_days,
-            "n_assets": n_assets,
-            "n_records": n_records,
-            "first_date": first_date,
-            "last_date": last_date,
-            "last_updated": last_updated,
-            "version": _version,
-            "fields": ["date", "asset", "open", "close", "high", "low", "rsi_6", "volume_ratio_5", "volume"],
-            "extra_key": "format_note",
-            "extra_value": "每条记录单行写入，便于流式解析",
-        }
-        factor_size_mb = _write_final_file(factor_final_path, factor_meta, factor_lines)
-        factor_written = True
+        # 因子：扫描 + 写出合并为一次（避免 factor_lines 全量驻留内存）
+        factor_size_mb, factor_stats = _scan_and_write_final(
+            factor_merged_path, factor_final_path, factor_meta_template, _logger
+        )
+        _logger.info(
+            "  因子统计: %s日 × %s只, %s条记录",
+            factor_stats["n_days"],
+            factor_stats["n_assets"],
+            factor_stats["n_records"],
+        )
         _logger.info("    因子文件: %s (%.2f MB)", factor_final_path, factor_size_mb)
+        gc.collect()  # 释放因子扫描期间的临时对象，再开始处理收益
 
-        del factor_lines  # 释放缓存
-        gc.collect()
-
-        # 写入收益文件（使用 _write_final_file 辅助函数）
-        return_meta = {
-            "generated_at": generated_at,
-            "source": "sina_api_batch_external_merge",
-            "n_days": return_n_days,
-            "n_assets": return_n_assets,
-            "n_records": n_return_records,
-            "first_date": return_first_date,
-            "last_date": return_last_date,
-            "last_updated": last_updated,
-            "version": _version,
-            "fields": ["date", "asset", "forward_return_1d", "forward_return_3d", "forward_return_5d"],
-            "extra_key": "note",
-            "extra_value": "3日和5日收益最后几天会有NaN",
-        }
-        return_size_mb = _write_final_file(return_final_path, return_meta, return_lines)
-        return_written = True
+        # 收益：因子已落盘，此时仅持有收益的扫描数据，内存峰值大幅降低
+        return_size_mb, return_stats = _scan_and_write_final(
+            return_merged_path, return_final_path, return_meta_template, _logger
+        )
+        _logger.info(
+            "  收益统计: %s日 × %s只, %s条记录",
+            return_stats["n_days"],
+            return_stats["n_assets"],
+            return_stats["n_records"],
+        )
         _logger.info("    收益文件: %s (%.2f MB)", return_final_path, return_size_mb)
 
         _logger.info("  ✓ 格式化完成")
 
     except Exception as e:
-        # 仅清理"未写完"的文件（标志位为 False），保留已成功写出的有效输出
-        # - 因子失败、收益未写：仅清理因子残缺文件
-        # - 因子成功、收益失败：仅清理收益残缺文件，保留因子有效输出
+        # 原子清理：因子+收益必须配套使用，任一失败都清理两个最终文件，避免下游读到不一致数据
+        # （此处反转了 v1.7 的"保留已成功因子"决策——业务侧因子和收益是配套数据契约，
+        #   单独的因子文件对下游 factor_generator 无意义）
         _logger.error("  ✗ 写文件失败: [%s]: %s", type(e).__name__, e)
-        cleanup_targets = []
-        if not factor_written:
-            cleanup_targets.append(factor_final_path)
-        if not return_written:
-            cleanup_targets.append(return_final_path)
-        for final_path in cleanup_targets:
+        for final_path in (factor_final_path, return_final_path):
             if final_path.exists():
                 try:
                     final_path.unlink()
-                    _logger.info("  已清理残缺文件: %s", final_path)
+                    _logger.info("  已清理输出文件（保持原子性）: %s", final_path)
                 except Exception as cleanup_err:
-                    _logger.warning("  清理残缺文件失败 %s: %s", final_path, cleanup_err)
+                    _logger.warning(
+                        "  清理输出文件失败 %s: [%s]: %s",
+                        final_path,
+                        type(cleanup_err).__name__,
+                        cleanup_err,
+                    )
         raise  # 重新抛出异常让调用方感知
 
     finally:
@@ -831,11 +982,14 @@ def cleanup_batch_files(
 
     Note:
         删除 batch_*_*.json.gz 和 merged_*.json.gz 临时文件
+        merged_*.json.gz 通常已在 `format_final_output` 的 finally 块中清理，
+        本函数仅作兜底。已存在性检查，重复删除安全。
 
     Example:
         >>> from data_fetchers.batch_processor import cleanup_batch_files
         >>> deleted = cleanup_batch_files(3)  # 清理 3 个批次的所有临时文件
-        >>> print(deleted)  # 删除的文件数量（如 8 = 3*2 + 2）
+        >>> # 通常 deleted = 6 (= 3 batch × 2 type)，因为 merged 文件已在 format_final_output 清理
+        >>> # 若 format_final_output 未运行或异常退出，deleted 最多 = 6 + 2 = 8
 
     Raises:
         无（删除失败仅记录 warning 日志，不影响返回值）
