@@ -34,6 +34,12 @@
                      公共 API 命名去下划线前缀（safe_dict/format_finite），消除跨脚本重复实现
   v1.5 (2026-06-15): warning 判定改用 is_finite_value 谓词（解耦表示层 "N/A" 字符串）；
                      positive_ratio 加 [0,1] 量纲范围校验；FactorCalcError 迁至 factor_ic.common.exceptions
+  v1.6 (2026-06-15): 6项修复：①logger.exception→logger.error+exc_info=True消除语义重复；
+                     ②四重校验简化为None+assert（信任公共模块契约）；
+                     ③required_columns移除因子输出列capital_flow_ratio_trend；
+                     ④start_time移至parse_args前覆盖参数解析；
+                     ⑤valid_days改用is_finite_value判定+warning替代"N/A"fallback；
+                     ⑥辅助字段加存在性日志区分"字段不存在"与"值为None"
 """
 
 import argparse
@@ -60,18 +66,19 @@ from factor_ic.common.logger_config import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 
 # ============================================================================
 # FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
-# required_columns: JOIN_KEYS（资金流占比趋势因子无额外输入列，仅用 date/asset 关联）
+# required_columns: JOIN_KEYS（本因子有 calculation，factor_col 是计算产出而非输入依赖，
+# L2 校验已豁免有 calculation 的因子，无需将 factor_col 列入 required_columns）
 # ============================================================================
 
 SPEC = register_factor(
     FactorSpec(
         factor_name="capital_flow_ratio_trend",
         factor_col="capital_flow_ratio_trend",
-        required_columns=JOIN_KEYS + ("capital_flow_ratio_trend",),
+        required_columns=JOIN_KEYS,
         calculation=calculate_capital_flow_ratio_trend,
         extra_log_params_fn=lambda _a: {"version": __version__},
     )
@@ -85,12 +92,11 @@ def main():
         FactorCalcError: 数据加载失败或计算结果结构不完整。
             调用方（CLI 或上层 pipeline）必须自行捕获处理。
     """
+    start_time = time.monotonic()
     parser = argparse.ArgumentParser(description="资金流占比趋势因子 IC 计算器")
     parser.add_argument("--force-full", action="store_true", help="强制全量计算")
     parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
     args = parser.parse_args()
-
-    start_time = time.monotonic()
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full + extra_log_params）
     # 使用 FactorSpec 驱动入口（遵循 factor_cols_literal_constant_design.md §4.1）
     # 注: 本因子原始数据从外部资金流文件加载（见 factor_calculator._load_fund_flow_data），
@@ -102,26 +108,28 @@ def main():
         _logger=logger,
     )
 
-    # 强化结果校验：覆盖 None / 非 dict / 缺关键字段 / 关键字段类型异常 四种失败场景，
-    # 避免后续 .get() 链静默掩盖真实错误或在非 dict 值上抛 AttributeError。
+    # 结果校验：仅保留 None 判断（公共模块 run_factor_ic 契约保证返回 dict 且含 ic_metrics），
+    # 其余结构约束由公共模块自身校验，避免维护两套契约。
     if result is None:
         raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
-    if not isinstance(result, dict):
-        raise FactorCalcError(f"run_factor_ic 返回类型异常: 期望 dict，实际 {type(result).__name__}")
-    if "ic_metrics" not in result:
-        raise FactorCalcError(
-            f"run_factor_ic 返回结构不完整: 缺少 'ic_metrics' 字段，实际键={list(result.keys())}"
-        )
-    # ic_metrics 是关键字段，类型必须严格 dict（含禁止 None），任何偏差立即抛错
-    _ic_metrics_value = result["ic_metrics"]
-    if not isinstance(_ic_metrics_value, dict):
-        raise FactorCalcError(
-            f"run_factor_ic 返回结构异常: 'ic_metrics' 期望 dict，实际 {type(_ic_metrics_value).__name__}"
-        )
-    ic_metrics: dict = _ic_metrics_value
+    assert isinstance(result, dict), f"run_factor_ic 返回类型异常: 期望 dict，实际 {type(result).__name__}"
+    assert "ic_metrics" in result, f"run_factor_ic 返回结构不完整: 缺少 'ic_metrics' 字段，实际键={list(result.keys())}"
+    assert isinstance(result["ic_metrics"], dict), (
+        f"run_factor_ic 返回结构异常: 'ic_metrics' 期望 dict，实际 {type(result['ic_metrics']).__name__}"
+    )
+    ic_metrics: dict = result["ic_metrics"]
 
     # 辅助字段（sample_stats/period/ic_distribution）允许缺失或为 None，软 fallback 为空 dict。
     # 调用 factor_ic.common.cli_helpers.safe_dict 公共 API，便于跨脚本复用与独立单测。
+    # 字段存在性日志：区分"公共模块未返回该字段"与"字段值为 None"，避免字段改名后静默丢失。
+    if "sample_stats" not in result:
+        logger.debug("result 中无 sample_stats 字段（公共模块未返回），将 fallback 为空 dict")
+    if "period" not in result:
+        logger.debug("result 中无 period 字段（公共模块未返回），将 fallback 为空 dict")
+    _has_ic_dist_key = "ic_distribution_consistency" in result
+    if not _has_ic_dist_key:
+        logger.debug("result 中无 ic_distribution_consistency 字段（公共模块未返回或字段改名），将 fallback 为空 dict")
+
     sample_stats = safe_dict(result.get("sample_stats"), field_name="sample_stats", logger=logger)
     period = safe_dict(result.get("period"), field_name="period", logger=logger)
     ic_distribution = safe_dict(
@@ -163,7 +171,12 @@ def main():
     logger.info("因子名称: %s", result.get("factor_name", "unknown"))
     logger.info("更新模式: %s", result.get("update_mode", "unknown"))
     logger.info("日期范围: %s ~ %s", period.get("start", "N/A"), period.get("end", "N/A"))
-    logger.info("有效天数: %s 天", sample_stats.get("valid_days", "N/A"))
+    # valid_days 使用 is_finite_value 判定，与其他字段保持一致的语义化缺失检测，
+    # 避免字符串 fallback "N/A" 使缺失检测形同虚设。
+    _valid_days = sample_stats.get("valid_days")
+    if not is_finite_value(_valid_days):
+        logger.warning("有效天数缺失或无效（None/NaN/Inf），请检查 sample_stats 数据完整性")
+    logger.info("有效天数: %s 天", format_finite(_valid_days, ".0f"))
     logger.info("--- IC指标 ---")
     logger.info("IC 均值: %s", ic_mean_str)
     logger.info("IC 标准差: %s", ic_std_str)
@@ -198,7 +211,7 @@ if __name__ == "__main__":
         # 业务预期异常（数据缺失/结构异常）：用 logger.error + exc_info=True 保留 cause 链
         # （__cause__ / __context__）但级别 ERROR，便于运维监控按场景配置告警阈值，
         # 与下方 CRITICAL 的程序 bug 噪声等级区分。
-        logger.exception("资金流占比趋势因子IC计算失败（业务异常）")
+        logger.error("资金流占比趋势因子IC计算失败（业务异常）", exc_info=True)  # noqa: G201
         sys.exit(1)
     except Exception:
         # 未预期异常（程序 bug / 外部依赖崩溃）：用 logger.critical 升级告警级别。
