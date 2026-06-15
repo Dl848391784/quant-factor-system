@@ -48,16 +48,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from paths import DATA_FETCHERS_RESULT  # 遵循 PROJECT.md H7 规则
 
+from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.exceptions import FactorCalcError
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
 from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)
-
-# ============================================================================
-# 参数统一管理
-# ============================================================================
-DEFAULT_MIN_STOCKS = 10
 EPSILON = 1e-10  # 避免除零阈值
 
 # 尾盘数据路径（遵循 PROJECT.md H7 规则：使用 paths.py 单一来源）
@@ -238,7 +235,7 @@ def main():
 
     # 防御性检查：result 为 None 时抛出异常（遵循 PROJECT.md 异常处理规范）
     if result is None:
-        raise RuntimeError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
+        raise FactorCalcError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
 
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get("ic_metrics") or {}
@@ -295,7 +292,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except RuntimeError:
+    except FactorCalcError:
         logger.exception("尾盘量价强度因子IC计算失败")
         sys.exit(1)
     except Exception:
