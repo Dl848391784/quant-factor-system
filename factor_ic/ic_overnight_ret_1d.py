@@ -152,13 +152,13 @@ def calculate_overnight_return(factor_df):
     if near_zero_mask.any():
         near_zero_count = near_zero_mask.sum()
         logger.warning(
-            f"发现 {near_zero_count} 个极小收盘价（|close| < {EPSILON}），存在除零风险，隔夜收益率已设为 NaN"
+            "发现 %s 个极小收盘价（|close| < %s），存在除零风险，隔夜收益率已设为 NaN", near_zero_count, EPSILON
         )
         factor_df.loc[near_zero_mask, "overnight_ret"] = np.nan
 
     if negative_mask.any():
         negative_count = negative_mask.sum()
-        logger.warning(f"发现 {negative_count} 个负数收盘价（close < 0），数据污染场景，隔夜收益率已设为 NaN")
+        logger.warning("发现 %s 个负数收盘价（close < 0），数据污染场景，隔夜收益率已设为 NaN", negative_count)
         factor_df.loc[negative_mask, "overnight_ret"] = np.nan
 
     # 统计计算结果
@@ -170,7 +170,12 @@ def calculate_overnight_return(factor_df):
         logger.warning("传入空 DataFrame，隔夜收益率计算跳过")
         return factor_df
 
-    logger.info(f"隔夜收益率计算完成\n有效值: {valid_count} / {total_count} ({valid_count / total_count:.2%})")
+    logger.info(
+        "隔夜收益率计算完成\n有效值: %s / %s (%.2f%%)",
+        valid_count,
+        total_count,
+        valid_count / total_count * 100,
+    )
 
     return factor_df
 
@@ -189,7 +194,11 @@ def main():
     args = parser.parse_args()
 
     # 启动参数日志（便于追溯本次运行配置）
-    logger.info(f"启动隔夜收益率因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+    logger.info(
+        "启动隔夜收益率因子IC计算: min_stocks=%s, force_full=%s",
+        args.min_stocks,
+        args.force_full,
+    )
 
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     # 注意：factor_cols 必须包含 asset, date 列（groupby 和 shift 依赖）
@@ -242,7 +251,7 @@ def main():
         f"ICIR: {icir_str}",
         f"IC>0 占比: {positive_ratio_str}",
     ]
-    logger.info("\n" + "\n".join(summary_lines))
+    logger.info("\n%s", "\n".join(summary_lines))
 
     # ic_mean 为 None 时额外输出 warning，便于告警系统捕获异常运行
     if ic_mean is None:
@@ -259,7 +268,7 @@ if __name__ == "__main__":
         main()
     except FactorCalcError as e:
         # 已知业务异常，使用 error()（不打印完整堆栈，但保留错误内容）
-        logger.error(f"隔夜收益率因子IC计算失败: {e}")
+        logger.error("隔夜收益率因子IC计算失败: %s", e)
         sys.exit(1)
     except Exception:
         # 未预期异常，使用 exception()（自动打印完整堆栈）

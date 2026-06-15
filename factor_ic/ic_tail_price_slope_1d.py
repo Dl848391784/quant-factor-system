@@ -257,7 +257,11 @@ def main():
     args = parser.parse_args()
 
     # 启动参数日志(便于追溯本次运行配置)
-    logger.info(f"启动尾盘价格趋势斜率因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+    logger.info(
+        "启动尾盘价格趋势斜率因子IC计算: min_stocks=%s, force_full=%s",
+        args.min_stocks,
+        args.force_full,
+    )
 
     # 使用公共模块主入口(遵循 PROJECT.md 强制复用规范)
     result = run_complex_factor_ic(
@@ -307,7 +311,7 @@ def main():
         f"ICIR: {icir_str}",
         f"IC>0 占比: {positive_ratio_str}",
     ]
-    logger.info("\n" + "\n".join(summary_lines))
+    logger.info("\n%s", "\n".join(summary_lines))
 
     # 异常状态告警(运维巡检用,四字段均需告警)
     if ic_mean is None:
@@ -329,8 +333,8 @@ if __name__ == "__main__":
     try:
         main()
     except FactorCalcError as e:
-        logger.error(f"因子计算业务异常: {e}")
+        logger.error("因子计算业务异常: %s", e)
         sys.exit(1)
     except Exception as e:
-        logger.exception(f"未预期异常: {e}")
+        logger.exception("未预期异常: %s", e)
         sys.exit(1)

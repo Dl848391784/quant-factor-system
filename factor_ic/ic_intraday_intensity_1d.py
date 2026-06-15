@@ -111,7 +111,7 @@ def calculate_intraday_intensity(
         valid_rows = factor_df[required_cols].dropna().shape[0]
         if valid_rows < 100:
             raise ValueError(f"数据校验失败：有效数据量不足\n期望 ≥ 100 行，实际 {valid_rows} 行\n请检查数据源质量")
-        _logger.info(f"开始计算日内强度因子，有效数据行数: {valid_rows}")
+        _logger.info("开始计算日内强度因子，有效数据行数: %s", valid_rows)
 
     # 4. 计算振幅（分母）
     amplitude = factor_df["high"] - factor_df["low"]
@@ -123,7 +123,7 @@ def calculate_intraday_intensity(
     zero_amplitude_mask = amplitude == 0
     zero_amplitude_count = int(zero_amplitude_mask.sum())  # type: ignore[union-attr]
     if zero_amplitude_count > 0:
-        _logger.warning(f"发现 {zero_amplitude_count} 条振幅为零的记录（High=Low），已设为 NaN")
+        _logger.warning("发现 %s 条振幅为零的记录（High=Low），已设为 NaN", zero_amplitude_count)
 
     intraday_intensity = intraday_intensity.where(amplitude > 0, np.nan)
 
@@ -132,7 +132,7 @@ def calculate_intraday_intensity(
 
     # 8. 统计计算结果
     valid_factor_count = factor_df["intraday_intensity"].notna().sum()
-    _logger.info(f"日内强度因子计算完成，有效因子值 {valid_factor_count} 条")
+    _logger.info("日内强度因子计算完成，有效因子值 %s 条", valid_factor_count)
 
     return factor_df
 
@@ -158,7 +158,11 @@ def main():
     args = parser.parse_args()
 
     # 启动参数日志（便于追溯本次运行配置）
-    logger.info(f"启动日内价格强度因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+    logger.info(
+        "启动日内价格强度因子IC计算: min_stocks=%s, force_full=%s",
+        args.min_stocks,
+        args.force_full,
+    )
 
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     # 注意：run_complex_factor_ic 需要 factor_cols 和 custom_factor_calculation
@@ -208,7 +212,7 @@ def main():
         f"ICIR: {icir_str}",
         f"IC>0 占比: {positive_ratio_str}",
     ]
-    logger.info("\n" + "\n".join(summary_lines))
+    logger.info("\n%s", "\n".join(summary_lines))
 
     # ic_mean 为 None 时额外输出 warning，便于告警系统捕获异常运行
     if ic_mean is None:
@@ -225,7 +229,7 @@ if __name__ == "__main__":
         main()
     except FactorCalcError as e:
         # 已知业务异常，使用 error()（不打印完整堆栈，但保留错误内容）
-        logger.error(f"日内强度因子IC计算失败: {e}")
+        logger.error("日内强度因子IC计算失败: %s", e)
         sys.exit(1)
     except Exception:
         # 未预期异常，使用 exception()（自动打印完整堆栈）

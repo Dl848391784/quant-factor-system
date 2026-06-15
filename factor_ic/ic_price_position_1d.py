@@ -58,7 +58,11 @@ def main():
     args = parser.parse_args()
 
     # 调用前日志
-    logger.info(f"启动全天价格位置因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+    logger.info(
+        "启动全天价格位置因子IC计算: min_stocks=%s, force_full=%s",
+        args.min_stocks,
+        args.force_full,
+    )
 
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
@@ -86,29 +90,29 @@ def main():
     logger.info("=" * 60)
     logger.info("结果摘要")
     logger.info("=" * 60)
-    logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
-    logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
-    logger.info(f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}")
-    logger.info(f"有效天数: {sample_stats.get('valid_days', 0)} 天")
+    logger.info("因子名称: %s", result.get("factor_name", "unknown"))
+    logger.info("更新模式: %s", result.get("update_mode", "unknown"))
+    logger.info("日期范围: %s ~ %s", period.get("start", "N/A"), period.get("end", "N/A"))
+    logger.info("有效天数: %s 天", sample_stats.get("valid_days", 0))
     logger.info("--- IC指标 ---")
     ic_mean = ic_metrics.get("ic_mean")
     if ic_mean is not None:
-        logger.info(f"IC 均值: {ic_mean:.4f}")
+        logger.info("IC 均值: %.4f", ic_mean)
     else:
         logger.info("IC 均值: N/A（计算结果为空）")
     ic_std = ic_metrics.get("ic_std")
     if ic_std is not None:
-        logger.info(f"IC 标准差: {ic_std:.4f}")
+        logger.info("IC 标准差: %.4f", ic_std)
     else:
         logger.info("IC 标准差: N/A")
     icir = ic_metrics.get("icir")
     if icir is not None:
-        logger.info(f"ICIR: {icir:.2f}")
+        logger.info("ICIR: %.2f", icir)
     else:
         logger.info("ICIR: N/A")
     positive_ratio = ic_distribution.get("positive_ratio")
     if positive_ratio is not None:
-        logger.info(f"IC>0 占比: {positive_ratio:.2%}")
+        logger.info("IC>0 占比: %.2f%%", positive_ratio * 100)
     else:
         logger.info("IC>0 占比: N/A")
 
@@ -127,7 +131,7 @@ if __name__ == "__main__":
         main()
     except FactorCalcError as e:
         # 已知业务异常，使用 error()（不打印完整堆栈）
-        logger.error(f"全天价格位置因子IC计算失败: {e}")
+        logger.error("全天价格位置因子IC计算失败: %s", e)
         sys.exit(1)
     except Exception:
         # 未预期异常，使用 exception()（自动打印完整堆栈，无需重复传 e）

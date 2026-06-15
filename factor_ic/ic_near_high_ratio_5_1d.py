@@ -37,7 +37,11 @@ def main():
     parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
     args = parser.parse_args()
 
-    logger.info(f"启动近5日高低位置因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+    logger.info(
+        "启动近5日高低位置因子IC计算: min_stocks=%s, force_full=%s",
+        args.min_stocks,
+        args.force_full,
+    )
 
     result = run_complex_factor_ic(
         factor_name="near_high_ratio_5",
@@ -81,11 +85,11 @@ def main():
         f"ICIR: {icir_str}",
         f"IC>0 占比: {positive_ratio_str}",
     ]
-    logger.info("\n" + "\n".join(summary_lines))
+    logger.info("\n%s", "\n".join(summary_lines))
 
     for field, name in [(ic_mean, "IC 均值"), (ic_std, "IC 标准差"), (icir, "ICIR"), (positive_ratio, "IC>0 占比")]:
         if field is None:
-            logger.warning(f"{name}为空")
+            logger.warning("%s为空", name)
 
     logger.info("近5日高低位置因子IC计算完成")
     return result
@@ -95,7 +99,7 @@ if __name__ == "__main__":
     try:
         main()
     except FactorCalcError as e:
-        logger.error(f"近5日高低位置因子IC计算失败: {e}")
+        logger.error("近5日高低位置因子IC计算失败: %s", e)
         sys.exit(1)
     except Exception:
         logger.exception("未预期的错误")

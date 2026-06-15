@@ -75,7 +75,10 @@ def main():
 
     start_time = time.monotonic()
     logger.info(
-        f"启动资金流占比趋势因子IC计算 v{__version__}: min_stocks={args.min_stocks}, force_full={args.force_full}"
+        "启动资金流占比趋势因子IC计算 v%s: min_stocks=%s, force_full=%s",
+        __version__,
+        args.min_stocks,
+        args.force_full,
     )
 
     # 注: factor_cols 在公共模块语义为"需从缓存加载的原始因子列"。
@@ -133,8 +136,8 @@ def main():
     # 触发统一的"无效"warning，避免静默错误。
     if is_finite_value(positive_ratio) and not (0.0 <= positive_ratio <= 1.0):
         logger.warning(
-            f"positive_ratio={positive_ratio} 超出预期范围 [0, 1]，"
-            "可能是公共模块返回量纲变更（应为 0–1 小数）；本次摘要按 'N/A' 处理"
+            "positive_ratio=%s 超出预期范围 [0, 1]，可能是公共模块返回量纲变更（应为 0–1 小数）；本次摘要按 'N/A' 处理",
+            positive_ratio,
         )
         positive_ratio = None
 
@@ -150,15 +153,15 @@ def main():
     logger.info("=" * 60)
     logger.info("结果摘要")
     logger.info("=" * 60)
-    logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
-    logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
-    logger.info(f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}")
-    logger.info(f"有效天数: {sample_stats.get('valid_days', 'N/A')} 天")
+    logger.info("因子名称: %s", result.get("factor_name", "unknown"))
+    logger.info("更新模式: %s", result.get("update_mode", "unknown"))
+    logger.info("日期范围: %s ~ %s", period.get("start", "N/A"), period.get("end", "N/A"))
+    logger.info("有效天数: %s 天", sample_stats.get("valid_days", "N/A"))
     logger.info("--- IC指标 ---")
-    logger.info(f"IC 均值: {ic_mean_str}")
-    logger.info(f"IC 标准差: {ic_std_str}")
-    logger.info(f"ICIR: {icir_str}")
-    logger.info(f"IC>0 占比: {positive_ratio_str}")
+    logger.info("IC 均值: %s", ic_mean_str)
+    logger.info("IC 标准差: %s", ic_std_str)
+    logger.info("ICIR: %s", icir_str)
+    logger.info("IC>0 占比: %s", positive_ratio_str)
 
     # 字段级差异化提示，提升运维可观测性。
     # 用 is_finite_value 谓词基于原始值判定（None/NaN/±Inf/非数/bool 均视为无效），
@@ -177,7 +180,7 @@ def main():
         )
 
     elapsed = time.monotonic() - start_time
-    logger.info(f"资金流占比趋势因子IC计算完成: elapsed={elapsed:.2f}s")
+    logger.info("资金流占比趋势因子IC计算完成: elapsed=%.2fs", elapsed)
     return result
 
 
@@ -188,7 +191,7 @@ if __name__ == "__main__":
         # 业务预期异常（数据缺失/结构异常）：用 logger.error + exc_info=True 保留 cause 链
         # （__cause__ / __context__）但级别 ERROR，便于运维监控按场景配置告警阈值，
         # 与下方 CRITICAL 的程序 bug 噪声等级区分。
-        logger.error("资金流占比趋势因子IC计算失败（业务异常）", exc_info=True)
+        logger.exception("资金流占比趋势因子IC计算失败（业务异常）")
         sys.exit(1)
     except Exception:
         # 未预期异常（程序 bug / 外部依赖崩溃）：用 logger.critical 升级告警级别。
