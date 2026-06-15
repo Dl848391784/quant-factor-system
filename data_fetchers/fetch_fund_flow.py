@@ -150,11 +150,14 @@ def fetch_fund_flow_data_for_stock(
         # 东方财富接口不直接返回成交额，但可以通过净额反推：
         # main_inflow_ratio = main_inflow_amount / total_volume * 100
         # → total_volume = main_inflow_amount / (main_ratio / 100)
-        # 仅当 main_ratio > 0 时反推有效；ratio == 0 不可除，ratio < 0 反推会得到
-        # 负的成交额（无意义错误数值），统一置为 None 让下游显式处理缺失。
+        # 仅当 main_amount > 0 且 main_ratio > 0 时反推有效：
+        # - main_amount < 0（净流出）→ 反推得负成交额，无意义
+        # - main_ratio == 0 → 不可除
+        # - main_ratio < 0 → 反推得负成交额，无意义
+        # 统一置为 None 让下游显式处理缺失。
         main_amount = record.get("main_inflow_amount")
         main_ratio = record.get("main_inflow_ratio")
-        if main_amount is not None and main_ratio is not None and main_ratio > 0:
+        if main_amount is not None and main_amount > 0 and main_ratio is not None and main_ratio > 0:
             record["total_volume"] = main_amount / (main_ratio / 100.0)
         else:
             record["total_volume"] = None
@@ -173,7 +176,7 @@ def load_cache(logger_arg: logging.Logger | None = None) -> dict[str, Any]:
     _logger = logger_arg or logger
     if not CACHE_FILE.exists():
         _logger.info("资金流数据缓存不存在，将全新拉取")
-        return {"meta": {}, "data": []}
+        return {"meta": {"completed_codes": []}, "data": []}
 
     try:
         with gzip.open(CACHE_FILE, "rt") as f:
@@ -182,7 +185,7 @@ def load_cache(logger_arg: logging.Logger | None = None) -> dict[str, Any]:
         return data
     except Exception as e:
         _logger.warning("加载缓存失败: %s (%s)，将全新拉取", str(e)[:80], type(e).__name__)
-        return {"meta": {}, "data": []}
+        return {"meta": {"completed_codes": []}, "data": []}
 
 
 def get_cached_stock_codes(cache_data: dict[str, Any]) -> set[str]:
@@ -244,19 +247,19 @@ def main(logger_arg: logging.Logger | None = None) -> int:
             skipped += 1
             continue
 
-        # 进度日志：用 processed 而非全局下标 i，避免大量跳过时长期不触发
+        processed += 1
+        # 进度日志：用 processed 而非全局下标，避免大量跳过时长期不触发
         if processed > 0 and processed % _BATCH_LOG_INTERVAL == 0:
             _logger.info(
                 "拉取进度: 已处理=%d (新增=%d, 失败=%d, 跳过=%d, 总计=%d)",
                 processed,
-                len(new_records),
+                len(new_completed_codes),
                 failed,
                 skipped,
                 len(all_codes),
             )
 
         records = fetch_fund_flow_data_for_stock(code, logger_arg=_logger)
-        processed += 1
         if records:
             new_records.extend(records)
             new_completed_codes.append(code)
@@ -283,13 +286,9 @@ def main(logger_arg: logging.Logger | None = None) -> int:
     # Step 4: 合并数据
     all_data = cache_data.get("data", []) + new_records
 
-    # 累积"已完整拉取成功"白名单：旧缓存的 + 本轮新增的
-    prior_completed = cache_data.get("meta", {}).get("completed_codes")
-    if isinstance(prior_completed, list):
-        completed_set = {str(c) for c in prior_completed if c}
-    else:
-        # 旧缓存无白名单，从 data 推断作为初始集合（首次升级迁移）
-        completed_set = {r.get("asset", "") for r in cache_data.get("data", []) if r.get("asset")}
+    # 累积"已完整拉取成功"白名单：cached_codes 已由 get_cached_stock_codes 统一处理
+    # （优先 meta.completed_codes，旧缓存兼容退回 data 推断），直接复用，不再重复推断
+    completed_set = set(cached_codes)
     completed_set.update(new_completed_codes)
 
     # Step 5: 构建元数据（fetched_at 在此处即时取，避免长时拉取与写入时间偏差过大——问题 #5）
@@ -312,7 +311,7 @@ def main(logger_arg: logging.Logger | None = None) -> int:
     output_data = {"meta": meta, "data": all_data}
     try:
         write_gzip_cache(CACHE_FILE, output_data, ensure_dir=True, logger=_logger)
-    except (OSError, PermissionError, TypeError, RuntimeError) as e:
+    except Exception as e:
         _logger.exception(
             "写入缓存失败: %s (%s)，路径=%s",
             str(e)[:120],
