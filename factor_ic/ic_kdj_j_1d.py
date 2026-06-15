@@ -61,6 +61,8 @@ from data_fetchers.factor_calculator import (
 from data_fetchers.factor_calculator import (
     calculate_kdj_j,
 )
+from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.exceptions import FactorCalcError
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
 from factor_ic.common.logger_config import get_logger
 
@@ -70,20 +72,6 @@ logger = get_logger(__name__)
 # ============================================================================
 # 自定义异常类
 # ============================================================================
-
-
-class FactorCalcError(Exception):
-    """因子计算业务异常（用于区分已知业务失败和未预期 RuntimeError）"""
-
-    pass
-
-
-# ============================================================================
-# 参数统一管理（部分从 factor_calculator 导入）
-# ============================================================================
-DEFAULT_MIN_STOCKS = 10
-
-
 # ============================================================================
 # CLI 入口
 # ============================================================================

@@ -56,35 +56,23 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
+from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.exceptions import FactorCalcError
 from factor_ic.common.factor_ic_runner import run_simple_factor_ic
 from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)
-
-# ============================================================================
-# 自定义异常类
-# ============================================================================
-
-class FactorCalcError(Exception):
-    """因子计算业务异常（用于区分已知业务失败和未预期 RuntimeError）"""
-    pass
-
-# ============================================================================
-# 参数统一管理
-# ============================================================================
-DEFAULT_MIN_STOCKS = 10
-
-
 # ============================================================================
 # CLI 入口
 # ============================================================================
 
+
 def main():
     """CLI 主入口"""
-    parser = argparse.ArgumentParser(description='量比因子 IC 计算器')
-    parser.add_argument('--force-full', action='store_true', help='强制全量计算')
-    parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数')
+    parser = argparse.ArgumentParser(description="量比因子 IC 计算器")
+    parser.add_argument("--force-full", action="store_true", help="强制全量计算")
+    parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
 
     args = parser.parse_args()
 
@@ -94,30 +82,30 @@ def main():
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     # 注意：run_simple_factor_ic 只需 factor_col，公共模块自动加载该列
     result = run_simple_factor_ic(
-        factor_name='volume_ratio',
-        factor_col='volume_ratio_5',
+        factor_name="volume_ratio",
+        factor_col="volume_ratio_5",
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        _logger=logger
+        _logger=logger,
     )
 
     # 防御性检查：result 为 None 时抛出业务异常（遵循 PROJECT.md 异常处理规范）
     if result is None:
-        raise FactorCalcError('run_simple_factor_ic 返回 None，数据加载或计算可能失败')
+        raise FactorCalcError("run_simple_factor_ic 返回 None，数据加载或计算可能失败")
 
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
-    ic_metrics = result.get('ic_metrics') or {}
-    sample_stats = result.get('sample_stats') or {}
-    period = result.get('period') or {}
+    ic_metrics = result.get("ic_metrics") or {}
+    sample_stats = result.get("sample_stats") or {}
+    period = result.get("period") or {}
     # 字段名 ic_distribution_consistency 来源于 MODULE.md 第56行输出结构
     # 语义：正比例与方向一致/矛盾判断（MODULE.md 第77行），非单纯分布统计
-    ic_distribution = result.get('ic_distribution_consistency') or {}
+    ic_distribution = result.get("ic_distribution_consistency") or {}
 
     # 构建结果摘要（合并为单条日志便于阅读）
-    ic_mean = ic_metrics.get('ic_mean')
-    ic_std = ic_metrics.get('ic_std')
-    icir = ic_metrics.get('icir')
-    positive_ratio = ic_distribution.get('positive_ratio')
+    ic_mean = ic_metrics.get("ic_mean")
+    ic_std = ic_metrics.get("ic_std")
+    icir = ic_metrics.get("icir")
+    positive_ratio = ic_distribution.get("positive_ratio")
 
     # 格式化各字段（None 时显示 N/A）
     ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
@@ -157,7 +145,7 @@ def main():
     return result
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main()
     except FactorCalcError as e:
