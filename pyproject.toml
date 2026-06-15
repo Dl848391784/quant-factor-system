@@ -25,6 +25,7 @@ exclude = [
     "*.egg-info",
     "build",
     "dist",
+    ".venv*",  # 虚拟环境（如 .venv_akshare_new）
 ]
 src = ["factor_ic", "backtest", "data_fetchers"]
 
@@ -38,6 +39,11 @@ select = [
     "UP",
     "C4",
     "SIM",
+    # G004/G003/G201: logger 风格统一（PROJECT.md 硬规则 #13）
+    # 仅 factor_ic/ 启用，其他模块在 per-file-ignores 中放行（逐步迁移）
+    "G004",  # logging-f-string
+    "G003",  # logging-string-concat
+    "G201",  # logging-exc-info
 ]
 ignore = [
     "E501",
@@ -52,6 +58,14 @@ lines-after-imports = 2
 
 [tool.ruff.lint.per-file-ignores]
 "test_*.py" = ["F401"]
+# G 规则当前仅 factor_ic/ 已合规；其他模块逐步迁移中（详见 PROJECT.md 硬规则 #13）
+"backtest/**/*.py" = ["G004", "G003", "G201"]
+"comprehensive_factor/**/*.py" = ["G004", "G003", "G201"]
+"data_fetchers/**/*.py" = ["G004", "G003", "G201"]
+"summary/**/*.py" = ["G004", "G003", "G201"]
+"temporary/**/*.py" = ["G004", "G003", "G201"]
+"run_pipeline.py" = ["G004", "G003", "G201"]
+"factor_definitions.py" = ["G004", "G003", "G201"]
 
 [tool.ruff.format]
 indent-style = "space"
