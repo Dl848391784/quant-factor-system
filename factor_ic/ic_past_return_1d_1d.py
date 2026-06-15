@@ -75,7 +75,11 @@ def main():
     args = parser.parse_args()
 
     # 启动参数日志（便于追溯本次运行配置）
-    logger.info(f"启动过去1日涨幅因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+    logger.info(
+        "启动过去1日涨幅因子IC计算: min_stocks=%s, force_full=%s",
+        args.min_stocks,
+        args.force_full,
+    )
 
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     # 因子数据已在 factor_generator.py 预计算，使用 run_simple_factor_ic 直接读取
@@ -126,7 +130,7 @@ def main():
         f"ICIR: {icir_str}",
         f"IC>0 占比: {positive_ratio_str}",
     ]
-    logger.info("\n" + "\n".join(summary_lines))
+    logger.info("\n%s", "\n".join(summary_lines))
 
     # 异常状态告警（运维巡检用，四字段均需告警）
     if ic_mean is None:
@@ -149,7 +153,7 @@ if __name__ == "__main__":
         main()
     except FactorCalcError as e:
         # 已知业务异常，使用 error()（不打印完整堆栈，但保留错误内容）
-        logger.error(f"过去1日涨幅因子IC计算失败: {e}")
+        logger.error("过去1日涨幅因子IC计算失败: %s", e)
         sys.exit(1)
     except Exception:
         # 未预期异常（含非预期 RuntimeError），使用 exception()（自动打印完整堆栈）

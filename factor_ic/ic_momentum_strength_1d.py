@@ -74,7 +74,11 @@ def main():
     args = parser.parse_args()
 
     # 调用前日志
-    _logger.info(f"启动动量强度因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+    _logger.info(
+        "启动动量强度因子IC计算: min_stocks=%s, force_full=%s",
+        args.min_stocks,
+        args.force_full,
+    )
 
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     # 注意：momentum_strength 需要 close（计算return_1d）和 return_5d
@@ -125,7 +129,7 @@ def main():
         f"ICIR: {icir_str}",
         f"IC>0占比: {positive_ratio_str}",
     ]
-    _logger.info("\n" + "\n".join(summary_lines))
+    _logger.info("\n%s", "\n".join(summary_lines))
 
     # 异常状态整体感知日志（运维巡检用）
     if ic_mean is None:
@@ -142,7 +146,7 @@ if __name__ == "__main__":
         main()
     except FactorCalcError as e:
         # 已知业务异常，使用 error()（不打印完整堆栈）
-        _logger.error(f"动量强度因子IC计算失败: {e}")
+        _logger.error("动量强度因子IC计算失败: %s", e)
         sys.exit(1)
     except Exception:
         # 未预期异常，使用 exception()（自动打印完整堆栈，无需重复传 e）
