@@ -89,6 +89,10 @@ _COL_OPEN = "open"
 _COL_OVERNIGHT_RET = "overnight_ret"
 _COL_MOMENTUM_STRENGTH = "momentum_strength"
 
+# 资金流族（PR-4b）
+_COL_CAPITAL_FLOW_RATIO_TREND = "capital_flow_ratio_trend"
+_COL_CAPITAL_FLOW_INTENSITY = "capital_flow_intensity"
+
 
 # ============================================================================
 # 行业因子默认参数（私有常量）

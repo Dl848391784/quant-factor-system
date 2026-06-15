@@ -9,28 +9,43 @@ volume_price / industry / industry_financial / fund_flow），通过本
 ``__init__.py`` 重导出，保证 80+ 处外部 ``from data_fetchers.factor_calculator
 import ...`` 路径零修改。
 
-PR-4a 阶段（当前，2026-06-15）
-==============================
-- ``_common.py``：模块级常量 + fallback logger + ``get_module_logger`` + 4 个
-  半公开 helper—— PR-2a 完成；PR-2c 新增 5 个动量族常量；
-  PR-4a 新增第 5 个共享 helper ``_add_industry_column``（行业类因子共用）
+PR-4b 阶段（当前，2026-06-15）—— 拆分重构完成
+=================================================
+- ``_common.py``：模块级常量 + fallback logger + ``get_module_logger`` + 5 个
+  半公开 helper（``_wilder_smoothing_rsi`` / ``_per_asset_transform`` /
+  ``_calculate_ewm_with_initial`` / ``_calculate_delta`` /
+  ``_add_industry_column``）；PR-2c 新增 5 个动量族常量；PR-4b 新增 2 个
+  资金流族常量（``_COL_CAPITAL_FLOW_RATIO_TREND`` / ``_COL_CAPITAL_FLOW_INTENSITY``）
 - ``basic.py``：7 个基础技术指标因子—— PR-2b 完成
 - ``momentum.py``：7 个价格 / 动量族因子—— PR-2c 完成
 - ``delta.py``：4 个止跌信号差分族因子—— PR-3 完成
 - ``volume_price.py``：4 个量价合成族因子—— PR-3 完成
-- **``industry.py``：3 个行业聚合（无外部 I/O）因子（``calculate_industry_momentum_5d``
-  / ``calculate_industry_turnover_trend`` / ``calculate_industry_amplitude_trend``）
-  —— PR-4a 新增**
-- ``_legacy.py``：剩余 5 个 ``calculate_*`` 函数（``calculate_industry_roe_trend`` /
-  ``calculate_industry_earnings_growth`` / ``calculate_industry_pe_trend`` /
-  ``calculate_capital_flow_ratio_trend`` / ``calculate_capital_flow_intensity``，
-  PR-4b 行业基本面 + 资金流继续搬，含 parquet I/O）；
-  顶部以 ``from .basic`` / ``.momentum`` / ``.delta`` / ``.volume_price`` /
-  ``.industry`` 5 段 re-import + ``from ._common import _add_industry_column``
-  维持向后兼容
+- ``industry.py``：3 个行业聚合（无外部 I/O）因子—— PR-4a 完成
+- **``industry_financial.py``：3 个行业基本面因子（``calculate_industry_roe_trend`` /
+  ``calculate_industry_earnings_growth`` / ``calculate_industry_pe_trend``）+ 3 个
+  parquet I/O helper—— PR-4b 新增**
+- **``fund_flow.py``：2 个资金流因子（``calculate_capital_flow_ratio_trend`` /
+  ``calculate_capital_flow_intensity``）+ 3 个 parquet I/O helper—— PR-4b 新增**
+- ``_legacy.py``：**已无任何业务函数定义**，仅保留模块级 import + 9 段子模块
+  re-import + ``__all__`` 列表（约 60 个名称）；从 ~2779 行精简到 ~307 行
 - 本 ``__init__.py`` 从 ``_common`` 直接重导出半公开 helper + 9 公共常量；
-  从 ``_legacy`` ``import *`` 透出全量 ``calculate_*`` 函数（含已搬到子模块
-  的函数，借由 _legacy re-import 路径透出，保持 ``__all__`` 单一来源）
+  从 ``_legacy`` ``import *`` 透出全量 ``calculate_*`` 函数（借由 _legacy 的
+  9 段 re-import 透出，保持 ``__all__`` 单一来源）
+
+拆分总览（design.md §5 实施完毕）
+================================
+| 子模块                | 函数数 | 行数  | I/O |
+|----------------------|--------|-------|-----|
+| _common.py           | 5 helper + 常量 | ~445 | 否 |
+| basic.py             | 7 公共          | 569  | 否 |
+| momentum.py          | 7 公共          | 604  | 否 |
+| delta.py             | 4 公共          | 174  | 否 |
+| volume_price.py      | 4 公共          | 262  | 否 |
+| industry.py          | 3 公共          | 295  | 否 |
+| industry_financial.py| 3 公共 + 3 helper | 429 | parquet |
+| fund_flow.py         | 2 公共 + 3 helper | 339 | parquet |
+| _legacy.py           | 0 函数（仅 re-import + __all__） | ~307 | — |
+| **合计**             | **30 公共 + 11 helper** | **~3424** | — |
 
 兼容性契约（design.md §7.3）
 ==========================
