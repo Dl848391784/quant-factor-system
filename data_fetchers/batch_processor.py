@@ -75,6 +75,12 @@
     - `n_way_merge_deduplicate` while 循环增加 `record is None` 守卫：理论上 heap 中的 key 已经过 peek_key 验证，但显式 None 检查防御未来多线程加载时的状态切换竞争，避免 None 污染 same_key_records
     - `_emit_record` 用 `max(..., key=lambda x: x[0])` 替换原 `same_key_records.sort(reverse=True)[0]`：O(n) 替换 O(n log n)，且消除"原地排序但调用方丢弃列表"的副作用歧义；docstring 标注 same_key_records 为只读使用
     - `save_batch_cache_sorted` Args/Note 章节明确 date 列类型契约：必须为 str 或 datetime64[ns]，禁止 CategoricalDtype（CategoricalDtype 的缺失值经 `astype(str)` 会变 `"<NA>"` 字符串导致下游 Schema 校验失败）
+- v1.11 (2026-06-15): 第十二轮 Bug 修复（轻量化彻底化 + 健壮性 + 契约明确）
+    - `_iter_merged_lines_second_pass` 移除两次 `json.loads` 调用：第一遍 `_iter_merged_records` 已保证 JSON 有效性，第二遍仅做行过滤+逗号剥离才符合"轻量"语义；同时 docstring 严格论证"行末逗号唯一来源是数组分隔符 `,\\n`"，因为 merged 文件由本模块 `_write_json_record` 生成，字段值的逗号在引号内、行末分隔逗号在引号外，不会混淆位置
+    - `save_batch_cache_sorted` 在验证列之前增加入口日志 `_logger.info("保存批次 %s...", batch_idx)`，与函数末尾 `"✓ 保存批次 N: ..."` 形成首尾呼应，调用方在日志流中可直接看到第几批次正在写入
+    - `_scan_and_write_final` 写 meta 时所有字符串字段（generated_at/source/last_updated/version/extra_key）统一用 `json.dumps(..., ensure_ascii=False)` 序列化，避免值含双引号/反斜杠/控制字符时破坏 JSON 结构（与 fields_json/extra_json 的处理方式保持一致）
+    - `format_final_output` 入口处增加 `factor_merged_path == return_merged_path` 显式断言（抛 ValueError），避免两路径相同时 finally 块对同一文件做两次 unlink + `_scan_and_write_final` 写两个不同 schema 输出的隐式依赖
+    - `_emit_record` 类型注解从 `list[tuple[int, dict]]` 改为 `Sequence[tuple[int, dict]]`，与 v1.10 docstring "只读使用" 语义对齐——`list` 类型暗示调用方可修改、`Sequence` 明确只读契约；`from collections.abc import Generator` 同步增补 `Sequence`
 
 作者: 云瑶
 创建日期: 2026-05-27
@@ -85,7 +91,7 @@ import gzip
 import heapq
 import json
 import logging
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import TextIO
@@ -170,38 +176,48 @@ def _iter_merged_lines_second_pass(merged_path: Path) -> Generator[str, None, No
     Note:
         内部生成器，**禁止单独调用**——本函数是 `_scan_and_write_final` 的实现细节，
         函数名后缀 `_second_pass` 用于强调"必须在第一遍 `_iter_merged_records` 验证后才使用"。
-        若跳过第一遍预扫描直接调用此函数，遇到无效 JSON 行会被静默跳过且行末逗号剥离逻辑
-        与第一遍可能产生不对称结果。
+        若跳过第一遍预扫描直接调用此函数，遇到无效 JSON 行会被静默接受（不做 JSON 解析校验）。
 
-        **对称性约束（必须与 `_iter_merged_records` 行为一致）**：
-        本函数采用与 `_iter_merged_records` 相同的两段式判定（先尝试原样 json.loads，
-        失败再剥离行末逗号），保证两遍生成的 line_content 字节级一致——避免"第一遍解析的
-        是 stripped、第二遍写出的是 stripped[:-1]" 这类不对称导致的写出 ≠ 验证内容。
+        **轻量化设计**：第一遍 `_iter_merged_records` 已保证每行可被 `json.loads` 解析，
+        本函数仅做行过滤+逗号剥离，**完全跳过 JSON 解析**——这是与第一遍的关键性能差异，
+        也是命名 "lines" 而非 "records" 的语义体现。
+
+        **对称性保证（与 `_iter_merged_records` 行为一致）**：
+        第一遍 `_iter_merged_records` 的 line_content 在两段式判定中：
+          - `json.loads(stripped)` 成功 → yield stripped（保留原行末逗号）
+          - 失败时尝试 `json.loads(stripped[:-1])` 成功 → yield stripped[:-1]（剥逗号）
+        第二遍这里**不能凭 endswith(",") 无条件剥离**——若字段值末尾本身带逗号且整行
+        不带尾逗号，stripped 原样可解析、第一遍 yield 的是 stripped，第二遍若剥末位
+        字符就会破坏内容。
+        正确做法：仅当行末是 "," 时尝试剥离（merged 数组分隔符固定写为 ",\\n"），
+        但必须配合"第一遍是否真的剥过"判定——直接信任第一遍结果即可：
+
+          - 数组分隔符的尾逗号：第一遍 stripped 的 `json.loads` 失败、剥逗号成功，
+            yield stripped[:-1]；这里同样剥末尾逗号即可保持字节一致。
+          - 字段值末尾的真逗号：第一遍 stripped 原样 `json.loads` 成功，yield stripped；
+            但这种行不会有"行末分隔逗号"——因为合并文件由 `_write_json_record` 生成，
+            分隔符固定 ",\\n"，不会与字段值的逗号混淆位置（字段值的逗号在引号内、
+            行末分隔逗号在引号外）。
+
+        **结论**：merged 文件由本模块自己生成，行末逗号唯一来源是数组分隔符；
+        本函数可安全凭 `stripped.endswith(",")` 决定剥离，无需任何 json.loads 校验。
 
         过滤规则：
         - 行首不是 "{" 的跳过（数组括号、空行等）
-        - 先尝试原样 json.loads，失败再剥 1 个末尾逗号重试
-        - 两次都失败则跳过（与 `_iter_merged_records` 一致的容错）
+        - 行末是 "," 则剥离（数组分隔符）
+        - 否则 yield 原样
     """
     with gzip.open(merged_path, "rt", encoding="utf-8") as f:
         for line in f:
             stripped = line.strip()
             if not stripped.startswith("{"):
                 continue
-            # 与 _iter_merged_records 完全对称的两段式判定（仅判定不返回 dict）
-            try:
-                json.loads(stripped)
+            # 第一遍 _iter_merged_records 已保证 JSON 有效性，此处仅做行过滤+逗号剥离
+            # （merged 文件由 _write_json_record 生成，行末逗号唯一来源是数组分隔符 ",\\n"）
+            if stripped.endswith(","):
+                yield stripped[:-1]
+            else:
                 yield stripped
-            except json.JSONDecodeError:
-                if stripped.endswith(","):
-                    candidate = stripped[:-1]
-                    try:
-                        json.loads(candidate)
-                        yield candidate
-                    except json.JSONDecodeError:
-                        continue
-                else:
-                    continue
 
 
 def _iter_merged_records(merged_path: Path, logger: logging.Logger) -> Generator[tuple[str, dict], None, None]:
@@ -329,10 +345,17 @@ def _scan_and_write_final(
     has_extra = extra_key and extra_value is not None
 
     with gzip.open(output_path, "wt", encoding="utf-8") as out_f:
+        # meta 字符串字段统一用 json.dumps 序列化，避免值中含双引号/反斜杠/控制字符时
+        # 破坏 JSON 结构（与下方 fields_json/extra_json 处理方式保持一致）
+        generated_at_json = json.dumps(meta["generated_at"], ensure_ascii=False)
+        source_json = json.dumps(meta["source"], ensure_ascii=False)
+        last_updated_json = json.dumps(meta["last_updated"], ensure_ascii=False)
+        version_json = json.dumps(meta["version"], ensure_ascii=False)
+
         out_f.write("{\n")
         out_f.write('  "meta": {\n')
-        out_f.write(f'    "generated_at": "{meta["generated_at"]}",\n')
-        out_f.write(f'    "source": "{meta["source"]}",\n')
+        out_f.write(f'    "generated_at": {generated_at_json},\n')
+        out_f.write(f'    "source": {source_json},\n')
         out_f.write(f'    "n_days": {meta["n_days"]},\n')
         out_f.write(f'    "n_assets": {meta["n_assets"]},\n')
         out_f.write(f'    "n_records": {meta["n_records"]},\n')
@@ -340,13 +363,14 @@ def _scan_and_write_final(
         out_f.write(f'      "start": {start_json},\n')
         out_f.write(f'      "end": {end_json}\n')
         out_f.write("    },\n")
-        out_f.write(f'    "last_updated": "{meta["last_updated"]}",\n')
-        out_f.write(f'    "version": "{meta["version"]}",\n')
-        fields_json = json.dumps(meta["fields"])
+        out_f.write(f'    "last_updated": {last_updated_json},\n')
+        out_f.write(f'    "version": {version_json},\n')
+        fields_json = json.dumps(meta["fields"], ensure_ascii=False)
         out_f.write(f'    "fields": {fields_json}{"," if has_extra else ""}\n')
         if has_extra:
-            extra_json = json.dumps(extra_value)
-            out_f.write(f'    "{extra_key}": {extra_json}\n')
+            extra_json = json.dumps(extra_value, ensure_ascii=False)
+            extra_key_json = json.dumps(extra_key, ensure_ascii=False)
+            out_f.write(f"    {extra_key_json}: {extra_json}\n")
         out_f.write("  },\n")
         out_f.write('  "data": [\n')
 
@@ -554,6 +578,10 @@ def save_batch_cache_sorted(
     _logger = logger_arg or logging.getLogger(__name__)
     _result_dir = result_dir or RESULT_DIR
 
+    # 入口日志：明确"开始"边界，与函数末尾的"✓ 保存批次 N: ..."形成首尾呼应，
+    # 调用方在日志流中可直接看到第几批次正在写入（而非只看到子步骤"保存因子数据"）
+    _logger.info("保存批次 %s...", batch_idx)
+
     factor_path = _result_dir / f"batch_{batch_idx}_factor.json.gz"
     return_path = _result_dir / f"batch_{batch_idx}_return.json.gz"
 
@@ -619,7 +647,7 @@ def save_batch_cache_sorted(
 
 def _emit_record(
     f: TextIO,
-    same_key_records: list[tuple[int, dict]],
+    same_key_records: Sequence[tuple[int, dict]],
     count: int,
     logger: logging.Logger | None = None,
 ) -> int:
@@ -833,6 +861,16 @@ def format_final_output(
     # 统一转换为 Path（遵循 MODULE.md 参数类型约定）
     factor_merged_path = Path(factor_merged_path)
     return_merged_path = Path(return_merged_path)
+
+    # 前置契约：因子和收益必须是不同的 merged 文件——它们承载不同字段集（行情+基础+扩展因子
+    # vs 1d/3d/5d 收益），路径相同会导致 finally 块对同一路径做两次 unlink（第一次成功
+    # 第二次因 exists() 检查静默跳过），且 _scan_and_write_final 也会读同一文件写两个
+    # 不同 schema 的输出，破坏数据契约。显式断言而非依赖 finally 的 exists() 兜底。
+    if factor_merged_path == return_merged_path:
+        raise ValueError(
+            f"factor_merged_path 与 return_merged_path 不能相同（{factor_merged_path}）："
+            "因子与收益是不同字段集的配套数据，必须由独立的 merged 文件写出"
+        )
 
     _logger.info("格式化最终输出文件: 因子=%s, 收益=%s", factor_merged_path, return_merged_path)
 

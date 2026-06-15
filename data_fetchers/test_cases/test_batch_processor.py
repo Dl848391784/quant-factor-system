@@ -919,6 +919,163 @@ def _make_logger():
     return log
 
 
+class TestBugFixesV111:
+    """v1.11 五项 Bug 修复回归测试（轻量化 + 健壮性 + 契约明确）"""
+
+    def test_iter_merged_lines_second_pass_no_json_loads(self, temp_dir):
+        """Bug #1: 第二遍生成器不应调用 json.loads（轻量化彻底化）
+
+        通过 monkey-patch json.loads 抛错，验证函数不依赖 JSON 解析也能正常工作。
+        """
+        import gzip
+        import json as _json
+        from unittest import mock
+
+        from data_fetchers.batch_processor import _iter_merged_lines_second_pass
+
+        merged_path = temp_dir / "merged_test.json.gz"
+        with gzip.open(merged_path, "wt", encoding="utf-8") as f:
+            f.write("[\n")
+            f.write('  {"date": "2026-06-15", "asset": "000001"},\n')
+            f.write('  {"date": "2026-06-16", "asset": "000002"}\n')
+            f.write("]")
+
+        # patch json.loads 让其抛错——若第二遍生成器内部还有 json.loads 调用，立刻暴露
+        with mock.patch("data_fetchers.batch_processor.json.loads", side_effect=AssertionError("不应调用 json.loads")):
+            lines = list(_iter_merged_lines_second_pass(merged_path))
+
+        assert len(lines) == 2
+        # 验证仅做了行过滤+逗号剥离
+        first = _json.loads(lines[0])
+        assert first["asset"] == "000001"
+        # 第一行原本以 "," 结尾，应被剥离
+        assert not lines[0].endswith(",")
+
+    def test_save_batch_cache_sorted_emits_entry_log(self, temp_dir):
+        """Bug #3: save_batch_cache_sorted 应在入口处记录"保存批次 N..." 日志"""
+        import logging
+
+        import pandas as pd
+
+        # 用一个捕获 logger 验证 info 日志被发出
+        capture_log = logging.getLogger("test_entry_log_capture")
+        capture_log.setLevel(logging.INFO)
+        captured = []
+
+        class _Handler(logging.Handler):
+            def emit(self, record):
+                captured.append(record.getMessage())
+
+        handler = _Handler(level=logging.INFO)
+        capture_log.addHandler(handler)
+        capture_log.propagate = False
+
+        factor_df = pd.DataFrame(
+            {
+                "date": ["2026-06-15"],
+                "asset": ["000001"],
+                "open": [10.0],
+                "close": [10.5],
+                "high": [11.0],
+                "low": [9.5],
+                "rsi_6": [50.0],
+                "volume_ratio_5": [1.0],
+                "volume": [1000000.0],
+            }
+        )
+        return_df = pd.DataFrame(
+            {
+                "date": ["2026-06-15"],
+                "asset": ["000001"],
+                "forward_return_1d": [0.01],
+                "forward_return_3d": [0.03],
+                "forward_return_5d": [0.05],
+            }
+        )
+        save_batch_cache_sorted(7, factor_df, return_df, result_dir=temp_dir, logger_arg=capture_log)
+
+        capture_log.removeHandler(handler)
+
+        # 关键断言：入口日志和结尾日志都存在
+        entry_logs = [m for m in captured if m == "保存批次 7..."]
+        end_logs = [m for m in captured if m.startswith("  ✓ 保存批次 7:")]
+        assert len(entry_logs) == 1, f"预期入口日志 '保存批次 7...'，实际捕获: {captured}"
+        assert len(end_logs) == 1, f"预期结尾日志 '✓ 保存批次 7: ...'，实际捕获: {captured}"
+
+    def test_scan_and_write_final_meta_string_with_special_chars(self, temp_dir, test_logger):
+        """Bug #4: meta 字符串字段含双引号/反斜杠时应被 json.dumps 转义"""
+        import gzip
+        import json as _json
+
+        from data_fetchers.batch_processor import _scan_and_write_final
+
+        # 创建一个有效 merged 文件
+        merged_path = temp_dir / "merged_test.json.gz"
+        with gzip.open(merged_path, "wt", encoding="utf-8") as f:
+            f.write("[\n")
+            f.write('  {"date": "2026-06-15", "asset": "000001", "value": 1.0}\n')
+            f.write("]")
+
+        output_path = temp_dir / "final_special.json.gz"
+        # 故意构造含双引号、反斜杠、换行的 meta 值
+        meta_template = {
+            "generated_at": '2026-06-15 with "quote"',
+            "source": "test\\backslash",
+            "last_updated": 'embedded "quote" inside',
+            "version": "v1.0\nwith\nnewline",
+            "fields": ["date", "asset", "value"],
+            "extra_key": "note",
+            "extra_value": 'comment with "quote" and \\backslash',
+        }
+        size_mb, stats = _scan_and_write_final(merged_path, output_path, meta_template, test_logger)
+        assert size_mb > 0
+
+        # 关键断言：写出的文件可被 json.loads 正常解析（特殊字符未破坏 JSON 结构）
+        with gzip.open(output_path, "rt", encoding="utf-8") as f:
+            data = _json.load(f)
+        assert data["meta"]["generated_at"] == '2026-06-15 with "quote"'
+        assert data["meta"]["source"] == "test\\backslash"
+        assert data["meta"]["last_updated"] == 'embedded "quote" inside'
+        assert data["meta"]["version"] == "v1.0\nwith\nnewline"
+        assert data["meta"]["note"] == 'comment with "quote" and \\backslash'
+
+    def test_format_final_output_rejects_same_paths(self, temp_dir, test_logger):
+        """Bug #5: factor_merged_path 与 return_merged_path 相同时应抛 ValueError"""
+        import gzip
+        import json as _json
+
+        from data_fetchers.batch_processor import format_final_output
+
+        # 创建一个 dummy merged 文件
+        same_path = temp_dir / "same_merged.json.gz"
+        with gzip.open(same_path, "wt", encoding="utf-8") as f:
+            _json.dump([{"date": "2026-06-15", "asset": "000001"}], f)
+
+        with pytest.raises(ValueError, match="不能相同"):
+            format_final_output(same_path, same_path, result_dir=temp_dir, logger_arg=test_logger)
+
+    def test_emit_record_accepts_tuple_input(self, temp_dir, test_logger):
+        """Bug #6: _emit_record 类型注解 Sequence 应同时接受 list 和 tuple
+
+        Sequence 是只读协议，tuple 也实现 Sequence；list 类型注解则不允许 tuple。
+        本测试验证 tuple 输入不报类型错误且功能正确（运行时 Python 不强制类型检查，
+        但通过此测试保留 mypy/pyright 静态检查的语义意图）。
+        """
+        import gzip
+
+        from data_fetchers.batch_processor import _emit_record
+
+        # 用 tuple 调用（list 注解会被静态类型检查器拒绝，Sequence 接受）
+        records_tuple = ((1, {"date": "2026-06-15", "asset": "001", "src": "first"}),)
+
+        output_path = temp_dir / "test_emit_tuple.json.gz"
+        with gzip.open(output_path, "wt", encoding="utf-8") as f:
+            f.write("[\n")
+            count = _emit_record(f, records_tuple, 0, test_logger)
+            f.write("\n]")
+        assert count == 1
+
+
 # ============================================================================
 # 集成测试
 # ============================================================================
