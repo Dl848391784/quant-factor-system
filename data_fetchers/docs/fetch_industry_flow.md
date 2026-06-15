@@ -1,8 +1,8 @@
 # fetch_industry 流程文档
 
-> 版本: v3.12
+> 版本: v3.13
 > 创建时间: 2026-05-27 14:20 北京时间
-> 更新时间: 2026-06-15（v3.12 防御性编程与日志层级一致性：EM 失败分支补 sleep、SW 外层 error→warning、EM 异常分支补 industry_map=None 防御性重置）
+> 更新时间: 2026-06-15（v3.13 误导性日志消除与 docstring 契约补充：_write_backup_cache 调用移出 try/except、SW docstring 补包装语义、衔接日志措辞修正）
 
 ---
 

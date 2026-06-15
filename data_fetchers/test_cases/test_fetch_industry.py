@@ -322,6 +322,43 @@ class TestBackupFallback:
             # 验证仍然返回数据
             assert len(data) > 0
 
+    def test_write_cache_exception_not_misclassified_as_parse_failure(self, mock_backup_file, caplog):
+        """TC004-5 (v3.13): _write_backup_cache 抛异常不应被误认为"解析失败"
+
+        v3.13 修复：旧实现把 `_write_backup_cache(industry_map)` 调用放在
+        try/except 块内，若该函数内部抛异常（理论上不会——其 docstring 声明
+        吞掉所有异常——但 docstring 契约不是硬约束），except 会把"写缓存失败"
+        当作"本地备用文件解析失败"记录，产生误导性日志。
+
+        本测试通过 mock `_write_backup_cache` 主动抛异常，验证：
+        - 异常向外抛出（而非被解析失败 except 静默捕获 + raise 误导日志）
+        - 日志中不出现"本地备用文件解析失败"误判（修复前会出现）
+
+        若 _write_backup_cache 调用仍在 try 内，本测试会失败：
+        - caplog 中能搜到"本地备用文件解析失败"误判日志
+        """
+        import logging
+        with patch(
+            'data_fetchers.fetch_industry._write_backup_cache',
+            side_effect=RuntimeError("mock 写缓存内部异常"),
+        ), caplog.at_level(logging.WARNING, logger='data_fetchers.fetch_industry'):
+            try:
+                load_local_industry_backup(stock_list_path=mock_backup_file, write_cache=True)
+            except RuntimeError:
+                # 写缓存异常按真实类型抛出（不再被 except 包装为"解析失败"）
+                pass
+
+            # v3.13 修复后：日志中不应出现"本地备用文件解析失败"
+            # （若修复未生效，旧代码会把 _write_backup_cache 异常归为解析失败误判）
+            misclassified = [
+                rec for rec in caplog.records
+                if "本地备用文件解析失败" in rec.getMessage()
+            ]
+            assert not misclassified, (
+                f"v3.13 修复未生效：_write_backup_cache 异常被误归为解析失败，"
+                f"误判日志: {[r.getMessage() for r in misclassified]}"
+            )
+
 
 class TestModuleCacheThreadSafety:
     """TC005: 线程安全测试"""
@@ -400,7 +437,7 @@ class TestConstraintCompliance:
 
     def test_version_constant_exists(self):
         """TC007-1: 版本号提取为常量（MODULE.md 约束 #16）"""
-        assert _OUTPUT_VERSION == '3.12'
+        assert _OUTPUT_VERSION == '3.13'
 
     def test_public_module_import(self):
         """TC007-2: 公共模块导入（MODULE.md 约束 #4）"""

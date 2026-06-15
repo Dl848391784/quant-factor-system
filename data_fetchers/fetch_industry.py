@@ -41,6 +41,7 @@
 - v3.10 (2026-06-14): 重复日志消除、降级链一致性与运行时契约验证（5项） - 1) fetch_stock_industry_sw 外层 except 通过 isinstance 判断 e 是否为 (RequestException, ValueError, OSError)，若是则跳过重复 logger.error 直接 raise（v3.9 内层已记录细粒度 error，外层再打"akshare API 获取失败"会让同一事件出现两条 error 日志、稀释信号），仅对未预期异常（KeyError 列校验、RuntimeError 股票名重试耗尽等）保留外层兜底日志；同步 import requests 提到 try 之前避免外层 except 引用未定义；2) _write_backup_cache docstring 显式声明"本函数不向外抛异常"契约（防覆盖路径读失败 + 写入失败均吞掉为 warning），消除调用方阅读时的歧义；3) load_stock_industry 缓存加载异常分支补充 INDUSTRY_CACHE_PATH.unlink(missing_ok=True)，与"缓存损坏"分支（L504）行为一致——加载异常通常是 JSON 解析失败/文件损坏，不删会导致下次仍读到同一损坏文件；4) _fallback_to_remote_or_backup 在 load_local_industry_backup 返回空 dict（文件不存在）时补充 logger.warning("降级链已耗尽，返回空 dict（文件不存在）")，让调用方从日志判断整条降级链已耗尽（旧实现仅 load_local_industry_backup 内部一条"备用文件不存在" warning，调用层级看不出降级链全部失败）；5) get_industry_map 添加 `assert isinstance(_industry_cache, dict), ...` 运行时契约验证（仅 __debug__ 模式生效，生产无开销），若未来 load_stock_industry 被改为某些路径返回非 dict，此处会立刻暴露契约破裂而非静默 cast 透传
 - v3.11 (2026-06-14): 异常处理鲁棒性与日志契约对齐（5项） - 1) fetch_stock_industry_sw 外层 except 用受保护的局部 `from requests import RequestException as _ReqExc` 替代 `requests.RequestException`，避免极端情况下 requests 本身导入失败时（顶层 import requests 抛 ImportError 进入本 except 块）`requests` 名字未绑定触发 NameError 覆盖原始 ImportError 异常链；2) refresh_industry_cache 新增 `except ImportError as em_imp_e` 分支，把 EM 段 import 失败也包成 RuntimeError 经 SW 段降级，与 SW 段（外层 except Exception 已经把 ImportError 包成 RuntimeError）对称——旧实现 EM import 失败走 main 的"未预期错误"else 分支、SW import 失败走"备用降级"分支，同样依赖缺失运维行为不一致；3) _write_backup_cache docstring 补 `Raises: 无（吞掉所有异常）` 节，与 load_local_industry_backup 的 Raises 节格式对称，让两个函数契约从 docstring 一目了然；4) _fallback_to_remote_or_backup 第一个 except 块补 `logger.info("[行业数据] akshare 全部失败，降级到本地备用数据...")` 衔接日志，info 级别（决策通知而非异常状态），避免运维查日志时 refresh 内部 EM warning + SW error 后直接跳到 backup 日志中间无衔接；5) load_stock_industry 日期格式异常分支两条 logger 调用（warning + info）合并为单条 warning，与其他异常返回分支（缓存损坏/刷新失败/无更新时间标记）的单日志风格对齐
 - v3.12 (2026-06-15): 防御性编程与日志层级一致性（3项） - 1) fetch_stock_industry_em 内层 for 循环 `except Exception` 分支补 `time.sleep(0.3)`：原实现 sleep 仅在成功分支执行，若 31 个板块全部因限速失败则会零间隔连环重试加剧限速；现失败分支与成功分支保持同样间隔，避免限速导致的连环失败；2) fetch_stock_industry_sw 外层 except 兜底日志由 `logger.error` 降级为 `logger.warning`：未预期异常（KeyError 列校验、RuntimeError 股票名重试耗尽）原本会让本函数与 refresh_industry_cache 的 SW 段 `logger.error("[行业数据] SW 获取失败 ...")` 同事件双 error；按"细节在内层 warning、决策在外层 error"的层级一致性原则，由调用方统一在 SW 路径失败时打 error；3) refresh_industry_cache 的 `except ImportError` 与 `except Exception` 两个 EM 分支末尾显式补 `industry_map = None`：当前 industry_map 初始值已是 None，此处为冗余赋值；防御性目的是若未来在 try 之前增加对 industry_map 的提前赋值（例如优化路径注入预取结果），异常分支不重置会让 `if industry_map is None` 误判跳过 SW 降级路径
+- v3.13 (2026-06-15): 误导性日志消除与 docstring 契约补充（3项） - 1) load_local_industry_backup 把 `_write_backup_cache(industry_map)` 调用从 try/except 块内移到块外（return 之前）：旧实现若 `_write_backup_cache` 抛异常（理论上不会——其 docstring 声明吞掉所有异常——但 docstring 契约不是硬约束，未来重构可能破坏），except 会把"写缓存失败"当作"本地备用文件解析失败"记录，产生误导性日志；`_write_backup_cache` 的不抛异常契约已自行覆盖错误处理，无需被 try 二次保护；2) fetch_stock_industry_sw docstring 补充"异常类型对调用方的差异"Note 节：通过 refresh_industry_cache 间接调用时所有异常被统一包装为 RuntimeError（原始异常通过 __cause__ 链可追溯），直接调用本函数时按原样抛出原始类型；这种差异是 refresh_industry_cache 对外契约简化的有意设计，docstring 显式说明避免调用方读 Raises 节产生"实际只会收到 RuntimeError"的认知冲突；3) _fallback_to_remote_or_backup 的衔接日志措辞由"akshare 全部失败"改为"akshare 获取或写缓存失败"：refresh_industry_cache 抛异常的来源不止"akshare 路径全部失败"（EM+SW 双失败），还包含"EM 成功但 write_json_cache 写缓存失败"（akshare 实际成功），旧措辞会让运维在第二种场景下误判故障定位（去查 akshare/网络而非磁盘），新措辞涵盖两种触发场景
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -66,7 +67,7 @@ except ImportError:
     from common import get_module_result_dir, get_stock_list_file, setup_logger, write_json_cache
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "3.12"
+_OUTPUT_VERSION = "3.13"
 
 # 日期格式常量（避免写入和解析格式不一致）
 _DATE_FORMAT = "%Y-%m-%d"
@@ -331,6 +332,22 @@ def fetch_stock_industry_sw() -> dict:
         ValueError / OSError: SW xls 解析失败（v3.9 区分记录）
         RuntimeError: 股票名称重试 3 次仍失败
         其他 Exception: 列校验等防御性失败，外层 except 兜底记录后 re-raise
+
+    Note:
+        **异常类型对调用方的差异**（v3.13 补充说明）：
+
+        - 通过 ``refresh_industry_cache`` 间接调用时（生产路径）：
+          上述所有异常类型（RequestException / ValueError / OSError / RuntimeError /
+          其他 Exception）都会被 ``refresh_industry_cache`` 的 SW 段
+          ``except Exception as sw_e`` 捕获，并 ``raise RuntimeError(...) from sw_e``
+          统一包装。调用方收到的始终是 ``RuntimeError``，原始异常通过 ``__cause__`` 链可追溯。
+
+        - 直接调用本函数时（测试 / 开发调试路径）：
+          上述异常类型按原样抛出，不做包装。调用方需按 Raises 节列出的具体类型分别处理。
+
+        这种"间接调用统一为 RuntimeError、直接调用保留原始类型"的差异是有意设计：
+        前者是 ``refresh_industry_cache`` 对外契约的简化（参见其 docstring "Raises: RuntimeError"），
+        后者保留诊断维度便于测试用例断言具体异常类型。
     """
     # v3.10: requests 提到 try 之前（函数顶部），让外层 except 也能引用
     # RequestException 做类型判断（避免重复 error 日志）
@@ -502,7 +519,13 @@ def _fallback_to_remote_or_backup(reason: str) -> dict:
         # backup 成功/失败日志，中间缺一条"决策通知"说明降级正在发生。
         # 用 info 而非 warning：这是降级链的正常衔接节点，异常状态已由内层
         # error 充分表达，本层只需告知"现在切换到本地备用数据路径"。
-        logger.info("[行业数据] akshare 全部失败，降级到本地备用数据...")
+        # v3.13: 措辞从"akshare 全部失败"改为"akshare 获取或写缓存失败"。
+        # 旧措辞不准确——refresh_industry_cache 抛异常的来源不止"akshare 获取失败"：
+        #   - EM 失败 + SW 失败（akshare 路径全部失败）
+        #   - EM 成功但 write_json_cache 失败（仅写缓存失败，akshare 实际是成功的）
+        # 旧措辞会让运维在第二种场景下误判故障定位（去查 akshare/网络而非磁盘）。
+        # 新措辞涵盖两种触发场景，与 refresh_industry_cache 的实际异常面对齐。
+        logger.info("[行业数据] akshare 获取或写缓存失败，降级到本地备用数据...")
         try:
             # v3.9: write_cache=True 显式传参（虽与默认值相同），避免与 main 调用风格不一致
             backup_map = load_local_industry_backup(write_cache=True)
@@ -778,18 +801,24 @@ def load_local_industry_backup(stock_list_path: Path | None = None, write_cache:
 
             logger.info(f"[行业数据] 本地备用分类完成: {len(industry_map)} 只股票")
 
-            # 写入缓存（避免每次重复读文件）
-            if write_cache and industry_map:
-                _write_backup_cache(industry_map)
-
-            return industry_map
-
         except Exception as e:
             # v3.5: 改 raise，让调用方区分"文件不存在"vs"文件损坏解析失败"
             # 旧写法只 warning + return {} 会让两种完全不同的失败原因合流为同一行日志，
             # 调用方（load_stock_industry / main）无法准确记录降级原因。
             logger.warning(f"[行业数据] 本地备用文件解析失败 [{type(e).__name__}]: {e} (path={stock_list_path})")
             raise
+
+        # v3.13: 写缓存调用移出 try/except 块。
+        # 旧实现把 _write_backup_cache(industry_map) 放在 try 内，若该函数内部
+        # 抛异常（理论上不会——其 docstring 声明吞掉所有异常不向外抛——但 docstring
+        # 契约不是硬约束，未来重构时可能被破坏），except 会把"写缓存失败"当作
+        # "本地备用文件解析失败"记录，产生误导性日志。
+        # _write_backup_cache 的不抛异常契约（见该函数 docstring "Raises: 无"）
+        # 已自行覆盖错误处理，无需被 try 二次保护——出 try 块再调用。
+        if write_cache and industry_map:
+            _write_backup_cache(industry_map)
+
+        return industry_map
     else:
         # 文件不存在：记录警告日志，方便调试（而非静默返回空 dict）
         logger.warning(f"[行业数据] 本地备用文件不存在: {stock_list_path}")
