@@ -47,6 +47,9 @@ from .ic_result_builder import build_error_result, build_ic_result, get_ic_outpu
 # 导入增量引擎
 from .incremental_engine import incremental_update_ic
 
+# 导入 FactorSpec（R3.3: run_factor_ic 新入口依赖）
+from .factor_spec import FactorSpec
+
 
 def run_factor_ic_analysis(
     factor_name: str,
@@ -422,6 +425,79 @@ def run_complex_factor_ic(
         factor_col=factor_col,
         factor_cols=factor_cols,
         custom_factor_calculation=custom_factor_calculation,
+        _logger=_logger,
+        **kwargs,
+    )
+
+
+def run_factor_ic(
+    spec: FactorSpec,
+    *,
+    return_period: str = "1d",
+    min_stocks: int = 10,
+    force_full: bool = False,
+    args: Any | None = None,
+    _logger=None,
+    **kwargs,
+) -> dict[str, Any]:
+    """FactorSpec 驱动的 IC 分析入口（推荐，替代 run_simple/run_complex）。
+
+    从 FactorSpec 提取 factor_name / factor_col / required_columns / calculation /
+    calc_params / extra_log_params，然后委托给 run_factor_ic_analysis。
+
+    Args:
+        spec: FactorSpec 实例（由 register_factor 注册）
+        return_period: 收益周期（默认 "1d"）
+        min_stocks: 最小股票数（默认 10）
+        force_full: 强制全量计算（默认 False）
+        args: CLI argparse.Namespace，供 calc_params_fn / extra_log_params_fn 提取参数
+        _logger: 日志记录器（遵循 M3 由调用方传入）
+        **kwargs: 其他参数（传递给 run_factor_ic_analysis）
+
+    Returns:
+        run_factor_ic_analysis 的完整结果字典
+
+    Raises:
+        DataSchemaError: required_columns 与数据源列不匹配时
+
+    示例:
+        SPEC = register_factor(FactorSpec(
+            factor_name="kdj_j",
+            factor_col="kdj_j",
+            required_columns=JOIN_KEYS + ("close", "high", "low", "kdj_j"),
+            calculation=calculate_kdj_j,
+            calc_params_fn=lambda a: {"n": a.n, "m1": a.m1, "m2": a.m2},
+            extra_log_params_fn=lambda a: {"n": a.n, "m1": a.m1, "m2": a.m2},
+        ))
+
+        result = run_factor_ic(spec=SPEC, args=args, _logger=logger)
+    """
+    from factor_ic.common.data_columns import load_available_columns, validate_required_columns
+
+    # L3 运行时 schema 预校验（可选：columns.json 存在时才校验）
+    columns_info = load_available_columns()
+    if columns_info and "all_cols" in columns_info:
+        validate_required_columns(
+            factor_name=spec.factor_name,
+            required_columns=spec.required_columns,
+            available_columns=columns_info["all_cols"],
+        )
+
+    # 从 spec + args 提取参数
+    custom_factor_calculation = spec.calculation
+    custom_factor_calculation_params = spec.calc_params_fn(args) if (spec.calc_params_fn and args) else None
+    extra_log_params = spec.extra_log_params_fn(args) if (spec.extra_log_params_fn and args) else None
+
+    return run_factor_ic_analysis(
+        factor_name=spec.factor_name,
+        factor_col=spec.factor_col,
+        factor_cols=list(spec.required_columns),
+        return_period=return_period,
+        min_stocks=min_stocks,
+        force_full=force_full,
+        custom_factor_calculation=custom_factor_calculation,
+        custom_factor_calculation_params=custom_factor_calculation_params,
+        extra_log_params=extra_log_params,
         _logger=_logger,
         **kwargs,
     )
