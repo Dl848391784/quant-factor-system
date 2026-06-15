@@ -43,4 +43,37 @@ class FactorCalcError(Exception):
     pass
 
 
-__all__ = ["FactorCalcError"]
+class DataSchemaError(Exception):
+    """因子数据 schema 校验失败
+
+    用途：FactorSpec 声明的 required_columns 与实际数据列不匹配时抛出。
+    含因子名 + 缺失列 + 可用列，便于运维精确定位。
+
+    典型触发场景：
+    - 上游 data_fetchers 改了列名，消费者 FactorSpec 的 required_columns 未同步
+    - 新增因子但 factor_ic_data.json.gz 未重跑，缺扩展因子列
+    - required_columns 含拼写错误的列名
+
+    捕获约定：
+    - factor_ic_runner.run_factor_ic() 内部捕获并 logger.error 后 raise
+    - CLI 入口 __main__ 块 except DataSchemaError → logger.error + sys.exit(1)
+    - 与 FactorCalcError 并列，上层 pipeline 可分别捕获处理
+    """
+
+    factor_name: str
+    missing_columns: list[str]
+    available_columns: list[str]
+
+    def __init__(
+        self,
+        factor_name: str,
+        missing: list[str],
+        available: list[str],
+    ) -> None:
+        self.factor_name = factor_name
+        self.missing_columns = missing
+        self.available_columns = available
+        super().__init__(f"因子 {factor_name} 数据 schema 校验失败: 缺失列 {missing}, 可用列(前20): {available[:20]}")
+
+
+__all__ = ["FactorCalcError", "DataSchemaError"]
