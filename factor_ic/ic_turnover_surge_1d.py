@@ -44,12 +44,30 @@ from data_fetchers.factor_calculator import (
     calculate_turnover_surge,
 )
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)
+
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# required_columns: JOIN_KEYS + close + turnover_rate（换手率突增计算输入）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="turnover_surge",
+        factor_col="turnover_surge",
+        required_columns=JOIN_KEYS + ("close", "turnover_rate", "turnover_surge"),
+        calculation=calculate_turnover_surge,
+        calc_params_fn=lambda a: {"surge_window": a.surge_window},
+        extra_log_params_fn=lambda a: {"surge_window": a.surge_window},
+    )
+)
 # ============================================================================
 # CLI 入口
 # ============================================================================
@@ -80,16 +98,12 @@ def main():
     args = parser.parse_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full + extra_log_params）
-    # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
-    result = run_complex_factor_ic(
-        factor_name="turnover_surge",
-        factor_col="turnover_surge",
-        factor_cols=["close", "turnover_rate"],
-        custom_factor_calculation=calculate_turnover_surge,
-        custom_factor_calculation_params={"surge_window": args.surge_window},
+    # 使用 FactorSpec 驱动入口（遵循 factor_cols_literal_constant_design.md §4.1）
+    result = run_factor_ic(
+        spec=SPEC,
+        args=args,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        extra_log_params={"surge_window": args.surge_window},
         _logger=logger,
     )
 

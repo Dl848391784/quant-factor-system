@@ -51,14 +51,31 @@ from factor_ic.common.cli_helpers import (  # noqa: E402
     is_finite_value,
     safe_dict,
 )
+from factor_ic.common.data_columns import JOIN_KEYS  # noqa: E402
 from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
-from factor_ic.common.factor_ic_runner import run_complex_factor_ic  # noqa: E402
+from factor_ic.common.factor_ic_runner import run_factor_ic  # noqa: E402
+from factor_ic.common.factor_spec import FactorSpec, register_factor  # noqa: E402
 from factor_ic.common.logger_config import get_logger  # noqa: E402
 
 
 logger = get_logger(__name__)
 
 __version__ = "1.5.0"
+
+# ============================================================================
+# FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
+# required_columns: JOIN_KEYS（资金流占比趋势因子无额外输入列，仅用 date/asset 关联）
+# ============================================================================
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="capital_flow_ratio_trend",
+        factor_col="capital_flow_ratio_trend",
+        required_columns=JOIN_KEYS + ("capital_flow_ratio_trend",),
+        calculation=calculate_capital_flow_ratio_trend,
+        extra_log_params_fn=lambda _a: {"version": __version__},
+    )
+)
 
 
 def main():
@@ -75,18 +92,13 @@ def main():
 
     start_time = time.monotonic()
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full + extra_log_params）
-    # 注: factor_cols 在公共模块语义为"需从缓存加载的原始因子列"。
-    # 本因子原始数据从外部资金流文件加载（见 factor_calculator._load_fund_flow_data），
-    # 缓存中仅需 date/asset 作匹配键，因此传 ["date", "asset"]（data_loader 会自动去重）。
-    # TODO: 公共模块 API 重命名（factor_cols → load_cols）作为独立任务跨 8 个调用点统一处理。
-    result = run_complex_factor_ic(
-        factor_name="capital_flow_ratio_trend",
-        factor_col="capital_flow_ratio_trend",
-        factor_cols=["date", "asset"],
-        custom_factor_calculation=calculate_capital_flow_ratio_trend,
+    # 使用 FactorSpec 驱动入口（遵循 factor_cols_literal_constant_design.md §4.1）
+    # 注: 本因子原始数据从外部资金流文件加载（见 factor_calculator._load_fund_flow_data），
+    # 缓存中仅需 date/asset 作匹配键（data_loader 会自动去重）。
+    result = run_factor_ic(
+        spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        extra_log_params={"version": __version__},
         _logger=logger,
     )
 
