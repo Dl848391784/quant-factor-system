@@ -43,6 +43,13 @@
     - `n_way_merge_deduplicate` 检查 `load_error` 并记录 warning 日志，区分"损坏跳过"和"正常空批次"
     - `format_final_output` finally 块删除临时文件失败时记录 warning 日志（而非静默 pass），确保问题可追溯
     - `format_final_output` 重构异常处理：因子和收益文件写出统一放入 try 块，失败时清理两个残缺文件，确保输出一致性
+- v1.7 (2026-06-15): 第八轮 Bug 修复
+    - `n_way_merge_deduplicate` 抽取 `_emit_record` 辅助函数：循环内 + 循环后最终写出统一应用 `count % 50000` 进度日志和 gc 触发，消除最终记录漏掉进度日志的边界条件
+    - `n_way_merge_deduplicate` 删除 `path.exists()` 前置过滤，由 BatchStream._load_all 的 `load_error="文件不存在"` 分支统一处理，消除调用方与类的重复检查
+    - `_scan_merged_file` 改为先 `json.loads(stripped)`、失败再 `json.loads(stripped[:-1])` 两段式解析，避免对字段值末尾的逗号字符做错误剥离
+    - `format_final_output` except 块用 `factor_written`/`return_written` 标志位精准识别"已成功写出"与"写到一半失败"，仅清理失败/未写完的文件，避免误删有效输出
+    - `save_batch_cache_sorted` 删除 `factor_df.copy()`/`return_df.copy()`，改用 `.assign(date=...).sort_values(...).reset_index(...)` 链式调用避免双倍内存峰值
+    - `_write_final_file` date_range null 处理消除 `"null"` 字符串中间变量，直接用 `is not None` 判断生成 JSON 字符串，避免 `first_date == "null"` 字符串歧义
 
 作者: 云瑶
 创建日期: 2026-05-27
@@ -164,13 +171,11 @@ def _write_final_file(output_path: Path, meta: dict, lines: list[str]) -> float:
     Note:
         内部函数，不导出到 __all__
     """
-    # 处理 date_range null
+    # 处理 date_range null（直接用 is not None 判断，避免 first_date 真实值恰好是 "null" 时的字符串歧义）
     first_date = meta.get("first_date")
     last_date = meta.get("last_date")
-    date_range_start = first_date if first_date is not None else "null"
-    date_range_end = last_date if last_date is not None else "null"
-    start_json = f'"{date_range_start}"' if date_range_start != "null" else "null"
-    end_json = f'"{date_range_end}"' if date_range_end != "null" else "null"
+    start_json = json.dumps(first_date) if first_date is not None else "null"
+    end_json = json.dumps(last_date) if last_date is not None else "null"
 
     # 检查是否有 extra meta
     extra_key = meta.get("extra_key")
@@ -241,21 +246,37 @@ def _scan_merged_file(
         for line in f:
             stripped = line.strip()
             if stripped.startswith("{"):
+                # 两段式解析：先尝试原样，失败再剥离行末逗号
+                # 避免 stripped.rstrip(",") 误剥离字段字符串值末尾的逗号
                 try:
-                    rec = json.loads(stripped.rstrip(","))
+                    rec = json.loads(stripped)
+                    line_content = stripped
+                except json.JSONDecodeError:
+                    # 原样解析失败：可能是数组分隔符 ",\n" 残留，剥离最后一个逗号重试
+                    if stripped.endswith(","):
+                        try:
+                            rec = json.loads(stripped[:-1])
+                            line_content = stripped[:-1]
+                        except json.JSONDecodeError as e:
+                            _logger.debug("跳过无效JSON行: %s... (%s)", stripped[:50], e)
+                            continue
+                    else:
+                        _logger.debug("跳过无效JSON行: %s...", stripped[:50])
+                        continue
+                try:
                     date = rec["date"]
                     asset = rec["asset"]
-                    date_set.add(date)
-                    asset_set.add(asset)
-                    if first_date is None or date < first_date:
-                        first_date = date
-                    if last_date is None or date > last_date:
-                        last_date = date
-                    n_records += 1
-                    lines.append(stripped.rstrip(","))
-                except json.JSONDecodeError as e:
-                    _logger.debug("跳过无效JSON行: %s... (%s)", stripped[:50], e)
+                except KeyError as e:
+                    _logger.debug("跳过缺少必需字段的记录: %s... (%s)", stripped[:50], e)
                     continue
+                date_set.add(date)
+                asset_set.add(asset)
+                if first_date is None or date < first_date:
+                    first_date = date
+                if last_date is None or date > last_date:
+                    last_date = date
+                n_records += 1
+                lines.append(line_content)
 
     n_days = len(date_set)
     n_assets = len(asset_set)
@@ -444,15 +465,14 @@ def save_batch_cache_sorted(
     validate_dataframe_columns(factor_df, required_factor_cols, "factor_df")
     validate_dataframe_columns(return_df, required_return_cols, "return_df")
 
-    # 格式化并排序（创建副本避免修改调用方原始 DataFrame）
-    factor_df = factor_df.copy()
-    return_df = return_df.copy()
-
-    factor_df["date"] = factor_df["date"].astype(str)
-    return_df["date"] = return_df["date"].astype(str)
-
-    factor_df = factor_df.sort_values(["date", "asset"]).reset_index(drop=True)
-    return_df = return_df.sort_values(["date", "asset"]).reset_index(drop=True)
+    # 格式化并排序：用 .assign() 转 date 列 + sort_values + reset_index 链式调用
+    # 链式调用本就返回新 DataFrame，避免 .copy() 造成的双倍内存峰值
+    factor_df = (
+        factor_df.assign(date=factor_df["date"].astype(str)).sort_values(["date", "asset"]).reset_index(drop=True)
+    )
+    return_df = (
+        return_df.assign(date=return_df["date"].astype(str)).sort_values(["date", "asset"]).reset_index(drop=True)
+    )
 
     # 流式写入因子数据（使用 _write_json_record 辅助函数）
     _logger.info("  保存因子数据...")
@@ -498,6 +518,40 @@ def save_batch_cache_sorted(
     # Note: 调用方若需释放大 DataFrame 应在自己的作用域中管理，此处不再做无效 del
 
 
+def _emit_record(
+    f: TextIO,
+    same_key_records: list[tuple[int, dict]],
+    count: int,
+    logger: logging.Logger | None = None,
+) -> int:
+    """从相同 key 的候选记录中选取最新批次写出，含进度日志和 gc 触发。
+
+    Args:
+        f: gzip 文件对象（TextIO）
+        same_key_records: 相同 key 的 (batch_idx, record) 列表
+        count: 当前已写出的记录数
+        logger: 日志记录器
+
+    Returns:
+        int: 更新后的 count
+
+    Note:
+        内部函数，不导出到 __all__
+    """
+    if not same_key_records:
+        return count
+    same_key_records.sort(key=lambda x: x[0], reverse=True)
+    best_record = same_key_records[0][1]
+    count = _write_json_record(f, best_record, count)
+
+    if count % 50000 == 0:
+        _logger = logger or logging.getLogger(__name__)
+        gc.collect()
+        _logger.info("    已写入 %s 条，内存: %s", count, get_memory_info_str())
+
+    return count
+
+
 # ============================================================================
 # N-way 合并
 # ============================================================================
@@ -539,18 +593,16 @@ def n_way_merge_deduplicate(
     _logger.info("[%s] 开始 N-way merge...", data_type)
     _logger.info("  当前内存: %s", get_memory_info_str())
 
-    # 创建所有批次的流
+    # 创建所有批次的流（不预先检查 path.exists()，由 BatchStream._load_all 统一处理）
     streams = []
     load_errors = []  # 收集加载错误信息
     for batch_idx in range(total_batches):
-        path = _result_dir / f"batch_{batch_idx}_{data_type}.json.gz"
-        if path.exists():
-            stream = BatchStream(batch_idx, data_type, result_dir=_result_dir)
-            if stream.load_error:
-                # 批次加载失败，记录日志并跳过
-                load_errors.append(f"batch_{batch_idx}_{data_type}: {stream.load_error}")
-            elif not stream.is_exhausted():
-                streams.append(stream)
+        stream = BatchStream(batch_idx, data_type, result_dir=_result_dir)
+        if stream.load_error:
+            # 批次加载失败（含文件不存在/损坏/读取失败），记录日志并跳过
+            load_errors.append(f"batch_{batch_idx}_{data_type}: {stream.load_error}")
+        elif not stream.is_exhausted():
+            streams.append(stream)
 
     if load_errors:
         _logger.warning("  ⚠ %s 个批次加载失败: %s", len(load_errors), load_errors)
@@ -588,14 +640,8 @@ def n_way_merge_deduplicate(
             if last_key == key:
                 same_key_records.append((batch_idx, record))
             else:
-                if same_key_records:
-                    same_key_records.sort(key=lambda x: x[0], reverse=True)
-                    best_record = same_key_records[0][1]
-                    count = _write_json_record(f, best_record, count)
-
-                    if count % 50000 == 0:
-                        gc.collect()
-                        _logger.info("    已写入 %s 条，内存: %s", count, get_memory_info_str())
+                # 写出上一组同 key 候选（含进度日志 + gc）
+                count = _emit_record(f, same_key_records, count, _logger)
 
                 last_key = key
                 same_key_records = [(batch_idx, record)]
@@ -605,10 +651,8 @@ def n_way_merge_deduplicate(
                 heapq.heappush(heap, (next_key, batch_idx, counter, stream))
                 counter += 1
 
-        if same_key_records:
-            same_key_records.sort(key=lambda x: x[0], reverse=True)
-            best_record = same_key_records[0][1]
-            count = _write_json_record(f, best_record, count)
+        # 循环结束后补写最后一组（同样走 _emit_record，进度日志/gc 时机统一）
+        count = _emit_record(f, same_key_records, count, _logger)
 
         f.write("\n]")
 
@@ -683,9 +727,11 @@ def format_final_output(
     )
     _logger.info("  收益统计: %s日 × %s只, %s条记录", return_n_days, return_n_assets, n_return_records)
 
-    # 写出两个最终文件（统一异常处理，确保一致性）
+    # 写出两个最终文件（统一异常处理；用标志位区分各文件写出状态）
     factor_final_path = _result_dir / "factor_data.json.gz"
     return_final_path = _result_dir / "return_data.json.gz"
+    factor_written = False  # 因子文件是否已成功写完
+    return_written = False  # 收益文件是否已成功写完
 
     try:
         # 写入因子文件（使用 _write_final_file 辅助函数）
@@ -704,6 +750,7 @@ def format_final_output(
             "extra_value": "每条记录单行写入，便于流式解析",
         }
         factor_size_mb = _write_final_file(factor_final_path, factor_meta, factor_lines)
+        factor_written = True
         _logger.info("    因子文件: %s (%.2f MB)", factor_final_path, factor_size_mb)
 
         del factor_lines  # 释放缓存
@@ -725,14 +772,22 @@ def format_final_output(
             "extra_value": "3日和5日收益最后几天会有NaN",
         }
         return_size_mb = _write_final_file(return_final_path, return_meta, return_lines)
+        return_written = True
         _logger.info("    收益文件: %s (%.2f MB)", return_final_path, return_size_mb)
 
         _logger.info("  ✓ 格式化完成")
 
     except Exception as e:
-        # 写文件失败：清理所有残缺文件（因子和收益），确保一致性
+        # 仅清理"未写完"的文件（标志位为 False），保留已成功写出的有效输出
+        # - 因子失败、收益未写：仅清理因子残缺文件
+        # - 因子成功、收益失败：仅清理收益残缺文件，保留因子有效输出
         _logger.error("  ✗ 写文件失败: [%s]: %s", type(e).__name__, e)
-        for final_path in [factor_final_path, return_final_path]:
+        cleanup_targets = []
+        if not factor_written:
+            cleanup_targets.append(factor_final_path)
+        if not return_written:
+            cleanup_targets.append(return_final_path)
+        for final_path in cleanup_targets:
             if final_path.exists():
                 try:
                     final_path.unlink()

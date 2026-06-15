@@ -60,6 +60,7 @@ def temp_dir():
 # BatchStream 类测试
 # ============================================================================
 
+
 class TestBatchStream:
     """TC001: BatchStream 流式读取测试"""
 
@@ -71,13 +72,13 @@ class TestBatchStream:
             {"date": "2026-05-27", "asset": "000001", "open": 10.0},
             {"date": "2026-05-27", "asset": "000002", "open": 20.0},
         ]
-        with gzip.open(batch_path, 'wt', encoding='utf-8') as f:
+        with gzip.open(batch_path, "wt", encoding="utf-8") as f:
             json.dump(test_data, f)
 
-        stream = BatchStream(0, 'factor', result_dir=temp_dir)
+        stream = BatchStream(0, "factor", result_dir=temp_dir)
 
         assert stream.batch_idx == 0
-        assert stream.data_type == 'factor'
+        assert stream.data_type == "factor"
         assert len(stream.records) == 2
         assert not stream.exhausted
 
@@ -85,10 +86,10 @@ class TestBatchStream:
         """验证 peek_key 返回正确的 key"""
         batch_path = temp_dir / "batch_0_factor.json.gz"
         test_data = [{"date": "2026-05-27", "asset": "000001", "open": 10.0}]
-        with gzip.open(batch_path, 'wt', encoding='utf-8') as f:
+        with gzip.open(batch_path, "wt", encoding="utf-8") as f:
             json.dump(test_data, f)
 
-        stream = BatchStream(0, 'factor', result_dir=temp_dir)
+        stream = BatchStream(0, "factor", result_dir=temp_dir)
         key = stream.peek_key()
 
         assert key == ("2026-05-27", "000001")
@@ -100,10 +101,10 @@ class TestBatchStream:
             {"date": "2026-05-27", "asset": "000001", "open": 10.0},
             {"date": "2026-05-27", "asset": "000002", "open": 20.0},
         ]
-        with gzip.open(batch_path, 'wt', encoding='utf-8') as f:
+        with gzip.open(batch_path, "wt", encoding="utf-8") as f:
             json.dump(test_data, f)
 
-        stream = BatchStream(0, 'factor', result_dir=temp_dir)
+        stream = BatchStream(0, "factor", result_dir=temp_dir)
 
         rec1 = stream.pop_record()
         assert rec1["asset"] == "000001"
@@ -120,11 +121,11 @@ class TestBatchStream:
 
         for path, batch_idx in [(batch_path0, 0), (batch_path1, 1)]:
             test_data = [{"date": "2026-05-27", "asset": "000001", "open": 10.0}]
-            with gzip.open(path, 'wt', encoding='utf-8') as f:
+            with gzip.open(path, "wt", encoding="utf-8") as f:
                 json.dump(test_data, f)
 
-        stream0 = BatchStream(0, 'factor', result_dir=temp_dir)
-        stream1 = BatchStream(1, 'factor', result_dir=temp_dir)
+        stream0 = BatchStream(0, "factor", result_dir=temp_dir)
+        stream1 = BatchStream(1, "factor", result_dir=temp_dir)
 
         assert stream0 < stream1
 
@@ -132,10 +133,10 @@ class TestBatchStream:
         """验证 cleanup 清理资源"""
         batch_path = temp_dir / "batch_0_factor.json.gz"
         test_data = [{"date": "2026-05-27", "asset": "000001", "open": 10.0}]
-        with gzip.open(batch_path, 'wt', encoding='utf-8') as f:
+        with gzip.open(batch_path, "wt", encoding="utf-8") as f:
             json.dump(test_data, f)
 
-        stream = BatchStream(0, 'factor', result_dir=temp_dir)
+        stream = BatchStream(0, "factor", result_dir=temp_dir)
         stream.cleanup()
 
         assert stream.records == []
@@ -146,6 +147,7 @@ class TestBatchStream:
 # save_batch_cache_sorted 测试
 # ============================================================================
 
+
 class TestSaveBatchCacheSorted:
     """TC002: save_batch_cache_sorted 批次保存测试"""
 
@@ -153,25 +155,29 @@ class TestSaveBatchCacheSorted:
         """验证基本批次保存功能"""
         import pandas as pd
 
-        factor_df = pd.DataFrame({
-            'date': ['2026-05-27', '2026-05-27'],
-            'asset': ['000001', '000002'],
-            'open': [10.0, 20.0],
-            'close': [10.5, 20.5],
-            'high': [11.0, 21.0],
-            'low': [9.5, 19.5],
-            'rsi_6': [50.0, 60.0],
-                        'volume_ratio_5': [1.0, 1.5],
-            'volume': [1000000.0, 2000000.0]
-        })
+        factor_df = pd.DataFrame(
+            {
+                "date": ["2026-05-27", "2026-05-27"],
+                "asset": ["000001", "000002"],
+                "open": [10.0, 20.0],
+                "close": [10.5, 20.5],
+                "high": [11.0, 21.0],
+                "low": [9.5, 19.5],
+                "rsi_6": [50.0, 60.0],
+                "volume_ratio_5": [1.0, 1.5],
+                "volume": [1000000.0, 2000000.0],
+            }
+        )
 
-        return_df = pd.DataFrame({
-            'date': ['2026-05-27', '2026-05-27'],
-            'asset': ['000001', '000002'],
-            'forward_return_1d': [0.01, 0.02],
-            'forward_return_3d': [0.03, 0.06],
-            'forward_return_5d': [0.05, 0.10]
-        })
+        return_df = pd.DataFrame(
+            {
+                "date": ["2026-05-27", "2026-05-27"],
+                "asset": ["000001", "000002"],
+                "forward_return_1d": [0.01, 0.02],
+                "forward_return_3d": [0.03, 0.06],
+                "forward_return_5d": [0.05, 0.10],
+            }
+        )
 
         save_batch_cache_sorted(0, factor_df, return_df, result_dir=temp_dir, logger_arg=test_logger)
 
@@ -187,19 +193,23 @@ class TestSaveBatchCacheSorted:
         import pandas as pd
 
         # 缺少必需列的 DataFrame
-        invalid_df = pd.DataFrame({
-            'date': ['2026-05-27'],
-            'asset': ['000001']
-            # 缺少 open, close, high, low, rsi_6, volume_ratio_5
-        })
+        invalid_df = pd.DataFrame(
+            {
+                "date": ["2026-05-27"],
+                "asset": ["000001"],
+                # 缺少 open, close, high, low, rsi_6, volume_ratio_5
+            }
+        )
 
-        return_df = pd.DataFrame({
-            'date': ['2026-05-27'],
-            'asset': ['000001'],
-            'forward_return_1d': [0.01],
-            'forward_return_3d': [0.03],
-            'forward_return_5d': [0.05]
-        })
+        return_df = pd.DataFrame(
+            {
+                "date": ["2026-05-27"],
+                "asset": ["000001"],
+                "forward_return_1d": [0.01],
+                "forward_return_3d": [0.03],
+                "forward_return_5d": [0.05],
+            }
+        )
 
         with pytest.raises(ValueError):
             save_batch_cache_sorted(0, invalid_df, return_df, result_dir=temp_dir, logger_arg=test_logger)
@@ -209,6 +219,7 @@ class TestSaveBatchCacheSorted:
 # n_way_merge_deduplicate 测试
 # ============================================================================
 
+
 class TestNWayMergeDeduplicate:
     """TC004: N-way merge 合并测试"""
 
@@ -217,34 +228,38 @@ class TestNWayMergeDeduplicate:
         import pandas as pd
 
         # 创建两个批次（模拟去重场景）
-        for batch_idx, asset in [(0, '000001'), (1, '000002')]:
-            factor_df = pd.DataFrame({
-                'date': ['2026-05-27'],
-                'asset': [asset],
-                'open': [10.0 + batch_idx],
-                'close': [10.5 + batch_idx],
-                'high': [11.0 + batch_idx],
-                'low': [9.5 + batch_idx],
-                'rsi_6': [50.0],
-                                'volume_ratio_5': [1.0],
-                'volume': [1000000.0]
-            })
-            return_df = pd.DataFrame({
-                'date': ['2026-05-27'],
-                'asset': [asset],
-                'forward_return_1d': [0.01],
-                'forward_return_3d': [0.03],
-                'forward_return_5d': [0.05]
-            })
+        for batch_idx, asset in [(0, "000001"), (1, "000002")]:
+            factor_df = pd.DataFrame(
+                {
+                    "date": ["2026-05-27"],
+                    "asset": [asset],
+                    "open": [10.0 + batch_idx],
+                    "close": [10.5 + batch_idx],
+                    "high": [11.0 + batch_idx],
+                    "low": [9.5 + batch_idx],
+                    "rsi_6": [50.0],
+                    "volume_ratio_5": [1.0],
+                    "volume": [1000000.0],
+                }
+            )
+            return_df = pd.DataFrame(
+                {
+                    "date": ["2026-05-27"],
+                    "asset": [asset],
+                    "forward_return_1d": [0.01],
+                    "forward_return_3d": [0.03],
+                    "forward_return_5d": [0.05],
+                }
+            )
             save_batch_cache_sorted(batch_idx, factor_df, return_df, result_dir=temp_dir, logger_arg=test_logger)
 
-        merged_path = n_way_merge_deduplicate(2, 'factor', result_dir=temp_dir, logger_arg=test_logger)
+        merged_path = n_way_merge_deduplicate(2, "factor", result_dir=temp_dir, logger_arg=test_logger)
 
         assert merged_path is not None
         assert merged_path.name == "merged_factor.json.gz"
 
         # 验证合并结果
-        with gzip.open(merged_path, 'rt', encoding='utf-8') as f:
+        with gzip.open(merged_path, "rt", encoding="utf-8") as f:
             merged_data = json.load(f)
         assert len(merged_data) == 2
 
@@ -254,42 +269,47 @@ class TestNWayMergeDeduplicate:
 
         # 两个批次包含相同 key，batch_1 是最新
         for batch_idx, close in [(0, 10.5), (1, 15.5)]:
-            factor_df = pd.DataFrame({
-                'date': ['2026-05-27'],
-                'asset': ['000001'],  # 相同 key
-                'open': [10.0],
-                'close': [close],
-                'high': [11.0],
-                'low': [9.5],
-                'rsi_6': [50.0],
-                                'volume_ratio_5': [1.0],
-                'volume': [1000000.0]
-            })
-            return_df = pd.DataFrame({
-                'date': ['2026-05-27'],
-                'asset': ['000001'],
-                'forward_return_1d': [0.01],
-                'forward_return_3d': [0.03],
-                'forward_return_5d': [0.05]
-            })
+            factor_df = pd.DataFrame(
+                {
+                    "date": ["2026-05-27"],
+                    "asset": ["000001"],  # 相同 key
+                    "open": [10.0],
+                    "close": [close],
+                    "high": [11.0],
+                    "low": [9.5],
+                    "rsi_6": [50.0],
+                    "volume_ratio_5": [1.0],
+                    "volume": [1000000.0],
+                }
+            )
+            return_df = pd.DataFrame(
+                {
+                    "date": ["2026-05-27"],
+                    "asset": ["000001"],
+                    "forward_return_1d": [0.01],
+                    "forward_return_3d": [0.03],
+                    "forward_return_5d": [0.05],
+                }
+            )
             save_batch_cache_sorted(batch_idx, factor_df, return_df, result_dir=temp_dir, logger_arg=test_logger)
 
-        merged_path = n_way_merge_deduplicate(2, 'factor', result_dir=temp_dir, logger_arg=test_logger)
+        merged_path = n_way_merge_deduplicate(2, "factor", result_dir=temp_dir, logger_arg=test_logger)
 
         # 验证选择最新 batch（batch_1 的 close=15.5）
-        with gzip.open(merged_path, 'rt', encoding='utf-8') as f:
+        with gzip.open(merged_path, "rt", encoding="utf-8") as f:
             merged_data = json.load(f)
-        assert merged_data[0]['close'] == 15.5
+        assert merged_data[0]["close"] == 15.5
 
     def test_merge_no_batches(self, temp_dir, test_logger):
         """TC006: 无有效批次返回 None"""
-        merged_path = n_way_merge_deduplicate(0, 'factor', result_dir=temp_dir, logger_arg=test_logger)
+        merged_path = n_way_merge_deduplicate(0, "factor", result_dir=temp_dir, logger_arg=test_logger)
         assert merged_path is None
 
 
 # ============================================================================
 # format_final_output 测试
 # ============================================================================
+
 
 class TestFormatFinalOutput:
     """TC007: 最终格式化测试"""
@@ -299,28 +319,32 @@ class TestFormatFinalOutput:
         import pandas as pd
 
         # 创建并合并一个批次
-        factor_df = pd.DataFrame({
-            'date': ['2026-05-27'],
-            'asset': ['000001'],
-            'open': [10.0],
-            'close': [10.5],
-            'high': [11.0],
-            'low': [9.5],
-            'rsi_6': [50.0],
-                            'volume_ratio_5': [1.0],
-                'volume': [1000000.0]
-        })
-        return_df = pd.DataFrame({
-            'date': ['2026-05-27'],
-            'asset': ['000001'],
-            'forward_return_1d': [0.01],
-            'forward_return_3d': [0.03],
-            'forward_return_5d': [0.05]
-        })
+        factor_df = pd.DataFrame(
+            {
+                "date": ["2026-05-27"],
+                "asset": ["000001"],
+                "open": [10.0],
+                "close": [10.5],
+                "high": [11.0],
+                "low": [9.5],
+                "rsi_6": [50.0],
+                "volume_ratio_5": [1.0],
+                "volume": [1000000.0],
+            }
+        )
+        return_df = pd.DataFrame(
+            {
+                "date": ["2026-05-27"],
+                "asset": ["000001"],
+                "forward_return_1d": [0.01],
+                "forward_return_3d": [0.03],
+                "forward_return_5d": [0.05],
+            }
+        )
         save_batch_cache_sorted(0, factor_df, return_df, result_dir=temp_dir, logger_arg=test_logger)
 
-        factor_merged = n_way_merge_deduplicate(1, 'factor', result_dir=temp_dir, logger_arg=test_logger)
-        return_merged = n_way_merge_deduplicate(1, 'return', result_dir=temp_dir, logger_arg=test_logger)
+        factor_merged = n_way_merge_deduplicate(1, "factor", result_dir=temp_dir, logger_arg=test_logger)
+        return_merged = n_way_merge_deduplicate(1, "return", result_dir=temp_dir, logger_arg=test_logger)
 
         format_final_output(factor_merged, return_merged, result_dir=temp_dir, logger_arg=test_logger)
 
@@ -332,12 +356,12 @@ class TestFormatFinalOutput:
         assert return_final.exists()
 
         # 验证 meta 结构
-        with gzip.open(factor_final, 'rt', encoding='utf-8') as f:
+        with gzip.open(factor_final, "rt", encoding="utf-8") as f:
             factor_data = json.load(f)
-        assert 'meta' in factor_data
-        assert 'data' in factor_data
-        assert factor_data['meta']['n_days'] == 1
-        assert factor_data['meta']['n_assets'] == 1
+        assert "meta" in factor_data
+        assert "data" in factor_data
+        assert factor_data["meta"]["n_days"] == 1
+        assert factor_data["meta"]["n_assets"] == 1
 
     def test_format_missing_merged_file(self, temp_dir, test_logger):
         """TC008: merged 文件不存在抛出 FileNotFoundError"""
@@ -353,6 +377,7 @@ class TestFormatFinalOutput:
 # cleanup_batch_files 测试
 # ============================================================================
 
+
 class TestCleanupBatchFiles:
     """TC009: 临时文件清理测试"""
 
@@ -361,32 +386,36 @@ class TestCleanupBatchFiles:
         import pandas as pd
 
         # 创建批次文件
-        factor_df = pd.DataFrame({
-            'date': ['2026-05-27'],
-            'asset': ['000001'],
-            'open': [10.0],
-            'close': [10.5],
-            'high': [11.0],
-            'low': [9.5],
-            'rsi_6': [50.0],
-                            'volume_ratio_5': [1.0],
-                'volume': [1000000.0]
-        })
-        return_df = pd.DataFrame({
-            'date': ['2026-05-27'],
-            'asset': ['000001'],
-            'forward_return_1d': [0.01],
-            'forward_return_3d': [0.03],
-            'forward_return_5d': [0.05]
-        })
+        factor_df = pd.DataFrame(
+            {
+                "date": ["2026-05-27"],
+                "asset": ["000001"],
+                "open": [10.0],
+                "close": [10.5],
+                "high": [11.0],
+                "low": [9.5],
+                "rsi_6": [50.0],
+                "volume_ratio_5": [1.0],
+                "volume": [1000000.0],
+            }
+        )
+        return_df = pd.DataFrame(
+            {
+                "date": ["2026-05-27"],
+                "asset": ["000001"],
+                "forward_return_1d": [0.01],
+                "forward_return_3d": [0.03],
+                "forward_return_5d": [0.05],
+            }
+        )
         save_batch_cache_sorted(0, factor_df, return_df, result_dir=temp_dir, logger_arg=test_logger)
 
         # 创建 merged 文件（手动创建）
         merged_factor = temp_dir / "merged_factor.json.gz"
         merged_return = temp_dir / "merged_return.json.gz"
-        with gzip.open(merged_factor, 'wt', encoding='utf-8') as f:
+        with gzip.open(merged_factor, "wt", encoding="utf-8") as f:
             json.dump([{"date": "2026-05-27", "asset": "000001"}], f)
-        with gzip.open(merged_return, 'wt', encoding='utf-8') as f:
+        with gzip.open(merged_return, "wt", encoding="utf-8") as f:
             json.dump([{"date": "2026-05-27", "asset": "000001"}], f)
 
         deleted = cleanup_batch_files(1, result_dir=temp_dir, logger_arg=test_logger)
@@ -407,8 +436,191 @@ class TestCleanupBatchFiles:
 
 
 # ============================================================================
+# Bug 修复回归测试（v1.7, 2026-06-15）
+# ============================================================================
+
+
+class TestBugFixesV17:
+    """TC012: v1.7 Bug 修复回归测试，防止已修复的 bug 重新出现"""
+
+    def test_scan_merged_file_value_with_trailing_comma(self, temp_dir, test_logger):
+        """Bug #2: 字段字符串值末尾恰好是逗号时，不能被 rstrip(",") 误剥离
+
+        构造一条记录，其 asset 字段值末尾为逗号（极端但合法的字符串值），
+        验证 _scan_merged_file 通过两段式解析能正确解析整条记录。
+        """
+        import gzip
+        import json as _json
+
+        from data_fetchers.batch_processor import _scan_merged_file
+
+        merged_path = temp_dir / "merged_factor.json.gz"
+        # 构造合并后文件格式（数组形式，单行 JSON 对象 + 逗号分隔）
+        record_with_trailing_comma_value = {
+            "date": "2026-05-27",
+            "asset": "ABC,",  # 故意构造尾部逗号的字符串值
+            "open": 10.0,
+        }
+        with gzip.open(merged_path, "wt", encoding="utf-8") as f:
+            f.write("[\n")
+            # 先尝试原样解析能成功（无尾随分隔逗号）
+            f.write("  " + _json.dumps(record_with_trailing_comma_value, ensure_ascii=False))
+            f.write("\n]")
+
+        n_days, n_assets, first_date, last_date, n_records, lines = _scan_merged_file(merged_path, test_logger)
+        assert n_records == 1
+        # 关键断言：asset 字段值的尾部逗号不应被剥离
+        parsed = _json.loads(lines[0])
+        assert parsed["asset"] == "ABC,"
+
+    def test_n_way_merge_no_path_exists_check(self, temp_dir, test_logger):
+        """Bug #5: 缺失批次文件不再依赖调用方 path.exists() 前置过滤
+
+        创建 batch_1，跳过 batch_0 和 batch_2，调用 n_way_merge_deduplicate(3)：
+        - BatchStream._load_all 应统一捕获缺失文件并设置 load_error
+        - 合并应仍能成功返回 batch_1 的内容
+        """
+        import gzip
+        import json as _json
+
+        # 仅创建 batch_1，故意缺失 batch_0 / batch_2
+        batch_1 = temp_dir / "batch_1_factor.json.gz"
+        with gzip.open(batch_1, "wt", encoding="utf-8") as f:
+            _json.dump([{"date": "2026-05-27", "asset": "000001", "open": 10.0}], f)
+
+        merged_path = n_way_merge_deduplicate(3, "factor", result_dir=temp_dir, logger_arg=test_logger)
+
+        assert merged_path is not None
+        with gzip.open(merged_path, "rt", encoding="utf-8") as f:
+            data = _json.load(f)
+        assert len(data) == 1
+        assert data[0]["asset"] == "000001"
+
+    def test_format_final_output_partial_failure_preserves_factor(self, temp_dir, test_logger):
+        """Bug #3: 因子写出成功后收益写出失败，except 块不应误删因子文件"""
+        import pandas as pd
+
+        # 创建 1 个有效批次 → 合并 → 拿到两个 merged 文件
+        factor_df = pd.DataFrame(
+            {
+                "date": ["2026-05-27"],
+                "asset": ["000001"],
+                "open": [10.0],
+                "close": [10.5],
+                "high": [11.0],
+                "low": [9.5],
+                "rsi_6": [50.0],
+                "volume_ratio_5": [1.0],
+                "volume": [1000000.0],
+            }
+        )
+        return_df = pd.DataFrame(
+            {
+                "date": ["2026-05-27"],
+                "asset": ["000001"],
+                "forward_return_1d": [0.01],
+                "forward_return_3d": [0.03],
+                "forward_return_5d": [0.05],
+            }
+        )
+        save_batch_cache_sorted(0, factor_df, return_df, result_dir=temp_dir, logger_arg=test_logger)
+
+        factor_merged = n_way_merge_deduplicate(1, "factor", result_dir=temp_dir, logger_arg=test_logger)
+        return_merged = n_way_merge_deduplicate(1, "return", result_dir=temp_dir, logger_arg=test_logger)
+        assert factor_merged is not None
+        assert return_merged is not None
+        from data_fetchers import batch_processor
+
+        original_write = batch_processor._write_final_file
+        call_count = {"n": 0}
+
+        def mocked_write(output_path, meta, lines):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return original_write(output_path, meta, lines)
+            raise OSError("模拟收益文件写入失败")
+
+        with (
+            mock_patch.object(batch_processor, "_write_final_file", side_effect=mocked_write),
+            pytest.raises(OSError, match="模拟收益文件写入失败"),
+        ):
+            format_final_output(factor_merged, return_merged, result_dir=temp_dir, logger_arg=test_logger)
+
+        # 关键断言：因子文件应保留（已成功写完），收益文件不存在或被清理
+        factor_final = temp_dir / "factor_data.json.gz"
+        return_final = temp_dir / "return_data.json.gz"
+        assert factor_final.exists(), "因子文件已成功写出，不应被误删"
+        assert not return_final.exists(), "收益文件写出失败，应被清理"
+
+    def test_write_final_file_date_value_literal_null_string(self, temp_dir):
+        """Bug #6: first_date 真实值恰好是字符串 "null" 时，不应被误判为空
+
+        构造 first_date="null" 的极端场景，验证 JSON 输出为 "\"null\"" 字符串值，
+        而不是 JSON null 字面量。
+        """
+        import gzip
+        import json as _json
+
+        from data_fetchers.batch_processor import _write_final_file
+
+        output_path = temp_dir / "test_null_string.json.gz"
+        meta = {
+            "generated_at": "2026-06-15T00:00:00",
+            "source": "test",
+            "n_days": 1,
+            "n_assets": 1,
+            "n_records": 1,
+            "first_date": "null",  # 字符串值就是 "null"
+            "last_date": "null",
+            "last_updated": "2026-06-15 00:00:00",
+            "version": "test",
+            "fields": ["date", "asset"],
+        }
+        lines = ['{"date": "null", "asset": "000001"}']
+        _write_final_file(output_path, meta, lines)
+
+        with gzip.open(output_path, "rt", encoding="utf-8") as f:
+            data = _json.load(f)
+
+        # 关键断言：date_range.start 应为字符串 "null"，不是 JSON null
+        assert data["meta"]["date_range"]["start"] == "null"
+        assert data["meta"]["date_range"]["end"] == "null"
+        assert isinstance(data["meta"]["date_range"]["start"], str)
+
+    def test_write_final_file_date_none(self, temp_dir):
+        """Bug #6 反向场景: first_date 为 None 时输出 JSON null 字面量"""
+        import gzip
+        import json as _json
+
+        from data_fetchers.batch_processor import _write_final_file
+
+        output_path = temp_dir / "test_none.json.gz"
+        meta = {
+            "generated_at": "2026-06-15T00:00:00",
+            "source": "test",
+            "n_days": 0,
+            "n_assets": 0,
+            "n_records": 0,
+            "first_date": None,
+            "last_date": None,
+            "last_updated": "2026-06-15 00:00:00",
+            "version": "test",
+            "fields": ["date", "asset"],
+        }
+        _write_final_file(output_path, meta, [])
+
+        with gzip.open(output_path, "rt", encoding="utf-8") as f:
+            data = _json.load(f)
+
+        # None 应被序列化为 JSON null（Python 中是 None）
+        assert data["meta"]["date_range"]["start"] is None
+        assert data["meta"]["date_range"]["end"] is None
+
+
+# ============================================================================
 # 集成测试
 # ============================================================================
+
 
 class TestIntegration:
     """TC011: 完整流程集成测试"""
@@ -419,29 +631,33 @@ class TestIntegration:
 
         # Step 1: 批次保存
         for batch_idx in range(2):
-            factor_df = pd.DataFrame({
-                'date': ['2026-05-27'],
-                'asset': [f'00000{batch_idx + 1}'],
-                'open': [10.0 + batch_idx],
-                'close': [10.5 + batch_idx],
-                'high': [11.0 + batch_idx],
-                'low': [9.5 + batch_idx],
-                'rsi_6': [50.0],
-                                'volume_ratio_5': [1.0],
-                'volume': [1000000.0]
-            })
-            return_df = pd.DataFrame({
-                'date': ['2026-05-27'],
-                'asset': [f'00000{batch_idx + 1}'],
-                'forward_return_1d': [0.01],
-                'forward_return_3d': [0.03],
-                'forward_return_5d': [0.05]
-            })
+            factor_df = pd.DataFrame(
+                {
+                    "date": ["2026-05-27"],
+                    "asset": [f"00000{batch_idx + 1}"],
+                    "open": [10.0 + batch_idx],
+                    "close": [10.5 + batch_idx],
+                    "high": [11.0 + batch_idx],
+                    "low": [9.5 + batch_idx],
+                    "rsi_6": [50.0],
+                    "volume_ratio_5": [1.0],
+                    "volume": [1000000.0],
+                }
+            )
+            return_df = pd.DataFrame(
+                {
+                    "date": ["2026-05-27"],
+                    "asset": [f"00000{batch_idx + 1}"],
+                    "forward_return_1d": [0.01],
+                    "forward_return_3d": [0.03],
+                    "forward_return_5d": [0.05],
+                }
+            )
             save_batch_cache_sorted(batch_idx, factor_df, return_df, result_dir=temp_dir, logger_arg=test_logger)
 
         # Step 2: N-way merge
-        factor_merged = n_way_merge_deduplicate(2, 'factor', result_dir=temp_dir, logger_arg=test_logger)
-        return_merged = n_way_merge_deduplicate(2, 'return', result_dir=temp_dir, logger_arg=test_logger)
+        factor_merged = n_way_merge_deduplicate(2, "factor", result_dir=temp_dir, logger_arg=test_logger)
+        return_merged = n_way_merge_deduplicate(2, "return", result_dir=temp_dir, logger_arg=test_logger)
 
         assert factor_merged is not None
         assert return_merged is not None
