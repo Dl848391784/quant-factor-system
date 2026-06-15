@@ -284,6 +284,21 @@ from .fund_flow import (
     calculate_capital_flow_ratio_trend,
 )
 
+# ===== 公共常量别名（被 ic_kdj_j、ic_rsi 等脚本 import） =====
+# PR-1 阶段从 _legacy.py 重导出；PR-2 起从 ._common 重导出，
+# 别名定义（DEFAULT_xxx = _DEFAULT_xxx）随 _common.py 一并搬运
+from ._common import (
+    DEFAULT_BOLLINGER_K,
+    DEFAULT_BOLLINGER_N,
+    DEFAULT_FORWARD_RETURN_SHIFT,
+    DEFAULT_KDJ_M1,
+    DEFAULT_KDJ_M2,
+    DEFAULT_KDJ_N,
+    DEFAULT_RSI_PERIOD,
+    DEFAULT_SURGE_WINDOW,
+    DEFAULT_VOLUME_RATIO_WINDOW,
+)
+
 __all__ = [
     # 与原 factor_calculator.py 顶部 __all__ 完全一致（按字母序）
     # 半公开 helper 不放 __all__（保持私有约定，但仍可被显式 import）
@@ -317,6 +332,16 @@ __all__ = [
     "calculate_turnover_surge_delta",
     "calculate_volume_price_strength",
     "calculate_volume_ratio",
+    # ----- 公共常量别名（v1.0 起即在 __all__，被外部脚本 import） -----
+    "DEFAULT_BOLLINGER_K",
+    "DEFAULT_BOLLINGER_N",
+    "DEFAULT_FORWARD_RETURN_SHIFT",
+    "DEFAULT_KDJ_M1",
+    "DEFAULT_KDJ_M2",
+    "DEFAULT_KDJ_N",
+    "DEFAULT_RSI_PERIOD",
+    "DEFAULT_SURGE_WINDOW",
+    "DEFAULT_VOLUME_RATIO_WINDOW",
 ]
 ```
 
@@ -333,6 +358,29 @@ _ = (_per_asset_transform, _calculate_ewm_with_initial, _calculate_delta,
 ```
 
 或更整洁：直接列入一个独立的私有 tuple `_REEXPORT_PRIVATE = (...)` 抑制 F401。**最终写法在 Execute 阶段定稿**。
+
+#### 4.2.1 公共常量别名兼容契约（PR-1 校准）
+
+PR-1 实施时发现 design.md v1.0 漏列了一组真实公共 API：原 `factor_calculator.py` 行 219-227 定义了 9 个常量别名（去掉 `_` 前缀的版本，如 `DEFAULT_RSI_PERIOD = _DEFAULT_RSI_PERIOD`）并写入了 `__all__`，外部脚本（`factor_ic/ic_kdj_j_1d.py`、`ic_rsi_*.py` 等）**直接 import 这些公开常量**而非私有的 `_DEFAULT_*`。
+
+| 公开别名 | 私有源（`_common.py` 内） | 已知调用方（部分） |
+|----------|---------------------------|--------------------|
+| `DEFAULT_RSI_PERIOD` | `_DEFAULT_RSI_PERIOD` | `factor_ic/ic_rsi_*.py` |
+| `DEFAULT_BOLLINGER_N` | `_DEFAULT_BOLLINGER_N` | `factor_ic/ic_bollinger_pb_*.py` |
+| `DEFAULT_BOLLINGER_K` | `_DEFAULT_BOLLINGER_K` | 同上 |
+| `DEFAULT_KDJ_N` | `_DEFAULT_KDJ_N` | `factor_ic/ic_kdj_j_*.py` |
+| `DEFAULT_KDJ_M1` | `_DEFAULT_KDJ_M1` | 同上 |
+| `DEFAULT_KDJ_M2` | `_DEFAULT_KDJ_M2` | 同上 |
+| `DEFAULT_SURGE_WINDOW` | `_DEFAULT_SURGE_WINDOW` | `factor_ic/ic_turnover_surge_*.py` |
+| `DEFAULT_VOLUME_RATIO_WINDOW` | `_DEFAULT_VOLUME_RATIO_WINDOW` | `factor_ic/ic_volume_ratio_*.py` |
+| `DEFAULT_FORWARD_RETURN_SHIFT` | `_DEFAULT_FORWARD_RETURN_SHIFT` | `factor_ic/ic_forward_return_*.py` |
+
+**契约**：
+1. 这 9 个 `DEFAULT_*` 常量与 30 个 `calculate_*` 函数 **同等优先级**，必须在 `__init__.py` 重导出，不得遗漏
+2. 别名定义（`DEFAULT_xxx = _DEFAULT_xxx`）随 `_common.py` 一并搬运（PR-2a 范围）
+3. 验证脚本（§7.4）必须把 9 个常量加入 import 列表（已更新）
+
+**经验教训**：design.md 撰写时 grep `from data_fetchers.factor_calculator import` **必须** 完整看 import 项目（不要被 `calculate_*` 模式诱导跳过常量名）。该校准已纳入 §13.1 Checklist。
 
 ## 5. 子模块函数清单（按行号映射）
 
@@ -677,6 +725,7 @@ Python 在解析 `from data_fetchers.factor_calculator import calculate_rsi` 时
 | `_calculate_delta` | 函数 | **保留**（搬到 `_common.py` 后通过 `__init__.py` 重导出） |
 | `_wilder_smoothing_rsi` | 函数 | **保留** |
 | `get_module_logger` | 函数 | **保留** |
+| `DEFAULT_RSI_PERIOD` 等 9 个 | 常量别名 | **保留**（v1.0 起即在 `__all__`，详见 §4.2.1） |
 | `_COL_*`、`_DEFAULT_*`、`_EPSILON` | 常量 | **不重导出**（原文件中也未被外部导入；属严格私有） |
 
 **裁定原则**：grep 命中外部 import = 必须重导出；grep 不命中 = 不重导出。这是基于 **实际使用** 而非主观判断的兼容裁定。
@@ -704,8 +753,11 @@ from data_fetchers.factor_calculator import (
     calculate_industry_pe_trend,
     calculate_capital_flow_ratio_trend, calculate_capital_flow_intensity,
     _per_asset_transform, _calculate_ewm_with_initial, _calculate_delta,
+    DEFAULT_RSI_PERIOD, DEFAULT_BOLLINGER_N, DEFAULT_BOLLINGER_K,
+    DEFAULT_KDJ_N, DEFAULT_KDJ_M1, DEFAULT_KDJ_M2,
+    DEFAULT_SURGE_WINDOW, DEFAULT_VOLUME_RATIO_WINDOW, DEFAULT_FORWARD_RETURN_SHIFT,
 )
-print('OK: 30 public + 3 semi-public symbols importable')
+print('OK: 30 public + 3 semi-public + 9 const aliases importable')
 "
 
 # (2) 双路径 import（fetch_factor_cache 兼容）
@@ -986,6 +1038,7 @@ Refs:
 - [ ] §5 子模块清单覆盖原文件全部 41 个函数（无遗漏、无重复）
 - [ ] §6.1 列出全部 80+ import 点，每个的兼容裁定都有依据
 - [ ] §7.3 半公开 API 重导出表与 §6.1 / §6.2 grep 结果一致
+- [ ] §4.2.1 公共常量别名兼容契约 9 项全部覆盖；§4.2 import 块、`__all__` 列表、§7.3 表格、§7.4 验证脚本四处一致
 
 ### 13.2 Code Quality（代码质量）
 
@@ -1042,5 +1095,6 @@ Refs:
 | v0.12 | 2026-06-15 | §12 规范引用（取证表 + 提交消息模板） |
 | v1.0-draft | 2026-06-15 | §13 审核 Checklist 完成；提交审核 |
 | **v1.0-approved** | **2026-06-15** | **审核通过 ✅；触发 Execute 阶段 PR-1** |
+| v1.1 | 2026-06-15 | PR-1 校准：补 §4.2 / §4.2.1 / §7.3 / §7.4 / §13.1 共 9 个公共常量别名兼容契约 |
 
 > 审核状态：APPROVED（用户于 2026-06-15 确认）。Execute 阶段从 PR-1 起步。
