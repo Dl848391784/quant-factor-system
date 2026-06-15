@@ -19,10 +19,15 @@
 - 资金流数据缺失 → Δratio 为 NaN
 - Δratio 首日无前值 → NaN
 
+异常契约：
+- main() 直接抛出 FactorCalcError（数据/计算失败）；调用方负责捕获。
+  CLI 入口 __main__ 块统一捕获并 sys.exit(1)。
+
 作者: 云瑶
 创建日期: 2026-06-12
 版本历史:
   v1.0 (2026-06-12): 初始版本，复用 factor_calculator.calculate_capital_flow_ratio_trend
+  v1.1 (2026-06-15): 强化结果校验、差异化 warning 提示、启动日志带版本号、摘要逐行输出
 """
 
 import argparse
@@ -39,6 +44,8 @@ from factor_ic.common.logger_config import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
+__version__ = "1.1.0"
+
 
 class FactorCalcError(Exception):
     """因子计算业务异常"""
@@ -46,18 +53,31 @@ class FactorCalcError(Exception):
     pass
 
 
+# 与公共模块 factor_ic_runner.run_factor_ic_analysis 默认值保持一致（=10）。
+# 跨模块统一配置收归是独立任务，本文件不重复定义新值。
 DEFAULT_MIN_STOCKS = 10
 
 
 def main():
-    """CLI 主入口"""
+    """CLI 主入口
+
+    Raises:
+        FactorCalcError: 数据加载失败或计算结果结构不完整。
+            调用方（CLI 或上层 pipeline）必须自行捕获处理。
+    """
     parser = argparse.ArgumentParser(description="资金流占比趋势因子 IC 计算器")
     parser.add_argument("--force-full", action="store_true", help="强制全量计算")
     parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
     args = parser.parse_args()
 
-    logger.info(f"启动资金流占比趋势因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+    logger.info(
+        f"启动资金流占比趋势因子IC计算 v{__version__}: min_stocks={args.min_stocks}, force_full={args.force_full}"
+    )
 
+    # 注: factor_cols 在公共模块语义为"需从缓存加载的原始因子列"。
+    # 本因子原始数据从外部资金流文件加载（见 factor_calculator._load_fund_flow_data），
+    # 缓存中仅需 date/asset 作匹配键，因此传 ["date", "asset"]（data_loader 会自动去重）。
+    # TODO: 公共模块 API 重命名（factor_cols → load_cols）作为独立任务跨 8 个调用点统一处理。
     result = run_complex_factor_ic(
         factor_name="capital_flow_ratio_trend",
         factor_col="capital_flow_ratio_trend",
@@ -68,13 +88,27 @@ def main():
         _logger=logger,
     )
 
+    # 强化结果校验：覆盖 None / 非 dict / 缺关键字段三种失败场景，
+    # 避免后续 .get() 链静默掩盖真实错误。
     if result is None:
         raise FactorCalcError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
+    if not isinstance(result, dict):
+        raise FactorCalcError(f"run_complex_factor_ic 返回类型异常: 期望 dict，实际 {type(result).__name__}")
+    if "ic_metrics" not in result:
+        raise FactorCalcError(
+            f"run_complex_factor_ic 返回结构不完整: 缺少 'ic_metrics' 字段，实际键={list(result.keys())}"
+        )
 
-    ic_metrics = result.get("ic_metrics") or {}
-    sample_stats = result.get("sample_stats") or {}
-    period = result.get("period") or {}
-    ic_distribution = result.get("ic_distribution_consistency") or {}
+    # 显式 None 判断而非 `or {}`：避免将合法 falsy 值（0、False、空字符串）误替换为空字典。
+    # 单次取值 + 局部判定，确保类型收窄稳定（Pyright 在多次 .get() 间无法收窄）。
+    _ic_metrics_raw = result.get("ic_metrics")
+    _sample_stats_raw = result.get("sample_stats")
+    _period_raw = result.get("period")
+    _ic_distribution_raw = result.get("ic_distribution_consistency")
+    ic_metrics = _ic_metrics_raw if _ic_metrics_raw is not None else {}
+    sample_stats = _sample_stats_raw if _sample_stats_raw is not None else {}
+    period = _period_raw if _period_raw is not None else {}
+    ic_distribution = _ic_distribution_raw if _ic_distribution_raw is not None else {}
 
     ic_mean = ic_metrics.get("ic_mean")
     ic_std = ic_metrics.get("ic_std")
@@ -86,30 +120,29 @@ def main():
     icir_str = f"{icir:.2f}" if icir is not None else "N/A"
     positive_ratio_str = f"{positive_ratio:.2%}" if positive_ratio is not None else "N/A"
 
-    summary_lines = [
-        "=" * 60,
-        "结果摘要",
-        "=" * 60,
-        f"因子名称: {result.get('factor_name', 'unknown')}",
-        f"更新模式: {result.get('update_mode', 'unknown')}",
-        f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}",
-        f"有效天数: {sample_stats.get('valid_days', 0)} 天",
-        "--- IC指标 ---",
-        f"IC 均值: {ic_mean_str}",
-        f"IC 标准差: {ic_std_str}",
-        f"ICIR: {icir_str}",
-        f"IC>0 占比: {positive_ratio_str}",
-    ]
-    logger.info("\n" + "\n".join(summary_lines))
+    # 摘要逐行输出，避免单条多行字符串在结构化日志系统中造成字段污染。
+    logger.info("=" * 60)
+    logger.info("结果摘要")
+    logger.info("=" * 60)
+    logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
+    logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
+    logger.info(f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}")
+    logger.info(f"有效天数: {sample_stats.get('valid_days', 0)} 天")
+    logger.info("--- IC指标 ---")
+    logger.info(f"IC 均值: {ic_mean_str}")
+    logger.info(f"IC 标准差: {ic_std_str}")
+    logger.info(f"ICIR: {icir_str}")
+    logger.info(f"IC>0 占比: {positive_ratio_str}")
 
+    # 字段级差异化提示，提升运维可观测性。
     if ic_mean is None:
-        logger.warning("本次计算 IC 均值为空，请检查数据源")
+        logger.warning("本次计算 IC 均值为空：因子-收益对齐后样本不足或全部 NaN，请检查数据源覆盖范围")
     if ic_std is None:
-        logger.warning("IC 标准差无法计算，请检查因子数据分布")
+        logger.warning("IC 标准差无法计算：因子值方差为零（全部相同）或截面样本不足，请检查因子计算逻辑")
     if icir is None:
-        logger.warning("ICIR 无法计算，请检查因子数据分布")
+        logger.warning("ICIR 无法计算：IC 标准差为零导致除零，或 IC 序列长度不足，请检查回测窗口")
     if positive_ratio is None:
-        logger.warning("IC>0 占比无法获取，请检查公共模块输出结构")
+        logger.warning("IC>0 占比无法获取：公共模块未输出 ic_distribution_consistency 字段，请核对模块版本")
 
     logger.info("资金流占比趋势因子IC计算完成")
     return result
