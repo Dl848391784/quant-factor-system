@@ -36,6 +36,12 @@
   - Fix 3: _parse_percentage/_parse_numeric_with_unit 统一 pd.isna 前置检查，消除对 numpy 继承关系的隐式依赖
   - Fix 4: _parse_report_date 增加 pd.isnull 前置检查，防 pd.NaT 漏判为字符串 "NaT"
   - Fix 5: 年化 EPS split+int 用 try/except 包裹，格式异常时 warning 并置 None
+- v1.0f (2026-06-15): 5 项缺陷修复
+  - Fix 1: 全量模式 API 失败股票记录 stale_codes 写入 meta，供下次优先重拉
+  - Fix 2: fetch_financial_data_for_stock 增加 429 限流检测 + 指数退避重试（最多3次）
+  - Fix 3: 进度日志去掉多余的 fetch_count > 1 条件（1 % 50 != 0 本不触发）
+  - Fix 4: 维护 total_new_count 计数器替换 len(new_stock_data)，避免检查点 clear 后日志失真
+  - Fix 5: 旧格式迁移补充统计日志（list 条数 → dict 股票数/记录数）+ asset 为空 warning 计数
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -74,7 +80,7 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0e"
+_OUTPUT_VERSION = "1.0f"
 
 # 模块级固定时间戳
 _NOW = dt_cls.now()
@@ -100,6 +106,8 @@ _FINANCIAL_FIELD_MAP: dict[str, str] = {
 _FETCH_DELAY = 0.3  # 每只股票拉取间隔（秒）
 _BATCH_LOG_INTERVAL = 50  # 每实际拉取50只股票输出一次进度日志
 _CHECKPOINT_INTERVAL = 100  # 每拉取100只股票做一次检查点写入
+_RATE_LIMIT_RETRIES = 3  # 限流退避最大重试次数
+_RATE_LIMIT_BASE_DELAY = 2.0  # 限流退避基础延迟（秒），每次翻倍
 
 # 年化系数：季度 EPS → 年化 EPS
 # Q1: ×4, Q2: ×2, Q3: ×4/3, Q4: ×1
@@ -221,6 +229,26 @@ def _parse_report_date(report_date_raw: Any) -> str | None:
         return None
 
 
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """检测异常是否为 API 限流（429/频率限制）特征
+
+    识别策略：
+    - HTTP 429 状态码（urllib/requests 的 HTTPError）
+    - 异常消息包含限流关键词（频率/限制/429/rate limit）
+    """
+    exc_name = type(exc).__name__
+    exc_msg = str(exc).lower()
+    # HTTP 429
+    if "429" in exc_msg or "429" in exc_name:
+        return True
+    # 常见限流异常类名
+    if exc_name in ("HTTPError", "TooManyRequests"):
+        return True
+    # 限流关键词（中英文）
+    rate_limit_keywords = ("rate limit", "too many", "频率", "限制", "throttl")
+    return any(kw in exc_msg for kw in rate_limit_keywords)
+
+
 def fetch_financial_data_for_stock(
     symbol: str,
     logger_arg: logging.Logger | None = None,
@@ -237,10 +265,31 @@ def fetch_financial_data_for_stock(
         数据为空返回空列表（该股票确实无财务数据）
     """
     _logger = logger_arg or logger
-    try:
-        df = ak.stock_financial_abstract_ths(symbol=symbol)
-    except Exception as e:
-        _logger.warning("拉取 %s 财务数据失败: %s (%s)", symbol, str(e)[:80], type(e).__name__)
+    for attempt in range(1, _RATE_LIMIT_RETRIES + 1):
+        try:
+            df = ak.stock_financial_abstract_ths(symbol=symbol)
+            break  # 成功则退出重试循环
+        except Exception as e:
+            # 检测限流特征：HTTP 429 或常见限流异常关键词
+            is_rate_limit = _is_rate_limit_error(e)
+            if is_rate_limit and attempt < _RATE_LIMIT_RETRIES:
+                delay = _RATE_LIMIT_BASE_DELAY * (2 ** (attempt - 1))
+                _logger.warning(
+                    "拉取 %s 触发限流 (第%d次), %0.1fs 后重试: %s (%s)",
+                    symbol, attempt, delay, str(e)[:80], type(e).__name__,
+                )
+                time.sleep(delay)
+                continue
+            _logger.warning(
+                "拉取 %s 财务数据失败: %s (%s)%s",
+                symbol,
+                str(e)[:80],
+                type(e).__name__,
+                f" (重试{_RATE_LIMIT_RETRIES}次后仍失败)" if is_rate_limit else "",
+            )
+            return None
+    else:
+        # 所有重试均失败（不应到达此处，但做防御）
         return None
 
     if df.empty:
@@ -366,10 +415,20 @@ def main(logger_arg: logging.Logger | None = None) -> int:
     if isinstance(raw_data, list):
         _logger.info("检测到旧格式缓存（list），迁移为 dict 格式")
         stock_data: dict[str, list[dict[str, Any]]] = {}
+        dropped_recs = 0
         for rec in raw_data:
             code = rec.get("asset", "")
             if code:
                 stock_data.setdefault(code, []).append(rec)
+            else:
+                dropped_recs += 1
+        migrated_records = sum(len(v) for v in stock_data.values())
+        _logger.info(
+            "迁移完成: list %d 条 → dict %d 只股票 / %d 条记录",
+            len(raw_data), len(stock_data), migrated_records,
+        )
+        if dropped_recs > 0:
+            _logger.warning("迁移丢弃 %d 条 asset 为空的记录", dropped_recs)
     else:
         stock_data = raw_data
 
@@ -418,6 +477,8 @@ def main(logger_arg: logging.Logger | None = None) -> int:
     failed = 0
     empty = 0
     fetch_count = 0  # 实际发起 API 请求的次数（不含跳过）
+    total_new_count = 0  # 本次运行实际新增的股票总数（不受检查点 clear 影响）
+    stale_codes: set[str] = set()  # 全量模式下 API 失败的股票代码，记录到 meta
 
     for i, code in enumerate(all_codes):
         # 增量模式跳过已有数据；全量模式全部重新拉取
@@ -428,12 +489,12 @@ def main(logger_arg: logging.Logger | None = None) -> int:
         fetch_count += 1
 
         # Fix 4: 进度日志以实际请求次数触发，而非原始索引 i
-        if fetch_count > 1 and fetch_count % _BATCH_LOG_INTERVAL == 0:
+        if fetch_count % _BATCH_LOG_INTERVAL == 0:
             _logger.info(
                 "拉取进度: 请求=%d/%d (新增=%d, 失败=%d, 空数据=%d, 跳过=%d)",
                 fetch_count,
                 len(all_codes) - skipped,
-                len(new_stock_data),
+                total_new_count,
                 failed,
                 empty,
                 skipped,
@@ -442,8 +503,11 @@ def main(logger_arg: logging.Logger | None = None) -> int:
         result = fetch_financial_data_for_stock(code, logger_arg=_logger)
         if result is None:
             failed += 1
+            if need_full_fetch:
+                stale_codes.add(code)
         elif result:
             new_stock_data[code] = result
+            total_new_count += 1
         else:
             empty += 1
 
@@ -478,7 +542,7 @@ def main(logger_arg: logging.Logger | None = None) -> int:
 
     _logger.info(
         "拉取完成: 新增 %d 只股票, 失败 %d, 空数据 %d, 跳过 %d (共请求 %d 次)",
-        len(new_stock_data),
+        total_new_count,
         failed,
         empty,
         skipped,
@@ -501,6 +565,10 @@ def main(logger_arg: logging.Logger | None = None) -> int:
         "fields": list(_FINANCIAL_FIELD_MAP.values()) + ["annualized_eps"],
         "source": "akshare_stock_financial_abstract_ths",
     }
+    # 全量模式下记录 API 失败的股票代码，供下次优先重拉
+    if stale_codes:
+        meta["stale_codes"] = sorted(stale_codes)
+        _logger.warning("本次全量拉取 %d 只股票 API 失败，已记录到 meta.stale_codes", len(stale_codes))
 
     # Step 7: 写入缓存
     output_data = {"meta": meta, "data": stock_data}

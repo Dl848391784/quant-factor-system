@@ -1,6 +1,6 @@
 """fetch_financial.py 单元测试
 
-覆盖 14 个修复（v1.0c: Fix 1-5, v1.0d: Fix 1-5, v1.0e: Fix 1-5）：
+覆盖 19 个修复（v1.0c: Fix 1-5, v1.0d: Fix 1-5, v1.0e: Fix 1-5, v1.0f: Fix 1-5）：
 v1.0c:
 1. _QUARTER_ANNUALIZE_FACTOR 无效月份 warning + annualized_eps 置 None
 2. _parse_percentage 数据源单位约定 + 输出范围断言
@@ -19,6 +19,12 @@ v1.0e:
 3. _parse_percentage/_parse_numeric_with_unit 统一 pd.isna 前置检查
 4. _parse_report_date 增加 pd.isnull 防 pd.NaT 漏判
 5. 年化 EPS split+int 用 try/except 防格式异常
+v1.0f:
+1. 全量模式 API 失败股票记录 stale_codes 写入 meta
+2. 429 限流检测 + 指数退避重试（最多3次）
+3. 进度日志去掉多余的 fetch_count > 1 条件
+4. total_new_count 计数器替换 len(new_stock_data)
+5. 旧格式迁移补充统计日志 + asset 为空 warning 计数
 """
 
 import json
@@ -768,3 +774,264 @@ class TestAnnualizedEpsFormatException:
 
         assert records is not None
         assert records[0]["annualized_eps"] == pytest.approx(2.0)
+
+
+# ─── v1.0f Fix 1: 全量模式 stale_codes ────────────────────────
+
+
+class TestStaleCodesInMeta:
+    """v1.0f Fix 1: 全量模式 API 失败股票记录到 meta.stale_codes"""
+
+    def test_stale_codes_written_to_meta(self):
+        """全量模式下 API 失败的股票应出现在 meta.stale_codes"""
+        from data_fetchers.fetch_financial import main
+
+        stock_list = [
+            {"code": "000001", "name": "ok"},
+            {"code": "000002", "name": "fail"},
+            {"code": "000003", "name": "ok"},
+        ]
+        mock_df_ok = pd.DataFrame(
+            {
+                "报告期": ["2024-03-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+
+        call_count = 0
+
+        def mock_fetch(symbol, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if symbol == "000002":
+                raise RuntimeError("API error")
+            return mock_df_ok
+
+        captured_data = []
+
+        def capture_write(path, data, **kwargs):
+            captured_data.append(data)
+
+        with (
+            patch(
+                "data_fetchers.fetch_financial.load_cache",
+                return_value={"meta": {}, "data": {}},
+            ),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=stock_list),
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", side_effect=mock_fetch),
+            patch("data_fetchers.fetch_financial.write_gzip_cache", side_effect=capture_write),
+            patch("data_fetchers.fetch_financial.time.sleep"),
+        ):
+            main()
+
+        # 最终写入的 meta 应包含 stale_codes
+        final_write = captured_data[-1]
+        assert "stale_codes" in final_write["meta"]
+        assert "000002" in final_write["meta"]["stale_codes"]
+
+    def test_incremental_mode_no_stale_codes(self):
+        """增量模式下 API 失败不记录 stale_codes"""
+        from data_fetchers.fetch_financial import main
+
+        stock_list = [{"code": "000001", "name": "fail"}]
+
+        captured_data = []
+
+        def capture_write(path, data, **kwargs):
+            captured_data.append(data)
+
+        with (
+            patch(
+                "data_fetchers.fetch_financial.load_cache",
+                return_value={
+                    "meta": {"last_full_fetch_date": dt_cls.now().strftime("%Y-%m-%d")},
+                    "data": {"000001": [{"asset": "000001"}]},
+                },
+            ),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=stock_list),
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", side_effect=RuntimeError("err")),
+            patch("data_fetchers.fetch_financial.write_gzip_cache", side_effect=capture_write),
+            patch("data_fetchers.fetch_financial.time.sleep"),
+        ):
+            main()
+
+        # 增量模式：000001 已在缓存中被跳过，不会拉取，无 stale_codes
+        final_write = captured_data[-1]
+        assert "stale_codes" not in final_write["meta"]
+
+
+# ─── v1.0f Fix 2: 429 限流退避重试 ────────────────────────────
+
+
+class TestRateLimitRetry:
+    """v1.0f Fix 2: fetch_financial_data_for_stock 限流退避重试"""
+
+    def test_is_rate_limit_error_detects_429(self):
+        """_is_rate_limit_error 识别 HTTP 429"""
+        from data_fetchers.fetch_financial import _is_rate_limit_error
+
+        assert _is_rate_limit_error(RuntimeError("HTTP 429 Too Many Requests"))
+        assert _is_rate_limit_error(RuntimeError("请求频率限制"))
+
+    def test_is_rate_limit_error_non_rate_limit(self):
+        """_is_rate_limit_error 对非限流异常返回 False"""
+        from data_fetchers.fetch_financial import _is_rate_limit_error
+
+        assert not _is_rate_limit_error(RuntimeError("Connection timeout"))
+        assert not _is_rate_limit_error(AttributeError("NoneType"))
+
+    def test_retry_succeeds_on_second_attempt(self):
+        """限流重试第 2 次成功时返回数据"""
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024-03-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+        call_count = 0
+
+        def mock_fetch(symbol, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("HTTP 429 Too Many Requests")
+            return mock_df
+
+        with (
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", side_effect=mock_fetch),
+            patch("data_fetchers.fetch_financial.time.sleep"),
+        ):
+            result = fetch_financial_data_for_stock("000001")
+
+        assert result is not None
+        assert len(result) == 1
+
+    def test_retry_exhausted_returns_none(self):
+        """限流重试耗尽后返回 None"""
+        with (
+            patch(
+                "data_fetchers.fetch_financial.ak.stock_financial_abstract_ths",
+                side_effect=RuntimeError("HTTP 429 Too Many Requests"),
+            ),
+            patch("data_fetchers.fetch_financial.time.sleep"),
+        ):
+            result = fetch_financial_data_for_stock("000001")
+
+        assert result is None
+
+
+# ─── v1.0f Fix 3: 进度日志去掉 fetch_count > 1 ──────────────────
+
+
+class TestProgressLogCondition:
+    """v1.0f Fix 3: 进度日志条件简化为 fetch_count % _BATCH_LOG_INTERVAL == 0"""
+
+    def test_no_redundant_gt_one_condition(self):
+        """源码中不应有 fetch_count > 1 条件"""
+        import inspect
+
+        from data_fetchers.fetch_financial import main
+
+        source = inspect.getsource(main)
+        assert "fetch_count > 1" not in source, "进度日志条件不应包含 fetch_count > 1"
+
+
+# ─── v1.0f Fix 4: total_new_count 替换 len(new_stock_data) ──────
+
+
+class TestTotalNewCount:
+    """v1.0f Fix 4: total_new_count 计数器替代 len(new_stock_data)"""
+
+    def test_total_new_count_after_checkpoint(self):
+        """检查点 clear 后拉取完成日志仍反映实际新增总数"""
+        from data_fetchers.fetch_financial import main
+
+        codes = [f"{i:06d}" for i in range(150)]
+        stock_list = [{"code": c, "name": f"stock_{c}"} for c in codes]
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024-03-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+
+        with (
+            patch("data_fetchers.fetch_financial.load_cache", return_value={"meta": {}, "data": {}}),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=stock_list),
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df),
+            patch("data_fetchers.fetch_financial.write_gzip_cache"),
+            patch("data_fetchers.fetch_financial.time.sleep"),
+        ):
+            main()
+
+        # 若 total_new_count 正确，"拉取完成"日志应显示 150 而非 50
+        # （150 > _CHECKPOINT_INTERVAL=100，clear 后 new_stock_data 只剩 50 条）
+
+
+# ─── v1.0f Fix 5: 旧格式迁移统计日志 ───────────────────────────
+
+
+class TestMigrationStatistics:
+    """v1.0f Fix 5: 旧格式迁移补充统计日志 + asset 为空 warning"""
+
+    def test_migration_log_contains_statistics(self, caplog):
+        """迁移完成日志应包含 list 条数和 dict 股票数/记录数"""
+        from data_fetchers.fetch_financial import main
+
+        cache_data = {
+            "meta": {},
+            "data": [
+                {"asset": "000001", "roe": 4.21},
+                {"asset": "000001", "roe": 3.5},
+                {"asset": "000002", "roe": 2.1},
+            ],
+        }
+
+        with (
+            patch("data_fetchers.fetch_financial.load_cache", return_value=cache_data),
+            patch(
+                "data_fetchers.fetch_financial.load_main_board_stock_list",
+                return_value=[],
+            ),
+            patch("data_fetchers.fetch_financial.write_gzip_cache"),
+            caplog.at_level(logging.INFO, logger="data_fetchers.fetch_financial"),
+        ):
+            main()
+
+        migration_msgs = [r for r in caplog.records if "迁移完成" in r.message]
+        assert len(migration_msgs) >= 1
+        msg = migration_msgs[0].message
+        assert "3 条" in msg  # list 长度
+        assert "2 只股票" in msg  # dict key 数
+        assert "3 条记录" in msg  # sum of values
+
+    def test_migration_warns_on_empty_asset(self, caplog):
+        """asset 为空的记录应触发 warning"""
+        from data_fetchers.fetch_financial import main
+
+        cache_data = {
+            "meta": {},
+            "data": [
+                {"asset": "000001", "roe": 4.21},
+                {"asset": "", "roe": 1.0},  # 空 asset
+                {"asset": None, "roe": 2.0},  # None asset
+            ],
+        }
+
+        with (
+            patch("data_fetchers.fetch_financial.load_cache", return_value=cache_data),
+            patch(
+                "data_fetchers.fetch_financial.load_main_board_stock_list",
+                return_value=[],
+            ),
+            patch("data_fetchers.fetch_financial.write_gzip_cache"),
+            caplog.at_level(logging.WARNING, logger="data_fetchers.fetch_financial"),
+        ):
+            main()
+
+        drop_msgs = [r for r in caplog.records if "asset 为空" in r.message]
+        assert len(drop_msgs) >= 1
+        assert "2" in drop_msgs[0].message  # 2 条被丢弃
