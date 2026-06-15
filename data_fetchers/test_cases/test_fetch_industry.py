@@ -400,7 +400,7 @@ class TestConstraintCompliance:
 
     def test_version_constant_exists(self):
         """TC007-1: 版本号提取为常量（MODULE.md 约束 #16）"""
-        assert _OUTPUT_VERSION == '3.11'
+        assert _OUTPUT_VERSION == '3.12'
 
     def test_public_module_import(self):
         """TC007-2: 公共模块导入（MODULE.md 约束 #4）"""
@@ -483,9 +483,14 @@ class TestEMSource:
         """TC009-2: _EM_INDUSTRY_NAMES 无重复（dict.fromkeys 已去重）"""
         assert len(_EM_INDUSTRY_NAMES) == len(set(_EM_INDUSTRY_NAMES))
 
+    @patch('time.sleep')
     @patch('akshare.stock_board_industry_cons_em')
-    def test_fetch_stock_industry_em_column_validation(self, mock_api):
-        """TC009-3: EM API 列名校验（防御性）"""
+    def test_fetch_stock_industry_em_column_validation(self, mock_api, _mock_sleep):
+        """TC009-3: EM API 列名校验（防御性）
+
+        v3.12: mock time.sleep 避免测试真实等待 31×0.3=9.3s
+        （v3.12 修复后 except 分支也 sleep 防限速）
+        """
         import pandas as pd
 
         # Mock 返回缺少必需列的 DataFrame
@@ -500,9 +505,13 @@ class TestEMSource:
             # 最终所有31个板块都失败 → RuntimeError
             assert isinstance(e, RuntimeError), f"期望 RuntimeError，实际 {type(e).__name__}"
 
+    @patch('time.sleep')
     @patch('akshare.stock_board_industry_cons_em')
-    def test_fetch_stock_industry_em_all_fail_raises_runtime_error(self, mock_api):
-        """TC009-4: 所有31个板块获取失败 → RuntimeError"""
+    def test_fetch_stock_industry_em_all_fail_raises_runtime_error(self, mock_api, _mock_sleep):
+        """TC009-4: 所有31个板块获取失败 → RuntimeError
+
+        v3.12: mock time.sleep 避免测试真实等待（v3.12 修复后失败分支也 sleep）
+        """
         mock_api.side_effect = Exception("网络错误")
 
         try:
@@ -511,9 +520,13 @@ class TestEMSource:
         except RuntimeError as e:
             assert '所有31个板块均获取失败' in str(e)
 
+    @patch('time.sleep')
     @patch('akshare.stock_board_industry_cons_em')
-    def test_fetch_stock_industry_em_partial_success(self, mock_api):
-        """TC009-5: 部分板块获取失败仍返回有效数据"""
+    def test_fetch_stock_industry_em_partial_success(self, mock_api, _mock_sleep):
+        """TC009-5: 部分板块获取失败仍返回有效数据
+
+        v3.12: mock time.sleep 避免测试真实等待（v3.12 修复后失败分支也 sleep）
+        """
         import pandas as pd
 
         # 只有第一个板块成功，其他失败
@@ -532,6 +545,35 @@ class TestEMSource:
         result = fetch_stock_industry_em()
         assert '000001' in result
         assert result['000001']['industry'] == '农林牧渔'  # 第一个板块
+
+    @patch('time.sleep')
+    @patch('akshare.stock_board_industry_cons_em')
+    def test_fetch_stock_industry_em_failure_branch_sleeps(self, mock_api, mock_sleep):
+        """TC009-5b (v3.12): 失败分支也调用 time.sleep(0.3) 防限速
+
+        v3.12 修复：原实现 sleep 仅在成功分支执行，若所有 31 个板块都因限速失败
+        会零间隔连环重试加剧限速。本测试验证：
+        - 全部板块失败时，time.sleep 被调用 31 次（每个失败板块各一次）
+        - 每次调用参数为 0.3 秒（与成功分支保持一致）
+
+        失败分支不 sleep 会让本测试失败：mock_sleep.call_count 将为 0。
+        """
+        mock_api.side_effect = Exception("限速错误")
+
+        try:
+            fetch_stock_industry_em()
+            assert False, "应抛出 RuntimeError"
+        except RuntimeError:
+            pass
+
+        # 31 个板块全部失败 → sleep 应被调用 31 次（v3.12 修复后）
+        assert mock_sleep.call_count == len(_EM_INDUSTRY_NAMES), (
+            f"失败分支 sleep 调用次数 {mock_sleep.call_count} ≠ 板块数 {len(_EM_INDUSTRY_NAMES)}，"
+            f"v3.12 修复未生效（失败分支未 sleep）"
+        )
+        # 验证所有调用参数都是 0.3
+        for call in mock_sleep.call_args_list:
+            assert call.args == (0.3,), f"sleep 参数应为 0.3，实际 {call.args}"
 
     @patch('data_fetchers.fetch_industry.fetch_stock_industry_em')
     @patch('data_fetchers.fetch_industry.fetch_stock_industry_sw')
