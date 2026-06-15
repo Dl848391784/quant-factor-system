@@ -82,7 +82,7 @@ def main():
 
     # 防御性检查：result 为 None 时抛出业务异常（遵循 PROJECT.md 异常处理规范）
     if result is None:
-        raise FactorCalcError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
+        raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
 
     # 输出 IC 摘要 + None 状态整合告警（公共模块,M3.1）
     log_factor_summary(result, "振幅差分因子", logger)

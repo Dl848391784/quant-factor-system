@@ -71,7 +71,7 @@ def main():
     )
 
     if result is None:
-        raise FactorCalcError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
+        raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
 
     # 输出 IC 摘要 + None 状态整合告警（公共模块,M3.1）
     log_factor_summary(result, "行业盈利增长因子", logger)

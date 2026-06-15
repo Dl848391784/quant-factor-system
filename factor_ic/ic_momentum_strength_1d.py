@@ -101,7 +101,7 @@ def main():
 
     # 保底处理：公共模块异常返回 None 时抛出 RuntimeError
     if result is None:
-        raise FactorCalcError("run_complex_factor_ic 返回 None")
+        raise FactorCalcError("run_factor_ic 返回 None")
 
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get("ic_metrics") or {}

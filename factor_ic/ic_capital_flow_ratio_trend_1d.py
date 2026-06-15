@@ -105,18 +105,18 @@ def main():
     # 强化结果校验：覆盖 None / 非 dict / 缺关键字段 / 关键字段类型异常 四种失败场景，
     # 避免后续 .get() 链静默掩盖真实错误或在非 dict 值上抛 AttributeError。
     if result is None:
-        raise FactorCalcError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
+        raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
     if not isinstance(result, dict):
-        raise FactorCalcError(f"run_complex_factor_ic 返回类型异常: 期望 dict，实际 {type(result).__name__}")
+        raise FactorCalcError(f"run_factor_ic 返回类型异常: 期望 dict，实际 {type(result).__name__}")
     if "ic_metrics" not in result:
         raise FactorCalcError(
-            f"run_complex_factor_ic 返回结构不完整: 缺少 'ic_metrics' 字段，实际键={list(result.keys())}"
+            f"run_factor_ic 返回结构不完整: 缺少 'ic_metrics' 字段，实际键={list(result.keys())}"
         )
     # ic_metrics 是关键字段，类型必须严格 dict（含禁止 None），任何偏差立即抛错
     _ic_metrics_value = result["ic_metrics"]
     if not isinstance(_ic_metrics_value, dict):
         raise FactorCalcError(
-            f"run_complex_factor_ic 返回结构异常: 'ic_metrics' 期望 dict，实际 {type(_ic_metrics_value).__name__}"
+            f"run_factor_ic 返回结构异常: 'ic_metrics' 期望 dict，实际 {type(_ic_metrics_value).__name__}"
         )
     ic_metrics: dict = _ic_metrics_value
 

@@ -307,7 +307,7 @@ def main():
     # （维护者注意：此分支非冗余——run_complex_factor_ic 在数据加载/计算失败时可能返回 None；
     # 删除此分支会导致 None 路径以 AttributeError 形式穿透 FactorCalcError 兜底）
     if result is None:
-        raise FactorCalcError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
+        raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
 
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get("ic_metrics") or {}

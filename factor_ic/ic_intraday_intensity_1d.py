@@ -186,7 +186,7 @@ def main():
 
     # 防御性检查：result 为 None 时抛出异常（遵循 PROJECT.md 异常处理规范）
     if result is None:
-        raise FactorCalcError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
+        raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
 
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get("ic_metrics") or {}
