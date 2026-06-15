@@ -1,6 +1,6 @@
 """fetch_financial.py 单元测试
 
-覆盖 19 个修复（v1.0c: Fix 1-5, v1.0d: Fix 1-5, v1.0e: Fix 1-5, v1.0f: Fix 1-5）：
+覆盖 24 个修复（v1.0c: Fix 1-5, v1.0d: Fix 1-5, v1.0e: Fix 1-5, v1.0f: Fix 1-5, v1.0g: Fix 1-5）：
 v1.0c:
 1. _QUARTER_ANNUALIZE_FACTOR 无效月份 warning + annualized_eps 置 None
 2. _parse_percentage 数据源单位约定 + 输出范围断言
@@ -25,6 +25,12 @@ v1.0f:
 3. 进度日志去掉多余的 fetch_count > 1 条件
 4. total_new_count 计数器替换 len(new_stock_data)
 5. 旧格式迁移补充统计日志 + asset 为空 warning 计数
+v1.0g:
+1. _is_rate_limit_error 删除无效 "429" in exc_name
+2. 删除 for-else 冗余分支
+3. bool 子类拦截（numpy.bool_(False)）
+4. 检查点条件删除 fetch_count > 0
+5. load_cache 空结构返回 {"data": {}}
 """
 
 import json
@@ -184,7 +190,7 @@ class TestCacheStructure:
         """缓存文件不存在返回空结构"""
         with patch("data_fetchers.fetch_financial.CACHE_FILE", Path("/nonexistent/file.json.gz")):
             result = load_cache()
-        assert result == {"meta": {}, "data": []}
+        assert result == {"meta": {}, "data": {}}
 
 
 class TestFullFetchTrigger:
@@ -1035,3 +1041,132 @@ class TestMigrationStatistics:
         drop_msgs = [r for r in caplog.records if "asset 为空" in r.message]
         assert len(drop_msgs) >= 1
         assert "2" in drop_msgs[0].message  # 2 条被丢弃
+
+
+# ─── v1.0g Fix 1: _is_rate_limit_error 删除无效 "429" in exc_name ──
+
+
+class TestRateLimitErrorNoClassNameCheck:
+    """v1.0g Fix 1: _is_rate_limit_error 不再检查异常类名中的 429"""
+
+    def test_no_429_in_class_name_check(self):
+        """源码中 _is_rate_limit_error 不应包含 '429' in exc_name"""
+        import inspect
+
+        from data_fetchers.fetch_financial import _is_rate_limit_error
+
+        source = inspect.getsource(_is_rate_limit_error)
+        assert '"429" in exc_name' not in source, "不应检查类名中是否含 429"
+
+    def test_429_in_message_still_detected(self):
+        """异常消息中的 429 仍应被检测到"""
+        from data_fetchers.fetch_financial import _is_rate_limit_error
+
+        assert _is_rate_limit_error(RuntimeError("HTTP 429"))
+
+
+# ─── v1.0g Fix 2: 删除 for-else 冗余分支 ──────────────────────
+
+
+class TestNoForElseBranch:
+    """v1.0g Fix 2: fetch_financial_data_for_stock 不应有 for-else 分支"""
+
+    def test_no_for_else_in_fetch(self):
+        """源码中 fetch_financial_data_for_stock 不应包含 for-else"""
+        import inspect
+
+        from data_fetchers.fetch_financial import fetch_financial_data_for_stock
+
+        source = inspect.getsource(fetch_financial_data_for_stock)
+        # for-else 的 else 前面是 except 块的 return，不应有独立的 else 分支
+        lines = source.split("\n")
+        for_else_found = False
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped == "else:" and i > 0:
+                # 检查是否是 for-else（前一个非空行应该是循环体内的代码）
+                for j in range(i - 1, -1, -1):
+                    prev = lines[j].strip()
+                    if prev and not prev.startswith("#"):
+                        if prev.startswith("return ") or prev.startswith("continue"):
+                            for_else_found = True
+                        break
+        assert not for_else_found, "不应存在 for-else 冗余分支"
+
+
+# ─── v1.0g Fix 3: bool 子类拦截 ──────────────────────────────
+
+
+class TestBoolSubclassIntercept:
+    """v1.0g Fix 3: numpy.bool_(False) 不被 int 分支误命中"""
+
+    def test_parse_percentage_numpy_bool_false(self):
+        """_parse_percentage 对 numpy.bool_(False) 返回 None 而非 0.0"""
+        assert _parse_percentage(np.bool_(False)) is None
+
+    def test_parse_percentage_numpy_bool_true(self):
+        """_parse_percentage 对 numpy.bool_(True) 返回 None 而非 1.0"""
+        assert _parse_percentage(np.bool_(True)) is None
+
+    def test_parse_numeric_numpy_bool_false(self):
+        """_parse_numeric_with_unit 对 numpy.bool_(False) 返回 None"""
+        from data_fetchers.fetch_financial import _parse_numeric_with_unit
+
+        assert _parse_numeric_with_unit(np.bool_(False)) is None
+
+    def test_parse_percentage_python_true_returns_float(self):
+        """Python 原生 True 被 val is False 拦截不了，但 isinstance(bool) 拦截"""
+        # True is False → False, 但 isinstance(True, bool) → True
+        assert _parse_percentage(True) is None
+
+    def test_parse_percentage_python_int_still_works(self):
+        """正常 Python int 仍能正常解析"""
+        assert _parse_percentage(5) == 5.0
+
+
+# ─── v1.0g Fix 4: 检查点条件无 fetch_count > 0 ────────────────
+
+
+class TestCheckpointNoRedundantCondition:
+    """v1.0g Fix 4: 检查点写入条件不包含 fetch_count > 0"""
+
+    def test_no_fetch_count_gt_zero_in_checkpoint(self):
+        """源码中检查点条件不应包含 fetch_count > 0"""
+        import inspect
+
+        from data_fetchers.fetch_financial import main
+
+        source = inspect.getsource(main)
+        assert "fetch_count > 0" not in source, "检查点条件不应包含 fetch_count > 0"
+
+
+# ─── v1.0g Fix 5: load_cache 空结构返回 dict ──────────────────
+
+
+class TestLoadCacheEmptyStructure:
+    """v1.0g Fix 5: load_cache 空结构返回 {"data": {}} 避免误触发迁移"""
+
+    def test_no_migration_log_for_empty_cache(self, caplog):
+        """空缓存不应触发旧格式迁移日志"""
+        from data_fetchers.fetch_financial import main
+
+        with (
+            patch("data_fetchers.fetch_financial.load_cache", return_value={"meta": {}, "data": {}}),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=[]),
+            patch("data_fetchers.fetch_financial.write_gzip_cache"),
+            caplog.at_level(logging.INFO, logger="data_fetchers.fetch_financial"),
+        ):
+            main()
+
+        migration_msgs = [r for r in caplog.records if "迁移" in r.message]
+        assert len(migration_msgs) == 0, "空缓存不应触发迁移日志"
+
+    def test_load_cache_missing_file_returns_dict(self, tmp_path):
+        """缓存文件不存在时返回 dict 格式空结构"""
+        from data_fetchers.fetch_financial import load_cache
+
+        with patch("data_fetchers.fetch_financial.CACHE_FILE", tmp_path / "nonexistent.json.gz"):
+            result = load_cache()
+
+        assert isinstance(result["data"], dict), "空缓存 data 应为 dict 类型"
+        assert len(result["data"]) == 0

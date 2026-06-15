@@ -42,6 +42,12 @@
   - Fix 3: 进度日志去掉多余的 fetch_count > 1 条件（1 % 50 != 0 本不触发）
   - Fix 4: 维护 total_new_count 计数器替换 len(new_stock_data)，避免检查点 clear 后日志失真
   - Fix 5: 旧格式迁移补充统计日志（list 条数 → dict 股票数/记录数）+ asset 为空 warning 计数
+- v1.0g (2026-06-15): 5 项缺陷修复
+  - Fix 1: _is_rate_limit_error 删除无效的 "429" in exc_name 条件（类名不含数字）
+  - Fix 2: 删除 for-else 冗余分支（循环体内已处理所有路径）
+  - Fix 3: _parse_percentage/_parse_numeric_with_unit 增加 bool 子类拦截（numpy.bool_(False) 不被 int 分支误命中）
+  - Fix 4: 检查点写入删除永远为真的 fetch_count > 0 冗余条件
+  - Fix 5: load_cache 空结构返回 {"data": {}} 与新格式一致，避免触发误迁移日志
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -80,7 +86,7 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0f"
+_OUTPUT_VERSION = "1.0g"
 
 # 模块级固定时间戳
 _NOW = dt_cls.now()
@@ -138,6 +144,9 @@ def _parse_percentage(val: Any) -> float | None:
     """
     if val is None or val is False:
         return None
+    # 拦截 numpy.bool_(False)：bool 是 int 子类，会被 isinstance(val, int) 命中
+    if isinstance(val, bool):
+        return None
     # 统一 NA 检查（兼容 float/numpy.float64/pd.NaT 等），消除对继承关系的隐式依赖
     try:
         if pd.isna(val):
@@ -174,6 +183,9 @@ def _parse_numeric_with_unit(val: Any) -> float | None:
         不依赖 isinstance(val, float) 对 numpy 标量的隐式继承关系。
     """
     if val is None or val is False:
+        return None
+    # 拦截 numpy.bool_(False)：bool 是 int 子类，会被 isinstance(val, int) 命中
+    if isinstance(val, bool):
         return None
     # 统一 NA 检查（兼容 float/numpy.float64/pd.NaT 等），消除对继承关系的隐式依赖
     try:
@@ -238,8 +250,8 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     """
     exc_name = type(exc).__name__
     exc_msg = str(exc).lower()
-    # HTTP 429
-    if "429" in exc_msg or "429" in exc_name:
+    # HTTP 429（仅检查异常消息，类名不含 "429"）
+    if "429" in exc_msg:
         return True
     # 常见限流异常类名
     if exc_name in ("HTTPError", "TooManyRequests"):
@@ -265,6 +277,7 @@ def fetch_financial_data_for_stock(
         数据为空返回空列表（该股票确实无财务数据）
     """
     _logger = logger_arg or logger
+    df = pd.DataFrame()  # 初始化：避免 Pyright possibly unbound 警告
     for attempt in range(1, _RATE_LIMIT_RETRIES + 1):
         try:
             df = ak.stock_financial_abstract_ths(symbol=symbol)
@@ -288,9 +301,6 @@ def fetch_financial_data_for_stock(
                 f" (重试{_RATE_LIMIT_RETRIES}次后仍失败)" if is_rate_limit else "",
             )
             return None
-    else:
-        # 所有重试均失败（不应到达此处，但做防御）
-        return None
 
     if df.empty:
         _logger.info("%s 财务数据为空", symbol)
@@ -366,7 +376,7 @@ def load_cache(logger_arg: logging.Logger | None = None) -> dict[str, Any]:
     _logger = logger_arg or logger
     if not CACHE_FILE.exists():
         _logger.info("财务数据缓存不存在，将全新拉取")
-        return {"meta": {}, "data": []}
+        return {"meta": {}, "data": {}}
 
     try:
         import gzip
@@ -383,7 +393,7 @@ def load_cache(logger_arg: logging.Logger | None = None) -> dict[str, Any]:
         return data
     except Exception as e:
         _logger.warning("加载缓存失败: %s (%s)，将全新拉取", str(e)[:80], type(e).__name__)
-        return {"meta": {}, "data": []}
+        return {"meta": {}, "data": {}}
 
 
 def get_cached_stock_codes(cache_data: dict[str, Any]) -> set[str]:
@@ -513,7 +523,7 @@ def main(logger_arg: logging.Logger | None = None) -> int:
 
         # Fix 2: 检查点写入 — 每 100 只股票写一次缓存，防崩溃丢失
         # 使用浅拷贝 {**stock_data, **new_stock_data} 避免提前 mutate stock_data
-        if fetch_count > 0 and fetch_count % _CHECKPOINT_INTERVAL == 0 and new_stock_data:
+        if fetch_count % _CHECKPOINT_INTERVAL == 0 and new_stock_data:
             merged = {**stock_data, **new_stock_data}
             checkpoint_meta: dict[str, Any] = {
                 "version": _OUTPUT_VERSION,
