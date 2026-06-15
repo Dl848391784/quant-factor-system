@@ -66,7 +66,7 @@ logger = get_logger(__name__)
 
 
 # 提取共用参数函数，避免海象运算符模块级命名空间泄漏（E731: def 替代 lambda 赋值）
-def _params_fn(a):  # noqa: F841
+def _params_fn(a):
     return {"n": a.n, "k": a.k}
 
 
@@ -187,7 +187,7 @@ if __name__ == "__main__":
         main()
     except FactorCalcError as e:
         # 业务异常：消息已足够定位，堆栈是噪音（MODULE.md M22 业务异常子类规则）
-        logger.error("布林带%B因子IC计算失败: %s", e)
+        logger.error("布林带%%B因子IC计算失败: %s", e)
         sys.exit(1)
     except Exception:
         # 未预期异常：必须打印堆栈以便定位
