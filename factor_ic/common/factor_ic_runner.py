@@ -61,6 +61,7 @@ def run_factor_ic_analysis(
     additional_factor_files: dict[str, Path] | None = None,
     custom_factor_calculation: Callable | None = None,
     custom_factor_calculation_params: dict[str, Any] | None = None,
+    extra_log_params: dict[str, Any] | None = None,
     _logger=None,
 ) -> dict[str, Any]:
     """
@@ -81,6 +82,9 @@ def run_factor_ic_analysis(
             - 用于需要预处理因子值的场景（如 KDJ 计算）
             - 函数签名: (factor_df: pd.DataFrame) -> pd.DataFrame
         custom_factor_calculation_params: 自定义因子计算参数
+        extra_log_params: 入口脚本传入的额外启动参数（非公共参数），用于在启动横幅中
+            打印因子特有参数（如 KDJ 的 n/m1/m2、布林带的 n/k）。
+            None / 空 dict 时不打印"扩展参数"行。
         _logger: 日志记录器（由调用方传入，默认使用模块 logger）
             - 参数名使用下划线前缀避免遮蔽模块级 logger
 
@@ -127,6 +131,12 @@ def run_factor_ic_analysis(
 
     _logger.info("=" * 60)
     _logger.info("因子 IC 分析: %s_%s", factor_name, return_period)
+    _logger.info("入口参数: min_stocks=%s, force_full=%s", min_stocks, force_full)
+    if extra_log_params:
+        # 扩展参数行：使用 % 惰性格式化（PROJECT.md 规则 #13），
+        # 同时对 v 做 %s 安全转换以容忍 None / int / str / float / bool 等类型
+        extra_str = ", ".join(f"{k}={v!s}" for k, v in extra_log_params.items())
+        _logger.info("扩展参数: %s", extra_str)
     _logger.info("=" * 60)
 
     # ========== 确定路径 ==========
