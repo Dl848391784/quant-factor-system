@@ -9,20 +9,24 @@ volume_price / industry / industry_financial / fund_flow），通过本
 ``__init__.py`` 重导出，保证 80+ 处外部 ``from data_fetchers.factor_calculator
 import ...`` 路径零修改。
 
-PR-2b 阶段（当前，2026-06-15）
+PR-2c 阶段（当前，2026-06-15）
 ==============================
 - ``_common.py``：模块级常量 + fallback logger + ``get_module_logger`` + 4 个
   半公开 helper（``_wilder_smoothing_rsi`` / ``_per_asset_transform`` /
-  ``_calculate_ewm_with_initial`` / ``_calculate_delta``）—— PR-2a 完成
-- **``basic.py``：7 个基础技术指标因子（``calculate_rsi`` /
-  ``calculate_volume_ratio`` / ``calculate_forward_return`` /
-  ``calculate_bollinger_pb`` / ``calculate_kdj_j`` /
-  ``calculate_turnover_surge`` / ``calculate_rsi_df``）—— PR-2b 新增**
-- ``_legacy.py``：剩余 23 个 ``calculate_*`` 函数（PR-2c 起继续搬）；
-  顶部以 ``from .basic import (...)`` 维持向后兼容
+  ``_calculate_ewm_with_initial`` / ``_calculate_delta``）—— PR-2a 完成；
+  PR-2c 新增动量族常量（``_COL_OPEN`` / ``_COL_OVERNIGHT_RET`` /
+  ``_COL_MOMENTUM_STRENGTH`` / ``_DEFAULT_MOMENTUM_STRENGTH_WINDOW`` /
+  ``_MOMENTUM_STRENGTH_STD_MIN``）
+- ``basic.py``：7 个基础技术指标因子—— PR-2b 完成
+- **``momentum.py``：7 个价格 / 动量族因子（``calculate_price_position`` /
+  ``calculate_amplitude`` / ``calculate_past_return_1d`` /
+  ``calculate_return_3d`` / ``calculate_return_5d`` /
+  ``calculate_momentum_strength`` / ``calculate_overnight_return``）—— PR-2c 新增**
+- ``_legacy.py``：剩余 16 个 ``calculate_*`` 函数（PR-3 起继续搬）；
+  顶部以 ``from .basic import (...)`` + ``from .momentum import (...)`` 维持向后兼容
 - 本 ``__init__.py`` 从 ``_common`` 直接重导出半公开 helper + 9 公共常量；
-  从 ``_legacy`` ``import *`` 透出全量 ``calculate_*`` 函数（含已搬到 basic
-  的 7 个，借由 _legacy re-import 路径透出，保持 ``__all__`` 单一来源）
+  从 ``_legacy`` ``import *`` 透出全量 ``calculate_*`` 函数（含已搬到子模块的
+  函数，借由 _legacy re-import 路径透出，保持 ``__all__`` 单一来源）
 
 兼容性契约（design.md §7.3）
 ==========================

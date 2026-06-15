@@ -84,6 +84,11 @@ _COL_INDUSTRY_ROE_TREND = "industry_roe_trend"  # v1.16 新增：行业ROE趋势
 _COL_INDUSTRY_EARNINGS_GROWTH = "industry_earnings_growth"  # v1.16 新增：行业盈利增长因子
 _COL_INDUSTRY_PE_TREND = "industry_pe_trend"  # v1.16 新增：行业PE趋势因子
 
+# 动量族（PR-2c）
+_COL_OPEN = "open"
+_COL_OVERNIGHT_RET = "overnight_ret"
+_COL_MOMENTUM_STRENGTH = "momentum_strength"
+
 
 # ============================================================================
 # 行业因子默认参数（私有常量）
@@ -113,6 +118,8 @@ _DEFAULT_AMPLITUDE_EPSILON = 1e-10  # 防止除零
 _DEFAULT_PAST_RETURN_1D_WINDOW = 1  # 1日涨幅窗口
 _DEFAULT_RETURN_3D_WINDOW = 3  # 3日累计涨幅窗口
 _DEFAULT_RETURN_5D_WINDOW = 5  # 5日累计涨幅窗口
+_DEFAULT_MOMENTUM_STRENGTH_WINDOW = 5  # 5日滚动窗口（动量强度日收益标准差窗口）
+_MOMENTUM_STRENGTH_STD_MIN = 0.01  # 日收益率标准差下限（防止均匀涨跌时比值爆炸）
 
 
 # ============================================================================

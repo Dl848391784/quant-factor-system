@@ -121,6 +121,7 @@ from ._common import (  # noqa: F401  允许此模块 re-export 这些符号
     _COL_LOW,
     _COL_MA5_DEVIATION,
     _COL_NEAR_HIGH_RATIO_5,
+    _COL_OPEN,
     _COL_PAST_RETURN_1D,
     _COL_POSITIVE_DAY_RATIO_5,
     _COL_PRICE_POSITION,
@@ -183,6 +184,20 @@ from .basic import (  # noqa: F401
     calculate_rsi_df,
     calculate_turnover_surge,
     calculate_volume_ratio,
+)
+
+# ============================================================================
+# 子模块 momentum re-import（PR-2c：动量族因子已搬到 .momentum，本文件 re-export
+# 维持 `from ._legacy import *` 通配兼容 + __all__ 中名称仍有效）
+# ============================================================================
+from .momentum import (  # noqa: F401
+    calculate_amplitude,
+    calculate_momentum_strength,
+    calculate_overnight_return,
+    calculate_past_return_1d,
+    calculate_price_position,
+    calculate_return_3d,
+    calculate_return_5d,
 )
 
 
@@ -305,61 +320,8 @@ __all__ = [
 # ============================================================================
 
 
-def calculate_price_position(factor_df: pd.DataFrame, logger_arg: logging.Logger | None = None) -> pd.DataFrame:
-    """
-    计算全天价格位置因子
-
-    公式: Price Position = (Close - Low) / (High - Low)
-
-    含义: 收盘价在全天振幅中的相对位置
-    - 0 = 收盘价等于最低价（全天最低收盘）
-    - 1 = 收盘价等于最高价（全天最高收盘）
-    - 0.5 = 收盘价在振幅中位
-
-    Args:
-        factor_df: 包含 close, high, low 列的 DataFrame
-        logger_arg: 日志记录器（可选，默认使用模块 logger）
-
-    Returns:
-        添加 price_position 列的 DataFrame
-
-    边界处理:
-        - High - Low = 0 时，使用 epsilon 防止除零，设为 0.5（中位）
-        - 正常结果值在 [0, 1] 范围
-
-    Example:
-        >>> df = pd.DataFrame({"close": [10.0, 12.0, 11.0], "high": [12.0, 13.0, 11.0], "low": [9.0, 11.0, 11.0]})
-        >>> result = calculate_price_position(df)
-        >>> "price_position" in result.columns
-        True
-        >>> result["price_position"].iloc[0]  # (10-9)/(12-9) = 0.333
-        0.333...
-    """
-    _logger = get_module_logger(logger_arg)
-
-    # 入口 copy（遵循 MODULE.md 约束）
-    df = factor_df.copy()
-
-    # 计算振幅
-    range_val = df[_COL_HIGH] - df[_COL_LOW]
-
-    # 防止除零
-    zero_range_mask = np.abs(range_val) < _DEFAULT_PRICE_POSITION_EPSILON
-
-    if zero_range_mask.any():
-        zero_count = zero_range_mask.sum()
-        _logger.warning(f"检测到 {zero_count} 个振幅为零的记录（high=low），price_position 设为 0.5（中位）")
-
-    # 计算价格位置
-    df[_COL_PRICE_POSITION] = np.where(
-        zero_range_mask,
-        0.5,  # 振幅为零时设为中位
-        (df[_COL_CLOSE] - df[_COL_LOW]) / range_val,
-    )
-
-    _logger.info(f"price_position 计算完成，共 {len(df)} 条记录")
-
-    return df
+# (PR-2c) calculate_price_position: 已迁移至 .momentum 子模块（design.md §5.3）；
+# 由本文件顶部 `from .momentum import calculate_price_position` 维持向后兼容。
 
 
 # ============================================================================
@@ -367,69 +329,12 @@ def calculate_price_position(factor_df: pd.DataFrame, logger_arg: logging.Logger
 # ============================================================================
 
 
-def calculate_amplitude(factor_df: pd.DataFrame, logger_arg: logging.Logger | None = None) -> pd.DataFrame:
-    """
-    计算振幅因子
-
-    公式: amplitude = (high - low) / close
-
-    含义: 当日振幅相对于收盘价的比率，反映价格波动强度
-    - 值越大 → 波动越剧烈
-    - 值越小 → 波动平稳
-    - 范围: 理论 [0, +∞)，实际通常 [0, 0.15]（A股振幅上限15%）
-
-    Args:
-        factor_df: 包含 high, low, close 列的 DataFrame
-        logger_arg: 日志记录器（可选，默认使用模块 logger）
-
-    Returns:
-        添加 amplitude 列的 DataFrame
-
-    边界处理:
-        - close = 0 时，设为 NaN（无效数据）
-        - high = low 时，振幅为 0（一字涨停/跌停）
-
-    Example:
-        >>> df = pd.DataFrame({"close": [10.0, 12.0, 0.0], "high": [12.0, 13.0, 11.0], "low": [9.0, 11.0, 9.0]})
-        >>> result = calculate_amplitude(df)
-        >>> "amplitude" in result.columns
-        True
-        >>> result["amplitude"].iloc[0]  # (12-9)/10 = 0.3
-        0.3
-        >>> pd.isna(result["amplitude"].iloc[2])  # close=0 → NaN
-        True
-    """
-    _logger = get_module_logger(logger_arg)
-
-    # 入口 copy（遵循 MODULE.md 约束）
-    df = factor_df.copy()
-
-    # 计算振幅
-    range_val = df[_COL_HIGH] - df[_COL_LOW]
-
-    # 检查 close 为零的情况
-    zero_close_mask = np.abs(df[_COL_CLOSE]) < _DEFAULT_AMPLITUDE_EPSILON
-
-    if zero_close_mask.any():
-        zero_count = zero_close_mask.sum()
-        _logger.warning(f"检测到 {zero_count} 个收盘价为零的记录，amplitude 设为 NaN（无效数据）")
-
-    # 计算振幅因子
-    # close=0 → NaN，否则计算 (high - low) / close
-    df[_COL_AMPLITUDE] = np.where(
-        zero_close_mask,
-        np.nan,  # 收盘价为零设为 NaN
-        range_val / df[_COL_CLOSE],
-    )
-
-    _logger.info(f"amplitude 计算完成，共 {len(df)} 条记录")
-
-    return df
+# (PR-2c) calculate_amplitude: 已迁移至 .momentum 子模块（design.md §5.3）；
+# 由本文件顶部 `from .momentum import calculate_amplitude` 维持向后兼容。
 
 
 # 振幅因子所需输入列（供调用方读取，避免硬编码耦合）
 # pyright: ignore[reportFunctionMemberAccess]
-calculate_amplitude.required_cols = ["close", "high", "low"]  # type: ignore[attr-defined]
 
 
 # ============================================================================
@@ -437,75 +342,8 @@ calculate_amplitude.required_cols = ["close", "high", "low"]  # type: ignore[att
 # ============================================================================
 
 
-def calculate_past_return_1d(
-    factor_df: pd.DataFrame, window: int = None, logger_arg: logging.Logger | None = None
-) -> pd.DataFrame:
-    """
-    计算 N 日涨幅因子（默认1日）
-
-    公式: past_return_1d = close[t] / close[t-1] - 1
-
-    含义: 当日涨跌幅（相对于昨日收盘价）
-    - 正值 → 上涨
-    - 负值 → 下跌
-    - 0 → 无变化
-    - 范围: 理论 [-∞, +∞)，A股日涨跌幅±10%
-
-    Args:
-        factor_df: 包含 close, asset, date 列的 DataFrame
-        window: 计算窗口（默认1日）
-        logger_arg: 日志记录器（可选，默认使用模块 logger）
-
-    Returns:
-        添加 past_return_1d 列的 DataFrame
-
-    边界处理:
-        - 第一日数据设为 NaN（无昨日收盘价）
-        - close[t-1] = 0 时设为 NaN（无效数据）
-
-    规范:
-        - 函数入口必须先 .copy()，避免修改原始数据
-        - 必须按 asset 分组后再做 shift（单股票时序指标）
-
-    Example:
-        >>> df = pd.DataFrame({
-        ...     'date': ['2026-01-01', '2026-01-02', '2026-01-03'],
-        ...     'asset': ['A', 'A', 'A'],
-        ...     'close': [100.0, 102.0, 101.0]
-               ... })
-               >>> result = calculate_past_return_1d(df, window=1)
-               >>> "past_return_1d" in result.columns
-               True
-               >>> pd.isna(result["past_return_1d"].iloc[0])  # 第一日无数据
-               True
-               >>> result["past_return_1d"].iloc[1]  # (102/100 - 1) = 0.02
-               0.02
-               >>> result["past_return_1d"].iloc[2]  # (101/102 - 1) = -0.0098...
-               -0.00980392156862745
-    """
-    _logger = get_module_logger(logger_arg)
-
-    if window is None:
-        window = _DEFAULT_PAST_RETURN_1D_WINDOW
-
-    # 入口 copy（遵循 MODULE.md 约束）
-    df = factor_df.copy()
-
-    # 按 asset+date 排序
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
-
-    # 按 asset 分组，shift(1) 获取昨日收盘价
-    close_shifted = df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].shift(window)
-
-    # 计算 1 日涨幅: close[t] / close[t-1] - 1
-    # close_shifted 为 NaN 或 0 时，结果设为 NaN
-    invalid_mask = close_shifted.isna() | (close_shifted.abs() < _EPSILON)
-
-    df[_COL_PAST_RETURN_1D] = np.where(invalid_mask, np.nan, df[_COL_CLOSE] / close_shifted - 1)
-
-    _logger.info(f"past_return_1d (window={window}) 计算完成，共 {len(df)} 条记录")
-
-    return df
+# (PR-2c) calculate_past_return_1d: 已迁移至 .momentum 子模块（design.md §5.3）；
+# 由本文件顶部 `from .momentum import calculate_past_return_1d` 维持向后兼容。
 
 
 # ============================================================================
@@ -513,75 +351,8 @@ def calculate_past_return_1d(
 # ============================================================================
 
 
-def calculate_return_3d(
-    factor_df: pd.DataFrame, window: int = None, logger_arg: logging.Logger | None = None
-) -> pd.DataFrame:
-    """
-    计算 N 日累计涨幅因子（默认3日）
-
-    公式: return_Nd = close[t] / close[t-N] - 1
-
-    含义: 过去 N 日累计涨跌幅
-    - 正值 → 上涨
-    - 负值 → 下跌
-    - 0 → 无变化
-    - 范围: 理论 [-∞, +∞)，A股日涨跌幅±10%，3日累计约±30%
-
-    Args:
-        factor_df: 包含 close, asset, date 列的 DataFrame
-        window: 计算窗口（默认3日）
-        logger_arg: 日志记录器（可选，默认使用模块 logger）
-
-    Returns:
-        添加 return_3d 列的 DataFrame
-
-    边界处理:
-        - 前N日数据设为 NaN（历史数据不足）
-        - close[t-N] = 0 时设为 NaN（无效数据）
-
-    规范:
-        - 函数入口必须先 .copy()，避免修改原始数据
-        - 必须按 asset 分组后再做 shift（单股票时序指标）
-
-    Example:
-        >>> df = pd.DataFrame(
-        ...     {
-        ...         "date": ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"],
-        ...         "asset": ["A", "A", "A", "A"],
-        ...         "close": [100.0, 102.0, 101.0, 105.0],
-        ...     }
-        ... )
-        >>> result = calculate_return_3d(df, window=3)
-        >>> "return_3d" in result.columns
-        True
-        >>> pd.isna(result["return_3d"].iloc[0])  # 前3日无数据
-        True
-        >>> result["return_3d"].iloc[3]  # (105/100 - 1) = 0.05
-        0.05
-    """
-    _logger = get_module_logger(logger_arg)
-
-    if window is None:
-        window = _DEFAULT_RETURN_3D_WINDOW
-
-    # 入口 copy（遵循 MODULE.md 约束）
-    df = factor_df.copy()
-
-    # 按 asset+date 排序
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
-
-    # 按 asset 分组，shift(window) 获取历史收盘价
-    close_shifted = df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].shift(window)
-
-    # 计算 N 日累计涨幅: close[t] / close[t-N] - 1
-    # close_shifted 为 NaN 或 0 时，结果设为 NaN
-    invalid_mask = close_shifted.isna() | (close_shifted.abs() < _EPSILON)
-
-    df[_COL_RETURN_3D] = np.where(invalid_mask, np.nan, df[_COL_CLOSE] / close_shifted - 1)
-
-    _logger.info(f"return_3d (window={window}) 计算完成，共 {len(df)} 条记录")
-
-    return df
+# (PR-2c) calculate_return_3d: 已迁移至 .momentum 子模块（design.md §5.3）；
+# 由本文件顶部 `from .momentum import calculate_return_3d` 维持向后兼容。
 
 
 # ============================================================================
@@ -589,75 +360,8 @@ def calculate_return_3d(
 # ============================================================================
 
 
-def calculate_return_5d(
-    factor_df: pd.DataFrame, window: int = None, logger_arg: logging.Logger | None = None
-) -> pd.DataFrame:
-    """
-    计算 N 日累计涨幅因子（默认5日）
-
-    公式: return_Nd = close[t] / close[t-N] - 1
-
-    含义: 过去 N 日累计涨跌幅
-    - 正值 → 上涨
-    - 负值 → 下跌
-    - 0 → 无变化
-    - 范围: 理论 [-∞, +∞)，A股日涨跌幅±10%，5日累计约±50%
-
-    Args:
-        factor_df: 包含 close, asset, date 列的 DataFrame
-        window: 计算窗口（默认5日）
-        logger_arg: 日志记录器（可选，默认使用模块 logger）
-
-    Returns:
-        添加 return_5d 列的 DataFrame
-
-    边界处理:
-        - 前N日数据设为 NaN（历史数据不足）
-        - close[t-N] = 0 时设为 NaN（无效数据）
-
-    规范:
-        - 函数入口必须先 .copy()，避免修改原始数据
-        - 必须按 asset 分组后再做 shift（单股票时序指标）
-
-    Example:
-        >>> df = pd.DataFrame(
-        ...     {
-        ...         "date": ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04", "2026-01-05", "2026-01-06"],
-        ...         "asset": ["A", "A", "A", "A", "A", "A"],
-        ...         "close": [100.0, 102.0, 101.0, 103.0, 105.0, 108.0],
-        ...     }
-        ... )
-        >>> result = calculate_return_5d(df, window=5)
-        >>> "return_5d" in result.columns
-        True
-        >>> pd.isna(result["return_5d"].iloc[0])  # 前5日无数据
-        True
-        >>> result["return_5d"].iloc[5]  # (108/100 - 1) = 0.08
-        0.08
-    """
-    _logger = get_module_logger(logger_arg)
-
-    if window is None:
-        window = _DEFAULT_RETURN_5D_WINDOW
-
-    # 入口 copy（遵循 MODULE.md 约束）
-    df = factor_df.copy()
-
-    # 按 asset+date 排序
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
-
-    # 按 asset 分组，shift(window) 获取历史收盘价
-    close_shifted = df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].shift(window)
-
-    # 计算 N 日累计涨幅: close[t] / close[t-N] - 1
-    # close_shifted 为 NaN 或 0 时，结果设为 NaN
-    invalid_mask = close_shifted.isna() | (close_shifted.abs() < _EPSILON)
-
-    df[_COL_RETURN_5D] = np.where(invalid_mask, np.nan, df[_COL_CLOSE] / close_shifted - 1)
-
-    _logger.info(f"return_5d (window={window}) 计算完成，共 {len(df)} 条记录")
-
-    return df
+# (PR-2c) calculate_return_5d: 已迁移至 .momentum 子模块（design.md §5.3）；
+# 由本文件顶部 `from .momentum import calculate_return_5d` 维持向后兼容。
 
 
 # ============================================================================
@@ -666,180 +370,13 @@ def calculate_return_5d(
 
 # 已添加：calculate_amplitude.required_cols = ['close', 'high', 'low']
 
-calculate_price_position.required_cols = ["close", "high", "low"]  # type: ignore[attr-defined]
 
-calculate_past_return_1d.required_cols = ["close", "asset", "date"]  # type: ignore[attr-defined]
-
-calculate_return_3d.required_cols = ["close", "asset", "date"]  # type: ignore[attr-defined]
-
-calculate_return_5d.required_cols = ["close", "asset", "date"]  # type: ignore[attr-defined]
+# (PR-2c) calculate_momentum_strength: 已迁移至 .momentum 子模块（design.md §5.3）；
+# 由本文件顶部 `from .momentum import calculate_momentum_strength` 维持向后兼容。
 
 
-# ============================================================================
-# 动量强度因子计算（v1.10 新增）
-# ============================================================================
-
-_COL_MOMENTUM_STRENGTH = "momentum_strength"
-_DEFAULT_MOMENTUM_STRENGTH_WINDOW = 5  # 5日滚动窗口
-_MOMENTUM_STRENGTH_STD_MIN = 0.01  # 日收益率标准差下限（防止均匀涨跌时比值爆炸）
-
-
-def calculate_momentum_strength(
-    factor_df: pd.DataFrame, window: int | None = None, logger_arg: logging.Logger | None = None
-) -> pd.DataFrame:
-    """
-    计算动量强度因子
-
-    公式: momentum_strength = return_5d / std(return_1d, window)
-
-    含义: 衡量5日累计涨幅相对于日收益率波动率的比率
-    - 高值 → 持续上涨趋势（动量强，波动小）
-    - 低值 → 震荡或下跌（动量弱，波动大）
-    - 范围: 理论 [-∞, +∞)，极端值需关注
-
-    Args:
-        factor_df: 包含 close, return_5d, asset, date 列的 DataFrame
-        window: 滚动标准差窗口（默认5日）
-        logger_arg: 日志记录器（可选，默认使用模块 logger）
-
-    Returns:
-        添加 momentum_strength 列的 DataFrame
-
-    边界处理:
-        - std = 0 时设为 NaN（除零保护）
-        - return_5d = NaN 时结果为 NaN（历史不足）
-        - 前 window 日数据设为 NaN（rolling window 不足）
-
-    规范:
-        - 函数入口必须先 .copy()，避免修改原始数据（遵循 MODULE.md 约束 M11）
-        - 必须按 asset 分组后再做 rolling（单股票时序指标）
-
-    Example:
-        >>> df = pd.DataFrame(
-        ...     {
-        ...         "date": ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04", "2026-01-05", "2026-01-06"],
-        ...         "asset": ["A", "A", "A", "A", "A", "A"],
-        ...         "close": [100.0, 102.0, 101.0, 103.0, 105.0, 108.0],
-        ...         "return_5d": [np.nan, np.nan, np.nan, np.nan, np.nan, 0.08],
-        ...     }
-        ... )
-        >>> result = calculate_momentum_strength(df, window=5)
-        >>> "momentum_strength" in result.columns
-        True
-        >>> pd.isna(result["momentum_strength"].iloc[0])  # 前5日无数据
-        True
-    """
-    _logger = get_module_logger(logger_arg)
-
-    if window is None:
-        window = _DEFAULT_MOMENTUM_STRENGTH_WINDOW
-
-    # 入口 copy（遵循 MODULE.md 约束 M11）
-    df = factor_df.copy()
-
-    # 按 asset+date 排序
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
-
-    # 计算日收益率 return_1d（临时列）
-    # 公式: close[t] / close[t-1] - 1
-    close_shifted = df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].shift(1)
-    invalid_close_mask = close_shifted.isna() | (close_shifted.abs() < _EPSILON)
-    df["_return_1d_temp"] = np.where(invalid_close_mask, np.nan, df[_COL_CLOSE] / close_shifted - 1)
-
-    # 计算 5 日滚动标准差（按 asset 分组）
-    # v1.x (2026-06-13): 用 _per_asset_transform 替代 groupby.transform，避免 OOM
-    df["_return_1d_std_5"] = _per_asset_transform(
-        asset_arr=df[_COL_ASSET].to_numpy(),
-        value_arr=df["_return_1d_temp"].to_numpy(),
-        fn=lambda s: s.rolling(window=window, min_periods=window).std(),
-    )
-
-    # 计算动量强度: return_5d / std(return_1d, 5)
-    # v1.38 修复：分母下限保护（防止均匀涨跌时比值爆炸）
-    # std 为 NaN 时设 NaN（历史不足）；std=0 时也设 NaN（完全无波动）
-    # std 极小但非零时 clip 到下限而非设 NaN
-    # 理由：连续5天均匀涨/跌 → std≈0.003 → return_5d/std ≈ ±50，极端异常
-    #   clip 到 0.01 后 → ±15 范围内，保留信号方向但限制极端幅度
-    invalid_std_mask = df["_return_1d_std_5"].isna() | (df["_return_1d_std_5"] < _EPSILON)
-    invalid_return_mask = df["return_5d"].isna()
-
-    # 对有效 std 做 clip（下限 _MOMENTUM_STRENGTH_STD_MIN=0.01）
-    # std=0 或 NaN 的行已被 invalid_std_mask 排除，clip 只作用于有效极小值
-    df["_return_1d_std_5_safe"] = df["_return_1d_std_5"].clip(lower=_MOMENTUM_STRENGTH_STD_MIN)
-
-    df[_COL_MOMENTUM_STRENGTH] = np.where(
-        invalid_std_mask | invalid_return_mask, np.nan, df["return_5d"] / df["_return_1d_std_5_safe"]
-    )
-
-    # 清理临时列
-    del df["_return_1d_temp"]
-    del df["_return_1d_std_5"]
-    del df["_return_1d_std_5_safe"]
-
-    _logger.info(f"momentum_strength (window={window}) 计算完成，共 {len(df)} 条记录")
-
-    return df
-
-
-calculate_momentum_strength.required_cols = ["close", "return_5d", "asset", "date"]  # type: ignore[attr-defined]
-
-
-# ============================================================================
-# 隔夜收益率因子计算
-# ============================================================================
-
-_COL_OPEN = "open"
-_COL_OVERNIGHT_RET = "overnight_ret"
-
-
-def calculate_overnight_return(factor_df: pd.DataFrame, logger_arg: logging.Logger | None = None) -> pd.DataFrame:
-    """计算隔夜收益率因子
-
-    公式: overnight_ret = (今日开盘价 - 昨日收盘价) / 昨日收盘价
-
-    参数:
-        factor_df: 包含 open, close, asset, date 列的 DataFrame
-        logger_arg: 调用方传入的 logger
-
-    返回:
-        添加 overnight_ret 列的 DataFrame
-
-    边界处理:
-        - 第一天数据为 NaN（无昨日收盘价）
-        - prev_close < EPSILON 时设为 NaN（除零防护）
-
-    Example:
-        >>> df = pd.DataFrame(
-        ...     {"asset": ["A", "A"], "date": ["2026-05-01", "2026-05-02"], "open": [10.0, 10.5], "close": [10.2, 10.8]}
-        ... )
-        >>> result = calculate_overnight_return(df)
-        >>> pd.isna(result["overnight_ret"].iloc[0])  # 第一天无昨日收盘价
-        True
-        >>> result["overnight_ret"].iloc[1]  # (10.5-10.2)/10.2
-        0.0294...
-    """
-    _logger = get_module_logger(logger_arg)
-
-    df = factor_df.copy()
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
-
-    # 按资产分组计算昨日收盘价
-    prev_close = df.groupby(_COL_ASSET)[_COL_CLOSE].shift(1)
-
-    # 除零防护：先检查 prev_close 是否接近零，再计算
-    invalid_mask = prev_close.abs() < _EPSILON
-    df[_COL_OVERNIGHT_RET] = np.where(invalid_mask, np.nan, (df[_COL_OPEN] - prev_close) / prev_close)
-
-    # 记录异常情况
-    if invalid_mask.any():
-        _logger.warning(f"发现 {invalid_mask.sum()} 个异常收盘价（<{_EPSILON}），已设为 NaN")
-
-    _logger.info(f"overnight_ret 计算完成，共 {len(df)} 条记录")
-
-    return df
-
-
-calculate_overnight_return.required_cols = ["open", "close"]  # type: ignore[attr-defined]
+# (PR-2c) calculate_overnight_return: 已迁移至 .momentum 子模块（design.md §5.3）；
+# 由本文件顶部 `from .momentum import calculate_overnight_return` 维持向后兼容。
 
 
 # ============================================================================
