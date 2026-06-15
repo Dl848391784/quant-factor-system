@@ -117,9 +117,9 @@ def fetch_batch_stocks(
     """
     logger = logger or _MODULE_LOGGER
     logger.info("=" * 60)
-    logger.info(f"[批次 {batch_idx + 1}/{total_batches}] 开始拉取...")
-    logger.info(f"  股票数量: {len(stock_batch)}")
-    logger.info(f"  当前内存: {get_memory_info_str()}")
+    logger.info("[批次 %s/%s] 开始拉取...", batch_idx + 1, total_batches)
+    logger.info("  股票数量: %s", len(stock_batch))
+    logger.info("  当前内存: %s", get_memory_info_str())
     logger.info("=" * 60)
 
     batch_start_time = time.time()
@@ -141,8 +141,8 @@ def fetch_batch_stocks(
         thread_a_stocks = [{"code": s, "name": ""} for s in sub_stocks[: len(sub_stocks) // 2]]
         thread_b_stocks = [{"code": s, "name": ""} for s in sub_stocks[len(sub_stocks) // 2 :]]
 
-        logger.info(f"  [子批次 {sub_idx + 1}/{num_sub_batches}] 拉取 {sub_start + 1}-{sub_end}...")
-        logger.info(f"    当前内存: {get_memory_info_str()}")
+        logger.info("  [子批次 %s/%s] 拉取 %s-%s...", sub_idx + 1, num_sub_batches, sub_start + 1, sub_end)
+        logger.info("    当前内存: %s", get_memory_info_str())
 
         sub_results = loader._fetch_stock_batch_parallel(thread_a_stocks, thread_b_stocks, FETCH_DAYS, None)
 
@@ -160,7 +160,10 @@ def fetch_batch_stocks(
         mem_mb = get_memory_usage_mb()
         if mem_mb > MEMORY_THRESHOLD_MB:
             logger.warning(
-                f"  ⚠ 内存超阈值 ({mem_mb:.1f}MB > {MEMORY_THRESHOLD_MB}MB)，暂停 {MEMORY_PAUSE_SECONDS}s..."
+                "  ⚠ 内存超阈值 (%.1fMB > %sMB)，暂停 %ss...",
+                mem_mb,
+                MEMORY_THRESHOLD_MB,
+                MEMORY_PAUSE_SECONDS,
             )
             gc.collect()
             time.sleep(MEMORY_PAUSE_SECONDS)
@@ -170,7 +173,11 @@ def fetch_batch_stocks(
 
     batch_elapsed = time.time() - batch_start_time
     logger.info(
-        f"  ✓ 批次 {batch_idx + 1} 拉取完成: 成功 {success_count}, 失败 {fail_count}, 耗时 {batch_elapsed:.1f}s"
+        "  ✓ 批次 %s 拉取完成: 成功 %s, 失败 %s, 耗时 %.1fs",
+        batch_idx + 1,
+        success_count,
+        fail_count,
+        batch_elapsed,
     )
 
     if not all_data_dict:
@@ -244,7 +251,7 @@ def fetch_batch_stocks(
     del valid_df
     gc.collect()
 
-    logger.info(f"  因子记录: {len(factor_df)}, 收益记录: {len(return_df)}")
+    logger.info("  因子记录: %s, 收益记录: %s", len(factor_df), len(return_df))
 
     return factor_df, return_df
 
@@ -325,7 +332,7 @@ def validate_final_data(logger: logging.Logger | None = None) -> tuple[bool, int
                             date_start = date_range.get("start", "") if isinstance(date_range, dict) else ""
                             date_end = date_range.get("end", "") if isinstance(date_range, dict) else ""
                         except json.JSONDecodeError as e:
-                            logger.warning(f"  ⚠ meta 解析失败: {e}")
+                            logger.warning("  ⚠ meta 解析失败: %s", e)
                         # 释放 meta 解析临时内存
                         del meta_lines, meta_content
                         meta_lines = []  # 重置以避免后续引用问题
@@ -354,18 +361,18 @@ def validate_final_data(logger: logging.Logger | None = None) -> tuple[bool, int
                             pass  # 抽样解析失败不影响计数
 
     except Exception as e:
-        logger.warning(f"  ⚠ 文件扫描失败: {e}")
+        logger.warning("  ⚠ 文件扫描失败: %s", e)
         return False, 0, 0, 0
 
-    logger.info(f"  交易日数: {n_days}")
-    logger.info(f"  股票数量: {n_assets}")
-    logger.info(f"  总记录数: {records_count}")
-    logger.info(f"  日期范围: {date_start} ~ {date_end}")
+    logger.info("  交易日数: %s", n_days)
+    logger.info("  股票数量: %s", n_assets)
+    logger.info("  总记录数: %s", records_count)
+    logger.info("  日期范围: %s ~ %s", date_start, date_end)
 
     # 抽样检查 RSI
     rsi_vals = [r["rsi_6"] for r in sample_records if r.get("rsi_6") is not None]
     if rsi_vals:
-        logger.info(f"  RSI(6)样本范围: [{min(rsi_vals):.2f}, {max(rsi_vals):.2f}]")
+        logger.info("  RSI(6)样本范围: [%.2f, %.2f]", min(rsi_vals), max(rsi_vals))
 
     # 验证数据有效性
     valid_rsi_count = len(rsi_vals)
@@ -382,13 +389,13 @@ def validate_final_data(logger: logging.Logger | None = None) -> tuple[bool, int
     is_valid = days_valid and data_valid and records_valid
 
     if not days_valid:
-        logger.warning(f"  ⚠ 交易日数不足 ({n_days}/{N_DAYS})")
+        logger.warning("  ⚠ 交易日数不足 (%s/%s)", n_days, N_DAYS)
     if not data_valid:
-        logger.warning(f"  ⚠ 数据有效性不足 (RSI有效比例: {rsi_valid_ratio:.1%} < 80%)")
+        logger.warning("  ⚠ 数据有效性不足 (RSI有效比例: %.1f%% < 80%%)", rsi_valid_ratio * 100)
     if not records_valid and n_records_in_meta > 0:
-        logger.warning(f"  ⚠ 记录数不一致 (流式统计: {records_count}, meta声明: {n_records_in_meta})")
+        logger.warning("  ⚠ 记录数不一致 (流式统计: %s, meta声明: %s)", records_count, n_records_in_meta)
     if is_valid:
-        logger.info(f"  ✓ 通过验证 (RSI有效比例: {rsi_valid_ratio:.1%}, 记录数一致: {records_count})")
+        logger.info("  ✓ 通过验证 (RSI有效比例: %.1f%%, 记录数一致: %s)", rsi_valid_ratio * 100, records_count)
 
     return is_valid, n_days, n_assets, records_count
 
@@ -411,14 +418,14 @@ def main() -> bool:
     logger = setup_logger("fetch_factor_cache", logs_dir=log_dir)
 
     logger.info("=" * 70)
-    logger.info(f"分批拉取 {N_DAYS} 天因子数据 (外部排序版本)")
+    logger.info("分批拉取 %s 天因子数据 (外部排序版本)", N_DAYS)
     logger.info("=" * 70)
-    logger.info(f"  版本: {_OUTPUT_VERSION}")
-    logger.info(f"  目标交易日数: {N_DAYS}")
-    logger.info(f"  每批股票数量: {BATCH_SIZE}")
-    logger.info(f"  内存阈值: {MEMORY_THRESHOLD_MB} MB")
-    logger.info(f"  开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info(f"  初始内存: {get_memory_info_str()}")
+    logger.info("  版本: %s", _OUTPUT_VERSION)
+    logger.info("  目标交易日数: %s", N_DAYS)
+    logger.info("  每批股票数量: %s", BATCH_SIZE)
+    logger.info("  内存阈值: %s MB", MEMORY_THRESHOLD_MB)
+    logger.info("  开始时间: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    logger.info("  初始内存: %s", get_memory_info_str())
 
     global_start = time.time()
 
@@ -431,7 +438,7 @@ def main() -> bool:
     stock_data = read_json_cache(stock_list_file, logger=logger)
 
     if stock_data is None:
-        logger.warning(f"  ! 股票列表文件不存在: {stock_list_file}")
+        logger.warning("  ! 股票列表文件不存在: %s", stock_list_file)
         return False
 
     # 提取股票代码列表
@@ -442,27 +449,30 @@ def main() -> bool:
         return False
 
     total_stocks = len(stock_list)
-    logger.info(f"  ✓ 从缓存获取到 {total_stocks} 只主板股票")
+    logger.info("  ✓ 从缓存获取到 %s 只主板股票", total_stocks)
 
     batches = [stock_list[i : i + BATCH_SIZE] for i in range(0, total_stocks, BATCH_SIZE)]
     total_batches = len(batches)
 
-    logger.info(f"[分批策略] 总批次: {total_batches}")
+    logger.info("[分批策略] 总批次: %s", total_batches)
 
     successful = 0
 
     for batch_idx, stock_batch in enumerate(batches):
         mem_mb = get_memory_usage_mb()
-        logger.info(f"  当前内存: {get_memory_info_str()}")
+        logger.info("  当前内存: %s", get_memory_info_str())
 
         if mem_mb > MEMORY_THRESHOLD_MB:
             logger.warning(
-                f"  ⚠ 内存超阈值 ({mem_mb:.1f}MB > {MEMORY_THRESHOLD_MB}MB)，暂停 {MEMORY_PAUSE_SECONDS}s..."
+                "  ⚠ 内存超阈值 (%.1fMB > %sMB)，暂停 %ss...",
+                mem_mb,
+                MEMORY_THRESHOLD_MB,
+                MEMORY_PAUSE_SECONDS,
             )
             gc.collect()
             time.sleep(MEMORY_PAUSE_SECONDS)
             mem_mb = get_memory_usage_mb()
-            logger.info(f"  GC后内存: {get_memory_info_str()}")
+            logger.info("  GC后内存: %s", get_memory_info_str())
 
         factor_df, return_df = fetch_batch_stocks(loader, stock_batch, batch_idx, total_batches, logger)
 
@@ -473,7 +483,7 @@ def main() -> bool:
             del factor_df, return_df
             gc.collect()
         else:
-            logger.warning(f"  ⚠ 批次 {batch_idx + 1} 失败")
+            logger.warning("  ⚠ 批次 %s 失败", batch_idx + 1)
             if factor_df is not None:
                 del factor_df
             if return_df is not None:
@@ -481,11 +491,11 @@ def main() -> bool:
 
         # 批次间强制垃圾回收
         gc.collect()
-        logger.info(f"  批次完成后内存: {get_memory_info_str()}")
+        logger.info("  批次完成后内存: %s", get_memory_info_str())
         time.sleep(5)  # 批次间休息时间增加
 
     logger.info("=" * 70)
-    logger.info(f"拉取完成: 成功 {successful}/{total_batches} 批次")
+    logger.info("拉取完成: 成功 %s/%s 批次", successful, total_batches)
     logger.info("=" * 70)
 
     # N-way merge 合并
@@ -517,10 +527,10 @@ def main() -> bool:
         logger.info("=" * 70)
         logger.info("全部完成!")
         logger.info("=" * 70)
-        logger.info(f"  结束时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"  总耗时: {elapsed:.1f}s ({elapsed / 60:.1f}min)")
-        logger.info(f"  数据验证: {'通过' if is_valid else '警告'}")
-        logger.info(f"  最终内存: {get_memory_info_str()}")
+        logger.info("  结束时间: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        logger.info("  总耗时: %.1fs (%.1fmin)", elapsed, elapsed / 60)
+        logger.info("  数据验证: %s", "通过" if is_valid else "警告")
+        logger.info("  最终内存: %s", get_memory_info_str())
 
         # 保存统计
         stats = {

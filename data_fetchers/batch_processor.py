@@ -254,7 +254,7 @@ def _scan_merged_file(
                     n_records += 1
                     lines.append(stripped.rstrip(","))
                 except json.JSONDecodeError as e:
-                    _logger.debug(f"跳过无效JSON行: {stripped[:50]}... ({e})")
+                    _logger.debug("跳过无效JSON行: %s... (%s)", stripped[:50], e)
                     continue
 
     n_days = len(date_set)
@@ -493,8 +493,8 @@ def save_batch_cache_sorted(
     factor_size_mb = factor_path.stat().st_size / (1024 * 1024)
     return_size_mb = return_path.stat().st_size / (1024 * 1024)
 
-    _logger.info(f"  ✓ 保存批次 {batch_idx}: 因子 {factor_size_mb:.2f}MB, 收益 {return_size_mb:.2f}MB")
-    _logger.info(f"  当前内存: {get_memory_info_str()}")
+    _logger.info("  ✓ 保存批次 %s: 因子 %.2fMB, 收益 %.2fMB", batch_idx, factor_size_mb, return_size_mb)
+    _logger.info("  当前内存: %s", get_memory_info_str())
     # Note: 调用方若需释放大 DataFrame 应在自己的作用域中管理，此处不再做无效 del
 
 
@@ -536,8 +536,8 @@ def n_way_merge_deduplicate(
     _logger = logger_arg or logging.getLogger(__name__)
     _result_dir = result_dir or RESULT_DIR
 
-    _logger.info(f"[{data_type}] 开始 N-way merge...")
-    _logger.info(f"  当前内存: {get_memory_info_str()}")
+    _logger.info("[%s] 开始 N-way merge...", data_type)
+    _logger.info("  当前内存: %s", get_memory_info_str())
 
     # 创建所有批次的流
     streams = []
@@ -553,13 +553,13 @@ def n_way_merge_deduplicate(
                 streams.append(stream)
 
     if load_errors:
-        _logger.warning(f"  ⚠ {len(load_errors)} 个批次加载失败: {load_errors}")
+        _logger.warning("  ⚠ %s 个批次加载失败: %s", len(load_errors), load_errors)
 
     if not streams:
         _logger.info("  无有效批次")
         return None
 
-    _logger.info(f"  有效批次: {len(streams)}/{total_batches}")
+    _logger.info("  有效批次: %s/%s", len(streams), total_batches)
 
     # N-way merge 使用 heap
     counter = 0
@@ -595,7 +595,7 @@ def n_way_merge_deduplicate(
 
                     if count % 50000 == 0:
                         gc.collect()
-                        _logger.info(f"    已写入 {count} 条，内存: {get_memory_info_str()}")
+                        _logger.info("    已写入 %s 条，内存: %s", count, get_memory_info_str())
 
                 last_key = key
                 same_key_records = [(batch_idx, record)]
@@ -612,7 +612,7 @@ def n_way_merge_deduplicate(
 
         f.write("\n]")
 
-    _logger.info(f"  合并完成: {count} 条 → {output_path}, 内存: {get_memory_info_str()}")
+    _logger.info("  合并完成: %s 条 → %s, 内存: %s", count, output_path, get_memory_info_str())
 
     for stream in streams:
         stream.cleanup()
@@ -667,7 +667,7 @@ def format_final_output(
     factor_merged_path = Path(factor_merged_path)
     return_merged_path = Path(return_merged_path)
 
-    _logger.info(f"格式化最终输出文件: 因子={factor_merged_path}, 收益={return_merged_path}")
+    _logger.info("格式化最终输出文件: 因子=%s, 收益=%s", factor_merged_path, return_merged_path)
 
     now = datetime.now()
     generated_at = now.isoformat()
@@ -675,13 +675,13 @@ def format_final_output(
 
     # 处理因子数据：使用辅助函数扫描
     n_days, n_assets, first_date, last_date, n_records, factor_lines = _scan_merged_file(factor_merged_path, _logger)
-    _logger.info(f"  因子统计: {n_days}日 × {n_assets}只, {n_records}条记录")
+    _logger.info("  因子统计: %s日 × %s只, %s条记录", n_days, n_assets, n_records)
 
     # 处理收益数据：使用辅助函数扫描
     return_n_days, return_n_assets, return_first_date, return_last_date, n_return_records, return_lines = (
         _scan_merged_file(return_merged_path, _logger)
     )
-    _logger.info(f"  收益统计: {return_n_days}日 × {return_n_assets}只, {n_return_records}条记录")
+    _logger.info("  收益统计: %s日 × %s只, %s条记录", return_n_days, return_n_assets, n_return_records)
 
     # 写出两个最终文件（统一异常处理，确保一致性）
     factor_final_path = _result_dir / "factor_data.json.gz"
@@ -704,7 +704,7 @@ def format_final_output(
             "extra_value": "每条记录单行写入，便于流式解析",
         }
         factor_size_mb = _write_final_file(factor_final_path, factor_meta, factor_lines)
-        _logger.info(f"    因子文件: {factor_final_path} ({factor_size_mb:.2f} MB)")
+        _logger.info("    因子文件: %s (%.2f MB)", factor_final_path, factor_size_mb)
 
         del factor_lines  # 释放缓存
         gc.collect()
@@ -725,20 +725,20 @@ def format_final_output(
             "extra_value": "3日和5日收益最后几天会有NaN",
         }
         return_size_mb = _write_final_file(return_final_path, return_meta, return_lines)
-        _logger.info(f"    收益文件: {return_final_path} ({return_size_mb:.2f} MB)")
+        _logger.info("    收益文件: %s (%.2f MB)", return_final_path, return_size_mb)
 
         _logger.info("  ✓ 格式化完成")
 
     except Exception as e:
         # 写文件失败：清理所有残缺文件（因子和收益），确保一致性
-        _logger.error(f"  ✗ 写文件失败: [{type(e).__name__}]: {e}")
+        _logger.error("  ✗ 写文件失败: [%s]: %s", type(e).__name__, e)
         for final_path in [factor_final_path, return_final_path]:
             if final_path.exists():
                 try:
                     final_path.unlink()
-                    _logger.info(f"  已清理残缺文件: {final_path}")
+                    _logger.info("  已清理残缺文件: %s", final_path)
                 except Exception as cleanup_err:
-                    _logger.warning(f"  清理残缺文件失败 {final_path}: {cleanup_err}")
+                    _logger.warning("  清理残缺文件失败 %s: %s", final_path, cleanup_err)
         raise  # 重新抛出异常让调用方感知
 
     finally:
@@ -747,12 +747,12 @@ def format_final_output(
             try:
                 factor_merged_path.unlink()
             except Exception as e:
-                _logger.warning(f"  清理临时文件失败 {factor_merged_path}: [{type(e).__name__}]: {e}")
+                _logger.warning("  清理临时文件失败 %s: [%s]: %s", factor_merged_path, type(e).__name__, e)
         if return_merged_path.exists():
             try:
                 return_merged_path.unlink()
             except Exception as e:
-                _logger.warning(f"  清理临时文件失败 {return_merged_path}: [{type(e).__name__}]: {e}")
+                _logger.warning("  清理临时文件失败 %s: [%s]: %s", return_merged_path, type(e).__name__, e)
 
 
 # ============================================================================
@@ -813,6 +813,6 @@ def cleanup_batch_files(
                 errors.append(f"{merged_path}: [{type(e).__name__}]: {e}")
 
     if errors:
-        _logger.warning(f"  ⚠ 删除失败 {len(errors)} 个文件: {errors}")
-    _logger.info(f"  ✓ 已删除 {deleted} 个临时文件")
+        _logger.warning("  ⚠ 删除失败 %s 个文件: %s", len(errors), errors)
+    _logger.info("  ✓ 已删除 %s 个临时文件", deleted)
     return deleted

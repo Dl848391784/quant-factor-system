@@ -199,7 +199,7 @@ def fetch_stock_industry_em() -> dict:
 
     import akshare as ak
 
-    logger.info(f"[行业数据 v{_OUTPUT_VERSION}] 开始获取东方财富行业分类（31个板块）...")
+    logger.info("[行业数据 v%s] 开始获取东方财富行业分类（31个板块）...", _OUTPUT_VERSION)
 
     industry_map: dict = {}
     success_count = 0
@@ -230,12 +230,12 @@ def fetch_stock_industry_em() -> dict:
             success_count += 1
             # v3.4: 逐板块降级为 debug——31 条 info 噪音过大，
             # 循环后的"获取完成"汇总 info 已足够体现关键节点
-            logger.debug(f"[行业数据] EM板块 '{em_name}': {len(df)} 只股票")
+            logger.debug("[行业数据] EM板块 '%s': %s 只股票", em_name, len(df))
             time.sleep(0.3)  # 防反爬间隔
 
         except Exception as e:
             fail_count += 1
-            logger.warning(f"[行业数据] EM板块 '{em_name}' 获取失败 [{type(e).__name__}]: {e}")
+            logger.warning("[行业数据] EM板块 '%s' 获取失败 [%s]: %s", em_name, type(e).__name__, e)
             # v3.12: 失败分支也需要 sleep——若所有板块都因限速失败，原实现会让 31 个
             # 请求瞬间打出（成功分支才 sleep）。失败往往是限速导致，不等待立刻重试
             # 下一个会加剧限速，反而让全部板块连环失败。与成功分支保持同样间隔。
@@ -248,7 +248,10 @@ def fetch_stock_industry_em() -> dict:
         )
 
     logger.info(
-        f"[行业数据] 东方财富获取完成: {len(industry_map)} 只股票, 板块成功: {success_count}, 失败: {fail_count}"
+        "[行业数据] 东方财富获取完成: %s 只股票, 板块成功: %s, 失败: %s",
+        len(industry_map),
+        success_count,
+        fail_count,
     )
     return industry_map
 
@@ -359,7 +362,7 @@ def fetch_stock_industry_sw() -> dict:
         import akshare as ak
         import pandas as pd
 
-        logger.info(f"[行业数据 v{_OUTPUT_VERSION}] 开始获取申万行业分类...")
+        logger.info("[行业数据 v%s] 开始获取申万行业分类...", _OUTPUT_VERSION)
 
         # 获取申万行业分类历史数据（v3.1: 自实现 xls 下载, 系统 CA bundle 解决 SSL 问题）
         # v3.9: 单独捕获 _download_sw_industry_xls，区分 HTTP 错误（含 SSL 失败）
@@ -448,7 +451,7 @@ def fetch_stock_industry_sw() -> dict:
             if code:
                 industry_map[code] = {"name": stock_name, "industry": industry_name, "industry_code": industry_code}
 
-        logger.info(f"[行业数据] 获取完成: {len(industry_map)} 只股票")
+        logger.info("[行业数据] 获取完成: %s 只股票", len(industry_map))
         return industry_map
 
     except Exception as e:
@@ -480,7 +483,7 @@ def fetch_stock_industry_sw() -> dict:
         # 同一事件产生两条 error 日志。按"细节在内层 warning、决策在外层 error"的层级
         # 一致性原则：本函数对未预期异常（KeyError 列校验、RuntimeError 股票名重试耗尽）
         # 仅留诊断维度的 warning，由调用方统一在 SW 路径失败时打 error。
-        logger.warning(f"[行业数据] akshare API 获取失败 [{type(e).__name__}]: {e}")
+        logger.warning("[行业数据] akshare API 获取失败 [%s]: %s", type(e).__name__, e)
         raise  # 重新抛出原始异常
 
 
@@ -511,7 +514,7 @@ def _fallback_to_remote_or_backup(reason: str) -> dict:
           重复日志（旧实现：本函数 warning + refresh 内部 error，两层语义同
           一事件）
     """
-    logger.info(f"[行业数据] {reason}，尝试重新获取 akshare 数据...")
+    logger.info("[行业数据] %s，尝试重新获取 akshare 数据...", reason)
     try:
         return refresh_industry_cache()
     except Exception:
@@ -534,8 +537,9 @@ def _fallback_to_remote_or_backup(reason: str) -> dict:
         except Exception as backup_e:
             # v3.5: 区分备用解析失败 vs 文件不存在，前者会 raise 到这里
             logger.error(
-                f"[行业数据] 备用数据解析失败 [{type(backup_e).__name__}]: {backup_e}，"
-                f"返回空 dict（下游需具备空数据兜底）"
+                "[行业数据] 备用数据解析失败 [%s]: %s，返回空 dict（下游需具备空数据兜底）",
+                type(backup_e).__name__,
+                backup_e,
             )
             return {}
         # v3.10: 备用文件不存在场景下 load_local_industry_backup 内部仅打了
@@ -579,7 +583,7 @@ def load_stock_industry() -> dict:
 
             # 数据完整性验证（防止缓存文件损坏导致后续 AttributeError）
             if not isinstance(industries, dict):
-                logger.warning(f"[行业数据] 缓存数据类型异常: industries 为 {type(industries).__name__}，期望 dict")
+                logger.warning("[行业数据] 缓存数据类型异常: industries 为 %s，期望 dict", type(industries).__name__)
                 # 删除损坏缓存
                 INDUSTRY_CACHE_PATH.unlink(missing_ok=True)
                 # v3.7: 三处共用的降级链抽取为 _fallback_to_remote_or_backup
@@ -595,7 +599,7 @@ def load_stock_industry() -> dict:
                     days_old = (datetime.now() - update_date).days
 
                     if days_old > 7:
-                        logger.info(f"[行业数据] 缓存已过期 {days_old} 天，尝试重新获取...")
+                        logger.info("[行业数据] 缓存已过期 %s 天，尝试重新获取...", days_old)
                         try:
                             return refresh_industry_cache()
                         except Exception as e:
@@ -603,12 +607,15 @@ def load_stock_industry() -> dict:
                             # v3.8: 括号内"旧缓存"文字与前文重复，改为过期天数
                             # 提供更具可操作性的信息（运维可据此判断旧缓存可信度）
                             logger.warning(
-                                f"[行业数据] 刷新失败 [{type(e).__name__}]: {e}，降级使用旧缓存（{days_old}天前）"
+                                "[行业数据] 刷新失败 [%s]: %s，降级使用旧缓存（%s天前）",
+                                type(e).__name__,
+                                e,
+                                days_old,
                             )
                             return industries
                     else:
                         # 缓存未过期，正常返回（覆盖完整：与缓存损坏和缓存过期分支对称）
-                        logger.info(f"[行业数据] 缓存未过期 ({days_old} 天)，从缓存加载: {len(industries)} 只股票")
+                        logger.info("[行业数据] 缓存未过期 (%s 天)，从缓存加载: %s 只股票", days_old, len(industries))
                         return industries
                 except ValueError as e:
                     # 日期格式异常，使用现有缓存（而非静默 pass）
@@ -616,20 +623,23 @@ def load_stock_industry() -> dict:
                     # （仅一条 info）不对称且啰嗦。合并为单条 warning，与"缓存损坏"
                     # / "刷新失败" / "缓存无更新时间标记" 等异常分支的单日志风格对齐。
                     logger.warning(
-                        f"[行业数据] 日期格式异常 {updated_at!r} [{type(e).__name__}]: {e}，"
-                        f"使用现有缓存: {len(industries)} 只股票"
+                        "[行业数据] 日期格式异常 %r [%s]: %s，使用现有缓存: %s 只股票",
+                        updated_at,
+                        type(e).__name__,
+                        e,
+                        len(industries),
                     )
                     return industries
 
             # updated_at 不存在（空字符串）：缓存缺时间戳是数据异常，warning 而非 info（v3.4）
-            logger.warning(f"[行业数据] 缓存无更新时间标记（数据异常），从缓存加载: {len(industries)} 只股票")
+            logger.warning("[行业数据] 缓存无更新时间标记（数据异常），从缓存加载: %s 只股票", len(industries))
             return industries
 
         except Exception as e:
             # v3.6: 缓存加载异常时直接走降级链并 return，不再 fall through 到
             # "缓存不存在"分支（旧控制流会输出"缓存不存在，尝试获取 akshare..."的
             # 误导日志，实际情况是缓存文件存在但 JSON 解析失败）
-            logger.warning(f"[行业数据] 缓存加载失败 [{type(e).__name__}]: {e}")
+            logger.warning("[行业数据] 缓存加载失败 [%s]: %s", type(e).__name__, e)
             # v3.10: 与上方"缓存损坏"分支（L504）保持一致——加载异常通常意味着
             # JSON 解析失败/文件损坏，不删除会导致下次 load_stock_industry 仍读到
             # 同一损坏文件再次 fail（即使 _fallback_to_remote_or_backup 内部
@@ -766,7 +776,7 @@ def refresh_industry_cache() -> dict:
 
     # 使用公共模块原子写入（遵循 MODULE.md 约束 #4）
     write_json_cache(INDUSTRY_CACHE_PATH, cache_data, json_indent=2)
-    logger.info(f"[行业数据] 缓存已更新: {INDUSTRY_CACHE_PATH} (v{_OUTPUT_VERSION}, source={source})")
+    logger.info("[行业数据] 缓存已更新: %s (v%s, source=%s)", INDUSTRY_CACHE_PATH, _OUTPUT_VERSION, source)
 
     return industry_map
 
@@ -829,7 +839,7 @@ def load_local_industry_backup(stock_list_path: Path | None = None, write_cache:
             # 与上方"本地备用文件不存在"warning（L797 附近）的严重级别保持一致。
             # 非空场景仍保留 info（真正的"分类完成"）。
             if industry_map:
-                logger.info(f"[行业数据] 本地备用分类完成: {len(industry_map)} 只股票")
+                logger.info("[行业数据] 本地备用分类完成: %s 只股票", len(industry_map))
             else:
                 logger.warning(
                     "[行业数据] 本地备用分类产出空结果: stocks 字段为空列表，备份文件内容损坏（path=%s）",
@@ -840,7 +850,7 @@ def load_local_industry_backup(stock_list_path: Path | None = None, write_cache:
             # v3.5: 改 raise，让调用方区分"文件不存在"vs"文件损坏解析失败"
             # 旧写法只 warning + return {} 会让两种完全不同的失败原因合流为同一行日志，
             # 调用方（load_stock_industry / main）无法准确记录降级原因。
-            logger.warning(f"[行业数据] 本地备用文件解析失败 [{type(e).__name__}]: {e} (path={stock_list_path})")
+            logger.warning("[行业数据] 本地备用文件解析失败 [%s]: %s (path=%s)", type(e).__name__, e, stock_list_path)
             raise
 
         # v3.13: 写缓存调用移出 try/except 块。
@@ -856,7 +866,7 @@ def load_local_industry_backup(stock_list_path: Path | None = None, write_cache:
         return industry_map
     else:
         # 文件不存在：记录警告日志，方便调试（而非静默返回空 dict）
-        logger.warning(f"[行业数据] 本地备用文件不存在: {stock_list_path}")
+        logger.warning("[行业数据] 本地备用文件不存在: %s", stock_list_path)
 
     return {}
 
@@ -938,9 +948,9 @@ def _write_backup_cache(industry_map: dict) -> None:
     # 备用缓存写入失败为非致命错误（MODULE.md 约束 #72）
     try:
         write_json_cache(INDUSTRY_CACHE_PATH, cache_data, json_indent=2)
-        logger.info(f"[行业数据] 备用缓存已写入: {INDUSTRY_CACHE_PATH}")
+        logger.info("[行业数据] 备用缓存已写入: %s", INDUSTRY_CACHE_PATH)
     except Exception as e:
-        logger.warning(f"[行业数据] 备用缓存写入失败 [{type(e).__name__}]: {e}（非致命，下次将重新读备用数据）")
+        logger.warning("[行业数据] 备用缓存写入失败 [%s]: %s（非致命，下次将重新读备用数据）", type(e).__name__, e)
 
 
 # 名称关键词→行业映射（infer_industry_from_name 使用）
@@ -1142,17 +1152,17 @@ def main() -> bool:
     cli_logger = _get_cli_logger()
 
     cli_logger.info("=" * 60)
-    cli_logger.info(f"股票行业分类数据拉取 v{_OUTPUT_VERSION}")
+    cli_logger.info("股票行业分类数据拉取 v%s", _OUTPUT_VERSION)
     cli_logger.info("降级链: 东方财富(EM) → 申万(SW) → 本地关键词推断")
     cli_logger.info("=" * 60)
 
     try:
         # 尝试从 akshare 获取（refresh_industry_cache 内部 EM→SW 降级）
         industry_map = refresh_industry_cache()
-        cli_logger.info(f"  ✓ 成功获取 {len(industry_map)} 只股票的行业分类")
+        cli_logger.info("  ✓ 成功获取 %s 只股票的行业分类", len(industry_map))
         # v3.4: 行业 top3 分布摘要，便于从日志快速判断数据质量
-        cli_logger.debug(f"  · top3 行业分布: {_format_top3_industries(industry_map)}")
-        cli_logger.info(f"  ✓ 缓存路径: {INDUSTRY_CACHE_PATH}")
+        cli_logger.debug("  · top3 行业分布: %s", _format_top3_industries(industry_map))
+        cli_logger.info("  ✓ 缓存路径: %s", INDUSTRY_CACHE_PATH)
         cli_logger.info("执行完成，退出码: 0")
         return True
 
@@ -1164,26 +1174,26 @@ def main() -> bool:
         # 的正确语义；现统一捕获后通过 isinstance 区分两类失败入口。
         if isinstance(e, RuntimeError):
             # EM + SW 均失败，尝试本地备用数据（refresh_industry_cache 契约异常）
-            cli_logger.warning(f"  ⚠ akshare 获取失败: {e}")
+            cli_logger.warning("  ⚠ akshare 获取失败: %s", e)
             cli_logger.info("  尝试使用本地备用数据（名称关键词推断）...")
 
             try:
                 backup_map = load_local_industry_backup(write_cache=True)
-                cli_logger.info(f"  ✓ 备用数据加载成功: {len(backup_map)} 只股票")
+                cli_logger.info("  ✓ 备用数据加载成功: %s 只股票", len(backup_map))
                 # v3.4: 备用数据同样补 top3 摘要——可立刻发现"75% 其他"这类污染
-                cli_logger.debug(f"  · top3 行业分布: {_format_top3_industries(backup_map)}")
-                cli_logger.info(f"  ✓ 缓存路径: {INDUSTRY_CACHE_PATH}")
+                cli_logger.debug("  · top3 行业分布: %s", _format_top3_industries(backup_map))
+                cli_logger.info("  ✓ 缓存路径: %s", INDUSTRY_CACHE_PATH)
                 cli_logger.info("执行完成（使用备用数据），退出码: 0")
                 return True
 
             except Exception as backup_e:
-                cli_logger.error(f"  ✗ 备用数据也失败 [{type(backup_e).__name__}]: {backup_e}")
+                cli_logger.error("  ✗ 备用数据也失败 [%s]: %s", type(backup_e).__name__, backup_e)
                 cli_logger.error("执行失败，退出码: 1")
                 return False
         else:
             # 非 RuntimeError：refresh_industry_cache 契约外的异常（import 错误、
             # KeyboardInterrupt 上层、未捕获的内部 bug 等），不应静默走备用路径
-            cli_logger.exception(f"  ✗ 未预期的错误: {type(e).__name__}: {e}")
+            cli_logger.exception("  ✗ 未预期的错误: %s: %s", type(e).__name__, e)
             cli_logger.error("执行失败，退出码: 1")
             return False
 

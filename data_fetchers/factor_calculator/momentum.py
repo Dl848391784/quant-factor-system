@@ -121,7 +121,7 @@ def calculate_price_position(factor_df: pd.DataFrame, logger_arg: logging.Logger
 
     if zero_range_mask.any():
         zero_count = zero_range_mask.sum()
-        _logger.warning(f"检测到 {zero_count} 个振幅为零的记录（high=low），price_position 设为 0.5（中位）")
+        _logger.warning("检测到 %s 个振幅为零的记录（high=low），price_position 设为 0.5（中位）", zero_count)
 
     # 计算价格位置
     df[_COL_PRICE_POSITION] = np.where(
@@ -130,7 +130,7 @@ def calculate_price_position(factor_df: pd.DataFrame, logger_arg: logging.Logger
         (df[_COL_CLOSE] - df[_COL_LOW]) / range_val,
     )
 
-    _logger.info(f"price_position 计算完成，共 {len(df)} 条记录")
+    _logger.info("price_position 计算完成，共 %s 条记录", len(df))
 
     return df
 
@@ -188,7 +188,7 @@ def calculate_amplitude(factor_df: pd.DataFrame, logger_arg: logging.Logger | No
 
     if zero_close_mask.any():
         zero_count = zero_close_mask.sum()
-        _logger.warning(f"检测到 {zero_count} 个收盘价为零的记录，amplitude 设为 NaN（无效数据）")
+        _logger.warning("检测到 %s 个收盘价为零的记录，amplitude 设为 NaN（无效数据）", zero_count)
 
     # 计算振幅因子
     # close=0 → NaN，否则计算 (high - low) / close
@@ -198,7 +198,7 @@ def calculate_amplitude(factor_df: pd.DataFrame, logger_arg: logging.Logger | No
         range_val / df[_COL_CLOSE],
     )
 
-    _logger.info(f"amplitude 计算完成，共 {len(df)} 条记录")
+    _logger.info("amplitude 计算完成，共 %s 条记录", len(df))
 
     return df
 
@@ -277,7 +277,7 @@ def calculate_past_return_1d(
 
     df[_COL_PAST_RETURN_1D] = np.where(invalid_mask, np.nan, df[_COL_CLOSE] / close_shifted - 1)
 
-    _logger.info(f"past_return_1d (window={window}) 计算完成，共 {len(df)} 条记录")
+    _logger.info("past_return_1d (window=%s) 计算完成，共 %s 条记录", window, len(df))
 
     return df
 
@@ -356,7 +356,7 @@ def calculate_return_3d(
 
     df[_COL_RETURN_3D] = np.where(invalid_mask, np.nan, df[_COL_CLOSE] / close_shifted - 1)
 
-    _logger.info(f"return_3d (window={window}) 计算完成，共 {len(df)} 条记录")
+    _logger.info("return_3d (window=%s) 计算完成，共 %s 条记录", window, len(df))
 
     return df
 
@@ -435,7 +435,7 @@ def calculate_return_5d(
 
     df[_COL_RETURN_5D] = np.where(invalid_mask, np.nan, df[_COL_CLOSE] / close_shifted - 1)
 
-    _logger.info(f"return_5d (window={window}) 计算完成，共 {len(df)} 条记录")
+    _logger.info("return_5d (window=%s) 计算完成，共 %s 条记录", window, len(df))
 
     return df
 
@@ -540,7 +540,7 @@ def calculate_momentum_strength(
     del df["_return_1d_std_5"]
     del df["_return_1d_std_5_safe"]
 
-    _logger.info(f"momentum_strength (window={window}) 计算完成，共 {len(df)} 条记录")
+    _logger.info("momentum_strength (window=%s) 计算完成，共 %s 条记录", window, len(df))
 
     return df
 
@@ -593,9 +593,9 @@ def calculate_overnight_return(factor_df: pd.DataFrame, logger_arg: logging.Logg
 
     # 记录异常情况
     if invalid_mask.any():
-        _logger.warning(f"发现 {invalid_mask.sum()} 个异常收盘价（<{_EPSILON}），已设为 NaN")
+        _logger.warning("发现 %s 个异常收盘价（<%s），已设为 NaN", invalid_mask.sum(), _EPSILON)
 
-    _logger.info(f"overnight_ret 计算完成，共 {len(df)} 条记录")
+    _logger.info("overnight_ret 计算完成，共 %s 条记录", len(df))
 
     return df
 

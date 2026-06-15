@@ -180,7 +180,7 @@ class RealDataLoader:
         data_file = os.path.join(LOCAL_DATA_DIR, f"{stock_code}.csv")
 
         if not os.path.exists(data_file):
-            self._logger.debug(f"本地数据文件不存在: {data_file}")
+            self._logger.debug("本地数据文件不存在: %s", data_file)
             return None
 
         try:
@@ -195,7 +195,7 @@ class RealDataLoader:
         except Exception as e:
             # CSV文件损坏、缺少必需列或列类型异常
             self._logger.warning(
-                f"[LocalDataError] 读取本地CSV失败: stock_code={stock_code}, file={data_file}, error={e}"
+                "[LocalDataError] 读取本地CSV失败: stock_code=%s, file=%s, error=%s", stock_code, data_file, e
             )
             return None
 
@@ -224,7 +224,7 @@ class RealDataLoader:
                 symbol = f"sz{stock_code}"
             else:
                 # 不支持的股票代码前缀，属于永久性失败
-                self._logger.warning(f"[PermanentFailure] 不支持的股票代码前缀: {stock_code}")
+                self._logger.warning("[PermanentFailure] 不支持的股票代码前缀: %s", stock_code)
                 raise PermanentFailureError(f"不支持的股票代码前缀: {stock_code}")
 
             params = {
@@ -242,7 +242,9 @@ class RealDataLoader:
             # API 返回非列表可能是服务端临时故障，记录警告并返回 None 以触发重试
             if not data or not isinstance(data, list):
                 self._logger.warning(
-                    f"[APIResponseError] API返回非列表数据: stock_code={stock_code}, data_type={type(data)}"
+                    "[APIResponseError] API返回非列表数据: stock_code=%s, data_type=%s",
+                    stock_code,
+                    type(data),
                 )
                 return None
 
@@ -263,7 +265,7 @@ class RealDataLoader:
                     continue
 
             if len(rows) < 15:
-                self._logger.debug(f"API返回有效数据不足: stock_code={stock_code}, rows={len(rows)}")
+                self._logger.debug("API返回有效数据不足: stock_code=%s, rows=%s", stock_code, len(rows))
                 return None
 
             df = pd.DataFrame(rows)
@@ -281,17 +283,17 @@ class RealDataLoader:
 
         except requests.RequestException as e:
             # 网络相关异常（超时、连接失败等）
-            self._logger.warning(f"[NetworkError] 获取股票数据失败: stock_code={stock_code}, error={e}")
+            self._logger.warning("[NetworkError] 获取股票数据失败: stock_code=%s, error=%s", stock_code, e)
             return None
 
         except json.JSONDecodeError as e:
             # JSON 解析错误
-            self._logger.warning(f"[JSONError] 解析响应失败: stock_code={stock_code}, error={e}")
+            self._logger.warning("[JSONError] 解析响应失败: stock_code=%s, error=%s", stock_code, e)
             return None
 
         except Exception as e:
             # 其他未知异常
-            self._logger.error(f"[UnexpectedError] 获取股票数据时发生未知错误: stock_code={stock_code}, error={e}")
+            self._logger.error("[UnexpectedError] 获取股票数据时发生未知错误: stock_code=%s, error=%s", stock_code, e)
             return None
 
     def _fetch_single_stock_with_retry(
@@ -326,14 +328,14 @@ class RealDataLoader:
                         time.sleep(0.3 * (attempt + 1))
             except PermanentFailureError as e:
                 # 永久性失败，直接返回，跳过重试
-                self._logger.debug(f"跳过重试（永久性失败）: {code}, reason={e}")
+                self._logger.debug("跳过重试（永久性失败）: %s, reason=%s", code, e)
                 return (code, None)
             except Exception:
                 # 其他临时异常，重试
                 if attempt < self.retries - 1:
                     time.sleep(0.5 * (attempt + 1))
 
-        self._logger.warning(f"重试 {self.retries} 次后放弃: {code}")
+        self._logger.warning("重试 %s 次后放弃: %s", self.retries, code)
         return (code, None)
 
     def _fetch_stock_batch(
@@ -395,7 +397,7 @@ class RealDataLoader:
                     results = future.result()
                     all_results.extend(results)
                 except Exception as e:
-                    self._logger.error(f"[ThreadError] {thread_name} 执行失败: {e}")
+                    self._logger.error("[ThreadError] %s 执行失败: %s", thread_name, e)
 
         return all_results
 

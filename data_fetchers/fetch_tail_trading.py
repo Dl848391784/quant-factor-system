@@ -243,7 +243,7 @@ def _parse_time_str(
         time_parts = time_str.split(":")
         if len(time_parts) < 2:
             if log_on_failure:
-                _logger.warning(f"时间解析失败: time_str='{time_str}', 时间格式不完整（少于2个部分）")
+                _logger.warning("时间解析失败: time_str='%s', 时间格式不完整（少于2个部分）", time_str)
             return None
 
         hour = int(time_parts[0])
@@ -252,7 +252,7 @@ def _parse_time_str(
 
     except (ValueError, IndexError) as e:
         if log_on_failure:
-            _logger.warning(f"时间解析失败: time_str='{time_str}', 错误=[{type(e).__name__}]: {e}")
+            _logger.warning("时间解析失败: time_str='%s', 错误=[%s]: %s", time_str, type(e).__name__, e)
         return None
 
 
@@ -332,9 +332,9 @@ def _filter_tail_klines(
 
     # v3.6: 分别输出空字段和格式异常日志
     if empty_field_count > 0:
-        _logger.warning(f"时间字段为空: {empty_field_count} 条K线（API返回缺失 time 字段）")
+        _logger.warning("时间字段为空: %s 条K线（API返回缺失 time 字段）", empty_field_count)
     if format_error_count > 0:
-        _logger.warning(f"时间格式异常: {format_error_count} 条K线（time 字段非空但无法解析）")
+        _logger.warning("时间格式异常: %s 条K线（time 字段非空但无法解析）", format_error_count)
 
     return tail_klines
 
@@ -372,8 +372,12 @@ def _calculate_tail_metrics(
     if kline_count < TAIL_KLINE_COUNT:
         # K线不足时记录debug日志，便于排查数据缺失原因
         _logger.debug(
-            f"[{code}] [{date}] 尾盘K线不足: 期望 {TAIL_KLINE_COUNT} 根, 实际 {kline_count} 根"
-            f"{'（可能为非交易日或半日市）' if kline_count > 0 else '（无数据）'}"
+            "[%s] [%s] 尾盘K线不足: 期望 %s 根, 实际 %s 根%s",
+            code,
+            date,
+            TAIL_KLINE_COUNT,
+            kline_count,
+            "（可能为非交易日或半日市）" if kline_count > 0 else "（无数据）",
         )
         return None
 
@@ -392,10 +396,10 @@ def _calculate_tail_metrics(
     # 去重后检查数量
     unique_count = len(time_to_kline)
     if unique_count != kline_count:
-        _logger.warning(f"[{code}] [{date}] 发现重复时间戳: 原始 {kline_count} 根 → 去重后 {unique_count} 根")
+        _logger.warning("[%s] [%s] 发现重复时间戳: 原始 %s 根 → 去重后 %s 根", code, date, kline_count, unique_count)
 
     if unique_count < TAIL_KLINE_COUNT:
-        _logger.warning(f"[{code}] [{date}] 去重后K线不足: 期望 {TAIL_KLINE_COUNT} 根, 实际 {unique_count} 根")
+        _logger.warning("[%s] [%s] 去重后K线不足: 期望 %s 根, 实际 %s 根", code, date, TAIL_KLINE_COUNT, unique_count)
         return None
 
     # v3.7: 提取排序到分支判断之前，避免两个分支重复排序
@@ -411,9 +415,13 @@ def _calculate_tail_metrics(
         # 直接转为列表切片即可，避免重复排序开销
         excess_timestamps = [str(t) for t in list(time_to_kline.keys())[TAIL_KLINE_COUNT:]]
         _logger.warning(
-            f"[{code}] [{date}] 去重后K线超量: 期望 {TAIL_KLINE_COUNT} 根, 实际 {unique_count} 根"
-            f" → 截取前 {TAIL_KLINE_COUNT} 根"
-            f"（超出的时间戳: {excess_timestamps}）"
+            "[%s] [%s] 去重后K线超量: 期望 %s 根, 实际 %s 根 → 截取前 %s 根（超出的时间戳: %s）",
+            code,
+            date,
+            TAIL_KLINE_COUNT,
+            unique_count,
+            TAIL_KLINE_COUNT,
+            excess_timestamps,
         )
         # v3.7: 截取前 TAIL_KLINE_COUNT 条（按时间升序，取最早的13根）
         sorted_unique_klines = sorted_unique_klines[:TAIL_KLINE_COUNT]
@@ -476,7 +484,7 @@ def fetch_tail_trading_for_stock(
         response = requests.get(_SINA_API_URL, params=params, timeout=10)
 
         if response.status_code != 200:
-            _logger.warning(f"[{code}] API返回状态码异常: {response.status_code}")
+            _logger.warning("[%s] API返回状态码异常: %s", code, response.status_code)
             return {"records": [], "status": _STATUS_FAILED}  # v3.4: 使用常量
 
         # 解析JSON数据
@@ -484,11 +492,11 @@ def fetch_tail_trading_for_stock(
 
         # 类型校验：应为列表
         if not isinstance(klines, list):
-            _logger.warning(f"[{code}] API返回数据类型异常: {type(klines).__name__}")
+            _logger.warning("[%s] API返回数据类型异常: %s", code, type(klines).__name__)
             return {"records": [], "status": _STATUS_FAILED}  # v3.4: 使用常量
 
         if not klines:
-            _logger.debug(f"[{code}] 无K线数据")
+            _logger.debug("[%s] 无K线数据", code)
             return {"records": [], "status": _STATUS_NO_DATA}  # v3.4: 使用常量
 
         # 解析K线数据（新浪API格式：day, open, high, low, close, volume）
@@ -517,7 +525,7 @@ def fetch_tail_trading_for_stock(
             try:
                 normalized_date = datetime.strptime(raw_date, "%Y-%m-%d").strftime("%Y-%m-%d")
             except ValueError:
-                _logger.warning(f"[{code}] date 格式异常无法规范化: '{raw_date}', 跳过该K线")
+                _logger.warning("[%s] date 格式异常无法规范化: '%s', 跳过该K线", code, raw_date)
                 continue
 
             # v3.6: 单条 K 线字段解析改为独立 try-except，单条失败不影响其他 K 线
@@ -534,13 +542,17 @@ def fetch_tail_trading_for_stock(
                 parsed_klines.append(parsed_kline)
             except (ValueError, TypeError) as e:
                 _logger.warning(
-                    f"[{code}] 单条K线字段解析失败（day='{day_str}'）: [{type(e).__name__}]: {e}, 跳过该K线"
+                    "[%s] 单条K线字段解析失败（day='%s'）: [%s]: %s, 跳过该K线",
+                    code,
+                    day_str,
+                    type(e).__name__,
+                    e,
                 )
                 continue
 
         # v3.3: parsed_klines 为空但 klines 非空时记录 warning（解析全部失败而非 API 无数据）
         if not parsed_klines and klines:
-            _logger.warning(f"[{code}] API返回 {len(klines)} 条K线但全部解析失败（day字段可能为空或格式异常）")
+            _logger.warning("[%s] API返回 %s 条K线但全部解析失败（day字段可能为空或格式异常）", code, len(klines))
             return {"records": [], "status": _STATUS_NO_DATA}  # v3.4: 使用常量
 
         # 按日期分组（v3.3: 过滤空字符串 date，避免脏数据写入缓存）
@@ -558,8 +570,9 @@ def fetch_tail_trading_for_stock(
         # 此处保留以防未来逻辑变更（如 date 规范化被移除）
         if parsed_klines and not date_groups:
             _logger.warning(
-                f"[{code}] parsed_klines 有 {len(parsed_klines)} 条但 date_groups 为空"
-                f"（date 字段全部为空字符串，已过滤）——边界防御触发"
+                "[%s] parsed_klines 有 %s 条但 date_groups 为空（date 字段全部为空字符串，已过滤）——边界防御触发",
+                code,
+                len(parsed_klines),
             )
             return {"records": [], "status": _STATUS_NO_DATA}
 
@@ -577,23 +590,23 @@ def fetch_tail_trading_for_stock(
 
         # v3.2: 区分"有有效数据"与"无有效数据"
         if records:
-            _logger.debug(f"[{code}] 获取 {len(records)} 天尾盘数据")
+            _logger.debug("[%s] 获取 %s 天尾盘数据", code, len(records))
             return {"records": records, "status": _STATUS_SUCCESS}  # v3.4: 使用常量
         else:
-            _logger.debug(f"[{code}] 无有效尾盘数据（K线不足）")
+            _logger.debug("[%s] 无有效尾盘数据（K线不足）", code)
             return {"records": [], "status": _STATUS_NO_DATA}  # v3.4: 使用常量
 
     except requests.RequestException as e:
-        _logger.warning(f"[{code}] 网络请求失败: [{type(e).__name__}]: {e}")
+        _logger.warning("[%s] 网络请求失败: [%s]: %s", code, type(e).__name__, e)
         return {"records": [], "status": _STATUS_FAILED}  # v3.4: 使用常量
     except json.JSONDecodeError as e:
-        _logger.warning(f"[{code}] JSON解析失败: [{type(e).__name__}]: {e}")
+        _logger.warning("[%s] JSON解析失败: [%s]: %s", code, type(e).__name__, e)
         return {"records": [], "status": _STATUS_FAILED}  # v3.4: 使用常量
     # v3.7: 此 except 为非预期异常兜底，正常情况下不应触发
     # 单条 K 线解析错误已在循环内独立 try-except 处理
     # 此处仅捕获网络层/JSON层之外的非预期异常（如 response.json() 内部错误）
     except (ValueError, TypeError) as e:  # v3.5: 新增 TypeError，覆盖 float(None) 等情况
-        _logger.warning(f"[{code}] 数据解析失败（非预期异常）: [{type(e).__name__}]: {e}")
+        _logger.warning("[%s] 数据解析失败（非预期异常）: [%s]: %s", code, type(e).__name__, e)
         return {"records": [], "status": _STATUS_FAILED}  # v3.4: 使用常量
 
 
@@ -627,11 +640,11 @@ def fetch_tail_trading_batch(
     if max_stocks > 0:
         stock_codes = stock_codes[:max_stocks]
         # v3.4: 日志措辞修正——"已限制最大拉取数量"而非"测试模式限制"
-        _logger.info(f"已限制最大拉取数量: 原始 {original_count} 支 → 实际拉取 {len(stock_codes)} 支")
+        _logger.info("已限制最大拉取数量: 原始 %s 支 → 实际拉取 %s 支", original_count, len(stock_codes))
 
     total_stocks = len(stock_codes)
-    _logger.info(f"开始拉取尾盘数据: {total_stocks} 支股票")
-    _logger.info(f"模式: {'全量（历史10天）' if full else '增量（最新一天）'}")
+    _logger.info("开始拉取尾盘数据: %s 支股票", total_stocks)
+    _logger.info("模式: %s", "全量（历史10天）" if full else "增量（最新一天）")
 
     all_records = []
     failed_stocks = []
@@ -653,14 +666,14 @@ def fetch_tail_trading_batch(
         # v3.7: 分别统计三种状态
         status = result.get("status")
         if status is None:
-            _logger.warning(f"[{code}] 返回结构异常: status 字段缺失")
+            _logger.warning("[%s] 返回结构异常: status 字段缺失", code)
             failed_stocks.append(code)
             failed_count += 1
         elif status == _STATUS_SUCCESS:
             # v3.8: 使用 .get() or [] 避免 None 值，并校验类型
             records = result.get("records") or []
             if not isinstance(records, list):
-                _logger.warning(f"[{code}] records 类型异常: {type(records).__name__}")
+                _logger.warning("[%s] records 类型异常: %s", code, type(records).__name__)
                 failed_stocks.append(code)
                 failed_count += 1
             else:
@@ -673,7 +686,7 @@ def fetch_tail_trading_batch(
             no_data_count += 1
         # v3.8: 补充 else 分支处理非预期 status 值，避免静默忽略
         else:
-            _logger.warning(f"[{code}] 返回非预期 status 值: '{status}'")
+            _logger.warning("[%s] 返回非预期 status 值: '%s'", code, status)
             failed_stocks.append(code)
             failed_count += 1
         # _STATUS_NO_DATA 状态：请求成功但无有效尾盘数据，不计入 failed_stocks
@@ -681,22 +694,26 @@ def fetch_tail_trading_batch(
         # 进度日志（每100股）
         if (idx + 1) % 100 == 0:
             progress_pct = (idx + 1) / total_stocks * 100
-            _logger.info(f"进度: {idx + 1}/{total_stocks} ({progress_pct:.1f}%)")
+            _logger.info("进度: %s/%s (%.1f%%)", idx + 1, total_stocks, progress_pct)
 
             # 每批完成后停顿（避免触发反爬）
             if idx + 1 < total_stocks:  # 不是最后一批
-                _logger.info(f"本批完成，停顿 {BATCH_PAUSE} 秒...")
+                _logger.info("本批完成，停顿 %s 秒...", BATCH_PAUSE)
                 time.sleep(BATCH_PAUSE)
 
     # v3.8: 统计日志补充 total_stocks 总数，读者可直观验证三项之和
     _logger.info(
-        f"拉取完成: {success_count}/{total_stocks} 有数据"
-        f", {no_data_count}/{total_stocks} 无数据"
-        f", {failed_count}/{total_stocks} 失败"
-        f", 总记录数 {len(all_records)} 条"
+        "拉取完成: %s/%s 有数据, %s/%s 无数据, %s/%s 失败",
+        success_count,
+        total_stocks,
+        no_data_count,
+        total_stocks,
+        failed_count,
+        total_stocks,
+        f", 总记录数 {len(all_records)} 条",
     )
     if failed_stocks:
-        _logger.warning(f"失败股票（前10支）: {failed_stocks[:10]}")
+        _logger.warning("失败股票（前10支）: %s", failed_stocks[:10])
 
     # v3.1: 返回包含 records 和 failed_stocks 的字典，支持增量模式断点续传
     return {
@@ -731,14 +748,14 @@ def load_cache(logger_arg: logging.Logger | None = None) -> dict[str, Any] | Non
 
         # 类型校验（遵循 MODULE.md 约束 #87）
         if not isinstance(data, dict):
-            _logger.warning(f"缓存数据类型异常: {type(data).__name__}")
+            _logger.warning("缓存数据类型异常: %s", type(data).__name__)
             return None
 
-        _logger.info(f"加载缓存成功: {len(data.get('data', []))} 条记录")
+        _logger.info("加载缓存成功: %s 条记录", len(data.get("data", [])))
         return data
 
     except (json.JSONDecodeError, OSError) as e:
-        _logger.warning(f"加载缓存失败: [{type(e).__name__}]: {e}")
+        _logger.warning("加载缓存失败: [%s]: %s", type(e).__name__, e)
         return None
 
 
@@ -772,7 +789,7 @@ def get_cached_stock_codes(existing_data: dict[str, Any] | None, logger_arg: log
         if asset:
             cached_codes.add(asset)
 
-    _logger.info(f"缓存中已有 {len(cached_codes)} 支股票的数据")
+    _logger.info("缓存中已有 %s 支股票的数据", len(cached_codes))
     return cached_codes
 
 
@@ -794,10 +811,10 @@ def save_cache(data: dict[str, Any], logger_arg: logging.Logger | None = None) -
 
     try:
         write_cache(_CACHE_FILE, data, logger=_logger)
-        _logger.info(f"保存缓存成功: {_CACHE_FILE}")
+        _logger.info("保存缓存成功: %s", _CACHE_FILE)
 
     except OSError as e:
-        _logger.error(f"保存缓存失败: [{type(e).__name__}]: {e}")
+        _logger.error("保存缓存失败: [%s]: %s", type(e).__name__, e)
         raise
 
 
@@ -850,7 +867,9 @@ def merge_records(
                     "n_days": 0,
                     "n_assets": 0,
                     "date_range": {"start": None, "end": None},
-                    "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # 实际保存时间（遵循 MODULE.md 约束 #106）
+                    "last_updated": datetime.now().strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    ),  # 实际保存时间（遵循 MODULE.md 约束 #106）
                     "version": _OUTPUT_VERSION,
                     "failed_stocks": [],  # 无失败股票
                 },
@@ -870,7 +889,7 @@ def merge_records(
         final_failed_stocks_list = sorted(list(final_failed_stocks))
 
         if final_failed_stocks_list:
-            _logger.info(f"失败股票累计: {len(final_failed_stocks_list)} 支（下次将优先拉取）")
+            _logger.info("失败股票累计: %s 支（下次将优先拉取）", len(final_failed_stocks_list))
 
         # v3.5: 直接构建新返回字典，消除浅拷贝隐患
         # 'data' 字段直接引用 existing_data['data']（不修改，无需复制）
@@ -957,7 +976,7 @@ def merge_records(
     final_failed_stocks_list = sorted(list(final_failed_stocks))
 
     if final_failed_stocks_list:
-        _logger.info(f"失败股票累计: {len(final_failed_stocks_list)} 支（下次将优先拉取）")
+        _logger.info("失败股票累计: %s 支（下次将优先拉取）", len(final_failed_stocks_list))
 
     return {
         "meta": {
@@ -1000,13 +1019,13 @@ def main(full: bool = False, max_stocks: int = 0, logger_arg: logging.Logger | N
     _logger = logger_arg or logger
 
     _logger.info("=" * 60)
-    _logger.info(f"[{_NOW_STR}] 开始拉取尾盘数据")
+    _logger.info("[%s] 开始拉取尾盘数据", _NOW_STR)
     _logger.info("=" * 60)
     # v3.8: 拆分版本号日志，语义更清晰——API版本与脚本版本分开
     _logger.info("数据源: 新浪财经5分钟K线 API")
-    _logger.info(f"脚本版本: v{_OUTPUT_VERSION}")
+    _logger.info("脚本版本: v%s", _OUTPUT_VERSION)
     _logger.info("尾盘时段: 14:00-15:00（共13根5分钟K线）")
-    _logger.info(f"缓存路径: {_CACHE_FILE}")
+    _logger.info("缓存路径: %s", _CACHE_FILE)
 
     # Step 1: 加载股票列表
     try:
@@ -1019,10 +1038,10 @@ def main(full: bool = False, max_stocks: int = 0, logger_arg: logging.Logger | N
         # 直接提取股票代码
         valid_codes = [s.get("code", "") for s in stock_list if s.get("code")]
 
-        _logger.info(f"有效股票数: {len(valid_codes)} 支")
+        _logger.info("有效股票数: %s 支", len(valid_codes))
 
     except (json.JSONDecodeError, OSError) as e:
-        _logger.error(f"加载股票列表失败: [{type(e).__name__}]: {e}")
+        _logger.error("加载股票列表失败: [%s]: %s", type(e).__name__, e)
         return False
 
     # Step 2: 加载现有缓存（全量模式和增量模式都需要）
@@ -1041,7 +1060,7 @@ def main(full: bool = False, max_stocks: int = 0, logger_arg: logging.Logger | N
         codes_to_fetch = valid_codes
 
         cached_codes_count = len(get_cached_stock_codes(existing_data, logger_arg=_logger))
-        _logger.info(f"全量模式: 拉取所有 {len(valid_codes)} 支股票（缓存已有 {cached_codes_count} 支）")
+        _logger.info("全量模式: 拉取所有 %s 支股票（缓存已有 %s 支）", len(valid_codes), cached_codes_count)
     else:
         # v3.1: 增量模式断点续传——优先拉取上次失败的股票
         # v3.4: existing_meta 和 cached_failed_stocks 已在 Step 3 开头统一获取
@@ -1054,10 +1073,10 @@ def main(full: bool = False, max_stocks: int = 0, logger_arg: logging.Logger | N
             other_codes = [code for code in valid_codes if code not in priority_set]
             codes_to_fetch = priority_codes + other_codes  # 失败股票优先
 
-            _logger.info(f"增量模式断点续传: 优先拉取 {len(priority_codes)} 支失败股票")
+            _logger.info("增量模式断点续传: 优先拉取 %s 支失败股票", len(priority_codes))
         else:
             # v3.2: 补充日志说明（与有断点续传时对称）
-            _logger.info(f"增量模式: 拉取全部 {len(valid_codes)} 支股票的最新数据")
+            _logger.info("增量模式: 拉取全部 %s 支股票的最新数据", len(valid_codes))
             codes_to_fetch = valid_codes
 
     # Step 4: 批量拉取数据（v3.1: 返回字典格式）
@@ -1075,9 +1094,9 @@ def main(full: bool = False, max_stocks: int = 0, logger_arg: logging.Logger | N
     # v3.7: 修正日志表达式——正确反映实际类型
     if new_records is None or failed_stocks is None:
         _logger.error(
-            f"batch_result 结构异常: "
-            f"records={'None' if new_records is None else type(new_records).__name__}, "
-            f"failed_stocks={'None' if failed_stocks is None else type(failed_stocks).__name__}"
+            "batch_result 结构异常: records=%s, failed_stocks=%s",
+            "None" if new_records is None else type(new_records).__name__,
+            "None" if failed_stocks is None else type(failed_stocks).__name__,
         )
         return False
 
@@ -1111,7 +1130,7 @@ def main(full: bool = False, max_stocks: int = 0, logger_arg: logging.Logger | N
     # 输出统计
     meta = merged_data["meta"]
     _logger.info("=" * 60)
-    _logger.info(f"[{_NOW_STR}] 尾盘数据拉取完成")
+    _logger.info("[%s] 尾盘数据拉取完成", _NOW_STR)
     _logger.info("=" * 60)
     # v3.5: date_range 为 None 时输出"（无数据）"替代 "None ~ None"
     date_start = meta["date_range"]["start"]
@@ -1119,15 +1138,15 @@ def main(full: bool = False, max_stocks: int = 0, logger_arg: logging.Logger | N
     if date_start is None or date_end is None:
         _logger.info("日期范围: （无数据）")
     else:
-        _logger.info(f"日期范围: {date_start} ~ {date_end}")
-    _logger.info(f"交易日数: {meta['n_days']}")
-    _logger.info(f"股票数量: {meta['n_assets']}")
+        _logger.info("日期范围: %s ~ %s", date_start, date_end)
+    _logger.info("交易日数: %s", meta["n_days"])
+    _logger.info("股票数量: %s", meta["n_assets"])
     # v3.8: 补充本次新增记录数，便于评估增量效果
     new_record_count = len(merged_data["data"]) - prev_count
-    _logger.info(f"本次新增记录: {new_record_count} 条")
-    _logger.info(f"总记录数: {len(merged_data['data'])}")
+    _logger.info("本次新增记录: %s 条", new_record_count)
+    _logger.info("总记录数: %s", len(merged_data["data"]))
     # v3.3: 补充 failed_stocks 数量输出
-    _logger.info(f"累计失败股票: {len(meta.get('failed_stocks', []))} 支")
+    _logger.info("累计失败股票: %s 支", len(meta.get("failed_stocks", [])))
 
     return True
 
@@ -1163,5 +1182,5 @@ if __name__ == "__main__":
             sys.exit(1)
 
     except (json.JSONDecodeError, OSError) as e:
-        cli_logger.error(f"执行失败: [{type(e).__name__}]: {e}")
+        cli_logger.error("执行失败: [%s]: %s", type(e).__name__, e)
         sys.exit(1)

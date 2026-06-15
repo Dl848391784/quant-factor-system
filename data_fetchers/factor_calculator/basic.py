@@ -303,11 +303,11 @@ def calculate_bollinger_pb(
 
     abnormal_count = abnormal_mask.sum()
     if abnormal_count > 0:
-        _logger.warning(f"检测到 {abnormal_count} 个异常布林带宽度（负值），已标记为 np.nan")
+        _logger.warning("检测到 %s 个异常布林带宽度（负值），已标记为 np.nan", abnormal_count)
     narrow_count = narrow_band_mask.sum()
     if narrow_count > 0:
         _logger.warning(
-            f"检测到 {narrow_count} 个过窄布林带宽度（< {_EPSILON}），已置为中性值 {_BOLLINGER_NEUTRAL_VALUE}"
+            "检测到 %s 个过窄布林带宽度（< %s），已置为中性值 %s", narrow_count, _EPSILON, _BOLLINGER_NEUTRAL_VALUE
         )
 
     factor_df[_COL_BOLLINGER_PB] = bollinger_pb
@@ -396,7 +396,9 @@ def calculate_kdj_j(
 
     narrow_count = narrow_range_mask.sum()
     if narrow_count > 0:
-        _logger.warning(f"检测到 {narrow_count} 个高低价区间过窄（< {_EPSILON}），RSV已置为中性值 {_KD_NEUTRAL_VALUE}")
+        _logger.warning(
+            "检测到 %s 个高低价区间过窄（< %s），RSV已置为中性值 %s", narrow_count, _EPSILON, _KD_NEUTRAL_VALUE
+        )
 
     # 计算 K 和 D（用 _per_asset_transform 替代 transform，避免 OOM）
     k_arr = _per_asset_transform(
@@ -482,7 +484,7 @@ def calculate_turnover_surge(
 
     zero_avg_count = zero_avg_mask.sum()
     if zero_avg_count > 0:
-        _logger.warning(f"检测到 {zero_avg_count} 个 avg_turnover 接近零，已标记为 np.nan")
+        _logger.warning("检测到 %s 个 avg_turnover 接近零，已标记为 np.nan", zero_avg_count)
 
     safe_avg_turnover = avg_turnover.where(~zero_avg_mask, np.nan)
     turnover_surge = factor_df[_COL_TURNOVER_RATE] / safe_avg_turnover
@@ -491,7 +493,7 @@ def calculate_turnover_surge(
     abnormal_mask = turnover_surge < 0
     abnormal_count = abnormal_mask.sum()
     if abnormal_count > 0:
-        _logger.warning(f"检测到 {abnormal_count} 个异常换手率突增（负值），已标记为 np.nan")
+        _logger.warning("检测到 %s 个异常换手率突增（负值），已标记为 np.nan", abnormal_count)
     turnover_surge = turnover_surge.where(~abnormal_mask, np.nan)
 
     factor_df[_COL_TURNOVER_SURGE] = turnover_surge
@@ -561,7 +563,7 @@ def calculate_rsi_df(
     )
 
     n_assets = df[_COL_ASSET].nunique()
-    _logger.info(f"rsi (n={n}) 计算完成，共 {n_rows} 条记录, {n_assets} 个 asset")
+    _logger.info("rsi (n=%s) 计算完成，共 %s 条记录, %s 个 asset", n, n_rows, n_assets)
 
     return df
 
