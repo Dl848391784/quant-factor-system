@@ -36,18 +36,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 # 从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
 from data_fetchers.factor_calculator import calculate_price_position
+from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.exceptions import FactorCalcError
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
 from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)
-
-# ============================================================================
-# 参数统一管理
-# ============================================================================
-DEFAULT_MIN_STOCKS = 10
-
-
 # ============================================================================
 # CLI 入口
 # ============================================================================
@@ -79,7 +74,7 @@ def main():
 
     # 保底处理：公共模块异常返回 None 时抛出 RuntimeError
     if result is None:
-        raise RuntimeError("run_complex_factor_ic 返回 None")
+        raise FactorCalcError("run_complex_factor_ic 返回 None")
 
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get("ic_metrics") or {}
@@ -130,7 +125,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except RuntimeError as e:
+    except FactorCalcError as e:
         # 已知业务异常，使用 error()（不打印完整堆栈）
         logger.error(f"全天价格位置因子IC计算失败: {e}")
         sys.exit(1)

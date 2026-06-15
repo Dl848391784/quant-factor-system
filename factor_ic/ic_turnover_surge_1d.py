@@ -33,18 +33,13 @@ from data_fetchers.factor_calculator import (
     DEFAULT_SURGE_WINDOW,
     calculate_turnover_surge,
 )
+from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.exceptions import FactorCalcError
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
 from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)
-
-# ============================================================================
-# 参数统一管理（部分从 factor_calculator 导入）
-# ============================================================================
-DEFAULT_MIN_STOCKS = 10
-
-
 # ============================================================================
 # CLI 入口
 # ============================================================================
@@ -78,7 +73,7 @@ def main():
 
     # 防御性检查：result 为 None 时抛出异常（遵循 PROJECT.md 异常处理规范）
     if result is None:
-        raise RuntimeError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
+        raise FactorCalcError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
 
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get("ic_metrics") or {}
@@ -127,7 +122,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except RuntimeError:
+    except FactorCalcError:
         logger.exception("换手率突增因子 IC 计算失败")
         sys.exit(1)
     except Exception:

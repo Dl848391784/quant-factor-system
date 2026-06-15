@@ -47,27 +47,23 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 # 从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
 from data_fetchers.factor_calculator import calculate_return_3d
+from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.exceptions import FactorCalcError
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
 from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)
-
-# ============================================================================
-# 参数统一管理
-# ============================================================================
-DEFAULT_MIN_STOCKS = 10
-
-
 # ============================================================================
 # CLI 入口
 # ============================================================================
 
+
 def main():
     """CLI 主入口"""
-    parser = argparse.ArgumentParser(description='3日累计涨幅因子 IC 计算器')
-    parser.add_argument('--force-full', action='store_true', help='强制全量计算')
-    parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数')
+    parser = argparse.ArgumentParser(description="3日累计涨幅因子 IC 计算器")
+    parser.add_argument("--force-full", action="store_true", help="强制全量计算")
+    parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
 
     args = parser.parse_args()
 
@@ -78,32 +74,32 @@ def main():
     # 注意：factor_cols 必须包含 asset, date 列（groupby 和 shift 依赖）
     # 已确认：公共模块按列名取列（data_loader.py 第205-222行），顺序无关
     result = run_complex_factor_ic(
-        factor_name='return_3d',
-        factor_col='return_3d',
-        factor_cols=['close', 'asset', 'date'],  # 必须包含 asset, date
+        factor_name="return_3d",
+        factor_col="return_3d",
+        factor_cols=["close", "asset", "date"],  # 必须包含 asset, date
         custom_factor_calculation=calculate_return_3d,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        _logger=logger
+        _logger=logger,
     )
 
     # 防御性检查：result 为 None 时抛出异常（遵循 PROJECT.md 异常处理规范）
     if result is None:
-        raise RuntimeError('run_complex_factor_ic 返回 None，数据加载或计算可能失败')
+        raise FactorCalcError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
 
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
-    ic_metrics = result.get('ic_metrics') or {}
-    sample_stats = result.get('sample_stats') or {}
-    period = result.get('period') or {}
+    ic_metrics = result.get("ic_metrics") or {}
+    sample_stats = result.get("sample_stats") or {}
+    period = result.get("period") or {}
     # 字段名 ic_distribution_consistency 来源于 MODULE.md 第56行输出结构
     # 语义：正比例与方向一致/矛盾判断（MODULE.md 第77行），非单纯分布统计
-    ic_distribution = result.get('ic_distribution_consistency') or {}
+    ic_distribution = result.get("ic_distribution_consistency") or {}
 
     # 构建结果摘要（单次输出保证并发场景下日志原子性）
-    ic_mean = ic_metrics.get('ic_mean')
-    ic_std = ic_metrics.get('ic_std')
-    icir = ic_metrics.get('icir')
-    positive_ratio = ic_distribution.get('positive_ratio')
+    ic_mean = ic_metrics.get("ic_mean")
+    ic_std = ic_metrics.get("ic_std")
+    icir = ic_metrics.get("icir")
+    positive_ratio = ic_distribution.get("positive_ratio")
 
     # 格式化各字段（None 时显示 N/A）
     ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
@@ -137,10 +133,10 @@ def main():
     return result
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main()
-    except RuntimeError as e:
+    except FactorCalcError as e:
         # 已知业务异常，使用 error()（不打印完整堆栈，但保留错误内容）
         logger.error(f"3日累计涨幅因子IC计算失败: {e}")
         sys.exit(1)

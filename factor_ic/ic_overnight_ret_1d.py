@@ -24,7 +24,7 @@
 创建日期: 2026-05-28
 版本历史:
   v1.0 (2026-05-28): 初始版本，实现隔夜收益率因子 IC 计算
-  v1.1 (2026-05-31): 
+  v1.1 (2026-05-31):
     - argparse 导入移至文件顶部（遵循 PEP 8）
     - 删除启动日志（公共模块已有等效日志）
     - 新增 result 为 None 保底处理
@@ -34,10 +34,10 @@
     - positive_ratio 为 None 时补充 warning（独立 if 语句）
     - 异常处理简化（删除冗余 RuntimeError 分支）
     - 代码量注释更新（反映实际行数）
-  v1.2 (2026-05-31): 
+  v1.2 (2026-05-31):
     - calculate_overnight_return 函数 logger 改为使用 __name__（避免硬编码）
     - 函数内 logger 变量改名为 log（避免遮蔽模块级 logger）
-  v1.3 (2026-05-31): 
+  v1.3 (2026-05-31):
     - 代码量注释更新（~100行 + ~70行，反映实际行数）
   v1.4 (2026-06-01):
     - calculate_overnight_return 函数签名修正（删除 logger_arg 参数）
@@ -71,16 +71,13 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
+from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.exceptions import FactorCalcError
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
 from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)
-
-# ============================================================================
-# 参数统一管理
-# ============================================================================
-DEFAULT_MIN_STOCKS = 10
 EPSILON = 1e-10  # 避免除零阈值
 
 
@@ -88,47 +85,49 @@ EPSILON = 1e-10  # 避免除零阈值
 # 因子计算函数
 # ============================================================================
 
+
 def calculate_overnight_return(factor_df):
     """
     计算隔夜收益率因子
-    
+
     公式: overnight_ret = (今日开盘价 - 昨日收盘价) / 昨日收盘价
-    
+
     Args:
         factor_df: 包含 open, close, asset, date 列的 DataFrame
             - 'asset': 资产代码（用于分组）
             - 'date': 交易日期
             - 'open': 开盘价
             - 'close': 收盘价
-    
+
     Returns:
         DataFrame，新增 'overnight_ret' 列
-        
+
     Note:
         - 遵循 MODULE.md 约束 #4：函数入口先 copy()
         - 第一天数据为 NaN（无昨日收盘价）
         - 除零防护：|prev_close| < EPSILON 或 prev_close < 0 时设为 NaN
         - 按资产分组计算（每只股票独立）
-        
+
     Example:
         >>> # 通过公共模块调用（推荐）
         >>> from factor_ic.common.factor_ic_runner import run_complex_factor_ic
         >>> result = run_complex_factor_ic(
-        ...     factor_name='overnight_ret',
-        ...     factor_col='overnight_ret',
-        ...     factor_cols=['open', 'close', 'asset', 'date'],  # 必须包含 asset, date
-        ...     custom_factor_calculation=calculate_overnight_return
+        ...     factor_name="overnight_ret",
+        ...     factor_col="overnight_ret",
+        ...     factor_cols=["open", "close", "asset", "date"],  # 必须包含 asset, date
+        ...     custom_factor_calculation=calculate_overnight_return,
         ... )
-        >>> 
         >>> # 独立调用（用于测试，需确保数据包含 asset, date 列）
-        >>> factor_df = pd.DataFrame({
-        ...     'asset': ['A', 'A', 'B', 'B'],
-        ...     'date': ['2026-05-01', '2026-05-02', '2026-05-01', '2026-05-02'],
-        ...     'open': [10.0, 10.5, 20.0, 21.0],
-        ...     'close': [10.2, 10.8, 20.5, 21.5]
-        ... })
+        >>> factor_df = pd.DataFrame(
+        ...     {
+        ...         "asset": ["A", "A", "B", "B"],
+        ...         "date": ["2026-05-01", "2026-05-02", "2026-05-01", "2026-05-02"],
+        ...         "open": [10.0, 10.5, 20.0, 21.0],
+        ...         "close": [10.2, 10.8, 20.5, 21.5],
+        ...     }
+        ... )
         >>> result_df = calculate_overnight_return(factor_df)
-        >>> print(result_df['overnight_ret'])
+        >>> print(result_df["overnight_ret"])
         >>> # asset A: NaN, 0.0294 (第一天NaN，第二天=(10.5-10.2)/10.2)
         >>> # asset B: NaN, 0.0244 (第一天NaN，第二天=(21.0-20.5)/20.5)
     """
@@ -137,10 +136,10 @@ def calculate_overnight_return(factor_df):
 
     # 按资产分组计算（每只股票独立）
     # 计算公式：overnight_ret = (open - close.shift(1)) / close.shift(1)
-    prev_close = factor_df.groupby('asset')['close'].shift(1)
+    prev_close = factor_df.groupby("asset")["close"].shift(1)
 
     # 计算隔夜收益率
-    factor_df['overnight_ret'] = (factor_df['open'] - prev_close) / prev_close
+    factor_df["overnight_ret"] = (factor_df["open"] - prev_close) / prev_close
 
     # 除零防护：检测极小值和负数收盘价（数据污染场景）
     # 条件 1: |prev_close| < EPSILON → 除零风险
@@ -153,21 +152,17 @@ def calculate_overnight_return(factor_df):
     if near_zero_mask.any():
         near_zero_count = near_zero_mask.sum()
         logger.warning(
-            f"发现 {near_zero_count} 个极小收盘价（|close| < {EPSILON}），"
-            f"存在除零风险，隔夜收益率已设为 NaN"
+            f"发现 {near_zero_count} 个极小收盘价（|close| < {EPSILON}），存在除零风险，隔夜收益率已设为 NaN"
         )
-        factor_df.loc[near_zero_mask, 'overnight_ret'] = np.nan
+        factor_df.loc[near_zero_mask, "overnight_ret"] = np.nan
 
     if negative_mask.any():
         negative_count = negative_mask.sum()
-        logger.warning(
-            f"发现 {negative_count} 个负数收盘价（close < 0），"
-            f"数据污染场景，隔夜收益率已设为 NaN"
-        )
-        factor_df.loc[negative_mask, 'overnight_ret'] = np.nan
+        logger.warning(f"发现 {negative_count} 个负数收盘价（close < 0），数据污染场景，隔夜收益率已设为 NaN")
+        factor_df.loc[negative_mask, "overnight_ret"] = np.nan
 
     # 统计计算结果
-    valid_count = factor_df['overnight_ret'].notna().sum()
+    valid_count = factor_df["overnight_ret"].notna().sum()
     total_count = len(factor_df)
 
     # 除零防护：空 DataFrame 时跳过比例计算
@@ -175,10 +170,7 @@ def calculate_overnight_return(factor_df):
         logger.warning("传入空 DataFrame，隔夜收益率计算跳过")
         return factor_df
 
-    logger.info(
-        f"隔夜收益率计算完成\n"
-        f"有效值: {valid_count} / {total_count} ({valid_count/total_count:.2%})"
-    )
+    logger.info(f"隔夜收益率计算完成\n有效值: {valid_count} / {total_count} ({valid_count / total_count:.2%})")
 
     return factor_df
 
@@ -187,11 +179,12 @@ def calculate_overnight_return(factor_df):
 # CLI 入口
 # ============================================================================
 
+
 def main():
     """CLI 主入口"""
-    parser = argparse.ArgumentParser(description='隔夜收益率因子 IC 计算器')
-    parser.add_argument('--force-full', action='store_true', help='强制全量计算')
-    parser.add_argument('--min-stocks', type=int, default=DEFAULT_MIN_STOCKS, help='最小股票数')
+    parser = argparse.ArgumentParser(description="隔夜收益率因子 IC 计算器")
+    parser.add_argument("--force-full", action="store_true", help="强制全量计算")
+    parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
 
     args = parser.parse_args()
 
@@ -202,32 +195,32 @@ def main():
     # 注意：factor_cols 必须包含 asset, date 列（groupby 和 shift 依赖）
     # 已确认：公共模块按列名取列（data_loader.py 第205-222行），顺序无关
     result = run_complex_factor_ic(
-        factor_name='overnight_ret',
-        factor_col='overnight_ret',
-        factor_cols=['open', 'close', 'asset', 'date'],  # 必须包含 asset, date
+        factor_name="overnight_ret",
+        factor_col="overnight_ret",
+        factor_cols=["open", "close", "asset", "date"],  # 必须包含 asset, date
         custom_factor_calculation=calculate_overnight_return,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        _logger=logger
+        _logger=logger,
     )
 
     # 防御性检查：result 为 None 时抛出异常（遵循 PROJECT.md 异常处理规范）
     if result is None:
-        raise RuntimeError('run_complex_factor_ic 返回 None，数据加载或计算可能失败')
+        raise FactorCalcError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
 
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
-    ic_metrics = result.get('ic_metrics') or {}
-    sample_stats = result.get('sample_stats') or {}
-    period = result.get('period') or {}
+    ic_metrics = result.get("ic_metrics") or {}
+    sample_stats = result.get("sample_stats") or {}
+    period = result.get("period") or {}
     # 字段名 ic_distribution_consistency 来源于 MODULE.md 第56行输出结构
     # 语义：正比例与方向一致/矛盾判断（MODULE.md 第77行），非单纯分布统计
-    ic_distribution = result.get('ic_distribution_consistency') or {}
+    ic_distribution = result.get("ic_distribution_consistency") or {}
 
     # 构建结果摘要（单次输出保证并发场景下日志原子性）
-    ic_mean = ic_metrics.get('ic_mean')
-    ic_std = ic_metrics.get('ic_std')
-    icir = ic_metrics.get('icir')
-    positive_ratio = ic_distribution.get('positive_ratio')
+    ic_mean = ic_metrics.get("ic_mean")
+    ic_std = ic_metrics.get("ic_std")
+    icir = ic_metrics.get("icir")
+    positive_ratio = ic_distribution.get("positive_ratio")
 
     # 格式化各字段（None 时显示 N/A）
     ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
@@ -261,10 +254,10 @@ def main():
     return result
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main()
-    except RuntimeError as e:
+    except FactorCalcError as e:
         # 已知业务异常，使用 error()（不打印完整堆栈，但保留错误内容）
         logger.error(f"隔夜收益率因子IC计算失败: {e}")
         sys.exit(1)
