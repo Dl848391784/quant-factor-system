@@ -130,7 +130,6 @@ import argparse
 import gzip
 import json
 import logging
-import math
 import os
 import sys
 from datetime import datetime
@@ -155,14 +154,14 @@ if __name__ == "__main__":
         calculate_amplitude,
         calculate_amplitude_delta,  # v1.40 新增：振幅差分因子
         calculate_bollinger_pb,
+        calculate_capital_flow_intensity,  # v1.44 新增：资金流强度因子（方案C）
+        calculate_capital_flow_ratio_trend,  # v1.44 新增：资金流占比趋势因子（方案C）
         calculate_industry_amplitude_trend,  # v1.42 新增：行业振幅趋势因子
         calculate_industry_earnings_growth,  # v1.43 新增：行业盈利增长因子
         calculate_industry_momentum_5d,  # v1.42 新增：行业5日动量因子
         calculate_industry_pe_trend,  # v1.43 新增：行业PE趋势因子
         calculate_industry_roe_trend,  # v1.43 新增：行业ROE趋势因子
         calculate_industry_turnover_trend,  # v1.42 新增：行业换手率趋势因子
-        calculate_capital_flow_ratio_trend,  # v1.44 新增：资金流占比趋势因子（方案C）
-        calculate_capital_flow_intensity,  # v1.44 新增：资金流强度因子（方案C）
         calculate_kdj_j,
         calculate_ma5_deviation,  # v1.41 新增：5日均线偏离度因子
         calculate_momentum_strength,  # v1.37 新增
@@ -185,14 +184,14 @@ else:
         calculate_amplitude,
         calculate_amplitude_delta,  # v1.40 新增：振幅差分因子
         calculate_bollinger_pb,
+        calculate_capital_flow_intensity,  # v1.44 新增：资金流强度因子（方案C）
+        calculate_capital_flow_ratio_trend,  # v1.44 新增：资金流占比趋势因子（方案C）
         calculate_industry_amplitude_trend,  # v1.42 新增：行业振幅趋势因子
         calculate_industry_earnings_growth,  # v1.43 新增：行业盈利增长因子
         calculate_industry_momentum_5d,  # v1.42 新增：行业5日动量因子
         calculate_industry_pe_trend,  # v1.43 新增：行业PE趋势因子
         calculate_industry_roe_trend,  # v1.43 新增：行业ROE趋势因子
         calculate_industry_turnover_trend,  # v1.42 新增：行业换手率趋势因子
-        calculate_capital_flow_ratio_trend,  # v1.44 新增：资金流占比趋势因子（方案C）
-        calculate_capital_flow_intensity,  # v1.44 新增：资金流强度因子（方案C）
         calculate_kdj_j,
         calculate_ma5_deviation,  # v1.41 新增：5日均线偏离度因子
         calculate_momentum_strength,  # v1.37 新增
@@ -1252,9 +1251,9 @@ def generate_all_factors(
     try:
         with gzip.open(temp_path, "wt", encoding="utf-8") as f:
             # 写入 JSON 头部
-            f.write("{\"dates\": ")
+            f.write('{"dates": ')
             json.dump(dates_list, f, ensure_ascii=False)
-            f.write(", \"data\": [")
+            f.write(', "data": [')
 
             # ⚠️ NaN→null 处理：json.dump 默认把 float NaN 输出为 "NaN"（非法JSON值）
             # Python json 模块的 JSONEncoder/iterencode 对嵌套 dict 中的 NaN 无法拦截
@@ -1263,7 +1262,7 @@ def generate_all_factors(
             def _nan_to_null(obj):
                 if isinstance(obj, float) and obj != obj:  # NaN (NaN != NaN)
                     return None
-                if isinstance(obj, float) and (obj == float('inf') or obj == float('-inf')):
+                if isinstance(obj, float) and (obj == float("inf") or obj == float("-inf")):
                     return None
                 if isinstance(obj, dict):
                     return {k: _nan_to_null(v) for k, v in obj.items()}

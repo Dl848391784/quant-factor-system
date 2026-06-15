@@ -307,7 +307,8 @@ def fetch_turnover_rate_eastmoney(logger_arg: logging.Logger | None = None) -> l
                         time.sleep(wait_time)
                     else:
                         _logger.error("  ✗ API请求失败 [%s]: %s", type(e).__name__, e)
-                        raise RuntimeError(f"API请求失败: {e}")
+                        # PROJECT.md H6 / data_fetchers MODULE.md: raise ... from e 保留异常链
+                        raise RuntimeError(f"API请求失败 [{type(e).__name__}]: {e}") from e
 
             if page == 1:
                 total_pages = data_json.get("result", {}).get("pages", 0)
@@ -332,16 +333,15 @@ def fetch_turnover_rate_eastmoney(logger_arg: logging.Logger | None = None) -> l
                 trade_date = item.get("TRADE_DATE", "")
                 turnover_rate = item.get("TURNOVERRATE")
 
-                if is_main_board_stock(code, name):
-                    if turnover_rate is not None and turnover_rate != "-":
-                        try:
-                            turnover_rate_float = float(turnover_rate)
-                            all_records.append(
-                                {"date": trade_date, "asset": code, "turnover_rate": turnover_rate_float, "name": name}
-                            )
-                            page_added += 1
-                        except (ValueError, TypeError):
-                            pass
+                if is_main_board_stock(code, name) and turnover_rate is not None and turnover_rate != "-":
+                    try:
+                        turnover_rate_float = float(turnover_rate)
+                        all_records.append(
+                            {"date": trade_date, "asset": code, "turnover_rate": turnover_rate_float, "name": name}
+                        )
+                        page_added += 1
+                    except (ValueError, TypeError):
+                        pass
 
             _logger.info("  第 %s/%s 页: 获取 %s 条，新增主板 %s 只", page, total_pages, len(result_data), page_added)
 
@@ -695,7 +695,7 @@ def get_cached_turnover_codes(logger_arg: logging.Logger | None = None) -> set[s
 
     data = cache_data.get("data", [])
     # 使用 .get() 防止缺少 'asset' 字段的记录导致 KeyError（遵循 MODULE.md 约束 101）
-    return set(record.get("asset") for record in data if record.get("asset"))
+    return {record.get("asset") for record in data if record.get("asset")}
 
 
 def load_cache(logger_arg: logging.Logger | None = None) -> dict[str, Any] | None:
@@ -738,7 +738,7 @@ def get_existing_stocks(cache_data: dict[str, Any] | None) -> set[str]:
         return set()
     data = cache_data.get("data", [])
     # 使用 .get() 与 get_cached_turnover_codes 保持一致（遵循 MODULE.md 约束 101）
-    return set(record.get("asset") for record in data if record.get("asset"))
+    return {record.get("asset") for record in data if record.get("asset")}
 
 
 def get_stock_latest_dates(cache_data: dict[str, Any] | None) -> dict[str, str]:
@@ -894,18 +894,16 @@ def merge_records(
     merged_records.sort(key=lambda x: (x.get("date", ""), x.get("asset", "")))
 
     # 使用 .get() 与上方 record_map 构建保持一致
-    unique_dates = sorted(set(r.get("date") for r in merged_records if r.get("date")))
-    unique_assets = sorted(set(r.get("asset") for r in merged_records if r.get("asset")))
+    unique_dates = sorted({r.get("date") for r in merged_records if r.get("date")})
+    unique_assets = sorted({r.get("asset") for r in merged_records if r.get("asset")})
 
     # meta 更新策略（遵循 MODULE.md 约束 93）
     # 数据源合并逻辑：若 existing_meta.source != source，则设为 'mixed'
-    final_source = source  # 默认使用新数据源
+    final_source = source  # 默认使用新数据源（单一数据源）
     if existing_meta:
         existing_source = existing_meta.get("source", source)
         if existing_source != source:
             final_source = "mixed"  # 数据源混合
-        else:
-            final_source = source  # 单一数据源
 
     # generated_at 语义：数据首次生成时间，有历史数据时保留原值
     generated_at = _NOW_ISO
