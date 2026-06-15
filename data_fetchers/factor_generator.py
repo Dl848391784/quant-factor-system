@@ -1412,6 +1412,26 @@ def generate_all_factors(
     logger.info("因子列: %s", metadata["factor_columns"])
     logger.info("=" * 40)
 
+    # ========== Step 15: 写出列名清单（消费者 schema 查询） ==========
+    # 遵循 factor_cols_literal_constant_design.md §3.5：
+    # 将 _OUTPUT_COLS 结构化输出为独立 JSON 文件，供 factor_ic 模块
+    # 校验 required_columns 是否与数据源对齐（M4 合规：读数据产物 ≠ import 模块）
+    columns_path = output_path.parent / "factor_ic_data_columns.json"
+    try:
+        columns_manifest = {
+            "base_cols": list(_BASE_COLS),
+            "extended_factor_cols": list(_EXTENDED_FACTOR_COLS),
+            "return_cols": list(_RETURN_COLS),
+            "all_cols": list(_OUTPUT_COLS),
+            "generated_at": metadata["generated_at"],
+        }
+        with open(columns_path, "w", encoding="utf-8") as f:
+            json.dump(columns_manifest, f, ensure_ascii=False, indent=2)
+        logger.info("列名清单已保存: %s", columns_path)
+    except OSError as e:
+        # 列名清单写入失败不应阻塞主流程（降级为 warn）
+        logger.warning("列名清单保存失败: %s, 原因: %s", columns_path, e)
+
     return metadata
 
 

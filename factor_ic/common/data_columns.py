@@ -20,6 +20,11 @@
 
 from __future__ import annotations
 
+import json
+import logging
+from pathlib import Path
+from typing import Any
+
 from factor_ic.common.exceptions import DataSchemaError
 
 
@@ -64,3 +69,49 @@ def validate_required_columns(
             missing=missing,
             available=list(available_columns),
         )
+
+
+# ============================================================================
+# 消费者 schema 查询（读 factor_ic_data_columns.json）
+# ============================================================================
+
+_DEFAULT_COLUMNS_PATH = Path(__file__).parent.parent.parent / "data_fetchers" / "result" / "factor_ic_data_columns.json"
+
+_CACHED_COLUMNS: dict[str, Any] | None = None
+
+
+def load_available_columns(columns_path: Path | None = None) -> dict[str, list[str]]:
+    """从 factor_ic_data_columns.json 加载列名清单（模块级缓存，只读一次）。
+
+    Args:
+        columns_path: 列名清单文件路径（默认 data_fetchers/result/factor_ic_data_columns.json）
+
+    Returns:
+        {"base_cols": [...], "extended_factor_cols": [...], "return_cols": [...], "all_cols": [...]}
+
+    Note:
+        - 文件不存在时返回空 dict（降级，不阻塞主流程；validate 仍由 data_loader KeyError 兜底）
+        - 模块级缓存：首次调用读文件，后续调用直接返回（遵循 design §4.2 方案 B）
+    """
+    global _CACHED_COLUMNS
+    if _CACHED_COLUMNS is not None:
+        return _CACHED_COLUMNS
+
+    path = columns_path or _DEFAULT_COLUMNS_PATH
+    logger = logging.getLogger(__name__)
+
+    if not path.exists():
+        logger.warning("列名清单不存在: %s（降级: 跳过 schema 预校验）", path)
+        _CACHED_COLUMNS = {}
+        return {}
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        _CACHED_COLUMNS = data
+        return data
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("列名清单读取失败: %s, 原因: %s（降级: 跳过 schema 预校验）", path, e)
+        _CACHED_COLUMNS = {}
+        return {}
+

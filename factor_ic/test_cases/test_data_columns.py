@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from factor_ic.common.data_columns import (
@@ -140,3 +142,66 @@ class TestValidateRequiredColumns:
             required_columns=("date", "asset"),
             available_columns=("date", "asset", "close"),
         )
+
+
+# ============================================================================
+# load_available_columns
+# ============================================================================
+
+
+class TestLoadAvailableColumns:
+    """load_available_columns() schema 查询测试。"""
+
+    def test_load_from_real_file(self, tmp_path):
+        """从临时 JSON 文件加载列名清单。"""
+        from factor_ic.common.data_columns import load_available_columns
+
+        # 写临时文件
+        manifest = {
+            "base_cols": ["date", "asset"],
+            "extended_factor_cols": ["amplitude"],
+            "return_cols": ["forward_return_1d"],
+            "all_cols": ["date", "asset", "amplitude", "forward_return_1d"],
+            "generated_at": "2026-06-15 12:00:00",
+        }
+        manifest_path = tmp_path / "factor_ic_data_columns.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        # 清缓存
+        import factor_ic.common.data_columns as _mod
+        _mod._CACHED_COLUMNS = None
+
+        result = load_available_columns(columns_path=manifest_path)
+        assert result["base_cols"] == ["date", "asset"]
+        assert "amplitude" in result["extended_factor_cols"]
+
+        # 清缓存
+        _mod._CACHED_COLUMNS = None
+
+    def test_missing_file_returns_empty(self, tmp_path):
+        """文件不存在时返回空 dict。"""
+        import factor_ic.common.data_columns as _mod
+        from factor_ic.common.data_columns import load_available_columns
+        _mod._CACHED_COLUMNS = None
+
+        result = load_available_columns(columns_path=tmp_path / "nonexistent.json")
+        assert result == {}
+
+        _mod._CACHED_COLUMNS = None
+
+    def test_caches_result(self, tmp_path):
+        """第二次调用直接返回缓存。"""
+        from factor_ic.common.data_columns import load_available_columns
+
+        manifest = {"all_cols": ["date"], "generated_at": "2026-06-15"}
+        manifest_path = tmp_path / "factor_ic_data_columns.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        import factor_ic.common.data_columns as _mod
+        _mod._CACHED_COLUMNS = None
+
+        r1 = load_available_columns(columns_path=manifest_path)
+        r2 = load_available_columns(columns_path=manifest_path)
+        assert r1 is r2  # 同一对象 = 缓存命中
+
+        _mod._CACHED_COLUMNS = None
