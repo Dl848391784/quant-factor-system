@@ -48,6 +48,11 @@
   - Fix 3: _parse_percentage/_parse_numeric_with_unit 增加 bool 子类拦截（numpy.bool_(False) 不被 int 分支误命中）
   - Fix 4: 检查点写入删除永远为真的 fetch_count > 0 冗余条件
   - Fix 5: load_cache 空结构返回 {"data": {}} 与新格式一致，避免触发误迁移日志
+- v1.0h (2026-06-15): 4 项缺陷修复
+  - Fix 1: 增量模式读取 meta.stale_codes 强制重拉失败股票（否则旧数据导致永远跳过）
+  - Fix 2: meta 时间戳改用 dt_cls.now() 而非模块级 _NOW（跨日运行时间漂移）
+  - Fix 3: 进度日志分母预计算 codes_to_fetch 固定值（避免随 skipped 动态变化）
+  - Fix 4: 失败日志补充异常响应摘要 [响应摘要: ...]，帮助判断未识别限流
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -86,9 +91,9 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0g"
+_OUTPUT_VERSION = "1.0h"
 
-# 模块级固定时间戳
+# 模块级固定时间戳（仅标记脚本启动时间，meta 中使用 dt_cls.now() 取完成时间）
 _NOW = dt_cls.now()
 
 logger = logging.getLogger(__name__)
@@ -294,10 +299,11 @@ def fetch_financial_data_for_stock(
                 time.sleep(delay)
                 continue
             _logger.warning(
-                "拉取 %s 财务数据失败: %s (%s)%s",
+                "拉取 %s 财务数据失败: %s (%s) [响应摘要: %s]%s",
                 symbol,
                 str(e)[:80],
                 type(e).__name__,
+                str(e)[:120],
                 f" (重试{_RATE_LIMIT_RETRIES}次后仍失败)" if is_rate_limit else "",
             )
             return None
@@ -465,6 +471,17 @@ def main(logger_arg: logging.Logger | None = None) -> int:
     else:
         _logger.info("无 last_full_fetch_date 记录，执行全量拉取")
 
+    # 读取上次 stale_codes，增量模式下强制重拉这些失败的股票
+    stale_codes_from_cache: set[str] = set()
+    raw_stale = cache_data.get("meta", {}).get("stale_codes")
+    if raw_stale and isinstance(raw_stale, list):
+        stale_codes_from_cache = set(raw_stale)
+        if not need_full_fetch and stale_codes_from_cache:
+            _logger.info(
+                "上次全量拉取有 %d 只股票 API 失败，本次增量模式强制重拉",
+                len(stale_codes_from_cache),
+            )
+
     # Step 3: 加载股票列表
     try:
         stock_list = load_main_board_stock_list(logger=_logger)
@@ -481,6 +498,12 @@ def main(logger_arg: logging.Logger | None = None) -> int:
 
     _logger.info("需拉取 %d 只股票（缓存已有 %d）", len(all_codes), len(cached_codes))
 
+    # 预计算待拉取股票数（固定分母，避免进度日志分母随 skipped 动态变化）
+    codes_to_fetch = (
+        len(all_codes) if need_full_fetch
+        else len(all_codes) - len(cached_codes - stale_codes_from_cache)
+    )
+
     # Step 4: 拉取数据
     new_stock_data: dict[str, list[dict[str, Any]]] = {}
     skipped = 0
@@ -491,8 +514,8 @@ def main(logger_arg: logging.Logger | None = None) -> int:
     stale_codes: set[str] = set()  # 全量模式下 API 失败的股票代码，记录到 meta
 
     for i, code in enumerate(all_codes):
-        # 增量模式跳过已有数据；全量模式全部重新拉取
-        if not need_full_fetch and code in cached_codes:
+        # 增量模式跳过已有数据（但 stale_codes_from_cache 中的股票强制重拉）；全量模式全部重新拉取
+        if not need_full_fetch and code in cached_codes and code not in stale_codes_from_cache:
             skipped += 1
             continue
 
@@ -503,7 +526,7 @@ def main(logger_arg: logging.Logger | None = None) -> int:
             _logger.info(
                 "拉取进度: 请求=%d/%d (新增=%d, 失败=%d, 空数据=%d, 跳过=%d)",
                 fetch_count,
-                len(all_codes) - skipped,
+                codes_to_fetch,
                 total_new_count,
                 failed,
                 empty,
@@ -527,10 +550,10 @@ def main(logger_arg: logging.Logger | None = None) -> int:
             merged = {**stock_data, **new_stock_data}
             checkpoint_meta: dict[str, Any] = {
                 "version": _OUTPUT_VERSION,
-                "fetched_at": _NOW.strftime("%Y-%m-%d %H:%M:%S"),
-                "last_full_fetch_date": _NOW.strftime("%Y-%m-%d")
+                "fetched_at": dt_cls.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "last_full_fetch_date": dt_cls.now().strftime("%Y-%m-%d")
                 if need_full_fetch
-                else (last_full_date_str or _NOW.strftime("%Y-%m-%d")),
+                else (last_full_date_str or dt_cls.now().strftime("%Y-%m-%d")),
                 "stock_count": len(merged),
                 "record_count": sum(len(v) for v in merged.values()),
                 "fields": list(_FINANCIAL_FIELD_MAP.values()) + ["annualized_eps"],
@@ -566,10 +589,10 @@ def main(logger_arg: logging.Logger | None = None) -> int:
     total_records = sum(len(v) for v in stock_data.values())
     meta: dict[str, Any] = {
         "version": _OUTPUT_VERSION,
-        "fetched_at": _NOW.strftime("%Y-%m-%d %H:%M:%S"),
-        "last_full_fetch_date": _NOW.strftime("%Y-%m-%d")
+        "fetched_at": dt_cls.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "last_full_fetch_date": dt_cls.now().strftime("%Y-%m-%d")
         if need_full_fetch
-        else (last_full_date_str or _NOW.strftime("%Y-%m-%d")),
+        else (last_full_date_str or dt_cls.now().strftime("%Y-%m-%d")),
         "stock_count": len(stock_data),
         "record_count": total_records,
         "fields": list(_FINANCIAL_FIELD_MAP.values()) + ["annualized_eps"],

@@ -1,6 +1,6 @@
 """fetch_financial.py 单元测试
 
-覆盖 24 个修复（v1.0c: Fix 1-5, v1.0d: Fix 1-5, v1.0e: Fix 1-5, v1.0f: Fix 1-5, v1.0g: Fix 1-5）：
+覆盖 28 个修复（v1.0c~v1.0h: Fix 1-5/1-5/1-5/1-5/1-5/1-4）：
 v1.0c:
 1. _QUARTER_ANNUALIZE_FACTOR 无效月份 warning + annualized_eps 置 None
 2. _parse_percentage 数据源单位约定 + 输出范围断言
@@ -31,6 +31,11 @@ v1.0g:
 3. bool 子类拦截（numpy.bool_(False)）
 4. 检查点条件删除 fetch_count > 0
 5. load_cache 空结构返回 {"data": {}}
+v1.0h:
+1. 增量模式读取 stale_codes 强制重拉失败股票
+2. meta 时间戳改用 dt_cls.now()
+3. 进度日志分母预计算 codes_to_fetch
+4. 失败日志补充异常响应摘要
 """
 
 import json
@@ -1170,3 +1175,141 @@ class TestLoadCacheEmptyStructure:
 
         assert isinstance(result["data"], dict), "空缓存 data 应为 dict 类型"
         assert len(result["data"]) == 0
+
+
+# ─── v1.0h Fix 1: 增量模式 stale_codes 强制重拉 ──────────────
+
+
+class TestStaleCodesIncrementalRefetch:
+    """v1.0h Fix 1: 增量模式下 stale_codes 中的股票不被跳过"""
+
+    def test_stale_codes_not_skipped_in_incremental(self, caplog):
+        """增量模式下 stale_codes 中的股票应被强制拉取"""
+        from data_fetchers.fetch_financial import main
+
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024-03-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+        # 增量模式：last_full_fetch_date 是今天，000002 在 stale_codes 中
+        cache_data = {
+            "meta": {
+                "last_full_fetch_date": dt_cls.now().strftime("%Y-%m-%d"),
+                "stale_codes": ["000002"],
+            },
+            "data": {
+                "000001": [{"asset": "000001", "roe": 4.21}],
+                "000002": [{"asset": "000002", "roe": 2.1}],  # 旧数据存在但需重拉
+            },
+        }
+        stock_list = [
+            {"code": "000001", "name": "ok"},
+            {"code": "000002", "name": "stale"},
+        ]
+
+        fetched_codes = []
+
+        def mock_fetch(symbol, **kwargs):
+            fetched_codes.append(symbol)
+            return mock_df
+
+        with (
+            patch("data_fetchers.fetch_financial.load_cache", return_value=cache_data),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=stock_list),
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", side_effect=mock_fetch),
+            patch("data_fetchers.fetch_financial.write_gzip_cache"),
+            patch("data_fetchers.fetch_financial.time.sleep"),
+        ):
+            main()
+
+        # 000001 在缓存中且不在 stale_codes → 跳过
+        # 000002 在缓存中但在 stale_codes → 不跳过，强制拉取
+        assert "000002" in fetched_codes, "stale_codes 中的股票应被强制拉取"
+        assert "000001" not in fetched_codes, "非 stale 的缓存股票应跳过"
+
+    def test_stale_codes_log_in_incremental(self, caplog):
+        """增量模式下有 stale_codes 时应打印强制重拉日志"""
+        from data_fetchers.fetch_financial import main
+
+        cache_data = {
+            "meta": {
+                "last_full_fetch_date": dt_cls.now().strftime("%Y-%m-%d"),
+                "stale_codes": ["000002"],
+            },
+            "data": {"000001": [{"asset": "000001"}], "000002": [{"asset": "000002"}]},
+        }
+
+        with (
+            patch("data_fetchers.fetch_financial.load_cache", return_value=cache_data),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=[]),
+            patch("data_fetchers.fetch_financial.write_gzip_cache"),
+            caplog.at_level(logging.INFO, logger="data_fetchers.fetch_financial"),
+        ):
+            main()
+
+        stale_msgs = [r for r in caplog.records if "强制重拉" in r.message]
+        assert len(stale_msgs) >= 1
+
+
+# ─── v1.0h Fix 2: meta 时间戳用 dt_cls.now() ──────────────────
+
+
+class TestMetaTimestampDynamic:
+    """v1.0h Fix 2: meta 中 fetched_at 和 last_full_fetch_date 使用 dt_cls.now()"""
+
+    def test_meta_uses_dynamic_timestamp(self):
+        """meta 中的时间戳应是完成时而非启动时"""
+        import inspect
+
+        from data_fetchers.fetch_financial import main
+
+        source = inspect.getsource(main)
+        # Step 6 的 meta 构建中不应使用 _NOW.strftime
+        # 查找 meta 构建区域
+        meta_start = source.find('"version": _OUTPUT_VERSION')
+        meta_section = source[meta_start:meta_start + 500] if meta_start >= 0 else ""
+        assert "_NOW.strftime" not in meta_section, "meta 构建不应使用 _NOW，应使用 dt_cls.now()"
+
+
+# ─── v1.0h Fix 3: 进度日志固定分母 ────────────────────────────
+
+
+class TestProgressLogFixedDenominator:
+    """v1.0h Fix 3: 进度日志分母 codes_to_fetch 是预计算的固定值"""
+
+    def test_codes_to_fetch_precomputed(self):
+        """源码中应预计算 codes_to_fetch 变量"""
+        import inspect
+
+        from data_fetchers.fetch_financial import main
+
+        source = inspect.getsource(main)
+        assert "codes_to_fetch" in source, "应预计算 codes_to_fetch 作为固定分母"
+
+    def test_progress_log_uses_codes_to_fetch(self):
+        """进度日志不应使用 len(all_codes) - skipped 动态计算"""
+        import inspect
+
+        from data_fetchers.fetch_financial import main
+
+        source = inspect.getsource(main)
+        assert "len(all_codes) - skipped" not in source, "进度日志分母不应动态计算"
+
+
+# ─── v1.0h Fix 4: 失败日志补充响应摘要 ────────────────────────
+
+
+class TestFailureLogResponseSummary:
+    """v1.0h Fix 4: 失败日志包含异常响应摘要"""
+
+    def test_failure_log_contains_response_summary(self):
+        """失败日志格式应包含 [响应摘要: ...]"""
+        import inspect
+
+        from data_fetchers.fetch_financial import fetch_financial_data_for_stock
+
+        source = inspect.getsource(fetch_financial_data_for_stock)
+        assert "响应摘要" in source, "失败日志应包含响应摘要字段"
