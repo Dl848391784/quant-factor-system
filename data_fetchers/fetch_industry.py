@@ -42,6 +42,7 @@
 - v3.11 (2026-06-14): 异常处理鲁棒性与日志契约对齐（5项） - 1) fetch_stock_industry_sw 外层 except 用受保护的局部 `from requests import RequestException as _ReqExc` 替代 `requests.RequestException`，避免极端情况下 requests 本身导入失败时（顶层 import requests 抛 ImportError 进入本 except 块）`requests` 名字未绑定触发 NameError 覆盖原始 ImportError 异常链；2) refresh_industry_cache 新增 `except ImportError as em_imp_e` 分支，把 EM 段 import 失败也包成 RuntimeError 经 SW 段降级，与 SW 段（外层 except Exception 已经把 ImportError 包成 RuntimeError）对称——旧实现 EM import 失败走 main 的"未预期错误"else 分支、SW import 失败走"备用降级"分支，同样依赖缺失运维行为不一致；3) _write_backup_cache docstring 补 `Raises: 无（吞掉所有异常）` 节，与 load_local_industry_backup 的 Raises 节格式对称，让两个函数契约从 docstring 一目了然；4) _fallback_to_remote_or_backup 第一个 except 块补 `logger.info("[行业数据] akshare 全部失败，降级到本地备用数据...")` 衔接日志，info 级别（决策通知而非异常状态），避免运维查日志时 refresh 内部 EM warning + SW error 后直接跳到 backup 日志中间无衔接；5) load_stock_industry 日期格式异常分支两条 logger 调用（warning + info）合并为单条 warning，与其他异常返回分支（缓存损坏/刷新失败/无更新时间标记）的单日志风格对齐
 - v3.12 (2026-06-15): 防御性编程与日志层级一致性（3项） - 1) fetch_stock_industry_em 内层 for 循环 `except Exception` 分支补 `time.sleep(0.3)`：原实现 sleep 仅在成功分支执行，若 31 个板块全部因限速失败则会零间隔连环重试加剧限速；现失败分支与成功分支保持同样间隔，避免限速导致的连环失败；2) fetch_stock_industry_sw 外层 except 兜底日志由 `logger.error` 降级为 `logger.warning`：未预期异常（KeyError 列校验、RuntimeError 股票名重试耗尽）原本会让本函数与 refresh_industry_cache 的 SW 段 `logger.error("[行业数据] SW 获取失败 ...")` 同事件双 error；按"细节在内层 warning、决策在外层 error"的层级一致性原则，由调用方统一在 SW 路径失败时打 error；3) refresh_industry_cache 的 `except ImportError` 与 `except Exception` 两个 EM 分支末尾显式补 `industry_map = None`：当前 industry_map 初始值已是 None，此处为冗余赋值；防御性目的是若未来在 try 之前增加对 industry_map 的提前赋值（例如优化路径注入预取结果），异常分支不重置会让 `if industry_map is None` 误判跳过 SW 降级路径
 - v3.13 (2026-06-15): 误导性日志消除与 docstring 契约补充（3项） - 1) load_local_industry_backup 把 `_write_backup_cache(industry_map)` 调用从 try/except 块内移到块外（return 之前）：旧实现若 `_write_backup_cache` 抛异常（理论上不会——其 docstring 声明吞掉所有异常——但 docstring 契约不是硬约束，未来重构可能破坏），except 会把"写缓存失败"当作"本地备用文件解析失败"记录，产生误导性日志；`_write_backup_cache` 的不抛异常契约已自行覆盖错误处理，无需被 try 二次保护；2) fetch_stock_industry_sw docstring 补充"异常类型对调用方的差异"Note 节：通过 refresh_industry_cache 间接调用时所有异常被统一包装为 RuntimeError（原始异常通过 __cause__ 链可追溯），直接调用本函数时按原样抛出原始类型；这种差异是 refresh_industry_cache 对外契约简化的有意设计，docstring 显式说明避免调用方读 Raises 节产生"实际只会收到 RuntimeError"的认知冲突；3) _fallback_to_remote_or_backup 的衔接日志措辞由"akshare 全部失败"改为"akshare 获取或写缓存失败"：refresh_industry_cache 抛异常的来源不止"akshare 路径全部失败"（EM+SW 双失败），还包含"EM 成功但 write_json_cache 写缓存失败"（akshare 实际成功），旧措辞会让运维在第二种场景下误判故障定位（去查 akshare/网络而非磁盘），新措辞涵盖两种触发场景
+- v3.14 (2026-06-15): 控制流契约修复与日志措辞精确化（2项） - 1) refresh_industry_cache 在 EM 返回空 dict（契约破裂路径）的 else 分支末尾补 `industry_map = None`：旧实现 `industry_map = fetch_stock_industry_em()` 在契约破裂时让 industry_map 保持为 `{}`（而非 None），导致下方 `if industry_map is None` 判为 False **直接跳过 SW 降级**进入缓存写入阶段，最终写入 `industries: {}` 空缓存文件并返回空 dict，下游模块全部读到空数据；同时 else 分支日志声明"继续降级到 SW 数据源"与运行时控制流不一致（说一套做一套）；修复后日志与控制流匹配；2) _fallback_to_remote_or_backup 的"降级链已耗尽" warning 括号内措辞由"文件不存在"改为"文件不存在或 stocks 列表为空"：load_local_industry_backup 返回空 dict 的触发场景有两种——(a) 文件不存在；(b) 文件存在但 `stock_data.get("stocks", [])` 为空列表（备份文件内容损坏）；旧措辞会让运维在场景 (b) 下误判为文件丢失而去找/恢复文件，新措辞涵盖两种实际场景
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -67,7 +68,7 @@ except ImportError:
     from common import get_module_result_dir, get_stock_list_file, setup_logger, write_json_cache
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "3.13"
+_OUTPUT_VERSION = "3.14"
 
 # 日期格式常量（避免写入和解析格式不一致）
 _DATE_FORMAT = "%Y-%m-%d"
@@ -542,8 +543,16 @@ def _fallback_to_remote_or_backup(reason: str) -> dict:
         # 用 warning 而非 error 的理由：备用文件不存在多属部署/初始化阶段的常见
         # 状态（首次运行未铺备份），不是契约破裂级别的事件；真正的 error 在
         # 上方"备用数据解析失败"分支已记录。
+        # v3.14: 括号内措辞从"文件不存在"改为"文件不存在或 stocks 列表为空"。
+        # 旧措辞不准确——load_local_industry_backup 返回空 dict 的触发场景有两种：
+        #   (a) 文件不存在（else 分支 `return {}`）
+        #   (b) 文件存在但 `stocks = stock_data.get("stocks", [])` 为空列表
+        #       → industry_map 也为空 dict → `write_cache and industry_map`
+        #       因 industry_map 为假跳过写缓存 → 直接 `return industry_map`（空 dict）
+        # 旧措辞会让运维在场景 (b) 下误判为文件丢失（去找/恢复备份文件），
+        # 而实际问题是备份文件内容损坏（stocks 字段为空数组）。
         if not backup_map:
-            logger.warning("[行业数据] 降级链已耗尽，返回空 dict（文件不存在）")
+            logger.warning("[行业数据] 降级链已耗尽，返回空 dict（文件不存在或 stocks 列表为空）")
         return backup_map
 
 
@@ -677,6 +686,17 @@ def refresh_industry_cache() -> dict:
             )
             em_error_msg = "EM [返回空数据]"
             em_error_detail = "EM: 返回空数据（内部逻辑错误，应 raise RuntimeError）"
+            # v3.14: 显式将 industry_map 重置为 None，确保下方 `if industry_map is None`
+            # 能正确进入 SW 降级路径。
+            # 旧实现：try 块第一行 `industry_map = fetch_stock_industry_em()` 在 EM
+            # 契约破裂返回空 dict 时，让 industry_map 保持为 {}（而非 None），
+            # 导致下方 `if industry_map is None` 判为 False，**直接跳过 SW 降级**
+            # 进入缓存写入阶段，最终写入一个 `industries: {}` 的空缓存文件并返回
+            # 空 dict，下游模块全部读到空数据。
+            # 修复后：日志已声明"继续降级到 SW 数据源"，此处控制流必须配合，
+            # 否则日志与行为不一致——这正是 PROJECT.md 规则 #5（因子方向根据实际
+            # 数据确定）的同源问题：声明的语义必须与运行时控制流匹配。
+            industry_map = None
     except ImportError as em_imp_e:
         # v3.11: EM 段 import 失败（akshare/time 等）原本会以 ImportError 直接透传
         # 到 main，落入 main 的"未预期错误"分支（else: cli_logger.exception），

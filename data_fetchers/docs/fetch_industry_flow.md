@@ -1,8 +1,8 @@
 # fetch_industry 流程文档
 
-> 版本: v3.13
+> 版本: v3.14
 > 创建时间: 2026-05-27 14:20 北京时间
-> 更新时间: 2026-06-15（v3.13 误导性日志消除与 docstring 契约补充：_write_backup_cache 调用移出 try/except、SW docstring 补包装语义、衔接日志措辞修正）
+> 更新时间: 2026-06-15（v3.14 控制流契约修复与日志措辞精确化：refresh_industry_cache EM 空 dict 分支补 `industry_map = None` 修复跳过 SW 降级 bug、降级链耗尽 warning 措辞补"或 stocks 列表为空"）
 
 ---
 
