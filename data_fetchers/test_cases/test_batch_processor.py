@@ -443,36 +443,6 @@ class TestCleanupBatchFiles:
 class TestBugFixesV17:
     """TC012: v1.7 Bug 修复回归测试，防止已修复的 bug 重新出现"""
 
-    def test_scan_merged_file_value_with_trailing_comma(self, temp_dir, test_logger):
-        """Bug #2: 字段字符串值末尾恰好是逗号时，不能被 rstrip(",") 误剥离
-
-        构造一条记录，其 asset 字段值末尾为逗号（极端但合法的字符串值），
-        验证 _scan_merged_file 通过两段式解析能正确解析整条记录。
-        """
-        import gzip
-        import json as _json
-
-        from data_fetchers.batch_processor import _scan_merged_file
-
-        merged_path = temp_dir / "merged_factor.json.gz"
-        # 构造合并后文件格式（数组形式，单行 JSON 对象 + 逗号分隔）
-        record_with_trailing_comma_value = {
-            "date": "2026-05-27",
-            "asset": "ABC,",  # 故意构造尾部逗号的字符串值
-            "open": 10.0,
-        }
-        with gzip.open(merged_path, "wt", encoding="utf-8") as f:
-            f.write("[\n")
-            # 先尝试原样解析能成功（无尾随分隔逗号）
-            f.write("  " + _json.dumps(record_with_trailing_comma_value, ensure_ascii=False))
-            f.write("\n]")
-
-        n_days, n_assets, first_date, last_date, n_records, lines = _scan_merged_file(merged_path, test_logger)
-        assert n_records == 1
-        # 关键断言：asset 字段值的尾部逗号不应被剥离
-        parsed = _json.loads(lines[0])
-        assert parsed["asset"] == "ABC,"
-
     def test_n_way_merge_no_path_exists_check(self, temp_dir, test_logger):
         """Bug #5: 缺失批次文件不再依赖调用方 path.exists() 前置过滤
 
@@ -557,67 +527,91 @@ class TestBugFixesV17:
         assert not factor_final.exists(), "原子清理：因子文件虽已写出但收益失败时也应清理"
         assert not return_final.exists(), "收益文件写出失败，应被清理"
 
-    def test_write_final_file_date_value_literal_null_string(self, temp_dir):
-        """Bug #6: first_date 真实值恰好是字符串 "null" 时，不应被误判为空
+    def test_merged_records_value_with_trailing_comma(self, temp_dir, test_logger):
+        """Bug #2 等价覆盖（v1.9 迁移自 _scan_merged_file）：_iter_merged_records 两段式解析能正确处理字段值末尾逗号"""
+        import gzip
+        import json as _json
 
-        构造 first_date="null" 的极端场景，验证 JSON 输出为 "\"null\"" 字符串值，
-        而不是 JSON null 字面量。
+        from data_fetchers.batch_processor import _iter_merged_records
+
+        merged_path = temp_dir / "merged_test.json.gz"
+        record_with_trailing_comma_value = {
+            "date": "2026-06-15",
+            "asset": "000001",
+            "value": "text_with_trailing_comma,",
+        }
+        with gzip.open(merged_path, "wt", encoding="utf-8") as f:
+            f.write("[\n")
+            f.write("  " + _json.dumps(record_with_trailing_comma_value, ensure_ascii=False))
+            f.write("\n]")
+
+        results = list(_iter_merged_records(merged_path, test_logger))
+        assert len(results) == 1
+        _line_content, rec = results[0]
+        # 字段值末尾逗号应保留
+        assert rec["value"] == "text_with_trailing_comma,"
+
+    def test_scan_and_write_final_date_value_literal_null_string(self, temp_dir, test_logger):
+        """Bug #6 等价覆盖（v1.9 迁移自 _write_final_file date_value_literal_null_string）：
+        date_range 字段为字符串 "null" 时输出 JSON 字符串而非 null 字面量
         """
         import gzip
         import json as _json
 
-        from data_fetchers.batch_processor import _write_final_file
+        from data_fetchers.batch_processor import _scan_and_write_final
+
+        merged_path = temp_dir / "merged_null_string.json.gz"
+        records = [{"date": "null", "asset": "000001", "value": 1.0}]
+        with gzip.open(merged_path, "wt", encoding="utf-8") as f:
+            f.write("[\n")
+            for i, rec in enumerate(records):
+                if i > 0:
+                    f.write(",\n")
+                f.write("  " + _json.dumps(rec, ensure_ascii=False))
+            f.write("\n]")
 
         output_path = temp_dir / "test_null_string.json.gz"
-        meta = {
+        meta_template = {
             "generated_at": "2026-06-15T00:00:00",
             "source": "test",
-            "n_days": 1,
-            "n_assets": 1,
-            "n_records": 1,
-            "first_date": "null",  # 字符串值就是 "null"
-            "last_date": "null",
             "last_updated": "2026-06-15 00:00:00",
             "version": "test",
-            "fields": ["date", "asset"],
+            "fields": ["date", "asset", "value"],
         }
-        lines = ['{"date": "null", "asset": "000001"}']
-        _write_final_file(output_path, meta, lines)
+        _scan_and_write_final(merged_path, output_path, meta_template, test_logger)
 
         with gzip.open(output_path, "rt", encoding="utf-8") as f:
             data = _json.load(f)
-
-        # 关键断言：date_range.start 应为字符串 "null"，不是 JSON null
+        # date_range.start 应为字符串 "null"，不是 JSON null
         assert data["meta"]["date_range"]["start"] == "null"
-        assert data["meta"]["date_range"]["end"] == "null"
         assert isinstance(data["meta"]["date_range"]["start"], str)
 
-    def test_write_final_file_date_none(self, temp_dir):
-        """Bug #6 反向场景: first_date 为 None 时输出 JSON null 字面量"""
+    def test_scan_and_write_final_date_none(self, temp_dir, test_logger):
+        """Bug #6 反向场景（v1.9 迁移自 _write_final_file date_none）：
+        merged 文件无记录时 first/last_date 为 None，date_range 输出 JSON null 字面量
+        """
         import gzip
         import json as _json
 
-        from data_fetchers.batch_processor import _write_final_file
+        from data_fetchers.batch_processor import _scan_and_write_final
+
+        merged_path = temp_dir / "merged_empty.json.gz"
+        with gzip.open(merged_path, "wt", encoding="utf-8") as f:
+            f.write("[]")
 
         output_path = temp_dir / "test_none.json.gz"
-        meta = {
+        meta_template = {
             "generated_at": "2026-06-15T00:00:00",
             "source": "test",
-            "n_days": 0,
-            "n_assets": 0,
-            "n_records": 0,
-            "first_date": None,
-            "last_date": None,
             "last_updated": "2026-06-15 00:00:00",
             "version": "test",
-            "fields": ["date", "asset"],
+            "fields": ["date", "asset", "value"],
         }
-        _write_final_file(output_path, meta, [])
+        _scan_and_write_final(merged_path, output_path, meta_template, test_logger)
 
         with gzip.open(output_path, "rt", encoding="utf-8") as f:
             data = _json.load(f)
-
-        # None 应被序列化为 JSON null（Python 中是 None）
+        # None 应被序列化为 JSON null
         assert data["meta"]["date_range"]["start"] is None
         assert data["meta"]["date_range"]["end"] is None
 

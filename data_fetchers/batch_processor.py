@@ -57,6 +57,16 @@
     - 新增 `_iter_merged_records` 流式生成器 + `_scan_and_write_final` 函数，将"扫描 merged 文件 + 写出最终文件"合并为单次遍历，`format_final_output` 改为先处理因子并落盘释放，再处理收益，避免两份 lines 同时驻留内存
     - `format_final_output` except 块反转为原子清理：因子+收益是配套数据契约，任一失败都清理两个最终输出文件，避免下游读到单边数据
     - `cleanup_batch_files` Example 注释更新：说明 merged 文件通常已在 `format_final_output` 中清理，本函数仅作兜底
+- v1.9 (2026-06-15): 第十轮 Bug 修复（死代码清理 + 性能优化 + 日志/注释精修）
+    - 删除孤儿函数 `_write_final_file` 和 `_scan_merged_file`（自 v1.8 重构为 `_scan_and_write_final` 后已无生产调用方），同步迁移测试到新代码路径
+    - 新增轻量生成器 `_iter_merged_lines`：仅做行过滤+逗号剥离不解析 dict，`_scan_and_write_final` 第二遍写出 data 数组改用此生成器避免重复 JSON 解析
+    - `_iter_merged_records` 补全返回类型注解 `Generator[tuple[str, dict], None, None]`，顶部 import 增补 `Generator`
+    - `format_final_output` 调用 `_scan_and_write_final` 前后各加 info 日志说明"两遍扫描-写出"的取舍，便于性能问题追溯
+    - `format_final_output` except 块清理日志级别 info → warning，与异常上下文语气一致
+    - `n_way_merge_deduplicate` 删除"正常但空批次"的冗余 `stream.cleanup()` else 分支（cleanup 对空列表是空操作），改为注释说明
+    - `BatchStream._load_all` 末尾 `self.exhausted = len(self.records) == 0` 加注释明确"空文件是正常情况"
+    - `save_batch_cache_sorted` Example docstring 的 factor_df 补充 `volume` 字段（required_factor_cols 包含但示例缺失会导致 doctest 失败）
+    - `_scan_and_write_final` Note 章节明确"两遍 IO 取舍"：用 2x 文件 IO 换 0 份 lines 内存峰值
 
 作者: 云瑶
 创建日期: 2026-05-27
@@ -67,6 +77,7 @@ import gzip
 import heapq
 import json
 import logging
+from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
 from typing import TextIO
@@ -139,141 +150,39 @@ def _write_json_record(f: TextIO, record: dict, count: int) -> int:
     return count + 1
 
 
-def _write_final_file(output_path: Path, meta: dict, lines: list[str]) -> float:
-    """
-    写入最终格式化文件
-
-    Args:
-        output_path: 输出文件路径
-        meta: meta 字典，包含以下字段：
-            - generated_at: ISO格式时间
-            - source: 数据源标识
-            - n_days: 交易日数
-            - n_assets: 股票数量
-            - n_records: 记录数
-            - first_date: 起始日期（可为 None）
-            - last_date: 结束日期（可为 None）
-            - last_updated: 更新时间字符串
-            - version: 版本号
-            - fields: 字段列表
-            - extra_key: extra_meta 的键名（可选，如 'format_note' 或 'note'）
-            - extra_value: extra_meta 的值（可选）
-        lines: 数据行列表
-
-    Returns:
-        float: 文件大小 MB
-
-    Example:
-        >>> from pathlib import Path
-        >>> meta = {
-        ...     "generated_at": "2026-05-27T10:00:00",
-        ...     "source": "test",
-        ...     "n_days": 10,
-        ...     "n_assets": 100,
-        ...     "n_records": 1000,
-        ...     "first_date": "2026-05-01",
-        ...     "last_date": "2026-05-27",
-        ...     "last_updated": "2026-05-27 10:00:00",
-        ...     "version": "1.0",
-        ...     "fields": ["date", "asset", "value"],
-        ... }
-        >>> lines = ['{"date": "2026-05-01", "asset": "000001", "value": 1.0}']
-        >>> size_mb = _write_final_file(Path("/tmp/test.json.gz"), meta, lines)
-
-    Note:
-        内部函数，不导出到 __all__
-    """
-    # 处理 date_range null（直接用 is not None 判断，避免 first_date 真实值恰好是 "null" 时的字符串歧义）
-    first_date = meta.get("first_date")
-    last_date = meta.get("last_date")
-    start_json = json.dumps(first_date) if first_date is not None else "null"
-    end_json = json.dumps(last_date) if last_date is not None else "null"
-
-    # 检查是否有 extra meta
-    extra_key = meta.get("extra_key")
-    extra_value = meta.get("extra_value")
-    has_extra = extra_key and extra_value is not None
-
-    with gzip.open(output_path, "wt", encoding="utf-8") as out_f:
-        out_f.write("{\n")
-        out_f.write('  "meta": {\n')
-        out_f.write(f'    "generated_at": "{meta["generated_at"]}",\n')
-        out_f.write(f'    "source": "{meta["source"]}",\n')
-        out_f.write(f'    "n_days": {meta["n_days"]},\n')
-        out_f.write(f'    "n_assets": {meta["n_assets"]},\n')
-        out_f.write(f'    "n_records": {meta["n_records"]},\n')
-        out_f.write('    "date_range": {\n')
-        out_f.write(f'      "start": {start_json},\n')
-        out_f.write(f'      "end": {end_json}\n')
-        out_f.write("    },\n")
-        out_f.write(f'    "last_updated": "{meta["last_updated"]}",\n')
-        out_f.write(f'    "version": "{meta["version"]}",\n')
-        # fields 行末尾有条件加逗号（有 extra 时加）
-        fields_json = json.dumps(meta["fields"])
-        out_f.write(f'    "fields": {fields_json}{"," if has_extra else ""}\n')
-        # extra meta 行开头不带逗号，与上方逗号位置统一
-        if has_extra:
-            extra_json = json.dumps(extra_value)
-            out_f.write(f'    "{extra_key}": {extra_json}\n')
-        out_f.write("  },\n")
-        out_f.write('  "data": [\n')
-
-        for i, line_content in enumerate(lines):
-            if i > 0:
-                out_f.write(",\n")
-            out_f.write("    " + line_content)
-
-        out_f.write("\n  ]\n")
-        out_f.write("}\n")
-
-    size_mb = output_path.stat().st_size / (1024 * 1024)
-    return size_mb
-
-
-def _scan_merged_file(
-    merged_path: Path, logger: logging.Logger | None = None
-) -> tuple[int, int, str | None, str | None, int, list[str]]:
-    """
-    扫描合并后的 JSON 文件，提取统计信息和有效行
+def _iter_merged_lines(merged_path: Path) -> Generator[str, None, None]:
+    """轻量流式迭代合并文件的有效 JSON 行（不解析为 dict）。
 
     Args:
         merged_path: 合并文件路径
-        logger: 日志记录器
 
-    Returns:
-        tuple: (n_days, n_assets, first_date, last_date, n_records, lines)
+    Yields:
+        str: 已剥离行末逗号的有效 JSON 行内容（保证可被 json.loads 解析）
 
     Note:
-        内部函数，不导出到 __all__
-        高内存场景请使用 `_scan_and_write_final`，避免 lines 列表驻留内存
+        内部生成器，不导出到 __all__
+        相比 `_iter_merged_records`：仅做行过滤+逗号剥离，不解析 dict、不查 KeyError，
+        用于"已确认有效（第一遍扫描通过）"的二次重读，避免重复解析浪费 CPU。
+
+        过滤规则：
+        - 行首不是 "{" 的跳过（数组括号、空行等）
+        - 行末有逗号则剥离（merged 文件数组分隔符 ",\n"）
+
+        注意：本生成器不做 JSON 完整性校验，调用方需保证文件已通过 `_iter_merged_records`
+        预扫描（如 `_scan_and_write_final` 第一遍统计 meta 的过程）。
     """
-    _logger = logger or logging.getLogger(__name__)
-    date_set = set()
-    asset_set = set()
-    first_date = None
-    last_date = None
-    n_records = 0
-    lines: list[str] = []
-
-    for line_content, rec in _iter_merged_records(merged_path, _logger):
-        date = rec["date"]
-        asset = rec["asset"]
-        date_set.add(date)
-        asset_set.add(asset)
-        if first_date is None or date < first_date:
-            first_date = date
-        if last_date is None or date > last_date:
-            last_date = date
-        n_records += 1
-        lines.append(line_content)
-
-    n_days = len(date_set)
-    n_assets = len(asset_set)
-
-    return n_days, n_assets, first_date, last_date, n_records, lines
+    with gzip.open(merged_path, "rt", encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if not stripped.startswith("{"):
+                continue
+            if stripped.endswith(","):
+                yield stripped[:-1]
+            else:
+                yield stripped
 
 
-def _iter_merged_records(merged_path: Path, logger: logging.Logger):
+def _iter_merged_records(merged_path: Path, logger: logging.Logger) -> Generator[tuple[str, dict], None, None]:
     """流式迭代合并文件的 (line_content, parsed_dict) 对。
 
     Args:
@@ -285,7 +194,8 @@ def _iter_merged_records(merged_path: Path, logger: logging.Logger):
 
     Note:
         内部生成器，不导出到 __all__
-        两段式 JSON 解析，避免 rstrip(",") 误剥离字段值末尾逗号
+        两段式 JSON 解析，避免 rstrip(",") 误剥离字段值末尾逗号。
+        若仅需 line_content 不需 dict，请使用更轻量的 `_iter_merged_lines`。
     """
     with gzip.open(merged_path, "rt", encoding="utf-8") as f:
         for line in f:
@@ -338,11 +248,16 @@ def _scan_and_write_final(
     Note:
         内部函数，不导出到 __all__
         相比"先 _scan_merged_file 全量缓存 + 再 _write_final_file 写出"的两阶段实现，
-        本函数将扫描与写出合并为单次遍历，避免大数据量时 lines 列表占用大量内存。
+        本函数将扫描与写出合并为单次写出（仅一份 lines 不驻留内存），但代价是对 merged
+        文件做两遍 IO：
 
-        注意：本函数采用两遍流式扫描——第一遍扫描统计 meta 字段（n_days/n_assets/n_records/
-        first_date/last_date），第二遍按行写出 data 数组。这样避免了 lines 列表全量驻留内存，
-        但 merged 文件需要 IO 两次。merged 文件已经是 gzip 压缩，IO 开销可接受。
+          - 第一遍 `_iter_merged_records` 解析每行为 dict，统计 meta（date/asset 唯一集、
+            n_records、first/last_date）。
+          - 第二遍 `_iter_merged_lines` **仅做行过滤+逗号剥离**，不解析 dict、不查 KeyError，
+            因为有效性已在第一遍由 `_iter_merged_records` 保证。
+
+        取舍：用 2x 文件 IO 换 0 份 lines 内存峰值。merged 文件已 gzip 压缩，IO 开销可接受；
+        换来的内存收益在大盘场景（数百万记录）显著。性能问题排查请关注两次 IO 的耗时差异。
     """
     # 第一遍：扫描 meta 统计
     date_set: set = set()
@@ -410,9 +325,9 @@ def _scan_and_write_final(
         out_f.write("  },\n")
         out_f.write('  "data": [\n')
 
-        # 流式写出 data 数组（第二遍扫描）
+        # 流式写出 data 数组（第二遍 IO：用轻量 _iter_merged_lines，不再解析 dict）
         first_record = True
-        for line_content, _rec in _iter_merged_records(merged_path, logger):
+        for line_content in _iter_merged_lines(merged_path):
             if first_record:
                 first_record = False
             else:
@@ -514,6 +429,8 @@ class BatchStream:
             return
 
         self.idx = 0
+        # 空文件是正常情况（该批次抓取期间无符合条件的数据），不视为错误：
+        # exhausted=True 让 peek_key/pop_record 立即返回 None，调用方自然过滤掉
         self.exhausted = len(self.records) == 0
 
     def peek_key(self) -> tuple[str, str] | None:
@@ -585,6 +502,7 @@ def save_batch_cache_sorted(
         ...         "low": [9.5, 19.5],
         ...         "rsi_6": [50.0, 60.0],
         ...         "volume_ratio_5": [1.0, 1.5],
+        ...         "volume": [1000000, 2000000],
         ...     }
         ... )
         >>> return_df = pd.DataFrame(
@@ -760,9 +678,9 @@ def n_way_merge_deduplicate(
             stream.cleanup()  # 与正常 stream 末尾 cleanup 风格一致
         elif not stream.is_exhausted():
             streams.append(stream)
-        else:
-            # 正常但空批次：清理保持风格一致
-            stream.cleanup()
+        # 注：空批次（无 load_error 但 records 为空）已被 BatchStream._load_all 标记为
+        # exhausted=True，is_exhausted() 检查返回 True 故不进入 streams；其 records 已是
+        # 空列表，无需 cleanup（cleanup 仅清理 records 列表，对空列表是空操作）。
 
     if load_errors:
         _logger.warning("  ⚠ %s 个批次加载失败: %s", len(load_errors), load_errors)
@@ -901,10 +819,13 @@ def format_final_output(
     }
 
     try:
-        # 因子：扫描 + 写出合并为一次（避免 factor_lines 全量驻留内存）
+        # 因子：扫描 + 写出合并为单次写出（_scan_and_write_final 内部对 merged 文件做两遍 IO）
+        # 取舍：用 2x merged 文件 IO 换 0 份 lines 内存峰值，性能排查可关注此处耗时
+        _logger.info("  [因子] 开始两遍扫描-写出（meta 第一遍解析 dict，data 第二遍仅过滤行）")
         factor_size_mb, factor_stats = _scan_and_write_final(
             factor_merged_path, factor_final_path, factor_meta_template, _logger
         )
+        _logger.info("  [因子] 两遍扫描-写出完成")
         _logger.info(
             "  因子统计: %s日 × %s只, %s条记录",
             factor_stats["n_days"],
@@ -915,9 +836,11 @@ def format_final_output(
         gc.collect()  # 释放因子扫描期间的临时对象，再开始处理收益
 
         # 收益：因子已落盘，此时仅持有收益的扫描数据，内存峰值大幅降低
+        _logger.info("  [收益] 开始两遍扫描-写出")
         return_size_mb, return_stats = _scan_and_write_final(
             return_merged_path, return_final_path, return_meta_template, _logger
         )
+        _logger.info("  [收益] 两遍扫描-写出完成")
         _logger.info(
             "  收益统计: %s日 × %s只, %s条记录",
             return_stats["n_days"],
@@ -937,7 +860,7 @@ def format_final_output(
             if final_path.exists():
                 try:
                     final_path.unlink()
-                    _logger.info("  已清理输出文件（保持原子性）: %s", final_path)
+                    _logger.warning("  已清理输出文件（保持原子性）: %s", final_path)
                 except Exception as cleanup_err:
                     _logger.warning(
                         "  清理输出文件失败 %s: [%s]: %s",
