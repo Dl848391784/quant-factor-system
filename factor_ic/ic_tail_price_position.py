@@ -34,6 +34,17 @@
   v1.0 (2026-06-02): 初始版本，实现尾盘价格位置因子 IC 计算
   v1.1 (2026-06-02): 优化 - 流程文档创建、lint修复、测试文件创建（5个测试用例）
   v1.2 (2026-06-02): 优化 - 抽取独立函数(get_close_price/calc_price_position)、公共模块复用(tail_data_loader)、异常处理注释补充、测试补充至13个
+  v1.3 (2026-06-15): 健壮性修复 - 9 项 issue 整改：
+    - 日志统计口径：改为 isinstance(list) + tail_high/tail_low 同时非 NaN
+      （原 prices.notna() 对 list 不可靠且语义不准）；
+    - calc_price_position 增加 isinstance 类型守卫，防御非数值类型入参；
+    - get_close_price 增加 prices[-1] 数值类型守卫；
+    - 合并两步 apply 为单次 _calc_row，消除 tail_close 中间列污染（遵循 MODULE.md M12）；
+    - main/__main__ 日志统一改为 %s 惰性格式化（与本文件 calculate 函数风格一致）；
+    - main 与 __main__ 职责划分注释 + result is None 早退出非冗余说明；
+    - result_cols 设计意图注释强化，防止维护者误改为 merged_df.columns；
+    - 测试补充：5 项 calc_price_position 类型守卫 + 2 项 get_close_price 异常列表（13 → 20 用例）；
+    - 同步修复测试 mock 缺 volumes 列的 pre-existing 失败。
 """
 
 import argparse
@@ -64,12 +75,12 @@ EPSILON = 1e-10  # 避免除零阈值
 # ============================================================================
 
 
-def get_close_price(prices: list | None) -> float:
+def get_close_price(prices: object) -> float:
     """
     获取尾盘收盘价（prices[-1])
 
     Args:
-        prices: 尾盘价格列表（13根5分钟K线收盘价）
+        prices: 尾盘价格列表（期望 list[float]，但接受任意对象由类型守卫过滤）
 
     Returns:
         尾盘收盘价，或 NaN（数据不完整时）
@@ -82,13 +93,17 @@ def get_close_price(prices: list | None) -> float:
         return np.nan
     if len(prices) < 13:
         return np.nan
-    return prices[-1]
+    last = prices[-1]
+    # 末位非数值类型直接返回 NaN（防御 prices 内含字符串/None/嵌套结构等异常数据）
+    if isinstance(last, bool) or not isinstance(last, (int, float, np.integer, np.floating)):
+        return np.nan
+    return float(last)
 
 
 def calc_price_position(
-    close_price: float,
-    tail_high: float,
-    tail_low: float,
+    close_price: object,
+    tail_high: object,
+    tail_low: object,
 ) -> float:
     """
     计算尾盘价格位置
@@ -97,26 +112,45 @@ def calc_price_position(
     - 尾盘价格位置 = (收盘价 - 尾盘最低价) / (尾盘最高价 - 尾盘最低价)
 
     Args:
-        close_price: 尾盘收盘价
-        tail_high: 尾盘最高价
-        tail_low: 尾盘最低价
+        close_price: 尾盘收盘价（期望 float，但接受任意对象，由类型守卫过滤）
+        tail_high: 尾盘最高价（期望 float，但接受任意对象，由类型守卫过滤）
+        tail_low: 尾盘最低价（期望 float，但接受任意对象，由类型守卫过滤）
 
     Returns:
         尾盘价格位置，理论范围 [0, 1]，或 NaN（边界情况）
 
     Note:
         - 任一参数为 NaN 时返回 NaN
+        - 任一参数非数值类型（str/list/dict 等）时返回 NaN
         - tail_high == tail_low 时返回 NaN（价格区间为零）
+
+    Pitfall:
+        pd.isna() 对 list/dict/str 等非数值类型行为不稳定（list 会逐元素返回数组，
+        str 直接返回 False），上游 merge 可能因数据异常带入非数值类型，
+        因此先用 isinstance 类型守卫，再走 pd.isna 检查。
     """
-    # 处理 NaN/None
-    if pd.isna(close_price) or pd.isna(tail_high) or pd.isna(tail_low):
+    # 类型守卫：非数值类型直接返回 NaN（防御 pd.isna 对 list/dict/str 的行为差异）
+    # 注意：bool 是 int 的子类，业务上不期望 bool 进入价格计算，单独排除。
+    numeric_types = (int, float, np.integer, np.floating)
+    if isinstance(close_price, bool) or not isinstance(close_price, numeric_types):
+        return np.nan
+    if isinstance(tail_high, bool) or not isinstance(tail_high, numeric_types):
+        return np.nan
+    if isinstance(tail_low, bool) or not isinstance(tail_low, numeric_types):
+        return np.nan
+    # 转 float 让后续运算/类型检查清晰（此时三个值都已确定为标量数值类型）
+    close_f = float(close_price)
+    high_f = float(tail_high)
+    low_f = float(tail_low)
+    # 处理 NaN（标量 float 的 pd.isna 返回 bool，安全）
+    if pd.isna(close_f) or pd.isna(high_f) or pd.isna(low_f):
         return np.nan
     # 除零防护：价格区间为零
-    price_range = tail_high - tail_low
+    price_range = high_f - low_f
     if abs(price_range) < EPSILON:
         return np.nan
     # 计算位置
-    return (close_price - tail_low) / price_range
+    return (close_f - low_f) / price_range
 
 
 def calculate_tail_price_position(factor_df: pd.DataFrame) -> pd.DataFrame:
@@ -181,20 +215,27 @@ def calculate_tail_price_position(factor_df: pd.DataFrame) -> pd.DataFrame:
         how="left",
     )
 
+    # 统计真实可用匹配数（issue #1+#2 修复）
+    # - prices 列存 list 对象，notna() 对 list 不可靠（list 本身被视为非 NaN 即使内容异常），
+    #   改用 isinstance 判断；
+    # - "匹配条数"语义应反映"可计算因子的有效行"——tail_high/tail_low 任一缺失则因子必为 NaN，
+    #   所以匹配数 = prices 是 list && tail_high/tail_low 同时非 NaN 的行数。
+    prices_is_list = merged_df["prices"].apply(lambda x: isinstance(x, list))
+    tail_bounds_valid = merged_df["tail_high"].notna() & merged_df["tail_low"].notna()
+    matched_count = int((prices_is_list & tail_bounds_valid).sum())
     logger.info(
-        "尾盘数据合并完成: %d / %d 条匹配",
-        merged_df["prices"].notna().sum(),
+        "尾盘数据合并完成: %d / %d 条有效匹配（prices 为 list 且 tail_high/tail_low 同时非 NaN）",
+        matched_count,
         len(factor_df),
     )
 
-    # 计算收盘价（使用抽取的独立函数）
-    merged_df["tail_close"] = merged_df["prices"].apply(get_close_price)
+    # 计算尾盘价格位置（合并 get_close_price + calc_price_position 为单次 apply，
+    # 避免引入 tail_close 中间列污染 merged_df，遵循 MODULE.md M12 中间变量不污染输出）
+    def _calc_row(row: pd.Series) -> float:
+        close_price = get_close_price(row["prices"])
+        return calc_price_position(close_price, row["tail_high"], row["tail_low"])
 
-    # 计算尾盘价格位置（使用抽取的独立函数）
-    merged_df["tail_price_position"] = merged_df.apply(
-        lambda row: calc_price_position(row["tail_close"], row["tail_high"], row["tail_low"]),
-        axis=1,
-    )
+    merged_df["tail_price_position"] = merged_df.apply(_calc_row, axis=1)
 
     # 统计有效因子数量
     valid_count = merged_df["tail_price_position"].notna().sum()
@@ -206,7 +247,13 @@ def calculate_tail_price_position(factor_df: pd.DataFrame) -> pd.DataFrame:
         100 * valid_count / total_count if total_count > 0 else 0,
     )
 
-    # 返回只包含原列 + 因子列的 DataFrame（防止列名重复）
+    # 返回只包含原列 + 因子列的 DataFrame（防止列名重复 + 遵循 MODULE.md M12）
+    # 设计意图（维护者注意，请勿误改为 merged_df.columns）：
+    # - factor_df 原始列只保留输入列（date/asset 等），不带 tail_price_position；
+    # - 即使 factor_df 上游意外传入 tail_close/prices/tail_high/tail_low 等同名列，
+    #   也以 merged_df 中合并产物为准（merge 后同名列冲突由 pandas 处理）；
+    # - 输出严格控制为「factor_df 原列 + tail_price_position」，避免 prices(list)、
+    #   tail_high/tail_low 等中间列污染下游 IC 计算。
     result_cols = [c for c in factor_df.columns if c != "tail_price_position"] + ["tail_price_position"]
     return merged_df[result_cols]
 
@@ -217,7 +264,13 @@ def calculate_tail_price_position(factor_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def main():
-    """CLI 主入口"""
+    """
+    CLI 主入口
+
+    职责划分（维护者请勿在 main 内重复加 try/except 兜底）：
+    - main()：负责业务逻辑（参数解析 → 调用 run_complex_factor_ic → 摘要日志）；
+    - __main__ 块：负责异常兜底（FactorCalcError → error；其他 → exception 打堆栈）。
+    """
     parser = argparse.ArgumentParser(description="尾盘价格位置因子 IC 计算器")
     parser.add_argument("--force-full", action="store_true", help="强制全量计算")
     parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
@@ -225,7 +278,13 @@ def main():
     args = parser.parse_args()
 
     # 启动参数日志（便于追溯本次运行配置）
-    logger.info(f"启动尾盘价格位置因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+    # 使用 %s 惰性格式化（与本文件 calculate_tail_price_position 内日志风格一致，
+    # 避免 logger 未启用 INFO 时仍执行字符串拼接）
+    logger.info(
+        "启动尾盘价格位置因子IC计算: min_stocks=%s, force_full=%s",
+        args.min_stocks,
+        args.force_full,
+    )
 
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
@@ -238,7 +297,9 @@ def main():
         _logger=logger,
     )
 
-    # 防御性检查：result 为 None 时抛出异常（遵循 PROJECT.md 异常处理规范）
+    # 防御性早退出：result 为 None 时立即抛 FactorCalcError，避免下方 result.get() 抛 AttributeError
+    # （维护者注意：此分支非冗余——run_complex_factor_ic 在数据加载/计算失败时可能返回 None；
+    # 删除此分支会导致 None 路径以 AttributeError 形式穿透 FactorCalcError 兜底）
     if result is None:
         raise FactorCalcError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
 
@@ -294,11 +355,13 @@ def main():
 
 
 if __name__ == "__main__":
+    # __main__ 职责：异常兜底（main 内不重复加 try/except）
     try:
         main()
     except FactorCalcError as e:
         # 已知业务异常，使用 error()（不打印完整堆栈，但保留错误内容）
-        logger.error(f"尾盘价格位置因子IC计算失败: {e}")
+        # 与本文件其他日志一致使用 %s 惰性格式化
+        logger.error("尾盘价格位置因子IC计算失败: %s", e)
         sys.exit(1)
     except Exception:
         # 未预期异常，使用 exception()（自动打印完整堆栈）

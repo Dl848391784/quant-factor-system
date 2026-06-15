@@ -54,6 +54,18 @@ class TestGetClosePrice:
         result = get_close_price(None)
         assert pd.isna(result)
 
+    def test_list_with_non_numeric_last(self):
+        """列表末位非数值 → NaN（防御 prices 内含异常数据）"""
+        prices = [10.0] * 12 + ["bad"]
+        result = get_close_price(prices)
+        assert pd.isna(result)
+
+    def test_list_with_none_last(self):
+        """列表末位为 None → NaN"""
+        prices = [10.0] * 12 + [None]
+        result = get_close_price(prices)
+        assert pd.isna(result)
+
 
 class TestCalcPricePosition:
     """价格位置计算函数测试"""
@@ -86,30 +98,61 @@ class TestCalcPricePosition:
         result = calc_price_position(np.nan, 11.0, 10.0)
         assert pd.isna(result)
 
+    def test_string_input_returns_nan(self):
+        """非数值类型(字符串)入参 → NaN，不抛异常（issue #3 类型守卫）"""
+        result = calc_price_position("10.5", 11.0, 10.0)
+        assert pd.isna(result)
+
+    def test_list_input_returns_nan(self):
+        """非数值类型(list)入参 → NaN，不抛异常（issue #3 类型守卫）"""
+        result = calc_price_position([10.5], 11.0, 10.0)
+        assert pd.isna(result)
+
+    def test_none_input_returns_nan(self):
+        """None 入参 → NaN（issue #3 类型守卫）"""
+        result = calc_price_position(None, 11.0, 10.0)
+        assert pd.isna(result)
+
+    def test_bool_input_returns_nan(self):
+        """bool 入参 → NaN（bool 是 int 子类，业务上不期望进入价格计算）"""
+        result = calc_price_position(True, 11.0, 10.0)
+        assert pd.isna(result)
+
+    def test_numpy_scalar_input(self):
+        """np.float64/np.int64 入参 → 正常计算（数值类型守卫不应误伤）"""
+        result = calc_price_position(np.float64(10.5), np.float64(11.0), np.int64(10))
+        assert abs(result - 0.5) < 0.001
+
 
 class TestCalculateTailPricePosition:
     """因子计算函数测试"""
 
     def test_normal_calculation(self):
         """正常计算场景"""
-        factor_df = pd.DataFrame({
-            "date": ["2026-06-01", "2026-06-01"],
-            "asset": ["000001", "000002"],
-        })
+        factor_df = pd.DataFrame(
+            {
+                "date": ["2026-06-01", "2026-06-01"],
+                "asset": ["000001", "000002"],
+            }
+        )
 
-        mock_tail_df = pd.DataFrame({
-            "date": ["2026-06-01", "2026-06-01"],
-            "asset": ["000001", "000002"],
-            "prices": [
-                [10.0, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 11.0, 11.0, 11.0],
-                [20.0, 20.1, 20.2, 20.3, 20.4, 20.5, 20.6, 20.7, 20.8, 20.9, 21.0, 21.0, 21.0],
-            ],
-            "tail_high": [11.0, 21.0],
-            "tail_low": [10.0, 20.0],
-        })
+        mock_tail_df = pd.DataFrame(
+            {
+                "date": ["2026-06-01", "2026-06-01"],
+                "asset": ["000001", "000002"],
+                "prices": [
+                    [10.0, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 11.0, 11.0, 11.0],
+                    [20.0, 20.1, 20.2, 20.3, 20.4, 20.5, 20.6, 20.7, 20.8, 20.9, 21.0, 21.0, 21.0],
+                ],
+                "volumes": [[1000] * 13, [2000] * 13],
+                "tail_high": [11.0, 21.0],
+                "tail_low": [10.0, 20.0],
+            }
+        )
 
         # 临时替换公共模块路径
         import factor_ic.common.tail_data_loader as loader_module
+
         original_path = loader_module.TAIL_TRADING_DATA_PATH
 
         with tempfile.NamedTemporaryFile(suffix=".json.gz", delete=False) as f:
@@ -127,10 +170,10 @@ class TestCalculateTailPricePosition:
 
             # asset 000001: 位置 = (11.0 - 10.0) / (11.0 - 10.0) = 1.0
             expected_000001 = 1.0
-            assert abs(
-                result_df.loc[result_df["asset"] == "000001", "tail_price_position"].values[0]
-                - expected_000001
-            ) < 0.001
+            assert (
+                abs(result_df.loc[result_df["asset"] == "000001", "tail_price_position"].values[0] - expected_000001)
+                < 0.001
+            )
 
         finally:
             loader_module.TAIL_TRADING_DATA_PATH = original_path
@@ -138,20 +181,26 @@ class TestCalculateTailPricePosition:
 
     def test_mid_position(self):
         """中间位置场景"""
-        factor_df = pd.DataFrame({
-            "date": ["2026-06-01"],
-            "asset": ["000001"],
-        })
+        factor_df = pd.DataFrame(
+            {
+                "date": ["2026-06-01"],
+                "asset": ["000001"],
+            }
+        )
 
-        mock_tail_df = pd.DataFrame({
-            "date": ["2026-06-01"],
-            "asset": ["000001"],
-            "prices": [[10.0, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 11.0, 11.0, 10.5]],
-            "tail_high": [11.0],
-            "tail_low": [10.0],
-        })
+        mock_tail_df = pd.DataFrame(
+            {
+                "date": ["2026-06-01"],
+                "asset": ["000001"],
+                "prices": [[10.0, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 11.0, 11.0, 10.5]],
+                "volumes": [[1000] * 13],
+                "tail_high": [11.0],
+                "tail_low": [10.0],
+            }
+        )
 
         import factor_ic.common.tail_data_loader as loader_module
+
         original_path = loader_module.TAIL_TRADING_DATA_PATH
 
         with tempfile.NamedTemporaryFile(suffix=".json.gz", delete=False) as f:
@@ -172,20 +221,26 @@ class TestCalculateTailPricePosition:
 
     def test_zero_range_protection(self):
         """除零防护"""
-        factor_df = pd.DataFrame({
-            "date": ["2026-06-01"],
-            "asset": ["000001"],
-        })
+        factor_df = pd.DataFrame(
+            {
+                "date": ["2026-06-01"],
+                "asset": ["000001"],
+            }
+        )
 
-        mock_tail_df = pd.DataFrame({
-            "date": ["2026-06-01"],
-            "asset": ["000001"],
-            "prices": [[10.0] * 13],
-            "tail_high": [10.0],
-            "tail_low": [10.0],
-        })
+        mock_tail_df = pd.DataFrame(
+            {
+                "date": ["2026-06-01"],
+                "asset": ["000001"],
+                "prices": [[10.0] * 13],
+                "volumes": [[1000] * 13],
+                "tail_high": [10.0],
+                "tail_low": [10.0],
+            }
+        )
 
         import factor_ic.common.tail_data_loader as loader_module
+
         original_path = loader_module.TAIL_TRADING_DATA_PATH
 
         with tempfile.NamedTemporaryFile(suffix=".json.gz", delete=False) as f:
@@ -210,6 +265,7 @@ class TestLoadTailTradingData:
     def test_file_not_found(self):
         """文件不存在时抛出异常"""
         import factor_ic.common.tail_data_loader as loader_module
+
         original_path = loader_module.TAIL_TRADING_DATA_PATH
         loader_module.TAIL_TRADING_DATA_PATH = Path("/nonexistent/path.json.gz")
 
@@ -222,6 +278,7 @@ class TestLoadTailTradingData:
     def test_invalid_format(self):
         """数据格式错误时抛出异常"""
         import factor_ic.common.tail_data_loader as loader_module
+
         original_path = loader_module.TAIL_TRADING_DATA_PATH
 
         # 写入格式错误的临时文件（缺少 data 字段）
