@@ -64,13 +64,19 @@ logger = get_logger(__name__)
 # required_columns: JOIN_KEYS + close（close 为布林带计算输入）
 # ============================================================================
 
+
+# 提取共用参数函数，避免海象运算符模块级命名空间泄漏（E731: def 替代 lambda 赋值）
+def _params_fn(a):  # noqa: F841
+    return {"n": a.n, "k": a.k}
+
+
 SPEC = register_factor(
     FactorSpec(
         factor_name="bollinger_pb",
         factor_col="bollinger_pb",
         required_columns=JOIN_KEYS + ("close",),
         calculation=calculate_bollinger_pb,
-        calc_params_fn=(_params_fn := lambda a: {"n": a.n, "k": a.k}),
+        calc_params_fn=_params_fn,
         extra_log_params_fn=_params_fn,
     )
 )
@@ -171,7 +177,7 @@ def main():
         )
 
     # 确认结果处理完成后才输出"计算完成"日志（避免中途失败造成误导）
-    logger.info("布林带%B因子IC计算完成")
+    logger.info("布林带%%B因子IC计算完成")
 
     return result
 
