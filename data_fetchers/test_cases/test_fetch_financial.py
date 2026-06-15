@@ -1,11 +1,18 @@
 """fetch_financial.py 单元测试
 
-覆盖 5 个修复：
+覆盖 9 个修复（v1.0c: Fix 1-5, v1.0d: Fix 1-5）：
+v1.0c:
 1. _QUARTER_ANNUALIZE_FACTOR 无效月份 warning + annualized_eps 置 None
 2. _parse_percentage 数据源单位约定 + 输出范围断言
 3. 缓存结构 dict 格式 + last_full_fetch_date + 增量/全量逻辑
 4. fetch_financial_data_for_stock 返回 None=异常 / []=空数据
 5. else 分支 numpy 标量 NaN 检测
+v1.0d:
+1. 缓存结构 list→dict 已在 v1.0c 完成（确认无需额外修改）
+2. 检查点写入 — 每 100 只股票写一次缓存
+3. 空数据日志 debug→info + 去前导空格
+4. 进度日志改用 fetch_count
+5. write_gzip_cache 后写入确认日志
 """
 
 import json
@@ -303,3 +310,213 @@ class TestNumpyScalarNaN:
         # 应该可以序列化为 JSON
         json_str = json.dumps(records, allow_nan=False)
         assert json_str is not None
+
+
+# ─── v1.0d Fix 2: 检查点写入 ──────────────────────────────────
+
+
+class TestCheckpointWrite:
+    """v1.0d Fix 2: 每 100 只股票做一次检查点写入"""
+
+    def test_checkpoint_interval_constant(self):
+        """_CHECKPOINT_INTERVAL 常量应存在且为 100"""
+        from data_fetchers.fetch_financial import _CHECKPOINT_INTERVAL
+
+        assert _CHECKPOINT_INTERVAL == 100
+
+    def test_checkpoint_writes_on_interval(self):
+        """main 在拉取 100 只后应触发检查点写入"""
+        from data_fetchers.fetch_financial import main
+
+        # 构造 101 只股票
+        codes = [f"{i:06d}" for i in range(101)]
+        stock_list = [{"code": c, "name": f"stock_{c}"} for c in codes]
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024-03-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+
+        with (
+            patch("data_fetchers.fetch_financial.load_cache", return_value={"meta": {}, "data": {}}),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=stock_list),
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df),
+            patch("data_fetchers.fetch_financial.write_gzip_cache") as mock_write,
+            patch("data_fetchers.fetch_financial.time.sleep"),
+        ):
+            main()
+
+        # write_gzip_cache 至少被调用 2 次：1 次检查点 + 1 次最终写入
+        assert mock_write.call_count >= 2
+
+    def test_no_checkpoint_when_few_stocks(self):
+        """少于 100 只股票时不触发检查点（只最终写入一次）"""
+        from data_fetchers.fetch_financial import main
+
+        codes = [f"{i:06d}" for i in range(10)]
+        stock_list = [{"code": c, "name": f"stock_{c}"} for c in codes]
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024-03-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+
+        with (
+            patch("data_fetchers.fetch_financial.load_cache", return_value={"meta": {}, "data": {}}),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=stock_list),
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df),
+            patch("data_fetchers.fetch_financial.write_gzip_cache") as mock_write,
+            patch("data_fetchers.fetch_financial.time.sleep"),
+        ):
+            main()
+
+        # 只有最终写入 1 次，无检查点
+        assert mock_write.call_count == 1
+
+
+# ─── v1.0d Fix 3: 空数据日志 debug→info ───────────────────────
+
+
+class TestEmptyDataLogLevel:
+    """v1.0d Fix 3: 空数据日志应为 info 级别，无前导空格"""
+
+    def test_empty_data_logs_at_info_level(self, caplog):
+        """df.empty 时应使用 info 而非 debug"""
+        with (
+            patch(
+                "data_fetchers.fetch_financial.ak.stock_financial_abstract_ths",
+                return_value=pd.DataFrame(),
+            ),
+            caplog.at_level(logging.INFO, logger="data_fetchers.fetch_financial"),
+        ):
+            result = fetch_financial_data_for_stock("000001")
+
+        assert result == []
+        # 应有 info 级别日志，不应有 debug 级别
+        info_msgs = [r for r in caplog.records if r.levelno == logging.INFO and "财务数据为空" in r.message]
+        assert len(info_msgs) >= 1
+
+    def test_no_leading_space_in_log(self, caplog):
+        """日志消息不应包含前导空格"""
+        with (
+            patch(
+                "data_fetchers.fetch_financial.ak.stock_financial_abstract_ths",
+                return_value=pd.DataFrame(),
+            ),
+            caplog.at_level(logging.INFO, logger="data_fetchers.fetch_financial"),
+        ):
+            fetch_financial_data_for_stock("000001")
+
+        for record in caplog.records:
+            if "财务数据为空" in record.message:
+                assert not record.message.startswith(" "), "日志消息不应有前导空格"
+
+
+# ─── v1.0d Fix 4: 进度日志用 fetch_count ──────────────────────
+
+
+class TestProgressLogFetchCount:
+    """v1.0d Fix 4: 进度日志以 fetch_count 而非原始索引 i 触发"""
+
+    def test_batch_log_interval_constant(self):
+        """_BATCH_LOG_INTERVAL 常量应为 50"""
+        from data_fetchers.fetch_financial import _BATCH_LOG_INTERVAL
+
+        assert _BATCH_LOG_INTERVAL == 50
+
+    def test_progress_logs_with_high_skip_rate(self, caplog):
+        """高跳过率时进度日志仍应触发（基于 fetch_count）"""
+        from data_fetchers.fetch_financial import main
+
+        # 构造 200 只股票，其中 150 只已在缓存中
+        all_codes = [f"{i:06d}" for i in range(200)]
+        stock_list = [{"code": c, "name": f"stock_{c}"} for c in all_codes]
+        cached_codes = {f"{i:06d}" for i in range(150)}  # 前 150 只已缓存
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024-03-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+
+        with (
+            patch(
+                "data_fetchers.fetch_financial.load_cache",
+                return_value={"meta": {"last_full_fetch_date": "2026-06-10"}, "data": {c: [] for c in cached_codes}},
+            ),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=stock_list),
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df),
+            patch("data_fetchers.fetch_financial.write_gzip_cache"),
+            patch("data_fetchers.fetch_financial.time.sleep"),
+            caplog.at_level(logging.INFO, logger="data_fetchers.fetch_financial"),
+        ):
+            main()
+
+        # 应有进度日志（fetch_count=50 时触发）
+        progress_msgs = [r for r in caplog.records if "拉取进度" in r.message]
+        assert len(progress_msgs) >= 1, "高跳过率时进度日志仍应触发"
+
+
+# ─── v1.0d Fix 5: 写入确认日志 ─────────────────────────────────
+
+
+class TestWriteConfirmationLog:
+    """v1.0d Fix 5: write_gzip_cache 后应有写入确认日志"""
+
+    def test_write_confirmation_logged(self, caplog):
+        """最终写入后应打印路径和记录数"""
+        from data_fetchers.fetch_financial import main
+
+        stock_list = [{"code": "000001", "name": "test"}]
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024-03-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+
+        with (
+            patch("data_fetchers.fetch_financial.load_cache", return_value={"meta": {}, "data": {}}),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=stock_list),
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df),
+            patch("data_fetchers.fetch_financial.write_gzip_cache"),
+            patch("data_fetchers.fetch_financial.time.sleep"),
+            caplog.at_level(logging.INFO, logger="data_fetchers.fetch_financial"),
+        ):
+            main()
+
+        # 应有"缓存写入完成"日志
+        confirm_msgs = [r for r in caplog.records if "缓存写入完成" in r.message]
+        assert len(confirm_msgs) >= 1, "应有缓存写入确认日志"
+
+    def test_write_confirmation_contains_path(self, caplog):
+        """确认日志应包含文件路径"""
+        from data_fetchers.fetch_financial import main
+
+        stock_list = [{"code": "000001", "name": "test"}]
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024-03-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+
+        with (
+            patch("data_fetchers.fetch_financial.load_cache", return_value={"meta": {}, "data": {}}),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=stock_list),
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df),
+            patch("data_fetchers.fetch_financial.write_gzip_cache"),
+            patch("data_fetchers.fetch_financial.time.sleep"),
+            caplog.at_level(logging.INFO, logger="data_fetchers.fetch_financial"),
+        ):
+            main()
+
+        confirm_msgs = [r for r in caplog.records if "缓存写入完成" in r.message]
+        assert any("financial_data.json.gz" in r.message for r in confirm_msgs), "确认日志应包含文件路径"

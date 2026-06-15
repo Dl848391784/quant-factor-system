@@ -24,6 +24,12 @@
   - Fix 3: 缓存结构 list→dict（以股票代码为 key）+ meta.last_full_fetch_date + 超过 90 天触发全量拉取
   - Fix 4: fetch_financial_data_for_stock 返回 None=异常 / []=空数据，main 分别计数 failed/empty
   - Fix 5: _FINANCIAL_FIELD_MAP else 分支 isinstance(raw_val, float) → 统一 pd.isna 兼容 numpy 标量
+- v1.0d (2026-06-15): 4 项缺陷修复
+  - Fix 1: 缓存结构 list→dict 已在 v1.0c 完成，本次确认无需额外修改
+  - Fix 2: 检查点写入 — 每 100 只股票写一次缓存，防崩溃数据丢失（_CHECKPOINT_INTERVAL）
+  - Fix 3: 空数据日志 debug→info + 去前导空格
+  - Fix 4: 进度日志改用 fetch_count（实际请求次数），跳过率高时也能正常触发
+  - Fix 5: write_gzip_cache 后补充写入确认日志（路径 + 股票数 + 记录数）
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -62,7 +68,7 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0c"
+_OUTPUT_VERSION = "1.0d"
 
 # 模块级固定时间戳
 _NOW = dt_cls.now()
@@ -86,7 +92,8 @@ _FINANCIAL_FIELD_MAP: dict[str, str] = {
 
 # 拉取速率控制
 _FETCH_DELAY = 0.3  # 每只股票拉取间隔（秒）
-_BATCH_LOG_INTERVAL = 50  # 每拉取50只股票输出一次进度日志
+_BATCH_LOG_INTERVAL = 50  # 每实际拉取50只股票输出一次进度日志
+_CHECKPOINT_INTERVAL = 100  # 每拉取100只股票做一次检查点写入
 
 # 年化系数：季度 EPS → 年化 EPS
 # Q1: ×4, Q2: ×2, Q3: ×4/3, Q4: ×1
@@ -209,7 +216,7 @@ def fetch_financial_data_for_stock(
         return None
 
     if df.empty:
-        _logger.debug(" %s 财务数据为空", symbol)
+        _logger.info("%s 财务数据为空", symbol)
         return []
 
     records: list[dict[str, Any]] = []
@@ -366,6 +373,7 @@ def main(logger_arg: logging.Logger | None = None) -> int:
     skipped = 0
     failed = 0
     empty = 0
+    fetch_count = 0  # 实际发起 API 请求的次数（不含跳过）
 
     for i, code in enumerate(all_codes):
         # 增量模式跳过已有数据；全量模式全部重新拉取
@@ -373,11 +381,14 @@ def main(logger_arg: logging.Logger | None = None) -> int:
             skipped += 1
             continue
 
-        if i > 0 and i % _BATCH_LOG_INTERVAL == 0:
+        fetch_count += 1
+
+        # Fix 4: 进度日志以实际请求次数触发，而非原始索引 i
+        if fetch_count > 1 and fetch_count % _BATCH_LOG_INTERVAL == 0:
             _logger.info(
-                "拉取进度: %d/%d (新增=%d, 失败=%d, 空数据=%d, 跳过=%d)",
-                i,
-                len(all_codes),
+                "拉取进度: 请求=%d/%d (新增=%d, 失败=%d, 空数据=%d, 跳过=%d)",
+                fetch_count,
+                len(all_codes) - skipped,
                 len(new_stock_data),
                 failed,
                 empty,
@@ -392,15 +403,40 @@ def main(logger_arg: logging.Logger | None = None) -> int:
         else:
             empty += 1
 
+        # Fix 2: 检查点写入 — 每 100 只股票写一次缓存，防崩溃丢失
+        if fetch_count > 0 and fetch_count % _CHECKPOINT_INTERVAL == 0 and new_stock_data:
+            # 合并当前新数据到 stock_data，写入检查点
+            stock_data.update(new_stock_data)
+            checkpoint_meta: dict[str, Any] = {
+                "version": _OUTPUT_VERSION,
+                "fetched_at": _NOW.strftime("%Y-%m-%d %H:%M:%S"),
+                "last_full_fetch_date": _NOW.strftime("%Y-%m-%d")
+                if need_full_fetch
+                else (last_full_date_str or _NOW.strftime("%Y-%m-%d")),
+                "stock_count": len(stock_data),
+                "record_count": sum(len(v) for v in stock_data.values()),
+                "fields": list(_FINANCIAL_FIELD_MAP.values()) + ["annualized_eps"],
+                "source": "akshare_stock_financial_abstract_ths",
+                "checkpoint": True,
+            }
+            checkpoint_data = {"meta": checkpoint_meta, "data": stock_data}
+            write_gzip_cache(CACHE_FILE, checkpoint_data, ensure_dir=True, logger=_logger)
+            _logger.info(
+                "检查点写入: %s (%d 只股票, %d 条记录)",
+                CACHE_FILE, len(stock_data), checkpoint_meta["record_count"],
+            )
+            new_stock_data.clear()  # 已写入的数据清空，避免重复合并
+
         # 速率控制
         time.sleep(_FETCH_DELAY)
 
     _logger.info(
-        "拉取完成: 新增 %d 只股票, 失败 %d, 空数据 %d, 跳过 %d",
+        "拉取完成: 新增 %d 只股票, 失败 %d, 空数据 %d, 跳过 %d (共请求 %d 次)",
         len(new_stock_data),
         failed,
         empty,
         skipped,
+        fetch_count,
     )
 
     # Step 5: 合并数据（dict 格式：以股票代码为 key，新数据覆盖旧数据）
@@ -423,6 +459,10 @@ def main(logger_arg: logging.Logger | None = None) -> int:
     # Step 7: 写入缓存
     output_data = {"meta": meta, "data": stock_data}
     write_gzip_cache(CACHE_FILE, output_data, ensure_dir=True, logger=_logger)
+    _logger.info(
+        "缓存写入完成: %s (%d 只股票, %d 条记录)",
+        CACHE_FILE, meta["stock_count"], meta["record_count"],
+    )
 
     # 显式释放大对象（遵循 R16）
     del new_stock_data, cache_data, stock_data
