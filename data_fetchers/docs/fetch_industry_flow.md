@@ -1,8 +1,8 @@
 # fetch_industry 流程文档
 
-> 版本: v3.14
+> 版本: v3.15
 > 创建时间: 2026-05-27 14:20 北京时间
-> 更新时间: 2026-06-15（v3.14 控制流契约修复与日志措辞精确化：refresh_industry_cache EM 空 dict 分支补 `industry_map = None` 修复跳过 SW 降级 bug、降级链耗尽 warning 措辞补"或 stocks 列表为空"）
+> 更新时间: 2026-06-15（v3.15 日志语义精度修复：load_local_industry_backup industry_map 为空时由 info "完成" 改为 warning "产出空结果，stocks 字段为空"，避免运维误判流程正常结束）
 
 ---
 

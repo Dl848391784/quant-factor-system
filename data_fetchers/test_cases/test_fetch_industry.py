@@ -399,6 +399,69 @@ class TestBackupFallback:
             f'v3.14 修复未生效：warning 措辞 {msg!r} 未覆盖"文件存在但 stocks 列表为空"场景，运维会误判为文件丢失'
         )
 
+    def test_load_local_backup_empty_stocks_warns_not_completes(self, temp_dir, caplog):
+        """TC004-7 (v3.15): stocks 列表为空时日志应为 warning "产出空结果"，而非 info "完成"
+
+        v3.15 修复：旧实现无论 industry_map 是否为空，都打 logger.info(
+        "本地备用分类完成: {n} 只股票")。当 stocks 字段为空列表（备份文件
+        内容损坏）时 industry_map 也为空 dict，但日志仍报"完成: 0 只股票"，
+        "完成"一词在数据为空时具有误导性——运维查日志会以为流程正常结束，
+        而实际是降级链最后一环也产出了空数据。
+
+        修复后：industry_map 为空时改为 warning + "产出空结果" 措辞 + 根因说明
+        （stocks 字段为空），与"本地备用文件不存在"warning 的严重级别一致。
+
+        本测试用 stocks=[] 的合法 JSON 触发空场景，断言：
+          (1) 不出现含 "完成" 的 info 日志（修复未生效会有该日志）
+          (2) 出现含 "产出空结果" 与 "stocks 字段为空" 的 warning
+        """
+        import logging
+
+        empty_stocks_path = temp_dir / "stock_list_empty.json"
+        with open(empty_stocks_path, "w", encoding="utf-8") as f:
+            json.dump({"stocks": []}, f)
+
+        with caplog.at_level(logging.INFO, logger="data_fetchers.fetch_industry"):
+            result = load_local_industry_backup(stock_list_path=empty_stocks_path, write_cache=False)
+
+        assert result == {}, "stocks 为空时应返回空 dict"
+
+        # (1) 不应出现误导性的"完成" info 日志
+        misleading_info = [
+            rec for rec in caplog.records if rec.levelno == logging.INFO and "本地备用分类完成" in rec.getMessage()
+        ]
+        assert not misleading_info, (
+            f"v3.15 修复未生效：stocks 为空时仍打了误导性 info '完成' 日志: {[r.getMessage() for r in misleading_info]}"
+        )
+
+        # (2) 应出现 warning "产出空结果" + 根因说明
+        warn_logs = [
+            rec for rec in caplog.records if rec.levelno == logging.WARNING and "产出空结果" in rec.getMessage()
+        ]
+        assert warn_logs, "应触发 warning 标识 stocks 为空场景"
+        msg = warn_logs[0].getMessage()
+        assert "stocks 字段为空" in msg, f"warning 应包含根因说明 'stocks 字段为空'，实际: {msg!r}"
+
+    def test_load_local_backup_non_empty_keeps_info_completes(self, mock_backup_file, caplog):
+        """TC004-8 (v3.15): industry_map 非空时仍保留 info "完成" 日志（v3.15 二分逻辑的另一半）
+
+        v3.15 修复用 `if industry_map` 二分：空走 warning，非空走 info。本测试
+        覆盖非空分支，确保修复未把所有日志一刀切改成 warning（mock_backup_file
+        含 4 只股票，industry_map 非空）。
+        """
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="data_fetchers.fetch_industry"):
+            result = load_local_industry_backup(stock_list_path=mock_backup_file, write_cache=False)
+
+        assert len(result) == 4, "mock_backup_file 含 4 只股票"
+
+        info_logs = [
+            rec for rec in caplog.records if rec.levelno == logging.INFO and "本地备用分类完成" in rec.getMessage()
+        ]
+        assert info_logs, "非空场景应保留 info '完成' 日志"
+        assert "4 只股票" in info_logs[0].getMessage()
+
 
 class TestModuleCacheThreadSafety:
     """TC005: 线程安全测试"""
@@ -474,7 +537,7 @@ class TestConstraintCompliance:
 
     def test_version_constant_exists(self):
         """TC007-1: 版本号提取为常量（MODULE.md 约束 #16）"""
-        assert _OUTPUT_VERSION == "3.14"
+        assert _OUTPUT_VERSION == "3.15"
 
     def test_public_module_import(self):
         """TC007-2: 公共模块导入（MODULE.md 约束 #4）"""
