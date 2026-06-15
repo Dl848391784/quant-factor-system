@@ -41,10 +41,10 @@ import pandas as pd
 
 # 本地模块导入
 try:
-    from data_fetchers.data_loader import RealDataLoader
+    from data_fetchers.data_loader import MIN_VALID_ROWS, RealDataLoader
     from data_fetchers.factor_calculator import calculate_forward_return, calculate_rsi, calculate_volume_ratio
 except ImportError:
-    from data_loader import RealDataLoader
+    from data_loader import MIN_VALID_ROWS, RealDataLoader
     from factor_calculator import calculate_forward_return, calculate_rsi, calculate_volume_ratio
 
 # 公共模块导入（条件导入：脚本直接运行时可能路径未配置）
@@ -137,17 +137,16 @@ def fetch_batch_stocks(
         sub_stocks = stock_batch[sub_start:sub_end]
 
         # data_loader._fetch_stock_batch_parallel 期望 [{'code': str, 'name': str}, ...] 格式
-        # 需要将字符串转换为字典格式
-        thread_a_stocks = [{"code": s, "name": ""} for s in sub_stocks[: len(sub_stocks) // 2]]
-        thread_b_stocks = [{"code": s, "name": ""} for s in sub_stocks[len(sub_stocks) // 2 :]]
+        # 内部已封装二等分线程分配，调用方只需传入完整列表
+        sub_stocks_dicts = [{"code": s, "name": ""} for s in sub_stocks]
 
         logger.info("  [子批次 %s/%s] 拉取 %s-%s...", sub_idx + 1, num_sub_batches, sub_start + 1, sub_end)
         logger.info("    当前内存: %s", get_memory_info_str())
 
-        sub_results = loader._fetch_stock_batch_parallel(thread_a_stocks, thread_b_stocks, FETCH_DAYS, None)
+        sub_results = loader._fetch_stock_batch_parallel(sub_stocks_dicts, FETCH_DAYS, None)
 
         for code, df in sub_results:
-            if df is not None and len(df) >= 15:
+            if df is not None and len(df) >= MIN_VALID_ROWS:
                 all_data_dict[code] = df
                 success_count += 1
             else:

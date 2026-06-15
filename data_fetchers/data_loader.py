@@ -27,6 +27,14 @@
   - 删除 _fetch_stock_batch 中未使用的 enumerate 变量 i
   - 删除未使用的 datetime 导入
   - 删除未使用的 typing.Any 导入
+- v2.3 (2026-06-15): 问题修复
+  - 提取魔法数字为模块级常量：MIN_VALID_ROWS=15、KLINE_SCALE_DAILY=240
+  - _fetch_single_stock_with_retry 数据不足分支补 debug 日志（含 code/attempt/rows）
+  - _fetch_single_stock_with_retry 兜底 except 补 warning 日志（含 code/attempt/异常类型）
+  - _fetch_stock_batch_parallel 改为接收单一完整列表，内部二等分（封装线程分配）
+  - get_stock_history 入口校验 stock_code/days 参数
+  - _fetch_stock_batch_parallel ThreadError 改用 logger.exception 保留完整堆栈
+  - _get_local_stock_history 成功路径补 debug 日志（含 file_path/rows）
 """
 
 # 标准库导入
@@ -61,6 +69,13 @@ KLINE_URL = "https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getK
 
 # 本地数据路径（兜底）
 LOCAL_DATA_DIR = os.path.expanduser("~/projects/factor_ic_analyzer/data")
+
+# 新浪 K 线接口 scale 参数：240 表示日线（60=60分钟，30=30分钟，15=15分钟，5=5分钟）
+KLINE_SCALE_DAILY = 240
+
+# 单只股票 K 线被视为"有效"的最小行数；少于此值视为数据不足，触发重试或丢弃
+# 同时被 _get_api_stock_history 的有效行数校验和 _fetch_single_stock_with_retry 的成功判定引用
+MIN_VALID_ROWS = 15
 
 # ============================================================================
 # 异常定义
@@ -156,13 +171,27 @@ class RealDataLoader:
         """获取单只股票的历史行情
 
         Args:
-            stock_code: 股票代码（如 '600000'）
-            days: 需要的数据天数
+            stock_code: 股票代码（如 '600000'），必须为非空字符串
+            days: 需要的数据天数，必须为正整数
 
         Returns:
             pd.DataFrame | None: K线数据，包含 date/open/high/low/close/volume/asset 列
                                  获取失败返回 None
+
+        Raises:
+            TypeError: stock_code 不是 str，或 days 不是 int
+            ValueError: stock_code 为空字符串，或 days 不是正整数
         """
+        # 入参基本校验：避免 None / 负数 / 错类型在深层抛出难以定位的异常
+        if not isinstance(stock_code, str):
+            raise TypeError(f"stock_code 必须是 str，实际类型: {type(stock_code).__name__}")
+        if not stock_code:
+            raise ValueError("stock_code 不能为空字符串")
+        if not isinstance(days, int) or isinstance(days, bool):
+            raise TypeError(f"days 必须是 int，实际类型: {type(days).__name__}")
+        if days <= 0:
+            raise ValueError(f"days 必须为正整数，实际: {days}")
+
         if self.use_local:
             return self._get_local_stock_history(stock_code, days)
         return self._get_api_stock_history(stock_code, days)
@@ -191,6 +220,14 @@ class RealDataLoader:
             required_cols = ["date", "open", "high", "low", "close", "volume", "asset"]
             df = df[required_cols]
 
+            # 与 API 路径日志密度对齐：成功读取也记录文件路径与实际返回行数
+            # tail(days) 在 len(df) < days 时返回全部，此处用 min 等价地推算最终行数
+            self._logger.debug(
+                "本地数据读取成功: stock_code=%s, file=%s, rows=%s",
+                stock_code,
+                data_file,
+                min(len(df), days),
+            )
             return df.tail(days)
         except Exception as e:
             # CSV文件损坏、缺少必需列或列类型异常
@@ -229,7 +266,7 @@ class RealDataLoader:
 
             params = {
                 "symbol": symbol,
-                "scale": 240,  # 日线
+                "scale": KLINE_SCALE_DAILY,  # 日线
                 "datalen": days + 50,
             }
 
@@ -264,8 +301,13 @@ class RealDataLoader:
                 except (ValueError, TypeError):
                     continue
 
-            if len(rows) < 15:
-                self._logger.debug("API返回有效数据不足: stock_code=%s, rows=%s", stock_code, len(rows))
+            if len(rows) < MIN_VALID_ROWS:
+                self._logger.debug(
+                    "API返回有效数据不足: stock_code=%s, rows=%s, min_required=%s",
+                    stock_code,
+                    len(rows),
+                    MIN_VALID_ROWS,
+                )
                 return None
 
             df = pd.DataFrame(rows)
@@ -320,18 +362,36 @@ class RealDataLoader:
         for attempt in range(self.retries):
             try:
                 df = self.get_stock_history(code, days=days)
-                if df is not None and len(df) >= 15:
+                if df is not None and len(df) >= MIN_VALID_ROWS:
                     return (code, df)
                 else:
-                    # 数据不足，重试
+                    # 数据不足（df 为 None 或行数 < MIN_VALID_ROWS），记录调试日志后重试
+                    # 让"数据不足重试"和"异常重试"在日志中可区分，避免静默重试无法定位根因
+                    self._logger.debug(
+                        "数据不足，准备重试: code=%s, attempt=%s/%s, rows=%s, min_required=%s",
+                        code,
+                        attempt + 1,
+                        self.retries,
+                        0 if df is None else len(df),
+                        MIN_VALID_ROWS,
+                    )
                     if attempt < self.retries - 1:
                         time.sleep(0.3 * (attempt + 1))
             except PermanentFailureError as e:
                 # 永久性失败，直接返回，跳过重试
                 self._logger.debug("跳过重试（永久性失败）: %s, reason=%s", code, e)
                 return (code, None)
-            except Exception:
-                # 其他临时异常，重试
+            except Exception as e:
+                # 其他临时异常，记录后重试
+                # v2.1 修复初衷：异常不能静默吞掉；此处补 warning 日志，含 code/attempt/异常类型与内容
+                self._logger.warning(
+                    "[TransientError] 获取股票数据时发生临时异常: code=%s, attempt=%s/%s, error_type=%s, error=%s",
+                    code,
+                    attempt + 1,
+                    self.retries,
+                    type(e).__name__,
+                    e,
+                )
                 if attempt < self.retries - 1:
                     time.sleep(0.5 * (attempt + 1))
 
@@ -361,16 +421,15 @@ class RealDataLoader:
 
     def _fetch_stock_batch_parallel(
         self,
-        stocks_for_thread_a: list[dict],
-        stocks_for_thread_b: list[dict],
+        stocks: list[dict],
         days: int,
         progress_callback: Callable | None = None,
     ) -> list[tuple[str, pd.DataFrame | None]]:
         """使用2个线程并行获取股票数据
 
         Args:
-            stocks_for_thread_a: 线程A处理的股票列表 [{'code': str, 'name': str}, ...]
-            stocks_for_thread_b: 线程B处理的股票列表
+            stocks: 待获取的股票列表 [{'code': str, 'name': str}, ...]，
+                    内部按二等分自动分配给 2 个工作线程，调用方无需关心线程内部分配
             days: 需要的数据天数
             progress_callback: 进度回调函数
 
@@ -378,11 +437,20 @@ class RealDataLoader:
             List[Tuple[str, Optional[pd.DataFrame]]]: 所有股票的数据结果
 
         Note:
-            - 线程A处理前半部分，线程B处理后半部分
-            - 每线程处理数量由调用方控制
+            - 内部将 stocks 二等分：前半部分交给 thread_a，后半部分交给 thread_b
             - 并发数固定为 2，避免触发 API 频率限制
+            - 长度为奇数时，thread_b 多 1 只
+            - 空列表直接返回 []，不创建线程池
         """
-        all_results = []
+        if not stocks:
+            return []
+
+        # 内部二等分：将线程分配职责封装在方法内，调用方不应关心线程内部数据分配
+        mid = len(stocks) // 2
+        stocks_for_thread_a = stocks[:mid]
+        stocks_for_thread_b = stocks[mid:]
+
+        all_results: list[tuple[str, pd.DataFrame | None]] = []
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {
@@ -396,8 +464,10 @@ class RealDataLoader:
                 try:
                     results = future.result()
                     all_results.extend(results)
-                except Exception as e:
-                    self._logger.error("[ThreadError] %s 执行失败: %s", thread_name, e)
+                except Exception:
+                    # 线程崩溃时必须保留完整堆栈，以便追溯根因
+                    # 用 logger.exception 自动附带 traceback；不再用 %s 拼接异常对象丢失上下文
+                    self._logger.exception("[ThreadError] %s 执行失败", thread_name)
 
         return all_results
 
@@ -406,4 +476,10 @@ class RealDataLoader:
 # 导出
 # ============================================================================
 
-__all__ = ["RealDataLoader", "get_module_logger", "PermanentFailureError"]
+__all__ = [
+    "RealDataLoader",
+    "get_module_logger",
+    "PermanentFailureError",
+    "MIN_VALID_ROWS",
+    "KLINE_SCALE_DAILY",
+]
