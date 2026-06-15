@@ -546,6 +546,75 @@ logger.info("启动 XXX 因子IC计算: ...")  # 与 runner 横幅重复
 
 ---
 
+## M3.3 factor_cols 声明式注册 + 运行时列校验
+
+**What**: 34 个 IC 入口脚本必须通过 `FactorSpec` 声明式注册因子元数据（名称、目标列、所需列、计算函数、参数提取函数），并通过 `run_factor_ic(spec=SPEC, ...)` 统一入口调用，禁止 `factor_cols=` 字符串字面量散落在调用处。
+
+**Why**:
+- **排序漂移**: 38 处 `factor_cols` 字面量中存在 `[open,close,asset,date]` vs `[date,asset,close]` 等顺序不一致，依赖内部拼接逻辑隐式去重
+- **静默失败**: 上游字段名变更时，硬编码列名无法被编译器或运行时检测
+- **两套入口**: `run_simple_factor_ic` / `run_complex_factor_ic` 参数不对称，增加维护负担
+
+**How**:
+1. 每个入口脚本在模块级声明 `SPEC = register_factor(FactorSpec(...))`：
+   - `factor_name`: 因子英文名（小写下划线）
+   - `factor_col`: IC 目标列名
+   - `required_columns`: 使用标准常量组合（`JOIN_KEYS` / `OHLC` / `OHLCV` / `PRICE_VOLUME`）+ 因子特有列
+   - `calculation`: 因子计算函数（无自定义计算时省略）
+   - `calc_params_fn`: 从 `argparse.Namespace` 提取计算参数的 `Callable`（无参数时省略）
+   - `extra_log_params_fn`: 从 `argparse.Namespace` 提取横幅扩展参数的 `Callable`（无扩展时省略）
+2. `main()` 内调用 `run_factor_ic(spec=SPEC, args=args, min_stocks=..., force_full=..., _logger=...)`
+3. `register_factor()` 执行 L2 注册期校验（非空 / 无重复 / 全小写字母数字下划线 / factor_col ∈ required_columns）
+4. `validate_required_columns()` 执行 L3 运行时校验（列缺失时抛出 `DataSchemaError`）
+
+**Don't**:
+- ❌ 在 `run_factor_ic()` 调用处写 `factor_cols=["date","asset","xxx"]` 字面量
+- ❌ 继续使用 `run_simple_factor_ic` / `run_complex_factor_ic`（已由 `run_factor_ic` 统一）
+- ❌ 在 SPEC 声明中引用尚未定义的本地函数（SPEC 应放在 `def main()` 之前、所有 `def calculate_*` 之后）
+
+**When**: 新增 IC 入口脚本时必须声明 SPEC；已有脚本迁移时按 R3.4 批次执行。
+
+**Examples**:
+```python
+# ✓ 正确: simple 因子（无自定义计算）
+from factor_ic.common.data_columns import JOIN_KEYS
+from factor_ic.common.factor_spec import FactorSpec, register_factor
+
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="rsi",
+        factor_col="rsi_6",
+        required_columns=JOIN_KEYS + ("rsi_6",),
+    )
+)
+
+# ✓ 正确: complex 因子（含计算函数 + 参数提取）
+SPEC = register_factor(
+    FactorSpec(
+        factor_name="turnover_surge",
+        factor_col="turnover_surge",
+        required_columns=JOIN_KEYS + ("close", "turnover_rate", "turnover_surge"),
+        calculation=calculate_turnover_surge,
+        calc_params_fn=lambda a: {"surge_window": a.surge_window},
+        extra_log_params_fn=lambda a: {"surge_window": a.surge_window},
+    )
+)
+
+# ✗ 错误: 字面量列名
+run_factor_ic(
+    spec=SPEC,
+    factor_cols=["date", "asset", "amplitude"],  # 禁止
+)
+```
+
+**Verify**:
+- `grep -rn 'factor_cols=\[' factor_ic/ic_*.py | grep -v '#'` 必须为 `0`（代码行无字面量）
+- `grep -rl 'SPEC = register_factor' factor_ic/ic_*.py | wc -l` 必须为 `34`（全部入口脚本已注册）
+- `grep -rn 'run_simple_factor_ic\|run_complex_factor_ic' factor_ic/ic_*.py | grep -v '^#' | grep -v 'docstring\|FactorCalcError'` 必须为 `0`（旧入口已替换）
+- `pytest factor_ic/test_cases/test_factor_spec.py factor_ic/test_cases/test_data_columns.py` 全部通过
+
+---
+
 ## M4. 跨目录公共模块禁止调用
 
 **What**:公共模块仅在本目录内复用,禁止跨目录调用 (`factor_ic/` 脚本不可 `from backtest.common import`)。
@@ -2188,6 +2257,7 @@ def calculate_all_stocks_vectorized(factor_df):  # 实际使用
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v4.4 | 2026-06-15 | 新增 M3.3 factor_cols 声明式注册 + 运行时列校验(FactorSpec + DataSchemaError + run_factor_ic 统一入口,34 脚本迁移完成) |
 | v4.3 | 2026-06-15 | 新增 M3.2 入口启动日志收口至公共模块横幅(34 脚本统一,配套 `factor_ic_runner.extra_log_params` 参数) |
 | v4.2 | 2026-06-15 | 新增 M3.1 主职责日志输出公共函数:logger 强制必传(M3 特例细化,配套 `factor_summary_logger.py`) |
 | v4.1 | 2026-06-12 | 新增行业方向性因子IC脚本注册表(industry_momentum_5d / industry_turnover_trend / industry_amplitude_trend);脚本注册表章节 | [experimental] |

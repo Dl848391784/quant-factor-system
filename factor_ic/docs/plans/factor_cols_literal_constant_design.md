@@ -1,6 +1,6 @@
 # factor_cols 字面量常量化 - 设计文档 v1.0
 
-**状态**: draft
+**状态**: implemented
 **作者**: 云瑶
 **创建**: 2026-06-15
 **前置**: 轮 1(启动日志去重)+ 轮 2(告警文案统一)已完成
@@ -374,3 +374,24 @@ def run_factor_ic(
 | 让 `_OUTPUT_COLS` 变公有 | 跨目录(M4),且 `_` 前缀是 factor_generator 的内部实现;columns.json 是更好的公开接口 |
 | 自动生成 FactorSpec | 34 脚本参数各异(计算函数/CLI 参数),手写声明比代码生成更可维护 |
 | 修改 backtest/comprehensive_factor 的 data_loader | 不在本 issue 范围;它们的 `load_factor_return_data` 已有列校验 |
+
+---
+
+## 实施记录
+
+| 阶段 | Commit | 日期 | 内容 |
+|------|--------|------|------|
+| R3.1 | `9b5f942` | 2026-06-15 | FactorSpec + DataSchemaError + data_columns + 单测 28 条 |
+| R3.2 | `3a34dfe` | 2026-06-15 | factor_generator 输出 columns.json + load_available_columns + 单测 3 条 |
+| R3.3 | `eec6cfc` | 2026-06-15 | run_factor_ic(spec=SPEC) 新入口 + 旧接口代理 |
+| R3.4-1 | `435cca7` | 2026-06-15 | 试点 4 脚本(amplitude_delta/rsi/kdj_j/bollinger_pb) |
+| R3.4-2 | `1ae9b3d` | 2026-06-15 | 批量 28 脚本(2 simple + 26 complex 无 _fn) |
+| R3.4-3 | `db278ac` | 2026-06-15 | 最后 2 含 _fn 脚本(turnover_surge/capital_flow_ratio_trend) |
+| R3.5 | (pending) | 2026-06-15 | MODULE.md M3.3 规范 + design.md 闭环 + 全量验证 |
+
+**验证数据**:
+- `factor_cols=[` 代码行: 0 (全部消除)
+- `SPEC = register_factor` 文件: 34/34
+- `run_simple_factor_ic` / `run_complex_factor_ic` 代码调用: 0
+- pytest: 266 passed, 66 skipped (无回归)
+- ruff check: All passed
