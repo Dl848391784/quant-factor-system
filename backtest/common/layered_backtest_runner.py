@@ -209,8 +209,8 @@ class LayerConfigBase:
             self.long_layers, self.short_layers = self._derive_long_short()
 
         # 8. 仅打印派生结果（完整配置摘要由 run_layered_backtest 打印一次）
-        logger.info(f"IC文件: {self.ic_source_resolved}")
-        logger.info(f"因子方向: {self.factor_direction} (来源: IC分析结果, ic_mean={ic_meta['ic_mean']:.4f})")
+        logger.info("IC文件: %s", self.ic_source_resolved)
+        logger.info("因子方向: %s (来源: IC分析结果, ic_mean=%.4f)", self.factor_direction, ic_meta["ic_mean"])
 
     def _load_ic_meta(self) -> dict[str, Any]:
         """加载 IC 分析结果（基类通用方法）

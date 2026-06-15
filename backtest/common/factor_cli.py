@@ -175,7 +175,7 @@ def factor_cli_main(
 
     # 启动时回放 CLI 参数（事后可复现具体 data_source/output_dir 取值）
     if not args.quiet:
-        logger.info(f"运行参数: {vars(args)}")
+        logger.info("运行参数: %s", vars(args))
 
     # 记录开始时间（计算回测耗时）
     start_time = perf_counter()
@@ -237,8 +237,8 @@ def factor_cli_main(
 
     # 结果摘要
     logger.info("回测结果摘要")
-    logger.info(f"因子名称: {factor_name}")  # 直接用变量，不从 meta 反查
-    logger.info(f"回测周期: {n_days_total} 天")
+    logger.info("因子名称: %s", factor_name)  # 直接用变量，不从 meta 反查
+    logger.info("回测周期: %s 天", n_days_total)
 
     # 各分层收益（按层序排序输出，避免依赖字典插入顺序）
     layer_stats = result.get("layer_stats") or {}
@@ -250,7 +250,7 @@ def factor_cli_main(
         layer_id = layer_key.replace("layer_", "")
         display_name = config.layer_names_dict.get(layer_id, f"Layer{layer_id}")
         cumulative_return = stats.get("cumulative_return") or 0.0
-        logger.info(f"Layer {layer_id} ({display_name}) 累计收益: {cumulative_return:.4f}")
+        logger.info("Layer %s (%s) 累计收益: %.4f", layer_id, display_name, cumulative_return)
 
     # 多空组合收益（统一处理：键缺失/值为 None 时打 warning）
     long_short = result.get("long_short") or {}
@@ -263,7 +263,7 @@ def factor_cli_main(
             if val is None:
                 logger.warning("多空组合 long_short_return_daily 为 None")
             else:
-                logger.info(f"多空日均收益: {val * 100:.4f}%")
+                logger.info("多空日均收益: %.4f%%", val * 100)
 
         # 多空夏普比率（规范定义字段）
         if "long_short_sharpe" not in long_short:
@@ -273,7 +273,7 @@ def factor_cli_main(
             if val is None:
                 logger.warning("多空组合 long_short_sharpe 为 None")
             else:
-                logger.info(f"多空组合夏普比率: {val:.2f}")
+                logger.info("多空组合夏普比率: %.2f", val)
 
         # 数据覆盖率（规范定义字段）
         if "coverage" not in long_short:
@@ -283,11 +283,11 @@ def factor_cli_main(
             if val is None:
                 logger.warning("多空组合 coverage 为 None")
             else:
-                logger.info(f"数据覆盖率: {val * 100:.1f}%")
+                logger.info("数据覆盖率: %.1f%%", val * 100)
     else:
         logger.warning("未生成多空组合指标")
 
     # 回测耗时日志（分层回测属计算密集任务）
     elapsed = perf_counter() - start_time
-    logger.info(f"回测耗时: {elapsed:.1f}s")
-    logger.info(f"{factor_name} 因子分层回测完成")
+    logger.info("回测耗时: %.1fs", elapsed)
+    logger.info("%s 因子分层回测完成", factor_name)

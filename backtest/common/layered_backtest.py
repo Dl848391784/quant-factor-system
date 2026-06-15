@@ -209,7 +209,7 @@ class LayeredBacktestEngine:
                         f"thresholds 必须严格递增，第{i}个阈值 {thresholds[i]} >= 第{i + 1}个阈值 {thresholds[i + 1]}"
                     )
 
-        logger.info(f"开始分层回测: layer_method={layer_method}, factor_direction={factor_direction}")
+        logger.info("开始分层回测: layer_method=%s, factor_direction=%s", layer_method, factor_direction)
 
         # ========== 确定分层数量（先修正 n_layers）==========
         # 必须在设置默认多空层之前，避免层编号越界
@@ -373,9 +373,11 @@ class LayeredBacktestEngine:
                 n_below = below_min_mask.sum()
                 pct_below = n_below / len(factor_values) * 100
                 logger.warning(
-                    f"fixed_threshold 边界警告: {n_below} 个股票 ({pct_below:.2f}%) "
-                    f"因子值低于最小阈值 {thresholds[0]}，已归入 Layer1。"
-                    f"建议：检查 thresholds 参数是否覆盖数据范围，或使用 percentile 分层。"
+                    "fixed_threshold 边界警告: %s 个股票 (%.2f%%) 因子值低于最小阈值 %s，已归入 Layer1。"
+                    "建议：检查 thresholds 参数是否覆盖数据范围，或使用 percentile 分层。",
+                    n_below,
+                    pct_below,
+                    thresholds[0],
                 )
                 layer_assignment[below_min_mask] = 1
                 assigned[below_min_mask] = True
@@ -386,9 +388,12 @@ class LayeredBacktestEngine:
                 n_above = above_max_mask.sum()
                 pct_above = n_above / len(factor_values) * 100
                 logger.warning(
-                    f"fixed_threshold 边界警告: {n_above} 个股票 ({pct_above:.2f}%) "
-                    f"因子值超过最大阈值 {thresholds[-1]}，已归入 Layer{n_layers}。"
-                    f"建议：检查 thresholds 参数是否覆盖数据范围，或使用 percentile 分层。"
+                    "fixed_threshold 边界警告: %s 个股票 (%.2f%%) 因子值超过最大阈值 %s，已归入 Layer%s。"
+                    "建议：检查 thresholds 参数是否覆盖数据范围，或使用 percentile 分层。",
+                    n_above,
+                    pct_above,
+                    thresholds[-1],
+                    n_layers,
                 )
                 layer_assignment[above_max_mask] = n_layers
                 assigned[above_max_mask] = True
@@ -413,8 +418,8 @@ class LayeredBacktestEngine:
             unassigned_mask = ~assigned
             if unassigned_mask.any():
                 logger.error(
-                    f"fixed_threshold 逻辑错误: {unassigned_mask.sum()} 个股票未归层，"
-                    f"请检查 thresholds 参数是否覆盖数据范围"
+                    "fixed_threshold 逻辑错误: %s 个股票未归层，请检查 thresholds 参数是否覆盖数据范围",
+                    unassigned_mask.sum(),
                 )
                 raise ValueError("fixed_threshold 分层逻辑错误：存在未归层的股票")
 

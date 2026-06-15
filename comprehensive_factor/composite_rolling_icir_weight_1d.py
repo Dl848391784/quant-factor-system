@@ -80,11 +80,13 @@ class RollingICIRWeightLayerConfig(CompositeLayerConfig):
         # 滚动参数校验
         if self.min_periods > self.rolling_window:
             logger.error(
-                f"滚动窗口参数校验失败: min_periods ({self.min_periods}) > rolling_window ({self.rolling_window})"
+                "滚动窗口参数校验失败: min_periods (%s) > rolling_window (%s)",
+                self.min_periods,
+                self.rolling_window,
             )
             raise ValueError(f"min_periods ({self.min_periods}) 必须小于等于 rolling_window ({self.rolling_window})")
         if self.min_periods < 1:
-            logger.error(f"滚动窗口参数校验失败: min_periods ({self.min_periods}) < 1")
+            logger.error("滚动窗口参数校验失败: min_periods (%s) < 1", self.min_periods)
             raise ValueError("min_periods 必须大于等于 1")
 
 
@@ -108,13 +110,13 @@ if __name__ == "__main__":
     logger.info("权重方法: rolling_icir_weight")
     logger.info("因子列表: 由 auto_select 筛选决定")
     logger.info("收益周期: 1d")
-    logger.info(f"数据源: {DEFAULT_DATA_SOURCE}")
-    logger.info(f"滚动窗口: {RollingICIRWeightLayerConfig.rolling_window}")
-    logger.info(f"最小周期: {RollingICIRWeightLayerConfig.min_periods}")
+    logger.info("数据源: %s", DEFAULT_DATA_SOURCE)
+    logger.info("滚动窗口: %s", RollingICIRWeightLayerConfig.rolling_window)
+    logger.info("最小周期: %s", RollingICIRWeightLayerConfig.min_periods)
 
     # 运行入口
     try:
         main()
     except Exception as e:
-        logger.error(f"滚动ICIR加权综合因子回测执行失败 [{type(e).__name__}]: {e}")
+        logger.error("滚动ICIR加权综合因子回测执行失败 [%s]: %s", type(e).__name__, e)
         sys.exit(1)

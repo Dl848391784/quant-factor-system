@@ -59,8 +59,6 @@ lines-after-imports = 2
 [tool.ruff.lint.per-file-ignores]
 "test_*.py" = ["F401"]
 # G 规则当前仅 factor_ic/ 已合规；其他模块逐步迁移中（详见 PROJECT.md 硬规则 #13）
-"backtest/**/*.py" = ["G004", "G003", "G201"]
-"comprehensive_factor/**/*.py" = ["G004", "G003", "G201"]
 "data_fetchers/**/*.py" = ["G004", "G003", "G201"]
 "summary/**/*.py" = ["G004", "G003", "G201"]
 "temporary/**/*.py" = ["G004", "G003", "G201"]

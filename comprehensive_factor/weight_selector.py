@@ -276,22 +276,22 @@ class ResultLoader:
             filepath = result_dir / f"composite_{method}_{return_period}.json"
             if not filepath.exists():
                 # 循环内 warning（与 corrupted_files 处理方式一致）
-                self._logger.warning(f"文件不存在: {filepath}")
+                self._logger.warning("文件不存在: %s", filepath)
                 continue
 
             try:
                 with open(filepath, encoding="utf-8") as f:
                     results[method] = json.load(f)
-                self._logger.debug(f"成功加载: {filepath}")
+                self._logger.debug("成功加载: %s", filepath)
             except json.JSONDecodeError as e:
                 corrupted_files.append(str(filepath))
                 if strict:
                     raise
-                self._logger.error(f"JSON解析失败: {filepath}, 位置 {e.pos}")
+                self._logger.error("JSON解析失败: %s, 位置 %s", filepath, e.pos)
                 continue
 
         if corrupted_files:
-            self._logger.warning(f"检测到 {len(corrupted_files)} 个 JSON 损坏文件: {corrupted_files}")
+            self._logger.warning("检测到 %s 个 JSON 损坏文件: %s", len(corrupted_files), corrupted_files)
 
         return results
 
@@ -405,14 +405,14 @@ class MetricExtractor:
                     "max_drawdown": max_drawdown,
                 }
             except (ValueError, KeyError) as e:
-                self._logger.warning(f"[{method}] 提取失败，跳过: {e}")
+                self._logger.warning("[%s] 提取失败，跳过: %s", method, e)
                 failed_methods.append(method)
 
         if not metrics_data:
             raise ValueError(f"所有方法提取失败: {failed_methods}")
 
         if failed_methods:
-            self._logger.warning(f"部分方法提取失败: {failed_methods}，剩余 {len(metrics_data)} 个有效方法")
+            self._logger.warning("部分方法提取失败: %s，剩余 %s 个有效方法", failed_methods, len(metrics_data))
 
         return metrics_data
 
@@ -521,7 +521,10 @@ class Scorer:
             if abs(best_score - second_score) < EPSILON:
                 tied_methods = [m for m, s in ranked if abs(s - best_score) < EPSILON]
                 self._logger.warning(
-                    f"检测到并列第一: {tied_methods} (得分均为 {best_score:.4f})，当前选择依赖输入顺序: {best_method}"
+                    "检测到并列第一: %s (得分均为 %.4f)，当前选择依赖输入顺序: %s",
+                    tied_methods,
+                    best_score,
+                    best_method,
                 )
 
         return best_method, best_score, ranked
@@ -648,7 +651,7 @@ class ReportFormatter:
             row += f" {score:>10.4f}"
             self._logger.info(row)
 
-        self._logger.info(f"最优权重方法: {best_method} | 综合得分: {best_score:.4f}")
+        self._logger.info("最优权重方法: %s | 综合得分: %.4f", best_method, best_score)
 
 
 # =============================================================================
@@ -698,7 +701,7 @@ def main():
         result_dir = Path(args.result_dir) if args.result_dir else script_dir / DEFAULT_CONFIG["result_dir"]
         output_path = Path(args.output) if args.output else result_dir / "weight_selection_result.json"
 
-        _logger.info(f"result_dir={result_dir} | output={output_path}")
+        _logger.info("result_dir=%s | output=%s", result_dir, output_path)
 
         # 创建不可变配置值对象（问题 3 修复：消除配置漂移风险）
         config = WeightSelectorConfig.from_dict(
@@ -724,18 +727,23 @@ def main():
             _logger.error("未找到任何结果文件")
             sys.exit(1)
 
-        _logger.info(f"加载 {len(results)} 个权重方式")
+        _logger.info("加载 %s 个权重方式", len(results))
 
         # 校验完整性
         expected_methods = DEFAULT_CONFIG["weight_methods"]
         if len(results) < len(expected_methods):
             missing_methods = [m for m in expected_methods if m not in results]
-            _logger.warning(f"部分权重方式结果缺失 ({len(results)}/{len(expected_methods)}): {missing_methods}")
+            _logger.warning(
+                "部分权重方式结果缺失 (%s/%s): %s",
+                len(results),
+                len(expected_methods),
+                missing_methods,
+            )
 
         # 2. 提取指标
         _logger.debug("提取评价指标...")
         metrics_data = extractor.extract(results)
-        _logger.debug(f"提取 {len(extractor.metric_configs)} 个指标")
+        _logger.debug("提取 %s 个指标", len(extractor.metric_configs))
 
         # 单方法场景提示（流程仍正常走 normalize/score/select）
         if len(metrics_data) == 1:
@@ -770,10 +778,10 @@ def main():
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(output, f, ensure_ascii=False, indent=2)
 
-        _logger.info(f"结果已保存: {output_path}")
+        _logger.info("结果已保存: %s", output_path)
 
     except Exception as e:
-        _logger.exception(f"权重选择器执行失败: {e}")
+        _logger.exception("权重选择器执行失败: %s", e)
         sys.exit(1)
 
 

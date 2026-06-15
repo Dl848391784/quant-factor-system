@@ -996,8 +996,8 @@ def create_cli_entrypoint(config_class: type[StockSelectorConfig]) -> Callable[[
             result, output_file = select_stocks(config, logger)
             logger.info("选股成功！输出文件: %s", output_file)
             return 0
-        except Exception as e:
-            logger.error("选股失败: %s", e, exc_info=True)
+        except Exception:
+            logger.exception("选股失败")
             return 1
 
     return main

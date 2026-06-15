@@ -59,18 +59,18 @@ logger = get_logger(__name__)
 def convert_to_native_types(obj: Any) -> Any:
     """
     递归转换 numpy/pandas 类型为 Python 厬生类型
-    
+
     解决 JSON 序列化时 numpy 类型无法直接序列化的问题。
-    
+
     Args:
         obj: 要转换的对象（可以是 dict, list, numpy 类型等）
-        
+
     Returns:
         转换后的 Python 原生类型对象
-        
+
     示例:
         >>> import numpy as np
-        >>> convert_to_native_types({'value': np.float64(1.5)})
+        >>> convert_to_native_types({"value": np.float64(1.5)})
         {'value': 1.5}
         >>> convert_to_native_types([np.int64(10), np.float32(2.5)])
         [10, 2.5]
@@ -137,7 +137,7 @@ def convert_to_native_types(obj: Any) -> Any:
 
     elif isinstance(obj, pd.DataFrame):
         # DataFrame 转为 list of dicts（每行一个 dict）
-        return convert_to_native_types(obj.to_dict('records'))
+        return convert_to_native_types(obj.to_dict("records"))
 
     elif isinstance(obj, pd.Timestamp):
         # pandas 时间戳转字符串（pd.NaT 已在前面单例检查处理）
@@ -153,28 +153,27 @@ def convert_to_native_types(obj: Any) -> Any:
         return obj
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # 简单测试
     # 测试字典
     test_dict = {
-        'int': np.int64(10),
-        'float': np.float64(1.5),
-        'nan': np.float64(np.nan),
-        'array': np.array([1, 2, 3]),
-        'nested': {
-            'value': np.float32(2.5)
-        }
+        "int": np.int64(10),
+        "float": np.float64(1.5),
+        "nan": np.float64(np.nan),
+        "array": np.array([1, 2, 3]),
+        "nested": {"value": np.float32(2.5)},
     }
 
     result = convert_to_native_types(test_dict)
     logger.info("转换结果:")
-    logger.info(f"  int: {result['int']} (type: {type(result['int']).__name__})")
-    logger.info(f"  float: {result['float']} (type: {type(result['float']).__name__})")
-    logger.info(f"  nan: {result['nan']} (应为 None)")
-    logger.info(f"  array: {result['array']}")
-    logger.info(f"  nested.value: {result['nested']['value']}")
+    logger.info("  int: %s (type: %s)", result["int"], type(result["int"]).__name__)
+    logger.info("  float: %s (type: %s)", result["float"], type(result["float"]).__name__)
+    logger.info("  nan: %s (应为 None)", result["nan"])
+    logger.info("  array: %s", result["array"])
+    logger.info("  nested.value: %s", result["nested"]["value"])
 
     # 测试 JSON 序列化
     import json
+
     json_str = json.dumps(result, ensure_ascii=False)
-    logger.info(f"\nJSON 序列化成功: {len(json_str)} chars")
+    logger.info("\nJSON 序列化成功: %s chars", len(json_str))

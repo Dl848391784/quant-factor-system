@@ -84,5 +84,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        logger.error(f"ICIR加权综合因子回测执行失败 [{type(e).__name__}]: {e}")
+        logger.error("ICIR加权综合因子回测执行失败 [%s]: %s", type(e).__name__, e)
         sys.exit(1)
