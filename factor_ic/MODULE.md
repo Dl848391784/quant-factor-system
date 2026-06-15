@@ -375,6 +375,83 @@ def load_data_from_cache(cache_path):
 
 ---
 
+## M3.1 主职责日志输出公共函数:logger 强制必传
+
+**What**:当公共函数的**主要职责本身就是输出日志**(如 `factor_summary_logger.log_factor_summary` 输出 IC 计算总结/告警),`logger` 参数**强制必传**,不允许 `logger=None` fallback。这是 M3 的特例细化,适用范围:`factor_ic/common/` 中函数名包含 `log_` 前缀或函数体 ≥80% 是 `logger.xxx(...)` 调用的模块。
+
+**Why**:M3 的 fallback 机制服务于"数据/结果构建类"公共函数(如 `load_data_from_cache`、`build_ic_result`),这类函数被独立调用做单元测试或一次性查询时,fallback 提供便捷。但**日志输出函数**没有"独立调用"场景——它的存在意义就是被入口脚本调用并归集到入口脚本的日志文件。若允许 `logger=None`,fallback 会落到 `factor_summary_logger` 自己的日志文件,与"日志归集到入口脚本"的设计意图完全相反。
+
+**触发条件**(满足其一即应抽公共函数并强制必传 logger):
+- ≥3 个入口脚本含相同/近似的 `logger.warning` / `logger.info` 文案块
+- 文案修改需同步多脚本(违反 DRY)
+- 文案需运维巡检统一(差异化文案让运维抓不到关键字)
+
+**How**:
+
+```python
+# factor_ic/common/factor_summary_logger.py
+# logger 不带默认值,必传
+def log_factor_summary(result, factor_display_name, logger, *, extra_summary_lines=None):
+    logger.info("=" * 60)
+    logger.info("%s IC 计算完成", factor_display_name)
+    # ... 主体全部是 logger.xxx(...)
+    none_fields = [k for k in ("ic_mean", "ic_std", "icir", "ic_positive_ratio") if result.get(k) is None]
+    if none_fields:
+        logger.warning(
+            "%s IC 指标异常字段: %s(数据加载可能失败,请查看上方 ERROR 日志或检查 build_error_result 触发条件)",
+            factor_display_name, ", ".join(none_fields),
+        )
+
+# 入口脚本调用:必须显式传 logger
+logger = get_logger(__name__)
+log_factor_summary(result, "振幅差分因子", logger)
+```
+
+**Don't**:
+
+```python
+# ❌ 给日志输出函数加 fallback,违背日志归集意图
+def log_factor_summary(result, factor_display_name, logger=None):
+    if logger is None:
+        logger = get_logger(__name__)  # 落到 factor_summary_logger.log,完全不是入口脚本的日志!
+    logger.info("...")
+
+# ❌ 在入口脚本继续保留各自的 4 条 if X is None: warning 字面量,不抽公共函数
+if result.get("ic_std") is None:
+    logger.warning("ICIR 无法计算...")  # 17 个脚本各写一份,文案漂移
+```
+
+**When**:
+
+| 场景 | 适用规范 | 说明 |
+|------|----------|------|
+| 数据加载/结果构建公共函数 | M3 (fallback) | 例:`load_data_from_cache`、`build_ic_result`,有独立调用场景 |
+| 日志输出主职责公共函数 | M3.1 (强制必传) | 例:`log_factor_summary`,无独立调用场景,日志须归集入口 |
+| 因子计算公共函数(无日志) | M3 (fallback,但实际不会触发) | 例:`compute_layered_ic`,logger 仅用于异常输出 |
+
+**Examples**:
+
+```python
+# ✓ 正确(M3.1):日志输出函数强制必传 logger
+log_factor_summary(result, "振幅差分因子", logger)
+
+# ✓ 正确(M3.1):测试用例必须传 mock logger
+def test_log_factor_summary_warns_on_none_fields():
+    mock_logger = MagicMock()
+    log_factor_summary({"ic_mean": None, ...}, "test", mock_logger)
+    mock_logger.warning.assert_called_once()
+
+# ✗ 错误(M3.1):省略 logger 触发 TypeError
+log_factor_summary(result, "振幅差分因子")  # missing 1 required positional argument
+```
+
+**Verify**:
+- `grep -c "logger=None" factor_ic/common/factor_summary_logger.py` 必须为 `0`
+- `grep -rn "ICIR 无法计算" factor_ic/ic_*.py | wc -l` 必须为 `0`(本轮迁移 17 脚本的字面量已全部抽到公共函数;另有 7 脚本采用"手写 summary_lines + 单条 ic_mean warning"模式,不在本规范适用范围,后续轮次单独处理)
+- `pytest factor_ic/test_cases/test_factor_summary_logger.py` 9/9 通过
+
+---
+
 ## M4. 跨目录公共模块禁止调用
 
 **What**:公共模块仅在本目录内复用,禁止跨目录调用 (`factor_ic/` 脚本不可 `from backtest.common import`)。
@@ -2017,7 +2094,8 @@ def calculate_all_stocks_vectorized(factor_df):  # 实际使用
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
-| v4.1 | 2026-06-12 | 新增行业方向性因子IC脚本注册表（industry_momentum_5d / industry_turnover_trend / industry_amplitude_trend）；脚本注册表章节 | [experimental] |
+| v4.2 | 2026-06-15 | 新增 M3.1 主职责日志输出公共函数:logger 强制必传(M3 特例细化,配套 `factor_summary_logger.py`) |
+| v4.1 | 2026-06-12 | 新增行业方向性因子IC脚本注册表(industry_momentum_5d / industry_turnover_trend / industry_amplitude_trend);脚本注册表章节 | [experimental] |
 | v4.0 | 2026-06-03 | 大重构:58 章节去重合并到 65 条 M 编号规则,按 11 类别 (A-K) 组织,每条套用 What/Why/How/Don't/When/Verify 框架;加目录索引;精简更新记录 |
 | v3.16 | 2026-06-02 | 新因子数据校验规范 (M53) |
 | v3.10-v3.15 | 2026-05-22~28 | 累积补充:pandas 缺失值标记、股价异常检测、rolling 语义、布林带、向量化、边界检查、防御对称、可选字段回退等规范 |
@@ -2039,5 +2117,5 @@ def calculate_all_stocks_vectorized(factor_df):  # 实际使用
 
 ---
 
-*最后更新: 2026-06-12*
+*最后更新: 2026-06-15*
 
