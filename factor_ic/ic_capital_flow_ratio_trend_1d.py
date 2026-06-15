@@ -28,10 +28,12 @@
 版本历史:
   v1.0 (2026-06-12): 初始版本，复用 factor_calculator.calculate_capital_flow_ratio_trend
   v1.1 (2026-06-15): 强化结果校验、差异化 warning 提示、启动日志带版本号、摘要逐行输出
+  v1.2 (2026-06-15): 补 ic_metrics 类型守卫、valid_days 缺失语义化、耗时记录、保留 FactorCalcError 异常链堆栈
 """
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 
@@ -44,7 +46,7 @@ from factor_ic.common.logger_config import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 
 class FactorCalcError(Exception):
@@ -70,6 +72,7 @@ def main():
     parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
     args = parser.parse_args()
 
+    start_time = time.monotonic()
     logger.info(
         f"启动资金流占比趋势因子IC计算 v{__version__}: min_stocks={args.min_stocks}, force_full={args.force_full}"
     )
@@ -88,8 +91,8 @@ def main():
         _logger=logger,
     )
 
-    # 强化结果校验：覆盖 None / 非 dict / 缺关键字段三种失败场景，
-    # 避免后续 .get() 链静默掩盖真实错误。
+    # 强化结果校验：覆盖 None / 非 dict / 缺关键字段 / 关键字段类型异常 四种失败场景，
+    # 避免后续 .get() 链静默掩盖真实错误或在非 dict 值上抛 AttributeError。
     if result is None:
         raise FactorCalcError("run_complex_factor_ic 返回 None，数据加载或计算可能失败")
     if not isinstance(result, dict):
@@ -98,17 +101,29 @@ def main():
         raise FactorCalcError(
             f"run_complex_factor_ic 返回结构不完整: 缺少 'ic_metrics' 字段，实际键={list(result.keys())}"
         )
+    # ic_metrics 是关键字段，类型必须严格 dict（含禁止 None），任何偏差立即抛错
+    _ic_metrics_value = result["ic_metrics"]
+    if not isinstance(_ic_metrics_value, dict):
+        raise FactorCalcError(
+            f"run_complex_factor_ic 返回结构异常: 'ic_metrics' 期望 dict，实际 {type(_ic_metrics_value).__name__}"
+        )
+    ic_metrics: dict = _ic_metrics_value
 
-    # 显式 None 判断而非 `or {}`：避免将合法 falsy 值（0、False、空字符串）误替换为空字典。
-    # 单次取值 + 局部判定，确保类型收窄稳定（Pyright 在多次 .get() 间无法收窄）。
-    _ic_metrics_raw = result.get("ic_metrics")
-    _sample_stats_raw = result.get("sample_stats")
-    _period_raw = result.get("period")
-    _ic_distribution_raw = result.get("ic_distribution_consistency")
-    ic_metrics = _ic_metrics_raw if _ic_metrics_raw is not None else {}
-    sample_stats = _sample_stats_raw if _sample_stats_raw is not None else {}
-    period = _period_raw if _period_raw is not None else {}
-    ic_distribution = _ic_distribution_raw if _ic_distribution_raw is not None else {}
+    # 辅助字段（sample_stats/period/ic_distribution）允许缺失或为 None，软 fallback 为空 dict。
+    # 但若返回类型异常（非 None 又非 dict），记录 warning 后 fallback，避免后续 .get() 抛 AttributeError。
+    # 注：单独函数封装而非内联三元，因 Pyright 在多次 .get() 间无法稳定收窄类型。
+    def _safe_dict(key: str) -> dict:
+        raw = result.get(key)
+        if raw is None:
+            return {}
+        if not isinstance(raw, dict):
+            logger.warning(f"返回字段 '{key}' 期望 dict|None，实际 {type(raw).__name__}，已 fallback 为空字典")
+            return {}
+        return raw
+
+    sample_stats = _safe_dict("sample_stats")
+    period = _safe_dict("period")
+    ic_distribution = _safe_dict("ic_distribution_consistency")
 
     ic_mean = ic_metrics.get("ic_mean")
     ic_std = ic_metrics.get("ic_std")
@@ -127,7 +142,7 @@ def main():
     logger.info(f"因子名称: {result.get('factor_name', 'unknown')}")
     logger.info(f"更新模式: {result.get('update_mode', 'unknown')}")
     logger.info(f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}")
-    logger.info(f"有效天数: {sample_stats.get('valid_days', 0)} 天")
+    logger.info(f"有效天数: {sample_stats.get('valid_days', 'N/A')} 天")
     logger.info("--- IC指标 ---")
     logger.info(f"IC 均值: {ic_mean_str}")
     logger.info(f"IC 标准差: {ic_std_str}")
@@ -144,15 +159,18 @@ def main():
     if positive_ratio is None:
         logger.warning("IC>0 占比无法获取：公共模块未输出 ic_distribution_consistency 字段，请核对模块版本")
 
-    logger.info("资金流占比趋势因子IC计算完成")
+    elapsed = time.monotonic() - start_time
+    logger.info(f"资金流占比趋势因子IC计算完成: elapsed={elapsed:.2f}s")
     return result
 
 
 if __name__ == "__main__":
     try:
         main()
-    except FactorCalcError as e:
-        logger.error(f"资金流占比趋势因子IC计算失败: {e}")
+    except FactorCalcError:
+        # 使用 logger.exception 保留完整堆栈与 cause 链（__cause__ / __context__），
+        # 避免底层 raise FactorCalcError(...) from e 的根因被静默丢弃。
+        logger.exception("资金流占比趋势因子IC计算失败")
         sys.exit(1)
     except Exception:
         logger.exception("未预期的错误")
