@@ -277,15 +277,7 @@ def main():
 
     args = parser.parse_args()
 
-    # 启动参数日志（便于追溯本次运行配置）
-    # 使用 %s 惰性格式化（与本文件 calculate_tail_price_position 内日志风格一致，
-    # 避免 logger 未启用 INFO 时仍执行字符串拼接）
-    logger.info(
-        "启动尾盘价格位置因子IC计算: min_stocks=%s, force_full=%s",
-        args.min_stocks,
-        args.force_full,
-    )
-
+    # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
         factor_name="tail_price_position",

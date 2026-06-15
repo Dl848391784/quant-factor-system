@@ -67,13 +67,7 @@ def main():
 
     args = parser.parse_args()
 
-    # 启动参数日志（便于追溯本次运行配置）
-    logger.info(
-        "启动3日累计涨幅因子IC计算: min_stocks=%s, force_full=%s",
-        args.min_stocks,
-        args.force_full,
-    )
-
+    # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     # 注意：factor_cols 必须包含 asset, date 列（groupby 和 shift 依赖）
     # 已确认：公共模块按列名取列（data_loader.py 第205-222行），顺序无关

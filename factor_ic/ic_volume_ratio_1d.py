@@ -77,13 +77,7 @@ def main():
 
     args = parser.parse_args()
 
-    # 启动参数日志（便于追溯本次运行配置）
-    logger.info(
-        "启动量比因子IC计算: min_stocks=%s, force_full=%s",
-        args.min_stocks,
-        args.force_full,
-    )
-
+    # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     # 注意：run_simple_factor_ic 只需 factor_col，公共模块自动加载该列
     result = run_simple_factor_ic(

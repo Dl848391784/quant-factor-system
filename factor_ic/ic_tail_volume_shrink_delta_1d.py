@@ -58,13 +58,7 @@ def main():
 
     args = parser.parse_args()
 
-    # 调用前日志
-    logger.info(
-        "启动尾盘缩量差分因子IC计算: min_stocks=%s, force_full=%s",
-        args.min_stocks,
-        args.force_full,
-    )
-
+    # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
         factor_name="tail_volume_shrink_delta",

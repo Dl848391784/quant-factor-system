@@ -37,12 +37,7 @@ def main():
     parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
     args = parser.parse_args()
 
-    logger.info(
-        "启动5日均线偏离度因子IC计算: min_stocks=%s, force_full=%s",
-        args.min_stocks,
-        args.force_full,
-    )
-
+    # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
     result = run_complex_factor_ic(
         factor_name="ma5_deviation",
         factor_col="ma5_deviation",
