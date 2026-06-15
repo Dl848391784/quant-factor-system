@@ -53,6 +53,13 @@
   - _fetch_single_stock_with_retry 抖动公式补注释（最大额外延迟 = delay * 0.095）
   - 模块 docstring 补"公开接口"段，明确 MIN_VALID_ROWS 推荐外部引用、KLINE_SCALE_DAILY 不推荐
   - _get_api_stock_history 单条解析失败补 debug 日志（含 stock_code/损坏 item/异常类型）
+- v2.5 (2026-06-15): 问题修复
+  - _get_api_stock_history [UnexpectedError] 改用 logger.exception 保留完整堆栈
+    与 _fetch_stock_batch_parallel 的 ThreadError 处理风格一致
+  - _fetch_single_stock_with_retry 放弃日志补 last_failure_reason/last_failure_detail
+    使语义高于循环内 debug/warning 而非更少
+  - _fetch_stock_batch_parallel 改 max_workers=len(shards) 动态化
+    避免实际只有 1 个 future 时多创建 1 个空闲 worker 线程
 """
 
 # 标准库导入
@@ -367,9 +374,11 @@ class RealDataLoader:
             self._logger.warning("[JSONError] 解析响应失败: stock_code=%s, error=%s", stock_code, e)
             return None
 
-        except Exception as e:
-            # 其他未知异常
-            self._logger.error("[UnexpectedError] 获取股票数据时发生未知错误: stock_code=%s, error=%s", stock_code, e)
+        except Exception:
+            # 其他未知异常：用 logger.exception 自动附带完整 traceback
+            # 与 _fetch_stock_batch_parallel 的 ThreadError 处理风格保持一致
+            # error 级别的未知异常如果只打 str(e) 反而比 thread 崩溃信息更难追溯根因
+            self._logger.exception("[UnexpectedError] 获取股票数据时发生未知错误: stock_code=%s", stock_code)
             return None
 
     def _fetch_single_stock_with_retry(
@@ -396,6 +405,11 @@ class RealDataLoader:
         # 目的：错开高并发下的请求时序，降低瞬时请求峰值；幅度足够小不显著影响整体节流
         time.sleep(delay * (1 + (request_id % 20) * 0.005))
 
+        # 记录每次重试的末次失败原因，循环结束后写入"放弃日志"，避免与循环内 debug/warning 信息量倒挂
+        # last_failure_reason 取值："insufficient_rows" | "exception" | None（仅成功路径会保持 None）
+        last_failure_reason: str | None = None
+        last_failure_detail: str = ""
+
         for attempt in range(self.retries):
             try:
                 df = self.get_stock_history(code, days=days)
@@ -404,12 +418,15 @@ class RealDataLoader:
                 else:
                     # 数据不足（df 为 None 或行数 < MIN_VALID_ROWS），记录调试日志后重试
                     # 让"数据不足重试"和"异常重试"在日志中可区分，避免静默重试无法定位根因
+                    rows_actual = 0 if df is None else len(df)
+                    last_failure_reason = "insufficient_rows"
+                    last_failure_detail = f"rows={rows_actual}, min_required={MIN_VALID_ROWS}"
                     self._logger.debug(
                         "数据不足，准备重试: code=%s, attempt=%s/%s, rows=%s, min_required=%s",
                         code,
                         attempt + 1,
                         self.retries,
-                        0 if df is None else len(df),
+                        rows_actual,
                         MIN_VALID_ROWS,
                     )
                     if attempt < self.retries - 1:
@@ -421,6 +438,8 @@ class RealDataLoader:
             except Exception as e:
                 # 其他临时异常，记录后重试
                 # v2.1 修复初衷：异常不能静默吞掉；此处补 warning 日志，含 code/attempt/异常类型与内容
+                last_failure_reason = "exception"
+                last_failure_detail = f"error_type={type(e).__name__}, error={e}"
                 self._logger.warning(
                     "[TransientError] 获取股票数据时发生临时异常: code=%s, attempt=%s/%s, error_type=%s, error=%s",
                     code,
@@ -432,7 +451,14 @@ class RealDataLoader:
                 if attempt < self.retries - 1:
                     time.sleep(0.5 * (attempt + 1))
 
-        self._logger.warning("重试 %s 次后放弃: %s", self.retries, code)
+        # 末次失败原因汇总到放弃日志，使语义高于循环内 debug/warning 而非更少
+        self._logger.warning(
+            "重试 %s 次后放弃: code=%s, last_failure_reason=%s, last_failure_detail=%s",
+            self.retries,
+            code,
+            last_failure_reason or "unknown",
+            last_failure_detail or "n/a",
+        )
         return (code, None)
 
     def _fetch_stock_batch(
@@ -475,12 +501,14 @@ class RealDataLoader:
 
         Note:
             - 内部将 stocks 二等分：前半部分交给 thread_a，后半部分交给 thread_b
-            - 并发数固定为 2，避免触发 API 频率限制
+            - 并发数最多为 2，避免触发 API 频率限制
             - 长度为奇数时，thread_b 多 1 只
             - **stocks 长度为 1 时，mid=0：thread_a 为空列表，仅 thread_b 工作**
-              （此时实际为单线程串行，是边界场景下可接受的退化行为）
+              （此时实际为单线程串行，是边界场景下可接受的退化行为；
+              线程池亦只创建 1 个 worker，不浪费空闲线程）
             - 空列表直接返回 []，不创建线程池
             - 任一分片为空时跳过提交对应线程任务，避免为空列表创建无意义的线程
+            - max_workers 按实际非空分片数动态确定（1 或 2），不固定为 2
         """
         if not stocks:
             return []
@@ -491,19 +519,23 @@ class RealDataLoader:
         stocks_for_thread_a = stocks[:mid]
         stocks_for_thread_b = stocks[mid:]
 
+        # 提前枚举要提交的非空分片，用于动态计算 max_workers，避免 max_workers=2 时实际只有 1 个
+        # future 而多创建 1 个空闲 worker 线程（资源浪费）
+        shards: list[tuple[str, list[dict]]] = []
+        if stocks_for_thread_a:
+            shards.append(("thread_a", stocks_for_thread_a))
+        if stocks_for_thread_b:
+            shards.append(("thread_b", stocks_for_thread_b))
+
         all_results: list[tuple[str, pd.DataFrame | None]] = []
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        # max_workers 至少为 1（前面 if not stocks 已守卫，shards 此处必非空）
+        with ThreadPoolExecutor(max_workers=len(shards)) as executor:
             # 仅对非空分片提交线程任务；空分片提交相当于让线程跑一次零长度循环，浪费调度开销
-            futures: dict = {}
-            if stocks_for_thread_a:
-                futures[executor.submit(self._fetch_stock_batch, stocks_for_thread_a, days, progress_callback)] = (
-                    "thread_a"
-                )
-            if stocks_for_thread_b:
-                futures[executor.submit(self._fetch_stock_batch, stocks_for_thread_b, days, progress_callback)] = (
-                    "thread_b"
-                )
+            futures: dict = {
+                executor.submit(self._fetch_stock_batch, shard_stocks, days, progress_callback): shard_name
+                for shard_name, shard_stocks in shards
+            }
 
             # 使用 as_completed 避免顺序阻塞等待
             for future in as_completed(futures):
