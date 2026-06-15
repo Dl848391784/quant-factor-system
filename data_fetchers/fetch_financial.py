@@ -53,6 +53,12 @@
   - Fix 2: meta 时间戳改用 dt_cls.now() 而非模块级 _NOW（跨日运行时间漂移）
   - Fix 3: 进度日志分母预计算 codes_to_fetch 固定值（避免随 skipped 动态变化）
   - Fix 4: 失败日志补充异常响应摘要 [响应摘要: ...]，帮助判断未识别限流
+- v1.0i (2026-06-15): 5 项缺陷修复
+  - Fix 1: 失败日志删除冗余 str(e)[:80]，只保留一份较长截断改标签为"异常信息"
+  - Fix 2: _is_rate_limit_error 删除 HTTPError 宽泛类名匹配（400/500 也会抛 HTTPError），仅保留 TooManyRequests
+  - Fix 3: codes_to_fetch 改为遍历 all_codes 统计与实际跳过逻辑一致（含废弃股票代码场景）
+  - Fix 4: _parse_percentage/_parse_numeric_with_unit val is False 冗余→由 isinstance(bool) 统一处理
+  - Fix 5: _parse_report_date str 分支增加 YYYY-MM-DD 正则校验，不符合格式返回 None + warning
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -65,6 +71,7 @@ import datetime
 import gc
 import json
 import logging
+import re
 import sys
 import time
 from datetime import datetime as dt_cls
@@ -91,7 +98,7 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0h"
+_OUTPUT_VERSION = "1.0i"
 
 # 模块级固定时间戳（仅标记脚本启动时间，meta 中使用 dt_cls.now() 取完成时间）
 _NOW = dt_cls.now()
@@ -147,9 +154,9 @@ def _parse_percentage(val: Any) -> float | None:
         - 集成测试通过已知股票数据断言输出范围来验证单位一致性
           （如 ROE 应在 [-100, 100] 区间，若出现 0.0421 量级则说明单位错误）
     """
-    if val is None or val is False:
+    if val is None:
         return None
-    # 拦截 numpy.bool_(False)：bool 是 int 子类，会被 isinstance(val, int) 命中
+    # 拦截 bool 子类（含 numpy.bool_）：bool 是 int 子类，会被 isinstance(val, int) 命中
     if isinstance(val, bool):
         return None
     # 统一 NA 检查（兼容 float/numpy.float64/pd.NaT 等），消除对继承关系的隐式依赖
@@ -178,7 +185,7 @@ def _parse_numeric_with_unit(val: Any) -> float | None:
     """解析带单位的数值（如 '426.33亿' → 426330000000.0, '2.0700' → 2.07）
 
     Args:
-        val: 原始值（可能是带亿/万单位的字符串、float、或 NaN/False/None）
+        val: 原始值（可能是带亿/万单位的字符串、float、或 NaN/None）
 
     Returns:
         解析后的浮点数（亿→×1e8, 万→×1e4, 无单位→原值），无法解析返回 None
@@ -187,9 +194,9 @@ def _parse_numeric_with_unit(val: Any) -> float | None:
         NA 值统一通过 pd.isna 前置检查处理，兼容 Python float / numpy.float64 / pd.NaT，
         不依赖 isinstance(val, float) 对 numpy 标量的隐式继承关系。
     """
-    if val is None or val is False:
+    if val is None:
         return None
-    # 拦截 numpy.bool_(False)：bool 是 int 子类，会被 isinstance(val, int) 命中
+    # 拦截 bool 子类（含 numpy.bool_）：bool 是 int 子类，会被 isinstance(val, int) 命中
     if isinstance(val, bool):
         return None
     # 统一 NA 检查（兼容 float/numpy.float64/pd.NaT 等），消除对继承关系的隐式依赖
@@ -222,11 +229,18 @@ def _parse_numeric_with_unit(val: Any) -> float | None:
     return None
 
 
+# 报告期日期正则：YYYY-MM-DD 格式校验
+_REPORT_DATE_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")
+
+
 def _parse_report_date(report_date_raw: Any) -> str | None:
     """解析报告期日期，兼容 datetime.date、pd.Timestamp 和字符串类型
 
-    注意：pd.NaT（pandas 缺失时间戳）不是 None，isinstance(NaT, datetime.date) 为 False，
-    但 str(NaT) 返回 'NaT' 会误判为有效日期，因此需前置 pd.isnull 检查。
+    注意：
+    - pd.NaT（pandas 缺失时间戳）不是 None，isinstance(NaT, datetime.date) 为 False，
+      但 str(NaT) 返回 'NaT' 会误判为有效日期，因此需前置 pd.isnull 检查。
+    - str 类型需通过 YYYY-MM-DD 正则校验，不规范格式（如 "20240331"、"2024年3月31日"）
+      返回 None，避免写入缓存后下游月份提取静默出错。
     """
     if report_date_raw is None:
         return None
@@ -239,7 +253,9 @@ def _parse_report_date(report_date_raw: Any) -> str | None:
     if isinstance(report_date_raw, datetime.date):
         return report_date_raw.strftime("%Y-%m-%d")
     if isinstance(report_date_raw, str):
-        return report_date_raw
+        if _REPORT_DATE_RE.match(report_date_raw):
+            return report_date_raw
+        return None
     try:
         return str(report_date_raw)
     except Exception:
@@ -258,8 +274,8 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     # HTTP 429（仅检查异常消息，类名不含 "429"）
     if "429" in exc_msg:
         return True
-    # 常见限流异常类名
-    if exc_name in ("HTTPError", "TooManyRequests"):
+    # 明确的限流异常类名（不包含 HTTPError：400/500 等非限流错误也会抛 HTTPError）
+    if exc_name == "TooManyRequests":
         return True
     # 限流关键词（中英文）
     rate_limit_keywords = ("rate limit", "too many", "频率", "限制", "throttl")
@@ -299,9 +315,8 @@ def fetch_financial_data_for_stock(
                 time.sleep(delay)
                 continue
             _logger.warning(
-                "拉取 %s 财务数据失败: %s (%s) [响应摘要: %s]%s",
+                "拉取 %s 财务数据失败: (%s) [异常信息: %s]%s",
                 symbol,
-                str(e)[:80],
                 type(e).__name__,
                 str(e)[:120],
                 f" (重试{_RATE_LIMIT_RETRIES}次后仍失败)" if is_rate_limit else "",
@@ -319,6 +334,12 @@ def fetch_financial_data_for_stock(
         report_date_raw = row.get("报告期", None)
         report_date_str = _parse_report_date(report_date_raw)
         if report_date_str is None:
+            if report_date_raw is not None:
+                _logger.warning(
+                    "报告期日期格式无效 (stock=%s, raw=%s), 跳过该记录",
+                    symbol,
+                    str(report_date_raw)[:40],
+                )
             continue
         record["report_date"] = report_date_str
 
@@ -498,10 +519,10 @@ def main(logger_arg: logging.Logger | None = None) -> int:
 
     _logger.info("需拉取 %d 只股票（缓存已有 %d）", len(all_codes), len(cached_codes))
 
-    # 预计算待拉取股票数（固定分母，避免进度日志分母随 skipped 动态变化）
-    codes_to_fetch = (
-        len(all_codes) if need_full_fetch
-        else len(all_codes) - len(cached_codes - stale_codes_from_cache)
+    # 预计算待拉取股票数（固定分母，与循环内跳过逻辑保持一致）
+    codes_to_fetch = sum(
+        1 for c in all_codes
+        if need_full_fetch or c not in cached_codes or c in stale_codes_from_cache
     )
 
     # Step 4: 拉取数据

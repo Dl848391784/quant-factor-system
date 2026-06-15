@@ -1,6 +1,6 @@
 """fetch_financial.py 单元测试
 
-覆盖 28 个修复（v1.0c~v1.0h: Fix 1-5/1-5/1-5/1-5/1-5/1-4）：
+覆盖 33 个修复（v1.0c~v1.0i: Fix 1-5/1-5/1-5/1-5/1-5/1-4/1-5）：
 v1.0c:
 1. _QUARTER_ANNUALIZE_FACTOR 无效月份 warning + annualized_eps 置 None
 2. _parse_percentage 数据源单位约定 + 输出范围断言
@@ -36,6 +36,12 @@ v1.0h:
 2. meta 时间戳改用 dt_cls.now()
 3. 进度日志分母预计算 codes_to_fetch
 4. 失败日志补充异常响应摘要
+v1.0i:
+1. 失败日志删除冗余 str(e)[:80]，只保留一份改标签为"异常信息"
+2. _is_rate_limit_error 删除 HTTPError 宽泛匹配，仅保留 TooManyRequests
+3. codes_to_fetch 遍历 all_codes 统计与实际跳过逻辑一致
+4. val is False 冗余移除，由 isinstance(bool) 统一处理
+5. _parse_report_date str 分支 YYYY-MM-DD 正则校验
 """
 
 import json
@@ -55,6 +61,7 @@ from data_fetchers.fetch_financial import (
     _OUTPUT_VERSION,
     _QUARTER_ANNUALIZE_FACTOR,
     _parse_percentage,
+    _parse_report_date,
     fetch_financial_data_for_stock,
     get_cached_stock_codes,
     load_cache,
@@ -726,10 +733,10 @@ class TestAnnualizedEpsFormatException:
     """v1.0e Fix 5: 年化 EPS 计算对异常日期格式的防护"""
 
     def test_year_only_format(self):
-        """仅含年份 '2024' 时 annualized_eps 为 None"""
+        """仅含年份 '2024' → 正则校验失败，整条记录跳过"""
         mock_df = pd.DataFrame(
             {
-                "报告期": ["2024"],  # 无月份
+                "报告期": ["2024"],  # 无月份，不符合 YYYY-MM-DD
                 "基本每股收益": [0.5],
                 **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
             }
@@ -737,12 +744,10 @@ class TestAnnualizedEpsFormatException:
         with patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df):
             records = fetch_financial_data_for_stock("000001")
 
-        assert records is not None
-        assert len(records) == 1
-        assert records[0]["annualized_eps"] is None
+        assert records == []
 
     def test_compact_format(self):
-        """紧凑格式 '20240331' 时 annualized_eps 为 None（split('-') 无分隔符）"""
+        """紧凑格式 '20240331' → 正则校验失败，整条记录跳过"""
         mock_df = pd.DataFrame(
             {
                 "报告期": ["20240331"],
@@ -753,11 +758,10 @@ class TestAnnualizedEpsFormatException:
         with patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df):
             records = fetch_financial_data_for_stock("000001")
 
-        assert records is not None
-        assert records[0]["annualized_eps"] is None
+        assert records == []
 
     def test_non_numeric_month(self):
-        """月份非数字时 annualized_eps 为 None"""
+        """月份非数字 '2024-AB-31' → 正则校验失败，整条记录跳过"""
         mock_df = pd.DataFrame(
             {
                 "报告期": ["2024-AB-31"],
@@ -768,8 +772,7 @@ class TestAnnualizedEpsFormatException:
         with patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df):
             records = fetch_financial_data_for_stock("000001")
 
-        assert records is not None
-        assert records[0]["annualized_eps"] is None
+        assert records == []
 
     def test_valid_format_still_works(self):
         """正常格式 '2024-03-31' 仍正确计算"""
@@ -1303,13 +1306,173 @@ class TestProgressLogFixedDenominator:
 
 
 class TestFailureLogResponseSummary:
-    """v1.0h Fix 4: 失败日志包含异常响应摘要"""
+    """v1.0h/v1.0i: 失败日志包含异常信息"""
 
     def test_failure_log_contains_response_summary(self):
-        """失败日志格式应包含 [响应摘要: ...]"""
+        """失败日志格式应包含 [异常信息: ...]"""
         import inspect
 
         from data_fetchers.fetch_financial import fetch_financial_data_for_stock
 
         source = inspect.getsource(fetch_financial_data_for_stock)
-        assert "响应摘要" in source, "失败日志应包含响应摘要字段"
+        assert "异常信息" in source, "失败日志应包含异常信息字段"
+
+
+# ─── v1.0i Fix 1: 失败日志无冗余 str(e)[:80] ──────────────────
+
+
+class TestFailureLogNoRedundantTruncation:
+    """v1.0i Fix 1: 失败日志不应同时打印两份 str(e) 截断"""
+
+    def test_failure_log_single_truncation(self):
+        """失败日志（'财务数据失败'）中 str(e) 只截断一次"""
+        import inspect
+
+        from data_fetchers.fetch_financial import fetch_financial_data_for_stock
+
+        source = inspect.getsource(fetch_financial_data_for_stock)
+        # 找到"财务数据失败"日志附近的代码块（格式行+参数行）
+        lines = source.split("\n")
+        for i, line in enumerate(lines):
+            if "财务数据失败" in line:
+                # 检查该行和后面5行（参数行）中 str(e)[: 的总数
+                block = "\n".join(lines[i : i + 6])
+                count = block.count("str(e)[:")
+                assert count == 1, f"失败日志块中 str(e)[: 应只出现1次，实际 {count} 次"
+                break
+
+
+# ─── v1.0i Fix 2: _is_rate_limit_error 不含 HTTPError ──────────
+
+
+class TestRateLimitNoHttpError:
+    """v1.0i Fix 2: _is_rate_limit_error 不匹配 HTTPError 类名"""
+
+    def test_httperror_not_in_class_check(self):
+        """源码中不应包含 HTTPError 类名匹配"""
+        import inspect
+
+        from data_fetchers.fetch_financial import _is_rate_limit_error
+
+        source = inspect.getsource(_is_rate_limit_error)
+        assert '"HTTPError"' not in source, "不应匹配 HTTPError 类名（400/500 也会抛）"
+
+    def test_httperror_non_429_not_detected(self):
+        """HTTP 500 错误不应被识别为限流"""
+        from data_fetchers.fetch_financial import _is_rate_limit_error
+
+        assert not _is_rate_limit_error(RuntimeError("HTTP 500 Internal Server Error"))
+
+    def test_httperror_429_still_detected(self):
+        """含 429 的 HTTPError 仍应被识别"""
+        from data_fetchers.fetch_financial import _is_rate_limit_error
+
+        assert _is_rate_limit_error(RuntimeError("HTTPError: 429 Too Many Requests"))
+
+
+# ─── v1.0i Fix 3: codes_to_fetch 遍历 all_codes ────────────────
+
+
+class TestCodesToFetchConsistency:
+    """v1.0i Fix 3: codes_to_fetch 遍历 all_codes 统计，与实际跳过逻辑一致"""
+
+    def test_codes_to_fetch_uses_all_codes(self):
+        """源码中 codes_to_fetch 应基于 all_codes 遍历"""
+        import inspect
+
+        from data_fetchers.fetch_financial import main
+
+        source = inspect.getsource(main)
+        assert "for c in all_codes" in source, "应遍历 all_codes 计算 codes_to_fetch"
+
+
+# ─── v1.0i Fix 4: val is False 冗余移除 ───────────────────────
+
+
+class TestValIsFalseRedundant:
+    """v1.0i Fix 4: val is False 已被 isinstance(bool) 覆盖，不应冗余出现"""
+
+    def test_no_val_is_false_in_parse_percentage(self):
+        """_parse_percentage 中不应有 val is False"""
+        import inspect
+
+        from data_fetchers.fetch_financial import _parse_percentage
+
+        source = inspect.getsource(_parse_percentage)
+        assert "val is False" not in source, "val is False 已被 isinstance(bool) 覆盖"
+
+    def test_no_val_is_false_in_parse_numeric(self):
+        """_parse_numeric_with_unit 中不应有 val is False"""
+        import inspect
+
+        from data_fetchers.fetch_financial import _parse_numeric_with_unit
+
+        source = inspect.getsource(_parse_numeric_with_unit)
+        assert "val is False" not in source, "val is False 已被 isinstance(bool) 覆盖"
+
+    def test_parse_percentage_false_still_returns_none(self):
+        """Python False 仍应返回 None（由 isinstance(bool) 处理）"""
+        assert _parse_percentage(False) is None
+
+    def test_parse_numeric_false_still_returns_none(self):
+        """Python False 仍应返回 None"""
+        from data_fetchers.fetch_financial import _parse_numeric_with_unit
+
+        assert _parse_numeric_with_unit(False) is None
+
+
+# ─── v1.0i Fix 5: _parse_report_date YYYY-MM-DD 正则校验 ────────
+
+
+class TestReportDateRegex:
+    """v1.0i Fix 5: _parse_report_date str 分支需 YYYY-MM-DD 正则校验"""
+
+    def test_valid_yyyy_mm_dd(self):
+        """标准 YYYY-MM-DD 格式应通过"""
+        assert _parse_report_date("2024-03-31") == "2024-03-31"
+
+    def test_compact_format_rejected(self):
+        """紧凑格式 YYYYMMDD 应返回 None"""
+        assert _parse_report_date("20240331") is None
+
+    def test_chinese_format_rejected(self):
+        """中文日期格式应返回 None"""
+        assert _parse_report_date("2024年3月31日") is None
+
+    def test_year_only_rejected(self):
+        """仅年份应返回 None"""
+        assert _parse_report_date("2024") is None
+
+    def test_invalid_month_rejected(self):
+        """无效月份应返回 None"""
+        assert _parse_report_date("2024-13-01") is None
+
+    def test_datetime_date_still_works(self):
+        """datetime.date 对象仍应正常工作"""
+        import datetime
+
+        d = datetime.date(2024, 3, 31)
+        assert _parse_report_date(d) == "2024-03-31"
+
+    def test_invalid_date_warning_logged(self, caplog):
+        """无效日期字符串应触发 warning"""
+        from data_fetchers.fetch_financial import fetch_financial_data_for_stock
+
+        # 构造返回含无效日期行的 DataFrame
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["20240331"],  # 紧凑格式
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+        with (
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df),
+            caplog.at_level(logging.WARNING, logger="data_fetchers.fetch_financial"),
+        ):
+            result = fetch_financial_data_for_stock("000001")
+
+        # 无效日期行被跳过，结果为空列表
+        assert result == []
+        invalid_msgs = [r for r in caplog.records if "格式无效" in r.message]
+        assert len(invalid_msgs) >= 1
