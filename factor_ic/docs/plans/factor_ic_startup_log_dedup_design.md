@@ -1,9 +1,11 @@
 # factor_ic 启动日志去重 - 设计文档 v1.0
 
-**状态**: pending-review (骨架阶段，待补实施步骤)
+**状态**: implemented (2026-06-15)
 **作者**: 云瑶
 **创建**: 2026-06-15
+**实施完成**: 2026-06-15
 **预估工作量**: 2-3 小时（含审查 + 34 脚本批改）
+**实际工作量**: 与预估一致
 
 ---
 
@@ -404,3 +406,45 @@ grep -nE '"=" \* 60' factor_ic/common/factor_ic_runner.py          # 应有命�
 | 2026-06-15 | v1.0-skeleton | 骨架完成（目标/范围/方案对比/接口草案）；§6-10 待 1C 补 |
 | 2026-06-15 | v1.0-step1c | 1C 补完 §6 实施步骤 + §7 验证清单 |
 | 2026-06-15 | v1.0 | 1C 补完 §8 回滚 + §9 风险预案 + §10 MODULE.md 规范草稿；状态变更为 ready-to-execute |
+| 2026-06-15 | v1.0-implemented | 全部实施完成；状态置 implemented |
+
+---
+
+## 12. 实施记录（commit 表）
+
+| 阶段 | Commit | 改动 | 说明 |
+|------|--------|------|------|
+| R1.1 公共模块扩展 | `0709fe6` | +145 行 | `factor_ic_runner` 横幅扩展 + 8 单测 |
+| R1.2A-1 试点 5 脚本 | `5f14bea` | -28 净 | ic_amplitude_1d / ic_amplitude_delta_1d / ic_industry_amplitude_trend_1d / ic_intraday_intensity_1d / ic_past_return_1d_1d |
+| R1.2A-2 余批 24 脚本 | `d0531c4` | -136 净 | 风格 A 余下脚本批量迁移 |
+| R1.2B 含扩展参数 5 脚本 | `2bbddd9` | -32 净 | bollinger_pb / capital_flow_ratio_trend / kdj_j / rsi（风格 B）/ turnover_surge（风格 B + extra） |
+| R1.3 MODULE.md M3.2 规范 | `5a68fe4` | +95 | 新增 M3.2 入口启动日志收口规范 + v4.3 更新记录 |
+
+**累计**：5 commits，34 入口脚本启动日志统一收口至公共模块横幅，净增减 +44 行（横幅扩展 +145 抵消入口删除 -196 + 规范文档 +95）。
+
+## 13. R1.5 集成验证记录（2026-06-15）
+
+抽样 3 个脚本覆盖三种迁移模式：
+
+| 脚本 | 迁移模式 | 横幅行数 | 扩展参数 | JSON schema diff |
+|------|---------|---------|---------|------------------|
+| `ic_rsi_1d` | 风格 B、无扩展、`run_simple_factor_ic` | 3 | — | OK（76 键路径一致） |
+| `ic_kdj_j_1d` | 风格 A、含扩展 n/m1/m2、`run_complex_factor_ic` | 4 | `n=9, m1=3, m2=3` | OK（76 键路径一致） |
+| `ic_amplitude_delta_1d` | 风格 A、无扩展、`run_complex_factor_ic` | 3 | — | OK（76 键路径一致） |
+
+**横幅样例**（`ic_kdj_j_1d`）：
+
+```
+============================================================
+因子 IC 分析: kdj_j_1d
+入口参数: min_stocks=10, force_full=False
+扩展参数: n=9, m1=3, m2=3
+============================================================
+```
+
+**Verify**:
+1. ✓ 启动横幅每次执行**只出现 1 次**（不再有入口脚本重复打印）
+2. ✓ JSON schema 与基线完全一致（无字段增减/重命名）
+3. ✓ pytest factor_ic/test_cases/ **234 passed, 66 skipped**（无回归）
+
+**结论**：方案 ④ 实施完成，公共模块横幅 + `extra_log_params` 接口稳定，34 脚本统一收口。
