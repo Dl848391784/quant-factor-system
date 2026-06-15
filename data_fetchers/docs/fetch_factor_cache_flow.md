@@ -1,6 +1,6 @@
 # fetch_factor_cache.py 流程文档
 
-> 版本: v1.1
+> 版本: v1.2
 > 创建时间: 2026-05-26
 > 更新时间: 2026-06-15 北京时间
 
@@ -167,6 +167,12 @@ cache/factor_data/
 
 ## 版本历史
 
+- v1.2 (2026-06-15): 5 项控制流与失败路径修复
+  - **validate_final_data 状态机重写**：消除原 if/elif/独立-if 三段并存的歧义控制流，重写为清晰的两阶段状态机（阶段 A 进入 + 阶段 B 累计 + 共用归零收敛点），单行/多行 meta 路径对称（issue #1）
+  - **meta 内存释放对称化**：归零块同步 `del meta_content + del meta_lines + meta_lines = []`，与 sample_records 的 del 释放原则一致；移除"list 占用可忽略"的不准确注释（issue #2）
+  - **format_final_output 输出兜底校验**：调用后、validate_final_data 前显式校验 `factor_data.json.gz` / `return_data.json.gz` 是否存在，避免静默写入失败时对旧文件/不完整文件产生 is_valid=True 误判（issue #3）
+  - **末批 sleep(5) 跳过**：批次循环 `time.sleep(5)` 改为 `if batch_idx < total_batches - 1` 条件化，与子批次 `time.sleep(2)` 处理原则一致（issue #4）
+  - **零批次成功快速失败**：批次循环结束后 `if successful == 0` 立即记录明确错误日志并 return False，避免无意义进入 N-way merge 阶段（issue #5）
 - v1.1 (2026-06-15): 8 项稳健性修复
   - **validate_final_data meta 解析**：分离"进入分支(子串)"与"累计分支(stripped)"的 brace_count 统计；修复单行完整 meta 时 continue 导致的死循环（issue #1+#2）
   - **fetch_batch_stocks 截取稳定性**：`groupby.cumcount(ascending=False)` 之前显式 `sort_values(["asset","date"], kind="mergesort")` + reset_index，保证降序编号严格对应日期降序（issue #3）

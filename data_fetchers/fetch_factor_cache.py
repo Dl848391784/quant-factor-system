@@ -309,59 +309,60 @@ def validate_final_data(logger: logging.Logger | None = None) -> tuple[bool, int
             for line in f:
                 stripped = line.strip()
 
-                # ========== META 解析阶段 ==========
-                # 检测进入 meta
-                # 修复 issue #1: 进入 in_meta 时只对截取后的子串计算初始 brace_count，
-                #   不对整行 stripped 计算（原代码会把 "meta": 前的 { 也算进去）
-                # 修复 issue #2: 不再 continue，fall-through 到 in_meta 累计分支，
-                #   统一处理"单行完整 meta"的 brace_count 归零判断
-                if '"meta":' in stripped and not in_meta and not in_data:
-                    meta_start = stripped.find("{")
-                    if meta_start != -1:
-                        sub = stripped[meta_start:]
-                        meta_lines.append(sub)
-                        brace_count = sub.count("{") - sub.count("}")
-                        in_meta = True
-                        if brace_count == 0:
-                            # 单行 JSON：直接进入解析归零分支
-                            pass
-                        else:
-                            continue
-                    else:
-                        # 没有 { 起始（异常情况）：跳过本行
-                        continue
+                # ========== META 解析阶段（两阶段状态机）==========
+                # 修复 issue #1: 重写为清晰的两阶段单分支结构，消除原 if/elif/独立-if 三段并存的歧义控制流。
+                #   阶段 A: 检测到 '"meta":' 时进入 in_meta，截取子串并计算初始 brace_count；
+                #           若立即归零（单行完整 meta）则同步解析重置；否则 continue 等下一行。
+                #   阶段 B: in_meta 状态下后续行统一累计 brace_count，归零时解析重置。
+                #   两条路径都收敛到同一段"解析+重置"逻辑，单行/多行对称且 fall-through 无歧义。
+                # 修复 issue #2: 同步在重置块内 del meta_lines 并重新赋空列表，与 sample_records
+                #   的 del 释放原则一致；移除"list 占用可忽略"的不准确注释。
 
-                # 收集 meta 内容直到 brace_count == 0
-                # 注意：进入分支已对截取后的子串完成首行累计，此处只处理后续行（对完整 stripped 累计）
+                # 阶段 A: 进入 meta
+                if not in_meta and not in_data and '"meta":' in stripped:
+                    meta_start = stripped.find("{")
+                    if meta_start == -1:
+                        # 没有 { 起始（异常情况）：跳过本行，等下一行可能的 {
+                        continue
+                    sub = stripped[meta_start:]
+                    meta_lines.append(sub)
+                    brace_count = sub.count("{") - sub.count("}")
+                    in_meta = True
+                    if brace_count > 0:
+                        # 多行 meta：等后续行累计
+                        continue
+                    # brace_count == 0：单行完整 meta，fall-through 到下方阶段 B 的归零块统一处理
+                # 阶段 B: 已在 meta 内，累计后续行
                 elif in_meta:
                     meta_lines.append(stripped)
                     brace_count += stripped.count("{") - stripped.count("}")
 
+                # 归零处理（阶段 A 单行 meta 与阶段 B 多行 meta 共用收敛点）
+                if in_meta and brace_count == 0:
+                    # meta 结束，解析并提取信息
+                    # 去掉最后一行的尾部逗号（meta 后面有逗号因为还有 data 字段）
+                    if meta_lines and meta_lines[-1].endswith(","):
+                        meta_lines[-1] = meta_lines[-1].rstrip(",")
+                    meta_content = "\n".join(meta_lines)
+                    try:
+                        meta = json.loads(meta_content)
+                        n_days = meta.get("n_days", 0)
+                        n_assets = meta.get("n_assets", 0)
+                        n_records_in_meta = meta.get("n_records", 0)
+                        date_range = meta.get("date_range", {})
+                        date_start = date_range.get("start", "") if isinstance(date_range, dict) else ""
+                        date_end = date_range.get("end", "") if isinstance(date_range, dict) else ""
+                    except json.JSONDecodeError as e:
+                        logger.warning("  ⚠ meta 解析失败: %s", e)
+                    # 释放 meta 解析临时内存（与 sample_records 的 del 释放原则保持一致）
+                    del meta_content
+                    del meta_lines
+                    meta_lines = []
+                    gc.collect()
+                    in_meta = False
+                    continue
                 if in_meta:
-                    if brace_count == 0:
-                        # meta 结束，解析并提取信息
-                        # 去掉最后一行的尾部逗号（meta 后面有逗号因为还有 data 字段）
-                        if meta_lines and meta_lines[-1].endswith(","):
-                            meta_lines[-1] = meta_lines[-1].rstrip(",")
-                        meta_content = "\n".join(meta_lines)
-                        try:
-                            meta = json.loads(meta_content)
-                            n_days = meta.get("n_days", 0)
-                            n_assets = meta.get("n_assets", 0)
-                            n_records_in_meta = meta.get("n_records", 0)
-                            date_range = meta.get("date_range", {})
-                            date_start = date_range.get("start", "") if isinstance(date_range, dict) else ""
-                            date_end = date_range.get("end", "") if isinstance(date_range, dict) else ""
-                        except json.JSONDecodeError as e:
-                            logger.warning("  ⚠ meta 解析失败: %s", e)
-                        # 释放 meta 解析临时内存
-                        # 修复 issue #8: 删除多余的 meta_lines = [] 重置；
-                        #   in_meta 已置 False，后续循环不会再进入 meta 分支访问该变量。
-                        #   仅 del meta_content（拼接后的大字符串），保留 meta_lines 引用
-                        #   以避免静态分析 possibly-unbound 误报；list 对象本身占用可忽略。
-                        del meta_content
-                        gc.collect()
-                        in_meta = False
+                    # 阶段 B 累计中但尚未归零：本行已消费，等下一行
                     continue
 
                 # ========== DATA 解析阶段 ==========
@@ -523,11 +524,19 @@ def main() -> bool:
         # 批次间强制垃圾回收
         gc.collect()
         logger.info("  批次完成后内存: %s", get_memory_info_str())
-        time.sleep(5)  # 批次间休息时间增加
+        # 修复 issue #4: 末批跳过 sleep，避免无意义等待；与子批次循环
+        #   `if sub_idx < num_sub_batches - 1: time.sleep(2)` 的处理原则保持一致
+        if batch_idx < total_batches - 1:
+            time.sleep(5)  # 批次间休息时间增加
 
     logger.info("=" * 70)
     logger.info("拉取完成: 成功 %s/%s 批次", successful, total_batches)
     logger.info("=" * 70)
+
+    # 修复 issue #5: 无任何批次成功时立即快速失败，避免无意义进入 N-way merge
+    if successful == 0:
+        logger.error("  ✗ 无任何批次成功（successful=0/%s），中止合并阶段", total_batches)
+        return False
 
     # N-way merge 合并
     logger.info("[合并阶段] N-way merge 外部排序...")
@@ -549,6 +558,20 @@ def main() -> bool:
             output_version=_OUTPUT_VERSION,
             logger_arg=logger,
         )
+
+        # 修复 issue #3: format_final_output 当前签名返回 None（失败靠 raise 传递），
+        #   但仍需对最终输出文件做存在性兜底校验——若内部异常被吞、I/O 错误未覆盖、
+        #   或上游契约变更导致静默失败，validate_final_data 会对旧文件/不完整文件返回
+        #   误判 is_valid=True。提前返回避免误报。
+        factor_final_path = RESULT_DIR / "factor_data.json.gz"
+        return_final_path = RESULT_DIR / "return_data.json.gz"
+        if not factor_final_path.exists() or not return_final_path.exists():
+            logger.error(
+                "  ✗ 格式化最终输出失败：缺少输出文件 (factor=%s, return=%s)",
+                factor_final_path.exists(),
+                return_final_path.exists(),
+            )
+            return False
 
         # 验证（提供最终统计信息）
         is_valid, n_days, n_assets, n_records = validate_final_data(logger)
