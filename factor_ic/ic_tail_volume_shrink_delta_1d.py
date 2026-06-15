@@ -58,7 +58,11 @@ def main():
     args = parser.parse_args()
 
     # 调用前日志
-    logger.info(f"启动尾盘缩量差分因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+    logger.info(
+        "启动尾盘缩量差分因子IC计算: min_stocks=%s, force_full=%s",
+        args.min_stocks,
+        args.force_full,
+    )
 
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
@@ -106,7 +110,7 @@ def main():
         f"ICIR: {icir_str}",
         f"IC>0 占比: {positive_ratio_str}",
     ]
-    logger.info("\n" + "\n".join(summary_lines))
+    logger.info("\n%s", "\n".join(summary_lines))
 
     # 四字段告警
     if ic_mean is None:
@@ -127,7 +131,7 @@ if __name__ == "__main__":
     try:
         main()
     except FactorCalcError as e:
-        logger.error(f"尾盘缩量差分因子IC计算失败: {e}")
+        logger.error("尾盘缩量差分因子IC计算失败: %s", e)
         sys.exit(1)
     except Exception:
         logger.exception("未预期的错误")

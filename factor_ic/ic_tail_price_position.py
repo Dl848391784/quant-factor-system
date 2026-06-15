@@ -345,7 +345,7 @@ def main():
         "计算完成",
         "=" * 40,
     ]
-    logger.info("\n" + "\n".join(summary_lines))
+    logger.info("\n%s", "\n".join(summary_lines))
 
     # ic_mean 为 None 时额外输出 warning，便于告警系统捕获异常运行
     if ic_mean is None:

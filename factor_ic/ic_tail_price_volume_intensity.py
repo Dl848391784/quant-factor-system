@@ -220,7 +220,11 @@ def main():
     args = parser.parse_args()
 
     # 启动参数日志（便于追溯本次运行配置）
-    logger.info(f"启动尾盘量价强度因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+    logger.info(
+        "启动尾盘量价强度因子IC计算: min_stocks=%s, force_full=%s",
+        args.min_stocks,
+        args.force_full,
+    )
 
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
@@ -277,7 +281,7 @@ def main():
         f"ICIR: {icir_str}",
         f"正比例: {positive_ratio_str}",
     ]
-    logger.info("\n" + "\n".join(summary_lines))
+    logger.info("\n%s", "\n".join(summary_lines))
 
     # ic_mean 为 None 时额外输出 warning，便于告警系统捕获异常运行
     if ic_mean is None:

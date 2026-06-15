@@ -46,7 +46,11 @@ def main():
     parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
     args = parser.parse_args()
 
-    logger.info(f"启动行业盈利增长因子IC计算: min_stocks={args.min_stocks}, force_full={args.force_full}")
+    logger.info(
+        "启动行业盈利增长因子IC计算: min_stocks=%s, force_full=%s",
+        args.min_stocks,
+        args.force_full,
+    )
 
     result = run_complex_factor_ic(
         factor_name="industry_earnings_growth",
@@ -90,7 +94,7 @@ def main():
         f"ICIR: {icir_str}",
         f"IC>0 占比: {positive_ratio_str}",
     ]
-    logger.info("\n" + "\n".join(summary_lines))
+    logger.info("\n%s", "\n".join(summary_lines))
 
     if ic_mean is None:
         logger.warning("本次计算 IC 均值为空，请检查数据源")
@@ -109,7 +113,7 @@ if __name__ == "__main__":
     try:
         main()
     except FactorCalcError as e:
-        logger.error(f"行业盈利增长因子IC计算失败: {e}")
+        logger.error("行业盈利增长因子IC计算失败: %s", e)
         sys.exit(1)
     except Exception:
         logger.exception("未预期的错误")
