@@ -1,6 +1,6 @@
 # fetch_factor_cache.py 流程文档
 
-> 版本: v1.2
+> 版本: v1.3
 > 创建时间: 2026-05-26
 > 更新时间: 2026-06-15 北京时间
 
@@ -167,6 +167,11 @@ cache/factor_data/
 
 ## 版本历史
 
+- v1.3 (2026-06-15): 4 项注释精确化与可观测性补强
+  - **validate_final_data 守卫块必要性说明**：阶段 B 末尾 `if in_meta: continue` 守卫块**非冗余** — 若 meta 多行某行的字段值合法包含 `"data": [` 字面子串（如 fields 描述），缺失此守卫会 fall-through 污染 in_data 状态。注释从"本行已消费"改为明确防污染说明（issue #1）
+  - **末批 sleep 修复注释消歧**：v1.1 issue #4 是模块顶层 mkdir 副作用，v1.2 issue #4 是末批 sleep — 同编号不同问题。给 v1.2 修复注释加 `(v1.2，末批 sleep)` 版本前缀并交叉引用 v1.1 的 mkdir 修复行号（issue #2）
+  - **validate_final_data 文件不存在前置检查**：在 gzip.open 之前显式 `if not factor_path.exists()` 判断，用 logger.error 输出含完整路径的明确信息；与 IO 中途失败（保留 warning + path + 异常类型）两类错误区分处理（issue #3）
+  - **内存超阈值 warning 含子批次编号**：扩展 `⚠ 内存超阈值` warning 日志格式为 `⚠ [子批次 N/M] 内存超阈值 ...`，使内存压力下子批次粒度进度仍可追踪，与正常路径 logger.debug 输出对称（issue #4）
 - v1.2 (2026-06-15): 5 项控制流与失败路径修复
   - **validate_final_data 状态机重写**：消除原 if/elif/独立-if 三段并存的歧义控制流，重写为清晰的两阶段状态机（阶段 A 进入 + 阶段 B 累计 + 共用归零收敛点），单行/多行 meta 路径对称（issue #1）
   - **meta 内存释放对称化**：归零块同步 `del meta_content + del meta_lines + meta_lines = []`，与 sample_records 的 del 释放原则一致；移除"list 占用可忽略"的不准确注释（issue #2）

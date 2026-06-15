@@ -159,10 +159,13 @@ def fetch_batch_stocks(
 
         # 内存监控：超过阈值时暂停
         # 修复 issue #6: 暂停后 continue 跳过本次固定 sleep(2)，避免双重等待累积
+        # 修复 issue #4（v1.3）: warning 日志补充子批次编号，使内存压力下进度仍可追踪
         mem_mb = get_memory_usage_mb()
         if mem_mb > MEMORY_THRESHOLD_MB:
             logger.warning(
-                "  ⚠ 内存超阈值 (%.1fMB > %sMB)，暂停 %ss...",
+                "  ⚠ [子批次 %s/%s] 内存超阈值 (%.1fMB > %sMB)，暂停 %ss...",
+                sub_idx + 1,
+                num_sub_batches,
                 mem_mb,
                 MEMORY_THRESHOLD_MB,
                 MEMORY_PAUSE_SECONDS,
@@ -285,6 +288,15 @@ def validate_final_data(logger: logging.Logger | None = None) -> tuple[bool, int
 
     factor_path = RESULT_DIR / "factor_data.json.gz"
 
+    # 修复 issue #3（v1.3）: 前置文件存在性检查。
+    #   gzip.open 在文件不存在时抛 FileNotFoundError，会被外层 except 兜底为
+    #   "⚠ 文件扫描失败"的 warning，但缺少路径信息且严重程度偏低。
+    #   验证文件根本不存在属于"严重错误"而非"扫描中途 IO 失败"，应用 logger.error
+    #   打印含完整路径的明确信息，与 IO 读取失败两类错误区分处理。
+    if not factor_path.exists():
+        logger.error("  ✗ 验证失败：最终输出文件不存在 path=%s", factor_path)
+        return False, 0, 0, 0
+
     # 初始化默认值
     n_days = 0
     n_assets = 0
@@ -362,7 +374,14 @@ def validate_final_data(logger: logging.Logger | None = None) -> tuple[bool, int
                     in_meta = False
                     continue
                 if in_meta:
-                    # 阶段 B 累计中但尚未归零：本行已消费，等下一行
+                    # 修复 issue #1（v1.3）: 守卫块**必要**，非冗余。
+                    #   阶段 B 累计行（elif in_meta）若 brace_count > 0 未归零，
+                    #   缺少此 continue 会 fall-through 到下方 DATA 解析阶段的
+                    #   `if '"data": [' in stripped` 检测——若 meta 内某字段值或
+                    #   嵌套结构中合法包含字符串 `"data": [`（例如 fields 字段值
+                    #   含此子串），会误触发 in_data=True 污染状态机。
+                    #   本块拦截所有"in_meta=True 且本行未归零"的多行累计路径，
+                    #   保证 meta/data 阶段严格隔离。
                     continue
 
                 # ========== DATA 解析阶段 ==========
@@ -386,7 +405,9 @@ def validate_final_data(logger: logging.Logger | None = None) -> tuple[bool, int
                             pass  # 抽样解析失败不影响计数
 
     except Exception as e:
-        logger.warning("  ⚠ 文件扫描失败: %s", e)
+        # 修复 issue #3（v1.3）: 区分文件不存在（前置已拦截）与 IO/解析失败两类错误。
+        #   到达此处说明文件存在但读取/解析中途异常，仍用 warning 级别并附带路径与异常类型。
+        logger.warning("  ⚠ 文件扫描失败: path=%s, [%s]: %s", factor_path, type(e).__name__, e)
         return False, 0, 0, 0
 
     logger.info("  交易日数: %s", n_days)
@@ -524,8 +545,10 @@ def main() -> bool:
         # 批次间强制垃圾回收
         gc.collect()
         logger.info("  批次完成后内存: %s", get_memory_info_str())
-        # 修复 issue #4: 末批跳过 sleep，避免无意义等待；与子批次循环
-        #   `if sub_idx < num_sub_batches - 1: time.sleep(2)` 的处理原则保持一致
+        # 修复 issue #4（v1.2，末批 sleep）: 末批跳过 sleep，避免无意义等待；
+        #   与子批次循环 `if sub_idx < num_sub_batches - 1: time.sleep(2)` 处理一致
+        #   注：v1.1 的 issue #4 是模块顶层 mkdir 副作用消除（见 line 94/445），
+        #   两轮修复编号同为 #4 但属不同问题，此注释明确版本以消歧。
         if batch_idx < total_batches - 1:
             time.sleep(5)  # 批次间休息时间增加
 
