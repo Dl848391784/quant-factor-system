@@ -4,6 +4,16 @@
 
 职责：从 API 获取股票历史数据（OHLCV K线）
 
+公开接口（__all__）：
+- RealDataLoader: 数据加载器主类
+- get_module_logger: logger 工厂函数
+- PermanentFailureError: 永久性失败异常
+- MIN_VALID_ROWS: 单只股票"有效行数"阈值（=15），同步暴露给调用方做二次校验，
+  以保证调用方与 _get_api_stock_history/_fetch_single_stock_with_retry 三处阈值一致。
+  推荐外部使用：直接 from data_fetchers.data_loader import MIN_VALID_ROWS。
+- KLINE_SCALE_DAILY: 新浪 K 线 scale 参数日线值（=240），仅作模块内部魔法数字消除使用。
+  外部一般无需引用；如需对接其他周期，请新增对应常量而非复用此值。
+
 版本历史：
 - v1.0 (2026-04-01): 首次创建（云舟）
 - v2.0 (2026-05-27): 简化重构
@@ -35,6 +45,14 @@
   - get_stock_history 入口校验 stock_code/days 参数
   - _fetch_stock_batch_parallel ThreadError 改用 logger.exception 保留完整堆栈
   - _get_local_stock_history 成功路径补 debug 日志（含 file_path/rows）
+- v2.4 (2026-06-15): 问题修复
+  - _fetch_stock_batch_parallel Note 补充 stocks 长度为 1 的边界行为说明
+  - _fetch_stock_batch_parallel 跳过对空分片的线程提交，避免无意义任务
+  - get_stock_history bool 守卫补行内注释，防止维护者误删
+  - _get_local_stock_history 改用 result = df.tail(days)，保证日志 rows 与返回行数严格一致
+  - _fetch_single_stock_with_retry 抖动公式补注释（最大额外延迟 = delay * 0.095）
+  - 模块 docstring 补"公开接口"段，明确 MIN_VALID_ROWS 推荐外部引用、KLINE_SCALE_DAILY 不推荐
+  - _get_api_stock_history 单条解析失败补 debug 日志（含 stock_code/损坏 item/异常类型）
 """
 
 # 标准库导入
@@ -71,10 +89,13 @@ KLINE_URL = "https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getK
 LOCAL_DATA_DIR = os.path.expanduser("~/projects/factor_ic_analyzer/data")
 
 # 新浪 K 线接口 scale 参数：240 表示日线（60=60分钟，30=30分钟，15=15分钟，5=5分钟）
+# 公开导出仅为消除模块内魔法数字；不推荐外部模块引用此值做语义判断
 KLINE_SCALE_DAILY = 240
 
 # 单只股票 K 线被视为"有效"的最小行数；少于此值视为数据不足，触发重试或丢弃
 # 同时被 _get_api_stock_history 的有效行数校验和 _fetch_single_stock_with_retry 的成功判定引用
+# **推荐外部引用**：调用方（如 fetch_factor_cache.py）应 import 此常量做二次校验，
+# 保证"加载器内部判定"与"调用方过滤逻辑"使用同一阈值，避免改一处漏一处
 MIN_VALID_ROWS = 15
 
 # ============================================================================
@@ -187,6 +208,9 @@ class RealDataLoader:
             raise TypeError(f"stock_code 必须是 str，实际类型: {type(stock_code).__name__}")
         if not stock_code:
             raise ValueError("stock_code 不能为空字符串")
+        # bool 是 int 的子类（True == 1, False == 0），isinstance(True, int) 返回 True，
+        # 因此必须用 isinstance(days, bool) 单独排除，否则 get_stock_history("600000", True) 会被误放行。
+        # 维护时请勿删除此 bool 守卫。
         if not isinstance(days, int) or isinstance(days, bool):
             raise TypeError(f"days 必须是 int，实际类型: {type(days).__name__}")
         if days <= 0:
@@ -220,15 +244,16 @@ class RealDataLoader:
             required_cols = ["date", "open", "high", "low", "close", "volume", "asset"]
             df = df[required_cols]
 
-            # 与 API 路径日志密度对齐：成功读取也记录文件路径与实际返回行数
-            # tail(days) 在 len(df) < days 时返回全部，此处用 min 等价地推算最终行数
+            # 严格保证日志 rows 与 return 行数一致：先取 tail 结果，再用 len 打日志、再 return
+            # （此前用 min(len(df), days) 推算的方式在某些边界下可能与 tail 实际行数不一致）
+            result = df.tail(days)
             self._logger.debug(
                 "本地数据读取成功: stock_code=%s, file=%s, rows=%s",
                 stock_code,
                 data_file,
-                min(len(df), days),
+                len(result),
             )
-            return df.tail(days)
+            return result
         except Exception as e:
             # CSV文件损坏、缺少必需列或列类型异常
             self._logger.warning(
@@ -298,7 +323,16 @@ class RealDataLoader:
                             "volume": float(item.get("volume", 0)),
                         }
                     )
-                except (ValueError, TypeError):
+                except (ValueError, TypeError) as item_err:
+                    # 单条 K 线字段类型异常时跳过，但必须记录 debug 日志
+                    # 否则大量字段损坏会被静默丢弃，数据质量问题无法追踪
+                    self._logger.debug(
+                        "[ItemParseError] 跳过损坏的K线: stock_code=%s, item=%s, error_type=%s, error=%s",
+                        stock_code,
+                        item,
+                        type(item_err).__name__,
+                        item_err,
+                    )
                     continue
 
             if len(rows) < MIN_VALID_ROWS:
@@ -357,6 +391,9 @@ class RealDataLoader:
             self._request_count += 1
             request_id = self._request_count
 
+        # 基于请求序号的轻微抖动：jitter_factor = 1 + (request_id % 20) * 0.005
+        # → 抖动因子范围 [1.000, 1.095]，最大额外延迟 = delay * 0.095
+        # 目的：错开高并发下的请求时序，降低瞬时请求峰值；幅度足够小不显著影响整体节流
         time.sleep(delay * (1 + (request_id % 20) * 0.005))
 
         for attempt in range(self.retries):
@@ -440,12 +477,16 @@ class RealDataLoader:
             - 内部将 stocks 二等分：前半部分交给 thread_a，后半部分交给 thread_b
             - 并发数固定为 2，避免触发 API 频率限制
             - 长度为奇数时，thread_b 多 1 只
+            - **stocks 长度为 1 时，mid=0：thread_a 为空列表，仅 thread_b 工作**
+              （此时实际为单线程串行，是边界场景下可接受的退化行为）
             - 空列表直接返回 []，不创建线程池
+            - 任一分片为空时跳过提交对应线程任务，避免为空列表创建无意义的线程
         """
         if not stocks:
             return []
 
         # 内部二等分：将线程分配职责封装在方法内，调用方不应关心线程内部数据分配
+        # 边界：len(stocks) == 1 时 mid=0 → thread_a=[]，thread_b=[stocks[0]]
         mid = len(stocks) // 2
         stocks_for_thread_a = stocks[:mid]
         stocks_for_thread_b = stocks[mid:]
@@ -453,10 +494,16 @@ class RealDataLoader:
         all_results: list[tuple[str, pd.DataFrame | None]] = []
 
         with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = {
-                executor.submit(self._fetch_stock_batch, stocks_for_thread_a, days, progress_callback): "thread_a",
-                executor.submit(self._fetch_stock_batch, stocks_for_thread_b, days, progress_callback): "thread_b",
-            }
+            # 仅对非空分片提交线程任务；空分片提交相当于让线程跑一次零长度循环，浪费调度开销
+            futures: dict = {}
+            if stocks_for_thread_a:
+                futures[executor.submit(self._fetch_stock_batch, stocks_for_thread_a, days, progress_callback)] = (
+                    "thread_a"
+                )
+            if stocks_for_thread_b:
+                futures[executor.submit(self._fetch_stock_batch, stocks_for_thread_b, days, progress_callback)] = (
+                    "thread_b"
+                )
 
             # 使用 as_completed 避免顺序阻塞等待
             for future in as_completed(futures):
