@@ -92,8 +92,6 @@ from pathlib import Path
 # ============================================================================
 # 类型导入
 # ============================================================================
-import numpy as np
-
 # ============================================================================
 # 第三方库导入
 # ============================================================================
@@ -187,6 +185,16 @@ from .basic import (  # noqa: F401
 )
 
 # ============================================================================
+# 子模块 delta re-import（PR-3：止跌信号差分族 4 个因子已搬到 .delta）
+# ============================================================================
+from .delta import (  # noqa: F401
+    calculate_amplitude_delta,
+    calculate_tail_price_position_delta,
+    calculate_tail_volume_shrink_delta,
+    calculate_turnover_surge_delta,
+)
+
+# ============================================================================
 # 子模块 momentum re-import（PR-2c：动量族因子已搬到 .momentum，本文件 re-export
 # 维持 `from ._legacy import *` 通配兼容 + __all__ 中名称仍有效）
 # ============================================================================
@@ -198,6 +206,16 @@ from .momentum import (  # noqa: F401
     calculate_price_position,
     calculate_return_3d,
     calculate_return_5d,
+)
+
+# ============================================================================
+# 子模块 volume_price re-import（PR-3：量价合成族 4 个因子已搬到 .volume_price）
+# ============================================================================
+from .volume_price import (  # noqa: F401
+    calculate_ma5_deviation,
+    calculate_near_high_ratio_5,
+    calculate_positive_day_ratio_5,
+    calculate_volume_price_strength,
 )
 
 
@@ -402,116 +420,21 @@ __all__ = [
 # ============================================================================
 
 
-def calculate_amplitude_delta(factor_df: pd.DataFrame, logger_arg: logging.Logger | None = None) -> pd.DataFrame:
-    """振幅差分因子：amplitude(T) - amplitude(T-1)
-
-    含义：振幅从低开始回升 = 止跌放量信号；振幅继续下降 = 闷跌加剧。
-
-    参数:
-        factor_df: 包含 date, asset, amplitude 列的 DataFrame
-        logger_arg: 调用方传入的 logger
-
-    返回:
-        添加 amplitude_delta 列的 DataFrame
-
-    边界处理:
-        - 第一日无前值 → NaN（自然排除）
-        - amplitude 为 NaN → delta 也为 NaN（传播）
-
-    Example:
-        >>> df = pd.DataFrame({"asset": ["A", "A"], "date": ["d1", "d2"], "amplitude": [0.04, 0.06]})
-        >>> result = calculate_amplitude_delta(df)
-        >>> pd.isna(result["amplitude_delta"].iloc[0])
-        True
-        >>> result["amplitude_delta"].iloc[1]  # 0.06 - 0.04
-        0.02
-    """
-    return _calculate_delta(factor_df, _COL_AMPLITUDE, _COL_AMPLITUDE_DELTA, logger_arg)
+# (PR-3) calculate_amplitude_delta: 已迁移至 .delta / .volume_price 子模块（design.md §5.4-5.5）；
+# 由本文件顶部 `from .delta import calculate_amplitude_delta` 维持向后兼容。
 
 
-def calculate_turnover_surge_delta(factor_df: pd.DataFrame, logger_arg: logging.Logger | None = None) -> pd.DataFrame:
-    """换手突增差分因子：turnover_surge(T) - turnover_surge(T-1)
-
-    含义：换手从低开始增加 = 市场关注回升；继续下降 = 无人关注。
-
-    参数:
-        factor_df: 包含 date, asset, turnover_surge 列的 DataFrame
-        logger_arg: 调用方传入的 logger
-
-    返回:
-        添加 turnover_surge_delta 列的 DataFrame
-
-    边界处理:
-        - 第一日无前值 → NaN（自然排除）
-        - turnover_surge 为 NaN → delta 也为 NaN（传播）
-
-    Example:
-        >>> df = pd.DataFrame({"asset": ["A", "A"], "date": ["d1", "d2"], "turnover_surge": [0.5, 0.8]})
-        >>> result = calculate_turnover_surge_delta(df)
-        >>> result["turnover_surge_delta"].iloc[1]  # 0.8 - 0.5
-        0.3
-    """
-    return _calculate_delta(factor_df, _COL_TURNOVER_SURGE, _COL_TURNOVER_SURGE_DELTA, logger_arg)
+# (PR-3) calculate_turnover_surge_delta: 已迁移至 .delta / .volume_price 子模块（design.md §5.4-5.5）；
+# 由本文件顶部 `from .delta import calculate_turnover_surge_delta` 维持向后兼容。
 
 
-def calculate_tail_price_position_delta(
-    factor_df: pd.DataFrame, logger_arg: logging.Logger | None = None
-) -> pd.DataFrame:
-    """尾盘位置差分因子：tail_price_position(T) - tail_price_position(T-1)
-
-    含义：尾盘从最低价回升 = 买盘开始进场；继续走低 = 卖方主导。
-
-    参数:
-        factor_df: 包含 date, asset, tail_price_position 列的 DataFrame
-        logger_arg: 调用方传入的 logger
-
-    返回:
-        添加 tail_price_position_delta 列的 DataFrame
-
-    边界处理:
-        - 第一日无前值 → NaN（自然排除）
-        - tail_price_position 为 NaN → delta 也为 NaN（传播）
-
-    Example:
-        >>> df = pd.DataFrame({"asset": ["A", "A"], "date": ["d1", "d2"], "tail_price_position": [0.0, 0.5]})
-        >>> result = calculate_tail_price_position_delta(df)
-        >>> result["tail_price_position_delta"].iloc[1]  # 0.5 - 0.0
-        0.5
-    """
-    return _calculate_delta(factor_df, "tail_price_position", _COL_TAIL_PRICE_POSITION_DELTA, logger_arg)
+# (PR-3) calculate_tail_price_position_delta: 已迁移至 .delta / .volume_price 子模块（design.md §5.4-5.5）；
+# 由本文件顶部 `from .delta import calculate_tail_price_position_delta` 维持向后兼容。
 
 
-def calculate_tail_volume_shrink_delta(
-    factor_df: pd.DataFrame, logger_arg: logging.Logger | None = None
-) -> pd.DataFrame:
-    """尾盘缩量差分因子：tail_volume_shrink(T) - tail_volume_shrink(T-1)
+# (PR-3) calculate_tail_volume_shrink_delta: 已迁移至 .delta / .volume_price 子模块（design.md §5.4-5.5）；
+# 由本文件顶部 `from .delta import calculate_tail_volume_shrink_delta` 维持向后兼容。
 
-    含义：尾盘从缩量转放量 = 资金开始介入；继续缩量 = 冷清。
-
-    参数:
-        factor_df: 包含 date, asset, tail_volume_shrink 列的 DataFrame
-        logger_arg: 调用方传入的 logger
-
-    返回:
-        添加 tail_volume_shrink_delta 列的 DataFrame
-
-    边界处理:
-        - 第一日无前值 → NaN（自然排除）
-        - tail_volume_shrink 为 NaN → delta 也为 NaN（传播）
-
-    Example:
-        >>> df = pd.DataFrame({"asset": ["A", "A"], "date": ["d1", "d2"], "tail_volume_shrink": [0.2, 0.3]})
-        >>> result = calculate_tail_volume_shrink_delta(df)
-        >>> result["tail_volume_shrink_delta"].iloc[1]  # 0.3 - 0.2
-        0.1
-    """
-    return _calculate_delta(factor_df, "tail_volume_shrink", _COL_TAIL_VOLUME_SHRINK_DELTA, logger_arg)
-
-
-calculate_amplitude_delta.required_cols = ["amplitude"]  # type: ignore[attr-defined]
-calculate_turnover_surge_delta.required_cols = ["turnover_surge"]  # type: ignore[attr-defined]
-calculate_tail_price_position_delta.required_cols = ["tail_price_position"]  # type: ignore[attr-defined]
-calculate_tail_volume_shrink_delta.required_cols = ["tail_volume_shrink"]  # type: ignore[attr-defined]
 
 # ============================================================================
 # 方向性因子（Directional Factors）
@@ -526,208 +449,20 @@ calculate_tail_volume_shrink_delta.required_cols = ["tail_volume_shrink"]  # typ
 # ============================================================================
 
 
-def calculate_volume_price_strength(
-    factor_df: pd.DataFrame,
-    *,
-    logger_arg: logging.Logger | None = None,
-) -> pd.DataFrame:
-    """计算量价齐升强度因子
-
-    公式: volume_price_strength = (close - open) / open × turnover_surge
-
-    含义:
-    - 高正值: 日内大幅上涨 + 高换手突增 = 放量上涨（强势）
-    - 高负值: 日内大幅下跌 + 高换手突增 = 放量下跌（弱势）
-    - 近零值: 小幅波动或低换手 = 无明确方向
-
-    边界处理:
-    - open = 0 → intraday_return = inf/NaN → 整行 NaN
-    - turnover_surge = NaN → 结果 NaN（传播）
-
-    遵循 H5: IC方向不预判
-    """
-    _logger = get_module_logger(logger_arg)
-
-    df = factor_df.copy()
-
-    # 计算日内涨幅 (close - open) / open
-    intraday_return = (df[_COL_CLOSE] - df[_COL_OPEN]) / df[_COL_OPEN]
-
-    # 乘以换手突增系数
-    df[_COL_VOLUME_PRICE_STRENGTH] = intraday_return * df["turnover_surge"]
-
-    valid_count = int(df[_COL_VOLUME_PRICE_STRENGTH].notna().sum())
-    _logger.info(
-        "  有效 %s: %d (%.2f%%)",
-        _COL_VOLUME_PRICE_STRENGTH,
-        valid_count,
-        valid_count / len(df) * 100 if len(df) > 0 else 0,
-    )
-
-    return df
+# (PR-3) calculate_volume_price_strength: 已迁移至 .delta / .volume_price 子模块（design.md §5.4-5.5）；
+# 由本文件顶部 `from .volume_price import calculate_volume_price_strength` 维持向后兼容。
 
 
-calculate_volume_price_strength.required_cols = ["open", "close", "turnover_surge"]  # type: ignore[attr-defined]
+# (PR-3) calculate_positive_day_ratio_5: 已迁移至 .delta / .volume_price 子模块（design.md §5.4-5.5）；
+# 由本文件顶部 `from .volume_price import calculate_positive_day_ratio_5` 维持向后兼容。
 
 
-def calculate_positive_day_ratio_5(
-    factor_df: pd.DataFrame,
-    *,
-    logger_arg: logging.Logger | None = None,
-) -> pd.DataFrame:
-    """计算近5日阳线比例因子
-
-    公式: positive_day_ratio_5 = count(close > prev_close, 最近5日) / 5
-
-    含义:
-    - 值接近1.0: 近5日全部上涨 = 强上升趋势
-    - 值接近0.0: 近5日全部下跌 = 强下降趋势
-    - 值接近0.5: 上涨下跌交替 = 无明确趋势
-
-    边界处理:
-    - 前4天无完整5日窗口 → NaN（自然排除）
-    - 全NaN组 → NaN
-
-    遵循 H5: IC方向不预判
-    """
-    _logger = get_module_logger(logger_arg)
-
-    df = factor_df.copy()
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
-
-    # 按asset分组计算日收益率
-    daily_return = df.groupby(_COL_ASSET)[_COL_CLOSE].diff()
-
-    # 阳线标记（日收益率 > 0）
-    positive_mask = (daily_return > 0).astype(float)
-
-    # rolling 5日窗口计算阳线比例，min_periods=5确保前4天为NaN
-    ratio = positive_mask.groupby(df[_COL_ASSET]).rolling(5, min_periods=5).mean().reset_index(level=0, drop=True)
-
-    df[_COL_POSITIVE_DAY_RATIO_5] = ratio
-
-    valid_count = int(df[_COL_POSITIVE_DAY_RATIO_5].notna().sum())
-    _logger.info(
-        "  有效 %s: %d (%.2f%%)",
-        _COL_POSITIVE_DAY_RATIO_5,
-        valid_count,
-        valid_count / len(df) * 100 if len(df) > 0 else 0,
-    )
-
-    return df
+# (PR-3) calculate_ma5_deviation: 已迁移至 .delta / .volume_price 子模块（design.md §5.4-5.5）；
+# 由本文件顶部 `from .volume_price import calculate_ma5_deviation` 维持向后兼容。
 
 
-calculate_positive_day_ratio_5.required_cols = ["date", "asset", "close"]  # type: ignore[attr-defined]
-
-
-def calculate_ma5_deviation(
-    factor_df: pd.DataFrame,
-    *,
-    logger_arg: logging.Logger | None = None,
-) -> pd.DataFrame:
-    """计算5日均线偏离度因子
-
-    公式: ma5_deviation = (close - MA5) / MA5
-
-    含义:
-    - 正值: 收盘价在5日均线之上 = 多头区域（上升趋势）
-    - 负值: 收盘价在5日均线之下 = 空头区域（下降趋势）
-    - 近零值: 收盘价贴近均线 = 趋势不明
-
-    边界处理:
-    - 前4天无完整5日窗口 → NaN
-    - MA5 = 0 → NaN（极少见，A股收盘价不为0）
-    - 比率型因子分母趋近零 → clip(lower=0.01)保护（遵循 Pitfall #47）
-
-    遵循 H5: IC方向不预判
-    """
-    _logger = get_module_logger(logger_arg)
-
-    df = factor_df.copy()
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
-
-    # 计算5日移动平均线
-    ma5 = df.groupby(_COL_ASSET)[_COL_CLOSE].rolling(5, min_periods=5).mean().reset_index(level=0, drop=True)
-
-    # MA5 = 0 时替换为 NaN（避免除零）
-    ma5_safe = ma5.replace(0, np.nan)
-
-    # 比率型因子分母趋近零保护（遵循 Pitfall #47）
-    ma5_safe = ma5_safe.clip(lower=0.01)
-
-    # 计算偏离度
-    df[_COL_MA5_DEVIATION] = (df[_COL_CLOSE] - ma5_safe) / ma5_safe
-
-    valid_count = int(df[_COL_MA5_DEVIATION].notna().sum())
-    _logger.info(
-        "  有效 %s: %d (%.2f%%)",
-        _COL_MA5_DEVIATION,
-        valid_count,
-        valid_count / len(df) * 100 if len(df) > 0 else 0,
-    )
-
-    return df
-
-
-calculate_ma5_deviation.required_cols = ["date", "asset", "close"]  # type: ignore[attr-defined]
-
-
-def calculate_near_high_ratio_5(
-    factor_df: pd.DataFrame,
-    *,
-    logger_arg: logging.Logger | None = None,
-) -> pd.DataFrame:
-    """计算近5日高低位置因子
-
-    公式: near_high_ratio_5 = (close - min(close,5日)) / (max(close,5日) - min(close,5日))
-
-    含义:
-    - 值接近1.0: 收盘价在近5日最高点附近 = 强势（接近高点）
-    - 值接近0.0: 收盘价在近5日最低点附近 = 弱势（接近低点）
-    - 值接近0.5: 在中间位置 = 趋势中性
-
-    边界处理:
-    - 前4天无完整5日窗口 → NaN
-    - 涨跌停一字板: max=min → diff=0 → position=1.0（遵循 Pitfall #45）
-      涨停: 收盘价=近5日最高=最强信号 → 1.0
-      跌停: 收盘价=近5日最低=最弱信号 → 但此时close=min, diff=0 → 也返回1.0
-      注意: 与price_position不同，这里5日窗口的涨跌停处理需进一步验证
-
-    遵循 H5: IC方向不预判
-    """
-    _logger = get_module_logger(logger_arg)
-
-    df = factor_df.copy()
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
-
-    # 计算5日滚动最高价和最低价
-    roll_max = df.groupby(_COL_ASSET)[_COL_CLOSE].rolling(5, min_periods=5).max().reset_index(level=0, drop=True)
-    roll_min = df.groupby(_COL_ASSET)[_COL_CLOSE].rolling(5, min_periods=5).min().reset_index(level=0, drop=True)
-
-    # 计算高低价差
-    diff = roll_max - roll_min
-
-    # 涨跌停一字板处理：diff=0时，收盘价在区间最高点 → position=1.0（遵循 Pitfall #45）
-    position = np.where(
-        diff == 0,
-        1.0,  # 涨跌停：收盘价锁定在极端位置 → 最强信号
-        (df[_COL_CLOSE] - roll_min) / diff,
-    )
-
-    df[_COL_NEAR_HIGH_RATIO_5] = position
-
-    valid_count = int(df[_COL_NEAR_HIGH_RATIO_5].notna().sum())
-    _logger.info(
-        "  有效 %s: %d (%.2f%%)",
-        _COL_NEAR_HIGH_RATIO_5,
-        valid_count,
-        valid_count / len(df) * 100 if len(df) > 0 else 0,
-    )
-
-    return df
-
-
-calculate_near_high_ratio_5.required_cols = ["date", "asset", "close"]  # type: ignore[attr-defined]
+# (PR-3) calculate_near_high_ratio_5: 已迁移至 .delta / .volume_price 子模块（design.md §5.4-5.5）；
+# 由本文件顶部 `from .volume_price import calculate_near_high_ratio_5` 维持向后兼容。
 
 
 # ============================================================================
