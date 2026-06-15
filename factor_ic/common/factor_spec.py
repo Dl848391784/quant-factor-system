@@ -95,8 +95,8 @@ def _validate_spec(spec: FactorSpec) -> None:
                 f"FactorSpec({spec.factor_name}) required_columns 列名 '{col}' 含非小写字母/数字/下划线/点字符"
             )
 
-    # 4. factor_col 在 required_columns 中
-    if spec.factor_col not in spec.required_columns:
+    # 4. factor_col 在 required_columns 中（仅简单因子；复杂因子有 calculation 时 factor_col 是计算产出，非输入依赖）
+    if spec.calculation is None and spec.factor_col not in spec.required_columns:
         raise ValueError(
             f"FactorSpec({spec.factor_name}) factor_col='{spec.factor_col}' 不在 required_columns {spec.required_columns} 中"
         )

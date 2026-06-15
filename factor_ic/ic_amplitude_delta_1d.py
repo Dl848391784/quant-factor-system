@@ -26,8 +26,17 @@ import sys
 from pathlib import Path
 
 
-# 添加项目路径
+# 添加项目路径（若脚本被移动或项目结构调整，下方断言将立即暴露问题）
 sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
+
+# 路径有效性断言：验证关键包可导入（防止 sys.path.insert 静默失效）
+try:
+    import factor_ic as _path_check  # noqa: E402, F401 — 路径有效性校验，不使用模块
+except ImportError as _path_err:
+    raise AssertionError(
+        f"无法定位 factor_ic 包，sys.path.insert 添加的路径可能无效: "
+        f"{Path(__file__).parent.parent}"
+    ) from _path_err
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 # 从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
@@ -52,7 +61,7 @@ SPEC = register_factor(
     FactorSpec(
         factor_name="amplitude_delta",
         factor_col="amplitude_delta",
-        required_columns=JOIN_KEYS + ("amplitude", "amplitude_delta"),
+        required_columns=JOIN_KEYS + ("amplitude",),
         calculation=calculate_amplitude_delta,
     )
 )
@@ -82,13 +91,11 @@ def main():
 
     # 防御性检查：result 为 None 时抛出业务异常（遵循 PROJECT.md 异常处理规范）
     if result is None:
+        logger.error("run_factor_ic 返回 None，数据加载或计算可能失败")
         raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
 
     # 输出 IC 摘要 + None 状态整合告警（公共模块,M3.1）
     log_factor_summary(result, "振幅差分因子", logger)
-
-    # 确认结果处理完成后才输出"计算完成"日志
-    logger.info("振幅差分因子IC计算完成")
 
     return result
 

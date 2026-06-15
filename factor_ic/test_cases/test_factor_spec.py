@@ -118,7 +118,7 @@ class TestRegisterFactorValidation:
         assert "digit_factor" in FACTOR_REGISTRY
 
     def test_factor_col_not_in_required_raises(self):
-        """规则 4: factor_col 在 required_columns 中。"""
+        """规则 4: 简单因子（calculation=None）factor_col 必须在 required_columns 中。"""
         with pytest.raises(ValueError, match="不在 required_columns"):
             register_factor(
                 FactorSpec(
@@ -127,6 +127,20 @@ class TestRegisterFactorValidation:
                     required_columns=("date", "asset", "other_col"),
                 )
             )
+
+    def test_complex_factor_col_not_in_required_allowed(self):
+        """规则 4: 复杂因子（有 calculation）factor_col 可不在 required_columns 中。"""
+        spec = register_factor(
+            FactorSpec(
+                factor_name="complex_no_input_col",
+                factor_col="computed_col",
+                required_columns=("date", "asset", "input_col"),
+                calculation=lambda df: df,
+            )
+        )
+        assert "complex_no_input_col" in FACTOR_REGISTRY
+        assert spec.factor_col == "computed_col"
+        assert "computed_col" not in spec.required_columns
 
     def test_duplicate_registration_raises(self):
         """规则 5: 不可覆盖注册。"""
