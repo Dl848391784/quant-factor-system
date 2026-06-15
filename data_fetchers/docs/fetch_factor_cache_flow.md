@@ -1,8 +1,8 @@
 # fetch_factor_cache.py 流程文档
 
-> 版本: v1.0
+> 版本: v1.1
 > 创建时间: 2026-05-26
-> 更新时间: 2026-05-26 03:30 北京时间
+> 更新时间: 2026-06-15 北京时间
 
 ---
 
@@ -167,10 +167,18 @@ cache/factor_data/
 
 ## 版本历史
 
+- v1.1 (2026-06-15): 8 项稳健性修复
+  - **validate_final_data meta 解析**：分离"进入分支(子串)"与"累计分支(stripped)"的 brace_count 统计；修复单行完整 meta 时 continue 导致的死循环（issue #1+#2）
+  - **fetch_batch_stocks 截取稳定性**：`groupby.cumcount(ascending=False)` 之前显式 `sort_values(["asset","date"], kind="mergesort")` + reset_index，保证降序编号严格对应日期降序（issue #3）
+  - **import 副作用消除**：模块级 `RESULT_DIR.mkdir` 移入 main() 首次使用前调用（issue #4）
+  - **finally 健壮性**：main() 顶部初始化 `total_batches = 0`，避免 batches 计算前抛异常时 finally 块触发 UnboundLocalError（issue #5）
+  - **冗余等待消除**：子批次内存超阈值 `time.sleep(MEMORY_PAUSE_SECONDS)` 后 `continue`，跳过无条件 `time.sleep(2)` 双重等待（issue #6）
+  - **日志降噪**：子批次拉取/内存日志降级为 logger.debug（每批 8 个子批次的冗余 info 输出）（issue #7）
+  - **代码整洁**：删除 `del meta_lines` 后多余的 `meta_lines = []` 重置（issue #8）
 - v3.4_with_ohlc (2026-04-09): 新增 open/high/low 字段，支持选股回测
 - v3.3 (2026-04-04): 外部排序 N-way merge，峰值内存优化
 - v1.0 (2026-05-26): 流程文档创建
 
 ---
 
-*最后更新: 2026-05-26 03:30 北京时间*
+*最后更新: 2026-06-15 北京时间*

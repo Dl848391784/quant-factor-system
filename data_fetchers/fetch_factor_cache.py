@@ -91,8 +91,10 @@ MEMORY_PAUSE_SECONDS = 15  # 内存超阈值时的暂停时间
 
 # 输出路径（遵循 MODULE.md 约束 #2：输出到 result 目录）
 # 使用公共模块路径函数，避免硬编码路径（遵循 MODULE.md 约束 62）
+# 修复 issue #4: 仅在 import 阶段计算路径，不在模块顶层执行 mkdir，
+#   避免被其他模块 import 时产生意外的目录创建副作用；
+#   mkdir 已下沉到 main() 首次使用 RESULT_DIR 之前调用。
 RESULT_DIR = get_module_result_dir()
-RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def fetch_batch_stocks(
@@ -140,8 +142,8 @@ def fetch_batch_stocks(
         # 内部已封装二等分线程分配，调用方只需传入完整列表
         sub_stocks_dicts = [{"code": s, "name": ""} for s in sub_stocks]
 
-        logger.info("  [子批次 %s/%s] 拉取 %s-%s...", sub_idx + 1, num_sub_batches, sub_start + 1, sub_end)
-        logger.info("    当前内存: %s", get_memory_info_str())
+        logger.debug("  [子批次 %s/%s] 拉取 %s-%s...", sub_idx + 1, num_sub_batches, sub_start + 1, sub_end)
+        logger.debug("    当前内存: %s", get_memory_info_str())
 
         sub_results = loader._fetch_stock_batch_parallel(sub_stocks_dicts, FETCH_DAYS, None)
 
@@ -156,6 +158,7 @@ def fetch_batch_stocks(
         gc.collect()
 
         # 内存监控：超过阈值时暂停
+        # 修复 issue #6: 暂停后 continue 跳过本次固定 sleep(2)，避免双重等待累积
         mem_mb = get_memory_usage_mb()
         if mem_mb > MEMORY_THRESHOLD_MB:
             logger.warning(
@@ -166,6 +169,7 @@ def fetch_batch_stocks(
             )
             gc.collect()
             time.sleep(MEMORY_PAUSE_SECONDS)
+            continue
 
         if sub_idx < num_sub_batches - 1:
             time.sleep(2)
@@ -220,6 +224,9 @@ def fetch_batch_stocks(
 
     # pandas 3.0 兼容性修复：使用 cumcount 替代 groupby().apply(tail)
     # 避免 group_keys=False 导致分组列被移除
+    # 修复 issue #3: cumcount 前显式按 ["asset", "date"] 升序，
+    #   保证 cumcount(ascending=False) 与日期降序严格对应，避免乱序插入导致截取不稳定
+    valid_df = valid_df.sort_values(["asset", "date"], kind="mergesort").reset_index(drop=True)
     valid_df["row_num"] = valid_df.groupby("asset").cumcount(ascending=False)
     valid_df = valid_df[valid_df["row_num"] < N_DAYS].copy().drop("row_num", axis=1)
 
@@ -304,18 +311,33 @@ def validate_final_data(logger: logging.Logger | None = None) -> tuple[bool, int
 
                 # ========== META 解析阶段 ==========
                 # 检测进入 meta
+                # 修复 issue #1: 进入 in_meta 时只对截取后的子串计算初始 brace_count，
+                #   不对整行 stripped 计算（原代码会把 "meta": 前的 { 也算进去）
+                # 修复 issue #2: 不再 continue，fall-through 到 in_meta 累计分支，
+                #   统一处理"单行完整 meta"的 brace_count 归零判断
                 if '"meta":' in stripped and not in_meta and not in_data:
-                    in_meta = True
                     meta_start = stripped.find("{")
                     if meta_start != -1:
-                        meta_lines.append(stripped[meta_start:])
-                        brace_count = 1
-                    continue
+                        sub = stripped[meta_start:]
+                        meta_lines.append(sub)
+                        brace_count = sub.count("{") - sub.count("}")
+                        in_meta = True
+                        if brace_count == 0:
+                            # 单行 JSON：直接进入解析归零分支
+                            pass
+                        else:
+                            continue
+                    else:
+                        # 没有 { 起始（异常情况）：跳过本行
+                        continue
 
                 # 收集 meta 内容直到 brace_count == 0
-                if in_meta:
+                # 注意：进入分支已对截取后的子串完成首行累计，此处只处理后续行（对完整 stripped 累计）
+                elif in_meta:
                     meta_lines.append(stripped)
                     brace_count += stripped.count("{") - stripped.count("}")
+
+                if in_meta:
                     if brace_count == 0:
                         # meta 结束，解析并提取信息
                         # 去掉最后一行的尾部逗号（meta 后面有逗号因为还有 data 字段）
@@ -333,8 +355,11 @@ def validate_final_data(logger: logging.Logger | None = None) -> tuple[bool, int
                         except json.JSONDecodeError as e:
                             logger.warning("  ⚠ meta 解析失败: %s", e)
                         # 释放 meta 解析临时内存
-                        del meta_lines, meta_content
-                        meta_lines = []  # 重置以避免后续引用问题
+                        # 修复 issue #8: 删除多余的 meta_lines = [] 重置；
+                        #   in_meta 已置 False，后续循环不会再进入 meta 分支访问该变量。
+                        #   仅 del meta_content（拼接后的大字符串），保留 meta_lines 引用
+                        #   以避免静态分析 possibly-unbound 误报；list 对象本身占用可忽略。
+                        del meta_content
                         gc.collect()
                         in_meta = False
                     continue
@@ -415,6 +440,13 @@ def main() -> bool:
     # 初始化 logger（遵循 PROJECT.md 日志规范：输出到 logs 目录）
     log_dir = get_logs_dir()
     logger = setup_logger("fetch_factor_cache", logs_dir=log_dir)
+
+    # 修复 issue #4: 在首次使用 RESULT_DIR 之前确保目录存在（替代被移除的模块级 mkdir）
+    RESULT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # 修复 issue #5: 顶部初始化 total_batches，避免 finally 块在 batches 计算前抛异常时
+    #   触发 UnboundLocalError；cleanup_batch_files 在 total_batches == 0 时无文件可清理。
+    total_batches = 0
 
     logger.info("=" * 70)
     logger.info("分批拉取 %s 天因子数据 (外部排序版本)", N_DAYS)
