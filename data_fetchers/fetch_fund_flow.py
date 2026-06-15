@@ -24,16 +24,17 @@
 """
 
 import gc
+import gzip
 import json
 import logging
 import sys
 import time
 from datetime import datetime as dt_cls
-from pathlib import Path
 from typing import Any
 
 import akshare as ak
 import pandas as pd
+
 
 # 公共模块导入（遵循 MODULE.md 约束 #4）
 try:
@@ -52,10 +53,11 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0"
+# v1.1: meta 新增 completed_codes/failed_codes，fetched_at 改为写入时即时戳
+_OUTPUT_VERSION = "1.1"
 
-# 模块级固定时间戳
-_NOW = dt_cls.now()
+# 注：fetched_at 时间戳在 main() Step 5 构建 meta 时即时调用 dt_cls.now()，
+# 不使用模块级常量，避免长时拉取（数小时）时时间戳与实际写入时间偏差过大。
 
 logger = logging.getLogger(__name__)
 
@@ -145,13 +147,14 @@ def fetch_fund_flow_data_for_stock(
                 record[en_name] = float(raw_val)
 
         # 成交额（用于 intensity = main_inflow / total_volume）
-        # 东方财富接口不直接返回成交额，但可以通过净额反推
+        # 东方财富接口不直接返回成交额，但可以通过净额反推：
         # main_inflow_ratio = main_inflow_amount / total_volume * 100
-        # → total_volume = main_inflow_amount / (main_inflow_ratio / 100)
-        # 但 ratio=0 时不可除 → 需特殊处理
-        main_amount = record.get("main_inflow_amount", None)
-        main_ratio = record.get("main_inflow_ratio", None)
-        if main_amount is not None and main_ratio is not None and main_ratio != 0:
+        # → total_volume = main_inflow_amount / (main_ratio / 100)
+        # 仅当 main_ratio > 0 时反推有效；ratio == 0 不可除，ratio < 0 反推会得到
+        # 负的成交额（无意义错误数值），统一置为 None 让下游显式处理缺失。
+        main_amount = record.get("main_inflow_amount")
+        main_ratio = record.get("main_inflow_ratio")
+        if main_amount is not None and main_ratio is not None and main_ratio > 0:
             record["total_volume"] = main_amount / (main_ratio / 100.0)
         else:
             record["total_volume"] = None
@@ -173,8 +176,6 @@ def load_cache(logger_arg: logging.Logger | None = None) -> dict[str, Any]:
         return {"meta": {}, "data": []}
 
     try:
-        import gzip
-
         with gzip.open(CACHE_FILE, "rt") as f:
             data = json.load(f)
         _logger.info("加载资金流数据缓存: %d 条记录", len(data.get("data", [])))
@@ -185,7 +186,18 @@ def load_cache(logger_arg: logging.Logger | None = None) -> dict[str, Any]:
 
 
 def get_cached_stock_codes(cache_data: dict[str, Any]) -> set[str]:
-    """从缓存数据中提取已拉取的股票代码集合"""
+    """从缓存数据中提取已完整拉取成功的股票代码集合
+
+    优先使用 meta.completed_codes（v1.1+ 写入的"完整拉取成功"白名单），
+    避免上次拉取中途失败的股票被永久跳过。
+
+    旧缓存（无 completed_codes）退回从 data 推断，保持向后兼容。
+    """
+    meta = cache_data.get("meta") or {}
+    completed = meta.get("completed_codes")
+    if isinstance(completed, list):
+        return {str(c) for c in completed if c}
+    # 兼容路径：旧缓存仍按 data 推断（首次升级后会自动迁移）
     return {r.get("asset", "") for r in cache_data.get("data", []) if r.get("asset")}
 
 
@@ -223,52 +235,97 @@ def main(logger_arg: logging.Logger | None = None) -> int:
     new_records: list[dict[str, Any]] = []
     skipped = 0
     failed = 0
+    failed_codes: list[str] = []  # 问题 #6：记录失败的具体股票代码
+    new_completed_codes: list[str] = []  # 问题 #1：本轮完整拉取成功的股票代码
+    processed = 0  # 问题 #2：独立的"已处理"计数器（不含 skipped）
 
-    for i, code in enumerate(all_codes):
+    for code in all_codes:
         if code in cached_codes:
             skipped += 1
             continue
 
-        if i > 0 and i % _BATCH_LOG_INTERVAL == 0:
+        # 进度日志：用 processed 而非全局下标 i，避免大量跳过时长期不触发
+        if processed > 0 and processed % _BATCH_LOG_INTERVAL == 0:
             _logger.info(
-                "拉取进度: %d/%d (新增=%d, 失败=%d, 跳过=%d)",
-                i, len(all_codes), len(new_records), failed, skipped,
+                "拉取进度: 已处理=%d (新增=%d, 失败=%d, 跳过=%d, 总计=%d)",
+                processed,
+                len(new_records),
+                failed,
+                skipped,
+                len(all_codes),
             )
 
         records = fetch_fund_flow_data_for_stock(code, logger_arg=_logger)
+        processed += 1
         if records:
             new_records.extend(records)
+            new_completed_codes.append(code)
         else:
             failed += 1
+            failed_codes.append(code)
 
         # 速率控制
         time.sleep(_FETCH_DELAY)
 
+    # 失败股票清单：日志输出前若干个 + meta 全量记录
+    if failed_codes:
+        preview = ", ".join(failed_codes[:20])
+        suffix = " ..." if len(failed_codes) > 20 else ""
+        _logger.warning("失败股票 %d 只: %s%s", len(failed_codes), preview, suffix)
+
     _logger.info(
         "拉取完成: 新增 %d 条记录, 失败 %d 只股票, 跳过 %d",
-        len(new_records), failed, skipped,
+        len(new_records),
+        failed,
+        skipped,
     )
 
     # Step 4: 合并数据
     all_data = cache_data.get("data", []) + new_records
 
-    # Step 5: 构建元数据
+    # 累积"已完整拉取成功"白名单：旧缓存的 + 本轮新增的
+    prior_completed = cache_data.get("meta", {}).get("completed_codes")
+    if isinstance(prior_completed, list):
+        completed_set = {str(c) for c in prior_completed if c}
+    else:
+        # 旧缓存无白名单，从 data 推断作为初始集合（首次升级迁移）
+        completed_set = {r.get("asset", "") for r in cache_data.get("data", []) if r.get("asset")}
+    completed_set.update(new_completed_codes)
+
+    # Step 5: 构建元数据（fetched_at 在此处即时取，避免长时拉取与写入时间偏差过大——问题 #5）
+    fetched_at = dt_cls.now().strftime("%Y-%m-%d %H:%M:%S")
     meta: dict[str, Any] = {
         "version": _OUTPUT_VERSION,
-        "fetched_at": _NOW.strftime("%Y-%m-%d %H:%M:%S"),
-        "stock_count": len(set(r.get("asset", "") for r in all_data)),
+        "fetched_at": fetched_at,
+        "stock_count": len({r.get("asset", "") for r in all_data}),
         "record_count": len(all_data),
         "fields": list(_FUND_FLOW_FIELD_MAP.values()) + ["total_volume"],
         "source": "akshare_stock_individual_fund_flow",
         "note": "每只股票约120交易日数据（API限制），日期范围约5个月",
+        # 问题 #1：完整拉取成功的股票代码白名单（替代"data 中存在即跳过"的脆弱判断）
+        "completed_codes": sorted(completed_set),
+        # 问题 #6：本轮失败股票代码（下次运行时不在 completed_codes 中会自动重试）
+        "failed_codes_last_run": sorted(failed_codes),
     }
 
-    # Step 6: 写入缓存
+    # Step 6: 写入缓存（问题 #8：捕获写入异常，失败时返回 1）
     output_data = {"meta": meta, "data": all_data}
-    write_gzip_cache(CACHE_FILE, output_data, ensure_dir=True, logger=_logger)
+    try:
+        write_gzip_cache(CACHE_FILE, output_data, ensure_dir=True, logger=_logger)
+    except (OSError, PermissionError, TypeError, RuntimeError) as e:
+        _logger.exception(
+            "写入缓存失败: %s (%s)，路径=%s",
+            str(e)[:120],
+            type(e).__name__,
+            CACHE_FILE,
+        )
+        # 问题 #7 在异常路径也释放：避免错误返回前长时间持有大对象引用
+        del new_records, cache_data, all_data, output_data, meta
+        gc.collect()
+        return 1
 
-    # 显式释放大对象（遵循 R16）
-    del new_records, cache_data, all_data
+    # 问题 #7：写入后同时释放 output_data 与 meta，确保 all_data 引用计数归零
+    del new_records, cache_data, all_data, output_data, meta
     gc.collect()
 
     _logger.info("=== 资金流数据拉取完成 ===")
