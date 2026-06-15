@@ -52,13 +52,7 @@ def main():
 
     args = parser.parse_args()
 
-    # 启动节点日志
-    logger.info(
-        "RSI_1D 因子 IC 计算启动 [min_stocks=%s, force_full=%s]",
-        args.min_stocks,
-        args.force_full,
-    )
-
+    # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_simple_factor_ic(
         factor_name="rsi", factor_col="rsi_6", min_stocks=args.min_stocks, force_full=args.force_full, _logger=logger

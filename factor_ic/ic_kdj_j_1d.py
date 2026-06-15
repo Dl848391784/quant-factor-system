@@ -110,16 +110,7 @@ def main():
 
     args = parser.parse_args()
 
-    # 调用前日志
-    logger.info(
-        "启动KDJ_J因子IC计算: n=%s, m1=%s, m2=%s, min_stocks=%s, force_full=%s",
-        args.n,
-        args.m1,
-        args.m2,
-        args.min_stocks,
-        args.force_full,
-    )
-
+    # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full + extra_log_params）
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
         factor_name="kdj_j",
@@ -129,6 +120,7 @@ def main():
         custom_factor_calculation_params={"n": args.n, "m1": args.m1, "m2": args.m2},
         min_stocks=args.min_stocks,
         force_full=args.force_full,
+        extra_log_params={"n": args.n, "m1": args.m1, "m2": args.m2},
         _logger=logger,
     )
 

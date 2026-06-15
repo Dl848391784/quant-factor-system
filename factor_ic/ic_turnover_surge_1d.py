@@ -79,14 +79,7 @@ def main():
 
     args = parser.parse_args()
 
-    # 启动节点日志
-    logger.info(
-        "换手率突增因子 IC 计算启动 [surge_window=%s, min_stocks=%s, force_full=%s]",
-        args.surge_window,
-        args.min_stocks,
-        args.force_full,
-    )
-
+    # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full + extra_log_params）
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
     result = run_complex_factor_ic(
         factor_name="turnover_surge",
@@ -96,6 +89,7 @@ def main():
         custom_factor_calculation_params={"surge_window": args.surge_window},
         min_stocks=args.min_stocks,
         force_full=args.force_full,
+        extra_log_params={"surge_window": args.surge_window},
         _logger=logger,
     )
 

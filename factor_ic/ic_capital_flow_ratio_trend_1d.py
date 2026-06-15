@@ -74,13 +74,7 @@ def main():
     args = parser.parse_args()
 
     start_time = time.monotonic()
-    logger.info(
-        "启动资金流占比趋势因子IC计算 v%s: min_stocks=%s, force_full=%s",
-        __version__,
-        args.min_stocks,
-        args.force_full,
-    )
-
+    # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full + extra_log_params）
     # 注: factor_cols 在公共模块语义为"需从缓存加载的原始因子列"。
     # 本因子原始数据从外部资金流文件加载（见 factor_calculator._load_fund_flow_data），
     # 缓存中仅需 date/asset 作匹配键，因此传 ["date", "asset"]（data_loader 会自动去重）。
@@ -92,6 +86,7 @@ def main():
         custom_factor_calculation=calculate_capital_flow_ratio_trend,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
+        extra_log_params={"version": __version__},
         _logger=logger,
     )
 
