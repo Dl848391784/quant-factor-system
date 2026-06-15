@@ -233,8 +233,10 @@ def _iter_merged_records(merged_path: Path, logger: logging.Logger) -> Generator
         内部生成器，不导出到 __all__
         两段式 JSON 解析，避免 rstrip(",") 误剥离字段值末尾逗号。
         若仅需 line_content 不需 dict（且仅在第一遍验证之后），请使用对称的
-        `_iter_merged_lines_second_pass` —— 它复用相同的两段式判定保证 line_content
-        字节级一致，避免不对称剥离导致的写出 ≠ 验证内容。
+        `_iter_merged_lines_second_pass` —— 它仅做行过滤+逗号剥离（不解析 dict），
+        依赖第一遍已验证的格式不变量保证 line_content 字节级一致，避免不对称剥离
+        导致的写出 ≠ 验证内容。两者分工差异：第一遍做 json.loads 两段式校验，
+        第二遍仅凭 endswith(",") 判定。
     """
     with gzip.open(merged_path, "rt", encoding="utf-8") as f:
         for line in f:
@@ -292,8 +294,8 @@ def _scan_and_write_final(
 
           - 第一遍 `_iter_merged_records` 解析每行为 dict，统计 meta（date/asset 唯一集、
             n_records、first/last_date）。
-          - 第二遍 `_iter_merged_lines_second_pass` 仅做行过滤+对称两段式判定，不解析 dict、
-            不查 KeyError；与第一遍使用相同的两段式逻辑保证 line_content 字节级一致。
+          - 第二遍 `_iter_merged_lines_second_pass` 仅凭 endswith(",") 剥逗号、不做 JSON
+            解析，依赖第一遍的格式验证保证；line_content 与第一遍 yield 的字符串字节级一致。
 
         取舍：用 2x 文件 IO 换 0 份 lines 内存峰值。merged 文件已 gzip 压缩，IO 开销可接受；
         换来的内存收益在大盘场景（数百万记录）显著。性能问题排查请关注两次 IO 的耗时差异。
@@ -371,8 +373,11 @@ def _scan_and_write_final(
         fields_json = json.dumps(meta["fields"], ensure_ascii=False)
         out_f.write(f'    "fields": {fields_json}{"," if has_extra else ""}\n')
         if has_extra:
-            extra_json = json.dumps(extra_value, ensure_ascii=False)
+            # 赋值顺序与写出语义（key 在前、value 在后）保持一致：
+            # 若未来在两行之间插入引用 extra_key_json 的代码，先 key 后 value 的顺序
+            # 可避免"先用后赋值"的潜在 NameError。
             extra_key_json = json.dumps(extra_key, ensure_ascii=False)
+            extra_json = json.dumps(extra_value, ensure_ascii=False)
             out_f.write(f"    {extra_key_json}: {extra_json}\n")
         out_f.write("  },\n")
         out_f.write('  "data": [\n')
@@ -710,6 +715,9 @@ def n_way_merge_deduplicate(
 
     Returns:
         Path | None: 输出文件路径（无有效数据时返回 None）
+            注：返回 None 时调用方可通过日志级别区分两种语义——
+              - info "无有效批次，无数据可合并"  → 正常空场景（所有批次本就无数据）
+              - warning "所有批次均加载失败"      → 异常场景（load_errors 非空），需人工排查
 
     Note:
         使用 heapq 实现 N-way merge，相同 key 按 batch_idx 降序选择最新数据
@@ -753,7 +761,14 @@ def n_way_merge_deduplicate(
         _logger.warning("  ⚠ %s 个批次加载失败: %s", len(load_errors), load_errors)
 
     if not streams:
-        _logger.info("  无有效批次")
+        # 区分两种语义：load_errors 非空 = 所有批次加载失败（异常），否则 = 本就无数据（正常）
+        if load_errors:
+            _logger.warning(
+                "  ⚠ 无有效批次：所有批次均加载失败（load_errors=%s 个），无数据可合并",
+                len(load_errors),
+            )
+        else:
+            _logger.info("  无有效批次，无数据可合并")
         return None
 
     _logger.info("  有效批次: %s/%s", len(streams), total_batches)

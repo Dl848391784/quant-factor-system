@@ -305,6 +305,39 @@ class TestNWayMergeDeduplicate:
         merged_path = n_way_merge_deduplicate(0, "factor", result_dir=temp_dir, logger_arg=test_logger)
         assert merged_path is None
 
+    def test_merge_all_batches_load_failed_warns(self, temp_dir, caplog):
+        """TC006b: 所有批次都加载失败时返回 None，但日志应为 warning（区别于"正常无数据"的 info）。
+
+        覆盖 n_way_merge_deduplicate 中 if not streams 分支对 load_errors 非空场景的语义区分：
+        load_errors 非空 → warning "所有批次均加载失败"；空 → info "无数据可合并"。
+        防止"加载失败"被误判为"业务正常无数据"而被静默吞掉。
+        """
+        # 制造两个损坏的批次文件（非 gzip 内容 + 非合法 JSON），让 BatchStream._load_all 走入
+        # JSON/读取失败分支（load_error != _LOAD_ERROR_FILE_NOT_FOUND），从而进入 load_errors 列表。
+        for batch_idx in range(2):
+            corrupt_path = temp_dir / f"batch_{batch_idx}_factor.json.gz"
+            corrupt_path.write_bytes(b"not a valid gzip stream")
+
+        # 用真实 logger（而非 test_logger fixture，它无 propagate 控制）让 caplog 捕获
+        real_logger = logging.getLogger("test_batch_processor.all_failed")
+        real_logger.setLevel(logging.DEBUG)
+        with caplog.at_level(logging.DEBUG, logger=real_logger.name):
+            merged_path = n_way_merge_deduplicate(2, "factor", result_dir=temp_dir, logger_arg=real_logger)
+
+        assert merged_path is None, "全部加载失败时应返回 None"
+
+        # 关键断言：必须出现 warning 级别的"所有批次均加载失败"日志，而非 info
+        warning_records = [
+            r for r in caplog.records if r.levelno == logging.WARNING and "所有批次均加载失败" in r.getMessage()
+        ]
+        assert warning_records, (
+            "load_errors 非空时必须以 WARNING 级别记录'所有批次均加载失败'，"
+            "以便调用方/运维通过日志级别区分'异常'和'正常无数据'两种语义"
+        )
+        # 反向断言：不应有"无有效批次，无数据可合并"的 info 日志（那是空场景的措辞）
+        info_no_data = [r for r in caplog.records if r.levelno == logging.INFO and "无数据可合并" in r.getMessage()]
+        assert not info_no_data, "load_errors 非空时不应记录'正常无数据'语义的 info 日志，否则两种语义被混淆"
+
 
 # ============================================================================
 # format_final_output 测试
