@@ -169,7 +169,7 @@ def get_factor_data_dates(logger=None) -> tuple[list[str], str | None]:
         gc.collect()
         return dates, latest_date
     except Exception as e:
-        logger.warning(f"读取 factor_data 失败 [{type(e).__name__}]: {e}")
+        logger.warning("读取 factor_data 失败 [%s]: %s", type(e).__name__, e)
         return [], None
 
 
@@ -233,7 +233,7 @@ def get_cache_latest_date(factor_name: str, logger=None) -> str | None:
 
         return latest_date
     except Exception as e:
-        logger.warning(f"读取缓存失败 [{factor_name}] [{type(e).__name__}]: {e}")
+        logger.warning("读取缓存失败 [%s] [%s]: %s", factor_name, type(e).__name__, e)
         return None
 
 
@@ -293,7 +293,7 @@ def check_data_completeness(factor_name: str, logger=None) -> tuple[str, list[st
 
     if not all_dates:
         # 数据源不可用
-        logger.warning(f"[{factor_name}] 数据完整性判断: skip（数据源不可用）")
+        logger.warning("[%s] 数据完整性判断: skip（数据源不可用）", factor_name)
         return "skip", [], info
 
     # 检查缓存最新日期
@@ -308,14 +308,22 @@ def check_data_completeness(factor_name: str, logger=None) -> tuple[str, list[st
         # missing_dates = all_dates（语义：全部需要计算，而非"缺失"）
         missing_dates = all_dates
         info["missing_count"] = len(missing_dates)
-        logger.info(f"[{factor_name}] 数据完整性判断: full（缓存不存在，需计算 {len(missing_dates)} 天）")
+        logger.info(
+            "[%s] 数据完整性判断: full（缓存不存在，需计算 %s 天）",
+            factor_name,
+            len(missing_dates),
+        )
         return "full", missing_dates, info
 
     if cache_latest is None:
         # 文件存在但读取失败，需要全量计算
         missing_dates = all_dates
         info["missing_count"] = len(missing_dates)
-        logger.warning(f"[{factor_name}] 数据完整性判断: full（缓存读取失败，需计算 {len(missing_dates)} 天）")
+        logger.warning(
+            "[%s] 数据完整性判断: full（缓存读取失败，需计算 %s 天）",
+            factor_name,
+            len(missing_dates),
+        )
         return "full", missing_dates, info
 
     # 计算缺失日期（大于缓存最新日期）
@@ -325,12 +333,15 @@ def check_data_completeness(factor_name: str, logger=None) -> tuple[str, list[st
     if len(missing_dates) > 0:
         # 有缺失日期，可增量更新
         logger.info(
-            f"[{factor_name}] 数据完整性判断: incremental（缓存至 {cache_latest}，需补充 {len(missing_dates)} 天）"
+            "[%s] 数据完整性判断: incremental（缓存至 %s，需补充 %s 天）",
+            factor_name,
+            cache_latest,
+            len(missing_dates),
         )
         return "incremental", missing_dates, info
     else:
         # 数据已最新
-        logger.debug(f"[{factor_name}] 数据完整性判断: skip（数据已最新，缓存至 {cache_latest}）")
+        logger.debug("[%s] 数据完整性判断: skip（数据已最新，缓存至 %s）", factor_name, cache_latest)
         return "skip", [], info
 
 
@@ -416,7 +427,7 @@ def get_cache_info(factor_name: str, logger=None) -> dict[str, Any]:
         info["latest_date"] = latest_date
 
     except Exception as e:
-        logger.warning(f"读取缓存信息失败 [{factor_name}] [{type(e).__name__}]: {e}")
+        logger.warning("读取缓存信息失败 [%s] [%s]: %s", factor_name, type(e).__name__, e)
         info["error"] = str(e)
 
     return info
@@ -435,12 +446,12 @@ if __name__ == "__main__":
     test_factors = ["kdj_j", "bollinger_pb", "turnover_surge", "rsi", "volume_ratio"]
 
     for factor in test_factors:
-        logger.info(f"【{factor}】")
+        logger.info("【%s】", factor)
         mode, missing, info = check_data_completeness(factor, logger=logger)
-        logger.info(f"模式: {mode}")
-        logger.info(f"缓存存在: {info['cache_exists']}")
-        logger.info(f"缓存最新日期: {info['cache_latest_date'] or '无'}")
-        logger.info(f"数据源最新日期: {info['source_latest_date'] or '无'}")
-        logger.info(f"待计算天数: {info['missing_count']}")
+        logger.info("模式: %s", mode)
+        logger.info("缓存存在: %s", info["cache_exists"])
+        logger.info("缓存最新日期: %s", info["cache_latest_date"] or "无")
+        logger.info("数据源最新日期: %s", info["source_latest_date"] or "无")
+        logger.info("待计算天数: %s", info["missing_count"])
         if missing:
-            logger.info(f"待计算日期范围: {missing[0]} ~ {missing[-1]}")
+            logger.info("待计算日期范围: %s ~ %s", missing[0], missing[-1])

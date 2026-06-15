@@ -158,7 +158,7 @@ def load_factor_return_data(
             with gzip.open(data_cache_path, "rt", encoding="utf-8") as f:
                 data = json.load(f)
         except (gzip.BadGzipFile, json.JSONDecodeError, OSError) as e:
-            logger.error(f"数据读取失败 [{data_cache_path}] [{type(e).__name__}]: {e}")
+            logger.error("数据读取失败 [%s] [%s]: %s", data_cache_path, type(e).__name__, e)
             raise
 
         if "data" not in data:
@@ -175,7 +175,7 @@ def load_factor_return_data(
         if col not in df.columns:
             raise KeyError(f"数据缺少必需列: '{col}'，无法继续处理")
 
-    logger.info(f"原始数据: {len(df)} 行, {df['asset'].nunique()} 只股票")
+    logger.info("原始数据: %s 行, %s 只股票", len(df), df["asset"].nunique())
 
     # ========== 日期类型统一转换 ==========
     df = _convert_date_column(df, "统一数据源", logger=logger)
@@ -186,8 +186,8 @@ def load_factor_return_data(
     raw_total_days = df["date"].nunique()
     raw_avg_stocks_per_day = round(df.groupby("date").size().mean(), 1)
 
-    logger.info(f"原始数据范围: {raw_period_start} ~ {raw_period_end}, {raw_total_days} 个交易日")
-    logger.info(f"原始平均每日股票数: {raw_avg_stocks_per_day}")
+    logger.info("原始数据范围: %s ~ %s, %s 个交易日", raw_period_start, raw_period_end, raw_total_days)
+    logger.info("原始平均每日股票数: %s", raw_avg_stocks_per_day)
 
     # ========== 数值列类型规范化（Decimal/str → float） ==========
     # 背景（2026-06-13）：统一数据源 factor_ic_data.json.gz 中 OHLC 等价格列以 Decimal
@@ -200,7 +200,10 @@ def load_factor_return_data(
     numeric_candidate_cols = [c for c in df.columns if c not in ("date", "asset")]
     for col in numeric_candidate_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    logger.info(f"数值列类型规范化完成: 转换 {len(numeric_candidate_cols)} 列（pd.to_numeric, Decimal/str → float）")
+    logger.info(
+        "数值列类型规范化完成: 转换 %s 列（pd.to_numeric, Decimal/str → float）",
+        len(numeric_candidate_cols),
+    )
 
     # ========== 加载额外因子文件（如有） ==========
     all_factor_cols = list(factor_cols)  # 创建副本，防止引用污染
@@ -214,7 +217,7 @@ def load_factor_return_data(
                 with gzip.open(file_path, "rt", encoding="utf-8") as f:
                     additional_data = json.load(f)
             except (gzip.BadGzipFile, json.JSONDecodeError, OSError) as e:
-                logger.error(f"额外因子数据读取失败 [{file_path}] [{type(e).__name__}]: {e}")
+                logger.error("额外因子数据读取失败 [%s] [%s]: %s", file_path, type(e).__name__, e)
                 raise
 
             if "data" not in additional_data:
@@ -237,11 +240,17 @@ def load_factor_return_data(
             if rows_lost > 0:
                 if rows_before > 0:
                     loss_pct = rows_lost / rows_before * 100
-                    logger.info(f"合并 {col_name} 后: {rows_after} 行（丢失 {rows_lost} 行，{loss_pct:.1f}%）")
+                    logger.info(
+                        "合并 %s 后: %s 行（丢失 %s 行，%.1f%%）",
+                        col_name,
+                        rows_after,
+                        rows_lost,
+                        loss_pct,
+                    )
                 else:
-                    logger.info(f"合并 {col_name} 后: {rows_after} 行（丢失 {rows_lost} 行，原始数据为空）")
+                    logger.info("合并 %s 后: %s 行（丢失 %s 行，原始数据为空）", col_name, rows_after, rows_lost)
             else:
-                logger.info(f"合并 {col_name} 后: {rows_after} 行（无数据丢失）")
+                logger.info("合并 %s 后: %s 行（无数据丢失）", col_name, rows_after)
 
         additional_cols = [k for k in additional_factor_files if k not in all_factor_cols]
         all_factor_cols.extend(additional_cols)
@@ -277,7 +286,12 @@ def load_factor_return_data(
     factor_df = factor_df.dropna(subset=dropna_cols).reset_index(drop=True)
     return_df = return_df.dropna(subset=[return_col]).reset_index(drop=True)
 
-    logger.info(f"过滤缺失值后: 因子 {len(factor_df)} 行（过滤列: {dropna_cols}），收益 {len(return_df)} 行")
+    logger.info(
+        "过滤缺失值后: 因子 %s 行（过滤列: %s），收益 %s 行",
+        len(factor_df),
+        dropna_cols,
+        len(return_df),
+    )
 
     # ========== 日期对齐（单文件内数据天然对齐） ==========
     # 取日期交集确保因子和收益数据对齐
@@ -289,7 +303,12 @@ def load_factor_return_data(
         common_dates = list(set(factor_dates) & set(return_dates))
         factor_df = factor_df[factor_df["date"].isin(common_dates)].reset_index(drop=True)
         return_df = return_df[return_df["date"].isin(common_dates)].reset_index(drop=True)
-        logger.info(f"对齐后: {len(common_dates)} 个日期, 因子 {len(factor_df)} 行, 收益 {len(return_df)} 行")
+        logger.info(
+            "对齐后: %s 个日期, 因子 %s 行, 收益 %s 行",
+            len(common_dates),
+            len(factor_df),
+            len(return_df),
+        )
 
     # ========== 返回结果 ==========
     return (
@@ -332,7 +351,7 @@ def _convert_date_column(df: pd.DataFrame, name: str, logger=None) -> pd.DataFra
 
     if nat_count > 0:
         invalid_samples = df["date"][date_series.isna()].head(5).tolist()
-        logger.error(f"[{name}] 发现 {nat_count} 个无效日期格式，示例: {invalid_samples}")
+        logger.error("[%s] 发现 %s 个无效日期格式，示例: %s", name, nat_count, invalid_samples)
         raise ValueError(
             f"{name}中存在 {nat_count} 个无效日期格式\n无效日期示例: {invalid_samples}\n请检查缓存数据源是否包含脏数据"
         )

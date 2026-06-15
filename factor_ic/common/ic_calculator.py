@@ -130,11 +130,11 @@ def calculate_ic_with_direction_verification(
 
     # ========== 输入验证 ==========
     if factor_df.empty:
-        logger.error(f"输入验证失败: factor_df 不能为空, factor_col={factor_col}")
+        logger.error("输入验证失败: factor_df 不能为空, factor_col=%s", factor_col)
         raise ValueError("factor_df 不能为空")
 
     if return_df.empty:
-        logger.error(f"输入验证失败: return_df 不能为空, return_col={return_col}")
+        logger.error("输入验证失败: return_df 不能为空, return_col=%s", return_col)
         raise ValueError("return_df 不能为空")
 
     required_factor_cols = [date_col, asset_col, factor_col]
@@ -143,18 +143,20 @@ def calculate_ic_with_direction_verification(
     for col in required_factor_cols:
         if col not in factor_df.columns:
             logger.error(
-                f"输入验证失败: factor_df 缺少列 '{col}', "
-                f"当前列: {factor_df.columns.tolist()}, "
-                f"期望列: {required_factor_cols}"
+                "输入验证失败: factor_df 缺少列 '%s', 当前列: %s, 期望列: %s",
+                col,
+                factor_df.columns.tolist(),
+                required_factor_cols,
             )
             raise KeyError(f"factor_df 缺少列: '{col}'")
 
     for col in required_return_cols:
         if col not in return_df.columns:
             logger.error(
-                f"输入验证失败: return_df 缺少列 '{col}', "
-                f"当前列: {return_df.columns.tolist()}, "
-                f"期望列: {required_return_cols}"
+                "输入验证失败: return_df 缺少列 '%s', 当前列: %s, 期望列: %s",
+                col,
+                return_df.columns.tolist(),
+                required_return_cols,
             )
             raise KeyError(f"return_df 缺少列: '{col}'")
 
@@ -168,10 +170,12 @@ def calculate_ic_with_direction_verification(
 
     if merged.empty:
         logger.error(
-            f"数据合并失败: factor_df 和 return_df 无法匹配, "
-            f"factor_df 行数={len(factor_df)}, "
-            f"return_df 行数={len(return_df)}, "
-            f"factor_col={factor_col}, return_col={return_col}"
+            "数据合并失败: factor_df 和 return_df 无法匹配, "
+            "factor_df 行数=%s, return_df 行数=%s, factor_col=%s, return_col=%s",
+            len(factor_df),
+            len(return_df),
+            factor_col,
+            return_col,
         )
         raise ValueError("factor_df 和 return_df 无法匹配")
 
@@ -181,9 +185,10 @@ def calculate_ic_with_direction_verification(
 
     if merged.empty:
         logger.error(
-            f"数据合并失败: 合并后数据全部为缺失值, "
-            f"原始合并行数={original_merged_rows}, "
-            f"factor_col={factor_col}, return_col={return_col}"
+            "数据合并失败: 合并后数据全部为缺失值, 原始合并行数=%s, factor_col=%s, return_col=%s",
+            original_merged_rows,
+            factor_col,
+            return_col,
         )
         raise ValueError("合并后数据全部为缺失值")
 
@@ -197,9 +202,9 @@ def calculate_ic_with_direction_verification(
 
     if not ic_list:
         logger.error(
-            f"IC计算失败: 没有有效的交易日, "
-            f"每交易日股票数 < {min_stocks}, "
-            f"原始数据日期数={len(merged.groupby(date_col))}"
+            "IC计算失败: 没有有效的交易日, 每交易日股票数 < %s, 原始数据日期数=%s",
+            min_stocks,
+            len(merged.groupby(date_col)),
         )
         raise ValueError(f"没有有效的交易日（每交易日股票数 < {min_stocks}）")
 
@@ -371,8 +376,8 @@ def _newey_west_t_stat(ic_series: pd.Series, lag: int = None) -> tuple[float, fl
         # 回退使用样本方差，并记录警告
         if logger:
             logger.warning(
-                f"Newey-West 方差为负或零（{nw_var:.6f}），IC序列可能存在强负自相关，"
-                f"回退使用样本方差，统计显著性判断可信度下降"
+                "Newey-West 方差为负或零（%.6f），IC序列可能存在强负自相关，回退使用样本方差，统计显著性判断可信度下降",
+                nw_var,
             )
         nw_var = np.var(ic_series, ddof=1)
 
@@ -813,9 +818,10 @@ def industry_neutral_rank(
     # 检查行业列是否存在
     if industry_col not in factor_df.columns:
         logger.error(
-            f"行业中性化失败: 因子数据缺少行业分类列 '{industry_col}', "
-            f"当前列: {factor_df.columns.tolist()}, "
-            f"factor_col={factor_col}"
+            "行业中性化失败: 因子数据缺少行业分类列 '%s', 当前列: %s, factor_col=%s",
+            industry_col,
+            factor_df.columns.tolist(),
+            factor_col,
         )
         raise ValueError(
             f"因子数据缺少行业分类列 '{industry_col}'\n"
@@ -878,9 +884,10 @@ def industry_neutral_residual(
     # 检查行业列是否存在
     if industry_col not in factor_df.columns:
         logger.error(
-            f"行业中性化失败: 因子数据缺少行业分类列 '{industry_col}', "
-            f"当前列: {factor_df.columns.tolist()}, "
-            f"factor_col={factor_col}"
+            "行业中性化失败: 因子数据缺少行业分类列 '%s', 当前列: %s, factor_col=%s",
+            industry_col,
+            factor_df.columns.tolist(),
+            factor_col,
         )
         raise ValueError(
             f"因子数据缺少行业分类列 '{industry_col}'\n"
@@ -946,6 +953,6 @@ if __name__ == "__main__":
     logger.info("=" * 60)
     logger.info("因子方向验证 IC 分析")
     logger.info("=" * 60)
-    logger.info(f"IC 均值:     {result['ic_mean']:.4f}")
-    logger.info(f"IC 标准差:   {result['ic_std']:.4f}")
-    logger.info(f"ICIR:        {result['icir']:.2f}")
+    logger.info("IC 均值:     %.4f", result["ic_mean"])
+    logger.info("IC 标准差:   %.4f", result["ic_std"])
+    logger.info("ICIR:        %.2f", result["icir"])

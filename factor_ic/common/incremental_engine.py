@@ -90,7 +90,7 @@ def get_cache_latest_date(cache_path: Path) -> str | None:
         return dates[-1] if dates else None
 
     except Exception as e:
-        logger.warning(f"读取缓存最新日期失败 [{cache_path}] [{type(e).__name__}]: {e}")
+        logger.warning("读取缓存最新日期失败 [%s] [%s]: %s", cache_path, type(e).__name__, e)
         return None
 
 
@@ -200,7 +200,7 @@ def read_existing_cache(cache_path: Path) -> tuple[dict | None, list[str], list[
         with open(cache_path, encoding="utf-8") as f:
             existing_data = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        logger.error(f"读取现有缓存失败 [{cache_path}] [{type(e).__name__}]: {e}")
+        logger.error("读取现有缓存失败 [%s] [%s]: %s", cache_path, type(e).__name__, e)
         raise
 
     existing_dates = existing_data.get("dates", [])
@@ -265,15 +265,15 @@ def calculate_missing_dates_ic(
     }
 
     if phantom_dates:
-        logger.warning(f"{len(phantom_dates)} 个缺失日期不在因子数据中（幽灵日期）")
+        logger.warning("%s 个缺失日期不在因子数据中（幽灵日期）", len(phantom_dates))
         examples = diagnostics["phantom_dates"][:5]
-        logger.warning(f"示例日期: {examples}")
+        logger.warning("示例日期: %s", examples)
 
     if factor_df_new.empty:
         logger.debug("缺失日期无有效数据，跳过增量计算")
         return [], [], diagnostics
 
-    logger.info(f"筛选后数据: {len(factor_df_new)} 行")
+    logger.info("筛选后数据: %s 行", len(factor_df_new))
 
     # 逐日计算 IC（预分组避免重复全表扫描）
     factor_groups = dict(iter(factor_df_new.groupby("date")))
@@ -291,7 +291,7 @@ def calculate_missing_dates_ic(
 
         # 区分"无收益数据"与"股票数不足"
         if merged.empty and day_return.empty:
-            logger.debug(f"日期 {date}: 因子有数据但无收益数据，跳过")
+            logger.debug("日期 %s: 因子有数据但无收益数据，跳过", date)
 
         # 使用核心函数计算单日 IC（确保算法一致性）
         ic_value = calculate_single_day_ic(merged, factor_col=factor_col, return_col=return_col, min_stocks=min_stocks)
@@ -302,9 +302,13 @@ def calculate_missing_dates_ic(
             new_ic_values.append(None)
             skipped_count += 1
 
-    logger.info(f"计算完成: {len(new_dates)} 天，{len([v for v in new_ic_values if v is not None])} 天有效 IC")
+    logger.info(
+        "计算完成: %s 天，%s 天有效 IC",
+        len(new_dates),
+        len([v for v in new_ic_values if v is not None]),
+    )
     if skipped_count > 0:
-        logger.info(f"{skipped_count} 天因股票数不足跳过")
+        logger.info("%s 天因股票数不足跳过", skipped_count)
 
     return new_dates, new_ic_values, diagnostics
 
@@ -347,7 +351,7 @@ def merge_ic_data(
 
     if overlap_dates:
         examples = sorted(overlap_dates)[:5]
-        logger.warning(f"发现 {len(overlap_dates)} 个重叠日期，将使用新值覆盖，示例: {examples}")
+        logger.warning("发现 %s 个重叠日期，将使用新值覆盖，示例: %s", len(overlap_dates), examples)
 
     # 使用字典去重（新值覆盖旧值）
     date_ic_map = {}
@@ -367,7 +371,7 @@ def merge_ic_data(
     # 统计有效 IC 数量（用于日志）
     valid_count = len([v for v in all_ic_values if v is not None])
 
-    logger.info(f"合并后总计: {len(all_dates)} 天（{valid_count} 天有效 IC）")
+    logger.info("合并后总计: %s 天（%s 天有效 IC）", len(all_dates), valid_count)
 
     return all_dates, all_ic_values, merge_info
 
@@ -397,7 +401,11 @@ def recalculate_statistics(all_dates: list[str], all_ic_values: list[float | Non
 
     if not valid_ic:
         none_count = len([v for v in all_ic_values if v is None])
-        logger.warning(f"无有效 IC 值，返回空统计（总数据量: {len(all_ic_values)}，None 值: {none_count}）")
+        logger.warning(
+            "无有效 IC 值，返回空统计（总数据量: %s，None 值: %s）",
+            len(all_ic_values),
+            none_count,
+        )
         return {
             "ic_mean": None,
             "ic_std": None,
@@ -424,8 +432,9 @@ def recalculate_statistics(all_dates: list[str], all_ic_values: list[float | Non
     # 若 calculate_ic_statistics 内部做了裁剪（如去 NaN），长度可能不匹配
     if len(rolling_ic_mean_raw) != len(valid_ic):
         logger.warning(
-            f"rolling_ic_mean 长度不匹配（期望 {len(valid_ic)}，实际 {len(rolling_ic_mean_raw)}），"
-            f"使用 None 填充对齐位置"
+            "rolling_ic_mean 长度不匹配（期望 %s，实际 %s），使用 None 填充对齐位置",
+            len(valid_ic),
+            len(rolling_ic_mean_raw),
         )
         # fallback：长度不匹配时全部用 None 填充对齐位
         rolling_ic_mean_aligned = [None] * len(all_dates)
@@ -487,7 +496,7 @@ def incremental_update_ic(
         6. 构建输出并保存 [6/6]
     """
     logger.info("=" * 40)
-    logger.info(f"增量更新: {factor_name}")
+    logger.info("增量更新: %s", factor_name)
     logger.info("=" * 40)
 
     # 1. 读取现有缓存（优先使用已读缓存数据，避免重复读文件）
@@ -496,13 +505,13 @@ def incremental_update_ic(
         existing_data = cache_data
         existing_dates = existing_data.get("dates", [])
         existing_ic_values = existing_data.get("ic_values", [])
-        logger.info(f"使用已读缓存数据: {len(existing_dates)} 天")
+        logger.info("使用已读缓存数据: %s 天", len(existing_dates))
     else:
         try:
             existing_data, existing_dates, existing_ic_values = read_existing_cache(output_path)
-            logger.info(f"现有数据: {len(existing_dates)} 天")
+            logger.info("现有数据: %s 天", len(existing_dates))
         except (json.JSONDecodeError, OSError) as e:
-            logger.error(f"缓存文件读取失败: {e}")
+            logger.error("缓存文件读取失败: %s", e)
             raise RuntimeError(f"缓存文件读取失败，请删除后重算: {output_path}") from e
 
     if existing_data is None:
@@ -541,8 +550,8 @@ def incremental_update_ic(
         logger.info("无缺失日期，数据已完整")
         return _normalize_existing_data(existing_data)
 
-    logger.info(f"缺失日期: {len(missing_dates)} 天")
-    logger.debug(f"示例: {missing_dates[:5]}")
+    logger.info("缺失日期: %s 天", len(missing_dates))
+    logger.debug("示例: %s", missing_dates[:5])
 
     # 3. 计算缺失日期 IC
     logger.info("[3/6] 计算缺失日期 IC...")
@@ -658,22 +667,31 @@ def incremental_update_ic(
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(convert_to_native_types(result), f, ensure_ascii=False, indent=2)
     except OSError as e:
-        logger.error(f"保存增量更新结果失败 [{output_path}] [{type(e).__name__}]: {e}")
+        logger.error("保存增量更新结果失败 [%s] [%s]: %s", output_path, type(e).__name__, e)
         raise
 
     if stats_ic_mean is not None and stats_icir is not None:
         logger.info(
-            f"✓ 增量更新完成！新增 {len(new_dates)} 天，总计 {len(all_dates)} 天，"
-            f"IC均值={stats_ic_mean:.4f}，ICIR={stats_icir:.2f}"
+            "✓ 增量更新完成！新增 %s 天，总计 %s 天，IC均值=%.4f，ICIR=%.2f",
+            len(new_dates),
+            len(all_dates),
+            stats_ic_mean,
+            stats_icir,
         )
     elif stats_ic_mean is not None:
         logger.info(
-            f"✓ 增量更新完成！新增 {len(new_dates)} 天，总计 {len(all_dates)} 天，"
-            f"IC均值={stats_ic_mean:.4f}，ICIR=无数据"
+            "✓ 增量更新完成！新增 %s 天，总计 %s 天，IC均值=%.4f，ICIR=无数据",
+            len(new_dates),
+            len(all_dates),
+            stats_ic_mean,
         )
     else:
-        logger.info(f"✓ 增量更新完成！新增 {len(new_dates)} 天，总计 {len(all_dates)} 天，无有效 IC 数据")
-    logger.info(f"✓ 结果已保存: {output_path}")
+        logger.info(
+            "✓ 增量更新完成！新增 %s 天，总计 %s 天，无有效 IC 数据",
+            len(new_dates),
+            len(all_dates),
+        )
+    logger.info("✓ 结果已保存: %s", output_path)
 
     return result
 
@@ -742,8 +760,8 @@ def should_use_incremental(
     factor_date_normalized = factor_latest.replace("/", "-")
 
     if cache_date_normalized >= factor_date_normalized:
-        logger.info(f"模式判断: 缓存已最新（{cache_latest} >= {factor_latest}），跳过更新")
+        logger.info("模式判断: 缓存已最新（%s >= %s），跳过更新", cache_latest, factor_latest)
         return UpdateMode.SKIP  # 缓存已最新，无需更新
 
-    logger.info(f"模式判断: 缓存滞后（{cache_latest} < {factor_latest}），增量更新")
+    logger.info("模式判断: 缓存滞后（%s < %s），增量更新", cache_latest, factor_latest)
     return UpdateMode.INCREMENTAL

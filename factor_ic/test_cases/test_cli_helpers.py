@@ -54,9 +54,11 @@ class TestSafeDict:
         result = safe_dict([1, 2], field_name="my_field", logger=logger)
         assert result == {}
         logger.warning.assert_called_once()
-        msg = logger.warning.call_args[0][0]
-        assert "my_field" in msg
-        assert "list" in msg
+        # %s 惰性格式化：拼接模板 + 位置参数后断言（与生产代码风格一致）
+        call_args = logger.warning.call_args
+        formatted = call_args[0][0] % call_args[0][1:]
+        assert "my_field" in formatted
+        assert "list" in formatted
 
     def test_logger_silent_on_none(self):
         # None 是合法情况，不应产生 warning

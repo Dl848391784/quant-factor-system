@@ -92,7 +92,11 @@ def safe_dict(
         return {}
     if not isinstance(data, dict):
         if logger is not None:
-            logger.warning(f"返回字段 '{field_name}' 期望 dict|None，实际 {type(data).__name__}，已 fallback 为空字典")
+            logger.warning(
+                "返回字段 '%s' 期望 dict|None，实际 %s，已 fallback 为空字典",
+                field_name,
+                type(data).__name__,
+            )
         return {}
     return data
 

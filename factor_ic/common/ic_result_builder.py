@@ -66,7 +66,7 @@ def build_ic_result(
     # 导致后续的 None 校验不可达
     ic_series = ic_result["ic_series"]
     if ic_series is None or len(ic_series) == 0:
-        logger.error(f"ic_series 为空，因子: {factor_name}，应调用 build_error_result 而非 build_ic_result")
+        logger.error("ic_series 为空，因子: %s，应调用 build_error_result 而非 build_ic_result", factor_name)
         raise ValueError("ic_series 为空，应调用 build_error_result 而非 build_ic_result")
 
     # 提取后立即统一排序，确保所有下游使用（dates/ic_values/rolling_ic_mean/period）
@@ -415,11 +415,11 @@ def save_ic_result(result: dict, output_path: Path | None = None) -> Path:
     try:
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(convert_to_native_types(result), f, indent=2, ensure_ascii=False)
-        logger.info(f"  ✓ 结果已保存: {output_path}")
+        logger.info("  ✓ 结果已保存: %s", output_path)
     except PermissionError as e:
-        logger.error(f"保存失败（权限错误）: {output_path} - {type(e).__name__}: {e}")
+        logger.error("保存失败（权限错误）: %s - %s: %s", output_path, type(e).__name__, e)
         raise
     except OSError as e:
-        logger.error(f"保存失败（磁盘满/路径错误）: {output_path} - {type(e).__name__}: {e}")
+        logger.error("保存失败（磁盘满/路径错误）: %s - %s: %s", output_path, type(e).__name__, e)
         raise
     return output_path
