@@ -56,7 +56,10 @@ def main():
 
     # 启动节点日志
     logger.info(
-        f"换手率突增因子 IC 计算启动 [surge_window={args.surge_window}, min_stocks={args.min_stocks}, force_full={args.force_full}]"
+        "换手率突增因子 IC 计算启动 [surge_window=%s, min_stocks=%s, force_full=%s]",
+        args.surge_window,
+        args.min_stocks,
+        args.force_full,
     )
 
     # 使用公共模块主入口（遵循 PROJECT.md 强制复用规范）
@@ -107,7 +110,7 @@ def main():
         f"ICIR: {icir_str}",
         f"IC>0 占比: {positive_ratio_str}",
     ]
-    logger.info("\n" + "\n".join(summary_lines))
+    logger.info("\n%s", "\n".join(summary_lines))
 
     # ic_mean 为 None 时额外输出 warning，便于告警系统捕获异常运行
     if ic_mean is None:
