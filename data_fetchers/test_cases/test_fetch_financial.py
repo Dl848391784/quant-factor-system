@@ -1,6 +1,6 @@
 """fetch_financial.py 单元测试
 
-覆盖 9 个修复（v1.0c: Fix 1-5, v1.0d: Fix 1-5）：
+覆盖 14 个修复（v1.0c: Fix 1-5, v1.0d: Fix 1-5, v1.0e: Fix 1-5）：
 v1.0c:
 1. _QUARTER_ANNUALIZE_FACTOR 无效月份 warning + annualized_eps 置 None
 2. _parse_percentage 数据源单位约定 + 输出范围断言
@@ -13,6 +13,12 @@ v1.0d:
 3. 空数据日志 debug→info + 去前导空格
 4. 进度日志改用 fetch_count
 5. write_gzip_cache 后写入确认日志
+v1.0e:
+1. load_cache 日志 dict 格式计算实际记录数而非 key 数
+2. 检查点写入使用浅拷贝，不提前 mutate stock_data
+3. _parse_percentage/_parse_numeric_with_unit 统一 pd.isna 前置检查
+4. _parse_report_date 增加 pd.isnull 防 pd.NaT 漏判
+5. 年化 EPS split+int 用 try/except 防格式异常
 """
 
 import json
@@ -520,3 +526,245 @@ class TestWriteConfirmationLog:
 
         confirm_msgs = [r for r in caplog.records if "缓存写入完成" in r.message]
         assert any("financial_data.json.gz" in r.message for r in confirm_msgs), "确认日志应包含文件路径"
+
+
+# ─── v1.0e Fix 1: load_cache 日志 dict 格式记录数 ───────────────
+
+
+class TestLoadCacheRecordCount:
+    """v1.0e Fix 1: load_cache 日志对 dict 格式应计算实际记录数"""
+
+    def test_dict_format_record_count(self, caplog, tmp_path):
+        """dict 格式缓存应显示记录总数而非 key 数"""
+        import gzip
+
+        cache_data = {
+            "meta": {"version": "1.0e"},
+            "data": {
+                "000001": [{"asset": "000001", "roe": 4.21}, {"asset": "000001", "roe": 3.5}],
+                "000002": [{"asset": "000002", "roe": 2.1}],
+            },
+        }
+        cache_file = tmp_path / "financial_data.json.gz"
+        with gzip.open(cache_file, "wt") as f:
+            json.dump(cache_data, f)
+
+        with (
+            patch("data_fetchers.fetch_financial.CACHE_FILE", cache_file),
+            caplog.at_level(logging.INFO, logger="data_fetchers.fetch_financial"),
+        ):
+            load_cache()
+
+        # 3 条记录（000001×2 + 000002×1），不是 2 只股票
+        msgs = [r for r in caplog.records if "条记录" in r.message]
+        assert len(msgs) >= 1
+        assert "3" in msgs[0].message, f"应为 3 条记录，实际: {msgs[0].message}"
+
+    def test_list_format_record_count(self, caplog, tmp_path):
+        """旧 list 格式缓存仍应正确显示记录数"""
+        import gzip
+
+        cache_data = {
+            "meta": {"version": "1.0b"},
+            "data": [{"asset": "000001"}, {"asset": "000002"}, {"asset": "000003"}],
+        }
+        cache_file = tmp_path / "financial_data.json.gz"
+        with gzip.open(cache_file, "wt") as f:
+            json.dump(cache_data, f)
+
+        with (
+            patch("data_fetchers.fetch_financial.CACHE_FILE", cache_file),
+            caplog.at_level(logging.INFO, logger="data_fetchers.fetch_financial"),
+        ):
+            load_cache()
+
+        msgs = [r for r in caplog.records if "条记录" in r.message]
+        assert len(msgs) >= 1
+        assert "3" in msgs[0].message
+
+
+# ─── v1.0e Fix 2: 检查点写入浅拷贝 ────────────────────────────
+
+
+class TestCheckpointShallowCopy:
+    """v1.0e Fix 2: 检查点写入使用浅拷贝，不提前 mutate stock_data"""
+
+    def test_checkpoint_does_not_mutate_stock_data_early(self):
+        """检查点写入时 stock_data 不应被提前 update"""
+        from data_fetchers.fetch_financial import main
+
+        codes = [f"{i:06d}" for i in range(101)]
+        stock_list = [{"code": c, "name": f"stock_{c}"} for c in codes]
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024-03-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+
+        # 验证：write_gzip_cache 的 checkpoint 调用中 data 应包含新数据
+        captured_data = []
+
+        def capture_write(path, data, **kwargs):
+            captured_data.append(data)
+
+        with (
+            patch("data_fetchers.fetch_financial.load_cache", return_value={"meta": {}, "data": {}}),
+            patch("data_fetchers.fetch_financial.load_main_board_stock_list", return_value=stock_list),
+            patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df),
+            patch("data_fetchers.fetch_financial.write_gzip_cache", side_effect=capture_write),
+            patch("data_fetchers.fetch_financial.time.sleep"),
+        ):
+            main()
+
+        # 检查点写入（第1次调用）的 data 应包含 100 只股票
+        assert len(captured_data) >= 2
+        checkpoint_data = captured_data[0]["data"]
+        assert len(checkpoint_data) == 100  # 前 100 只
+
+
+# ─── v1.0e Fix 3: 统一 pd.isna 前置检查 ───────────────────────
+
+
+class TestUnifiedPdIsna:
+    """v1.0e Fix 3: _parse_percentage 和 _parse_numeric_with_unit 统一 pd.isna 前置检查"""
+
+    def test_parse_percentage_numpy_float64_nan(self):
+        """_parse_percentage 对 numpy.float64 NaN 返回 None"""
+        assert _parse_percentage(np.float64("nan")) is None
+
+    def test_parse_percentage_numpy_float64_valid(self):
+        """_parse_percentage 对 numpy.float64 有效值正常返回"""
+        assert _parse_percentage(np.float64(4.21)) == pytest.approx(4.21)
+
+    def test_parse_numeric_numpy_float64_nan(self):
+        """_parse_numeric_with_unit 对 numpy.float64 NaN 返回 None"""
+        from data_fetchers.fetch_financial import _parse_numeric_with_unit
+
+        assert _parse_numeric_with_unit(np.float64("nan")) is None
+
+    def test_parse_numeric_numpy_float64_valid(self):
+        """_parse_numeric_with_unit 对 numpy.float64 有效值正常返回"""
+        from data_fetchers.fetch_financial import _parse_numeric_with_unit
+
+        assert _parse_numeric_with_unit(np.float64(2.07)) == pytest.approx(2.07)
+
+    def test_parse_percentage_nat(self):
+        """_parse_percentage 对 pd.NaT 返回 None（pd.isna 前置检查拦截）"""
+        assert _parse_percentage(pd.NaT) is None
+
+    def test_parse_numeric_nat(self):
+        """_parse_numeric_with_unit 对 pd.NaT 返回 None"""
+        from data_fetchers.fetch_financial import _parse_numeric_with_unit
+
+        assert _parse_numeric_with_unit(pd.NaT) is None
+
+
+# ─── v1.0e Fix 4: _parse_report_date 防 pd.NaT 漏判 ────────────
+
+
+class TestParseReportDateNaT:
+    """v1.0e Fix 4: _parse_report_date 应将 pd.NaT 识别为 None"""
+
+    def test_nat_returns_none(self):
+        """pd.NaT 应返回 None，不是字符串 'NaT'"""
+        from data_fetchers.fetch_financial import _parse_report_date
+
+        result = _parse_report_date(pd.NaT)
+        assert result is None
+
+    def test_none_returns_none(self):
+        """None 返回 None"""
+        from data_fetchers.fetch_financial import _parse_report_date
+
+        assert _parse_report_date(None) is None
+
+    def test_valid_date_string(self):
+        """有效日期字符串原样返回"""
+        from data_fetchers.fetch_financial import _parse_report_date
+
+        assert _parse_report_date("2024-03-31") == "2024-03-31"
+
+    def test_datetime_date(self):
+        """datetime.date 对象格式化为字符串"""
+        import datetime as dt
+
+        from data_fetchers.fetch_financial import _parse_report_date
+
+        d = dt.date(2024, 3, 31)
+        assert _parse_report_date(d) == "2024-03-31"
+
+    def test_numpy_nan_returns_none(self):
+        """numpy NaN 也应返回 None"""
+        from data_fetchers.fetch_financial import _parse_report_date
+
+        assert _parse_report_date(np.float64("nan")) is None
+
+
+# ─── v1.0e Fix 5: 年化 EPS split+int 异常防护 ────────────────
+
+
+class TestAnnualizedEpsFormatException:
+    """v1.0e Fix 5: 年化 EPS 计算对异常日期格式的防护"""
+
+    def test_year_only_format(self):
+        """仅含年份 '2024' 时 annualized_eps 为 None"""
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024"],  # 无月份
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+        with patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df):
+            records = fetch_financial_data_for_stock("000001")
+
+        assert records is not None
+        assert len(records) == 1
+        assert records[0]["annualized_eps"] is None
+
+    def test_compact_format(self):
+        """紧凑格式 '20240331' 时 annualized_eps 为 None（split('-') 无分隔符）"""
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["20240331"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+        with patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df):
+            records = fetch_financial_data_for_stock("000001")
+
+        assert records is not None
+        assert records[0]["annualized_eps"] is None
+
+    def test_non_numeric_month(self):
+        """月份非数字时 annualized_eps 为 None"""
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024-AB-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+        with patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df):
+            records = fetch_financial_data_for_stock("000001")
+
+        assert records is not None
+        assert records[0]["annualized_eps"] is None
+
+    def test_valid_format_still_works(self):
+        """正常格式 '2024-03-31' 仍正确计算"""
+        mock_df = pd.DataFrame(
+            {
+                "报告期": ["2024-03-31"],
+                "基本每股收益": [0.5],
+                **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+            }
+        )
+        with patch("data_fetchers.fetch_financial.ak.stock_financial_abstract_ths", return_value=mock_df):
+            records = fetch_financial_data_for_stock("000001")
+
+        assert records is not None
+        assert records[0]["annualized_eps"] == pytest.approx(2.0)

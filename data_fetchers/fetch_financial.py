@@ -30,6 +30,12 @@
   - Fix 3: 空数据日志 debug→info + 去前导空格
   - Fix 4: 进度日志改用 fetch_count（实际请求次数），跳过率高时也能正常触发
   - Fix 5: write_gzip_cache 后补充写入确认日志（路径 + 股票数 + 记录数）
+- v1.0e (2026-06-15): 5 项缺陷修复
+  - Fix 1: load_cache 日志 len(dict) 显示 key 数而非记录数 → 按类型分别计算
+  - Fix 2: 检查点写入改用浅拷贝 {**stock_data, **new_stock_data}，不提前 mutate stock_data
+  - Fix 3: _parse_percentage/_parse_numeric_with_unit 统一 pd.isna 前置检查，消除对 numpy 继承关系的隐式依赖
+  - Fix 4: _parse_report_date 增加 pd.isnull 前置检查，防 pd.NaT 漏判为字符串 "NaT"
+  - Fix 5: 年化 EPS split+int 用 try/except 包裹，格式异常时 warning 并置 None
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -68,7 +74,7 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0d"
+_OUTPUT_VERSION = "1.0e"
 
 # 模块级固定时间戳
 _NOW = dt_cls.now()
@@ -124,12 +130,16 @@ def _parse_percentage(val: Any) -> float | None:
     """
     if val is None or val is False:
         return None
-    if isinstance(val, float):
+    # 统一 NA 检查（兼容 float/numpy.float64/pd.NaT 等），消除对继承关系的隐式依赖
+    try:
         if pd.isna(val):
             return None
-        return val
+    except (ValueError, TypeError):
+        pass  # pd.isna 对非数值类型（如 list）可能抛异常，此时忽略
     if isinstance(val, (int,)):
         return float(val)
+    if isinstance(val, float):
+        return val
     if isinstance(val, str):
         # 去掉百分号和空格
         s = val.strip().replace("%", "").replace("％", "")
@@ -150,15 +160,23 @@ def _parse_numeric_with_unit(val: Any) -> float | None:
 
     Returns:
         解析后的浮点数（亿→×1e8, 万→×1e4, 无单位→原值），无法解析返回 None
+
+    Note:
+        NA 值统一通过 pd.isna 前置检查处理，兼容 Python float / numpy.float64 / pd.NaT，
+        不依赖 isinstance(val, float) 对 numpy 标量的隐式继承关系。
     """
     if val is None or val is False:
         return None
-    if isinstance(val, float):
+    # 统一 NA 检查（兼容 float/numpy.float64/pd.NaT 等），消除对继承关系的隐式依赖
+    try:
         if pd.isna(val):
             return None
-        return val
+    except (ValueError, TypeError):
+        pass
     if isinstance(val, (int,)):
         return float(val)
+    if isinstance(val, float):
+        return val
     if isinstance(val, str):
         s = val.strip()
         if s in ("", "-", "N/A", "nan", "NaN", "--"):
@@ -180,9 +198,19 @@ def _parse_numeric_with_unit(val: Any) -> float | None:
 
 
 def _parse_report_date(report_date_raw: Any) -> str | None:
-    """解析报告期日期，兼容 datetime.date 和字符串类型"""
+    """解析报告期日期，兼容 datetime.date、pd.Timestamp 和字符串类型
+
+    注意：pd.NaT（pandas 缺失时间戳）不是 None，isinstance(NaT, datetime.date) 为 False，
+    但 str(NaT) 返回 'NaT' 会误判为有效日期，因此需前置 pd.isnull 检查。
+    """
     if report_date_raw is None:
         return None
+    # 前置 NA 检查：拦截 pd.NaT 和其他 pandas 缺失值
+    try:
+        if pd.isnull(report_date_raw):
+            return None
+    except (ValueError, TypeError):
+        pass
     if isinstance(report_date_raw, datetime.date):
         return report_date_raw.strftime("%Y-%m-%d")
     if isinstance(report_date_raw, str):
@@ -250,18 +278,28 @@ def fetch_financial_data_for_stock(
         # 遵循 PROJECT.md R15（显式除零保护）：factor 为 None 时置 None 而非静默兜底
         eps = record.get("basic_eps")
         if eps is not None and eps != 0:
-            month = int(report_date_str.split("-")[1])
-            factor = _QUARTER_ANNUALIZE_FACTOR.get(month)
-            if factor is None:
+            try:
+                parts = report_date_str.split("-")
+                month = int(parts[1])
+            except (IndexError, ValueError):
                 _logger.warning(
-                    "报告期月份 %d 不在季度年化系数字典中 (stock=%s, report_date=%s), annualized_eps 置 None",
-                    month,
+                    "报告期日期格式异常无法提取月份 (stock=%s, report_date=%s), annualized_eps 置 None",
                     symbol,
                     report_date_str,
                 )
                 record["annualized_eps"] = None
             else:
-                record["annualized_eps"] = eps * factor
+                factor = _QUARTER_ANNUALIZE_FACTOR.get(month)
+                if factor is None:
+                    _logger.warning(
+                        "报告期月份 %d 不在季度年化系数字典中 (stock=%s, report_date=%s), annualized_eps 置 None",
+                        month,
+                        symbol,
+                        report_date_str,
+                    )
+                    record["annualized_eps"] = None
+                else:
+                    record["annualized_eps"] = eps * factor
         else:
             record["annualized_eps"] = None
 
@@ -286,7 +324,13 @@ def load_cache(logger_arg: logging.Logger | None = None) -> dict[str, Any]:
 
         with gzip.open(CACHE_FILE, "rt") as f:
             data = json.load(f)
-        _logger.info("加载财务数据缓存: %d 条记录", len(data.get("data", [])))
+        # 兼容 dict（v1.0c+）和 list（v1.0b）格式，计算实际记录数
+        raw_data_field = data.get("data", [])
+        if isinstance(raw_data_field, dict):
+            record_count = sum(len(v) for v in raw_data_field.values())
+        else:
+            record_count = len(raw_data_field)
+        _logger.info("加载财务数据缓存: %d 条记录", record_count)
         return data
     except Exception as e:
         _logger.warning("加载缓存失败: %s (%s)，将全新拉取", str(e)[:80], type(e).__name__)
@@ -404,28 +448,30 @@ def main(logger_arg: logging.Logger | None = None) -> int:
             empty += 1
 
         # Fix 2: 检查点写入 — 每 100 只股票写一次缓存，防崩溃丢失
+        # 使用浅拷贝 {**stock_data, **new_stock_data} 避免提前 mutate stock_data
         if fetch_count > 0 and fetch_count % _CHECKPOINT_INTERVAL == 0 and new_stock_data:
-            # 合并当前新数据到 stock_data，写入检查点
-            stock_data.update(new_stock_data)
+            merged = {**stock_data, **new_stock_data}
             checkpoint_meta: dict[str, Any] = {
                 "version": _OUTPUT_VERSION,
                 "fetched_at": _NOW.strftime("%Y-%m-%d %H:%M:%S"),
                 "last_full_fetch_date": _NOW.strftime("%Y-%m-%d")
                 if need_full_fetch
                 else (last_full_date_str or _NOW.strftime("%Y-%m-%d")),
-                "stock_count": len(stock_data),
-                "record_count": sum(len(v) for v in stock_data.values()),
+                "stock_count": len(merged),
+                "record_count": sum(len(v) for v in merged.values()),
                 "fields": list(_FINANCIAL_FIELD_MAP.values()) + ["annualized_eps"],
                 "source": "akshare_stock_financial_abstract_ths",
                 "checkpoint": True,
             }
-            checkpoint_data = {"meta": checkpoint_meta, "data": stock_data}
+            checkpoint_data = {"meta": checkpoint_meta, "data": merged}
             write_gzip_cache(CACHE_FILE, checkpoint_data, ensure_dir=True, logger=_logger)
             _logger.info(
                 "检查点写入: %s (%d 只股票, %d 条记录)",
-                CACHE_FILE, len(stock_data), checkpoint_meta["record_count"],
+                CACHE_FILE, len(merged), checkpoint_meta["record_count"],
             )
-            new_stock_data.clear()  # 已写入的数据清空，避免重复合并
+            # 检查点后才合并到 stock_data，清空 new_stock_data 避免重复合并
+            stock_data.update(new_stock_data)
+            new_stock_data.clear()
 
         # 速率控制
         time.sleep(_FETCH_DELAY)
