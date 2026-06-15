@@ -36,7 +36,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
 from data_fetchers.factor_calculator import calculate_capital_flow_intensity  # noqa: E402
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS  # noqa: E402
 from factor_ic.common.data_columns import JOIN_KEYS
-from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
 from factor_ic.common.factor_ic_runner import run_factor_ic  # noqa: E402
 from factor_ic.common.factor_spec import FactorSpec, register_factor  # noqa: E402
 from factor_ic.common.factor_summary_logger import log_factor_summary  # noqa: E402
@@ -66,8 +65,8 @@ def main():
     parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
     args = parser.parse_args()
 
-    # 启动上下文日志（问题4：模块顶层无启动日志，补充因子名称+关键参数便于追溯）
-    logger.info("资金流强度因子IC计算启动 | min_stocks=%d | force_full=%s", args.min_stocks, args.force_full)
+    # 启动上下文日志（问题4：补充因子名称便于日志追溯，参数细节由 run_factor_ic 横幅统一承载）
+    logger.info("资金流强度因子IC计算启动")
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
     result = run_factor_ic(
@@ -77,12 +76,9 @@ def main():
         _logger=logger,
     )
 
-    # 问题1：覆盖 None / 非 dict / success=False 三种失败场景，避免静默跳过摘要
+    # 问题1：覆盖 None / success=False 两种失败场景，避免静默跳过摘要
     if result is None:
         logger.error("run_factor_ic 返回 None，数据加载或计算可能失败")
-        sys.exit(1)
-    if not isinstance(result, dict):
-        logger.error("run_factor_ic 返回类型异常: 期望 dict，实际 %s", type(result).__name__)
         sys.exit(1)
     if not result.get("success", False):
         logger.error("资金流强度因子IC计算失败: %s", result.get("error", "未知错误"))
@@ -99,9 +95,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except FactorCalcError as e:
-        logger.error("资金流强度因子IC计算失败: %s", e)
-        sys.exit(1)
     except Exception:
         # 问题5：附带因子名上下文，便于日志聚合检索定位出错阶段
         logger.exception("资金流强度因子运行失败 (capital_flow_intensity)")
