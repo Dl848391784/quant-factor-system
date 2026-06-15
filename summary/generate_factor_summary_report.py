@@ -553,13 +553,13 @@ def load_json_file(path: Path, logger: logging.Logger) -> dict | None:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
     except FileNotFoundError:
-        logger.debug(f"文件不存在: {path}")
+        logger.debug("文件不存在: %s", path)
         return None
     except json.JSONDecodeError as e:
-        logger.warning(f"JSON 解析错误: {path}, 位置 {e.pos}, 原因: {e.msg}")
+        logger.warning("JSON 解析错误: %s, 位置 %s, 原因: %s", path, e.pos, e.msg)
         return None
     except (PermissionError, IsADirectoryError, OSError) as e:
-        logger.warning(f"文件读取错误: {path}, 类型 {type(e).__name__}, 原因: {e}")
+        logger.warning("文件读取错误: %s, 类型 %s, 原因: %s", path, type(e).__name__, e)
         return None
 
 
@@ -599,7 +599,7 @@ def load_ic_results(logger: logging.Logger) -> list[dict]:
 
     # 按 ICIR 降序排序
     results.sort(key=lambda x: x["icir"], reverse=True)
-    logger.info(f"加载 IC 结果: {file_count} 个因子")
+    logger.info("加载 IC 结果: %s 个因子", file_count)
     return results
 
 
@@ -654,7 +654,7 @@ def load_backtest_results(logger: logging.Logger) -> list[dict]:
             )
             file_count += 1
 
-    logger.info(f"加载回测结果: {file_count} 个因子")
+    logger.info("加载回测结果: %s 个因子", file_count)
     return results
 
 
@@ -765,7 +765,12 @@ def calculate_factor_correlation(logger: logging.Logger, force_full: bool = Fals
             corr_df.columns = factor_names
 
             elapsed = time.time() - start_time
-            logger.info(f"因子相关性计算完成，耗时: {elapsed:.2f}秒（采样{stock_count}只股票，{len(data_list)}条记录）")
+            logger.info(
+                "因子相关性计算完成，耗时: %.2f秒（采样%s只股票，%s条记录）",
+                elapsed,
+                stock_count,
+                len(data_list),
+            )
 
             return corr_df
 
@@ -849,7 +854,7 @@ def load_composite_results(logger: logging.Logger) -> list[dict]:
             )
             file_count += 1
 
-    logger.info(f"加载综合因子结果: {file_count} 种权重方法")
+    logger.info("加载综合因子结果: %s 种权重方法", file_count)
     return results
 
 
@@ -2134,7 +2139,7 @@ def main():
 
     # 记录开始时间（用于计算总耗时）
     start_time = time.time()
-    logger.info(f"开始生成汇总报告 (版本 {__version__})")
+    logger.info("开始生成汇总报告 (版本 %s)", __version__)
 
     parser = argparse.ArgumentParser(description="生成因子分析数据汇总报告")
     parser.add_argument("--date", type=str, help="指定日期 (YYYY-MM-DD)，默认当天")
@@ -2159,14 +2164,14 @@ def main():
     # 文件写入异常处理
     try:
         output_path.write_text(report, encoding="utf-8")
-        logger.info(f"报告已保存到: {output_path}")
+        logger.info("报告已保存到: %s", output_path)
     except OSError as e:
         logger.error("文件写入失败: %s, 原因: %s", output_path, e)
         sys.exit(1)
 
     # 记录总耗时
     elapsed = time.time() - start_time
-    logger.info(f"报告生成完成，总耗时: {elapsed:.2f}秒")
+    logger.info("报告生成完成，总耗时: %.2f秒", elapsed)
 
 
 if __name__ == "__main__":
