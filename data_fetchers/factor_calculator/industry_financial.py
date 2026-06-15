@@ -118,9 +118,21 @@ def _load_financial_data(
     with gzip.open(path, "rt") as f:
         raw_data = json.load(f)
 
-    data_list = raw_data.get("data", [])
-    if not data_list:
+    data_field = raw_data.get("data", [])
+    if not data_field:
         raise RuntimeError(f"财务数据缓存为空: {path}")
+
+    # 兼容两种缓存格式（fetch_financial v1.0c+ dict / v1.0b list）
+    if isinstance(data_field, dict):
+        data_list: list[dict] = []
+        for stock_code, records in data_field.items():
+            for rec in records:
+                rec_copy = dict(rec)
+                if "asset" not in rec_copy:
+                    rec_copy["asset"] = stock_code
+                data_list.append(rec_copy)
+    else:
+        data_list = data_field
 
     df = pd.DataFrame(data_list)
 
