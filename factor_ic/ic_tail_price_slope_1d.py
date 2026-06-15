@@ -64,6 +64,7 @@ from paths import DATA_FETCHERS_RESULT  # 遵循 PROJECT.md H7 规则
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
 from factor_ic.common.exceptions import FactorCalcError
 from factor_ic.common.factor_ic_runner import run_complex_factor_ic
+from factor_ic.common.factor_summary_logger import log_factor_summary
 from factor_ic.common.logger_config import get_logger
 
 
@@ -278,50 +279,8 @@ def main():
     if result is None:
         raise FactorCalcError("run_complex_factor_ic 返回 None,数据加载或计算可能失败")
 
-    # 使用 .get() + or {} 防御性访问结果(避免 None 导致格式化失败)
-    ic_metrics = result.get("ic_metrics") or {}
-    sample_stats = result.get("sample_stats") or {}
-    period = result.get("period") or {}
-    # 字段名 ic_distribution_consistency 来源于 MODULE.md 第56行输出结构模板
-    ic_distribution = result.get("ic_distribution_consistency") or {}
-
-    # 构建结果摘要(合并为单条日志便于阅读)
-    ic_mean = ic_metrics.get("ic_mean")
-    ic_std = ic_metrics.get("ic_std")
-    icir = ic_metrics.get("icir")
-    positive_ratio = ic_distribution.get("positive_ratio")
-
-    # 格式化各字段(None 时显示 N/A)
-    ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
-    ic_std_str = f"{ic_std:.4f}" if ic_std is not None else "N/A"
-    icir_str = f"{icir:.2f}" if icir is not None else "N/A"
-    positive_ratio_str = f"{positive_ratio:.2%}" if positive_ratio is not None else "N/A"
-
-    summary_lines = [
-        "=" * 60,
-        "结果摘要",
-        "=" * 60,
-        f"因子名称: {result.get('factor_name', 'unknown')}",
-        f"更新模式: {result.get('update_mode', 'unknown')}",
-        f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}",
-        f"有效天数: {sample_stats.get('valid_days', 0)} 天",
-        "--- IC指标 ---",
-        f"IC 均值: {ic_mean_str}",
-        f"IC 标准差: {ic_std_str}",
-        f"ICIR: {icir_str}",
-        f"IC>0 占比: {positive_ratio_str}",
-    ]
-    logger.info("\n%s", "\n".join(summary_lines))
-
-    # 异常状态告警(运维巡检用,四字段均需告警)
-    if ic_mean is None:
-        logger.warning("本次计算 IC 均值为空,请检查数据源")
-    if ic_std is None:
-        logger.warning("IC 标准差无法计算,请检查因子数据分布")
-    if icir is None:
-        logger.warning("ICIR 无法计算,请检查因子数据分布")
-    if positive_ratio is None:
-        logger.warning("IC>0 占比无法获取,请检查公共模块输出结构")
+    # 输出 IC 摘要 + None 状态整合告警（公共模块,M3.1）
+    log_factor_summary(result, "尾盘价格趋势斜率因子", logger)
 
     # 确认结果处理完成后才输出"计算完成"日志
     logger.info("尾盘价格趋势斜率因子IC计算完成")
