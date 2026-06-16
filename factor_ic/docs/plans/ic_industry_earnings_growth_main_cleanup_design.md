@@ -278,9 +278,20 @@ R1-R3 已落地方案 A（保留 `if result is None` 死分支作为防御性守
 | #4 注释边界模糊 | 改为"None 检查由 main 提前退出" | 改为"run_factor_ic 永不返回 None + log_factor_summary 透明性审阅" |
 | #5 SPEC 注册 import-time 失败 | try/except → sys.exit(2) | 保留 R3 实现（不属于死代码） |
 
-### 10.4 后续待办（不在本轮 scope）
+### 10.4 后续待办闭环（已全部落地）
 
-- R7c：补 H12 / H13 正反例段落（参考 PROJECT.md H11 L189-240 模板：正反例 + Why + Verify + 当前覆盖范围）
-- R8：`scripts/check_exit_codes.py` 与 `scripts/check_dead_branches.py` 自动化检查脚本（H12 / H13 当前为人工 review，工具落地后可去掉 [待实施] 标记）
-- 路线图表 L321 的 H11（必测场景）与硬规则表 L163 的 H11（日志格式）编号冲突 —— 历史遗留问题，本次未引入也未修复，应另开 design.md 处理
+| 编号 | 待办 | 状态 | Commit |
+|------|------|------|--------|
+| R7c-1 | 补 H12 正反例段落（PROJECT.md H11 5 段式模板） | ✅ 已落地 | `809a1bd` |
+| R7c-2 | 补 H13 正反例段落（含判定边界 6 段式） | ✅ 已落地 | `2fdfcb9` |
+| R9 | `scripts/check_exit_codes.py` H12 自动化检查 + 11 pytest | ✅ 已落地 | `d08bdb6` |
+| R10 | `scripts/check_dead_branches.py` H13 自动化检查 + 15 pytest + 30 文件 allowlist 渐进迁移 | ✅ 已落地 | `9a5caf6` |
+| R11 | 路线图 H11（必测场景）→ H14 编号冲突修复 | ✅ 已落地 | `7f3709d` |
+
+### 10.5 后续可选改进（不在本轮 scope）
+
+- 把 30 个 allowlist 文件按 R4-R6 模板逐个迁移（每文件独立 commit），allowlist 清空后从 PROJECT.md H13 当前覆盖范围移除 ⏳ 标记
+- 把 `scripts/check_exit_codes.py` 和 `scripts/check_dead_branches.py` 接入 pre-commit hook 与 CI workflow（当前可手工运行 `python scripts/check_*.py all`）
+- AGENTS.md 规则速查表 + 项目根 README 补充 H12 / H13 说明
+
 
