@@ -113,6 +113,10 @@
   - Fix 1: 检查点 new_stock_data.clear() 移入 try 成功分支，写入失败时保留增量待重试
   - Fix 2: load_cache 损坏缓存日志 list(data.keys())[:10] 截断 + 标注总键数，防超大键名列表撑爆日志
   - Fix 3: write_gzip_cache 双调用点 except 扩展为 (OSError, TypeError, ValueError, RuntimeError)，与 docstring 声明的 Raises 一致
+- v1.0s (2026-06-16): 3 项缺陷修复（注释精度 + 异常缩窄 + 公共 API 标注）
+  - Fix 1: 检查点 clear 时序注释更正——失败保留场景下次检查点或最终写入时一并落盘（new_stock_data 可能已累积更多新数据，非仅本次失败批次）
+  - Fix 2: _parse_report_date 兜底分支 except Exception → except (TypeError, AttributeError)，缩窄至 str() 实际可能抛出的异常类型，避免过宽捕获
+  - Fix 3: get_cached_stock_codes docstring 标注为外部 API（test_fetch_financial.py 6 处引用），明确不在 main() 调用链内
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -153,7 +157,7 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0r"
+_OUTPUT_VERSION = "1.0s"
 
 logger = logging.getLogger(__name__)
 
@@ -335,7 +339,9 @@ def _parse_report_date(report_date_raw: Any) -> str | None:
     # 但 99% 情况下 str() 结果不符合 YYYY-MM-DD 时统一返回 None。
     try:
         fallback_str = str(report_date_raw)
-    except Exception:
+    except (TypeError, AttributeError):
+        # str() 在 CPython 中几乎不抛异常，仅 __str__ 被重写为抛异常的自定义类才会触发
+        # 限定为 TypeError/AttributeError，避免过宽捕获掩盖真正意外的错误
         return None
     if _REPORT_DATE_RE.match(fallback_str):
         try:
@@ -541,7 +547,12 @@ def load_cache(logger_arg: logging.Logger | None = None) -> dict[str, Any]:
 
 
 def get_cached_stock_codes(cache_data: dict[str, Any]) -> set[str]:
-    """从缓存数据中提取已拉取的股票代码集合
+    """从缓存数据中提取已拉取的股票代码集合（外部 API）
+
+    本函数是 fetch_financial 模块对外暴露的工具函数，供测试代码
+    （data_fetchers/test_cases/test_fetch_financial.py）和潜在的外部调用方
+    （如增量拉取脚本、缓存巡检工具）使用，**不在 main() 调用链内**。
+    main() 内部直接使用 set(stock_data.keys()) 判断已缓存代码。
 
     兼容两种格式：dict（v1.0c+）和 list（v1.0b 及更早）
     """
@@ -729,9 +740,10 @@ def main(logger_arg: logging.Logger | None = None) -> int:
                 "checkpoint": True,
             }
             checkpoint_data = {"meta": checkpoint_meta, "data": stock_data}
-            # Fix 1 (v1.0r): new_stock_data.clear() 必须在写入成功后才执行
-            # 写入失败时保留 new_stock_data 内容，下次检查点重新尝试落盘
-            # （stock_data.update 是幂等的，重复 update 同 key 不会丢数据）
+            # Fix 1 (v1.0s): new_stock_data.clear() 必须在写入成功后才执行
+            # 写入失败时保留 new_stock_data，下次检查点或最终写入时一并落盘
+            # 注：此时 new_stock_data 可能已累积更多新数据（非仅本次失败批次），
+            # 因 stock_data.update 幂等，重复 update 同 key 不会丢数据
             try:
                 write_gzip_cache(CACHE_FILE, checkpoint_data, ensure_dir=True, logger=_logger)
                 _logger.info(
