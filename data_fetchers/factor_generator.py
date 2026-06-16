@@ -718,6 +718,9 @@ def _write_factor_json_gz(
 
         os.replace(temp_path, output_path)
         replaced = True
+        # R5: 文件级完整性可见信号——若 gzip 压缩异常导致体积远小于预期
+        # （如空文件替换了正常文件），仅靠路径+记录数无法从日志发现
+        logger.info("  输出文件大小: %.2f MB", output_path.stat().st_size / 1024**2)
     except OSError as e:
         # PermissionError 是 OSError 子类
         logger.error("文件系统错误保存失败: %s, 原因: %s (%s)", output_path, type(e).__name__, str(e))
