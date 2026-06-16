@@ -535,6 +535,11 @@ def _run_pipeline_step(
           * 即便 emit_valid_log=False，valid_count 仍正常计入 metadata，
             元数据完整性不受日志策略影响
         - 改 emit_valid_log 取值 = 改运行时日志规格，需走需求评审，不属于 bug fix
+
+    Raises:
+        KeyError: 当 factor_func 未生成所有 output_cols 中预期列时，
+                  错误消息含函数名 + 缺失列名 + 实际生成列，便于精确归因
+                  （否则下游 factor_df[col].notna() 抛的 KeyError 仅含列名）
     """
     step_label = step["step_label"]
     if step_label:
@@ -547,6 +552,16 @@ def _run_pipeline_step(
     emit_valid_log: bool = step["emit_valid_log"]
     total_records = len(factor_df)
     valid_counts: dict[str, int] = {}
+
+    # 提前校验 factor_func 是否生成了所有预期列
+    # 否则下方 factor_df[col].notna() 会抛 KeyError，错误信息只含列名，
+    # 无法定位是哪个 factor_func 漏写。这里显式 raise 给出精确归因。
+    missing = [c for c in output_cols if c not in factor_df.columns]
+    if missing:
+        raise KeyError(
+            f"因子函数 {factor_func.__name__} 未生成预期列: {missing}, "
+            f"实际生成列: {list(factor_df.columns)}"
+        )
 
     for col in output_cols:
         valid_count = int(factor_df[col].notna().sum())

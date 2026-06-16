@@ -32,6 +32,7 @@ from data_fetchers.factor_generator import (
     _calc_pct,
     _load_json_gz_data,
     _nan_to_null,
+    _run_pipeline_step,
     _write_factor_json_gz,
 )
 
@@ -442,6 +443,94 @@ class TestAtomicWriteJson:
         assert path.exists()
         with open(path, encoding="utf-8") as f:
             assert json.load(f) == {"a": 1}
+
+
+# ============================================================================
+# _run_pipeline_step: factor_func 漏写列时的精确错误归因（bug 2）
+# ============================================================================
+
+
+class TestRunPipelineStepMissingCols:
+    """_run_pipeline_step 提前校验 output_cols 缺失（bug 2 回归）"""
+
+    def test_factor_func_missing_one_col_raises_keyerror(
+        self,
+        silent_logger: logging.Logger,
+    ) -> None:
+        """factor_func 漏写一列：抛 KeyError，消息含函数名 + 缺失列名 + 实际列"""
+
+        def buggy_factor_func(df: pd.DataFrame, *, logger_arg: logging.Logger) -> pd.DataFrame:
+            df = df.copy()
+            df["partial_col_a"] = 1.0
+            # 故意漏写 partial_col_b
+            return df
+
+        step = {
+            "step_label": "Test step",
+            "factor_func": buggy_factor_func,
+            "output_cols": ("partial_col_a", "partial_col_b"),
+            "emit_valid_log": False,
+        }
+        df = pd.DataFrame({"date": ["2026-01-01"], "asset": ["A"]})
+
+        with pytest.raises(KeyError) as exc_info:
+            _run_pipeline_step(df, step, silent_logger)
+
+        msg = str(exc_info.value)
+        # 关键断言：错误消息必须含归因信息
+        assert "buggy_factor_func" in msg
+        assert "partial_col_b" in msg
+        # 且不应误报已写入的列
+        assert "['partial_col_a', 'partial_col_b']" in msg or "'partial_col_b'" in msg
+
+    def test_factor_func_writes_all_cols_no_error(
+        self,
+        silent_logger: logging.Logger,
+    ) -> None:
+        """factor_func 全部写入：正常返回"""
+
+        def good_factor_func(df: pd.DataFrame, *, logger_arg: logging.Logger) -> pd.DataFrame:
+            df = df.copy()
+            df["col_a"] = 1.0
+            df["col_b"] = 2.0
+            return df
+
+        step = {
+            "step_label": "Test step",
+            "factor_func": good_factor_func,
+            "output_cols": ("col_a", "col_b"),
+            "emit_valid_log": False,
+        }
+        df = pd.DataFrame({"date": ["2026-01-01"], "asset": ["A"]})
+
+        result_df, valid_counts = _run_pipeline_step(df, step, silent_logger)
+        assert valid_counts == {"col_a": 1, "col_b": 1}
+        assert "col_a" in result_df.columns
+        assert "col_b" in result_df.columns
+
+    def test_tail_factor_missing_3_of_5_cols(
+        self,
+        silent_logger: logging.Logger,
+    ) -> None:
+        """模拟用户报告场景：tail 因子返回 5 列但 factor_func 只写 2 列"""
+
+        def partial_tail_func(df: pd.DataFrame, *, logger_arg: logging.Logger) -> pd.DataFrame:
+            df = df.copy()
+            df["tail_col_1"] = 1.0
+            df["tail_col_2"] = 2.0
+            # 漏写 tail_col_3 / 4 / 5
+            return df
+
+        step = {
+            "step_label": "Step 11: 计算尾盘因子...",
+            "factor_func": partial_tail_func,
+            "output_cols": ("tail_col_1", "tail_col_2", "tail_col_3", "tail_col_4", "tail_col_5"),
+            "emit_valid_log": True,
+        }
+        df = pd.DataFrame({"date": ["2026-01-01"], "asset": ["A"]})
+
+        with pytest.raises(KeyError, match="partial_tail_func"):
+            _run_pipeline_step(df, step, silent_logger)
 
 
 # ============================================================================
