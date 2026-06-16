@@ -29,6 +29,8 @@
   v1.0 (2026-06-12): 初始版本，复用 factor_calculator.calculate_industry_roe_trend
   v1.1 (2026-06-16): 7项修复——result接收/None检查+warning/SummaryLogError/getattr防御/
                      SpecRegistrationError兜底/启动日志/完成日志补统计量
+  v1.2 (2026-06-16): 6项修复——None→FactorCalcError/args=None用默认Namespace/
+                     or{}单行/去重复warning日志/__cause__or e兜底/去_cli别名变量
 """
 
 import argparse
@@ -85,25 +87,33 @@ def _build_parser():
     return parser
 
 
+def _default_args():
+    """构造库函数调用默认参数（避免 args=None 时解析 sys.argv）。"""
+    return argparse.Namespace(min_stocks=DEFAULT_MIN_STOCKS, force_full=False)
+
+
 def main(args=None):
     """CLI 主入口
 
     Parameters
     ----------
     args : namespace-like | None
-        CLI 参数。None 时内部解析 sys.argv（仅 CLI 调用场景）。
+        CLI 参数。None 时使用默认值（min_stocks=DEFAULT_MIN_STOCKS,
+        force_full=False），不解析 sys.argv。
         库函数调用方可传入任何含 ``min_stocks`` 和 ``force_full``
         属性的对象（如 ``argparse.Namespace`` 或自定义 dataclass），
         不限于 ``argparse.Namespace``。
 
     Returns
     -------
-    dict | None
-        run_factor_ic 的完整结果字典。None 表示数据加载或计算失败，
-        由调用方（__main__ 块或库函数调用方）检查并处理。
+    dict
+        run_factor_ic 的完整结果字典。
 
     Raises
     ------
+    FactorCalcError
+        run_factor_ic 返回 None（数据加载或计算失败），由 __main__ 块
+        映射为 exit 5（R19）。
     SummaryLogError
         log_factor_summary 摘要输出阶段失败（因子计算 result 可能已成功生成）。
         由 __main__ 块捕获并映射为 exit 3（R17 辅助层失败）。
@@ -114,7 +124,7 @@ def main(args=None):
     """
 
     if args is None:
-        args = _build_parser().parse_args()
+        args = _default_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
     # 本地启动参数日志：补充模块日志流可追溯入参（与公共横幅互补）
@@ -131,20 +141,17 @@ def main(args=None):
         logger=logger,
     )
 
-    # None 检查：记录上下文后返回 None，由调用方（__main__ 块或库函数调用方）决定处理方式
-    # （R20: main() 作为库函数不应抛业务异常泄露，但需留痕便于库调用场景排查）
+    # None → FactorCalcError：统一走异常处理链（而非裸 sys.exit），
+    # 确保退出码语义一致（数据加载失败 = 因子计算内部失败 → exit 5）
     if result is None:
-        logger.warning(
-            "run_factor_ic 返回 None（factor=%s, min_stocks=%s, force_full=%s），数据加载或计算可能失败",
-            SPEC.factor_name,
-            args.min_stocks,
-            args.force_full,
+        raise FactorCalcError(
+            f"run_factor_ic 返回 None（factor={SPEC.factor_name}, "
+            f"min_stocks={args.min_stocks}, force_full={args.force_full}），"
+            "数据加载或计算可能失败"
         )
-        return None
 
     # 计算完成检查点日志：保留 log_factor_summary 未覆盖的维度信息（日期范围、更新模式）
-    _period = result.get("period")
-    period = _period if _period is not None else {}
+    period = result.get("period") or {}
     logger.info(
         "run_factor_ic 完成: 日期范围=%s~%s, 更新模式=%s",
         period.get("start", "N/A"),
@@ -158,19 +165,13 @@ def main(args=None):
     try:
         log_factor_summary(result, "行业ROE趋势因子", logger)
     except Exception as e:
-        # 结构化警告：因子产物已生成，仅摘要层失败（便于监控系统过滤）
-        logger.warning(
-            "因子产物已生成，仅摘要层失败（factor=%s）",
-            SPEC.factor_name,
-        )
         raise SummaryLogError(
             "log_factor_summary 摘要输出阶段失败（因子计算 result 已成功生成；"
             "故障源 = 摘要日志层而非 run_factor_ic 业务路径）"
         ) from e
 
     # 替换冗余的"计算完成"日志为包含关键指标的有效信息
-    _ic_metrics = result.get("ic_metrics")
-    ic_metrics = _ic_metrics if _ic_metrics is not None else {}
+    ic_metrics = result.get("ic_metrics") or {}
     ic_mean = ic_metrics.get("ic_mean")
     icir = ic_metrics.get("icir")
     ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
@@ -186,15 +187,9 @@ def main(args=None):
 if __name__ == "__main__":
     # 共享 _build_parser()，sys.argv 只解析一次，结果传入 main()
     _cli_args = _build_parser().parse_args()
-    # 在 try 块前提取上下文字段，except 块不依赖 _cli_args 作用域位置
-    _cli_min_stocks = _cli_args.min_stocks
-    _cli_force_full = _cli_args.force_full
 
     try:
-        result = main(args=_cli_args)
-        # main() 内已打 warning 留痕，此处仅负责退出码映射
-        if result is None:
-            sys.exit(5)
+        main(args=_cli_args)
     except DataSchemaError as e:
         # 数据 Schema 校验失败（公共模块 validate_required_columns 抛出）：
         # H12 R18 → exit 4 与因子计算失败（exit 5）严格区分。
@@ -212,19 +207,20 @@ if __name__ == "__main__":
         # 辅助层失败（R17），因子计算 result 已成功生成
         # 主结果产物可用，下游 backtest/comprehensive/summary 可正常消费；
         # 仅旁路日志摘要失败时返回 exit 3
-        # M22: 业务异常子类不打完整堆栈，只打印核心原因（e.__cause__）
-        cause_msg = str(e.__cause__) if e.__cause__ else "未知原因"
+        # M22: 业务异常子类不打完整堆栈，只打印核心原因
+        # e.__cause__ or e 兜底：若 raise 不带 from 则 __cause__ 为 None，
+        # 此时回退到 SummaryLogError 自身消息，避免"未知原因"丢失信息
         logger.error(
             "摘要输出阶段失败（因子计算 result 已成功生成；故障源 = 摘要日志层；原因: %s）",
-            cause_msg,
+            e.__cause__ or e,
         )
         sys.exit(3)  # H12 R17：辅助层失败专用退出码
     except FactorCalcError as e:
         logger.error(
             "行业ROE趋势因子IC计算失败 (factor=%s, min_stocks=%s, force_full=%s): %s",
             SPEC.factor_name,
-            _cli_min_stocks,
-            _cli_force_full,
+            _cli_args.min_stocks,
+            _cli_args.force_full,
             e,
         )
         sys.exit(5)  # H12 R19: 因子计算失败 → 检查计算代码
