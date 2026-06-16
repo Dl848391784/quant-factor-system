@@ -942,75 +942,87 @@ def generate_all_factors(
     # 显式释放 factor_df 内存（可能包含中间列，比 output_df 更多）
     del factor_df
 
-    # ========== Step 13: 保存输出 ==========
-    logger.info("Step 13: 保存输出...")
-
-    total_records = len(output_df)
-    _write_factor_json_gz(output_df, output_path, logger)
-
-    logger.info("  输出路径: %s", output_path)
-    logger.info("  输出记录数: %d", total_records)
-
-    # 计算运行耗时
-    end_time = datetime.now()
-    elapsed_seconds = (end_time - start_time).total_seconds()
-
-    # ========== Step 14: 返回元数据 ==========
-    # metadata 字段说明：
-    # - generated_at: 生成时间（格式 YYYY-MM-DD HH:MM:SS）
-    # - elapsed_seconds: 运行耗时（秒，精度 .2f）
-    # - total_records: 输出总记录数
-    # - valid_records: 各因子有效记录数（绝对值）
-    # - valid_records_percent: 各因子有效记录百分比（与日志输出一致，便于质量评估）
-    # - factor_columns: 扩展因子列名（不含基础列和基础因子）
-    # - return_columns: 收益数据列名
-    # - input_sources: 输入数据源路径
-    # - output_path: 输出文件路径
-
-    metadata = {
-        "generated_at": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-        "elapsed_seconds": round(elapsed_seconds, 2),
-        "total_records": total_records,
-        "valid_records": {key: valid_counts[key] for key in _VALID_KEY_ORDER},
-        "valid_records_percent": {key: _calc_pct(valid_counts[key], total_records) for key in _VALID_KEY_ORDER},
-        "factor_columns": list(_EXTENDED_FACTOR_COLS),  # 扩展因子列（返回副本，防止外部修改）
-        "return_columns": list(_RETURN_COLS),  # 收益数据列（返回副本，防止外部修改）
-        "input_sources": {
-            "factor_data": str(factor_data_path),
-            "turnover_data": str(turnover_data_path),
-            "return_data": str(return_data_path),
-        },
-        "output_path": str(output_path),
-    }
-
-    logger.info("=" * 40)
-    logger.info("因子生成完成")
-    logger.info("生成时间: %s", metadata["generated_at"])
-    logger.info("运行耗时: %.2f 秒", metadata["elapsed_seconds"])
-    logger.info("因子列: %s", metadata["factor_columns"])
-    logger.info("=" * 40)
-
-    # ========== Step 15: 写出列名清单（消费者 schema 查询） ==========
-    # 遵循 factor_cols_literal_constant_design.md §3.5：
-    # 将 _OUTPUT_COLS 结构化输出为独立 JSON 文件，供 factor_ic 模块
-    # 校验 required_columns 是否与数据源对齐（M4 合规：读数据产物 ≠ import 模块）
-    columns_path = output_path.parent / "factor_ic_data_columns.json"
+    # ========== Step 13~15 包裹在 try/finally 中，确保异常路径同样释放 output_df ==========
+    # 正常路径：return 后栈解开，output_df 由 GC 回收
+    # 异常路径：若 _write_factor_json_gz 等抛出 RuntimeError，本 finally 显式去除引用，
+    #          避免外层调用方栈帧持续持有 output_df（重试 / 后续任务场景下尤其重要）
     try:
-        columns_manifest = {
-            "base_cols": list(_BASE_COLS),
-            "extended_factor_cols": list(_EXTENDED_FACTOR_COLS),
-            "return_cols": list(_RETURN_COLS),
-            "all_cols": list(_OUTPUT_COLS),
-            "generated_at": metadata["generated_at"],
-        }
-        with open(columns_path, "w", encoding="utf-8") as f:
-            json.dump(columns_manifest, f, ensure_ascii=False, indent=2)
-        logger.info("列名清单已保存: %s", columns_path)
-    except OSError as e:
-        # 列名清单写入失败不应阻塞主流程（降级为 warn）
-        logger.warning("列名清单保存失败: %s, 原因: %s", columns_path, e)
+        # ========== Step 13: 保存输出 ==========
+        logger.info("Step 13: 保存输出...")
 
-    return metadata
+        total_records = len(output_df)
+        _write_factor_json_gz(output_df, output_path, logger)
+
+        logger.info("  输出路径: %s", output_path)
+        logger.info("  输出记录数: %d", total_records)
+
+        # 计算运行耗时
+        end_time = datetime.now()
+        elapsed_seconds = (end_time - start_time).total_seconds()
+
+        # ========== Step 14: 返回元数据 ==========
+        # metadata 字段说明：
+        # - generated_at: 生成时间（格式 YYYY-MM-DD HH:MM:SS）
+        # - elapsed_seconds: 运行耗时（秒，精度 .2f）
+        # - total_records: 输出总记录数
+        # - valid_records: 各因子有效记录数（绝对值）
+        # - valid_records_percent: 各因子有效记录百分比（与日志输出一致，便于质量评估）
+        # - factor_columns: 扩展因子列名（不含基础列和基础因子）
+        # - return_columns: 收益数据列名
+        # - input_sources: 输入数据源路径
+        # - output_path: 输出文件路径
+
+        metadata = {
+            "generated_at": end_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "elapsed_seconds": round(elapsed_seconds, 2),
+            "total_records": total_records,
+            "valid_records": {key: valid_counts[key] for key in _VALID_KEY_ORDER},
+            "valid_records_percent": {key: _calc_pct(valid_counts[key], total_records) for key in _VALID_KEY_ORDER},
+            "factor_columns": list(_EXTENDED_FACTOR_COLS),  # 扩展因子列（返回副本，防止外部修改）
+            "return_columns": list(_RETURN_COLS),  # 收益数据列（返回副本，防止外部修改）
+            "input_sources": {
+                "factor_data": str(factor_data_path),
+                "turnover_data": str(turnover_data_path),
+                "return_data": str(return_data_path),
+            },
+            "output_path": str(output_path),
+        }
+
+        logger.info("=" * 40)
+        logger.info("因子生成完成")
+        logger.info("生成时间: %s", metadata["generated_at"])
+        logger.info("运行耗时: %.2f 秒", metadata["elapsed_seconds"])
+        logger.info("因子列: %s", metadata["factor_columns"])
+        logger.info("=" * 40)
+
+        # ========== Step 15: 写出列名清单（消费者 schema 查询） ==========
+        # 遵循 factor_cols_literal_constant_design.md §3.5：
+        # 将 _OUTPUT_COLS 结构化输出为独立 JSON 文件，供 factor_ic 模块
+        # 校验 required_columns 是否与数据源对齐（M4 合规：读数据产物 ≠ import 模块）
+        columns_path = output_path.parent / "factor_ic_data_columns.json"
+        try:
+            columns_manifest = {
+                "base_cols": list(_BASE_COLS),
+                "extended_factor_cols": list(_EXTENDED_FACTOR_COLS),
+                "return_cols": list(_RETURN_COLS),
+                "all_cols": list(_OUTPUT_COLS),
+                "generated_at": metadata["generated_at"],
+            }
+            with open(columns_path, "w", encoding="utf-8") as f:
+                json.dump(columns_manifest, f, ensure_ascii=False, indent=2)
+            logger.info("列名清单已保存: %s", columns_path)
+        except OSError as e:
+            # 列名清单写入失败不应阻塞主流程（降级为 warn）
+            logger.warning("列名清单保存失败: %s, 原因: %s", columns_path, e)
+
+        return metadata
+    finally:
+        # 防御性释放：异常路径下显式去除 output_df 引用
+        # 正常路径下 return 后函数栈解开，GC 会回收 output_df
+        # 此处保留 del 显式表达意图：即使 Step 13/14/15 抛出异常，
+        # output_df（约 30% factor_df 体积）也能立即去除局部引用
+        if "output_df" in locals():
+            del output_df
 
 
 # ============================================================================
