@@ -47,6 +47,9 @@ def main():
     args = parser.parse_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
+    # 此处补充 debug 入参审计：若公共横幅未覆盖某参数，调试时可从 DEBUG 日志确认入参实际值
+    logger.debug("启动参数: force_full=%s, min_stocks=%s", args.force_full, args.min_stocks)
+
     result = run_factor_ic(
         spec=SPEC,
         min_stocks=args.min_stocks,
