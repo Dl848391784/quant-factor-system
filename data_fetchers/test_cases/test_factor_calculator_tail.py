@@ -139,3 +139,56 @@ class TestCalculateTailFactorsEquivalence:
                 small_factor_df[col].reset_index(drop=True),
                 check_names=False,
             )
+
+    def test_partial_match_equivalence(self, small_factor_df, tail_data_file, test_logger):
+        """部分行有尾盘数据时，匹配行=有效值，未匹配行=NaN（mask 路径核心）。
+
+        构造：tail 数据只覆盖 asset A 的 2 条记录，B/C 共 4 行无尾盘数据。
+        预期：A 的 2 行 5 个因子均非 NaN；B/C 的 4 行 5 个因子均为 NaN。
+        """
+        # 仅 A 有尾盘数据
+        records = [
+            _make_tail_record("2026-01-01", "A"),
+            _make_tail_record("2026-01-02", "A"),
+        ]
+        tail_data_file(records)
+
+        result = calculate_tail_factors(small_factor_df.copy(), logger_arg=test_logger)
+
+        # 行数不变
+        assert len(result) == len(small_factor_df)
+
+        # A 的 2 行全部有值
+        a_rows = result[result["asset"] == "A"]
+        assert len(a_rows) == 2
+        for col in _TAIL_FACTOR_COLS:
+            nan_count = a_rows[col].isna().sum()
+            assert nan_count == 0, f"asset A 行 {col} 不应有 NaN，实际 {nan_count}"
+
+        # B/C 的 4 行全部为 NaN
+        non_a_rows = result[result["asset"] != "A"]
+        assert len(non_a_rows) == 4
+        for col in _TAIL_FACTOR_COLS:
+            nan_count = non_a_rows[col].isna().sum()
+            assert nan_count == 4, f"asset B/C 行 {col} 应全部 NaN，实际 {nan_count} 个 NaN"
+
+    def test_zero_match(self, small_factor_df, tail_data_file, test_logger):
+        """tail_df 与 factor_df 完全无交集时，5 个因子均为 NaN，函数不抛异常。
+
+        构造：tail 数据用不在 small_factor_df 里的 asset (Z) 和 date。
+        """
+        records = [
+            _make_tail_record("2025-12-31", "Z"),  # date 和 asset 都对不上
+        ]
+        tail_data_file(records)
+
+        result = calculate_tail_factors(small_factor_df.copy(), logger_arg=test_logger)
+
+        # 行数不变
+        assert len(result) == len(small_factor_df)
+        # 5 个因子全部 NaN
+        for col in _TAIL_FACTOR_COLS:
+            nan_count = result[col].isna().sum()
+            assert nan_count == len(small_factor_df), (
+                f"{col} 在零匹配下应全部 NaN，实际 {nan_count}/{len(small_factor_df)}"
+            )
