@@ -184,9 +184,11 @@ def main():
         logger=logger,
     )
 
-    # 防御性检查：result 为 None 时抛出异常（遵循 PROJECT.md 异常处理规范）
-    if result is None:
-        raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
+    # run_factor_ic 在 factor_ic_runner.py 中所有路径都显式 return result 或
+    # build_error_result(...)（始终为 dict），不存在返回 None 的代码路径。
+    # 因此此处的 `if result is None` 守卫属于永不触发的死代码（违反
+    # AGENTS.md 规则 #14），已删除。若未来 callee 行为变化可由调用方在
+    # 解构字段时通过 .get(...) 防御。
 
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）
     ic_metrics = result.get("ic_metrics") or {}
