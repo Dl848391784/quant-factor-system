@@ -40,8 +40,6 @@ logger = get_logger(__name__)
 # FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
 # ============================================================================
 
-SPEC: FactorSpec  # noqa: F842 — 仅类型注解；下方 try 块在 import-time 完成赋值，
-# 注册失败会 raise 抛出异常中断模块加载（不会进入未绑定状态，故无需赋初值 None）。
 try:
     SPEC = register_factor(
         FactorSpec(
