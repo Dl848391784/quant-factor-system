@@ -48,7 +48,9 @@ SPEC = register_factor(
     FactorSpec(
         factor_name="industry_amplitude_trend",
         factor_col="industry_amplitude_trend",
-        required_columns=JOIN_KEYS + ("amplitude", "industry_amplitude_trend"),
+        # required_columns 仅声明输入依赖列；industry_amplitude_trend 是 calculation 的产出，
+        # 不属于输入依赖（遵循 factor_spec.py L98-102: 复杂因子有 calculation 时 factor_col 是计算产出，非输入依赖）
+        required_columns=JOIN_KEYS + ("amplitude",),
         calculation=calculate_industry_amplitude_trend,
     )
 )
