@@ -829,7 +829,8 @@ def generate_all_factors(
     base_data_records = _load_json_gz_data(factor_data_path, "基础因子", logger)
 
     factor_df = pd.DataFrame(base_data_records)
-    factor_df["date"] = pd.to_datetime(factor_df["date"])
+    # 使用 format='mixed' 处理不同日期格式（与 Step 2/3 保持一致）
+    factor_df["date"] = pd.to_datetime(factor_df["date"], format="mixed")
 
     # 显式释放 base_data_records 内存（JSON 加载的大对象）
     del base_data_records
