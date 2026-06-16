@@ -77,10 +77,8 @@ try:
         create_eastmoney_session,
         create_retry_session,
         create_sina_session,
-        request_with_retry,
-    )
-    from .http_client import (
         get_module_logger as http_get_module_logger,
+        request_with_retry,
     )
     _HTTP_CLIENT_AVAILABLE = True
 except ImportError:

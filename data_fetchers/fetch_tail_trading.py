@@ -141,8 +141,7 @@ import json
 import logging
 import sys
 import time
-from datetime import datetime
-from datetime import time as datetime_time
+from datetime import datetime, time as datetime_time
 from typing import Any
 
 import requests

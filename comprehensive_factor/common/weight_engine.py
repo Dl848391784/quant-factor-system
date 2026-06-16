@@ -36,8 +36,6 @@ from comprehensive_factor.common.logger_config import get_logger
 # 调用方（composite_runner / run_pipeline 等）已将项目根加入 sys.path
 from factor_definitions import (
     FACTOR_COL_TO_NAME_MAP as _MODULE_COL_TO_NAME_MAP,
-)
-from factor_definitions import (
     FACTOR_NAME_TO_COL_MAP as _MODULE_NAME_TO_COL_MAP,
 )
 
