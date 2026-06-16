@@ -1,24 +1,7 @@
 #!/usr/bin/env python3
-"""
-统一因子生成模块
+"""统一因子生成模块：合并基础因子 + 换手率 + 收益数据，输出 factor_ic_data.json.gz。
 
-职责：生成所有因子数据到缓存，提供单一数据源
-
-Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
-
-使用前提：
-- 包内导入优先（from .common / .factor_calculator）
-- 脚本直接运行时（python data_fetchers/factor_generator.py）走 except ImportError 分支，
-  自动注入 project_root 到 sys.path 后改用绝对导入，无需手动设置 PYTHONPATH
-
-遵循 PROJECT.md 规范：
-- 输出到 data_fetchers/result/
-- 复用公共模块计算函数（遵循强制复用规范）
-- 公共模块接收 logger 参数（遵循 PROJECT.md 公共模块日志规范）
-
-版本历史：见 git log。
-
-作者: 云瑶
+输出: data_fetchers/result/factor_ic_data.json.gz（PROJECT.md 跨模块数据路径规范）。
 """
 
 import argparse
@@ -38,7 +21,6 @@ import pandas as pd
 
 # ============================================================================
 # 条件导入：包内导入优先；脚本直接运行时（无父包）回退到绝对导入 + sys.path 注入
-# 单一来源：避免 if/else 重复列举导入符号（约束 #3 复用 factor_calculator）
 # ============================================================================
 try:
     from .common.logger_config import setup_logger
@@ -107,43 +89,27 @@ except ImportError:
         calculate_volume_price_strength,
     )
 
-# ============================================================================
-# 模块级 fallback logger（遵循 PROJECT.md 公共模块日志规范）
-# ============================================================================
+# 模块级 fallback logger（PROJECT.md 公共模块日志规范）
 _MODULE_LOGGER = logging.getLogger("data_fetchers.factor_generator")
 
-# ============================================================================
-# 公共 API 导出
-# ============================================================================
 __all__ = [
     "generate_all_factors",
     "get_module_logger",
 ]
 
-# ============================================================================
-# 默认路径配置（私有常量）
-# ============================================================================
-
-# 输入输出数据路径（result 目录：统一数据源，遵循 PROJECT.md 跨模块数据路径规范）
-# 数据由 fetch_factor_cache.py 和 fetch_turnover.py 输出到 result 目录，本模块从该目录读取并输出
-# parent=data_fetchers/, 路径为 data_fetchers/result/
-# 注：输入输出路径相同，若未来需分离可再拆分常量
+# 输入输出根目录：data_fetchers/result/（输入输出共用，详见 PROJECT.md 跨模块数据路径规范）
 _DEFAULT_RESULT_DIR = Path(__file__).parent / "result"
 
-# 扩展因子列名（元组防止意外修改）
-# v1.33 新增尾盘因子：tail_price_position, tail_price_slope, tail_price_volume_intensity
-# v1.34 新增隔夜收益率因子：overnight_ret（跳空幅度）
-# v1.35 新增尾盘量能加速度因子：tail_volume_acceleration（后半段/前半段成交量比）
-# v1.37 新增动量强度因子：momentum_strength（5日涨幅/5日波动率）
+# 扩展因子列名（元组防止意外修改）。新增因子时同步更新 _VALID_KEY_ORDER + _FACTOR_PIPELINE_STEPS。
 _EXTENDED_FACTOR_COLS: tuple[str, ...] = (
-    "past_return_1d",  # 当日涨跌幅（遵循 PROJECT.md 规则：因子计算在 data_fetchers 完成）
+    "past_return_1d",  # 当日涨跌幅（PROJECT.md 规则：因子计算在 data_fetchers 完成）
     "bollinger_pb",
     "kdj_j",
     "turnover_surge",
     "amplitude",
     "price_position",
-    "return_5d",  # v1.37 新增：5日累计涨幅（momentum_strength 的前置依赖）
-    "momentum_strength",  # v1.37 新增：动量强度因子
+    "return_5d",  # momentum_strength 的前置依赖
+    "momentum_strength",
     "overnight_ret",
     "intraday_intensity",
     "tail_price_position",
@@ -151,29 +117,28 @@ _EXTENDED_FACTOR_COLS: tuple[str, ...] = (
     "tail_price_volume_intensity",
     "tail_volume_acceleration",
     "tail_volume_shrink",
-    "amplitude_delta",  # v1.40 新增：振幅差分因子
-    "turnover_surge_delta",  # v1.40 新增：换手突增差分因子
-    "tail_price_position_delta",  # v1.40 新增：尾盘位置差分因子
-    "tail_volume_shrink_delta",  # v1.40 新增：尾盘缩量差分因子
-    "volume_price_strength",  # v1.41 新增：量价齐升因子
-    "positive_day_ratio_5",  # v1.41 新增：5日阳线比例因子
-    "ma5_deviation",  # v1.41 新增：5日均线偏离度因子
-    "near_high_ratio_5",  # v1.41 新增：近5日高低位置因子
-    "industry_momentum_5d",  # v1.42 新增：行业5日动量因子
-    "industry_turnover_trend",  # v1.42 新增：行业换手率趋势因子
-    "industry_amplitude_trend",  # v1.42 新增：行业振幅趋势因子
-    "industry_roe_trend",  # v1.43 新增：行业ROE趋势因子（方案B）
-    "industry_earnings_growth",  # v1.43 新增：行业盈利增长因子（方案B）
-    "industry_pe_trend",  # v1.43 新增：行业PE趋势因子（方案B）
-    "capital_flow_ratio_trend",  # v1.44 新增：资金流占比趋势因子（方案C）
-    "capital_flow_intensity",  # v1.44 新增：资金流强度因子（方案C）
+    "amplitude_delta",
+    "turnover_surge_delta",
+    "tail_price_position_delta",
+    "tail_volume_shrink_delta",
+    "volume_price_strength",
+    "positive_day_ratio_5",
+    "ma5_deviation",
+    "near_high_ratio_5",
+    "industry_momentum_5d",
+    "industry_turnover_trend",
+    "industry_amplitude_trend",
+    "industry_roe_trend",
+    "industry_earnings_growth",
+    "industry_pe_trend",
+    "capital_flow_ratio_trend",
+    "capital_flow_intensity",
 )
 
-# 收益数据列名（元组防止意外修改）
+# 收益数据列名
 _RETURN_COLS: tuple[str, ...] = ("forward_return_1d", "forward_return_3d", "forward_return_5d")
 
-# 基础列名（元组防止意外修改）
-# 包含：索引字段 + 行情数据 + 基础因子 + 换手率（从换手率数据合并）+ 成交量（尾盘量比计算需要）
+# 基础列：索引 + 行情 + 基础因子 + 换手率 + 成交量（尾盘量比依赖）
 _BASE_COLS: tuple[str, ...] = (
     "date",
     "asset",
@@ -187,19 +152,13 @@ _BASE_COLS: tuple[str, ...] = (
     "volume",
 )
 
-# OHLCV + 索引列集合（不含基础因子）：用于 Step 1 日志中识别基础因子列。
-# 与 _BASE_COLS 区别：_BASE_COLS 含 rsi_6/volume_ratio_5（基础因子），
-# 此集合只含纯行情 + 索引列，剔除后剩下的即"基础因子列"。
+# 纯 OHLCV + 索引列（不含 rsi_6/volume_ratio_5 等基础因子）：Step 1 日志识别基础因子列用。
 _OHLCV_INDEX_COLS: frozenset[str] = frozenset({"date", "asset", "open", "close", "high", "low", "volume"})
 
-# 输出列名：基础列 + 扩展因子 + 收益数据（元组防止意外修改）
-# 组成：_BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS
-# 列数动态由各源元组计算，避免手动维护数字与实际不一致。
-# 当前规模见 _ALL_COLS_COUNTS 模块级常量（运行时校验）。
+# 输出列 = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS（动态拼接，避免硬编码列数）
 _OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS
 
-# 列数清单（供日志、metadata、回归测试使用）：动态从源元组计算，
-# 单一事实源（_BASE_COLS / _EXTENDED_FACTOR_COLS / _RETURN_COLS）。
+# 列数清单（供日志、metadata、回归测试使用）
 _ALL_COLS_COUNTS: dict[str, int] = {
     "base_cols": len(_BASE_COLS),
     "extended_factor_cols": len(_EXTENDED_FACTOR_COLS),
@@ -209,27 +168,15 @@ _ALL_COLS_COUNTS: dict[str, int] = {
 
 
 # ============================================================================
-# 因子管线表（D 步表驱动重构，2026-06-16）
+# 因子管线表（D 步表驱动重构）
 # ============================================================================
-# _FACTOR_PIPELINE_STEPS：generate_all_factors step 3.5~11.9 的元数据描述。
+# generate_all_factors step 3.5~11.9 的元数据描述。每项 dict 字段：
+#   step_label     str       段头日志（"" 表示沿用上一段头）
+#   factor_func    Callable  factor_calculator 公共 API（df, *, logger_arg) -> df
+#   output_cols    tuple     本因子写入的列（tail=5 列，其它=1 列）
+#   emit_valid_log bool      是否逐列打印 "  有效 xxx: N (P%)"（详见 _run_pipeline_step docstring）
 #
-# 每项 dict 字段：
-#   step_label    str   step 段头日志（可为空字符串：表示与上一项同段，不重复打印）
-#   factor_func   Callable  factor_calculator 公共 API（df, *, logger_arg) -> df
-#   output_cols   tuple[str, ...]  本因子写入的列（tail 是 5 列，其它都 1 列）
-#   emit_valid_log bool 是否打印 "  有效 xxx: %d (%.2f%%)" 行
-#                       - step 3.5~11.5 段：全 True（成熟因子 + 差分因子，
-#                         单因子日志便于观察 NaN 分布与样本量演变）
-#                       - step 11.6/11.7/11.8/11.9 段：仅段头因子 True
-#                         （volume_price_strength / industry_momentum_5d /
-#                          industry_roe_trend / capital_flow_ratio_trend）
-#                         同段后续因子 False（避免日志刷屏）
-#                       策略：兼顾调试可观测性（段头能看到数据质量）+
-#                       日志简洁度（同段不刷屏）
-#                       详见 _run_pipeline_step docstring 的 emit_valid_log 约定段
-#
-# 注：_VALID_KEY_ORDER 是 31 个 key 的 tuple，与 D 步重构前 metadata 顺序字符级一致。
-# 两者集合等价，但顺序不同（表序按 step 段，metadata 序按历史累积顺序）。
+# _VALID_KEY_ORDER 与本表集合等价但顺序不同（表序按 step 段，metadata 序按历史累积顺序）。
 # ============================================================================
 _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
     # --- Step 3.5: past_return_1d ---
@@ -424,10 +371,8 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
 )
 
 
-# metadata.valid_records / valid_records_percent 的 key 固定顺序
-# 与 D 步重构前 metadata 输出顺序字符级一致，保 JSON 输出 byte 级稳定（下游 diff 无噪声）。
-# 与 _FACTOR_PIPELINE_STEPS 是集合等价（31 项）但顺序不同：表序按 step 段，
-# metadata 序按历史 v1.0~v1.44 累积顺序。两者解耦，互不影响。
+# metadata.valid_records / valid_records_percent 的 key 顺序：保 JSON 输出 byte 级稳定（下游 diff 无噪声）。
+# 与 _FACTOR_PIPELINE_STEPS 集合等价但顺序不同（表序按 step 段，metadata 序按历史 v1.0~v1.44 累积顺序）。
 _VALID_KEY_ORDER: tuple[str, ...] = (
     # v1.0 起的 9 项 + intraday_intensity
     "bollinger_pb",
@@ -469,8 +414,7 @@ _VALID_KEY_ORDER: tuple[str, ...] = (
     "capital_flow_intensity",
 )
 
-# 启动期一致性校验：表 output_cols 集合 必须等于 _VALID_KEY_ORDER 集合
-# 防御未来新增因子时漏加表项 / 漏加 metadata key
+# 启动期一致性校验：防御新增因子时漏改表 / 漏加 metadata key
 _PIPELINE_OUTPUT_COLS_SET = frozenset(col for step in _FACTOR_PIPELINE_STEPS for col in step["output_cols"])
 _VALID_KEY_SET = frozenset(_VALID_KEY_ORDER)
 if _VALID_KEY_SET != _PIPELINE_OUTPUT_COLS_SET:
@@ -488,31 +432,21 @@ if _VALID_KEY_SET != _PIPELINE_OUTPUT_COLS_SET:
 
 
 def _calc_pct(count: int, total: int) -> float:
-    """
-    计算百分比（除零保护）
+    """计算百分比（除零保护 + 非有限值保护）。
 
     Args:
-        count: 记录数（分子，如有效记录数、缺失记录数等），支持 int 或兼容类型
-        total: 总记录数（分母），支持 int 或兼容类型
+        count: 分子（有效记录数 / 缺失记录数等），int 或兼容类型（numpy.int64 / float）。
+        total: 分母。total 或结果非有限（NaN/±inf）时返回 0.0，
+               避免 inf 输入伪装成空数据（count/inf*100=0.0）或返回 inf。
 
     Returns:
-        float: 百分比（0.0-100.0），空数据/非有限值时返回 0.0
+        百分比（0.0~100.0，保留 2 位小数）。
 
     Example:
-        >>> _calc_pct(80, 100)  # 有效记录百分比
+        >>> _calc_pct(80, 100)
         80.0
-        >>> _calc_pct(20, 100)  # 缺失记录百分比
-        20.0
-        >>> _calc_pct(50, 0)  # 空数据，返回 0.0
+        >>> _calc_pct(50, 0)
         0.0
-
-    Note:
-        - 通用百分比计算函数，可用于有效记录、缺失记录等场景
-        - 参数语义由调用方决定（count 是分子，total 是分母）
-        - 类型注解为 int，但实际接受 int、numpy.int64、float 等兼容类型
-        - Python 运行时不强制类型检查，注解仅为静态分析提供参考
-        - 非有限值（NaN / ±inf）保护：total 或结果为非有限值时返回 0.0，
-          避免 inf 输入伪装成空数据（count/inf*100=0.0）或返回 inf
     """
     if not math.isfinite(total) or total <= 0:
         return 0.0
@@ -527,47 +461,35 @@ def _run_pipeline_step(
     step: dict[str, Any],
     logger: logging.Logger,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
-    """
-    执行 _FACTOR_PIPELINE_STEPS 中的单个 step（D 步表驱动重构核心）
+    """执行 _FACTOR_PIPELINE_STEPS 中的单个 step。
 
-    流程（与原 step 3.5~11.9 段字符级一致）：
-    1. 若 step["step_label"] 非空 → 打印段头日志
-    2. 调用 step["factor_func"](factor_df, logger_arg=logger) 写入 output_cols
+    流程：
+    1. step["step_label"] 非空 → 打印段头日志
+    2. 调用 step["factor_func"](factor_df, logger_arg=logger)
     3. 对每个 output_col 计算 valid_count = int(notna().sum())
-    4. 若 step["emit_valid_log"] 为 True，逐列打印 "  有效 xxx: N (P%)"
-    5. 返回 (新 factor_df, {col: valid_count, ...})
+    4. step["emit_valid_log"] 为 True 时逐列打印 "  有效 xxx: N (P%)"
 
     Args:
-        factor_df: 当前因子 DataFrame（in-place 模式由 factor_func 决定）
-        step: _FACTOR_PIPELINE_STEPS 中的一项
-        logger: 日志器，传给 factor_func 的 logger_arg
+        factor_df: 当前 DataFrame（in-place 与否由 factor_func 决定）。
+        step: _FACTOR_PIPELINE_STEPS 中的一项。
+        logger: 日志器，作为 logger_arg 传给 factor_func。
 
     Returns:
-        (factor_df, valid_counts):
-        - factor_df: factor_func 调用后的 DataFrame
-        - valid_counts: {output_col: notna_count}，调用方累积入 metadata
-
-    Note:
-        - 此 helper 涵盖 simple（单列）和 tail（5 列）两种因子，靠 output_cols 长度区分
-        - emit_valid_log 与 step_label 正交：
-          * step_label：是否打印段头（"" 表示沿用上一段头，常用于段内续接因子）
-          * emit_valid_log：是否对 output_cols 逐列打印 "  有效 xxx: N (P%)"
-        - 当前 emit_valid_log 取值约定：
-          * step 3.5~11.5 全 True：早期成熟因子 + 差分因子，单因子日志便于
-            观察 NaN 分布与样本量演变（差分因子样本量较少时尤其需要）
-          * step 11.6~11.9 仅段头 True（volume_price_strength /
-            industry_momentum_5d / industry_roe_trend /
-            capital_flow_ratio_trend）：兼顾调试可观测性（段头能看
-            数据质量）+ 日志简洁度（同段后续因子 False 避免刷屏）
-          * 即便 emit_valid_log=False，valid_count 仍正常计入 metadata，
-            元数据完整性不受日志策略影响
-        - 改 emit_valid_log 取值 = 改运行时日志规格，需走需求评审
-          （本次 11.6~11.9 段头改 True 已通过评审，2026-06-16 bug 4 修复）
+        (factor_df, {output_col: notna_count})，调用方累积入 metadata。
 
     Raises:
-        KeyError: 当 factor_func 未生成所有 output_cols 中预期列时，
-                  错误消息含函数名 + 缺失列名 + 实际生成列，便于精确归因
-                  （否则下游 factor_df[col].notna() 抛的 KeyError 仅含列名）
+        KeyError: factor_func 未生成全部 output_cols 时抛出，错误消息含函数名 +
+                  缺失列名 + 实际生成列，便于精确归因（否则下游 notna() 抛的
+                  KeyError 仅含列名，无法定位漏写的 factor_func）。
+
+    Note:
+        emit_valid_log 与 step_label 正交：
+        - step_label：是否打印段头（"" 表示沿用上一段头）
+        - emit_valid_log：是否对 output_cols 逐列打印 valid 行
+        当前取值约定：step 3.5~11.5 全 True；step 11.6~11.9 仅段头 True
+        （兼顾调试可观测性 + 日志简洁度，同段后续因子 False 避免刷屏）。
+        emit_valid_log=False 时 valid_count 仍计入 metadata，不影响元数据完整性。
+        改 emit_valid_log 取值 = 改运行时日志规格，需走需求评审。
     """
     step_label = step["step_label"]
     if step_label:
