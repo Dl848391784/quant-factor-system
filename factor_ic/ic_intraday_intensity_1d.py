@@ -208,26 +208,27 @@ def main():
     icir_str = f"{icir:.2f}" if icir is not None else "N/A"
     positive_ratio_str = f"{positive_ratio:.2%}" if positive_ratio is not None else "N/A"
 
-    summary_lines = [
-        "=" * 60,
-        "结果摘要",
-        "=" * 60,
-        f"因子名称: {result.get('factor_name', 'unknown')}",
-        f"更新模式: {result.get('update_mode', 'unknown')}",
-        f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}",
-        f"有效天数: {sample_stats.get('valid_days', 0)} 天",
-        "--- IC指标 ---",
-        f"IC 均值: {ic_mean_str}",
-        f"IC 标准差: {ic_std_str}",
-        f"ICIR: {icir_str}",
-        f"IC>0 占比: {positive_ratio_str}",
-    ]
     # ic_mean 为 None 时优先输出 warning（在摘要 info 之前，避免下游告警
     # 系统按时序扫描时把告警淹没在正常摘要日志后面被误判为正常结束）
     if ic_mean is None:
         logger.warning("本次计算 IC 均值为空，请检查数据源")
 
-    logger.info("\n%s", "\n".join(summary_lines))
+    # 结果摘要逐字段输出：每条字段独立成一条 log record，避免多行拼接
+    # 在结构化日志后端（JSON/ELK 等）中产生裸换行破坏采集解析。grep/awk
+    # 单行检索同样更友好。原 "\n%s" + "\n".join(...) 写法注释里宣称的
+    # "并发原子性" 实则单次 logger.info 本身已是一条记录，无切割风险。
+    logger.info("=" * 60)
+    logger.info("结果摘要")
+    logger.info("=" * 60)
+    logger.info("因子名称: %s", result.get("factor_name", "unknown"))
+    logger.info("更新模式: %s", result.get("update_mode", "unknown"))
+    logger.info("日期范围: %s ~ %s", period.get("start", "N/A"), period.get("end", "N/A"))
+    logger.info("有效天数: %s 天", sample_stats.get("valid_days", 0))
+    logger.info("--- IC指标 ---")
+    logger.info("IC 均值: %s", ic_mean_str)
+    logger.info("IC 标准差: %s", ic_std_str)
+    logger.info("ICIR: %s", icir_str)
+    logger.info("IC>0 占比: %s", positive_ratio_str)
 
     # 确认结果处理完成后才输出"计算完成"日志（避免中途失败造成误导）
     logger.info("日内强度因子IC计算完成")
