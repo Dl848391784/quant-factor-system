@@ -4,7 +4,7 @@
 
 遵循 PROJECT.md 公共模块强制复用规范：
 - 主流程使用 run_factor_ic()（FactorSpec 驱动统一入口，已替代 run_simple/run_complex；
-  详见 factor_ic/MODULE.md L551 / L572：禁止继续使用 run_complex_factor_ic，34 脚本已迁移）
+  详见 factor_ic/MODULE.md：禁止继续使用 run_complex_factor_ic，全部脚本已迁移）
 - 因子计算逻辑复用 data_fetchers.factor_calculator（遵循 MODULE.md 约束 #3）
 
 因子定义：
