@@ -203,8 +203,8 @@ _OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COL
 #                       step 3.5~11.5 段的 15 项 + step 11 的 5 列 = True
 #                       step 11.6/11.7/11.8/11.9 段的 12 项 = False
 #
-# 注：_VALID_KEY_ORDER 即 metadata.valid_records 的 key 顺序（27 项），
-# 由本表 output_cols 拼接生成（D2 helper 内派生，D3 metadata 段引用）。
+# 注：_VALID_KEY_ORDER 是 31 个 key 的 tuple，与 D 步重构前 metadata 顺序字符级一致。
+# 两者集合等价，但顺序不同（表序按 step 段，metadata 序按历史累积顺序）。
 # ============================================================================
 _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
     # --- Step 3.5: past_return_1d ---
@@ -395,8 +395,61 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
 
 
 # metadata.valid_records / valid_records_percent 的 key 固定顺序
-# 由 _FACTOR_PIPELINE_STEPS 派生：每项 output_cols 按表顺序拼接，共 27 个 key
-_VALID_KEY_ORDER: tuple[str, ...] = tuple(col for step in _FACTOR_PIPELINE_STEPS for col in step["output_cols"])
+# 与 D 步重构前 metadata 输出顺序字符级一致，保 JSON 输出 byte 级稳定（下游 diff 无噪声）。
+# 与 _FACTOR_PIPELINE_STEPS 是集合等价（31 项）但顺序不同：表序按 step 段，
+# metadata 序按历史 v1.0~v1.44 累积顺序。两者解耦，互不影响。
+_VALID_KEY_ORDER: tuple[str, ...] = (
+    # v1.0 起的 9 项 + intraday_intensity
+    "bollinger_pb",
+    "kdj_j",
+    "turnover_surge",
+    "amplitude",
+    "price_position",
+    "past_return_1d",
+    "overnight_ret",
+    "return_5d",
+    "momentum_strength",
+    "intraday_intensity",
+    # tail 5 列
+    "tail_price_position",
+    "tail_price_slope",
+    "tail_price_volume_intensity",
+    "tail_volume_acceleration",
+    "tail_volume_shrink",
+    # v1.40 差分因子
+    "amplitude_delta",
+    "turnover_surge_delta",
+    "tail_price_position_delta",
+    "tail_volume_shrink_delta",
+    # v1.41 方向性因子
+    "volume_price_strength",
+    "positive_day_ratio_5",
+    "ma5_deviation",
+    "near_high_ratio_5",
+    # v1.42 行业方向性因子
+    "industry_momentum_5d",
+    "industry_turnover_trend",
+    "industry_amplitude_trend",
+    # v1.43 行业基本面因子（方案B）
+    "industry_roe_trend",
+    "industry_earnings_growth",
+    "industry_pe_trend",
+    # v1.44 资金流因子（方案C）
+    "capital_flow_ratio_trend",
+    "capital_flow_intensity",
+)
+
+# 启动期一致性校验：表 output_cols 集合 必须等于 _VALID_KEY_ORDER 集合
+# 防御未来新增因子时漏加表项 / 漏加 metadata key
+_PIPELINE_OUTPUT_COLS_SET = frozenset(col for step in _FACTOR_PIPELINE_STEPS for col in step["output_cols"])
+_VALID_KEY_SET = frozenset(_VALID_KEY_ORDER)
+if _VALID_KEY_SET != _PIPELINE_OUTPUT_COLS_SET:
+    _missing_in_metadata = _PIPELINE_OUTPUT_COLS_SET - _VALID_KEY_SET
+    _missing_in_table = _VALID_KEY_SET - _PIPELINE_OUTPUT_COLS_SET
+    raise RuntimeError(
+        f"_FACTOR_PIPELINE_STEPS / _VALID_KEY_ORDER 集合不一致："
+        f"表多出={sorted(_missing_in_metadata)}，metadata 多出={sorted(_missing_in_table)}"
+    )
 
 
 # ============================================================================
@@ -728,226 +781,19 @@ def generate_all_factors(
 
     logger.info("  合并收益后记录数: %d", len(factor_df))
 
-    # ========== Step 3.5: 计算 past_return_1d（当日涨跌幅） ==========
-    logger.info("Step 3.5: 计算当日涨跌幅因子...")
+    # ========== Step 3.5 ~ 11.9: 计算所有因子（D 步表驱动重构）==========
+    # 详情见 _FACTOR_PIPELINE_STEPS 表（27 项）+ _run_pipeline_step helper。
+    # 日志格式与 D 步重构前字符级一致：
+    #   - step_label 非空时打印 "Step xx.x: ..."
+    #   - emit_valid_log=True 时逐列打印 "  有效 xxx: N (P%)"
+    valid_counts: dict[str, int] = {}
+    for step in _FACTOR_PIPELINE_STEPS:
+        factor_df, step_valid_counts = _run_pipeline_step(factor_df, step, logger)
+        valid_counts.update(step_valid_counts)
 
-    factor_df = calculate_past_return_1d(factor_df, logger_arg=logger)
-
-    past_return_valid = int(factor_df["past_return_1d"].notna().sum())
-    logger.info("  有效 past_return_1d: %d (%.2f%%)", past_return_valid, _calc_pct(past_return_valid, len(factor_df)))
-
-    # ========== Step 4: 计算 bollinger_pb ==========
-    logger.info("Step 4: 计算布林带 %B 因子...")
-
-    factor_df = calculate_bollinger_pb(factor_df, logger_arg=logger)
-
-    bollinger_valid = int(factor_df["bollinger_pb"].notna().sum())
-    logger.info("  有效 bollinger_pb: %d (%.2f%%)", bollinger_valid, _calc_pct(bollinger_valid, len(factor_df)))
-
-    # ========== Step 5: 计算 kdj_j ==========
-    logger.info("Step 5: 计算 KDJ_J 因子...")
-
-    factor_df = calculate_kdj_j(factor_df, logger_arg=logger)
-
-    kdj_valid = int(factor_df["kdj_j"].notna().sum())
-    logger.info("  有效 kdj_j: %d (%.2f%%)", kdj_valid, _calc_pct(kdj_valid, len(factor_df)))
-
-    # ========== Step 6: 计算 turnover_surge ==========
-    logger.info("Step 6: 计算换手率突增因子...")
-
-    factor_df = calculate_turnover_surge(factor_df, logger_arg=logger)
-
-    surge_valid = int(factor_df["turnover_surge"].notna().sum())
-    logger.info("  有效 turnover_surge: %d (%.2f%%)", surge_valid, _calc_pct(surge_valid, len(factor_df)))
-
-    # ========== Step 7: 计算 amplitude ==========
-    logger.info("Step 7: 计算振幅因子...")
-
-    factor_df = calculate_amplitude(factor_df, logger_arg=logger)
-
-    amplitude_valid = int(factor_df["amplitude"].notna().sum())
-    logger.info("  有效 amplitude: %d (%.2f%%)", amplitude_valid, _calc_pct(amplitude_valid, len(factor_df)))
-
-    # ========== Step 8: 计算 price_position ==========
-    logger.info("Step 8: 计算价格位置因子...")
-
-    factor_df = calculate_price_position(factor_df, logger_arg=logger)
-
-    position_valid = int(factor_df["price_position"].notna().sum())
-    logger.info("  有效 price_position: %d (%.2f%%)", position_valid, _calc_pct(position_valid, len(factor_df)))
-
-    # ========== Step 8.5: 计算 return_5d（5日累计涨幅） ==========
-    logger.info("Step 8.5: 计算5日累计涨幅因子...")
-
-    factor_df = calculate_return_5d(factor_df, logger_arg=logger)
-
-    return_5d_valid = int(factor_df["return_5d"].notna().sum())
-    logger.info("  有效 return_5d: %d (%.2f%%)", return_5d_valid, _calc_pct(return_5d_valid, len(factor_df)))
-
-    # ========== Step 8.6: 计算 momentum_strength（动量强度） ==========
-    logger.info("Step 8.6: 计算动量强度因子...")
-
-    factor_df = calculate_momentum_strength(factor_df, logger_arg=logger)
-
-    momentum_valid = int(factor_df["momentum_strength"].notna().sum())
-    logger.info("  有效 momentum_strength: %d (%.2f%%)", momentum_valid, _calc_pct(momentum_valid, len(factor_df)))
-
-    # ========== Step 9: 计算 overnight_ret（隔夜收益率/跳空幅度） ==========
-    logger.info("Step 9: 计算隔夜收益率因子（跳空幅度）...")
-
-    factor_df = calculate_overnight_return(factor_df, logger_arg=logger)
-
-    overnight_valid = int(factor_df["overnight_ret"].notna().sum())
-    logger.info("  有效 overnight_ret: %d (%.2f%%)", overnight_valid, _calc_pct(overnight_valid, len(factor_df)))
-
-    # ========== Step 10: 计算 intraday_intensity（日内价格强度） ==========
-    logger.info("Step 10: 计算日内价格强度因子...")
-
-    factor_df = calculate_intraday_intensity(factor_df, logger_arg=logger)
-
-    intraday_valid = int(factor_df["intraday_intensity"].notna().sum())
-    logger.info("  有效 intraday_intensity: %d (%.2f%%)", intraday_valid, _calc_pct(intraday_valid, len(factor_df)))
-
-    # ========== Step 11: 计算尾盘因子 ==========
-    logger.info("Step 11: 计算尾盘因子...")
-
-    factor_df = calculate_tail_factors(factor_df, logger_arg=logger)
-
-    tail_position_valid = int(factor_df["tail_price_position"].notna().sum())
-    tail_slope_valid = int(factor_df["tail_price_slope"].notna().sum())
-    tail_intensity_valid = int(factor_df["tail_price_volume_intensity"].notna().sum())
-    tail_acceleration_valid = int(factor_df["tail_volume_acceleration"].notna().sum())
-    tail_shrink_valid = int(factor_df["tail_volume_shrink"].notna().sum())
-    logger.info(
-        "  有效 tail_price_position: %d (%.2f%%)", tail_position_valid, _calc_pct(tail_position_valid, len(factor_df))
-    )
-    logger.info("  有效 tail_price_slope: %d (%.2f%%)", tail_slope_valid, _calc_pct(tail_slope_valid, len(factor_df)))
-    logger.info(
-        "  有效 tail_price_volume_intensity: %d (%.2f%%)",
-        tail_intensity_valid,
-        _calc_pct(tail_intensity_valid, len(factor_df)),
-    )
-    logger.info(
-        "  有效 tail_volume_acceleration: %d (%.2f%%)",
-        tail_acceleration_valid,
-        _calc_pct(tail_acceleration_valid, len(factor_df)),
-    )
-    logger.info(
-        "  有效 tail_volume_shrink: %d (%.2f%%)", tail_shrink_valid, _calc_pct(tail_shrink_valid, len(factor_df))
-    )
-
-    # ========== Step 11.5: 计算止跌信号差分因子（Reversal Delta Factors） ==========
-    # v1.40 新增：差分因子依赖原始因子（必须在原始因子计算之后）
-    # 遵循 H5: 因子方向不预判，IC方向由数据决定
-    logger.info("Step 11.5: 计算止跌信号差分因子...")
-
-    # 振幅差分因子：amplitude(T) - amplitude(T-1)
-    factor_df = calculate_amplitude_delta(factor_df, logger_arg=logger)
-    amplitude_delta_valid = int(factor_df["amplitude_delta"].notna().sum())
-    logger.info(
-        "  有效 amplitude_delta: %d (%.2f%%)",
-        amplitude_delta_valid,
-        _calc_pct(amplitude_delta_valid, len(factor_df)),
-    )
-
-    # 换手突增差分因子：turnover_surge(T) - turnover_surge(T-1)
-    factor_df = calculate_turnover_surge_delta(factor_df, logger_arg=logger)
-    turnover_surge_delta_valid = int(factor_df["turnover_surge_delta"].notna().sum())
-    logger.info(
-        "  有效 turnover_surge_delta: %d (%.2f%%)",
-        turnover_surge_delta_valid,
-        _calc_pct(turnover_surge_delta_valid, len(factor_df)),
-    )
-
-    # 尾盘位置差分因子：tail_price_position(T) - tail_price_position(T-1)
-    factor_df = calculate_tail_price_position_delta(factor_df, logger_arg=logger)
-    tail_position_delta_valid = int(factor_df["tail_price_position_delta"].notna().sum())
-    logger.info(
-        "  有效 tail_price_position_delta: %d (%.2f%%)",
-        tail_position_delta_valid,
-        _calc_pct(tail_position_delta_valid, len(factor_df)),
-    )
-
-    # 尾盘缩量差分因子：tail_volume_shrink(T) - tail_volume_shrink(T-1)
-    factor_df = calculate_tail_volume_shrink_delta(factor_df, logger_arg=logger)
-    tail_shrink_delta_valid = int(factor_df["tail_volume_shrink_delta"].notna().sum())
-    logger.info(
-        "  有效 tail_volume_shrink_delta: %d (%.2f%%)",
-        tail_shrink_delta_valid,
-        _calc_pct(tail_shrink_delta_valid, len(factor_df)),
-    )
-
-    # ========== Step 11.6: 计算方向性因子（Directional Factors） ==========
-    logger.info("Step 11.6: 计算方向性因子...")
-
-    # 量价齐升强度因子
-    factor_df = calculate_volume_price_strength(factor_df, logger_arg=logger)
-    volume_price_strength_valid = int(factor_df["volume_price_strength"].notna().sum())
-
-    # 近5日阳线比例因子
-    factor_df = calculate_positive_day_ratio_5(factor_df, logger_arg=logger)
-    positive_day_ratio_5_valid = int(factor_df["positive_day_ratio_5"].notna().sum())
-
-    # 5日均线偏离度因子
-    factor_df = calculate_ma5_deviation(factor_df, logger_arg=logger)
-    ma5_deviation_valid = int(factor_df["ma5_deviation"].notna().sum())
-
-    # 近5日高低位置因子
-    factor_df = calculate_near_high_ratio_5(factor_df, logger_arg=logger)
-    near_high_ratio_5_valid = int(factor_df["near_high_ratio_5"].notna().sum())
-
-    # ========== Step 11.7: 计算行业级别方向性因子（Industry-Level Directional Factors） ==========
-    logger.info("Step 11.7: 计算行业级别方向性因子...")
-    # Note: 行业因子需要 industry 列做分组聚合。统一添加一次 industry 列，3个因子函数共用。
-    # industry 列不属于 _OUTPUT_COLS，Step 12 输出时自动排除。
-
-    # 行业5日动量因子
-    factor_df = calculate_industry_momentum_5d(factor_df, logger_arg=logger)
-    industry_momentum_5d_valid = int(factor_df["industry_momentum_5d"].notna().sum())
-
-    # 行业换手率趋势因子
-    factor_df = calculate_industry_turnover_trend(factor_df, logger_arg=logger)
-    industry_turnover_trend_valid = int(factor_df["industry_turnover_trend"].notna().sum())
-
-    # 行业振幅趋势因子
-    factor_df = calculate_industry_amplitude_trend(factor_df, logger_arg=logger)
-    industry_amplitude_trend_valid = int(factor_df["industry_amplitude_trend"].notna().sum())
-
-    # ========== Step 11.8: 计算行业基本面动量因子（方案B：Industry-Level Fundamental Momentum） ==========
-    logger.info("Step 11.8: 计算行业基本面动量因子...")
-    # Note: 基本面因子函数内部会添加 industry 列（与方案A相同逻辑），用于行业聚合赋个股。
-    # 数据来源: financial_data.json.gz（季度财务数据，merge_asof 前推填充对齐日频）
-
-    # 行业ROE趋势因子（行业ΔROE赋个股）
-    factor_df = calculate_industry_roe_trend(factor_df, logger_arg=logger)
-    industry_roe_trend_valid = int(factor_df["industry_roe_trend"].notna().sum())
-
-    # 行业盈利增长因子（行业净利润增长率赋个股）
-    factor_df = calculate_industry_earnings_growth(factor_df, logger_arg=logger)
-    industry_earnings_growth_valid = int(factor_df["industry_earnings_growth"].notna().sum())
-
-    # 行业PE趋势因子（行业ΔPE赋个股）
-    factor_df = calculate_industry_pe_trend(factor_df, logger_arg=logger)
-    industry_pe_trend_valid = int(factor_df["industry_pe_trend"].notna().sum())
-
-    # ========== Step 11.9: 计算资金流因子（方案C：Capital Flow Factors） ==========
-    logger.info("Step 11.9: 计算资金流因子...")
-    # Note: 资金流因子函数内部会添加 industry 列（与方案A/B相同逻辑）
-    # 数据来源: fund_flow_data.json.gz（约120交易日日频数据，精确匹配无需前推填充）
-    # ⚠️ 数据覆盖限制: 每只股票约120交易日（API限制），超过此范围的日期 → NaN
-
-    # 资金流占比趋势因子（行业Δ主力净流入占比赋个股）
-    factor_df = calculate_capital_flow_ratio_trend(factor_df, logger_arg=logger)
-    capital_flow_ratio_trend_valid = int(factor_df["capital_flow_ratio_trend"].notna().sum())
-
-    # 资金流强度因子（行业主力流入绝对额占比赋个股）
-    factor_df = calculate_capital_flow_intensity(factor_df, logger_arg=logger)
-    capital_flow_intensity_valid = int(factor_df["capital_flow_intensity"].notna().sum())
-
-    # 删除 industry 临时列（不属于 _OUTPUT_COLS，不应出现在最终输出中）
-    # Note: 方案A/B/C的因子函数都会添加 industry 列，统一在此删除
-    if "industry" in factor_df.columns:
-        factor_df = factor_df.drop(columns=["industry"])
+    # step 11.7/11.8/11.9 的因子函数会添加 industry 临时列（用于行业聚合赋个股），
+    # 不属于 _OUTPUT_COLS，统一在此删除。
+    factor_df = _drop_industry_column(factor_df)
 
     # ========== Step 12: 格式化输出 ==========
     logger.info("Step 12: 格式化输出...")
@@ -1069,72 +915,8 @@ def generate_all_factors(
         "generated_at": end_time.strftime("%Y-%m-%d %H:%M:%S"),
         "elapsed_seconds": round(elapsed_seconds, 2),
         "total_records": total_records,
-        "valid_records": {
-            "bollinger_pb": bollinger_valid,
-            "kdj_j": kdj_valid,
-            "turnover_surge": surge_valid,
-            "amplitude": amplitude_valid,
-            "price_position": position_valid,
-            "past_return_1d": past_return_valid,
-            "overnight_ret": overnight_valid,
-            "return_5d": return_5d_valid,
-            "momentum_strength": momentum_valid,
-            "intraday_intensity": intraday_valid,
-            "tail_price_position": tail_position_valid,
-            "tail_price_slope": tail_slope_valid,
-            "tail_price_volume_intensity": tail_intensity_valid,
-            "tail_volume_acceleration": tail_acceleration_valid,
-            "tail_volume_shrink": tail_shrink_valid,
-            "amplitude_delta": amplitude_delta_valid,  # v1.40 新增
-            "turnover_surge_delta": turnover_surge_delta_valid,  # v1.40 新增
-            "tail_price_position_delta": tail_position_delta_valid,  # v1.40 新增
-            "tail_volume_shrink_delta": tail_shrink_delta_valid,  # v1.40 新增
-            "volume_price_strength": volume_price_strength_valid,  # v1.41 新增
-            "positive_day_ratio_5": positive_day_ratio_5_valid,  # v1.41 新增
-            "ma5_deviation": ma5_deviation_valid,  # v1.41 新增
-            "near_high_ratio_5": near_high_ratio_5_valid,  # v1.41 新增
-            "industry_momentum_5d": industry_momentum_5d_valid,  # v1.42 新增
-            "industry_turnover_trend": industry_turnover_trend_valid,  # v1.42 新增
-            "industry_amplitude_trend": industry_amplitude_trend_valid,  # v1.42 新增
-            "industry_roe_trend": industry_roe_trend_valid,  # v1.43 新增（方案B）
-            "industry_earnings_growth": industry_earnings_growth_valid,  # v1.43 新增（方案B）
-            "industry_pe_trend": industry_pe_trend_valid,  # v1.43 新增（方案B）
-            "capital_flow_ratio_trend": capital_flow_ratio_trend_valid,  # v1.44 新增（方案C）
-            "capital_flow_intensity": capital_flow_intensity_valid,  # v1.44 新增（方案C）
-        },
-        "valid_records_percent": {
-            "bollinger_pb": _calc_pct(bollinger_valid, total_records),
-            "kdj_j": _calc_pct(kdj_valid, total_records),
-            "turnover_surge": _calc_pct(surge_valid, total_records),
-            "amplitude": _calc_pct(amplitude_valid, total_records),
-            "price_position": _calc_pct(position_valid, total_records),
-            "past_return_1d": _calc_pct(past_return_valid, total_records),
-            "overnight_ret": _calc_pct(overnight_valid, total_records),
-            "return_5d": _calc_pct(return_5d_valid, total_records),
-            "momentum_strength": _calc_pct(momentum_valid, total_records),
-            "intraday_intensity": _calc_pct(intraday_valid, total_records),
-            "tail_price_position": _calc_pct(tail_position_valid, total_records),
-            "tail_price_slope": _calc_pct(tail_slope_valid, total_records),
-            "tail_price_volume_intensity": _calc_pct(tail_intensity_valid, total_records),
-            "tail_volume_acceleration": _calc_pct(tail_acceleration_valid, total_records),
-            "tail_volume_shrink": _calc_pct(tail_shrink_valid, total_records),
-            "amplitude_delta": _calc_pct(amplitude_delta_valid, total_records),  # v1.40 新增
-            "turnover_surge_delta": _calc_pct(turnover_surge_delta_valid, total_records),  # v1.40 新增
-            "tail_price_position_delta": _calc_pct(tail_position_delta_valid, total_records),  # v1.40 新增
-            "tail_volume_shrink_delta": _calc_pct(tail_shrink_delta_valid, total_records),  # v1.40 新增
-            "volume_price_strength": _calc_pct(volume_price_strength_valid, total_records),  # v1.41 新增
-            "positive_day_ratio_5": _calc_pct(positive_day_ratio_5_valid, total_records),  # v1.41 新增
-            "ma5_deviation": _calc_pct(ma5_deviation_valid, total_records),  # v1.41 新增
-            "near_high_ratio_5": _calc_pct(near_high_ratio_5_valid, total_records),  # v1.41 新增
-            "industry_momentum_5d": _calc_pct(industry_momentum_5d_valid, total_records),  # v1.42 新增
-            "industry_turnover_trend": _calc_pct(industry_turnover_trend_valid, total_records),  # v1.42 新增
-            "industry_amplitude_trend": _calc_pct(industry_amplitude_trend_valid, total_records),  # v1.42 新增
-            "industry_roe_trend": _calc_pct(industry_roe_trend_valid, total_records),  # v1.43 新增（方案B）
-            "industry_earnings_growth": _calc_pct(industry_earnings_growth_valid, total_records),  # v1.43 新增（方案B）
-            "industry_pe_trend": _calc_pct(industry_pe_trend_valid, total_records),  # v1.43 新增（方案B）
-            "capital_flow_ratio_trend": _calc_pct(capital_flow_ratio_trend_valid, total_records),  # v1.44 新增（方案C）
-            "capital_flow_intensity": _calc_pct(capital_flow_intensity_valid, total_records),  # v1.44 新增（方案C）
-        },
+        "valid_records": {key: valid_counts[key] for key in _VALID_KEY_ORDER},
+        "valid_records_percent": {key: _calc_pct(valid_counts[key], total_records) for key in _VALID_KEY_ORDER},
         "factor_columns": list(_EXTENDED_FACTOR_COLS),  # 扩展因子列（返回副本，防止外部修改）
         "return_columns": list(_RETURN_COLS),  # 收益数据列（返回副本，防止外部修改）
         "input_sources": {
