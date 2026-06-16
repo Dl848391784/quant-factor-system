@@ -26,6 +26,7 @@ from data_fetchers.factor_calculator import (
     calculate_kdj_j,
     calculate_momentum_strength,
     calculate_rsi,
+    calculate_rsi_df,
     calculate_turnover_surge,
     calculate_volume_ratio,
     get_module_logger,
@@ -411,16 +412,72 @@ class TestEdgeCases:
     def test_missing_columns_bollinger(self):
         """测试缺失列（布林带）"""
         df_without_close = pd.DataFrame({"date": ["2026-01-01"], "asset": ["A"], "high": [103], "low": [99]})
-        # 缺失 close 列应抛异常
-        with pytest.raises(KeyError):
+        # 缺失 close 列应抛 ValueError
+        with pytest.raises(ValueError, match="calculate_bollinger_pb 缺少必要列"):
             calculate_bollinger_pb(df_without_close, n=20, k=2.0)
 
     def test_missing_columns_kdj(self):
         """测试缺失列（KDJ）"""
         df_without_high = pd.DataFrame({"date": ["2026-01-01"], "asset": ["A"], "close": [100], "low": [99]})
-        # 缺失 high 列应抛异常
-        with pytest.raises(KeyError):
+        # 缺失 high 列应抛 ValueError
+        with pytest.raises(ValueError, match="calculate_kdj_j 缺少必要列"):
             calculate_kdj_j(df_without_high, n=9, m1=3, m2=3)
+
+    def test_missing_columns_turnover_surge(self):
+        """测试缺失列（换手骤增）"""
+        df_without_turnover = pd.DataFrame({"date": ["2026-01-01"], "asset": ["A"], "close": [100]})
+        # 缺失 turnover_rate 列应抛 ValueError
+        with pytest.raises(ValueError, match="calculate_turnover_surge 缺少必要列"):
+            calculate_turnover_surge(df_without_turnover, surge_window=5)
+
+    def test_missing_columns_rsi_df(self):
+        """测试缺失列（RSI DataFrame 版）"""
+        df_without_close = pd.DataFrame({"date": ["2026-01-01"], "asset": ["A"]})
+        # 缺失 close 列应抛 ValueError
+        with pytest.raises(ValueError, match="calculate_rsi_df 缺少必要列"):
+            calculate_rsi_df(df_without_close, n=6)
+
+
+class TestIndexTransparency:
+    """DataFrame 级函数 index 透明性测试：返回行顺序与输入一致"""
+
+    @pytest.fixture
+    def unsorted_factor_df(self):
+        """构造行顺序乱序的 DataFrame，验证函数返回时恢复原始顺序"""
+        return pd.DataFrame(
+            {
+                "date": ["2026-01-03", "2026-01-01", "2026-01-02", "2026-01-03", "2026-01-01", "2026-01-02"],
+                "asset": ["A", "A", "A", "B", "B", "B"],
+                "close": [101, 100, 102, 201, 200, 202],
+                "high": [103, 103, 104, 203, 203, 204],
+                "low": [99, 99, 100, 199, 199, 200],
+                "turnover_rate": [0.03, 0.01, 0.02, 0.03, 0.01, 0.02],
+            }
+        )
+
+    def test_bollinger_pb_preserves_index(self, unsorted_factor_df):
+        """calculate_bollinger_pb 返回行顺序与输入一致"""
+        original_index = unsorted_factor_df.index.tolist()
+        result = calculate_bollinger_pb(unsorted_factor_df, n=20, k=2.0)
+        assert result.index.tolist() == original_index
+
+    def test_kdj_j_preserves_index(self, unsorted_factor_df):
+        """calculate_kdj_j 返回行顺序与输入一致"""
+        original_index = unsorted_factor_df.index.tolist()
+        result = calculate_kdj_j(unsorted_factor_df, n=9, m1=3, m2=3)
+        assert result.index.tolist() == original_index
+
+    def test_turnover_surge_preserves_index(self, unsorted_factor_df):
+        """calculate_turnover_surge 返回行顺序与输入一致"""
+        original_index = unsorted_factor_df.index.tolist()
+        result = calculate_turnover_surge(unsorted_factor_df, surge_window=5)
+        assert result.index.tolist() == original_index
+
+    def test_rsi_df_preserves_index(self, unsorted_factor_df):
+        """calculate_rsi_df 返回行顺序与输入一致"""
+        original_index = unsorted_factor_df.index.tolist()
+        result = calculate_rsi_df(unsorted_factor_df, n=6)
+        assert result.index.tolist() == original_index
 
 
 class TestCalculateMomentumStrengthStdClip:

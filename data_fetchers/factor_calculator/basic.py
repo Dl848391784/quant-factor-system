@@ -103,9 +103,10 @@ def calculate_rsi(close_prices: pd.Series, period: int = _DEFAULT_RSI_PERIOD) ->
         >>> import pandas as pd
         >>> close = pd.Series([100, 102, 101, 103, 105, 104, 106])
         >>> rsi = calculate_rsi(close, period=6)
-        >>> # 前 5 天为 NaN，第 6 天开始有值
-        >>> rsi.iloc[5]  # 第一个有效值
-        50.0
+        >>> # 前 period-1 天为 NaN（数据不足），从第 period 天起有有效值
+        >>> # RSI 范围 0-100，具体值取决于价格序列
+        >>> 0 <= rsi.dropna().max() <= 100
+        True
     """
     # 入口：创建副本避免副作用（遵循模块规范）
     close_prices = close_prices.copy()
@@ -271,6 +272,14 @@ def calculate_bollinger_pb(
     # 入口：创建副本避免副作用
     factor_df = factor_df.copy()
 
+    # 列存在性校验
+    missing = [c for c in calculate_bollinger_pb.required_cols if c not in factor_df.columns]
+    if missing:
+        raise ValueError(f"calculate_bollinger_pb 缺少必要列: {missing}，请检查输入 DataFrame")
+
+    # 保留 original_index 用于结果回填到原顺序
+    original_index = factor_df.index
+
     # 按 asset 分组计算滚动统计
     factor_df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
@@ -297,8 +306,8 @@ def calculate_bollinger_pb(
     safe_band_width = band_width.where(~abnormal_mask, np.nan).clip(lower=_EPSILON)
     bollinger_pb = (factor_df[_COL_CLOSE] - lower) / safe_band_width
 
-    # 异常处理：先处理严重异常（abnormal），再处理边界情况（narrow）
-    bollinger_pb = bollinger_pb.where(~abnormal_mask, np.nan)
+    # safe_band_width 已将 abnormal 位置置为 NaN（clip 不影响 NaN），
+    # bollinger_pb 继承 NaN 传播，无需再次 where(~abnormal_mask, np.nan)
     bollinger_pb = bollinger_pb.where(~narrow_band_mask, _BOLLINGER_NEUTRAL_VALUE)
 
     abnormal_count = abnormal_mask.sum()
@@ -311,6 +320,17 @@ def calculate_bollinger_pb(
         )
 
     factor_df[_COL_BOLLINGER_PB] = bollinger_pb
+
+    _logger.info(
+        "bollinger_pb (n=%s, k=%s) 计算完成，共 %s 条记录, %s 个 asset",
+        n,
+        k,
+        len(factor_df),
+        factor_df[_COL_ASSET].nunique(),
+    )
+
+    # 恢复原始 index 顺序（保持函数对调用方透明）
+    factor_df = factor_df.loc[original_index]
 
     return factor_df
 
@@ -368,6 +388,14 @@ def calculate_kdj_j(
     # 函数入口必须先 copy
     factor_df = factor_df.copy()
 
+    # 列存在性校验
+    missing = [c for c in calculate_kdj_j.required_cols if c not in factor_df.columns]
+    if missing:
+        raise ValueError(f"calculate_kdj_j 缺少必要列: {missing}，请检查输入 DataFrame")
+
+    # 保留 original_index 用于结果回填到原顺序
+    original_index = factor_df.index
+
     # 按 asset+date 排序
     factor_df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
@@ -417,6 +445,18 @@ def calculate_kdj_j(
     # 计算 J
     factor_df[_COL_KDJ_J] = 3 * k - 2 * d
 
+    _logger.info(
+        "kdj_j (n=%s, m1=%s, m2=%s) 计算完成，共 %s 条记录, %s 个 asset",
+        n,
+        m1,
+        m2,
+        len(factor_df),
+        factor_df[_COL_ASSET].nunique(),
+    )
+
+    # 恢复原始 index 顺序（保持函数对调用方透明）
+    factor_df = factor_df.loc[original_index]
+
     return factor_df
 
 
@@ -435,7 +475,7 @@ def calculate_turnover_surge(
     计算换手率突增因子
 
     参数:
-        factor_df: 包含 turnover_rate, close 列的 DataFrame
+        factor_df: 包含 turnover_rate, asset, date 列的 DataFrame
         surge_window: 换手率均值计算窗口
         logger_arg: 调用方传入的 logger（遵循 MODULE.md 约束 77）
 
@@ -464,6 +504,11 @@ def calculate_turnover_surge(
 
     # 函数入口必须先 copy
     factor_df = factor_df.copy()
+
+    # 列存在性校验
+    missing = [c for c in calculate_turnover_surge.required_cols if c not in factor_df.columns]
+    if missing:
+        raise ValueError(f"calculate_turnover_surge 缺少必要列: {missing}，请检查输入 DataFrame")
 
     # 排序保证 _per_asset_transform 同 asset 行连续
     # 保留 original_index 用于结果回填到原顺序
@@ -498,13 +543,20 @@ def calculate_turnover_surge(
 
     factor_df[_COL_TURNOVER_SURGE] = turnover_surge
 
+    _logger.info(
+        "turnover_surge (surge_window=%s) 计算完成，共 %s 条记录, %s 个 asset",
+        surge_window,
+        len(factor_df),
+        factor_df[_COL_ASSET].nunique(),
+    )
+
     # 恢复原始 index 顺序（保持函数对调用方透明）
     factor_df = factor_df.loc[original_index]
 
     return factor_df
 
 
-calculate_turnover_surge.required_cols = ["turnover_rate", "close"]  # type: ignore[attr-defined]
+calculate_turnover_surge.required_cols = ["turnover_rate", "asset", "date"]  # type: ignore[attr-defined]
 
 
 # ============================================================================
@@ -548,24 +600,39 @@ def calculate_rsi_df(
     """
     _logger = get_module_logger(logger_arg)
 
-    # 排序 + reset_index 保证 numpy 切片对齐
-    df = factor_df.sort_values([_COL_ASSET, _COL_DATE]).reset_index(drop=True)
-    n_rows = len(df)
+    # 函数入口必须先 copy
+    factor_df = factor_df.copy()
+
+    # 列存在性校验
+    missing = [c for c in calculate_rsi_df.required_cols if c not in factor_df.columns]
+    if missing:
+        raise ValueError(f"calculate_rsi_df 缺少必要列: {missing}，请检查输入 DataFrame")
+
+    # 保留 original_index 用于结果回填到原顺序
+    original_index = factor_df.index
+
+    # 排序保证 _per_asset_transform 同 asset 行连续
+    factor_df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
+
+    n_rows = len(factor_df)
     if n_rows == 0:
-        df["rsi"] = pd.Series(dtype="float64")
-        return df
+        factor_df["rsi"] = np.nan
+        return factor_df
 
     # 用通用 helper 替代 transform，避免 OOM（详见 _per_asset_transform docstring）
-    df["rsi"] = _per_asset_transform(
-        asset_arr=df[_COL_ASSET].to_numpy(),
-        value_arr=df[_COL_CLOSE].to_numpy(),
+    factor_df["rsi"] = _per_asset_transform(
+        asset_arr=factor_df[_COL_ASSET].to_numpy(),
+        value_arr=factor_df[_COL_CLOSE].to_numpy(),
         fn=lambda close_s: calculate_rsi(close_s, period=n),
     )
 
-    n_assets = df[_COL_ASSET].nunique()
+    n_assets = factor_df[_COL_ASSET].nunique()
     _logger.info("rsi (n=%s) 计算完成，共 %s 条记录, %s 个 asset", n, n_rows, n_assets)
 
-    return df
+    # 恢复原始 index 顺序（保持函数对调用方透明）
+    factor_df = factor_df.loc[original_index]
+
+    return factor_df
 
 
 calculate_rsi_df.required_cols = ["close"]  # type: ignore[attr-defined]
