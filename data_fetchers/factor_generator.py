@@ -786,10 +786,11 @@ def _format_and_write_output(
     output_path: Path,
     start_time: datetime,
     logger: logging.Logger,
-) -> dict[str, Any]:
-    """Step 12~15：格式化输出 + 保存 + 返回元数据。
+) -> tuple[int, datetime, float]:
+    """Step 12~15：格式化输出 + 保存。
 
-    input_sources 由调用方 generate_all_factors 写入 metadata。
+    Returns:
+        (total_records, end_time, elapsed_seconds)，供调用方构造 metadata。
 
     Raises:
         KeyError: 必需输出列不存在。
@@ -832,19 +833,11 @@ def _format_and_write_output(
         end_time = datetime.now()
         elapsed_seconds = (end_time - start_time).total_seconds()
 
-        # ========== Step 14: 返回元数据 ==========
-        # metadata 字段顺序为契约：valid_records 按 _VALID_KEY_ORDER 排序
-
-        metadata: dict[str, Any] = {
-            "generated_at": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "elapsed_seconds": round(elapsed_seconds, 2),
-            "total_records": total_records,
-        }
-
+        # ========== Step 14: 返回写出结果 ==========
         logger.info("=" * 40)
         logger.info("因子生成完成")
-        logger.info("生成时间: %s", metadata["generated_at"])
-        logger.info("运行耗时: %.2f 秒", metadata["elapsed_seconds"])
+        logger.info("生成时间: %s", end_time.strftime("%Y-%m-%d %H:%M:%S"))
+        logger.info("运行耗时: %.2f 秒", elapsed_seconds)
         logger.info("因子列: %s", list(_EXTENDED_FACTOR_COLS))
         logger.info("=" * 40)
 
@@ -857,7 +850,7 @@ def _format_and_write_output(
                 "extended_factor_cols": list(_EXTENDED_FACTOR_COLS),
                 "return_cols": list(_RETURN_COLS),
                 "all_cols": list(_OUTPUT_COLS),
-                "generated_at": metadata["generated_at"],
+                "generated_at": end_time.strftime("%Y-%m-%d %H:%M:%S"),
             }
             _atomic_write_json(columns_manifest, columns_path, logger)
             logger.info("列名清单已保存: %s", columns_path)
@@ -865,7 +858,7 @@ def _format_and_write_output(
             # 列名清单写入失败不阻塞主流程
             logger.warning("列名清单保存失败: %s, 原因: %s", columns_path, e)
 
-        return metadata
+        return total_records, end_time, elapsed_seconds
     finally:
         # output_df sentinel：cast 失败时 output_df=None，跳过 del 防止 NameError
         if output_df is not None:
@@ -918,21 +911,27 @@ def generate_all_factors(
     # Step 3.5~11.9：因子管线
     factor_df, valid_counts = _run_factor_pipeline(factor_df, logger)
 
-    # Step 12~15：格式化 + 输出 + 元数据
-    metadata = _format_and_write_output(factor_df, output_path, start_time, logger)
+    # Step 12~15：格式化 + 输出
+    total_records, end_time, elapsed_seconds = _format_and_write_output(factor_df, output_path, start_time, logger)
 
-    # 补充 valid_counts 相关元数据
-    total_records = metadata["total_records"]
-    metadata["valid_records"] = {key: valid_counts[key] for key in _VALID_KEY_ORDER}
-    metadata["valid_records_percent"] = {key: _calc_pct(valid_counts[key], total_records) for key in _VALID_KEY_ORDER}
-    metadata["factor_columns"] = list(_EXTENDED_FACTOR_COLS)
-    metadata["return_columns"] = list(_RETURN_COLS)
-    metadata["input_sources"] = {
-        "factor_data": str(factor_data_path),
-        "turnover_data": str(turnover_data_path),
-        "return_data": str(return_data_path),
+    # 统一构造完整 metadata（契约字段顺序：generated_at / elapsed_seconds /
+    # total_records / valid_records / valid_records_percent / factor_columns /
+    # return_columns / input_sources / output_path）
+    metadata: dict[str, Any] = {
+        "generated_at": end_time.strftime("%Y-%m-%d %H:%M:%S"),
+        "elapsed_seconds": round(elapsed_seconds, 2),
+        "total_records": total_records,
+        "valid_records": {key: valid_counts[key] for key in _VALID_KEY_ORDER},
+        "valid_records_percent": {key: _calc_pct(valid_counts[key], total_records) for key in _VALID_KEY_ORDER},
+        "factor_columns": list(_EXTENDED_FACTOR_COLS),
+        "return_columns": list(_RETURN_COLS),
+        "input_sources": {
+            "factor_data": str(factor_data_path),
+            "turnover_data": str(turnover_data_path),
+            "return_data": str(return_data_path),
+        },
+        "output_path": str(output_path),
     }
-    metadata["output_path"] = str(output_path)
 
     return metadata
 
