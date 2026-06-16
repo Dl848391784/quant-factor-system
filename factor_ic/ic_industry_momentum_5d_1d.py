@@ -76,9 +76,9 @@ def main(args: argparse.Namespace) -> dict:
     """流程编排：抛异常但不退出（R20：禁 sys.exit，退出码由 __main__ 块统一处理）。
 
     raises:
-        DataSchemaError: 数据列契约不匹配（→ __main__ 退出码 4，R18）
-        FactorCalcError: 因子计算内部失败（→ __main__ 退出码 5，R19）
-        SummaryLogError: 摘要日志层失败（→ __main__ 退出码 3，R17；result 已生成）
+        DataSchemaError: 透传自 run_factor_ic（→ __main__ 退出码 4，R18）
+        FactorCalcError: 透传自 run_factor_ic（→ __main__ 退出码 5，R19）
+        SummaryLogError: 本函数构造并抛出（→ __main__ 退出码 3，R17；result 已生成）
     """
     # 启动横幅由公共模块 factor_ic_runner 统一打印；此处冗余落盘 min_stocks/force_full
     # 到本模块日志，作为公共横幅被过滤或回归时的可观测性兜底。
