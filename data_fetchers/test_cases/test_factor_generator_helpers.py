@@ -18,6 +18,7 @@ from __future__ import annotations
 import gzip
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -441,6 +442,87 @@ class TestAtomicWriteJson:
         assert path.exists()
         with open(path, encoding="utf-8") as f:
             assert json.load(f) == {"a": 1}
+
+
+# ============================================================================
+# main CLI 入口：quiet 模式下成功反馈走 print(stdout)
+# ============================================================================
+
+
+class TestMainQuietMode:
+    """main() 函数 quiet / 非 quiet 模式下的成功反馈渠道（bug 1 回归）"""
+
+    @pytest.fixture
+    def fake_metadata(self) -> dict[str, Any]:
+        return {
+            "generated_at": "2026-06-16 17:30:00",
+            "elapsed_seconds": 1.23,
+            "total_records": 9876,
+            "valid_records": {},
+            "valid_records_percent": {},
+            "factor_columns": [],
+            "return_columns": [],
+            "input_sources": {},
+            "output_path": "/tmp/fake_factor_ic_data.json.gz",
+        }
+
+    def test_quiet_mode_prints_summary_to_stdout(
+        self,
+        fake_metadata: dict[str, Any],
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """quiet 模式：成功反馈必须走 print（绕过 ERROR 级别过滤）"""
+        from data_fetchers import factor_generator as fg
+
+        monkeypatch.setattr(sys, "argv", ["factor_generator.py", "--quiet"])
+        with patch.object(fg, "generate_all_factors", return_value=fake_metadata):
+            rc = fg.main()
+
+        assert rc == 0
+        captured = capsys.readouterr()
+        # 关键断言：摘要 + 退出码必须出现在 stdout
+        assert "执行摘要" in captured.out
+        assert "总记录数=9876" in captured.out
+        assert "耗时=1.23秒" in captured.out
+        assert "执行成功，退出码: 0" in captured.out
+
+    def test_default_mode_uses_logger_info(
+        self,
+        fake_metadata: dict[str, Any],
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """默认模式：成功反馈走 logger.info（不走 print，避免日志重复）"""
+        from data_fetchers import factor_generator as fg
+
+        monkeypatch.setattr(sys, "argv", ["factor_generator.py"])
+        with patch.object(fg, "generate_all_factors", return_value=fake_metadata):
+            rc = fg.main()
+
+        assert rc == 0
+        captured = capsys.readouterr()
+        # 关键断言：默认模式下 stdout 不应有 print 出来的摘要（避免重复）
+        # 注：logger 输出去 stderr，不影响 stdout
+        assert "执行摘要" not in captured.out
+        assert "执行成功，退出码: 0" not in captured.out
+
+    def test_quiet_mode_failure_returns_1(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """quiet 模式失败路径不受影响：仍返回 1，logger.exception 走 ERROR 级别"""
+        from data_fetchers import factor_generator as fg
+
+        monkeypatch.setattr(sys, "argv", ["factor_generator.py", "--quiet"])
+        with patch.object(fg, "generate_all_factors", side_effect=RuntimeError("boom")):
+            rc = fg.main()
+
+        assert rc == 1
+        captured = capsys.readouterr()
+        # 失败路径不应打成功消息
+        assert "执行成功" not in captured.out
 
 
 if __name__ == "__main__":

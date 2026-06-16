@@ -1101,13 +1101,27 @@ def main() -> int:
             logger=logger,
         )
         # CLI 入口执行摘要（关键元数据）
-        logger.info(
-            "执行摘要: 总记录数=%d, 耗时=%.2f秒, 输出路径=%s",
-            metadata["total_records"],
-            metadata["elapsed_seconds"],
-            metadata["output_path"],
+        # quiet 模式下日志级别为 ERROR，logger.info 会被过滤；
+        # 摘要 + 退出码是脚本调用方判定成功的最小信号，必须始终输出 →
+        # 非 quiet：走 logger.info（与正常日志格式一致）
+        # quiet：走 print(stdout)（绕过 logger 级别过滤，给上游 CI / shell 留可读取信号）
+        summary_msg = (
+            f"执行摘要: 总记录数={metadata['total_records']}, "
+            f"耗时={metadata['elapsed_seconds']:.2f}秒, "
+            f"输出路径={metadata['output_path']}"
         )
-        logger.info("执行成功，退出码: 0")
+        success_msg = "执行成功，退出码: 0"
+        if args.quiet:
+            print(summary_msg)
+            print(success_msg)
+        else:
+            logger.info(
+                "执行摘要: 总记录数=%d, 耗时=%.2f秒, 输出路径=%s",
+                metadata["total_records"],
+                metadata["elapsed_seconds"],
+                metadata["output_path"],
+            )
+            logger.info("执行成功，退出码: 0")
         return 0
     except Exception as e:
         # data_fetchers MODULE.md R10: 类型名 + logger.exception 自动附堆栈
