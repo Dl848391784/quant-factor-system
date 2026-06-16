@@ -3,7 +3,7 @@
 资金流占比趋势因子 IC 计算器 - 使用公共模块主入口
 
 遵循 PROJECT.md 公共模块强制复用规范：
-- 主流程使用 run_complex_factor_ic()（禁止手写三模式分支）
+- 主流程使用 run_factor_ic()（禁止手写三模式分支）
 - 因子计算逻辑复用 data_fetchers.factor_calculator（遵循 MODULE.md 约束 #3）
 
 因子定义：
@@ -134,15 +134,13 @@ def main():
 
     # 辅助字段（sample_stats/period/ic_distribution_consistency）允许缺失或为 None，软 fallback 为空 dict。
     # 调用 factor_ic.common.cli_helpers.safe_dict 公共 API，便于跨脚本复用与独立单测。
-    # 字段存在性日志：区分"公共模块未返回该字段"与"字段值为 None"，避免字段改名后静默丢失。
-    if "sample_stats" not in result:
-        logger.debug("result 中无 sample_stats 字段（公共模块未返回），将 fallback 为空 dict")
-    if "period" not in result:
-        logger.debug("result 中无 period 字段（公共模块未返回），将 fallback 为空 dict")
-    _has_ic_dist_key = "ic_distribution_consistency" in result
-    if not _has_ic_dist_key:
-        logger.debug("result 中无 ic_distribution_consistency 字段（公共模块未返回或字段改名），将 fallback 为空 dict")
-
+    # 日志职责：safe_dict 已覆盖结构异常告警——
+    #   - 字段缺失（key not in result）→ result.get() 返回 None → safe_dict 静默返回 {}，
+    #     业务上"键不存在"与"值为 None"等价（都意味着公共模块未输出该辅助字段），无需区分日志路径；
+    #   - 字段值为非 None 非 dict（结构异常）→ safe_dict 用 field_name 定位并打 warning。
+    # 因此本处不再前置 `if key not in result: logger.debug(...)`：前置 debug 块与 safe_dict
+    # 在"None / 缺失"场景会形成两条职责重叠的日志记录（debug + 静默 / debug + warning），
+    # 且 _has_<x>_key 这类布尔中间变量仅供单次 if 判断使用，徒增阅读噪声。
     sample_stats = safe_dict(result.get("sample_stats"), field_name="sample_stats", logger=logger)
     period = safe_dict(result.get("period"), field_name="period", logger=logger)
     ic_distribution_consistency = safe_dict(
