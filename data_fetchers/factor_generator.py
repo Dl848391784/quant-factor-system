@@ -191,6 +191,215 @@ _OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COL
 
 
 # ============================================================================
+# 因子管线表（D 步表驱动重构，2026-06-16）
+# ============================================================================
+# _FACTOR_PIPELINE_STEPS：generate_all_factors step 3.5~11.9 的元数据描述。
+#
+# 每项 dict 字段：
+#   step_label    str   step 段头日志（可为空字符串：表示与上一项同段，不重复打印）
+#   factor_func   Callable  factor_calculator 公共 API（df, *, logger_arg) -> df
+#   output_cols   tuple[str, ...]  本因子写入的列（tail 是 5 列，其它都 1 列）
+#   emit_valid_log bool 是否打印 "  有效 xxx: %d (%.2f%%)" 行
+#                       step 3.5~11.5 段的 15 项 + step 11 的 5 列 = True
+#                       step 11.6/11.7/11.8/11.9 段的 12 项 = False
+#
+# 注：_VALID_KEY_ORDER 即 metadata.valid_records 的 key 顺序（27 项），
+# 由本表 output_cols 拼接生成（D2 helper 内派生，D3 metadata 段引用）。
+# ============================================================================
+_FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
+    # --- Step 3.5: past_return_1d ---
+    {
+        "step_label": "Step 3.5: 计算当日涨跌幅因子...",
+        "factor_func": calculate_past_return_1d,
+        "output_cols": ("past_return_1d",),
+        "emit_valid_log": True,
+    },
+    # --- Step 4: bollinger_pb ---
+    {
+        "step_label": "Step 4: 计算布林带 %B 因子...",
+        "factor_func": calculate_bollinger_pb,
+        "output_cols": ("bollinger_pb",),
+        "emit_valid_log": True,
+    },
+    # --- Step 5: kdj_j ---
+    {
+        "step_label": "Step 5: 计算 KDJ_J 因子...",
+        "factor_func": calculate_kdj_j,
+        "output_cols": ("kdj_j",),
+        "emit_valid_log": True,
+    },
+    # --- Step 6: turnover_surge ---
+    {
+        "step_label": "Step 6: 计算换手率突增因子...",
+        "factor_func": calculate_turnover_surge,
+        "output_cols": ("turnover_surge",),
+        "emit_valid_log": True,
+    },
+    # --- Step 7: amplitude ---
+    {
+        "step_label": "Step 7: 计算振幅因子...",
+        "factor_func": calculate_amplitude,
+        "output_cols": ("amplitude",),
+        "emit_valid_log": True,
+    },
+    # --- Step 8: price_position ---
+    {
+        "step_label": "Step 8: 计算价格位置因子...",
+        "factor_func": calculate_price_position,
+        "output_cols": ("price_position",),
+        "emit_valid_log": True,
+    },
+    # --- Step 8.5: return_5d ---
+    {
+        "step_label": "Step 8.5: 计算5日累计涨幅因子...",
+        "factor_func": calculate_return_5d,
+        "output_cols": ("return_5d",),
+        "emit_valid_log": True,
+    },
+    # --- Step 8.6: momentum_strength ---
+    {
+        "step_label": "Step 8.6: 计算动量强度因子...",
+        "factor_func": calculate_momentum_strength,
+        "output_cols": ("momentum_strength",),
+        "emit_valid_log": True,
+    },
+    # --- Step 9: overnight_ret ---
+    {
+        "step_label": "Step 9: 计算隔夜收益率因子（跳空幅度）...",
+        "factor_func": calculate_overnight_return,
+        "output_cols": ("overnight_ret",),
+        "emit_valid_log": True,
+    },
+    # --- Step 10: intraday_intensity ---
+    {
+        "step_label": "Step 10: 计算日内价格强度因子...",
+        "factor_func": calculate_intraday_intensity,
+        "output_cols": ("intraday_intensity",),
+        "emit_valid_log": True,
+    },
+    # --- Step 11: tail (5 列输出) ---
+    {
+        "step_label": "Step 11: 计算尾盘因子...",
+        "factor_func": calculate_tail_factors,
+        "output_cols": (
+            "tail_price_position",
+            "tail_price_slope",
+            "tail_price_volume_intensity",
+            "tail_volume_acceleration",
+            "tail_volume_shrink",
+        ),
+        "emit_valid_log": True,
+    },
+    # --- Step 11.5: 止跌信号差分因子（v1.40）---
+    {
+        "step_label": "Step 11.5: 计算止跌信号差分因子...",
+        "factor_func": calculate_amplitude_delta,
+        "output_cols": ("amplitude_delta",),
+        "emit_valid_log": True,
+    },
+    {
+        "step_label": "",
+        "factor_func": calculate_turnover_surge_delta,
+        "output_cols": ("turnover_surge_delta",),
+        "emit_valid_log": True,
+    },
+    {
+        "step_label": "",
+        "factor_func": calculate_tail_price_position_delta,
+        "output_cols": ("tail_price_position_delta",),
+        "emit_valid_log": True,
+    },
+    {
+        "step_label": "",
+        "factor_func": calculate_tail_volume_shrink_delta,
+        "output_cols": ("tail_volume_shrink_delta",),
+        "emit_valid_log": True,
+    },
+    # --- Step 11.6: 方向性因子（v1.41）---
+    {
+        "step_label": "Step 11.6: 计算方向性因子...",
+        "factor_func": calculate_volume_price_strength,
+        "output_cols": ("volume_price_strength",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": "",
+        "factor_func": calculate_positive_day_ratio_5,
+        "output_cols": ("positive_day_ratio_5",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": "",
+        "factor_func": calculate_ma5_deviation,
+        "output_cols": ("ma5_deviation",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": "",
+        "factor_func": calculate_near_high_ratio_5,
+        "output_cols": ("near_high_ratio_5",),
+        "emit_valid_log": False,
+    },
+    # --- Step 11.7: 行业级别方向性因子（v1.42）---
+    {
+        "step_label": "Step 11.7: 计算行业级别方向性因子...",
+        "factor_func": calculate_industry_momentum_5d,
+        "output_cols": ("industry_momentum_5d",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": "",
+        "factor_func": calculate_industry_turnover_trend,
+        "output_cols": ("industry_turnover_trend",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": "",
+        "factor_func": calculate_industry_amplitude_trend,
+        "output_cols": ("industry_amplitude_trend",),
+        "emit_valid_log": False,
+    },
+    # --- Step 11.8: 行业基本面动量因子（v1.43 方案B）---
+    {
+        "step_label": "Step 11.8: 计算行业基本面动量因子...",
+        "factor_func": calculate_industry_roe_trend,
+        "output_cols": ("industry_roe_trend",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": "",
+        "factor_func": calculate_industry_earnings_growth,
+        "output_cols": ("industry_earnings_growth",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": "",
+        "factor_func": calculate_industry_pe_trend,
+        "output_cols": ("industry_pe_trend",),
+        "emit_valid_log": False,
+    },
+    # --- Step 11.9: 资金流因子（v1.44 方案C）---
+    {
+        "step_label": "Step 11.9: 计算资金流因子...",
+        "factor_func": calculate_capital_flow_ratio_trend,
+        "output_cols": ("capital_flow_ratio_trend",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": "",
+        "factor_func": calculate_capital_flow_intensity,
+        "output_cols": ("capital_flow_intensity",),
+        "emit_valid_log": False,
+    },
+)
+
+
+# metadata.valid_records / valid_records_percent 的 key 固定顺序
+# 由 _FACTOR_PIPELINE_STEPS 派生：每项 output_cols 按表顺序拼接，共 27 个 key
+_VALID_KEY_ORDER: tuple[str, ...] = tuple(col for step in _FACTOR_PIPELINE_STEPS for col in step["output_cols"])
+
+
+# ============================================================================
 # 模块级私有辅助函数
 # ============================================================================
 
