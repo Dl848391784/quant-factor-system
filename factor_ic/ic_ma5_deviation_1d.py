@@ -62,27 +62,21 @@ _KEY_PERIOD_START = "start"
 _KEY_PERIOD_END = "end"
 
 
-def main():
-    """CLI 主入口"""
-    parser = argparse.ArgumentParser(description="5日均线偏离度因子 IC 计算器")
-    parser.add_argument("--force-full", action="store_true", help="强制全量计算")
-    parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
-    args = parser.parse_args()
+def _log_summary(result: dict) -> None:
+    """格式化并打印 IC 计算结果摘要 + 空值告警。
 
-    # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
-    # 此处补充 debug 入参审计：若公共横幅未覆盖某参数，调试时可从 DEBUG 日志确认入参实际值
-    logger.debug("启动参数: force_full=%s, min_stocks=%s", args.force_full, args.min_stocks)
+    职责（与 main 解耦）：
+      1. 从 result 提取 ic_metrics / sample_stats / period / ic_distribution 字段；
+      2. 先发出空值 warning（顺序在摘要之前，避免读者先看到 N/A 再看到原因）；
+      3. 打印结果摘要 INFO 日志。
 
-    result = run_factor_ic(
-        spec=SPEC,
-        min_stocks=args.min_stocks,
-        force_full=args.force_full,
-        logger=logger,
-    )
+    参数:
+        result: run_factor_ic 返回的结果字典（结构由 ic_result_builder.build_ic_result 定义）。
 
-    if result is None:
-        raise FactorCalcError("run_factor_ic 返回 None，因子计算未产生有效结果，请检查数据或配置")
-
+    设计说明:
+        本函数仅负责"展示"，不做任何业务决策、不抛业务异常；result 为 None 的判断
+        由调用方 main() 在执行流程编排阶段完成。
+    """
     ic_metrics = result.get(_KEY_IC_METRICS) or {}
     sample_stats = result.get(_KEY_SAMPLE_STATS) or {}
     period = result.get(_KEY_PERIOD) or {}
@@ -120,6 +114,36 @@ def main():
 
     logger.info("\n%s", "\n".join(summary_lines))
 
+
+def main():
+    """CLI 主入口
+
+    职责（单一）：
+      1. 解析命令行参数；
+      2. 编排流程：调用 run_factor_ic → 校验非空 → 委托 _log_summary 展示。
+
+    格式化与日志展示已委托给 _log_summary，main 不再关心字段提取与摘要拼接。
+    """
+    parser = argparse.ArgumentParser(description="5日均线偏离度因子 IC 计算器")
+    parser.add_argument("--force-full", action="store_true", help="强制全量计算")
+    parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
+    args = parser.parse_args()
+
+    # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
+    # 此处补充 debug 入参审计：若公共横幅未覆盖某参数，调试时可从 DEBUG 日志确认入参实际值
+    logger.debug("启动参数: force_full=%s, min_stocks=%s", args.force_full, args.min_stocks)
+
+    result = run_factor_ic(
+        spec=SPEC,
+        min_stocks=args.min_stocks,
+        force_full=args.force_full,
+        logger=logger,
+    )
+
+    if result is None:
+        raise FactorCalcError("run_factor_ic 返回 None，因子计算未产生有效结果，请检查数据或配置")
+
+    _log_summary(result)
     return result
 
 
