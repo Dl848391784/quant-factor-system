@@ -215,22 +215,23 @@ def main():
     if ic_mean is None:
         logger.warning("本次计算 IC 均值为空，请检查数据源")
 
-    # 结果摘要逐字段输出：每条字段独立成一条 log record，避免多行拼接
-    # 在结构化日志后端（JSON/ELK 等）中产生裸换行破坏采集解析。grep/awk
-    # 单行检索同样更友好。原 "\n%s" + "\n".join(...) 写法注释里宣称的
-    # "并发原子性" 实则单次 logger.info 本身已是一条记录，无切割风险。
-    logger.info("=" * 60)
-    logger.info("结果摘要")
-    logger.info("=" * 60)
-    logger.info("因子名称: %s", result.get("factor_name", "unknown"))
-    logger.info("更新模式: %s", result.get("update_mode", "unknown"))
-    logger.info("日期范围: %s ~ %s", period.get("start", "N/A"), period.get("end", "N/A"))
-    logger.info("有效天数: %s 天", sample_stats.get("valid_days", 0))
-    logger.info("--- IC指标 ---")
-    logger.info("IC 均值: %s", ic_mean_str)
-    logger.info("IC 标准差: %s", ic_std_str)
-    logger.info("ICIR: %s", icir_str)
-    logger.info("IC>0 占比: %s", positive_ratio_str)
+    # 结果摘要单行结构化输出：所有字段以 key=value 形式拼接，避免：
+    # 1. 分隔线日志（"=" * 60）每次调用都在格式化阶段重新求值，与 %s
+    #    懒格式化惯用法不一致，且对结构化日志无语义价值；
+    # 2. 多条 logger.info 在并发场景下被其他线程的日志切割破坏可读性。
+    # 单行 key=value 格式同时友好于 grep/awk 单行检索与 JSON 后端字段提取。
+    logger.info(
+        "结果摘要 | 因子=%s 更新模式=%s 日期范围=%s~%s 有效天数=%s ic_mean=%s ic_std=%s icir=%s ic_positive_ratio=%s",
+        result.get("factor_name", "unknown"),
+        result.get("update_mode", "unknown"),
+        period.get("start", "N/A"),
+        period.get("end", "N/A"),
+        sample_stats.get("valid_days", 0),
+        ic_mean_str,
+        ic_std_str,
+        icir_str,
+        positive_ratio_str,
+    )
 
     # 确认结果处理完成后才输出"计算完成"日志（避免中途失败造成误导）
     logger.info("日内强度因子IC计算完成")
