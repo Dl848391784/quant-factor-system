@@ -201,7 +201,14 @@ if __name__ == "__main__":
         # 数据 Schema 校验失败（公共模块 validate_required_columns 抛出）：
         # H12 R18 → exit 4 与因子计算失败（exit 5）严格区分。
         # MODULE.md M22：业务异常用 logger.error 不打堆栈。
-        logger.error("数据 Schema 校验失败 (factor=%s): %s", e.factor_name, e)
+        # 注：DataSchemaError.__init__ 显式设置 factor_name（见 factor_ic/common/exceptions.py L73），
+        # 但仍用 getattr 兜底——若未来子类化或异常构造路径变化导致属性缺失，
+        # 直接 e.factor_name 会触发 AttributeError 掩盖原始 schema 失败信息。
+        logger.error(
+            "数据 Schema 校验失败 (factor=%s): %s",
+            getattr(e, "factor_name", "unknown"),
+            e,
+        )
         sys.exit(4)  # H12 R18: schema 失败 → 检查上游数据
     except FactorCalcError as e:
         # 业务异常：消息已足够定位，堆栈是噪音（MODULE.md M22 业务异常子类规则）
