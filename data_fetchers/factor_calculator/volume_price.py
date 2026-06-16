@@ -30,9 +30,12 @@
 
 兼容性
 ======
-本模块函数实现与原 ``factor_calculator.py`` v1.17 字节级一致；PR-3 通过
-``temporary/factor_calculator_baseline_fingerprint.json`` 的 22 个因子
-指纹验证。
+原 ``factor_calculator.py`` v1.17 的字节级一致性已在 2026-06-16 修复中
+**主动废弃**（修复 ``calculate_near_high_ratio_5`` 的跌停误标为强信号、
+``calculate_ma5_deviation`` 的 ``clip(lower=0.01)`` 系统性偏差、
+``calculate_positive_day_ratio_5`` 的首行 NaN 误计为阴线等行为缺陷）。
+``temporary/factor_calculator_baseline_fingerprint.json`` 的旧指纹不再适用，
+新基线由 ``data_fetchers/test_cases/test_factor_calculator.py`` 的单元测试守护。
 """
 
 from __future__ import annotations
@@ -221,10 +224,9 @@ def calculate_near_high_ratio_5(
 
     边界处理:
     - 前4天无完整5日窗口 → NaN
-    - 涨跌停一字板: max=min → diff=0 → position=1.0（遵循 Pitfall #45）
-      涨停: 收盘价=近5日最高=最强信号 → 1.0
-      跌停: 收盘价=近5日最低=最弱信号 → 但此时close=min, diff=0 → 也返回1.0
-      注意: 与price_position不同，这里5日窗口的涨跌停处理需进一步验证
+    - 涨跌停一字板 / 5 日内 close 完全无波动: max=min → diff=0 → NaN
+      （此时无法区分位置强弱：close=min=max，强行返回 1.0 会让跌停被误标为
+      最强信号；返回 NaN 交由后续截面标准化或 IC 计算自然剔除该极端样本）
 
     遵循 H5: IC方向不预判
     """
@@ -240,11 +242,17 @@ def calculate_near_high_ratio_5(
     # 计算高低价差
     diff = roll_max - roll_min
 
-    # 涨跌停一字板处理：diff=0时，收盘价在区间最高点 → position=1.0（遵循 Pitfall #45）
-    position = np.where(
-        diff == 0,
-        1.0,  # 涨跌停：收盘价锁定在极端位置 → 最强信号
-        (df[_COL_CLOSE] - roll_min) / diff,
+    # diff == 0（5 日内无波动 / 一字板）时返回 NaN：
+    # 此时 close = min = max，无法判定相对强弱，强行赋 1.0 会让跌停一字板
+    # 被错误地标为"最强信号"。返回 NaN 让后续截面处理自然剔除该极端样本。
+    # 用 pd.Series 包装以保证索引与 df 对齐（np.where 返回 ndarray 不带索引）。
+    position = pd.Series(
+        np.where(
+            diff == 0,
+            np.nan,
+            (df[_COL_CLOSE] - roll_min) / diff,
+        ),
+        index=df.index,
     )
 
     df[_COL_NEAR_HIGH_RATIO_5] = position
