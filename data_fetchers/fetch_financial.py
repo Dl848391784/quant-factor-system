@@ -98,6 +98,12 @@
   - Fix 4: df 守卫触发时增加 _logger.error，避免与 fetch 失败 / 空数据静默混淆
   - Fix 5: 主循环 enumerate 改为直接迭代（循环变量 i 从未使用）
   - Fix 6: load_cache 旧格式日志文案 "旧格式 list" → "待迁移旧格式"（准确反映此处仅加载未迁移）
+- v1.0p (2026-06-16): 5 项缺陷修复（关键词冗余 + 注释精度 + import 位置）
+  - Fix 1: _is_rate_limit_error cn_keywords 删除 "请求频率限制"/"访问频率"（"频率" 子串已覆盖）
+  - Fix 2: _parse_report_date 兜底分支注释修正（numpy.datetime64.str() 实际含纳秒后缀，无法通过正则；分支保留为防御兜底）
+  - Fix 3: load_cache 内的 import gzip 移至文件顶部 import 区
+  - Fix 4: _parse_report_date docstring 明确"str 格式不符静默返回 None，由调用方记录原始值"
+  - Fix 5: df 初始化注释删除 "assert df is not None 永远成立" 旧表述（v1.0o 已改为 _logger.error 守卫）
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -108,6 +114,7 @@
 
 import datetime
 import gc
+import gzip
 import json
 import logging
 import re
@@ -137,7 +144,7 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0o"
+_OUTPUT_VERSION = "1.0p"
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +291,8 @@ def _parse_report_date(report_date_raw: Any) -> str | None:
     - pd.NaT（pandas 缺失时间戳）不是 None，isinstance(NaT, datetime.date) 为 False，
       但 str(NaT) 返回 'NaT' 会误判为有效日期，因此需前置 pd.isnull 检查。
     - str 类型需通过 YYYY-MM-DD 正则校验，不规范格式（如 "20240331"、"2024年3月31日"）
-      返回 None，避免写入缓存后下游月份提取静默出错。
+      静默返回 None（不打日志），由调用方负责记录原始值与上下文（如 stock symbol）。
+      调用方应在 _parse_report_date 返回 None 时检查 raw 是否非空并记录 warning。
     """
     if report_date_raw is None:
         return None
@@ -309,11 +317,13 @@ def _parse_report_date(report_date_raw: Any) -> str | None:
             return report_date_raw
         return None
     # 其他类型兜底：尝试转为字符串后校验。
-    # 预期覆盖的类型（不属于 datetime.date / str 的合法日期对象）：
-    # - numpy.datetime64：str() 输出 "2024-03-31" 或 "2024-03-31T00:00:00"，前者可通过正则
-    # - 自定义日期类（实现 __str__ 返回 ISO 格式）：极少见但允许
-    # 注：pd.NaT 已被前置 pd.isnull 拦截，不会走到这里；pd.Timestamp 已被 datetime.date 分支捕获。
-    # 若 str() 结果不符合 YYYY-MM-DD，统一返回 None（不规范输入应该被拒绝）。
+    # Fix 2 (v1.0p): 实际可能命中的合法输入极少 ——
+    # - numpy.datetime64 的 str() 通常输出 "2024-03-31T00:00:00.000000000"（含纳秒后缀），
+    #   无法通过 _REPORT_DATE_RE 正则；akshare 一般已转为 pd.Timestamp（被 datetime.date 分支捕获）
+    # - 自定义日期类（__str__ 返回 ISO 格式）：极罕见，理论可能但生产几乎不出现
+    # 注：pd.NaT 已被前置 pd.isnull 拦截；pd.Timestamp 已被 datetime.date 分支捕获。
+    # 此分支保留作为防御兜底（未来若数据源出现新类型，至少不会抛 AttributeError），
+    # 但 99% 情况下 str() 结果不符合 YYYY-MM-DD 时统一返回 None。
     try:
         fallback_str = str(report_date_raw)
     except Exception:
@@ -343,7 +353,9 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     if exc_name == "TooManyRequests":
         return True
     # 中文关键词：精确匹配，不受大小写影响，对原串直接 in 判断
-    cn_keywords = ("频率", "请求频率限制", "访问频率")
+    # Fix 1 (v1.0p): "频率" 已覆盖 "请求频率限制" / "访问频率" 等含子串的消息，
+    # 避免冗余子集（任何含后两者的消息必然已被 "频率" 命中）。
+    cn_keywords = ("频率",)
     if any(kw in exc_msg for kw in cn_keywords):
         return True
     # 英文关键词：本身全为小写，仅对英文匹配场景做 casefold（兼容 unicode 大写映射）
@@ -370,8 +382,8 @@ def fetch_financial_data_for_stock(
     """
     _logger = logger_arg or logger
     # df 在 try 成功后立即 break；except 分支均会 return None 或 continue。
-    # 初始化为 None 仅为静态分析（Pyright reportPossiblyUnbound）友好，
-    # 实际执行路径下 `assert df is not None` 永远成立。
+    # 初始化为 None 仅为静态分析（Pyright reportPossiblyUnbound）友好；
+    # 运行期守卫见循环后 `if df is None: _logger.error(...); return None`。
     df: pd.DataFrame | None = None
     for attempt in range(1, _RATE_LIMIT_RETRIES + 1):
         try:
@@ -489,8 +501,6 @@ def load_cache(logger_arg: logging.Logger | None = None) -> dict[str, Any]:
         return {"meta": {}, "data": {}}
 
     try:
-        import gzip
-
         with gzip.open(CACHE_FILE, "rt") as f:
             data = json.load(f)
         # 兼容 dict（v1.0c+）和 list（v1.0b）格式，计算实际记录数
