@@ -222,11 +222,12 @@ def main():
         f"ICIR: {icir_str}",
         f"IC>0 占比: {positive_ratio_str}",
     ]
-    logger.info("\n%s", "\n".join(summary_lines))
-
-    # ic_mean 为 None 时额外输出 warning，便于告警系统捕获异常运行
+    # ic_mean 为 None 时优先输出 warning（在摘要 info 之前，避免下游告警
+    # 系统按时序扫描时把告警淹没在正常摘要日志后面被误判为正常结束）
     if ic_mean is None:
         logger.warning("本次计算 IC 均值为空，请检查数据源")
+
+    logger.info("\n%s", "\n".join(summary_lines))
 
     # 确认结果处理完成后才输出"计算完成"日志（避免中途失败造成误导）
     logger.info("日内强度因子IC计算完成")
