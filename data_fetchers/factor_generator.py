@@ -599,29 +599,21 @@ def _nan_to_null(obj: Any) -> Any:
 
 
 def _atomic_write_json(payload: Any, path: Path, logger: logging.Logger) -> None:
-    """原子写出小型 JSON 文件（< 1MB）。
+    """原子写出小型 JSON 文件（< 1MB，用于 Step 15 列名清单等）。
 
-    用于 Step 15 列名清单等小文件场景，与 _write_factor_json_gz 的流式批写互补：
-    - _write_factor_json_gz：大文件（百 MB 级），流式批写避免 OOM，gzip 压缩
-    - _atomic_write_json：小文件（KB 级），全量 json.dump，不压缩
+    与 _write_factor_json_gz 互补：本函数全量 json.dump 不压缩；
+    后者流式批写避免大文件 OOM。两者数据流形态不同（KB 级 vs 百 MB 级），不强行共用底层。
 
-    实现细节（与 _write_factor_json_gz 对齐）：
-    1. 写临时文件 path + ".tmp"
-    2. os.replace 原子替换目标文件（标记 replaced=True）
-    3. finally 中：os.replace 失败 → 清理临时文件；成功 → 不动目标文件
+    实现：写 path+".tmp" → os.replace 原子替换 → finally 仅在替换失败时清理临时文件
+    （replaced 标志避免误删已成功替换的目标文件）。
 
     Args:
-        payload: 任意可 json.dump 的 Python 对象
-        path: 目标文件路径
-        logger: 日志器（OSError 时 warning + raise）
+        payload: 任意可 json.dump 的对象。
+        path: 目标文件路径。
+        logger: 日志器（OSError 时 warn）。
 
     Raises:
-        OSError: 写入或替换失败（调用方决定是否降级为 warn）
-
-    Note:
-        - 不复用 _write_factor_json_gz：流式批写场景与全量写场景的数据流形态不同
-        - replaced 标志避免 finally 误删已原子替换成功的目标文件
-        - encoding='utf-8' + ensure_ascii=False：支持中文 / 因子名直接可读
+        OSError: 写入或替换失败（调用方决定是否降级为 warn）。
     """
     temp_path = path.parent / (path.name + ".tmp")
     replaced = False
@@ -648,79 +640,65 @@ def _write_factor_json_gz(
 ) -> None:
     """流式写出 factor_ic_data.json.gz（gzip + 临时文件 + 原子替换）。
 
-    封装 Step 13 的写出逻辑：mkdir + 流式批写 + NaN→null + 临时文件原子替换。
-    异常类型 / 消息 / 日志格式与重构前字符级一致。
+    封装 Step 13 的写出逻辑：mkdir + 流式批写 + NaN→null + 原子替换。
 
     Args:
-        output_df: 已对齐 _OUTPUT_COLS 的输出 DataFrame
-        output_path: 目标输出路径
-        logger: 日志器
-        batch_size: 流式写入批次大小（默认 50000，约 200MB 内存峰值）
+        output_df: 已对齐 _OUTPUT_COLS 的输出 DataFrame。
+        output_path: 目标输出路径。
+        logger: 日志器。
+        batch_size: 流式写入批次大小（默认 50000，约 200MB 内存峰值）。
 
     Raises:
-        RuntimeError: mkdir 失败 / 写入文件系统错误 / 未知错误（含原因 + 类型名）
+        RuntimeError: mkdir 失败 / 文件系统错误 / 未知错误（含原因 + 类型名）。
     """
-    # dates 字段：字符串排序对 YYYY-MM-DD 格式正确（字典序与日期序一致）
+    # YYYY-MM-DD 字典序与日期序一致，直接字符串排序
     dates_list = sorted(output_df["date"].unique().tolist())
 
-    # 确保父目录存在（职责分离：mkdir 单独处理，异常信息更精确）
+    # mkdir 单独 try：异常信息更精确
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         logger.error("创建输出目录失败: %s, 原因: %s (%s)", output_path.parent, type(e).__name__, str(e))
         raise RuntimeError(f"创建输出目录失败: {output_path.parent}, {type(e).__name__}: {e}") from e
 
-    # 使用临时文件 + os.replace 原子写入（遵循 PROJECT.md 文件写入规范）
-    # ⚠️ 内存优化: 流式写入 JSON，避免 output_df.to_dict("records") 一次性创建4GB+字典
-    # 旧方法: json.dump({"dates": ..., "data": output_df.to_dict("records")}, f) → OOM
-    # 新方法: 分批写入 {"dates": ..., "data": [row1, row2, ...]} → 内存峰值仅每批行数
+    # 临时文件 + os.replace 原子写入。流式分批避免 to_dict("records") 一次性 OOM（4GB+）。
     temp_path = output_path.parent / (output_path.name + ".tmp")
     replaced = False
     try:
         with gzip.open(temp_path, "wt", encoding="utf-8") as f:
-            # 写入 JSON 头部
             f.write('{"dates": ')
             json.dump(dates_list, f, ensure_ascii=False)
             f.write(', "data": [')
 
-            # 分批写入数据行（避免一次性 to_dict("records") 导致 OOM）
-            # ⚠️ 关键: 逐条输出每个记录，而不是 json.dump(batch_records)（输出整个数组）
-            # 因为 json.dump(batch_records) 会把每批输出为 [...]，逗号连接后变成 [[batch1], [batch2], ...]
-            # 正确格式应该是 [record1, record2, ...]，不能嵌套
+            # 逐条写而非 json.dump(batch_records)：后者会输出 [...]，
+            # 多批拼接后变成嵌套 [[batch1], [batch2], ...]，违反 JSON 数组格式
             total_rows = len(output_df)
             first_record = True
             for batch_start in range(0, total_rows, batch_size):
                 batch_end = min(batch_start + batch_size, total_rows)
                 batch_df = output_df.iloc[batch_start:batch_end]
                 batch_records = batch_df.to_dict("records")
-                # NaN→null 转换（确保 JSON 严格合规）
                 batch_records = _nan_to_null(batch_records)
-                # 逐条输出每个记录，逗号 + 换行分隔
                 for record in batch_records:
                     if not first_record:
                         f.write(",\n")
                     json.dump(record, f, ensure_ascii=False)
                     first_record = False
-                # 显式释放批次数据
                 del batch_df, batch_records
 
-            # 写入 JSON 尾部
             f.write("]}")
 
         os.replace(temp_path, output_path)
         replaced = True
     except OSError as e:
-        # 文件系统错误（磁盘/权限/IO，PermissionError 是 OSError 子类）
+        # PermissionError 是 OSError 子类
         logger.error("文件系统错误保存失败: %s, 原因: %s (%s)", output_path, type(e).__name__, str(e))
         raise RuntimeError(f"文件系统错误: {output_path}, {type(e).__name__}: {e}") from e
     except Exception as e:
-        # 未知错误（兜底）
         logger.error("未知错误保存失败: %s, 原因: %s (%s)", output_path, type(e).__name__, str(e))
         raise RuntimeError(f"未知错误保存失败: {output_path}, {type(e).__name__}: {e}") from e
     finally:
-        # 仅在 os.replace 未成功执行时才清理临时文件，
-        # 避免 replace 后再抛异常时误删已原子替换成功的目标文件。
-        # missing_ok=True：原子操作，消除 TOCTOU 竞争窗口。
+        # 仅在 os.replace 未成功时清理：避免 replace 后再抛异常时误删已替换的目标文件
         if not replaced:
             temp_path.unlink(missing_ok=True)
 
