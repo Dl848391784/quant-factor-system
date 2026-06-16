@@ -70,6 +70,14 @@ v1.10 (2026-06-05): 新增动量强度因子
   - 添加 `_COL_MOMENTUM_STRENGTH` 和 `_DEFAULT_MOMENTUM_STRENGTH_WINDOW` 常量
   - 公式：momentum_strength = return_5d / std(return_1d, 5日)
   - 边界处理：std=0 → NaN（除零保护），前5日 → NaN（rolling window 不足）
+v1.11 (2026-06-01): 新增隔夜收益率因子
+  - 添加 `calculate_overnight_return()` 函数
+  - 添加 `_COL_OPEN`、`_COL_OVERNIGHT_RET` 常量
+  - 公式：overnight_ret = (今日开盘价 - 昨日收盘价) / 昨日收盘价
+  - 边界处理：第一天无昨日收盘价 → NaN
+v1.12 (2026-06-01): 新增 DataFrame 级 RSI 包装函数
+  - 添加 `calculate_rsi_df()` 函数（封装 `calculate_rsi`，输入/输出均为 DataFrame）
+  - 引入 `_per_asset_transform` 重构 RSI 多资产分组计算（避免 OOM，详见 PR f3711f3d）
 v1.13 (2026-06-11): 新增止跌信号差分因子（4个）
   - 添加 `_calculate_delta()` 通用差分辅助函数
   - 添加 `calculate_amplitude_delta()` 振幅差分因子
@@ -83,10 +91,10 @@ v1.13 (2026-06-11): 新增止跌信号差分因子（4个）
 创建日期: 2026-05-27
 """
 
-# ============================================================================
-# _add_industry_column helper：PR-4a 后已搬到 _common.py（行业类因子共享 helper）；
-# 本文件中仍保留的 5 个 industry/fund_flow 函数通过下方 import 继续使用。
-# ============================================================================
+# stdlib import：用于在文件末尾、9 段子模块 re-import 全部成功后注册加载诊断
+# 锚点（详见文件末尾 _MODULE_LOGGER 定义）。需置于文件顶部以满足 ruff E402。
+import logging
+
 from ._common import (  # noqa: F401  允许此模块 re-export 这些符号
     _BOLLINGER_NEUTRAL_VALUE,
     _COL_AMPLITUDE,
@@ -138,7 +146,6 @@ from ._common import (  # noqa: F401  允许此模块 re-export 这些符号
     _DEFAULT_VOLUME_RATIO_WINDOW,
     _EPSILON,
     _KD_NEUTRAL_VALUE,
-    _MODULE_LOGGER,
     _RSI_MAX_VALUE,
     _RSI_NEUTRAL_VALUE,
     DEFAULT_BOLLINGER_K,
@@ -150,13 +157,17 @@ from ._common import (  # noqa: F401  允许此模块 re-export 这些符号
     DEFAULT_RSI_PERIOD,
     DEFAULT_SURGE_WINDOW,
     DEFAULT_VOLUME_RATIO_WINDOW,
-    _calculate_delta,
-    _calculate_ewm_with_initial,
-    _per_asset_transform,
-    _wilder_smoothing_rsi,
-    get_module_logger,
 )
 
+# 注：以下 5 个内部 helper 不再经门面层 re-export（R6，2026-06-16）——
+#   `_MODULE_LOGGER`、`_calculate_delta`、`_per_asset_transform`、
+#   `_calculate_ewm_with_initial`、`_wilder_smoothing_rsi`、`get_module_logger`
+# 子模块（basic / momentum / delta / volume_price / industry / industry_financial /
+# fund_flow / intraday / tail）均直接 ``from ._common import ...`` 取用，避免外部
+# 通过 ``from data_fetchers.factor_calculator import _MODULE_LOGGER`` 等路径访问
+# 私有符号导致的封装边界泄漏。``__init__.py`` 仍从 ``_common`` 直接重导出
+# 测试/外部依赖的半公开 helper（``_per_asset_transform`` /
+# ``_calculate_ewm_with_initial`` / ``get_module_logger`` 等），路径不变。
 # R2 (2026-06-16): _add_industry_column 已迁出至 _industry_helpers.py，
 # 此处保留 re-import 维持 ``from ._legacy import *`` 通配兼容。
 from ._industry_helpers import _add_industry_column  # noqa: F401
@@ -302,24 +313,18 @@ __all__ = [
 
 
 # ============================================================================
-# 重构残留说明（design.md §6 PR 切片，2026-06-15）
+# 加载诊断锚点（R5）
 # ============================================================================
-# PR-2a ~ PR-4b 已把所有 26 个 ``calculate_*`` 公共函数 + 5 个共享 helper
-# （``_wilder_smoothing_rsi`` / ``_per_asset_transform`` /
-# ``_calculate_ewm_with_initial`` / ``_calculate_delta`` / ``_add_industry_column``）
-# 全部搬到 7 个子模块 + ``_common.py``：
-#   - basic.py / momentum.py / delta.py / volume_price.py（纯计算）
-#   - industry.py（行业聚合，纯计算）
-#   - industry_financial.py / fund_flow.py（含 parquet I/O）
+# 9 段子模块 re-import 全部成功执行后才会到达此处；任一子模块抛 ImportError
+# 都会在该 debug 行之前冒泡到调用方，留下"加载到了哪一段"的可追溯线索。
 #
-# 本文件仅保留：
-#   1. 模块级 import + 9 段子模块 re-import（顶部 ~250 行）
-#   2. ``__all__`` 列表（约 60 个名称，design.md §7.3 兼容性契约）
-#
-# 所有公共 ``calculate_*`` 名称仍可通过：
-#   from data_fetchers.factor_calculator import *  # 80+ 处下游零修改
-#   from data_fetchers.factor_calculator import calculate_xxx
-#   from data_fetchers.factor_calculator._legacy import calculate_xxx  # 子模块 re-import 路径
-# 三种方式访问，与 v1.17 单文件版本字节级一致（指纹基线 22/22 验证）。
-#
-# PR-5 后本文件可考虑进一步缩减（仅保留 __all__ + re-import），或合并到 __init__.py。
+# 使用 module-local logger（而非从 `_common` re-export `_MODULE_LOGGER`），既避免
+# 封装边界泄漏（R6：`_MODULE_LOGGER` 不在 `__all__` 中且以 `_` 开头，``from
+# data_fetchers.factor_calculator import *`` 不会带出），又为加载成功提供
+# debug 级诊断锚点。% 惰性格式化（PROJECT.md 硬规则 #13），子模块清单与上方
+# 9 段 import 注释顺序保持一致。
+_MODULE_LOGGER = logging.getLogger(__name__)
+_MODULE_LOGGER.debug(
+    "factor_calculator legacy facade loaded, submodules: %s",
+    "basic / delta / fund_flow / industry / industry_financial / intraday / momentum / tail / volume_price",
+)
