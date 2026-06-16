@@ -83,6 +83,14 @@
   - Fix 5: 进度日志移至 result 处理之后（原位置在 fetch_financial_data_for_stock 调用前打印，统计数字比已请求次数少 1）
   - Fix 6: 检查点行内注释 "每 100 只" → "每 500 只"，与常量 _CHECKPOINT_INTERVAL=500 对齐
   - Fix 7: 增量模式失败码（含非缓存 code）统一记录到 stale_codes，final_stale = (上次 stale - 本次成功重拉) ∪ 本次新失败，提升日志可观测性
+- v1.0n (2026-06-16): 6 项缺陷修复（运行时守卫策略 + 解析语义收紧 + 死代码清理）
+  - Fix 1: assert df is not None → if df is None: return None（生产代码避免 -O 优化跳过 + AssertionError 不友好）
+  - Fix 2: _is_rate_limit_error 中文/英文关键词分桶（中文不走 lower 避免无意义处理，英文用 casefold）
+  - Fix 3: load_cache dict 格式日志同时打印股票数 + 记录数（与 main "缓存已有 N 只股票" 维度对齐）
+  - Fix 4: _parse_percentage int/float 分支合并 + 显式 docstring 标注 int 兼容性兜底语义
+  - Fix 5: _parse_numeric_with_unit 不再静默 strip 百分号，遇到 % 返回 None + warning（防止 "4.21%亿" 误解析为 4.21e8）
+  - Fix 6: all_codes 用 dict.fromkeys 保序去重（消除重复 code 在 successfully_fetched_codes / 检查点重复请求的潜在风险）
+  - Fix 8: 删除从未引用的 _NOW 模块级常量（meta 时间戳已全部改用 dt_cls.now()）
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -122,10 +130,7 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0m"
-
-# 模块级固定时间戳（仅标记脚本启动时间，meta 中使用 dt_cls.now() 取完成时间）
-_NOW = dt_cls.now()
+_OUTPUT_VERSION = "1.0n"
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +179,7 @@ def _parse_percentage(val: Any) -> float | None:
         数据源单位约定（akshare stock_financial_abstract_ths）：
         - str 类型：带 '%' 后缀的百分数形式（如 '4.21%' 表示 4.21%）
         - float 类型：已是百分数形式（如 4.21 表示 4.21%，而非 0.0421）
+        - int 类型：兼容性兜底，与 float 同语义（如 5 表示 5%，少数据源可能返回纯整数）
         - 若数据源返回小数形式，调用方需自行 ×100 转换
         - 集成测试通过已知股票数据断言输出范围来验证单位一致性
           （如 ROE 应在 [-100, 100] 区间，若出现 0.0421 量级则说明单位错误）
@@ -189,10 +195,9 @@ def _parse_percentage(val: Any) -> float | None:
             return None
     except (ValueError, TypeError):
         pass  # pd.isna 对非数值类型（如 list）可能抛异常，此时忽略
-    if isinstance(val, (int,)):
+    # int 与 float 同语义（数据源返回的数值已是百分数形式），合并分支消除冗余
+    if isinstance(val, (int, float)):
         return float(val)
-    if isinstance(val, float):
-        return val
     if isinstance(val, str):
         # 去掉百分号和空格
         s = val.strip().replace("%", "").replace("％", "")
@@ -237,6 +242,12 @@ def _parse_numeric_with_unit(val: Any) -> float | None:
         s = val.strip()
         if s in ("", "-", "N/A", "nan", "NaN", "--"):
             return None
+        # Fix 5 (v1.0n): 本函数定位为"数值带单位"（亿/万），百分号属于百分比格式，
+        # 不应静默 strip。若混入百分号（如脏数据 "4.21%亿" → 误解析为 4.21e8），
+        # 直接返回 None 让调用方走 _parse_percentage 或上抛 warning。
+        if "%" in s or "％" in s:
+            logger.warning("_parse_numeric_with_unit 收到含百分号的输入: %r，返回 None", s[:40])
+            return None
         # 处理亿/万单位
         multiplier = 1.0
         if "亿" in s:
@@ -245,7 +256,6 @@ def _parse_numeric_with_unit(val: Any) -> float | None:
         elif "万" in s:
             s = s.replace("万", "")
             multiplier = 1e4
-        s = s.replace("%", "").replace("％", "")
         try:
             return float(s) * multiplier
         except ValueError:
@@ -310,16 +320,22 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     - 异常消息包含限流关键词（频率/限制/429/rate limit）
     """
     exc_name = type(exc).__name__
-    exc_msg = str(exc).lower()
+    exc_msg = str(exc)
     # HTTP 429（仅检查异常消息，类名不含 "429"）
     if "429" in exc_msg:
         return True
     # 明确的限流异常类名（不包含 HTTPError：400/500 等非限流错误也会抛 HTTPError）
     if exc_name == "TooManyRequests":
         return True
-    # 限流关键词（中英文）
-    rate_limit_keywords = ("rate limit", "too many", "频率", "请求频率限制", "访问频率", "throttl")
-    return any(kw in exc_msg for kw in rate_limit_keywords)
+    # 中文关键词：精确匹配，不受大小写影响，对原串直接 in 判断
+    cn_keywords = ("频率", "请求频率限制", "访问频率")
+    if any(kw in exc_msg for kw in cn_keywords):
+        return True
+    # 英文关键词：本身全为小写，仅对英文匹配场景做 casefold（兼容 unicode 大写映射）
+    # 不对全消息 .lower()，避免对中文字符串做无意义处理。
+    exc_msg_cf = exc_msg.casefold()
+    en_keywords = ("rate limit", "too many", "throttl")
+    return any(kw in exc_msg_cf for kw in en_keywords)
 
 
 def fetch_financial_data_for_stock(
@@ -374,7 +390,11 @@ def fetch_financial_data_for_stock(
             )
             return None
 
-    assert df is not None  # 静态分析：循环必通过成功 break 或 except return 退出
+    # 静态分析守卫：循环正常路径必通过 break 后 df 有值，否则 except 分支已 return。
+    # 用 if 显式守卫而非 assert，避免 -O 优化跳过守卫 + AssertionError 不友好。
+    # 运行期理论上永真，仍保留以兼容未来 except 分支重构（防御性编程）。
+    if df is None:
+        return None
     if df.empty:
         _logger.info("%s 财务数据为空", symbol)
         return []
@@ -456,12 +476,15 @@ def load_cache(logger_arg: logging.Logger | None = None) -> dict[str, Any]:
         with gzip.open(CACHE_FILE, "rt") as f:
             data = json.load(f)
         # 兼容 dict（v1.0c+）和 list（v1.0b）格式，计算实际记录数
+        # Fix 3 (v1.0n): dict 格式同时打印股票数 + 记录数，与 main 中 "缓存已有 N 只股票" 对齐
         raw_data_field = data.get("data", [])
         if isinstance(raw_data_field, dict):
+            stock_count = len(raw_data_field)
             record_count = sum(len(v) for v in raw_data_field.values())
+            _logger.info("加载财务数据缓存: %d 只股票 / %d 条记录", stock_count, record_count)
         else:
             record_count = len(raw_data_field)
-        _logger.info("加载财务数据缓存: %d 条记录", record_count)
+            _logger.info("加载财务数据缓存（旧格式 list）: %d 条记录", record_count)
         return data
     except Exception as e:
         _logger.warning("加载缓存失败: %s (%s)，将全新拉取", str(e)[:80], type(e).__name__)
@@ -563,11 +586,20 @@ def main(logger_arg: logging.Logger | None = None) -> int:
         return 1
 
     # 提取6位股票代码
-    all_codes: list[str] = []
+    # Fix 6 (v1.0n): 用 dict.fromkeys 保序去重，从根本上消除 stock_list 重复 code 的潜在风险
+    # （避免重复 code 在 successfully_fetched_codes 计数偏差，以及检查点后重复发起 API 请求）
+    raw_codes: list[str] = []
     for stock in stock_list:
         code = str(stock.get("code", "")).zfill(6)
         if len(code) == 6 and code.isdigit():
-            all_codes.append(code)
+            raw_codes.append(code)
+    all_codes: list[str] = list(dict.fromkeys(raw_codes))
+    if len(all_codes) != len(raw_codes):
+        _logger.info(
+            "stock_list 含重复 code，已去重: 原 %d → 去重后 %d",
+            len(raw_codes),
+            len(all_codes),
+        )
 
     # 过滤 stale_codes_from_cache 中已退市/改代码的废弃代码
     # （已不在当前 all_codes 中的代码不应被计入 codes_to_fetch 或尝试拉取）
