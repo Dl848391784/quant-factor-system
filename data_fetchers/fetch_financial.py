@@ -117,6 +117,10 @@
   - Fix 1: 检查点 clear 时序注释更正——失败保留场景下次检查点或最终写入时一并落盘（new_stock_data 可能已累积更多新数据，非仅本次失败批次）
   - Fix 2: _parse_report_date 兜底分支 except Exception → except (TypeError, AttributeError)，缩窄至 str() 实际可能抛出的异常类型，避免过宽捕获
   - Fix 3: get_cached_stock_codes docstring 标注为外部 API（test_fetch_financial.py 6 处引用），明确不在 main() 调用链内
+- v1.0t (2026-06-16): 3 项缺陷修复（错误日志措辞 + 中间变量精简 + 失败路径 docstring 区分）
+  - Fix 1: 检查点失败 error 日志"本轮中间状态丢失" → "本轮检查点未落盘，数据仍在内存，将随下次检查点或最终写入一并落盘"，与实际行为对齐（new_stock_data 未被清除，运维不应误判为不可恢复）
+  - Fix 2: load_cache keys_preview 中间变量精简，直接在 _logger.warning 参数中内联 all_keys[:10]
+  - Fix 3: _parse_report_date docstring 补充 str 分支两类失败路径的区分说明（正则不匹配 vs 正则匹配但日期非法），调用方 warning 中需打印 raw 原始值供排查
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -157,7 +161,7 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0s"
+_OUTPUT_VERSION = "1.0t"
 
 logger = logging.getLogger(__name__)
 
@@ -306,6 +310,10 @@ def _parse_report_date(report_date_raw: Any) -> str | None:
     - str 类型需通过 YYYY-MM-DD 正则校验，不规范格式（如 "20240331"、"2024年3月31日"）
       静默返回 None（不打日志），由调用方负责记录原始值与上下文（如 stock symbol）。
       调用方应在 _parse_report_date 返回 None 时检查 raw 是否非空并记录 warning。
+    - str 分支两类失败均返回 None，本函数内部不区分：
+      (a) 正则不匹配：格式不符（如 "20240331"、"2024/03/31"）
+      (b) 正则匹配但 fromisoformat 失败：格式符合但日期非法（如 "2024-02-31"、"2024-13-01"）
+      调用方 warning 中应打印 raw 原始值，由人工/排查脚本据原始值人工区分两类失败。
     """
     if report_date_raw is None:
         return None
@@ -523,10 +531,9 @@ def load_cache(logger_arg: logging.Logger | None = None) -> dict[str, Any]:
         if "data" not in data:
             # Fix 2 (v1.0r): keys 截断防超大键名列表撑爆日志（被篡改的 JSON 可能含 MB 级键名）
             all_keys = list(data.keys())
-            keys_preview = all_keys[:10]
             _logger.warning(
                 "缓存文件结构异常: 缺失 'data' 键 (keys[:10]=%s, 总键数=%d)，按空缓存处理",
-                keys_preview,
+                all_keys[:10],
                 len(all_keys),
             )
             return {"meta": {}, "data": {}}
@@ -757,7 +764,7 @@ def main(logger_arg: logging.Logger | None = None) -> int:
                 # Fix 3 (v1.0r): write_gzip_cache docstring Raises 包含 TypeError/ValueError/RuntimeError
                 # （json.dumps 失败抛 TypeError；非法压缩级别抛 ValueError；未知错误抛 RuntimeError）
                 _logger.error(
-                    "检查点写入失败: %s (%s)，本轮中间状态丢失，继续拉取后续股票",
+                    "检查点写入失败: %s (%s)，本轮检查点未落盘，数据仍在内存，将随下次检查点或最终写入一并落盘",
                     str(e)[:120],
                     type(e).__name__,
                 )
