@@ -636,6 +636,7 @@ grep -rn "assert False\|if False:" factor_ic/ comprehensive_factor/ backtest/
 || 版本 | 日期 | 更新内容 | 稳定性标注 ||
 ||------|------|---------|-----------||
 ||| v1.42 | 2026-06-12 | 新增行业方向性因子（industry_momentum_5d / industry_turnover_trend / industry_amplitude_trend）；因子分类一览表；行业方向性因子说明（What/Why/How/Don't/When/Verify） | [experimental] ||
+||| v3.5 | 2026-06-16 | "Run Pipeline 执行排查流程" 3 处修订：①步骤 3 新鲜度检查改 ijson 流式扫描（修复 408MB factor_ic_data.json.gz 上 `json.load` OOM kill）；②步骤 3 新增"反向追溯（产物→上游脚本映射）"小节，识别 run_pipeline 单脚本失败不中断导致下游静默用旧数据；③步骤 5 汇总表新增"产物 mtime / 数据 latest_date"列 + 判读规则；④常见异常表新增 OOM kill（退出码 137 / 静默截断）行 | [experimental] ||
 ||| v3.4 | 2026-06-04 | 扩展"Run Pipeline 执行排查流程"步骤 3：检查所有时间序列数据文件日期新鲜度（factor_ic_data + turnover_rate + tail_trading），明确不需要检查的文件类型 | [stable] ||
 || v3.3 | 2026-06-04 | 补充"Run Pipeline 执行排查流程"中 data_fetchers 数据日期新鲜度检查（步骤 3），关联 Pitfall 162 | [stable] ||
 || v3.2 | 2026-06-04 | 新增"Run Pipeline 执行排查流程"章节：执行顺序与日志位置表、排查步骤（标准化流程）、常见异常快速定位表 | [stable] |
@@ -769,67 +770,54 @@ ls -la summary/logs/*_2026-MM-DD.log
 
 **⚠️ 关键检查点**：必须验证每个 data_fetchers 脚本拉取的数据日期是否到了 T-1（前一日），否则后续模块可能使用过期数据。
 
-检查方法（按脚本输出文件逐一检查）：
+检查方法（统一脚本，流式扫描避免 OOM） [experimental]：
+
+> ⚠️ **必须用流式扫描**（`ijson`），禁止 `json.load()` 全量加载。
+> `factor_ic_data.json.gz` 单文件解压后可达 GB 级，全量加载在 7.3GB 内存机器上必然 OOM kill（exit 137），症状是命令静默退出无报错——这本身就是 v3.5 章节修订的触发案例。
 
 ```bash
-# 检查 factor_ic_data.json.gz 中最新日期（factor_generator.py 输出，依赖多个上游数据）
+# 一次性检查所有时间序列数据文件的日期新鲜度
 python -c "
-import pandas as pd
-import gzip
-import json
+import gzip, ijson
 from datetime import datetime, timedelta
 
-with gzip.open('data_fetchers/result/factor_ic_data.json.gz', 'rt') as f:
-    data = json.load(f)
-df = pd.DataFrame(data['data'])
-latest_date = df['date'].max()
 yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-print(f'factor_ic_data.json.gz:')
-print(f'  数据最新日期: {latest_date}')
-print(f'  期望日期(T-1): {yesterday}')
-print(f'  新鲜度判定: {\"✅ 符合\" if latest_date >= yesterday else \"❌ 过期\"}')
-"
-
-# 检查 turnover_rate_data.json.gz 中最新日期（fetch_turnover.py 输出）
-python -c "
-import pandas as pd
-import gzip
-import json
-from datetime import datetime, timedelta
-
-with gzip.open('data_fetchers/result/turnover_rate_data.json.gz', 'rt') as f:
-    data = json.load(f)
-df = pd.DataFrame(data['data'])
-latest_date = df['date'].max()
-yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-print(f'turnover_rate_data.json.gz:')
-print(f'  数据最新日期: {latest_date}')
-print(f'  期望日期(T-1): {yesterday}')
-print(f'  新鲜度判定: {\"✅ 符合\" if latest_date >= yesterday else \"❌ 过期\"}')
-"
-
-# 检查 tail_trading_data.json.gz 中最新日期（fetch_tail_trading.py 输出）
-python -c "
-import pandas as pd
-import gzip
-import json
-from datetime import datetime, timedelta
-
-with gzip.open('data_fetchers/result/tail_trading_data.json.gz', 'rt') as f:
-    data = json.load(f)
-df = pd.DataFrame(data['data'])
-latest_date = df['date'].max()
-yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-print(f'tail_trading_data.json.gz:')
-print(f'  数据最新日期: {latest_date}')
-print(f'  期望日期(T-1): {yesterday}')
-print(f'  新鲜度判定: {\"✅ 符合\" if latest_date >= yesterday else \"❌ 过期\"}')
+files = [
+    ('factor_ic_data.json.gz',    'data_fetchers/result/factor_ic_data.json.gz'),
+    ('turnover_rate_data.json.gz','data_fetchers/result/turnover_rate_data.json.gz'),
+    ('tail_trading_data.json.gz', 'data_fetchers/result/tail_trading_data.json.gz'),
+]
+for name, path in files:
+    max_d = ''
+    try:
+        with gzip.open(path, 'rb') as f:
+            # 流式遍历 data 数组的每个元素的 date 字段，常驻内存 O(1)
+            for d in ijson.items(f, 'data.item.date'):
+                if d and d > max_d:
+                    max_d = d
+    except Exception as e:
+        max_d = f'ERR:{e}'
+    fresh = '✅ 符合' if max_d >= yesterday else '❌ 过期'
+    print(f'{name}: latest={max_d}  expected(T-1)={yesterday}  {fresh}')
 "
 ```
+
+**前置依赖**：`ijson>=3.0`（已在项目环境中预装，验证：`python -c "import ijson; print(ijson.__version__)"`）。
 
 **判定标准**：
 - `latest_date >= T-1` → ✅ 数据新鲜，可继续排查后续模块
 - `latest_date < T-1` → ❌ 数据过期，需检查对应 data_fetchers 脚本执行情况
+
+**反向追溯（产物→上游脚本映射）** [experimental]：
+
+发现某产物过期时，按下表定位上游失败脚本（`run_pipeline.py` 单脚本失败仅记入 `failed_scripts` 不中断流程，下游会静默用旧数据，必须反向追溯）：
+
+|| 过期产物 | 上游脚本 | 关联 Stage | 检查日志 |
+||---------|---------|-----------|---------|
+|| `factor_ic_data.json.gz` | `factor_generator.py` | Stage 1 | `data_fetchers/logs/factor_generator_2026-MM-DD.log` |
+|| `turnover_rate_data.json.gz` | `fetch_turnover.py` | Stage 0 | `data_fetchers/logs/fetch_turnover_2026-MM-DD.log` |
+|| `tail_trading_data.json.gz` | `fetch_tail_trading.py` | Stage 0 | `data_fetchers/logs/fetch_tail_trading_2026-MM-DD.log` |
+|| `factor_data.json.gz` | `fetch_factor_cache.py` | Stage 0 | `logs/fetch_factor_cache_2026-MM-DD.log` |
 
 **不需要检查日期新鲜度的文件**：
 - `stock_list.json`（股票列表，非时间序列）
@@ -853,11 +841,14 @@ grep -r "ERROR\|Exception\|Traceback\|FAIL\|失败" \
 
 **步骤 5：汇总报告**
 
-输出格式：
+输出格式 [experimental]：
 
-| 模块 | 时间 | 状态 | 关键指标 |
-|------|------|------|----------|
-| 模块名 | HH:MM-HH:MM | ✅/⚠️/❌ | 耗时、记录数、验证结果 |
+| 模块 | 时间 | 状态 | 关键指标 | 产物 mtime / 数据 latest_date |
+|------|------|------|----------|-------------------------------|
+| 模块名 | HH:MM-HH:MM | ✅/⚠️/❌ | 耗时、记录数、验证结果 | 文件 mtime + 流式扫描得到的 latest_date（步骤 3 结果） |
+
+> ⚠️ **关键判读规则**：状态列只反映"脚本退出码"，**必须叠加最后一列才能识别"脚本绿但数据陈旧"的静默故障**。
+> 典型表现：Stage 1 脚本 OOM kill 后，Stage 2-7 全部"成功"，但产物 latest_date < T-1 ⇒ 实际是基于过期数据出报告，应整体判 ⚠️。
 
 **异常分类**：
 - **ERROR**：执行失败，需立即关注
@@ -873,6 +864,7 @@ grep -r "ERROR\|Exception\|Traceback\|FAIL\|失败" \
 || `Max retries exceeded` | 网络超时/数据源不可达 | 检查网络连接或数据源状态 |
 || `数据完整性判断: full` | 无缓存/缓存过期 | 正常情况，全量计算模式 |
 || `缺失记录数: N (X%)` | 数据源部分缺失 | 评估缺失比例是否在容忍范围 |
+|| 退出码 137 / 日志在某 Step 静默截断、无 Traceback | OOM kill（内存超限被 SIGKILL） | `dmesg -T \| grep -iE "oom\|killed process"` 或 `journalctl --since "今日 00:00" \| grep -iE "oom\|killed"`；机器仅 7.3GB 内存，`factor_generator.py` Step 12 序列化大 DataFrame 时高发 [experimental] |
 
 ### 执行顺序完整清单（run_pipeline.py v1.3）
 
