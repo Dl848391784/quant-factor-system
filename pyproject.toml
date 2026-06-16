@@ -54,6 +54,7 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["factor_ic", "backtest", "data_fetchers", "common"]
 force-single-line = false
+combine-as-imports = true  # 同源 from 含 `as` 别名时也合并，避免 PEP 8 同源合并被 isort 拆回（见 factor_ic/ic_kdj_j_1d.py KDJ 默认参数 import）
 lines-after-imports = 2
 
 [tool.ruff.lint.per-file-ignores]

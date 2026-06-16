@@ -52,18 +52,13 @@ import sys
 
 # 添加项目路径
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
+# 同源导入合并为单条语句（PEP 8 imports 风格 + ruff isort combine-as-imports）：
+#   - calculate_kdj_j: KDJ_J 因子计算函数（遵循 MODULE.md 约束 #3）
+#   - DEFAULT_KDJ_N: RSV 计算周期；DEFAULT_KDJ_M1: K值平滑周期；DEFAULT_KDJ_M2: D值平滑周期
 from data_fetchers.factor_calculator import (
-    DEFAULT_KDJ_M1 as DEFAULT_M1,  # K值平滑周期
-)
-from data_fetchers.factor_calculator import (
-    DEFAULT_KDJ_M2 as DEFAULT_M2,  # D值平滑周期
-)
-from data_fetchers.factor_calculator import (
-    DEFAULT_KDJ_N as DEFAULT_N,  # RSV 计算周期
-)
-
-# 重构后：从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
-from data_fetchers.factor_calculator import (
+    DEFAULT_KDJ_M1 as DEFAULT_M1,
+    DEFAULT_KDJ_M2 as DEFAULT_M2,
+    DEFAULT_KDJ_N as DEFAULT_N,
     calculate_kdj_j,
 )
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
