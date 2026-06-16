@@ -30,6 +30,7 @@
   v1.0 (2026-06-12): 初始版本，复用 factor_calculator.calculate_industry_pe_trend
   v1.1 (2026-06-16): 修复退出码表/None检查/sys.exit/参数命名/日志问题
   v1.2 (2026-06-16): None返回补warning/SummaryLogError改error+cause/or{}改is not None/日志去冗余/FactorCalcError补上下文
+  v1.3 (2026-06-16): 抽取_build_parser消除重复解析/删除__main__重复日志/ic_metrics风格统一/去重复result.get
 """
 
 import argparse
@@ -59,8 +60,22 @@ SPEC = register_factor(
 )
 
 
-def main():
+def _build_parser():
+    """构建 CLI 参数解析器（main() 与 __main__ 共享，消除重复定义）。"""
+    parser = argparse.ArgumentParser(description="行业PE趋势因子 IC 计算器")
+    parser.add_argument("--force-full", action="store_true", help="强制全量计算")
+    parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
+    return parser
+
+
+def main(args=None):
     """CLI 主入口
+
+    Parameters
+    ----------
+    args : argparse.Namespace | None
+        CLI 参数。None 时内部解析 sys.argv（仅 CLI 调用场景）。
+        库函数调用方可直接传入预构造的 Namespace。
 
     Returns
     -------
@@ -79,10 +94,8 @@ def main():
         其他未预期异常原样传播。
     """
 
-    parser = argparse.ArgumentParser(description="行业PE趋势因子 IC 计算器")
-    parser.add_argument("--force-full", action="store_true", help="强制全量计算")
-    parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
-    args = parser.parse_args()
+    if args is None:
+        args = _build_parser().parse_args()
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
     result = run_factor_ic(
@@ -103,9 +116,12 @@ def main():
         )
         return None
 
-    # #6 修复：计算完成检查点日志（含 result 基本维度，便于生产排查）
-    sample_stats = result.get("sample_stats") if result.get("sample_stats") is not None else {}
-    period = result.get("period") if result.get("period") is not None else {}
+    # 计算完成检查点日志（含 result 基本维度，便于生产排查）
+    # 使用中间变量避免同一 key 重复调用 result.get()
+    _sample_stats = result.get("sample_stats")
+    sample_stats = _sample_stats if _sample_stats is not None else {}
+    _period = result.get("period")
+    period = _period if _period is not None else {}
     logger.debug(
         "run_factor_ic 完成: 有效天数=%s, 日期范围=%s~%s, 更新模式=%s",
         sample_stats.get("valid_days", "N/A"),
@@ -114,7 +130,7 @@ def main():
         result.get("update_mode", "N/A"),
     )
 
-    # #3 修复：log_factor_summary 失败时 raise SummaryLogError 而非 sys.exit(3)
+    # log_factor_summary 失败时 raise SummaryLogError 而非 sys.exit(3)
     # （R20: main() 体内禁 sys.exit，必须 raise 让 __main__ 块统一处理退出码）
     try:
         log_factor_summary(result, "行业PE趋势因子", logger)
@@ -124,8 +140,9 @@ def main():
             "故障源 = 摘要日志层而非 run_factor_ic 业务路径）"
         ) from e
 
-    # #5 修复：替换冗余的"计算完成"日志为包含关键指标的有效信息
-    ic_metrics = result.get("ic_metrics") or {}
+    # 替换冗余的"计算完成"日志为包含关键指标的有效信息
+    _ic_metrics = result.get("ic_metrics")
+    ic_metrics = _ic_metrics if _ic_metrics is not None else {}
     ic_mean = ic_metrics.get("ic_mean")
     icir = ic_metrics.get("icir")
     ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
@@ -139,17 +156,13 @@ def main():
 
 
 if __name__ == "__main__":
-    # 解析参数供 __main__ 异常日志使用（与 main() 内解析一致）
-    _parser = argparse.ArgumentParser()
-    _parser.add_argument("--force-full", action="store_true")
-    _parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS)
-    _cli_args, _ = _parser.parse_known_args()
+    # 共享 _build_parser()，sys.argv 只解析一次，结果传入 main()
+    _cli_args = _build_parser().parse_args()
 
     try:
-        result = main()
-        # None 检查从 main() 移至此处，映射为 exit 5（R19 因子计算失败）
+        result = main(args=_cli_args)
+        # main() 内已打 warning 留痕，此处仅负责退出码映射
         if result is None:
-            logger.error("run_factor_ic 返回 None，数据加载或计算可能失败")
             sys.exit(5)
     except DataSchemaError as e:
         # 数据 Schema 校验失败（公共模块 validate_required_columns 抛出）：
