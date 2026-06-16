@@ -255,23 +255,17 @@ def calculate_near_high_ratio_5(
     roll_max = df.groupby(_COL_ASSET)[_COL_CLOSE].rolling(5, min_periods=5).max().reset_index(level=0, drop=True)
     roll_min = df.groupby(_COL_ASSET)[_COL_CLOSE].rolling(5, min_periods=5).min().reset_index(level=0, drop=True)
 
-    # 计算高低价差
-    diff = roll_max - roll_min
+    # 计算高低价差，并把 0 替换为 NaN：
+    # diff == 0（5 日内 close 完全无波动 / 一字板）时无法判定相对强弱，
+    # close = min = max，强行赋 1.0 会让跌停一字板被错误地标为"最强信号"，
+    # 转 NaN 让后续截面处理自然剔除该极端样本。
+    # 用 replace 而非 np.where：np.where 两分支都会被完整求值，对 NaN/0
+    # 分母进行除法时 numpy 会触发 RuntimeWarning: invalid value / divide by
+    # zero；改为先得到 diff_safe 再单次除法，NaN/0 自然传播为 NaN，无警告且
+    # 代码更简洁。
+    diff_safe = (roll_max - roll_min).replace(0, np.nan)
 
-    # diff == 0（5 日内无波动 / 一字板）时返回 NaN：
-    # 此时 close = min = max，无法判定相对强弱，强行赋 1.0 会让跌停一字板
-    # 被错误地标为"最强信号"。返回 NaN 让后续截面处理自然剔除该极端样本。
-    # 用 pd.Series 包装以保证索引与 df 对齐（np.where 返回 ndarray 不带索引）。
-    position = pd.Series(
-        np.where(
-            diff == 0,
-            np.nan,
-            (df[_COL_CLOSE] - roll_min) / diff,
-        ),
-        index=df.index,
-    )
-
-    df[_COL_NEAR_HIGH_RATIO_5] = position
+    df[_COL_NEAR_HIGH_RATIO_5] = (df[_COL_CLOSE] - roll_min) / diff_safe
 
     valid_count = int(df[_COL_NEAR_HIGH_RATIO_5].notna().sum())
     nan_count = len(df) - valid_count
