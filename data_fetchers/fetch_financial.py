@@ -104,6 +104,11 @@
   - Fix 3: load_cache 内的 import gzip 移至文件顶部 import 区
   - Fix 4: _parse_report_date docstring 明确"str 格式不符静默返回 None，由调用方记录原始值"
   - Fix 5: df 初始化注释删除 "assert df is not None 永远成立" 旧表述（v1.0o 已改为 _logger.error 守卫）
+- v1.0q (2026-06-16): 4 项缺陷修复（间接层简化 + 编码显式化 + 写入异常守卫 + 损坏缓存检测）
+  - Fix 1: _is_rate_limit_error 单关键词直接 in 判断，删除 cn_keywords 元组+any 间接层
+  - Fix 2: load_cache 的 gzip.open 显式 encoding="utf-8"，规避 Windows cp936 解码失败
+  - Fix 3: write_gzip_cache 双调用点加 try/except OSError；checkpoint 失败 error+继续，最终失败 error+return 1
+  - Fix 4: load_cache "data" 键缺失检测（损坏缓存 → warning + 空缓存返回，而非误判为 v1.0b 旧格式）
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -144,7 +149,7 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0p"
+_OUTPUT_VERSION = "1.0q"
 
 logger = logging.getLogger(__name__)
 
@@ -353,10 +358,8 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     if exc_name == "TooManyRequests":
         return True
     # 中文关键词：精确匹配，不受大小写影响，对原串直接 in 判断
-    # Fix 1 (v1.0p): "频率" 已覆盖 "请求频率限制" / "访问频率" 等含子串的消息，
-    # 避免冗余子集（任何含后两者的消息必然已被 "频率" 命中）。
-    cn_keywords = ("频率",)
-    if any(kw in exc_msg for kw in cn_keywords):
+    # Fix 1 (v1.0q): 单关键词无需 any+循环，直接 in 判断（删除 cn_keywords 间接层）
+    if "频率" in exc_msg:
         return True
     # 英文关键词：本身全为小写，仅对英文匹配场景做 casefold（兼容 unicode 大写映射）
     # 不对全消息 .lower()，避免对中文字符串做无意义处理。
@@ -501,11 +504,21 @@ def load_cache(logger_arg: logging.Logger | None = None) -> dict[str, Any]:
         return {"meta": {}, "data": {}}
 
     try:
-        with gzip.open(CACHE_FILE, "rt") as f:
+        # Fix 2 (v1.0q): 显式 encoding="utf-8"，避免 Windows 默认编码（cp936 等）
+        # 解码含中文字段（股票名称等）的缓存时报 UnicodeDecodeError
+        with gzip.open(CACHE_FILE, "rt", encoding="utf-8") as f:
             data = json.load(f)
+        # Fix 4 (v1.0q): 区分"键缺失（损坏缓存）" vs "v1.0b 旧 list 格式"
+        # 默认值改为 {}，并显式检测 "data" 键存在性
+        if "data" not in data:
+            _logger.warning(
+                "缓存文件结构异常: 缺失 'data' 键 (keys=%s)，按空缓存处理",
+                list(data.keys()),
+            )
+            return {"meta": {}, "data": {}}
+        raw_data_field = data["data"]
         # 兼容 dict（v1.0c+）和 list（v1.0b）格式，计算实际记录数
         # Fix 3 (v1.0n): dict 格式同时打印股票数 + 记录数，与 main 中 "缓存已有 N 只股票" 对齐
-        raw_data_field = data.get("data", [])
         if isinstance(raw_data_field, dict):
             stock_count = len(raw_data_field)
             record_count = sum(len(v) for v in raw_data_field.values())
@@ -708,13 +721,22 @@ def main(logger_arg: logging.Logger | None = None) -> int:
                 "checkpoint": True,
             }
             checkpoint_data = {"meta": checkpoint_meta, "data": stock_data}
-            write_gzip_cache(CACHE_FILE, checkpoint_data, ensure_dir=True, logger=_logger)
-            _logger.info(
-                "检查点写入: %s (%d 只股票, %d 条记录)",
-                CACHE_FILE,
-                len(stock_data),
-                checkpoint_meta["record_count"],
-            )
+            # Fix 3 (v1.0q): 检查点写入失败不应终止进程（已拉到的数据可继续累积），
+            # 但必须显式记录 error，避免静默丢失中间状态
+            try:
+                write_gzip_cache(CACHE_FILE, checkpoint_data, ensure_dir=True, logger=_logger)
+                _logger.info(
+                    "检查点写入: %s (%d 只股票, %d 条记录)",
+                    CACHE_FILE,
+                    len(stock_data),
+                    checkpoint_meta["record_count"],
+                )
+            except OSError as e:
+                _logger.error(
+                    "检查点写入失败: %s (%s)，本轮中间状态丢失，继续拉取后续股票",
+                    str(e)[:120],
+                    type(e).__name__,
+                )
             new_stock_data.clear()
 
         # 速率控制
@@ -780,13 +802,22 @@ def main(logger_arg: logging.Logger | None = None) -> int:
 
     # Step 7: 写入缓存
     output_data = {"meta": meta, "data": stock_data}
-    write_gzip_cache(CACHE_FILE, output_data, ensure_dir=True, logger=_logger)
-    _logger.info(
-        "缓存写入完成: %s (%d 只股票, %d 条记录)",
-        CACHE_FILE,
-        meta["stock_count"],
-        meta["record_count"],
-    )
+    # Fix 3 (v1.0q): 最终写入失败 = 全部数据丢失，必须 return 1（与退出码契约一致）
+    try:
+        write_gzip_cache(CACHE_FILE, output_data, ensure_dir=True, logger=_logger)
+        _logger.info(
+            "缓存写入完成: %s (%d 只股票, %d 条记录)",
+            CACHE_FILE,
+            meta["stock_count"],
+            meta["record_count"],
+        )
+    except OSError as e:
+        _logger.error(
+            "最终缓存写入失败: %s (%s)，本次拉取数据全部丢失，退出码 1",
+            str(e)[:120],
+            type(e).__name__,
+        )
+        return 1
 
     # 显式释放大对象（遵循 R16）
     del new_stock_data, cache_data, stock_data
