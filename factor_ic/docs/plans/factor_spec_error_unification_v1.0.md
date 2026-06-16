@@ -363,3 +363,66 @@ ruff check $(git diff --name-only <prev> HEAD)  # 本次涉及文件全过
 
 每轮独立 commit + 独立验证保证回滚最小爆炸半径。
 
+---
+
+## §10 R5a 实际扩散闭环（2026-06-16 完成）
+
+### §10.1 R3/R4 与 R5a 范围对照
+
+| 阶段 | 计划范围 | 实际范围 | 偏差说明 |
+|---|---|---|---|
+| R3 | momentum_5d 单文件 issue 1-7 | 已落地 | 业务异常 4 路用 logger.exception，**违反 MODULE.md M22**（M22 后于 R3 在 §3.5 之外被发现） |
+| R4 | 16 文件 issue 1 扩散 | 仅 2 文件（earnings_growth + turnover_trend） | 扫描发现其余 14 文件无模块顶层 try/except register_factor，importlib 自然抛 |
+| R5a | 31 其他文件 issue 7 扩散（H12 R18/R19 退出码差异化） | 31 文件全覆盖 + R3 momentum_5d 回滚 + 3 special 文件违 M22/H11 修齐 + 1 P2 文件 R20 迁移 | 实测发现需扩展范围 |
+
+### §10.2 R5a 子轮节奏（甲-C 方案）
+
+| 子轮 | commit | 范围 | 文件数 |
+|---|---|---|---|
+| R5a.0 | 2b7cfba | momentum_5d 4 路 logger.exception → logger.error（M22 回滚） | 1 |
+| R5a.1 | 4defb6f | 字母前段 8 文件（7 P1 standard + 1 P3 + _logger 变体） | 8 |
+| R5a.2 | 4f876a9 | 字母中段 7 P1 文件 | 7 |
+| R5a.3 | 0edd64b | 字母后段前 6 P1 文件 | 6 |
+| R5a.4 | 0e6de52 | 字母后段后 6 P1 文件 | 6 |
+| R5a.5 | 24a2c08 | 3 special 文件 M22/H11 修齐 + R18/R19 升档 | 3 |
+| R5a.6 | 794fddf | P2 ic_capital_flow_intensity_1d.py R20 迁移 + R18/R19 升档 + check_exit_codes 白名单 | 2 |
+
+累计：32 文件改动（31 ic_*.py + scripts/check_exit_codes.py），约 320 行代码改动。
+
+### §10.3 改写器设计（/tmp/r5a_rewriter.py）
+
+P1（无 DataSchemaError handler）+ P3（已有）双路径支持，logger 命名变体（logger / _logger）通过 `detect_logger_name(src)` 探测后注入正则。正则用 `(.*?)\)\s*\n` + `re.DOTALL` 兼容 logger.error 字符串内 ASCII 括号干扰。
+
+不支持的形态由人工修复（R5a.5 special 3 文件 + R5a.6 P2 1 文件）。
+
+### §10.4 实测验证（每子轮独立验证 + R5a.7 总体抽样）
+
+每子轮：`ruff check + format` → `pytest factor_ic/test_cases/`（270 passed / 66 skipped 基线一致）→ `python scripts/check_exit_codes.py all`（34 文件全过）→ commit。
+
+R5a.7 抽样实测（/tmp/r5a7_smoke.py，9 文件覆盖每子轮 + P2 + P3 + special + _logger 变体）：
+- 9 文件 importlib smoke 全 ✓（SPEC.factor_name 正确加载）
+- 9 文件 __main__ 块 AST 解析 exit codes：常规 = {1,4,5}，P2 = {1,3,4,5}
+- 全 34 文件 check_exit_codes 全过
+
+### §10.5 §6.2 骨架与 R5a.0 后实际形态的差异
+
+§6.2 骨架（R3 期）业务异常 3 路用 `logger.exception`，R5a.0 已回滚为 M22 合规版：
+```python
+except DataSchemaError as e:
+    logger.error("...: %s", e)  # 不打堆栈
+    sys.exit(4)
+except FactorCalcError as e:
+    logger.error("...: %s", e)
+    sys.exit(5)
+except SummaryLogError as e:
+    logger.error("...: %s", e)
+    sys.exit(3)
+except Exception:
+    logger.exception("未预期的错误")  # M22 唯一允许打堆栈的分支
+    sys.exit(1)
+```
+
+§6.2 文档保留为历史记录（不再作为目标骨架），实际目标见 R5a.0 commit 2b7cfba 的 momentum_5d。
+
+---
+
