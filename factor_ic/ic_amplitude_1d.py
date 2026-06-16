@@ -54,7 +54,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # 从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
 from data_fetchers.factor_calculator import calculate_amplitude
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
-from factor_ic.common.data_columns import JOIN_KEYS, OHLC
 from factor_ic.common.exceptions import FactorCalcError
 from factor_ic.common.factor_ic_runner import run_factor_ic
 from factor_ic.common.factor_spec import FactorSpec, register_factor
@@ -71,7 +70,6 @@ SPEC = register_factor(
     FactorSpec(
         factor_name="amplitude",
         factor_col="amplitude",
-        required_columns=JOIN_KEYS + OHLC + ("amplitude",),
         calculation=calculate_amplitude,
     )
 )

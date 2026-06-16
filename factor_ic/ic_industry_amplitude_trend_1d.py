@@ -30,7 +30,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
 
 from data_fetchers.factor_calculator import calculate_industry_amplitude_trend  # noqa: E402
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS  # noqa: E402
-from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
 from factor_ic.common.factor_ic_runner import run_factor_ic  # noqa: E402
 from factor_ic.common.factor_spec import FactorSpec, register_factor  # noqa: E402
@@ -50,7 +49,6 @@ SPEC = register_factor(
         factor_col="industry_amplitude_trend",
         # required_columns 仅声明输入依赖列；industry_amplitude_trend 是 calculation 的产出，
         # 不属于输入依赖（遵循 factor_spec.py L98-102: 复杂因子有 calculation 时 factor_col 是计算产出，非输入依赖）
-        required_columns=JOIN_KEYS + ("amplitude",),
         calculation=calculate_industry_amplitude_trend,
     )
 )

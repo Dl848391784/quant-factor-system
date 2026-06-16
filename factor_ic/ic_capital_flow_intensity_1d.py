@@ -35,7 +35,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
 
 from data_fetchers.factor_calculator import calculate_capital_flow_intensity  # noqa: E402
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS  # noqa: E402
-from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.factor_ic_runner import run_factor_ic  # noqa: E402
 from factor_ic.common.factor_spec import FactorSpec, register_factor  # noqa: E402
 from factor_ic.common.factor_summary_logger import log_factor_summary  # noqa: E402
@@ -52,7 +51,6 @@ SPEC = register_factor(
     FactorSpec(
         factor_name="capital_flow_intensity",
         factor_col="capital_flow_intensity",
-        required_columns=JOIN_KEYS + ("capital_flow_intensity",),
         calculation=calculate_capital_flow_intensity,
     )
 )

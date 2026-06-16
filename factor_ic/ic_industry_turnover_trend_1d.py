@@ -30,7 +30,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
 
 from data_fetchers.factor_calculator import calculate_industry_turnover_trend  # noqa: E402
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS  # noqa: E402
-from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
 from factor_ic.common.factor_ic_runner import run_factor_ic  # noqa: E402
 from factor_ic.common.factor_spec import FactorSpec, register_factor  # noqa: E402
@@ -48,7 +47,6 @@ SPEC = register_factor(
     FactorSpec(
         factor_name="industry_turnover_trend",
         factor_col="industry_turnover_trend",
-        required_columns=JOIN_KEYS + ("turnover_rate", "industry_turnover_trend"),
         calculation=calculate_industry_turnover_trend,
     )
 )

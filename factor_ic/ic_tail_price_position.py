@@ -60,7 +60,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
-from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError
 from factor_ic.common.factor_ic_runner import run_factor_ic
 from factor_ic.common.factor_spec import FactorSpec, register_factor
@@ -270,11 +269,13 @@ def calculate_tail_price_position(factor_df: pd.DataFrame) -> pd.DataFrame:
 # FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
 # ============================================================================
 
+# 声明计算所需的输入列（供 FactorSpec 自动派生 required_columns，遵循 factor_spec_required_cols_and_sys_path_design.md §3.1）
+calculate_tail_price_position.required_cols = ["date", "asset"]
+
 SPEC = register_factor(
     FactorSpec(
         factor_name="tail_price_position",
         factor_col="tail_price_position",
-        required_columns=JOIN_KEYS + ("tail_price_position",),
         calculation=calculate_tail_price_position,
     )
 )

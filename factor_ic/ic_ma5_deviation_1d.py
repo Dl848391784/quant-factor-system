@@ -22,7 +22,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
 
 from data_fetchers.factor_calculator import calculate_ma5_deviation  # noqa: E402
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS  # noqa: E402
-from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
 from factor_ic.common.factor_ic_runner import run_factor_ic  # noqa: E402
 from factor_ic.common.factor_spec import FactorSpec, register_factor  # noqa: E402
@@ -39,7 +38,6 @@ SPEC = register_factor(
     FactorSpec(
         factor_name="ma5_deviation",
         factor_col="ma5_deviation",
-        required_columns=JOIN_KEYS + ("close", "ma5_deviation"),
         calculation=calculate_ma5_deviation,
     )
 )

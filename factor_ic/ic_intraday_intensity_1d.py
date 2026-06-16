@@ -42,7 +42,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
-from factor_ic.common.data_columns import JOIN_KEYS, OHLC
 from factor_ic.common.exceptions import FactorCalcError
 from factor_ic.common.factor_ic_runner import run_factor_ic
 from factor_ic.common.factor_spec import FactorSpec, register_factor
@@ -159,7 +158,6 @@ SPEC = register_factor(
     FactorSpec(
         factor_name="intraday_intensity",
         factor_col="intraday_intensity",
-        required_columns=JOIN_KEYS + OHLC + ("intraday_intensity",),
         calculation=calculate_intraday_intensity,
     )
 )

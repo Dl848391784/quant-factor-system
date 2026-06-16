@@ -73,7 +73,6 @@ from factor_ic.common.cli_helpers import (  # noqa: E402
     is_finite_value,
     safe_dict,
 )
-from factor_ic.common.data_columns import JOIN_KEYS  # noqa: E402
 from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
 from factor_ic.common.factor_ic_runner import run_factor_ic  # noqa: E402
 from factor_ic.common.factor_spec import FactorSpec, register_factor  # noqa: E402
@@ -94,7 +93,6 @@ SPEC = register_factor(
     FactorSpec(
         factor_name="capital_flow_ratio_trend",
         factor_col="capital_flow_ratio_trend",
-        required_columns=JOIN_KEYS,
         calculation=calculate_capital_flow_ratio_trend,
         extra_log_params_fn=lambda _a: {"version": __version__},
     )

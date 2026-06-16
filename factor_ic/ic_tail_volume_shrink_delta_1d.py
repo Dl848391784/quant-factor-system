@@ -33,7 +33,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from data_fetchers.factor_calculator import calculate_tail_volume_shrink_delta  # noqa: E402
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS  # noqa: E402
-from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
 from factor_ic.common.factor_ic_runner import run_factor_ic  # noqa: E402
 from factor_ic.common.factor_spec import FactorSpec, register_factor  # noqa: E402
@@ -51,7 +50,6 @@ SPEC = register_factor(
     FactorSpec(
         factor_name="tail_volume_shrink_delta",
         factor_col="tail_volume_shrink_delta",
-        required_columns=JOIN_KEYS + ("tail_volume_shrink", "tail_volume_shrink_delta"),
         calculation=calculate_tail_volume_shrink_delta,
     )
 )

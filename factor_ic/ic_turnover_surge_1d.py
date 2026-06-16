@@ -44,7 +44,6 @@ from data_fetchers.factor_calculator import (
     calculate_turnover_surge,
 )
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
-from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError
 from factor_ic.common.factor_ic_runner import run_factor_ic
 from factor_ic.common.factor_spec import FactorSpec, register_factor
@@ -62,7 +61,6 @@ SPEC = register_factor(
     FactorSpec(
         factor_name="turnover_surge",
         factor_col="turnover_surge",
-        required_columns=JOIN_KEYS + ("close", "turnover_rate", "turnover_surge"),
         calculation=calculate_turnover_surge,
         calc_params_fn=lambda a: {"surge_window": a.surge_window},
         extra_log_params_fn=lambda a: {"surge_window": a.surge_window},

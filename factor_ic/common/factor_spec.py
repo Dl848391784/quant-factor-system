@@ -16,16 +16,25 @@ extra_log_params 的分散字面量，统一为 frozen dataclass 声明。
 - _fn 后缀的 Callable 字段用于从 CLI args 提取参数，避免 dataclass 内含 args 引用
 - FACTOR_REGISTRY 注册表提供全局查询能力
 
+required_columns 自动派生（v1.1, 遵循 factor_spec_required_cols_and_sys_path_design.md §3.1 方案 3-A）：
+- required_columns 为 None 且 calculation 拥有 .required_cols 属性 → 自动派生
+- 派生公式：JOIN_KEYS + tuple(c for c in calculation.required_cols if c not in JOIN_KEYS)
+- 双声明一致性校验：若 required_columns 与 calculation.required_cols 都提供，
+  派生结果必须与显式声明一致（防漂移）
+
 作者: 云瑶
 创建日期: 2026-06-15
 版本历史:
   v1.0 (2026-06-15): 落地 FactorSpec + register_factor + FACTOR_REGISTRY
+  v1.1 (2026-06-16): required_columns 改为可选 + __post_init__ 自动派生 + 双声明一致性校验
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+
+from factor_ic.common.data_columns import JOIN_KEYS
 
 
 # ============================================================================
@@ -41,6 +50,9 @@ class FactorSpec:
         factor_name: 因子名称(如 "amplitude_delta")
         factor_col: 因子列名(如 "amplitude_delta", 即 DataFrame 中的列名)
         required_columns: 需加载的原始因子列(含索引列 date/asset, 替代旧 factor_cols 参数)
+            - 简单因子(calculation=None): 必须显式声明
+            - 复杂因子(calculation 有 .required_cols 属性): 可省略, 自动派生
+            - 复杂因子若同时显式声明: 校验与 calculation.required_cols 推导结果一致
         calculation: 因子计算函数(None = 简单因子, 直接从缓存读取)
         calc_params_fn: 从 CLI args 提取计算参数的函数 → dict
         extra_log_params_fn: 从 CLI args 提取启动横幅扩展参数的函数 → dict
@@ -48,10 +60,42 @@ class FactorSpec:
 
     factor_name: str
     factor_col: str
-    required_columns: tuple[str, ...]
+    required_columns: tuple[str, ...] | None = None
     calculation: Callable | None = None
     calc_params_fn: Callable | None = None
     extra_log_params_fn: Callable | None = None
+
+    def __post_init__(self) -> None:
+        """L1.5 实例化期：required_columns 自动派生（方案 3-A）。
+
+        派生策略：
+        - required_columns is None 且 calculation 有 .required_cols → 自动派生
+        - required_columns is None 且 calculation 无 .required_cols → ValueError
+        - required_columns 显式声明 + calculation 有 .required_cols → 一致性校验
+        - required_columns 显式声明 + calculation 无 .required_cols → 不变
+        """
+        calc_cols = getattr(self.calculation, "required_cols", None) if self.calculation else None
+
+        if self.required_columns is None:
+            # 必须能自动派生
+            if calc_cols is None:
+                raise ValueError(
+                    f"FactorSpec({self.factor_name}) required_columns 未提供，"
+                    f"且 calculation={self.calculation!r} 未声明 .required_cols 属性，无法自动派生"
+                )
+            derived = JOIN_KEYS + tuple(c for c in calc_cols if c not in JOIN_KEYS)
+            # frozen dataclass 通过 object.__setattr__ 绕过冻结
+            object.__setattr__(self, "required_columns", derived)
+        elif calc_cols is not None:
+            # 双声明 → 校验一致性
+            expected = JOIN_KEYS + tuple(c for c in calc_cols if c not in JOIN_KEYS)
+            if tuple(self.required_columns) != expected:
+                raise ValueError(
+                    f"FactorSpec({self.factor_name}) required_columns 与 calculation.required_cols 不一致：\n"
+                    f"  显式声明: {tuple(self.required_columns)}\n"
+                    f"  从 calculation 派生: {expected}\n"
+                    f"  请删除 required_columns 参数（自动派生）或同步两侧声明"
+                )
 
 
 # ============================================================================
@@ -80,7 +124,7 @@ def register_factor(spec: FactorSpec) -> FactorSpec:
 
 def _validate_spec(spec: FactorSpec) -> None:
     """L2 注册期校验：格式 + 语义规则。"""
-    # 1. required_columns 非空
+    # 1. required_columns 非空（__post_init__ 后必非 None）
     if not spec.required_columns:
         raise ValueError(f"FactorSpec({spec.factor_name}) required_columns 不能为空")
 

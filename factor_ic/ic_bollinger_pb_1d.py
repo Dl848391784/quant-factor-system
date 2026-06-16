@@ -50,7 +50,6 @@ from data_fetchers.factor_calculator import (  # isort: skip
     calculate_bollinger_pb,
 )
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
-from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError
 from factor_ic.common.factor_ic_runner import run_factor_ic
 from factor_ic.common.factor_spec import FactorSpec, register_factor
@@ -74,7 +73,6 @@ SPEC = register_factor(
     FactorSpec(
         factor_name="bollinger_pb",
         factor_col="bollinger_pb",
-        required_columns=JOIN_KEYS + ("close",),
         calculation=calculate_bollinger_pb,
         calc_params_fn=_params_fn,
         extra_log_params_fn=_params_fn,

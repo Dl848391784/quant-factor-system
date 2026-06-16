@@ -41,7 +41,6 @@ except ImportError as _path_err:
 # 从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
 from data_fetchers.factor_calculator import calculate_amplitude_delta  # noqa: E402
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS  # noqa: E402
-from factor_ic.common.data_columns import JOIN_KEYS  # noqa: E402
 from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
 from factor_ic.common.factor_ic_runner import run_factor_ic  # noqa: E402
 from factor_ic.common.factor_spec import FactorSpec, register_factor  # noqa: E402
@@ -60,7 +59,6 @@ SPEC = register_factor(
     FactorSpec(
         factor_name="amplitude_delta",
         factor_col="amplitude_delta",
-        required_columns=JOIN_KEYS + ("amplitude",),
         calculation=calculate_amplitude_delta,
     )
 )

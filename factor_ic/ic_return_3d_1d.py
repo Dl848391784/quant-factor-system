@@ -48,7 +48,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # 从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
 from data_fetchers.factor_calculator import calculate_return_3d
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
-from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.exceptions import FactorCalcError
 from factor_ic.common.factor_ic_runner import run_factor_ic
 from factor_ic.common.factor_spec import FactorSpec, register_factor
@@ -65,7 +64,6 @@ SPEC = register_factor(
     FactorSpec(
         factor_name="return_3d",
         factor_col="return_3d",
-        required_columns=JOIN_KEYS + ("close", "return_3d"),
         calculation=calculate_return_3d,
     )
 )

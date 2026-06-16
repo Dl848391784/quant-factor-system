@@ -72,7 +72,6 @@ from data_fetchers.factor_calculator import (
     calculate_kdj_j,
 )
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
-from factor_ic.common.data_columns import JOIN_KEYS, OHLC
 from factor_ic.common.exceptions import FactorCalcError
 from factor_ic.common.factor_ic_runner import run_factor_ic
 from factor_ic.common.factor_spec import FactorSpec, register_factor
@@ -90,7 +89,6 @@ SPEC = register_factor(
     FactorSpec(
         factor_name="kdj_j",
         factor_col="kdj_j",
-        required_columns=JOIN_KEYS + OHLC + ("kdj_j",),
         calculation=calculate_kdj_j,
         calc_params_fn=lambda a: {"n": a.n, "m1": a.m1, "m2": a.m2},
         extra_log_params_fn=lambda a: {"n": a.n, "m1": a.m1, "m2": a.m2},
