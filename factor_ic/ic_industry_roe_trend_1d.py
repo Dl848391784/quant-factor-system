@@ -16,7 +16,7 @@
   1 = 未预期错误（程序 bug；R20 main() 体内禁 sys.exit）
   3 = 辅助层失败（计算成功，但日志摘要/监控输出失败；R17）
   4 = DataSchemaError（数据 schema 不匹配，需检查上游列契约；R18）
-  5 = FactorCalcError（因子计算内部失败，需检查计算代码；R19）
+  5 = FactorCalcError（因子计算失败或数据加载失败，需检查计算代码或上游数据；R19）
 
 边界处理：
 - industry 未知 → 赋 '其他' 行业
@@ -31,6 +31,8 @@
                      SpecRegistrationError兜底/启动日志/完成日志补统计量
   v1.2 (2026-06-16): 6项修复——None→FactorCalcError/args=None用默认Namespace/
                      or{}单行/去重复warning日志/__cause__or e兜底/去_cli别名变量
+  v1.3 (2026-06-16): 4项修复——__main__接收result/FactorCalcError消息区分数据加载/
+                     异常继承关系注释/截断常量提取
 """
 
 import argparse
@@ -46,6 +48,9 @@ from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)
+
+# 模块级常量：异常消息截断上限（str(e)[:_MAX_ERR_LEN] 与日志模板需同步）
+_MAX_ERR_LEN = 200
 
 # ============================================================================
 # FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
@@ -72,9 +77,10 @@ except SpecRegistrationError as e:
     #   * CLI 场景 → Python 解释器打印 traceback 后默认 exit 1（trade-off：放弃
     #     import-time/runtime 退出码区分 换取 测试可隔离性）。
     logger.critical(
-        "FactorSpec 注册失败 (factor=industry_roe_trend): %s (%s) (truncated to <=200 chars)",
-        str(e)[:200],
+        "FactorSpec 注册失败 (factor=industry_roe_trend): %s (%s) (truncated to <=%d chars)",
+        str(e)[:_MAX_ERR_LEN],
         type(e).__name__,
+        _MAX_ERR_LEN,
     )
     raise
 
@@ -112,8 +118,9 @@ def main(args=None):
     Raises
     ------
     FactorCalcError
-        run_factor_ic 返回 None（数据加载或计算失败），由 __main__ 块
-        映射为 exit 5（R19）。
+        run_factor_ic 返回 None（数据加载失败，区别于因子计算内部异常），
+        由 __main__ 块映射为 exit 5（R19）。消息前缀 [数据加载] 便于运维
+        区分故障层。
     SummaryLogError
         log_factor_summary 摘要输出阶段失败（因子计算 result 可能已成功生成）。
         由 __main__ 块捕获并映射为 exit 3（R17 辅助层失败）。
@@ -142,10 +149,11 @@ def main(args=None):
     )
 
     # None → FactorCalcError：统一走异常处理链（而非裸 sys.exit），
-    # 确保退出码语义一致（数据加载失败 = 因子计算内部失败 → exit 5）
+    # 消息前缀 [数据加载] 明确标注故障层，便于运维区分"数据层问题"与
+    # "因子计算代码问题"（两者均走 exit 5，但日志消息可区分）
     if result is None:
         raise FactorCalcError(
-            f"run_factor_ic 返回 None（factor={SPEC.factor_name}, "
+            f"[数据加载] run_factor_ic 返回 None（factor={SPEC.factor_name}, "
             f"min_stocks={args.min_stocks}, force_full={args.force_full}），"
             "数据加载或计算可能失败"
         )
@@ -188,8 +196,15 @@ if __name__ == "__main__":
     # 共享 _build_parser()，sys.argv 只解析一次，结果传入 main()
     _cli_args = _build_parser().parse_args()
 
+    # 异常分支顺序依据（exceptions.py L27/L46/L79 已确认）：
+    # - DataSchemaError / FactorCalcError / SummaryLogError 均直接继承 Exception，
+    #   三者是【平级关系，无父子继承】。当前捕获顺序（DataSchema → SummaryLog →
+    #   FactorCalc → Exception）不会因继承关系导致某个分支被提前截获。
+    # - 若未来重构使 SummaryLogError 继承 FactorCalcError，则 except FactorCalcError
+    #   会截获 SummaryLogError，导致 exit 3 路径丢失。此处注释作为守卫：
+    #   修改异常继承关系时必须同步审查此处的 except 顺序。
     try:
-        main(args=_cli_args)
+        result = main(args=_cli_args)
     except DataSchemaError as e:
         # 数据 Schema 校验失败（公共模块 validate_required_columns 抛出）：
         # H12 R18 → exit 4 与因子计算失败（exit 5）严格区分。
