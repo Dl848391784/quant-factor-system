@@ -164,3 +164,64 @@ python -c "import factor_ic.ic_industry_earnings_growth_1d; print('OK')"
   本次也**不新建**（避免与用户原始 5 项要求脱节）。如用户要求补流程文档，单独一轮处理。
 - 版本历史 docstring 不升版本号：本次属于职责边界清理，不涉及计算逻辑变化；
   若用户要求升版本，按 v1.0 → v1.1 + 追加版本块处理。
+
+---
+
+## 9. 方案 A → 方案 B 切换（追加于 R4-R8）
+
+### 9.1 决策背景
+
+R1-R3 已落地方案 A（保留 `if result is None` 死分支作为防御性守卫，注释说明
+"上游契约破坏 → error 级别便于排查"）。**但用户在 R3 收口后明确表态**：
+> "AGENTS.md需要更新规则，应该彻底删除死代码"
+
+因此放弃方案 A，改方案 B（彻底删除 `if result is None` 死代码块），并将
+"退出码 0/1/2" 与"删除死代码"上升为项目级硬规则。
+
+### 9.2 方案 B 标准模板
+
+以 `factor_ic/ic_industry_amplitude_trend_1d.py` v1.0o 为基准（已实测、ruff/pytest 通过）：
+
+| 位置 | 改动 |
+|---|---|
+| import 区 | **新增** `DataSchemaError`（与 `FactorCalcError` 一起 from `factor_ic.common.exceptions`） |
+| `main()` 内 `if result is None` 块 | **整块删除**（含 logger.error + sys.exit(1)） |
+| `log_factor_summary` 调用前注释 | 改为透明性审阅说明：`run_factor_ic` 失败走 build_error_result 或抛 DataSchemaError，永不返回 None；冗余守卫掩盖真实错误来源；log_factor_summary 自身契约不抛异常 / 不 sys.exit |
+| `__main__` 块 | 保留 `except FactorCalcError`，**新增** `except DataSchemaError as e`（在 FactorCalcError 之前），保留 `except Exception` 兜底；总计 3 段 except，附 5-7 行注释说明分支顺序依据（exceptions.py L27/46/60 平级关系） |
+
+### 9.3 关键纠偏（重要）
+
+❌ 错误理解：方案 B = 删除 `from factor_ic.common.exceptions import FactorCalcError` import + 删 `except FactorCalcError`
+✅ 正确理解：方案 B = 删 `if result is None` 死分支 + 新增 DataSchemaError 显式 except；FactorCalcError 仍保留
+
+依据：amplitude_trend v1.0o 实测保留 FactorCalcError import 和 except 分支（factor_ic/ic_industry_amplitude_trend_1d.py L30, L146-148）。
+
+### 9.4 拆轮次（R4-R8）
+
+| 轮次 | 范围 | 文件 | 预计行数 |
+|---|---|---|---|
+| R4 | earnings_growth 切方案 B | `factor_ic/ic_industry_earnings_growth_1d.py` | ~30 行变更 |
+| R5 | momentum_5d 切方案 B | `factor_ic/ic_industry_momentum_5d_1d.py` | ~30 行变更 |
+| R6 | turnover_trend 切方案 B | `factor_ic/ic_industry_turnover_trend_1d.py` | ~30 行变更 |
+| R7 | 规范升级 | `PROJECT.md`（S1→H12）+ `AGENTS.md` 规则 #6 | ~15 行变更 |
+| R8 | design.md 状态闭环 | 本文档（标记方案 B 完成 + 追加结果） | ~10 行变更 |
+
+每轮独立 commit，每轮显式路径，每轮 ruff + pytest。
+
+### 9.5 R7 规范升级方案
+
+**PROJECT.md**：S1（L262）从软约束升级为 H12 硬规则，插入到 L162（H11 之后）。
+- 新 H12：`退出码语义：0=成功 / 1=运行时错误 / 2=import-time 配置或注册失败`
+- 删除 L262 旧 S1 行
+- 自动化检查：`scripts/check_exit_codes.py` 待交付（标 [待实施]）
+
+**AGENTS.md** 规则 #6：从 `0/1` 扩展为 `0/1/2`（同步定义）。
+
+### 9.6 退出码 2 的语义边界（明确约定）
+
+- exit 0 = 成功完成
+- exit 1 = `main()` 运行时错误（DataSchemaError / FactorCalcError / 未预期 Exception / `assert` 失败 / 数据缺失）
+- exit 2 = 模块 import-time 配置或注册失败（`register_factor` 重复、required_columns 非法、配置文件缺失等）
+
+**为什么需要区分 1 与 2**：CI / pipeline 脚本可据此判断是"代码本身有 bug 不能加载"（exit 2，立即告警停止流水线）还是"数据/逻辑层面执行失败"（exit 1，可重试 / 排查数据）。
+
