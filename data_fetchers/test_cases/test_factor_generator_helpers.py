@@ -828,6 +828,45 @@ class TestAllColsCountsConsistency:
         )
 
 
+class TestPipelineStepsAndColsConsistency:
+    """_FACTOR_PIPELINE_STEPS 表注释中 step 数与列数一致（bug 3 回归）"""
+
+    def test_pipeline_step_count_matches_table_length(self) -> None:
+        """注释中的 step 数必须等于 _FACTOR_PIPELINE_STEPS 实际长度。"""
+        from data_fetchers.factor_generator import _FACTOR_PIPELINE_STEPS
+
+        assert len(_FACTOR_PIPELINE_STEPS) == 27, "_FACTOR_PIPELINE_STEPS 当前为 27 个 step"
+
+    def test_pipeline_output_cols_count_matches_extended_factor_cols(self) -> None:
+        """所有 step 的 output_cols 总数必须等于 _EXTENDED_FACTOR_COLS 长度。"""
+        from data_fetchers.factor_generator import _EXTENDED_FACTOR_COLS, _FACTOR_PIPELINE_STEPS
+
+        total_output_cols = sum(len(step["output_cols"]) for step in _FACTOR_PIPELINE_STEPS)
+        assert total_output_cols == len(_EXTENDED_FACTOR_COLS), (
+            f"pipeline 输出列总数 {total_output_cols} 应等于 _EXTENDED_FACTOR_COLS 长度 {len(_EXTENDED_FACTOR_COLS)}"
+        )
+
+    def test_pipeline_comment_distinguishes_step_and_col_counts(self) -> None:
+        """generate_all_factors 中 Step 3.5~11.9 段注释必须明确区分 step 数与列数。
+
+        反例：曾经写 \"_FACTOR_PIPELINE_STEPS 表（27 项）\"，
+        \"项\" 既可指 step 也可指 col 造成歧义。
+        """
+        from pathlib import Path
+
+        from data_fetchers import factor_generator as fg
+
+        source = Path(fg.__file__).read_text(encoding="utf-8")
+        # 反例：禁止仅写 "（N 项）" 的模糊计数
+        assert "_FACTOR_PIPELINE_STEPS 表（27 项）" not in source, (
+            '_FACTOR_PIPELINE_STEPS 表注释禁用模糊 "项" 字，必须区分 step 数与列数'
+        )
+        # 正例：必须明确包含 \"step\" 与 \"输出列\" 字段
+        assert "_FACTOR_PIPELINE_STEPS 表（27 个 step，31 个输出列）" in source, (
+            '_FACTOR_PIPELINE_STEPS 表注释必须形如 "（27 个 step，31 个输出列）"'
+        )
+
+
 if __name__ == "__main__":
     import sys
 

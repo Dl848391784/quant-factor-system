@@ -999,7 +999,8 @@ def generate_all_factors(
     logger.info("  合并收益后记录数: %d", len(factor_df))
 
     # ========== Step 3.5 ~ 11.9: 计算所有因子（D 步表驱动重构）==========
-    # 详情见 _FACTOR_PIPELINE_STEPS 表（27 项）+ _run_pipeline_step helper。
+    # 详情见 _FACTOR_PIPELINE_STEPS 表（27 个 step，31 个输出列）+ _run_pipeline_step helper。
+    # step 数 ≠ 输出列数：tail 因子单 step 输出 5 列，其它 step 单 step 输出 1 列。
     # 日志格式与 D 步重构前字符级一致：
     #   - step_label 非空时打印 "Step xx.x: ..."
     #   - emit_valid_log=True 时逐列打印 "  有效 xxx: N (P%)"
