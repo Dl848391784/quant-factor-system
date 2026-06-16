@@ -166,6 +166,74 @@ class TestNanToNull:
             {"date": "2026-01-03", "asset": "000003", "factor": 0.5},
         ]
 
+    # ------------------------------------------------------------------ #
+    # R3 兜底：np.integer / np.bool_ / tuple 转换（json.dump TypeError 防御）
+    # ------------------------------------------------------------------ #
+
+    def test_numpy_int64_to_python_int(self) -> None:
+        """np.int64 → Python int（json.dump 不支持 np.int64）"""
+        result = _nan_to_null(np.int64(42))
+        assert result == 42
+        assert type(result) is int  # 必须是原生 int 而非 np.int64
+
+    def test_numpy_int32_to_python_int(self) -> None:
+        """np.int32 同样降级为 Python int"""
+        result = _nan_to_null(np.int32(7))
+        assert result == 7
+        assert type(result) is int
+
+    def test_numpy_uint8_to_python_int(self) -> None:
+        """np.uint8（无符号）也走 np.integer 分支降级"""
+        result = _nan_to_null(np.uint8(255))
+        assert result == 255
+        assert type(result) is int
+
+    def test_numpy_bool_true_to_python_bool(self) -> None:
+        """np.bool_(True) → Python True，必须保留布尔语义而非 1"""
+        result = _nan_to_null(np.bool_(True))
+        assert result is True
+        assert type(result) is bool  # 不是 int(1)
+
+    def test_numpy_bool_false_to_python_bool(self) -> None:
+        """np.bool_(False) → Python False，必须保留布尔语义而非 0"""
+        result = _nan_to_null(np.bool_(False))
+        assert result is False
+        assert type(result) is bool
+
+    def test_tuple_recursive_returns_list(self) -> None:
+        """tuple 容器递归并返回 list（JSON 没有 tuple 类型）"""
+        result = _nan_to_null((1.0, float("nan"), np.int64(3)))
+        assert result == [1.0, None, 3]
+        assert type(result) is list
+
+    def test_mixed_numpy_scalars_in_records(self) -> None:
+        """复合场景：records 含 NaN + np.int64 + np.bool_，确保 json.dump 可序列化"""
+        import json
+
+        records = [
+            {
+                "asset": "000001",
+                "rank": np.int64(1),
+                "selected": np.bool_(True),
+                "factor": np.float64("nan"),
+            },
+            {
+                "asset": "000002",
+                "rank": np.int32(2),
+                "selected": np.bool_(False),
+                "factor": 0.5,
+            },
+        ]
+        result = _nan_to_null(records)
+        # json.dump 必须不抛 TypeError
+        serialized = json.dumps(result, allow_nan=False)
+        assert "NaN" not in serialized  # 严格 JSON：不允许 NaN 字面量
+        # 反序列化后字段值与类型语义正确
+        deserialized = json.loads(serialized)
+        assert deserialized[0]["rank"] == 1 and deserialized[0]["selected"] is True
+        assert deserialized[0]["factor"] is None
+        assert deserialized[1]["rank"] == 2 and deserialized[1]["selected"] is False
+
 
 # ============================================================================
 # _write_factor_json_gz: 原子写入 + 异常清理

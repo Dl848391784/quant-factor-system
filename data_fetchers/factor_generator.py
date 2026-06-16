@@ -590,19 +590,41 @@ def _load_json_gz_data(
 
 
 def _nan_to_null(obj: Any) -> Any:
-    """递归将 float NaN/inf/-inf 转 None，确保 JSON 严格合规。
+    """递归将 float NaN/inf/-inf 转 None，并把 numpy 标量降级为 Python 原生类型。
 
     json.dump 默认把 float NaN 输出为 "NaN"（非法 JSON）；
     pandas to_dict('records') 把 NaN 输出为 float('nan') 而非 None。
     唯一可靠方案：遍历每条记录，NaN/inf → None → JSON 输出 null。
 
-    类型兼容：numpy.float32/float16 不是 float 子类，需 np.floating 兜底。
+    类型兼容（按检查顺序）：
+      1. float / np.floating：NaN/inf → None；非 NaN/inf 的 np.floating 仍按
+         JSON-encodable 透传给 json.dump（Py3.9+ 原生 json 已支持）。
+      2. np.bool_：必须先于 np.integer 检查（np.bool_ 是 np.integer 子类，
+         走 int(obj) 会得到 0/1 而丢失布尔语义）。降级为 Python bool。
+      3. np.integer：np.int8/16/32/64/uint*，json 不支持，降级为 Python int。
+      4. dict/list/tuple：递归。tuple 容器同样需要逐元素转换；为保持 JSON 数组
+         与 list 输入一致，统一返回 list（JSON 没有 tuple 类型）。
+      5. 其他对象（str/bool/int/None 及未知类型）原样返回。
+
+    历史背景：原实现仅处理 float NaN/dict/list，调用方在 Step 13 之前对 DataFrame
+    用 to_dict('records') 时若有 numpy 标量泄漏（pandas dtype=object 列、bool 列），
+    json.dump 会抛 TypeError: Object of type int64/bool_ is not JSON serializable。
+    本函数作为 records → json.dump 的最后一道净化，必须自己处理这些类型。
     """
+    # 浮点 NaN/inf 优先：np.floating 是 NaN 主要来源
     if isinstance(obj, (float, np.floating)) and (math.isnan(obj) or math.isinf(obj)):
         return None
+    # np.bool_ 必须先于 np.integer：np.bool_ 是 np.generic 子类，且与 np.integer 共享
+    # bool/integer 类型层级，先匹配可避免 True/False 被降级为 1/0 而丢失 JSON 布尔语义
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    # 容器递归：dict / list / tuple 都可能装载 numpy 标量
     if isinstance(obj, dict):
         return {k: _nan_to_null(v) for k, v in obj.items()}
-    if isinstance(obj, list):
+    if isinstance(obj, (list, tuple)):
+        # JSON 没有 tuple 类型，统一输出为 list（与 list 输入返回值类型保持一致）
         return [_nan_to_null(item) for item in obj]
     return obj
 
