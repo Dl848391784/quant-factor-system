@@ -64,7 +64,12 @@ def main():
     )
 
     if result is None:
-        raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
+        # 错误路径职责分离：直接 logger.error + sys.exit(1)，不借道异常。
+        # 注：run_factor_ic 当前实现契约为永不返回 None（失败走 build_error_result
+        # 返回 dict 或抛 DataSchemaError），此分支属于防御性守卫，触发即上游契约破坏，
+        # error 级别记录便于排查（参考 dead-code skill Pitfall 1 v1.0o 守卫策略）。
+        logger.error("run_factor_ic 返回 None，数据加载或计算可能失败 (factor=industry_turnover_trend)")
+        sys.exit(1)
 
     # 输出 IC 摘要（公共模块,M3.1）
     # 职责约定：None 检查由 main() 调用方提前退出（见上方 result is None 分支），
