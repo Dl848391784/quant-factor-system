@@ -91,6 +91,13 @@
   - Fix 5: _parse_numeric_with_unit 不再静默 strip 百分号，遇到 % 返回 None + warning（防止 "4.21%亿" 误解析为 4.21e8）
   - Fix 6: all_codes 用 dict.fromkeys 保序去重（消除重复 code 在 successfully_fetched_codes / 检查点重复请求的潜在风险）
   - Fix 8: 删除从未引用的 _NOW 模块级常量（meta 时间戳已全部改用 dt_cls.now()）
+- v1.0o (2026-06-16): 6 项缺陷修复（一致性 + 可观测性收尾）
+  - Fix 1: _parse_numeric_with_unit 合并 int/float 分支（与 _parse_percentage 风格一致，消除冗余）
+  - Fix 2: _parse_numeric_with_unit 增加可选 logger_arg 参数，调用方传入 _logger（避免 warning 绕过调用链路由）
+  - Fix 3: _parse_report_date 兜底分支补充注释（明确预期覆盖 numpy.datetime64 等非 datetime.date 子类）
+  - Fix 4: df 守卫触发时增加 _logger.error，避免与 fetch 失败 / 空数据静默混淆
+  - Fix 5: 主循环 enumerate 改为直接迭代（循环变量 i 从未使用）
+  - Fix 6: load_cache 旧格式日志文案 "旧格式 list" → "待迁移旧格式"（准确反映此处仅加载未迁移）
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -130,7 +137,7 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0n"
+_OUTPUT_VERSION = "1.0o"
 
 logger = logging.getLogger(__name__)
 
@@ -210,11 +217,13 @@ def _parse_percentage(val: Any) -> float | None:
     return None
 
 
-def _parse_numeric_with_unit(val: Any) -> float | None:
+def _parse_numeric_with_unit(val: Any, logger_arg: logging.Logger | None = None) -> float | None:
     """解析带单位的数值（如 '426.33亿' → 426330000000.0, '2.0700' → 2.07）
 
     Args:
         val: 原始值（可能是带亿/万单位的字符串、float、或 NaN/None）
+        logger_arg: 可选 logger，若提供则 warning 通过该 logger 输出（与调用链路由一致）；
+                    否则使用模块级 logger 作为兜底。
 
     Returns:
         解析后的浮点数（亿→×1e8, 万→×1e4, 无单位→原值），无法解析返回 None
@@ -223,6 +232,7 @@ def _parse_numeric_with_unit(val: Any) -> float | None:
         NA 值统一通过 pd.isna 前置检查处理，兼容 Python float / numpy.float64 / pd.NaT，
         不依赖 isinstance(val, float) 对 numpy 标量的隐式继承关系。
     """
+    _logger = logger_arg or logger
     if val is None:
         return None
     # 拦截 bool 子类（含 numpy.bool_）：bool 是 int 子类，会被 isinstance(val, int) 命中
@@ -234,10 +244,10 @@ def _parse_numeric_with_unit(val: Any) -> float | None:
             return None
     except (ValueError, TypeError):
         pass
-    if isinstance(val, (int,)):
+    # int 与 float 同语义（数据源返回的数值已是裸数值），合并分支消除冗余
+    # （与 _parse_percentage 风格保持一致）
+    if isinstance(val, (int, float)):
         return float(val)
-    if isinstance(val, float):
-        return val
     if isinstance(val, str):
         s = val.strip()
         if s in ("", "-", "N/A", "nan", "NaN", "--"):
@@ -246,7 +256,7 @@ def _parse_numeric_with_unit(val: Any) -> float | None:
         # 不应静默 strip。若混入百分号（如脏数据 "4.21%亿" → 误解析为 4.21e8），
         # 直接返回 None 让调用方走 _parse_percentage 或上抛 warning。
         if "%" in s or "％" in s:
-            logger.warning("_parse_numeric_with_unit 收到含百分号的输入: %r，返回 None", s[:40])
+            _logger.warning("_parse_numeric_with_unit 收到含百分号的输入: %r，返回 None", s[:40])
             return None
         # 处理亿/万单位
         multiplier = 1.0
@@ -298,7 +308,12 @@ def _parse_report_date(report_date_raw: Any) -> str | None:
                 return None
             return report_date_raw
         return None
-    # 其他类型：尝试转为字符串后校验
+    # 其他类型兜底：尝试转为字符串后校验。
+    # 预期覆盖的类型（不属于 datetime.date / str 的合法日期对象）：
+    # - numpy.datetime64：str() 输出 "2024-03-31" 或 "2024-03-31T00:00:00"，前者可通过正则
+    # - 自定义日期类（实现 __str__ 返回 ISO 格式）：极少见但允许
+    # 注：pd.NaT 已被前置 pd.isnull 拦截，不会走到这里；pd.Timestamp 已被 datetime.date 分支捕获。
+    # 若 str() 结果不符合 YYYY-MM-DD，统一返回 None（不规范输入应该被拒绝）。
     try:
         fallback_str = str(report_date_raw)
     except Exception:
@@ -394,6 +409,9 @@ def fetch_financial_data_for_stock(
     # 用 if 显式守卫而非 assert，避免 -O 优化跳过守卫 + AssertionError 不友好。
     # 运行期理论上永真，仍保留以兼容未来 except 分支重构（防御性编程）。
     if df is None:
+        # Fix 4 (v1.0o): 守卫被实际触发意味着 except 重构破坏了原契约（所有失败路径都 return None），
+        # 必须 error 级别记录以便排查，禁止与 fetch 失败 / 空数据 (return [] / None) 混淆。
+        _logger.error("df 意外为 None (symbol=%s)，请检查重试逻辑契约是否被破坏", symbol)
         return None
     if df.empty:
         _logger.info("%s 财务数据为空", symbol)
@@ -422,7 +440,7 @@ def fetch_financial_data_for_stock(
             if cn_name in ("净利润同比增长率", "营业总收入同比增长率", "净资产收益率", "净资产收益率-摊薄"):
                 record[en_name] = _parse_percentage(row.get(cn_name, None))
             elif cn_name in ("基本每股收益", "每股净资产"):
-                record[en_name] = _parse_numeric_with_unit(row.get(cn_name, None))
+                record[en_name] = _parse_numeric_with_unit(row.get(cn_name, None), _logger)
 
         # 计算年化 EPS（用于 PE 计算）
         # 遵循 PROJECT.md R15（显式除零保护）：factor 为 None 时置 None 而非静默兜底
@@ -484,7 +502,7 @@ def load_cache(logger_arg: logging.Logger | None = None) -> dict[str, Any]:
             _logger.info("加载财务数据缓存: %d 只股票 / %d 条记录", stock_count, record_count)
         else:
             record_count = len(raw_data_field)
-            _logger.info("加载财务数据缓存（旧格式 list）: %d 条记录", record_count)
+            _logger.info("加载财务数据缓存（待迁移旧格式）: %d 条记录", record_count)
         return data
     except Exception as e:
         _logger.warning("加载缓存失败: %s (%s)，将全新拉取", str(e)[:80], type(e).__name__)
@@ -628,7 +646,7 @@ def main(logger_arg: logging.Logger | None = None) -> int:
     total_new_count = 0  # 本次运行实际新增的股票总数（不受检查点 clear 影响）
     stale_codes: set[str] = set()  # 本次运行 API 失败的股票代码（全量/增量统一记录），最终汇入 meta.stale_codes
 
-    for i, code in enumerate(all_codes):
+    for code in all_codes:
         # 增量模式跳过已有数据（但 stale_codes_from_cache 中的股票强制重拉）；全量模式全部重新拉取
         if not need_full_fetch and code in cached_codes and code not in stale_codes_from_cache:
             skipped += 1
