@@ -43,8 +43,14 @@ SPEC = register_factor(
     FactorSpec(
         factor_name="industry_amplitude_trend",
         factor_col="industry_amplitude_trend",
-        # required_columns 仅声明输入依赖列；industry_amplitude_trend 是 calculation 的产出，
-        # 不属于输入依赖（遵循 factor_spec.py L98-102: 复杂因子有 calculation 时 factor_col 是计算产出，非输入依赖）
+        # required_columns 缺省说明（遵循 factor_spec.py v1.1 §3.1 方案 3-A）：
+        # 1. FactorSpec.required_columns 为可选字段（factor_spec.py L63: tuple[str, ...] | None = None）。
+        # 2. 缺省时由 __post_init__ 自动派生：读取 calculation.required_cols 属性
+        #    （factor_spec.py L72；本因子已验证 calculate_industry_amplitude_trend.required_cols
+        #    = ['date', 'asset', 'amplitude']）。
+        # 3. 因此本处省略 required_columns 是合规的，等价于显式声明
+        #    required_columns=JOIN_KEYS + ("amplitude",)；产出列 industry_amplitude_trend
+        #    不属于输入依赖（factor_spec.py L98-102: 有 calculation 时 factor_col 是计算产出）。
         calculation=calculate_industry_amplitude_trend,
     )
 )
