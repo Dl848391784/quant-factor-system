@@ -100,7 +100,8 @@ __all__ = [
 # 输入输出根目录：data_fetchers/result/（输入输出共用，详见 PROJECT.md 跨模块数据路径规范）
 _DEFAULT_RESULT_DIR = Path(__file__).parent / "result"
 
-# 扩展因子列名（元组防止意外修改）。新增因子时同步更新 _VALID_KEY_ORDER + _FACTOR_PIPELINE_STEPS。
+# 扩展因子列名（元组防止意外修改）。新增因子时只需在 _FACTOR_PIPELINE_STEPS 插入一项，
+# 启动期校验会自动检测 _EXTENDED_FACTOR_COLS 是否同步。
 _EXTENDED_FACTOR_COLS: tuple[str, ...] = (
     "past_return_1d",  # 当日涨跌幅（PROJECT.md 规则：因子计算在 data_fetchers 完成）
     "bollinger_pb",
@@ -182,7 +183,8 @@ _ALL_COLS_COUNTS: dict[str, int] = {
 #   - 校验：模块加载期校验首个 step 必须 step_label is not None，
 #     防御新增 step 时误把段首设为 None 导致整段无段头日志且无任何报错。
 #
-# _VALID_KEY_ORDER 与本表集合等价但顺序不同（表序按 step 段，metadata 序按历史累积顺序）。
+# _VALID_KEY_ORDER 由本表动态生成（R2 修复）：metadata 排序 = 管线执行顺序，
+# 新增因子只需在本表插入一项，不再需要手动同步独立 _VALID_KEY_ORDER。
 # ============================================================================
 _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
     # --- Step 3.5: past_return_1d ---
@@ -378,57 +380,25 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
 
 
 # metadata.valid_records / valid_records_percent 的 key 顺序：保 JSON 输出 byte 级稳定（下游 diff 无噪声）。
-# 与 _FACTOR_PIPELINE_STEPS 集合等价但顺序不同（表序按 step 段，metadata 序按历史 v1.0~v1.44 累积顺序）。
-_VALID_KEY_ORDER: tuple[str, ...] = (
-    # v1.0 起的 9 项 + intraday_intensity
-    "bollinger_pb",
-    "kdj_j",
-    "turnover_surge",
-    "amplitude",
-    "price_position",
-    "past_return_1d",
-    "overnight_ret",
-    "return_5d",
-    "momentum_strength",
-    "intraday_intensity",
-    # tail 5 列
-    "tail_price_position",
-    "tail_price_slope",
-    "tail_price_volume_intensity",
-    "tail_volume_acceleration",
-    "tail_volume_shrink",
-    # v1.40 差分因子
-    "amplitude_delta",
-    "turnover_surge_delta",
-    "tail_price_position_delta",
-    "tail_volume_shrink_delta",
-    # v1.41 方向性因子
-    "volume_price_strength",
-    "positive_day_ratio_5",
-    "ma5_deviation",
-    "near_high_ratio_5",
-    # v1.42 行业方向性因子
-    "industry_momentum_5d",
-    "industry_turnover_trend",
-    "industry_amplitude_trend",
-    # v1.43 行业基本面因子（方案B）
-    "industry_roe_trend",
-    "industry_earnings_growth",
-    "industry_pe_trend",
-    # v1.44 资金流因子（方案C）
-    "capital_flow_ratio_trend",
-    "capital_flow_intensity",
-)
+# R2 修复：由 _FACTOR_PIPELINE_STEPS 动态生成（管线执行顺序 = metadata 排序），
+# 新增因子只需在 _FACTOR_PIPELINE_STEPS 插入一项，不再需要手动同步 _VALID_KEY_ORDER。
+# 原 _VALID_KEY_ORDER 按'历史 v1.0~v1.44 累积顺序'独立维护，每次新增需改三处
+# （_EXTENDED_FACTOR_COLS / _FACTOR_PIPELINE_STEPS / _VALID_KEY_ORDER），遗漏任一处
+# 才被启动期集合校验发现——维护成本高且不必要。
+_VALID_KEY_ORDER: tuple[str, ...] = tuple(col for step in _FACTOR_PIPELINE_STEPS for col in step["output_cols"])
 
-# 启动期一致性校验：防御新增因子时漏改表 / 漏加 metadata key
+# 启动期一致性校验（R2 修复后简化）：
+# _VALID_KEY_ORDER 由 _FACTOR_PIPELINE_STEPS 动态生成，集合必然相等，
+# 不再需要双向校验。保留 _EXTENDED_FACTOR_COLS 与 _FACTOR_PIPELINE_STEPS 的
+# 集合一致性校验：防御新增因子时只改了表但漏改了 _EXTENDED_FACTOR_COLS。
 _PIPELINE_OUTPUT_COLS_SET = frozenset(col for step in _FACTOR_PIPELINE_STEPS for col in step["output_cols"])
-_VALID_KEY_SET = frozenset(_VALID_KEY_ORDER)
-if _VALID_KEY_SET != _PIPELINE_OUTPUT_COLS_SET:
-    _missing_in_metadata = _PIPELINE_OUTPUT_COLS_SET - _VALID_KEY_SET
-    _missing_in_table = _VALID_KEY_SET - _PIPELINE_OUTPUT_COLS_SET
+_EXTENDED_FACTOR_COLS_SET = frozenset(_EXTENDED_FACTOR_COLS)
+if _EXTENDED_FACTOR_COLS_SET != _PIPELINE_OUTPUT_COLS_SET:
+    _missing_in_ext = _PIPELINE_OUTPUT_COLS_SET - _EXTENDED_FACTOR_COLS_SET
+    _missing_in_pipeline = _EXTENDED_FACTOR_COLS_SET - _PIPELINE_OUTPUT_COLS_SET
     raise RuntimeError(
-        f"_FACTOR_PIPELINE_STEPS / _VALID_KEY_ORDER 集合不一致："
-        f"表多出={sorted(_missing_in_metadata)}，metadata 多出={sorted(_missing_in_table)}"
+        f"_EXTENDED_FACTOR_COLS / _FACTOR_PIPELINE_STEPS 集合不一致："
+        f"pipeline 多出={sorted(_missing_in_ext)}，_EXTENDED_FACTOR_COLS 多出={sorted(_missing_in_pipeline)}"
     )
 
 # 启动期段首校验（R1 修复）：首个 step 必须 step_label is not None。
