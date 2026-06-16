@@ -40,13 +40,32 @@ logger = get_logger(__name__)
 # FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
 # ============================================================================
 
-SPEC = register_factor(
-    FactorSpec(
-        factor_name="industry_earnings_growth",
-        factor_col="industry_earnings_growth",
-        calculation=calculate_industry_earnings_growth,
+SPEC: FactorSpec
+try:
+    SPEC = register_factor(
+        FactorSpec(
+            factor_name="industry_earnings_growth",
+            factor_col="industry_earnings_growth",
+            calculation=calculate_industry_earnings_growth,
+        )
     )
-)
+except (ValueError, TypeError) as e:
+    # 模块顶层注册失败兜底（fix #5）：
+    # - register_factor 文档声明 Raises: ValueError（factor_spec.py:117-119，含重复注册、
+    #   required_columns 为空、列名非法、factor_col 不在 required_columns 中等）。
+    # - TypeError 防御 FactorSpec dataclass 构造期的字段类型错误（虽属于代码 bug，
+    #   仍以可观测方式退出而非裸抛栈）。
+    # - 退出码 2：与 main() 运行时错误（exit 1）区分，专用于 import-time 配置错误
+    #   （遵循 ic_industry_earnings_growth_main_cleanup_design.md §3 退出码约定）。
+    # - 不在 main() 内做注册：保持模块级 SPEC 单例契约，且
+    #   factor_ic/common/test_factor_spec_consistency.py 通过 importlib + pkgutil
+    #   扫描所有 ic_*.py 触发 SPEC 注册，main() 内注册会破坏该测试。
+    logger.critical(
+        "FactorSpec 注册失败 (factor=industry_earnings_growth): %s (%s)",
+        str(e)[:200],
+        type(e).__name__,
+    )
+    sys.exit(2)
 
 
 def main():

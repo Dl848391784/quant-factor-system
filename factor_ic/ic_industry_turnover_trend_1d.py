@@ -39,13 +39,27 @@ logger = get_logger(__name__)
 # FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
 # ============================================================================
 
-SPEC = register_factor(
-    FactorSpec(
-        factor_name="industry_turnover_trend",
-        factor_col="industry_turnover_trend",
-        calculation=calculate_industry_turnover_trend,
+SPEC: FactorSpec
+try:
+    SPEC = register_factor(
+        FactorSpec(
+            factor_name="industry_turnover_trend",
+            factor_col="industry_turnover_trend",
+            calculation=calculate_industry_turnover_trend,
+        )
     )
-)
+except (ValueError, TypeError) as e:
+    # 模块顶层注册失败兜底（fix #5）：详见
+    # ic_industry_earnings_growth_main_cleanup_design.md §3 退出码约定 / §4 R3。
+    # - register_factor 抛 ValueError（factor_spec.py:117-119：重复注册、列名非法等）
+    # - TypeError 防御 FactorSpec dataclass 构造期类型错误
+    # - 退出码 2：import-time 配置错误，与 main() 运行时错误（1）区分
+    logger.critical(
+        "FactorSpec 注册失败 (factor=industry_turnover_trend): %s (%s)",
+        str(e)[:200],
+        type(e).__name__,
+    )
+    sys.exit(2)
 
 
 def main():
