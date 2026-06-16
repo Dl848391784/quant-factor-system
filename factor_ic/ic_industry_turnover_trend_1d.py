@@ -39,7 +39,8 @@ logger = get_logger(__name__)
 # FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
 # ============================================================================
 
-SPEC: FactorSpec
+SPEC: FactorSpec  # noqa: F842 — 仅类型注解；下方 try 块在 import-time 完成赋值，
+# 注册失败 raise 中断模块加载（不会进入未绑定状态，无需 None 初值）。
 try:
     SPEC = register_factor(
         FactorSpec(
@@ -49,17 +50,19 @@ try:
         )
     )
 except (ValueError, TypeError) as e:
-    # 模块顶层注册失败兜底（fix #5）：详见
-    # ic_industry_earnings_growth_main_cleanup_design.md §3 退出码约定 / §4 R3。
+    # 模块顶层注册失败兜底（R17 同步迁移）：
     # - register_factor 抛 ValueError（factor_spec.py:117-119：重复注册、列名非法等）
     # - TypeError 防御 FactorSpec dataclass 构造期类型错误
-    # - 退出码 2：import-time 配置错误，与 main() 运行时错误（1）区分
+    # - R17 改为 logger.critical + raise（详见 PROJECT.md H12 R16 修正版）：
+    #   importlib.import_module 在 test_factor_spec_consistency.py 中扫描所有 ic_*.py
+    #   触发 SPEC 注册，sys.exit 会杀掉 pytest 宿主；raise 让调用方决定行为。
+    err_msg = str(e)[:200]  # 截断避免超长异常淹没单行日志
     logger.critical(
         "FactorSpec 注册失败 (factor=industry_turnover_trend): %s (%s)",
-        str(e)[:200],
+        err_msg,
         type(e).__name__,
     )
-    sys.exit(2)
+    raise
 
 
 def main():
