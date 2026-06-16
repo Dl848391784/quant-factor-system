@@ -161,7 +161,7 @@ dependencies = [
 | H9 | 任务粒度：≤3 文件 **AND** ≤200 行（两者都需满足，违反任一即超粒度） | 控制单次改动规模，便于 review 和回退；超粒度走 Design-First | pre-commit `scripts/check_task_size.py` | pre-commit |
 | H10 | 测试覆盖率：不低于阶段性阈值（当前 60%，目标 70%） | 防止新代码无测试拉低基线 | pytest `--cov-fail-under=60`（当前阶段） | CI |
 | H11 | 日志格式：% 惰性格式化（禁止 f-string / + 拼接 / `exc_info=True`） | 性能（高 verbosity 时跳过格式化）+ 风格统一 + 与标准库 logging 结构化处理器（如 JSON）兼容 | ruff G004 / G003 / G201 | pre-commit + CI |
-| H12 | 退出码语义：0=成功 / 1=运行时业务错误 / 2=import-time 配置或注册失败（R16 后已弃用，改 logger.critical+raise）/ 3=辅助层失败（计算成功，但日志摘要 / 监控输出 / sidecar 类组件失败） | CI / shell 脚本能区分 4 种状态：成功 vs 业务失败（可重试）vs 代码不能加载（停流水线）vs 主结果可用但旁路告警（产物可用，仅 sidecar 待修） | 人工 review + `scripts/check_exit_codes.py` | pre-commit + CI |
+| H12 | 退出码语义：0=成功 / 1=未预期错误（程序 bug） / 2=import-time 配置或注册失败（R16 后已弃用，改 logger.critical+raise）/ 3=辅助层失败（R17，计算成功，但日志摘要 / 监控输出 / sidecar 类组件失败）/ 4=DataSchemaError（R18，数据 schema 不匹配，需检查上游列契约）/ 5=FactorCalcError（R19，因子计算内部失败，需检查计算代码）；附 R20 = `main()` 函数体内禁 sys.exit，必须 raise 让 `__main__` 块统一处理 | CI / shell 脚本能区分 6 种状态：成功 vs 程序 bug（exit 1）vs 代码不能加载（exit 2 弃用）vs 主结果可用但旁路告警（exit 3）vs 数据 schema 失败（exit 4，检查上游）vs 因子计算失败（exit 5，检查代码）；R20 保证 main() 可被单元测试直接调用 | 人工 review + `scripts/check_exit_codes.py` | pre-commit + CI |
 | H13 | 死代码禁止：禁止永不触发的防御性兜底分支（如 `if result is None` 守卫面对永不返回 None 的 callee） | 死代码掩盖真实错误来源、误导维护者、增加噪音；必须删除而非保留 | 人工 review + `scripts/check_dead_branches.py`（[待实施]） | pre-commit + CI |
 
 **H2 正反例**：
@@ -311,6 +311,35 @@ def main():
             "log_factor_summary 摘要输出阶段失败（result 已成功生成；故障源 = 摘要层）"
         )
         sys.exit(3)  # 辅助层失败专用退出码
+
+# ✅ 正例 4（R18+R19+R20）：业务异常按"排查路径"差异化退出码 + main 内禁 sys.exit
+# 调度器据 exit 码精确分流：exit 4 → 检查上游数据 / exit 5 → 检查计算代码 /
+# exit 3 → 主结果可用仅降级告警 / exit 1 → 程序 bug（CRITICAL 通知）
+def main(args):  # R20 拆分：parse_args 独立，main 只编排，不调 sys.exit
+    result = run_factor_ic(spec=SPEC, ...)  # 抛 DataSchemaError / FactorCalcError 不捕获
+    try:
+        log_factor_summary(result, "xxx 因子", logger)
+    except Exception as e:
+        # R20: main() 内禁 sys.exit，改 raise SummaryLogError 让 __main__ 统一处理
+        raise SummaryLogError("摘要日志层失败（result 已生成）") from e
+    return result
+
+
+if __name__ == "__main__":
+    try:
+        main(parse_args())
+    except DataSchemaError:
+        logger.exception("IC 计算失败 (数据列依赖不匹配)")
+        sys.exit(4)  # R18: 数据 schema 不匹配 → 检查上游 / 列契约
+    except FactorCalcError:
+        logger.exception("IC 计算失败")
+        sys.exit(5)  # R19: 因子计算内部失败 → 检查计算代码 / 边界条件
+    except SummaryLogError:
+        logger.exception("摘要日志层失败（主结果产物已生成，可用）")
+        sys.exit(3)  # R17: 辅助层失败专用退出码
+    except Exception:
+        logger.exception("未预期的错误")
+        sys.exit(1)  # 程序 bug → CRITICAL 告警
 ```
 
 **H12 Why**：
@@ -327,6 +356,16 @@ def main():
   sys.exit，进程以 exit 0 退出，CI / 调度器无法感知"摘要层失败但计算成功"这一中间态；
   exit 3 让调度器可降级告警（产物可用，sidecar 待修），与 exit 1（业务失败应停止下游）
   和 exit 2（代码不能加载应停流水线）严格区分
+- **业务异常差异化（R18+R19 新增）**：原 `except (DataSchemaError, FactorCalcError)`
+  合并 exit 1 让排查路径混淆——DataSchemaError 需检查上游数据列契约（哪个 fetcher 改了
+  schema），FactorCalcError 需检查计算代码（边界条件 / 算子内部）。拆为 exit 4 / exit 5 后
+  调度器可精确分流：exit 4 触发 "上游数据回溯流水线"，exit 5 触发 "代码 owner 通知 + 单元测试
+  扩充"，exit 1 退化为程序 bug（CRITICAL 告警立即响应）。同时 exit 1 语义从"运行时业务错误"
+  收窄为"未预期错误（程序 bug）"，与 H12 Verify 的语义对齐
+- **main 内禁 sys.exit（R20 新增）**：`main()` 内部直接 `sys.exit(N)` 导致单元测试无法
+  调用 main 验证业务逻辑（test 进程会被杀），且退出码逻辑分散在 main + __main__ 两处难维护。
+  改为 main 只 raise（含 SummaryLogError 包装辅助层异常），__main__ 块统一 except → sys.exit。
+  收益：① main 可被 pytest 直接调用 ② 退出码语义集中维护 ③ 单元测试可断言异常类型而非进程退出码
 - **trade-off**：放弃 import-time exit 2 / runtime exit 1 的退出码区分，
   换取 import-time 注册失败的可隔离性（CI 仍可通过 stderr 中的
   `CRITICAL ... FactorSpec 注册失败` 关键字 + traceback 区分错误来源）
@@ -337,9 +376,11 @@ def main():
 grep -rn "sys.exit(" factor_ic/ic_*.py
 # 期望：
 # - 模块顶层 try/except register_factor → logger.critical + raise（不应有 sys.exit）
-# - __main__ 块 except → sys.exit(1)
-# - main() 内部业务失败 → sys.exit(1)
-# - main() 内部辅助层（log_factor_summary 等）失败 → sys.exit(3)（R17）
+# - main() 函数体内 → 不应有 sys.exit（R20，必须 raise 让 __main__ 处理）
+# - __main__ 块 except DataSchemaError → sys.exit(4)（R18）
+# - __main__ 块 except FactorCalcError → sys.exit(5)（R19）
+# - __main__ 块 except SummaryLogError → sys.exit(3)（R17）
+# - __main__ 块 except Exception → sys.exit(1)
 
 # 自动化检查：
 python scripts/check_exit_codes.py all
