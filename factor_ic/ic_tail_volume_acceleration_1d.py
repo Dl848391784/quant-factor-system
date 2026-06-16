@@ -41,16 +41,12 @@
 # 标准库导入
 import argparse
 import sys
-from pathlib import Path
 
 # 第三方库导入
 import numpy as np
 import pandas as pd
 
-
 # 添加项目路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 # 本地模块导入
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
 from factor_ic.common.exceptions import FactorCalcError

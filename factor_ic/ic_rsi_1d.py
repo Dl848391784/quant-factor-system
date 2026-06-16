@@ -25,12 +25,8 @@ RSI_1D IC 计算器（重构版 v2） - 1日收益周期
 
 import argparse
 import sys
-from pathlib import Path
-
 
 # 添加项目路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
 from factor_ic.common.data_columns import JOIN_KEYS

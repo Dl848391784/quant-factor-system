@@ -62,14 +62,10 @@
 
 import argparse
 import sys
-from pathlib import Path
 
 import numpy as np
 
-
 # 添加项目路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
 from factor_ic.common.exceptions import FactorCalcError

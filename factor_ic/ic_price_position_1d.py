@@ -39,12 +39,8 @@
 
 import argparse
 import sys
-from pathlib import Path
-
 
 # 添加项目路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 # 从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
 from data_fetchers.factor_calculator import calculate_price_position

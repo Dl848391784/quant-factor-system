@@ -23,20 +23,16 @@
 
 import argparse
 import sys
-from pathlib import Path
-
 
 # 添加项目路径
-sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
-
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
-from data_fetchers.factor_calculator import calculate_turnover_surge_delta  # noqa: E402
-from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS  # noqa: E402
-from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
-from factor_ic.common.factor_ic_runner import run_factor_ic  # noqa: E402
-from factor_ic.common.factor_spec import FactorSpec, register_factor  # noqa: E402
-from factor_ic.common.factor_summary_logger import log_factor_summary  # noqa: E402
-from factor_ic.common.logger_config import get_logger  # noqa: E402
+from data_fetchers.factor_calculator import calculate_turnover_surge_delta
+from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.exceptions import FactorCalcError
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
+from factor_ic.common.factor_summary_logger import log_factor_summary
+from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)

@@ -15,17 +15,13 @@
 
 import argparse
 import sys
-from pathlib import Path
 
-
-sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
-
-from data_fetchers.factor_calculator import calculate_positive_day_ratio_5  # noqa: E402
-from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS  # noqa: E402
-from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
-from factor_ic.common.factor_ic_runner import run_factor_ic  # noqa: E402
-from factor_ic.common.factor_spec import FactorSpec, register_factor  # noqa: E402
-from factor_ic.common.logger_config import get_logger  # noqa: E402
+from data_fetchers.factor_calculator import calculate_positive_day_ratio_5
+from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.exceptions import FactorCalcError
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
+from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)

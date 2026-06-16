@@ -23,29 +23,16 @@
 
 import argparse
 import sys
-from pathlib import Path
-
-
-# 添加项目路径（若脚本被移动或项目结构调整，下方断言将立即暴露问题）
-sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
-
-# 路径有效性校验：验证关键包可导入（防止 sys.path.insert 静默失效）
-try:
-    import factor_ic as _path_check  # noqa: E402, F401 — 路径有效性校验，不使用模块
-except ImportError as _path_err:
-    raise ImportError(
-        f"无法定位 factor_ic 包，sys.path.insert 添加的路径可能无效: {Path(__file__).parent.parent}"
-    ) from _path_err
 
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 # 从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
-from data_fetchers.factor_calculator import calculate_amplitude_delta  # noqa: E402
-from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS  # noqa: E402
-from factor_ic.common.exceptions import FactorCalcError  # noqa: E402
-from factor_ic.common.factor_ic_runner import run_factor_ic  # noqa: E402
-from factor_ic.common.factor_spec import FactorSpec, register_factor  # noqa: E402
-from factor_ic.common.factor_summary_logger import log_factor_summary  # noqa: E402
-from factor_ic.common.logger_config import get_logger  # noqa: E402
+from data_fetchers.factor_calculator import calculate_amplitude_delta
+from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.exceptions import FactorCalcError
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
+from factor_ic.common.factor_summary_logger import log_factor_summary
+from factor_ic.common.logger_config import get_logger
 
 
 logger = get_logger(__name__)

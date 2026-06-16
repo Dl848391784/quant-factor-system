@@ -48,16 +48,12 @@ import argparse
 import gzip
 import json
 import sys
-from pathlib import Path
 
 # 第三方库导入
 import numpy as np
 import pandas as pd
 
-
 # 添加项目路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 # 本地模块导入
 from paths import DATA_FETCHERS_RESULT  # 遵循 PROJECT.md H7 规则
 

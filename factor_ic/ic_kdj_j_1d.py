@@ -49,13 +49,8 @@ KDJ_J 因子 IC 计算器 - 使用公共模块主入口
 
 import argparse
 import sys
-from pathlib import Path
-
 
 # 添加项目路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from data_fetchers.factor_calculator import (
     DEFAULT_KDJ_M1 as DEFAULT_M1,  # K值平滑周期

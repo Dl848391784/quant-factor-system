@@ -34,16 +34,11 @@
 
 import argparse
 import sys
-from pathlib import Path
-
 
 # ============================================================================
 # 本地模块导入
 # ============================================================================
-
 # 添加项目路径（遵循 PROJECT.md 根目录模块导入规范）
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from data_fetchers.factor_calculator import calculate_momentum_strength
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
 from factor_ic.common.exceptions import FactorCalcError

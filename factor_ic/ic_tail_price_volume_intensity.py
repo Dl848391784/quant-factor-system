@@ -36,15 +36,11 @@ import argparse
 import gzip
 import json
 import sys
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-
 # 添加项目路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 # 导入公共模块主入口（遵循 PROJECT.md 强制复用规范）
 from paths import DATA_FETCHERS_RESULT  # 遵循 PROJECT.md H7 规则
 
