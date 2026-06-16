@@ -31,6 +31,7 @@
   v1.1 (2026-06-16): 修复退出码表/None检查/sys.exit/参数命名/日志问题
   v1.2 (2026-06-16): None返回补warning/SummaryLogError改error+cause/or{}改is not None/日志去冗余/FactorCalcError补上下文
   v1.3 (2026-06-16): 抽取_build_parser消除重复解析/删除__main__重复日志/ic_metrics风格统一/去重复result.get
+  v1.4 (2026-06-16): args类型放宽namespace-like/检查点debug→info去重/_cli_args提取为独立变量
 """
 
 import argparse
@@ -73,9 +74,11 @@ def main(args=None):
 
     Parameters
     ----------
-    args : argparse.Namespace | None
+    args : namespace-like | None
         CLI 参数。None 时内部解析 sys.argv（仅 CLI 调用场景）。
-        库函数调用方可直接传入预构造的 Namespace。
+        库函数调用方可传入任何含 ``min_stocks`` 和 ``force_full``
+        属性的对象（如 ``argparse.Namespace`` 或自定义 dataclass），
+        不限于 ``argparse.Namespace``。
 
     Returns
     -------
@@ -116,15 +119,12 @@ def main(args=None):
         )
         return None
 
-    # 计算完成检查点日志（含 result 基本维度，便于生产排查）
+    # 计算完成检查点日志：保留 log_factor_summary 未覆盖的维度信息（日期范围、更新模式）
     # 使用中间变量避免同一 key 重复调用 result.get()
-    _sample_stats = result.get("sample_stats")
-    sample_stats = _sample_stats if _sample_stats is not None else {}
     _period = result.get("period")
     period = _period if _period is not None else {}
-    logger.debug(
-        "run_factor_ic 完成: 有效天数=%s, 日期范围=%s~%s, 更新模式=%s",
-        sample_stats.get("valid_days", "N/A"),
+    logger.info(
+        "run_factor_ic 完成: 日期范围=%s~%s, 更新模式=%s",
         period.get("start", "N/A"),
         period.get("end", "N/A"),
         result.get("update_mode", "N/A"),
@@ -158,6 +158,9 @@ def main(args=None):
 if __name__ == "__main__":
     # 共享 _build_parser()，sys.argv 只解析一次，结果传入 main()
     _cli_args = _build_parser().parse_args()
+    # 在 try 块前提取上下文字段，except 块不依赖 _cli_args 作用域位置
+    _cli_min_stocks = _cli_args.min_stocks
+    _cli_force_full = _cli_args.force_full
 
     try:
         result = main(args=_cli_args)
@@ -185,8 +188,8 @@ if __name__ == "__main__":
         logger.error(
             "行业PE趋势因子IC计算失败 (factor=%s, min_stocks=%s, force_full=%s): %s",
             SPEC.factor_name,
-            _cli_args.min_stocks,
-            _cli_args.force_full,
+            _cli_min_stocks,
+            _cli_force_full,
             e,
         )
         sys.exit(5)  # H12 R19: 因子计算失败 → 检查计算代码
