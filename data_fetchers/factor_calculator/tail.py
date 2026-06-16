@@ -416,57 +416,94 @@ def calculate_tail_factors(
     if "volumes" in tail_df.columns:
         merge_cols.append("volumes")
 
-    merged_df = factor_df.merge(tail_df[merge_cols], on=["date", "asset"], how="left")
+    # ---- v1.43 内存优化：mask 子集 apply（design.md fix-tail-factors-oom.md §3）----
+    # 原实现先 left-merge 出全表（1.49M 行）再 apply(axis=1)，95%+ 行未匹配 → NaN→NaN 空转，
+    # 但仍构造含 list 列的 Series，单进程 RSS 峰值 3.27GB → OOM(-9)。
+    # 新实现：仅在命中行子集（含 prices）上做 apply，未命中行直接置 NaN，
+    # 行序保留、5 个因子值与原实现字节级一致（NaN 守卫见 _calc_* helper）。
+    has_volumes = "volumes" in tail_df.columns
+
+    # Step 1: 在 factor_df 上预初始化 5 个因子列为 NaN（覆盖未命中行）
+    for col in _TAIL_FACTOR_COLS:
+        factor_df[col] = np.nan
+
+    # Step 2: mask 出有尾盘数据的行（用 tail_df 的 (date, asset) 作为索引集）
+    tail_keys = pd.MultiIndex.from_arrays([tail_df["date"], tail_df["asset"]])
+    factor_keys = pd.MultiIndex.from_arrays([factor_df["date"], factor_df["asset"]])
+    mask = factor_keys.isin(tail_keys)
+    matched_count = int(mask.sum())
 
     _logger.info(
         "尾盘数据合并完成: %d / %d 条匹配",
-        merged_df["prices"].notna().sum(),
+        matched_count,
         len(factor_df),
     )
 
-    # 计算尾盘收盘价
-    merged_df["tail_close"] = merged_df["prices"].apply(_get_close_price)
+    # Step 3: 仅当存在匹配行时才做 merge + apply
+    if matched_count > 0:
+        # MODULE.md R16: 中间对象用完即释放，降峰值
+        # 仅取 apply 实际需要的列，避免 sub 携带其他基础因子（已 ~20 列）
+        sub_cols = ["date", "asset", "volume"]
+        for opt_col in ("close", "high", "low"):
+            if opt_col in factor_df.columns:
+                sub_cols.append(opt_col)
+        sub = factor_df.loc[mask, sub_cols].copy()
+        sub = sub.merge(tail_df[merge_cols], on=["date", "asset"], how="left")
 
-    # 计算尾盘价格位置（v1.39: 传入日线 close/high/low 用于涨跌停判断）
-    merged_df["tail_price_position"] = merged_df.apply(
-        lambda row: _calc_price_position(
-            row["tail_close"],
-            row["tail_high"],
-            row["tail_low"],
-            daily_close=row.get("close"),
-            daily_high=row.get("high"),
-            daily_low=row.get("low"),
-        ),
-        axis=1,
-    )
+        # 计算尾盘收盘价（仅子集）
+        sub["tail_close"] = sub["prices"].apply(_get_close_price)
 
-    # 计算尾盘趋势斜率
-    merged_df["tail_price_slope"] = merged_df["prices"].apply(_calc_tail_price_slope)
-
-    # 计算尾盘量价强度 / 量能加速度 / 缩量程度（依赖 volumes）
-    if "volumes" in merged_df.columns:
-        merged_df["tail_price_volume_intensity"] = merged_df.apply(
-            lambda row: _calc_tail_price_volume_intensity(row["prices"], row["volumes"], row["volume"]),
+        # 计算尾盘价格位置（v1.39: 传入日线 close/high/low 用于涨跌停判断）
+        sub["tail_price_position"] = sub.apply(
+            lambda row: _calc_price_position(
+                row["tail_close"],
+                row["tail_high"],
+                row["tail_low"],
+                daily_close=row.get("close"),
+                daily_high=row.get("high"),
+                daily_low=row.get("low"),
+            ),
             axis=1,
         )
-        merged_df["tail_volume_acceleration"] = merged_df["volumes"].apply(_calc_tail_volume_acceleration)
-        merged_df["tail_volume_shrink"] = merged_df.apply(
-            lambda row: _calc_tail_volume_shrink(row["volumes"], row["volume"]),
-            axis=1,
-        )
-    else:
-        merged_df["tail_price_volume_intensity"] = np.nan
-        merged_df["tail_volume_acceleration"] = np.nan
-        merged_df["tail_volume_shrink"] = np.nan
+
+        # 计算尾盘趋势斜率
+        sub["tail_price_slope"] = sub["prices"].apply(_calc_tail_price_slope)
+
+        # 计算尾盘量价强度 / 量能加速度 / 缩量程度（依赖 volumes）
+        if has_volumes:
+            sub["tail_price_volume_intensity"] = sub.apply(
+                lambda row: _calc_tail_price_volume_intensity(row["prices"], row["volumes"], row["volume"]),
+                axis=1,
+            )
+            sub["tail_volume_acceleration"] = sub["volumes"].apply(_calc_tail_volume_acceleration)
+            sub["tail_volume_shrink"] = sub.apply(
+                lambda row: _calc_tail_volume_shrink(row["volumes"], row["volume"]),
+                axis=1,
+            )
+        # has_volumes=False 分支：3 列已在 Step 1 预置 NaN，下面 warning 即可
+
+        # Step 4: 把 sub 的因子列写回 factor_df（按 mask 位置对齐）
+        # sub 与 factor_df.loc[mask] 行序一致（loc[mask].copy() 保留原顺序，merge 不重排已存在键）
+        for col in _TAIL_FACTOR_COLS:
+            if col in sub.columns:
+                factor_df.loc[mask, col] = sub[col].to_numpy()
+
+        # MODULE.md R16: 大对象显式 del 释放
+        del sub
+
+    if not has_volumes:
         _logger.warning(
             "尾盘数据缺少 'volumes' 列，tail_price_volume_intensity/"
             "tail_volume_acceleration/tail_volume_shrink 将为 NaN"
         )
 
+    # MODULE.md R16: tail_df 已用完
+    del tail_df
+
     # 统计有效因子数量
-    total_count = len(merged_df)
+    total_count = len(factor_df)
     for col in _TAIL_FACTOR_COLS:
-        valid_count = merged_df[col].notna().sum()
+        valid_count = factor_df[col].notna().sum()
         _logger.info(
             "%s 因子计算完成: %d / %d 有效 (%.1f%%)",
             col,
@@ -475,9 +512,7 @@ def calculate_tail_factors(
             100 * valid_count / total_count if total_count > 0 else 0,
         )
 
-    # 返回只包含原列 + 因子列的 DataFrame
-    result_cols = list(factor_df.columns) + list(_TAIL_FACTOR_COLS)
-    return merged_df[result_cols]
+    return factor_df
 
 
 calculate_tail_factors.required_cols = ["date", "asset", "volume"]  # type: ignore[attr-defined]
