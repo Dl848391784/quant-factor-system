@@ -113,7 +113,13 @@ def main():
     # "未预期的错误"，此时无法分辨故障源是因子计算（main 中段）还是日志摘要（main 末段）。
     # 在此独立 try/except 包裹：
     # - 摘要层异常打印明确前缀 "log_factor_summary 摘要输出阶段失败"，便于一眼定位；
-    # - 不重新 raise（因子计算结果已成功，不应因摘要层 bug 反向污染业务退出码）；
+    # - 用 sys.exit(3) 显式标记辅助层失败（PROJECT.md H12 R17 退出码档）：
+    #   * 因子计算 result 已成功生成，主结果产物（factor_ic/result/）可用，
+    #     下游 backtest / comprehensive_factor / summary 可正常消费；
+    #   * 仅旁路日志摘要输出失败 → exit 3 与业务失败（exit 1，主结果不可用）和
+    #     import-time 注册失败（exit 2，代码不能加载）严格区分，调度器可据此降级告警；
+    #   * 不静默吞异常（先前 issue：仅 logger 不 sys.exit → 进程 exit 0，
+    #     调度器把"摘要层失败"误判为"完全成功"，告警丢失）。
     # - 同时输出完整 traceback（logger.exception）保留调试信息。
     try:
         log_factor_summary(result, "行业5日动量因子", logger)
@@ -122,6 +128,7 @@ def main():
             "log_factor_summary 摘要输出阶段失败（因子计算 result 已成功生成；"
             "故障源 = 摘要日志层而非 run_factor_ic 业务路径）"
         )
+        sys.exit(3)  # H12 R17：辅助层失败专用退出码，与 exit 1/2 严格区分
 
 
 if __name__ == "__main__":
