@@ -763,49 +763,27 @@ def get_module_logger(logger: logging.Logger | None = None) -> logging.Logger:
 # ============================================================================
 
 
-def generate_all_factors(
-    factor_data_path: Path | str | None = None,
-    turnover_data_path: Path | str | None = None,
-    return_data_path: Path | str | None = None,
-    output_path: Path | str | None = None,
-    logger: logging.Logger | None = None,
-) -> dict[str, Any]:
-    """生成所有因子数据（含收益数据），输出 factor_ic_data.json.gz + factor_ic_data_columns.json。
-
-    复用 factor_calculator 计算函数；空数据场景所有百分比有除零保护返回 0.0。
+def _load_and_merge_data(
+    factor_data_path: Path,
+    turnover_data_path: Path,
+    return_data_path: Path,
+    logger: logging.Logger,
+) -> pd.DataFrame:
+    """Step 1~3：加载基础因子 + 换手率 + 收益数据，合并为 factor_df。
 
     Args:
-        factor_data_path: 基础因子数据路径（默认 factor_data.json.gz）。
-        turnover_data_path: 换手率数据路径（默认 turnover_rate_data.json.gz）。
-        return_data_path: 收益数据路径（默认 return_data.json.gz）。
-        output_path: 输出路径（默认 factor_ic_data.json.gz）。
-        logger: 调用方传入的 logger（可选）。
+        factor_data_path: 基础因子数据路径。
+        turnover_data_path: 换手率数据路径。
+        return_data_path: 收益数据路径。
+        logger: 日志器。
 
     Returns:
-        元数据字典（生成时间、因子列表、有效记录数/百分比、运行耗时等）。
+        合并后的 factor_df（含基础因子 + 换手率 + 收益数据列）。
 
     Raises:
         FileNotFoundError: 输入数据文件不存在。
-        ValueError: 数据格式不正确（缺少 'data' 字段）、JSON 解析失败、gzip 损坏
-            （JSONDecodeError 已内部捕获并转换为 ValueError）。
-        KeyError: 必需输出列不存在。
-        RuntimeError: 文件系统错误（磁盘/权限/IO）或未知保存错误。
+        ValueError: 数据格式不正确（缺少 'data' 字段）、JSON 解析失败、gzip 损坏。
     """
-    start_time = datetime.now()
-    logger = get_module_logger(logger)
-
-    # 默认路径
-    factor_data_path = Path(factor_data_path) if factor_data_path else _DEFAULT_RESULT_DIR / "factor_data.json.gz"
-    turnover_data_path = (
-        Path(turnover_data_path) if turnover_data_path else _DEFAULT_RESULT_DIR / "turnover_rate_data.json.gz"
-    )
-    return_data_path = Path(return_data_path) if return_data_path else _DEFAULT_RESULT_DIR / "return_data.json.gz"
-    output_path = Path(output_path) if output_path else _DEFAULT_RESULT_DIR / "factor_ic_data.json.gz"
-
-    logger.info("=" * 40)
-    logger.info("统一因子生成模块")
-    logger.info("=" * 40)
-
     # ========== Step 1: 加载基础因子数据 ==========
     logger.info("Step 1: 加载基础因子数据...")
 
@@ -869,9 +847,26 @@ def generate_all_factors(
 
     logger.info("  合并收益后记录数: %d", len(factor_df))
 
-    # ========== Step 3.5 ~ 11.9: 计算所有因子（D 步表驱动重构）==========
-    # 详情见 _FACTOR_PIPELINE_STEPS 表（27 个 step，31 个输出列）+ _run_pipeline_step。
-    # step_label 非空时打印 "Step xx.x: ..."；emit_valid_log=True 时逐列打印有效计数。
+    return factor_df
+
+
+def _run_factor_pipeline(
+    factor_df: pd.DataFrame,
+    logger: logging.Logger,
+) -> tuple[pd.DataFrame, dict[str, int]]:
+    """Step 3.5~11.9：执行因子管线，返回更新后的 factor_df 与 valid_counts。
+
+    详情见 _FACTOR_PIPELINE_STEPS 表（27 个 step，31 个输出列）+ _run_pipeline_step。
+
+    Args:
+        factor_df: 合并了基础因子 + 换手率 + 收益数据的 DataFrame。
+        logger: 日志器。
+
+    Returns:
+        (factor_df, valid_counts)：
+        - factor_df：所有因子列已计算完成。
+        - valid_counts：{因子列名: 有效记录数}，供 metadata 使用。
+    """
     valid_counts: dict[str, int] = {}
     for step in _FACTOR_PIPELINE_STEPS:
         factor_df, step_valid_counts = _run_pipeline_step(factor_df, step, logger)
@@ -880,6 +875,36 @@ def generate_all_factors(
     # step 11.7/11.8/11.9 因子函数会添加 industry 临时列（行业聚合赋个股），不属于 _OUTPUT_COLS
     factor_df = _drop_industry_column(factor_df)
 
+    return factor_df, valid_counts
+
+
+def _format_and_write_output(
+    factor_df: pd.DataFrame,
+    output_path: Path,
+    start_time: datetime,
+    factor_data_path: Path,
+    turnover_data_path: Path,
+    return_data_path: Path,
+    logger: logging.Logger,
+) -> dict[str, Any]:
+    """Step 12~15：格式化输出 + 保存 + 返回元数据。
+
+    Args:
+        factor_df: 所有因子列已计算完成的 DataFrame。
+        output_path: 输出路径。
+        start_time: 开始时间（用于计算 elapsed_seconds）。
+        factor_data_path: 基础因子数据路径（元数据记录用）。
+        turnover_data_path: 换手率数据路径（元数据记录用）。
+        return_data_path: 收益数据路径（元数据记录用）。
+        logger: 日志器。
+
+    Returns:
+        元数据字典。
+
+    Raises:
+        KeyError: 必需输出列不存在。
+        RuntimeError: 文件系统错误。
+    """
     # ========== Step 12: 格式化输出 ==========
     logger.info("Step 12: 格式化输出...")
 
@@ -924,27 +949,17 @@ def generate_all_factors(
         # valid_records 与 valid_records_percent 按 _VALID_KEY_ORDER 排序，
         # 与日志输出一致便于质量评估。
 
-        metadata = {
+        metadata: dict[str, Any] = {
             "generated_at": end_time.strftime("%Y-%m-%d %H:%M:%S"),
             "elapsed_seconds": round(elapsed_seconds, 2),
             "total_records": total_records,
-            "valid_records": {key: valid_counts[key] for key in _VALID_KEY_ORDER},
-            "valid_records_percent": {key: _calc_pct(valid_counts[key], total_records) for key in _VALID_KEY_ORDER},
-            "factor_columns": list(_EXTENDED_FACTOR_COLS),  # 扩展因子列（返回副本，防止外部修改）
-            "return_columns": list(_RETURN_COLS),  # 收益数据列（返回副本，防止外部修改）
-            "input_sources": {
-                "factor_data": str(factor_data_path),
-                "turnover_data": str(turnover_data_path),
-                "return_data": str(return_data_path),
-            },
-            "output_path": str(output_path),
         }
 
         logger.info("=" * 40)
         logger.info("因子生成完成")
         logger.info("生成时间: %s", metadata["generated_at"])
         logger.info("运行耗时: %.2f 秒", metadata["elapsed_seconds"])
-        logger.info("因子列: %s", metadata["factor_columns"])
+        logger.info("因子列: %s", list(_EXTENDED_FACTOR_COLS))
         logger.info("=" * 40)
 
         # ========== Step 15: 写出列名清单（消费者 schema 查询） ==========
@@ -972,6 +987,76 @@ def generate_all_factors(
         # 进入 finally 时一定存在。异常路径下显式 del 释放（约 30% factor_df 体积）；
         # 正常路径走 return，栈解开后由 GC 回收。
         del output_df
+
+
+def generate_all_factors(
+    factor_data_path: Path | str | None = None,
+    turnover_data_path: Path | str | None = None,
+    return_data_path: Path | str | None = None,
+    output_path: Path | str | None = None,
+    logger: logging.Logger | None = None,
+) -> dict[str, Any]:
+    """生成所有因子数据（含收益数据），输出 factor_ic_data.json.gz + factor_ic_data_columns.json。
+
+    复用 factor_calculator 计算函数；空数据场景所有百分比有除零保护返回 0.0。
+
+    Args:
+        factor_data_path: 基础因子数据路径（默认 factor_data.json.gz）。
+        turnover_data_path: 换手率数据路径（默认 turnover_rate_data.json.gz）。
+        return_data_path: 收益数据路径（默认 return_data.json.gz）。
+        output_path: 输出路径（默认 factor_ic_data.json.gz）。
+        logger: 调用方传入的 logger（可选）。
+
+    Returns:
+        元数据字典（生成时间、因子列表、有效记录数/百分比、运行耗时等）。
+
+    Raises:
+        FileNotFoundError: 输入数据文件不存在。
+        ValueError: 数据格式不正确（缺少 'data' 字段）、JSON 解析失败、gzip 损坏
+            （JSONDecodeError 已内部捕获并转换为 ValueError）。
+        KeyError: 必需输出列不存在。
+        RuntimeError: 文件系统错误（磁盘/权限/IO）或未知保存错误。
+    """
+    start_time = datetime.now()
+    logger = get_module_logger(logger)
+
+    # 默认路径
+    factor_data_path = Path(factor_data_path) if factor_data_path else _DEFAULT_RESULT_DIR / "factor_data.json.gz"
+    turnover_data_path = (
+        Path(turnover_data_path) if turnover_data_path else _DEFAULT_RESULT_DIR / "turnover_rate_data.json.gz"
+    )
+    return_data_path = Path(return_data_path) if return_data_path else _DEFAULT_RESULT_DIR / "return_data.json.gz"
+    output_path = Path(output_path) if output_path else _DEFAULT_RESULT_DIR / "factor_ic_data.json.gz"
+
+    logger.info("=" * 40)
+    logger.info("统一因子生成模块")
+    logger.info("=" * 40)
+
+    # Step 1~3：加载 + 合并
+    factor_df = _load_and_merge_data(factor_data_path, turnover_data_path, return_data_path, logger)
+
+    # Step 3.5~11.9：因子管线
+    factor_df, valid_counts = _run_factor_pipeline(factor_df, logger)
+
+    # Step 12~15：格式化 + 输出 + 元数据
+    metadata = _format_and_write_output(
+        factor_df, output_path, start_time, factor_data_path, turnover_data_path, return_data_path, logger
+    )
+
+    # 补充 valid_counts 相关元数据（在 _format_and_write_output 中无法访问 valid_counts）
+    total_records = metadata["total_records"]
+    metadata["valid_records"] = {key: valid_counts[key] for key in _VALID_KEY_ORDER}
+    metadata["valid_records_percent"] = {key: _calc_pct(valid_counts[key], total_records) for key in _VALID_KEY_ORDER}
+    metadata["factor_columns"] = list(_EXTENDED_FACTOR_COLS)  # 扩展因子列（返回副本，防止外部修改）
+    metadata["return_columns"] = list(_RETURN_COLS)  # 收益数据列（返回副本，防止外部修改）
+    metadata["input_sources"] = {
+        "factor_data": str(factor_data_path),
+        "turnover_data": str(turnover_data_path),
+        "return_data": str(return_data_path),
+    }
+    metadata["output_path"] = str(output_path)
+
+    return metadata
 
 
 # ============================================================================

@@ -870,6 +870,8 @@ class TestOutputDfNoneSentinel:
     - R2 修复：del factor_df 从 try 内移到 try 之前。为此 output_df 切片也必须
       上提到 try 之前（missing_cols 检查通过后立即执行），try 进入时 output_df
       一定存在。None sentinel 失去意义，finally 改为无守卫 `del output_df`。
+    - R3 拆分：output_df 相关逻辑从 generate_all_factors 移入
+      _format_and_write_output，测试搜索目标同步更新。
 
     本测试组保留两条核心防御：
     1. output_df 在 try 之前已赋值（避免回退到 try 内首次赋值 → 再次出现
@@ -881,7 +883,7 @@ class TestOutputDfNoneSentinel:
         """源码约定：output_df 首次赋值在 try 块之前（R2 内存修复关键约束）。
 
         通过 AST 静态解析验证：
-        1. 在 generate_all_factors 函数体顶层找到首个 output_df 赋值
+        1. 在 _format_and_write_output 函数体顶层找到首个 output_df 赋值
         2. 该赋值在所有 ast.Try 节点之前（行号严格小于）
 
         若首次赋值落到 try 内，意味着 del factor_df 也回到 try 内，
@@ -895,12 +897,12 @@ class TestOutputDfNoneSentinel:
         source = Path(fg.__file__).read_text(encoding="utf-8")
         tree = ast.parse(source)
 
-        # 定位 generate_all_factors 函数
+        # R3: output_df 从 generate_all_factors 移入 _format_and_write_output
         func = next(
-            (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "generate_all_factors"),
+            (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_format_and_write_output"),
             None,
         )
-        assert func is not None, "generate_all_factors 函数未找到"
+        assert func is not None, "_format_and_write_output 函数未找到"
 
         # 在函数体直接子节点中查找首个 output_df 赋值（不深入子作用域）
         first_assign_node: ast.AST | None = None
@@ -916,11 +918,11 @@ class TestOutputDfNoneSentinel:
                 first_assign_node = node
                 break
 
-        assert first_assign_node is not None, "未在 generate_all_factors 函数体顶层找到 output_df 赋值"
+        assert first_assign_node is not None, "未在 _format_and_write_output 函数体顶层找到 output_df 赋值"
 
         # 找到函数体顶层的 ast.Try（包裹 Step 13~15 的那个），验证 output_df 赋值在其之前
         try_nodes = [n for n in func.body if isinstance(n, ast.Try)]
-        assert try_nodes, "generate_all_factors 顶层未找到 try/finally 块（Step 13~15 包裹）"
+        assert try_nodes, "_format_and_write_output 顶层未找到 try/finally 块（Step 13~15 包裹）"
         first_try = try_nodes[0]
 
         assert first_assign_node.lineno < first_try.lineno, (
