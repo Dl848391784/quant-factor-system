@@ -151,20 +151,20 @@ if __name__ == "__main__":
     # - exit 5 (R19) → 因子计算代码 / 边界条件排查路径（FactorCalcError）
     # - exit 3 (R17) → 主结果可用仅 sidecar 待修，调度器降级告警（SummaryLogError）
     # - exit 1     → 未预期错误兜底（CRITICAL 立即响应）
-    # logger.exception 替代 logger.error(...%s, e)：
-    # - logger.exception 自动附带 traceback，是合规惯用法（PROJECT.md H11 禁的是显式
-    #   exc_info=True，logger.exception 是其内置标准用法）；
-    # - 与原 logger.error("...%s", e) 相比保留完整调用栈，排查时不需要再去日志上下文重组。
+    # 日志方法分类（MODULE.md M22）：
+    # - 业务异常子类（DataSchemaError / FactorCalcError / SummaryLogError）：logger.error
+    #   携带消息即可，错误消息已足够定位，堆栈是噪音；
+    # - 未预期 Exception：logger.exception 自动附加完整堆栈，定位 bug 必需。
     try:
         main(parse_args())
-    except DataSchemaError:
-        logger.exception("行业5日动量因子IC计算失败 (数据列依赖不匹配)")
+    except DataSchemaError as e:
+        logger.error("行业5日动量因子IC计算失败 (数据列依赖不匹配): %s", e)
         sys.exit(4)  # H12 R18: schema 失败 → 检查上游数据
-    except FactorCalcError:
-        logger.exception("行业5日动量因子IC计算失败")
+    except FactorCalcError as e:
+        logger.error("行业5日动量因子IC计算失败: %s", e)
         sys.exit(5)  # H12 R19: 因子计算失败 → 检查计算代码
-    except SummaryLogError:
-        logger.exception("摘要日志层失败（主结果产物已生成，可用）")
+    except SummaryLogError as e:
+        logger.error("摘要日志层失败（主结果产物已生成，可用）: %s", e)
         sys.exit(3)  # H12 R17: 辅助层失败专用退出码
     except Exception:
         logger.exception("未预期的错误")
