@@ -713,6 +713,50 @@ class TestMainQuietMode:
         # 失败路径不应打成功消息
         assert "执行成功" not in captured.out
 
+    def test_quiet_mode_failure_prints_to_stderr(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """quiet 模式失败时必须 print 到 stderr（与成功 print 到 stdout 对称，bug 4 回归）。
+
+        修复前问题：成功走 print(stdout)，失败仅走 logger（混合 stdout/stderr 输出渠道），
+        quiet 用户无法在统一 stream 上判断结果。
+        """
+        from data_fetchers import factor_generator as fg
+
+        monkeypatch.setattr(sys, "argv", ["factor_generator.py", "--quiet"])
+        with patch.object(fg, "generate_all_factors", side_effect=RuntimeError("disk full")):
+            rc = fg.main()
+
+        assert rc == 1
+        captured = capsys.readouterr()
+        # 关键断言：quiet 失败必须 print 到 stderr，包含异常类型与消息
+        assert "执行失败" in captured.err
+        assert "RuntimeError" in captured.err
+        assert "disk full" in captured.err
+        # stdout 不应被失败消息污染（成功消息走 stdout，失败走 stderr，渠道分离）
+        assert "执行失败" not in captured.out
+
+    def test_default_mode_failure_no_print(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """默认模式失败不走 print（仅 logger.exception，避免日志重复）。"""
+        from data_fetchers import factor_generator as fg
+
+        monkeypatch.setattr(sys, "argv", ["factor_generator.py"])
+        with patch.object(fg, "generate_all_factors", side_effect=RuntimeError("boom")):
+            rc = fg.main()
+
+        assert rc == 1
+        captured = capsys.readouterr()
+        # 默认模式不应有 print 到 stderr 的失败消息（logger 已处理）
+        # 注：logger 也可能输出到 stderr，但 print 的格式 "执行失败: RuntimeError: boom" 不应被 print 走
+        # 用 stdout 反向验证（默认模式 print 任何消息都为异常）
+        assert "执行失败:" not in captured.out
+
 
 class TestOutputDfNoneSentinel:
     """generate_all_factors 用 None sentinel 替代 locals() 守卫（bug 1 回归）"""

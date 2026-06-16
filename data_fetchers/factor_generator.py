@@ -1181,6 +1181,12 @@ def main() -> int:
     except Exception as e:
         # data_fetchers MODULE.md R10: 类型名 + logger.exception 自动附堆栈
         logger.exception("执行失败 [%s]", type(e).__name__)
+        # quiet 模式下 logger 级别 = ERROR，logger.exception 走 stderr 仍可达；
+        # 但成功路径 quiet 走 print(stdout)，为保持两条路径"输出可见性"对称，
+        # quiet 失败也补一行 print 到 stderr，给上游 CI / shell 提供
+        # 与成功路径一致的可读取信号（且不污染 stdout，便于管道判断）。
+        if args.quiet:
+            print(f"执行失败: {type(e).__name__}: {e}", file=sys.stderr)
         return 1
 
 
