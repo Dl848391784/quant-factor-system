@@ -186,7 +186,7 @@ def test_runtime_exit_0_fail(tmp_path: Path) -> None:
 
 
 def test_runtime_exit_2_fail(tmp_path: Path) -> None:
-    """__main__ except 用 sys.exit(2) 应违规（仅 exit 1 合规）。"""
+    """__main__ except Exception 用 sys.exit(2) 应违规（兜底仅允许 exit 1）。"""
     fp = _write(
         tmp_path,
         """
@@ -201,7 +201,7 @@ def test_runtime_exit_2_fail(tmp_path: Path) -> None:
     )
     violations = _check_file(fp)
     assert len(violations) == 1
-    assert "exit 1" in violations[0]
+    assert "exit ∈ [1]" in violations[0]
     assert "sys.exit(2)" in violations[0]
 
 
@@ -278,3 +278,168 @@ def test_syntax_error_reports(tmp_path: Path) -> None:
     violations = _check_file(fp)
     assert len(violations) == 1
     assert "语法错误" in violations[0]
+
+
+# ─────────────────── R17/R18/R19/R20 差异化退出码 ───────────────────
+
+
+def test_r18_data_schema_exit_4_pass(tmp_path: Path) -> None:
+    """R18: __main__ except DataSchemaError 用 sys.exit(4) 应通过。"""
+    fp = _write(
+        tmp_path,
+        """
+        import sys
+
+        if __name__ == "__main__":
+            try:
+                main()
+            except DataSchemaError:
+                sys.exit(4)
+            except Exception:
+                sys.exit(1)
+        """,
+    )
+    assert _check_file(fp) == []
+
+
+def test_r18_data_schema_exit_1_legacy_pass(tmp_path: Path) -> None:
+    """R18 旧兼容：DataSchemaError → sys.exit(1) 仍通过（多值允许集合 {1, 4}）。"""
+    fp = _write(
+        tmp_path,
+        """
+        import sys
+
+        if __name__ == "__main__":
+            try:
+                main()
+            except DataSchemaError:
+                sys.exit(1)
+        """,
+    )
+    assert _check_file(fp) == []
+
+
+def test_r19_factor_calc_exit_5_pass(tmp_path: Path) -> None:
+    """R19: __main__ except FactorCalcError 用 sys.exit(5) 应通过。"""
+    fp = _write(
+        tmp_path,
+        """
+        import sys
+
+        if __name__ == "__main__":
+            try:
+                main()
+            except FactorCalcError:
+                sys.exit(5)
+        """,
+    )
+    assert _check_file(fp) == []
+
+
+def test_r19_factor_calc_exit_3_fail(tmp_path: Path) -> None:
+    """R19: FactorCalcError 用 sys.exit(3) 应违规（{1, 5} 不含 3）。"""
+    fp = _write(
+        tmp_path,
+        """
+        import sys
+
+        if __name__ == "__main__":
+            try:
+                main()
+            except FactorCalcError:
+                sys.exit(3)
+        """,
+    )
+    violations = _check_file(fp)
+    assert len(violations) == 1
+    assert "FactorCalcError" in violations[0]
+    assert "exit ∈ [1, 5]" in violations[0]
+
+
+def test_r17_summary_log_exit_3_pass(tmp_path: Path) -> None:
+    """R17: __main__ except SummaryLogError 用 sys.exit(3) 应通过。"""
+    fp = _write(
+        tmp_path,
+        """
+        import sys
+
+        if __name__ == "__main__":
+            try:
+                main()
+            except SummaryLogError:
+                sys.exit(3)
+        """,
+    )
+    assert _check_file(fp) == []
+
+
+def test_r17_summary_log_exit_1_fail(tmp_path: Path) -> None:
+    """R17: SummaryLogError 用 sys.exit(1) 应违规（强制 exit 3，不允许旧兼容）。"""
+    fp = _write(
+        tmp_path,
+        """
+        import sys
+
+        if __name__ == "__main__":
+            try:
+                main()
+            except SummaryLogError:
+                sys.exit(1)
+        """,
+    )
+    violations = _check_file(fp)
+    assert len(violations) == 1
+    assert "SummaryLogError" in violations[0]
+    assert "exit ∈ [3]" in violations[0]
+
+
+def test_r20_main_body_sys_exit_fail_when_migrated(tmp_path: Path, monkeypatch) -> None:
+    """R20: 已迁移文件的 main() 函数体内 sys.exit 应违规。"""
+    import scripts.check_exit_codes as mod
+
+    fp = _write(
+        tmp_path,
+        """
+        import sys
+
+        def main(args):
+            if not args:
+                sys.exit(1)  # R20 违规
+            return 0
+
+        if __name__ == "__main__":
+            try:
+                main(parse_args())
+            except Exception:
+                sys.exit(1)
+        """,
+    )
+    # 把临时文件名加入白名单
+    monkeypatch.setattr(mod, "R20_MIGRATED_FILES", frozenset({fp.name}))
+    violations = _check_file(fp)
+    assert len(violations) == 1
+    assert "R20 违规" in violations[0]
+    assert "main() 函数体内禁 sys.exit" in violations[0]
+
+
+def test_r20_main_body_sys_exit_pass_when_not_migrated(tmp_path: Path) -> None:
+    """R20 旧兼容：未迁移文件 main() 函数体内的 sys.exit(3) 应保持通过（白名单豁免）。"""
+    fp = _write(
+        tmp_path,
+        """
+        import sys
+
+        def main():
+            try:
+                log_factor_summary()
+            except Exception:
+                sys.exit(3)  # R17 旧实现，未迁移到 R20
+
+        if __name__ == "__main__":
+            try:
+                main()
+            except Exception:
+                sys.exit(1)
+        """,
+    )
+    assert _check_file(fp) == []

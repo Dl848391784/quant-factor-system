@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """
 检查 sys.exit 退出码语义符合 PROJECT.md H12：
-- 0 = 成功
-- 1 = main() 运行时错误
-- 2 = import-time 配置或注册失败
+- 0 = 完全成功
+- 1 = 未预期错误（程序 bug） / 兜底
+- 2 = (R16 弃用，模块顶层改 logger.critical + raise)
+- 3 = 辅助层失败（R17，SummaryLogError）
+- 4 = DataSchemaError（R18，数据 schema 不匹配，需检查上游列契约）
+- 5 = FactorCalcError（R19，因子计算内部失败，需检查计算代码）
+- R20 = main() 函数体内禁 sys.exit，必须 raise 让 __main__ 块统一处理
 
 检查策略（AST 分析）：
-- 扫描 factor_ic/ic_*.py 文件
-- 模块顶层 try/except 块内（捕获 register_factor 等）的 sys.exit 必须用 exit code 2
-- if __name__ == "__main__" 块内 except 中的 sys.exit 必须用 exit code 1
+- ① 模块顶层 try/except 块（R16）：禁止 sys.exit，必须 logger.critical + raise
+- ② if __name__ == "__main__" 块内 except：按异常类名→允许 exit 码集合差异化
+  （EXCEPTION_TO_ALLOWED_EXIT_CODES，多值兼容旧 sys.exit(1) + 新 sys.exit(4/5)）
+- ③ R20：main() 函数体内禁 sys.exit（仅对 R20_MIGRATED_FILES 白名单强制）
 - 任何 sys.exit(0) 在 except 块中视为违规（隐藏失败）
 
 对应 PROJECT.md 规则 H12 / AGENTS.md 规则 #6。
@@ -32,7 +37,59 @@ TARGET_GLOB_PATTERNS = [
 # R16 升级：模块顶层 except 不再用 sys.exit(2)，改为 logger.critical + raise，
 # 因此 IMPORT_TIME_EXIT_CODE 不再使用（保留常量用于历史 grep 兼容）。
 IMPORT_TIME_EXIT_CODE = 2  # noqa: F841 — R16 起仅供历史参考，不在检查中使用
-RUNTIME_EXIT_CODE = 1  # __main__ 块内 except
+RUNTIME_EXIT_CODE = 1  # __main__ 块内 except（默认/兜底）
+
+# R18+R19+R17 升级：__main__ 块按 except 异常类名差异化退出码。
+# 映射策略：异常类名 → 允许的 exit 码集合（多值兼容旧实现）。
+# - 多值允许：旧文件用 sys.exit(1) 兼容，新实现用差异化码（4/5/3）；扩散完成后可收紧为单值
+# - 未在表中命中 → 回退到默认 RUNTIME_EXIT_CODE（仅允许 exit 1）
+EXCEPTION_TO_ALLOWED_EXIT_CODES: dict[str, set[int]] = {
+    "DataSchemaError": {1, 4},  # R18: 4=新差异化（检查上游数据），1=旧兼容
+    "FactorCalcError": {1, 5},  # R19: 5=新差异化（检查计算代码），1=旧兼容
+    "SummaryLogError": {3},  # R17: 强制 exit 3（辅助层失败专用）
+    "Exception": {RUNTIME_EXIT_CODE},  # 兜底：程序 bug → exit 1
+}
+
+# R20: main() 函数体内禁 sys.exit，必须 raise 让 __main__ 块统一处理。
+# 仅对已迁移文件强制（白名单），未迁移文件保持向后兼容（旧 main 内含 sys.exit(3) for R17）。
+# 扩散完成后此白名单将切换为黑名单（默认全部强制）。
+R20_MIGRATED_FILES: frozenset[str] = frozenset(
+    {
+        # R3 后填入 momentum_5d；R4 扩散批次后增补
+    }
+)
+
+
+def _handler_exception_names(handler: ast.ExceptHandler) -> list[str]:
+    """提取 except 子句捕获的异常类名列表（含 except (A, B) 元组形式）。
+
+    返回空列表表示裸 except 或捕获非 Name 节点（如属性访问 module.Error）。
+    """
+    if handler.type is None:
+        return []  # 裸 except
+    names: list[str] = []
+    targets = handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
+    for t in targets:
+        if isinstance(t, ast.Name):
+            names.append(t.id)
+        elif isinstance(t, ast.Attribute):
+            names.append(t.attr)  # 如 exceptions.DataSchemaError → DataSchemaError
+    return names
+
+
+def _allowed_exit_codes_for_handler(handler: ast.ExceptHandler) -> set[int]:
+    """根据 except 捕获的异常类名计算允许的退出码集合。
+
+    多个异常类时取并集（兼容旧 except (DataSchemaError, FactorCalcError) 写法）。
+    无命中时回退默认 RUNTIME_EXIT_CODE。
+    """
+    names = _handler_exception_names(handler)
+    if not names:
+        return {RUNTIME_EXIT_CODE}
+    allowed: set[int] = set()
+    for name in names:
+        allowed |= EXCEPTION_TO_ALLOWED_EXIT_CODES.get(name, {RUNTIME_EXIT_CODE})
+    return allowed
 
 
 def _is_main_guard(node: ast.If) -> bool:
@@ -117,26 +174,43 @@ def _check_file(filepath: Path) -> list[str]:
                     )
 
         # ② if __name__ == "__main__" 块内的 try/except
+        # R18+R19+R17：按 except 异常类名差异化允许的 exit 码（多值兼容旧实现）
         if isinstance(stmt, ast.If) and _is_main_guard(stmt):
             for inner in ast.walk(stmt):
                 if not isinstance(inner, ast.Try):
                     continue
                 for handler in inner.handlers:
+                    allowed_codes = _allowed_exit_codes_for_handler(handler)
+                    handler_names = _handler_exception_names(handler) or ["<bare except>"]
+                    handler_repr = "/".join(handler_names)
                     for lineno, code in _extract_exit_codes(handler):
                         if code is None:
                             violations.append(
-                                f"{filepath}:{lineno}: __main__ except 中 sys.exit 无常量参数（H12 要求 exit 1）"
+                                f"{filepath}:{lineno}: __main__ except {handler_repr} 中 "
+                                f"sys.exit 无常量参数（H12 要求 exit ∈ {sorted(allowed_codes)}）"
                             )
                         elif code == 0:
                             violations.append(
-                                f"{filepath}:{lineno}: __main__ except 中 sys.exit(0) 隐藏失败，"
-                                f"H12 要求运行时错误用 exit {RUNTIME_EXIT_CODE}"
+                                f"{filepath}:{lineno}: __main__ except {handler_repr} 中 "
+                                f"sys.exit(0) 隐藏失败，H12 要求 exit ∈ {sorted(allowed_codes)}"
                             )
-                        elif code != RUNTIME_EXIT_CODE:
+                        elif code not in allowed_codes:
                             violations.append(
-                                f"{filepath}:{lineno}: __main__ except 中 sys.exit({code})，"
-                                f"H12 要求运行时错误用 exit {RUNTIME_EXIT_CODE}"
+                                f"{filepath}:{lineno}: __main__ except {handler_repr} 中 "
+                                f"sys.exit({code})，H12 要求 exit ∈ {sorted(allowed_codes)}"
                             )
+
+    # ③ R20：main() 函数体内禁 sys.exit（仅对已迁移文件强制）
+    # 未迁移文件保持向后兼容；扩散完成后 R20_MIGRATED_FILES 切换为黑名单
+    if filepath.name in R20_MIGRATED_FILES:
+        for stmt in tree.body:
+            if isinstance(stmt, ast.FunctionDef) and stmt.name == "main":
+                for lineno, code in _extract_exit_codes(stmt):
+                    code_repr = "" if code is None else str(code)
+                    violations.append(
+                        f"{filepath}:{lineno}: R20 违规 — main() 函数体内禁 sys.exit({code_repr})，"
+                        f"必须 raise 具名异常让 __main__ 块统一处理（PROJECT.md H12 R20）"
+                    )
 
     return violations
 
@@ -192,9 +266,14 @@ def check_exit_codes(mode: str = "staged") -> int:
         for v in all_violations:
             print(f"   {v}")
         print()
-        print("   H12 规则（R16 修正后）：")
-        print("   - 模块顶层 try/except register_factor → logger.critical + raise（禁止 sys.exit）")
-        print(f"   - __main__ 块 except → sys.exit({RUNTIME_EXIT_CODE})")
+        print("   H12 规则（R16/R17/R18/R19/R20）：")
+        print("   - ① 模块顶层 except register_factor → logger.critical + raise（禁止 sys.exit）")
+        print("   - ② __main__ except 按异常类名差异化 exit 码：")
+        print("       DataSchemaError → exit 4（R18）/ 1（旧兼容）")
+        print("       FactorCalcError → exit 5（R19）/ 1（旧兼容）")
+        print("       SummaryLogError → exit 3（R17）")
+        print("       Exception → exit 1（兜底）")
+        print("   - ③ R20: main() 函数体内禁 sys.exit，必须 raise 让 __main__ 处理")
         print("   - 禁止 except 块中 sys.exit(0)")
         return 1
 
