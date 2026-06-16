@@ -40,7 +40,8 @@ logger = get_logger(__name__)
 # FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
 # ============================================================================
 
-SPEC: FactorSpec
+SPEC: FactorSpec  # noqa: F842 — 仅类型注解；下方 try 块在 import-time 完成赋值，
+# 注册失败会 raise 抛出异常中断模块加载（不会进入未绑定状态，故无需赋初值 None）。
 try:
     SPEC = register_factor(
         FactorSpec(
@@ -50,22 +51,29 @@ try:
         )
     )
 except (ValueError, TypeError) as e:
-    # 模块顶层注册失败兜底（fix #5）：
+    # 模块顶层注册失败兜底（fix #5 + R13 调整）：
     # - register_factor 文档声明 Raises: ValueError（factor_spec.py:117-119，含重复注册、
     #   required_columns 为空、列名非法、factor_col 不在 required_columns 中等）。
     # - TypeError 防御 FactorSpec dataclass 构造期的字段类型错误（虽属于代码 bug，
-    #   仍以可观测方式退出而非裸抛栈）。
-    # - 退出码 2：与 main() 运行时错误（exit 1）区分，专用于 import-time 配置错误
-    #   （遵循 ic_industry_earnings_growth_main_cleanup_design.md §3 退出码约定）。
-    # - 不在 main() 内做注册：保持模块级 SPEC 单例契约，且
-    #   factor_ic/common/test_factor_spec_consistency.py 通过 importlib + pkgutil
-    #   扫描所有 ic_*.py 触发 SPEC 注册，main() 内注册会破坏该测试。
+    #   仍以可观测方式记录后再抛出）。
+    # - 行为变化（R13）：先前在此处 sys.exit(2) 退出，但
+    #   factor_ic/common/test_factor_spec_consistency.py 通过 importlib.import_module
+    #   扫描所有 ic_*.py 触发 SPEC 注册，sys.exit 会直接杀掉 pytest 宿主进程，
+    #   与"测试通过 importlib 触发注册"路径自相矛盾。
+    # - 现改为 logger.critical 后 raise：
+    #   * 测试场景 → import_module 抛 ValueError/TypeError，测试可捕获/断言/skip；
+    #   * CLI 场景（python ic_industry_earnings_growth_1d.py）→ Python 解释器
+    #     打印 traceback 后默认 exit 1（不再是 exit 2，trade-off：放弃
+    #     import-time/runtime 退出码区分 换取 测试可隔离性）。
+    # - 该 trade-off 见 ic_industry_earnings_growth_main_cleanup_design.md §11。
+    err_msg = str(e)[:200]  # 截断 200 字符：避免超长异常消息（如全量列名列表）淹没单行日志，
+    # 与 logger_config 默认 console formatter 单行可读性边界一致。
     logger.critical(
         "FactorSpec 注册失败 (factor=industry_earnings_growth): %s (%s)",
-        str(e)[:200],
+        err_msg,
         type(e).__name__,
     )
-    sys.exit(2)
+    raise
 
 
 def main():
