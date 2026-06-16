@@ -204,6 +204,9 @@ _OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COL
 #   emit_valid_log bool 是否打印 "  有效 xxx: %d (%.2f%%)" 行
 #                       step 3.5~11.5 段的 15 项 + step 11 的 5 列 = True
 #                       step 11.6/11.7/11.8/11.9 段的 12 项 = False
+#                       策略：成熟因子 + 差分因子需观察样本量演变 → True；
+#                       方向性 / 行业级因子量大刷屏 → False（仅保留段头）
+#                       详见 _run_pipeline_step docstring 的 emit_valid_log 约定段
 #
 # 注：_VALID_KEY_ORDER 是 31 个 key 的 tuple，与 D 步重构前 metadata 顺序字符级一致。
 # 两者集合等价，但顺序不同（表序按 step 段，metadata 序按历史累积顺序）。
@@ -521,9 +524,17 @@ def _run_pipeline_step(
 
     Note:
         - 此 helper 涵盖 simple（单列）和 tail（5 列）两种因子，靠 output_cols 长度区分
-        - emit_valid_log=False 时（step 11.6~11.9 共 12 个因子）仍计算 valid_count，
-          但不打印日志 → metadata 字段完整，日志保持原样
-        - step_label="" 表示沿用上一段头（step 11.5/11.6/11.7/11.8/11.9 内续接因子）
+        - emit_valid_log 与 step_label 正交：
+          * step_label：是否打印段头（"" 表示沿用上一段头，常用于段内续接因子）
+          * emit_valid_log：是否对 output_cols 逐列打印 "  有效 xxx: N (P%)"
+        - 当前 emit_valid_log 取值约定：
+          * step 3.5~11.5 全 True：早期成熟因子 + 差分因子，单因子日志便于
+            观察 NaN 分布与样本量演变（差分因子样本量较少时尤其需要）
+          * step 11.6~11.9 全 False（共 12 个因子）：方向性 / 行业级因子
+            数量多，逐因子打 valid 行会显著刷屏，仅保留段头日志
+          * 即便 emit_valid_log=False，valid_count 仍正常计入 metadata，
+            元数据完整性不受日志策略影响
+        - 改 emit_valid_log 取值 = 改运行时日志规格，需走需求评审，不属于 bug fix
     """
     step_label = step["step_label"]
     if step_label:
