@@ -83,7 +83,7 @@ def calculate_volume_price_strength(
     遵循 H5: IC方向不预判
     """
     _logger = get_module_logger(logger_arg)
-    _logger.debug("  输入 %s: %d 行", _COL_VOLUME_PRICE_STRENGTH, len(factor_df))
+    _logger.debug("  输入 %s: %d 行", "calculate_volume_price_strength", len(factor_df))
 
     df = factor_df.copy()
 
@@ -131,7 +131,7 @@ def calculate_positive_day_ratio_5(
     遵循 H5: IC方向不预判
     """
     _logger = get_module_logger(logger_arg)
-    _logger.debug("  输入 %s: %d 行", _COL_POSITIVE_DAY_RATIO_5, len(factor_df))
+    _logger.debug("  输入 %s: %d 行", "calculate_positive_day_ratio_5", len(factor_df))
 
     df = factor_df.copy()
     df = df.sort_values([_COL_ASSET, _COL_DATE])
@@ -191,7 +191,7 @@ def calculate_ma5_deviation(
     遵循 H5: IC方向不预判
     """
     _logger = get_module_logger(logger_arg)
-    _logger.debug("  输入 %s: %d 行", _COL_MA5_DEVIATION, len(factor_df))
+    _logger.debug("  输入 %s: %d 行", "calculate_ma5_deviation", len(factor_df))
 
     df = factor_df.copy()
     df = df.sort_values([_COL_ASSET, _COL_DATE])
@@ -246,7 +246,7 @@ def calculate_near_high_ratio_5(
     遵循 H5: IC方向不预判
     """
     _logger = get_module_logger(logger_arg)
-    _logger.debug("  输入 %s: %d 行", _COL_NEAR_HIGH_RATIO_5, len(factor_df))
+    _logger.debug("  输入 %s: %d 行", "calculate_near_high_ratio_5", len(factor_df))
 
     df = factor_df.copy()
     df = df.sort_values([_COL_ASSET, _COL_DATE])
