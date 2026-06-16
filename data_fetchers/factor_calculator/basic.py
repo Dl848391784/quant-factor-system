@@ -253,7 +253,7 @@ def calculate_forward_return(
     zero_close_count = zero_close_mask.sum()
     if zero_close_count > 0:
         _logger.warning("检测到 %s 个收盘价接近零，前瞻收益已标记为 np.nan", zero_close_count)
-    # 负收盘价检测（数据脏时可能出现）
+    # 检测明显负收盘价（< -_EPSILON，数据脏时可能出现）
     neg_close_mask = close_prices.notna() & (close_prices <= 0) & ~zero_close_mask
     neg_close_count = neg_close_mask.sum()
     if neg_close_count > 0:
@@ -649,13 +649,13 @@ def calculate_rsi_df(
 
     if len(factor_df) == 0:
         factor_df["rsi"] = pd.Series([], dtype="float64", index=factor_df.index)
-        return factor_df
+        return factor_df.loc[original_index]
 
     # 用通用 helper 替代 transform，避免 OOM（详见 _per_asset_transform docstring）
     factor_df["rsi"] = _per_asset_transform(
         asset_arr=factor_df[_COL_ASSET].to_numpy(),
         value_arr=factor_df[_COL_CLOSE].to_numpy(),
-        fn=lambda close_s: calculate_rsi(close_s, period=n),
+        fn=lambda close_s: calculate_rsi(close_s, period=n, logger_arg=_logger),
     )
 
     _logger.info(
