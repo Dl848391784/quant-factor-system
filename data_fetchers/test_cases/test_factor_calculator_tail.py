@@ -192,3 +192,87 @@ class TestCalculateTailFactorsEquivalence:
             assert nan_count == len(small_factor_df), (
                 f"{col} 在零匹配下应全部 NaN，实际 {nan_count}/{len(small_factor_df)}"
             )
+
+    def test_row_order_preserved(self, small_factor_df, tail_data_file, test_logger):
+        """factor_df 行序乱序时，mask 写回保持原顺序对齐。
+
+        构造：shuffle 后的 factor_df，仅 (A, 2026-01-02) 和 (C, 2026-01-01) 有尾盘数据。
+        预期：result 的 date/asset 列与 shuffled 输入一致；这两行因子有值，其余 NaN。
+        """
+        # shuffle (固定随机种子保证可重复)
+        shuffled = small_factor_df.sample(frac=1, random_state=42).reset_index(drop=True)
+
+        records = [
+            _make_tail_record("2026-01-02", "A"),
+            _make_tail_record("2026-01-01", "C"),
+        ]
+        tail_data_file(records)
+
+        result = calculate_tail_factors(shuffled.copy(), logger_arg=test_logger)
+
+        # date / asset 列与 shuffled 输入完全一致（行序保留）
+        pd.testing.assert_series_equal(
+            result["date"].reset_index(drop=True),
+            shuffled["date"].reset_index(drop=True),
+            check_names=False,
+        )
+        pd.testing.assert_series_equal(
+            result["asset"].reset_index(drop=True),
+            shuffled["asset"].reset_index(drop=True),
+            check_names=False,
+        )
+
+        # 命中行：5 因子非 NaN；未命中行：5 因子 NaN
+        matched_mask = ((result["date"] == "2026-01-02") & (result["asset"] == "A")) | (
+            (result["date"] == "2026-01-01") & (result["asset"] == "C")
+        )
+        assert matched_mask.sum() == 2
+
+        for col in _TAIL_FACTOR_COLS:
+            matched_nan = result.loc[matched_mask, col].isna().sum()
+            assert matched_nan == 0, f"匹配行 {col} 不应有 NaN，实际 {matched_nan}"
+            unmatched_nan = result.loc[~matched_mask, col].isna().sum()
+            assert unmatched_nan == 4, f"未匹配 4 行 {col} 应全部 NaN，实际 {unmatched_nan}"
+
+    def test_limit_up_branch(self, small_factor_df, tail_data_file, test_logger):
+        """涨跌停分支（v1.39）：tail_high == tail_low 时根据日线 close/high/low 判断。
+
+        构造 3 个 asset：
+        - A 的 2026-01-01：尾盘零波动 + daily close == daily high → 涨停 → position=1.0
+        - B 的 2026-01-01：尾盘零波动 + daily close == daily low → 跌停 → position=0.0
+        - C 的 2026-01-01：尾盘零波动 + daily close 介于 high/low 之间 → 中性 → position=0.5
+        """
+        # 修改 small_factor_df：让 A 涨停（close=high）、B 跌停（close=low）、C 中性
+        df = small_factor_df.copy()
+        # A / 2026-01-01：涨停（close == high）
+        df.loc[(df["date"] == "2026-01-01") & (df["asset"] == "A"), "close"] = 10.3
+        df.loc[(df["date"] == "2026-01-01") & (df["asset"] == "A"), "high"] = 10.3
+        # B / 2026-01-01：跌停（close == low）
+        df.loc[(df["date"] == "2026-01-01") & (df["asset"] == "B"), "close"] = 19.8
+        df.loc[(df["date"] == "2026-01-01") & (df["asset"] == "B"), "low"] = 19.8
+        # C / 2026-01-01：保持 close=30.0 介于 high=30.3 / low=29.8 之间 → 中性
+
+        # 构造尾盘 13 根 K 线全相同（tail_high == tail_low，零波动）
+        flat_prices_a = [10.3] * 13  # A 涨停
+        flat_prices_b = [19.8] * 13  # B 跌停
+        flat_prices_c = [30.0] * 13  # C 零波动但非涨跌停
+        records = [
+            _make_tail_record("2026-01-01", "A", prices=flat_prices_a, tail_high=10.3, tail_low=10.3),
+            _make_tail_record("2026-01-01", "B", prices=flat_prices_b, tail_high=19.8, tail_low=19.8),
+            _make_tail_record("2026-01-01", "C", prices=flat_prices_c, tail_high=30.0, tail_low=30.0),
+        ]
+        tail_data_file(records)
+
+        result = calculate_tail_factors(df.copy(), logger_arg=test_logger)
+
+        # 取 2026-01-01 三个 asset 的 tail_price_position
+        pos = result.set_index(["date", "asset"])["tail_price_position"]
+        assert pos[("2026-01-01", "A")] == pytest.approx(1.0), "A 涨停应为 1.0"
+        assert pos[("2026-01-01", "B")] == pytest.approx(0.0), "B 跌停应为 0.0"
+        assert pos[("2026-01-01", "C")] == pytest.approx(0.5), "C 零波动非涨跌停应为 0.5"
+
+        # 验证零波动下 tail_price_slope = 0（mean_price=10.3, slope=0）
+        slope = result.set_index(["date", "asset"])["tail_price_slope"]
+        assert slope[("2026-01-01", "A")] == pytest.approx(0.0)
+        assert slope[("2026-01-01", "B")] == pytest.approx(0.0)
+        assert slope[("2026-01-01", "C")] == pytest.approx(0.0)
