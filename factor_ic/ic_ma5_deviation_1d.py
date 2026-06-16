@@ -21,6 +21,21 @@ from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
 from factor_ic.common.exceptions import DataSchemaError, FactorCalcError
 from factor_ic.common.factor_ic_runner import run_factor_ic
 from factor_ic.common.factor_spec import FactorSpec, register_factor
+from factor_ic.common.ic_result_builder import (
+    RESULT_KEY_FACTOR_NAME as _KEY_FACTOR_NAME,
+    RESULT_KEY_IC_DISTRIBUTION as _KEY_IC_DISTRIBUTION,
+    RESULT_KEY_IC_MEAN as _KEY_IC_MEAN,
+    RESULT_KEY_IC_METRICS as _KEY_IC_METRICS,
+    RESULT_KEY_IC_STD as _KEY_IC_STD,
+    RESULT_KEY_ICIR as _KEY_ICIR,
+    RESULT_KEY_PERIOD as _KEY_PERIOD,
+    RESULT_KEY_PERIOD_END as _KEY_PERIOD_END,
+    RESULT_KEY_PERIOD_START as _KEY_PERIOD_START,
+    RESULT_KEY_POSITIVE_RATIO as _KEY_POSITIVE_RATIO,
+    RESULT_KEY_SAMPLE_STATS as _KEY_SAMPLE_STATS,
+    RESULT_KEY_UPDATE_MODE as _KEY_UPDATE_MODE,
+    RESULT_KEY_VALID_DAYS as _KEY_VALID_DAYS,
+)
 from factor_ic.common.logger_config import get_logger
 
 
@@ -39,27 +54,12 @@ SPEC = register_factor(
 )
 
 # ============================================================================
-# 结果字典键名常量（与 factor_ic.common.ic_result_builder.build_ic_result 输出严格对齐）
+# 结果字典键名常量
 # ----------------------------------------------------------------------------
-# 引入原因：避免散落字符串字面量；run_factor_ic 返回结构变更时由静态检查/grep 一次定位。
+# 全部从 factor_ic.common.ic_result_builder 导入并以 _KEY_* 私名 alias 局部使用：
+# 键名变更只需改 ic_result_builder.RESULT_KEY_*，本文件无需同步——
+# 让"键名对齐"从注释承诺升级为代码约束（import 失败即 import-time 报错）。
 # ============================================================================
-
-_KEY_IC_METRICS = "ic_metrics"
-_KEY_SAMPLE_STATS = "sample_stats"
-_KEY_PERIOD = "period"
-_KEY_IC_DISTRIBUTION = "ic_distribution_consistency"
-_KEY_FACTOR_NAME = "factor_name"
-_KEY_UPDATE_MODE = "update_mode"
-# ic_metrics 子键
-_KEY_IC_MEAN = "ic_mean"
-_KEY_IC_STD = "ic_std"
-_KEY_ICIR = "icir"
-# ic_distribution_consistency 子键
-_KEY_POSITIVE_RATIO = "positive_ratio"
-# sample_stats / period 子键
-_KEY_VALID_DAYS = "valid_days"
-_KEY_PERIOD_START = "start"
-_KEY_PERIOD_END = "end"
 
 
 def _safe_dict(result: dict, key: str) -> dict:

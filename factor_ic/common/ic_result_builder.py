@@ -25,6 +25,33 @@ from .logger_config import get_logger
 logger = get_logger(__name__)
 
 
+# ============================================================================
+# 结果字典键名常量（公共导出）
+# ----------------------------------------------------------------------------
+# 用途：本模块组装 result 字典使用，下游脚本（如 ic_*_1d.py）import 复用，
+#      消除"两处字符串字面量人工同步"负担。
+# 规则：键名变更必须只改本处一行，下游引用自动跟随；新增键时同步在此处声明。
+# 命名约定：以 RESULT_KEY_ 前缀公开导出，区别于模块内部的私有常量。
+# ============================================================================
+
+RESULT_KEY_FACTOR_NAME = "factor_name"
+RESULT_KEY_PERIOD = "period"
+RESULT_KEY_IC_METRICS = "ic_metrics"
+RESULT_KEY_SAMPLE_STATS = "sample_stats"
+RESULT_KEY_IC_DISTRIBUTION = "ic_distribution_consistency"
+RESULT_KEY_UPDATE_MODE = "update_mode"
+# ic_metrics 子键
+RESULT_KEY_IC_MEAN = "ic_mean"
+RESULT_KEY_IC_STD = "ic_std"
+RESULT_KEY_ICIR = "icir"
+# ic_distribution_consistency 子键
+RESULT_KEY_POSITIVE_RATIO = "positive_ratio"
+# sample_stats / period 子键
+RESULT_KEY_VALID_DAYS = "valid_days"
+RESULT_KEY_PERIOD_START = "start"
+RESULT_KEY_PERIOD_END = "end"
+
+
 def build_ic_result(
     ic_result: dict,
     raw_metadata: dict,
@@ -144,25 +171,29 @@ def build_ic_result(
     }
 
     # ========== 组装完整结果 ==========
+    # 顶层键名引用 RESULT_KEY_* 常量，让"输出字段契约"成为代码约束而非注释承诺：
+    # 下游脚本 import 同名常量后，键名修改在此处一次完成；未列入常量的键
+    # （如 success/calculation_date/dates/...）目前没有外部脚本以字面量耦合，
+    # 待出现新依赖再上提。
     result = {
         "success": True,
-        "factor_name": factor_name,
+        RESULT_KEY_FACTOR_NAME: factor_name,
         "calculation_date": datetime.now().isoformat(),
-        "period": period,
-        "ic_metrics": ic_metrics,
-        "sample_stats": sample_stats,
+        RESULT_KEY_PERIOD: period,
+        RESULT_KEY_IC_METRICS: ic_metrics,
+        RESULT_KEY_SAMPLE_STATS: sample_stats,
         "statistical_significance": statistical_significance,
         "factor_direction": factor_direction_judgment,
         "economic_significance": economic_significance,
         "icir_stability": icir_stability,
-        "ic_distribution_consistency": ic_distribution_consistency,
+        RESULT_KEY_IC_DISTRIBUTION: ic_distribution_consistency,
         "dates": dates,
         "ic_values": ic_values,
         "rolling_ic_mean": rolling_ic_mean,
-        "positive_ratio": positive_ratio,
+        RESULT_KEY_POSITIVE_RATIO: positive_ratio,
         "summary": summary,
         "factor_stats": factor_stats,
-        "update_mode": update_mode,
+        RESULT_KEY_UPDATE_MODE: update_mode,
         "factor_col": factor_col,  # 额外字段，用于追踪
     }
 
