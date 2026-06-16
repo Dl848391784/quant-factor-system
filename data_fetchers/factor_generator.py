@@ -586,7 +586,7 @@ def _load_json_gz_data(
     Args:
         path: 数据文件路径
         dataset_label: 数据集中文标签（用于错误消息），例 "基础因子" / "换手率" / "收益"
-        logger: 日志器（gzip.BadGzipFile 时 error 日志）
+        logger: 日志器（gzip / JSON 解析失败时记录 error 日志）
 
     Returns:
         records: list[dict]，对应 JSON 文件 "data" 字段值
@@ -594,6 +594,12 @@ def _load_json_gz_data(
     Raises:
         FileNotFoundError: 文件不存在
         ValueError: gzip 损坏 / JSON 解析失败 / 缺少 'data' 字段
+
+    Note:
+        - 日志策略：gzip.BadGzipFile 与 json.JSONDecodeError 同为解析失败，
+          统一在 except 块内打 logger.error 后再 raise，便于运维定位故障来源。
+        - 内存安全：JSONDecodeError 仅引用 path / lineno / colno / msg 等小字段，
+          不引用 e.doc（可能持有整个 JSON 文本副本）。
     """
     try:
         with gzip.open(path, "rt", encoding="utf-8") as f:
@@ -604,8 +610,8 @@ def _load_json_gz_data(
         logger.error("gzip 文件损坏: %s, 原因: %s", path, str(e))
         raise ValueError(f"gzip 文件损坏: {path}") from e
     except json.JSONDecodeError as e:
-        # JSONDecodeError 内存优化：提取关键信息，避免 e.doc 内存翻倍
-        # 将行列信息合并到异常消息，由调用方统一决定是否记录日志
+        # 内存安全：仅引用 path / lineno / colno / msg，不引用 e.doc（避免内存翻倍）
+        logger.error("JSON解析失败: %s, 行 %d, 列 %d, 信息: %s", path, e.lineno, e.colno, e.msg)
         raise ValueError(f"JSON解析失败: {path}, 行 {e.lineno}, 列 {e.colno}, 信息: {e.msg}") from e
 
     # 数据验证：检查 'data' 字段存在

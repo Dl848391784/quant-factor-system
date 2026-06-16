@@ -28,6 +28,7 @@ import pytest
 
 from data_fetchers.factor_generator import (
     _calc_pct,
+    _load_json_gz_data,
     _nan_to_null,
     _write_factor_json_gz,
 )
@@ -259,6 +260,93 @@ class TestWriteFactorJsonGz:
         assert output_path.exists(), "os.replace 成功后目标文件不应被清理"
         temp_path = output_path.parent / (output_path.name + ".tmp")
         assert not temp_path.exists(), "临时文件已被 replace 移走"
+
+
+# ============================================================================
+# _load_json_gz_data: gzip + JSON 加载 + 日志策略
+# ============================================================================
+
+
+class TestLoadJsonGzData:
+    """_load_json_gz_data 单元测试（重点验证两个 except 分支均打 logger.error）"""
+
+    def test_success(
+        self,
+        tmp_path: Path,
+        silent_logger: logging.Logger,
+    ) -> None:
+        """正常加载：返回 'data' 字段内容"""
+        path = tmp_path / "ok.json.gz"
+        with gzip.open(path, "wt", encoding="utf-8") as f:
+            json.dump({"data": [{"a": 1}, {"a": 2}]}, f)
+
+        result = _load_json_gz_data(path, "测试", silent_logger)
+        assert result == [{"a": 1}, {"a": 2}]
+
+    def test_file_not_found(
+        self,
+        tmp_path: Path,
+        silent_logger: logging.Logger,
+    ) -> None:
+        """文件不存在 → FileNotFoundError（无日志，调用栈足够清晰）"""
+        path = tmp_path / "missing.json.gz"
+        with pytest.raises(FileNotFoundError, match="测试数据文件不存在"):
+            _load_json_gz_data(path, "测试", silent_logger)
+
+    def test_bad_gzip_logs_error(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """gzip 损坏 → logger.error 被调用 + ValueError 抛出"""
+        path = tmp_path / "broken.json.gz"
+        # 非 gzip 内容
+        path.write_bytes(b"not a gzip file")
+
+        logger = logging.getLogger("test_bad_gzip")
+        logger.handlers.clear()
+        with patch.object(logger, "error") as mock_error, pytest.raises(ValueError, match="gzip 文件损坏"):
+            _load_json_gz_data(path, "测试", logger)
+
+        mock_error.assert_called_once()
+        # 验证日志参数包含 path（第一个 % 占位符）
+        args = mock_error.call_args.args
+        assert "gzip 文件损坏" in args[0]
+        assert path in args  # path 是其中一个位置参数
+
+    def test_json_decode_error_logs_error(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """JSON 解析失败 → logger.error 被调用（与 BadGzipFile 一致策略）+ ValueError 抛出"""
+        path = tmp_path / "bad_json.json.gz"
+        # 合法 gzip 包装非法 JSON
+        with gzip.open(path, "wt", encoding="utf-8") as f:
+            f.write("{not valid json")
+
+        logger = logging.getLogger("test_bad_json")
+        logger.handlers.clear()
+        with patch.object(logger, "error") as mock_error, pytest.raises(ValueError, match="JSON解析失败"):
+            _load_json_gz_data(path, "测试", logger)
+
+        # 关键断言：JSONDecodeError 分支必须打 logger.error（修复前缺失）
+        mock_error.assert_called_once()
+        args = mock_error.call_args.args
+        assert "JSON解析失败" in args[0]
+        # 验证不引用 e.doc（避免内存翻倍）：参数中不应含完整 JSON 文本
+        assert "{not valid json" not in str(args)
+
+    def test_missing_data_field(
+        self,
+        tmp_path: Path,
+        silent_logger: logging.Logger,
+    ) -> None:
+        """缺 'data' 字段 → ValueError"""
+        path = tmp_path / "no_data.json.gz"
+        with gzip.open(path, "wt", encoding="utf-8") as f:
+            json.dump({"other_field": []}, f)
+
+        with pytest.raises(ValueError, match="测试数据缺少 'data' 字段"):
+            _load_json_gz_data(path, "测试", silent_logger)
 
 
 if __name__ == "__main__":
