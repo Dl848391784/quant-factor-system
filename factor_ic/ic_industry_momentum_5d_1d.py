@@ -91,8 +91,22 @@ def main():
     # 模式 E：防御 is None 兜底面对永不返回 None 的函数），已彻底移除。
     # log_factor_summary 自身契约（factor_summary_logger.py L40-44）：不抛异常、不调用
     # sys.exit、不影响调用方控制流；其内部对 dict 字段为 None 的异常情况输出整合告警
-    # （L83-92），无需调用方额外守卫。
-    log_factor_summary(result, "行业5日动量因子", logger)
+    # （L83-92），无需调用方额外守卫业务语义。
+    #
+    # 错误来源区分（issue 4：契约依赖注释而非代码强制）：
+    # 一旦摘要层未来回归并抛异常，__main__ 块的通用 except Exception 会输出
+    # "未预期的错误"，此时无法分辨故障源是因子计算（main 中段）还是日志摘要（main 末段）。
+    # 在此独立 try/except 包裹：
+    # - 摘要层异常打印明确前缀 "log_factor_summary 摘要输出阶段失败"，便于一眼定位；
+    # - 不重新 raise（因子计算结果已成功，不应因摘要层 bug 反向污染业务退出码）；
+    # - 同时输出完整 traceback（logger.exception）保留调试信息。
+    try:
+        log_factor_summary(result, "行业5日动量因子", logger)
+    except Exception:
+        logger.exception(
+            "log_factor_summary 摘要输出阶段失败（因子计算 result 已成功生成；"
+            "故障源 = 摘要日志层而非 run_factor_ic 业务路径）"
+        )
 
 
 if __name__ == "__main__":
