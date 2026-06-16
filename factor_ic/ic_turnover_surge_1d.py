@@ -39,7 +39,7 @@ from data_fetchers.factor_calculator import (
     calculate_turnover_surge,
 )
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
-from factor_ic.common.exceptions import FactorCalcError
+from factor_ic.common.exceptions import DataSchemaError, FactorCalcError
 from factor_ic.common.factor_ic_runner import run_factor_ic
 from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.logger_config import get_logger
@@ -164,10 +164,16 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except DataSchemaError as e:
+        # 数据 Schema 校验失败（公共模块 validate_required_columns 抛出）：
+        # H12 R18 → exit 4 与因子计算失败（exit 5）严格区分。
+        # MODULE.md M22：业务异常用 logger.error 不打堆栈。
+        logger.error("数据 Schema 校验失败 (factor=%s): %s", e.factor_name, e)
+        sys.exit(4)  # H12 R18: schema 失败 → 检查上游数据
     except FactorCalcError as e:
         # 业务异常：消息已足够定位，堆栈是噪音（MODULE.md M22 业务异常子类规则）
         logger.error("换手率突增因子 IC 计算失败: %s", e)
-        sys.exit(1)
+        sys.exit(5)  # H12 R19: 因子计算失败 → 检查计算代码
     except Exception:
         # 未预期异常：必须打印堆栈以便定位
         logger.exception("换手率突增因子 IC 计算失败（未预期错误）")
