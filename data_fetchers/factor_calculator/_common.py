@@ -27,7 +27,7 @@
   NaN 中断时记录 debug 日志；``_calculate_delta`` 行顺序契约写入 docstring，
   日志级别由 INFO 降为 DEBUG（避免高频批量调用刷屏）；
   ``_DEFAULT_PRICE_POSITION_EPSILON`` / ``_DEFAULT_AMPLITUDE_EPSILON`` 改为引用
-  ``_EPSILON`` 消除重复字面量；修正 ``get_module_logger`` 文档示例的函数名。
+  ``_EPSILON`` 消除重复字面量。
 - v1.22 (2026-06-16) R3：本模块自身可观测性与契约修复（不改公式语义）：
   ``_per_asset_transform`` 增加 ``_validate_sort`` 参数，大批量场景可跳过
   ``np.unique`` 的 O(n log n) 排序校验；``_calculate_ewm_with_initial`` 的字符串
@@ -52,6 +52,22 @@
   ``logging.getLogger(__name__)``，按 Python 日志命名约定使用模块全限定名
   以支持按层级精确过滤；末尾迁出说明注释由 15 行精简为 3 行（架构规范属
   design.md / MODULE.md 内容，不应承载于代码注释）。
+- v1.24 (2026-06-16) R5：本模块自身 8 项可观测性 / 契约 / 防御修复：
+  ``_wilder_smoothing_rsi`` 删除 ``in_reported_break = False`` 重置死代码
+  （Wilder 标准下链不可恢复，``else`` 分支永不进入，重置永不触发——违反
+  PROJECT.md 规则 #14 同源原则）；``_per_asset_transform`` 把 ``boundaries``
+  扩展上移到 ``_validate_sort`` 分支前，让两路日志与主循环共用一份扩展数据，
+  消除 ``len(boundaries)+1`` / ``len(boundaries)-1`` 双重读法歧义，并在循环
+  结束后补正常路径函数级 debug 日志（与 ``_validate_sort=False`` 路径对称）；
+  ``_calculate_ewm_with_initial`` 早返回改 ``return series.copy()`` 保证副作用
+  隔离，``result_series.index = series.index`` 改 ``set_axis(series.index)``
+  使用 pandas 官方推荐的链式 / 函数式 Index 替换 API；``_calculate_delta``
+  日志百分比表达式显式加括号 ``(valid_count / max(total_count, 1)) * 100``
+  防止后续误改成整除 / 调括号时静默走错；模块 docstring 删除 v1.21 中"修正
+  ``get_module_logger`` 文档示例的函数名"过时备注（当前示例已与签名一致）；
+  ``_DEFAULT_PRICE_POSITION_EPSILON`` / ``_DEFAULT_AMPLITUDE_EPSILON`` 注释由
+  6 行精简为 1 行语义别名说明，设计理由迁至 design.md（与 v1.23 末尾迁出
+  说明精简原则一致，不在代码注释中承载架构规范）。
 """
 
 from __future__ import annotations
@@ -152,12 +168,7 @@ _DEFAULT_KDJ_M2 = 3
 _DEFAULT_SURGE_WINDOW = 5
 _DEFAULT_VOLUME_RATIO_WINDOW = 5
 _DEFAULT_FORWARD_RETURN_SHIFT = 1
-# 价格位置 / 振幅族因子的除零保护 epsilon。语义与 ``_EPSILON`` 等价，
-# 显式引用而非重新定义，避免后续维护时三处 1e-10 不同步（PROJECT.md 死代码 #14 同源原则）。
-# 命名保留是给 ``momentum.py`` 按"业务族"语义直读：``_DEFAULT_PRICE_POSITION_EPSILON``
-# 比 ``_EPSILON`` 在因子代码里更可读（_DEFAULT_* 做语义层、_EPSILON 做物理层）。
-# 单下划线前缀仅约束"跨包访问"——``momentum.py`` 与本模块同属 ``factor_calculator``
-# 包内部模块，按 PEP 8 包内可访问私有符号约定，无封装违规。
+# 语义别名：``_DEFAULT_*_EPSILON`` 引用 ``_EPSILON``，供 momentum.py 按业务族语义直读。设计理由见 design.md。
 _DEFAULT_PRICE_POSITION_EPSILON = _EPSILON
 _DEFAULT_AMPLITUDE_EPSILON = _EPSILON
 _DEFAULT_PAST_RETURN_1D_WINDOW = 1  # 1日涨幅窗口
@@ -282,9 +293,11 @@ def _wilder_smoothing_rsi(series: pd.Series, n: int) -> pd.Series:
     # 由 False→True 的瞬间）。
     # 关键区分：当前输入 NaN（``pd.isna(series.iloc[i])``）属"数据传播"，**不**
     # 改变 ``in_reported_break``——若紧接着的下一轮再因 prev=NaN 触发链断，仍
-    # 应记录为新段起点。这是上一轮（R3 / 早期 R4）漏报的根因。
-    # 在 Wilder 标准下链不会恢复（else 分支需 prev 非 NaN，链断后永远进不来），
-    # 因此实际记录条数 ≤ 1；保留 ``= False`` 重置仅为语义完整。
+    # 应记录为新段起点。这是早期版本（R3 / R4 早期）漏报的根因。
+    # Wilder 标准下链一旦断裂则不可恢复（``else`` 分支需 prev 非 NaN，链断后
+    # ``prev`` 永远为 NaN，``else`` 分支永远进不来），因此实际只会记录 1 段；
+    # 不重置 ``in_reported_break``，避免 PROJECT.md 规则 #14 死代码（永不触发
+    # 的"链恢复"防御分支）。
     nan_break_starts: list[int] = []
     in_reported_break = False  # 当前是否处于"已报告的链断段"中
     for i in range(n, len(series)):
@@ -298,7 +311,6 @@ def _wilder_smoothing_rsi(series: pd.Series, n: int) -> pd.Series:
                 in_reported_break = True
         else:
             result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * prev
-            in_reported_break = False
 
     if nan_break_starts:
         _MODULE_LOGGER.debug(
@@ -374,21 +386,28 @@ def _per_asset_transform(
     if n_rows == 0:
         return np.array([], dtype=np.float64)
 
-    # 找 asset 边界（同 asset 行连续，asset 变化处即新组起点）
+    # 找 asset 边界并立即扩展（同 asset 行连续，asset 变化处即新组起点）。
+    # 扩展后 ``boundaries`` 形如 ``[0, b1, b2, ..., n_rows]``，``len-1`` 即段数。
+    # 上移到 ``_validate_sort`` 分支之前：让两个分支与后续主循环都共用同一份
+    # 已扩展数据，``len(boundaries) - 1`` 在全函数表达"段数"语义一致，避免
+    # 旧实现中 ``len(boundaries) + 1``（分支内、未扩展）/ ``len(boundaries) - 1``
+    # （主循环内、已扩展）的双重读法（R5 #2）。
     boundaries = np.flatnonzero(asset_arr[1:] != asset_arr[:-1]) + 1
+    boundaries = np.concatenate([[0], boundaries, [n_rows]])
+    n_assets = len(boundaries) - 1
+
     if _validate_sort:
-        # 排序契约校验：boundaries 给出的每个 asset 段必须只出现一次。
-        # 若调用方未按 asset 排序（同一 asset 被切成多段），unique_groups < n_groups。
+        # 排序契约校验：扩展后 ``n_assets`` 即段数；若调用方未按 asset 排序
+        # （同一 asset 被切成多段），``n_assets > n_unique_assets``。
         # 静默错误代价高（fn 看到的不是完整 asset 切片），用 ValueError 显式抛出，
         # 比 docstring "必须已按 asset 排序" 的口头约束可靠（PROJECT.md 规则 #5 同源）。
         # 性能注记：``np.unique`` 是 O(n log n)，>1M 行场景调用方可显式传
         # ``_validate_sort=False`` 跳过（详见 Args._validate_sort）。
-        n_groups = len(boundaries) + 1
         n_unique_assets = len(np.unique(asset_arr))
-        if n_groups != n_unique_assets:
+        if n_assets != n_unique_assets:
             raise ValueError(
                 f"_per_asset_transform: asset_arr 未按 asset 排序，"
-                f"切片得到 {n_groups} 段但只有 {n_unique_assets} 个唯一 asset，"
+                f"切片得到 {n_assets} 段但只有 {n_unique_assets} 个唯一 asset，"
                 f"调用方需先按 asset 排序后再传入"
             )
     else:
@@ -399,14 +418,12 @@ def _per_asset_transform(
         _MODULE_LOGGER.debug(
             "_per_asset_transform: 已跳过排序契约校验（_validate_sort=False），"
             "调用方需自行保证 asset_arr 严格按 asset 排序，"
-            "n_rows=%d, boundary_segments=%d",
+            "n_rows=%d, n_assets=%d",
             n_rows,
-            len(boundaries) + 1,
+            n_assets,
         )
-    boundaries = np.concatenate([[0], boundaries, [n_rows]])
 
     out = np.full(n_rows, np.nan, dtype=np.float64)
-    n_assets = len(boundaries) - 1
     for i in range(n_assets):
         start, end = boundaries[i], boundaries[i + 1]
         slice_series = pd.Series(value_arr[start:end])
@@ -423,6 +440,16 @@ def _per_asset_transform(
                 f"got={len(result_series)}（请检查 fn 是否做了 dropna / 聚合）"
             )
         out[start:end] = result_series.to_numpy(dtype=np.float64)
+
+    # 正常执行路径函数级 debug：与 ``_validate_sort=False`` 路径对称，让大批量
+    # 调用（factor_generator 一次跑数十个因子）能从日志判断该函数是否被执行
+    # 及处理了多少 asset。日志级别 DEBUG，不冲生产 INFO 流量（R5 #7）。
+    _MODULE_LOGGER.debug(
+        "_per_asset_transform: 完成，n_rows=%d, n_assets=%d, validate_sort=%s",
+        n_rows,
+        n_assets,
+        _validate_sort,
+    )
     return out
 
 
@@ -454,11 +481,15 @@ def _calculate_ewm_with_initial(series: pd.Series, alpha: float, initial_value: 
         等非字符串类型时，会与字符串哨兵索引混合得到 ``object`` dtype Index，
         在某些 pandas 版本上还可能触发 TypeError 或对齐异常。
         实现选择**先把两段都重置为 RangeIndex 再 concat**：concat 不再依赖
-        业务索引，``ewm`` 沿位置滚动；最后 ``iloc[1:]`` 切掉哨兵位、把原始
-        ``series.index`` 直接赋回结果。彻底规避混合索引类型问题。
+        业务索引，``ewm`` 沿位置滚动；最后 ``iloc[1:]`` 切掉哨兵位、用
+        ``set_axis(series.index)`` 把原始 ``series.index`` 函数式赋回。彻底
+        规避混合索引类型问题。
     """
     if len(series) == 0 or series.isna().all():
-        return series
+        # 副作用隔离（R5 #5）：所有路径都返回独立副本，调用方修改返回值
+        # 不会回写上游数据。docstring "保留输入 series 的原始索引与索引类型"
+        # 不允许 caller 与 callee 共享对象底层。
+        return series.copy()
 
     # 在第一个有效值前插入虚拟 initial_value。索引类型隔离：先把 series 重置为
     # RangeIndex，再与单元素 RangeIndex 哨兵串拼接，concat 全程使用同质整型索引。
@@ -477,14 +508,17 @@ def _calculate_ewm_with_initial(series: pd.Series, alpha: float, initial_value: 
     result_with_initial = series_with_initial.ewm(alpha=alpha, adjust=False, ignore_na=True).mean()
 
     # 取除虚拟初始值外的结果（iloc[1:] 跳过位置 0 的哨兵种子）。
-    # ``.copy()`` 必须保留：紧接着对 ``result_series.index`` 赋新索引、又用
+    # ``.copy()`` 必须保留：紧接着对 ``result_series`` 重新赋索引、又用
     # ``.where`` 重新生成结果。``iloc[1:]`` 返回的是 ``result_with_initial`` 的
     # 视图，直接对视图改 ``.index`` 会触发 pandas chained-assignment 行为
     # （部分版本抛 SettingWithCopyWarning，部分版本静默改不到目标），并且未来
     # ``result_with_initial`` 仍持有底层数组引用会造成误共享。维护时**禁止删除**
     # 此 ``.copy()``——它不是冗余而是切片解耦的必要操作。
     result_series = result_with_initial.iloc[1:].copy()
-    result_series.index = series.index
+    # 用 ``set_axis`` 替代属性赋值 ``result_series.index = series.index``：
+    # ``set_axis`` 是 pandas 官方推荐的链式 / 函数式 Index 替换 API，不依赖属性
+    # 赋值副作用，跨 pandas 版本（含 2.x / 3.x）行为更稳定（R5 #3）。
+    result_series = result_series.set_axis(series.index)
 
     # 恢复原始 NaN 位置
     result_series = result_series.where(series.notna(), float("nan"))
@@ -545,11 +579,13 @@ def _calculate_delta(
     total_count = len(df)
     # 高频批量调用场景下（factor_generator 一次跑数十个因子），INFO 日志会刷屏。
     # 降为 DEBUG：调试期可通过日志级别开关查看，生产期保持安静。
+    # 显式括号（R5 #4）：``(valid_count / max(total_count, 1)) * 100`` 与 Python 默认
+    # 优先级一致，但显式分组防止后续误改成整数除法 / 调括号时静默走错路径。
     _logger.debug(
         "差分因子 %s: 有效=%d (%.2f%%), base_col=%s",
         delta_col,
         valid_count,
-        valid_count / max(total_count, 1) * 100,
+        (valid_count / max(total_count, 1)) * 100,
         base_col,
     )
 
