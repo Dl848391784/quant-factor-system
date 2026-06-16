@@ -28,7 +28,7 @@ from data_fetchers.factor_calculator import calculate_industry_turnover_trend
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
 from factor_ic.common.exceptions import DataSchemaError, FactorCalcError
 from factor_ic.common.factor_ic_runner import run_factor_ic
-from factor_ic.common.factor_spec import FactorSpec, register_factor
+from factor_ic.common.factor_spec import FactorSpec, SpecRegistrationError, register_factor
 from factor_ic.common.factor_summary_logger import log_factor_summary
 from factor_ic.common.logger_config import get_logger
 
@@ -47,17 +47,17 @@ try:
             calculation=calculate_industry_turnover_trend,
         )
     )
-except (ValueError, TypeError) as e:
-    # 模块顶层注册失败兜底（R17 同步迁移）：
-    # - register_factor 抛 ValueError（factor_spec.py:117-119：重复注册、列名非法等）
-    # - TypeError 防御 FactorSpec dataclass 构造期类型错误
-    # - R17 改为 logger.critical + raise（详见 PROJECT.md H12 R16 修正版）：
-    #   importlib.import_module 在 test_factor_spec_consistency.py 中扫描所有 ic_*.py
-    #   触发 SPEC 注册，sys.exit 会杀掉 pytest 宿主；raise 让调用方决定行为。
-    err_msg = str(e)[:200]  # 截断避免超长异常淹没单行日志
+except SpecRegistrationError as e:
+    # 模块顶层注册失败兜底（R4-min 收紧版，对齐 ic_industry_momentum_5d_1d.py R3 范式）：
+    # - SpecRegistrationError = register_factor 包装层统一抛出的注册期异常
+    #   （继承 ValueError，封装重复注册、列名非法、FactorSpec dataclass 构造期 TypeError 等）。
+    # - importlib.import_module 在 test_factor_spec_consistency.py 中扫描所有 ic_*.py
+    #   触发 SPEC 注册，sys.exit 会杀掉 pytest 宿主；改 raise 让调用方决定行为。
+    # - 截断策略：str(e)[:200] 内联到 logger 实参，固定后缀 "(truncated to <=200 chars)"
+    #   显式告知阅读者本字段可能被截断。
     logger.critical(
-        "FactorSpec 注册失败 (factor=industry_turnover_trend): %s (%s)",
-        err_msg,
+        "FactorSpec 注册失败 (factor=industry_turnover_trend): %s (%s) (truncated to <=200 chars)",
+        str(e)[:200],
         type(e).__name__,
     )
     raise

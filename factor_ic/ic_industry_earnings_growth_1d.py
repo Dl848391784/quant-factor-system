@@ -29,7 +29,7 @@ from data_fetchers.factor_calculator import calculate_industry_earnings_growth
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
 from factor_ic.common.exceptions import DataSchemaError, FactorCalcError
 from factor_ic.common.factor_ic_runner import run_factor_ic
-from factor_ic.common.factor_spec import FactorSpec, register_factor
+from factor_ic.common.factor_spec import FactorSpec, SpecRegistrationError, register_factor
 from factor_ic.common.factor_summary_logger import log_factor_summary
 from factor_ic.common.logger_config import get_logger
 
@@ -48,27 +48,25 @@ try:
             calculation=calculate_industry_earnings_growth,
         )
     )
-except (ValueError, TypeError) as e:
-    # 模块顶层注册失败兜底（fix #5 + R13 调整）：
-    # - register_factor 文档声明 Raises: ValueError（factor_spec.py:117-119，含重复注册、
-    #   required_columns 为空、列名非法、factor_col 不在 required_columns 中等）。
-    # - TypeError 防御 FactorSpec dataclass 构造期的字段类型错误（虽属于代码 bug，
-    #   仍以可观测方式记录后再抛出）。
-    # - 行为变化（R13）：先前在此处 sys.exit(2) 退出，但
-    #   factor_ic/common/test_factor_spec_consistency.py 通过 importlib.import_module
-    #   扫描所有 ic_*.py 触发 SPEC 注册，sys.exit 会直接杀掉 pytest 宿主进程，
-    #   与"测试通过 importlib 触发注册"路径自相矛盾。
+except SpecRegistrationError as e:
+    # 模块顶层注册失败兜底（R4-min 收紧版）：
+    # - SpecRegistrationError = register_factor 包装层统一抛出的注册期异常
+    #   （继承 ValueError，封装重复注册、required_columns 为空、列名非法、
+    #   factor_col 不在 required_columns 中、FactorSpec dataclass 构造期 TypeError 等）。
+    # - 行为变化（R13）：先前 sys.exit(2) 退出，但 test_factor_spec_consistency.py
+    #   通过 importlib.import_module 扫描所有 ic_*.py 触发 SPEC 注册，sys.exit
+    #   会直接杀掉 pytest 宿主进程，与"测试通过 importlib 触发注册"路径自相矛盾。
     # - 现改为 logger.critical 后 raise：
-    #   * 测试场景 → import_module 抛 ValueError/TypeError，测试可捕获/断言/skip；
-    #   * CLI 场景（python ic_industry_earnings_growth_1d.py）→ Python 解释器
-    #     打印 traceback 后默认 exit 1（不再是 exit 2，trade-off：放弃
+    #   * 测试场景 → import_module 抛 SpecRegistrationError，测试可捕获/断言/skip；
+    #   * CLI 场景 → Python 解释器打印 traceback 后默认 exit 1（trade-off：放弃
     #     import-time/runtime 退出码区分 换取 测试可隔离性）。
     # - 该 trade-off 见 ic_industry_earnings_growth_main_cleanup_design.md §11。
-    err_msg = str(e)[:200]  # 截断 200 字符：避免超长异常消息（如全量列名列表）淹没单行日志，
-    # 与 logger_config 默认 console formatter 单行可读性边界一致。
+    # - 截断策略（消除中间变量 + 固定截断标记，对齐 ic_industry_momentum_5d_1d.py R3 范式）：
+    #   str(e)[:200] 直接内联到 logger 实参，格式串中固定追加
+    #   "(truncated to <=200 chars)" 显式告知阅读者本字段可能被截断。
     logger.critical(
-        "FactorSpec 注册失败 (factor=industry_earnings_growth): %s (%s)",
-        err_msg,
+        "FactorSpec 注册失败 (factor=industry_earnings_growth): %s (%s) (truncated to <=200 chars)",
+        str(e)[:200],
         type(e).__name__,
     )
     raise
