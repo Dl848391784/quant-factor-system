@@ -69,7 +69,7 @@ from factor_ic.common.cli_helpers import (
     is_finite_value,
     safe_dict,
 )
-from factor_ic.common.exceptions import FactorCalcError
+from factor_ic.common.exceptions import DataSchemaError, FactorCalcError
 from factor_ic.common.factor_ic_runner import run_factor_ic
 from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.logger_config import get_logger
@@ -248,27 +248,37 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except FactorCalcError:
-        # 业务预期异常（数据缺失/结构异常）：用 logger.error + exc_info=True 保留 cause 链
-        # （__cause__ / __context__）但级别 ERROR，便于运维监控按场景配置告警阈值，
-        # 与下方 CRITICAL 的程序 bug 噪声等级区分。
-        # 日志附带 factor_name + version：运维从聚合日志能直接定位是哪个因子、哪个版本失败，
-        # 避免在多因子 pipeline 并发跑时出现"某个因子挂了但不知道是哪个"的盲区。
-        logger.error(  # noqa: G201
-            "因子IC计算失败（业务异常）: factor_name=%s, version=%s",
+    except DataSchemaError as e:
+        # 数据 Schema 校验失败（公共模块 validate_required_columns 抛出）：
+        # H12 R18 → exit 4 与因子计算失败（exit 5）严格区分。
+        # MODULE.md M22：业务异常用 logger.error 不打堆栈。
+        # 保留 factor_name + version 运维上下文（运维聚合日志按因子/版本分组告警）。
+        logger.error(
+            "数据 Schema 校验失败: factor_name=%s, version=%s: %s",
             SPEC.factor_name,
             __version__,
-            exc_info=True,
+            e,
         )
-        sys.exit(1)
+        sys.exit(4)  # H12 R18: schema 失败 → 检查上游数据
+    except FactorCalcError as e:
+        # 业务预期异常（数据缺失/结构异常）：MODULE.md M22 业务异常用 logger.error
+        # 不打堆栈（消息 + factor_name + version 上下文已足够定位）。
+        # 保留 factor_name + version：运维从聚合日志能直接定位是哪个因子、哪个版本失败，
+        # 避免在多因子 pipeline 并发跑时出现"某个因子挂了但不知道是哪个"的盲区。
+        logger.error(
+            "因子IC计算失败（业务异常）: factor_name=%s, version=%s: %s",
+            SPEC.factor_name,
+            __version__,
+            e,
+        )
+        sys.exit(5)  # H12 R19: 因子计算失败 → 检查计算代码
     except Exception:
-        # 未预期异常（程序 bug / 外部依赖崩溃）：用 logger.critical 升级告警级别。
-        # 注：未与 FactorCalcError 合并，因二者告警分级不同（ERROR vs CRITICAL）。
+        # 未预期异常（程序 bug / 外部依赖崩溃）：用 logger.exception 自动附堆栈，
+        # 升级告警级别（CRITICAL）由日志聚合系统按 ERROR vs traceback 区分。
         # 同样附带 factor_name + version 上下文，便于线上排查。
-        logger.critical(
+        logger.exception(
             "因子IC计算遇到未预期错误: factor_name=%s, version=%s",
             SPEC.factor_name,
             __version__,
-            exc_info=True,
         )
         sys.exit(1)
