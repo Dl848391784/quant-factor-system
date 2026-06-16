@@ -51,9 +51,9 @@ from ._common import (
     _COL_CAPITAL_FLOW_INTENSITY,
     _COL_CAPITAL_FLOW_RATIO_TREND,
     _COL_DATE,
-    _add_industry_column,
     get_module_logger,
 )
+from ._industry_helpers import _add_industry_column
 
 
 # ============================================================================

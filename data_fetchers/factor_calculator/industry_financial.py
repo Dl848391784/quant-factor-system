@@ -54,9 +54,9 @@ from ._common import (
     _COL_INDUSTRY_EARNINGS_GROWTH,
     _COL_INDUSTRY_PE_TREND,
     _COL_INDUSTRY_ROE_TREND,
-    _add_industry_column,
     get_module_logger,
 )
+from ._industry_helpers import _add_industry_column
 
 
 # ============================================================================

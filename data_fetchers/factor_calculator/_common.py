@@ -13,10 +13,18 @@
   ``data_fetchers/factor_calculator/__init__.py`` 显式 re-export。
 - 仅依赖标准库 + numpy + pandas + logging（依赖图根节点，不得反向依赖任何兄弟子模块）。
 - 内容与原 ``factor_calculator.py``（已重命名为 ``_legacy.py``）逐字对齐，禁止重写公式或调整边界处理（设计 §3.2 N1）。
+- ``_add_industry_column`` 已于 R2（2026-06-16）迁出至 ``_industry_helpers.py``，
+  以保持本模块作为依赖图根节点的纯净度（不反向依赖 ``fetch_industry``）。
 
 历史：
 - v1.20 (2026-06-15) PR-2a：从 ``_legacy.py`` 行 100-234 / 267-313 / 470-525 /
   618-651 / 1452-1503 抽取至本模块，``_legacy.py`` 改为 ``from ._common import *`` 兼容。
+- v1.21 (2026-06-16) R2：``_add_industry_column`` 迁出至 ``_industry_helpers.py``
+  （消除 §5.1 反向依赖违规，原始问题清单 #1）；同步修复
+  ``_per_asset_transform`` 排序契约校验（#3）、``_calculate_ewm_with_initial``
+  哨兵索引（#4）、``_wilder_smoothing_rsi`` 前值 NaN 可观测性（#5）、
+  ``_calculate_delta`` 文档与日志级别（#6/#8）、EPSILON 重复定义（#7）、
+  ``get_module_logger`` 文档示例（#10）。
 """
 
 from __future__ import annotations
@@ -432,52 +440,11 @@ def _calculate_delta(
 
 
 # ============================================================================
-# 行业列注入 helper（PR-4a 从 _legacy.py 搬入；被多个 industry 类因子复用）
+# 行业列注入 helper：已迁出至 ._industry_helpers（R2，2026-06-16）
+# ----------------------------------------------------------------------------
+# 原因：``_add_industry_column`` 反向依赖 ``data_fetchers.fetch_industry``，
+# 让 ``_common.py`` 不再是依赖图根节点，违反本文件 §5.1 约束（仅依赖
+# stdlib + numpy + pandas + logging）。迁移到 ``_industry_helpers.py`` 后，
+# ``_common.py`` 重新成为纯净根节点。调用方需改用：
+#     from data_fetchers.factor_calculator._industry_helpers import _add_industry_column
 # ============================================================================
-
-
-def _add_industry_column(
-    df: pd.DataFrame,
-    _logger: logging.Logger,
-) -> pd.DataFrame:
-    """为 DataFrame 添加 industry 列（从 fetch_industry 映射）
-
-    Args:
-        df: 包含 asset 列的 DataFrame
-        _logger: 日志记录器
-
-    Returns:
-        DataFrame 新增 industry 列，未知股票赋 '其他'
-
-    Note:
-        使用 fetch_industry.get_industry_map() 获取行业映射，
-        避免重复加载（模块级缓存+线程安全）。
-        如果 industry 列已存在则跳过添加（避免重复添加）。
-    """
-    # 如果 industry 列已存在则跳过（多次调用 / 上游已合并的场景）
-    if "industry" in df.columns:
-        _logger.debug(
-            "_add_industry_column: industry 列已存在（rows=%d），跳过注入",
-            len(df),
-        )
-        return df
-
-    try:
-        from data_fetchers.fetch_industry import get_industry_map
-    except ImportError:
-        from fetch_industry import get_industry_map  # noqa: E402
-
-    industry_map = get_industry_map()
-
-    # 映射：asset → industry
-    df["industry"] = df[_COL_ASSET].map(lambda code: industry_map.get(str(code), {}).get("industry", "其他"))
-
-    unknown_count = int((df["industry"] == "其他").sum())
-    if unknown_count > 0:
-        _logger.warning(
-            "  行业未知股票数: %d (%.2f%%)",
-            unknown_count,
-            unknown_count / len(df) * 100 if len(df) > 0 else 0,
-        )
-
-    return df

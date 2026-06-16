@@ -57,9 +57,9 @@ from ._common import (
     _DEFAULT_INDUSTRY_WINDOW,
     _DEFAULT_MIN_INDUSTRY_STOCKS,
     _DEFAULT_TREND_DENOMINATOR_MIN,
-    _add_industry_column,
     get_module_logger,
 )
+from ._industry_helpers import _add_industry_column
 
 
 __all__: list[str] = []

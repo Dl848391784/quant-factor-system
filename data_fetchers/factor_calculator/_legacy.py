@@ -150,13 +150,16 @@ from ._common import (  # noqa: F401  允许此模块 re-export 这些符号
     DEFAULT_RSI_PERIOD,
     DEFAULT_SURGE_WINDOW,
     DEFAULT_VOLUME_RATIO_WINDOW,
-    _add_industry_column,  # noqa: F401
     _calculate_delta,
     _calculate_ewm_with_initial,
     _per_asset_transform,
     _wilder_smoothing_rsi,
     get_module_logger,
 )
+
+# R2 (2026-06-16): _add_industry_column 已迁出至 _industry_helpers.py，
+# 此处保留 re-import 维持 ``from ._legacy import *`` 通配兼容。
+from ._industry_helpers import _add_industry_column  # noqa: F401
 
 # ============================================================================
 # 子模块 basic re-import（PR-2b：basic 因子已搬到 .basic，本文件 re-export 维持
@@ -218,13 +221,6 @@ from .intraday import (  # noqa: F401
 )
 
 # ============================================================================
-# 子模块 tail re-import（B4：尾盘 5 分钟 K 线族因子从 factor_generator.py 迁出）
-# ============================================================================
-from .tail import (  # noqa: F401
-    calculate_tail_factors,
-)
-
-# ============================================================================
 # 子模块 momentum re-import（PR-2c：动量族因子已搬到 .momentum，本文件 re-export
 # 维持 `from ._legacy import *` 通配兼容 + __all__ 中名称仍有效）
 # ============================================================================
@@ -236,6 +232,13 @@ from .momentum import (  # noqa: F401
     calculate_price_position,
     calculate_return_3d,
     calculate_return_5d,
+)
+
+# ============================================================================
+# 子模块 tail re-import（B4：尾盘 5 分钟 K 线族因子从 factor_generator.py 迁出）
+# ============================================================================
+from .tail import (  # noqa: F401
+    calculate_tail_factors,
 )
 
 # ============================================================================
