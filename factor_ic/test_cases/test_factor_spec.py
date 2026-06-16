@@ -19,6 +19,7 @@ from factor_ic.common.data_columns import JOIN_KEYS
 from factor_ic.common.factor_spec import (
     FACTOR_REGISTRY,
     FactorSpec,
+    SpecRegistrationError,
     register_factor,
 )
 
@@ -102,9 +103,7 @@ class TestRegisterFactorValidation:
     def test_uppercase_column_raises(self):
         """规则 3: 全小写字母 + 数字 + 下划线 + 点。"""
         with pytest.raises(ValueError, match="非小写"):
-            register_factor(
-                _make_spec(required_columns=("date", "asset", "CLOSE"))
-            )
+            register_factor(_make_spec(required_columns=("date", "asset", "CLOSE")))
 
     def test_digit_in_column_name_allowed(self):
         """数字在列名中允许(如 rsi_6 / return_5d)。"""
@@ -206,3 +205,52 @@ class TestJoinKeysComposition:
         """JOIN_KEYS 保证 date 在最前。"""
         assert JOIN_KEYS[0] == "date"
         assert JOIN_KEYS[1] == "asset"
+
+
+# ============================================================================
+# SpecRegistrationError 包装行为（issue 4 + design v1.0 §4.3）
+# ============================================================================
+
+
+class TestSpecRegistrationError:
+    """register_factor 异常包装统一为 SpecRegistrationError，附 factor_name 上下文。"""
+
+    def test_register_factor_value_error_wrapped(self):
+        """L2 校验失败（如重复注册）→ SpecRegistrationError 含 factor_name。"""
+        register_factor(_make_spec(factor_name="dup_factor"))
+        with pytest.raises(SpecRegistrationError) as exc_info:
+            register_factor(_make_spec(factor_name="dup_factor"))
+        assert exc_info.value.factor_name == "dup_factor"
+        assert "dup_factor" in str(exc_info.value)
+        assert "已注册" in str(exc_info.value) or "覆盖" in str(exc_info.value)
+        # 异常链保留：__cause__ 是原始 ValueError（H6 raise from e）
+        assert isinstance(exc_info.value.__cause__, ValueError)
+        assert not isinstance(exc_info.value.__cause__, SpecRegistrationError)
+
+    def test_spec_registration_error_is_value_error(self):
+        """向后兼容：SpecRegistrationError 是 ValueError 子类，旧 except 仍可 catch。"""
+        with pytest.raises(ValueError) as exc_info:  # 不是 SpecRegistrationError
+            register_factor(_make_spec(required_columns=()))
+        # 实际抛的是 SpecRegistrationError，但 except ValueError 也能 catch（向后兼容）
+        assert isinstance(exc_info.value, SpecRegistrationError)
+        assert exc_info.value.factor_name == "test_factor"
+
+    def test_register_factor_unexpected_error_wrapped(self, monkeypatch):
+        """非 ValueError 异常（如 AttributeError）→ 仍包装为 SpecRegistrationError。
+
+        防御 issue 1 描述的"绕过捕获块静默向上传播"路径：所有路径统一包装。
+        """
+        from factor_ic.common import factor_spec as fs_mod
+
+        def boom(spec):
+            raise AttributeError("意外的属性访问错误")
+
+        monkeypatch.setattr(fs_mod, "_validate_spec", boom)
+
+        with pytest.raises(SpecRegistrationError) as exc_info:
+            register_factor(_make_spec(factor_name="unexpected_factor"))
+        assert exc_info.value.factor_name == "unexpected_factor"
+        assert "意外错误" in str(exc_info.value)
+        assert "AttributeError" in str(exc_info.value)
+        # 异常链保留原始 AttributeError
+        assert isinstance(exc_info.value.__cause__, AttributeError)

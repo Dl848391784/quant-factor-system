@@ -105,6 +105,34 @@ class FactorSpec:
 FACTOR_REGISTRY: dict[str, FactorSpec] = {}
 
 
+# ============================================================================
+# 注册失败专用异常（issue 4：附 factor_name 上下文供扫描层聚合错误）
+# ============================================================================
+
+
+class SpecRegistrationError(ValueError):
+    """register_factor 注册失败专用异常。
+
+    继承 ValueError 保证向后兼容（旧 `except (ValueError, TypeError)` 仍可 catch），
+    携带 factor_name 上下文供扫描层（如 test_factor_spec_consistency.py / importlib
+    批量扫描）从异常对象直接定位故障因子，无需再依赖日志 grep。
+
+    设计要点（design v1.0 §4.1）：
+    - 单一类型：register_factor 对外只抛 SpecRegistrationError，调用方 except 范围
+      可从原 `(ValueError, TypeError)` 收窄为单一具名异常（issue 1）；
+    - 异常聚合：__init__ 把 factor_name 拼进消息，str(e) 自带因子名前缀；
+    - 向后兼容：继承 ValueError 而非 Exception，存量 16 文件未迁移期间旧 except
+      仍可 catch，扩散过程零中断（详见 design v1.0 §3.1）。
+
+    Attributes:
+        factor_name: 注册失败的因子名（程序可访问的结构化字段）
+    """
+
+    def __init__(self, factor_name: str, message: str) -> None:
+        self.factor_name = factor_name
+        super().__init__(f"FactorSpec({factor_name}) 注册失败: {message}")
+
+
 def register_factor(spec: FactorSpec) -> FactorSpec:
     """注册因子规格到全局注册表，并执行 L2 校验。
 
@@ -115,9 +143,22 @@ def register_factor(spec: FactorSpec) -> FactorSpec:
         传入的 spec（便于模块级声明: SPEC = register_factor(FactorSpec(...))）
 
     Raises:
-        ValueError: 校验失败
+        SpecRegistrationError: L2 校验失败 / 注册期任何异常（含 factor_name 上下文）。
+            继承自 ValueError，旧 `except ValueError` / `except (ValueError, TypeError)`
+            仍可 catch，向后兼容。
     """
-    _validate_spec(spec)
+    try:
+        _validate_spec(spec)
+    except ValueError as e:
+        # _validate_spec 抛 ValueError → 包装为 SpecRegistrationError 附 factor_name
+        # （raise from e 保留原始 traceback，遵循 H6 异常链规则）
+        raise SpecRegistrationError(spec.factor_name, str(e)) from e
+    except Exception as e:
+        # 防御 L2 校验流程中任何意外异常（AttributeError/RuntimeError/...），
+        # 把 issue 1 描述的"绕过捕获块静默向上传播"路径堵死：所有路径都包装为
+        # SpecRegistrationError，调用方一个 except 即可全覆盖。
+        raise SpecRegistrationError(spec.factor_name, f"意外错误 ({type(e).__name__}): {e}") from e
+
     FACTOR_REGISTRY[spec.factor_name] = spec
     return spec
 

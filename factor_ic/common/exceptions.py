@@ -76,4 +76,26 @@ class DataSchemaError(Exception):
         super().__init__(f"因子 {factor_name} 数据 schema 校验失败: 缺失列 {missing}, 可用列(前20): {available[:20]}")
 
 
-__all__ = ["FactorCalcError", "DataSchemaError"]
+class SummaryLogError(Exception):
+    """摘要日志层失败（H12 R20 + R17 联动）
+
+    用途：log_factor_summary 在 main() 内失败时，main() 不能直接 sys.exit(3)
+    （会杀单元测试宿主进程，issue 2），改为 raise SummaryLogError 让 __main__
+    块统一处理退出码（exit 3 = 辅助层失败，主结果产物可用）。
+
+    典型触发场景：
+    - log_factor_summary 内部 dict 字段访问异常（理论上其契约 L40-44 不抛，
+      但本异常作为防御性兜底，一旦未来回归打破契约可立即定位）
+    - logger 子系统故障（如 disk full、handler 异常）
+
+    捕获约定：
+    - main() 内 try/except log_factor_summary → raise SummaryLogError(...) from e
+    - CLI 入口 __main__ 块 except SummaryLogError → logger.exception + sys.exit(3)
+    - 与 DataSchemaError / FactorCalcError 并列：本异常表示"主结果可用，仅 sidecar
+      失败"，exit 3 与业务失败 exit 4/5 严格区分（H12 R17/R18/R19 退出码档）
+    """
+
+    pass
+
+
+__all__ = ["FactorCalcError", "DataSchemaError", "SummaryLogError"]
