@@ -608,6 +608,104 @@ def _load_json_gz_data(
     return payload["data"]
 
 
+def _nan_to_null(obj: Any) -> Any:
+    """递归将 float NaN/inf/-inf 转 None，确保 JSON 严格合规。
+
+    json.dump 默认把 float NaN 输出为 "NaN"（非法 JSON 值）；
+    pandas to_dict('records') 把 NaN 输出为 float('nan') 而非 None。
+    唯一可靠方案：遍历每条记录，NaN/inf → None → JSON 输出为 null。
+    """
+    if isinstance(obj, float) and obj != obj:  # NaN (NaN != NaN)
+        return None
+    if isinstance(obj, float) and (obj == float("inf") or obj == float("-inf")):
+        return None
+    if isinstance(obj, dict):
+        return {k: _nan_to_null(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_nan_to_null(item) for item in obj]
+    return obj
+
+
+def _write_factor_json_gz(
+    output_df: pd.DataFrame,
+    output_path: Path,
+    logger: logging.Logger,
+    *,
+    batch_size: int = 50000,
+) -> None:
+    """流式写出 factor_ic_data.json.gz（gzip + 临时文件 + 原子替换）。
+
+    封装 Step 13 的写出逻辑：mkdir + 流式批写 + NaN→null + 临时文件原子替换。
+    异常类型 / 消息 / 日志格式与重构前字符级一致。
+
+    Args:
+        output_df: 已对齐 _OUTPUT_COLS 的输出 DataFrame
+        output_path: 目标输出路径
+        logger: 日志器
+        batch_size: 流式写入批次大小（默认 50000，约 200MB 内存峰值）
+
+    Raises:
+        RuntimeError: mkdir 失败 / 写入文件系统错误 / 未知错误（含原因 + 类型名）
+    """
+    # dates 字段：字符串排序对 YYYY-MM-DD 格式正确（字典序与日期序一致）
+    dates_list = sorted(output_df["date"].unique().tolist())
+
+    # 确保父目录存在（职责分离：mkdir 单独处理，异常信息更精确）
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.error("创建输出目录失败: %s, 原因: %s (%s)", output_path.parent, type(e).__name__, str(e))
+        raise RuntimeError(f"创建输出目录失败: {output_path.parent}, {type(e).__name__}: {e}") from e
+
+    # 使用临时文件 + os.replace 原子写入（遵循 PROJECT.md 文件写入规范）
+    # ⚠️ 内存优化: 流式写入 JSON，避免 output_df.to_dict("records") 一次性创建4GB+字典
+    # 旧方法: json.dump({"dates": ..., "data": output_df.to_dict("records")}, f) → OOM
+    # 新方法: 分批写入 {"dates": ..., "data": [row1, row2, ...]} → 内存峰值仅每批行数
+    temp_path = output_path.parent / (output_path.name + ".tmp")
+    try:
+        with gzip.open(temp_path, "wt", encoding="utf-8") as f:
+            # 写入 JSON 头部
+            f.write('{"dates": ')
+            json.dump(dates_list, f, ensure_ascii=False)
+            f.write(', "data": [')
+
+            # 分批写入数据行（避免一次性 to_dict("records") 导致 OOM）
+            # ⚠️ 关键: 逐条输出每个记录，而不是 json.dump(batch_records)（输出整个数组）
+            # 因为 json.dump(batch_records) 会把每批输出为 [...]，逗号连接后变成 [[batch1], [batch2], ...]
+            # 正确格式应该是 [record1, record2, ...]，不能嵌套
+            total_rows = len(output_df)
+            first_record = True
+            for batch_start in range(0, total_rows, batch_size):
+                batch_end = min(batch_start + batch_size, total_rows)
+                batch_df = output_df.iloc[batch_start:batch_end]
+                batch_records = batch_df.to_dict("records")
+                # NaN→null 转换（确保 JSON 严格合规）
+                batch_records = _nan_to_null(batch_records)
+                # 逐条输出每个记录，逗号 + 换行分隔
+                for record in batch_records:
+                    if not first_record:
+                        f.write(",\n")
+                    json.dump(record, f, ensure_ascii=False)
+                    first_record = False
+                # 显式释放批次数据
+                del batch_df, batch_records
+
+            # 写入 JSON 尾部
+            f.write("]}")
+
+        os.replace(temp_path, output_path)
+    except OSError as e:
+        # 文件系统错误（磁盘/权限/IO，PermissionError 是 OSError 子类）
+        logger.error("文件系统错误保存失败: %s, 原因: %s (%s)", output_path, type(e).__name__, str(e))
+        temp_path.unlink(missing_ok=True)  # 原子操作，消除 TOCTOU 竞争窗口
+        raise RuntimeError(f"文件系统错误: {output_path}, {type(e).__name__}: {e}") from e
+    except Exception as e:
+        # 未知错误（兜底）
+        logger.error("未知错误保存失败: %s, 原因: %s (%s)", output_path, type(e).__name__, str(e))
+        temp_path.unlink(missing_ok=True)  # 原子操作，消除 TOCTOU 竞争窗口
+        raise RuntimeError(f"未知错误保存失败: {output_path}, {type(e).__name__}: {e}") from e
+
+
 # ============================================================================
 # logger 获取函数（遵循 PROJECT.md 公共模块日志规范）
 # ============================================================================
@@ -812,82 +910,8 @@ def generate_all_factors(
     # ========== Step 13: 保存输出 ==========
     logger.info("Step 13: 保存输出...")
 
-    # dates 字段：字符串排序对 YYYY-MM-DD 格式正确（字典序与日期序一致）
-    # 从 output_df 取 dates，数据来源更清晰
-    dates_list = sorted(output_df["date"].unique().tolist())
-
     total_records = len(output_df)
-
-    # 确保父目录存在（职责分离：mkdir 单独处理，异常信息更精确）
-    try:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        logger.error("创建输出目录失败: %s, 原因: %s (%s)", output_path.parent, type(e).__name__, str(e))
-        raise RuntimeError(f"创建输出目录失败: {output_path.parent}, {type(e).__name__}: {e}") from e
-
-    # 使用临时文件 + os.replace 原子写入（遵循 PROJECT.md 文件写入规范）
-    # ⚠️ 内存优化: 流式写入 JSON，避免 output_df.to_dict("records") 一次性创建4GB+字典
-    # 旧方法: json.dump({"dates": ..., "data": output_df.to_dict("records")}, f) → OOM
-    # 新方法: 分批写入 {"dates": ..., "data": [row1, row2, ...]} → 内存峰值仅每批行数
-    _BATCH_WRITE_SIZE = 50000  # 每批写入5万行，峰值约 50000 × 44列 × 100B ≈ 200MB
-    temp_path = output_path.parent / (output_path.name + ".tmp")
-    try:
-        with gzip.open(temp_path, "wt", encoding="utf-8") as f:
-            # 写入 JSON 头部
-            f.write('{"dates": ')
-            json.dump(dates_list, f, ensure_ascii=False)
-            f.write(', "data": [')
-
-            # ⚠️ NaN→null 处理：json.dump 默认把 float NaN 输出为 "NaN"（非法JSON值）
-            # Python json 模块的 JSONEncoder/iterencode 对嵌套 dict 中的 NaN 无法拦截
-            # pandas to_dict('records') 把 NaN 输出为 float('nan')，不是 None
-            # 唯一可靠方案: 在 to_dict 后遍历每条记录，NaN → None → json 输出为 null
-            def _nan_to_null(obj):
-                if isinstance(obj, float) and obj != obj:  # NaN (NaN != NaN)
-                    return None
-                if isinstance(obj, float) and (obj == float("inf") or obj == float("-inf")):
-                    return None
-                if isinstance(obj, dict):
-                    return {k: _nan_to_null(v) for k, v in obj.items()}
-                if isinstance(obj, list):
-                    return [_nan_to_null(item) for item in obj]
-                return obj
-
-            # 分批写入数据行（避免一次性 to_dict("records") 导致 OOM）
-            # ⚠️ 关键: 逐条输出每个记录，而不是 json.dump(batch_records)（输出整个数组）
-            # 因为 json.dump(batch_records) 会把每批输出为 [...]，逗号连接后变成 [[batch1], [batch2], ...]
-            # 正确格式应该是 [record1, record2, ...]，不能嵌套
-            total_rows = len(output_df)
-            first_record = True
-            for batch_start in range(0, total_rows, _BATCH_WRITE_SIZE):
-                batch_end = min(batch_start + _BATCH_WRITE_SIZE, total_rows)
-                batch_df = output_df.iloc[batch_start:batch_end]
-                batch_records = batch_df.to_dict("records")
-                # NaN→null 转换（确保 JSON 严格合规）
-                batch_records = _nan_to_null(batch_records)
-                # 逐条输出每个记录，逗号 + 换行分隔
-                for record in batch_records:
-                    if not first_record:
-                        f.write(",\n")
-                    json.dump(record, f, ensure_ascii=False)
-                    first_record = False
-                # 显式释放批次数据
-                del batch_df, batch_records
-
-            # 写入 JSON 尾部
-            f.write("]}")
-
-        os.replace(temp_path, output_path)
-    except OSError as e:
-        # 文件系统错误（磁盘/权限/IO，PermissionError 是 OSError 子类）
-        logger.error("文件系统错误保存失败: %s, 原因: %s (%s)", output_path, type(e).__name__, str(e))
-        temp_path.unlink(missing_ok=True)  # 原子操作，消除 TOCTOU 竞争窗口
-        raise RuntimeError(f"文件系统错误: {output_path}, {type(e).__name__}: {e}") from e
-    except Exception as e:
-        # 未知错误（兜底）
-        logger.error("未知错误保存失败: %s, 原因: %s (%s)", output_path, type(e).__name__, str(e))
-        temp_path.unlink(missing_ok=True)  # 原子操作，消除 TOCTOU 竞争窗口
-        raise RuntimeError(f"未知错误保存失败: {output_path}, {type(e).__name__}: {e}") from e
+    _write_factor_json_gz(output_df, output_path, logger)
 
     logger.info("  输出路径: %s", output_path)
     logger.info("  输出记录数: %d", total_records)
