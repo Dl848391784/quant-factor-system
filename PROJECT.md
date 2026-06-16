@@ -296,7 +296,7 @@ grep -rn "sys.exit(" factor_ic/ic_*.py
 **H12 当前覆盖范围**：
 - ✅ 已落地：`factor_ic/ic_industry_amplitude_trend_1d.py` / `ic_industry_earnings_growth_1d.py` / `ic_industry_momentum_5d_1d.py` / `ic_industry_turnover_trend_1d.py`
 - ⏳ 待迁移：其他 `factor_ic/ic_*.py` 文件、`backtest/`、`comprehensive_factor/`、`data_fetchers/`、`summary/`
-- 自动化：`scripts/check_exit_codes.py` 待交付（标 [待实施]，工具落地后启用 pre-commit + CI）
+- 自动化：`scripts/check_exit_codes.py` ✅ 已交付（AST 分析，pre-commit + CI 模式，11 个 pytest 全过）
 
 **H13 正反例**：
 ```python
