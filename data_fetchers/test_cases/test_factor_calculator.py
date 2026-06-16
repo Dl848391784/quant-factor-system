@@ -195,6 +195,11 @@ class TestCalculateVolumeRatio:
         # 不同窗口结果不同
         assert not vr_5.equals(vr_10)
 
+    def test_logger_parameter(self, sample_volume, test_logger):
+        """测试 logger 参数（v2: 新增可选 logger_arg）"""
+        vr = calculate_volume_ratio(sample_volume, window=5, logger_arg=test_logger)
+        assert isinstance(vr, pd.Series)
+
 
 # ============================================================================
 # calculate_forward_return 测试
@@ -235,6 +240,11 @@ class TestCalculateForwardReturn:
         assert pd.isna(fr_3.iloc[-1])
         assert pd.isna(fr_3.iloc[-2])
         assert pd.isna(fr_3.iloc[-3])
+
+    def test_logger_parameter(self, sample_close_prices, test_logger):
+        """测试 logger 参数（v2: 新增可选 logger_arg）"""
+        fr = calculate_forward_return(sample_close_prices, shift=1, logger_arg=test_logger)
+        assert isinstance(fr, pd.Series)
 
 
 # ============================================================================

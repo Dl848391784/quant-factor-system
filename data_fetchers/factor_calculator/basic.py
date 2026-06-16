@@ -151,7 +151,9 @@ def calculate_rsi(close_prices: pd.Series, period: int = _DEFAULT_RSI_PERIOD) ->
 # ============================================================================
 
 
-def calculate_volume_ratio(volume: pd.Series, window: int = _DEFAULT_VOLUME_RATIO_WINDOW) -> pd.Series:
+def calculate_volume_ratio(
+    volume: pd.Series, window: int = _DEFAULT_VOLUME_RATIO_WINDOW, logger_arg: logging.Logger | None = None
+) -> pd.Series:
     """
     计算量比因子
 
@@ -160,6 +162,7 @@ def calculate_volume_ratio(volume: pd.Series, window: int = _DEFAULT_VOLUME_RATI
     Args:
         volume: 成交量序列
         window: 计算窗口
+        logger_arg: 调用方传入的 logger（遵循 MODULE.md 约束 77）
 
     Returns:
         量比值序列
@@ -172,6 +175,8 @@ def calculate_volume_ratio(volume: pd.Series, window: int = _DEFAULT_VOLUME_RATI
         >>> vr.iloc[5]  # 第 6 天量比
         1.5
     """
+    _logger = get_module_logger(logger_arg)
+
     # 入口：创建副本避免副作用（遵循模块规范）
     volume = volume.copy()
 
@@ -180,12 +185,18 @@ def calculate_volume_ratio(volume: pd.Series, window: int = _DEFAULT_VOLUME_RATI
 
     # 防除零：avg_volume 接近零时标记为 NaN
     zero_avg_mask = avg_volume.notna() & (avg_volume.abs() < _EPSILON)
+    zero_avg_count = zero_avg_mask.sum()
+    if zero_avg_count > 0:
+        _logger.warning("检测到 %s 个 avg_volume 接近零，已标记为 np.nan", zero_avg_count)
     safe_avg_volume = avg_volume.where(~zero_avg_mask, np.nan)
 
     volume_ratio = volume / safe_avg_volume
 
     # 异常负值检测
     abnormal_mask = volume_ratio < 0
+    abnormal_count = abnormal_mask.sum()
+    if abnormal_count > 0:
+        _logger.warning("检测到 %s 个异常量比（负值），已标记为 np.nan", abnormal_count)
     volume_ratio = volume_ratio.where(~abnormal_mask, np.nan)
 
     return volume_ratio
@@ -196,7 +207,9 @@ def calculate_volume_ratio(volume: pd.Series, window: int = _DEFAULT_VOLUME_RATI
 # ============================================================================
 
 
-def calculate_forward_return(close_prices: pd.Series, shift: int = _DEFAULT_FORWARD_RETURN_SHIFT) -> pd.Series:
+def calculate_forward_return(
+    close_prices: pd.Series, shift: int = _DEFAULT_FORWARD_RETURN_SHIFT, logger_arg: logging.Logger | None = None
+) -> pd.Series:
     """
     计算前瞻收益率
 
@@ -205,6 +218,7 @@ def calculate_forward_return(close_prices: pd.Series, shift: int = _DEFAULT_FORW
     Args:
         close_prices: 收盘价序列
         shift: 前瞻天数
+        logger_arg: 调用方传入的 logger（遵循 MODULE.md 约束 77）
 
     Returns:
         前瞻收益率序列
@@ -218,12 +232,18 @@ def calculate_forward_return(close_prices: pd.Series, shift: int = _DEFAULT_FORW
         >>> fr.iloc[3]  # 最后一天无次日数据，为 NaN
         nan
     """
+    _logger = get_module_logger(logger_arg)
+
     # 入口：创建副本避免副作用（遵循模块规范）
     close_prices = close_prices.copy()
 
     future_close = close_prices.shift(-shift)
 
     # 防除零
+    zero_close_mask = close_prices.notna() & (close_prices.abs() < _EPSILON)
+    zero_close_count = zero_close_mask.sum()
+    if zero_close_count > 0:
+        _logger.warning("检测到 %s 个收盘价接近零，前瞻收益已标记为 np.nan", zero_close_count)
     safe_close = close_prices.where(close_prices > _EPSILON, np.nan)
 
     forward_return = (future_close - close_prices) / safe_close
@@ -335,7 +355,7 @@ def calculate_bollinger_pb(
     return factor_df
 
 
-calculate_bollinger_pb.required_cols = ["close"]  # type: ignore[attr-defined]
+calculate_bollinger_pb.required_cols = ["close", "asset", "date"]  # type: ignore[attr-defined]
 
 
 # ============================================================================
@@ -460,7 +480,7 @@ def calculate_kdj_j(
     return factor_df
 
 
-calculate_kdj_j.required_cols = ["close", "high", "low"]  # type: ignore[attr-defined]
+calculate_kdj_j.required_cols = ["close", "high", "low", "asset", "date"]  # type: ignore[attr-defined]
 
 
 # ============================================================================
@@ -493,7 +513,6 @@ def calculate_turnover_surge(
         ...         "date": ["2026-01-01", "2026-01-02", "2026-01-03"],
         ...         "asset": ["A", "A", "A"],
         ...         "turnover_rate": [0.01, 0.02, 0.03],
-        ...         "close": [100, 102, 103],
         ...     }
         ... )
         >>> result = calculate_turnover_surge(df, surge_window=5)
@@ -614,10 +633,9 @@ def calculate_rsi_df(
     # 排序保证 _per_asset_transform 同 asset 行连续
     factor_df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
-    n_rows = len(factor_df)
-    if n_rows == 0:
-        factor_df["rsi"] = np.nan
-        return factor_df
+    if len(factor_df) == 0:
+        factor_df["rsi"] = pd.Series([], dtype="float64", index=factor_df.index)
+        return factor_df.loc[original_index]
 
     # 用通用 helper 替代 transform，避免 OOM（详见 _per_asset_transform docstring）
     factor_df["rsi"] = _per_asset_transform(
@@ -626,8 +644,12 @@ def calculate_rsi_df(
         fn=lambda close_s: calculate_rsi(close_s, period=n),
     )
 
-    n_assets = factor_df[_COL_ASSET].nunique()
-    _logger.info("rsi (n=%s) 计算完成，共 %s 条记录, %s 个 asset", n, n_rows, n_assets)
+    _logger.info(
+        "rsi (n=%s) 计算完成，共 %s 条记录, %s 个 asset",
+        n,
+        len(factor_df),
+        factor_df[_COL_ASSET].nunique(),
+    )
 
     # 恢复原始 index 顺序（保持函数对调用方透明）
     factor_df = factor_df.loc[original_index]
@@ -635,4 +657,4 @@ def calculate_rsi_df(
     return factor_df
 
 
-calculate_rsi_df.required_cols = ["close"]  # type: ignore[attr-defined]
+calculate_rsi_df.required_cols = ["close", "asset", "date"]  # type: ignore[attr-defined]
