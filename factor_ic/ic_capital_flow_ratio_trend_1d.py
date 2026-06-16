@@ -35,11 +35,11 @@
   v1.5.0 (2026-06-15): warning 判定改用 is_finite_value 谓词（解耦表示层 "N/A" 字符串）；
                        positive_ratio 加 [0,1] 量纲范围校验；FactorCalcError 迁至 factor_ic.common.exceptions
   v1.6.0 (2026-06-15): 6项修复：①logger.exception→logger.error+exc_info=True消除语义重复；
-                       ②四重校验简化为None+assert（信任公共模块契约）；
+                       ②四重校验简化为None+assert（信任公共模块契约）（已由 v1.7.0 ①替换为 if-not-raise）；
                        ③required_columns移除因子输出列capital_flow_ratio_trend；
                        ④start_time移至parse_args前覆盖参数解析；
                        ⑤valid_days改用is_finite_value判定+warning替代"N/A"fallback；
-                       ⑥辅助字段加存在性日志区分"字段不存在"与"值为None"
+                       ⑥辅助字段加存在性日志区分"字段不存在"与"值为None"（已由 v1.8.0 删除前置 debug 块）
   v1.7.0 (2026-06-16): 6项防御性修复：①三处 assert 替换为 if-not-raise FactorCalcError，
                        避免 -O 模式下契约校验静默失效；②变量 ic_distribution 重命名为
                        ic_distribution_consistency 与字段名/日志名统一；③去除 positive_ratio
@@ -47,6 +47,15 @@
                        的 ERROR/CRITICAL 日志补充 factor_name 上下文方便排查；⑤valid_days
                        无效时仅保留 warning，避免与 info 重复输出 N/A；⑥版本历史行格式
                        与 __version__ 三段式语义化版本对齐（vX.Y.Z）
+  v1.8.0 (2026-06-16): 5项修复：①docstring run_complex_factor_ic→run_factor_ic 与实际调用对齐；
+                       ②/③删除三处前置 if-key-not-in-result debug 块（safe_dict None 路径已静默
+                       fallback，前置 debug 与之职责重叠）+ 消除 _has_ic_dist_key 一次性中间变量；
+                       ④positive_ratio 量纲越界引入 positive_ratio_range_warned 标志，去除结尾
+                       'IC>0 占比无效' 与上方'超出 [0,1] 范围'的双重告警；⑤ic_*/positive_ratio
+                       warning 判定块前移到原始值赋值之后、format_finite 之前，附"原始值不再
+                       修改"维护约束注释，避免 info 与 warning 跨越多行后值不一致；⑥变量
+                       _positive_ratio_range_warned 去下划线前缀（前缀仅留给"临时/单次"局部变量
+                       如 _valid_days，状态标志用普通命名以视觉区分用途）
 """
 
 import argparse
@@ -73,7 +82,7 @@ from factor_ic.common.logger_config import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
-__version__ = "1.7.0"
+__version__ = "1.8.0"
 
 # ============================================================================
 # FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
@@ -165,14 +174,17 @@ def main():
     # 量纲越界标志：用于结尾 warning 块去重。量纲越界时本块已打过一条针对性 warning
     # （描述"超出 [0, 1] 范围"），若结尾 warning 块再触发"IC>0 占比无效"则形成两条
     # 描述同一事件的 warning 且语义互相掩盖。
-    _positive_ratio_range_warned = False
+    # 命名说明：函数内局部状态标志，无下划线前缀（_xxx 在本项目仅用于"临时/单次判定后
+    # 即丢弃"的局部变量，如 _valid_days；状态标志跨多处读写，应使用普通命名以与
+    # "临时变量"在视觉上区分开）。
+    positive_ratio_range_warned = False
     if is_finite_value(positive_ratio) and not (0.0 <= positive_ratio <= 1.0):
         logger.warning(
             "positive_ratio=%s 超出预期范围 [0, 1]，可能是公共模块返回量纲变更（应为 0–1 小数）；本次摘要按 'N/A' 处理",
             positive_ratio,
         )
         positive_ratio = None
-        _positive_ratio_range_warned = True
+        positive_ratio_range_warned = True
 
     # ========================================================================
     # 字段级差异化 warning 集中判定（紧跟原始值赋值之后、format_finite 之前）
@@ -183,7 +195,7 @@ def main():
     #
     # ⚠️ 维护约束：本块之后到 format_finite 调用之间，禁止再修改这四个原始值变量。
     # 唯一已知的例外是上方 positive_ratio 量纲越界 → None 的赋值（已在 warning 前完成
-    # 并设置 _positive_ratio_range_warned 标志，故本块的 positive_ratio 判定基于"已修正"
+    # 并设置 positive_ratio_range_warned 标志，故本块的 positive_ratio 判定基于"已修正"
     # 的值，与去重标志配合避免重复告警）。
     #
     # 用 is_finite_value 谓词基于原始值判定（None/NaN/±Inf/非数/bool 均视为无效），
@@ -195,7 +207,7 @@ def main():
         logger.warning("IC 标准差无效（None/NaN/Inf）：因子值方差为零（全部相同）或截面样本不足，请检查因子计算逻辑")
     if not is_finite_value(icir):
         logger.warning("ICIR 无效（None/NaN/Inf）：IC 标准差为零导致除零，或 IC 序列长度不足，请检查回测窗口")
-    if not is_finite_value(positive_ratio) and not _positive_ratio_range_warned:
+    if not is_finite_value(positive_ratio) and not positive_ratio_range_warned:
         # 仅当 positive_ratio 因"非量纲越界"原因（None/NaN/Inf/字段缺失）变成 None 时
         # 才触发本通用 warning；量纲越界场景已在上方打过更精确的 warning，此处跳过避免重复。
         logger.warning(
