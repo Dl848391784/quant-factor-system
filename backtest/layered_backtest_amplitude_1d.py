@@ -45,6 +45,7 @@ if __name__ == "__main__":
     # 此处仅保护 SystemExit 之外的"启动期/未预期异常"（如 import 期失败、
     # 配置类构造抛出未被 CLI 捕获的异常），保证 CI/调度系统能拿到非 0 退出码。
     _logger = get_logger("amplitude")
+    _logger.debug("启动参数 argv=%s", sys.argv)
     try:
         factor_cli_main(config_cls=AmplitudeLayerConfig, factor_calculator=calculate_amplitude)
     except SystemExit:

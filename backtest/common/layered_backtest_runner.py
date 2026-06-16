@@ -211,6 +211,15 @@ class LayerConfigBase:
         # 8. 仅打印派生结果（完整配置摘要由 run_layered_backtest 打印一次）
         logger.info("IC文件: %s", self.ic_source_resolved)
         logger.info("因子方向: %s (来源: IC分析结果, ic_mean=%.4f)", self.factor_direction, ic_meta["ic_mean"])
+        # 9. 派生元数据汇总（关键观测点：定位"为什么这个因子的多空层是这样划分的"）
+        logger.info(
+            "派生元数据汇总: factor_name=%s direction=%s n_layers=%d long_layers=%s short_layers=%s",
+            self.factor_name,
+            self.factor_direction,
+            self.n_layers,
+            self.long_layers,
+            self.short_layers,
+        )
 
     def _load_ic_meta(self) -> dict[str, Any]:
         """加载 IC 分析结果（基类通用方法）
