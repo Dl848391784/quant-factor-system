@@ -254,7 +254,15 @@ if not data_available:
     logger.warning("数据缺失，跳过")
     sys.exit(0)
 
-# ✅ 正例 1：import-time 配置/注册失败 → exit 2
+# ❌ 反例 3（R16 修正）：模块顶层 except 直接 sys.exit(2)
+# 该写法被 importlib.import_module 调用时会杀掉宿主进程（如 pytest 扫描注册）
+try:
+    SPEC = register_factor(...)
+except (ValueError, TypeError):
+    sys.exit(2)  # 杀掉 pytest 进程！
+
+# ✅ 正例 1：import-time 配置/注册失败 → logger.critical + raise
+# （让调用方决定行为：测试可捕获/skip，CLI 由 Python 默认 traceback+exit 1）
 try:
     SPEC: FactorSpec = register_factor(
         factor_name="industry_xxx",
@@ -263,15 +271,16 @@ try:
         calc_func=calculate_industry_xxx,
     )
 except (ValueError, TypeError) as e:
-    logger.critical("FactorSpec 注册失败: %s (%s)", str(e)[:200], type(e).__name__)
-    sys.exit(2)
+    err_msg = str(e)[:200]  # 截断防止超长异常淹没单行日志
+    logger.critical("FactorSpec 注册失败: %s (%s)", err_msg, type(e).__name__)
+    raise
 
 # ✅ 正例 2：main() 运行时错误 → exit 1
 if __name__ == "__main__":
     try:
         main()
-    except DataSchemaError as e:
-        logger.error("数据列依赖不匹配: %s", e)
+    except (DataSchemaError, FactorCalcError) as e:
+        logger.error("...IC 计算失败: %s (%s)", e, type(e).__name__)
         sys.exit(1)
     except Exception:
         logger.exception("未预期的错误")
@@ -279,24 +288,33 @@ if __name__ == "__main__":
 ```
 
 **H12 Why**：
-- **CI / pipeline 区分能力**：exit 2 = 代码本身不能加载（立即停止流水线、@维护者）；exit 1 = 数据/逻辑层面失败（可重试、可降级）；exit 0 = 成功
-- **可观测性**：`run_pipeline.py` 等编排脚本可据退出码决定后续动作（exit 2 → 中断；exit 1 → 跳过该因子继续；exit 0 → 计入成功）
-- **Unix 惯例对齐**：1=通用错误，2=误用/配置（参考 bash exit code 约定、git 等工具的 exit 2 语义）
+- **CI / pipeline 区分能力**：exit 1 = 数据/逻辑层面失败（可重试、可降级）；exit 0 = 成功
+- **可观测性**：`run_pipeline.py` 等编排脚本可据 stderr+退出码决定后续动作
+- **测试可隔离性（R16 修正）**：模块顶层 sys.exit 会被 importlib.import_module
+  传染杀宿主进程；`factor_ic/common/test_factor_spec_consistency.py` 通过 importlib
+  扫描所有 ic_*.py 触发 SPEC 注册，import-time exit 路径与该测试设计不兼容。
+  改为 logger.critical + raise 后，测试框架可捕获 ValueError/TypeError 并合规断言/skip
+- **trade-off**：放弃 import-time exit 2 / runtime exit 1 的退出码区分，
+  换取 import-time 注册失败的可隔离性（CI 仍可通过 stderr 中的
+  `CRITICAL ... FactorSpec 注册失败` 关键字 + traceback 区分错误来源）
 
 **H12 Verify**：
 ```bash
 # 检查 sys.exit 调用点是否符合语义
 grep -rn "sys.exit(" factor_ic/ic_*.py
 # 期望：
-# - 模块顶层 try/except register_factor → sys.exit(2)
+# - 模块顶层 try/except register_factor → logger.critical + raise（不应有 sys.exit）
 # - __main__ 块 except → sys.exit(1)
 # - main() 内部业务失败 → sys.exit(1)
+
+# 自动化检查：
+python scripts/check_exit_codes.py all
 ```
 
 **H12 当前覆盖范围**：
 - ✅ 已落地：`factor_ic/ic_industry_amplitude_trend_1d.py` / `ic_industry_earnings_growth_1d.py` / `ic_industry_momentum_5d_1d.py` / `ic_industry_turnover_trend_1d.py`
 - ⏳ 待迁移：其他 `factor_ic/ic_*.py` 文件、`backtest/`、`comprehensive_factor/`、`data_fetchers/`、`summary/`
-- 自动化：`scripts/check_exit_codes.py` ✅ 已交付（AST 分析，pre-commit + CI 模式，11 个 pytest 全过）
+- 自动化：`scripts/check_exit_codes.py` ✅ 已交付（AST 分析，pre-commit + CI 模式，11 个 pytest 全过；R16 升级支持模块顶层"无 sys.exit + 必须 raise"模式校验）
 
 **H13 正反例**：
 ```python

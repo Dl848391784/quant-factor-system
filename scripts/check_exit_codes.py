@@ -29,7 +29,9 @@ TARGET_GLOB_PATTERNS = [
 ]
 
 # 允许的退出码（按位置）
-IMPORT_TIME_EXIT_CODE = 2  # 模块顶层 try/except 块
+# R16 升级：模块顶层 except 不再用 sys.exit(2)，改为 logger.critical + raise，
+# 因此 IMPORT_TIME_EXIT_CODE 不再使用（保留常量用于历史 grep 兼容）。
+IMPORT_TIME_EXIT_CODE = 2  # noqa: F841 — R16 起仅供历史参考，不在检查中使用
 RUNTIME_EXIT_CODE = 1  # __main__ 块内 except
 
 
@@ -94,18 +96,25 @@ def _check_file(filepath: Path) -> list[str]:
 
     for stmt in tree.body:
         # ① 模块顶层 try/except 块（捕获 register_factor 等 import-time 失败）
+        # H12 R16 升级：禁止 sys.exit（会杀 importlib 宿主进程），必须以 raise 收尾
         if isinstance(stmt, ast.Try):
             for handler in stmt.handlers:
-                for lineno, code in _extract_exit_codes(handler):
-                    if code is None:
-                        violations.append(
-                            f"{filepath}:{lineno}: 模块顶层 except 中 sys.exit 无常量参数（H12 要求 exit 2）"
-                        )
-                    elif code != IMPORT_TIME_EXIT_CODE:
-                        violations.append(
-                            f"{filepath}:{lineno}: 模块顶层 except 中 sys.exit({code})，"
-                            f"H12 要求 import-time 失败用 exit {IMPORT_TIME_EXIT_CODE}"
-                        )
+                # 检查是否有 sys.exit
+                exit_codes = _extract_exit_codes(handler)
+                for lineno, code in exit_codes:
+                    code_repr = "" if code is None else str(code)
+                    violations.append(
+                        f"{filepath}:{lineno}: 模块顶层 except 禁止 sys.exit({code_repr})，"
+                        f"会杀 importlib.import_module 宿主进程；H12 要求改为 logger.critical + raise"
+                    )
+                # 检查是否包含 raise（裸 raise 或 raise NewError）
+                has_raise = any(isinstance(n, ast.Raise) for n in ast.walk(handler))
+                if not has_raise and not exit_codes:
+                    # 既无 sys.exit 也无 raise → except 块吞异常（H12 隐性违规）
+                    violations.append(
+                        f"{filepath}:{handler.lineno}: 模块顶层 except 必须以 raise 收尾"
+                        f"（H12 要求让调用方决定退出行为，不可吞异常）"
+                    )
 
         # ② if __name__ == "__main__" 块内的 try/except
         if isinstance(stmt, ast.If) and _is_main_guard(stmt):
@@ -183,8 +192,8 @@ def check_exit_codes(mode: str = "staged") -> int:
         for v in all_violations:
             print(f"   {v}")
         print()
-        print("   H12 规则：")
-        print(f"   - 模块顶层 try/except register_factor → sys.exit({IMPORT_TIME_EXIT_CODE})")
+        print("   H12 规则（R16 修正后）：")
+        print("   - 模块顶层 try/except register_factor → logger.critical + raise（禁止 sys.exit）")
         print(f"   - __main__ 块 except → sys.exit({RUNTIME_EXIT_CODE})")
         print("   - 禁止 except 块中 sys.exit(0)")
         return 1

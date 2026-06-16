@@ -1,9 +1,11 @@
 """
 scripts/check_exit_codes.py 的单元测试
 
-覆盖 H12 退出码检查的正反例：
-- 合规：模块顶层 try/except register → sys.exit(2)；__main__ except → sys.exit(1)
-- 违规：顶层 except → sys.exit(1)；__main__ except → sys.exit(0)；__main__ except → sys.exit(2)
+覆盖 H12 退出码检查的正反例（R16 修正后语义）：
+- 合规：模块顶层 try/except register → logger.critical + raise（禁止 sys.exit）；
+        __main__ except → sys.exit(1)
+- 违规：顶层 except → sys.exit(任意)；__main__ except → sys.exit(0)；
+        __main__ except → sys.exit(2)；顶层 except 既无 sys.exit 也无 raise（吞异常）
 
 对应 PROJECT.md 规则 H12 / AGENTS.md 规则 #6。
 """
@@ -13,7 +15,6 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-import pytest
 from scripts.check_exit_codes import _check_file
 
 
@@ -27,8 +28,8 @@ def _write(tmp_path: Path, content: str) -> Path:
 # ─────────────────────────── 合规样本 ───────────────────────────
 
 
-def test_import_time_exit_2_pass(tmp_path: Path) -> None:
-    """模块顶层 try/except register_factor → sys.exit(2) 应通过。"""
+def test_import_time_raise_pass(tmp_path: Path) -> None:
+    """模块顶层 try/except register_factor → logger.critical + raise 应通过（R16）。"""
     fp = _write(
         tmp_path,
         """
@@ -37,7 +38,8 @@ def test_import_time_exit_2_pass(tmp_path: Path) -> None:
         try:
             SPEC = register_factor(name="x")
         except ValueError as e:
-            sys.exit(2)
+            logger.critical("注册失败: %s", e)
+            raise
         """,
     )
     assert _check_file(fp) == []
@@ -67,7 +69,7 @@ def test_no_exit_calls_pass(tmp_path: Path) -> None:
 
 
 def test_combined_correct_pass(tmp_path: Path) -> None:
-    """import-time exit 2 + runtime exit 1 同时存在应通过。"""
+    """import-time raise + runtime exit 1 同时存在应通过（R16 新模式）。"""
     fp = _write(
         tmp_path,
         """
@@ -75,8 +77,9 @@ def test_combined_correct_pass(tmp_path: Path) -> None:
 
         try:
             SPEC = register_factor(name="x")
-        except ValueError:
-            sys.exit(2)
+        except ValueError as e:
+            logger.critical("注册失败: %s", e)
+            raise
 
         def main():
             pass
@@ -93,11 +96,44 @@ def test_combined_correct_pass(tmp_path: Path) -> None:
     assert _check_file(fp) == []
 
 
+def test_import_time_raise_new_exception_pass(tmp_path: Path) -> None:
+    """顶层 except 中 raise NewError(...) 也应通过（不限于裸 raise）。"""
+    fp = _write(
+        tmp_path,
+        """
+        try:
+            SPEC = register_factor(name="x")
+        except ValueError as e:
+            raise RuntimeError("wrap") from e
+        """,
+    )
+    assert _check_file(fp) == []
+
+
 # ─────────────────────────── 违规样本 ───────────────────────────
 
 
+def test_import_time_exit_2_fail(tmp_path: Path) -> None:
+    """R16：模块顶层 except 用 sys.exit(2) 应违规（杀 importlib 宿主）。"""
+    fp = _write(
+        tmp_path,
+        """
+        import sys
+
+        try:
+            SPEC = register_factor(name="x")
+        except ValueError:
+            sys.exit(2)
+        """,
+    )
+    violations = _check_file(fp)
+    assert len(violations) == 1
+    assert "禁止 sys.exit" in violations[0]
+    assert "logger.critical + raise" in violations[0]
+
+
 def test_import_time_exit_1_fail(tmp_path: Path) -> None:
-    """模块顶层 except 用 sys.exit(1) 应违规。"""
+    """R16：模块顶层 except 用 sys.exit(1) 也违规（任何 sys.exit 都禁止）。"""
     fp = _write(
         tmp_path,
         """
@@ -111,8 +147,23 @@ def test_import_time_exit_1_fail(tmp_path: Path) -> None:
     )
     violations = _check_file(fp)
     assert len(violations) == 1
-    assert "exit 2" in violations[0]
-    assert "sys.exit(1)" in violations[0]
+    assert "禁止 sys.exit" in violations[0]
+
+
+def test_import_time_swallow_exception_fail(tmp_path: Path) -> None:
+    """R16：顶层 except 既无 sys.exit 也无 raise → 吞异常违规。"""
+    fp = _write(
+        tmp_path,
+        """
+        try:
+            SPEC = register_factor(name="x")
+        except ValueError:
+            pass  # 吞异常
+        """,
+    )
+    violations = _check_file(fp)
+    assert len(violations) == 1
+    assert "必须以 raise 收尾" in violations[0]
 
 
 def test_runtime_exit_0_fail(tmp_path: Path) -> None:
@@ -135,7 +186,7 @@ def test_runtime_exit_0_fail(tmp_path: Path) -> None:
 
 
 def test_runtime_exit_2_fail(tmp_path: Path) -> None:
-    """__main__ except 用 sys.exit(2) 应违规（仅 import-time 才是 2）。"""
+    """__main__ except 用 sys.exit(2) 应违规（仅 exit 1 合规）。"""
     fp = _write(
         tmp_path,
         """
@@ -154,17 +205,18 @@ def test_runtime_exit_2_fail(tmp_path: Path) -> None:
     assert "sys.exit(2)" in violations[0]
 
 
-def test_exit_no_arg_fail_in_top_try(tmp_path: Path) -> None:
-    """顶层 except 中 sys.exit() 无参数应违规。"""
+def test_runtime_exit_no_arg_fail(tmp_path: Path) -> None:
+    """__main__ except 中 sys.exit() 无参数应违规。"""
     fp = _write(
         tmp_path,
         """
         import sys
 
-        try:
-            SPEC = register_factor(name="x")
-        except ValueError:
-            sys.exit()
+        if __name__ == "__main__":
+            try:
+                main()
+            except Exception:
+                sys.exit()
         """,
     )
     violations = _check_file(fp)
@@ -182,15 +234,15 @@ def test_multiple_violations(tmp_path: Path) -> None:
         try:
             SPEC = register_factor(name="x")
         except ValueError:
-            sys.exit(1)
+            sys.exit(1)  # R16: 顶层禁止 sys.exit
 
         if __name__ == "__main__":
             try:
                 main()
             except DataSchemaError:
-                sys.exit(0)
+                sys.exit(0)  # 隐藏失败
             except Exception:
-                sys.exit(2)
+                sys.exit(2)  # 应为 exit 1
         """,
     )
     violations = _check_file(fp)
