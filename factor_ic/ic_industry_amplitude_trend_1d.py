@@ -83,6 +83,10 @@ def main():
     # 注：run_factor_ic 失败路径走 build_error_result（返回 dict）或抛 DataSchemaError，
     # 不会返回 None；冗余的 result is None 兜底掩盖真实错误来源，已移除。
     # log_factor_summary 作为流程终结的唯一日志出口，避免与其重复的"计算完成"语义。
+    # 透明性审阅（factor_summary_logger.py 全文）：函数实现仅 dict.get + 字符串格式化
+    # + logger.info/warning，无 try/except、无 sys.exit、无静默 return；其行为契约
+    # （L40-44）明确"不抛异常、不调用 sys.exit、不影响调用方控制流"。因此本调用处
+    # 不需要额外 try-except 包裹，失败路径不会被静默吞掉。
     log_factor_summary(result, "行业振幅趋势因子", logger)
 
     return result
