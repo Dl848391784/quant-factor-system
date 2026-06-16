@@ -174,6 +174,34 @@ def main():
         positive_ratio = None
         _positive_ratio_range_warned = True
 
+    # ========================================================================
+    # 字段级差异化 warning 集中判定（紧跟原始值赋值之后、format_finite 之前）
+    # ========================================================================
+    # 设计要点（修复用户报告 #4）：warning 判定基于原始值（ic_mean / ic_std / icir /
+    # positive_ratio），必须与原始值赋值物理相邻，避免与下方摘要 info 块跨越多行后
+    # 出现"info 输出修改前的值、warning 判定修改后的值"的静默不一致。
+    #
+    # ⚠️ 维护约束：本块之后到 format_finite 调用之间，禁止再修改这四个原始值变量。
+    # 唯一已知的例外是上方 positive_ratio 量纲越界 → None 的赋值（已在 warning 前完成
+    # 并设置 _positive_ratio_range_warned 标志，故本块的 positive_ratio 判定基于"已修正"
+    # 的值，与去重标志配合避免重复告警）。
+    #
+    # 用 is_finite_value 谓词基于原始值判定（None/NaN/±Inf/非数/bool 均视为无效），
+    # 避免 warning 依赖 format_finite 的字符串 fallback（"N/A"）—— 若公共模块表示层
+    # 字符串改动，业务告警不会失效。
+    if not is_finite_value(ic_mean):
+        logger.warning("本次计算 IC 均值无效（None/NaN/Inf）：因子-收益对齐后样本不足或全部 NaN，请检查数据源覆盖范围")
+    if not is_finite_value(ic_std):
+        logger.warning("IC 标准差无效（None/NaN/Inf）：因子值方差为零（全部相同）或截面样本不足，请检查因子计算逻辑")
+    if not is_finite_value(icir):
+        logger.warning("ICIR 无效（None/NaN/Inf）：IC 标准差为零导致除零，或 IC 序列长度不足，请检查回测窗口")
+    if not is_finite_value(positive_ratio) and not _positive_ratio_range_warned:
+        # 仅当 positive_ratio 因"非量纲越界"原因（None/NaN/Inf/字段缺失）变成 None 时
+        # 才触发本通用 warning；量纲越界场景已在上方打过更精确的 warning，此处跳过避免重复。
+        logger.warning(
+            "IC>0 占比无效（None/NaN/Inf）：公共模块未输出 ic_distribution_consistency 字段或值非有限，请核对模块版本"
+        )
+
     # 格式化前用 format_finite 统一守卫 None / NaN / Inf：
     # 公共模块在样本不足或除零时可能返回 float('nan')/float('inf')，
     # 直接 f-string 会输出 'nan'/'inf' 字面量污染摘要日志和下游消费者。
@@ -205,23 +233,6 @@ def main():
     logger.info("IC 标准差: %s", ic_std_str)
     logger.info("ICIR: %s", icir_str)
     logger.info("IC>0 占比: %s", positive_ratio_str)
-
-    # 字段级差异化提示，提升运维可观测性。
-    # 用 is_finite_value 谓词基于原始值判定（None/NaN/±Inf/非数/bool 均视为无效），
-    # 避免 warning 依赖 format_finite 的字符串 fallback（"N/A"）—— 若公共模块表示层
-    # 字符串改动，业务告警不会失效。
-    if not is_finite_value(ic_mean):
-        logger.warning("本次计算 IC 均值无效（None/NaN/Inf）：因子-收益对齐后样本不足或全部 NaN，请检查数据源覆盖范围")
-    if not is_finite_value(ic_std):
-        logger.warning("IC 标准差无效（None/NaN/Inf）：因子值方差为零（全部相同）或截面样本不足，请检查因子计算逻辑")
-    if not is_finite_value(icir):
-        logger.warning("ICIR 无效（None/NaN/Inf）：IC 标准差为零导致除零，或 IC 序列长度不足，请检查回测窗口")
-    if not is_finite_value(positive_ratio) and not _positive_ratio_range_warned:
-        # 仅当 positive_ratio 因"非量纲越界"原因（None/NaN/Inf/字段缺失）变成 None 时
-        # 才触发本通用 warning；量纲越界场景已在上方打过更精确的 warning，此处跳过避免重复。
-        logger.warning(
-            "IC>0 占比无效（None/NaN/Inf）：公共模块未输出 ic_distribution_consistency 字段或值非有限，请核对模块版本"
-        )
 
     elapsed = time.monotonic() - start_time
     logger.info("资金流占比趋势因子IC计算完成: elapsed=%.2fs", elapsed)
