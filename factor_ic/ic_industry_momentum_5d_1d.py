@@ -114,7 +114,7 @@ if __name__ == "__main__":
     # except Exception 兜底以 exit 1 上报，业务失败被误判为程序 bug。
     #
     # 退出码档（H12 R17/R18/R19）：
-    #   exit 4 (DataSchemaError) → 上游数据 / 別契约
+    #   exit 4 (DataSchemaError) → 上游数据 / 列契约
     #   exit 5 (FactorCalcError) → 因子计算代码
     #   exit 3 (SummaryLogError) → 主结果可用，sidecar 失败
     #   exit 1 (Exception)       → 未预期错误（CRITICAL 立即响应）
