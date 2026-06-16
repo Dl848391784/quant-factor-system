@@ -57,6 +57,7 @@ import sys
 from collections.abc import Callable
 from enum import IntEnum
 from time import perf_counter
+from typing import NoReturn
 
 from backtest.common.layered_backtest_runner import LayerConfigBase, run_layered_backtest
 from backtest.common.logger_config import get_logger
@@ -74,8 +75,11 @@ class ExitCode(IntEnum):
     UNEXPECTED_ERROR = 6  # 未预期异常
 
 
-def _die(logger, code: ExitCode, msg: str) -> None:
+def _die(logger, code: ExitCode, msg: str) -> NoReturn:
     """错误处理辅助函数：收敛 logger.error + sys.exit 模式
+
+    标记 NoReturn 让类型检查器理解 _die 调用后控制流终止，
+    避免后续变量误报 possibly-unbound。
 
     Args:
         logger: 日志对象
@@ -176,30 +180,36 @@ def factor_cli_main(
     # 启动时回放 CLI 参数（事后可复现具体 data_source/output_dir 取值）
     if not args.quiet:
         logger.info("运行参数: %s", vars(args))
+    # DEBUG 级别同时回放原始 argv，便于诊断 argparse 解析前的真实命令行
+    logger.debug("启动 argv=%s", sys.argv)
 
     # 记录开始时间（计算回测耗时）
     start_time = perf_counter()
 
-    # 配置实例（基类 __post_init__ 已打印启动日志）
-    config = config_cls()
-
-    # 因子列名从 config 派生（优先 factor_col，否则 factor_name）
-    factor_col = config.factor_col_resolved
-
-    # required_factor_cols 派生：
-    #   1. 预计算因子：factor_col 本身就是所需列
-    #   2. 需计算因子：从 calculator.required_cols 读取
-    if factor_calculator is None:
-        required_factor_cols = [factor_col]
-    else:
-        required_factor_cols = getattr(factor_calculator, "required_cols", None)
-
-    # 包装 calculator（如 partial）
-    if setup_calculator and factor_calculator is not None:
-        factor_calculator = setup_calculator(args, factor_calculator)  # type: ignore[arg-type]
-
-    # try 范围收窄：仅包裹 run_layered_backtest() 调用
+    # try 范围覆盖配置实例化 + 派生 + 回测调用：
+    # - config_cls() 在 __post_init__ 中可能抛 FileNotFoundError（IC 文件不存在）、
+    #   KeyError（ic_metrics 字段缺失）、ValueError（layer_names 校验失败）
+    # - run_layered_backtest() 抛业务异常
+    # 统一用 ExitCode 退出，避免子脚本各自加 try/except 兜底（瘦声明原则）
     try:
+        # 配置实例（基类 __post_init__ 已打印启动日志 + 派生元数据汇总）
+        config = config_cls()
+
+        # 因子列名从 config 派生（优先 factor_col，否则 factor_name）
+        factor_col = config.factor_col_resolved
+
+        # required_factor_cols 派生：
+        #   1. 预计算因子：factor_col 本身就是所需列
+        #   2. 需计算因子：从 calculator.required_cols 读取
+        if factor_calculator is None:
+            required_factor_cols = [factor_col]
+        else:
+            required_factor_cols = getattr(factor_calculator, "required_cols", None)
+
+        # 包装 calculator（如 partial）
+        if setup_calculator and factor_calculator is not None:
+            factor_calculator = setup_calculator(args, factor_calculator)  # type: ignore[arg-type]
+
         result = run_layered_backtest(
             factor_name=factor_name,
             factor_col=factor_col,
