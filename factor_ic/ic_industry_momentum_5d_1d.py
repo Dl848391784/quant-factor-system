@@ -129,12 +129,11 @@ if __name__ == "__main__":
     # 内 warning 落盘，不再重复堆栈）；Exception 兜底 → logger.exception。
     try:
         main(parse_args())
-    except DataSchemaError as e:
-        # message 字段独立可读 + logger.exception 自动附加堆栈与异常链。
-        logger.exception("行业5日动量因子IC计算失败 (数据列依赖不匹配): %s", e)
+    except DataSchemaError:
+        logger.exception("行业5日动量因子IC计算失败 (数据列依赖不匹配)")
         sys.exit(4)  # H12 R18: schema 失败 → 检查上游数据
-    except FactorCalcError as e:
-        logger.exception("行业5日动量因子IC计算失败: %s", e)
+    except FactorCalcError:
+        logger.exception("行业5日动量因子IC计算失败")
         sys.exit(5)  # H12 R19: 因子计算失败 → 检查计算代码
     except SummaryLogError as e:
         # 不用 logger.exception：原始异常类型已由 main() 内 logger.warning 单独落盘，
