@@ -78,10 +78,9 @@ def main():
         _logger=logger,
     )
 
-    if result is None:
-        raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
-
     # 输出 IC 摘要 + None 状态整合告警（公共模块,M3.1）
+    # 注：run_factor_ic 失败路径走 build_error_result（返回 dict）或抛 DataSchemaError，
+    # 不会返回 None；冗余的 result is None 兜底掩盖真实错误来源，已移除。
     log_factor_summary(result, "行业振幅趋势因子", logger)
 
     logger.info("行业振幅趋势因子IC计算完成")
