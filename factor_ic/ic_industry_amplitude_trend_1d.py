@@ -26,7 +26,7 @@ import sys
 
 from data_fetchers.factor_calculator import calculate_industry_amplitude_trend
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
-from factor_ic.common.exceptions import FactorCalcError
+from factor_ic.common.exceptions import DataSchemaError, FactorCalcError
 from factor_ic.common.factor_ic_runner import run_factor_ic
 from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.factor_summary_logger import log_factor_summary
@@ -90,6 +90,12 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except DataSchemaError as e:
+        # run_factor_ic 文档（factor_ic_runner.py L460-461）声明 required_columns 与
+        # 数据源列不匹配时抛 DataSchemaError；单独捕获以保留 schema 失败的明确语义，
+        # 避免落入通用 Exception 分支后丢失"列依赖不匹配"这一关键上下文。
+        logger.error("行业振幅趋势因子IC计算失败 (数据列依赖不匹配): %s", e)
+        sys.exit(1)
     except FactorCalcError as e:
         logger.error("行业振幅趋势因子IC计算失败: %s", e)
         sys.exit(1)
