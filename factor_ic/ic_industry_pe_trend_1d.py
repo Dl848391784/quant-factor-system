@@ -29,6 +29,7 @@
 版本历史:
   v1.0 (2026-06-12): 初始版本，复用 factor_calculator.calculate_industry_pe_trend
   v1.1 (2026-06-16): 修复退出码表/None检查/sys.exit/参数命名/日志问题
+  v1.2 (2026-06-16): None返回补warning/SummaryLogError改error+cause/or{}改is not None/日志去冗余/FactorCalcError补上下文
 """
 
 import argparse
@@ -91,14 +92,20 @@ def main():
         logger=logger,
     )
 
-    # #2 修复：None 检查移入 __main__ 块（R20: main() 作为库函数不应抛业务异常泄露）
-    # 此处仅返回 result（可能为 None），由调用方决定如何处理
+    # None 检查：记录上下文后返回 None，由调用方（__main__ 块或库函数调用方）决定处理方式
+    # （R20: main() 作为库函数不应抛业务异常泄露，但需留痕便于库调用场景排查）
     if result is None:
+        logger.warning(
+            "run_factor_ic 返回 None（factor=%s, min_stocks=%s, force_full=%s），数据加载或计算可能失败",
+            SPEC.factor_name,
+            args.min_stocks,
+            args.force_full,
+        )
         return None
 
     # #6 修复：计算完成检查点日志（含 result 基本维度，便于生产排查）
-    sample_stats = result.get("sample_stats") or {}
-    period = result.get("period") or {}
+    sample_stats = result.get("sample_stats") if result.get("sample_stats") is not None else {}
+    period = result.get("period") if result.get("period") is not None else {}
     logger.debug(
         "run_factor_ic 完成: 有效天数=%s, 日期范围=%s~%s, 更新模式=%s",
         sample_stats.get("valid_days", "N/A"),
@@ -124,18 +131,23 @@ def main():
     ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
     icir_str = f"{icir:.2f}" if icir is not None else "N/A"
     logger.info(
-        "行业PE趋势因子IC计算完成: IC均值=%s, ICIR=%s, 有效天数=%s",
+        "行业PE趋势因子IC计算完成: IC均值=%s, ICIR=%s",
         ic_mean_str,
         icir_str,
-        sample_stats.get("valid_days", "N/A"),
     )
     return result
 
 
 if __name__ == "__main__":
+    # 解析参数供 __main__ 异常日志使用（与 main() 内解析一致）
+    _parser = argparse.ArgumentParser()
+    _parser.add_argument("--force-full", action="store_true")
+    _parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS)
+    _cli_args, _ = _parser.parse_known_args()
+
     try:
         result = main()
-        # #2 修复：None 检查从 main() 移至此处，映射为 exit 5（R19 因子计算失败）
+        # None 检查从 main() 移至此处，映射为 exit 5（R19 因子计算失败）
         if result is None:
             logger.error("run_factor_ic 返回 None，数据加载或计算可能失败")
             sys.exit(5)
@@ -145,16 +157,25 @@ if __name__ == "__main__":
         # MODULE.md M22：业务异常用 logger.error 不打堆栈。
         logger.error("数据 Schema 校验失败 (factor=%s): %s", e.factor_name, e)
         sys.exit(4)  # H12 R18: schema 失败 → 检查上游数据
-    except SummaryLogError:
-        # #3 修复：辅助层失败（R17），因子计算 result 已成功生成
+    except SummaryLogError as e:
+        # 辅助层失败（R17），因子计算 result 已成功生成
         # 主结果产物可用，下游 backtest/comprehensive/summary 可正常消费；
         # 仅旁路日志摘要失败时返回 exit 3
-        logger.exception(
-            "摘要输出阶段失败（因子计算 result 已成功生成；故障源 = 摘要日志层而非 run_factor_ic 业务路径）"
+        # M22: 业务异常子类不打完整堆栈，只打印核心原因（e.__cause__）
+        cause_msg = str(e.__cause__) if e.__cause__ else "未知原因"
+        logger.error(
+            "摘要输出阶段失败（因子计算 result 已成功生成；故障源 = 摘要日志层；原因: %s）",
+            cause_msg,
         )
         sys.exit(3)  # H12 R17：辅助层失败专用退出码
     except FactorCalcError as e:
-        logger.error("行业PE趋势因子IC计算失败: %s", e)
+        logger.error(
+            "行业PE趋势因子IC计算失败 (factor=%s, min_stocks=%s, force_full=%s): %s",
+            SPEC.factor_name,
+            _cli_args.min_stocks,
+            _cli_args.force_full,
+            e,
+        )
         sys.exit(5)  # H12 R19: 因子计算失败 → 检查计算代码
     except Exception:
         logger.exception("未预期的错误")
