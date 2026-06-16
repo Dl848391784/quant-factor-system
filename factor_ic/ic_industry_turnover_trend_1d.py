@@ -40,7 +40,7 @@ logger = get_logger(__name__)
 # FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
 # ============================================================================
 
-SPEC = None  # 模块级占位，注册成功后由 register_factor 赋值
+SPEC = None  # 防止注册失败 raise 传播期间 SPEC 处于未定义状态导致 NameError
 
 try:
     SPEC = register_factor(
@@ -100,10 +100,10 @@ if __name__ == "__main__":
         main()
     except DataSchemaError:
         logger.exception("行业换手率趋势因子IC计算失败 (数据列依赖不匹配)")
-        sys.exit(4)  # H12 R18: schema 失败 → 检查上游数据
+        sys.exit(4)  # schema 失败，退出码 4 供 shell 脚本区分数据问题
     except FactorCalcError:
         logger.exception("行业换手率趋势因子IC计算失败")
-        sys.exit(5)  # H12 R19: 因子计算失败 → 检查计算代码
+        sys.exit(5)  # 因子计算失败，退出码 5 供 shell 脚本区分计算逻辑问题
     except Exception:
         logger.exception("未预期的错误")
         sys.exit(1)
