@@ -3,7 +3,8 @@
 行业换手率趋势因子 IC 计算器 - 使用公共模块主入口
 
 遵循 PROJECT.md 公共模块强制复用规范：
-- 主流程使用 run_complex_factor_ic()（禁止手写三模式分支）
+- 主流程使用 run_factor_ic()（FactorSpec 驱动统一入口，已替代 run_simple/run_complex；
+  详见 factor_ic/MODULE.md：禁止继续使用 run_complex_factor_ic，全部脚本已迁移）
 - 因子计算逻辑复用 data_fetchers.factor_calculator（遵循 MODULE.md 约束 #3）
 
 因子定义：
@@ -39,6 +40,8 @@ logger = get_logger(__name__)
 # FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
 # ============================================================================
 
+SPEC = None  # 初始化为 None，防止注册失败 raise 后 main() 引用 NameError
+
 try:
     SPEC = register_factor(
         FactorSpec(
@@ -53,10 +56,10 @@ except SpecRegistrationError as e:
     #   （继承 ValueError，封装重复注册、列名非法、FactorSpec dataclass 构造期 TypeError 等）。
     # - importlib.import_module 在 test_factor_spec_consistency.py 中扫描所有 ic_*.py
     #   触发 SPEC 注册，sys.exit 会杀掉 pytest 宿主；改 raise 让调用方决定行为。
-    # - 截断策略：str(e)[:200] 内联到 logger 实参，固定后缀 "(truncated to <=200 chars)"
-    #   显式告知阅读者本字段可能被截断。
+    # - str(e)[:200] 截断策略：防止单条日志过长；截断标记仅在注释中说明，
+    #   不混入日志消息体以免污染结构化解析。
     logger.critical(
-        "FactorSpec 注册失败 (factor=industry_turnover_trend): %s (%s) (truncated to <=200 chars)",
+        "FactorSpec 注册失败 (factor=industry_turnover_trend): %s (%s)",
         str(e)[:200],
         type(e).__name__,
     )
@@ -65,6 +68,10 @@ except SpecRegistrationError as e:
 
 def main():
     """CLI 主入口"""
+    if SPEC is None:
+        logger.critical("SPEC 未注册，无法执行 IC 计算（注册阶段可能已失败）")
+        sys.exit(2)  # import-time 注册失败
+
     parser = argparse.ArgumentParser(description="行业换手率趋势因子 IC 计算器")
     parser.add_argument("--force-full", action="store_true", help="强制全量计算")
     parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
@@ -78,39 +85,31 @@ def main():
         logger=logger,
     )
 
-    # 包裹 log_factor_summary：摘要层失败 → sys.exit(3) 显式辅助层失败信号
-    # （PROJECT.md H12 R17）。因子计算 result 已成功生成，主结果产物可用，下游
-    # backtest/comprehensive/summary 可正常消费；仅旁路日志摘要失败时返回 exit 3，
-    # 与业务失败（exit 1）和 import-time 注册失败（exit 2）严格区分。
+    # 包裹 log_factor_summary：摘要层失败 → sys.exit(3)
+    # （H12 R17 要求：辅助层失败用退出码 3，与业务失败 exit 1 / 注册失败 exit 2 区分）。
+    # 因子计算 result 已成功生成，主结果产物可用，下游可正常消费。
     try:
         log_factor_summary(result, "行业换手率趋势因子", logger)
-    except Exception:
+    except Exception as e:
         logger.exception(
-            "log_factor_summary 摘要输出阶段失败（因子计算 result 已成功生成；"
-            "故障源 = 摘要日志层而非 run_factor_ic 业务路径）"
+            "log_factor_summary 摘要输出阶段失败: %s %s（因子计算 result 已成功生成；"
+            "故障源 = 摘要日志层而非 run_factor_ic 业务路径）",
+            type(e).__name__,
+            str(e),
         )
-        sys.exit(3)  # H12 R17：辅助层失败专用退出码
+        sys.exit(3)
 
 
 if __name__ == "__main__":
-    # 异常分支顺序依据（exceptions.py L27/L46 已确认）：
-    # - DataSchemaError(Exception) 与 FactorCalcError(Exception) 均直接继承 Exception，
-    #   两者是【平级关系，无父子继承】（exceptions.py L60 注释也明确"与 FactorCalcError 并列"）。
-    # - 因此 DataSchemaError ↔ FactorCalcError 的捕获顺序在异常匹配上等价，无主次之分。
-    # - 当前先 DataSchemaError 后 FactorCalcError 的顺序仅为可读性约定（按错误来源远近排序：
-    #   schema 失败发生在数据加载阶段（最早），因子计算失败发生在加载之后），
-    #   未来调整顺序不会改变捕获语义。
-    # - 通用 Exception 必须放最后，作为非业务异常的兜底（程序 bug → CRITICAL 告警语义）。
+    # DataSchemaError 与 FactorCalcError 平级（均直接继承 Exception），捕获顺序等价
     try:
         main()
-    except DataSchemaError as e:
-        # run_factor_ic 文档（factor_ic_runner.py L460-461）声明 required_columns 与
-        # 数据源列不匹配时抛 DataSchemaError；单独捕获以保留 schema 失败的明确语义，
-        # 避免落入通用 Exception 分支后丢失"列依赖不匹配"这一关键上下文。
-        logger.error("行业换手率趋势因子IC计算失败 (数据列依赖不匹配): %s", e)
+    except DataSchemaError:
+        # schema 失败（required_columns 与数据源列不匹配），单独捕获保留明确语义
+        logger.exception("行业换手率趋势因子IC计算失败 (数据列依赖不匹配)")
         sys.exit(1)
-    except FactorCalcError as e:
-        logger.error("行业换手率趋势因子IC计算失败: %s", e)
+    except FactorCalcError:
+        logger.exception("行业换手率趋势因子IC计算失败")
         sys.exit(1)
     except Exception:
         logger.exception("未预期的错误")
