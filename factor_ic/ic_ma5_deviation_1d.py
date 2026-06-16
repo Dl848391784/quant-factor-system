@@ -55,7 +55,7 @@ def main():
     )
 
     if result is None:
-        raise FactorCalcError("run_factor_ic 返回 None")
+        raise FactorCalcError("run_factor_ic 返回 None，因子计算未产生有效结果，请检查数据或配置")
 
     ic_metrics = result.get("ic_metrics") or {}
     sample_stats = result.get("sample_stats") or {}
