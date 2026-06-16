@@ -66,6 +66,10 @@ def main():
 
     # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
     # 本地启动参数日志：补充模块日志流可追溯入参（与公共横幅互补）
+    # 布尔格式说明：force_full=%s 沿用 Python bool 默认字符串化（True/False），
+    # 与公共模块 factor_ic_runner.py:137 的 "入口参数: min_stocks=%s, force_full=%s"
+    # 完全一致，保持项目内布尔日志检索语法统一（grep "force_full=True" 可同时
+    # 命中本模块与公共模块）。此处不切换为 yes/no 或 1/0 风格是有意为之。
     logger.info(
         "启动 run_factor_ic: factor=%s min_stocks=%d force_full=%s",
         SPEC.factor_name,
