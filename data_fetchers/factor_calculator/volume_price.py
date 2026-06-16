@@ -96,12 +96,12 @@ def calculate_volume_price_strength(
     valid_count = int(df[_COL_VOLUME_PRICE_STRENGTH].notna().sum())
     nan_count = len(df) - valid_count
     _logger.info(
-        "  有效 %s: %d (%.2f%%)",
+        "  有效 %s: %d (%.2f%%)，NaN %d 行",
         _COL_VOLUME_PRICE_STRENGTH,
         valid_count,
         valid_count / len(df) * 100 if len(df) > 0 else 0,
+        nan_count,
     )
-    _logger.info("  NaN %s: %d 行", _COL_VOLUME_PRICE_STRENGTH, nan_count)
 
     return df
 
@@ -154,12 +154,12 @@ def calculate_positive_day_ratio_5(
     valid_count = int(df[_COL_POSITIVE_DAY_RATIO_5].notna().sum())
     nan_count = len(df) - valid_count
     _logger.info(
-        "  有效 %s: %d (%.2f%%)",
+        "  有效 %s: %d (%.2f%%)，NaN %d 行",
         _COL_POSITIVE_DAY_RATIO_5,
         valid_count,
         valid_count / len(df) * 100 if len(df) > 0 else 0,
+        nan_count,
     )
-    _logger.info("  NaN %s: %d 行", _COL_POSITIVE_DAY_RATIO_5, nan_count)
 
     return df
 
@@ -210,12 +210,12 @@ def calculate_ma5_deviation(
     valid_count = int(df[_COL_MA5_DEVIATION].notna().sum())
     nan_count = len(df) - valid_count
     _logger.info(
-        "  有效 %s: %d (%.2f%%)",
+        "  有效 %s: %d (%.2f%%)，NaN %d 行",
         _COL_MA5_DEVIATION,
         valid_count,
         valid_count / len(df) * 100 if len(df) > 0 else 0,
+        nan_count,
     )
-    _logger.info("  NaN %s: %d 行", _COL_MA5_DEVIATION, nan_count)
 
     return df
 
@@ -276,12 +276,12 @@ def calculate_near_high_ratio_5(
     valid_count = int(df[_COL_NEAR_HIGH_RATIO_5].notna().sum())
     nan_count = len(df) - valid_count
     _logger.info(
-        "  有效 %s: %d (%.2f%%)",
+        "  有效 %s: %d (%.2f%%)，NaN %d 行",
         _COL_NEAR_HIGH_RATIO_5,
         valid_count,
         valid_count / len(df) * 100 if len(df) > 0 else 0,
+        nan_count,
     )
-    _logger.info("  NaN %s: %d 行", _COL_NEAR_HIGH_RATIO_5, nan_count)
 
     return df
 
