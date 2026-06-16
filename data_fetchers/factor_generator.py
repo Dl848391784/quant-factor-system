@@ -566,6 +566,48 @@ def _drop_industry_column(factor_df: pd.DataFrame) -> pd.DataFrame:
     return factor_df
 
 
+def _load_json_gz_data(
+    path: Path,
+    dataset_label: str,
+    logger: logging.Logger,
+) -> list[dict[str, Any]]:
+    """加载 gzip 压缩的 JSON 数据文件并提取 'data' 字段。
+
+    统一封装 Step 1/2/3 的加载逻辑：gzip 解压 + JSON 解析 + 'data' 字段校验。
+    异常类型 / 消息格式与重构前字符级一致。
+
+    Args:
+        path: 数据文件路径
+        dataset_label: 数据集中文标签（用于错误消息），例 "基础因子" / "换手率" / "收益"
+        logger: 日志器（gzip.BadGzipFile 时 error 日志）
+
+    Returns:
+        records: list[dict]，对应 JSON 文件 "data" 字段值
+
+    Raises:
+        FileNotFoundError: 文件不存在
+        ValueError: gzip 损坏 / JSON 解析失败 / 缺少 'data' 字段
+    """
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            payload = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"{dataset_label}数据文件不存在: {path}") from None
+    except gzip.BadGzipFile as e:
+        logger.error("gzip 文件损坏: %s, 原因: %s", path, str(e))
+        raise ValueError(f"gzip 文件损坏: {path}") from e
+    except json.JSONDecodeError as e:
+        # JSONDecodeError 内存优化：提取关键信息，避免 e.doc 内存翻倍
+        # 将行列信息合并到异常消息，由调用方统一决定是否记录日志
+        raise ValueError(f"JSON解析失败: {path}, 行 {e.lineno}, 列 {e.colno}, 信息: {e.msg}") from e
+
+    # 数据验证：检查 'data' 字段存在
+    if "data" not in payload:
+        raise ValueError(f"{dataset_label}数据缺少 'data' 字段: {path}")
+
+    return payload["data"]
+
+
 # ============================================================================
 # logger 获取函数（遵循 PROJECT.md 公共模块日志规范）
 # ============================================================================
@@ -669,28 +711,13 @@ def generate_all_factors(
     # ========== Step 1: 加载基础因子数据 ==========
     logger.info("Step 1: 加载基础因子数据...")
 
-    try:
-        with gzip.open(factor_data_path, "rt", encoding="utf-8") as f:
-            base_data = json.load(f)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"基础因子数据文件不存在: {factor_data_path}") from None
-    except gzip.BadGzipFile as e:
-        logger.error("gzip 文件损坏: %s, 原因: %s", factor_data_path, str(e))
-        raise ValueError(f"gzip 文件损坏: {factor_data_path}") from e
-    except json.JSONDecodeError as e:
-        # JSONDecodeError 内存优化：提取关键信息，避免 e.doc 内存翻倍
-        # 将行列信息合并到异常消息，由调用方统一决定是否记录日志
-        raise ValueError(f"JSON解析失败: {factor_data_path}, 行 {e.lineno}, 列 {e.colno}, 信息: {e.msg}") from e
+    base_data_records = _load_json_gz_data(factor_data_path, "基础因子", logger)
 
-    # 数据验证：检查 'data' 字段存在
-    if "data" not in base_data:
-        raise ValueError(f"基础因子数据缺少 'data' 字段: {factor_data_path}")
-
-    factor_df = pd.DataFrame(base_data["data"])
+    factor_df = pd.DataFrame(base_data_records)
     factor_df["date"] = pd.to_datetime(factor_df["date"])
 
-    # 显式释放 base_data 内存（JSON 加载的大对象）
-    del base_data
+    # 显式释放 base_data_records 内存（JSON 加载的大对象）
+    del base_data_records
 
     logger.info("  基础数据记录数: %d", len(factor_df))
     logger.info("  基础因子列: rsi_6, volume_ratio_5")
@@ -698,29 +725,14 @@ def generate_all_factors(
     # ========== Step 2: 加载换手率数据 ==========
     logger.info("Step 2: 加载换手率数据...")
 
-    try:
-        with gzip.open(turnover_data_path, "rt", encoding="utf-8") as f:
-            turnover_data = json.load(f)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"换手率数据文件不存在: {turnover_data_path}") from None
-    except gzip.BadGzipFile as e:
-        logger.error("gzip 文件损坏: %s, 原因: %s", turnover_data_path, str(e))
-        raise ValueError(f"gzip 文件损坏: {turnover_data_path}") from e
-    except json.JSONDecodeError as e:
-        # JSONDecodeError 内存优化：提取关键信息，避免 e.doc 内存翻倍
-        # 将行列信息合并到异常消息，由调用方统一决定是否记录日志
-        raise ValueError(f"JSON解析失败: {turnover_data_path}, 行 {e.lineno}, 列 {e.colno}, 信息: {e.msg}") from e
+    turnover_records = _load_json_gz_data(turnover_data_path, "换手率", logger)
 
-    # 数据验证：检查 'data' 字段存在
-    if "data" not in turnover_data:
-        raise ValueError(f"换手率数据缺少 'data' 字段: {turnover_data_path}")
-
-    turnover_df = pd.DataFrame(turnover_data["data"])
+    turnover_df = pd.DataFrame(turnover_records)
     # 使用 format='mixed' 处理不同日期格式（有的带时间，有的不带）
     turnover_df["date"] = pd.to_datetime(turnover_df["date"], format="mixed")
 
-    # 显式释放 turnover_data 内存（JSON 加载的大对象）
-    del turnover_data
+    # 显式释放 turnover_records 内存（JSON 加载的大对象）
+    del turnover_records
 
     logger.info("  换手率数据记录数: %d", len(turnover_df))
 
@@ -740,28 +752,13 @@ def generate_all_factors(
     # ========== Step 3: 加载收益数据 ==========
     logger.info("Step 3: 加载收益数据...")
 
-    try:
-        with gzip.open(return_data_path, "rt", encoding="utf-8") as f:
-            return_data = json.load(f)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"收益数据文件不存在: {return_data_path}") from None
-    except gzip.BadGzipFile as e:
-        logger.error("gzip 文件损坏: %s, 原因: %s", return_data_path, str(e))
-        raise ValueError(f"gzip 文件损坏: {return_data_path}") from e
-    except json.JSONDecodeError as e:
-        # JSONDecodeError 内存优化：提取关键信息，避免 e.doc 内存翻倍
-        # 将行列信息合并到异常消息，由调用方统一决定是否记录日志
-        raise ValueError(f"JSON解析失败: {return_data_path}, 行 {e.lineno}, 列 {e.colno}, 信息: {e.msg}") from e
+    return_records = _load_json_gz_data(return_data_path, "收益", logger)
 
-    # 数据验证：检查 'data' 字段存在
-    if "data" not in return_data:
-        raise ValueError(f"收益数据缺少 'data' 字段: {return_data_path}")
-
-    return_df = pd.DataFrame(return_data["data"])
+    return_df = pd.DataFrame(return_records)
     return_df["date"] = pd.to_datetime(return_df["date"], format="mixed")
 
-    # 显式释放 return_data 内存（JSON 加载的大对象）
-    del return_data
+    # 显式释放 return_records 内存（JSON 加载的大对象）
+    del return_records
 
     logger.info("  收益数据记录数: %d", len(return_df))
 
