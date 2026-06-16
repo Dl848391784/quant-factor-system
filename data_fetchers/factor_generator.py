@@ -833,16 +833,9 @@ def _format_and_write_output(
         end_time = datetime.now()
         elapsed_seconds = (end_time - start_time).total_seconds()
 
-        # ========== Step 14: 返回写出结果 ==========
-        logger.info("=" * 40)
-        logger.info("因子生成完成")
-        logger.info("生成时间: %s", end_time.strftime("%Y-%m-%d %H:%M:%S"))
-        logger.info("运行耗时: %.2f 秒", elapsed_seconds)
-        logger.info("因子列: %s", list(_EXTENDED_FACTOR_COLS))
-        logger.info("=" * 40)
-
         # ========== Step 15: 写出列名清单 ==========
-        # 供 factor_ic 模块校验 required_columns；_atomic_write_json 保证原子性
+        # 先于完成日志执行：确保所有写出操作完成后再打印"因子生成完成"，
+        # 避免列名清单写出失败时日志已打印"完成"造成误导
         columns_path = output_path.parent / "factor_ic_data_columns.json"
         try:
             columns_manifest = {
@@ -857,6 +850,14 @@ def _format_and_write_output(
         except OSError as e:
             # 列名清单写入失败不阻塞主流程
             logger.warning("列名清单保存失败: %s, 原因: %s", columns_path, e)
+
+        # ========== Step 14: 完成摘要 ==========
+        logger.info("=" * 40)
+        logger.info("因子生成完成")
+        logger.info("生成时间: %s", end_time.strftime("%Y-%m-%d %H:%M:%S"))
+        logger.info("运行耗时: %.2f 秒", elapsed_seconds)
+        logger.info("因子列: %s", list(_EXTENDED_FACTOR_COLS))
+        logger.info("=" * 40)
 
         return total_records, end_time, elapsed_seconds
     finally:
