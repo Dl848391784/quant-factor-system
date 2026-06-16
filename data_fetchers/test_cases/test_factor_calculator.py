@@ -389,10 +389,17 @@ class TestGetModuleLogger:
         assert result == test_logger
 
     def test_without_logger(self):
-        """测试不传入 logger（使用 fallback）"""
+        """测试不传入 logger（使用 fallback）
+
+        R4 (2026-06-16) 起 ``_MODULE_LOGGER`` 改为 ``logging.getLogger(__name__)``，
+        即模块全限定名 ``data_fetchers.factor_calculator._common``，比旧硬编码
+        ``"data_fetchers.factor_calculator"`` 更精确（按 Python 日志命名约定使用
+        模块全限定名以支持层级过滤）。子 logger 自动继承父级 handler，对外可见
+        日志输出无变化。
+        """
         result = get_module_logger()
         assert isinstance(result, logging.Logger)
-        assert result.name == "data_fetchers.factor_calculator"
+        assert result.name == "data_fetchers.factor_calculator._common"
 
     def test_none_logger(self):
         """测试传入 None"""

@@ -38,6 +38,20 @@
   （``d3(0.05) - d2(0.03) = 0.02``）明确时序差分语义；迁出说明与 EPSILON 命名
   注释改写为"包内私有 helper / 同包兄弟模块按 PEP 8 包内访问"语义，消除
   "调用方应使用包级路径"与实际架构（包内访问私有符号合规）的歧义。
+- v1.23 (2026-06-16) R4：本模块自身 8 项可观测性 / 契约 / 防御修复：
+  ``_wilder_smoothing_rsi`` 入口加 ``n <= 0`` 防御抛 ValueError；中断索引收集
+  策略由"全部位置"改为"段起点"（中断后每个后续位置都触发"前值 NaN"分支会让
+  日志列表 = O(n) 自身刷屏，改为只记录 NaN 段起点）；
+  ``_per_asset_transform`` 加 fn 返回长度断言（带 asset 标识替代 numpy 形状广播
+  错误的不可读信息），``_validate_sort=False`` 路径增加 debug 日志记录"已跳过校验
+  + 调用方负责"；
+  ``_calculate_ewm_with_initial`` 哨兵 dtype 由 ``series_reset.dtype`` 改为固定
+  ``np.float64``（避免上游 series 含 NaN 时 dtype 退化为 object/Float64 导致
+  ewm 走异常分支），并补 ``.copy()`` 注释说明"切片解耦必要操作 / 禁止删除"；
+  模块级 logger 由硬编码 ``"data_fetchers.factor_calculator"`` 改为
+  ``logging.getLogger(__name__)``，按 Python 日志命名约定使用模块全限定名
+  以支持按层级精确过滤；末尾迁出说明注释由 15 行精简为 3 行（架构规范属
+  design.md / MODULE.md 内容，不应承载于代码注释）。
 """
 
 from __future__ import annotations
@@ -172,7 +186,11 @@ DEFAULT_FORWARD_RETURN_SHIFT = _DEFAULT_FORWARD_RETURN_SHIFT
 # 模块级 fallback logger（遵循 PROJECT.md 公共模块日志规范）
 # ============================================================================
 
-_MODULE_LOGGER = logging.getLogger("data_fetchers.factor_calculator")
+# 模块级 fallback logger 使用 ``__name__``（即 ``data_fetchers.factor_calculator._common``），
+# 比硬编码上层包名 ``data_fetchers.factor_calculator`` 更精确：调用方按 logger 名层级
+# 过滤时（如 ``logging.getLogger("data_fetchers.factor_calculator._common").setLevel(WARNING)``）
+# 可独立调节本模块日志级别。子 logger 自动继承父级 handler，不破坏既有外部配置。
+_MODULE_LOGGER = logging.getLogger(__name__)
 
 
 def get_module_logger(logger_arg: logging.Logger | None = None) -> logging.Logger:
@@ -212,10 +230,14 @@ def _wilder_smoothing_rsi(series: pd.Series, n: int) -> pd.Series:
 
     Args:
         series: 单资产的序列（gain 或 loss）
-        n: 窗口期
+        n: 窗口期（必须为正整数）
 
     Returns:
         Wilder 平滑均值序列
+
+    Raises:
+        ValueError: ``n <= 0`` 时（alpha = 1/n 会除零或得到负值，``series.iloc[:n]``
+            在 n=0 时返回空序列使 seed=NaN，整体行为不可预期）。
 
     Note:
         Wilder (1978) 标准实现：
@@ -231,6 +253,12 @@ def _wilder_smoothing_rsi(series: pd.Series, n: int) -> pd.Series:
         - pandas ewm(adjust=False) 从第 1 个观测值就开始计算
         - Wilder 标准要求前 n-1 天为 NaN，第 n 天用 SMA
     """
+    # 入参校验：n 必须为正整数。
+    # n=0 会触发 ZeroDivisionError，n<0 会让 alpha 变负彻底污染递推结果，
+    # 早抛 ValueError 比让"前 n-1 天 NaN + alpha 异常"两个错误叠加后再爆更可读。
+    if n <= 0:
+        raise ValueError(f"_wilder_smoothing_rsi: 窗口期 n 必须为正整数，实际传入 {n}")
+
     alpha = 1.0 / n
 
     # 初始化全 NaN 序列
@@ -250,26 +278,34 @@ def _wilder_smoothing_rsi(series: pd.Series, n: int) -> pd.Series:
     # 边界行为：若 result.iloc[i-1] 已为 NaN（例如外部把已计算结果某段置 NaN
     # 或 SMA 种子位之后又出现 NaN 输入），递推链将不可恢复地全部 NaN。
     # 这是 Wilder 标准 NaN 传播语义（不在此处兜底）。
-    # 可观测性：收集所有"前值 NaN 导致中断"的索引位置，循环结束后一次性输出
-    # debug 日志。R3 改进：相比仅记录首次中断，本方案完整暴露所有断点（同一
-    # asset 输入存在多段空洞时尤为关键），但日志条数仍为 O(1)，不会刷屏。
-    nan_break_indices: list[int] = []
+    # 可观测性：仅记录每段"前值 NaN 导致链断"的**起点**（``in_reported_break``
+    # 由 False→True 的瞬间）。
+    # 关键区分：当前输入 NaN（``pd.isna(series.iloc[i])``）属"数据传播"，**不**
+    # 改变 ``in_reported_break``——若紧接着的下一轮再因 prev=NaN 触发链断，仍
+    # 应记录为新段起点。这是上一轮（R3 / 早期 R4）漏报的根因。
+    # 在 Wilder 标准下链不会恢复（else 分支需 prev 非 NaN，链断后永远进不来），
+    # 因此实际记录条数 ≤ 1；保留 ``= False`` 重置仅为语义完整。
+    nan_break_starts: list[int] = []
+    in_reported_break = False  # 当前是否处于"已报告的链断段"中
     for i in range(n, len(series)):
         prev = result.iloc[i - 1]
-        if pd.isna(series.iloc[i]):  # 当天值为 NaN：传播 NaN
+        if pd.isna(series.iloc[i]):  # 当天值为 NaN：传播 NaN（不改 in_reported_break）
             result.iloc[i] = float("nan")
         elif pd.isna(prev):  # 前值 NaN：递推链中断，从此全 NaN
             result.iloc[i] = float("nan")
-            nan_break_indices.append(i)
+            if not in_reported_break:
+                nan_break_starts.append(i)
+                in_reported_break = True
         else:
             result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * prev
+            in_reported_break = False
 
-    if nan_break_indices:
+    if nan_break_starts:
         _MODULE_LOGGER.debug(
-            "_wilder_smoothing_rsi: 递推链共发生 %d 处中断（前值为 NaN），索引位置 = %s；"
-            "首次中断后该段后续值均为 NaN（Wilder 标准 NaN 传播语义）",
-            len(nan_break_indices),
-            nan_break_indices,
+            "_wilder_smoothing_rsi: 递推链共发生 %d 段中断（前值 NaN），段起点索引 = %s；"
+            "每段起点之后值均为 NaN（Wilder 标准 NaN 传播语义）",
+            len(nan_break_starts),
+            nan_break_starts,
         )
 
     return result
@@ -355,6 +391,18 @@ def _per_asset_transform(
                 f"切片得到 {n_groups} 段但只有 {n_unique_assets} 个唯一 asset，"
                 f"调用方需先按 asset 排序后再传入"
             )
+    else:
+        # 跳过校验路径：仅记录 debug 日志，明确告知调用方"已承担排序正确性责任"。
+        # 不做任何降级校验（任何"看似贴心"的兜底都会让 _validate_sort=False
+        # 的语义变成"也许会校验"，违反 PROJECT.md 规则 #14 死代码同源原则）。
+        # 仍可通过 logger 名层级过滤定位"哪个调用方传了 False"。
+        _MODULE_LOGGER.debug(
+            "_per_asset_transform: 已跳过排序契约校验（_validate_sort=False），"
+            "调用方需自行保证 asset_arr 严格按 asset 排序，"
+            "n_rows=%d, boundary_segments=%d",
+            n_rows,
+            len(boundaries) + 1,
+        )
     boundaries = np.concatenate([[0], boundaries, [n_rows]])
 
     out = np.full(n_rows, np.nan, dtype=np.float64)
@@ -363,6 +411,17 @@ def _per_asset_transform(
         start, end = boundaries[i], boundaries[i + 1]
         slice_series = pd.Series(value_arr[start:end])
         result_series = fn(slice_series)
+        # 长度契约校验：fn 内部若做 dropna / reindex / 自定义聚合，可能返回长度不一致的
+        # Series。若直接 ``out[start:end] = result_series.to_numpy(...)``，numpy 会因
+        # 形状不匹配抛 ValueError，但消息形如 ``could not broadcast input array from
+        # shape (X,) into shape (Y,)``，缺少 asset 标识，调试代价高。
+        # 主动断言并附带 ``asset_arr[start]`` 标识，便于上游定位是哪个 asset 的 fn 走错。
+        if len(result_series) != end - start:
+            raise ValueError(
+                f"_per_asset_transform: fn 返回长度与切片不一致，"
+                f"asset={asset_arr[start]!r}, expected={end - start}, "
+                f"got={len(result_series)}（请检查 fn 是否做了 dropna / 聚合）"
+            )
         out[start:end] = result_series.to_numpy(dtype=np.float64)
     return out
 
@@ -406,12 +465,24 @@ def _calculate_ewm_with_initial(series: pd.Series, alpha: float, initial_value: 
     # 业务索引（datetime / int / 复合）在最终 ``result_series.index = series.index``
     # 这一步原样恢复，对调用方完全透明。
     series_reset = series.reset_index(drop=True)
-    sentinel = pd.Series([initial_value], dtype=series_reset.dtype)
+    # 哨兵 dtype 固定为 ``np.float64``，不继承 ``series_reset.dtype``：
+    # 当上游 series 含 NaN 时其 dtype 可能是 ``object`` 或 ``Float64``（pandas
+    # nullable float），此时让哨兵继承会让 ``ewm`` 走 nullable 分支或 object 路径，
+    # 数值行为与传统 float64 路径不一致（部分 pandas 版本 nullable+ewm 还会触发
+    # ``TypeError: float() argument must be a string or real number``）。
+    # 业务上 K/D 中性值 50.0 与 RSI gain/loss 都是普通 float64 语义，固化更安全。
+    sentinel = pd.Series([initial_value], dtype=np.float64)
     series_with_initial = pd.concat([sentinel, series_reset], ignore_index=True)
 
     result_with_initial = series_with_initial.ewm(alpha=alpha, adjust=False, ignore_na=True).mean()
 
-    # 取除虚拟初始值外的结果（iloc[1:] 跳过位置 0 的哨兵种子）
+    # 取除虚拟初始值外的结果（iloc[1:] 跳过位置 0 的哨兵种子）。
+    # ``.copy()`` 必须保留：紧接着对 ``result_series.index`` 赋新索引、又用
+    # ``.where`` 重新生成结果。``iloc[1:]`` 返回的是 ``result_with_initial`` 的
+    # 视图，直接对视图改 ``.index`` 会触发 pandas chained-assignment 行为
+    # （部分版本抛 SettingWithCopyWarning，部分版本静默改不到目标），并且未来
+    # ``result_with_initial`` 仍持有底层数组引用会造成误共享。维护时**禁止删除**
+    # 此 ``.copy()``——它不是冗余而是切片解耦的必要操作。
     result_series = result_with_initial.iloc[1:].copy()
     result_series.index = series.index
 
@@ -485,19 +556,6 @@ def _calculate_delta(
     return df
 
 
-# ============================================================================
-# 行业列注入 helper：已迁出至 ._industry_helpers（R2，2026-06-16）
-# ----------------------------------------------------------------------------
-# 原因：``_add_industry_column`` 反向依赖 ``data_fetchers.fetch_industry``，
-# 让 ``_common.py`` 不再是依赖图根节点，违反本文件 §5.1 约束（仅依赖
-# stdlib + numpy + pandas + logging）。迁移到 ``_industry_helpers.py`` 后，
-# ``_common.py`` 重新成为纯净根节点。
-#
-# 调用约定：``_add_industry_column`` 是 factor_calculator **包内私有 helper**，
-# 仅供本包内部模块（industry.py / fund_flow.py / industry_financial.py）使用，
-# 不通过 ``__init__.py`` re-export。**包内**兄弟模块按 PEP 8 包内访问私有符号
-# 约定，可直接相对 import：
-#     from ._industry_helpers import _add_industry_column
-# **包外**调用方禁止依赖该符号——若有跨包复用需求，应先在 design.md 评审接口
-# 公开化（去前导下划线 + 加入 ``__init__.py`` __all__），再迁出至公开 API。
-# ============================================================================
+# ``_add_industry_column`` 已于 R2 (2026-06-16) 迁出至 ``_industry_helpers.py``
+# （消除 §5.1 反向依赖：``_common.py`` 不再依赖 ``data_fetchers.fetch_industry``）。
+# 包内调用：``from ._industry_helpers import _add_industry_column``。架构规范见 design.md。
