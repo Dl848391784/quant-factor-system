@@ -434,6 +434,85 @@ def _calc_pct(count: int, total: int) -> float:
     return round(count / total * 100, 2)
 
 
+def _run_pipeline_step(
+    factor_df: pd.DataFrame,
+    step: dict[str, Any],
+    logger: logging.Logger,
+) -> tuple[pd.DataFrame, dict[str, int]]:
+    """
+    执行 _FACTOR_PIPELINE_STEPS 中的单个 step（D 步表驱动重构核心）
+
+    流程（与原 step 3.5~11.9 段字符级一致）：
+    1. 若 step["step_label"] 非空 → 打印段头日志
+    2. 调用 step["factor_func"](factor_df, logger_arg=logger) 写入 output_cols
+    3. 对每个 output_col 计算 valid_count = int(notna().sum())
+    4. 若 step["emit_valid_log"] 为 True，逐列打印 "  有效 xxx: N (P%)"
+    5. 返回 (新 factor_df, {col: valid_count, ...})
+
+    Args:
+        factor_df: 当前因子 DataFrame（in-place 模式由 factor_func 决定）
+        step: _FACTOR_PIPELINE_STEPS 中的一项
+        logger: 日志器，传给 factor_func 的 logger_arg
+
+    Returns:
+        (factor_df, valid_counts):
+        - factor_df: factor_func 调用后的 DataFrame
+        - valid_counts: {output_col: notna_count}，调用方累积入 metadata
+
+    Note:
+        - 此 helper 涵盖 simple（单列）和 tail（5 列）两种因子，靠 output_cols 长度区分
+        - emit_valid_log=False 时（step 11.6~11.9 共 12 个因子）仍计算 valid_count，
+          但不打印日志 → metadata 字段完整，日志保持原样
+        - step_label="" 表示沿用上一段头（step 11.5/11.6/11.7/11.8/11.9 内续接因子）
+    """
+    step_label = step["step_label"]
+    if step_label:
+        logger.info(step_label)
+
+    factor_func = step["factor_func"]
+    factor_df = factor_func(factor_df, logger_arg=logger)
+
+    output_cols: tuple[str, ...] = step["output_cols"]
+    emit_valid_log: bool = step["emit_valid_log"]
+    total_records = len(factor_df)
+    valid_counts: dict[str, int] = {}
+
+    for col in output_cols:
+        valid_count = int(factor_df[col].notna().sum())
+        valid_counts[col] = valid_count
+        if emit_valid_log:
+            logger.info(
+                "  有效 %s: %d (%.2f%%)",
+                col,
+                valid_count,
+                _calc_pct(valid_count, total_records),
+            )
+
+    return factor_df, valid_counts
+
+
+def _drop_industry_column(factor_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    删除 industry 临时列（D 步表驱动重构辅助）
+
+    industry 列由 step 11.7/11.8/11.9 的因子函数添加用于行业聚合赋值，
+    不属于 _OUTPUT_COLS，必须在 metadata/输出前清理。
+
+    Args:
+        factor_df: 已完成 step 11.9 的 DataFrame
+
+    Returns:
+        删除 industry 列后的 DataFrame（若不存在则原样返回）
+
+    Note:
+        - 与原代码（行 ~870）字符级等价
+        - if 守卫存在因为：方案A/B/C 因子被禁用时 industry 可能不存在
+    """
+    if "industry" in factor_df.columns:
+        factor_df = factor_df.drop(columns=["industry"])
+    return factor_df
+
+
 # ============================================================================
 # logger 获取函数（遵循 PROJECT.md 公共模块日志规范）
 # ============================================================================
