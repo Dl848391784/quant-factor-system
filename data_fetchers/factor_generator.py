@@ -207,10 +207,14 @@ _OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COL
 #   factor_func   Callable  factor_calculator 公共 API（df, *, logger_arg) -> df
 #   output_cols   tuple[str, ...]  本因子写入的列（tail 是 5 列，其它都 1 列）
 #   emit_valid_log bool 是否打印 "  有效 xxx: %d (%.2f%%)" 行
-#                       step 3.5~11.5 段的 15 项 + step 11 的 5 列 = True
-#                       step 11.6/11.7/11.8/11.9 段的 12 项 = False
-#                       策略：成熟因子 + 差分因子需观察样本量演变 → True；
-#                       方向性 / 行业级因子量大刷屏 → False（仅保留段头）
+#                       - step 3.5~11.5 段：全 True（成熟因子 + 差分因子，
+#                         单因子日志便于观察 NaN 分布与样本量演变）
+#                       - step 11.6/11.7/11.8/11.9 段：仅段头因子 True
+#                         （volume_price_strength / industry_momentum_5d /
+#                          industry_roe_trend / capital_flow_ratio_trend）
+#                         同段后续因子 False（避免日志刷屏）
+#                       策略：兼顾调试可观测性（段头能看到数据质量）+
+#                       日志简洁度（同段不刷屏）
 #                       详见 _run_pipeline_step docstring 的 emit_valid_log 约定段
 #
 # 注：_VALID_KEY_ORDER 是 31 个 key 的 tuple，与 D 步重构前 metadata 顺序字符级一致。
@@ -330,7 +334,9 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
         "step_label": "Step 11.6: 计算方向性因子...",
         "factor_func": calculate_volume_price_strength,
         "output_cols": ("volume_price_strength",),
-        "emit_valid_log": False,
+        # 段头因子打印 valid 行：调试时至少能从日志判断本段数据质量
+        # 同段后续 3 个因子保持 False 避免日志刷屏
+        "emit_valid_log": True,
     },
     {
         "step_label": "",
@@ -355,7 +361,8 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
         "step_label": "Step 11.7: 计算行业级别方向性因子...",
         "factor_func": calculate_industry_momentum_5d,
         "output_cols": ("industry_momentum_5d",),
-        "emit_valid_log": False,
+        # 段头因子打印 valid 行（同 Step 11.6 段头）
+        "emit_valid_log": True,
     },
     {
         "step_label": "",
@@ -374,7 +381,8 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
         "step_label": "Step 11.8: 计算行业基本面动量因子...",
         "factor_func": calculate_industry_roe_trend,
         "output_cols": ("industry_roe_trend",),
-        "emit_valid_log": False,
+        # 段头因子打印 valid 行（同 Step 11.6 段头）
+        "emit_valid_log": True,
     },
     {
         "step_label": "",
@@ -393,7 +401,8 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
         "step_label": "Step 11.9: 计算资金流因子...",
         "factor_func": calculate_capital_flow_ratio_trend,
         "output_cols": ("capital_flow_ratio_trend",),
-        "emit_valid_log": False,
+        # 段头因子打印 valid 行（同 Step 11.6 段头）
+        "emit_valid_log": True,
     },
     {
         "step_label": "",
@@ -535,11 +544,14 @@ def _run_pipeline_step(
         - 当前 emit_valid_log 取值约定：
           * step 3.5~11.5 全 True：早期成熟因子 + 差分因子，单因子日志便于
             观察 NaN 分布与样本量演变（差分因子样本量较少时尤其需要）
-          * step 11.6~11.9 全 False（共 12 个因子）：方向性 / 行业级因子
-            数量多，逐因子打 valid 行会显著刷屏，仅保留段头日志
+          * step 11.6~11.9 仅段头 True（volume_price_strength /
+            industry_momentum_5d / industry_roe_trend /
+            capital_flow_ratio_trend）：兼顾调试可观测性（段头能看
+            数据质量）+ 日志简洁度（同段后续因子 False 避免刷屏）
           * 即便 emit_valid_log=False，valid_count 仍正常计入 metadata，
             元数据完整性不受日志策略影响
-        - 改 emit_valid_log 取值 = 改运行时日志规格，需走需求评审，不属于 bug fix
+        - 改 emit_valid_log 取值 = 改运行时日志规格，需走需求评审
+          （本次 11.6~11.9 段头改 True 已通过评审，2026-06-16 bug 4 修复）
 
     Raises:
         KeyError: 当 factor_func 未生成所有 output_cols 中预期列时，

@@ -29,6 +29,7 @@ import pytest
 
 from data_fetchers.factor_generator import (
     _BASE_COLS,
+    _FACTOR_PIPELINE_STEPS,
     _OHLCV_INDEX_COLS,
     _atomic_write_json,
     _calc_pct,
@@ -445,6 +446,70 @@ class TestAtomicWriteJson:
         assert path.exists()
         with open(path, encoding="utf-8") as f:
             assert json.load(f) == {"a": 1}
+
+
+# ============================================================================
+# _FACTOR_PIPELINE_STEPS: emit_valid_log 取值规格守护（bug 4）
+# ============================================================================
+
+
+class TestPipelineEmitValidLogSpec:
+    """_FACTOR_PIPELINE_STEPS 的 emit_valid_log 取值规格守护。
+
+    bug 4 修复：Step 11.6~11.9 段头因子改为 emit_valid_log=True，
+    同段后续因子保持 False。本测试守护该规格不被意外回退。
+    """
+
+    # 必须 emit_valid_log=True 的段头因子（bug 4 修复后）
+    SECTION_HEAD_FACTORS_TRUE = {
+        "volume_price_strength",  # Step 11.6 段头
+        "industry_momentum_5d",  # Step 11.7 段头
+        "industry_roe_trend",  # Step 11.8 段头
+        "capital_flow_ratio_trend",  # Step 11.9 段头
+    }
+
+    # 必须 emit_valid_log=False 的同段后续因子（避免刷屏）
+    SECTION_FOLLOW_FACTORS_FALSE = {
+        "positive_day_ratio_5",
+        "ma5_deviation",
+        "near_high_ratio_5",
+        "industry_turnover_trend",
+        "industry_amplitude_trend",
+        "industry_earnings_growth",
+        "industry_pe_trend",
+        "capital_flow_intensity",
+    }
+
+    def test_step_11_6_to_11_9_section_heads_emit_true(self) -> None:
+        """段头因子（共 4 个）必须 emit_valid_log=True"""
+        actual_true_factors = {
+            step["output_cols"][0]
+            for step in _FACTOR_PIPELINE_STEPS
+            if step["emit_valid_log"] and step["output_cols"][0] in self.SECTION_HEAD_FACTORS_TRUE
+        }
+        assert actual_true_factors == self.SECTION_HEAD_FACTORS_TRUE, (
+            f"Step 11.6~11.9 段头因子应全部 emit=True, 缺失: {self.SECTION_HEAD_FACTORS_TRUE - actual_true_factors}"
+        )
+
+    def test_step_11_6_to_11_9_followers_emit_false(self) -> None:
+        """同段后续因子（共 8 个）必须 emit_valid_log=False（避免日志刷屏）"""
+        actual_false_factors = {
+            step["output_cols"][0]
+            for step in _FACTOR_PIPELINE_STEPS
+            if not step["emit_valid_log"] and step["output_cols"][0] in self.SECTION_FOLLOW_FACTORS_FALSE
+        }
+        assert actual_false_factors == self.SECTION_FOLLOW_FACTORS_FALSE, (
+            f"Step 11.6~11.9 同段后续因子应全部 emit=False, "
+            f"误置 True: {self.SECTION_FOLLOW_FACTORS_FALSE - actual_false_factors}"
+        )
+
+    def test_emit_false_count_matches_spec(self) -> None:
+        """emit_valid_log=False 的因子数应 = 8（同段后续）
+        bug 4 修复前是 12，修复后段头 4 个改为 True → 剩 8 个 False"""
+        false_count = sum(1 for step in _FACTOR_PIPELINE_STEPS if not step["emit_valid_log"])
+        assert false_count == 8, (
+            f"emit_valid_log=False 数量异常: {false_count}, 应为 8（bug 4 修复后 Step 11.6~11.9 段头 4 个改为 True）"
+        )
 
 
 # ============================================================================
