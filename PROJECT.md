@@ -239,6 +239,65 @@ ruff check --select G factor_ic/
 - H10：阶段计划与设定依据见"测试覆盖规范"章节
 - H11：当前仅 `factor_ic/` 强制；其他模块在 `pyproject.toml [tool.ruff.lint.per-file-ignores]` 中暂放行，迁移完成后逐步移除
 
+**H12 正反例**：
+```python
+# ❌ 反例 1：所有失败统一 exit 1（无法区分代码 bug vs 运行时错误）
+if __name__ == "__main__":
+    try:
+        SPEC = register_factor(...)  # import-time 注册失败也是 exit 1
+        main()                        # 运行时数据缺失也是 exit 1
+    except Exception:
+        sys.exit(1)
+
+# ❌ 反例 2：用 exit 0 表示"虽然失败但不影响"（CI 无法感知）
+if not data_available:
+    logger.warning("数据缺失，跳过")
+    sys.exit(0)
+
+# ✅ 正例 1：import-time 配置/注册失败 → exit 2
+try:
+    SPEC: FactorSpec = register_factor(
+        factor_name="industry_xxx",
+        factor_col="industry_xxx",
+        required_columns=["date", "stock_code", "industry"],
+        calc_func=calculate_industry_xxx,
+    )
+except (ValueError, TypeError) as e:
+    logger.critical("FactorSpec 注册失败: %s (%s)", str(e)[:200], type(e).__name__)
+    sys.exit(2)
+
+# ✅ 正例 2：main() 运行时错误 → exit 1
+if __name__ == "__main__":
+    try:
+        main()
+    except DataSchemaError as e:
+        logger.error("数据列依赖不匹配: %s", e)
+        sys.exit(1)
+    except Exception:
+        logger.exception("未预期的错误")
+        sys.exit(1)
+```
+
+**H12 Why**：
+- **CI / pipeline 区分能力**：exit 2 = 代码本身不能加载（立即停止流水线、@维护者）；exit 1 = 数据/逻辑层面失败（可重试、可降级）；exit 0 = 成功
+- **可观测性**：`run_pipeline.py` 等编排脚本可据退出码决定后续动作（exit 2 → 中断；exit 1 → 跳过该因子继续；exit 0 → 计入成功）
+- **Unix 惯例对齐**：1=通用错误，2=误用/配置（参考 bash exit code 约定、git 等工具的 exit 2 语义）
+
+**H12 Verify**：
+```bash
+# 检查 sys.exit 调用点是否符合语义
+grep -rn "sys.exit(" factor_ic/ic_*.py
+# 期望：
+# - 模块顶层 try/except register_factor → sys.exit(2)
+# - __main__ 块 except → sys.exit(1)
+# - main() 内部业务失败 → sys.exit(1)
+```
+
+**H12 当前覆盖范围**：
+- ✅ 已落地：`factor_ic/ic_industry_amplitude_trend_1d.py` / `ic_industry_earnings_growth_1d.py` / `ic_industry_momentum_5d_1d.py` / `ic_industry_turnover_trend_1d.py`
+- ⏳ 待迁移：其他 `factor_ic/ic_*.py` 文件、`backtest/`、`comprehensive_factor/`、`data_fetchers/`、`summary/`
+- 自动化：`scripts/check_exit_codes.py` 待交付（标 [待实施]，工具落地后启用 pre-commit + CI）
+
 ---
 
 ## 规则冲突仲裁 [stable]
