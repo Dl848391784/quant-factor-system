@@ -97,7 +97,6 @@ def main():
 
     logger.info("\n%s", "\n".join(summary_lines))
 
-    logger.info("5日均线偏离度因子IC计算完成")
     return result
 
 
