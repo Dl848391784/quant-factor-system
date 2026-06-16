@@ -76,6 +76,7 @@ Plan → Execute → Review → Debug
 | 11 | 路径导入：`from paths import` | import-linter |
 | 12 | Design-First：2+文件先提交 design.md | 人工审核 |
 | 13 | 日志格式：% 惰性格式化（禁止 f-string / + 拼接 / `exc_info=True`）| ruff G004/G003/G201 |
+| 14 | 死代码禁止：禁止永不触发的防御性兜底分支（如 `if result is None` 守卫面对永不返回 None 的 callee） | 人工 review |
 
 **所有路径必须从 `paths.py` 导入，禁止字符串字面量。**
 

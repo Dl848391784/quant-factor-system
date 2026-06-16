@@ -162,6 +162,7 @@ dependencies = [
 | H10 | 测试覆盖率：不低于阶段性阈值（当前 60%，目标 70%） | 防止新代码无测试拉低基线 | pytest `--cov-fail-under=60`（当前阶段） | CI |
 | H11 | 日志格式：% 惰性格式化（禁止 f-string / + 拼接 / `exc_info=True`） | 性能（高 verbosity 时跳过格式化）+ 风格统一 + 与标准库 logging 结构化处理器（如 JSON）兼容 | ruff G004 / G003 / G201 | pre-commit + CI |
 | H12 | 退出码语义：0=成功 / 1=运行时错误 / 2=import-time 配置或注册失败 | CI / shell 脚本能区分"代码不能加载"（exit 2，立即告警停止流水线）vs"运行时失败"（exit 1，可重试 / 排查数据） | 人工 review + `scripts/check_exit_codes.py`（[待实施]） | pre-commit + CI |
+| H13 | 死代码禁止：禁止永不触发的防御性兜底分支（如 `if result is None` 守卫面对永不返回 None 的 callee） | 死代码掩盖真实错误来源、误导维护者、增加噪音；必须删除而非保留 | 人工 review + `scripts/check_dead_branches.py`（[待实施]） | pre-commit + CI |
 
 **H2 正反例**：
 - ✅ 算输出（必须放 `<模块>/result/`）：分析结果 JSON、回测报告、汇总文件、对外暴露的数据产物
