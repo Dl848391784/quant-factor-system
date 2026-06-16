@@ -173,7 +173,9 @@ def calculate_ma5_deviation(
     边界处理:
     - 前4天无完整5日窗口 → NaN
     - MA5 = 0 → NaN（极少见，A股收盘价不为0）
-    - 比率型因子分母趋近零 → clip(lower=0.01)保护（遵循 Pitfall #47）
+    - 不再对极小正值做 clip 抬升：A 股 close 不为负，clip(lower=0.01) 会
+      把 0.001~0.009 的 MA5 静默抬到 0.01，引入系统性偏差。零值已由
+      replace(0, np.nan) 排除，其余分母让结果自然反映极小 MA5 的偏离度。
 
     遵循 H5: IC方向不预判
     """
@@ -185,11 +187,10 @@ def calculate_ma5_deviation(
     # 计算5日移动平均线
     ma5 = df.groupby(_COL_ASSET)[_COL_CLOSE].rolling(5, min_periods=5).mean().reset_index(level=0, drop=True)
 
-    # MA5 = 0 时替换为 NaN（避免除零）
+    # MA5 = 0 时替换为 NaN（避免除零）；
+    # 不再用 clip(lower=0.01) 抬升极小正值——会引入系统性偏差，且 A 股 close
+    # 不为负，零值是唯一需要保护的退化情形。
     ma5_safe = ma5.replace(0, np.nan)
-
-    # 比率型因子分母趋近零保护（遵循 Pitfall #47）
-    ma5_safe = ma5_safe.clip(lower=0.01)
 
     # 计算偏离度
     df[_COL_MA5_DEVIATION] = (df[_COL_CLOSE] - ma5_safe) / ma5_safe
