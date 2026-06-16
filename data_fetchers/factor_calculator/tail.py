@@ -40,6 +40,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from ._common import get_module_logger
+
 
 __all__: list[str] = []
 
@@ -347,3 +349,135 @@ def _calc_tail_volume_shrink(
 
     tail_volume = sum(volumes)
     return tail_volume / float(total_volume)
+
+
+# ============================================================================
+# 公共编排 API（B4 轮）
+# ============================================================================
+
+
+# 5 个尾盘因子输出列（按依赖顺序固定列序，与原 factor_generator 一致）
+_TAIL_FACTOR_COLS: tuple[str, ...] = (
+    "tail_price_position",
+    "tail_price_slope",
+    "tail_price_volume_intensity",
+    "tail_volume_acceleration",
+    "tail_volume_shrink",
+)
+
+
+def calculate_tail_factors(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """计算所有尾盘因子（合并计算，避免重复加载尾盘数据）。
+
+    本函数为尾盘因子族的统一入口，一次加载尾盘数据后计算 5 个因子，
+    避免每个因子重复 I/O。
+
+    Args:
+        factor_df: 包含 ``date`` / ``asset`` / ``volume`` 列的 DataFrame。
+            若同时含 ``close`` / ``high`` / ``low``，则 ``tail_price_position``
+            会启用 v1.39 涨跌停处理逻辑。
+        logger_arg: 日志记录器（可选）
+
+    Returns:
+        新增以下列的 DataFrame：
+
+        - ``tail_price_position``：尾盘价格位置 ``[0, 1]``
+        - ``tail_price_slope``：尾盘趋势斜率（百分比）
+        - ``tail_price_volume_intensity``：尾盘量价强度
+        - ``tail_volume_acceleration``：尾盘量能加速度
+        - ``tail_volume_shrink``：尾盘缩量程度 ``[0, 1]``
+
+    Note:
+        - 遵循 MODULE.md 约束 #4：函数入口先 ``copy()``
+        - 尾盘数据不存在 / 损坏：5 个因子全部置 NaN
+        - 尾盘数据缺 ``volumes`` 列：仅 ``tail_price_position`` /
+          ``tail_price_slope`` 有值，其余 3 个置 NaN（warning）
+    """
+    _logger = get_module_logger(logger_arg)
+    factor_df = factor_df.copy()
+
+    # 加载尾盘数据
+    tail_df = _load_tail_trading_data(_logger)
+    if tail_df.empty:
+        for col in _TAIL_FACTOR_COLS:
+            factor_df[col] = np.nan
+        return factor_df
+
+    # 确保日期格式一致
+    factor_df["date"] = pd.to_datetime(factor_df["date"]).dt.strftime("%Y-%m-%d")
+    tail_df["date"] = pd.to_datetime(tail_df["date"]).dt.strftime("%Y-%m-%d")
+
+    # 合并尾盘数据
+    merge_cols = ["date", "asset", "prices", "tail_high", "tail_low"]
+    if "volumes" in tail_df.columns:
+        merge_cols.append("volumes")
+
+    merged_df = factor_df.merge(tail_df[merge_cols], on=["date", "asset"], how="left")
+
+    _logger.info(
+        "尾盘数据合并完成: %d / %d 条匹配",
+        merged_df["prices"].notna().sum(),
+        len(factor_df),
+    )
+
+    # 计算尾盘收盘价
+    merged_df["tail_close"] = merged_df["prices"].apply(_get_close_price)
+
+    # 计算尾盘价格位置（v1.39: 传入日线 close/high/low 用于涨跌停判断）
+    merged_df["tail_price_position"] = merged_df.apply(
+        lambda row: _calc_price_position(
+            row["tail_close"],
+            row["tail_high"],
+            row["tail_low"],
+            daily_close=row.get("close"),
+            daily_high=row.get("high"),
+            daily_low=row.get("low"),
+        ),
+        axis=1,
+    )
+
+    # 计算尾盘趋势斜率
+    merged_df["tail_price_slope"] = merged_df["prices"].apply(_calc_tail_price_slope)
+
+    # 计算尾盘量价强度 / 量能加速度 / 缩量程度（依赖 volumes）
+    if "volumes" in merged_df.columns:
+        merged_df["tail_price_volume_intensity"] = merged_df.apply(
+            lambda row: _calc_tail_price_volume_intensity(row["prices"], row["volumes"], row["volume"]),
+            axis=1,
+        )
+        merged_df["tail_volume_acceleration"] = merged_df["volumes"].apply(_calc_tail_volume_acceleration)
+        merged_df["tail_volume_shrink"] = merged_df.apply(
+            lambda row: _calc_tail_volume_shrink(row["volumes"], row["volume"]),
+            axis=1,
+        )
+    else:
+        merged_df["tail_price_volume_intensity"] = np.nan
+        merged_df["tail_volume_acceleration"] = np.nan
+        merged_df["tail_volume_shrink"] = np.nan
+        _logger.warning(
+            "尾盘数据缺少 'volumes' 列，tail_price_volume_intensity/"
+            "tail_volume_acceleration/tail_volume_shrink 将为 NaN"
+        )
+
+    # 统计有效因子数量
+    total_count = len(merged_df)
+    for col in _TAIL_FACTOR_COLS:
+        valid_count = merged_df[col].notna().sum()
+        _logger.info(
+            "%s 因子计算完成: %d / %d 有效 (%.1f%%)",
+            col,
+            valid_count,
+            total_count,
+            100 * valid_count / total_count if total_count > 0 else 0,
+        )
+
+    # 返回只包含原列 + 因子列的 DataFrame
+    result_cols = list(factor_df.columns) + list(_TAIL_FACTOR_COLS)
+    return merged_df[result_cols]
+
+
+calculate_tail_factors.required_cols = ["date", "asset", "volume"]  # type: ignore[attr-defined]
