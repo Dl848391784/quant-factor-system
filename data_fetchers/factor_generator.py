@@ -709,29 +709,16 @@ def _write_factor_json_gz(
 
 
 def get_module_logger(logger: logging.Logger | None = None) -> logging.Logger:
-    """
-    获取模块 logger
+    """获取模块 logger（None → 模块级 fallback；非 None → 透传调用方 logger）。
 
     Args:
-        logger: 调用方传入的 logger（可选）
+        logger: 调用方传入的 logger（可选）。
 
     Returns:
-        logging.Logger: 模块 logger
+        模块 logger 或调用方传入的 logger。
 
     Raises:
-        TypeError: logger 参数不是 logging.Logger 类型
-
-    Note:
-        - 如果 logger 为 None，返回模块级 fallback logger
-        - 公共模块接收 logger 参数，日志可追溯调用方
-
-    Example:
-        >>> logger = get_module_logger()
-        >>> logger.name
-        'data_fetchers.factor_generator'
-        >>> custom_logger = get_module_logger(logging.getLogger("my_app"))
-        >>> custom_logger.name
-        'my_app'
+        TypeError: logger 参数不是 logging.Logger 类型。
     """
     if logger is None:
         return _MODULE_LOGGER
@@ -752,41 +739,26 @@ def generate_all_factors(
     output_path: Path | str | None = None,
     logger: logging.Logger | None = None,
 ) -> dict[str, Any]:
-    """
-    生成所有因子数据（含收益数据）
+    """生成所有因子数据（含收益数据），输出 factor_ic_data.json.gz + factor_ic_data_columns.json。
+
+    复用 factor_calculator 计算函数；空数据场景所有百分比有除零保护返回 0.0。
 
     Args:
-        factor_data_path: 基础因子数据路径（默认 factor_data.json.gz）
-        turnover_data_path: 换手率数据路径（默认 turnover_rate_data.json.gz）
-        return_data_path: 收益数据路径（默认 return_data.json.gz）
-        output_path: 输出路径（默认 factor_ic_data.json.gz）
-        logger: 调用方传入的 logger（可选）
+        factor_data_path: 基础因子数据路径（默认 factor_data.json.gz）。
+        turnover_data_path: 换手率数据路径（默认 turnover_rate_data.json.gz）。
+        return_data_path: 收益数据路径（默认 return_data.json.gz）。
+        output_path: 输出路径（默认 factor_ic_data.json.gz）。
+        logger: 调用方传入的 logger（可选）。
 
     Returns:
-        Dict[str, Any]: 元数据字典（包含生成时间、因子列表、运行耗时等）
+        元数据字典（生成时间、因子列表、有效记录数/百分比、运行耗时等）。
 
     Raises:
-        FileNotFoundError: 输入数据文件不存在
-        ValueError: 数据格式不正确（缺少 'data' 字段）、JSON 解析失败、gzip 文件损坏
-        KeyError: 必需字段不存在（输出列不存在）
-        RuntimeError: 文件系统错误（磁盘/权限/IO）或未知保存错误
-
-    Note:
-        - 输出到 data_fetchers/result/factor_ic_data.json.gz
-        - 复用 factor_calculator 计算函数（遵循强制复用规范）
-        - 公共模块接收 logger 参数，日志可追溯调用方
-        - 运行耗时统计方便性能分析
-        - 空数据场景：所有百分比计算均有除零保护，返回 0.0
-        - JSONDecodeError 已内部捕获并转换为 ValueError，调用方不会收到 JSONDecodeError
-
-    Example:
-        # 以下为示例用法，非实际运行（generate_all_factors 需要输入数据文件）
-        >>> from data_fetchers.factor_generator import generate_all_factors
-        >>> metadata = generate_all_factors()  # 需要 data_fetchers/result/*.json.gz
-        >>> metadata["factor_columns"]  # 返回列表副本，防止外部修改
-        ['bollinger_pb', 'kdj_j', 'turnover_surge']
-        >>> isinstance(metadata["elapsed_seconds"], float)
-        True
+        FileNotFoundError: 输入数据文件不存在。
+        ValueError: 数据格式不正确（缺少 'data' 字段）、JSON 解析失败、gzip 损坏
+            （JSONDecodeError 已内部捕获并转换为 ValueError）。
+        KeyError: 必需输出列不存在。
+        RuntimeError: 文件系统错误（磁盘/权限/IO）或未知保存错误。
     """
     start_time = datetime.now()
     logger = get_module_logger(logger)
@@ -809,16 +781,13 @@ def generate_all_factors(
     base_data_records = _load_json_gz_data(factor_data_path, "基础因子", logger)
 
     factor_df = pd.DataFrame(base_data_records)
-    # 使用 format='mixed' 处理不同日期格式（与 Step 2/3 保持一致）
+    # format='mixed'：兼容上游不同日期格式（带/不带时间）
     factor_df["date"] = pd.to_datetime(factor_df["date"], format="mixed")
 
-    # 显式释放 base_data_records 内存（JSON 加载的大对象）
-    del base_data_records
+    del base_data_records  # JSON 加载的大对象，提前释放
 
     logger.info("  基础数据记录数: %d", len(factor_df))
-    # 动态反映实际基础因子列：剔除 OHLCV + 索引列，剩下即基础因子
-    # 历史上此处硬编码 'rsi_6, volume_ratio_5'，若上游 fetch_factor_cache
-    # 新增/删除基础因子列，日志会产生误导。改为从 factor_df.columns 实时计算。
+    # 动态识别基础因子列（剔除 OHLCV+索引列），避免上游新增/删除列时日志误导
     base_factor_cols = [c for c in factor_df.columns if c not in _OHLCV_INDEX_COLS]
     logger.info("  基础因子列: %s", base_factor_cols)
 
@@ -828,21 +797,15 @@ def generate_all_factors(
     turnover_records = _load_json_gz_data(turnover_data_path, "换手率", logger)
 
     turnover_df = pd.DataFrame(turnover_records)
-    # 使用 format='mixed' 处理不同日期格式（有的带时间，有的不带）
     turnover_df["date"] = pd.to_datetime(turnover_df["date"], format="mixed")
 
-    # 显式释放 turnover_records 内存（JSON 加载的大对象）
     del turnover_records
 
     logger.info("  换手率数据记录数: %d", len(turnover_df))
 
-    # 合并换手率
     factor_df = factor_df.merge(turnover_df[["date", "asset", "turnover_rate"]], on=["date", "asset"], how="left")
-
-    # 显式释放 turnover_df 内存（merge 完成后不再需要）
     del turnover_df
 
-    # 检查换手率缺失情况
     turnover_missing = int(factor_df["turnover_rate"].isna().sum())
     if turnover_missing > 0:
         logger.warning("  换手率缺失记录数: %d (%.2f%%)", turnover_missing, _calc_pct(turnover_missing, len(factor_df)))
@@ -857,18 +820,13 @@ def generate_all_factors(
     return_df = pd.DataFrame(return_records)
     return_df["date"] = pd.to_datetime(return_df["date"], format="mixed")
 
-    # 显式释放 return_records 内存（JSON 加载的大对象）
     del return_records
 
     logger.info("  收益数据记录数: %d", len(return_df))
 
-    # 合并收益数据
     factor_df = factor_df.merge(return_df[["date", "asset"] + list(_RETURN_COLS)], on=["date", "asset"], how="left")
-
-    # 显式释放 return_df 内存（merge 完成后不再需要）
     del return_df
 
-    # 检查收益数据缺失情况
     for col in _RETURN_COLS:
         return_missing = int(factor_df[col].isna().sum())
         if return_missing > 0:
@@ -879,18 +837,14 @@ def generate_all_factors(
     logger.info("  合并收益后记录数: %d", len(factor_df))
 
     # ========== Step 3.5 ~ 11.9: 计算所有因子（D 步表驱动重构）==========
-    # 详情见 _FACTOR_PIPELINE_STEPS 表（27 个 step，31 个输出列）+ _run_pipeline_step helper。
-    # step 数 ≠ 输出列数：tail 因子单 step 输出 5 列，其它 step 单 step 输出 1 列。
-    # 日志格式与 D 步重构前字符级一致：
-    #   - step_label 非空时打印 "Step xx.x: ..."
-    #   - emit_valid_log=True 时逐列打印 "  有效 xxx: N (P%)"
+    # 详情见 _FACTOR_PIPELINE_STEPS 表（27 个 step，31 个输出列）+ _run_pipeline_step。
+    # step_label 非空时打印 "Step xx.x: ..."；emit_valid_log=True 时逐列打印有效计数。
     valid_counts: dict[str, int] = {}
     for step in _FACTOR_PIPELINE_STEPS:
         factor_df, step_valid_counts = _run_pipeline_step(factor_df, step, logger)
         valid_counts.update(step_valid_counts)
 
-    # step 11.7/11.8/11.9 的因子函数会添加 industry 临时列（用于行业聚合赋个股），
-    # 不属于 _OUTPUT_COLS，统一在此删除。
+    # step 11.7/11.8/11.9 因子函数会添加 industry 临时列（行业聚合赋个股），不属于 _OUTPUT_COLS
     factor_df = _drop_industry_column(factor_df)
 
     # ========== Step 12: 格式化输出 ==========
@@ -935,16 +889,12 @@ def generate_all_factors(
         elapsed_seconds = (end_time - start_time).total_seconds()
 
         # ========== Step 14: 返回元数据 ==========
-        # metadata 字段说明：
-        # - generated_at: 生成时间（格式 YYYY-MM-DD HH:MM:SS）
-        # - elapsed_seconds: 运行耗时（秒，精度 .2f）
-        # - total_records: 输出总记录数
-        # - valid_records: 各因子有效记录数（绝对值）
-        # - valid_records_percent: 各因子有效记录百分比（与日志输出一致，便于质量评估）
-        # - factor_columns: 扩展因子列名（不含基础列和基础因子）
-        # - return_columns: 收益数据列名
-        # - input_sources: 输入数据源路径
-        # - output_path: 输出文件路径
+        # metadata 字段顺序为契约（消费者 summary 模块按序读取）：
+        #   generated_at / elapsed_seconds / total_records / valid_records[*] /
+        #   valid_records_percent[*] / factor_columns / return_columns /
+        #   input_sources / output_path
+        # valid_records 与 valid_records_percent 按 _VALID_KEY_ORDER 排序，
+        # 与日志输出一致便于质量评估。
 
         metadata = {
             "generated_at": end_time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -970,10 +920,9 @@ def generate_all_factors(
         logger.info("=" * 40)
 
         # ========== Step 15: 写出列名清单（消费者 schema 查询） ==========
-        # 遵循 factor_cols_literal_constant_design.md §3.5：
-        # 将 _OUTPUT_COLS 结构化输出为独立 JSON 文件，供 factor_ic 模块
-        # 校验 required_columns 是否与数据源对齐（M4 合规：读数据产物 ≠ import 模块）
-        # 使用 _atomic_write_json 保证原子性：避免下游读到半写入的文件
+        # 遵循 factor_cols_literal_constant_design.md §3.5：_OUTPUT_COLS 结构化输出
+        # 供 factor_ic 模块校验 required_columns（M4 合规：读数据产物 ≠ import 模块）。
+        # _atomic_write_json 保证原子性，避免下游读到半写文件。
         columns_path = output_path.parent / "factor_ic_data_columns.json"
         try:
             columns_manifest = {
