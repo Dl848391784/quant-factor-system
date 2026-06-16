@@ -57,10 +57,14 @@ except (ValueError, TypeError) as e:
     # - R17 改为 logger.critical + raise（详见 PROJECT.md H12 R16 修正版）：
     #   importlib.import_module 在 test_factor_spec_consistency.py 中扫描所有 ic_*.py
     #   触发 SPEC 注册，sys.exit 会杀掉 pytest 宿主；raise 让调用方决定行为。
-    err_msg = str(e)[:200]  # 截断避免超长异常淹没单行日志
+    # 截断策略（消除中间变量 + 固定截断标记）：
+    # - str(e)[:200] 直接内联到 logger 实参，不再走 err_msg 中间变量；
+    # - 格式串中固定追加 "(truncated to <=200 chars)" 标记声明截断上限，
+    #   显式告知阅读者本字段可能被截断，避免静默信息丢失；
+    # - 完整异常对象由下方 raise 携带 traceback 向上传播（CLI 块 logger.exception 输出）。
     logger.critical(
-        "FactorSpec 注册失败 (factor=industry_momentum_5d): %s (%s)",
-        err_msg,
+        "FactorSpec 注册失败 (factor=industry_momentum_5d): %s (%s) (truncated to <=200 chars)",
+        str(e)[:200],
         type(e).__name__,
     )
     raise
