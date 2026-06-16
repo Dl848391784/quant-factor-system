@@ -28,7 +28,7 @@ import sys
 
 from data_fetchers.factor_calculator import calculate_industry_momentum_5d
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
-from factor_ic.common.exceptions import FactorCalcError
+from factor_ic.common.exceptions import DataSchemaError, FactorCalcError
 from factor_ic.common.factor_ic_runner import run_factor_ic
 from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.factor_summary_logger import log_factor_summary
@@ -79,24 +79,33 @@ def main():
         _logger=logger,
     )
 
-    if result is None:
-        # 错误路径职责分离：直接 logger.error + sys.exit(1)，不借道异常。
-        # 注：run_factor_ic 当前实现契约为永不返回 None（失败走 build_error_result
-        # 返回 dict 或抛 DataSchemaError），此分支属于防御性守卫，触发即上游契约破坏，
-        # error 级别记录便于排查（参考 dead-code skill Pitfall 1 v1.0o 守卫策略）。
-        logger.error("run_factor_ic 返回 None，数据加载或计算可能失败 (factor=industry_momentum_5d)")
-        sys.exit(1)
-
     # 输出 IC 摘要（公共模块,M3.1）
-    # 职责约定：None 检查由 main() 调用方提前退出（见上方 result is None 分支），
-    # log_factor_summary 只处理非 None 的合法 dict 结果，并对 dict 内字段为 None 的
-    # 异常情况输出整合告警（factor_summary_logger.py L83-92）。
+    # 注：run_factor_ic 失败路径走 build_error_result（返回 dict）或抛 DataSchemaError，
+    # 永不返回 None；冗余的 result is None 兜底掩盖真实错误来源（违反 dead-code skill
+    # 模式 E：防御 is None 兜底面对永不返回 None 的函数），已彻底移除。
+    # log_factor_summary 自身契约（factor_summary_logger.py L40-44）：不抛异常、不调用
+    # sys.exit、不影响调用方控制流；其内部对 dict 字段为 None 的异常情况输出整合告警
+    # （L83-92），无需调用方额外守卫。
     log_factor_summary(result, "行业5日动量因子", logger)
 
 
 if __name__ == "__main__":
+    # 异常分支顺序依据（exceptions.py L27/L46 已确认）：
+    # - DataSchemaError(Exception) 与 FactorCalcError(Exception) 均直接继承 Exception，
+    #   两者是【平级关系，无父子继承】（exceptions.py L60 注释也明确"与 FactorCalcError 并列"）。
+    # - 因此 DataSchemaError ↔ FactorCalcError 的捕获顺序在异常匹配上等价，无主次之分。
+    # - 当前先 DataSchemaError 后 FactorCalcError 的顺序仅为可读性约定（按错误来源远近排序：
+    #   schema 失败发生在数据加载阶段（最早），因子计算失败发生在加载之后），
+    #   未来调整顺序不会改变捕获语义。
+    # - 通用 Exception 必须放最后，作为非业务异常的兜底（程序 bug → CRITICAL 告警语义）。
     try:
         main()
+    except DataSchemaError as e:
+        # run_factor_ic 文档（factor_ic_runner.py L460-461）声明 required_columns 与
+        # 数据源列不匹配时抛 DataSchemaError；单独捕获以保留 schema 失败的明确语义，
+        # 避免落入通用 Exception 分支后丢失"列依赖不匹配"这一关键上下文。
+        logger.error("行业5日动量因子IC计算失败 (数据列依赖不匹配): %s", e)
+        sys.exit(1)
     except FactorCalcError as e:
         logger.error("行业5日动量因子IC计算失败: %s", e)
         sys.exit(1)
