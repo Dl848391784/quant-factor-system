@@ -55,7 +55,8 @@ EXCEPTION_TO_ALLOWED_EXIT_CODES: dict[str, set[int]] = {
 # 扩散完成后此白名单将切换为黑名单（默认全部强制）。
 R20_MIGRATED_FILES: frozenset[str] = frozenset(
     {
-        # R3 后填入 momentum_5d；R4 扩散批次后增补
+        "ic_industry_momentum_5d_1d.py",  # R3 落地（design.md §6 完整 7 issue 修复）
+        # R4 扩散批次后增补
     }
 )
 
