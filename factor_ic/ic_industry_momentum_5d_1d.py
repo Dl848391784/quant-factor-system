@@ -42,27 +42,36 @@ logger = get_logger(__name__)
 # FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
 # ============================================================================
 
+_FACTOR_NAME = "industry_momentum_5d"
+
 try:
     SPEC = register_factor(
         FactorSpec(
-            factor_name="industry_momentum_5d",
-            factor_col="industry_momentum_5d",
+            factor_name=_FACTOR_NAME,
+            factor_col=_FACTOR_NAME,
             calculation=calculate_industry_momentum_5d,
         )
     )
 except SpecRegistrationError as e:
-    # 模块顶层注册失败兜底（R1 公共模块包装层后简化）：
-    # - register_factor 抛 SpecRegistrationError（factor_spec.py L107-167：重复注册、列名非法
-    #   等 ValueError 与 dataclass 构造期 TypeError 已被包装层统一为 SpecRegistrationError，
-    #   异常对象内已含 factor_name 上下文，logger 格式串无需重复 "factor=...")。
-    # - H12 R16：logger.critical + raise，不 sys.exit（importlib.import_module 在
-    #   test_factor_spec_consistency.py 中扫描所有 ic_*.py 触发 SPEC 注册，sys.exit 会杀
+    # 模块顶层注册失败兜底：
+    # - register_factor 抛 SpecRegistrationError（重复注册、列名非法等 ValueError 与
+    #   dataclass 构造期 TypeError 由公共包装层统一为 SpecRegistrationError）。
+    # - logger.critical 显式带 factor=%s 字段（issue 2）：异常对象内虽含 factor_name
+    #   上下文，但格式串本身原先无 factor 字段，日志聚合按字段查询会漏掉本行；
+    #   显式落盘 factor=%s 后，grep "factor=industry_momentum_5d.*注册失败" 可直接命中。
+    # - 退出策略：logger.critical + raise，不 sys.exit（test_factor_spec_consistency.py
+    #   通过 importlib.import_module 扫描所有 ic_*.py 触发 SPEC 注册，sys.exit 会杀
     #   pytest 宿主；raise 让调用方决定行为）。
-    # - 截断策略（消除中间变量 + 固定截断标记）：str(e)[:200] 直接内联到 logger 实参，
-    #   格式串中固定追加 "(truncated to <=200 chars)" 显式告知阅读者本字段可能被截断；
-    #   完整异常对象由下方 raise 携带 traceback 向上传播（CLI 块 logger.exception 输出）。
+    # - 向上传播的异常类型（供调用方文档参考，issue 2）：
+    #     SpecRegistrationError(ValueError) —— 即调用方既可 except SpecRegistrationError
+    #     精确捕获，也可 except ValueError 宽口径捕获。__main__ 块的 except Exception
+    #     兜底分支会落盘 logger.exception 完整堆栈。
+    # - 截断策略：str(e)[:200] 直接内联到 logger 实参，格式串中固定追加
+    #   "(truncated to <=200 chars)" 显式告知阅读者本字段可能被截断；完整异常对象由
+    #   下方 raise 携带 traceback 向上传播。
     logger.critical(
-        "FactorSpec 注册失败: %s (truncated to <=200 chars)",
+        "FactorSpec 注册失败: factor=%s 错误: %s (truncated to <=200 chars)",
+        _FACTOR_NAME,
         str(e)[:200],
     )
     raise
