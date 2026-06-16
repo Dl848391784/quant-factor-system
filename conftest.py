@@ -1,4 +1,4 @@
-"""项目级 pytest conftest：测试期间抑制模块日志的 console 输出。
+"""项目级 pytest conftest：测试期间抑制模块日志的 console 输出 + 项目根 sys.path 注入。
 
 模块 logger_config.py 注册了 StreamHandler(INFO)，pytest 运行时每条
 logger.info() 都会打印到 stdout，导致大量日志字符涌入前台，干扰
@@ -8,11 +8,29 @@ logger.info() 都会打印到 stdout，导致大量日志字符涌入前台，�
 临时提升为 WARNING（仅错误/警告输出到前台），session 结束后恢复。
 INFO/DEBUG 日志仍写入各模块 logs/ 文件（FileHandler 不受影响），
 不丢失调试信息。
+
+sys.path 注入（遵循 factor_spec_required_cols_and_sys_path_design.md §3.2 方案 4-A）：
+- 将项目根加到 sys.path[0]，使 `factor_ic.*` / `data_fetchers.*` / `backtest.*`
+  在 pytest 测试期间统一可导入
+- pytest 通过 [tool.pytest.ini_options].pythonpath = ["."] 单独注入
+- ic 脚本运行规范统一为 `python -m factor_ic.ic_xxx_1d`（python -m 模式下
+  Python 自动把 cwd 加入 sys.path，无需脚本头部的 sys.path.insert）
+- 取代各 ic 脚本头部的 sys.path.insert + noqa 重复声明
 """
 
 import logging
+import sys
+from pathlib import Path
 
 import pytest
+
+
+# ---------------------------------------------------------------------------
+# 项目根 sys.path 注入（必须在任何 factor_ic / data_fetchers / backtest 导入前生效）
+# ---------------------------------------------------------------------------
+_PROJECT_ROOT = str(Path(__file__).resolve().parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 
 @pytest.fixture(scope="session", autouse=True)
