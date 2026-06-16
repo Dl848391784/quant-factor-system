@@ -104,12 +104,15 @@ def calculate_intraday_intensity(
     # 2. DataFrame 参数先 copy()（遵循 MODULE.md 约束 4）
     factor_df = factor_df.copy()
 
-    # 3. 有效数据量校验（可通过 skip_validation 跳过）
+    # 3. 有效数据量校验（可通过 skip_validation 跳过，但入参规模仍需记录）
+    valid_rows = factor_df[required_cols].dropna().shape[0]
     if not skip_validation:
-        valid_rows = factor_df[required_cols].dropna().shape[0]
         if valid_rows < 100:
             raise ValueError(f"数据校验失败：有效数据量不足\n期望 ≥ 100 行，实际 {valid_rows} 行\n请检查数据源质量")
         _logger.info("开始计算日内强度因子，有效数据行数: %s", valid_rows)
+    else:
+        # skip_validation=True 主要用于单元测试，仍记录一条 debug 级日志便于排查
+        _logger.debug("开始计算日内强度因子（skip_validation=True），有效数据行数: %s", valid_rows)
 
     # 4. 计算振幅（分母）
     amplitude = factor_df["high"] - factor_df["low"]
