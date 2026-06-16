@@ -298,6 +298,73 @@ grep -rn "sys.exit(" factor_ic/ic_*.py
 - ⏳ 待迁移：其他 `factor_ic/ic_*.py` 文件、`backtest/`、`comprehensive_factor/`、`data_fetchers/`、`summary/`
 - 自动化：`scripts/check_exit_codes.py` 待交付（标 [待实施]，工具落地后启用 pre-commit + CI）
 
+**H13 正反例**：
+```python
+# ❌ 反例 1：callee 永不返回 None，caller 仍写守卫
+result = run_factor_ic(...)  # 实现：失败走 build_error_result(返回 dict) 或 raise DataSchemaError
+if result is None:            # 死分支，永不触发
+    logger.error("run_factor_ic 返回 None")
+    sys.exit(1)
+
+# ❌ 反例 2：assert False 之后的代码
+def parse(x):
+    assert x > 0
+    if x < 0:                 # 不可达
+        return None
+    return x
+
+# ❌ 反例 3：if False 包裹的"备用方案"
+if False:                     # 死代码
+    use_legacy_path()
+else:
+    use_new_path()
+
+# ✅ 正例 1：删除死守卫，让真实错误自然抛出
+result = run_factor_ic(...)
+log_factor_summary(result, "因子名", logger)  # 失败由上游 raise 触发，由 __main__ except 捕获
+
+# ✅ 正例 2：callee 文档明确可能返回 None → 必须守卫（不是死代码）
+config = load_config(path)    # 文档：找不到时返回 None
+if config is None:
+    logger.error("配置文件不存在: %s", path)
+    sys.exit(1)
+
+# ✅ 正例 3：第三方库返回值不确定 → 必须守卫（不是死代码）
+response = requests.get(url)
+if response.status_code != 200:
+    raise RuntimeError(f"HTTP {response.status_code}")
+```
+
+**H13 Why**：
+- **错误来源可追溯**：死代码兜底会用 generic 错误消息掩盖 callee 真实抛出的 DataSchemaError / FactorCalcError 上下文
+- **维护者认知负担**：保留死分支让维护者误以为"该路径可能触发，需要思考"，实际是干扰
+- **测试覆盖率假象**：死分支永远不会被测试触发，但工具不会标红，造成"覆盖率高但实际未测"假象
+- **历史教训**：本次 R1-R3 把 `if result is None` 当"防御性守卫"保留，被用户纠正"应该彻底删除死代码"；R4-R6 修正
+
+**H13 判定边界**（避免过度删除）：
+- ✅ 应删：callee 实现明确"永不返回 None"（dict 失败 + raise 双路径）+ caller 仍写 `if result is None` 守卫
+- ✅ 应删：`if False:` / `assert False` 之后的代码 / 不可达的 `else` 分支
+- ❌ 不应删：callee 文档明确"可能返回 None"
+- ❌ 不应删：callee 是 third-party 库（契约可能变化）
+- ❌ 不应删：业务上可能进入但当前测试未覆盖（这是测试覆盖问题，不是死代码）
+- 判定方法：必须能给出 callee 的具体行号证据（如 `factor_ic_runner.py:442` 返回 dict / `:461` raise），否则按"不应删"处理
+
+**H13 Verify**：
+```bash
+# 检查 factor_ic/ic_*.py 是否仍有 None 死守卫
+grep -rn "if result is None" factor_ic/ic_*.py
+# 期望：零命中
+
+# 检查不可达分支
+grep -rn "assert False\|if False:" factor_ic/ comprehensive_factor/ backtest/
+# 期望：零命中（除测试用例中的负向测试）
+```
+
+**H13 当前覆盖范围**：
+- ✅ 已落地：4 个行业 IC 脚本（earnings_growth / momentum_5d / turnover_trend / amplitude_trend）`if result is None` 已删
+- ⏳ 待审计：其他 `factor_ic/ic_*.py` 文件、`backtest/`、`comprehensive_factor/`、`data_fetchers/` 中的 None 守卫合规性
+- 自动化：`scripts/check_dead_branches.py` 待交付（标 [待实施]，工具落地后启用 pre-commit + CI）
+
 ---
 
 ## 规则冲突仲裁 [stable]
