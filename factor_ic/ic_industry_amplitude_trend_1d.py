@@ -145,10 +145,10 @@ if __name__ == "__main__":
         # 数据源列不匹配时抛 DataSchemaError；单独捕获以保留 schema 失败的明确语义，
         # 避免落入通用 Exception 分支后丢失"列依赖不匹配"这一关键上下文。
         logger.error("行业振幅趋势因子IC计算失败 (数据列依赖不匹配): %s", e)
-        sys.exit(1)
+        sys.exit(4)  # H12 R18: schema 失败 → 检查上游数据
     except FactorCalcError as e:
         logger.error("行业振幅趋势因子IC计算失败: %s", e)
-        sys.exit(1)
+        sys.exit(5)  # H12 R19: 因子计算失败 → 检查计算代码
     except Exception:
         logger.exception("未预期的错误")
         sys.exit(1)
