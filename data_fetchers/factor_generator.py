@@ -673,6 +673,7 @@ def _write_factor_json_gz(
     # 旧方法: json.dump({"dates": ..., "data": output_df.to_dict("records")}, f) → OOM
     # 新方法: 分批写入 {"dates": ..., "data": [row1, row2, ...]} → 内存峰值仅每批行数
     temp_path = output_path.parent / (output_path.name + ".tmp")
+    replaced = False
     try:
         with gzip.open(temp_path, "wt", encoding="utf-8") as f:
             # 写入 JSON 头部
@@ -705,16 +706,21 @@ def _write_factor_json_gz(
             f.write("]}")
 
         os.replace(temp_path, output_path)
+        replaced = True
     except OSError as e:
         # 文件系统错误（磁盘/权限/IO，PermissionError 是 OSError 子类）
         logger.error("文件系统错误保存失败: %s, 原因: %s (%s)", output_path, type(e).__name__, str(e))
-        temp_path.unlink(missing_ok=True)  # 原子操作，消除 TOCTOU 竞争窗口
         raise RuntimeError(f"文件系统错误: {output_path}, {type(e).__name__}: {e}") from e
     except Exception as e:
         # 未知错误（兜底）
         logger.error("未知错误保存失败: %s, 原因: %s (%s)", output_path, type(e).__name__, str(e))
-        temp_path.unlink(missing_ok=True)  # 原子操作，消除 TOCTOU 竞争窗口
         raise RuntimeError(f"未知错误保存失败: {output_path}, {type(e).__name__}: {e}") from e
+    finally:
+        # 仅在 os.replace 未成功执行时才清理临时文件，
+        # 避免 replace 后再抛异常时误删已原子替换成功的目标文件。
+        # missing_ok=True：原子操作，消除 TOCTOU 竞争窗口。
+        if not replaced:
+            temp_path.unlink(missing_ok=True)
 
 
 # ============================================================================
