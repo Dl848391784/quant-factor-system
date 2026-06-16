@@ -3,7 +3,8 @@
 行业振幅趋势因子 IC 计算器 - 使用公共模块主入口
 
 遵循 PROJECT.md 公共模块强制复用规范：
-- 主流程使用 run_complex_factor_ic()（禁止手写三模式分支）
+- 主流程使用 run_factor_ic()（FactorSpec 驱动入口，禁止手写三模式分支；
+  factor_ic_runner.py L433 推荐入口，替代 run_simple_factor_ic / run_complex_factor_ic）
 - 因子计算逻辑复用 data_fetchers.factor_calculator（遵循 MODULE.md 约束 #3）
 
 因子定义：
