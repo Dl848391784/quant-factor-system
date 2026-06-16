@@ -83,6 +83,7 @@ def calculate_volume_price_strength(
     遵循 H5: IC方向不预判
     """
     _logger = get_module_logger(logger_arg)
+    _logger.debug("  输入 %s: %d 行", _COL_VOLUME_PRICE_STRENGTH, len(factor_df))
 
     df = factor_df.copy()
 
@@ -93,12 +94,14 @@ def calculate_volume_price_strength(
     df[_COL_VOLUME_PRICE_STRENGTH] = intraday_return * df[_COL_TURNOVER_SURGE]
 
     valid_count = int(df[_COL_VOLUME_PRICE_STRENGTH].notna().sum())
+    nan_count = len(df) - valid_count
     _logger.info(
         "  有效 %s: %d (%.2f%%)",
         _COL_VOLUME_PRICE_STRENGTH,
         valid_count,
         valid_count / len(df) * 100 if len(df) > 0 else 0,
     )
+    _logger.info("  NaN %s: %d 行", _COL_VOLUME_PRICE_STRENGTH, nan_count)
 
     return df
 
@@ -128,6 +131,7 @@ def calculate_positive_day_ratio_5(
     遵循 H5: IC方向不预判
     """
     _logger = get_module_logger(logger_arg)
+    _logger.debug("  输入 %s: %d 行", _COL_POSITIVE_DAY_RATIO_5, len(factor_df))
 
     df = factor_df.copy()
     df = df.sort_values([_COL_ASSET, _COL_DATE])
@@ -148,12 +152,14 @@ def calculate_positive_day_ratio_5(
     df[_COL_POSITIVE_DAY_RATIO_5] = ratio
 
     valid_count = int(df[_COL_POSITIVE_DAY_RATIO_5].notna().sum())
+    nan_count = len(df) - valid_count
     _logger.info(
         "  有效 %s: %d (%.2f%%)",
         _COL_POSITIVE_DAY_RATIO_5,
         valid_count,
         valid_count / len(df) * 100 if len(df) > 0 else 0,
     )
+    _logger.info("  NaN %s: %d 行", _COL_POSITIVE_DAY_RATIO_5, nan_count)
 
     return df
 
@@ -185,6 +191,7 @@ def calculate_ma5_deviation(
     遵循 H5: IC方向不预判
     """
     _logger = get_module_logger(logger_arg)
+    _logger.debug("  输入 %s: %d 行", _COL_MA5_DEVIATION, len(factor_df))
 
     df = factor_df.copy()
     df = df.sort_values([_COL_ASSET, _COL_DATE])
@@ -201,12 +208,14 @@ def calculate_ma5_deviation(
     df[_COL_MA5_DEVIATION] = (df[_COL_CLOSE] - ma5_safe) / ma5_safe
 
     valid_count = int(df[_COL_MA5_DEVIATION].notna().sum())
+    nan_count = len(df) - valid_count
     _logger.info(
         "  有效 %s: %d (%.2f%%)",
         _COL_MA5_DEVIATION,
         valid_count,
         valid_count / len(df) * 100 if len(df) > 0 else 0,
     )
+    _logger.info("  NaN %s: %d 行", _COL_MA5_DEVIATION, nan_count)
 
     return df
 
@@ -237,6 +246,7 @@ def calculate_near_high_ratio_5(
     遵循 H5: IC方向不预判
     """
     _logger = get_module_logger(logger_arg)
+    _logger.debug("  输入 %s: %d 行", _COL_NEAR_HIGH_RATIO_5, len(factor_df))
 
     df = factor_df.copy()
     df = df.sort_values([_COL_ASSET, _COL_DATE])
@@ -264,12 +274,14 @@ def calculate_near_high_ratio_5(
     df[_COL_NEAR_HIGH_RATIO_5] = position
 
     valid_count = int(df[_COL_NEAR_HIGH_RATIO_5].notna().sum())
+    nan_count = len(df) - valid_count
     _logger.info(
         "  有效 %s: %d (%.2f%%)",
         _COL_NEAR_HIGH_RATIO_5,
         valid_count,
         valid_count / len(df) * 100 if len(df) > 0 else 0,
     )
+    _logger.info("  NaN %s: %d 行", _COL_NEAR_HIGH_RATIO_5, nan_count)
 
     return df
 
