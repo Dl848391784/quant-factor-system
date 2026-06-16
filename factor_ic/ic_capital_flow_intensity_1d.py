@@ -31,6 +31,7 @@ import sys
 
 from data_fetchers.factor_calculator import calculate_capital_flow_intensity
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
+from factor_ic.common.exceptions import DataSchemaError, FactorCalcError, SummaryLogError
 from factor_ic.common.factor_ic_runner import run_factor_ic
 from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.factor_summary_logger import log_factor_summary
@@ -71,25 +72,23 @@ def main():
     )
 
     # 问题1：覆盖 None / success=False 两种失败场景，避免静默跳过摘要
+    # R20 迁移：main 内禁 sys.exit，改为 raise FactorCalcError 让 __main__ 块统一处理。
     if result is None:
-        logger.error("run_factor_ic 返回 None，数据加载或计算可能失败")
-        sys.exit(1)
+        raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
     if not result.get("success", False):
-        logger.error("资金流强度因子IC计算失败: %s", result.get("error", "未知错误"))
-        sys.exit(1)
+        raise FactorCalcError(f"资金流强度因子IC计算失败: {result.get('error', '未知错误')}")
 
-    # 包裹 log_factor_summary：摘要层失败 → sys.exit(3) 显式辅助层失败信号
-    # （PROJECT.md H12 R17）。因子计算 result 已成功生成，主结果产物可用，下游
-    # backtest/comprehensive/summary 可正常消费；仅旁路日志摘要失败时返回 exit 3，
-    # 与业务失败（exit 1）和 import-time 注册失败（exit 2）严格区分。
+    # 包裹 log_factor_summary：摘要层失败 → SummaryLogError 让 __main__ 块统一处理
+    # （PROJECT.md H12 R17，exit 3）。因子计算 result 已成功生成，主结果产物可用，
+    # 下游 backtest/comprehensive/summary 可正常消费；仅旁路日志摘要失败时返回 exit 3，
+    # 与业务失败（exit 5）和 schema 失败（exit 4）严格区分。
     try:
         log_factor_summary(result, "资金流强度因子", logger)
-    except Exception:
-        logger.exception(
+    except Exception as e:
+        raise SummaryLogError(
             "log_factor_summary 摘要输出阶段失败（因子计算 result 已成功生成；"
             "故障源 = 摘要日志层而非 run_factor_ic 业务路径）"
-        )
-        sys.exit(3)  # H12 R17：辅助层失败专用退出码
+        ) from e
 
     # 问题3：log_factor_summary 已输出完整结果摘要（含因子名/IC指标/日期范围），
     # 隐含计算完成语义，删除冗余的"计算完成"日志保持单一完成信号
@@ -99,7 +98,22 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except DataSchemaError as e:
+        # 数据 Schema 校验失败（公共模块 validate_required_columns 抛出）：
+        # H12 R18 → exit 4 与因子计算失败（exit 5）严格区分。
+        # MODULE.md M22：业务异常用 logger.error 不打堆栈。
+        logger.error("数据 Schema 校验失败 (factor=%s): %s", e.factor_name, e)
+        sys.exit(4)  # H12 R18: schema 失败 → 检查上游数据
+    except FactorCalcError as e:
+        # 业务异常：消息已足够定位，堆栈是噪音（MODULE.md M22 业务异常子类规则）
+        logger.error("资金流强度因子IC计算失败: %s", e)
+        sys.exit(5)  # H12 R19: 因子计算失败 → 检查计算代码
+    except SummaryLogError as e:
+        # 摘要日志层失败（主结果产物已生成，可用）：H12 R17 exit 3 辅助层信号
+        logger.error("摘要日志层失败（主结果产物已生成，可用）: %s", e)
+        sys.exit(3)  # H12 R17: 辅助层失败专用退出码
     except Exception:
-        # 问题5：附带因子名上下文，便于日志聚合检索定位出错阶段
+        # 未预期异常（程序 bug）：必须打印堆栈以便定位
+        # 附带因子名上下文，便于日志聚合检索定位出错阶段
         logger.exception("资金流强度因子运行失败 (capital_flow_intensity)")
         sys.exit(1)

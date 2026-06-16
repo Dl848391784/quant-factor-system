@@ -56,6 +56,7 @@ EXCEPTION_TO_ALLOWED_EXIT_CODES: dict[str, set[int]] = {
 R20_MIGRATED_FILES: frozenset[str] = frozenset(
     {
         "ic_industry_momentum_5d_1d.py",  # R3 落地（design.md §6 完整 7 issue 修复）
+        "ic_capital_flow_intensity_1d.py",  # R5a.6 迁移（main 内 sys.exit → raise + 三层 handler）
         # R4 扩散批次后增补
     }
 )
