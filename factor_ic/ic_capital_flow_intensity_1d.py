@@ -78,8 +78,18 @@ def main():
         logger.error("资金流强度因子IC计算失败: %s", result.get("error", "未知错误"))
         sys.exit(1)
 
-    # 输出 IC 摘要 + None 状态整合告警（公共模块,M3.1）
-    log_factor_summary(result, "资金流强度因子", logger)
+    # 包裹 log_factor_summary：摘要层失败 → sys.exit(3) 显式辅助层失败信号
+    # （PROJECT.md H12 R17）。因子计算 result 已成功生成，主结果产物可用，下游
+    # backtest/comprehensive/summary 可正常消费；仅旁路日志摘要失败时返回 exit 3，
+    # 与业务失败（exit 1）和 import-time 注册失败（exit 2）严格区分。
+    try:
+        log_factor_summary(result, "资金流强度因子", logger)
+    except Exception:
+        logger.exception(
+            "log_factor_summary 摘要输出阶段失败（因子计算 result 已成功生成；"
+            "故障源 = 摘要日志层而非 run_factor_ic 业务路径）"
+        )
+        sys.exit(3)  # H12 R17：辅助层失败专用退出码
 
     # 问题3：log_factor_summary 已输出完整结果摘要（含因子名/IC指标/日期范围），
     # 隐含计算完成语义，删除冗余的"计算完成"日志保持单一完成信号
