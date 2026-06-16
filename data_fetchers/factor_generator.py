@@ -32,6 +32,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 
@@ -620,10 +621,14 @@ def _nan_to_null(obj: Any) -> Any:
     json.dump 默认把 float NaN 输出为 "NaN"（非法 JSON 值）；
     pandas to_dict('records') 把 NaN 输出为 float('nan') 而非 None。
     唯一可靠方案：遍历每条记录，NaN/inf → None → JSON 输出为 null。
+
+    类型兼容：
+    - Python float：直接命中 isinstance(obj, float)
+    - numpy.float64：在 64 位系统上是 float 子类（也命中第一支）
+    - numpy.float32 / numpy.float16：不是 float 子类，需 np.floating 兜底
+    - bool：不是 float 子类，不会误判
     """
-    if isinstance(obj, float) and obj != obj:  # NaN (NaN != NaN)
-        return None
-    if isinstance(obj, float) and (obj == float("inf") or obj == float("-inf")):
+    if isinstance(obj, (float, np.floating)) and (math.isnan(obj) or math.isinf(obj)):
         return None
     if isinstance(obj, dict):
         return {k: _nan_to_null(v) for k, v in obj.items()}
