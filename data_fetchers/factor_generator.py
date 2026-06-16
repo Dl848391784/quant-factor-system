@@ -859,11 +859,13 @@ def generate_all_factors(
     del return_df
 
     for col in _RETURN_COLS:
-        return_missing = int(factor_df[col].isna().sum())
-        if return_missing > 0:
-            logger.warning(
-                "  %s 缺失记录数: %d (%.2f%%)", col, return_missing, _calc_pct(return_missing, len(factor_df))
-            )
+        # col_missing：循环作用域局部变量，每次迭代独立含义。
+        # 修复点：原变量名 return_missing 在循环结束后仍指向最后一列的统计值，
+        # 与外层"收益数据整体缺失"语义混淆。重命名后语义只针对当前 col 当次迭代，
+        # 不会被误读为跨列汇总值。
+        col_missing = int(factor_df[col].isna().sum())
+        if col_missing > 0:
+            logger.warning("  %s 缺失记录数: %d (%.2f%%)", col, col_missing, _calc_pct(col_missing, len(factor_df)))
 
     logger.info("  合并收益后记录数: %d", len(factor_df))
 
