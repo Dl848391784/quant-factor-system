@@ -854,27 +854,22 @@ def generate_all_factors(
     if pd.api.types.is_datetime64_any_dtype(factor_df["date"]):
         factor_df["date"] = factor_df["date"].dt.strftime("%Y-%m-%d")
 
-    # 检查列是否存在（直接使用模块级常量 _OUTPUT_COLS）
+    # 检查列是否存在
     missing_cols = [col for col in _OUTPUT_COLS if col not in factor_df.columns]
     if missing_cols:
         raise KeyError(f"输出列不存在: {missing_cols}，请检查因子计算函数的输出列名是否与 _EXTENDED_FACTOR_COLS 一致")
 
-    # output_df 初始化为 None（None sentinel pattern）：
-    # 替代 finally 中基于 locals() 的存在性守卫——
-    # locals() 在 CPython 中并不可靠（尤其在异常退出帧时）且每次调用构造新 dict，
-    # 显式 None 初始化让 finally 的清理条件语义明确：output_df is not None 即已成功创建。
+    # output_df = None：None sentinel pattern，让 finally 清理条件语义明确
+    # （locals() 在 CPython 异常退出帧时不可靠且每次构造新 dict）
     output_df: pd.DataFrame | None = None
 
-    # ========== Step 13~15 包裹在 try/finally 中，确保异常路径同样释放 output_df ==========
-    # 正常路径：return 后栈解开，output_df 由 GC 回收
-    # 异常路径：若 _write_factor_json_gz 等抛出 RuntimeError，本 finally 显式去除引用，
-    #          避免外层调用方栈帧持续持有 output_df（重试 / 后续任务场景下尤其重要）
+    # Step 13~15 包裹 try/finally：异常路径下也释放 output_df（约 30% factor_df 体积），
+    # 避免外层调用方栈帧持续持有大对象（重试 / 后续任务场景）
     try:
-        # cast：pandas 重载使列选择推断为 DataFrame | Series，运行时实为 DataFrame
-        output_df = cast(pd.DataFrame, factor_df[list(_OUTPUT_COLS)].copy())  # 元组转列表，pandas 列选择需要列表
+        # cast：pandas 列选择推断为 DataFrame | Series，运行时实为 DataFrame
+        output_df = cast(pd.DataFrame, factor_df[list(_OUTPUT_COLS)].copy())
 
-        # 显式释放 factor_df 内存（可能包含中间列，比 output_df 更多）
-        del factor_df
+        del factor_df  # 可能含中间列，比 output_df 更大
         # ========== Step 13: 保存输出 ==========
         logger.info("Step 13: 保存输出...")
 
@@ -940,12 +935,7 @@ def generate_all_factors(
 
         return metadata
     finally:
-        # 防御性释放：异常路径下显式去除 output_df 引用
-        # 正常路径下 return 后函数栈解开，GC 会回收 output_df
-        # 此处保留 del 显式表达意图：即使 Step 13/14/15 抛出异常，
-        # output_df（约 30% factor_df 体积）也能立即去除局部引用。
-        # 用 None sentinel 而非 locals()："is not None" 语义明确，
-        # 不依赖 CPython locals() 实现，且零开销。
+        # 异常路径下显式去除 output_df 引用；正常路径靠 return 后栈解开 + GC
         if output_df is not None:
             del output_df
 
@@ -966,11 +956,9 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    # 设置日志级别
     log_level = logging.ERROR if args.quiet else logging.INFO
     logger = setup_logger("factor_generator", level=log_level)
 
-    # 参数路径转换
     factor_data_path = Path(args.factor_data) if args.factor_data else None
     turnover_data_path = Path(args.turnover_data) if args.turnover_data else None
     return_data_path = Path(args.return_data) if args.return_data else None
@@ -1019,11 +1007,5 @@ def main() -> int:
         return 1
 
 
-# ============================================================================
-# __main__ CLI 入口
-# ============================================================================
-
 if __name__ == "__main__":
-    # CLI 入口：调用 main() 函数，测试代码已移至 test_cases/test_factor_generator.py
-    # 注意：sys 已在顶部条件块导入，无需重复导入
     sys.exit(main())
