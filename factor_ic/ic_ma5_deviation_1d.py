@@ -62,6 +62,26 @@ _KEY_PERIOD_START = "start"
 _KEY_PERIOD_END = "end"
 
 
+def _safe_dict(result: dict, key: str) -> dict:
+    """从 result 安全提取 dict 类型子字段。
+
+    与原 `result.get(key) or {}` 模式的差异：
+      - 原模式：值为 falsy（0、""、[]、None、{}）一律替换为 {}，掩盖上游返回错误类型。
+      - 本函数：仅当值为 dict 时透传；缺失/None 静默返回 {}（兼容字段尚未生成的情况）；
+        其他非 dict 类型记录 warning 暴露上游结构异常，再返回 {} 保证下游格式化不崩。
+
+    设计说明：
+        本函数定位为"展示层防御"，不抛异常——_log_summary 的职责是尽力打印摘要，
+        即使部分字段类型异常也不应阻断整体日志。类型不一致由 warning 通道暴露给运维。
+    """
+    value = result.get(key)
+    if isinstance(value, dict):
+        return value
+    if value is not None:
+        logger.warning("结果字段 %r 类型异常，期望 dict，实际 %s（值已忽略）", key, type(value).__name__)
+    return {}
+
+
 def _log_summary(result: dict) -> None:
     """格式化并打印 IC 计算结果摘要 + 空值告警。
 
@@ -77,10 +97,10 @@ def _log_summary(result: dict) -> None:
         本函数仅负责"展示"，不做任何业务决策、不抛业务异常；result 为 None 的判断
         由调用方 main() 在执行流程编排阶段完成。
     """
-    ic_metrics = result.get(_KEY_IC_METRICS) or {}
-    sample_stats = result.get(_KEY_SAMPLE_STATS) or {}
-    period = result.get(_KEY_PERIOD) or {}
-    ic_distribution = result.get(_KEY_IC_DISTRIBUTION) or {}
+    ic_metrics = _safe_dict(result, _KEY_IC_METRICS)
+    sample_stats = _safe_dict(result, _KEY_SAMPLE_STATS)
+    period = _safe_dict(result, _KEY_PERIOD)
+    ic_distribution = _safe_dict(result, _KEY_IC_DISTRIBUTION)
 
     ic_mean = ic_metrics.get(_KEY_IC_MEAN)
     ic_std = ic_metrics.get(_KEY_IC_STD)
