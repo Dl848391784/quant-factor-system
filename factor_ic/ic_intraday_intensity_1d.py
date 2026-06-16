@@ -89,8 +89,9 @@ def calculate_intraday_intensity(
         >>> result["intraday_intensity"].iloc[0]
         0.25
     """
-    # logger 参数命名遵循 MODULE.md 约束 77（避免遮蔽模块级 logger）
-    logger = logger_arg or logger
+    # 局部 logger 命名为 _logger，避免与模块级 logger 同名遮蔽
+    # （遵循 AGENTS.md 规则 #14：禁止用同名变量"伪装"作用域隔离）
+    _logger = logger_arg or logger
 
     # 1. 数据校验（遵循 MODULE.md v3.16 新因子数据校验规范）
     required_cols = ["open", "close", "high", "low"]
@@ -108,7 +109,7 @@ def calculate_intraday_intensity(
         valid_rows = factor_df[required_cols].dropna().shape[0]
         if valid_rows < 100:
             raise ValueError(f"数据校验失败：有效数据量不足\n期望 ≥ 100 行，实际 {valid_rows} 行\n请检查数据源质量")
-        logger.info("开始计算日内强度因子，有效数据行数: %s", valid_rows)
+        _logger.info("开始计算日内强度因子，有效数据行数: %s", valid_rows)
 
     # 4. 计算振幅（分母）
     amplitude = factor_df["high"] - factor_df["low"]
@@ -120,7 +121,7 @@ def calculate_intraday_intensity(
     zero_amplitude_mask = amplitude == 0
     zero_amplitude_count = int(zero_amplitude_mask.sum())  # type: ignore[union-attr]
     if zero_amplitude_count > 0:
-        logger.warning("发现 %s 条振幅为零的记录（High=Low），已设为 NaN", zero_amplitude_count)
+        _logger.warning("发现 %s 条振幅为零的记录（High=Low），已设为 NaN", zero_amplitude_count)
 
     intraday_intensity = intraday_intensity.where(amplitude > 0, np.nan)
 
@@ -129,7 +130,7 @@ def calculate_intraday_intensity(
 
     # 8. 统计计算结果
     valid_factor_count = factor_df["intraday_intensity"].notna().sum()
-    logger.info("日内强度因子计算完成，有效因子值 %s 条", valid_factor_count)
+    _logger.info("日内强度因子计算完成，有效因子值 %s 条", valid_factor_count)
 
     return factor_df
 
