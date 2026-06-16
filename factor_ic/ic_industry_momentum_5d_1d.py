@@ -180,8 +180,8 @@ if __name__ == "__main__":
     #     看不到根因列名）。
     #   * H12 R17/R18/R19 退出码档把这三类异常定级为"业务失败立即响应"，与
     #     CRITICAL 级别可观测性诉求一致 → 必须保留完整异常链 traceback。
-    #   * PROJECT.md 规则 #13 禁止 exc_info=True，因此使用 logger.exception 自动
-    #     附加堆栈与异常链，是唯一合规方案。
+    #   * 选用 logger.exception 的理由：自动附加完整异常链 traceback（含 __cause__
+    #     链上的原始异常），message 字段独立写错误摘要，二者互补。
     # - 未预期 Exception：logger.exception（保持不变，定位 bug 必需）。
     try:
         main(parse_args())
