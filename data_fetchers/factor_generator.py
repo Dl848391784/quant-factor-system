@@ -773,12 +773,11 @@ def _format_and_write_output(
     factor_df: pd.DataFrame,
     output_path: Path,
     start_time: datetime,
-    factor_data_path: Path,
-    turnover_data_path: Path,
-    return_data_path: Path,
     logger: logging.Logger,
 ) -> dict[str, Any]:
     """Step 12~15：格式化输出 + 保存 + 返回元数据。
+
+    input_sources 由调用方 generate_all_factors 写入 metadata。
 
     Raises:
         KeyError: 必需输出列不存在。
@@ -903,7 +902,7 @@ def generate_all_factors(
 
     # Step 12~15：格式化 + 输出 + 元数据
     metadata = _format_and_write_output(
-        factor_df, output_path, start_time, factor_data_path, turnover_data_path, return_data_path, logger
+        factor_df, output_path, start_time, logger
     )
 
     # 补充 valid_counts 相关元数据
