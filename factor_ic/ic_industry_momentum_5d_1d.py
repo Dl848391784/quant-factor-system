@@ -185,11 +185,12 @@ if __name__ == "__main__":
     # - 未预期 Exception：logger.exception（保持不变，定位 bug 必需）。
     try:
         main(parse_args())
-    except DataSchemaError:
-        logger.exception("行业5日动量因子IC计算失败 (数据列依赖不匹配)")
+    except DataSchemaError as e:
+        # message 字段独立可读 + logger.exception 自动附加堆栈与异常链。
+        logger.exception("行业5日动量因子IC计算失败 (数据列依赖不匹配): %s", e)
         sys.exit(4)  # H12 R18: schema 失败 → 检查上游数据
-    except FactorCalcError:
-        logger.exception("行业5日动量因子IC计算失败")
+    except FactorCalcError as e:
+        logger.exception("行业5日动量因子IC计算失败: %s", e)
         sys.exit(5)  # H12 R19: 因子计算失败 → 检查计算代码
     except SummaryLogError as e:
         # 不用 logger.exception：原始异常类型已由 main() 内 logger.warning 单独落盘，
