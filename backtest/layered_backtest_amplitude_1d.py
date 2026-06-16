@@ -11,13 +11,11 @@
 为基类 LayerConfigBase 通用职责，详见基类 docstring。
 """
 
-import sys
 from collections.abc import Sequence
 from typing import ClassVar
 
 from backtest.common.factor_cli import factor_cli_main
 from backtest.common.layered_backtest_runner import LayerConfigBase
-from backtest.common.logger_config import get_logger
 from data_fetchers.factor_calculator import calculate_amplitude
 
 
@@ -41,16 +39,4 @@ class AmplitudeLayerConfig(LayerConfigBase):
 
 
 if __name__ == "__main__":
-    # 最外层兜底：factor_cli_main 内部已收敛业务异常并以 ExitCode 退出。
-    # 此处仅保护 SystemExit 之外的"启动期/未预期异常"（如 import 期失败、
-    # 配置类构造抛出未被 CLI 捕获的异常），保证 CI/调度系统能拿到非 0 退出码。
-    _logger = get_logger("amplitude")
-    _logger.debug("启动参数 argv=%s", sys.argv)
-    try:
-        factor_cli_main(config_cls=AmplitudeLayerConfig, factor_calculator=calculate_amplitude)
-    except SystemExit:
-        # factor_cli_main 通过 sys.exit(ExitCode.*) 主动退出，透传码值
-        raise
-    except Exception:
-        _logger.exception("amplitude 因子分层回测启动期未预期异常")
-        sys.exit(1)
+    factor_cli_main(config_cls=AmplitudeLayerConfig, factor_calculator=calculate_amplitude)
