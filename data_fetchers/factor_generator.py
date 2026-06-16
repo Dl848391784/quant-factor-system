@@ -527,21 +527,10 @@ def _run_pipeline_step(
 
 
 def _drop_industry_column(factor_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    删除 industry 临时列（D 步表驱动重构辅助）
+    """删除 industry 临时列（不属于 _OUTPUT_COLS，metadata/输出前清理）。
 
-    industry 列由 step 11.7/11.8/11.9 的因子函数添加用于行业聚合赋值，
-    不属于 _OUTPUT_COLS，必须在 metadata/输出前清理。
-
-    Args:
-        factor_df: 已完成 step 11.9 的 DataFrame
-
-    Returns:
-        删除 industry 列后的 DataFrame（若不存在则原样返回）
-
-    Note:
-        - 与原代码（行 ~870）字符级等价
-        - if 守卫存在因为：方案A/B/C 因子被禁用时 industry 可能不存在
+    industry 列由 step 11.7~11.9 的行业因子函数添加用于行业聚合赋值。
+    if 守卫：方案 A/B/C 因子被禁用时 industry 可能不存在。
     """
     if "industry" in factor_df.columns:
         factor_df = factor_df.drop(columns=["industry"])
@@ -553,28 +542,23 @@ def _load_json_gz_data(
     dataset_label: str,
     logger: logging.Logger,
 ) -> list[dict[str, Any]]:
-    """加载 gzip 压缩的 JSON 数据文件并提取 'data' 字段。
-
-    统一封装 Step 1/2/3 的加载逻辑：gzip 解压 + JSON 解析 + 'data' 字段校验。
-    异常类型 / 消息格式与重构前字符级一致。
+    """加载 gzip 压缩的 JSON 文件并提取 'data' 字段（封装 Step 1/2/3 的加载逻辑）。
 
     Args:
-        path: 数据文件路径
-        dataset_label: 数据集中文标签（用于错误消息），例 "基础因子" / "换手率" / "收益"
-        logger: 日志器（gzip / JSON 解析失败时记录 error 日志）
+        path: 数据文件路径。
+        dataset_label: 中文标签（错误消息用），如 "基础因子" / "换手率" / "收益"。
+        logger: 日志器，gzip / JSON 解析失败时记录 error。
 
     Returns:
-        records: list[dict]，对应 JSON 文件 "data" 字段值
+        list[dict]，对应 JSON 文件 "data" 字段值。
 
     Raises:
-        FileNotFoundError: 文件不存在
-        ValueError: gzip 损坏 / JSON 解析失败 / 缺少 'data' 字段
+        FileNotFoundError: 文件不存在。
+        ValueError: gzip 损坏 / JSON 解析失败 / 缺少 'data' 字段。
 
     Note:
-        - 日志策略：gzip.BadGzipFile 与 json.JSONDecodeError 同为解析失败，
-          统一在 except 块内打 logger.error 后再 raise，便于运维定位故障来源。
-        - 内存安全：JSONDecodeError 仅引用 path / lineno / colno / msg 等小字段，
-          不引用 e.doc（可能持有整个 JSON 文本副本）。
+        内存安全：JSONDecodeError 仅引用 path/lineno/colno/msg，不引用 e.doc
+        （e.doc 可能持有整个 JSON 文本副本，导致内存翻倍）。
     """
     try:
         with gzip.open(path, "rt", encoding="utf-8") as f:
@@ -599,15 +583,11 @@ def _load_json_gz_data(
 def _nan_to_null(obj: Any) -> Any:
     """递归将 float NaN/inf/-inf 转 None，确保 JSON 严格合规。
 
-    json.dump 默认把 float NaN 输出为 "NaN"（非法 JSON 值）；
+    json.dump 默认把 float NaN 输出为 "NaN"（非法 JSON）；
     pandas to_dict('records') 把 NaN 输出为 float('nan') 而非 None。
-    唯一可靠方案：遍历每条记录，NaN/inf → None → JSON 输出为 null。
+    唯一可靠方案：遍历每条记录，NaN/inf → None → JSON 输出 null。
 
-    类型兼容：
-    - Python float：直接命中 isinstance(obj, float)
-    - numpy.float64：在 64 位系统上是 float 子类（也命中第一支）
-    - numpy.float32 / numpy.float16：不是 float 子类，需 np.floating 兜底
-    - bool：不是 float 子类，不会误判
+    类型兼容：numpy.float32/float16 不是 float 子类，需 np.floating 兜底。
     """
     if isinstance(obj, (float, np.floating)) and (math.isnan(obj) or math.isinf(obj)):
         return None
