@@ -2,7 +2,8 @@
 
 > 作者：云瑶
 > 创建日期：2026-06-16
-> 状态：已审核（2026-06-16 用户确认 A / 2 / Q3=是）
+> 状态：✅ R4-R7b 完成（2026-06-16 切方案 B + H12/H13 升级硬规则）
+> 历史状态：已审核（2026-06-16 用户确认 A / 2 / Q3=是）→ R3 收口后用户改方案 B
 > 关联规范：AGENTS.md §0 Design-First / 规则 #12；factor_ic/MODULE.md M19-M23（异常与错误）；
 > 关联范例：`factor_ic/ic_industry_amplitude_trend_1d.py`（同类清理已落地）；
 > 关联 skill：dead-code-and-observability-fixes 模式 E（防御 `is None` 兜底面对永不返回 None 的函数）
@@ -245,4 +246,41 @@ R1-R3 已落地方案 A（保留 `if result is None` 死分支作为防御性守
 - ❌ 不应删：callee 文档不明确返回值是否可能为 None / callee 是 third-party 库（契约可能变化）
 - ❌ 不应删：业务上可能进入但当前测试未覆盖的分支（这是测试覆盖问题，不是死代码）
 - 判定方法：必须能给出 callee 的具体行号证据（如 factor_ic_runner.py L442 返回 dict / L461 raise），否则按"不应删"处理
+
+---
+
+## 10. R4-R7b 落地结果（2026-06-16 闭环）
+
+### 10.1 commit 链
+
+| 轮次 | commit | 范围 | 行数 |
+|---|---|---|---|
+| R4 | `3320601` | earnings_growth 切方案 B + design.md §9 落地 | 82+/12- |
+| R5 | `ee3baee` | momentum_5d 切方案 B | 21+/12- |
+| R6 | `0075237` | turnover_trend 切方案 B | 21+/12- |
+| R7a | `68474b0` | S1→H12 退出码硬规则 + design.md §9.5/§9.6 | 27+/6- |
+| R7b | `b26a51b` | 新增 H13 死代码禁止硬规则 | 2+/0- |
+
+### 10.2 验证结果
+
+- ruff check / format：3 个目标文件 + 2 个规范文件全部通过
+- pytest：earnings_growth 6 passed/5 skipped；spec_consistency 2 passed；factor_spec 12 passed
+- SPEC 注册：3 个文件 import 验证通过（`industry_earnings_growth` / `industry_momentum_5d` / `industry_turnover_trend`）
+- 隔离性：每个 commit 显式路径，无其他 agent staged 文件被误带入（multi-agent-commit-isolation 遵循）
+
+### 10.3 用户原始 5 项需求的最终落地状态
+
+| 需求 | R1-R3（方案 A，已被 R4-R6 推翻） | R4-R6（方案 B，最终状态） |
+|---|---|---|
+| #1 result is None 借道异常 | logger.error + sys.exit(1) 保留分支 | **整块删除** |
+| #2 main() return result | 已删 | 已删（沿用 R1） |
+| #3 冗余"计算完成" logger | 已删 | 已删（沿用 R1） |
+| #4 注释边界模糊 | 改为"None 检查由 main 提前退出" | 改为"run_factor_ic 永不返回 None + log_factor_summary 透明性审阅" |
+| #5 SPEC 注册 import-time 失败 | try/except → sys.exit(2) | 保留 R3 实现（不属于死代码） |
+
+### 10.4 后续待办（不在本轮 scope）
+
+- R7c：补 H12 / H13 正反例段落（参考 PROJECT.md H11 L189-240 模板：正反例 + Why + Verify + 当前覆盖范围）
+- R8：`scripts/check_exit_codes.py` 与 `scripts/check_dead_branches.py` 自动化检查脚本（H12 / H13 当前为人工 review，工具落地后可去掉 [待实施] 标记）
+- 路线图表 L321 的 H11（必测场景）与硬规则表 L163 的 H11（日志格式）编号冲突 —— 历史遗留问题，本次未引入也未修复，应另开 design.md 处理
 
