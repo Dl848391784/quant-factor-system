@@ -26,20 +26,27 @@
 作者: 云瑶
 创建日期: 2026-06-12
 版本历史:
-  v1.0 (2026-06-12): 初始版本，复用 factor_calculator.calculate_capital_flow_ratio_trend
-  v1.1 (2026-06-15): 强化结果校验、差异化 warning 提示、启动日志带版本号、摘要逐行输出
-  v1.2 (2026-06-15): 补 ic_metrics 类型守卫、valid_days 缺失语义化、耗时记录、保留 FactorCalcError 异常链堆栈
-  v1.3 (2026-06-15): _safe_dict 提到模块级纯函数、补 NaN/Inf 守卫、异常告警分级（ERROR vs CRITICAL）
-  v1.4 (2026-06-15): _safe_dict/_format_finite/DEFAULT_MIN_STOCKS 抽取至 factor_ic.common.cli_helpers，
-                     公共 API 命名去下划线前缀（safe_dict/format_finite），消除跨脚本重复实现
-  v1.5 (2026-06-15): warning 判定改用 is_finite_value 谓词（解耦表示层 "N/A" 字符串）；
-                     positive_ratio 加 [0,1] 量纲范围校验；FactorCalcError 迁至 factor_ic.common.exceptions
-  v1.6 (2026-06-15): 6项修复：①logger.exception→logger.error+exc_info=True消除语义重复；
-                     ②四重校验简化为None+assert（信任公共模块契约）；
-                     ③required_columns移除因子输出列capital_flow_ratio_trend；
-                     ④start_time移至parse_args前覆盖参数解析；
-                     ⑤valid_days改用is_finite_value判定+warning替代"N/A"fallback；
-                     ⑥辅助字段加存在性日志区分"字段不存在"与"值为None"
+  v1.0.0 (2026-06-12): 初始版本，复用 factor_calculator.calculate_capital_flow_ratio_trend
+  v1.1.0 (2026-06-15): 强化结果校验、差异化 warning 提示、启动日志带版本号、摘要逐行输出
+  v1.2.0 (2026-06-15): 补 ic_metrics 类型守卫、valid_days 缺失语义化、耗时记录、保留 FactorCalcError 异常链堆栈
+  v1.3.0 (2026-06-15): _safe_dict 提到模块级纯函数、补 NaN/Inf 守卫、异常告警分级（ERROR vs CRITICAL）
+  v1.4.0 (2026-06-15): _safe_dict/_format_finite/DEFAULT_MIN_STOCKS 抽取至 factor_ic.common.cli_helpers，
+                       公共 API 命名去下划线前缀（safe_dict/format_finite），消除跨脚本重复实现
+  v1.5.0 (2026-06-15): warning 判定改用 is_finite_value 谓词（解耦表示层 "N/A" 字符串）；
+                       positive_ratio 加 [0,1] 量纲范围校验；FactorCalcError 迁至 factor_ic.common.exceptions
+  v1.6.0 (2026-06-15): 6项修复：①logger.exception→logger.error+exc_info=True消除语义重复；
+                       ②四重校验简化为None+assert（信任公共模块契约）；
+                       ③required_columns移除因子输出列capital_flow_ratio_trend；
+                       ④start_time移至parse_args前覆盖参数解析；
+                       ⑤valid_days改用is_finite_value判定+warning替代"N/A"fallback；
+                       ⑥辅助字段加存在性日志区分"字段不存在"与"值为None"
+  v1.7.0 (2026-06-16): 6项防御性修复：①三处 assert 替换为 if-not-raise FactorCalcError，
+                       避免 -O 模式下契约校验静默失效；②变量 ic_distribution 重命名为
+                       ic_distribution_consistency 与字段名/日志名统一；③去除 positive_ratio
+                       注释中的硬编码行号 ic_calculator:722，改为契约语义描述；④__main__
+                       的 ERROR/CRITICAL 日志补充 factor_name 上下文方便排查；⑤valid_days
+                       无效时仅保留 warning，避免与 info 重复输出 N/A；⑥版本历史行格式
+                       与 __version__ 三段式语义化版本对齐（vX.Y.Z）
 """
 
 import argparse
@@ -66,7 +73,7 @@ from factor_ic.common.logger_config import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
-__version__ = "1.6.0"
+__version__ = "1.7.0"
 
 # ============================================================================
 # FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
@@ -108,18 +115,24 @@ def main():
         _logger=logger,
     )
 
-    # 结果校验：仅保留 None 判断（公共模块 run_factor_ic 契约保证返回 dict 且含 ic_metrics），
-    # 其余结构约束由公共模块自身校验，避免维护两套契约。
+    # 结果校验：显式 if-not-raise FactorCalcError（不用 assert，因为 Python 以 -O
+    # 优化模式运行时 assert 语句会被整体跳过，导致类型/结构异常无法被捕获并直接向
+    # 下游传播——本因子作为 pipeline 节点必须在所有运行模式下保持契约校验。
+    # 公共模块 run_factor_ic 契约保证返回 dict 且含 ic_metrics，但跨版本/跨实现时
+    # 仍需边界守卫（depend-on-contract 而非 trust-blindly）。
     if result is None:
         raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
-    assert isinstance(result, dict), f"run_factor_ic 返回类型异常: 期望 dict，实际 {type(result).__name__}"
-    assert "ic_metrics" in result, f"run_factor_ic 返回结构不完整: 缺少 'ic_metrics' 字段，实际键={list(result.keys())}"
-    assert isinstance(result["ic_metrics"], dict), (
-        f"run_factor_ic 返回结构异常: 'ic_metrics' 期望 dict，实际 {type(result['ic_metrics']).__name__}"
-    )
+    if not isinstance(result, dict):
+        raise FactorCalcError(f"run_factor_ic 返回类型异常: 期望 dict，实际 {type(result).__name__}")
+    if "ic_metrics" not in result:
+        raise FactorCalcError(f"run_factor_ic 返回结构不完整: 缺少 'ic_metrics' 字段，实际键={list(result.keys())}")
+    if not isinstance(result["ic_metrics"], dict):
+        raise FactorCalcError(
+            f"run_factor_ic 返回结构异常: 'ic_metrics' 期望 dict，实际 {type(result['ic_metrics']).__name__}"
+        )
     ic_metrics: dict = result["ic_metrics"]
 
-    # 辅助字段（sample_stats/period/ic_distribution）允许缺失或为 None，软 fallback 为空 dict。
+    # 辅助字段（sample_stats/period/ic_distribution_consistency）允许缺失或为 None，软 fallback 为空 dict。
     # 调用 factor_ic.common.cli_helpers.safe_dict 公共 API，便于跨脚本复用与独立单测。
     # 字段存在性日志：区分"公共模块未返回该字段"与"字段值为 None"，避免字段改名后静默丢失。
     if "sample_stats" not in result:
@@ -132,7 +145,7 @@ def main():
 
     sample_stats = safe_dict(result.get("sample_stats"), field_name="sample_stats", logger=logger)
     period = safe_dict(result.get("period"), field_name="period", logger=logger)
-    ic_distribution = safe_dict(
+    ic_distribution_consistency = safe_dict(
         result.get("ic_distribution_consistency"),
         field_name="ic_distribution_consistency",
         logger=logger,
@@ -141,14 +154,16 @@ def main():
     ic_mean = ic_metrics.get("ic_mean")
     ic_std = ic_metrics.get("ic_std")
     icir = ic_metrics.get("icir")
-    positive_ratio = ic_distribution.get("positive_ratio")
+    positive_ratio = ic_distribution_consistency.get("positive_ratio")
 
-    # positive_ratio 量纲约定（来源: factor_ic.common.ic_calculator:722
-    # `positive_ratio = positive_count / n`）：必须为 [0, 1] 之间的小数。
-    # 此处作防御性范围校验：若公共模块契约变更（误返回 0–100 整数百分比），
-    # `.2%` 格式化结果会变成 "5230.00%" 等明显错误值且无任何告警。
-    # 落在 [0, 1] 之外时降级为 None，让下方 format_finite/is_finite_value 链
-    # 触发统一的"无效"warning，避免静默错误。
+    # positive_ratio 量纲约定（契约语义：factor_ic.common.ic_calculator 内部以
+    # `positive_ratio = positive_count / n` 形式定义，n 为有效 IC 截面数）：
+    # 必须为 [0, 1] 之间的小数。此处作防御性范围校验：若公共模块契约变更
+    # （误返回 0–100 整数百分比），`.2%` 格式化结果会变成 "5230.00%" 等明显错误值
+    # 且无任何告警。落在 [0, 1] 之外时降级为 None，让下方 format_finite/is_finite_value
+    # 链触发统一的"无效"warning，避免静默错误。
+    # 注：故意不引用源码行号，行号会随代码演进失效成为误导性硬编码文档；契约是
+    # "比例=正向计数/总数 ∈ [0,1]"，这一语义稳定，行号不稳定。
     if is_finite_value(positive_ratio) and not (0.0 <= positive_ratio <= 1.0):
         logger.warning(
             "positive_ratio=%s 超出预期范围 [0, 1]，可能是公共模块返回量纲变更（应为 0–1 小数）；本次摘要按 'N/A' 处理",
@@ -173,10 +188,15 @@ def main():
     logger.info("日期范围: %s ~ %s", period.get("start", "N/A"), period.get("end", "N/A"))
     # valid_days 使用 is_finite_value 判定，与其他字段保持一致的语义化缺失检测，
     # 避免字符串 fallback "N/A" 使缺失检测形同虚设。
+    # 输出策略二选一（不重复输出）：
+    # - 无效时：仅打 warning，附带 "无效"原因，不再重复输出 N/A info 行（避免结构化
+    #   日志系统中两条描述同一字段的记录污染告警）。
+    # - 有效时：仅打 info "有效天数: <值> 天"，正常摘要行。
     _valid_days = sample_stats.get("valid_days")
     if not is_finite_value(_valid_days):
-        logger.warning("有效天数缺失或无效（None/NaN/Inf），请检查 sample_stats 数据完整性")
-    logger.info("有效天数: %s 天", format_finite(_valid_days, ".0f"))
+        logger.warning("有效天数缺失或无效（None/NaN/Inf）：摘要中略过该字段，请检查 sample_stats 数据完整性")
+    else:
+        logger.info("有效天数: %s 天", format_finite(_valid_days, ".0f"))
     logger.info("--- IC指标 ---")
     logger.info("IC 均值: %s", ic_mean_str)
     logger.info("IC 标准差: %s", ic_std_str)
@@ -211,10 +231,23 @@ if __name__ == "__main__":
         # 业务预期异常（数据缺失/结构异常）：用 logger.error + exc_info=True 保留 cause 链
         # （__cause__ / __context__）但级别 ERROR，便于运维监控按场景配置告警阈值，
         # 与下方 CRITICAL 的程序 bug 噪声等级区分。
-        logger.error("资金流占比趋势因子IC计算失败（业务异常）", exc_info=True)  # noqa: G201
+        # 日志附带 factor_name + version：运维从聚合日志能直接定位是哪个因子、哪个版本失败，
+        # 避免在多因子 pipeline 并发跑时出现"某个因子挂了但不知道是哪个"的盲区。
+        logger.error(  # noqa: G201
+            "因子IC计算失败（业务异常）: factor_name=%s, version=%s",
+            SPEC.factor_name,
+            __version__,
+            exc_info=True,
+        )
         sys.exit(1)
     except Exception:
         # 未预期异常（程序 bug / 外部依赖崩溃）：用 logger.critical 升级告警级别。
         # 注：未与 FactorCalcError 合并，因二者告警分级不同（ERROR vs CRITICAL）。
-        logger.critical("资金流占比趋势因子IC计算遇到未预期错误", exc_info=True)
+        # 同样附带 factor_name + version 上下文，便于线上排查。
+        logger.critical(
+            "因子IC计算遇到未预期错误: factor_name=%s, version=%s",
+            SPEC.factor_name,
+            __version__,
+            exc_info=True,
+        )
         sys.exit(1)
