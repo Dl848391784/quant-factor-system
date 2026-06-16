@@ -91,11 +91,9 @@ def _log_summary(result: dict) -> None:
       3. 打印结果摘要 INFO 日志。
 
     参数:
-        result: run_factor_ic 返回的结果字典（结构由 ic_result_builder.build_ic_result 定义）。
-
-    设计说明:
-        本函数仅负责"展示"，不做任何业务决策、不抛业务异常；result 为 None 的判断
-        由调用方 main() 在执行流程编排阶段完成。
+        result: run_factor_ic 返回的非空结果字典（结构由
+            ic_result_builder.build_ic_result 定义）。类型契约由调用方保证，
+            本函数信任入参类型——None 校验属流程控制，归 main()。
     """
     ic_metrics = _safe_dict(result, _KEY_IC_METRICS)
     sample_stats = _safe_dict(result, _KEY_SAMPLE_STATS)
