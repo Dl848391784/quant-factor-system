@@ -122,23 +122,16 @@ def main(args: argparse.Namespace) -> dict:
     # 永不返回 None；冗余的 result is None 兜底掩盖真实错误来源（违反 dead-code skill
     # 模式 E：防御 is None 兜底面对永不返回 None 的函数），已彻底移除。
     #
-    # 关于 try/except 的存在性裁决（issue 1）：
-    # log_factor_summary 的 docstring 声明该函数"不抛异常、不调用 sys.exit、不影响
-    # 调用方控制流"，按字面契约本 try 块永远不会触发。但 SummaryLogError 的设计意图
-    # 是**防御性兜底**（exceptions.py SummaryLogError docstring 显式声明"一旦未来回归
-    # 打破契约可立即定位"），因此本块**有意保留**，并修正两处可观测性问题：
-    #   1) 移除注释中"契约保证不抛"的强断言措辞——契约可能被回归打破，注释不应给阅
-    #      读者"该分支是死代码"的误导。
-    #   2) except 中先用 logger.warning 落盘原始异常类型（type(e).__name__），让排查
-    #      时可分辨"摘要层内部哪一类故障"（如 KeyError vs IOError vs disk full），
-    #      避免被 SummaryLogError 一刀切包装后丢失原始类型信息（仅靠 __cause__ 链
-    #      在某些日志聚合环境下不易直读）。
+    # try/except 防御性兜底（issue 1 立场统一）：
+    # log_factor_summary 当前实现按设计意图不抛异常，但 SummaryLogError 作为防御层
+    # 需在未来契约被回归打破时立即定位故障。except 中先 logger.warning 落盘原始异常
+    # 类型（type(e).__name__）以分辨摘要层内部故障类别（KeyError vs IOError vs disk
+    # full），再 raise SummaryLogError 让 __main__ 走 exit 3 分支。
     #
     # 错误来源区分（按异常类型映射退出码，详见 __main__ 块）：
     # - SummaryLogError → exit 3（主结果产物可用，仅 sidecar 待修）
     # - DataSchemaError → exit 4 / FactorCalcError → exit 5 / Exception → exit 1
-    # main() 不再 sys.exit：保证 main 可被 pytest 直接调用（不杀宿主进程），
-    # 退出码语义集中维护在 __main__ 块。
+    # main() 不再 sys.exit：保证 main 可被 pytest 直接调用（不杀宿主进程）。
     # raise ... from e 保留原始异常 traceback（H6 异常链铁律）。
     try:
         log_factor_summary(result, "行业5日动量因子", logger)
