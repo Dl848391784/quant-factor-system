@@ -25,6 +25,7 @@ import argparse
 import gzip
 import json
 import logging
+import math
 import os
 import sys
 from datetime import datetime
@@ -466,7 +467,7 @@ def _calc_pct(count: int, total: int) -> float:
         total: 总记录数（分母），支持 int 或兼容类型
 
     Returns:
-        float: 百分比（0.0-100.0），空数据时返回 0.0
+        float: 百分比（0.0-100.0），空数据/非有限值时返回 0.0
 
     Example:
         >>> _calc_pct(80, 100)  # 有效记录百分比
@@ -481,10 +482,15 @@ def _calc_pct(count: int, total: int) -> float:
         - 参数语义由调用方决定（count 是分子，total 是分母）
         - 类型注解为 int，但实际接受 int、numpy.int64、float 等兼容类型
         - Python 运行时不强制类型检查，注解仅为静态分析提供参考
+        - 非有限值（NaN / ±inf）保护：total 或结果为非有限值时返回 0.0，
+          避免 inf 输入伪装成空数据（count/inf*100=0.0）或返回 inf
     """
-    if total <= 0:
+    if not math.isfinite(total) or total <= 0:
         return 0.0
-    return round(count / total * 100, 2)
+    result = count / total * 100
+    if not math.isfinite(result):
+        return 0.0
+    return round(result, 2)
 
 
 def _run_pipeline_step(
