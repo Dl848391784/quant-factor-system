@@ -78,14 +78,18 @@ def main():
         _logger=logger,
     )
 
-    # 输出 IC 摘要（公共模块,M3.1）
-    # 注：run_factor_ic 失败路径走 build_error_result（返回 dict）或抛 DataSchemaError，
-    # 永不返回 None；冗余的 result is None 兜底掩盖真实错误来源（违反 dead-code skill
-    # 模式 E：防御 is None 兜底面对永不返回 None 的函数），已彻底移除。
-    # log_factor_summary 自身契约（factor_summary_logger.py L40-44）：不抛异常、不调用
-    # sys.exit、不影响调用方控制流；其内部对 dict 字段为 None 的异常情况输出整合告警
-    # （L83-92），无需调用方额外守卫。
-    log_factor_summary(result, "行业换手率趋势因子", logger)
+    # 包裹 log_factor_summary：摘要层失败 → sys.exit(3) 显式辅助层失败信号
+    # （PROJECT.md H12 R17）。因子计算 result 已成功生成，主结果产物可用，下游
+    # backtest/comprehensive/summary 可正常消费；仅旁路日志摘要失败时返回 exit 3，
+    # 与业务失败（exit 1）和 import-time 注册失败（exit 2）严格区分。
+    try:
+        log_factor_summary(result, "行业换手率趋势因子", logger)
+    except Exception:
+        logger.exception(
+            "log_factor_summary 摘要输出阶段失败（因子计算 result 已成功生成；"
+            "故障源 = 摘要日志层而非 run_factor_ic 业务路径）"
+        )
+        sys.exit(3)  # H12 R17：辅助层失败专用退出码
 
 
 if __name__ == "__main__":
