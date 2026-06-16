@@ -157,13 +157,21 @@ def main(args: argparse.Namespace) -> dict:
 
 
 if __name__ == "__main__":
-    # 异常分支顺序依据（exceptions.py L27/L46/SummaryLogError 已确认）：
+    # ⚠️ 契约耦合提示（issue 3）：
+    # 本 except 链精确对应 run_factor_ic / log_factor_summary 当前的异常契约。
+    # 若公共模块（factor_ic_runner / factor_summary_logger / exceptions）新增或调整
+    # 异常类型 —— 例如 run_factor_ic 未来引入 DataLoadError / IncrementalSyncError ——
+    # 必须同步更新本捕获链（新增对应 except 分支 + 退出码映射），否则新异常会落入
+    # 通用 except Exception 兜底分支以 exit 1 上报，导致退出码语义失准（业务失败被
+    # 误判为程序 bug，调度器告警分流路径错误）。
+    # 对应规范：PROJECT.md 跨模块数据契约同步条款（修改公共模块异常契约时需同步消费方）。
+    # 退出码映射统一约束：本块 exit 1/3/4/5 与下表保持一致，未来若新增异常 → 新增退出码档。
+    #
+    # 异常分支顺序依据：
     # - DataSchemaError(Exception) / FactorCalcError(Exception) / SummaryLogError(Exception)
-    #   均直接继承 Exception，三者是【平级关系，无父子继承】（exceptions.py L60 注释也明确
-    #   "与 FactorCalcError 并列"）。
-    # - 因此三者的捕获顺序在异常匹配上等价，无主次之分。
+    #   均直接继承 Exception，三者是【平级关系，无父子继承】；捕获顺序在异常匹配上等价。
     # - 当前顺序为可读性约定（按错误来源远近排序：schema 失败发生在数据加载阶段（最早），
-    #   因子计算失败发生在加载之后，摘要日志失败发生在主流程末尾），未来调整顺序不会改变捕获语义。
+    #   因子计算失败发生在加载之后，摘要日志失败发生在主流程末尾）。
     # - 通用 Exception 必须放最后，作为非业务异常的兜底（程序 bug → CRITICAL 告警语义）。
     # 退出码档（PROJECT.md H12 R17/R18/R19）：
     # - exit 4 (R18) → 上游数据 / 列契约排查路径（DataSchemaError）
