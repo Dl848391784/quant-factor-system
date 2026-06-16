@@ -7,121 +7,16 @@
 Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
 
 使用前提：
-- 运行前需将 project_root 加入 PYTHONPATH，或以项目根目录为工作目录执行
-- 否则 else 分支的 factor_ic 绝对导入会触发 ModuleNotFoundError
+- 包内导入优先（from .common / .factor_calculator）
+- 脚本直接运行时（python data_fetchers/factor_generator.py）走 except ImportError 分支，
+  自动注入 project_root 到 sys.path 后改用绝对导入，无需手动设置 PYTHONPATH
 
 遵循 PROJECT.md 规范：
 - 输出到 data_fetchers/result/
 - 复用公共模块计算函数（遵循强制复用规范）
 - 公共模块接收 logger 参数（遵循 PROJECT.md 公共模块日志规范）
 
-版本历史：
-- v1.0 (2026-05-24): 初始版本，支持 bollinger_pb、kdj_j、turnover_surge 因子
-- v1.1 (2026-05-25): logger 参数化 + __all__ 导出 + 类型注解精确化 + 异常处理补全
-- v1.2 (2026-05-25): 清理冗余导入/常量 + os 导入规范化 + 数据验证补全 + CLI 参数补全 + 运行耗时统计
-- v1.3 (2026-05-25): 常量命名私有化（DEFAULT_CACHE_DIR → _DEFAULT_CACHE_DIR）+ 导入顺序 PEP 8 合规化（argparse 为 CLI 入口特有导入，保留函数内导入）
-- v1.4 (2026-05-25): 流程文档创建 + 测试用例创建 + output_cols 注释补全（索引含义）+ valid_records_percent 字段补全
-- v1.5 (2026-05-25): 条件导入合并简化（移除 __main__ 重复 sys.path.insert）+ 异常处理精确化（OSError 涵盖 PermissionError）+ metadata 字段注释补全
-- v1.6 (2026-05-25): JSONDecodeError 内存优化（提取 lineno/colno/msg）+ CLI 入口返回退出码 + __main__ 测试补全 valid_records_percent + 条件导入合并简化（CLI 入口块）
-- v1.7 (2026-05-25): docstring RuntimeError 补全 + main() 返回类型注解（-> int）
-- v1.8 (2026-05-25): gzip.BadGzipFile 异常处理补全（gzip 文件损坏）
-- v1.9 (2026-05-25): 冗余导入清理（移除条件导入块的 _Path）
-- v1.10 (2026-05-25): 导入冗余清理（合并 gzip 导入、移除 main() 函数内冗余 logging 导入）
-- v1.11 (2026-05-25): Bug修复（条件导入合并到顶部、__main__循环导入修复、PermissionError重复捕获简化、temp_path后缀处理修复）
-- v1.12 (2026-05-25): Bug修复（output_cols注释修正OHLCV顺序、dates排序补充注释、total_records除零保护、版本历史移除硬编码行号、argparse版本描述修正）+ MODULE.md日志换行符规范补充（错误日志允许多行格式化）
-- v1.13 (2026-05-25): Bug修复（缩进错误修正Step8注释、numpy.int64类型转换JSON兼容、__main__块改为CLI入口调用main()、测试代码移至test_cases/test_factor_generator.py）
-- v1.14 (2026-05-25): Bug修复（除零保护统一使用_calc_pct模块级函数、_EXTENDED_FACTOR_COLS常量替代硬编码切片、docstring补充空数据异常声明、turnover_missing显式int转换）
-- v1.15 (2026-05-25): Bug修复（docstring移除JSONDecodeError声明、temp_path.unlink改用missing_ok=True消除TOCTOU竞争窗口）
-- v1.16 (2026-05-25): 代码结构优化（_BASE_COLS+_OUTPUT_COLS常量统一output_cols引用关系、__main__块移除sys重复导入、_calc_pct函数语义修正为通用百分比计算）
-- v1.17 (2026-05-25): Bug修复（output_path父目录不存在时创建、dates字段从output_df取数据来源更清晰、docstring示例值改为范围说明）
-- v1.18 (2026-05-25): Bug修复（版本历史描述修正v1.12日志换行符为规范补充而非修复、_EXTENDED_FACTOR_COLS返回副本防止外部修改）
-- v1.19 (2026-05-25): 代码结构优化（常量改为元组防止意外修改、docstring示例补充注释说明返回列表副本、factor_df显式释放内存）
-- v1.20 (2026-05-25): 代码结构优化（mkdir移入try块统一异常处理、_OUTPUT_COLS注释移到常量定义处、_calc_pct docstring补充示例、main()异常日志增加类型名）
-- v1.21 (2026-05-25): Bug修复（docstring Example格式修正：注释放在>>>行、返回值行无注释、增加isinstance示例）
-- v1.22 (2026-05-25): 代码结构优化（清理output_cols冗余别名、mkdir和temp_path职责分离、base_data/turnover_data内存释放、missing_cols错误信息改进）
-- v1.23 (2026-05-26): 代码结构优化（tuple类型注解改为tuple[str, ...]更精确表达字符串元组）
-- v1.24 (2026-05-26): Bug修复+代码结构优化（turnover_df内存释放、docstring Example标记非运行示例、元组转列表pandas兼容）
-- v1.25 (2026-05-26): Bug修复+文档修正（_calc_pct类型注解补充兼容类型说明、docstring Raises删除输入数据为空场景、兜底块错误信息补充异常详情）
-- v1.26 (2026-05-26): 规范合规修复（输出路径改为result目录，遵循MODULE.md约束#2：与factor_ic等模块保持一致）
-- v1.27 (2026-05-27): 4项修复——1) 条件导入else分支注释补充（说明factor_ic跨包必须用绝对导入）；2) Step编号修正（7→6、8→7、9→8）；3) sys移至顶层导入（PEP 8合规）；4) _DEFAULT_CACHE_DIR注释补充路径层级说明
-- v1.28 (2026-05-27): 4项修复——1) 模块docstring声明Python>=3.8（gzip.BadGzipFile）；2) output_df显式释放内存（与既有风格一致）；3) json.dump设置ensure_ascii=False（中文不转义）；4) argparse移至顶层导入（PEP 8合规）
-- v1.29 (2026-05-27): 5项修复——1) Step编号重排（2b→3，后续顺延4-9）；2) 使用前提说明补充（PYTHONPATH要求）；3) output_df提前释放（output_data构建后立即del）；4) gzip.open显式encoding='utf-8'（跨平台一致性）；5) JSONDecodeError捕获移除logger.error（行列信息合并到ValueError）
-- v1.30 (2026-05-27): 4项日志精确化修复：
-    1. Step 1/2/3 gzip.BadGzipFile 捕获块补充 logger.error（文件路径+异常原因）
-    2. Step 8 OSError/Exception 捕获块补充 logger.error（输出路径+异常类型+原因）
-    3. Step 8 mkdir OSError 捕获块补充 logger.error（目录路径+异常类型+原因）
-    4. main() 成功分支补充执行摘要日志（total_records、elapsed_seconds、output_path）
-- v1.31 (2026-05-27): 4项修复：
-    1. Step 1/2/3 gzip.open 读取补充 encoding='utf-8'（跨平台一致性，与写入对称）
-    2. 删除 main() finally 块（logger 共享风险，Python 进程退出自动清理）
-    3. Step 4/5/6 因子计算函数补充 logger_arg=logger（日志统一输出到调用方 logger）
-    4. 合并 _DEFAULT_CACHE_DIR/_DEFAULT_RESULT_DIR 为单一常量（消除虚假语义差异）
-- v1.32 (2026-05-27): 2项文档修复：
-    1. 模块 docstring 输出路径修正：cache/factor_data/ → data_fetchers/result/
-    2. generate_all_factors Note 修正：factor_ic → factor_calculator（与实际导入一致）
-- v1.33 (2026-06-02): 尾盘因子整合到统一数据源：
-    1. 新增 _EXTENDED_FACTOR_COLS: tail_price_position, tail_price_slope, tail_price_volume_intensity
-    2. 新增 _load_tail_trading_data() 函数加载尾盘5分钟K线数据
-    3. 新增 _calculate_tail_factors() 函数合并计算尾盘因子
-    4. 新增 Step 9 计算尾盘因子，Step 编号顺延至 10-12
-    5. 更新 metadata valid_records 包含所有因子统计
-    6. 遵循 PROJECT.md H1 规则：迁移函数而非跨模块导入
-- v1.34 (2026-06-03): 新增隔夜收益率因子（跳空幅度）：
-    1. 新增 overnight_ret 到 _EXTENDED_FACTOR_COLS
-    2. 新增 Step 9 计算 overnight_ret（调用 calculate_overnight_return）
-    3. Step 编号顺延：尾盘因子 Step 10，格式化 Step 11，保存 Step 12
-    4. 公式：(今日Open - 昨日Close) / 昨日Close（即跳空幅度）
-- v1.35 (2026-06-03): 新增尾盘量能加速度因子：
-    1. 新增 tail_volume_acceleration 到 _EXTENDED_FACTOR_COLS
-    2. 新增 _calc_tail_volume_acceleration() 函数（后半段/前半段成交量比）
-    3. 在 _calculate_tail_factors() 中添加 tail_volume_acceleration 计算
-    4. 公式：sum(volumes[7:13]) / sum(volumes[0:6])（后半段/前半段）
-    5. 遵循数据层架构原则：因子数据预计算存储到统一数据源
-- v1.36 (2026-06-03): 新增两个缺失因子：
-    1. 新增 intraday_intensity 到 _EXTENDED_FACTOR_COLS（日内价格强度）
-    2. 新增 tail_volume_shrink 到 _EXTENDED_FACTOR_COLS（尾盘缩量程度）
-    3. 新增 _calc_intraday_intensity() 函数（(close-open)/(high-low)）
-    4. 新增 _calc_tail_volume_shrink() 函数（尾盘成交量总和/全天成交量）
-    5. 在 generate_all_factors 中添加 Step 10 计算 intraday_intensity
-    6. 在 _calculate_tail_factors 中添加 tail_volume_shrink 计算
-    7. 更新 metadata valid_records 包含 intraday_intensity/tail_volume_acceleration/tail_volume_shrink
-    8. 遵循数据层架构原则：因子数据预计算存储到统一数据源
-- v1.37 (2026-06-04): 新增当日涨跌幅因子（遵循 PROJECT.md 因子开发规范）：
-    1. 新增 past_return_1d 到 _EXTENDED_FACTOR_COLS（当日涨跌幅）
-    2. 新增 Step 3.5 计算 past_return_1d（调用 calculate_past_return_1d）
-    3. 导入 calculate_past_return_1d 函数
-    4. 公式：close[t] / close[t-1] - 1（当日涨跌幅）
-    5. 遵循 PROJECT.md 规范：因子计算在 data_fetchers 完成，存储到统一数据源
-- v1.38 (2026-06-05): 新增动量强度因子（遵循 PROJECT.md 因子开发规范）：
-    1. 新增 return_5d 到 _EXTENDED_FACTOR_COLS（5日累计涨幅，momentum_strength 前置依赖）
-    2. 新增 momentum_strength 到 _EXTENDED_FACTOR_COLS（动量强度因子）
-    3. 导入 calculate_return_5d 和 calculate_momentum_strength 函数
-    4. 新增 Step 8.5 计算 return_5d（调用 calculate_return_5d）
-    5. 新增 Step 8.6 计算 momentum_strength（调用 calculate_momentum_strength）
-    6. 公式：momentum_strength = return_5d / std(return_1d, 5日)
-    7. 遵循 PROJECT.md 规范：因子计算在 data_fetchers 完成，存储到统一数据源
-- v1.39 (2026-06-11): 涨跌停零波动处理（tail_price_position 公式分母为零不再是 NaN）：
-    1. _calc_price_position 新增 daily_close/high/low 参数，涨跌停时 position=1.0/0.0
-    2. 涨停：尾盘价格锁定涨停板 → 收盘价=区间最高点 → position=1.0（最强信号）
-    3. 跌停：尾盘价格锁定跌停板 → 收盘价=区间最低点 → position=0.0（最弱信号）
-    4. 极端罕见无交易非涨跌停 → position=0.5（中性）
-    5. 日线数据缺失无法判断方向 → 仍返回 NaN
-- v1.40 (2026-06-11): 新增止跌信号差分因子（4个，遵循 H5 因子方向不预判）：
-    1. 新增 amplitude_delta 到 _EXTENDED_FACTOR_COLS（振幅差分因子）
-    2. 新增 turnover_surge_delta 到 _EXTENDED_FACTOR_COLS（换手突增差分因子）
-    3. 新增 tail_price_position_delta 到 _EXTENDED_FACTOR_COLS（尾盘位置差分因子）
-    4. 新增 tail_volume_shrink_delta 到 _EXTENDED_FACTOR_COLS（尾盘缩量差分因子）
-    5. 新增 Step 11.5 计算4个差分因子（依赖原始因子已计算）
-    6. 公式：delta = factor(T) - factor(T-1)，按asset分组shift(1)
-    7. metadata valid_records/valid_records_percent 同步更新
-- v1.42 (2026-06-12): 新增行业级别方向性因子（Pattern 14）：
-    1. 新增 industry_momentum_5d 到 _EXTENDED_FACTOR_COLS（行业5日动量）
-    2. 新增 industry_turnover_trend 到 _EXTENDED_FACTOR_COLS（行业换手率趋势）
-    3. 新增 industry_amplitude_trend 到 _EXTENDED_FACTOR_COLS（行业振幅趋势）
-    4. 新增 Step 11.7 计算行业级别方向性因子
-    5. 公式：按(行业,日期)分组聚合→赋给同行业每只个股
-    6. 实测结论：个股方向性IC全负，行业层面IC=+0.026（方向性信号存在于行业而非个股）
-    7. 遵循 H5：IC方向不预判，行业因子作为行业配置维度补充
+版本历史：见 git log。
 
 作者: 云瑶
 """
@@ -141,71 +36,70 @@ import pandas as pd
 
 
 # ============================================================================
-# 条件导入：__main__ 时添加 sys.path + 绝对导入，其他时候使用相对导入
-# 注意：sys.path.insert 是必要的，因为脚本需要能够直接运行
-# 遵循 stock_utils.py 的条件导入模式
-if __name__ == "__main__":
-    project_root = Path(__file__).parent.parent
-    if str(project_root) not in sys.path:
-        sys.path.insert(0, str(project_root))
-    # 重构后统一从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
-    from data_fetchers.common.logger_config import setup_logger
-    from data_fetchers.factor_calculator import (
-        calculate_amplitude,
-        calculate_amplitude_delta,  # v1.40 新增：振幅差分因子
-        calculate_bollinger_pb,
-        calculate_capital_flow_intensity,  # v1.44 新增：资金流强度因子（方案C）
-        calculate_capital_flow_ratio_trend,  # v1.44 新增：资金流占比趋势因子（方案C）
-        calculate_industry_amplitude_trend,  # v1.42 新增：行业振幅趋势因子
-        calculate_industry_earnings_growth,  # v1.43 新增：行业盈利增长因子
-        calculate_industry_momentum_5d,  # v1.42 新增：行业5日动量因子
-        calculate_industry_pe_trend,  # v1.43 新增：行业PE趋势因子
-        calculate_industry_roe_trend,  # v1.43 新增：行业ROE趋势因子
-        calculate_industry_turnover_trend,  # v1.42 新增：行业换手率趋势因子
-        calculate_kdj_j,
-        calculate_ma5_deviation,  # v1.41 新增：5日均线偏离度因子
-        calculate_momentum_strength,  # v1.37 新增
-        calculate_near_high_ratio_5,  # v1.41 新增：近5日高低位置因子
-        calculate_overnight_return,
-        calculate_past_return_1d,  # 当日涨跌幅
-        calculate_positive_day_ratio_5,  # v1.41 新增：5日阳线比例因子
-        calculate_price_position,
-        calculate_return_5d,  # v1.37 新增：5日累计涨幅
-        calculate_tail_price_position_delta,  # v1.40 新增：尾盘位置差分因子
-        calculate_tail_volume_shrink_delta,  # v1.40 新增：尾盘缩量差分因子
-        calculate_turnover_surge,
-        calculate_turnover_surge_delta,  # v1.40 新增：换手突增差分因子
-        calculate_volume_price_strength,  # v1.41 新增：量价齐升因子
-    )
-else:
-    # 重构后统一从 factor_calculator 导入因子计算函数（遵循 MODULE.md 约束 #3）
+# 条件导入：包内导入优先；脚本直接运行时（无父包）回退到绝对导入 + sys.path 注入
+# 单一来源：避免 if/else 重复列举导入符号（约束 #3 复用 factor_calculator）
+# ============================================================================
+try:
     from .common.logger_config import setup_logger
     from .factor_calculator import (
         calculate_amplitude,
-        calculate_amplitude_delta,  # v1.40 新增：振幅差分因子
+        calculate_amplitude_delta,
         calculate_bollinger_pb,
-        calculate_capital_flow_intensity,  # v1.44 新增：资金流强度因子（方案C）
-        calculate_capital_flow_ratio_trend,  # v1.44 新增：资金流占比趋势因子（方案C）
-        calculate_industry_amplitude_trend,  # v1.42 新增：行业振幅趋势因子
-        calculate_industry_earnings_growth,  # v1.43 新增：行业盈利增长因子
-        calculate_industry_momentum_5d,  # v1.42 新增：行业5日动量因子
-        calculate_industry_pe_trend,  # v1.43 新增：行业PE趋势因子
-        calculate_industry_roe_trend,  # v1.43 新增：行业ROE趋势因子
-        calculate_industry_turnover_trend,  # v1.42 新增：行业换手率趋势因子
+        calculate_capital_flow_intensity,
+        calculate_capital_flow_ratio_trend,
+        calculate_industry_amplitude_trend,
+        calculate_industry_earnings_growth,
+        calculate_industry_momentum_5d,
+        calculate_industry_pe_trend,
+        calculate_industry_roe_trend,
+        calculate_industry_turnover_trend,
         calculate_kdj_j,
-        calculate_ma5_deviation,  # v1.41 新增：5日均线偏离度因子
-        calculate_momentum_strength,  # v1.37 新增
-        calculate_near_high_ratio_5,  # v1.41 新增：近5日高低位置因子
+        calculate_ma5_deviation,
+        calculate_momentum_strength,
+        calculate_near_high_ratio_5,
         calculate_overnight_return,
-        calculate_past_return_1d,  # 当日涨跌幅
-        calculate_positive_day_ratio_5,  # v1.41 新增：5日阳线比例因子
+        calculate_past_return_1d,
+        calculate_positive_day_ratio_5,
         calculate_price_position,
-        calculate_return_5d,  # v1.37 新增：5日累计涨幅
-        calculate_tail_price_position_delta,  # v1.40 新增：尾盘位置差分因子
-        calculate_tail_volume_shrink_delta,  # v1.40 新增：尾盘缩量差分因子
+        calculate_return_5d,
+        calculate_tail_price_position_delta,
+        calculate_tail_volume_shrink_delta,
         calculate_turnover_surge,
-        calculate_turnover_surge_delta,  # v1.40 新增：换手突增差分因子
-        calculate_volume_price_strength,  # v1.41 新增：量价齐升因子
+        calculate_turnover_surge_delta,
+        calculate_volume_price_strength,
+    )
+except ImportError:
+    # 脚本直接运行（无父包上下文）：将项目根注入 sys.path 后改用绝对导入
+    project_root = Path(__file__).parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+    from data_fetchers.common.logger_config import setup_logger
+    from data_fetchers.factor_calculator import (
+        calculate_amplitude,
+        calculate_amplitude_delta,
+        calculate_bollinger_pb,
+        calculate_capital_flow_intensity,
+        calculate_capital_flow_ratio_trend,
+        calculate_industry_amplitude_trend,
+        calculate_industry_earnings_growth,
+        calculate_industry_momentum_5d,
+        calculate_industry_pe_trend,
+        calculate_industry_roe_trend,
+        calculate_industry_turnover_trend,
+        calculate_kdj_j,
+        calculate_ma5_deviation,
+        calculate_momentum_strength,
+        calculate_near_high_ratio_5,
+        calculate_overnight_return,
+        calculate_past_return_1d,
+        calculate_positive_day_ratio_5,
+        calculate_price_position,
+        calculate_return_5d,
+        calculate_tail_price_position_delta,
+        calculate_tail_volume_shrink_delta,
+        calculate_turnover_surge,
+        calculate_turnover_surge_delta,
+        calculate_volume_price_strength,
     )
 
 # ============================================================================
