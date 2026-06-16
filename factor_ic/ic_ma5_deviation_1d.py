@@ -82,6 +82,32 @@ def _safe_dict(result: dict, key: str) -> dict:
     return {}
 
 
+def _fmt_float(value: object, fmt: str, label: str) -> str:
+    """安全格式化浮点指标值，防止类型异常击穿 _log_summary。
+
+    动机：原 f-string `f"{v:.4f}"` 对字符串等非数值类型会抛 TypeError，
+    异常穿透 main() 后被 `except Exception` 兜底，打印堆栈并 exit 1，
+    与 FactorCalcError exit 5 语义混淆——"展示层格式化失败"被错报为
+    "未预期错误"。
+
+    参数:
+        value: 待格式化的值（期望 int/float/None）。
+        fmt: format spec（如 ".4f"、".2%"），不含外层大括号。
+        label: 字段名，用于 warning 日志定位（如 "IC 均值"）。
+
+    返回:
+        - None → "N/A"（合法缺失）
+        - 数值 → 按 fmt 格式化（bool 视为非数值，避免 True 显示为 1.0000）
+        - 其他类型 → "N/A(type=<typename>)" + 一条 warning（避免格式化异常扩散）
+    """
+    if value is None:
+        return "N/A"
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        logger.warning("%s 值类型异常，期望 int/float，实际 %s（值=%r）", label, type(value).__name__, value)
+        return f"N/A(type={type(value).__name__})"
+    return format(value, fmt)
+
+
 def _log_summary(result: dict) -> None:
     """格式化并打印 IC 计算结果摘要 + 空值告警。
 
@@ -105,10 +131,10 @@ def _log_summary(result: dict) -> None:
     icir = ic_metrics.get(_KEY_ICIR)
     positive_ratio = ic_distribution.get(_KEY_POSITIVE_RATIO)
 
-    ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
-    ic_std_str = f"{ic_std:.4f}" if ic_std is not None else "N/A"
-    icir_str = f"{icir:.2f}" if icir is not None else "N/A"
-    positive_ratio_str = f"{positive_ratio:.2%}" if positive_ratio is not None else "N/A"
+    ic_mean_str = _fmt_float(ic_mean, ".4f", "IC 均值")
+    ic_std_str = _fmt_float(ic_std, ".4f", "IC 标准差")
+    icir_str = _fmt_float(icir, ".2f", "ICIR")
+    positive_ratio_str = _fmt_float(positive_ratio, ".2%", "IC>0 占比")
 
     summary_lines = [
         "=" * 60,
