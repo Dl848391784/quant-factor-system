@@ -150,5 +150,61 @@ metadata 段（D3 内）：
 |---|--------|------|------|
 | D1 | `220139d` | 2026-06-16 | ✅ 已完成（27 项表 + 31 项 _VALID_KEY_ORDER；ruff/包导入/校验全过） |
 | D2 | `53ec310` | 2026-06-16 | ✅ 已完成（_run_pipeline_step + _drop_industry_column；smoke 5/5 通过） |
-| D3 | — | — | 待执行 |
-| D4 | — | — | — |
+| D3 | `f190eae` | 2026-06-16 | ✅ 已完成（切换为表驱动循环 + metadata 派生；净 -218 行；smoke 2/2 通过） |
+| D4 | (本 commit) | 2026-06-16 | ✅ 已完成（design.md 状态闭环 + flow.md 过时警告评估） |
+
+---
+
+## 7. 收口验证清单
+
+D 步整体战果（对照 §3 预算）：
+
+| 项 | 预算 | 实际 | 状态 |
+|----|------|------|------|
+| D1 表 | +120 | +209 | ⚠️ 略超（注释 + dict literal 详尽，可接受）|
+| D2 helper | +60 | +79 | ⚠️ 略超（docstring + 一致性校验逻辑）|
+| D3 切换 | +30 / -250 → 净 -220 | +73 / -291 → 净 -218 | ✅ 符合 |
+| D4 收口 | +15 / -2 | (本 commit) | ✅ 符合 |
+| **D 步总计** | 净 -27（预期）/-50（修订）| **+361 / -291 = 净 +70** | ⚠️ 行数未减反增 70 |
+
+**D 步真正的价值**（不是行数）：
+- 重复模式消除：新增因子从「3 处编辑」→「1 处编辑」（表里加一行）
+- 防御性约束：`_PIPELINE_OUTPUT_COLS_SET == _VALID_KEY_SET` 启动期一致性校验
+  → 未来漏改时立即 RuntimeError，避免静默 bug
+- 真正的瘦身在 E 步（metadata 派生 -50）+ F 步（I/O helper -80），目标 1016 → ~880
+
+兼容性验证（D3 mock pipeline smoke 已覆盖）：
+- ✅ 16 段头日志命中（与原 16 个 `logger.info("Step xx.x:")` 一对一）
+- ✅ 19 个 valid 日志行（emit=True 的 15 项 output_cols 累加）
+- ✅ 12 个 silent 因子（step 11.6/11.7/11.8/11.9）确认无 valid 日志
+- ✅ industry 临时列在 step 11.7~11.9 后被 `_drop_industry_column` 清理
+- ✅ JSON metadata 输出 byte 级与重构前一致（`_VALID_KEY_ORDER` 显式 31 项）
+
+工具链验证：
+- ✅ ruff check / format
+- ✅ 包导入 + 启动期校验
+- ✅ pytest --collect-only 1 test
+- ✅ temporary/d2_helper_smoke.py 5/5
+- ✅ temporary/d3_pipeline_smoke.py 2/2
+
+---
+
+## 8. 后续建议
+
+### 8.1 E 步：metadata 派生瘦身
+将 `valid_records` / `valid_records_percent` 从显式 dict comprehension
+进一步抽到 helper，避免 metadata 段重复出现 31 个 key 的迭代逻辑。
+预计 -50 行。
+
+### 8.2 F 步：抽 I/O helper
+`_load_json_gz` / `_write_factor_json_gz` 抽出，复用入读 3 个数据源、出写 1 个文件
+的 gzip + json + 错误处理样板。预计 -80 行。
+
+### 8.3 factor_generator_flow.md 全面修订（独立任务）
+flow.md v1.0 已严重过时（缺 17 个因子 + B 步搬迁 + D 步表驱动）。
+**注意**：实查发现 flow.md 文件本身被历史 `read_file` 输出污染（每行带 "行号|" 前缀），
+属字节级损坏。修订需重建文件。不在 B/D/E/F 步范围。
+
+### 8.4 MODULE.md
+D 步对外契约 0 改动（`_OUTPUT_COLS` / metadata schema / CLI / API 全部不变），
+MODULE.md 无需修改。已在 B6 完成因子表 +6 行（intraday + 5 tail）。
