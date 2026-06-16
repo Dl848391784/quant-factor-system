@@ -380,11 +380,17 @@ if _EXTENDED_FACTOR_COLS_SET != _PIPELINE_OUTPUT_COLS_SET:
         f"pipeline 多出={sorted(_missing_in_ext)}，_EXTENDED_FACTOR_COLS 多出={sorted(_missing_in_pipeline)}"
     )
 
-# 启动期校验：首个 step 必须 step_label is not None（段首为 None 则整段无段头日志）
-if _FACTOR_PIPELINE_STEPS and not _FACTOR_PIPELINE_STEPS[0]["step_label"]:
-    raise RuntimeError(
-        "_FACTOR_PIPELINE_STEPS[0]['step_label'] 不得为 None：首个 step 必须为段头，否则整段无段头日志（R1 防御）"
-    )
+# 启动期段首校验：每个 step_label=None 的 step 之前必须已有非 None step_label
+# （否则该段整段无段头日志且无报错）。校验 [0] 只防首个，无法防中间段首误写 None。
+_seen_non_none_label = False
+for _i, _step in enumerate(_FACTOR_PIPELINE_STEPS):
+    if _step["step_label"] is not None:
+        _seen_non_none_label = True
+    elif not _seen_non_none_label:
+        raise RuntimeError(
+            f"_FACTOR_PIPELINE_STEPS[{_i}]['step_label'] 为 None 但此前无任何非 None step_label："
+            f"段首缺失会导致整段无段头日志"
+        )
 
 
 # --- 模块级私有辅助函数 ---

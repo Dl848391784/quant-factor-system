@@ -708,13 +708,15 @@ class TestRunPipelineStepMissingCols:
 # ============================================================================
 
 
-class TestPipelineStepLabelFirstStep:
-    """模块加载期段首校验（R1 修复回归）：首个 step 必须 step_label is not None"""
+class TestPipelineStepLabelValidation:
+    """模块加载期段首校验（R1 初始化 + R3 扩展为全表遍历）
+
+    约束：每个 step_label=None 的 step 之前必须已有非 None step_label，
+    否则该段整段无段头日志且无报错。原 [0] 校验无法防中间段首误写 None。
+    """
 
     def test_first_step_has_non_none_label(self) -> None:
-        """_FACTOR_PIPELINE_STEPS[0]['step_label'] 不得为 None / 空字符串。
-        若段首设为 None，整段无段头日志且无报错，新增/调整 step 时容易遗漏。
-        """
+        """_FACTOR_PIPELINE_STEPS[0]['step_label'] 不得为 None / 空字符串。"""
         from data_fetchers.factor_generator import _FACTOR_PIPELINE_STEPS
 
         assert _FACTOR_PIPELINE_STEPS, "_FACTOR_PIPELINE_STEPS 不应为空"
@@ -724,9 +726,7 @@ class TestPipelineStepLabelFirstStep:
         )
 
     def test_no_empty_string_step_labels(self) -> None:
-        """R1 修复后，所有 step_label 应为 str（非空）或 None，不再有空字符串 ''。
-        旧实现用 '' 表示续表，新约定用 None。若残留 '' 说明迁移遗漏。
-        """
+        """R1 修复后，所有 step_label 应为 str（非空）或 None，不再有空字符串 ''。"""
         from data_fetchers.factor_generator import _FACTOR_PIPELINE_STEPS
 
         for i, step in enumerate(_FACTOR_PIPELINE_STEPS):
@@ -735,6 +735,24 @@ class TestPipelineStepLabelFirstStep:
                 f"_FACTOR_PIPELINE_STEPS[{i}]['step_label'] 为空字符串 ''，"
                 f"应改为 None（R1 新约定：续表用 None，不再用 ''）"
             )
+
+    def test_no_none_before_any_non_none_label(self) -> None:
+        """R3 全表遍历：每个 None 的 step 之前必须已有非 None step_label。
+
+        若中间某段首误写 None（前段有 label，但本段新段首也写 None），
+        该段将无段头日志。校验覆盖 [0] 无法发现的中间段首问题。
+        """
+        from data_fetchers.factor_generator import _FACTOR_PIPELINE_STEPS
+
+        seen_non_none = False
+        for i, step in enumerate(_FACTOR_PIPELINE_STEPS):
+            if step["step_label"] is not None:
+                seen_non_none = True
+            elif not seen_non_none:
+                pytest.fail(
+                    f"_FACTOR_PIPELINE_STEPS[{i}]['step_label'] 为 None 但此前无任何非 None step_label，"
+                    f"段首缺失"
+                )
 
 
 # ============================================================================
