@@ -191,8 +191,10 @@ if __name__ == "__main__":
     except FactorCalcError:
         logger.exception("行业5日动量因子IC计算失败")
         sys.exit(5)  # H12 R19: 因子计算失败 → 检查计算代码
-    except SummaryLogError:
-        logger.exception("摘要日志层失败（主结果产物已生成，可用）")
+    except SummaryLogError as e:
+        # 不用 logger.exception：原始异常类型已由 main() 内 logger.warning 单独落盘，
+        # SummaryLogError.__str__ 自带定位信息，再附加堆栈会与 warning 重复记录同一次失败。
+        logger.error("摘要日志层失败（主结果产物已生成，可用）: %s", e)
         sys.exit(3)  # H12 R17: 辅助层失败专用退出码
     except Exception:
         logger.exception("未预期的错误")
