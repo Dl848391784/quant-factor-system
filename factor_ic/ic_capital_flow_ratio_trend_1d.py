@@ -162,12 +162,17 @@ def main():
     # 链触发统一的"无效"warning，避免静默错误。
     # 注：故意不引用源码行号，行号会随代码演进失效成为误导性硬编码文档；契约是
     # "比例=正向计数/总数 ∈ [0,1]"，这一语义稳定，行号不稳定。
+    # 量纲越界标志：用于结尾 warning 块去重。量纲越界时本块已打过一条针对性 warning
+    # （描述"超出 [0, 1] 范围"），若结尾 warning 块再触发"IC>0 占比无效"则形成两条
+    # 描述同一事件的 warning 且语义互相掩盖。
+    _positive_ratio_range_warned = False
     if is_finite_value(positive_ratio) and not (0.0 <= positive_ratio <= 1.0):
         logger.warning(
             "positive_ratio=%s 超出预期范围 [0, 1]，可能是公共模块返回量纲变更（应为 0–1 小数）；本次摘要按 'N/A' 处理",
             positive_ratio,
         )
         positive_ratio = None
+        _positive_ratio_range_warned = True
 
     # 格式化前用 format_finite 统一守卫 None / NaN / Inf：
     # 公共模块在样本不足或除零时可能返回 float('nan')/float('inf')，
@@ -211,10 +216,11 @@ def main():
         logger.warning("IC 标准差无效（None/NaN/Inf）：因子值方差为零（全部相同）或截面样本不足，请检查因子计算逻辑")
     if not is_finite_value(icir):
         logger.warning("ICIR 无效（None/NaN/Inf）：IC 标准差为零导致除零，或 IC 序列长度不足，请检查回测窗口")
-    if not is_finite_value(positive_ratio):
+    if not is_finite_value(positive_ratio) and not _positive_ratio_range_warned:
+        # 仅当 positive_ratio 因"非量纲越界"原因（None/NaN/Inf/字段缺失）变成 None 时
+        # 才触发本通用 warning；量纲越界场景已在上方打过更精确的 warning，此处跳过避免重复。
         logger.warning(
-            "IC>0 占比无效（None/NaN/Inf 或量纲越界）：公共模块未输出 ic_distribution_consistency 字段、"
-            "值非有限，或返回值不在预期 [0, 1] 范围内（详见上文 positive_ratio 范围校验日志），请核对模块版本"
+            "IC>0 占比无效（None/NaN/Inf）：公共模块未输出 ic_distribution_consistency 字段或值非有限，请核对模块版本"
         )
 
     elapsed = time.monotonic() - start_time
