@@ -20,11 +20,24 @@
 - v1.20 (2026-06-15) PR-2a：从 ``_legacy.py`` 行 100-234 / 267-313 / 470-525 /
   618-651 / 1452-1503 抽取至本模块，``_legacy.py`` 改为 ``from ._common import *`` 兼容。
 - v1.21 (2026-06-16) R2：``_add_industry_column`` 迁出至 ``_industry_helpers.py``
-  （消除 §5.1 反向依赖违规，原始问题清单 #1）；同步修复
-  ``_per_asset_transform`` 排序契约校验（#3）、``_calculate_ewm_with_initial``
-  哨兵索引（#4）、``_wilder_smoothing_rsi`` 前值 NaN 可观测性（#5）、
-  ``_calculate_delta`` 文档与日志级别（#6/#8）、EPSILON 重复定义（#7）、
-  ``get_module_logger`` 文档示例（#10）。
+  （消除 §5.1 反向依赖违规：``_common.py`` 不再依赖 ``data_fetchers.fetch_industry``）；
+  同步修复：``_per_asset_transform`` 增加排序契约硬校验（同 asset 不连续即抛 ValueError）；
+  ``_calculate_ewm_with_initial`` 哨兵索引由 ``-1`` 改为不可碰撞的字符串
+  ``"__ewm_initial_sentinel__"``；``_wilder_smoothing_rsi`` 在递推链首次因前值
+  NaN 中断时记录 debug 日志；``_calculate_delta`` 行顺序契约写入 docstring，
+  日志级别由 INFO 降为 DEBUG（避免高频批量调用刷屏）；
+  ``_DEFAULT_PRICE_POSITION_EPSILON`` / ``_DEFAULT_AMPLITUDE_EPSILON`` 改为引用
+  ``_EPSILON`` 消除重复字面量；修正 ``get_module_logger`` 文档示例的函数名。
+- v1.22 (2026-06-16) R3：本模块自身可观测性与契约修复（不改公式语义）：
+  ``_per_asset_transform`` 增加 ``_validate_sort`` 参数，大批量场景可跳过
+  ``np.unique`` 的 O(n log n) 排序校验；``_calculate_ewm_with_initial`` 的字符串
+  哨兵索引方案改为"先重置为 RangeIndex 再 concat"，彻底规避业务索引（datetime /
+  int / 复合）与字符串混合的 dtype 退化与潜在 TypeError；
+  ``_wilder_smoothing_rsi`` 收集所有递推链中断索引，循环结束后一次性输出 debug
+  （仅 1 条日志，但完整暴露多段空洞）；``_calculate_delta`` Example 注释加日期标签
+  （``d3(0.05) - d2(0.03) = 0.02``）明确时序差分语义；迁出说明与 EPSILON 命名
+  注释改写为"包内私有 helper / 同包兄弟模块按 PEP 8 包内访问"语义，消除
+  "调用方应使用包级路径"与实际架构（包内访问私有符号合规）的歧义。
 """
 
 from __future__ import annotations
@@ -127,7 +140,10 @@ _DEFAULT_VOLUME_RATIO_WINDOW = 5
 _DEFAULT_FORWARD_RETURN_SHIFT = 1
 # 价格位置 / 振幅族因子的除零保护 epsilon。语义与 ``_EPSILON`` 等价，
 # 显式引用而非重新定义，避免后续维护时三处 1e-10 不同步（PROJECT.md 死代码 #14 同源原则）。
-# 命名保留是为了被 momentum.py 按"业务族"语义 import；外部别名（_DEFAULT_*）做语义层、_EPSILON 做物理层。
+# 命名保留是给 ``momentum.py`` 按"业务族"语义直读：``_DEFAULT_PRICE_POSITION_EPSILON``
+# 比 ``_EPSILON`` 在因子代码里更可读（_DEFAULT_* 做语义层、_EPSILON 做物理层）。
+# 单下划线前缀仅约束"跨包访问"——``momentum.py`` 与本模块同属 ``factor_calculator``
+# 包内部模块，按 PEP 8 包内可访问私有符号约定，无封装违规。
 _DEFAULT_PRICE_POSITION_EPSILON = _EPSILON
 _DEFAULT_AMPLITUDE_EPSILON = _EPSILON
 _DEFAULT_PAST_RETURN_1D_WINDOW = 1  # 1日涨幅窗口
@@ -233,23 +249,28 @@ def _wilder_smoothing_rsi(series: pd.Series, n: int) -> pd.Series:
     # 第 n+1 天起（索引 n 到 len-1）：EWM 递推
     # 边界行为：若 result.iloc[i-1] 已为 NaN（例如外部把已计算结果某段置 NaN
     # 或 SMA 种子位之后又出现 NaN 输入），递推链将不可恢复地全部 NaN。
-    # 这是 Wilder 标准 NaN 传播语义（不在此处兜底），仅在首次发生时记录 debug
-    # 日志，便于上游定位"为什么后续全 NaN"。
-    nan_break_logged = False
+    # 这是 Wilder 标准 NaN 传播语义（不在此处兜底）。
+    # 可观测性：收集所有"前值 NaN 导致中断"的索引位置，循环结束后一次性输出
+    # debug 日志。R3 改进：相比仅记录首次中断，本方案完整暴露所有断点（同一
+    # asset 输入存在多段空洞时尤为关键），但日志条数仍为 O(1)，不会刷屏。
+    nan_break_indices: list[int] = []
     for i in range(n, len(series)):
         prev = result.iloc[i - 1]
         if pd.isna(series.iloc[i]):  # 当天值为 NaN：传播 NaN
             result.iloc[i] = float("nan")
         elif pd.isna(prev):  # 前值 NaN：递推链中断，从此全 NaN
             result.iloc[i] = float("nan")
-            if not nan_break_logged:
-                _MODULE_LOGGER.debug(
-                    "_wilder_smoothing_rsi: 递推链于索引 %d 中断（前值为 NaN），后续值将全部为 NaN",
-                    i,
-                )
-                nan_break_logged = True
+            nan_break_indices.append(i)
         else:
             result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * prev
+
+    if nan_break_indices:
+        _MODULE_LOGGER.debug(
+            "_wilder_smoothing_rsi: 递推链共发生 %d 处中断（前值为 NaN），索引位置 = %s；"
+            "首次中断后该段后续值均为 NaN（Wilder 标准 NaN 传播语义）",
+            len(nan_break_indices),
+            nan_break_indices,
+        )
 
     return result
 
@@ -263,6 +284,8 @@ def _per_asset_transform(
     asset_arr: np.ndarray,
     value_arr: np.ndarray,
     fn: Callable[[pd.Series], pd.Series],
+    *,
+    _validate_sort: bool = True,
 ) -> np.ndarray:
     """按 asset 分组对单列数值序列应用 fn，返回回填的 ndarray。
 
@@ -277,12 +300,23 @@ def _per_asset_transform(
         asset_arr: asset 列 ndarray（必须已按 asset 排序）
         value_arr: 数值列 ndarray
         fn: 接收单 asset 的 ``pd.Series``，返回同长度 ``pd.Series``
+        _validate_sort: 是否做"排序契约"硬校验（默认 True）。
+            校验依赖 ``np.unique(asset_arr)``，时间复杂度 O(n log n)，
+            在 >1M 行场景下会**抵消** ``transform → 切片`` 的内存优化目的
+            （内存仍是 O(n)，但额外 CPU 排序成本不可忽略）。
+            调用方若已能保证传入数据严格按 asset 排序（例如上游刚做过
+            ``df.sort_values("asset")`` 或预排序的物化缓存），可显式传
+            ``_validate_sort=False`` 跳过校验。
+            **下划线前缀 + keyword-only**：标识"性能逃生舱"非常规接口，
+            误用代价高（fn 看到的不是完整 asset 切片但不报错），
+            慎用——默认开启校验更安全。
 
     Returns:
         回填后的 float64 ndarray（NaN 为缺失），长度与输入一致
 
     Raises:
-        ValueError: asset_arr 与 value_arr 长度不一致，或 asset_arr 未按 asset 排序
+        ValueError: asset_arr 与 value_arr 长度不一致；或
+            ``_validate_sort=True`` 且 asset_arr 未按 asset 排序
             （同一 asset 在数组中不连续 → 切片段数与唯一 asset 数不等）
 
     实现说明:
@@ -306,18 +340,21 @@ def _per_asset_transform(
 
     # 找 asset 边界（同 asset 行连续，asset 变化处即新组起点）
     boundaries = np.flatnonzero(asset_arr[1:] != asset_arr[:-1]) + 1
-    # 排序契约校验：boundaries 给出的每个 asset 段必须只出现一次。
-    # 若调用方未按 asset 排序（同一 asset 被切成多段），unique_groups < n_groups。
-    # 静默错误代价高（fn 看到的不是完整 asset 切片），用 ValueError 显式抛出，
-    # 比 docstring "必须已按 asset 排序" 的口头约束可靠（PROJECT.md 规则 #5 同源）。
-    n_groups = len(boundaries) + 1
-    n_unique_assets = len(np.unique(asset_arr))
-    if n_groups != n_unique_assets:
-        raise ValueError(
-            f"_per_asset_transform: asset_arr 未按 asset 排序，"
-            f"切片得到 {n_groups} 段但只有 {n_unique_assets} 个唯一 asset，"
-            f"调用方需先按 asset 排序后再传入"
-        )
+    if _validate_sort:
+        # 排序契约校验：boundaries 给出的每个 asset 段必须只出现一次。
+        # 若调用方未按 asset 排序（同一 asset 被切成多段），unique_groups < n_groups。
+        # 静默错误代价高（fn 看到的不是完整 asset 切片），用 ValueError 显式抛出，
+        # 比 docstring "必须已按 asset 排序" 的口头约束可靠（PROJECT.md 规则 #5 同源）。
+        # 性能注记：``np.unique`` 是 O(n log n)，>1M 行场景调用方可显式传
+        # ``_validate_sort=False`` 跳过（详见 Args._validate_sort）。
+        n_groups = len(boundaries) + 1
+        n_unique_assets = len(np.unique(asset_arr))
+        if n_groups != n_unique_assets:
+            raise ValueError(
+                f"_per_asset_transform: asset_arr 未按 asset 排序，"
+                f"切片得到 {n_groups} 段但只有 {n_unique_assets} 个唯一 asset，"
+                f"调用方需先按 asset 排序后再传入"
+            )
     boundaries = np.concatenate([[0], boundaries, [n_rows]])
 
     out = np.full(n_rows, np.nan, dtype=np.float64)
@@ -346,27 +383,36 @@ def _calculate_ewm_with_initial(series: pd.Series, alpha: float, initial_value: 
         initial_value: 初始值（K/D 使用 50.0 作为中性值）
 
     Returns:
-        EWM 递推结果序列
+        EWM 递推结果序列（保留输入 ``series`` 的原始索引与索引类型）
 
     Note:
-        - 在第一个有效值前插入虚拟 initial_value 作为 EWM 种子
-        - 使用 ewm(adjust=False, ignore_na=True) 确保正确传播 NaN
+        - 在第一个有效值前插入虚拟 ``initial_value`` 作为 EWM 种子
+        - 使用 ``ewm(adjust=False, ignore_na=True)`` 确保正确传播 NaN
         - 恢复原始 NaN 位置，避免虚拟初始值污染结果
+
+    实现细节（索引类型隔离）:
+        ``pd.concat([单元素串, series])`` 在 series 索引为 datetime / int / 多级
+        等非字符串类型时，会与字符串哨兵索引混合得到 ``object`` dtype Index，
+        在某些 pandas 版本上还可能触发 TypeError 或对齐异常。
+        实现选择**先把两段都重置为 RangeIndex 再 concat**：concat 不再依赖
+        业务索引，``ewm`` 沿位置滚动；最后 ``iloc[1:]`` 切掉哨兵位、把原始
+        ``series.index`` 直接赋回结果。彻底规避混合索引类型问题。
     """
     if len(series) == 0 or series.isna().all():
         return series
 
-    # 在第一个有效值前插入虚拟 initial_value（保留原始索引）。
-    # 哨兵索引使用字符串 "__ewm_initial_sentinel__"：
-    # - 业务索引为日期（datetime）/ 整数序号 / asset+date 复合，绝不会与该字符串相等
-    # - 旧实现用 -1，业务侧若直接传 RangeIndex 起点为 -1 / 自定义负向 index 会冲突
-    _SENTINEL_INDEX = "__ewm_initial_sentinel__"
-    series_with_initial = pd.concat([pd.Series([initial_value], index=[_SENTINEL_INDEX]), series])
+    # 在第一个有效值前插入虚拟 initial_value。索引类型隔离：先把 series 重置为
+    # RangeIndex，再与单元素 RangeIndex 哨兵串拼接，concat 全程使用同质整型索引。
+    # 业务索引（datetime / int / 复合）在最终 ``result_series.index = series.index``
+    # 这一步原样恢复，对调用方完全透明。
+    series_reset = series.reset_index(drop=True)
+    sentinel = pd.Series([initial_value], dtype=series_reset.dtype)
+    series_with_initial = pd.concat([sentinel, series_reset], ignore_index=True)
 
     result_with_initial = series_with_initial.ewm(alpha=alpha, adjust=False, ignore_na=True).mean()
 
-    # 取除虚拟初始值外的结果（iloc[1:] 跳过哨兵索引位的虚拟值）
-    result_series = result_with_initial.iloc[1:]
+    # 取除虚拟初始值外的结果（iloc[1:] 跳过位置 0 的哨兵种子）
+    result_series = result_with_initial.iloc[1:].copy()
     result_series.index = series.index
 
     # 恢复原始 NaN 位置
@@ -410,7 +456,7 @@ def _calculate_delta(
         >>> result = _calculate_delta(df, "amplitude", "amplitude_delta")
         >>> pd.isna(result["amplitude_delta"].iloc[0])  # 第一日无前值
         True
-        >>> result["amplitude_delta"].iloc[2]  # 0.05 - 0.03
+        >>> result["amplitude_delta"].iloc[2]  # d3(0.05) - d2(0.03) = 0.02（时序差分，按 [asset,date] 排序后取前一行）
         0.02
     """
     _logger = get_module_logger(logger_arg)
@@ -445,6 +491,13 @@ def _calculate_delta(
 # 原因：``_add_industry_column`` 反向依赖 ``data_fetchers.fetch_industry``，
 # 让 ``_common.py`` 不再是依赖图根节点，违反本文件 §5.1 约束（仅依赖
 # stdlib + numpy + pandas + logging）。迁移到 ``_industry_helpers.py`` 后，
-# ``_common.py`` 重新成为纯净根节点。调用方需改用：
-#     from data_fetchers.factor_calculator._industry_helpers import _add_industry_column
+# ``_common.py`` 重新成为纯净根节点。
+#
+# 调用约定：``_add_industry_column`` 是 factor_calculator **包内私有 helper**，
+# 仅供本包内部模块（industry.py / fund_flow.py / industry_financial.py）使用，
+# 不通过 ``__init__.py`` re-export。**包内**兄弟模块按 PEP 8 包内访问私有符号
+# 约定，可直接相对 import：
+#     from ._industry_helpers import _add_industry_column
+# **包外**调用方禁止依赖该符号——若有跨包复用需求，应先在 design.md 评审接口
+# 公开化（去前导下划线 + 加入 ``__init__.py`` __all__），再迁出至公开 API。
 # ============================================================================
