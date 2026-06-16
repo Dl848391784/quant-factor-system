@@ -554,20 +554,29 @@ def _load_json_gz_data(
 
     Raises:
         FileNotFoundError: 文件不存在。
-        ValueError: gzip 损坏 / JSON 解析失败 / 缺少 'data' 字段。
+        ValueError: gzip 损坏 / 非 gzip 格式 / JSON 解析失败 / 缺少 'data' 字段。
 
     Note:
         内存安全：JSONDecodeError 仅引用 path/lineno/colno/msg，不引用 e.doc
         （e.doc 可能持有整个 JSON 文本副本，导致内存翻倍）。
+
+        gzip 错误兼容：BadGzipFile (Python 3.8+ 才有) 仅在魔数损坏时抛出；
+        若文件存在但非 gzip 格式（普通文本 / 截断 / 解压流错误），gzip 模块抛 OSError。
+        合并捕获 (BadGzipFile, OSError) 覆盖两种场景，按异常类型区分日志。
     """
     try:
         with gzip.open(path, "rt", encoding="utf-8") as f:
             payload = json.load(f)
     except FileNotFoundError:
         raise FileNotFoundError(f"{dataset_label}数据文件不存在: {path}") from None
-    except gzip.BadGzipFile as e:
-        logger.error("gzip 文件损坏: %s, 原因: %s", path, str(e))
-        raise ValueError(f"gzip 文件损坏: {path}") from e
+    except (gzip.BadGzipFile, OSError) as e:
+        # BadGzipFile 是 OSError 子类（Py3.8+），先捕获更具体的 BadGzipFile 语义
+        # （isinstance 检查避免普通 OSError 被误标为 "gzip 文件损坏"）
+        if isinstance(e, gzip.BadGzipFile):
+            logger.error("gzip 文件损坏（魔数错误）: %s, 原因: %s", path, str(e))
+            raise ValueError(f"gzip 文件损坏: {path}") from e
+        logger.error("gzip 读取失败（非 gzip 格式或 IO 错误）: %s, 原因: %s", path, str(e))
+        raise ValueError(f"gzip 读取失败: {path}") from e
     except json.JSONDecodeError as e:
         # 内存安全：仅引用 path / lineno / colno / msg，不引用 e.doc（避免内存翻倍）
         logger.error("JSON解析失败: %s, 行 %d, 列 %d, 信息: %s", path, e.lineno, e.colno, e.msg)
