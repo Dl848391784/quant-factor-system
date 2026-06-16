@@ -30,7 +30,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -1013,16 +1013,22 @@ def generate_all_factors(
     if missing_cols:
         raise KeyError(f"输出列不存在: {missing_cols}，请检查因子计算函数的输出列名是否与 _EXTENDED_FACTOR_COLS 一致")
 
-    output_df = factor_df[list(_OUTPUT_COLS)].copy()  # 元组转列表，pandas 列选择需要列表
-
-    # 显式释放 factor_df 内存（可能包含中间列，比 output_df 更多）
-    del factor_df
+    # output_df 初始化为 None（None sentinel pattern）：
+    # 替代 finally 中基于 locals() 的存在性守卫——
+    # locals() 在 CPython 中并不可靠（尤其在异常退出帧时）且每次调用构造新 dict，
+    # 显式 None 初始化让 finally 的清理条件语义明确：output_df is not None 即已成功创建。
+    output_df: pd.DataFrame | None = None
 
     # ========== Step 13~15 包裹在 try/finally 中，确保异常路径同样释放 output_df ==========
     # 正常路径：return 后栈解开，output_df 由 GC 回收
     # 异常路径：若 _write_factor_json_gz 等抛出 RuntimeError，本 finally 显式去除引用，
     #          避免外层调用方栈帧持续持有 output_df（重试 / 后续任务场景下尤其重要）
     try:
+        # cast：pandas 重载使列选择推断为 DataFrame | Series，运行时实为 DataFrame
+        output_df = cast(pd.DataFrame, factor_df[list(_OUTPUT_COLS)].copy())  # 元组转列表，pandas 列选择需要列表
+
+        # 显式释放 factor_df 内存（可能包含中间列，比 output_df 更多）
+        del factor_df
         # ========== Step 13: 保存输出 ==========
         logger.info("Step 13: 保存输出...")
 
@@ -1096,8 +1102,10 @@ def generate_all_factors(
         # 防御性释放：异常路径下显式去除 output_df 引用
         # 正常路径下 return 后函数栈解开，GC 会回收 output_df
         # 此处保留 del 显式表达意图：即使 Step 13/14/15 抛出异常，
-        # output_df（约 30% factor_df 体积）也能立即去除局部引用
-        if "output_df" in locals():
+        # output_df（约 30% factor_df 体积）也能立即去除局部引用。
+        # 用 None sentinel 而非 locals()："is not None" 语义明确，
+        # 不依赖 CPython locals() 实现，且零开销。
+        if output_df is not None:
             del output_df
 
 

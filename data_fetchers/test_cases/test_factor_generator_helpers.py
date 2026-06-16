@@ -714,6 +714,71 @@ class TestMainQuietMode:
         assert "执行成功" not in captured.out
 
 
+class TestOutputDfNoneSentinel:
+    """generate_all_factors 用 None sentinel 替代 locals() 守卫（bug 1 回归）"""
+
+    def test_output_df_initialized_to_none_before_try(self) -> None:
+        """源码约定：output_df 在 try 块之前初始化为 None。
+
+        通过 AST 静态解析验证：
+        1. output_df 首次赋值出现在 try 块外（早期初始化）
+        2. 该首次赋值的值为 None
+        """
+        import ast
+        from pathlib import Path
+
+        from data_fetchers import factor_generator as fg
+
+        source = Path(fg.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+        # 定位 generate_all_factors 函数
+        func = next(
+            (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "generate_all_factors"),
+            None,
+        )
+        assert func is not None, "generate_all_factors 函数未找到"
+
+        # 在函数体直接子节点中查找首个 output_df 赋值（不深入子作用域）
+        first_assign_node: ast.AST | None = None
+        for node in func.body:
+            # AnnAssign: output_df: ... = None
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "output_df":
+                first_assign_node = node
+                break
+            # Assign: output_df = None
+            if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "output_df" for t in node.targets
+            ):
+                first_assign_node = node
+                break
+
+        assert first_assign_node is not None, "未在 generate_all_factors 函数体顶层找到 output_df 初始化"
+
+        # 验证赋值为 None（AnnAssign 在仅声明无赋值时 value 为 None，需先排除）
+        value_node = first_assign_node.value
+        assert value_node is not None, "output_df 仅声明类型而无 = None 赋值，必须显式赋值 None"
+        assert isinstance(value_node, ast.Constant) and value_node.value is None, (
+            f"output_df 必须初始化为 None（None sentinel），实际: {ast.dump(value_node)!r}"
+        )
+
+    def test_finally_uses_is_not_none_not_locals(self) -> None:
+        """源码约定：finally 块用 `output_df is not None` 而非 `"output_df" in locals()`"""
+        from pathlib import Path
+
+        from data_fetchers import factor_generator as fg
+
+        source = Path(fg.__file__).read_text(encoding="utf-8")
+        # 反例：禁止 locals() 守卫
+        assert '"output_df" in locals()' not in source, (
+            'finally 中不得使用 `"output_df" in locals()`：locals() 在 CPython 中不可靠且有性能开销'
+        )
+        # 正例：必须有 None sentinel 守卫
+        assert "if output_df is not None:" in source, (
+            "finally 中必须使用 `if output_df is not None:` 守卫（None sentinel pattern）"
+        )
+
+
 if __name__ == "__main__":
     import sys
 
