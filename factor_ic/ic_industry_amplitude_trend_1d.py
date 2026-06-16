@@ -83,6 +83,27 @@ def main():
         _logger=logger,
     )
 
+    # debug 级中间状态日志：debug 模式下对 result 关键字段做细粒度追踪，
+    # 不污染生产 INFO 日志（生产摘要由 log_factor_summary 唯一输出）。
+    # 关键字段选取理由：
+    #   - factor_name / update_mode：定位本次运行身份
+    #   - period.start ~ period.end：确认数据窗口
+    #   - sample_stats.valid_days：判断是否走了 build_error_result 兜底（valid_days=0）
+    #   - ic_metrics.ic_mean / icir：核心 IC 指标，便于排查异常返回结构
+    ic_metrics = result.get("ic_metrics") or {}
+    sample_stats = result.get("sample_stats") or {}
+    period = result.get("period") or {}
+    logger.debug(
+        "run_factor_ic 返回: factor=%s update_mode=%s period=%s~%s valid_days=%s ic_mean=%s icir=%s",
+        result.get("factor_name"),
+        result.get("update_mode"),
+        period.get("start"),
+        period.get("end"),
+        sample_stats.get("valid_days"),
+        ic_metrics.get("ic_mean"),
+        ic_metrics.get("icir"),
+    )
+
     # 输出 IC 摘要 + None 状态整合告警（公共模块,M3.1）
     # 注：run_factor_ic 失败路径走 build_error_result（返回 dict）或抛 DataSchemaError，
     # 不会返回 None；冗余的 result is None 兜底掩盖真实错误来源，已移除。
