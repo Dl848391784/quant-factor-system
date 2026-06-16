@@ -118,3 +118,232 @@ def _get_close_price(prices: list | None) -> float:
     if len(prices) < _TAIL_KLINE_COUNT:
         return np.nan
     return prices[-1]
+
+
+# ============================================================================
+# row-level 因子计算（B3 轮，私有 helper）
+# ============================================================================
+
+
+def _calc_price_position(
+    close_price: float,
+    tail_high: float,
+    tail_low: float,
+    daily_close: float | None = None,
+    daily_high: float | None = None,
+    daily_low: float | None = None,
+) -> float:
+    """计算尾盘价格位置。
+
+    公式:
+    - 尾盘价格位置 = (收盘价 - 尾盘最低价) / (尾盘最高价 - 尾盘最低价)
+    - 理论范围 [0, 1]
+
+    涨跌停处理（v1.39）:
+    - 当 tail_high == tail_low（零波动）时，公式分母为零 → 0/0 无定义
+    - 涨停：尾盘价格锁定在涨停板，收盘价=区间最高点 → position = 1.0（最强信号）
+    - 跌停：尾盘价格锁定在跌停板，收盘价=区间最低点 → position = 0.0（最弱信号）
+    - 判断方法：close == daily_high → 涨停方向 → 1.0；close == daily_low → 跌停方向 → 0.0
+    - 极端罕见无交易且非涨跌停 → 0.5（中性，无信号）
+
+    Args:
+        close_price: 尾盘收盘价
+        tail_high: 尾盘最高价
+        tail_low: 尾盘最低价
+        daily_close: 日线收盘价（涨跌停判断需要，可选）
+        daily_high: 日线最高价（涨跌停判断需要，可选）
+        daily_low: 日线最低价（涨跌停判断需要，可选）
+
+    Returns:
+        尾盘价格位置，理论范围 [0, 1]，或 NaN（输入缺失）
+    """
+    if pd.isna(close_price) or pd.isna(tail_high) or pd.isna(tail_low):
+        return np.nan
+    price_range = tail_high - tail_low
+    if abs(price_range) < _TAIL_EPSILON:
+        # v1.39: 零波动不是缺失数据——涨跌停是极端明确的信号
+        # 涨停：收盘价在区间最高点 → position = 1.0
+        # 跌停：收盘价在区间最低点 → position = 0.0
+        # 判断依据：日线 close 与 high/low 的关系
+        if (
+            daily_close is not None
+            and not pd.isna(daily_close)
+            and daily_high is not None
+            and not pd.isna(daily_high)
+            and daily_low is not None
+            and not pd.isna(daily_low)
+        ):
+            if daily_close == daily_high:
+                # 涨停（含一字涨停）：收盘价=日线最高 → 尾盘位置=1.0
+                return 1.0
+            if daily_close == daily_low:
+                # 跌停（含一字跌停）：收盘价=日线最低 → 尾盘位置=0.0
+                return 0.0
+            # 极端罕见：零波动但非涨跌停（如尾盘无成交但日内有波动）
+            # 中性填充：position = 0.5
+            return 0.5
+        # 日线数据缺失时无法判断方向，仍返回 NaN
+        return np.nan
+    return (close_price - tail_low) / price_range
+
+
+def _calc_tail_price_slope(prices: list | None) -> float:
+    """计算尾盘趋势斜率（百分比形式）。
+
+    公式:
+    - 线性回归：对 prices 数组做回归，得到 slope
+    - 百分比斜率：factor_value = slope / mean_price
+
+    Args:
+        prices: 13 根 5 分钟 K 线收盘价列表
+
+    Returns:
+        百分比斜率，或 NaN（数据不完整 / 除零）
+    """
+    if not isinstance(prices, list):
+        return np.nan
+    if len(prices) < _TAIL_KLINE_COUNT:
+        return np.nan
+
+    Y = np.array(prices)
+    if np.any(np.isnan(Y)):
+        return np.nan
+
+    X = np.arange(_TAIL_KLINE_COUNT)
+    try:
+        slope, _ = np.polyfit(X, Y, 1)
+    except np.linalg.LinAlgError:
+        return np.nan
+
+    mean_price = np.mean(Y)
+    if abs(mean_price) < _TAIL_EPSILON:
+        return np.nan
+
+    return slope / mean_price
+
+
+def _calc_tail_price_volume_intensity(
+    prices: list | None,
+    volumes: list | None,
+    total_volume: float | None,
+) -> float:
+    """计算尾盘量价强度。
+
+    公式:
+    - 尾盘涨跌幅 = (prices[-1] - prices[0]) / prices[0]
+    - 尾盘量比 = sum(volumes) / volume
+    - 尾盘量价强度 = 尾盘涨跌幅 × 尾盘量比
+
+    Args:
+        prices: 13 根 5 分钟 K 线收盘价列表
+        volumes: 13 根 5 分钟 K 线成交量列表
+        total_volume: 全天成交量
+
+    Returns:
+        尾盘量价强度，或 NaN（数据不完整 / 除零）
+    """
+    # 类型守卫：检查 None
+    if prices is None or volumes is None or total_volume is None:
+        return np.nan
+    if not isinstance(prices, list) or not isinstance(volumes, list):
+        return np.nan
+    if len(prices) < _TAIL_KLINE_COUNT or len(volumes) < _TAIL_KLINE_COUNT:
+        return np.nan
+    # 类型守卫：total_volume 必须是数值
+    if not isinstance(total_volume, (int, float)):
+        return np.nan
+    if abs(float(total_volume)) < _TAIL_EPSILON:
+        return np.nan
+
+    first_price = prices[0]
+    last_price = prices[-1]
+    if abs(first_price) < _TAIL_EPSILON:
+        return np.nan
+
+    price_change = (last_price - first_price) / first_price
+    tail_volume = sum(volumes)
+    volume_ratio = tail_volume / float(total_volume)
+
+    return price_change * volume_ratio
+
+
+def _calc_tail_volume_acceleration(volumes: list | None) -> float:
+    """计算尾盘量能加速度（后半段/前半段成交量比）。
+
+    公式:
+    - 前半段成交量总和 = sum(volumes[0:6])  # 14:00-14:25
+    - 后半段成交量总和 = sum(volumes[7:13])  # 14:35-15:00
+    - 量能加速度 = 后半段 / 前半段
+
+    Args:
+        volumes: 13 根 5 分钟 K 线成交量列表
+
+    Returns:
+        量能加速度值，或 NaN（数据不完整 / 除零）
+
+    Note:
+        - 14:30（索引 6）不属于任何一段
+        - 遵循 MODULE.md 约束 #5：类型守卫先用 isinstance 再用 pd.isna
+    """
+    # 类型守卫：检查 None / 非列表类型
+    if volumes is None:
+        return np.nan
+    if not isinstance(volumes, list):
+        return np.nan
+    if len(volumes) < _TAIL_KLINE_COUNT:
+        return np.nan
+    # 检查是否包含 NaN / None
+    if any(v is None or (isinstance(v, float) and np.isnan(v)) for v in volumes):
+        return np.nan
+
+    # 前半段成交量总和（索引 0-5）
+    front_volume = sum(volumes[0:6])
+    # 后半段成交量总和（索引 7-12）
+    back_volume = sum(volumes[7:13])
+
+    # 除零防护
+    if front_volume < _TAIL_EPSILON:
+        return np.nan
+
+    return back_volume / front_volume
+
+
+def _calc_tail_volume_shrink(
+    volumes: list | None,
+    total_volume: float | None,
+) -> float:
+    """计算尾盘缩量程度（尾盘成交量总和 / 全天成交量）。
+
+    公式:
+    - 尾盘缩量程度 = sum(volumes) / total_volume
+
+    Args:
+        volumes: 13 根 5 分钟 K 线成交量列表（14:00-15:00）
+        total_volume: 全天成交量
+
+    Returns:
+        尾盘缩量程度值，理论范围 [0, 1]，或 NaN（数据不完整 / 除零）
+
+    Note:
+        - 数值越小表示尾盘缩量越明显
+        - 遵循 MODULE.md 约束 #5：类型守卫先用 isinstance 再用 pd.isna
+    """
+    # 类型守卫：检查 None
+    if volumes is None or total_volume is None:
+        return np.nan
+    if not isinstance(volumes, list):
+        return np.nan
+    if len(volumes) < _TAIL_KLINE_COUNT:
+        return np.nan
+    # 类型守卫：total_volume 必须是数值
+    if not isinstance(total_volume, (int, float)):
+        return np.nan
+    if abs(float(total_volume)) < _TAIL_EPSILON:
+        return np.nan
+
+    # 检查 volumes 是否包含 NaN / None
+    if any(v is None or (isinstance(v, float) and np.isnan(v)) for v in volumes):
+        return np.nan
+
+    tail_volume = sum(volumes)
+    return tail_volume / float(total_volume)
