@@ -31,7 +31,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 
@@ -53,6 +52,7 @@ try:
         calculate_industry_pe_trend,
         calculate_industry_roe_trend,
         calculate_industry_turnover_trend,
+        calculate_intraday_intensity,
         calculate_kdj_j,
         calculate_ma5_deviation,
         calculate_momentum_strength,
@@ -62,6 +62,7 @@ try:
         calculate_positive_day_ratio_5,
         calculate_price_position,
         calculate_return_5d,
+        calculate_tail_factors,
         calculate_tail_price_position_delta,
         calculate_tail_volume_shrink_delta,
         calculate_turnover_surge,
@@ -86,6 +87,7 @@ except ImportError:
         calculate_industry_pe_trend,
         calculate_industry_roe_trend,
         calculate_industry_turnover_trend,
+        calculate_intraday_intensity,
         calculate_kdj_j,
         calculate_ma5_deviation,
         calculate_momentum_strength,
@@ -95,6 +97,7 @@ except ImportError:
         calculate_positive_day_ratio_5,
         calculate_price_position,
         calculate_return_5d,
+        calculate_tail_factors,
         calculate_tail_price_position_delta,
         calculate_tail_volume_shrink_delta,
         calculate_turnover_surge,
@@ -185,449 +188,6 @@ _BASE_COLS: tuple[str, ...] = (
 # 输出列名：基础列 + 扩展因子 + 收益数据（元组防止意外修改）
 # 组成：_BASE_COLS(10) + _EXTENDED_FACTOR_COLS(15) + _RETURN_COLS(3)
 _OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS
-
-
-# ============================================================================
-# 尾盘因子计算常量
-# ============================================================================
-
-# 尾盘数据路径（遵循 PROJECT.md H7 规则：使用 paths.py 单一来源）
-_TAIL_TRADING_DATA_PATH = _DEFAULT_RESULT_DIR / "tail_trading_data.json.gz"
-
-# 尾盘因子计算参数
-EPSILON = 1e-10  # 避免除零阈值
-_TAIL_KLINE_COUNT = 13  # 尾盘5分钟K线数量（14:00-15:00共13根K线）
-
-# ============================================================================
-# 日内因子计算函数（基于 OHLC 数据）
-# ============================================================================
-
-
-def _calc_intraday_intensity(
-    open_price: float | None, close_price: float | None, high: float | None, low: float | None
-) -> float:
-    """
-    计算日内价格强度（收盘价在振幅中的相对位置）
-
-    公式:
-    - 日内价格强度 = (close - open) / (high - low)
-
-    Args:
-        open_price: 开盘价
-        close_price: 收盘价
-        high: 最高价
-        low: 最低价
-
-    Returns:
-        日内价格强度值，理论范围 [-1, 1]，或 NaN（数据不完整/除零）
-
-    Note:
-        - 正值表示收盘价高于开盘价（上涨），负值表示下跌
-        - 数值越大表示上涨强度越强，数值越小表示下跌强度越强
-        - 遵循 MODULE.md 约束 #5：类型守卫先用 isinstance 再用 pd.isna
-    """
-    # 类型守卫：检查 None
-    if open_price is None or close_price is None or high is None or low is None:
-        return np.nan
-    # 类型守卫：参数必须是数值
-    if not all(isinstance(p, (int, float)) for p in [open_price, close_price, high, low]):
-        return np.nan
-
-    price_range = high - low
-    if abs(price_range) < EPSILON:
-        return np.nan
-
-    return (close_price - open_price) / price_range
-
-
-# ============================================================================
-# 尾盘因子计算函数（从 factor_ic/ic_tail_price_*.py 迁移）
-# ============================================================================
-
-
-def _load_tail_trading_data(logger: logging.Logger) -> pd.DataFrame:
-    """
-    加载尾盘5分钟K线数据
-
-    Args:
-        logger: 日志记录器
-
-    Returns:
-        pd.DataFrame: 尾盘数据，包含 date, asset, prices, volumes, tail_high, tail_low 列
-
-    Note:
-        - 文件不存在时返回空 DataFrame（而非抛异常）
-        - 日志记录加载状态
-        - 遵循 MODULE.md 约束 #4：函数入口先 copy()
-    """
-    if not _TAIL_TRADING_DATA_PATH.exists():
-        logger.warning("尾盘数据文件不存在: %s，尾盘因子将为 NaN", _TAIL_TRADING_DATA_PATH)
-        return pd.DataFrame()
-
-    try:
-        with gzip.open(_TAIL_TRADING_DATA_PATH, "rt", encoding="utf-8") as f:
-            data = json.load(f)
-    except gzip.BadGzipFile as e:
-        logger.error("尾盘数据 gzip 文件损坏: %s, 原因: %s", _TAIL_TRADING_DATA_PATH, str(e))
-        return pd.DataFrame()
-    except json.JSONDecodeError as e:
-        logger.error("尾盘数据 JSON 解析失败: %s, 行 %d, 列 %d", _TAIL_TRADING_DATA_PATH, e.lineno, e.colno)
-        return pd.DataFrame()
-
-    if "data" not in data:
-        logger.error("尾盘数据缺少 'data' 字段: %s", _TAIL_TRADING_DATA_PATH)
-        return pd.DataFrame()
-
-    df = pd.DataFrame(data["data"])
-    logger.info("尾盘数据加载完成: %d 条记录", len(df))
-    return df
-
-
-def _get_close_price(prices: list | None) -> float:
-    """
-    获取尾盘收盘价（prices[-1])
-
-    Args:
-        prices: 尾盘价格列表（13根5分钟K线收盘价）
-
-    Returns:
-        尾盘收盘价，或 NaN（数据不完整时）
-    """
-    if not isinstance(prices, list):
-        return np.nan
-    if len(prices) < _TAIL_KLINE_COUNT:
-        return np.nan
-    return prices[-1]
-
-
-def _calc_price_position(
-    close_price: float,
-    tail_high: float,
-    tail_low: float,
-    daily_close: float | None = None,
-    daily_high: float | None = None,
-    daily_low: float | None = None,
-) -> float:
-    """
-    计算尾盘价格位置
-
-    公式:
-    - 尾盘价格位置 = (收盘价 - 尾盘最低价) / (尾盘最高价 - 尾盘最低价)
-    - 理论范围 [0, 1]
-
-    涨跌停处理（v1.39）:
-    - 当 tail_high == tail_low（零波动）时，公式分母为零 → 0/0 无定义
-    - 涨停：尾盘价格锁定在涨停板，收盘价=区间最高点 → position = 1.0（最强信号）
-    - 跌停：尾盘价格锁定在跌停板，收盘价=区间最低点 → position = 0.0（最弱信号）
-    - 判断方法：close == daily_high → 涨停方向 → 1.0；close == daily_low → 跌停方向 → 0.0
-    - 极端罕见无交易且非涨跌停 → 0.5（中性，无信号）
-
-    Args:
-        close_price: 尾盘收盘价
-        tail_high: 尾盘最高价
-        tail_low: 尾盘最低价
-        daily_close: 日线收盘价（涨跌停判断需要，可选）
-        daily_high: 日线最高价（涨跌停判断需要，可选）
-        daily_low: 日线最低价（涨跌停判断需要，可选）
-
-    Returns:
-        尾盘价格位置，理论范围 [0, 1]，或 NaN（输入缺失）
-    """
-    if pd.isna(close_price) or pd.isna(tail_high) or pd.isna(tail_low):
-        return np.nan
-    price_range = tail_high - tail_low
-    if abs(price_range) < EPSILON:
-        # v1.39: 零波动不是缺失数据——涨跌停是极端明确的信号
-        # 涨停：收盘价在区间最高点 → position = 1.0
-        # 跌停：收盘价在区间最低点 → position = 0.0
-        # 判断依据：日线 close 与 high/low 的关系
-        if (
-            daily_close is not None
-            and not pd.isna(daily_close)
-            and daily_high is not None
-            and not pd.isna(daily_high)
-            and daily_low is not None
-            and not pd.isna(daily_low)
-        ):
-            if daily_close == daily_high:
-                # 涨停（含一字涨停）：收盘价=日线最高 → 尾盘位置=1.0
-                return 1.0
-            if daily_close == daily_low:
-                # 跌停（含一字跌停）：收盘价=日线最低 → 尾盘位置=0.0
-                return 0.0
-            # 极端罕见：零波动但非涨跌停（如尾盘无成交但日内有波动）
-            # 中性填充：position = 0.5
-            return 0.5
-        # 日线数据缺失时无法判断方向，仍返回 NaN
-        return np.nan
-    return (close_price - tail_low) / price_range
-
-
-def _calc_tail_price_slope(prices: list | None) -> float:
-    """
-    计算尾盘趋势斜率（百分比形式）
-
-    公式:
-    - 线性回归：对 prices 数组做回归，得到 slope
-    - 百分比斜率：factor_value = slope / mean_price
-
-    Args:
-        prices: 13根5分钟K线收盘价列表
-
-    Returns:
-        百分比斜率，或 NaN（数据不完整/除零）
-    """
-    if not isinstance(prices, list):
-        return np.nan
-    if len(prices) < _TAIL_KLINE_COUNT:
-        return np.nan
-
-    Y = np.array(prices)
-    if np.any(np.isnan(Y)):
-        return np.nan
-
-    X = np.arange(_TAIL_KLINE_COUNT)
-    try:
-        slope, _ = np.polyfit(X, Y, 1)
-    except np.linalg.LinAlgError:
-        return np.nan
-
-    mean_price = np.mean(Y)
-    if abs(mean_price) < EPSILON:
-        return np.nan
-
-    return slope / mean_price
-
-
-def _calc_tail_price_volume_intensity(prices: list | None, volumes: list | None, total_volume: float | None) -> float:
-    """
-    计算尾盘量价强度
-
-    公式:
-    - 尾盘涨跌幅 = (prices[-1] - prices[0]) / prices[0]
-    - 尾盘量比 = sum(volumes) / volume
-    - 尾盘量价强度 = 尾盘涨跌幅 × 尾盘量比
-
-    Args:
-        prices: 13根5分钟K线收盘价列表
-        volumes: 13根5分钟K线成交量列表
-        total_volume: 全天成交量
-
-    Returns:
-        尾盘量价强度，或 NaN（数据不完整/除零）
-    """
-    # 类型守卫：检查 None
-    if prices is None or volumes is None or total_volume is None:
-        return np.nan
-    if not isinstance(prices, list) or not isinstance(volumes, list):
-        return np.nan
-    if len(prices) < _TAIL_KLINE_COUNT or len(volumes) < _TAIL_KLINE_COUNT:
-        return np.nan
-    # 类型守卫：total_volume 必须是数值
-    if not isinstance(total_volume, (int, float)):
-        return np.nan
-    if abs(float(total_volume)) < EPSILON:
-        return np.nan
-
-    first_price = prices[0]
-    last_price = prices[-1]
-    if abs(first_price) < EPSILON:
-        return np.nan
-
-    price_change = (last_price - first_price) / first_price
-    tail_volume = sum(volumes)
-    volume_ratio = tail_volume / float(total_volume)
-
-    return price_change * volume_ratio
-
-
-def _calc_tail_volume_acceleration(volumes: list | None) -> float:
-    """
-    计算尾盘量能加速度（后半段/前半段成交量比）
-
-    公式:
-    - 前半段成交量总和 = sum(volumes[0:6])  # 14:00-14:25
-    - 后半段成交量总和 = sum(volumes[7:13])  # 14:35-15:00
-    - 量能加速度 = 后半段 / 前半段
-
-    Args:
-        volumes: 13根5分钟K线成交量列表
-
-    Returns:
-        量能加速度值，或 NaN（数据不完整/除零）
-
-    Note:
-        - 14:30（索引6）不属于任何一段
-        - 遵循 MODULE.md 约束 #5：类型守卫先用 isinstance 再用 pd.isna
-    """
-    # 类型守卫：检查 None/非列表类型
-    if volumes is None:
-        return np.nan
-    if not isinstance(volumes, list):
-        return np.nan
-    if len(volumes) < 13:
-        return np.nan
-    # 检查是否包含 NaN/None
-    if any(v is None or (isinstance(v, float) and np.isnan(v)) for v in volumes):
-        return np.nan
-
-    # 前半段成交量总和（索引 0-5）
-    front_volume = sum(volumes[0:6])
-    # 后半段成交量总和（索引 7-12）
-    back_volume = sum(volumes[7:13])
-
-    # 除零防护
-    if front_volume < EPSILON:
-        return np.nan
-
-    return back_volume / front_volume
-
-
-def _calc_tail_volume_shrink(volumes: list | None, total_volume: float | None) -> float:
-    """
-    计算尾盘缩量程度（尾盘成交量总和/全天成交量）
-
-    公式:
-    - 尾盘缩量程度 = sum(volumes) / total_volume
-
-    Args:
-        volumes: 13根5分钟K线成交量列表（14:00-15:00）
-        total_volume: 全天成交量
-
-    Returns:
-        尾盘缩量程度值，理论范围 [0, 1]，或 NaN（数据不完整/除零）
-
-    Note:
-        - 数值越小表示尾盘缩量越明显
-        - 遵循 MODULE.md 约束 #5：类型守卫先用 isinstance 再用 pd.isna
-    """
-    # 类型守卫：检查 None
-    if volumes is None or total_volume is None:
-        return np.nan
-    if not isinstance(volumes, list):
-        return np.nan
-    if len(volumes) < _TAIL_KLINE_COUNT:
-        return np.nan
-    # 类型守卫：total_volume 必须是数值
-    if not isinstance(total_volume, (int, float)):
-        return np.nan
-    if abs(float(total_volume)) < EPSILON:
-        return np.nan
-
-    # 检查 volumes 是否包含 NaN/None
-    if any(v is None or (isinstance(v, float) and np.isnan(v)) for v in volumes):
-        return np.nan
-
-    tail_volume = sum(volumes)
-    return tail_volume / float(total_volume)
-
-
-def _calculate_tail_factors(factor_df: pd.DataFrame, logger: logging.Logger) -> pd.DataFrame:
-    """
-    计算所有尾盘因子（合并计算，避免重复加载尾盘数据）
-
-    Args:
-        factor_df: 包含 date, asset, volume 列的 DataFrame
-        logger: 日志记录器
-
-    Returns:
-        DataFrame，新增 tail_price_position, tail_price_slope, tail_price_volume_intensity, tail_volume_acceleration, tail_volume_shrink 列
-
-    Note:
-        - 遵循 MODULE.md 约束 #4：函数入口先 copy()
-        - 尾盘数据不存在时返回全 NaN
-        - 合并计算减少内存占用和数据加载次数
-    """
-    factor_df = factor_df.copy()
-
-    # 加载尾盘数据
-    tail_df = _load_tail_trading_data(logger)
-    if tail_df.empty:
-        factor_df["tail_price_position"] = np.nan
-        factor_df["tail_price_slope"] = np.nan
-        factor_df["tail_price_volume_intensity"] = np.nan
-        factor_df["tail_volume_acceleration"] = np.nan
-        factor_df["tail_volume_shrink"] = np.nan
-        return factor_df
-
-    # 确保日期格式一致
-    factor_df["date"] = pd.to_datetime(factor_df["date"]).dt.strftime("%Y-%m-%d")
-    tail_df["date"] = pd.to_datetime(tail_df["date"]).dt.strftime("%Y-%m-%d")
-
-    # 合并尾盘数据
-    merge_cols = ["date", "asset", "prices", "tail_high", "tail_low"]
-    if "volumes" in tail_df.columns:
-        merge_cols.append("volumes")
-
-    merged_df = factor_df.merge(tail_df[merge_cols], on=["date", "asset"], how="left")
-
-    logger.info("尾盘数据合并完成: %d / %d 条匹配", merged_df["prices"].notna().sum(), len(factor_df))
-
-    # 计算尾盘收盘价
-    merged_df["tail_close"] = merged_df["prices"].apply(_get_close_price)
-
-    # 计算尾盘价格位置（v1.39: 传入日线 close/high/low 用于涨跌停判断）
-    merged_df["tail_price_position"] = merged_df.apply(
-        lambda row: _calc_price_position(
-            row["tail_close"],
-            row["tail_high"],
-            row["tail_low"],
-            daily_close=row.get("close"),
-            daily_high=row.get("high"),
-            daily_low=row.get("low"),
-        ),
-        axis=1,
-    )
-
-    # 计算尾盘趋势斜率
-    merged_df["tail_price_slope"] = merged_df["prices"].apply(_calc_tail_price_slope)
-
-    # 计算尾盘量价强度
-    if "volumes" in merged_df.columns:
-        merged_df["tail_price_volume_intensity"] = merged_df.apply(
-            lambda row: _calc_tail_price_volume_intensity(row["prices"], row["volumes"], row["volume"]), axis=1
-        )
-        # 计算尾盘量能加速度（后半段/前半段成交量比）
-        merged_df["tail_volume_acceleration"] = merged_df["volumes"].apply(_calc_tail_volume_acceleration)
-        # 计算尾盘缩量程度（尾盘成交量总和/全天成交量）
-        merged_df["tail_volume_shrink"] = merged_df.apply(
-            lambda row: _calc_tail_volume_shrink(row["volumes"], row["volume"]), axis=1
-        )
-    else:
-        merged_df["tail_price_volume_intensity"] = np.nan
-        merged_df["tail_volume_acceleration"] = np.nan
-        merged_df["tail_volume_shrink"] = np.nan
-        logger.warning(
-            "尾盘数据缺少 'volumes' 列，tail_price_volume_intensity/tail_volume_acceleration/tail_volume_shrink 将为 NaN"
-        )
-
-    # 统计有效因子数量
-    for col in [
-        "tail_price_position",
-        "tail_price_slope",
-        "tail_price_volume_intensity",
-        "tail_volume_acceleration",
-        "tail_volume_shrink",
-    ]:
-        valid_count = merged_df[col].notna().sum()
-        total_count = len(merged_df)
-        logger.info(
-            "%s 因子计算完成: %d / %d 有效 (%.1f%%)",
-            col,
-            valid_count,
-            total_count,
-            100 * valid_count / total_count if total_count > 0 else 0,
-        )
-
-    # 返回只包含原列 + 因子列的 DataFrame
-    result_cols = list(factor_df.columns) + [
-        "tail_price_position",
-        "tail_price_slope",
-        "tail_price_volume_intensity",
-        "tail_volume_acceleration",
-        "tail_volume_shrink",
-    ]
-    return merged_df[result_cols]
 
 
 # ============================================================================
@@ -955,9 +515,7 @@ def generate_all_factors(
     # ========== Step 10: 计算 intraday_intensity（日内价格强度） ==========
     logger.info("Step 10: 计算日内价格强度因子...")
 
-    factor_df["intraday_intensity"] = factor_df.apply(
-        lambda row: _calc_intraday_intensity(row["open"], row["close"], row["high"], row["low"]), axis=1
-    )
+    factor_df = calculate_intraday_intensity(factor_df, logger_arg=logger)
 
     intraday_valid = int(factor_df["intraday_intensity"].notna().sum())
     logger.info("  有效 intraday_intensity: %d (%.2f%%)", intraday_valid, _calc_pct(intraday_valid, len(factor_df)))
@@ -965,7 +523,7 @@ def generate_all_factors(
     # ========== Step 11: 计算尾盘因子 ==========
     logger.info("Step 11: 计算尾盘因子...")
 
-    factor_df = _calculate_tail_factors(factor_df, logger)
+    factor_df = calculate_tail_factors(factor_df, logger_arg=logger)
 
     tail_position_valid = int(factor_df["tail_price_position"].notna().sum())
     tail_slope_valid = int(factor_df["tail_price_slope"].notna().sum())
