@@ -294,4 +294,64 @@ R1-R3 已落地方案 A（保留 `if result is None` 死分支作为防御性守
 - 把 `scripts/check_exit_codes.py` 和 `scripts/check_dead_branches.py` 接入 pre-commit hook 与 CI workflow（当前可手工运行 `python scripts/check_*.py all`）
 - AGENTS.md 规则速查表 + 项目根 README 补充 H12 / H13 说明
 
+---
+
+## §11 R13-R17：用户第二轮 5 个问题修复 + H12 规范修正（trade-off 决策）
+
+### 11.1 用户原话与 5 个问题
+
+用户在 R12 落地后给出第二轮反馈（针对 `factor_ic/ic_industry_earnings_growth_1d.py`）：
+
+| # | 问题（用户原话精炼） | 位置 | 修复方案 |
+|---|----|---|---|
+| 1 | 顶层 `sys.exit(2)` 与"importlib 扫描触发注册"路径自相矛盾 | L52-68 顶层 except | logger.critical + raise（R13） |
+| 2 | `SPEC: FactorSpec` 仅注解无初值，UnboundLocalError 风险 | L43 类型注解 | 保留无初值 + noqa 注释（R13） |
+| 3 | DataSchemaError + FactorCalcError 两个 except 前缀+退出码相同 | `__main__` 块 | 合并 except (DataSchemaError, FactorCalcError)（R14） |
+| 4 | main() 末尾缺流程完成标记日志 | main() 末尾 | 补 `logger.info("...计算完成")`（R15） |
+| 5 | `str(e)[:200]` 内联截断 + 魔法数 200 无来源 | L65 logger.critical 参数位 | 提取 `err_msg = str(e)[:200]` + 注释（R13） |
+
+### 11.2 核心 trade-off：放弃 import-time exit 2
+
+**冲突点**：用户原话"__main__ 块捕获该异常后再做 sys.exit(2)" 在 Python 模块加载语义上**不可达**——import-time `raise` 会让整个文件加载失败，`if __name__ == "__main__":` 块根本执行不到。
+
+**两个备选**：
+- A. 顶层 except → `raise`（执行用户原意中"raise"部分），放弃 exit 2 语义
+- B. 顶层 except → `sys.exit(2)`（保留 H12 原规范），承认与"importlib 扫描"自相矛盾
+
+**决策（选 A）**：
+1. `factor_ic/common/test_factor_spec_consistency.py:31-33` 通过 `pkgutil.iter_modules` + `importlib.import_module(f"factor_ic.{mod.name}")` 扫描所有 ic_*.py 触发 SPEC 注册
+2. `sys.exit(2)` 在 importlib 路径上会**杀掉 pytest 宿主进程**，与"测试通过 importlib 扫描"路径根本矛盾
+3. `raise` 让调用方决定行为：测试可捕获 ValueError/TypeError，CLI 由 Python 默认 traceback + exit 1 兜底
+4. 代价：放弃 import-time（exit 2）/ runtime（exit 1）的退出码区分；CI 仍可通过 stderr `CRITICAL ... FactorSpec 注册失败` 关键字 + traceback 区分错误来源
+
+### 11.3 R13-R17 落地状态
+
+| 编号 | 内容 | 状态 | Commit |
+|------|------|------|--------|
+| R13 | earnings_growth 顶层 try/except 改 raise + err_msg 提取 + SPEC noqa 注释（问题 1+2+5） | ✅ 已落地 | `4871460` |
+| R14 | earnings_growth `__main__` 合并 except (DataSchemaError, FactorCalcError)（问题 3） | ✅ 已落地 | `d185545` |
+| R15 | earnings_growth main() 末尾补"计算完成"流程日志（问题 4，回滚 R1 决策） | ✅ 已落地 | `0e586e0` |
+| R16 | PROJECT.md H12 规范修正（exit 2 → raise）+ check_exit_codes.py 升级 + 14 pytest | ✅ 已落地 | `436f4c4` |
+| R17 | 三姊妹脚本（momentum_5d / turnover_trend）同步迁移到 raise 模式 | ✅ 已落地 | `bf3e2ee` |
+
+### 11.4 R1 决策回滚说明（问题 4）
+
+R1 阶段曾以"与 log_factor_summary 重叠"为由删除 `logger.info("...计算完成")`，本轮 R15 回滚。
+
+**认知修正**：数据摘要日志 ≠ 流程完成标记日志：
+- `log_factor_summary`：描述"算了什么"（数据维度，因子值统计）
+- `logger.info("...计算完成")`：描述"走到了哪一步"（控制流维度，main() 末尾边界）
+
+两者职责正交。R15 在该日志上方注释中显式标记"上一轮 R1 曾以'重叠'为由删除"+ 职责区分，**防止未来再次被误删**。
+
+### 11.5 全量验证
+
+- **ruff check**：All checks passed
+- **ruff format**：无未格式化文件
+- **pytest factor_ic/**：269 passed / 66 skipped
+- **pytest scripts/**：14 passed（test_check_exit_codes 11 → 14，新增 raise 模式正反例）
+- **scripts/check_exit_codes.py all**：34 文件通过（R17 后所有 ic_industry_*.py 合规）
+- **scripts/check_dead_branches.py all**：227 文件通过
+- **SPEC import 验证**：earnings_growth / momentum_5d / turnover_trend 三脚本均 OK
+
 
