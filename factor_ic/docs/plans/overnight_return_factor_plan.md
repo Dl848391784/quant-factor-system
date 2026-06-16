@@ -227,7 +227,7 @@ if __name__ == '__main__':
 **命令：**
 ```bash
 cd /home/admin/projects/factor_ic_analyzer
-python factor_ic/ic_overnight_ret_1d.py
+python -m factor_ic.ic_overnight_ret_1d
 ```
 
 **预期输出：**

@@ -38,7 +38,7 @@ amplitude = (high - low) / close
 
 ```bash
 # IC 计算
-python factor_ic/ic_amplitude_1d.py --force-full
+python -m factor_ic.ic_amplitude_1d --force-full
 
 # 分层回测
 python backtest/layered_backtest_amplitude_1d.py

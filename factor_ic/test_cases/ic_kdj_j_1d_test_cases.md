@@ -36,7 +36,7 @@
     36|- close/high/low 数据连续
     37|
     38|**测试步骤**:
-    39|1. 执行脚本: `python factor_ic/ic_kdj_j_1d.py --force-full`
+    39|1. 执行脚本: `python -m factor_ic.ic_kdj_j_1d --force-full`
     40|2. 观察输出日志，确认公共模块调用成功
     41|3. 检查因子计算步骤（RSV → K → D → J）
     42|4. 检查 IC 计算结果（五维度判断）
@@ -135,7 +135,7 @@
    135|- 新数据已添加到缓存
    136|
    137|**测试步骤**:
-   138|1. 执行脚本不带 --force-full 参数: `python factor_ic/ic_kdj_j_1d.py`
+   138|1. 执行脚本不带 --force-full 参数: `python -m factor_ic.ic_kdj_j_1d`
    139|2. 观察增量判断结果
    140|3. 检查只计算缺失日期
    141|

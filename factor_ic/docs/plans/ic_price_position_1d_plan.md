@@ -205,7 +205,7 @@ Step 4: 结果输出
 **命令**：
 ```bash
 cd /home/admin/projects/factor_ic_analyzer
-python factor_ic/ic_price_position_1d.py
+python -m factor_ic.ic_price_position_1d
 ```
 
 **验证项**：

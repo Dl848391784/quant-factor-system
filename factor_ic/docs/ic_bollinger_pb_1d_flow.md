@@ -305,7 +305,7 @@ except ValueError as e:
 
 ```bash
 cd /home/admin/projects/factor_ic_analyzer
-python factor_ic/ic_bollinger_pb_1d.py
+python -m factor_ic.ic_bollinger_pb_1d
 ```
 
 **输出：**
@@ -336,7 +336,7 @@ python factor_ic/ic_bollinger_pb_1d.py
 ### 全量模式（强制）
 
 ```bash
-python factor_ic/ic_bollinger_pb_1d.py --force-full
+python -m factor_ic.ic_bollinger_pb_1d --force-full
 ```
 
 **输出：**

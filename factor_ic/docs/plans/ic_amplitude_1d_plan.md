@@ -82,7 +82,7 @@ def calculate_amplitude(
 
 ```bash
 # IC 计算
-python factor_ic/ic_amplitude_1d.py
+python -m factor_ic.ic_amplitude_1d
 
 # 分层回测
 python backtest/layered_backtest_amplitude_1d.py

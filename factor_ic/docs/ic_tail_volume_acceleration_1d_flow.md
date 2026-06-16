@@ -90,13 +90,13 @@
 
 ```bash
 # 增量计算（默认）
-python factor_ic/ic_tail_volume_acceleration_1d.py
+python -m factor_ic.ic_tail_volume_acceleration_1d
 
 # 强制全量计算
-python factor_ic/ic_tail_volume_acceleration_1d.py --force-full
+python -m factor_ic.ic_tail_volume_acceleration_1d --force-full
 
 # 指定最小股票数
-python factor_ic/ic_tail_volume_acceleration_1d.py --min-stocks 50
+python -m factor_ic.ic_tail_volume_acceleration_1d --min-stocks 50
 ```
 
 ### 4.2 输出位置

@@ -288,13 +288,13 @@ factor_ic/result/ic_intraday_intensity_1d_analysis_result.json
 
 ```bash
 # 正常运行（自动判断模式）
-python factor_ic/ic_intraday_intensity_1d.py
+python -m factor_ic.ic_intraday_intensity_1d
 
 # 强制全量计算
-python factor_ic/ic_intraday_intensity_1d.py --force-full
+python -m factor_ic.ic_intraday_intensity_1d --force-full
 
 # 自定义最小股票数
-python factor_ic/ic_intraday_intensity_1d.py --min-stocks 20
+python -m factor_ic.ic_intraday_intensity_1d --min-stocks 20
 ```
 
 ---
