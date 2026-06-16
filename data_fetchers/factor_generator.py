@@ -474,6 +474,8 @@ def _run_pipeline_step(
         （兼顾调试可观测性 + 日志简洁度，同段后续因子 False 避免刷屏）。
         emit_valid_log=False 时 valid_count 仍计入 metadata，不影响元数据完整性。
         改 emit_valid_log 取值 = 改运行时日志规格，需走需求评审。
+        R4: emit_valid_log=False 的因子补 logger.debug 级别日志（生产不输出，
+        DEBUG 时可观测静默失败）。
     """
     step_label = step["step_label"]
     # R1: step_label 语义 None=无段头（旧实现 "" 也归此分支，新增 step 应使用 None）
@@ -502,6 +504,16 @@ def _run_pipeline_step(
         valid_counts[col] = valid_count
         if emit_valid_log:
             logger.info(
+                "  有效 %s: %d (%.2f%%)",
+                col,
+                valid_count,
+                _calc_pct(valid_count, total_records),
+            )
+        else:
+            # R4: emit_valid_log=False 时补 debug 级别日志。
+            # 生产环境默认 INFO 级别不输出，但调 DEBUG 时可观测静默失败（全 NaN），
+            # 兼顾日志简洁性与可观测性。
+            logger.debug(
                 "  有效 %s: %d (%.2f%%)",
                 col,
                 valid_count,
