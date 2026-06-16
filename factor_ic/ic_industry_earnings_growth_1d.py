@@ -100,6 +100,14 @@ def main():
     # （L83-92），无需调用方额外守卫。
     log_factor_summary(result, "行业盈利增长因子", logger)
 
+    # 流程完成标记（R15 补回）：
+    # - 与 log_factor_summary 的【数据摘要】职责正交：本日志只标记 main() 正常走完，
+    #   运维侧 grep '行业盈利增长因子IC计算完成' 可确认进程未在 log_factor_summary
+    #   之后异常退出。
+    # - 历史：上一轮 R1 曾以"与 log_factor_summary 重叠"为由删除，本轮认知修正：
+    #   数据摘要 ≠ 流程完成标记。前者描述"算了什么"，后者描述"走到了哪一步"。
+    logger.info("行业盈利增长因子IC计算完成")
+
 
 if __name__ == "__main__":
     # 异常分支设计（R14 简化）：
