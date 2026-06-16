@@ -171,10 +171,16 @@ _ALL_COLS_COUNTS: dict[str, int] = {
 # 因子管线表（D 步表驱动重构）
 # ============================================================================
 # generate_all_factors step 3.5~11.9 的元数据描述。每项 dict 字段：
-#   step_label     str       段头日志（"" 表示沿用上一段头）
-#   factor_func    Callable  factor_calculator 公共 API（df, *, logger_arg) -> df
-#   output_cols    tuple     本因子写入的列（tail=5 列，其它=1 列）
-#   emit_valid_log bool      是否逐列打印 "  有效 xxx: N (P%)"（详见 _run_pipeline_step docstring）
+#   step_label     str | None  段头日志（None 表示沿用上一段头，R1 修复前为 ""）
+#   factor_func    Callable    factor_calculator 公共 API（df, *, logger_arg) -> df
+#   output_cols    tuple       本因子写入的列（tail=5 列，其它=1 列）
+#   emit_valid_log bool        是否逐列打印 "  有效 xxx: N (P%)"（详见 _run_pipeline_step docstring）
+#
+# step_label 语义（R1 修复）：
+#   - 段头：非空 str，会调用 logger.info(step_label) 打印
+#   - 续表：None，复用上一段头（原实现用 "" 隐式约定，新约定 None 语义更明确）
+#   - 校验：模块加载期校验首个 step 必须 step_label is not None，
+#     防御新增 step 时误把段首设为 None 导致整段无段头日志且无任何报错。
 #
 # _VALID_KEY_ORDER 与本表集合等价但顺序不同（表序按 step 段，metadata 序按历史累积顺序）。
 # ============================================================================
@@ -270,19 +276,19 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
         "emit_valid_log": True,
     },
     {
-        "step_label": "",
+        "step_label": None,
         "factor_func": calculate_turnover_surge_delta,
         "output_cols": ("turnover_surge_delta",),
         "emit_valid_log": True,
     },
     {
-        "step_label": "",
+        "step_label": None,
         "factor_func": calculate_tail_price_position_delta,
         "output_cols": ("tail_price_position_delta",),
         "emit_valid_log": True,
     },
     {
-        "step_label": "",
+        "step_label": None,
         "factor_func": calculate_tail_volume_shrink_delta,
         "output_cols": ("tail_volume_shrink_delta",),
         "emit_valid_log": True,
@@ -297,19 +303,19 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
         "emit_valid_log": True,
     },
     {
-        "step_label": "",
+        "step_label": None,
         "factor_func": calculate_positive_day_ratio_5,
         "output_cols": ("positive_day_ratio_5",),
         "emit_valid_log": False,
     },
     {
-        "step_label": "",
+        "step_label": None,
         "factor_func": calculate_ma5_deviation,
         "output_cols": ("ma5_deviation",),
         "emit_valid_log": False,
     },
     {
-        "step_label": "",
+        "step_label": None,
         "factor_func": calculate_near_high_ratio_5,
         "output_cols": ("near_high_ratio_5",),
         "emit_valid_log": False,
@@ -323,13 +329,13 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
         "emit_valid_log": True,
     },
     {
-        "step_label": "",
+        "step_label": None,
         "factor_func": calculate_industry_turnover_trend,
         "output_cols": ("industry_turnover_trend",),
         "emit_valid_log": False,
     },
     {
-        "step_label": "",
+        "step_label": None,
         "factor_func": calculate_industry_amplitude_trend,
         "output_cols": ("industry_amplitude_trend",),
         "emit_valid_log": False,
@@ -343,13 +349,13 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
         "emit_valid_log": True,
     },
     {
-        "step_label": "",
+        "step_label": None,
         "factor_func": calculate_industry_earnings_growth,
         "output_cols": ("industry_earnings_growth",),
         "emit_valid_log": False,
     },
     {
-        "step_label": "",
+        "step_label": None,
         "factor_func": calculate_industry_pe_trend,
         "output_cols": ("industry_pe_trend",),
         "emit_valid_log": False,
@@ -363,7 +369,7 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
         "emit_valid_log": True,
     },
     {
-        "step_label": "",
+        "step_label": None,
         "factor_func": calculate_capital_flow_intensity,
         "output_cols": ("capital_flow_intensity",),
         "emit_valid_log": False,
@@ -425,6 +431,14 @@ if _VALID_KEY_SET != _PIPELINE_OUTPUT_COLS_SET:
         f"表多出={sorted(_missing_in_metadata)}，metadata 多出={sorted(_missing_in_table)}"
     )
 
+# 启动期段首校验（R1 修复）：首个 step 必须 step_label is not None。
+# 若段首 step_label 为 None，整段无段头日志且无报错，新增/调整 step 时不经意遗漏
+# 会导致生产环境运行日志缺失整段头（静默问题）。
+if _FACTOR_PIPELINE_STEPS and not _FACTOR_PIPELINE_STEPS[0]["step_label"]:
+    raise RuntimeError(
+        "_FACTOR_PIPELINE_STEPS[0]['step_label'] 不得为 None：首个 step 必须为段头，否则整段无段头日志（R1 防御）"
+    )
+
 
 # ============================================================================
 # 模块级私有辅助函数
@@ -464,7 +478,7 @@ def _run_pipeline_step(
     """执行 _FACTOR_PIPELINE_STEPS 中的单个 step。
 
     流程：
-    1. step["step_label"] 非空 → 打印段头日志
+    1. step["step_label"] 非 None → 打印段头日志（None 表示沿用上一段头，无新日志）
     2. 调用 step["factor_func"](factor_df, logger_arg=logger)
     3. 对每个 output_col 计算 valid_count = int(notna().sum())
     4. step["emit_valid_log"] 为 True 时逐列打印 "  有效 xxx: N (P%)"
@@ -484,7 +498,7 @@ def _run_pipeline_step(
 
     Note:
         emit_valid_log 与 step_label 正交：
-        - step_label：是否打印段头（"" 表示沿用上一段头）
+        - step_label：是否打印段头（None 表示沿用上一段头，R1 修复前为 ""）
         - emit_valid_log：是否对 output_cols 逐列打印 valid 行
         当前取值约定：step 3.5~11.5 全 True；step 11.6~11.9 仅段头 True
         （兼顾调试可观测性 + 日志简洁度，同段后续因子 False 避免刷屏）。
@@ -492,7 +506,8 @@ def _run_pipeline_step(
         改 emit_valid_log 取值 = 改运行时日志规格，需走需求评审。
     """
     step_label = step["step_label"]
-    if step_label:
+    # R1: step_label 语义 None=无段头（旧实现 "" 也归此分支，新增 step 应使用 None）
+    if step_label is not None:
         logger.info(step_label)
 
     factor_func = step["factor_func"]

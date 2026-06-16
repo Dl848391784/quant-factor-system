@@ -704,6 +704,40 @@ class TestRunPipelineStepMissingCols:
 # ============================================================================
 # main CLI 入口：quiet 模式下成功反馈走 print(stdout)
 # ============================================================================
+# R1 段首校验回归：_FACTOR_PIPELINE_STEPS[0]['step_label'] 不得为 None
+# ============================================================================
+
+
+class TestPipelineStepLabelFirstStep:
+    """模块加载期段首校验（R1 修复回归）：首个 step 必须 step_label is not None"""
+
+    def test_first_step_has_non_none_label(self) -> None:
+        """_FACTOR_PIPELINE_STEPS[0]['step_label'] 不得为 None / 空字符串。
+        若段首设为 None，整段无段头日志且无报错，新增/调整 step 时容易遗漏。
+        """
+        from data_fetchers.factor_generator import _FACTOR_PIPELINE_STEPS
+
+        assert _FACTOR_PIPELINE_STEPS, "_FACTOR_PIPELINE_STEPS 不应为空"
+        first_label = _FACTOR_PIPELINE_STEPS[0]["step_label"]
+        assert first_label is not None and first_label != "", (
+            f"_FACTOR_PIPELINE_STEPS[0]['step_label'] 不得为 None / 空字符串，实际: {first_label!r}"
+        )
+
+    def test_no_empty_string_step_labels(self) -> None:
+        """R1 修复后，所有 step_label 应为 str（非空）或 None，不再有空字符串 ''。
+        旧实现用 '' 表示续表，新约定用 None。若残留 '' 说明迁移遗漏。
+        """
+        from data_fetchers.factor_generator import _FACTOR_PIPELINE_STEPS
+
+        for i, step in enumerate(_FACTOR_PIPELINE_STEPS):
+            label = step["step_label"]
+            assert label != "", (
+                f"_FACTOR_PIPELINE_STEPS[{i}]['step_label'] 为空字符串 ''，"
+                f"应改为 None（R1 新约定：续表用 None，不再用 ''）"
+            )
+
+
+# ============================================================================
 
 
 class TestMainQuietMode:
