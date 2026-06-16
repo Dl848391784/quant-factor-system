@@ -638,8 +638,6 @@ def _write_factor_json_gz(
 
         os.replace(temp_path, output_path)
         replaced = True
-        # R5: 文件级完整性信号
-        logger.info("  输出文件大小: %.2f MB", output_path.stat().st_size / 1024**2)
     except OSError as e:
         # PermissionError 是 OSError 子类
         logger.error("文件系统错误保存失败: %s, 原因: %s (%s)", output_path, type(e).__name__, str(e))
@@ -651,6 +649,14 @@ def _write_factor_json_gz(
         # 仅 os.replace 未成功时清理
         if not replaced:
             temp_path.unlink(missing_ok=True)
+
+    # 文件大小查询在 try 外独立执行：若 stat() 因权限/竞态抛 OSError，
+    # 不应误报为"文件系统错误保存失败"（文件已成功写出），
+    # 降级为 warning 而非抛异常。
+    try:
+        logger.info("  输出文件大小: %.2f MB", output_path.stat().st_size / 1024**2)
+    except OSError as e:
+        logger.warning("输出文件大小查询失败（文件已成功写出）: %s, 原因: %s", output_path, e)
 
 
 # --- logger 获取 ---
@@ -913,9 +919,7 @@ def generate_all_factors(
     factor_df, valid_counts = _run_factor_pipeline(factor_df, logger)
 
     # Step 12~15：格式化 + 输出 + 元数据
-    metadata = _format_and_write_output(
-        factor_df, output_path, start_time, logger
-    )
+    metadata = _format_and_write_output(factor_df, output_path, start_time, logger)
 
     # 补充 valid_counts 相关元数据
     total_records = metadata["total_records"]
