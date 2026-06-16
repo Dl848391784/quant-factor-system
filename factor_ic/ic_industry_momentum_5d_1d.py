@@ -107,28 +107,37 @@ def main(args: argparse.Namespace) -> dict:
         _logger=logger,
     )
 
-    # 输出 IC 摘要（公共模块,M3.1）
-    # 注：run_factor_ic 失败路径走 build_error_result（返回 dict）或抛 DataSchemaError，
+    # 输出 IC 摘要（公共模块）
+    # run_factor_ic 失败路径走 build_error_result（返回 dict）或抛 DataSchemaError，
     # 永不返回 None；冗余的 result is None 兜底掩盖真实错误来源（违反 dead-code skill
     # 模式 E：防御 is None 兜底面对永不返回 None 的函数），已彻底移除。
-    # log_factor_summary 自身契约（factor_summary_logger.py L40-44）：不抛异常、不调用
-    # sys.exit、不影响调用方控制流；其内部对 dict 字段为 None 的异常情况输出整合告警
-    # （L83-92），无需调用方额外守卫业务语义。
     #
-    # 错误来源区分（R20+R17：契约依赖注释而非代码强制 → 改用类型化异常）：
-    # - 摘要层异常 raise SummaryLogError 让 __main__ 走专用 exit 3 分支（H12 R17），
-    #   __main__ except SummaryLogError 与 except DataSchemaError/FactorCalcError 平级，
-    #   按异常类型差异化退出码，告警分流精确：
-    #   * exit 4 (DataSchemaError) → 上游数据 / 列契约排查路径
-    #   * exit 5 (FactorCalcError) → 因子计算代码 / 边界条件排查路径
-    #   * exit 3 (SummaryLogError) → 主结果可用，仅旁路 sidecar 待修，调度器降级告警
-    #   * exit 1 (Exception 兜底) → 程序 bug 路径（CRITICAL 立即响应）
-    # - main() 不再 sys.exit（R20）：保证 main 可被 pytest 直接调用（不杀宿主进程），
-    #   退出码语义集中维护在 __main__ 块，单元测试可断言异常类型而非进程退出码。
-    # - 通过 raise ... from e 保留原始异常 traceback（H6 异常链铁律）。
+    # 关于 try/except 的存在性裁决（issue 1）：
+    # log_factor_summary 的 docstring 声明该函数"不抛异常、不调用 sys.exit、不影响
+    # 调用方控制流"，按字面契约本 try 块永远不会触发。但 SummaryLogError 的设计意图
+    # 是**防御性兜底**（exceptions.py SummaryLogError docstring 显式声明"一旦未来回归
+    # 打破契约可立即定位"），因此本块**有意保留**，并修正两处可观测性问题：
+    #   1) 移除注释中"契约保证不抛"的强断言措辞——契约可能被回归打破，注释不应给阅
+    #      读者"该分支是死代码"的误导。
+    #   2) except 中先用 logger.warning 落盘原始异常类型（type(e).__name__），让排查
+    #      时可分辨"摘要层内部哪一类故障"（如 KeyError vs IOError vs disk full），
+    #      避免被 SummaryLogError 一刀切包装后丢失原始类型信息（仅靠 __cause__ 链
+    #      在某些日志聚合环境下不易直读）。
+    #
+    # 错误来源区分（按异常类型映射退出码，详见 __main__ 块）：
+    # - SummaryLogError → exit 3（主结果产物可用，仅 sidecar 待修）
+    # - DataSchemaError → exit 4 / FactorCalcError → exit 5 / Exception → exit 1
+    # main() 不再 sys.exit：保证 main 可被 pytest 直接调用（不杀宿主进程），
+    # 退出码语义集中维护在 __main__ 块。
+    # raise ... from e 保留原始异常 traceback（H6 异常链铁律）。
     try:
         log_factor_summary(result, "行业5日动量因子", logger)
     except Exception as e:
+        # 落盘原始异常类型，避免 SummaryLogError 包装后调用方无法区分摘要层内部故障。
+        logger.warning(
+            "log_factor_summary 摘要输出失败，原始异常类型: %s",
+            type(e).__name__,
+        )
         raise SummaryLogError(
             "log_factor_summary 摘要输出阶段失败（因子计算 result 已成功生成；"
             "故障源 = 摘要日志层而非 run_factor_ic 业务路径）"
