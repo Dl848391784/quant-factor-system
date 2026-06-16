@@ -117,16 +117,18 @@ def calculate_intraday_intensity(
     # 4. 计算振幅（分母）
     amplitude = factor_df["high"] - factor_df["low"]
 
-    # 5. 计算日内强度
-    intraday_intensity = (factor_df["close"] - factor_df["open"]) / amplitude
+    # 5. 除零/异常保护：振幅 ≤ 0 时分母置 NaN，避免中间产生 inf
+    #    （遵循 AGENTS.md 规则 #14：不允许"先算 inf 再覆盖"的二次处理歧义；
+    #    统计 mask 与替换 mask 必须共用同一份，防止负振幅等数据异常时计数与
+    #    实际替换数不匹配）
+    zero_or_negative_mask = amplitude <= 0
+    invalid_amplitude_count = int(zero_or_negative_mask.sum())  # type: ignore[union-attr]
+    if invalid_amplitude_count > 0:
+        _logger.warning("发现 %s 条振幅 ≤ 0 的记录（含 High=Low 与异常负振幅），已设为 NaN", invalid_amplitude_count)
 
-    # 6. 除零保护：振幅为 0 时设为 NaN
-    zero_amplitude_mask = amplitude == 0
-    zero_amplitude_count = int(zero_amplitude_mask.sum())  # type: ignore[union-attr]
-    if zero_amplitude_count > 0:
-        _logger.warning("发现 %s 条振幅为零的记录（High=Low），已设为 NaN", zero_amplitude_count)
-
-    intraday_intensity = intraday_intensity.where(amplitude > 0, np.nan)
+    # 6. 用 NaN 替换无效分母后再除：分母为 NaN 时结果直接为 NaN，无 inf 中间值
+    safe_amplitude = amplitude.where(~zero_or_negative_mask, np.nan)
+    intraday_intensity = (factor_df["close"] - factor_df["open"]) / safe_amplitude
 
     # 7. 添加因子列
     factor_df["intraday_intensity"] = intraday_intensity
