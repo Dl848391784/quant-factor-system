@@ -81,7 +81,9 @@ __all__: list[str] = []
 # ============================================================================
 
 
-def calculate_rsi(close_prices: pd.Series, period: int = _DEFAULT_RSI_PERIOD) -> pd.Series:
+def calculate_rsi(
+    close_prices: pd.Series, period: int = _DEFAULT_RSI_PERIOD, logger_arg: logging.Logger | None = None
+) -> pd.Series:
     """
     向量化计算 RSI 指标
 
@@ -95,6 +97,7 @@ def calculate_rsi(close_prices: pd.Series, period: int = _DEFAULT_RSI_PERIOD) ->
     Args:
         close_prices: 收盘价序列
         period: RSI 计算周期
+        logger_arg: 调用方传入的 logger（遵循 MODULE.md 约束 77）
 
     Returns:
         RSI 值序列（0-100）
@@ -108,6 +111,7 @@ def calculate_rsi(close_prices: pd.Series, period: int = _DEFAULT_RSI_PERIOD) ->
         >>> 0 <= rsi.dropna().max() <= 100
         True
     """
+    _logger = get_module_logger(logger_arg)
     # 入口：创建副本避免副作用（遵循模块规范）
     close_prices = close_prices.copy()
 
@@ -141,6 +145,11 @@ def calculate_rsi(close_prices: pd.Series, period: int = _DEFAULT_RSI_PERIOD) ->
     rsi.loc[both_zero_mask] = _RSI_NEUTRAL_VALUE
 
     # 保留前 period 天的 NaN，让调用方自行决定如何处理
+    # clip 前检测超范围值（遵循"异常检测而非静默修正"规范）
+    out_of_range_mask = rsi.notna() & ((rsi < 0) | (rsi > _RSI_MAX_VALUE))
+    out_of_range_count = out_of_range_mask.sum()
+    if out_of_range_count > 0:
+        _logger.warning("检测到 %s 个 RSI 超出 [0, %s] 范围，已 clip 至边界", out_of_range_count, _RSI_MAX_VALUE)
     rsi = rsi.clip(0, _RSI_MAX_VALUE)
 
     return rsi
@@ -239,11 +248,16 @@ def calculate_forward_return(
 
     future_close = close_prices.shift(-shift)
 
-    # 防除零
+    # 防除零：close 接近零或为负时标记为 NaN
     zero_close_mask = close_prices.notna() & (close_prices.abs() < _EPSILON)
     zero_close_count = zero_close_mask.sum()
     if zero_close_count > 0:
         _logger.warning("检测到 %s 个收盘价接近零，前瞻收益已标记为 np.nan", zero_close_count)
+    # 负收盘价检测（数据脏时可能出现）
+    neg_close_mask = close_prices.notna() & (close_prices <= 0) & ~zero_close_mask
+    neg_close_count = neg_close_mask.sum()
+    if neg_close_count > 0:
+        _logger.warning("检测到 %s 个负收盘价，前瞻收益已标记为 np.nan", neg_close_count)
     safe_close = close_prices.where(close_prices > _EPSILON, np.nan)
 
     forward_return = (future_close - close_prices) / safe_close
@@ -355,7 +369,7 @@ def calculate_bollinger_pb(
     return factor_df
 
 
-calculate_bollinger_pb.required_cols = ["close", "asset", "date"]  # type: ignore[attr-defined]
+calculate_bollinger_pb.required_cols = [_COL_CLOSE, _COL_ASSET, _COL_DATE]  # type: ignore[attr-defined]
 
 
 # ============================================================================
@@ -480,7 +494,7 @@ def calculate_kdj_j(
     return factor_df
 
 
-calculate_kdj_j.required_cols = ["close", "high", "low", "asset", "date"]  # type: ignore[attr-defined]
+calculate_kdj_j.required_cols = [_COL_CLOSE, _COL_HIGH, _COL_LOW, _COL_ASSET, _COL_DATE]  # type: ignore[attr-defined]
 
 
 # ============================================================================
@@ -575,7 +589,7 @@ def calculate_turnover_surge(
     return factor_df
 
 
-calculate_turnover_surge.required_cols = ["turnover_rate", "asset", "date"]  # type: ignore[attr-defined]
+calculate_turnover_surge.required_cols = [_COL_TURNOVER_RATE, _COL_ASSET, _COL_DATE]  # type: ignore[attr-defined]
 
 
 # ============================================================================
@@ -635,7 +649,7 @@ def calculate_rsi_df(
 
     if len(factor_df) == 0:
         factor_df["rsi"] = pd.Series([], dtype="float64", index=factor_df.index)
-        return factor_df.loc[original_index]
+        return factor_df
 
     # 用通用 helper 替代 transform，避免 OOM（详见 _per_asset_transform docstring）
     factor_df["rsi"] = _per_asset_transform(
@@ -657,4 +671,4 @@ def calculate_rsi_df(
     return factor_df
 
 
-calculate_rsi_df.required_cols = ["close", "asset", "date"]  # type: ignore[attr-defined]
+calculate_rsi_df.required_cols = [_COL_CLOSE, _COL_ASSET, _COL_DATE]  # type: ignore[attr-defined]

@@ -156,6 +156,11 @@ class TestCalculateRSI:
         assert (valid_rsi == 50).all()  # 有效值全部为 50
         assert pd.isna(rsi.iloc[0])  # 第一天是 NaN
 
+    def test_logger_parameter(self, sample_close_prices, test_logger):
+        """测试 logger 参数（v3: 新增可选 logger_arg）"""
+        rsi = calculate_rsi(sample_close_prices, period=6, logger_arg=test_logger)
+        assert isinstance(rsi, pd.Series)
+
 
 # ============================================================================
 # calculate_volume_ratio 测试
