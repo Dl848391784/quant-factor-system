@@ -77,7 +77,22 @@ def main():
     parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
     args = parser.parse_args()
 
-    # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）
+    # 启动横幅由公共模块 factor_ic_runner 统一打印（含 min_stocks/force_full）。
+    # 本地启动参数日志（issue 5：消除"启动上下文唯一记录点在公共模块"的可观测性盲区）：
+    # 公共模块横幅若被日志级别过滤、或公共模块实现回归不再打印参数，本模块原本将无任何
+    # 启动上下文落盘。此处冗余但低成本：模块自身 logger 输出一行 INFO，
+    # 把实际生效的 min_stocks / force_full 锁定到本模块日志文件，与公共横幅互补。
+    # 布尔格式说明：force_full=%s 沿用 Python bool 默认字符串化（True/False），
+    # 与公共模块 factor_ic_runner.py 启动行 "入口参数: min_stocks=%s, force_full=%s"
+    # 完全一致，保持项目内布尔日志检索语法统一（grep "force_full=True" 可同时
+    # 命中本模块与公共模块），不切换为 yes/no 或 1/0 风格是有意为之
+    # （对齐 ic_industry_amplitude_trend_1d.py 同位修复）。
+    logger.info(
+        "启动 run_factor_ic: factor=%s min_stocks=%d force_full=%s",
+        SPEC.factor_name,
+        args.min_stocks,
+        args.force_full,
+    )
     result = run_factor_ic(
         spec=SPEC,
         min_stocks=args.min_stocks,
