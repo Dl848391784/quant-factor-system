@@ -40,7 +40,7 @@ logger = get_logger(__name__)
 # FactorSpec 声明式注册（遵循 factor_cols_literal_constant_design.md §4.1）
 # ============================================================================
 
-SPEC = None  # 初始化为 None，防止注册失败 raise 后 main() 引用 NameError
+SPEC = None  # 模块级占位，注册成功后由 register_factor 赋值
 
 try:
     SPEC = register_factor(
@@ -68,10 +68,6 @@ except SpecRegistrationError as e:
 
 def main():
     """CLI 主入口"""
-    if SPEC is None:
-        logger.critical("SPEC 未注册，无法执行 IC 计算（注册阶段可能已失败）")
-        sys.exit(2)  # import-time 注册失败
-
     parser = argparse.ArgumentParser(description="行业换手率趋势因子 IC 计算器")
     parser.add_argument("--force-full", action="store_true", help="强制全量计算")
     parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
@@ -90,12 +86,10 @@ def main():
     # 因子计算 result 已成功生成，主结果产物可用，下游可正常消费。
     try:
         log_factor_summary(result, "行业换手率趋势因子", logger)
-    except Exception as e:
+    except Exception:
         logger.exception(
-            "log_factor_summary 摘要输出阶段失败: %s %s（因子计算 result 已成功生成；"
-            "故障源 = 摘要日志层而非 run_factor_ic 业务路径）",
-            type(e).__name__,
-            str(e),
+            "log_factor_summary 摘要输出阶段失败（因子计算 result 已成功生成；"
+            "故障源 = 摘要日志层而非 run_factor_ic 业务路径）"
         )
         sys.exit(3)
 
@@ -105,12 +99,11 @@ if __name__ == "__main__":
     try:
         main()
     except DataSchemaError:
-        # schema 失败（required_columns 与数据源列不匹配），单独捕获保留明确语义
         logger.exception("行业换手率趋势因子IC计算失败 (数据列依赖不匹配)")
-        sys.exit(1)
+        sys.exit(4)  # H12 R18: schema 失败 → 检查上游数据
     except FactorCalcError:
         logger.exception("行业换手率趋势因子IC计算失败")
-        sys.exit(1)
+        sys.exit(5)  # H12 R19: 因子计算失败 → 检查计算代码
     except Exception:
         logger.exception("未预期的错误")
         sys.exit(1)
