@@ -12,8 +12,8 @@
   涨跌方向一致性）
 - ``calculate_positive_day_ratio_5(factor_df, ...)``：5 日内上涨天数比例
 - ``calculate_ma5_deviation(factor_df, ...)``：``(close - ma5) / ma5``
-- ``calculate_near_high_ratio_5(factor_df, ...)``：``close / max(high, 5d)``
-  （5 日新高接近度）
+- ``calculate_near_high_ratio_5(factor_df, ...)``：``(close - min5) / (max5 - min5)``
+  （5 日新高接近度，基于收盘价 5 日窗口的相对位置）
 
 依赖
 ====
