@@ -27,6 +27,7 @@ import pandas as pd
 import pytest
 
 from data_fetchers.factor_generator import (
+    _atomic_write_json,
     _calc_pct,
     _load_json_gz_data,
     _nan_to_null,
@@ -347,6 +348,99 @@ class TestLoadJsonGzData:
 
         with pytest.raises(ValueError, match="测试数据缺少 'data' 字段"):
             _load_json_gz_data(path, "测试", silent_logger)
+
+
+# ============================================================================
+# _atomic_write_json: 小型 JSON 原子写出（Step 15 列名清单等场景）
+# ============================================================================
+
+
+class TestAtomicWriteJson:
+    """_atomic_write_json 单元测试（写入 → 原子替换 → finally 清理）"""
+
+    def test_success_creates_file(
+        self,
+        tmp_path: Path,
+        silent_logger: logging.Logger,
+    ) -> None:
+        """正常写入：目标文件存在，临时文件不存在"""
+        path = tmp_path / "manifest.json"
+        payload = {"all_cols": ["a", "b", "c"], "generated_at": "2026-06-16 10:00:00"}
+
+        _atomic_write_json(payload, path, silent_logger)
+
+        # 目标文件存在 + 内容匹配
+        assert path.exists()
+        with open(path, encoding="utf-8") as f:
+            assert json.load(f) == payload
+        # 临时文件已被 os.replace 移走
+        assert not (tmp_path / "manifest.json.tmp").exists()
+
+    def test_chinese_content_no_escape(
+        self,
+        tmp_path: Path,
+        silent_logger: logging.Logger,
+    ) -> None:
+        """ensure_ascii=False：中文 / 因子名直接可读"""
+        path = tmp_path / "zh.json"
+        payload = {"因子": ["振幅", "换手率"]}
+
+        _atomic_write_json(payload, path, silent_logger)
+
+        text = path.read_text(encoding="utf-8")
+        # 直接含中文（未被 \uXXXX 转义）
+        assert "振幅" in text
+        assert "换手率" in text
+
+    def test_overwrite_existing_atomically(
+        self,
+        tmp_path: Path,
+        silent_logger: logging.Logger,
+    ) -> None:
+        """覆盖已存在文件：os.replace 原子替换"""
+        path = tmp_path / "existing.json"
+        path.write_text('{"old": "data"}', encoding="utf-8")
+
+        _atomic_write_json({"new": "data"}, path, silent_logger)
+
+        with open(path, encoding="utf-8") as f:
+            assert json.load(f) == {"new": "data"}
+
+    def test_write_failure_cleans_temp_file(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """json.dump 失败时（不可序列化对象）：临时文件被 finally 清理"""
+        path = tmp_path / "bad.json"
+        # set 不可 json.dump → TypeError → 临时文件已写部分内容但 os.replace 未执行
+        unserializable: Any = {"k": {1, 2, 3}}
+
+        logger = logging.getLogger("test_atomic_write_fail")
+        logger.handlers.clear()
+
+        with pytest.raises(TypeError):
+            _atomic_write_json(unserializable, path, logger)
+
+        # 关键断言：临时文件被 finally 清理（避免目录残留）
+        assert not (tmp_path / "bad.json.tmp").exists()
+        # 目标文件未生成（os.replace 未执行）
+        assert not path.exists()
+
+    def test_replace_success_does_not_unlink_target(
+        self,
+        tmp_path: Path,
+        silent_logger: logging.Logger,
+    ) -> None:
+        """关键回归：os.replace 成功后 finally 不应误删目标文件
+
+        与 _write_factor_json_gz 的 replaced 标志同源问题。"""
+        path = tmp_path / "target.json"
+        _atomic_write_json({"a": 1}, path, silent_logger)
+
+        # 目标文件依然存在（finally 因 replaced=True 未删）
+        assert path.exists()
+        with open(path, encoding="utf-8") as f:
+            assert json.load(f) == {"a": 1}
 
 
 if __name__ == "__main__":

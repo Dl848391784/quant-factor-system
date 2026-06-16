@@ -654,6 +654,47 @@ def _nan_to_null(obj: Any) -> Any:
     return obj
 
 
+def _atomic_write_json(payload: Any, path: Path, logger: logging.Logger) -> None:
+    """原子写出小型 JSON 文件（< 1MB）。
+
+    用于 Step 15 列名清单等小文件场景，与 _write_factor_json_gz 的流式批写互补：
+    - _write_factor_json_gz：大文件（百 MB 级），流式批写避免 OOM，gzip 压缩
+    - _atomic_write_json：小文件（KB 级），全量 json.dump，不压缩
+
+    实现细节（与 _write_factor_json_gz 对齐）：
+    1. 写临时文件 path + ".tmp"
+    2. os.replace 原子替换目标文件（标记 replaced=True）
+    3. finally 中：os.replace 失败 → 清理临时文件；成功 → 不动目标文件
+
+    Args:
+        payload: 任意可 json.dump 的 Python 对象
+        path: 目标文件路径
+        logger: 日志器（OSError 时 warning + raise）
+
+    Raises:
+        OSError: 写入或替换失败（调用方决定是否降级为 warn）
+
+    Note:
+        - 不复用 _write_factor_json_gz：流式批写场景与全量写场景的数据流形态不同
+        - replaced 标志避免 finally 误删已原子替换成功的目标文件
+        - encoding='utf-8' + ensure_ascii=False：支持中文 / 因子名直接可读
+    """
+    temp_path = path.parent / (path.name + ".tmp")
+    replaced = False
+    try:
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        os.replace(temp_path, path)
+        replaced = True
+    finally:
+        # os.replace 成功后 temp_path 已不存在；失败则需清理
+        if not replaced and temp_path.exists():
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError as cleanup_err:
+                logger.warning("临时文件清理失败: %s, 原因: %s", temp_path, cleanup_err)
+
+
 def _write_factor_json_gz(
     output_df: pd.DataFrame,
     output_path: Path,
@@ -999,6 +1040,7 @@ def generate_all_factors(
         # 遵循 factor_cols_literal_constant_design.md §3.5：
         # 将 _OUTPUT_COLS 结构化输出为独立 JSON 文件，供 factor_ic 模块
         # 校验 required_columns 是否与数据源对齐（M4 合规：读数据产物 ≠ import 模块）
+        # 使用 _atomic_write_json 保证原子性：避免下游读到半写入的文件
         columns_path = output_path.parent / "factor_ic_data_columns.json"
         try:
             columns_manifest = {
@@ -1008,8 +1050,7 @@ def generate_all_factors(
                 "all_cols": list(_OUTPUT_COLS),
                 "generated_at": metadata["generated_at"],
             }
-            with open(columns_path, "w", encoding="utf-8") as f:
-                json.dump(columns_manifest, f, ensure_ascii=False, indent=2)
+            _atomic_write_json(columns_manifest, columns_path, logger)
             logger.info("列名清单已保存: %s", columns_path)
         except OSError as e:
             # 列名清单写入失败不应阻塞主流程（降级为 warn）
