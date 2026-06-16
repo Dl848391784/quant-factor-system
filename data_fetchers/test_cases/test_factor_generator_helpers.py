@@ -779,6 +779,55 @@ class TestOutputDfNoneSentinel:
         )
 
 
+class TestAllColsCountsConsistency:
+    """_ALL_COLS_COUNTS 与各源元组长度一致（bug 2 回归）"""
+
+    def test_all_cols_counts_matches_source_tuples(self) -> None:
+        """_ALL_COLS_COUNTS 字段值必须等于对应元组的 len()，不允许手动数字硬编码偏离。"""
+        from data_fetchers.factor_generator import (
+            _ALL_COLS_COUNTS,
+            _BASE_COLS,
+            _EXTENDED_FACTOR_COLS,
+            _OUTPUT_COLS,
+            _RETURN_COLS,
+        )
+
+        assert _ALL_COLS_COUNTS["base_cols"] == len(_BASE_COLS)
+        assert _ALL_COLS_COUNTS["extended_factor_cols"] == len(_EXTENDED_FACTOR_COLS)
+        assert _ALL_COLS_COUNTS["return_cols"] == len(_RETURN_COLS)
+        assert _ALL_COLS_COUNTS["total"] == len(_OUTPUT_COLS)
+        # 求和也必须等于 total（防止有人在元组以外加列）
+        assert (
+            _ALL_COLS_COUNTS["base_cols"] + _ALL_COLS_COUNTS["extended_factor_cols"] + _ALL_COLS_COUNTS["return_cols"]
+            == _ALL_COLS_COUNTS["total"]
+        )
+
+    def test_output_cols_definition_has_no_stale_count(self) -> None:
+        """_OUTPUT_COLS 定义上方的注释禁止出现过时的硬编码数字（如 (15)）。
+
+        反面案例：曾经写 `_EXTENDED_FACTOR_COLS(15)` 但实际是 31，导致维护者误判。
+        """
+        import re
+        from pathlib import Path
+
+        from data_fetchers import factor_generator as fg
+
+        source = Path(fg.__file__).read_text(encoding="utf-8")
+        # 定位 _OUTPUT_COLS 定义所在行的前 5 行注释（注释区域）
+        lines = source.split("\n")
+        out_idx = next((i for i, line in enumerate(lines) if line.startswith("_OUTPUT_COLS:")), -1)
+        assert out_idx > 0, "_OUTPUT_COLS 定义未找到"
+        comment_block = "\n".join(lines[max(0, out_idx - 5) : out_idx])
+
+        # 反例：禁止 _BASE_COLS(数字) / _EXTENDED_FACTOR_COLS(数字) / _RETURN_COLS(数字)
+        # 形式的硬编码数字注释（容易过时）
+        stale_pattern = re.compile(r"_(BASE|EXTENDED_FACTOR|RETURN)_COLS\(\d+\)")
+        match = stale_pattern.search(comment_block)
+        assert match is None, (
+            f"_OUTPUT_COLS 注释禁止硬编码列数 `{match.group(0) if match else ''}`，列数已迁移至 _ALL_COLS_COUNTS 运行时计算"
+        )
+
+
 if __name__ == "__main__":
     import sys
 

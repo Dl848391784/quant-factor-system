@@ -193,8 +193,19 @@ _BASE_COLS: tuple[str, ...] = (
 _OHLCV_INDEX_COLS: frozenset[str] = frozenset({"date", "asset", "open", "close", "high", "low", "volume"})
 
 # 输出列名：基础列 + 扩展因子 + 收益数据（元组防止意外修改）
-# 组成：_BASE_COLS(10) + _EXTENDED_FACTOR_COLS(15) + _RETURN_COLS(3)
+# 组成：_BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS
+# 列数动态由各源元组计算，避免手动维护数字与实际不一致。
+# 当前规模见 _ALL_COLS_COUNTS 模块级常量（运行时校验）。
 _OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS
+
+# 列数清单（供日志、metadata、回归测试使用）：动态从源元组计算，
+# 单一事实源（_BASE_COLS / _EXTENDED_FACTOR_COLS / _RETURN_COLS）。
+_ALL_COLS_COUNTS: dict[str, int] = {
+    "base_cols": len(_BASE_COLS),
+    "extended_factor_cols": len(_EXTENDED_FACTOR_COLS),
+    "return_cols": len(_RETURN_COLS),
+    "total": len(_OUTPUT_COLS),
+}
 
 
 # ============================================================================
