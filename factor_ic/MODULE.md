@@ -615,6 +615,67 @@ run_factor_ic(
 
 ---
 
+## M3.4 ic 脚本 CLI 调用规范统一为 `python -m`
+
+**What**: 所有 `factor_ic/ic_*.py` 入口脚本仅支持 `python -m factor_ic.ic_xxx_1d` 调用方式，禁止脚本头部 `sys.path.insert`。
+
+**How**:
+1. 项目根 `pyproject.toml` 声明 `[tool.pytest.ini_options].pythonpath = ["."]`，pytest 自动注入项目根
+2. 项目根 `conftest.py` 注入 `_PROJECT_ROOT` 到 `sys.path[0]`，pytest 与 IDE 直跑双保险
+3. ic 脚本头部仅保留 `import argparse / sys / from data_fetchers.factor_calculator import ... / from factor_ic.common.xxx import ...`，无任何 `sys.path.insert(...)`
+4. 命令行调用统一为 `python -m factor_ic.ic_xxx_1d [--force-full] [--min-stocks N]`
+
+**Don't**:
+```bash
+# ✗ 错误: 直接以脚本路径执行（项目根未入 sys.path，data_fetchers/factor_ic 包不可见）
+python factor_ic/ic_amplitude_1d.py
+
+# ✗ 错误: 在脚本头部插 sys.path（重复声明，34 处维护负担）
+sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
+from data_fetchers.factor_calculator import calculate_xxx  # noqa: E402
+```
+
+**Why**:
+- 旧方案 34 个 ic 脚本各自维护 `sys.path.insert + 7 个 noqa: E402`，重构脚本路径或包名时需 34 处同步修改
+- `python -m` 模式下 Python 自动把 cwd 加入 `sys.path`，与 conftest/pyproject 的注入机制一致
+- 移除噪声 import（`from pathlib import Path` / `import factor_ic as _path_check` 等仅为路径校验存在的代码），脚本头部减少 ~10 行
+- 与 pipeline（已使用 `python -m`）调用方式天然一致，无需双轨
+
+**When**:
+- 新增 ic 入口脚本：必须遵循
+- 老 ic 脚本：已批量迁移（34/34 完成，commit `1223389`）
+- 调试单脚本：手动执行命令需切换为 `python -m factor_ic.<module_name>`（不带 `.py`）
+
+**Examples**:
+```bash
+# ✓ 正确：CLI 直接执行
+python -m factor_ic.ic_amplitude_1d --force-full
+python -m factor_ic.ic_kdj_j_1d --min-stocks 50
+
+# ✓ 正确：pipeline 调用（已是 -m，无需修改）
+python -m factor_ic.ic_industry_amplitude_trend_1d
+```
+
+```python
+# ✓ 正确：脚本头部仅 import，无 sys.path 操作
+import argparse
+import sys
+
+from data_fetchers.factor_calculator import calculate_amplitude
+from factor_ic.common.factor_ic_runner import run_factor_ic
+from factor_ic.common.factor_spec import FactorSpec, register_factor
+```
+
+**Verify**:
+- `grep -l "sys.path.insert" factor_ic/ic_*.py` 必须为空（无脚本头部路径注入）
+- `grep -l "noqa: E402" factor_ic/ic_*.py` 必须为空（无路径相关 noqa 标记）
+- `python -m factor_ic.ic_industry_amplitude_trend_1d --help` 必须正常输出 argparse 帮助
+- `pytest factor_ic/common/test_factor_spec.py factor_ic/common/test_factor_spec_consistency.py` 全部通过
+
+**关联设计**: `factor_ic/docs/plans/factor_spec_required_cols_and_sys_path_design.md §3.2 方案 4-A`（commit `e874e65`）。
+
+---
+
 ## M4. 跨目录公共模块禁止调用
 
 **What**:公共模块仅在本目录内复用,禁止跨目录调用 (`factor_ic/` 脚本不可 `from backtest.common import`)。
