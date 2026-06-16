@@ -445,7 +445,7 @@ grep -rn "assert False\|if False:" factor_ic/ comprehensive_factor/ backtest/
 | 编号 | 规则 | 状态 | 升级条件 |
 |------|------|------|---------|
 | H4 | 字段非空：None 必须显式设置 + 记录原因 | [预留]（规则定义见 S4） | 校验函数 `validate_and_save_output` 交付后，执行下方"S4 → H4 升级 checklist" |
-| H11 | 必测场景：每个场景至少一个可运行的测试函数（pytest --collect-only 可发现） | [待实施]（规则定义已生效，工具未交付） | `scripts/check_required_test_scenarios.py` 交付后启用 CI 强制 |
+| H14 | 必测场景：每个场景至少一个可运行的测试函数（pytest --collect-only 可发现） | [待实施]（规则定义已生效，工具未交付） | `scripts/check_required_test_scenarios.py` 交付后启用 CI 强制 |
 | S4 | 字段非空：None 必须显式设置 + 记录原因（运行时校验） | [部分生效]：依赖人工 review；待 `validate_and_save_output` 交付后升级为 H4 | 见下方 checklist |
 
 **S4 → H4 升级 checklist（升级时必须同步修改的位置）**：
@@ -609,15 +609,15 @@ CI 任务（具体实现）：
 
 （以上为示例，H2=输出位置、H7=路径导入、H9=任务粒度为典型组合）
 
-**可引用的规则编号**：以"硬规则（违反即拒收）"表和"建议（软约束）"表为唯一来源。"路线图：待实施 / 预留规则"表中的 H4、H11、S4 不可作为取证依据。
+**可引用的规则编号**：以"硬规则（违反即拒收）"表和"建议（软约束）"表为唯一来源。"路线图：待实施 / 预留规则"表中的 H4、H14、S4 不可作为取证依据。
 
 CI 脚本校验（`scripts/validate_pr_reference.py`）：
-1. 规则编号格式正确：H1、H2、H3、H5、H6、H7、H8、H9、H10、S1、S2、S3
+1. 规则编号格式正确：H1、H2、H3、H5、H6、H7、H8、H9、H10、H11、H12、H13、S1、S2、S3
 2. 编号在硬规则表或建议表中真实存在
-3. 路线图中的规则（当前 H4、H11、S4）不可作为取证依据
+3. 路线图中的规则（当前 H4、H14、S4）不可作为取证依据
 
 **校验失败示例**：
-- 若 PR 描述写"引用 H11"，validate_pr_reference.py 抛错：`错误：H11 当前为待实施状态（见路线图），不可作为取证依据。`
+- 若 PR 描述写"引用 H14"，validate_pr_reference.py 抛错：`错误：H14 当前为待实施状态（见路线图），不可作为取证依据。`
 - 若 PR 描述写"引用 H4"，validate_pr_reference.py 抛错：`错误：H4 为预留规则（见路线图，规则定义见 S4），不可作为取证依据。`
 
 ---
