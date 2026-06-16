@@ -759,14 +759,31 @@ class TestMainQuietMode:
 
 
 class TestOutputDfNoneSentinel:
-    """generate_all_factors 用 None sentinel 替代 locals() 守卫（bug 1 回归）"""
+    """generate_all_factors output_df 生命周期约定（bug 1 回归 + R2 内存修复回归）
 
-    def test_output_df_initialized_to_none_before_try(self) -> None:
-        """源码约定：output_df 在 try 块之前初始化为 None。
+    历史：
+    - bug 1（None sentinel 时代）：output_df 在 try 前 = None，try 内 copy，
+      finally 用 `if output_df is not None` 守卫。禁止 `"output_df" in locals()`
+      因 locals() 在 CPython 中不可靠且有性能开销。
+    - R2 修复：del factor_df 从 try 内移到 try 之前。为此 output_df 切片也必须
+      上提到 try 之前（missing_cols 检查通过后立即执行），try 进入时 output_df
+      一定存在。None sentinel 失去意义，finally 改为无守卫 `del output_df`。
+
+    本测试组保留两条核心防御：
+    1. output_df 在 try 之前已赋值（避免回退到 try 内首次赋值 → 再次出现
+       del factor_df 跳过的内存泄漏路径）
+    2. finally 永不使用 `"output_df" in locals()` 守卫（locals 反模式）
+    """
+
+    def test_output_df_assigned_before_try(self) -> None:
+        """源码约定：output_df 首次赋值在 try 块之前（R2 内存修复关键约束）。
 
         通过 AST 静态解析验证：
-        1. output_df 首次赋值出现在 try 块外（早期初始化）
-        2. 该首次赋值的值为 None
+        1. 在 generate_all_factors 函数体顶层找到首个 output_df 赋值
+        2. 该赋值在所有 ast.Try 节点之前（行号严格小于）
+
+        若首次赋值落到 try 内，意味着 del factor_df 也回到 try 内，
+        copy 抛 KeyError 时 factor_df 大对象将随异常持续驻留外层栈帧。
         """
         import ast
         from pathlib import Path
@@ -786,40 +803,43 @@ class TestOutputDfNoneSentinel:
         # 在函数体直接子节点中查找首个 output_df 赋值（不深入子作用域）
         first_assign_node: ast.AST | None = None
         for node in func.body:
-            # AnnAssign: output_df: ... = None
+            # AnnAssign: output_df: ... = ...
             if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "output_df":
                 first_assign_node = node
                 break
-            # Assign: output_df = None
+            # Assign: output_df = ...
             if isinstance(node, ast.Assign) and any(
                 isinstance(t, ast.Name) and t.id == "output_df" for t in node.targets
             ):
                 first_assign_node = node
                 break
 
-        assert first_assign_node is not None, "未在 generate_all_factors 函数体顶层找到 output_df 初始化"
+        assert first_assign_node is not None, "未在 generate_all_factors 函数体顶层找到 output_df 赋值"
 
-        # 验证赋值为 None（AnnAssign 在仅声明无赋值时 value 为 None，需先排除）
-        value_node = first_assign_node.value
-        assert value_node is not None, "output_df 仅声明类型而无 = None 赋值，必须显式赋值 None"
-        assert isinstance(value_node, ast.Constant) and value_node.value is None, (
-            f"output_df 必须初始化为 None（None sentinel），实际: {ast.dump(value_node)!r}"
+        # 找到函数体顶层的 ast.Try（包裹 Step 13~15 的那个），验证 output_df 赋值在其之前
+        try_nodes = [n for n in func.body if isinstance(n, ast.Try)]
+        assert try_nodes, "generate_all_factors 顶层未找到 try/finally 块（Step 13~15 包裹）"
+        first_try = try_nodes[0]
+
+        assert first_assign_node.lineno < first_try.lineno, (
+            f"output_df 首次赋值（行 {first_assign_node.lineno}）必须在 try 块（行 {first_try.lineno}）之前。"
+            f"若回退到 try 内首次赋值，del factor_df 将再次受到 KeyError 影响（R2 修复回归）。"
         )
 
-    def test_finally_uses_is_not_none_not_locals(self) -> None:
-        """源码约定：finally 块用 `output_df is not None` 而非 `"output_df" in locals()`"""
+    def test_finally_does_not_use_locals_guard(self) -> None:
+        """源码约定：finally 块禁止使用 `"output_df" in locals()` 守卫（bug 1 回归）。
+
+        locals() 在 CPython 异常退出帧时不可靠且每次构造新 dict，是已知反模式。
+        R2 修复后 output_df 在 try 之前已无条件赋值，finally 可直接 `del output_df`，
+        无需任何守卫。本测试只防御 locals() 反模式重新出现。
+        """
         from pathlib import Path
 
         from data_fetchers import factor_generator as fg
 
         source = Path(fg.__file__).read_text(encoding="utf-8")
-        # 反例：禁止 locals() 守卫
         assert '"output_df" in locals()' not in source, (
             'finally 中不得使用 `"output_df" in locals()`：locals() 在 CPython 中不可靠且有性能开销'
-        )
-        # 正例：必须有 None sentinel 守卫
-        assert "if output_df is not None:" in source, (
-            "finally 中必须使用 `if output_df is not None:` 守卫（None sentinel pattern）"
         )
 
 

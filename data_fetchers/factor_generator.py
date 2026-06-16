@@ -868,17 +868,17 @@ def generate_all_factors(
     if missing_cols:
         raise KeyError(f"输出列不存在: {missing_cols}，请检查因子计算函数的输出列名是否与 _EXTENDED_FACTOR_COLS 一致")
 
-    # output_df = None：None sentinel pattern，让 finally 清理条件语义明确
-    # （locals() 在 CPython 异常退出帧时不可靠且每次构造新 dict）
-    output_df: pd.DataFrame | None = None
+    # 提前执行 output_df 切片 + del factor_df：missing_cols 已通过，列选择不会再抛 KeyError；
+    # 即便仍意外抛出（如 cast 失败），factor_df 也会随当前函数栈展开释放（不进入 try/finally
+    # 才能避免清理路径误引用未定义变量）。修复点：原实现把 copy + del 放在 try 内，
+    # 一旦 copy 抛 KeyError，del factor_df 跳过，factor_df 大对象将随异常持续驻留外层栈帧。
+    # cast：pandas 列选择推断为 DataFrame | Series，运行时实为 DataFrame
+    output_df = cast(pd.DataFrame, factor_df[list(_OUTPUT_COLS)].copy())
+    del factor_df  # 可能含中间列，比 output_df 更大
 
     # Step 13~15 包裹 try/finally：异常路径下也释放 output_df（约 30% factor_df 体积），
     # 避免外层调用方栈帧持续持有大对象（重试 / 后续任务场景）
     try:
-        # cast：pandas 列选择推断为 DataFrame | Series，运行时实为 DataFrame
-        output_df = cast(pd.DataFrame, factor_df[list(_OUTPUT_COLS)].copy())
-
-        del factor_df  # 可能含中间列，比 output_df 更大
         # ========== Step 13: 保存输出 ==========
         logger.info("Step 13: 保存输出...")
 
@@ -944,9 +944,10 @@ def generate_all_factors(
 
         return metadata
     finally:
-        # 异常路径下显式去除 output_df 引用；正常路径靠 return 后栈解开 + GC
-        if output_df is not None:
-            del output_df
+        # output_df 在 try 之前已无条件赋值（missing_cols 检查通过后立即 copy），
+        # 进入 finally 时一定存在。异常路径下显式 del 释放（约 30% factor_df 体积）；
+        # 正常路径走 return，栈解开后由 GC 回收。
+        del output_df
 
 
 # ============================================================================
