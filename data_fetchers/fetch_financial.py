@@ -70,11 +70,19 @@
   - Fix 3: 检查点 clear 后 final_stale 计算丢失前批成功码 → 新增 successfully_fetched_codes 集合跨检查点累积
   - Fix 4: _is_rate_limit_error 关键词 "限制" 过于宽泛 → "请求频率限制" / "访问频率"
   - Fix 5: fetch_financial_data_for_stock 删除 df=pd.DataFrame() 初始化，改用 for-else 结构确保 df 只在成功 break 后使用
--v1.0l (2026-06-15): 4 项缺陷修复
+- v1.0l (2026-06-15): 4 项缺陷修复
   - Fix 1: stale_codes_from_cache 与 all_codes 取交集，过滤已退市/改代码的废弃股票（避免无效请求和 codes_to_fetch 分母虚增）
   - Fix 2: _CHECKPOINT_INTERVAL 100→500，减少全量序列化 stock_data 的 I/O 开销（每次检查点序列化规模与最终写入相当）
   - Fix 3: 调用方 warning 文案"格式无效"→"不符合YYYY-MM-DD格式或非合法日期"（明确区分正则不匹配 vs 日期非法）
   - Fix 4: final_stale 计算改用 successfully_fetched_codes（仅本次请求成功的），成功重拉计数不再虚报历史已有数据
+- v1.0m (2026-06-16): 7 项缺陷修复（死代码清理 + 语义/日志/统计修正）
+  - Fix 1: _FINANCIAL_FIELD_MAP 字段提取循环 else 分支删除（6 个 key 已被 if/elif 全覆盖，分支死代码）
+  - Fix 2: _parse_report_date pd.Timestamp 独立分支删除（pd.Timestamp 是 datetime.date 子类，已被上方分支优先捕获，永远不可达）
+  - Fix 3: 年化 EPS 条件 `eps != 0` 移除（EPS == 0 为有效盈亏平衡值，年化结果应为 0 而非 None）
+  - Fix 4: fetch_financial_data_for_stock for-else else 块删除（最后一次重试 attempt < _RATE_LIMIT_RETRIES 为 False 必走 return None，else 不可达）
+  - Fix 5: 进度日志移至 result 处理之后（原位置在 fetch_financial_data_for_stock 调用前打印，统计数字比已请求次数少 1）
+  - Fix 6: 检查点行内注释 "每 100 只" → "每 500 只"，与常量 _CHECKPOINT_INTERVAL=500 对齐
+  - Fix 7: 增量模式失败码（含非缓存 code）统一记录到 stale_codes，final_stale = (上次 stale - 本次成功重拉) ∪ 本次新失败，提升日志可观测性
 
 约束合规:
 - 输出到 result 目录（MODULE.md 约束 #2）
@@ -114,7 +122,7 @@ except ImportError:
     )
 
 # 版本号常量（MODULE.md 约束 #16）
-_OUTPUT_VERSION = "1.0l"
+_OUTPUT_VERSION = "1.0m"
 
 # 模块级固定时间戳（仅标记脚本启动时间，meta 中使用 dt_cls.now() 取完成时间）
 _NOW = dt_cls.now()
@@ -267,6 +275,8 @@ def _parse_report_date(report_date_raw: Any) -> str | None:
     except (ValueError, TypeError):
         pass
     if isinstance(report_date_raw, datetime.date):
+        # 注意：pd.Timestamp 是 datetime.date 子类，会在此分支被捕获，
+        # 其 strftime("%Y-%m-%d") 行为与 datetime.date 一致，无需独立分支。
         return report_date_raw.strftime("%Y-%m-%d")
     if isinstance(report_date_raw, str):
         if _REPORT_DATE_RE.match(report_date_raw):
@@ -277,17 +287,6 @@ def _parse_report_date(report_date_raw: Any) -> str | None:
             except ValueError:
                 return None
             return report_date_raw
-        return None
-    # pd.Timestamp 单独处理：str(pd.Timestamp(...)) 返回 "YYYY-MM-DD HH:MM:SS" 格式，
-    # 无法通过 _REPORT_DATE_RE 正则，需用 .strftime("%Y-%m-%d") 格式化
-    if isinstance(report_date_raw, pd.Timestamp):
-        formatted = report_date_raw.strftime("%Y-%m-%d")
-        if _REPORT_DATE_RE.match(formatted):
-            try:
-                datetime.date.fromisoformat(formatted)
-            except ValueError:
-                return None
-            return formatted
         return None
     # 其他类型：尝试转为字符串后校验
     try:
@@ -339,6 +338,10 @@ def fetch_financial_data_for_stock(
         数据为空返回空列表（该股票确实无财务数据）
     """
     _logger = logger_arg or logger
+    # df 在 try 成功后立即 break；except 分支均会 return None 或 continue。
+    # 初始化为 None 仅为静态分析（Pyright reportPossiblyUnbound）友好，
+    # 实际执行路径下 `assert df is not None` 永远成立。
+    df: pd.DataFrame | None = None
     for attempt in range(1, _RATE_LIMIT_RETRIES + 1):
         try:
             df = ak.stock_financial_abstract_ths(symbol=symbol)
@@ -358,6 +361,10 @@ def fetch_financial_data_for_stock(
                 )
                 time.sleep(delay)
                 continue
+            # 非限流异常 或 限流但已达最后一次重试 → 直接返回 None
+            # 最后一次循环 attempt == _RATE_LIMIT_RETRIES，
+            # `attempt < _RATE_LIMIT_RETRIES` 为 False 必落入此分支 return None，
+            # 因此 for-else 子句永远不可达，已删除。
             _logger.warning(
                 "拉取 %s 财务数据失败: (%s) [异常信息: %s]%s",
                 symbol,
@@ -366,10 +373,8 @@ def fetch_financial_data_for_stock(
                 f" (重试{_RATE_LIMIT_RETRIES}次后仍失败)" if is_rate_limit else "",
             )
             return None
-    else:
-        # 所有重试均为限流且通过 continue 跳过，未 break 也未 return
-        return None
 
+    assert df is not None  # 静态分析：循环必通过成功 break 或 except return 退出
     if df.empty:
         _logger.info("%s 财务数据为空", symbol)
         return []
@@ -392,25 +397,18 @@ def fetch_financial_data_for_stock(
 
         # 提取关键字段（中文名 → 英文逻辑名）
         # 百分比字段: 净利润同比增长率, 营业总收入同比增长率, ROE
+        # _FINANCIAL_FIELD_MAP 共 6 个字段：4 个百分比 + 2 个数值带单位，已被下方分支全覆盖
         for cn_name, en_name in _FINANCIAL_FIELD_MAP.items():
             if cn_name in ("净利润同比增长率", "营业总收入同比增长率", "净资产收益率", "净资产收益率-摊薄"):
                 record[en_name] = _parse_percentage(row.get(cn_name, None))
-            elif cn_name in ("基本每股收益",) or cn_name in ("每股净资产",):
+            elif cn_name in ("基本每股收益", "每股净资产"):
                 record[en_name] = _parse_numeric_with_unit(row.get(cn_name, None))
-            else:
-                raw_val = row.get(cn_name, None)
-                try:
-                    if pd.isna(raw_val):
-                        record[en_name] = None
-                    else:
-                        record[en_name] = float(raw_val)
-                except (ValueError, TypeError):
-                    record[en_name] = None
 
         # 计算年化 EPS（用于 PE 计算）
         # 遵循 PROJECT.md R15（显式除零保护）：factor 为 None 时置 None 而非静默兜底
+        # 注意：eps == 0 是有效的盈亏平衡数值（非缺失），年化后仍为 0，不应置 None。
         eps = record.get("basic_eps")
-        if eps is not None and eps != 0:
+        if eps is not None:
             try:
                 parts = report_date_str.split("-")
                 month = int(parts[1])
@@ -596,7 +594,7 @@ def main(logger_arg: logging.Logger | None = None) -> int:
     empty = 0
     fetch_count = 0  # 实际发起 API 请求的次数（不含跳过）
     total_new_count = 0  # 本次运行实际新增的股票总数（不受检查点 clear 影响）
-    stale_codes: set[str] = set()  # 全量模式下 API 失败的股票代码，记录到 meta
+    stale_codes: set[str] = set()  # 本次运行 API 失败的股票代码（全量/增量统一记录），最终汇入 meta.stale_codes
 
     for i, code in enumerate(all_codes):
         # 增量模式跳过已有数据（但 stale_codes_from_cache 中的股票强制重拉）；全量模式全部重新拉取
@@ -606,7 +604,22 @@ def main(logger_arg: logging.Logger | None = None) -> int:
 
         fetch_count += 1
 
-        # Fix 4: 进度日志以实际请求次数触发，而非原始索引 i
+        result = fetch_financial_data_for_stock(code, logger_arg=_logger)
+        if result is None:
+            failed += 1
+            # Fix 7: 统一记录失败码到 stale_codes（不再受 need_full_fetch 限制）
+            # 增量模式下若 code 不在 cached_codes，原逻辑不会记录，
+            # 导致下次运行虽仍会重试但无法通过 meta.stale_codes 日志感知失败状态。
+            stale_codes.add(code)
+        elif result:
+            new_stock_data[code] = result
+            successfully_fetched_codes.add(code)
+            total_new_count += 1
+        else:
+            empty += 1
+
+        # Fix 5: 进度日志移至 result 处理之后，使本次请求结果纳入统计。
+        # 原位置（调用前）会导致 total_new_count/failed/empty 比已请求次数少 1。
         if fetch_count % _BATCH_LOG_INTERVAL == 0:
             _logger.info(
                 "拉取进度: 请求=%d/%d (新增=%d, 失败=%d, 空数据=%d, 跳过=%d)",
@@ -618,19 +631,7 @@ def main(logger_arg: logging.Logger | None = None) -> int:
                 skipped,
             )
 
-        result = fetch_financial_data_for_stock(code, logger_arg=_logger)
-        if result is None:
-            failed += 1
-            if need_full_fetch:
-                stale_codes.add(code)
-        elif result:
-            new_stock_data[code] = result
-            successfully_fetched_codes.add(code)
-            total_new_count += 1
-        else:
-            empty += 1
-
-        # 检查点写入 — 每 100 只股票写一次缓存，防崩溃丢失
+        # 检查点写入 — 每 500 只股票写一次缓存，防崩溃丢失（_CHECKPOINT_INTERVAL）
         # 先 update 再直接写 stock_data，避免浅拷贝导致内存峰值翻倍
         if fetch_count % _CHECKPOINT_INTERVAL == 0 and new_stock_data:
             stock_data.update(new_stock_data)
@@ -684,23 +685,30 @@ def main(logger_arg: logging.Logger | None = None) -> int:
         "fields": list(_FINANCIAL_FIELD_MAP.values()) + ["annualized_eps"],
         "source": "akshare_stock_financial_abstract_ths",
     }
-    # 全量/增量模式统一处理 stale_codes：
-    # - 全量模式：stale_codes 为本次新失败的股票
-    # - 增量模式：stale_codes_from_cache 中成功重拉的需移除，仍失败的需保留
+    # 全量/增量模式统一处理 stale_codes（Fix 7：所有模式下失败码统一记录）：
+    # - stale_codes：本次运行实际失败的 code（含非缓存新失败）
+    # - 全量模式：final_stale = 本次失败码（覆盖式记录）
+    # - 增量模式：final_stale = (上次 stale - 本次成功重拉) ∪ 本次新失败码
     final_stale: set[str] = set()
     if need_full_fetch:
         final_stale = stale_codes
-    elif stale_codes_from_cache:
-        # 增量模式：本次实际成功拉取的不再 stale
-        # 用 successfully_fetched_codes（仅本次请求成功的），而非 stock_data.keys()（含历史数据）
-        final_stale = stale_codes_from_cache - successfully_fetched_codes
+    else:
+        # 增量模式：保留上次仍未成功的 + 本次新失败的，移除本次成功重拉的
+        kept_from_cache = stale_codes_from_cache - successfully_fetched_codes
+        final_stale = kept_from_cache | stale_codes
         successfully_refetched = stale_codes_from_cache & successfully_fetched_codes
-        if final_stale != stale_codes_from_cache:
+        if stale_codes_from_cache and (successfully_refetched or stale_codes):
             _logger.info(
-                "stale_codes: 上次 %d 只 → 本次成功重拉 %d 只 → 剩余 %d 只仍失败",
+                "stale_codes: 上次 %d 只 → 本次成功重拉 %d 只 → 本次新失败 %d 只 → 剩余 %d 只",
                 len(stale_codes_from_cache),
                 len(successfully_refetched),
+                len(stale_codes - stale_codes_from_cache),
                 len(final_stale),
+            )
+        elif stale_codes:
+            _logger.info(
+                "stale_codes: 上次 0 只 → 本次新失败 %d 只",
+                len(stale_codes),
             )
     if final_stale:
         meta["stale_codes"] = sorted(final_stale)
