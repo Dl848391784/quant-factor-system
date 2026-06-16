@@ -50,6 +50,7 @@ from ._common import (
     _COL_NEAR_HIGH_RATIO_5,
     _COL_OPEN,
     _COL_POSITIVE_DAY_RATIO_5,
+    _COL_TURNOVER_SURGE,
     _COL_VOLUME_PRICE_STRENGTH,
     get_module_logger,
 )
@@ -86,7 +87,7 @@ def calculate_volume_price_strength(
     intraday_return = (df[_COL_CLOSE] - df[_COL_OPEN]) / df[_COL_OPEN]
 
     # 乘以换手突增系数
-    df[_COL_VOLUME_PRICE_STRENGTH] = intraday_return * df["turnover_surge"]
+    df[_COL_VOLUME_PRICE_STRENGTH] = intraday_return * df[_COL_TURNOVER_SURGE]
 
     valid_count = int(df[_COL_VOLUME_PRICE_STRENGTH].notna().sum())
     _logger.info(
