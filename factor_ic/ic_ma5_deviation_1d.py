@@ -38,6 +38,14 @@ SPEC = register_factor(
     )
 )
 
+# ============================================================================
+# 结果字典键名常量（与 factor_ic.common.ic_result_builder.build_ic_result 输出严格对齐）
+# ----------------------------------------------------------------------------
+# 引入原因：避免散落字符串字面量；run_factor_ic 返回结构变更时由静态检查/grep 一次定位。
+# ============================================================================
+
+_KEY_IC_DISTRIBUTION = "ic_distribution_consistency"
+
 
 def main():
     """CLI 主入口"""
@@ -63,7 +71,7 @@ def main():
     ic_metrics = result.get("ic_metrics") or {}
     sample_stats = result.get("sample_stats") or {}
     period = result.get("period") or {}
-    ic_distribution = result.get("ic_distribution_consistency") or {}
+    ic_distribution = result.get(_KEY_IC_DISTRIBUTION) or {}
 
     ic_mean = ic_metrics.get("ic_mean")
     ic_std = ic_metrics.get("ic_std")
