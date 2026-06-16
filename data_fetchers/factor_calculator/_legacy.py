@@ -211,6 +211,13 @@ from .industry_financial import (  # noqa: F401
 )
 
 # ============================================================================
+# 子模块 intraday re-import（B1：日内强度族因子从 factor_generator.py 迁出）
+# ============================================================================
+from .intraday import (  # noqa: F401
+    calculate_intraday_intensity,
+)
+
+# ============================================================================
 # 子模块 momentum re-import（PR-2c：动量族因子已搬到 .momentum，本文件 re-export
 # 维持 `from ._legacy import *` 通配兼容 + __all__ 中名称仍有效）
 # ============================================================================
@@ -269,6 +276,7 @@ __all__ = [
     "calculate_industry_pe_trend",  # v1.16 新增：行业PE趋势因子
     "calculate_capital_flow_ratio_trend",  # v1.17 新增：资金流占比趋势因子（方案C）
     "calculate_capital_flow_intensity",  # v1.17 新增：资金流强度因子（方案C）
+    "calculate_intraday_intensity",  # B1 新增：日内强度因子（从 factor_generator 迁入）
     # 公共常量别名（向下兼容 ic_kdj_j 等脚本的导入）
     "DEFAULT_RSI_PERIOD",
     "DEFAULT_BOLLINGER_N",
