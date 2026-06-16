@@ -86,11 +86,13 @@ def main():
         f"ICIR: {icir_str}",
         f"IC>0 占比: {positive_ratio_str}",
     ]
-    logger.info("\n%s", "\n".join(summary_lines))
 
+    # 空值检测必须在摘要打印之前，避免读者先看到 N/A 后看到 warning 解释（日志语义颠倒）
     for field, name in [(ic_mean, "IC 均值"), (ic_std, "IC 标准差"), (icir, "ICIR"), (positive_ratio, "IC>0 占比")]:
         if field is None:
             logger.warning("%s为空", name)
+
+    logger.info("\n%s", "\n".join(summary_lines))
 
     logger.info("5日均线偏离度因子IC计算完成")
     return result
