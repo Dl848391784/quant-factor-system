@@ -75,9 +75,26 @@ B5 后追加：`python data_fetchers/factor_generator.py --help` 必须 OK。
 
 | 轮 | commit | 时间 | 状态 |
 |---|--------|------|------|
-| B1 | — | 2026-06-16 | 待执行 |
-| B2 | — | — | — |
-| B3 | — | — | — |
-| B4 | — | — | — |
-| B5 | — | — | — |
-| B6 | — | — | — |
+| B1 | `faaa7fe` | 2026-06-16 | ✅ 完成（intraday.py 新建 + 注册，+216 行）|
+| B2 | `a969c67` | 2026-06-16 | ✅ 完成（tail.py 骨架 + I/O，+120 行；新旧 _load_tail_trading_data 在 66304×9 数据上 df.equals=True）|
+| B3 | `b7cee65` | 2026-06-16 | ✅ 完成（5 个 row-level helper，+229 行；26 个边界用例 vs 原版全等）|
+| B4 | `bb0732b` | 2026-06-16 | ✅ 完成（calculate_tail_factors 公共 API，+142 行；真实数据 3000 行 5 列 vs _calculate_tail_factors 全等）|
+| B5 | `80be47f` | 2026-06-16 | ✅ 完成（factor_generator.py 切换+删除，1392→946 行，+6 / -448）|
+| B6 | _本轮_ | 2026-06-16 | ✅ 完成（MODULE.md 因子表 +6 行，design.md 状态闭环）|
+
+## 7. 收口验证
+
+- [x] `ruff check` / `ruff format` 全套通过
+- [x] `from data_fetchers import factor_generator` 包导入 OK
+- [x] `python data_fetchers/factor_generator.py --help` 脚本入口 OK
+- [x] `pytest --collect-only` 通过
+- [x] B5 真实数据等价性已验证（B4 commit 上 2997 有效值 5 列全等）
+
+## 8. 后续建议（不在 B 步范围）
+
+- `data_fetchers/docs/factor_generator_flow.md` 当前仅描述到 Step 1-8 / Bollinger/KDJ/Turnover_Surge 因子（pre-existing 过时，未在本轮收口；建议在 D 步（generate_all_factors 表驱动重构）时一并修订到 Step 1-11+ 全因子）
+- factor_generator.py 当前 946 行——D / E / F 步可继续瘦身：
+  * D: generate_all_factors 表驱动（预计 -200 行）
+  * E: metadata 派生（预计 -50 行）
+  * F: I/O helper 抽提（预计 -80 行）
+  * 合计目标 ~580 行

@@ -967,6 +967,12 @@ factor_df['middle'] = middle  # TypeError: incompatible index (pandas 3.0)
 | Industry_Momentum_5d | industry_momentum_5d | window=5 | close, stock_industry.json（行业映射） |
 | Industry_Turnover_Trend | industry_turnover_trend | — | turnover_rate, stock_industry.json（行业映射） |
 | Industry_Amplitude_Trend | industry_amplitude_trend | clip_lower=0.001 | amplitude, stock_industry.json（行业映射） |
+| Intraday_Intensity | intraday_intensity | — | open, close, high, low |
+| Tail_Price_Position | tail_price_position | — | tail_high, tail_low, prices, daily close/high/low（涨跌停判断） |
+| Tail_Price_Slope | tail_price_slope | — | prices（13 根 5 分钟 K 线收盘价）|
+| Tail_Price_Volume_Intensity | tail_price_volume_intensity | — | prices, volumes, volume |
+| Tail_Volume_Acceleration | tail_volume_acceleration | — | volumes（13 根 5 分钟 K 线成交量）|
+| Tail_Volume_Shrink | tail_volume_shrink | — | volumes, volume |
 
 **行业方向性因子说明**（v1.42 2026-06-12 新增）：
 
