@@ -161,7 +161,7 @@ dependencies = [
 | H9 | 任务粒度：≤3 文件 **AND** ≤200 行（两者都需满足，违反任一即超粒度） | 控制单次改动规模，便于 review 和回退；超粒度走 Design-First | pre-commit `scripts/check_task_size.py` | pre-commit |
 | H10 | 测试覆盖率：不低于阶段性阈值（当前 60%，目标 70%） | 防止新代码无测试拉低基线 | pytest `--cov-fail-under=60`（当前阶段） | CI |
 | H11 | 日志格式：% 惰性格式化（禁止 f-string / + 拼接 / `exc_info=True`） | 性能（高 verbosity 时跳过格式化）+ 风格统一 + 与标准库 logging 结构化处理器（如 JSON）兼容 | ruff G004 / G003 / G201 | pre-commit + CI |
-| H12 | 退出码语义：0=成功 / 1=运行时错误 / 2=import-time 配置或注册失败 | CI / shell 脚本能区分"代码不能加载"（exit 2，立即告警停止流水线）vs"运行时失败"（exit 1，可重试 / 排查数据） | 人工 review + `scripts/check_exit_codes.py`（[待实施]） | pre-commit + CI |
+| H12 | 退出码语义：0=成功 / 1=运行时业务错误 / 2=import-time 配置或注册失败（R16 后已弃用，改 logger.critical+raise）/ 3=辅助层失败（计算成功，但日志摘要 / 监控输出 / sidecar 类组件失败） | CI / shell 脚本能区分 4 种状态：成功 vs 业务失败（可重试）vs 代码不能加载（停流水线）vs 主结果可用但旁路告警（产物可用，仅 sidecar 待修） | 人工 review + `scripts/check_exit_codes.py` | pre-commit + CI |
 | H13 | 死代码禁止：禁止永不触发的防御性兜底分支（如 `if result is None` 守卫面对永不返回 None 的 callee） | 死代码掩盖真实错误来源、误导维护者、增加噪音；必须删除而非保留 | 人工 review + `scripts/check_dead_branches.py`（[待实施]） | pre-commit + CI |
 
 **H2 正反例**：
@@ -261,6 +261,18 @@ try:
 except (ValueError, TypeError):
     sys.exit(2)  # 杀掉 pytest 进程！
 
+# ❌ 反例 4（R17 修正）：辅助层（日志摘要 / 监控）异常被静默吞掉
+# 因子计算成功 → result 已生成；摘要层抛异常 → logger 后无 sys.exit
+# 后果：进程以 exit 0 退出，CI / 调度器把"摘要层失败"当成"完全成功"，告警丢失
+def main():
+    result = run_factor_ic(spec=SPEC, ...)
+    try:
+        log_factor_summary(result, "xxx 因子", logger)
+    except Exception:
+        logger.exception("摘要输出失败")
+        # ❌ 缺少 sys.exit(3)：进程仍以 exit 0 退出，调用方无感知
+        # 修复：补 sys.exit(3) 用辅助层退出码语义化告警
+
 # ✅ 正例 1：import-time 配置/注册失败 → logger.critical + raise
 # （让调用方决定行为：测试可捕获/skip，CLI 由 Python 默认 traceback+exit 1）
 try:
@@ -285,15 +297,36 @@ if __name__ == "__main__":
     except Exception:
         logger.exception("未预期的错误")
         sys.exit(1)
+
+# ✅ 正例 3（R17）：辅助层（日志摘要 / 监控 / sidecar）失败 → exit 3
+# 主结果（因子计算 result）已成功生成、产物可用，仅旁路输出失败；
+# 用 exit 3 与业务失败（exit 1）区分，调度器可降级告警（产物可用，仅 sidecar 待修），
+# 不与 import-time 失败（exit 2，停流水线）混淆
+def main():
+    result = run_factor_ic(spec=SPEC, ...)  # 主结果已生成
+    try:
+        log_factor_summary(result, "xxx 因子", logger)
+    except Exception:
+        logger.exception(
+            "log_factor_summary 摘要输出阶段失败（result 已成功生成；故障源 = 摘要层）"
+        )
+        sys.exit(3)  # 辅助层失败专用退出码
 ```
 
 **H12 Why**：
-- **CI / pipeline 区分能力**：exit 1 = 数据/逻辑层面失败（可重试、可降级）；exit 0 = 成功
-- **可观测性**：`run_pipeline.py` 等编排脚本可据 stderr+退出码决定后续动作
+- **CI / pipeline 区分能力**：exit 1 = 数据/逻辑层面业务失败（可重试、可降级）；
+  exit 3 = 辅助层失败（产物可用，调度器降级告警，不阻塞下游消费方）；
+  exit 0 = 完全成功
+- **可观测性**：`run_pipeline.py` 等编排脚本可据 stderr+退出码决定后续动作（exit 3
+  时下游可正常读 `<模块>/result/`，仅旁路监控产物缺失）
 - **测试可隔离性（R16 修正）**：模块顶层 sys.exit 会被 importlib.import_module
   传染杀宿主进程；`factor_ic/common/test_factor_spec_consistency.py` 通过 importlib
   扫描所有 ic_*.py 触发 SPEC 注册，import-time exit 路径与该测试设计不兼容。
   改为 logger.critical + raise 后，测试框架可捕获 ValueError/TypeError 并合规断言/skip
+- **辅助层退出码（R17 新增）**：log_factor_summary 等辅助组件抛异常时若仅 logger 不
+  sys.exit，进程以 exit 0 退出，CI / 调度器无法感知"摘要层失败但计算成功"这一中间态；
+  exit 3 让调度器可降级告警（产物可用，sidecar 待修），与 exit 1（业务失败应停止下游）
+  和 exit 2（代码不能加载应停流水线）严格区分
 - **trade-off**：放弃 import-time exit 2 / runtime exit 1 的退出码区分，
   换取 import-time 注册失败的可隔离性（CI 仍可通过 stderr 中的
   `CRITICAL ... FactorSpec 注册失败` 关键字 + traceback 区分错误来源）
@@ -306,6 +339,7 @@ grep -rn "sys.exit(" factor_ic/ic_*.py
 # - 模块顶层 try/except register_factor → logger.critical + raise（不应有 sys.exit）
 # - __main__ 块 except → sys.exit(1)
 # - main() 内部业务失败 → sys.exit(1)
+# - main() 内部辅助层（log_factor_summary 等）失败 → sys.exit(3)（R17）
 
 # 自动化检查：
 python scripts/check_exit_codes.py all
