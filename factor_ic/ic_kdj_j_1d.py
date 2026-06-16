@@ -148,12 +148,14 @@ def main():
     ic_std = ic_metrics.get("ic_std")
     icir = ic_metrics.get("icir")
     positive_ratio = ic_distribution.get("positive_ratio")
+    valid_days = sample_stats.get("valid_days")
 
-    # 格式化各字段（None 时显示 N/A）
+    # 格式化各字段（None 时显示 N/A，避免硬编码默认值掩盖数据缺失）
     ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
     ic_std_str = f"{ic_std:.4f}" if ic_std is not None else "N/A"
     icir_str = f"{icir:.2f}" if icir is not None else "N/A"
     positive_ratio_str = f"{positive_ratio:.2%}" if positive_ratio is not None else "N/A"
+    valid_days_str = f"{valid_days} 天" if valid_days is not None else "N/A"
 
     summary_lines = [
         "=" * 60,
@@ -163,7 +165,7 @@ def main():
         f"更新模式: {result.get('update_mode', 'unknown')}",
         f"计算参数: n={args.n}, m1={args.m1}, m2={args.m2}",
         f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}",
-        f"有效天数: {sample_stats.get('valid_days', 0)} 天",
+        f"有效天数: {valid_days_str}",
         "--- IC指标 ---",
         f"IC 均值: {ic_mean_str}",
         f"IC 标准差: {ic_std_str}",
@@ -180,6 +182,7 @@ def main():
             ("ic_std", ic_std),
             ("icir", icir),
             ("positive_ratio", positive_ratio),
+            ("valid_days", valid_days),
         )
         if value is None
     ]
