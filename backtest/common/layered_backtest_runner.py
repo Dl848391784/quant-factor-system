@@ -124,6 +124,11 @@ class LayerConfigBase:
     - long_layers/short_layers: 由 n_layers 和 factor_direction 派生
     - layer_names_dict: 运行时转换为 {层号: 描述} 格式供日志显示
 
+    类定义期校验（__init_subclass__，类加载时即生效，违反触发 import-time 失败）：
+    - len(layer_names) >= 2
+    - len(layer_descriptions) == len(layer_names) （若 layer_descriptions 非空）
+      防止文档（"5 层"等模式描述）与实现脱节、防止 layer_names_dict 派生时静默回退。
+
     示例：
         class Return5dLayerConfig(LayerConfigBase):
             factor_name: ClassVar[str] = 'return_5d'
@@ -160,6 +165,29 @@ class LayerConfigBase:
 
     # === 派生字段（无默认值，field(init=False)） ===
     factor_direction: Literal["positive", "negative"] = field(init=False)
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """类定义期校验：layer_names / layer_descriptions 长度一致性。
+
+        在类加载（import）时即生效，违反时抛 ValueError，按规则 #6 应映射到
+        退出码 2（import-time 配置失败）。这是文档（"percentile 5 层"等模式
+        描述）与实现的硬契约，防止下游 layer_names_dict 静默回退到英文标签
+        而出现"日志少了中文描述但程序仍能跑"的退化场景。
+        """
+        super().__init_subclass__(**kwargs)
+        # 抽象基类自身不参与（factor_name 默认空），仅校验真正的子类声明
+        names = cls.layer_names
+        if not names:
+            return  # 抽象/中间类，留给 __post_init__ 在实例化时再卡 factor_name
+        if len(names) < 2:
+            raise ValueError(f"{cls.__name__}: layer_names 至少需要 2 层，当前: {len(names)}")
+        descs = cls.layer_descriptions
+        if descs and len(descs) != len(names):
+            raise ValueError(
+                f"{cls.__name__}: layer_descriptions 长度({len(descs)}) "
+                f"与 layer_names 长度({len(names)}) 不一致，"
+                f"请确保两者一一对应（或将 layer_descriptions 留空以回退到 layer_names）"
+            )
 
     def __post_init__(self):
         """初始化后处理：派生配置 + 打印日志"""
