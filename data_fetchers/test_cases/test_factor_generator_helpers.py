@@ -28,6 +28,8 @@ import pandas as pd
 import pytest
 
 from data_fetchers.factor_generator import (
+    _BASE_COLS,
+    _OHLCV_INDEX_COLS,
     _atomic_write_json,
     _calc_pct,
     _load_json_gz_data,
@@ -443,6 +445,39 @@ class TestAtomicWriteJson:
         assert path.exists()
         with open(path, encoding="utf-8") as f:
             assert json.load(f) == {"a": 1}
+
+
+# ============================================================================
+# 模块常量一致性：_OHLCV_INDEX_COLS 与 _BASE_COLS 关系（bug 3 守护）
+# ============================================================================
+
+
+class TestOhlcvIndexColsConsistency:
+    """_OHLCV_INDEX_COLS 用于 Step 1 日志识别基础因子列，
+    必须是 _BASE_COLS 的真子集（_BASE_COLS - _OHLCV_INDEX_COLS = 基础因子列）"""
+
+    def test_ohlcv_index_cols_is_strict_subset_of_base_cols(self) -> None:
+        """所有 OHLCV + 索引列必须都在 _BASE_COLS 中（否则 Step 1 日志错误）"""
+        base_set = set(_BASE_COLS)
+        assert _OHLCV_INDEX_COLS.issubset(base_set), (
+            f"_OHLCV_INDEX_COLS 含 _BASE_COLS 之外的列: {_OHLCV_INDEX_COLS - base_set}"
+        )
+
+    def test_ohlcv_index_cols_excludes_base_factors(self) -> None:
+        """_OHLCV_INDEX_COLS 必须不含基础因子（否则 Step 1 日志会过滤掉它们）"""
+        # 当前已知的基础因子列（fetch_factor_cache 输出）
+        known_base_factors = {"rsi_6", "volume_ratio_5", "turnover_rate"}
+        leaked = known_base_factors & _OHLCV_INDEX_COLS
+        assert not leaked, f"基础因子被误列入 _OHLCV_INDEX_COLS: {leaked}"
+
+    def test_diff_yields_known_base_factors(self) -> None:
+        """_BASE_COLS - _OHLCV_INDEX_COLS 应给出当前基础因子集合
+        （此测试在新增/删除基础因子时会失败，提示同步更新 Step 1 日志或常量）"""
+        diff = set(_BASE_COLS) - _OHLCV_INDEX_COLS
+        # 当前基础因子：rsi_6 / volume_ratio_5 / turnover_rate
+        assert diff == {"rsi_6", "volume_ratio_5", "turnover_rate"}, (
+            f"_BASE_COLS 与 _OHLCV_INDEX_COLS 差集不符合预期: {diff}, 如新增/删除基础因子，请同步更新本测试与相关常量"
+        )
 
 
 # ============================================================================

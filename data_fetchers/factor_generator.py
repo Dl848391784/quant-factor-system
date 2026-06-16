@@ -187,6 +187,11 @@ _BASE_COLS: tuple[str, ...] = (
     "volume",
 )
 
+# OHLCV + 索引列集合（不含基础因子）：用于 Step 1 日志中识别基础因子列。
+# 与 _BASE_COLS 区别：_BASE_COLS 含 rsi_6/volume_ratio_5（基础因子），
+# 此集合只含纯行情 + 索引列，剔除后剩下的即"基础因子列"。
+_OHLCV_INDEX_COLS: frozenset[str] = frozenset({"date", "asset", "open", "close", "high", "low", "volume"})
+
 # 输出列名：基础列 + 扩展因子 + 收益数据（元组防止意外修改）
 # 组成：_BASE_COLS(10) + _EXTENDED_FACTOR_COLS(15) + _RETURN_COLS(3)
 _OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS
@@ -559,8 +564,7 @@ def _run_pipeline_step(
     missing = [c for c in output_cols if c not in factor_df.columns]
     if missing:
         raise KeyError(
-            f"因子函数 {factor_func.__name__} 未生成预期列: {missing}, "
-            f"实际生成列: {list(factor_df.columns)}"
+            f"因子函数 {factor_func.__name__} 未生成预期列: {missing}, 实际生成列: {list(factor_df.columns)}"
         )
 
     for col in output_cols:
@@ -909,7 +913,11 @@ def generate_all_factors(
     del base_data_records
 
     logger.info("  基础数据记录数: %d", len(factor_df))
-    logger.info("  基础因子列: rsi_6, volume_ratio_5")
+    # 动态反映实际基础因子列：剔除 OHLCV + 索引列，剩下即基础因子
+    # 历史上此处硬编码 'rsi_6, volume_ratio_5'，若上游 fetch_factor_cache
+    # 新增/删除基础因子列，日志会产生误导。改为从 factor_df.columns 实时计算。
+    base_factor_cols = [c for c in factor_df.columns if c not in _OHLCV_INDEX_COLS]
+    logger.info("  基础因子列: %s", base_factor_cols)
 
     # ========== Step 2: 加载换手率数据 ==========
     logger.info("Step 2: 加载换手率数据...")
