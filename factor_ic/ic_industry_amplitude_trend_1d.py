@@ -127,6 +127,14 @@ def main():
 
 
 if __name__ == "__main__":
+    # 异常分支顺序依据（exceptions.py L27/L46 已确认）：
+    # - DataSchemaError(Exception) 与 FactorCalcError(Exception) 均直接继承 Exception，
+    #   两者是【平级关系，无父子继承】（exceptions.py L60 注释也明确"与 FactorCalcError 并列"）。
+    # - 因此 DataSchemaError ↔ FactorCalcError 的捕获顺序在异常匹配上等价，无主次之分。
+    # - 当前先 DataSchemaError 后 FactorCalcError 的顺序仅为可读性约定（按错误来源远近排序：
+    #   schema 失败发生在数据加载阶段（最早），因子计算失败发生在加载之后），
+    #   未来调整顺序不会改变捕获语义。
+    # - 通用 Exception 必须放最后，作为非业务异常的兜底（程序 bug → CRITICAL 告警语义）。
     try:
         main()
     except DataSchemaError as e:
