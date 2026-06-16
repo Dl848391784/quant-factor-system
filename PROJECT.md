@@ -362,8 +362,8 @@ grep -rn "assert False\|if False:" factor_ic/ comprehensive_factor/ backtest/
 
 **H13 当前覆盖范围**：
 - ✅ 已落地：4 个行业 IC 脚本（earnings_growth / momentum_5d / turnover_trend / amplitude_trend）`if result is None` 已删
-- ⏳ 待审计：其他 `factor_ic/ic_*.py` 文件、`backtest/`、`comprehensive_factor/`、`data_fetchers/` 中的 None 守卫合规性
-- 自动化：`scripts/check_dead_branches.py` 待交付（标 [待实施]，工具落地后启用 pre-commit + CI）
+- ⏳ 待审计：30 个 `factor_ic/ic_*.py` 文件已纳入 `scripts/check_dead_branches.py` allowlist 短路豁免，逐个迁移后从 allowlist 删除
+- 自动化：`scripts/check_dead_branches.py` ✅ 已交付（AST + allowlist 渐进迁移，pre-commit + CI 模式，15 个 pytest 全过）
 
 ---
 
