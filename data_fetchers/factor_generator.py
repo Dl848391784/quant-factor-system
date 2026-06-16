@@ -797,8 +797,13 @@ def _format_and_write_output(
 
     # 提前切片 + del factor_df：missing_cols 已通过，列选择不会再抛 KeyError；
     # cast：pandas 列选择推断为 DataFrame | Series，运行时实为 DataFrame
-    output_df = cast(pd.DataFrame, factor_df[list(_OUTPUT_COLS)].copy())
-    del factor_df
+    # sentinel：若 cast 本身异常，output_df 未赋值，finally 的 del 会抛 NameError
+    output_df: pd.DataFrame | None = None
+    try:
+        output_df = cast(pd.DataFrame, factor_df[list(_OUTPUT_COLS)].copy())
+    finally:
+        # cast 成功：factor_df 立即释放；cast 失败：factor_df 随栈展开释放
+        del factor_df
 
     # try/finally：异常路径也释放 output_df
     try:
@@ -850,8 +855,9 @@ def _format_and_write_output(
 
         return metadata
     finally:
-        # output_df 在 try 之前已赋值；异常路径显式 del 释放
-        del output_df
+        # output_df sentinel：cast 失败时 output_df=None，跳过 del 防止 NameError
+        if output_df is not None:
+            del output_df
 
 
 def generate_all_factors(

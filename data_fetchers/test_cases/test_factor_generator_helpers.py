@@ -934,8 +934,8 @@ class TestOutputDfNoneSentinel:
         """源码约定：finally 块禁止使用 `"output_df" in locals()` 守卫（bug 1 回归）。
 
         locals() 在 CPython 异常退出帧时不可靠且每次构造新 dict，是已知反模式。
-        R2 修复后 output_df 在 try 之前已无条件赋值，finally 可直接 `del output_df`，
-        无需任何守卫。本测试只防御 locals() 反模式重新出现。
+        R2 修复后 output_df 使用 None sentinel + `if output_df is not None` 守卫，
+        finally 安全释放。本测试只防御 locals() 反模式重新出现。
         """
         from pathlib import Path
 
