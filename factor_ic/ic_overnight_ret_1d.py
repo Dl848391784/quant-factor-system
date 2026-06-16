@@ -113,7 +113,7 @@ def calculate_overnight_return(factor_df):
             spec=SPEC,
             min_stocks=args.min_stocks,
             force_full=args.force_full,
-            _logger=logger,
+            logger=logger,
         )
             >>> # 独立调用（用于测试，需确保数据包含 asset, date 列）
             >>> factor_df = pd.DataFrame(
@@ -215,7 +215,7 @@ def main():
         spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        _logger=logger,
+        logger=logger,
     )
 
     # 防御性检查：result 为 None 时抛出异常（遵循 PROJECT.md 异常处理规范）

@@ -80,7 +80,7 @@ def main():
         spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        _logger=logger,
+        logger=logger,
     )
 
     # debug 级中间状态日志：debug 模式下对 result 关键字段做细粒度追踪，

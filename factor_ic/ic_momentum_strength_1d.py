@@ -29,7 +29,7 @@
     2. 修复 ic_std/icir 格式化陷阱（字符串 'N/A' 无法用 :.4f）
     3. 添加异常状态整体感知日志（ic_mean=None 时 warning）
     4. 导入分组注释规范化（本地模块分隔）
-    5. 添加模块级 __version__ 常量 + _logger 模式
+    5. 添加模块级 __version__ 常量 + logger 模式
 """
 
 import argparse
@@ -53,8 +53,8 @@ from factor_ic.common.logger_config import get_logger
 
 __version__ = "1.1"
 
-# 使用模块级 _logger 模式（遵循 superpowers-workflow 最佳实践）
-_logger = get_logger(__name__)
+# 使用模块级 logger 模式（遵循 superpowers-workflow 最佳实践）
+logger = get_logger(__name__)
 
 
 # ============================================================================
@@ -89,7 +89,7 @@ def main():
         spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        _logger=_logger,
+        logger=logger,
     )
 
     # 保底处理：公共模块异常返回 None 时抛出 RuntimeError
@@ -128,14 +128,14 @@ def main():
         f"ICIR: {icir_str}",
         f"IC>0占比: {positive_ratio_str}",
     ]
-    _logger.info("\n%s", "\n".join(summary_lines))
+    logger.info("\n%s", "\n".join(summary_lines))
 
     # 异常状态整体感知日志（运维巡检用）
     if ic_mean is None:
-        _logger.warning("本次IC计算结果为空，请检查数据源或参数配置")
+        logger.warning("本次IC计算结果为空，请检查数据源或参数配置")
 
     # 确认结果处理完成后才输出"计算完成"日志
-    _logger.info("动量强度因子IC计算完成")
+    logger.info("动量强度因子IC计算完成")
 
     return result
 
@@ -147,13 +147,13 @@ if __name__ == "__main__":
         # 数据 Schema 校验失败（公共模块 validate_required_columns 抛出）：
         # H12 R18 → exit 4 与因子计算失败（exit 5）严格区分。
         # MODULE.md M22：业务异常用 logger.error 不打堆栈。
-        _logger.error("数据 Schema 校验失败 (factor=%s): %s", e.factor_name, e)
+        logger.error("数据 Schema 校验失败 (factor=%s): %s", e.factor_name, e)
         sys.exit(4)  # H12 R18: schema 失败 → 检查上游数据
     except FactorCalcError as e:
         # 已知业务异常，使用 error()（不打印完整堆栈）
-        _logger.error("动量强度因子IC计算失败: %s", e)
+        logger.error("动量强度因子IC计算失败: %s", e)
         sys.exit(5)  # H12 R19: 因子计算失败 → 检查计算代码
     except Exception:
         # 未预期异常，使用 exception()（自动打印完整堆栈，无需重复传 e）
-        _logger.exception("未预期的错误")
+        logger.exception("未预期的错误")
         sys.exit(1)

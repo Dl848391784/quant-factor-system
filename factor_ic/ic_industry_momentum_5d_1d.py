@@ -93,7 +93,7 @@ def main(args: argparse.Namespace) -> dict:
         spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        _logger=logger,
+        logger=logger,
     )
 
     # 输出 IC 摘要（公共模块）。防御性保留 try/except：若契约被回归打破，

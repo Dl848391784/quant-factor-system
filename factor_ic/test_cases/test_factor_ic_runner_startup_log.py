@@ -47,7 +47,7 @@ def _capture_startup_banner(extra_log_params, *, min_stocks=10, force_full=False
             min_stocks=min_stocks,
             force_full=force_full,
             extra_log_params=extra_log_params,
-            _logger=mock_logger,
+            logger=mock_logger,
         )
 
     # 提取所有 logger.info 调用的渲染字符串（仿 logging 实际行为）

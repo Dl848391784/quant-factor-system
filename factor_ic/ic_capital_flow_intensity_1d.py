@@ -68,7 +68,7 @@ def main():
         spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        _logger=logger,
+        logger=logger,
     )
 
     # 问题1：覆盖 None / success=False 两种失败场景，避免静默跳过摘要

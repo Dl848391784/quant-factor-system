@@ -97,7 +97,7 @@ def main():
         args=args,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        _logger=logger,
+        logger=logger,
     )
 
     # 防御性检查：result 为 None 时抛出异常（遵循 PROJECT.md 异常处理规范）

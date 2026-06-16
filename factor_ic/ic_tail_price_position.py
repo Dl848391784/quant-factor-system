@@ -181,7 +181,7 @@ def calculate_tail_price_position(factor_df: pd.DataFrame) -> pd.DataFrame:
             spec=SPEC,
             min_stocks=args.min_stocks,
             force_full=args.force_full,
-            _logger=logger,
+            logger=logger,
         )
     """
     # 遵循 MODULE.md 约束 #4：函数入口先 copy()
@@ -297,7 +297,7 @@ def main():
         spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        _logger=logger,
+        logger=logger,
     )
 
     # 防御性早退出：result 为 None 时立即抛 FactorCalcError，避免下方 result.get() 抛 AttributeError

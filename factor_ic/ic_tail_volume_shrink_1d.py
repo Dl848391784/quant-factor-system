@@ -187,7 +187,7 @@ def calculate_tail_volume_shrink(factor_df: pd.DataFrame) -> pd.DataFrame:
             spec=SPEC,
             min_stocks=args.min_stocks,
             force_full=args.force_full,
-            _logger=logger,
+            logger=logger,
         )
             >>> # 异常场景:尾盘数据文件不存在(返回全 NaN 因子值,不中断计算)
             >>> # 系统自动 fallback,日志记录 FileNotFoundError
@@ -273,7 +273,7 @@ def main():
         spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        _logger=logger,
+        logger=logger,
     )
 
     # 防御性检查: result 为 None 时抛出业务异常(遵循 PROJECT.md 异常处理规范)

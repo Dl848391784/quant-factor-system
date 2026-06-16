@@ -115,7 +115,7 @@ def main():
         spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        _logger=logger,
+        logger=logger,
     )
 
     # 结果校验：显式 if-not-raise FactorCalcError（不用 assert，因为 Python 以 -O

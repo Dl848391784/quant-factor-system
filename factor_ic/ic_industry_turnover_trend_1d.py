@@ -75,7 +75,7 @@ def main():
         spec=SPEC,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
-        _logger=logger,
+        logger=logger,
     )
 
     # 包裹 log_factor_summary：摘要层失败 → sys.exit(3) 显式辅助层失败信号
