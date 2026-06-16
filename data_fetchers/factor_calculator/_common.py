@@ -117,8 +117,11 @@ _DEFAULT_KDJ_M2 = 3
 _DEFAULT_SURGE_WINDOW = 5
 _DEFAULT_VOLUME_RATIO_WINDOW = 5
 _DEFAULT_FORWARD_RETURN_SHIFT = 1
-_DEFAULT_PRICE_POSITION_EPSILON = 1e-10  # 防止除零
-_DEFAULT_AMPLITUDE_EPSILON = 1e-10  # 防止除零
+# 价格位置 / 振幅族因子的除零保护 epsilon。语义与 ``_EPSILON`` 等价，
+# 显式引用而非重新定义，避免后续维护时三处 1e-10 不同步（PROJECT.md 死代码 #14 同源原则）。
+# 命名保留是为了被 momentum.py 按"业务族"语义 import；外部别名（_DEFAULT_*）做语义层、_EPSILON 做物理层。
+_DEFAULT_PRICE_POSITION_EPSILON = _EPSILON
+_DEFAULT_AMPLITUDE_EPSILON = _EPSILON
 _DEFAULT_PAST_RETURN_1D_WINDOW = 1  # 1日涨幅窗口
 _DEFAULT_RETURN_3D_WINDOW = 3  # 3日累计涨幅窗口
 _DEFAULT_RETURN_5D_WINDOW = 5  # 5日累计涨幅窗口
@@ -165,10 +168,10 @@ def get_module_logger(logger_arg: logging.Logger | None = None) -> logging.Logge
         >>> # 调用方传入 logger
         >>> from data_fetchers.common.logger_config import setup_logger
         >>> logger = setup_logger("factor_generator")
-        >>> result = calculate_bollinger_pb(df, logger_arg=logger)
+        >>> result = _calculate_delta(df, "amplitude", "amplitude_delta", logger_arg=logger)
 
         >>> # 不传 logger，使用模块级 fallback
-        >>> result = calculate_bollinger_pb(df)
+        >>> result = _calculate_delta(df, "amplitude", "amplitude_delta")
     """
     if logger_arg is not None:
         return logger_arg
@@ -220,11 +223,25 @@ def _wilder_smoothing_rsi(series: pd.Series, n: int) -> pd.Series:
     result.iloc[n - 1] = seed
 
     # 第 n+1 天起（索引 n 到 len-1）：EWM 递推
+    # 边界行为：若 result.iloc[i-1] 已为 NaN（例如外部把已计算结果某段置 NaN
+    # 或 SMA 种子位之后又出现 NaN 输入），递推链将不可恢复地全部 NaN。
+    # 这是 Wilder 标准 NaN 传播语义（不在此处兜底），仅在首次发生时记录 debug
+    # 日志，便于上游定位"为什么后续全 NaN"。
+    nan_break_logged = False
     for i in range(n, len(series)):
+        prev = result.iloc[i - 1]
         if pd.isna(series.iloc[i]):  # 当天值为 NaN：传播 NaN
             result.iloc[i] = float("nan")
+        elif pd.isna(prev):  # 前值 NaN：递推链中断，从此全 NaN
+            result.iloc[i] = float("nan")
+            if not nan_break_logged:
+                _MODULE_LOGGER.debug(
+                    "_wilder_smoothing_rsi: 递推链于索引 %d 中断（前值为 NaN），后续值将全部为 NaN",
+                    i,
+                )
+                nan_break_logged = True
         else:
-            result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * result.iloc[i - 1]
+            result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * prev
 
     return result
 
@@ -257,7 +274,8 @@ def _per_asset_transform(
         回填后的 float64 ndarray（NaN 为缺失），长度与输入一致
 
     Raises:
-        ValueError: asset_arr 与 value_arr 长度不一致
+        ValueError: asset_arr 与 value_arr 长度不一致，或 asset_arr 未按 asset 排序
+            （同一 asset 在数组中不连续 → 切片段数与唯一 asset 数不等）
 
     实现说明:
         - 单 asset 切片足够小，``fn`` 内部的 rolling/ewm/diff 操作内存友好
@@ -280,6 +298,18 @@ def _per_asset_transform(
 
     # 找 asset 边界（同 asset 行连续，asset 变化处即新组起点）
     boundaries = np.flatnonzero(asset_arr[1:] != asset_arr[:-1]) + 1
+    # 排序契约校验：boundaries 给出的每个 asset 段必须只出现一次。
+    # 若调用方未按 asset 排序（同一 asset 被切成多段），unique_groups < n_groups。
+    # 静默错误代价高（fn 看到的不是完整 asset 切片），用 ValueError 显式抛出，
+    # 比 docstring "必须已按 asset 排序" 的口头约束可靠（PROJECT.md 规则 #5 同源）。
+    n_groups = len(boundaries) + 1
+    n_unique_assets = len(np.unique(asset_arr))
+    if n_groups != n_unique_assets:
+        raise ValueError(
+            f"_per_asset_transform: asset_arr 未按 asset 排序，"
+            f"切片得到 {n_groups} 段但只有 {n_unique_assets} 个唯一 asset，"
+            f"调用方需先按 asset 排序后再传入"
+        )
     boundaries = np.concatenate([[0], boundaries, [n_rows]])
 
     out = np.full(n_rows, np.nan, dtype=np.float64)
@@ -318,12 +348,16 @@ def _calculate_ewm_with_initial(series: pd.Series, alpha: float, initial_value: 
     if len(series) == 0 or series.isna().all():
         return series
 
-    # 在第一个有效值前插入虚拟 initial_value（保留原始索引）
-    series_with_initial = pd.concat([pd.Series([initial_value], index=[-1]), series])
+    # 在第一个有效值前插入虚拟 initial_value（保留原始索引）。
+    # 哨兵索引使用字符串 "__ewm_initial_sentinel__"：
+    # - 业务索引为日期（datetime）/ 整数序号 / asset+date 复合，绝不会与该字符串相等
+    # - 旧实现用 -1，业务侧若直接传 RangeIndex 起点为 -1 / 自定义负向 index 会冲突
+    _SENTINEL_INDEX = "__ewm_initial_sentinel__"
+    series_with_initial = pd.concat([pd.Series([initial_value], index=[_SENTINEL_INDEX]), series])
 
     result_with_initial = series_with_initial.ewm(alpha=alpha, adjust=False, ignore_na=True).mean()
 
-    # 取除虚拟初始值外的结果（iloc[1:] 跳过 index=-1 的虚拟值）
+    # 取除虚拟初始值外的结果（iloc[1:] 跳过哨兵索引位的虚拟值）
     result_series = result_with_initial.iloc[1:]
     result_series.index = series.index
 
@@ -354,7 +388,9 @@ def _calculate_delta(
         logger_arg: 可选 logger
 
     返回:
-        factor_df 新增 delta_col 列
+        factor_df 新增 delta_col 列。
+        **行顺序契约**：返回 DataFrame 已按 ``[asset, date]`` 升序排序，与输入行顺序
+        可能不同；调用方若依赖原始顺序需自行 ``reindex`` 或保存原索引后还原。
 
     边界处理:
         - 第一日无前值 → NaN（自然排除，不做填充）
@@ -382,7 +418,9 @@ def _calculate_delta(
 
     valid_count = int(df[delta_col].notna().sum())
     total_count = len(df)
-    _logger.info(
+    # 高频批量调用场景下（factor_generator 一次跑数十个因子），INFO 日志会刷屏。
+    # 降为 DEBUG：调试期可通过日志级别开关查看，生产期保持安静。
+    _logger.debug(
         "差分因子 %s: 有效=%d (%.2f%%), base_col=%s",
         delta_col,
         valid_count,
@@ -416,8 +454,12 @@ def _add_industry_column(
         避免重复加载（模块级缓存+线程安全）。
         如果 industry 列已存在则跳过添加（避免重复添加）。
     """
-    # 如果 industry 列已存在则跳过
+    # 如果 industry 列已存在则跳过（多次调用 / 上游已合并的场景）
     if "industry" in df.columns:
+        _logger.debug(
+            "_add_industry_column: industry 列已存在（rows=%d），跳过注入",
+            len(df),
+        )
         return df
 
     try:
