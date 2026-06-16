@@ -96,16 +96,11 @@ def main(args: argparse.Namespace) -> dict:
         _logger=logger,
     )
 
-    # 输出 IC 摘要（公共模块）。防御性保留 try/except：warning 先落盘原始异常类型，
-    # 再 raise SummaryLogError 让 __main__ 走 exit 3。main 不 sys.exit，便于 pytest 调用。
+    # 输出 IC 摘要（公共模块）。防御性保留 try/except：若契约被回归打破，
+    # raise SummaryLogError 让 __main__ 走 exit 3。main 不 sys.exit，便于 pytest 调用。
     try:
         log_factor_summary(result, "行业5日动量因子", logger)
     except Exception as e:
-        # 落盘原始异常类型，避免 SummaryLogError 包装后调用方无法区分摘要层内部故障。
-        logger.warning(
-            "log_factor_summary 摘要输出失败，原始异常类型: %s",
-            type(e).__name__,
-        )
         raise SummaryLogError(
             "log_factor_summary 摘要输出阶段失败（因子计算 result 已成功生成；"
             "故障源 = 摘要日志层而非 run_factor_ic 业务路径）"
@@ -124,9 +119,9 @@ if __name__ == "__main__":
     #   exit 3 (SummaryLogError) → 主结果可用，sidecar 失败
     #   exit 1 (Exception)       → 未预期错误（CRITICAL 立即响应）
     #
-    # 日志分工：DataSchemaError/FactorCalcError → logger.exception（message 含错误摘要，
-    # 自动附加异常链 traceback）；SummaryLogError → logger.error（原始类型已由 main()
-    # 内 warning 落盘，不再重复堆栈）；Exception 兜底 → logger.exception。
+    # 日志分工：DataSchemaError/FactorCalcError → logger.exception（自动附加异常链
+    # traceback）；SummaryLogError → warning 落盘原始类型 + logger.error 输出定位信息
+    # （自包含在同一 except 块内）；Exception 兜底 → logger.exception。
     try:
         main(parse_args())
     except DataSchemaError:
@@ -136,8 +131,13 @@ if __name__ == "__main__":
         logger.exception("行业5日动量因子IC计算失败")
         sys.exit(5)  # H12 R19: 因子计算失败 → 检查计算代码
     except SummaryLogError as e:
-        # 不用 logger.exception：原始异常类型已由 main() 内 logger.warning 单独落盘，
-        # SummaryLogError.__str__ 自带定位信息，再附加堆栈会与 warning 重复记录同一次失败。
+        # warning 先落盘原始异常类型（来自 __cause__），logger.error 输出 SummaryLogError
+        # 定位信息；两条日志自包含在同一 except 块内，消除跨函数隐式依赖。
+        cause = e.__cause__
+        if cause is not None:
+            logger.warning(
+                "摘要日志层原始异常类型: %s", type(cause).__name__,
+            )
         logger.error("摘要日志层失败（主结果产物已生成，可用）: %s", e)
         sys.exit(3)  # H12 R17: 辅助层失败专用退出码
     except Exception:
