@@ -98,13 +98,14 @@ def main(args: argparse.Namespace) -> dict:
     # 公共模块横幅若被日志级别过滤、或公共模块实现回归不再打印参数，本模块原本将无任何
     # 启动上下文落盘。此处冗余但低成本：模块自身 logger 输出一行 INFO，
     # 把实际生效的 min_stocks / force_full 锁定到本模块日志文件，与公共横幅互补。
-    # 布尔格式说明：force_full=%s 沿用 Python bool 默认字符串化（True/False），
-    # 与公共模块 factor_ic_runner.py 启动行 "入口参数: min_stocks=%s, force_full=%s"
-    # 完全一致，保持项目内布尔日志检索语法统一（grep "force_full=True" 可同时
-    # 命中本模块与公共模块），不切换为 yes/no 或 1/0 风格是有意为之
-    # （对齐 ic_industry_amplitude_trend_1d.py 同位修复）。
+    # 格式说明：min_stocks=%s 与 force_full=%s 全部使用 %s（issue 4）：
+    # - argparse type=int 在 CLI 路径会做类型转换，但单元测试可直接构造 argparse.Namespace
+    #   传入非 int（如 None / "10" 字符串）触发 main(args)，%d 在此场景下会抛 TypeError；
+    # - %s 安全降级为 str()，与本文件其他字段（factor=%s force_full=%s）以及公共模块
+    #   factor_ic_runner.py 启动行 "入口参数: min_stocks=%s, force_full=%s" 完全一致，
+    #   保持项目内日志检索语法统一（grep "force_full=True" 跨模块同时命中）。
     logger.info(
-        "启动 run_factor_ic: factor=%s min_stocks=%d force_full=%s",
+        "启动 run_factor_ic: factor=%s min_stocks=%s force_full=%s",
         SPEC.factor_name,
         args.min_stocks,
         args.force_full,
