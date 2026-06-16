@@ -101,7 +101,8 @@ def main():
     Returns
     -------
     dict
-        run_complex_factor_ic 的完整结果字典（成功路径下保证非 None）。
+        计算成功时返回 run_complex_factor_ic 的完整结果字典；
+        否则抛出 FactorCalcError（不会返回 None）。
 
     Raises
     ------
