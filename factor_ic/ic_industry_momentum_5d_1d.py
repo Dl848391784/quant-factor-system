@@ -68,11 +68,11 @@ def main():
     if result is None:
         raise FactorCalcError("run_factor_ic 返回 None，数据加载或计算可能失败")
 
-    # 输出 IC 摘要 + None 状态整合告警（公共模块,M3.1）
+    # 输出 IC 摘要（公共模块,M3.1）
+    # 职责约定：None 检查由 main() 调用方提前退出（见上方 result is None 分支），
+    # log_factor_summary 只处理非 None 的合法 dict 结果，并对 dict 内字段为 None 的
+    # 异常情况输出整合告警（factor_summary_logger.py L83-92）。
     log_factor_summary(result, "行业5日动量因子", logger)
-
-    logger.info("行业5日动量因子IC计算完成")
-    return result
 
 
 if __name__ == "__main__":
