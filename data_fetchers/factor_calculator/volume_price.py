@@ -121,7 +121,8 @@ def calculate_positive_day_ratio_5(
     - 值接近0.5: 上涨下跌交替 = 无明确趋势
 
     边界处理:
-    - 前4天无完整5日窗口 → NaN（自然排除）
+    - 每个 asset 前 5 天为 NaN（首行 diff 为 NaN，rolling(5) 至少需要 5 个
+      非 NaN 样本，因此前 4 天 + 包含首行的第 5 天均为 NaN，第 6 天起才有值）
     - 全NaN组 → NaN
 
     遵循 H5: IC方向不预判
@@ -135,7 +136,11 @@ def calculate_positive_day_ratio_5(
     daily_return = df.groupby(_COL_ASSET)[_COL_CLOSE].diff()
 
     # 阳线标记（日收益率 > 0）
-    positive_mask = (daily_return > 0).astype(float)
+    # 首行 diff 为 NaN（每个 asset 第一个交易日无前日收盘可比），
+    # 直接 (daily_return > 0).astype(float) 会把 NaN > 0 求值为 False = 0.0，
+    # 让首行被误计为"阴线"参与 rolling 求和。用 .where(notna()) 保留 NaN，
+    # rolling 在 min_periods=5 下自然把含 NaN 的窗口结果置为 NaN。
+    positive_mask = daily_return.gt(0).astype(float).where(daily_return.notna())
 
     # rolling 5日窗口计算阳线比例，min_periods=5确保前4天为NaN
     ratio = positive_mask.groupby(df[_COL_ASSET]).rolling(5, min_periods=5).mean().reset_index(level=0, drop=True)
