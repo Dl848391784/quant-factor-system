@@ -44,7 +44,22 @@ SPEC = register_factor(
 # 引入原因：避免散落字符串字面量；run_factor_ic 返回结构变更时由静态检查/grep 一次定位。
 # ============================================================================
 
+_KEY_IC_METRICS = "ic_metrics"
+_KEY_SAMPLE_STATS = "sample_stats"
+_KEY_PERIOD = "period"
 _KEY_IC_DISTRIBUTION = "ic_distribution_consistency"
+_KEY_FACTOR_NAME = "factor_name"
+_KEY_UPDATE_MODE = "update_mode"
+# ic_metrics 子键
+_KEY_IC_MEAN = "ic_mean"
+_KEY_IC_STD = "ic_std"
+_KEY_ICIR = "icir"
+# ic_distribution_consistency 子键
+_KEY_POSITIVE_RATIO = "positive_ratio"
+# sample_stats / period 子键
+_KEY_VALID_DAYS = "valid_days"
+_KEY_PERIOD_START = "start"
+_KEY_PERIOD_END = "end"
 
 
 def main():
@@ -68,15 +83,15 @@ def main():
     if result is None:
         raise FactorCalcError("run_factor_ic 返回 None，因子计算未产生有效结果，请检查数据或配置")
 
-    ic_metrics = result.get("ic_metrics") or {}
-    sample_stats = result.get("sample_stats") or {}
-    period = result.get("period") or {}
+    ic_metrics = result.get(_KEY_IC_METRICS) or {}
+    sample_stats = result.get(_KEY_SAMPLE_STATS) or {}
+    period = result.get(_KEY_PERIOD) or {}
     ic_distribution = result.get(_KEY_IC_DISTRIBUTION) or {}
 
-    ic_mean = ic_metrics.get("ic_mean")
-    ic_std = ic_metrics.get("ic_std")
-    icir = ic_metrics.get("icir")
-    positive_ratio = ic_distribution.get("positive_ratio")
+    ic_mean = ic_metrics.get(_KEY_IC_MEAN)
+    ic_std = ic_metrics.get(_KEY_IC_STD)
+    icir = ic_metrics.get(_KEY_ICIR)
+    positive_ratio = ic_distribution.get(_KEY_POSITIVE_RATIO)
 
     ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
     ic_std_str = f"{ic_std:.4f}" if ic_std is not None else "N/A"
@@ -87,10 +102,10 @@ def main():
         "=" * 60,
         "结果摘要",
         "=" * 60,
-        f"因子名称: {result.get('factor_name', 'unknown')}",
-        f"更新模式: {result.get('update_mode', 'unknown')}",
-        f"日期范围: {period.get('start', 'N/A')} ~ {period.get('end', 'N/A')}",
-        f"有效天数: {sample_stats.get('valid_days', 0)} 天",
+        f"因子名称: {result.get(_KEY_FACTOR_NAME, 'unknown')}",
+        f"更新模式: {result.get(_KEY_UPDATE_MODE, 'unknown')}",
+        f"日期范围: {period.get(_KEY_PERIOD_START, 'N/A')} ~ {period.get(_KEY_PERIOD_END, 'N/A')}",
+        f"有效天数: {sample_stats.get(_KEY_VALID_DAYS, 0)} 天",
         "--- IC指标 ---",
         f"IC 均值: {ic_mean_str}",
         f"IC 标准差: {ic_std_str}",
