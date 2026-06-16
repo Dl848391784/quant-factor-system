@@ -161,6 +161,7 @@ dependencies = [
 | H9 | 任务粒度：≤3 文件 **AND** ≤200 行（两者都需满足，违反任一即超粒度） | 控制单次改动规模，便于 review 和回退；超粒度走 Design-First | pre-commit `scripts/check_task_size.py` | pre-commit |
 | H10 | 测试覆盖率：不低于阶段性阈值（当前 60%，目标 70%） | 防止新代码无测试拉低基线 | pytest `--cov-fail-under=60`（当前阶段） | CI |
 | H11 | 日志格式：% 惰性格式化（禁止 f-string / + 拼接 / `exc_info=True`） | 性能（高 verbosity 时跳过格式化）+ 风格统一 + 与标准库 logging 结构化处理器（如 JSON）兼容 | ruff G004 / G003 / G201 | pre-commit + CI |
+| H12 | 退出码语义：0=成功 / 1=运行时错误 / 2=import-time 配置或注册失败 | CI / shell 脚本能区分"代码不能加载"（exit 2，立即告警停止流水线）vs"运行时失败"（exit 1，可重试 / 排查数据） | 人工 review + `scripts/check_exit_codes.py`（[待实施]） | pre-commit + CI |
 
 **H2 正反例**：
 - ✅ 算输出（必须放 `<模块>/result/`）：分析结果 JSON、回测报告、汇总文件、对外暴露的数据产物
@@ -259,7 +260,6 @@ ruff check --select G factor_ic/
 
 | 规则编号 | 建议 | 目的 | 当前状态 | 自动化计划 |
 |---|------|------|----------|------------|
-| S1 | 退出码统一 0/1 | 让 CI / shell 脚本能统一判定成功失败 | 手动检查 | 待 CI 脚本 |
 | S2 | 配套文件同步创建（新增 schema 时同步 test、新增 path 时同步 PROJECT.md） | 防止配套漂移 | 人工审核 | 待 PR 模板 + CI |
 | S3 | 日志格式统一 | 便于日志聚合与 grep | 手动检查 | 待自定义 logger_config 模块 + AST 检查脚本 |
 

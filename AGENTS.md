@@ -68,7 +68,7 @@ Plan → Execute → Review → Debug
 | 3 | 临时文件：放 `temporary/` | grep 临时脚本 |
 | 4 | 字段非空：None 必须显式设置 + 记录原因 | JSON Schema |
 | 5 | 因子方向：根据实际 IC 确定 | pytest 断言 |
-| 6 | 退出码：0/1 | 手动检查 |
+| 6 | 退出码：0=成功 / 1=运行时错误 / 2=import-time 配置或注册失败 | 手动检查 |
 | 7 | 测试位置：`<模块>/test_cases/` | pytest 发现 |
 | 8 | 配套文件：新建脚本同步创建流程文档 + pytest | 人工审核 |
 | 9 | 日志格式：使用模块 logger_config | ruff |

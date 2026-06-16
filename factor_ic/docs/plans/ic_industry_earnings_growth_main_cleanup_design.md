@@ -210,12 +210,25 @@ R1-R3 已落地方案 A（保留 `if result is None` 死分支作为防御性守
 
 ### 9.5 R7 规范升级方案
 
-**PROJECT.md**：S1（L262）从软约束升级为 H12 硬规则，插入到 L162（H11 之后）。
-- 新 H12：`退出码语义：0=成功 / 1=运行时错误 / 2=import-time 配置或注册失败`
-- 删除 L262 旧 S1 行
-- 自动化检查：`scripts/check_exit_codes.py` 待交付（标 [待实施]）
+**PROJECT.md**：S1（L262）从软约束升级为 H12 硬规则，插入到 L163（H11 之后）；
+同时新增 H13 死代码硬规则（紧随 H12）。
 
-**AGENTS.md** 规则 #6：从 `0/1` 扩展为 `0/1/2`（同步定义）。
+**新 H12（退出码语义）**：
+- 规则：`退出码语义：0=成功 / 1=运行时错误 / 2=import-time 配置或注册失败`
+- 目的：CI / shell 脚本能区分"代码不能加载"（exit 2）vs"运行时失败"（exit 1）
+- 自动化检查：`scripts/check_exit_codes.py`（待交付，标 [待实施]）
+- 删除 L262 旧 S1 行
+
+**新 H13（死代码禁止）**：
+- 规则：`禁止永不触发的防御性兜底分支（如 if result is None 兜底面对永不返回 None 的函数）`
+- 目的：死代码掩盖真实错误来源、误导维护者、增加噪音；必须删除
+- 验证方法：人工 review + `grep -rn "if result is None" factor_ic/ic_*.py` 应为零命中（非 amplitude_trend / 三脚本以外）
+- 自动化检查：`scripts/check_dead_branches.py`（待交付，标 [待实施]）
+- 历史教训：本次 R1-R3 误以为方案 A（保留死分支作为防御性守卫）合规，
+  R4-R6 才修正为方案 B（彻底删除）。规则化后避免再次走偏。
+
+**AGENTS.md** 规则 #6：从 `0/1` 扩展为 `0/1/2`（同步 H12 定义）；
+新增规则 #14（对应 PROJECT.md H13 死代码禁止）。
 
 ### 9.6 退出码 2 的语义边界（明确约定）
 
@@ -224,4 +237,12 @@ R1-R3 已落地方案 A（保留 `if result is None` 死分支作为防御性守
 - exit 2 = 模块 import-time 配置或注册失败（`register_factor` 重复、required_columns 非法、配置文件缺失等）
 
 **为什么需要区分 1 与 2**：CI / pipeline 脚本可据此判断是"代码本身有 bug 不能加载"（exit 2，立即告警停止流水线）还是"数据/逻辑层面执行失败"（exit 1，可重试 / 排查数据）。
+
+### 9.7 H13 死代码规则的判定边界（避免过度删除）
+
+- ✅ 应删：callee 实现明确"永不返回 None"（dict 失败 + raise 双路径）+ caller 仍写 `if result is None` 守卫
+- ✅ 应删：`if False:` / `assert False` 之后的代码 / 不可达的 `else` 分支
+- ❌ 不应删：callee 文档不明确返回值是否可能为 None / callee 是 third-party 库（契约可能变化）
+- ❌ 不应删：业务上可能进入但当前测试未覆盖的分支（这是测试覆盖问题，不是死代码）
+- 判定方法：必须能给出 callee 的具体行号证据（如 factor_ic_runner.py L442 返回 dict / L461 raise），否则按"不应删"处理
 
