@@ -520,3 +520,41 @@ parser.set_defaults(neutralize=True)
 
 **全文无矛盾，design.md 闭环完成**。R6 之后进入实施阶段（R7-R22）。
 
+---
+
+## §8 R7 核对发现（实施前接口确认）
+
+### 8.1 复用 `data_fetchers.fetch_industry.get_industry_map`
+
+| 项 | 现状 |
+|---|---|
+| 函数签名 | `get_industry_map() -> dict[str, dict]` |
+| 返回结构 | `{"002309": {"name": "中利集团", "industry": "电力设备", "industry_code": "220301"}, ...}` |
+| 缓存机制 | 模块级 `_industry_cache` + 双重检查锁，已实现，**R8 直接用即可** |
+| 契约 | 必返回 dict（可能为空），不抛异常（v3.7 文档保证） |
+
+### 8.2 ⚠️ 协议偏差修正：`'未知'` vs `NaN`
+
+发现 `get_stock_industry(code)` 对**不在行业表中的 asset**返回 `'未知'`（字符串），而非 `None`/NaN。
+
+为保持 design §3.3 的 "{其他, NaN} 剔除" 协议清晰，**R8 实现不调 `get_stock_industry`**，改为直接基于 `get_industry_map()` 的 dict 做 `.map()`：
+
+```python
+# R8 实现伪代码
+ind_map = get_industry_map()  # {asset: {name, industry, industry_code}}
+asset_to_industry = {k: v.get("industry") for k, v in ind_map.items()}
+factor_df["industry"] = factor_df["asset"].map(asset_to_industry)
+# 未知 asset → pandas NaN（自然行为）
+# 行业表中的 "其他" → factor_df["industry"] == "其他"
+```
+
+剔除条件统一为：
+
+```python
+factor_df_neutral = factor_df[
+    factor_df["industry"].notna() & (factor_df["industry"] != "其他")
+]
+```
+
+**修正后 design 一致性**：§3.3 表格中 "`industry == '其他'` 或 `industry is NaN` 的股票" 与本实现完全对齐 ✅
+
