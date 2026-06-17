@@ -532,9 +532,8 @@ class TestPipelineEmitValidLogSpec:
     SECTION_HEAD_FACTORS_TRUE = {
         "volume_price_strength",  # Step 11.6 段头
         "industry_momentum_5d",  # Step 11.7 段头
-        "industry_roe_trend",  # Step 11.8 段头
-        "industry_pe_trend",  # Step 11.8.3 段头（OOM 可观测性）
-        "capital_flow_ratio_trend",  # Step 11.9 段头
+        "industry_roe_trend",  # Step 11.8 行业财务三因子 block 段头
+        "capital_flow_ratio_trend",  # Step 11.9 资金流双因子 block 段头
     }
 
     # 必须 emit_valid_log=False 的同段后续因子（避免刷屏）
@@ -544,11 +543,10 @@ class TestPipelineEmitValidLogSpec:
         "near_high_ratio_5",
         "industry_turnover_trend",
         "industry_amplitude_trend",
-        "industry_earnings_growth",
     }
 
     def test_step_11_6_to_11_9_section_heads_emit_true(self) -> None:
-        """段头因子（共 5 个）必须 emit_valid_log=True"""
+        """段头因子（共 4 个）必须 emit_valid_log=True"""
         actual_true_factors = {
             step["output_cols"][0]
             for step in _FACTOR_PIPELINE_STEPS
@@ -559,7 +557,7 @@ class TestPipelineEmitValidLogSpec:
         )
 
     def test_step_11_6_to_11_9_followers_emit_false(self) -> None:
-        """同段后续因子（共 6 个）必须 emit_valid_log=False（避免日志刷屏）"""
+        """同段后续因子（共 5 个）必须 emit_valid_log=False（避免日志刷屏）"""
         actual_false_factors = {
             step["output_cols"][0]
             for step in _FACTOR_PIPELINE_STEPS
@@ -571,14 +569,14 @@ class TestPipelineEmitValidLogSpec:
         )
 
     def test_emit_false_count_matches_spec(self) -> None:
-        """emit_valid_log=False 的因子数应 = 6（同段后续）。
+        """emit_valid_log=False 的因子数应 = 5（同段后续）。
 
-        Step 11.9 资金流合并为单 step orchestrator 后，capital_flow_intensity
-        不再是独立后续 step；Step 11.8.3 PE 趋势因子为 OOM 可观测性改成段头日志。
+        Step 11.8 行业财务与 Step 11.9 资金流均为单 step block；
+        block 内部负责输出多列有效率，不再把第二/第三列建成独立 follower step。
         """
         false_count = sum(1 for step in _FACTOR_PIPELINE_STEPS if not step["emit_valid_log"])
-        assert false_count == 6, (
-            f"emit_valid_log=False 数量异常: {false_count}, 应为 6（Step 11.9 资金流单 step + Step 11.8.3 可观测）"
+        assert false_count == 5, (
+            f"emit_valid_log=False 数量异常: {false_count}, 应为 5（Step 11.8/11.9 均为单 step block）"
         )
 
 
@@ -1022,7 +1020,7 @@ class TestPipelineStepsAndColsConsistency:
         """注释中的 step 数必须等于 _FACTOR_PIPELINE_STEPS 实际长度。"""
         from data_fetchers.factor_generator import _FACTOR_PIPELINE_STEPS
 
-        assert len(_FACTOR_PIPELINE_STEPS) == 26, "_FACTOR_PIPELINE_STEPS 当前为 26 个 step"
+        assert len(_FACTOR_PIPELINE_STEPS) == 24, "_FACTOR_PIPELINE_STEPS 当前为 24 个 step"
 
     def test_pipeline_output_cols_count_matches_extended_factor_cols(self) -> None:
         """所有 step 的 output_cols 总数必须等于 _EXTENDED_FACTOR_COLS 长度。"""
@@ -1036,7 +1034,7 @@ class TestPipelineStepsAndColsConsistency:
     def test_pipeline_comment_distinguishes_step_and_col_counts(self) -> None:
         """generate_all_factors 中 Step 3.5~11.9 段注释必须明确区分 step 数与列数。
 
-        反例：曾经写 \"_FACTOR_PIPELINE_STEPS 表（26 项）\"，
+        反例：曾经写 \"_FACTOR_PIPELINE_STEPS 表（24 项）\"，
         \"项\" 既可指 step 也可指 col 造成歧义。
         """
         from pathlib import Path
@@ -1045,12 +1043,12 @@ class TestPipelineStepsAndColsConsistency:
 
         source = Path(fg.__file__).read_text(encoding="utf-8")
         # 反例：禁止仅写 "（N 项）" 的模糊计数
-        assert "_FACTOR_PIPELINE_STEPS 表（26 项）" not in source, (
+        assert "_FACTOR_PIPELINE_STEPS 表（24 项）" not in source, (
             '_FACTOR_PIPELINE_STEPS 表注释禁用模糊 "项" 字，必须区分 step 数与列数'
         )
         # 正例：必须明确包含 \"step\" 与 \"输出列\" 字段
-        assert "_FACTOR_PIPELINE_STEPS 表（26 个 step，31 个输出列）" in source, (
-            '_FACTOR_PIPELINE_STEPS 表注释必须形如 "（26 个 step，31 个输出列）"'
+        assert "_FACTOR_PIPELINE_STEPS 表（24 个 step，31 个输出列）" in source, (
+            '_FACTOR_PIPELINE_STEPS 表注释必须形如 "（24 个 step，31 个输出列）"'
         )
 
 
