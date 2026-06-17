@@ -443,3 +443,80 @@ parser.set_defaults(neutralize=True)
 - 单脚本暴露会让 CLI 接口爆炸（×30 因子）
 - 调试需要时直接调 runner CLI 即可
 
+---
+
+## §6 验证方案
+
+### 6.1 单元测试
+
+| 轮次 | 测试文件 | 测试用例 | 验证目标 |
+|---|---|---|---|
+| R9 | `factor_ic/test_cases/test_data_loader_industry.py` | `test_merge_industry_happy_path` | factor_df.asset → industry 列正确合并 |
+| R9 | 同上 | `test_merge_industry_unknown_asset_fallback` | 未在行业表中的 asset → industry='其他' |
+| R9 | 同上 | `test_merge_industry_no_pollution` | 现有列不被修改 |
+| R15 | `factor_ic/test_cases/test_runner_neutralize.py` | `test_neutralize_excluded_factor_skipped` | 排除清单内因子 → enabled=false + skipped_reason |
+| R15 | 同上 | `test_neutralize_disabled_via_param` | neutralize=False → enabled=false + "user disabled" |
+| R15 | 同上 | `test_neutralize_excluded_overrides_user_param` | neutralize=True + 排除清单 → 仍 skip 且 reason 是排除清单 |
+| R15 | 同上 | `test_industry_aggregated_factor_residual_zero` | 同行业值相同的 mock 数据 → 残差 abs<1e-9（§3.1 实证证据保留） |
+| R15 | 同上 | `test_neutral_excludes_other_industry` | 含 '其他' 行业的 mock → neutral 路径剔除 ~26%，raw 路径不剔除 |
+| R17 | `factor_ic/test_cases/test_ic_result_builder_neutral.py` | `test_output_has_ic_neutral_industry_field` | JSON 含 ic_neutral_industry 字段 |
+| R17 | 同上 | `test_decay_rate_calculation` | decay_rate = (raw - neutral) / raw 算式正确 |
+| R17 | 同上 | `test_decay_level_threshold` | decay_rate=0.31 → "high"；=0.29 → "low"（D11 阈值 30%） |
+| R19 | `summary/test_cases/test_neutralize_sensitivity_column.py` | `test_summary_report_has_decay_column` | summary txt 报告含"中性化敏感度"列 |
+
+### 6.2 集成测试（R20 全因子回归跑数）
+
+跑全部 ~30 个 `ic_*.py`，校验：
+
+1. **每个因子输出 JSON 都含 `ic_neutral_industry` 顶层字段**
+   - `find factor_ic/result/ -name 'ic_*_1d_analysis_result.json' | xargs -I{} jq -e '.ic_neutral_industry' {}`
+2. **排除清单内 8 个因子**：`enabled=false`, `skipped_reason` 含 "INDUSTRY_NEUTRALIZE_EXCLUDED"
+3. **纳入清单 ~22 个因子**：`enabled=true`, `decay_rate` 是有限数（非 NaN/Inf）
+4. **raw IC 数值与改动前完全一致**（保护下游 backtest 链路），抽样对比 5 个因子的 `ic_metrics.ic_mean`：误差 < 1e-9
+5. **summary 报告新列存在**且阈值标注正确
+
+### 6.3 性能预算
+
+| 项 | 现状（每因子） | 改动后预估 | 说明 |
+|---|---|---|---|
+| factor_df 加载 | ~3-5 s | +0.1 s | industry merge 是 O(n) 单列字典查 |
+| raw IC 计算 | ~5-10 s | 不变 | 算法不变 |
+| neutral IC 计算 | — | +5-10 s | 残差回归（按日 groupby + LinearRegression） |
+| 总耗时 | 8-15 s | **15-25 s** | **可接受**：单因子总耗时 < 30 s |
+
+**降级方案**（若实测超预算）：把 `industry_neutral_residual` 内的 `LinearRegression().fit()` 换成 numpy 闭式解（`np.linalg.lstsq` 或直接行业均值减），预计可砍 50% 耗时。
+
+### 6.4 回归保护
+
+| 风险 | 检测手段 |
+|---|---|
+| 改动破坏 raw IC 数值 | R15 集成测试断言现有 5 个 fixture JSON 的 ic_mean 完全一致 |
+| 改动破坏 backtest 读取的 factor_direction | R15 单测断言 factor_direction 字段仍只来自 raw 计算结果 |
+| 单因子脚本 CLI 接口变更 | 任何 ic_*.py 不改动；如有改动，违反 §5.1 "零改动" 约束 |
+| 输出 JSON schema 不向后兼容 | R20 末段：summary 模块按现有逻辑读 ic_metrics 必须仍能正常运行 |
+
+---
+
+## §7 引用闭环核对（R6 末尾，全文检查）
+
+回扫 §3-§6 对 §1-§2 命题的引用，确认无矛盾：
+
+| 引用方 | 被引用方 | 命题 | 状态 |
+|---|---|---|---|
+| §3.1 排除原因 | §1.1 | "因子值在行业内部全部相同" → 形式化为 "残差≡0" | ✅ 一致 |
+| §3.1 实证验证 | §3.1 表内 8 因子 | R15 单测 `test_industry_aggregated_factor_residual_zero` | ✅ 单测覆盖 |
+| §3.3 "其他" 处理 | §2.3 | 1544 只 / 26.3% / 申万二级码异质性 | ✅ 数据一致 |
+| §4 D6 "其他" 决策 | §2.3 | 当独立行业引入噪声 → 剔除 | ✅ 一致 |
+| §4 D7 min_industry_stocks=5 | `ic_calculator.py:858` | 函数现有签名默认值 | ✅ 一致 |
+| §4 D8 factor_direction | §1.3 | 不修改 backtest 链路 | ✅ 一致 |
+| §4 D9 静态映射 | §2.5 | 当前数据是单期快照 | ✅ 一致 |
+| §4 D10 删除死代码 | §1.1 | "0 个调用点" + AGENTS.md #14 | ✅ 一致 |
+| §4 D12 字段命名 | §5.2.2 | `ic_neutral_industry` 与 `industry_neutral_residual` 函数前缀一致 | ✅ 一致 |
+| §5.1 流程图 Step 4 | §5.3 协议表 | 排除清单优先于用户开关 | ✅ 一致 |
+| §5.2.1 schema 字段名 | §5.2.2 命名规则 + §5.3 常量 | `ic_neutral_industry` 全文一致 | ✅ 一致 |
+| §5.2.3 排除字段示例 | §5.3 协议表 | enabled=false + skipped_reason 一致 | ✅ 一致 |
+| §6.1 单测覆盖 | §3.1/§3.3/§5.3 | 三个核心机制（残差≡0/'其他'剔除/排除清单优先）均有单测 | ✅ 一致 |
+| §6.2 集成测试 | §5.2 schema | 字段断言全部对齐 | ✅ 一致 |
+
+**全文无矛盾，design.md 闭环完成**。R6 之后进入实施阶段（R7-R22）。
+
