@@ -108,6 +108,7 @@ from factor_definitions import FACTOR_DEFINITIONS, get_factor_definition
 | factor_ic_data | factor_ic_data.json.gz | dates[-1] | full_json |
 | factor_data | factor_data.json.gz | meta.date_range.end | full_json |
 | turnover_data | turnover_rate_data.json.gz | meta.date_range.end | full_json |
+| tail_trading_data | tail_trading_data.json.gz | meta.date_range.end | full_json |
 
 **数据完成度检查（v2.0 新增）：**
 
@@ -127,9 +128,10 @@ from factor_definitions import FACTOR_DEFINITIONS, get_factor_definition
 
 检查方法：
 1. 从 factor_ic_data.json.gz 的完整 JSON 对象头部读取最新日期（dates[-1]）
-2. 统计该日期下的股票数（读取该日期对应的数据行）
-3. 对比 expected_stocks（从 factor_data.json.gz meta.total_stocks 获取，约 3000）
-4. 计算完成度百分比
+2. 从 factor_data.json.gz / turnover_rate_data.json.gz / tail_trading_data.json.gz 的 meta.date_range.end 读取最新日期
+3. 统计该日期下的股票数（读取该日期对应的数据行）
+4. 对比 expected_stocks（从 factor_data.json.gz meta.total_stocks 获取，约 3000）
+5. 计算完成度百分比
 
 ### 衍生数据检查
 

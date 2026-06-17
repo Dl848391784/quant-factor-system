@@ -1,9 +1,9 @@
 # generate_factor_summary_report.py 流程文档
 
-> 版本: v1.6
+> 版本: v1.7
 > 创建时间: 2026-05-28
 > 最后更新: 2026-06-17
-> 脚本版本: generate_factor_summary_report.py v2.19
+> 脚本版本: generate_factor_summary_report.py v2.20
 
 ---
 
@@ -16,6 +16,7 @@
 - backtest/result/ - 分层回测结果
 - comprehensive_factor/result/ - 综合因子结果
 - data_fetchers/result/factor_ic_data.json.gz - 因子数据（用于计算相关性）
+- data_fetchers/result/tail_trading_data.json.gz - 尾盘5分钟K线数据（用于基础数据完整性检查）
 
 **输出位置：** summary/result/factor_summary_report_YYYY-MM-DD.txt
 
@@ -80,6 +81,7 @@ derived_results = check_derived_data_freshness(date, logger)
 | 基础数据 | factor_ic_data.json.gz | dates[-1] | full_json（gzip，头部包含顶层 dates 数组） |
 | 基础数据 | factor_data.json.gz | meta.date_range.end | full_json（gzip） |
 | 基础数据 | turnover_rate_data.json.gz | meta.date_range.end | full_json（gzip） |
+| 基础数据 | tail_trading_data.json.gz | meta.date_range.end | full_json（gzip） |
 | 衍生数据 | IC 结果文件 | ic_series[-1].date | JSON |
 | 衍生数据 | 回测结果文件 | 文件存在性检查 | — |
 | 衍生数据 | 综合因子结果文件 | 文件存在性检查 | — |

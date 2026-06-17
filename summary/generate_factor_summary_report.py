@@ -51,9 +51,10 @@
     v2.17: 2026-06-11 评分说明重构——展示所有4种方法的9维度完整评分明细而非只对比IC vs ICIR；最优方法(Rolling ICIR)换手率低分给出解释
     v2.18: 2026-06-11 选股结果展示振幅过滤信息（排除振幅<1%%的一字板涨停股）；top_n 从 3 改为 10
     v2.19: 2026-06-17 修复 factor_ic_data 新鲜度检查误报：主数据源为完整 JSON 对象，读取 gzip 头部解析顶层 dates[-1]
+    v2.20: 2026-06-17 基础数据源检查纳入 tail_trading_data，展示尾盘5分钟K线数据新鲜度
 """
 
-__version__ = "2.19"
+__version__ = "2.20"
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -123,6 +124,13 @@ DATA_CHECK_SOURCES = {
     "turnover_data": {
         "path": "data_fetchers/result/turnover_rate_data.json.gz",
         "description": "换手率数据",
+        "date_field": "meta.date_range.end",  # 从 meta.date_range.end 获取最新日期
+        "format": "full_json",  # 完整 JSON 对象
+        "is_gzip": True,
+    },
+    "tail_trading_data": {
+        "path": "data_fetchers/result/tail_trading_data.json.gz",
+        "description": "尾盘5分钟K线数据",
         "date_field": "meta.date_range.end",  # 从 meta.date_range.end 获取最新日期
         "format": "full_json",  # 完整 JSON 对象
         "is_gzip": True,

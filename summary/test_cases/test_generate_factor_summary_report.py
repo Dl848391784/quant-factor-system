@@ -52,7 +52,7 @@ class TestVersion:
 
     def test_version_defined(self):
         """验证版本常量存在"""
-        assert __version__ == "2.19"
+        assert __version__ == "2.20"
 
 
 class TestHelperFunctions:
@@ -364,6 +364,59 @@ class TestDataFreshnessCheck:
                 assert len(results) == 1
                 assert results[0]["actual_date"] == "2026-06-01"
                 assert results[0]["status"] == "ok"
+                logger.error.assert_not_called()
+
+    def test_check_data_freshness_tail_trading_data_full_json_meta_end(self):
+        """测试 tail_trading_data 完整 JSON 格式从 meta.date_range.end 提取日期"""
+        logger = MagicMock()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "data_fetchers" / "result").mkdir(parents=True)
+
+            test_data = {
+                "meta": {
+                    "date_range": {"start": "2026-05-08", "end": "2026-06-01"},
+                    "last_updated": "2026-06-02 05:47:28",
+                    "source": "mixed",
+                },
+                "data": [
+                    {
+                        "date": "2026-06-01",
+                        "asset": "000001",
+                        "prices": [10.0] * 13,
+                        "volumes": [1000] * 13,
+                        "tail_high": 10.5,
+                        "tail_low": 9.8,
+                    }
+                ],
+            }
+            file_path = root / "data_fetchers" / "result" / "tail_trading_data.json.gz"
+            with gzip.open(file_path, "wt", encoding="utf-8") as f:
+                json.dump(test_data, f)
+
+            with (
+                patch("summary.generate_factor_summary_report.PROJECT_ROOT", root),
+                patch(
+                    "summary.generate_factor_summary_report.DATA_CHECK_SOURCES",
+                    {
+                        "tail_trading_data": {
+                            "path": "data_fetchers/result/tail_trading_data.json.gz",
+                            "description": "尾盘5分钟K线数据",
+                            "date_field": "meta.date_range.end",
+                            "format": "full_json",
+                            "is_gzip": True,
+                        }
+                    },
+                ),
+            ):
+                results = check_data_freshness("2026-06-02", logger)
+
+                assert len(results) == 1
+                assert results[0]["source"] == "tail_trading_data"
+                assert results[0]["actual_date"] == "2026-06-01"
+                assert results[0]["status"] == "ok"
+                assert results[0]["status_symbol"] == "✓正常"
                 logger.error.assert_not_called()
 
 
