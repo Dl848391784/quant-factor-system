@@ -349,7 +349,97 @@ R3 末尾会再做一次引用闭环，但 R2 阶段先列出 §3-§4 引用了 
 }
 ```
 
-#### 5.2.4 错误路径（factor_ic 异常时）
+### 5.3 排除清单常量 + neutralize 开关协议
 
-`build_error_result` 输出仍维持原结构，**不**包含 `ic_neutral_industry` 字段（避免 None 套娃 None）。下游消费方按 `success: false` 短路即可。
+#### 5.3.1 排除清单常量定义位置
+
+```python
+# factor_ic/common/factor_ic_runner.py（顶部模块级常量，R12 新增）
+
+# 行业中性化排除清单：行业聚合赋个股因子，行业内值相同 → 残差≡0 → IC≡0
+# 详见 design.md §3.1 实证依据
+INDUSTRY_NEUTRALIZE_EXCLUDED: frozenset[str] = frozenset({
+    "industry_momentum_5d",
+    "industry_turnover_trend",
+    "industry_amplitude_trend",
+    "industry_roe_trend",
+    "industry_earnings_growth",
+    "industry_pe_trend",
+    "capital_flow_intensity",
+    "capital_flow_ratio_trend",
+})
+
+# 排除原因模板（写入 ic_neutral_industry.skipped_reason）
+INDUSTRY_NEUTRALIZE_SKIPPED_REASON = (
+    "factor in INDUSTRY_NEUTRALIZE_EXCLUDED (industry-aggregated factor)"
+)
+```
+
+**为什么是 frozenset 而不是 list**：
+- 不可变（防止运行时被意外修改）
+- O(1) 查询（`factor_name in INDUSTRY_NEUTRALIZE_EXCLUDED`）
+- 类型标注 `frozenset[str]` 明确语义
+
+#### 5.3.2 neutralize 开关协议
+
+`run_factor_ic_analysis` 函数签名（R13 改动）：
+
+```python
+def run_factor_ic_analysis(
+    factor_name: str,
+    factor_col: str,
+    factor_cols: list[str],
+    return_period: str = "1d",
+    min_stocks: int = 10,
+    force_full: bool = False,
+    custom_factor_calculation=None,
+    custom_factor_calculation_params=None,
+    extra_log_params=None,
+    *,
+    neutralize: bool = True,                  # ← R13 新增（D3 默认 True）
+    neutralize_min_industry_stocks: int = 5,  # ← R13 新增（D7 默认 5）
+    logger=None,
+    **kwargs,
+) -> dict[str, Any]:
+    """
+    新参数:
+        neutralize: 是否计算行业中性化 IC。默认 True。
+            - True 且 factor_name 不在 INDUSTRY_NEUTRALIZE_EXCLUDED → 计算并输出
+            - True 且 factor_name 在 INDUSTRY_NEUTRALIZE_EXCLUDED → **强制覆盖为 False**，
+              输出 ic_neutral_industry.enabled=false + skipped_reason
+            - False（用户显式关）→ 不计算，输出 ic_neutral_industry.enabled=false +
+              skipped_reason="user disabled via neutralize=False"
+        neutralize_min_industry_stocks: 残差回归时单行业最小股票数（D7）
+    """
+```
+
+**协议核心规则**（R13 实现需严格遵守）：
+
+| 入参 neutralize | factor_name 是否在排除清单 | 实际行为 | enabled | skipped_reason |
+|:---:|:---:|---|:---:|---|
+| True | 否 | 计算 neutral IC | true | null |
+| True | **是** | **强制 skip**（覆盖入参） | false | "factor in INDUSTRY_NEUTRALIZE_EXCLUDED ..." |
+| False | 否 | 用户主动关闭 | false | "user disabled via neutralize=False" |
+| False | 是 | 双重原因，按排除清单为主 | false | "factor in INDUSTRY_NEUTRALIZE_EXCLUDED ..." |
+
+**为什么排除清单优先于用户开关**：避免用户误开导致排除清单内因子产生 IC≡0 的误导性输出（这种结果会污染 summary 报告，伤害诊断价值）。
+
+#### 5.3.3 CLI 暴露
+
+`factor_ic_runner.py::main` 加 `--no-neutralize` flag（默认开，提供关闭逃生口）：
+
+```python
+parser.add_argument(
+    "--no-neutralize",
+    dest="neutralize",
+    action="store_false",
+    help="关闭行业中性化（仅输出 raw IC，调试用；默认开启）",
+)
+parser.set_defaults(neutralize=True)
+```
+
+单因子脚本（`factor_ic/ic_*.py`）**不暴露**该 CLI 选项，因为：
+- 默认行为已通过排除清单自动正确处理
+- 单脚本暴露会让 CLI 接口爆炸（×30 因子）
+- 调试需要时直接调 runner CLI 即可
 
