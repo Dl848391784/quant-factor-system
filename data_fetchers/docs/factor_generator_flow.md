@@ -354,6 +354,14 @@
    353|- **实现约束**: 两个资金流输出必须由单个 orchestrator step 一次性生成，禁止在 `factor_generator.py` pipeline 中拆回 `calculate_capital_flow_ratio_trend` 与 `calculate_capital_flow_intensity` 两个独立 step。
    354|- **原因**: 拆成两个 step 会重复加载资金流数据并重复构造 149 万行级 merge 中间表，实跑在 Step 11.8 后进入资金流阶段时出现 OOM-kill（signal 9）。
    355|- **验证**: `_FACTOR_PIPELINE_STEPS` 中资金流 step 数量为 1，且 `factor_func.__name__ == "calculate_capital_flow_block"`。
+
+### Step 12: 输出格式化 OOM 修复
+
+- **调用**: `_format_and_write_output(factor_df, output_path, start_time, logger)` → `_write_factor_json_gz(output_df, output_path, logger)`
+- **输出文件**: `data_fetchers/result/factor_ic_data.json.gz`
+- **实现约束**: Step 12 禁止使用 `factor_df[list(_OUTPUT_COLS)].copy()` 复制全量输出列；Step 13 写出禁止使用 `DataFrame.to_dict("records")` 构造批量 `list[dict]`。
+- **原因**: 149 万行 × 31 列的输出阶段若同时持有宽 `factor_df`、全量 `output_df.copy()`、批量 `list[dict]`，会在 RSS 约 3.3GB 时被 OOM-kill。当前实现改为列视图 + `itertuples(index=False, name=None)` 逐行构造单条 record 并立即 `json.dump`。
+- **验证**: `data_fetchers/test_cases/test_factor_generator_helpers.py::TestWriteFactorJsonGz::test_streaming_writer_does_not_call_to_dict` 对 `pd.DataFrame.to_dict` 加失败 mock，防止回退到批量 records 路径；真实验证使用 `/usr/bin/time -v python data_fetchers/factor_generator.py` 并检查输出文件 mtime 与 dmesg。
    356|
    357|---
    358|
@@ -361,6 +369,7 @@
    360|
    361|| 版本 | 日期 | 更新内容 |
    362||------|------|---------|
+   363|| v1.3 | 2026-06-17 | Step 12 输出格式化改为列视图 + 逐行 JSON 写出，避免 `output_df.copy()` 与 `to_dict("records")` OOM |
    363|| v1.2 | 2026-06-17 | Step 11.8 行业财务因子切换为单 step orchestrator，避免 `industry_pe_trend` OOM |
    364|| v1.1 | 2026-06-17 | Step 11.9 资金流因子切换为单 step orchestrator，避免 OOM |
    365|| v1.0 | 2026-05-25 | 创建流程文档 |
