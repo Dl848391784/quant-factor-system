@@ -533,6 +533,7 @@ class TestPipelineEmitValidLogSpec:
         "volume_price_strength",  # Step 11.6 段头
         "industry_momentum_5d",  # Step 11.7 段头
         "industry_roe_trend",  # Step 11.8 段头
+        "industry_pe_trend",  # Step 11.8.3 段头（OOM 可观测性）
         "capital_flow_ratio_trend",  # Step 11.9 段头
     }
 
@@ -544,12 +545,10 @@ class TestPipelineEmitValidLogSpec:
         "industry_turnover_trend",
         "industry_amplitude_trend",
         "industry_earnings_growth",
-        "industry_pe_trend",
-        "capital_flow_intensity",
     }
 
     def test_step_11_6_to_11_9_section_heads_emit_true(self) -> None:
-        """段头因子（共 4 个）必须 emit_valid_log=True"""
+        """段头因子（共 5 个）必须 emit_valid_log=True"""
         actual_true_factors = {
             step["output_cols"][0]
             for step in _FACTOR_PIPELINE_STEPS
@@ -560,7 +559,7 @@ class TestPipelineEmitValidLogSpec:
         )
 
     def test_step_11_6_to_11_9_followers_emit_false(self) -> None:
-        """同段后续因子（共 8 个）必须 emit_valid_log=False（避免日志刷屏）"""
+        """同段后续因子（共 6 个）必须 emit_valid_log=False（避免日志刷屏）"""
         actual_false_factors = {
             step["output_cols"][0]
             for step in _FACTOR_PIPELINE_STEPS
@@ -572,11 +571,14 @@ class TestPipelineEmitValidLogSpec:
         )
 
     def test_emit_false_count_matches_spec(self) -> None:
-        """emit_valid_log=False 的因子数应 = 8（同段后续）
-        bug 4 修复前是 12，修复后段头 4 个改为 True → 剩 8 个 False"""
+        """emit_valid_log=False 的因子数应 = 6（同段后续）。
+
+        Step 11.9 资金流合并为单 step orchestrator 后，capital_flow_intensity
+        不再是独立后续 step；Step 11.8.3 PE 趋势因子为 OOM 可观测性改成段头日志。
+        """
         false_count = sum(1 for step in _FACTOR_PIPELINE_STEPS if not step["emit_valid_log"])
-        assert false_count == 8, (
-            f"emit_valid_log=False 数量异常: {false_count}, 应为 8（bug 4 修复后 Step 11.6~11.9 段头 4 个改为 True）"
+        assert false_count == 6, (
+            f"emit_valid_log=False 数量异常: {false_count}, 应为 6（Step 11.9 资金流单 step + Step 11.8.3 可观测）"
         )
 
 
@@ -750,8 +752,7 @@ class TestPipelineStepLabelValidation:
                 seen_non_none = True
             elif not seen_non_none:
                 pytest.fail(
-                    f"_FACTOR_PIPELINE_STEPS[{i}]['step_label'] 为 None 但此前无任何非 None step_label，"
-                    f"段首缺失"
+                    f"_FACTOR_PIPELINE_STEPS[{i}]['step_label'] 为 None 但此前无任何非 None step_label，段首缺失"
                 )
 
 
@@ -1021,7 +1022,7 @@ class TestPipelineStepsAndColsConsistency:
         """注释中的 step 数必须等于 _FACTOR_PIPELINE_STEPS 实际长度。"""
         from data_fetchers.factor_generator import _FACTOR_PIPELINE_STEPS
 
-        assert len(_FACTOR_PIPELINE_STEPS) == 27, "_FACTOR_PIPELINE_STEPS 当前为 27 个 step"
+        assert len(_FACTOR_PIPELINE_STEPS) == 26, "_FACTOR_PIPELINE_STEPS 当前为 26 个 step"
 
     def test_pipeline_output_cols_count_matches_extended_factor_cols(self) -> None:
         """所有 step 的 output_cols 总数必须等于 _EXTENDED_FACTOR_COLS 长度。"""
@@ -1035,7 +1036,7 @@ class TestPipelineStepsAndColsConsistency:
     def test_pipeline_comment_distinguishes_step_and_col_counts(self) -> None:
         """generate_all_factors 中 Step 3.5~11.9 段注释必须明确区分 step 数与列数。
 
-        反例：曾经写 \"_FACTOR_PIPELINE_STEPS 表（27 项）\"，
+        反例：曾经写 \"_FACTOR_PIPELINE_STEPS 表（26 项）\"，
         \"项\" 既可指 step 也可指 col 造成歧义。
         """
         from pathlib import Path
@@ -1044,12 +1045,12 @@ class TestPipelineStepsAndColsConsistency:
 
         source = Path(fg.__file__).read_text(encoding="utf-8")
         # 反例：禁止仅写 "（N 项）" 的模糊计数
-        assert "_FACTOR_PIPELINE_STEPS 表（27 项）" not in source, (
+        assert "_FACTOR_PIPELINE_STEPS 表（26 项）" not in source, (
             '_FACTOR_PIPELINE_STEPS 表注释禁用模糊 "项" 字，必须区分 step 数与列数'
         )
         # 正例：必须明确包含 \"step\" 与 \"输出列\" 字段
-        assert "_FACTOR_PIPELINE_STEPS 表（27 个 step，31 个输出列）" in source, (
-            '_FACTOR_PIPELINE_STEPS 表注释必须形如 "（27 个 step，31 个输出列）"'
+        assert "_FACTOR_PIPELINE_STEPS 表（26 个 step，31 个输出列）" in source, (
+            '_FACTOR_PIPELINE_STEPS 表注释必须形如 "（26 个 step，31 个输出列）"'
         )
 
 

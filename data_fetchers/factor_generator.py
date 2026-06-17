@@ -26,8 +26,6 @@ try:
         calculate_amplitude,
         calculate_amplitude_delta,
         calculate_bollinger_pb,
-        calculate_capital_flow_intensity,
-        calculate_capital_flow_ratio_trend,
         calculate_industry_amplitude_trend,
         calculate_industry_earnings_growth,
         calculate_industry_momentum_5d,
@@ -51,6 +49,7 @@ try:
         calculate_turnover_surge_delta,
         calculate_volume_price_strength,
     )
+    from .factor_calculator.fund_flow import calculate_capital_flow_block
 except ImportError:
     # 脚本直接运行（无父包上下文）：将项目根注入 sys.path 后改用绝对导入
     project_root = Path(__file__).parent.parent
@@ -61,8 +60,6 @@ except ImportError:
         calculate_amplitude,
         calculate_amplitude_delta,
         calculate_bollinger_pb,
-        calculate_capital_flow_intensity,
-        calculate_capital_flow_ratio_trend,
         calculate_industry_amplitude_trend,
         calculate_industry_earnings_growth,
         calculate_industry_momentum_5d,
@@ -86,6 +83,7 @@ except ImportError:
         calculate_turnover_surge_delta,
         calculate_volume_price_strength,
     )
+    from data_fetchers.factor_calculator.fund_flow import calculate_capital_flow_block
 
 # 模块级 fallback logger（PROJECT.md 公共模块日志规范）
 _MODULE_LOGGER = logging.getLogger("data_fetchers.factor_generator")
@@ -344,24 +342,17 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
         "emit_valid_log": False,
     },
     {
-        "step_label": None,
+        "step_label": "Step 11.8.3: 计算行业PE趋势因子...",
         "factor_func": calculate_industry_pe_trend,
         "output_cols": ("industry_pe_trend",),
-        "emit_valid_log": False,
-    },
-    # --- Step 11.9: 资金流因子（v1.44 方案C）---
-    {
-        "step_label": "Step 11.9: 计算资金流因子...",
-        "factor_func": calculate_capital_flow_ratio_trend,
-        "output_cols": ("capital_flow_ratio_trend",),
-        # 段头因子打印 valid 行
         "emit_valid_log": True,
     },
+    # --- Step 11.9: 资金流因子（v1.44 方案C，R3 OOM 修复：单 step orchestrator）---
     {
-        "step_label": None,
-        "factor_func": calculate_capital_flow_intensity,
-        "output_cols": ("capital_flow_intensity",),
-        "emit_valid_log": False,
+        "step_label": "Step 11.9: 计算资金流因子...",
+        "factor_func": calculate_capital_flow_block,
+        "output_cols": ("capital_flow_ratio_trend", "capital_flow_intensity"),
+        "emit_valid_log": True,
     },
 )
 
@@ -765,7 +756,7 @@ def _run_factor_pipeline(
 ) -> tuple[pd.DataFrame, dict[str, int]]:
     """Step 3.5~11.9：执行因子管线。
 
-    详情见 _FACTOR_PIPELINE_STEPS 表（27 个 step，31 个输出列）。
+    详情见 _FACTOR_PIPELINE_STEPS 表（26 个 step，31 个输出列）。
 
     Returns:
         (factor_df, valid_counts)。

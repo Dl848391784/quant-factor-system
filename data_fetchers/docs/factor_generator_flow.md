@@ -336,12 +336,25 @@
    336|
    337|---
    338|
-   339|## 版本历史
+   339|## 当前实现补充（2026-06-17）
    340|
-   341|| 版本 | 日期 | 更新内容 |
-   342||------|------|---------|
-   343|| v1.0 | 2026-05-25 | 创建流程文档 |
-   344|
-   345|---
-   346|
-   347|*创建时间: 2026-05-25 10:25 北京时间*
+   341|### Step 11.9: 资金流因子 OOM 修复
+   342|
+   343|- **调用**: `calculate_capital_flow_block(factor_df)`
+   344|- **输出列**: `capital_flow_ratio_trend`, `capital_flow_intensity`
+   345|- **实现约束**: 两个资金流输出必须由单个 orchestrator step 一次性生成，禁止在 `factor_generator.py` pipeline 中拆回 `calculate_capital_flow_ratio_trend` 与 `calculate_capital_flow_intensity` 两个独立 step。
+   346|- **原因**: 拆成两个 step 会重复加载资金流数据并重复构造 149 万行级 merge 中间表，实跑在 Step 11.8 后进入资金流阶段时出现 OOM-kill（signal 9）。
+   347|- **验证**: `_FACTOR_PIPELINE_STEPS` 中资金流 step 数量为 1，且 `factor_func.__name__ == "calculate_capital_flow_block"`。
+   348|
+   349|---
+   350|
+   351|## 版本历史
+   352|
+   353|| 版本 | 日期 | 更新内容 |
+   354||------|------|---------|
+   355|| v1.1 | 2026-06-17 | Step 11.9 资金流因子切换为单 step orchestrator，避免 OOM |
+   356|| v1.0 | 2026-05-25 | 创建流程文档 |
+   357|
+   358|---
+   359|
+   360|*创建时间: 2026-05-25 10:25 北京时间；最近更新: 2026-06-17 北京时间*
