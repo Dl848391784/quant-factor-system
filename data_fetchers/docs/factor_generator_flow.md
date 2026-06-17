@@ -338,23 +338,33 @@
    338|
    339|## 当前实现补充（2026-06-17）
    340|
-   341|### Step 11.9: 资金流因子 OOM 修复
+   341|### Step 11.8: 行业财务因子 OOM 修复
    342|
-   343|- **调用**: `calculate_capital_flow_block(factor_df)`
-   344|- **输出列**: `capital_flow_ratio_trend`, `capital_flow_intensity`
-   345|- **实现约束**: 两个资金流输出必须由单个 orchestrator step 一次性生成，禁止在 `factor_generator.py` pipeline 中拆回 `calculate_capital_flow_ratio_trend` 与 `calculate_capital_flow_intensity` 两个独立 step。
-   346|- **原因**: 拆成两个 step 会重复加载资金流数据并重复构造 149 万行级 merge 中间表，实跑在 Step 11.8 后进入资金流阶段时出现 OOM-kill（signal 9）。
-   347|- **验证**: `_FACTOR_PIPELINE_STEPS` 中资金流 step 数量为 1，且 `factor_func.__name__ == "calculate_capital_flow_block"`。
-   348|
-   349|---
+   343|- **调用**: `calculate_industry_financial_block(factor_df)`
+   344|- **输出列**: `industry_roe_trend`, `industry_earnings_growth`, `industry_pe_trend`
+   345|- **实现约束**: 三个行业财务输出必须由单个 orchestrator step 一次性生成，禁止在 `factor_generator.py` pipeline 中拆回 `calculate_industry_roe_trend`、`calculate_industry_earnings_growth`、`calculate_industry_pe_trend` 三个独立 step。
+   346|- **原因**: 拆成三个 step 会重复加载季度财务数据、重复 `merge_asof` 日频对齐，并在 `industry_pe_trend` 前复制已经变宽的 149 万行级 DataFrame；实跑在 `有效 industry_earnings_growth` 后被 OOM-kill（signal 9）。
+   347|- **验证**: `_FACTOR_PIPELINE_STEPS` 中行业财务 step 数量为 1，且 `factor_func.__name__ == "calculate_industry_financial_block"`；该 step 的 `output_cols` 同时包含三列行业财务因子。
+   348|- **实跑结果**: 2026-06-17 使用 `/usr/bin/time -v python data_fetchers/factor_generator.py` 验证，已完成 `industry_roe_trend` / `industry_earnings_growth` / `industry_pe_trend` 三列有效率输出，并继续进入 Step 11.9；原 `industry_earnings_growth` 后 OOM 已消除。
+   349|
+   350|### Step 11.9: 资金流因子 OOM 修复
    350|
-   351|## 版本历史
-   352|
-   353|| 版本 | 日期 | 更新内容 |
-   354||------|------|---------|
-   355|| v1.1 | 2026-06-17 | Step 11.9 资金流因子切换为单 step orchestrator，避免 OOM |
-   356|| v1.0 | 2026-05-25 | 创建流程文档 |
-   357|
-   358|---
-   359|
-   360|*创建时间: 2026-05-25 10:25 北京时间；最近更新: 2026-06-17 北京时间*
+   351|- **调用**: `calculate_capital_flow_block(factor_df)`
+   352|- **输出列**: `capital_flow_ratio_trend`, `capital_flow_intensity`
+   353|- **实现约束**: 两个资金流输出必须由单个 orchestrator step 一次性生成，禁止在 `factor_generator.py` pipeline 中拆回 `calculate_capital_flow_ratio_trend` 与 `calculate_capital_flow_intensity` 两个独立 step。
+   354|- **原因**: 拆成两个 step 会重复加载资金流数据并重复构造 149 万行级 merge 中间表，实跑在 Step 11.8 后进入资金流阶段时出现 OOM-kill（signal 9）。
+   355|- **验证**: `_FACTOR_PIPELINE_STEPS` 中资金流 step 数量为 1，且 `factor_func.__name__ == "calculate_capital_flow_block"`。
+   356|
+   357|---
+   358|
+   359|## 版本历史
+   360|
+   361|| 版本 | 日期 | 更新内容 |
+   362||------|------|---------|
+   363|| v1.2 | 2026-06-17 | Step 11.8 行业财务因子切换为单 step orchestrator，避免 `industry_pe_trend` OOM |
+   364|| v1.1 | 2026-06-17 | Step 11.9 资金流因子切换为单 step orchestrator，避免 OOM |
+   365|| v1.0 | 2026-05-25 | 创建流程文档 |
+   366|
+   367|---
+   368|
+   369|*创建时间: 2026-05-25 10:25 北京时间；最近更新: 2026-06-17 北京时间*
