@@ -152,31 +152,34 @@ def _load_financial_data(
     return df
 
 
-def _merge_asof_financial(
+def _merge_asof_financial_multi(
     factor_df: pd.DataFrame,
     financial_df: pd.DataFrame,
-    value_col: str,
-    output_col: str,
+    value_cols: list[str],
     logger_arg: logging.Logger | None = None,
-) -> pd.Series:
-    """前推填充对齐季度财务数据到日频（merge_asof 模式）
+) -> pd.DataFrame:
+    """前推填充对齐季度财务数据到日频（一次返回多列）。
+
+    v1.45 内存优化：将原先 N 次单列 ``merge_asof`` 合并为一次多列
+    ``merge_asof``，用于 ``calculate_industry_financial_block`` 降低 Step 11.8
+    的重复排序 / merge / 中间表峰值。
 
     Args:
         factor_df: 日频因子 DataFrame（含 date, asset 列）
-        financial_df: 季度财务 DataFrame（含 asset, report_date, value_col 列）
-        value_col: 财务数据中的值列名（如 'roe', 'basic_eps'）
-        output_col: 输出到 factor_df 的列名（如 'roe_daily', 'eps_daily'）
+        financial_df: 季度财务 DataFrame（含 asset, report_date, value_cols 列）
+        value_cols: 财务数据中的值列名列表
         logger_arg: logger（可选）
 
     Returns:
-        与 factor_df 行数对齐的 Series，前推填充的财务值
+        与单列 ``_merge_asof_financial`` 语义一致的 DataFrame，只包含
+        ``value_cols`` 中的列。
 
     Note: 使用 pd.merge_asof(direction='backward') 实现 point-forward fill
     """
     _logger = get_module_logger(logger_arg)
 
     # 准备合并所需的数据
-    fin_subset = financial_df[["asset", "report_date", value_col]].copy()
+    fin_subset = financial_df[["asset", "report_date", *value_cols]].copy()
     fin_subset = fin_subset.rename(columns={"report_date": "date"})
     fin_subset["date"] = pd.to_datetime(fin_subset["date"])
 
@@ -192,7 +195,42 @@ def _merge_asof_financial(
         direction="backward",  # Point-forward: 取最近已发布的财报
     )
 
-    return merged[value_col].rename(output_col)
+    result = pd.DataFrame(merged[value_cols])
+    _logger.debug(
+        "_merge_asof_financial_multi: rows=%d, value_cols=%s",
+        len(result),
+        value_cols,
+    )
+    return result
+
+
+def _merge_asof_financial(
+    factor_df: pd.DataFrame,
+    financial_df: pd.DataFrame,
+    value_col: str,
+    output_col: str,
+    logger_arg: logging.Logger | None = None,
+) -> pd.Series:
+    """前推填充对齐季度财务数据到日频（单列版，thin wrapper）。
+
+    Args:
+        factor_df: 日频因子 DataFrame（含 date, asset 列）
+        financial_df: 季度财务 DataFrame（含 asset, report_date, value_col 列）
+        value_col: 财务数据中的值列名（如 'roe', 'basic_eps'）
+        output_col: 输出到 factor_df 的列名（如 'roe_daily', 'eps_daily'）
+        logger_arg: logger（可选）
+
+    Returns:
+        与 factor_df 行数对齐的 Series，前推填充的财务值
+
+    Note:
+        本函数保留原签名以维持外部测试 / 历史调用方兼容。新代码批量对齐
+        多列时应直接调用 ``_merge_asof_financial_multi``。
+    """
+    multi_result = _merge_asof_financial_multi(factor_df, financial_df, [value_col], logger_arg)
+    series = multi_result.iloc[:, 0]
+    series.name = output_col
+    return series
 
 
 def calculate_industry_roe_trend(
@@ -439,3 +477,97 @@ def calculate_industry_pe_trend(
 
 
 calculate_industry_pe_trend.required_cols = ["date", "asset", "close"]  # type: ignore[attr-defined]
+
+
+def calculate_industry_financial_block(
+    factor_df: pd.DataFrame,
+    *,
+    financial_data_path: str | Path | None = None,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """行业财务三因子合并 orchestrator（pipeline 专用，v1.45 OOM 治理）。
+
+    一次性产出 ``industry_roe_trend`` + ``industry_earnings_growth`` +
+    ``industry_pe_trend`` 三个因子。与依次调用三个公共函数数值等价，但通过
+    单次财务数据加载、单次 asof 对齐、单次行业聚合降低 Step 11.8 内存峰值。
+
+    Args:
+        factor_df: 因子表（含 date, asset, close 列）
+        financial_data_path: 财务缓存路径（None=默认路径）
+        logger_arg: logger（可选）
+
+    Returns:
+        factor_df + 三个行业财务因子列。
+
+    required_cols: ``["date", "asset", "close"]``
+    """
+    _logger = get_module_logger(logger_arg)
+
+    df = factor_df.copy()
+
+    # Step 1: 加载财务数据（一次加载，替代三个独立函数重复 gzip/json/DataFrame）
+    _logger.info("  Step 1: 加载季度财务数据 (orchestrator)...")
+    financial_df = _load_financial_data(financial_data_path, logger_arg)
+
+    # Step 2: 单次 asof 对齐 ROE / 净利润增长 / EPS 三列
+    _logger.info("  Step 2: 单次前推填充 ROE/净利润增长率/年化EPS 对齐日频...")
+    aligned = _merge_asof_financial_multi(
+        df,
+        financial_df,
+        ["roe", "net_profit_growth_yoy", "annualized_eps"],
+        logger_arg,
+    )
+    df["roe_daily"] = pd.to_numeric(aligned["roe"], errors="coerce")
+    df["growth_daily"] = pd.to_numeric(aligned["net_profit_growth_yoy"], errors="coerce")
+    df["eps_daily"] = pd.to_numeric(aligned["annualized_eps"], errors="coerce")
+    del aligned, financial_df
+
+    # Step 3: 与旧函数最终行序一致，按 asset/date 排序后计算季度变化
+    _logger.info("  Step 3: 计算 ΔROE / PE / ΔPE...")
+    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    df["delta_roe"] = df["roe_daily"] - df.groupby(_COL_ASSET)["roe_daily"].shift(1)
+
+    eps_safe = df["eps_daily"].clip(lower=_PE_DENOMINATOR_MIN)
+    df["pe_daily"] = df[_COL_CLOSE] / eps_safe
+    df.loc[df["eps_daily"] <= 0, "pe_daily"] = float("nan")
+    df.loc[df["eps_daily"].isna(), "pe_daily"] = float("nan")
+    df["delta_pe"] = df["pe_daily"] - df.groupby(_COL_ASSET)["pe_daily"].shift(1)
+
+    # Step 4: 添加 industry 列（idempotent，只跑一次）
+    _logger.info("  Step 4: 添加行业分类列...")
+    df = _add_industry_column(df, _logger)
+
+    # Step 5: 一次行业聚合，同时产出三列因子；vectorized merge 赋回个股
+    _logger.info("  Step 5: 行业聚合（三因子一次赋给个股）...")
+    industry_agg = (
+        df.groupby(["industry", _COL_DATE])
+        .agg(
+            **{
+                _COL_INDUSTRY_ROE_TREND: ("delta_roe", "mean"),
+                _COL_INDUSTRY_EARNINGS_GROWTH: ("growth_daily", "mean"),
+                _COL_INDUSTRY_PE_TREND: ("delta_pe", "mean"),
+            }
+        )
+        .reset_index()
+    )
+    df = df.merge(industry_agg, on=["industry", _COL_DATE], how="left")
+    del industry_agg
+
+    # Step 6: 清理中间列（只保留三个最终因子）
+    df = df.drop(columns=["roe_daily", "growth_daily", "eps_daily", "pe_daily", "delta_roe", "delta_pe"])
+
+    n = len(df)
+    for col in (_COL_INDUSTRY_ROE_TREND, _COL_INDUSTRY_EARNINGS_GROWTH, _COL_INDUSTRY_PE_TREND):
+        col_series = df.loc[:, col]
+        valid_count = int(col_series.notna().sum())
+        _logger.info(
+            "  有效 %s: %d (%.2f%%)",
+            col,
+            valid_count,
+            valid_count / n * 100 if n > 0 else 0,
+        )
+
+    return df
+
+
+calculate_industry_financial_block.required_cols = ["date", "asset", "close"]  # type: ignore[attr-defined]
