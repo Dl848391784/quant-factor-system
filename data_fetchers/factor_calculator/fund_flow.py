@@ -408,3 +408,113 @@ def calculate_capital_flow_intensity(
 
 
 calculate_capital_flow_intensity.required_cols = ["date", "asset"]  # type: ignore[attr-defined]
+
+
+# ============================================================================
+# v1.44 内存优化：pipeline 专用 orchestrator
+# ============================================================================
+
+
+def calculate_capital_flow_block(
+    factor_df: pd.DataFrame,
+    *,
+    fund_flow_path: str | Path | None = None,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """资金流双因子合并 orchestrator（pipeline 专用，v1.44 OOM 治理）。
+
+    一次性产出 ``capital_flow_ratio_trend`` + ``capital_flow_intensity`` 两个因子。
+    与依次调用 ``calculate_capital_flow_ratio_trend`` + ``calculate_capital_flow_intensity``
+    数值等价，但内存占用大幅下降：
+
+    优化点（对比两次独立调用）：
+      1. fund_flow 数据只 load 一次（lru_cache 命中 + 单次 multi-merge 取 3 列）
+      2. industry 列只添加一次（_add_industry_column 已 idempotent）
+      3. 行业聚合用 vectorized merge 替代 ``set_index().index.map(lambda)``
+         （消除 1.49M 次 python lambda dict lookup）
+      4. 中间列 (ratio_daily/delta_ratio/amount_daily/volume_daily/intensity)
+         在 block 内完成生命周期，return 前 del + 不污染 factor_df
+
+    数学等价性：
+      - capital_flow_ratio_trend：步骤与 calculate_capital_flow_ratio_trend 一致
+        （shift(1) → groupby(industry,date).mean）
+      - capital_flow_intensity：步骤与 calculate_capital_flow_intensity 一致
+        （|amount|/volume 含三重 NaN 守卫 → groupby(industry,date).mean）
+
+    Args:
+        factor_df: 因子表（含 date, asset 列）
+        fund_flow_path: 资金流缓存路径（None=默认走 lru_cache）
+        logger_arg: logger（可选）
+
+    Returns:
+        factor_df + ``capital_flow_ratio_trend`` + ``capital_flow_intensity`` 两列。
+
+    required_cols: ``[\"date\", \"asset\"]``
+    """
+    _logger = get_module_logger(logger_arg)
+
+    df = factor_df.copy()
+
+    # Step 1: 加载资金流数据（默认路径走 lru_cache）
+    _logger.info("  Step 1: 加载资金流数据 (orchestrator)...")
+    fund_flow_df = _load_fund_flow_data(fund_flow_path, logger_arg)
+
+    # Step 2: 单次 multi-merge 取 3 列（替代 3 次单列 left_merge）
+    _logger.info("  Step 2: 单次 multi-merge 主力净流入占比/金额 + 总成交额...")
+    merged_cols = _merge_fund_flow_daily_multi(
+        df,
+        fund_flow_df,
+        ["main_inflow_ratio", "main_inflow_amount", "total_volume"],
+        logger_arg,
+    )
+    df["ratio_daily"] = merged_cols["main_inflow_ratio"].to_numpy()
+    df["amount_daily"] = merged_cols["main_inflow_amount"].to_numpy()
+    df["volume_daily"] = merged_cols["total_volume"].to_numpy()
+    del merged_cols  # 大对象立即释放（MODULE.md R16）
+
+    # Step 3: 添加 industry 列（idempotent，只跑一次）
+    _logger.info("  Step 3: 添加行业分类列...")
+    df = _add_industry_column(df, _logger)
+
+    # Step 4: 计算 Δratio = ratio(current) - ratio(previous)（按 asset 排序后 shift）
+    _logger.info("  Step 4: 计算 Δ主力净流入占比 + intensity...")
+    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    df["delta_ratio"] = df["ratio_daily"] - df.groupby(_COL_ASSET)["ratio_daily"].shift(1)
+
+    # Step 5: 计算 intensity = |amount| / volume（含三重 NaN 守卫）
+    df["intensity"] = df["amount_daily"].abs() / df["volume_daily"]
+    df.loc[df["volume_daily"] == 0, "intensity"] = float("nan")
+    df.loc[df["volume_daily"].isna(), "intensity"] = float("nan")
+    df.loc[df["amount_daily"].isna(), "intensity"] = float("nan")
+
+    # Step 6: 行业聚合 — 一次 groupby 同时算两因子（vectorized merge 赋回个股）
+    _logger.info("  Step 6: 行业聚合（vectorized merge 赋个股）...")
+    industry_agg = (
+        df.groupby(["industry", _COL_DATE])
+        .agg(
+            **{
+                _COL_CAPITAL_FLOW_RATIO_TREND: ("delta_ratio", "mean"),
+                _COL_CAPITAL_FLOW_INTENSITY: ("intensity", "mean"),
+            }
+        )
+        .reset_index()
+    )
+
+    # 用 left_merge 替代 set_index().index.map(lambda)（消除 1.49M python lookup）
+    df = df.merge(industry_agg, on=["industry", _COL_DATE], how="left")
+    del industry_agg
+
+    # Step 7: 清理中间列（保两个最终因子）
+    df = df.drop(columns=["ratio_daily", "delta_ratio", "amount_daily", "volume_daily", "intensity"])
+
+    # 日志：两因子有效率
+    n = len(df)
+    for col in (_COL_CAPITAL_FLOW_RATIO_TREND, _COL_CAPITAL_FLOW_INTENSITY):
+        col_series = df.loc[:, col]
+        valid = int(col_series.notna().sum())
+        _logger.info("  有效 %s: %d (%.2f%%)", col, valid, valid / n * 100 if n > 0 else 0.0)
+
+    return df
+
+
+calculate_capital_flow_block.required_cols = ["date", "asset"]  # type: ignore[attr-defined]
