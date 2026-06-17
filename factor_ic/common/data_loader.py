@@ -368,3 +368,61 @@ def get_data_cache_path() -> Path:
 def get_data_dir() -> Path:
     """获取数据目录路径"""
     return DEFAULT_DATA_DIR
+
+
+def merge_industry_column(
+    factor_df: pd.DataFrame,
+    asset_col: str = "asset",
+    out_col: str = "industry",
+    logger=None,
+) -> pd.DataFrame:
+    """
+    为 factor_df 添加申万一级行业列（行业中性化前置步骤）
+
+    数据来源:
+        data_fetchers.fetch_industry.get_industry_map() 提供的静态行业快照
+        （详见 design.md §2.1 / §8.1 接口契约）
+
+    参数:
+        factor_df: 因子 DataFrame，必须含 asset_col 列
+        asset_col: 股票代码列名，默认 'asset'
+        out_col: 输出行业列名，默认 'industry'
+        logger: 日志记录器（由调用方传入，默认使用模块 logger）
+
+    返回:
+        新 DataFrame（不修改入参），增加一列 out_col：
+        - 已知 asset → 申万一级行业名（如 '电力设备'、'其他'）
+        - 未知 asset → pandas NaN（design.md §8.2 协议）
+
+    Note:
+        '其他' 是 fetch_industry 已存在的合法行业值，本函数不做特殊处理；
+        是否剔除由下游 (run_factor_ic_analysis) 按 design.md §3.3 决定。
+    """
+    if logger is None:
+        logger = get_logger(__name__)
+
+    if asset_col not in factor_df.columns:
+        raise KeyError(f"factor_df 缺少 '{asset_col}' 列；可用列: {list(factor_df.columns)}")
+
+    # 延迟导入：避免在 data_loader 顶层引入跨模块依赖（与现有 factor_calculator 复用模式一致）
+    from data_fetchers.fetch_industry import get_industry_map
+
+    industry_map = get_industry_map()
+    asset_to_industry = {code: info.get("industry") for code, info in industry_map.items()}
+
+    result = factor_df.copy()
+    result[out_col] = result[asset_col].map(asset_to_industry)
+
+    total = len(result)
+    matched = int(result[out_col].notna().sum())
+    unmatched = total - matched
+    other_count = int((result[out_col] == "其他").sum())
+    logger.info(
+        "行业列合并: 总 %s 行 / 已匹配 %s 行 / 未匹配 %s 行 / '其他' %s 行",
+        total,
+        matched,
+        unmatched,
+        other_count,
+    )
+
+    return result
