@@ -510,6 +510,8 @@ def _json_safe_value(obj: Any) -> Any:
     """
     if isinstance(obj, (float, np.floating)) and (math.isnan(obj) or math.isinf(obj)):
         return None
+    if isinstance(obj, np.floating):
+        return float(obj)
     if isinstance(obj, np.bool_):
         return bool(obj)
     if isinstance(obj, np.integer):

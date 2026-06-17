@@ -100,6 +100,8 @@ class TestJsonSafeValue:
 
     def test_numpy_scalar_to_python_scalar(self) -> None:
         """numpy 标量转换为 json.dump 可处理的 Python 标量。"""
+        assert _json_safe_value(np.float64(1.25)) == 1.25
+        assert type(_json_safe_value(np.float64(1.25))) is float
         assert _json_safe_value(np.int64(3)) == 3
         assert type(_json_safe_value(np.int64(3))) is int
         assert _json_safe_value(np.bool_(True)) is True
