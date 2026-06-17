@@ -218,7 +218,60 @@ R3 末尾会再做一次引用闭环，但 R2 阶段先列出 §3-§4 引用了 
 
 ---
 
-## §5 技术方案（R3 续写）
+## §5 技术方案
+
+### 5.1 接入点流程图
+
+整体改动以 **runner 为枢纽**，行业 merge 与残差回归在 runner 内部完成，单因子脚本（`factor_ic/ic_*.py`）**零改动**。
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  factor_ic/ic_<name>_1d.py（无改动）                                   │
+│    └─→ run_factor_ic(spec, args, ...)  [factor_ic_runner.py:432]      │
+└────────────────────────────┬─────────────────────────────────────────┘
+                             │
+                             ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  run_factor_ic_analysis(...)  [factor_ic_runner.py:54]   ← 主改动点    │
+│                                                                      │
+│  Step 1: load_factor_return_data()      [data_loader.py]             │
+│            ↓                                                         │
+│  Step 2: factor_df = _merge_industry_column(factor_df)  ← R8 新增      │
+│            （加一列 industry，'其他'/NaN 不剔除，留给后续判断）         │
+│            ↓                                                         │
+│  Step 3: ic_raw = calculate_ic_with_direction_verification(           │
+│              factor_df, return_df, ...)                              │
+│            （raw IC：使用原始 factor_col，不剔除 '其他'）              │
+│            ↓                                                         │
+│  Step 4: 判断 factor_name in INDUSTRY_NEUTRALIZE_EXCLUDED              │
+│          ┌─────────────────────────────────┬─────────────────────┐    │
+│          │ True（排除清单内）               │ False（纳入清单）    │    │
+│          │ ic_neutral_industry = None       │ → Step 5 残差回归    │    │
+│          │ neutralize_skipped_reason set    │                     │    │
+│          └─────────────────────────────────┴─────────────────────┘    │
+│            ↓                                                         │
+│  Step 5: factor_df_neutral = factor_df[                              │
+│              ~factor_df['industry'].isin({'其他', NaN})               │
+│            ]                                                         │
+│            ↓                                                         │
+│          factor_df_residual = industry_neutral_residual(              │
+│              factor_df_neutral, factor_col, ...)                     │
+│            （输出列名: 'neutral_factor'）                              │
+│            ↓                                                         │
+│          ic_neutral = calculate_ic_with_direction_verification(       │
+│              factor_df_residual, return_df,                          │
+│              factor_col='neutral_factor', ...)                       │
+│            ↓                                                         │
+│  Step 6: build_ic_result(ic_raw, ic_neutral, ...)  ← R16 加双字段       │
+│            ↓                                                         │
+│  Step 7: save_ic_result(...)  [输出 JSON 含 ic_neutral_industry]       │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+**关键约束**：
+- Step 3（raw IC）与 Step 5（neutral IC）**使用相同的 return_df**，保证两套 IC 数值的可比性
+- Step 5 中残差回归仅对剔除 "其他" 后的子集做；剔除发生在残差回归之前，不发生在 IC 计算之前
+- `factor_direction`（D8 决策）由 ic_raw 提供；ic_neutral 不参与 backtest 链路
 
 ## §6 验证方案（R3 续写）
 
