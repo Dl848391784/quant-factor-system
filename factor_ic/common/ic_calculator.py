@@ -801,22 +801,35 @@ def industry_neutral_residual(
     logger=None,
 ) -> pd.DataFrame:
     """
-    截面回归去除行业效应
+    截面回归去除行业效应（行业中性化）
+
+    实现：每日截面对 factor_col ~ 行业哑变量做最小二乘回归，
+    残差即为剔除行业均值后的纯个股 alpha 信号。
 
     参数:
-        factor_df: 包含 date, asset, factor_value, industry 的 DataFrame
+        factor_df: 因子 DataFrame，必须含 date_col / asset_col / factor_col / industry_col
         factor_col: 因子值列名
-        industry_col: 行业分类列名
-        date_col: 日期列名
-        asset_col: 资产列名
-        min_industry_stocks: 每个行业最少股票数
+        industry_col: 行业分类列名（默认 'industry'）
+        date_col: 日期列名（默认 'date'）
+        asset_col: 资产列名（默认 'asset'）
+        min_industry_stocks: 每个行业内最少股票数；同时也是有效行业总样本量下限。
+            默认 5。design.md D7 决策：5 是统计回归对自由度的最低要求，
+            低于此值残差噪声主导。当前未提供更高显著性下限，因为子行业（申万一级）
+            股票数典型在 50-300 区间，5 仅为下限护栏。
         logger: 日志记录器（由调用方传入，默认使用模块 logger）
 
     返回:
-        DataFrame 包含 date, asset, neutral_factor 列（回归残差）
+        DataFrame，列 = [date_col, asset_col, 'neutral_factor']，数据：
+        - 每行：(date, asset) 对应的回归残差，已 round(6)
+        - 行数 ≤ 输入行数（不满足 min_industry_stocks 的行业整批剔除）
+        - 当所有日期都被过滤掉时，返回空 DataFrame（columns 同上）
+
+    异常:
+        ValueError: factor_df 缺少 industry_col 列时抛出（错误消息含可用列清单）
 
     规范:
         PROJECT.md 行业中性化处理 - 回归残差方式
+        design.md §5.1 Step 5（行业中性化主路径）
     """
     from sklearn.linear_model import LinearRegression
 
@@ -859,6 +872,10 @@ def industry_neutral_residual(
         # zip 返回二元组，用两个变量解包
         for asset, res in zip(valid_industries[asset_col].values, residual):
             results.append({date_col: date, asset_col: asset, "neutral_factor": round(res, 6)})
+
+    if not results:
+        # 所有日期都被过滤：返回空 DataFrame，但保留契约列（供下游 IC 计算稳定地报 0 行）
+        return pd.DataFrame(columns=[date_col, asset_col, "neutral_factor"])
 
     return pd.DataFrame(results)
 
