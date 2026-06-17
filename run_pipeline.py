@@ -109,6 +109,7 @@ Stage 7: 汇总报告
 - v1.5 (2026-06-05): 新增 momentum_strength 因子（IC + 分层回测）
 - v1.6 (2026-06-06): 新增 tail_volume_shrink 因子（IC + 分层回测）
 - v1.7 (2026-06-13): 补注册 4 个方向性因子（volume_price_strength / positive_day_ratio_5 / ma5_deviation / near_high_ratio_5）的分层回测；补注册 intraday_intensity、capital_flow_intensity / capital_flow_ratio_trend、6 个 industry_* 因子、turnover_surge_delta / amplitude_delta 的 IC + 分层回测（脚本均已存在但漏注册到 pipeline）
+- v1.8 (2026-06-17): fetch_turnover 设置 5 小时独立超时，避免 baostock 慢速拉取被默认 30 分钟超时反复重启
 
 作者: 云瑶
 """
@@ -133,6 +134,7 @@ PROJECT_ROOT = Path(__file__).parent.resolve()
 MAX_RETRIES = 3  # 脚本级别最大重试次数
 RETRY_DELAY = 30  # 重试间隔（秒）
 SCRIPT_TIMEOUT = 1800  # 单个脚本最大执行时间（秒）= 30分钟
+FETCH_TURNOVER_TIMEOUT = 18000  # fetch_turnover 独立超时（秒）= 5小时
 
 # ============================================================================
 # 脚本定义
@@ -154,7 +156,7 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     # Stage 0: 基础数据拉取
     ScriptTask("fetch_stock_list", "data_fetchers/fetch_stock_list.py", 0, []),
     ScriptTask("fetch_factor_cache", "data_fetchers/fetch_factor_cache.py", 0, []),
-    ScriptTask("fetch_turnover", "data_fetchers/fetch_turnover.py", 0, ["--baostock"]),
+    ScriptTask("fetch_turnover", "data_fetchers/fetch_turnover.py", 0, ["--baostock"], timeout=FETCH_TURNOVER_TIMEOUT),
     ScriptTask("fetch_industry", "data_fetchers/fetch_industry.py", 0, []),  # 行业分类数据
     ScriptTask(
         "fetch_tail_trading", "data_fetchers/fetch_tail_trading.py", 0, [], timeout=10800
