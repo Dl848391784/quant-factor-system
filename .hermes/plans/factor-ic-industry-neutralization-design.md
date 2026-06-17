@@ -273,5 +273,83 @@ R3 末尾会再做一次引用闭环，但 R2 阶段先列出 §3-§4 引用了 
 - Step 5 中残差回归仅对剔除 "其他" 后的子集做；剔除发生在残差回归之前，不发生在 IC 计算之前
 - `factor_direction`（D8 决策）由 ic_raw 提供；ic_neutral 不参与 backtest 链路
 
-## §6 验证方案（R3 续写）
+### 5.2 字段命名 + JSON Schema
+
+#### 5.2.1 顶层字段新增（factor_ic 输出 JSON）
+
+在 `<模块>/result/ic_<因子>_1d_analysis_result.json` 顶层新增 1 个对象字段（不影响现有字段）：
+
+```json
+{
+  "success": true,
+  "factor_name": "rsi_6",
+  "calculation_date": "2026-06-17",
+  "period": {...},
+  "ic_metrics": {...},                  // 维持原 raw IC 数值
+  "sample_stats": {...},                // 维持原（基于 raw 数据）
+  "statistical_significance": {...},    // 维持原（raw）
+  "factor_direction": {...},            // D8: 仅基于 raw（backtest 读取）
+  "economic_significance": {...},       // 维持原（raw）
+  "icir_stability": {...},              // 维持原（raw）
+  "ic_distribution_consistency": {...}, // 维持原（raw）
+  "dates": [...],                       // 维持原（raw 的 ic_series.index）
+  "ic_values": [...],                   // 维持原（raw）
+  "rolling_ic_mean": [...],             // 维持原（raw）
+  "positive_ratio": 0.52,               // 维持原（raw）
+  "summary": {...},                     // 维持原（raw）
+
+  // ↓↓↓ R16 新增字段 ↓↓↓
+  "ic_neutral_industry": {
+    "enabled": true,                    // false 表示因子在排除清单内
+    "skipped_reason": null,             // enabled=false 时填写原因
+    "ic_metrics": {                     // 与顶层 ic_metrics 同结构
+      "ic_mean": -0.034,
+      "ic_std": 0.082,
+      "icir": -0.41,
+      "p_value": 0.012,
+      "p_value_display": "0.012"
+    },
+    "sample_stats": {                   // neutral 路径的样本量（剔除 '其他' 后）
+      "valid_days": 540,
+      "avg_stocks_per_day": 1842,       // 显著低于 raw（剔除了 '其他' 的 ~26%）
+      "excluded_other_industry_pct": 0.263
+    },
+    "decay_rate": 0.18,                 // = (raw_ic_mean - neutral_ic_mean) / raw_ic_mean
+    "decay_level": "low",               // <30% low / >=30% high (D11)
+    "ic_values": [...],                 // neutral 路径每日 IC 序列（与 raw 的 dates 一一对应；neutral 缺失日填 null）
+    "summary": "中性化后 IC 衰减 18%，行业 beta 不是主要 IC 来源"
+  },
+
+  "factor_stats": {...},                // 维持原
+  "update_mode": "full",
+  "factor_col": "rsi_6"
+}
+```
+
+#### 5.2.2 字段命名规则（D12）
+
+| 命名 | 含义 | 选择理由 |
+|---|---|---|
+| `ic_neutral_industry` | 当前期：仅行业中性化 | 与函数名 `industry_neutral_residual` 前缀一致 |
+| `ic_neutral_industry_size`（保留位） | 后续期：行业 + 市值双中性化 | 命名空间向后扩展 |
+| `ic_residual_industry`（不采用） | — | "residual" 偏实现细节，"neutral" 偏含义 |
+
+#### 5.2.3 排除清单内的字段取值
+
+```json
+"ic_neutral_industry": {
+  "enabled": false,
+  "skipped_reason": "factor in INDUSTRY_NEUTRALIZE_EXCLUDED (industry-aggregated factor)",
+  "ic_metrics": null,
+  "sample_stats": null,
+  "decay_rate": null,
+  "decay_level": "n/a",
+  "ic_values": null,
+  "summary": "行业聚合因子，残差回归后值≡0，已跳过"
+}
+```
+
+#### 5.2.4 错误路径（factor_ic 异常时）
+
+`build_error_result` 输出仍维持原结构，**不**包含 `ic_neutral_industry` 字段（避免 None 套娃 None）。下游消费方按 `success: false` 短路即可。
 
