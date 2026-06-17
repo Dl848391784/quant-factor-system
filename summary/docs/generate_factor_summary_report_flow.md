@@ -1,9 +1,9 @@
 # generate_factor_summary_report.py 流程文档
 
-> 版本: v1.5
+> 版本: v1.6
 > 创建时间: 2026-05-28
-> 最后更新: 2026-06-02
-> 脚本版本: generate_factor_summary_report.py v1.9
+> 最后更新: 2026-06-17
+> 脚本版本: generate_factor_summary_report.py v2.19
 
 ---
 
@@ -77,7 +77,7 @@ derived_results = check_derived_data_freshness(date, logger)
 
 | 检查类型 | 数据源 | 日期字段路径 | 文件格式 |
 |---------|--------|-------------|----------|
-| 基础数据 | factor_ic_data.json.gz | dates[-1] | line_json（gzip） |
+| 基础数据 | factor_ic_data.json.gz | dates[-1] | full_json（gzip，头部包含顶层 dates 数组） |
 | 基础数据 | factor_data.json.gz | meta.date_range.end | full_json（gzip） |
 | 基础数据 | turnover_rate_data.json.gz | meta.date_range.end | full_json（gzip） |
 | 衍生数据 | IC 结果文件 | ic_series[-1].date | JSON |

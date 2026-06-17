@@ -50,9 +50,10 @@
     v2.16: 2026-06-11 权重展示修复——最优方法为Rolling ICIR时展示真实last_day_weights而非静态ICIR权重；tail_price_position从18.4%(静态)→8.3%(Rolling最新日)；权重来源说明动态化
     v2.17: 2026-06-11 评分说明重构——展示所有4种方法的9维度完整评分明细而非只对比IC vs ICIR；最优方法(Rolling ICIR)换手率低分给出解释
     v2.18: 2026-06-11 选股结果展示振幅过滤信息（排除振幅<1%%的一字板涨停股）；top_n 从 3 改为 10
+    v2.19: 2026-06-17 修复 factor_ic_data 新鲜度检查误报：主数据源为完整 JSON 对象，读取 gzip 头部解析顶层 dates[-1]
 """
 
-__version__ = "2.18"
+__version__ = "2.19"
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -101,13 +102,15 @@ DATA_PATHS = {
     "stock_selection": "comprehensive_factor/result/stock_selection_result.json",
 }
 
+DATA_FRESHNESS_HEAD_CHARS = 65536  # 覆盖完整顶层 dates 数组，避免解析 factor_ic_data 全量大文件
+
 # 数据完整性检查配置
 DATA_CHECK_SOURCES = {
     "factor_ic_data": {
         "path": "data_fetchers/result/factor_ic_data.json.gz",
         "description": "主数据源(行情+因子+收益)",
         "date_field": "dates",  # 从顶层 dates 数组获取最新日期
-        "format": "line_json",  # 每行一个 JSON 对象，dates 在第一行顶层
+        "format": "full_json",  # 完整 JSON 对象，头部包含顶层 dates 数组
         "is_gzip": True,
     },
     "factor_data": {
@@ -292,8 +295,8 @@ def check_data_freshness(date: str, logger: logging.Logger) -> list[dict]:
                                 result["actual_date"] = dates[-1]
                     elif file_format == "full_json":
                         # 完整 JSON 对象（可能很大），只读取头部部分用正则匹配
-                        # meta.date_range.end 通常在文件开头部分
-                        content = f.read(5000)  # 读取足够获取 meta 的内容
+                        # meta.date_range.end / 顶层 dates 通常在文件开头部分
+                        content = f.read(DATA_FRESHNESS_HEAD_CHARS)
                         actual_date = _extract_date_from_json_content(content, date_field)
                         if actual_date:
                             result["actual_date"] = actual_date

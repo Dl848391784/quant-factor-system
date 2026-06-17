@@ -52,7 +52,7 @@ class TestVersion:
 
     def test_version_defined(self):
         """验证版本常量存在"""
-        assert __version__ == "2.18"
+        assert __version__ == "2.19"
 
 
 class TestHelperFunctions:
@@ -327,6 +327,44 @@ class TestDataFreshnessCheck:
                 assert len(results) == 1
                 assert results[0]["actual_date"] == "2026-06-01"
                 assert results[0]["status"] == "ok"
+
+    def test_check_data_freshness_factor_ic_data_full_json_dates(self):
+        """测试 factor_ic_data 完整 JSON 格式从顶层 dates[-1] 提取日期"""
+        logger = MagicMock()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "data_fetchers" / "result").mkdir(parents=True)
+
+            file_path = root / "data_fetchers" / "result" / "factor_ic_data.json.gz"
+            with gzip.open(file_path, "wt", encoding="utf-8") as f:
+                f.write('{"dates": ')
+                json.dump(["2026-05-29", "2026-06-01"], f)
+                f.write(', "data": [')
+                f.write(json.dumps({"date": "2026-06-01", "asset": "000001"}))
+                f.write("]}")
+
+            with (
+                patch("summary.generate_factor_summary_report.PROJECT_ROOT", root),
+                patch(
+                    "summary.generate_factor_summary_report.DATA_CHECK_SOURCES",
+                    {
+                        "factor_ic_data": {
+                            "path": "data_fetchers/result/factor_ic_data.json.gz",
+                            "description": "主数据源(行情+因子+收益)",
+                            "date_field": "dates",
+                            "format": "full_json",
+                            "is_gzip": True,
+                        }
+                    },
+                ),
+            ):
+                results = check_data_freshness("2026-06-02", logger)
+
+                assert len(results) == 1
+                assert results[0]["actual_date"] == "2026-06-01"
+                assert results[0]["status"] == "ok"
+                logger.error.assert_not_called()
 
 
 class TestDerivedDataFreshnessCheck:

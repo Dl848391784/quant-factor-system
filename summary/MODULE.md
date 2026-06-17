@@ -105,7 +105,7 @@ from factor_definitions import FACTOR_DEFINITIONS, get_factor_definition
 
 | 数据源 | 路径 | 日期字段 | 格式 |
 |-------|------|---------|------|
-| factor_ic_data | factor_ic_data.json.gz | dates[-1] | line_json |
+| factor_ic_data | factor_ic_data.json.gz | dates[-1] | full_json |
 | factor_data | factor_data.json.gz | meta.date_range.end | full_json |
 | turnover_data | turnover_rate_data.json.gz | meta.date_range.end | full_json |
 
@@ -126,7 +126,7 @@ from factor_definitions import FACTOR_DEFINITIONS, get_factor_definition
 | < 70% | error | ✗严重缺失 |
 
 检查方法：
-1. 从 factor_ic_data.json.gz 读取最新日期（dates[-1]）
+1. 从 factor_ic_data.json.gz 的完整 JSON 对象头部读取最新日期（dates[-1]）
 2. 统计该日期下的股票数（读取该日期对应的数据行）
 3. 对比 expected_stocks（从 factor_data.json.gz meta.total_stocks 获取，约 3000）
 4. 计算完成度百分比
