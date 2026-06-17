@@ -33,6 +33,7 @@ from data_fetchers.factor_generator import (
     _OHLCV_INDEX_COLS,
     _atomic_write_json,
     _calc_pct,
+    _json_safe_value,
     _load_json_gz_data,
     _nan_to_null,
     _run_pipeline_step,
@@ -83,6 +84,30 @@ class TestCalcPct:
     def test_rounding(self) -> None:
         """保留两位小数"""
         assert _calc_pct(1, 3) == 33.33
+
+
+# ============================================================================
+# _json_safe_value: 单值 JSON 安全转换
+# ============================================================================
+
+
+class TestJsonSafeValue:
+    """_json_safe_value 单值转换测试"""
+
+    def test_float_nan_to_none(self) -> None:
+        """float NaN → None。"""
+        assert _json_safe_value(float("nan")) is None
+
+    def test_numpy_scalar_to_python_scalar(self) -> None:
+        """numpy 标量转换为 json.dump 可处理的 Python 标量。"""
+        assert _json_safe_value(np.int64(3)) == 3
+        assert type(_json_safe_value(np.int64(3))) is int
+        assert _json_safe_value(np.bool_(True)) is True
+
+    def test_normal_values_unchanged(self) -> None:
+        """普通 Python 值保持原样。"""
+        assert _json_safe_value("000001") == "000001"
+        assert _json_safe_value(1.5) == 1.5
 
 
 # ============================================================================
@@ -282,6 +307,22 @@ class TestWriteFactorJsonGz:
             payload: dict[str, Any] = json.load(f)
         assert payload["dates"] == ["2026-01-01", "2026-01-02"]
         assert payload["data"][1]["factor"] is None  # NaN → null
+
+    def test_streaming_writer_does_not_call_to_dict(
+        self,
+        tmp_path: Path,
+        sample_df: pd.DataFrame,
+        silent_logger: logging.Logger,
+    ) -> None:
+        """写出路径禁止回退到 DataFrame.to_dict('records') 批量对象图。"""
+        output_path = tmp_path / "out.json.gz"
+
+        with patch.object(pd.DataFrame, "to_dict", side_effect=AssertionError("to_dict forbidden")):
+            _write_factor_json_gz(sample_df, output_path, silent_logger)
+
+        with gzip.open(output_path, "rt", encoding="utf-8") as f:
+            payload: dict[str, Any] = json.load(f)
+        assert len(payload["data"]) == 2
 
     def test_gzip_write_failure_cleans_temp(
         self,

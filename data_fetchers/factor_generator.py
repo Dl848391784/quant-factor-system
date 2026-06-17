@@ -502,6 +502,21 @@ def _load_json_gz_data(
     return payload["data"]
 
 
+def _json_safe_value(obj: Any) -> Any:
+    """将单个值转换为严格 JSON 可序列化值。
+
+    float/np.floating 的 NaN/inf/-inf 转 None；numpy 标量降级为
+    Python 原生类型。容器类型由 _nan_to_null 递归处理。
+    """
+    if isinstance(obj, (float, np.floating)) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    return obj
+
+
 def _nan_to_null(obj: Any) -> Any:
     """递归将 float NaN/inf/-inf 转 None，numpy 标量降级为 Python 原生类型。
 
@@ -515,14 +530,9 @@ def _nan_to_null(obj: Any) -> Any:
       4. dict/list/tuple：递归；tuple 统一返回 list（JSON 无 tuple）
       5. 其他：原样返回
     """
-    # 浮点 NaN/inf 优先
-    if isinstance(obj, (float, np.floating)) and (math.isnan(obj) or math.isinf(obj)):
-        return None
-    # np.bool_ 先于 np.integer（np.bool_ 是其子类，走 int 丢布尔语义）
-    if isinstance(obj, np.bool_):
-        return bool(obj)
-    if isinstance(obj, np.integer):
-        return int(obj)
+    safe_obj = _json_safe_value(obj)
+    if safe_obj is not obj:
+        return safe_obj
     # 容器递归
     if isinstance(obj, dict):
         return {k: _nan_to_null(v) for k, v in obj.items()}
@@ -569,7 +579,7 @@ def _write_factor_json_gz(
         output_df: 已对齐 _OUTPUT_COLS 的输出 DataFrame。
         output_path: 目标输出路径。
         logger: 日志器。
-        batch_size: 流式写入批次大小（默认 50000）。
+        batch_size: 保留兼容参数；当前逐行流式写入，不再构造批次 records。
 
     Raises:
         RuntimeError: mkdir 失败 / 文件系统错误 / 未知错误。
@@ -593,20 +603,16 @@ def _write_factor_json_gz(
             json.dump(dates_list, f, ensure_ascii=False)
             f.write(', "data": [')
 
-            # 逐条写而非 json.dump(batch_records)：后者输出 [...] 拼接后嵌套
-            total_rows = len(output_df)
+            # 逐行写出：避免 to_dict("records") 生成 list[dict] 放大全量面板内存。
+            columns = list(output_df.columns)
             first_record = True
-            for batch_start in range(0, total_rows, batch_size):
-                batch_end = min(batch_start + batch_size, total_rows)
-                batch_df = output_df.iloc[batch_start:batch_end]
-                batch_records = batch_df.to_dict("records")
-                batch_records = _nan_to_null(batch_records)
-                for record in batch_records:
-                    if not first_record:
-                        f.write(",\n")
-                    json.dump(record, f, ensure_ascii=False)
-                    first_record = False
-                del batch_df, batch_records
+            for row in output_df.itertuples(index=False, name=None):
+                if not first_record:
+                    f.write(",\n")
+                record = {col: _json_safe_value(value) for col, value in zip(columns, row, strict=True)}
+                json.dump(record, f, ensure_ascii=False)
+                first_record = False
+                del record
 
             f.write("]}")
 
@@ -787,7 +793,7 @@ def _format_and_write_output(
     # sentinel：若 cast 本身异常，output_df 未赋值，finally 的 del 会抛 NameError
     output_df: pd.DataFrame | None = None
     try:
-        output_df = cast(pd.DataFrame, factor_df[list(_OUTPUT_COLS)].copy())
+        output_df = cast(pd.DataFrame, factor_df.loc[:, list(_OUTPUT_COLS)])
     finally:
         # cast 成功：factor_df 立即释放；cast 失败：factor_df 随栈展开释放
         del factor_df
