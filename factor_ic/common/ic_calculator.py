@@ -785,68 +785,10 @@ def calculate_ic_statistics(ic_series: pd.Series, logger=None) -> dict:
 # ============================================================
 # 行业中性化函数（PROJECT.md 规范）
 # ============================================================
-
-
-def industry_neutral_rank(
-    factor_df: pd.DataFrame,
-    factor_col: str,
-    industry_col: str = "industry",
-    date_col: str = "date",
-    min_industry_stocks: int = 5,
-    logger=None,
-) -> pd.DataFrame:
-    """
-    截面内按行业分别排名
-
-    参数:
-        factor_df: 包含 date, asset, factor_value, industry 的 DataFrame
-        factor_col: 因子值列名
-        industry_col: 行业分类列名
-        date_col: 日期列名
-        min_industry_stocks: 每个行业最少股票数，低于此值的行业跳过
-        logger: 日志记录器（由调用方传入，默认使用模块 logger）
-
-    返回:
-        factor_df 增加 'industry_rank' 列（行业内百分位排名）
-
-    规范:
-        PROJECT.md 行业中性化处理 - 行业内排名方式
-    """
-    if logger is None:
-        logger = get_logger(__name__)
-
-    # 检查行业列是否存在
-    if industry_col not in factor_df.columns:
-        logger.error(
-            "行业中性化失败: 因子数据缺少行业分类列 '%s', 当前列: %s, factor_col=%s",
-            industry_col,
-            factor_df.columns.tolist(),
-            factor_col,
-        )
-        raise ValueError(
-            f"因子数据缺少行业分类列 '{industry_col}'\n"
-            f"当前列: {factor_df.columns.tolist()}\n"
-            f"请先补充行业数据后再使用行业中性化"
-        )
-
-    # 重置索引，确保索引唯一且连续，避免 SettingWithCopyWarning
-    factor_df = factor_df.copy()
-    factor_df = factor_df.reset_index(drop=True)
-    factor_df["industry_rank"] = float("nan")
-
-    # 按日期和行业分组排名
-    for date, day_data in factor_df.groupby(date_col):
-        for industry, ind_data in day_data.groupby(industry_col):
-            if len(ind_data) < min_industry_stocks:
-                # 股票数不足，跳过该行业
-                continue
-
-            # 计算行业内百分位排名
-            # 使用 iloc 按位置写入，避免索引对齐问题
-            rank_pct = ind_data[factor_col].rank(pct=True)
-            factor_df.loc[ind_data.index, "industry_rank"] = rank_pct
-
-    return factor_df
+# v2026-06-18: 删除 industry_neutral_rank 死代码
+#   - 历史定义仅 1 处，0 处调用（grep 确认）
+#   - 行业中性化方案统一采用残差回归（design.md D1+D10）
+#   - 遵循 AGENTS.md 硬规则 #14：禁止死代码
 
 
 def industry_neutral_residual(
