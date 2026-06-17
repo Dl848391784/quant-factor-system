@@ -41,6 +41,7 @@ parquet 文件，本模块仅负责 **读取 + 计算因子**。未来若新增"
 
 from __future__ import annotations
 
+import functools
 import logging
 from pathlib import Path
 
@@ -95,10 +96,38 @@ def _load_fund_flow_data(
     Raises:
         FileNotFoundError: 缓存文件不存在
         RuntimeError: 缓存数据为空或格式错误
+
+    Note (v1.44 内存优化):
+        - 默认路径（fund_flow_path=None）走 process-local cache，同一进程内
+          重复调用直接返回同一 DataFrame 对象（id 相等），消除 Step 11.9 内的
+          重复 gzip 解压 + json.load + DataFrame 构造（1.49M 行级浪费）。
+        - 自定义路径（fund_flow_path 非 None）不走 cache，保持外部测试可控性。
+        - 进程结束 / 显式调用 ``_load_fund_flow_data_cached.cache_clear()`` 释放。
     """
+    if fund_flow_path is None:
+        # 默认路径：走 cache（同 PID 内文件不变）
+        return _load_fund_flow_data_cached()
+    # 自定义路径：不走 cache（外部测试 / 历史回放可指定不同文件）
+    return _load_fund_flow_data_uncached(Path(fund_flow_path), logger_arg)
+
+
+@functools.lru_cache(maxsize=1)
+def _load_fund_flow_data_cached() -> pd.DataFrame:
+    """默认路径下的 process-local cache 包装（v1.44 内存优化）。
+
+    cache key 为空（无参），同 PID 内首次加载后所有后续调用直接返回缓存对象。
+    pipeline 末尾应调用 ``_load_fund_flow_data_cached.cache_clear()`` 释放内存。
+    """
+    return _load_fund_flow_data_uncached(_get_fund_flow_data_path(), None)
+
+
+def _load_fund_flow_data_uncached(
+    path: Path,
+    logger_arg: logging.Logger | None,
+) -> pd.DataFrame:
+    """实际的 gzip + json + DataFrame 加载逻辑（无 cache 包装）。"""
     _logger = get_module_logger(logger_arg)
 
-    path = Path(fund_flow_path) if fund_flow_path else _get_fund_flow_data_path(logger_arg)
     if not path.exists():
         raise FileNotFoundError(f"资金流数据缓存不存在: {path}，请先运行 fetch_fund_flow.py")
 
@@ -106,13 +135,11 @@ def _load_fund_flow_data(
     import json
 
     # 检测文件是否为 gzip 格式（支持 plain JSON 和 gzip 两种）
-    is_gzip = True
     try:
         with gzip.open(path, "rt") as f:
             raw_data = json.load(f)
     except gzip.BadGzipFile:
         # plain JSON 格式（兼容早期写入版本）
-        is_gzip = False
         with open(path) as f:
             raw_data = json.load(f)
 
@@ -136,6 +163,58 @@ def _load_fund_flow_data(
     return df
 
 
+def _merge_fund_flow_daily_multi(
+    factor_df: pd.DataFrame,
+    fund_flow_df: pd.DataFrame,
+    value_cols: list[str],
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """合并日频资金流数据到因子 DataFrame（一次返回多列）。
+
+    v1.44 内存优化：将原先 N 次单列 merge（每次 1.49M 行 left_merge）合并为
+    单次多列 merge，减少中间表构造次数。
+
+    Args:
+        factor_df: 日频因子 DataFrame（含 date, asset 列）
+        fund_flow_df: 资金流 DataFrame（含 asset, date, value_cols 列）
+        value_cols: 资金流数据中的值列名列表（一次取多列）
+        logger_arg: logger（可选）
+
+    Returns:
+        与 factor_df 行数对齐的 DataFrame，包含 value_cols 中所有列。
+        未匹配行所有 value_cols 列均为 NaN。
+
+    Note:
+        - 行序与 factor_df 严格一致（merge how="left"，single-key match 不重排）
+        - 输出 DataFrame 不含 date / asset 列，仅包含 value_cols
+    """
+    _logger = get_module_logger(logger_arg)
+
+    # 一次性取出所有需要的值列 + 合并键
+    ff_subset = fund_flow_df[["asset", "date", *value_cols]].copy()
+    ff_subset["date"] = ff_subset["date"].astype(str)
+
+    merged = factor_df[[_COL_DATE, _COL_ASSET]].copy()
+    merged[_COL_DATE] = merged[_COL_DATE].astype(str)
+
+    # 单次 left_merge 同时拿到所有 value_cols
+    merged_full = merged.merge(
+        ff_subset,
+        left_on=[_COL_DATE, _COL_ASSET],
+        right_on=["date", "asset"],
+        how="left",
+    )
+    # value_cols 是 list[str]，索引必返回 DataFrame；显式构造避开 Pyright 联合类型推断
+    result = pd.DataFrame(merged_full[value_cols])
+
+    _logger.debug(
+        "_merge_fund_flow_daily_multi: rows=%d, value_cols=%s",
+        len(result),
+        value_cols,
+    )
+    return result
+
+
 def _merge_fund_flow_daily(
     factor_df: pd.DataFrame,
     fund_flow_df: pd.DataFrame,
@@ -143,7 +222,7 @@ def _merge_fund_flow_daily(
     output_col: str,
     logger_arg: logging.Logger | None = None,
 ) -> pd.Series:
-    """合并日频资金流数据到因子 DataFrame
+    """合并日频资金流数据到因子 DataFrame（单列版，thin wrapper 维持外部 API）。
 
     Args:
         factor_df: 日频因子 DataFrame（含 date, asset 列）
@@ -154,25 +233,17 @@ def _merge_fund_flow_daily(
 
     Returns:
         与 factor_df 行数对齐的 Series
+
+    Note (v1.44):
+        本函数现在是 ``_merge_fund_flow_daily_multi`` 的单列 thin wrapper，
+        保持原签名以维持外部测试 / 历史调用方的兼容性。新代码应直接调用
+        multi 版以批量合并多列。
     """
-    _logger = get_module_logger(logger_arg)
-
-    # 日期格式对齐
-    ff_subset = fund_flow_df[["asset", "date", value_col]].copy()
-    ff_subset["date"] = ff_subset["date"].astype(str)
-
-    # 精确匹配（资金流数据是日频，无需 merge_asof）
-    merged = factor_df[[_COL_DATE, _COL_ASSET]].copy()
-    merged[_COL_DATE] = merged[_COL_DATE].astype(str)
-
-    result = merged.merge(
-        ff_subset,
-        left_on=[_COL_DATE, _COL_ASSET],
-        right_on=["date", "asset"],
-        how="left",
-    )[value_col].rename(output_col)
-
-    return result
+    multi_result = _merge_fund_flow_daily_multi(factor_df, fund_flow_df, [value_col], logger_arg)
+    # multi_result 单列 DataFrame；取出 Series 后改名（Pyright 友好的 iloc 写法）
+    series = multi_result.iloc[:, 0]
+    series.name = output_col
+    return series
 
 
 def calculate_capital_flow_ratio_trend(
