@@ -269,19 +269,24 @@ def test_fetch_one_stock_clip_drops_out_of_range(fake_em_df: pd.DataFrame) -> No
 
 
 def test_fetch_one_stock_value_error_no_retry(fake_em_df: pd.DataFrame) -> None:
-    """TC-U-12: _normalize_fields 抛 ValueError 也走重试逻辑（不区分错误类型）。"""
+    """TC-U-12 / U-F3-6: _normalize_fields 抛 ValueError 时不重试，直接上抛。
+
+    数据契约错误（缺列）重试无意义，遵循 design.md §8.2 异常处理矩阵。
+    """
     bad_df = fake_em_df.drop(columns=["流通市值"])
     with (
         mock_patch(
             "data_fetchers.fetch_market_cap.ak.stock_value_em",
             return_value=bad_df,
         ),
-        mock_patch("data_fetchers.fetch_market_cap.time.sleep"),
+        mock_patch("data_fetchers.fetch_market_cap.time.sleep") as mock_sleep,
+        pytest.raises(ValueError, match="缺少必要字段"),
     ):
-        result = fetch_one_stock("000001", ("2024-03-18", "2024-03-20"), max_retries=2)
+        fetch_one_stock("000001", ("2024-03-18", "2024-03-20"), max_retries=3)
 
-    # 字段缺失是结构问题，重试无效，最终返回 None
-    assert result is None
+    # 不应该进入重试退避（time.sleep 不被调用，或仅 REQUEST_INTERVAL）
+    # 重试退避 sleep(delay+jitter) 不应触发；放宽：调用次数 <= 1（仅 REQUEST_INTERVAL）
+    assert mock_sleep.call_count <= 1
 
 
 # ============================================================
@@ -770,3 +775,96 @@ def test_main_empty_stock_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 
     rc = main(target_date_range=("2024-03-18", "2024-03-20"))
     assert rc == 1
+
+
+# ============================================================
+# TC-U-28..30: design.md §9 覆盖率补充
+# ============================================================
+
+
+def test_normalize_fields_raises_on_missing_columns(fake_em_df: pd.DataFrame) -> None:
+    """U-F7-2: 输入缺 `流通市值` 列触发 ValueError（硬规则 #14 防御性）。"""
+    bad = fake_em_df.drop(columns=["流通市值"])
+    with pytest.raises(ValueError, match="缺少必要字段"):
+        _normalize_fields(bad, symbol="000001")
+
+
+def test_fetch_batch_concurrent_isolation(fake_em_df: pd.DataFrame) -> None:
+    """U-F4-3: 并发 5 股，其中 1 股抛非 ValueError 异常，其他 4 股不受影响。"""
+    call_log: list[str] = []
+
+    def side_effect(symbol: str) -> pd.DataFrame:
+        call_log.append(symbol)
+        if symbol == "600000":
+            raise ConnectionError(f"模拟网络异常: {symbol}")
+        return fake_em_df.copy()
+
+    with (
+        mock_patch(
+            "data_fetchers.fetch_market_cap.ak.stock_value_em",
+            side_effect=lambda symbol: side_effect(symbol),
+        ),
+        mock_patch("data_fetchers.fetch_market_cap.time.sleep"),
+    ):
+        df, success, fail = fetch_batch(
+            symbols=["000001", "000002", "600000", "300001", "688001"],
+            batch_idx=1,
+            total_batches=1,
+            target_date_range=("2024-03-18", "2024-03-20"),
+            max_workers=4,
+        )
+
+    # 1 股失败，4 股成功；其他股票数据完整（隔离正确）
+    assert success == 4
+    assert fail == 1
+    assert df is not None
+    assert sorted(df["asset"].unique()) == ["000001", "000002", "300001", "688001"]
+
+
+def test_merge_emit_meta_has_all_required_fields(
+    tmp_path: Path, fake_em_df: pd.DataFrame, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """U-F6-2: meta 包含 design.md §7.2 全部 11 个必填字段。"""
+    df = _normalize_fields(fake_em_df, symbol="000001")
+    _make_batch_cache(tmp_path, 1, df)
+
+    final_file = tmp_path / "market_cap_data.json.gz"
+    monkeypatch.setattr("data_fetchers.fetch_market_cap.OUTPUT_FILE", final_file)
+
+    merge_and_emit_final(
+        total_batches=1,
+        target_date_range=("2024-03-18", "2024-03-20"),
+        total_success=1,
+        total_fail=0,
+        elapsed_seconds=1.0,
+        result_dir=tmp_path,
+    )
+
+    import gzip as _gzip
+
+    with _gzip.open(final_file, "rt", encoding="utf-8") as f:
+        meta = json.load(f)["meta"]
+
+    # design.md §7.2 必填字段
+    required_top = {
+        "version",
+        "source",
+        "generated_at",
+        "n_days",
+        "n_assets",
+        "n_records",
+        "date_range",
+        "fetch_stats",
+        "field_units",
+        "circ_market_cap_non_null_rate",
+    }
+    missing = required_top - set(meta.keys())
+    assert not missing, f"meta 缺字段: {missing}"
+
+    # date_range 子字段
+    assert {"start", "end", "target_start", "target_end"} <= set(meta["date_range"].keys())
+
+    # fetch_stats 子字段
+    assert {"total_success", "total_fail", "fail_rate", "elapsed_seconds", "total_batches"} <= set(
+        meta["fetch_stats"].keys()
+    )

@@ -332,6 +332,9 @@ def fetch_one_stock(
                 log.info("symbol=%s 重试成功（第 %d 次尝试）", symbol, attempt + 1)
             time.sleep(REQUEST_INTERVAL)
             return df_clipped
+        except ValueError:
+            # 数据契约错误（缺列 / 区间逆序）— 重试无意义，直接上抛（design.md §8.2 / U-F3-6）
+            raise
         except Exception as exc:  # noqa: BLE001 — 网络/解析异常种类多样，统一捕获 + 重试
             last_exc = exc
             if attempt < max_retries - 1:
