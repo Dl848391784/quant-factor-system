@@ -123,3 +123,77 @@ def test_r17b_normalize_enabled_drops_skipped_reason_residual():
     assert "skipped_reason" not in out
     assert "another_extra" not in out
     assert list(out.keys()) == list(NEUTRAL_REQUIRED_KEYS_ENABLED)
+
+
+# ---------------------------------------------------------------------------
+# R17c: build_ic_result 顶层接入
+# ---------------------------------------------------------------------------
+
+
+def _make_minimal_ic_result_and_meta():
+    """构造满足 build_ic_result 必填的最小 ic_result + raw_metadata。"""
+    ic_series = pd.Series([0.05, 0.03], index=["2026-01-01", "2026-01-02"])
+    ic_result = {
+        "ic_series": ic_series, "ic_mean": 0.04, "ic_std": 0.01, "icir": 4.0,
+        "p_value": 0.001, "p_value_display": "< 0.01", "positive_ratio": 1.0, "n_days": 2,
+        "statistical_significance": {
+            "p_value": 0.001, "p_value_display": "< 0.01", "t_stat": 4.0,
+            "is_significant": True, "conclusion": "Y",
+        },
+        "factor_direction": {"ic_mean": 0.04, "ic_mean_sign": "positive", "conclusion": "Y"},
+        "economic_significance": {"is_economically_significant": True, "conclusion": "Y"},
+        "icir_stability": {"is_stable": True, "conclusion": "Y"},
+        "ic_distribution_consistency": {"conclusion": "Y"},
+    }
+    raw_metadata = {
+        "period_start": "2026-01-01", "period_end": "2026-01-02",
+        "total_days": 2, "avg_stocks_per_day": 100,
+    }
+    return ic_result, raw_metadata
+
+
+def test_r17c_build_ic_result_payload_none_no_neutral_field():
+    """ic_neutral_payload=None → 顶层结果不出现 ic_neutral_industry 字段（向后兼容）。"""
+    from factor_ic.common.ic_result_builder import build_ic_result
+
+    ic_result, raw_meta = _make_minimal_ic_result_and_meta()
+    result = build_ic_result(ic_result, raw_meta, factor_name="test_1d")
+    assert RESULT_KEY_IC_NEUTRAL not in result
+
+
+def test_r17c_build_ic_result_payload_disabled():
+    """ic_neutral_payload={enabled=False} → 顶层 ic_neutral_industry 仅 2 字段。"""
+    from factor_ic.common.ic_result_builder import build_ic_result
+
+    ic_result, raw_meta = _make_minimal_ic_result_and_meta()
+    payload = {"enabled": False, "skipped_reason": "user disabled"}
+    result = build_ic_result(ic_result, raw_meta, factor_name="test_1d", ic_neutral_payload=payload)
+    assert RESULT_KEY_IC_NEUTRAL in result
+    neutral = result[RESULT_KEY_IC_NEUTRAL]
+    assert list(neutral.keys()) == list(NEUTRAL_REQUIRED_KEYS_DISABLED)
+    assert neutral["enabled"] is False
+    assert neutral["skipped_reason"] == "user disabled"
+
+
+def test_r17c_build_ic_result_payload_enabled_field_order():
+    """ic_neutral_payload={enabled=True 13 字段} → 顶层字段按 schema 顺序输出。"""
+    from factor_ic.common.ic_result_builder import build_ic_result
+
+    ic_result, raw_meta = _make_minimal_ic_result_and_meta()
+    payload = _make_full_enabled_payload()
+    result = build_ic_result(ic_result, raw_meta, factor_name="test_1d", ic_neutral_payload=payload)
+    neutral = result[RESULT_KEY_IC_NEUTRAL]
+    assert list(neutral.keys()) == list(NEUTRAL_REQUIRED_KEYS_ENABLED)
+    assert neutral["decay_level"] == "high"
+
+
+def test_r17c_build_ic_result_payload_invalid_raises():
+    """ic_neutral_payload 不合规 → ValueError 透传到调用方（runner）。"""
+    from factor_ic.common.ic_result_builder import build_ic_result
+
+    ic_result, raw_meta = _make_minimal_ic_result_and_meta()
+    with pytest.raises(ValueError, match="ic_mean"):
+        build_ic_result(
+            ic_result, raw_meta, factor_name="test_1d",
+            ic_neutral_payload={"enabled": True},  # 缺 12 字段
+        )
