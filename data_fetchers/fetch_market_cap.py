@@ -28,6 +28,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from datetime import datetime
@@ -170,18 +171,124 @@ def load_target_assets(
     stock_list_file: Path | None = None,
     logger_arg: logging.Logger | None = None,
 ) -> list[str]:
-    """加载目标股票代码列表（详见 design.md §3.2 F2）。"""
-    raise NotImplementedError("C2b 实现")
+    """加载目标股票代码列表（详见 design.md §3.2 F2）。
+
+    读取 stock_list.json 的 ``codes`` 字段，过滤 ST 前缀（``*ST/ST/S``）。
+
+    Args:
+        stock_list_file: stock_list.json 路径，None 时使用 STOCK_LIST_FILE。
+        logger_arg: 日志记录器，None 时使用模块级 logger。
+
+    Returns:
+        股票代码列表（6 位字符串），按原序保留。
+
+    Raises:
+        FileNotFoundError: stock_list.json 不存在。
+        KeyError: ``codes`` 字段缺失（结构异常）。
+    """
+    log = logger_arg if logger_arg is not None else logger
+    target_file = stock_list_file if stock_list_file is not None else STOCK_LIST_FILE
+
+    if not target_file.exists():
+        raise FileNotFoundError(f"stock_list 文件不存在: {target_file}（请先运行 fetch_factor_cache.py）")
+
+    with target_file.open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    if "codes" not in payload:
+        raise KeyError(f"stock_list.json 缺少 'codes' 字段，实际键: {sorted(payload.keys())}")
+
+    raw_codes = payload["codes"]
+    if not isinstance(raw_codes, list):
+        raise TypeError(f"stock_list.json 'codes' 字段应为 list，实际为 {type(raw_codes).__name__}")
+
+    # 过滤 ST 股票（基于 stocks 字段中的 name 前缀，遵循 fetch_turnover.py:163 约定）
+    stocks_meta = {item["code"]: item.get("name", "") for item in payload.get("stocks", [])}
+    filtered: list[str] = []
+    skipped_st = 0
+    for code in raw_codes:
+        name = stocks_meta.get(code, "")
+        if any(name.startswith(prefix) for prefix in ST_PREFIXES):
+            skipped_st += 1
+            continue
+        filtered.append(code)
+
+    log.info(
+        "加载股票列表完成: 总数=%d, 过滤ST=%d, 目标=%d",
+        len(raw_codes),
+        skipped_st,
+        len(filtered),
+    )
+    return filtered
 
 
 def _normalize_fields(df_raw: pd.DataFrame, symbol: str) -> pd.DataFrame:
-    """归一化 ak.stock_value_em 返回结果（详见 design.md §6.4）。"""
-    raise NotImplementedError("C2b 实现")
+    """归一化 ak.stock_value_em 返回结果（详见 design.md §6.4）。
+
+    将 13 列中文字段映射为 11 列英文字段，并附加 ``asset`` 列。
+    丢弃 ``当日收盘价 / 当日涨跌幅``（与因子用途无关，详见 design.md §6.3）。
+
+    Args:
+        df_raw: ``ak.stock_value_em`` 返回的原始 DataFrame（13 列）。
+        symbol: 6 位股票代码（用于填充 asset 列）。
+
+    Returns:
+        12 列 DataFrame：``date, asset, total_market_cap, ..., ps_ttm``。
+
+    Raises:
+        ValueError: 必要字段（数据日期/总市值/流通市值）缺失。
+    """
+    if df_raw is None or df_raw.empty:
+        # 空 DataFrame 返回 12 列空结构（避免下游 concat 报错）
+        return pd.DataFrame(columns=list(_OUTPUT_COLUMNS))
+
+    # 必要字段检查
+    required_zh = ["数据日期", "总市值", "流通市值"]
+    missing = [c for c in required_zh if c not in df_raw.columns]
+    if missing:
+        raise ValueError(f"symbol={symbol} 缺少必要字段 {missing}，实际列: {list(df_raw.columns)}")
+
+    # 中→英重命名（字典 in-place 不修改原 df）
+    df = df_raw.rename(columns=_FIELD_MAPPING).copy()
+
+    # 丢弃冗余字段（design.md §6.3 决策）
+    df = df.drop(columns=[c for c in _DROPPED_FIELDS if c in df.columns])
+
+    # 日期归一化为 ISO 字符串（YYYY-MM-DD）
+    df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
+
+    # 附加 asset 列
+    df["asset"] = symbol
+
+    # 列顺序对齐 _OUTPUT_COLUMNS；缺列补 NaN（防御 akshare 偶发字段缺失）
+    for col in _OUTPUT_COLUMNS:
+        if col not in df.columns:
+            df[col] = pd.NA
+
+    return df[list(_OUTPUT_COLUMNS)].reset_index(drop=True)
 
 
 def _clip_to_target_range(df: pd.DataFrame, target_date_range: tuple[str, str]) -> pd.DataFrame:
-    """裁剪到目标区间（详见 design.md §4.2 Stage 4→5）。"""
-    raise NotImplementedError("C2b 实现")
+    """裁剪到目标区间（详见 design.md §4.2 Stage 4→5）。
+
+    保留 ``start <= date <= end`` 的行。空 DataFrame 直接返回。
+
+    Args:
+        df: 已归一化的 12 列 DataFrame（含 ``date`` 列，ISO 字符串）。
+        target_date_range: ``(start_iso, end_iso)``，闭区间。
+
+    Returns:
+        裁剪后的 DataFrame，索引重置。
+    """
+    if df is None or df.empty:
+        return df if df is not None else pd.DataFrame(columns=list(_OUTPUT_COLUMNS))
+
+    start, end = target_date_range
+    if start > end:
+        raise ValueError(f"target_date_range 起止逆序: start={start} > end={end}")
+
+    mask = (df["date"] >= start) & (df["date"] <= end)
+    return df.loc[mask].reset_index(drop=True)
 
 
 def fetch_one_stock(
