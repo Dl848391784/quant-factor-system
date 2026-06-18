@@ -902,6 +902,7 @@ factor_df['middle'] = middle  # TypeError: incompatible index (pandas 3.0)
 | 因子数据 | `data_fetchers/result/` | `factor_ic_data.json.gz` |
 | 换手率数据 | `data_fetchers/result/` | `turnover_rate_data.json.gz` |
 | 主力资金流 | `data_fetchers/result/` | `main_inflow_data.json.gz` |
+| 市值数据（v1.0+） | `data_fetchers/result/` | `market_cap_data.json.gz` |
 
 **禁止**:
 ```

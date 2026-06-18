@@ -49,6 +49,7 @@ Plan → Execute → Review → Debug
 |------|---------|---------|---------|
 | data_fetchers/fetch_factor_cache | `data_fetchers/result/` | `factor_data.json.gz` | factor_generator |
 | data_fetchers/fetch_turnover | `data_fetchers/result/` | `turnover_rate_data.json.gz` | factor_generator |
+| data_fetchers/fetch_market_cap | `data_fetchers/result/` | `market_cap_data.json.gz` | factor_ic（市值中性化，待启用） |
 | data_fetchers/factor_generator | `data_fetchers/result/` | `factor_ic_data.json.gz` | factor_ic, backtest, comprehensive_factor, summary |
 | factor_ic | `factor_ic/result/` | `ic_<因子>_<周期>_analysis_result.json` | comprehensive_factor, summary |
 | backtest | `backtest/result/` | `<因子>_layered_backtest.json` | summary |
