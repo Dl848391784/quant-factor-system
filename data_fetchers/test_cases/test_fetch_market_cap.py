@@ -40,6 +40,7 @@ from data_fetchers.fetch_market_cap import (  # noqa: E402
     load_target_assets,
     merge_and_emit_final,
     save_batch_cache,
+    validate_final_data,
 )
 
 
@@ -555,3 +556,148 @@ def test_merge_and_emit_final_empty_batches(tmp_path: Path, monkeypatch: pytest.
 
     assert n == 0
     assert not final_file.exists()
+
+
+# ============================================================
+# TC-U-22..25: validate_final_data
+# ============================================================
+
+
+def _write_final_payload(target: Path, df: pd.DataFrame, meta: dict) -> None:
+    """测试 helper：写入最终格式 payload。"""
+    import gzip as _gzip
+
+    payload = {"meta": meta, "data": df.to_dict(orient="records")}
+    with _gzip.open(target, "wt", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+
+
+def _make_full_df(n_assets: int = 100, n_days: int = 5) -> pd.DataFrame:
+    """构造 N 只股票 × M 天的合法最终数据。"""
+    rows = []
+    for ai in range(n_assets):
+        code = f"{ai:06d}"
+        for di in range(n_days):
+            rows.append(
+                {
+                    "date": f"2024-03-{18 + di:02d}",
+                    "asset": code,
+                    "total_market_cap": 1.0e10,
+                    "circ_market_cap": 8.0e9,
+                    "total_shares": 1_000_000_000,
+                    "circ_shares": 800_000_000,
+                    "pe_ttm": 12.5,
+                    "pe_lyr": 13.0,
+                    "pb": 1.5,
+                    "peg": 0.8,
+                    "pcf_ttm": 9.5,
+                    "ps_ttm": 2.5,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_validate_final_data_ok(tmp_path: Path, stock_list_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TC-U-22: 合法 payload 通过全部 V1-V7。"""
+    monkeypatch.setattr("data_fetchers.fetch_market_cap.STOCK_LIST_FILE", stock_list_file)
+
+    df = pd.DataFrame(
+        [
+            {
+                "date": "2024-03-18",
+                "asset": code,
+                "total_market_cap": 1.0e10,
+                "circ_market_cap": 8.0e9,
+                "total_shares": 1_000_000_000,
+                "circ_shares": 800_000_000,
+                "pe_ttm": 12.5,
+                "pe_lyr": 13.0,
+                "pb": 1.5,
+                "peg": 0.8,
+                "pcf_ttm": 9.5,
+                "ps_ttm": 2.5,
+            }
+            for code in ["000001", "000002", "600000"]
+        ]
+    )
+    meta = {"version": "1.0", "n_records": 3, "n_assets": 3, "n_days": 1}
+    final = tmp_path / "market_cap_data.json.gz"
+    _write_final_payload(final, df, meta)
+
+    ok, n, na, nd = validate_final_data(output_file=final)
+    assert ok is True
+    assert n == 3
+    assert na == 3
+    assert nd == 1
+
+
+def test_validate_final_data_missing_field(tmp_path: Path) -> None:
+    """TC-U-23: 缺少 circ_market_cap 字段触发 V3 失败。"""
+    df = pd.DataFrame(
+        [
+            {
+                "date": "2024-03-18",
+                "asset": "000001",
+                "total_market_cap": 1.0e10,
+                "total_shares": 1_000_000_000,
+                "circ_shares": 800_000_000,
+                "pe_ttm": 12.5,
+                "pe_lyr": 13.0,
+                "pb": 1.5,
+                "peg": 0.8,
+                "pcf_ttm": 9.5,
+                "ps_ttm": 2.5,
+            }
+        ]
+    )
+    meta = {"version": "1.0", "n_records": 1, "n_assets": 1, "n_days": 1}
+    final = tmp_path / "market_cap_data.json.gz"
+    _write_final_payload(final, df, meta)
+
+    ok, _, _, _ = validate_final_data(output_file=final)
+    assert ok is False
+
+
+def test_validate_final_data_low_circ_non_null(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TC-U-24: circ_market_cap 非空率 < 99% 触发 V6 失败。"""
+    monkeypatch.setattr(
+        "data_fetchers.fetch_market_cap.STOCK_LIST_FILE",
+        tmp_path / "no_stock_list.json",
+    )
+
+    df = _make_full_df(n_assets=100, n_days=1)
+    df.loc[:4, "circ_market_cap"] = None  # 5% 缺失
+
+    meta = {"version": "1.0", "n_records": len(df), "n_assets": 100, "n_days": 1}
+    final = tmp_path / "market_cap_data.json.gz"
+    _write_final_payload(final, df, meta)
+
+    ok, _, _, _ = validate_final_data(output_file=final)
+    assert ok is False
+
+
+def test_validate_final_data_negative_market_cap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TC-U-25: 市值字段出现 <= 0 值触发 V7 失败。"""
+    monkeypatch.setattr(
+        "data_fetchers.fetch_market_cap.STOCK_LIST_FILE",
+        tmp_path / "no_stock_list.json",
+    )
+
+    df = _make_full_df(n_assets=100, n_days=1)
+    df.loc[0, "circ_market_cap"] = -1.0
+
+    meta = {"version": "1.0", "n_records": len(df), "n_assets": 100, "n_days": 1}
+    final = tmp_path / "market_cap_data.json.gz"
+    _write_final_payload(final, df, meta)
+
+    ok, _, _, _ = validate_final_data(output_file=final)
+    assert ok is False
+
+
+def test_validate_final_data_missing_file(tmp_path: Path) -> None:
+    """TC-U-25b: 文件不存在触发 V1 失败。"""
+    ok, n, na, nd = validate_final_data(output_file=tmp_path / "missing.json.gz")
+    assert ok is False
+    assert n == 0
+    assert na == 0
+    assert nd == 0

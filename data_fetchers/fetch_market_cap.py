@@ -672,8 +672,124 @@ def validate_final_data(
     output_file: Path | None = None,
     logger_arg: logging.Logger | None = None,
 ) -> tuple[bool, int, int, int]:
-    """验证最终输出（详见 design.md §3.1 F9）。"""
-    raise NotImplementedError("C2d 实现")
+    """验证最终输出（详见 design.md §3.1 F9 / §10）。
+
+    校验项:
+        - V1 文件存在且可读
+        - V2 必备 keys: meta + data
+        - V3 12 列字段齐全（_OUTPUT_COLUMNS）
+        - V4 (date, asset) 唯一
+        - V5 股票覆盖率 >= 95%（按 stock_list 计）
+        - V6 circ_market_cap 非空率 >= 99%
+        - V7 数值字段类型与单位（仅做范围/类型 sanity check）
+
+    Args:
+        output_file: 待校验文件，None 时使用 OUTPUT_FILE。
+        logger_arg: 日志记录器。
+
+    Returns:
+        ``(ok, n_records, n_assets, n_days)``：
+            - ok: 是否通过全部校验；
+            - 后三项为最终数据集统计（便于上游打日志）。
+    """
+    log = logger_arg if logger_arg is not None else logger
+    target = output_file if output_file is not None else OUTPUT_FILE
+
+    # V1 文件存在
+    if not target.exists():
+        log.error("[V1] 输出文件不存在: %s", target)
+        return False, 0, 0, 0
+
+    try:
+        with gzip.open(target, "rt", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception as exc:
+        log.error("[V1] 文件读取/解析失败: %s", exc)
+        return False, 0, 0, 0
+
+    # V2 顶层 keys
+    if "meta" not in payload or "data" not in payload:
+        log.error("[V2] 缺少 meta/data 字段，实际: %s", sorted(payload.keys()))
+        return False, 0, 0, 0
+
+    data = payload["data"]
+    meta = payload["meta"]
+    n_records = len(data)
+    if n_records == 0:
+        log.error("[V2] data 为空")
+        return False, 0, 0, 0
+
+    df = pd.DataFrame(data)
+
+    # V3 字段齐全
+    missing_cols = [c for c in _OUTPUT_COLUMNS if c not in df.columns]
+    if missing_cols:
+        log.error("[V3] 缺少字段: %s", missing_cols)
+        return False, n_records, 0, 0
+
+    n_assets = int(df["asset"].nunique())
+    n_days = int(df["date"].nunique())
+
+    # V4 (date, asset) 唯一
+    dup_count = int(df.duplicated(subset=["date", "asset"]).sum())
+    if dup_count > 0:
+        log.error("[V4] 存在 %d 行 (date, asset) 重复", dup_count)
+        return False, n_records, n_assets, n_days
+
+    # V5 股票覆盖率（容忍未运行 fetch_factor_cache 的场景：跳过 V5 但日志提示）
+    try:
+        target_codes = load_target_assets(logger_arg=log)
+        coverage = n_assets / len(target_codes) if target_codes else 0.0
+        if coverage < MIN_STOCK_COVERAGE:
+            log.error(
+                "[V5] 股票覆盖率 %.2f%% < 阈值 %.2f%%",
+                coverage * 100,
+                MIN_STOCK_COVERAGE * 100,
+            )
+            return False, n_records, n_assets, n_days
+        log.info("[V5] 股票覆盖率: %.2f%% (%d / %d)", coverage * 100, n_assets, len(target_codes))
+    except FileNotFoundError:
+        log.warning("[V5] stock_list.json 不存在，跳过覆盖率校验")
+
+    # V6 circ_market_cap 非空率
+    circ_non_null = float(df["circ_market_cap"].notna().mean())
+    if circ_non_null < MIN_KEY_FIELD_NON_NULL_RATE:
+        log.error(
+            "[V6] circ_market_cap 非空率 %.2f%% < 阈值 %.2f%%",
+            circ_non_null * 100,
+            MIN_KEY_FIELD_NON_NULL_RATE * 100,
+        )
+        return False, n_records, n_assets, n_days
+
+    # V7 数值字段 sanity check：市值应为正
+    numeric_cols = ["total_market_cap", "circ_market_cap", "total_shares", "circ_shares"]
+    for col in numeric_cols:
+        if col not in df.columns:
+            continue
+        # 允许 NaN，仅检查非 NaN 值
+        non_null = df[col].dropna()
+        if len(non_null) > 0 and (non_null <= 0).any():
+            n_bad = int((non_null <= 0).sum())
+            log.error("[V7] 字段 %s 出现 <= 0 值 %d 次（应为正）", col, n_bad)
+            return False, n_records, n_assets, n_days
+
+    # meta 一致性（report_only，不影响通过）
+    meta_n_records = meta.get("n_records")
+    if meta_n_records != n_records:
+        log.warning(
+            "meta.n_records=%s 与实际 data 行数 %d 不一致（已修正使用实际值）",
+            meta_n_records,
+            n_records,
+        )
+
+    log.info(
+        "[OK] 验证通过: n_records=%d, n_assets=%d, n_days=%d, circ_non_null=%.2f%%",
+        n_records,
+        n_assets,
+        n_days,
+        circ_non_null * 100,
+    )
+    return True, n_records, n_assets, n_days
 
 
 def main(
