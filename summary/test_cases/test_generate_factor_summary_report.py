@@ -887,5 +887,85 @@ class TestDetectWeightRankAnomalies:
         assert anomalies == []
 
 
+# ---------------------------------------------------------------------------
+# v2.19: _compute_factor_concentration 测试
+# ---------------------------------------------------------------------------
+
+
+class TestComputeFactorConcentration:
+    """测试因子贡献集中度检测。"""
+
+    def test_concentration_detected_for_dominant_factor(self):
+        """单一因子贡献占比超 50% 或实际/名义 > 2x 时应被检出。"""
+        from summary.generate_factor_summary_report import _compute_factor_concentration
+
+        # 模拟 tail_price_position 主导场景
+        # weight=0.198, z=-2.45 → contribution=0.485, composite≈1.16
+        # concentration=0.485/1.16=41.8% < 50%, 但 relative=41.8%/19.8%=2.1x > 2.0
+        top_stocks = [
+            {
+                "composite_value": -1.2,
+                "factor_values_std": {
+                    "tail_price_position": -2.45,
+                    "momentum_strength": -0.2,
+                    "overnight_ret": -0.3,
+                },
+            },
+            {
+                "composite_value": -1.1,
+                "factor_values_std": {
+                    "tail_price_position": -2.45,
+                    "momentum_strength": -0.1,
+                    "overnight_ret": -0.2,
+                },
+            },
+        ]
+        weights = {"tail_price_position": 0.198, "momentum_strength": 0.008, "overnight_ret": 0.103}
+
+        anomalies = _compute_factor_concentration(top_stocks, weights)
+        assert len(anomalies) >= 1
+        # tail_price_position 应是集中度最高的
+        assert anomalies[0]["factor_col"] == "tail_price_position"
+        assert anomalies[0]["relative_ratio"] > 2.0
+
+    def test_no_concentration_when_well_diversified(self):
+        """因子贡献均匀分布时不应检出异常。"""
+        from summary.generate_factor_summary_report import _compute_factor_concentration
+
+        top_stocks = [
+            {
+                "composite_value": -1.0,
+                "factor_values_std": {"a": -1.0, "b": -1.0, "c": -1.0, "d": -1.0},
+            },
+        ]
+        weights = {"a": 0.25, "b": 0.25, "c": 0.25, "d": 0.25}
+
+        anomalies = _compute_factor_concentration(top_stocks, weights)
+        # 每个因子贡献 = 0.25 * 1.0 = 0.25, 占比 = 0.25 / 1.0 = 25% < 50%
+        assert anomalies == []
+
+    def test_empty_top_stocks_returns_empty(self):
+        """空股票列表返回空。"""
+        from summary.generate_factor_summary_report import _compute_factor_concentration
+
+        anomalies = _compute_factor_concentration([], {"a": 0.5})
+        assert anomalies == []
+
+    def test_zero_composite_returns_empty(self):
+        """综合因子值全为 0 时返回空（避免除零）。"""
+        from summary.generate_factor_summary_report import _compute_factor_concentration
+
+        top_stocks = [
+            {
+                "composite_value": 0.0,
+                "factor_values_std": {"a": -2.0, "b": -1.0},
+            },
+        ]
+        weights = {"a": 0.5, "b": 0.5}
+
+        anomalies = _compute_factor_concentration(top_stocks, weights)
+        assert anomalies == []
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

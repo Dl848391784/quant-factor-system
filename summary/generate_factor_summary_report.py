@@ -1761,7 +1761,73 @@ def _generate_weight_selection_section(weight_result: dict | None) -> list[str]:
     return lines
 
 
-def _generate_stock_selection_section(stock_result: dict | None) -> list[str]:
+def _compute_factor_concentration(
+    top_stocks: list[dict],
+    comp_weights: dict[str, float],
+    *,
+    concentration_threshold: float = 0.5,
+    relative_ratio_threshold: float = 2.0,
+) -> list[dict]:
+    """检测 Top N 股票中因子贡献集中度过高的因子。
+
+    双重检测条件（满足任一即报警）：
+    1. 绝对集中度：因子平均绝对贡献占综合因子平均绝对值 > concentration_threshold（50%）
+       → 表面多因子综合实际近乎单因子选股
+    2. 相对集中度：实际贡献占比 / 名义权重 > relative_ratio_threshold（2.0x）
+       → 因子实际影响力远超名义权重，z-score 极端化导致权重失真
+
+    典型场景：tail_price_position 原始值=0.0（收盘=尾盘最低价）导致
+    z-score≈-2.45，名义权重 19.8% 但实际贡献占比 41%（2.07x）。
+
+    Args:
+        top_stocks: 选中的股票列表，每项含 factor_values_std 和 composite_value
+        comp_weights: {factor_col: weight} 权重字典
+        concentration_threshold: 绝对贡献占比阈值，默认 0.5（50%）
+        relative_ratio_threshold: 相对贡献倍数阈值，默认 2.0
+
+    Returns:
+        集中度异常因子列表（按集中度降序），每项含 factor_name /
+        factor_col / weight / avg_abs_contribution / concentration_ratio /
+        relative_ratio
+    """
+    if not top_stocks or not comp_weights:
+        return []
+
+    avg_abs_composite = sum(abs(s.get("composite_value", 0)) for s in top_stocks) / len(top_stocks)
+    if avg_abs_composite < 1e-9:
+        return []
+
+    anomalies = []
+    for factor_col, weight in comp_weights.items():
+        abs_contributions = []
+        for stock in top_stocks:
+            std_val = stock.get("factor_values_std", {}).get(factor_col)
+            if std_val is not None:
+                abs_contributions.append(abs(weight * std_val))
+        if not abs_contributions:
+            continue
+        avg_abs_contribution = sum(abs_contributions) / len(abs_contributions)
+        concentration = avg_abs_contribution / avg_abs_composite
+        relative_ratio = concentration / weight if weight > 1e-9 else float("inf")
+        if concentration >= concentration_threshold or relative_ratio >= relative_ratio_threshold:
+            anomalies.append(
+                {
+                    "factor_name": COL_TO_FACTOR_NAME_MAP.get(factor_col, factor_col),
+                    "factor_col": factor_col,
+                    "weight": weight,
+                    "avg_abs_contribution": avg_abs_contribution,
+                    "concentration_ratio": concentration,
+                    "relative_ratio": relative_ratio,
+                }
+            )
+
+    return sorted(anomalies, key=lambda x: x["concentration_ratio"], reverse=True)
+
+
+def _generate_stock_selection_section(
+    stock_result: dict | None,
+    comp_weights: dict[str, float] | None = None,
+) -> list[str]:
     """生成股票选股结果展示部分
 
     v2.2 (2026-06-03): 新增股票选股结果展示
@@ -1894,6 +1960,24 @@ def _generate_stock_selection_section(stock_result: dict | None) -> list[str]:
             lines.append(f"{rank:>4} {code:<10} {format_float(composite_value, 3):>12} {coverage_str:>6} {factor_str}")
 
         lines.append("-" * 70)
+
+        # v2.19: 因子贡献集中度检测
+        if comp_weights:
+            concentration_anomalies = _compute_factor_concentration(top_stocks, comp_weights)
+            if concentration_anomalies:
+                lines.append("")
+                lines.append("⚠ 因子贡献集中度警告:")
+                for a in concentration_anomalies:
+                    lines.append(
+                        f"  - {a['factor_name']}: 名义权重={a['weight']:.1%}，"
+                        f"实际贡献占比={a['concentration_ratio']:.1%}"
+                        f"（{a['relative_ratio']:.1f}x名义权重）"
+                    )
+                lines.append(
+                    "    说明: 该因子的实际贡献远超名义权重，"
+                    "可能原因: 因子原始值集中在边界(如0.0)导致z-score极端化，"
+                    "有效分散化不足"
+                )
 
     # 权重配置信息
     weight_config = stock_result.get("weight_config", {})
@@ -2291,7 +2375,21 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     lines.extend(_generate_weight_selection_section(weight_result))
 
     # v2.2: 第八部分：股票选股结果（新增）
-    lines.extend(_generate_stock_selection_section(stock_result))
+    # v2.19: 提取 comp_weights 传入选股 section，用于因子贡献集中度检测
+    stock_comp_weights: dict[str, float] = {}
+    best_item = next(
+        (item for item in composite_results if item.get("weight_method") == best_weight_method),
+        None,
+    )
+    if best_item:
+        if best_weight_method == "rolling_icir_weight":
+            weight_meta = best_item.get("weight_meta", {})
+            last_day_weights = weight_meta.get("last_day_weights", {})
+            stock_comp_weights = last_day_weights if last_day_weights else best_item.get("weights", {})
+        else:
+            stock_comp_weights = best_item.get("weights", {})
+
+    lines.extend(_generate_stock_selection_section(stock_result, stock_comp_weights))
 
     return "\n".join(lines)
 
