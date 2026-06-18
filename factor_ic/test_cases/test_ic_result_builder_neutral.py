@@ -61,3 +61,65 @@ def test_r17a_normalize_disabled_extra_fields_dropped():
     assert list(out.keys()) == ["enabled", "skipped_reason"]
     assert "ic_mean" not in out
     assert "extra" not in out
+
+
+# ---------------------------------------------------------------------------
+# R17b: enabled=True 路径
+# ---------------------------------------------------------------------------
+
+
+def _make_full_enabled_payload() -> dict:
+    """构造完整 13 字段 enabled=True payload（占位值，仅供 schema 校验）。"""
+    return {
+        "enabled": True,
+        "ic_mean": 0.02,
+        "ic_std": 0.005,
+        "icir": 4.0,
+        "p_value": 0.05,
+        "p_value_display": "0.05",
+        "positive_ratio": 0.6,
+        "n_days": 100,
+        "dates": ["2026-01-01", "2026-01-02"],
+        "ic_values": [0.02, 0.02],
+        "decay_rate": 0.5,
+        "decay_level": "high",
+        "min_industry_stocks": 5,
+    }
+
+
+def test_r17b_normalize_enabled_complete_field_order():
+    """enabled=True 完整 13 字段 → 字段按 NEUTRAL_REQUIRED_KEYS_ENABLED 顺序输出。"""
+    payload = _make_full_enabled_payload()
+    out = _normalize_neutral_payload(payload)
+    assert list(out.keys()) == list(NEUTRAL_REQUIRED_KEYS_ENABLED)
+    # 数值原样保留
+    assert out["ic_mean"] == 0.02
+    assert out["decay_level"] == "high"
+
+
+@pytest.mark.parametrize("missing_field", [
+    "ic_mean", "ic_std", "icir", "p_value", "p_value_display",
+    "positive_ratio", "n_days", "dates", "ic_values",
+    "decay_rate", "decay_level", "min_industry_stocks",
+])
+def test_r17b_normalize_enabled_missing_required_field_raises(missing_field):
+    """enabled=True 缺任意必填字段 → ValueError 错误消息含该字段名。"""
+    payload = _make_full_enabled_payload()
+    del payload[missing_field]
+    with pytest.raises(ValueError, match=missing_field):
+        _normalize_neutral_payload(payload)
+
+
+def test_r17b_normalize_enabled_drops_skipped_reason_residual():
+    """enabled=True 残留 skipped_reason=None（runner .update 后） → 标准化丢弃。
+
+    runner 侧先建 {enabled, skipped_reason: None}, 再 .update(payload)；
+    enabled=True 时 skipped_reason 残留为 None,标准化必须丢弃。
+    """
+    payload = _make_full_enabled_payload()
+    payload["skipped_reason"] = None  # runner 残留
+    payload["another_extra"] = "noise"
+    out = _normalize_neutral_payload(payload)
+    assert "skipped_reason" not in out
+    assert "another_extra" not in out
+    assert list(out.keys()) == list(NEUTRAL_REQUIRED_KEYS_ENABLED)
