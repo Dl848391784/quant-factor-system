@@ -54,3 +54,24 @@ def test_r15a_excluded_factor_forced_skip_even_when_neutralize_true():
     assert reason == NEUTRALIZE_SKIP_REASON_EXCLUDED
     # 防御：清单内确实包含该因子（防止排除清单被误改）
     assert "industry_momentum_5d" in INDUSTRY_NEUTRALIZE_EXCLUDED
+
+
+# ---------------------------------------------------------------------------
+# R15b: 用户传 neutralize=False（非排除因子）→ enabled=False，reason=USER_DISABLED
+# ---------------------------------------------------------------------------
+
+
+def test_r15b_user_disabled_non_excluded_factor():
+    """rsi 不在排除清单 + neutralize=False → 用户开关生效。
+
+    协议依据: design.md §5.3.2 优先级 #4（用户参数最低优先级，但非排除因子下生效）
+    """
+    enabled, reason = _resolve_neutralize_decision(
+        factor_name="rsi",
+        neutralize=False,
+        mode="full",
+    )
+    assert enabled is False
+    assert reason == NEUTRALIZE_SKIP_REASON_USER_DISABLED
+    # 防御：rsi 不在排除清单（防止误加入清单）
+    assert "rsi" not in INDUSTRY_NEUTRALIZE_EXCLUDED
