@@ -6,10 +6,10 @@
 Stage 0: 基础数据拉取
   1. fetch_stock_list.py        → data_fetchers/result/stock_list.json
   2. fetch_factor_cache.py      → cache/factor_data/factor_data.json.gz（收益数据已内置于 factor_ic_data.json.gz）
-  3. fetch_turnover.py          → data_fetchers/result/turnover_rate_data.json.gz
-  4. fetch_industry.py          → result/stock_industry.json
-  5. fetch_tail_trading.py      → data_fetchers/result/tail_trading_data.json.gz（尾盘5分钟K线数据）
-  6. fetch_market_cap.py        → data_fetchers/result/market_cap_data.json.gz（市值数据，用于市值中性化）
+  3. fetch_market_cap.py        → data_fetchers/result/market_cap_data.json.gz（市值/估值面板，中性化依赖）
+  4. fetch_turnover.py          → data_fetchers/result/turnover_rate_data.json.gz
+  5. fetch_industry.py          → result/stock_industry.json
+  6. fetch_tail_trading.py      → data_fetchers/result/tail_trading_data.json.gz（尾盘5分钟K线数据）
 
 Stage 1: 数据整合
   7. factor_generator.py        → data_fetchers/result/factor_ic_data.json.gz
@@ -111,7 +111,7 @@ Stage 7: 汇总报告
 - v1.6 (2026-06-06): 新增 tail_volume_shrink 因子（IC + 分层回测）
 - v1.7 (2026-06-13): 补注册 4 个方向性因子（volume_price_strength / positive_day_ratio_5 / ma5_deviation / near_high_ratio_5）的分层回测；补注册 intraday_intensity、capital_flow_intensity / capital_flow_ratio_trend、6 个 industry_* 因子、turnover_surge_delta / amplitude_delta 的 IC + 分层回测（脚本均已存在但漏注册到 pipeline）
 - v1.8 (2026-06-17): fetch_turnover 设置 5 小时独立超时，避免 baostock 慢速拉取被默认 30 分钟超时反复重启
-- v1.9 (2026-06-18): 新增 fetch_market_cap 到 Stage 0（市值数据，用于 factor_ic 市值中性化，遵循 AGENTS.md §1 数据路径表）
+- v1.9 (2026-06-18): Stage 0 新增 fetch_market_cap（市值/估值面板数据），为 P3 联合中性化提供数据基础
 
 作者: 云瑶
 """
@@ -158,6 +158,8 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     # Stage 0: 基础数据拉取
     ScriptTask("fetch_stock_list", "data_fetchers/fetch_stock_list.py", 0, []),
     ScriptTask("fetch_factor_cache", "data_fetchers/fetch_factor_cache.py", 0, []),
+    # 市值/估值面板数据（P3 市值中性化依赖，2026-06-18 新增）
+    ScriptTask("fetch_market_cap", "data_fetchers/fetch_market_cap.py", 0, []),
     ScriptTask("fetch_turnover", "data_fetchers/fetch_turnover.py", 0, ["--baostock"], timeout=FETCH_TURNOVER_TIMEOUT),
     ScriptTask("fetch_industry", "data_fetchers/fetch_industry.py", 0, []),  # 行业分类数据
     ScriptTask(
