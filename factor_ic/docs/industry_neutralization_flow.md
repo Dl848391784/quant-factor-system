@@ -1,11 +1,32 @@
 # 行业中性化 IC 计算流程文档
 
 > 生成时间: 2026-06-18 (北京时间)
-> 审阅版本: v1.0
+> 审阅版本: v1.1
 > 实施完成日期: 2026-06-18
+> v1.1 更新: 2026-06-18 P1 重构 — neutralizer 引擎 + ControlProvider 协议 + 排除清单 dict 化
 > 流程归属: `factor_ic/common/` 公共流程（跨因子复用）
 > 配套规范: `factor_ic/MODULE.md` M66 (类别 L. 行业中性化)
-> 配套设计: `.hermes/plans/factor-ic-industry-neutralization-design.md`
+> 配套设计: `designs/feat_neutralization_framework.md`（P1 后主设计文档）
+> 历史设计: `.hermes/plans/factor-ic-industry-neutralization-design.md`（P0 历史档）
+
+---
+
+## P1 重构变更摘要 (2026-06-18)
+
+为支持后续市值中性化等多控制变量场景，P1 期完成三处重构：
+
+1. **新增 `factor_ic/common/neutralizer.py`** —— 通用截面 OLS 引擎，
+   接收 `list[ControlProvider]`，按共线性自动决策 `drop_first` / `fit_intercept`。
+2. **新增 `factor_ic/common/control_providers/`** —— `ControlProvider` 协议
+   + `IndustryProvider` 实现 + `PROVIDER_REGISTRY + build_providers([...])`。
+3. **排除清单升级 dict 结构** —— `INDUSTRY_NEUTRALIZE_EXCLUDED` (frozenset) →
+   `NEUTRALIZE_EXCLUDED: dict[str, frozenset[str]]`，每控制变量独立维护。
+   旧名作为别名继续兼容。
+
+**P1 期对外行为不变**：runner 调用从 `industry_neutral_residual` 切到
+`neutralize([IndustryProvider()])`，`drop_first=False` + `fit_intercept=True`
+下两路逐位一致（`test_neutralizer_parity.py` + `test_p1_baseline_snapshot.py`
+34 因子全因子快照验证 abs diff = 0）。
 
 ---
 
@@ -77,8 +98,8 @@
                │                 │      │ Step 3: 残差回归           │
                │                 │      │ a) merge_industry_column  │
                │                 │      │ b) 剔除 '其他' 行业         │
-               │                 │      │ c) industry_neutral_      │
-               │                 │      │    residual()             │
+               │                 │      │ c) neutralize(            │
+               │                 │      │    [IndustryProvider()])  │
                │                 │      │ d) IC on 残差 → neutral_ic │
                │                 │      └──────────┬───────────────┘
                │                 │                 │

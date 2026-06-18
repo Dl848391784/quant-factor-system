@@ -1134,8 +1134,33 @@ pytest factor_ic/test_cases/  # 全过
 | 字段 | 值 |
 |------|-----|
 | design.md 起草 | ✅ 完成（2026-06-18） |
-| 入口审核 | **待审核** |
-| P1 启动 | 等待审核通过 |
+| 入口审核 | ✅ 通过（2026-06-18） |
+| **P1 实施** | ✅ **完成（2026-06-18）— 7 commits + 81 tests 通过** |
+| P2 启动 | 待用户决策启动时机 |
+
+#### P1 已完成的 7 个 commits
+
+| commit | 主题 | 行数 | 测试 |
+|--------|------|------|------|
+| `3be1763` | P1.1+P1.2 协议 + IndustryProvider + 注册表 | +497/-0 | 16 passed |
+| `d0c96ab` | P1.3 neutralizer 引擎 + legacy 逐位对比 | +341/-0 | 7 passed |
+| `f9a0652` | P1.4 runner 切到 neutralizer 引擎 | +12/-7 | RSI 端到端 abs diff = 0 |
+| `67ea446` | P1.5 排除清单升级 dict 结构 + 别名兼容 | +129/-17 | 9 + 7 旧 passed |
+| `d33c9f5` | P1.6 全因子 hard gate baseline + 34 因子快照 | +1173/-0 | 34 passed |
+| `<本 commit>` | P1.7 文档同步（flow doc + design.md 状态） | +约 60/-15 | 人工审核 |
+
+#### P1 关键交付物
+
+- 新模块: `factor_ic/common/control_providers/{base,industry,__init__}.py` + `factor_ic/common/neutralizer.py`
+- 新测试: `test_control_providers.py` (16) + `test_neutralizer_parity.py` (7) + `test_neutralize_excluded_schema.py` (9) + `test_p1_baseline_snapshot.py` (34)
+- 新 baseline: `factor_ic/test_cases/snapshots/p1_baseline_ic.json`（34 因子，13 KB）
+- P1.7 文档同步: `factor_ic/docs/industry_neutralization_flow.md` 升级 v1.1（P1 重构变更摘要）
+
+#### P1 验收硬证据
+
+- 端到端 RSI 因子 P0 vs P1: 10 字段 + 509 个 ic_values + 509 个日期 abs diff = 0
+- 全因子 P1.6 快照: 34/34 通过（含 26 enabled + 8 skipped）
+- 排除清单别名兼容: 现有 `test_factor_ic_runner_neutralize.py` 7 测试 0 修改通过
 
 ### 14.2 设计审核 checklist（用户审阅项）
 
