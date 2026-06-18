@@ -570,8 +570,9 @@ def standardize_factors(
             lambda x: np.clip((x - x.mean()) / x.std(), -_WINSORIZE_SIGMA, _WINSORIZE_SIGMA) if x.std() > 0 else np.nan
         )
 
-        # v2.20: 点质量检测——某值在截面中出现频率 >1% 时，clip z-score 到 ±2σ
+        # v2.20: 点质量检测——某值在截面中出现频率 >1% 且 z-score 超 ±2σ 时 clip
         # 典型场景：tail_price_position close=tail_low→0.0，68/3019=2.3% 股票挤在同一值
+        # 优化：只对 |z-score| > clip 阈值的点质量做处理，跳过低精度因子的非极端重复值
         for date_val, group in factor_df.groupby("date"):
             n = int(group[col].count())  # 非NaN数
             if n == 0:
@@ -580,20 +581,23 @@ def standardize_factors(
             for val, count in val_counts.items():
                 if pd.isna(val):
                     continue
-                if count / n > _POINT_MASS_THRESHOLD:
-                    mask = (factor_df["date"] == date_val) & (factor_df[col] == val)
-                    factor_df.loc[mask, std_col] = factor_df.loc[mask, std_col].clip(
-                        -_POINT_MASS_CLIP_SIGMA, _POINT_MASS_CLIP_SIGMA
-                    )
-                    logger.info(
-                        "因子 %s 在 %s 检测到点质量: value=%.4f, count=%d (%.1f%%), z-score clip 到 ±%.1fσ",
-                        col,
-                        date_val,
-                        val,
-                        count,
-                        count / n * 100,
-                        _POINT_MASS_CLIP_SIGMA,
-                    )
+                if count / n <= _POINT_MASS_THRESHOLD:
+                    continue
+                # 只处理 z-score 超出 clip 阈值的点质量
+                mask = (factor_df["date"] == date_val) & (factor_df[col] == val)
+                z_vals = factor_df.loc[mask, std_col]
+                if z_vals.abs().max() <= _POINT_MASS_CLIP_SIGMA:
+                    continue  # z-score 在 ±2σ 以内，无需 clip
+                factor_df.loc[mask, std_col] = z_vals.clip(-_POINT_MASS_CLIP_SIGMA, _POINT_MASS_CLIP_SIGMA)
+                logger.info(
+                    "因子 %s 在 %s 检测到点质量: value=%.4f, count=%d (%.1f%%), z-score clip 到 ±%.1fσ",
+                    col,
+                    date_val,
+                    val,
+                    count,
+                    count / n * 100,
+                    _POINT_MASS_CLIP_SIGMA,
+                )
 
         # NaN 处理：原因子值为 NaN 时标准化后仍为 NaN
         # 使用 fillna 保持原本 NaN 的位置，而非 .loc 后置还原
