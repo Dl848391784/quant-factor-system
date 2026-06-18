@@ -149,6 +149,7 @@ holdout: 451-500 天 → 最终一次性评估，不调参
 |---------|------|---------|------|-----------|
 | 训练子集 | `reverse_discovery/result/factor_ic_data_train_<train_end>.json.gz` | 与主数据源完全相同的 gzip JSON | 给逆向发现脚本使用 | reverse_discovery 内部 |
 | 测试子集 | `reverse_discovery/result/factor_ic_data_test_<train_end>.json.gz` | 与主数据源完全相同的 gzip JSON | 通过 `--data-source` 传给正向 pipeline 验证 | factor_ic / backtest / comprehensive_factor |
+| 留出子集 | `reverse_discovery/result/factor_ic_data_holdout.json.gz` | 与主数据源完全相同的 gzip JSON | 最终一次性评估，永不参与调参（遵循 D2） | factor_ic / backtest（仅 Phase E 终极评估）|
 | 候选因子定义 | `reverse_discovery/result/candidate_factors_<日期>.json` | JSON | 记录逆向发现的因子公式、参数、显著性指标 | 人工审核 → factor_generator 注册 |
 | 发现报告 | `reverse_discovery/result/discovery_report_<日期>.txt` | 纯文本 | 归因分析结果、统计检验、特征重要性排序 | 人工阅读 |
 
