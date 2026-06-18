@@ -291,3 +291,62 @@ def test_r15f_factor_col_nan_rows_dropped_before_regression():
     assert "skipped_reason" not in payload, (
         f"修复后 NaN 不应触发 computation failed 降级，实得 skipped_reason={payload.get('skipped_reason')!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# R15g: raw_ic_mean 近零时 decay_rate 置 None（防止 -3282% 爆炸）
+# 依据: factor_ic_runner.py L274 近零保护阈值 _DECAY_RATE_RAW_IC_FLOOR=0.001
+#   |raw_ic_mean| < 0.001 → 分母不稳定 → decay_rate=None → 报告显示 '-'
+#   场景: capital_flow_ratio_trend raw_ic=-0.000302, 旧阈值 1e-9 未拦截 → -3282%
+# ---------------------------------------------------------------------------
+
+
+def test_r15g_decay_rate_none_when_raw_ic_near_zero():
+    """raw_ic_mean 低于近零保护阈值时 decay_rate 应为 None。
+
+    构造 raw_ic_mean=0.0003（< _DECAY_RATE_RAW_IC_FLOOR=0.001）的场景，
+    验证 decay_rate=None 而非 -32.82 这样的爆炸值。
+    """
+    from factor_ic.common.factor_ic_runner import _DECAY_RATE_RAW_IC_FLOOR, _compute_industry_neutral_ic
+    from factor_ic.common.logger_config import get_logger
+
+    assert _DECAY_RATE_RAW_IC_FLOOR == 0.001
+
+    np.random.seed(42)
+    dates = pd.date_range("2026-01-01", periods=10, freq="D").strftime("%Y-%m-%d")
+    industry_assets = {
+        "银行": [f"1{i:05d}.SH" for i in range(1, 8)],
+        "钢铁": [f"2{i:05d}.SH" for i in range(1, 8)],
+    }
+    asset_to_industry = {a: ind for ind, assets in industry_assets.items() for a in assets}
+    all_assets = list(asset_to_industry.keys())
+
+    rows_factor, rows_return = [], []
+    for d in dates:
+        for a in all_assets:
+            # 因子值与收益几乎无关 → raw IC 极小
+            rows_factor.append({"date": d, "asset": a, "noise_factor": np.random.normal(0, 1)})
+            rows_return.append({"date": d, "asset": a, "forward_return_1d": np.random.normal(0, 0.01)})
+
+    factor_df = pd.DataFrame(rows_factor)
+    return_df = pd.DataFrame(rows_return)
+    fake_industry_map = {a: {"industry": asset_to_industry[a]} for a in all_assets}
+
+    with patch("data_fetchers.fetch_industry.get_industry_map", return_value=fake_industry_map):
+        payload = _compute_industry_neutral_ic(
+            factor_df=factor_df,
+            return_df=return_df,
+            factor_col="noise_factor",
+            return_col="forward_return_1d",
+            min_stocks=5,
+            neutralize_min_industry_stocks=5,
+            raw_ic_mean=0.0003,  # < _DECAY_RATE_RAW_IC_FLOOR → 近零保护触发
+            logger=get_logger("test_r15g"),
+        )
+
+    assert payload["decay_rate"] is None, (
+        f"raw_ic_mean=0.0003 < 阈值 {_DECAY_RATE_RAW_IC_FLOOR} 时 decay_rate 应为 None, 实际 {payload['decay_rate']}"
+    )
+    assert payload["decay_level"] == "undefined", (
+        f"decay_rate=None 时 decay_level 应为 'undefined', 实际 {payload['decay_level']!r}"
+    )

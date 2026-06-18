@@ -97,6 +97,11 @@ def is_excluded(factor_name: str, control_name: str) -> bool:
 
 DEFAULT_NEUTRALIZE_SPECS: list[str] = ["industry", "log_market_cap"]
 
+# decay_rate 近零保护阈值（factor_ic_runner.py L274）
+# |raw_ic_mean| < 0.001 时 IC 远低于经济显著性阈值(0.03)的 1/30,
+# p-value 远超 0.05, 原始 IC 本身是噪声 → decay_rate 无统计意义, 置为 None
+_DECAY_RATE_RAW_IC_FLOOR: float = 0.001
+
 
 # skipped_reason 文本常量（写入输出 JSON 的 ic_neutralized.skipped_reason）
 NEUTRALIZE_SKIP_REASON_EXCLUDED = "factor in INDUSTRY_NEUTRALIZE_EXCLUDED (industry-aggregated factor)"
@@ -162,6 +167,7 @@ def _classify_decay_level(decay_rate: float, threshold: float = 0.30) -> str:
     - decay_rate < 0: 'inverse' (中性化后 |IC| 反而上升, 结构性增益)
 
     raw_ic_mean ≈ 0 时分母不稳定 → 'undefined'
+    （|raw_ic_mean| < _DECAY_RATE_RAW_IC_FLOOR 时视为近零, decay_rate=None）
     """
     import math
 
@@ -271,7 +277,10 @@ def _compute_neutralized_ic(
     )
 
     neutral_ic_mean = float(neutral_ic_result.get("ic_mean", 0.0))
-    if abs(raw_ic_mean) < 1e-9:
+    # |raw_ic_mean| < 0.001 时 IC 远低于经济显著性阈值(0.03)的 1/30,
+    # p-value 远超 0.05, 原始 IC 本身是噪声 → decay_rate 无统计意义
+    # 遵循硬规则 #14: 禁止对噪声分母做防御性兜底计算
+    if abs(raw_ic_mean) < _DECAY_RATE_RAW_IC_FLOOR:
         decay_rate = float("nan")
     else:
         decay_rate = (abs(raw_ic_mean) - abs(neutral_ic_mean)) / abs(raw_ic_mean)
