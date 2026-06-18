@@ -16,7 +16,7 @@
 - [模块概述](#模块概述)
 - [输出结构模板](#输出结构模板)
 
-### 二、规则索引 (M1-M65,按类别)
+### 二、规则索引 (M1-M66,按类别)
 
 | 类别 | 编号 | 主题 |
 |------|------|------|
@@ -31,6 +31,7 @@
 | **I. 数据校验** | M53-M55 | 计算前校验 / 列存在 / 长度检查 |
 | **J. 代码风格** | M56-M62 | PEP8 import / 注释缩进 / 字典缩进 / 命名 / 参数 / 签名同步 / 类型 |
 | **K. 路径对称与同步** | M63-M65 | 防御对称 / 等价性三重保障 / 死代码清理 |
+| **L. 行业中性化** | M66 | 双路径 schema (disabled/enabled) / oneOf 互斥校验 / 降级保护 |
 
 ### 三、附录
 - [更新记录](#更新记录)
@@ -2314,10 +2315,95 @@ def calculate_all_stocks_vectorized(factor_df):  # 实际使用
 
 ---
 
+## M66. 行业中性化双路径 schema
+
+**What**: `ic_neutral_industry` 顶层字段（`factor_ic/result/ic_*_analysis_result.json`）必须遵循 disabled / enabled **双路径互斥** schema，由 `factor_ic/schemas/ic_analysis_result.schema.json` 的 `oneOf` 约束强制：
+
+| 路径 | enabled | 字段数 | 必填字段 | additionalProperties |
+|------|---------|-------|---------|---------------------|
+| disabled | `False` | 2 | `enabled`, `skipped_reason` | `false` |
+| enabled | `True` | 13 | `enabled`, `ic_mean`, `ic_std`, `icir`, `p_value`, `p_value_display`, `positive_ratio`, `n_days`, `dates`, `ic_values`, `decay_rate`, `decay_level`, `min_industry_stocks` | `false` |
+
+**How**:
+
+1. **runner 层产出**：`factor_ic_runner._compute_industry_neutral_ic` 失败 → runner try/except 改 disabled payload + `skipped_reason`；成功 → 13 字段 enabled payload。
+2. **builder 层标准化**：`ic_result_builder._normalize_neutral_payload(payload)` 校验必填 + 按 `NEUTRAL_REQUIRED_KEYS_DISABLED/ENABLED` 顺序输出，丢弃多余字段（防 runner `.update` 残留）。
+3. **schema 校验**：`oneOf` + `additionalProperties: false` 双重保护，校验入口为 `scripts/validate_output_schemas.py`。
+4. **decay_level enum**：`high` (≥30%) / `low` (<30%) / `inverse` (<0) / `undefined`（4 值固定）。
+
+**Don't**:
+
+```python
+# ❌ 反例 1：runner 直接挂 .update 无标准化（schema 残留 raw_ic_mean / extra）
+ic_neutral = compute_payload()
+result["ic_neutral_industry"] = ic_neutral  # ← 缺标准化
+
+# ❌ 反例 2：disabled 路径补全空字段当 None（违反 oneOf disabled 仅 2 字段）
+result["ic_neutral_industry"] = {
+    "enabled": False, "skipped_reason": "...", "ic_mean": None, "decay_rate": None
+}  # ← additionalProperties=false 校验失败
+
+# ❌ 反例 3：decay_level 写自定义字符串
+"decay_level": "moderate"  # ← enum 校验失败
+
+# ❌ 反例 4：失败抛 RuntimeError 不捕获，污染 raw IC 主流程
+def run_factor_ic_analysis(...):
+    ic_neutral = _compute_industry_neutral_ic(...)  # ← 抛错直接挂掉 raw IC
+```
+
+**Why**:
+1. **诊断价值**：双字段（raw IC + neutral IC）可识别因子 alpha 是真 alpha 还是行业 beta（参见 design.md §1.2）。
+2. **schema 互斥**：disabled 路径只关心"为什么跳过"，enabled 路径需要完整 IC 指标 + 衰减率，强制互斥避免读取方做"字段是否存在"的脆弱判断。
+3. **降级保护**：行业中性化失败（NaN 残差 / 行业映射缺失等）不能拖垮 raw IC 主流程，必须 try/except 降级为 disabled 路径。
+4. **`additionalProperties: false`**：防止 builder `.update(...)` 残留临时字段（如 raw_ic_mean / extra）污染下游消费方。
+
+**When**:
+- **必须遵守**：所有 `factor_ic/ic_*_1d.py` 因子 IC 脚本输出的 `ic_neutral_industry` 字段。
+- **可豁免**：旧 IC 结果文件（v4.5 之前未启用中性化）顶层无 `ic_neutral_industry`，schema 标记为 optional 字段（不在顶层 `required` 列表）。
+
+**Examples**:
+
+```python
+# ✓ 正确 1：runner 失败降级
+try:
+    payload = _compute_industry_neutral_ic(factor_df, ...)
+    payload["enabled"] = True
+except Exception as e:
+    logger.warning("行业中性化 IC 计算失败，降级为 skipped: %s", e)
+    payload = {"enabled": False, "skipped_reason": f"computation failed: {e}"}
+
+# ✓ 正确 2：builder 标准化输出
+result["ic_neutral_industry"] = _normalize_neutral_payload(payload)
+# → enabled=False: 仅返回 {enabled, skipped_reason}
+# → enabled=True : 按 NEUTRAL_REQUIRED_KEYS_ENABLED 顺序返回 13 字段
+```
+
+**Verify**:
+```bash
+# 校验 schema 本身
+python -c "import json, jsonschema; jsonschema.Draft7Validator.check_schema(json.load(open('factor_ic/schemas/ic_analysis_result.schema.json')))"
+
+# 校验真实产物
+python scripts/validate_output_schemas.py
+
+# 单测覆盖
+pytest factor_ic/test_cases/test_ic_result_builder_neutral.py     # 21 test
+pytest factor_ic/test_cases/test_factor_ic_runner_neutralize.py   # 6  test
+pytest summary/test_cases/test_neutral_cell.py                     # 13 test
+```
+
+**相关引用**:
+- design 文档：`.hermes/plans/factor-ic-industry-neutralization-design.md` §5.2
+- 实现：`factor_ic/common/factor_ic_runner.py::_compute_industry_neutral_ic` + `factor_ic/common/ic_result_builder.py::_normalize_neutral_payload`
+- schema：`factor_ic/schemas/ic_analysis_result.schema.json` `properties.ic_neutral_industry`
+
+---
+
 ## 更新记录
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v4.5 | 2026-06-18 | 新增 M66 行业中性化双路径 schema (disabled 2 字段 / enabled 13 字段, oneOf 互斥, additionalProperties=false) [experimental];索引新增 L 类别 |
 | v4.4 | 2026-06-15 | 新增 M3.3 factor_cols 声明式注册 + 运行时列校验(FactorSpec + DataSchemaError + run_factor_ic 统一入口,34 脚本迁移完成) |
 | v4.3 | 2026-06-15 | 新增 M3.2 入口启动日志收口至公共模块横幅(34 脚本统一,配套 `factor_ic_runner.extra_log_params` 参数) |
 | v4.2 | 2026-06-15 | 新增 M3.1 主职责日志输出公共函数:logger 强制必传(M3 特例细化,配套 `factor_summary_logger.py`) |
@@ -2343,5 +2429,5 @@ def calculate_all_stocks_vectorized(factor_df):  # 实际使用
 
 ---
 
-*最后更新: 2026-06-15*
+*最后更新: 2026-06-18*
 
