@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from summary.generate_factor_summary_report import _format_neutral_cell
+from summary.generate_factor_summary_report import _format_neutral_cell, _generate_ic_section
 
 
 # ---------------------------------------------------------------------------
@@ -72,3 +72,64 @@ class TestFormatNeutralCell:
         """
         item = {"neutral_enabled": True, "neutral_decay_rate": 0.0, "neutral_decay_level": "high"}
         assert _format_neutral_cell(item) == "0% ⚠"
+
+
+# ---------------------------------------------------------------------------
+# R19b: _generate_ic_section 表头 + 数据行单测
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateIcSectionNeutralColumn:
+    """覆盖 _generate_ic_section 中性化列的渲染逻辑（R18b 改造）。"""
+
+    def _make_ic_results(self) -> list[dict]:
+        """构造 3 个因子，覆盖 high/low/disabled 三种渲染情形。"""
+        return [
+            {
+                "factor_name": "amplitude", "ic_mean": 0.05, "icir": 0.30,
+                "ic_std": 0.16, "valid_days": 100,
+                "neutral_enabled": True, "neutral_decay_rate": 0.62, "neutral_decay_level": "high",
+            },
+            {
+                "factor_name": "rsi", "ic_mean": -0.03, "icir": -0.15,
+                "ic_std": 0.20, "valid_days": 100,
+                "neutral_enabled": True, "neutral_decay_rate": 0.10, "neutral_decay_level": "low",
+            },
+            {
+                "factor_name": "industry_momentum_5d", "ic_mean": 0.04, "icir": 0.20,
+                "ic_std": 0.20, "valid_days": 100,
+                "neutral_enabled": False, "neutral_decay_rate": None, "neutral_decay_level": "undefined",
+            },
+        ]
+
+    def test_header_contains_neutral_column(self):
+        """IC 表表头必须含'中性化敏感'列名（design.md §6）。"""
+        lines = _generate_ic_section(self._make_ic_results(), backtest_results=[])
+        # 找到表头行（含'因子'+'IC均值'+'ICIR'）
+        header_lines = [l for l in lines if "因子" in l and "ICIR" in l and "IC均值" in l]
+        assert len(header_lines) >= 1, f"未找到表头行，前 5 行: {lines[:5]}"
+        assert "中性化敏感" in header_lines[0], f"表头缺'中性化敏感'列: {header_lines[0]!r}"
+
+    def test_high_factor_row_has_warning_symbol(self):
+        """高敏感因子（amplitude, decay=62%）行末尾应含 '⚠'。"""
+        lines = _generate_ic_section(self._make_ic_results(), backtest_results=[])
+        amp_lines = [l for l in lines if l.startswith("amplitude")]
+        assert len(amp_lines) == 1, f"未找到 amplitude 行: {amp_lines}"
+        assert "⚠" in amp_lines[0], f"high 因子缺 ⚠ 高亮: {amp_lines[0]!r}"
+        assert "62%" in amp_lines[0]
+
+    def test_low_factor_row_no_warning_symbol(self):
+        """低敏感因子（rsi, decay=10%）行不带 ⚠。"""
+        lines = _generate_ic_section(self._make_ic_results(), backtest_results=[])
+        rsi_lines = [l for l in lines if l.startswith("rsi")]
+        assert len(rsi_lines) == 1
+        assert "⚠" not in rsi_lines[0]
+        assert "10%" in rsi_lines[0]
+
+    def test_disabled_factor_row_shows_dash(self):
+        """未启用的因子（industry_momentum_5d, enabled=False）行末尾显示 '-'。"""
+        lines = _generate_ic_section(self._make_ic_results(), backtest_results=[])
+        ind_lines = [l for l in lines if l.startswith("industry_momentum_5d")]
+        assert len(ind_lines) == 1
+        assert ind_lines[0].rstrip().endswith("-"), f"disabled 因子末尾应为 '-': {ind_lines[0]!r}"
+        assert "⚠" not in ind_lines[0]
