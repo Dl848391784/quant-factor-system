@@ -358,6 +358,25 @@ def load_ic_results(
             )
             # 不跳过该因子，但记录警告（下游使用时会回退等权）
 
+        # Plan D: 注入中性化 IC 字段（供 weight_engine 优先使用）
+        # 设计：designs/neutralized_ic_weighting_design.md §2
+        # enabled=True → weight_engine 取 neutralized_icir / neutralized_ic_mean
+        # enabled=False / 缺失 → 不设 neutralized_* 字段，weight_engine fallback to raw
+        ic_neutralized = ic_data.get("ic_neutralized")
+        if isinstance(ic_neutralized, dict) and ic_neutralized.get("enabled") is True:
+            extracted_data["neutralized_enabled"] = True
+            extracted_data["neutralized_icir"] = ic_neutralized.get("icir")
+            extracted_data["neutralized_ic_mean"] = ic_neutralized.get("ic_mean")
+            extracted_data["decay_level"] = ic_neutralized.get("decay_level")
+            logger.debug(
+                "因子 %s: 中性化 IC 已加载 (neutralized_icir=%s, decay_level=%s)",
+                factor_name,
+                ic_neutralized.get("icir"),
+                ic_neutralized.get("decay_level"),
+            )
+        else:
+            extracted_data["neutralized_enabled"] = False
+
         ic_results[factor_name] = extracted_data
 
     # 修复：返回缺失因子列表信息
