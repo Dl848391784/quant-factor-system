@@ -98,7 +98,7 @@ def is_excluded(factor_name: str, control_name: str) -> bool:
 DEFAULT_NEUTRALIZE_SPECS: list[str] = ["industry", "log_market_cap"]
 
 
-# skipped_reason 文本常量（写入输出 JSON 的 ic_neutral_industry.skipped_reason）
+# skipped_reason 文本常量（写入输出 JSON 的 ic_neutralized.skipped_reason）
 NEUTRALIZE_SKIP_REASON_EXCLUDED = "factor in INDUSTRY_NEUTRALIZE_EXCLUDED (industry-aggregated factor)"
 NEUTRALIZE_SKIP_REASON_USER_DISABLED = "user disabled via neutralize=False"
 NEUTRALIZE_SKIP_REASON_INCREMENTAL = "incremental mode (industry neutralization v1 supports full mode only)"

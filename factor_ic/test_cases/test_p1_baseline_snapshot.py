@@ -104,14 +104,12 @@ def _extract_current_summary(result: dict) -> dict:
         "period_end": period.get("end"),
     }
 
-    # P3: 新字段 ic_neutralized 优先；旧文件只有 ic_neutral_industry
+    # P4: 只读 ic_neutralized（legacy ic_neutral_industry 已移除）
     neu_raw = result.get("ic_neutralized")
     if isinstance(neu_raw, dict) and neu_raw:
         neu: dict = neu_raw
-        is_p3_format = True
     else:
-        neu = result.get("ic_neutral_industry") or {}
-        is_p3_format = False
+        neu = {}
 
     if neu.get("enabled") is True:
         neutral = {
@@ -123,7 +121,7 @@ def _extract_current_summary(result: dict) -> dict:
     else:
         neutral = {"enabled": False, "skipped_reason": neu.get("skipped_reason")}
 
-    return {"raw": raw, "neutral": neutral, "is_p3_format": is_p3_format}
+    return {"raw": raw, "neutral": neutral}
 
 
 def _compare_field(name: str, expected, actual) -> str | None:
@@ -164,31 +162,8 @@ def test_p1_baseline_match(factor_name: str):
         if msg:
             failures.append(msg)
 
-    # neutral 字段
-    # P3 新格式文件（ic_neutralized）默认 specs 已从 industry-only 变为
-    # industry+log_market_cap，neutral IC 值会变，跳过 neutral 对比。
-    # raw IC 不受 specs 影响，仍验证。旧格式文件仍做逐位对比。
-    if not actual.get("is_p3_format"):
-        exp_enabled = expected["neutral"].get("enabled")
-        act_enabled = actual["neutral"].get("enabled")
-        if exp_enabled != act_enabled:
-            failures.append(f"neutral.enabled: expected={exp_enabled} actual={act_enabled}")
-        elif exp_enabled is True:
-            for field in _NEUTRAL_ENABLED_FIELDS:
-                msg = _compare_field(
-                    f"neutral.{field}",
-                    expected["neutral"].get(field),
-                    actual["neutral"].get(field),
-                )
-                if msg:
-                    failures.append(msg)
-        else:
-            msg = _compare_field(
-                "neutral.skipped_reason",
-                expected["neutral"].get("skipped_reason"),
-                actual["neutral"].get("skipped_reason"),
-            )
-            if msg:
-                failures.append(msg)
+    # neutral 字段：P4 后所有因子均为 P3 格式（ic_neutralized），默认 specs 已从
+    # industry-only 变为 industry+log_market_cap，neutral IC 值与 P1 baseline 不同。
+    # raw IC 不受 specs 影响，仍逐位验证。neutral 对比已不再需要（P1 hard gate 完成）。
 
     assert not failures, f"P1 baseline drift detected for factor '{factor_name}':\n  " + "\n  ".join(failures)

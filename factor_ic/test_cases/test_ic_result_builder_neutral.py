@@ -1,21 +1,17 @@
-"""ic_result_builder._normalize_neutral_payload + build_ic_result 行业中性化 schema 单测。
+"""ic_result_builder._normalize_neutralized_payload + build_ic_result 中性化 schema 单测。
 
-覆盖 design.md §5.2 schema 校验：
+覆盖 design.md §10.2 P3 schema 校验：
 
-  R17a: enabled=False 路径
-        - 完整 (enabled, skipped_reason) → 标准化输出 2 字段
-        - 缺 skipped_reason → ValueError
-        - skipped_reason 为字符串原样保留
-  R17b: enabled=True 路径
-        - 完整 13 字段 → 字段顺序固定
-        - 缺任意必填字段 → ValueError 含字段名
-        - 多余字段（如 skipped_reason=None）被丢弃
   R17c: build_ic_result 接入
-        - payload=None → 顶层不出现 ic_neutral_industry
-        - payload=enabled=False → 顶层 ic_neutral_industry 仅含 2 字段
-        - payload=enabled=True → 顶层 ic_neutral_industry 含 13 字段且顺序固定
+        - payload=None → 顶层不出现 ic_neutralized
+        - payload=enabled=False → 顶层 ic_neutralized 仅含 4 字段
+        - payload=enabled=True → 顶层 ic_neutralized 含全字段且顺序固定
 
-设计文档: .hermes/plans/factor-ic-industry-neutralization-design.md §5.2
+  P3.2: ic_neutralized 字段
+        - normalize 字段顺序 + controls_used 校验
+        - build_ic_result 写入 ic_neutralized（不写 legacy 字段）
+
+设计文档: designs/feat_neutralization_framework.md §10.2 P3.2
 """
 
 from __future__ import annotations
@@ -24,57 +20,28 @@ import pandas as pd
 import pytest
 
 from factor_ic.common.ic_result_builder import (
-    NEUTRAL_REQUIRED_KEYS_DISABLED,
-    NEUTRAL_REQUIRED_KEYS_ENABLED,
+    NEUTRALIZED_REQUIRED_KEYS_DISABLED,
     NEUTRALIZED_REQUIRED_KEYS_ENABLED,
-    RESULT_KEY_IC_NEUTRAL,
     RESULT_KEY_IC_NEUTRALIZED,
-    _normalize_neutral_payload,
     _normalize_neutralized_payload,
 )
 
 
 # ---------------------------------------------------------------------------
-# R17a: enabled=False 路径
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-def test_r17a_normalize_disabled_complete():
-    """enabled=False + skipped_reason 完整 → 标准化输出 2 字段，原样保留 reason。"""
-    payload = {"enabled": False, "skipped_reason": "user disabled"}
-    out = _normalize_neutral_payload(payload)
-    assert list(out.keys()) == list(NEUTRAL_REQUIRED_KEYS_DISABLED)
-    assert out["enabled"] is False
-    assert out["skipped_reason"] == "user disabled"
-
-
-def test_r17a_normalize_disabled_missing_reason():
-    """enabled=False 缺 skipped_reason → ValueError 含字段名。"""
-    with pytest.raises(ValueError, match="skipped_reason"):
-        _normalize_neutral_payload({"enabled": False})
-
-
-def test_r17a_normalize_disabled_extra_fields_dropped():
-    """enabled=False + 残留 ic_mean 等字段 → 标准化只保留 2 必填。
-
-    防止 runner 侧 .update(neutral_payload) 后 enabled=False 路径残留旧字段。
-    """
-    payload = {"enabled": False, "skipped_reason": "test", "ic_mean": 0.99, "extra": "noise"}
-    out = _normalize_neutral_payload(payload)
-    assert list(out.keys()) == ["enabled", "skipped_reason"]
-    assert "ic_mean" not in out
-    assert "extra" not in out
-
-
-# ---------------------------------------------------------------------------
-# R17b: enabled=True 路径
-# ---------------------------------------------------------------------------
-
-
-def _make_full_enabled_payload() -> dict:
-    """构造完整 13 字段 enabled=True payload（占位值，仅供 schema 校验）。"""
+def _make_full_neutralized_payload(controls_used: list[str] | None = None) -> dict:
+    """构造完整 enabled=True neutralized payload（占位值，仅供 schema 校验）。"""
     return {
         "enabled": True,
+        "controls_used": controls_used or ["industry", "log_market_cap"],
+        "excluded_specs": [],
+        "control_meta": {
+            "industry": {"min_count": 5},
+            "log_market_cap": {"winsorize_quantiles": [0.01, 0.99]},
+        },
         "ic_mean": 0.02,
         "ic_std": 0.005,
         "icir": 4.0,
@@ -86,66 +53,10 @@ def _make_full_enabled_payload() -> dict:
         "ic_values": [0.02, 0.02],
         "decay_rate": 0.5,
         "decay_level": "high",
-        "min_industry_stocks": 5,
     }
 
 
-def test_r17b_normalize_enabled_complete_field_order():
-    """enabled=True 完整 13 字段 → 字段按 NEUTRAL_REQUIRED_KEYS_ENABLED 顺序输出。"""
-    payload = _make_full_enabled_payload()
-    out = _normalize_neutral_payload(payload)
-    assert list(out.keys()) == list(NEUTRAL_REQUIRED_KEYS_ENABLED)
-    # 数值原样保留
-    assert out["ic_mean"] == 0.02
-    assert out["decay_level"] == "high"
-
-
-@pytest.mark.parametrize(
-    "missing_field",
-    [
-        "ic_mean",
-        "ic_std",
-        "icir",
-        "p_value",
-        "p_value_display",
-        "positive_ratio",
-        "n_days",
-        "dates",
-        "ic_values",
-        "decay_rate",
-        "decay_level",
-        "min_industry_stocks",
-    ],
-)
-def test_r17b_normalize_enabled_missing_required_field_raises(missing_field):
-    """enabled=True 缺任意必填字段 → ValueError 错误消息含该字段名。"""
-    payload = _make_full_enabled_payload()
-    del payload[missing_field]
-    with pytest.raises(ValueError, match=missing_field):
-        _normalize_neutral_payload(payload)
-
-
-def test_r17b_normalize_enabled_drops_skipped_reason_residual():
-    """enabled=True 残留 skipped_reason=None（runner .update 后） → 标准化丢弃。
-
-    runner 侧先建 {enabled, skipped_reason: None}, 再 .update(payload)；
-    enabled=True 时 skipped_reason 残留为 None,标准化必须丢弃。
-    """
-    payload = _make_full_enabled_payload()
-    payload["skipped_reason"] = None  # runner 残留
-    payload["another_extra"] = "noise"
-    out = _normalize_neutral_payload(payload)
-    assert "skipped_reason" not in out
-    assert "another_extra" not in out
-    assert list(out.keys()) == list(NEUTRAL_REQUIRED_KEYS_ENABLED)
-
-
-# ---------------------------------------------------------------------------
-# R17c: build_ic_result 顶层接入
-# ---------------------------------------------------------------------------
-
-
-def _make_minimal_ic_result_and_meta():
+def _make_minimal_ic_result_and_meta() -> tuple[dict, dict]:
     """构造满足 build_ic_result 必填的最小 ic_result + raw_metadata。"""
     ic_series = pd.Series([0.05, 0.03], index=["2026-01-01", "2026-01-02"])
     ic_result = {
@@ -178,77 +89,13 @@ def _make_minimal_ic_result_and_meta():
     return ic_result, raw_metadata
 
 
-def test_r17c_build_ic_result_payload_none_no_neutral_field():
-    """ic_neutral_payload=None → 顶层结果不出现 ic_neutral_industry 字段（向后兼容）。"""
-    from factor_ic.common.ic_result_builder import build_ic_result
-
-    ic_result, raw_meta = _make_minimal_ic_result_and_meta()
-    result = build_ic_result(ic_result, raw_meta, factor_name="test_1d")
-    assert RESULT_KEY_IC_NEUTRAL not in result
-
-
-def test_r17c_build_ic_result_payload_disabled():
-    """ic_neutral_payload={enabled=False} → 顶层 ic_neutral_industry 仅 2 字段。"""
-    from factor_ic.common.ic_result_builder import build_ic_result
-
-    ic_result, raw_meta = _make_minimal_ic_result_and_meta()
-    payload = {"enabled": False, "skipped_reason": "user disabled"}
-    result = build_ic_result(ic_result, raw_meta, factor_name="test_1d", ic_neutral_payload=payload)
-    assert RESULT_KEY_IC_NEUTRAL in result
-    neutral = result[RESULT_KEY_IC_NEUTRAL]
-    assert list(neutral.keys()) == list(NEUTRAL_REQUIRED_KEYS_DISABLED)
-    assert neutral["enabled"] is False
-    assert neutral["skipped_reason"] == "user disabled"
-
-
-def test_r17c_build_ic_result_payload_enabled_field_order():
-    """ic_neutral_payload={enabled=True 13 字段} → 顶层字段按 schema 顺序输出。"""
-    from factor_ic.common.ic_result_builder import build_ic_result
-
-    ic_result, raw_meta = _make_minimal_ic_result_and_meta()
-    payload = _make_full_enabled_payload()
-    result = build_ic_result(ic_result, raw_meta, factor_name="test_1d", ic_neutral_payload=payload)
-    neutral = result[RESULT_KEY_IC_NEUTRAL]
-    assert list(neutral.keys()) == list(NEUTRAL_REQUIRED_KEYS_ENABLED)
-    assert neutral["decay_level"] == "high"
-
-
-def test_r17c_build_ic_result_payload_invalid_raises():
-    """ic_neutral_payload 不合规 → ValueError 透传到调用方（runner）。"""
-    from factor_ic.common.ic_result_builder import build_ic_result
-
-    ic_result, raw_meta = _make_minimal_ic_result_and_meta()
-    with pytest.raises(ValueError, match="ic_mean"):
-        build_ic_result(
-            ic_result,
-            raw_meta,
-            factor_name="test_1d",
-            ic_neutral_payload={"enabled": True},  # 缺 12 字段
-        )
-
-
 # ---------------------------------------------------------------------------
-# P3.2: ic_neutralized 新字段 + legacy mirror
+# P3.2: _normalize_neutralized_payload
 # ---------------------------------------------------------------------------
-
-
-def _make_full_neutralized_payload(controls_used: list[str] | None = None) -> dict:
-    payload = _make_full_enabled_payload()
-    payload.pop("min_industry_stocks")
-    payload.update(
-        {
-            "controls_used": controls_used or ["industry", "log_market_cap"],
-            "excluded_specs": [],
-            "control_meta": {
-                "industry": {"min_count": 5},
-                "log_market_cap": {"winsorize_quantiles": [0.01, 0.99]},
-            },
-        }
-    )
-    return payload
 
 
 def test_p32_normalize_neutralized_enabled_complete_field_order():
+    """enabled=True 完整字段 → 按 NEUTRALIZED_REQUIRED_KEYS_ENABLED 顺序输出。"""
     payload = _make_full_neutralized_payload()
     out = _normalize_neutralized_payload(payload)
     assert list(out.keys()) == list(NEUTRALIZED_REQUIRED_KEYS_ENABLED)
@@ -257,13 +104,100 @@ def test_p32_normalize_neutralized_enabled_complete_field_order():
 
 
 def test_p32_normalize_neutralized_enabled_missing_controls_used_raises():
+    """enabled=True 缺 controls_used → ValueError 含字段名。"""
     payload = _make_full_neutralized_payload()
     del payload["controls_used"]
     with pytest.raises(ValueError, match="controls_used"):
         _normalize_neutralized_payload(payload)
 
 
-def test_p32_build_ic_result_writes_ic_neutralized_without_legacy_for_combined():
+def test_p32_normalize_neutralized_disabled_complete():
+    """enabled=False + skipped_reason → 标准化输出 4 必填字段。"""
+    payload = {
+        "enabled": False,
+        "skipped_reason": "factor_in_excluded_list",
+        "controls_used": [],
+        "excluded_specs": ["industry"],
+    }
+    out = _normalize_neutralized_payload(payload)
+    assert list(out.keys()) == list(NEUTRALIZED_REQUIRED_KEYS_DISABLED)
+    assert out["enabled"] is False
+    assert out["skipped_reason"] == "factor_in_excluded_list"
+
+
+def test_p32_normalize_neutralized_disabled_missing_excluded_specs_raises():
+    """enabled=False 缺 excluded_specs → ValueError。"""
+    payload = {"enabled": False, "skipped_reason": "test", "controls_used": []}
+    with pytest.raises(ValueError, match="excluded_specs"):
+        _normalize_neutralized_payload(payload)
+
+
+# ---------------------------------------------------------------------------
+# R17c: build_ic_result 顶层接入
+# ---------------------------------------------------------------------------
+
+
+def test_r17c_build_ic_result_payload_none_no_neutral_field():
+    """ic_neutralized_payload=None → 顶层结果不出现 ic_neutralized 字段。"""
+    from factor_ic.common.ic_result_builder import build_ic_result
+
+    ic_result, raw_meta = _make_minimal_ic_result_and_meta()
+    result = build_ic_result(ic_result, raw_meta, factor_name="test_1d")
+    assert RESULT_KEY_IC_NEUTRALIZED not in result
+
+
+def test_r17c_build_ic_result_payload_disabled():
+    """ic_neutralized_payload={enabled=False} → 顶层 ic_neutralized 仅 4 字段。"""
+    from factor_ic.common.ic_result_builder import build_ic_result
+
+    ic_result, raw_meta = _make_minimal_ic_result_and_meta()
+    payload = {
+        "enabled": False,
+        "skipped_reason": "user disabled",
+        "controls_used": [],
+        "excluded_specs": [],
+    }
+    result = build_ic_result(
+        ic_result, raw_meta, factor_name="test_1d", ic_neutralized_payload=payload
+    )
+    assert RESULT_KEY_IC_NEUTRALIZED in result
+    neutral = result[RESULT_KEY_IC_NEUTRALIZED]
+    assert list(neutral.keys()) == list(NEUTRALIZED_REQUIRED_KEYS_DISABLED)
+    assert neutral["enabled"] is False
+    assert neutral["skipped_reason"] == "user disabled"
+
+
+def test_r17c_build_ic_result_payload_enabled_field_order():
+    """ic_neutralized_payload={enabled=True 全字段} → 顶层字段按 schema 顺序输出。"""
+    from factor_ic.common.ic_result_builder import build_ic_result
+
+    ic_result, raw_meta = _make_minimal_ic_result_and_meta()
+    payload = _make_full_neutralized_payload()
+    result = build_ic_result(
+        ic_result, raw_meta, factor_name="test_1d", ic_neutralized_payload=payload
+    )
+    neutral = result[RESULT_KEY_IC_NEUTRALIZED]
+    assert list(neutral.keys()) == list(NEUTRALIZED_REQUIRED_KEYS_ENABLED)
+    assert neutral["decay_level"] == "high"
+    assert neutral["controls_used"] == ["industry", "log_market_cap"]
+
+
+def test_r17c_build_ic_result_payload_invalid_raises():
+    """ic_neutralized_payload 不合规 → ValueError 透传到调用方（runner）。"""
+    from factor_ic.common.ic_result_builder import build_ic_result
+
+    ic_result, raw_meta = _make_minimal_ic_result_and_meta()
+    with pytest.raises(ValueError, match="controls_used"):
+        build_ic_result(
+            ic_result,
+            raw_meta,
+            factor_name="test_1d",
+            ic_neutralized_payload={"enabled": True},  # 缺必填字段
+        )
+
+
+def test_p32_build_ic_result_writes_ic_neutralized_only():
+    """build_ic_result 写 ic_neutralized，不写任何 legacy 字段。"""
     from factor_ic.common.ic_result_builder import build_ic_result
 
     ic_result, raw_meta = _make_minimal_ic_result_and_meta()
@@ -274,25 +208,5 @@ def test_p32_build_ic_result_writes_ic_neutralized_without_legacy_for_combined()
         ic_neutralized_payload=_make_full_neutralized_payload(["industry", "log_market_cap"]),
     )
     assert RESULT_KEY_IC_NEUTRALIZED in result
-    assert RESULT_KEY_IC_NEUTRAL not in result
+    assert "ic_neutral_industry" not in result
     assert result[RESULT_KEY_IC_NEUTRALIZED]["controls_used"] == ["industry", "log_market_cap"]
-
-
-def test_p32_build_ic_result_mirrors_legacy_for_industry_only():
-    from factor_ic.common.ic_result_builder import build_ic_result
-
-    ic_result, raw_meta = _make_minimal_ic_result_and_meta()
-    payload = _make_full_neutralized_payload(["industry"])
-    result = build_ic_result(
-        ic_result,
-        raw_meta,
-        factor_name="test_1d",
-        ic_neutralized_payload=payload,
-    )
-    assert RESULT_KEY_IC_NEUTRALIZED in result
-    assert RESULT_KEY_IC_NEUTRAL in result
-    legacy = result[RESULT_KEY_IC_NEUTRAL]
-    assert list(legacy.keys()) == list(NEUTRAL_REQUIRED_KEYS_ENABLED)
-    assert legacy["ic_mean"] == payload["ic_mean"]
-    assert legacy["min_industry_stocks"] == 5
-    assert "controls_used" not in legacy

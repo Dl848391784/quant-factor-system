@@ -58,7 +58,7 @@ def _extract_summary(result: dict) -> dict:
         "period_end": period.get("end"),
     }
 
-    neu = result.get("ic_neutral_industry") or {}
+    neu = result.get("ic_neutralized") or {}
     if neu.get("enabled") is True:
         neutral = {
             "enabled": True,

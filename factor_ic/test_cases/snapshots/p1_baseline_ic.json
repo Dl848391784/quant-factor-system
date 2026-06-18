@@ -2,17 +2,17 @@
   "amplitude_1d": {
     "neutral": {
       "decay_level": "low",
-      "decay_rate": 0.138915,
+      "decay_rate": 0.061466,
       "enabled": true,
-      "ic_mean": -0.049447,
-      "ic_std": 0.105249,
-      "ic_values_hash": "824508b41042347d",
-      "icir": 0.4698,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.053894,
+      "ic_std": 0.086497,
+      "ic_values_hash": "1f8f5e9ac276aa82",
+      "icir": 0.6231,
+      "min_industry_stocks": null,
       "n_dates": 509,
       "n_days": 509,
       "p_value": 0.0,
-      "positive_ratio": 0.25343811394891946
+      "positive_ratio": 0.22396856581532418
     },
     "raw": {
       "ic_mean": -0.057424,
@@ -30,17 +30,17 @@
   "amplitude_delta_1d": {
     "neutral": {
       "decay_level": "inverse",
-      "decay_rate": -0.180099,
+      "decay_rate": -0.268328,
       "enabled": true,
-      "ic_mean": -0.007399,
-      "ic_std": 0.07135,
-      "ic_values_hash": "9867b3daa3aa3b00",
-      "icir": 0.1037,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.007953,
+      "ic_std": 0.058463,
+      "ic_values_hash": "4d28e192c14d930c",
+      "icir": 0.136,
+      "min_industry_stocks": null,
       "n_dates": 508,
       "n_days": 508,
-      "p_value": 0.0060939566933870815,
-      "positive_ratio": 0.4389763779527559
+      "p_value": 0.0006261276832999485,
+      "positive_ratio": 0.44881889763779526
     },
     "raw": {
       "ic_mean": -0.00627,
@@ -58,17 +58,17 @@
   "bollinger_pb_1d": {
     "neutral": {
       "decay_level": "low",
-      "decay_rate": 0.191381,
+      "decay_rate": 0.239901,
       "enabled": true,
-      "ic_mean": -0.029627,
-      "ic_std": 0.101237,
-      "ic_values_hash": "6e42f02ef9fc01da",
-      "icir": 0.2926,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.027849,
+      "ic_std": 0.092215,
+      "ic_values_hash": "76aee42daa34bd67",
+      "icir": 0.302,
+      "min_industry_stocks": null,
       "n_dates": 490,
       "n_days": 490,
-      "p_value": 5.329070518200751e-15,
-      "positive_ratio": 0.3816326530612245
+      "p_value": 2.042810365310288e-14,
+      "positive_ratio": 0.363265306122449
     },
     "raw": {
       "ic_mean": -0.036639,
@@ -85,8 +85,18 @@
   },
   "capital_flow_intensity_1d": {
     "neutral": {
-      "enabled": false,
-      "skipped_reason": "factor in INDUSTRY_NEUTRALIZE_EXCLUDED (industry-aggregated factor)"
+      "decay_level": "high",
+      "decay_rate": 0.350878,
+      "enabled": true,
+      "ic_mean": 0.001002,
+      "ic_std": 0.099665,
+      "ic_values_hash": "46ac42998bda6645",
+      "icir": 0.0101,
+      "min_industry_stocks": null,
+      "n_dates": 141,
+      "n_days": 141,
+      "p_value": 0.8937240953438919,
+      "positive_ratio": 0.5106382978723404
     },
     "raw": {
       "ic_mean": -0.001544,
@@ -103,8 +113,18 @@
   },
   "capital_flow_ratio_trend_1d": {
     "neutral": {
-      "enabled": false,
-      "skipped_reason": "factor in INDUSTRY_NEUTRALIZE_EXCLUDED (industry-aggregated factor)"
+      "decay_level": "inverse",
+      "decay_rate": -32.817057,
+      "enabled": true,
+      "ic_mean": -0.010214,
+      "ic_std": 0.113814,
+      "ic_values_hash": "6f9665ed12098cdf",
+      "icir": 0.0897,
+      "min_industry_stocks": null,
+      "n_dates": 140,
+      "n_days": 140,
+      "p_value": 0.2372612522821742,
+      "positive_ratio": 0.4142857142857143
     },
     "raw": {
       "ic_mean": -0.000302,
@@ -121,8 +141,18 @@
   },
   "industry_amplitude_trend_1d": {
     "neutral": {
-      "enabled": false,
-      "skipped_reason": "factor in INDUSTRY_NEUTRALIZE_EXCLUDED (industry-aggregated factor)"
+      "decay_level": "low",
+      "decay_rate": 0.070878,
+      "enabled": true,
+      "ic_mean": -0.000164,
+      "ic_std": 0.115719,
+      "ic_values_hash": "3a06ec37db9eb602",
+      "icir": 0.0014,
+      "min_industry_stocks": null,
+      "n_dates": 514,
+      "n_days": 514,
+      "p_value": 0.9731935369818212,
+      "positive_ratio": 0.5175097276264592
     },
     "raw": {
       "ic_mean": -0.000176,
@@ -139,26 +169,46 @@
   },
   "industry_earnings_growth_1d": {
     "neutral": {
-      "enabled": false,
-      "skipped_reason": "factor in INDUSTRY_NEUTRALIZE_EXCLUDED (industry-aggregated factor)"
-    },
-    "raw": {
-      "ic_mean": -0.000918,
-      "ic_std": 0.089288,
-      "ic_values_hash": "2b772b1220ca1f84",
-      "icir": 0.0103,
+      "decay_level": "high",
+      "decay_rate": 0.343176,
+      "enabled": true,
+      "ic_mean": -0.00079,
+      "ic_std": 0.095202,
+      "ic_values_hash": "9c2b08f1b570c594",
+      "icir": 0.0083,
+      "min_industry_stocks": null,
       "n_dates": 516,
       "n_days": 516,
-      "p_value": 0.8240036058195932,
+      "p_value": 0.8456377206568899,
+      "positive_ratio": 0.4844961240310077
+    },
+    "raw": {
+      "ic_mean": -0.001202,
+      "ic_std": 0.090166,
+      "ic_values_hash": "5b052cb3614e6447",
+      "icir": 0.0133,
+      "n_dates": 516,
+      "n_days": 516,
+      "p_value": 0.7829868919767189,
       "period_end": "2026-06-16",
       "period_start": "2024-04-29",
-      "positive_ratio": 0.5019
+      "positive_ratio": 0.4961
     }
   },
   "industry_momentum_5d_1d": {
     "neutral": {
-      "enabled": false,
-      "skipped_reason": "factor in INDUSTRY_NEUTRALIZE_EXCLUDED (industry-aggregated factor)"
+      "decay_level": "low",
+      "decay_rate": 0.209377,
+      "enabled": true,
+      "ic_mean": -0.013693,
+      "ic_std": 0.130545,
+      "ic_values_hash": "042fc1523590960b",
+      "icir": 0.1049,
+      "min_industry_stocks": null,
+      "n_dates": 511,
+      "n_days": 511,
+      "p_value": 0.014655295385920919,
+      "positive_ratio": 0.4657534246575342
     },
     "raw": {
       "ic_mean": -0.017319,
@@ -175,53 +225,83 @@
   },
   "industry_pe_trend_1d": {
     "neutral": {
-      "enabled": false,
-      "skipped_reason": "factor in INDUSTRY_NEUTRALIZE_EXCLUDED (industry-aggregated factor)"
-    },
-    "raw": {
-      "ic_mean": 0.001002,
-      "ic_std": 0.089762,
-      "ic_values_hash": "645521035dc2d0e4",
-      "icir": 0.0112,
+      "decay_level": "low",
+      "decay_rate": 0.107084,
+      "enabled": true,
+      "ic_mean": -0.001897,
+      "ic_std": 0.085082,
+      "ic_values_hash": "85c95a94f27243b7",
+      "icir": 0.0223,
+      "min_industry_stocks": null,
       "n_dates": 513,
       "n_days": 513,
-      "p_value": 0.807466722249568,
+      "p_value": 0.5993682450267115,
+      "positive_ratio": 0.4834307992202729
+    },
+    "raw": {
+      "ic_mean": 0.002125,
+      "ic_std": 0.088143,
+      "ic_values_hash": "500b533b8f902d2a",
+      "icir": 0.0241,
+      "n_dates": 513,
+      "n_days": 513,
+      "p_value": 0.6172226111537895,
       "period_end": "2026-06-16",
       "period_start": "2024-05-06",
-      "positive_ratio": 0.5146
+      "positive_ratio": 0.5049
     }
   },
   "industry_roe_trend_1d": {
     "neutral": {
-      "enabled": false,
-      "skipped_reason": "factor in INDUSTRY_NEUTRALIZE_EXCLUDED (industry-aggregated factor)"
-    },
-    "raw": {
-      "ic_mean": -0.007205,
-      "ic_std": 0.089089,
-      "ic_values_hash": "11a1e537952f67b3",
-      "icir": 0.0809,
+      "decay_level": "low",
+      "decay_rate": 0.277227,
+      "enabled": true,
+      "ic_mean": 0.001052,
+      "ic_std": 0.098772,
+      "ic_values_hash": "560576daf9279740",
+      "icir": 0.0107,
+      "min_industry_stocks": null,
       "n_dates": 515,
       "n_days": 515,
-      "p_value": 0.05154620410960553,
+      "p_value": 0.8005241450915492,
+      "positive_ratio": 0.5048543689320388
+    },
+    "raw": {
+      "ic_mean": 0.001456,
+      "ic_std": 0.095413,
+      "ic_values_hash": "ae4116bc1b9e6244",
+      "icir": 0.0153,
+      "n_dates": 515,
+      "n_days": 515,
+      "p_value": 0.7369632729868529,
       "period_end": "2026-06-16",
       "period_start": "2024-04-30",
-      "positive_ratio": 0.4699
+      "positive_ratio": 0.4893
     }
   },
   "industry_turnover_trend_1d": {
     "neutral": {
-      "enabled": false,
-      "skipped_reason": "factor in INDUSTRY_NEUTRALIZE_EXCLUDED (industry-aggregated factor)"
-    },
-    "raw": {
-      "ic_mean": -0.008794,
-      "ic_std": 0.101247,
-      "ic_values_hash": "fd7263c681a9ed3b",
-      "icir": 0.0869,
+      "decay_level": "inverse",
+      "decay_rate": -0.013778,
+      "enabled": true,
+      "ic_mean": -0.008911,
+      "ic_std": 0.100655,
+      "ic_values_hash": "bc425a3bf937e52c",
+      "icir": 0.0885,
+      "min_industry_stocks": null,
       "n_dates": 502,
       "n_days": 502,
-      "p_value": 0.05910348197593396,
+      "p_value": 0.05206420190689309,
+      "positive_ratio": 0.44223107569721115
+    },
+    "raw": {
+      "ic_mean": -0.00879,
+      "ic_std": 0.101255,
+      "ic_values_hash": "ee75ff24552cca12",
+      "icir": 0.0868,
+      "n_dates": 502,
+      "n_days": 502,
+      "p_value": 0.05927910021736582,
       "period_end": "2026-06-16",
       "period_start": "2024-05-22",
       "positive_ratio": 0.4442
@@ -230,17 +310,17 @@
   "intraday_intensity_1d": {
     "neutral": {
       "decay_level": "inverse",
-      "decay_rate": -0.04278,
+      "decay_rate": -0.04485,
       "enabled": true,
-      "ic_mean": -0.020832,
-      "ic_std": 0.093188,
-      "ic_values_hash": "45ddcf0e50ad65ce",
-      "icir": 0.2235,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.020873,
+      "ic_std": 0.08114,
+      "ic_values_hash": "d9fffbf93288b3f9",
+      "icir": 0.2572,
+      "min_industry_stocks": null,
       "n_dates": 509,
       "n_days": 509,
-      "p_value": 1.761559809132507e-08,
-      "positive_ratio": 0.4027504911591356
+      "p_value": 1.6619341458579129e-09,
+      "positive_ratio": 0.40078585461689586
     },
     "raw": {
       "ic_mean": -0.019977,
@@ -258,17 +338,17 @@
   "kdj_j_1d": {
     "neutral": {
       "decay_level": "high",
-      "decay_rate": 0.335163,
+      "decay_rate": 0.373733,
       "enabled": true,
-      "ic_mean": -0.014985,
-      "ic_std": 0.100325,
-      "ic_values_hash": "605c4f8216951119",
-      "icir": 0.1494,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.014115,
+      "ic_std": 0.089693,
+      "ic_values_hash": "4c0f508e8d336399",
+      "icir": 0.1574,
+      "min_industry_stocks": null,
       "n_dates": 501,
       "n_days": 501,
-      "p_value": 5.2116722649486746e-05,
-      "positive_ratio": 0.46107784431137727
+      "p_value": 2.86205307926668e-05,
+      "positive_ratio": 0.47704590818363274
     },
     "raw": {
       "ic_mean": -0.022539,
@@ -285,18 +365,18 @@
   },
   "ma5_deviation_1d": {
     "neutral": {
-      "decay_level": "low",
-      "decay_rate": 0.269072,
+      "decay_level": "high",
+      "decay_rate": 0.320426,
       "enabled": true,
-      "ic_mean": -0.018533,
-      "ic_std": 0.112367,
-      "ic_values_hash": "64ba5b0f533152d2",
-      "icir": 0.1649,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.017231,
+      "ic_std": 0.094847,
+      "ic_values_hash": "f29cb1df2f435579",
+      "icir": 0.1817,
+      "min_industry_stocks": null,
       "n_dates": 505,
       "n_days": 505,
-      "p_value": 9.736675517846294e-06,
-      "positive_ratio": 0.4316831683168317
+      "p_value": 9.635992367140744e-06,
+      "positive_ratio": 0.42376237623762375
     },
     "raw": {
       "ic_mean": -0.025356,
@@ -313,46 +393,46 @@
   },
   "momentum_strength_1d": {
     "neutral": {
-      "decay_level": "low",
-      "decay_rate": 0.222985,
+      "decay_level": "high",
+      "decay_rate": 0.31229,
       "enabled": true,
-      "ic_mean": -0.027423,
-      "ic_std": 0.10238,
-      "ic_values_hash": "ab84a5e48f97eeb5",
-      "icir": 0.2679,
-      "min_industry_stocks": 5,
-      "n_dates": 499,
-      "n_days": 499,
-      "p_value": 9.483525076348087e-13,
-      "positive_ratio": 0.3847695390781563
+      "ic_mean": -0.024952,
+      "ic_std": 0.087821,
+      "ic_values_hash": "00c2fe5e19dd5e33",
+      "icir": 0.2841,
+      "min_industry_stocks": null,
+      "n_dates": 504,
+      "n_days": 504,
+      "p_value": 4.711786516509164e-13,
+      "positive_ratio": 0.38293650793650796
     },
     "raw": {
-      "ic_mean": -0.035293,
-      "ic_std": 0.14523,
-      "ic_values_hash": "2755a6c133d1e312",
-      "icir": 0.243,
-      "n_dates": 506,
-      "n_days": 506,
-      "p_value": 1.1239076336266862e-10,
+      "ic_mean": -0.036283,
+      "ic_std": 0.147544,
+      "ic_values_hash": "e84baa75cdab01e4",
+      "icir": 0.2459,
+      "n_dates": 511,
+      "n_days": 511,
+      "p_value": 3.70430353058282e-11,
       "period_end": "2026-06-16",
-      "period_start": "2024-05-16",
-      "positive_ratio": 0.413
+      "period_start": "2024-05-09",
+      "positive_ratio": 0.4149
     }
   },
   "near_high_ratio_5_1d": {
     "neutral": {
       "decay_level": "high",
-      "decay_rate": 0.326136,
+      "decay_rate": 0.399665,
       "enabled": true,
-      "ic_mean": -0.018445,
-      "ic_std": 0.091846,
-      "ic_values_hash": "459baba679684438",
-      "icir": 0.2008,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.016432,
+      "ic_std": 0.082391,
+      "ic_values_hash": "f615113afcd4da14",
+      "icir": 0.1994,
+      "min_industry_stocks": null,
       "n_dates": 505,
       "n_days": 505,
-      "p_value": 4.2566711999647566e-07,
-      "positive_ratio": 0.44356435643564357
+      "p_value": 1.003141327782231e-06,
+      "positive_ratio": 0.43564356435643564
     },
     "raw": {
       "ic_mean": -0.027372,
@@ -370,17 +450,17 @@
   "overnight_ret_1d": {
     "neutral": {
       "decay_level": "inverse",
-      "decay_rate": -0.176698,
+      "decay_rate": -0.167207,
       "enabled": true,
-      "ic_mean": 0.02489,
-      "ic_std": 0.060822,
-      "ic_values_hash": "2af506a888d46326",
-      "icir": 0.4092,
-      "min_industry_stocks": 5,
+      "ic_mean": 0.024689,
+      "ic_std": 0.05858,
+      "ic_values_hash": "ac84a291346f849e",
+      "icir": 0.4215,
+      "min_industry_stocks": null,
       "n_dates": 508,
       "n_days": 508,
       "p_value": 0.0,
-      "positive_ratio": 0.6751968503937008
+      "positive_ratio": 0.687007874015748
     },
     "raw": {
       "ic_mean": 0.021152,
@@ -395,20 +475,48 @@
       "positive_ratio": 0.6214
     }
   },
+  "past_return_1d": {
+    "neutral": {
+      "decay_level": "high",
+      "decay_rate": 0.316678,
+      "enabled": true,
+      "ic_mean": -0.009678,
+      "ic_std": 0.087408,
+      "ic_values_hash": "fe553993c1c407d6",
+      "icir": 0.1107,
+      "min_industry_stocks": null,
+      "n_dates": 508,
+      "n_days": 508,
+      "p_value": 0.017231572380071558,
+      "positive_ratio": 0.4566929133858268
+    },
+    "raw": {
+      "ic_mean": -0.014164,
+      "ic_std": 0.146002,
+      "ic_values_hash": "72b4fe44d34fcfc3",
+      "icir": 0.097,
+      "n_dates": 515,
+      "n_days": 515,
+      "p_value": 0.01966224884098855,
+      "period_end": "2026-06-16",
+      "period_start": "2024-04-30",
+      "positive_ratio": 0.4505
+    }
+  },
   "past_return_1d_1d": {
     "neutral": {
       "decay_level": "high",
-      "decay_rate": 0.321793,
+      "decay_rate": 0.316678,
       "enabled": true,
-      "ic_mean": -0.009606,
-      "ic_std": 0.100027,
-      "ic_values_hash": "8fc37aded86a97e4",
-      "icir": 0.096,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.009678,
+      "ic_std": 0.087408,
+      "ic_values_hash": "fe553993c1c407d6",
+      "icir": 0.1107,
+      "min_industry_stocks": null,
       "n_dates": 508,
       "n_days": 508,
-      "p_value": 0.020941068863870704,
-      "positive_ratio": 0.4468503937007874
+      "p_value": 0.017231572380071558,
+      "positive_ratio": 0.4566929133858268
     },
     "raw": {
       "ic_mean": -0.014164,
@@ -426,17 +534,17 @@
   "positive_day_ratio_5_1d": {
     "neutral": {
       "decay_level": "low",
-      "decay_rate": 0.251664,
+      "decay_rate": 0.289064,
       "enabled": true,
-      "ic_mean": -0.021679,
-      "ic_std": 0.077283,
-      "ic_values_hash": "fa1a48a9e2de7e05",
-      "icir": 0.2805,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.020596,
+      "ic_std": 0.06727,
+      "ic_values_hash": "c63fc3897813c163",
+      "icir": 0.3062,
+      "min_industry_stocks": null,
       "n_dates": 504,
       "n_days": 504,
-      "p_value": 1.021405182655144e-14,
-      "positive_ratio": 0.373015873015873
+      "p_value": 8.881784197001252e-16,
+      "positive_ratio": 0.38095238095238093
     },
     "raw": {
       "ic_mean": -0.02897,
@@ -454,17 +562,17 @@
   "price_position_1d": {
     "neutral": {
       "decay_level": "inverse",
-      "decay_rate": -0.169593,
+      "decay_rate": -0.221116,
       "enabled": true,
-      "ic_mean": -0.018342,
-      "ic_std": 0.085036,
-      "ic_values_hash": "b4bf154ef63dc038",
-      "icir": 0.2157,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.01915,
+      "ic_std": 0.077038,
+      "ic_values_hash": "7d7b909d00bc2182",
+      "icir": 0.2486,
+      "min_industry_stocks": null,
       "n_dates": 509,
       "n_days": 509,
-      "p_value": 1.0552358276072482e-07,
-      "positive_ratio": 0.4086444007858546
+      "p_value": 4.021310839874559e-09,
+      "positive_ratio": 0.39096267190569745
     },
     "raw": {
       "ic_mean": -0.015682,
@@ -482,17 +590,17 @@
   "return_3d_1d": {
     "neutral": {
       "decay_level": "low",
-      "decay_rate": 0.245087,
+      "decay_rate": 0.299985,
       "enabled": true,
-      "ic_mean": -0.020442,
-      "ic_std": 0.110469,
-      "ic_values_hash": "1347445c9e6f56a4",
-      "icir": 0.185,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.018955,
+      "ic_std": 0.091268,
+      "ic_values_hash": "cf2eb9a0b5188abd",
+      "icir": 0.2077,
+      "min_industry_stocks": null,
       "n_dates": 506,
       "n_days": 506,
-      "p_value": 1.9825981478760468e-07,
-      "positive_ratio": 0.4308300395256917
+      "p_value": 1.440190144919029e-07,
+      "positive_ratio": 0.41699604743083
     },
     "raw": {
       "ic_mean": -0.027078,
@@ -509,18 +617,18 @@
   },
   "return_5d_1d": {
     "neutral": {
-      "decay_level": "low",
-      "decay_rate": 0.271893,
+      "decay_level": "high",
+      "decay_rate": 0.312973,
       "enabled": true,
-      "ic_mean": -0.024976,
-      "ic_std": 0.115169,
-      "ic_values_hash": "7ef56da5f582374c",
-      "icir": 0.2169,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.023567,
+      "ic_std": 0.098339,
+      "ic_values_hash": "2af10b51e8962388",
+      "icir": 0.2396,
+      "min_industry_stocks": null,
       "n_dates": 504,
       "n_days": 504,
-      "p_value": 2.6932780672339618e-08,
-      "positive_ratio": 0.39880952380952384
+      "p_value": 5.75286773774053e-09,
+      "positive_ratio": 0.3968253968253968
     },
     "raw": {
       "ic_mean": -0.034303,
@@ -538,16 +646,16 @@
   "rsi_1d": {
     "neutral": {
       "decay_level": "low",
-      "decay_rate": 0.233009,
+      "decay_rate": 0.256326,
       "enabled": true,
-      "ic_mean": -0.030356,
-      "ic_std": 0.106727,
-      "ic_values_hash": "ffa62c80b1727473",
-      "icir": 0.2844,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.029433,
+      "ic_std": 0.094353,
+      "ic_values_hash": "9352efb6fc2371e1",
+      "icir": 0.3119,
+      "min_industry_stocks": null,
       "n_dates": 509,
       "n_days": 509,
-      "p_value": 1.2212453270876722e-14,
+      "p_value": 8.881784197001252e-16,
       "positive_ratio": 0.37328094302554027
     },
     "raw": {
@@ -566,54 +674,54 @@
   "tail_price_position_1d": {
     "neutral": {
       "decay_level": "low",
-      "decay_rate": 0.210745,
+      "decay_rate": 0.26934,
       "enabled": true,
-      "ic_mean": -0.048778,
-      "ic_std": 0.047797,
-      "ic_values_hash": "7af66c000b948a2c",
-      "icir": 1.0205,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.032664,
+      "ic_std": 0.0463,
+      "ic_values_hash": "1ec00c82d20a2042",
+      "icir": 0.7055,
+      "min_industry_stocks": null,
       "n_dates": 23,
       "n_days": 23,
-      "p_value": 1.0331248798678416e-06,
-      "positive_ratio": 0.17391304347826086
+      "p_value": 0.00018208077917192256,
+      "positive_ratio": 0.2608695652173913
     },
     "raw": {
-      "ic_mean": -0.061802,
-      "ic_std": 0.074149,
-      "ic_values_hash": "481da139cd20c16c",
-      "icir": 0.8335,
+      "ic_mean": -0.044705,
+      "ic_std": 0.076134,
+      "ic_values_hash": "d3592740aa8b7303",
+      "icir": 0.5872,
       "n_dates": 23,
       "n_days": 23,
-      "p_value": 3.560354661402698e-05,
+      "p_value": 0.0021413316869096644,
       "period_end": "2026-06-16",
       "period_start": "2026-05-15",
-      "positive_ratio": 0.1304
+      "positive_ratio": 0.2609
     }
   },
   "tail_price_position_delta_1d": {
     "neutral": {
       "decay_level": "high",
-      "decay_rate": 0.337592,
+      "decay_rate": 0.393482,
       "enabled": true,
-      "ic_mean": -0.023258,
-      "ic_std": 0.046419,
-      "ic_values_hash": "06007cfd2cc77ea5",
-      "icir": 0.501,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.021357,
+      "ic_std": 0.044965,
+      "ic_values_hash": "e9cb1c2728691d6f",
+      "icir": 0.475,
+      "min_industry_stocks": null,
       "n_dates": 22,
       "n_days": 22,
-      "p_value": 0.006226597717165161,
-      "positive_ratio": 0.2727272727272727
+      "p_value": 0.006462511774930624,
+      "positive_ratio": 0.36363636363636365
     },
     "raw": {
-      "ic_mean": -0.035112,
-      "ic_std": 0.082208,
-      "ic_values_hash": "cb2a955fd9b1dfe8",
-      "icir": 0.4271,
+      "ic_mean": -0.035212,
+      "ic_std": 0.082111,
+      "ic_values_hash": "0a5c3c55fdfdcaec",
+      "icir": 0.4288,
       "n_dates": 22,
       "n_days": 22,
-      "p_value": 0.023208133826703614,
+      "p_value": 0.022899727458539187,
       "period_end": "2026-06-16",
       "period_start": "2026-05-18",
       "positive_ratio": 0.3636
@@ -622,17 +730,17 @@
   "tail_price_slope_1d": {
     "neutral": {
       "decay_level": "high",
-      "decay_rate": 0.305409,
+      "decay_rate": 0.429141,
       "enabled": true,
-      "ic_mean": -0.047352,
-      "ic_std": 0.097617,
-      "ic_values_hash": "dc79f6ae83a905d0",
-      "icir": 0.4851,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.038917,
+      "ic_std": 0.085984,
+      "ic_values_hash": "162ab055e171d1f8",
+      "icir": 0.4526,
+      "min_industry_stocks": null,
       "n_dates": 23,
       "n_days": 23,
-      "p_value": 0.015420696078214169,
-      "positive_ratio": 0.30434782608695654
+      "p_value": 0.029711471004974843,
+      "positive_ratio": 0.2608695652173913
     },
     "raw": {
       "ic_mean": -0.068173,
@@ -650,17 +758,17 @@
   "tail_price_volume_intensity_1d": {
     "neutral": {
       "decay_level": "high",
-      "decay_rate": 0.321958,
+      "decay_rate": 0.44006,
       "enabled": true,
-      "ic_mean": -0.04879,
-      "ic_std": 0.083232,
-      "ic_values_hash": "635c6899679d3e09",
-      "icir": 0.5862,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.040292,
+      "ic_std": 0.070807,
+      "ic_values_hash": "293f74fc972c9288",
+      "icir": 0.569,
+      "min_industry_stocks": null,
       "n_dates": 23,
       "n_days": 23,
-      "p_value": 0.008607781156715788,
-      "positive_ratio": 0.21739130434782608
+      "p_value": 0.012707699890516011,
+      "positive_ratio": 0.17391304347826086
     },
     "raw": {
       "ic_mean": -0.071958,
@@ -678,17 +786,17 @@
   "tail_volume_acceleration_1d": {
     "neutral": {
       "decay_level": "inverse",
-      "decay_rate": -0.441662,
+      "decay_rate": -0.202371,
       "enabled": true,
-      "ic_mean": -0.029757,
-      "ic_std": 0.037855,
-      "ic_values_hash": "33cf5b76100be738",
-      "icir": 0.7861,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.024818,
+      "ic_std": 0.038707,
+      "ic_values_hash": "9b32907624644ed4",
+      "icir": 0.6412,
+      "min_industry_stocks": null,
       "n_dates": 23,
       "n_days": 23,
-      "p_value": 1.6738943982019805e-05,
-      "positive_ratio": 0.17391304347826086
+      "p_value": 0.0024114208509706803,
+      "positive_ratio": 0.21739130434782608
     },
     "raw": {
       "ic_mean": -0.020641,
@@ -706,17 +814,17 @@
   "tail_volume_shrink_1d": {
     "neutral": {
       "decay_level": "high",
-      "decay_rate": 0.428515,
+      "decay_rate": 0.367275,
       "enabled": true,
-      "ic_mean": -0.005341,
-      "ic_std": 0.057069,
-      "ic_values_hash": "c58801183a3d1f09",
-      "icir": 0.0936,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.005914,
+      "ic_std": 0.050587,
+      "ic_values_hash": "2b0f0e6d90923b49",
+      "icir": 0.1169,
+      "min_industry_stocks": null,
       "n_dates": 23,
       "n_days": 23,
-      "p_value": 0.6027219403267932,
-      "positive_ratio": 0.4782608695652174
+      "p_value": 0.5624914722233787,
+      "positive_ratio": 0.5217391304347826
     },
     "raw": {
       "ic_mean": -0.009346,
@@ -733,27 +841,27 @@
   },
   "tail_volume_shrink_delta_1d": {
     "neutral": {
-      "decay_level": "low",
-      "decay_rate": 0.065023,
+      "decay_level": "inverse",
+      "decay_rate": -0.109343,
       "enabled": true,
-      "ic_mean": -0.013829,
-      "ic_std": 0.040683,
-      "ic_values_hash": "2ec555912ea3e885",
-      "icir": 0.3399,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.016497,
+      "ic_std": 0.038445,
+      "ic_values_hash": "089d7c3f0faad96c",
+      "icir": 0.4291,
+      "min_industry_stocks": null,
       "n_dates": 22,
       "n_days": 22,
-      "p_value": 0.0799663390782206,
+      "p_value": 0.021154694374426963,
       "positive_ratio": 0.3181818181818182
     },
     "raw": {
-      "ic_mean": -0.014791,
-      "ic_std": 0.052177,
-      "ic_values_hash": "4e2fdad2bf9d99c3",
-      "icir": 0.2835,
+      "ic_mean": -0.014871,
+      "ic_std": 0.052078,
+      "ic_values_hash": "1171e2670b590058",
+      "icir": 0.2855,
       "n_dates": 22,
       "n_days": 22,
-      "p_value": 0.147184260063842,
+      "p_value": 0.14547307778892038,
       "period_end": "2026-06-16",
       "period_start": "2026-05-18",
       "positive_ratio": 0.3636
@@ -762,54 +870,54 @@
   "turnover_surge_1d": {
     "neutral": {
       "decay_level": "low",
-      "decay_rate": 0.191221,
+      "decay_rate": 0.15794,
       "enabled": true,
-      "ic_mean": -0.024847,
-      "ic_std": 0.068742,
-      "ic_values_hash": "306f1ba5e6cf4f35",
-      "icir": 0.3614,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.025869,
+      "ic_std": 0.063248,
+      "ic_values_hash": "274951937d93e936",
+      "icir": 0.409,
+      "min_industry_stocks": null,
       "n_dates": 498,
       "n_days": 498,
       "p_value": 0.0,
-      "positive_ratio": 0.3473895582329317
+      "positive_ratio": 0.321285140562249
     },
     "raw": {
-      "ic_mean": -0.030722,
-      "ic_std": 0.095154,
-      "ic_values_hash": "719be317f01d6cdb",
+      "ic_mean": -0.030721,
+      "ic_std": 0.095155,
+      "ic_values_hash": "8c56227db4da4e76",
       "icir": 0.3229,
       "n_dates": 498,
       "n_days": 498,
-      "p_value": 1.9761969838327786e-14,
+      "p_value": 1.887379141862766e-14,
       "period_end": "2026-06-16",
       "period_start": "2024-05-28",
-      "positive_ratio": 0.3414
+      "positive_ratio": 0.3394
     }
   },
   "turnover_surge_delta_1d": {
     "neutral": {
       "decay_level": "low",
-      "decay_rate": 0.293004,
+      "decay_rate": 0.284727,
       "enabled": true,
-      "ic_mean": -0.006329,
-      "ic_std": 0.05575,
-      "ic_values_hash": "a571d0ac7f337e8b",
-      "icir": 0.1135,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.006408,
+      "ic_std": 0.048766,
+      "ic_values_hash": "4a5202f8ea26b2ba",
+      "icir": 0.1314,
+      "min_industry_stocks": null,
       "n_dates": 497,
       "n_days": 497,
-      "p_value": 0.0035590817925224005,
-      "positive_ratio": 0.45472837022132795
+      "p_value": 0.0008302475795347597,
+      "positive_ratio": 0.4426559356136821
     },
     "raw": {
-      "ic_mean": -0.008952,
-      "ic_std": 0.081947,
-      "ic_values_hash": "3bafc91092f188f0",
-      "icir": 0.1092,
+      "ic_mean": -0.008959,
+      "ic_std": 0.081946,
+      "ic_values_hash": "278e8cbc85db0ccf",
+      "icir": 0.1093,
       "n_dates": 497,
       "n_days": 497,
-      "p_value": 0.0070924493778088404,
+      "p_value": 0.007041842436669388,
       "period_end": "2026-06-16",
       "period_start": "2024-05-29",
       "positive_ratio": 0.4567
@@ -817,18 +925,18 @@
   },
   "volume_price_strength_1d": {
     "neutral": {
-      "decay_level": "high",
-      "decay_rate": 0.301256,
+      "decay_level": "low",
+      "decay_rate": 0.298199,
       "enabled": true,
-      "ic_mean": -0.018682,
-      "ic_std": 0.086243,
-      "ic_values_hash": "5f54e2a28c6e3505",
-      "icir": 0.2166,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.018763,
+      "ic_std": 0.075905,
+      "ic_values_hash": "b86bc83764d13e3b",
+      "icir": 0.2472,
+      "min_industry_stocks": null,
       "n_dates": 498,
       "n_days": 498,
-      "p_value": 1.2364532375741533e-07,
-      "positive_ratio": 0.40963855421686746
+      "p_value": 6.575092381666536e-08,
+      "positive_ratio": 0.39558232931726905
     },
     "raw": {
       "ic_mean": -0.026736,
@@ -846,17 +954,17 @@
   "volume_ratio_1d": {
     "neutral": {
       "decay_level": "low",
-      "decay_rate": 0.257577,
+      "decay_rate": 0.215556,
       "enabled": true,
-      "ic_mean": -0.025132,
-      "ic_std": 0.071729,
-      "ic_values_hash": "1e43e34540308fd6",
-      "icir": 0.3504,
-      "min_industry_stocks": 5,
+      "ic_mean": -0.026554,
+      "ic_std": 0.065724,
+      "ic_values_hash": "1e2d44dafa4f3e55",
+      "icir": 0.404,
+      "min_industry_stocks": null,
       "n_dates": 509,
       "n_days": 509,
       "p_value": 0.0,
-      "positive_ratio": 0.3477406679764244
+      "positive_ratio": 0.3280943025540275
     },
     "raw": {
       "ic_mean": -0.033851,
