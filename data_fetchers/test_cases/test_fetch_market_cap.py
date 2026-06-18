@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
-fetch_market_cap.py 纯函数测试（C2b 阶段）
+fetch_market_cap.py 测试（C2b + C2c）
 
 测试覆盖（详见 design.md §9）：
 - TC-U-01..03 load_target_assets：正常 / 缺 codes / 过滤 ST
 - TC-U-04..06 _normalize_fields：13 列 → 12 列 / 空 df / 缺必要字段
 - TC-U-07     _clip_to_target_range：闭区间裁剪
+- TC-U-08..12 fetch_one_stock：成功 / 重试成功 / 全失败 / 空区间裁剪
+- TC-U-13..15 fetch_batch：成功 / 失败率>50% / 空 symbols
 
 运行方式：
     pytest data_fetchers/test_cases/test_fetch_market_cap.py -v
 
 版本历史：
 - v1.0 (2026-06-18): C2b 三个纯函数单测
+- v1.1 (2026-06-18): C2c fetch_one_stock + fetch_batch 单测
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from unittest.mock import patch as mock_patch
 
 import pandas as pd
 import pytest
@@ -30,6 +34,8 @@ from data_fetchers.fetch_market_cap import (  # noqa: E402
     _OUTPUT_COLUMNS,
     _clip_to_target_range,
     _normalize_fields,
+    fetch_batch,
+    fetch_one_stock,
     load_target_assets,
 )
 
@@ -179,3 +185,190 @@ def test_clip_to_target_range_reversed_range(fake_em_df: pd.DataFrame) -> None:
     df = _normalize_fields(fake_em_df, symbol="000001")
     with pytest.raises(ValueError, match="起止逆序"):
         _clip_to_target_range(df, ("2024-03-20", "2024-03-18"))
+
+
+# ============================================================
+# TC-U-08..12: fetch_one_stock
+# ============================================================
+
+
+def test_fetch_one_stock_success(fake_em_df: pd.DataFrame) -> None:
+    """TC-U-08: 一次成功调用，返回归一化裁剪后的 12 列 DataFrame。"""
+    with (
+        mock_patch(
+            "data_fetchers.fetch_market_cap.ak.stock_value_em",
+            return_value=fake_em_df,
+        ),
+        mock_patch("data_fetchers.fetch_market_cap.time.sleep"),
+    ):
+        result = fetch_one_stock("000001", ("2024-03-18", "2024-03-20"))
+
+    assert result is not None
+    assert list(result.columns) == list(_OUTPUT_COLUMNS)
+    assert len(result) == 3
+    assert (result["asset"] == "000001").all()
+
+
+def test_fetch_one_stock_retry_then_success(fake_em_df: pd.DataFrame) -> None:
+    """TC-U-09: 第一次失败，第二次成功，最终返回 DataFrame。"""
+    call_log = {"calls": 0}
+
+    def _flaky(symbol: str) -> pd.DataFrame:
+        call_log["calls"] += 1
+        if call_log["calls"] == 1:
+            raise ConnectionError("simulated network failure")
+        return fake_em_df
+
+    with (
+        mock_patch(
+            "data_fetchers.fetch_market_cap.ak.stock_value_em",
+            side_effect=_flaky,
+        ),
+        mock_patch("data_fetchers.fetch_market_cap.time.sleep"),
+    ):
+        result = fetch_one_stock("000001", ("2024-03-18", "2024-03-20"), max_retries=3)
+
+    assert result is not None
+    assert len(result) == 3
+    assert call_log["calls"] == 2
+
+
+def test_fetch_one_stock_all_retries_fail() -> None:
+    """TC-U-10: 全部重试失败，返回 None（决策 E1：skip + warning）。"""
+    with (
+        mock_patch(
+            "data_fetchers.fetch_market_cap.ak.stock_value_em",
+            side_effect=ConnectionError("persistent failure"),
+        ),
+        mock_patch("data_fetchers.fetch_market_cap.time.sleep"),
+    ):
+        result = fetch_one_stock("000001", ("2024-03-18", "2024-03-20"), max_retries=3)
+
+    assert result is None
+
+
+def test_fetch_one_stock_clip_drops_out_of_range(fake_em_df: pd.DataFrame) -> None:
+    """TC-U-11: target_date_range 之外的日期被裁掉，返回空 DataFrame。"""
+    with (
+        mock_patch(
+            "data_fetchers.fetch_market_cap.ak.stock_value_em",
+            return_value=fake_em_df,
+        ),
+        mock_patch("data_fetchers.fetch_market_cap.time.sleep"),
+    ):
+        result = fetch_one_stock("000001", ("2025-01-01", "2025-12-31"))
+
+    assert result is not None
+    assert len(result) == 0
+    assert list(result.columns) == list(_OUTPUT_COLUMNS)
+
+
+def test_fetch_one_stock_value_error_no_retry(fake_em_df: pd.DataFrame) -> None:
+    """TC-U-12: _normalize_fields 抛 ValueError 也走重试逻辑（不区分错误类型）。"""
+    bad_df = fake_em_df.drop(columns=["流通市值"])
+    with (
+        mock_patch(
+            "data_fetchers.fetch_market_cap.ak.stock_value_em",
+            return_value=bad_df,
+        ),
+        mock_patch("data_fetchers.fetch_market_cap.time.sleep"),
+    ):
+        result = fetch_one_stock("000001", ("2024-03-18", "2024-03-20"), max_retries=2)
+
+    # 字段缺失是结构问题，重试无效，最终返回 None
+    assert result is None
+
+
+# ============================================================
+# TC-U-13..15: fetch_batch
+# ============================================================
+
+
+def test_fetch_batch_all_success(fake_em_df: pd.DataFrame) -> None:
+    """TC-U-13: 一批 3 只全成功，merged DataFrame 行数 = 3 × 3 = 9。"""
+    with (
+        mock_patch(
+            "data_fetchers.fetch_market_cap.ak.stock_value_em",
+            return_value=fake_em_df,
+        ),
+        mock_patch("data_fetchers.fetch_market_cap.time.sleep"),
+    ):
+        df, success, fail = fetch_batch(
+            ["000001", "000002", "600000"],
+            batch_idx=1,
+            total_batches=1,
+            target_date_range=("2024-03-18", "2024-03-20"),
+            max_workers=2,
+        )
+
+    assert df is not None
+    assert success == 3
+    assert fail == 0
+    assert len(df) == 9
+    assert set(df["asset"].unique()) == {"000001", "000002", "600000"}
+
+
+def test_fetch_batch_high_failure_rate() -> None:
+    """TC-U-14: 单批失败率 > 50%（4 中 3 失败）触发批次失败信号（df=None）。"""
+    fake_df = pd.DataFrame(
+        {
+            "数据日期": ["2024-03-18"],
+            "当日收盘价": [10.0],
+            "当日涨跌幅": [0.0],
+            "总市值": [1.0e10],
+            "流通市值": [8.0e9],
+            "总股本": [1_000_000_000],
+            "流通股本": [800_000_000],
+            "PE(TTM)": [12.0],
+            "PE(静)": [12.0],
+            "市净率": [1.5],
+            "PEG值": [0.8],
+            "市现率": [9.0],
+            "市销率": [2.5],
+        }
+    )
+
+    call_log = {"calls": 0}
+
+    def _mostly_fail(symbol: str) -> pd.DataFrame:
+        call_log["calls"] += 1
+        # 只有 000001 成功，其他全失败
+        if symbol == "000001":
+            return fake_df
+        raise ConnectionError(f"sim fail {symbol}")
+
+    with (
+        mock_patch(
+            "data_fetchers.fetch_market_cap.ak.stock_value_em",
+            side_effect=_mostly_fail,
+        ),
+        mock_patch("data_fetchers.fetch_market_cap.time.sleep"),
+    ):
+        df, success, fail = fetch_batch(
+            ["000001", "000002", "000003", "000004"],
+            batch_idx=1,
+            total_batches=1,
+            target_date_range=("2024-03-18", "2024-03-20"),
+            max_workers=2,
+        )
+
+    # 失败率 75% > 50% → df 应为 None
+    assert df is None
+    assert success == 1
+    assert fail == 3
+
+
+def test_fetch_batch_empty_symbols() -> None:
+    """TC-U-15: 空 symbols 列表直接返回空 DataFrame。"""
+    df, success, fail = fetch_batch(
+        [],
+        batch_idx=1,
+        total_batches=1,
+        target_date_range=("2024-03-18", "2024-03-20"),
+    )
+
+    assert df is not None
+    assert len(df) == 0
+    assert success == 0
+    assert fail == 0
+    assert list(df.columns) == list(_OUTPUT_COLUMNS)

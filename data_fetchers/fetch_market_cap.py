@@ -30,10 +30,14 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
+import akshare as ak
 import pandas as pd
 
 
@@ -297,8 +301,61 @@ def fetch_one_stock(
     max_retries: int = MAX_RETRIES,
     logger_arg: logging.Logger | None = None,
 ) -> pd.DataFrame | None:
-    """单股市值数据拉取（详见 design.md §3.2 F3 / §5.3）。"""
-    raise NotImplementedError("C2c 实现")
+    """单股市值数据拉取（详见 design.md §3.2 F3 / §5.3）。
+
+    流程:
+        1. 调用 ``ak.stock_value_em(symbol=...)`` 获取 13 列原始 DataFrame
+        2. ``_normalize_fields`` → 12 列英文
+        3. ``_clip_to_target_range`` 裁剪到目标区间
+        4. 失败时指数退避重试（默认 3 次）
+
+    Args:
+        symbol: 6 位股票代码。
+        target_date_range: ``(start_iso, end_iso)`` 闭区间。
+        max_retries: 最大重试次数（含首次调用，遵循 design.md §8.4）。
+        logger_arg: 日志记录器。
+
+    Returns:
+        归一化 + 裁剪后的 12 列 DataFrame；所有重试均失败时返回 None。
+    """
+    log = logger_arg if logger_arg is not None else logger
+
+    last_exc: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            df_raw = ak.stock_value_em(symbol=symbol)
+            df_norm = _normalize_fields(df_raw, symbol=symbol)
+            df_clipped = _clip_to_target_range(df_norm, target_date_range)
+            if attempt > 0:
+                log.info("symbol=%s 重试成功（第 %d 次尝试）", symbol, attempt + 1)
+            time.sleep(REQUEST_INTERVAL)
+            return df_clipped
+        except Exception as exc:  # noqa: BLE001 — 网络/解析异常种类多样，统一捕获 + 重试
+            last_exc = exc
+            if attempt < max_retries - 1:
+                # 指数退避 + 抖动（design.md §8.4）
+                delay = RETRY_BACKOFF_BASE * (2**attempt)
+                jitter = random.uniform(0, 0.1 * delay)
+                log.warning(
+                    "symbol=%s 第 %d 次失败: %s，%.2fs 后重试",
+                    symbol,
+                    attempt + 1,
+                    exc,
+                    delay + jitter,
+                )
+                time.sleep(delay + jitter)
+            else:
+                log.error(
+                    "symbol=%s 重试 %d 次后仍失败，跳过: %s",
+                    symbol,
+                    max_retries,
+                    exc,
+                )
+
+    # 全部重试耗尽（决策 E1：skip + warning，不抛异常）
+    if last_exc is not None:
+        log.warning("symbol=%s 最终放弃（%s）", symbol, type(last_exc).__name__)
+    return None
 
 
 def fetch_batch(
@@ -309,8 +366,84 @@ def fetch_batch(
     max_workers: int = MAX_WORKERS,
     logger_arg: logging.Logger | None = None,
 ) -> tuple[pd.DataFrame | None, int, int]:
-    """批量拉取一组股票（详见 design.md §3.2 F4 / §5.2）。"""
-    raise NotImplementedError("C2c 实现")
+    """批量拉取一组股票（详见 design.md §3.2 F4 / §5.2）。
+
+    使用 ``ThreadPoolExecutor`` 并发调用 ``fetch_one_stock``，按 symbol 收集结果。
+    单批失败率超过 50% 视为批次失败（返回 None），由调用方决定是否中止。
+
+    Args:
+        symbols: 本批 symbol 列表（≤ BATCH_SIZE）。
+        batch_idx: 批次索引（1-based，用于日志）。
+        total_batches: 总批次数。
+        target_date_range: 目标日期区间。
+        max_workers: 并发线程数（决策 F2）。
+        logger_arg: 日志记录器。
+
+    Returns:
+        ``(df_or_None, success_count, fail_count)``：
+            - 成功结果合并后的 DataFrame（任一行返回非空即合入）；
+            - 单批失败率 > 50% 时 df 设为 None（触发批次中止信号）。
+    """
+    log = logger_arg if logger_arg is not None else logger
+    n = len(symbols)
+    if n == 0:
+        return pd.DataFrame(columns=list(_OUTPUT_COLUMNS)), 0, 0
+
+    log.info(
+        "批次 %d/%d 开始: %d 只股票（max_workers=%d）",
+        batch_idx,
+        total_batches,
+        n,
+        max_workers,
+    )
+
+    success_dfs: list[pd.DataFrame] = []
+    success_cnt = 0
+    fail_cnt = 0
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_symbol = {
+            executor.submit(fetch_one_stock, sym, target_date_range, MAX_RETRIES, log): sym for sym in symbols
+        }
+        for future in as_completed(future_to_symbol):
+            sym = future_to_symbol[future]
+            try:
+                df = future.result()
+            except Exception as exc:  # noqa: BLE001
+                log.error("symbol=%s future 异常: %s", sym, exc)
+                fail_cnt += 1
+                continue
+
+            if df is None or df.empty:
+                fail_cnt += 1
+            else:
+                success_dfs.append(df)
+                success_cnt += 1
+
+    fail_rate = fail_cnt / n if n > 0 else 0.0
+    log.info(
+        "批次 %d/%d 完成: 成功=%d, 失败=%d, 失败率=%.2f%%",
+        batch_idx,
+        total_batches,
+        success_cnt,
+        fail_cnt,
+        fail_rate * 100,
+    )
+
+    # 单批失败率 > 50% 触发批次失败信号（design.md §8.3）
+    if fail_rate > 0.5:
+        log.error(
+            "批次 %d 失败率 %.2f%% > 50%%，标记批次失败",
+            batch_idx,
+            fail_rate * 100,
+        )
+        return None, success_cnt, fail_cnt
+
+    if not success_dfs:
+        return pd.DataFrame(columns=list(_OUTPUT_COLUMNS)), success_cnt, fail_cnt
+
+    merged = pd.concat(success_dfs, ignore_index=True)
+    return merged, success_cnt, fail_cnt
 
 
 def save_batch_cache(
