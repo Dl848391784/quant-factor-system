@@ -10,6 +10,9 @@
         → 排除优先于用户参数（design.md §5.3.2 优先级 #1）
   R15d: case_residual_zero — 残差全 0 时 neutral_ic ≈ 0，decay_rate≈1.0 → 'high'
   R15e: case_other_industry_excluded — '其他' 行业按 D6 决策剔除，回归仅基于剩余行业
+  R15f: case_factor_col_nan_dropped — factor_col 含 NaN 时不再 "computation failed: Input y contains NaN."
+        而是显式 dropna 后正常返回 enabled=True payload
+        （industry_neutralization_flow.md §5.3 follow-up 闭环 2026-06-18）
 
 策略：
   - 不依赖真实数据缓存，构造小型 DataFrame 直接调用 _compute_industry_neutral_ic
@@ -128,7 +131,9 @@ def test_r15d_factor_constant_within_industry_decay_high():
             # 因子 = 纯行业值（行业内常数）
             rows_factor.append({"date": d, "asset": a, "ind_const_factor": industries[ind]})
             # 收益与因子相关（用于 raw IC > 0）
-            rows_return.append({"date": d, "asset": a, "forward_return_1d": 0.001 * industries[ind] + np.random.normal(0, 0.005)})
+            rows_return.append(
+                {"date": d, "asset": a, "forward_return_1d": 0.001 * industries[ind] + np.random.normal(0, 0.005)}
+            )
 
     factor_df = pd.DataFrame(rows_factor)
     return_df = pd.DataFrame(rows_return)
@@ -209,3 +214,80 @@ def test_r15e_other_industry_excluded_from_residual():
     assert payload["n_days"] >= 5
     # 既然剔了'其他'，残差不应等于 raw（其他被剔后的回归结果与含其他不同）
     # 此处只验证流程未失败（残差行数 < raw 行数已在 logger info 输出验证）
+
+
+# ---------------------------------------------------------------------------
+# R15f: factor_col 含 NaN → 显式 dropna 后中性化正常完成（不再 computation failed）
+# ---------------------------------------------------------------------------
+
+
+def test_r15f_factor_col_nan_rows_dropped_before_regression():
+    """factor_col 含 NaN 时不再触发 sklearn `Input y contains NaN.`。
+
+    背景: industry_neutralization_flow.md §5.3 follow-up（2026-06-18 实证闭环）
+        - 复杂因子（custom_factor_calculation 在 data_loader dropna 之后才生成 factor_col）
+          首日/防御场景天然写入 NaN（实证 overnight_ret 2225 NaN 行 / 58 个日期）
+        - sklearn LinearRegression.fit 默认 force_all_finite=True → ValueError → 外层 except
+          降级 enabled=False / skipped_reason="computation failed: Input y contains NaN."
+        - 修复: _compute_industry_neutral_ic Step 2.6 在调 industry_neutral_residual 前
+          显式 dropna(subset=[factor_col])（与 raw IC 路径 ic_calculator 内部 dropna 对齐）
+
+    构造: 14 只股票 × 5 天，每个行业首日 factor_col=NaN（模拟 overnight_ret 首日场景）。
+    断言: payload["enabled"] 字段不存在（=正常 enabled=True 路径），n_days≈5，
+          ic_mean / ic_std / icir 均为有限值，未触发 computation failed 降级。
+    """
+    from factor_ic.common.factor_ic_runner import _compute_industry_neutral_ic
+    from factor_ic.common.logger_config import get_logger
+
+    np.random.seed(42)
+    dates = pd.date_range("2026-01-01", periods=5, freq="D").strftime("%Y-%m-%d").tolist()
+    industry_assets = {
+        "银行": [f"1{i:05d}.SH" for i in range(1, 8)],
+        "钢铁": [f"2{i:05d}.SH" for i in range(1, 8)],
+    }
+    asset_to_industry = {a: ind for ind, assets in industry_assets.items() for a in assets}
+    all_assets = list(asset_to_industry.keys())
+
+    rows_factor, rows_return = [], []
+    for d_idx, d in enumerate(dates):
+        for a in all_assets:
+            # 模拟首日 NaN（与 calculate_overnight_return 首日 shift(1)→NaN 行为一致）
+            factor_val = np.nan if d_idx == 0 else np.random.normal(0, 1)
+            rows_factor.append({"date": d, "asset": a, "test_factor": factor_val})
+            rows_return.append({"date": d, "asset": a, "forward_return_1d": np.random.normal(0, 0.01)})
+
+    factor_df = pd.DataFrame(rows_factor)
+    return_df = pd.DataFrame(rows_return)
+    fake_industry_map = {a: {"industry": asset_to_industry[a]} for a in all_assets}
+
+    nan_input = int(factor_df["test_factor"].isna().sum())
+    assert nan_input == len(all_assets), f"构造失败：首日应有 {len(all_assets)} 个 NaN，实得 {nan_input}"
+
+    with patch("data_fetchers.fetch_industry.get_industry_map", return_value=fake_industry_map):
+        # 修复前此调用会被外层 except 捕获 → 抛 RuntimeError 让 runner 降级；
+        # 修复后内部 dropna 把 NaN 行剔掉，正常返回 13 字段 payload。
+        payload = _compute_industry_neutral_ic(
+            factor_df=factor_df,
+            return_df=return_df,
+            factor_col="test_factor",
+            return_col="forward_return_1d",
+            min_stocks=5,
+            neutralize_min_industry_stocks=5,
+            raw_ic_mean=0.05,
+            logger=get_logger("test_r15f"),
+        )
+
+    # 关键断言：payload 是 enabled=True 路径产物（含 ic_mean/dates 等），不是降级 schema
+    assert "enabled" not in payload, (
+        f"_compute_industry_neutral_ic 应直接返回 enabled=True payload（不含 enabled 字段，由调用方拼装），"
+        f"实得 {payload!r}"
+    )
+    assert "ic_mean" in payload and payload["ic_mean"] is not None, "ic_mean 应为有限值"
+    assert "dates" in payload and len(payload["dates"]) >= 4, (
+        f"首日 NaN 被剔后应至少剩 4 天 IC（首日 factor 全 NaN 不参与回归），实得 {len(payload['dates'])} 天"
+    )
+    assert payload["n_days"] >= 4
+    # 防回归：不应再走降级路径
+    assert "skipped_reason" not in payload, (
+        f"修复后 NaN 不应触发 computation failed 降级，实得 skipped_reason={payload.get('skipped_reason')!r}"
+    )

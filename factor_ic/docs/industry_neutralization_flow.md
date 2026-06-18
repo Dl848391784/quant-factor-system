@@ -254,10 +254,14 @@ except RuntimeError as exc:
 
 ### 5.3 已知 follow-up
 
-`overnight_ret_1d` 在 R20 实测中触发场景 #4，根因待排查（独立 follow-up，不在 R22 范围）：
-- 假设 1：`industry_neutral_residual` 函数 dropna 不彻底
-- 假设 2：上游因子计算输出含 NaN，merge 后行业列正常但因子列含 NaN
-- 验证方向：`assert not np.isnan(y).any()` + 逐步排查
+✅ **2026-06-18 闭环（云瑶）**：`overnight_ret_1d` 在 R20 实测中触发场景 #4，根因落地为**假设 2**：
+
+- **现象**：`ic_neutral_industry.skipped_reason = "computation failed: Input y contains NaN."`，外层 except 把 ic_neutral_industry 整体降级为 `enabled=False`。
+- **根因链**：`factor_ic/common/data_loader.py:286` 仅按 load 时的 `factor_cols=['date','asset','open','close']` 做 dropna，此时 `overnight_ret` 列还不存在；`factor_ic/common/factor_ic_runner.py:516` 在 dropna **之后**才执行 `custom_factor_calculation = calculate_overnight_return`，按规范在以下场景写入 NaN：每只股票首日（`groupby('asset').close.shift(1)`）、`|prev_close| < EPSILON`、`prev_close < 0` 防御。raw IC 路径靠 `ic_calculator.calculate_ic_with_direction_verification` 第 184 行 `merged.dropna(subset=[factor_col, return_col])` 兜底；中性化路径之前**没有同等兜底**，把 NaN 直接喂进 `LinearRegression.fit`（默认 `force_all_finite=True`）→ sklearn 抛 `ValueError: Input y contains NaN.`。
+- **实证数据**（`temporary/probe_overnight_neutral_nan.py`，2026-06-18）：`overnight_ret` 计算后 NaN 3026 行 / 1,491,862（0.20%），分布于 85 / 544 个交易日；剔除"其他"行业后仍残留 2225 NaN 行 / 58 个日期；`industry` 列 NaN 数为 0（行业 merge 100% 命中，**不是元凶**）。
+- **修复**：`_compute_industry_neutral_ic` Step 2.6 在调 `industry_neutral_residual` 之前显式 `factor_df_filtered = factor_df_filtered.dropna(subset=[factor_col])`，与 raw IC 路径兜底对齐；同步纠正 Step 2.5 误导注释（区分"行业列 NaN"vs"因子值列 NaN"，前者由 `industry_neutral_residual` 内部 `groupby(industry_col)` 自动跳过，后者必须显式 dropna）。
+- **测试**：`factor_ic/test_cases/test_factor_ic_runner_neutralize.py::test_r15f_factor_col_nan_rows_dropped_before_regression`（构造首日 factor=NaN 场景，回退修复后必然抛 `Input y contains NaN.`，已实测验证）。
+- **回归影响**：复杂因子家族（custom_factor_calculation 在 data_loader dropna 之后才生成 factor_col：overnight_ret / kdj_j / bollinger_pb / 其他 first-N 天会产生 NaN 的因子）共享同一兜底，未来新增同类因子免疫。
 
 ---
 

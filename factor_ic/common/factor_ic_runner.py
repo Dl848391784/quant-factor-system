@@ -194,11 +194,29 @@ def _compute_industry_neutral_ic(
 
     # Step 2.5: 剔除 '其他' 行业（design.md §3.3 / D6 决策）
     #   - '其他' 是申万一级里的混杂桶（含申万二级码 220901/280203 等），不应作为独立行业回归
-    #   - NaN（未知 asset）不需手动剔除：industry_neutral_residual 内部 groupby 自动跳过
+    #   - industry 列为 NaN（未匹配 asset）不需手动剔除：industry_neutral_residual 内部
+    #     groupby(industry_col) 会跳过 NaN 分组（pandas 默认 dropna=True 行为）
     before = len(factor_df_with_industry)
     factor_df_filtered = factor_df_with_industry[factor_df_with_industry["industry"] != "其他"].copy()
     other_dropped = before - len(factor_df_filtered)
     logger.info("[neutralize] '其他' 行业剔除: %d 行（剩余 %d 行）", other_dropped, len(factor_df_filtered))
+
+    # Step 2.6: 剔除 factor_col 为 NaN 的行（industry_neutralization_flow.md §5.3 follow-up 闭环 2026-06-18）
+    #   - sklearn LinearRegression.fit 默认 force_all_finite=True，y 含 NaN 直接抛 ValueError，
+    #     被外层 except 降级为 enabled=False / skipped_reason="computation failed: Input y contains NaN."
+    #   - raw IC 路径在 ic_calculator.calculate_ic_with_direction_verification 内部已有 dropna 兜底，
+    #     中性化路径必须显式 dropna 与之对齐，否则首日/停牌等天然 NaN 行会让中性化整体失败
+    #   - 复杂因子（custom_factor_calculation 在 data_loader dropna 之后才生成 factor_col）尤其受影响：
+    #     overnight_ret 首日 + |prev_close|<EPSILON / prev_close<0 防御场景实测产生 2225 NaN 行 / 58 个日期
+    before_nan = len(factor_df_filtered)
+    factor_df_filtered = factor_df_filtered.dropna(subset=[factor_col])
+    nan_dropped = before_nan - len(factor_df_filtered)
+    logger.info(
+        "[neutralize] %s NaN 剔除: %d 行（剩余 %d 行）",
+        factor_col,
+        nan_dropped,
+        len(factor_df_filtered),
+    )
 
     # Step 3: 求残差因子
     residual_df = industry_neutral_residual(
