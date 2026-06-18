@@ -24,6 +24,8 @@ results/
 output/
 **/result/
 *.json
+# 例外：测试快照 baseline 必须入版本控制（design.md P1.6 hard gate）
+!factor_ic/test_cases/snapshots/*.json
 
 # Logs
 *.log
