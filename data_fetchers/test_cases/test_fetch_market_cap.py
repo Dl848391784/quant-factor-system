@@ -34,9 +34,11 @@ from data_fetchers.fetch_market_cap import (  # noqa: E402
     _OUTPUT_COLUMNS,
     _clip_to_target_range,
     _normalize_fields,
+    _read_factor_data_date_range,
     fetch_batch,
     fetch_one_stock,
     load_target_assets,
+    save_batch_cache,
 )
 
 
@@ -372,3 +374,68 @@ def test_fetch_batch_empty_symbols() -> None:
     assert success == 0
     assert fail == 0
     assert list(df.columns) == list(_OUTPUT_COLUMNS)
+
+
+# ============================================================
+# TC-U-16..18: save_batch_cache + _read_factor_data_date_range
+# ============================================================
+
+
+def test_save_batch_cache_atomic_write(tmp_path: Path, fake_em_df: pd.DataFrame) -> None:
+    """TC-U-16: 落盘后文件存在，结构含 batch_idx/n_rows/n_assets/data。"""
+    df = _normalize_fields(fake_em_df, symbol="000001")
+    cache_path = save_batch_cache(batch_idx=7, df=df, result_dir=tmp_path)
+
+    assert cache_path.exists()
+    assert cache_path.name == "market_cap_batch_0007.json.gz"
+
+    import gzip as _gzip
+
+    with _gzip.open(cache_path, "rt", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    assert payload["batch_idx"] == 7
+    assert payload["n_rows"] == 3
+    assert payload["n_assets"] == 1
+    assert len(payload["data"]) == 3
+    assert payload["data"][0]["asset"] == "000001"
+    # 落盘列顺序保留
+    assert list(payload["data"][0].keys()) == list(_OUTPUT_COLUMNS)
+
+
+def test_save_batch_cache_empty_df_skipped(tmp_path: Path) -> None:
+    """TC-U-17: 空 df 不落盘，返回 Path('')。"""
+    empty = pd.DataFrame(columns=list(_OUTPUT_COLUMNS))
+    result = save_batch_cache(batch_idx=1, df=empty, result_dir=tmp_path)
+
+    assert result == Path("")
+    # 临时目录应该为空（不写半文件）
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_read_factor_data_date_range(tmp_path: Path) -> None:
+    """TC-U-18: 读取 factor_data.json.gz meta.date_range，返回 (start, end)。"""
+    import gzip as _gzip
+
+    fake_payload = {
+        "meta": {
+            "date_range": {"start": "2024-03-18", "end": "2026-06-17"},
+            "n_days": 545,
+            "n_assets": 3026,
+        },
+        "data": [],
+    }
+    fake_file = tmp_path / "factor_data.json.gz"
+    with _gzip.open(fake_file, "wt", encoding="utf-8") as f:
+        json.dump(fake_payload, f)
+
+    start, end = _read_factor_data_date_range(factor_data_file=fake_file)
+    assert start == "2024-03-18"
+    assert end == "2026-06-17"
+
+
+def test_read_factor_data_date_range_missing_file(tmp_path: Path) -> None:
+    """TC-U-18b: 文件不存在抛 FileNotFoundError。"""
+    nonexistent = tmp_path / "missing.json.gz"
+    with pytest.raises(FileNotFoundError, match="factor_data 文件不存在"):
+        _read_factor_data_date_range(factor_data_file=nonexistent)

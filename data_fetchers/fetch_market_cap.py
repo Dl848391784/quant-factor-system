@@ -28,10 +28,12 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import random
 import sys
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -446,14 +448,94 @@ def fetch_batch(
     return merged, success_cnt, fail_cnt
 
 
+def _read_factor_data_date_range(
+    factor_data_file: Path | None = None,
+    logger_arg: logging.Logger | None = None,
+) -> tuple[str, str]:
+    """读取 factor_data.json.gz 的 ``meta.date_range`` 作为目标日期区间。
+
+    Args:
+        factor_data_file: factor_data.json.gz 路径，None 时使用 FACTOR_DATA_FILE。
+        logger_arg: 日志记录器。
+
+    Returns:
+        ``(start_iso, end_iso)``，闭区间。
+
+    Raises:
+        FileNotFoundError: factor_data.json.gz 不存在（上游未跑 fetch_factor_cache）。
+        KeyError: meta.date_range 字段缺失。
+    """
+    log = logger_arg if logger_arg is not None else logger
+    target = factor_data_file if factor_data_file is not None else FACTOR_DATA_FILE
+
+    if not target.exists():
+        raise FileNotFoundError(f"factor_data 文件不存在: {target}（请先运行 fetch_factor_cache.py）")
+
+    with gzip.open(target, "rt", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    meta = payload.get("meta", {})
+    date_range = meta.get("date_range")
+    if not date_range or "start" not in date_range or "end" not in date_range:
+        raise KeyError(f"factor_data.json.gz meta.date_range 字段缺失或不完整，实际: {date_range}")
+
+    start, end = date_range["start"], date_range["end"]
+    log.info("从 factor_data 读取目标区间: [%s, %s]", start, end)
+    return start, end
+
+
 def save_batch_cache(
     batch_idx: int,
     df: pd.DataFrame,
     result_dir: Path | None = None,
     logger_arg: logging.Logger | None = None,
 ) -> Path:
-    """落盘单批次缓存（详见 design.md §3.1 F5）。"""
-    raise NotImplementedError("C2d 实现")
+    """落盘单批次缓存（详见 design.md §3.1 F5）。
+
+    用 tempfile + Path.replace 实现原子写（避免半文件污染下游合并阶段，
+    模板见 fetch_turnover.py:798-806）。
+
+    Args:
+        batch_idx: 批次索引（1-based），用作文件名 ``market_cap_batch_<idx>.json.gz``。
+        df: 12 列归一化后 DataFrame；若空则不落盘，返回空路径。
+        result_dir: 输出目录，None 时使用 RESULT_DIR。
+        logger_arg: 日志记录器。
+
+    Returns:
+        缓存文件路径；df 为空时返回 ``Path('')``。
+    """
+    log = logger_arg if logger_arg is not None else logger
+    target_dir = result_dir if result_dir is not None else RESULT_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    if df is None or df.empty:
+        log.warning("批次 %d 为空，跳过落盘", batch_idx)
+        return Path("")
+
+    cache_file = target_dir / f"market_cap_batch_{batch_idx:04d}.json.gz"
+
+    payload = {
+        "batch_idx": batch_idx,
+        "n_rows": len(df),
+        "n_assets": int(df["asset"].nunique()),
+        "data": df.to_dict(orient="records"),
+    }
+
+    # 原子写（tempfile + Path.replace，遵循 AGENTS.md 规则 #2）
+    with tempfile.NamedTemporaryFile(suffix=".json.gz", dir=target_dir, delete=False) as temp_f:
+        temp_path = Path(temp_f.name)
+        with gzip.open(temp_f, "wt", encoding="utf-8") as gz_f:
+            json.dump(payload, gz_f, ensure_ascii=False)
+
+    temp_path.replace(cache_file)
+    log.info(
+        "批次 %d 缓存落盘: %s (rows=%d, assets=%d)",
+        batch_idx,
+        cache_file.name,
+        len(df),
+        payload["n_assets"],
+    )
+    return cache_file
 
 
 def merge_and_emit_final(
