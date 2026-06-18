@@ -558,3 +558,60 @@ factor_df_neutral = factor_df[
 
 **修正后 design 一致性**：§3.3 表格中 "`industry == '其他'` 或 `industry is NaN` 的股票" 与本实现完全对齐 ✅
 
+
+---
+
+## §9 实施完成记录（R22e）
+
+> 完成时间: 2026-06-18
+> 状态: ✅ 闭环（仅行业中性化；市值中性化因数据缺失暂不做）
+
+### 9.1 实施轮次回顾（R1-R22）
+
+| 阶段 | 轮次 | 核心交付 | commit 范围 |
+|---|---|---|---|
+| Plan | R1-R8 | design.md §1-§8（含 §8 协议偏差修正） | 多轮 patch |
+| Execute | R9-R14 | data_loader.merge_industry_column → ic_calculator 死代码清理 → factor_ic_runner 决策/计算/接入 → ic_result_builder R14 占位 | c1f4890→7dbbb99 |
+| Execute | R15a-e | factor_ic_runner 排除清单 + 用户禁用 + '其他'剔除 5 集成测试 | 5 commits |
+| Execute | bug fix | ic_calculator._newey_west_t_stat 加 logger 参数（修预存 bug） | 1 commit |
+| Execute | R16a-c | ic_result_builder NEUTRAL_REQUIRED_KEYS + _normalize_neutral_payload + 端到端 smoke | 隐含 commits |
+| Execute | R17a-c | ic_result_builder 21 单测 | 3 commits |
+| Execute | R18a-b | summary _format_neutral_cell + 中性化敏感列 | 隐含 commits |
+| Execute | R19a-b | summary 13 单测 | 2 commits |
+| Execute | R20 | 三因子真实数据回测验证（rsi/amplitude/overnight_ret） | 数据产物 |
+| Execute | R21a | schema oneOf 双路径 + additionalProperties=false | 06e58f4 |
+| Execute | R21b | MODULE.md M66 + 类别 L. 行业中性化 + v4.5 | 1f3318e |
+| Review | R22a-d | industry_neutralization_flow.md 公共流程文档 | 3b61c2b/e7b428f/8c0ab87/cb18502 |
+
+### 9.2 测试覆盖
+
+| 测试文件 | 用例数 | 覆盖范围 |
+|---|---|---|
+| `factor_ic/test_cases/test_factor_ic_runner_neutralize.py` | 6 | 决策优先级（排除清单 / 用户禁用 / '其他'剔除 / 残差≡0） |
+| `factor_ic/test_cases/test_ic_result_builder_neutral.py` | 21 | disabled 路径 / enabled 路径 / 顶层接入 / 字段缺失防御 |
+| `summary/test_cases/test_neutral_cell.py` | 13 | _format_neutral_cell + IC 表头数据行 |
+| **合计** | **40** | 本任务新增；旧 240 passed 零回归 |
+
+### 9.3 真实数据验证（R20）
+
+| 因子 | raw IC | neutral IC | decay | level | 结论 |
+|---|---|---|---|---|---|
+| `rsi_1d` | -0.0396 | -0.0304 | 23.3% | low | ✅ 真 alpha |
+| `amplitude_1d` | -0.0574 | -0.0494 | 13.9% | low | ✅ 真 alpha |
+| `overnight_ret_1d` | 0.0212 | (skipped) | — | — | ⚠️ NaN 降级正常 |
+
+### 9.4 已知 follow-up（不在 R22 范围）
+
+1. `overnight_ret_1d` 残差含 NaN 根因排查（独立 task）
+2. 市值中性化（依赖 `total_mv` 数据接入；当前数据集无市值字段）
+3. 全量因子（17 个非排除）批量跑一遍获取 high/low/inverse 三档分布全景
+
+### 9.5 规范化产物清单
+
+- 代码：`factor_ic/common/data_loader.py` + `factor_ic_runner.py` + `ic_calculator.py` + `ic_result_builder.py`
+- 报告：`summary/generate_factor_summary_report.py`
+- schema：`factor_ic/schemas/ic_analysis_result.schema.json`
+- 测试：3 文件 / 40 用例
+- 规范：`factor_ic/MODULE.md` M66
+- 流程：`factor_ic/docs/industry_neutralization_flow.md` v1.0
+- 设计：`.hermes/plans/factor-ic-industry-neutralization-design.md`（本文档）
