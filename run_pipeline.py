@@ -9,96 +9,97 @@ Stage 0: 基础数据拉取
   3. fetch_turnover.py          → data_fetchers/result/turnover_rate_data.json.gz
   4. fetch_industry.py          → result/stock_industry.json
   5. fetch_tail_trading.py      → data_fetchers/result/tail_trading_data.json.gz（尾盘5分钟K线数据）
+  6. fetch_market_cap.py        → data_fetchers/result/market_cap_data.json.gz（市值数据，用于市值中性化）
 
 Stage 1: 数据整合
-  6. factor_generator.py        → data_fetchers/result/factor_ic_data.json.gz
+  7. factor_generator.py        → data_fetchers/result/factor_ic_data.json.gz
 
 Stage 2: IC计算
-  7. ic_rsi_1d.py
-  8. ic_volume_ratio_1d.py
-  9. ic_kdj_j_1d.py
-  10. ic_bollinger_pb_1d.py
-  11. ic_turnover_surge_1d.py
-  12. ic_amplitude_1d.py
-  13. ic_price_position_1d.py
-  14. ic_return_3d_1d.py
-  15. ic_return_5d_1d.py
-  16. ic_overnight_ret_1d.py
-  17. ic_past_return_1d_1d.py (新增 2026-06-04)
-  18. ic_momentum_strength_1d.py (新增 2026-06-05)
-  19. ic_tail_price_position.py (新增 2026-06-02)
-  20. ic_tail_price_slope_1d.py (新增 2026-06-02)
-  21. ic_tail_price_volume_intensity.py (新增 2026-06-02)
-  22. ic_tail_volume_acceleration_1d.py (新增 2026-06-02)
-  23. ic_tail_volume_shrink_1d.py (新增 2026-06-06)
-  24. ic_volume_price_strength_1d.py (新增 2026-06-11)
-  25. ic_positive_day_ratio_5_1d.py (新增 2026-06-11)
-  26. ic_ma5_deviation_1d.py (新增 2026-06-11)
-  27. ic_near_high_ratio_5_1d.py (新增 2026-06-11)
-  28. ic_intraday_intensity_1d.py (补注册 2026-06-13)
-  29. ic_capital_flow_intensity_1d.py (补注册 2026-06-13)
-  30. ic_capital_flow_ratio_trend_1d.py (补注册 2026-06-13)
-  31. ic_industry_pe_trend_1d.py (补注册 2026-06-13)
-  32. ic_industry_earnings_growth_1d.py (补注册 2026-06-13)
-  33. ic_industry_roe_trend_1d.py (补注册 2026-06-13)
-  34. ic_industry_turnover_trend_1d.py (补注册 2026-06-13)
-  35. ic_industry_momentum_5d_1d.py (补注册 2026-06-13)
-  36. ic_industry_amplitude_trend_1d.py (补注册 2026-06-13)
-  37. ic_tail_price_position_delta_1d.py (新增 2026-06-11)
-  38. ic_tail_volume_shrink_delta_1d.py (新增 2026-06-11)
-  39. ic_turnover_surge_delta_1d.py (补注册 2026-06-13)
-  40. ic_amplitude_delta_1d.py (补注册 2026-06-13)
+  8. ic_rsi_1d.py
+  9. ic_volume_ratio_1d.py
+  10. ic_kdj_j_1d.py
+  11. ic_bollinger_pb_1d.py
+  12. ic_turnover_surge_1d.py
+  13. ic_amplitude_1d.py
+  14. ic_price_position_1d.py
+  15. ic_return_3d_1d.py
+  16. ic_return_5d_1d.py
+  17. ic_overnight_ret_1d.py
+  18. ic_past_return_1d_1d.py (新增 2026-06-04)
+  19. ic_momentum_strength_1d.py (新增 2026-06-05)
+  20. ic_tail_price_position.py (新增 2026-06-02)
+  21. ic_tail_price_slope_1d.py (新增 2026-06-02)
+  22. ic_tail_price_volume_intensity.py (新增 2026-06-02)
+  23. ic_tail_volume_acceleration_1d.py (新增 2026-06-02)
+  24. ic_tail_volume_shrink_1d.py (新增 2026-06-06)
+  25. ic_volume_price_strength_1d.py (新增 2026-06-11)
+  26. ic_positive_day_ratio_5_1d.py (新增 2026-06-11)
+  27. ic_ma5_deviation_1d.py (新增 2026-06-11)
+  28. ic_near_high_ratio_5_1d.py (新增 2026-06-11)
+  29. ic_intraday_intensity_1d.py (补注册 2026-06-13)
+  30. ic_capital_flow_intensity_1d.py (补注册 2026-06-13)
+  31. ic_capital_flow_ratio_trend_1d.py (补注册 2026-06-13)
+  32. ic_industry_pe_trend_1d.py (补注册 2026-06-13)
+  33. ic_industry_earnings_growth_1d.py (补注册 2026-06-13)
+  34. ic_industry_roe_trend_1d.py (补注册 2026-06-13)
+  35. ic_industry_turnover_trend_1d.py (补注册 2026-06-13)
+  36. ic_industry_momentum_5d_1d.py (补注册 2026-06-13)
+  37. ic_industry_amplitude_trend_1d.py (补注册 2026-06-13)
+  38. ic_tail_price_position_delta_1d.py (新增 2026-06-11)
+  39. ic_tail_volume_shrink_delta_1d.py (新增 2026-06-11)
+  40. ic_turnover_surge_delta_1d.py (补注册 2026-06-13)
+  41. ic_amplitude_delta_1d.py (补注册 2026-06-13)
 
 Stage 3: 分层回测
-  41. layered_backtest_rsi_1d.py
-  42. layered_backtest_volume_ratio_1d.py
-  43. layered_backtest_kdj_j_1d.py
-  44. layered_backtest_bollinger_pb_1d.py
-  45. layered_backtest_turnover_surge_1d.py
-  46. layered_backtest_amplitude_1d.py
-  47. layered_backtest_price_position_1d.py
-  48. layered_backtest_return_3d_1d.py
-  49. layered_backtest_return_5d_1d.py
-  50. layered_backtest_overnight_ret_1d.py
-  51. layered_backtest_past_return_1d_1d.py (新增 2026-06-04)
-  52. layered_backtest_momentum_strength_1d.py (新增 2026-06-05)
-  53. layered_backtest_tail_price_position_1d.py (新增 2026-06-02)
-  54. layered_backtest_tail_price_slope_1d.py (新增 2026-06-02)
-  55. layered_backtest_tail_price_volume_intensity_1d.py (新增 2026-06-02)
-  56. layered_backtest_tail_volume_acceleration_1d.py (新增 2026-06-02)
-  57. layered_backtest_tail_volume_shrink_1d.py (新增 2026-06-06)
-  58. layered_backtest_volume_price_strength_1d.py (补注册 2026-06-13)
-  59. layered_backtest_positive_day_ratio_5_1d.py (补注册 2026-06-13)
-  60. layered_backtest_ma5_deviation_1d.py (补注册 2026-06-13)
-  61. layered_backtest_near_high_ratio_5_1d.py (补注册 2026-06-13)
-  62. layered_backtest_intraday_intensity_1d.py (补注册 2026-06-13)
-  63. layered_backtest_capital_flow_intensity_1d.py (补注册 2026-06-13)
-  64. layered_backtest_capital_flow_ratio_trend_1d.py (补注册 2026-06-13)
-  65. layered_backtest_industry_pe_trend_1d.py (补注册 2026-06-13)
-  66. layered_backtest_industry_earnings_growth_1d.py (补注册 2026-06-13)
-  67. layered_backtest_industry_roe_trend_1d.py (补注册 2026-06-13)
-  68. layered_backtest_industry_turnover_trend_1d.py (补注册 2026-06-13)
-  69. layered_backtest_industry_momentum_5d_1d.py (补注册 2026-06-13)
-  70. layered_backtest_industry_amplitude_trend_1d.py (补注册 2026-06-13)
-  71. layered_backtest_tail_price_position_delta_1d.py (新增 2026-06-11)
-  72. layered_backtest_tail_volume_shrink_delta_1d.py (新增 2026-06-11)
-  73. layered_backtest_turnover_surge_delta_1d.py (补注册 2026-06-13)
-  74. layered_backtest_amplitude_delta_1d.py (补注册 2026-06-13)
+  42. layered_backtest_rsi_1d.py
+  43. layered_backtest_volume_ratio_1d.py
+  44. layered_backtest_kdj_j_1d.py
+  45. layered_backtest_bollinger_pb_1d.py
+  46. layered_backtest_turnover_surge_1d.py
+  47. layered_backtest_amplitude_1d.py
+  48. layered_backtest_price_position_1d.py
+  49. layered_backtest_return_3d_1d.py
+  50. layered_backtest_return_5d_1d.py
+  51. layered_backtest_overnight_ret_1d.py
+  52. layered_backtest_past_return_1d_1d.py (新增 2026-06-04)
+  53. layered_backtest_momentum_strength_1d.py (新增 2026-06-05)
+  54. layered_backtest_tail_price_position_1d.py (新增 2026-06-02)
+  55. layered_backtest_tail_price_slope_1d.py (新增 2026-06-02)
+  56. layered_backtest_tail_price_volume_intensity_1d.py (新增 2026-06-02)
+  57. layered_backtest_tail_volume_acceleration_1d.py (新增 2026-06-02)
+  58. layered_backtest_tail_volume_shrink_1d.py (新增 2026-06-06)
+  59. layered_backtest_volume_price_strength_1d.py (补注册 2026-06-13)
+  60. layered_backtest_positive_day_ratio_5_1d.py (补注册 2026-06-13)
+  61. layered_backtest_ma5_deviation_1d.py (补注册 2026-06-13)
+  62. layered_backtest_near_high_ratio_5_1d.py (补注册 2026-06-13)
+  63. layered_backtest_intraday_intensity_1d.py (补注册 2026-06-13)
+  64. layered_backtest_capital_flow_intensity_1d.py (补注册 2026-06-13)
+  65. layered_backtest_capital_flow_ratio_trend_1d.py (补注册 2026-06-13)
+  66. layered_backtest_industry_pe_trend_1d.py (补注册 2026-06-13)
+  67. layered_backtest_industry_earnings_growth_1d.py (补注册 2026-06-13)
+  68. layered_backtest_industry_roe_trend_1d.py (补注册 2026-06-13)
+  69. layered_backtest_industry_turnover_trend_1d.py (补注册 2026-06-13)
+  70. layered_backtest_industry_momentum_5d_1d.py (补注册 2026-06-13)
+  71. layered_backtest_industry_amplitude_trend_1d.py (补注册 2026-06-13)
+  72. layered_backtest_tail_price_position_delta_1d.py (新增 2026-06-11)
+  73. layered_backtest_tail_volume_shrink_delta_1d.py (新增 2026-06-11)
+  74. layered_backtest_turnover_surge_delta_1d.py (补注册 2026-06-13)
+  75. layered_backtest_amplitude_delta_1d.py (补注册 2026-06-13)
 
 Stage 4: 综合因子
-  75. composite_equal_weight_1d.py
-  76. composite_icir_weight_1d.py
-  77. composite_ic_weight_1d.py
-  78. composite_rolling_icir_weight_1d.py
+  76. composite_equal_weight_1d.py
+  77. composite_icir_weight_1d.py
+  78. composite_ic_weight_1d.py
+  79. composite_rolling_icir_weight_1d.py
 
 Stage 5: 权重选择（新增 2026-06-03）
-  79. weight_selector.py         → comprehensive_factor/result/weight_selection_result.json
+  80. weight_selector.py         → comprehensive_factor/result/weight_selection_result.json
 
 Stage 6: 股票选股（新增 2026-06-03）
-  80. stock_selector.py          → comprehensive_factor/result/stock_selection_result.json
+  81. stock_selector.py          → comprehensive_factor/result/stock_selection_result.json
 
 Stage 7: 汇总报告
-  81. generate_factor_summary_report.py
+  82. generate_factor_summary_report.py
 
 版本历史：
 - v1.0 (2026-05-27): 初始版本，完全串行执行，退出码检查，脚本级别重试
@@ -110,6 +111,7 @@ Stage 7: 汇总报告
 - v1.6 (2026-06-06): 新增 tail_volume_shrink 因子（IC + 分层回测）
 - v1.7 (2026-06-13): 补注册 4 个方向性因子（volume_price_strength / positive_day_ratio_5 / ma5_deviation / near_high_ratio_5）的分层回测；补注册 intraday_intensity、capital_flow_intensity / capital_flow_ratio_trend、6 个 industry_* 因子、turnover_surge_delta / amplitude_delta 的 IC + 分层回测（脚本均已存在但漏注册到 pipeline）
 - v1.8 (2026-06-17): fetch_turnover 设置 5 小时独立超时，避免 baostock 慢速拉取被默认 30 分钟超时反复重启
+- v1.9 (2026-06-18): 新增 fetch_market_cap 到 Stage 0（市值数据，用于 factor_ic 市值中性化，遵循 AGENTS.md §1 数据路径表）
 
 作者: 云瑶
 """
@@ -161,6 +163,7 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask(
         "fetch_tail_trading", "data_fetchers/fetch_tail_trading.py", 0, [], timeout=10800
     ),  # 尾盘5分钟K线数据（3小时超时，因每批停顿80秒）
+    ScriptTask("fetch_market_cap", "data_fetchers/fetch_market_cap.py", 0, []),  # 市值数据（用于市值中性化）
     # Stage 1: 数据整合
     ScriptTask("factor_generator", "data_fetchers/factor_generator.py", 1, []),
     # Stage 2: IC计算
