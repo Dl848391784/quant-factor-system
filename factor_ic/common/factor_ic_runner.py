@@ -115,6 +115,161 @@ def _resolve_neutralize_decision(
     return True, None
 
 
+def _classify_decay_level(decay_rate: float, threshold: float = 0.30) -> str:
+    """
+    根据衰减率分类（design.md §5.4 报告分级）
+
+    decay_rate = (raw_ic_mean - neutral_ic_mean) / raw_ic_mean
+
+    - decay_rate >= threshold (默认 30%): 'high' (高度行业 beta 驱动)
+    - 0 <= decay_rate < threshold: 'low' (alpha 主导)
+    - decay_rate < 0: 'inverse' (中性化后 |IC| 反而上升, 结构性增益)
+
+    raw_ic_mean ≈ 0 时分母不稳定 → 'undefined'
+    """
+    import math
+
+    if not math.isfinite(decay_rate):
+        return "undefined"
+    if decay_rate < 0:
+        return "inverse"
+    if decay_rate >= threshold:
+        return "high"
+    return "low"
+
+
+def _compute_industry_neutral_ic(
+    *,
+    factor_df,
+    return_df,
+    factor_col: str,
+    return_col: str,
+    min_stocks: int,
+    neutralize_min_industry_stocks: int,
+    raw_ic_mean: float,
+    logger,
+) -> dict[str, Any]:
+    """
+    计算行业中性化 IC（design.md §5.1 Step 4-7 实现）
+
+    流程：
+    1. 加载行业映射（fetch_industry.get_industry_map → dict）
+    2. merge_industry_column 注入 'industry' 列（未知 asset 自然产生 NaN）
+    3. industry_neutral_residual 求残差因子（'其他' + NaN + 行业内 <min 全过滤）
+    4. 用残差因子重新调用 calculate_ic_with_direction_verification
+    5. 计算 decay_rate + decay_level
+
+    参数:
+        factor_df / return_df: 已加载的因子/收益数据
+        factor_col / return_col: 列名
+        min_stocks: IC 计算的每日最少股票数
+        neutralize_min_industry_stocks: 行业内最少股票数（默认 5）
+        raw_ic_mean: raw IC 均值（用于计算 decay_rate）
+        logger: 日志记录器
+
+    返回:
+        dict: {
+            'ic_mean', 'ic_std', 'icir', 'p_value', 'p_value_display',
+            'positive_ratio',
+            'dates', 'ic_values',
+            'decay_rate', 'decay_level',
+            'min_industry_stocks',
+        }
+        若中间步骤过滤为空，抛 RuntimeError 让上层降级为 skipped_reason
+
+    Note:
+        merge_industry_column 内部已 import data_fetchers.fetch_industry，本函数不再重复。
+        industry_neutral_residual 不支持 exclude_industries 参数，'其他'剔除在本函数显式做。
+    """
+    from .data_loader import merge_industry_column
+    from .ic_calculator import calculate_ic_with_direction_verification, industry_neutral_residual
+
+    # Step 1+2: 注入 industry 列（merge_industry_column 内部已加载行业映射, 未知 asset 自然 NaN）
+    factor_df_with_industry = merge_industry_column(
+        factor_df,
+        asset_col="asset",
+        out_col="industry",
+        logger=logger,
+    )
+
+    # Step 2.5: 剔除 '其他' 行业（design.md §3.3 / D6 决策）
+    #   - '其他' 是申万一级里的混杂桶（含申万二级码 220901/280203 等），不应作为独立行业回归
+    #   - NaN（未知 asset）不需手动剔除：industry_neutral_residual 内部 groupby 自动跳过
+    before = len(factor_df_with_industry)
+    factor_df_filtered = factor_df_with_industry[factor_df_with_industry["industry"] != "其他"].copy()
+    other_dropped = before - len(factor_df_filtered)
+    logger.info("[neutralize] '其他' 行业剔除: %d 行（剩余 %d 行）", other_dropped, len(factor_df_filtered))
+
+    # Step 3: 求残差因子
+    residual_df = industry_neutral_residual(
+        factor_df=factor_df_filtered,
+        factor_col=factor_col,
+        date_col="date",
+        asset_col="asset",
+        industry_col="industry",
+        min_industry_stocks=neutralize_min_industry_stocks,
+        logger=logger,
+    )
+
+    if residual_df.empty:
+        raise RuntimeError("industry_neutral_residual 返回空 DataFrame（'其他'+NaN+小行业全部过滤）")
+
+    logger.info(
+        "[neutralize] 残差因子: %d 行（vs raw factor %d 行）",
+        len(residual_df),
+        len(factor_df_with_industry),
+    )
+
+    # Step 4: 用残差因子重新计算 IC（残差列名固定为 neutral_factor）
+    neutral_ic_result = calculate_ic_with_direction_verification(
+        factor_df=residual_df,
+        return_df=return_df,
+        factor_col="neutral_factor",
+        return_col=return_col,
+        date_col="date",
+        asset_col="asset",
+        min_stocks=min_stocks,
+        logger=logger,
+    )
+
+    # Step 5: 提取核心字段 + 计算衰减
+    neutral_ic_mean = float(neutral_ic_result.get("ic_mean", 0.0))
+    # decay_rate = (raw - neutral) / raw（用绝对值避免符号干扰）
+    if abs(raw_ic_mean) < 1e-9:
+        decay_rate = float("nan")
+    else:
+        decay_rate = (abs(raw_ic_mean) - abs(neutral_ic_mean)) / abs(raw_ic_mean)
+
+    decay_level = _classify_decay_level(decay_rate)
+
+    # 时序数据
+    neutral_ic_series = neutral_ic_result["ic_series"]
+    if neutral_ic_series is not None and len(neutral_ic_series) > 0:
+        neutral_ic_series = neutral_ic_series.sort_index()
+        neutral_dates = [str(d) for d in neutral_ic_series.index]
+        neutral_ic_values = [round(float(v), 6) for v in neutral_ic_series.values]
+    else:
+        neutral_dates = []
+        neutral_ic_values = []
+
+    stats_sig = neutral_ic_result.get("statistical_significance") or {}
+
+    return {
+        "ic_mean": round(neutral_ic_mean, 6),
+        "ic_std": round(float(neutral_ic_result.get("ic_std", 0.0)), 6),
+        "icir": round(float(neutral_ic_result.get("icir", 0.0)), 4),
+        "p_value": stats_sig.get("p_value"),
+        "p_value_display": stats_sig.get("p_value_display"),
+        "positive_ratio": neutral_ic_result.get("positive_ratio"),
+        "n_days": neutral_ic_result.get("n_days"),
+        "dates": neutral_dates,
+        "ic_values": neutral_ic_values,
+        "decay_rate": round(decay_rate, 6) if decay_rate == decay_rate else None,  # NaN→None
+        "decay_level": decay_level,
+        "min_industry_stocks": neutralize_min_industry_stocks,
+    }
+
+
 def run_factor_ic_analysis(
     factor_name: str,
     factor_col: str,
@@ -129,6 +284,9 @@ def run_factor_ic_analysis(
     custom_factor_calculation: Callable | None = None,
     custom_factor_calculation_params: dict[str, Any] | None = None,
     extra_log_params: dict[str, Any] | None = None,
+    *,
+    neutralize: bool = True,
+    neutralize_min_industry_stocks: int = 5,
     logger=None,
 ) -> dict[str, Any]:
     """
@@ -399,6 +557,48 @@ def run_factor_ic_analysis(
             data_source=data_source,
         )
 
+    # ========== 行业中性化 IC（design.md §5.1 Step 4-7） ==========
+    # 协议解析：mode 已经是 'full'（增量分支已 return）
+    neutral_enabled, neutral_skip_reason = _resolve_neutralize_decision(
+        factor_name=factor_name,
+        neutralize=neutralize,
+        mode="full",
+    )
+
+    ic_neutral_payload: dict[str, Any] = {
+        "enabled": neutral_enabled,
+        "skipped_reason": neutral_skip_reason,
+    }
+
+    if neutral_enabled:
+        try:
+            neutral_payload = _compute_industry_neutral_ic(
+                factor_df=factor_df,
+                return_df=return_df,
+                factor_col=factor_col,
+                return_col=return_col,
+                min_stocks=min_stocks,
+                neutralize_min_industry_stocks=neutralize_min_industry_stocks,
+                raw_ic_mean=float(ic_result.get("ic_mean", 0.0)),
+                logger=logger,
+            )
+            ic_neutral_payload.update(neutral_payload)
+            logger.info(
+                "neutral IC 均值: %.4f / decay_rate: %.4f / decay_level: %s",
+                neutral_payload.get("ic_mean", 0.0),
+                neutral_payload.get("decay_rate", 0.0),
+                neutral_payload.get("decay_level", "unknown"),
+            )
+        except Exception as e:
+            # 不让中性化失败拖垮 raw IC 输出，降级为 enabled=false + 失败原因
+            logger.warning("行业中性化 IC 计算失败，降级为 skipped: %s", e)
+            ic_neutral_payload = {
+                "enabled": False,
+                "skipped_reason": f"computation failed: {e}",
+            }
+    else:
+        logger.info("行业中性化 IC 跳过: %s", neutral_skip_reason)
+
     # 构建完整结果
 
     result = build_ic_result(
@@ -409,6 +609,7 @@ def run_factor_ic_analysis(
         data_source=data_source,
         factor_col=factor_col,
         update_mode="full",
+        ic_neutral_payload=ic_neutral_payload,
     )
 
     # 保存

@@ -60,6 +60,7 @@ def build_ic_result(
     data_source: str = "",
     factor_col: str = "",
     update_mode: str = "full",
+    ic_neutral_payload: dict | None = None,
 ) -> dict:
     """
     构建 IC 分析完整结果（符合 MODULE.md 输出结构统一性规范）
@@ -196,6 +197,12 @@ def build_ic_result(
         RESULT_KEY_UPDATE_MODE: update_mode,
         "factor_col": factor_col,  # 额外字段，用于追踪
     }
+
+    # ========== 行业中性化 IC（design.md §5.2 顶层字段） ==========
+    # R14 仅占位接入：拿 payload 直接挂顶层 ic_neutral_industry 字段。
+    # R16 会改造为完整 schema 标准化（含必填字段校验、衰减统计、二级别名等）。
+    if ic_neutral_payload is not None:
+        result["ic_neutral_industry"] = ic_neutral_payload
 
     # 类型转换（确保 JSON 兼容）
     result = convert_to_native_types(result)
