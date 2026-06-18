@@ -61,8 +61,12 @@ P2 在不改变 runner 默认行为的前提下，新增市值控制变量能力
 | `< 30%` (low) | neutral IC 与 raw IC 接近 → 行业 beta 占比小 | **真 alpha**，行业中性化后仍有效 |
 | `≥ 30%` (high) | neutral IC 显著小于 raw IC → 行业 beta 占主导 | alpha 主要来自**行业 beta**，非个股层面真 alpha |
 | `< 0%` (inverse) | neutral IC 反向于 raw IC | 因子方向被行业掩盖，需重新评估 |
+| `None` (undefined) | \|raw_ic_mean\| < 0.001 → 原始 IC 是噪声，分母不稳定 | decay_rate 无统计意义，报告显示 '-' |
 
 > 核心公式：`decay_rate = 1 - |neutral_ic_mean| / |raw_ic_mean|`
+>
+> 近零保护：`|raw_ic_mean| < _DECAY_RATE_RAW_IC_FLOOR (0.001)` 时 decay_rate 置 None，
+> 避免 raw_ic≈0（p-value 远超 0.05）时衰减率爆炸（如 capital_flow_ratio_trend raw_ic=-0.0003 → 旧逻辑 -3282%）。
 
 ---
 
