@@ -119,7 +119,100 @@
 
 ## 四、schema 与真实数据示例
 
-> R22c 待补
+### 4.1 schema 定义（`factor_ic/schemas/ic_analysis_result.schema.json`）
+
+`ic_neutral_industry` 字段使用 `oneOf` 双路径：
+
+```jsonc
+"ic_neutral_industry": {
+  "oneOf": [
+    {  // 路径 A: disabled (2 字段)
+      "type": "object",
+      "properties": {
+        "enabled": {"const": false},
+        "skipped_reason": {"type": "string"}
+      },
+      "required": ["enabled", "skipped_reason"],
+      "additionalProperties": false
+    },
+    {  // 路径 B: enabled (13 字段)
+      "type": "object",
+      "properties": {
+        "enabled": {"const": true},
+        "ic_mean": {"type": "number"},
+        "ic_std": {"type": "number"},
+        "icir": {"type": "number"},
+        "p_value": {"type": "number"},
+        "p_value_display": {"type": "string"},
+        "positive_ratio": {"type": "number"},
+        "n_days": {"type": "integer"},
+        "dates": {"type": "array", "items": {"type": "string"}},
+        "ic_values": {"type": "array", "items": {"type": "number"}},
+        "decay_rate": {"type": "number"},
+        "decay_level": {"enum": ["high", "low", "inverse", "undefined"]},
+        "min_industry_stocks": {"type": "integer"}
+      },
+      "required": [/* 全部 13 字段 */],
+      "additionalProperties": false
+    }
+  ]
+}
+```
+
+> 双层防御：`oneOf` 互斥 + `additionalProperties: false` 防字段污染。
+
+### 4.2 R20 实测三因子对照表（2024-05-13 ~ 2026-06-13，509 交易日）
+
+| 因子 | raw IC mean | neutral IC mean | decay_rate | decay_level | 备注 |
+|---|---|---|---|---|---|
+| `rsi_1d` | -0.0396 | -0.0304 | **23.3%** | `low` | 真 alpha，行业 beta 占比小 |
+| `amplitude_1d` | -0.0574 | -0.0494 | **13.9%** | `low` | 真 alpha，几乎不受行业影响 |
+| `overnight_ret_1d` | 0.0212 | — | — | — | 残差回归含 NaN，降级 disabled（见 §5） |
+
+### 4.3 enabled payload 实例（`ic_rsi_1d_analysis_result.json` 摘录）
+
+```jsonc
+{
+  "ic_neutral_industry": {
+    "enabled": true,
+    "ic_mean": -0.030356,
+    "ic_std": 0.106727,
+    "icir": 0.2844,
+    "p_value": 1.22e-14,
+    "p_value_display": "1.22e-14",
+    "positive_ratio": 0.3733,
+    "n_days": 509,
+    "dates": ["2024-05-13", "2024-05-14", /* ... */],
+    "ic_values": [/* 509 个每日 IC */],
+    "decay_rate": 0.2330,
+    "decay_level": "low",
+    "min_industry_stocks": 5
+  }
+}
+```
+
+### 4.4 disabled payload 实例（`ic_overnight_ret_1d_analysis_result.json`）
+
+```jsonc
+{
+  "ic_neutral_industry": {
+    "enabled": false,
+    "skipped_reason": "computation failed: Input y contains NaN."
+  }
+}
+```
+
+### 4.5 行业映射统计（参考）
+
+```
+全样本                  1,491,862 行
+├─ '其他' 行业剔除        -392,021 行 (26.3%)
+└─ 参与残差回归          1,099,841 行
+    └─ 有效残差          1,099,487 行 (剔除回归 NaN 等)
+```
+
+> 数据来源: `data_fetchers/fetch_industry.get_industry_map()`；统计基于 R20 全量回测日志。
+
 
 ---
 
