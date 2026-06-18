@@ -559,9 +559,41 @@ def standardize_factors(
         # 理由：momentum_strength 等比率类因子可能产生 ±50 的极端值，
         #   标准化后 z-score 达 ±11.7σ，统计意义极弱（p<0.003），截断不损失有效信息
         _WINSORIZE_SIGMA = 3.0
+
+        # v2.20 新增：点质量检测——某值在截面中出现频率 >1% 时，clip z-score 到 ±2σ
+        # 理由：tail_price_position 在 close=tail_low 时精确为 0.0，68/3019=2.3% 的股票
+        #   挤在同一值上，z-score=-2.45 导致权重失真（名义 19.8% 实际贡献 41%）
+        #   clip 到 ±2σ 保留信号方向但限制极端贡献，相对倍数从 2.1x 降到 1.72x
+        _POINT_MASS_THRESHOLD = 0.01  # 出现频率 >1% 判定为点质量
+        _POINT_MASS_CLIP_SIGMA = 2.0  # 点质量 z-score 截断阈值
         factor_df[std_col] = factor_df.groupby("date")[col].transform(
             lambda x: np.clip((x - x.mean()) / x.std(), -_WINSORIZE_SIGMA, _WINSORIZE_SIGMA) if x.std() > 0 else np.nan
         )
+
+        # v2.20: 点质量检测——某值在截面中出现频率 >1% 时，clip z-score 到 ±2σ
+        # 典型场景：tail_price_position close=tail_low→0.0，68/3019=2.3% 股票挤在同一值
+        for date_val, group in factor_df.groupby("date"):
+            n = int(group[col].count())  # 非NaN数
+            if n == 0:
+                continue
+            val_counts = group[col].value_counts()
+            for val, count in val_counts.items():
+                if pd.isna(val):
+                    continue
+                if count / n > _POINT_MASS_THRESHOLD:
+                    mask = (factor_df["date"] == date_val) & (factor_df[col] == val)
+                    factor_df.loc[mask, std_col] = factor_df.loc[mask, std_col].clip(
+                        -_POINT_MASS_CLIP_SIGMA, _POINT_MASS_CLIP_SIGMA
+                    )
+                    logger.info(
+                        "因子 %s 在 %s 检测到点质量: value=%.4f, count=%d (%.1f%%), z-score clip 到 ±%.1fσ",
+                        col,
+                        date_val,
+                        val,
+                        count,
+                        count / n * 100,
+                        _POINT_MASS_CLIP_SIGMA,
+                    )
 
         # NaN 处理：原因子值为 NaN 时标准化后仍为 NaN
         # 使用 fillna 保持原本 NaN 的位置，而非 .loc 后置还原
