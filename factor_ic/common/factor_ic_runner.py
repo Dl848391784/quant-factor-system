@@ -862,6 +862,13 @@ def main():
     parser.add_argument("--period", default="1d", help="收益周期")
     parser.add_argument("--min-stocks", type=int, default=10, help="最小股票数")
     parser.add_argument("--force-full", action="store_true", help="强制全量计算")
+    parser.add_argument(
+        "--data-source",
+        type=str,
+        default=None,
+        dest="data_source",
+        help="数据源文件路径（默认使用 factor_ic_data.json.gz）",
+    )
 
     args = parser.parse_args()
 
@@ -872,6 +879,7 @@ def main():
         return_period=args.period,
         min_stocks=args.min_stocks,
         force_full=args.force_full,
+        data_cache_path=args.data_source,
         logger=logger,  # 传入模块级 logger（参数名 logger，值是模块级 logger）
     )
 
