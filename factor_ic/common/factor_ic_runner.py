@@ -52,23 +52,42 @@ from .incremental_engine import incremental_update_ic
 
 
 # ============================================================
-# 行业中性化排除清单（design.md §3.1 + §5.3）
+# 中性化排除清单（design.md §3.1, §4.1, §5.3）
 # ============================================================
-# 行业聚合赋个股的因子：因子值在行业内全部相同 → 行业回归残差 ≡ 0 → IC ≡ 0
-# 这类因子被强制跳过中性化（即使调用方传入 neutralize=True 也覆盖为 False）
-# 详见 design.md §5.3.2 协议表与 §3.1 实证依据
-INDUSTRY_NEUTRALIZE_EXCLUDED: frozenset[str] = frozenset(
-    {
-        "industry_momentum_5d",
-        "industry_turnover_trend",
-        "industry_amplitude_trend",
-        "industry_roe_trend",
-        "industry_earnings_growth",
-        "industry_pe_trend",
-        "capital_flow_intensity",
-        "capital_flow_ratio_trend",
-    }
-)
+# 二维结构 NEUTRALIZE_EXCLUDED[control_name] -> frozenset[factor_name]：
+# 每个控制变量独立维护一份 excluded 因子集合，原因类型可不同：
+#   - "industry": 行业聚合赋个股的因子（行业内同值 → 残差≡0）
+#   - "log_market_cap" (P2 起): 大/小盘强 beta 因子（待 P2 实证后补充）
+#
+# 兼容性: 旧名 INDUSTRY_NEUTRALIZE_EXCLUDED 作为 NEUTRALIZE_EXCLUDED["industry"]
+# 的常量别名继续导出，下游测试与日志文本无需改动。
+NEUTRALIZE_EXCLUDED: dict[str, frozenset[str]] = {
+    "industry": frozenset(
+        {
+            "industry_momentum_5d",
+            "industry_turnover_trend",
+            "industry_amplitude_trend",
+            "industry_roe_trend",
+            "industry_earnings_growth",
+            "industry_pe_trend",
+            "capital_flow_intensity",
+            "capital_flow_ratio_trend",
+        }
+    ),
+}
+
+# 兼容别名（向后兼容；新代码请用 NEUTRALIZE_EXCLUDED["industry"]）
+INDUSTRY_NEUTRALIZE_EXCLUDED: frozenset[str] = NEUTRALIZE_EXCLUDED["industry"]
+
+
+def is_excluded(factor_name: str, control_name: str) -> bool:
+    """因子 factor_name 是否被 control_name 控制变量的排除清单命中。
+
+    未注册的 control_name 视为无排除规则（返回 False，不抛错），
+    供未来新增 control 时无需先填表也能跑通。
+    """
+    return factor_name in NEUTRALIZE_EXCLUDED.get(control_name, frozenset())
+
 
 # skipped_reason 文本常量（写入输出 JSON 的 ic_neutral_industry.skipped_reason）
 NEUTRALIZE_SKIP_REASON_EXCLUDED = "factor in INDUSTRY_NEUTRALIZE_EXCLUDED (industry-aggregated factor)"
@@ -104,7 +123,7 @@ def _resolve_neutralize_decision(
     Note:
         本函数不调用 logger，纯函数便于单测；调用方负责日志记录。
     """
-    if factor_name in INDUSTRY_NEUTRALIZE_EXCLUDED:
+    if is_excluded(factor_name, "industry"):
         return False, NEUTRALIZE_SKIP_REASON_EXCLUDED
     if mode == "incremental":
         return False, NEUTRALIZE_SKIP_REASON_INCREMENTAL
