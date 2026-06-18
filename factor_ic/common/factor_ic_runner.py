@@ -77,6 +77,44 @@ NEUTRALIZE_SKIP_REASON_INCREMENTAL = "incremental mode (industry neutralization 
 NEUTRALIZE_SKIP_REASON_SKIP_MODE = "skip mode (cached result, neutralization not recomputed)"
 
 
+def _resolve_neutralize_decision(
+    factor_name: str,
+    neutralize: bool,
+    mode: str,
+) -> tuple[bool, str | None]:
+    """
+    解析行业中性化的最终决策（design.md §5.3.2 协议表）
+
+    协议优先级：排除清单 > 模式限制 > 用户参数
+    - 排除清单内因子（残差≡0）→ 强制 skip（覆盖用户参数）
+    - 非 full 模式（增量/skip）→ skip（v1 仅支持 full 模式重算）
+    - 用户传 neutralize=False → skip
+    - 否则启用
+
+    参数:
+        factor_name: 因子名（不含 _1d 后缀，与排除清单 key 一致）
+        neutralize: 调用方传入的开关
+        mode: 当前执行模式（'full' / 'incremental' / 'skip'）
+
+    返回:
+        (enabled, skipped_reason)
+        - enabled=True: 应当计算 neutral IC, skipped_reason=None
+        - enabled=False: 应跳过, skipped_reason 为协议表中的固定文本
+
+    Note:
+        本函数不调用 logger，纯函数便于单测；调用方负责日志记录。
+    """
+    if factor_name in INDUSTRY_NEUTRALIZE_EXCLUDED:
+        return False, NEUTRALIZE_SKIP_REASON_EXCLUDED
+    if mode == "incremental":
+        return False, NEUTRALIZE_SKIP_REASON_INCREMENTAL
+    if mode == "skip":
+        return False, NEUTRALIZE_SKIP_REASON_SKIP_MODE
+    if not neutralize:
+        return False, NEUTRALIZE_SKIP_REASON_USER_DISABLED
+    return True, None
+
+
 def run_factor_ic_analysis(
     factor_name: str,
     factor_col: str,
