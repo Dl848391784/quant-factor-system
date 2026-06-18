@@ -1,0 +1,61 @@
+========================================================================================================================
+P3 衰减对比报告：raw vs industry-only vs industry+log_market_cap
+========================================================================================================================
+
+因子                                           raw_IC     ind_IC ind+cap_IC  ind_decay  ind+cap_decay       增量衰减 状态             
+------------------------------------------------------------------------------------------------------------------------
+amplitude_1d                              -0.057424  -0.049447  -0.053894     0.1389         0.0615    -0.0774      ok             
+amplitude_delta_1d                        -0.006270  -0.007399  -0.007953    -0.1801        -0.2683    -0.0882      ok             
+bollinger_pb_1d                           -0.036639  -0.029627  -0.027849     0.1914         0.2399     0.0485      ok             
+capital_flow_intensity_1d                 -0.001544          -   0.001002          -         0.3509          -      excluded:industry
+capital_flow_ratio_trend_1d               -0.000302          -  -0.010214          -       -32.8171          -      excluded:industry
+industry_amplitude_trend_1d               -0.000176          -  -0.000164          -         0.0709          -      excluded:industry
+industry_earnings_growth_1d               -0.000918          -  -0.000790          -         0.3432          -      excluded:industry
+industry_momentum_5d_1d                   -0.017319          -  -0.013693          -         0.2094          -      excluded:industry
+industry_pe_trend_1d                       0.001002          -  -0.001897          -         0.1071          -      excluded:industry
+industry_roe_trend_1d                     -0.007205          -   0.001052          -         0.2772          -      excluded:industry
+industry_turnover_trend_1d                -0.008794          -  -0.008911          -        -0.0138          -      excluded:industry
+intraday_intensity_1d                     -0.019977  -0.020832  -0.020873    -0.0428        -0.0449    -0.0021      ok             
+kdj_j_1d                                  -0.022539  -0.014985  -0.014115     0.3352         0.3737     0.0386      ok             
+ma5_deviation_1d                          -0.025356  -0.018533  -0.017231     0.2691         0.3204     0.0514      ok             
+momentum_strength_1d                      -0.035293  -0.027423  -0.024952     0.2230         0.3123     0.0893      ok             
+near_high_ratio_5_1d                      -0.027372  -0.018445  -0.016432     0.3261         0.3997     0.0735      ok             
+overnight_ret_1d                           0.021152   0.024890   0.024689    -0.1767        -0.1672     0.0095      ok             
+past_return_1d_1d                         -0.014164  -0.009606  -0.009678     0.3218         0.3167    -0.0051      ok             
+positive_day_ratio_5_1d                   -0.028970  -0.021679  -0.020596     0.2517         0.2891     0.0374      ok             
+price_position_1d                         -0.015682  -0.018342  -0.019150    -0.1696        -0.2211    -0.0515      ok             
+return_3d_1d                              -0.027078  -0.020442          -     0.2451              -          -      ok             
+return_5d_1d                              -0.034303  -0.024976  -0.023567     0.2719         0.3130     0.0411      ok             
+rsi_1d                                    -0.039578  -0.030356  -0.029433     0.2330         0.2563     0.0233      ok             
+tail_price_position_1d                    -0.061802  -0.048778  -0.032664     0.2107         0.2693     0.0586      ok             
+tail_price_position_delta_1d              -0.035112  -0.023258  -0.021357     0.3376         0.3935     0.0559      ok             
+tail_price_slope_1d                       -0.068173  -0.047352  -0.038917     0.3054         0.4291     0.1237 ⚠    ok             
+tail_price_volume_intensity_1d            -0.071958  -0.048790  -0.040292     0.3220         0.4401     0.1181 ⚠    ok             
+tail_volume_acceleration_1d               -0.020641  -0.029757  -0.024818    -0.4417        -0.2024     0.2393 ⚠    ok             
+tail_volume_shrink_1d                     -0.009346  -0.005341  -0.005914     0.4285         0.3673    -0.0612      ok             
+tail_volume_shrink_delta_1d               -0.014791  -0.013829  -0.016497     0.0650        -0.1093    -0.1744      ok             
+turnover_surge_1d                         -0.030722  -0.024847  -0.025869     0.1912         0.1579    -0.0333      ok             
+turnover_surge_delta_1d                   -0.008952  -0.006329  -0.006408     0.2930         0.2847    -0.0083      ok             
+volume_price_strength_1d                  -0.026736  -0.018682  -0.018763     0.3013         0.2982    -0.0031      ok             
+volume_ratio_1d                           -0.033851  -0.025132  -0.026554     0.2576         0.2156    -0.0420      ok             
+------------------------------------------------------------------------------------------------------------------------
+总因子数: 34
+增量衰减 > 10% (市值中性化必要): 3
+增量衰减 ≤ 10% (市值中性化影响小): 31
+
+Top 10 增量衰减（市值中性化影响最大的因子）:
+  1. tail_volume_acceleration_1d              delta_decay=0.2393 (ind=-0.4417 → ind+cap=-0.2024)
+  2. tail_price_slope_1d                      delta_decay=0.1237 (ind=0.3054 → ind+cap=0.4291)
+  3. tail_price_volume_intensity_1d           delta_decay=0.1181 (ind=0.3220 → ind+cap=0.4401)
+  4. momentum_strength_1d                     delta_decay=0.0893 (ind=0.2230 → ind+cap=0.3123)
+  5. near_high_ratio_5_1d                     delta_decay=0.0735 (ind=0.3261 → ind+cap=0.3997)
+  6. tail_price_position_1d                   delta_decay=0.0586 (ind=0.2107 → ind+cap=0.2693)
+  7. tail_price_position_delta_1d             delta_decay=0.0559 (ind=0.3376 → ind+cap=0.3935)
+  8. ma5_deviation_1d                         delta_decay=0.0514 (ind=0.2691 → ind+cap=0.3204)
+  9. bollinger_pb_1d                          delta_decay=0.0485 (ind=0.1914 → ind+cap=0.2399)
+  10. return_5d_1d                             delta_decay=0.0411 (ind=0.2719 → ind+cap=0.3130)
+
+结论:
+  - 3/34 因子增量衰减 > 10%，说明市值中性化对这些因子有显著影响
+  - 31/34 因子增量衰减 ≤ 10%，市值中性化影响较小
+  - 增量衰减 > 10% 的因子原 IC 含显著市值溢价，联合中性化必要

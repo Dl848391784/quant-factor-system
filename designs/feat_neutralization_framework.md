@@ -1150,7 +1150,8 @@ pytest factor_ic/test_cases/  # 全过
 | 入口审核 | ✅ 通过（2026-06-18） |
 | **P1 实施** | ✅ **完成（2026-06-18）— 6 commits + 73 tests 通过** |
 | **P2 实施** | ✅ **完成（2026-06-18）— 3 commits + 89 tests 通过；默认行为不变** |
-| P3 启动 | 待用户决策启动时机 |
+| **P3 实施** | ✅ **完成（2026-06-18）— 5 commits + 423 tests 通过；默认联合中性化生效** |
+| P4 启动 | 待用户决策启动时机 |
 
 #### P1 已完成的 6 个 commits
 
@@ -1170,6 +1171,30 @@ pytest factor_ic/test_cases/  # 全过
 | `616a859` | P2.1 LogMarketCapProvider 实现 | +340/-0 | 12 passed |
 | `aa5f7cf` | P2.2 注册 provider + 排除清单 | +31/-0 | 42 passed |
 | `1ce2b8d` | P2.3 联合中性化集成测试 | +120/-0 | 6 passed；P1/P2 集合 89 passed |
+
+#### P3 已完成的 5 个 commits
+
+| commit | 主题 | 行数 | 测试 |
+|--------|------|------|------|
+| `e9b75cd` | P3.1 `_resolve_neutralize_specs` helper + `DEFAULT_NEUTRALIZE_SPECS` | +319/-120 | 6 passed |
+| `00fca06` | P3.2 builder `ic_neutralized` schema + legacy mirror | +180/-21 | 25 passed |
+| `2ef86d0` | P3.3 summary 新字段优先读取 + 「中性化方式」列 | +107/-25 | 17 passed；131 集合 |
+| `f91e142` | P3.1b runner 默认 `industry+log_market_cap` 联合中性化 | +64/-41 | 423 passed, 66 skipped |
+| `<本 commit>` | P3.4 真实数据衰减对比报告 + design.md 状态 | +约 200 | 34 因子报告生成 |
+
+#### P3.4 衰减对比报告发现 (2026-06-18)
+
+全因子跑 `["industry", "log_market_cap"]` vs P0/P1 `["industry"]`，对比 decay_rate：
+
+- **3/34 因子增量衰减 > 10%**（市值中性化必要）：
+  - `tail_volume_acceleration_1d`: delta_decay=23.9%（ind=-44.2% → ind+cap=-20.2%，inverse 减弱）
+  - `tail_price_slope_1d`: delta_decay=12.4%（ind=30.5% → ind+cap=42.9%，市值溢价显著）
+  - `tail_price_volume_intensity_1d`: delta_decay=11.8%（ind=32.2% → ind+cap=44.0%，市值溢价显著）
+- **31/34 因子增量衰减 ≤ 10%**（市值中性化影响小）
+- `return_3d_1d` 因使用 `custom_factor_calculation`（complex 因子），脚本用 `run_simple_factor_ic` 未覆盖，combined IC 缺失（1/34，不影响结论）
+- 8 个行业聚合因子（`industry_*` / `capital_flow_*`）在排除清单中被 industry 弹出，仅跑 `log_market_cap`
+
+报告文件: `temporary/p3_decay_comparison.txt` + `temporary/p3_decay_comparison.json`
 
 #### P1 关键交付物
 
