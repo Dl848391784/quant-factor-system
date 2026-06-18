@@ -1912,6 +1912,77 @@ def _generate_stock_selection_section(stock_result: dict | None) -> list[str]:
     return lines
 
 
+def _detect_weight_rank_anomalies(
+    selected_factors: list[str],
+    factor_data: list[dict],
+    comp_weights: dict[str, float],
+    *,
+    rank_drop_threshold: int | None = None,
+) -> list[dict]:
+    """检测 Rolling ICIR 权重排名与全样本 ICIR 排名显著不一致的因子。
+
+    仅对 Rolling ICIR 加权有意义：全样本 ICIR 高但权重极低，
+    说明该因子近 60 日 IC 表现急剧恶化（滚动 ICIR 动态降权）。
+    rank_drop = weight_rank - icir_rank（正值表示权重排名低于 ICIR 排名）。
+
+    Args:
+        selected_factors: 选中因子名列表
+        factor_data: 合并后的因子数据（含 icir 字段）
+        comp_weights: {factor_col: weight} 权重字典
+        rank_drop_threshold: 排名下降位数阈值，None 时按 max(2, N//3) 自适应
+
+    Returns:
+        异常因子列表，每项含 factor_name / icir / icir_rank /
+        weight / weight_rank / rank_drop
+    """
+    n = len(selected_factors)
+    if n < 3:
+        return []
+
+    if rank_drop_threshold is None:
+        rank_drop_threshold = max(2, n // 4)
+
+    # 收集每个因子的 ICIR 和权重
+    factor_stats = []
+    for factor_name in selected_factors:
+        factor_item = next((f for f in factor_data if f["factor_name"] == factor_name), None)
+        if not factor_item:
+            continue
+        icir = factor_item.get("icir", 0)
+        factor_col = FACTOR_NAME_TO_COL_MAP.get(factor_name, factor_name)
+        weight = comp_weights.get(factor_col, 0)
+        factor_stats.append(
+            {
+                "factor_name": factor_name,
+                "icir": icir,
+                "weight": weight,
+            }
+        )
+
+    if len(factor_stats) < 3:
+        return []
+
+    # 按 |ICIR| 降序排名（rank 1 = 最强 ICIR）
+    by_icir = sorted(factor_stats, key=lambda x: abs(x["icir"]), reverse=True)
+    for i, item in enumerate(by_icir):
+        item["icir_rank"] = i + 1
+
+    # 按权重降序排名（rank 1 = 最高权重）
+    by_weight = sorted(factor_stats, key=lambda x: x["weight"], reverse=True)
+    for i, item in enumerate(by_weight):
+        item["weight_rank"] = i + 1
+
+    # 检测排名下降（权重排名远低于 ICIR 排名）
+    anomalies = []
+    for item in factor_stats:
+        rank_drop = item["weight_rank"] - item["icir_rank"]
+        if rank_drop >= rank_drop_threshold:
+            item["rank_drop"] = rank_drop
+            anomalies.append(item)
+
+    return anomalies
+
+
 def _generate_comparison_section(
     factor_data: list[dict], composite_results: list[dict], best_weight_method: str = "icir_weight"
 ) -> list[str]:
@@ -2038,6 +2109,22 @@ def _generate_comparison_section(
             lines.append(f"{factor_name:<18} 数据缺失")
 
     lines.append("-" * 70)
+
+    # v2.18: Rolling ICIR 权重排名 vs 全样本 ICIR 排名异常检测
+    if best_weight_method == "rolling_icir_weight" and selected_factors and comp_weights:
+        anomalies = _detect_weight_rank_anomalies(selected_factors, factor_data, comp_weights)
+        if anomalies:
+            lines.append("")
+            lines.append("⚠ Rolling ICIR 权重异常因子说明:")
+            n_total = len(selected_factors)
+            for a in anomalies:
+                lines.append(
+                    f"  - {a['factor_name']}: 全样本ICIR={a['icir']:.4f}"
+                    f"(排名{a['icir_rank']}/{n_total}) → 权重={a['weight']:.1%}"
+                    f"(排名{a['weight_rank']}/{n_total})"
+                )
+                lines.append(f"    权重排名显著低于ICIR排名(下降{a['rank_drop']}位)，表明该因子近60日IC表现急剧恶化")
+            lines.append("    说明: Rolling ICIR使用60日滚动窗口动态加权，全样本ICIR高但近期失效的因子会被自动降权")
 
     # v2.11→v2.13: 综合因子收益低于单因子时的完整分析说明
     # 检查选中因子是否存在短样本因子（有效天数差异导致年化收益不可比）

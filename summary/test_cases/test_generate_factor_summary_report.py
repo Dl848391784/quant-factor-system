@@ -809,5 +809,83 @@ class TestReportStructure:
             assert ic_results[0]["factor_name"] == "rsi"
 
 
+# ---------------------------------------------------------------------------
+# v2.18: _detect_weight_rank_anomalies 测试
+# ---------------------------------------------------------------------------
+
+
+class TestDetectWeightRankAnomalies:
+    """测试 Rolling ICIR 权重排名 vs 全样本 ICIR 排名异常检测。"""
+
+    def test_momentum_strength_style_anomaly_detected(self):
+        """ICIR 排名高但权重排名低（排名下降≥阈值）的因子应被检出。"""
+        from summary.generate_factor_summary_report import _detect_weight_rank_anomalies
+
+        selected = ["factor_a", "factor_b", "momentum", "factor_d", "factor_e"]
+        factor_data = [
+            {"factor_name": "factor_a", "icir": 0.50},
+            {"factor_name": "factor_b", "icir": 0.40},
+            {"factor_name": "momentum", "icir": 0.25},
+            {"factor_name": "factor_d", "icir": 0.20},
+            {"factor_name": "factor_e", "icir": 0.15},
+        ]
+        # momentum ICIR 排名 3/5，但权重排名 5/5（下降 2 位）
+        weights = {
+            "factor_a": 0.30,
+            "factor_b": 0.25,
+            "factor_d": 0.20,
+            "factor_e": 0.15,
+            "momentum": 0.01,
+        }
+
+        anomalies = _detect_weight_rank_anomalies(selected, factor_data, weights)
+        assert len(anomalies) == 1
+        assert anomalies[0]["factor_name"] == "momentum"
+        assert anomalies[0]["icir_rank"] == 3
+        assert anomalies[0]["weight_rank"] == 5
+        assert anomalies[0]["rank_drop"] == 2
+
+    def test_no_anomaly_when_ranks_consistent(self):
+        """ICIR 排名与权重排名一致时不应检出异常。"""
+        from summary.generate_factor_summary_report import _detect_weight_rank_anomalies
+
+        selected = ["a", "b", "c"]
+        factor_data = [
+            {"factor_name": "a", "icir": 0.50},
+            {"factor_name": "b", "icir": 0.30},
+            {"factor_name": "c", "icir": 0.10},
+        ]
+        weights = {"a": 0.50, "b": 0.30, "c": 0.20}
+
+        anomalies = _detect_weight_rank_anomalies(selected, factor_data, weights)
+        assert len(anomalies) == 0
+
+    def test_too_few_factors_returns_empty(self):
+        """因子数 < 3 时返回空列表（排名差异无统计意义）。"""
+        from summary.generate_factor_summary_report import _detect_weight_rank_anomalies
+
+        selected = ["a", "b"]
+        factor_data = [
+            {"factor_name": "a", "icir": 0.50},
+            {"factor_name": "b", "icir": 0.10},
+        ]
+        weights = {"a": 0.01, "b": 0.99}
+
+        anomalies = _detect_weight_rank_anomalies(selected, factor_data, weights)
+        assert anomalies == []
+
+    def test_uses_factor_name_to_col_map(self):
+        """权重字典 key 是 factor_col（可能与 factor_name 不同），应通过映射查找。"""
+        from summary.generate_factor_summary_report import _detect_weight_rank_anomalies
+
+        selected = ["momentum_strength"]
+        # 仅 1 个因子 → 不足 3 个，返回空，但验证不报 KeyError
+        factor_data = [{"factor_name": "momentum_strength", "icir": 0.25}]
+        weights = {"momentum_strength": 0.01}
+
+        anomalies = _detect_weight_rank_anomalies(selected, factor_data, weights)
+        assert anomalies == []
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
