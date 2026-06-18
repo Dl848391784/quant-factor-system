@@ -46,7 +46,74 @@
 
 ## 三、决策流程图
 
-> R22b 待补 ASCII 决策树
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  run_factor_ic_analysis(factor_name, neutralize=True, ...)      │
+│  (factor_ic/common/factor_ic_runner.py)                         │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+                               ▼
+        ┌──────────────────────────────────────────────────┐
+        │  Step 1: raw IC 计算（现有主流程，不受影响）       │
+        │  → ic_metrics + factor_direction + statistical... │
+        └──────────────────────────────┬───────────────────┘
+                                       │
+                                       ▼
+        ┌──────────────────────────────────────────────────┐
+        │  Step 2: _resolve_neutralize_decision()           │
+        │  优先级 #1 排除清单 > #2 用户禁用                   │
+        └──────┬─────────────────┬─────────────────┬───────┘
+               │                 │                 │
+   factor 在排除清单           neutralize=False      其余情况
+   (industry_*/capital_flow_*) (用户显式禁用)       (默认走中性化)
+               │                 │                 │
+               ▼                 ▼                 ▼
+        enabled=False      enabled=False        enabled=True
+        skipped_reason=    skipped_reason=
+        EXCLUDED           USER_DISABLED
+               │                 │                 │
+               │                 │                 ▼
+               │                 │      ┌──────────────────────────┐
+               │                 │      │ Step 3: 残差回归           │
+               │                 │      │ a) merge_industry_column  │
+               │                 │      │ b) 剔除 '其他' 行业         │
+               │                 │      │ c) industry_neutral_      │
+               │                 │      │    residual()             │
+               │                 │      │ d) IC on 残差 → neutral_ic │
+               │                 │      └──────────┬───────────────┘
+               │                 │                 │
+               │                 │                 ▼
+               │                 │         ┌─────────────────┐
+               │                 │         │  成功 / 失败？    │
+               │                 │         └────┬────────┬───┘
+               │                 │              │ 成功    │ 失败 (NaN/...)
+               │                 │              ▼        ▼
+               │                 │      enabled=True  enabled=False
+               │                 │      13 字段       skipped_reason=
+               │                 │      payload      "computation failed:..."
+               │                 │              │        │
+               └─────────────────┴──────────────┼────────┘
+                                                ▼
+        ┌──────────────────────────────────────────────────┐
+        │  Step 4: build_ic_result(ic_neutral_payload=...)  │
+        │  → _normalize_neutral_payload() 校验+顺序固定     │
+        │  → result["ic_neutral_industry"] = 标准化 schema   │
+        └──────────────────────────────┬───────────────────┘
+                                       │
+                                       ▼
+        ┌──────────────────────────────────────────────────┐
+        │  Step 5: validate_and_save_output()               │
+        │  → schema oneOf 校验 + additionalProperties=false │
+        │  → 写入 factor_ic/result/ic_<因子>_*.json          │
+        └──────────────────────────────────────────────────┘
+```
+
+**关键决策点**：
+1. **优先级**：排除清单 > 用户禁用（`industry_*` 因子即使 `neutralize=True` 也强制 disabled）
+2. **降级原则**：Step 3 失败 → disabled payload（不污染 raw IC 主流程）
+3. **'其他' 行业剔除**：行业映射缺失的股票被聚到 '其他'，无法估计行业 beta，剔除避免污染残差
+4. **min_industry_stocks**：默认 5（每个行业 < 5 只股票时无法稳定估计行业均值），少于阈值的行业整体剔除
+
 
 ---
 
