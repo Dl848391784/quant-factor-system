@@ -47,6 +47,7 @@ import pandas as pd
 try:
     from data_fetchers.common.logger_config import setup_logger
     from data_fetchers.common.paths import (
+        get_factor_data_backup_file,
         get_market_cap_data_file,
         get_module_logs_dir,
         get_module_result_dir,
@@ -55,6 +56,7 @@ try:
 except ImportError:
     from common.logger_config import setup_logger  # type: ignore[no-redef]
     from common.paths import (  # type: ignore[no-redef]
+        get_factor_data_backup_file,
         get_market_cap_data_file,
         get_module_logs_dir,
         get_module_result_dir,
@@ -150,7 +152,7 @@ __all__ = [
 RESULT_DIR = get_module_result_dir()
 OUTPUT_FILE = get_market_cap_data_file()
 STOCK_LIST_FILE = get_stock_list_file()
-FACTOR_DATA_FILE = RESULT_DIR / "factor_data.json.gz"
+FACTOR_DATA_FILE = get_factor_data_backup_file()
 
 # ============================================================
 # 日志配置（遵循 AGENTS.md 规则 #9）

@@ -23,9 +23,9 @@ _PROJECT_ROOT: Path | None = None
 def get_project_root() -> Path:
     """
     获取项目根目录
-    
+
     使用相对于本模块的位置计算，避免硬编码绝对路径。
-    
+
     Returns:
         Path: 项目根目录路径
     """
@@ -39,11 +39,11 @@ def get_project_root() -> Path:
 def get_stock_list_file() -> Path:
     """
     获取股票列表结果文件路径
-    
+
     Returns:
         Path: data_fetchers/result/stock_list.json 文件路径（遵循 MODULE.md 约束 2）
     """
-    return get_module_result_dir() / 'stock_list.json'
+    return get_module_result_dir() / "stock_list.json"
 
 
 def get_market_cap_data_file() -> Path:
@@ -58,48 +58,61 @@ def get_market_cap_data_file() -> Path:
     Returns:
         Path: data_fetchers/result/market_cap_data.json.gz 文件路径
     """
-    return get_module_result_dir() / 'market_cap_data.json.gz'
+    return get_module_result_dir() / "market_cap_data.json.gz"
+
+
+def get_factor_data_backup_file() -> Path:
+    """
+    获取 factor_data.json.gz 备份文件路径
+
+    用途：fetch_market_cap 从中读取 meta.date_range 作为目标区间默认值（与因子面板对齐）
+    稳定性：[experimental] 2026-06-18
+
+    Returns:
+        Path: data_fetchers/result/factor_data.json.gz 文件路径
+    """
+    return get_module_result_dir() / "factor_data.json.gz"
 
 
 def get_logs_dir() -> Path:
     """
     获取项目级日志目录
-    
+
     Returns:
         Path: logs/ 目录路径
     """
-    return get_project_root() / 'logs'
+    return get_project_root() / "logs"
 
 
 def get_module_logs_dir() -> Path:
     """
     获取模块级日志目录（data_fetchers/logs）
-    
+
     Returns:
         Path: data_fetchers/logs/ 目录路径
     """
-    return Path(__file__).parent.parent / 'logs'
+    return Path(__file__).parent.parent / "logs"
 
 
 def get_module_result_dir() -> Path:
     """
     获取模块级结果目录（data_fetchers/result）
-    
+
     统一数据源路径，所有因子数据、收益数据、换手率数据都在此目录。
-    
+
     Returns:
         Path: data_fetchers/result/ 目录路径
     """
-    return Path(__file__).parent.parent / 'result'
+    return Path(__file__).parent.parent / "result"
 
 
 def ensure_dir(dir_path: Path) -> Path:
     """
     确保目录存在，不存在则创建
-    
+
     Args:
         dir_path: 目录路径
-        
+
     Returns:
         Path: 目录路径
     """
@@ -132,7 +145,7 @@ class Paths:
 paths = Paths()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # 测试路径获取
     print("项目根目录:", get_project_root())
     print("模块结果目录:", get_module_result_dir())
