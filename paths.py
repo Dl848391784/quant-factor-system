@@ -36,6 +36,7 @@ FACTOR_IC_RESULT = PROJECT_ROOT / "factor_ic" / "result"
 BACKTEST_RESULT = PROJECT_ROOT / "backtest" / "result"
 COMPREHENSIVE_FACTOR_RESULT = PROJECT_ROOT / "comprehensive_factor" / "result"
 SUMMARY_RESULT = PROJECT_ROOT / "summary" / "result"
+REVERSE_DISCOVERY_RESULT = PROJECT_ROOT / "reverse_discovery" / "result"
 
 # ============================================================================
 # 统一数据源（单一来源原则）
@@ -67,6 +68,7 @@ FACTOR_IC_LOGS = PROJECT_ROOT / "factor_ic" / "logs"
 BACKTEST_LOGS = PROJECT_ROOT / "backtest" / "logs"
 COMPREHENSIVE_FACTOR_LOGS = PROJECT_ROOT / "comprehensive_factor" / "logs"
 SUMMARY_LOGS = PROJECT_ROOT / "summary" / "logs"
+REVERSE_DISCOVERY_LOGS = PROJECT_ROOT / "reverse_discovery" / "logs"
 
 # ============================================================================
 # 临时文件目录
@@ -110,6 +112,7 @@ __all__ = [
     "BACKTEST_RESULT",
     "COMPREHENSIVE_FACTOR_RESULT",
     "SUMMARY_RESULT",
+    "REVERSE_DISCOVERY_RESULT",
     "FACTOR_IC_DATA",
     "MARKET_CAP_DATA",
     "RETURN_DATA_BACKUP",
@@ -119,6 +122,7 @@ __all__ = [
     "BACKTEST_LOGS",
     "COMPREHENSIVE_FACTOR_LOGS",
     "SUMMARY_LOGS",
+    "REVERSE_DISCOVERY_LOGS",
     "TEMPORARY_DIR",
     "DESIGNS_DIR",
     "validate_path_exists",
