@@ -271,8 +271,22 @@ class ICIRWeightMethod(WeightMethodBase):
         # 使用基类公共方法（向量化实现）
         return self._apply_weights(factor_df, factor_cols, weights, self.logger, "ICIR加权")
 
-    def get_weights(self, factor_cols: list[str], ic_results: dict[str, dict],
-                     short_sample_factors: dict[str, int] | None = None) -> dict[str, float]:
+    @staticmethod
+    def _extract_effective_icir(entry: dict) -> float | None:
+        """Plan D: 优先 neutralized_icir，fallback raw icir（design.md §2）
+
+        neutralized_enabled=True 且 neutralized_icir 非 None → 用中性化值
+        否则 → 用 raw icir（向后兼容旧版 IC 结果）
+        """
+        if entry.get("neutralized_enabled") and entry.get("neutralized_icir") is not None:
+            return abs(entry["neutralized_icir"])
+        if entry.get("icir") is not None:
+            return abs(entry["icir"])
+        return None
+
+    def get_weights(
+        self, factor_cols: list[str], ic_results: dict[str, dict], short_sample_factors: dict[str, int] | None = None
+    ) -> dict[str, float]:
         """获取ICIR权重
 
         处理负ICIR：
@@ -285,9 +299,10 @@ class ICIRWeightMethod(WeightMethodBase):
         - 理由：18天数据的高ICIR统计不显著，惩罚后权重更合理
         - 例如：18天因子惩罚系数 = sqrt(18/30) ≈ 0.77，ICIR从0.80降至0.62
 
-        实际 ICIR 值（见 factor_ic/result/*.json）：
-        - volume_ratio: ICIR=0.3058（2024-03-27~2026-05-14）
-        - rsi: ICIR=0.2519
+        Plan D (2026-06-18): 优先使用中性化 ICIR
+        - neutralized_enabled=True 时取 neutralized_icir（纯 alpha 贡献）
+        - fallback raw icir（含行业/市值 beta）
+        - short_sample 惩罚在取值后叠加（两者正交，design.md §2.4）
 
         v1.12 修复：删除冗余条件 or len(...) == 0
         """
@@ -307,32 +322,31 @@ class ICIRWeightMethod(WeightMethodBase):
             # 使用基类公共方法提取因子名（贪婪匹配）
             factor_name = self._get_factor_name_from_col(col)
 
-            if factor_name in ic_results and "icir" in ic_results[factor_name]:
-                icir_abs = abs(ic_results[factor_name]["icir"])
+            # Plan D: 优先 neutralized_icir，fallback raw icir
+            if factor_name in ic_results:
+                icir_abs = self._extract_effective_icir(ic_results[factor_name])
+            elif col in ic_results:
+                icir_abs = self._extract_effective_icir(ic_results[col])
+            else:
+                icir_abs = None
+
+            if icir_abs is not None:
                 # v1.15→v1.16: 短样本因子ICIR权重惩罚（1.5次方）
-                if short_sample_factors and factor_name in short_sample_factors:
-                    valid_days = short_sample_factors[factor_name]
+                penalty_key = factor_name if factor_name in (short_sample_factors or {}) else col
+                if short_sample_factors and penalty_key in short_sample_factors:
+                    valid_days = short_sample_factors[penalty_key]
                     ratio = valid_days / MIN_SAMPLE_DAYS
-                    penalty = ratio ** 1.5  # v1.16: 从 linear 改为 1.5 次方
-                    icir_abs *= penalty
+                    penalty = ratio**1.5  # v1.16: 从 linear 改为 1.5 次方
                     self.logger.info(
                         "短样本因子 %s: ICIR惩罚 %.3f→%.3f (×%d/%d=%.2f)",
-                        factor_name, abs(ic_results[factor_name]["icir"]), icir_abs,
-                        valid_days, MIN_SAMPLE_DAYS, penalty,
+                        penalty_key,
+                        icir_abs,
+                        icir_abs * penalty,
+                        valid_days,
+                        MIN_SAMPLE_DAYS,
+                        penalty,
                     )
-                icir_values[col] = icir_abs
-            elif col in ic_results and "icir" in ic_results[col]:
-                icir_abs = abs(ic_results[col]["icir"])
-                # v1.15→v1.16: 短样本因子ICIR权重惩罚（按列名匹配，1.5次方）
-                if short_sample_factors and col in short_sample_factors:
-                    valid_days = short_sample_factors[col]
-                    ratio = valid_days / MIN_SAMPLE_DAYS
-                    penalty = ratio ** 1.5  # v1.16: 从 linear 改为 1.5 次方
                     icir_abs *= penalty
-                    self.logger.info(
-                        "短样本因子 %s: ICIR惩罚 →%.3f (×%d/%d=%.2f)",
-                        col, icir_abs, valid_days, MIN_SAMPLE_DAYS, penalty,
-                    )
                 icir_values[col] = icir_abs
             else:
                 self.logger.warning("因子 %s 缺失 ICIR，使用等权默认值 1.0", col)
@@ -528,7 +542,9 @@ class RollingICIRWeightMethod(WeightMethodBase):
                 last_valid_icir = ic_series.dropna().iloc[-1] if len(ic_series.dropna()) > 0 else None
                 if last_valid_icir is not None:
                     # T-1 的 map 结果为 NaN → 用 last_valid_icir 匉日期条件填充
-                    is_t1_nan = factor_df[rolling_col].isna() & (factor_df["date_sorted"] == factor_df["date_sorted"].max())
+                    is_t1_nan = factor_df[rolling_col].isna() & (
+                        factor_df["date_sorted"] == factor_df["date_sorted"].max()
+                    )
                     factor_df.loc[is_t1_nan, rolling_col] = abs(last_valid_icir)
 
         # 每日计算权重并加权
@@ -743,8 +759,12 @@ class WeightEngine:
             return self.method.calculate(factor_df, factor_cols, ic_results, ic_daily_data, short_sample_factors)
         return self.method.calculate(factor_df, factor_cols, ic_results, ic_daily_data)
 
-    def get_weights(self, factor_cols: list[str], ic_results: dict[str, dict] | None = None,
-                     short_sample_factors: dict[str, int] | None = None) -> dict[str, float]:
+    def get_weights(
+        self,
+        factor_cols: list[str],
+        ic_results: dict[str, dict] | None = None,
+        short_sample_factors: dict[str, int] | None = None,
+    ) -> dict[str, float]:
         """获取权重"""
         if isinstance(self.method, ICIRWeightMethod) and short_sample_factors:
             return self.method.get_weights(factor_cols, ic_results, short_sample_factors)
