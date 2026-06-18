@@ -38,6 +38,7 @@ from data_fetchers.fetch_market_cap import (  # noqa: E402
     fetch_batch,
     fetch_one_stock,
     load_target_assets,
+    main,
     merge_and_emit_final,
     save_batch_cache,
     validate_final_data,
@@ -701,3 +702,71 @@ def test_validate_final_data_missing_file(tmp_path: Path) -> None:
     assert n == 0
     assert na == 0
     assert nd == 0
+
+
+# ============================================================
+# TC-U-26..27: main 顶层编排（mock fetch_batch）
+# ============================================================
+
+
+def test_main_happy_path(
+    tmp_path: Path,
+    stock_list_file: Path,
+    fake_em_df: pd.DataFrame,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TC-U-26: main happy path（mock 网络 + 临时目录），返回 0。"""
+    # 重定向所有 IO 到 tmp_path
+    final_file = tmp_path / "market_cap_data.json.gz"
+    monkeypatch.setattr("data_fetchers.fetch_market_cap.STOCK_LIST_FILE", stock_list_file)
+    monkeypatch.setattr("data_fetchers.fetch_market_cap.RESULT_DIR", tmp_path)
+    monkeypatch.setattr("data_fetchers.fetch_market_cap.OUTPUT_FILE", final_file)
+
+    # mock fetch_one_stock 返回 fake DataFrame（避免真实网络）
+    def fake_fetch_one_stock(symbol: str, **kwargs: object) -> pd.DataFrame:
+        df = fake_em_df.copy()
+        # _normalize_fields 会被网络层调用前 / fetch_one_stock 内调用
+        # 直接返回 raw em 格式，让 fetch_one_stock 自己 normalize
+        return df
+
+    # 按 fetch_one_stock 真实接口：返回 normalized 12 列 df
+    from data_fetchers.fetch_market_cap import _clip_to_target_range, _normalize_fields
+
+    def fake_fetch_one_normalized(
+        symbol: str,
+        target_date_range: tuple[str, str],
+        max_retries: int = 3,
+        logger_arg: object = None,
+    ) -> pd.DataFrame:
+        df = fake_em_df.copy()
+        df = _normalize_fields(df, symbol=symbol)
+        df = _clip_to_target_range(df, target_date_range)
+        return df
+
+    monkeypatch.setattr("data_fetchers.fetch_market_cap.fetch_one_stock", fake_fetch_one_normalized)
+
+    rc = main(target_date_range=("2024-03-18", "2024-03-20"))
+    assert rc == 0
+    assert final_file.exists()
+
+    import gzip as _gzip
+
+    with _gzip.open(final_file, "rt", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    # stock_list 含 5 stocks 过滤 ST 后 3 个 → 3 assets × 3 days = 9 records
+    assert payload["meta"]["n_assets"] == 3
+    assert payload["meta"]["n_records"] == 9
+    assert payload["meta"]["fetch_stats"]["total_success"] == 3
+    assert payload["meta"]["fetch_stats"]["total_fail"] == 0
+
+
+def test_main_empty_stock_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TC-U-27: stock_list 为空返回 1。"""
+    empty_list = tmp_path / "empty_list.json"
+    empty_list.write_text(json.dumps({"stocks": []}), encoding="utf-8")
+    monkeypatch.setattr("data_fetchers.fetch_market_cap.STOCK_LIST_FILE", empty_list)
+    monkeypatch.setattr("data_fetchers.fetch_market_cap.RESULT_DIR", tmp_path)
+
+    rc = main(target_date_range=("2024-03-18", "2024-03-20"))
+    assert rc == 1

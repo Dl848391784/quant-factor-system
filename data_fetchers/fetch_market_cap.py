@@ -796,9 +796,168 @@ def main(
     target_date_range: tuple[str, str] | None = None,
     logger_arg: logging.Logger | None = None,
 ) -> int:
-    """顶层编排（详见 design.md §3.1 F1 / §5.1）。"""
-    raise NotImplementedError("C2d 实现")
+    """顶层编排（详见 design.md §3.1 F1 / §5.1）。
+
+    流程:
+        1. 读取目标区间（None 时从 factor_data.json.gz meta.date_range 推断）
+        2. 加载目标股票（load_target_assets，过滤 ST）
+        3. 切批：BATCH_SIZE=250 切片
+        4. 每批 fetch_batch → save_batch_cache
+        5. 全部完成后 merge_and_emit_final
+        6. validate_final_data 校验
+        7. 总失败率 > 5% 或 V1-V7 失败 → 返回 1
+
+    Args:
+        target_date_range: ``(start, end)`` 闭区间；None 时自动推断。
+        logger_arg: 日志记录器。
+
+    Returns:
+        退出码（遵循 AGENTS.md 规则 #6）：
+            0 = 成功
+            1 = 运行时错误（失败率/校验失败/上游缺失）
+            2 = 配置或导入错误（已被外层 try/except 捕获）
+    """
+    log = logger_arg if logger_arg is not None else logger
+    log.info("=" * 70)
+    log.info("fetch_market_cap.py v%s 启动", _OUTPUT_VERSION)
+    log.info("=" * 70)
+
+    start_time = time.time()
+
+    # 1. 推断目标区间
+    try:
+        if target_date_range is None:
+            target_date_range = _read_factor_data_date_range(logger_arg=log)
+        log.info("目标日期区间: [%s, %s]", target_date_range[0], target_date_range[1])
+    except (FileNotFoundError, KeyError) as exc:
+        log.error("读取目标日期区间失败: %s", exc)
+        return 1
+
+    # 2. 加载目标股票
+    try:
+        symbols = load_target_assets(logger_arg=log)
+    except (FileNotFoundError, KeyError, TypeError) as exc:
+        log.error("加载股票列表失败: %s", exc)
+        return 1
+
+    if not symbols:
+        log.error("目标股票列表为空")
+        return 1
+
+    # 3. 切批
+    n = len(symbols)
+    batches = [symbols[i : i + BATCH_SIZE] for i in range(0, n, BATCH_SIZE)]
+    total_batches = len(batches)
+    log.info(
+        "共 %d 只股票，切分为 %d 批（BATCH_SIZE=%d，max_workers=%d）",
+        n,
+        total_batches,
+        BATCH_SIZE,
+        MAX_WORKERS,
+    )
+
+    # 4. 逐批拉取 + 落盘
+    total_success = 0
+    total_fail = 0
+    failed_batches = 0
+    for idx, batch_symbols in enumerate(batches, start=1):
+        df, succ, fail = fetch_batch(
+            batch_symbols,
+            batch_idx=idx,
+            total_batches=total_batches,
+            target_date_range=target_date_range,
+            max_workers=MAX_WORKERS,
+            logger_arg=log,
+        )
+        total_success += succ
+        total_fail += fail
+
+        if df is None:
+            failed_batches += 1
+            log.error("批次 %d 失败率超 50%%，已记录但继续后续批次", idx)
+            continue
+
+        if df.empty:
+            log.warning("批次 %d 无成功记录，跳过落盘", idx)
+            continue
+
+        save_batch_cache(idx, df, logger_arg=log)
+
+    elapsed = time.time() - start_time
+    log.info(
+        "全部批次完成: 总耗时=%.2fs, 成功=%d, 失败=%d, 失败批次=%d",
+        elapsed,
+        total_success,
+        total_fail,
+        failed_batches,
+    )
+
+    # 5. 合并 + 落盘
+    n_records = merge_and_emit_final(
+        total_batches=total_batches,
+        target_date_range=target_date_range,
+        total_success=total_success,
+        total_fail=total_fail,
+        elapsed_seconds=elapsed,
+        logger_arg=log,
+    )
+    if n_records == 0:
+        log.error("合并阶段无任何记录，终止")
+        return 1
+
+    # 6. 校验
+    ok, n_rec, n_assets, n_days = validate_final_data(logger_arg=log)
+    if not ok:
+        log.error("最终数据校验失败")
+        return 1
+
+    # 7. 总失败率检查（单点决策：所有批次完成后整体阈值 5%）
+    total_attempts = total_success + total_fail
+    overall_fail_rate = total_fail / total_attempts if total_attempts > 0 else 0.0
+    if overall_fail_rate > TOTAL_FAIL_RATE_THRESHOLD:
+        log.error(
+            "总失败率 %.2f%% > 阈值 %.2f%%，标记为运行时错误",
+            overall_fail_rate * 100,
+            TOTAL_FAIL_RATE_THRESHOLD * 100,
+        )
+        return 1
+
+    log.info("=" * 70)
+    log.info(
+        "✓ 全部完成: n_records=%d, n_assets=%d, n_days=%d, 总失败率=%.2f%%, 耗时=%.2fs",
+        n_rec,
+        n_assets,
+        n_days,
+        overall_fail_rate * 100,
+        elapsed,
+    )
+    log.info("=" * 70)
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="抓取 A 股日频市值数据 → market_cap_data.json.gz",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--start",
+        default=None,
+        help="起始日期 (YYYY-MM-DD)；不传则从 factor_data.json.gz 读取",
+    )
+    parser.add_argument(
+        "--end",
+        default=None,
+        help="结束日期 (YYYY-MM-DD)；不传则从 factor_data.json.gz 读取",
+    )
+    args = parser.parse_args()
+
+    cli_range: tuple[str, str] | None = None
+    if args.start and args.end:
+        cli_range = (args.start, args.end)
+    elif args.start or args.end:
+        parser.error("--start 与 --end 必须同时提供")
+
+    sys.exit(main(target_date_range=cli_range))
