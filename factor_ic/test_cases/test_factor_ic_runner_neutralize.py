@@ -75,3 +75,26 @@ def test_r15b_user_disabled_non_excluded_factor():
     assert reason == NEUTRALIZE_SKIP_REASON_USER_DISABLED
     # 防御：rsi 不在排除清单（防止误加入清单）
     assert "rsi" not in INDUSTRY_NEUTRALIZE_EXCLUDED
+
+
+# ---------------------------------------------------------------------------
+# R15c: 排除清单优先级 > 用户参数（neutralize=True/False 都强制 EXCLUDED）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("user_neutralize", [True, False])
+def test_r15c_excluded_overrides_user_param(user_neutralize):
+    """capital_flow_intensity 在排除清单 → neutralize=True 或 False 都强制 EXCLUDED。
+
+    协议依据: design.md §5.3.2 优先级 #1 > #4（排除清单覆盖用户开关）
+    """
+    enabled, reason = _resolve_neutralize_decision(
+        factor_name="capital_flow_intensity",
+        neutralize=user_neutralize,
+        mode="full",
+    )
+    assert enabled is False
+    assert reason == NEUTRALIZE_SKIP_REASON_EXCLUDED, (
+        f"排除清单应强制返回 EXCLUDED，user_neutralize={user_neutralize} 时收到 reason={reason!r}"
+    )
+    assert "capital_flow_intensity" in INDUSTRY_NEUTRALIZE_EXCLUDED
