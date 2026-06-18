@@ -72,6 +72,7 @@ factor_ic_analyzer/
 ├── comprehensive_factor/   # 综合因子模块
 ├── data_fetchers/          # 数据获取模块
 ├── summary/                # 数据汇总模块
+├── reverse_discovery/      # 逆向因子发现模块（experimental，2026-06-18 新增）
 ├── scripts/                # 自动化检查脚本
 ├── tests/integration/      # 跨模块集成测试
 ├── designs/                # design.md 存放目录
@@ -81,7 +82,7 @@ factor_ic_analyzer/
 └── PROJECT.md              # 本文件
 ```
 
-**业务模块统一约定**：每个业务模块（factor_ic / backtest / comprehensive_factor / data_fetchers / summary）必须包含：
+**业务模块统一约定**：每个业务模块（factor_ic / backtest / comprehensive_factor / data_fetchers / summary / reverse_discovery）必须包含：
 - `test_cases/` —— 单元测试
 - `schemas/` —— JSON Schema 校验文件
 - 产物输出到 `result/`（见 H2）
