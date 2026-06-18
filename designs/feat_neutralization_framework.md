@@ -754,15 +754,20 @@ NEUTRALIZE_EXCLUDED: dict[str, frozenset[str]] = {
 
 P2 不改默认行为（`neutralize_specs=["industry"]`），仅添加新 Provider 让用户能手动启用。
 
+> **P2 实施状态 (2026-06-18)**：✅ 已完成。实际实现修正了设计伪代码中的一个细节：
+> `market_cap_data.json.gz` 顶层结构是 gzip JSON `{meta, data}`，因此
+> `LogMarketCapProvider.load()` 使用 `gzip.open + json.load(...)["data"]`，
+> 不使用 `pd.read_json(..., compression="gzip")` 直接读取裸 records。
+
 ### 9.1 P2 commit 链
 
 | commit | 名称 | 文件 | 行数 | 验证 |
 |--------|------|------|------|------|
-| **P2.1** | `LogMarketCapProvider` 实现 | `factor_ic/common/control_providers/log_market_cap.py` + 测试 | +200 | 单元测试：load/preprocess/to_design/filter/get_meta |
-| **P2.2** | 注册到 PROVIDER_REGISTRY + 排除清单 | `control_providers/__init__.py` + `factor_ic_runner.py` | +10 | `build_providers(["log_market_cap"])` 通过；排除 `log_market_cap` 因子自身 |
-| **P2.3** | 联合中性化集成测试（手动指定 specs） | `factor_ic/test_cases/test_neutralizer_combined.py` | +150 | `["industry","log_market_cap"]` 路径跑通；多重共线性护栏生效 |
+| ✅ `616a859` | `LogMarketCapProvider` 实现 | `factor_ic/common/control_providers/log_market_cap.py` + 测试 | +340 | 12 passed |
+| ✅ `aa5f7cf` | 注册到 PROVIDER_REGISTRY + 排除清单 | `control_providers/__init__.py` + `factor_ic_runner.py` + 测试 | +31 | 42 passed |
+| ✅ `1ce2b8d` | 联合中性化集成测试（手动指定 specs） | `factor_ic/test_cases/test_neutralizer_combined.py` | +120 | 6 passed；P1/P2 集合 89 passed |
 
-总计 3 个 commit，约 +360 行。
+总计 3 个代码 commit，约 +491 行；P2 未改变 runner 默认行为。
 
 ### 9.2 P2 各 commit 实施细节
 
@@ -772,40 +777,48 @@ P2 不改默认行为（`neutralize_specs=["industry"]`），仅添加新 Provid
 
 **实现要点**:
 ```python
+import gzip
+import json
 import numpy as np
 import pandas as pd
-from data_fetchers.common.paths import MARKET_CAP_DATA  # 已在 P0 加
+from data_fetchers.common.paths import get_market_cap_data_file
 
 
 class LogMarketCapProvider:
     name = "log_market_cap"
     column_type = "numerical"
+    join_keys = ["date", "asset"]
     
     # 配置
     SOURCE_FIELD = "circ_market_cap"   # 用流通市值，不用总市值
+    OUTPUT_COL = "log_market_cap"
     WINSORIZE_QUANTILES = (0.01, 0.99) # Barra 标准
-    LN_FLOOR = 1e6                     # 1 元防 ln(0)，理论不会触发（A股流通市值最小百万级）
     
     def __init__(self):
         self._meta = {
+            "source_field": self.SOURCE_FIELD,
             "winsorize_quantiles": list(self.WINSORIZE_QUANTILES),
+            "n_loaded": 0,
+            "n_after_slice": 0,
+            "n_missing_or_non_positive_dropped": 0,
             "n_winsorized_low": 0,
             "n_winsorized_high": 0,
-            "n_zero_dropped": 0,
         }
     
     def load(self, dates, assets, *, logger=None):
-        # 从 market_cap_data.json.gz 读 [date, asset, circ_market_cap]
+        # 从 gzip JSON {meta,data} 读 [date, asset, circ_market_cap]
         # 按 dates / assets 切片
-        df = pd.read_json(MARKET_CAP_DATA, compression="gzip")
+        with gzip.open(get_market_cap_data_file(), "rt", encoding="utf-8") as fp:
+            payload = json.load(fp)
+        df = pd.DataFrame.from_records(payload["data"])
         df = df[df["date"].isin(dates) & df["asset"].isin(assets)]
         return df[["date", "asset", self.SOURCE_FIELD]]
     
     def preprocess(self, df, *, logger=None):
-        # 1. 剔除 circ_market_cap <= 0（护栏）
+        # 1. 剔除 circ_market_cap 缺失或 <= 0（护栏）
         before = len(df)
-        df = df[df[self.SOURCE_FIELD] > 0].copy()
-        self._meta["n_zero_dropped"] = before - len(df)
+        df = df[df[self.SOURCE_FIELD].notna() & (df[self.SOURCE_FIELD] > 0)].copy()
+        self._meta["n_missing_or_non_positive_dropped"] = before - len(df)
         
         # 2. ln 变换
         df["log_market_cap"] = np.log(df[self.SOURCE_FIELD])
@@ -1135,10 +1148,11 @@ pytest factor_ic/test_cases/  # 全过
 |------|-----|
 | design.md 起草 | ✅ 完成（2026-06-18） |
 | 入口审核 | ✅ 通过（2026-06-18） |
-| **P1 实施** | ✅ **完成（2026-06-18）— 7 commits + 81 tests 通过** |
-| P2 启动 | 待用户决策启动时机 |
+| **P1 实施** | ✅ **完成（2026-06-18）— 6 commits + 73 tests 通过** |
+| **P2 实施** | ✅ **完成（2026-06-18）— 3 commits + 89 tests 通过；默认行为不变** |
+| P3 启动 | 待用户决策启动时机 |
 
-#### P1 已完成的 7 个 commits
+#### P1 已完成的 6 个 commits
 
 | commit | 主题 | 行数 | 测试 |
 |--------|------|------|------|
@@ -1147,7 +1161,15 @@ pytest factor_ic/test_cases/  # 全过
 | `f9a0652` | P1.4 runner 切到 neutralizer 引擎 | +12/-7 | RSI 端到端 abs diff = 0 |
 | `67ea446` | P1.5 排除清单升级 dict 结构 + 别名兼容 | +129/-17 | 9 + 7 旧 passed |
 | `d33c9f5` | P1.6 全因子 hard gate baseline + 34 因子快照 | +1173/-0 | 34 passed |
-| `<本 commit>` | P1.7 文档同步（flow doc + design.md 状态） | +约 60/-15 | 人工审核 |
+| `faa5d91` | P1.7 文档同步（flow doc + design.md 状态） | +52/-6 | 人工审核 |
+
+#### P2 已完成的 3 个 commits
+
+| commit | 主题 | 行数 | 测试 |
+|--------|------|------|------|
+| `616a859` | P2.1 LogMarketCapProvider 实现 | +340/-0 | 12 passed |
+| `aa5f7cf` | P2.2 注册 provider + 排除清单 | +31/-0 | 42 passed |
+| `1ce2b8d` | P2.3 联合中性化集成测试 | +120/-0 | 6 passed；P1/P2 集合 89 passed |
 
 #### P1 关键交付物
 

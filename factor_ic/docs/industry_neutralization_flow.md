@@ -1,9 +1,10 @@
 # 行业中性化 IC 计算流程文档
 
 > 生成时间: 2026-06-18 (北京时间)
-> 审阅版本: v1.1
+> 审阅版本: v1.2
 > 实施完成日期: 2026-06-18
 > v1.1 更新: 2026-06-18 P1 重构 — neutralizer 引擎 + ControlProvider 协议 + 排除清单 dict 化
+> v1.2 更新: 2026-06-18 P2 扩展 — LogMarketCapProvider + 联合中性化测试（默认行为不变）
 > 流程归属: `factor_ic/common/` 公共流程（跨因子复用）
 > 配套规范: `factor_ic/MODULE.md` M66 (类别 L. 行业中性化)
 > 配套设计: `designs/feat_neutralization_framework.md`（P1 后主设计文档）
@@ -27,6 +28,26 @@
 `neutralize([IndustryProvider()])`，`drop_first=False` + `fit_intercept=True`
 下两路逐位一致（`test_neutralizer_parity.py` + `test_p1_baseline_snapshot.py`
 34 因子全因子快照验证 abs diff = 0）。
+
+---
+
+## P2 扩展变更摘要 (2026-06-18)
+
+P2 在不改变 runner 默认行为的前提下，新增市值控制变量能力：
+
+1. **新增 `LogMarketCapProvider`**：读取 `data_fetchers/result/market_cap_data.json.gz`
+   中的 `circ_market_cap`（流通市值），生成 `log_market_cap` 连续控制列。
+2. **预处理口径**：缺失/非正值剔除 → `ln(circ_market_cap)` → 每日截面
+   winsorize(1%, 99%) → 不标准化。
+3. **注册表接入**：`PROVIDER_REGISTRY["log_market_cap"] = LogMarketCapProvider`，
+   `build_providers(["industry", "log_market_cap"])` 可手动构造联合控制变量。
+4. **排除清单扩展**：`NEUTRALIZE_EXCLUDED["log_market_cap"] = {"log_market_cap"}`，
+   防止未来如果存在同名市值因子时“自己中性化自己”。
+5. **联合中性化测试**：`test_neutralizer_combined.py` 覆盖含 numerical 时
+   categorical 自动 `drop_first=True`，以及双 control 残差均值约 0。
+
+**P2 期对外行为仍不变**：`run_factor_ic_analysis(..., neutralize=True)` 仍只输出
+`ic_neutral_industry`，不会默认读市值文件；P3 才引入默认联合中性化与新 schema。
 
 ---
 
