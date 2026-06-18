@@ -51,6 +51,76 @@ RESULT_KEY_VALID_DAYS = "valid_days"
 RESULT_KEY_PERIOD_START = "start"
 RESULT_KEY_PERIOD_END = "end"
 
+# ============================================================================
+# 行业中性化输出字段（design.md §5.2 schema）
+# ----------------------------------------------------------------------------
+# 顶层挂在 result["ic_neutral_industry"] 下，供下游 summary / comprehensive_factor 读取。
+# enabled=False 时只保留 enabled + skipped_reason 两键；enabled=True 时全字段必填。
+# ============================================================================
+
+RESULT_KEY_IC_NEUTRAL = "ic_neutral_industry"
+
+# enabled=True 时必填字段（design.md §5.2 schema）
+NEUTRAL_REQUIRED_KEYS_ENABLED = (
+    "enabled",
+    "ic_mean",
+    "ic_std",
+    "icir",
+    "p_value",
+    "p_value_display",
+    "positive_ratio",
+    "n_days",
+    "dates",
+    "ic_values",
+    "decay_rate",
+    "decay_level",
+    "min_industry_stocks",
+)
+
+# enabled=False 时必填字段（仅元信息，不含 IC 数值）
+NEUTRAL_REQUIRED_KEYS_DISABLED = ("enabled", "skipped_reason")
+
+
+def _normalize_neutral_payload(payload: dict) -> dict:
+    """
+    标准化 ic_neutral_industry 输出 schema（design.md §5.2）
+
+    职责：
+    - enabled=True: 校验 13 个必填字段都存在；按固定顺序输出
+    - enabled=False: 校验 enabled + skipped_reason 都存在；只输出这两键
+    - 防止 runner 侧 helper 漏字段或字段顺序漂移导致下游消费不稳定
+
+    参数:
+        payload: runner 侧 _compute_industry_neutral_ic 返回值
+            或 {"enabled": False, "skipped_reason": "..."} 形式
+
+    返回:
+        标准化后的 dict（按 NEUTRAL_REQUIRED_KEYS_* 顺序）
+
+    异常:
+        ValueError: 必填字段缺失（错误消息含缺失字段名 + 当前 payload keys）
+    """
+    if not isinstance(payload, dict):
+        raise ValueError(f"ic_neutral_payload 必须是 dict，实际类型: {type(payload).__name__}")
+
+    enabled = payload.get("enabled")
+    if enabled is None:
+        raise ValueError(f"ic_neutral_payload 缺少 'enabled' 字段; 当前 keys: {list(payload.keys())}")
+
+    if enabled is True:
+        required = NEUTRAL_REQUIRED_KEYS_ENABLED
+    else:
+        required = NEUTRAL_REQUIRED_KEYS_DISABLED
+
+    missing = [k for k in required if k not in payload]
+    if missing:
+        raise ValueError(
+            f"ic_neutral_payload 缺少必填字段 {missing}（enabled={enabled}）; 当前 keys: {list(payload.keys())}"
+        )
+
+    # 按 required 顺序输出（确保 JSON 字段顺序稳定）
+    return {k: payload[k] for k in required}
+
 
 def build_ic_result(
     ic_result: dict,
