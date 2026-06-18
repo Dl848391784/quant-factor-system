@@ -46,6 +46,21 @@ def get_stock_list_file() -> Path:
     return get_module_result_dir() / 'stock_list.json'
 
 
+def get_market_cap_data_file() -> Path:
+    """
+    获取市值/估值面板数据文件路径
+
+    数据源：akshare ak.stock_value_em
+    用途：市值中性化（ln(circ_market_cap) 截面回归残差法）
+    详见：designs/feat_market_cap_data_fetcher.md §1, §6, §7
+    稳定性：[experimental] 2026-06-18
+
+    Returns:
+        Path: data_fetchers/result/market_cap_data.json.gz 文件路径
+    """
+    return get_module_result_dir() / 'market_cap_data.json.gz'
+
+
 def get_logs_dir() -> Path:
     """
     获取项目级日志目录

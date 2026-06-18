@@ -53,6 +53,11 @@ FUND_FLOW_DATA = DATA_FETCHERS_RESULT / "fund_flow_data.json.gz"  # 资金流数
 RETURN_DATA_BACKUP = DATA_FETCHERS_RESULT / "return_data.json.gz"
 FACTOR_DATA_BACKUP = DATA_FETCHERS_RESULT / "factor_data.json.gz"
 
+# 市值/估值面板（市值中性化数据源，[experimental] 2026-06-18）
+# 来源：akshare ak.stock_value_em；字段含 total/circ_market_cap、total/circ_shares、PE/PB/PEG/PCF/PS
+# 详见 designs/feat_market_cap_data_fetcher.md §6, §7
+MARKET_CAP_DATA = DATA_FETCHERS_RESULT / "market_cap_data.json.gz"
+
 # ============================================================================
 # 日志目录
 # ============================================================================
@@ -106,6 +111,7 @@ __all__ = [
     "COMPREHENSIVE_FACTOR_RESULT",
     "SUMMARY_RESULT",
     "FACTOR_IC_DATA",
+    "MARKET_CAP_DATA",
     "RETURN_DATA_BACKUP",
     "FACTOR_DATA_BACKUP",
     "DATA_FETCHERS_LOGS",
