@@ -597,6 +597,10 @@ def load_ic_results(logger: logging.Logger) -> list[dict]:
             ic_metrics = data.get("ic_metrics", {})
             sample_stats = data.get("sample_stats", {})
 
+            # 行业中性化字段（design.md §5.2）：可能不存在（旧 IC 结果文件未启用中性化）
+            # 只读取摘要列需要的 3 字段：enabled / decay_rate / decay_level
+            neutral = data.get("ic_neutral_industry") or {}
+
             results.append(
                 {
                     "factor_name": factor_name,
@@ -604,6 +608,10 @@ def load_ic_results(logger: logging.Logger) -> list[dict]:
                     "icir": ic_metrics.get("icir", 0),
                     "ic_std": ic_metrics.get("ic_std", 0),
                     "valid_days": sample_stats.get("valid_days", 0),
+                    # 行业中性化敏感度（R18a 新增）
+                    "neutral_enabled": neutral.get("enabled", False),
+                    "neutral_decay_rate": neutral.get("decay_rate"),  # None 时摘要列显示 '-'
+                    "neutral_decay_level": neutral.get("decay_level", "undefined"),
                 }
             )
             file_count += 1
