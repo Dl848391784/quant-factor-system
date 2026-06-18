@@ -574,6 +574,30 @@ def load_json_file(path: Path, logger: logging.Logger) -> dict | None:
         return None
 
 
+def _select_neutral_payload(data: dict) -> tuple[dict, str]:
+    """选择 summary 使用的中性化 payload（P3: 新字段优先，旧字段兜底）。
+
+    返回 (payload, method)。method 用于汇总报告"中性化方式"列：
+        - 新字段 enabled=True 且 controls_used 非空：按注册顺序拼接，如 "industry+log_market_cap"
+        - 新字段 enabled=False：显示 "skipped"（具体原因在 skipped_reason 中）
+        - 仅有旧字段（P3 之前生成的 IC 文件）：显示 "industry only (legacy)"
+        - 都没有：显示 "-"
+    """
+    neutralized = data.get("ic_neutralized")
+    if isinstance(neutralized, dict) and neutralized:
+        if neutralized.get("enabled") is not True:
+            return neutralized, "skipped"
+        controls_used = neutralized.get("controls_used") or []
+        method = "+".join(str(control) for control in controls_used) if controls_used else "neutralized"
+        return neutralized, method
+
+    legacy = data.get("ic_neutral_industry")
+    if isinstance(legacy, dict) and legacy:
+        return legacy, "industry only (legacy)"
+
+    return {}, "-"
+
+
 def load_ic_results(logger: logging.Logger) -> list[dict]:
     """加载所有单因子 IC 分析结果
 
@@ -597,9 +621,9 @@ def load_ic_results(logger: logging.Logger) -> list[dict]:
             ic_metrics = data.get("ic_metrics", {})
             sample_stats = data.get("sample_stats", {})
 
-            # 行业中性化字段（design.md §5.2）：可能不存在（旧 IC 结果文件未启用中性化）
-            # 只读取摘要列需要的 3 字段：enabled / decay_rate / decay_level
-            neutral = data.get("ic_neutral_industry") or {}
+            # P3 中性化字段：新字段优先，旧字段兜底（design.md §10.2 P3.3）
+            # 只读取摘要列需要的字段：enabled / decay_rate / decay_level / controls_used
+            neutral, neutral_method = _select_neutral_payload(data)
 
             results.append(
                 {
@@ -608,10 +632,10 @@ def load_ic_results(logger: logging.Logger) -> list[dict]:
                     "icir": ic_metrics.get("icir", 0),
                     "ic_std": ic_metrics.get("ic_std", 0),
                     "valid_days": sample_stats.get("valid_days", 0),
-                    # 行业中性化敏感度（R18a 新增）
                     "neutral_enabled": neutral.get("enabled", False),
                     "neutral_decay_rate": neutral.get("decay_rate"),  # None 时摘要列显示 '-'
                     "neutral_decay_level": neutral.get("decay_level", "undefined"),
+                    "neutral_method": neutral_method,
                 }
             )
             file_count += 1
@@ -1439,12 +1463,12 @@ def _generate_ic_section(ic_results: list[dict], backtest_results: list[dict] | 
     lines = []
     lines.append("")
     lines.append("一、单因子 IC 数据汇总")
-    lines.append("-" * 132)
+    lines.append("-" * 150)
     lines.append(
         f"{'因子':<20} {'定义':<50} {'IC均值':>8} {'ICIR':>6} "
-        f"{'IC标准差':>8} {'有效天数':>6} {'中性化敏感':>10}"
+        f"{'IC标准差':>8} {'有效天数':>6} {'中性化敏感':>10} {'中性化方式':>14}"
     )
-    lines.append("-" * 132)
+    lines.append("-" * 150)
 
     for item in ic_results:
         factor_name = item["factor_name"]
@@ -1460,6 +1484,7 @@ def _generate_ic_section(ic_results: list[dict], backtest_results: list[dict] | 
         # - high (≥30%): 'XX% ⚠' 高亮 (alpha 主要来自行业 beta)
         # - low/inverse/undefined: 'XX%'
         neutral_cell = _format_neutral_cell(item)
+        neutral_method = item.get("neutral_method", "-")
 
         lines.append(
             f"{factor_name:<20} "
@@ -1468,10 +1493,11 @@ def _generate_ic_section(ic_results: list[dict], backtest_results: list[dict] | 
             f"{format_float(item['icir']):>6} "
             f"{format_float(item['ic_std']):>8} "
             f"{item['valid_days']:>6} "
-            f"{neutral_cell:>10}"
+            f"{neutral_cell:>10} "
+            f"{neutral_method:>14}"
         )
 
-    lines.append("-" * 132)
+    lines.append("-" * 150)
     ic_order = ", ".join([f"{r['factor_name']}({r['icir']:.2f})" for r in ic_results[:5]])
     lines.append(f"IC排序(ICIR降序): {ic_order}")
 

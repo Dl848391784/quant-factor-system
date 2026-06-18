@@ -19,8 +19,45 @@
 from __future__ import annotations
 
 import pytest
+from summary.generate_factor_summary_report import _format_neutral_cell, _generate_ic_section, _select_neutral_payload
 
-from summary.generate_factor_summary_report import _format_neutral_cell, _generate_ic_section
+
+# ---------------------------------------------------------------------------
+# P3.3: neutral payload selector
+# ---------------------------------------------------------------------------
+
+
+class TestSelectNeutralPayload:
+    def test_new_field_preferred_over_legacy(self):
+        new_payload = {"enabled": True, "controls_used": ["industry", "log_market_cap"], "decay_rate": 0.2}
+        legacy_payload = {"enabled": True, "decay_rate": 0.9}
+        payload, method = _select_neutral_payload(
+            {"ic_neutralized": new_payload, "ic_neutral_industry": legacy_payload}
+        )
+        assert payload is new_payload
+        assert method == "industry+log_market_cap"
+
+    def test_legacy_fallback(self):
+        legacy_payload = {"enabled": True, "decay_rate": 0.3}
+        payload, method = _select_neutral_payload({"ic_neutral_industry": legacy_payload})
+        assert payload is legacy_payload
+        assert method == "industry only (legacy)"
+
+    def test_disabled_neutralized_marked_skipped(self):
+        disabled = {
+            "enabled": False,
+            "skipped_reason": "factor_in_excluded_list",
+            "controls_used": [],
+            "excluded_specs": ["industry"],
+        }
+        payload, method = _select_neutral_payload({"ic_neutralized": disabled})
+        assert payload is disabled
+        assert method == "skipped"
+
+    def test_missing_neutral_payload(self):
+        payload, method = _select_neutral_payload({})
+        assert payload == {}
+        assert method == "-"
 
 
 # ---------------------------------------------------------------------------
@@ -46,12 +83,15 @@ class TestFormatNeutralCell:
         item = {"neutral_enabled": True, "neutral_decay_rate": 0.62, "neutral_decay_level": "high"}
         assert _format_neutral_cell(item) == "62% ⚠"
 
-    @pytest.mark.parametrize(("level", "rate", "expected"), [
-        ("low", 0.10, "10%"),
-        ("inverse", -0.20, "-20%"),
-        ("undefined", 0.05, "5%"),
-        ("low", 0.299, "30%"),  # 边界 (<30% rounds to 30%) — 该 cell 不带 ⚠ 因为 level=low
-    ])
+    @pytest.mark.parametrize(
+        ("level", "rate", "expected"),
+        [
+            ("low", 0.10, "10%"),
+            ("inverse", -0.20, "-20%"),
+            ("undefined", 0.05, "5%"),
+            ("low", 0.299, "30%"),  # 边界 (<30% rounds to 30%) — 该 cell 不带 ⚠ 因为 level=low
+        ],
+    )
     def test_non_high_levels_no_warning(self, level, rate, expected):
         """non-high 层级不带 ⚠ 高亮符号。"""
         item = {"neutral_enabled": True, "neutral_decay_rate": rate, "neutral_decay_level": level}
@@ -86,19 +126,35 @@ class TestGenerateIcSectionNeutralColumn:
         """构造 3 个因子，覆盖 high/low/disabled 三种渲染情形。"""
         return [
             {
-                "factor_name": "amplitude", "ic_mean": 0.05, "icir": 0.30,
-                "ic_std": 0.16, "valid_days": 100,
-                "neutral_enabled": True, "neutral_decay_rate": 0.62, "neutral_decay_level": "high",
+                "factor_name": "amplitude",
+                "ic_mean": 0.05,
+                "icir": 0.30,
+                "ic_std": 0.16,
+                "valid_days": 100,
+                "neutral_enabled": True,
+                "neutral_decay_rate": 0.62,
+                "neutral_decay_level": "high",
+                "neutral_method": "industry+log_market_cap",
             },
             {
-                "factor_name": "rsi", "ic_mean": -0.03, "icir": -0.15,
-                "ic_std": 0.20, "valid_days": 100,
-                "neutral_enabled": True, "neutral_decay_rate": 0.10, "neutral_decay_level": "low",
+                "factor_name": "rsi",
+                "ic_mean": -0.03,
+                "icir": -0.15,
+                "ic_std": 0.20,
+                "valid_days": 100,
+                "neutral_enabled": True,
+                "neutral_decay_rate": 0.10,
+                "neutral_decay_level": "low",
             },
             {
-                "factor_name": "industry_momentum_5d", "ic_mean": 0.04, "icir": 0.20,
-                "ic_std": 0.20, "valid_days": 100,
-                "neutral_enabled": False, "neutral_decay_rate": None, "neutral_decay_level": "undefined",
+                "factor_name": "industry_momentum_5d",
+                "ic_mean": 0.04,
+                "icir": 0.20,
+                "ic_std": 0.20,
+                "valid_days": 100,
+                "neutral_enabled": False,
+                "neutral_decay_rate": None,
+                "neutral_decay_level": "undefined",
             },
         ]
 
