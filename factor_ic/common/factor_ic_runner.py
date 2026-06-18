@@ -26,15 +26,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-# 导入日志
-from .logger_config import get_logger
-
-
-logger = get_logger(__name__)
-
 # 导入数据加载（单文件模式）
-
 # 导入数据完整性检查
+from .control_providers import IndustryProvider
+from .control_providers.base import ControlProvider
 from .data_completeness import check_data_completeness
 from .data_loader import get_data_cache_path, load_factor_return_data
 
@@ -49,6 +44,12 @@ from .ic_result_builder import build_error_result, build_ic_result, get_ic_outpu
 
 # 导入增量引擎
 from .incremental_engine import incremental_update_ic
+
+# 导入日志
+from .logger_config import get_logger
+
+
+logger = get_logger(__name__)
 
 
 # ============================================================
@@ -94,6 +95,9 @@ def is_excluded(factor_name: str, control_name: str) -> bool:
     return factor_name in NEUTRALIZE_EXCLUDED.get(control_name, frozenset())
 
 
+DEFAULT_NEUTRALIZE_SPECS: list[str] = ["industry", "log_market_cap"]
+
+
 # skipped_reason 文本常量（写入输出 JSON 的 ic_neutral_industry.skipped_reason）
 NEUTRALIZE_SKIP_REASON_EXCLUDED = "factor in INDUSTRY_NEUTRALIZE_EXCLUDED (industry-aggregated factor)"
 NEUTRALIZE_SKIP_REASON_USER_DISABLED = "user disabled via neutralize=False"
@@ -101,42 +105,50 @@ NEUTRALIZE_SKIP_REASON_INCREMENTAL = "incremental mode (industry neutralization 
 NEUTRALIZE_SKIP_REASON_SKIP_MODE = "skip mode (cached result, neutralization not recomputed)"
 
 
+def _resolve_neutralize_specs(
+    factor_name: str,
+    neutralize: bool,
+    mode: str,
+    neutralize_specs: list[str] | None,
+) -> tuple[list[str], str | None, list[str]]:
+    """解析 P3 多 control 中性化 specs。
+
+    返回 (effective_specs, skipped_reason, excluded_specs)。
+    - neutralize=False / incremental / skip: 全局跳过，effective_specs=[]
+    - full 且启用：默认 ["industry", "log_market_cap"]
+    - 因子命中某 control 排除清单：只弹出该 control，其他 control 继续跑
+    - 所有 control 都被弹出：返回 EXCLUDED skipped_reason
+    """
+    if mode == "incremental":
+        return [], NEUTRALIZE_SKIP_REASON_INCREMENTAL, []
+    if mode == "skip":
+        return [], NEUTRALIZE_SKIP_REASON_SKIP_MODE, []
+    if not neutralize:
+        return [], NEUTRALIZE_SKIP_REASON_USER_DISABLED, []
+
+    requested_specs = list(DEFAULT_NEUTRALIZE_SPECS if neutralize_specs is None else neutralize_specs)
+    excluded_specs = [spec for spec in requested_specs if is_excluded(factor_name, spec)]
+    effective_specs = [spec for spec in requested_specs if spec not in excluded_specs]
+    if not effective_specs:
+        return [], NEUTRALIZE_SKIP_REASON_EXCLUDED, excluded_specs
+    return effective_specs, None, excluded_specs
+
+
 def _resolve_neutralize_decision(
     factor_name: str,
     neutralize: bool,
     mode: str,
 ) -> tuple[bool, str | None]:
-    """
-    解析行业中性化的最终决策（design.md §5.3.2 协议表）
-
-    协议优先级：排除清单 > 模式限制 > 用户参数
-    - 排除清单内因子（残差≡0）→ 强制 skip（覆盖用户参数）
-    - 非 full 模式（增量/skip）→ skip（v1 仅支持 full 模式重算）
-    - 用户传 neutralize=False → skip
-    - 否则启用
-
-    参数:
-        factor_name: 因子名（不含 _1d 后缀，与排除清单 key 一致）
-        neutralize: 调用方传入的开关
-        mode: 当前执行模式（'full' / 'incremental' / 'skip'）
-
-    返回:
-        (enabled, skipped_reason)
-        - enabled=True: 应当计算 neutral IC, skipped_reason=None
-        - enabled=False: 应跳过, skipped_reason 为协议表中的固定文本
-
-    Note:
-        本函数不调用 logger，纯函数便于单测；调用方负责日志记录。
-    """
+    """解析 legacy 行业中性化决策（保持 P1/P2 优先级：排除清单 > 模式 > 用户）。"""
     if is_excluded(factor_name, "industry"):
         return False, NEUTRALIZE_SKIP_REASON_EXCLUDED
-    if mode == "incremental":
-        return False, NEUTRALIZE_SKIP_REASON_INCREMENTAL
-    if mode == "skip":
-        return False, NEUTRALIZE_SKIP_REASON_SKIP_MODE
-    if not neutralize:
-        return False, NEUTRALIZE_SKIP_REASON_USER_DISABLED
-    return True, None
+    effective_specs, skipped_reason, _ = _resolve_neutralize_specs(
+        factor_name=factor_name,
+        neutralize=neutralize,
+        mode=mode,
+        neutralize_specs=["industry"],
+    )
+    return bool(effective_specs), skipped_reason
 
 
 def _classify_decay_level(decay_rate: float, threshold: float = 0.30) -> str:
@@ -162,112 +174,89 @@ def _classify_decay_level(decay_rate: float, threshold: float = 0.30) -> str:
     return "low"
 
 
-def _compute_industry_neutral_ic(
+def _merge_control_provider(
+    factor_df,
+    provider: ControlProvider,
+    *,
+    logger,
+):
+    """加载/预处理单个 provider，并按 join_keys 合并到 factor_df。"""
+    dates = list(dict.fromkeys(factor_df["date"].astype(str).tolist()))
+    assets = list(dict.fromkeys(factor_df["asset"].astype(str).tolist()))
+    control_df = provider.load(dates=dates, assets=assets, logger=logger)
+    control_df = provider.preprocess(control_df, logger=logger)
+    missing_keys = [key for key in provider.join_keys if key not in control_df.columns]
+    if missing_keys:
+        raise ValueError(f"provider {provider.name} preprocess 后缺少 join_keys {missing_keys}")
+    merged = factor_df.merge(control_df, on=provider.join_keys, how="left")
+    logger.info(
+        "[neutralize] provider=%s join_keys=%s merged_rows=%d",
+        provider.name,
+        provider.join_keys,
+        len(merged),
+    )
+    return merged
+
+
+def _compute_neutralized_ic(
     *,
     factor_df,
     return_df,
     factor_col: str,
     return_col: str,
+    providers: list[ControlProvider],
     min_stocks: int,
-    neutralize_min_industry_stocks: int,
+    control_min_count: int,
     raw_ic_mean: float,
     logger,
 ) -> dict[str, Any]:
-    """
-    计算行业中性化 IC（design.md §5.1 Step 4-7 实现）
-
-    流程：
-    1. 加载行业映射（fetch_industry.get_industry_map → dict）
-    2. merge_industry_column 注入 'industry' 列（未知 asset 自然产生 NaN）
-    3. industry_neutral_residual 求残差因子（'其他' + NaN + 行业内 <min 全过滤）
-    4. 用残差因子重新调用 calculate_ic_with_direction_verification
-    5. 计算 decay_rate + decay_level
-
-    参数:
-        factor_df / return_df: 已加载的因子/收益数据
-        factor_col / return_col: 列名
-        min_stocks: IC 计算的每日最少股票数
-        neutralize_min_industry_stocks: 行业内最少股票数（默认 5）
-        raw_ic_mean: raw IC 均值（用于计算 decay_rate）
-        logger: 日志记录器
-
-    返回:
-        dict: {
-            'ic_mean', 'ic_std', 'icir', 'p_value', 'p_value_display',
-            'positive_ratio',
-            'dates', 'ic_values',
-            'decay_rate', 'decay_level',
-            'min_industry_stocks',
-        }
-        若中间步骤过滤为空，抛 RuntimeError 让上层降级为 skipped_reason
-
-    Note:
-        merge_industry_column 内部已 import data_fetchers.fetch_industry，本函数不再重复。
-        residual 计算走 neutralizer.neutralize([IndustryProvider()])（P1.4 起），
-        '其他' 剔除仍由本函数显式完成（与 P0 行为一致）。
-    """
-    from .control_providers import IndustryProvider
-    from .data_loader import merge_industry_column
-    from .ic_calculator import calculate_ic_with_direction_verification
+    """计算多 control 中性化 IC（P3 通用路径）。"""
     from .neutralizer import neutralize
 
-    # Step 1+2: 注入 industry 列（merge_industry_column 内部已加载行业映射, 未知 asset 自然 NaN）
-    factor_df_with_industry = merge_industry_column(
-        factor_df,
-        asset_col="asset",
-        out_col="industry",
-        logger=logger,
-    )
+    if logger is None:
+        logger = get_logger(__name__)
+    if not providers:
+        raise ValueError("_compute_neutralized_ic: providers 不能为空")
 
-    # Step 2.5: 剔除 '其他' 行业（design.md §3.3 / D6 决策）
-    #   - '其他' 是申万一级里的混杂桶（含申万二级码 220901/280203 等），不应作为独立行业回归
-    #   - industry 列为 NaN（未匹配 asset）不需手动剔除：industry_neutral_residual 内部
-    #     groupby(industry_col) 会跳过 NaN 分组（pandas 默认 dropna=True 行为）
-    before = len(factor_df_with_industry)
-    factor_df_filtered = factor_df_with_industry[factor_df_with_industry["industry"] != "其他"].copy()
-    other_dropped = before - len(factor_df_filtered)
-    logger.info("[neutralize] '其他' 行业剔除: %d 行（剩余 %d 行）", other_dropped, len(factor_df_filtered))
+    factor_df_neutral = factor_df.copy()
+    for provider in providers:
+        factor_df_neutral = _merge_control_provider(factor_df_neutral, provider, logger=logger)
 
-    # Step 2.6: 剔除 factor_col 为 NaN 的行（industry_neutralization_flow.md §5.3 follow-up 闭环 2026-06-18）
-    #   - sklearn LinearRegression.fit 默认 force_all_finite=True，y 含 NaN 直接抛 ValueError，
-    #     被外层 except 降级为 enabled=False / skipped_reason="computation failed: Input y contains NaN."
-    #   - raw IC 路径在 ic_calculator.calculate_ic_with_direction_verification 内部已有 dropna 兜底，
-    #     中性化路径必须显式 dropna 与之对齐，否则首日/停牌等天然 NaN 行会让中性化整体失败
-    #   - 复杂因子（custom_factor_calculation 在 data_loader dropna 之后才生成 factor_col）尤其受影响：
-    #     overnight_ret 首日 + |prev_close|<EPSILON / prev_close<0 防御场景实测产生 2225 NaN 行 / 58 个日期
-    before_nan = len(factor_df_filtered)
-    factor_df_filtered = factor_df_filtered.dropna(subset=[factor_col])
-    nan_dropped = before_nan - len(factor_df_filtered)
+    before_nan = len(factor_df_neutral)
+    required_cols = [factor_col]
+    for provider in providers:
+        if provider.column_type == "categorical":
+            required_cols.append(provider.name)
+        else:
+            required_cols.append(provider.name)
+    factor_df_neutral = factor_df_neutral.dropna(subset=required_cols)
+    nan_dropped = before_nan - len(factor_df_neutral)
     logger.info(
-        "[neutralize] %s NaN 剔除: %d 行（剩余 %d 行）",
-        factor_col,
+        "[neutralize] required=%s NaN 剔除: %d 行（剩余 %d 行）",
+        required_cols,
         nan_dropped,
-        len(factor_df_filtered),
+        len(factor_df_neutral),
     )
 
-    # Step 3: 求残差因子（P1.4: 切到 neutralizer 引擎 + IndustryProvider）
-    # 引擎在 has_numerical=False、drop_first=False、fit_intercept=True 路径下与
-    # legacy industry_neutral_residual 逐位一致（参见 test_neutralizer_parity.py）
     residual_df = neutralize(
-        factor_df_filtered,
-        providers=[IndustryProvider()],
+        factor_df_neutral,
+        providers=providers,
         factor_col=factor_col,
         date_col="date",
         asset_col="asset",
-        min_count=neutralize_min_industry_stocks,
+        min_count=control_min_count,
         logger=logger,
     )
-
     if residual_df.empty:
-        raise RuntimeError("industry_neutral_residual 返回空 DataFrame（'其他'+NaN+小行业全部过滤）")
+        raise RuntimeError("neutralize 返回空 DataFrame（控制变量缺失/小样本全部过滤）")
 
     logger.info(
-        "[neutralize] 残差因子: %d 行（vs raw factor %d 行）",
+        "[neutralize] controls=%s 残差因子: %d 行（vs raw factor %d 行）",
+        [provider.name for provider in providers],
         len(residual_df),
-        len(factor_df_with_industry),
+        len(factor_df),
     )
 
-    # Step 4: 用残差因子重新计算 IC（残差列名固定为 neutral_factor）
     neutral_ic_result = calculate_ic_with_direction_verification(
         factor_df=residual_df,
         return_df=return_df,
@@ -279,17 +268,13 @@ def _compute_industry_neutral_ic(
         logger=logger,
     )
 
-    # Step 5: 提取核心字段 + 计算衰减
     neutral_ic_mean = float(neutral_ic_result.get("ic_mean", 0.0))
-    # decay_rate = (raw - neutral) / raw（用绝对值避免符号干扰）
     if abs(raw_ic_mean) < 1e-9:
         decay_rate = float("nan")
     else:
         decay_rate = (abs(raw_ic_mean) - abs(neutral_ic_mean)) / abs(raw_ic_mean)
-
     decay_level = _classify_decay_level(decay_rate)
 
-    # 时序数据
     neutral_ic_series = neutral_ic_result["ic_series"]
     if neutral_ic_series is not None and len(neutral_ic_series) > 0:
         neutral_ic_series = neutral_ic_series.sort_index()
@@ -300,8 +285,12 @@ def _compute_industry_neutral_ic(
         neutral_ic_values = []
 
     stats_sig = neutral_ic_result.get("statistical_significance") or {}
-
+    control_meta = {provider.name: provider.get_meta() for provider in providers}
     return {
+        "enabled": True,
+        "controls_used": [provider.name for provider in providers],
+        "excluded_specs": [],
+        "control_meta": control_meta,
         "ic_mean": round(neutral_ic_mean, 6),
         "ic_std": round(float(neutral_ic_result.get("ic_std", 0.0)), 6),
         "icir": round(float(neutral_ic_result.get("icir", 0.0)), 4),
@@ -311,10 +300,40 @@ def _compute_industry_neutral_ic(
         "n_days": neutral_ic_result.get("n_days"),
         "dates": neutral_dates,
         "ic_values": neutral_ic_values,
-        "decay_rate": round(decay_rate, 6) if decay_rate == decay_rate else None,  # NaN→None
+        "decay_rate": round(decay_rate, 6) if decay_rate == decay_rate else None,
         "decay_level": decay_level,
-        "min_industry_stocks": neutralize_min_industry_stocks,
     }
+
+
+def _compute_industry_neutral_ic(
+    *,
+    factor_df,
+    return_df,
+    factor_col: str,
+    return_col: str,
+    min_stocks: int,
+    neutralize_min_industry_stocks: int,
+    raw_ic_mean: float,
+    logger,
+) -> dict[str, Any]:
+    """计算 legacy 行业中性化 IC（P3 前兼容包装）。"""
+    provider = IndustryProvider()
+    payload = _compute_neutralized_ic(
+        factor_df=factor_df,
+        return_df=return_df,
+        factor_col=factor_col,
+        return_col=return_col,
+        providers=[provider],
+        min_stocks=min_stocks,
+        control_min_count=neutralize_min_industry_stocks,
+        raw_ic_mean=raw_ic_mean,
+        logger=logger,
+    )
+    legacy_payload = {
+        k: v for k, v in payload.items() if k not in {"enabled", "controls_used", "excluded_specs", "control_meta"}
+    }
+    legacy_payload["min_industry_stocks"] = neutralize_min_industry_stocks
+    return legacy_payload
 
 
 def run_factor_ic_analysis(
