@@ -269,10 +269,10 @@ def build_ic_result(
     }
 
     # ========== 行业中性化 IC（design.md §5.2 顶层字段） ==========
-    # R14 仅占位接入：拿 payload 直接挂顶层 ic_neutral_industry 字段。
-    # R16 会改造为完整 schema 标准化（含必填字段校验、衰减统计、二级别名等）。
+    # R16b: 通过 _normalize_neutral_payload 校验必填 + 固定字段顺序输出。
+    # payload 不合规时抛 ValueError，让上游（runner）显式失败而不是产出残缺 JSON。
     if ic_neutral_payload is not None:
-        result["ic_neutral_industry"] = ic_neutral_payload
+        result[RESULT_KEY_IC_NEUTRAL] = _normalize_neutral_payload(ic_neutral_payload)
 
     # 类型转换（确保 JSON 兼容）
     result = convert_to_native_types(result)
