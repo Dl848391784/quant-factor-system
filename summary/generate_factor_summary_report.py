@@ -1398,6 +1398,32 @@ def merge_factor_data(ic_results: list[dict], backtest_results: list[dict]) -> l
     return merged
 
 
+def _format_neutral_cell(ic_item: dict) -> str:
+    """格式化"中性化敏感"列文本（design.md §6 / R18b）。
+
+    显示规则：
+    - enabled=False / decay_rate=None: '-' （未启用或被排除清单跳过）
+    - decay_level='high' (≥30%): 'XX% ⚠' （alpha 主要来自行业 beta）
+    - decay_level='low' / 'inverse' / 'undefined': 'XX%'
+
+    Args:
+        ic_item: load_ic_results 返回的单条记录, 含
+            neutral_enabled / neutral_decay_rate / neutral_decay_level
+
+    Returns:
+        固定 ≤10 字符宽度的显示字符串（已含右侧高亮符号 ⚠ if any）
+    """
+    enabled = ic_item.get("neutral_enabled", False)
+    decay_rate = ic_item.get("neutral_decay_rate")
+    if not enabled or decay_rate is None:
+        return "-"
+    pct = f"{decay_rate * 100:.0f}%"
+    level = ic_item.get("neutral_decay_level", "undefined")
+    if level == "high":
+        return f"{pct} ⚠"
+    return pct
+
+
 def _generate_ic_section(ic_results: list[dict], backtest_results: list[dict] | None = None) -> list[str]:
     """生成单因子 IC 数据汇总部分
 
@@ -1413,9 +1439,12 @@ def _generate_ic_section(ic_results: list[dict], backtest_results: list[dict] | 
     lines = []
     lines.append("")
     lines.append("一、单因子 IC 数据汇总")
-    lines.append("-" * 120)
-    lines.append(f"{'因子':<20} {'定义':<50} {'IC均值':>8} {'ICIR':>6} {'IC标准差':>8} {'有效天数':>6}")
-    lines.append("-" * 120)
+    lines.append("-" * 132)
+    lines.append(
+        f"{'因子':<20} {'定义':<50} {'IC均值':>8} {'ICIR':>6} "
+        f"{'IC标准差':>8} {'有效天数':>6} {'中性化敏感':>10}"
+    )
+    lines.append("-" * 132)
 
     for item in ic_results:
         factor_name = item["factor_name"]
@@ -1425,16 +1454,24 @@ def _generate_ic_section(ic_results: list[dict], backtest_results: list[dict] | 
         if len(factor_def) > 50:
             factor_def = factor_def[:47] + "..."
 
+        # 中性化敏感度列（design.md §6 / R18b）
+        # - enabled=False: '-' (未启用或被排除清单跳过)
+        # - decay_rate=None: '-'
+        # - high (≥30%): 'XX% ⚠' 高亮 (alpha 主要来自行业 beta)
+        # - low/inverse/undefined: 'XX%'
+        neutral_cell = _format_neutral_cell(item)
+
         lines.append(
             f"{factor_name:<20} "
             f"{factor_def:<50} "
             f"{format_float(item['ic_mean']):>8} "
             f"{format_float(item['icir']):>6} "
             f"{format_float(item['ic_std']):>8} "
-            f"{item['valid_days']:>6}"
+            f"{item['valid_days']:>6} "
+            f"{neutral_cell:>10}"
         )
 
-    lines.append("-" * 120)
+    lines.append("-" * 132)
     ic_order = ", ".join([f"{r['factor_name']}({r['icir']:.2f})" for r in ic_results[:5]])
     lines.append(f"IC排序(ICIR降序): {ic_order}")
 
