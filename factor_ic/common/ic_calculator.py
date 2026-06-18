@@ -312,7 +312,7 @@ def calculate_single_day_ic(
     return ic_value
 
 
-def _newey_west_t_stat(ic_series: pd.Series, lag: int = None) -> tuple[float, float, int]:
+def _newey_west_t_stat(ic_series: pd.Series, lag: int = None, logger=None) -> tuple[float, float, int]:
     """
     Newey-West 调整的 t 统计量
 
