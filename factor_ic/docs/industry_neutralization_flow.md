@@ -218,14 +218,115 @@
 
 ## 五、异常降级路径
 
-> R22d 待补
+行业中性化是诊断信息，**绝不允许污染主流程 raw IC**。所有失败路径都降级为 `enabled=false` payload。
+
+### 5.1 降级触发条件
+
+| # | 触发场景 | skipped_reason 值 | 实际案例 |
+|---|---|---|---|
+| 1 | factor 在排除清单（`industry_*`, `capital_flow_*`） | `"EXCLUDED: factor in exclusion list"` | `industry_momentum_5d` |
+| 2 | 用户 CLI `--no-neutralize` 显式禁用 | `"USER_DISABLED: neutralize=False"` | `--neutralize false` |
+| 3 | 行业映射全部为 `'其他'`（剔除后无行业可残差） | `"computation failed: <详情>"` | 罕见 |
+| 4 | 残差回归输入含 NaN（sklearn LinearRegression 拒收） | `"computation failed: Input y contains NaN."` | `overnight_ret_1d` (R20) |
+| 5 | 残差全为 0（常数列，IC 未定义） | enabled=True + decay_level=`high`/`undefined` | R15d 集成测试 |
+| 6 | 单行业股票数 < `min_industry_stocks=5` | 该行业整体剔除（不触发降级） | 小盘行业 |
+
+### 5.2 降级实现位置
+
+```python
+# factor_ic/common/factor_ic_runner.py: _compute_industry_neutral_ic
+try:
+    residual = industry_neutral_residual(...)
+    neutral_ic = compute_ic(residual, return_series)
+    return {"enabled": True, ..., 13 字段}
+except Exception as exc:
+    logger.exception("Industry neutral computation failed for %s", factor_name)
+    raise RuntimeError(f"computation failed: {exc}") from exc
+
+# 上层 run_factor_ic_analysis 捕获:
+try:
+    neutral_payload = _compute_industry_neutral_ic(...)
+except RuntimeError as exc:
+    neutral_payload = {"enabled": False, "skipped_reason": str(exc)}
+```
+
+> **设计原则**：低层抛 `RuntimeError`（带 `from exc` 异常链）→ 上层捕获降级。raw IC 主流程独立完成，不受中性化失败影响。
+
+### 5.3 已知 follow-up
+
+`overnight_ret_1d` 在 R20 实测中触发场景 #4，根因待排查（独立 follow-up，不在 R22 范围）：
+- 假设 1：`industry_neutral_residual` 函数 dropna 不彻底
+- 假设 2：上游因子计算输出含 NaN，merge 后行业列正常但因子列含 NaN
+- 验证方向：`assert not np.isnan(y).any()` + 逐步排查
 
 ---
 
 ## 六、验证方法
 
-> R22d 待补
+### 6.1 schema 校验
+
+```bash
+cd factor_ic && python3.11 -c "
+import json, jsonschema
+schema = json.load(open('schemas/ic_analysis_result.schema.json'))
+result = json.load(open('result/ic_rsi_1d_analysis_result.json'))
+jsonschema.validate(result, schema)
+print('OK')
+"
+```
+
+### 6.2 单元测试
+
+```bash
+# runner 决策优先级 (R15a-e, 6 case)
+pytest factor_ic/test_cases/test_factor_ic_runner_neutralize.py -v
+
+# builder 双路径 schema 校验 (R17a-c, 21 case)
+pytest factor_ic/test_cases/test_ic_result_builder_neutral.py -v
+
+# summary 中性化敏感列展示 (R19a-b, 13 case)
+pytest summary/test_cases/test_neutral_cell.py -v
+```
+
+### 6.3 全量回测验证
+
+```bash
+# 单因子真实数据
+python3.11 -m factor_ic.ic_rsi_1d --force-full
+
+# 检查输出 schema
+python3.11 -c "
+import json
+d = json.load(open('factor_ic/result/ic_rsi_1d_analysis_result.json'))
+n = d['ic_neutral_industry']
+assert n['enabled'] in (True, False)
+if n['enabled']:
+    assert set(n.keys()) == {'enabled', 'ic_mean', 'ic_std', 'icir', 'p_value',
+        'p_value_display', 'positive_ratio', 'n_days', 'dates', 'ic_values',
+        'decay_rate', 'decay_level', 'min_industry_stocks'}
+    print(f'decay={n[\"decay_rate\"]:.1%} level={n[\"decay_level\"]}')
+"
+```
+
+### 6.4 衰减率三档分布巡检
+
+```bash
+# summary 报告自动展示"中性化敏感"列, 巡检 high 因子
+python3.11 -m summary.generate_factor_summary_report
+grep -E "\\d+% ⚠" summary/result/factor_summary_report_*.txt
+```
+
+> high 因子（衰减率 ≥ 30%）需重点审视：alpha 是否主要来自行业 beta，是否需要在策略层面行业中性化或剔除。
+
+---
+
+## 七、版本历史
+
+| 版本 | 日期 | 变更 |
+|---|---|---|
+| v1.0 | 2026-06-18 | 初版（R22 行业中性化 [experimental] 项目闭环） |
 
 ---
 
 *最后更新: 2026-06-18*
+
