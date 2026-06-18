@@ -575,13 +575,12 @@ def load_json_file(path: Path, logger: logging.Logger) -> dict | None:
 
 
 def _select_neutral_payload(data: dict) -> tuple[dict, str]:
-    """选择 summary 使用的中性化 payload（P3: 新字段优先，旧字段兜底）。
+    """选择 summary 使用的中性化 payload（P4: 仅读 ic_neutralized）。
 
     返回 (payload, method)。method 用于汇总报告"中性化方式"列：
-        - 新字段 enabled=True 且 controls_used 非空：按注册顺序拼接，如 "industry+log_market_cap"
-        - 新字段 enabled=False：显示 "skipped"（具体原因在 skipped_reason 中）
-        - 仅有旧字段（P3 之前生成的 IC 文件）：显示 "industry only (legacy)"
-        - 都没有：显示 "-"
+        - enabled=True 且 controls_used 非空：按注册顺序拼接，如 "industry+log_market_cap"
+        - enabled=False：显示 "skipped"（具体原因在 skipped_reason 中）
+        - 无 ic_neutralized 字段：显示 "-"（需重跑因子）
     """
     neutralized = data.get("ic_neutralized")
     if isinstance(neutralized, dict) and neutralized:
@@ -590,10 +589,6 @@ def _select_neutral_payload(data: dict) -> tuple[dict, str]:
         controls_used = neutralized.get("controls_used") or []
         method = "+".join(str(control) for control in controls_used) if controls_used else "neutralized"
         return neutralized, method
-
-    legacy = data.get("ic_neutral_industry")
-    if isinstance(legacy, dict) and legacy:
-        return legacy, "industry only (legacy)"
 
     return {}, "-"
 

@@ -28,20 +28,11 @@ from summary.generate_factor_summary_report import _format_neutral_cell, _genera
 
 
 class TestSelectNeutralPayload:
-    def test_new_field_preferred_over_legacy(self):
+    def test_new_field_enabled_with_controls(self):
         new_payload = {"enabled": True, "controls_used": ["industry", "log_market_cap"], "decay_rate": 0.2}
-        legacy_payload = {"enabled": True, "decay_rate": 0.9}
-        payload, method = _select_neutral_payload(
-            {"ic_neutralized": new_payload, "ic_neutral_industry": legacy_payload}
-        )
+        payload, method = _select_neutral_payload({"ic_neutralized": new_payload})
         assert payload is new_payload
         assert method == "industry+log_market_cap"
-
-    def test_legacy_fallback(self):
-        legacy_payload = {"enabled": True, "decay_rate": 0.3}
-        payload, method = _select_neutral_payload({"ic_neutral_industry": legacy_payload})
-        assert payload is legacy_payload
-        assert method == "industry only (legacy)"
 
     def test_disabled_neutralized_marked_skipped(self):
         disabled = {
@@ -162,14 +153,14 @@ class TestGenerateIcSectionNeutralColumn:
         """IC 表表头必须含'中性化敏感'列名（design.md §6）。"""
         lines = _generate_ic_section(self._make_ic_results(), backtest_results=[])
         # 找到表头行（含'因子'+'IC均值'+'ICIR'）
-        header_lines = [l for l in lines if "因子" in l and "ICIR" in l and "IC均值" in l]
+        header_lines = [line for line in lines if "因子" in line and "ICIR" in line and "IC均值" in line]
         assert len(header_lines) >= 1, f"未找到表头行，前 5 行: {lines[:5]}"
         assert "中性化敏感" in header_lines[0], f"表头缺'中性化敏感'列: {header_lines[0]!r}"
 
     def test_high_factor_row_has_warning_symbol(self):
         """高敏感因子（amplitude, decay=62%）行末尾应含 '⚠'。"""
         lines = _generate_ic_section(self._make_ic_results(), backtest_results=[])
-        amp_lines = [l for l in lines if l.startswith("amplitude")]
+        amp_lines = [line for line in lines if line.startswith("amplitude")]
         assert len(amp_lines) == 1, f"未找到 amplitude 行: {amp_lines}"
         assert "⚠" in amp_lines[0], f"high 因子缺 ⚠ 高亮: {amp_lines[0]!r}"
         assert "62%" in amp_lines[0]
@@ -177,7 +168,7 @@ class TestGenerateIcSectionNeutralColumn:
     def test_low_factor_row_no_warning_symbol(self):
         """低敏感因子（rsi, decay=10%）行不带 ⚠。"""
         lines = _generate_ic_section(self._make_ic_results(), backtest_results=[])
-        rsi_lines = [l for l in lines if l.startswith("rsi")]
+        rsi_lines = [line for line in lines if line.startswith("rsi")]
         assert len(rsi_lines) == 1
         assert "⚠" not in rsi_lines[0]
         assert "10%" in rsi_lines[0]
@@ -185,7 +176,7 @@ class TestGenerateIcSectionNeutralColumn:
     def test_disabled_factor_row_shows_dash(self):
         """未启用的因子（industry_momentum_5d, enabled=False）行末尾显示 '-'。"""
         lines = _generate_ic_section(self._make_ic_results(), backtest_results=[])
-        ind_lines = [l for l in lines if l.startswith("industry_momentum_5d")]
+        ind_lines = [line for line in lines if line.startswith("industry_momentum_5d")]
         assert len(ind_lines) == 1
         assert ind_lines[0].rstrip().endswith("-"), f"disabled 因子末尾应为 '-': {ind_lines[0]!r}"
         assert "⚠" not in ind_lines[0]
