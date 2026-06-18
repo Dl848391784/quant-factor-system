@@ -26,8 +26,11 @@ import pytest
 from factor_ic.common.ic_result_builder import (
     NEUTRAL_REQUIRED_KEYS_DISABLED,
     NEUTRAL_REQUIRED_KEYS_ENABLED,
+    NEUTRALIZED_REQUIRED_KEYS_ENABLED,
     RESULT_KEY_IC_NEUTRAL,
+    RESULT_KEY_IC_NEUTRALIZED,
     _normalize_neutral_payload,
+    _normalize_neutralized_payload,
 )
 
 
@@ -97,11 +100,23 @@ def test_r17b_normalize_enabled_complete_field_order():
     assert out["decay_level"] == "high"
 
 
-@pytest.mark.parametrize("missing_field", [
-    "ic_mean", "ic_std", "icir", "p_value", "p_value_display",
-    "positive_ratio", "n_days", "dates", "ic_values",
-    "decay_rate", "decay_level", "min_industry_stocks",
-])
+@pytest.mark.parametrize(
+    "missing_field",
+    [
+        "ic_mean",
+        "ic_std",
+        "icir",
+        "p_value",
+        "p_value_display",
+        "positive_ratio",
+        "n_days",
+        "dates",
+        "ic_values",
+        "decay_rate",
+        "decay_level",
+        "min_industry_stocks",
+    ],
+)
 def test_r17b_normalize_enabled_missing_required_field_raises(missing_field):
     """enabled=True 缺任意必填字段 → ValueError 错误消息含该字段名。"""
     payload = _make_full_enabled_payload()
@@ -134,11 +149,20 @@ def _make_minimal_ic_result_and_meta():
     """构造满足 build_ic_result 必填的最小 ic_result + raw_metadata。"""
     ic_series = pd.Series([0.05, 0.03], index=["2026-01-01", "2026-01-02"])
     ic_result = {
-        "ic_series": ic_series, "ic_mean": 0.04, "ic_std": 0.01, "icir": 4.0,
-        "p_value": 0.001, "p_value_display": "< 0.01", "positive_ratio": 1.0, "n_days": 2,
+        "ic_series": ic_series,
+        "ic_mean": 0.04,
+        "ic_std": 0.01,
+        "icir": 4.0,
+        "p_value": 0.001,
+        "p_value_display": "< 0.01",
+        "positive_ratio": 1.0,
+        "n_days": 2,
         "statistical_significance": {
-            "p_value": 0.001, "p_value_display": "< 0.01", "t_stat": 4.0,
-            "is_significant": True, "conclusion": "Y",
+            "p_value": 0.001,
+            "p_value_display": "< 0.01",
+            "t_stat": 4.0,
+            "is_significant": True,
+            "conclusion": "Y",
         },
         "factor_direction": {"ic_mean": 0.04, "ic_mean_sign": "positive", "conclusion": "Y"},
         "economic_significance": {"is_economically_significant": True, "conclusion": "Y"},
@@ -146,8 +170,10 @@ def _make_minimal_ic_result_and_meta():
         "ic_distribution_consistency": {"conclusion": "Y"},
     }
     raw_metadata = {
-        "period_start": "2026-01-01", "period_end": "2026-01-02",
-        "total_days": 2, "avg_stocks_per_day": 100,
+        "period_start": "2026-01-01",
+        "period_end": "2026-01-02",
+        "total_days": 2,
+        "avg_stocks_per_day": 100,
     }
     return ic_result, raw_metadata
 
@@ -194,6 +220,79 @@ def test_r17c_build_ic_result_payload_invalid_raises():
     ic_result, raw_meta = _make_minimal_ic_result_and_meta()
     with pytest.raises(ValueError, match="ic_mean"):
         build_ic_result(
-            ic_result, raw_meta, factor_name="test_1d",
+            ic_result,
+            raw_meta,
+            factor_name="test_1d",
             ic_neutral_payload={"enabled": True},  # 缺 12 字段
         )
+
+
+# ---------------------------------------------------------------------------
+# P3.2: ic_neutralized 新字段 + legacy mirror
+# ---------------------------------------------------------------------------
+
+
+def _make_full_neutralized_payload(controls_used: list[str] | None = None) -> dict:
+    payload = _make_full_enabled_payload()
+    payload.pop("min_industry_stocks")
+    payload.update(
+        {
+            "controls_used": controls_used or ["industry", "log_market_cap"],
+            "excluded_specs": [],
+            "control_meta": {
+                "industry": {"min_count": 5},
+                "log_market_cap": {"winsorize_quantiles": [0.01, 0.99]},
+            },
+        }
+    )
+    return payload
+
+
+def test_p32_normalize_neutralized_enabled_complete_field_order():
+    payload = _make_full_neutralized_payload()
+    out = _normalize_neutralized_payload(payload)
+    assert list(out.keys()) == list(NEUTRALIZED_REQUIRED_KEYS_ENABLED)
+    assert out["controls_used"] == ["industry", "log_market_cap"]
+    assert out["control_meta"]["industry"]["min_count"] == 5
+
+
+def test_p32_normalize_neutralized_enabled_missing_controls_used_raises():
+    payload = _make_full_neutralized_payload()
+    del payload["controls_used"]
+    with pytest.raises(ValueError, match="controls_used"):
+        _normalize_neutralized_payload(payload)
+
+
+def test_p32_build_ic_result_writes_ic_neutralized_without_legacy_for_combined():
+    from factor_ic.common.ic_result_builder import build_ic_result
+
+    ic_result, raw_meta = _make_minimal_ic_result_and_meta()
+    result = build_ic_result(
+        ic_result,
+        raw_meta,
+        factor_name="test_1d",
+        ic_neutralized_payload=_make_full_neutralized_payload(["industry", "log_market_cap"]),
+    )
+    assert RESULT_KEY_IC_NEUTRALIZED in result
+    assert RESULT_KEY_IC_NEUTRAL not in result
+    assert result[RESULT_KEY_IC_NEUTRALIZED]["controls_used"] == ["industry", "log_market_cap"]
+
+
+def test_p32_build_ic_result_mirrors_legacy_for_industry_only():
+    from factor_ic.common.ic_result_builder import build_ic_result
+
+    ic_result, raw_meta = _make_minimal_ic_result_and_meta()
+    payload = _make_full_neutralized_payload(["industry"])
+    result = build_ic_result(
+        ic_result,
+        raw_meta,
+        factor_name="test_1d",
+        ic_neutralized_payload=payload,
+    )
+    assert RESULT_KEY_IC_NEUTRALIZED in result
+    assert RESULT_KEY_IC_NEUTRAL in result
+    legacy = result[RESULT_KEY_IC_NEUTRAL]
+    assert list(legacy.keys()) == list(NEUTRAL_REQUIRED_KEYS_ENABLED)
+    assert legacy["ic_mean"] == payload["ic_mean"]
+    assert legacy["min_industry_stocks"] == 5
+    assert "controls_used" not in legacy

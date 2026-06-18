@@ -59,8 +59,30 @@ RESULT_KEY_PERIOD_END = "end"
 # ============================================================================
 
 RESULT_KEY_IC_NEUTRAL = "ic_neutral_industry"
+RESULT_KEY_IC_NEUTRALIZED = "ic_neutralized"
 
-# enabled=True 时必填字段（design.md §5.2 schema）
+# P3 新字段 enabled=True 必填字段（design.md §10.2 P3.2 schema）
+NEUTRALIZED_REQUIRED_KEYS_ENABLED = (
+    "enabled",
+    "controls_used",
+    "excluded_specs",
+    "control_meta",
+    "ic_mean",
+    "ic_std",
+    "icir",
+    "p_value",
+    "p_value_display",
+    "positive_ratio",
+    "n_days",
+    "dates",
+    "ic_values",
+    "decay_rate",
+    "decay_level",
+)
+
+# enabled=False 时必填字段（仅元信息，不含 IC 数值）
+NEUTRALIZED_REQUIRED_KEYS_DISABLED = ("enabled", "skipped_reason", "controls_used", "excluded_specs")
+
 NEUTRAL_REQUIRED_KEYS_ENABLED = (
     "enabled",
     "ic_mean",
@@ -107,10 +129,7 @@ def _normalize_neutral_payload(payload: dict) -> dict:
     if enabled is None:
         raise ValueError(f"ic_neutral_payload 缺少 'enabled' 字段; 当前 keys: {list(payload.keys())}")
 
-    if enabled is True:
-        required = NEUTRAL_REQUIRED_KEYS_ENABLED
-    else:
-        required = NEUTRAL_REQUIRED_KEYS_DISABLED
+    required = NEUTRAL_REQUIRED_KEYS_ENABLED if enabled is True else NEUTRAL_REQUIRED_KEYS_DISABLED
 
     missing = [k for k in required if k not in payload]
     if missing:
@@ -122,6 +141,42 @@ def _normalize_neutral_payload(payload: dict) -> dict:
     return {k: payload[k] for k in required}
 
 
+def _normalize_neutralized_payload(payload: dict) -> dict:
+    """标准化 P3 `ic_neutralized` 输出 schema。"""
+    if not isinstance(payload, dict):
+        raise ValueError(f"ic_neutralized_payload 必须是 dict，实际类型: {type(payload).__name__}")
+
+    enabled = payload.get("enabled")
+    if enabled is None:
+        raise ValueError(f"ic_neutralized_payload 缺少 'enabled' 字段; 当前 keys: {list(payload.keys())}")
+
+    required = NEUTRALIZED_REQUIRED_KEYS_ENABLED if enabled is True else NEUTRALIZED_REQUIRED_KEYS_DISABLED
+    missing = [k for k in required if k not in payload]
+    if missing:
+        raise ValueError(
+            f"ic_neutralized_payload 缺少必填字段 {missing}（enabled={enabled}）; 当前 keys: {list(payload.keys())}"
+        )
+    return {k: payload[k] for k in required}
+
+
+def _build_legacy_neutral_mirror(neutralized: dict) -> dict:
+    """从 industry-only `ic_neutralized` 构建 P3 过渡期 legacy 镜像。"""
+    if neutralized.get("enabled") is not True:
+        return _normalize_neutral_payload(
+            {
+                "enabled": False,
+                "skipped_reason": neutralized.get("skipped_reason", "neutralization skipped"),
+            }
+        )
+
+    control_meta = neutralized.get("control_meta") or {}
+    industry_meta = control_meta.get("industry") or {}
+    min_industry_stocks = industry_meta.get("min_count", industry_meta.get("min_industry_stocks", 5))
+    payload = {key: neutralized[key] for key in NEUTRAL_REQUIRED_KEYS_ENABLED if key != "min_industry_stocks"}
+    payload["min_industry_stocks"] = min_industry_stocks
+    return _normalize_neutral_payload(payload)
+
+
 def build_ic_result(
     ic_result: dict,
     raw_metadata: dict,
@@ -131,6 +186,7 @@ def build_ic_result(
     factor_col: str = "",
     update_mode: str = "full",
     ic_neutral_payload: dict | None = None,
+    ic_neutralized_payload: dict | None = None,
 ) -> dict:
     """
     构建 IC 分析完整结果（符合 MODULE.md 输出结构统一性规范）
@@ -268,10 +324,14 @@ def build_ic_result(
         "factor_col": factor_col,  # 额外字段，用于追踪
     }
 
-    # ========== 行业中性化 IC（design.md §5.2 顶层字段） ==========
-    # R16b: 通过 _normalize_neutral_payload 校验必填 + 固定字段顺序输出。
-    # payload 不合规时抛 ValueError，让上游（runner）显式失败而不是产出残缺 JSON。
-    if ic_neutral_payload is not None:
+    # ========== 中性化 IC（design.md §10.2 P3.2 顶层字段） ==========
+    # P3 起新字段为 ic_neutralized；P3-P4 期间保留 legacy 参数/字段兼容旧调用方。
+    if ic_neutralized_payload is not None:
+        normalized = _normalize_neutralized_payload(ic_neutralized_payload)
+        result[RESULT_KEY_IC_NEUTRALIZED] = normalized
+        if normalized.get("controls_used") == ["industry"]:
+            result[RESULT_KEY_IC_NEUTRAL] = _build_legacy_neutral_mirror(normalized)
+    elif ic_neutral_payload is not None:
         result[RESULT_KEY_IC_NEUTRAL] = _normalize_neutral_payload(ic_neutral_payload)
 
     # 类型转换（确保 JSON 兼容）
