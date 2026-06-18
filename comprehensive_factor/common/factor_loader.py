@@ -572,23 +572,27 @@ def standardize_factors(
 
         # v2.20: 点质量检测——某值在截面中出现频率 >1% 且 z-score 超 ±2σ 时 clip
         # 典型场景：tail_price_position close=tail_low→0.0，68/3019=2.3% 股票挤在同一值
-        # 优化：只对 |z-score| > clip 阈值的点质量做处理，跳过低精度因子的非极端重复值
-        for date_val, group in factor_df.groupby("date"):
-            n = int(group[col].count())  # 非NaN数
-            if n == 0:
-                continue
-            val_counts = group[col].value_counts()
-            for val, count in val_counts.items():
+        # 优化：先找 z-score 超出 ±2σ 的行，再检查这些行的原始值是否为点质量
+        #   避免对低精度因子（如 volume_ratio_5 两位小数）遍历所有唯一值
+        extreme_mask = factor_df[std_col].abs() > _POINT_MASS_CLIP_SIGMA
+        if extreme_mask.any():
+            # 获取极端行的唯一 (date, value) 组合
+            extreme_rows = factor_df.loc[extreme_mask, ["date", col]].drop_duplicates()
+            for _, row in extreme_rows.iterrows():
+                date_val = row["date"]
+                val = row[col]
                 if pd.isna(val):
                     continue
+                n = int(factor_df.loc[factor_df["date"] == date_val, col].count())
+                if n == 0:
+                    continue
+                count = int(((factor_df["date"] == date_val) & (factor_df[col] == val)).sum())
                 if count / n <= _POINT_MASS_THRESHOLD:
                     continue
-                # 只处理 z-score 超出 clip 阈值的点质量
                 mask = (factor_df["date"] == date_val) & (factor_df[col] == val)
-                z_vals = factor_df.loc[mask, std_col]
-                if z_vals.abs().max() <= _POINT_MASS_CLIP_SIGMA:
-                    continue  # z-score 在 ±2σ 以内，无需 clip
-                factor_df.loc[mask, std_col] = z_vals.clip(-_POINT_MASS_CLIP_SIGMA, _POINT_MASS_CLIP_SIGMA)
+                factor_df.loc[mask, std_col] = factor_df.loc[mask, std_col].clip(
+                    -_POINT_MASS_CLIP_SIGMA, _POINT_MASS_CLIP_SIGMA
+                )
                 logger.info(
                     "因子 %s 在 %s 检测到点质量: value=%.4f, count=%d (%.1f%%), z-score clip 到 ±%.1fσ",
                     col,
