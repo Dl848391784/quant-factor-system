@@ -395,8 +395,19 @@ class ICWeightMethod(WeightMethodBase):
         # 使用基类公共方法（向量化实现）
         return self._apply_weights(factor_df, factor_cols, weights, self.logger, "IC加权")
 
+    @staticmethod
+    def _extract_effective_ic_mean(entry: dict) -> float | None:
+        """Plan D: 优先 neutralized_ic_mean，fallback raw ic_mean（design.md §2）"""
+        if entry.get("neutralized_enabled") and entry.get("neutralized_ic_mean") is not None:
+            return abs(entry["neutralized_ic_mean"])
+        if entry.get("ic_mean") is not None:
+            return abs(entry["ic_mean"])
+        return None
+
     def get_weights(self, factor_cols: list[str], ic_results: dict[str, dict]) -> dict[str, float]:
         """获取IC权重
+
+        Plan D (2026-06-18): 优先使用中性化 IC 均值（design.md §2）
 
         v1.12 修复：删除冗余条件 or len(...) == 0
         """
@@ -410,10 +421,16 @@ class ICWeightMethod(WeightMethodBase):
             # 使用基类公共方法提取因子名（贪婪匹配）
             factor_name = self._get_factor_name_from_col(col)
 
-            if factor_name in ic_results and "ic_mean" in ic_results[factor_name]:
-                ic_values[col] = abs(ic_results[factor_name]["ic_mean"])
-            elif col in ic_results and "ic_mean" in ic_results[col]:
-                ic_values[col] = abs(ic_results[col]["ic_mean"])
+            # Plan D: 优先 neutralized_ic_mean，fallback raw ic_mean
+            if factor_name in ic_results:
+                ic_abs = self._extract_effective_ic_mean(ic_results[factor_name])
+            elif col in ic_results:
+                ic_abs = self._extract_effective_ic_mean(ic_results[col])
+            else:
+                ic_abs = None
+
+            if ic_abs is not None:
+                ic_values[col] = ic_abs
             else:
                 self.logger.warning("因子 %s 缺失 IC 均值，使用等权默认值 1.0", col)
                 ic_values[col] = 1.0
