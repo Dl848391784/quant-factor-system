@@ -38,6 +38,7 @@ from data_fetchers.fetch_market_cap import (  # noqa: E402
     fetch_batch,
     fetch_one_stock,
     load_target_assets,
+    merge_and_emit_final,
     save_batch_cache,
 )
 
@@ -439,3 +440,118 @@ def test_read_factor_data_date_range_missing_file(tmp_path: Path) -> None:
     nonexistent = tmp_path / "missing.json.gz"
     with pytest.raises(FileNotFoundError, match="factor_data 文件不存在"):
         _read_factor_data_date_range(factor_data_file=nonexistent)
+
+
+# ============================================================
+# TC-U-19..21: merge_and_emit_final
+# ============================================================
+
+
+def _make_batch_cache(target_dir: Path, batch_idx: int, df: pd.DataFrame) -> None:
+    """测试 helper：构造一个批次缓存文件。"""
+    import gzip as _gzip
+
+    cache = target_dir / f"market_cap_batch_{batch_idx:04d}.json.gz"
+    payload = {
+        "batch_idx": batch_idx,
+        "n_rows": len(df),
+        "n_assets": int(df["asset"].nunique()) if len(df) else 0,
+        "data": df.to_dict(orient="records"),
+    }
+    with _gzip.open(cache, "wt", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+
+
+def test_merge_and_emit_final_full_flow(
+    tmp_path: Path, fake_em_df: pd.DataFrame, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TC-U-19: 2 批次（5 + 4 行）合并去重，最终落盘 + meta 计算 + 清理。"""
+    import gzip as _gzip
+
+    # 构造 batch1: 5 行（000001 + 000002 各 part）
+    df1 = _normalize_fields(fake_em_df, symbol="000001")  # 3 行
+    df2 = _normalize_fields(fake_em_df, symbol="000002").iloc[:2]  # 2 行
+    batch1 = pd.concat([df1, df2], ignore_index=True)
+    _make_batch_cache(tmp_path, 1, batch1)
+
+    # 构造 batch2: 包含 1 行重复（000001/2024-03-18）+ 3 行新数据
+    df3 = _normalize_fields(fake_em_df, symbol="000001").iloc[:1]  # 重复
+    df4 = _normalize_fields(fake_em_df, symbol="600000")  # 3 行新
+    batch2 = pd.concat([df3, df4], ignore_index=True)
+    _make_batch_cache(tmp_path, 2, batch2)
+
+    # 把 OUTPUT_FILE 重定向到 tmp_path
+    final_file = tmp_path / "market_cap_data.json.gz"
+    monkeypatch.setattr("data_fetchers.fetch_market_cap.OUTPUT_FILE", final_file)
+
+    n = merge_and_emit_final(
+        total_batches=2,
+        target_date_range=("2024-03-18", "2024-03-20"),
+        total_success=3,
+        total_fail=0,
+        elapsed_seconds=12.5,
+        result_dir=tmp_path,
+    )
+
+    # 5 + 4 = 9 raw → 去重 1 行 = 8 final
+    assert n == 8
+    assert final_file.exists()
+
+    # 验证最终文件结构
+    with _gzip.open(final_file, "rt", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    assert "meta" in payload
+    assert "data" in payload
+    meta = payload["meta"]
+    assert meta["n_records"] == 8
+    assert meta["n_assets"] == 3
+    assert meta["n_days"] == 3
+    assert meta["date_range"]["start"] == "2024-03-18"
+    assert meta["date_range"]["end"] == "2024-03-20"
+    assert meta["fetch_stats"]["total_success"] == 3
+    assert meta["fetch_stats"]["fail_rate"] == 0.0
+    assert meta["circ_market_cap_non_null_rate"] == 1.0
+
+    # 批次缓存被清理
+    remaining = list(tmp_path.glob("market_cap_batch_*.json.gz"))
+    assert remaining == []
+
+
+def test_merge_and_emit_final_no_batches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TC-U-20: 没有任何批次缓存返回 0，不写最终文件。"""
+    final_file = tmp_path / "market_cap_data.json.gz"
+    monkeypatch.setattr("data_fetchers.fetch_market_cap.OUTPUT_FILE", final_file)
+
+    n = merge_and_emit_final(
+        total_batches=0,
+        target_date_range=("2024-03-18", "2024-03-20"),
+        total_success=0,
+        total_fail=0,
+        elapsed_seconds=0.0,
+        result_dir=tmp_path,
+    )
+
+    assert n == 0
+    assert not final_file.exists()
+
+
+def test_merge_and_emit_final_empty_batches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TC-U-21: 批次缓存全空返回 0。"""
+    empty = pd.DataFrame(columns=list(_OUTPUT_COLUMNS))
+    _make_batch_cache(tmp_path, 1, empty)
+
+    final_file = tmp_path / "market_cap_data.json.gz"
+    monkeypatch.setattr("data_fetchers.fetch_market_cap.OUTPUT_FILE", final_file)
+
+    n = merge_and_emit_final(
+        total_batches=1,
+        target_date_range=("2024-03-18", "2024-03-20"),
+        total_success=0,
+        total_fail=10,
+        elapsed_seconds=5.0,
+        result_dir=tmp_path,
+    )
+
+    assert n == 0
+    assert not final_file.exists()

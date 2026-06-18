@@ -547,8 +547,125 @@ def merge_and_emit_final(
     result_dir: Path | None = None,
     logger_arg: logging.Logger | None = None,
 ) -> int:
-    """合并所有批次并写最终输出（详见 design.md §3.1 F6 / §4.3）。"""
-    raise NotImplementedError("C2d 实现")
+    """合并所有批次并写最终输出（详见 design.md §3.1 F6 / §4.3）。
+
+    流程:
+        1. glob ``market_cap_batch_*.json.gz`` → 读取所有 data 行
+        2. concat → 按 (date, asset) 去重（保留第一条）
+        3. 计算 meta（n_days / n_assets / n_records / coverage_rate）
+        4. 原子写 ``market_cap_data.json.gz``
+        5. 清理临时批次缓存
+
+    Args:
+        total_batches: 总批次数（用于日志）。
+        target_date_range: 目标日期区间 ``(start, end)``。
+        total_success / total_fail: 单股成功/失败计数。
+        elapsed_seconds: 全流程耗时（秒）。
+        result_dir: 输出目录，None 时使用 RESULT_DIR。
+        logger_arg: 日志记录器。
+
+    Returns:
+        合并后总记录数（行数）；若无任何批次缓存返回 0。
+    """
+    log = logger_arg if logger_arg is not None else logger
+    target_dir = result_dir if result_dir is not None else RESULT_DIR
+
+    batch_files = sorted(target_dir.glob("market_cap_batch_*.json.gz"))
+    if not batch_files:
+        log.error("未找到任何批次缓存文件，无法合并")
+        return 0
+
+    log.info("开始合并 %d 个批次缓存", len(batch_files))
+
+    all_records: list[dict] = []
+    for bf in batch_files:
+        with gzip.open(bf, "rt", encoding="utf-8") as f:
+            payload = json.load(f)
+        all_records.extend(payload.get("data", []))
+
+    if not all_records:
+        log.error("所有批次缓存均为空数据")
+        return 0
+
+    df = pd.DataFrame(all_records)
+    raw_count = len(df)
+
+    # 去重 (date, asset)：保留第一条
+    df = df.drop_duplicates(subset=["date", "asset"], keep="first").reset_index(drop=True)
+    dedup_count = len(df)
+    if raw_count > dedup_count:
+        log.warning("去重 %d → %d 行（去掉 %d 重复）", raw_count, dedup_count, raw_count - dedup_count)
+
+    # 列顺序对齐
+    df = df[list(_OUTPUT_COLUMNS)]
+
+    # ----------------- meta 计算 -----------------
+    n_records = len(df)
+    n_assets = int(df["asset"].nunique())
+    n_days = int(df["date"].nunique())
+    actual_start = str(df["date"].min())
+    actual_end = str(df["date"].max())
+
+    # 关键字段非空率（V6: circ_market_cap）
+    circ_non_null = float(df["circ_market_cap"].notna().mean()) if n_records else 0.0
+
+    meta = {
+        "version": _OUTPUT_VERSION,
+        "source": _OUTPUT_SOURCE,
+        "generated_at": _NOW_ISO,
+        "n_days": n_days,
+        "n_assets": n_assets,
+        "n_records": n_records,
+        "date_range": {
+            "start": actual_start,
+            "end": actual_end,
+            "target_start": target_date_range[0],
+            "target_end": target_date_range[1],
+        },
+        "fetch_stats": {
+            "total_success": total_success,
+            "total_fail": total_fail,
+            "fail_rate": round(total_fail / (total_success + total_fail), 4)
+            if (total_success + total_fail) > 0
+            else 0.0,
+            "elapsed_seconds": round(elapsed_seconds, 2),
+            "total_batches": total_batches,
+        },
+        "field_units": _FIELD_UNITS,
+        "circ_market_cap_non_null_rate": round(circ_non_null, 4),
+    }
+
+    payload = {
+        "meta": meta,
+        "data": df.to_dict(orient="records"),
+    }
+
+    # 原子写最终文件
+    target_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(suffix=".json.gz", dir=target_dir, delete=False) as temp_f:
+        temp_path = Path(temp_f.name)
+        with gzip.open(temp_f, "wt", encoding="utf-8") as gz_f:
+            json.dump(payload, gz_f, ensure_ascii=False)
+    temp_path.replace(OUTPUT_FILE)
+
+    log.info(
+        "最终输出落盘: %s (n_records=%d, n_days=%d, n_assets=%d, circ_non_null=%.2f%%)",
+        OUTPUT_FILE.name,
+        n_records,
+        n_days,
+        n_assets,
+        circ_non_null * 100,
+    )
+
+    # 清理批次缓存
+    for bf in batch_files:
+        try:
+            bf.unlink()
+        except OSError as exc:
+            log.warning("清理批次缓存失败 %s: %s", bf.name, exc)
+    log.info("已清理 %d 个批次缓存文件", len(batch_files))
+
+    return n_records
 
 
 def validate_final_data(
