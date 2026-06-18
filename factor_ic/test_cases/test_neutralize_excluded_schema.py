@@ -30,6 +30,10 @@ class TestNeutralizeExcludedSchema:
         assert "industry" in NEUTRALIZE_EXCLUDED
         assert isinstance(NEUTRALIZE_EXCLUDED["industry"], frozenset)
 
+    def test_dict_has_log_market_cap_key(self):
+        assert "log_market_cap" in NEUTRALIZE_EXCLUDED
+        assert NEUTRALIZE_EXCLUDED["log_market_cap"] == frozenset({"log_market_cap"})
+
     def test_industry_set_contents(self):
         """8 个原行业聚合因子全部进入 NEUTRALIZE_EXCLUDED['industry']。"""
         expected = {
@@ -58,6 +62,10 @@ class TestIsExcluded:
     def test_industry_aggregated_factor_excluded(self):
         assert is_excluded("industry_momentum_5d", "industry") is True
         assert is_excluded("capital_flow_intensity", "industry") is True
+
+    def test_log_market_cap_factor_excluded_from_self_control(self):
+        assert is_excluded("log_market_cap", "log_market_cap") is True
+        assert is_excluded("rsi", "log_market_cap") is False
 
     def test_normal_factor_not_excluded(self):
         assert is_excluded("rsi", "industry") is False

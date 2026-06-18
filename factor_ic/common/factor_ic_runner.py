@@ -74,6 +74,11 @@ NEUTRALIZE_EXCLUDED: dict[str, frozenset[str]] = {
             "capital_flow_ratio_trend",
         }
     ),
+    "log_market_cap": frozenset(
+        {
+            "log_market_cap",
+        }
+    ),
 }
 
 # 兼容别名（向后兼容；新代码请用 NEUTRALIZE_EXCLUDED["industry"]）

@@ -18,6 +18,7 @@ from collections.abc import Callable
 
 from .base import ControlProvider
 from .industry import IndustryProvider
+from .log_market_cap import LogMarketCapProvider
 
 
 # Provider 工厂注册表：name → 无参工厂函数
@@ -25,6 +26,7 @@ from .industry import IndustryProvider
 # 升级为 (name, kwargs) 形式（design.md §4.1 演进路径）。
 PROVIDER_REGISTRY: dict[str, Callable[[], ControlProvider]] = {
     "industry": IndustryProvider,
+    "log_market_cap": LogMarketCapProvider,
 }
 
 
@@ -60,5 +62,6 @@ __all__ = [
     "PROVIDER_REGISTRY",
     "ControlProvider",
     "IndustryProvider",
+    "LogMarketCapProvider",
     "build_providers",
 ]

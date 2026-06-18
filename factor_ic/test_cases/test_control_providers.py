@@ -17,6 +17,7 @@ from factor_ic.common.control_providers import (
     PROVIDER_REGISTRY,
     ControlProvider,
     IndustryProvider,
+    LogMarketCapProvider,
     build_providers,
 )
 
@@ -55,10 +56,24 @@ class TestProviderRegistry:
     def test_registry_contains_industry(self):
         assert "industry" in PROVIDER_REGISTRY
 
+    def test_registry_contains_log_market_cap(self):
+        assert "log_market_cap" in PROVIDER_REGISTRY
+
     def test_build_providers_single(self):
         providers = build_providers(["industry"])
         assert len(providers) == 1
         assert isinstance(providers[0], IndustryProvider)
+
+    def test_build_providers_log_market_cap(self):
+        providers = build_providers(["log_market_cap"])
+        assert len(providers) == 1
+        assert isinstance(providers[0], LogMarketCapProvider)
+
+    def test_build_providers_combined_preserves_order(self):
+        providers = build_providers(["industry", "log_market_cap"])
+        assert [p.name for p in providers] == ["industry", "log_market_cap"]
+        assert isinstance(providers[0], IndustryProvider)
+        assert isinstance(providers[1], LogMarketCapProvider)
 
     def test_build_providers_empty(self):
         """空 specs 返回空列表（design.md §4.1：表示裸 IC，不做中性化）。"""
