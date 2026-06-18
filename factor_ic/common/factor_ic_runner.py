@@ -28,7 +28,7 @@ from typing import Any
 
 # 导入数据加载（单文件模式）
 # 导入数据完整性检查
-from .control_providers import IndustryProvider
+from .control_providers import IndustryProvider, build_providers
 from .control_providers.base import ControlProvider
 from .data_completeness import check_data_completeness
 from .data_loader import get_data_cache_path, load_factor_return_data
@@ -209,6 +209,7 @@ def _compute_neutralized_ic(
     control_min_count: int,
     raw_ic_mean: float,
     logger,
+    excluded_specs: list[str] | None = None,
 ) -> dict[str, Any]:
     """计算多 control 中性化 IC（P3 通用路径）。"""
     from .neutralizer import neutralize
@@ -217,6 +218,7 @@ def _compute_neutralized_ic(
         logger = get_logger(__name__)
     if not providers:
         raise ValueError("_compute_neutralized_ic: providers 不能为空")
+    excluded_specs = list(excluded_specs or [])
 
     factor_df_neutral = factor_df.copy()
     for provider in providers:
@@ -289,7 +291,7 @@ def _compute_neutralized_ic(
     return {
         "enabled": True,
         "controls_used": [provider.name for provider in providers],
-        "excluded_specs": [],
+        "excluded_specs": excluded_specs,
         "control_meta": control_meta,
         "ic_mean": round(neutral_ic_mean, 6),
         "ic_std": round(float(neutral_ic_result.get("ic_std", 0.0)), 6),
@@ -352,6 +354,7 @@ def run_factor_ic_analysis(
     extra_log_params: dict[str, Any] | None = None,
     *,
     neutralize: bool = True,
+    neutralize_specs: list[str] | None = None,
     neutralize_min_industry_stocks: int = 5,
     logger=None,
 ) -> dict[str, Any]:
@@ -623,50 +626,58 @@ def run_factor_ic_analysis(
             data_source=data_source,
         )
 
-    # ========== 行业中性化 IC（design.md §5.1 Step 4-7） ==========
-    # 协议解析：mode 已经是 'full'（增量分支已 return）
-    neutral_enabled, neutral_skip_reason = _resolve_neutralize_decision(
+    # ========== 中性化 IC（design.md §5.1 Step 4-7, P3: specs 路径） ==========
+    # mode 已经是 'full'（增量分支已 return）
+    effective_specs, neutral_skip_reason, excluded_specs = _resolve_neutralize_specs(
         factor_name=factor_name,
         neutralize=neutralize,
         mode="full",
+        neutralize_specs=neutralize_specs,
     )
 
-    ic_neutral_payload: dict[str, Any] = {
-        "enabled": neutral_enabled,
-        "skipped_reason": neutral_skip_reason,
-    }
+    ic_neutralized_payload: dict[str, Any] | None = None
 
-    if neutral_enabled:
+    if not effective_specs:
+        # 全局跳过（user disabled / incremental / skip / 全排除）
+        ic_neutralized_payload = {
+            "enabled": False,
+            "skipped_reason": neutral_skip_reason,
+            "controls_used": [],
+            "excluded_specs": excluded_specs,
+        }
+        logger.info("中性化 IC 跳过: %s", neutral_skip_reason)
+    else:
         try:
-            neutral_payload = _compute_industry_neutral_ic(
+            providers = build_providers(effective_specs)
+            ic_neutralized_payload = _compute_neutralized_ic(
                 factor_df=factor_df,
                 return_df=return_df,
                 factor_col=factor_col,
                 return_col=return_col,
+                providers=providers,
                 min_stocks=min_stocks,
-                neutralize_min_industry_stocks=neutralize_min_industry_stocks,
+                control_min_count=neutralize_min_industry_stocks,
                 raw_ic_mean=float(ic_result.get("ic_mean", 0.0)),
                 logger=logger,
+                excluded_specs=excluded_specs,
             )
-            ic_neutral_payload.update(neutral_payload)
             logger.info(
                 "neutral IC 均值: %.4f / decay_rate: %.4f / decay_level: %s",
-                neutral_payload.get("ic_mean", 0.0),
-                neutral_payload.get("decay_rate", 0.0),
-                neutral_payload.get("decay_level", "unknown"),
+                ic_neutralized_payload.get("ic_mean", 0.0),
+                ic_neutralized_payload.get("decay_rate", 0.0),
+                ic_neutralized_payload.get("decay_level", "unknown"),
             )
         except Exception as e:
             # 不让中性化失败拖垮 raw IC 输出，降级为 enabled=false + 失败原因
-            logger.warning("行业中性化 IC 计算失败，降级为 skipped: %s", e)
-            ic_neutral_payload = {
+            logger.warning("中性化 IC 计算失败，降级为 skipped: %s", e)
+            ic_neutralized_payload = {
                 "enabled": False,
                 "skipped_reason": f"computation failed: {e}",
+                "controls_used": [],
+                "excluded_specs": excluded_specs,
             }
-    else:
-        logger.info("行业中性化 IC 跳过: %s", neutral_skip_reason)
 
     # 构建完整结果
-
     result = build_ic_result(
         ic_result=ic_result,
         raw_metadata=raw_metadata,
@@ -675,7 +686,7 @@ def run_factor_ic_analysis(
         data_source=data_source,
         factor_col=factor_col,
         update_mode="full",
-        ic_neutral_payload=ic_neutral_payload,
+        ic_neutralized_payload=ic_neutralized_payload,
     )
 
     # 保存
