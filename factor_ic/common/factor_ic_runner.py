@@ -51,6 +51,32 @@ from .ic_result_builder import build_error_result, build_ic_result, get_ic_outpu
 from .incremental_engine import incremental_update_ic
 
 
+# ============================================================
+# 行业中性化排除清单（design.md §3.1 + §5.3）
+# ============================================================
+# 行业聚合赋个股的因子：因子值在行业内全部相同 → 行业回归残差 ≡ 0 → IC ≡ 0
+# 这类因子被强制跳过中性化（即使调用方传入 neutralize=True 也覆盖为 False）
+# 详见 design.md §5.3.2 协议表与 §3.1 实证依据
+INDUSTRY_NEUTRALIZE_EXCLUDED: frozenset[str] = frozenset(
+    {
+        "industry_momentum_5d",
+        "industry_turnover_trend",
+        "industry_amplitude_trend",
+        "industry_roe_trend",
+        "industry_earnings_growth",
+        "industry_pe_trend",
+        "capital_flow_intensity",
+        "capital_flow_ratio_trend",
+    }
+)
+
+# skipped_reason 文本常量（写入输出 JSON 的 ic_neutral_industry.skipped_reason）
+NEUTRALIZE_SKIP_REASON_EXCLUDED = "factor in INDUSTRY_NEUTRALIZE_EXCLUDED (industry-aggregated factor)"
+NEUTRALIZE_SKIP_REASON_USER_DISABLED = "user disabled via neutralize=False"
+NEUTRALIZE_SKIP_REASON_INCREMENTAL = "incremental mode (industry neutralization v1 supports full mode only)"
+NEUTRALIZE_SKIP_REASON_SKIP_MODE = "skip mode (cached result, neutralization not recomputed)"
+
+
 def run_factor_ic_analysis(
     factor_name: str,
     factor_col: str,
