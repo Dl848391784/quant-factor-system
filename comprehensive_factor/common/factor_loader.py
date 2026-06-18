@@ -446,15 +446,26 @@ def load_ic_daily(
         with open(ic_file, encoding="utf-8") as f:
             ic_data = json.load(f)
 
-        # 提取 ic_values 和 dates/valid_dates 字段
-        if "ic_values" not in ic_data:
-            logger.warning("IC结果文件缺失 'ic_values' 字段: %s", ic_file)
-            missing_factors.append(factor_name)
-            continue
+        # Plan D: 优先使用中性化 IC 日序列（design.md §2.5）
+        ic_neutralized = ic_data.get("ic_neutralized")
+        if (
+            isinstance(ic_neutralized, dict)
+            and ic_neutralized.get("enabled") is True
+            and ic_neutralized.get("ic_values")
+        ):
+            dates = ic_neutralized.get("dates", [])
+            ic_values = ic_neutralized.get("ic_values", [])
+            logger.debug("因子 %s: 使用中性化 IC 日序列 (n=%d)", factor_name, len(ic_values))
+        else:
+            # Fallback: raw IC 日序列
+            if "ic_values" not in ic_data:
+                logger.warning("IC结果文件缺失 'ic_values' 字段: %s", ic_file)
+                missing_factors.append(factor_name)
+                continue
 
-        # 使用 valid_dates（有效日期）或 dates
-        dates = ic_data.get("valid_dates", ic_data.get("dates", []))
-        ic_values = ic_data.get("ic_values", [])
+            # 使用 valid_dates（有效日期）或 dates
+            dates = ic_data.get("valid_dates", ic_data.get("dates", []))
+            ic_values = ic_data.get("ic_values", [])
 
         # 修复：日期与IC值数量不一致时抛出错误（不再静默截断）
         # 原代码截断可能导致错位数据对齐到错误日期，产生错误的滚动ICIR
