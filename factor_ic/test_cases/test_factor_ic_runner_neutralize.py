@@ -98,3 +98,57 @@ def test_r15c_excluded_overrides_user_param(user_neutralize):
         f"排除清单应强制返回 EXCLUDED，user_neutralize={user_neutralize} 时收到 reason={reason!r}"
     )
     assert "capital_flow_intensity" in INDUSTRY_NEUTRALIZE_EXCLUDED
+
+
+# ---------------------------------------------------------------------------
+# R15d: 因子值在行业内全相同 → 残差≡0 → neutral_ic≈0 → decay 接近 1.0 → 'high'
+# ---------------------------------------------------------------------------
+
+
+def test_r15d_factor_constant_within_industry_decay_high():
+    """构造一个"行业内常数因子"（每只股票因子值 = 行业 ID 数值），
+    残差应全 0，neutral IC 应接近 0，decay_rate 接近 1.0 → decay_level='high'。
+
+    实证依据: design.md §3.1 行业聚合赋个股因子的数学性质
+    """
+    from factor_ic.common.factor_ic_runner import _compute_industry_neutral_ic
+    from factor_ic.common.logger_config import get_logger
+
+    np.random.seed(42)
+    dates = pd.date_range("2026-01-01", periods=10, freq="D").strftime("%Y-%m-%d")
+    industries = {"银行": 5.0, "钢铁": 3.0, "电力": 7.0}
+    industry_assets = {ind: [f"{i:01d}{j:05d}.SH" for j in range(1, 8)] for i, ind in enumerate(industries, 1)}
+    asset_to_industry = {a: ind for ind, assets in industry_assets.items() for a in assets}
+    all_assets = list(asset_to_industry.keys())
+
+    rows_factor, rows_return = [], []
+    for d in dates:
+        for a in all_assets:
+            ind = asset_to_industry[a]
+            # 因子 = 纯行业值（行业内常数）
+            rows_factor.append({"date": d, "asset": a, "ind_const_factor": industries[ind]})
+            # 收益与因子相关（用于 raw IC > 0）
+            rows_return.append({"date": d, "asset": a, "forward_return_1d": 0.001 * industries[ind] + np.random.normal(0, 0.005)})
+
+    factor_df = pd.DataFrame(rows_factor)
+    return_df = pd.DataFrame(rows_return)
+    fake_industry_map = {a: {"industry": asset_to_industry[a]} for a in all_assets}
+
+    with patch("data_fetchers.fetch_industry.get_industry_map", return_value=fake_industry_map):
+        payload = _compute_industry_neutral_ic(
+            factor_df=factor_df,
+            return_df=return_df,
+            factor_col="ind_const_factor",
+            return_col="forward_return_1d",
+            min_stocks=5,
+            neutralize_min_industry_stocks=5,
+            raw_ic_mean=0.50,  # 假设 raw IC 0.50（强相关）
+            logger=get_logger("test_r15d"),
+        )
+
+    # 残差≡0 → neutral_ic 几乎等于 0
+    assert abs(payload["ic_mean"]) < 1e-3, f"残差全 0 时 neutral_ic 应≈0，实际 {payload['ic_mean']}"
+    # decay_rate = (|0.50| - |neutral|) / |0.50| 应接近 1.0
+    assert payload["decay_rate"] is not None
+    assert payload["decay_rate"] > 0.95, f"decay_rate 应接近 1.0，实际 {payload['decay_rate']}"
+    assert payload["decay_level"] == "high"
