@@ -1151,7 +1151,7 @@ pytest factor_ic/test_cases/  # 全过
 | **P1 实施** | ✅ **完成（2026-06-18）— 6 commits + 73 tests 通过** |
 | **P2 实施** | ✅ **完成（2026-06-18）— 3 commits + 89 tests 通过；默认行为不变** |
 | **P3 实施** | ✅ **完成（2026-06-18）— 5 commits + 423 tests 通过；默认联合中性化生效** |
-| P4 启动 | 待用户决策启动时机 |
+| **P4 实施** | ✅ **完成（2026-06-18）— 3 commits + 407 tests 通过；legacy 字段下线** |
 
 #### P1 已完成的 6 个 commits
 
@@ -1195,6 +1195,21 @@ pytest factor_ic/test_cases/  # 全过
 - 8 个行业聚合因子（`industry_*` / `capital_flow_*`）在排除清单中被 industry 弹出，仅跑 `log_market_cap`
 
 报告文件: `temporary/p3_decay_comparison.txt` + `temporary/p3_decay_comparison.json`
+
+#### P4 已完成的 3 个 commits
+
+| commit | 主题 | 行数 | 测试 |
+|--------|------|------|------|
+| `a8b60ab` | P4.1 summary 删 legacy fallback | +10/-24 | 16 passed |
+| `29c8869` | P4.2 builder 删镜像写入 + 测试清理 | +508/-593 | 407 passed, 66 skipped |
+| `<本 commit>` | P4.3 文档同步 + 全量验证 | +约 30 | 407 passed |
+
+#### P4 关键变更
+
+- `ic_neutral_industry` 字段完全移除（builder 不再写入，summary 不再读取）
+- builder 只接受 `ic_neutralized_payload` 参数，只写 `ic_neutralized` 字段
+- P1 baseline 重新生成（35 因子，P3 格式，当前数据）
+- `_build_legacy_neutral_mirror` / `_normalize_neutral_payload` / `NEUTRAL_REQUIRED_KEYS_*` / `RESULT_KEY_IC_NEUTRAL` 全部删除
 
 #### P1 关键交付物
 

@@ -1,10 +1,11 @@
 # 行业中性化 IC 计算流程文档
 
 > 生成时间: 2026-06-18 (北京时间)
-> 审阅版本: v1.2
+> 审阅版本: v1.3
 > 实施完成日期: 2026-06-18
 > v1.1 更新: 2026-06-18 P1 重构 — neutralizer 引擎 + ControlProvider 协议 + 排除清单 dict 化
 > v1.2 更新: 2026-06-18 P2 扩展 — LogMarketCapProvider + 联合中性化测试（默认行为不变）
+> v1.3 更新: 2026-06-18 P3+P4 — 默认联合中性化生效 + legacy ic_neutral_industry 字段下线
 > 流程归属: `factor_ic/common/` 公共流程（跨因子复用）
 > 配套规范: `factor_ic/MODULE.md` M66 (类别 L. 行业中性化)
 > 配套设计: `designs/feat_neutralization_framework.md`（P1 后主设计文档）
