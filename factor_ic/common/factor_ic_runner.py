@@ -179,10 +179,13 @@ def _compute_industry_neutral_ic(
 
     Note:
         merge_industry_column 内部已 import data_fetchers.fetch_industry，本函数不再重复。
-        industry_neutral_residual 不支持 exclude_industries 参数，'其他'剔除在本函数显式做。
+        residual 计算走 neutralizer.neutralize([IndustryProvider()])（P1.4 起），
+        '其他' 剔除仍由本函数显式完成（与 P0 行为一致）。
     """
+    from .control_providers import IndustryProvider
     from .data_loader import merge_industry_column
-    from .ic_calculator import calculate_ic_with_direction_verification, industry_neutral_residual
+    from .ic_calculator import calculate_ic_with_direction_verification
+    from .neutralizer import neutralize
 
     # Step 1+2: 注入 industry 列（merge_industry_column 内部已加载行业映射, 未知 asset 自然 NaN）
     factor_df_with_industry = merge_industry_column(
@@ -218,14 +221,16 @@ def _compute_industry_neutral_ic(
         len(factor_df_filtered),
     )
 
-    # Step 3: 求残差因子
-    residual_df = industry_neutral_residual(
-        factor_df=factor_df_filtered,
+    # Step 3: 求残差因子（P1.4: 切到 neutralizer 引擎 + IndustryProvider）
+    # 引擎在 has_numerical=False、drop_first=False、fit_intercept=True 路径下与
+    # legacy industry_neutral_residual 逐位一致（参见 test_neutralizer_parity.py）
+    residual_df = neutralize(
+        factor_df_filtered,
+        providers=[IndustryProvider()],
         factor_col=factor_col,
         date_col="date",
         asset_col="asset",
-        industry_col="industry",
-        min_industry_stocks=neutralize_min_industry_stocks,
+        min_count=neutralize_min_industry_stocks,
         logger=logger,
     )
 
