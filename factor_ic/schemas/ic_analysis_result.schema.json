@@ -57,6 +57,50 @@
         "p_value": { "type": ["number", "null"] },
         "is_significant": { "type": "boolean" }
       }
+    },
+    "ic_neutral_industry": {
+      "description": "行业中性化 IC 字段（design.md §5.2）。可选——旧 IC 结果文件无此字段，调用方未启用中性化时也无此字段。两条路径互斥：enabled=False 仅 2 字段（disabled），enabled=True 含 13 字段（标准化 schema）。",
+      "type": "object",
+      "required": ["enabled"],
+      "oneOf": [
+        {
+          "description": "disabled 路径：因子被排除清单跳过、用户禁用、计算降级失败。",
+          "properties": {
+            "enabled": { "const": false },
+            "skipped_reason": { "type": "string", "minLength": 1 }
+          },
+          "required": ["enabled", "skipped_reason"],
+          "additionalProperties": false
+        },
+        {
+          "description": "enabled 路径：行业残差回归成功，含完整 IC 指标 + 衰减率。",
+          "properties": {
+            "enabled": { "const": true },
+            "ic_mean": { "type": ["number", "null"] },
+            "ic_std": { "type": ["number", "null"] },
+            "icir": { "type": ["number", "null"] },
+            "p_value": { "type": ["number", "null"] },
+            "p_value_display": { "type": "string" },
+            "positive_ratio": { "type": ["number", "null"] },
+            "n_days": { "type": "integer", "minimum": 0 },
+            "dates": { "type": "array", "items": { "type": "string" } },
+            "ic_values": { "type": "array", "items": { "type": ["number", "null"] } },
+            "decay_rate": { "type": ["number", "null"], "description": "衰减率 = 1 - |neutral_ic_mean| / |raw_ic_mean|" },
+            "decay_level": {
+              "type": "string",
+              "enum": ["high", "low", "inverse", "undefined"],
+              "description": "high(≥30%) / low(<30%) / inverse(<0) / undefined(无法分类)"
+            },
+            "min_industry_stocks": { "type": "integer", "minimum": 1 }
+          },
+          "required": [
+            "enabled", "ic_mean", "ic_std", "icir", "p_value", "p_value_display",
+            "positive_ratio", "n_days", "dates", "ic_values",
+            "decay_rate", "decay_level", "min_industry_stocks"
+          ],
+          "additionalProperties": false
+        }
+      ]
     }
   },
   "additionalProperties": true
