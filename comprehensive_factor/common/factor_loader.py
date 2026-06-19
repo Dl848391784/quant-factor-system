@@ -615,8 +615,9 @@ def standardize_factors(
             z_mask = (factor_df[std_col].abs() > _POINT_MASS_ZSCORE_GATE).values
             factor_df.loc[pm_mask & z_mask, std_col] = np.nan
 
+            # 逐值详情降为 debug：数万条/因子的逐值日志导致 416M 日志/次（v2.25 修复）
             for _, row in point_mass.iterrows():
-                logger.info(
+                logger.debug(
                     "因子 %s 在 %s 检测到点质量: value=%.4f, count=%d (%.1f%%), z-score 置 NaN",
                     col,
                     row["date"],
@@ -624,6 +625,16 @@ def standardize_factors(
                     int(row["val_count"]),
                     row["frequency"] * 100,
                 )
+            # 汇总信息：每因子一条 info，足够运维判断
+            pm_affected_rows = int((pm_mask & z_mask).sum())
+            pm_affected_dates = len(set(point_mass["date"]))
+            logger.info(
+                "因子 %s 点质量检测: %d 个 (date,value) 组合, 涉及 %d 天, %d 行 z-score 置 NaN",
+                col,
+                len(point_mass),
+                pm_affected_dates,
+                pm_affected_rows,
+            )
 
         # NaN 处理：原因子值为 NaN 时标准化后仍为 NaN
         # 使用 fillna 保持原本 NaN 的位置，而非 .loc 后置还原
