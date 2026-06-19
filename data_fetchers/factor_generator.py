@@ -147,14 +147,18 @@ _BASE_COLS: tuple[str, ...] = (
 # 纯 OHLCV + 索引列（Step 1 日志识别基础因子列用）
 _OHLCV_INDEX_COLS: frozenset[str] = frozenset({"date", "asset", "open", "close", "high", "low", "volume"})
 
-# 输出列 = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS
-_OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS
+# 标记列：非因子非收益的布尔标记列
+_FLAG_COLS: tuple[str, ...] = ("is_untradeable",)
+
+# 输出列 = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS + _FLAG_COLS
+_OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS + _FLAG_COLS
 
 # 列数清单（供日志、metadata、回归测试使用）
 _ALL_COLS_COUNTS: dict[str, int] = {
     "base_cols": len(_BASE_COLS),
     "extended_factor_cols": len(_EXTENDED_FACTOR_COLS),
     "return_cols": len(_RETURN_COLS),
+    "flag_cols": len(_FLAG_COLS),
     "total": len(_OUTPUT_COLS),
 }
 
@@ -763,6 +767,52 @@ def _run_factor_pipeline(
     return factor_df, valid_counts
 
 
+def _mark_untradeable(
+    factor_df: pd.DataFrame,
+    logger: logging.Logger,
+) -> pd.DataFrame:
+    """Step 11.10：标记不可交易股票（T 日涨停类，尾盘无法买入）。
+
+    交易模型: T-1 算因子 → T 尾盘买入 → T+1 尾盘卖出。
+    T 日涨停（一字板/尾盘封板）的股票无法在 T 日尾盘买入，标记为不可交易。
+
+    判定标准（仅涨停，不含跌停——T 日跌停可买，T+1 跌停不可预知）:
+      - 一字板涨停: amplitude < 0.01 且 涨幅 >= 0.098
+      - 尾盘涨停: 涨幅 >= 0.098 且 close == high（排除一字板）
+
+    涨幅 = (close - prev_close) / prev_close，prev_close = groupby(asset).close.shift(1)。
+    首日 prev_close=NaN → 涨幅=NaN → is_untradeable=0（保守不过滤）。
+
+    输出列: is_untradeable（int 0/1，1=不可交易）。
+    """
+    logger.info("Step 11.10: 标记不可交易股票（涨停类）...")
+
+    factor_df = factor_df.sort_values(["asset", "date"]).reset_index(drop=True)
+    prev_close = factor_df.groupby("asset")["close"].shift(1)
+    pct_change = (factor_df["close"] - prev_close) / prev_close
+
+    has_pct = pct_change.notna()
+    close_eq_high = (factor_df["close"] - factor_df["high"]).abs() < 1e-6
+
+    is_limit_up_one = has_pct & (factor_df["amplitude"] < 0.01) & (pct_change >= 0.098)
+    is_limit_up_tail = has_pct & (pct_change >= 0.098) & close_eq_high & ~is_limit_up_one
+
+    factor_df["is_untradeable"] = (is_limit_up_one | is_limit_up_tail).astype(int)
+
+    total = len(factor_df)
+    untradeable_count = int(factor_df["is_untradeable"].sum())
+    logger.info(
+        "  不可交易: %d / %d (%.3f%%), 其中一字板涨停 %d, 尾盘涨停 %d",
+        untradeable_count,
+        total,
+        untradeable_count / total * 100 if total > 0 else 0,
+        int(is_limit_up_one.sum()),
+        int(is_limit_up_tail.sum()),
+    )
+
+    return factor_df
+
+
 def _format_and_write_output(
     factor_df: pd.DataFrame,
     output_path: Path,
@@ -824,6 +874,7 @@ def _format_and_write_output(
                 "base_cols": list(_BASE_COLS),
                 "extended_factor_cols": list(_EXTENDED_FACTOR_COLS),
                 "return_cols": list(_RETURN_COLS),
+                "flag_cols": list(_FLAG_COLS),
                 "all_cols": list(_OUTPUT_COLS),
                 "generated_at": end_time.strftime("%Y-%m-%d %H:%M:%S"),
             }
@@ -894,6 +945,9 @@ def generate_all_factors(
     # Step 3.5~11.9：因子管线
     factor_df, valid_counts = _run_factor_pipeline(factor_df, logger)
 
+    # Step 11.10：标记不可交易股票
+    factor_df = _mark_untradeable(factor_df, logger)
+
     # Step 12~15：格式化 + 输出
     total_records, end_time, elapsed_seconds = _format_and_write_output(factor_df, output_path, start_time, logger)
 
@@ -908,6 +962,7 @@ def generate_all_factors(
         "valid_records_percent": {key: _calc_pct(valid_counts[key], total_records) for key in _VALID_KEY_ORDER},
         "factor_columns": list(_EXTENDED_FACTOR_COLS),
         "return_columns": list(_RETURN_COLS),
+        "flag_columns": list(_FLAG_COLS),
         "input_sources": {
             "factor_data": str(factor_data_path),
             "turnover_data": str(turnover_data_path),

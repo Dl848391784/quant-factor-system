@@ -1016,6 +1016,7 @@ class TestAllColsCountsConsistency:
             _ALL_COLS_COUNTS,
             _BASE_COLS,
             _EXTENDED_FACTOR_COLS,
+            _FLAG_COLS,
             _OUTPUT_COLS,
             _RETURN_COLS,
         )
@@ -1023,10 +1024,14 @@ class TestAllColsCountsConsistency:
         assert _ALL_COLS_COUNTS["base_cols"] == len(_BASE_COLS)
         assert _ALL_COLS_COUNTS["extended_factor_cols"] == len(_EXTENDED_FACTOR_COLS)
         assert _ALL_COLS_COUNTS["return_cols"] == len(_RETURN_COLS)
+        assert _ALL_COLS_COUNTS["flag_cols"] == len(_FLAG_COLS)
         assert _ALL_COLS_COUNTS["total"] == len(_OUTPUT_COLS)
         # 求和也必须等于 total（防止有人在元组以外加列）
         assert (
-            _ALL_COLS_COUNTS["base_cols"] + _ALL_COLS_COUNTS["extended_factor_cols"] + _ALL_COLS_COUNTS["return_cols"]
+            _ALL_COLS_COUNTS["base_cols"]
+            + _ALL_COLS_COUNTS["extended_factor_cols"]
+            + _ALL_COLS_COUNTS["return_cols"]
+            + _ALL_COLS_COUNTS["flag_cols"]
             == _ALL_COLS_COUNTS["total"]
         )
 
