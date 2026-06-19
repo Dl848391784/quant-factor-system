@@ -348,7 +348,9 @@ class TestEdgeCases:
         all_nan = pd.Series([np.nan] * 10)
 
         with pytest.raises(ValueError, match="综合因子值全部为 NaN"):
-            sort_and_select(all_nan, mock_factor_df, top_n=3, factor_direction="negative", factor_cols=["rsi_6", "volume_ratio_5"])
+            sort_and_select(
+                all_nan, mock_factor_df, top_n=3, factor_direction="negative", factor_cols=["rsi_6", "volume_ratio_5"]
+            )
 
     def test_amplitude_zero_threshold(self, mock_factor_df, mock_composite_factor):
         """测试振幅阈值=0时不排除任何股票"""
@@ -366,3 +368,80 @@ class TestEdgeCases:
 
         assert excluded_amp == 0
         assert len(result) == 3
+
+
+# ============================================================================
+# 覆盖率计算测试 (v1.13)
+# ============================================================================
+
+
+class TestWeightCoverage:
+    """权重覆盖率计算测试（v1.13: 修复因子名/列名不匹配导致覆盖率恒定）"""
+
+    def test_coverage_varies_by_missing_factors(self, mock_factor_df, mock_composite_factor):
+        """缺失因子的股票覆盖率应低于完整股票"""
+        # v1.14: 覆盖率基于 _std 列判断（综合因子用 std 计算，std=NaN 则该因子不贡献）
+        df = mock_factor_df.copy()
+        df.loc[0, "rsi_6_std"] = np.nan  # 000001 缺失 rsi_6 标准化值
+
+        # 权重键 = 列名（v1.13 修复后的正确格式）
+        weights = {"rsi_6": 0.6, "volume_ratio_5": 0.4}
+
+        result, _ = sort_and_select(
+            mock_composite_factor,
+            df,
+            top_n=10,
+            factor_direction="negative",
+            factor_cols=["rsi_6", "volume_ratio_5"],
+            weights=weights,
+            min_weight_coverage=0,  # 禁用过滤，测试覆盖率计算本身
+        )
+
+        # 找到 000001（index=0，缺失 rsi_6）
+        stock_000001 = next(s for s in result if s["code"] == "000001")
+        # 找到 000002（index=1，无缺失）
+        stock_000002 = next(s for s in result if s["code"] == "000002")
+
+        # 000001 缺失 rsi_6(权重0.6) → coverage = 0.4/1.0 = 0.4
+        assert stock_000001["weight_coverage"] == pytest.approx(0.4, abs=0.01)
+        # 000002 无缺失 → coverage = 1.0
+        assert stock_000002["weight_coverage"] == pytest.approx(1.0, abs=0.01)
+
+    def test_coverage_all_present(self, mock_factor_df, mock_composite_factor):
+        """所有因子都有值时覆盖率为 1.0"""
+        weights = {"rsi_6": 0.5, "volume_ratio_5": 0.5}
+
+        result, _ = sort_and_select(
+            mock_composite_factor,
+            mock_factor_df,
+            top_n=3,
+            factor_direction="negative",
+            factor_cols=["rsi_6", "volume_ratio_5"],
+            weights=weights,
+        )
+
+        for stock in result:
+            assert stock["weight_coverage"] == pytest.approx(1.0, abs=0.01)
+
+    def test_coverage_raw_present_std_nan(self, mock_factor_df, mock_composite_factor):
+        """v1.14: raw 值非 NaN 但 std=NaN 时，覆盖率应反映 std 缺失（非 raw 可用）"""
+        df = mock_factor_df.copy()
+        # raw 值保留非 NaN，但 std 值设为 NaN（模拟生产环境短样本因子场景）
+        df.loc[0, "rsi_6_std"] = np.nan
+        # rsi_6 raw 值仍为 50（非 NaN），但 std 为 NaN → 综合因子不使用该因子
+
+        weights = {"rsi_6": 0.6, "volume_ratio_5": 0.4}
+
+        result, _ = sort_and_select(
+            mock_composite_factor,
+            df,
+            top_n=10,
+            factor_direction="negative",
+            factor_cols=["rsi_6", "volume_ratio_5"],
+            weights=weights,
+            min_weight_coverage=0,  # 禁用过滤，测试覆盖率计算本身
+        )
+
+        stock_000001 = next(s for s in result if s["code"] == "000001")
+        # rsi_6 std=NaN → 不计入 available_weight → coverage = 0.4/1.0 = 0.4
+        assert stock_000001["weight_coverage"] == pytest.approx(0.4, abs=0.01)

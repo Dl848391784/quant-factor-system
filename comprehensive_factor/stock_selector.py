@@ -76,7 +76,7 @@ from comprehensive_factor.common.weight_engine import WeightEngine  # noqa: E402
 # ============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "1.12"
+__version__ = "1.14"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -409,9 +409,11 @@ def sort_and_select(
         # coverage = (该股票非NaN因子权重之和) / coverage_total
         stock_coverage = pd.Series(1.0, index=result_df.index)
         for col, w in coverage_weights.items():  # v1.11: 使用 coverage_weights（含 fallback）
-            if col in result_df.columns and coverage_total > 0:
+            # v1.14: 用 _std 列判断可用性（综合因子用 std 计算，std=NaN 则该因子不贡献）
+            std_col = f"{col}_std"
+            if std_col in result_df.columns and coverage_total > 0:
                 factor_weight_ratio = abs(w) / coverage_total
-                is_available = result_df[col].notna()
+                is_available = result_df[std_col].notna()
                 stock_coverage = stock_coverage.where(is_available, stock_coverage - factor_weight_ratio)
 
         coverage_mask = stock_coverage >= min_weight_coverage
@@ -517,11 +519,12 @@ def sort_and_select(
                     factor_values_std[col] = round(convert_to_native_types(std_val), 4)
 
         # v1.10→v1.11: 计算该股票的因子覆盖率（使用 coverage_weights 含 fallback）
+        # v1.14: 用 _std 列判断可用性（综合因子用 std 计算，std=NaN 则该因子不贡献）
         if coverage_weights and coverage_total > 0:
             available_weight = sum(
                 abs(w)
                 for col, w in coverage_weights.items()
-                if col in factor_cols and (col in row and pd.notna(row[col]))
+                if col in factor_cols and (f"{col}_std" in row and pd.notna(row[f"{col}_std"]))
             )
             weight_coverage = available_weight / coverage_total
         else:
@@ -862,6 +865,13 @@ def select_stocks(
                 selection_weights = wm.get("last_day_weights")
         except (json.JSONDecodeError, KeyError):
             logger.warning("无法从 composite 结果读取权重，跳过覆盖率过滤")
+
+    # v1.13: 映射权重键名：因子名 → 列名
+    # last_day_weights 键为因子名(如 volume_ratio)，factor_cols 为列名(如 volume_ratio_5)
+    # 不映射会导致覆盖率计算中 col in factor_cols 永远 False，覆盖率恒为 1-volume_ratio_weight
+    if selection_weights and factor_list and factor_cols:
+        name_to_col = dict(zip(factor_list, factor_cols))
+        selection_weights = {name_to_col.get(k, k): v for k, v in selection_weights.items()}
 
     top_stocks, excluded_by_amplitude = sort_and_select(
         composite_factor,
