@@ -400,6 +400,8 @@ def load_factor_return_data(
     keep_cols: set[str] = set(_INDEX_COLS) | set(_RETURN_COLS)
     if required_factor_cols:
         keep_cols |= set(required_factor_cols)
+    # is_untradeable: 不可交易标记列（涨停类），回测需排除
+    keep_cols.add("is_untradeable")
 
     # 数值列白名单：return + factor（数据源中数值以 Decimal/字符串序列化，需提前 float 化）
     # 显式排除 _INDEX_COLS：date/asset 是 str，部分因子（如 return_3d / past_return_1d /
@@ -466,6 +468,21 @@ def load_factor_return_data(
         len(first_record_keys),
         len(full_df.columns),
     )
+
+    # 5.5) 过滤不可交易股票（涨停类，T 日尾盘无法买入）
+    # 向后兼容: 旧数据无此列时跳过过滤
+    if "is_untradeable" in full_df.columns:
+        untradeable_mask = full_df["is_untradeable"].fillna(0).astype(int) == 1
+        untradeable_count = int(untradeable_mask.sum())
+        if untradeable_count > 0:
+            full_df = full_df[~untradeable_mask].reset_index(drop=True)
+            logger.info(
+                "过滤不可交易股票(涨停类): 排除 %d 条, 剩余 %d 条",
+                untradeable_count,
+                len(full_df),
+            )
+    else:
+        logger.warning("数据缺少 is_untradeable 列，跳过不可交易股票过滤")
 
     # 6) 分离 return_df / factor_df
     #    用 .copy() 切片产生独立 DataFrame，然后 del full_df 释放原引用
