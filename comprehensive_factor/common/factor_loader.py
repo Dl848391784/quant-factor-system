@@ -574,32 +574,36 @@ def standardize_factors(
 
         # v2.20: 点质量检测——某值在截面中出现频率 >1% 且 z-score 超阈值时置 NaN
         # 典型场景：tail_price_position close=tail_low→0.0，68/3019=2.3% 股票挤在同一值
-        # 优化：先找 z-score 超出阈值的行，再检查这些行的原始值是否为点质量
-        #   避免对低精度因子（如 volume_ratio_5 两位小数）遍历所有唯一值
-        extreme_mask = factor_df[std_col].abs() > _POINT_MASS_ZSCORE_GATE
-        if extreme_mask.any():
-            # 获取极端行的唯一 (date, value) 组合
-            extreme_rows = factor_df.loc[extreme_mask, ["date", col]].drop_duplicates()
-            for _, row in extreme_rows.iterrows():
-                date_val = row["date"]
-                val = row[col]
-                if pd.isna(val):
-                    continue
-                n = int(factor_df.loc[factor_df["date"] == date_val, col].count())
-                if n == 0:
-                    continue
-                count = int(((factor_df["date"] == date_val) & (factor_df[col] == val)).sum())
-                if count / n <= _POINT_MASS_THRESHOLD:
-                    continue
-                mask = (factor_df["date"] == date_val) & (factor_df[col] == val)
-                factor_df.loc[mask, std_col] = np.nan
+        # v2.24: 向量化重写——groupby+merge 预计算替代 iterrows+全表过滤
+        #   根因：_POINT_MASS_ZSCORE_GATE=1.0 导致 30% 行被标记为 extreme，
+        #   iterrows 每次 3 次 O(N) 全表扫描，150 万行 × 45 万组合 = 71 小时
+        #   修复：groupby(["date", col]).size() 一次性预计算所有 (date, value) 频率，
+        #   merge 回原 df 批量标记，复杂度 O(N log N)
+        val_counts = factor_df.groupby(["date", col]).size().reset_index(name="val_count")
+        date_totals = factor_df.groupby("date")[col].count().reset_index(name="date_total")
+        val_counts = val_counts.merge(date_totals, on="date")
+        val_counts["frequency"] = val_counts["val_count"] / val_counts["date_total"]
+        point_mass = val_counts[val_counts["frequency"] > _POINT_MASS_THRESHOLD]
+
+        if not point_mass.empty:
+            pm_flags = factor_df[["date", col]].merge(
+                point_mass[["date", col]],
+                on=["date", col],
+                how="left",
+                indicator=True,
+            )
+            pm_mask = (pm_flags["_merge"] == "both").values
+            z_mask = (factor_df[std_col].abs() > _POINT_MASS_ZSCORE_GATE).values
+            factor_df.loc[pm_mask & z_mask, std_col] = np.nan
+
+            for _, row in point_mass.iterrows():
                 logger.info(
                     "因子 %s 在 %s 检测到点质量: value=%.4f, count=%d (%.1f%%), z-score 置 NaN",
                     col,
-                    date_val,
-                    val,
-                    count,
-                    count / n * 100,
+                    row["date"],
+                    row[col],
+                    int(row["val_count"]),
+                    row["frequency"] * 100,
                 )
 
         # NaN 处理：原因子值为 NaN 时标准化后仍为 NaN
