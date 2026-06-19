@@ -1907,6 +1907,7 @@ for factor_name, direction in direction_map.items():
 | v2.22 | 2026-06-12 | 新增行业方向性因子映射说明（M17 FACTOR_NAME_TO_COL_MAP 新增3条）；M6 代码示例同步更新；映射说明章节（What/How/Don't/Verify） |
 | v2.22 | 2026-06-11 | stock_selector.py v1.12: 新增 min_amplitude 参数（默认0.01=1%，排除不可交易的一字板涨停股）+ top_n 默认值从3改为10；MODULE.md 选股规范更新（前置过滤、过滤顺序、输出模板、CLI参数） |
 | v2.24 | 2026-06-19 | factor_loader.py: standardize_factors 点质量检测向量化重写——groupby(["date",col]).size()+merge 预计算替代 iterrows+3次O(N)全表过滤，修复综合因子 Stage 4 全部超时（71小时→1.9分钟，全量150万行验证）；test_standardize_point_mass.py 4/4 通过 |
+| v2.25 | 2026-06-19 | stock_selector.py v1.16: 振幅过滤 bug 修复——amplitude 不在选中因子列时额外加载用于过滤（之前振幅过滤被完全跳过，7 只一字板股票未排除，含 001216 振幅=0%）；select_stocks Step 4 新增 load_cols 逻辑 |
 | v2.16 | 2026-06-11 | factor_loader.py v2.16: standardize_factors 新增 Winsorize 截断（±3σ），防止 momentum_strength 等比率类因子极端值导致 z-score 爆炸 |
 | v2.8 | 2026-06-10 | weight_engine.py v1.14: _apply_weights NaN 传播 Bug 修复（fillna(0)+divide+sum 替代 divide+sum(skipna=False)），让增量采集因子正常参与综合因子计算；M29 How/Don't 同步修正 |
 | v2.7 | 2026-06-04 | logger_config.py v2.0: 重写对齐 factor_ic 实现，自动文件输出；M4 扩展日志配置模块职责规范 |

@@ -76,7 +76,7 @@ from comprehensive_factor.common.weight_engine import WeightEngine  # noqa: E402
 # ============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "1.15"
+__version__ = "1.16"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -714,8 +714,14 @@ def select_stocks(
         raise ValueError(f"factor_list ({len(factor_list)}) 与 factor_cols ({len(factor_cols)}) 数量不一致")
 
     # Step 4: 加载因子数据
+    # v1.16: 振幅过滤需要 amplitude 列，即使 amplitude 不在选中因子中
+    #        额外加载 amplitude 列用于一字板过滤（不参与标准化和综合因子计算）
+    load_cols = list(factor_cols)
+    if config.min_amplitude > 0 and "amplitude" not in load_cols:
+        load_cols.append("amplitude")
+        logger.info("额外加载 amplitude 列用于振幅过滤（不在选中因子中）")
     logger.info("加载因子数据...")
-    factor_df_raw = load_factor_values(factor_cols, config.data_source, logger)
+    factor_df_raw = load_factor_values(load_cols, config.data_source, logger)
     # 类型转换：load_factor_values 返回 DataFrame（pandas DataFrame 构造返回类型不稳定）
     factor_df = cast(pd.DataFrame, factor_df_raw)
 
