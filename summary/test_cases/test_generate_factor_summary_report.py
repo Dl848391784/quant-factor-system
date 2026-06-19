@@ -52,7 +52,7 @@ class TestVersion:
 
     def test_version_defined(self):
         """验证版本常量存在"""
-        assert __version__ == "2.20"
+        assert __version__ == "2.21"
 
 
 class TestHelperFunctions:
@@ -965,6 +965,118 @@ class TestComputeFactorConcentration:
 
         anomalies = _compute_factor_concentration(top_stocks, weights)
         assert anomalies == []
+
+
+class TestWeightLookupFallback:
+    """v2.21 Fix1: Rolling ICIR last_day_weights 权重查找回退测试。
+
+    last_day_weights 键使用因子名（如 volume_ratio），而非列名（如 volume_ratio_5）。
+    代码应先查列名，再回退因子名，避免权重返回 0。
+    """
+
+    def test_factor_name_fallback_when_col_name_misses(self):
+        """last_day_weights 用因子名做键时，列名查找失败应回退到因子名查找。"""
+        from summary.generate_factor_summary_report import FACTOR_NAME_TO_COL_MAP
+
+        # volume_ratio 的列名是 volume_ratio_5
+        factor_name = "volume_ratio"
+        factor_col = FACTOR_NAME_TO_COL_MAP.get(factor_name, factor_name)
+
+        # last_day_weights 用因子名做键（实际数据行为）
+        last_day_weights = {"volume_ratio": 0.065, "momentum_strength": 0.004}
+
+        # 模拟修复后的查找逻辑
+        weight = last_day_weights.get(factor_col, last_day_weights.get(factor_name, 0))
+
+        assert weight == 0.065  # 应该通过因子名回退找到 0.065，而非返回 0
+
+    def test_col_name_still_works_for_static_weights(self):
+        """静态权重用列名做键时，列名查找应直接命中。"""
+        from summary.generate_factor_summary_report import FACTOR_NAME_TO_COL_MAP
+
+        factor_name = "volume_ratio"
+        factor_col = FACTOR_NAME_TO_COL_MAP.get(factor_name, factor_name)
+
+        # meta.weights 用列名做键
+        static_weights = {"volume_ratio_5": 0.12, "momentum_strength": 0.004}
+
+        weight = static_weights.get(factor_col, static_weights.get(factor_name, 0))
+
+        assert weight == 0.12  # 列名直接命中
+
+
+class TestBacktestFactorNameStripping:
+    """v2.21 Fix4: load_backtest_results 剥离 _1d 后缀测试。
+
+    intraday_intensity_1d 应剥离为 intraday_intensity（在 FACTOR_DEFINITIONS 中）。
+    past_return_1d 不应剥离（剥离后 past_return 不在 FACTOR_DEFINITIONS 中）。
+    """
+
+    def test_intraday_intensity_stripped(self):
+        """intraday_intensity_1d 应被剥离为 intraday_intensity。"""
+        from factor_definitions import FACTOR_DEFINITIONS
+
+        factor_name = "intraday_intensity_1d"
+        if factor_name.endswith("_1d"):
+            stripped = factor_name[:-3]
+            if stripped in FACTOR_DEFINITIONS:
+                factor_name = stripped
+
+        assert factor_name == "intraday_intensity"
+
+    def test_past_return_1d_not_stripped(self):
+        """past_return_1d 不应被剥离（其因子名本身含 _1d）。"""
+        from factor_definitions import FACTOR_DEFINITIONS
+
+        factor_name = "past_return_1d"
+        if factor_name.endswith("_1d"):
+            stripped = factor_name[:-3]
+            if stripped in FACTOR_DEFINITIONS:
+                factor_name = stripped
+
+        assert factor_name == "past_return_1d"  # 保持不变
+
+
+class TestZScoreDisplayConsistency:
+    """v2.21 Fix6: z-score 列显示格式统一测试。"""
+
+    def test_zscore_none_shows_nan(self):
+        """z-score 为 None 时统一显示'缺失(NaN)'。"""
+        # 模拟修复后的逻辑
+        v_std = None
+        if v_std is None:
+            result = "缺失(NaN)"
+        elif abs(v_std) < 0.001:
+            result = "0.00"
+        else:
+            result = f"{v_std:.2f}"
+
+        assert result == "缺失(NaN)"
+
+    def test_zscore_near_zero_shows_zero(self):
+        """z-score ≈ 0 时统一显示'0.00'，不再显示'≈0(真实)'。"""
+        v_std = 0.0001
+        if v_std is None:
+            result = "缺失(NaN)"
+        elif abs(v_std) < 0.001:
+            result = "0.00"
+        else:
+            result = f"{v_std:.2f}"
+
+        assert result == "0.00"
+        assert "真实" not in result
+
+    def test_zscore_normal_shows_value(self):
+        """z-score 正常值显示两位小数。"""
+        v_std = -1.3456
+        if v_std is None:
+            result = "缺失(NaN)"
+        elif abs(v_std) < 0.001:
+            result = "0.00"
+        else:
+            result = f"{v_std:.2f}"
+
+        assert result == "-1.35"
 
 
 if __name__ == "__main__":

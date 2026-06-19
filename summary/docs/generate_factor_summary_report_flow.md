@@ -1,9 +1,9 @@
 # generate_factor_summary_report.py 流程文档
 
-> 版本: v1.7
+> 版本: v1.8
 > 创建时间: 2026-05-28
-> 最后更新: 2026-06-17
-> 脚本版本: generate_factor_summary_report.py v2.20
+> 最后更新: 2026-06-19
+> 脚本版本: generate_factor_summary_report.py v2.21
 
 ---
 
@@ -317,5 +317,13 @@ DATA_CHECK_SOURCES = {
    - 新增 Step 0 数据完整性检查流程
    - 更新整体架构图（新增 check_data_freshness/check_derived_data_freshness）
    - 新增数据完整性检查配置说明
-   - 补充异常处理场景（gzip 文件损坏）
-   - 同步脚本版本 v1.9
+
+3. v1.8（2026-06-19）：
+   - 同步脚本版本至 v2.21
+   - v2.21 修复 6 项报告问题：
+     - Fix1: Rolling ICIR last_day_weights 权重查找增加因子名回退（volume_ratio 0%→6.5%）
+     - Fix2: overnight_ret 异常说明"其他因子均为负"→"其他主要因子均为负"
+     - Fix3: Section 6 综合因子收益说明动态编号，避免条件不满足时跳号
+     - Fix4: load_backtest_results 剥离 _1d 后缀（intraday_intensity_1d→intraday_intensity）
+     - Fix5: overnight_ret 回测夏普/单调性精度格式化（15位小数→2位）
+     - Fix6: z-score 列移除"≈0(真实)"标签，统一显示"0.00"

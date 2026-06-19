@@ -52,9 +52,16 @@
     v2.18: 2026-06-11 选股结果展示振幅过滤信息（排除振幅<1%%的一字板涨停股）；top_n 从 3 改为 10
     v2.19: 2026-06-17 修复 factor_ic_data 新鲜度检查误报：主数据源为完整 JSON 对象，读取 gzip 头部解析顶层 dates[-1]
     v2.20: 2026-06-17 基础数据源检查纳入 tail_trading_data，展示尾盘5分钟K线数据新鲜度
+    v2.21: 2026-06-19 修复6项报告问题：
+           - Fix1: Rolling ICIR last_day_weights 权重查找增加因子名回退（volume_ratio 0%→6.5%）
+           - Fix2: overnight_ret 异常说明"其他因子均为负"→"其他主要因子均为负"
+           - Fix3: Section 6 综合因子收益说明动态编号，避免跳号
+           - Fix4: load_backtest_results 剥离 _1d 后缀（intraday_intensity_1d→intraday_intensity）
+           - Fix5: overnight_ret 回测夏普/单调性精度格式化（15位小数→2位）
+           - Fix6: z-score 列移除"≈0(真实)"标签，统一显示"0.00"
 """
 
-__version__ = "2.20"
+__version__ = "2.21"
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -663,8 +670,14 @@ def load_backtest_results(logger: logging.Logger) -> list[dict]:
             # 注意：部分回测文件 factor_name 在 meta 子对象中（如 past_return_1d_layered_backtest.json）
             factor_name_from_json = data.get("factor_name", "") or data.get("meta", {}).get("factor_name", "")
             if factor_name_from_json:
-                # JSON 中的 factor_name 已是正确因子名（如 "past_return_1d"），无需剥离
                 factor_name = factor_name_from_json
+                # v2.21: 与 load_ic_results 保持一致——剥离 return_period 后缀 _1d
+                # 但需避免误剥 past_return_1d（其因子名本身含 _1d）
+                # 策略：剥离后检查 FACTOR_DEFINITIONS，仅当剥离结果在定义表中才剥离
+                if factor_name.endswith("_1d"):
+                    stripped = factor_name[:-3]
+                    if stripped in FACTOR_DEFINITIONS:
+                        factor_name = stripped
             else:
                 # 回退：从文件 stem 提取（兼容无 factor_name 字段的旧文件）
                 factor_name = file.stem.replace("_layered_backtest", "")
@@ -1277,7 +1290,9 @@ def get_factor_selection_info(
         factor_info = []
         for f in selected_factors:
             factor_col = FACTOR_NAME_TO_COL_MAP.get(f, f)
-            weight = weights.get(factor_col, 0)
+            # v2.21: last_day_weights 键可能是因子名而非列名（如 volume_ratio vs volume_ratio_5），
+            # 先查列名，再回退因子名，避免权重查找返回 0
+            weight = weights.get(factor_col, weights.get(f, 0))
             ic_item = next((r for r in ic_results if r["factor_name"] == f), None)
             if ic_item:
                 factor_info.append(f"{f}(ICIR={ic_item['icir']:.2f},权重={weight * 100:.1f}%)")
@@ -1525,9 +1540,10 @@ def _generate_ic_section(ic_results: list[dict], backtest_results: list[dict] | 
         if other_ic_means and all(ic < 0 for ic in other_ic_means[:5]):  # 检查前5个因子IC方向
             # 查找 overnight_ret 的回测数据
             bt_or = next((b for b in (backtest_results or []) if b["factor_name"] == "overnight_ret"), None)
-            or_sharpe = bt_or["long_short_sharpe"] if bt_or else "N/A"
-            or_mono = bt_or["monotonicity_correlation"] if bt_or else "N/A"
-            lines.append(f"overnight_ret IC均值={or_item['ic_mean']:.4f}为正（其他因子均为负），方向异常")
+            # v2.21: 格式化精度，避免15位小数
+            or_sharpe = format_float(bt_or["long_short_sharpe"], 2) if bt_or else "N/A"
+            or_mono = format_float(bt_or["monotonicity_correlation"], 2) if bt_or else "N/A"
+            lines.append(f"overnight_ret IC均值={or_item['ic_mean']:.4f}为正（其他主要因子均为负），方向异常")
             lines.append("  深度分析：IC方向为正表示隔夜收益大的股票次日收益也大（正向预测），")
             lines.append("           与多数因子（IC为负=因子值大的股票次日收益小）方向相反。")
             lines.append(f"           回测夏普={or_sharpe}, 单调性={or_mono}——可能是有效的反向因子。")
@@ -1918,23 +1934,12 @@ def _generate_stock_selection_section(
                     factor_name = COL_TO_FACTOR_NAME_MAP.get(k, k)
                     # v2.15: 取反因子名后加*标记，消除解读歧义（z-score已取反≠原始z-score）
                     display_name = f"{factor_name}*" if factor_name in flipped_set else factor_name
-                    v_raw = factor_values.get(k)
                     if v_std is None:
-                        # 缺失(NaN): 原始数据无值，综合因子计算时被 fillna(0) 填充（z=0）
-                        # 区分"缺失(NaN)"和"真实≈0"（原始值确实为0）
-                        if v_raw is None:
-                            parts.append(f"{display_name}=缺失(NaN)")
-                        elif abs(v_raw) < 0.001:
-                            parts.append(f"{display_name}=≈0(真实)")
-                        else:
-                            parts.append(f"{display_name}=缺失(NaN)")
+                        # v2.21: z-score 缺失统一显示"缺失(NaN)"，不再区分原始值是否≈0
+                        parts.append(f"{display_name}=缺失(NaN)")
                     elif abs(v_std) < 0.001:
-                        # z≈0: 标准化后接近均值（=无信号），但原始值可能很大或很小
-                        # 区分：原始值也≈0（真实≈0） vs 原始值大但标准化后≈0（均值附近）
-                        if v_raw is not None and abs(v_raw) < 0.001:
-                            parts.append(f"{display_name}=≈0(真实)")
-                        else:
-                            parts.append(f"{display_name}=0.00")
+                        # v2.21: z-score≈0 统一显示"0.00"，不再区分原始值是否≈0
+                        parts.append(f"{display_name}=0.00")
                     else:
                         # 正常标准化值（z-score），保留2位小数
                         # Winsorize ±3σ 截断后范围 [-3.00, 3.00]
@@ -1949,7 +1954,8 @@ def _generate_stock_selection_section(
                     if v is None:
                         parts.append(f"{factor_name}=缺失(NaN)")
                     elif abs(v) < 0.001:
-                        parts.append(f"{factor_name}=≈0(真实)")
+                        # v2.21: 统一显示"0.00"，不再使用"≈0(真实)"标签
+                        parts.append(f"{factor_name}=0.00")
                     else:
                         parts.append(f"{factor_name}={format_float(v, 2)}")
                 factor_str = ", ".join(parts)
@@ -2034,7 +2040,8 @@ def _detect_weight_rank_anomalies(
             continue
         icir = factor_item.get("icir", 0)
         factor_col = FACTOR_NAME_TO_COL_MAP.get(factor_name, factor_name)
-        weight = comp_weights.get(factor_col, 0)
+        # v2.21: last_day_weights 键可能是因子名而非列名，先查列名再回退因子名
+        weight = comp_weights.get(factor_col, comp_weights.get(factor_name, 0))
         factor_stats.append(
             {
                 "factor_name": factor_name,
@@ -2179,7 +2186,10 @@ def _generate_comparison_section(
         if factor_item:
             # v2.16: 从最优方法的权重获取（而非硬编码 icir_weight）
             factor_col = FACTOR_NAME_TO_COL_MAP.get(factor_name, factor_name)
-            weight = comp_weights.get(factor_col, 0)  # v2.16: comp_weights 已根据最优方法确定
+            # v2.21: last_day_weights 键可能是因子名而非列名，先查列名再回退因子名
+            weight = comp_weights.get(
+                factor_col, comp_weights.get(factor_name, 0)
+            )  # v2.16: comp_weights 已根据最优方法确定
 
             lines.append(
                 f"{factor_name:<18} "
@@ -2231,6 +2241,9 @@ def _generate_comparison_section(
         lines.append("")
         lines.append("⚠ 综合因子收益低于单因子分析:")
 
+        # v2.21: 动态编号，避免条件不满足时编号跳过
+        note_idx = 1
+
         if short_sample_selected:
             short_names = [f["factor_name"] for f in short_sample_selected]
             short_days = [str(f.get("valid_days", "N/A")) for f in short_sample_selected]
@@ -2245,28 +2258,30 @@ def _generate_comparison_section(
                 if f["factor_name"] in selected_factors and f.get("valid_days", 999) >= 30
             ]
             lines.append(
-                f"  1. 数据覆盖差异: 短样本因子({','.join(short_names)})仅{','.join(short_days)}天，年化收益极端放大"
+                f"  {note_idx}. 数据覆盖差异: 短样本因子({','.join(short_names)})仅{','.join(short_days)}天，年化收益极端放大"
             )
             lines.append(f"     长样本因子({','.join(long_names)})有{','.join(long_days)}天数据，收益更可靠")
             lines.append("     综合因子覆盖全周期，短样本因子仅少数日期有数据，其余日期由其他因子主导")
+            note_idx += 1
 
         if composite_best_return < min_long_return and min_long_return > 0:
             lines.append(
-                f"  2. 方向抵消效应: 综合因子最优年化={composite_best_return:.1f}%，低于长样本单因子最低={min_long_return:.1f}%"
+                f"  {note_idx}. 方向抵消效应: 综合因子最优年化={composite_best_return:.1f}%，低于长样本单因子最低={min_long_return:.1f}%"
             )
             lines.append("     原因分析：正向因子(overnight_ret)取反后与负向因子方向统一，但因子间相关性导致")
             lines.append("     部分信号重叠抵消。综合因子年化低于最优单因子是正常的——组合分散降低了极端收益")
             lines.append("     同时也降低了极端风险（夏普比率可能更优）")
+            note_idx += 1
 
         # v2.13: 说明overnight_ret方向处理是否正确
         flipped_factors = []
         if composite_results:
             flipped_factors = composite_results[0].get("flipped_factors", [])
         if flipped_factors:
-            lines.append(f"  3. overnight_ret方向处理: 已取反标准化值({flipped_factors})，无二次反向风险")
+            lines.append(f"  {note_idx}. overnight_ret方向处理: 已取反标准化值({flipped_factors})，无二次反向风险")
             lines.append("     取反逻辑：IC均值>0 → 标准化值取反 → 与负向因子方向统一 → 做空因子值大的股票")
         else:
-            lines.append("  3. overnight_ret方向处理: 未取反（若overnight_ret入选，需验证方向是否一致）")
+            lines.append(f"  {note_idx}. overnight_ret方向处理: 未取反（若overnight_ret入选，需验证方向是否一致）")
 
     return lines
 
