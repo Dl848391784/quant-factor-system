@@ -141,3 +141,49 @@ dmesg: anon-rss:4.17GB python，每次 SIGKILL
 ### 设计文档
 
 完整设计稿: `designs/composite_streaming_load_design.md`（含背景、方案、影响范围、数据流对比、测试方案、风险回滚、验收标准 9 章）。
+
+---
+
+## 附录：v2.24 daily.json.gz 流式写入（2026-06-19）
+
+### 背景
+
+v2.23 解决了数据加载阶段的 OOM，但输出阶段 `daily.json.gz` 生成仍存在 OOM Kill。2026-06-19 凌晨 cron pipeline 中，4 个综合因子脚本（equal/icir/ic/rolling_icir）全部在保存 JSON 结果后、生成 daily.json.gz 时被 OOM Kill（退出码 -9），重试 3 次均失败。
+
+```
+dmesg: Out of memory: Killed process 2503152 (python3) anon-rss:3867444kB
+```
+
+### 根因
+
+`composite_runner.py` Step 10 原实现：
+
+```python
+daily_output = {
+    "meta": {...},
+    "data": backtest_convert(factor_df[output_cols].to_dict("records")),  # 1.5M dict 列表
+}
+with gzip.open(daily_file, "wt") as f:
+    json.dump(daily_output, f, indent=2, ensure_ascii=False)  # 全量序列化
+```
+
+三重内存峰值：
+1. `to_dict("records")` — 150万行 × 6列 → 150万个 dict 对象 ~750MB
+2. `backtest_convert()` — 递归转换生成完整副本 ~750MB
+3. `json.dump(indent=2)` — 构建完整 JSON 字符串 ~1GB
+
+峰值合计 ~2.5GB + DataFrame 本身 ~400MB = ~2.9GB，在 7.3GB 系统（含其他进程）触发 OOM。
+
+### 修复方案
+
+流式分块写入：5000 行/块，逐块 `to_dict("records")` + `backtest_convert` + `json.dump`，直接写入 gzip 文件句柄。
+
+| 路径 | 旧（v2.23） | 新（v2.24） | 变化 |
+|------|-----------|-----------|------|
+| daily.json.gz 峰值内存 | ~2.9 GB | ~365 MB | **-87%** |
+| 输出 JSON 格式 | `indent=2` 缩进 | 无缩进（data 数组） | 文件更小，格式兼容 |
+
+### 验证
+
+- 150万行模拟数据：峰值 365MB，JSON 格式完整，块边界正确
+- `pytest comprehensive_factor/test_cases/` 32 passed（排除预存在 fixture 错误）

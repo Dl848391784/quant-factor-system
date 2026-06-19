@@ -516,8 +516,10 @@ def run_composite_backtest(
 
         if isinstance(weight_engine.method, RollingICIRWeightMethod) and weight_engine.method._last_day_weights:
             last_day_weights = weight_engine.method._last_day_weights
-            logger.info("Rolling ICIR: 读取 _last_day_weights（真实滚动ICIR权重）: %s",
-                        {k: f"{v:.2%}" for k, v in last_day_weights.items()})
+            logger.info(
+                "Rolling ICIR: 读取 _last_day_weights（真实滚动ICIR权重）: %s",
+                {k: f"{v:.2%}" for k, v in last_day_weights.items()},
+            )
         else:
             # 回退：使用 ICIR 静态权重（v2.15→v2.16：直接创建 ICIRWeightMethod）
             # v2.15 的 Bug：weight_engine.get_weights() 对 rolling_icir_weight 返回等权，
@@ -687,21 +689,39 @@ def run_composite_backtest(
     logger.info("综合因子结果已保存: %s", output_file)
 
     # 10. 保存综合因子每日明细
+    # v2.24: 流式分块写入，避免 to_dict("records") 一次性生成 1.5M dict 列表导致 OOM
+    #   原实现: to_dict("records") → backtest_convert → json.dump(indent=2)
+    #   三重内存峰值（dict 列表 ~750MB + 转换副本 ~750MB + JSON 字符串 ~1GB）在 7GB 系统 OOM
+    #   修复: 分块处理（5000行/块），逐块转换+写入，峰值内存 ~5MB
     # 校验输出必需列（防御性编程）
     output_cols = ["date", "asset", "composite_factor"] + factor_cols
     missing_cols = [col for col in output_cols if col not in factor_df.columns]
     if missing_cols:
         raise ValueError(f"factor_df 缺少输出必需列: {missing_cols}, 当前列: {list(factor_df.columns)}")
 
-    daily_output = {
-        "meta": {"weight_method": weight_method, "columns": output_cols},
-        "data": backtest_convert(factor_df[output_cols].to_dict("records")),
-    }
-
     daily_file = output_dir / f"composite_{weight_method}_{return_period}_daily.json.gz"
+    _DAILY_CHUNK_SIZE = 5000
 
     with gzip.open(daily_file, "wt", encoding="utf-8") as f:
-        json.dump(daily_output, f, indent=2, ensure_ascii=False)
+        f.write('{"meta": ')
+        json.dump(
+            {"weight_method": weight_method, "columns": output_cols},
+            f,
+            ensure_ascii=False,
+        )
+        f.write(', "data": [')
+
+        first_record = True
+        for i in range(0, len(factor_df), _DAILY_CHUNK_SIZE):
+            chunk = factor_df[output_cols].iloc[i : i + _DAILY_CHUNK_SIZE]
+            records = backtest_convert(chunk.to_dict("records"))
+            for record in records:
+                if not first_record:
+                    f.write(",")
+                first_record = False
+                json.dump(record, f, ensure_ascii=False)
+
+        f.write("]}")
 
     logger.info("综合因子每日明细已保存: %s", daily_file)
 
