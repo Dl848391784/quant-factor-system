@@ -118,11 +118,14 @@ def load_factor_return_data(
     #         149万行 × 4 列约 60MB，相比 list[dict] 的 ~600MB 降低 10 倍
     #   预期: 内存峰值 4.2GB → <500MB
     # 需要的列集合: date + asset + factor_cols + return_col + forward_return_1d (默认)
+    # is_untradeable: 不可交易标记列（v1.46+，涨停类股票标记为1，IC计算需排除）
     required_cols = ["date", "asset"] + factor_cols + [return_col]
     # forward_return_1d 是默认收益列，始终保留（即使 return_col 是 3d/5d）
     if return_col != "forward_return_1d" and "forward_return_1d" not in required_cols:
         required_cols.append("forward_return_1d")
-    # 去重（保留首次出现顺序，避免下游 select_cols 中列重复）
+    # is_untradeable 列（如存在则加载用于过滤）
+    required_cols.append("is_untradeable")
+    # 去重（保留首次出现顺序，避免下方 select_cols 中列重复）
     required_cols = list(dict.fromkeys(required_cols))
 
     import gc
@@ -292,6 +295,25 @@ def load_factor_return_data(
         dropna_cols,
         len(return_df),
     )
+
+    # ========== 过滤不可交易股票（涨停类） ==========
+    # is_untradeable=1 表示 T 日涨停（一字板/尾盘封板），无法在 T 日尾盘买入，
+    # 其 forward_return 无法实际捕获，应从 IC 计算中排除。
+    # 向后兼容: 旧数据无此列时跳过过滤。
+    if "is_untradeable" in df.columns:
+        untradeable_mask = df["is_untradeable"].fillna(0).astype(int) == 1
+        untradeable_count = int(untradeable_mask.sum())
+        if untradeable_count > 0:
+            factor_df = factor_df[~untradeable_mask.loc[factor_df.index]].reset_index(drop=True)
+            return_df = return_df[~untradeable_mask.loc[return_df.index]].reset_index(drop=True)
+            logger.info(
+                "过滤不可交易股票(涨停类): 排除 %d 行, 剩余因子 %s 行, 收益 %s 行",
+                untradeable_count,
+                len(factor_df),
+                len(return_df),
+            )
+    else:
+        logger.warning("数据缺少 is_untradeable 列，跳过不可交易股票过滤")
 
     # ========== 日期对齐（单文件内数据天然对齐） ==========
     # 取日期交集确保因子和收益数据对齐
