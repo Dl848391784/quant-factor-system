@@ -1,9 +1,9 @@
 # generate_factor_summary_report.py 流程文档
 
-> 版本: v2.0
+> 版本: v2.1
 > 创建时间: 2026-05-28
 > 最后更新: 2026-06-19
-> 脚本版本: generate_factor_summary_report.py v2.23
+> 脚本版本: generate_factor_summary_report.py v2.24
 
 ---
 
@@ -341,3 +341,8 @@ DATA_CHECK_SOURCES = {
    - 同步脚本版本至 v2.23
    - v2.23: format_weights 权重统一 :.1f 精度，与 Section 4/6 保持一致
      （修复 vr:6% vs 6.5% 跨节显示差异）
+
+6. v2.1（2026-06-19）：
+   - 同步脚本版本至 v2.24
+   - v2.24: Section 7 最优方法说明动态列举得分≥0.9的维度，避免硬编码错误
+     （修复：单调性0.600误列"接近1.0"，最大回撤1.000遗漏）

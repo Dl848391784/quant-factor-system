@@ -61,7 +61,7 @@
            - Fix6: z-score 列移除"≈0(真实)"标签，统一显示"0.00"
 """
 
-__version__ = "2.23"
+__version__ = "2.24"
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -1764,8 +1764,16 @@ def _generate_weight_selection_section(weight_result: dict | None) -> list[str]:
             if turnover_long < 0.5 or turnover_short < 0.5:
                 lines.append("")
                 lines.append("  ★ Rolling ICIR加权换手率得分较低但综合得分最高：")
+                # v2.24: 动态列举得分≥0.9的维度，避免硬编码错误（单调性0.6≠接近1.0）
+                high_score_dims = []
+                for m_key, m_score in best_ms.items():
+                    if m_key in ("turnover_long_avg", "turnover_short_avg"):
+                        continue  # 换手率已单独说明
+                    if m_score >= 0.9:
+                        high_score_dims.append(metric_display_names.get(m_key, m_key))
+                high_score_str = "/".join(high_score_dims) if high_score_dims else "多数维度"
                 lines.append(
-                    f"    收益/夏普/单调性/成本后收益得分接近1.0，换手率得分({turnover_long:.2f}/{turnover_short:.2f})虽低"
+                    f"    {high_score_str}得分接近1.0，换手率得分({turnover_long:.2f}/{turnover_short:.2f})虽低"
                 )
                 lines.append("    但9维度等权加权后综合得分仍最高，换手率惩罚不足以抵消其他维度优势")
                 lines.append(
