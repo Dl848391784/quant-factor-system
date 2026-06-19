@@ -315,6 +315,19 @@ def run_composite_backtest(
 
         logger.info("自动筛选完成: %s → %s", factor_list, factor_cols)
 
+    # v2.26: 过滤数据中不存在的因子列（如 return_3d 有 IC 结果但不在 factor_ic_data 中）
+    # 原因：auto_select 基于 IC 结果选因子，不感知数据列是否实际存在。
+    #   若不过滤，后续 full_df[factor_required_cols] 触发 KeyError。
+    if factor_cols is not None and factor_list is not None and full_df is not None:
+        missing_data_cols = [c for c in factor_cols if c not in full_df.columns]
+        if missing_data_cols:
+            # 同步过滤 factor_list 和 factor_cols（两者按位置一一对应）
+            kept_pairs = [(f, c) for f, c in zip(factor_list, factor_cols) if c in full_df.columns]
+            skipped_factors = [f for f, c in zip(factor_list, factor_cols) if c not in full_df.columns]
+            factor_list = [f for f, _ in kept_pairs]
+            factor_cols = [c for _, c in kept_pairs]
+            logger.warning("因子数据列缺失，从复合因子计算中跳过: %s", skipped_factors)
+
     # 如果仍未指定，使用默认配置
     if factor_list is None:
         raise ValueError("factor_list 未指定\n请设置 auto_select=True 启用自动筛选，或手动传入 factor_list")
