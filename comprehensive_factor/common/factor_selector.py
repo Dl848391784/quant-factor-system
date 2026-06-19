@@ -30,6 +30,9 @@
     v1.6 (2026-06-13): 单一映射来源（方案 B）
         - 删除本地 FACTOR_NAME_TO_COL_MAP 定义，改为从 factor_definitions 导入
         - 详见 designs/factor_name_col_map_unification_design.md
+    v1.7 (2026-06-19): ICIR 比较容差修复
+        - 容差从 0.001 收紧至 1e-9，避免相近 ICIR 误判为相等
+        - 显示精度从 .3f 改为 .4f，确保差异可见（如 0.3199<0.3202）
 """
 
 import json
@@ -619,12 +622,14 @@ def select_best_from_groups(
                     else:
                         # v2.6: 修复问题4 - 当 ICIR 相等时显示 '=' 而非 '<'
                         # v2.7: 修复显示精度 - 使用 .3f 避免 0.32<0.32 视觉矛盾
+                        # v2.8: 收紧容差至 1e-9 + 显示精度 .4f，
+                        #        避免 0.3199 vs 0.3202 差值 0.0003 < 0.001 误判为相等
                         icir_val = icir_values[factor_name]
                         best_icir_val = valid_icir_values[best_factor]
-                        # 使用阈值容差判断相等（避免浮点精度问题）
-                        icir_cmp = "=" if abs(icir_val - best_icir_val) < 0.001 else "<"
+                        # 仅浮点级相等才用 '='（容差 1e-9）
+                        icir_cmp = "=" if abs(icir_val - best_icir_val) < 1e-9 else "<"
                         dropped_factors[factor_name] = (
-                            f"与{best_factor}高相关({corr_str}), |ICIR|={icir_val:.3f}{icir_cmp}{best_icir_val:.3f}"
+                            f"与{best_factor}高相关({corr_str}), |ICIR|={icir_val:.4f}{icir_cmp}{best_icir_val:.4f}"
                         )
 
                     logger.info("丢弃高相关因子: %s（保留 %s，ICIR 更高）", factor_name, best_factor)
