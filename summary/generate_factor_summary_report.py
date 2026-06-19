@@ -61,7 +61,7 @@
            - Fix6: z-score 列移除"≈0(真实)"标签，统一显示"0.00"
 """
 
-__version__ = "2.24"
+__version__ = "2.25"
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -174,6 +174,13 @@ DATA_CHECK_SOURCES = {
     "tail_trading_data": {
         "path": "data_fetchers/result/tail_trading_data.json.gz",
         "description": "尾盘5分钟K线数据",
+        "date_field": "meta.date_range.end",  # 从 meta.date_range.end 获取最新日期
+        "format": "full_json",  # 完整 JSON 对象
+        "is_gzip": True,
+    },
+    "market_cap_data": {
+        "path": "data_fetchers/result/market_cap_data.json.gz",
+        "description": "市值数据(市值中性化用)",
         "date_field": "meta.date_range.end",  # 从 meta.date_range.end 获取最新日期
         "format": "full_json",  # 完整 JSON 对象
         "is_gzip": True,

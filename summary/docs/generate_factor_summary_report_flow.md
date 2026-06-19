@@ -1,9 +1,9 @@
 # generate_factor_summary_report.py 流程文档
 
-> 版本: v2.1
+> 版本: v2.2
 > 创建时间: 2026-05-28
 > 最后更新: 2026-06-19
-> 脚本版本: generate_factor_summary_report.py v2.24
+> 脚本版本: generate_factor_summary_report.py v2.25
 
 ---
 
@@ -346,3 +346,8 @@ DATA_CHECK_SOURCES = {
    - 同步脚本版本至 v2.24
    - v2.24: Section 7 最优方法说明动态列举得分≥0.9的维度，避免硬编码错误
      （修复：单调性0.600误列"接近1.0"，最大回撤1.000遗漏）
+
+7. v2.2（2026-06-19）：
+   - 同步脚本版本至 v2.25
+   - v2.25: DATA_CHECK_SOURCES 新增 market_cap_data 数据源检查
+     （市值数据用于市值中性化，AGENTS.md 跨模块数据路径表已定义）
