@@ -50,6 +50,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
+import numpy as np
 import pandas as pd
 
 
@@ -329,6 +330,7 @@ def sort_and_select(
     weights: dict[str, float] | None = None,  # v1.10: 因子权重（用于覆盖率过滤）
     min_weight_coverage: float = 0.5,  # v1.10→v1.17: 最低因子权重覆盖率（50%安全网，不再需要70%因为v1.17中性填充已天然惩罚缺失因子）
     min_amplitude: float = 0.01,  # v1.12: 最低振幅阈值（排除不可交易的一字板涨停股）
+    max_exposure: float = 0.7,  # v2.20: 单因子最大贡献占比（超限按比例缩减综合因子值）
     logger: logging.Logger | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """排序并选出 Top N 股票
@@ -438,6 +440,35 @@ def sort_and_select(
                 min_amplitude * 100,
             )
         valid_mask = valid_mask & amplitude_mask
+
+    # v2.20: 单因子暴露限制——任一因子贡献占比超 max_exposure 时按比例缩减综合因子值
+    # 效果：降低单因子主导股票的排名，让多元化信号更强的股票上升
+    if max_exposure > 0 and weights:
+        contrib_cols = []
+        for col, w in weights.items():
+            std_col = f"{col}_std"
+            if std_col in result_df.columns and abs(w) > 0:
+                result_df[f"_contrib_{col}"] = result_df[std_col].fillna(0) * w
+                contrib_cols.append(f"_contrib_{col}")
+        if contrib_cols:
+            max_contrib = result_df[contrib_cols].abs().max(axis=1)
+            abs_composite = composite_factor.abs()
+            # dominance = max(|contrib|) / |composite|，仅对非零综合因子计算
+            dominance = max_contrib / abs_composite.where(abs_composite > 1e-12, np.nan)
+            over_limit = dominance > max_exposure
+            if over_limit.any():
+                # 按比例缩减：scale = max_exposure / dominance
+                scale = pd.Series(1.0, index=composite_factor.index)
+                scale[over_limit] = max_exposure / dominance[over_limit]
+                composite_factor = composite_factor * scale
+                result_df["composite_factor"] = composite_factor
+                logger.info(
+                    "单因子暴露限制: %d 只股票被降权（单因子贡献占比 > %.0f%%）",
+                    int(over_limit.sum()),
+                    max_exposure * 100,
+                )
+            # 清理临时列
+            result_df.drop(columns=contrib_cols, inplace=True)
 
     # 排序（根据因子方向）
     # ascending=True 升序（反向因子：值越小越好）
