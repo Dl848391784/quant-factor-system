@@ -259,12 +259,14 @@ class TestSortAndSelect:
         assert "rsi_6" in result[0]["factor_values"]
         assert "volume_ratio_5" in result[0]["factor_values"]
 
-    def test_amplitude_filter(self, mock_factor_df):
-        """测试振幅过滤（v1.12 新增）"""
-        # 添加 amplitude 列：部分股票振幅低于阈值
+    def test_amplitude_filter_removed(self, mock_factor_df):
+        """测试振幅过滤已移除（v1.17: is_untradeable 在 load_full_data 阶段过滤）。
+
+        sort_and_select 不再做 amplitude 过滤，excluded_by_amplitude 恒为 0。
+        不可交易股票（涨停类）由 load_full_data → factor_loader 层过滤。
+        """
         df_with_amplitude = mock_factor_df.copy()
         df_with_amplitude["amplitude"] = [0.005, 0.008, 0.03, 0.05, 0.02, 0.015, 0.04, 0.001, 0.06, 0.09]
-        # 振幅 < 0.01 的股票：000001(0.005), 000002(0.008), 000008(0.001) = 3只
 
         composite = pd.Series([-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5])
 
@@ -277,12 +279,9 @@ class TestSortAndSelect:
             min_amplitude=0.01,
         )
 
-        # 3 只振幅不足的股票被排除
-        assert excluded_amp == 3
-        # 结果中不应包含被排除的股票
-        excluded_codes = ["000001", "000002", "000008"]
-        for item in result:
-            assert item["code"] not in excluded_codes
+        # amplitude 过滤已移至 load_full_data 层，sort_and_select 不再排除
+        assert excluded_amp == 0
+        assert len(result) == 5
 
 
 # ============================================================================
