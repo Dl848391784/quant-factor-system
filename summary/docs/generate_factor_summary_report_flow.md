@@ -1,9 +1,9 @@
 # generate_factor_summary_report.py 流程文档
 
-> 版本: v1.9
+> 版本: v2.0
 > 创建时间: 2026-05-28
 > 最后更新: 2026-06-19
-> 脚本版本: generate_factor_summary_report.py v2.22
+> 脚本版本: generate_factor_summary_report.py v2.23
 
 ---
 
@@ -336,3 +336,8 @@ DATA_CHECK_SOURCES = {
      - Fix3: 相关性矩阵列头用因子缩写替代 name[:8]（tp_pos/tp_vol/tp_pos_d 可区分）
      - Fix4: 剔除因子列表拆多行显示，避免单行超长截断
      - Fix5: Section 8 新增覆盖率过滤信息（stock_selector v1.15 配合，meta 新增 excluded_by_coverage/min_weight_coverage）
+
+5. v2.0（2026-06-19）：
+   - 同步脚本版本至 v2.23
+   - v2.23: format_weights 权重统一 :.1f 精度，与 Section 4/6 保持一致
+     （修复 vr:6% vs 6.5% 跨节显示差异）

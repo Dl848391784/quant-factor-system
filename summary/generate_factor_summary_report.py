@@ -61,7 +61,7 @@
            - Fix6: z-score 列移除"≈0(真实)"标签，统一显示"0.00"
 """
 
-__version__ = "2.22"
+__version__ = "2.23"
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -1065,6 +1065,8 @@ def format_weights(weights: dict) -> str:
     v2.22: 缩写表提取为模块级 FACTOR_ABBR + _get_factor_abbr；
            键归一化（列名→因子名）解决 vol/vr 不一致；
            权重 <0.5% 显示1位小数避免截断为 0%
+    v2.23: 权重统一 :.1f 精度，与 Section 4/6 的 :.1f 保持一致，
+           避免 vr:6% vs 6.5% 跨节显示差异
     """
     parts = []
     for factor, weight in weights.items():
@@ -1072,11 +1074,8 @@ def format_weights(weights: dict) -> str:
         factor_name = COL_TO_FACTOR_NAME_MAP.get(factor, factor) or factor
         abbr = _get_factor_abbr(factor_name)
         pct = weight * 100
-        # v2.22: 权重 <0.5% 显示1位小数（如 0.4%），避免 :.0f 截断为 0%
-        if pct < 0.5:
-            parts.append(f"{abbr}:{pct:.1f}%")
-        else:
-            parts.append(f"{abbr}:{pct:.0f}%")
+        # v2.23: 统一 1 位小数，与 Section 4/6 权重显示精度一致
+        parts.append(f"{abbr}:{pct:.1f}%")
 
     return ", ".join(parts)
 
