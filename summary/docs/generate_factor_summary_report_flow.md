@@ -1,9 +1,9 @@
 # generate_factor_summary_report.py 流程文档
 
-> 版本: v1.8
+> 版本: v1.9
 > 创建时间: 2026-05-28
 > 最后更新: 2026-06-19
-> 脚本版本: generate_factor_summary_report.py v2.21
+> 脚本版本: generate_factor_summary_report.py v2.22
 
 ---
 
@@ -327,3 +327,12 @@ DATA_CHECK_SOURCES = {
      - Fix4: load_backtest_results 剥离 _1d 后缀（intraday_intensity_1d→intraday_intensity）
      - Fix5: overnight_ret 回测夏普/单调性精度格式化（15位小数→2位）
      - Fix6: z-score 列移除"≈0(真实)"标签，统一显示"0.00"
+
+4. v1.9（2026-06-19）：
+   - 同步脚本版本至 v2.22
+   - v2.22 修复 5 项报告格式问题：
+     - Fix1: format_weights 缩写表提取为模块级 FACTOR_ABBR，键归一化（列名→因子名）解决 vol/vr 不一致
+     - Fix2: 权重 <0.5% 显示1位小数（momentum_strength 0%→0.4%）
+     - Fix3: 相关性矩阵列头用因子缩写替代 name[:8]（tp_pos/tp_vol/tp_pos_d 可区分）
+     - Fix4: 剔除因子列表拆多行显示，避免单行超长截断
+     - Fix5: Section 8 新增覆盖率过滤信息（stock_selector v1.15 配合，meta 新增 excluded_by_coverage/min_weight_coverage）

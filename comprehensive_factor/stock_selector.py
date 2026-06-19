@@ -76,7 +76,7 @@ from comprehensive_factor.common.weight_engine import WeightEngine  # noqa: E402
 # ============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "1.14"
+__version__ = "1.15"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -332,7 +332,7 @@ def sort_and_select(
     min_amplitude: float = 0.01,  # v1.12: 最低振幅阈值（排除不可交易的一字板涨停股）
     max_exposure: float = 0.7,  # v2.20: 单因子最大贡献占比（超限按比例缩减综合因子值）
     logger: logging.Logger | None = None,
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, int]:
     """排序并选出 Top N 股票
 
     Args:
@@ -347,7 +347,7 @@ def sort_and_select(
         logger: 日志对象（默认使用模块级 _logger）
 
     Returns:
-        Tuple[选股结果列表, 振幅过滤排除数]
+        Tuple[选股结果列表, 振幅过滤排除数, 覆盖率过滤排除数]
         选股结果列表结构：
         [
             {"rank": 1, "code": "000001", "composite_value": -2.35, "factor_values": {...}},
@@ -404,6 +404,7 @@ def sort_and_select(
     coverage_weights = weights if weights and total_weight > 0 else dict.fromkeys(factor_cols, 1.0 / len(factor_cols))
     coverage_total = sum(abs(w) for w in coverage_weights.values())
 
+    excluded_by_coverage = 0  # v1.15: 初始化，供返回值使用
     if coverage_weights and min_weight_coverage > 0 and coverage_total > 0:
         # 计算每只股票的因子覆盖率
         # coverage = (该股票非NaN因子权重之和) / coverage_total
@@ -541,7 +542,7 @@ def sort_and_select(
             }
         )
 
-    return result_list, excluded_by_amplitude
+    return result_list, excluded_by_amplitude, excluded_by_coverage
 
 
 def build_result(
@@ -555,6 +556,8 @@ def build_result(
     direction_map: dict[str, str] | None = None,  # v1.10: 方向映射（报告展示需要）
     flipped_factors: list[str] | None = None,  # v1.10: 取反因子列表（报告展示需要）
     excluded_by_amplitude: int = 0,  # v1.12: 振幅过滤排除数
+    excluded_by_coverage: int = 0,  # v1.15: 覆盖率过滤排除数
+    min_weight_coverage: float = 0.5,  # v1.15: 覆盖率阈值
     logger: logging.Logger | None = None,
 ) -> dict[str, Any]:
     """构建输出结果
@@ -596,6 +599,9 @@ def build_result(
             # v1.12: 振幅过滤信息（报告展示需要）
             "min_amplitude": config.min_amplitude,
             "excluded_by_amplitude": excluded_by_amplitude,
+            # v1.15: 覆盖率过滤信息（报告展示需要）
+            "excluded_by_coverage": excluded_by_coverage,
+            "min_weight_coverage": min_weight_coverage,
         },
         "top_stocks": top_stocks,
         "weight_config": {
@@ -873,7 +879,7 @@ def select_stocks(
         name_to_col = dict(zip(factor_list, factor_cols))
         selection_weights = {name_to_col.get(k, k): v for k, v in selection_weights.items()}
 
-    top_stocks, excluded_by_amplitude = sort_and_select(
+    top_stocks, excluded_by_amplitude, excluded_by_coverage = sort_and_select(
         composite_factor,
         factor_df,
         config.top_n,
@@ -899,6 +905,7 @@ def select_stocks(
         direction_map=direction_map,
         flipped_factors=flipped_factors,
         excluded_by_amplitude=excluded_by_amplitude,  # v1.12: 振幅过滤排除数
+        excluded_by_coverage=excluded_by_coverage,  # v1.15: 覆盖率过滤排除数
         logger=logger,
     )
 

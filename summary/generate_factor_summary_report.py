@@ -61,7 +61,7 @@
            - Fix6: z-score 列移除"≈0(真实)"标签，统一显示"0.00"
 """
 
-__version__ = "2.21"
+__version__ = "2.22"
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -98,6 +98,42 @@ from factor_definitions import (  # noqa: E402
 #                    改为从 factor_definitions 导入（单一映射来源，方案 B）
 #                    详见 designs/factor_name_col_map_unification_design.md §3.5
 COL_TO_FACTOR_NAME_MAP = FACTOR_COL_TO_NAME_MAP
+
+# v2.22: 因子缩写表（模块级常量，format_weights 和 generate_correlation_section 共用）
+FACTOR_ABBR = {
+    "turnover_surge": "ts",
+    "bollinger_pb": "bp",
+    "volume_ratio": "vr",
+    "rsi": "rsi",
+    "kdj_j": "kdj",
+    "tail_price_position": "tp_pos",
+    "tail_price_volume_intensity": "tp_vol",
+    "tail_price_slope": "tp_slp",
+    "tail_volume_acceleration": "tv_acc",
+    "tail_volume_shrink": "tv_shr",
+    "momentum_strength": "mom",
+    "amplitude": "amp",
+    "overnight_ret": "on_ret",
+    "return_3d": "r3d",
+    "return_5d": "r5d",
+    "intraday_intensity": "in_int",
+    "price_position": "pp",
+    "past_return_1d": "pr1d",
+    "tail_price_position_delta": "tp_pos_d",
+    "tail_volume_shrink_delta": "tv_shr_d",
+    "volume_price_strength": "vps_str",
+    "positive_day_ratio_5": "pdr5d",
+    "ma5_deviation": "m5_dev",
+    "near_high_ratio_5": "nrhr5d",
+}
+
+
+def _get_factor_abbr(factor_name: str) -> str:
+    """获取因子缩写，未命中时取前3字符
+
+    v2.22: 从 format_weights 提取为模块级函数，供 generate_correlation_section 复用
+    """
+    return FACTOR_ABBR.get(factor_name, factor_name[:3])
 
 
 # 数据路径配置
@@ -1020,44 +1056,27 @@ def format_weights(weights: dict) -> str:
     """格式化权重字符串
 
     Args:
-        weights: 权重字典（因子名 → 权重值）
+        weights: 权重字典（因子名或列名 → 权重值）
 
     Returns:
         格式化的权重字符串（如 "ts:60%, bp:40%")
 
     v2.6: 添加 tail_price_position/tail_price_volume_intensity 缩写区分（问题9修复）
+    v2.22: 缩写表提取为模块级 FACTOR_ABBR + _get_factor_abbr；
+           键归一化（列名→因子名）解决 vol/vr 不一致；
+           权重 <0.5% 显示1位小数避免截断为 0%
     """
-    factor_abbr = {
-        "turnover_surge": "ts",
-        "bollinger_pb": "bp",
-        "volume_ratio": "vr",
-        "rsi": "rsi",
-        "kdj_j": "kdj",
-        "tail_price_position": "tp_pos",  # v2.6: 区分 tail_price 系因子
-        "tail_price_volume_intensity": "tp_vol",  # v2.6: 区分 tail_price 系因子
-        "tail_price_slope": "tp_slp",
-        "tail_volume_acceleration": "tv_acc",
-        "tail_volume_shrink": "tv_shr",
-        "momentum_strength": "mom",
-        "amplitude": "amp",
-        "overnight_ret": "on_ret",
-        "return_3d": "r3d",
-        "return_5d": "r5d",
-        "intraday_intensity": "in_int",
-        "price_position": "pp",
-        "past_return_1d": "pr1d",
-        "tail_price_position_delta": "tp_pos_d",  # 差分因子缩写
-        "tail_volume_shrink_delta": "tv_shr_d",  # 差分因子缩写
-        "volume_price_strength": "vps_str",  # 量价齐升
-        "positive_day_ratio_5": "pdr5d",  # 5日阳线比例
-        "ma5_deviation": "m5_dev",  # 5日均线偏离度
-        "near_high_ratio_5": "nrhr5d",  # 近5日高低位置
-    }
-
     parts = []
     for factor, weight in weights.items():
-        abbr = factor_abbr.get(factor, factor[:3])
-        parts.append(f"{abbr}:{weight * 100:.0f}%")
+        # v2.22: 归一化键——列名(如 volume_ratio_5)→因子名(如 volume_ratio)
+        factor_name = COL_TO_FACTOR_NAME_MAP.get(factor, factor) or factor
+        abbr = _get_factor_abbr(factor_name)
+        pct = weight * 100
+        # v2.22: 权重 <0.5% 显示1位小数（如 0.4%），避免 :.0f 截断为 0%
+        if pct < 0.5:
+            parts.append(f"{abbr}:{pct:.1f}%")
+        else:
+            parts.append(f"{abbr}:{pct:.0f}%")
 
     return ", ".join(parts)
 
@@ -1171,7 +1190,9 @@ def generate_correlation_section(
     # 表头
     header = f"{'因子':<12}"
     for name in factor_names:
-        header += f"{name[:8]:>10}"
+        # v2.22: 用因子缩写替代 name[:8]，避免 tail_pri ×3 无法区分
+        abbr = _get_factor_abbr(name)
+        header += f"{abbr:>10}"
     lines.append(header)
     lines.append("-" * 70)
 
@@ -1378,7 +1399,10 @@ def get_factor_selection_info(
 
             excluded_info.append(f"{f}({reason})")
 
-        lines.append(f"  - 剔除因子: {', '.join(excluded_info)}")
+        # v2.22: 剔除因子拆多行显示，避免单行超长截断
+        lines.append("  - 剔除因子:")
+        for info in excluded_info:
+            lines.append(f"    · {info}")
 
     # v2.12: 标注回测强劲但被剔除的因子（豁免规则需重跑pipeline生效）
     # 检查是否有回测表现优秀但因 ic_mean/icir 不足被剔除的因子
@@ -1884,6 +1908,14 @@ def _generate_stock_selection_section(
     if min_amplitude > 0:
         lines.append(
             f"振幅过滤: 排除 {excluded_by_amplitude} 只股票（振幅 < {min_amplitude * 100:.2f}%，不可交易的一字板涨停股）"
+        )
+
+    # v2.22: 覆盖率过滤信息展示
+    excluded_by_coverage = meta.get("excluded_by_coverage", 0)
+    min_weight_coverage = meta.get("min_weight_coverage", 0)
+    if min_weight_coverage > 0:
+        lines.append(
+            f"覆盖率过滤: 排除 {excluded_by_coverage} 只股票（覆盖率 < {min_weight_coverage * 100:.0f}%，缺失高权重因子导致综合因子值不可信）"
         )
 
     # v2.12: 方向处理说明——展示取反因子

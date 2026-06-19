@@ -52,7 +52,7 @@ class TestVersion:
 
     def test_version_defined(self):
         """验证版本常量存在"""
-        assert __version__ == "2.21"
+        assert __version__ == "2.22"
 
 
 class TestHelperFunctions:
@@ -127,6 +127,20 @@ class TestHelperFunctions:
         result = format_weights(weights)
         assert "ts:60%" in result
         assert "bp:40%" in result
+
+    def test_format_weights_column_name_keys(self):
+        """v2.22: 列名键应归一化为因子名再查缩写（vol→vr 一致性）"""
+        weights = {"volume_ratio_5": 0.12, "rsi_6": 0.08}
+        result = format_weights(weights)
+        assert "vr:12%" in result  # 列名 volume_ratio_5 → 因子名 volume_ratio → 缩写 vr
+        assert "rsi:8%" in result
+
+    def test_format_weights_small_weight(self):
+        """v2.22: 权重 <0.5% 显示1位小数（避免 0.4% 截断为 0%）"""
+        weights = {"momentum_strength": 0.004, "tail_price_position": 0.27}
+        result = format_weights(weights)
+        assert "mom:0.4%" in result  # 0.4% 不截断为 0%
+        assert "tp_pos:27%" in result
 
     def test_format_percentage_default(self):
         """测试百分比格式化（默认精度）"""
