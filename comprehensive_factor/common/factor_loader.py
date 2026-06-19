@@ -102,6 +102,10 @@ def load_full_data(
     else:
         required_cols = None  # peek 阶段决定
 
+    # is_untradeable: 不可交易标记列（涨停类），加载用于过滤
+    if required_cols is not None:
+        required_cols.append("is_untradeable")
+
     full_df: pd.DataFrame
 
     try:
@@ -209,6 +213,21 @@ def load_full_data(
     for col in numeric_cols:
         full_df[col] = pd.to_numeric(full_df[col], errors="coerce")
     logger.info("数值列类型规范化完成: %d 列（pd.to_numeric, Decimal/str → float）", len(numeric_cols))
+
+    # === 过滤不可交易股票（涨停类，T 日尾盘无法买入） ===
+    # 向后兼容: 旧数据无此列时跳过过滤
+    if "is_untradeable" in full_df.columns:
+        untradeable_mask = full_df["is_untradeable"].fillna(0).astype(int) == 1
+        untradeable_count = int(untradeable_mask.sum())
+        if untradeable_count > 0:
+            full_df = full_df[~untradeable_mask].reset_index(drop=True)
+            logger.info(
+                "过滤不可交易股票(涨停类): 排除 %d 条, 剩余 %d 条",
+                untradeable_count,
+                len(full_df),
+            )
+    else:
+        logger.warning("数据缺少 is_untradeable 列，跳过不可交易股票过滤")
 
     return full_df
 

@@ -76,7 +76,7 @@ from comprehensive_factor.common.weight_engine import WeightEngine  # noqa: E402
 # ============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "1.16"
+__version__ = "1.17"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -429,20 +429,9 @@ def sort_and_select(
         # 合覆盖率过滤到 valid_mask
         valid_mask = valid_mask & coverage_mask
 
-    # v1.12: 振幅过滤（排除不可交易的一字板涨停股）
-    # 振幅 < min_amplitude 的股票实际无法买入（一字板封涨停），排除以提高选股可操作性
+    # v1.12→v1.17: 振幅过滤已移除，不可交易股票（涨停类）由 factor_loader 在数据加载层过滤
+    # is_untradeable 列（T 日涨停=1）在 load_full_data 阶段已排除，此处无需重复
     excluded_by_amplitude = 0
-    if min_amplitude > 0 and "amplitude" in result_df.columns:
-        amplitude_mask = result_df["amplitude"] >= min_amplitude
-        excluded_by_amplitude = int(valid_mask.sum() - (valid_mask & amplitude_mask).sum())
-
-        if excluded_by_amplitude > 0:
-            logger.info(
-                "振幅过滤: 排除 %d 只股票（振幅 < %.2f%%，一字板或接近一字板涨停股不可买入）",
-                excluded_by_amplitude,
-                min_amplitude * 100,
-            )
-        valid_mask = valid_mask & amplitude_mask
 
     # v2.20: 单因子暴露限制——任一因子贡献占比超 max_exposure 时按比例缩减综合因子值
     # 效果：降低单因子主导股票的排名，让多元化信号更强的股票上升
@@ -714,14 +703,9 @@ def select_stocks(
         raise ValueError(f"factor_list ({len(factor_list)}) 与 factor_cols ({len(factor_cols)}) 数量不一致")
 
     # Step 4: 加载因子数据
-    # v1.16: 振幅过滤需要 amplitude 列，即使 amplitude 不在选中因子中
-    #        额外加载 amplitude 列用于一字板过滤（不参与标准化和综合因子计算）
-    load_cols = list(factor_cols)
-    if config.min_amplitude > 0 and "amplitude" not in load_cols:
-        load_cols.append("amplitude")
-        logger.info("额外加载 amplitude 列用于振幅过滤（不在选中因子中）")
+    # 不可交易股票（涨停类）由 factor_loader 在 load_full_data 阶段过滤
     logger.info("加载因子数据...")
-    factor_df_raw = load_factor_values(load_cols, config.data_source, logger)
+    factor_df_raw = load_factor_values(factor_cols, config.data_source, logger)
     # 类型转换：load_factor_values 返回 DataFrame（pandas DataFrame 构造返回类型不稳定）
     factor_df = cast(pd.DataFrame, factor_df_raw)
 
