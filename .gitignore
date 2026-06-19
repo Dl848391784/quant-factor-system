@@ -5,7 +5,9 @@ __pycache__/
 *.so
 .Python
 .venv/
+.venv*/
 venv/
+test_venv/
 ENV/
 
 # IDE
@@ -38,4 +40,5 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+temporary/
 *.tmp
