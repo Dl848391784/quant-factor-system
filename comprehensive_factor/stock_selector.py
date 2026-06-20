@@ -69,6 +69,7 @@ from comprehensive_factor.common.factor_loader import (  # noqa: E402
 )
 from comprehensive_factor.common.logger_config import get_logger  # noqa: E402
 from comprehensive_factor.common.weight_engine import WeightEngine  # noqa: E402
+from factor_definitions import FACTOR_COL_TO_NAME_MAP  # noqa: E402
 
 
 # ============================================================================
@@ -486,27 +487,30 @@ def sort_and_select(
     result_list = []
     for rank_idx, (_, row) in enumerate(top_stocks.iterrows(), start=1):
         # 提取因子值（问题 7 修复：只输出显式列名集合）
-        factor_values = {}
         # v1.3 新增：标准化因子值（z-score，经 Winsorize ±3σ 截断）
         # 报告应显示标准化值而非原始值，避免比率型因子原始极端值误导用户
         # 如 momentum_strength 原始值=-9.08 看似极端，但标准化 z=-2.65，有效贡献仅 2%×-2.65
+        # v1.4: factor_values/factor_values_std 的 key 统一用逻辑名（与 weight_config.factor_list 一致），
+        #   通过 FACTOR_COL_TO_NAME_MAP 反向映射列名→逻辑名，避免 rsi_6 vs rsi 不一致
+        factor_values = {}
         factor_values_std = {}
         for col in factor_cols:
+            logic_name = FACTOR_COL_TO_NAME_MAP.get(col, col)
             if col in row:
                 val = row[col]
                 # 问题 1 修复：只判 pd.isna，EPSILON 不该用于数值合法性判断
                 if pd.isna(val):
-                    factor_values[col] = None
+                    factor_values[logic_name] = None
                 else:
-                    factor_values[col] = convert_to_native_types(val)
+                    factor_values[logic_name] = convert_to_native_types(val)
             # 标准化值（_std 列由 standardize_factors 生成，经 Winsorize ±3σ 截断）
             std_col = f"{col}_std"
             if std_col in row:
                 std_val = row[std_col]
                 if pd.isna(std_val):
-                    factor_values_std[col] = None
+                    factor_values_std[logic_name] = None
                 else:
-                    factor_values_std[col] = round(convert_to_native_types(std_val), 4)
+                    factor_values_std[logic_name] = round(convert_to_native_types(std_val), 4)
 
         # v1.10→v1.11: 计算该股票的因子覆盖率（使用 coverage_weights 含 fallback）
         # v1.14: 用 _std 列判断可用性（综合因子用 std 计算，std=NaN 则该因子不贡献）

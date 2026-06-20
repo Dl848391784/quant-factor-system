@@ -109,8 +109,8 @@ def mock_top_stocks():
             "rank": 1,
             "code": "000006",
             "composite_value": -1.5,
-            "factor_values": {"rsi_6": 10, "volume_ratio_5": 0.2},
-            "factor_values_std": {"rsi_6": -2.0, "volume_ratio_5": -1.0},
+            "factor_values": {"rsi": 10, "volume_ratio": 0.2},
+            "factor_values_std": {"rsi": -2.0, "volume_ratio": -1.0},
             "weight_coverage": 1.0,
         }
     ]
@@ -256,8 +256,8 @@ class TestSortAndSelect:
         )
 
         assert "factor_values" in result[0]
-        assert "rsi_6" in result[0]["factor_values"]
-        assert "volume_ratio_5" in result[0]["factor_values"]
+        assert "rsi" in result[0]["factor_values"]
+        assert "volume_ratio" in result[0]["factor_values"]
 
     def test_amplitude_filter_removed(self, mock_factor_df):
         """测试振幅过滤已移除（v1.17: is_untradeable 在 load_full_data 阶段过滤）。
