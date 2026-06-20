@@ -1213,6 +1213,16 @@ def generate_correlation_section(
 
     lines.append("-" * 70)
 
+    # v2.24: 缩写对照表——行名用全名、列名用缩写，需输出对照表供读者查阅
+    if factor_names:
+        abbr_pairs = [(name, _get_factor_abbr(name)) for name in factor_names]
+        # 只在有缩写差异时才输出（避免全名=缩写时多余）
+        diff_pairs = [(n, a) for n, a in abbr_pairs if n != a]
+        if diff_pairs:
+            lines.append("【缩写对照表】")
+            for name, abbr in diff_pairs:
+                lines.append(f"  {abbr:<10} = {name}")
+
     # v2.6: 问题8修复 - 展示剔除的高相关因子对
     if selection_result:
         high_corr_dropped = selection_result.get("high_corr_dropped", {})
@@ -1834,6 +1844,9 @@ def _generate_weight_selection_section(weight_result: dict | None) -> list[str]:
         lines.append("")
         lines.append("【评分明细】")
         lines.append("各方法各维度归一化得分（Min-Max归一化，逆向指标已反转）")
+        # v2.24: 说明 Min-Max 归一化的放大效应
+        lines.append("  注: Min-Max归一化将原始值映射到[0,1]，方法间微小差异可能被放大为较大得分差距")
+        lines.append("       请结合括号内原始值判断实际差异，归一化得分仅反映相对排名")
 
         # 构建维度展示名称映射
         metric_display_names = {
