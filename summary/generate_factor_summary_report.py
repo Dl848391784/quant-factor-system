@@ -2093,16 +2093,18 @@ def _generate_stock_selection_section(
     top_stocks = stock_result.get("top_stocks", [])
 
     # 元信息展示
-    # v2.24: 动态标注数据日期——从数据完整性检查获取实际最新日期，不硬编码T-1
+    # v2.24: 动态标注数据日期——对比 expected_date(T-1) 与 actual_date 判断数据延迟
     selection_date = meta.get("selection_date", "N/A")
     data_date_note = "（使用T-1数据）"  # 默认标注
     if data_freshness:
-        # 找主数据源(factor_ic_data)的最新日期
         main_source = next((s for s in data_freshness if "factor_ic_data" in s.get("source", "")), None)
         if main_source:
+            expected_date = main_source.get("expected_date", "")
             actual_date = main_source.get("actual_date", "")
-            if actual_date and actual_date != selection_date:
-                data_date_note = f"（数据截至{actual_date}）"
+            if expected_date and actual_date and actual_date != expected_date:
+                data_date_note = f"（数据滞后，截至{actual_date}，T-1应为{expected_date}）"
+            elif actual_date and actual_date == expected_date:
+                data_date_note = "（使用T-1数据）"
     lines.append(f"选股日期: {selection_date}{data_date_note}")
     lines.append(f"最优权重方法: {get_weight_method_display(meta.get('weight_method', 'N/A'))}")
     lines.append(f"权重综合得分: {format_float(meta.get('composite_score', 0), 4)}")
