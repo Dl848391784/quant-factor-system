@@ -1955,8 +1955,11 @@ if cat_i != cat_j and corr_val > 0.9:
 
 **Verify**:
 - `pytest comprehensive_factor/test_cases/test_dimension_aware_dedup.py`
+- `pytest comprehensive_factor/test_cases/test_factor_selector_exemption.py`（v2.33: 豁免信息传递链）
 - 检查 `select_factors` 返回结构含 `dimension_coverage` 字段（`covered`/`missing`/`selected_by_dimension`）
+- 检查 `select_factors` 返回结构含 `exempted_factors` 字段（v2.33: 豁免详情，供报告展示）
 - 检查 `DEFAULT_THRESHOLDS` 不含 `cross_dimension_corr_threshold`（v2.7 移除）
+- 检查 summary 报告第三章跨维度高相关对标注"保留"而非"建议剔除"（v2.33: 报告展示同步）
 
 ---
 
@@ -2017,6 +2020,7 @@ weight_engine = WeightEngine(dimension_weight_method="icir")  # 硬编码
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v2.33 | 2026-06-20 | factor_selector.py v2.10 + summary v2.23: 豁免信息传递链 + 报告维度感知展示同步。(1) validate_factor 返回值扩展为 (is_valid, reasons, exempt_details)，exempt_details 记录每个触发豁免检查的阈值详情（trigger/threshold/actual/exempted/conditions/detail）；新增 _build_exemption_fail_reason 辅助函数。(2) filter_invalid_factors 结果新增 exempted_factors 字段，select_factors 透传。(3) summary generate_correlation_section 维度感知展示——跨维度高相关标注'保留'而非'建议剔除'，消除与 M57 筛选逻辑的矛盾。(4) summary get_factor_selection_info 展示豁免标注（入选因子标'豁免:...'，被剔除因子标'未满足豁免:...'），移除旧的'回测强劲因子被剔除说明'段。test_factor_selector_exemption.py 11 测试。遵循 designs/exempt_info_propagation_design.md 路径B |
 | v2.32 | 2026-06-20 | stock_selector.py v1.4: factor_values/factor_values_std 的 key 统一用逻辑名（通过 FACTOR_COL_TO_NAME_MAP 反向映射列名→逻辑名），与 weight_config.factor_list 一致——修复 rsi vs rsi_6、volume_ratio vs volume_ratio_5 命名不一致；同步修复 summary 模块 L1858 集中度检测隐藏 bug（comp_weights key 是逻辑名但 factor_values_std key 是列名导致 rsi/volume_ratio 集中度检测失效）；test_stock_selector.py 更新 4 处断言 |
 | v2.31 | 2026-06-20 | factor_selector.py v2.9: select_best_from_groups 新增 corr_matrix 参数——Union-Find 传递性归组时被淘汰因子和 best_factor 之间可能没有直接 >0.7 的配对（如 positive_day_ratio_5 通过中间因子间接归入 rsi 组），从 corr_matrix 查找实际相关系数补全去重原因显示；test_dimension_aware_dedup.py 新增 TestTransitiveGroupCorrDisplay 2 测试（corr_matrix 补全 + None 兜底"传递性归组"） |
 | v2.30 | 2026-06-20 | factor_loader.py v2.27: standardize_factors 点质量检测增加物理边界值豁免——高频值=当日截面 min/max 时不置 NaN（tail_price_position 0.0=11.1%/1.0=6.9%、price_position 0.0=4.3%/1.0=2.6%、near_high_ratio_5 1.0=15.5% 均为有界分布的真实极端信号）；遵循 AGENTS.md 规则 #15（第一性原理）；AGENTS.md 新增规则 #15；test_standardize_point_mass.py 重写为 12 测试（4 原有+4 离散豁免+4 物理边界豁免），原有测试改用非边界值 0.5 |
