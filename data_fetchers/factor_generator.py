@@ -38,6 +38,7 @@ try:
         calculate_past_return_1d,
         calculate_positive_day_ratio_5,
         calculate_price_position,
+        calculate_return_3d,
         calculate_return_5d,
         calculate_tail_factors,
         calculate_tail_price_position_delta,
@@ -70,6 +71,7 @@ except ImportError:
         calculate_past_return_1d,
         calculate_positive_day_ratio_5,
         calculate_price_position,
+        calculate_return_3d,
         calculate_return_5d,
         calculate_tail_factors,
         calculate_tail_price_position_delta,
@@ -100,6 +102,7 @@ _EXTENDED_FACTOR_COLS: tuple[str, ...] = (
     "turnover_surge",
     "amplitude",
     "price_position",
+    "return_3d",  # 3日累计涨幅（IC 脚本 ic_return_3d_1d.py 使用）
     "return_5d",  # momentum_strength 前置依赖
     "momentum_strength",
     "overnight_ret",
@@ -213,6 +216,13 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
         "step_label": "Step 8: 计算价格位置因子...",
         "factor_func": calculate_price_position,
         "output_cols": ("price_position",),
+        "emit_valid_log": True,
+    },
+    # --- Step 8.4: return_3d ---
+    {
+        "step_label": "Step 8.4: 计算3日累计涨幅因子...",
+        "factor_func": calculate_return_3d,
+        "output_cols": ("return_3d",),
         "emit_valid_log": True,
     },
     # --- Step 8.5: return_5d ---
@@ -751,7 +761,7 @@ def _run_factor_pipeline(
 ) -> tuple[pd.DataFrame, dict[str, int]]:
     """Step 3.5~11.9：执行因子管线。
 
-    详情见 _FACTOR_PIPELINE_STEPS 表（24 个 step，31 个输出列）。
+    详情见 _FACTOR_PIPELINE_STEPS 表（25 个 step，32 个输出列）。
 
     Returns:
         (factor_df, valid_counts)。

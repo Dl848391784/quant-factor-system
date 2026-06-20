@@ -360,7 +360,7 @@
 - **调用**: `_format_and_write_output(factor_df, output_path, start_time, logger)` → `_write_factor_json_gz(output_df, output_path, logger)`
 - **输出文件**: `data_fetchers/result/factor_ic_data.json.gz`
 - **实现约束**: Step 12 禁止使用 `factor_df[list(_OUTPUT_COLS)].copy()` 复制全量输出列；Step 13 写出禁止使用 `DataFrame.to_dict("records")` 构造批量 `list[dict]`。
-- **原因**: 149 万行 × 31 列的输出阶段若同时持有宽 `factor_df`、全量 `output_df.copy()`、批量 `list[dict]`，会在 RSS 约 3.3GB 时被 OOM-kill。当前实现改为列视图 + `itertuples(index=False, name=None)` 逐行构造单条 record 并立即 `json.dump`。
+- **原因**: 149 万行 × 32 列的输出阶段若同时持有宽 `factor_df`、全量 `output_df.copy()`、批量 `list[dict]`，会在 RSS 约 3.3GB 时被 OOM-kill。当前实现改为列视图 + `itertuples(index=False, name=None)` 逐行构造单条 record 并立即 `json.dump`。
 - **验证**: `data_fetchers/test_cases/test_factor_generator_helpers.py::TestWriteFactorJsonGz::test_streaming_writer_does_not_call_to_dict` 对 `pd.DataFrame.to_dict` 加失败 mock，防止回退到批量 records 路径；真实验证使用 `/usr/bin/time -v python data_fetchers/factor_generator.py` 并检查输出文件 mtime 与 dmesg。
 - **实跑结果**: 2026-06-17 12:49 完整运行成功，输出 `1494817` 条记录，`factor_ic_data.json.gz` 更新为 `409756118` bytes，`factor_ic_data_columns.json` 同步更新；运行期间 dmesg OOM 计数未增加，退出码 0。
    356|

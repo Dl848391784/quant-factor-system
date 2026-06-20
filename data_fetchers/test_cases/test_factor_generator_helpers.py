@@ -1068,7 +1068,7 @@ class TestPipelineStepsAndColsConsistency:
         """注释中的 step 数必须等于 _FACTOR_PIPELINE_STEPS 实际长度。"""
         from data_fetchers.factor_generator import _FACTOR_PIPELINE_STEPS
 
-        assert len(_FACTOR_PIPELINE_STEPS) == 24, "_FACTOR_PIPELINE_STEPS 当前为 24 个 step"
+        assert len(_FACTOR_PIPELINE_STEPS) == 25, "_FACTOR_PIPELINE_STEPS 当前为 25 个 step"
 
     def test_pipeline_output_cols_count_matches_extended_factor_cols(self) -> None:
         """所有 step 的 output_cols 总数必须等于 _EXTENDED_FACTOR_COLS 长度。"""
@@ -1094,9 +1094,9 @@ class TestPipelineStepsAndColsConsistency:
         assert "_FACTOR_PIPELINE_STEPS 表（24 项）" not in source, (
             '_FACTOR_PIPELINE_STEPS 表注释禁用模糊 "项" 字，必须区分 step 数与列数'
         )
-        # 正例：必须明确包含 \"step\" 与 \"输出列\" 字段
-        assert "_FACTOR_PIPELINE_STEPS 表（24 个 step，31 个输出列）" in source, (
-            '_FACTOR_PIPELINE_STEPS 表注释必须形如 "（24 个 step，31 个输出列）"'
+        # 正例：必须明确包含 "step" 与 "输出列" 字段
+        assert "_FACTOR_PIPELINE_STEPS 表（25 个 step，32 个输出列）" in source, (
+            '_FACTOR_PIPELINE_STEPS 表注释必须形如 "（25 个 step，32 个输出列）"'
         )
 
 
