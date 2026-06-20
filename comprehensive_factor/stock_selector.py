@@ -36,6 +36,7 @@ Step 7: 股票选股 (stock_selector.py) ← 本脚本
 - v1.17 (2026-06-11): 覆盖率门槛 70%→50%（配合 weight_engine v1.17 中性填充策略：缺失因子 z=0 不放大，天然趋中惩罚，70%不再必要，50%仅作安全网）
 - v1.3b (2026-06-11): 新增 factor_values_std 字段（标准化 z-score，Winsorize ±3σ 截断），解决报告显示原始值误导问题（momentum_strength 原始=-9.08→z=-2.65）
 - v1.12 (2026-06-11): 2项改动：1. 新增 min_amplitude 参数（默认0.01=1%，排除不可交易的一字板涨停股）；2. top_n 默认值从3改为10，扩大选股范围
+- v1.21 (2026-06-20): 修复维度权重不生效 bug——从 composite 结果读取 dimension_weight_method 传给 WeightEngine（之前 stock_selector 自建 WeightEngine 时缺 dimension_weight_method/factor_categories 参数，导致选股排序用不带维度权重的综合因子值，维度分组工作无效）
 
 作者: 云瑶
 创建日期: 2026-06-03
@@ -69,7 +70,7 @@ from comprehensive_factor.common.factor_loader import (  # noqa: E402
 )
 from comprehensive_factor.common.logger_config import get_logger  # noqa: E402
 from comprehensive_factor.common.weight_engine import WeightEngine  # noqa: E402
-from factor_definitions import FACTOR_COL_TO_NAME_MAP  # noqa: E402
+from factor_definitions import FACTOR_CATEGORIES, FACTOR_COL_TO_NAME_MAP  # noqa: E402
 
 
 # ============================================================================
@@ -828,6 +829,7 @@ def select_stocks(
     # Step 9: 计算综合因子
     # v1.10: 从 composite 结果读取 short_sample_factors，传给 weight_engine 进行 ICIR 惩罚
     short_sample_factors = None
+    dimension_weight_method = None  # v1.21: 维度权重方法（从 composite 结果读取）
     if composite_file.exists():
         try:
             with open(composite_file, encoding="utf-8") as f:
@@ -840,11 +842,23 @@ def select_stocks(
                     "短样本因子ICIR权重惩罚: %s",
                     {k: f"×{v}/30={v / 30:.2f}" for k, v in short_sample_factors.items()},
                 )
+            # v1.21: 读取维度权重方法，传给 WeightEngine（修复维度权重不生效 bug）
+            dimension_weight_method = (
+                composite_data_for_ss.get("meta", {}).get("weight_meta", {}).get("dimension_weight_method")
+            )
+            if dimension_weight_method:
+                logger.info("维度权重方法: %s", dimension_weight_method)
         except (json.JSONDecodeError, KeyError):
             logger.warning("无法从 composite 结果读取 short_sample_factors，跳过惩罚")
 
     logger.info("计算综合因子（权重方法: %s）...", best_method)
-    weight_engine = WeightEngine(weight_method=best_method, window=config.rolling_window, logger=logger)
+    weight_engine = WeightEngine(
+        weight_method=best_method,
+        window=config.rolling_window,
+        logger=logger,
+        dimension_weight_method=dimension_weight_method,
+        factor_categories=FACTOR_CATEGORIES if dimension_weight_method else None,
+    )
     composite_factor = weight_engine.calculate(factor_df, factor_cols, ic_results, ic_daily_data, short_sample_factors)
 
     # Step 10: 排序选出 Top N
