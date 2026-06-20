@@ -33,6 +33,13 @@
   - 修正历史 4 个错列名：kdj_j_9→kdj_j、bollinger_pb_20→bollinger_pb、
     turnover_surge_5→turnover_surge；删除死条目 main_inflow_ratio_1d
   - 详见 designs/factor_name_col_map_unification_design.md
+- v1.6 (2026-06-20): 新增因子经济维度分类
+  - 新增 FACTOR_CATEGORIES（34 项因子 → 8 维度映射）
+  - 新增 CATEGORY_DIMENSIONS（维度列表）
+  - 分类依据: 因子计算逻辑的经济含义（非统计相关性）
+  - 8 维度: momentum/price_position/volume/tail_behavior/volatility/overnight/capital_flow/industry
+  - 用途: factor_selector 维度内去重，避免跨维度误淘汰
+  - 详见 designs/factor_classification_design.md
 
 作者: 云瑶
 创建日期: 2026-06-02
@@ -57,6 +64,8 @@ __all__ = [
     "FACTOR_DEFINITIONS",
     "FACTOR_NAME_TO_COL_MAP",
     "FACTOR_COL_TO_NAME_MAP",
+    "FACTOR_CATEGORIES",
+    "CATEGORY_DIMENSIONS",
     "get_factor_definition",
     "get_all_factor_names",
     "get_factor_col",
@@ -66,7 +75,7 @@ __all__ = [
 # ============================================================================
 # 版本常量
 # ============================================================================
-__version__ = "1.5"
+__version__ = "1.6"
 __author__ = "云瑶"
 
 # ============================================================================
@@ -258,6 +267,75 @@ FACTOR_NAME_TO_COL_MAP: dict[str, str] = {
 
 # 反向映射：列名 → 因子名（自动推导，避免手工同步漂移）
 FACTOR_COL_TO_NAME_MAP: dict[str, str] = {v: k for k, v in FACTOR_NAME_TO_COL_MAP.items()}
+
+
+# ============================================================================
+# 因子经济维度分类（v1.6, 2026-06-20）
+# ============================================================================
+# 定义来源: 2026-06-20 因子多样性讨论，参考 AQR 4 类风格 + MSCI FaCS 5 类
+# 分类依据: 因子计算逻辑的经济含义，不是统计相关性
+# 用途: factor_selector.py 的 identify_high_corr_groups 维度内去重
+#   - 同维度因子对, |corr|>0.7 → 合并去重（维度内冗余）
+#   - 跨维度因子对, |corr|>0.9 → 合并去重（极端高相关兜底）
+#   - 跨维度因子对, 0.7<|corr|≤0.9 → 保留（经济含义不同）
+# 详见: designs/factor_classification_design.md
+
+FACTOR_CATEGORIES: dict[str, str] = {
+    # 动量/趋势 (9): 基于历史收益方向预测未来
+    "momentum_strength": "momentum",
+    "return_3d": "momentum",
+    "return_5d": "momentum",
+    "rsi": "momentum",
+    "kdj_j": "momentum",
+    "ma5_deviation": "momentum",
+    "near_high_ratio_5": "momentum",
+    "past_return_1d": "momentum",
+    "positive_day_ratio_5": "momentum",
+    # 价格位置 (4): 收盘价在当日/布林带/尾盘区间中的相对位置
+    "price_position": "price_position",
+    "bollinger_pb": "price_position",
+    "tail_price_position": "price_position",
+    "tail_price_position_delta": "price_position",
+    # 量能 (5): 成交量/换手率维度的强度信号
+    "volume_ratio": "volume",
+    "turnover_surge": "volume",
+    "turnover_surge_delta": "volume",
+    "volume_price_strength": "volume",
+    "intraday_intensity": "volume",
+    # 尾盘行为 (5): 14:00-15:00 尾盘时段的量价特征
+    "tail_price_slope": "tail_behavior",
+    "tail_price_volume_intensity": "tail_behavior",
+    "tail_volume_acceleration": "tail_behavior",
+    "tail_volume_shrink": "tail_behavior",
+    "tail_volume_shrink_delta": "tail_behavior",
+    # 波动率 (2): 当日价格波动幅度
+    "amplitude": "volatility",
+    "amplitude_delta": "volatility",
+    # 隔夜跳空 (1): 隔夜时段收益
+    "overnight_ret": "overnight",
+    # 资金流 (2): 主力资金流向趋势
+    "capital_flow_ratio_trend": "capital_flow",
+    "capital_flow_intensity": "capital_flow",
+    # 行业 (6): 行业层面的动量/换手/振幅/基本面趋势
+    "industry_momentum_5d": "industry",
+    "industry_turnover_trend": "industry",
+    "industry_amplitude_trend": "industry",
+    "industry_roe_trend": "industry",
+    "industry_earnings_growth": "industry",
+    "industry_pe_trend": "industry",
+}
+
+# 维度列表（用于遍历，顺序无特殊含义）
+CATEGORY_DIMENSIONS: list[str] = [
+    "momentum",
+    "price_position",
+    "volume",
+    "tail_behavior",
+    "volatility",
+    "overnight",
+    "capital_flow",
+    "industry",
+]
 
 
 def get_factor_col(factor_name: str, default: str | None = None) -> str:

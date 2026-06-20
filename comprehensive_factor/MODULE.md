@@ -1,7 +1,7 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.24
-> 最后更新: 2026-06-19
+> 版本: v2.26
+> 最后更新: 2026-06-20
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
 >
@@ -25,7 +25,7 @@
 | **A. 模块基础** | M1-M4 | 模块职责 / 公共模块复用 / 脚本命名 / 输出与日志 |
 | **B. 加权方式** | M5-M8 | 4 种加权 / 静态权重 / 滚动 ICIR / 向量化实现 |
 | **C. 标准化** | M9-M11 | 截面标准化 / `_std` 列接口约定 / NaN 处理 |
-| **D. 因子筛选** | M12-M16 | 无效判定 / 高相关组 Union-Find / 关键指标缺失 / ICIR 缺失 / 完整性标记 |
+| **D. 因子筛选** | M12-M16, M57 | 无效判定 / 高相关组 Union-Find / 关键指标缺失 / ICIR 缺失 / 完整性标记 / 维度感知去重 |
 | **E. 命名映射与正则** | M17-M20 | 因子名映射表 / 反向映射 / 正则预编译+贪婪 / 跳过非标准 |
 | **F. 数据加载与校验** | M21-M26 | 数据来源 / 必需列 / 返回值解包 / 空值检查 / 类型校验 / 一致性强校验 |
 | **G. NaN 与权重处理** | M27-M30 | NaN 相关性 / composite NaN / 动态权重归一化 / 除零保护 |
@@ -76,7 +76,7 @@ Step 1: 单一因子分析
 Step 2: 因子筛选 (自动化,见 D 类规则)
   ├─ 计算所有因子两两相关性矩阵
   ├─ 无效因子 (IC 不显著/单调性差) → 直接丢弃
-  ├─ 高相关组 (|corr|>0.7) → 只保留最强的 (按 |ICIR|)
+  ├─ 高相关组 (同维度 |corr|>0.7, 跨维度 |corr|>0.9) → 只保留最强的 (按 |ICIR|, M57)
   └─ 保留下来的因子 → 两两低相关
                               ↓
 Step 3: 标准化 (M9)
@@ -1894,10 +1894,76 @@ for factor_name, direction in direction_map.items():
 
 ---
 
+## M57. 因子维度分类与维度内去重
+
+**What**: `identify_high_corr_groups` 必须支持维度感知去重——同维度因子对用 `high_corr_threshold`(0.7)，跨维度因子对用 `cross_dimension_corr_threshold`(0.9)。经济含义不同的因子即使统计相关性 0.7-0.9 也不互相淘汰。
+
+**Why**:
+- 结构性盲区：原逻辑只看两两相关性 >0.7 去重，不考虑维度覆盖。bollinger_pb (price_position) 与 momentum_strength (momentum) 相关 >0.7 时，ICIR 更高的 bollinger_pb 胜出，整个动量维度被一个均值回归因子"代表"后消失
+- 业界共识：AQR/MSCI 的"两阶段筛选"——维度内去重 → 跨维度组合。经济含义不同的因子即使统计相关也应保留（Asness et al. 2013：价值与动量负相关 -0.4~-0.7，组合后 Sharpe 更高）
+- 0.7 阈值刚性：0.69 和 0.71 的差别决定了整个维度的去留，但信息重叠程度几乎相同
+
+**How**:
+
+```python
+# identify_high_corr_groups 维度感知逻辑
+cat_i = factor_categories.get(name_i) if factor_categories else None
+cat_j = factor_categories.get(name_j) if factor_categories else None
+
+if cat_i is not None and cat_j is not None and cat_i != cat_j:
+    # 跨维度：仅当超过 cross_dimension_threshold(0.9) 才合并
+    if corr_val > cross_dimension_threshold:
+        union(name_i, name_j)
+    # else: 跨维度保留（0.7 < corr ≤ 0.9 不去重）
+else:
+    # 同维度或无分类信息：正常合并（>0.7）
+    union(name_i, name_j)
+```
+
+**维度分类定义** (`factor_definitions.py` `FACTOR_CATEGORIES`)：
+
+| 维度 | 因子数 | 代表因子 |
+|------|--------|---------|
+| momentum | 9 | momentum_strength, rsi, kdj_j, return_5d |
+| price_position | 4 | bollinger_pb, price_position, tail_price_position |
+| volume | 5 | volume_ratio, turnover_surge, volume_price_strength |
+| tail_behavior | 5 | tail_price_slope, tail_volume_shrink |
+| volatility | 2 | amplitude, amplitude_delta |
+| overnight | 1 | overnight_ret |
+| capital_flow | 2 | capital_flow_ratio_trend, capital_flow_intensity |
+| industry | 6 | industry_momentum_5d, industry_roe_trend |
+
+**Don't**:
+
+```python
+# ❌ 跨维度因子对用 0.7 阈值去重（导致维度坍塌）
+if corr_val > 0.7:
+    union(name_i, name_j)  # 不分维度，全部合并
+
+# ❌ 分类依据用统计相关性而非经济含义
+# （相关性会随数据窗口变化，经济含义是因子计算的固有属性）
+
+# ❌ 在 select_best_from_groups 中做维度感知（跨组协调复杂度高）
+# 正确做法：从 identify_high_corr_groups 源头控制哪些因子被合并
+```
+
+**When**:
+- 必须遵守：`select_factors` 调用 `identify_high_corr_groups` 时传入 `factor_categories=FACTOR_CATEGORIES` 和 `cross_dimension_threshold`
+- 可豁免：`factor_categories=None` 时退化为原始逻辑（向后兼容）
+- 跨维度兜底阈值 0.9：仅对极端高相关（如 0.95）的跨维度因子对去重，防止信息完全冗余
+
+**Verify**:
+- `pytest comprehensive_factor/test_cases/test_dimension_aware_dedup.py`
+- 检查 `select_factors` 返回结构含 `dimension_coverage` 字段（`covered`/`missing`/`selected_by_dimension`）
+- 检查 `DEFAULT_THRESHOLDS` 含 `cross_dimension_corr_threshold: 0.9`
+
+---
+
 ## 更新记录
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v2.26 | 2026-06-20 | factor_selector.py v1.8: 维度感知去重——identify_high_corr_groups 新增 factor_categories + cross_dimension_threshold 参数（同维度 >0.7 去重, 跨维度 >0.9 兜底）；新增 _compute_dimension_coverage + dimension_coverage 输出字段；factor_definitions.py v1.6: 新增 FACTOR_CATEGORIES(34 因子→8 维度)；M57 规则 + D 类规则索引更新；test_dimension_aware_dedup.py 17/17 通过 |
 | v2.13 | 2026-06-10 | composite_runner.py v2.13: 新增 Step 3.5 方向统一化（正向因子 ic_mean>0 取反 -*_std 统一负向语义）；M56 规则 + N 类规则索引；输出结构模板补充 direction_map/flipped_factors；流程图更新 |
 | v2.17 | 2026-06-11 | weight_engine.py v1.18c: Pitfall #46 修复——_last_day_weights NaN→0% 问题（增量因子原则：不能因覆盖率低排除）；提取逻辑复用 calculate() fillna(1/n) 等权回退，4个tail系因子从0%→8.33%；composite_runner 同步更新 |
 | v2.18 | 2026-06-11 | generate_factor_summary_report.py v2.15: 正向因子取反后 z-score 加 `*` 标记 + 表头说明，消除解读歧义；M56 补充展示语义说明；conftest.py 测试期间抑制 console 日志 |
@@ -1940,5 +2006,5 @@ for factor_name, direction in direction_map.items():
 
 ---
 
-*最后更新: 2026-06-12*
+*最后更新: 2026-06-20*
 

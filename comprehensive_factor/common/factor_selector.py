@@ -33,6 +33,12 @@
     v1.7 (2026-06-19): ICIR 比较容差修复
         - 容差从 0.001 收紧至 1e-9，避免相近 ICIR 误判为相等
         - 显示精度从 .3f 改为 .4f，确保差异可见（如 0.3199<0.3202）
+    v1.8 (2026-06-20): 维度感知去重
+        - identify_high_corr_groups 新增 factor_categories + cross_dimension_threshold 参数
+        - 同维度因子对用 threshold(0.7)，跨维度用 cross_dimension_threshold(0.9)
+        - 新增 _compute_dimension_coverage 辅助函数
+        - select_factors 输出新增 dimension_coverage 字段
+        - 详见 designs/factor_classification_design.md
 """
 
 import json
@@ -45,7 +51,7 @@ from comprehensive_factor.common.logger_config import get_logger
 
 # v1.6: 单一映射来源（方案 B）
 # 调用方（composite_runner / run_pipeline 等）已将项目根加入 sys.path
-from factor_definitions import FACTOR_NAME_TO_COL_MAP
+from factor_definitions import FACTOR_CATEGORIES, FACTOR_NAME_TO_COL_MAP
 
 
 # 默认路径
@@ -62,7 +68,8 @@ DEFAULT_THRESHOLDS = {
     "icir_abs_min": 0.15,  # |ICIR| 最小值（稳定性，0.15≈IC均值/IC标准差>0.03/0.2）
     "monotonicity_corr_abs_min": 0.4,  # |单调性相关性| 最小值（0.4为一般单调）
     "long_short_return_min": 0.03,  # 多空年化收益最小值（3%，扣除成本后仍正收益）
-    "high_corr_threshold": 0.7,  # 高相关性阈值
+    "high_corr_threshold": 0.7,  # 同维度高相关性阈值
+    "cross_dimension_corr_threshold": 0.9,  # v1.8: 跨维度高相关兜底阈值
     "min_sample_days": 30,  # v1.6: 最小样本天数（统计学大样本近似门槛，ICIR统计可靠性）
 }
 
@@ -415,11 +422,16 @@ def identify_high_corr_groups(
     valid_factors: dict[str, dict],
     corr_matrix: pd.DataFrame,
     threshold: float | None = None,
+    factor_categories: dict[str, str] | None = None,
+    cross_dimension_threshold: float | None = None,
     logger: logging.Logger | None = None,
 ) -> tuple[list[list[str]], list[tuple[str, str, float]]]:
     """识别高相关因子组
 
     v2.5 (2026-05-28): 返回 (groups, high_corr_pairs)，保存相关系数值供下游使用
+    v2.6 (2026-06-20): 维度感知——同维度因子对用 threshold(0.7)，
+        跨维度因子对用 cross_dimension_threshold(0.9)，避免经济含义
+        不同的因子因统计相关性高而被误淘汰
 
     使用 Union-Find（并查集）算法识别高相关因子组。
     正确处理跨组合并（A-B, B-C, C-D 应合并为一个大组）。
@@ -427,7 +439,11 @@ def identify_high_corr_groups(
     Args:
         valid_factors: 有效因子数据
         corr_matrix: 相关性矩阵
-        threshold: 高相关性阈值
+        threshold: 同维度高相关性阈值（默认 0.7）
+        factor_categories: 因子→维度映射（如 {"rsi": "momentum"}）。
+            为 None 时退化为原始逻辑（所有因子对用同一阈值）
+        cross_dimension_threshold: 跨维度高相关兜底阈值（默认 0.9）。
+            仅当因子对分属不同维度时使用
         logger: 日志对象
 
     Returns:
@@ -501,15 +517,55 @@ def identify_high_corr_groups(
             parent[root_x] = root_y  # 合并
 
     # 构建相关性图，union 高相关因子
+    # v2.6: 维度感知——同维度用 threshold(0.7)，跨维度用 cross_dimension_threshold(0.9)
     high_corr_pairs = []
+    cross_dimension_skipped: list[tuple[str, str, float, str, str]] = []
     for i, name_i in enumerate(factor_names):
         for j, name_j in enumerate(factor_names):
             if i < j and name_i in corr_matrix.index and name_j in corr_matrix.columns:
                 corr_val = abs(corr_matrix.loc[name_i, name_j])
                 if not pd.isna(corr_val) and corr_val > threshold:
-                    high_corr_pairs.append((name_i, name_j, corr_val))
-                    union(name_i, name_j)  # 合并高相关因子
-                    logger.debug("高相关因子: %s vs %s, corr=%.2f", name_i, name_j, corr_val)
+                    # v2.6: 维度感知判断
+                    cat_i = factor_categories.get(name_i) if factor_categories else None
+                    cat_j = factor_categories.get(name_j) if factor_categories else None
+
+                    if cat_i is not None and cat_j is not None and cat_i != cat_j:
+                        # 跨维度：仅当超过 cross_dimension_threshold 才合并
+                        if cross_dimension_threshold is not None and corr_val > cross_dimension_threshold:
+                            high_corr_pairs.append((name_i, name_j, corr_val))
+                            union(name_i, name_j)
+                            logger.debug(
+                                "跨维度高相关(>%.2f): %s(%s) vs %s(%s), corr=%.2f",
+                                cross_dimension_threshold,
+                                name_i,
+                                cat_i,
+                                name_j,
+                                cat_j,
+                                corr_val,
+                            )
+                        else:
+                            cross_dimension_skipped.append((name_i, name_j, corr_val, cat_i, cat_j))
+                            logger.debug(
+                                "跨维度保留: %s(%s) vs %s(%s), corr=%.2f (维度不同, 不去重)",
+                                name_i,
+                                cat_i,
+                                name_j,
+                                cat_j,
+                                corr_val,
+                            )
+                    else:
+                        # 同维度或无分类信息：正常合并
+                        high_corr_pairs.append((name_i, name_j, corr_val))
+                        union(name_i, name_j)
+                        logger.debug("同维度高相关: %s vs %s, corr=%.2f", name_i, name_j, corr_val)
+
+    if cross_dimension_skipped:
+        logger.info(
+            "维度感知: 跨维度保留 %d 对 (同维度阈值=%.2f, 跨维度阈值=%.2f)",
+            len(cross_dimension_skipped),
+            threshold,
+            cross_dimension_threshold if cross_dimension_threshold is not None else float("inf"),
+        )
 
     # 按 root 分组
     groups_dict: dict[str, list[str]] = {}
@@ -638,6 +694,46 @@ def select_best_from_groups(
     return list(selected_factors_set), dropped_factors
 
 
+def _compute_dimension_coverage(
+    selected_factors: list[str],
+    valid_factors: dict[str, dict],
+) -> dict:
+    """计算选中因子在各维度的覆盖情况
+
+    Args:
+        selected_factors: 选中因子列表
+        valid_factors: 有效因子数据
+
+    Returns:
+        {
+            "covered": ["momentum", "price_position", ...],
+            "missing": ["volatility", ...],
+            "selected_by_dimension": {"momentum": ["rsi", ...], ...},
+        }
+    """
+    if not FACTOR_CATEGORIES:
+        return {"covered": [], "missing": [], "selected_by_dimension": {}}
+
+    selected_set = set(selected_factors)
+    selected_by_dim: dict[str, list[str]] = {}
+    valid_by_dim: dict[str, list[str]] = {}
+
+    for factor_name, dim in FACTOR_CATEGORIES.items():
+        if factor_name in valid_factors:
+            valid_by_dim.setdefault(dim, []).append(factor_name)
+        if factor_name in selected_set:
+            selected_by_dim.setdefault(dim, []).append(factor_name)
+
+    covered = sorted(selected_by_dim.keys())
+    missing = sorted(set(valid_by_dim.keys()) - set(selected_by_dim.keys()))
+
+    return {
+        "covered": covered,
+        "missing": missing,
+        "selected_by_dimension": selected_by_dim,
+    }
+
+
 def select_factors(
     ic_result_dir: Path | None = None,
     backtest_result_dir: Path | None = None,
@@ -650,7 +746,7 @@ def select_factors(
     流程:
     1. 加载所有因子数据
     2. 筛选无效因子
-    3. 识别高相关组
+    3. 识别高相关组（v1.8: 维度感知——同维度 >0.7 去重, 跨维度 >0.9 去重）
     4. 选择最优因子
 
     Args:
@@ -706,10 +802,13 @@ def select_factors(
 
     if corr_matrix is not None and len(valid_factors) > 0:
         # v2.5: identify_high_corr_groups 现在返回 (groups, pairs)
+        # v2.6: 传入维度分类，启用维度感知去重
         high_corr_groups, high_corr_pairs = identify_high_corr_groups(
             valid_factors=valid_factors,
             corr_matrix=corr_matrix,
             threshold=thresholds["high_corr_threshold"],  # 修复：入口已处理 None，直接使用
+            factor_categories=FACTOR_CATEGORIES,
+            cross_dimension_threshold=thresholds.get("cross_dimension_corr_threshold", 0.9),
             logger=logger,
         )
 
@@ -762,6 +861,8 @@ def select_factors(
         "selection_warnings": selection_warnings,  # 筛选过程中的警告列表
         # v1.6: 短样本因子标记（供ICIR权重惩罚使用）
         "short_sample_factors": short_sample_factors,  # {factor_name: valid_days}
+        # v1.8: 维度覆盖统计（维度感知去重后的覆盖情况）
+        "dimension_coverage": _compute_dimension_coverage(selected_factors, valid_factors),
     }
 
     logger.info("筛选完成: 选中 %d 个因子", len(selected_factors))
