@@ -180,6 +180,13 @@ def load_all_factor_results(
             with open(backtest_file, encoding="utf-8") as f:
                 backtest_data = json.load(f)
 
+            # v2.11: 回测文件名可能含 _1d 后缀（如 intraday_intensity_1d_layered_backtest.json），
+            # 但 IC 文件名提取的因子名不含后缀（intraday_intensity），需要修正
+            if factor_name not in all_factors and factor_name.endswith("_1d"):
+                stripped = factor_name[:-3]
+                if stripped in all_factors:
+                    factor_name = stripped
+
             if factor_name in all_factors:
                 all_factors[factor_name]["backtest"] = backtest_data
             else:

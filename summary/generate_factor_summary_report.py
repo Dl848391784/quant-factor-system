@@ -1317,7 +1317,8 @@ def _format_exempt_note(factor_name: str, exempted_factors_map: dict[str, list[d
         fail_details = [d for d in details if not d["exempted"]]
         if not fail_details:
             return ""
-        parts = [d["detail"] for d in fail_details]
+        # v2.25: 去重——ic_mean 和 icir 两个条件可能触发相同的豁免失败说明
+        parts = list(dict.fromkeys(d["detail"] for d in fail_details))
         return ";".join(parts)
 
 
@@ -1590,6 +1591,12 @@ def _generate_neutralization_notes(ic_results: list[dict]) -> list[str]:
         notes.append(
             f"  '-': 中性化未启用或被排除清单跳过 — {', '.join(null_disabled[:5])}"
             + ("..." if len(null_disabled) > 5 else "")
+        )
+
+    if null_excluded:
+        notes.append(
+            f"  '-': 中性化已启用但 decay_rate 缺失（可能因有效天数不足无法计算） — {', '.join(null_excluded[:5])}"
+            + ("..." if len(null_excluded) > 5 else "")
         )
 
     if extreme_negative:
@@ -2492,7 +2499,7 @@ def _generate_comparison_section(
 
     if short_sample_selected or (composite_best_return < min_long_return and min_long_return > 0):
         lines.append("")
-        lines.append("⚠ 综合因子收益低于单因子分析:")
+        lines.append("⚠ 综合因子收益低于短样本单因子分析:")
 
         # v2.21: 动态编号，避免条件不满足时编号跳过
         note_idx = 1
