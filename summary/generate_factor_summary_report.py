@@ -87,6 +87,7 @@ import pandas as pd  # noqa: E402
 
 # 项目模块导入
 from factor_definitions import (  # noqa: E402
+    FACTOR_CATEGORIES,
     FACTOR_COL_TO_NAME_MAP,
     FACTOR_DEFINITIONS,
     FACTOR_NAME_TO_COL_MAP,
@@ -1225,12 +1226,36 @@ def generate_correlation_section(
             lines.append("-" * 70)
 
     # 选中因子之间的高相关因子对
+    # v2.23 (2026-06-20): 维度感知展示——跨维度高相关标注"保留"，同维度才标"建议检查"
     high_corr_pairs = _extract_corr_pairs(corr_matrix, factor_names, CORR_THRESHOLD_HIGH, CORR_MAX)
 
     if high_corr_pairs:
-        lines.append(f"选中因子中高相关因子对（|corr| > {CORR_THRESHOLD_HIGH:.1f}，建议剔除其中一个）：")
+        # 按维度分类: 跨维度保留 vs 同维度（应已被筛选去重）
+        cross_dim_pairs: list[tuple[str, str, float]] = []
+        same_dim_pairs: list[tuple[str, str, float]] = []
         for pair in high_corr_pairs:
-            lines.append(f"  - {pair[0]} vs {pair[1]}: {format_float(pair[2], 2)}")
+            cat_i = FACTOR_CATEGORIES.get(pair[0])
+            cat_j = FACTOR_CATEGORIES.get(pair[1])
+            if cat_i and cat_j and cat_i != cat_j:
+                cross_dim_pairs.append(pair)
+            else:
+                same_dim_pairs.append(pair)
+
+        if cross_dim_pairs:
+            lines.append(f"选中因子中跨维度高相关因子对（|corr| > {CORR_THRESHOLD_HIGH:.1f}，维度不同→保留，不去重）：")
+            for pair in cross_dim_pairs:
+                cat_i = FACTOR_CATEGORIES.get(pair[0], "?")
+                cat_j = FACTOR_CATEGORIES.get(pair[1], "?")
+                lines.append(f"  - {pair[0]}[{cat_i}] vs {pair[1]}[{cat_j}]: {format_float(pair[2], 2)}")
+
+        if same_dim_pairs:
+            lines.append(f"选中因子中同维度高相关因子对（|corr| > {CORR_THRESHOLD_HIGH:.1f}，建议检查筛选逻辑）：")
+            for pair in same_dim_pairs:
+                cat_i = FACTOR_CATEGORIES.get(pair[0], "?")
+                lines.append(f"  - {pair[0]}[{cat_i}] vs {pair[1]}[{cat_i}]: {format_float(pair[2], 2)}")
+
+        if not cross_dim_pairs and not same_dim_pairs:
+            lines.append(f"选中因子中无高相关因子对（所有因子相关性 < {CORR_THRESHOLD_HIGH:.1f}）")
     else:
         lines.append(f"选中因子中无高相关因子对（所有因子相关性 < {CORR_THRESHOLD_HIGH:.1f}）")
 
@@ -1246,6 +1271,44 @@ def generate_correlation_section(
     lines.append("-" * 70)
 
     return lines
+
+
+def _format_exempt_note(factor_name: str, exempted_factors_map: dict[str, list[dict]], is_selected: bool) -> str:
+    """格式化豁免标注文本
+
+    Args:
+        factor_name: 因子名
+        exempted_factors_map: {factor_name: [exempt_detail, ...]}
+        is_selected: True=入选因子, False=被剔除因子
+
+    Returns:
+        豁免标注字符串（无豁免记录时返回空字符串）
+
+    入选因子（豁免成功）:
+        ",豁免:|ic_mean|=0.017<0.03,回测强劲(夏普=5.54>1.5,单调性=0.53>0.5)"
+    被剔除因子（豁免失败）:
+        "未满足豁免: 夏普=1.43<1.5"
+    """
+    details = exempted_factors_map.get(factor_name)
+    if not details:
+        return ""
+
+    if is_selected:
+        # 入选因子: 只展示豁免成功的记录
+        success_details = [d for d in details if d["exempted"]]
+        if not success_details:
+            return ""
+        parts = []
+        for d in success_details:
+            parts.append(f"|{d['trigger']}|={d['actual']:.3f}<{d['threshold']:.3f},{d['detail']}")
+        return f",豁免:{';'.join(parts)}"
+    else:
+        # 被剔除因子: 展示豁免失败的记录
+        fail_details = [d for d in details if not d["exempted"]]
+        if not fail_details:
+            return ""
+        parts = [d["detail"] for d in fail_details]
+        return ";".join(parts)
 
 
 def get_factor_selection_info(
@@ -1280,6 +1343,7 @@ def get_factor_selection_info(
     weights = {}
     selection_result = None  # v1.7: 筛选详细结果
     weight_source_note = ""  # v2.16: 权重来源说明
+    exempted_factors_map: dict[str, list[dict]] = {}  # v2.23: 豁免详情（从 selection_result 提取）
 
     # v2.16: 根据最优权重方法选择权重数据源
     #   之前硬编码取 icir_weight 的静态权重 → Rolling ICIR 为最优时展示静态权重 → 严重误导
@@ -1313,6 +1377,9 @@ def get_factor_selection_info(
             weight_source_note = f"权重来自{get_weight_method_display(best_weight_method)}"
 
         selection_result = selection_result_item
+        # v2.23: 提取豁免详情
+        if selection_result_item:
+            exempted_factors_map = selection_result_item.get("exempted_factors", {})
 
         factor_info = []
         for f in selected_factors:
@@ -1321,10 +1388,12 @@ def get_factor_selection_info(
             # 先查列名，再回退因子名，避免权重查找返回 0
             weight = weights.get(factor_col, weights.get(f, 0))
             ic_item = next((r for r in ic_results if r["factor_name"] == f), None)
+            # v2.23: 追加豁免标注
+            exempt_note = _format_exempt_note(f, exempted_factors_map, is_selected=True)
             if ic_item:
-                factor_info.append(f"{f}(ICIR={ic_item['icir']:.2f},权重={weight * 100:.1f}%)")
+                factor_info.append(f"{f}(ICIR={ic_item['icir']:.2f},权重={weight * 100:.1f}%{exempt_note})")
             else:
-                factor_info.append(f"{f}(权重={weight * 100:.1f}%)")
+                factor_info.append(f"{f}(权重={weight * 100:.1f}%{exempt_note})")
 
         lines.append(f"  - 选中因子: {', '.join(factor_info)}")
         lines.append(f"  - 注：{weight_source_note}")  # v2.16: 动态权重来源说明
@@ -1339,16 +1408,21 @@ def get_factor_selection_info(
                     selected_factors = item.get("factor_list", [])
                 weights = item.get("weights", {})
                 selection_result = selection_result_item
+                # v2.23: 提取豁免详情
+                if selection_result_item:
+                    exempted_factors_map = selection_result_item.get("exempted_factors", {})
 
                 factor_info = []
                 for f in selected_factors:
                     factor_col = FACTOR_NAME_TO_COL_MAP.get(f, f)
                     weight = weights.get(factor_col, 0)
                     ic_item = next((r for r in ic_results if r["factor_name"] == f), None)
+                    # v2.23: 追加豁免标注
+                    exempt_note = _format_exempt_note(f, exempted_factors_map, is_selected=True)
                     if ic_item:
-                        factor_info.append(f"{f}(ICIR={ic_item['icir']:.2f},权重={weight * 100:.1f}%)")
+                        factor_info.append(f"{f}(ICIR={ic_item['icir']:.2f},权重={weight * 100:.1f}%{exempt_note})")
                     else:
-                        factor_info.append(f"{f}(权重={weight * 100:.1f}%)")
+                        factor_info.append(f"{f}(权重={weight * 100:.1f}%{exempt_note})")
 
                 lines.append(f"  - 选中因子: {', '.join(factor_info)}")
                 lines.append("  - 注：权重来自ICIR加权方法(最优方法结果缺失,回退)")
@@ -1403,38 +1477,17 @@ def get_factor_selection_info(
                     reason = "原因未知（selection_result 未记录）"
                     logger.warning("因子 %s 剔除原因未知，建议重新执行综合因子脚本", f)
 
+            # v2.23: 追加豁免失败说明
+            exempt_note = _format_exempt_note(f, exempted_factors_map, is_selected=False)
+            if exempt_note:
+                reason += f"; {exempt_note}"
+
             excluded_info.append(f"{f}({reason})")
 
         # v2.22: 剔除因子拆多行显示，避免单行超长截断
         lines.append("  - 剔除因子:")
         for info in excluded_info:
             lines.append(f"    · {info}")
-
-    # v2.12: 标注回测强劲但被剔除的因子（豁免规则需重跑pipeline生效）
-    # 检查是否有回测表现优秀但因 ic_mean/icir 不足被剔除的因子
-    strong_excluded = []
-    for f in excluded_factors:
-        bt_item = next((r for r in backtest_results if r["factor_name"] == f), None)
-        ic_item = next((r for r in ic_results if r["factor_name"] == f), None)
-        if bt_item and ic_item:
-            sharpe = bt_item.get("long_short_sharpe", 0)
-            mono = bt_item.get("monotonicity_correlation", 0)
-            ic_mean = ic_item.get("ic_mean", 0)
-            # 豁免条件：|夏普|>1.5 + |单调性|>0.5 + |ic_mean|>=0.005
-            if abs(sharpe) > 1.5 and abs(mono) > 0.5 and abs(ic_mean) >= 0.005:
-                reason = exclude_reasons.get(f, "")
-                if "|ic_mean|" in reason or "|icir|" in reason:
-                    strong_excluded.append(
-                        f"{f}(夏普={sharpe:.2f}, 单调性={mono:.2f} — 回测强劲因子豁免规则应生效，需重跑pipeline)"
-                    )
-
-    if strong_excluded:
-        lines.append("")
-        lines.append("  ⚠ 回测强劲因子被剔除说明：")
-        for info in strong_excluded:
-            lines.append(f"    - {info}")
-        lines.append("    豁免规则：|夏普|>1.5 + |单调性|>0.5 + |ic_mean|>=0.005 → 豁免 ic_mean/icir 阈值检查")
-        lines.append("    当前结果未生效可能因 pipeline 运行时使用了旧版筛选代码，重跑后豁免因子应入选")
 
     lines.append("-" * 70)
     lines.append(f"筛选后因子列表: {selected_factors}")
