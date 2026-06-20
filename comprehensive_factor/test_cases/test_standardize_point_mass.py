@@ -123,5 +123,92 @@ class TestPointMassDetection:
         assert nan_z.isna().all()
 
 
+class TestDiscreteFactorExemption:
+    """v2.26: 离散型因子豁免点质量检测。"""
+
+    @staticmethod
+    def _build_df(values: list[float], date_str: str = "2026-06-18") -> pd.DataFrame:
+        n = len(values)
+        return pd.DataFrame(
+            {
+                "date": [date_str] * n,
+                "asset": [f"stock_{i:04d}" for i in range(n)],
+                "test_factor": values,
+            }
+        )
+
+    def test_discrete_factor_no_point_mass(self):
+        """离散型因子（unique < 20）即使高频聚集也不置 NaN。
+
+        模拟 positive_day_ratio_5：6 个离散值，每个 >1% 频率，
+        4 个值 |z|>1.0 ——若无豁免，80%+ 股票被置 NaN。
+        """
+        # 300 只股票，6 个离散值（模拟 5 日上涨比例）
+        # 0.0:88, 0.2:588, 0.4:965, 0.6:904, 0.8:406, 1.0:70（≈真实分布）
+        values = [0.0] * 9 + [0.2] * 59 + [0.4] * 96 + [0.6] * 90 + [0.8] * 41 + [1.0] * 5
+        df = self._build_df(values)
+        result = standardize_factors(df, ["test_factor"])
+
+        # 离散因子：所有 z-score 都不应被置 NaN（豁免点质量检测）
+        z_scores = result["test_factor_std"]
+        nan_count = z_scores.isna().sum()
+        assert nan_count == 0, f"离散因子不应有点质量 NaN, 实际 NaN 数: {nan_count}/{len(z_scores)}"
+
+    def test_discrete_factor_by_ratio(self):
+        """离散型因子（unique/N < 5%）豁免。
+
+        300 只股票，15 个离散值（unique/N = 5%），每个值出现 20 次。
+        """
+        values = []
+        for v in range(15):
+            values.extend([float(v)] * 20)
+        df = self._build_df(values)
+        result = standardize_factors(df, ["test_factor"])
+
+        z_scores = result["test_factor_std"]
+        assert z_scores.isna().sum() == 0, "unique/N < 5% 的离散因子不应有点质量 NaN"
+
+    def test_continuous_factor_still_detected(self):
+        """连续型因子仍执行点质量检测（豁免不影响连续因子）。"""
+        # 300 只股票：293 个连续值 + 7 个 0.0（2.3%，unique ≈ 294，ratio ≈ 98%）
+        rng = np.random.RandomState(42)
+        normal_values = rng.uniform(0.2, 1.0, size=293).tolist()
+        point_mass_values = [0.0] * 7
+        all_values = normal_values + point_mass_values
+
+        df = self._build_df(all_values)
+        result = standardize_factors(df, ["test_factor"])
+
+        # 连续因子：0.0 点质量应被检测到并置 NaN
+        point_mass_z = result.loc[result["test_factor"] == 0.0, "test_factor_std"]
+        assert point_mass_z.isna().all(), "连续因子的点质量仍应被检测"
+
+    def test_mixed_date_discrete_and_continuous(self):
+        """多日期：离散日期豁免，连续日期正常检测。"""
+        # 日期 A：离散因子（6 个值）
+        values_a = [0.0] * 50 + [0.2] * 100 + [0.4] * 100 + [0.6] * 50
+        # 日期 B：连续因子 + 点质量
+        rng = np.random.RandomState(42)
+        values_b = rng.uniform(0.2, 1.0, size=293).tolist() + [0.0] * 7
+
+        df = pd.DataFrame(
+            {
+                "date": ["2026-06-18"] * 300 + ["2026-06-19"] * 300,
+                "asset": [f"s_{i:04d}" for i in range(600)],
+                "test_factor": values_a + values_b,
+            }
+        )
+        result = standardize_factors(df, ["test_factor"])
+
+        # 日期 A（离散）：无 NaN
+        z_a = result.loc[result["date"] == "2026-06-18", "test_factor_std"]
+        assert z_a.isna().sum() == 0, "离散日期不应有点质量 NaN"
+
+        # 日期 B（连续）：0.0 点质量被置 NaN
+        mask_b_pm = (result["date"] == "2026-06-19") & (result["test_factor"] == 0.0)
+        z_b_pm = result.loc[mask_b_pm, "test_factor_std"]
+        assert z_b_pm.isna().all(), "连续日期的点质量仍应被检测"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

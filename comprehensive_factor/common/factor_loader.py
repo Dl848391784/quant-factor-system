@@ -585,8 +585,13 @@ def standardize_factors(
         #   v1 clip±2σ 验证失败（贡献占比反升到 51%），v2 改为置 NaN：
         #   点质量是离散事件非正态尾部，z-score 无统计意义；NaN→fillna(0)=中性无信号
         #   弱势信号由相关因子携带（tail_price_position_delta corr=0.69）
+        # v2.26 (2026-06-20): 离散型因子豁免——unique/N < 5% 或 unique < 20 的因子
+        #   天然只有少量离散值（如 positive_day_ratio_5 只有 6 个值），高频聚集是
+        #   固有属性而非数据噪声，点质量检测会误杀几乎所有股票的 z-score
         _POINT_MASS_THRESHOLD = 0.01  # 出现频率 >1% 判定为点质量
         _POINT_MASS_ZSCORE_GATE = 1.0  # z-score 超此阈值才检查点质量（性能优化，低门限确保跨日期一致检出）
+        _DISCRETE_UNIQUE_RATIO = 0.05  # unique 值数 / N < 5% 判定为离散型
+        _DISCRETE_MIN_UNIQUE = 20  # unique 值数 < 20 判定为离散型
         factor_df[std_col] = factor_df.groupby("date")[col].transform(
             lambda x: np.clip((x - x.mean()) / x.std(), -_WINSORIZE_SIGMA, _WINSORIZE_SIGMA) if x.std() > 0 else np.nan
         )
@@ -598,11 +603,33 @@ def standardize_factors(
         #   iterrows 每次 3 次 O(N) 全表扫描，150 万行 × 45 万组合 = 71 小时
         #   修复：groupby(["date", col]).size() 一次性预计算所有 (date, value) 频率，
         #   merge 回原 df 批量标记，复杂度 O(N log N)
+        # v2.26 (2026-06-20): 离散型因子豁免——unique/N < 5% 或 unique < 20 时跳过
+        #   典型场景：positive_day_ratio_5 只有 6 个值(0.0~1.0)，4/6 个值的 |z|>1.0
+        #   导致 80%+ 股票 z-score 被置 NaN，因子实际零贡献
         val_counts = factor_df.groupby(["date", col]).size().reset_index(name="val_count")
         date_totals = factor_df.groupby("date")[col].count().reset_index(name="date_total")
         val_counts = val_counts.merge(date_totals, on="date")
         val_counts["frequency"] = val_counts["val_count"] / val_counts["date_total"]
-        point_mass = val_counts[val_counts["frequency"] > _POINT_MASS_THRESHOLD]
+
+        # v2.26: 离散度判断——每日截面 unique 值数
+        daily_unique = factor_df.groupby("date")[col].nunique()
+        daily_n = factor_df.groupby("date")[col].count()
+        is_discrete = (daily_unique / daily_n < _DISCRETE_UNIQUE_RATIO) | (daily_unique < _DISCRETE_MIN_UNIQUE)
+        discrete_dates = list(daily_unique.index[is_discrete])  # type: ignore[reportArgumentType]
+
+        if discrete_dates:
+            logger.info(
+                "因子 %s 在 %d 个日期判定为离散型 (unique/N < %.0f%% 或 unique < %d)，跳过点质量检测",
+                col,
+                len(discrete_dates),
+                _DISCRETE_UNIQUE_RATIO * 100,
+                _DISCRETE_MIN_UNIQUE,
+            )
+
+        # 只对非离散日期执行点质量检测
+        point_mass = val_counts[
+            (val_counts["frequency"] > _POINT_MASS_THRESHOLD) & (~val_counts["date"].isin(discrete_dates))
+        ]
 
         if not point_mass.empty:
             pm_flags = factor_df[["date", col]].merge(
