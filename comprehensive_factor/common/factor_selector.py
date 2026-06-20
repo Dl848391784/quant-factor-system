@@ -196,9 +196,31 @@ def load_all_factor_results(
     return all_factors
 
 
+def _build_exemption_fail_reason(sharpe: float | None, mono_corr: float | None, ic_mean: float | None) -> str:
+    """构建豁免失败的原因说明
+
+    Args:
+        sharpe: 多空夏普比率
+        mono_corr: 单调性相关系数
+        ic_mean: IC均值
+
+    Returns:
+        失败原因字符串，指出哪个条件未满足
+    """
+    failed: list[str] = []
+    if sharpe is None or abs(sharpe) <= 1.5:
+        failed.append(f"夏普={sharpe:.2f}" if sharpe is not None else "夏普缺失")
+    if mono_corr is None or abs(mono_corr) <= 0.5:
+        failed.append(f"单调性={mono_corr:.2f}" if mono_corr is not None else "单调性缺失")
+    if ic_mean is None or abs(ic_mean) < 0.005:
+        failed.append(f"|ic_mean|={abs(ic_mean):.4f}" if ic_mean is not None else "ic_mean缺失")
+
+    return f"未满足豁免: {'+'.join(failed)}"
+
+
 def validate_factor(
     factor_name: str, factor_data: dict, thresholds: dict | None = None, logger: logging.Logger | None = None
-) -> tuple[bool, list[str]]:
+) -> tuple[bool, list[str], list[dict]]:
     """判断因子是否有效
 
     Args:
@@ -207,9 +229,15 @@ def validate_factor(
         thresholds: 阈值配置
 
     Returns:
-        (is_valid, reasons)
+        (is_valid, reasons, exempt_details)
         - is_valid: True/False
         - reasons: 无效原因列表
+        - exempt_details: 豁免详情列表，每个触发豁免检查的阈值一条记录
+          [{"trigger": "ic_mean", "threshold": 0.03, "actual": 0.0168,
+            "exempted": True/False,
+            "conditions": {"sharpe": 5.54, "mono_corr": 0.53, "ic_mean_abs": 0.017},
+            "detail": "回测强劲(夏普=5.54>1.5,单调性=0.53>0.5)"}, ...]
+          无豁免触发时为空列表
 
     Note:
         - 关键指标缺失时标记为无效（不再静默通过）
@@ -223,6 +251,7 @@ def validate_factor(
         logger = get_logger(__name__)
 
     reasons = []
+    exempt_details: list[dict] = []
 
     # 1. IC 均值检查
     ic_metrics = factor_data.get("ic_metrics", {})
@@ -276,9 +305,37 @@ def validate_factor(
                 ls_sharpe,
                 mono_corr,
             )
+            exempt_details.append(
+                {
+                    "trigger": "ic_mean",
+                    "threshold": thresholds["ic_mean_abs_min"],
+                    "actual": abs(ic_mean),
+                    "exempted": True,
+                    "conditions": {
+                        "sharpe": ls_sharpe,
+                        "mono_corr": mono_corr,
+                        "ic_mean_abs": abs(ic_mean),
+                    },
+                    "detail": f"回测强劲(夏普={abs(ls_sharpe):.2f}>1.5,单调性={abs(mono_corr):.2f}>0.5)",
+                }
+            )
         else:
             reasons.append(f"|ic_mean|={abs(ic_mean):.3f}<{thresholds['ic_mean_abs_min']}")
             logger.debug("因子 %s: |ic_mean|=%.3f 不达标", factor_name, abs(ic_mean))
+            exempt_details.append(
+                {
+                    "trigger": "ic_mean",
+                    "threshold": thresholds["ic_mean_abs_min"],
+                    "actual": abs(ic_mean),
+                    "exempted": False,
+                    "conditions": {
+                        "sharpe": ls_sharpe,
+                        "mono_corr": mono_corr,
+                        "ic_mean_abs": abs(ic_mean),
+                    },
+                    "detail": _build_exemption_fail_reason(ls_sharpe, mono_corr, ic_mean),
+                }
+            )
 
     # 2. p-value 检查（可选，缺失时跳过）
     p_value = ic_metrics.get("p_value", None)
@@ -327,9 +384,37 @@ def validate_factor(
                 ls_sharpe,
                 mono_corr,
             )
+            exempt_details.append(
+                {
+                    "trigger": "icir",
+                    "threshold": thresholds["icir_abs_min"],
+                    "actual": abs(icir),
+                    "exempted": True,
+                    "conditions": {
+                        "sharpe": ls_sharpe,
+                        "mono_corr": mono_corr,
+                        "ic_mean_abs": abs(ic_mean) if ic_mean is not None else None,
+                    },
+                    "detail": f"回测强劲(夏普={abs(ls_sharpe):.2f}>1.5,单调性={abs(mono_corr):.2f}>0.5)",
+                }
+            )
         else:
             reasons.append(f"|icir|={abs(icir):.3f}<{thresholds['icir_abs_min']}")
             logger.debug("因子 %s: |icir|=%.3f 不达标", factor_name, abs(icir))
+            exempt_details.append(
+                {
+                    "trigger": "icir",
+                    "threshold": thresholds["icir_abs_min"],
+                    "actual": abs(icir),
+                    "exempted": False,
+                    "conditions": {
+                        "sharpe": ls_sharpe,
+                        "mono_corr": mono_corr,
+                        "ic_mean_abs": abs(ic_mean) if ic_mean is not None else None,
+                    },
+                    "detail": _build_exemption_fail_reason(ls_sharpe, mono_corr, ic_mean),
+                }
+            )
 
     # 4. 单调性检查（可选）
     # v1.6: backtest/monotonicity 已在顶部提取，不再重复
@@ -357,7 +442,7 @@ def validate_factor(
 
     is_valid = len(reasons) == 0
 
-    return is_valid, reasons
+    return is_valid, reasons, exempt_details
 
 
 def filter_invalid_factors(
@@ -384,6 +469,7 @@ def filter_invalid_factors(
     valid_factors = {}
     invalid_factors = {}
     short_sample_factors = {}  # v1.6: 短样本因子标记
+    exempted_factors: dict[str, list[dict]] = {}  # v2.10: 豁免详情（供报告展示）
     min_sample_days = thresholds.get("min_sample_days", 30)
     # v1.7: 极短样本硬门槛——valid_days < 15 的因子直接剔除
     # 统计学依据：15天以下ICIR的t检验 p-value > 0.3，不具任何预测意义
@@ -391,7 +477,11 @@ def filter_invalid_factors(
 
     for factor_name, factor_data in all_factors.items():
         # 修复：传入 logger 参数，以便 validate_factor 记录日志
-        is_valid, reasons = validate_factor(factor_name, factor_data, thresholds, logger)
+        is_valid, reasons, exempt_details = validate_factor(factor_name, factor_data, thresholds, logger)
+
+        # v2.10: 收集豁免详情（无论入选或剔除，只要有豁免触发就记录）
+        if exempt_details:
+            exempted_factors[factor_name] = exempt_details
 
         # v1.7: 极短样本硬门槛检查（优先于validate_factor结果）
         sample_stats = factor_data.get("sample_stats", {})
@@ -412,10 +502,19 @@ def filter_invalid_factors(
             logger.warning("无效因子: %s, 原因: %s", factor_name, "; ".join(reasons))
 
     logger.info(
-        "筛选结果: 有效 %d, 无效 %d, 短样本 %d", len(valid_factors), len(invalid_factors), len(short_sample_factors)
+        "筛选结果: 有效 %d, 无效 %d, 短样本 %d, 含豁免详情 %d",
+        len(valid_factors),
+        len(invalid_factors),
+        len(short_sample_factors),
+        len(exempted_factors),
     )
 
-    return {"valid": valid_factors, "invalid": invalid_factors, "short_sample_factors": short_sample_factors}
+    return {
+        "valid": valid_factors,
+        "invalid": invalid_factors,
+        "short_sample_factors": short_sample_factors,
+        "exempted_factors": exempted_factors,
+    }
 
 
 def identify_high_corr_groups(
@@ -645,9 +744,16 @@ def select_best_from_groups(
                     # v2.5: 包含相关系数
                     # v2.9: corr_lookup 找不到时从 corr_matrix 补全（传递性归组）
                     corr_val = corr_lookup.get((factor_name, best_factor))
-                    if corr_val is None and corr_matrix is not None and factor_name in corr_matrix.index and best_factor in corr_matrix.columns:
+                    if (
+                        corr_val is None
+                        and corr_matrix is not None
+                        and factor_name in corr_matrix.index
+                        and best_factor in corr_matrix.columns
+                    ):
                         corr_val = abs(corr_matrix.loc[factor_name, best_factor])
-                    corr_str = f"corr={corr_val:.2f}" if corr_val is not None and not pd.isna(corr_val) else "传递性归组"
+                    corr_str = (
+                        f"corr={corr_val:.2f}" if corr_val is not None and not pd.isna(corr_val) else "传递性归组"
+                    )
                     dropped_factors[factor_name] = f"与{best_factor}高相关({corr_str}), icir缺失无法比较"
         else:
             # 找出 ICIR 最高的因子（只比较有 icir 的因子）
@@ -662,9 +768,16 @@ def select_best_from_groups(
                     # v2.5: 获取相关系数
                     # v2.9: corr_lookup 找不到时从 corr_matrix 补全（传递性归组）
                     corr_val = corr_lookup.get((factor_name, best_factor))
-                    if corr_val is None and corr_matrix is not None and factor_name in corr_matrix.index and best_factor in corr_matrix.columns:
+                    if (
+                        corr_val is None
+                        and corr_matrix is not None
+                        and factor_name in corr_matrix.index
+                        and best_factor in corr_matrix.columns
+                    ):
                         corr_val = abs(corr_matrix.loc[factor_name, best_factor])
-                    corr_str = f"corr={corr_val:.2f}" if corr_val is not None and not pd.isna(corr_val) else "传递性归组"
+                    corr_str = (
+                        f"corr={corr_val:.2f}" if corr_val is not None and not pd.isna(corr_val) else "传递性归组"
+                    )
 
                     # 修复：区分 icir 缺失和 ICIR 较低
                     if factor_name in missing_icir_factors:
@@ -784,6 +897,7 @@ def select_factors(
     valid_factors = filter_result["valid"]
     invalid_factors = filter_result["invalid"]
     short_sample_factors = filter_result.get("short_sample_factors", {})  # v1.6
+    exempted_factors = filter_result.get("exempted_factors", {})  # v2.10: 豁免详情
 
     # Step 3: 识别高相关组（需要相关性矩阵）
     high_corr_groups = []
@@ -858,6 +972,8 @@ def select_factors(
         "selection_warnings": selection_warnings,  # 筛选过程中的警告列表
         # v1.6: 短样本因子标记（供ICIR权重惩罚使用）
         "short_sample_factors": short_sample_factors,  # {factor_name: valid_days}
+        # v2.10: 豁免详情（供报告展示豁免成功/失败原因）
+        "exempted_factors": exempted_factors,  # {factor_name: [exempt_detail, ...]}
         # v1.8: 维度覆盖统计（维度感知去重后的覆盖情况）
         "dimension_coverage": _compute_dimension_coverage(selected_factors, valid_factors),
     }
