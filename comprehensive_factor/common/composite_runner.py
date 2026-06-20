@@ -53,7 +53,7 @@ from comprehensive_factor.common.weight_engine import ICIRWeightMethod, RollingI
 # v2.17: 单一映射来源（方案 B）
 # factor_definitions 位于项目根（与 factor_selector / weight_engine 同模式：
 # 调用方已在 sys.path 中包含项目根），故可在 sys.path 注入之前 import
-from factor_definitions import FACTOR_COL_TO_NAME_MAP, FACTOR_NAME_TO_COL_MAP
+from factor_definitions import FACTOR_CATEGORIES, FACTOR_COL_TO_NAME_MAP, FACTOR_NAME_TO_COL_MAP
 
 
 # 导入 backtest 公共模块（跨模块调用，但通过函数接口）
@@ -186,6 +186,7 @@ def run_composite_backtest(
     output_dir: str | Path | None = None,  # 修复：支持 str 或 Path，入口统一转换
     auto_select: bool = False,  # 是否自动筛选因子
     thresholds: dict | None = None,  # 筛选阈值配置
+    dimension_weight_method: str | None = None,  # v1.20: 维度级别权重分配 (none/equal/icir)
     verbose: bool = True,
     logger: logging.Logger | None = None,
 ) -> dict:
@@ -487,7 +488,14 @@ def run_composite_backtest(
             {k: f"×{v}/30={v / 30:.2f}" for k, v in short_sample_factors.items()},
         )
 
-    weight_engine = WeightEngine(weight_method=weight_method, window=config.rolling_window, logger=logger)
+    # v1.20: 透传维度权重分配参数
+    weight_engine = WeightEngine(
+        weight_method=weight_method,
+        window=config.rolling_window,
+        logger=logger,
+        dimension_weight_method=dimension_weight_method,
+        factor_categories=FACTOR_CATEGORIES if dimension_weight_method else None,
+    )
 
     composite_factor = weight_engine.calculate(
         factor_df=factor_df,
@@ -555,6 +563,7 @@ def run_composite_backtest(
             "window": config.rolling_window,
             "note": "权重每日动态计算，不保存静态值",
             "last_day_weights": last_day_weights,  # v2.16: 读取 calculate() 内的真实权重
+            "dimension_weight_method": dimension_weight_method,  # v1.20: 维度权重分配方式
         }
         logger.info("滚动ICIR加权: 权重每日动态计算（窗口 %d 日），不保存静态权重", config.rolling_window)
         if last_day_weights:
@@ -787,6 +796,13 @@ def create_cli_entrypoint(
         )
         parser.add_argument("--output_dir", type=str, default=None)
         parser.add_argument("--no_auto_select", action="store_true", help="禁用自动因子筛选（使用硬编码因子列表）")
+        parser.add_argument(
+            "--dimension_weight",
+            type=str,
+            default=None,
+            choices=["none", "equal", "icir"],
+            help="维度级别权重分配方式 (none=不启用/equal=维度等权/icir=维度ICIR加权)，默认 none",
+        )
         parser.add_argument("--quiet", action="store_true")
 
         args = parser.parse_args()
@@ -821,6 +837,7 @@ def create_cli_entrypoint(
                 backtest_result_dir=args.backtest_result_dir,
                 output_dir=args.output_dir,
                 auto_select=use_auto_select,
+                dimension_weight_method=args.dimension_weight if args.dimension_weight != "none" else None,
                 verbose=not args.quiet,
                 logger=logger,
             )

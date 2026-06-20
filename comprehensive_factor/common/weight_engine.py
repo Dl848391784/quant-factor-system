@@ -456,12 +456,139 @@ class RollingICIRWeightMethod(WeightMethodBase):
 
     v1.10 修复：滚动 ICIR 应在时间轴上计算，而非按 asset 分组。
     IC 是每日截面相关性，同一日期所有股票的 IC 值相同。
+
+    v1.20 (2026-06-20): 维度级别权重分配（方案 B）
+        - dimension_weight_method='icir': 维度权重=维度内平均|ICIR|归一化，
+          维度内因子按 |ICIR| 分配 → 高 ICIR 维度适度超配但不主导
+        - dimension_weight_method='equal': 维度等权 1/n_dims
+        - dimension_weight_method=None: 当前行为（向后兼容）
     """
 
-    def __init__(self, window: int = 60, logger: logging.Logger | None = None):
+    def __init__(
+        self,
+        window: int = 60,
+        logger: logging.Logger | None = None,
+        dimension_weight_method: str | None = None,
+        factor_categories: dict[str, str] | None = None,
+    ):
         self.window = window
         self.logger = logger or get_logger(__name__)
         self._last_day_weights: dict[str, float] = {}  # v1.18: calculate() 后填充
+        # v1.20: 维度级别权重分配
+        self.dimension_weight_method = dimension_weight_method
+        self.factor_categories = factor_categories
+
+    def _build_dimension_groups(self, factor_cols: list[str]) -> dict[str, list[str]]:
+        """构建维度→因子列名分组
+
+        v1.20: 将 factor_cols 按维度分组，用于两阶段权重计算。
+        因子列名通过 _get_factor_name_from_col 映射到因子名后查 FACTOR_CATEGORIES。
+
+        Returns:
+            {dimension: [col1, col2, ...]}，无分类信息时返回空 dict
+        """
+        if not self.factor_categories or not self.dimension_weight_method:
+            return {}
+
+        groups: dict[str, list[str]] = {}
+        for col in factor_cols:
+            factor_name = self._get_factor_name_from_col(col)
+            dim = self.factor_categories.get(factor_name)
+            if dim is None:
+                # 未分类因子归入 "uncategorized" 维度
+                dim = "uncategorized"
+            groups.setdefault(dim, []).append(col)
+
+        return groups
+
+    def _apply_dimension_weights(
+        self,
+        factor_df: pd.DataFrame,
+        factor_cols: list[str],
+        rolling_icir_cols: list[str],
+        dimension_groups: dict[str, list[str]],
+    ) -> pd.DataFrame:
+        """两阶段维度感知权重计算
+
+        v1.20 方案 B:
+        - equal: 维度等权 1/n_dims，维度内因子按 |ICIR| 分配
+        - icir: 维度权重 = 维度内平均|ICIR| 归一化，维度内因子按 |ICIR| 分配
+
+        对每个日期独立计算（rolling_icir 是每日动态的）。
+        """
+        n_dims = len(dimension_groups)
+        n_factors = len(factor_cols)
+
+        # 为每个因子列预分配 _dim_weight 列
+        for col in factor_cols:
+            factor_df[f"{col}_dim_weight"] = 0.0
+
+        # 向量化实现：逐维度处理
+        for dim, dim_cols in dimension_groups.items():
+            dim_rolling_cols = [f"{c}_rolling_icir" for c in dim_cols]
+
+            # 维度内 |ICIR| 绝对值
+            dim_abs_icir = factor_df[dim_rolling_cols].abs()
+            dim_icir_sum = dim_abs_icir.sum(axis=1)  # 每行的维度内 |ICIR| 之和
+
+            # 第一阶段：维度内归一化
+            dim_icir_sum_safe = dim_icir_sum.replace(0, np.nan)
+            for col in dim_cols:
+                rolling_col = f"{col}_rolling_icir"
+                intra_weight = factor_df[rolling_col].abs() / dim_icir_sum_safe
+                # 维度内全为 0 或 NaN 时回退等权
+                intra_weight = intra_weight.fillna(1.0 / len(dim_cols))
+
+                if self.dimension_weight_method == "equal":
+                    # equal: 维度等权 1/n_dims
+                    factor_df[f"{col}_dim_weight"] = intra_weight * (1.0 / n_dims)
+                elif self.dimension_weight_method == "icir":
+                    # icir: 维度权重 = 维度内平均|ICIR| / Σ_dim_avg
+                    # 维度内平均 |ICIR| = dim_icir_sum / n_factors_in_dim
+                    # 但需要所有维度的平均|ICIR| 才能归一化，暂存中间结果
+                    factor_df[f"{col}_dim_weight"] = intra_weight
+                else:
+                    factor_df[f"{col}_dim_weight"] = intra_weight
+
+        # icir 模式：第二阶段维度间归一化
+        if self.dimension_weight_method == "icir":
+            # 计算每个维度每个日期的"平均|ICIR|"
+            dim_avg_icir_cols = {}
+            for dim, dim_cols in dimension_groups.items():
+                dim_rolling_cols = [f"{c}_rolling_icir" for c in dim_cols]
+                dim_abs_icir = factor_df[dim_rolling_cols].abs()
+                # 维度内平均 |ICIR|（skipna=True，忽略 NaN 因子）
+                dim_avg_icir = dim_abs_icir.mean(axis=1, skipna=True)
+                dim_avg_icir_cols[dim] = dim_avg_icir
+
+            # 维度间归一化：dim_weight_d = avg_icir_d / Σ_avg_icir
+            total_avg_icir = sum(dim_avg_icir_cols.values())
+            total_avg_icir_safe = total_avg_icir.replace(0, np.nan)
+
+            for dim, dim_cols in dimension_groups.items():
+                dim_weight = dim_avg_icir_cols[dim] / total_avg_icir_safe
+                # 全部维度 avg_icir 为 0 时回退等权
+                dim_weight = dim_weight.fillna(1.0 / n_dims)
+
+                for col in dim_cols:
+                    # 最终权重 = 维度内权重 × 维度权重
+                    factor_df[f"{col}_dim_weight"] = factor_df[f"{col}_dim_weight"] * dim_weight
+
+        # 对所有因子列的 _dim_weight 做行级归一化（确保每日权重和=1）
+        dim_weight_cols = [f"{c}_dim_weight" for c in factor_cols]
+        total_weight = factor_df[dim_weight_cols].sum(axis=1)
+        total_weight_safe = total_weight.replace(0, np.nan)
+        for col in factor_cols:
+            wcol = f"{col}_dim_weight"
+            factor_df[wcol] = factor_df[wcol] / total_weight_safe
+            # 全部为 0 时回退等权
+            factor_df[wcol] = factor_df[wcol].fillna(1.0 / n_factors)
+
+        # 清理临时列
+        if "weight_sum" in factor_df.columns:
+            factor_df.drop(columns=["weight_sum"], inplace=True, errors="ignore")
+
+        return factor_df
 
     def calculate(
         self,
@@ -567,13 +694,23 @@ class RollingICIRWeightMethod(WeightMethodBase):
         # 每日计算权重并加权
         rolling_icir_cols = [f"{col}_rolling_icir" for col in factor_cols]
 
-        # 每日权重 = |rolling_icir| / sum(|rolling_icir|)
-        factor_df["weight_sum"] = factor_df[rolling_icir_cols].abs().sum(axis=1)
+        # v1.20: 维度级别权重分配
+        # 当 dimension_weight_method 非空且 factor_categories 可用时，
+        # 将单阶段 |icir|/Σ_all 改为两阶段：维度内归一化 → 维度间归一化
+        dimension_groups = self._build_dimension_groups(factor_cols)
 
-        # 修复：除零保护 - weight_sum 为 0 时回退等权
-        weight_sum_safe = factor_df["weight_sum"].replace(0, np.nan)
+        if dimension_groups and self.dimension_weight_method:
+            # 两阶段权重：每个日期的每个因子计算维度感知权重
+            factor_df = self._apply_dimension_weights(factor_df, factor_cols, rolling_icir_cols, dimension_groups)
+        else:
+            # 原始逻辑：每日权重 = |rolling_icir| / sum(|rolling_icir|)
+            factor_df["weight_sum"] = factor_df[rolling_icir_cols].abs().sum(axis=1)
+            weight_sum_safe = factor_df["weight_sum"].replace(0, np.nan)
+            for col, rolling_col in zip(factor_cols, rolling_icir_cols):
+                weight = factor_df[rolling_col].abs() / weight_sum_safe
+                weight = weight.fillna(1.0 / len(factor_cols))
+                factor_df[f"{col}_dim_weight"] = weight
 
-        # 使用基类公共方法计算加权（需要构建每日权重）
         std_cols = [f"{col}_std" for col in factor_cols]
 
         # 向量化加权：每日动态权重
@@ -581,9 +718,8 @@ class RollingICIRWeightMethod(WeightMethodBase):
         valid_weight_per_row = pd.Series(0.0, index=factor_df.index)
 
         for col, std_col, rolling_col in zip(factor_cols, std_cols, rolling_icir_cols):
-            # 每日权重 = |rolling_icir| / weight_sum（安全除零）
-            weight = factor_df[rolling_col].abs() / weight_sum_safe
-            weight = weight.fillna(1.0 / len(factor_cols))  # 除零或缺失时回退等权
+            # v1.20: 使用维度感知权重（_dim_weight 列由两阶段或原始逻辑统一生成）
+            weight = factor_df[f"{col}_dim_weight"]
 
             # v1.14 修复：NaN 因子不传播到综合因子（与 _apply_weights 同逻辑）
             # 原实现：factor_df[std_col] * weight → NaN * weight = NaN → composite + NaN = NaN
@@ -622,17 +758,38 @@ class RollingICIRWeightMethod(WeightMethodBase):
         #   NaN 因子使用 1/n 回退（与 line 531 一致），再统一归一化。
 
         def _extract_weights_from_row(row, factor_cols_list):
-            """从指定行提取有效权重，复用 calculate() 的权重计算逻辑
+            """从指定行提取有效权重
 
-            权重计算与 calculate() lines 516-531 完全一致：
-            1. weight_sum = sum(|rolling_icir|) 仅统计有效（非NaN）因子
-            2. 有效因子: weight_i = |icir_i| / weight_sum
-            3. NaN因子: weight_i = 1/n（等权回退，与 calculate() fillna(1/n) 一致）
-            4. 归一化: weight_i / sum(all weights) → 确保总和=1.0
+            v1.20: 优先使用 _dim_weight 列（维度感知权重已由
+            _apply_dimension_weights 或原始逻辑计算好）。
+            无 _dim_weight 列时回退到原始计算逻辑。
             """
             n_factors = len(factor_cols_list)
-            # Step 1: 计算 weight_sum（仅有效因子，与 calculate() line 516 一致）
-            # pandas sum(axis=1) 默认 skipna=True，NaN 不计入
+
+            # v1.20: 优先从 _dim_weight 列读取（两阶段或原始逻辑统一生成）
+            dim_weight_cols = [f"{c}_dim_weight" for c in factor_cols_list]
+            has_dim_weights = all(c in row.index for c in dim_weight_cols)
+
+            if has_dim_weights:
+                raw_weights = {}
+                weight_sum = 0.0
+                for col in factor_cols_list:
+                    wcol = f"{col}_dim_weight"
+                    raw_val = row.get(wcol)
+                    factor_name = self._get_factor_name_from_col(col)
+                    if pd.notna(raw_val) and float(raw_val) != 0.0:
+                        raw_weights[factor_name] = float(raw_val)
+                        weight_sum += float(raw_val)
+                    else:
+                        raw_weights[factor_name] = 0.0
+
+                if weight_sum == 0:
+                    return None
+
+                # 归一化（确保总和=1.0）
+                return {name: w / weight_sum for name, w in raw_weights.items()}
+
+            # 回退：原始逻辑（无 _dim_weight 列时）
             weight_sum = 0.0
             for col in factor_cols_list:
                 rolling_col = f"{col}_rolling_icir"
@@ -641,10 +798,8 @@ class RollingICIRWeightMethod(WeightMethodBase):
                     weight_sum += abs(float(raw_val))
 
             if weight_sum == 0:
-                # 所有因子 rolling_icir 均为 NaN（T-1日期无IC数据）
                 return None
 
-            # Step 2: 计算每个因子的原始权重（与 calculate() lines 530-531 一致）
             raw_weights = {}
             for col in factor_cols_list:
                 rolling_col = f"{col}_rolling_icir"
@@ -653,10 +808,8 @@ class RollingICIRWeightMethod(WeightMethodBase):
                 if pd.notna(raw_val):
                     raw_weights[factor_name] = abs(float(raw_val)) / weight_sum
                 else:
-                    # NaN → 1/n 等权回退（与 calculate() line 531 fillna(1/n) 一致）
                     raw_weights[factor_name] = 1.0 / n_factors
 
-            # Step 3: 归一化（使总和=1.0，与 calculate() 行级归一化一致）
             total_raw = sum(raw_weights.values())
             return {name: w / total_raw for name, w in raw_weights.items()}
 
@@ -730,6 +883,8 @@ class WeightEngine:
         weight_method: str,
         window: int = DEFAULT_WINDOW,  # v1.12 修复：使用常量而非硬编码
         logger: logging.Logger | None = None,
+        dimension_weight_method: str | None = None,  # v1.20: 维度级别权重分配
+        factor_categories: dict[str, str] | None = None,  # v1.20: 因子维度分类
     ):
         if weight_method not in self.METHOD_MAP:
             raise ValueError(f"不支持的加权方式: {weight_method}，支持: {list(self.METHOD_MAP.keys())}")
@@ -748,12 +903,19 @@ class WeightEngine:
         # 创建加权方法实例
         method_class = self.METHOD_MAP[weight_method]
         if weight_method == "rolling_icir_weight":
-            self.method = method_class(window=window, logger=self.logger)
+            # v1.20: 透传维度权重参数
+            self.method = method_class(
+                window=window,
+                logger=self.logger,
+                dimension_weight_method=dimension_weight_method,
+                factor_categories=factor_categories,
+            )
         else:
             self.method = method_class(logger=self.logger)
 
         self.weight_method = weight_method
         self.window = window
+        self.dimension_weight_method = dimension_weight_method  # v1.20
 
     def calculate(
         self,

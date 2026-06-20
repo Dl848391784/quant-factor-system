@@ -1,6 +1,6 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.27
+> 版本: v2.28
 > 最后更新: 2026-06-20
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
@@ -1960,10 +1960,64 @@ if cat_i != cat_j and corr_val > 0.9:
 
 ---
 
-## 更新记录
+## M58. 维度级别权重分配
+
+**What**: 当 `dimension_weight_method` 非 `none` 时，`WeightEngine` 的权重计算从单阶段 `|ICIR_i| / Σ_all |ICIR_j|` 改为两阶段：维度内归一化 → 维度间归一化。防止高 ICIR 维度（如 price_position 51.5%）主导综合因子。
+
+**Why**:
+- 维度感知去重（M57）保证了因子被**选中**，但不控制**权重分配**。rolling ICIR 加权按 |ICIR| 分配权重，tail_price_position |ICIR|=0.787 远高于其他因子，使 price_position 维度占 51.5% 权重，选出持续下跌的股票
+- 业界实践：AQR/MSCI 风险预算——各维度应大致等贡献，高 ICIR 维度可适度超配但不主导（Asness et al. 2013）
+- 单阶段归一化的问题：4 因子的 price_position 维度天然有更多高 ICIR 因子，累计权重必然主导
+
+**How**:
+
+```python
+# dimension_weight_method='icir'（方案 B，推荐）
+# 第一阶段：维度内归一化
+for dim, dim_cols in dimension_groups.items():
+    dim_icir_sum = Σ |rolling_icir_j| for j in dim_cols
+    for col in dim_cols:
+        intra_weight[col] = |rolling_icir[col]| / dim_icir_sum
+
+# 第二阶段：维度间归一化（维度权重 = 维度内平均|ICIR| 归一化）
+for dim, dim_cols in dimension_groups.items():
+    dim_avg_icir = dim_icir_sum / len(dim_cols)
+    dim_weight = dim_avg_icir / Σ_dim dim_avg_icir
+    for col in dim_cols:
+        weight[col] = dim_weight * intra_weight[col]
+```
+
+**CLI 参数**:
+```
+--dimension_weight none    # 默认，不启用（向后兼容）
+--dimension_weight equal   # 维度等权 1/n_dims
+--dimension_weight icir    # 维度 ICIR 加权（推荐）
+```
+
+**Don't**:
+
+```python
+# ❌ 维度权重硬编码（应通过 --dimension_weight CLI 参数控制）
+weight_engine = WeightEngine(dimension_weight_method="icir")  # 硬编码
+
+# ❌ 在 select_factors 阶段做权重分配（权重分配是 weight_engine 的职责）
+```
+
+**When**:
+- 推荐：`--dimension_weight icir`（兼顾维度平衡和因子质量）
+- 可选：`--dimension_weight equal`（强制维度等权，适用于探索性分析）
+- 默认：`none`（向后兼容，不改变当前行为）
+
+**Verify**:
+- `pytest comprehensive_factor/test_cases/test_dimension_weight.py`
+- 检查 `weight_meta.dimension_weight_method` 字段输出
+- 检查各维度权重分布是否合理（无单一维度 >50%）
+
+---
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v2.28 | 2026-06-20 | weight_engine.py v1.20: 维度级别权重分配（方案 B）——RollingICIRWeightMethod 新增 dimension_weight_method + factor_categories 参数，两阶段权重计算（维度内归一化 → 维度间归一化）；WeightEngine 透传维度参数；composite_runner 新增 --dimension_weight CLI 参数（none/equal/icir）；M58 规则；test_dimension_weight.py 12 测试 |
 | v2.27 | 2026-06-20 | factor_selector.py v1.9: 移除跨维度兜底合并——跨维度因子对一律不合并（v1.8 的 0.9 兜底导致 Union-Find 传递性桥接消灭整个 momentum 维度）；移除 cross_dimension_threshold 参数 + cross_dimension_corr_threshold 配置；M57 规则同步更新；test_dimension_aware_dedup.py 更新为 18 测试（含桥接回归测试） |
 | v2.26 | 2026-06-20 | factor_selector.py v1.8: 维度感知去重——identify_high_corr_groups 新增 factor_categories + cross_dimension_threshold 参数（同维度 >0.7 去重, 跨维度 >0.9 兜底）；新增 _compute_dimension_coverage + dimension_coverage 输出字段；factor_definitions.py v1.6: 新增 FACTOR_CATEGORIES(34 因子→8 维度)；M57 规则 + D 类规则索引更新；test_dimension_aware_dedup.py 17/17 通过 |
 | v2.13 | 2026-06-10 | composite_runner.py v2.13: 新增 Step 3.5 方向统一化（正向因子 ic_mean>0 取反 -*_std 统一负向语义）；M56 规则 + N 类规则索引；输出结构模板补充 direction_map/flipped_factors；流程图更新 |
