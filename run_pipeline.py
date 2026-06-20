@@ -264,7 +264,12 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask("composite_equal", "comprehensive_factor/composite_equal_weight_1d.py", 4, []),
     ScriptTask("composite_icir", "comprehensive_factor/composite_icir_weight_1d.py", 4, []),
     ScriptTask("composite_ic", "comprehensive_factor/composite_ic_weight_1d.py", 4, []),
-    ScriptTask("composite_rolling_icir", "comprehensive_factor/composite_rolling_icir_weight_1d.py", 4, []),
+    ScriptTask(
+        "composite_rolling_icir",
+        "comprehensive_factor/composite_rolling_icir_weight_1d.py",
+        4,
+        ["--dimension_weight", "icir"],
+    ),
     # Stage 5: 权重选择（新增 2026-06-03）
     ScriptTask("weight_selector", "comprehensive_factor/weight_selector.py", 5, []),
     # Stage 6: 股票选股（新增 2026-06-03）
