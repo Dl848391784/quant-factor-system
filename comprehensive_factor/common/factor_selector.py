@@ -573,11 +573,15 @@ def select_best_from_groups(
     high_corr_groups: list[list[str]],
     high_corr_pairs: list[tuple[str, str, float]],
     valid_factors: dict[str, dict],
+    corr_matrix: pd.DataFrame | None = None,
     logger: logging.Logger | None = None,
 ) -> tuple[list[str], dict[str, str]]:
     """从高相关组中选择最优因子
 
     v2.5 (2026-05-28): 新增 high_corr_pairs 参数，在剔除原因中包含具体相关系数
+    v2.9 (2026-06-20): 新增 corr_matrix 参数——Union-Find 传递性归组时，
+        被淘汰因子和 best_factor 之间可能没有直接 >threshold 的配对，
+        从 corr_matrix 查找实际相关系数补全显示
 
     保留规则：组内保留 |ICIR| 最高的因子
 
@@ -585,6 +589,7 @@ def select_best_from_groups(
         high_corr_groups: 高相关因子组
         high_corr_pairs: 高相关因子对列表（含相关系数）
         valid_factors: 有效因子数据
+        corr_matrix: 因子相关性矩阵（用于查找间接归组因子对的实际 corr）
         logger: 日志对象
 
     Returns:
@@ -638,8 +643,11 @@ def select_best_from_groups(
                     # 修复：使用 discard 替代 remove（O(1) vs O(n)）
                     selected_factors_set.discard(factor_name)
                     # v2.5: 包含相关系数
+                    # v2.9: corr_lookup 找不到时从 corr_matrix 补全（传递性归组）
                     corr_val = corr_lookup.get((factor_name, best_factor))
-                    corr_str = f"corr={corr_val:.2f}" if corr_val is not None else ""
+                    if corr_val is None and corr_matrix is not None and factor_name in corr_matrix.index and best_factor in corr_matrix.columns:
+                        corr_val = abs(corr_matrix.loc[factor_name, best_factor])
+                    corr_str = f"corr={corr_val:.2f}" if corr_val is not None and not pd.isna(corr_val) else "传递性归组"
                     dropped_factors[factor_name] = f"与{best_factor}高相关({corr_str}), icir缺失无法比较"
         else:
             # 找出 ICIR 最高的因子（只比较有 icir 的因子）
@@ -652,8 +660,11 @@ def select_best_from_groups(
                     selected_factors_set.discard(factor_name)
 
                     # v2.5: 获取相关系数
+                    # v2.9: corr_lookup 找不到时从 corr_matrix 补全（传递性归组）
                     corr_val = corr_lookup.get((factor_name, best_factor))
-                    corr_str = f"corr={corr_val:.2f}" if corr_val is not None else ""
+                    if corr_val is None and corr_matrix is not None and factor_name in corr_matrix.index and best_factor in corr_matrix.columns:
+                        corr_val = abs(corr_matrix.loc[factor_name, best_factor])
+                    corr_str = f"corr={corr_val:.2f}" if corr_val is not None and not pd.isna(corr_val) else "传递性归组"
 
                     # 修复：区分 icir 缺失和 ICIR 较低
                     if factor_name in missing_icir_factors:
@@ -798,10 +809,12 @@ def select_factors(
 
         # Step 4: 选择最优因子
         # v2.5: 传入 high_corr_pairs，在原因中包含相关系数
+        # v2.9: 传入 corr_matrix，补全传递性归组因子对的实际 corr
         selected_factors, high_corr_dropped = select_best_from_groups(
             high_corr_groups=high_corr_groups,
             high_corr_pairs=high_corr_pairs,
             valid_factors=valid_factors,
+            corr_matrix=corr_matrix,
             logger=logger,
         )
     else:

@@ -338,3 +338,80 @@ class TestDefaultThresholds:
     def test_no_cross_dimension_threshold(self):
         """v2.7: DEFAULT_THRESHOLDS 不再包含 cross_dimension_corr_threshold"""
         assert "cross_dimension_corr_threshold" not in DEFAULT_THRESHOLDS
+
+
+class TestTransitiveGroupCorrDisplay:
+    """v2.9: 传递性归组时 corr 从 corr_matrix 补全，不显示为空"""
+
+    def test_transitive_corr_from_matrix(self):
+        """传递性归组因子对的 corr 从 corr_matrix 补全，不显示为空。
+
+        场景: A-B 0.80(直接), B-C 0.75(直接), A-C 0.50(间接)
+        Union-Find 将 A-B-C 归为同组，best=A(ICIR最高)
+        C 被淘汰时 corr_lookup 无 (C,A) 配对 → 从 corr_matrix 补全 0.50
+        """
+        from comprehensive_factor.common.factor_selector import select_best_from_groups
+
+        valid_factors = {
+            "factor_a": {"ic_metrics": {"icir": 0.30}},
+            "factor_b": {"ic_metrics": {"icir": 0.20}},
+            "factor_c": {"ic_metrics": {"icir": 0.10}},
+        }
+
+        high_corr_pairs = [
+            ("factor_a", "factor_b", 0.80),
+            ("factor_b", "factor_c", 0.75),
+        ]
+
+        corr_matrix = pd.DataFrame(
+            {
+                "factor_a": [1.0, 0.80, 0.50],
+                "factor_b": [0.80, 1.0, 0.75],
+                "factor_c": [0.50, 0.75, 1.0],
+            },
+            index=["factor_a", "factor_b", "factor_c"],
+        )
+
+        groups = [["factor_a", "factor_b", "factor_c"]]
+
+        selected, dropped = select_best_from_groups(
+            high_corr_groups=groups,
+            high_corr_pairs=high_corr_pairs,
+            valid_factors=valid_factors,
+            corr_matrix=corr_matrix,
+        )
+
+        assert "factor_a" in selected
+        assert "factor_b" in dropped
+        assert "corr=0.80" in dropped["factor_b"]
+        # factor_c 间接归组，corr 从 corr_matrix 补全
+        assert "factor_c" in dropped
+        assert "corr=0.50" in dropped["factor_c"]
+        assert "传递性归组" not in dropped["factor_c"]
+
+    def test_transitive_corr_no_matrix_fallback(self):
+        """corr_matrix 为 None 时，间接归组因子对显示'传递性归组'。"""
+        from comprehensive_factor.common.factor_selector import select_best_from_groups
+
+        valid_factors = {
+            "factor_a": {"ic_metrics": {"icir": 0.30}},
+            "factor_b": {"ic_metrics": {"icir": 0.20}},
+            "factor_c": {"ic_metrics": {"icir": 0.10}},
+        }
+
+        high_corr_pairs = [
+            ("factor_a", "factor_b", 0.80),
+            ("factor_b", "factor_c", 0.75),
+        ]
+
+        groups = [["factor_a", "factor_b", "factor_c"]]
+
+        selected, dropped = select_best_from_groups(
+            high_corr_groups=groups,
+            high_corr_pairs=high_corr_pairs,
+            valid_factors=valid_factors,
+            corr_matrix=None,
+        )
+
+        assert "factor_c" in dropped
+        assert "传递性归组" in dropped["factor_c"]
