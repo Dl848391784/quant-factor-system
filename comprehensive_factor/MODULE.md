@@ -1,6 +1,6 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.29
+> 版本: v2.30
 > 最后更新: 2026-06-20
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
@@ -2017,6 +2017,7 @@ weight_engine = WeightEngine(dimension_weight_method="icir")  # 硬编码
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v2.30 | 2026-06-20 | factor_loader.py v2.27: standardize_factors 点质量检测增加物理边界值豁免——高频值=当日截面 min/max 时不置 NaN（tail_price_position 0.0=11.1%/1.0=6.9%、price_position 0.0=4.3%/1.0=2.6%、near_high_ratio_5 1.0=15.5% 均为有界分布的真实极端信号）；遵循 AGENTS.md 规则 #15（第一性原理）；AGENTS.md 新增规则 #15；test_standardize_point_mass.py 重写为 12 测试（4 原有+4 离散豁免+4 物理边界豁免），原有测试改用非边界值 0.5 |
 | v2.29 | 2026-06-20 | factor_loader.py v2.26: standardize_factors 点质量检测增加离散因子豁免——unique/N < 5% 或 unique < 20 的因子跳过点质量检测（positive_day_ratio_5 的 6 个离散值天然高频聚集，误杀 80%+ 股票 z-score）；test_standardize_point_mass.py 新增 TestDiscreteFactorExemption 4 测试 |
 | v2.28 | 2026-06-20 | weight_engine.py v1.20: 维度级别权重分配（方案 B）——RollingICIRWeightMethod 新增 dimension_weight_method + factor_categories 参数，两阶段权重计算（维度内归一化 → 维度间归一化）；WeightEngine 透传维度参数；composite_runner 新增 --dimension_weight CLI 参数（none/equal/icir）；M58 规则；test_dimension_weight.py 12 测试 |
 | v2.27 | 2026-06-20 | factor_selector.py v1.9: 移除跨维度兜底合并——跨维度因子对一律不合并（v1.8 的 0.9 兜底导致 Union-Find 传递性桥接消灭整个 momentum 维度）；移除 cross_dimension_threshold 参数 + cross_dimension_corr_threshold 配置；M57 规则同步更新；test_dimension_aware_dedup.py 更新为 18 测试（含桥接回归测试） |

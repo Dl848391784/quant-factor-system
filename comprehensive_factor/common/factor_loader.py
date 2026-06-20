@@ -631,6 +631,26 @@ def standardize_factors(
             (val_counts["frequency"] > _POINT_MASS_THRESHOLD) & (~val_counts["date"].isin(discrete_dates))
         ]
 
+        # v2.27 (2026-06-20): 物理边界值豁免——高频值=当日截面 min/max 时不置 NaN
+        # 理由：有界分布(如 [0,1])的边界值是真实极端信号，不是数据噪声。
+        #   tail_price_position=0.0 表示"价格处于窗口期最低点"，11% 股票触底
+        #   在下跌市中完全正常。将其置 NaN 等于消除最极端的真实信号。
+        #   点质量检测应只针对中间值的异常聚集（可能是计算 bug），
+        #   而非物理边界的自然聚集。遵循 AGENTS.md 规则 #15（第一性原理）。
+        if not point_mass.empty:
+            daily_bounds = factor_df.groupby("date")[col].agg(["min", "max"]).reset_index()
+            daily_bounds.columns = ["date", "daily_min", "daily_max"]
+            point_mass = point_mass.merge(daily_bounds, on="date")
+            is_boundary = (point_mass[col] == point_mass["daily_min"]) | (point_mass[col] == point_mass["daily_max"])
+            boundary_count = int(is_boundary.sum())
+            if boundary_count > 0:
+                logger.info(
+                    "因子 %s 物理边界豁免: %d 个 (date,value) 组合为截面 min/max，跳过点质量检测",
+                    col,
+                    boundary_count,
+                )
+            point_mass = point_mass[~is_boundary].drop(columns=["daily_min", "daily_max"])
+
         if not point_mass.empty:
             pm_flags = factor_df[["date", col]].merge(
                 point_mass[["date", col]],

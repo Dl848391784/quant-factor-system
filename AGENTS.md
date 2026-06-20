@@ -78,6 +78,7 @@ Plan → Execute → Review → Debug
 | 12 | Design-First：2+文件先提交 design.md | 人工审核 |
 | 13 | 日志格式：% 惰性格式化（禁止 f-string / + 拼接 / `exc_info=True`）| ruff G004/G003/G201 |
 | 14 | 死代码禁止：禁止永不触发的防御性兜底分支（如 `if result is None` 守卫面对永不返回 None 的 callee） | 人工 review |
+| 15 | **第一性原理**：所有方案必须从基本原理推导，禁止调参数式临时修复。方案必须在数据分布变化时仍然成立（如调阈值到 2.5 让问题消失 = 违规；物理边界豁免 = 合规）。违反 = 退回重设计 | 人工 review |
 
 **所有路径必须从 `paths.py` 导入，禁止字符串字面量。**
 
