@@ -1541,6 +1541,55 @@ def _format_neutral_cell(ic_item: dict) -> str:
     return pct
 
 
+def _generate_neutralization_notes(ic_results: list[dict]) -> list[str]:
+    """生成中性化敏感列的说明文本
+
+    v2.24 (2026-06-20): 新增
+
+    解释两类异常：
+    1. 空值（-）：区分"未启用中性化"和"被排除清单跳过"
+    2. 极端负值（|decay_rate| > 1.0，即>100%衰减）：中性化后IC方向反转
+
+    Args:
+        ic_results: IC 结果列表
+
+    Returns:
+        说明文本列表（为空则不输出说明段）
+    """
+    notes = []
+    # 统计空值原因
+    null_disabled = []  # 未启用
+    null_excluded = []  # 被排除清单跳过
+    extreme_negative = []  # 极端负值（方向反转）
+
+    for item in ic_results:
+        name = item.get("factor_name", "?")
+        enabled = item.get("neutral_enabled", False)
+        decay_rate = item.get("neutral_decay_rate")
+
+        if not enabled or decay_rate is None:
+            if not enabled:
+                null_disabled.append(name)
+            else:
+                null_excluded.append(name)
+        elif decay_rate < -1.0:
+            # decay_rate < -1.0 表示中性化后IC方向反转且幅度超过原始IC
+            extreme_negative.append((name, decay_rate))
+
+    if null_disabled:
+        notes.append(
+            f"  '-': 中性化未启用或被排除清单跳过 — {', '.join(null_disabled[:5])}"
+            + ("..." if len(null_disabled) > 5 else "")
+        )
+
+    if extreme_negative:
+        notes.append("  极端负值（<-100%）：中性化后IC方向反转，alpha可能来自行业beta而非个股alpha")
+        for name, rate in extreme_negative:
+            notes.append(f"    - {name}: {rate * 100:.0f}%")
+
+    return notes
+
+
 def _generate_ic_section(ic_results: list[dict], backtest_results: list[dict] | None = None) -> list[str]:
     """生成单因子 IC 数据汇总部分
 
@@ -1632,14 +1681,24 @@ def _generate_ic_section(ic_results: list[dict], backtest_results: list[dict] | 
             lines.append(f"           回测夏普={or_sharpe}, 单调性={or_mono}——可能是有效的反向因子。")
             lines.append("           反向因子在综合因子中需取反方向使用（做空因子值大的股票做多因子值小的股票）。")
 
+    # v2.24: 中性化敏感列说明——极端值和空值解释
+    neutral_notes = _generate_neutralization_notes(ic_results)
+    if neutral_notes:
+        lines.append("")
+        lines.append("【中性化敏感列说明】")
+        for note in neutral_notes:
+            lines.append(note)
+
     return lines
 
 
 def _generate_backtest_section(ic_results: list[dict], backtest_results: list[dict]) -> list[str]:
     """生成单因子分层回测数据汇总部分
 
+    v2.24 (2026-06-20): 短样本因子追加⚠标记
+
     Args:
-        ic_results: IC 结果列表（用于排序）
+        ic_results: IC 结果列表（用于排序 + valid_days 短样本标记）
         backtest_results: 回测结果列表
 
     Returns:
@@ -1652,20 +1711,33 @@ def _generate_backtest_section(ic_results: list[dict], backtest_results: list[di
     lines.append(f"{'因子':<18} {'多空年化收益':>12} {'夏普比率':>8} {'单调性系数':>10} {'单调性质量':>10}")
     lines.append("-" * 70)
 
+    # v2.24: 构建 valid_days 映射，用于短样本标记
+    valid_days_map = {r["factor_name"]: r.get("valid_days", 999) for r in ic_results}
+    MIN_RELIABLE_DAYS = 30
+
     # 按 IC 结果顺序排序回测结果
     factor_order_map = {r["factor_name"]: i for i, r in enumerate(ic_results)}
     backtest_sorted = sorted(backtest_results, key=lambda x: factor_order_map.get(x["factor_name"], 999))
 
     for item in backtest_sorted:
+        factor_name = item["factor_name"]
+        # v2.24: 短样本因子追加⚠标记
+        days = valid_days_map.get(factor_name, 999)
+        mark = " ⚠短样本" if days < MIN_RELIABLE_DAYS else ""
         lines.append(
-            f"{item['factor_name']:<18} "
+            f"{factor_name:<18} "
             f"{format_percentage(item['long_short_return_annual']):>12} "
             f"{format_float(item['long_short_sharpe'], 2):>8} "
             f"{format_float(item['monotonicity_correlation']):>10} "
-            f"{item['monotonicity_symbol']:>10}"
+            f"{item['monotonicity_symbol']:>10}{mark}"
         )
 
     lines.append("-" * 70)
+
+    # v2.24: 短样本标记说明
+    short_sample_in_table = [name for name, days in valid_days_map.items() if days < MIN_RELIABLE_DAYS]
+    if short_sample_in_table:
+        lines.append("⚠ 短样本标记: 年化收益由极少交易日推算，极不稳定（有效天数<30天）")
 
     return lines
 
@@ -1809,7 +1881,9 @@ def _generate_weight_selection_section(weight_result: dict | None) -> list[str]:
                 raw = item.get("raw_values", {}).get(m, None)
                 direction = metric_configs[m].get("direction", "higher_better")
                 display_name = metric_display_names.get(m, m)
-                raw_str = f"(原始值={raw:.4f})" if raw is not None else ""
+                # v2.24: 成本后日收益值极小(~0.003)，4位小数不足以区分方法间差异，提升到6位
+                raw_decimals = 6 if m == "long_short_net_daily" else 4
+                raw_str = f"(原始值={raw:.{raw_decimals}f})" if raw is not None else ""
                 best_star = " ★" if is_best and score >= 0.9 else ""
                 lines.append(f"    - {display_name}: {score:.3f} {raw_str}{best_star}")
 
@@ -1866,6 +1940,49 @@ def _generate_weight_selection_section(weight_result: dict | None) -> list[str]:
     lines.append("-" * 70)
 
     return lines
+
+
+def _detect_duplicate_zscores(top_stocks: list[dict], min_duplicates: int = 3) -> list[str]:
+    """检测 Top N 股票中同一因子 z-score 完全相同的情况
+
+    v2.24 (2026-06-20): 新增
+
+    相同 z-score 的原因：
+    1. 原始值相同（如 tail_price_position=0.0=收盘最低价）→ z-score 相同（数学正确）
+    2. Winsorize ±3σ 截断 → z=±3.00 多次出现
+
+    Args:
+        top_stocks: 选中的股票列表
+        min_duplicates: 最少重复次数才报告（默认3次）
+
+    Returns:
+        说明文本列表，每项描述一个因子的重复情况
+    """
+    from collections import Counter
+
+    # 收集每个因子的 z-score
+    factor_zscores: dict[str, list[float]] = {}
+    for stock in top_stocks:
+        factor_values_std = stock.get("factor_values_std", {})
+        for col, z_score in factor_values_std.items():
+            if z_score is not None:
+                factor_zscores.setdefault(col, []).append(round(z_score, 4))
+
+    notes = []
+    for col, scores in factor_zscores.items():
+        score_counts = Counter(scores)
+        for score, count in score_counts.items():
+            if count >= min_duplicates:
+                # 判断是否为截断值
+                is_clipped = abs(score) >= 2.99
+                reason = (
+                    "Winsorize ±3σ 截断（多只股票极端值被截断为同一值）"
+                    if is_clipped
+                    else "原始值相同（如尾盘因子=0.0=收盘最低价，不同股票原始值一致→z-score一致）"
+                )
+                notes.append(f"{col}: z-score={score:.2f} 出现{count}次 — {reason}")
+
+    return notes
 
 
 def _compute_factor_concentration(
@@ -1934,13 +2051,17 @@ def _compute_factor_concentration(
 def _generate_stock_selection_section(
     stock_result: dict | None,
     comp_weights: dict[str, float] | None = None,
+    data_freshness: list[dict] | None = None,
 ) -> list[str]:
     """生成股票选股结果展示部分
 
     v2.2 (2026-06-03): 新增股票选股结果展示
+    v2.24 (2026-06-20): 新增 data_freshness 参数，动态标注选股数据日期
 
     Args:
         stock_result: 股票选股结果字典（可为 None）
+        comp_weights: 综合因子权重字典
+        data_freshness: 数据完整性检查结果（来自 check_data_freshness）
 
     Returns:
         报告文本行列表
@@ -1959,9 +2080,17 @@ def _generate_stock_selection_section(
     top_stocks = stock_result.get("top_stocks", [])
 
     # 元信息展示
-    lines.append(
-        f"选股日期: {meta.get('selection_date', 'N/A')}（使用T-1数据）"
-    )  # v2.6: 问题3修复 - 明确为使用数据的日期
+    # v2.24: 动态标注数据日期——从数据完整性检查获取实际最新日期，不硬编码T-1
+    selection_date = meta.get("selection_date", "N/A")
+    data_date_note = "（使用T-1数据）"  # 默认标注
+    if data_freshness:
+        # 找主数据源(factor_ic_data)的最新日期
+        main_source = next((s for s in data_freshness if "factor_ic_data" in s.get("source", "")), None)
+        if main_source:
+            actual_date = main_source.get("actual_date", "")
+            if actual_date and actual_date != selection_date:
+                data_date_note = f"（数据截至{actual_date}）"
+    lines.append(f"选股日期: {selection_date}{data_date_note}")
     lines.append(f"最优权重方法: {get_weight_method_display(meta.get('weight_method', 'N/A'))}")
     lines.append(f"权重综合得分: {format_float(meta.get('composite_score', 0), 4)}")
     lines.append(
@@ -2083,6 +2212,16 @@ def _generate_stock_selection_section(
                     "可能原因: 因子原始值集中在边界(如0.0)导致z-score极端化，"
                     "有效分散化不足"
                 )
+
+        # v2.24: 相同 z-score 检测——多只股票同一因子 z-score 完全相同
+        # 原因：原始值相同（如尾盘因子=0.0=收盘最低价）→ z-score 相同（数学正确）
+        # 或 Winsorize ±3σ 截断（z=-3.00 或 z=3.00 多次出现）
+        dup_notes = _detect_duplicate_zscores(top_stocks)
+        if dup_notes:
+            lines.append("")
+            lines.append("ℹ 相同z-score说明:")
+            for note in dup_notes:
+                lines.append(f"  - {note}")
 
     # 权重配置信息
     weight_config = stock_result.get("weight_config", {})
@@ -2367,20 +2506,32 @@ def _generate_comparison_section(
             lines.append(
                 f"  {note_idx}. 方向抵消效应: 综合因子最优年化={composite_best_return:.1f}%，低于长样本单因子最低={min_long_return:.1f}%"
             )
-            lines.append("     原因分析：正向因子(overnight_ret)取反后与负向因子方向统一，但因子间相关性导致")
+            # v2.24: 不硬编码 overnight_ret，用实际 flipped_factors
+            flipped_in_selected = []
+            if composite_results:
+                flipped_in_selected = [
+                    f for f in (composite_results[0].get("flipped_factors", [])) if f in selected_factors
+                ]
+            if flipped_in_selected:
+                lines.append(
+                    f"     原因分析：正向因子({','.join(flipped_in_selected)})取反后与负向因子方向统一，但因子间相关性导致"
+                )
+            else:
+                lines.append("     原因分析：因子间相关性导致部分信号重叠抵消")
             lines.append("     部分信号重叠抵消。综合因子年化低于最优单因子是正常的——组合分散降低了极端收益")
             lines.append("     同时也降低了极端风险（夏普比率可能更优）")
             note_idx += 1
 
-        # v2.13: 说明overnight_ret方向处理是否正确
+        # v2.13→v2.24: overnight_ret方向处理说明——仅在overnight_ret入选时输出
         flipped_factors = []
         if composite_results:
             flipped_factors = composite_results[0].get("flipped_factors", [])
-        if flipped_factors:
+        # v2.24: 只在 overnight_ret 实际入选时才讨论其方向处理
+        if flipped_factors and "overnight_ret" in selected_factors:
             lines.append(f"  {note_idx}. overnight_ret方向处理: 已取反标准化值({flipped_factors})，无二次反向风险")
             lines.append("     取反逻辑：IC均值>0 → 标准化值取反 → 与负向因子方向统一 → 做空因子值大的股票")
-        else:
-            lines.append(f"  {note_idx}. overnight_ret方向处理: 未取反（若overnight_ret入选，需验证方向是否一致）")
+            note_idx += 1
+        # overnight_ret 未入选时不输出方向处理说明（讨论不存在的场景无意义）
 
     return lines
 
@@ -2503,7 +2654,7 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
         else:
             stock_comp_weights = best_item.get("weights", {})
 
-    lines.extend(_generate_stock_selection_section(stock_result, stock_comp_weights))
+    lines.extend(_generate_stock_selection_section(stock_result, stock_comp_weights, data_results))
 
     return "\n".join(lines)
 
