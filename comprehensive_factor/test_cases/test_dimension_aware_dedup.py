@@ -1,20 +1,19 @@
 """
 维度感知因子去重测试用例
 
-遵循 MODULE.md M17 规则：
+遵循 MODULE.md M57 规则：
 - 同维度因子对, |corr|>0.7 → 合并去重（维度内冗余）
-- 跨维度因子对, |corr|>0.9 → 合并去重（极端高相关兜底）
-- 跨维度因子对, 0.7<|corr|≤0.9 → 保留（经济含义不同）
+- 跨维度因子对 → 不合并（经济含义不同，统计高相关 ≠ 经济冗余）
 
 测试范围：
 1. 同维度高相关因子被合并去重
-2. 跨维度高相关因子(0.7-0.9)不被合并
-3. 跨维度极端高相关(>0.9)被合并去重
-4. 无分类时退化为原逻辑（向后兼容）
-5. FACTOR_CATEGORIES 覆盖所有因子
-6. _compute_dimension_coverage 输出正确
+2. 跨维度高相关因子(包括 >0.9)不被合并
+3. 无分类时退化为原逻辑（向后兼容）
+4. FACTOR_CATEGORIES 覆盖所有因子
+5. _compute_dimension_coverage 输出正确
 
 创建日期: 2026-06-20
+更新日期: 2026-06-20 (v2: 移除跨维度兜底合并)
 """
 
 import logging
@@ -91,7 +90,6 @@ class TestSameDimensionDedup:
             corr_matrix=corr,
             threshold=0.7,
             factor_categories=categories,
-            cross_dimension_threshold=0.9,
         )
 
         # 应产生 1 个高相关组（合并）
@@ -112,7 +110,6 @@ class TestSameDimensionDedup:
             corr_matrix=corr,
             threshold=0.7,
             factor_categories=categories,
-            cross_dimension_threshold=0.9,
         )
 
         assert len(groups) == 0
@@ -120,10 +117,10 @@ class TestSameDimensionDedup:
 
 
 class TestCrossDimensionPreserved:
-    """跨维度高相关因子(0.7-0.9)不应被合并"""
+    """跨维度高相关因子不应被合并（无论相关性多高）"""
 
     def test_cross_dimension_0_75_not_merged(self):
-        """跨维度因子对 corr=0.75, 0.7 < 0.75 < 0.9 → 保留"""
+        """跨维度因子对 corr=0.75 > 0.7 → 保留（维度不同）"""
         factors = ["rsi", "bollinger_pb"]
         valid = _make_valid_factors(factors, [0.30, 0.34])
         corr = _make_corr_matrix(factors, {("rsi", "bollinger_pb"): 0.75})
@@ -134,15 +131,14 @@ class TestCrossDimensionPreserved:
             corr_matrix=corr,
             threshold=0.7,
             factor_categories=categories,
-            cross_dimension_threshold=0.9,
         )
 
-        # 跨维度 0.75 < 0.9 → 不合并
+        # 跨维度 → 不合并
         assert len(groups) == 0
         assert len(pairs) == 0
 
     def test_cross_dimension_0_89_not_merged(self):
-        """跨维度因子对 corr=0.89 < 0.9 → 保留（边界值）"""
+        """跨维度因子对 corr=0.89 → 保留（维度不同）"""
         factors = ["rsi", "bollinger_pb"]
         valid = _make_valid_factors(factors, [0.30, 0.34])
         corr = _make_corr_matrix(factors, {("rsi", "bollinger_pb"): 0.89})
@@ -153,9 +149,26 @@ class TestCrossDimensionPreserved:
             corr_matrix=corr,
             threshold=0.7,
             factor_categories=categories,
-            cross_dimension_threshold=0.9,
         )
 
+        assert len(groups) == 0
+        assert len(pairs) == 0
+
+    def test_cross_dimension_0_95_not_merged(self):
+        """跨维度因子对 corr=0.95 > 0.9 → 仍保留（v2.7: 跨维度一律不合并）"""
+        factors = ["rsi", "bollinger_pb"]
+        valid = _make_valid_factors(factors, [0.30, 0.34])
+        corr = _make_corr_matrix(factors, {("rsi", "bollinger_pb"): 0.95})
+        categories = {"rsi": "momentum", "bollinger_pb": "price_position"}
+
+        groups, pairs = identify_high_corr_groups(
+            valid_factors=valid,
+            corr_matrix=corr,
+            threshold=0.7,
+            factor_categories=categories,
+        )
+
+        # v2.7: 跨维度不合并，即使 corr=0.95
         assert len(groups) == 0
         assert len(pairs) == 0
 
@@ -163,8 +176,8 @@ class TestCrossDimensionPreserved:
         """混合场景：同维度合并 + 跨维度保留"""
         factors = ["rsi", "kdj_j", "bollinger_pb"]
         # rsi-kdj_j: 同维度(momentum), corr=0.8 > 0.7 → 合并
-        # rsi-bollinger_pb: 跨维度, corr=0.75 < 0.9 → 保留
-        # kdj_j-bollinger_pb: 跨维度, corr=0.72 < 0.9 → 保留
+        # rsi-bollinger_pb: 跨维度, corr=0.75 → 保留
+        # kdj_j-bollinger_pb: 跨维度, corr=0.72 → 保留
         valid = _make_valid_factors(factors, [0.30, 0.25, 0.34])
         corr = _make_corr_matrix(
             factors,
@@ -181,7 +194,6 @@ class TestCrossDimensionPreserved:
             corr_matrix=corr,
             threshold=0.7,
             factor_categories=categories,
-            cross_dimension_threshold=0.9,
         )
 
         # 只 rsi-kdj_j 合并（同维度），bollinger_pb 独立
@@ -190,48 +202,37 @@ class TestCrossDimensionPreserved:
         # 只 1 个高相关对（同维度的）
         assert len(pairs) == 1
 
+    def test_cross_dimension_no_bridge_contamination(self):
+        """v2.7 回归测试：跨维度高相关不再通过桥接消灭整个维度
 
-class TestCrossDimensionExtremeDedup:
-    """跨维度极端高相关(>0.9)应被合并去重"""
-
-    def test_cross_dimension_0_95_merged(self):
-        """跨维度因子对 corr=0.95 > 0.9 → 合并（极端高相关兜底）"""
-        factors = ["rsi", "bollinger_pb"]
-        valid = _make_valid_factors(factors, [0.30, 0.34])
-        corr = _make_corr_matrix(factors, {("rsi", "bollinger_pb"): 0.95})
-        categories = {"rsi": "momentum", "bollinger_pb": "price_position"}
+        场景：rsi[momentum]↔bollinger_pb[price_position] corr=0.92,
+              return_3d[momentum]↔rsi[momentum] corr=0.85
+        v1.8(旧): rsi-bollinger_pb >0.9 合并 → return_3d 通过 rsi 被拉入同组 → 被淘汰
+        v2.7(新): 跨维度不合并 → rsi/return_3d 同维度合并, bollinger_pb 独立
+        """
+        factors = ["rsi", "bollinger_pb", "return_3d"]
+        valid = _make_valid_factors(factors, [0.32, 0.34, 0.28])
+        corr = _make_corr_matrix(
+            factors,
+            {("rsi", "bollinger_pb"): 0.92, ("rsi", "return_3d"): 0.85, ("return_3d", "bollinger_pb"): 0.80},
+        )
+        categories = {
+            "rsi": "momentum",
+            "bollinger_pb": "price_position",
+            "return_3d": "momentum",
+        }
 
         groups, pairs = identify_high_corr_groups(
             valid_factors=valid,
             corr_matrix=corr,
             threshold=0.7,
             factor_categories=categories,
-            cross_dimension_threshold=0.9,
         )
 
-        # 跨维度 0.95 > 0.9 → 合并
+        # rsi-return_3d 同维度合并；bollinger_pb 跨维度独立
         assert len(groups) == 1
-        assert set(groups[0]) == {"rsi", "bollinger_pb"}
-        assert len(pairs) == 1
-
-    def test_cross_dimension_exactly_0_9_not_merged(self):
-        """跨维度因子对 corr=0.9 = threshold → 不合并（严格大于）"""
-        factors = ["rsi", "bollinger_pb"]
-        valid = _make_valid_factors(factors, [0.30, 0.34])
-        corr = _make_corr_matrix(factors, {("rsi", "bollinger_pb"): 0.9})
-        categories = {"rsi": "momentum", "bollinger_pb": "price_position"}
-
-        groups, pairs = identify_high_corr_groups(
-            valid_factors=valid,
-            corr_matrix=corr,
-            threshold=0.7,
-            factor_categories=categories,
-            cross_dimension_threshold=0.9,
-        )
-
-        # 0.9 不 > 0.9 → 不合并
-        assert len(groups) == 0
-        assert len(pairs) == 0
+        assert set(groups[0]) == {"rsi", "return_3d"}
+        assert len(pairs) == 1  # 只有同维度的 1 对
 
 
 class TestNoCategoriesBackwardCompat:
@@ -248,32 +249,12 @@ class TestNoCategoriesBackwardCompat:
             corr_matrix=corr,
             threshold=0.7,
             factor_categories=None,  # 无分类
-            cross_dimension_threshold=0.9,
         )
 
         # 无分类 → 原始逻辑：0.75 > 0.7 → 合并
         assert len(groups) == 1
         assert set(groups[0]) == {"rsi", "bollinger_pb"}
         assert len(pairs) == 1
-
-    def test_no_cross_dimension_threshold(self):
-        """cross_dimension_threshold=None 时，跨维度不合并（保守）"""
-        factors = ["rsi", "bollinger_pb"]
-        valid = _make_valid_factors(factors, [0.30, 0.34])
-        corr = _make_corr_matrix(factors, {("rsi", "bollinger_pb"): 0.95})
-        categories = {"rsi": "momentum", "bollinger_pb": "price_position"}
-
-        groups, pairs = identify_high_corr_groups(
-            valid_factors=valid,
-            corr_matrix=corr,
-            threshold=0.7,
-            factor_categories=categories,
-            cross_dimension_threshold=None,  # 不设跨维度阈值
-        )
-
-        # cross_dimension_threshold=None → 跨维度永远不合并
-        assert len(groups) == 0
-        assert len(pairs) == 0
 
 
 class TestCategoriesComplete:
@@ -345,7 +326,15 @@ class TestDimensionCoverage:
         assert len(result["covered"]) == 0
         assert "momentum" in result["missing"]
 
-    def test_default_thresholds_has_cross_dimension(self):
-        """DEFAULT_THRESHOLDS 包含 cross_dimension_corr_threshold"""
-        assert "cross_dimension_corr_threshold" in DEFAULT_THRESHOLDS
-        assert DEFAULT_THRESHOLDS["cross_dimension_corr_threshold"] == 0.9
+
+class TestDefaultThresholds:
+    """DEFAULT_THRESHOLDS 配置正确"""
+
+    def test_high_corr_threshold(self):
+        """DEFAULT_THRESHOLDS 包含 high_corr_threshold=0.7"""
+        assert "high_corr_threshold" in DEFAULT_THRESHOLDS
+        assert DEFAULT_THRESHOLDS["high_corr_threshold"] == 0.7
+
+    def test_no_cross_dimension_threshold(self):
+        """v2.7: DEFAULT_THRESHOLDS 不再包含 cross_dimension_corr_threshold"""
+        assert "cross_dimension_corr_threshold" not in DEFAULT_THRESHOLDS

@@ -1,6 +1,6 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.26
+> 版本: v2.27
 > 最后更新: 2026-06-20
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
@@ -76,7 +76,7 @@ Step 1: 单一因子分析
 Step 2: 因子筛选 (自动化,见 D 类规则)
   ├─ 计算所有因子两两相关性矩阵
   ├─ 无效因子 (IC 不显著/单调性差) → 直接丢弃
-  ├─ 高相关组 (同维度 |corr|>0.7, 跨维度 |corr|>0.9) → 只保留最强的 (按 |ICIR|, M57)
+  ├─ 高相关组 (同维度 |corr|>0.7, 跨维度不合并) → 只保留最强的 (按 |ICIR|, M57)
   └─ 保留下来的因子 → 两两低相关
                               ↓
 Step 3: 标准化 (M9)
@@ -1896,10 +1896,11 @@ for factor_name, direction in direction_map.items():
 
 ## M57. 因子维度分类与维度内去重
 
-**What**: `identify_high_corr_groups` 必须支持维度感知去重——同维度因子对用 `high_corr_threshold`(0.7)，跨维度因子对用 `cross_dimension_corr_threshold`(0.9)。经济含义不同的因子即使统计相关性 0.7-0.9 也不互相淘汰。
+**What**: `identify_high_corr_groups` 必须支持维度感知去重——同维度因子对用 `high_corr_threshold`(0.7) 合并去重，跨维度因子对不合并。经济含义不同的因子即使统计相关性极高（如 0.95）也不互相淘汰。
 
 **Why**:
 - 结构性盲区：原逻辑只看两两相关性 >0.7 去重，不考虑维度覆盖。bollinger_pb (price_position) 与 momentum_strength (momentum) 相关 >0.7 时，ICIR 更高的 bollinger_pb 胜出，整个动量维度被一个均值回归因子"代表"后消失
+- 传递性桥接（v1.8→v2.7 修正）：v1.8 的跨维度兜底阈值 0.9 仍有问题——rsi[momentum]↔bollinger_pb[price_position] corr=0.92 > 0.9 合并后，所有同维度因子通过 Union-Find 传递性被拉入同组，7 个 momentum 因子全部被 1 个 price_position 因子淘汰。桥接使跨维度兜底弊大于利
 - 业界共识：AQR/MSCI 的"两阶段筛选"——维度内去重 → 跨维度组合。经济含义不同的因子即使统计相关也应保留（Asness et al. 2013：价值与动量负相关 -0.4~-0.7，组合后 Sharpe 更高）
 - 0.7 阈值刚性：0.69 和 0.71 的差别决定了整个维度的去留，但信息重叠程度几乎相同
 
@@ -1911,10 +1912,8 @@ cat_i = factor_categories.get(name_i) if factor_categories else None
 cat_j = factor_categories.get(name_j) if factor_categories else None
 
 if cat_i is not None and cat_j is not None and cat_i != cat_j:
-    # 跨维度：仅当超过 cross_dimension_threshold(0.9) 才合并
-    if corr_val > cross_dimension_threshold:
-        union(name_i, name_j)
-    # else: 跨维度保留（0.7 < corr ≤ 0.9 不去重）
+    # 跨维度：不合并（经济含义不同，统计高相关 ≠ 经济冗余）
+    pass
 else:
     # 同维度或无分类信息：正常合并（>0.7）
     union(name_i, name_j)
@@ -1940,22 +1939,24 @@ else:
 if corr_val > 0.7:
     union(name_i, name_j)  # 不分维度，全部合并
 
+# ❌ 跨维度兜底阈值（如 0.9）——Union-Find 传递性桥接会消灭整个维度
+if cat_i != cat_j and corr_val > 0.9:
+    union(name_i, name_j)  # rsi↔bollinger_pb 桥接 → 同维度因子被拉入同组
+
 # ❌ 分类依据用统计相关性而非经济含义
 # （相关性会随数据窗口变化，经济含义是因子计算的固有属性）
 
 # ❌ 在 select_best_from_groups 中做维度感知（跨组协调复杂度高）
-# 正确做法：从 identify_high_corr_groups 源头控制哪些因子被合并
 ```
 
 **When**:
-- 必须遵守：`select_factors` 调用 `identify_high_corr_groups` 时传入 `factor_categories=FACTOR_CATEGORIES` 和 `cross_dimension_threshold`
+- 必须遵守：`select_factors` 调用 `identify_high_corr_groups` 时传入 `factor_categories=FACTOR_CATEGORIES`
 - 可豁免：`factor_categories=None` 时退化为原始逻辑（向后兼容）
-- 跨维度兜底阈值 0.9：仅对极端高相关（如 0.95）的跨维度因子对去重，防止信息完全冗余
 
 **Verify**:
 - `pytest comprehensive_factor/test_cases/test_dimension_aware_dedup.py`
 - 检查 `select_factors` 返回结构含 `dimension_coverage` 字段（`covered`/`missing`/`selected_by_dimension`）
-- 检查 `DEFAULT_THRESHOLDS` 含 `cross_dimension_corr_threshold: 0.9`
+- 检查 `DEFAULT_THRESHOLDS` 不含 `cross_dimension_corr_threshold`（v2.7 移除）
 
 ---
 
@@ -1963,6 +1964,7 @@ if corr_val > 0.7:
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v2.27 | 2026-06-20 | factor_selector.py v1.9: 移除跨维度兜底合并——跨维度因子对一律不合并（v1.8 的 0.9 兜底导致 Union-Find 传递性桥接消灭整个 momentum 维度）；移除 cross_dimension_threshold 参数 + cross_dimension_corr_threshold 配置；M57 规则同步更新；test_dimension_aware_dedup.py 更新为 18 测试（含桥接回归测试） |
 | v2.26 | 2026-06-20 | factor_selector.py v1.8: 维度感知去重——identify_high_corr_groups 新增 factor_categories + cross_dimension_threshold 参数（同维度 >0.7 去重, 跨维度 >0.9 兜底）；新增 _compute_dimension_coverage + dimension_coverage 输出字段；factor_definitions.py v1.6: 新增 FACTOR_CATEGORIES(34 因子→8 维度)；M57 规则 + D 类规则索引更新；test_dimension_aware_dedup.py 17/17 通过 |
 | v2.13 | 2026-06-10 | composite_runner.py v2.13: 新增 Step 3.5 方向统一化（正向因子 ic_mean>0 取反 -*_std 统一负向语义）；M56 规则 + N 类规则索引；输出结构模板补充 direction_map/flipped_factors；流程图更新 |
 | v2.17 | 2026-06-11 | weight_engine.py v1.18c: Pitfall #46 修复——_last_day_weights NaN→0% 问题（增量因子原则：不能因覆盖率低排除）；提取逻辑复用 calculate() fillna(1/n) 等权回退，4个tail系因子从0%→8.33%；composite_runner 同步更新 |

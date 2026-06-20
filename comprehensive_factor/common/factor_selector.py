@@ -34,8 +34,9 @@
         - 容差从 0.001 收紧至 1e-9，避免相近 ICIR 误判为相等
         - 显示精度从 .3f 改为 .4f，确保差异可见（如 0.3199<0.3202）
     v1.8 (2026-06-20): 维度感知去重
-        - identify_high_corr_groups 新增 factor_categories + cross_dimension_threshold 参数
-        - 同维度因子对用 threshold(0.7)，跨维度用 cross_dimension_threshold(0.9)
+    v1.9 (2026-06-20): 移除跨维度兜底合并——跨维度因子对一律不合并
+        - identify_high_corr_groups 新增 factor_categories 参数
+        - 同维度因子对用 threshold(0.7) 合并去重；跨维度因子对不合并（经济含义不同）
         - 新增 _compute_dimension_coverage 辅助函数
         - select_factors 输出新增 dimension_coverage 字段
         - 详见 designs/factor_classification_design.md
@@ -69,7 +70,6 @@ DEFAULT_THRESHOLDS = {
     "monotonicity_corr_abs_min": 0.4,  # |单调性相关性| 最小值（0.4为一般单调）
     "long_short_return_min": 0.03,  # 多空年化收益最小值（3%，扣除成本后仍正收益）
     "high_corr_threshold": 0.7,  # 同维度高相关性阈值
-    "cross_dimension_corr_threshold": 0.9,  # v1.8: 跨维度高相关兜底阈值
     "min_sample_days": 30,  # v1.6: 最小样本天数（统计学大样本近似门槛，ICIR统计可靠性）
 }
 
@@ -423,15 +423,16 @@ def identify_high_corr_groups(
     corr_matrix: pd.DataFrame,
     threshold: float | None = None,
     factor_categories: dict[str, str] | None = None,
-    cross_dimension_threshold: float | None = None,
     logger: logging.Logger | None = None,
 ) -> tuple[list[list[str]], list[tuple[str, str, float]]]:
     """识别高相关因子组
 
     v2.5 (2026-05-28): 返回 (groups, high_corr_pairs)，保存相关系数值供下游使用
-    v2.6 (2026-06-20): 维度感知——同维度因子对用 threshold(0.7)，
-        跨维度因子对用 cross_dimension_threshold(0.9)，避免经济含义
-        不同的因子因统计相关性高而被误淘汰
+    v2.6 (2026-06-20): 维度感知——同维度因子对用 threshold(0.7) 合并去重，
+        跨维度因子对不合并（经济含义不同，统计高相关 ≠ 经济冗余）
+    v2.7 (2026-06-20): 移除跨维度兜底合并——跨维度 >0.9 的桥接会导致
+        Union-Find 传递性消灭整个维度（如 rsi↔bollinger_pb 0.92 桥接
+        导致 7 个 momentum 因子全部被 1 个 price_position 因子淘汰）
 
     使用 Union-Find（并查集）算法识别高相关因子组。
     正确处理跨组合并（A-B, B-C, C-D 应合并为一个大组）。
@@ -442,8 +443,6 @@ def identify_high_corr_groups(
         threshold: 同维度高相关性阈值（默认 0.7）
         factor_categories: 因子→维度映射（如 {"rsi": "momentum"}）。
             为 None 时退化为原始逻辑（所有因子对用同一阈值）
-        cross_dimension_threshold: 跨维度高相关兜底阈值（默认 0.9）。
-            仅当因子对分属不同维度时使用
         logger: 日志对象
 
     Returns:
@@ -517,7 +516,7 @@ def identify_high_corr_groups(
             parent[root_x] = root_y  # 合并
 
     # 构建相关性图，union 高相关因子
-    # v2.6: 维度感知——同维度用 threshold(0.7)，跨维度用 cross_dimension_threshold(0.9)
+    # v2.7: 同维度 >threshold 合并；跨维度不合并（经济含义不同）
     high_corr_pairs = []
     cross_dimension_skipped: list[tuple[str, str, float, str, str]] = []
     for i, name_i in enumerate(factor_names):
@@ -525,34 +524,21 @@ def identify_high_corr_groups(
             if i < j and name_i in corr_matrix.index and name_j in corr_matrix.columns:
                 corr_val = abs(corr_matrix.loc[name_i, name_j])
                 if not pd.isna(corr_val) and corr_val > threshold:
-                    # v2.6: 维度感知判断
+                    # v2.7: 维度感知判断
                     cat_i = factor_categories.get(name_i) if factor_categories else None
                     cat_j = factor_categories.get(name_j) if factor_categories else None
 
                     if cat_i is not None and cat_j is not None and cat_i != cat_j:
-                        # 跨维度：仅当超过 cross_dimension_threshold 才合并
-                        if cross_dimension_threshold is not None and corr_val > cross_dimension_threshold:
-                            high_corr_pairs.append((name_i, name_j, corr_val))
-                            union(name_i, name_j)
-                            logger.debug(
-                                "跨维度高相关(>%.2f): %s(%s) vs %s(%s), corr=%.2f",
-                                cross_dimension_threshold,
-                                name_i,
-                                cat_i,
-                                name_j,
-                                cat_j,
-                                corr_val,
-                            )
-                        else:
-                            cross_dimension_skipped.append((name_i, name_j, corr_val, cat_i, cat_j))
-                            logger.debug(
-                                "跨维度保留: %s(%s) vs %s(%s), corr=%.2f (维度不同, 不去重)",
-                                name_i,
-                                cat_i,
-                                name_j,
-                                cat_j,
-                                corr_val,
-                            )
+                        # 跨维度：不合并（经济含义不同）
+                        cross_dimension_skipped.append((name_i, name_j, corr_val, cat_i, cat_j))
+                        logger.debug(
+                            "跨维度保留: %s(%s) vs %s(%s), corr=%.2f (维度不同, 不去重)",
+                            name_i,
+                            cat_i,
+                            name_j,
+                            cat_j,
+                            corr_val,
+                        )
                     else:
                         # 同维度或无分类信息：正常合并
                         high_corr_pairs.append((name_i, name_j, corr_val))
@@ -561,10 +547,9 @@ def identify_high_corr_groups(
 
     if cross_dimension_skipped:
         logger.info(
-            "维度感知: 跨维度保留 %d 对 (同维度阈值=%.2f, 跨维度阈值=%.2f)",
+            "维度感知: 跨维度保留 %d 对 (同维度阈值=%.2f, 跨维度不合并)",
             len(cross_dimension_skipped),
             threshold,
-            cross_dimension_threshold if cross_dimension_threshold is not None else float("inf"),
         )
 
     # 按 root 分组
@@ -802,13 +787,12 @@ def select_factors(
 
     if corr_matrix is not None and len(valid_factors) > 0:
         # v2.5: identify_high_corr_groups 现在返回 (groups, pairs)
-        # v2.6: 传入维度分类，启用维度感知去重
+        # v2.7: 传入维度分类，启用维度感知去重（同维度合并，跨维度不合并）
         high_corr_groups, high_corr_pairs = identify_high_corr_groups(
             valid_factors=valid_factors,
             corr_matrix=corr_matrix,
             threshold=thresholds["high_corr_threshold"],  # 修复：入口已处理 None，直接使用
             factor_categories=FACTOR_CATEGORIES,
-            cross_dimension_threshold=thresholds.get("cross_dimension_corr_threshold", 0.9),
             logger=logger,
         )
 
