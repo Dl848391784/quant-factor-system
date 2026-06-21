@@ -7,8 +7,8 @@
 - 因子计算逻辑复用 data_fetchers.factor_calculator（遵循 MODULE.md 约束 #3）
 
 因子定义：
-- amplitude_compression = mean(amplitude, 5d) / mean(amplitude, 10d)
-- 含义: <1=波动收敛（企稳特征）
+- amplitude_compression = 5日均振幅 / 10日均振幅
+- 含义: 振幅收敛，<1=波动收敛，企稳信号
 - 遵循 H5: IC方向不预判，由数据决定
 
 退出码语义（遵循 PROJECT.md H12）：
@@ -18,13 +18,13 @@
   4 = DataSchemaError（数据 schema 不匹配，需检查上游列契约；R18）
   5 = FactorCalcError（因子计算失败或数据加载失败，需检查计算代码或上游数据；R19）
 
-v2.35: P5-补充 新增因子（确认信号角色，二阶导数企稳信号）
+v2.35: P5-补充 二阶导数企稳信号因子
 """
 
 import argparse
 import sys
 
-from data_fetchers.factor_calculator import calculate_amplitude_compression
+from data_fetchers.factor_calculator.volume_price import calculate_amplitude_compression
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
 from factor_ic.common.exceptions import DataSchemaError, FactorCalcError, SummaryLogError
 from factor_ic.common.factor_ic_runner import run_factor_ic
@@ -36,6 +36,11 @@ from factor_ic.common.logger_config import get_logger
 logger = get_logger(__name__)
 
 _MAX_ERR_LEN = 200
+
+# ============================================================================
+# FactorSpec 声明式注册（遵循 M3.3）
+# 预计算因子: 传 calculation，required_columns 从 calculation.required_cols 自动派生
+# ============================================================================
 
 try:
     SPEC = register_factor(
@@ -56,7 +61,7 @@ except SpecRegistrationError as e:
 
 
 def _build_parser():
-    """构建 CLI 参数解析器（main() 与 __main__ 共享，消除重复定义）。"""  # noqa: E501
+    """构建 CLI 参数解析器（main() 与 __main__ 共享，消除重复定义）。"""
     parser = argparse.ArgumentParser(description="振幅收敛因子 IC 计算器")
     parser.add_argument("--force-full", action="store_true", help="强制全量计算")
     parser.add_argument("--min-stocks", type=int, default=DEFAULT_MIN_STOCKS, help="最小股票数")
@@ -64,26 +69,55 @@ def _build_parser():
 
 
 def _default_args():
-    """构造库函数调用默认参数（避免 args=None 时解析 sys.argv）。"""  # noqa: E501
+    """构造库函数调用默认参数（避免 args=None 时解析 sys.argv）。"""
     return argparse.Namespace(min_stocks=DEFAULT_MIN_STOCKS, force_full=False)
 
 
 def main(args=None):
-    """CLI 主入口"""
+    """CLI 主入口
+
+    Parameters
+    ----------
+    args : namespace-like | None
+        CLI 参数。None 时使用默认值。
+
+    Returns
+    -------
+    dict
+        run_factor_ic 的完整结果字典。
+
+    Raises
+    ------
+    FactorCalcError
+        run_factor_ic 返回 None（数据加载失败）。
+    SummaryLogError
+        log_factor_summary 摘要输出阶段失败。
+    DataSchemaError
+        数据 schema 校验失败。
+    """
+
     if args is None:
         args = _default_args()
 
     logger.info(
-        "入口参数: min_stocks=%s, force_full=%s",
+        "启动 run_factor_ic: factor=%s min_stocks=%d force_full=%s",
+        SPEC.factor_name,
         args.min_stocks,
         args.force_full,
     )
+    result = run_factor_ic(
+        spec=SPEC,
+        min_stocks=args.min_stocks,
+        force_full=args.force_full,
+        logger=logger,
+    )
 
-    mode_label = "强制全量计算" if args.force_full else "增量更新"
-    logger.info("模式判断: %s", mode_label)
-    logger.info("============================================================")
-
-    result = run_factor_ic(SPEC, args)
+    if result is None:
+        raise FactorCalcError(
+            "[数据加载] run_factor_ic 返回 None（factor=%s, "
+            "min_stocks=%s, force_full=%s），数据加载或计算可能失败"
+            % (SPEC.factor_name, args.min_stocks, args.force_full)
+        )
 
     period = result.get("period") or {}
     logger.info(
@@ -104,8 +138,8 @@ def main(args=None):
     ic_metrics = result.get("ic_metrics") or {}
     ic_mean = ic_metrics.get("ic_mean")
     icir = ic_metrics.get("icir")
-    ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
-    icir_str = f"{icir:.2f}" if icir is not None else "N/A"
+    ic_mean_str = "%0.4f" % ic_mean if ic_mean is not None else "N/A"
+    icir_str = "%0.2f" % icir if icir is not None else "N/A"
     logger.info(
         "振幅收敛因子 IC计算完成: IC均值=%s, ICIR=%s",
         ic_mean_str,
