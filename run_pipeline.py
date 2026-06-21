@@ -54,6 +54,12 @@ Stage 2: IC计算
   44. ic_lower_shadow_ratio_1d.py (v2.35 P5 新增)
   45. ic_volume_shrink_rate_1d.py (v2.35 P5 新增)
   46. ic_price_volume_divergence_1d.py (v2.35 P5 新增)
+  47. ic_return_acceleration_5d_1d.py (v2.35 P5-补充 新增)
+  48. ic_downside_deceleration_1d.py (v2.35 P5-补充 新增)
+  49. ic_amplitude_compression_1d.py (v2.35 P5-补充 新增)
+  50. ic_range_compression_1d.py (v2.35 P5-补充 新增)
+  51. ic_volume_decay_rate_1d.py (v2.35 P5-补充 新增)
+  52. ic_turnover_decay_rate_1d.py (v2.35 P5-补充 新增)
 
 Stage 3: 分层回测
   53. layered_backtest_rsi_1d.py
@@ -95,6 +101,12 @@ Stage 3: 分层回测
   78. layered_backtest_lower_shadow_ratio_1d.py (v2.35 P5 新增)
   79. layered_backtest_volume_shrink_rate_1d.py (v2.35 P5 新增)
   80. layered_backtest_price_volume_divergence_1d.py (v2.35 P5 新增)
+  81. layered_backtest_return_acceleration_5d_1d.py (v2.35 P5-补充 新增)
+  82. layered_backtest_downside_deceleration_1d.py (v2.35 P5-补充 新增)
+  83. layered_backtest_amplitude_compression_1d.py (v2.35 P5-补充 新增)
+  84. layered_backtest_range_compression_1d.py (v2.35 P5-补充 新增)
+  85. layered_backtest_volume_decay_rate_1d.py (v2.35 P5-补充 新增)
+  86. layered_backtest_turnover_decay_rate_1d.py (v2.35 P5-补充 新增)
 
 Stage 4: 综合因子
   87. composite_equal_weight_1d.py
