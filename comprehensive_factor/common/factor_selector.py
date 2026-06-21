@@ -63,14 +63,19 @@ DEFAULT_BACKTEST_RESULT_DIR = Path(__file__).parent.parent.parent / "backtest" /
 # 默认阈值（业界惯例）
 # v2.6: 修复高相关剔除显示格式：当ICIR相等时使用 '=' 而非 '<'
 # v2.7: 修复显示精度：使用 .3f 避免 0.32<0.32 视觉矛盾
+# v2.35: P1 只做多对齐——long_short_return_min → long_return_min（多头年化）
+# v2.35: P1 只做多对齐——min_sample_days 30→60（t检验: N=60时 t=ICIR×√60=1.16 边际显著）
+# v2.35: P1 只做多对齐——新增 layer_1 硬约束（公理1: 只做多收益=L1收益，不可豁免）
 DEFAULT_THRESHOLDS = {
     "ic_mean_abs_min": 0.03,  # |IC均值| 最小值（经济显著性）
     "p_value_max": 0.05,  # p-value 最大值（统计显著性）
     "icir_abs_min": 0.15,  # |ICIR| 最小值（稳定性，0.15≈IC均值/IC标准差>0.03/0.2）
     "monotonicity_corr_abs_min": 0.4,  # |单调性相关性| 最小值（0.4为一般单调）
-    "long_short_return_min": 0.03,  # 多空年化收益最小值（3%，扣除成本后仍正收益）
+    "long_return_min": 0.03,  # 多头年化收益最小值（3%，只做多策略经济意义门槛）
     "high_corr_threshold": 0.7,  # 同维度高相关性阈值
-    "min_sample_days": 30,  # v1.6: 最小样本天数（统计学大样本近似门槛，ICIR统计可靠性）
+    "min_sample_days": 60,  # v2.35: 最小样本天数（t检验边际显著门槛，24天t=0.73不显著）
+    "layer_1_return_min": 0.0,  # v2.35: L1年化收益下限（公理1: 只做多收益=L1，不可豁免）
+    "layer_1_sharpe_min": 0.0,  # v2.35: L1夏普下限（L1正收益但不稳定不可用）
 }
 
 
@@ -428,11 +433,11 @@ def validate_factor(
     if mono_corr is not None and abs(mono_corr) < thresholds["monotonicity_corr_abs_min"]:
         reasons.append(f"|monotonicity_corr|={abs(mono_corr):.2f}<{thresholds['monotonicity_corr_abs_min']}")
 
-    # 5. 多空收益检查（可选）
-    # v1.6: long_short 已在顶部提取
-    ls_return = long_short.get("long_short_return_annual", None)
-    if ls_return is not None and ls_return < thresholds["long_short_return_min"]:
-        reasons.append(f"long_short_return={ls_return * 100:.1f}%<{thresholds['long_short_return_min'] * 100:.0f}%")
+    # 5. 多头收益检查（v2.35: P1 只做多对齐——原 long_short_return → long_return）
+    # 公理1: 只做多策略不能做空，多空收益无意义，改用多头年化收益
+    long_return = long_short.get("long_return_annual", None)
+    if long_return is not None and long_return < thresholds["long_return_min"]:
+        reasons.append(f"long_return={long_return * 100:.1f}%<{thresholds['long_return_min'] * 100:.0f}%")
 
     # 6. 短样本警告（v1.6: 不剔除但标记，ICIR权重惩罚在下游处理）
     # 短样本因子不被剔除（可能仍有预测力），但需要标记以在ICIR加权时惩罚
@@ -445,6 +450,27 @@ def validate_factor(
             min_sample_days,
             valid_days,
             min_sample_days,
+        )
+
+    # 7. Layer1 绝对收益硬约束（v2.35: P1 只做多对齐，不可豁免）
+    # 公理1: 只做多策略收益 = Layer1 买入层收益，L1<=0 的因子有害无益
+    # 与豁免逻辑不同：L1>0 是数学定义而非可调阈值，任何豁免都违反公理1
+    layer_stats = backtest.get("layer_stats", {})
+    layer_1 = layer_stats.get("layer_1", {})
+    layer_1_annual = layer_1.get("annual_return", None)
+    layer_1_sharpe = layer_1.get("sharpe_ratio", None)
+    if layer_1_annual is not None and layer_1_annual <= thresholds["layer_1_return_min"]:
+        reasons.append(
+            f"layer_1_annual={layer_1_annual * 100:.1f}%<={thresholds['layer_1_return_min'] * 100:.0f}%（只做多硬约束，不可豁免）"
+        )
+        logger.info(
+            "因子 %s: L1年化=%.2f%%<=0%%，只做多策略有害，硬约束淘汰（不可豁免）",
+            factor_name,
+            layer_1_annual * 100,
+        )
+    if layer_1_sharpe is not None and layer_1_sharpe <= thresholds["layer_1_sharpe_min"]:
+        reasons.append(
+            f"layer_1_sharpe={layer_1_sharpe:.2f}<={thresholds['layer_1_sharpe_min']:.2f}（L1收益不稳定，不可豁免）"
         )
 
     is_valid = len(reasons) == 0
