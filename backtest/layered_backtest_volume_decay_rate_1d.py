@@ -4,42 +4,49 @@
 
 因子定义：
 - volume_decay_rate: volume_ma5 / volume_ma10
-- 含义: 近期成交量相对历史的变化趋势, <1=量能衰减(卖盘衰竭)
-- v2.35: P5-补充新增因子（企稳信号，design.md §2.5 二阶导数）
-- 因子已在 factor_generator 预计算，无需自定义计算函数
+- 含义: 5日均量/10日均量，<1=量能衰减=卖盘衰竭=企稳信号
+- v2.35: P5-补充 二阶导数企稳信号因子（量能衰竭维度，design.md §2）
+- 因子已在 factor_generator 预计算，factor_calculator=None
+
+分层模式：percentile 5层（每层约20%）
+
+因子元数据派生机制（基类 LayerConfigBase）：
+- factor_direction: 从 ic_source IC 文件加载，ic_mean < 0 为 negative
+- n_layers: 由 len(layer_names) 派生
+- long_layers/short_layers: 由 n_layers 和 factor_direction 派生
 """
 
-from __future__ import annotations
+from collections.abc import Sequence
+from typing import ClassVar
 
 from backtest.common.factor_cli import factor_cli_main
-from backtest.common.layer_config_base import LayerConfigBase
-from backtest.common.stabilization_filter_config import StabilizationFilterConfig
+from backtest.common.layered_backtest_runner import LayerConfigBase
 
 
-class VolumeDecayRateConfig(LayerConfigBase):
-    """量能衰减因子分层回测配置
+class VolumeDecayRateLayerConfig(LayerConfigBase):
+    """量能衰减因子分层配置
 
-    预计算因子: factor_calculator=None
-    因子已在 factor_ic_data.json.gz 中
+    薄声明：仅定义因子名称与分层命名，逻辑完全下沉基类。
     """
 
-    factor_col: str = "volume_decay_rate"
-    factor_name: str = "量能衰减"
-    factor_calculator: None = None  # 预计算因子，无需运行时计算
+    factor_name: ClassVar[str] = "volume_decay_rate"
 
-    # ── 分层参数 ──
-    n_layers: int = 5
-    layer_names: tuple[str, ...] = ("L1", "L2", "L3", "L4", "L5")
+    layer_names: ClassVar[Sequence[str]] = (
+        "lowest",
+        "lower",
+        "normal",
+        "higher",
+        "highest",
+    )
 
-    # ── 稳定性筛选 ── (遵循 PROJECT.md M7)
-    stabilization_filter: StabilizationFilterConfig = StabilizationFilterConfig()
-
-
-def main():
-    """脚本入口"""
-    config = VolumeDecayRateConfig()
-    factor_cli_main(config)
+    layer_descriptions: ClassVar[Sequence[str]] = (
+        "极低层(量能衰减最强)",
+        "偏低层(量能衰减)",
+        "正常层(量能适中)",
+        "偏高层(量能放大)",
+        "极高层(量能急剧放大)",
+    )
 
 
 if __name__ == "__main__":
-    main()
+    factor_cli_main(config_cls=VolumeDecayRateLayerConfig, factor_calculator=None)

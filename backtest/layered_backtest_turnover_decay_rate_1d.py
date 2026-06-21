@@ -3,43 +3,50 @@
 换手率衰减因子分层回测脚本
 
 因子定义：
-- turnover_decay_rate: turnover_rate / mean(turnover_rate, 5d)
-- 含义: 当日换手率相对近期均值的比值, <1=换手率下降(卖盘衰竭)
-- v2.35: P5-补充新增因子（企稳信号，design.md §2.5 二阶导数）
-- 因子已在 factor_generator 预计算，无需自定义计算函数
+- turnover_decay_rate: turnover_rate / turnover_rate_ma5
+- 含义: 当日换手率/5日均换手率，<1=换手衰减=卖盘衰竭=企稳信号
+- v2.35: P5-补充 二阶导数企稳信号因子（量能衰竭维度，design.md §2）
+- 因子已在 factor_generator 预计算，factor_calculator=None
+
+分层模式：percentile 5层（每层约20%）
+
+因子元数据派生机制（基类 LayerConfigBase）：
+- factor_direction: 从 ic_source IC 文件加载，ic_mean < 0 为 negative
+- n_layers: 由 len(layer_names) 派生
+- long_layers/short_layers: 由 n_layers 和 factor_direction 派生
 """
 
-from __future__ import annotations
+from collections.abc import Sequence
+from typing import ClassVar
 
 from backtest.common.factor_cli import factor_cli_main
-from backtest.common.layer_config_base import LayerConfigBase
-from backtest.common.stabilization_filter_config import StabilizationFilterConfig
+from backtest.common.layered_backtest_runner import LayerConfigBase
 
 
-class TurnoverDecayRateConfig(LayerConfigBase):
-    """换手率衰减因子分层回测配置
+class TurnoverDecayRateLayerConfig(LayerConfigBase):
+    """换手率衰减因子分层配置
 
-    预计算因子: factor_calculator=None
-    因子已在 factor_ic_data.json.gz 中
+    薄声明：仅定义因子名称与分层命名，逻辑完全下沉基类。
     """
 
-    factor_col: str = "turnover_decay_rate"
-    factor_name: str = "换手率衰减"
-    factor_calculator: None = None  # 预计算因子，无需运行时计算
+    factor_name: ClassVar[str] = "turnover_decay_rate"
 
-    # ── 分层参数 ──
-    n_layers: int = 5
-    layer_names: tuple[str, ...] = ("L1", "L2", "L3", "L4", "L5")
+    layer_names: ClassVar[Sequence[str]] = (
+        "lowest",
+        "lower",
+        "normal",
+        "higher",
+        "highest",
+    )
 
-    # ── 稳定性筛选 ── (遵循 PROJECT.md M7)
-    stabilization_filter: StabilizationFilterConfig = StabilizationFilterConfig()
-
-
-def main():
-    """脚本入口"""
-    config = TurnoverDecayRateConfig()
-    factor_cli_main(config)
+    layer_descriptions: ClassVar[Sequence[str]] = (
+        "极低层(换手衰减最强)",
+        "偏低层(换手衰减)",
+        "正常层(换手适中)",
+        "偏高层(换手放大)",
+        "极高层(换手急剧放大)",
+    )
 
 
 if __name__ == "__main__":
-    main()
+    factor_cli_main(config_cls=TurnoverDecayRateLayerConfig, factor_calculator=None)
