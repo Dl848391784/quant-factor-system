@@ -539,6 +539,113 @@ def sort_and_select(
     return result_list, excluded_by_amplitude, excluded_by_coverage
 
 
+def apply_stabilization_filter(
+    top_stocks: list[dict[str, Any]],
+    factor_df: pd.DataFrame,
+    top_n: int,
+    logger: logging.Logger | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    """P6 企稳确认过滤器（v2.35）
+
+    在选股排序后，检查候选股票是否有企稳信号。
+    排除没有企稳信号的股票（如放量下跌无承接），从后续排名递补。
+
+    公理4推论4: 只有"跌了多少"无"是否企稳"，无法区分错杀vs基本面恶化。
+    本过滤器用 P5 新增的确认信号因子判断"是否企稳"。
+
+    企稳条件（任一满足即通过）:
+    - volume_shrink_rate < 1.0（缩量，卖盘衰竭）
+    - price_volume_divergence > 0（价跌量缩背离，止跌信号）
+    - lower_shadow_ratio > 0.3（下影线承接）
+
+    如果确认信号因子列不存在或值为 NaN，跳过过滤（不排除）。
+
+    Args:
+        top_stocks: sort_and_select 返回的候选股票列表（应 ≥ top_n）
+        factor_df: 单日因子 DataFrame（包含 asset 列）
+        top_n: 最终选股数量
+        logger: 日志对象
+
+    Returns:
+        (filtered_stocks, excluded_count)
+    """
+    if logger is None:
+        logger = _logger
+
+    confirmation_cols = ["volume_shrink_rate", "price_volume_divergence", "lower_shadow_ratio"]
+    available_cols = [c for c in confirmation_cols if c in factor_df.columns]
+
+    if not available_cols:
+        logger.info("企稳确认过滤: 确认信号因子不可用，跳过过滤")
+        return top_stocks[:top_n], 0
+
+    # 构建 asset → row 索引（单日数据，asset 唯一）
+    asset_index = factor_df.set_index("asset") if "asset" in factor_df.columns else factor_df
+
+    filtered: list[dict[str, Any]] = []
+    excluded = 0
+    for stock in top_stocks:
+        if len(filtered) >= top_n:
+            break
+
+        code = stock["code"]
+        row = asset_index.loc[code] if code in asset_index.index else None
+        if row is None:
+            filtered.append(stock)
+            continue
+
+        vol_shrink = row.get("volume_shrink_rate", np.nan)
+        pv_div = row.get("price_volume_divergence", np.nan)
+        lower_shadow = row.get("lower_shadow_ratio", np.nan)
+
+        # 全部 NaN → 数据不可用，跳过过滤
+        if pd.isna(vol_shrink) and pd.isna(pv_div) and pd.isna(lower_shadow):
+            filtered.append(stock)
+            continue
+
+        # 企稳条件（任一满足即通过）
+        is_stabilizing = (
+            (not pd.isna(vol_shrink) and vol_shrink < 1.0)
+            or (not pd.isna(pv_div) and pv_div > 0)
+            or (not pd.isna(lower_shadow) and lower_shadow > 0.3)
+        )
+
+        if is_stabilizing:
+            filtered.append(stock)
+        else:
+            excluded += 1
+            logger.debug(
+                "企稳过滤排除: %s (缩量率=%.3f, 背离=%.4f, 下影线=%.3f)",
+                code,
+                vol_shrink,
+                pv_div,
+                lower_shadow,
+            )
+
+    # 不足 top_n 时用被排除的股票递补（向后兼容）
+    if len(filtered) < top_n:
+        filtered_codes = {s["code"] for s in filtered}
+        for stock in top_stocks:
+            if len(filtered) >= top_n:
+                break
+            if stock["code"] not in filtered_codes:
+                stock["stabilization_warning"] = True
+                filtered.append(stock)
+
+    # 重新编号 rank
+    for idx, stock in enumerate(filtered[:top_n], start=1):
+        stock["rank"] = idx
+
+    logger.info(
+        "企稳确认过滤: 候选 %d → 通过 %d, 排除 %d",
+        len(top_stocks),
+        min(len(filtered), top_n),
+        excluded,
+    )
+
+    return filtered[:top_n], excluded
+
+
 def build_result(
     top_stocks: list[dict[str, Any]],
     config: StockSelectorConfig,
@@ -551,6 +658,7 @@ def build_result(
     flipped_factors: list[str] | None = None,  # v1.10: 取反因子列表（报告展示需要）
     excluded_by_amplitude: int = 0,  # v1.12: 振幅过滤排除数
     excluded_by_coverage: int = 0,  # v1.15: 覆盖率过滤排除数
+    excluded_by_confirmation: int = 0,  # v2.35: P6 企稳确认过滤排除数
     min_weight_coverage: float = 0.5,  # v1.15: 覆盖率阈值
     logger: logging.Logger | None = None,
 ) -> dict[str, Any]:
@@ -596,6 +704,8 @@ def build_result(
             # v1.15: 覆盖率过滤信息（报告展示需要）
             "excluded_by_coverage": excluded_by_coverage,
             "min_weight_coverage": min_weight_coverage,
+            # v2.35: P6 企稳确认过滤信息
+            "excluded_by_confirmation": excluded_by_confirmation,
         },
         "top_stocks": top_stocks,
         "weight_config": {
@@ -887,15 +997,23 @@ def select_stocks(
         name_to_col = dict(zip(factor_list, factor_cols))
         selection_weights = {name_to_col.get(k, k): v for k, v in selection_weights.items()}
 
+    # v2.35: P6 企稳确认过滤——候选池翻倍，为过滤预留递补空间
+    candidate_n = config.top_n * 2
     top_stocks, excluded_by_amplitude, excluded_by_coverage = sort_and_select(
         composite_factor,
         factor_df,
-        config.top_n,
+        candidate_n,
         config.factor_direction,
         factor_cols,
         weights=selection_weights,  # v1.10: 传入权重用于覆盖率过滤
         min_amplitude=config.min_amplitude,  # v1.12: 传入振幅阈值
         logger=logger,
+    )
+
+    # Step 10.5: P6 企稳确认过滤（v2.35）
+    # 公理4推论4: 区分错杀vs基本面恶化需要"是否企稳"信号
+    top_stocks, excluded_by_confirmation = apply_stabilization_filter(
+        top_stocks, factor_df, config.top_n, logger=logger
     )
 
     # Step 11: 构建结果（问题 5 修复：传递运行时变量）
@@ -914,6 +1032,7 @@ def select_stocks(
         flipped_factors=flipped_factors,
         excluded_by_amplitude=excluded_by_amplitude,  # v1.12: 振幅过滤排除数
         excluded_by_coverage=excluded_by_coverage,  # v1.15: 覆盖率过滤排除数
+        excluded_by_confirmation=excluded_by_confirmation,  # v2.35: P6 企稳过滤排除数
         logger=logger,
     )
 
