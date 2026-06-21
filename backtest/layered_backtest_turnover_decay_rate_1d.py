@@ -3,9 +3,9 @@
 换手率衰减因子分层回测脚本
 
 因子定义：
-- turnover_decay_rate: turnover_rate / turnover_rate_ma5
-- 含义: <1=换手率下降（卖盘参与度下降）
-- v2.35: P5-补充 新增因子（确认信号角色，二阶导数企稳信号）
+- turnover_decay_rate = 当日换手率 / 5日平均换手率
+- 含义: 换手率衰减，<1=卖盘衰竭
+- v2.35: P5-补充 二阶导数企稳信号因子（确认信号角色）
 - 因子已在 factor_generator 预计算，factor_calculator=None
 
 分层模式：percentile 5层（每层约20%）
@@ -40,11 +40,11 @@ class TurnoverDecayRateLayerConfig(LayerConfigBase):
     )
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        "极低层(换手率大幅下降)",
-        "偏低层(换手率轻微下降)",
-        "正常层(换手率稳定)",
-        "偏高层(换手率轻微上升)",
-        "极高层(换手率明显上升)",
+        "极低层(换手率放大最大)",
+        "偏低层(换手率放大较小)",
+        "正常层(换手率适中)",
+        "偏高层(换手率衰减较小)",
+        "极高层(换手率衰减最大)",
     )
 
 

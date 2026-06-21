@@ -3,9 +3,9 @@
 5日收益率加速度因子分层回测脚本
 
 因子定义：
-- return_acceleration_5d: return_5d(t) - return_5d(t-5)
-- 含义: 正值=跌幅收窄（二阶导数企稳信号）
-- v2.35: P5-补充 新增因子（确认信号角色，二阶导数企稳信号）
+- return_acceleration_5d = return_5d(t) - return_5d(t-5)
+- 含义: 5日收益率加速度，正值=跌幅收窄
+- v2.35: P5-补充 二阶导数企稳信号因子（确认信号角色）
 - 因子已在 factor_generator 预计算，factor_calculator=None
 
 分层模式：percentile 5层（每层约20%）
@@ -40,11 +40,11 @@ class ReturnAcceleration5dLayerConfig(LayerConfigBase):
     )
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        "极低层(跌幅扩大)",
-        "偏低层(跌幅轻微扩大)",
+        "极低层(跌幅加速最大)",
+        "偏低层(跌幅加速较小)",
         "正常层(加速度适中)",
-        "偏高层(跌幅轻微收窄)",
-        "极高层(跌幅明显收窄)",
+        "偏高层(跌幅收窄较小)",
+        "极高层(跌幅收窄最大)",
     )
 
 

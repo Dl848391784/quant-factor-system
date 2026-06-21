@@ -3,9 +3,9 @@
 量能衰减因子分层回测脚本
 
 因子定义：
-- volume_decay_rate: volume_ma5 / volume_ma10
-- 含义: <1=量能衰减（卖盘参与度下降）
-- v2.35: P5-补充 新增因子（确认信号角色，二阶导数企稳信号）
+- volume_decay_rate = 5日均量 / 10日均量
+- 含义: 量能衰减，<1=卖盘衰竭
+- v2.35: P5-补充 二阶导数企稳信号因子（确认信号角色）
 - 因子已在 factor_generator 预计算，factor_calculator=None
 
 分层模式：percentile 5层（每层约20%）
@@ -40,11 +40,11 @@ class VolumeDecayRateLayerConfig(LayerConfigBase):
     )
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        "极低层(量能大幅衰减)",
-        "偏低层(量能轻微衰减)",
-        "正常层(量能稳定)",
-        "偏高层(量能轻微放大)",
-        "极高层(量能明显放大)",
+        "极低层(量能放大最大)",
+        "偏低层(量能放大较小)",
+        "正常层(量比适中)",
+        "偏高层(量能衰减较小)",
+        "极高层(量能衰减最大)",
     )
 
 

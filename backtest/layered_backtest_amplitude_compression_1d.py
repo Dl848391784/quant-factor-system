@@ -3,9 +3,9 @@
 振幅收敛因子分层回测脚本
 
 因子定义：
-- amplitude_compression: mean(amplitude, 5d) / mean(amplitude, 10d)
-- 含义: <1=波动收敛（企稳特征）
-- v2.35: P5-补充 新增因子（确认信号角色，二阶导数企稳信号）
+- amplitude_compression = 5日均振幅 / 10日均振幅
+- 含义: 振幅收敛，<1=波动收敛
+- v2.35: P5-补充 二阶导数企稳信号因子（确认信号角色）
 - 因子已在 factor_generator 预计算，factor_calculator=None
 
 分层模式：percentile 5层（每层约20%）
@@ -40,11 +40,11 @@ class AmplitudeCompressionLayerConfig(LayerConfigBase):
     )
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        "极低层(振幅大幅发散)",
-        "偏低层(振幅轻微发散)",
-        "正常层(振幅稳定)",
-        "偏高层(振幅轻微收敛)",
-        "极高层(振幅明显收敛)",
+        "极低层(振幅发散最大)",
+        "偏低层(振幅发散较小)",
+        "正常层(振幅适中)",
+        "偏高层(振幅收敛较小)",
+        "极高层(振幅收敛最大)",
     )
 
 

@@ -3,9 +3,9 @@
 价格区间收敛因子分层回测脚本
 
 因子定义：
-- range_compression: (rolling_high_5d - rolling_low_5d) / (rolling_high_10d - rolling_low_10d)
-- 含义: <1=价格区间收敛（企稳特征）
-- v2.35: P5-补充 新增因子（确认信号角色，二阶导数企稳信号）
+- range_compression = 5日价格区间 / 10日价格区间
+- 含义: 价格区间收敛，<1=波动收敛
+- v2.35: P5-补充 二阶导数企稳信号因子（确认信号角色）
 - 因子已在 factor_generator 预计算，factor_calculator=None
 
 分层模式：percentile 5层（每层约20%）
@@ -40,11 +40,11 @@ class RangeCompressionLayerConfig(LayerConfigBase):
     )
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        "极低层(区间大幅发散)",
-        "偏低层(区间轻微发散)",
-        "正常层(区间稳定)",
-        "偏高层(区间轻微收敛)",
-        "极高层(区间明显收敛)",
+        "极低层(区间发散最大)",
+        "偏低层(区间发散较小)",
+        "正常层(区间适中)",
+        "偏高层(区间收敛较小)",
+        "极高层(区间收敛最大)",
     )
 
 

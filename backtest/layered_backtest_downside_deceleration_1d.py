@@ -3,9 +3,9 @@
 下跌减速因子分层回测脚本
 
 因子定义：
-- downside_deceleration: max(0, return_5d(t) - return_5d(t-5)) 当前期下跌
-- 含义: 正值=前期下跌股票跌幅收窄（更纯粹企稳信号）
-- v2.35: P5-补充 新增因子（确认信号角色，二阶导数企稳信号）
+- downside_deceleration = max(0, return_5d(t) - return_5d(t-5)) 仅当前期下跌
+- 含义: 下跌股票跌幅收窄幅度
+- v2.35: P5-补充 二阶导数企稳信号因子（确认信号角色）
 - 因子已在 factor_generator 预计算，factor_calculator=None
 
 分层模式：percentile 5层（每层约20%）
@@ -32,19 +32,19 @@ class DownsideDecelerationLayerConfig(LayerConfigBase):
     factor_name: ClassVar[str] = "downside_deceleration"
 
     layer_names: ClassVar[Sequence[str]] = (
-        "zero",
-        "mild",
-        "moderate",
-        "strong",
-        "very_strong",
+        "lowest",
+        "lower",
+        "normal",
+        "higher",
+        "highest",
     )
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        "零层(无企稳信号)",
-        "微弱层(轻微企稳)",
-        "中等层(跌幅中等收窄)",
-        "较强层(跌幅明显收窄)",
-        "极强层(跌幅极明显收窄)",
+        "极低层(减速最小)",
+        "偏低层(减速较小)",
+        "正常层(减速适中)",
+        "偏高层(减速较大)",
+        "极高层(减速最大)",
     )
 
 
