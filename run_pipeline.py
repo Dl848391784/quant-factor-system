@@ -54,12 +54,6 @@ Stage 2: IC计算
   44. ic_lower_shadow_ratio_1d.py (v2.35 P5 新增)
   45. ic_volume_shrink_rate_1d.py (v2.35 P5 新增)
   46. ic_price_volume_divergence_1d.py (v2.35 P5 新增)
-  47. ic_return_acceleration_5d_1d.py (v2.35 P5-补充 新增)
-  48. ic_downside_deceleration_1d.py (v2.35 P5-补充 新增)
-  49. ic_amplitude_compression_1d.py (v2.35 P5-补充 新增)
-  50. ic_range_compression_1d.py (v2.35 P5-补充 新增)
-  51. ic_volume_decay_rate_1d.py (v2.35 P5-补充 新增)
-  52. ic_turnover_decay_rate_1d.py (v2.35 P5-补充 新增)
 
 Stage 3: 分层回测
   53. layered_backtest_rsi_1d.py
@@ -101,12 +95,6 @@ Stage 3: 分层回测
   78. layered_backtest_lower_shadow_ratio_1d.py (v2.35 P5 新增)
   79. layered_backtest_volume_shrink_rate_1d.py (v2.35 P5 新增)
   80. layered_backtest_price_volume_divergence_1d.py (v2.35 P5 新增)
-  81. layered_backtest_return_acceleration_5d_1d.py (v2.35 P5-补充 新增)
-  82. layered_backtest_downside_deceleration_1d.py (v2.35 P5-补充 新增)
-  83. layered_backtest_amplitude_compression_1d.py (v2.35 P5-补充 新增)
-  84. layered_backtest_range_compression_1d.py (v2.35 P5-补充 新增)
-  85. layered_backtest_volume_decay_rate_1d.py (v2.35 P5-补充 新增)
-  86. layered_backtest_turnover_decay_rate_1d.py (v2.35 P5-补充 新增)
 
 Stage 4: 综合因子
   87. composite_equal_weight_1d.py
@@ -240,13 +228,6 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask("ic_lower_shadow_ratio", "factor_ic/ic_lower_shadow_ratio_1d.py", 2, []),
     ScriptTask("ic_volume_shrink_rate", "factor_ic/ic_volume_shrink_rate_1d.py", 2, []),
     ScriptTask("ic_price_volume_divergence", "factor_ic/ic_price_volume_divergence_1d.py", 2, []),
-    # v2.35: P5-补充 6个二阶导数企稳信号因子
-    ScriptTask("ic_return_acceleration_5d", "factor_ic/ic_return_acceleration_5d_1d.py", 2, []),
-    ScriptTask("ic_downside_deceleration", "factor_ic/ic_downside_deceleration_1d.py", 2, []),
-    ScriptTask("ic_amplitude_compression", "factor_ic/ic_amplitude_compression_1d.py", 2, []),
-    ScriptTask("ic_range_compression", "factor_ic/ic_range_compression_1d.py", 2, []),
-    ScriptTask("ic_volume_decay_rate", "factor_ic/ic_volume_decay_rate_1d.py", 2, []),
-    ScriptTask("ic_turnover_decay_rate", "factor_ic/ic_turnover_decay_rate_1d.py", 2, []),
     # Stage 3: 分层回测
     ScriptTask("backtest_rsi", "backtest/layered_backtest_rsi_1d.py", 3, []),
     ScriptTask("backtest_volume_ratio", "backtest/layered_backtest_volume_ratio_1d.py", 3, []),
@@ -301,13 +282,6 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask("backtest_lower_shadow_ratio", "backtest/layered_backtest_lower_shadow_ratio_1d.py", 3, []),
     ScriptTask("backtest_volume_shrink_rate", "backtest/layered_backtest_volume_shrink_rate_1d.py", 3, []),
     ScriptTask("backtest_price_volume_divergence", "backtest/layered_backtest_price_volume_divergence_1d.py", 3, []),
-    # v2.35: P5-补充 6个二阶导数企稳信号因子回测
-    ScriptTask("backtest_return_acceleration_5d", "backtest/layered_backtest_return_acceleration_5d_1d.py", 3, []),
-    ScriptTask("backtest_downside_deceleration", "backtest/layered_backtest_downside_deceleration_1d.py", 3, []),
-    ScriptTask("backtest_amplitude_compression", "backtest/layered_backtest_amplitude_compression_1d.py", 3, []),
-    ScriptTask("backtest_range_compression", "backtest/layered_backtest_range_compression_1d.py", 3, []),
-    ScriptTask("backtest_volume_decay_rate", "backtest/layered_backtest_volume_decay_rate_1d.py", 3, []),
-    ScriptTask("backtest_turnover_decay_rate", "backtest/layered_backtest_turnover_decay_rate_1d.py", 3, []),
     # Stage 4: 综合因子（auto_select 默认启用，无需传参；传 --auto_select 会触发 argparse unrecognized arguments 错误）
     # v2.35: P2 维度权重全方法支持——4种方法统一配置 --dimension_weight icir
     # 消除 rolling_icir 独享维度权重的不公平对比（design.md §2.2 决策点3）
