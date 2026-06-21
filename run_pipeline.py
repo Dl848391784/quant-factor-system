@@ -212,6 +212,12 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask("ic_tail_volume_shrink_delta", "factor_ic/ic_tail_volume_shrink_delta_1d.py", 2, []),
     ScriptTask("ic_turnover_surge_delta", "factor_ic/ic_turnover_surge_delta_1d.py", 2, []),
     ScriptTask("ic_amplitude_delta", "factor_ic/ic_amplitude_delta_1d.py", 2, []),
+    # v2.35: P5 新增5个趋势变化/量价背离因子 IC（design.md §2.5）
+    ScriptTask("ic_rsi_slope_3d", "factor_ic/ic_rsi_slope_3d_1d.py", 2, []),
+    ScriptTask("ic_ma5_slope", "factor_ic/ic_ma5_slope_1d.py", 2, []),
+    ScriptTask("ic_lower_shadow_ratio", "factor_ic/ic_lower_shadow_ratio_1d.py", 2, []),
+    ScriptTask("ic_volume_shrink_rate", "factor_ic/ic_volume_shrink_rate_1d.py", 2, []),
+    ScriptTask("ic_price_volume_divergence", "factor_ic/ic_price_volume_divergence_1d.py", 2, []),
     # Stage 3: 分层回测
     ScriptTask("backtest_rsi", "backtest/layered_backtest_rsi_1d.py", 3, []),
     ScriptTask("backtest_volume_ratio", "backtest/layered_backtest_volume_ratio_1d.py", 3, []),
@@ -260,6 +266,12 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask("backtest_tail_volume_shrink_delta", "backtest/layered_backtest_tail_volume_shrink_delta_1d.py", 3, []),
     ScriptTask("backtest_turnover_surge_delta", "backtest/layered_backtest_turnover_surge_delta_1d.py", 3, []),
     ScriptTask("backtest_amplitude_delta", "backtest/layered_backtest_amplitude_delta_1d.py", 3, []),
+    # v2.35: P5 新增5个趋势变化/量价背离因子分层回测（design.md §2.5）
+    ScriptTask("backtest_rsi_slope_3d", "backtest/layered_backtest_rsi_slope_3d_1d.py", 3, []),
+    ScriptTask("backtest_ma5_slope", "backtest/layered_backtest_ma5_slope_1d.py", 3, []),
+    ScriptTask("backtest_lower_shadow_ratio", "backtest/layered_backtest_lower_shadow_ratio_1d.py", 3, []),
+    ScriptTask("backtest_volume_shrink_rate", "backtest/layered_backtest_volume_shrink_rate_1d.py", 3, []),
+    ScriptTask("backtest_price_volume_divergence", "backtest/layered_backtest_price_volume_divergence_1d.py", 3, []),
     # Stage 4: 综合因子（auto_select 默认启用，无需传参；传 --auto_select 会触发 argparse unrecognized arguments 错误）
     # v2.35: P2 维度权重全方法支持——4种方法统一配置 --dimension_weight icir
     # 消除 rolling_icir 独享维度权重的不公平对比（design.md §2.2 决策点3）
