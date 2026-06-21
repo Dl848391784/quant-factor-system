@@ -498,17 +498,58 @@ def _cross_section_zscore(
 
     Note:
         ``ddof=0`` 与现有 ic_preprocessing 的截面 z-score 风格一致。
+
+        实现选择 numpy 边界切片而非 pandas groupby.transform：
+        - 后者在 >1M 行 × ~500 group 场景下因内部索引重建产生 GB 级临时对象
+          （见 backtest/MODULE.md M54 / `_per_asset_transform` docstring）
+        - 前者只持有 ``2 × float64 ndarray``（sort 索引 + 输出，约 12MB+12MB）
+        - 设计依据: ``designs/fix_factor_generator_step14_oom.md`` §4
     """
     if len(value) != len(dates):
         raise ValueError(f"value/dates 长度不一致: {len(value)} vs {len(dates)}")
 
-    def _zscore_one(s: pd.Series) -> pd.Series:
-        mu = s.mean()
-        sigma = s.std(ddof=0)
-        return (s - mu) / (sigma + std_min)
+    n = len(value)
+    if n == 0:
+        return pd.Series([], dtype=np.float64, index=value.index)
 
-    z = value.groupby(dates, sort=False).transform(_zscore_one)
-    return z.clip(-clip_sigma, clip_sigma)
+    # 1. 提取 numpy 视图（不复制底层 buffer）
+    val_arr = value.to_numpy(dtype=np.float64, copy=False)
+    date_arr = dates.to_numpy(copy=False)
+
+    # 2. 按 date 稳定排序（argsort 返回索引，原数组不变）
+    sort_idx = np.argsort(date_arr, kind="stable")
+    val_sorted = val_arr[sort_idx]
+    date_sorted = date_arr[sort_idx]
+
+    # 3. 找 date 边界（同 date 行连续，date 变化处即新组起点）
+    #    扩展后 ``boundaries`` 形如 ``[0, b1, b2, ..., n]``，``len-1`` 即段数
+    boundaries = np.flatnonzero(date_sorted[1:] != date_sorted[:-1]) + 1
+    boundaries = np.concatenate([[0], boundaries, [n]])
+
+    # 4. 逐 date 切片做 z-score 计算（numpy 向量化，nanmean/nanstd 跳过 NaN）
+    out_sorted = np.full(n, np.nan, dtype=np.float64)
+    with np.errstate(invalid="ignore"):  # 全 NaN 截面会触发 'Mean of empty slice' 警告，吞掉
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            for i in range(len(boundaries) - 1):
+                start, end = boundaries[i], boundaries[i + 1]
+                seg = val_sorted[start:end]
+                mu = np.nanmean(seg)
+                sigma = np.nanstd(seg, ddof=0)
+                # 单日全 NaN → mu/sigma 都是 NaN → 输出保持 NaN
+                # 单日 std=0 → 加 std_min 防除零，结果 (seg - mu)/std_min ≈ 0
+                out_sorted[start:end] = (seg - mu) / (sigma + std_min)
+
+    # 5. clip 到 ±clip_sigma（in-place，省一次分配）
+    np.clip(out_sorted, -clip_sigma, clip_sigma, out=out_sorted)
+
+    # 6. 恢复原顺序（sort_idx[i] 是排序后第 i 个元素的原位置）
+    out = np.empty(n, dtype=np.float64)
+    out[sort_idx] = out_sorted
+
+    return pd.Series(out, index=value.index)
 
 
 # ============================================================================

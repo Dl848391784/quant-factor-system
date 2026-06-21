@@ -927,16 +927,18 @@ def calculate_interaction_amplitude(
         - 极端值 clip 到 ±3σ × ±3σ = ±9（实际 IC 验证范围内）
     """
     _logger = get_module_logger(logger_arg)
-    df = factor_df.copy()
 
     required = [_COL_DATE, _COL_RETURN_3D, _COL_AMPLITUDE]
-    missing = [c for c in required if c not in df.columns]
+    missing = [c for c in required if c not in factor_df.columns]
     if missing:
         raise ValueError(f"interaction_amplitude 缺失必需列: {missing}")
 
-    weakness = _build_weakness(df, _logger)
-    amp_z = _cross_section_zscore(df[_COL_AMPLITUDE], df[_COL_DATE])
-    df[_COL_INTERACTION_AMPLITUDE] = weakness * amp_z
+    # 不 copy 整个宽表（OOM 根因）：直接在原 df 列上算 z-score，
+    # 用 assign 返回带新列的浅拷贝（底层 buffer 共享，仅新列分配 ~12MB）。
+    # 设计依据: designs/fix_factor_generator_step14_oom.md §4
+    weakness = -_cross_section_zscore(factor_df[_COL_RETURN_3D], factor_df[_COL_DATE])
+    amp_z = _cross_section_zscore(factor_df[_COL_AMPLITUDE], factor_df[_COL_DATE])
+    df = factor_df.assign(**{_COL_INTERACTION_AMPLITUDE: weakness * amp_z})
 
     valid_count = int(df[_COL_INTERACTION_AMPLITUDE].notna().sum())
     _logger.info(
@@ -973,16 +975,18 @@ def calculate_interaction_turnover(
         - clip ±3σ × ±3σ
     """
     _logger = get_module_logger(logger_arg)
-    df = factor_df.copy()
 
     required = [_COL_DATE, _COL_RETURN_3D, _COL_TURNOVER_RATE]
-    missing = [c for c in required if c not in df.columns]
+    missing = [c for c in required if c not in factor_df.columns]
     if missing:
         raise ValueError(f"interaction_turnover 缺失必需列: {missing}")
 
-    weakness = _build_weakness(df, _logger)
-    turnover_z = _cross_section_zscore(df[_COL_TURNOVER_RATE], df[_COL_DATE])
-    df[_COL_INTERACTION_TURNOVER] = weakness * turnover_z
+    # 不 copy 整个宽表（OOM 根因）：直接在原 df 列上算 z-score，
+    # 用 assign 返回带新列的浅拷贝（底层 buffer 共享，仅新列分配 ~12MB）。
+    # 设计依据: designs/fix_factor_generator_step14_oom.md §4
+    weakness = -_cross_section_zscore(factor_df[_COL_RETURN_3D], factor_df[_COL_DATE])
+    turnover_z = _cross_section_zscore(factor_df[_COL_TURNOVER_RATE], factor_df[_COL_DATE])
+    df = factor_df.assign(**{_COL_INTERACTION_TURNOVER: weakness * turnover_z})
 
     valid_count = int(df[_COL_INTERACTION_TURNOVER].notna().sum())
     _logger.info(
@@ -1024,17 +1028,19 @@ def calculate_interaction_amp_compression(
         通过字符串字面量引用，避免反向 import 同包子模块。
     """
     _logger = get_module_logger(logger_arg)
-    df = factor_df.copy()
 
     amp_compression_col = "amplitude_compression"
     required = [_COL_DATE, _COL_RETURN_3D, amp_compression_col]
-    missing = [c for c in required if c not in df.columns]
+    missing = [c for c in required if c not in factor_df.columns]
     if missing:
         raise ValueError(f"interaction_amp_compression 缺失必需列: {missing}")
 
-    weakness = _build_weakness(df, _logger)
-    amp_comp_z = _cross_section_zscore(df[amp_compression_col], df[_COL_DATE])
-    df[_COL_INTERACTION_AMP_COMPRESSION] = weakness * amp_comp_z
+    # 不 copy 整个宽表（OOM 根因）：直接在原 df 列上算 z-score，
+    # 用 assign 返回带新列的浅拷贝（底层 buffer 共享，仅新列分配 ~12MB）。
+    # 设计依据: designs/fix_factor_generator_step14_oom.md §4
+    weakness = -_cross_section_zscore(factor_df[_COL_RETURN_3D], factor_df[_COL_DATE])
+    amp_comp_z = _cross_section_zscore(factor_df[amp_compression_col], factor_df[_COL_DATE])
+    df = factor_df.assign(**{_COL_INTERACTION_AMP_COMPRESSION: weakness * amp_comp_z})
 
     valid_count = int(df[_COL_INTERACTION_AMP_COMPRESSION].notna().sum())
     _logger.info(
