@@ -8,7 +8,7 @@
 
 因子定义：
 - return_acceleration_5d = return_5d(t) - return_5d(t-5)
-- 含义: 5日收益率的加速度——正值=跌幅收窄
+- 含义: 5日收益率加速度，正值=跌幅收窄，二阶导数企稳信号
 - 遵循 H5: IC方向不预判，由数据决定
 
 退出码语义（遵循 PROJECT.md H12）：
@@ -18,13 +18,13 @@
   4 = DataSchemaError（数据 schema 不匹配，需检查上游列契约；R18）
   5 = FactorCalcError（因子计算失败或数据加载失败，需检查计算代码或上游数据；R19）
 
-v2.35: P5-补充 二阶导数企稳信号因子（design.md §1, §4）
+v2.35: P5-补充 二阶导数企稳信号因子
 """
 
 import argparse
 import sys
 
-from data_fetchers.factor_calculator import calculate_return_acceleration_5d
+from data_fetchers.factor_calculator.momentum import calculate_return_acceleration_5d
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
 from factor_ic.common.exceptions import DataSchemaError, FactorCalcError, SummaryLogError
 from factor_ic.common.factor_ic_runner import run_factor_ic
@@ -114,9 +114,9 @@ def main(args=None):
 
     if result is None:
         raise FactorCalcError(
-            f"[数据加载] run_factor_ic 返回 None（factor={SPEC.factor_name}, "
-            f"min_stocks={args.min_stocks}, force_full={args.force_full}），"
-            "数据加载或计算可能失败"
+            "[数据加载] run_factor_ic 返回 None（factor=%s, "
+            "min_stocks=%s, force_full=%s），数据加载或计算可能失败"
+            % (SPEC.factor_name, args.min_stocks, args.force_full)
         )
 
     period = result.get("period") or {}
@@ -138,8 +138,8 @@ def main(args=None):
     ic_metrics = result.get("ic_metrics") or {}
     ic_mean = ic_metrics.get("ic_mean")
     icir = ic_metrics.get("icir")
-    ic_mean_str = f"{ic_mean:.4f}" if ic_mean is not None else "N/A"
-    icir_str = f"{icir:.2f}" if icir is not None else "N/A"
+    ic_mean_str = "%0.4f" % ic_mean if ic_mean is not None else "N/A"
+    icir_str = "%0.2f" % icir if icir is not None else "N/A"
     logger.info(
         "5日收益率加速度因子 IC计算完成: IC均值=%s, ICIR=%s",
         ic_mean_str,
