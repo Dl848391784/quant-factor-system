@@ -1,7 +1,7 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.32
-> 最后更新: 2026-06-20
+> 版本: v2.33
+> 最后更新: 2026-06-21
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
 >
@@ -514,11 +514,13 @@ def _apply_weights(
 
 ## M9. 每日截面标准化
 
-**What**:加权前对**每日每个因子**做截面标准化:`factor_std = (factor - μ) / σ`。
+**What**:加权前对**每日每个因子**做截面标准化:`factor_std = (factor - μ) / σ`。v2.28 新增 `skip_point_mass` 简化模式。
 
-**Why**:不同因子值范围悬殊 (RSI 0-100, Volume_Ratio 0.1-5),未标准化会让高值因子主导组合。
+**Why**:不同因子值范围悬殊 (RSI 0-100, Volume_Ratio 0.1-5),未标准化会让高值因子主导组合。`skip_point_mass` 用于 auto_select 相关性矩阵计算——粗粒度 z-score 足够，Pearson corr 对 NaN 鲁棒；跳过 ~60MB×45次 groupby+merge 临时对象显著降低内存峰值（3.5GB→2.65GB）。
 
-**How**:在 `composite_runner` 中统一处理,生成 `<col>_std` 列。
+**How**:在 `composite_runner` 中统一处理,生成 `<col>_std` 列。auto_select 阶段调用 `standardize_factors(..., skip_point_mass=True)`，选中因子后调用完整版标准化。
+
+**Don't**:不要在 auto_select 阶段使用完整版标准化（45因子×groupby+merge 产生 3.5GB+ 内存峰值导致 OOM Kill exit -9）。
 
 ---
 
@@ -884,6 +886,8 @@ _FACTOR_SUFFIX_PATTERN = re.compile(r'(.+?)_\d+[a-z]?$')
 | ImportError fallback | `gzip.open + json.load` | ~4.5 GB | OOM 风险，仅 ijson 缺失时使用 |
 
 **Don't**: 在 composite 模块内自行 `gzip.open + json.load(f)` 加载 `factor_ic_data.json.gz`，会触发 OOM Kill（exit code -9）。设计文档: `designs/composite_streaming_load_design.md`。
+
+**v2.28 内存优化（2026-06-21）**: auto_select 阶段内存峰值从 ~3.5GB 降至 ~2.65GB，修复 OOM Kill（exit -9）。3 项改动：(1) `standardize_factors(skip_point_mass=True)` 跳过点质量检测，减少 45×groupby+merge 临时对象；(2) auto_select 完成后 `del all_factor_df + all_corr_matrix; gc.collect()` 释放 ~1GB；(3) `return_df` 提取和 `full_df` 释放从 Step 8 提前到 Step 1，消除三峰叠加。设计文档: `designs/composite_auto_select_memory_optimization_design.md`。
 
 ---
 
@@ -2026,7 +2030,8 @@ weight_engine = WeightEngine(dimension_weight_method="icir")  # 硬编码
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
-| v2.33 | 2026-06-20 | factor_selector.py v2.10 + summary v2.23: 豁免信息传递链 + 报告维度感知展示同步。(1) validate_factor 返回值扩展为 (is_valid, reasons, exempt_details)，exempt_details 记录每个触发豁免检查的阈值详情（trigger/threshold/actual/exempted/conditions/detail）；新增 _build_exemption_fail_reason 辅助函数。(2) filter_invalid_factors 结果新增 exempted_factors 字段，select_factors 透传。(3) summary generate_correlation_section 维度感知展示——跨维度高相关标注'保留'而非'建议剔除'，消除与 M57 筛选逻辑的矛盾。(4) summary get_factor_selection_info 展示豁免标注（入选因子标'豁免:...'，被剔除因子标'未满足豁免:...'），移除旧的'回测强劲因子被剔除说明'段。test_factor_selector_exemption.py 11 测试。遵循 designs/exempt_info_propagation_design.md 路径B |
+| v2.33 | 2026-06-21 | composite_runner.py v2.28 OOM 修复：3 项改动降低内存峰值 3.5GB→2.65GB（24%）。(1) auto_select 阶段 standardize_factors 新增 skip_point_mass=True 参数，跳过 45 次 groupby+merge 点质量检测临时对象。(2) auto_select 完成后 del all_factor_df + all_corr_matrix + gc.collect()。(3) return_df 提取和 full_df 释放从 Step 8 提前到 Step 1。4 个综合因子脚本共用 composite_runner.py 一次覆盖。设计文档: designs/composite_auto_select_memory_optimization_design.md |
+| v2.33a | 2026-06-20 | factor_selector.py v2.10 + summary v2.23: 豁免信息传递链 + 报告维度感知展示同步。遵循 designs/exempt_info_propagation_design.md 路径B |
 | v2.35 | 2026-06-21 | 策略系统性改造六层方案（designs/strategy_systemic_overhaul.md P1-P6）: **P1** factor_selector v2.35 L1>0硬约束+多头收益替代多空+样本≥60天; **P2** weight_engine v2.35 维度权重全方法支持(_apply_dimension_weights_static提到Base, 4种方法统一); **P3** weight_selector 删4个多空/空头指标+增layer_1_annual/layer_1_sharpe(9→7指标); **P5** 新增5因子(rsi_slope_3d/ma5_slope/lower_shadow_ratio/volume_shrink_rate/price_volume_divergence, 34→39); **P6** FACTOR_ROLES三角色(primary/confirmation/filter)+确认信号IC门槛0.01+stock_selector企稳确认过滤器; PROJECT.md新增"策略约束:只做多"章节; M12更新long_short→long_return+layer_1_annual硬约束; M58更新全方法支持 |
 | v2.34 | 2026-06-20 | stock_selector.py v1.21: 修复维度权重不生效 bug——从 composite 结果读取 dimension_weight_method 传给 WeightEngine（之前 stock_selector 自建 WeightEngine 时缺 dimension_weight_method/factor_categories 参数，导致选股排序用不带维度权重的综合因子值，v2.28 维度权重工作无效）。修复后 Top10 中 #4-#10 重新排列，维度权重分布从 price_position 54%→34.6% |
 | v2.32 | 2026-06-20 | stock_selector.py v1.4: factor_values/factor_values_std 的 key 统一用逻辑名（通过 FACTOR_COL_TO_NAME_MAP 反向映射列名→逻辑名），与 weight_config.factor_list 一致——修复 rsi vs rsi_6、volume_ratio vs volume_ratio_5 命名不一致；同步修复 summary 模块 L1858 集中度检测隐藏 bug（comp_weights key 是逻辑名但 factor_values_std key 是列名导致 rsi/volume_ratio 集中度检测失效）；test_stock_selector.py 更新 4 处断言 |
