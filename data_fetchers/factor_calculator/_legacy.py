@@ -240,6 +240,12 @@ from .momentum import (  # noqa: F401
     calculate_downside_deceleration,  # v2.35: P5-补充 下跌减速
     calculate_interaction_amp_compression,  # v2.36: 交互因子族 (design.md feat_interaction_factors)
     calculate_interaction_amplitude,  # v2.36: 交互因子族 (design.md feat_interaction_factors)
+    calculate_interaction_bollinger,  # v2.37: 交互因子第二批 (design.md feat_interaction_factors_batch2)
+    calculate_interaction_intraday,  # v2.37: 交互因子第二批
+    calculate_interaction_kdj,  # v2.37: 交互因子第二批
+    calculate_interaction_ma5_dev,  # v2.37: 交互因子第二批
+    calculate_interaction_near_high,  # v2.37: 交互因子第二批
+    calculate_interaction_price_pos,  # v2.37: 交互因子第二批
     calculate_interaction_turnover,  # v2.36: 交互因子族 (design.md feat_interaction_factors)
     calculate_lower_shadow_ratio,  # v2.35: P5 下影线比
     calculate_ma5_slope,  # v2.35: P5 MA5斜率
@@ -328,6 +334,13 @@ __all__ = [
     "calculate_interaction_amplitude",  # v2.36: weakness × amplitude_z
     "calculate_interaction_turnover",  # v2.36: weakness × turnover_rate_z
     "calculate_interaction_amp_compression",  # v2.36: weakness × amplitude_compression_z
+    # v2.37: 交互因子第二批（design.md feat_interaction_factors_batch2）
+    "calculate_interaction_near_high",  # v2.37: weakness × near_high_ratio_5_z
+    "calculate_interaction_intraday",  # v2.37: weakness × intraday_intensity_z
+    "calculate_interaction_ma5_dev",  # v2.37: weakness × ma5_deviation_z
+    "calculate_interaction_price_pos",  # v2.37: weakness × price_position_z
+    "calculate_interaction_kdj",  # v2.37: weakness × kdj_j_z
+    "calculate_interaction_bollinger",  # v2.37: weakness × bollinger_pb_z
     # 公共常量别名（向下兼容 ic_kdj_j 等脚本的导入）
     "DEFAULT_RSI_PERIOD",
     "DEFAULT_BOLLINGER_N",

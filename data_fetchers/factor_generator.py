@@ -33,6 +33,12 @@ try:
         calculate_industry_turnover_trend,
         calculate_interaction_amp_compression,  # v2.36: 交互因子 (design.md feat_interaction_factors)
         calculate_interaction_amplitude,  # v2.36: 交互因子
+        calculate_interaction_bollinger,  # v2.37: 交互因子第二批
+        calculate_interaction_intraday,  # v2.37: 交互因子第二批
+        calculate_interaction_kdj,  # v2.37: 交互因子第二批
+        calculate_interaction_ma5_dev,  # v2.37: 交互因子第二批
+        calculate_interaction_near_high,  # v2.37: 交互因子第二批
+        calculate_interaction_price_pos,  # v2.37: 交互因子第二批
         calculate_interaction_turnover,  # v2.36: 交互因子
         calculate_intraday_intensity,
         calculate_kdj_j,
@@ -80,6 +86,12 @@ except ImportError:
         calculate_industry_turnover_trend,
         calculate_interaction_amp_compression,  # v2.36: 交互因子 (design.md feat_interaction_factors)
         calculate_interaction_amplitude,  # v2.36: 交互因子
+        calculate_interaction_bollinger,  # v2.37: 交互因子第二批
+        calculate_interaction_intraday,  # v2.37: 交互因子第二批
+        calculate_interaction_kdj,  # v2.37: 交互因子第二批
+        calculate_interaction_ma5_dev,  # v2.37: 交互因子第二批
+        calculate_interaction_near_high,  # v2.37: 交互因子第二批
+        calculate_interaction_price_pos,  # v2.37: 交互因子第二批
         calculate_interaction_turnover,  # v2.36: 交互因子
         calculate_intraday_intensity,
         calculate_kdj_j,
@@ -173,6 +185,13 @@ _EXTENDED_FACTOR_COLS: tuple[str, ...] = (
     "interaction_amplitude",
     "interaction_turnover",
     "interaction_amp_compression",
+    # v2.37: 交互因子第二批
+    "interaction_near_high",
+    "interaction_intraday",
+    "interaction_ma5_dev",
+    "interaction_price_pos",
+    "interaction_kdj",
+    "interaction_bollinger",
 )
 
 # 收益数据列名
@@ -483,6 +502,43 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
         "step_label": None,
         "factor_func": calculate_interaction_amp_compression,
         "output_cols": ("interaction_amp_compression",),
+        "emit_valid_log": False,
+    },
+    # v2.37: 交互因子第二批（design.md feat_interaction_factors_batch2）
+    {
+        "step_label": "Step 14.2: 计算交互因子第二批...",
+        "factor_func": calculate_interaction_near_high,
+        "output_cols": ("interaction_near_high",),
+        "emit_valid_log": True,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_intraday,
+        "output_cols": ("interaction_intraday",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_ma5_dev,
+        "output_cols": ("interaction_ma5_dev",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_price_pos,
+        "output_cols": ("interaction_price_pos",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_kdj,
+        "output_cols": ("interaction_kdj",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_bollinger,
+        "output_cols": ("interaction_bollinger",),
         "emit_valid_log": False,
     },
 )

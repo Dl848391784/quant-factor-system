@@ -151,6 +151,14 @@ _COL_INTERACTION_AMPLITUDE = "interaction_amplitude"
 _COL_INTERACTION_TURNOVER = "interaction_turnover"
 _COL_INTERACTION_AMP_COMPRESSION = "interaction_amp_compression"
 
+# 交互因子族 第二批（v2.37, 2026-06-22）—— 6 个新交互因子（design.md feat_interaction_factors_batch2）
+_COL_INTERACTION_NEAR_HIGH = "interaction_near_high"
+_COL_INTERACTION_INTRADAY = "interaction_intraday"
+_COL_INTERACTION_MA5_DEV = "interaction_ma5_dev"
+_COL_INTERACTION_PRICE_POS = "interaction_price_pos"
+_COL_INTERACTION_KDJ = "interaction_kdj"
+_COL_INTERACTION_BOLLINGER = "interaction_bollinger"
+
 # 交互因子默认参数
 _DEFAULT_INTERACTION_CLIP_SIGMA = 3.0  # 截面 z-score clip 到 ±3σ 防极端值
 _DEFAULT_INTERACTION_STD_MIN = 1e-10  # 截面 std 防除零下限

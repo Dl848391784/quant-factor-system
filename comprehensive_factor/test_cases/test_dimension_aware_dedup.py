@@ -276,11 +276,11 @@ class TestCategoriesComplete:
 
     def test_categories_count(self):
         """FACTOR_CATEGORIES 有 48 个因子 (v2.36 交互因子3个: 45→48)"""
-        assert len(FACTOR_CATEGORIES) == 48  # v2.36: 交互因子族 +3 (45→48)
+        assert len(FACTOR_CATEGORIES) == 54  # v2.37: 交互因子第二批 +6 (48→54)
 
     def test_dimensions_count(self):
         """CATEGORY_DIMENSIONS 有 10 个维度 (v2.36 复合维度2个: 8→10)"""
-        assert len(CATEGORY_DIMENSIONS) == 10
+        assert len(CATEGORY_DIMENSIONS) == 12  # v2.37: +momentum_x_momentum +momentum_x_price_position (10→12)
 
 
 class TestDimensionCoverage:

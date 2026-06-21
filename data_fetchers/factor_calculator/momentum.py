@@ -49,9 +49,17 @@ from ._common import (
     _COL_HIGH,
     _COL_INTERACTION_AMP_COMPRESSION,
     _COL_INTERACTION_AMPLITUDE,
+    _COL_INTERACTION_BOLLINGER,
+    _COL_INTERACTION_INTRADAY,
+    _COL_INTERACTION_KDJ,
+    _COL_INTERACTION_MA5_DEV,
+    _COL_INTERACTION_NEAR_HIGH,
+    _COL_INTERACTION_PRICE_POS,
     _COL_INTERACTION_TURNOVER,
     _COL_LOW,
+    _COL_MA5_DEVIATION,
     _COL_MOMENTUM_STRENGTH,
+    _COL_NEAR_HIGH_RATIO_5,
     _COL_OPEN,
     _COL_OVERNIGHT_RET,
     _COL_PAST_RETURN_1D,
@@ -1057,3 +1065,178 @@ calculate_interaction_amp_compression.required_cols = [  # type: ignore[attr-def
     "return_3d",
     "amplitude_compression",
 ]
+
+
+# ============================================================================
+# 交互因子族 第二批（v2.37, 2026-06-22）—— 6 个新交互因子
+# 设计依据: designs/feat_interaction_factors_batch2.md
+# 实证验证: /tmp/factor_ic.db 149万条记录, IC > 0.005 且 p < 0.05
+# ============================================================================
+
+
+def calculate_interaction_near_high(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """交互因子 interaction_near_high = -z_cs(return_3d) × z_cs(near_high_ratio_5)。
+
+    实证 IC=+0.0425 ICIR=0.487（第一批中最强），primary 角色。
+    含义: 弱势(3日跌) × 近5日高点位置高 = 反弹型。
+    """
+    _logger = get_module_logger(logger_arg)
+    required = [_COL_DATE, _COL_RETURN_3D, _COL_NEAR_HIGH_RATIO_5]
+    missing = [c for c in required if c not in factor_df.columns]
+    if missing:
+        raise ValueError(f"interaction_near_high 缺失必需列: {missing}")
+    weakness = -_cross_section_zscore(factor_df[_COL_RETURN_3D], factor_df[_COL_DATE])
+    factor_z = _cross_section_zscore(factor_df[_COL_NEAR_HIGH_RATIO_5], factor_df[_COL_DATE])
+    df = factor_df.assign(**{_COL_INTERACTION_NEAR_HIGH: weakness * factor_z})
+    valid_count = int(df[_COL_INTERACTION_NEAR_HIGH].notna().sum())
+    _logger.info(
+        "  interaction_near_high: valid=%d (%.2f%%)", valid_count, valid_count / len(df) * 100 if len(df) > 0 else 0.0
+    )
+    return df
+
+
+calculate_interaction_near_high.required_cols = ["date", "asset", "return_3d", "near_high_ratio_5"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_intraday(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """交互因子 interaction_intraday = -z_cs(past_return_1d) × z_cs(intraday_intensity)。
+
+    实证 IC=+0.0354 ICIR=0.576，primary 角色。
+    含义: 弱势(1日跌) × 日内强度高 = 反弹型。weakness 用 ret1d（短期弱势对日内信号更敏感）。
+    """
+    _logger = get_module_logger(logger_arg)
+    required = [_COL_DATE, _COL_PAST_RETURN_1D, "intraday_intensity"]
+    missing = [c for c in required if c not in factor_df.columns]
+    if missing:
+        raise ValueError(f"interaction_intraday 缺失必需列: {missing}")
+    weakness = -_cross_section_zscore(factor_df[_COL_PAST_RETURN_1D], factor_df[_COL_DATE])
+    factor_z = _cross_section_zscore(factor_df["intraday_intensity"], factor_df[_COL_DATE])
+    df = factor_df.assign(**{_COL_INTERACTION_INTRADAY: weakness * factor_z})
+    valid_count = int(df[_COL_INTERACTION_INTRADAY].notna().sum())
+    _logger.info(
+        "  interaction_intraday: valid=%d (%.2f%%)", valid_count, valid_count / len(df) * 100 if len(df) > 0 else 0.0
+    )
+    return df
+
+
+calculate_interaction_intraday.required_cols = ["date", "asset", "past_return_1d", "intraday_intensity"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_ma5_dev(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """交互因子 interaction_ma5_dev = -z_cs(return_3d) × z_cs(ma5_deviation)。
+
+    实证 IC=+0.0322 ICIR=0.580（ICIR 最高），primary 角色。
+    含义: 弱势(3日跌) × MA5偏离度高 = 反弹型。
+    """
+    _logger = get_module_logger(logger_arg)
+    required = [_COL_DATE, _COL_RETURN_3D, _COL_MA5_DEVIATION]
+    missing = [c for c in required if c not in factor_df.columns]
+    if missing:
+        raise ValueError(f"interaction_ma5_dev 缺失必需列: {missing}")
+    weakness = -_cross_section_zscore(factor_df[_COL_RETURN_3D], factor_df[_COL_DATE])
+    factor_z = _cross_section_zscore(factor_df[_COL_MA5_DEVIATION], factor_df[_COL_DATE])
+    df = factor_df.assign(**{_COL_INTERACTION_MA5_DEV: weakness * factor_z})
+    valid_count = int(df[_COL_INTERACTION_MA5_DEV].notna().sum())
+    _logger.info(
+        "  interaction_ma5_dev: valid=%d (%.2f%%)", valid_count, valid_count / len(df) * 100 if len(df) > 0 else 0.0
+    )
+    return df
+
+
+calculate_interaction_ma5_dev.required_cols = ["date", "asset", "return_3d", "ma5_deviation"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_price_pos(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """交互因子 interaction_price_pos = -z_cs(past_return_1d) × z_cs(price_position)。
+
+    实证 IC=+0.0317 ICIR=0.513，primary 角色。
+    含义: 弱势(1日跌) × 价格位置高 = 反弹型。weakness 用 ret1d。
+    """
+    _logger = get_module_logger(logger_arg)
+    required = [_COL_DATE, _COL_PAST_RETURN_1D, _COL_PRICE_POSITION]
+    missing = [c for c in required if c not in factor_df.columns]
+    if missing:
+        raise ValueError(f"interaction_price_pos 缺失必需列: {missing}")
+    weakness = -_cross_section_zscore(factor_df[_COL_PAST_RETURN_1D], factor_df[_COL_DATE])
+    factor_z = _cross_section_zscore(factor_df[_COL_PRICE_POSITION], factor_df[_COL_DATE])
+    df = factor_df.assign(**{_COL_INTERACTION_PRICE_POS: weakness * factor_z})
+    valid_count = int(df[_COL_INTERACTION_PRICE_POS].notna().sum())
+    _logger.info(
+        "  interaction_price_pos: valid=%d (%.2f%%)", valid_count, valid_count / len(df) * 100 if len(df) > 0 else 0.0
+    )
+    return df
+
+
+calculate_interaction_price_pos.required_cols = ["date", "asset", "past_return_1d", "price_position"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_kdj(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """交互因子 interaction_kdj = -z_cs(return_5d) × z_cs(kdj_j)。
+
+    实证 IC=+0.0286 ICIR=0.400，confirmation 角色。
+    含义: 弱势(5日跌) × KDJ J值高 = 反弹型。weakness 用 ret5d（较长期弱势对趋势指标更敏感）。
+    """
+    _logger = get_module_logger(logger_arg)
+    required = [_COL_DATE, _COL_RETURN_5D, "kdj_j"]
+    missing = [c for c in required if c not in factor_df.columns]
+    if missing:
+        raise ValueError(f"interaction_kdj 缺失必需列: {missing}")
+    weakness = -_cross_section_zscore(factor_df[_COL_RETURN_5D], factor_df[_COL_DATE])
+    factor_z = _cross_section_zscore(factor_df["kdj_j"], factor_df[_COL_DATE])
+    df = factor_df.assign(**{_COL_INTERACTION_KDJ: weakness * factor_z})
+    valid_count = int(df[_COL_INTERACTION_KDJ].notna().sum())
+    _logger.info(
+        "  interaction_kdj: valid=%d (%.2f%%)", valid_count, valid_count / len(df) * 100 if len(df) > 0 else 0.0
+    )
+    return df
+
+
+calculate_interaction_kdj.required_cols = ["date", "asset", "return_5d", "kdj_j"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_bollinger(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """交互因子 interaction_bollinger = -z_cs(return_5d) × z_cs(bollinger_pb)。
+
+    实证 IC=+0.0247 ICIR=0.384，confirmation 角色。
+    含义: 弱势(5日跌) × 布林带%B高 = 反弹型。weakness 用 ret5d。
+    """
+    _logger = get_module_logger(logger_arg)
+    required = [_COL_DATE, _COL_RETURN_5D, "bollinger_pb"]
+    missing = [c for c in required if c not in factor_df.columns]
+    if missing:
+        raise ValueError(f"interaction_bollinger 缺失必需列: {missing}")
+    weakness = -_cross_section_zscore(factor_df[_COL_RETURN_5D], factor_df[_COL_DATE])
+    factor_z = _cross_section_zscore(factor_df["bollinger_pb"], factor_df[_COL_DATE])
+    df = factor_df.assign(**{_COL_INTERACTION_BOLLINGER: weakness * factor_z})
+    valid_count = int(df[_COL_INTERACTION_BOLLINGER].notna().sum())
+    _logger.info(
+        "  interaction_bollinger: valid=%d (%.2f%%)", valid_count, valid_count / len(df) * 100 if len(df) > 0 else 0.0
+    )
+    return df
+
+
+calculate_interaction_bollinger.required_cols = ["date", "asset", "return_5d", "bollinger_pb"]  # type: ignore[attr-defined]

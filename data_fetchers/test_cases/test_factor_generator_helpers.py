@@ -621,9 +621,9 @@ class TestPipelineEmitValidLogSpec:
         v2.36: 交互因子族 Step 14（1个 True + 2个 False），False 14→16。
         """
         false_count = sum(1 for step in _FACTOR_PIPELINE_STEPS if not step["emit_valid_log"])
-        assert false_count == 16, (
-            f"emit_valid_log=False 数量异常: {false_count}, 应为 16"
-            "（Step 11.8/11.9 单block + P5 4 + P5-补充 5 + v2.36 交互因子 2）"
+        assert false_count == 21, (
+            f"emit_valid_log=False 数量异常: {false_count}, 应为 21"
+            "（Step 11.8/11.9 单block + P5 4 + P5-补充 5 + v2.36 2 + v2.37 5）"
         )
 
 
@@ -1072,9 +1072,9 @@ class TestPipelineStepsAndColsConsistency:
         """注释中的 step 数必须等于 _FACTOR_PIPELINE_STEPS 实际长度。"""
         from data_fetchers.factor_generator import _FACTOR_PIPELINE_STEPS
 
-        assert len(_FACTOR_PIPELINE_STEPS) == 39, (
-            "_FACTOR_PIPELINE_STEPS 当前为 39 个 step "
-            "（v2.35: P5 新增5个 + P5-补充6个; v2.36: 交互因子族 3个）"
+        assert len(_FACTOR_PIPELINE_STEPS) == 45, (
+            "_FACTOR_PIPELINE_STEPS 当前为 45 个 step "
+            "（v2.35: P5+P5-补充 11个; v2.36: 交互因子3个; v2.37: 交互因子第二批6个）"
         )
 
     def test_pipeline_output_cols_count_matches_extended_factor_cols(self) -> None:

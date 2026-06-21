@@ -49,17 +49,20 @@ class TestFactorRolesDefinition:
             "range_compression",
             "volume_decay_rate",
             "turnover_decay_rate",
-            # v2.36 交互因子族3个（条件因子方向，IC≈+0.02 < 0.03 走 confirmation）
+            # v2.36: 交互因子族（IC≈+0.02 < 0.03 门槛, 走 confirmation 固定权重）
             "interaction_amplitude",
             "interaction_turnover",
             "interaction_amp_compression",
+            # v2.37: 交互因子第二批 confirmation 角色
+            "interaction_kdj",
+            "interaction_bollinger",
         }
         assert set(confirmation) == expected
 
     def test_primary_count(self):
-        """主信号因子=34个 (FACTOR_CATEGORIES 48 - confirmation 14)"""
+        """主信号因子=38个 (FACTOR_CATEGORIES 54 - confirmation 16)"""
         primary = [f for f, r in FACTOR_ROLES.items() if r == "primary"]
-        assert len(primary) == 34
+        assert len(primary) == 38
 
     def test_no_filter_factors_yet(self):
         """暂无过滤器角色因子（批次8在stock_selector中实现）"""

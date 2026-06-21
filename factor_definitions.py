@@ -168,6 +168,12 @@ FACTOR_DEFINITIONS: dict[str, str] = {
     "interaction_amplitude": "交互因子(振幅): -z_cs(return_3d) × z_cs(amplitude), 弱势×高振幅=反弹信号",
     "interaction_turnover": "交互因子(换手): -z_cs(return_3d) × z_cs(turnover_rate), 弱势×高换手=反弹信号",
     "interaction_amp_compression": "交互因子(振幅收敛): -z_cs(return_3d) × z_cs(amplitude_compression), 弱势×振幅收敛=企稳信号",
+    "interaction_near_high": "交互因子: -z_cs(ret3d) × z_cs(near_high_ratio_5), 弱势×近高点=反弹确认",
+    "interaction_intraday": "交互因子: -z_cs(ret1d) × z_cs(intraday_intensity), 短期弱势×日内强度=反弹",
+    "interaction_ma5_dev": "交互因子: -z_cs(ret3d) × z_cs(ma5_deviation), 弱势×MA5偏离=趋势反转",
+    "interaction_price_pos": "交互因子: -z_cs(ret1d) × z_cs(price_position), 短期弱势×价格位置=反弹",
+    "interaction_kdj": "交互因子: -z_cs(ret5d) × z_cs(kdj_j), 中期弱势×KDJ=超卖反弹",
+    "interaction_bollinger": "交互因子: -z_cs(ret5d) × z_cs(bollinger_pb), 中期弱势×布林带=超卖反弹",
 }
 
 # ============================================================================
@@ -300,6 +306,12 @@ FACTOR_NAME_TO_COL_MAP: dict[str, str] = {
     "interaction_amplitude": "interaction_amplitude",
     "interaction_turnover": "interaction_turnover",
     "interaction_amp_compression": "interaction_amp_compression",
+    "interaction_near_high": "interaction_near_high",
+    "interaction_intraday": "interaction_intraday",
+    "interaction_ma5_dev": "interaction_ma5_dev",
+    "interaction_price_pos": "interaction_price_pos",
+    "interaction_kdj": "interaction_kdj",
+    "interaction_bollinger": "interaction_bollinger",
 }
 
 # 反向映射：列名 → 因子名（自动推导，避免手工同步漂移）
@@ -380,6 +392,12 @@ FACTOR_CATEGORIES: dict[str, str] = {
     "interaction_amplitude": "momentum_x_volatility",  # weakness × amplitude_z
     "interaction_turnover": "momentum_x_volume",  # weakness × turnover_rate_z
     "interaction_amp_compression": "momentum_x_volatility",  # weakness × amplitude_compression_z
+    "interaction_near_high": "momentum_x_price_position",
+    "interaction_intraday": "momentum_x_volume",
+    "interaction_ma5_dev": "momentum_x_momentum",
+    "interaction_price_pos": "momentum_x_price_position",
+    "interaction_kdj": "momentum_x_momentum",
+    "interaction_bollinger": "momentum_x_price_position",
 }
 
 # 维度列表（用于遍历，顺序无特殊含义）
@@ -395,6 +413,8 @@ CATEGORY_DIMENSIONS: list[str] = [
     # v2.36: 交互因子复合维度
     "momentum_x_volatility",
     "momentum_x_volume",
+    "momentum_x_price_position",
+    "momentum_x_momentum",
 ]
 
 # ============================================================================
@@ -433,6 +453,12 @@ FACTOR_ROLES: dict[str, str] = {
             "interaction_amplitude",
             "interaction_turnover",
             "interaction_amp_compression",
+            "interaction_near_high",
+            "interaction_intraday",
+            "interaction_ma5_dev",
+            "interaction_price_pos",
+            "interaction_kdj",
+            "interaction_bollinger",
         }
     },
     # --- 确认信号（趋势变化/量价背离/二阶导数企稳）---
@@ -454,6 +480,12 @@ FACTOR_ROLES: dict[str, str] = {
     "interaction_amplitude": "confirmation",
     "interaction_turnover": "confirmation",
     "interaction_amp_compression": "confirmation",
+    "interaction_near_high": "primary",
+    "interaction_intraday": "primary",
+    "interaction_ma5_dev": "primary",
+    "interaction_price_pos": "primary",
+    "interaction_kdj": "confirmation",
+    "interaction_bollinger": "confirmation",
     # --- 过滤器（基本面恶化，批次8实现）---
     # 暂无 filter 角色因子；基本面过滤在 stock_selector 中直接实现
 }
