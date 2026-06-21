@@ -280,7 +280,7 @@ def run_composite_backtest(
 
         # v2.8: 先标准化因子，再计算相关性
         logger.info("标准化所有因子值...")
-        all_factor_df = standardize_factors(all_factor_df, all_factor_cols, logger)
+        all_factor_df = standardize_factors(all_factor_df, all_factor_cols, logger, skip_point_mass=True)
 
         # 计算相关性矩阵
         logger.info("计算所有因子相关性矩阵...")
@@ -316,6 +316,19 @@ def run_composite_backtest(
 
         logger.info("自动筛选完成: %s → %s", factor_list, factor_cols)
 
+        # v2.28: 释放 auto_select 中间数据（OOM 修复）
+        # all_factor_df(45因子×90列~1GB) 和 all_corr_matrix 在筛选完成后不再需要，
+        # 立即释放避免叠加峰值。设计依据见 designs/composite_auto_select_memory_optimization_design.md §2.1 L1
+        del all_factor_df
+        if all_corr_matrix is not None:
+            del all_corr_matrix
+        if "all_corr_matrix_renamed" in dir():
+            del all_corr_matrix_renamed
+        import gc
+
+        gc.collect()
+        logger.info("auto_select 中间数据已释放（all_factor_df + corr_matrix）")
+
     # v2.26: 过滤数据中不存在的因子列（如 return_3d 有 IC 结果但不在 factor_ic_data 中）
     # 原因：auto_select 基于 IC 结果选因子，不感知数据列是否实际存在。
     #   若不过滤，后续 full_df[factor_required_cols] 触发 KeyError。
@@ -349,9 +362,39 @@ def run_composite_backtest(
 
     # 1. 加载因子数据
     # v2.10: 从 full_df 提取子集，不再独立调用 load_factor_values
+    # v2.28: 同时提取 return_df，释放 full_df（OOM 修复）
     logger.info("提取因子数据（从已加载的 full_df）...")
     factor_required_cols = ["date", "asset"] + factor_cols
     factor_df = full_df[factor_required_cols].copy()
+
+    # v2.28: 提前提取 return_df + 释放 full_df（OOM 修复）
+    # 原代码在 Step 8 才提取 return_df 并释放 full_df，
+    # 现在提前到这里，确保 full_df 释放后只剩 factor_df + return_df ~0.8GB
+    return_cols = ["date", "asset", "forward_return_1d", "forward_return_3d", "forward_return_5d"]
+    for col in ["forward_return_1d", "forward_return_3d", "forward_return_5d"]:
+        if col not in full_df.columns:
+            raise ValueError(f"full_df 中缺少收益列 '{col}', 当前列: {list(full_df.columns)}")
+
+    return_df = full_df[return_cols].copy()
+    logger.info("收益数据（从 full_df 提取）: %d 条记录", len(return_df))
+    if len(return_df) == 0:
+        raise ValueError(
+            "return_df 为空 DataFrame（有列名但无数据），无法进行分层回测\n"
+            "可能原因：\n"
+            "  1. full_df 数据为空\n"
+            "  2. 数据加载异常（检查 load_full_data()）\n"
+            f"  当前列: {list(return_df.columns)}"
+        )
+
+    if "forward_return_1d" not in return_df.columns:
+        raise ValueError(f"return_df 缺少 'forward_return_1d' 列，当前列: {list(return_df.columns)}")
+
+    # v2.28: full_df 所有子集已提取完毕，释放内存
+    del full_df
+    import gc
+
+    gc.collect()
+    logger.info("full_df 已释放（v2.28: 提前释放）")
 
     # 2. 加载 IC 结果
     logger.info("加载 IC 结果...")
@@ -592,35 +635,7 @@ def run_composite_backtest(
     # 8. 调用 backtest 分层回测
     logger.info("调用 backtest 分层回测...")
 
-    # v2.10: 从 full_df 提取收益数据，不再独立调用 load_factor_return_data
-    # 分离 return_df（保持与 load_factor_return_data 相同的字段和校验逻辑）
-    return_cols = ["date", "asset", "forward_return_1d", "forward_return_3d", "forward_return_5d"]
-    for col in ["forward_return_1d", "forward_return_3d", "forward_return_5d"]:
-        if col not in full_df.columns:
-            raise ValueError(f"full_df 中缺少收益列 '{col}'，当前列: {list(full_df.columns)}")
-
-    return_df = full_df[return_cols].copy()
-    logger.info("收益数据（从 full_df 提取）: %d 条记录", len(return_df))
-
-    # 修复：检查空 DataFrame（有列名但无数据）
-    if len(return_df) == 0:
-        raise ValueError(
-            "return_df 为空 DataFrame（有列名但无数据），无法进行分层回测\n"
-            "可能原因：\n"
-            "  1. full_df 数据为空\n"
-            "  2. 数据加载异常（检查 load_full_data()）\n"
-            f"  当前列: {list(return_df.columns)}"
-        )
-
-    if "forward_return_1d" not in return_df.columns:
-        raise ValueError(f"return_df 缺少 'forward_return_1d' 列，当前列: {list(return_df.columns)}")
-
-    # v2.10: full_df 已提取完所有子集，显式释放内存
-    del full_df
-    import gc
-
-    gc.collect()
-    logger.info("full_df 已释放")
+    # v2.28: return_df 已在 Step 1 提取、full_df 已释放，此处直接使用已提取的 return_df
 
     # 创建回测引擎（直接传入已计算的综合因子）
     logger.info("创建回测引擎...")

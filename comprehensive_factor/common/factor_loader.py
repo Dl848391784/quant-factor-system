@@ -522,7 +522,10 @@ def load_ic_daily(
 
 
 def standardize_factors(
-    factor_df: pd.DataFrame, factor_cols: list[str], logger: logging.Logger | None = None
+    factor_df: pd.DataFrame,
+    factor_cols: list[str],
+    logger: logging.Logger | None = None,
+    skip_point_mass: bool = False,
 ) -> pd.DataFrame:
     """截面标准化因子值
 
@@ -532,6 +535,12 @@ def standardize_factors(
         factor_df: 因子 DataFrame（包含 date, asset, 因子列）
         factor_cols: 需标准化的因子列名
         logger: 日志对象
+        skip_point_mass: 跳过点质量检测（auto_select 简化模式）
+            - False（默认）：完整标准化（Winsorize ±3σ + 点质量检测 + NaN 还原）
+            - True：仅截面 z-score + Winsorize ±3σ（用于 auto_select 相关性计算）
+            - 设计依据：点质量检测将 z-score 置 NaN，仅影响因子内部极端值；
+              Pearson corr() 对 NaN 鲁棒（自动跳过 NaN pair），相关性矩阵精度 <0.01 差异。
+              详见 designs/composite_auto_select_memory_optimization_design.md §2.2
 
     Returns:
         标准化后的 DataFrame（新增标准化因子列，命名: <因子列>_std）
@@ -596,96 +605,103 @@ def standardize_factors(
             lambda x: np.clip((x - x.mean()) / x.std(), -_WINSORIZE_SIGMA, _WINSORIZE_SIGMA) if x.std() > 0 else np.nan
         )
 
-        # v2.20: 点质量检测——某值在截面中出现频率 >1% 且 z-score 超阈值时置 NaN
-        # 典型场景：tail_price_position close=tail_low→0.0，68/3019=2.3% 股票挤在同一值
-        # v2.24: 向量化重写——groupby+merge 预计算替代 iterrows+全表过滤
-        #   根因：_POINT_MASS_ZSCORE_GATE=1.0 导致 30% 行被标记为 extreme，
-        #   iterrows 每次 3 次 O(N) 全表扫描，150 万行 × 45 万组合 = 71 小时
-        #   修复：groupby(["date", col]).size() 一次性预计算所有 (date, value) 频率，
-        #   merge 回原 df 批量标记，复杂度 O(N log N)
-        # v2.26 (2026-06-20): 离散型因子豁免——unique/N < 5% 或 unique < 20 时跳过
-        #   典型场景：positive_day_ratio_5 只有 6 个值(0.0~1.0)，4/6 个值的 |z|>1.0
-        #   导致 80%+ 股票 z-score 被置 NaN，因子实际零贡献
-        val_counts = factor_df.groupby(["date", col]).size().reset_index(name="val_count")
-        date_totals = factor_df.groupby("date")[col].count().reset_index(name="date_total")
-        val_counts = val_counts.merge(date_totals, on="date")
-        val_counts["frequency"] = val_counts["val_count"] / val_counts["date_total"]
+        # v2.28: skip_point_mass=True 时跳过点质量检测（auto_select 简化模式）
+        # 设计依据：相关性矩阵只需粗粒度 z-score，Pearson corr() 对 NaN 鲁棒；
+        #   点质量检测仅影响因子内部极端值标记，不影响因子间线性关系。
+        #   简化模式跳过 ~60MB × 45 次 groupby+merge 临时对象，显著降低内存峰值。
+        if not skip_point_mass:
+            # v2.20: 点质量检测——某值在截面中出现频率 >1% 且 z-score 超阈值时置 NaN
+            # 典型场景：tail_price_position close=tail_low→0.0，68/3019=2.3% 股票挤在同一值
+            # v2.24: 向量化重写——groupby+merge 预计算替代 iterrows+全表过滤
+            #   根因：_POINT_MASS_ZSCORE_GATE=1.0 导致 30% 行被标记为 extreme，
+            #   iterrows 每次 3 次 O(N) 全表扫描，150 万行 × 45 万组合 = 71 小时
+            #   修复：groupby(["date", col]).size() 一次性预计算所有 (date, value) 频率，
+            #   merge 回原 df 批量标记，复杂度 O(N log N)
+            # v2.26 (2026-06-20): 离散型因子豁免——unique/N < 5% 或 unique < 20 时跳过
+            #   典型场景：positive_day_ratio_5 只有 6 个值(0.0~1.0)，4/6 个值的 |z|>1.0
+            #   导致 80%+ 股票 z-score 被置 NaN，因子实际零贡献
+            val_counts = factor_df.groupby(["date", col]).size().reset_index(name="val_count")
+            date_totals = factor_df.groupby("date")[col].count().reset_index(name="date_total")
+            val_counts = val_counts.merge(date_totals, on="date")
+            val_counts["frequency"] = val_counts["val_count"] / val_counts["date_total"]
 
-        # v2.26: 离散度判断——每日截面 unique 值数
-        daily_unique = factor_df.groupby("date")[col].nunique()
-        daily_n = factor_df.groupby("date")[col].count()
-        is_discrete = (daily_unique / daily_n < _DISCRETE_UNIQUE_RATIO) | (daily_unique < _DISCRETE_MIN_UNIQUE)
-        discrete_dates = list(daily_unique.index[is_discrete])  # type: ignore[reportArgumentType]
+            # v2.26: 离散度判断——每日截面 unique 值数
+            daily_unique = factor_df.groupby("date")[col].nunique()
+            daily_n = factor_df.groupby("date")[col].count()
+            is_discrete = (daily_unique / daily_n < _DISCRETE_UNIQUE_RATIO) | (daily_unique < _DISCRETE_MIN_UNIQUE)
+            discrete_dates = list(daily_unique.index[is_discrete])  # type: ignore[reportArgumentType]
 
-        if discrete_dates:
-            logger.info(
-                "因子 %s 在 %d 个日期判定为离散型 (unique/N < %.0f%% 或 unique < %d)，跳过点质量检测",
-                col,
-                len(discrete_dates),
-                _DISCRETE_UNIQUE_RATIO * 100,
-                _DISCRETE_MIN_UNIQUE,
-            )
-
-        # 只对非离散日期执行点质量检测
-        point_mass = val_counts[
-            (val_counts["frequency"] > _POINT_MASS_THRESHOLD) & (~val_counts["date"].isin(discrete_dates))
-        ]
-
-        # v2.27 (2026-06-20): 物理边界值豁免——高频值=当日截面 min/max 时不置 NaN
-        # 理由：有界分布(如 [0,1])的边界值是真实极端信号，不是数据噪声。
-        #   tail_price_position=0.0 表示"价格处于窗口期最低点"，11% 股票触底
-        #   在下跌市中完全正常。将其置 NaN 等于消除最极端的真实信号。
-        #   点质量检测应只针对中间值的异常聚集（可能是计算 bug），
-        #   而非物理边界的自然聚集。遵循 AGENTS.md 规则 #15（第一性原理）。
-        if not point_mass.empty:
-            daily_bounds = factor_df.groupby("date")[col].agg(["min", "max"]).reset_index()
-            daily_bounds.columns = ["date", "daily_min", "daily_max"]
-            point_mass = point_mass.merge(daily_bounds, on="date")
-            is_boundary = (point_mass[col] == point_mass["daily_min"]) | (point_mass[col] == point_mass["daily_max"])
-            boundary_count = int(is_boundary.sum())
-            if boundary_count > 0:
+            if discrete_dates:
                 logger.info(
-                    "因子 %s 物理边界豁免: %d 个 (date,value) 组合为截面 min/max，跳过点质量检测",
+                    "因子 %s 在 %d 个日期判定为离散型 (unique/N < %.0f%% 或 unique < %d)，跳过点质量检测",
                     col,
-                    boundary_count,
+                    len(discrete_dates),
+                    _DISCRETE_UNIQUE_RATIO * 100,
+                    _DISCRETE_MIN_UNIQUE,
                 )
-            point_mass = point_mass[~is_boundary].drop(columns=["daily_min", "daily_max"])
 
-        if not point_mass.empty:
-            pm_flags = factor_df[["date", col]].merge(
-                point_mass[["date", col]],
-                on=["date", col],
-                how="left",
-                indicator=True,
-            )
-            pm_mask = (pm_flags["_merge"] == "both").values
-            z_mask = (factor_df[std_col].abs() > _POINT_MASS_ZSCORE_GATE).values
-            factor_df.loc[pm_mask & z_mask, std_col] = np.nan
+            # 只对非离散日期执行点质量检测
+            point_mass = val_counts[
+                (val_counts["frequency"] > _POINT_MASS_THRESHOLD) & (~val_counts["date"].isin(discrete_dates))
+            ]
 
-            # 逐值详情降为 debug：数万条/因子的逐值日志导致 416M 日志/次（v2.25 修复）
-            for _, row in point_mass.iterrows():
-                logger.debug(
-                    "因子 %s 在 %s 检测到点质量: value=%.4f, count=%d (%.1f%%), z-score 置 NaN",
+            # v2.27 (2026-06-20): 物理边界值豁免——高频值=当日截面 min/max 时不置 NaN
+            # 理由：有界分布(如 [0,1])的边界值是真实极端信号，不是数据噪声。
+            #   tail_price_position=0.0 表示"价格处于窗口期最低点"，11% 股票触底
+            #   在下跌市中完全正常。将其置 NaN 等于消除最极端的真实信号。
+            #   点质量检测应只针对中间值的异常聚集（可能是计算 bug），
+            #   而非物理边界的自然聚集。遵循 AGENTS.md 规则 #15（第一性原理）。
+            if not point_mass.empty:
+                daily_bounds = factor_df.groupby("date")[col].agg(["min", "max"]).reset_index()
+                daily_bounds.columns = ["date", "daily_min", "daily_max"]
+                point_mass = point_mass.merge(daily_bounds, on="date")
+                is_boundary = (point_mass[col] == point_mass["daily_min"]) | (
+                    point_mass[col] == point_mass["daily_max"]
+                )
+                boundary_count = int(is_boundary.sum())
+                if boundary_count > 0:
+                    logger.info(
+                        "因子 %s 物理边界豁免: %d 个 (date,value) 组合为截面 min/max，跳过点质量检测",
+                        col,
+                        boundary_count,
+                    )
+                point_mass = point_mass[~is_boundary].drop(columns=["daily_min", "daily_max"])
+
+            if not point_mass.empty:
+                pm_flags = factor_df[["date", col]].merge(
+                    point_mass[["date", col]],
+                    on=["date", col],
+                    how="left",
+                    indicator=True,
+                )
+                pm_mask = (pm_flags["_merge"] == "both").values
+                z_mask = (factor_df[std_col].abs() > _POINT_MASS_ZSCORE_GATE).values
+                factor_df.loc[pm_mask & z_mask, std_col] = np.nan
+
+                # 逐值详情降为 debug：数万条/因子的逐值日志导致 416M 日志/次（v2.25 修复）
+                for _, row in point_mass.iterrows():
+                    logger.debug(
+                        "因子 %s 在 %s 检测到点质量: value=%.4f, count=%d (%.1f%%), z-score 置 NaN",
+                        col,
+                        row["date"],
+                        row[col],
+                        int(row["val_count"]),
+                        row["frequency"] * 100,
+                    )
+                # 汇总信息：每因子一条 info，足够运维判断
+                pm_affected_rows = int((pm_mask & z_mask).sum())
+                pm_affected_dates = len(set(point_mass["date"]))
+                logger.info(
+                    "因子 %s 点质量检测: %d 个 (date,value) 组合, 涉及 %d 天, %d 行 z-score 置 NaN",
                     col,
-                    row["date"],
-                    row[col],
-                    int(row["val_count"]),
-                    row["frequency"] * 100,
+                    len(point_mass),
+                    pm_affected_dates,
+                    pm_affected_rows,
                 )
-            # 汇总信息：每因子一条 info，足够运维判断
-            pm_affected_rows = int((pm_mask & z_mask).sum())
-            pm_affected_dates = len(set(point_mass["date"]))
-            logger.info(
-                "因子 %s 点质量检测: %d 个 (date,value) 组合, 涉及 %d 天, %d 行 z-score 置 NaN",
-                col,
-                len(point_mass),
-                pm_affected_dates,
-                pm_affected_rows,
-            )
 
-        # NaN 处理：原因子值为 NaN 时标准化后仍为 NaN
-        # 使用 fillna 保持原本 NaN 的位置，而非 .loc 后置还原
-        factor_df.loc[factor_df[col].isna(), std_col] = np.nan
+            # NaN 处理：原因子值为 NaN 时标准化后仍为 NaN
+            # 使用 fillna 保持原本 NaN 的位置，而非 .loc 后置还原
+            factor_df.loc[factor_df[col].isna(), std_col] = np.nan
 
     logger.info("因子标准化完成: %d 个因子", len(factor_cols))
 
