@@ -1,47 +1,31 @@
 #!/usr/bin/env python3
 """
-价格区间收敛因子分层回测
-
-遵循 PROJECT.md 回测脚本规范：
-- 使用 LayeredBacktestConfig（ClassVar 薄声明，遵循 M5）
-- 预计算因子: factor_calculator=None（遵循 M6 Sequence）
-- 入口使用 factor_cli_main()（遵循 M8）
+价格区间收敛因子分层回测脚本
 
 因子定义：
-- range_compression = 5日价格区间 / 10日价格区间
-- 含义: 价格区间收敛，<1=波动收敛
-- 遵循 H5: IC方向不预判，由数据决定
+- range_compression: (rolling_high_5d - rolling_low_5d) / (rolling_high_10d - rolling_low_10d)
+- 含义: 近期价格波动范围相对历史变化
+- v2.35: P5-补充因子（确认信号角色，企稳信号二阶维度）
+- 因子已在 factor_generator 预计算，factor_calculator=None
 
-v2.35: P5-补充 二阶导数企稳信号因子
+遵循 backtest/MODULE.md M5(ClassVar薄声明)/M6(Sequence)/M8(factor_cli_main入口)
 """
 
-import sys
-
-from backtest.common.backtest_cli import factor_cli_main
-from backtest.common.layered_backtest_config import LayeredBacktestConfig
+from backtest.common.factor_cli import LayerConfigBase, factor_cli_main
 
 
-class RangeCompressionBacktest(LayeredBacktestConfig):
-    """价格区间收敛因子分层回测配置（遵循 M5 ClassVar 薄声明）"""
+class RangeCompressionLayerConfig(LayerConfigBase):
+    """价格区间收敛因子分层回测配置"""
 
     factor_name: str = "range_compression"
-    factor_col: str = "range_compression"
-    period: str = "1d"
-    factor_calculator = None  # 预计算因子，直接从 factor_ic_data.json.gz 读取
-
-    # 分层标签（遵循 M6 Sequence）
-    layer_labels: tuple[str, ...] = (
-        "极低层(区间发散最大)",
-        "偏低层(区间发散较小)",
-        "正常层(区间适中)",
-        "偏高层(区间收敛较小)",
-        "极高层(区间收敛最大)",
+    layer_names: tuple[str, ...] = (
+        "L1_0-20",
+        "L2_20-40",
+        "L3_40-60",
+        "L4_60-80",
+        "L5_80-100",
     )
 
 
-def main() -> None:
-    factor_cli_main(RangeCompressionBacktest)
-
-
 if __name__ == "__main__":
-    main()
+    factor_cli_main(config_cls=RangeCompressionLayerConfig, factor_calculator=None)

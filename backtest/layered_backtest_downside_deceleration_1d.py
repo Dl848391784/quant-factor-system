@@ -1,47 +1,31 @@
 #!/usr/bin/env python3
 """
-下跌减速因子分层回测
-
-遵循 PROJECT.md 回测脚本规范：
-- 使用 LayeredBacktestConfig（ClassVar 薄声明，遵循 M5）
-- 预计算因子: factor_calculator=None（遵循 M6 Sequence）
-- 入口使用 factor_cli_main()（遵循 M8）
+下跌减速因子分层回测脚本
 
 因子定义：
-- downside_deceleration = max(0, return_5d(t) - return_5d(t-5)) 仅当前期下跌
+- downside_deceleration: max(0, return_5d(t) - return_5d(t-5)) 仅当前期下跌
 - 含义: 下跌股票跌幅收窄幅度
-- 遵循 H5: IC方向不预判，由数据决定
+- v2.35: P5-补充因子（确认信号角色，企稳信号二阶维度）
+- 因子已在 factor_generator 预计算，factor_calculator=None
 
-v2.35: P5-补充 二阶导数企稳信号因子
+遵循 backtest/MODULE.md M5(ClassVar薄声明)/M6(Sequence)/M8(factor_cli_main入口)
 """
 
-import sys
-
-from backtest.common.backtest_cli import factor_cli_main
-from backtest.common.layered_backtest_config import LayeredBacktestConfig
+from backtest.common.factor_cli import LayerConfigBase, factor_cli_main
 
 
-class DownsideDecelerationBacktest(LayeredBacktestConfig):
-    """下跌减速因子分层回测配置（遵循 M5 ClassVar 薄声明）"""
+class DownsideDecelerationLayerConfig(LayerConfigBase):
+    """下跌减速因子分层回测配置"""
 
     factor_name: str = "downside_deceleration"
-    factor_col: str = "downside_deceleration"
-    period: str = "1d"
-    factor_calculator = None  # 预计算因子，直接从 factor_ic_data.json.gz 读取
-
-    # 分层标签（遵循 M6 Sequence）
-    layer_labels: tuple[str, ...] = (
-        "极低层(减速最小)",
-        "偏低层(减速较小)",
-        "正常层(减速适中)",
-        "偏高层(减速较大)",
-        "极高层(减速最大)",
+    layer_names: tuple[str, ...] = (
+        "L1_0-20",
+        "L2_20-40",
+        "L3_40-60",
+        "L4_60-80",
+        "L5_80-100",
     )
 
 
-def main() -> None:
-    factor_cli_main(DownsideDecelerationBacktest)
-
-
 if __name__ == "__main__":
-    main()
+    factor_cli_main(config_cls=DownsideDecelerationLayerConfig, factor_calculator=None)
