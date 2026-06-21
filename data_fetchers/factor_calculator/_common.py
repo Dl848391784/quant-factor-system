@@ -144,6 +144,17 @@ _COL_MOMENTUM_STRENGTH = "momentum_strength"
 _COL_CAPITAL_FLOW_RATIO_TREND = "capital_flow_ratio_trend"
 _COL_CAPITAL_FLOW_INTENSITY = "capital_flow_intensity"
 
+# 交互因子族（v2.36, 2026-06-22）—— 条件因子方向方案 B（design.md feat_interaction_factors）
+# weakness × factor_z, 捕捉"弱势子样本中因子方向翻转"的条件效应，见 skill
+# factor-development ref conditional-ic-analysis.md
+_COL_INTERACTION_AMPLITUDE = "interaction_amplitude"
+_COL_INTERACTION_TURNOVER = "interaction_turnover"
+_COL_INTERACTION_AMP_COMPRESSION = "interaction_amp_compression"
+
+# 交互因子默认参数
+_DEFAULT_INTERACTION_CLIP_SIGMA = 3.0  # 截面 z-score clip 到 ±3σ 防极端值
+_DEFAULT_INTERACTION_STD_MIN = 1e-10  # 截面 std 防除零下限
+
 
 # ============================================================================
 # 行业因子默认参数（私有常量）
@@ -451,6 +462,53 @@ def _per_asset_transform(
         _validate_sort,
     )
     return out
+
+
+# ============================================================================
+# 截面 z-score helper（交互因子族复用）
+# ============================================================================
+
+
+def _cross_section_zscore(
+    value: pd.Series,
+    dates: pd.Series,
+    *,
+    clip_sigma: float = _DEFAULT_INTERACTION_CLIP_SIGMA,
+    std_min: float = _DEFAULT_INTERACTION_STD_MIN,
+) -> pd.Series:
+    """按日期截面计算 z-score，并 clip 到 ±clip_sigma。
+
+    用于交互因子族（design.md feat_interaction_factors §4.1）：把同一交易日内
+    的因子值标准化为零均值单位方差的 z-score，再做乘法叠加。
+
+    Args:
+        value: 待标准化的因子值 Series（NaN 直接传播，不参与均值/方差计算）
+        dates: 与 ``value`` 等长的日期 Series（截面分组键）
+        clip_sigma: 截尾门限，默认 ±3σ（``_DEFAULT_INTERACTION_CLIP_SIGMA``）
+        std_min: 截面 std 防除零下限，默认 1e-10（``_DEFAULT_INTERACTION_STD_MIN``）
+
+    Returns:
+        与输入同长同 index 的 Series：``(value - cs_mean) / (cs_std + std_min)``
+        再 clip 到 ``[-clip_sigma, +clip_sigma]``。
+
+    边界处理:
+        - 单日截面全 NaN → 该日所有输出 NaN
+        - 截面 std=0（同日所有值相等）→ 加 ``std_min`` 防除零，结果接近 0
+        - NaN 行透传 NaN，不污染其它行
+
+    Note:
+        ``ddof=0`` 与现有 ic_preprocessing 的截面 z-score 风格一致。
+    """
+    if len(value) != len(dates):
+        raise ValueError(f"value/dates 长度不一致: {len(value)} vs {len(dates)}")
+
+    def _zscore_one(s: pd.Series) -> pd.Series:
+        mu = s.mean()
+        sigma = s.std(ddof=0)
+        return (s - mu) / (sigma + std_min)
+
+    z = value.groupby(dates, sort=False).transform(_zscore_one)
+    return z.clip(-clip_sigma, clip_sigma)
 
 
 # ============================================================================

@@ -47,6 +47,9 @@ from ._common import (
     _COL_CLOSE,
     _COL_DATE,
     _COL_HIGH,
+    _COL_INTERACTION_AMP_COMPRESSION,
+    _COL_INTERACTION_AMPLITUDE,
+    _COL_INTERACTION_TURNOVER,
     _COL_LOW,
     _COL_MOMENTUM_STRENGTH,
     _COL_OPEN,
@@ -55,6 +58,7 @@ from ._common import (
     _COL_PRICE_POSITION,
     _COL_RETURN_3D,
     _COL_RETURN_5D,
+    _COL_TURNOVER_RATE,
     _DEFAULT_AMPLITUDE_EPSILON,
     _DEFAULT_MOMENTUM_STRENGTH_WINDOW,
     _DEFAULT_PAST_RETURN_1D_WINDOW,
@@ -63,6 +67,7 @@ from ._common import (
     _DEFAULT_RETURN_5D_WINDOW,
     _EPSILON,
     _MOMENTUM_STRENGTH_STD_MIN,
+    _cross_section_zscore,
     _per_asset_transform,
     get_module_logger,
 )
@@ -857,3 +862,188 @@ def calculate_downside_deceleration(
 
 
 calculate_downside_deceleration.required_cols = ["date", "asset", "return_5d"]  # type: ignore[attr-defined]
+
+
+# ============================================================================
+# 交互因子族（v2.36, 2026-06-22）—— 条件因子方向方案 B
+# ============================================================================
+# 设计依据：design.md feat_interaction_factors。
+#
+# 第一性原理：IC = corr(因子值, 未来收益) 是无条件相关系数，假设"因子-收益
+# 关系在所有条件下相同"。实证发现 amplitude/turnover_rate 等因子在弱势子样本
+# 中 IC 翻正（弱势股 IC=+0.083 vs 全样本 -0.022），即因子方向是条件依赖的。
+# 交互因子 = -z_cs(return_3d) × z_cs(factor) 用乘法捕捉这种条件方向，
+# 把"弱势×高振幅=反弹"信号提取到无条件 IC 上（实测全样本 IC≈+0.020 翻正）。
+#
+# 实证数据来源：skill factor-development ref conditional-ic-analysis.md §3-4。
+# weakness 源于 return_3d 是因为它在 4 个候选 weakness 信号中 IC 表现最佳。
+
+
+def _build_weakness(df: pd.DataFrame, logger: logging.Logger) -> pd.Series:
+    """构建 weakness 信号：-z_cs(return_3d)。
+
+    跌得越多越弱势，z-score 越高 → 与因子 z-score 相乘后捕捉"弱势 × 高因子值"组合。
+    使用 ``_cross_section_zscore``（带 ±3σ clip），见 ``_common.py``。
+
+    Args:
+        df: 必须包含 _COL_DATE / _COL_RETURN_3D 列
+        logger: 日志器
+
+    Returns:
+        weakness Series（与 df 同 index）
+    """
+    if _COL_RETURN_3D not in df.columns:
+        raise ValueError(f"交互因子缺失依赖列: {_COL_RETURN_3D}")
+    nan_count = int(df[_COL_RETURN_3D].isna().sum())
+    if nan_count > 0:
+        logger.debug("  weakness 构建: return_3d NaN=%d (会传播到交互因子)", nan_count)
+    return -_cross_section_zscore(df[_COL_RETURN_3D], df[_COL_DATE])
+
+
+def calculate_interaction_amplitude(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """计算交互因子 interaction_amplitude = -z_cs(return_3d) × z_cs(amplitude)。
+
+    含义: 捕捉"弱势(跌得多)股票中高振幅=反弹信号"的条件效应。
+    实证全样本 IC≈+0.020（方向="positive"，选高值=反弹型）。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_3d / amplitude 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_amplitude`` 列的 DataFrame（不改原 df）
+
+    边界处理:
+        - return_3d 或 amplitude 缺失 → 交互值为 NaN（乘法自然传播）
+        - 截面 std=0 → 加 1e-10 防除零（_cross_section_zscore 内部处理）
+        - 极端值 clip 到 ±3σ × ±3σ = ±9（实际 IC 验证范围内）
+    """
+    _logger = get_module_logger(logger_arg)
+    df = factor_df.copy()
+
+    required = [_COL_DATE, _COL_RETURN_3D, _COL_AMPLITUDE]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"interaction_amplitude 缺失必需列: {missing}")
+
+    weakness = _build_weakness(df, _logger)
+    amp_z = _cross_section_zscore(df[_COL_AMPLITUDE], df[_COL_DATE])
+    df[_COL_INTERACTION_AMPLITUDE] = weakness * amp_z
+
+    valid_count = int(df[_COL_INTERACTION_AMPLITUDE].notna().sum())
+    _logger.info(
+        "  interaction_amplitude: valid=%d (%.2f%%)",
+        valid_count,
+        valid_count / len(df) * 100 if len(df) > 0 else 0.0,
+    )
+    return df
+
+
+calculate_interaction_amplitude.required_cols = ["date", "asset", "return_3d", "amplitude"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_turnover(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """计算交互因子 interaction_turnover = -z_cs(return_3d) × z_cs(turnover_rate)。
+
+    含义: 捕捉"弱势股票中高换手=反弹信号"的条件效应。
+    实证全样本 IC≈+0.016（方向="positive"）。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_3d / turnover_rate 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_turnover`` 列的 DataFrame
+
+    边界处理:
+        - return_3d 或 turnover_rate 缺失 → 交互值 NaN
+        - 截面 std=0 → 加 1e-10 防除零
+        - clip ±3σ × ±3σ
+    """
+    _logger = get_module_logger(logger_arg)
+    df = factor_df.copy()
+
+    required = [_COL_DATE, _COL_RETURN_3D, _COL_TURNOVER_RATE]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"interaction_turnover 缺失必需列: {missing}")
+
+    weakness = _build_weakness(df, _logger)
+    turnover_z = _cross_section_zscore(df[_COL_TURNOVER_RATE], df[_COL_DATE])
+    df[_COL_INTERACTION_TURNOVER] = weakness * turnover_z
+
+    valid_count = int(df[_COL_INTERACTION_TURNOVER].notna().sum())
+    _logger.info(
+        "  interaction_turnover: valid=%d (%.2f%%)",
+        valid_count,
+        valid_count / len(df) * 100 if len(df) > 0 else 0.0,
+    )
+    return df
+
+
+calculate_interaction_turnover.required_cols = ["date", "asset", "return_3d", "turnover_rate"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_amp_compression(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """计算交互因子 interaction_amp_compression = -z_cs(return_3d) × z_cs(amplitude_compression)。
+
+    含义: 捕捉"弱势股票中振幅收敛=反弹信号"的条件效应。
+    实证全样本 IC≈+0.008（方向="positive"，弱信号但维度独立）。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_3d / amplitude_compression 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_amp_compression`` 列的 DataFrame
+
+    边界处理:
+        - return_3d 或 amplitude_compression 缺失 → 交互值 NaN
+        - 截面 std=0 → 加 1e-10 防除零
+        - clip ±3σ × ±3σ
+
+    Note:
+        ``amplitude_compression`` 列字符串字面量为 "amplitude_compression"，
+        其常量 ``_COL_AMP_COMPRESSION`` 定义在 ``volume_price.py``。本模块
+        通过字符串字面量引用，避免反向 import 同包子模块。
+    """
+    _logger = get_module_logger(logger_arg)
+    df = factor_df.copy()
+
+    amp_compression_col = "amplitude_compression"
+    required = [_COL_DATE, _COL_RETURN_3D, amp_compression_col]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"interaction_amp_compression 缺失必需列: {missing}")
+
+    weakness = _build_weakness(df, _logger)
+    amp_comp_z = _cross_section_zscore(df[amp_compression_col], df[_COL_DATE])
+    df[_COL_INTERACTION_AMP_COMPRESSION] = weakness * amp_comp_z
+
+    valid_count = int(df[_COL_INTERACTION_AMP_COMPRESSION].notna().sum())
+    _logger.info(
+        "  interaction_amp_compression: valid=%d (%.2f%%)",
+        valid_count,
+        valid_count / len(df) * 100 if len(df) > 0 else 0.0,
+    )
+    return df
+
+
+calculate_interaction_amp_compression.required_cols = [  # type: ignore[attr-defined]
+    "date",
+    "asset",
+    "return_3d",
+    "amplitude_compression",
+]

@@ -238,6 +238,9 @@ from .intraday import (  # noqa: F401
 from .momentum import (  # noqa: F401
     calculate_amplitude,
     calculate_downside_deceleration,  # v2.35: P5-补充 下跌减速
+    calculate_interaction_amp_compression,  # v2.36: 交互因子族 (design.md feat_interaction_factors)
+    calculate_interaction_amplitude,  # v2.36: 交互因子族 (design.md feat_interaction_factors)
+    calculate_interaction_turnover,  # v2.36: 交互因子族 (design.md feat_interaction_factors)
     calculate_lower_shadow_ratio,  # v2.35: P5 下影线比
     calculate_ma5_slope,  # v2.35: P5 MA5斜率
     calculate_momentum_strength,
@@ -321,6 +324,10 @@ __all__ = [
     "calculate_range_compression",  # v2.35: P5-补充 价格区间收敛
     "calculate_volume_decay_rate",  # v2.35: P5-补充 量能衰减
     "calculate_turnover_decay_rate",  # v2.35: P5-补充 换手率衰减
+    # v2.36: 交互因子族 —— 条件因子方向方案 B（design.md feat_interaction_factors）
+    "calculate_interaction_amplitude",  # v2.36: weakness × amplitude_z
+    "calculate_interaction_turnover",  # v2.36: weakness × turnover_rate_z
+    "calculate_interaction_amp_compression",  # v2.36: weakness × amplitude_compression_z
     # 公共常量别名（向下兼容 ic_kdj_j 等脚本的导入）
     "DEFAULT_RSI_PERIOD",
     "DEFAULT_BOLLINGER_N",
