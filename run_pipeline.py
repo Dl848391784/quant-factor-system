@@ -261,9 +261,11 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask("backtest_turnover_surge_delta", "backtest/layered_backtest_turnover_surge_delta_1d.py", 3, []),
     ScriptTask("backtest_amplitude_delta", "backtest/layered_backtest_amplitude_delta_1d.py", 3, []),
     # Stage 4: 综合因子（auto_select 默认启用，无需传参；传 --auto_select 会触发 argparse unrecognized arguments 错误）
-    ScriptTask("composite_equal", "comprehensive_factor/composite_equal_weight_1d.py", 4, []),
-    ScriptTask("composite_icir", "comprehensive_factor/composite_icir_weight_1d.py", 4, []),
-    ScriptTask("composite_ic", "comprehensive_factor/composite_ic_weight_1d.py", 4, []),
+    # v2.35: P2 维度权重全方法支持——4种方法统一配置 --dimension_weight icir
+    # 消除 rolling_icir 独享维度权重的不公平对比（design.md §2.2 决策点3）
+    ScriptTask("composite_equal", "comprehensive_factor/composite_equal_weight_1d.py", 4, ["--dimension_weight", "icir"]),
+    ScriptTask("composite_icir", "comprehensive_factor/composite_icir_weight_1d.py", 4, ["--dimension_weight", "icir"]),
+    ScriptTask("composite_ic", "comprehensive_factor/composite_ic_weight_1d.py", 4, ["--dimension_weight", "icir"]),
     ScriptTask(
         "composite_rolling_icir",
         "comprehensive_factor/composite_rolling_icir_weight_1d.py",
