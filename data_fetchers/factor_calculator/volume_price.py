@@ -445,7 +445,9 @@ def calculate_amplitude_compression(
         factor_df: 包含 date, asset, amplitude 列的 DataFrame
     """
     log = logger_arg or logging.getLogger(__name__)
-    df = factor_df.sort_values([_COL_ASSET, _COL_DATE]).copy()
+    # sort_values(inplace=False) 返回独立 buffer 的新对象，无需额外 .copy()
+    # （设计依据: designs/fix_factor_generator_step13_oom.md §4.3 等价性证明）
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     amp_ma5 = (
         df.groupby(_COL_ASSET)[_COL_AMPLITUDE].rolling(_MA5_WINDOW, min_periods=3).mean().reset_index(0, drop=True)
@@ -486,7 +488,9 @@ def calculate_range_compression(
         factor_df: 包含 date, asset, high, low 列的 DataFrame
     """
     log = logger_arg or logging.getLogger(__name__)
-    df = factor_df.sort_values([_COL_ASSET, _COL_DATE]).copy()
+    # sort_values(inplace=False) 返回独立 buffer 的新对象，无需额外 .copy()
+    # （设计依据: designs/fix_factor_generator_step13_oom.md §4.3 等价性证明）
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     roll_high_5 = df.groupby(_COL_ASSET)[_COL_HIGH].rolling(_MA5_WINDOW, min_periods=3).max().reset_index(0, drop=True)
     roll_low_5 = df.groupby(_COL_ASSET)[_COL_LOW].rolling(_MA5_WINDOW, min_periods=3).min().reset_index(0, drop=True)
@@ -530,7 +534,9 @@ def calculate_volume_decay_rate(
         factor_df: 包含 date, asset, volume 列的 DataFrame
     """
     log = logger_arg or logging.getLogger(__name__)
-    df = factor_df.sort_values([_COL_ASSET, _COL_DATE]).copy()
+    # sort_values(inplace=False) 返回独立 buffer 的新对象，无需额外 .copy()
+    # （设计依据: designs/fix_factor_generator_step13_oom.md §4.3 等价性证明）
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     vol_ma5 = df.groupby(_COL_ASSET)[_COL_VOLUME].rolling(_MA5_WINDOW, min_periods=3).mean().reset_index(0, drop=True)
     vol_ma10 = df.groupby(_COL_ASSET)[_COL_VOLUME].rolling(_MA10_WINDOW, min_periods=5).mean().reset_index(0, drop=True)
@@ -567,7 +573,9 @@ def calculate_turnover_decay_rate(
         factor_df: 包含 date, asset, turnover_rate 列的 DataFrame
     """
     log = logger_arg or logging.getLogger(__name__)
-    df = factor_df.sort_values([_COL_ASSET, _COL_DATE]).copy()
+    # sort_values(inplace=False) 返回独立 buffer 的新对象，无需额外 .copy()
+    # （设计依据: designs/fix_factor_generator_step13_oom.md §4.3 等价性证明）
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     turnover_ma5 = (
         df.groupby(_COL_ASSET)[_COL_TURNOVER].rolling(_MA5_WINDOW, min_periods=3).mean().reset_index(0, drop=True)

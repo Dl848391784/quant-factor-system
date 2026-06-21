@@ -801,7 +801,9 @@ def calculate_return_acceleration_5d(
         添加了 return_acceleration_5d 列的 DataFrame
     """
     log = logger_arg or logging.getLogger(__name__)
-    df = factor_df.sort_values([_COL_ASSET, _COL_DATE]).copy()
+    # sort_values(inplace=False) 返回独立 buffer 的新对象，无需额外 .copy()
+    # （设计依据: designs/fix_factor_generator_step13_oom.md §4.3 等价性证明）
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     df[_COL_RETURN_ACCEL_5D] = df.groupby(_COL_ASSET)[_COL_RETURN_5D].transform(
         lambda x: x - x.shift(_RETURN_ACCEL_LAG)
@@ -842,7 +844,9 @@ def calculate_downside_deceleration(
         添加了 downside_deceleration 列的 DataFrame
     """
     log = logger_arg or logging.getLogger(__name__)
-    df = factor_df.sort_values([_COL_ASSET, _COL_DATE]).copy()
+    # sort_values(inplace=False) 返回独立 buffer 的新对象，无需额外 .copy()
+    # （设计依据: designs/fix_factor_generator_step13_oom.md §4.3 等价性证明）
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     prev_ret5d = df.groupby(_COL_ASSET)[_COL_RETURN_5D].shift(_RETURN_ACCEL_LAG)
     accel = df[_COL_RETURN_5D] - prev_ret5d
