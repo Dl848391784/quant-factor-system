@@ -89,21 +89,10 @@ def _freeze_config(obj: dict | list) -> MappingProxyType | tuple:
 
 # 内部可变配置（用于构建，不会被外部直接访问）
 _DEFAULT_CONFIG_INTERNAL = {
-    # 评价指标配置（问题 4 修复：添加 short_name）
+    # 评价指标配置（v2.35: P3 只做多对齐——移除4个多空/空头指标，新增2个L1指标）
+    # 公理1: 只做多策略不能做空，多空/空头指标无意义（design.md §2.3）
     "metrics": {
         # 收益类指标（越大越好）
-        "long_short_return_annual": {
-            "direction": "higher_better",
-            "weight": 1.0,
-            "description": "多空年化收益",
-            "short_name": "ls_ret_ann",
-        },
-        "long_short_sharpe": {
-            "direction": "higher_better",
-            "weight": 1.0,
-            "description": "多空夏普比率",
-            "short_name": "ls_sharpe",
-        },
         "long_return_annual": {
             "direction": "higher_better",
             "weight": 1.0,
@@ -116,17 +105,23 @@ _DEFAULT_CONFIG_INTERNAL = {
             "description": "多头夏普比率",
             "short_name": "l_sharpe",
         },
+        "layer_1_annual": {  # v2.35: P3 新增——L1绝对年化收益（只做多核心指标）
+            "direction": "higher_better",
+            "weight": 1.0,
+            "description": "Layer1买入层年化收益",
+            "short_name": "l1_ret_ann",
+        },
+        "layer_1_sharpe": {  # v2.35: P3 新增——L1夏普（稳定性）
+            "direction": "higher_better",
+            "weight": 1.0,
+            "description": "Layer1买入层夏普比率",
+            "short_name": "l1_sharpe",
+        },
         "monotonicity_abs": {
             "direction": "higher_better",
             "weight": 1.0,
             "description": "单调性相关性绝对值",
             "short_name": "mono_abs",
-        },
-        "long_short_net_daily": {
-            "direction": "higher_better",
-            "weight": 1.0,
-            "description": "成本后日收益",
-            "short_name": "ls_net",
         },
         # 成本风险类指标（越小越好）
         "turnover_long_avg": {
@@ -134,12 +129,6 @@ _DEFAULT_CONFIG_INTERNAL = {
             "weight": 1.0,
             "description": "多头换手率",
             "short_name": "to_long",
-        },
-        "turnover_short_avg": {
-            "direction": "lower_better",
-            "weight": 1.0,
-            "description": "空头换手率",
-            "short_name": "to_short",
         },
         "max_drawdown": {
             "direction": "lower_better",
@@ -342,11 +331,9 @@ class MetricExtractor:
             ValueError: 所有方法提取失败
         """
         metrics_data = {}
+        # v2.35: P3 只做多对齐——required_fields 移除多空/空头指标
         required_fields = [
-            "long_short_return_annual",
-            "long_short_sharpe",
             "turnover_long_avg",
-            "turnover_short_avg",
         ]
 
         failed_methods = []
@@ -359,16 +346,12 @@ class MetricExtractor:
 
                 long_short = backtest.get("long_short", {})
                 monotonicity = backtest.get("monotonicity", {})
-                trading = backtest.get("trading_cost_analysis", {})
                 layer_stats = backtest.get("layer_stats", {})
 
                 # 检查必需字段
                 for field in required_fields:
                     if field not in long_short:
                         raise ValueError(f"必需字段缺失: {field}")
-
-                if "long_short_net_daily" not in trading:
-                    raise ValueError("必需字段缺失: long_short_net_daily")
 
                 if "correlation" not in monotonicity:
                     raise ValueError("必需字段缺失: monotonicity.correlation")
@@ -393,15 +376,18 @@ class MetricExtractor:
                 long_sharpe = sum(layer["sharpe_ratio"] for layer in long_layer_data) / len(long_layer_data)
                 max_drawdown = sum(abs(layer["max_drawdown"]) for layer in long_layer_data) / len(long_layer_data)
 
+                # v2.35: P3 新增——提取 Layer1 单独指标（只做多核心指标）
+                layer_1 = layer_stats.get("layer_1", {})
+                layer_1_annual = layer_1.get("annual_return")
+                layer_1_sharpe = layer_1.get("sharpe_ratio")
+
                 metrics_data[method] = {
-                    "long_short_return_annual": long_short["long_short_return_annual"],
-                    "long_short_sharpe": long_short["long_short_sharpe"],
                     "long_return_annual": long_return_annual,
                     "long_sharpe": long_sharpe,
+                    "layer_1_annual": layer_1_annual if layer_1_annual is not None else 0.0,
+                    "layer_1_sharpe": layer_1_sharpe if layer_1_sharpe is not None else 0.0,
                     "monotonicity_abs": abs(monotonicity["correlation"]),
-                    "long_short_net_daily": trading["long_short_net_daily"],
                     "turnover_long_avg": long_short["turnover_long_avg"],
-                    "turnover_short_avg": long_short["turnover_short_avg"],
                     "max_drawdown": max_drawdown,
                 }
             except (ValueError, KeyError) as e:
