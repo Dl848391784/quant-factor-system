@@ -31,6 +31,9 @@ try:
         calculate_industry_amplitude_trend,
         calculate_industry_momentum_5d,
         calculate_industry_turnover_trend,
+        calculate_interaction_amp_compression,  # v2.36: 交互因子 (design.md feat_interaction_factors)
+        calculate_interaction_amplitude,  # v2.36: 交互因子
+        calculate_interaction_turnover,  # v2.36: 交互因子
         calculate_intraday_intensity,
         calculate_kdj_j,
         calculate_lower_shadow_ratio,  # v2.35: P5
@@ -75,6 +78,9 @@ except ImportError:
         calculate_industry_amplitude_trend,
         calculate_industry_momentum_5d,
         calculate_industry_turnover_trend,
+        calculate_interaction_amp_compression,  # v2.36: 交互因子 (design.md feat_interaction_factors)
+        calculate_interaction_amplitude,  # v2.36: 交互因子
+        calculate_interaction_turnover,  # v2.36: 交互因子
         calculate_intraday_intensity,
         calculate_kdj_j,
         calculate_lower_shadow_ratio,  # v2.35: P5
@@ -163,6 +169,10 @@ _EXTENDED_FACTOR_COLS: tuple[str, ...] = (
     "range_compression",
     "volume_decay_rate",
     "turnover_decay_rate",
+    # v2.36: 交互因子族 —— 条件因子方向方案 B (design.md feat_interaction_factors)
+    "interaction_amplitude",
+    "interaction_turnover",
+    "interaction_amp_compression",
 )
 
 # 收益数据列名
@@ -452,6 +462,27 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
         "step_label": None,
         "factor_func": calculate_turnover_decay_rate,
         "output_cols": ("turnover_decay_rate",),
+        "emit_valid_log": False,
+    },
+    # v2.36: 交互因子族 —— 条件因子方向方案 B (design.md feat_interaction_factors)
+    # 依赖：return_3d (Step 9) + amplitude (Step 9) + turnover_rate (上游) + amplitude_compression (Step 13)
+    # 必须放在 _FACTOR_PIPELINE_STEPS 末尾，确保所有依赖列已生成
+    {
+        "step_label": "Step 14: 计算交互因子族（条件因子方向方案B）...",
+        "factor_func": calculate_interaction_amplitude,
+        "output_cols": ("interaction_amplitude",),
+        "emit_valid_log": True,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_turnover,
+        "output_cols": ("interaction_turnover",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_amp_compression,
+        "output_cols": ("interaction_amp_compression",),
         "emit_valid_log": False,
     },
 )

@@ -612,15 +612,18 @@ class TestPipelineEmitValidLogSpec:
         )
 
     def test_emit_false_count_matches_spec(self) -> None:
-        """emit_valid_log=False 的因子数应 = 9（同段后续 + P5 新增4个）。
+        """emit_valid_log=False 的因子数应 = 16（同段后续 + P5 新增4个 + P5-补充5个 + v2.36 交互因子2个）。
 
         Step 11.8 行业财务与 Step 11.9 资金流均为单 step block；
         block 内部负责输出多列有效率，不再把第二/第三列建成独立 follower step。
         v2.35: P5 新增 Step 12（1个 True + 4个 False），False 总数 5→9。
+        v2.35: P5-补充 二阶导数因子 Step 13（1个 True + 5个 False），False 9→14。
+        v2.36: 交互因子族 Step 14（1个 True + 2个 False），False 14→16。
         """
         false_count = sum(1 for step in _FACTOR_PIPELINE_STEPS if not step["emit_valid_log"])
-        assert false_count == 9, (
-            f"emit_valid_log=False 数量异常: {false_count}, 应为 9（Step 11.8/11.9 均为单 step block + P5 新增4个 follower）"
+        assert false_count == 16, (
+            f"emit_valid_log=False 数量异常: {false_count}, 应为 16"
+            "（Step 11.8/11.9 单block + P5 4 + P5-补充 5 + v2.36 交互因子 2）"
         )
 
 
@@ -1069,7 +1072,10 @@ class TestPipelineStepsAndColsConsistency:
         """注释中的 step 数必须等于 _FACTOR_PIPELINE_STEPS 实际长度。"""
         from data_fetchers.factor_generator import _FACTOR_PIPELINE_STEPS
 
-        assert len(_FACTOR_PIPELINE_STEPS) == 30, "_FACTOR_PIPELINE_STEPS 当前为 30 个 step（v2.35: P5 新增5个）"
+        assert len(_FACTOR_PIPELINE_STEPS) == 39, (
+            "_FACTOR_PIPELINE_STEPS 当前为 39 个 step "
+            "（v2.35: P5 新增5个 + P5-补充6个; v2.36: 交互因子族 3个）"
+        )
 
     def test_pipeline_output_cols_count_matches_extended_factor_cols(self) -> None:
         """所有 step 的 output_cols 总数必须等于 _EXTENDED_FACTOR_COLS 长度。"""

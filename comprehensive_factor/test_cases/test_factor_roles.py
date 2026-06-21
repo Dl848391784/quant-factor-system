@@ -33,19 +33,31 @@ class TestFactorRolesDefinition:
             assert role in FACTOR_ROLE_TYPES, f"{f} 角色={role} 不在 {FACTOR_ROLE_TYPES}"
 
     def test_confirmation_factors_are_p5_new(self):
-        """确认信号因子=P5新增的5个"""
+        """确认信号因子=P5新增5个 + P5-补充6个 + v2.36 交互因子3个 = 14"""
         confirmation = [f for f, r in FACTOR_ROLES.items() if r == "confirmation"]
         expected = {
+            # P5 新增5个：趋势变化/量价背离
             "rsi_slope_3d",
             "ma5_slope",
             "lower_shadow_ratio",
             "volume_shrink_rate",
             "price_volume_divergence",
+            # P5-补充6个：二阶导数企稳信号
+            "return_acceleration_5d",
+            "downside_deceleration",
+            "amplitude_compression",
+            "range_compression",
+            "volume_decay_rate",
+            "turnover_decay_rate",
+            # v2.36 交互因子族3个（条件因子方向，IC≈+0.02 < 0.03 走 confirmation）
+            "interaction_amplitude",
+            "interaction_turnover",
+            "interaction_amp_compression",
         }
         assert set(confirmation) == expected
 
     def test_primary_count(self):
-        """主信号因子=34个"""
+        """主信号因子=34个 (FACTOR_CATEGORIES 48 - confirmation 14)"""
         primary = [f for f, r in FACTOR_ROLES.items() if r == "primary"]
         assert len(primary) == 34
 

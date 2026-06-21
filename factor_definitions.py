@@ -161,6 +161,13 @@ FACTOR_DEFINITIONS: dict[str, str] = {
     "range_compression": "价格区间收敛: 5日价格区间/10日价格区间, <1=波动收敛",
     "volume_decay_rate": "量能衰减: 5日均量/10日均量, <1=量能衰减",
     "turnover_decay_rate": "换手率衰减: 当日换手率/5日平均换手率, <1=换手率下降",
+    # v2.36: 交互因子族 —— 条件因子方向方案 B (design.md feat_interaction_factors)
+    # 第一性原理: IC = 无条件相关系数, 实证因子在弱势子样本中 IC 翻正 (skill ref
+    # conditional-ic-analysis.md §3-4). 交互因子 -z_cs(return_3d) × z_cs(X) 用乘法
+    # 自然吸收条件方向, 全样本 IC 翻正为正向 (期望 +0.02), 选高值=反弹型.
+    "interaction_amplitude": "交互因子(振幅): -z_cs(return_3d) × z_cs(amplitude), 弱势×高振幅=反弹信号",
+    "interaction_turnover": "交互因子(换手): -z_cs(return_3d) × z_cs(turnover_rate), 弱势×高换手=反弹信号",
+    "interaction_amp_compression": "交互因子(振幅收敛): -z_cs(return_3d) × z_cs(amplitude_compression), 弱势×振幅收敛=企稳信号",
 }
 
 # ============================================================================
@@ -289,6 +296,10 @@ FACTOR_NAME_TO_COL_MAP: dict[str, str] = {
     "range_compression": "range_compression",
     "volume_decay_rate": "volume_decay_rate",
     "turnover_decay_rate": "turnover_decay_rate",
+    # v2.36: 交互因子族 —— 条件因子方向方案 B
+    "interaction_amplitude": "interaction_amplitude",
+    "interaction_turnover": "interaction_turnover",
+    "interaction_amp_compression": "interaction_amp_compression",
 }
 
 # 反向映射：列名 → 因子名（自动推导，避免手工同步漂移）
@@ -362,6 +373,13 @@ FACTOR_CATEGORIES: dict[str, str] = {
     "range_compression": "volatility",  # 价格区间收敛，波动率维度
     "volume_decay_rate": "volume",  # 量能衰减，量能维度
     "turnover_decay_rate": "volume",  # 换手率衰减，量能维度
+    # v2.36: 交互因子族 —— 条件因子方向方案 B (design.md feat_interaction_factors)
+    # 复合维度名标识"跨维度乘法"本质，避免被单维度去重淘汰；
+    # 与 momentum/volatility/volume 等单维度因子在 identify_high_corr_groups
+    # 中视为不同经济维度（统计高相关 ≠ 经济冗余）。
+    "interaction_amplitude": "momentum_x_volatility",  # weakness × amplitude_z
+    "interaction_turnover": "momentum_x_volume",  # weakness × turnover_rate_z
+    "interaction_amp_compression": "momentum_x_volatility",  # weakness × amplitude_compression_z
 }
 
 # 维度列表（用于遍历，顺序无特殊含义）
@@ -374,6 +392,9 @@ CATEGORY_DIMENSIONS: list[str] = [
     "overnight",
     "capital_flow",
     "industry",
+    # v2.36: 交互因子复合维度
+    "momentum_x_volatility",
+    "momentum_x_volume",
 ]
 
 # ============================================================================
@@ -408,6 +429,10 @@ FACTOR_ROLES: dict[str, str] = {
             "range_compression",
             "volume_decay_rate",
             "turnover_decay_rate",
+            # v2.36: 交互因子族（IC≈+0.02 < 0.03 门槛, 走 confirmation 固定权重）
+            "interaction_amplitude",
+            "interaction_turnover",
+            "interaction_amp_compression",
         }
     },
     # --- 确认信号（趋势变化/量价背离/二阶导数企稳）---
@@ -424,6 +449,11 @@ FACTOR_ROLES: dict[str, str] = {
     "range_compression": "confirmation",
     "volume_decay_rate": "confirmation",
     "turnover_decay_rate": "confirmation",
+    # v2.36: 交互因子族（条件因子方向, design.md feat_interaction_factors §7 风险表）
+    # IC≈+0.02 低于综合因子 0.03 门槛, 走 confirmation 固定权重避免被 ICIR 加权淘汰.
+    "interaction_amplitude": "confirmation",
+    "interaction_turnover": "confirmation",
+    "interaction_amp_compression": "confirmation",
     # --- 过滤器（基本面恶化，批次8实现）---
     # 暂无 filter 角色因子；基本面过滤在 stock_selector 中直接实现
 }

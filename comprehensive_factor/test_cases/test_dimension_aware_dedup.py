@@ -275,12 +275,12 @@ class TestCategoriesComplete:
         assert cats_used == dims, f"Missing in DIMENSIONS: {cats_used - dims}, Extra in DIMENSIONS: {dims - cats_used}"
 
     def test_categories_count(self):
-        """FACTOR_CATEGORIES 有 34 个因子"""
-        assert len(FACTOR_CATEGORIES) == 39  # v2.35: P5 新增5个因子 34→39
+        """FACTOR_CATEGORIES 有 48 个因子 (v2.36 交互因子3个: 45→48)"""
+        assert len(FACTOR_CATEGORIES) == 48  # v2.36: 交互因子族 +3 (45→48)
 
     def test_dimensions_count(self):
-        """CATEGORY_DIMENSIONS 有 8 个维度"""
-        assert len(CATEGORY_DIMENSIONS) == 8
+        """CATEGORY_DIMENSIONS 有 10 个维度 (v2.36 复合维度2个: 8→10)"""
+        assert len(CATEGORY_DIMENSIONS) == 10
 
 
 class TestDimensionCoverage:
