@@ -54,9 +54,15 @@ Stage 2: IC计算
   44. ic_lower_shadow_ratio_1d.py (v2.35 P5 新增)
   45. ic_volume_shrink_rate_1d.py (v2.35 P5 新增)
   46. ic_price_volume_divergence_1d.py (v2.35 P5 新增)
+  47. ic_return_acceleration_5d_1d.py (v2.35 P5-补充 新增)
+  48. ic_downside_deceleration_1d.py (v2.35 P5-补充 新增)
+  49. ic_amplitude_compression_1d.py (v2.35 P5-补充 新增)
+  50. ic_range_compression_1d.py (v2.35 P5-补充 新增)
+  51. ic_volume_decay_rate_1d.py (v2.35 P5-补充 新增)
+  52. ic_turnover_decay_rate_1d.py (v2.35 P5-补充 新增)
 
 Stage 3: 分层回测
-  47. layered_backtest_rsi_1d.py
+  53. layered_backtest_rsi_1d.py
   43. layered_backtest_volume_ratio_1d.py
   44. layered_backtest_kdj_j_1d.py
   45. layered_backtest_bollinger_pb_1d.py
@@ -95,12 +101,18 @@ Stage 3: 分层回测
   78. layered_backtest_lower_shadow_ratio_1d.py (v2.35 P5 新增)
   79. layered_backtest_volume_shrink_rate_1d.py (v2.35 P5 新增)
   80. layered_backtest_price_volume_divergence_1d.py (v2.35 P5 新增)
+  81. layered_backtest_return_acceleration_5d_1d.py (v2.35 P5-补充 新增)
+  82. layered_backtest_downside_deceleration_1d.py (v2.35 P5-补充 新增)
+  83. layered_backtest_amplitude_compression_1d.py (v2.35 P5-补充 新增)
+  84. layered_backtest_range_compression_1d.py (v2.35 P5-补充 新增)
+  85. layered_backtest_volume_decay_rate_1d.py (v2.35 P5-补充 新增)
+  86. layered_backtest_turnover_decay_rate_1d.py (v2.35 P5-补充 新增)
 
 Stage 4: 综合因子
-  81. composite_equal_weight_1d.py
-  82. composite_icir_weight_1d.py
-  83. composite_ic_weight_1d.py
-  84. composite_rolling_icir_weight_1d.py
+  87. composite_equal_weight_1d.py
+  88. composite_icir_weight_1d.py
+  89. composite_ic_weight_1d.py
+  90. composite_rolling_icir_weight_1d.py
 
 Stage 5: 权重选择（新增 2026-06-03）
   80. weight_selector.py         → comprehensive_factor/result/weight_selection_result.json
@@ -299,7 +311,9 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     # Stage 4: 综合因子（auto_select 默认启用，无需传参；传 --auto_select 会触发 argparse unrecognized arguments 错误）
     # v2.35: P2 维度权重全方法支持——4种方法统一配置 --dimension_weight icir
     # 消除 rolling_icir 独享维度权重的不公平对比（design.md §2.2 决策点3）
-    ScriptTask("composite_equal", "comprehensive_factor/composite_equal_weight_1d.py", 4, ["--dimension_weight", "icir"]),
+    ScriptTask(
+        "composite_equal", "comprehensive_factor/composite_equal_weight_1d.py", 4, ["--dimension_weight", "icir"]
+    ),
     ScriptTask("composite_icir", "comprehensive_factor/composite_icir_weight_1d.py", 4, ["--dimension_weight", "icir"]),
     ScriptTask("composite_ic", "comprehensive_factor/composite_ic_weight_1d.py", 4, ["--dimension_weight", "icir"]),
     ScriptTask(
