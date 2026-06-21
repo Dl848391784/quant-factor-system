@@ -247,6 +247,10 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask("ic_range_compression", "factor_ic/ic_range_compression_1d.py", 2, []),
     ScriptTask("ic_volume_decay_rate", "factor_ic/ic_volume_decay_rate_1d.py", 2, []),
     ScriptTask("ic_turnover_decay_rate", "factor_ic/ic_turnover_decay_rate_1d.py", 2, []),
+    # v2.36: 交互因子族 IC（条件因子方向方案 B, design.md feat_interaction_factors）
+    ScriptTask("ic_interaction_amplitude", "factor_ic/ic_interaction_amplitude_1d.py", 2, []),
+    ScriptTask("ic_interaction_turnover", "factor_ic/ic_interaction_turnover_1d.py", 2, []),
+    ScriptTask("ic_interaction_amp_compression", "factor_ic/ic_interaction_amp_compression_1d.py", 2, []),
     # Stage 3: 分层回测
     ScriptTask("backtest_rsi", "backtest/layered_backtest_rsi_1d.py", 3, []),
     ScriptTask("backtest_volume_ratio", "backtest/layered_backtest_volume_ratio_1d.py", 3, []),
@@ -308,6 +312,25 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask("backtest_range_compression", "backtest/layered_backtest_range_compression_1d.py", 3, []),
     ScriptTask("backtest_volume_decay_rate", "backtest/layered_backtest_volume_decay_rate_1d.py", 3, []),
     ScriptTask("backtest_turnover_decay_rate", "backtest/layered_backtest_turnover_decay_rate_1d.py", 3, []),
+    # v2.36: 交互因子族 分层回测（条件因子方向方案 B）
+    ScriptTask(
+        "backtest_interaction_amplitude",
+        "backtest/layered_backtest_interaction_amplitude_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_turnover",
+        "backtest/layered_backtest_interaction_turnover_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_amp_compression",
+        "backtest/layered_backtest_interaction_amp_compression_1d.py",
+        3,
+        [],
+    ),
     # Stage 4: 综合因子（auto_select 默认启用，无需传参；传 --auto_select 会触发 argparse unrecognized arguments 错误）
     # v2.35: P2 维度权重全方法支持——4种方法统一配置 --dimension_weight icir
     # 消除 rolling_icir 独享维度权重的不公平对比（design.md §2.2 决策点3）
