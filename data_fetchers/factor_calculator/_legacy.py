@@ -237,6 +237,7 @@ from .intraday import (  # noqa: F401
 # ============================================================================
 from .momentum import (  # noqa: F401
     calculate_amplitude,
+    calculate_downside_deceleration,  # v2.35: P5-补充 下跌减速
     calculate_lower_shadow_ratio,  # v2.35: P5 下影线比
     calculate_ma5_slope,  # v2.35: P5 MA5斜率
     calculate_momentum_strength,
@@ -245,10 +246,10 @@ from .momentum import (  # noqa: F401
     calculate_price_position,
     calculate_return_3d,
     calculate_return_5d,
+    calculate_return_acceleration_5d,  # v2.35: P5-补充 收益率加速度
     calculate_rsi_slope_3d,  # v2.35: P5 RSI斜率
 )
 
-# ============================================================================
 # 子模块 tail re-import（B4：尾盘 5 分钟 K 线族因子从 factor_generator.py 迁出）
 # ============================================================================
 from .tail import (  # noqa: F401
@@ -259,10 +260,14 @@ from .tail import (  # noqa: F401
 # 子模块 volume_price re-import（PR-3：量价合成族 4 个因子已搬到 .volume_price）
 # ============================================================================
 from .volume_price import (  # noqa: F401
+    calculate_amplitude_compression,  # v2.35: P5-补充 振幅收敛
     calculate_ma5_deviation,
     calculate_near_high_ratio_5,
     calculate_positive_day_ratio_5,
     calculate_price_volume_divergence,  # v2.35: P5 价跌量缩背离
+    calculate_range_compression,  # v2.35: P5-补充 价格区间收敛
+    calculate_turnover_decay_rate,  # v2.35: P5-补充 换手率衰减
+    calculate_volume_decay_rate,  # v2.35: P5-补充 量能衰减
     calculate_volume_price_strength,
     calculate_volume_shrink_rate,  # v2.35: P5 缩量率
 )
@@ -309,6 +314,13 @@ __all__ = [
     "calculate_lower_shadow_ratio",  # v2.35: P5 下影线比
     "calculate_volume_shrink_rate",  # v2.35: P5 缩量率
     "calculate_price_volume_divergence",  # v2.35: P5 价跌量缩背离
+    # v2.35: P5-补充——二阶导数企稳信号因子（3维度6因子）
+    "calculate_return_acceleration_5d",  # v2.35: P5-补充 收益率加速度
+    "calculate_downside_deceleration",  # v2.35: P5-补充 下跌减速
+    "calculate_amplitude_compression",  # v2.35: P5-补充 振幅收敛
+    "calculate_range_compression",  # v2.35: P5-补充 价格区间收敛
+    "calculate_volume_decay_rate",  # v2.35: P5-补充 量能衰减
+    "calculate_turnover_decay_rate",  # v2.35: P5-补充 换手率衰减
     # 公共常量别名（向下兼容 ic_kdj_j 等脚本的导入）
     "DEFAULT_RSI_PERIOD",
     "DEFAULT_BOLLINGER_N",

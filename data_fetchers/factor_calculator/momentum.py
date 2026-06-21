@@ -684,8 +684,19 @@ def calculate_ma5_slope(
     df = factor_df.copy()
     df = df.sort_values([_COL_ASSET, _COL_DATE])
 
-    ma5 = df.groupby(_COL_ASSET)[_COL_CLOSE].rolling(_MA5_WINDOW, min_periods=_MA5_WINDOW).mean().reset_index(level=0, drop=True)
-    ma5_prev = df.groupby(_COL_ASSET)[_COL_CLOSE].rolling(_MA5_WINDOW, min_periods=_MA5_WINDOW).mean().shift(_MA5_SLOPE_WINDOW).reset_index(level=0, drop=True)
+    ma5 = (
+        df.groupby(_COL_ASSET)[_COL_CLOSE]
+        .rolling(_MA5_WINDOW, min_periods=_MA5_WINDOW)
+        .mean()
+        .reset_index(level=0, drop=True)
+    )
+    ma5_prev = (
+        df.groupby(_COL_ASSET)[_COL_CLOSE]
+        .rolling(_MA5_WINDOW, min_periods=_MA5_WINDOW)
+        .mean()
+        .shift(_MA5_SLOPE_WINDOW)
+        .reset_index(level=0, drop=True)
+    )
 
     ma5_prev_safe = ma5_prev.replace(0, np.nan)
     df[_COL_MA5_SLOPE] = (ma5 - ma5_prev_safe) / ma5_prev_safe
@@ -753,3 +764,96 @@ def calculate_lower_shadow_ratio(
 
 
 calculate_lower_shadow_ratio.required_cols = ["open", "close", "high", "low"]  # type: ignore[attr-defined]
+
+
+# ============================================================================
+# v2.35: P5-补充——价格加速度因子（二阶导数：企稳信号）
+# 公理4: 需要"是否企稳"信号 = 下跌速度在放缓 = 二阶导数为正
+# ============================================================================
+
+_COL_RETURN_ACCEL_5D = "return_acceleration_5d"
+_COL_DOWNSIDE_DECEL = "downside_deceleration"
+_RETURN_ACCEL_LAG = 5
+
+
+def calculate_return_acceleration_5d(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """计算 5日收益率加速度（二阶导数：跌幅收窄信号）
+
+    公式: return_acceleration_5d = return_5d(t) - return_5d(t-5)
+    物理含义: 5日收益率的变化量（加速度）
+    企稳信号: 正值 = 跌幅收窄/涨幅扩大
+    预期IC方向: 正向（跌幅收窄 → 后续收益高）
+
+    Args:
+        factor_df: 包含 date, asset, return_5d 列的 DataFrame
+        logger_arg: 日志器
+
+    Returns:
+        添加了 return_acceleration_5d 列的 DataFrame
+    """
+    log = logger_arg or logging.getLogger(__name__)
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE]).copy()
+
+    df[_COL_RETURN_ACCEL_5D] = df.groupby(_COL_ASSET)[_COL_RETURN_5D].transform(
+        lambda x: x - x.shift(_RETURN_ACCEL_LAG)
+    )
+
+    valid_count = int(df[_COL_RETURN_ACCEL_5D].notna().sum())
+    log.info(
+        "  return_acceleration_5d: valid=%d (%.2f%%), NaN=%d",
+        valid_count,
+        valid_count / len(df) * 100 if len(df) > 0 else 0,
+        len(df) - valid_count,
+    )
+
+    return df
+
+
+calculate_return_acceleration_5d.required_cols = ["date", "asset", "return_5d"]  # type: ignore[attr-defined]
+
+
+def calculate_downside_deceleration(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """计算 下跌减速因子（仅对前期下跌的股票计算跌幅收窄幅度）
+
+    公式: downside_deceleration = max(0, return_5d(t) - return_5d(t-5))
+           仅当 return_5d(t-5) < 0（前期下跌）时计算，否则为 0
+    物理含义: 下跌股票的跌幅收窄幅度
+    企稳信号: 正值 = 之前在跌，现在跌幅收窄了
+    预期IC方向: 正向
+
+    Args:
+        factor_df: 包含 date, asset, return_5d 列的 DataFrame
+        logger_arg: 日志器
+
+    Returns:
+        添加了 downside_deceleration 列的 DataFrame
+    """
+    log = logger_arg or logging.getLogger(__name__)
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE]).copy()
+
+    prev_ret5d = df.groupby(_COL_ASSET)[_COL_RETURN_5D].shift(_RETURN_ACCEL_LAG)
+    accel = df[_COL_RETURN_5D] - prev_ret5d
+    # 仅对前期下跌(prev_ret5d < 0)的股票计算，取非负值
+    df[_COL_DOWNSIDE_DECEL] = np.where(prev_ret5d < 0, np.maximum(0, accel), 0)
+
+    valid_count = int(df[_COL_DOWNSIDE_DECEL].notna().sum())
+    positive_count = int((df[_COL_DOWNSIDE_DECEL] > 0).sum())
+    log.info(
+        "  downside_deceleration: valid=%d (%.2f%%), 跌幅收窄(>0)=%d",
+        valid_count,
+        valid_count / len(df) * 100 if len(df) > 0 else 0,
+        positive_count,
+    )
+
+    return df
+
+
+calculate_downside_deceleration.required_cols = ["date", "asset", "return_5d"]  # type: ignore[attr-defined]

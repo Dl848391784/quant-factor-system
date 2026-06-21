@@ -24,8 +24,10 @@ try:
     from .common.logger_config import setup_logger
     from .factor_calculator import (
         calculate_amplitude,
+        calculate_amplitude_compression,  # v2.35: P5-补充
         calculate_amplitude_delta,
         calculate_bollinger_pb,
+        calculate_downside_deceleration,  # v2.35: P5-补充
         calculate_industry_amplitude_trend,
         calculate_industry_momentum_5d,
         calculate_industry_turnover_trend,
@@ -41,14 +43,18 @@ try:
         calculate_positive_day_ratio_5,
         calculate_price_position,
         calculate_price_volume_divergence,  # v2.35: P5
+        calculate_range_compression,  # v2.35: P5-补充
         calculate_return_3d,
         calculate_return_5d,
+        calculate_return_acceleration_5d,  # v2.35: P5-补充
         calculate_rsi_slope_3d,  # v2.35: P5
         calculate_tail_factors,
         calculate_tail_price_position_delta,
         calculate_tail_volume_shrink_delta,
+        calculate_turnover_decay_rate,  # v2.35: P5-补充
         calculate_turnover_surge,
         calculate_turnover_surge_delta,
+        calculate_volume_decay_rate,  # v2.35: P5-补充
         calculate_volume_price_strength,
         calculate_volume_shrink_rate,  # v2.35: P5
     )
@@ -62,8 +68,10 @@ except ImportError:
     from data_fetchers.common.logger_config import setup_logger
     from data_fetchers.factor_calculator import (
         calculate_amplitude,
+        calculate_amplitude_compression,  # v2.35: P5-补充
         calculate_amplitude_delta,
         calculate_bollinger_pb,
+        calculate_downside_deceleration,  # v2.35: P5-补充
         calculate_industry_amplitude_trend,
         calculate_industry_momentum_5d,
         calculate_industry_turnover_trend,
@@ -79,14 +87,18 @@ except ImportError:
         calculate_positive_day_ratio_5,
         calculate_price_position,
         calculate_price_volume_divergence,  # v2.35: P5
+        calculate_range_compression,  # v2.35: P5-补充
         calculate_return_3d,
         calculate_return_5d,
+        calculate_return_acceleration_5d,  # v2.35: P5-补充
         calculate_rsi_slope_3d,  # v2.35: P5
         calculate_tail_factors,
         calculate_tail_price_position_delta,
         calculate_tail_volume_shrink_delta,
+        calculate_turnover_decay_rate,  # v2.35: P5-补充
         calculate_turnover_surge,
         calculate_turnover_surge_delta,
+        calculate_volume_decay_rate,  # v2.35: P5-补充
         calculate_volume_price_strength,
         calculate_volume_shrink_rate,  # v2.35: P5
     )
@@ -144,6 +156,13 @@ _EXTENDED_FACTOR_COLS: tuple[str, ...] = (
     "lower_shadow_ratio",
     "volume_shrink_rate",
     "price_volume_divergence",
+    # v2.35: P5-补充——二阶导数企稳信号因子（3维度6因子）
+    "return_acceleration_5d",
+    "downside_deceleration",
+    "amplitude_compression",
+    "range_compression",
+    "volume_decay_rate",
+    "turnover_decay_rate",
 )
 
 # 收益数据列名
@@ -396,6 +415,43 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
         "step_label": None,
         "factor_func": calculate_price_volume_divergence,
         "output_cols": ("price_volume_divergence",),
+        "emit_valid_log": False,
+    },
+    # v2.35: P5-补充——二阶导数企稳信号因子（3维度6因子）
+    {
+        "step_label": "Step 13: 计算二阶导数企稳信号因子...",
+        "factor_func": calculate_return_acceleration_5d,
+        "output_cols": ("return_acceleration_5d",),
+        "emit_valid_log": True,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_downside_deceleration,
+        "output_cols": ("downside_deceleration",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_amplitude_compression,
+        "output_cols": ("amplitude_compression",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_range_compression,
+        "output_cols": ("range_compression",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_volume_decay_rate,
+        "output_cols": ("volume_decay_rate",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_turnover_decay_rate,
+        "output_cols": ("turnover_decay_rate",),
         "emit_valid_log": False,
     },
 )

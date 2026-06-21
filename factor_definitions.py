@@ -154,6 +154,13 @@ FACTOR_DEFINITIONS: dict[str, str] = {
     "lower_shadow_ratio": "下影线比: 下影线长度/全日振幅, 值大=低位有承接",
     "volume_shrink_rate": "缩量率: 当日成交量/5日均量, <1=缩量(卖盘衰竭)",
     "price_volume_divergence": "价跌量缩背离: -price_ret_5d * max(0, 1-vol_ratio), 正值=止跌信号",
+    # v2.35: P5-补充——二阶导数企稳信号因子
+    "return_acceleration_5d": "5日收益率加速度: return_5d(t) - return_5d(t-5), 正值=跌幅收窄",
+    "downside_deceleration": "下跌减速: max(0, return_5d(t) - return_5d(t-5)) 当前期下跌, 正值=企稳",
+    "amplitude_compression": "振幅收敛: 5日均振幅/10日均振幅, <1=波动收敛",
+    "range_compression": "价格区间收敛: 5日价格区间/10日价格区间, <1=波动收敛",
+    "volume_decay_rate": "量能衰减: 5日均量/10日均量, <1=量能衰减",
+    "turnover_decay_rate": "换手率衰减: 当日换手率/5日平均换手率, <1=换手率下降",
 }
 
 # ============================================================================
@@ -275,6 +282,13 @@ FACTOR_NAME_TO_COL_MAP: dict[str, str] = {
     "lower_shadow_ratio": "lower_shadow_ratio",
     "volume_shrink_rate": "volume_shrink_rate",
     "price_volume_divergence": "price_volume_divergence",
+    # v2.35: P5-补充
+    "return_acceleration_5d": "return_acceleration_5d",
+    "downside_deceleration": "downside_deceleration",
+    "amplitude_compression": "amplitude_compression",
+    "range_compression": "range_compression",
+    "volume_decay_rate": "volume_decay_rate",
+    "turnover_decay_rate": "turnover_decay_rate",
 }
 
 # 反向映射：列名 → 因子名（自动推导，避免手工同步漂移）
@@ -341,6 +355,13 @@ FACTOR_CATEGORIES: dict[str, str] = {
     "lower_shadow_ratio": "price_position",  # K线形态，价格位置维度
     "volume_shrink_rate": "volume",  # 缩量信号，量能维度
     "price_volume_divergence": "volume",  # 量价背离，量能维度
+    # v2.35: P5-补充——二阶导数企稳信号因子维度归属
+    "return_acceleration_5d": "momentum",  # 收益率加速度，价格动量维度
+    "downside_deceleration": "momentum",  # 下跌减速，价格动量维度
+    "amplitude_compression": "volatility",  # 振幅收敛，波动率维度
+    "range_compression": "volatility",  # 价格区间收敛，波动率维度
+    "volume_decay_rate": "volume",  # 量能衰减，量能维度
+    "turnover_decay_rate": "volume",  # 换手率衰减，量能维度
 }
 
 # 维度列表（用于遍历，顺序无特殊含义）
@@ -380,15 +401,29 @@ FACTOR_ROLES: dict[str, str] = {
             "lower_shadow_ratio",
             "volume_shrink_rate",
             "price_volume_divergence",
+            # v2.35: P5-补充6个二阶导数因子
+            "return_acceleration_5d",
+            "downside_deceleration",
+            "amplitude_compression",
+            "range_compression",
+            "volume_decay_rate",
+            "turnover_decay_rate",
         }
     },
-    # --- 确认信号（趋势变化/量价背离）---
-    # v2.35: P5 新增5个因子，IC可能低于0.03门槛，用固定权重避免ICIR加权给0权重
+    # --- 确认信号（趋势变化/量价背离/二阶导数企稳）---
+    # v2.35: P5 新增5个 + P5-补充6个因子，IC可能低于0.03门槛，用固定权重避免ICIR加权给0权重
     "rsi_slope_3d": "confirmation",
     "ma5_slope": "confirmation",
     "lower_shadow_ratio": "confirmation",
     "volume_shrink_rate": "confirmation",
     "price_volume_divergence": "confirmation",
+    # v2.35: P5-补充——二阶导数企稳信号因子
+    "return_acceleration_5d": "confirmation",
+    "downside_deceleration": "confirmation",
+    "amplitude_compression": "confirmation",
+    "range_compression": "confirmation",
+    "volume_decay_rate": "confirmation",
+    "turnover_decay_rate": "confirmation",
     # --- 过滤器（基本面恶化，批次8实现）---
     # 暂无 filter 角色因子；基本面过滤在 stock_selector 中直接实现
 }

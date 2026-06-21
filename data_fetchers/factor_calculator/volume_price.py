@@ -321,7 +321,12 @@ def calculate_volume_shrink_rate(
     df = factor_df.copy()
     df = df.sort_values([_COL_ASSET, _COL_DATE])
 
-    vol_ma5 = df.groupby(_COL_ASSET)[_COL_VOLUME].rolling(_VOL_WINDOW, min_periods=_VOL_WINDOW).mean().reset_index(level=0, drop=True)
+    vol_ma5 = (
+        df.groupby(_COL_ASSET)[_COL_VOLUME]
+        .rolling(_VOL_WINDOW, min_periods=_VOL_WINDOW)
+        .mean()
+        .reset_index(level=0, drop=True)
+    )
     vol_ma5_safe = vol_ma5.replace(0, np.nan)
     df[_COL_VOLUME_SHRINK_RATE] = df[_COL_VOLUME] / vol_ma5_safe
 
@@ -378,7 +383,12 @@ def calculate_price_volume_divergence(
     price_ret_5d = df[_COL_CLOSE] / close_prev_safe - 1.0
 
     # 量比
-    vol_ma5 = df.groupby(_COL_ASSET)[_COL_VOLUME].rolling(_VOL_WINDOW, min_periods=_VOL_WINDOW).mean().reset_index(level=0, drop=True)
+    vol_ma5 = (
+        df.groupby(_COL_ASSET)[_COL_VOLUME]
+        .rolling(_VOL_WINDOW, min_periods=_VOL_WINDOW)
+        .mean()
+        .reset_index(level=0, drop=True)
+    )
     vol_ma5_safe = vol_ma5.replace(0, np.nan)
     vol_ratio = df[_COL_VOLUME] / vol_ma5_safe
 
@@ -399,3 +409,181 @@ def calculate_price_volume_divergence(
 
 
 calculate_price_volume_divergence.required_cols = ["date", "asset", "close", "volume"]  # type: ignore[attr-defined]
+
+
+# ============================================================================
+# v2.35: P5-补充——波动率收敛 + 量能衰竭因子（企稳信号二阶维度）
+# ============================================================================
+
+_COL_AMPLITUDE = "amplitude"
+_COL_HIGH = "high"
+_COL_LOW = "low"
+_COL_VOLUME = "volume"
+_COL_TURNOVER = "turnover_rate"
+_COL_AMP_COMPRESSION = "amplitude_compression"
+_COL_RANGE_COMPRESSION = "range_compression"
+_COL_VOLUME_DECAY = "volume_decay_rate"
+_COL_TURNOVER_DECAY = "turnover_decay_rate"
+
+_MA5_WINDOW = 5
+_MA10_WINDOW = 10
+
+
+def calculate_amplitude_compression(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """计算振幅收敛因子（5日均振幅 / 10日均振幅）
+
+    公式: amplitude_compression = mean(amplitude, 5d) / mean(amplitude, 10d)
+    物理含义: 近期波动幅度相对历史的变化
+    企稳信号: <1 = 波动收敛（振幅在缩小）
+    预期IC方向: 反向（收敛→企稳，但收敛本身值小）
+
+    Args:
+        factor_df: 包含 date, asset, amplitude 列的 DataFrame
+    """
+    log = logger_arg or logging.getLogger(__name__)
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE]).copy()
+
+    amp_ma5 = (
+        df.groupby(_COL_ASSET)[_COL_AMPLITUDE].rolling(_MA5_WINDOW, min_periods=3).mean().reset_index(0, drop=True)
+    )
+    amp_ma10 = (
+        df.groupby(_COL_ASSET)[_COL_AMPLITUDE].rolling(_MA10_WINDOW, min_periods=5).mean().reset_index(0, drop=True)
+    )
+    df[_COL_AMP_COMPRESSION] = amp_ma5 / amp_ma10.replace(0, np.nan)
+
+    valid_count = int(df[_COL_AMP_COMPRESSION].notna().sum())
+    log.info(
+        "  有效 %s: %d (%.2f%%)，NaN %d 行",
+        _COL_AMP_COMPRESSION,
+        valid_count,
+        valid_count / len(df) * 100 if len(df) > 0 else 0,
+        len(df) - valid_count,
+    )
+
+    return df
+
+
+calculate_amplitude_compression.required_cols = ["date", "asset", "amplitude"]  # type: ignore[attr-defined]
+
+
+def calculate_range_compression(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """计算价格区间收敛因子（5日价格区间 / 10日价格区间）
+
+    公式: range_compression = (rolling_high_5d - rolling_low_5d) / (rolling_high_10d - rolling_low_10d)
+    物理含义: 近期价格波动范围相对历史的变化
+    企稳信号: <1 = 波动范围收敛
+    预期IC方向: 反向（收敛→企稳，但收敛本身值小）
+
+    Args:
+        factor_df: 包含 date, asset, high, low 列的 DataFrame
+    """
+    log = logger_arg or logging.getLogger(__name__)
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE]).copy()
+
+    roll_high_5 = df.groupby(_COL_ASSET)[_COL_HIGH].rolling(_MA5_WINDOW, min_periods=3).max().reset_index(0, drop=True)
+    roll_low_5 = df.groupby(_COL_ASSET)[_COL_LOW].rolling(_MA5_WINDOW, min_periods=3).min().reset_index(0, drop=True)
+    roll_high_10 = (
+        df.groupby(_COL_ASSET)[_COL_HIGH].rolling(_MA10_WINDOW, min_periods=5).max().reset_index(0, drop=True)
+    )
+    roll_low_10 = df.groupby(_COL_ASSET)[_COL_LOW].rolling(_MA10_WINDOW, min_periods=5).min().reset_index(0, drop=True)
+
+    range_5 = roll_high_5 - roll_low_5
+    range_10 = roll_high_10 - roll_low_10
+    df[_COL_RANGE_COMPRESSION] = range_5 / range_10.replace(0, np.nan)
+
+    valid_count = int(df[_COL_RANGE_COMPRESSION].notna().sum())
+    log.info(
+        "  有效 %s: %d (%.2f%%)，NaN %d 行",
+        _COL_RANGE_COMPRESSION,
+        valid_count,
+        valid_count / len(df) * 100 if len(df) > 0 else 0,
+        len(df) - valid_count,
+    )
+
+    return df
+
+
+calculate_range_compression.required_cols = ["date", "asset", "high", "low"]  # type: ignore[attr-defined]
+
+
+def calculate_volume_decay_rate(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """计算量能衰减因子（5日均量 / 10日均量）
+
+    公式: volume_decay_rate = volume_ma5 / volume_ma10
+    物理含义: 近期成交量相对历史的变化趋势
+    企稳信号: <1 = 量能衰减（卖盘参与度下降）
+    预期IC方向: 反向（衰减→企稳，但衰减本身值小）
+
+    Args:
+        factor_df: 包含 date, asset, volume 列的 DataFrame
+    """
+    log = logger_arg or logging.getLogger(__name__)
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE]).copy()
+
+    vol_ma5 = df.groupby(_COL_ASSET)[_COL_VOLUME].rolling(_MA5_WINDOW, min_periods=3).mean().reset_index(0, drop=True)
+    vol_ma10 = df.groupby(_COL_ASSET)[_COL_VOLUME].rolling(_MA10_WINDOW, min_periods=5).mean().reset_index(0, drop=True)
+    df[_COL_VOLUME_DECAY] = vol_ma5 / vol_ma10.replace(0, np.nan)
+
+    valid_count = int(df[_COL_VOLUME_DECAY].notna().sum())
+    log.info(
+        "  有效 %s: %d (%.2f%%)，NaN %d 行",
+        _COL_VOLUME_DECAY,
+        valid_count,
+        valid_count / len(df) * 100 if len(df) > 0 else 0,
+        len(df) - valid_count,
+    )
+
+    return df
+
+
+calculate_volume_decay_rate.required_cols = ["date", "asset", "volume"]  # type: ignore[attr-defined]
+
+
+def calculate_turnover_decay_rate(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """计算换手率衰减因子（当日换手率 / 5日平均换手率）
+
+    公式: turnover_decay_rate = turnover_rate / mean(turnover_rate, 5d)
+    物理含义: 当日换手率相对近期均值的比值
+    企稳信号: <1 = 换手率下降（卖盘参与度下降）
+    预期IC方向: 反向（衰减→企稳，但衰减本身值小）
+
+    Args:
+        factor_df: 包含 date, asset, turnover_rate 列的 DataFrame
+    """
+    log = logger_arg or logging.getLogger(__name__)
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE]).copy()
+
+    turnover_ma5 = (
+        df.groupby(_COL_ASSET)[_COL_TURNOVER].rolling(_MA5_WINDOW, min_periods=3).mean().reset_index(0, drop=True)
+    )
+    df[_COL_TURNOVER_DECAY] = df[_COL_TURNOVER] / turnover_ma5.replace(0, np.nan)
+
+    valid_count = int(df[_COL_TURNOVER_DECAY].notna().sum())
+    log.info(
+        "  有效 %s: %d (%.2f%%)，NaN %d 行",
+        _COL_TURNOVER_DECAY,
+        valid_count,
+        valid_count / len(df) * 100 if len(df) > 0 else 0,
+        len(df) - valid_count,
+    )
+
+    return df
+
+
+calculate_turnover_decay_rate.required_cols = ["date", "asset", "turnover_rate"]  # type: ignore[attr-defined]
