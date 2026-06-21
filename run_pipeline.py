@@ -49,9 +49,14 @@ Stage 2: IC计算
   39. ic_tail_volume_shrink_delta_1d.py (新增 2026-06-11)
   40. ic_turnover_surge_delta_1d.py (补注册 2026-06-13)
   41. ic_amplitude_delta_1d.py (补注册 2026-06-13)
+  42. ic_rsi_slope_3d_1d.py (v2.35 P5 新增)
+  43. ic_ma5_slope_1d.py (v2.35 P5 新增)
+  44. ic_lower_shadow_ratio_1d.py (v2.35 P5 新增)
+  45. ic_volume_shrink_rate_1d.py (v2.35 P5 新增)
+  46. ic_price_volume_divergence_1d.py (v2.35 P5 新增)
 
 Stage 3: 分层回测
-  42. layered_backtest_rsi_1d.py
+  47. layered_backtest_rsi_1d.py
   43. layered_backtest_volume_ratio_1d.py
   44. layered_backtest_kdj_j_1d.py
   45. layered_backtest_bollinger_pb_1d.py
@@ -85,12 +90,17 @@ Stage 3: 分层回测
   73. layered_backtest_tail_volume_shrink_delta_1d.py (新增 2026-06-11)
   74. layered_backtest_turnover_surge_delta_1d.py (补注册 2026-06-13)
   75. layered_backtest_amplitude_delta_1d.py (补注册 2026-06-13)
+  76. layered_backtest_rsi_slope_3d_1d.py (v2.35 P5 新增)
+  77. layered_backtest_ma5_slope_1d.py (v2.35 P5 新增)
+  78. layered_backtest_lower_shadow_ratio_1d.py (v2.35 P5 新增)
+  79. layered_backtest_volume_shrink_rate_1d.py (v2.35 P5 新增)
+  80. layered_backtest_price_volume_divergence_1d.py (v2.35 P5 新增)
 
 Stage 4: 综合因子
-  76. composite_equal_weight_1d.py
-  77. composite_icir_weight_1d.py
-  78. composite_ic_weight_1d.py
-  79. composite_rolling_icir_weight_1d.py
+  81. composite_equal_weight_1d.py
+  82. composite_icir_weight_1d.py
+  83. composite_ic_weight_1d.py
+  84. composite_rolling_icir_weight_1d.py
 
 Stage 5: 权重选择（新增 2026-06-03）
   80. weight_selector.py         → comprehensive_factor/result/weight_selection_result.json
