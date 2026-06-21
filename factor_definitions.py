@@ -355,6 +355,51 @@ CATEGORY_DIMENSIONS: list[str] = [
     "industry",
 ]
 
+# ============================================================================
+# v2.35: P6 角色化权重体系——因子角色定义
+# 遵循 designs/strategy_systemic_overhaul.md §2.6 决策点1/4
+#
+# 三角色体系（公理2: 反转需确认信号，非纯反转赌注）:
+#   primary      → 主信号: 反转触发, ICIR+维度权重加权
+#   confirmation → 确认信号: 趋势变化/量价背离确认, 固定权重各5%
+#   filter       → 过滤器: 基本面恶化硬过滤（批次8在stock_selector执行）
+#
+# 角色是因子固有属性（类似维度分类），与 FACTOR_CATEGORIES 同级。
+# 默认所有因子为 primary；P5 新增5个趋势变化/量价背离因子为 confirmation。
+# ============================================================================
+FACTOR_ROLES: dict[str, str] = {
+    # --- 主信号（反转触发）---
+    # 所有现有因子默认为 primary（34个）
+    **{
+        name: "primary"
+        for name in FACTOR_CATEGORIES
+        if name
+        not in {
+            "rsi_slope_3d",
+            "ma5_slope",
+            "lower_shadow_ratio",
+            "volume_shrink_rate",
+            "price_volume_divergence",
+        }
+    },
+    # --- 确认信号（趋势变化/量价背离）---
+    # v2.35: P5 新增5个因子，IC可能低于0.03门槛，用固定权重避免ICIR加权给0权重
+    "rsi_slope_3d": "confirmation",
+    "ma5_slope": "confirmation",
+    "lower_shadow_ratio": "confirmation",
+    "volume_shrink_rate": "confirmation",
+    "price_volume_divergence": "confirmation",
+    # --- 过滤器（基本面恶化，批次8实现）---
+    # 暂无 filter 角色因子；基本面过滤在 stock_selector 中直接实现
+}
+
+# 角色列表（用于遍历）
+FACTOR_ROLE_TYPES: list[str] = ["primary", "confirmation", "filter"]
+
+# 确认信号固定权重（design.md §2.6 决策点2: 方案B 主信号75%+确认信号25%）
+CONFIRMATION_WEIGHT_PER_FACTOR = 0.05  # 每个确认因子5%（5个共25%）
+PRIMARY_WEIGHT_TOTAL = 0.75  # 主信号共75%
+
 
 def get_factor_col(factor_name: str, default: str | None = None) -> str:
     """因子名 → 数据列名

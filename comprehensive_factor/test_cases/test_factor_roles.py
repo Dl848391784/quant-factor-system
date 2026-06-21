@@ -1,0 +1,112 @@
+"""P6-Step1: 角色化权重体系测试
+
+验证 design.md P6（批次7）：
+1. FACTOR_ROLES 定义正确（三角色: primary/confirmation/filter）
+2. factor_selector 筛选结果包含 role 字段
+3. 确认信号因子 IC 门槛降至 0.01（vs 主信号 0.03）
+
+遵循 designs/strategy_systemic_overhaul.md §2.6。
+"""
+
+import pytest
+from comprehensive_factor.common.factor_selector import DEFAULT_THRESHOLDS, validate_factor
+from factor_definitions import (
+    CONFIRMATION_WEIGHT_PER_FACTOR,
+    FACTOR_CATEGORIES,
+    FACTOR_ROLE_TYPES,
+    FACTOR_ROLES,
+    PRIMARY_WEIGHT_TOTAL,
+)
+
+
+class TestFactorRolesDefinition:
+    """FACTOR_ROLES 定义完整性"""
+
+    def test_all_factors_have_role(self):
+        """每个因子都有角色标记"""
+        for f in FACTOR_CATEGORIES:
+            assert f in FACTOR_ROLES, f"{f} 缺少角色标记"
+
+    def test_role_values_valid(self):
+        """角色值只允许 primary/confirmation/filter"""
+        for f, role in FACTOR_ROLES.items():
+            assert role in FACTOR_ROLE_TYPES, f"{f} 角色={role} 不在 {FACTOR_ROLE_TYPES}"
+
+    def test_confirmation_factors_are_p5_new(self):
+        """确认信号因子=P5新增的5个"""
+        confirmation = [f for f, r in FACTOR_ROLES.items() if r == "confirmation"]
+        expected = {
+            "rsi_slope_3d",
+            "ma5_slope",
+            "lower_shadow_ratio",
+            "volume_shrink_rate",
+            "price_volume_divergence",
+        }
+        assert set(confirmation) == expected
+
+    def test_primary_count(self):
+        """主信号因子=34个"""
+        primary = [f for f, r in FACTOR_ROLES.items() if r == "primary"]
+        assert len(primary) == 34
+
+    def test_no_filter_factors_yet(self):
+        """暂无过滤器角色因子（批次8在stock_selector中实现）"""
+        filters = [f for f, r in FACTOR_ROLES.items() if r == "filter"]
+        assert len(filters) == 0
+
+    def test_weight_constants(self):
+        """权重常量正确（design.md §2.6 决策点2: 方案B）"""
+        assert CONFIRMATION_WEIGHT_PER_FACTOR == 0.05
+        assert PRIMARY_WEIGHT_TOTAL == 0.75
+
+
+class TestValidateFactorRoleAware:
+    """validate_factor 角色相关 IC 门槛"""
+
+    def _make_factor_data(
+        self,
+        ic_mean: float = -0.015,
+        icir: float = 0.3,
+        layer_1_annual: float = 0.05,
+        layer_1_sharpe: float = 1.0,
+        valid_days: int = 100,
+    ) -> dict:
+        """构造因子数据（IC=0.015 在确认信号门槛0.01之上但主信号门槛0.03之下）"""
+        return {
+            "ic_metrics": {"ic_mean": ic_mean, "icir": icir},
+            "backtest": {
+                "layer_1_annual": layer_1_annual,
+                "layer_1_sharpe": layer_1_sharpe,
+                "long_return_annual": layer_1_annual,
+                "long_short_sharpe": layer_1_sharpe,
+                "monotonicity_corr": 0.6,
+            },
+            "sample_stats": {"valid_days": valid_days},
+        }
+
+    def test_confirmation_factor_passes_lower_ic_threshold(self):
+        """确认信号因子 |IC|=0.015 > 0.01 → 通过（主信号门槛0.03会失败）"""
+        factor_data = self._make_factor_data(ic_mean=-0.015)
+        is_valid, reasons, _ = validate_factor("rsi_slope_3d", factor_data)
+        assert is_valid, f"确认信号因子应通过低IC门槛, 失败原因: {reasons}"
+
+    def test_primary_factor_fails_at_ic_015(self):
+        """主信号因子 |IC|=0.015 < 0.03 → 失败（除非回测强劲豁免）"""
+        factor_data = self._make_factor_data(ic_mean=-0.015)
+        # 用一个 primary 角色的因子名
+        is_valid, reasons, _ = validate_factor("rsi", factor_data)
+        # |IC|=0.015 < 0.03, 且回测不强（sharpe=1.0<1.5），不豁免
+        assert not is_valid, "主信号因子 |IC|=0.015<0.03 且回测不强，应失败"
+        assert any("|ic_mean|" in r for r in reasons)
+
+    def test_primary_factor_passes_at_ic_004(self):
+        """主信号因子 |IC|=0.04 > 0.03 → 通过"""
+        factor_data = self._make_factor_data(ic_mean=-0.04)
+        is_valid, reasons, _ = validate_factor("rsi", factor_data)
+        assert is_valid, f"主信号因子 |IC|=0.04>0.03 应通过, 失败原因: {reasons}"
+
+    def test_confirmation_factor_fails_at_ic_0005(self):
+        """确认信号因子 |IC|=0.005 < 0.01 → 失败"""
+        factor_data = self._make_factor_data(ic_mean=-0.005)
+        is_valid, reasons, _ = validate_factor("ma5_slope", factor_data)
+        assert not is_valid, "确认信号因子 |IC|=0.005<0.01 应失败"

@@ -52,7 +52,7 @@ from comprehensive_factor.common.logger_config import get_logger
 
 # v1.6: 单一映射来源（方案 B）
 # 调用方（composite_runner / run_pipeline 等）已将项目根加入 sys.path
-from factor_definitions import FACTOR_CATEGORIES, FACTOR_NAME_TO_COL_MAP
+from factor_definitions import FACTOR_CATEGORIES, FACTOR_NAME_TO_COL_MAP, FACTOR_ROLES
 
 
 # 默认路径
@@ -266,6 +266,9 @@ def validate_factor(
     exempt_details: list[dict] = []
 
     # 1. IC 均值检查
+    # v2.35: P6 角色化权重——确认信号因子 IC 门槛降至 0.01（design.md §2.6 决策点1）
+    factor_role = FACTOR_ROLES.get(factor_name, "primary")
+    ic_threshold = 0.01 if factor_role == "confirmation" else thresholds["ic_mean_abs_min"]
     ic_metrics = factor_data.get("ic_metrics", {})
     ic_mean = ic_metrics.get("ic_mean", None)
     sample_stats = factor_data.get("sample_stats", {})
@@ -297,7 +300,7 @@ def validate_factor(
     if ic_mean is None:
         reasons.append("ic_mean 缺失（数据不完整）")
         logger.debug("因子 %s: ic_mean 缺失", factor_name)
-    elif abs(ic_mean) < thresholds["ic_mean_abs_min"]:
+    elif abs(ic_mean) < ic_threshold:
         # v1.5→v1.6: 反向因子豁免扩展——降低ic_mean门槛至0.005，新增ICIR豁免
         # v1.5: |ic_mean| >= 0.01 + 夏普 > 1.5 + 单调性 > 0.5
         # v1.6: |ic_mean| >= 0.005（覆盖tail_volume_shrink: ic_mean=0.006）+ 夏普 > 1.5 + 单调性 > 0.5
@@ -313,14 +316,14 @@ def validate_factor(
                 "因子 %s: |ic_mean|=%.3f<%.3f 但回测强劲(夏普=%.2f,单调性=%.2f)，反向因子豁免",
                 factor_name,
                 abs(ic_mean),
-                thresholds["ic_mean_abs_min"],
+                ic_threshold,
                 ls_sharpe,
                 mono_corr,
             )
             exempt_details.append(
                 {
                     "trigger": "ic_mean",
-                    "threshold": thresholds["ic_mean_abs_min"],
+                    "threshold": ic_threshold,
                     "actual": abs(ic_mean),
                     "exempted": True,
                     "conditions": {
@@ -332,12 +335,12 @@ def validate_factor(
                 }
             )
         else:
-            reasons.append(f"|ic_mean|={abs(ic_mean):.3f}<{thresholds['ic_mean_abs_min']}")
+            reasons.append(f"|ic_mean|={abs(ic_mean):.3f}<{ic_threshold}")
             logger.debug("因子 %s: |ic_mean|=%.3f 不达标", factor_name, abs(ic_mean))
             exempt_details.append(
                 {
                     "trigger": "ic_mean",
-                    "threshold": thresholds["ic_mean_abs_min"],
+                    "threshold": ic_threshold,
                     "actual": abs(ic_mean),
                     "exempted": False,
                     "conditions": {
@@ -526,6 +529,8 @@ def filter_invalid_factors(
 
         if is_valid:
             valid_factors[factor_name] = factor_data
+            # v2.35: P6 角色化权重——标记因子角色（primary/confirmation/filter）
+            valid_factors[factor_name]["role"] = FACTOR_ROLES.get(factor_name, "primary")
             # v1.6: 标记短样本因子（有效天数 < min_sample_days）
             if valid_days is not None and valid_days < min_sample_days:
                 short_sample_factors[factor_name] = valid_days
