@@ -1,7 +1,7 @@
 # P5 新因子 IC 脚本 + 分层回测脚本 Design
 
 > 遵循 designs/strategy_systemic_overhaul.md §2.5 P5（批次5已完成因子计算函数）
-> 本 design 覆盖：为5个预计算因子创建 IC 脚本 + 分层回测脚本
+> 本 design 覆盖：为11个预计算因子创建 IC 脚本 + 分层回测脚本
 
 ## 1. 背景
 
@@ -12,7 +12,17 @@ P5 批次5已在 factor_generator.py 注册5个新因子的计算函数：
 - volume_shrink_rate (volume): 缩量率
 - price_volume_divergence (volume): 价跌量缩背离
 
-这5个因子是**预计算因子**（已在 factor_ic_data.json.gz 中），不需要自定义计算函数。
+P5-补充已在 factor_generator.py 注册6个二阶导数企稳信号因子：
+- return_acceleration_5d (momentum): 5日收益率加速度
+- downside_deceleration (momentum): 下跌减速
+- amplitude_compression (volatility): 振幅收敛
+- range_compression (volatility): 价格区间收敛
+- volume_decay_rate (volume): 量能衰减
+- turnover_decay_rate (volume): 换手率衰减
+
+这11个因子是**预计算因子**（已在 factor_ic_data.json.gz 中）。
+IC脚本使用 `calculation=calculate_xxx` 让 FactorSpec 自动从 `required_cols` 派生 `required_columns`。
+回测脚本使用 `factor_calculator=None`（预计算因子不需要运行时计算）。
 
 ## 2. 规范引用
 
@@ -30,15 +40,19 @@ P5 批次5已在 factor_generator.py 注册5个新因子的计算函数：
 
 ### 批次A: 3个 IC 脚本（rsi_slope_3d + ma5_slope + lower_shadow_ratio）
 ### 批次B: 2个 IC 脚本（volume_shrink_rate + price_volume_divergence）
-### 批次C: 3个回测脚本（rsi_slope_3d + ma5_slope + lower_shadow_ratio）
-### 批次D: 2个回测脚本（volume_shrink_rate + price_volume_divergence）
+### 批次C: 3个 IC 脚本（return_acceleration_5d + downside_deceleration + amplitude_compression）
+### 批次D: 3个 IC 脚本（range_compression + volume_decay_rate + turnover_decay_rate）
+### 批次E: 3个回测脚本（rsi_slope_3d + ma5_slope + lower_shadow_ratio）
+### 批次F: 2个回测脚本（volume_shrink_rate + price_volume_divergence）
+### 批次G: 3个回测脚本（return_acceleration_5d + downside_deceleration + amplitude_compression）
+### 批次H: 3个回测脚本（range_compression + volume_decay_rate + turnover_decay_rate）
 
 每批 ≤3 文件，遵循 ruff → pytest → commit。
 
 ## 4. IC 脚本模板（遵循 ic_industry_roe_trend_1d.py v1.3 模式）
 
 关键点：
-- FactorSpec: 预计算因子省略 calculation 参数，required_columns 省略（公共模块自动派生）
+- FactorSpec: 传 calculation=calculate_xxx 让 FactorSpec 自动派生 required_columns
 - 异常处理: SpecRegistrationError → raise; DataSchemaError → exit 4; SummaryLogError → exit 3; FactorCalcError → exit 5
 - main(args=None): 支持 args=None 库函数调用
 - log_factor_summary: 摘要日志

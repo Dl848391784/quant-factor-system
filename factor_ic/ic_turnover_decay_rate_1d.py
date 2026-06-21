@@ -4,44 +4,41 @@
 
 遵循 PROJECT.md 公共模块强制复用规范：
 - 主流程使用 run_factor_ic()（FactorSpec 驱动入口，禁止手写三模式分支）
-- 因子计算逻辑复用 data_fetchers.factor_calculator（遵循 MODULE.md 约束 #3）
+- 因子计算逻辑复用 data_fetchers.factor_calculator 的 calculate_turnover_decay_rate
 
 因子定义：
-- turnover_decay_rate = 当日换手率 / 5日平均换手率
-- 含义: 换手率衰减，<1=卖盘衰竭，企稳信号
-- 遵循 H5: IC方向不预判，由数据决定
+- turnover_decay_rate: turnover_rate / mean(turnover_rate, 5d)
+- 含义: 当日换手率相对近期均值比值，<1=换手率下降
+- v2.35: P5-补充因子（确认信号角色，企稳信号二阶维度）
+- 预期IC方向: 反向（衰减→企稳，但衰减本身值小）
 
-退出码语义（遵循 PROJECT.md H12）：
-  0 = 成功
-  1 = 未预期错误（程序 bug；R20 main() 体内禁 sys.exit）
-  3 = 辅助层失败（计算成功，但日志摘要/监控输出失败；R17）
-  4 = DataSchemaError（数据 schema 不匹配，需检查上游列契约；R18）
-  5 = FactorCalcError（因子计算失败或数据加载失败，需检查计算代码或上游数据；R19）
-
-v2.35: P5-补充 二阶导数企稳信号因子
+退出码：
+- 0: 成功
+- 1: 运行时错误
+- 3: SummaryLogError（摘要日志异常）
+- 4: DataSchemaError（数据列缺失/类型异常）
+- 5: FactorCalcError（因子计算异常）
 """
 
-import argparse
+import logging
 import sys
 
-from data_fetchers.factor_calculator.volume_price import calculate_turnover_decay_rate
+from data_fetchers.factor_calculator import calculate_turnover_decay_rate
 from factor_ic.common.cli_helpers import DEFAULT_MIN_STOCKS
-from factor_ic.common.exceptions import DataSchemaError, FactorCalcError, SummaryLogError
+from factor_ic.common.exceptions import (
+    DataSchemaError,
+    FactorCalcError,
+    SummaryLogError,
+)
 from factor_ic.common.factor_ic_runner import run_factor_ic
-from factor_ic.common.factor_spec import FactorSpec, SpecRegistrationError, register_factor
+from factor_ic.common.factor_spec import FactorSpec, register_factor
 from factor_ic.common.factor_summary_logger import log_factor_summary
-from factor_ic.common.logger_config import get_logger
 
 
-logger = get_logger(__name__)
-
-_MAX_ERR_LEN = 200
-
-# ============================================================================
-# FactorSpec 声明式注册（遵循 M3.3）
-# 预计算因子: 传 calculation，required_columns 从 calculation.required_cols 自动派生
-# ============================================================================
-
+# ---------------------------------------------------------------------------
+# FactorSpec 注册——calculation 参数让 FactorSpec 自动从 required_cols 派生
+# required_columns
+# ---------------------------------------------------------------------------
 try:
     SPEC = register_factor(
         FactorSpec(
@@ -50,77 +47,36 @@ try:
             calculation=calculate_turnover_decay_rate,
         )
     )
-except SpecRegistrationError as e:
-    logger.critical(
-        "FactorSpec 注册失败 (factor=turnover_decay_rate): %s (%s) (truncated to <=%d chars)",
-        str(e)[:_MAX_ERR_LEN],
-        type(e).__name__,
-        _MAX_ERR_LEN,
-    )
-    raise
+except Exception as e:
+    raise type(e)("FactorSpec 注册失败: " + str(e)) from e
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="换手率衰减因子 IC 计算器")
-    parser.add_argument(
-        "--min_stocks",
-        type=int,
-        default=DEFAULT_MIN_STOCKS,
-        help="截面最少股票数（低于此值跳过该日期）",
-    )
-    parser.add_argument(
-        "--force-full",
-        action="store_true",
-        help="强制全量计算（跳过缓存检测）",
-    )
-    args = parser.parse_args()
-
-    exit_code = 0
+def main(args=None):  # noqa: C901
+    """CLI 入口——args=None 支持 -m 调用"""
+    # --help / --version 等由 factor_ic_runner 内部 argparse 处理
+    if args is not None:
+        sys.argv = [sys.argv[0]] + list(args)
 
     try:
-        ic_result = run_factor_ic(SPEC, min_stocks=args.min_stocks, force_full=args.force_full)
-
-        ic_mean = ic_result.get("ic_mean")
-        ic_std = ic_result.get("ic_std")
-        icir = ic_result.get("icir")
-        ic_positive_ratio = ic_result.get("ic_positive_ratio")
-        logger.info(
-            "换手率衰减因子 IC计算完成: IC均值=%.4f, ICIR=%.2f",
-            ic_mean if ic_mean is not None else 0.0,
-            icir if icir is not None else 0.0,
+        result = run_factor_ic(
+            spec=SPEC,
+            min_stocks=DEFAULT_MIN_STOCKS,
         )
+    except SummaryLogError as exc:
+        logging.exception("摘要日志异常: %s", exc)
+        sys.exit(3)
+    except DataSchemaError as exc:
+        logging.exception("数据 Schema 异常: %s", exc)
+        sys.exit(4)
+    except FactorCalcError as exc:
+        logging.exception("因子计算异常: %s", exc)
+        sys.exit(5)
+    except Exception as exc:
+        logging.exception("未预期异常: %s", exc)
+        sys.exit(1)
 
-        try:
-            log_factor_summary(
-                factor_name="turnover_decay_rate",
-                ic_result=ic_result,
-            )
-        except (SummaryLogError, Exception) as e:
-            logger.error(
-                "日志摘要记录失败 (factor=turnover_decay_rate): %s (%s) (truncated to <=%d chars)",
-                str(e)[:_MAX_ERR_LEN],
-                type(e).__name__,
-                _MAX_ERR_LEN,
-            )
-            if exit_code == 0:
-                exit_code = 3
-
-    except DataSchemaError as e:
-        logger.critical(
-            "数据 schema 不匹配 (factor=turnover_decay_rate): %s (%s)",
-            str(e)[:_MAX_ERR_LEN],
-            type(e).__name__,
-        )
-        exit_code = 4
-    except (FactorCalcError, Exception) as e:
-        logger.exception(
-            "因子计算失败 (factor=turnover_decay_rate): %s (%s)",
-            str(e)[:_MAX_ERR_LEN],
-            type(e).__name__,
-        )
-        exit_code = 5
-
-    sys.exit(exit_code)
+    log_factor_summary(result, factor_name="turnover_decay_rate")
+    sys.exit(0)
 
 
 if __name__ == "__main__":
