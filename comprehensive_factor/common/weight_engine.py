@@ -165,6 +165,93 @@ class WeightMethodBase(ABC):
 
         return composite
 
+    # v2.35: P2 维度权重全方法支持——静态权重维度再分配（通用方法，所有子类可调用）
+    # M58(MODULE.md L1966): 维度权重是WeightEngine通用能力，不限于rolling_icir
+    # 设计决策(design.md §2.2): 维度权重是"后处理"层，不改变核心计算逻辑
+    dimension_weight_method: str | None = None
+    factor_categories: dict[str, str] | None = None
+
+    def _apply_dimension_weights_static(
+        self,
+        weights: dict[str, float],
+        factor_cols: list[str],
+    ) -> dict[str, float]:
+        """静态权重维度两阶段再分配（后处理）
+
+        与 RollingICIRWeightMethod._apply_dimension_weights 的区别：
+        - 滚动方法: 对 DataFrame 列操作（权重每日动态）
+        - 静态方法: 对 weights dict 操作（权重固定）
+
+        两阶段:
+        1. 维度内归一化: 各因子在维度内按原始权重比例分配
+        2. 维度间归一化:
+           - equal: 1/n_dims（维度等权）
+           - icir: 维度权重 = 维度内平均|权重| 归一化
+
+        Args:
+            weights: 原始权重字典 {因子列: 权重值}
+            factor_cols: 因子列名列表
+
+        Returns:
+            维度再分配后的权重字典（权重和=1）
+        """
+        if not self.dimension_weight_method or not self.factor_categories:
+            return weights
+
+        # 构建维度分组
+        groups: dict[str, list[str]] = {}
+        for col in factor_cols:
+            factor_name = self._get_factor_name_from_col(col)
+            dim = self.factor_categories.get(factor_name, "uncategorized")
+            groups.setdefault(dim, []).append(col)
+
+        n_dims = len(groups)
+        n_factors = len(factor_cols)
+        new_weights: dict[str, float] = {}
+
+        if self.dimension_weight_method == "equal":
+            # 维度等权: 1/n_dims，维度内按原权重比例
+            for dim, dim_cols in groups.items():
+                dim_total = sum(abs(weights[c]) for c in dim_cols)
+                for col in dim_cols:
+                    if dim_total > 0:
+                        new_weights[col] = weights[col] / dim_total * (1.0 / n_dims)
+                    else:
+                        new_weights[col] = 1.0 / n_factors
+        elif self.dimension_weight_method == "icir":
+            # icir: 维度权重 = 维度内平均|权重| 归一化
+            dim_avg: dict[str, float] = {}
+            for dim, dim_cols in groups.items():
+                dim_avg[dim] = sum(abs(weights[c]) for c in dim_cols) / len(dim_cols)
+            total_avg = sum(dim_avg.values())
+
+            for dim, dim_cols in groups.items():
+                dim_total = sum(abs(weights[c]) for c in dim_cols)
+                dim_weight = dim_avg[dim] / total_avg if total_avg > 0 else 1.0 / n_dims
+                for col in dim_cols:
+                    if dim_total > 0:
+                        new_weights[col] = (weights[col] / dim_total) * dim_weight
+                    else:
+                        new_weights[col] = 1.0 / n_factors
+        else:
+            new_weights = weights
+
+        # 行级归一化（确保权重和=1）
+        total = sum(new_weights.values())
+        if total > 0:
+            new_weights = {k: v / total for k, v in new_weights.items()}
+
+        logger = getattr(self, "logger", None) or get_logger(__name__)
+        logger.info(
+            "维度权重再分配(%s): %d维度 %d因子 → %s",
+            self.dimension_weight_method,
+            n_dims,
+            n_factors,
+            {k: f"{v:.4f}" for k, v in new_weights.items()},
+        )
+
+        return new_weights
+
     @abstractmethod
     def calculate(
         self,
@@ -202,8 +289,15 @@ class EqualWeightMethod(WeightMethodBase):
     weight = 1 / n_factors
     """
 
-    def __init__(self, logger: logging.Logger | None = None):
+    def __init__(
+        self,
+        logger: logging.Logger | None = None,
+        dimension_weight_method: str | None = None,
+        factor_categories: dict[str, str] | None = None,
+    ):
         self.logger = logger or get_logger(__name__)
+        self.dimension_weight_method = dimension_weight_method  # v2.35: P2 维度权重全方法
+        self.factor_categories = factor_categories
 
     def calculate(
         self,
@@ -217,9 +311,13 @@ class EqualWeightMethod(WeightMethodBase):
         v1.12 修复：删除重复校验
         - WeightEngine.calculate 已校验 factor_cols 非空
         - 子类 calculate 信任调用方已完成校验
+        v2.35: P2 维度权重后处理
         """
         # 计算权重
         weights = self.get_weights(factor_cols, ic_results)
+
+        # v2.35: P2 维度权重再分配（后处理）
+        weights = self._apply_dimension_weights_static(weights, factor_cols)
 
         # 使用基类公共方法（向量化实现）
         return self._apply_weights(factor_df, factor_cols, weights, self.logger, "等权加权")
@@ -246,8 +344,15 @@ class ICIRWeightMethod(WeightMethodBase):
     注意：反向因子ICIR为负值，需要特殊处理。
     """
 
-    def __init__(self, logger: logging.Logger | None = None):
+    def __init__(
+        self,
+        logger: logging.Logger | None = None,
+        dimension_weight_method: str | None = None,
+        factor_categories: dict[str, str] | None = None,
+    ):
         self.logger = logger or get_logger(__name__)
+        self.dimension_weight_method = dimension_weight_method  # v2.35: P2 维度权重全方法
+        self.factor_categories = factor_categories
 
     def calculate(
         self,
@@ -261,12 +366,16 @@ class ICIRWeightMethod(WeightMethodBase):
 
         v1.12 修复：删除重复校验（WeightEngine.calculate 已校验）
         v1.15: 新增 short_sample_factors 参数，短样本因子ICIR权重惩罚
+        v2.35: P2 维度权重后处理
         """
         if ic_results is None:
             raise ValueError("ICIR加权需要 ic_results 参数")
 
         # 计算权重（v1.15: 传入短样本因子信息）
         weights = self.get_weights(factor_cols, ic_results, short_sample_factors)
+
+        # v2.35: P2 维度权重再分配（后处理）
+        weights = self._apply_dimension_weights_static(weights, factor_cols)
 
         # 使用基类公共方法（向量化实现）
         return self._apply_weights(factor_df, factor_cols, weights, self.logger, "ICIR加权")
@@ -372,8 +481,15 @@ class ICWeightMethod(WeightMethodBase):
     使用绝对值：反向因子IC均值为负，取绝对值后加权。
     """
 
-    def __init__(self, logger: logging.Logger | None = None):
+    def __init__(
+        self,
+        logger: logging.Logger | None = None,
+        dimension_weight_method: str | None = None,
+        factor_categories: dict[str, str] | None = None,
+    ):
         self.logger = logger or get_logger(__name__)
+        self.dimension_weight_method = dimension_weight_method  # v2.35: P2 维度权重全方法
+        self.factor_categories = factor_categories
 
     def calculate(
         self,
@@ -385,12 +501,16 @@ class ICWeightMethod(WeightMethodBase):
         """IC均值加权计算
 
         v1.12 修复：删除重复校验（WeightEngine.calculate 已校验）
+        v2.35: P2 维度权重后处理
         """
         if ic_results is None:
             raise ValueError("IC加权需要 ic_results 参数")
 
         # 计算权重
         weights = self.get_weights(factor_cols, ic_results)
+
+        # v2.35: P2 维度权重再分配（后处理）
+        weights = self._apply_dimension_weights_static(weights, factor_cols)
 
         # 使用基类公共方法（向量化实现）
         return self._apply_weights(factor_df, factor_cols, weights, self.logger, "IC加权")
@@ -911,7 +1031,13 @@ class WeightEngine:
                 factor_categories=factor_categories,
             )
         else:
-            self.method = method_class(logger=self.logger)
+            # v2.35: P2 维度权重全方法支持——消除 rolling_icir 独享
+            # M58(MODULE.md L1966): 维度权重是 WeightEngine 通用能力
+            self.method = method_class(
+                logger=self.logger,
+                dimension_weight_method=dimension_weight_method,
+                factor_categories=factor_categories,
+            )
 
         self.weight_method = weight_method
         self.window = window
