@@ -514,13 +514,13 @@ def _apply_weights(
 
 ## M9. 每日截面标准化
 
-**What**:加权前对**每日每个因子**做截面标准化:`factor_std = (factor - μ) / σ`。v2.28 新增 `skip_point_mass` 简化模式。
+**What**:加权前对**每日每个因子**做截面标准化:`factor_std = (factor - μ) / σ`。v2.28 新增 `skip_point_mass` 简化模式。v2.29 新增零膨胀因子零值分离标准化。
 
-**Why**:不同因子值范围悬殊 (RSI 0-100, Volume_Ratio 0.1-5),未标准化会让高值因子主导组合。`skip_point_mass` 用于 auto_select 相关性矩阵计算——粗粒度 z-score 足够，Pearson corr 对 NaN 鲁棒；跳过 ~60MB×45次 groupby+merge 临时对象显著降低内存峰值（3.5GB→2.65GB）。
+**Why**:不同因子值范围悬殊 (RSI 0-100, Volume_Ratio 0.1-5),未标准化会让高值因子主导组合。`skip_point_mass` 用于 auto_select 相关性矩阵计算——粗粒度 z-score 足够，Pearson corr 对 NaN 鲁棒；跳过 ~60MB×45次 groupby+merge 临时对象显著降低内存峰值（3.5GB→2.65GB）。零值分离标准化用于修正零膨胀分布的 σ 失真——42%零值→σ≈0.015人为压缩→非零值z-score被放大到±3→ICIR=0.16弱因子贡献22.5%(1.8x应有份额)。
 
-**How**:在 `composite_runner` 中统一处理,生成 `<col>_std` 列。auto_select 阶段调用 `standardize_factors(..., skip_point_mass=True)`，选中因子后调用完整版标准化。
+**How**:在 `composite_runner` 中统一处理,生成 `<col>_std` 列。auto_select 阶段调用 `standardize_factors(..., skip_point_mass=True)`，选中因子后调用完整版标准化。v2.29 零值分离标准化：检测每日截面零值占比 ≥5%（`_ZERO_INFLATED_THRESHOLD=0.05`），触发时零值→z=0（中性截断信号），非零值→用自身μ/σ标准化+clip±3σ。受影响因子：price_volume_divergence(528/545日期，平均51.3%零值)、price_position(100/545日期，平均16.9%零值)、near_high_ratio_5(54.8%零值)。
 
-**Don't**:不要在 auto_select 阶段使用完整版标准化（45因子×groupby+merge 产生 3.5GB+ 内存峰值导致 OOM Kill exit -9）。
+**Don't**:不要在 auto_select 阶段使用完整版标准化（45因子×groupby+merge 产生 3.5GB+ 内存峰值导致 OOM Kill exit -9）。不要将零膨胀因子的零值视为数据缺失——零值是公式截断信号（如 pvd 的 max(0,1-vol_ratio)=0 表示"不缩量=无背离=中性"），有经济含义。
 
 ---
 
@@ -2032,6 +2032,7 @@ weight_engine = WeightEngine(dimension_weight_method="icir")  # 硬编码
 |------|------|---------|
 | v2.33 | 2026-06-21 | composite_runner.py v2.28 OOM 修复：3 项改动降低内存峰值 3.5GB→2.65GB（24%）。(1) auto_select 阶段 standardize_factors 新增 skip_point_mass=True 参数，跳过 45 次 groupby+merge 点质量检测临时对象。(2) auto_select 完成后 del all_factor_df + all_corr_matrix + gc.collect()。(3) return_df 提取和 full_df 释放从 Step 8 提前到 Step 1。4 个综合因子脚本共用 composite_runner.py 一次覆盖。设计文档: designs/composite_auto_select_memory_optimization_design.md |
 | v2.33a | 2026-06-20 | factor_selector.py v2.10 + summary v2.23: 豁免信息传递链 + 报告维度感知展示同步。遵循 designs/exempt_info_propagation_design.md 路径B |
+| v2.29b | 2026-06-21 | factor_loader.py v2.29b: 零膨胀因子零值分离标准化——检测截面零值占比≥5%（_ZERO_INFLATED_THRESHOLD=0.05），零值→z=0（中性截断信号），非零值→用自身μ/σ标准化+clip±3σ。修复 price_volume_divergence 42%零值→σ≈0.015人为压缩→ICIR=0.16弱因子贡献22.5%→修复后pvd z-score绝对值下降28-38%，占比从22.5%→18.2%。新增 _is_zero_inflated_group + _standardize_zero_inflated 辅助函数 + test_zero_inflated_standardization.py 13测试。遵循 designs/zero_inflated_standardization_design.md 方案A。M9规范同步更新 |
 | v2.35 | 2026-06-21 | 策略系统性改造六层方案（designs/strategy_systemic_overhaul.md P1-P6）: **P1** factor_selector v2.35 L1>0硬约束+多头收益替代多空+样本≥60天; **P2** weight_engine v2.35 维度权重全方法支持(_apply_dimension_weights_static提到Base, 4种方法统一); **P3** weight_selector 删4个多空/空头指标+增layer_1_annual/layer_1_sharpe(9→7指标); **P5** 新增5因子(rsi_slope_3d/ma5_slope/lower_shadow_ratio/volume_shrink_rate/price_volume_divergence, 34→39); **P6** FACTOR_ROLES三角色(primary/confirmation/filter)+确认信号IC门槛0.01+stock_selector企稳确认过滤器; PROJECT.md新增"策略约束:只做多"章节; M12更新long_short→long_return+layer_1_annual硬约束; M58更新全方法支持 |
 | v2.34 | 2026-06-20 | stock_selector.py v1.21: 修复维度权重不生效 bug——从 composite 结果读取 dimension_weight_method 传给 WeightEngine（之前 stock_selector 自建 WeightEngine 时缺 dimension_weight_method/factor_categories 参数，导致选股排序用不带维度权重的综合因子值，v2.28 维度权重工作无效）。修复后 Top10 中 #4-#10 重新排列，维度权重分布从 price_position 54%→34.6% |
 | v2.32 | 2026-06-20 | stock_selector.py v1.4: factor_values/factor_values_std 的 key 统一用逻辑名（通过 FACTOR_COL_TO_NAME_MAP 反向映射列名→逻辑名），与 weight_config.factor_list 一致——修复 rsi vs rsi_6、volume_ratio vs volume_ratio_5 命名不一致；同步修复 summary 模块 L1858 集中度检测隐藏 bug（comp_weights key 是逻辑名但 factor_values_std key 是列名导致 rsi/volume_ratio 集中度检测失效）；test_stock_selector.py 更新 4 处断言 |

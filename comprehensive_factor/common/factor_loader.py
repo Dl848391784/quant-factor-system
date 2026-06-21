@@ -521,6 +521,72 @@ def load_ic_daily(
     return ic_daily_data
 
 
+def _is_zero_inflated_group(group: "pd.Series[float]", zero_threshold: float, ratio_threshold: float) -> bool:
+    """判断截面分组是否为零膨胀分布（零值占比 ≥ ratio_threshold）
+
+    用于 standardize_factors 的 transform lambda 中，决定是否启用零值分离标准化。
+    遵循第一性原理：零值占比 ≥ 5% 意味着零值是分布的固有属性（如 pvd 的 max(0,...) 截断），
+    不是偶发噪声，σ 失真不可忽略。
+
+    Args:
+        group: 每日截面因子值 Series
+        zero_threshold: |v| < 此阈值判定为零值
+        ratio_threshold: 零值占比 ≥ 此阈值判定为零膨胀
+    """
+    if len(group) == 0:
+        return False
+    zero_ratio = (group.abs() < zero_threshold).sum() / len(group)
+    return zero_ratio >= ratio_threshold
+
+
+def _standardize_zero_inflated(
+    group: "pd.Series[float]",
+    winsorize_sigma: float,
+    zero_threshold: float,
+) -> "pd.Series[float]":
+    """零值分离标准化——零值 z=0（中性），非零值用自身 μ/σ 标准化 + clip
+
+    第一性原理推导：
+    1. 零值是中性截断信号（如 pvd 的 shrink_signal=0 表示"不缩量=无背离"）
+    2. 零值不应参与 σ 计算——它们压缩 σ 导致非零值 z-score 人为放大
+    3. 非零值应用自身分布标准化——σ_nonzero 反映真实的信号离散度
+
+    Args:
+        group: 每日截面因子值 Series
+        winsorize_sigma: Winsorize clip 阈值（±3σ）
+        zero_threshold: |v| < 此阈值判定为零值
+
+    Returns:
+        标准化后的 Series（零值 → z=0，非零值 → 用非零值自身 μ/σ 标准化 + clip）
+    """
+    zero_mask = group.abs() < zero_threshold
+    nonzero_vals = group[~zero_mask]
+
+    if len(nonzero_vals) == 0:
+        # 全为零值 → 全部 z = 0（中性）
+        return pd.Series(0.0, index=group.index)
+
+    if len(nonzero_vals) <= 1:
+        # 非零值不足 → 非零值也无法标准化 → 全部 z = 0
+        return pd.Series(0.0, index=group.index)
+
+    mu = nonzero_vals.mean()
+    sigma = nonzero_vals.std()
+
+    if sigma == 0:
+        # 所有非零值相同 → z = 0（无法区分信号强度）
+        return pd.Series(0.0, index=group.index)
+
+    # 非零值标准化 + clip ±winsorize_sigma
+    z_nonzero = np.clip((nonzero_vals - mu) / sigma, -winsorize_sigma, winsorize_sigma)
+
+    # 组合结果：零值 → z = 0，非零值 → z_nonzero
+    result = pd.Series(0.0, index=group.index)
+    result[~zero_mask] = z_nonzero
+
+    return result
+
+
 def standardize_factors(
     factor_df: pd.DataFrame,
     factor_cols: list[str],
@@ -601,8 +667,38 @@ def standardize_factors(
         _POINT_MASS_ZSCORE_GATE = 1.0  # z-score 超此阈值才检查点质量（性能优化，低门限确保跨日期一致检出）
         _DISCRETE_UNIQUE_RATIO = 0.05  # unique 值数 / N < 5% 判定为离散型
         _DISCRETE_MIN_UNIQUE = 20  # unique 值数 < 20 判定为离散型
+        # v2.29 新增：零膨胀因子零值分离标准化（第一性原理推导）
+        #   零值在 price_volume_divergence 等因子中有经济含义（中性截断信号，不是数据噪声）
+        #   42%零值→σ全截面≈0.015人为压缩→非零值z-score被放大到±3→ICIR=0.16弱因子贡献22.5%
+        #   修复：零值组z=0（中性），非零值组用自身μ/σ标准化→σ_nonzero≈0.03→z自然范围[-2,+2]
+        _ZERO_INFLATED_THRESHOLD = 0.05  # 每日截面零值占比 ≥5% 触发零值分离标准化
+        _ZERO_VALUE_THRESHOLD = 0.001  # |v| < 此阈值判定为零值（浮点精度保护）
+
+        # v2.29: 零值分离标准化——先检测零膨胀因子，再分别处理
+        # 步骤1：计算每日截面的零值占比
+        daily_zero_ratio = factor_df.groupby("date")[col].apply(
+            lambda x: (x.abs() < _ZERO_VALUE_THRESHOLD).sum() / len(x) if len(x) > 0 else 0.0
+        )
+        # 步骤2：区分零膨胀日期和正常日期
+        is_zero_inflated = daily_zero_ratio >= _ZERO_INFLATED_THRESHOLD
+        inflated_dates = list(daily_zero_ratio.index[is_zero_inflated])  # type: ignore[reportArgumentType]
+
+        if inflated_dates:
+            avg_zero_pct = daily_zero_ratio[is_zero_inflated].mean() * 100
+            logger.info(
+                "因子 %s 检测到零膨胀分布: %d/%d 日期零值占比≥%.0f%% (平均%.1f%%)，启用零值分离标准化",
+                col,
+                len(inflated_dates),
+                len(daily_zero_ratio),
+                _ZERO_INFLATED_THRESHOLD * 100,
+                avg_zero_pct,
+            )
+
+        # 步骤3：对零膨胀日期使用零值分离标准化，对正常日期使用原有标准化
         factor_df[std_col] = factor_df.groupby("date")[col].transform(
-            lambda x: np.clip((x - x.mean()) / x.std(), -_WINSORIZE_SIGMA, _WINSORIZE_SIGMA) if x.std() > 0 else np.nan
+            lambda x: _standardize_zero_inflated(x, _WINSORIZE_SIGMA, _ZERO_VALUE_THRESHOLD)
+            if _is_zero_inflated_group(x, _ZERO_VALUE_THRESHOLD, _ZERO_INFLATED_THRESHOLD)
+            else (np.clip((x - x.mean()) / x.std(), -_WINSORIZE_SIGMA, _WINSORIZE_SIGMA) if x.std() > 0 else np.nan)
         )
 
         # v2.28: skip_point_mass=True 时跳过点质量检测（auto_select 简化模式）
