@@ -12,7 +12,7 @@
 - p_value > 0.05 → 无效（统计不显著）
 - |icir| < 0.2 → 无效（稳定性差）
 - |monotonicity_corr| < 0.5 → 无效（分层不单调）
-- long_short_return_annual < 5% → 无效（经济意义弱）
+- long_return_annual < 3% → 无效（经济意义弱，只做多策略）
 
 高相关组筛选:
 - |corr| > 0.7 → 高相关组

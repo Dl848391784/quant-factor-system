@@ -532,6 +532,27 @@ grep -rn "assert False\|if False:" factor_ic/ comprehensive_factor/ backtest/
 
 ---
 
+## 策略约束：只做多（Long-Only）[stable]
+
+**What**: 本系统为**只做多（long-only）**量化选股策略，不允许做空。
+
+**How**: 只做多约束影响以下三个环节：
+1. **因子筛选（M12）**：门槛指标用 `long_return_annual`（多头年化收益）而非 `long_short_return_annual`（多空收益）；`layer_1_annual > 0` 为不可豁免硬约束（公理1: 只做多收益 = Layer1 买入层收益）
+2. **方法评分（weight_selector）**：评分指标不含多空/空头指标（`long_short_return_annual`、`long_short_sharpe`、`long_short_net_daily`、`turnover_short_avg` 已移除），改为 `layer_1_annual` + `layer_1_sharpe`
+3. **选股执行（stock_selector）**：企稳确认过滤器排除无企稳信号的股票（公理4推论4: 区分错杀vs基本面恶化）
+
+**Don't**:
+- 禁止在筛选/评分中使用多空收益指标（对只做多无意义）
+- 禁止将 L1<0 的因子豁免入选（只做多策略持有 L1 = 买入层收益）
+
+**Why**: 只做多策略收益 = Layer1 买入层收益，不能做空 Layer5。多空收益指标衡量的是做多Layer1+做空Layer5的对冲组合，对只做多策略无经济意义。历史教训：原 M12 使用 `long_short_return_annual` 导致高IC但L1负的有毒因子被豁免入选。
+
+**When**: 所有涉及因子筛选、方法评分、选股执行的场景必须遵守。
+
+**Verify**: `grep -r "long_short_return_annual" comprehensive_factor/common/factor_selector.py comprehensive_factor/weight_selector.py` 应零命中
+
+---
+
 ## 路线图：待实施 / 预留规则 [reference]
 
 **以下规则当前不在硬规则表中强制执行，不可作为 PR 取证依据。** 待对应工具交付或规则升级后，按 checklist 迁入 H 表。

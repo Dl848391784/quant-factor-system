@@ -99,7 +99,7 @@ Step 5: 综合因子分层回测
   对 4 个综合因子分别做分层回测
                               ↓
 Step 6: 权重方式选择 (weight_selector.py)
-  ├─ 提取评价指标（收益、稳定性、成本风险）
+  ├─ 提取评价指标（v2.35: 7指标全对齐只做多——含layer_1_annual/layer_1_sharpe）
   ├─ Min-Max归一化（方向统一化）
   ├─ 等权综合得分
   └─ 输出最优权重方法
@@ -112,6 +112,7 @@ Step 7: 股票选股 (stock_selector.py)
   ├─ 加载 IC 每日序列（滚动ICIR需要）
   ├─ 计算综合因子值（使用最优权重方法）
   ├─ 按因子方向排序（反向升序/正向降序）
+  ├─ v2.35: P6 企稳确认过滤（排除无企稳信号股票）
   └─ 输出 Top N 股票列表
 ```
 
@@ -579,6 +580,8 @@ factor_df.loc[factor_df[col].isna(), std_col] = np.nan
 
 ## M12. 无效因子判定标准 (5 个阈值)
 
+> **v2.35 更新**: 遵循 PROJECT.md「策略约束：只做多（Long-Only）」，`long_short_return_annual` 已替换为 `long_return_annual`（多头年化收益），`layer_1_annual > 0` 为不可豁免硬约束。
+
 **What**:因子无效判定:任一指标不满足即判无效。
 
 | 指标 | 阈值 | 理由 |
@@ -587,7 +590,8 @@ factor_df.loc[factor_df[col].isna(), std_col] = np.nan
 | p_value | > 0.05 | 统计不显著 |
 | \|icir\| | < 0.15 | 稳定性差 (波动大) |
 | \|monotonicity_corr\| | < 0.4 | 分层收益不单调 |
-| long_short_return_annual | < 3% | 经济意义弱 (扣除双边成本 1% 后负收益) |
+| long_return_annual | < 2% | 多头年化收益低 (只做多策略经济意义门槛) |
+| layer_1_annual | ≤ 0 | **不可豁免硬约束**: 只做多收益 = Layer1 买入层收益 (公理1) |
 
 **Why** (阈值依据):
 - ≥ 0.03:业界公认最低有效阈值
@@ -1965,6 +1969,8 @@ if cat_i != cat_j and corr_val > 0.9:
 
 ## M58. 维度级别权重分配
 
+> **v2.35 更新**: 维度权重已从 rolling_icir_weight 独享扩展到全部4种加权方式（equal/icir/ic/rolling_icir）。`_apply_dimension_weights_static` 方法提取到 `WeightMethodBase`，所有子类通过它调用维度再分配。run_pipeline.py 4个 ScriptTask 统一配置 `--dimension_weight icir`。
+
 **What**: 当 `dimension_weight_method` 非 `none` 时，`WeightEngine` 的权重计算从单阶段 `|ICIR_i| / Σ_all |ICIR_j|` 改为两阶段：维度内归一化 → 维度间归一化。防止高 ICIR 维度（如 price_position 51.5%）主导综合因子。
 
 **Why**:
@@ -2021,6 +2027,7 @@ weight_engine = WeightEngine(dimension_weight_method="icir")  # 硬编码
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
 | v2.33 | 2026-06-20 | factor_selector.py v2.10 + summary v2.23: 豁免信息传递链 + 报告维度感知展示同步。(1) validate_factor 返回值扩展为 (is_valid, reasons, exempt_details)，exempt_details 记录每个触发豁免检查的阈值详情（trigger/threshold/actual/exempted/conditions/detail）；新增 _build_exemption_fail_reason 辅助函数。(2) filter_invalid_factors 结果新增 exempted_factors 字段，select_factors 透传。(3) summary generate_correlation_section 维度感知展示——跨维度高相关标注'保留'而非'建议剔除'，消除与 M57 筛选逻辑的矛盾。(4) summary get_factor_selection_info 展示豁免标注（入选因子标'豁免:...'，被剔除因子标'未满足豁免:...'），移除旧的'回测强劲因子被剔除说明'段。test_factor_selector_exemption.py 11 测试。遵循 designs/exempt_info_propagation_design.md 路径B |
+| v2.35 | 2026-06-21 | 策略系统性改造六层方案（designs/strategy_systemic_overhaul.md P1-P6）: **P1** factor_selector v2.35 L1>0硬约束+多头收益替代多空+样本≥60天; **P2** weight_engine v2.35 维度权重全方法支持(_apply_dimension_weights_static提到Base, 4种方法统一); **P3** weight_selector 删4个多空/空头指标+增layer_1_annual/layer_1_sharpe(9→7指标); **P5** 新增5因子(rsi_slope_3d/ma5_slope/lower_shadow_ratio/volume_shrink_rate/price_volume_divergence, 34→39); **P6** FACTOR_ROLES三角色(primary/confirmation/filter)+确认信号IC门槛0.01+stock_selector企稳确认过滤器; PROJECT.md新增"策略约束:只做多"章节; M12更新long_short→long_return+layer_1_annual硬约束; M58更新全方法支持 |
 | v2.34 | 2026-06-20 | stock_selector.py v1.21: 修复维度权重不生效 bug——从 composite 结果读取 dimension_weight_method 传给 WeightEngine（之前 stock_selector 自建 WeightEngine 时缺 dimension_weight_method/factor_categories 参数，导致选股排序用不带维度权重的综合因子值，v2.28 维度权重工作无效）。修复后 Top10 中 #4-#10 重新排列，维度权重分布从 price_position 54%→34.6% |
 | v2.32 | 2026-06-20 | stock_selector.py v1.4: factor_values/factor_values_std 的 key 统一用逻辑名（通过 FACTOR_COL_TO_NAME_MAP 反向映射列名→逻辑名），与 weight_config.factor_list 一致——修复 rsi vs rsi_6、volume_ratio vs volume_ratio_5 命名不一致；同步修复 summary 模块 L1858 集中度检测隐藏 bug（comp_weights key 是逻辑名但 factor_values_std key 是列名导致 rsi/volume_ratio 集中度检测失效）；test_stock_selector.py 更新 4 处断言 |
 | v2.31 | 2026-06-20 | factor_selector.py v2.9: select_best_from_groups 新增 corr_matrix 参数——Union-Find 传递性归组时被淘汰因子和 best_factor 之间可能没有直接 >0.7 的配对（如 positive_day_ratio_5 通过中间因子间接归入 rsi 组），从 corr_matrix 查找实际相关系数补全去重原因显示；test_dimension_aware_dedup.py 新增 TestTransitiveGroupCorrDisplay 2 测试（corr_matrix 补全 + None 兜底"传递性归组"） |
