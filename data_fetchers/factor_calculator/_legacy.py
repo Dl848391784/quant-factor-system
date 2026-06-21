@@ -237,12 +237,15 @@ from .intraday import (  # noqa: F401
 # ============================================================================
 from .momentum import (  # noqa: F401
     calculate_amplitude,
+    calculate_lower_shadow_ratio,  # v2.35: P5 下影线比
+    calculate_ma5_slope,  # v2.35: P5 MA5斜率
     calculate_momentum_strength,
     calculate_overnight_return,
     calculate_past_return_1d,
     calculate_price_position,
     calculate_return_3d,
     calculate_return_5d,
+    calculate_rsi_slope_3d,  # v2.35: P5 RSI斜率
 )
 
 # ============================================================================
@@ -259,7 +262,9 @@ from .volume_price import (  # noqa: F401
     calculate_ma5_deviation,
     calculate_near_high_ratio_5,
     calculate_positive_day_ratio_5,
+    calculate_price_volume_divergence,  # v2.35: P5 价跌量缩背离
     calculate_volume_price_strength,
+    calculate_volume_shrink_rate,  # v2.35: P5 缩量率
 )
 
 
@@ -299,6 +304,11 @@ __all__ = [
     "calculate_capital_flow_intensity",  # v1.17 新增：资金流强度因子（方案C）
     "calculate_intraday_intensity",  # B1 新增：日内强度因子（从 factor_generator 迁入）
     "calculate_tail_factors",  # B4 新增：尾盘因子族编排（从 factor_generator 迁入）
+    "calculate_rsi_slope_3d",  # v2.35: P5 RSI 3日斜率
+    "calculate_ma5_slope",  # v2.35: P5 MA5 3日斜率
+    "calculate_lower_shadow_ratio",  # v2.35: P5 下影线比
+    "calculate_volume_shrink_rate",  # v2.35: P5 缩量率
+    "calculate_price_volume_divergence",  # v2.35: P5 价跌量缩背离
     # 公共常量别名（向下兼容 ic_kdj_j 等脚本的导入）
     "DEFAULT_RSI_PERIOD",
     "DEFAULT_BOLLINGER_N",

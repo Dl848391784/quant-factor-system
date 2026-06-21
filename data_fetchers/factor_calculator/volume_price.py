@@ -281,3 +281,121 @@ def calculate_near_high_ratio_5(
 
 
 calculate_near_high_ratio_5.required_cols = ["date", "asset", "close"]  # type: ignore[attr-defined]
+
+
+# ============================================================================
+# v2.35: P5 补齐信息维度——量价背离/缩量因子（design.md §2.5）
+# ============================================================================
+
+_COL_VOLUME = "volume"
+_COL_VOLUME_SHRINK_RATE = "volume_shrink_rate"
+_COL_PRICE_VOLUME_DIVERGENCE = "price_volume_divergence"
+
+_VOL_WINDOW = 5
+_PRICE_DIV_WINDOW = 5
+_DIV_EPSILON = 1e-10
+
+
+def calculate_volume_shrink_rate(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """计算缩量率因子
+
+    公式: vol_ma5 = rolling(volume, 5).mean()
+          volume_shrink_rate = volume_today / vol_ma5
+
+    含义: <1=缩量（卖盘衰竭），>1=放量。
+    与现有 volume_ratio（量比，当日量/5日均量）互补：
+    volume_ratio 基于成交量，volume_shrink_rate 基于成交股数，两者经济含义一致但数据源不同。
+    本因子作为"确认信号"——反转策略中缩量=卖压衰竭的确认。
+
+    边界处理:
+        - 前4天无完整5日窗口 → NaN
+        - vol_ma5 = 0 → NaN
+    """
+    _logger = get_module_logger(logger_arg)
+    _logger.debug("  输入 %s: %d 行", "calculate_volume_shrink_rate", len(factor_df))
+
+    df = factor_df.copy()
+    df = df.sort_values([_COL_ASSET, _COL_DATE])
+
+    vol_ma5 = df.groupby(_COL_ASSET)[_COL_VOLUME].rolling(_VOL_WINDOW, min_periods=_VOL_WINDOW).mean().reset_index(level=0, drop=True)
+    vol_ma5_safe = vol_ma5.replace(0, np.nan)
+    df[_COL_VOLUME_SHRINK_RATE] = df[_COL_VOLUME] / vol_ma5_safe
+
+    valid_count = int(df[_COL_VOLUME_SHRINK_RATE].notna().sum())
+    _logger.info(
+        "  有效 %s: %d (%.2f%%)，NaN %d 行",
+        _COL_VOLUME_SHRINK_RATE,
+        valid_count,
+        valid_count / len(df) * 100 if len(df) > 0 else 0,
+        len(df) - valid_count,
+    )
+
+    return df
+
+
+calculate_volume_shrink_rate.required_cols = ["date", "asset", "volume"]  # type: ignore[attr-defined]
+
+
+def calculate_price_volume_divergence(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """计算价跌量缩背离因子
+
+    公式: price_ret_5d = close_today / close_{today-5} - 1
+          vol_ma5 = rolling(volume, 5).mean()
+          vol_ratio = volume_today / vol_ma5
+          price_volume_divergence = -price_ret_5d * max(0, 1 - vol_ratio)
+
+    含义:
+        - 价跌(price_ret<0) + 缩量(vol_ratio<1) → 正值（止跌信号）
+        - 价跌 + 放量 → 0（无背离，跌势未止）
+        - 价涨 → ≤0（非反转语境）
+
+    正向因子（值大=止跌信号强），与现有反向因子互补。
+
+    边界处理:
+        - 前4天无完整窗口 → NaN
+        - vol_ma5 = 0 → vol_ratio = NaN → 结果 NaN
+        - close_{today-5} = 0 → NaN
+
+    遵循 H5: IC方向不预判
+    """
+    _logger = get_module_logger(logger_arg)
+    _logger.debug("  输入 %s: %d 行", "calculate_price_volume_divergence", len(factor_df))
+
+    df = factor_df.copy()
+    df = df.sort_values([_COL_ASSET, _COL_DATE])
+
+    # 5日价格收益率
+    close_prev = df.groupby(_COL_ASSET)[_COL_CLOSE].shift(_PRICE_DIV_WINDOW)
+    close_prev_safe = close_prev.replace(0, np.nan)
+    price_ret_5d = df[_COL_CLOSE] / close_prev_safe - 1.0
+
+    # 量比
+    vol_ma5 = df.groupby(_COL_ASSET)[_COL_VOLUME].rolling(_VOL_WINDOW, min_periods=_VOL_WINDOW).mean().reset_index(level=0, drop=True)
+    vol_ma5_safe = vol_ma5.replace(0, np.nan)
+    vol_ratio = df[_COL_VOLUME] / vol_ma5_safe
+
+    # 背离信号: -price_ret * max(0, 1-vol_ratio)
+    shrink_signal = np.maximum(0.0, 1.0 - vol_ratio)
+    df[_COL_PRICE_VOLUME_DIVERGENCE] = -price_ret_5d * shrink_signal
+
+    valid_count = int(df[_COL_PRICE_VOLUME_DIVERGENCE].notna().sum())
+    _logger.info(
+        "  有效 %s: %d (%.2f%%)，NaN %d 行",
+        _COL_PRICE_VOLUME_DIVERGENCE,
+        valid_count,
+        valid_count / len(df) * 100 if len(df) > 0 else 0,
+        len(df) - valid_count,
+    )
+
+    return df
+
+
+calculate_price_volume_divergence.required_cols = ["date", "asset", "close", "volume"]  # type: ignore[attr-defined]

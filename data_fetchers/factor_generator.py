@@ -31,21 +31,26 @@ try:
         calculate_industry_turnover_trend,
         calculate_intraday_intensity,
         calculate_kdj_j,
+        calculate_lower_shadow_ratio,  # v2.35: P5
         calculate_ma5_deviation,
+        calculate_ma5_slope,  # v2.35: P5
         calculate_momentum_strength,
         calculate_near_high_ratio_5,
         calculate_overnight_return,
         calculate_past_return_1d,
         calculate_positive_day_ratio_5,
         calculate_price_position,
+        calculate_price_volume_divergence,  # v2.35: P5
         calculate_return_3d,
         calculate_return_5d,
+        calculate_rsi_slope_3d,  # v2.35: P5
         calculate_tail_factors,
         calculate_tail_price_position_delta,
         calculate_tail_volume_shrink_delta,
         calculate_turnover_surge,
         calculate_turnover_surge_delta,
         calculate_volume_price_strength,
+        calculate_volume_shrink_rate,  # v2.35: P5
     )
     from .factor_calculator.fund_flow import calculate_capital_flow_block
     from .factor_calculator.industry_financial import calculate_industry_financial_block
@@ -64,21 +69,26 @@ except ImportError:
         calculate_industry_turnover_trend,
         calculate_intraday_intensity,
         calculate_kdj_j,
+        calculate_lower_shadow_ratio,  # v2.35: P5
         calculate_ma5_deviation,
+        calculate_ma5_slope,  # v2.35: P5
         calculate_momentum_strength,
         calculate_near_high_ratio_5,
         calculate_overnight_return,
         calculate_past_return_1d,
         calculate_positive_day_ratio_5,
         calculate_price_position,
+        calculate_price_volume_divergence,  # v2.35: P5
         calculate_return_3d,
         calculate_return_5d,
+        calculate_rsi_slope_3d,  # v2.35: P5
         calculate_tail_factors,
         calculate_tail_price_position_delta,
         calculate_tail_volume_shrink_delta,
         calculate_turnover_surge,
         calculate_turnover_surge_delta,
         calculate_volume_price_strength,
+        calculate_volume_shrink_rate,  # v2.35: P5
     )
     from data_fetchers.factor_calculator.fund_flow import calculate_capital_flow_block
     from data_fetchers.factor_calculator.industry_financial import calculate_industry_financial_block
@@ -128,6 +138,12 @@ _EXTENDED_FACTOR_COLS: tuple[str, ...] = (
     "industry_pe_trend",
     "capital_flow_ratio_trend",
     "capital_flow_intensity",
+    # v2.35: P5 补齐信息维度——趋势变化/量价背离因子
+    "rsi_slope_3d",
+    "ma5_slope",
+    "lower_shadow_ratio",
+    "volume_shrink_rate",
+    "price_volume_divergence",
 )
 
 # 收益数据列名
@@ -350,6 +366,37 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
         "factor_func": calculate_capital_flow_block,
         "output_cols": ("capital_flow_ratio_trend", "capital_flow_intensity"),
         "emit_valid_log": True,
+    },
+    # --- Step 12: P5 补齐信息维度因子（v2.35）---
+    {
+        "step_label": "Step 12: 计算趋势变化/量价背离因子...",
+        "factor_func": calculate_rsi_slope_3d,
+        "output_cols": ("rsi_slope_3d",),
+        "emit_valid_log": True,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_ma5_slope,
+        "output_cols": ("ma5_slope",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_lower_shadow_ratio,
+        "output_cols": ("lower_shadow_ratio",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_volume_shrink_rate,
+        "output_cols": ("volume_shrink_rate",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_price_volume_divergence,
+        "output_cols": ("price_volume_divergence",),
+        "emit_valid_log": False,
     },
 )
 

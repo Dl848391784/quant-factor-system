@@ -276,7 +276,7 @@ class TestCategoriesComplete:
 
     def test_categories_count(self):
         """FACTOR_CATEGORIES 有 34 个因子"""
-        assert len(FACTOR_CATEGORIES) == 34
+        assert len(FACTOR_CATEGORIES) == 39  # v2.35: P5 新增5个因子 34→39
 
     def test_dimensions_count(self):
         """CATEGORY_DIMENSIONS 有 8 个维度"""

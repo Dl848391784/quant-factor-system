@@ -601,3 +601,155 @@ def calculate_overnight_return(factor_df: pd.DataFrame, logger_arg: logging.Logg
 
 
 calculate_overnight_return.required_cols = ["open", "close"]  # type: ignore[attr-defined]
+
+
+# ============================================================================
+# v2.35: P5 补齐信息维度——趋势变化/K线形态因子（design.md §2.5）
+# ============================================================================
+
+_COL_RSI_6 = "rsi_6"
+_COL_RSI_SLOPE_3D = "rsi_slope_3d"
+_COL_MA5_SLOPE = "ma5_slope"
+_COL_LOWER_SHADOW_RATIO = "lower_shadow_ratio"
+
+_RSI_SLOPE_WINDOW = 3
+_MA5_WINDOW = 5
+_MA5_SLOPE_WINDOW = 3
+_LOWER_SHADOW_EPSILON = 1e-10
+
+
+def calculate_rsi_slope_3d(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """计算 RSI 3日斜率因子
+
+    公式: rsi_slope_3d = RSI(6, today) - RSI(6, today-3)
+
+    含义: RSI 从超卖区回升=卖压减弱，正值=动量向上拐头。
+    与现有 rsi（测量状态）互补：rsi 量"当前强弱"，rsi_slope_3d 量"强弱变化方向"。
+
+    边界处理:
+        - 前3天无完整窗口 → NaN
+        - rsi_6 为 NaN 时结果为 NaN
+
+    遵循 H5: IC方向不预判
+    """
+    _logger = get_module_logger(logger_arg)
+    _logger.debug("  输入 %s: %d 行", "calculate_rsi_slope_3d", len(factor_df))
+
+    df = factor_df.copy()
+    df = df.sort_values([_COL_ASSET, _COL_DATE])
+
+    rsi = df.groupby(_COL_ASSET)[_COL_RSI_6]
+    df[_COL_RSI_SLOPE_3D] = rsi.transform(lambda x: x - x.shift(_RSI_SLOPE_WINDOW))
+
+    valid_count = int(df[_COL_RSI_SLOPE_3D].notna().sum())
+    _logger.info(
+        "  有效 %s: %d (%.2f%%)，NaN %d 行",
+        _COL_RSI_SLOPE_3D,
+        valid_count,
+        valid_count / len(df) * 100 if len(df) > 0 else 0,
+        len(df) - valid_count,
+    )
+
+    return df
+
+
+calculate_rsi_slope_3d.required_cols = ["date", "asset", "rsi_6"]  # type: ignore[attr-defined]
+
+
+def calculate_ma5_slope(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """计算 MA5 3日斜率因子
+
+    公式: ma5 = rolling(close, 5).mean()
+          ma5_slope = (ma5_today - ma5_{today-3}) / ma5_{today-3}
+
+    含义: 均线走平/回升=下跌趋势可能结束，正值=中期趋势向上拐头。
+    与现有 ma5_deviation（测量偏离度）互补：ma5_deviation 量"价格离均线多远"，
+    ma5_slope 量"均线本身往哪走"。
+
+    边界处理:
+        - 前7天无完整窗口（5日均线 + 3日差分）→ NaN
+        - ma5_{today-3} = 0 → NaN（A 股 close 不为负，零值由 replace 排除）
+    """
+    _logger = get_module_logger(logger_arg)
+    _logger.debug("  输入 %s: %d 行", "calculate_ma5_slope", len(factor_df))
+
+    df = factor_df.copy()
+    df = df.sort_values([_COL_ASSET, _COL_DATE])
+
+    ma5 = df.groupby(_COL_ASSET)[_COL_CLOSE].rolling(_MA5_WINDOW, min_periods=_MA5_WINDOW).mean().reset_index(level=0, drop=True)
+    ma5_prev = df.groupby(_COL_ASSET)[_COL_CLOSE].rolling(_MA5_WINDOW, min_periods=_MA5_WINDOW).mean().shift(_MA5_SLOPE_WINDOW).reset_index(level=0, drop=True)
+
+    ma5_prev_safe = ma5_prev.replace(0, np.nan)
+    df[_COL_MA5_SLOPE] = (ma5 - ma5_prev_safe) / ma5_prev_safe
+
+    valid_count = int(df[_COL_MA5_SLOPE].notna().sum())
+    _logger.info(
+        "  有效 %s: %d (%.2f%%)，NaN %d 行",
+        _COL_MA5_SLOPE,
+        valid_count,
+        valid_count / len(df) * 100 if len(df) > 0 else 0,
+        len(df) - valid_count,
+    )
+
+    return df
+
+
+calculate_ma5_slope.required_cols = ["date", "asset", "close"]  # type: ignore[attr-defined]
+
+
+def calculate_lower_shadow_ratio(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """计算下影线比因子
+
+    公式: lower_shadow = max(0, min(open, close) - low)
+          total_range = high - low
+          lower_shadow_ratio = lower_shadow / total_range
+
+    含义: 下影线长=低位有承接买盘，值大=空方抛压被买盘吸收。
+    与现有 price_position（收盘价位置）互补：price_position 量"收盘在哪"，
+    lower_shadow_ratio 量"盘中有无承接"。
+
+    边界处理:
+        - high - low = 0 时（一字板），设为 0.5（中位，无信息）
+        - 正常结果值在 [0, 1] 范围
+    """
+    _logger = get_module_logger(logger_arg)
+    _logger.debug("  输入 %s: %d 行", "calculate_lower_shadow_ratio", len(factor_df))
+
+    df = factor_df.copy()
+
+    body_bottom = np.minimum(df[_COL_OPEN], df[_COL_CLOSE])
+    lower_shadow = np.maximum(0.0, body_bottom - df[_COL_LOW])
+    total_range = df[_COL_HIGH] - df[_COL_LOW]
+
+    zero_range_mask = np.abs(total_range) < _LOWER_SHADOW_EPSILON
+    df[_COL_LOWER_SHADOW_RATIO] = np.where(
+        zero_range_mask,
+        0.5,
+        lower_shadow / total_range,
+    )
+
+    valid_count = int(df[_COL_LOWER_SHADOW_RATIO].notna().sum())
+    _logger.info(
+        "  有效 %s: %d (%.2f%%)，NaN %d 行",
+        _COL_LOWER_SHADOW_RATIO,
+        valid_count,
+        valid_count / len(df) * 100 if len(df) > 0 else 0,
+        len(df) - valid_count,
+    )
+
+    return df
+
+
+calculate_lower_shadow_ratio.required_cols = ["open", "close", "high", "low"]  # type: ignore[attr-defined]

@@ -148,6 +148,12 @@ FACTOR_DEFINITIONS: dict[str, str] = {
     # -------------------------------------------------------------------------
     "capital_flow_ratio_trend": "资金流占比趋势: 行业Δ主力净流入占比赋个股(主力净流入/总成交额→行业均值→5日变化), 方向性因子IC=+0.0278",
     "capital_flow_intensity": "资金流强度: 行业|主力流入额|/总成交额赋个股(绝对额占比→行业均值), 方向性因子IC=+0.024, 覆盖26%",
+    # v2.35: P5 补齐信息维度——趋势变化/量价背离因子
+    "rsi_slope_3d": "RSI 3日斜率: RSI(6)的3日变化量, 正值=动量向上拐头",
+    "ma5_slope": "MA5 3日斜率: 5日均线3日变化率, 正值=中期趋势向上",
+    "lower_shadow_ratio": "下影线比: 下影线长度/全日振幅, 值大=低位有承接",
+    "volume_shrink_rate": "缩量率: 当日成交量/5日均量, <1=缩量(卖盘衰竭)",
+    "price_volume_divergence": "价跌量缩背离: -price_ret_5d * max(0, 1-vol_ratio), 正值=止跌信号",
 }
 
 # ============================================================================
@@ -263,6 +269,12 @@ FACTOR_NAME_TO_COL_MAP: dict[str, str] = {
     # -------------------------------------------------------------------------
     "capital_flow_ratio_trend": "capital_flow_ratio_trend",
     "capital_flow_intensity": "capital_flow_intensity",
+    # v2.35: P5 新增因子（列名=因子名，无后缀）
+    "rsi_slope_3d": "rsi_slope_3d",
+    "ma5_slope": "ma5_slope",
+    "lower_shadow_ratio": "lower_shadow_ratio",
+    "volume_shrink_rate": "volume_shrink_rate",
+    "price_volume_divergence": "price_volume_divergence",
 }
 
 # 反向映射：列名 → 因子名（自动推导，避免手工同步漂移）
@@ -323,6 +335,12 @@ FACTOR_CATEGORIES: dict[str, str] = {
     "industry_roe_trend": "industry",
     "industry_earnings_growth": "industry",
     "industry_pe_trend": "industry",
+    # v2.35: P5 补齐信息维度——趋势变化/量价背离因子
+    "rsi_slope_3d": "momentum",  # RSI变化率，动量维度
+    "ma5_slope": "momentum",  # 均线斜率，趋势维度
+    "lower_shadow_ratio": "price_position",  # K线形态，价格位置维度
+    "volume_shrink_rate": "volume",  # 缩量信号，量能维度
+    "price_volume_divergence": "volume",  # 量价背离，量能维度
 }
 
 # 维度列表（用于遍历，顺序无特殊含义）
