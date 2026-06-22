@@ -2195,7 +2195,7 @@ weight_engine = WeightEngine(dimension_weight_method="icir")  # 硬编码
 | v2.16 | 2026-06-11 | factor_loader.py v2.16: standardize_factors 新增 Winsorize 截断（±3σ），防止 momentum_strength 等比率类因子极端值导致 z-score 爆炸 |
 | v2.8 | 2026-06-10 | weight_engine.py v1.14: _apply_weights NaN 传播 Bug 修复（fillna(0)+divide+sum 替代 divide+sum(skipna=False)），让增量采集因子正常参与综合因子计算；M29 How/Don't 同步修正 |
 | v2.7 | 2026-06-04 | logger_config.py v2.0: 重写对齐 factor_ic 实现，自动文件输出；M4 扩展日志配置模块职责规范 |
-| v2.6 | 2026-06-03 | weight_selector.py v1.4: select_best_method() 添加空字典检查；流程文档 + 测试用例文档 + 边界测试 |
+| v2.6 | 2026-06-03 | weight_selector.py v1.4: select_best_method() 添加空字典检查；测试用例文档 + 边界测试 |
 | v2.5 | 2026-06-03 | stock_selector.py v1.2: top_n 默认值改为 3 + 因子列表从 composite 结果读取（非硬编码）；MODULE.md 补充因子来源规范 + 示例更新 |
 | v2.4 | 2026-06-03 | run_pipeline.py v1.3: 新增 Stage 5 权重选择 + Stage 6 股票选股；generate_factor_summary_report.py v2.2: 新增第七、八部分 |
 | v2.3 | 2026-06-03 | stock_selector.py v1.1: 添加版本历史、模块级 logger、完善类型注解 |
@@ -2218,7 +2218,6 @@ weight_engine = WeightEngine(dimension_weight_method="icir")  # 硬编码
 - 项目级规范:`PROJECT.md` (目录结构、开发检查清单)
 - 上游 IC 计算:`factor_ic/MODULE.md`
 - 下游分层回测:`backtest/MODULE.md`
-- 流程文档:`comprehensive_factor/docs/<脚本>_flow.md`
 - 测试用例:`comprehensive_factor/test_cases/<脚本>_test_cases.py`
 - 公共模块:`comprehensive_factor/common/` 各模块
 

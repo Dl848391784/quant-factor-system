@@ -27,7 +27,6 @@
 reverse_discovery/
 ├── MODULE.md           # 本文件（模块规范）
 ├── common/             # 模块内公共函数（待开发）
-├── docs/               # 流程文档（待开发）
 ├── logs/               # 日志目录（按 PROJECT.md 日志规范）
 ├── result/             # 输出目录（候选因子定义、训练子集、发现报告）
 ├── schemas/            # JSON Schema 校验文件（待第一个输出脚本实现时创建）
@@ -568,7 +567,6 @@ reverse_discovery/test_cases/
 | **paths.py 常量** | 首个输出脚本 PR | `paths.py` + AGENTS.md 跨模块数据路径表 |
 | **CLI 参数规范** | 首个 CLI 入口脚本 | "CLI 入口设计"新章节（参考 backtest M8） |
 | **logger_config.py** | 首个脚本 PR | `reverse_discovery/common/logger_config.py` |
-| **流程文档（_flow.md）** | 每个脚本 PR | `reverse_discovery/docs/<脚本名>_flow.md` |
 | **AGENTS.md 跨模块数据路径表条目** | 首个输出文件契约稳定 | AGENTS.md §1 表格 |
 | **具体特征发现算法（t-test / 互信息 / 树模型）选型** | Phase 1 收益画像探索后 | "发现方法"新章节 |
 | **FDR 校正方法选型** | 同上 | 同上 |
@@ -576,9 +574,8 @@ reverse_discovery/test_cases/
 **触发流程**（遵循 AGENTS.md 陷阱 1）：每补充一项，必须同步检查：
 1. 本 MODULE.md 对应章节
 2. 依赖的 PROJECT.md / AGENTS.md 表格
-3. 流程文档（`docs/<脚本名>_flow.md`）
-4. 测试用例（`test_cases/test_<脚本名>.py`）
-5. 时间标注（用户偏好：改动后必须立即更新流程文档 + 时间标注）
+3. 测试用例（`test_cases/test_<脚本名>.py`）
+4. 时间标注（用户偏好：改动后更新时间标注）
 
 ---
 

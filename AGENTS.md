@@ -45,7 +45,7 @@ Plan → Execute → Review → Debug
 | 阶段 | 核心动作 | 必做项 |
 |------|---------|--------|
 | **Plan** | 先探索再规划 | 读 PROJECT.md + MODULE.md；涉及 2+ 文件先提交 design.md；任务粒度 ≤3 文件 ≤200 行 |
-| **Execute** | 分步执行验证 | 每步完成后验证；运行脚本检查实际输出；同步更新流程文档 + 时间标注 |
+| **Execute** | 分步执行验证 | 每步完成后验证；运行脚本检查实际输出 |
 | **Review** | 两阶段评审 | ruff → pytest → Spec Compliance（对照规范）→ Code Quality |
 | **Debug** | 系统性调试 | 测试失败时加载 `systematic-debugging` skill，找根因再修复 |
 
@@ -86,7 +86,7 @@ Plan → Execute → Review → Debug
 | 5 | 因子方向：根据实际 IC 确定 | pytest 断言 |
 | 6 | 退出码：0=成功 / 1=运行时错误 / 2=import-time 配置或注册失败 | 手动检查 |
 | 7 | 测试位置：`<模块>/test_cases/` | pytest 发现 |
-| 8 | 配套文件：新建脚本同步创建流程文档 + pytest | 人工审核 |
+| 8 | 配套文件：新建脚本同步创建 pytest | 人工审核 |
 | 9 | 日志格式：使用模块 logger_config | ruff |
 | 10 | 异常链：`raise ... from e` | ruff B904 |
 | 11 | 路径导入：`from paths import` | import-linter |
@@ -115,7 +115,6 @@ Plan → Execute → Review → Debug
 ### 陷阱 3：跨规范层级写错位置
 - 项目级规范 → PROJECT.md
 - 模块级规范 → `<模块>/MODULE.md`
-- 流程级规范 → `<模块>/docs/<脚本名>_flow.md`
 
 写错层级 = 重复定义 / 遗漏更新。
 

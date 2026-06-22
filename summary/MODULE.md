@@ -20,9 +20,6 @@
 ```
 summary/
 ├── MODULE.md           # 本文件（模块规范）
-├── docs/               # 流程文档
-│   ├── generate_factor_summary_report_flow.md
-│   └── merge_factors_flow.md
 ├── logs/               # 日志目录（汇总报告生成日志）
 ├── result/             # 汇总报告输出目录
 │   └── factor_summary_report_YYYY-MM-DD.txt
@@ -511,7 +508,6 @@ rsi                -0.045     0.51      0.089       498
    - generate_factor_summary_report.py 深度审查优化（v1.2 → v1.3）
    - 删除 calculate_factor_correlation 未使用参数 ic_results
    - 补充返回类型注解（get_monotonicity_symbol、get_weight_method_display、format_weights、generate_correlation_section）
-   - 创建流程文档 docs/generate_factor_summary_report_flow.md
    - 创建 pytest 测试文件 test_cases/test_generate_factor_summary_report.py（25个测试用例）
 
 5. v1.4（2026-05-28）：
@@ -554,7 +550,6 @@ rsi                -0.045     0.51      0.089       498
    - 修复列名推断逻辑风险（新增 FACTOR_VALUE_COLUMNS 优先级列表，排除 REQUIRED_COLUMNS）
    - 添加 argparse 命令行参数支持（--factors/--output/--list-factors/--version）
    - 新增 list_available_factors 函数
-   - 创建流程文档 docs/merge_factors_flow.md
 
 9. v1.8（2026-05-28）：
    - merge_factors.py 第三轮深度审查（v1.2 → v1.3）
@@ -578,7 +573,6 @@ rsi                -0.045     0.51      0.089       498
    - 新增 DATA_CHECK_SOURCES 配置表
    - 报告新增第零部分（数据完整性检查）
    - 新增 get_expected_t_minus_1() 计算期望日期
-   - 更新流程文档 generate_factor_summary_report_flow.md v1.5
    - 新增测试用例 9 个（数据完整性检查相关）
 
 11. v2.0（2026-06-02）：

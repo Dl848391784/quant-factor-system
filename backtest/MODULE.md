@@ -1637,7 +1637,6 @@ factor_df = full_df[["date", "asset", "close", "factor_xxx"]].copy()
 **相关文档**:
 - 项目级规范:`PROJECT.md` (目录结构、开发检查清单)
 - 因子计算规范:`factor_ic/MODULE.md` (上游 IC 计算)
-- 流程文档:`backtest/docs/<因子>_layered_backtest_flow.md`
 - 测试用例:`backtest/test_cases/<因子>_layered_backtest_test_cases.md`
 - 公共模块:`backtest/common/` 各模块
 

@@ -42,7 +42,6 @@
 - [paths.py 使用规范](#pathspy-使用规范)
 - [输出目录规范](#输出目录规范)
 - [模块边界规范](#模块边界规范)
-- [流程文档配套规范](#流程文档配套规范)
 
 ### 模块文档
 - [factor_generator.py](#factor_generatorpy)
@@ -930,19 +929,17 @@ factor_df['middle'] = middle  # TypeError: incompatible index (pandas 3.0)
 
 ---
 
-### 流程文档配套规范
+### 配套文件规范
 
 新建脚本时必须同步创建配套文件:
 
 | 文件类型 | 位置 | 命名规则 | 示例 |
 |---------|------|---------|------|
-| 流程文档 | `<模块>/docs/` | `<脚本名>_flow.md` | `factor_generator_flow.md` |
 | 测试用例 | `<模块>/test_cases/` | `<脚本名>_test_cases.md` | `factor_generator_test_cases.md` |
 
 **新建脚本 checklist**:
 ```
 □ 创建脚本文件 (如 fetch_xxx.py)
-□ 同步创建流程文档 (docs/fetch_xxx_flow.md)
 □ 同步创建测试用例 (test_cases/fetch_xxx_test_cases.md)
 ```
 
@@ -1121,7 +1118,6 @@ factor_generator.py 的因子计算逻辑从 IC 脚本迁移:
 ## 待补充
 
 ```
-□ 各脚本流程文档(docs/fetch_xxx_flow.md)
 □ 各脚本测试用例(test_cases/fetch_xxx_test_cases.md)
 □ 日期处理模块(common/date_utils.py,交易日判断、日期范围计算)
 □ 数据验证模块(common/data_validator.py,字段完整性检查)
@@ -1147,7 +1143,7 @@ factor_generator.py 的因子计算逻辑从 IC 脚本迁移:
 
 | 版本 | 时间 | 更新内容 |
 |-----|------|---------|
-| v1.0 | 2026-05-27 17:00 | 初始创建:导入规范化、logger 参数化、类型注解精确化、__all__ 修复、docstring 补全 (Example 章节);配套 docs/factor_calculator_flow.md、test_cases/test_factor_calculator.py |
+| v1.0 | 2026-05-27 17:00 | 初始创建:导入规范化、logger 参数化、类型注解精确化、__all__ 修复、docstring 补全 (Example 章节);配套 test_cases/test_factor_calculator.py |
 | v1.1 | 2026-05-27 19:30 | 第二轮优化:版本历史添加、常量命名私有化 (DEFAULT_* → _DEFAULT_*)、__all__ 移到导入后位置 |
 | v1.2 | 2026-05-27 20:00 | 第三轮优化:内部函数 `_calculate_ewm_with_initial` docstring 补全、新增私有常量 (volume_ratio_window、forward_return_shift)、消除硬编码默认值 |
 | v1.3 | 2026-05-27 21:00 | 第四轮优化:提取列名常量 (6 输入 + 3 输出)、提取魔法数字常量 (4 个基准值 + 2 个阈值)、消除硬编码字符串和魔法数字 |

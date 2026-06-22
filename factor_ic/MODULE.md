@@ -2423,7 +2423,6 @@ pytest summary/test_cases/test_neutral_cell.py                     # 13 test
 
 **相关文档**:
 - 项目级规范:`PROJECT.md` (目录结构、开发检查清单)
-- 流程文档:`factor_ic/docs/ic_<因子名>_<周期>_flow.md`
 - 公共函数:`factor_ic/common/` 模块
 - 公共模块说明:`factor_ic/common/README.md`
 
