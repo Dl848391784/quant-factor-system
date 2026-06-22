@@ -574,8 +574,11 @@ FACTOR_ROLES: dict[str, str] = {
     "interaction_price_pos": "primary",
     "interaction_kdj": "confirmation",
     "interaction_bollinger": "confirmation",
-    # --- 过滤器（基本面恶化，批次8实现）---
-    # 暂无 filter 角色因子；基本面过滤在 stock_selector 中直接实现
+    # --- 过滤器（基本面恶化，硬过滤）---
+    # 第一性原理: master_l1_l6_roadmap.md §2.3
+    # 阈值依据: 5 日累计 -10% = 券商风控经验, A 股 ST 警示线邻近
+    # 注意: 该因子值由 stock_selector 实时从 return_5d 派生, 非 factor_generator 计算
+    "cum_return_5d_breakdown": "filter",
 }
 
 # 角色列表（用于遍历）
