@@ -186,7 +186,7 @@ class TestSortAndSelect:
 
     def test_negative_direction_ascending(self, mock_factor_df, mock_composite_factor):
         """测试反向因子升序排序"""
-        result, excluded_amp, _ = sort_and_select(
+        result, excluded_amp, _, _ = sort_and_select(
             mock_composite_factor,
             mock_factor_df,
             top_n=3,
@@ -204,7 +204,7 @@ class TestSortAndSelect:
     def test_positive_direction_descending(self, mock_factor_df, mock_composite_factor):
         """测试正向因子降序排序"""
         # 正向因子：降序（值越大越好）
-        result, excluded_amp, _ = sort_and_select(
+        result, excluded_amp, _, _ = sort_and_select(
             mock_composite_factor,
             mock_factor_df,
             top_n=3,
@@ -217,7 +217,7 @@ class TestSortAndSelect:
 
     def test_top_n_larger_than_total(self, mock_factor_df, mock_composite_factor):
         """测试 Top N 大于总股票数"""
-        result, excluded_amp, _ = sort_and_select(
+        result, excluded_amp, _, _ = sort_and_select(
             mock_composite_factor,
             mock_factor_df,
             top_n=100,  # 大于实际数量 10
@@ -232,7 +232,7 @@ class TestSortAndSelect:
         # 添加 NaN 值
         composite_with_nan = pd.Series([0.0, 0.5, np.nan, 1.0, np.nan, -1.0, -0.5, np.nan, 0.25, np.nan])
 
-        result, excluded_amp, _ = sort_and_select(
+        result, excluded_amp, _, _ = sort_and_select(
             composite_with_nan,
             mock_factor_df,
             top_n=3,
@@ -247,7 +247,7 @@ class TestSortAndSelect:
 
     def test_factor_values_included(self, mock_factor_df, mock_composite_factor):
         """测试因子值包含在结果中"""
-        result, excluded_amp, _ = sort_and_select(
+        result, excluded_amp, _, _ = sort_and_select(
             mock_composite_factor,
             mock_factor_df,
             top_n=1,
@@ -270,7 +270,7 @@ class TestSortAndSelect:
 
         composite = pd.Series([-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5])
 
-        result, excluded_amp, _ = sort_and_select(
+        result, excluded_amp, _, _ = sort_and_select(
             composite,
             df_with_amplitude,
             top_n=5,
@@ -376,7 +376,7 @@ class TestEdgeCases:
         df_with_amplitude = mock_factor_df.copy()
         df_with_amplitude["amplitude"] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
-        result, excluded_amp, _ = sort_and_select(
+        result, excluded_amp, _, _ = sort_and_select(
             mock_composite_factor,
             df_with_amplitude,
             top_n=3,
@@ -406,7 +406,7 @@ class TestWeightCoverage:
         # 权重键 = 列名（v1.13 修复后的正确格式）
         weights = {"rsi_6": 0.6, "volume_ratio_5": 0.4}
 
-        result, _, _ = sort_and_select(
+        result, _, _, _ = sort_and_select(
             mock_composite_factor,
             df,
             top_n=10,
@@ -430,7 +430,7 @@ class TestWeightCoverage:
         """所有因子都有值时覆盖率为 1.0"""
         weights = {"rsi_6": 0.5, "volume_ratio_5": 0.5}
 
-        result, _, _ = sort_and_select(
+        result, _, _, _ = sort_and_select(
             mock_composite_factor,
             mock_factor_df,
             top_n=3,
@@ -451,7 +451,7 @@ class TestWeightCoverage:
 
         weights = {"rsi_6": 0.6, "volume_ratio_5": 0.4}
 
-        result, _, _ = sort_and_select(
+        result, _, _, _ = sort_and_select(
             mock_composite_factor,
             df,
             top_n=10,

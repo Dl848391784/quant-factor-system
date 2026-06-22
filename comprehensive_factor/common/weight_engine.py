@@ -36,6 +36,7 @@ from comprehensive_factor.common.logger_config import get_logger
 # 调用方（composite_runner / run_pipeline 等）已将项目根加入 sys.path
 from factor_definitions import (
     FACTOR_COL_TO_NAME_MAP as _MODULE_COL_TO_NAME_MAP,
+    FACTOR_FAMILIES as _MODULE_FACTOR_FAMILIES,  # v2.40: 经济同源族（用于族级 cap）
     FACTOR_NAME_TO_COL_MAP as _MODULE_NAME_TO_COL_MAP,
 )
 
@@ -46,6 +47,13 @@ from factor_definitions import (
 #   名义 43.7% / 实际贡献 64% → 综合因子退化为单因子, 失去分散化优势
 # 选择 0.25 而非 0.30: 0.30 仍允许 amplitude_compression 占 30% (design.md §8)
 WEIGHT_CAP_DEFAULT = 0.25
+
+# v2.40: 经济同源族权重上限 (design.md feat_family_weight_cap_and_liquidity_filter §3.2)
+# 业界依据: AQR 多因子产品任一策略 ≤ 33%（Asness 2013）；本项目 8 族经济同源聚合
+# 防族级垄断: v2.39 实测 amplitude_family (amplitude_compression 25% +
+#   interaction_amp_compression 13.75%) = 38.75%，绕过维度权重再分配
+# 选择 0.30 而非 0.25: 0.30 允许 1 个族支配但不主导，剩余 70% 分配 6-8 族
+FAMILY_CAP_DEFAULT = 0.30
 
 
 class WeightMethodBase(ABC):
@@ -142,6 +150,11 @@ class WeightMethodBase(ABC):
         - 业界依据: Asness (2013), AQR 多因子产品经验上限
         - 防垄断: factor_summary_report_2026-06-22.txt 显示
           amplitude_compression 名义 43.7% / 实际贡献 64% → 综合因子退化为单因子
+
+        v2.40: 经济同源族权重上限 30% (design.md feat_family_weight_cap_and_liquidity_filter §3.2)
+        - 应用 _cap_family_weight: 同源信号族总权重不得超过 30%
+        - 防族级垄断: v2.39 实测 amplitude_family (amplitude_compression 25% +
+          interaction_amp_compression 13.75%) = 38.75%，绕过 _cap_single_factor_weight
         """
         # 使用标准化因子列
         std_cols = [f"{col}_std" for col in factor_cols]
@@ -153,6 +166,9 @@ class WeightMethodBase(ABC):
 
         # v2.38: 应用单因子权重上限（25% 软上限，迭代摊分）
         capped_weights = self._cap_single_factor_weight(weights, cap=WEIGHT_CAP_DEFAULT, logger=logger)
+
+        # v2.40: 应用族级权重上限（30% 软上限，按族内原权重比例分配）
+        capped_weights = self._cap_family_weight(capped_weights, factor_cols, cap=FAMILY_CAP_DEFAULT, logger=logger)
 
         # 向量化加权求和
         # 构建权重向量
@@ -289,17 +305,137 @@ class WeightMethodBase(ABC):
         return capped
 
     @staticmethod
+    def _cap_family_weight(
+        weights: dict[str, float],
+        factor_cols: list[str],
+        cap: float = 0.30,
+        max_iter: int = 20,
+        logger: logging.Logger | None = None,
+    ) -> dict[str, float]:
+        """族级权重上限（迭代摊分，与 _cap_single_factor_weight 同构）
+
+        v2.40 design.md §3.2:
+        - 把因子按 FACTOR_FAMILIES 聚合到经济同源族
+        - 任一族总权重不得超过 cap (默认 30%)
+        - 超过的族按族内原权重比例降权
+        - 超出部分按其他族原权重比例摊分
+
+        Args:
+            weights: 因子列名→权重（已经过单因子 cap）
+            factor_cols: 因子列名列表（用于反查因子名→族）
+            cap: 族级权重上限（默认 0.30）
+            max_iter: 最大迭代次数（防极端 NaN）
+            logger: 日志对象
+
+        Returns:
+            族级 cap 后的权重 dict（sum 仍 = 1.0）
+
+        Note:
+            - FACTOR_FAMILIES 为空 / 因子未归族 → 归 'uncategorized_family' 不参与 cap
+            - 若所有族都 ≤ cap → 直接返回
+            - 物理可行性: n_active_families × cap ≥ 1.0 时方程有解
+              (例如 4 族各 cap=30% = 120% ≥ 100% ✓)
+        """
+        # 容错: weights 为空或单因子
+        if not weights or len(weights) == 1:
+            return dict(weights)
+
+        # Step 1: 因子列名 → 族名（通过 _get_factor_name_from_col 反查）
+        # 使用临时实例方法（_get_factor_name_from_col 是 instance method）
+        # 为支持 staticmethod 调用，这里复制核心逻辑
+        col_to_family: dict[str, str] = {}
+        for col in factor_cols:
+            if col not in weights:
+                continue
+            # 优先反向映射
+            factor_name = _MODULE_COL_TO_NAME_MAP.get(col)
+            if factor_name is None:
+                # 回退：贪婪截断数字后缀
+                m = re.match(r"(.+)_(?:\d+[a-z]?|\d+)$", col)
+                factor_name = m.group(1) if m else col
+            family = _MODULE_FACTOR_FAMILIES.get(factor_name, "uncategorized_family")
+            col_to_family[col] = family
+
+        # Step 2: 按族聚合权重
+        capped = dict(weights)
+
+        for _ in range(max_iter):
+            family_totals: dict[str, float] = {}
+            for col, w in capped.items():
+                fam = col_to_family.get(col, "uncategorized_family")
+                family_totals[fam] = family_totals.get(fam, 0.0) + abs(w)
+
+            # 找出超限的族
+            over_families = {f: t for f, t in family_totals.items() if t > cap + 1e-9}
+            if not over_families:
+                break
+
+            # 收集 under 族（含恰好 = cap 的）
+            under_families = {f: t for f, t in family_totals.items() if t <= cap + 1e-9}
+            under_sum = sum(under_families.values())
+            if under_sum <= 1e-12:
+                # 所有族都 over: n × cap < 1.0 即无解，但当前 cap=0.30 + ≥4 族实际不可能
+                if logger is not None:
+                    logger.warning("_cap_family_weight: 所有族均超 cap=%.2f, 物理不可行, 跳过本轮", cap)
+                break
+
+            # Step 3: 对超限族按族内原权重比例降权至 cap
+            total_excess = 0.0
+            for fam, total in over_families.items():
+                scale = cap / total
+                fam_cols = [c for c, f in col_to_family.items() if f == fam]
+                for c in fam_cols:
+                    new_w = capped[c] * scale
+                    total_excess += abs(capped[c]) - abs(new_w)
+                    capped[c] = new_w
+
+            # Step 4: 把 excess 按 under 族当前 capped 权重比例摊分
+            # 修复 bug: 必须用 capped (而非 weights), 否则摊分比例与族总和不一致导致 sum 漂移
+            under_factor_total = sum(abs(capped[c]) for c, f in col_to_family.items() if f in under_families)
+            if under_factor_total > 1e-12:
+                for c, f in col_to_family.items():
+                    if f in under_families:
+                        share = abs(capped[c]) / under_factor_total
+                        sign = 1 if capped[c] >= 0 else -1
+                        capped[c] += total_excess * share * sign
+
+        # Step 5: 计算最终族分布，记录日志
+        if logger is not None:
+            final_totals: dict[str, float] = {}
+            for c, w in capped.items():
+                fam = col_to_family.get(c, "uncategorized_family")
+                final_totals[fam] = final_totals.get(fam, 0.0) + abs(w)
+            capped_families = [f for f, t in final_totals.items() if t > cap - 1e-3]
+            if capped_families:
+                logger.info(
+                    "_cap_family_weight cap=%.2f: 触达上限族 %s, 族分布 %s",
+                    cap,
+                    capped_families,
+                    {f: round(t, 4) for f, t in sorted(final_totals.items(), key=lambda x: -x[1])},
+                )
+
+        return capped
+
+    @staticmethod
     def _cap_weight_matrix(
         W: np.ndarray,
         cap: float = 0.25,
         max_iter: int = 20,
+        factor_families: list[int] | None = None,  # v2.40: 族索引，启用族级 cap
+        family_cap: float = 0.30,  # v2.40: 族级上限
     ) -> np.ndarray:
         """权重矩阵行级软上限（向量化版本, 用于 RollingICIR 每日动态权重）
+
+        v2.40: 增加 family_cap 族级限制
+        - factor_families: 每列对应的族 ID（int），None 时跳过族级 cap
+        - family_cap: 族级上限（默认 0.30）
 
         Args:
             W: shape (n_days, n_factors), 每行 sum == 1.0 (假定已归一化)
             cap: 单因子最大权重
             max_iter: 迭代上限
+            factor_families: 每列对应的族 ID（可选，启用族级 cap）
+            family_cap: 族级权重上限（默认 0.30）
 
         Returns:
             capped W, 每行 sum == 1.0
@@ -359,6 +495,46 @@ class WeightMethodBase(ABC):
                 # 摊分: W += excess[d] × ratio[d, f]
                 addend = excess_per_row[:, None] * ratio
                 W[normal_rows] = W[normal_rows] + addend[normal_rows]
+
+        # v2.40: 族级 cap（在单因子 cap 之后再约束族级总权重）
+        if factor_families is not None:
+            fam_arr = np.asarray(factor_families, dtype=int)
+            unique_fams = np.unique(fam_arr)
+            n_active_families = len(unique_fams)
+            # 物理可行性: n_families × family_cap ≥ 1.0
+            if n_active_families * family_cap >= 1.0 - 1e-9:
+                # 构建 (n_families, n_factors) 选择矩阵 S，S[k, f]=1 表示因子 f 属于族 k
+                S = np.zeros((n_active_families, W.shape[1]), dtype=float)
+                for k, fam_id in enumerate(unique_fams):
+                    S[k, fam_arr == fam_id] = 1.0
+
+                for _ in range(max_iter):
+                    # 族总权重: F = W @ S.T → shape (n_days, n_families)
+                    F = W @ S.T
+                    over_fam_mask = family_cap + EPS < F
+                    if not over_fam_mask.any():
+                        break
+
+                    # 每行超额（按族汇总）
+                    family_excess = np.where(over_fam_mask, F - family_cap, 0.0).sum(axis=1)
+
+                    # 超限族内按比例降权: scale[d, k] = family_cap / F[d, k] if over
+                    scale_factor = np.where(over_fam_mask, family_cap / np.maximum(F, EPS), 1.0)
+                    # 把 scale 映射到因子级: factor_scale[d, f] = scale_factor[d, fam[f]]
+                    factor_scale = scale_factor[:, fam_arr]
+                    W = W * factor_scale
+
+                    # under 族总权重和（用于摊分）
+                    under_fam_mask = ~over_fam_mask
+                    under_fam_sum = np.where(under_fam_mask, F, 0.0).sum(axis=1)
+
+                    # 摊分: 在 under 族内按各因子原权重比例分摊 excess
+                    safe_under_sum = np.where(under_fam_sum > EPS, under_fam_sum, 1.0)
+                    # under_fam[d, k]=1 if family k under cap
+                    under_factor_mask = under_fam_mask[:, fam_arr]  # (n_days, n_factors)
+                    under_factor_w = np.where(under_factor_mask, W, 0.0)
+                    addend = family_excess[:, None] * (under_factor_w / safe_under_sum[:, None])
+                    W = W + addend
 
         return W
 
@@ -1031,10 +1207,27 @@ class RollingICIRWeightMethod(WeightMethodBase):
         # v2.38: 行级单因子权重上限（design.md feat_interaction_exemption_and_weight_cap §4.3）
         # RollingICIR 每日动态权重 _dim_weight 可能某日某因子占比过高（如 amplitude_compression 43.7%）
         # 用 _cap_weight_matrix 对每行做 25% 截断+剩余比例摊分, 保持每行 sum=1.0
+
+        # v2.40: 构建族索引（用于族级 cap）
+        # 因子列名 → 族名 → 整数 ID
+        family_id_map: dict[str, int] = {}
+        family_indices: list[int] = []
+        for col in factor_cols:
+            factor_name = self._get_factor_name_from_col(col)
+            family = _MODULE_FACTOR_FAMILIES.get(factor_name, "uncategorized_family")
+            if family not in family_id_map:
+                family_id_map[family] = len(family_id_map)
+            family_indices.append(family_id_map[family])
+
         dim_weight_cols = [f"{col}_dim_weight" for col in factor_cols]
         W = factor_df[dim_weight_cols].to_numpy(dtype=float)
         # 仅对有效行（非全 NaN）进行 cap; NaN 会被 fillna(1/n) 保护
-        W_capped = self._cap_weight_matrix(W, cap=WEIGHT_CAP_DEFAULT)
+        W_capped = self._cap_weight_matrix(
+            W,
+            cap=WEIGHT_CAP_DEFAULT,
+            factor_families=family_indices,
+            family_cap=FAMILY_CAP_DEFAULT,
+        )
         # 写回 _dim_weight 列
         for i, col in enumerate(factor_cols):
             factor_df[f"{col}_dim_weight"] = W_capped[:, i]

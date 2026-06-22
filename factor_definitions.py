@@ -65,6 +65,7 @@ __all__ = [
     "FACTOR_NAME_TO_COL_MAP",
     "FACTOR_COL_TO_NAME_MAP",
     "FACTOR_CATEGORIES",
+    "FACTOR_FAMILIES",  # v2.40: 经济同源族（粗粒度，用于族级权重 cap）
     "CATEGORY_DIMENSIONS",
     "get_factor_definition",
     "get_all_factor_names",
@@ -398,6 +399,93 @@ FACTOR_CATEGORIES: dict[str, str] = {
     "interaction_price_pos": "momentum_x_price_position",
     "interaction_kdj": "momentum_x_momentum",
     "interaction_bollinger": "momentum_x_price_position",
+}
+
+
+# ============================================================================
+# v2.40: 经济同源族（粗粒度分类，用于族级权重上限）
+#
+# 与 FACTOR_CATEGORIES 的区别:
+#   - FACTOR_CATEGORIES (8 维度): 细粒度分类，用于维度感知去重 + 维度权重再分配
+#   - FACTOR_FAMILIES (~8 族):   粗粒度经济同源聚合，用于族级权重 cap (30%)
+#
+# 设计动机 (designs/feat_family_weight_cap_and_liquidity_filter.md §3.1):
+#   v2.39 验证后发现"振幅信号族" amplitude_compression (volatility) +
+#   interaction_amp_compression (momentum_x_volatility) = 38.75% 权重，
+#   绕过维度权重再分配（被标为两个不同维度）。
+#
+# 经济同源原则:
+#   interaction_amp_compression 原始信号 = weakness × amplitude_compression_z
+#   → 与 amplitude_compression 同源，应归入 amplitude_family
+#
+# 与 FACTOR_CATEGORIES 解耦:
+#   族粒度由"信号原料"决定，不严格遵循维度命名空间。
+#   维度命名空间可能因 weight_engine 维度再分配考虑分裂，但族粒度不分。
+# ============================================================================
+FACTOR_FAMILIES: dict[str, str] = {
+    # === 振幅族 ===
+    "amplitude": "amplitude_family",
+    "amplitude_delta": "amplitude_family",
+    "amplitude_compression": "amplitude_family",
+    "range_compression": "amplitude_family",
+    "interaction_amplitude": "amplitude_family",
+    "interaction_amp_compression": "amplitude_family",
+    # === 量能族（成交量 / 换手率） ===
+    "volume_ratio": "volume_family",
+    "volume_decay_rate": "volume_family",
+    "volume_shrink_rate": "volume_family",
+    "volume_price_strength": "volume_family",
+    "price_volume_divergence": "volume_family",
+    "turnover_surge": "volume_family",
+    "turnover_surge_delta": "volume_family",
+    "turnover_decay_rate": "volume_family",
+    "interaction_turnover": "volume_family",
+    "interaction_intraday": "volume_family",
+    "intraday_intensity": "volume_family",
+    # === 价格位置族 ===
+    "price_position": "price_family",
+    "bollinger_pb": "price_family",
+    "tail_price_position": "price_family",
+    "tail_price_position_delta": "price_family",
+    "interaction_price_pos": "price_family",
+    "interaction_near_high": "price_family",
+    "interaction_bollinger": "price_family",
+    # === 动量族 ===
+    "momentum_strength": "momentum_family",
+    "return_3d": "momentum_family",
+    "return_5d": "momentum_family",
+    "rsi": "momentum_family",
+    "kdj_j": "momentum_family",
+    "ma5_deviation": "momentum_family",
+    "ma5_slope": "momentum_family",
+    "rsi_slope_3d": "momentum_family",
+    "near_high_ratio_5": "momentum_family",
+    "past_return_1d": "momentum_family",
+    "positive_day_ratio_5": "momentum_family",
+    "return_acceleration_5d": "momentum_family",
+    "downside_deceleration": "momentum_family",
+    "interaction_ma5_dev": "momentum_family",
+    "interaction_kdj": "momentum_family",
+    # === 尾盘行为族 ===
+    "tail_price_slope": "tail_family",
+    "tail_price_volume_intensity": "tail_family",
+    "tail_volume_acceleration": "tail_family",
+    "tail_volume_shrink": "tail_family",
+    "tail_volume_shrink_delta": "tail_family",
+    # === 隔夜族 ===
+    "overnight_ret": "overnight_family",
+    # === 资金流族 ===
+    "capital_flow_ratio_trend": "capital_flow_family",
+    "capital_flow_intensity": "capital_flow_family",
+    # === 行业族 ===
+    "industry_momentum_5d": "industry_family",
+    "industry_turnover_trend": "industry_family",
+    "industry_amplitude_trend": "industry_family",
+    "industry_roe_trend": "industry_family",
+    "industry_earnings_growth": "industry_family",
+    "industry_pe_trend": "industry_family",
+    # === 其他/未归类（独立族，不被族 cap 主导） ===
+    "lower_shadow_ratio": "uncategorized_family",
 }
 
 # 维度列表（用于遍历，顺序无特殊含义）

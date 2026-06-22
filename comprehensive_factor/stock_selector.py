@@ -120,6 +120,9 @@ class StockSelectorConfig:
     factor_direction: str = "negative"  # 综合因子方向（反向）
     rolling_window: int = 60  # 滚动 ICIR 窗口
     min_amplitude: float = 0.01  # 最低振幅阈值（排除不可交易的一字板涨停股，振幅<1%无法买入）
+    # v2.40: 流动性过滤参数（design.md feat_family_weight_cap_and_liquidity_filter §3.3）
+    enable_liquidity_filter: bool = True  # 启用流动性过滤（默认启用，切除尾部成交额）
+    min_amount_percentile: float = 0.05  # 截面分位（默认 5%，自适应每日成交额分布）
 
     # === 数据路径 ===（问题 4 修复：default_factory 保证延迟求值）
     data_source: Path = field(default_factory=lambda: DEFAULT_DATA_SOURCE)
@@ -333,8 +336,10 @@ def sort_and_select(
     min_weight_coverage: float = 0.5,  # v1.10→v1.17: 最低因子权重覆盖率（50%安全网，不再需要70%因为v1.17中性填充已天然惩罚缺失因子）
     min_amplitude: float = 0.01,  # v1.12: 最低振幅阈值（排除不可交易的一字板涨停股）
     max_exposure: float = 0.7,  # v2.20: 单因子最大贡献占比（超限按比例缩减综合因子值）
+    enable_liquidity_filter: bool = False,  # v2.40: 流动性过滤（成交额截面分位）
+    min_amount_percentile: float = 0.05,  # v2.40: 底部 5% 成交额排除（百分位自适应）
     logger: logging.Logger | None = None,
-) -> tuple[list[dict[str, Any]], int, int]:
+) -> tuple[list[dict[str, Any]], int, int, int]:
     """排序并选出 Top N 股票
 
     Args:
@@ -346,10 +351,13 @@ def sort_and_select(
         weights: 因子权重字典（v1.10: 用于覆盖率过滤）
         min_weight_coverage: 最低因子权重覆盖率阈值（默认0.5=50%安全网）
         min_amplitude: 最低振幅阈值（v1.12: 默认0.01=1%，排除一字板涨停股）
+        max_exposure: 单因子最大贡献占比（v2.20: 默认0.7=70%）
+        enable_liquidity_filter: v2.40: 启用流动性过滤（默认 False）
+        min_amount_percentile: v2.40: 最低成交额分位（默认0.05=排除底部5%）
         logger: 日志对象（默认使用模块级 _logger）
 
     Returns:
-        Tuple[选股结果列表, 振幅过滤排除数, 覆盖率过滤排除数]
+        Tuple[选股结果列表, 振幅过滤排除数, 覆盖率过滤排除数, 流动性过滤排除数]
         选股结果列表结构：
         [
             {"rank": 1, "code": "000001", "composite_value": -2.35, "factor_values": {...}},
@@ -362,6 +370,13 @@ def sort_and_select(
         - negative（反向）: 升序排序，值越小越好
         - 缺失值（NaN）不参与排序，排在最后
         - v1.10: 新增因子覆盖率过滤——缺失因子权重之和超过阈值则排除
+
+        v2.40 流动性过滤设计：
+        - amount = volume × close（元，实际成交额）
+        - 截面分位自适应：排除每天成交额最低的 5%（min_amount_percentile）
+        - 不使用硬编码阈值（如 500 万），因为牛市/熊市的成交额量级差异大
+        - 核心思想：切除尾部流动性最差的股票，避免价格扭曲
+        - 需要 volume + close 列同时存在时才启用
 
     Contract:
         - 问题 6 修复：composite_factor.index 必须与 factor_df.index 对齐
@@ -464,6 +479,38 @@ def sort_and_select(
             # 清理临时列
             result_df.drop(columns=contrib_cols, inplace=True)
 
+    # v2.40: 流动性过滤（截面分位自适应，design.md §3.3）
+    # 切除尾部成交额最低的 min_amount_percentile（默认 5%）股票
+    # 数据：amount = volume × close（元）；不使用硬编码阈值
+    excluded_by_liquidity = 0
+    if enable_liquidity_filter:
+        has_volume = "volume" in result_df.columns
+        has_close = "close" in result_df.columns
+        if has_volume and has_close:
+            amount = result_df["volume"].astype(float) * result_df["close"].astype(float)
+            # 仅对 valid（综合因子非 NaN）股票计算阈值
+            valid_amount = amount[valid_mask & amount.notna() & (amount > 0)]
+            if len(valid_amount) > 0:
+                threshold = valid_amount.quantile(min_amount_percentile)
+                liquidity_mask = (amount >= threshold) & amount.notna()
+                excluded_by_liquidity = int(valid_mask.sum() - (valid_mask & liquidity_mask).sum())
+                if excluded_by_liquidity > 0:
+                    logger.info(
+                        "流动性过滤: P%d=%.0f 万元, 排除 %d 只股票（成交额过低，IC 关系失效区域）",
+                        int(min_amount_percentile * 100),
+                        threshold / 1e4,
+                        excluded_by_liquidity,
+                    )
+                valid_mask = valid_mask & liquidity_mask
+            else:
+                logger.warning("流动性过滤跳过: 无有效 amount 数据")
+        else:
+            logger.warning(
+                "流动性过滤跳过: factor_df 缺少 volume/close 列 (has_volume=%s, has_close=%s)",
+                has_volume,
+                has_close,
+            )
+
     # 排序（根据因子方向）
     # ascending=True 升序（反向因子：值越小越好）
     # ascending=False 降序（正向因子：值越大越好）
@@ -536,7 +583,7 @@ def sort_and_select(
             }
         )
 
-    return result_list, excluded_by_amplitude, excluded_by_coverage
+    return result_list, excluded_by_amplitude, excluded_by_coverage, excluded_by_liquidity
 
 
 def apply_stabilization_filter(
@@ -658,6 +705,7 @@ def build_result(
     flipped_factors: list[str] | None = None,  # v1.10: 取反因子列表（报告展示需要）
     excluded_by_amplitude: int = 0,  # v1.12: 振幅过滤排除数
     excluded_by_coverage: int = 0,  # v1.15: 覆盖率过滤排除数
+    excluded_by_liquidity: int = 0,  # v2.40: 流动性过滤排除数
     excluded_by_confirmation: int = 0,  # v2.35: P6 企稳确认过滤排除数
     min_weight_coverage: float = 0.5,  # v1.15: 覆盖率阈值
     logger: logging.Logger | None = None,
@@ -704,6 +752,8 @@ def build_result(
             # v1.15: 覆盖率过滤信息（报告展示需要）
             "excluded_by_coverage": excluded_by_coverage,
             "min_weight_coverage": min_weight_coverage,
+            # v2.40: 流动性过滤信息（成交额截面分位过滤）
+            "excluded_by_liquidity": excluded_by_liquidity,
             # v2.35: P6 企稳确认过滤信息
             "excluded_by_confirmation": excluded_by_confirmation,
         },
@@ -824,6 +874,21 @@ def select_stocks(
     # 类型转换：load_factor_values 返回 DataFrame（pandas DataFrame 构造返回类型不稳定）
     factor_df = cast(pd.DataFrame, factor_df_raw)
 
+    # v2.40: 独立加载流动性列（volume + close），不污染 standardize_factors 工作流
+    # 设计依据：composite_runner OOM 修复 — 把 liquidity 与因子标准化解耦
+    # stock_selector 阶段 factor_df 已被 selection_date 过滤为单日，merge 成本极低
+    if config.enable_liquidity_filter:
+        logger.info("加载流动性数据（volume + close）...")
+        try:
+            liquidity_df_raw = load_factor_values(["volume", "close"], config.data_source, logger)
+            liquidity_df = cast(pd.DataFrame, liquidity_df_raw)
+            logger.info("流动性数据加载完成: %d 条", len(liquidity_df))
+        except Exception:
+            logger.exception("流动性数据加载失败，将跳过流动性过滤")
+            liquidity_df = None
+    else:
+        liquidity_df = None
+
     # Step 5: 确定选股日期
     selection_date = config.selection_date  # 问题 5 修复：用局部变量持有
     if selection_date is None:
@@ -843,6 +908,19 @@ def select_stocks(
     # 问题 1 修复：合并为一行 mask 过滤，避免引入临时列污染上游对象
     mask = factor_df["date"].apply(lambda d: pd.Timestamp(d).strftime("%Y-%m-%d")) == selection_date
     factor_df = factor_df[mask].copy()
+
+    # v2.40: 单日 factor_df 上 merge volume/close（仅 ~3000 行，开销极小）
+    if liquidity_df is not None:
+        liq_mask = liquidity_df["date"].apply(lambda d: pd.Timestamp(d).strftime("%Y-%m-%d")) == selection_date
+        liquidity_day = liquidity_df[liq_mask][["asset", "volume", "close"]].copy()
+        before_n = len(factor_df)
+        factor_df = factor_df.merge(liquidity_day, on="asset", how="left")
+        logger.info(
+            "流动性列已 merge 到 factor_df: %d 行 → %d 行（volume/close 覆盖率 %.2f%%）",
+            before_n,
+            len(factor_df),
+            factor_df["volume"].notna().mean() * 100,
+        )
 
     # 问题 2 修复：变量名改为 stocks_on_date，避免误解为"全部股票数"
     stocks_on_date = len(factor_df)
@@ -999,7 +1077,7 @@ def select_stocks(
 
     # v2.35: P6 企稳确认过滤——候选池翻倍，为过滤预留递补空间
     candidate_n = config.top_n * 2
-    top_stocks, excluded_by_amplitude, excluded_by_coverage = sort_and_select(
+    top_stocks, excluded_by_amplitude, excluded_by_coverage, excluded_by_liquidity = sort_and_select(
         composite_factor,
         factor_df,
         candidate_n,
@@ -1007,6 +1085,8 @@ def select_stocks(
         factor_cols,
         weights=selection_weights,  # v1.10: 传入权重用于覆盖率过滤
         min_amplitude=config.min_amplitude,  # v1.12: 传入振幅阈值
+        enable_liquidity_filter=config.enable_liquidity_filter,  # v2.40
+        min_amount_percentile=config.min_amount_percentile,  # v2.40
         logger=logger,
     )
 
@@ -1032,6 +1112,7 @@ def select_stocks(
         flipped_factors=flipped_factors,
         excluded_by_amplitude=excluded_by_amplitude,  # v1.12: 振幅过滤排除数
         excluded_by_coverage=excluded_by_coverage,  # v1.15: 覆盖率过滤排除数
+        excluded_by_liquidity=excluded_by_liquidity,  # v2.40: 流动性过滤排除数
         excluded_by_confirmation=excluded_by_confirmation,  # v2.35: P6 企稳过滤排除数
         logger=logger,
     )

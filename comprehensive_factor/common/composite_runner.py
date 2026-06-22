@@ -285,6 +285,7 @@ def run_composite_backtest(
 
         del full_df
         import gc
+
         gc.collect()
         logger.info("full_df 已释放（v2.28b: auto_select 阶段提前释放）")
 
@@ -348,6 +349,9 @@ def run_composite_backtest(
 
         # v2.28b: 从 all_factor_df 提取选中因子子集，再释放中间数据
         # 不再 del all_factor_df 后重新加载 full_df（full_df 已在 L287 释放）
+        # v2.40 (OOM fix): factor_df 只含 [date, asset, *factor_cols]，
+        #   volume/close 不进入 factor_df（stock_selector 独立加载），
+        #   避免 standardize_factors 内多次 copy 放大 OOM
         factor_selected_cols = ["date", "asset"] + factor_cols
         factor_df = all_factor_df[factor_selected_cols].copy()
         logger.info("选中因子数据已从 all_factor_df 提取: %d 列 → %d 条记录", len(factor_selected_cols), len(factor_df))
@@ -398,6 +402,7 @@ def run_composite_backtest(
     # 1. 加载因子数据
     # v2.28b: auto_select=True 时 factor_df 和 return_df 已在 auto_select 内部提取，full_df 已释放
     #   auto_select=False 时需要从 full_df 提取 factor_df 和 return_df，然后释放 full_df
+    # v2.40 (OOM fix): volume/close 不进入 factor_df（stock_selector 独立加载）
     if not auto_select:
         logger.info("提取因子数据（从已加载的 full_df）...")
         factor_required_cols = ["date", "asset"] + factor_cols
@@ -423,6 +428,7 @@ def run_composite_backtest(
 
         del full_df
         import gc
+
         gc.collect()
         logger.info("full_df 已释放（v2.28b: auto_select=False 分支释放）")
     else:

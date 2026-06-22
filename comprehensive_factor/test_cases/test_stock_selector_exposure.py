@@ -58,7 +58,7 @@ class TestMaxExposure:
         composite, factor_df, weights, factor_cols = self._build_inputs(factor_a, factor_b)
 
         # 无暴露限制：stock_0 排名第 1（composite=-1.5 < -1.0）
-        result_no_limit, _, _ = sort_and_select(
+        result_no_limit, _, _, _ = sort_and_select(
             composite.copy(),
             factor_df.copy(),
             top_n=2,
@@ -71,7 +71,7 @@ class TestMaxExposure:
         assert result_no_limit[0]["code"] == "stock_0000"
 
         # 有暴露限制（50%）：stock_0 被缩减 → 排名下降
-        result_with_limit, _, _ = sort_and_select(
+        result_with_limit, _, _, _ = sort_and_select(
             composite.copy(),
             factor_df.copy(),
             top_n=2,
@@ -91,7 +91,7 @@ class TestMaxExposure:
         factor_b = np.array([-2.0, -1.0, 0.0])
         composite, factor_df, weights, factor_cols = self._build_inputs(factor_a, factor_b)
 
-        result, _, _ = sort_and_select(
+        result, _, _, _ = sort_and_select(
             composite.copy(),
             factor_df.copy(),
             top_n=3,
@@ -111,7 +111,7 @@ class TestMaxExposure:
         factor_b = np.array([0.0, -1.0])
         composite, factor_df, weights, factor_cols = self._build_inputs(factor_a, factor_b)
 
-        result, _, _ = sort_and_select(
+        result, _, _, _ = sort_and_select(
             composite.copy(),
             factor_df.copy(),
             top_n=2,
@@ -134,7 +134,7 @@ class TestMaxExposure:
         factor_b = np.array([0.1])
         composite, factor_df, weights, factor_cols = self._build_inputs(factor_a, factor_b)
 
-        result, _, _ = sort_and_select(
+        result, _, _, _ = sort_and_select(
             composite.copy(),
             factor_df.copy(),
             top_n=1,
