@@ -121,7 +121,7 @@ class StockSelectorConfig:
     rolling_window: int = 60  # 滚动 ICIR 窗口
     min_amplitude: float = 0.01  # 最低振幅阈值（排除不可交易的一字板涨停股，振幅<1%无法买入）
     # v2.40: 流动性过滤参数（design.md feat_family_weight_cap_and_liquidity_filter §3.3）
-    enable_liquidity_filter: bool = True  # 启用流动性过滤（默认启用，切除尾部成交额）
+    enable_liquidity_filter: bool = False  # v2.41 (R1): 默认关闭——已前置到 factor_generator (_mark_low_liquidity)
     min_amount_percentile: float = 0.05  # 截面分位（默认 5%，自适应每日成交额分布）
 
     # === 数据路径 ===（问题 4 修复：default_factory 保证延迟求值）
@@ -336,7 +336,7 @@ def sort_and_select(
     min_weight_coverage: float = 0.5,  # v1.10→v1.17: 最低因子权重覆盖率（50%安全网，不再需要70%因为v1.17中性填充已天然惩罚缺失因子）
     min_amplitude: float = 0.01,  # v1.12: 最低振幅阈值（排除不可交易的一字板涨停股）
     max_exposure: float = 0.7,  # v2.20: 单因子最大贡献占比（超限按比例缩减综合因子值）
-    enable_liquidity_filter: bool = False,  # v2.40: 流动性过滤（成交额截面分位）
+    enable_liquidity_filter: bool = False,  # v2.41 (R1): 默认关闭——已前置到 factor_generator
     min_amount_percentile: float = 0.05,  # v2.40: 底部 5% 成交额排除（百分位自适应）
     logger: logging.Logger | None = None,
 ) -> tuple[list[dict[str, Any]], int, int, int]:
@@ -352,7 +352,10 @@ def sort_and_select(
         min_weight_coverage: 最低因子权重覆盖率阈值（默认0.5=50%安全网）
         min_amplitude: 最低振幅阈值（v1.12: 默认0.01=1%，排除一字板涨停股）
         max_exposure: 单因子最大贡献占比（v2.20: 默认0.7=70%）
-        enable_liquidity_filter: v2.40: 启用流动性过滤（默认 False）
+        enable_liquidity_filter: v2.41 (R1): 紧急开关（默认 False）.
+            R1 已将流动性过滤前置到 factor_generator (_mark_low_liquidity, 截面 P5),
+            上游加载器 (factor_loader / data_loader / layered_backtest_runner) 自动过滤.
+            此开关仅在需二次兜底时手动启用, 默认关闭以避免重复过滤.
         min_amount_percentile: v2.40: 最低成交额分位（默认0.05=排除底部5%）
         logger: 日志对象（默认使用模块级 _logger）
 
