@@ -248,6 +248,11 @@ interaction_turnover、interaction_amp_compression 按同样模式增量加入�
 
 ## 8. 验收标准
 
+> **⚠️ Post-Mortem 注（2026-06-22 v2.36 实施后追加）**：
+> 验收标准 #1 用的 "+0.005~+0.035 全样本均值" 是**池化全样本 Spearman IC 口径**
+> （SQLite 一次性 spearmanr(factor, return)），与 pipeline 实际产出的 **逐日截面 IC 等权均值** 不等价。
+> 详见 §10 Post-Mortem。
+
 1. ✅ 3 个交互因子 IC 全样本均值在 [+0.005, +0.035]，方向="positive"
 2. ✅ 进入综合因子池后参与 select_factors 流程，至少 1 个被选中
 3. ✅ stock_selection_result.json 的 Top 10 中至少有 3 只**非阴跌型**股票（5日累计收益 > -3%）—— 与基线对比
@@ -264,6 +269,72 @@ interaction_turnover、interaction_amp_compression 按同样模式增量加入�
 | Execute Batch 1-3 | 11 文件改动 | 见 §5.1 |
 | Review | ruff + pytest + Spec Compliance + 实证 IC | 报告 |
 | Debug | 测试失败处理 | systematic-debugging skill |
+
+---
+
+## 10. Post-Mortem：IC 口径错配导致的"预期未达成"
+
+> **追加日期**：2026-06-22（实施后诊断）
+> **触发**：pipeline 重跑后，3 个因子 IC 实测 (+0.0048/+0.0016/+0.0077) 远低于 §3 设计预期 (+0.020/+0.016/+0.008)，怀疑因子失效
+
+### 10.1 根因诊断（已闭环）
+
+经逐列数值核对（`temporary/compare_sql_vs_pipeline_input.py`）：
+
+1. **数据源 100% 一致**：SQLite `/tmp/factor_ic.db` 与 `factor_ic_data.json.gz` 在所有 5 列、1467504 行上 `相等比例=1.0`，**排除"数据不一致"假设**。
+2. **IC 口径不等价**：
+
+| 因子 | 设计预期（池化 IC） | Pipeline 实测（逐日 IC, min_stocks=10）| 我的逐日 IC（min_stocks=30）|
+|---|---|---|---|
+| interaction_amplitude | +0.020 (池化=+0.0195 ✓) | **+0.0048** | +0.0126 |
+| interaction_turnover | +0.016 (池化=+0.0163 ✓) | **+0.0016** | +0.0063 |
+| interaction_amp_compression | +0.008 (池化=+0.0083 ✓) | **+0.0077** | +0.0129 |
+
+**结论**：设计 §3 IC 预期用 `scipy.stats.spearmanr(全样本 factor, 全样本 return)`（池化 IC）算出，
+而 pipeline `factor_ic/common/ic_calculator.py` 用**逐日 groupby + spearman 后等权平均**（逐日 IC）。
+两者数学上不等价（详见 skill ref `daily-ic-vs-pooled-ic-equivalence.md`）：
+
+```
+ic_pooled  ≈ Σ wₜ · icₜ   (wₜ = nₜ/N, 每日权重 ∝ 当日股票数)
+ic_daily   = (1/T) · Σ icₜ  (每日等权)
+```
+
+差值 = `Σ (wₜ - 1/T) · icₜ` = "样本规模与截面 IC 的协方差"。
+
+### 10.2 分段 IC 详情（interaction_amplitude，pipeline 实测）
+
+| 区段 | mean IC | std | 备注 |
+|---|---|---|---|
+| 前 30 日 | **−0.0065** | 0.0964 | n=10~150，噪声极大且偏负 |
+| 31-100 日 | **+0.0193** | 0.0675 | 接近设计预期 |
+| 101-300 日 | **+0.0024** | 0.0642 | 已开始衰减 |
+| 最近 200 日 | **+0.0044** | 0.0514 | 持续低于设计预期 |
+
+**关键**：amplitude/turnover 在所有时段（包括最近 200 日）IC < 设计预期 → 不是"实时失效"，是**设计预期口径用错**。
+**例外**：amp_compression 的 daily IC (+0.0077) ≈ 设计预期 (+0.008) → 这个因子设计基本正确。
+
+### 10.3 决议
+
+| 项 | 决议 | 理由 |
+|---|---|---|
+| §3 的池化 IC 数值 | **保留但加 ⚠️ 注** | 历史依据，体现设计推导逻辑 |
+| 验收标准 #1 的口径 | **重新表述为 daily IC** | 与生产线对齐 |
+| interaction_amplitude / turnover 是否上线 | **依综合贡献 + Top10 多样性判断**（验收 #2/#3） | 单因子 IC ≠ 综合贡献，需看实际选股效果 |
+| 后续设计 IC 预期推导 | **必须复刻 pipeline 逐日 IC 算法** | 见 PROJECT.md 待补充规则 |
+
+### 10.4 改进项（建议在后续 design 中实施）
+
+- [ ] **PROJECT.md 新规则**：design.md §3 的 IC 预期值必须标注口径（pooled / daily）+ 计算脚本路径
+- [ ] **factor_ic 报告增强**：除 `ic_metrics.ic_mean`（daily），同时输出 `ic_pooled_full_sample` 辅助 sanity check
+- [ ] **factor_summary 增加"IC 时段分解"表**：前 30 日 / 中期 / 最近 200 日，暴露衰减
+- [ ] **min_stocks 默认值讨论**：是否升到 30 以削减前期稀疏样本污染（独立 design.md）
+
+### 10.5 相关 ref
+
+- skill `factor-development` ref `daily-ic-vs-pooled-ic-equivalence.md` — 两种 IC 数学不等价的完整证明
+- skill `factor-development` ref `conditional-ic-analysis.md` — 条件 IC 分解工具
+- `temporary/compare_sql_vs_pipeline_input.py` — 本次诊断验证脚本（可保留为回归测试模板）
+- `temporary/verify_interaction_factors_ic.py` — 池化 IC 验证脚本（注意输出与生产 IC 不同口径）
 
 ---
 
