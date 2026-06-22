@@ -7,11 +7,11 @@
 正确导入方式：
     # 方式 1：通过 pip install -e . 安装项目后使用包导入
     from factor_ic_analyzer.paths import FACTOR_IC_DATA
-    
+
     # 方式 2：通过 PYTHONPATH 环境变量
     # export PYTHONPATH=/path/to/factor_ic_analyzer
     from paths import FACTOR_IC_DATA
-    
+
     # 方式 3：项目根目录下的脚本可直接导入
     from paths import FACTOR_IC_DATA  # paths.py 在根目录
 
@@ -44,7 +44,10 @@ REVERSE_DISCOVERY_RESULT = PROJECT_ROOT / "reverse_discovery" / "result"
 
 # factor_ic_data.json.gz = 行情 + 因子 + 收益数据
 # 所有下游模块必须从此文件读取，禁止从其他文件读取收益数据
+# L1~L4 阶段 dual-write：json.gz 保留兼容 + parquet 新格式
+# L5 阶段移除 json.gz，FACTOR_IC_DATA 指向 .parquet
 FACTOR_IC_DATA = DATA_FETCHERS_RESULT / "factor_ic_data.json.gz"
+FACTOR_IC_DATA_PARQUET = DATA_FETCHERS_RESULT / "factor_ic_data.parquet"
 
 # 外部数据源（因子计算依赖，非统一数据源的一部分）
 FINANCIAL_DATA = DATA_FETCHERS_RESULT / "financial_data.json.gz"  # 财务指标数据（方案B基本面动量因子）
@@ -94,11 +97,7 @@ def validate_path_exists(path: Path, description: str) -> None:
     用于 CI 强制检查：修改路径配置后必须验证新路径存在
     """
     if not path.exists():
-        raise FileNotFoundError(
-            f"路径不存在: {path}\n"
-            f"描述: {description}\n"
-            f"请检查路径配置或执行数据生成脚本"
-        )
+        raise FileNotFoundError(f"路径不存在: {path}\n描述: {description}\n请检查路径配置或执行数据生成脚本")
 
 
 # ============================================================================
@@ -114,6 +113,7 @@ __all__ = [
     "SUMMARY_RESULT",
     "REVERSE_DISCOVERY_RESULT",
     "FACTOR_IC_DATA",
+    "FACTOR_IC_DATA_PARQUET",
     "MARKET_CAP_DATA",
     "RETURN_DATA_BACKUP",
     "FACTOR_DATA_BACKUP",

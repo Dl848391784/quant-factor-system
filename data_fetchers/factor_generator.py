@@ -853,6 +853,66 @@ def _write_factor_json_gz(
         logger.warning("输出文件大小查询失败（文件已成功写出）: %s, 原因: %s", output_path, e)
 
 
+def _write_factor_parquet(
+    output_df: pd.DataFrame,
+    output_path: Path,
+    logger: logging.Logger,
+) -> None:
+    """写出 factor_ic_data.parquet（列式二进制 + dates 存入 file metadata）。
+
+    Args:
+        output_df: 已对齐 _OUTPUT_COLS 的输出 DataFrame。
+        output_path: 目标输出路径（.parquet）。
+        logger: 日志器。
+
+    Raises:
+        RuntimeError: 写入失败。
+    """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    # YYYY-MM-DD 字典序与日期序一致
+    dates_list = sorted(output_df["date"].unique().tolist())
+
+    # 确保输出目录存在
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.error("创建输出目录失败: %s, 原因: %s (%s)", output_path.parent, type(e).__name__, str(e))
+        raise RuntimeError(f"创建输出目录失败: {output_path.parent}, {type(e).__name__}: {e}") from e
+
+    # 临时文件 + os.replace 原子写入
+    temp_path = output_path.parent / (output_path.name + ".tmp")
+    replaced = False
+    try:
+        # DataFrame → Arrow Table
+        table = pa.Table.from_pandas(output_df, preserve_index=False)
+
+        # dates 数组存入 file-level metadata（读 metadata 不读数据，~0ms）
+        existing_meta = table.schema.metadata or {}
+        combined_meta = {
+            **existing_meta,
+            b"dates": json.dumps(dates_list, ensure_ascii=False).encode("utf-8"),
+            b"generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S").encode("utf-8"),
+        }
+        table = table.replace_schema_metadata(combined_meta)
+
+        pq.write_table(table, temp_path, compression="snappy")
+        os.replace(temp_path, output_path)
+        replaced = True
+    except Exception as e:
+        logger.error("Parquet 写入失败: %s, 原因: %s (%s)", output_path, type(e).__name__, str(e))
+        raise RuntimeError(f"Parquet 写入失败: {output_path}, {type(e).__name__}: {e}") from e
+    finally:
+        if not replaced:
+            temp_path.unlink(missing_ok=True)
+
+    try:
+        logger.info("  Parquet 输出文件大小: %.2f MB", output_path.stat().st_size / 1024**2)
+    except OSError as e:
+        logger.warning("Parquet 文件大小查询失败（文件已成功写出）: %s, 原因: %s", output_path, e)
+
+
 # --- logger 获取 ---
 
 
@@ -1135,7 +1195,12 @@ def _format_and_write_output(
         total_records = len(output_df)
         _write_factor_json_gz(output_df, output_path, logger)
 
+        # L1: dual-write Parquet（列式二进制，下游读取层将逐步切换到 .parquet）
+        parquet_output_path = output_path.parent / output_path.name.replace(".json.gz", ".parquet")
+        _write_factor_parquet(output_df, parquet_output_path, logger)
+
         logger.info("  输出路径: %s", output_path)
+        logger.info("  Parquet 输出路径: %s", parquet_output_path)
         logger.info("  输出记录数: %d", total_records)
 
         # 计算运行耗时
