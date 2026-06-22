@@ -455,26 +455,102 @@ def validate_factor(
             min_sample_days,
         )
 
-    # 7. Layer1 绝对收益硬约束（v2.35: P1 只做多对齐，不可豁免）
+    # 7. Layer1 绝对收益硬约束（v2.35: P1 只做多对齐）
     # 公理1: 只做多策略收益 = Layer1 买入层收益，L1<=0 的因子有害无益
-    # 与豁免逻辑不同：L1>0 是数学定义而非可调阈值，任何豁免都违反公理1
+    #
+    # v2.38: 交互因子族 L1 豁免（design.md feat_interaction_exemption_and_weight_cap §4.1）
+    # 第一性原理: 交互因子 = -z_cs(weakness) × z_cs(X)，L1 = "强势×高 + 弱势×低" 双对角混合，
+    # 按设计 L1 必亏（数学必然）。L10 收益强劲 + 单调性显著时，"只做多"策略仍能赚钱。
+    # 豁免阈值（严格，三条同时满足）:
+    #   - long_return > 10%      (long_return_min=3% 的 3 倍冗余, 防"L10 弱反弹"假信号)
+    #   - long_short_sharpe > 1.5 (业界量化因子最低门槛, 与 reverse_factor 豁免一致)
+    #   - mono_corr > 0.5        (单调性显著, 证明 L10 - L1 价差稳定)
+    # 限定范围: factor_name.startswith("interaction_") —— 单调线性因子 L1 约束保持
     layer_stats = backtest.get("layer_stats", {})
     layer_1 = layer_stats.get("layer_1", {})
     layer_1_annual = layer_1.get("annual_return", None)
     layer_1_sharpe = layer_1.get("sharpe_ratio", None)
+
+    is_interaction_factor = factor_name.startswith("interaction_")
+    long_return_for_l1_exempt = long_short.get("long_return_annual", None)
+    is_l1_exempt = (
+        is_interaction_factor
+        and long_return_for_l1_exempt is not None
+        and long_return_for_l1_exempt > 0.10
+        and ls_sharpe is not None
+        and ls_sharpe > 1.5
+        and mono_corr is not None
+        and mono_corr > 0.5
+    )
+
     if layer_1_annual is not None and layer_1_annual <= thresholds["layer_1_return_min"]:
-        reasons.append(
-            f"layer_1_annual={layer_1_annual * 100:.1f}%<={thresholds['layer_1_return_min'] * 100:.0f}%（只做多硬约束，不可豁免）"
-        )
-        logger.info(
-            "因子 %s: L1年化=%.2f%%<=0%%，只做多策略有害，硬约束淘汰（不可豁免）",
-            factor_name,
-            layer_1_annual * 100,
-        )
+        if is_l1_exempt:
+            # Pyright 窄化：is_l1_exempt 为 True 时下列三个值都非 None
+            assert long_return_for_l1_exempt is not None
+            assert ls_sharpe is not None
+            assert mono_corr is not None
+            logger.info(
+                "因子 %s: L1年化=%.2f%% 但交互因子族豁免(多头年化=%.2f%%>10%%, 多空夏普=%.2f>1.5, 单调性=%.2f>0.5)",
+                factor_name,
+                layer_1_annual * 100,
+                long_return_for_l1_exempt * 100,
+                ls_sharpe,
+                mono_corr,
+            )
+            exempt_details.append(
+                {
+                    "trigger": "layer_1_annual",
+                    "threshold": thresholds["layer_1_return_min"],
+                    "actual": layer_1_annual,
+                    "exempted": True,
+                    "conditions": {
+                        "long_return": long_return_for_l1_exempt,
+                        "ls_sharpe": ls_sharpe,
+                        "mono_corr": mono_corr,
+                        "is_interaction": True,
+                    },
+                    "detail": f"交互因子L1豁免(多头年化={long_return_for_l1_exempt * 100:.1f}%>10%, 多空夏普={ls_sharpe:.2f}>1.5, 单调性={mono_corr:.2f}>0.5)",
+                }
+            )
+        else:
+            reasons.append(
+                f"layer_1_annual={layer_1_annual * 100:.1f}%<={thresholds['layer_1_return_min'] * 100:.0f}%（只做多硬约束，不可豁免）"
+            )
+            logger.info(
+                "因子 %s: L1年化=%.2f%%<=0%%，只做多策略有害，硬约束淘汰（不可豁免）",
+                factor_name,
+                layer_1_annual * 100,
+            )
     if layer_1_sharpe is not None and layer_1_sharpe <= thresholds["layer_1_sharpe_min"]:
-        reasons.append(
-            f"layer_1_sharpe={layer_1_sharpe:.2f}<={thresholds['layer_1_sharpe_min']:.2f}（L1收益不稳定，不可豁免）"
-        )
+        if is_l1_exempt:
+            # Pyright 窄化（同上）
+            assert long_return_for_l1_exempt is not None
+            assert ls_sharpe is not None
+            assert mono_corr is not None
+            logger.info(
+                "因子 %s: L1夏普=%.2f 但交互因子族豁免(同上条件)",
+                factor_name,
+                layer_1_sharpe,
+            )
+            exempt_details.append(
+                {
+                    "trigger": "layer_1_sharpe",
+                    "threshold": thresholds["layer_1_sharpe_min"],
+                    "actual": layer_1_sharpe,
+                    "exempted": True,
+                    "conditions": {
+                        "long_return": long_return_for_l1_exempt,
+                        "ls_sharpe": ls_sharpe,
+                        "mono_corr": mono_corr,
+                        "is_interaction": True,
+                    },
+                    "detail": f"交互因子L1豁免(多头年化={long_return_for_l1_exempt * 100:.1f}%>10%, 多空夏普={ls_sharpe:.2f}>1.5, 单调性={mono_corr:.2f}>0.5)",
+                }
+            )
+        else:
+            reasons.append(
+                f"layer_1_sharpe={layer_1_sharpe:.2f}<={thresholds['layer_1_sharpe_min']:.2f}（L1收益不稳定，不可豁免）"
+            )
 
     is_valid = len(reasons) == 0
 

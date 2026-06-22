@@ -25,7 +25,7 @@
 | **A. 模块基础** | M1-M4 | 模块职责 / 公共模块复用 / 脚本命名 / 输出与日志 |
 | **B. 加权方式** | M5-M8 | 4 种加权 / 静态权重 / 滚动 ICIR / 向量化实现 |
 | **C. 标准化** | M9-M11 | 截面标准化 / `_std` 列接口约定 / NaN 处理 |
-| **D. 因子筛选** | M12-M16, M57 | 无效判定 / 高相关组 Union-Find / 关键指标缺失 / ICIR 缺失 / 完整性标记 / 维度感知去重 |
+| **D. 因子筛选** | M12-M16, M16a, M57 | 无效判定 / 高相关组 Union-Find / 关键指标缺失 / ICIR 缺失 / 完整性标记 / 交互因子L1豁免 / 维度感知去重 |
 | **E. 命名映射与正则** | M17-M20 | 因子名映射表 / 反向映射 / 正则预编译+贪婪 / 跳过非标准 |
 | **F. 数据加载与校验** | M21-M26 | 数据来源 / 必需列 / 返回值解包 / 空值检查 / 类型校验 / 一致性强校验 |
 | **G. NaN 与权重处理** | M27-M30 | NaN 相关性 / composite NaN / 动态权重归一化 / 除零保护 |
@@ -730,6 +730,64 @@ if missing_in_index or missing_in_columns:
   "selection_warnings": []
 }
 ```
+
+---
+
+## M16a. 交互因子族 L1 硬约束豁免 (v2.38)
+
+**What**:`factor_name.startswith("interaction_")` 的因子在 L1 年化/夏普硬约束检查时,允许豁免。豁免条件为三条同时满足:
+- `long_return_annual > 0.10`(多头年化 > 10%)
+- `long_short_sharpe > 1.5`(多空夏普 > 1.5)
+- `monotonicity_corr > 0.5`(单调性 > 0.5)
+
+**How**:`validate_factor` (`factor_selector.py:458-548`) 在 L1 检查处计算 `is_l1_exempt` 标志,豁免时记录 `exempt_details`(`trigger=layer_1_annual`/`layer_1_sharpe`, `exempted=True`, `conditions` 含 `is_interaction=True`)而不加入 `reasons`。
+
+**Don't**:
+- 禁止扩展到非 `interaction_` 前缀的因子(单调线性因子 L1<=0 是因子无效的可靠信号)。
+- 禁止放宽阈值(`long_return>5%` 会误纳"L10 弱反弹"假信号,见 design.md §4.2)。
+- 禁止仅满足 1-2 条就豁免(三条同时满足才能证明"只做多"策略可盈利)。
+
+**Why**:第一性原理推导(见 `designs/feat_interaction_exemption_and_weight_cap.md` §2):
+
+```
+interaction_X = -z_cs(weakness_ret) × z_cs(X)
+                            ↓
+L1 (最低分) = "强势×高 + 弱势×低" 双对角混合 → 注定亏损(数学必然)
+L10 (最高分) = "弱势×高" → 反弹候选 → 显著盈利
+```
+
+原 L1 硬约束 (v2.35) 为**单调线性因子**设计 (IC 方向统一 negative 后 L1<=0 = 因子无效),不适用于非线性的交互因子。
+
+**When**:
+- 适用:所有 `factor_name.startswith("interaction_")` 的因子。
+- 不适用:单调线性因子(如 `amplitude_compression`, `volume_ratio`)、跨维度复合因子。
+
+**Examples**:
+
+```python
+# ✓ 优质交互因子豁免通过 (interaction_ma5_dev)
+# long_return=24.2%>10%, ls_sharpe=4.25>1.5, mono_corr=0.76>0.5
+# → L1=-24.6% 豁免, 入选
+
+# ✗ 弱交互因子保持淘汰 (interaction_turnover)
+# long_return=8.9%<10% → 不满足豁免条件
+# → L1=-16.3% 触发硬约束, 淘汰
+
+# ✗ 非交互因子即使指标满足也不豁免 (假想的 amplitude 高指标版本)
+# 名字不以 interaction_ 开头 → 不进入豁免分支
+# → L1 硬约束严格执行
+```
+
+**Verify**:
+- `pytest comprehensive_factor/test_cases/test_factor_selector_p1.py::TestInteractionFactorL1Exemption` (5 个测试)
+- 当前 9 个交互因子分类预期:
+  - 豁免入池(6): ma5_dev / near_high / intraday / kdj / price_pos / bollinger
+  - 保持淘汰(3): amplitude (mono 不足) / amp_compression / turnover (long_return 不足)
+
+**引用**:
+- 设计文档: `designs/feat_interaction_exemption_and_weight_cap.md` §2, §4.1, §4.2
+- 业界依据: Asness (2013) "Value and Momentum Everywhere" §3 非线性因子价值
+- 项目规范: PROJECT.md §⚡ 第一性原理 / AGENTS.md 硬规则 #5(因子方向由数据定)
 
 ---
 
