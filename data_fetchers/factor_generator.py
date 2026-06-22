@@ -215,7 +215,15 @@ _BASE_COLS: tuple[str, ...] = (
 _OHLCV_INDEX_COLS: frozenset[str] = frozenset({"date", "asset", "open", "close", "high", "low", "volume"})
 
 # 标记列：非因子非收益的布尔标记列
-_FLAG_COLS: tuple[str, ...] = ("is_untradeable",)
+_FLAG_COLS: tuple[str, ...] = ("is_untradeable", "is_low_liquidity")
+
+# v2.41 (R1): 流动性截面分位（前置过滤）
+# 第一性原理（designs/master_l1_l6_roadmap.md §2.1）:
+#     成交额 < 截面 P_MIN_AMOUNT_PCT 时, "涨/跌" 是少量交易噪声, IC 假设失效.
+#     截面自适应分位（非固定数字）适配任何市场环境.
+_MIN_AMOUNT_PERCENTILE: float = 0.05
+# 截面样本不足下限（小于此数则跳过当日过滤, 避免极端日全部过滤）
+_LOW_LIQ_MIN_CROSS_SECTION_SIZE: int = 10
 
 # 输出列 = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS + _FLAG_COLS
 _OUTPUT_COLS: tuple[str, ...] = _BASE_COLS + _EXTENDED_FACTOR_COLS + _RETURN_COLS + _FLAG_COLS
@@ -1013,6 +1021,75 @@ def _mark_untradeable(
     return factor_df
 
 
+def _mark_low_liquidity(
+    factor_df: pd.DataFrame,
+    logger: logging.Logger,
+    min_amount_percentile: float = _MIN_AMOUNT_PERCENTILE,
+    min_cross_section_size: int = _LOW_LIQ_MIN_CROSS_SECTION_SIZE,
+) -> pd.DataFrame:
+    """Step 11.11：标记低流动性股票（截面成交额 < P5 → IC 假设失效区）。
+
+    第一性原理（designs/feat_liquidity_filter_to_factor_generator.md §2.1）:
+        amount = volume × close (元)
+        截面分位 (per-date 自适应) 切除成交额最低 5% 的样本.
+        固定数字 (如 5000万) 不能跨牛熊适配, 故使用百分位.
+
+    Args:
+        factor_df: 包含 date / volume / close 列的面板.
+        logger: 日志.
+        min_amount_percentile: 截面最低分位阈值 (默认 0.05).
+        min_cross_section_size: 截面样本下限 (默认 10), 小于则跳过当日过滤.
+
+    Returns:
+        factor_df 加 'is_low_liquidity' 列 (int 0/1).
+
+    Raises:
+        KeyError: 缺 volume 或 close 列.
+    """
+    logger.info("Step 11.11: 标记低流动性股票（截面成交额 P%d）...", int(min_amount_percentile * 100))
+
+    missing = [c for c in ("volume", "close") if c not in factor_df.columns]
+    if missing:
+        raise KeyError(f"_mark_low_liquidity 需要 volume + close 列, 缺失: {missing}")
+
+    factor_df = factor_df.copy()
+    amount = factor_df["volume"].astype(float) * factor_df["close"].astype(float)
+
+    # 截面分位标记: 0=正常, 1=低流动性
+    flag = pd.Series(0, index=factor_df.index, dtype=int)
+
+    for date_val, idx in factor_df.groupby("date", sort=False).groups.items():
+        sub_amount = amount.loc[idx]
+        valid = sub_amount[sub_amount.notna() & (sub_amount > 0)]
+        if len(valid) < min_cross_section_size:
+            # 截面样本不足, 跳过当日过滤
+            logger.debug(
+                "  is_low_liquidity 跳过 %s: 截面样本 %d < %d",
+                date_val,
+                len(valid),
+                min_cross_section_size,
+            )
+            continue
+        threshold = valid.quantile(min_amount_percentile)
+        # NaN 或 0 也视为低流动性（与 < threshold 一致）
+        low_mask = sub_amount.isna() | (sub_amount <= 0) | (sub_amount < threshold)
+        flag.loc[idx[low_mask.to_numpy()]] = 1
+
+    factor_df["is_low_liquidity"] = flag
+
+    total = len(factor_df)
+    low_count = int(flag.sum())
+    logger.info(
+        "  低流动性: %d / %d (%.3f%%), 截面分位 P%d",
+        low_count,
+        total,
+        low_count / total * 100 if total > 0 else 0,
+        int(min_amount_percentile * 100),
+    )
+
+    return factor_df
+
+
 def _format_and_write_output(
     factor_df: pd.DataFrame,
     output_path: Path,
@@ -1147,6 +1224,9 @@ def generate_all_factors(
 
     # Step 11.10：标记不可交易股票
     factor_df = _mark_untradeable(factor_df, logger)
+
+    # Step 11.11：标记低流动性股票 (R1, designs/feat_liquidity_filter_to_factor_generator.md)
+    factor_df = _mark_low_liquidity(factor_df, logger)
 
     # Step 12~15：格式化 + 输出
     total_records, end_time, elapsed_seconds = _format_and_write_output(factor_df, output_path, start_time, logger)
