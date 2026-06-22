@@ -1076,6 +1076,7 @@ class RollingICIRWeightMethod(WeightMethodBase):
         logger: logging.Logger | None = None,
         dimension_weight_method: str | None = None,
         factor_categories: dict[str, str] | None = None,
+        enable_role_weights: bool = False,  # v2.41 (R2): 滚动版暂不支持，r2c 扩展
     ):
         self.window = window
         self.logger = logger or get_logger(__name__)
@@ -1083,6 +1084,9 @@ class RollingICIRWeightMethod(WeightMethodBase):
         # v1.20: 维度级别权重分配
         self.dimension_weight_method = dimension_weight_method
         self.factor_categories = factor_categories
+        self.enable_role_weights = enable_role_weights
+        if enable_role_weights:
+            self.logger.warning("RollingICIRWeightMethod: role_weights 暂不支持 (r2c 待实现), 已忽略")
 
     def _build_dimension_groups(self, factor_cols: list[str]) -> dict[str, list[str]]:
         """构建维度→因子列名分组
@@ -1529,6 +1533,7 @@ class WeightEngine:
         logger: logging.Logger | None = None,
         dimension_weight_method: str | None = None,  # v1.20: 维度级别权重分配
         factor_categories: dict[str, str] | None = None,  # v1.20: 因子维度分类
+        enable_role_weights: bool = True,  # v2.41 (R2): 角色固定权重
     ):
         if weight_method not in self.METHOD_MAP:
             raise ValueError(f"不支持的加权方式: {weight_method}，支持: {list(self.METHOD_MAP.keys())}")
@@ -1553,6 +1558,7 @@ class WeightEngine:
                 logger=self.logger,
                 dimension_weight_method=dimension_weight_method,
                 factor_categories=factor_categories,
+                enable_role_weights=enable_role_weights,  # v2.41 (R2)
             )
         else:
             # v2.35: P2 维度权重全方法支持——消除 rolling_icir 独享
@@ -1561,6 +1567,7 @@ class WeightEngine:
                 logger=self.logger,
                 dimension_weight_method=dimension_weight_method,
                 factor_categories=factor_categories,
+                enable_role_weights=enable_role_weights,  # v2.41 (R2)
             )
 
         self.weight_method = weight_method

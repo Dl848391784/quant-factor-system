@@ -187,6 +187,7 @@ def run_composite_backtest(
     auto_select: bool = False,  # 是否自动筛选因子
     thresholds: dict | None = None,  # 筛选阈值配置
     dimension_weight_method: str | None = None,  # v1.20: 维度级别权重分配 (none/equal/icir)
+    enable_role_weights: bool = True,  # v2.41 (R2): 角色固定权重 (主75%+确认25%)
     verbose: bool = True,
     logger: logging.Logger | None = None,
 ) -> dict:
@@ -576,6 +577,7 @@ def run_composite_backtest(
         logger=logger,
         dimension_weight_method=dimension_weight_method,
         factor_categories=FACTOR_CATEGORIES if dimension_weight_method else None,
+        enable_role_weights=enable_role_weights,  # v2.41 (R2)
     )
 
     composite_factor = weight_engine.calculate(
@@ -645,6 +647,7 @@ def run_composite_backtest(
             "note": "权重每日动态计算，不保存静态值",
             "last_day_weights": last_day_weights,  # v2.16: 读取 calculate() 内的真实权重
             "dimension_weight_method": dimension_weight_method,  # v1.20: 维度权重分配方式
+            "enable_role_weights": enable_role_weights,  # v2.41 (R2): 角色固定权重
         }
         logger.info("滚动ICIR加权: 权重每日动态计算（窗口 %d 日），不保存静态权重", config.rolling_window)
         if last_day_weights:
@@ -857,6 +860,11 @@ def create_cli_entrypoint(
             help="维度级别权重分配方式 (none=不启用/equal=维度等权/icir=维度ICIR加权)，默认 none",
         )
         parser.add_argument("--quiet", action="store_true")
+        parser.add_argument(
+            "--disable-role-weights",
+            action="store_true",
+            help="禁用角色固定权重 (v2.41 R2: 主75%+确认25%)，默认启用",
+        )
 
         args = parser.parse_args()
 
@@ -891,6 +899,7 @@ def create_cli_entrypoint(
                 output_dir=args.output_dir,
                 auto_select=use_auto_select,
                 dimension_weight_method=args.dimension_weight if args.dimension_weight != "none" else None,
+                enable_role_weights=not args.disable_role_weights,  # v2.41 (R2)
                 verbose=not args.quiet,
                 logger=logger,
             )
