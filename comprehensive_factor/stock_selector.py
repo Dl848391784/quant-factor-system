@@ -589,6 +589,49 @@ def sort_and_select(
     return result_list, excluded_by_amplitude, excluded_by_coverage, excluded_by_liquidity
 
 
+def apply_filter_role_factors(
+    candidates_df: pd.DataFrame,
+    logger: logging.Logger | None = None,
+) -> tuple[pd.DataFrame, dict[str, int]]:
+    """filter 角色因子硬过滤 (R3, designs/feat_filter_role_fundamental_breakdown.md §3.3)
+
+    在 composite 计算之前应用基本面恶化硬过滤, 排除已发生恶化的股票.
+    filter 角色因子 = 客观事实 (非概率信号), 用经济意义阈值做硬约束.
+
+    当前阈值 (v1.0, 单一过滤器):
+    - cum_return_5d_breakdown: return_5d < -0.10 → 排除
+
+    Args:
+        candidates_df: 候选股票 DataFrame (含 return_5d 等列).
+        logger: 日志对象.
+
+    Returns:
+        (filtered_df, exclusion_counts): 过滤后 DataFrame + 各过滤器排除数 dict.
+    """
+    if logger is None:
+        logger = _logger
+
+    exclusion_counts: dict[str, int] = {}
+    df = candidates_df.copy()
+
+    # cum_return_5d_breakdown: return_5d < -10%
+    if "return_5d" in df.columns:
+        breakdown_mask = df["return_5d"].notna() & (df["return_5d"] < -0.10)
+        n_excluded = int(breakdown_mask.sum())
+        exclusion_counts["cum_return_5d_breakdown"] = n_excluded
+        if n_excluded > 0:
+            df = df[~breakdown_mask].reset_index(drop=True)
+            logger.info(
+                "filter[cum_return_5d_breakdown]: 排除 %d 只 (return_5d < -10%%)",
+                n_excluded,
+            )
+    else:
+        logger.warning("filter[cum_return_5d_breakdown]: 缺 return_5d 列, 跳过过滤")
+        exclusion_counts["cum_return_5d_breakdown"] = 0
+
+    return df, exclusion_counts
+
+
 def apply_stabilization_filter(
     top_stocks: list[dict[str, Any]],
     factor_df: pd.DataFrame,
@@ -710,6 +753,7 @@ def build_result(
     excluded_by_coverage: int = 0,  # v1.15: 覆盖率过滤排除数
     excluded_by_liquidity: int = 0,  # v2.40: 流动性过滤排除数
     excluded_by_confirmation: int = 0,  # v2.35: P6 企稳确认过滤排除数
+    excluded_by_filter: dict[str, int] | None = None,  # v2.41 (R3): filter 角色排除数
     min_weight_coverage: float = 0.5,  # v1.15: 覆盖率阈值
     logger: logging.Logger | None = None,
 ) -> dict[str, Any]:
@@ -759,6 +803,8 @@ def build_result(
             "excluded_by_liquidity": excluded_by_liquidity,
             # v2.35: P6 企稳确认过滤信息
             "excluded_by_confirmation": excluded_by_confirmation,
+            # v2.41 (R3): filter 角色硬过滤信息
+            "excluded_by_filter": excluded_by_filter or {},
         },
         "top_stocks": top_stocks,
         "weight_config": {
@@ -1042,6 +1088,9 @@ def select_stocks(
         except (json.JSONDecodeError, KeyError):
             logger.warning("无法从 composite 结果读取 short_sample_factors，跳过惩罚")
 
+    # R3: filter 角色硬过滤 (在 composite 计算之前, 避免基本面恶化股污染权重)
+    factor_df, filter_exclusions = apply_filter_role_factors(factor_df, logger)
+
     logger.info("计算综合因子（权重方法: %s）...", best_method)
     weight_engine = WeightEngine(
         weight_method=best_method,
@@ -1117,6 +1166,7 @@ def select_stocks(
         excluded_by_coverage=excluded_by_coverage,  # v1.15: 覆盖率过滤排除数
         excluded_by_liquidity=excluded_by_liquidity,  # v2.40: 流动性过滤排除数
         excluded_by_confirmation=excluded_by_confirmation,  # v2.35: P6 企稳过滤排除数
+        excluded_by_filter=filter_exclusions,  # v2.41 (R3): filter 角色排除数
         logger=logger,
     )
 
