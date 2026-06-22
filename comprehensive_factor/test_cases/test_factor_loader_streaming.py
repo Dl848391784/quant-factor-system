@@ -79,7 +79,7 @@ def test_load_with_factor_cols_subset(mini_data_source):
     """T2: factor_cols 模式只加载指定因子 + 5 个固定列（date/asset/forward_return_*）。"""
     df = load_full_data(data_source=mini_data_source, factor_cols=["rsi_6"])
 
-    # 必须包含: date, asset, rsi_6, forward_return_1d/3d/5d, is_untradeable
+    # 必须包含: date, asset, rsi_6, forward_return_1d/3d/5d, is_untradeable, is_low_liquidity
     expected_cols = {
         "date",
         "asset",
@@ -88,6 +88,7 @@ def test_load_with_factor_cols_subset(mini_data_source):
         "forward_return_3d",
         "forward_return_5d",
         "is_untradeable",
+        "is_low_liquidity",
     }
     assert set(df.columns) == expected_cols
     # 不应包含未请求的因子列

@@ -125,6 +125,8 @@ def load_factor_return_data(
         required_cols.append("forward_return_1d")
     # is_untradeable 列（如存在则加载用于过滤）
     required_cols.append("is_untradeable")
+    # is_low_liquidity (R1): 低流动性标记列，截面成交额 P5，加载用于过滤
+    required_cols.append("is_low_liquidity")
     # 去重（保留首次出现顺序，避免下方 select_cols 中列重复）
     required_cols = list(dict.fromkeys(required_cols))
 
@@ -314,6 +316,25 @@ def load_factor_return_data(
             )
     else:
         logger.warning("数据缺少 is_untradeable 列，跳过不可交易股票过滤")
+
+    # ========== 过滤低流动性股票 (R1, designs/feat_liquidity_filter_to_factor_generator.md) ==========
+    # is_low_liquidity=1 表示 T 日成交额 < 截面 P5, 价格变动由少量交易噪声主导,
+    # IC 假设失效, 应从 IC 计算中排除.
+    # 向后兼容: 旧数据无此列时跳过过滤.
+    if "is_low_liquidity" in df.columns:
+        low_liq_mask = df["is_low_liquidity"].fillna(0).astype(int) == 1
+        low_liq_count = int(low_liq_mask.sum())
+        if low_liq_count > 0:
+            factor_df = factor_df[~low_liq_mask.loc[factor_df.index]].reset_index(drop=True)
+            return_df = return_df[~low_liq_mask.loc[return_df.index]].reset_index(drop=True)
+            logger.info(
+                "过滤低流动性股票(截面成交额 P5): 排除 %d 行, 剩余因子 %s 行, 收益 %s 行",
+                low_liq_count,
+                len(factor_df),
+                len(return_df),
+            )
+    else:
+        logger.warning("数据缺少 is_low_liquidity 列，跳过低流动性股票过滤")
 
     # ========== 日期对齐（单文件内数据天然对齐） ==========
     # 取日期交集确保因子和收益数据对齐

@@ -103,8 +103,10 @@ def load_full_data(
         required_cols = None  # peek 阶段决定
 
     # is_untradeable: 不可交易标记列（涨停类），加载用于过滤
+    # is_low_liquidity (R1): 低流动性标记列（截面成交额 P5），加载用于过滤
     if required_cols is not None:
         required_cols.append("is_untradeable")
+        required_cols.append("is_low_liquidity")
 
     full_df: pd.DataFrame
 
@@ -228,6 +230,22 @@ def load_full_data(
             )
     else:
         logger.warning("数据缺少 is_untradeable 列，跳过不可交易股票过滤")
+
+    # === 过滤低流动性股票 (R1, designs/feat_liquidity_filter_to_factor_generator.md) ===
+    # 截面成交额 P5 切除尾部, 排除 IC 假设失效区（少量交易噪声主导价格变动）.
+    # 向后兼容: 旧数据无此列时跳过过滤.
+    if "is_low_liquidity" in full_df.columns:
+        low_liq_mask = full_df["is_low_liquidity"].fillna(0).astype(int) == 1
+        low_liq_count = int(low_liq_mask.sum())
+        if low_liq_count > 0:
+            full_df = full_df[~low_liq_mask].reset_index(drop=True)
+            logger.info(
+                "过滤低流动性股票(截面成交额 P5): 排除 %d 条, 剩余 %d 条",
+                low_liq_count,
+                len(full_df),
+            )
+    else:
+        logger.warning("数据缺少 is_low_liquidity 列，跳过低流动性股票过滤")
 
     return full_df
 
@@ -696,9 +714,11 @@ def standardize_factors(
 
         # 步骤3：对零膨胀日期使用零值分离标准化，对正常日期使用原有标准化
         factor_df[std_col] = factor_df.groupby("date")[col].transform(
-            lambda x: _standardize_zero_inflated(x, _WINSORIZE_SIGMA, _ZERO_VALUE_THRESHOLD)
-            if _is_zero_inflated_group(x, _ZERO_VALUE_THRESHOLD, _ZERO_INFLATED_THRESHOLD)
-            else (np.clip((x - x.mean()) / x.std(), -_WINSORIZE_SIGMA, _WINSORIZE_SIGMA) if x.std() > 0 else np.nan)
+            lambda x: (
+                _standardize_zero_inflated(x, _WINSORIZE_SIGMA, _ZERO_VALUE_THRESHOLD)
+                if _is_zero_inflated_group(x, _ZERO_VALUE_THRESHOLD, _ZERO_INFLATED_THRESHOLD)
+                else (np.clip((x - x.mean()) / x.std(), -_WINSORIZE_SIGMA, _WINSORIZE_SIGMA) if x.std() > 0 else np.nan)
+            )
         )
 
         # v2.28: skip_point_mass=True 时跳过点质量检测（auto_select 简化模式）

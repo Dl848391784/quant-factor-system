@@ -402,6 +402,8 @@ def load_factor_return_data(
         keep_cols |= set(required_factor_cols)
     # is_untradeable: 不可交易标记列（涨停类），回测需排除
     keep_cols.add("is_untradeable")
+    # is_low_liquidity (R1): 低流动性标记列（截面成交额 P5），回测需排除
+    keep_cols.add("is_low_liquidity")
 
     # 数值列白名单：return + factor（数据源中数值以 Decimal/字符串序列化，需提前 float 化）
     # 显式排除 _INDEX_COLS：date/asset 是 str，部分因子（如 return_3d / past_return_1d /
@@ -483,6 +485,22 @@ def load_factor_return_data(
             )
     else:
         logger.warning("数据缺少 is_untradeable 列，跳过不可交易股票过滤")
+
+    # 5.6) 过滤低流动性股票 (R1, designs/feat_liquidity_filter_to_factor_generator.md)
+    # 截面成交额 P5 切除尾部, 排除 IC 假设失效区.
+    # 向后兼容: 旧数据无此列时跳过过滤.
+    if "is_low_liquidity" in full_df.columns:
+        low_liq_mask = full_df["is_low_liquidity"].fillna(0).astype(int) == 1
+        low_liq_count = int(low_liq_mask.sum())
+        if low_liq_count > 0:
+            full_df = full_df[~low_liq_mask].reset_index(drop=True)
+            logger.info(
+                "过滤低流动性股票(截面成交额 P5): 排除 %d 条, 剩余 %d 条",
+                low_liq_count,
+                len(full_df),
+            )
+    else:
+        logger.warning("数据缺少 is_low_liquidity 列，跳过低流动性股票过滤")
 
     # 6) 分离 return_df / factor_df
     #    用 .copy() 切片产生独立 DataFrame，然后 del full_df 释放原引用
