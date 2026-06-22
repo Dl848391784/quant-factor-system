@@ -116,6 +116,37 @@ def get_factor_data_dates(logger=None) -> tuple[list[str], str | None]:
 
     factor_path = FACTOR_DATA_DIR / "factor_ic_data.json.gz"
 
+    # L3: 优先 Parquet metadata 读取 dates（~0ms，不读数据行）
+    parquet_path = FACTOR_DATA_DIR / "factor_ic_data.parquet"
+    if parquet_path.exists():
+        try:
+            import json as _json
+
+            import pyarrow.parquet as pq
+
+            schema = pq.read_schema(parquet_path)
+            meta = schema.metadata or {}
+            if b"dates" in meta:
+                dates = _json.loads(meta[b"dates"])
+                dates = _normalize_dates(dates)
+                latest_date = dates[-1] if dates else None
+                logger.info("从 Parquet metadata 读取 dates: %d 个日期", len(dates))
+                return dates, latest_date
+
+            # metadata 无 dates → 从 date 列流式读取（Parquet 列投影，仅读 1 列）
+            logger.info("Parquet metadata 无 dates，从 date 列读取")
+            import pandas as pd
+
+            df_dates = pd.read_parquet(parquet_path, columns=["date"])
+            dates = sorted(df_dates["date"].astype(str).unique().tolist())
+            dates = _normalize_dates(dates)
+            latest_date = dates[-1] if dates else None
+            del df_dates
+            gc.collect()
+            return dates, latest_date
+        except Exception as e:
+            logger.warning("Parquet dates 读取失败，回退到 ijson: %s", e)
+
     if not factor_path.exists():
         return [], None
 
