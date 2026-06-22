@@ -28,7 +28,7 @@
 | **D. 因子筛选** | M12-M16, M16a, M57 | 无效判定 / 高相关组 Union-Find / 关键指标缺失 / ICIR 缺失 / 完整性标记 / 交互因子L1豁免 / 维度感知去重 |
 | **E. 命名映射与正则** | M17-M20 | 因子名映射表 / 反向映射 / 正则预编译+贪婪 / 跳过非标准 |
 | **F. 数据加载与校验** | M21-M26 | 数据来源 / 必需列 / 返回值解包 / 空值检查 / 类型校验 / 一致性强校验 |
-| **G. NaN 与权重处理** | M27-M30 | NaN 相关性 / composite NaN / 动态权重归一化 / 除零保护 |
+| **G. NaN 与权重处理** | M27-M30, M30a | NaN 相关性 / composite NaN / 动态权重归一化 / 除零保护 / 单因子权重上限 |
 | **H. 防御性校验** | M31-M34 | 校验前置 / 前置条件 / 父类 validate / 校验层级 |
 | **I. 缺失与字段回退** | M35-M37 | 缺失因子返回 / 字段回退验证 / 死代码移除 |
 | **J. 动态权重与时间轴** | M38-M40 | 动态权重保存 / 元信息分离 / 滚动 ICIR 时间轴 |
@@ -1194,6 +1194,71 @@ weights = {col: icir_values[col] / total_icir for col in factor_cols}
 ```
 
 **触发条件**:仅当所有因子 ICIR 绝对值为 0 时触发 (若部分缺失被置 1.0,total > 0 不触发)。
+
+---
+
+## M30a. 单因子权重上限 (v2.38)
+
+**What**: 综合因子计算时,任何单因子的名义权重**不得超过 25%** (`WEIGHT_CAP_DEFAULT = 0.25`)。超出部分按剩余因子的原权重比例摊分,确保 `sum(weights) == 1.0` 不变。
+
+**How**:
+
+```python
+# weight_engine.py:WEIGHT_CAP_DEFAULT = 0.25 (模块级常量)
+
+# 静态权重路径 (Equal/ICIR/IC) — _apply_weights 入口调用
+capped_weights = self._cap_single_factor_weight(weights, cap=WEIGHT_CAP_DEFAULT, logger=logger)
+weight_values = np.array([capped_weights[col] for col in factor_cols])
+
+# 动态权重路径 (RollingICIR) — _dim_weight 列生成后行级 cap
+W = factor_df[dim_weight_cols].to_numpy(dtype=float)
+W_capped = self._cap_weight_matrix(W, cap=WEIGHT_CAP_DEFAULT)  # 矩阵向量化版本
+for i, col in enumerate(factor_cols):
+    factor_df[f"{col}_dim_weight"] = W_capped[:, i]
+```
+
+**算法 (软上限, 迭代摊分)**:
+
+```
+while any(w > cap):
+    超额因子截断至 cap
+    excess = sum(w_i - cap for w_i > cap)
+    剩余因子 (w < cap) 按其原权重比例摊分 excess
+理论上 floor(1/cap) 个因子可同时达到 cap (4 × 25% = 100%)
+```
+
+**Don't**:
+- 不要用硬截断 (剩余 excess 无处可分 → sum < 1.0 破坏归一化前提)
+- 不要不归一化输入 (sum != 1.0 会触发先归一化, 见 logger warning)
+- 不要在 n_factors × cap < 1.0 时强制 cap (物理不可解, 已加可行性 short-circuit, 见 v2.38a)
+
+**Why**:
+- **业界依据**: Asness (2013) "Value and Momentum Everywhere"、AQR 多因子产品上限均为 20-30%。
+- **防垄断**: 实测 `factor_summary_report_2026-06-22.txt` 显示 amplitude_compression 名义 43.7% / 实际贡献 64% → 综合因子退化为单因子,失去分散化优势 (design.md feat_interaction_exemption_and_weight_cap §1)。
+- **保留排序信息**: 软上限 (vs 硬截断) 在被 cap 的因子之外完整保留 ICIR 排序,信息损失最小。
+- **物理可行性**: `n × cap >= 1.0` 是 cap 有解的必要条件;不满足时跳过 cap (而非等权回退),避免破坏少因子场景的权重信息。
+
+**When**:
+- ✅ 所有 4 种加权方式 (Equal/ICIR/IC/RollingICIR) 共同生效
+- ✅ 因子数 ≥ 4 时严格执行 (4 × 25% = 1.0 边界可行)
+- ⚠️ 因子数 < 4 时跳过 cap (物理不可解), 此为防御性短路而非业务漏洞
+
+**Examples**:
+
+```python
+# ✓ 正确: 8 因子, amplitude_compression 43.7% → 25%, 其他按比例放大
+input  = {"amp_compression": 0.437, "b": 0.105, "c": 0.089, ...}
+output = {"amp_compression": 0.250, "b": 0.150, "c": 0.127, ...}  # sum=1.0
+
+# ✗ 错误: 硬截断不摊分 → sum < 1.0
+input  = {"a": 0.50, "b": 0.30, "c": 0.20}
+wrong  = {"a": 0.25, "b": 0.30, "c": 0.20}  # sum=0.75, 破坏归一化
+```
+
+**Verify**:
+- `pytest comprehensive_factor/test_cases/test_weight_cap.py` — 15 个单元测试
+- pipeline 重跑后 `factor_summary_report` 应显示无因子名义权重 > 25%
+- RollingICIR 日志: `"行级 cap=0.25: N/M 行触发截断, 已摊分至剩余因子"`
 
 ---
 

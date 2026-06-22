@@ -40,6 +40,14 @@ from factor_definitions import (
 )
 
 
+# v2.38: 单因子权重上限默认值 (design.md feat_interaction_exemption_and_weight_cap §4.3)
+# 业界依据: Asness (2013) "Value and Momentum Everywhere", AQR 多因子产品经验值
+# 防垄断: factor_summary_report_2026-06-22.txt 显示 amplitude_compression
+#   名义 43.7% / 实际贡献 64% → 综合因子退化为单因子, 失去分散化优势
+# 选择 0.25 而非 0.30: 0.30 仍允许 amplitude_compression 占 30% (design.md §8)
+WEIGHT_CAP_DEFAULT = 0.25
+
+
 class WeightMethodBase(ABC):
     """加权方法基类"""
 
@@ -110,7 +118,7 @@ class WeightMethodBase(ABC):
         logger: logging.Logger,
         method_name: str = "加权",
     ) -> pd.Series:
-        """应用权重计算综合因子（向量化实现 + 缺失因子中性填充）
+        """应用权重计算综合因子（向量化实现 + 缺失因子中性填充 + 单因子权重上限）
 
         Args:
             factor_df: 因子 DataFrame
@@ -128,6 +136,12 @@ class WeightMethodBase(ABC):
         - v1.17: 缺失因子 z-score 用 0 填充（= 全市场平均）+ 不归一化
           原理：z-score=0 是统计均值，缺失=无信号=中性，既不放大也不惩罚
           效果：缺失因子视为"该因子处于平均水平"，综合因子值自然趋中
+
+        v2.38: 单因子权重上限 25% (design.md feat_interaction_exemption_and_weight_cap §4.3)
+        - 应用 _cap_single_factor_weight: 任何单因子名义权重不得超过 25%
+        - 业界依据: Asness (2013), AQR 多因子产品经验上限
+        - 防垄断: factor_summary_report_2026-06-22.txt 显示
+          amplitude_compression 名义 43.7% / 实际贡献 64% → 综合因子退化为单因子
         """
         # 使用标准化因子列
         std_cols = [f"{col}_std" for col in factor_cols]
@@ -137,9 +151,12 @@ class WeightMethodBase(ABC):
         if missing_cols:
             raise ValueError(f"标准化因子列缺失: {missing_cols}")
 
+        # v2.38: 应用单因子权重上限（25% 软上限，迭代摊分）
+        capped_weights = self._cap_single_factor_weight(weights, cap=WEIGHT_CAP_DEFAULT, logger=logger)
+
         # 向量化加权求和
         # 构建权重向量
-        weight_values = np.array([weights[col] for col in factor_cols])
+        weight_values = np.array([capped_weights[col] for col in factor_cols])
 
         # 构建 DataFrame（标准化因子列）
         std_df = factor_df[std_cols]
@@ -161,9 +178,189 @@ class WeightMethodBase(ABC):
         all_nan_mask = std_df.isna().all(axis=1)
         composite = composite.where(~all_nan_mask, np.nan)
 
-        logger.info("%s完成: 权重 %s，NaN处理=中性填充(z=0)", method_name, weights)
+        logger.info("%s完成: 权重 %s，NaN处理=中性填充(z=0)", method_name, capped_weights)
 
         return composite
+
+    @staticmethod
+    def _cap_single_factor_weight(
+        weights: dict[str, float],
+        cap: float = 0.25,
+        logger: logging.Logger | None = None,
+        max_iter: int = 20,
+    ) -> dict[str, float]:
+        """单因子权重软上限（迭代摊分算法）
+
+        Args:
+            weights: 原始权重 {factor_col: weight}, 假定 sum == 1.0
+            cap: 单因子最大权重（默认 25%, 业界 AQR/Asness 2013 经验值）
+            logger: 日志对象（可选, 记录截断事件）
+            max_iter: 迭代上限（防御性, 实测多 1-2 轮即收敛）
+
+        Returns:
+            capped weights, sum == 1.0 (1e-9 精度内)
+
+        Algorithm (软上限, 保留 ICIR 排序信息):
+            while any(w > cap):
+                excess = sum(max(0, w - cap) for w in weights)  # 超额总和
+                超额因子截至 cap; 剩余因子按其原权重比例分摊 excess
+            理论上最多 floor(1/cap)-1 个因子可达 cap (4 个 25%=100%)
+
+        Edge cases:
+            - 空字典: 直接返回
+            - 单因子: 必为 100%, 远超 cap → 退化为 {f: 1.0} (无可分摊对象)
+            - 全部到 cap: 总权重 < 1.0 时, 按"剩余因子已耗尽"等权拉回
+
+        v2.38: design.md feat_interaction_exemption_and_weight_cap §4.3
+        v2.38a: 物理可行性约束 - n_factors * cap < 1.0 时跳过 cap (不可解, 避免等权回退破坏权重信息)
+        """
+        if not weights:
+            return weights
+
+        # v2.38a: 物理可行性检查 - cap 必须可达成 (n × cap >= 1.0)
+        # 例: 3 因子 × 0.25 = 0.75 < 1.0 → cap 无解, 跳过 (保留原权重)
+        n = len(weights)
+        if n * cap < 1.0 - 1e-9:
+            if logger is not None:
+                logger.debug(
+                    "_cap_single_factor_weight skipped: n=%d * cap=%.2f = %.2f < 1.0 (cap 物理不可行)",
+                    n,
+                    cap,
+                    n * cap,
+                )
+            return dict(weights)
+
+        # 防御性: 检查输入 sum
+        original_sum = sum(weights.values())
+        if abs(original_sum - 1.0) > 1e-6:
+            if logger is not None:
+                logger.warning(
+                    "_cap_single_factor_weight 输入权重总和=%.6f != 1.0, 先归一化",
+                    original_sum,
+                )
+            if original_sum == 0:
+                # 退化为等权
+                n = len(weights)
+                return dict.fromkeys(weights, 1.0 / n)
+            weights = {f: w / original_sum for f, w in weights.items()}
+
+        capped = dict(weights)
+        truncated_factors: list[str] = []
+
+        for _ in range(max_iter):
+            # 找出超过 cap 的因子
+            over_cap = {f: w for f, w in capped.items() if w > cap + 1e-12}
+            if not over_cap:
+                break
+
+            # 超额总和
+            excess = sum(w - cap for w in over_cap.values())
+
+            # 截断到 cap
+            for f in over_cap:
+                capped[f] = cap
+                if f not in truncated_factors:
+                    truncated_factors.append(f)
+
+            # 剩余因子 (权重 < cap) 的原权重总和
+            others = {f: w for f, w in capped.items() if w < cap - 1e-12}
+            others_sum = sum(others.values())
+
+            if others_sum < 1e-12:
+                # 所有因子都到顶: 剩余 excess 无处可分, 等权拉回
+                # (此情况只在 n * cap < 1.0 时出现, 例如 3 因子 × cap=0.30 = 0.90)
+                n = len(capped)
+                for f in capped:
+                    capped[f] = 1.0 / n
+                break
+
+            # 按 others 原权重比例摊分 excess
+            for f in others:
+                capped[f] += excess * (others[f] / others_sum)
+
+        if logger is not None and truncated_factors:
+            logger.info(
+                "_cap_single_factor_weight cap=%.2f: 截断 %d 个因子 %s, 摊分至剩余",
+                cap,
+                len(truncated_factors),
+                truncated_factors,
+            )
+
+        return capped
+
+    @staticmethod
+    def _cap_weight_matrix(
+        W: np.ndarray,
+        cap: float = 0.25,
+        max_iter: int = 20,
+    ) -> np.ndarray:
+        """权重矩阵行级软上限（向量化版本, 用于 RollingICIR 每日动态权重）
+
+        Args:
+            W: shape (n_days, n_factors), 每行 sum == 1.0 (假定已归一化)
+            cap: 单因子最大权重
+            max_iter: 迭代上限
+
+        Returns:
+            capped W, 每行 sum == 1.0
+
+        Algorithm (与 _cap_single_factor_weight 同构, numpy 向量化):
+            for _ in range(max_iter):
+                over = W > cap                   # bool mask
+                if not over.any(): break
+                excess = (W - cap).clip(0).sum(axis=1)   # 每行超额
+                W[over] = cap                    # 截断
+                under = W < cap - 1e-12          # 剩余可摊分因子 mask
+                under_sum = (W * under).sum(axis=1)
+                # 按比例摊分: W += excess * (W * under) / under_sum (行广播)
+                ...
+
+        v2.38: design.md §4.3, 用于 RollingICIRWeightMethod 每日 _dim_weight 行
+        v2.38a: 物理可行性约束 - n_factors * cap < 1.0 时直接返回 (跳过 cap)
+        """
+        # v2.38a: 物理可行性检查
+        n_factors = W.shape[1]
+        if n_factors * cap < 1.0 - 1e-9:
+            return W.copy()  # 不可解, 保留原权重
+
+        W = W.copy()  # 防御性: 不污染原矩阵
+        EPS = 1e-12
+
+        for _ in range(max_iter):
+            over_mask = cap + EPS < W
+            if not over_mask.any():
+                break
+
+            # 每行超额总和
+            excess_per_row = np.where(over_mask, W - cap, 0.0).sum(axis=1)  # (n_days,)
+
+            # 截断到 cap
+            W = np.where(over_mask, cap, W)
+
+            # 剩余可摊分因子 mask
+            under_mask = cap - EPS > W
+
+            # 每行剩余因子原权重总和
+            under_sum_per_row = np.where(under_mask, W, 0.0).sum(axis=1)  # (n_days,)
+
+            # 行 1: 所有因子到顶 (under_sum=0) → 等权拉回 (避免除零)
+            all_capped_rows = under_sum_per_row < EPS
+            if all_capped_rows.any():
+                W[all_capped_rows, :] = 1.0 / n_factors
+
+            # 行 2: 正常摊分
+            normal_rows = ~all_capped_rows
+            if normal_rows.any():
+                # ratio[d, f] = W[d, f] / under_sum[d] if under_mask else 0
+                under_w = np.where(under_mask, W, 0.0)
+                # 除零保护: under_sum_per_row 已知非零（normal_rows 上）
+                ratio = np.zeros_like(W)
+                ratio[normal_rows] = under_w[normal_rows] / under_sum_per_row[normal_rows, None]
+                # 摊分: W += excess[d] × ratio[d, f]
+                addend = excess_per_row[:, None] * ratio
+                W[normal_rows] = W[normal_rows] + addend[normal_rows]
+
+        return W
 
     # v2.35: P2 维度权重全方法支持——静态权重维度再分配（通用方法，所有子类可调用）
     # M58(MODULE.md L1966): 维度权重是WeightEngine通用能力，不限于rolling_icir
@@ -830,6 +1027,27 @@ class RollingICIRWeightMethod(WeightMethodBase):
                 weight = factor_df[rolling_col].abs() / weight_sum_safe
                 weight = weight.fillna(1.0 / len(factor_cols))
                 factor_df[f"{col}_dim_weight"] = weight
+
+        # v2.38: 行级单因子权重上限（design.md feat_interaction_exemption_and_weight_cap §4.3）
+        # RollingICIR 每日动态权重 _dim_weight 可能某日某因子占比过高（如 amplitude_compression 43.7%）
+        # 用 _cap_weight_matrix 对每行做 25% 截断+剩余比例摊分, 保持每行 sum=1.0
+        dim_weight_cols = [f"{col}_dim_weight" for col in factor_cols]
+        W = factor_df[dim_weight_cols].to_numpy(dtype=float)
+        # 仅对有效行（非全 NaN）进行 cap; NaN 会被 fillna(1/n) 保护
+        W_capped = self._cap_weight_matrix(W, cap=WEIGHT_CAP_DEFAULT)
+        # 写回 _dim_weight 列
+        for i, col in enumerate(factor_cols):
+            factor_df[f"{col}_dim_weight"] = W_capped[:, i]
+        # 截断事件记录（统计层面）
+        any_capped_mask = (W > WEIGHT_CAP_DEFAULT + 1e-12).any(axis=1)
+        n_capped_rows = int(any_capped_mask.sum())
+        if n_capped_rows > 0:
+            self.logger.info(
+                "RollingICIR 行级 cap=%.2f: %d/%d 行触发截断, 已摊分至剩余因子",
+                WEIGHT_CAP_DEFAULT,
+                n_capped_rows,
+                len(W),
+            )
 
         std_cols = [f"{col}_std" for col in factor_cols]
 
