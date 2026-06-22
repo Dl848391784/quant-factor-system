@@ -233,11 +233,35 @@ def split_data(
     logger.info("主数据源: %s", data_source)
     logger.info("train_end=%s, test_end=%s, purge_days=%d", train_end, test_end, purge_days)
 
-    # 1. 流式读取 dates 数组
+    # 1. 读取 dates（L4: Parquet metadata 优先）
     logger.info("读取 dates 数组...")
-    with gzip.open(data_source, "rb") as f:
-        dates = list(ijson.items(f, "dates.item", use_float=True))
-    logger.info("交易日总数: %d", len(dates))
+    parquet_path = data_source.parent / data_source.name.replace(".json.gz", ".parquet")
+
+    if parquet_path.exists():
+        try:
+            import pyarrow.parquet as pq
+
+            schema = pq.read_schema(parquet_path)
+            meta = schema.metadata or {}
+            if b"dates" in meta:
+                dates = json.loads(meta[b"dates"])
+                logger.info("从 Parquet metadata 读取 dates: %d 个交易日", len(dates))
+            else:
+                import pandas as pd
+
+                df_dates = pd.read_parquet(parquet_path, columns=["date"])
+                dates = sorted(df_dates["date"].astype(str).unique().tolist())
+                del df_dates
+                logger.info("从 Parquet date 列读取 dates: %d 个交易日", len(dates))
+        except Exception as e:
+            logger.warning("Parquet dates 读取失败，回退到 ijson: %s", e)
+            with gzip.open(data_source, "rb") as f:
+                dates = list(ijson.items(f, "dates.item", use_float=True))
+            logger.info("交易日总数: %d", len(dates))
+    else:
+        with gzip.open(data_source, "rb") as f:
+            dates = list(ijson.items(f, "dates.item", use_float=True))
+        logger.info("交易日总数: %d", len(dates))
 
     # 2. 计算三段日期
     splits = compute_date_splits(dates, train_end, test_end, purge_days)

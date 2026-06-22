@@ -342,29 +342,58 @@ def check_data_freshness(date: str, logger: logging.Logger) -> list[dict]:
             file_format = config.get("format", "line_json")
             date_field = config.get("date_field", "dates")
 
-            if config.get("is_gzip"):
-                with gzip.open(file_path, "rt", encoding="utf-8") as f:
-                    if file_format == "line_json":
-                        # 每行一个 JSON 对象，只读第一行获取顶层 dates
-                        first_line = f.readline()
-                        if first_line:
-                            data = json.loads(first_line)
-                            dates = data.get("dates", [])
-                            if dates:
-                                result["actual_date"] = dates[-1]
-                    elif file_format == "full_json":
-                        # 完整 JSON 对象（可能很大），只读取头部部分用正则匹配
-                        # meta.date_range.end / 顶层 dates 通常在文件开头部分
-                        content = f.read(DATA_FRESHNESS_HEAD_CHARS)
-                        actual_date = _extract_date_from_json_content(content, date_field)
-                        if actual_date:
-                            result["actual_date"] = actual_date
-            else:
-                # 非压缩文件
-                data = json.loads(file_path.read_text(encoding="utf-8"))
-                actual_date = _get_nested_field(data, date_field)
-                if actual_date:
-                    result["actual_date"] = actual_date
+            # L4: Parquet 优先（factor_ic_data 有 Parquet 版本时从 metadata 读 dates）
+            parquet_path = file_path.with_suffix(".parquet")
+            if source_name == "factor_ic_data" and parquet_path.exists():
+                try:
+                    import pyarrow.parquet as pq
+
+                    schema = pq.read_schema(parquet_path)
+                    meta = schema.metadata or {}
+                    if b"dates" in meta:
+                        import json as _json
+
+                        dates = _json.loads(meta[b"dates"])
+                        if dates:
+                            result["actual_date"] = dates[-1]
+                    else:
+                        # metadata 无 dates → 从 date 列读取
+                        df_dates = pd.read_parquet(parquet_path, columns=["date"])
+                        dates_list = sorted(df_dates["date"].astype(str).unique())
+                        if dates_list:
+                            result["actual_date"] = dates_list[-1]
+                        del df_dates
+                except Exception as e:
+                    logger.warning("Parquet 读取 dates 失败，回退到 JSON.gz: %s", e)
+                    # 回退到下方 gzip 路径
+                    parquet_path = None  # 标记回退
+
+            if result["actual_date"] == "unknown" and (
+                source_name != "factor_ic_data" or not parquet_path or not parquet_path.exists()
+            ):
+                if config.get("is_gzip"):
+                    with gzip.open(file_path, "rt", encoding="utf-8") as f:
+                        if file_format == "line_json":
+                            # 每行一个 JSON 对象，只读第一行获取顶层 dates
+                            first_line = f.readline()
+                            if first_line:
+                                data = json.loads(first_line)
+                                dates = data.get("dates", [])
+                                if dates:
+                                    result["actual_date"] = dates[-1]
+                        elif file_format == "full_json":
+                            # 完整 JSON 对象（可能很大），只读取头部部分用正则匹配
+                            # meta.date_range.end / 顶层 dates 通常在文件开头部分
+                            content = f.read(DATA_FRESHNESS_HEAD_CHARS)
+                            actual_date = _extract_date_from_json_content(content, date_field)
+                            if actual_date:
+                                result["actual_date"] = actual_date
+                else:
+                    # 非压缩文件
+                    data = json.loads(file_path.read_text(encoding="utf-8"))
+                    actual_date = _get_nested_field(data, date_field)
+                    if actual_date:
+                        result["actual_date"] = actual_date
 
             # 判断状态
             if result["actual_date"] == expected_t_minus_1:
@@ -793,6 +822,49 @@ def calculate_factor_correlation(logger: logging.Logger, force_full: bool = Fals
 
     # 如果综合因子结果中没有相关性数据，尝试从原始数据计算
     factor_data_path = PROJECT_ROOT / DATA_PATHS["factor_data"] / "factor_ic_data.json.gz"
+
+    # L4: Parquet 优先（列投影读取因子列，避免逐行解析 JSON）
+    parquet_path = factor_data_path.with_suffix(".parquet")
+
+    if parquet_path.exists():
+        logger.info("从 Parquet 读取因子数据计算相关性（列投影）...")
+        start_time = time.time()
+
+        try:
+            factor_cols = list(FACTOR_COL_TO_NAME_MAP.keys())
+            # 列投影读取（仅读 date + asset + factor_cols）
+            read_cols = ["date", "asset"] + factor_cols
+            corr_df_raw = pd.read_parquet(parquet_path, columns=read_cols)
+
+            # 采样：取前 MAX_STOCKS_SAMPLE 只股票
+            unique_assets = corr_df_raw["asset"].unique()
+            sampled_assets = unique_assets[:MAX_STOCKS_SAMPLE]
+            corr_df_raw = corr_df_raw[corr_df_raw["asset"].isin(sampled_assets)]
+
+            # 提取因子列
+            available_factor_cols = [c for c in factor_cols if c in corr_df_raw.columns]
+            factor_df = corr_df_raw[["date", "asset"] + available_factor_cols].copy()
+            del corr_df_raw
+
+            # 计算相关性
+            corr_matrix = factor_df[available_factor_cols].corr()
+
+            # 重命名
+            factor_names = [FACTOR_COL_TO_NAME_MAP.get(c, c) for c in corr_matrix.columns]
+            corr_df = corr_matrix.copy()
+            corr_df.index = factor_names
+            corr_df.columns = factor_names
+
+            elapsed = time.time() - start_time
+            logger.info(
+                "因子相关性计算完成(Parquet)，耗时: %.2f秒（采样%s只股票）",
+                elapsed,
+                len(sampled_assets),
+            )
+
+            return corr_df
+        except Exception as e:
+            logger.warning("Parquet 相关性计算失败，回退到 JSON.gz: %s", e)
 
     if not factor_data_path.exists():
         logger.warning("因子数据文件不存在，无法计算相关性")
