@@ -42,10 +42,12 @@ REVERSE_DISCOVERY_RESULT = PROJECT_ROOT / "reverse_discovery" / "result"
 # 统一数据源（单一来源原则）
 # ============================================================================
 
-# factor_ic_data.json.gz = 行情 + 因子 + 收益数据
-# 所有下游模块必须从此文件读取，禁止从其他文件读取收益数据
-# L1~L4 阶段 dual-write：json.gz 保留兼容 + parquet 新格式
-# L5 阶段移除 json.gz，FACTOR_IC_DATA 指向 .parquet
+# factor_ic_data = 行情 + 因子 + 收益数据
+# 所有下游模块从此文件读取，禁止从其他文件读取收益数据
+# Parquet 迁移（2026-06-22）：reader 内部自动检测 .parquet sibling，
+#   存在则用 pd.read_parquet(columns=[...])（~1.5s, ~50-150MB），
+#   不存在则 fallback ijson 流式（~30s, ~500MB+）
+# 生成 Parquet：重跑 data_fetchers/factor_generator.py（dual-write 模式）
 FACTOR_IC_DATA = DATA_FETCHERS_RESULT / "factor_ic_data.json.gz"
 FACTOR_IC_DATA_PARQUET = DATA_FETCHERS_RESULT / "factor_ic_data.parquet"
 
