@@ -25,7 +25,7 @@
 | **A. 模块基础** | M1-M4 | 模块职责 / 公共模块复用 / 脚本命名 / 输出与日志 |
 | **B. 加权方式** | M5-M8 | 4 种加权 / 静态权重 / 滚动 ICIR / 向量化实现 |
 | **C. 标准化** | M9-M11 | 截面标准化 / `_std` 列接口约定 / NaN 处理 |
-| **D. 因子筛选** | M12-M16, M16a, M57 | 无效判定 / 高相关组 Union-Find / 关键指标缺失 / ICIR 缺失 / 完整性标记 / 交互因子L1豁免 / 维度感知去重 |
+| **D. 因子筛选** | M12-M16, M16a, M57 | 无效判定 / 高相关组 Union-Find / 关键指标缺失 / ICIR 缺失 / 完整性标记 / 交互因子独立门槛 (v2.39) / 维度感知去重 |
 | **E. 命名映射与正则** | M17-M20 | 因子名映射表 / 反向映射 / 正则预编译+贪婪 / 跳过非标准 |
 | **F. 数据加载与校验** | M21-M26 | 数据来源 / 必需列 / 返回值解包 / 空值检查 / 类型校验 / 一致性强校验 |
 | **G. NaN 与权重处理** | M27-M30, M30a | NaN 相关性 / composite NaN / 动态权重归一化 / 除零保护 / 单因子权重上限 |
@@ -733,61 +733,78 @@ if missing_in_index or missing_in_columns:
 
 ---
 
-## M16a. 交互因子族 L1 硬约束豁免 (v2.38)
+## M16a. 交互因子族独立门槛体系 (v2.39, 取代 v2.38 L1 豁免)
 
-**What**:`factor_name.startswith("interaction_")` 的因子在 L1 年化/夏普硬约束检查时,允许豁免。豁免条件为三条同时满足:
-- `long_return_annual > 0.10`(多头年化 > 10%)
-- `long_short_sharpe > 1.5`(多空夏普 > 1.5)
-- `monotonicity_corr > 0.5`(单调性 > 0.5)
+**What**:`factor_name.startswith("interaction_")` 的因子使用独立的 `INTERACTION_THRESHOLDS` 门槛 dict 派发，覆盖 `DEFAULT_THRESHOLDS` 的同名字段。线性因子主 dict 零修改。
 
-**How**:`validate_factor` (`factor_selector.py:458-548`) 在 L1 检查处计算 `is_l1_exempt` 标志,豁免时记录 `exempt_details`(`trigger=layer_1_annual`/`layer_1_sharpe`, `exempted=True`, `conditions` 含 `is_interaction=True`)而不加入 `reasons`。
+| 字段 | DEFAULT (线性) | INTERACTION (交互) | 设计依据 |
+|---|---|---|---|
+| `ic_mean_abs_min` | 0.03 | 0.005 | 池化 IC 稀释, 三因子实测 0.002~0.008 |
+| `p_value_max` | 0.05 | 0.05 | v2.39 修正: 保留（最强信号真实性判据）|
+| `icir_abs_min` | 0.15 | 0.05 | 早期噪声 + IC 衰减, 三因子实测 0.024~0.120 |
+| `monotonicity_corr_abs_min` | 0.40 | 0.30 | 乘法非单调, 三因子实测 0.36~0.42 |
+| `long_return_min` | 0.03 | 0.05 (**更严**) | 只做多策略关键判据, 不放宽 |
+| `layer_1_return_min` | 0.0 | -0.25 | 承认 L1 必亏的数学必然 |
+| `layer_1_sharpe_min` | 0.0 | -1.50 | L1 夏普容忍下限 |
+
+**How**:`_get_thresholds_for_factor(factor_name, base_thresholds)` 派发函数（`factor_selector.py:91-118`）。`validate_factor` 入口（`factor_selector.py:312-316`）调用派发，得到 `(thresholds, threshold_source)`，后续所有门槛检查都用派发后的 dict。`exempt_details` 每条记录新增 `threshold_source: "interaction" | "default"` 字段供审计。
 
 **Don't**:
-- 禁止扩展到非 `interaction_` 前缀的因子(单调线性因子 L1<=0 是因子无效的可靠信号)。
-- 禁止放宽阈值(`long_return>5%` 会误纳"L10 弱反弹"假信号,见 design.md §4.2)。
-- 禁止仅满足 1-2 条就豁免(三条同时满足才能证明"只做多"策略可盈利)。
+- 禁止把 `INTERACTION_THRESHOLDS` 中的字段写到 `DEFAULT_THRESHOLDS`（破坏线性因子主 dict 零修改承诺）。
+- 禁止给非 `interaction_` 前缀因子启用 INTERACTION 门槛（单调线性因子 L1<=0 仍是因子无效的可靠信号）。
+- 禁止把 `p_value_max` 改回 `None`（v2.39 Post-Mortem §7.1 证伪：amp_compression p=0.012 显著 是反例，p_value 在 ic_mean 小时反而更重要）。
 
-**Why**:第一性原理推导(见 `designs/feat_interaction_exemption_and_weight_cap.md` §2):
+**Why**:第一性原理推导（见 `designs/feat_interaction_thresholds_v239.md` §1.3 §2.2）：
 
 ```
 interaction_X = -z_cs(weakness_ret) × z_cs(X)
-                            ↓
-L1 (最低分) = "强势×高 + 弱势×低" 双对角混合 → 注定亏损(数学必然)
-L10 (最高分) = "弱势×高" → 反弹候选 → 显著盈利
+                            ↓ 乘法结构
+统计特性与单调线性因子结构性不同:
+  - 池化 IC 等权稀释 → ic_mean 0.002~0.020 (vs 线性 0.02~0.07)
+  - 早期噪声 + IC 衰减 → icir 0.02~0.15 (vs 线性 0.15~0.30)
+  - 乘法非单调, 分层 U 形 → mono_corr 0.30~0.50 (vs 线性 0.50~0.80)
+  - L1 = "强势×低 + 弱势×高" 双对角混合 → L1 必亏 (数学必然)
 ```
 
-原 L1 硬约束 (v2.35) 为**单调线性因子**设计 (IC 方向统一 negative 后 L1<=0 = 因子无效),不适用于非线性的交互因子。
+v2.39 用**独立门槛 dict** 取代 v2.38 的 L1 豁免分支：本质相同（让交互因子族走不同标准），但更干净——不再需要"是否豁免"的复杂分支，门槛 dict 直接告诉门槛检查"L1 阈值是 -0.25"。
 
 **When**:
 - 适用:所有 `factor_name.startswith("interaction_")` 的因子。
-- 不适用:单调线性因子(如 `amplitude_compression`, `volume_ratio`)、跨维度复合因子。
+- 不适用:单调线性因子（继续走 DEFAULT_THRESHOLDS）。
 
 **Examples**:
 
 ```python
-# ✓ 优质交互因子豁免通过 (interaction_ma5_dev)
-# long_return=24.2%>10%, ls_sharpe=4.25>1.5, mono_corr=0.76>0.5
-# → L1=-24.6% 豁免, 入选
+# ✓ interaction_amp_compression (ic=0.0077, icir=0.120, mono=0.357, p=0.012, L1=-11.8%)
+# - ic_mean 0.0077 > INTERACTION 0.005 ✓
+# - p_value 0.012 < 0.05 ✓
+# - L1 -11.8% > INTERACTION -0.25 ✓
+# → 入池
 
-# ✗ 弱交互因子保持淘汰 (interaction_turnover)
-# long_return=8.9%<10% → 不满足豁免条件
-# → L1=-16.3% 触发硬约束, 淘汰
+# ✗ interaction_amplitude (ic=0.0048, p=0.113)
+# - ic_mean 0.0048 < INTERACTION 0.005 ✗
+# - p_value 0.113 > 0.05 ✗ (边缘噪声)
+# → 淘汰
 
-# ✗ 非交互因子即使指标满足也不豁免 (假想的 amplitude 高指标版本)
-# 名字不以 interaction_ 开头 → 不进入豁免分支
-# → L1 硬约束严格执行
+# ✗ interaction_turnover (ic=0.0016, icir=0.024, p=0.611)
+# - ic_mean 0.0016 < 0.005 ✗
+# - icir 0.024 < 0.05 ✗
+# - p_value 0.611 > 0.05 ✗ (几乎纯随机)
+# → 淘汰
 ```
 
 **Verify**:
-- `pytest comprehensive_factor/test_cases/test_factor_selector_p1.py::TestInteractionFactorL1Exemption` (5 个测试)
+- `pytest comprehensive_factor/test_cases/test_factor_selector_interaction_thresholds.py` (16 个测试)
+- `pytest comprehensive_factor/test_cases/test_factor_selector_p1.py::TestInteractionFactorL1Threshold` (4 个测试)
 - 当前 9 个交互因子分类预期:
-  - 豁免入池(6): ma5_dev / near_high / intraday / kdj / price_pos / bollinger
-  - 保持淘汰(3): amplitude (mono 不足) / amp_compression / turnover (long_return 不足)
+  - 入池 (1, 待 pipeline 验证): amp_compression
+  - 淘汰 (2): amplitude (ic_mean+p_value), turnover (ic_mean+icir+p_value)
+  - 待验证 (6): ma5_dev / near_high / intraday / kdj / price_pos / bollinger
 
 **引用**:
-- 设计文档: `designs/feat_interaction_exemption_and_weight_cap.md` §2, §4.1, §4.2
-- 业界依据: Asness (2013) "Value and Momentum Everywhere" §3 非线性因子价值
-- 项目规范: PROJECT.md §⚡ 第一性原理 / AGENTS.md 硬规则 #5(因子方向由数据定)
+- 设计文档: `designs/feat_interaction_thresholds_v239.md` §2.2, §3, §7 (Post-Mortem)
+- 历史: v2.38 L1 豁免（commit 4c845c0）已在 v2.39 删除，由独立门槛体系取代
+- 项目规范: PROJECT.md §⚡ 第一性原理 / AGENTS.md 硬规则 #5（因子方向由数据定）
 
 ---
 

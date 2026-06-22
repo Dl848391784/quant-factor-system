@@ -79,6 +79,55 @@ DEFAULT_THRESHOLDS = {
 }
 
 
+# v2.39: 交互因子族独立门槛体系（design.md feat_interaction_thresholds_v239.md §2.2）
+# 第一性原理：交互因子 = -z_cs(weakness) × z_cs(X) 是乘法结构，统计特性与线性单调因子结构性不同：
+#   - 池化 IC 等权稀释 → ic_mean 典型值 0.002~0.020（vs 线性 0.02~0.07）
+#   - 早期 30 日 IC 噪声 ±0.15 + IC 衰减 → icir 典型 0.02~0.15（vs 线性 0.15~0.30）
+#   - 乘法结构非单调，分层 U 形 → mono_corr 典型 0.30~0.50（vs 线性 0.50~0.80）
+#   - ic_mean 小 → t 统计天然不显著 → p_value 跳过
+#   - L1 = "强势×低 + 弱势×高" 双对角混合 → L1 必亏（数学必然），独立门槛容忍 L1 负
+# long_return_min 反而更严（5% > 3%）：只做多策略能否赚钱的关键判据，不可放宽
+# 详见 designs/feat_interaction_thresholds_v239.md §1.3（根因）§2.2（设计）§2.4（决策矩阵）
+INTERACTION_THRESHOLDS = {
+    "ic_mean_abs_min": 0.005,  # 池化 IC 稀释后, 三因子实测 0.002~0.008
+    "p_value_max": 0.05,  # v2.39 修正: 保留 p_value 门槛（最强信号真实性判据, ic_mean 小时反而更重要）
+    "icir_abs_min": 0.05,  # 早期噪声 + IC 衰减, 三因子实测 0.024~0.120
+    "monotonicity_corr_abs_min": 0.30,  # 乘法非单调, 三因子实测 0.36~0.42
+    "long_return_min": 0.05,  # 多头年化, 高于主 dict 3%（只做多关键判据, 三因子实测 10.1~11.6%）
+    "high_corr_threshold": 0.7,  # 同主 dict（维度相关性是物理结构约束）
+    "min_sample_days": 60,  # 同主 dict
+    "layer_1_return_min": -0.25,  # 承认 L1 必亏的数学必然, 三因子实测 -11.8~-20.6%, 留 4pp 缓冲
+    "layer_1_sharpe_min": -1.50,  # L1 夏普容忍下限, 与 v2.38 设计一致
+}
+
+
+def _get_thresholds_for_factor(factor_name: str, base_thresholds: dict) -> tuple[dict, str]:
+    """根据因子名前缀派发门槛 dict。
+
+    交互因子族（factor_name.startswith("interaction_")）使用 INTERACTION_THRESHOLDS
+    覆盖主 dict 的同名字段；其余因子使用 base_thresholds 不变。
+
+    Args:
+        factor_name: 因子名称（如 "rsi", "interaction_amplitude"）
+        base_thresholds: 主门槛 dict（通常是 DEFAULT_THRESHOLDS）
+
+    Returns:
+        (merged_thresholds, source)
+        - merged_thresholds: 派发后的门槛 dict
+        - source: "interaction" 或 "default"，用于审计标识
+
+    设计:
+        - 用 merge 而非完全替换，避免 INTERACTION_THRESHOLDS 漏定义某字段导致 KeyError
+        - 线性因子主 dict 零修改（方案 B 核心承诺）
+        - 详见 designs/feat_interaction_thresholds_v239.md §3.2
+    """
+    if factor_name.startswith("interaction_"):
+        merged = dict(base_thresholds)
+        merged.update(INTERACTION_THRESHOLDS)
+        return merged, "interaction"
+    return base_thresholds, "default"
+
+
 # v1.6: FACTOR_NAME_TO_COL_MAP 已从 factor_definitions 导入（单一映射来源）
 # 历史本地定义已删除；如需扩展因子映射，请改 factor_definitions.py
 # 详见：designs/factor_name_col_map_unification_design.md §3.2
@@ -262,13 +311,23 @@ def validate_factor(
     if logger is None:
         logger = get_logger(__name__)
 
+    # v2.39: 交互因子族独立门槛体系派发（design feat_interaction_thresholds_v239.md §3.2）
+    # 线性因子（factor_name 不以 "interaction_" 开头）继续用 base_thresholds，零改动；
+    # 交互因子用 INTERACTION_THRESHOLDS merge 覆盖同名字段
+    thresholds, threshold_source = _get_thresholds_for_factor(factor_name, thresholds)
+
     reasons = []
     exempt_details: list[dict] = []
 
     # 1. IC 均值检查
     # v2.35: P6 角色化权重——确认信号因子 IC 门槛降至 0.01（design.md §2.6 决策点1）
+    # v2.39: 交互因子族独立门槛 override confirmation 角色阈值
+    #   confirmation 角色 0.01 是为线性确认因子标定的，交互因子族走 INTERACTION_THRESHOLDS 0.005
     factor_role = FACTOR_ROLES.get(factor_name, "primary")
-    ic_threshold = 0.01 if factor_role == "confirmation" else thresholds["ic_mean_abs_min"]
+    if threshold_source == "interaction":
+        ic_threshold = thresholds["ic_mean_abs_min"]
+    else:
+        ic_threshold = 0.01 if factor_role == "confirmation" else thresholds["ic_mean_abs_min"]
     ic_metrics = factor_data.get("ic_metrics", {})
     ic_mean = ic_metrics.get("ic_mean", None)
     sample_stats = factor_data.get("sample_stats", {})
@@ -324,6 +383,7 @@ def validate_factor(
                 {
                     "trigger": "ic_mean",
                     "threshold": ic_threshold,
+                    "threshold_source": threshold_source,
                     "actual": abs(ic_mean),
                     "exempted": True,
                     "conditions": {
@@ -341,6 +401,7 @@ def validate_factor(
                 {
                     "trigger": "ic_mean",
                     "threshold": ic_threshold,
+                    "threshold_source": threshold_source,
                     "actual": abs(ic_mean),
                     "exempted": False,
                     "conditions": {
@@ -357,19 +418,21 @@ def validate_factor(
     # v1.5: 小样本豁免——valid_days < 30 时 p_value 不可靠，跳过检查
     # 统计原理：样本量 < 30 时，即使强信号也难以达到 p < 0.05
     # 阈值来源：统计学最小样本量惯例（30 为大样本近似门槛）
+    # v2.39: p_value_max=None 时跳过检查（交互因子族 design §2.2）
     MIN_SAMPLE_SIZE_FOR_PVALUE = 30
-    if p_value is not None and p_value > thresholds["p_value_max"]:
+    p_value_max = thresholds.get("p_value_max")
+    if p_value_max is not None and p_value is not None and p_value > p_value_max:
         if valid_days is not None and valid_days < MIN_SAMPLE_SIZE_FOR_PVALUE:
             logger.info(
                 "因子 %s: p_value=%.3f>%.2f 但有效天数=%d<%d，小样本豁免p_value检查",
                 factor_name,
                 p_value,
-                thresholds["p_value_max"],
+                p_value_max,
                 valid_days,
                 MIN_SAMPLE_SIZE_FOR_PVALUE,
             )
         else:
-            reasons.append(f"p_value={p_value:.3f}>{thresholds['p_value_max']}")
+            reasons.append(f"p_value={p_value:.3f}>{p_value_max}")
 
     # 3. ICIR 检查
     icir = ic_metrics.get("icir", None)
@@ -403,6 +466,7 @@ def validate_factor(
                 {
                     "trigger": "icir",
                     "threshold": thresholds["icir_abs_min"],
+                    "threshold_source": threshold_source,
                     "actual": abs(icir),
                     "exempted": True,
                     "conditions": {
@@ -420,6 +484,7 @@ def validate_factor(
                 {
                     "trigger": "icir",
                     "threshold": thresholds["icir_abs_min"],
+                    "threshold_source": threshold_source,
                     "actual": abs(icir),
                     "exempted": False,
                     "conditions": {
@@ -458,99 +523,30 @@ def validate_factor(
     # 7. Layer1 绝对收益硬约束（v2.35: P1 只做多对齐）
     # 公理1: 只做多策略收益 = Layer1 买入层收益，L1<=0 的因子有害无益
     #
-    # v2.38: 交互因子族 L1 豁免（design.md feat_interaction_exemption_and_weight_cap §4.1）
-    # 第一性原理: 交互因子 = -z_cs(weakness) × z_cs(X)，L1 = "强势×高 + 弱势×低" 双对角混合，
-    # 按设计 L1 必亏（数学必然）。L10 收益强劲 + 单调性显著时，"只做多"策略仍能赚钱。
-    # 豁免阈值（严格，三条同时满足）:
-    #   - long_return > 10%      (long_return_min=3% 的 3 倍冗余, 防"L10 弱反弹"假信号)
-    #   - long_short_sharpe > 1.5 (业界量化因子最低门槛, 与 reverse_factor 豁免一致)
-    #   - mono_corr > 0.5        (单调性显著, 证明 L10 - L1 价差稳定)
-    # 限定范围: factor_name.startswith("interaction_") —— 单调线性因子 L1 约束保持
+    # v2.39: 交互因子族走独立门槛（INTERACTION_THRESHOLDS）：
+    #   - layer_1_return_min = -0.25（承认乘法结构 L1 必亏的数学必然）
+    #   - layer_1_sharpe_min = -1.50（容忍 L1 夏普负值）
+    #   设计依据：design.md feat_interaction_thresholds_v239.md §2.2
+    # 线性因子继续走 DEFAULT_THRESHOLDS 的 0.0 硬约束（不变）
+    # 历史：v2.38 Batch 1 的 L1 豁免分支（commit 4c845c0）已在 v2.39 删除——
+    #       独立门槛体系下交互因子的 L1 阈值已下移到 -0.25，不再需要"豁免"逻辑
     layer_stats = backtest.get("layer_stats", {})
     layer_1 = layer_stats.get("layer_1", {})
     layer_1_annual = layer_1.get("annual_return", None)
     layer_1_sharpe = layer_1.get("sharpe_ratio", None)
 
-    is_interaction_factor = factor_name.startswith("interaction_")
-    long_return_for_l1_exempt = long_short.get("long_return_annual", None)
-    is_l1_exempt = (
-        is_interaction_factor
-        and long_return_for_l1_exempt is not None
-        and long_return_for_l1_exempt > 0.10
-        and ls_sharpe is not None
-        and ls_sharpe > 1.5
-        and mono_corr is not None
-        and mono_corr > 0.5
-    )
-
     if layer_1_annual is not None and layer_1_annual <= thresholds["layer_1_return_min"]:
-        if is_l1_exempt:
-            # Pyright 窄化：is_l1_exempt 为 True 时下列三个值都非 None
-            assert long_return_for_l1_exempt is not None
-            assert ls_sharpe is not None
-            assert mono_corr is not None
-            logger.info(
-                "因子 %s: L1年化=%.2f%% 但交互因子族豁免(多头年化=%.2f%%>10%%, 多空夏普=%.2f>1.5, 单调性=%.2f>0.5)",
-                factor_name,
-                layer_1_annual * 100,
-                long_return_for_l1_exempt * 100,
-                ls_sharpe,
-                mono_corr,
-            )
-            exempt_details.append(
-                {
-                    "trigger": "layer_1_annual",
-                    "threshold": thresholds["layer_1_return_min"],
-                    "actual": layer_1_annual,
-                    "exempted": True,
-                    "conditions": {
-                        "long_return": long_return_for_l1_exempt,
-                        "ls_sharpe": ls_sharpe,
-                        "mono_corr": mono_corr,
-                        "is_interaction": True,
-                    },
-                    "detail": f"交互因子L1豁免(多头年化={long_return_for_l1_exempt * 100:.1f}%>10%, 多空夏普={ls_sharpe:.2f}>1.5, 单调性={mono_corr:.2f}>0.5)",
-                }
-            )
-        else:
-            reasons.append(
-                f"layer_1_annual={layer_1_annual * 100:.1f}%<={thresholds['layer_1_return_min'] * 100:.0f}%（只做多硬约束，不可豁免）"
-            )
-            logger.info(
-                "因子 %s: L1年化=%.2f%%<=0%%，只做多策略有害，硬约束淘汰（不可豁免）",
-                factor_name,
-                layer_1_annual * 100,
-            )
+        reasons.append(
+            f"layer_1_annual={layer_1_annual * 100:.1f}%<={thresholds['layer_1_return_min'] * 100:.0f}%（只做多硬约束）"
+        )
+        logger.info(
+            "因子 %s: L1年化=%.2f%%<=%.0f%%，只做多策略有害，硬约束淘汰",
+            factor_name,
+            layer_1_annual * 100,
+            thresholds["layer_1_return_min"] * 100,
+        )
     if layer_1_sharpe is not None and layer_1_sharpe <= thresholds["layer_1_sharpe_min"]:
-        if is_l1_exempt:
-            # Pyright 窄化（同上）
-            assert long_return_for_l1_exempt is not None
-            assert ls_sharpe is not None
-            assert mono_corr is not None
-            logger.info(
-                "因子 %s: L1夏普=%.2f 但交互因子族豁免(同上条件)",
-                factor_name,
-                layer_1_sharpe,
-            )
-            exempt_details.append(
-                {
-                    "trigger": "layer_1_sharpe",
-                    "threshold": thresholds["layer_1_sharpe_min"],
-                    "actual": layer_1_sharpe,
-                    "exempted": True,
-                    "conditions": {
-                        "long_return": long_return_for_l1_exempt,
-                        "ls_sharpe": ls_sharpe,
-                        "mono_corr": mono_corr,
-                        "is_interaction": True,
-                    },
-                    "detail": f"交互因子L1豁免(多头年化={long_return_for_l1_exempt * 100:.1f}%>10%, 多空夏普={ls_sharpe:.2f}>1.5, 单调性={mono_corr:.2f}>0.5)",
-                }
-            )
-        else:
-            reasons.append(
-                f"layer_1_sharpe={layer_1_sharpe:.2f}<={thresholds['layer_1_sharpe_min']:.2f}（L1收益不稳定，不可豁免）"
-            )
+        reasons.append(f"layer_1_sharpe={layer_1_sharpe:.2f}<={thresholds['layer_1_sharpe_min']:.2f}（L1收益不稳定）")
 
     is_valid = len(reasons) == 0
 
