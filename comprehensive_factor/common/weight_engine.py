@@ -38,6 +38,8 @@ from factor_definitions import (
     FACTOR_COL_TO_NAME_MAP as _MODULE_COL_TO_NAME_MAP,
     FACTOR_FAMILIES as _MODULE_FACTOR_FAMILIES,  # v2.40: 经济同源族（用于族级 cap）
     FACTOR_NAME_TO_COL_MAP as _MODULE_NAME_TO_COL_MAP,
+    FACTOR_ROLES as _MODULE_FACTOR_ROLES,  # v2.41 (R2): 角色固定权重
+    PRIMARY_WEIGHT_TOTAL as _MODULE_PRIMARY_WEIGHT_TOTAL,  # v2.41 (R2): 主信号总权重锚
 )
 
 
@@ -543,6 +545,7 @@ class WeightMethodBase(ABC):
     # 设计决策(design.md §2.2): 维度权重是"后处理"层，不改变核心计算逻辑
     dimension_weight_method: str | None = None
     factor_categories: dict[str, str] | None = None
+    enable_role_weights: bool = False  # v2.41 (R2): 角色固定权重，r2b 由 composite_runner 启用
 
     def _apply_dimension_weights_static(
         self,
@@ -625,6 +628,104 @@ class WeightMethodBase(ABC):
 
         return new_weights
 
+    # v2.41 (R2): 角色固定权重后处理（主 75% + 确认 25%）
+    # 设计依据: designs/feat_role_based_fixed_weight_75_25.md §3.1
+    # 第一性原理: PRIMARY_WEIGHT_TOTAL=0.75 为锚, confirmation 总额=1-0.75=0.25
+    #   每个 confirmation = 0.25 / n_confirmation (自适应因子数量)
+    #   注意: CONFIRMATION_WEIGHT_PER_FACTOR=0.05 是 5 因子假设下的旧常量,
+    #   实际 16 个 confirmation 因子 → 0.05×16=0.80 会反转 75/25, 故不使用.
+    def _apply_role_weights_static(
+        self,
+        weights: dict[str, float],
+        factor_cols: list[str],
+    ) -> dict[str, float]:
+        """角色后处理: primary 75% + confirmation 25% 平摊 + filter 排除.
+
+        第一性原理 (designs/feat_role_based_fixed_weight_75_25.md §5):
+            - primary (反转触发): 高 IC, 单独可形成多头收益
+            - confirmation (企稳确认): 低 IC 但低相关, 固定份额保证发言权
+            - filter: 基本面/累计跌幅, stock_selector 硬过滤, 不进 composite
+            - 业界依据: Asness 2013, AQR 核心+卫星 70-80/20-30
+
+        Args:
+            weights: 上游 (dimension_weights 后) 权重字典.
+            factor_cols: 因子列名列表.
+
+        Returns:
+            角色处理后的权重字典, sum=1.0 (filter 因子权重=0).
+
+        豁免: 无 confirmation 因子 → 退化为原权重归一化.
+        """
+        if not getattr(self, "enable_role_weights", False):
+            return weights
+
+        logger = getattr(self, "logger", None)
+        if logger is None:
+            from comprehensive_factor.common.logger_config import get_logger
+
+            logger = get_logger(__name__)
+
+        # 1) 按角色分桶
+        primary_cols: list[str] = []
+        confirmation_cols: list[str] = []
+        filter_cols: list[str] = []
+        for col in factor_cols:
+            factor_name = self._get_factor_name_from_col(col)
+            role = _MODULE_FACTOR_ROLES.get(factor_name, "primary")
+            if role == "primary":
+                primary_cols.append(col)
+            elif role == "confirmation":
+                confirmation_cols.append(col)
+            elif role == "filter":
+                filter_cols.append(col)
+
+        # 2) filter 角色: 权重置 0 (由 stock_selector 硬过滤)
+        new_weights: dict[str, float] = dict.fromkeys(filter_cols, 0.0)
+
+        # 3) confirmation 角色: 总额 25%, 均分
+        if confirmation_cols:
+            confirmation_total = 1.0 - _MODULE_PRIMARY_WEIGHT_TOTAL  # 0.25
+            per_confirmation = confirmation_total / len(confirmation_cols)
+            for col in confirmation_cols:
+                new_weights[col] = per_confirmation
+        else:
+            confirmation_total = 0.0
+
+        # 4) primary 角色: 总额 75%, 按原权重比例分配
+        primary_total_target = _MODULE_PRIMARY_WEIGHT_TOTAL  # 0.75
+        if primary_cols:
+            primary_orig_sum = sum(weights.get(c, 0.0) for c in primary_cols)
+            if primary_orig_sum > 0:
+                for col in primary_cols:
+                    new_weights[col] = weights.get(col, 0.0) / primary_orig_sum * primary_total_target
+            else:
+                # primary 原权重全 0 → 等权降级
+                logger.warning("_apply_role_weights: primary 原权重全 0, 降级为等权")
+                for col in primary_cols:
+                    new_weights[col] = primary_total_target / len(primary_cols)
+        else:
+            # 无 primary, confirmation 单独承担 100%
+            logger.warning("_apply_role_weights: 无 primary 因子, confirmation 占 100%%")
+            if confirmation_cols and confirmation_total > 0:
+                scale = 1.0 / confirmation_total
+                for col in confirmation_cols:
+                    new_weights[col] *= scale
+
+        # 5) 归一化校验
+        total = sum(new_weights.values())
+        if total > 0 and abs(total - 1.0) > 1e-6:
+            new_weights = {k: v / total for k, v in new_weights.items()}
+
+        logger.info(
+            "角色权重: primary=%d (%.0f%%) + confirmation=%d (%.0f%%) + filter=%d (排除)",
+            len(primary_cols),
+            primary_total_target * 100,
+            len(confirmation_cols),
+            confirmation_total * 100,
+            len(filter_cols),
+        )
+        return new_weights
+
     @abstractmethod
     def calculate(
         self,
@@ -667,10 +768,12 @@ class EqualWeightMethod(WeightMethodBase):
         logger: logging.Logger | None = None,
         dimension_weight_method: str | None = None,
         factor_categories: dict[str, str] | None = None,
+        enable_role_weights: bool = False,  # v2.41 (R2)
     ):
         self.logger = logger or get_logger(__name__)
         self.dimension_weight_method = dimension_weight_method  # v2.35: P2 维度权重全方法
         self.factor_categories = factor_categories
+        self.enable_role_weights = enable_role_weights  # v2.41 (R2)
 
     def calculate(
         self,
@@ -691,6 +794,8 @@ class EqualWeightMethod(WeightMethodBase):
 
         # v2.35: P2 维度权重再分配（后处理）
         weights = self._apply_dimension_weights_static(weights, factor_cols)
+        # v2.41 (R2): 角色固定权重后处理（主 75% + 确认 25%）
+        weights = self._apply_role_weights_static(weights, factor_cols)
 
         # 使用基类公共方法（向量化实现）
         return self._apply_weights(factor_df, factor_cols, weights, self.logger, "等权加权")
@@ -722,10 +827,12 @@ class ICIRWeightMethod(WeightMethodBase):
         logger: logging.Logger | None = None,
         dimension_weight_method: str | None = None,
         factor_categories: dict[str, str] | None = None,
+        enable_role_weights: bool = False,  # v2.41 (R2)
     ):
         self.logger = logger or get_logger(__name__)
         self.dimension_weight_method = dimension_weight_method  # v2.35: P2 维度权重全方法
         self.factor_categories = factor_categories
+        self.enable_role_weights = enable_role_weights  # v2.41 (R2)
 
     def calculate(
         self,
@@ -749,6 +856,8 @@ class ICIRWeightMethod(WeightMethodBase):
 
         # v2.35: P2 维度权重再分配（后处理）
         weights = self._apply_dimension_weights_static(weights, factor_cols)
+        # v2.41 (R2): 角色固定权重后处理（主 75% + 确认 25%）
+        weights = self._apply_role_weights_static(weights, factor_cols)
 
         # 使用基类公共方法（向量化实现）
         return self._apply_weights(factor_df, factor_cols, weights, self.logger, "ICIR加权")
@@ -859,10 +968,12 @@ class ICWeightMethod(WeightMethodBase):
         logger: logging.Logger | None = None,
         dimension_weight_method: str | None = None,
         factor_categories: dict[str, str] | None = None,
+        enable_role_weights: bool = False,  # v2.41 (R2)
     ):
         self.logger = logger or get_logger(__name__)
         self.dimension_weight_method = dimension_weight_method  # v2.35: P2 维度权重全方法
         self.factor_categories = factor_categories
+        self.enable_role_weights = enable_role_weights  # v2.41 (R2)
 
     def calculate(
         self,
@@ -884,6 +995,8 @@ class ICWeightMethod(WeightMethodBase):
 
         # v2.35: P2 维度权重再分配（后处理）
         weights = self._apply_dimension_weights_static(weights, factor_cols)
+        # v2.41 (R2): 角色固定权重后处理（主 75% + 确认 25%）
+        weights = self._apply_role_weights_static(weights, factor_cols)
 
         # 使用基类公共方法（向量化实现）
         return self._apply_weights(factor_df, factor_cols, weights, self.logger, "IC加权")
