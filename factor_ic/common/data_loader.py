@@ -108,15 +108,6 @@ def load_factor_return_data(
     if not data_cache_path.exists():
         raise FileNotFoundError(f"数据缓存不存在: {data_cache_path}")
 
-    # ⚠️ 内存优化: ijson 流式读取 + 列式累积构建 DataFrame
-    # v1（2026-06-12）: ijson 逐条解析 → 全量累积到 list[dict] → pd.DataFrame
-    #   问题: list[dict] 与最终 DataFrame 双份共存，扩展因子加入后峰值仍达 4.2GB → OOM
-    # v2（2026-06-13 16:48）: ijson 分块累积 dict → 每块转 DataFrame → pd.concat
-    #   问题: pd.concat 时所有块共存，峰值 ~4GB 未改善（实测仍 OOM）
-    # v3（2026-06-13 17:00）: ijson 流式 → 列式 dict[col, list] 累积 → 一次性建 DataFrame
-    #   原理: 列式累积只为每列存一个 list[scalar]，省掉 N 个 dict 的对象头开销
-    #         149万行 × 4 列约 60MB，相比 list[dict] 的 ~600MB 降低 10 倍
-    #   预期: 内存峰值 4.2GB → <500MB
     # 需要的列集合: date + asset + factor_cols + return_col + forward_return_1d (默认)
     # is_untradeable: 不可交易标记列（v1.46+，涨停类股票标记为1，IC计算需排除）
     required_cols = ["date", "asset"] + factor_cols + [return_col]
@@ -130,50 +121,85 @@ def load_factor_return_data(
     # 去重（保留首次出现顺序，避免下方 select_cols 中列重复）
     required_cols = list(dict.fromkeys(required_cols))
 
+    # ========== 读取数据（L2: Parquet 优先, JSON.gz fallback） ==========
+    parquet_path = data_cache_path.parent / data_cache_path.name.replace(".json.gz", ".parquet")
+
     import gc
 
     dates_set: set[str] = set()
-    df = None  # 初始化为 None，ijson 路径会通过 columns 构建，json.load 路径直接赋值
-    try:
-        import ijson
+    df = None
 
-        # 列式累积：每列预分配一个 list，避免 list[dict] 的 dict 对象头开销
-        columns: dict[str, list] = {col: [] for col in required_cols}
-        with gzip.open(data_cache_path, "rb") as f:
-            # ijson.items 流式解析 JSON 的 "data" 数组
-            for record in ijson.items(f, "data.item"):
-                # 按列追加（缺失列追加 None，pandas 会处理为 NaN）
-                for col in required_cols:
-                    columns[col].append(record.get(col))
-                date_val = record.get("date")
-                if date_val is not None:
-                    dates_set.add(str(date_val))
+    if parquet_path.exists():
+        # --- Parquet 路径 ---
+        import pyarrow.parquet as pq
 
-        if not columns["date"]:
-            raise KeyError(f"数据缓存文件 '{data_cache_path}' 数据为空或格式错误")
+        logger.info("从 Parquet 读取: %s", parquet_path)
 
-        # 一次性从列式字典构建 DataFrame（pandas 内部直接转 numpy 列存，避免重复拷贝）
-        df = pd.DataFrame(columns)
-        del columns
-        gc.collect()
-    except ImportError:
-        # ijson 不可用时回退到 json.load（老方法，可能OOM）
-        logger.warning("ijson 不可用，回退到 json.load（内存峰值约4.4GB，可能OOM）")
+        schema = pq.read_schema(parquet_path)
+        available_cols = set(schema.names)
+        read_cols = [col for col in required_cols if col in available_cols]
+
+        # 列投影读取（物理只读目标列，内存峰值 ~50-150MB）
+        df = pd.read_parquet(parquet_path, columns=read_cols)
+
+        # 补充缺失列为 NaN（与 ijson 路径 record.get(col)=None 行为一致）
+        for col in required_cols:
+            if col not in df.columns:
+                df[col] = pd.NA
+
+        # dates 从 file-level metadata 读取（~0ms，不读数据）
+        meta = schema.metadata or {}
+        if b"dates" in meta:
+            dates_set = set(json.loads(meta[b"dates"]))
+        else:
+            dates_set = set(df["date"].astype(str).unique())
+
+        if df.empty:
+            raise KeyError(f"Parquet 文件 '{parquet_path}' 数据为空")
+    else:
+        # --- fallback: ijson / json.load（保留向后兼容） ---
         try:
-            with gzip.open(data_cache_path, "rt", encoding="utf-8") as f:
-                data = json.load(f)
-        except (gzip.BadGzipFile, json.JSONDecodeError, OSError) as e:
-            logger.error("数据读取失败 [%s] [%s]: %s", data_cache_path, type(e).__name__, e)
-            raise
+            import ijson
 
-        if "data" not in data:
-            raise KeyError(f"数据缓存文件 '{data_cache_path}' 缺少 'data' 键\nJSON 结构: {list(data.keys())}") from None
+            # 列式累积：每列预分配一个 list，避免 list[dict] 的 dict 对象头开销
+            columns: dict[str, list] = {col: [] for col in required_cols}
+            with gzip.open(data_cache_path, "rb") as f:
+                # ijson.items 流式解析 JSON 的 "data" 数组
+                for record in ijson.items(f, "data.item"):
+                    # 按列追加（缺失列追加 None，pandas 会处理为 NaN）
+                    for col in required_cols:
+                        columns[col].append(record.get(col))
+                    date_val = record.get("date")
+                    if date_val is not None:
+                        dates_set.add(str(date_val))
 
-        df = pd.DataFrame(data["data"])
-        del data["data"]
-        del data
-        gc.collect()
-        dates_set = set(df["date"].astype(str).unique())
+            if not columns["date"]:
+                raise KeyError(f"数据缓存文件 '{data_cache_path}' 数据为空或格式错误")
+
+            # 一次性从列式字典构建 DataFrame
+            df = pd.DataFrame(columns)
+            del columns
+            gc.collect()
+        except ImportError:
+            # ijson 不可用时回退到 json.load（老方法，可能OOM）
+            logger.warning("ijson 不可用，回退到 json.load（内存峰值约4.4GB，可能OOM）")
+            try:
+                with gzip.open(data_cache_path, "rt", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (gzip.BadGzipFile, json.JSONDecodeError, OSError) as e:
+                logger.error("数据读取失败 [%s] [%s]: %s", data_cache_path, type(e).__name__, e)
+                raise
+
+            if "data" not in data:
+                raise KeyError(
+                    f"数据缓存文件 '{data_cache_path}' 缺少 'data' 键\nJSON 结构: {list(data.keys())}"
+                ) from None
+
+            df = pd.DataFrame(data["data"])
+            del data["data"]
+            del data
+            gc.collect()
+            dates_set = set(df["date"].astype(str).unique())
 
     # ========== 基础列验证（加载后立即验证） ==========
     for col in ["date", "asset"]:
