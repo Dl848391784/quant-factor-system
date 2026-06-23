@@ -76,6 +76,10 @@ DEFAULT_THRESHOLDS = {
     "min_sample_days": 60,  # v2.35: 最小样本天数（t检验边际显著门槛，24天t=0.73不显著）
     "layer_1_return_min": 0.0,  # v2.35: L1年化收益下限（公理1: 只做多收益=L1，不可豁免）
     "layer_1_sharpe_min": 0.0,  # v2.35: L1夏普下限（L1正收益但不稳定不可用）
+    # v2.45: 实验性硬门槛（design: factor_selector_positive_ic_only.md）
+    # require_positive_ic=True 时，原始 ic_mean<0 的因子直接判定 invalid，不可豁免
+    # 用途：动量风格 A/B 实验；默认 False，线上零影响
+    "require_positive_ic": False,
 }
 
 
@@ -412,6 +416,21 @@ def validate_factor(
                     "detail": _build_exemption_fail_reason(ls_sharpe, mono_corr, ic_mean),
                 }
             )
+
+    # v2.45: 正 IC 硬门槛（require_positive_ic）
+    # 设计：design factor_selector_positive_ic_only.md
+    # 用途：动量风格 A/B 实验，排除反转族因子（原始 ic_mean<0）
+    # 关键约束：硬门槛不可豁免——豁免会破坏"只用正向因子"的核心约束
+    # 位置：IC 均值豁免逻辑之后，即使触发反向豁免也会被此门槛剔除
+    # 默认 False（DEFAULT_THRESHOLDS）→ 线上 v2.44 行为零改动
+    require_positive_ic = thresholds.get("require_positive_ic", False)
+    if require_positive_ic and ic_mean is not None and ic_mean < 0:
+        reasons.append(f"ic_mean={ic_mean:+.4f}<0（require_positive_ic=True）")
+        logger.debug(
+            "因子 %s: ic_mean=%+.4f<0, 被 require_positive_ic 过滤",
+            factor_name,
+            ic_mean,
+        )
 
     # 2. p-value 检查（可选，缺失时跳过）
     p_value = ic_metrics.get("p_value", None)
