@@ -249,8 +249,41 @@ while i < len(scripts_to_run):
 
 ---
 
-## 8. 待用户确认事项
+## 9. 实测后调整记录（2026-06-23 Execute 阶段后回填）
 
-1. **决策 2（仅 stage 2/3 并行）**是否符合预期？还是希望 stage 4 也并行（综合因子，单脚本 2.6GB，N=2 风险高但可行）？
-2. **默认 N=2** 是否合适？还是用户希望默认 N=1（不开并行）+ 明示传 `--parallel` 才开启？
-3. **stage 边界**：批不跨 stage 边界。例如最后 stage 2 剩 1 个脚本时，本批就 1 个；stage 2 完成才进 stage 3。是否符合预期？
+### 9.1 实测数据
+
+| 测试 | 结果 |
+|------|------|
+| ic_rsi_1d 单跑（`/usr/bin/time -v`） | 28.14s / 峰值 **2.46 GB** RSS |
+| ic_rsi + ic_amplitude **串行** | 总 57.9s / 峰值 2.53 GB / 2 全成功 |
+| ic_rsi + ic_amplitude **并行 N=2** | 总 32.7s（**1.77x 加速**）/ ic_amplitude **OOM Killed (exit -9)** |
+| dmesg OOM 证据 | `oom-kill: constraint=CONSTRAINT_NONE, global_oom, task=python, total-vm: 4376340kB` |
+
+### 9.2 设计假设偏差
+
+| 项 | 设计假设 | 实测 |
+|----|---------|------|
+| 单脚本峰值 | 2.6 GB | ic_rsi 2.46 GB ✓ / **ic_amplitude >4 GB ✗** |
+| N=2 总占用 | 5.2 GB | **>8 GB**（含中性化 OLS 峰值 + join 中间表）|
+| 7.3 GB 机器余量 | 2.1 GB | 实际可用 ~3.7 GB（系统占 3.6 GB），N=2 仍 OOM |
+
+**根因**：`ic_amplitude_1d` 含交叉因子计算（amplitude × volume_ratio 等），中性化阶段 join + OLS 残差矩阵峰值远超 ic_rsi 类纯单因子脚本。设计阶段用 ic_amplitude_1d 做基准（2.6 GB）是**加载完成后的稳态值，不是峰值**。
+
+### 9.3 决策调整
+
+**`DEFAULT_PARALLEL = 2` → `DEFAULT_PARALLEL = 1`**
+
+理由：
+- 第一性原理：单脚本峰值不可预测（不同 IC 脚本中性化复杂度差异大），默认 N=1 是安全契约
+- 用户语义："默认两个并行"是表达"可选项"，OOM 风险不应作为默认承担
+- 兼容性：用户显式 `--parallel 2` 仍可启用，高配机器（>16GB 可用）受益
+
+代码改动：`run_pipeline.py` 行 165 单行常量；批次切分、批间屏障、并行原语等核心逻辑**无需改动**。
+
+### 9.4 未来若想稳定启用 N>1
+
+需先治本（任一即可）：
+1. **降低 IC 脚本峰值**：chunked OLS（按日期分块）/ float32 / 中性化前提前 dropna
+2. **扩 swap**：`fallocate -l 8G /swapfile` 让 OS 处理瞬时尖峰（牺牲性能）
+3. **升级机器**：>16GB 内存，3.7GB 余量变 12GB+，N=2 安全

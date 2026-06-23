@@ -162,7 +162,11 @@ SCRIPT_TIMEOUT = 1800  # 单个脚本最大执行时间（秒）= 30分钟
 FETCH_TURNOVER_TIMEOUT = 18000  # fetch_turnover 独立超时（秒）= 5小时
 
 # 并行执行配置（2026-06-23 新增，遵循 designs/run_pipeline_parallel_design.md）
-DEFAULT_PARALLEL = 2  # 默认并行度，--parallel N 可覆盖；N=1 等同于串行
+# 默认 N=1（串行）：实测 N=2 在 7.3GB 机器上触发 OOM Killed
+#   - 单脚本峰值实测：ic_rsi_1d ~2.46GB / ic_amplitude_1d >4GB（含中性化 OLS）
+#   - N=2 总占用 ~5-8GB + 系统 3.6GB > 7.3GB 内存，全局 OOM Killer 触发
+#   - 用户显式 --parallel 2 时承担 OOM 风险（高配机器 >16GB 可用）
+DEFAULT_PARALLEL = 1  # 默认串行；--parallel N 可覆盖
 # 可并行的 stage 集合：仅 IC 计算 (2) 和分层回测 (3)，每脚本独立读 Parquet 写各自 result/，无写竞争。
 # Stage 0（数据拉取）有顺序依赖；Stage 1/5/6/7 单脚本；Stage 4 单脚本峰值 ~2.6GB（用户决策保持串行）。
 PARALLELIZABLE_STAGES: frozenset[int] = frozenset({2, 3})
