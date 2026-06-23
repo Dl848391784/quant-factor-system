@@ -96,7 +96,7 @@ INTERACTION_THRESHOLDS = {
     "long_return_min": 0.05,  # 多头年化, 高于主 dict 3%（只做多关键判据, 三因子实测 10.1~11.6%）
     "high_corr_threshold": 0.7,  # 同主 dict（维度相关性是物理结构约束）
     "min_sample_days": 60,  # 同主 dict
-    "layer_1_return_min": -0.25,  # 承认 L1 必亏的数学必然, 三因子实测 -11.8~-20.6%, 留 4pp 缓冲
+    "layer_1_return_min": -0.28,  # v2.40: 7 因子分布 mean=-18.85% σ=4.55pp → mean-2σ≈-28%, 见 designs/feat_interaction_thresholds_v240.md
     "layer_1_sharpe_min": -1.50,  # L1 夏普容忍下限, 与 v2.38 设计一致
 }
 

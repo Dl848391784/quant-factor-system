@@ -78,7 +78,7 @@ class TestThresholdDispatch:
             assert src == "interaction", f"{fn} 应走 interaction 门槛"
             assert t["ic_mean_abs_min"] == 0.005
             assert t["monotonicity_corr_abs_min"] == 0.30
-            assert t["layer_1_return_min"] == -0.25
+            assert t["layer_1_return_min"] == -0.28  # v2.40: 见 designs/feat_interaction_thresholds_v240.md
 
     def test_default_thresholds_unchanged_by_dispatch(self):
         """关键: 派发不能修改主 dict（线性因子主 dict 零修改承诺）"""
@@ -143,7 +143,7 @@ class TestInteractionThresholdsBehavior:
         assert is_valid, f"交互因子 L1=−0.20 应过, 实际: {reasons}"
 
     def test_interaction_l1_below_threshold_rejected(self):
-        """交互因子 L1=−0.30 < −0.25 仍应被淘汰（门槛是过滤器）"""
+        """交互因子 L1=−0.30 < −0.28 (v2.40) 仍应被淘汰（门槛是过滤器）"""
         data = _make_factor_data(
             ic_mean=0.008,
             icir=0.08,

@@ -166,11 +166,11 @@ class TestInteractionFactorL1Threshold:
     """v2.39: 交互因子族独立 L1 阈值
 
     第一性原理: 交互因子 = -z(weakness) × z(X), L1 必亏（数学必然）
-    设计: INTERACTION_THRESHOLDS layer_1_return_min=-0.25, layer_1_sharpe_min=-1.50
+    设计: INTERACTION_THRESHOLDS layer_1_return_min=-0.28 (v2.40), layer_1_sharpe_min=-1.50
     线性因子主 dict 阈值 0.0 / 0.0 不变
 
     取代 v2.38 的 L1 豁免分支（commit 4c845c0），v2.39 用独立门槛体系实现同等功能。
-    见 designs/feat_interaction_thresholds_v239.md §2.2 §7
+    v2.40 校准: 经验缓冲 (-25%) → 统计驱动 mean-2σ (-28%), 见 designs/feat_interaction_thresholds_v240.md
     """
 
     def test_interaction_factor_l1_negative_within_threshold_passes(self):
