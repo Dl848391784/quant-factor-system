@@ -45,6 +45,7 @@ summary/
 | 分层回测结果 | backtest | `backtest/result/` | `<因子名>_layered_backtest.json` |
 | 综合因子结果 | comprehensive_factor | `comprehensive_factor/result/` | `composite_<加权方式>_1d.json` |
 | 因子数据 | data_fetchers | `data_fetchers/result/` | `factor_ic_data.parquet` |
+| 股票名称映射（v2.26） | data_fetchers | `data_fetchers/result/stock_list.json` (`paths.STOCK_LIST_DATA`) | `{"stocks": [{"code","name",...}]}` |
 
 ### 数据流向
 

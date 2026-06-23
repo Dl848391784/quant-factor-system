@@ -59,6 +59,10 @@ FACTOR_DATA_BACKUP = DATA_FETCHERS_RESULT / "factor_data.json.gz"
 # 详见 designs/feat_market_cap_data_fetcher.md §6, §7
 MARKET_CAP_DATA = DATA_FETCHERS_RESULT / "market_cap_data.json.gz"
 
+# 股票列表数据（code → name 映射来源，由 fetch_stock_list 维护）
+# summary 报告"八、股票选股结果"用于在股票代码后展示股票名称
+STOCK_LIST_DATA = DATA_FETCHERS_RESULT / "stock_list.json"
+
 # ============================================================================
 # 日志目录
 # ============================================================================

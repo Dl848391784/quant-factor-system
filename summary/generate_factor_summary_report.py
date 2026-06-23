@@ -59,9 +59,13 @@
            - Fix4: load_backtest_results 剥离 _1d 后缀（intraday_intensity_1d→intraday_intensity）
            - Fix5: overnight_ret 回测夏普/单调性精度格式化（15位小数→2位）
            - Fix6: z-score 列移除"≈0(真实)"标签，统一显示"0.00"
+    v2.26: 2026-06-23 第八节"股票选股结果"在股票代码后新增"股票名称"列
+           - 新增 load_stock_name_map() 从 paths.STOCK_LIST_DATA 加载 code→name 映射
+           - Top 10 详表、短名单 11~N 简表、决策卡片三处表格统一展示名称
+           - 名称缺失时回退"--"，文件缺失/解析失败仅 warning 不阻塞主报告
 """
 
-__version__ = "2.25"
+__version__ = "2.26"
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -93,6 +97,7 @@ from factor_definitions import (  # noqa: E402
     FACTOR_DEFINITIONS,
     FACTOR_NAME_TO_COL_MAP,
 )
+from paths import STOCK_LIST_DATA  # noqa: E402
 
 
 # v2.7→v2.18: 列名到因子名反向映射 alias（向后兼容）
@@ -989,6 +994,47 @@ def load_stock_selection_result(logger: logging.Logger) -> dict | None:
             meta.get("excluded_by_amplitude", 0),
         )
     return data
+
+
+def load_stock_name_map(logger: logging.Logger) -> dict[str, str]:
+    """加载股票代码 → 股票名称映射
+
+    v2.26 (2026-06-23): 新增——summary 第八节"股票选股结果"在股票代码后展示名称。
+
+    数据源：paths.STOCK_LIST_DATA (data_fetchers/result/stock_list.json)
+            由 fetch_stock_list.py 维护，结构 {"stocks": [{"code", "name", ...}, ...]}。
+
+    Args:
+        logger: 日志记录器
+
+    Returns:
+        {code: name} 字典。文件不存在或解析失败时返回空 dict（降级为不展示名称，
+        而非抛错——名称仅是展示辅助，不应阻塞主报告生成）。
+    """
+    stock_file = STOCK_LIST_DATA
+    if not stock_file.exists():
+        logger.warning("股票列表文件不存在: %s（短名单将不展示股票名称）", stock_file)
+        return {}
+
+    try:
+        data = load_json_file(stock_file, logger)
+    except Exception as e:
+        logger.warning("加载股票列表失败: %s（短名单将不展示股票名称）", e)
+        return {}
+
+    if not data:
+        return {}
+
+    stocks = data.get("stocks", [])
+    name_map: dict[str, str] = {}
+    for s in stocks:
+        code = s.get("code")
+        name = s.get("name")
+        if code and name:
+            # 清洗名称内的全角空格（如 "万 科Ａ" → "万科Ａ"），便于对齐表格列宽
+            name_map[str(code)] = str(name).replace(" ", "").replace("\u3000", "")
+    logger.info("加载股票名称映射: %d 只", len(name_map))
+    return name_map
 
 
 def get_monotonicity_symbol(quality: str) -> str:
@@ -2039,16 +2085,20 @@ def _generate_stock_selection_section(
     stock_result: dict | None,
     comp_weights: dict[str, float] | None = None,
     data_freshness: list[dict] | None = None,
+    stock_name_map: dict[str, str] | None = None,
 ) -> list[str]:
     """生成股票选股结果展示部分
 
     v2.2 (2026-06-03): 新增股票选股结果展示
     v2.24 (2026-06-20): 新增 data_freshness 参数，动态标注选股数据日期
+    v2.26 (2026-06-23): 新增 stock_name_map 参数，在股票代码后展示股票名称
 
     Args:
         stock_result: 股票选股结果字典（可为 None）
         comp_weights: 综合因子权重字典
         data_freshness: 数据完整性检查结果（来自 check_data_freshness）
+        stock_name_map: {code: name} 映射（来自 load_stock_name_map）；
+                        None 或缺失键时回退为"--"，不展示名称
 
     Returns:
         报告文本行列表
@@ -2136,13 +2186,15 @@ def _generate_stock_selection_section(
         # v2.15: 正向因子取反后z-score加*标记，消除解读歧义
         header_note = "  * = 已取反统一负向语义" if flipped_factors else ""
         lines.append(
-            f"{'排名':>4} {'股票代码':<10} {'综合因子值':>12} {'覆盖率':>6} {'因子标准化值(z-score)':<40}{header_note}"
+            f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12} {'覆盖率':>6} {'因子标准化值(z-score)':<40}{header_note}"
         )
         lines.append("-" * 70)
 
         for item in detail_stocks:
             rank = item.get("rank", 0)
             code = item.get("code", "N/A")
+            # v2.26: 股票名称从 stock_name_map 查找，缺失时回退"--"（不阻塞主报告）
+            name = (stock_name_map or {}).get(code, "--")
             composite_value = item.get("composite_value", 0)
             weight_coverage = item.get("weight_coverage", 1.0)  # v2.12: 因子覆盖率
 
@@ -2191,7 +2243,9 @@ def _generate_stock_selection_section(
                 factor_str = "无因子值"
 
             coverage_str = f"{weight_coverage * 100:.0f}%" if weight_coverage < 1 else "100%"
-            lines.append(f"{rank:>4} {code:<10} {format_float(composite_value, 3):>12} {coverage_str:>6} {factor_str}")
+            lines.append(
+                f"{rank:>4} {code:<10} {name:<8} {format_float(composite_value, 3):>12} {coverage_str:>6} {factor_str}"
+            )
 
         lines.append("-" * 70)
 
@@ -2201,13 +2255,15 @@ def _generate_stock_selection_section(
             lines.append("")
             lines.append(f"【短名单 11~{len(top_stocks)} 简表（备选池）】")
             lines.append(
-                f"{'排名':>4} {'股票代码':<10} {'综合因子值':>12} {'覆盖率':>6} {'主导前 3 因子（贡献占比）':<40}"
+                f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12} {'覆盖率':>6} {'主导前 3 因子（贡献占比）':<40}"
             )
             lines.append("-" * 70)
             flipped_set = set(flipped_factors) if flipped_factors else set()
             for item in brief_stocks:
                 rank = item.get("rank", 0)
                 code = item.get("code", "N/A")
+                # v2.26: 短名单简表展示股票名称
+                name = (stock_name_map or {}).get(code, "--")
                 composite_value = item.get("composite_value", 0)
                 weight_coverage = item.get("weight_coverage", 1.0)
                 factor_values_std = item.get("factor_values_std", {}) or {}
@@ -2237,7 +2293,7 @@ def _generate_stock_selection_section(
 
                 coverage_str = f"{weight_coverage * 100:.0f}%" if weight_coverage < 1 else "100%"
                 lines.append(
-                    f"{rank:>4} {code:<10} {format_float(composite_value, 3):>12} {coverage_str:>6} {dominant_str}"
+                    f"{rank:>4} {code:<10} {name:<8} {format_float(composite_value, 3):>12} {coverage_str:>6} {dominant_str}"
                 )
             lines.append("-" * 70)
             lines.append(
@@ -2251,8 +2307,10 @@ def _generate_stock_selection_section(
             if has_card:
                 lines.append("")
                 lines.append("【决策卡片 (人工决断辅助, 5 维客观字段)】")
-                lines.append("  排名 股票代码  D1 跌幅档/振幅档/区间位置          | D2 风险 | D3 企稳 | D4 历史")
-                lines.append("-" * 110)
+                lines.append(
+                    "  排名 股票代码  股票名称   D1 跌幅档/振幅档/区间位置          | D2 风险 | D3 企稳 | D4 历史"
+                )
+                lines.append("-" * 120)
                 for s in top_stocks:
                     card = s.get("decision_card")
                     if not card:
@@ -2280,20 +2338,16 @@ def _generate_stock_selection_section(
                         d2_str += f"({','.join(d2_flags)})"
 
                     # D3 企稳数 (0~3), raw_signals_available=False 显示 n/a
-                    d3_str = (
-                        "n/a"
-                        if not d3.get("raw_signals_available", False)
-                        else f"{d3.get('hit_count', 0)}/3"
-                    )
+                    d3_str = "n/a" if not d3.get("raw_signals_available", False) else f"{d3.get('hit_count', 0)}/3"
 
                     # D4 历史 — 本期 null
                     times = d4.get("times_in_top30_last_60d")
                     d4_str = "n/a" if times is None else f"{times}次"
 
                     lines.append(
-                        f"  {s['rank']:>3} {s['code']:<8} {d1_str:<34}  | {d2_str:<14} | {d3_str:<6} | {d4_str}"
+                        f"  {s['rank']:>3} {s['code']:<8} {(stock_name_map or {}).get(s['code'], '--'):<8} {d1_str:<34}  | {d2_str:<14} | {d3_str:<6} | {d4_str}"
                     )
-                lines.append("-" * 110)
+                lines.append("-" * 120)
                 lines.append("说明:")
                 lines.append("  D1 客观分类: 纯阈值分桶（跌幅/振幅/收盘价在近 5 日区间位置）, 不带叙事词。")
                 lines.append("  D2 风险标记: 深跌(<-10%) / 低流动性(当日成交额底 5%) / 极端振幅(<1% 或 >12%)。")
@@ -2682,6 +2736,9 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     logger.info("加载股票选股结果...")
     stock_result = load_stock_selection_result(logger)
 
+    # v2.26: 加载股票名称映射（短名单展示用）
+    stock_name_map = load_stock_name_map(logger)
+
     # 数据加载失败保护：关键数据为空时抛出明确错误
     if not ic_results:
         logger.error("IC 结果数据为空，无法生成报告")
@@ -2763,7 +2820,7 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
         else:
             stock_comp_weights = best_item.get("weights", {})
 
-    lines.extend(_generate_stock_selection_section(stock_result, stock_comp_weights, data_results))
+    lines.extend(_generate_stock_selection_section(stock_result, stock_comp_weights, data_results, stock_name_map))
 
     return "\n".join(lines)
 

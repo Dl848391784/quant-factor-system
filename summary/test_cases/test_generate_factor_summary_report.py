@@ -43,6 +43,7 @@ from summary.generate_factor_summary_report import (
     get_monotonicity_symbol,
     get_weight_method_display,
     load_json_file,
+    load_stock_name_map,
     merge_factor_data,
     setup_logger,
 )
@@ -53,7 +54,7 @@ class TestVersion:
 
     def test_version_defined(self):
         """验证版本常量存在"""
-        assert __version__ == "2.25"
+        assert __version__ == "2.26"
 
 
 class TestHelperFunctions:
@@ -1279,6 +1280,123 @@ class TestDecisionCardRendering:
         assert "2. 新闻" in text
         assert "3. 财报" in text
         assert "4. 股东" in text
+
+
+# ============================================================================
+# v2.26: 股票名称展示测试 (2026-06-23)
+# ============================================================================
+
+
+class TestStockNameDisplay:
+    """v2.26 第八节短名单在股票代码后展示股票名称."""
+
+    def _build_name_map(self, n: int) -> dict[str, str]:
+        # 匹配 _build_mock_stock_result 的 code 模式 "60XXXX"
+        return {f"60{i:04d}": f"测试股{i:02d}" for i in range(n)}
+
+    def test_top10_detail_table_shows_name_column(self):
+        """Top 10 详表表头与数据行均含股票名称列."""
+        result = _build_mock_stock_result(10)
+        name_map = self._build_name_map(10)
+        lines = _generate_stock_selection_section(result, {}, None, name_map)
+        text = "\n".join(lines)
+        # 表头新增"股票名称"列
+        assert "股票名称" in text
+        # 至少一只股票的名称出现在详表
+        assert "测试股00" in text
+        assert "测试股09" in text
+
+    def test_brief_table_shows_name_column(self):
+        """短名单 11~N 简表展示股票名称."""
+        result = _build_mock_stock_result(15)
+        name_map = self._build_name_map(15)
+        lines = _generate_stock_selection_section(result, {}, None, name_map)
+        text = "\n".join(lines)
+        # 简表区域应展示 11~15 的名称
+        assert "测试股10" in text
+        assert "测试股14" in text
+
+    def test_decision_card_shows_name_column(self):
+        """决策卡片表头与行均展示股票名称."""
+        result = _add_decision_cards(_build_mock_stock_result(11))
+        name_map = self._build_name_map(11)
+        lines = _generate_stock_selection_section(result, {}, None, name_map)
+        text = "\n".join(lines)
+        # 决策卡片表头新增"股票名称"列
+        assert "排名 股票代码  股票名称" in text
+        # 决策卡片中至少有名称出现
+        assert "测试股00" in text
+
+    def test_missing_name_falls_back_to_dash(self):
+        """name_map 缺失某 code 时回退为 '--', 不崩溃."""
+        result = _build_mock_stock_result(12)
+        # 仅提供前 5 只的名称
+        partial = {f"60{i:04d}": f"测试股{i:02d}" for i in range(5)}
+        lines = _generate_stock_selection_section(result, {}, None, partial)
+        text = "\n".join(lines)
+        # 第 6 只之后应回退为 "--"
+        assert "测试股04" in text
+        assert "--" in text
+
+    def test_none_name_map_does_not_crash(self):
+        """stock_name_map=None 时全部展示 '--', 报告正常生成."""
+        result = _build_mock_stock_result(12)
+        lines = _generate_stock_selection_section(result, {}, None, None)
+        text = "\n".join(lines)
+        # 表头仍含"股票名称", 数据行回退为 "--"
+        assert "股票名称" in text
+        assert "--" in text
+
+
+class TestLoadStockNameMap:
+    """load_stock_name_map 数据加载逻辑测试."""
+
+    def test_missing_file_returns_empty_dict(self, tmp_path, monkeypatch):
+        """文件不存在时返回 {} 且仅 warning, 不抛错."""
+        import summary.generate_factor_summary_report as mod
+
+        fake_path = tmp_path / "nonexistent.json"
+        monkeypatch.setattr(mod, "STOCK_LIST_DATA", fake_path)
+        logger = logging.getLogger("test_load_stock_name_map_missing")
+        result = mod.load_stock_name_map(logger)
+        assert result == {}
+
+    def test_valid_file_returns_code_to_name(self, tmp_path, monkeypatch):
+        """正常 stock_list.json 返回 {code: name}, 名称清洗全角空格."""
+        import summary.generate_factor_summary_report as mod
+
+        fake_path = tmp_path / "stock_list.json"
+        fake_path.write_text(
+            json.dumps(
+                {
+                    "meta": {"total_count": 3},
+                    "stocks": [
+                        {"code": "600000", "name": "浦发银行"},
+                        {"code": "000002", "name": "万 科Ａ"},  # 含全角空格
+                        {"code": "601857", "name": "中国石油"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(mod, "STOCK_LIST_DATA", fake_path)
+        logger = logging.getLogger("test_load_stock_name_map_valid")
+        result = mod.load_stock_name_map(logger)
+        assert result["600000"] == "浦发银行"
+        assert result["000002"] == "万科Ａ"  # 全角空格被清洗
+        assert result["601857"] == "中国石油"
+        assert len(result) == 3
+
+    def test_malformed_file_does_not_crash(self, tmp_path, monkeypatch):
+        """文件解析失败时返回 {}, 仅 warning."""
+        import summary.generate_factor_summary_report as mod
+
+        fake_path = tmp_path / "stock_list.json"
+        fake_path.write_text("not a valid json {{{", encoding="utf-8")
+        monkeypatch.setattr(mod, "STOCK_LIST_DATA", fake_path)
+        logger = logging.getLogger("test_load_stock_name_map_malformed")
+        result = mod.load_stock_name_map(logger)
+        assert result == {}
 
 
 if __name__ == "__main__":
