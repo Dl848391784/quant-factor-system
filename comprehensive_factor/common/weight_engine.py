@@ -726,6 +726,87 @@ class WeightMethodBase(ABC):
         )
         return new_weights
 
+    # v2.41 (r2c): 角色固定权重后处理（矩阵版, 用于 RollingICIR 每日动态权重）
+    # 设计依据: designs/feat_r2c_role_weights_for_rolling_icir.md
+    # 与 _apply_role_weights_static 同构, 向量化逐行处理.
+    def _apply_role_weights_matrix(
+        self,
+        W: np.ndarray,
+        factor_cols: list[str],
+    ) -> np.ndarray:
+        """角色后处理 (矩阵版): primary 75% + confirmation 25% 均分 + filter 排除.
+
+        与 _apply_role_weights_static (dict 版) 数值同构, 但对 (n_days, n_factors)
+        矩阵每行独立完成角色分桶 → 归一化, 用于 RollingICIRWeightMethod 每日动态权重.
+
+        Args:
+            W: shape (n_days, n_factors), 每行 sum 假定 ≈ 1.0
+            factor_cols: 因子列名列表, 对应 W 的列顺序.
+
+        Returns:
+            重新分配权重后的 W (拷贝), 每行 sum == 1.0.
+            filter 列权重 = 0; confirmation 列均分 25%; primary 列按原行内比例分配 75%.
+
+        豁免: enable_role_weights=False → 直接返回 W.copy() (向后兼容).
+        """
+        if not getattr(self, "enable_role_weights", False):
+            return W.copy()
+
+        # 1) 角色分桶 (factor_cols 静态决定, 所有行共享 mask)
+        primary_mask = np.array(
+            [_MODULE_FACTOR_ROLES.get(self._get_factor_name_from_col(c), "primary") == "primary" for c in factor_cols],
+            dtype=bool,
+        )
+        conf_mask = np.array(
+            [
+                _MODULE_FACTOR_ROLES.get(self._get_factor_name_from_col(c), "primary") == "confirmation"
+                for c in factor_cols
+            ],
+            dtype=bool,
+        )
+        filter_mask = np.array(
+            [_MODULE_FACTOR_ROLES.get(self._get_factor_name_from_col(c), "primary") == "filter" for c in factor_cols],
+            dtype=bool,
+        )
+
+        n_primary = int(primary_mask.sum())
+        n_conf = int(conf_mask.sum())
+        confirmation_total = 1.0 - _MODULE_PRIMARY_WEIGHT_TOTAL  # 0.25
+        primary_target = _MODULE_PRIMARY_WEIGHT_TOTAL  # 0.75
+
+        W_new = W.copy()
+
+        # 2) filter 桶: 置 0 (硬过滤由 stock_selector 处理)
+        if filter_mask.any():
+            W_new[:, filter_mask] = 0.0
+
+        # 3) confirmation 桶: 均分 25% (无 confirmation 时 primary 独占 100%)
+        if n_conf > 0:
+            W_new[:, conf_mask] = confirmation_total / n_conf
+            primary_pool = primary_target
+        else:
+            primary_pool = 1.0  # 无 confirmation → primary 独占 100%
+
+        # 4) primary 桶: 按原行内权重比例分配 primary_pool
+        if n_primary > 0:
+            primary_sum_per_row = W[:, primary_mask].sum(axis=1, keepdims=True)  # (n_days, 1)
+            # 防御性: primary 原权重全 0 行 → 等权降级
+            zero_rows = (primary_sum_per_row < 1e-12).flatten()
+            safe_sum = np.where(primary_sum_per_row < 1e-12, 1.0, primary_sum_per_row)
+            W_new[:, primary_mask] = W[:, primary_mask] / safe_sum * primary_pool
+            if zero_rows.any():
+                # 等权降级: zero_rows 上的 primary 列改写为 primary_pool / n_primary
+                W_new[np.ix_(zero_rows, primary_mask)] = primary_pool / n_primary
+        elif n_conf > 0:
+            # 无 primary, confirmation 单独承担 100%
+            W_new[:, conf_mask] = 1.0 / n_conf
+
+        # 5) 行归一化兜底 (防浮点累积误差)
+        row_sum = W_new.sum(axis=1, keepdims=True)
+        W_new = W_new / np.where(row_sum > 1e-12, row_sum, 1.0)
+
+        return W_new
+
     @abstractmethod
     def calculate(
         self,
@@ -1076,7 +1157,7 @@ class RollingICIRWeightMethod(WeightMethodBase):
         logger: logging.Logger | None = None,
         dimension_weight_method: str | None = None,
         factor_categories: dict[str, str] | None = None,
-        enable_role_weights: bool = False,  # v2.41 (R2): 滚动版暂不支持，r2c 扩展
+        enable_role_weights: bool = False,  # v2.41 (r2c): 已接通到 _apply_role_weights_matrix
     ):
         self.window = window
         self.logger = logger or get_logger(__name__)
@@ -1084,9 +1165,7 @@ class RollingICIRWeightMethod(WeightMethodBase):
         # v1.20: 维度级别权重分配
         self.dimension_weight_method = dimension_weight_method
         self.factor_categories = factor_categories
-        self.enable_role_weights = enable_role_weights
-        if enable_role_weights:
-            self.logger.warning("RollingICIRWeightMethod: role_weights 暂不支持 (r2c 待实现), 已忽略")
+        self.enable_role_weights = enable_role_weights  # v2.41 (r2c): 已接通
 
     def _build_dimension_groups(self, factor_cols: list[str]) -> dict[str, list[str]]:
         """构建维度→因子列名分组
@@ -1345,6 +1424,14 @@ class RollingICIRWeightMethod(WeightMethodBase):
             factor_families=family_indices,
             family_cap=FAMILY_CAP_DEFAULT,
         )
+
+        # v2.41 (r2c): 角色固定权重后处理 (与静态版 dict 实现同构)
+        # 设计依据: designs/feat_r2c_role_weights_for_rolling_icir.md
+        # 接通点: cap 之后, 写回 _dim_weight 列之前 (此时 W_capped 每行 sum=1.0, 干净入口)
+        if getattr(self, "enable_role_weights", False):
+            W_capped = self._apply_role_weights_matrix(W_capped, factor_cols)
+            self.logger.info("RollingICIR 角色权重: primary 75%% + confirmation 25%% 均分 + filter 排除（每日动态）")
+
         # 写回 _dim_weight 列
         for i, col in enumerate(factor_cols):
             factor_df[f"{col}_dim_weight"] = W_capped[:, i]
