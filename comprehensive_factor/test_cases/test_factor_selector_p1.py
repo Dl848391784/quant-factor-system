@@ -17,6 +17,14 @@ from comprehensive_factor.common.factor_selector import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _disable_require_positive_ic(monkeypatch):
+    """v2.45: 本测试文件测的是 L1 硬约束 + min_sample_days, 与 require_positive_ic 正交。
+    fixture 默认 ic_mean=-0.04 是反向因子, 需关闭硬门槛保持原断言意图。
+    """
+    monkeypatch.setitem(DEFAULT_THRESHOLDS, "require_positive_ic", False)
+
+
 def _make_factor_data(
     ic_mean: float | None = -0.04,
     icir: float | None = 0.30,

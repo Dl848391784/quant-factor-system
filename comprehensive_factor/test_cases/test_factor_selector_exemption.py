@@ -21,6 +21,14 @@ from comprehensive_factor.common.factor_selector import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _disable_require_positive_ic(monkeypatch):
+    """v2.45: 本测试文件测的是反向因子豁免逻辑, 与 require_positive_ic 正交。
+    fixture 数据多为 ic_mean<0 的反向因子, 需关闭硬门槛保持原断言意图。
+    """
+    monkeypatch.setitem(DEFAULT_THRESHOLDS, "require_positive_ic", False)
+
+
 def _make_factor_data(
     ic_mean: float | None,
     icir: float | None,

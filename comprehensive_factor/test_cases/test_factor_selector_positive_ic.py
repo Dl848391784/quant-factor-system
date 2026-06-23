@@ -51,21 +51,23 @@ def _make_factor_data(
     }
 
 
-class TestDefaultBehaviorUnchanged:
-    """require_positive_ic 默认 False — 线上行为零改动"""
+class TestDefaultBehaviorRequirePositiveIc:
+    """v2.45: require_positive_ic 默认 True — 启用动量风格硬门槛"""
 
-    def test_default_thresholds_has_require_positive_ic_false(self):
-        """DEFAULT_THRESHOLDS 必须显式定义 require_positive_ic=False（设计承诺）"""
+    def test_default_thresholds_has_require_positive_ic_true(self):
+        """DEFAULT_THRESHOLDS 默认 require_positive_ic=True（v2.45 启用）"""
         assert "require_positive_ic" in DEFAULT_THRESHOLDS
-        assert DEFAULT_THRESHOLDS["require_positive_ic"] is False
+        assert DEFAULT_THRESHOLDS["require_positive_ic"] is True
 
-    def test_negative_ic_factor_passes_when_disabled(self):
-        """默认 False 时, ic_mean<0 但其他指标都过的因子 → valid"""
+    def test_negative_ic_factor_passes_when_explicitly_disabled(self):
+        """显式 require_positive_ic=False 时, ic_mean<0 但其他指标都过的因子 → valid"""
+        t = dict(DEFAULT_THRESHOLDS)
+        t["require_positive_ic"] = False
         # 强反向因子：ic_mean<0 但 |ic_mean|>0.03 + |icir|>0.15 + 高夏普高单调
         factor_data = _make_factor_data(ic_mean=-0.05, icir=-0.3, sharpe=2.0, mono=0.6)
-        is_valid, reasons, _ = validate_factor("rsi", factor_data)
-        # 默认门槛下应通过（|ic_mean|=0.05>0.03, |icir|=0.3>0.15）
-        assert is_valid, f"默认应通过, 但 invalid, reasons={reasons}"
+        is_valid, reasons, _ = validate_factor("rsi", factor_data, thresholds=t)
+        # 显式关闭后应通过（|ic_mean|=0.05>0.03, |icir|=0.3>0.15）
+        assert is_valid, f"显式关闭 require_positive_ic 后应通过, 但 invalid, reasons={reasons}"
 
 
 class TestRequirePositiveIcEnforced:

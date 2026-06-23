@@ -2,8 +2,17 @@
 
 **Author**: 云瑶
 **Date**: 2026-06-23
-**Status**: implementing
+**Status**: implemented (v2.45)
 **Related**: AGENTS.md 硬规则 #5（因子方向），PROJECT.md 数据驱动原则
+
+---
+
+## 设计决策更新（2026-06-23 落地）
+
+**最终决策：`DEFAULT_THRESHOLDS["require_positive_ic"] = True`（默认启用）**
+
+原因：用户明确表达"修改完我跑 run_pipeline 看数据"——意图是开箱启用，不是 A/B 开关。
+影响：v2.44 行为发生预期改变（线上动量化）；老 baseline 测试（test_factor_roles / test_factor_selector_exemption / test_factor_selector_p1）的 fixture 是 ic_mean<0 的反向因子，与新硬门槛正交，需要显式 `monkeypatch.setitem(DEFAULT_THRESHOLDS, "require_positive_ic", False)` 保持原有断言意图。
 
 ---
 

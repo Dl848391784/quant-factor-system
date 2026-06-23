@@ -79,7 +79,7 @@ DEFAULT_THRESHOLDS = {
     # v2.45: 实验性硬门槛（design: factor_selector_positive_ic_only.md）
     # require_positive_ic=True 时，原始 ic_mean<0 的因子直接判定 invalid，不可豁免
     # 用途：动量风格 A/B 实验；默认 False，线上零影响
-    "require_positive_ic": False,
+    "require_positive_ic": True,
 }
 
 

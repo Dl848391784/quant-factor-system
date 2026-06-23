@@ -19,6 +19,14 @@ from factor_definitions import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _disable_require_positive_ic(monkeypatch):
+    """v2.45: 本测试文件测的是角色化 IC 门槛和反向因子豁免, 与 require_positive_ic 正交。
+    显式关闭 require_positive_ic 让 ic_mean<0 的 fixture 数据保持原有断言意图。
+    """
+    monkeypatch.setitem(DEFAULT_THRESHOLDS, "require_positive_ic", False)
+
+
 class TestFactorRolesDefinition:
     """FACTOR_ROLES 定义完整性"""
 
