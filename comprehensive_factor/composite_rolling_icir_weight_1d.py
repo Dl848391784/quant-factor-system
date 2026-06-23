@@ -55,7 +55,7 @@ class RollingICIRWeightLayerConfig(CompositeLayerConfig):
     - rolling_window=60（约3个月交易日，捕捉季度周期性）
     - min_periods=20（window//3，数据不足时回退等权）
 
-    综合因子方向：反向因子（因子值越大，未来收益越低）
+    综合因子方向：正向因子（v2.47 对齐：因子值越大，未来收益越高）
     """
 
     # 滚动窗口参数
@@ -63,9 +63,9 @@ class RollingICIRWeightLayerConfig(CompositeLayerConfig):
 
     # 分层参数
     n_layers: int = 5
-    factor_direction: str = "negative"
-    long_layers: list[int] = field(default_factory=lambda: [1, 2])
-    short_layers: list[int] = field(default_factory=lambda: [4, 5])
+    factor_direction: str = "positive"  # v2.47: 综合因子方向（对齐到正向语义，值大=好）
+    long_layers: list[int] = field(default_factory=lambda: [4, 5])  # v2.47: 正向因子，Layer 4/5 = 高 composite = 多头
+    short_layers: list[int] = field(default_factory=lambda: [1, 2])  # v2.47: Layer 1/2 = 低 composite = 空头
     trade_cost_rate: float = 0.003
     min_stocks_per_layer: int = 10
 

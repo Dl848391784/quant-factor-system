@@ -1709,7 +1709,7 @@ def _generate_ic_section(ic_results: list[dict], backtest_results: list[dict] | 
             lines.append("  深度分析：IC方向为正表示隔夜收益大的股票次日收益也大（正向预测），")
             lines.append("           与多数因子（IC为负=因子值大的股票次日收益小）方向相反。")
             lines.append(f"           回测夏普={or_sharpe}, 单调性={or_mono}——可能是有效的反向因子。")
-            lines.append("           反向因子在综合因子中需取反方向使用（做空因子值大的股票做多因子值小的股票）。")
+            lines.append("           v2.47: 反向因子标准化值取反对齐到正向语义（综合因子值越大→预期收益越高）。")
 
     # v2.24: 中性化敏感列说明——极端值和空值解释
     neutral_notes = _generate_neutralization_notes(ic_results)
@@ -1812,10 +1812,10 @@ def _generate_composite_section(composite_results: list[dict]) -> list[str]:
     if flipped_factors:
         lines.append("")
         lines.append("【方向处理说明】")
-        lines.append(f"  正向因子（IC均值>0）已取反标准化值，统一为负向语义：{flipped_factors}")
+        lines.append(f"  反向因子（IC均值<0）标准化值已取反，对齐到正向语义：{flipped_factors}")
         for f in flipped_factors:
-            lines.append(f"  - {f}: IC均值>0(正向因子)，综合因子计算时标准化值取反，做空因子值大的股票")
-        lines.append("  说明：综合因子方向=negative（反向），取反后的正向因子与负向因子方向一致")
+            lines.append(f"  - {f}: IC均值<0(反向因子)，综合因子计算时标准化值取反，做多因子值小的股票")
+        lines.append("  说明：v2.47 综合因子方向=positive（正向），所有因子对齐后值大=好信号（高 composite=选中）")
 
     return lines
 
@@ -2153,17 +2153,17 @@ def _generate_stock_selection_section(
             f"覆盖率过滤: 排除 {excluded_by_coverage} 只股票（覆盖率 < {min_weight_coverage * 100:.0f}%，缺失高权重因子导致综合因子值不可信）"
         )
 
-    # v2.12: 方向处理说明——展示取反因子
+    # v2.12 / v2.47: 方向处理说明——展示取反因子（v2.47 含义反转：现在是 IC<0 因子被翻到正向）
     flipped_factors = meta.get("flipped_factors", [])
     if flipped_factors:
         lines.append("")
         lines.append("【方向处理说明】")
-        lines.append(f"  正向因子已取反标准化值，统一为负向语义：{flipped_factors}")
+        lines.append(f"  反向因子标准化值已取反，对齐到正向语义：{flipped_factors}")
         for f in flipped_factors:
             lines.append(
-                f"  - {f}: IC均值>0(正向因子)，综合因子计算时标准化值取反（做空因子值大的股票做多因子值小的股票）"
+                f"  - {f}: IC均值<0(反向因子)，综合因子计算时标准化值取反（做多因子值小的股票做空因子值大的股票）"
             )
-        lines.append("  说明：选股方向=negative（反向），因子值越小 → 综合因子越小 → 被选为Top股票")
+        lines.append("  说明：v2.47 选股方向=positive（正向），因子值越大 → 综合因子越大 → 被选为Top股票")
 
     lines.append("")
 
@@ -2183,8 +2183,8 @@ def _generate_stock_selection_section(
         lines.append(detail_title)
         # v2.12: 增加覆盖率列
         # v2.14: 因子值详情改为显示标准化值(z-score)，而非原始值
-        # v2.15: 正向因子取反后z-score加*标记，消除解读歧义
-        header_note = "  * = 已取反统一负向语义" if flipped_factors else ""
+        # v2.15 / v2.47: 反向因子取反后z-score加*标记，消除解读歧义
+        header_note = "  * = 已取反对齐到正向语义" if flipped_factors else ""
         lines.append(
             f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12} {'覆盖率':>6} {'因子标准化值(z-score)':<40}{header_note}"
         )
@@ -2677,7 +2677,7 @@ def _generate_comparison_section(
                 ]
             if flipped_in_selected:
                 lines.append(
-                    f"     原因分析：正向因子({','.join(flipped_in_selected)})取反后与负向因子方向统一，但因子间相关性导致"
+                    f"     原因分析：反向因子({','.join(flipped_in_selected)})取反后与正向因子方向统一，但因子间相关性导致"
                 )
             else:
                 lines.append("     原因分析：因子间相关性导致部分信号重叠抵消")

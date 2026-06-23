@@ -95,7 +95,7 @@ class CompositeLayerConfig(LayerConfigBase):
     注意：
     - 子类必须声明 factor_name ClassVar（继承自 LayerConfigBase 的要求）
     - factor_name 用于日志和结果文件命名
-    - 综合因子不加载单独 IC 文件，factor_direction 固定为 'negative'
+    - 综合因子不加载单独 IC 文件，factor_direction 固定为 'positive'（v2.47 对齐到正向语义）
     """
 
     # === 因子元数据（子类必须声明，满足 LayerConfigBase 要求） ===
@@ -124,8 +124,11 @@ class CompositeLayerConfig(LayerConfigBase):
         if not self.factor_name:
             raise ValueError(f"子类必须声明 factor_name ClassVar，当前类: {self.__class__.__name__}")
 
-        # 2. 综合因子不加载 IC 文件，factor_direction 固定为 'negative'
-        self.factor_direction = "negative"
+        # 2. 综合因子不加载 IC 文件，factor_direction 固定为 'positive'
+        # v2.47: 方向语义对齐到 positive —— 所有因子按 sign(IC) 对齐后，
+        #   composite = Σ w_i × sign(IC_i) × z_i，方向永远 positive（值大 = 好）
+        #   参考 designs/direction_align_to_positive_v247.md
+        self.factor_direction = "positive"
         self.ic_source_resolved = ""  # 综合因子无单独 IC 文件
 
         # 3. 派生 factor_col_resolved
@@ -264,25 +267,22 @@ def run_composite_backtest(
 
         logger.info("启用自动因子筛选（筛选决定因子列表）...")
 
-        # v2.8: 先加载所有因子数据用于计算相关性矩阵
-        # 修复：select_factors 需要 corr_matrix 进行高相关筛选
-        logger.info("加载所有因子数据用于相关性计算...")
+        # v2.46 (OOM 修复): 重排步骤顺序消除 full_df + all_factor_df 叠加峰值
+        # 原顺序: L280 all_factor_df=full_df.copy() 时 full_df 还在 → 瞬时叠加 1.4GB
+        # 新顺序: 先提取 return_df → del full_df → 二次列投影加载 all_factor_df
+        # 内存峰值: 3.2GB (OOM) → ~2.6GB
+        # 设计依据: designs/composite_runner_auto_select_oom_v246.md
 
         # v2.17: 单一映射来源（方案 B）—— 直接使用 factor_definitions 模块级常量
-        # 历史反射 select_factors.__globals__.get(...) 已替换为显式 import
-        all_factor_cols = list(FACTOR_NAME_TO_COL_MAP.values())
+        all_factor_cols_candidate = list(FACTOR_NAME_TO_COL_MAP.values())
 
-        # v2.10: 从 full_df 提取子集，不再独立调用 load_factor_values
-        required_all_cols = ["date", "asset"] + [c for c in all_factor_cols if c in full_df.columns]
-        missing_all_cols = [c for c in all_factor_cols if c not in full_df.columns]
+        # Step A: 在 full_df 释放前, 检测哪些因子列真实存在
+        all_factor_cols = [c for c in all_factor_cols_candidate if c in full_df.columns]
+        missing_all_cols = [c for c in all_factor_cols_candidate if c not in full_df.columns]
         if missing_all_cols:
-            logger.warning("全量因子列缺失（将从 full_df 跳过）: %s", missing_all_cols)
-        all_factor_df = full_df[required_all_cols].copy()
+            logger.warning("全量因子列缺失（将跳过）: %s", missing_all_cols)
 
-        # v2.28b: 提前提取 return_df + 释放 full_df（OOM 修复第二轮）
-        # 原代码 full_df 在 auto_select 阶段仍驻留 ~0.5GB，叠加 all_factor_df ~1GB = 1.5GB+
-        # icir_weight 等脚本因系统可用内存更低（~2.1GB anon-rss）仍被 OOM Kill
-        # 现在提取 return_df 后立即释放 full_df，auto_select 阶段峰值降至 ~1GB
+        # Step B: 提前提取轻量 return_df (~120MB)
         return_cols = ["date", "asset", "forward_return_1d", "forward_return_3d", "forward_return_5d"]
         for col in ["forward_return_1d", "forward_return_3d", "forward_return_5d"]:
             if col not in full_df.columns:
@@ -290,11 +290,26 @@ def run_composite_backtest(
         return_df = full_df[return_cols].copy()
         logger.info("收益数据（从 full_df 提取）: %d 条记录", len(return_df))
 
+        # Step C: 立即释放 full_df (~800MB)
         del full_df
         import gc
 
         gc.collect()
-        logger.info("full_df 已释放（v2.28b: auto_select 阶段提前释放）")
+        logger.info("full_df 已释放（v2.46: 二次列投影前提前释放）")
+
+        # Step D: 二次列投影加载 all_factor_df (~720MB, 此时 full_df 已释放, 不叠加)
+        logger.info("加载所有因子数据用于相关性计算（v2.46: 二次列投影避免叠加峰值）...")
+        all_factor_df = load_full_data(
+            data_source=data_source,
+            factor_cols=all_factor_cols,
+            logger=logger,
+        )
+        logger.info(
+            "all_factor_df 加载完成: %d 行 × %d 列 (含 %d 个因子)",
+            len(all_factor_df),
+            len(all_factor_df.columns),
+            len(all_factor_cols),
+        )
 
         # v2.28b: 因子列缺失过滤必须在 full_df 释放前执行
         # select_factors 返回的 factor_cols 可能包含不在数据中的列名（如 return_3d）
@@ -484,12 +499,15 @@ def run_composite_backtest(
                 "可能原因：standardize_factors 未正确生成标准化列"
             )
 
-    # 5. 因子方向统一化（正向因子取反，使所有因子统一为负向语义）
-    # v2.13: 正向因子（ic_mean > 0）在负向因子组合中信号方向相反，
-    #   直接加权会抵消信号。取反后所有因子统一为负向语义：
-    #   标准化正值=差信号 → 综合因子低值=好信号 → factor_direction='negative'
-    direction_map = {}  # {factor_name: 'negative'|'positive'|'unknown'}
-    flipped_factors = []
+    # 5. 因子方向统一化（按 sign(IC) 对齐到正向语义）
+    # v2.47: 按第一性原理对齐到 positive（设计：designs/direction_align_to_positive_v247.md）
+    #   signal_i = sign(IC_i) × z_i，不论 IC 方向 → signal 大 = 看好。
+    #   IC<0 因子（反转族）取反 → 与 IC>0 因子（动量族）统一为正向语义：
+    #   标准化正值 = 好信号 → 综合因子高值 = 好信号 → factor_direction='positive'
+    #   旧 v2.13 取反到 negative 与本版数学镜像对称（composite_new = -composite_old），
+    #   选股 / 回测结果数值不变，仅符号翻转，但报告语义更直观。
+    direction_map = {}  # {factor_name: 'negative'|'positive'|'unknown'}（记录原始 IC 方向）
+    flipped_factors = []  # v2.47: 原 IC<0 被翻到 positive 的因子（语义反转，需配合 aligned_to 字段读取）
 
     for i, col in enumerate(factor_cols):
         # 通过 factor_list[i] 查找对应的因子逻辑名
@@ -506,19 +524,19 @@ def run_composite_backtest(
             continue
 
         std_col = f"{col}_std"
-        if ic_mean_val > 0:
-            # 正向因子：取反标准化值，使其统一为负向语义
-            direction_map[factor_name] = "positive"
+        if ic_mean_val < 0:
+            # 反向因子：取反标准化值，使其对齐到正向语义
+            direction_map[factor_name] = "negative"
             factor_df[std_col] = -factor_df[std_col]
             flipped_factors.append(factor_name)
-            logger.info("因子 %s ic_mean=%.4f>0（正向因子），标准化值已取反以统一负向语义", factor_name, ic_mean_val)
+            logger.info("因子 %s ic_mean=%.4f<0（反向因子），标准化值已取反以对齐正向语义", factor_name, ic_mean_val)
         else:
-            # 负向因子：保持不变
-            direction_map[factor_name] = "negative"
+            # 正向因子：保持不变
+            direction_map[factor_name] = "positive"
 
     if flipped_factors:
         logger.info(
-            "方向统一化完成: %d 个正向因子已取反 (%s)，所有因子统一为负向语义", len(flipped_factors), flipped_factors
+            "方向统一化完成: %d 个反向因子已取反 (%s)，所有因子对齐到正向语义", len(flipped_factors), flipped_factors
         )
 
     # 5b. 计算因子相关性（基于方向统一化后的数据）

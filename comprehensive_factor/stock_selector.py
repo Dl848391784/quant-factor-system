@@ -122,7 +122,7 @@ class StockSelectorConfig:
     # 第一性原理: √N 降噪 (N=10→30 降噪 1.73x), 退出极端尾部 (0.36% → 1.1%)
     # 战略目标 (AGENTS.md): Layer 1 (549) → 短名单 30~50 → 人工决断 3~5
     top_n: int = 30  # v2.42: 短名单扩展, 从 10 改为 30
-    factor_direction: str = "negative"  # 综合因子方向（反向）
+    factor_direction: str = "positive"  # v2.47: 综合因子方向（对齐到正向语义，值大=好）
     rolling_window: int = 60  # 滚动 ICIR 窗口
     min_amplitude: float = 0.01  # 最低振幅阈值（排除不可交易的一字板涨停股，振幅<1%无法买入）
     # v2.40: 流动性过滤参数（design.md feat_family_weight_cap_and_liquidity_filter §3.3）
@@ -1102,7 +1102,7 @@ def select_stocks(
     factor_df = standardize_factors(factor_df, factor_cols, logger)
 
     # Step 7.5: 方向统一化（遵循 MODULE.md M56）
-    # 正向因子 (ic_mean>0) 标准化值取反，统一为负向语义
+    # v2.47: 按 sign(IC) 对齐到正向语义 —— 反向因子 (ic_mean<0) 标准化值取反
     # 与 composite_runner Step 5 保持一致，确保综合因子值与回测时相同
     direction_map: dict[str, str] = {}
     flipped_factors: list[str] = []
@@ -1137,17 +1137,17 @@ def select_stocks(
                 continue
 
             std_col = f"{col}_std"
-            if ic_mean_val > 0:
-                direction_map[factor_name] = "positive"
+            if ic_mean_val < 0:
+                direction_map[factor_name] = "negative"
                 factor_df[std_col] = -factor_df[std_col]
                 flipped_factors.append(factor_name)
                 logger.info(
-                    "因子 %s ic_mean=%.4f>0（正向因子），标准化值已取反以统一负向语义",
+                    "因子 %s ic_mean=%.4f<0（反向因子），标准化值已取反以对齐正向语义",
                     factor_name,
                     ic_mean_val,
                 )
             else:
-                direction_map[factor_name] = "negative"
+                direction_map[factor_name] = "positive"
     else:
         # 使用从 composite 读取的 direction_map 执行取反
         for i, col in enumerate(factor_cols):
@@ -1155,10 +1155,10 @@ def select_stocks(
             direction = direction_map.get(factor_name, "unknown")
 
             std_col = f"{col}_std"
-            if direction == "positive":
+            if direction == "negative":
                 factor_df[std_col] = -factor_df[std_col]
                 logger.info(
-                    "因子 %s（正向因子），标准化值已取反以统一负向语义",
+                    "因子 %s（反向因子），标准化值已取反以对齐正向语义",
                     factor_name,
                 )
 
@@ -1280,9 +1280,7 @@ def select_stocks(
         factor_df_for_stage2 = factor_df
         if config.stage2_sort_col not in factor_df.columns:
             try:
-                aux_df_raw = load_factor_values(
-                    [config.stage2_sort_col], config.data_source, logger
-                )
+                aux_df_raw = load_factor_values([config.stage2_sort_col], config.data_source, logger)
                 aux_df = cast(pd.DataFrame, aux_df_raw)
                 if "date" in aux_df.columns:
                     aux_df = aux_df[aux_df["date"] == selection_date].copy()

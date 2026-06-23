@@ -50,13 +50,13 @@ class ICWeightLayerConfig(CompositeLayerConfig):
     - weight_i = |ic_mean_i| / sum(|ic_mean_j|)
     - IC绝对值越大权重越高，反映因子预测能力
 
-    综合因子方向：反向因子（因子值越大，未来收益越低）
+    综合因子方向：正向因子（v2.47 对齐：因子值越大，未来收益越高）
     """
 
     n_layers: int = 5
-    factor_direction: str = "negative"
-    long_layers: list[int] = field(default_factory=lambda: [1, 2])
-    short_layers: list[int] = field(default_factory=lambda: [4, 5])
+    factor_direction: str = "positive"  # v2.47: 综合因子方向（对齐到正向语义，值大=好）
+    long_layers: list[int] = field(default_factory=lambda: [4, 5])  # v2.47: 正向因子，Layer 4/5 = 高 composite = 多头
+    short_layers: list[int] = field(default_factory=lambda: [1, 2])  # v2.47: Layer 1/2 = 低 composite = 空头
     trade_cost_rate: float = 0.003
     min_stocks_per_layer: int = 10
 

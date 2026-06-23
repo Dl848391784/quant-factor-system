@@ -732,15 +732,15 @@ class TestFlippedFactorDisplay:
             assert display_name == f"{f}*"
 
     def test_header_note_with_flipped_factors(self):
-        """表头应在有取反因子时显示 * = 已取反统一负向语义"""
+        """表头应在有取反因子时显示 * = 已取反对齐到正向语义"""
         flipped_factors = ["overnight_ret"]
-        header_note = "  * = 已取反统一负向语义" if flipped_factors else ""
-        assert "* = 已取反统一负向语义" in header_note
+        header_note = "  * = 已取反对齐到正向语义" if flipped_factors else ""
+        assert "* = 已取反对齐到正向语义" in header_note
 
     def test_header_note_without_flipped_factors(self):
         """无取反因子时表头不应有额外说明"""
         flipped_factors = []
-        header_note = "  * = 已取反统一负向语义" if flipped_factors else ""
+        header_note = "  * = 已取反对齐到正向语义" if flipped_factors else ""
         assert header_note == ""
 
     def test_factor_str_contains_asterisk_for_flipped(self):
@@ -1123,7 +1123,7 @@ def _build_mock_stock_result(n_stocks: int) -> dict:
             "selection_date": "2026-06-22",
             "weight_method": "rolling_icir_weight",
             "composite_score": 0.6021,
-            "factor_direction": "negative",
+            "factor_direction": "positive",
             "top_n": n_stocks,
             "stocks_on_date": 2749,
             "min_amplitude": 0.01,

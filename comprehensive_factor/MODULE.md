@@ -35,7 +35,7 @@
 | **K. CLI 与异常** | M41-M45 | 退出码 / 堆栈保留 / 最小导入 / 文件读取异常 / logger 传递 |
 | **L. Config 设计** | M46-M48 | Config 类 + 继承 / 单一数据源 / List 必须 field |
 | **M. 代码风格与性能** | M49-M55 | 模块级代码 / PEP8 / Union-Find 迭代 / set 替代 list / lambda 延迟绑定 / rolling_std ddof / 注释数据来源 |
-| **N. 方向统一化** | M56 | 正向因子取反统一负向语义 / direction_map / flipped_factors |
+| **N. 方向统一化** | M56 | 反向因子取反对齐到正向语义 (v2.47) / direction_map / flipped_factors |
 
 ### 三、附录
 - [更新记录](#更新记录)
@@ -82,9 +82,9 @@ Step 2: 因子筛选 (自动化,见 D 类规则)
 Step 3: 标准化 (M9)
   每日截面标准化: factor_std = (factor - μ) / σ
                               ↓
-Step 3.5: 方向统一化 (M56)
+Step 3.5: 方向统一化 (M56, v2.47)
   ├─ 从 ic_results 读取 ic_mean 判断因子方向
-  ├─ 正向因子 (ic_mean>0): 标准化值取反 (-*_std)，统一为负向语义
+  ├─ 反向因子 (ic_mean<0): 标准化值取反 (-*_std)，对齐到正向语义
   ├─ 负向因子 (ic_mean≤0): 保持不变
   └─ 输出 direction_map + flipped_factors → 写入 JSON config
                               ↓
@@ -93,7 +93,7 @@ Step 4: 加权计算综合因子 (B 类规则)
   ├─ ICIR 加权 (icir_weight)
   ├─ IC 加权 (ic_weight)
   └─ 滚动 ICIR 加权 (rolling_icir_weight)
-  → 得到 4 个综合因子（统一为负向语义：低值=好信号）
+  → 得到 4 个综合因子（v2.47 对齐到正向语义：高值=好信号）
                               ↓
 Step 5: 综合因子分层回测
   对 4 个综合因子分别做分层回测
@@ -108,7 +108,7 @@ Step 7: 股票选股 (stock_selector.py)
   ├─ 加载最优权重配置（weight_selection_result.json）
   ├─ 加载当日因子数据（factor_ic_data.parquet）
   ├─ 标准化因子值
-  ├─ 方向统一化（正向因子取反，同 Step 3.5）
+  ├─ 方向统一化（反向因子取反对齐到正向，同 Step 3.5）
   ├─ 加载 IC 每日序列（滚动ICIR需要）
   ├─ 计算综合因子值（使用最优权重方法）
   ├─ 按因子方向排序（反向升序/正向降序）
@@ -1967,22 +1967,27 @@ if not factor_cols or len(factor_cols) == 0:
 
 # N. 方向统一化
 
-## M56. 因子方向统一化（正向因子取反）
+## M56. 因子方向统一化（反向因子取反对齐到正向）
 
-**What**: 加权计算前，正向因子（ic_mean > 0）的标准化值必须取反（`-*_std`），使所有因子统一为负向语义。综合因子统一为负向因子：低值 = 好信号（预期高收益）。
+**版本历史**:
+- v2.13 (2026-06-10): 正向因子（ic_mean>0）取反，统一到 negative 语义，composite 低值=好
+- **v2.47 (2026-06-23)**: 镜像翻转——反向因子（ic_mean<0）取反，对齐到 **positive** 语义，composite 高值=好。数学等价（composite_new = -composite_old），选股 / 回测数值不变，但报告语义更直观。参考 `designs/direction_align_to_positive_v247.md`。
 
-**Why**:
-- 综合因子组合了多个方向不同的因子：负向因子（ic_mean < 0）如 turnover_surge（缩量=好信号），正向因子（ic_mean > 0）如 tail_price_position（值大=好信号）
-- 正向因子不取反时，其标准化正值表示好信号，但负向因子标准化负值表示好信号，两者加权后信号抵消
-- 取反后所有因子统一为负向语义：标准化负值 = 好信号，加权叠加增强而非抵消
-- 这与 Pitfall 40 一致：综合因子 `factor_direction='negative'`，`direction_map` 存入 meta 供下游（summary、stock_selector）读取
+**What**: 加权计算前，反向因子（`ic_mean < 0`）的标准化值必须取反（`-*_std`），使所有因子对齐到**正向语义**。综合因子统一为正向因子：高值 = 好信号（预期高收益）。
+
+**Why (第一性原理)**:
+- 定义 `signal_i = sign(IC_i) × z_i`，则不论 IC 方向，`signal` 大 = 看好。
+- 加权和 `composite = Σ w_i × sign(IC_i) × z_i` 方向永远 positive（值大=好），不依赖因子 IC 分布。
+- 综合因子组合了多个方向不同的因子：正向因子（ic_mean>0）如 tail_price_position（值大=好），反向因子（ic_mean<0）如 turnover_surge（值小=好）。
+- 不取反时，两类因子加权信号抵消；取反后所有因子对齐到 positive：标准化正值=好信号，加权叠加增强而非抵消。
+- 综合因子 `factor_direction='positive'`，`direction_map` 存入 meta 供下游（summary、stock_selector）读取。
 
 **How**:
 
 ```python
-# composite_runner.py Step 5 (代码行 387-429)
-direction_map = {}  # {factor_name: 'negative'|'positive'|'unknown'}
-flipped_factors = []
+# composite_runner.py Step 5 (v2.47)
+direction_map = {}  # {factor_name: 'negative'|'positive'|'unknown'}（记录原始 IC 方向）
+flipped_factors = []  # v2.47: 原 IC<0 被翻到 positive 的因子
 
 for i, col in enumerate(factor_cols):
     factor_name = factor_list[i] if i < len(factor_list) else col
@@ -1994,24 +1999,24 @@ for i, col in enumerate(factor_cols):
         continue  # IC 缺失，保持原值
 
     std_col = f"{col}_std"
-    if ic_mean_val > 0:
-        direction_map[factor_name] = 'positive'
-        factor_df[std_col] = -factor_df[std_col]  # 取反
+    if ic_mean_val < 0:
+        direction_map[factor_name] = 'negative'
+        factor_df[std_col] = -factor_df[std_col]  # 取反对齐到 positive
         flipped_factors.append(factor_name)
     else:
-        direction_map[factor_name] = 'negative'  # 保持不变
+        direction_map[factor_name] = 'positive'  # 保持不变
 
 # 写入 JSON config
 'config': {
     'direction_map': direction_map,
-    'flipped_factors': flipped_factors,
+    'flipped_factors': flipped_factors,  # v2.47: 含义反转，是 IC<0 因子
 }
 ```
 
 **Don't**:
 
 ```python
-# ❌ 不取反，让正向和负向因子加权抵消
+# ❌ 不取反，让正向和反向因子加权抵消
 composite = sum(factor_df[f'{col}_std'] * weight for col, weight in zip(factor_cols, weights))
 
 # ❌ 硬编码因子方向（不可扩展）
@@ -2019,6 +2024,10 @@ if col == 'rsi':
     factor_df[f'{col}_std'] = -factor_df[f'{col}_std']
 
 # ❌ direction_map 只存 'positive'/'negative'，不存 'unknown'（IC 缺失时无法区分）
+
+# ❌ (v2.13 旧逻辑) 取反到 negative 语义，让 composite 低值=好（反直觉）
+if ic_mean_val > 0:
+    factor_df[std_col] = -factor_df[std_col]
 ```
 
 **When**:
@@ -2029,15 +2038,15 @@ if col == 'rsi':
 **Examples**:
 
 ```python
-# ✓ 正确：正向因子取反，统一负向语义
-# turnover_surge ic_mean=-0.05 → 'negative'，*_std 保持不变
-# tail_price_position ic_mean=0.03 → 'positive'，*_std 取反
-# 加权后 composite_factor 低值=好信号，factor_direction='negative'
+# ✓ 正确（v2.47）：反向因子取反，对齐到正向语义
+# tail_price_position ic_mean=0.03 → 'positive'，*_std 保持不变
+# turnover_surge ic_mean=-0.05 → 'negative'，*_std 取反
+# 加权后 composite_factor 高值=好信号，factor_direction='positive'
 
 # ✓ stock_selector 中同步方向统一化
 direction_map = composite_result['config']['direction_map']
 for factor_name, direction in direction_map.items():
-    if direction == 'positive':
+    if direction == 'negative':
         factor_df[f'{col}_std'] = -factor_df[f'{col}_std']
 
 # ✗ 错误：stock_selector 不做方向统一化，综合因子值与回测时不一致
@@ -2047,14 +2056,21 @@ for factor_name, direction in direction_map.items():
 - `pytest comprehensive_factor/test_cases/test_direction_unify.py`
 - 检查 JSON 输出 `config.direction_map` 和 `config.flipped_factors` 存在且非空
 - 检查 stock_selector 使用 `direction_map` 执行方向统一化
-- 检查报告展示：取反因子的 z-score 列名加 `*` 标记（如 `overnight_ret*=-3.00`），表头有 `* = 已取反统一负向语义` 说明
+- 检查报告展示：取反因子的 z-score 列名加 `*` 标记（如 `turnover_surge*=2.10`），表头有 `* = 已取反对齐到正向语义` 说明
 
-**展示语义说明** (v2.15):
+**展示语义说明** (v2.15 / v2.47):
 
-`factor_values_std` 中正向因子的 z-score 已取反，非原始 z-score。例如：
-- overnight_ret 原始 z-score=3.0（隔夜收益远高于均值）→ 取反后=-3.00（统一负向语义）
-- 报告展示为 `overnight_ret*=-3.00`，`*` 标记提醒读者这不是原始 z-score
-- 未取反因子（如 `amplitude=-1.97`）无 `*` 标记，就是原始 z-score
+`factor_values_std` 中反向因子的 z-score 已取反，非原始 z-score。例如：
+- turnover_surge 原始 z-score=-2.10（缩量好信号）→ 取反后=+2.10（对齐到正向语义）
+- 报告展示为 `turnover_surge*=2.10`，`*` 标记提醒读者这不是原始 z-score
+- 未取反因子（如 `tail_price_position=1.20`）无 `*` 标记，就是原始 z-score
+
+**数学等价证明** (v2.13 vs v2.47):
+
+设原始 z 集合 {z_i}，IC sign 集合 {s_i = sign(IC_i)}：
+- v2.13: composite_old = Σ w_i × (−s_i × z_i) = −Σ w_i × s_i × z_i  （s>0 取反）
+- v2.47: composite_new = Σ w_i × (s_i × z_i) = Σ w_i × s_i × z_i      （s<0 取反）
+- → `composite_new = −composite_old`，选股结果完全一致，Layer 编号镜像（旧 Layer 1 ≡ 新 Layer 5）
 
 ---
 
