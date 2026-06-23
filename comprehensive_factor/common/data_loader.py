@@ -13,10 +13,10 @@ from pathlib import Path
 
 
 # 统一数据源路径（遵循 PROJECT.md 跨模块数据路径规范）
-DEFAULT_DATA_SOURCE = Path(__file__).parent.parent.parent / 'data_fetchers' / 'result' / 'factor_ic_data.json.gz'
+DEFAULT_DATA_SOURCE = Path(__file__).parent.parent.parent / "data_fetchers" / "result" / "factor_ic_data.parquet"
 
 # IC 结果目录（comprehensive_factor 依赖）
-DEFAULT_IC_RESULT_DIR = Path(__file__).parent.parent.parent / 'factor_ic' / 'result'
+DEFAULT_IC_RESULT_DIR = Path(__file__).parent.parent.parent / "factor_ic" / "result"
 
 # 历史路径（已废弃，保留用于向后兼容检查）
-_DEPRECATED_CACHE_DIR = Path(__file__).parent.parent.parent / 'cache' / 'factor_data'
+_DEPRECATED_CACHE_DIR = Path(__file__).parent.parent.parent / "cache" / "factor_data"

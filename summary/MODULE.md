@@ -1,8 +1,8 @@
 # summary 模块规范
 
-> 版本: v2.1
+> 版本: v2.2
 > 创建时间: 2026-05-28
-> 最后更新: 2026-06-02
+> 最后更新: 2026-06-23（Parquet 迁移：factor_ic_data.json.gz → .parquet）
 
 ## 快速参考
 
@@ -44,7 +44,7 @@ summary/
 | IC 分析结果 | factor_ic | `factor_ic/result/` | `ic_<因子名>_analysis_result.json` |
 | 分层回测结果 | backtest | `backtest/result/` | `<因子名>_layered_backtest.json` |
 | 综合因子结果 | comprehensive_factor | `comprehensive_factor/result/` | `composite_<加权方式>_1d.json` |
-| 因子数据 | data_fetchers | `data_fetchers/result/` | `factor_ic_data.json.gz` |
+| 因子数据 | data_fetchers | `data_fetchers/result/` | `factor_ic_data.parquet` |
 
 ### 数据流向
 
@@ -102,7 +102,7 @@ from factor_definitions import FACTOR_DEFINITIONS, get_factor_definition
 
 | 数据源 | 路径 | 日期字段 | 格式 |
 |-------|------|---------|------|
-| factor_ic_data | factor_ic_data.json.gz | dates[-1] | full_json |
+| factor_ic_data | factor_ic_data.parquet | dates[-1] | full_json |
 | factor_data | factor_data.json.gz | meta.date_range.end | full_json |
 | turnover_data | turnover_rate_data.json.gz | meta.date_range.end | full_json |
 | tail_trading_data | tail_trading_data.json.gz | meta.date_range.end | full_json |
@@ -124,7 +124,7 @@ from factor_definitions import FACTOR_DEFINITIONS, get_factor_definition
 | < 70% | error | ✗严重缺失 |
 
 检查方法：
-1. 从 factor_ic_data.json.gz 的完整 JSON 对象头部读取最新日期（dates[-1]）
+1. 从 factor_ic_data.parquet 的完整 JSON 对象头部读取最新日期（dates[-1]）
 2. 从 factor_data.json.gz / turnover_rate_data.json.gz / tail_trading_data.json.gz 的 meta.date_range.end 读取最新日期
 3. 统计该日期下的股票数（读取该日期对应的数据行）
 4. 对比 expected_stocks（从 factor_data.json.gz meta.total_stocks 获取，约 3000）
@@ -303,7 +303,7 @@ ls comprehensive_factor/result/composite_*_1d.json | wc -l | expect 4
 - 单因子 IC 分析结果（factor_ic/result/）
 - 单因子分层回测结果（backtest/result/）
 - 综合因子四种权重回测结果（comprehensive_factor/result/）
-- 因子数据文件（data_fetchers/result/factor_ic_data.json.gz）
+- 因子数据文件（data_fetchers/result/factor_ic_data.parquet）
 
 **输出：**
 - 汇总报告（文本格式）
@@ -337,11 +337,11 @@ python summary/generate_factor_summary_report.py [--date YYYY-MM-DD] [--output r
 **功能：** 合并多个因子数据到主数据源
 
 **输入：**
-- 主数据源（data_fetchers/result/factor_ic_data.json.gz）
+- 主数据源（data_fetchers/result/factor_ic_data.parquet）
 - 新因子文件（cache/factor_data/factors/*.parquet）
 
 **输出：**
-- 合并后数据（data_fetchers/result/factor_ic_data.json.gz）
+- 合并后数据（data_fetchers/result/factor_ic_data.parquet）
 - 合并后数据 Parquet 格式（data_fetchers/result/factor_ic_data.parquet）
 - 元数据文件（data_fetchers/result/factor_ic_data_metadata.json）
 

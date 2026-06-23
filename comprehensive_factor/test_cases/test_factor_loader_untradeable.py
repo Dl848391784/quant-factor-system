@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """factor_loader 不可交易股票过滤测试。"""
 
-import gzip
-import json
 import sys
 from pathlib import Path
 
@@ -15,13 +13,12 @@ from comprehensive_factor.common.factor_loader import load_factor_values, load_f
 
 
 def _write_test_data(path: Path, records: list[dict]) -> None:
-    with gzip.open(path, "wt", encoding="utf-8") as f:
-        json.dump({"data": records, "meta": {}}, f)
+    pd.DataFrame(records).to_parquet(path, engine="pyarrow")
 
 
 @pytest.fixture
 def test_data_with_untradeable(tmp_path: Path) -> Path:
-    data_path = tmp_path / "test_cf_data.json.gz"
+    data_path = tmp_path / "test_cf_data.parquet"
     records = [
         {
             "date": "2024-01-01",
@@ -66,7 +63,7 @@ def test_data_with_untradeable(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def test_data_without_untradeable(tmp_path: Path) -> Path:
-    data_path = tmp_path / "test_cf_data_old.json.gz"
+    data_path = tmp_path / "test_cf_data_old.parquet"
     records = [
         {
             "date": "2024-01-01",

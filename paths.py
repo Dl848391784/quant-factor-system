@@ -42,14 +42,9 @@ REVERSE_DISCOVERY_RESULT = PROJECT_ROOT / "reverse_discovery" / "result"
 # 统一数据源（单一来源原则）
 # ============================================================================
 
-# factor_ic_data = 行情 + 因子 + 收益数据
+# factor_ic_data = 行情 + 因子 + 收益数据（Parquet 列式存储）
 # 所有下游模块从此文件读取，禁止从其他文件读取收益数据
-# Parquet 迁移（2026-06-22）：reader 内部自动检测 .parquet sibling，
-#   存在则用 pd.read_parquet(columns=[...])（~1.5s, ~50-150MB），
-#   不存在则 fallback ijson 流式（~30s, ~500MB+）
-# 生成 Parquet：重跑 data_fetchers/factor_generator.py（dual-write 模式）
-FACTOR_IC_DATA = DATA_FETCHERS_RESULT / "factor_ic_data.json.gz"
-FACTOR_IC_DATA_PARQUET = DATA_FETCHERS_RESULT / "factor_ic_data.parquet"
+FACTOR_IC_DATA = DATA_FETCHERS_RESULT / "factor_ic_data.parquet"
 
 # 外部数据源（因子计算依赖，非统一数据源的一部分）
 FINANCIAL_DATA = DATA_FETCHERS_RESULT / "financial_data.json.gz"  # 财务指标数据（方案B基本面动量因子）
@@ -115,7 +110,6 @@ __all__ = [
     "SUMMARY_RESULT",
     "REVERSE_DISCOVERY_RESULT",
     "FACTOR_IC_DATA",
-    "FACTOR_IC_DATA_PARQUET",
     "MARKET_CAP_DATA",
     "RETURN_DATA_BACKUP",
     "FACTOR_DATA_BACKUP",

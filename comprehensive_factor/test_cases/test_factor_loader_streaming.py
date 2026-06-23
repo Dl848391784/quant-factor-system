@@ -14,8 +14,6 @@
 from __future__ import annotations
 
 import builtins
-import gzip
-import json
 
 import numpy as np
 import pandas as pd
@@ -26,13 +24,9 @@ from comprehensive_factor.common.factor_loader import (
 )
 
 
-@pytest.fixture
-def mini_data_source(tmp_path):
-    """构造 10 行 × 7 列的 mini factor_ic_data.json.gz。
-
-    包含 date, asset, 2 个因子列, 3 个 forward_return 列。
-    """
-    records = [
+def _build_mini_records():
+    """构造 mini factor_ic_data 测试记录。"""
+    return [
         {
             "date": f"2026-06-{day:02d}",
             "asset": "000001.SZ",
@@ -44,10 +38,17 @@ def mini_data_source(tmp_path):
         }
         for day in range(1, 11)
     ]
-    payload = {"data": records, "metadata": {"source": "test"}}
-    out = tmp_path / "mini_factor_ic_data.json.gz"
-    with gzip.open(out, "wt", encoding="utf-8") as f:
-        json.dump(payload, f)
+
+
+@pytest.fixture
+def mini_data_source(tmp_path):
+    """构造 10 行 × 7 列的 mini factor_ic_data.parquet。
+
+    包含 date, asset, 2 个因子列, 3 个 forward_return 列。
+    """
+    records = _build_mini_records()
+    out = tmp_path / "mini_factor_ic_data.parquet"
+    pd.DataFrame(records).to_parquet(out, engine="pyarrow")
     return out
 
 
@@ -56,10 +57,8 @@ def test_full_load_consistent_with_json_load(mini_data_source):
     # 新路径
     new_df = load_full_data(data_source=mini_data_source)
 
-    # 参考路径（直接 json.load）
-    with gzip.open(mini_data_source, "rt", encoding="utf-8") as f:
-        payload = json.load(f)
-    ref_df = pd.DataFrame(payload["data"])
+    # 参考路径（直接构造 DataFrame）
+    ref_df = pd.DataFrame(_build_mini_records())
     # 与新版一致：对数值列做 to_numeric
     for col in ref_df.columns:
         if col not in ("date", "asset"):

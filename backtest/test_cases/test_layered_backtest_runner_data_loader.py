@@ -17,12 +17,10 @@
 - 改用 ijson 流式 + 列过滤后内存峰值降低 ~10x
 - 单测使用 100 行 × 10 列 fake fixture，不依赖真实数据
 """
-
-import gzip
-import json
 import sys
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 
@@ -36,8 +34,8 @@ from backtest.common.layered_backtest_runner import load_factor_return_data
 # ============================================================================
 
 
-def _build_fake_payload(n_rows: int = 100, extra_factor_cols: int = 8) -> dict:
-    """构造 fake factor_ic_data.json.gz 内容
+def _build_fake_records(n_rows: int = 100, extra_factor_cols: int = 8) -> list[dict]:
+    """构造 fake records 列表
 
     每条记录字段:
         - index: date, asset
@@ -57,18 +55,16 @@ def _build_fake_payload(n_rows: int = 100, extra_factor_cols: int = 8) -> dict:
         for fname in factor_names:
             rec[fname] = float(i) + hash(fname) % 100
         records.append(rec)
-    return {"meta": {"n_rows": n_rows}, "data": records}
+    return records
 
 
 @pytest.fixture
 def fake_data_source(tmp_path: Path) -> Path:
-    """100 行 × 13 列 fake 数据源"""
-    payload = _build_fake_payload(n_rows=100, extra_factor_cols=8)
-    path = tmp_path / "factor_ic_data.json.gz"
-    with gzip.open(path, "wt", encoding="utf-8") as f:
-        json.dump(payload, f)
+    """100 行 × 13 列 fake Parquet 数据源"""
+    records = _build_fake_records(n_rows=100, extra_factor_cols=8)
+    path = tmp_path / "factor_ic_data.parquet"
+    pd.DataFrame(records).to_parquet(path, engine="pyarrow")
     return path
-
 
 # ============================================================================
 # TC01-03: 基本返回结构
@@ -112,35 +108,32 @@ class TestBasicLoad:
 class TestErrorHandling:
     def test_missing_return_col_raises(self, tmp_path):
         """TC04: 缺少 forward_return_3d 抛 ValueError"""
-        payload = {
-            "data": [
-                {
-                    "date": "2026-01-01",
-                    "asset": "000001",
-                    "rsi_6": 50.0,
-                    "forward_return_1d": 0.01,
-                    "forward_return_5d": 0.03,
-                },
-            ]
-        }
-        path = tmp_path / "missing_return.json.gz"
-        with gzip.open(path, "wt", encoding="utf-8") as f:
-            json.dump(payload, f)
+        records = [
+            {
+                "date": "2026-01-01",
+                "asset": "000001",
+                "rsi_6": 50.0,
+                "forward_return_1d": 0.01,
+                "forward_return_5d": 0.03,
+            },
+        ]
+        path = tmp_path / "missing_return.parquet"
+        pd.DataFrame(records).to_parquet(path, engine="pyarrow")
         with pytest.raises(ValueError, match="forward_return_3d"):
             load_factor_return_data(data_source=path, required_factor_cols=["rsi_6"])
 
     def test_missing_data_key_raises(self, tmp_path):
-        """TC05: 缺少 'data' 顶层字段抛 ValueError（"data 字段为空"）
+        """TC05: 数据源缺少收益列时抛 ValueError（Parquet 等效于旧 JSON.gz 'data' 字段为空）。
 
-        v2.9 (2026-06-13): 移除 ijson.kvitems 顶层校验（OOM 根因），改为依赖
-        ijson.items(f, "data.item") yield 0 条记录后用 n_records == 0 兜底。
-        因此报错从 KeyError("data") 变为 ValueError("'data' 字段为空")。
+        v2.9 (2026-06-13): 旧版 JSON.gz 使用 ijson 流式解析，无 'data' key 时 yield 0 条，
+        n_records==0 兜底报 ValueError("'data' 字段为空")。
+        Parquet 迁移后：空 Parquet 文件（仅有 date/asset 列，无收益列）→ pq.read_schema
+        检测到缺少 forward_return_1d → ValueError("数据源中缺少收益列 'forward_return_1d'")。
         """
-        payload = {"meta": {"foo": "bar"}, "records": []}
-        path = tmp_path / "no_data.json.gz"
-        with gzip.open(path, "wt", encoding="utf-8") as f:
-            json.dump(payload, f)
-        with pytest.raises(ValueError, match="'data' 字段为空"):
+        df = pd.DataFrame({"date": pd.Series([], dtype=str), "asset": pd.Series([], dtype=str)})
+        path = tmp_path / "no_data.parquet"
+        df.to_parquet(path, engine="pyarrow")
+        with pytest.raises(ValueError, match="缺少收益列"):
             load_factor_return_data(data_source=path, required_factor_cols=["rsi_6"])
 
     def test_missing_required_factor_raises(self, fake_data_source):
@@ -155,7 +148,7 @@ class TestErrorHandling:
         """TC06b: 数据源文件不存在抛 FileNotFoundError"""
         with pytest.raises(FileNotFoundError):
             load_factor_return_data(
-                data_source=tmp_path / "ghost.json.gz",
+                data_source=tmp_path / "ghost.parquet",
                 required_factor_cols=["rsi_6"],
             )
 
@@ -211,9 +204,8 @@ class TestMemoryFootprint:
             for fname in all_factor_cols:
                 rec[fname] = float(i)
             records.append(rec)
-        path = tmp_path / "big.json.gz"
-        with gzip.open(path, "wt", encoding="utf-8") as f:
-            json.dump({"data": records}, f)
+        path = tmp_path / "big.parquet"
+        pd.DataFrame(records).to_parquet(path, engine="pyarrow")
 
         # 过滤：仅 1 个因子列
         factor_df_filtered, _ = load_factor_return_data(data_source=path, required_factor_cols=["factor_0"])

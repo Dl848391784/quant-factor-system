@@ -1,7 +1,7 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.33
-> 最后更新: 2026-06-21
+> 版本: v2.34
+> 最后更新: 2026-06-23（Parquet 迁移：factor_ic_data.json.gz → .parquet）
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
 >
@@ -48,7 +48,7 @@
 comprehensive_factor 模块负责将多个**单因子**按加权方式组合成**综合因子**,并调用 backtest 模块进行分层回测。
 
 **模块定位**:
-- **输入**:`factor_ic` 的 IC 结果 + 单因子值 (从 `data_fetchers/result/factor_ic_data.json.gz`)
+- **输入**:`factor_ic` 的 IC 结果 + 单因子值 (从 `data_fetchers/result/factor_ic_data.parquet`)
 - **处理**:加权计算综合因子值
 - **输出**:`comprehensive_factor/result/<脚本名>.json` (综合因子分层回测结果)
 - **依赖方向**:`data_fetchers → factor_ic → comprehensive_factor → backtest (调用)`
@@ -62,7 +62,7 @@ comprehensive_factor 模块负责将多个**单因子**按加权方式组合成*
 | 滚动 ICIR 加权 | rolling_icir_weight | `composite_rolling_icir_weight_1d.py` |
 | IC 加权 | ic_weight | `composite_ic_weight_1d.py` |
 
-**统一数据源 (2026-05-27 起)**:所有因子、行情、收益数据均在 `factor_ic_data.json.gz` 中。参数 `cache_dir` 已改为 `data_source`。
+**统一数据源 (2026-05-27 起)**:所有因子、行情、收益数据均在 `factor_ic_data.parquet` 中。参数 `cache_dir` 已改为 `data_source`。
 
 ---
 
@@ -106,7 +106,7 @@ Step 6: 权重方式选择 (weight_selector.py)
                               ↓
 Step 7: 股票选股 (stock_selector.py)
   ├─ 加载最优权重配置（weight_selection_result.json）
-  ├─ 加载当日因子数据（factor_ic_data.json.gz）
+  ├─ 加载当日因子数据（factor_ic_data.parquet）
   ├─ 标准化因子值
   ├─ 方向统一化（正向因子取反，同 Step 3.5）
   ├─ 加载 IC 每日序列（滚动ICIR需要）
@@ -164,7 +164,7 @@ Step 7: 股票选股 (stock_selector.py)
 ```
 1. 加载最优权重配置（weight_selection_result.json）
 2. 从最优权重 composite 结果读取因子列表（factor_list/factor_cols）
-3. 加载当日因子数据（factor_ic_data.json.gz）
+3. 加载当日因子数据（factor_ic_data.parquet）
 4. 确定选股日期（默认取最新日期）
 5. 过滤数据（只保留选股日期）
 6. 标准化因子（截面标准化）
@@ -947,7 +947,7 @@ _FACTOR_SUFFIX_PATTERN = re.compile(r'(.+?)_\d+[a-z]?$')
 
 | 数据类型 | 来源路径 | 公共函数 |
 |---------|---------|---------|
-| 因子原始值 | `data_fetchers/result/factor_ic_data.json.gz` | `factor_loader.load_factor_values()` |
+| 因子原始值 | `data_fetchers/result/factor_ic_data.parquet` | `factor_loader.load_factor_values()` |
 | IC 统计结果 | `factor_ic/result/*.json` | `factor_loader.load_ic_results()` |
 | IC 每日序列 | `factor_ic/result/*_daily.json.gz` | `factor_loader.load_ic_daily()` |
 
@@ -960,7 +960,7 @@ _FACTOR_SUFFIX_PATTERN = re.compile(r'(.+?)_\d+[a-z]?$')
 | `load_factor_values()` | 委托 `load_full_data(factor_cols=...)` | ~175 MB | stock_selector 等下游 |
 | ImportError fallback | `gzip.open + json.load` | ~4.5 GB | OOM 风险，仅 ijson 缺失时使用 |
 
-**Don't**: 在 composite 模块内自行 `gzip.open + json.load(f)` 加载 `factor_ic_data.json.gz`，会触发 OOM Kill（exit code -9）。设计文档: `designs/composite_streaming_load_design.md`。
+**Don't**: 在 composite 模块内自行 `gzip.open + json.load(f)` 加载 `factor_ic_data.parquet`，会触发 OOM Kill（exit code -9）。设计文档: `designs/composite_streaming_load_design.md`。
 
 **v2.28 内存优化（2026-06-21）**: auto_select 阶段内存峰值从 ~3.5GB 降至 ~2.65GB，修复 OOM Kill（exit -9）。3 项改动：(1) `standardize_factors(skip_point_mass=True)` 跳过点质量检测，减少 45×groupby+merge 临时对象；(2) auto_select 完成后 `del all_factor_df + all_corr_matrix; gc.collect()` 释放 ~1GB；(3) `return_df` 提取和 `full_df` 释放从 Step 8 提前到 Step 1，消除三峰叠加。设计文档: `designs/composite_auto_select_memory_optimization_design.md`。
 

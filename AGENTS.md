@@ -65,13 +65,13 @@ Plan → Execute → Review → Debug
 | data_fetchers/fetch_factor_cache | `data_fetchers/result/` | `factor_data.json.gz` | factor_generator |
 | data_fetchers/fetch_turnover | `data_fetchers/result/` | `turnover_rate_data.json.gz` | factor_generator |
 | data_fetchers/fetch_market_cap | `data_fetchers/result/` | `market_cap_data.json.gz` | factor_ic（市值中性化，待启用） |
-| data_fetchers/factor_generator | `data_fetchers/result/` | `factor_ic_data.json.gz` | factor_ic, backtest, comprehensive_factor, summary |
+| data_fetchers/factor_generator | `data_fetchers/result/` | `factor_ic_data.parquet` | factor_ic, backtest, comprehensive_factor, summary |
 | factor_ic | `factor_ic/result/` | `ic_<因子>_<周期>_analysis_result.json` | comprehensive_factor, summary |
 | backtest | `backtest/result/` | `<因子>_layered_backtest.json` | summary |
 | comprehensive_factor | `comprehensive_factor/result/` | `composite_<加权>_1d.json` | summary |
 | summary | `summary/result/` | `factor_summary_report_YYYY-MM-DD.txt` | — |
 
-**统一数据源**：`factor_ic_data.json.gz` 包含行情 + 基础因子 + 扩展因子 + 收益数据（`forward_return_1d/3d/5d`）。所有下游模块**只能**从此文件读取，禁止从 `return_data.json.gz` 读收益数据（仅备份）。
+**统一数据源**：`factor_ic_data.parquet` 包含行情 + 基础因子 + 扩展因子 + 收益数据（`forward_return_1d/3d/5d`）。所有下游模块**只能**从此文件读取，禁止从 `return_data.json.gz` 读收益数据（仅备份）。
 
 ---
 

@@ -19,15 +19,14 @@ from factor_ic.common.data_loader import load_factor_return_data
 
 
 def _write_test_data(path: Path, records: list[dict]) -> None:
-    """写入测试用的 gzip JSON 数据文件。"""
-    with gzip.open(path, "wt", encoding="utf-8") as f:
-        json.dump({"data": records, "meta": {"date_range": {"start": "2024-01-01", "end": "2024-01-02"}}}, f)
+    """写入测试用的 Parquet 数据文件。"""
+    pd.DataFrame(records).to_parquet(path, engine="pyarrow")
 
 
 @pytest.fixture
 def test_data_with_untradeable(tmp_path: Path) -> Path:
     """构造含 is_untradeable 列的测试数据。"""
-    data_path = tmp_path / "test_data.json.gz"
+    data_path = tmp_path / "test_data.parquet"
     records = [
         # 000001: T-1 正常, T 正常
         {"date": "2024-01-01", "asset": "000001", "rsi_6": 50.0, "forward_return_1d": 0.01, "is_untradeable": 0},
@@ -46,7 +45,7 @@ def test_data_with_untradeable(tmp_path: Path) -> Path:
 @pytest.fixture
 def test_data_without_untradeable(tmp_path: Path) -> Path:
     """构造不含 is_untradeable 列的旧数据（向后兼容测试）。"""
-    data_path = tmp_path / "test_data_old.json.gz"
+    data_path = tmp_path / "test_data_old.parquet"
     records = [
         {"date": "2024-01-01", "asset": "000001", "rsi_6": 50.0, "forward_return_1d": 0.01},
         {"date": "2024-01-02", "asset": "000001", "rsi_6": 55.0, "forward_return_1d": 0.02},

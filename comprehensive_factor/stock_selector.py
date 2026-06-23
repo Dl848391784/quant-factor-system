@@ -88,7 +88,7 @@ _logger = get_logger(__name__)
 # 配置类
 # ============================================================================
 
-DEFAULT_DATA_SOURCE = PROJECT_ROOT / "data_fetchers" / "result" / "factor_ic_data.json.gz"
+DEFAULT_DATA_SOURCE = PROJECT_ROOT / "data_fetchers" / "result" / "factor_ic_data.parquet"
 DEFAULT_IC_RESULT_DIR = PROJECT_ROOT / "factor_ic" / "result"
 DEFAULT_WEIGHT_RESULT_PATH = PROJECT_ROOT / "comprehensive_factor" / "result" / "weight_selection_result.json"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "comprehensive_factor" / "result"

@@ -49,7 +49,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
-import ijson
 import pandas as pd
 
 from backtest.common.convert_types import convert_to_native_types
@@ -409,101 +408,41 @@ def load_factor_return_data(
     # 显式排除 _INDEX_COLS：date/asset 是 str，部分因子（如 return_3d / past_return_1d /
     # ma5_deviation 等）的 required_cols 含 'date'/'asset'，若纳入数值白名单将触发
     # float('YYYY-MM-DD') ValueError（factor_cli 退出码 3 = DATA_STRUCTURE_ERROR）。
-    numeric_cols: set[str] = (set(_RETURN_COLS) | set(required_factor_cols or [])) - set(_INDEX_COLS)
+    # 3) 读取数据（Parquet 列式存储）
+    import pyarrow.parquet as pq
 
-    # 3) 读取数据（L2: Parquet 优先, JSON.gz fallback）
-    #    Parquet 原生 float64，无需 numeric_cols 即时 float 化
-    parquet_path = data_source.parent / data_source.name.replace(".json.gz", ".parquet")
-    full_df: pd.DataFrame
+    logger.info("从 Parquet 读取: %s", data_source)
 
-    if parquet_path.exists():
-        import pyarrow.parquet as pq
+    schema = pq.read_schema(data_source)
+    available_cols = set(schema.names)
+    read_cols = [col for col in sorted(keep_cols) if col in available_cols]
 
-        logger.info("从 Parquet 读取: %s", parquet_path)
+    # 列投影读取（物理只读目标列）
+    full_df: pd.DataFrame = pd.read_parquet(data_source, columns=read_cols)
 
-        schema = pq.read_schema(parquet_path)
-        available_cols = set(schema.names)
-        read_cols = [col for col in sorted(keep_cols) if col in available_cols]
+    # 补充缺失列为 NaN
+    for col in keep_cols:
+        if col not in full_df.columns:
+            full_df[col] = pd.NA
 
-        # 列投影读取（物理只读目标列）
-        full_df = pd.read_parquet(parquet_path, columns=read_cols)
+    # 校验收益列存在
+    for col in _RETURN_COLS:
+        if col not in available_cols:
+            raise ValueError(f"数据源中缺少收益列 '{col}'，当前列: {sorted(available_cols)}")
 
-        # 补充缺失列为 NaN（与 ijson 路径行为一致）
-        for col in keep_cols:
-            if col not in full_df.columns:
-                full_df[col] = pd.NA
-
-        # 校验收益列存在
-        for col in _RETURN_COLS:
+    # 校验必需因子列存在
+    if required_factor_cols:
+        for col in required_factor_cols:
             if col not in available_cols:
-                raise ValueError(f"数据源中缺少收益列 '{col}'，当前列: {sorted(available_cols)}")
+                available_factor = [c for c in sorted(available_cols) if c not in _INDEX_COLS and c not in _RETURN_COLS]
+                raise ValueError(f"因子数据中缺少 '{col}' 列\n可用因子列: {available_factor}")
 
-        # 校验必需因子列存在
-        if required_factor_cols:
-            for col in required_factor_cols:
-                if col not in available_cols:
-                    available_factor = [
-                        c for c in sorted(available_cols) if c not in _INDEX_COLS and c not in _RETURN_COLS
-                    ]
-                    raise ValueError(f"因子数据中缺少 '{col}' 列\n可用因子列: {available_factor}")
-
-        logger.info(
-            "统一数据源(Parquet): %d 条记录，原始 %d 列 → 读取 %d 列",
-            len(full_df),
-            len(available_cols),
-            len(full_df.columns),
-        )
-    else:
-        # --- fallback: ijson 流式（保留向后兼容） ---
-        # 数值列即时 float 化（JSON.gz 中数值以 Decimal/字符串存储）
-        columns: dict[str, list[Any]] = {}
-        first_record_keys: list[str] | None = None
-        n_records = 0
-        try:
-            with gzip.open(data_source, "rb") as f:
-                for record in ijson.items(f, "data.item", use_float=True):
-                    if first_record_keys is None:
-                        first_record_keys = list(record.keys())
-                        for col in keep_cols:
-                            if col in record:
-                                columns[col] = []
-                    for col, col_list in columns.items():
-                        val = record.get(col)
-                        if col in numeric_cols and val is not None:
-                            col_list.append(float(val))
-                        else:
-                            col_list.append(val)
-                    n_records += 1
-        except ijson.common.IncompleteJSONError as e:
-            raise ValueError(f"数据源 JSON 解析失败: {data_source}: {e}") from e
-
-        if n_records == 0:
-            raise ValueError(f"数据源 'data' 字段为空: {data_source}")
-
-        assert first_record_keys is not None
-        first_keys_set = set(first_record_keys)
-
-        for col in _RETURN_COLS:
-            if col not in first_keys_set:
-                raise ValueError(f"数据源中缺少收益列 '{col}'，当前列: {first_record_keys}")
-
-        if required_factor_cols:
-            for col in required_factor_cols:
-                if col not in first_keys_set:
-                    available_cols_list = [
-                        c for c in first_record_keys if c not in _INDEX_COLS and c not in _RETURN_COLS
-                    ]
-                    raise ValueError(f"因子数据中缺少 '{col}' 列\n可用因子列: {available_cols_list}")
-
-        full_df = pd.DataFrame(columns)
-        columns.clear()
-        del columns
-        logger.info(
-            "统一数据源(ijson): %d 条记录，原始 %d 列 → 过滤保留 %d 列",
-            len(full_df),
-            len(first_record_keys),
-            len(full_df.columns),
-        )
+    logger.info(
+        "统一数据源(Parquet): %d 条记录，原始 %d 列 → 读取 %d 列",
+        len(full_df),
+        len(available_cols),
+        len(full_df.columns),
+    )
 
     # 5.5) 过滤不可交易股票（涨停类，T 日尾盘无法买入）
     # 向后兼容: 旧数据无此列时跳过过滤
@@ -542,7 +481,9 @@ def load_factor_return_data(
     return_df = full_df[list(_INDEX_COLS) + list(_RETURN_COLS)].copy()
     logger.info("收益数据: %d 条记录", len(return_df))
 
-    factor_cols = [col for col in full_df.columns if col not in _RETURN_COLS]
+    # is_untradeable / is_low_liquidity 是过滤辅助列，不应出现在 factor_df
+    _AUX_COLS = {"is_untradeable", "is_low_liquidity"}
+    factor_cols = [col for col in full_df.columns if col not in _RETURN_COLS and col not in _AUX_COLS]
     factor_df = full_df[factor_cols].copy()
     logger.info("因子数据: %d 条记录，%d 列", len(factor_df), len(factor_cols))
 

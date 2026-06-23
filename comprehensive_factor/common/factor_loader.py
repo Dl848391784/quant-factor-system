@@ -28,7 +28,6 @@
 创建日期: 2026-05-24
 """
 
-import gzip
 import json
 import logging
 from pathlib import Path
@@ -38,7 +37,7 @@ import pandas as pd
 
 
 # 统一数据源路径（遵循 PROJECT.md 跨模块数据路径规范）
-DEFAULT_DATA_SOURCE = Path(__file__).parent.parent.parent / "data_fetchers" / "result" / "factor_ic_data.json.gz"
+DEFAULT_DATA_SOURCE = Path(__file__).parent.parent.parent / "data_fetchers" / "result" / "factor_ic_data.parquet"
 DEFAULT_IC_RESULT_DIR = Path(__file__).parent.parent.parent / "factor_ic" / "result"
 
 
@@ -110,95 +109,29 @@ def load_full_data(
 
     full_df: pd.DataFrame
 
-    # L2: 优先 Parquet 列式读取
-    parquet_path = data_source.parent / data_source.name.replace(".json.gz", ".parquet")
+    # Parquet 列式读取
+    import pyarrow.parquet as pq
 
-    if parquet_path.exists():
-        import pyarrow.parquet as pq
+    logger.info("从 Parquet 读取: %s", data_source)
 
-        logger.info("从 Parquet 读取: %s", parquet_path)
+    schema = pq.read_schema(data_source)
+    available_cols = set(schema.names)
 
-        schema = pq.read_schema(parquet_path)
-        available_cols = set(schema.names)
-
-        # 决定读取列
-        if required_cols is None:
-            read_cols = sorted(available_cols)
-        else:
-            read_cols = [col for col in required_cols if col in available_cols]
-
-        full_df = pd.read_parquet(parquet_path, columns=read_cols)
-
-        # 补充缺失列为 NaN
-        if required_cols is not None:
-            for col in required_cols:
-                if col not in full_df.columns:
-                    full_df[col] = pd.NA
-
-        logger.info("Parquet 加载完成: %d 行 × %d 列", len(full_df), len(full_df.columns))
+    # 决定读取列
+    if required_cols is None:
+        read_cols = sorted(available_cols)
     else:
-        # --- fallback: ijson 流式（保留向后兼容） ---
-        try:
-            import array
+        read_cols = [col for col in required_cols if col in available_cols]
 
-            import ijson
+    full_df = pd.read_parquet(data_source, columns=read_cols)
 
-            # peek 首条记录决定列集合（仅当 factor_cols=None 时）
-            with gzip.open(data_source, "rb") as f:
-                first_record = next(iter(ijson.items(f, "data.item")), None)
-            if first_record is None:
-                raise KeyError(f"数据源 JSON 'data' 数组为空: {data_source}")
+    # 补充缺失列为 NaN
+    if required_cols is not None:
+        for col in required_cols:
+            if col not in full_df.columns:
+                full_df[col] = pd.NA
 
-            if required_cols is None:
-                required_cols = list(first_record.keys())
-
-            # 类型分类：str 列用 list（date/asset），数值列用 array.array('d')
-            STR_COLS = {"date", "asset"}
-            str_columns: dict[str, list[str | None]] = {col: [] for col in required_cols if col in STR_COLS}
-            num_columns: dict[str, array.array[float]] = {
-                col: array.array("d") for col in required_cols if col not in STR_COLS
-            }
-
-            with gzip.open(data_source, "rb") as f:
-                for record in ijson.items(f, "data.item"):
-                    for col, lst in str_columns.items():
-                        val = record.get(col)
-                        lst.append(str(val) if val is not None else None)
-                    for col, arr in num_columns.items():
-                        val = record.get(col)
-                        arr.append(float(val) if val is not None else float("nan"))
-
-            if not str_columns.get("date") and "date" in required_cols:
-                raise KeyError(f"数据源 JSON 'data' 数组为空: {data_source}")
-
-            df_data: dict[str, object] = {}
-            for col in required_cols:
-                if col in str_columns:
-                    df_data[col] = str_columns[col]
-                else:
-                    df_data[col] = np.frombuffer(num_columns[col], dtype=np.float64).copy()
-
-            full_df = pd.DataFrame(df_data)
-            del df_data, str_columns, num_columns
-            import gc
-
-            gc.collect()
-            logger.info("ijson 流式加载完成: %d 行 × %d 列", len(full_df), len(full_df.columns))
-
-        except ImportError:
-            logger.warning("ijson 不可用，回退到 json.load（峰值 ~4GB，可能 OOM）")
-            with gzip.open(data_source, "rt", encoding="utf-8") as f:
-                data = json.load(f)
-            if "data" not in data:
-                raise KeyError(f"数据源 JSON 结构缺失 'data' 字段: {data_source}") from None
-            full_df = pd.DataFrame(data["data"])
-            del data
-            import gc
-
-            gc.collect()
-            if factor_cols is not None and required_cols is not None:
-                available = [c for c in required_cols if c in full_df.columns]
-                full_df = full_df[available].copy()
+    logger.info("Parquet 加载完成: %d 行 × %d 列", len(full_df), len(full_df.columns))
 
     # === 校验 date / asset 类型（保留现有逻辑） ===
     if len(full_df) > 0:

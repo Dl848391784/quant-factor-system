@@ -39,7 +39,7 @@ from .logger_config import get_logger
 # 统一数据源：data_fetchers/result/factor_ic_data.json.gz
 # 包含：行情数据 + 基础因子 + 扩展因子 + 收益数据（forward_return_1d/3d/5d）
 DEFAULT_DATA_DIR = Path(__file__).parent.parent.parent / "data_fetchers" / "result"
-DEFAULT_DATA_CACHE = DEFAULT_DATA_DIR / "factor_ic_data.json.gz"
+DEFAULT_DATA_CACHE = DEFAULT_DATA_DIR / "factor_ic_data.parquet"
 
 
 def load_factor_return_data(
@@ -121,85 +121,30 @@ def load_factor_return_data(
     # 去重（保留首次出现顺序，避免下方 select_cols 中列重复）
     required_cols = list(dict.fromkeys(required_cols))
 
-    # ========== 读取数据（L2: Parquet 优先, JSON.gz fallback） ==========
-    parquet_path = data_cache_path.parent / data_cache_path.name.replace(".json.gz", ".parquet")
+    # ========== 读取数据（Parquet 列式存储） ==========
+    import pyarrow.parquet as pq
 
-    import gc
+    logger.info("从 Parquet 读取: %s", data_cache_path)
 
-    dates_set: set[str] = set()
-    df = None
+    schema = pq.read_schema(data_cache_path)
+    available_cols = set(schema.names)
+    read_cols = [col for col in required_cols if col in available_cols]
 
-    if parquet_path.exists():
-        # --- Parquet 路径 ---
-        import pyarrow.parquet as pq
+    # 列投影读取（物理只读目标列，内存峰值 ~50-150MB）
+    df = pd.read_parquet(data_cache_path, columns=read_cols)
 
-        logger.info("从 Parquet 读取: %s", parquet_path)
+    # 补充缺失列为 NaN
+    for col in required_cols:
+        if col not in df.columns:
+            df[col] = pd.NA
 
-        schema = pq.read_schema(parquet_path)
-        available_cols = set(schema.names)
-        read_cols = [col for col in required_cols if col in available_cols]
+    # dates 校验：确认 metadata 或 date 列存在
+    meta = schema.metadata or {}
+    if b"dates" not in meta and "date" not in available_cols:
+        raise KeyError(f"Parquet 文件 '{data_cache_path}' 无 dates metadata 且无 date 列")
 
-        # 列投影读取（物理只读目标列，内存峰值 ~50-150MB）
-        df = pd.read_parquet(parquet_path, columns=read_cols)
-
-        # 补充缺失列为 NaN（与 ijson 路径 record.get(col)=None 行为一致）
-        for col in required_cols:
-            if col not in df.columns:
-                df[col] = pd.NA
-
-        # dates 从 file-level metadata 读取（~0ms，不读数据）
-        meta = schema.metadata or {}
-        if b"dates" in meta:
-            dates_set = set(json.loads(meta[b"dates"]))
-        else:
-            dates_set = set(df["date"].astype(str).unique())
-
-        if df.empty:
-            raise KeyError(f"Parquet 文件 '{parquet_path}' 数据为空")
-    else:
-        # --- fallback: ijson / json.load（保留向后兼容） ---
-        try:
-            import ijson
-
-            # 列式累积：每列预分配一个 list，避免 list[dict] 的 dict 对象头开销
-            columns: dict[str, list] = {col: [] for col in required_cols}
-            with gzip.open(data_cache_path, "rb") as f:
-                # ijson.items 流式解析 JSON 的 "data" 数组
-                for record in ijson.items(f, "data.item"):
-                    # 按列追加（缺失列追加 None，pandas 会处理为 NaN）
-                    for col in required_cols:
-                        columns[col].append(record.get(col))
-                    date_val = record.get("date")
-                    if date_val is not None:
-                        dates_set.add(str(date_val))
-
-            if not columns["date"]:
-                raise KeyError(f"数据缓存文件 '{data_cache_path}' 数据为空或格式错误")
-
-            # 一次性从列式字典构建 DataFrame
-            df = pd.DataFrame(columns)
-            del columns
-            gc.collect()
-        except ImportError:
-            # ijson 不可用时回退到 json.load（老方法，可能OOM）
-            logger.warning("ijson 不可用，回退到 json.load（内存峰值约4.4GB，可能OOM）")
-            try:
-                with gzip.open(data_cache_path, "rt", encoding="utf-8") as f:
-                    data = json.load(f)
-            except (gzip.BadGzipFile, json.JSONDecodeError, OSError) as e:
-                logger.error("数据读取失败 [%s] [%s]: %s", data_cache_path, type(e).__name__, e)
-                raise
-
-            if "data" not in data:
-                raise KeyError(
-                    f"数据缓存文件 '{data_cache_path}' 缺少 'data' 键\nJSON 结构: {list(data.keys())}"
-                ) from None
-
-            df = pd.DataFrame(data["data"])
-            del data["data"]
-            del data
-            gc.collect()
-            dates_set = set(df["date"].astype(str).unique())
+    if df.empty:
+        raise KeyError(f"Parquet 文件 '{data_cache_path}' 数据为空")
 
     # ========== 基础列验证（加载后立即验证） ==========
     for col in ["date", "asset"]:

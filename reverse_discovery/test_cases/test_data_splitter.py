@@ -12,10 +12,12 @@ data_splitter 测试用例。
 使用构造的小数据（10 条记录），不依赖真实 2GB 文件。
 """
 
-import gzip
 import json
 from pathlib import Path
 
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 from reverse_discovery.data_splitter import compute_date_splits, split_data
 
@@ -67,21 +69,34 @@ def _make_record(date: str, asset: str = "000001") -> dict:
 
 @pytest.fixture
 def fake_data_source(tmp_path: Path) -> Path:
-    """构造一个 mini factor_ic_data.json.gz 文件。"""
+    """构造一个 mini factor_ic_data.parquet 文件（含 dates metadata）。"""
     records = []
     for date in TEST_DATES:
         for asset in ["000001", "000002"]:
             records.append(_make_record(date, asset))
 
-    data = {
-        "dates": TEST_DATES,
-        "data": records,
-    }
-    path = tmp_path / "factor_ic_data.json.gz"
-    with gzip.open(path, "wt", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
+    df = pd.DataFrame(records)
+    table = pa.Table.from_pandas(df, preserve_index=False)
+    schema_meta = dict(table.schema.metadata or {})
+    schema_meta[b"dates"] = json.dumps(TEST_DATES, ensure_ascii=False).encode("utf-8")
+    table = table.replace_schema_metadata(schema_meta)
+    path = tmp_path / "factor_ic_data.parquet"
+    pq.write_table(table, path)
     return path
 
+
+
+
+def _read_subset(path: Path) -> dict:
+    """读取 split_data 输出的 Parquet 子集，返回 dict(data, dates, metadata) 兼容旧断言。"""
+    table = pq.read_table(path)
+    df = table.to_pandas()
+    meta = table.schema.metadata or {}
+    return {
+        "data": df.to_dict("records"),
+        "dates": json.loads(meta[b"dates"]) if b"dates" in meta else [],
+        "metadata": json.loads(meta[b"split_metadata"]) if b"split_metadata" in meta else {},
+    }
 
 # ============================================================================
 # 1. 日期切分边界
@@ -228,8 +243,7 @@ class TestSplitDataOutput:
         )
 
         # 读取 train 子集的第一条记录
-        with gzip.open(result["train"], "rt", encoding="utf-8") as f:
-            subset_data = json.load(f)
+        subset_data = _read_subset(result["train"])
 
         assert subset_data["data"], "train 子集 data 不应为空"
         record_keys = list(subset_data["data"][0].keys())
@@ -246,8 +260,7 @@ class TestSplitDataOutput:
             output_dir=output_dir,
         )
 
-        with gzip.open(result["train"], "rt", encoding="utf-8") as f:
-            subset_data = json.load(f)
+        subset_data = _read_subset(result["train"])
 
         meta = subset_data["metadata"]
         assert meta["split_type"] == "train"
@@ -270,12 +283,9 @@ class TestSplitDataOutput:
 
         splits = compute_date_splits(TEST_DATES, "2024-01-07", "2024-01-09", purge_days=2)
 
-        with gzip.open(result["train"], "rt", encoding="utf-8") as f:
-            train_data = json.load(f)
-        with gzip.open(result["test"], "rt", encoding="utf-8") as f:
-            test_data = json.load(f)
-        with gzip.open(result["holdout"], "rt", encoding="utf-8") as f:
-            holdout_data = json.load(f)
+        train_data = _read_subset(result["train"])
+        test_data = _read_subset(result["test"])
+        holdout_data = _read_subset(result["holdout"])
 
         assert train_data["dates"] == splits["train"]
         assert test_data["dates"] == splits["test"]
@@ -292,18 +302,15 @@ class TestSplitDataOutput:
             output_dir=output_dir,
         )
 
-        with gzip.open(result["train"], "rt", encoding="utf-8") as f:
-            train_data = json.load(f)
+        train_data = _read_subset(result["train"])
         # train 有 5 天 × 2 只股票 = 10 条记录
         assert len(train_data["data"]) == 10
 
-        with gzip.open(result["test"], "rt", encoding="utf-8") as f:
-            test_data = json.load(f)
+        test_data = _read_subset(result["test"])
         # test 有 2 天 × 2 只股票 = 4 条记录
         assert len(test_data["data"]) == 4
 
-        with gzip.open(result["holdout"], "rt", encoding="utf-8") as f:
-            holdout_data = json.load(f)
+        holdout_data = _read_subset(result["holdout"])
         # holdout 有 1 天 × 2 只股票 = 2 条记录
         assert len(holdout_data["data"]) == 2
 
@@ -318,9 +325,9 @@ class TestSplitDataOutput:
             output_dir=output_dir,
         )
 
-        assert result["train"].name == "factor_ic_data_train_2024-01-07.json.gz"
-        assert result["test"].name == "factor_ic_data_test_2024-01-07.json.gz"
-        assert result["holdout"].name == "factor_ic_data_holdout.json.gz"
+        assert result["train"].name == "factor_ic_data_train_2024-01-07.parquet"
+        assert result["test"].name == "factor_ic_data_test_2024-01-07.parquet"
+        assert result["holdout"].name == "factor_ic_data_holdout.parquet"
 
     def test_data_source_not_found_raises(self, tmp_path: Path):
         """主数据源不存在时抛 FileNotFoundError。"""
@@ -329,6 +336,6 @@ class TestSplitDataOutput:
             split_data(
                 train_end="2024-01-07",
                 test_end="2024-01-09",
-                data_source=tmp_path / "nonexistent.json.gz",
+                data_source=tmp_path / "nonexistent.parquet",
                 output_dir=output_dir,
             )

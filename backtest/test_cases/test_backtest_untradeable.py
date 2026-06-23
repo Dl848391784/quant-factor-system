@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """backtest load_factor_return_data 不可交易股票过滤测试。"""
 
-import gzip
-import json
 import sys
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 
@@ -14,13 +13,12 @@ from backtest.common.layered_backtest_runner import load_factor_return_data
 
 
 def _write_test_data(path: Path, records: list[dict]) -> None:
-    with gzip.open(path, "wt", encoding="utf-8") as f:
-        json.dump({"data": records, "meta": {}}, f)
+    pd.DataFrame(records).to_parquet(path, engine="pyarrow")
 
 
 @pytest.fixture
 def test_data_with_untradeable(tmp_path: Path) -> Path:
-    data_path = tmp_path / "test_bt_data.json.gz"
+    data_path = tmp_path / "test_bt_data.parquet"
     records = [
         {
             "date": "2024-01-01",
@@ -65,7 +63,7 @@ def test_data_with_untradeable(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def test_data_without_untradeable(tmp_path: Path) -> Path:
-    data_path = tmp_path / "test_bt_data_old.json.gz"
+    data_path = tmp_path / "test_bt_data_old.parquet"
     records = [
         {
             "date": "2024-01-01",

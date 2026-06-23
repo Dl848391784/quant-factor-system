@@ -1189,18 +1189,13 @@ def _format_and_write_output(
 
     # try/finally：异常路径也释放 output_df
     try:
-        # ========== Step 13: 保存输出 ==========
+        # ========== Step 13: 保存输出（Parquet 列式存储） ==========
         logger.info("Step 13: 保存输出...")
 
         total_records = len(output_df)
-        _write_factor_json_gz(output_df, output_path, logger)
-
-        # L1: dual-write Parquet（列式二进制，下游读取层将逐步切换到 .parquet）
-        parquet_output_path = output_path.parent / output_path.name.replace(".json.gz", ".parquet")
-        _write_factor_parquet(output_df, parquet_output_path, logger)
+        _write_factor_parquet(output_df, output_path, logger)
 
         logger.info("  输出路径: %s", output_path)
-        logger.info("  Parquet 输出路径: %s", parquet_output_path)
         logger.info("  输出记录数: %d", total_records)
 
         # 计算运行耗时
@@ -1275,7 +1270,7 @@ def generate_all_factors(
         Path(turnover_data_path) if turnover_data_path else _DEFAULT_RESULT_DIR / "turnover_rate_data.json.gz"
     )
     return_data_path = Path(return_data_path) if return_data_path else _DEFAULT_RESULT_DIR / "return_data.json.gz"
-    output_path = Path(output_path) if output_path else _DEFAULT_RESULT_DIR / "factor_ic_data.json.gz"
+    output_path = Path(output_path) if output_path else _DEFAULT_RESULT_DIR / "factor_ic_data.parquet"
 
     logger.info("=" * 40)
     logger.info("统一因子生成模块")

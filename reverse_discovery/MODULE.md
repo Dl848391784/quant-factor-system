@@ -107,7 +107,7 @@ holdout: 451-500 天 → 最终一次性评估，不调参
 
 ### D3. 不修改原则：不改主数据源、不改正向 pipeline
 
-**What**: reverse_discovery 模块只生成训练子集文件（写入自己的 result/），不修改 `data_fetchers/result/factor_ic_data.json.gz` 主数据源；不修改 factor_ic / backtest / comprehensive_factor 的计算逻辑。
+**What**: reverse_discovery 模块只生成训练子集文件（写入自己的 result/），不修改 `data_fetchers/result/factor_ic_data.parquet` 主数据源；不修改 factor_ic / backtest / comprehensive_factor 的计算逻辑。
 
 **How**:
 - 训练子集生成：从主数据源筛选日期范围 → 写到 `reverse_discovery/result/factor_ic_data_train_<train_end>.json.gz`
@@ -115,7 +115,7 @@ holdout: 451-500 天 → 最终一次性评估，不调参
 - 候选因子集成：新因子先在 factor_generator 中注册计算逻辑，再走正向流程
 
 **Don't**:
-- ❌ 修改 `data_fetchers/result/factor_ic_data.json.gz`（破坏正向流程）
+- ❌ 修改 `data_fetchers/result/factor_ic_data.parquet`（破坏正向流程）
 - ❌ 在 factor_ic / backtest 内增加"训练/测试段"分支逻辑（侵入式修改）
 - ❌ 在 reverse_discovery 内重复实现 IC 计算 / 分层回测（违反模块边界）
 
@@ -136,10 +136,10 @@ holdout: 451-500 天 → 最终一次性评估，不调参
 
 | 数据类型 | 来源模块 | 数据路径 | 文件格式 |
 |---------|---------|---------|---------|
-| 统一行情/因子/收益数据 | data_fetchers | `data_fetchers/result/factor_ic_data.json.gz` | gzip JSON（含行情、基础因子、扩展因子、`forward_return_1d/3d/5d`）|
+| 统一行情/因子/收益数据 | data_fetchers | `data_fetchers/result/factor_ic_data.parquet` | gzip JSON（含行情、基础因子、扩展因子、`forward_return_1d/3d/5d`）|
 
 **禁止**：
-- 直接修改 `factor_ic_data.json.gz`（违反 D3 不修改原则）
+- 直接修改 `factor_ic_data.parquet`（违反 D3 不修改原则）
 - 从 `return_data.json.gz` 读取收益数据（AGENTS.md 已明确该文件仅备份）
 
 ### 输出数据
@@ -160,7 +160,7 @@ holdout: 451-500 天 → 最终一次性评估，不调参
 ```
 ┌──────────────────────────────────┐
 │   data_fetchers/result/          │
-│   factor_ic_data.json.gz         │ ← 主数据源（500 天全量）
+│   factor_ic_data.parquet         │ ← 主数据源（500 天全量）
 │   （只读，禁止修改）              │
 └────────────┬─────────────────────┘
              │
@@ -384,10 +384,10 @@ target_return    = data.loc[t_minus_1, 'forward_return_1d']  # T-1 时刻 = T-1�
 # ✓ 正确
 from paths import DATA_FETCHERS_RESULT_DIR
 
-main_data_source = DATA_FETCHERS_RESULT_DIR / 'factor_ic_data.json.gz'
+main_data_source = DATA_FETCHERS_RESULT_DIR / 'factor_ic_data.parquet'
 
 # ✗ 错误：路径字面量
-main_data_source = Path('data_fetchers/result/factor_ic_data.json.gz')
+main_data_source = Path('data_fetchers/result/factor_ic_data.parquet')
 ```
 
 paths.py 中需新增的常量（待 reverse_discovery 首个脚本实现时添加）：
@@ -400,7 +400,7 @@ paths.py 中需新增的常量（待 reverse_discovery 首个脚本实现时添�
 
 ### 训练/测试子集（gzip JSON）
 
-**与主数据源 `factor_ic_data.json.gz` schema 完全一致**，仅日期范围不同。这样正向 pipeline 不需要任何代码改动即可消费。
+**与主数据源 `factor_ic_data.parquet` schema 完全一致**，仅日期范围不同。这样正向 pipeline 不需要任何代码改动即可消费。
 
 ```json
 {
@@ -414,7 +414,7 @@ paths.py 中需新增的常量（待 reverse_discovery 首个脚本实现时添�
       "end": "2026-03-13"
     },
     "trading_days": 248,
-    "parent_source": "data_fetchers/result/factor_ic_data.json.gz",
+    "parent_source": "data_fetchers/result/factor_ic_data.parquet",
     "generated_at": "2026-06-18T10:30:00"
   },
   "dates": ["2024-06-18", "2024-06-19", ...],

@@ -1,7 +1,7 @@
 # factor_ic 模块规范
 
-> 版本: v4.1
-> 最后更新: 2026-06-12
+> 版本: v4.2
+> 最后更新: 2026-06-23（Parquet 迁移：factor_ic_data.json.gz → .parquet）
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**(简单规则可省略部分项)。
 >
@@ -83,7 +83,7 @@
 factor_ic 模块负责计算各类因子的 IC(Information Coefficient)值,用于评估因子对未来收益的预测能力。
 
 **模块定位**:
-- **输入**:`data_fetchers/result/factor_ic_data.json.gz`(统一数据源,含因子和收益)
+- **输入**:`data_fetchers/result/factor_ic_data.parquet`(统一数据源,含因子和收益)
 - **输出**:`factor_ic/result/ic_<因子>_<周期>_analysis_result.json`
 - **依赖方向**:`data_fetchers → cache → factor_ic → backtest`,单向无环
 - **数据职责**:不自行拉取数据,只处理已缓存数据
@@ -251,15 +251,15 @@ result = run_complex_factor_ic(
 
 ## M1.1. IC 模块数据来源单一化
 
-**What**: `factor_ic/` 下的脚本**只负责 IC 计算**,所需数据必须由 `data_fetchers/factor_generator.py` 统一生成到 `factor_ic_data.json.gz` 中,禁止自行拉取或计算因子数据。
+**What**: `factor_ic/` 下的脚本**只负责 IC 计算**,所需数据必须由 `data_fetchers/factor_generator.py` 统一生成到 `factor_ic_data.parquet` 中,禁止自行拉取或计算因子数据。
 
 **Why**: 
-1. **数据源统一**: `factor_ic_data.json.gz` 是跨模块共享的统一数据源,综合因子(comprehensive_factor)等下游模块也依赖此数据
+1. **数据源统一**: `factor_ic_data.parquet` 是跨模块共享的统一数据源,综合因子(comprehensive_factor)等下游模块也依赖此数据
 2. **职责分离**: factor_generator 负责数据合并与因子计算,factor_ic 只负责 IC 分析
 3. **避免重复计算**: 同一因子数据不应在多个模块重复计算
 
 **How**:
-- ✅ `factor_ic/` 脚本从 `data_fetchers/result/factor_ic_data.json.gz` 读取数据
+- ✅ `factor_ic/` 脚本从 `data_fetchers/result/factor_ic_data.parquet` 读取数据
 - ❌ `factor_ic/` 脚本自行调用 `fetch_factor_cache.py` 或 `fetch_turnover.py`
 - ❌ `factor_ic/` 脚本自行计算基础因子(rsi_6, volume_ratio_5 等)
 
@@ -274,12 +274,12 @@ from factor_ic.common.data_loader import load_factor_return_data
 data = load_factor_return_data(factor_cols=['rsi_6', 'close'])
 ```
 
-**When**: 开发任何新因子 IC 脚本前,确认所需字段已在 `factor_ic_data.json.gz` 中存在。
+**When**: 开发任何新因子 IC 脚本前,确认所需字段已在 `factor_ic_data.parquet` 中存在。
 
 **Verify**: 
 - [ ] `factor_ic/` 脚本不调用 `data_fetchers/fetch_*.py` 中的数据获取函数
 - [ ] 新增因子字段时,先在 `factor_generator.py` 中添加,再在 `factor_ic/` 中使用
-- [ ] 开发新因子 IC 脚本前,先检查 `factor_ic_data.json.gz` 中是否存在所需字段(避免反复调试)
+- [ ] 开发新因子 IC 脚本前,先检查 `factor_ic_data.parquet` 中是否存在所需字段(避免反复调试)
 
 ---
 
@@ -1968,7 +1968,7 @@ def calculate_xxx(factor_df, logger=None):
         raise ValueError(
             f"数据校验失败:缺失必需列 {missing_cols}\n"
             f"实际列: {list(factor_df.columns)}\n"
-            f"请检查 data_fetchers/result/factor_ic_data.json.gz 是否包含所需列"
+            f"请检查 data_fetchers/result/factor_ic_data.parquet 是否包含所需列"
         )
 
     # 2. 有效数据量校验

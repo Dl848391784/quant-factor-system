@@ -99,9 +99,10 @@ class TestCLIExecution:
     def test_script_runs_without_error(self):
         """脚本应能正常运行"""
         import subprocess
+        import sys
 
         result = subprocess.run(
-            ['python', 'backtest/layered_backtest_intraday_intensity_1d.py'],
+            [sys.executable, 'backtest/layered_backtest_intraday_intensity_1d.py'],
             cwd='/home/admin/projects/factor_ic_analyzer',
             capture_output=True,
             text=True,

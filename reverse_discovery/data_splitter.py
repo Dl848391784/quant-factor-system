@@ -27,12 +27,10 @@ CLI 入口：
 - v1.0 (2026-06-18): 初始版本，单次切分 + ijson 流式读写
 """
 
-import gzip
 import json
 from datetime import datetime
 from pathlib import Path
 
-import ijson
 from paths import FACTOR_IC_DATA, REVERSE_DISCOVERY_RESULT
 from reverse_discovery.common.logger_config import get_logger
 
@@ -170,30 +168,22 @@ def _write_subset(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    n_records = 0
-    with gzip.open(output_path, "wt", encoding="utf-8") as out_f:
-        # 1. 写 metadata + dates（小数据，直接 json.dumps）
-        out_f.write('{"metadata": ')
-        out_f.write(json.dumps(metadata, ensure_ascii=False))
-        out_f.write(', "dates": ')
-        out_f.write(json.dumps(subset_dates, ensure_ascii=False))
-        out_f.write(', "data": [')
+    import pandas as pd
+    import pyarrow as pa
+    import pyarrow.parquet as pq
 
-        # 2. 流式读 data 数组，过滤 + 写入
-        first_record = True
-        with gzip.open(data_source, "rb") as in_f:
-            for record in ijson.items(in_f, "data.item", use_float=True):
-                record_date = record.get("date")
-                if record_date not in target_dates:
-                    continue
-                if not first_record:
-                    out_f.write(",")
-                out_f.write(json.dumps(record, ensure_ascii=False))
-                first_record = False
-                n_records += 1
+    # 从 Parquet 读全部数据，过滤目标日期
+    full_df = pd.read_parquet(data_source)
+    subset_df = full_df[full_df["date"].isin(list(target_dates))].reset_index(drop=True)
+    n_records = len(subset_df)
 
-        # 3. 闭合 data 数组和 JSON 对象
-        out_f.write("]}")
+    # 写 Parquet + metadata（含 dates + split metadata）
+    table = pa.Table.from_pandas(subset_df, preserve_index=False)
+    schema_meta = dict(table.schema.metadata or {})
+    schema_meta[b"dates"] = json.dumps(subset_dates, ensure_ascii=False).encode("utf-8")
+    schema_meta[b"split_metadata"] = json.dumps(metadata, ensure_ascii=False).encode("utf-8")
+    table = table.replace_schema_metadata(schema_meta)
+    pq.write_table(table, output_path)
 
     logger.info("写入完成: %d 条记录", n_records)
     return n_records
@@ -233,35 +223,22 @@ def split_data(
     logger.info("主数据源: %s", data_source)
     logger.info("train_end=%s, test_end=%s, purge_days=%d", train_end, test_end, purge_days)
 
-    # 1. 读取 dates（L4: Parquet metadata 优先）
+    # 1. 读取 dates（Parquet metadata）
     logger.info("读取 dates 数组...")
-    parquet_path = data_source.parent / data_source.name.replace(".json.gz", ".parquet")
+    import pyarrow.parquet as pq
 
-    if parquet_path.exists():
-        try:
-            import pyarrow.parquet as pq
-
-            schema = pq.read_schema(parquet_path)
-            meta = schema.metadata or {}
-            if b"dates" in meta:
-                dates = json.loads(meta[b"dates"])
-                logger.info("从 Parquet metadata 读取 dates: %d 个交易日", len(dates))
-            else:
-                import pandas as pd
-
-                df_dates = pd.read_parquet(parquet_path, columns=["date"])
-                dates = sorted(df_dates["date"].astype(str).unique().tolist())
-                del df_dates
-                logger.info("从 Parquet date 列读取 dates: %d 个交易日", len(dates))
-        except Exception as e:
-            logger.warning("Parquet dates 读取失败，回退到 ijson: %s", e)
-            with gzip.open(data_source, "rb") as f:
-                dates = list(ijson.items(f, "dates.item", use_float=True))
-            logger.info("交易日总数: %d", len(dates))
+    schema = pq.read_schema(data_source)
+    meta = schema.metadata or {}
+    if b"dates" in meta:
+        dates = json.loads(meta[b"dates"])
+        logger.info("从 Parquet metadata 读取 dates: %d 个交易日", len(dates))
     else:
-        with gzip.open(data_source, "rb") as f:
-            dates = list(ijson.items(f, "dates.item", use_float=True))
-        logger.info("交易日总数: %d", len(dates))
+        import pandas as pd
+
+        df_dates = pd.read_parquet(data_source, columns=["date"])
+        dates = sorted(df_dates["date"].astype(str).unique().tolist())
+        del df_dates
+        logger.info("从 Parquet date 列读取 dates: %d 个交易日", len(dates))
 
     # 2. 计算三段日期
     splits = compute_date_splits(dates, train_end, test_end, purge_days)
@@ -293,11 +270,11 @@ def split_data(
         len(train_dates),
         parent_source_str,
     )
-    train_path = output_dir / f"factor_ic_data_train_{train_end}.json.gz"
+    train_path = output_dir / f"factor_ic_data_train_{train_end}.parquet"
     _write_subset(train_path, train_meta, train_dates, data_source, set(train_dates))
 
     # test
-    test_path = output_dir / f"factor_ic_data_test_{train_end}.json.gz"
+    test_path = output_dir / f"factor_ic_data_test_{train_end}.parquet"
     if test_dates:
         test_meta = _build_metadata(
             "test",
@@ -314,7 +291,7 @@ def split_data(
         test_path = None
 
     # holdout
-    holdout_path = output_dir / "factor_ic_data_holdout.json.gz"
+    holdout_path = output_dir / "factor_ic_data_holdout.parquet"
     if holdout_dates:
         holdout_meta = _build_metadata(
             "holdout",
@@ -355,7 +332,7 @@ def main():
         type=str,
         default=None,
         dest="data_source",
-        help="主数据源路径（默认使用 factor_ic_data.json.gz）",
+        help="主数据源路径（默认使用 factor_ic_data.parquet）",
     )
     parser.add_argument(
         "--output-dir",

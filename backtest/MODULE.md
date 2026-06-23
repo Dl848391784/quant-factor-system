@@ -1,7 +1,7 @@
 # backtest 模块规范
 
-> 版本: v2.3
-> 最后更新: 2026-06-13
+> 版本: v2.4
+> 最后更新: 2026-06-23（Parquet 迁移：factor_ic_data.json.gz → .parquet）
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
 >
@@ -76,7 +76,7 @@ backtest 模块负责对因子 IC 结果进行**分层回测**,评估因子的�
 
 **模块定位**:
 - **输入**:`factor_ic/result/ic_<因子>_<周期>_analysis_result.json` (IC 分析结果)
-- **数据源**:`data_fetchers/result/factor_ic_data.json.gz` (统一数据源,2026-05-27 后)
+- **数据源**:`data_fetchers/result/factor_ic_data.parquet` (统一数据源,2026-05-27 后)
 - **输出**:`backtest/result/<因子>_layered_backtest.json` (分层收益、夏普、回撤等)
 - **依赖方向**:`data_fetchers → factor_ic → backtest`,单向无环
 
@@ -1076,7 +1076,7 @@ except Exception as e:
 
 **Why**:支持自定义数据源便于多环境部署;支持自定义输出便于结果归档。
 
-**统一数据源** (v2.7 / 2026-05-27):所有模块从 `data_fetchers/result/factor_ic_data.json.gz` 读取。已废弃 `cache_dir` 和 `additional_data_files` 参数。
+**统一数据源** (v2.7 / 2026-05-27):所有模块从 `data_fetchers/result/factor_ic_data.parquet` 读取。已废弃 `cache_dir` 和 `additional_data_files` 参数。
 
 ---
 
@@ -1481,7 +1481,7 @@ layer_names = {
 
 ## M53. 预计算因子禁止重复传递 factor_calculator
 
-**What**: 预计算因子（数据已在 `factor_ic_data.json.gz` 统一数据源中）分层回测脚本**禁止**传递 `factor_calculator` 参数。
+**What**: 预计算因子（数据已在 `factor_ic_data.parquet` 统一数据源中）分层回测脚本**禁止**传递 `factor_calculator` 参数。
 
 **Why**: 
 - 统一数据源已包含预计算因子列（如 `tail_price_position`）
@@ -1518,13 +1518,13 @@ if __name__ == "__main__":
 - ❌ 同一因子列在数据源和 `factor_calculator` 中双重定义
 
 **When**: 判断是否为预计算因子：
-- 数据源 `factor_ic_data.json.gz` 已包含该因子列 → 预计算因子
+- 数据源 `factor_ic_data.parquet` 已包含该因子列 → 预计算因子
 - 数据源不包含 → 需要传递 `factor_calculator` 动态计算
 
 **Verify**: 
 ```bash
 # 检查因子是否在数据源中预计算
-python -c "import json, gzip; data=json.load(gzip.open('data_fetchers/result/factor_ic_data.json.gz','rt')); print('factor_cols:', data['meta']['factor_cols'])"
+python -c "import json, gzip; data=json.load(gzip.open('data_fetchers/result/factor_ic_data.parquet','rt')); print('factor_cols:', data['meta']['factor_cols'])"
 
 # 检查分层回测脚本是否传递 factor_calculator
 grep -n "factor_calculator" backtest/layered_backtest_tail*.py
@@ -1539,10 +1539,10 @@ grep -n "factor_calculator" backtest/layered_backtest_tail*.py
 
 ## M54. 大规模数据加载强制流式 ijson + 列白名单
 
-**What**: 分层回测加载 `factor_ic_data.json.gz` (>300 MB 压缩 / >2 GB 解压) 时,**禁止使用** `json.load()` / `ijson.kvitems(f, "")`,必须用 `ijson.items(f, "data.item")` 流式遍历 + 列白名单过滤。
+**What**: 分层回测加载 `factor_ic_data.parquet` (>300 MB 压缩 / >2 GB 解压) 时,**禁止使用** `json.load()` / `ijson.kvitems(f, "")`,必须用 `ijson.items(f, "data.item")` 流式遍历 + 列白名单过滤。
 
 **Why**:
-- `factor_ic_data.json.gz` 含 1.5M+ 行 × 44 列,`json.load()` 一次性物化为 Python 对象峰值可达 4.2 GB → SIGKILL
+- `factor_ic_data.parquet` 含 1.5M+ 行 × 44 列,`json.load()` 一次性物化为 Python 对象峰值可达 4.2 GB → SIGKILL
 - `ijson.kvitems(f, "")` 在 yajl2_c 后端下,yield "data" key 之前会**完整解析**其 value(等同 `json.load`),不能用作"顶层结构校验"
 - `ijson.items(f, "data.item")` 是真正的逐行流式 SAX,峰值仅一行的内存
 - 加载后 `full_df` 必须 `del`,因为 `return_df`/`factor_df` 已经 `.copy()` 出独立副本,保留原引用 = 内存翻倍
@@ -1595,7 +1595,7 @@ factor_df = full_df[["date", "asset", "close", "factor_xxx"]].copy()
 ```
 
 **When**:
-- 任何加载 `factor_ic_data.json.gz` 的回测 / IC / summary 脚本
+- 任何加载 `factor_ic_data.parquet` 的回测 / IC / summary 脚本
 - 任何加载 >100 MB JSON / JSON.gz 的场景
 - **不适用**:小配置文件 (< 10 MB)、IC 分析结果 (`ic_*_analysis_result.json`,通常 < 5 MB)
 
@@ -1606,7 +1606,7 @@ factor_df = full_df[["date", "asset", "close", "factor_xxx"]].copy()
 
 **典型案例** (2026-06-13):
 - `layered_backtest_rsi_1d` 触发 OOM (anon-rss 4.21 GB,SIGKILL by oom-killer)
-- 双根因:① `json.load` 加载 `factor_ic_data.json.gz` (峰值 4 GB);② `ijson.kvitems(f, "")` 顶层校验等同全量加载
+- 双根因:① `json.load` 加载 `factor_ic_data.parquet` (峰值 4 GB);② `ijson.kvitems(f, "")` 顶层校验等同全量加载
 - 修复:`runner.py` v2.8 → v2.9,移除顶层校验,改 `ijson.items(f, "data.item")` + 列白名单 + `del full_df`
 - 端到端:4.16 GB SIGKILL → 901 MB Exit 0 (降 78%),74 个分层回测脚本统一受益
 

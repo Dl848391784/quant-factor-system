@@ -23,7 +23,6 @@
 """
 
 import gc
-import gzip
 import json
 from pathlib import Path
 from typing import Any
@@ -114,94 +113,34 @@ def get_factor_data_dates(logger=None) -> tuple[list[str], str | None]:
     if logger is None:
         logger = get_logger(__name__)
 
-    factor_path = FACTOR_DATA_DIR / "factor_ic_data.json.gz"
-
-    # L3: 优先 Parquet metadata 读取 dates（~0ms，不读数据行）
-    parquet_path = FACTOR_DATA_DIR / "factor_ic_data.parquet"
-    if parquet_path.exists():
-        try:
-            import json as _json
-
-            import pyarrow.parquet as pq
-
-            schema = pq.read_schema(parquet_path)
-            meta = schema.metadata or {}
-            if b"dates" in meta:
-                dates = _json.loads(meta[b"dates"])
-                dates = _normalize_dates(dates)
-                latest_date = dates[-1] if dates else None
-                logger.info("从 Parquet metadata 读取 dates: %d 个日期", len(dates))
-                return dates, latest_date
-
-            # metadata 无 dates → 从 date 列流式读取（Parquet 列投影，仅读 1 列）
-            logger.info("Parquet metadata 无 dates，从 date 列读取")
-            import pandas as pd
-
-            df_dates = pd.read_parquet(parquet_path, columns=["date"])
-            dates = sorted(df_dates["date"].astype(str).unique().tolist())
-            dates = _normalize_dates(dates)
-            latest_date = dates[-1] if dates else None
-            del df_dates
-            gc.collect()
-            return dates, latest_date
-        except Exception as e:
-            logger.warning("Parquet dates 读取失败，回退到 ijson: %s", e)
+    factor_path = FACTOR_DATA_DIR / "factor_ic_data.parquet"
 
     if not factor_path.exists():
         return [], None
 
-    try:
-        try:
-            import ijson
-            from ijson import IncompleteJSONError
+    # 从 Parquet metadata 读取 dates（~0ms，不读数据行）
+    import pyarrow.parquet as pq
 
-            dates: list[str] = []
-            # 优先尝试顶层 dates 字段（factor_ic_data.json.gz 实际格式，2026-06-13 验证）
-            with gzip.open(factor_path, "rb") as f:
-                try:
-                    for date in ijson.items(f, "dates.item"):
-                        if date is not None:
-                            dates.append(str(date))
-                except (IncompleteJSONError, KeyError):
-                    pass
-
-            # 兼容 meta.dates 格式（旧版/其他模块）
-            if not dates:
-                with gzip.open(factor_path, "rb") as f:
-                    try:
-                        for date in ijson.items(f, "meta.dates.item"):
-                            if date is not None:
-                                dates.append(str(date))
-                    except (IncompleteJSONError, KeyError):
-                        pass
-
-            # fallback: 从 data[].date 流式提取（耗时但避开 OOM）
-            if not dates:
-                logger.warning("dates / meta.dates 字段缺失，从 data[].date 扫描（较慢）")
-                with gzip.open(factor_path, "rb") as f:
-                    for date in ijson.items(f, "data.item.date"):
-                        if date is not None:
-                            dates.append(str(date))
-        except ImportError:
-            logger.warning("ijson 不可用，回退到 json.load（可能 OOM）")
-            with gzip.open(factor_path, "rt", encoding="utf-8") as f:
-                data = json.load(f)
-            meta = data.get("meta", {})
-            dates = meta.get("dates", [])
-            if not dates:
-                dates = [r["date"] for r in data.get("data", []) if r.get("date") is not None]
-            del data
-            gc.collect()
-
-        # 使用公共函数标准化日期（去重、排序、截断）
+    schema = pq.read_schema(factor_path)
+    meta = schema.metadata or {}
+    if b"dates" in meta:
+        dates = json.loads(meta[b"dates"])
         dates = _normalize_dates(dates)
         latest_date = dates[-1] if dates else None
-
-        gc.collect()
+        logger.info("从 Parquet metadata 读取 dates: %d 个日期", len(dates))
         return dates, latest_date
-    except Exception as e:
-        logger.warning("读取 factor_data 失败 [%s]: %s", type(e).__name__, e)
-        return [], None
+
+    # metadata 无 dates → 从 date 列读取（Parquet 列投影，仅读 1 列）
+    logger.info("Parquet metadata 无 dates，从 date 列读取")
+    import pandas as pd
+
+    df_dates = pd.read_parquet(factor_path, columns=["date"])
+    dates = sorted(df_dates["date"].astype(str).unique().tolist())
+    dates = _normalize_dates(dates)
+    latest_date = dates[-1] if dates else None
+    del df_dates
+    gc.collect()
+    return dates, latest_date
 
 
 def _extract_dates_from_cache(data: dict[str, Any]) -> tuple[list[str], str | None]:

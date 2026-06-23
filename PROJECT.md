@@ -493,7 +493,7 @@ grep -rn "assert False\|if False:" factor_ic/ comprehensive_factor/ backtest/
 | 序号 | 文件 | 位置 | 作用 |
 |------|------|------|------|
 | 1 | `data_fetchers/factor_generator.py` | `_EXTENDED_FACTOR_COLS` | 数据源因子列定义 |
-| 2 | `data_fetchers/factor_generator.py` | 因子计算函数 | 计算逻辑，结果存入 `factor_ic_data.json.gz`（统一数据源） |
+| 2 | `data_fetchers/factor_generator.py` | 因子计算函数 | 计算逻辑，结果存入 `factor_ic_data.parquet`（统一数据源） |
 | 3 | `comprehensive_factor/common/factor_selector.py` | `FACTOR_NAME_TO_COL_MAP` | 因子名→列名映射（筛选层） |
 | 4 | `comprehensive_factor/common/weight_engine.py` | `FACTOR_NAME_TO_COL_MAP` | 因子名→列名映射（权重层） |
 | 5 | `factor_definitions.py`（项目根目录） | `FACTOR_DEFINITIONS` | 因子定义（名称、公式、含义），汇总报告因子说明显示 |
@@ -528,7 +528,7 @@ grep -rn "assert False\|if False:" factor_ic/ comprehensive_factor/ backtest/
 - **When**：综合因子组合需要行业维度补充时使用
 - **Verify**：IC脚本实测IC值、回测分层单调性
 
-**关键依赖**: 新增因子后必须重新运行 `factor_generator.py` 更新 `factor_ic_data.json.gz`，否则后续脚本无法读取新因子值。
+**关键依赖**: 新增因子后必须重新运行 `factor_generator.py` 更新 `factor_ic_data.parquet`，否则后续脚本无法读取新因子值。
 
 ---
 
@@ -640,7 +640,7 @@ grep -rn "assert False\|if False:" factor_ic/ comprehensive_factor/ backtest/
 | comprehensive_factor | `composite_<加权>_1d.json` | `comprehensive_factor/schemas/composite_factor.schema.json` | 同 schema 多文件，schema 内必须包含 `weighting_method` 字段约束 |
 | data_fetchers | `factor_data.json.gz` | `data_fetchers/schemas/factor_data.schema.json` | 单文件单 schema |
 | data_fetchers | `turnover_rate_data.json.gz` | `data_fetchers/schemas/turnover_rate_data.schema.json` | 单文件单 schema |
-| data_fetchers | `factor_ic_data.json.gz` | `data_fetchers/schemas/factor_ic_data.schema.json` | 单文件单 schema（统一数据源） |
+| data_fetchers | `factor_ic_data.parquet` | `data_fetchers/schemas/factor_ic_data.schema.json` | 单文件单 schema（统一数据源） |
 | summary | `factor_summary_report_YYYY-MM-DD.txt` | `summary/schemas/summary_report.schema.json` | 单文件单 schema |
 
 **校验工具与调用入口**：
@@ -657,6 +657,7 @@ grep -rn "assert False\|if False:" factor_ic/ comprehensive_factor/ backtest/
 
 || 版本 | 日期 | 更新内容 | 稳定性标注 ||
 ||------|------|---------|-----------||
+||| v3.6 | 2026-06-23 | **Parquet 迁移完成**：`factor_ic_data.json.gz` → `factor_ic_data.parquet`，删除所有 ijson fallback / JSON.gz dual-write 路径（净减 ~290 行死代码）。实测数据加载耗时 88s → 1.9s（46x），单脚本峰值内存 OOM → 626MB。Parquet file-level metadata 存 `dates` 数组。§1 数据契约表 + 新鲜度检查脚本（步骤 3）同步更新 | [stable] ||
 ||| v1.42 | 2026-06-12 | 新增行业方向性因子（industry_momentum_5d / industry_turnover_trend / industry_amplitude_trend）；因子分类一览表；行业方向性因子说明（What/Why/How/Don't/When/Verify） | [experimental] ||
 ||| v3.5 | 2026-06-16 | "Run Pipeline 执行排查流程" 3 处修订：①步骤 3 新鲜度检查改 ijson 流式扫描（修复 408MB factor_ic_data.json.gz 上 `json.load` OOM kill）；②步骤 3 新增"反向追溯（产物→上游脚本映射）"小节，识别 run_pipeline 单脚本失败不中断导致下游静默用旧数据；③步骤 5 汇总表新增"产物 mtime / 数据 latest_date"列 + 判读规则；④常见异常表新增 OOM kill（退出码 137 / 静默截断）行 | [experimental] ||
 ||| v3.4 | 2026-06-04 | 扩展"Run Pipeline 执行排查流程"步骤 3：检查所有时间序列数据文件日期新鲜度（factor_ic_data + turnover_rate + tail_trading），明确不需要检查的文件类型 | [stable] ||
@@ -792,20 +793,33 @@ ls -la summary/logs/*_2026-MM-DD.log
 
 **⚠️ 关键检查点**：必须验证每个 data_fetchers 脚本拉取的数据日期是否到了 T-1（前一日），否则后续模块可能使用过期数据。
 
-检查方法（统一脚本，流式扫描避免 OOM） [experimental]：
+检查方法（统一脚本） [experimental]：
 
-> ⚠️ **必须用流式扫描**（`ijson`），禁止 `json.load()` 全量加载。
-> `factor_ic_data.json.gz` 单文件解压后可达 GB 级，全量加载在 7.3GB 内存机器上必然 OOM kill（exit 137），症状是命令静默退出无报错——这本身就是 v3.5 章节修订的触发案例。
+> ⚠️ **factor_ic_data 用 Parquet metadata 读取**（~0ms，列式存储无需遍历）；其他 `.json.gz` 文件保持 `ijson` 流式扫描（避免 `json.load` 全量加载 OOM kill exit 137）。
+> Parquet 迁移（2026-06-23）后，`factor_ic_data.parquet` 不再有"全量加载 OOM"风险——`pd.read_parquet(columns=[...])` 列投影读取，单脚本峰值内存 ~626MB。
 
 ```bash
 # 一次性检查所有时间序列数据文件的日期新鲜度
 python -c "
-import gzip, ijson
+import gzip, ijson, json
 from datetime import datetime, timedelta
+import pyarrow.parquet as pq
 
 yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+# factor_ic_data: 从 Parquet file-level metadata 读取 dates（~0ms）
+try:
+    schema = pq.read_schema('data_fetchers/result/factor_ic_data.parquet')
+    meta = schema.metadata or {}
+    dates = json.loads(meta[b'dates']) if b'dates' in meta else []
+    max_d = max(dates) if dates else ''
+except Exception as e:
+    max_d = f'ERR:{e}'
+fresh = '✅ 符合' if max_d >= yesterday else '❌ 过期'
+print(f'factor_ic_data.parquet: latest={max_d}  expected(T-1)={yesterday}  {fresh}')
+
+# 其他 .json.gz 文件：ijson 流式扫描 data.item.date
 files = [
-    ('factor_ic_data.json.gz',    'data_fetchers/result/factor_ic_data.json.gz'),
     ('turnover_rate_data.json.gz','data_fetchers/result/turnover_rate_data.json.gz'),
     ('tail_trading_data.json.gz', 'data_fetchers/result/tail_trading_data.json.gz'),
 ]
@@ -813,7 +827,6 @@ for name, path in files:
     max_d = ''
     try:
         with gzip.open(path, 'rb') as f:
-            # 流式遍历 data 数组的每个元素的 date 字段，常驻内存 O(1)
             for d in ijson.items(f, 'data.item.date'):
                 if d and d > max_d:
                     max_d = d
@@ -824,7 +837,7 @@ for name, path in files:
 "
 ```
 
-**前置依赖**：`ijson>=3.0`（已在项目环境中预装，验证：`python -c "import ijson; print(ijson.__version__)"`）。
+**前置依赖**：`pyarrow>=10.0`（已在项目环境中预装）+ `ijson>=3.0`（验证：`python -c "import pyarrow, ijson; print(pyarrow.__version__, ijson.__version__)"`）。
 
 **判定标准**：
 - `latest_date >= T-1` → ✅ 数据新鲜，可继续排查后续模块
@@ -836,7 +849,7 @@ for name, path in files:
 
 || 过期产物 | 上游脚本 | 关联 Stage | 检查日志 |
 ||---------|---------|-----------|---------|
-|| `factor_ic_data.json.gz` | `factor_generator.py` | Stage 1 | `data_fetchers/logs/factor_generator_2026-MM-DD.log` |
+|| `factor_ic_data.parquet` | `factor_generator.py` | Stage 1 | `data_fetchers/logs/factor_generator_2026-MM-DD.log` |
 || `turnover_rate_data.json.gz` | `fetch_turnover.py` | Stage 0 | `data_fetchers/logs/fetch_turnover_2026-MM-DD.log` |
 || `tail_trading_data.json.gz` | `fetch_tail_trading.py` | Stage 0 | `data_fetchers/logs/fetch_tail_trading_2026-MM-DD.log` |
 || `factor_data.json.gz` | `fetch_factor_cache.py` | Stage 0 | `logs/fetch_factor_cache_2026-MM-DD.log` |

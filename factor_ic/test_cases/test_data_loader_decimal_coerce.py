@@ -50,9 +50,8 @@ def fake_unified_cache_with_decimal(tmp_path: Path) -> Path:
                 }
             )
 
-    cache_path = tmp_path / "factor_ic_data.json.gz"
-    with gzip.open(cache_path, "wt", encoding="utf-8") as f:
-        json.dump({"data": records}, f)
+    cache_path = tmp_path / "factor_ic_data.parquet"
+    pd.DataFrame(records).to_parquet(cache_path, engine="pyarrow")
     return cache_path
 
 

@@ -898,7 +898,7 @@ factor_df['middle'] = middle  # TypeError: incompatible index (pandas 3.0)
 
 | 数据类型 | 输出目录 | 文件格式 |
 |----------|---------|----------|
-| 因子数据 | `data_fetchers/result/` | `factor_ic_data.json.gz` |
+| 因子数据 | `data_fetchers/result/` | `factor_ic_data.parquet` |
 | 换手率数据 | `data_fetchers/result/` | `turnover_rate_data.json.gz` |
 | 主力资金流 | `data_fetchers/result/` | `main_inflow_data.json.gz` |
 | 市值数据（v1.0+） | `data_fetchers/result/` | `market_cap_data.json.gz` |
@@ -951,7 +951,7 @@ factor_df['middle'] = middle  # TypeError: incompatible index (pandas 3.0)
 
 **职责**:生成所有因子数据到缓存,提供单一数据源
 **位置**:`data_fetchers/factor_generator.py`
-**输出**:`data_fetchers/result/factor_ic_data.json.gz`
+**输出**:`data_fetchers/result/factor_ic_data.parquet`
 
 **支持的因子**:
 
@@ -1073,7 +1073,7 @@ factor_generator.py 的因子计算逻辑从 IC 脚本迁移:
 }
 ```
 
-**factor_ic_data.json.gz (统一数据源)**:包含所有 5 个因子 (见 factor_generator.py 输出结构)
+**factor_ic_data.parquet (统一数据源)**:包含所有 5 个因子 (见 factor_generator.py 输出结构)
 
 **turnover_rate_data.json.gz**:
 ```json
