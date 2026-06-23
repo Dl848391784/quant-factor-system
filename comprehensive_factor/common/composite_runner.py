@@ -25,9 +25,15 @@
         - 删除 select_factors.__globals__.get(...) 反射调用
         - 改为显式 from factor_definitions import FACTOR_NAME_TO_COL_MAP, FACTOR_COL_TO_NAME_MAP
         - 详见 designs/factor_name_col_map_unification_design.md §3.4
+    v2.36: 2026-06-23 daily 明细 json.gz → parquet 迁移（设计文档: designs/composite_daily_parquet_migration_design.md）
+        - 列裁剪：60+ 列 → 3 列（date/asset/composite_factor），原始因子值已在 factor_ic_data.parquet
+        - 格式切换：gzip JSON → parquet (zstd)
+        - 性能：单文件写入 3.5 min → < 5s，文件大小 217 MB → ~20 MB
+        - 移除 v2.24 流式分块逻辑（3 列无 OOM 风险，pandas to_parquet 内部已分块）
+        - 无下游消费者（codegraph + grep 三轮验证），不触发跨模块同步
+        - 抽出 _save_composite_daily 辅助函数提升可测性
 """
 
-import gzip
 import json
 import logging
 import sys
@@ -766,44 +772,51 @@ def run_composite_backtest(
 
     logger.info("综合因子结果已保存: %s", output_file)
 
-    # 10. 保存综合因子每日明细
-    # v2.24: 流式分块写入，避免 to_dict("records") 一次性生成 1.5M dict 列表导致 OOM
-    #   原实现: to_dict("records") → backtest_convert → json.dump(indent=2)
-    #   三重内存峰值（dict 列表 ~750MB + 转换副本 ~750MB + JSON 字符串 ~1GB）在 7GB 系统 OOM
-    #   修复: 分块处理（5000行/块），逐块转换+写入，峰值内存 ~5MB
-    # 校验输出必需列（防御性编程）
-    output_cols = ["date", "asset", "composite_factor"] + factor_cols
-    missing_cols = [col for col in output_cols if col not in factor_df.columns]
-    if missing_cols:
-        raise ValueError(f"factor_df 缺少输出必需列: {missing_cols}, 当前列: {list(factor_df.columns)}")
-
-    daily_file = output_dir / f"composite_{weight_method}_{return_period}_daily.json.gz"
-    _DAILY_CHUNK_SIZE = 5000
-
-    with gzip.open(daily_file, "wt", encoding="utf-8") as f:
-        f.write('{"meta": ')
-        json.dump(
-            {"weight_method": weight_method, "columns": output_cols},
-            f,
-            ensure_ascii=False,
-        )
-        f.write(', "data": [')
-
-        first_record = True
-        for i in range(0, len(factor_df), _DAILY_CHUNK_SIZE):
-            chunk = factor_df[output_cols].iloc[i : i + _DAILY_CHUNK_SIZE]
-            records = backtest_convert(chunk.to_dict("records"))
-            for record in records:
-                if not first_record:
-                    f.write(",")
-                first_record = False
-                json.dump(record, f, ensure_ascii=False)
-
-        f.write("]}")
-
-    logger.info("综合因子每日明细已保存: %s", daily_file)
+    # 10. 保存综合因子每日明细（v2.36: parquet + 列裁剪）
+    # 设计文档: designs/composite_daily_parquet_migration_design.md
+    #
+    # 列选择依据：composite_factor 是 composite 模块唯一的新计算结果；
+    #   原始 factor_cols 完全可从 data_fetchers/result/factor_ic_data.parquet 读取，
+    #   不再重复存储（违反单一数据源原则）。
+    # v2.36 移除 v2.24 的 gzip JSON 流式分块写入：3 列约 100MB 远低于内存上限，
+    #   pandas.to_parquet 内部已用 pyarrow batch writer，应用层无需再做分块。
+    _save_composite_daily(factor_df, output_dir, weight_method, return_period, logger)
 
     return output_data
+
+
+def _save_composite_daily(
+    factor_df: pd.DataFrame,
+    output_dir: Path,
+    weight_method: str,
+    return_period: str,
+    logger: logging.Logger,
+) -> Path:
+    """保存综合因子每日明细到 parquet 文件（v2.36）。
+
+    Args:
+        factor_df: 必须包含 date/asset/composite_factor 三列；其他列将被裁剪。
+        output_dir: 输出目录。
+        weight_method: 加权方法名。
+        return_period: 收益周期（如 "1d"）。
+        logger: 调用方注入的 logger。
+
+    Returns:
+        实际写入的 parquet 文件路径。
+
+    Raises:
+        ValueError: 当 factor_df 缺少 daily 输出必需列时。
+    """
+    output_cols = ["date", "asset", "composite_factor"]
+    missing_cols = [col for col in output_cols if col not in factor_df.columns]
+    if missing_cols:
+        raise ValueError(f"factor_df 缺少 daily 输出必需列: {missing_cols}, 当前列: {list(factor_df.columns)}")
+
+    daily_file = output_dir / f"composite_{weight_method}_{return_period}_daily.parquet"
+    factor_df[output_cols].to_parquet(daily_file, compression="zstd", index=False)
+
+    logger.info("综合因子每日明细已保存: %s", daily_file)
+    return daily_file
 
 
 # ============================================================================
