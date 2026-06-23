@@ -1,7 +1,7 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.34
-> 最后更新: 2026-06-23（Parquet 迁移：factor_ic_data.json.gz → .parquet）
+> 版本: v2.44
+> 最后更新: 2026-06-23（v2.44 两阶段选股: Stage 1 composite Top 200 → Stage 2 turnover 升序 → Stage 3 企稳过滤）
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
 >
@@ -112,7 +112,9 @@ Step 7: 股票选股 (stock_selector.py)
   ├─ 加载 IC 每日序列（滚动ICIR需要）
   ├─ 计算综合因子值（使用最优权重方法）
   ├─ 按因子方向排序（反向升序/正向降序）
-  ├─ v2.35: P6 企稳确认过滤（排除无企稳信号股票）
+  ├─ v2.44: Stage 1 — composite Top stage1_pool_size (默认 200, 设计 §2.2)
+  ├─ v2.44: Stage 2 — 在 Stage 1 内按 stage2_sort_col 升序取 top_n*2 (默认 turnover_rate 升序)
+  ├─ v2.35: P6 企稳确认过滤（Stage 3，排除无企稳信号股票）
   └─ 输出 Top N 股票列表
 ```
 

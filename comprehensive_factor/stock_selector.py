@@ -129,6 +129,15 @@ class StockSelectorConfig:
     enable_liquidity_filter: bool = False  # v2.41 (R1): 默认关闭——已前置到 factor_generator (_mark_low_liquidity)
     min_amount_percentile: float = 0.05  # 截面分位（默认 5%，自适应每日成交额分布）
 
+    # v2.44: 两阶段选股 (designs/feat_two_stage_stock_selector_v244.md)
+    # Stage 1: composite 取 Top stage1_pool_size (alpha 仍有效的子池)
+    # Stage 2: 在 Stage 1 候选内按 stage2_sort_col 排序取 top_n*2 (避开线性尾部失效)
+    # Stage 3: 企稳过滤切到 top_n (现有 apply_stabilization_filter 不变)
+    enable_two_stage: bool = True  # v2.44: 默认开启
+    stage1_pool_size: int = 200  # OOS 最优 (vs Top60 +2.31pp, vs Top300 优于 +10pp)
+    stage2_sort_col: str = "turnover_rate"  # 5 候选 OOS 验证最稳健 (IS→OOS 衰减仅 4pp)
+    stage2_ascending: bool = True  # 升序: 选未被游资关注的冷门弱势股
+
     # === 数据路径 ===（问题 4 修复：default_factory 保证延迟求值）
     data_source: Path = field(default_factory=lambda: DEFAULT_DATA_SOURCE)
     ic_result_dir: Path = field(default_factory=lambda: DEFAULT_IC_RESULT_DIR)
@@ -156,6 +165,16 @@ class StockSelectorConfig:
 
         if self.factor_direction not in ("positive", "negative"):
             raise ValueError(f"factor_direction 必须为 'positive' 或 'negative'，当前: {self.factor_direction}")
+
+        # v2.44: 两阶段配置校验
+        if self.enable_two_stage:
+            if self.stage1_pool_size <= self.top_n * 2:
+                raise ValueError(
+                    f"stage1_pool_size ({self.stage1_pool_size}) 必须 > top_n*2 ({self.top_n * 2})"
+                    "，否则两阶段退化为单阶段"
+                )
+            if not isinstance(self.stage2_sort_col, str) or not self.stage2_sort_col:
+                raise ValueError(f"stage2_sort_col 必须为非空字符串，当前: {self.stage2_sort_col!r}")
 
 
 # ============================================================================
@@ -637,6 +656,96 @@ def apply_filter_role_factors(
     return df, exclusion_counts
 
 
+def apply_stage2_resort(
+    stage1_stocks: list[dict[str, Any]],
+    factor_df: pd.DataFrame,
+    target_n: int,
+    sort_col: str,
+    ascending: bool,
+    logger: logging.Logger | None = None,
+) -> list[dict[str, Any]]:
+    """Stage 2 重排 (v2.44): 在 Stage 1 候选内按 sort_col 排序取 target_n.
+
+    设计依据: designs/feat_two_stage_stock_selector_v244.md
+    第一性原理:
+        composite 是 17 个因子的线性加权, IC 是截面均值——能保证 layer_1 整体优于 layer_5,
+        但不保证 layer_1 内最极值的 30 只仍优于中间分位 (线性尾部失效).
+        Stage 2 用次级变量 (默认 turnover_rate 升序) 在 Stage 1 池子内重排, 避开尾部失效区间.
+
+    OOS 验证 (后 30% 日历, 163 日, designs/feat_two_stage_stock_selector_v244.md §2):
+        - turnover 升序: IS=14.10% → OOS=10.43%, 衰减仅 4pp (最稳健)
+        - 经济意义: composite 主方向 negative, Top 端 = 最弱势股. 升序 = 未被游资关注的
+          冷门弱势股. 高 turnover 弱势股 = 游资爆炒后被洗 = T+1 大概率继续抛.
+
+    Args:
+        stage1_stocks: Stage 1 候选 (来自 sort_and_select, 长度 = stage1_pool_size)
+        factor_df: 当日 factor DataFrame, 必须含 'asset' 和 sort_col 列
+        target_n: Stage 2 输出数量 (= top_n × 2, 留给企稳过滤递补)
+        sort_col: Stage 2 排序列 (默认 'turnover_rate')
+        ascending: True 升序 (低值优先), False 降序
+        logger: 日志对象
+
+    Returns:
+        Stage 2 重排后的 stocks (长度 ≤ target_n), 每只新增 'stage1_rank' 字段保留 Stage 1 名次.
+    """
+    if logger is None:
+        logger = _logger
+
+    if not stage1_stocks:
+        return stage1_stocks
+
+    if sort_col not in factor_df.columns:
+        logger.warning(
+            "Stage 2 排序列 %s 不存在于 factor_df, 跳过 Stage 2 重排, 直接截取 Stage 1 前 %d 只",
+            sort_col,
+            target_n,
+        )
+        return stage1_stocks[:target_n]
+
+    if "asset" not in factor_df.columns:
+        logger.warning("factor_df 缺 asset 列, 跳过 Stage 2 重排")
+        return stage1_stocks[:target_n]
+
+    # 构建 asset → sort_col 值映射
+    asset_to_val: dict[str, float] = factor_df.set_index("asset")[sort_col].to_dict()
+
+    # NaN / 缺失值排到末尾 (升序时 +inf, 降序时 -inf)
+    sentinel = float("inf") if ascending else float("-inf")
+
+    def _sort_key(stock: dict[str, Any]) -> float:
+        val = asset_to_val.get(stock["code"], sentinel)
+        if isinstance(val, float) and np.isnan(val):
+            return sentinel
+        return float(val)
+
+    sorted_stocks = sorted(stage1_stocks, key=_sort_key, reverse=not ascending)
+
+    # 统计有效值
+    n_with_val = sum(
+        1
+        for s in stage1_stocks
+        if s["code"] in asset_to_val
+        and not (isinstance(asset_to_val[s["code"]], float) and np.isnan(asset_to_val[s["code"]]))
+    )
+    logger.info(
+        "Stage 2 重排: 输入 %d 只, 排序 %s (%s), 有效 %s 值 %d 只, 输出 %d 只",
+        len(stage1_stocks),
+        sort_col,
+        "升序" if ascending else "降序",
+        sort_col,
+        n_with_val,
+        min(target_n, len(sorted_stocks)),
+    )
+
+    # 保留 Stage 1 rank, 重新编号 rank 为 Stage 2 名次
+    result = sorted_stocks[:target_n]
+    for idx, stock in enumerate(result, start=1):
+        stock["stage1_rank"] = stock.get("rank", idx)  # 保留 Stage 1 名次
+        stock["rank"] = idx  # Stage 2 后的临时 rank (企稳过滤后会再次重编号)
+
+    return result
+
+
 def apply_stabilization_filter(
     top_stocks: list[dict[str, Any]],
     factor_df: pd.DataFrame,
@@ -790,6 +899,13 @@ def build_result(
             "composite_score": best_selection["composite_score"],
             "factor_direction": config.factor_direction,
             "top_n": config.top_n,
+            # v2.44: 两阶段选股元数据 (designs/feat_two_stage_stock_selector_v244.md)
+            "two_stage_selection": {
+                "enabled": config.enable_two_stage,
+                "stage1_pool_size": config.stage1_pool_size if config.enable_two_stage else None,
+                "stage2_sort_col": config.stage2_sort_col if config.enable_two_stage else None,
+                "stage2_ascending": config.stage2_ascending if config.enable_two_stage else None,
+            },
             # 问题 2 修复：字段名改为 stocks_on_date，语义精确
             "stocks_on_date": stocks_on_date,
             "valid_stocks": len(top_stocks),
@@ -1133,19 +1249,90 @@ def select_stocks(
         selection_weights = {name_to_col.get(k, k): v for k, v in selection_weights.items()}
 
     # v2.35: P6 企稳确认过滤——候选池翻倍，为过滤预留递补空间
-    candidate_n = config.top_n * 2
-    top_stocks, excluded_by_amplitude, excluded_by_coverage, excluded_by_liquidity = sort_and_select(
-        composite_factor,
-        factor_df,
-        candidate_n,
-        config.factor_direction,
-        factor_cols,
-        weights=selection_weights,  # v1.10: 传入权重用于覆盖率过滤
-        min_amplitude=config.min_amplitude,  # v1.12: 传入振幅阈值
-        enable_liquidity_filter=config.enable_liquidity_filter,  # v2.40
-        min_amount_percentile=config.min_amount_percentile,  # v2.40
-        logger=logger,
-    )
+    # v2.44: 两阶段选股 (designs/feat_two_stage_stock_selector_v244.md)
+    #   Stage 1: composite Top stage1_pool_size (alpha 仍有效的子池, 默认 200)
+    #   Stage 2: 在 Stage 1 内按 stage2_sort_col 排序取 top_n*2 (避开线性尾部失效)
+    #   Stage 3: apply_stabilization_filter 切到 top_n (现有不变)
+    if config.enable_two_stage:
+        stage1_n = config.stage1_pool_size
+        logger.info(
+            "两阶段选股 (v2.44) | Stage 1: composite Top %d → Stage 2: %s %s Top %d → Stage 3: 企稳过滤 → Top %d",
+            stage1_n,
+            config.stage2_sort_col,
+            "升序" if config.stage2_ascending else "降序",
+            config.top_n * 2,
+            config.top_n,
+        )
+        stage1_stocks, excluded_by_amplitude, excluded_by_coverage, excluded_by_liquidity = sort_and_select(
+            composite_factor,
+            factor_df,
+            stage1_n,
+            config.factor_direction,
+            factor_cols,
+            weights=selection_weights,
+            min_amplitude=config.min_amplitude,
+            enable_liquidity_filter=config.enable_liquidity_filter,
+            min_amount_percentile=config.min_amount_percentile,
+            logger=logger,
+        )
+        # v2.44: Stage 2 排序列可能不在 standardize 后的 factor_df 中 (如 turnover_rate)
+        # 需要从原始数据源 (factor_ic_data.parquet) 加载并对齐到 selection_date
+        factor_df_for_stage2 = factor_df
+        if config.stage2_sort_col not in factor_df.columns:
+            try:
+                aux_df_raw = load_factor_values(
+                    [config.stage2_sort_col], config.data_source, logger
+                )
+                aux_df = cast(pd.DataFrame, aux_df_raw)
+                if "date" in aux_df.columns:
+                    aux_df = aux_df[aux_df["date"] == selection_date].copy()
+                if config.stage2_sort_col in aux_df.columns:
+                    factor_df_for_stage2 = factor_df.merge(
+                        cast(pd.DataFrame, aux_df[["asset", config.stage2_sort_col]]),
+                        on="asset",
+                        how="left",
+                    )
+                    logger.info(
+                        "Stage 2: 从原始数据源加载 %s 列, %d 只股票获得值",
+                        config.stage2_sort_col,
+                        factor_df_for_stage2[config.stage2_sort_col].notna().sum(),
+                    )
+                else:
+                    logger.warning(
+                        "Stage 2 排序列 %s 不在原始数据源, 将跳过 Stage 2 重排",
+                        config.stage2_sort_col,
+                    )
+            except (FileNotFoundError, KeyError, ValueError) as e:
+                logger.warning(
+                    "Stage 2 排序列 %s 加载失败 (%s), 将跳过 Stage 2 重排",
+                    config.stage2_sort_col,
+                    e,
+                )
+        # Stage 2: 按次级变量重排, 输出 top_n*2 (留给企稳过滤递补)
+        candidate_n = config.top_n * 2
+        top_stocks = apply_stage2_resort(
+            stage1_stocks,
+            factor_df_for_stage2,
+            candidate_n,
+            sort_col=config.stage2_sort_col,
+            ascending=config.stage2_ascending,
+            logger=logger,
+        )
+    else:
+        # 单阶段 (v2.44 之前的行为, 用 enable_two_stage=False 退回)
+        candidate_n = config.top_n * 2
+        top_stocks, excluded_by_amplitude, excluded_by_coverage, excluded_by_liquidity = sort_and_select(
+            composite_factor,
+            factor_df,
+            candidate_n,
+            config.factor_direction,
+            factor_cols,
+            weights=selection_weights,
+            min_amplitude=config.min_amplitude,
+            enable_liquidity_filter=config.enable_liquidity_filter,
+            min_amount_percentile=config.min_amount_percentile,
+            logger=logger,
+        )
 
     # Step 10.5: P6 企稳确认过滤（v2.35）
     # 公理4推论4: 区分错杀vs基本面恶化需要"是否企稳"信号

@@ -17,6 +17,7 @@
 import numpy as np
 import pandas as pd
 
+
 # === 数据加载 ===
 comp = pd.read_parquet(
     "comprehensive_factor/result/composite_rolling_icir_weight_1d_daily.parquet"
