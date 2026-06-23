@@ -116,7 +116,11 @@ class StockSelectorConfig:
     # 运行时从 composite 结果读取，是 dead config
 
     # === 选股参数 ===
-    top_n: int = 10  # 选出前 N 只股票（v1.12: 从3改为10，扩大选股范围）
+    # v2.42: 短名单扩展 10 → 30
+    # 设计依据: designs/feat_shortlist_top30_v1.md §1.2
+    # 第一性原理: √N 降噪 (N=10→30 降噪 1.73x), 退出极端尾部 (0.36% → 1.1%)
+    # 战略目标 (AGENTS.md): Layer 1 (549) → 短名单 30~50 → 人工决断 3~5
+    top_n: int = 30  # v2.42: 短名单扩展, 从 10 改为 30
     factor_direction: str = "negative"  # 综合因子方向（反向）
     rolling_window: int = 60  # 滚动 ICIR 窗口
     min_amplitude: float = 0.01  # 最低振幅阈值（排除不可交易的一字板涨停股，振幅<1%无法买入）
@@ -1210,8 +1214,8 @@ def create_cli_entrypoint(config_class: type[StockSelectorConfig]) -> Callable[[
         parser.add_argument(
             "--top_n",
             type=int,
-            default=10,
-            help="选出前 N 只股票（默认: 10）",
+            default=30,  # v2.42: 短名单扩展, 与 StockSelectorConfig.top_n 同步
+            help="选出前 N 只股票（默认: 30，短名单, designs/feat_shortlist_top30_v1.md）",
         )
 
         parser.add_argument(

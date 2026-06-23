@@ -2117,8 +2117,19 @@ def _generate_stock_selection_section(
     lines.append("")
 
     # Top N 股票表格
+    # v2.42 (designs/feat_shortlist_top30_v1.md §2.2): 拆分 Top 10 详表 + 11~N 简表
+    #   - Top 1~10: 详表, 展示全部因子 z-score (保留 v2.14 信息密度)
+    #   - Top 11~N: 简表, 展示主导前 3 因子贡献占比 (避免 30 行 × 15 因子冗长)
     if top_stocks:
-        lines.append(f"【Top {len(top_stocks)} 股票】")
+        DETAIL_LIMIT = 10  # v2.42: Top 10 详表边界
+        detail_stocks = top_stocks[:DETAIL_LIMIT]
+        brief_stocks = top_stocks[DETAIL_LIMIT:]
+
+        # === Top 1~10 详表 ===
+        detail_title = (
+            f"【Top {len(detail_stocks)} 详表（重点观察）】" if brief_stocks else f"【Top {len(detail_stocks)} 股票】"
+        )
+        lines.append(detail_title)
         # v2.12: 增加覆盖率列
         # v2.14: 因子值详情改为显示标准化值(z-score)，而非原始值
         # v2.15: 正向因子取反后z-score加*标记，消除解读歧义
@@ -2128,7 +2139,7 @@ def _generate_stock_selection_section(
         )
         lines.append("-" * 70)
 
-        for item in top_stocks:
+        for item in detail_stocks:
             rank = item.get("rank", 0)
             code = item.get("code", "N/A")
             composite_value = item.get("composite_value", 0)
@@ -2182,6 +2193,56 @@ def _generate_stock_selection_section(
             lines.append(f"{rank:>4} {code:<10} {format_float(composite_value, 3):>12} {coverage_str:>6} {factor_str}")
 
         lines.append("-" * 70)
+
+        # === Top 11~N 简表 (v2.42: designs/feat_shortlist_top30_v1.md §2.2) ===
+        # 主导前 3 因子: 按 |w × z| 贡献占比排序, 展示备选池信号来源
+        if brief_stocks:
+            lines.append("")
+            lines.append(f"【短名单 11~{len(top_stocks)} 简表（备选池）】")
+            lines.append(
+                f"{'排名':>4} {'股票代码':<10} {'综合因子值':>12} {'覆盖率':>6} {'主导前 3 因子（贡献占比）':<40}"
+            )
+            lines.append("-" * 70)
+            flipped_set = set(flipped_factors) if flipped_factors else set()
+            for item in brief_stocks:
+                rank = item.get("rank", 0)
+                code = item.get("code", "N/A")
+                composite_value = item.get("composite_value", 0)
+                weight_coverage = item.get("weight_coverage", 1.0)
+                factor_values_std = item.get("factor_values_std", {}) or {}
+
+                # 计算主导前 3 因子: 按 |w × z| 占总贡献的比例
+                dominant_str = "(无主导因子)"
+                if comp_weights and factor_values_std:
+                    contributions = {}
+                    for col, w in comp_weights.items():
+                        # comp_weights 用列名做 key, factor_values_std 也是列名 (v1.4)
+                        z = factor_values_std.get(col)
+                        if z is None or w is None:
+                            continue
+                        contributions[col] = abs(float(w) * float(z))
+                    total = sum(contributions.values())
+                    if total > 0:
+                        ratios = sorted(
+                            ((c, v / total) for c, v in contributions.items()),
+                            key=lambda kv: -kv[1],
+                        )[:3]
+                        parts = []
+                        for col, ratio in ratios:
+                            factor_name = COL_TO_FACTOR_NAME_MAP.get(col, col)
+                            display = f"{factor_name}*" if factor_name in flipped_set else factor_name
+                            parts.append(f"{display}({ratio * 100:.0f}%)")
+                        dominant_str = ", ".join(parts)
+
+                coverage_str = f"{weight_coverage * 100:.0f}%" if weight_coverage < 1 else "100%"
+                lines.append(
+                    f"{rank:>4} {code:<10} {format_float(composite_value, 3):>12} {coverage_str:>6} {dominant_str}"
+                )
+            lines.append("-" * 70)
+            lines.append(
+                f"说明: Top 1~10 为 composite 极值区（高信号 + 高波动）, Top 11~{len(top_stocks)} 为短名单备选池。"
+            )
+            lines.append("最终持仓 3~5 只由人工决断（参考 PROJECT.md 战略目标：量化辅助 + 人工决断）。")
 
         # v2.19: 因子贡献集中度检测
         if comp_weights:

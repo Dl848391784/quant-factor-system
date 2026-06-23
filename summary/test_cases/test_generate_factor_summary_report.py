@@ -31,6 +31,7 @@ from summary.generate_factor_summary_report import (
     __version__,
     _extract_date_from_json_content,
     _generate_data_check_section,
+    _generate_stock_selection_section,
     _get_nested_field,
     check_data_freshness,
     check_derived_data_freshness,
@@ -1091,6 +1092,102 @@ class TestZScoreDisplayConsistency:
             result = f"{v_std:.2f}"
 
         assert result == "-1.35"
+
+
+# ============================================================================
+# v2.42: 短名单扩展 Top 30 测试 (designs/feat_shortlist_top30_v1.md §8.1)
+# ============================================================================
+
+
+def _build_mock_stock_result(n_stocks: int) -> dict:
+    """构造 mock stock_selection_result.json 数据 (n_stocks 只股票)."""
+    top_stocks = []
+    for i in range(n_stocks):
+        top_stocks.append(
+            {
+                "rank": i + 1,
+                "code": f"60{i:04d}",
+                "composite_value": -0.5 - i * 0.01,
+                "factor_values": {"interaction_kdj": -0.8, "bollinger_pb": 0.04},
+                "factor_values_std": {
+                    "interaction_kdj": 0.14 - i * 0.01,
+                    "bollinger_pb": -1.06 + i * 0.02,
+                    "return_5d": -0.59,
+                },
+                "weight_coverage": 1.0,
+            }
+        )
+    return {
+        "meta": {
+            "selection_date": "2026-06-22",
+            "weight_method": "rolling_icir_weight",
+            "composite_score": 0.6021,
+            "factor_direction": "negative",
+            "top_n": n_stocks,
+            "stocks_on_date": 2749,
+            "min_amplitude": 0.01,
+            "excluded_by_amplitude": 12,
+        },
+        "top_stocks": top_stocks,
+        "weight_config": {"method": "rolling_icir_weight", "window": 60},
+    }
+
+
+class TestShortlistTop30:
+    """Top 30 短名单展示测试 (v2.42)."""
+
+    def test_top10_only_uses_detail_only(self):
+        """N=10 时仅输出详表 (向后兼容)."""
+        result = _build_mock_stock_result(10)
+        weights = {"interaction_kdj": 0.1, "bollinger_pb": 0.08, "return_5d": 0.07}
+        lines = _generate_stock_selection_section(result, weights, None)
+        text = "\n".join(lines)
+        # N=10 时保留旧版"【Top 10 股票】"标题, 不进入简表分支
+        assert "【Top 10 股票】" in text
+        assert "短名单" not in text
+        assert "简表" not in text
+
+    def test_top30_outputs_detail_plus_brief(self):
+        """N=30 时输出 Top 10 详表 + 11~30 简表."""
+        result = _build_mock_stock_result(30)
+        weights = {"interaction_kdj": 0.1, "bollinger_pb": 0.08, "return_5d": 0.07}
+        lines = _generate_stock_selection_section(result, weights, None)
+        text = "\n".join(lines)
+        # 标题分层
+        assert "【Top 10 详表（重点观察）】" in text
+        assert "【短名单 11~30 简表（备选池）】" in text
+        # 详表 10 行 + 简表 20 行
+        assert "主导前 3 因子" in text
+        # 战略目标提示
+        assert "人工决断" in text
+
+    def test_brief_table_dominant_factors_format(self):
+        """简表展示主导因子占比, 格式为 'name(XX%)'."""
+        result = _build_mock_stock_result(15)  # 触发简表 (>10)
+        weights = {"interaction_kdj": 0.5, "bollinger_pb": 0.3, "return_5d": 0.2}
+        lines = _generate_stock_selection_section(result, weights, None)
+        # 简表区块至少包含一行 "(XX%)"
+        brief_block = [
+            line
+            for line in lines
+            if "(" in line and "%)" in line and ("interaction_kdj" in line or "bollinger_pb" in line)
+        ]
+        assert len(brief_block) > 0, f"简表未找到主导因子百分比行: {lines}"
+
+    def test_brief_table_handles_missing_weights(self):
+        """comp_weights=None 时简表显示 '(无主导因子)' 而非崩溃."""
+        result = _build_mock_stock_result(12)
+        lines = _generate_stock_selection_section(result, None, None)
+        text = "\n".join(lines)
+        assert "【短名单 11~12 简表（备选池）】" in text
+        assert "(无主导因子)" in text
+
+    def test_top30_meta_top_n_displayed(self):
+        """meta.top_n=30 在报告头部正确展示."""
+        result = _build_mock_stock_result(30)
+        lines = _generate_stock_selection_section(result, {}, None)
+        text = "\n".join(lines)
+        assert "选出股票数: 30 只" in text
 
 
 if __name__ == "__main__":
