@@ -143,6 +143,7 @@ import os
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import NamedTuple
 
@@ -159,6 +160,12 @@ MAX_RETRIES = 3  # 脚本级别最大重试次数
 RETRY_DELAY = 30  # 重试间隔（秒）
 SCRIPT_TIMEOUT = 1800  # 单个脚本最大执行时间（秒）= 30分钟
 FETCH_TURNOVER_TIMEOUT = 18000  # fetch_turnover 独立超时（秒）= 5小时
+
+# 并行执行配置（2026-06-23 新增，遵循 designs/run_pipeline_parallel_design.md）
+DEFAULT_PARALLEL = 2  # 默认并行度，--parallel N 可覆盖；N=1 等同于串行
+# 可并行的 stage 集合：仅 IC 计算 (2) 和分层回测 (3)，每脚本独立读 Parquet 写各自 result/，无写竞争。
+# Stage 0（数据拉取）有顺序依赖；Stage 1/5/6/7 单脚本；Stage 4 单脚本峰值 ~2.6GB（用户决策保持串行）。
+PARALLELIZABLE_STAGES: frozenset[int] = frozenset({2, 3})
 
 # ============================================================================
 # 脚本定义
@@ -436,14 +443,125 @@ def run_script(task: ScriptTask, retry_count: int = 0) -> bool:
         return False
 
 
-def run_pipeline(start_stage: int = 0, start_script: str | None = None, skip_stages: list[int] | None = None) -> bool:
+# ============================================================================
+# 并行执行辅助函数（2026-06-23 新增）
+# ============================================================================
+
+
+def run_script_with_retry(task: ScriptTask) -> tuple[ScriptTask, bool]:
+    """
+    单脚本 + 重试循环（封装供线程池调用）。
+
+    与原 run_pipeline() 内联的重试循环行为完全一致：最多 MAX_RETRIES 次重试，
+    每次重试间隔 RETRY_DELAY 秒。重试时序在并行模式下会阻塞当前 worker 线程，
+    但不影响同批其他 worker（接受这一折衷，见 design §6 风险表）。
+
+    Returns:
+        (task, True): 至少一次执行成功
+        (task, False): 重试次数用尽全部失败
+    """
+    for retry in range(MAX_RETRIES + 1):
+        if run_script(task, retry):
+            return task, True
+        if retry < MAX_RETRIES:
+            print(f"[{task.name}] 等待 %ds 后重试..." % RETRY_DELAY)
+            time.sleep(RETRY_DELAY)
+    print(f"[{task.name}] 重试次数用尽，标记为失败")
+    return task, False
+
+
+def _plan_batches(
+    scripts: list[ScriptTask],
+    parallel: int,
+    parallelizable_stages: frozenset[int] = PARALLELIZABLE_STAGES,
+) -> list[list[ScriptTask]]:
+    """
+    将脚本列表切分为执行批次（纯函数，可独立单元测试）。
+
+    规则：
+    - 不跨 stage 边界（用户决策 Q3=A）
+    - stage ∈ parallelizable_stages 且 parallel > 1：按 batch_size=parallel 切分
+    - 其他情况：每脚本一个单元素批
+
+    Args:
+        scripts: 已过滤的待执行脚本列表（按原 PIPELINE_SCRIPTS 顺序）
+        parallel: 并行度，N=1 等同于全串行
+        parallelizable_stages: 允许并行的 stage 集合
+
+    Returns:
+        批次列表，每批是若干同 stage 的 ScriptTask。串行情况下每批长度 1。
+
+    Examples:
+        # parallel=1 → 每脚本一批
+        _plan_batches([t1, t2, t3], 1) == [[t1], [t2], [t3]]
+
+        # parallel=2 且全部在 stage 2 → 按 2 切分
+        _plan_batches([t1, t2, t3, t4, t5], 2) where all stage=2
+            == [[t1, t2], [t3, t4], [t5]]
+
+        # 混合 stage → stage 边界处自然切断
+        _plan_batches([s0a, s2a, s2b, s2c, s3a], 2)
+            == [[s0a], [s2a, s2b], [s2c], [s3a]]
+    """
+    batches: list[list[ScriptTask]] = []
+    i = 0
+    n = len(scripts)
+    while i < n:
+        task = scripts[i]
+        if task.stage in parallelizable_stages and parallel > 1:
+            # 收集同 stage 的连续段
+            j = i
+            while j < n and scripts[j].stage == task.stage:
+                j += 1
+            stage_tasks = scripts[i:j]
+            # 按 batch_size=parallel 切分
+            for k in range(0, len(stage_tasks), parallel):
+                batches.append(stage_tasks[k : k + parallel])
+            i = j
+        else:
+            # 串行 stage 或 parallel=1：单元素批
+            batches.append([task])
+            i += 1
+    return batches
+
+
+def _run_batch_parallel(tasks: list[ScriptTask], parallel: int) -> list[tuple[ScriptTask, bool]]:
+    """
+    并行执行一批 tasks，全部完成才返回（批间严格屏障）。
+
+    使用 ThreadPoolExecutor：subprocess.run 是阻塞 IO，线程池调度无 GIL 问题。
+    as_completed 等所有 future 完成，单个失败不取消同批其他 future。
+
+    Args:
+        tasks: 同 stage 的脚本列表（长度 <= parallel）
+        parallel: 线程池大小
+
+    Returns:
+        每个 task 的 (task, success) 二元组列表（顺序按完成时间，非提交顺序）
+    """
+    results: list[tuple[ScriptTask, bool]] = []
+    with ThreadPoolExecutor(max_workers=parallel) as pool:
+        futures = {pool.submit(run_script_with_retry, t): t for t in tasks}
+        for fut in as_completed(futures):
+            results.append(fut.result())
+    return results
+
+
+def run_pipeline(
+    start_stage: int = 0,
+    start_script: str | None = None,
+    skip_stages: list[int] | None = None,
+    parallel: int = 1,
+) -> bool:
     """
     执行完整流程
 
     Args:
-        start_stage: 从哪个阶段开始（0-4）
+        start_stage: 从哪个阶段开始（0-7）
         start_script: 从哪个脚本开始（脚本名称，如 'fetch_turnover'）
         skip_stages: 跳过的阶段列表
+        parallel: 并行度（默认 1=串行）。N>1 时仅 PARALLELIZABLE_STAGES 内的脚本并行，
+                  批内 N 个 future 全部完成才进下一批（批间严格屏障）。
 
     Returns:
         True: 全部成功
@@ -477,12 +595,19 @@ def run_pipeline(start_stage: int = 0, start_script: str | None = None, skip_sta
         print("[信息] 无脚本需要执行")
         return True
 
+    # 切分批次（基于 _plan_batches 纯函数，便于单元测试）
+    batches = _plan_batches(scripts_to_run, parallel)
+
     # 打印执行计划
     print("=" * 70)
     print("因子分析流程执行计划")
     print("=" * 70)
     print(f"项目根目录: {PROJECT_ROOT}")
     print(f"执行脚本数: {len(scripts_to_run)}")
+    print(f"批次数: {len(batches)}")
+    print(f"并行度: {parallel} ({'并行' if parallel > 1 else '串行'}模式)")
+    if parallel > 1:
+        print(f"可并行 stages: {sorted(PARALLELIZABLE_STAGES)}")
     print(f"重试配置: 最大{MAX_RETRIES}次, 间隔{RETRY_DELAY}s")
     print("-" * 70)
 
@@ -492,34 +617,46 @@ def run_pipeline(start_stage: int = 0, start_script: str | None = None, skip_sta
     print("=" * 70)
     print()
 
-    # 逐个执行脚本
+    # 逐批执行脚本（批内可并行，批间严格屏障）
     failed_scripts: list[tuple[ScriptTask, int]] = []  # (task, exit_code)
     success_count = 0
 
-    for task in scripts_to_run:
+    for batch_idx, batch in enumerate(batches, 1):
+        is_parallel_batch = len(batch) > 1
+        batch_stage = batch[0].stage
+
         print()
-        print(f"[阶段 {task.stage}] 执行: {task.name}")
-        print("-" * 50)
-
-        # 重试机制
-        for retry in range(MAX_RETRIES + 1):
-            success = run_script(task, retry)
-
+        if is_parallel_batch:
+            print(
+                f">>> Batch {batch_idx}/{len(batches)} [Stage {batch_stage}] "
+                f"并行启动 ({len(batch)} tasks): {', '.join(t.name for t in batch)}"
+            )
+            t0 = time.time()
+            batch_results = _run_batch_parallel(batch, parallel)
+            batch_elapsed = time.time() - t0
+            ok_count = sum(1 for _, s in batch_results if s)
+            print(
+                f"<<< Batch {batch_idx}/{len(batches)} [Stage {batch_stage}] "
+                f"完成 (耗时 %.1fs, 成功 %d/%d)" % (batch_elapsed, ok_count, len(batch))
+            )
+            for tk, success in batch_results:
+                if success:
+                    success_count += 1
+                else:
+                    failed_scripts.append((tk, -1))
+        else:
+            # 单元素批（串行 stage 或 parallel=1）：保持原行为
+            task = batch[0]
+            print(f"[阶段 {task.stage}] 执行: {task.name}")
+            print("-" * 50)
+            _, success = run_script_with_retry(task)
             if success:
                 success_count += 1
-                break
-
-            # 最后一次重试失败，记录失败
-            if retry == MAX_RETRIES:
-                print(f"[{task.name}] 重试次数用尽，标记为失败")
+            else:
                 failed_scripts.append((task, -1))
-                break
 
-            # 等待重试
-            print(f"[{task.name}] 等待 {RETRY_DELAY}s 后重试...")
-            time.sleep(RETRY_DELAY)
-
-        # 每个脚本执行后主动回收内存 + 短暂等待，防止 OOM（7.3GB 机器）
+        # 每批执行后主动回收内存 + 短暂等待，防止 OOM（7.3GB 机器）
+        # 并行批 N 个子进程已全部 exit，sleep 一次足够（不是 N 次）
         gc.collect()
         time.sleep(3)
 
@@ -574,6 +711,17 @@ def main() -> int:
     )
 
     parser.add_argument(
+        "--parallel",
+        type=int,
+        default=DEFAULT_PARALLEL,
+        help=(
+            f"并行度 N（默认 {DEFAULT_PARALLEL}）。N=1 等同于串行；N>1 时仅 Stage 2 (IC) 和 "
+            "Stage 3 (Backtest) 内的脚本按批并行（批间严格屏障，N 个完成才进下一批）。"
+            "其他 stage 始终串行。"
+        ),
+    )
+
+    parser.add_argument(
         "--max-retries", type=int, default=MAX_RETRIES, help=f"脚本级别最大重试次数（默认 {MAX_RETRIES}）"
     )
 
@@ -581,12 +729,21 @@ def main() -> int:
 
     args = parser.parse_args()
 
+    # 参数验证
+    if args.parallel < 1:
+        parser.error(f"--parallel 必须 >= 1，当前 {args.parallel}")
+
     # 更新全局配置
     MAX_RETRIES = args.max_retries
     RETRY_DELAY = args.retry_delay
 
     # 执行流程
-    success = run_pipeline(start_stage=args.start_stage, start_script=args.start_script, skip_stages=args.skip_stages)
+    success = run_pipeline(
+        start_stage=args.start_stage,
+        start_script=args.start_script,
+        skip_stages=args.skip_stages,
+        parallel=args.parallel,
+    )
 
     return 0 if success else 1
 
