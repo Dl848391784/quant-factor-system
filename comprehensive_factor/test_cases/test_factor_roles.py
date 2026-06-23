@@ -64,10 +64,18 @@ class TestFactorRolesDefinition:
         primary = [f for f, r in FACTOR_ROLES.items() if r == "primary"]
         assert len(primary) == 38
 
-    def test_no_filter_factors_yet(self):
-        """暂无过滤器角色因子（批次8在stock_selector中实现）"""
+    def test_filter_role_has_cum_return_5d_breakdown(self):
+        """filter 角色：R3 起新增 cum_return_5d_breakdown（首个 filter 因子）
+
+        历史: 该测试原断言 `len(filters) == 0`（批次 8 才实现）。
+              R3 启动后 (commit 98d6113, 2026-06-22) 提前到批次 1 上线。
+        依据: designs/feat_filter_role_fundamental_breakdown.md §3.1-§3.2
+              + designs/master_l1_l6_roadmap.md §2.3
+        阈值: 5 日累计 -10% = 券商风控经验，A 股 ST 警示线邻近（绝对值边界，
+              非百分位）。
+        """
         filters = [f for f, r in FACTOR_ROLES.items() if r == "filter"]
-        assert len(filters) == 0
+        assert filters == ["cum_return_5d_breakdown"]
 
     def test_weight_constants(self):
         """权重常量正确（design.md §2.6 决策点2: 方案B）"""
