@@ -152,14 +152,23 @@ class TestMarkLowLiquidity:
         )
         assert set(result["is_low_liquidity"].unique()).issubset({0, 1})
 
-    def test_input_not_mutated(self) -> None:
-        """输入 DataFrame 不被原地修改"""
+    def test_input_mutated_inplace(self) -> None:
+        """输入 DataFrame 被原地添加 is_low_liquidity 列。
+
+        契约变更（2026-06-23 OOM 修复）：
+            原契约 "不修改输入"（test_input_not_mutated）依赖 factor_df.copy()，
+            该 copy 在 60+ 列 × 150 万行的生产数据下产生 ~1.5-2 GB 内存峰值，
+            触发 OOM (dmesg: anon-rss:3.6 GB, total-vm:4.5 GB)。
+            与同模块 _mark_untradeable 对齐，改为"原地加列"契约。
+            调用方 generate_all_factors 每步都用返回值覆盖局部变量，
+            从不复用旧 df，此契约对调用方无副作用。
+        """
         amounts = [(f"00000{i}", 1e8) for i in range(1, 21)]
         df = _make_panel("2026-06-20", amounts)
-        original_cols = set(df.columns)
         logger = _make_logger()
 
-        _ = _mark_low_liquidity(df, logger)
+        result = _mark_low_liquidity(df, logger)
 
-        assert set(df.columns) == original_cols, "输入 DataFrame 不应被修改"
-        assert "is_low_liquidity" not in df.columns
+        # 原地修改：输入 df 同样被加上 is_low_liquidity 列，且与返回值是同一对象
+        assert "is_low_liquidity" in df.columns
+        assert result is df, "应返回同一 DataFrame 对象（原地加列，与 _mark_untradeable 一致）"

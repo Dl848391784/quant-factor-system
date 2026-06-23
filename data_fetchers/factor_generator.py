@@ -1112,33 +1112,33 @@ def _mark_low_liquidity(
     if missing:
         raise KeyError(f"_mark_low_liquidity 需要 volume + close 列, 缺失: {missing}")
 
-    factor_df = factor_df.copy()
-    amount = factor_df["volume"].astype(float) * factor_df["close"].astype(float)
+    # OOM 修复（2026-06-23）：
+    # 1) 删除整表 factor_df.copy()——此函数是 pipeline 最后一步（调用方 generate_all_factors
+    #    持有的 factor_df 是局部变量，无外部别名），整表 copy 在 60+ 列 × 150 万行下额外吃
+    #    ~1.5-2 GB 内存峰值，叠加 anon-rss 触发 OOM (dmesg: anon-rss:3.6 GB)；
+    # 2) Python for-loop over groupby('date').groups 改为向量化 groupby().transform，
+    #    避免每日 .loc[idx] 中间 Series 碎片；
+    # 3) amount/threshold 改用 float32 + flag 改用 int8，进一步压峰值。
+    # 与 _mark_untradeable 的"不 copy 直接加列"模式保持一致。
+    amount = (factor_df["volume"].astype(np.float32) * factor_df["close"].astype(np.float32)).astype(np.float32)
 
-    # 截面分位标记: 0=正常, 1=低流动性
-    flag = pd.Series(0, index=factor_df.index, dtype=int)
+    # valid 样本: amount > 0 且非 NaN（用于截面分位 + 样本数判定）
+    valid_amount = amount.where(amount.notna() & (amount > 0))
 
-    for date_val, idx in factor_df.groupby("date", sort=False).groups.items():
-        sub_amount = amount.loc[idx]
-        valid = sub_amount[sub_amount.notna() & (sub_amount > 0)]
-        if len(valid) < min_cross_section_size:
-            # 截面样本不足, 跳过当日过滤
-            logger.debug(
-                "  is_low_liquidity 跳过 %s: 截面样本 %d < %d",
-                date_val,
-                len(valid),
-                min_cross_section_size,
-            )
-            continue
-        threshold = valid.quantile(min_amount_percentile)
-        # NaN 或 0 也视为低流动性（与 < threshold 一致）
-        low_mask = sub_amount.isna() | (sub_amount <= 0) | (sub_amount < threshold)
-        flag.loc[idx[low_mask.to_numpy()]] = 1
+    grouped = valid_amount.groupby(factor_df["date"], sort=False)
+    threshold = grouped.transform("quantile", min_amount_percentile)
+    cross_size = grouped.transform("count")  # 每日 valid 样本数
 
-    factor_df["is_low_liquidity"] = flag
+    # 标记规则:
+    #   - cross_size < min_cross_section_size：当日截面样本不足，跳过（flag=0，与原循环 continue 一致）
+    #   - 否则：amount NaN / <=0 / < threshold 均标 1
+    low_mask = (cross_size >= min_cross_section_size) & (
+        amount.isna() | (amount <= 0) | (amount < threshold)
+    )
+    factor_df["is_low_liquidity"] = low_mask.to_numpy().astype(np.int8)
 
     total = len(factor_df)
-    low_count = int(flag.sum())
+    low_count = int(factor_df["is_low_liquidity"].sum())
     logger.info(
         "  低流动性: %d / %d (%.3f%%), 截面分位 P%d",
         low_count,
