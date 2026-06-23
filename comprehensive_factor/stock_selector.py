@@ -70,6 +70,7 @@ from comprehensive_factor.common.factor_loader import (  # noqa: E402
 )
 from comprehensive_factor.common.logger_config import get_logger  # noqa: E402
 from comprehensive_factor.common.weight_engine import WeightEngine  # noqa: E402
+from comprehensive_factor.decision_card import build_decision_cards  # noqa: E402
 from factor_definitions import FACTOR_CATEGORIES, FACTOR_COL_TO_NAME_MAP  # noqa: E402
 
 
@@ -1151,6 +1152,41 @@ def select_stocks(
     top_stocks, excluded_by_confirmation = apply_stabilization_filter(
         top_stocks, factor_df, config.top_n, logger=logger
     )
+
+    # Step 10.6: 决策卡片 (v2.43, designs/feat_decision_card_v1.md)
+    # 在短名单上叠加 5 维客观字段, 辅助人工决断 (3~5 只持仓)
+    # 战略目标 (AGENTS.md): 量化辅助 + 人工决断
+    # 数据准备: 加载决策卡片所需的原始行情/确认信号列（不在 standardize 后的 factor_df 中）
+    card_aux_cols = [
+        "amplitude",
+        "close",
+        "high",
+        "low",
+        "volume",
+        "volume_shrink_rate",
+        "lower_shadow_ratio",
+        "price_volume_divergence",
+    ]
+    missing_aux = [c for c in card_aux_cols if c not in factor_df.columns]
+    factor_df_for_cards = factor_df
+    if missing_aux:
+        logger.info("decision_card: 加载辅助列 %s", missing_aux)
+        try:
+            aux_df_raw = load_factor_values(missing_aux, config.data_source, logger)
+            aux_df = cast(pd.DataFrame, aux_df_raw)
+            # 过滤到 selection_date (与 factor_df 对齐)
+            if "date" in aux_df.columns:
+                aux_df = aux_df[aux_df["date"] == selection_date].copy()
+            merge_cols = ["asset"] + [c for c in missing_aux if c in aux_df.columns]
+            factor_df_for_cards = factor_df.merge(cast(pd.DataFrame, aux_df[merge_cols]), on="asset", how="left")
+        except (FileNotFoundError, KeyError, ValueError) as e:
+            logger.warning("decision_card: 辅助列加载失败 (%s), 部分字段将为 n/a", e)
+    # 派生 amount = close × volume (parquet 无 amount 列, 用成交额代理)
+    if "close" in factor_df_for_cards.columns and "volume" in factor_df_for_cards.columns:
+        factor_df_for_cards = factor_df_for_cards.assign(
+            amount=factor_df_for_cards["close"] * factor_df_for_cards["volume"]
+        )
+    top_stocks = build_decision_cards(top_stocks, factor_df_for_cards, logger=logger)
 
     # Step 11: 构建结果（问题 5 修复：传递运行时变量）
     # 问题 2 修复：total_stocks → stocks_on_date

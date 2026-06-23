@@ -1190,5 +1190,96 @@ class TestShortlistTop30:
         assert "选出股票数: 30 只" in text
 
 
+# ============================================================================
+# v2.43: 决策卡片渲染测试 (designs/feat_decision_card_v1.md §6)
+# ============================================================================
+
+
+def _add_decision_cards(result: dict, with_d2_warnings: bool = False) -> dict:
+    """给 mock result 的 top_stocks 追加 decision_card 字段."""
+    for s in result["top_stocks"]:
+        s["decision_card"] = {
+            "d1_classification": {
+                "return_5d_bucket": "中跌(-15~-5%)" if with_d2_warnings else "温和(-5~0%)",
+                "return_5d_value": -0.08,
+                "amplitude_bucket": "中(4~8%)",
+                "amplitude_value": 0.05,
+                "close_position_5d": "底部",
+            },
+            "d2_risk": {
+                "deep_decline_5d": with_d2_warnings,
+                "low_liquidity": False,
+                "extreme_amplitude": False,
+                "warning_count": 1 if with_d2_warnings else 0,
+            },
+            "d3_stabilization": {
+                "volume_shrink": True,
+                "pv_divergence": True,
+                "lower_shadow": True,
+                "hit_count": 3,
+                "raw_signals_available": True,
+            },
+            "d4_history": {
+                "times_in_top30_last_60d": None,
+                "avg_1d_return_when_in_top30": None,
+                "note": "需历史归档机制（独立 design 待启动）",
+            },
+        }
+    return result
+
+
+class TestDecisionCardRendering:
+    """v2.43 决策卡片在 summary 中的渲染."""
+
+    def test_card_block_rendered_when_cards_present(self):
+        result = _add_decision_cards(_build_mock_stock_result(15))
+        lines = _generate_stock_selection_section(result, {}, None)
+        text = "\n".join(lines)
+        assert "【决策卡片 (人工决断辅助, 5 维客观字段)】" in text
+        assert "D1 跌幅档" in text
+        assert "D5 人工核查清单" in text
+
+    def test_card_block_skipped_when_no_cards(self):
+        """top_stocks 无 decision_card 字段时, 不渲染决策卡片块."""
+        result = _build_mock_stock_result(15)  # 不调 _add_decision_cards
+        lines = _generate_stock_selection_section(result, {}, None)
+        text = "\n".join(lines)
+        assert "【决策卡片" not in text
+        assert "D5 人工核查清单" not in text
+
+    def test_d2_warnings_show_flags(self):
+        """D2 warning_count > 0 时标注命中详情."""
+        result = _add_decision_cards(_build_mock_stock_result(11), with_d2_warnings=True)
+        lines = _generate_stock_selection_section(result, {}, None)
+        text = "\n".join(lines)
+        # 1/3 + 命中标签
+        assert "1/3(深跌)" in text
+
+    def test_d3_na_when_signals_unavailable(self):
+        """D3 raw_signals_available=False 时显示 n/a."""
+        result = _add_decision_cards(_build_mock_stock_result(11))
+        # 把第一只改成 raw_signals_available=False
+        result["top_stocks"][0]["decision_card"]["d3_stabilization"] = {
+            "volume_shrink": None,
+            "pv_divergence": None,
+            "lower_shadow": None,
+            "hit_count": 0,
+            "raw_signals_available": False,
+        }
+        lines = _generate_stock_selection_section(result, {}, None)
+        text = "\n".join(lines)
+        assert " n/a   " in text  # 仅 D3 列宽 6 的 n/a
+
+    def test_d5_checklist_rendered(self):
+        result = _add_decision_cards(_build_mock_stock_result(11))
+        lines = _generate_stock_selection_section(result, {}, None)
+        text = "\n".join(lines)
+        # 4 项核查
+        assert "1. 公告" in text
+        assert "2. 新闻" in text
+        assert "3. 财报" in text
+        assert "4. 股东" in text
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

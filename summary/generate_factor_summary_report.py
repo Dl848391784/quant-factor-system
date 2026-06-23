@@ -86,6 +86,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import pandas as pd  # noqa: E402
 
 # 项目模块导入
+from comprehensive_factor.decision_card import CHECKLIST_D5  # noqa: E402
 from factor_definitions import (  # noqa: E402
     FACTOR_CATEGORIES,
     FACTOR_COL_TO_NAME_MAP,
@@ -2243,6 +2244,65 @@ def _generate_stock_selection_section(
                 f"说明: Top 1~10 为 composite 极值区（高信号 + 高波动）, Top 11~{len(top_stocks)} 为短名单备选池。"
             )
             lines.append("最终持仓 3~5 只由人工决断（参考 PROJECT.md 战略目标：量化辅助 + 人工决断）。")
+
+            # v2.43: 决策卡片块 (designs/feat_decision_card_v1.md)
+            # 5 维客观字段叠加在短名单上, 辅助人工决断 3~5 只持仓
+            has_card = any(s.get("decision_card") for s in top_stocks)
+            if has_card:
+                lines.append("")
+                lines.append("【决策卡片 (人工决断辅助, 5 维客观字段)】")
+                lines.append("  排名 股票代码  D1 跌幅档/振幅档/区间位置          | D2 风险 | D3 企稳 | D4 历史")
+                lines.append("-" * 110)
+                for s in top_stocks:
+                    card = s.get("decision_card")
+                    if not card:
+                        continue
+                    d1 = card.get("d1_classification", {})
+                    d2 = card.get("d2_risk", {})
+                    d3 = card.get("d3_stabilization", {})
+                    d4 = card.get("d4_history", {})
+
+                    d1_str = (
+                        f"{d1.get('return_5d_bucket', 'n/a')} / "
+                        f"{d1.get('amplitude_bucket', 'n/a')} / "
+                        f"{d1.get('close_position_5d', 'n/a')}"
+                    )
+                    # D2 风险数 (0~3), 命中详情标注
+                    d2_flags = []
+                    if d2.get("deep_decline_5d"):
+                        d2_flags.append("深跌")
+                    if d2.get("low_liquidity"):
+                        d2_flags.append("低流动性")
+                    if d2.get("extreme_amplitude"):
+                        d2_flags.append("极端振幅")
+                    d2_str = f"{d2.get('warning_count', 0)}/3"
+                    if d2_flags:
+                        d2_str += f"({','.join(d2_flags)})"
+
+                    # D3 企稳数 (0~3), raw_signals_available=False 显示 n/a
+                    d3_str = (
+                        "n/a"
+                        if not d3.get("raw_signals_available", False)
+                        else f"{d3.get('hit_count', 0)}/3"
+                    )
+
+                    # D4 历史 — 本期 null
+                    times = d4.get("times_in_top30_last_60d")
+                    d4_str = "n/a" if times is None else f"{times}次"
+
+                    lines.append(
+                        f"  {s['rank']:>3} {s['code']:<8} {d1_str:<34}  | {d2_str:<14} | {d3_str:<6} | {d4_str}"
+                    )
+                lines.append("-" * 110)
+                lines.append("说明:")
+                lines.append("  D1 客观分类: 纯阈值分桶（跌幅/振幅/收盘价在近 5 日区间位置）, 不带叙事词。")
+                lines.append("  D2 风险标记: 深跌(<-10%) / 低流动性(当日成交额底 5%) / 极端振幅(<1% 或 >12%)。")
+                lines.append("  D3 企稳信号: 缩量 + 价量背离 + 下影线 (与 P6 企稳过滤一致, 0~3 个命中)。")
+                lines.append("  D4 历史画像: 本期为 n/a (需历史归档机制, 独立 design 待启动)。")
+                lines.append("")
+                lines.append("【D5 人工核查清单 (固定模板, 适用每只候选股票)】")
+                for i, item in enumerate(CHECKLIST_D5, 1):
+                    lines.append(f"  {i}. {item}")
 
         # v2.19: 因子贡献集中度检测
         if comp_weights:
