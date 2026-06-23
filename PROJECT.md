@@ -657,6 +657,7 @@ grep -rn "assert False\|if False:" factor_ic/ comprehensive_factor/ backtest/
 
 || 版本 | 日期 | 更新内容 | 稳定性标注 ||
 ||------|------|---------|-----------||
+||| v3.7 | 2026-06-23 | **run_pipeline.py 并行改造**：新增 `--parallel N` 参数（默认 N=2），Stage 2 (IC) + Stage 3 (Backtest) 内的脚本按批并行（`ThreadPoolExecutor` 调度 subprocess.run）；批间严格屏障（N 个完成才进下一批，`as_completed` 等所有 future）；其他 stage 始终串行；不跨 stage 边界拼批；失败处理保持原 `failed_scripts` 汇总语义。`PARALLELIZABLE_STAGES = {2, 3}` 显式配置避免 Stage 4 (~2.6GB/脚本) 风险。新增"并行执行模式 [experimental]"章节（What/How/Why/When/Don't/Examples/Verify）。新增 `test_cases/test_run_pipeline_batching.py`（12 用例）覆盖批次切分逻辑。预期 pipeline 总耗时 ~60min → ~30min（2x 加速）| [experimental] ||
 ||| v3.6 | 2026-06-23 | **Parquet 迁移完成**：`factor_ic_data.json.gz` → `factor_ic_data.parquet`，删除所有 ijson fallback / JSON.gz dual-write 路径（净减 ~290 行死代码）。实测数据加载耗时 88s → 1.9s（46x），单脚本峰值内存 OOM → 626MB。Parquet file-level metadata 存 `dates` 数组。§1 数据契约表 + 新鲜度检查脚本（步骤 3）同步更新 | [stable] ||
 ||| v1.42 | 2026-06-12 | 新增行业方向性因子（industry_momentum_5d / industry_turnover_trend / industry_amplitude_trend）；因子分类一览表；行业方向性因子说明（What/Why/How/Don't/When/Verify） | [experimental] ||
 ||| v3.5 | 2026-06-16 | "Run Pipeline 执行排查流程" 3 处修订：①步骤 3 新鲜度检查改 ijson 流式扫描（修复 408MB factor_ic_data.json.gz 上 `json.load` OOM kill）；②步骤 3 新增"反向追溯（产物→上游脚本映射）"小节，识别 run_pipeline 单脚本失败不中断导致下游静默用旧数据；③步骤 5 汇总表新增"产物 mtime / 数据 latest_date"列 + 判读规则；④常见异常表新增 OOM kill（退出码 137 / 静默截断）行 | [experimental] ||
@@ -742,6 +743,48 @@ CI 脚本校验（`scripts/validate_pr_reference.py`）：
 ## Run Pipeline 执行排查流程 [stable]
 
 **当用户询问 Run_pipeline 脚本执行情况时，按以下步骤排查：**
+
+### 并行执行模式 [experimental]（2026-06-23 新增）
+
+**What**: `run_pipeline.py --parallel N` 控制并行度。
+
+**How**:
+- 默认 `N=2`：Stage 2 (IC) + Stage 3 (Backtest) 内的脚本按批并行，**每批 N 个完成才进下一批**（批间严格屏障）
+- `N=1`：完全串行（向后兼容路径）
+- 仅 `PARALLELIZABLE_STAGES = {2, 3}` 内的脚本并行；Stage 0/1/4/5/6/7 始终串行
+- 不跨 stage 边界拼批：Stage 2 全部完成才进 Stage 3
+- 单脚本失败不取消同批其他 future（保持原有 `failed_scripts` 汇总语义）
+- 重试策略不变（`MAX_RETRIES=3`, `RETRY_DELAY=30s`），重试发生在 worker 线程内
+
+**Why**: Parquet 迁移后单 IC 脚本耗时 ~30s、内存峰值 ~2.6GB。N=2 时 5.2GB 峰值 < 7.3GB 机器内存有余量；总 pipeline 耗时从 ~60min 降至 ~30min。
+
+**When**:
+- 日常 pipeline 重跑：`--parallel 2`（默认）
+- 内存紧张 / 调试：`--parallel 1`（强制串行，便于复现问题）
+- 高配机器（>16GB）可尝试 `--parallel 3+`，但用户自行评估 OOM 风险
+
+**Don't**:
+- ❌ 不要在 Stage 0（fetch_*）开启并行 — 部分数据源有限速 / 顺序依赖
+- ❌ 不要把 Stage 4（comprehensive_factor）加入 `PARALLELIZABLE_STAGES` — 单脚本 ~2.6GB，N=2 峰值 5.2GB 接近红线
+
+**Examples**:
+```bash
+# 默认并行（推荐日常使用）
+python run_pipeline.py
+
+# 强制串行（调试用）
+python run_pipeline.py --parallel 1
+
+# 从某 IC 脚本开始 + 并行
+python run_pipeline.py --start-script ic_amplitude --parallel 2
+
+# 跳过部分 stage + 并行
+python run_pipeline.py --skip-stages 0 1 --parallel 2
+```
+
+**Verify**: `pytest test_cases/test_run_pipeline_batching.py -v`（12 个用例覆盖批次切分逻辑）
+
+设计文档: `designs/run_pipeline_parallel_design.md`
 
 ### 执行顺序与日志位置
 
