@@ -1269,14 +1269,19 @@ class RollingICIRWeightMethod(WeightMethodBase):
         factor_df = pd.concat([factor_df, pd.DataFrame(dim_weight_data, index=factor_df.index)], axis=1)
 
         # 对所有因子列的 _dim_weight 做行级归一化（确保每日权重和=1）
+        # v2.52 (OOM 炸弹7, 模式3c): 向量化归一化替代逐列更新
+        # 原实现 for col: factor_df[wcol] = factor_df[wcol] / total → 35 次 inplace update
+        # 每次 update 让 BlockManager 创建新 Block → 碎片化 → 6.1GB OOM
+        # 修复：矩阵化操作，一次性更新所有列
         dim_weight_cols = [f"{c}_dim_weight" for c in factor_cols]
         total_weight = factor_df[dim_weight_cols].sum(axis=1)
         total_weight_safe = total_weight.replace(0, np.nan)
-        for col in factor_cols:
-            wcol = f"{col}_dim_weight"
-            factor_df[wcol] = factor_df[wcol] / total_weight_safe
-            # 全部为 0 时回退等权
-            factor_df[wcol] = factor_df[wcol].fillna(1.0 / n_factors)
+        W = factor_df[dim_weight_cols].to_numpy(dtype=float)
+        W = W / total_weight_safe.to_numpy(dtype=float)[:, None]
+        # 全部为 0 时回退等权
+        W = np.where(np.isnan(W), 1.0 / n_factors, W)
+        # 一次性写回
+        factor_df[dim_weight_cols] = W
 
         # 清理临时列
         if "weight_sum" in factor_df.columns:
@@ -1462,9 +1467,9 @@ class RollingICIRWeightMethod(WeightMethodBase):
             W_capped = self._apply_role_weights_matrix(W_capped, factor_cols)
             self.logger.info("RollingICIR 角色权重: primary 75%% + confirmation 25%% 均分 + filter 排除（每日动态）")
 
-        # 写回 _dim_weight 列
-        for i, col in enumerate(factor_cols):
-            factor_df[f"{col}_dim_weight"] = W_capped[:, i]
+        # v2.52 (OOM 炸弹7, 模式3c): 批量写回 _dim_weight 列，避免逐列 insert 碎片化
+        dim_weight_cols = [f"{col}_dim_weight" for col in factor_cols]
+        factor_df[dim_weight_cols] = W_capped
         # 截断事件记录（统计层面）
         any_capped_mask = (W > WEIGHT_CAP_DEFAULT + 1e-12).any(axis=1)
         n_capped_rows = int(any_capped_mask.sum())

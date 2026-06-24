@@ -267,9 +267,15 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask("ic_interaction_turnover__ret3d_pos", "factor_ic/ic_interaction_turnover__ret3d_pos_1d.py", 2, []),
     ScriptTask("ic_interaction_turnover__ret3d_neg", "factor_ic/ic_interaction_turnover__ret3d_neg_1d.py", 2, []),
     ScriptTask("ic_interaction_turnover__ret3d_abs", "factor_ic/ic_interaction_turnover__ret3d_abs_1d.py", 2, []),
-    ScriptTask("ic_interaction_amp_compression__ret3d_pos", "factor_ic/ic_interaction_amp_compression__ret3d_pos_1d.py", 2, []),
-    ScriptTask("ic_interaction_amp_compression__ret3d_neg", "factor_ic/ic_interaction_amp_compression__ret3d_neg_1d.py", 2, []),
-    ScriptTask("ic_interaction_amp_compression__ret3d_abs", "factor_ic/ic_interaction_amp_compression__ret3d_abs_1d.py", 2, []),
+    ScriptTask(
+        "ic_interaction_amp_compression__ret3d_pos", "factor_ic/ic_interaction_amp_compression__ret3d_pos_1d.py", 2, []
+    ),
+    ScriptTask(
+        "ic_interaction_amp_compression__ret3d_neg", "factor_ic/ic_interaction_amp_compression__ret3d_neg_1d.py", 2, []
+    ),
+    ScriptTask(
+        "ic_interaction_amp_compression__ret3d_abs", "factor_ic/ic_interaction_amp_compression__ret3d_abs_1d.py", 2, []
+    ),
     ScriptTask("ic_interaction_near_high__ret3d_pos", "factor_ic/ic_interaction_near_high__ret3d_pos_1d.py", 2, []),
     ScriptTask("ic_interaction_near_high__ret3d_neg", "factor_ic/ic_interaction_near_high__ret3d_neg_1d.py", 2, []),
     ScriptTask("ic_interaction_near_high__ret3d_abs", "factor_ic/ic_interaction_near_high__ret3d_abs_1d.py", 2, []),
@@ -352,33 +358,159 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     # v2.48: 交互因子族 27 个 pos/neg/abs ReLU 变体分层回测脚本 (F2 阶段注册)
     # 设计依据: designs/feat_factor_definition_destigmatization_v1.md v1.2
     # 9 base × {pos, neg, abs} = 27, factor_direction 由 _load_ic_meta 派生 (无叙事预设)
-    ScriptTask("backtest_interaction_amplitude__ret3d_pos", "backtest/layered_backtest_interaction_amplitude__ret3d_pos_1d.py", 3, []),
-    ScriptTask("backtest_interaction_amplitude__ret3d_neg", "backtest/layered_backtest_interaction_amplitude__ret3d_neg_1d.py", 3, []),
-    ScriptTask("backtest_interaction_amplitude__ret3d_abs", "backtest/layered_backtest_interaction_amplitude__ret3d_abs_1d.py", 3, []),
-    ScriptTask("backtest_interaction_turnover__ret3d_pos", "backtest/layered_backtest_interaction_turnover__ret3d_pos_1d.py", 3, []),
-    ScriptTask("backtest_interaction_turnover__ret3d_neg", "backtest/layered_backtest_interaction_turnover__ret3d_neg_1d.py", 3, []),
-    ScriptTask("backtest_interaction_turnover__ret3d_abs", "backtest/layered_backtest_interaction_turnover__ret3d_abs_1d.py", 3, []),
-    ScriptTask("backtest_interaction_amp_compression__ret3d_pos", "backtest/layered_backtest_interaction_amp_compression__ret3d_pos_1d.py", 3, []),
-    ScriptTask("backtest_interaction_amp_compression__ret3d_neg", "backtest/layered_backtest_interaction_amp_compression__ret3d_neg_1d.py", 3, []),
-    ScriptTask("backtest_interaction_amp_compression__ret3d_abs", "backtest/layered_backtest_interaction_amp_compression__ret3d_abs_1d.py", 3, []),
-    ScriptTask("backtest_interaction_near_high__ret3d_pos", "backtest/layered_backtest_interaction_near_high__ret3d_pos_1d.py", 3, []),
-    ScriptTask("backtest_interaction_near_high__ret3d_neg", "backtest/layered_backtest_interaction_near_high__ret3d_neg_1d.py", 3, []),
-    ScriptTask("backtest_interaction_near_high__ret3d_abs", "backtest/layered_backtest_interaction_near_high__ret3d_abs_1d.py", 3, []),
-    ScriptTask("backtest_interaction_intraday__ret1d_pos", "backtest/layered_backtest_interaction_intraday__ret1d_pos_1d.py", 3, []),
-    ScriptTask("backtest_interaction_intraday__ret1d_neg", "backtest/layered_backtest_interaction_intraday__ret1d_neg_1d.py", 3, []),
-    ScriptTask("backtest_interaction_intraday__ret1d_abs", "backtest/layered_backtest_interaction_intraday__ret1d_abs_1d.py", 3, []),
-    ScriptTask("backtest_interaction_ma5_dev__ret3d_pos", "backtest/layered_backtest_interaction_ma5_dev__ret3d_pos_1d.py", 3, []),
-    ScriptTask("backtest_interaction_ma5_dev__ret3d_neg", "backtest/layered_backtest_interaction_ma5_dev__ret3d_neg_1d.py", 3, []),
-    ScriptTask("backtest_interaction_ma5_dev__ret3d_abs", "backtest/layered_backtest_interaction_ma5_dev__ret3d_abs_1d.py", 3, []),
-    ScriptTask("backtest_interaction_price_pos__ret1d_pos", "backtest/layered_backtest_interaction_price_pos__ret1d_pos_1d.py", 3, []),
-    ScriptTask("backtest_interaction_price_pos__ret1d_neg", "backtest/layered_backtest_interaction_price_pos__ret1d_neg_1d.py", 3, []),
-    ScriptTask("backtest_interaction_price_pos__ret1d_abs", "backtest/layered_backtest_interaction_price_pos__ret1d_abs_1d.py", 3, []),
-    ScriptTask("backtest_interaction_kdj__ret5d_pos", "backtest/layered_backtest_interaction_kdj__ret5d_pos_1d.py", 3, []),
-    ScriptTask("backtest_interaction_kdj__ret5d_neg", "backtest/layered_backtest_interaction_kdj__ret5d_neg_1d.py", 3, []),
-    ScriptTask("backtest_interaction_kdj__ret5d_abs", "backtest/layered_backtest_interaction_kdj__ret5d_abs_1d.py", 3, []),
-    ScriptTask("backtest_interaction_bollinger__ret5d_pos", "backtest/layered_backtest_interaction_bollinger__ret5d_pos_1d.py", 3, []),
-    ScriptTask("backtest_interaction_bollinger__ret5d_neg", "backtest/layered_backtest_interaction_bollinger__ret5d_neg_1d.py", 3, []),
-    ScriptTask("backtest_interaction_bollinger__ret5d_abs", "backtest/layered_backtest_interaction_bollinger__ret5d_abs_1d.py", 3, []),
+    ScriptTask(
+        "backtest_interaction_amplitude__ret3d_pos",
+        "backtest/layered_backtest_interaction_amplitude__ret3d_pos_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_amplitude__ret3d_neg",
+        "backtest/layered_backtest_interaction_amplitude__ret3d_neg_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_amplitude__ret3d_abs",
+        "backtest/layered_backtest_interaction_amplitude__ret3d_abs_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_turnover__ret3d_pos",
+        "backtest/layered_backtest_interaction_turnover__ret3d_pos_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_turnover__ret3d_neg",
+        "backtest/layered_backtest_interaction_turnover__ret3d_neg_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_turnover__ret3d_abs",
+        "backtest/layered_backtest_interaction_turnover__ret3d_abs_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_amp_compression__ret3d_pos",
+        "backtest/layered_backtest_interaction_amp_compression__ret3d_pos_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_amp_compression__ret3d_neg",
+        "backtest/layered_backtest_interaction_amp_compression__ret3d_neg_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_amp_compression__ret3d_abs",
+        "backtest/layered_backtest_interaction_amp_compression__ret3d_abs_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_near_high__ret3d_pos",
+        "backtest/layered_backtest_interaction_near_high__ret3d_pos_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_near_high__ret3d_neg",
+        "backtest/layered_backtest_interaction_near_high__ret3d_neg_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_near_high__ret3d_abs",
+        "backtest/layered_backtest_interaction_near_high__ret3d_abs_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_intraday__ret1d_pos",
+        "backtest/layered_backtest_interaction_intraday__ret1d_pos_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_intraday__ret1d_neg",
+        "backtest/layered_backtest_interaction_intraday__ret1d_neg_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_intraday__ret1d_abs",
+        "backtest/layered_backtest_interaction_intraday__ret1d_abs_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_ma5_dev__ret3d_pos",
+        "backtest/layered_backtest_interaction_ma5_dev__ret3d_pos_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_ma5_dev__ret3d_neg",
+        "backtest/layered_backtest_interaction_ma5_dev__ret3d_neg_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_ma5_dev__ret3d_abs",
+        "backtest/layered_backtest_interaction_ma5_dev__ret3d_abs_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_price_pos__ret1d_pos",
+        "backtest/layered_backtest_interaction_price_pos__ret1d_pos_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_price_pos__ret1d_neg",
+        "backtest/layered_backtest_interaction_price_pos__ret1d_neg_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_price_pos__ret1d_abs",
+        "backtest/layered_backtest_interaction_price_pos__ret1d_abs_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_kdj__ret5d_pos", "backtest/layered_backtest_interaction_kdj__ret5d_pos_1d.py", 3, []
+    ),
+    ScriptTask(
+        "backtest_interaction_kdj__ret5d_neg", "backtest/layered_backtest_interaction_kdj__ret5d_neg_1d.py", 3, []
+    ),
+    ScriptTask(
+        "backtest_interaction_kdj__ret5d_abs", "backtest/layered_backtest_interaction_kdj__ret5d_abs_1d.py", 3, []
+    ),
+    ScriptTask(
+        "backtest_interaction_bollinger__ret5d_pos",
+        "backtest/layered_backtest_interaction_bollinger__ret5d_pos_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_bollinger__ret5d_neg",
+        "backtest/layered_backtest_interaction_bollinger__ret5d_neg_1d.py",
+        3,
+        [],
+    ),
+    ScriptTask(
+        "backtest_interaction_bollinger__ret5d_abs",
+        "backtest/layered_backtest_interaction_bollinger__ret5d_abs_1d.py",
+        3,
+        [],
+    ),
     # Stage 4: 综合因子（auto_select 默认启用，无需传参；传 --auto_select 会触发 argparse unrecognized arguments 错误）
     # v2.35: P2 维度权重全方法支持——4种方法统一配置 --dimension_weight icir
     # 消除 rolling_icir 独享维度权重的不公平对比（design.md §2.2 决策点3）
@@ -446,7 +578,12 @@ def run_script(task: ScriptTask, retry_count: int = 0) -> bool:
             cwd=PROJECT_ROOT,
             text=True,
             timeout=actual_timeout,
-            env={**dict(os.environ), "PYTHONPATH": str(PROJECT_ROOT)},
+            env={
+                **dict(os.environ),
+                "PYTHONPATH": str(PROJECT_ROOT),
+                "MALLOC_TRIM_THRESHOLD_": "-1",
+                "MALLOC_MMAP_THRESHOLD_": "131072",
+            },
         )
 
         elapsed = time.time() - start_time
@@ -655,14 +792,10 @@ def run_pipeline(
         # v2.48: Stage 4 (composite) 前杀 LSP 进程释放内存 (~200MB)
         # composite 阶段加载全量 parquet + 标准化 + 相关性矩阵, 内存峰值高,
         # 7.3GB 机器上 LSP 占 ~200MB 可能导致 OOM. LSP 在非交互跑 pipeline 时无用.
-        if batch_stage >= 4 and not any(
-            s.stage >= 4 for s in scripts_to_run[:scripts_to_run.index(batch[0])]
-        ):
+        if batch_stage >= 4 and not any(s.stage >= 4 for s in scripts_to_run[: scripts_to_run.index(batch[0])]):
             import signal as _signal
 
-            for _line in subprocess.check_output(
-                ["ps", "aux"], text=True
-            ).splitlines():
+            for _line in subprocess.check_output(["ps", "aux"], text=True).splitlines():
                 if "pyright-langserver" in _line and "grep" not in _line:
                     _pid = int(_line.split()[1])
                     try:
