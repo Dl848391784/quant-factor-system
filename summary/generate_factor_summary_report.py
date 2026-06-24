@@ -1094,10 +1094,13 @@ def load_stock_selection_result(logger: logging.Logger) -> dict | None:
     stage1_rows = df_sorted[df_sorted["stage"] == 1]
     stage2_rows = df_sorted[df_sorted["stage"] == 2]
     stage3_rows = df_sorted[df_sorted["stage"] == 3]
+    # v3.8: Stage 1 Bottom 30 (stage=4)
+    stage1_bottom_rows = df_sorted[df_sorted["stage"] == 4]
 
     stage1_top = [_row_to_stock_dict(r) for _, r in stage1_rows.iterrows()]
     stage2_top = [_row_to_stock_dict(r) for _, r in stage2_rows.iterrows()]
     stage3_top = [_row_to_stock_dict(r) for _, r in stage3_rows.iterrows()]
+    stage1_bottom = [_row_to_stock_dict(r) for _, r in stage1_bottom_rows.iterrows()]
 
     # meta 重建: 从 stage3 首行 (若空则 stage1) + file metadata
     ref_row = (
@@ -1150,6 +1153,7 @@ def load_stock_selection_result(logger: logging.Logger) -> dict | None:
         "stage1_top": stage1_top,
         "stage2_top": stage2_top,
         "stage3_top": stage3_top,
+        "stage1_bottom": stage1_bottom,  # v3.8: Bottom 30
         "weight_config": weight_config,
     }
 
@@ -2369,6 +2373,22 @@ def _generate_stock_selection_section(
             lines.append(f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12}")
             lines.append("-" * 50)
             for item in stage1_top:
+                rank = item.get("rank", 0)
+                code = item.get("code", "N/A")
+                name = (stock_name_map or {}).get(code, "--")
+                cv = item.get("composite_value", 0)
+                lines.append(f"{rank:>4} {code:<10} {name:<8} {format_float(cv, 3):>12}")
+            lines.append("-" * 50)
+            lines.append("")
+
+        # v3.8: Stage 1 Bottom 30 简表 (composite 最低的 30 只)
+        # designs/feat_report_bottom30.md
+        stage1_bottom = stock_result.get("stage1_bottom", []) or []
+        if stage1_bottom:
+            lines.append(f"【Stage 1: 综合因子值 Bottom {len(stage1_bottom)} (composite 升序)】")
+            lines.append(f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12}")
+            lines.append("-" * 50)
+            for item in stage1_bottom:
                 rank = item.get("rank", 0)
                 code = item.get("code", "N/A")
                 name = (stock_name_map or {}).get(code, "--")

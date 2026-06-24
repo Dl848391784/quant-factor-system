@@ -965,6 +965,7 @@ def write_selection_history(
     flipped_factors: list[str] | None,
     exclusion_stats: dict[str, Any],
     output_dir: Path | str,
+    stage1_bottom: list[dict[str, Any]] | None = None,  # v3.8: Bottom 30 快照
     logger: logging.Logger | None = None,
 ) -> Path:
     """写入选股历史到 Parquet 分区数据集（单一信源, designs/feat_stock_selection_history_parquet.md）.
@@ -1095,6 +1096,10 @@ def write_selection_history(
         rows.append(_row(2, s))
     for s in stage3_top:
         rows.append(_row(3, s))
+    # v3.8: Stage 1 Bottom 30 (stage=4), composite 最低的 30 只
+    if stage1_bottom:
+        for s in stage1_bottom:
+            rows.append(_row(4, s))
 
     if not rows:
         raise ValueError(
@@ -1471,6 +1476,7 @@ def select_stocks(
     # 见 designs/feat_stock_selection_history_parquet.md §3.1
     stage1_top_snapshot: list[dict[str, Any]] = []
     stage2_top_snapshot: list[dict[str, Any]] = []
+    stage1_bottom_snapshot: list[dict[str, Any]] = []
 
     if config.enable_two_stage:
         stage1_n = config.stage1_pool_size
@@ -1497,6 +1503,10 @@ def select_stocks(
         # v3.7: 捕获 Stage 1 Top 30 快照 (拷贝, 避免后续 apply_stage2_resort mutate rank/stage1_rank)
         # 见 designs/feat_stock_selection_history_parquet.md §3.1
         stage1_top_snapshot = [copy.deepcopy(s) for s in stage1_stocks[: config.top_n]]
+        # v3.8: 捕获 Stage 1 Bottom 30 快照 (composite 最低的 30 只, rank 保持原始 171~200)
+        # 用于报告展示 composite 两端分布 (designs/feat_report_bottom30.md)
+        if len(stage1_stocks) > config.top_n:
+            stage1_bottom_snapshot = [copy.deepcopy(s) for s in stage1_stocks[-config.top_n :]]
 
         # v2.44: Stage 2 排序列可能不在 standardize 后的 factor_df 中 (如 turnover_rate)
         # 需要从原始数据源 (factor_ic_data.parquet) 加载并对齐到 selection_date
@@ -1645,6 +1655,7 @@ def select_stocks(
         flipped_factors=flipped_factors,
         exclusion_stats=exclusion_stats,
         output_dir=config.output_dir,
+        stage1_bottom=stage1_bottom_snapshot,  # v3.8: Bottom 30
         logger=logger,
     )
 
