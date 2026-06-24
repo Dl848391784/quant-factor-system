@@ -137,6 +137,7 @@ Plan → Execute → Review → Debug
 | factor_ic | `factor_ic/result/` | `ic_<因子>_<周期>_analysis_result.json` | comprehensive_factor, summary |
 | backtest | `backtest/result/` | `<因子>_layered_backtest.json` | summary |
 | comprehensive_factor | `comprehensive_factor/result/` | `composite_<加权>_1d.json` | summary |
+| comprehensive_factor/stock_selector | `comprehensive_factor/result/stock_selection_history/` | `selection_date=YYYY-MM-DD/part-0.parquet`（Hive 分区数据集，含 Stage 1/2/3 三段 ~90 行/天）| summary |
 | summary | `summary/result/` | `factor_summary_report_YYYY-MM-DD.txt` | — |
 
 **统一数据源**：`factor_ic_data.parquet` 包含行情 + 基础因子 + 扩展因子 + 收益数据（`forward_return_1d/3d/5d`）。所有下游模块**只能**从此文件读取，禁止从 `return_data.json.gz` 读收益数据（仅备份）。

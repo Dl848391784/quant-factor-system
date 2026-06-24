@@ -65,7 +65,7 @@
            - 名称缺失时回退"--"，文件缺失/解析失败仅 warning 不阻塞主报告
 """
 
-__version__ = "2.26"
+__version__ = "3.7"  # v3.7 (2026-06-24): 读 Parquet 分区数据集 + 渲染 Stage 1/2/3 三段轨迹
 __author__ = "factor_ic_analyzer"
 
 # 标准库导入
@@ -150,7 +150,7 @@ DATA_PATHS = {
     "comprehensive_result": "comprehensive_factor/result",
     "factor_data": "data_fetchers/result",
     "weight_selection": "comprehensive_factor/result/weight_selection_result.json",
-    "stock_selection": "comprehensive_factor/result/stock_selection_result.json",
+    "stock_selection": "comprehensive_factor/result/stock_selection_history",
 }
 
 DATA_FRESHNESS_HEAD_CHARS = 65536  # 覆盖完整顶层 dates 数组，避免解析 factor_ic_data 全量大文件
@@ -960,7 +960,12 @@ def load_weight_selection_result(logger: logging.Logger) -> dict | None:
 
 
 def load_stock_selection_result(logger: logging.Logger) -> dict | None:
-    """加载股票选股结果
+    """加载股票选股结果 (v3.7: 从 Parquet 分区数据集读取最新一日).
+
+    v3.7 (2026-06-24): 数据源切换 JSON → Parquet 分区数据集.
+    路径: comprehensive_factor/result/stock_selection_history/selection_date=YYYY-MM-DD/part-0.parquet
+    每天分区含 Stage 1/2/3 Top N 行 (默认 ~90 行); 取最新 selection_date 分区,
+    按 stage 拆为三段, 渲染段可分别展示 (设计依据: designs/feat_stock_selection_history_parquet.md §3).
 
     v2.2 (2026-06-03): 新增股票选股结果加载
 
@@ -968,32 +973,199 @@ def load_stock_selection_result(logger: logging.Logger) -> dict | None:
         logger: 日志记录器
 
     Returns:
-        股票选股结果字典，结构：
+        股票选股结果字典 (向后兼容旧 schema + 新增 stage1/2 段):
         {
-            "meta": {"selection_date": str, "weight_method": str, "top_n": int, ...},
-            "top_stocks": [{"rank": int, "code": str, "composite_value": float, ...}],
-            ...
+            "meta": {"selection_date": str, "weight_method": str, "top_n": int,
+                     "min_amplitude": float, "excluded_by_amplitude": int,
+                     "stocks_on_date": int, "direction_map": dict,
+                     "flipped_factors": list, ...},
+            "top_stocks": [{"rank": int, "code": str, "composite_value": float,
+                            "factor_values": dict, "factor_values_std": dict,
+                            "decision_card": dict | None, ...}, ...],   # Stage 3 短名单
+            "stage1_top": [{...}],   # 新增 v3.7: Stage 1 composite 降序 Top N
+            "stage2_top": [{...}],   # 新增 v3.7: Stage 2 turnover 升序 Top N
+            "weight_config": {...},
         }
-        或 None（文件不存在）
+        或 None (数据集不存在 / 空).
     """
-    stock_file = PROJECT_ROOT / DATA_PATHS["stock_selection"]
+    import contextlib
+    import json as _json
 
-    if not stock_file.exists():
-        logger.debug("股票选股结果文件不存在: %s", stock_file)
+    import pyarrow.compute as pc
+    import pyarrow.dataset as pads
+    import pyarrow.parquet as pq
+
+    history_root = PROJECT_ROOT / DATA_PATHS["stock_selection"]
+
+    if not history_root.exists():
+        logger.debug("股票选股 Parquet 数据集不存在: %s", history_root)
         return None
 
-    data = load_json_file(stock_file, logger)
-    if data:
-        meta = data.get("meta", {})
-        logger.info(
-            "加载股票选股结果: 选股日期=%s, Top N=%d, 最优权重=%s, 振幅阈值=%.2f%%, 振幅排除=%d只",
-            meta.get("selection_date", "N/A"),
-            meta.get("top_n", 0),
-            meta.get("weight_method", "N/A"),
-            meta.get("min_amplitude", 0) * 100,
-            meta.get("excluded_by_amplitude", 0),
-        )
-    return data
+    try:
+        dataset = pads.dataset(str(history_root), partitioning="hive")
+    except Exception:
+        logger.exception("读取股票选股 Parquet 数据集失败: %s", history_root)
+        return None
+
+    # 取最新 selection_date 分区
+    dates_table = dataset.to_table(columns=["selection_date"])
+    if dates_table.num_rows == 0:
+        logger.warning("股票选股 Parquet 数据集为空: %s", history_root)
+        return None
+
+    dates = dates_table.column("selection_date").to_pylist()
+    latest_date = max(dates)
+
+    df = dataset.to_table(filter=pc.field("selection_date") == latest_date).to_pandas()
+    if df.empty:
+        logger.warning("最新分区 %s 无行", latest_date)
+        return None
+
+    # 找该日 part-0.parquet 用于读 file-level metadata
+    partition_dir = history_root / f"selection_date={latest_date}"
+    part_files = sorted(partition_dir.glob("*.parquet"))
+    file_meta_raw: dict[bytes, bytes] = {}
+    if part_files:
+        try:
+            pq_meta = pq.read_metadata(str(part_files[0]))
+            if pq_meta.metadata:
+                file_meta_raw = dict(pq_meta.metadata)
+        except Exception:
+            logger.exception("读 Parquet file-level metadata 失败: %s", part_files[0])
+
+    def _meta_str(key: str, default: str = "") -> str:
+        v = file_meta_raw.get(key.encode())
+        return v.decode() if v else default
+
+    def _meta_int(key: str, default: int = 0) -> int:
+        s = _meta_str(key)
+        try:
+            return int(s) if s else default
+        except (ValueError, TypeError):
+            return default
+
+    def _meta_float(key: str, default: float = 0.0) -> float:
+        s = _meta_str(key)
+        try:
+            return float(s) if s else default
+        except (ValueError, TypeError):
+            return default
+
+    def _meta_json(key: str, default):
+        s = _meta_str(key)
+        if not s:
+            return default
+        try:
+            return _json.loads(s)
+        except (ValueError, TypeError):
+            return default
+
+    # 行 → 渲染兼容字典 (旧 schema "top_stocks" 项的结构)
+    def _row_to_stock_dict(row: pd.Series) -> dict:
+        out: dict = {
+            "rank": int(row["rank"]),
+            "code": str(row["code"]),
+            "composite_value": (float(row["composite_value"]) if pd.notna(row["composite_value"]) else None),
+        }
+        if pd.notna(row.get("weight_coverage")):
+            out["weight_coverage"] = float(row["weight_coverage"])
+        if pd.notna(row.get("stage1_rank")):
+            out["stage1_rank"] = int(row["stage1_rank"])
+        if pd.notna(row.get("stage2_sort_value")):
+            out["stage2_sort_value"] = float(row["stage2_sort_value"])
+        if pd.notna(row.get("excluded_at_stage3")) and row["excluded_at_stage3"]:
+            out["excluded_at_stage3"] = str(row["excluded_at_stage3"])
+        # 嵌套 JSON 串解析回 dict
+        fv = row.get("factor_values_json")
+        if isinstance(fv, str) and fv:
+            with contextlib.suppress(ValueError, TypeError):
+                out["factor_values"] = _json.loads(fv)
+        fvs = row.get("factor_values_std_json")
+        if isinstance(fvs, str) and fvs:
+            with contextlib.suppress(ValueError, TypeError):
+                out["factor_values_std"] = _json.loads(fvs)
+        dc = row.get("decision_card_json")
+        if isinstance(dc, str) and dc:
+            with contextlib.suppress(ValueError, TypeError):
+                out["decision_card"] = _json.loads(dc)
+        return out
+
+    df_sorted = df.sort_values(["stage", "rank"])
+    stage1_rows = df_sorted[df_sorted["stage"] == 1]
+    stage2_rows = df_sorted[df_sorted["stage"] == 2]
+    stage3_rows = df_sorted[df_sorted["stage"] == 3]
+
+    stage1_top = [_row_to_stock_dict(r) for _, r in stage1_rows.iterrows()]
+    stage2_top = [_row_to_stock_dict(r) for _, r in stage2_rows.iterrows()]
+    stage3_top = [_row_to_stock_dict(r) for _, r in stage3_rows.iterrows()]
+
+    # meta 重建: 从 stage3 首行 (若空则 stage1) + file metadata
+    ref_row = (
+        stage3_rows.iloc[0]
+        if not stage3_rows.empty
+        else (stage1_rows.iloc[0] if not stage1_rows.empty else df_sorted.iloc[0])
+    )
+    direction_map = {}
+    dm_raw = ref_row.get("direction_map_json")
+    if isinstance(dm_raw, str) and dm_raw:
+        with contextlib.suppress(ValueError, TypeError):
+            direction_map = _json.loads(dm_raw)
+    flipped_factors: list = []
+    ff_raw = ref_row.get("flipped_factors_json")
+    if isinstance(ff_raw, str) and ff_raw:
+        with contextlib.suppress(ValueError, TypeError):
+            flipped_factors = _json.loads(ff_raw)
+
+    meta = {
+        "selection_date": str(latest_date),
+        "weight_method": str(ref_row["weight_method"]),
+        "factor_direction": str(ref_row["factor_direction"]),
+        "top_n": int(ref_row["top_n"]),
+        "composite_score": float(ref_row["composite_score"]) if pd.notna(ref_row.get("composite_score")) else 0.0,
+        "direction_map": direction_map,
+        "flipped_factors": flipped_factors,
+        "stocks_on_date": _meta_int("stocks_on_date"),
+        "min_amplitude": _meta_float("min_amplitude"),
+        "min_weight_coverage": _meta_float("min_weight_coverage"),
+        "excluded_by_amplitude": _meta_int("excluded_by_amplitude"),
+        "excluded_by_coverage": _meta_int("excluded_by_coverage"),
+        "excluded_by_liquidity": _meta_int("excluded_by_liquidity"),
+        "excluded_by_confirmation": _meta_int("excluded_by_confirmation"),
+        "excluded_by_filter": _meta_json("excluded_by_filter", {}),
+        "stage1_pool_size": int(ref_row["stage1_pool_size"]) if pd.notna(ref_row.get("stage1_pool_size")) else None,
+        "stage2_sort_col": str(ref_row["stage2_sort_col"]) if pd.notna(ref_row.get("stage2_sort_col")) else None,
+        "stage2_ascending": bool(ref_row["stage2_ascending"]) if pd.notna(ref_row.get("stage2_ascending")) else None,
+        "valid_stocks": len(stage3_top),
+    }
+
+    weight_config = {
+        "method": meta["weight_method"],
+        "factor_list": _meta_json("factor_list_json", []),
+        "factor_cols": _meta_json("factor_cols_json", []),
+    }
+
+    result = {
+        "meta": meta,
+        "top_stocks": stage3_top,  # 向后兼容: 默认仍指 Stage 3 短名单
+        "stage1_top": stage1_top,
+        "stage2_top": stage2_top,
+        "stage3_top": stage3_top,
+        "weight_config": weight_config,
+    }
+
+    logger.info(
+        "加载股票选股结果 (Parquet): 选股日期=%s, Top N=%d, 最优权重=%s, "
+        "Stage1=%d/Stage2=%d/Stage3=%d, 振幅阈值=%.2f%%, 振幅排除=%d只",
+        meta["selection_date"],
+        meta["top_n"],
+        meta["weight_method"],
+        len(stage1_top),
+        len(stage2_top),
+        len(stage3_top),
+        meta["min_amplitude"] * 100,
+        meta["excluded_by_amplitude"],
+    )
+    return result
 
 
 def load_stock_name_map(logger: logging.Logger) -> dict[str, str]:
@@ -2167,7 +2339,73 @@ def _generate_stock_selection_section(
 
     lines.append("")
 
-    # Top N 股票表格
+    # === v3.7: Stage 1 / Stage 2 / Stage 3 三段轨迹展示 ===
+    # 设计依据: designs/feat_stock_selection_history_parquet.md §3 (读取侧)
+    # 用户原始诉求 (2026-06-24): "因子 IC>0 应选暴涨股, 但选出来是下跌横盘股" + "选股是否按评分排序"
+    # 根因: v2.44 两阶段选股 Stage 2 按 stage2_sort_col (turnover_rate) 升序重排,
+    #       Stage 3 经企稳过滤后已不按 composite 排序; 旧报告只展示 Stage 3 隐藏了中间轨迹.
+    # 修复: 显式打印 Stage 1 (composite 降序 真高分股) + Stage 2 (turnover 升序后) + Stage 3 (最终短名单).
+    stage1_top = stock_result.get("stage1_top", []) or []
+    stage2_top = stock_result.get("stage2_top", []) or []
+
+    if stage1_top or stage2_top:
+        stage1_pool_size = meta.get("stage1_pool_size")
+        stage2_sort_col = meta.get("stage2_sort_col")
+        stage2_ascending = meta.get("stage2_ascending")
+
+        lines.append("【两阶段选股轨迹】")
+        if stage1_pool_size is not None:
+            lines.append(f"  Stage 1: 综合因子值降序取 Top {stage1_pool_size} 作为候选池")
+        if stage2_sort_col:
+            direction_label = "升序" if stage2_ascending else "降序"
+            lines.append(f"  Stage 2: 候选池按 {stage2_sort_col} {direction_label}重排, 取 Top {meta.get('top_n', 0)}")
+        lines.append(f"  Stage 3: Stage 2 结果经企稳过滤+决策卡, 输出最终 Top {meta.get('top_n', 0)} 短名单")
+        lines.append("  说明: 最终短名单 (Stage 3) 不按综合因子值排序——rank 是 Stage 2 重排后的名次.")
+        lines.append("")
+
+        # Stage 1 简表: 真正按综合因子值排序的"高分股"
+        if stage1_top:
+            lines.append(f"【Stage 1: 综合因子值 Top {len(stage1_top)} (composite 降序)】")
+            lines.append(f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12}")
+            lines.append("-" * 50)
+            for item in stage1_top:
+                rank = item.get("rank", 0)
+                code = item.get("code", "N/A")
+                name = (stock_name_map or {}).get(code, "--")
+                cv = item.get("composite_value", 0)
+                lines.append(f"{rank:>4} {code:<10} {name:<8} {format_float(cv, 3):>12}")
+            lines.append("-" * 50)
+            lines.append("")
+
+        # Stage 2 简表: 按 stage2_sort_col 升序重排后, 看每只 stage 2 股票的 Stage 1 名次回溯
+        if stage2_top:
+            sort_col_label = stage2_sort_col or "stage2_sort_value"
+            lines.append(
+                f"【Stage 2: 按 {sort_col_label} {'升' if stage2_ascending else '降'}序 Top {len(stage2_top)}】"
+            )
+            lines.append(
+                f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12} {sort_col_label:>10} {'Stage1名次':>10}"
+            )
+            lines.append("-" * 70)
+            for item in stage2_top:
+                rank = item.get("rank", 0)
+                code = item.get("code", "N/A")
+                name = (stock_name_map or {}).get(code, "--")
+                cv = item.get("composite_value", 0)
+                sort_v = item.get("stage2_sort_value")
+                sort_v_str = format_float(sort_v, 4) if sort_v is not None else "N/A"
+                s1_rank = item.get("stage1_rank")
+                s1_rank_str = f"#{s1_rank}" if s1_rank else "N/A"
+                lines.append(
+                    f"{rank:>4} {code:<10} {name:<8} {format_float(cv, 3):>12} {sort_v_str:>10} {s1_rank_str:>10}"
+                )
+            lines.append("-" * 70)
+            lines.append("")
+
+        lines.append(f"【Stage 3: 最终短名单 Top {meta.get('top_n', 0)} (企稳过滤后)】")
+        lines.append("")
+
+    # Top N 股票表格 (Stage 3, 即向后兼容的 top_stocks)
     # v2.42 (designs/feat_shortlist_top30_v1.md §2.2): 拆分 Top 10 详表 + 11~N 简表
     #   - Top 1~10: 详表, 展示全部因子 z-score (保留 v2.14 信息密度)
     #   - Top 11~N: 简表, 展示主导前 3 因子贡献占比 (避免 30 行 × 15 因子冗长)
