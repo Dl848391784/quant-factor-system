@@ -107,9 +107,12 @@ def load_full_data(
         required_cols.append("is_untradeable")
         required_cols.append("is_low_liquidity")
 
-    full_df: pd.DataFrame
-
-    # Parquet 列式读取
+    # v2.49: Arrow 层面行过滤，替代 pandas filter+reset_index 双拷贝。
+    # 原实现 full_df = full_df[~mask].reset_index(drop=True) 产生两份拷贝
+    # (boolean indexing copy + reset_index copy)，79列×1.5M行每次≈0.95GB，
+    # 两次过滤峰值≈2.9GB 叠加已加载 DataFrame→OOM。
+    # 修复：pq.read_table → Arrow compute 过滤 → to_pandas，只加载需要的行。
+    import pyarrow.compute as pc
     import pyarrow.parquet as pq
 
     logger.info("从 Parquet 读取: %s", data_source)
@@ -123,15 +126,48 @@ def load_full_data(
     else:
         read_cols = [col for col in required_cols if col in available_cols]
 
-    full_df = pd.read_parquet(data_source, columns=read_cols)
+    table = pq.read_table(data_source, columns=read_cols)
 
-    # 补充缺失列为 NaN
+    # 补充缺失列为 null（向后兼容）
     if required_cols is not None:
-        for col in required_cols:
-            if col not in full_df.columns:
-                full_df[col] = pd.NA
+        import pyarrow as pa
 
-    logger.info("Parquet 加载完成: %d 行 × %d 列", len(full_df), len(full_df.columns))
+        for col in required_cols:
+            if col not in table.column_names:
+                table = table.append_column(col, pa.nulls(table.num_rows, type=pa.null()))
+
+    logger.info("Parquet 加载完成: %d 行 × %d 列", table.num_rows, table.num_columns)
+
+    # === Arrow 层面行过滤（v2.49: to_pandas 之前过滤，避免 pandas 双拷贝） ===
+    keep_mask = None
+    filter_logs: list[tuple[str, int]] = []
+
+    if "is_untradeable" in table.column_names:
+        untradeable_col = pc.fill_null(table.column("is_untradeable"), 0)
+        untradeable_count = pc.sum(pc.equal(untradeable_col, 1).cast("int64")).as_py()
+        if untradeable_count > 0:
+            keep_mask = pc.not_equal(untradeable_col, 1)
+            filter_logs.append(("不可交易股票(涨停类)", untradeable_count))
+    else:
+        logger.warning("数据缺少 is_untradeable 列，跳过不可交易股票过滤")
+
+    if "is_low_liquidity" in table.column_names:
+        low_liq_col = pc.fill_null(table.column("is_low_liquidity"), 0)
+        low_liq_count = pc.sum(pc.equal(low_liq_col, 1).cast("int64")).as_py()
+        if low_liq_count > 0:
+            m = pc.not_equal(low_liq_col, 1)
+            keep_mask = m if keep_mask is None else pc.and_(keep_mask, m)
+            filter_logs.append(("低流动性股票(截面成交额 P5)", low_liq_count))
+    else:
+        logger.warning("数据缺少 is_low_liquidity 列，跳过低流动性股票过滤")
+
+    if keep_mask is not None:
+        table = table.filter(keep_mask)
+
+    full_df = table.to_pandas()
+
+    for label, excluded in filter_logs:
+        logger.info("过滤%s: 排除 %d 条, 剩余 %d 条", label, excluded, len(full_df))
 
     # === 校验 date / asset 类型（保留现有逻辑） ===
     if len(full_df) > 0:
@@ -164,41 +200,11 @@ def load_full_data(
     # 背景：factor_ic_data.json.gz 中 OHLC 等价格列以 Decimal 字符串形式存储，
     #   pandas 读取后 dtype=object，下游计算触发 `Decimal - float` 类型不兼容。
     # 修复：对所有非键列统一 pd.to_numeric(errors="coerce")
+    # Note: Parquet 已保证数值列类型正确，此循环对 float64 列是 no-op
     numeric_cols = [c for c in full_df.columns if c not in ("date", "asset")]
     for col in numeric_cols:
         full_df[col] = pd.to_numeric(full_df[col], errors="coerce")
     logger.info("数值列类型规范化完成: %d 列（pd.to_numeric, Decimal/str → float）", len(numeric_cols))
-
-    # === 过滤不可交易股票（涨停类，T 日尾盘无法买入） ===
-    # 向后兼容: 旧数据无此列时跳过过滤
-    if "is_untradeable" in full_df.columns:
-        untradeable_mask = full_df["is_untradeable"].fillna(0).astype(int) == 1
-        untradeable_count = int(untradeable_mask.sum())
-        if untradeable_count > 0:
-            full_df = full_df[~untradeable_mask].reset_index(drop=True)
-            logger.info(
-                "过滤不可交易股票(涨停类): 排除 %d 条, 剩余 %d 条",
-                untradeable_count,
-                len(full_df),
-            )
-    else:
-        logger.warning("数据缺少 is_untradeable 列，跳过不可交易股票过滤")
-
-    # === 过滤低流动性股票 (R1, designs/feat_liquidity_filter_to_factor_generator.md) ===
-    # 截面成交额 P5 切除尾部, 排除 IC 假设失效区（少量交易噪声主导价格变动）.
-    # 向后兼容: 旧数据无此列时跳过过滤.
-    if "is_low_liquidity" in full_df.columns:
-        low_liq_mask = full_df["is_low_liquidity"].fillna(0).astype(int) == 1
-        low_liq_count = int(low_liq_mask.sum())
-        if low_liq_count > 0:
-            full_df = full_df[~low_liq_mask].reset_index(drop=True)
-            logger.info(
-                "过滤低流动性股票(截面成交额 P5): 排除 %d 条, 剩余 %d 条",
-                low_liq_count,
-                len(full_df),
-            )
-    else:
-        logger.warning("数据缺少 is_low_liquidity 列，跳过低流动性股票过滤")
 
     return full_df
 
