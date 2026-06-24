@@ -634,6 +634,11 @@ def standardize_factors(
     # 全量 copy 1.39M×79列 ≈ 1GB 冗余，是 composite OOM 炸弹 1。
     # 函数仅新增 _std 列，不修改原始因子列，原地操作安全。
 
+    # v2.52 (OOM 炸弹6, 模式3c): 用 dict 收集 _std 列，循环结束后 pd.concat 批量添加
+    # 逐列 factor_df[std_col] = value 导致 pandas BlockManager 创建 N 个独立 Block
+    # PerformanceWarning: "DataFrame is highly fragmented" → 实际内存膨胀 ~3x → OOM
+    std_results: dict[str, pd.Series] = {}
+
     for col in factor_cols:
         std_col = f"{col}_std"
 
@@ -746,7 +751,7 @@ def standardize_factors(
 
             # 按日期选择分支: 零膨胀日期用 z_zi, 正常日期用 z_normal
             is_zi_date = date_col.isin(inflated_dates)
-            factor_df[std_col] = z_zi.where(is_zi_date, z_normal)
+            std_results[std_col] = z_zi.where(is_zi_date, z_normal)
 
             # v2.51 (OOM 炸弹4): 释放零膨胀分支临时对象
             # 35因子循环中，每个零膨胀因子产生 ~8 个 1.39M 元素 Series (~85MB)
@@ -754,7 +759,7 @@ def standardize_factors(
             del nonzero_vals, daily_mean_nz, daily_std_nz, daily_count_nz
             del row_mean_nz, row_std_nz, row_count_nz, z_zi, is_zi_date, degenerate_mask
         else:
-            factor_df[std_col] = z_normal
+            std_results[std_col] = z_normal
 
         # v2.51 (OOM 炸弹4): 每因子循环结束后释放临时对象
         # row_mean/row_std/z_normal 各 1.39M float64 ≈ 33MB/因子
@@ -833,8 +838,8 @@ def standardize_factors(
                     indicator=True,
                 )
                 pm_mask = (pm_flags["_merge"] == "both").values
-                z_mask = (factor_df[std_col].abs() > _POINT_MASS_ZSCORE_GATE).values
-                factor_df.loc[pm_mask & z_mask, std_col] = np.nan
+                z_mask = (std_results[std_col].abs() > _POINT_MASS_ZSCORE_GATE).values
+                std_results[std_col] = std_results[std_col].where(~(pm_mask & z_mask), np.nan)
 
                 # 逐值详情降为 debug：数万条/因子的逐值日志导致 416M 日志/次（v2.25 修复）
                 for _, row in point_mass.iterrows():
@@ -859,7 +864,7 @@ def standardize_factors(
 
             # NaN 处理：原因子值为 NaN 时标准化后仍为 NaN
             # 使用 fillna 保持原本 NaN 的位置，而非 .loc 后置还原
-            factor_df.loc[factor_df[col].isna(), std_col] = np.nan
+            std_results[std_col] = std_results[std_col].where(~factor_df[col].isna(), np.nan)
 
             # v2.51 (OOM 炸弹4): 释放点质量检测分支临时对象
             # groupby+merge 链产生 ~60MB/因子的临时 DataFrame，不释放则累积触发 OOM
@@ -876,6 +881,14 @@ def standardize_factors(
         # 不调用 munmap 归还 OS。107 次标准化循环（auto_select 72 + 主流程 35）累积
         # ~5.6GB 碎片，远超 ~600MB 活跃数据 → OOM SIGKILL
         # malloc_trim(0) 强制 glibc 归还所有 free 的 arena 页给 OS
+        _trim_arena()
+
+    # v2.52 (OOM 炸弹6, 模式3c): pd.concat 批量添加所有 _std 列
+    # 一次性创建所有新列的 Block，避免逐列 insert 的 N 次碎片化
+    if std_results:
+        factor_df = pd.concat([factor_df, pd.DataFrame(std_results, index=factor_df.index)], axis=1)
+        del std_results
+        gc.collect()
         _trim_arena()
 
     logger.info("因子标准化完成: %d 个因子", len(factor_cols))
