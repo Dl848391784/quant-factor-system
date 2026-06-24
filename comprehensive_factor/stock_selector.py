@@ -1503,10 +1503,25 @@ def select_stocks(
         # v3.7: 捕获 Stage 1 Top 30 快照 (拷贝, 避免后续 apply_stage2_resort mutate rank/stage1_rank)
         # 见 designs/feat_stock_selection_history_parquet.md §3.1
         stage1_top_snapshot = [copy.deepcopy(s) for s in stage1_stocks[: config.top_n]]
-        # v3.8: 捕获 Stage 1 Bottom 30 快照 (composite 最低的 30 只, rank 保持原始 171~200)
-        # 用于报告展示 composite 两端分布 (designs/feat_report_bottom30.md)
-        if len(stage1_stocks) > config.top_n:
-            stage1_bottom_snapshot = [copy.deepcopy(s) for s in stage1_stocks[-config.top_n :]]
+        # v3.8: 捕获全市场 composite 最低 30 只 (用于报告展示两端分布)
+        # 注意: 不是 stage1_stocks[-30:]——那是 Top 200 候选池的倒数, 全是正值
+        # 用户需要看到全市场 composite 最低的股票 (如 603261=-2.34)
+        # designs/feat_report_bottom30.md
+        valid_cf = composite_factor.dropna()
+        if len(valid_cf) > 0:
+            # 升序取最低 30 只 (无论 factor_direction, composite 升序 = 最差)
+            bottom_30 = valid_cf.nsmallest(config.top_n)
+            # rank = 全市场降序排名 (最高=1, 最低=N)
+            full_ranked = valid_cf.sort_values(ascending=False)
+            rank_map = {idx: i + 1 for i, idx in enumerate(full_ranked.index)}
+            stage1_bottom_snapshot = [
+                {
+                    "rank": rank_map[idx],
+                    "code": factor_df.loc[idx, "asset"],
+                    "composite_value": convert_to_native_types(val),
+                }
+                for idx, val in bottom_30.items()
+            ]
 
         # v2.44: Stage 2 排序列可能不在 standardize 后的 factor_df 中 (如 turnover_rate)
         # 需要从原始数据源 (factor_ic_data.parquet) 加载并对齐到 selection_date

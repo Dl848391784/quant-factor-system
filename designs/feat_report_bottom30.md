@@ -11,17 +11,21 @@
 
 ## How
 
-### 1. stock_selector.py — 捕获 Bottom 30 快照
+### 1. stock_selector.py — 从全量 composite_factor 取 Bottom 30
 
-在 L1499 `stage1_top_snapshot` 旁新增:
+Stage 1 候选池 = composite 降序 Top 200 (全是正值 0.59~1.06).
+用户要看的 Bottom 30 是**全市场** composite 最低的 30 只 (如 603261=-2.34),
+它们不在 Stage 1 候选池中.
 
+因此直接从 `composite_factor` Series 升序取最低 30 只:
 ```python
-stage1_bottom_snapshot: list[dict[str, Any]] = []
-# ...
-stage1_bottom_snapshot = [copy.deepcopy(s) for s in stage1_stocks[-config.top_n:]]
+valid_cf = composite_factor.dropna()
+bottom_30 = valid_cf.nsmallest(config.top_n)
+full_ranked = valid_cf.sort_values(ascending=False)
+rank_map = {idx: i + 1 for i, idx in enumerate(full_ranked.index)}
 ```
 
-Bottom 30 的 rank 从 stage1_stocks 原始 rank 保留 (171~200), 不重新编号.
+rank = 全市场降序排名 (最高=1, 最低=N), 与 Top 30 的 rank 体系一致.
 
 ### 2. stock_selector.py — Parquet 归档 stage=4
 
@@ -43,10 +47,10 @@ schema 不变 (stage 字段 int8, 已支持 1/2/3/4).
   ...
 --------------------------------------------------
 
-【Stage 1: 综合因子值 Bottom 30 (composite 升序)】
+【全市场: 综合因子值 Bottom 30 (composite 升序)】
   排名 股票代码       股票名称            综合因子值
 --------------------------------------------------
- 171 603261     ...               -2.341
+2760 603261     ...               -2.341
   ...
 --------------------------------------------------
 ```

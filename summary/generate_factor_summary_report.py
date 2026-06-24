@@ -2381,11 +2381,11 @@ def _generate_stock_selection_section(
             lines.append("-" * 50)
             lines.append("")
 
-        # v3.8: Stage 1 Bottom 30 简表 (composite 最低的 30 只)
+        # v3.8: 全市场 Bottom 30 简表 (composite 最低的 30 只)
         # designs/feat_report_bottom30.md
         stage1_bottom = stock_result.get("stage1_bottom", []) or []
         if stage1_bottom:
-            lines.append(f"【Stage 1: 综合因子值 Bottom {len(stage1_bottom)} (composite 升序)】")
+            lines.append(f"【全市场: 综合因子值 Bottom {len(stage1_bottom)} (composite 升序)】")
             lines.append(f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12}")
             lines.append("-" * 50)
             for item in stage1_bottom:
