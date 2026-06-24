@@ -1,7 +1,7 @@
 # comprehensive_factor 模块规范
 
-> 版本: v2.44
-> 最后更新: 2026-06-23（v2.44 两阶段选股: Stage 1 composite Top 200 → Stage 2 turnover 升序 → Stage 3 企稳过滤）
+> 版本: v3.7
+> 最后更新: 2026-06-24（v3.7 stock_selector: 废除 stock_selection_result.json 单文件, 改用 Parquet 分区数据集 stock_selection_history/, 含 Stage 1/2/3 Top 30 三段轨迹, designs/feat_stock_selection_history_parquet.md）
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
 >
@@ -186,18 +186,74 @@ Step 7: 股票选股 (stock_selector.py)
 - **反向因子** (`factor_direction=negative`): 升序排序（综合因子值越小越好）
 - **正向因子** (`factor_direction=positive`): 降序排序（综合因子值越大越好）
 
-**输出**: `result/stock_selection_result.json`
+**输出 (v3.7, designs/feat_stock_selection_history_parquet.md)**:
 
-```json
+`result/stock_selection_history/selection_date=YYYY-MM-DD/part-0.parquet`
+
+**布局**: Hive-style 分区 Parquet 数据集. 每天一个分区, 含 Stage 1/2/3 Top 30 共 ~90 行 (单阶段模式仅 stage3, ~30 行). 同日重跑覆盖该分区, 历史分区不动. **无 JSON 兜底**——写失败抛 RuntimeError, pipeline 退出码 1.
+
+**Schema** (23 列, 详见 `comprehensive_factor/schemas/stock_selection_history.schema.json`):
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| selection_date | string (分区键, 虚拟列) | 选股日期 |
+| stage | int8 | 1=composite 降序 / 2=stage2_sort_col 重排 / 3=企稳+决策卡 |
+| rank | int16 | 该 stage 内名次 (1-based) |
+| code | string | 股票代码 |
+| composite_value | float64 | 标准化综合因子值 (z-score) |
+| weight_coverage | float64 (nullable) | v1.15 权重覆盖率 |
+| stage1_rank | int16 (nullable) | Stage 1 名次 (Stage 2/3 行保留以供轨迹追溯) |
+| stage2_sort_value | float64 (nullable) | Stage 2 排序列原始值 (仅 Stage 2 行) |
+| excluded_at_stage3 | string (nullable) | 'stabilization' = Stage 2 被企稳过滤淘汰 |
+| weight_method, factor_direction, top_n | — | 配置快照 |
+| stage1_pool_size, stage2_sort_col, stage2_ascending | nullable | 两阶段配置 (单阶段全 null) |
+| direction_map_json, flipped_factors_json | string | 方向统一化元数据 (JSON 串) |
+| composite_score | float64 | weight_selector 最优分数 |
+| created_at | timestamp[us,UTC] | 写入时刻 |
+| run_id | string (uuid) | 审计 UUID |
+| factor_values_json, factor_values_std_json, decision_card_json | nullable | 嵌套字段 JSON 序列化, 仅 Stage 3 行有值 |
+
+**File-level metadata** (`pq.read_metadata(...).metadata`, 不在 schema 中, 用于统计):
+- `excluded_by_amplitude` / `excluded_by_coverage` / `excluded_by_liquidity` / `excluded_by_confirmation` (整数字符串)
+- `excluded_by_filter` (filter 角色排除字典 JSON 串)
+- `min_amplitude` / `min_weight_coverage` / `stocks_on_date` / `factor_list_json` / `factor_cols_json` / `generated_at`
+
+**读取 (示例)**:
+
+```python
+import pyarrow.compute as pc
+import pyarrow.dataset as pads
+
+ds = pads.dataset("comprehensive_factor/result/stock_selection_history", partitioning="hive")
+# 单日 stage 3 短名单
+df = ds.to_table(
+    filter=(pc.field("selection_date") == "2026-06-23") & (pc.field("stage") == 3)
+).to_pandas()
+# 跨日轨迹: 某股票每天 stage 3 名次变化
+trajectory = ds.to_table(
+    filter=(pc.field("code") == "002126") & (pc.field("stage") == 3)
+).to_pandas().sort_values("selection_date")
+```
+
+**Schema 演进硬约束** (`design §5.2`):
+- ✅ 加列 (nullable)
+- ❌ 删/改名现有列
+- ❌ 改 nullable 属性
+- ❌ 改分区键格式
+
+**已废弃** (v3.6 及之前, 保留只读):
+- `result/stock_selection_result.json` 单文件输出, schema 见 `comprehensive_factor/schemas/stock_selection_result.deprecated.schema.json`
+- `result_baseline_20260621/stock_selection_result.json` 备份目录历史快照
+
+```python
+# 旧 JSON 结构 (DEPRECATED, 仅用于 result_baseline_20260621/ 历史校验)
 {
   "meta": {
     "selection_date": "2026-06-01",
     "weight_method": "icir_weight",
-    "composite_score": 0.7273,
     "factor_direction": "negative",
     "top_n": 10,
     "stocks_on_date": 3006,
-    "valid_stocks": 10,
     "created_at": "2026-06-03T22:25:39",
     "direction_map": {...},
     "flipped_factors": [...],
@@ -209,18 +265,12 @@ Step 7: 股票选股 (stock_selector.py)
       "rank": 1,
       "code": "003004",
       "composite_value": -3.1497,
-      "factor_values": {"tail_price_position": 0.85, "turnover_surge": 1.2},
-      "factor_values_std": {"tail_price_position": -1.85, "turnover_surge": -2.20, "overnight_ret": -3.00},
+      "factor_values": {...},
+      "factor_values_std": {...},
       "weight_coverage": 1.0
-    },
-    ...
+    }
   ],
-  "weight_config": {
-    "method": "icir_weight",
-    "window": null,
-    "factor_list": ["tail_price_position", "tail_price_volume_intensity", "turnover_surge", "amplitude"],
-    "factor_cols": ["tail_price_position", "tail_price_volume_intensity", "turnover_surge", "amplitude"]
-  }
+  "weight_config": {...}
 }
 ```
 
@@ -2202,6 +2252,7 @@ weight_engine = WeightEngine(dimension_weight_method="icir")  # 硬编码
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v3.7 | 2026-06-24 | stock_selector.py v3.7: 废除 `stock_selection_result.json` 单文件输出, 改用 Parquet 分区数据集 `stock_selection_history/selection_date=YYYY-MM-DD/part-0.parquet` 作为单一信源, 含 Stage 1/2/3 Top 30 三段轨迹 (~90 行/天). (1) 新增 `write_selection_history()` 函数: pa.Table.from_pandas + pq.write_table + os.replace 原子覆盖, 显式 23 列 schema, file-level metadata 存 excluded_by_* 统计. (2) 删除 `save_result()`, 写失败抛 RuntimeError (无 JSON 兜底). (3) `apply_stage2_resort` 写回 stage2_sort_value 供归档. (4) `select_stocks` 三阶段深拷贝 Top 30 快照避开 mutate. (5) 单阶段 `enable_two_stage=False` 时只归档 Stage 3. (6) 新增 `comprehensive_factor/schemas/stock_selection_history.schema.json` 含 schema 演进硬约束 (加列✅/删名❌/改分区键❌). (7) 旧 schema 标 `stock_selection_result.deprecated.schema.json`. (8) 9 个新单测 `test_selection_history_parquet.py` 全绿. 设计文档: designs/feat_stock_selection_history_parquet.md |
 | v2.33 | 2026-06-21 | composite_runner.py v2.28 OOM 修复：3 项改动降低内存峰值 3.5GB→2.65GB（24%）。(1) auto_select 阶段 standardize_factors 新增 skip_point_mass=True 参数，跳过 45 次 groupby+merge 点质量检测临时对象。(2) auto_select 完成后 del all_factor_df + all_corr_matrix + gc.collect()。(3) return_df 提取和 full_df 释放从 Step 8 提前到 Step 1。4 个综合因子脚本共用 composite_runner.py 一次覆盖。设计文档: designs/composite_auto_select_memory_optimization_design.md |
 | v2.33a | 2026-06-20 | factor_selector.py v2.10 + summary v2.23: 豁免信息传递链 + 报告维度感知展示同步。遵循 designs/exempt_info_propagation_design.md 路径B |
 | v2.29b | 2026-06-21 | factor_loader.py v2.29b: 零膨胀因子零值分离标准化——检测截面零值占比≥5%（_ZERO_INFLATED_THRESHOLD=0.05），零值→z=0（中性截断信号），非零值→用自身μ/σ标准化+clip±3σ。修复 price_volume_divergence 42%零值→σ≈0.015人为压缩→ICIR=0.16弱因子贡献22.5%→修复后pvd z-score绝对值下降28-38%，占比从22.5%→18.2%。新增 _is_zero_inflated_group + _standardize_zero_inflated 辅助函数 + test_zero_inflated_standardization.py 13测试。遵循 designs/zero_inflated_standardization_design.md 方案A。M9规范同步更新 |

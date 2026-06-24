@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Stock Selection Result (DEPRECATED v3.6 and earlier)",
+  "description": "DEPRECATED: 本 schema 描述的 stock_selection_result.json 单文件输出已于 v3.7 (2026-06-24) 废弃, 改用 Parquet 分区数据集 stock_selection_history/ (见 stock_selection_history.schema.json). 设计依据: designs/feat_stock_selection_history_parquet.md. 现有磁盘上 comprehensive_factor/result/stock_selection_result.json 保留为只读快照 (cutoff: 2026-06-23 的运行结果), pipeline 不再生成新文件. 下游 (summary 模块) 在 T3 完成后改读 Parquet, 届时本 schema 仅用于 result_baseline_20260621/ 备份目录的历史快照校验.",
+  "x-deprecation": {
+    "deprecated_in": "v3.7",
+    "deprecation_date": "2026-06-24",
+    "replacement": "comprehensive_factor/schemas/stock_selection_history.schema.json",
+    "migration_doc": "designs/feat_stock_selection_history_parquet.md",
+    "removal_planned": false,
+    "removal_reason_if_planned": "保留供 result_baseline_20260621/ 历史快照校验, 不主动删除"
+  },
+  "type": "object",
+  "required": ["meta", "top_stocks", "weight_config"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["selection_date", "top_n", "factor_direction"],
+      "properties": {
+        "selection_date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "top_n": { "type": "integer", "minimum": 1 },
+        "factor_direction": { "type": "string", "enum": ["positive", "negative"] }
+      }
+    },
+    "top_stocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rank", "code", "composite_value"],
+        "properties": {
+          "rank": { "type": "integer", "minimum": 1 },
+          "code": { "type": "string" },
+          "composite_value": { "type": "number" }
+        }
+      }
+    },
+    "weight_config": { "type": "object" }
+  },
+  "additionalProperties": true
+}

@@ -22,7 +22,6 @@ import pyarrow.compute as pc
 import pyarrow.dataset as pads
 import pyarrow.parquet as pq
 import pytest
-
 from comprehensive_factor.stock_selector import StockSelectorConfig, write_selection_history
 
 
@@ -135,9 +134,7 @@ def stage3_top(stage2_top) -> list[dict]:
 
 
 class TestWriteSelectionHistory:
-    def test_write_three_stages_basic(
-        self, base_config, weight_config, stage1_top, stage2_top, stage3_top
-    ):
+    def test_write_three_stages_basic(self, base_config, weight_config, stage1_top, stage2_top, stage3_top):
         """写入后三阶段各 30 行, 总 90 行."""
         partition_dir = write_selection_history(
             stage1_top=stage1_top,
@@ -176,9 +173,7 @@ class TestWriteSelectionHistory:
         # 分区键虚拟列存在
         assert (df["selection_date"] == "2026-06-23").all()
 
-    def test_partition_key_correct(
-        self, base_config, weight_config, stage1_top, stage2_top, stage3_top
-    ):
+    def test_partition_key_correct(self, base_config, weight_config, stage1_top, stage2_top, stage3_top):
         """Hive 分区目录结构 selection_date=YYYY-MM-DD."""
         write_selection_history(
             stage1_top=stage1_top,
@@ -204,9 +199,7 @@ class TestWriteSelectionHistory:
         df = ds.to_table(filter=pc.field("selection_date") == "2026-06-23").to_pandas()
         assert (df["selection_date"] == "2026-06-23").all()
 
-    def test_file_level_metadata_roundtrip(
-        self, base_config, weight_config, stage1_top, stage2_top, stage3_top
-    ):
+    def test_file_level_metadata_roundtrip(self, base_config, weight_config, stage1_top, stage2_top, stage3_top):
         """excluded_by_* 写入 file-level metadata 可读取还原."""
         exclusion_stats = {
             "excluded_by_amplitude": 5,
@@ -245,9 +238,7 @@ class TestWriteSelectionHistory:
         assert json.loads(meta[b"factor_list_json"].decode("utf-8")) == ["rsi"]
         assert json.loads(meta[b"factor_cols_json"].decode("utf-8")) == ["rsi_6"]
 
-    def test_rerun_same_date_overwrites_partition(
-        self, base_config, weight_config, stage1_top, stage2_top, stage3_top
-    ):
+    def test_rerun_same_date_overwrites_partition(self, base_config, weight_config, stage1_top, stage2_top, stage3_top):
         """同日重跑覆盖同分区, 其他分区不动."""
         # 第一次写 2026-06-22
         cfg_22 = base_config
@@ -267,9 +258,7 @@ class TestWriteSelectionHistory:
             exclusion_stats={},
             output_dir=base_config.output_dir,
         )
-        path_22 = (
-            base_config.output_dir / "stock_selection_history" / "selection_date=2026-06-22" / "part-0.parquet"
-        )
+        path_22 = base_config.output_dir / "stock_selection_history" / "selection_date=2026-06-22" / "part-0.parquet"
         assert path_22.exists()
         size_22_before = path_22.stat().st_size
 
@@ -289,9 +278,7 @@ class TestWriteSelectionHistory:
             exclusion_stats={},
             output_dir=base_config.output_dir,
         )
-        path_23 = (
-            base_config.output_dir / "stock_selection_history" / "selection_date=2026-06-23" / "part-0.parquet"
-        )
+        path_23 = base_config.output_dir / "stock_selection_history" / "selection_date=2026-06-23" / "part-0.parquet"
         assert path_23.exists()
         assert path_22.exists(), "其他分区不应被影响"
         assert path_22.stat().st_size == size_22_before, "其他分区文件大小不应变"
@@ -318,9 +305,7 @@ class TestWriteSelectionHistory:
         df_23 = pq.read_table(path_23).to_pandas()
         assert len(df_23) == 30, f"重跑后只剩 30 行 (10×3), 实际 {len(df_23)}"
 
-    def test_single_stage_mode_only_stage3(
-        self, base_config, weight_config, stage3_top, tmp_path
-    ):
+    def test_single_stage_mode_only_stage3(self, base_config, weight_config, stage3_top, tmp_path):
         """enable_two_stage=False 时, stage1/stage2 传 [], 只归档 stage3."""
         cfg_single = StockSelectorConfig(
             top_n=30,
@@ -358,9 +343,7 @@ class TestWriteSelectionHistory:
         assert df["stage2_sort_col"].isna().all()
         assert df["stage2_ascending"].isna().all()
 
-    def test_excluded_at_stage3_field(
-        self, base_config, weight_config, stage1_top, stage2_top, stage3_top
-    ):
+    def test_excluded_at_stage3_field(self, base_config, weight_config, stage1_top, stage2_top, stage3_top):
         """Stage 2 中没进 Stage 3 的股票, excluded_at_stage3='stabilization'."""
         partition_dir = write_selection_history(
             stage1_top=stage1_top,
@@ -390,9 +373,7 @@ class TestWriteSelectionHistory:
         assert df[df["stage"] == 1]["excluded_at_stage3"].isna().all()
         assert df[df["stage"] == 3]["excluded_at_stage3"].isna().all()
 
-    def test_stage2_sort_value_populated(
-        self, base_config, weight_config, stage1_top, stage2_top, stage3_top
-    ):
+    def test_stage2_sort_value_populated(self, base_config, weight_config, stage1_top, stage2_top, stage3_top):
         """Stage 2 行应带 stage2_sort_value, Stage 1 行不带."""
         partition_dir = write_selection_history(
             stage1_top=stage1_top,
@@ -416,9 +397,7 @@ class TestWriteSelectionHistory:
         # Stage 2 行 stage2_sort_value 全有值
         assert df[df["stage"] == 2]["stage2_sort_value"].notna().all()
 
-    def test_no_json_file_written(
-        self, base_config, weight_config, stage1_top, stage2_top, stage3_top
-    ):
+    def test_no_json_file_written(self, base_config, weight_config, stage1_top, stage2_top, stage3_top):
         """v3.7 防回归: 写入后输出目录不应产生 stock_selection_result.json."""
         write_selection_history(
             stage1_top=stage1_top,
@@ -455,4 +434,59 @@ class TestWriteSelectionHistory:
                 flipped_factors=[],
                 exclusion_stats={},
                 output_dir=base_config.output_dir,
+            )
+
+    def test_rows_match_schema(self, base_config, weight_config, stage1_top, stage2_top, stage3_top):
+        """读回的每行结构符合 comprehensive_factor/schemas/stock_selection_history.schema.json.
+
+        合规性检查 (PROJECT.md 规则 #4: JSON Schema 校验输出).
+        """
+        import math
+
+        import jsonschema
+
+        schema_path = Path(__file__).parent.parent / "schemas" / "stock_selection_history.schema.json"
+        with open(schema_path) as f:
+            schema = json.load(f)
+
+        write_selection_history(
+            stage1_top=stage1_top,
+            stage2_top=stage2_top,
+            stage3_top=stage3_top,
+            config=base_config,
+            weight_config=weight_config,
+            selection_date="2026-06-23",
+            stocks_on_date=2790,
+            factor_list=["rsi"],
+            factor_cols=["rsi_6"],
+            direction_map={"rsi": "positive"},
+            flipped_factors=[],
+            exclusion_stats={},
+            output_dir=base_config.output_dir,
+        )
+
+        history_root = base_config.output_dir / "stock_selection_history"
+        ds = pads.dataset(str(history_root), partitioning="hive")
+        df = ds.to_table().to_pandas()
+
+        validator = jsonschema.Draft7Validator(schema)
+        for idx, row in df.iterrows():
+            row_dict = {}
+            for k, v in row.to_dict().items():
+                # pandas NaN/NaT -> None (JSON Schema null)
+                if v is None or (isinstance(v, float) and math.isnan(v)):
+                    row_dict[k] = None
+                elif hasattr(v, "isoformat"):  # Timestamp
+                    row_dict[k] = v.isoformat()
+                elif isinstance(v, bool):
+                    row_dict[k] = bool(v)
+                elif hasattr(v, "item"):  # numpy scalar
+                    row_dict[k] = v.item()
+                else:
+                    row_dict[k] = v
+
+            errors = sorted(validator.iter_errors(row_dict), key=lambda e: e.path)
+            assert not errors, (
+                f"Row {idx} (stage={row_dict['stage']}, rank={row_dict['rank']}) "
+                f"违反 schema: {[e.message for e in errors]}"
             )

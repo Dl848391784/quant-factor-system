@@ -1,0 +1,154 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Stock Selection History Row (v3.7)",
+  "description": "comprehensive_factor 模块 stock_selection_history/ Parquet 分区数据集每行结构. 设计依据: designs/feat_stock_selection_history_parquet.md. 取代 v3.6 之前的 stock_selection_result.json (后者已 deprecated, 见 stock_selection_result.deprecated.schema.json).",
+  "type": "object",
+  "required": [
+    "selection_date",
+    "stage",
+    "rank",
+    "code",
+    "composite_value",
+    "weight_method",
+    "factor_direction",
+    "top_n",
+    "direction_map_json",
+    "flipped_factors_json",
+    "composite_score",
+    "created_at",
+    "run_id"
+  ],
+  "properties": {
+    "selection_date": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "选股日期, Hive 分区键 (selection_date=YYYY-MM-DD/). Parquet body 不存此列, 由 pyarrow.dataset(partitioning='hive') 自动注入虚拟列."
+    },
+    "stage": {
+      "type": "integer",
+      "enum": [1, 2, 3],
+      "description": "v2.44 两阶段选股阶段标识. 1=composite 降序 Top stage1_pool_size 内的 Top 30; 2=按 stage2_sort_col 重排后 Top 30; 3=企稳过滤+决策卡片后最终 Top N (默认 30)."
+    },
+    "rank": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "该 stage 内的名次, 1-based."
+    },
+    "code": {
+      "type": "string",
+      "description": "股票代码 (akshare 格式, 6 位数字)."
+    },
+    "composite_value": {
+      "type": "number",
+      "description": "标准化后综合因子值 (z-score). 跨 stage 是相同股票的同一值——composite 在 standardize 阶段计算一次后不变."
+    },
+    "weight_coverage": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1,
+      "description": "v1.15 权重覆盖率. (1 - 缺失因子权重和). null 表示未计算 (老数据兼容)."
+    },
+    "stage1_rank": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "该股票在 Stage 1 (composite 降序) 内的名次. Stage 1 行: 等于 rank; Stage 2/3 行: 保留 Stage 1 名次以供轨迹追溯. 单阶段模式 (enable_two_stage=False) 全 null."
+    },
+    "stage2_sort_value": {
+      "type": ["number", "null"],
+      "description": "Stage 2 排序列 (stage2_sort_col, 如 turnover_rate) 的原始值. 仅 Stage 2 行有值; Stage 1/3 行为 null."
+    },
+    "excluded_at_stage3": {
+      "type": ["string", "null"],
+      "enum": [null, "stabilization", "decision_card_fail"],
+      "description": "Stage 2 -> Stage 3 淘汰原因. Stage 2 行中若 code 不在 Stage 3 内则标 'stabilization' (apply_stabilization_filter 淘汰); 'decision_card_fail' 保留扩展. Stage 1/3 行为 null."
+    },
+    "weight_method": {
+      "type": "string",
+      "description": "权重方法名 (如 rolling_icir_weight). 由 build_result 从 weight_config.best_selection.method 取."
+    },
+    "factor_direction": {
+      "type": "string",
+      "enum": ["positive", "negative"],
+      "description": "因子方向 (PROJECT.md 规则 #5). v1.10 方向统一化后通常 positive."
+    },
+    "top_n": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "短名单大小 (StockSelectorConfig.top_n, 默认 30)."
+    },
+    "stage1_pool_size": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "Stage 1 候选池大小 (默认 200). 单阶段模式为 null."
+    },
+    "stage2_sort_col": {
+      "type": ["string", "null"],
+      "description": "Stage 2 排序列名 (如 turnover_rate). 单阶段模式为 null."
+    },
+    "stage2_ascending": {
+      "type": ["boolean", "null"],
+      "description": "Stage 2 排序方向 (true=升序). 单阶段模式为 null."
+    },
+    "direction_map_json": {
+      "type": "string",
+      "description": "JSON 字符串: {factor_logic_name -> 'positive'/'negative'}. 用字符串规避跨日 schema 漂移."
+    },
+    "flipped_factors_json": {
+      "type": "string",
+      "description": "JSON 字符串: 标准化时取反的因子列表."
+    },
+    "composite_score": {
+      "type": "number",
+      "description": "weight_config.best_selection.composite_score (权重选择器最优分数)."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Parquet 文件写入时刻 (UTC, ISO8601)."
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "本次选股运行 UUID. 同日重跑覆盖分区时 run_id 更新 (用于审计)."
+    },
+    "factor_values_json": {
+      "type": ["string", "null"],
+      "description": "JSON 字符串: {factor_col -> 原始值}. 仅 Stage 3 行有值. 用 JSON 规避因子集合变化引起的 schema 漂移."
+    },
+    "factor_values_std_json": {
+      "type": ["string", "null"],
+      "description": "JSON 字符串: {factor_col -> z-score 标准化值}. 仅 Stage 3 行有值."
+    },
+    "decision_card_json": {
+      "type": ["string", "null"],
+      "description": "JSON 字符串: 决策卡片 (v2.43, 5 维客观字段). 仅 Stage 3 行有值."
+    }
+  },
+  "additionalProperties": false,
+  "x-parquet-metadata": {
+    "description": "Parquet file-level metadata (table.replace_schema_metadata) 含统计字段, 不在行 schema 中.",
+    "keys": {
+      "excluded_by_amplitude": "振幅过滤排除数 (整数字符串)",
+      "excluded_by_coverage": "覆盖率过滤排除数 (整数字符串)",
+      "excluded_by_liquidity": "流动性过滤排除数 (整数字符串)",
+      "excluded_by_confirmation": "企稳过滤排除数 (整数字符串)",
+      "excluded_by_filter": "filter 角色排除数 (JSON 字符串)",
+      "min_amplitude": "振幅阈值 (浮点字符串)",
+      "min_weight_coverage": "覆盖率阈值 (浮点字符串)",
+      "stocks_on_date": "该日全市场股票数 (整数字符串)",
+      "factor_list_json": "因子逻辑名列表 (JSON 字符串)",
+      "factor_cols_json": "因子列名列表 (JSON 字符串)",
+      "generated_at": "写入时刻 ISO8601 (字符串)"
+    }
+  },
+  "x-schema-evolution-rules": {
+    "description": "Schema 演进硬约束 (design §5.2). Schema 改动需先更 design 再改实现.",
+    "allowed": "新增 nullable 列 (向后兼容)",
+    "forbidden": [
+      "删除/改名现有列",
+      "改变现有列的 nullable 属性",
+      "改变 stage 枚举值含义 (1/2/3 固定)",
+      "改变 selection_date 分区键格式"
+    ]
+  }
+}
