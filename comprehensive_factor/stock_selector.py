@@ -37,14 +37,18 @@ Step 7: 股票选股 (stock_selector.py) ← 本脚本
 - v1.3b (2026-06-11): 新增 factor_values_std 字段（标准化 z-score，Winsorize ±3σ 截断），解决报告显示原始值误导问题（momentum_strength 原始=-9.08→z=-2.65）
 - v1.12 (2026-06-11): 2项改动：1. 新增 min_amplitude 参数（默认0.01=1%，排除不可交易的一字板涨停股）；2. top_n 默认值从3改为10，扩大选股范围
 - v1.21 (2026-06-20): 修复维度权重不生效 bug——从 composite 结果读取 dimension_weight_method 传给 WeightEngine（之前 stock_selector 自建 WeightEngine 时缺 dimension_weight_method/factor_categories 参数，导致选股排序用不带维度权重的综合因子值，维度分组工作无效）
+- v3.7 (2026-06-24): 废除 stock_selection_result.json 单文件, 改用 Parquet 分区数据集 stock_selection_history/ 作为单一信源 (designs/feat_stock_selection_history_parquet.md). 含 Stage 1/2/3 Top 30 三段, 按 selection_date 分区, file-level metadata 存 excluded_by_* 统计. apply_stage2_resort 写回 stage2_sort_value 字段.
 
 作者: 云瑶
 创建日期: 2026-06-03
 """
 
+import copy
 import json
 import logging
+import os
 import sys
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -79,7 +83,7 @@ from factor_definitions import FACTOR_CATEGORIES, FACTOR_COL_TO_NAME_MAP  # noqa
 # ============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "1.17"
+__version__ = "3.7"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -109,8 +113,8 @@ class StockSelectorConfig:
     - 单一数据源
 
     Note:
-        - factor_direction 固定为 'negative'（综合因子默认反向）
-        - 参考 MODULE.md M79: 综合因子低值预期高收益
+        - factor_direction 固定为 'positive'（v2.47: 综合因子对齐到正向语义）
+        - 参考 MODULE.md M56 v2.47: 综合因子高值预期高收益
     """
 
     # 问题 2 修复：删除 factor_list/factor_cols 字段
@@ -738,10 +742,16 @@ def apply_stage2_resort(
     )
 
     # 保留 Stage 1 rank, 重新编号 rank 为 Stage 2 名次
+    # v3.7: 同时把排序值 sort_col 写回 stock['stage2_sort_value'], 供 Parquet 归档 (design §2.2)
     result = sorted_stocks[:target_n]
     for idx, stock in enumerate(result, start=1):
         stock["stage1_rank"] = stock.get("rank", idx)  # 保留 Stage 1 名次
         stock["rank"] = idx  # Stage 2 后的临时 rank (企稳过滤后会再次重编号)
+        raw_val = asset_to_val.get(stock["code"])
+        if raw_val is not None and not (isinstance(raw_val, float) and np.isnan(raw_val)):
+            stock["stage2_sort_value"] = float(raw_val)
+        else:
+            stock["stage2_sort_value"] = None
 
     return result
 
@@ -941,44 +951,246 @@ def build_result(
     return result
 
 
-def save_result(
-    result: dict[str, Any],
+def write_selection_history(
+    stage1_top: list[dict[str, Any]],
+    stage2_top: list[dict[str, Any]],
+    stage3_top: list[dict[str, Any]],
+    config: StockSelectorConfig,
+    weight_config: dict[str, Any],
+    selection_date: str,
+    stocks_on_date: int,
+    factor_list: list[str],
+    factor_cols: list[str],
+    direction_map: dict[str, str] | None,
+    flipped_factors: list[str] | None,
+    exclusion_stats: dict[str, Any],
     output_dir: Path | str,
     logger: logging.Logger | None = None,
 ) -> Path:
-    """保存结果到 JSON 文件
+    """写入选股历史到 Parquet 分区数据集（单一信源, designs/feat_stock_selection_history_parquet.md）.
+
+    数据集布局 (Hive-style partitioning):
+        <output_dir>/stock_selection_history/selection_date=YYYY-MM-DD/part-0.parquet
+
+    每天一个分区, 含 Stage 1/2/3 Top 30 共 ~90 行. 同日重跑覆盖该分区, 其他分区不动.
 
     Args:
-        result: 结果字典
-        output_dir: 输出目录（Path 或 str）
-        logger: 日志对象（默认使用模块级 _logger）
+        stage1_top: Stage 1 (composite 降序) Top 30. 调用方需切片好.
+        stage2_top: Stage 2 (按 stage2_sort_col 重排) Top 30. 调用方需切片好.
+                    enable_two_stage=False 时传 [].
+        stage3_top: Stage 3 (企稳过滤后) 最终 Top N. 含 factor_values/decision_card.
+        config: 选股配置.
+        weight_config: 权重配置 (含 best_selection.method/composite_score).
+        selection_date: 选股日期 'YYYY-MM-DD'.
+        stocks_on_date: 该日全市场股票数.
+        factor_list: 因子逻辑名列表.
+        factor_cols: 因子列名列表.
+        direction_map: 因子方向映射 (logic_name -> 'positive'/'negative').
+        flipped_factors: 标准化时取反的因子列表.
+        exclusion_stats: dict 含 excluded_by_amplitude/coverage/liquidity/confirmation/filter (写入 file metadata).
+        output_dir: 输出根目录 (函数内自动拼接 'stock_selection_history').
+        logger: 日志.
 
     Returns:
-        输出文件路径
+        分区目录路径 (selection_date=YYYY-MM-DD).
 
-    Note:
-        - 输出文件名: stock_selection_result.json
-        - 遵循 MODULE.md M4: 输出到 comprehensive_factor/result/
+    Raises:
+        RuntimeError: 写入失败 (按 design §3.2: 无 JSON 兜底, 失败即 pipeline 失败).
+        ValueError: 输入数据契约违反.
     """
     if logger is None:
         logger = _logger
 
-    # 转换为 Path
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
     output_dir = Path(output_dir)
+    dataset_root = output_dir / "stock_selection_history"
+    partition_dir = dataset_root / f"selection_date={selection_date}"
 
-    # 确保输出目录存在
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # 构造行集合
+    best_selection = weight_config["best_selection"]
+    run_id = str(uuid.uuid4())
+    created_at = datetime.now(timezone.utc)
+    weight_method = best_selection["method"]
+    composite_score = float(best_selection["composite_score"])
+    direction_map_json_str = json.dumps(direction_map or {}, ensure_ascii=False, sort_keys=True)
+    flipped_factors_json_str = json.dumps(flipped_factors or [], ensure_ascii=False)
 
-    # 输出文件名（固定）
-    output_file = output_dir / "stock_selection_result.json"
+    # Stage3 codes 集合 (用于标记 Stage 2 中被淘汰的股票)
+    stage3_codes = {s["code"] for s in stage3_top}
 
-    # 保存 JSON
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
+    def _row(stage: int, stock: dict[str, Any]) -> dict[str, Any]:
+        """构造一行 Parquet 记录"""
+        code = stock["code"]
+        composite_value = float(stock["composite_value"])
+        weight_coverage = stock.get("weight_coverage")
+        weight_coverage_f = float(weight_coverage) if weight_coverage is not None else None
 
-    logger.info("结果已保存: %s", output_file)
+        stage1_rank: int | None
+        if stage == 1:
+            stage1_rank = int(stock["rank"])
+        else:
+            sr = stock.get("stage1_rank")
+            stage1_rank = int(sr) if sr is not None else None
 
-    return output_file
+        stage2_sort_value: float | None = None
+        if stage == 2 and config.enable_two_stage and config.stage2_sort_col:
+            # apply_stage2_resort 没把排序值塞回 stock dict, 留 None;
+            # 调用方若想填值需扩展 apply_stage2_resort. 本期接受 None (留作未来扩展).
+            stage2_sort_value = stock.get("stage2_sort_value")
+            if stage2_sort_value is not None:
+                stage2_sort_value = float(stage2_sort_value)
+
+        excluded_at_stage3: str | None = None
+        if stage == 2 and code not in stage3_codes:
+            excluded_at_stage3 = "stabilization"
+
+        factor_values_json_str: str | None = None
+        factor_values_std_json_str: str | None = None
+        decision_card_json_str: str | None = None
+        if stage == 3:
+            fv = stock.get("factor_values")
+            if fv is not None:
+                factor_values_json_str = json.dumps(fv, ensure_ascii=False, sort_keys=True)
+            fvs = stock.get("factor_values_std")
+            if fvs is not None:
+                factor_values_std_json_str = json.dumps(fvs, ensure_ascii=False, sort_keys=True)
+            dc = stock.get("decision_card")
+            if dc is not None:
+                decision_card_json_str = json.dumps(dc, ensure_ascii=False, sort_keys=True)
+
+        return {
+            # 注: selection_date 是 Hive 分区键, 不写入 Parquet body (Hive 分区天然把目录名当虚拟列,
+            # 写入列会与分区键冲突: ArrowTypeError 'string vs dictionary<values=string>'.
+            # 通过 pads.dataset(partitioning='hive') 读取时 selection_date 列会自动出现).
+            "stage": stage,
+            "rank": int(stock["rank"]),
+            "code": code,
+            "composite_value": composite_value,
+            "weight_coverage": weight_coverage_f,
+            "stage1_rank": stage1_rank,
+            "stage2_sort_value": stage2_sort_value,
+            "excluded_at_stage3": excluded_at_stage3,
+            "weight_method": weight_method,
+            "factor_direction": config.factor_direction,
+            "top_n": int(config.top_n),
+            "stage1_pool_size": int(config.stage1_pool_size) if config.enable_two_stage else None,
+            "stage2_sort_col": config.stage2_sort_col if config.enable_two_stage else None,
+            "stage2_ascending": bool(config.stage2_ascending) if config.enable_two_stage else None,
+            "direction_map_json": direction_map_json_str,
+            "flipped_factors_json": flipped_factors_json_str,
+            "composite_score": composite_score,
+            "created_at": created_at,
+            "run_id": run_id,
+            "factor_values_json": factor_values_json_str,
+            "factor_values_std_json": factor_values_std_json_str,
+            "decision_card_json": decision_card_json_str,
+        }
+
+    rows: list[dict[str, Any]] = []
+    for s in stage1_top:
+        rows.append(_row(1, s))
+    for s in stage2_top:
+        rows.append(_row(2, s))
+    for s in stage3_top:
+        rows.append(_row(3, s))
+
+    if not rows:
+        raise ValueError(
+            f"write_selection_history: 没有行可写 (selection_date={selection_date}). "
+            "stage1/stage2/stage3 三组均为空, 请检查上游流水线."
+        )
+
+    df = pd.DataFrame(rows)
+
+    # 显式 schema (design §2.2): 保证跨日 schema 稳定, 不被 pandas 类型推断打乱
+    # 注: selection_date 不在 schema 中——它是 Hive 分区键, pyarrow 读取时自动注入虚拟列
+    schema = pa.schema(
+        [
+            pa.field("stage", pa.int8(), nullable=False),
+            pa.field("rank", pa.int16(), nullable=False),
+            pa.field("code", pa.string(), nullable=False),
+            pa.field("composite_value", pa.float64(), nullable=False),
+            pa.field("weight_coverage", pa.float64(), nullable=True),
+            pa.field("stage1_rank", pa.int16(), nullable=True),
+            pa.field("stage2_sort_value", pa.float64(), nullable=True),
+            pa.field("excluded_at_stage3", pa.string(), nullable=True),
+            pa.field("weight_method", pa.string(), nullable=False),
+            pa.field("factor_direction", pa.string(), nullable=False),
+            pa.field("top_n", pa.int16(), nullable=False),
+            pa.field("stage1_pool_size", pa.int16(), nullable=True),
+            pa.field("stage2_sort_col", pa.string(), nullable=True),
+            pa.field("stage2_ascending", pa.bool_(), nullable=True),
+            pa.field("direction_map_json", pa.string(), nullable=False),
+            pa.field("flipped_factors_json", pa.string(), nullable=False),
+            pa.field("composite_score", pa.float64(), nullable=False),
+            pa.field("created_at", pa.timestamp("us", tz="UTC"), nullable=False),
+            pa.field("run_id", pa.string(), nullable=False),
+            pa.field("factor_values_json", pa.string(), nullable=True),
+            pa.field("factor_values_std_json", pa.string(), nullable=True),
+            pa.field("decision_card_json", pa.string(), nullable=True),
+        ]
+    )
+
+    try:
+        table = pa.Table.from_pandas(df, schema=schema, preserve_index=False)
+    except (pa.ArrowException, ValueError, TypeError) as e:
+        logger.exception("write_selection_history: DataFrame → Arrow Table 转换失败, schema 不匹配")
+        raise RuntimeError(f"write_selection_history: DataFrame → Arrow Table 转换失败: {type(e).__name__}: {e}") from e
+
+    # file-level metadata (统计字段, 不参与查询)
+    exclusion_meta = {
+        b"excluded_by_amplitude": str(exclusion_stats.get("excluded_by_amplitude", 0)).encode("utf-8"),
+        b"excluded_by_coverage": str(exclusion_stats.get("excluded_by_coverage", 0)).encode("utf-8"),
+        b"excluded_by_liquidity": str(exclusion_stats.get("excluded_by_liquidity", 0)).encode("utf-8"),
+        b"excluded_by_confirmation": str(exclusion_stats.get("excluded_by_confirmation", 0)).encode("utf-8"),
+        b"excluded_by_filter": json.dumps(exclusion_stats.get("excluded_by_filter") or {}, ensure_ascii=False).encode(
+            "utf-8"
+        ),
+        b"min_amplitude": str(config.min_amplitude).encode("utf-8"),
+        b"min_weight_coverage": str(exclusion_stats.get("min_weight_coverage", 0.5)).encode("utf-8"),
+        b"stocks_on_date": str(stocks_on_date).encode("utf-8"),
+        b"factor_list_json": json.dumps(factor_list, ensure_ascii=False).encode("utf-8"),
+        b"factor_cols_json": json.dumps(factor_cols, ensure_ascii=False).encode("utf-8"),
+        b"generated_at": created_at.strftime("%Y-%m-%dT%H:%M:%S%z").encode("utf-8"),
+    }
+    existing_meta = table.schema.metadata or {}
+    table = table.replace_schema_metadata({**existing_meta, **exclusion_meta})
+
+    # 写入: 临时文件 + os.replace 原子覆盖 (项目 v3.6 同 pattern)
+    try:
+        partition_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.exception("write_selection_history: 创建分区目录失败: %s", partition_dir)
+        raise RuntimeError(
+            f"write_selection_history: 创建分区目录失败: {partition_dir}, {type(e).__name__}: {e}"
+        ) from e
+
+    target_path = partition_dir / "part-0.parquet"
+    temp_path = partition_dir / "part-0.parquet.tmp"
+    replaced = False
+    try:
+        pq.write_table(table, temp_path, compression="snappy")
+        os.replace(temp_path, target_path)
+        replaced = True
+    except (pa.ArrowException, OSError) as e:
+        logger.exception("write_selection_history: Parquet 写入失败: %s", target_path)
+        raise RuntimeError(f"write_selection_history: Parquet 写入失败: {target_path}, {type(e).__name__}: {e}") from e
+    finally:
+        if not replaced:
+            temp_path.unlink(missing_ok=True)
+
+    logger.info(
+        "选股历史已写入 Parquet 分区: %s (stage1=%d, stage2=%d, stage3=%d, 大小=%.2f KB)",
+        partition_dir,
+        len(stage1_top),
+        len(stage2_top),
+        len(stage3_top),
+        target_path.stat().st_size / 1024,
+    )
+
+    return partition_dir
 
 
 def select_stocks(
@@ -1004,7 +1216,9 @@ def select_stocks(
         logger: 日志对象（默认使用模块级 _logger）
 
     Returns:
-        Tuple[result_dict, output_file_path]
+        Tuple[result_dict, output_path]
+            - result_dict: build_result 返回的内存字典（含 meta/top_stocks/weight_config）
+            - output_path: write_selection_history 返回的 Parquet 分区目录
 
     Raises:
         ValueError: 数据异常
@@ -1253,6 +1467,11 @@ def select_stocks(
     #   Stage 1: composite Top stage1_pool_size (alpha 仍有效的子池, 默认 200)
     #   Stage 2: 在 Stage 1 内按 stage2_sort_col 排序取 top_n*2 (避开线性尾部失效)
     #   Stage 3: apply_stabilization_filter 切到 top_n (现有不变)
+    # v3.7: stage1_top_snapshot / stage2_top_snapshot 用于 write_selection_history (Parquet 归档)
+    # 见 designs/feat_stock_selection_history_parquet.md §3.1
+    stage1_top_snapshot: list[dict[str, Any]] = []
+    stage2_top_snapshot: list[dict[str, Any]] = []
+
     if config.enable_two_stage:
         stage1_n = config.stage1_pool_size
         logger.info(
@@ -1275,6 +1494,10 @@ def select_stocks(
             min_amount_percentile=config.min_amount_percentile,
             logger=logger,
         )
+        # v3.7: 捕获 Stage 1 Top 30 快照 (拷贝, 避免后续 apply_stage2_resort mutate rank/stage1_rank)
+        # 见 designs/feat_stock_selection_history_parquet.md §3.1
+        stage1_top_snapshot = [copy.deepcopy(s) for s in stage1_stocks[: config.top_n]]
+
         # v2.44: Stage 2 排序列可能不在 standardize 后的 factor_df 中 (如 turnover_rate)
         # 需要从原始数据源 (factor_ic_data.parquet) 加载并对齐到 selection_date
         factor_df_for_stage2 = factor_df
@@ -1316,6 +1539,8 @@ def select_stocks(
             ascending=config.stage2_ascending,
             logger=logger,
         )
+        # v3.7: 捕获 Stage 2 Top 30 快照 (深拷贝, 避免后续 stabilization filter 重编号 rank)
+        stage2_top_snapshot = [copy.deepcopy(s) for s in top_stocks[: config.top_n]]
     else:
         # 单阶段 (v2.44 之前的行为, 用 enable_two_stage=False 退回)
         candidate_n = config.top_n * 2
@@ -1373,7 +1598,7 @@ def select_stocks(
         )
     top_stocks = build_decision_cards(top_stocks, factor_df_for_cards, logger=logger)
 
-    # Step 11: 构建结果（问题 5 修复：传递运行时变量）
+    # Step 11: 构建结果（仅作为函数返回供 CLI/调用方查看, 不再写 JSON 落盘——v3.7 改用 Parquet）
     # 问题 2 修复：total_stocks → stocks_on_date
     # v1.10: 传入 direction_map 和 flipped_factors
     # v1.12: 传入 excluded_by_amplitude
@@ -1395,12 +1620,36 @@ def select_stocks(
         logger=logger,
     )
 
-    # Step 12: 保存结果
-    # 问题 3 修复：__post_init__ 已处理路径默认值，无需运行时校验
-    output_file = save_result(result, config.output_dir, logger)
+    # Step 12: 写入 Parquet 选股历史 (v3.7, designs/feat_stock_selection_history_parquet.md)
+    # 取代 v3.6 之前的 save_result JSON 单文件——Parquet 单一信源, 失败抛异常无兜底
+    # 单阶段模式 (enable_two_stage=False) 时 stage1/stage2 快照为 [], 只归档 stage3
+    exclusion_stats = {
+        "excluded_by_amplitude": excluded_by_amplitude,
+        "excluded_by_coverage": excluded_by_coverage,
+        "excluded_by_liquidity": excluded_by_liquidity,
+        "excluded_by_confirmation": excluded_by_confirmation,
+        "excluded_by_filter": filter_exclusions,
+        "min_weight_coverage": 0.5,  # v1.15 阈值, 与 build_result 默认一致
+    }
+    partition_dir = write_selection_history(
+        stage1_top=stage1_top_snapshot,
+        stage2_top=stage2_top_snapshot,
+        stage3_top=top_stocks,
+        config=config,
+        weight_config=weight_config,
+        selection_date=selection_date,
+        stocks_on_date=stocks_on_date,
+        factor_list=factor_list,
+        factor_cols=factor_cols,
+        direction_map=direction_map,
+        flipped_factors=flipped_factors,
+        exclusion_stats=exclusion_stats,
+        output_dir=config.output_dir,
+        logger=logger,
+    )
 
     # 问题 4 修复：删除流程完成日志，让 CLI 层的成功日志兼任收尾
-    return result, output_file
+    return result, partition_dir
 
 
 # ============================================================================
@@ -1450,8 +1699,8 @@ def create_cli_entrypoint(config_class: type[StockSelectorConfig]) -> Callable[[
             "--factor_direction",
             type=str,
             choices=["positive", "negative"],
-            default="negative",
-            help="因子方向（默认: negative，反向因子）",
+            default="positive",
+            help="因子方向（v2.47: 默认 positive，对齐到正向语义，值大=好）",
         )
 
         parser.add_argument(
@@ -1527,8 +1776,8 @@ def create_cli_entrypoint(config_class: type[StockSelectorConfig]) -> Callable[[
 
         # 执行选股
         try:
-            result, output_file = select_stocks(config, logger)
-            logger.info("选股成功！输出文件: %s", output_file)
+            result, output_path = select_stocks(config, logger)
+            logger.info("选股成功！输出路径: %s", output_path)
             return 0
         except Exception:
             logger.exception("选股失败")

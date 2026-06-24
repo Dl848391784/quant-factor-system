@@ -309,20 +309,34 @@ class TestDirectionUnificationJSONOutput:
 class TestStockSelectorDirectionConsistency:
     """stock_selector 方向统一化一致性测试"""
 
-    def test_stock_selector_json_has_direction_info(self):
-        """stock_selector 输出含方向统一化信息"""
-        import json
+    def test_stock_selector_parquet_has_direction_info(self):
+        """stock_selector Parquet 数据集含方向统一化信息 (v3.7).
+
+        v3.7 起 stock_selection_result.json 被 Parquet 分区数据集替代,
+        见 designs/feat_stock_selection_history_parquet.md.
+        """
         from pathlib import Path
 
+        import pyarrow.compute as pc
+        import pyarrow.dataset as pads
+
         result_dir = Path(__file__).parent.parent / "result"
-        stock_file = result_dir / "stock_selection_result.json"
+        history_root = result_dir / "stock_selection_history"
 
-        if not stock_file.exists():
-            pytest.skip("无 stock_selection_result.json，跳过")
+        if not history_root.exists() or not any(history_root.iterdir()):
+            pytest.skip("无 stock_selection_history Parquet 数据集，跳过")
 
-        with open(stock_file, encoding="utf-8") as f:
-            data = json.load(f)
+        dataset = pads.dataset(str(history_root), partitioning="hive")
+        # 最新分区
+        partitions = sorted(
+            p for p in history_root.iterdir() if p.is_dir() and p.name.startswith("selection_date=")
+        )
+        latest = partitions[-1].name.split("=", 1)[1]
+        df = dataset.to_table(filter=pc.field("selection_date") == latest).to_pandas()
 
-        # 检查 meta 含 factor_direction
-        meta = data.get("meta", {})
-        assert "factor_direction" in meta, "stock_selection_result.json meta 缺少 factor_direction"
+        assert "factor_direction" in df.columns, "Parquet 数据集缺少 factor_direction 列"
+        assert df["factor_direction"].notna().all(), "factor_direction 列含 null"
+        valid_directions = {"positive", "negative"}
+        assert set(df["factor_direction"].unique()).issubset(valid_directions), (
+            f"factor_direction 值不合法: {df['factor_direction'].unique()}"
+        )
