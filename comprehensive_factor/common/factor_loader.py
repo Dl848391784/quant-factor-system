@@ -651,10 +651,10 @@ def standardize_factors(
     # 全量 copy 1.39M×79列 ≈ 1GB 冗余，是 composite OOM 炸弹 1。
     # 函数仅新增 _std 列，不修改原始因子列，原地操作安全。
 
-    # v2.52 (OOM 炸弹6, 模式3c): 用 dict 收集 _std 列，循环结束后 pd.concat 批量添加
-    # 逐列 factor_df[std_col] = value 导致 pandas BlockManager 创建 N 个独立 Block
-    # PerformanceWarning: "DataFrame is highly fragmented" → 实际内存膨胀 ~3x → OOM
-    std_results: dict[str, pd.Series] = {}
+    # v2.52: 逐列 insert (不再用 std_results dict + pd.concat)
+    # pd.concat 在循环末尾创建 factor_df + std_results_df + result = 3.2GB 峰值 → OOM
+    # baseline 已从 3.6GB 降到 2GB (Arrow pool fix), 逐列 insert 的碎片开销可承受
+    import pyarrow as pa
 
     for col in factor_cols:
         std_col = f"{col}_std"
@@ -768,7 +768,7 @@ def standardize_factors(
 
             # 按日期选择分支: 零膨胀日期用 z_zi, 正常日期用 z_normal
             is_zi_date = date_col.isin(inflated_dates)
-            std_results[std_col] = z_zi.where(is_zi_date, z_normal)
+            std_results_col = z_zi.where(is_zi_date, z_normal)
 
             # v2.51 (OOM 炸弹4): 释放零膨胀分支临时对象
             # 35因子循环中，每个零膨胀因子产生 ~8 个 1.39M 元素 Series (~85MB)
@@ -776,7 +776,7 @@ def standardize_factors(
             del nonzero_vals, daily_mean_nz, daily_std_nz, daily_count_nz
             del row_mean_nz, row_std_nz, row_count_nz, z_zi, is_zi_date, degenerate_mask
         else:
-            std_results[std_col] = z_normal
+            std_results_col = z_normal
 
         # v2.51 (OOM 炸弹4): 每因子循环结束后释放临时对象
         # row_mean/row_std/z_normal 各 1.39M float64 ≈ 33MB/因子
@@ -784,6 +784,10 @@ def standardize_factors(
         # 不显式释放则 35 因子累积 ~3GB 碎片，叠加 factor_df + return_df + ic_data 触发 OOM
         del daily_stats, daily_group_size, daily_zero_count, daily_zero_ratio
         del row_mean, row_std, z_normal, zero_mask
+
+        # v2.52: 逐列 insert 到 factor_df (不再用 std_results dict)
+        factor_df[std_col] = std_results_col
+        del std_results_col
 
         # v2.28: skip_point_mass=True 时跳过点质量检测（auto_select 简化模式）
         # 设计依据：相关性矩阵只需粗粒度 z-score，Pearson corr() 对 NaN 鲁棒；
@@ -855,8 +859,8 @@ def standardize_factors(
                     indicator=True,
                 )
                 pm_mask = (pm_flags["_merge"] == "both").values
-                z_mask = (std_results[std_col].abs() > _POINT_MASS_ZSCORE_GATE).values
-                std_results[std_col] = std_results[std_col].where(~(pm_mask & z_mask), np.nan)
+                z_mask = (factor_df[std_col].abs() > _POINT_MASS_ZSCORE_GATE).values
+                factor_df[std_col] = factor_df[std_col].where(~(pm_mask & z_mask), np.nan)
 
                 # 逐值详情降为 debug：数万条/因子的逐值日志导致 416M 日志/次（v2.25 修复）
                 for _, row in point_mass.iterrows():
@@ -881,7 +885,9 @@ def standardize_factors(
 
             # NaN 处理：原因子值为 NaN 时标准化后仍为 NaN
             # 使用 fillna 保持原本 NaN 的位置，而非 .loc 后置还原
-            std_results[std_col] = std_results[std_col].where(~factor_df[col].isna(), np.nan)
+            std_results_col = factor_df[std_col].where(~factor_df[col].isna(), np.nan)
+            factor_df[std_col] = std_results_col
+            del std_results_col
 
             # v2.51 (OOM 炸弹4): 释放点质量检测分支临时对象
             # groupby+merge 链产生 ~60MB/因子的临时 DataFrame，不释放则累积触发 OOM
@@ -893,20 +899,9 @@ def standardize_factors(
         # date_col/value_col 是对 factor_df 列的引用（非独立 buffer），不需 del
         # 但 numpy/pandas 分配器缓存的临时 buffer 需要 gc 触发释放
         gc.collect()
-        # v2.52 (OOM 炸弹5, 模式7): glibc malloc arena 碎片不归还 OS
-        # gc.collect() 回收 Python 对象，但 glibc malloc 只把碎片放入 arena bins
-        # 不调用 munmap 归还 OS。107 次标准化循环（auto_select 72 + 主流程 35）累积
-        # ~5.6GB 碎片，远超 ~600MB 活跃数据 → OOM SIGKILL
-        # malloc_trim(0) 强制 glibc 归还所有 free 的 arena 页给 OS
+        # v2.52 (OOM 炸弹5, 模式7): glibc malloc arena 碎片 + Arrow pool 同时清理
         _trim_arena()
-
-    # v2.52 (OOM 炸弹6, 模式3c): pd.concat 批量添加所有 _std 列
-    # 一次性创建所有新列的 Block，避免逐列 insert 的 N 次碎片化
-    if std_results:
-        factor_df = pd.concat([factor_df, pd.DataFrame(std_results, index=factor_df.index)], axis=1)
-        del std_results
-        gc.collect()
-        _trim_arena()
+        pa.default_memory_pool().release_unused()
 
     logger.info("因子标准化完成: %d 个因子", len(factor_cols))
 
