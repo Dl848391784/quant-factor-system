@@ -1337,7 +1337,16 @@ class RollingICIRWeightMethod(WeightMethodBase):
                 rolling_icir_dict[col] = pd.Series(dtype=float)
 
         # 构建 factor_df 的日期索引
-        factor_df = factor_df.copy()
+        # v2.49 (OOM fix): 提取精简工作 DataFrame，避免在 72 列宽表上 copy + 逐列 insert 导致碎片化
+        # 原代码 factor_df = factor_df.copy() 复制了 72 列 × 1.39M 行 ≈ 766MB 完整宽表，
+        # 随后逐列 insert 72 个中间列（_rolling_icir×35 + _dim_weight×35 + weight_sum + date_sorted），
+        # pandas BlockManager 重度碎片化使实际内存膨胀到理论值 ~3x → 6.48GB OOM。
+        # 修复：只提取 calculate 实际需要的列（date + _std），在精简 DataFrame 上操作。
+        # 预计峰值从 ~6.48GB 降至 ~2.8GB（省 copy 766MB + 减少碎片化 ~1.5GB + 减少列数）。
+        # 后续代码访问的原始列仅有 date 和 _std 列（已验证 L1341-1577 所有访问点）。
+        std_cols = [f"{col}_std" for col in factor_cols]
+        work_cols = ["date"] + [c for c in std_cols if c in factor_df.columns]
+        factor_df = factor_df[work_cols].copy()
         factor_df["date_sorted"] = pd.to_datetime(factor_df["date"])
 
         # v1.11 修复：lambda 延迟绑定问题
