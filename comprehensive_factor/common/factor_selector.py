@@ -112,7 +112,7 @@ def _get_thresholds_for_factor(factor_name: str, base_thresholds: dict) -> tuple
     覆盖主 dict 的同名字段；其余因子使用 base_thresholds 不变。
 
     Args:
-        factor_name: 因子名称（如 "rsi", "interaction_amplitude"）
+        factor_name: 因子名称（如 "rsi", "interaction_amplitude__ret3d_pos"）
         base_thresholds: 主门槛 dict（通常是 DEFAULT_THRESHOLDS）
 
     Returns:

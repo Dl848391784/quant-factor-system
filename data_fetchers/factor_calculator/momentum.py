@@ -47,15 +47,33 @@ from ._common import (
     _COL_CLOSE,
     _COL_DATE,
     _COL_HIGH,
-    _COL_INTERACTION_AMP_COMPRESSION,
-    _COL_INTERACTION_AMPLITUDE,
-    _COL_INTERACTION_BOLLINGER,
-    _COL_INTERACTION_INTRADAY,
-    _COL_INTERACTION_KDJ,
-    _COL_INTERACTION_MA5_DEV,
-    _COL_INTERACTION_NEAR_HIGH,
-    _COL_INTERACTION_PRICE_POS,
-    _COL_INTERACTION_TURNOVER,
+    _COL_INTERACTION_AMP_COMPRESSION__RET3D_ABS,
+    _COL_INTERACTION_AMP_COMPRESSION__RET3D_NEG,
+    _COL_INTERACTION_AMP_COMPRESSION__RET3D_POS,
+    _COL_INTERACTION_AMPLITUDE__RET3D_ABS,
+    _COL_INTERACTION_AMPLITUDE__RET3D_NEG,
+    _COL_INTERACTION_AMPLITUDE__RET3D_POS,
+    _COL_INTERACTION_BOLLINGER__RET5D_ABS,
+    _COL_INTERACTION_BOLLINGER__RET5D_NEG,
+    _COL_INTERACTION_BOLLINGER__RET5D_POS,
+    _COL_INTERACTION_INTRADAY__RET1D_ABS,
+    _COL_INTERACTION_INTRADAY__RET1D_NEG,
+    _COL_INTERACTION_INTRADAY__RET1D_POS,
+    _COL_INTERACTION_KDJ__RET5D_ABS,
+    _COL_INTERACTION_KDJ__RET5D_NEG,
+    _COL_INTERACTION_KDJ__RET5D_POS,
+    _COL_INTERACTION_MA5_DEV__RET3D_ABS,
+    _COL_INTERACTION_MA5_DEV__RET3D_NEG,
+    _COL_INTERACTION_MA5_DEV__RET3D_POS,
+    _COL_INTERACTION_NEAR_HIGH__RET3D_ABS,
+    _COL_INTERACTION_NEAR_HIGH__RET3D_NEG,
+    _COL_INTERACTION_NEAR_HIGH__RET3D_POS,
+    _COL_INTERACTION_PRICE_POS__RET1D_ABS,
+    _COL_INTERACTION_PRICE_POS__RET1D_NEG,
+    _COL_INTERACTION_PRICE_POS__RET1D_POS,
+    _COL_INTERACTION_TURNOVER__RET3D_ABS,
+    _COL_INTERACTION_TURNOVER__RET3D_NEG,
+    _COL_INTERACTION_TURNOVER__RET3D_POS,
     _COL_LOW,
     _COL_MA5_DEVIATION,
     _COL_MOMENTUM_STRENGTH,
@@ -877,366 +895,944 @@ calculate_downside_deceleration.required_cols = ["date", "asset", "return_5d"]  
 
 
 # ============================================================================
-# 交互因子族（v2.36, 2026-06-22）—— 条件因子方向方案 B
 # ============================================================================
-# 设计依据：design.md feat_interaction_factors。
+# 交互因子族（v2.48, 2026-06-24, designs/feat_factor_definition_destigmatization_v1.md v1.2）
 #
-# 第一性原理：IC = corr(因子值, 未来收益) 是无条件相关系数，假设"因子-收益
-# 关系在所有条件下相同"。实证发现 amplitude/turnover_rate 等因子在弱势子样本
-# 中 IC 翻正（弱势股 IC=+0.083 vs 全样本 -0.022），即因子方向是条件依赖的。
-# 交互因子 = -z_cs(return_3d) × z_cs(factor) 用乘法捕捉这种条件方向，
-# 把"弱势×高振幅=反弹"信号提取到无条件 IC 上（实测全样本 IC≈+0.020 翻正）。
+# 重构原因：旧 v2.36/v2.37 公式 = -z(ret_Nd) × z(factor) 单边 weakness 输入，
+# 数学上无对应 strength 变体，违反 AGENTS.md 数据驱动原则（行 64-89）
+# —— 因子定义阶段就预设了"跌段中因子有效"的方向假设。
 #
-# 实证数据来源：skill factor-development ref conditional-ic-analysis.md §3-4。
-# weakness 源于 return_3d 是因为它在 4 个候选 weakness 信号中 IC 表现最佳。
+# 新方案 (B''): 每个 base_factor 配 pos/neg/abs 三个 ReLU 切半轴变体：
+#   pos = max(z(ret_Nd), 0) × z(factor)   只在过去 N 日涨段启用
+#   neg = min(z(ret_Nd), 0) × z(factor)   只在过去 N 日跌段启用（旧 weakness 的"跌段子集"）
+#   abs = |z(ret_Nd)|       × z(factor)   按动幅大小启用，不分方向
+#
+# 数学独立性: pos + neg ≡ z(ret) × z(factor)，但三者单独使用时 IC 互相独立
+# （ReLU 非线性破坏 affine 对称 → composite 方向归一不会抵消）。
+#
+# 旧名 interaction_amplitude/interaction_turnover/... 全部删除，下游一次性切到新名。
+# ============================================================================
 
 
-def _build_weakness(df: pd.DataFrame, logger: logging.Logger) -> pd.Series:
-    """构建 weakness 信号：-z_cs(return_3d)。
-
-    跌得越多越弱势，z-score 越高 → 与因子 z-score 相乘后捕捉"弱势 × 高因子值"组合。
-    使用 ``_cross_section_zscore``（带 ±3σ clip），见 ``_common.py``。
+def _apply_relu_direction(ret_z: pd.Series, direction: str) -> pd.Series:
+    """对 z-score 化的 signed return 应用 ReLU 切半轴。
 
     Args:
-        df: 必须包含 _COL_DATE / _COL_RETURN_3D 列
+        ret_z: 已 z-score 化的 signed return（保留正负号信息）
+        direction: 切半轴方向，{"pos", "neg", "abs"} 之一
+            - pos: max(ret_z, 0)  只保留涨段（>0），跌段置 0
+            - neg: min(ret_z, 0)  只保留跌段（<0），涨段置 0
+            - abs: |ret_z|        所有截面都启用，按动幅大小
+
+    Returns:
+        与输入同 index 的 Series；元素来自 numpy 向量化切半轴
+
+    Raises:
+        ValueError: direction 不在 {"pos", "neg", "abs"} 内
+    """
+    arr = ret_z.to_numpy(dtype=np.float64, copy=False)
+    if direction == "pos":
+        out = np.maximum(arr, 0.0)
+    elif direction == "neg":
+        out = np.minimum(arr, 0.0)
+    elif direction == "abs":
+        out = np.abs(arr)
+    else:
+        raise ValueError(f"interaction direction 必须是 pos/neg/abs, 收到 {direction!r}")
+    # NaN 透传（np.maximum/minimum/abs 都对 NaN 保持传播）
+    return pd.Series(out, index=ret_z.index, dtype=np.float64)
+
+
+def _calculate_interaction_variant(
+    factor_df: pd.DataFrame,
+    *,
+    ret_col: str,
+    factor_col: str,
+    output_col: str,
+    direction: str,
+    logger: logging.Logger,
+) -> pd.DataFrame:
+    """通用 interaction 因子计算 helper（pos/neg/abs 三变体共用）。
+
+    公式: output = _apply_relu_direction(z_cs(ret_col), direction) × z_cs(factor_col)
+
+    Args:
+        factor_df: 必须包含 date / asset / ret_col / factor_col 列
+        ret_col: signed return 列名（如 return_3d / past_return_1d / return_5d）
+        factor_col: base factor 列名（如 amplitude / kdj_j / bollinger_pb）
+        output_col: 输出列名（如 interaction_amplitude__ret3d_pos）
+        direction: ReLU 方向，{"pos", "neg", "abs"} 之一
         logger: 日志器
 
     Returns:
-        weakness Series（与 df 同 index）
+        添加 ``output_col`` 列的 DataFrame（assign 浅拷贝，底层 buffer 共享）
+
+    Raises:
+        ValueError: 必需列缺失，或 direction 不合法
+
+    边界处理:
+        - ret_col / factor_col 缺失值 → 输出 NaN（乘法自然传播）
+        - 截面 std=0 → 加 1e-10 防除零（_cross_section_zscore 内部处理）
+        - 截面值 clip ±3σ → 输出 clip ±3 × ±3 = ±9（实际 IC 验证范围内）
+
+    Note:
+        不 copy 整个宽表（OOM 根因）：直接在原 df 列上算 z-score，
+        用 assign 返回带新列的浅拷贝（底层 buffer 共享，仅新列分配 ~12MB）。
+        设计依据: designs/fix_factor_generator_step14_oom.md §4
     """
-    if _COL_RETURN_3D not in df.columns:
-        raise ValueError(f"交互因子缺失依赖列: {_COL_RETURN_3D}")
-    nan_count = int(df[_COL_RETURN_3D].isna().sum())
-    if nan_count > 0:
-        logger.debug("  weakness 构建: return_3d NaN=%d (会传播到交互因子)", nan_count)
-    return -_cross_section_zscore(df[_COL_RETURN_3D], df[_COL_DATE])
+    required = [_COL_DATE, ret_col, factor_col]
+    missing = [c for c in required if c not in factor_df.columns]
+    if missing:
+        raise ValueError(f"{output_col} 缺失必需列: {missing}")
+
+    ret_z = _cross_section_zscore(factor_df[ret_col], factor_df[_COL_DATE])
+    direction_term = _apply_relu_direction(ret_z, direction)
+    factor_z = _cross_section_zscore(factor_df[factor_col], factor_df[_COL_DATE])
+
+    df = factor_df.assign(**{output_col: direction_term * factor_z})
+
+    valid_count = int(df[output_col].notna().sum())
+    logger.info(
+        "  %s: valid=%d (%.2f%%)",
+        output_col,
+        valid_count,
+        valid_count / len(df) * 100 if len(df) > 0 else 0.0,
+    )
+    return df
 
 
-def calculate_interaction_amplitude(
+def calculate_interaction_amplitude__ret3d_pos(
     factor_df: pd.DataFrame,
     *,
     logger_arg: logging.Logger | None = None,
 ) -> pd.DataFrame:
-    """计算交互因子 interaction_amplitude = -z_cs(return_3d) × z_cs(amplitude)。
+    """amplitude 因子的 pos 变体: max(z(ret), 0) × z_cs(amplitude)。
 
-    含义: 捕捉"弱势(跌得多)股票中高振幅=反弹信号"的条件效应。
-    实证全样本 IC≈+0.020（方向="positive"，选高值=反弹型）。
+    只在过去 N 日涨段启用（ReLU(+)），捕捉涨段中因子与未来收益的关系
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.020；新 pos 变体 IC 待 F2 跑出。
 
     Args:
         factor_df: 必须包含 date / asset / return_3d / amplitude 列
         logger_arg: 日志器
 
     Returns:
-        添加 ``interaction_amplitude`` 列的 DataFrame（不改原 df）
-
-    边界处理:
-        - return_3d 或 amplitude 缺失 → 交互值为 NaN（乘法自然传播）
-        - 截面 std=0 → 加 1e-10 防除零（_cross_section_zscore 内部处理）
-        - 极端值 clip 到 ±3σ × ±3σ = ±9（实际 IC 验证范围内）
+        添加 ``interaction_amplitude__ret3d_pos`` 列的 DataFrame
     """
-    _logger = get_module_logger(logger_arg)
-
-    required = [_COL_DATE, _COL_RETURN_3D, _COL_AMPLITUDE]
-    missing = [c for c in required if c not in factor_df.columns]
-    if missing:
-        raise ValueError(f"interaction_amplitude 缺失必需列: {missing}")
-
-    # 不 copy 整个宽表（OOM 根因）：直接在原 df 列上算 z-score，
-    # 用 assign 返回带新列的浅拷贝（底层 buffer 共享，仅新列分配 ~12MB）。
-    # 设计依据: designs/fix_factor_generator_step14_oom.md §4
-    weakness = -_cross_section_zscore(factor_df[_COL_RETURN_3D], factor_df[_COL_DATE])
-    amp_z = _cross_section_zscore(factor_df[_COL_AMPLITUDE], factor_df[_COL_DATE])
-    df = factor_df.assign(**{_COL_INTERACTION_AMPLITUDE: weakness * amp_z})
-
-    valid_count = int(df[_COL_INTERACTION_AMPLITUDE].notna().sum())
-    _logger.info(
-        "  interaction_amplitude: valid=%d (%.2f%%)",
-        valid_count,
-        valid_count / len(df) * 100 if len(df) > 0 else 0.0,
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_3D,
+        factor_col=_COL_AMPLITUDE,
+        output_col=_COL_INTERACTION_AMPLITUDE__RET3D_POS,
+        direction="pos",
+        logger=get_module_logger(logger_arg),
     )
-    return df
 
 
-calculate_interaction_amplitude.required_cols = ["date", "asset", "return_3d", "amplitude"]  # type: ignore[attr-defined]
+calculate_interaction_amplitude__ret3d_pos.required_cols = ["date", "asset", "return_3d", "amplitude"]  # type: ignore[attr-defined]
 
 
-def calculate_interaction_turnover(
+def calculate_interaction_amplitude__ret3d_neg(
     factor_df: pd.DataFrame,
     *,
     logger_arg: logging.Logger | None = None,
 ) -> pd.DataFrame:
-    """计算交互因子 interaction_turnover = -z_cs(return_3d) × z_cs(turnover_rate)。
+    """amplitude 因子的 neg 变体: min(z(ret), 0) × z_cs(amplitude)。
 
-    含义: 捕捉"弱势股票中高换手=反弹信号"的条件效应。
-    实证全样本 IC≈+0.016（方向="positive"）。
+    只在过去 N 日跌段启用（ReLU(-)），是旧 weakness 公式 -z(ret)·z(factor) 的跌段子集
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.020；新 neg 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_3d / amplitude 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_amplitude__ret3d_neg`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_3D,
+        factor_col=_COL_AMPLITUDE,
+        output_col=_COL_INTERACTION_AMPLITUDE__RET3D_NEG,
+        direction="neg",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_amplitude__ret3d_neg.required_cols = ["date", "asset", "return_3d", "amplitude"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_amplitude__ret3d_abs(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """amplitude 因子的 abs 变体: |z(ret)| × z_cs(amplitude)。
+
+    按动幅大小启用，不分方向（|ReLU|），捕捉|过去N日动量|与因子的乘积效应
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.020；新 abs 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_3d / amplitude 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_amplitude__ret3d_abs`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_3D,
+        factor_col=_COL_AMPLITUDE,
+        output_col=_COL_INTERACTION_AMPLITUDE__RET3D_ABS,
+        direction="abs",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_amplitude__ret3d_abs.required_cols = ["date", "asset", "return_3d", "amplitude"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_turnover__ret3d_pos(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """turnover 因子的 pos 变体: max(z(ret), 0) × z_cs(turnover_rate)。
+
+    只在过去 N 日涨段启用（ReLU(+)），捕捉涨段中因子与未来收益的关系
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.016；新 pos 变体 IC 待 F2 跑出。
 
     Args:
         factor_df: 必须包含 date / asset / return_3d / turnover_rate 列
         logger_arg: 日志器
 
     Returns:
-        添加 ``interaction_turnover`` 列的 DataFrame
-
-    边界处理:
-        - return_3d 或 turnover_rate 缺失 → 交互值 NaN
-        - 截面 std=0 → 加 1e-10 防除零
-        - clip ±3σ × ±3σ
+        添加 ``interaction_turnover__ret3d_pos`` 列的 DataFrame
     """
-    _logger = get_module_logger(logger_arg)
-
-    required = [_COL_DATE, _COL_RETURN_3D, _COL_TURNOVER_RATE]
-    missing = [c for c in required if c not in factor_df.columns]
-    if missing:
-        raise ValueError(f"interaction_turnover 缺失必需列: {missing}")
-
-    # 不 copy 整个宽表（OOM 根因）：直接在原 df 列上算 z-score，
-    # 用 assign 返回带新列的浅拷贝（底层 buffer 共享，仅新列分配 ~12MB）。
-    # 设计依据: designs/fix_factor_generator_step14_oom.md §4
-    weakness = -_cross_section_zscore(factor_df[_COL_RETURN_3D], factor_df[_COL_DATE])
-    turnover_z = _cross_section_zscore(factor_df[_COL_TURNOVER_RATE], factor_df[_COL_DATE])
-    df = factor_df.assign(**{_COL_INTERACTION_TURNOVER: weakness * turnover_z})
-
-    valid_count = int(df[_COL_INTERACTION_TURNOVER].notna().sum())
-    _logger.info(
-        "  interaction_turnover: valid=%d (%.2f%%)",
-        valid_count,
-        valid_count / len(df) * 100 if len(df) > 0 else 0.0,
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_3D,
+        factor_col=_COL_TURNOVER_RATE,
+        output_col=_COL_INTERACTION_TURNOVER__RET3D_POS,
+        direction="pos",
+        logger=get_module_logger(logger_arg),
     )
-    return df
 
 
-calculate_interaction_turnover.required_cols = ["date", "asset", "return_3d", "turnover_rate"]  # type: ignore[attr-defined]
+calculate_interaction_turnover__ret3d_pos.required_cols = ["date", "asset", "return_3d", "turnover_rate"]  # type: ignore[attr-defined]
 
 
-def calculate_interaction_amp_compression(
+def calculate_interaction_turnover__ret3d_neg(
     factor_df: pd.DataFrame,
     *,
     logger_arg: logging.Logger | None = None,
 ) -> pd.DataFrame:
-    """计算交互因子 interaction_amp_compression = -z_cs(return_3d) × z_cs(amplitude_compression)。
+    """turnover 因子的 neg 变体: min(z(ret), 0) × z_cs(turnover_rate)。
 
-    含义: 捕捉"弱势股票中振幅收敛=反弹信号"的条件效应。
-    实证全样本 IC≈+0.008（方向="positive"，弱信号但维度独立）。
+    只在过去 N 日跌段启用（ReLU(-)），是旧 weakness 公式 -z(ret)·z(factor) 的跌段子集
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.016；新 neg 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_3d / turnover_rate 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_turnover__ret3d_neg`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_3D,
+        factor_col=_COL_TURNOVER_RATE,
+        output_col=_COL_INTERACTION_TURNOVER__RET3D_NEG,
+        direction="neg",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_turnover__ret3d_neg.required_cols = ["date", "asset", "return_3d", "turnover_rate"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_turnover__ret3d_abs(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """turnover 因子的 abs 变体: |z(ret)| × z_cs(turnover_rate)。
+
+    按动幅大小启用，不分方向（|ReLU|），捕捉|过去N日动量|与因子的乘积效应
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.016；新 abs 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_3d / turnover_rate 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_turnover__ret3d_abs`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_3D,
+        factor_col=_COL_TURNOVER_RATE,
+        output_col=_COL_INTERACTION_TURNOVER__RET3D_ABS,
+        direction="abs",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_turnover__ret3d_abs.required_cols = ["date", "asset", "return_3d", "turnover_rate"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_amp_compression__ret3d_pos(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """amp_compression 因子的 pos 变体: max(z(ret), 0) × z_cs(amplitude_compression)。
+
+    只在过去 N 日涨段启用（ReLU(+)），捕捉涨段中因子与未来收益的关系
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.008；新 pos 变体 IC 待 F2 跑出。
 
     Args:
         factor_df: 必须包含 date / asset / return_3d / amplitude_compression 列
         logger_arg: 日志器
 
     Returns:
-        添加 ``interaction_amp_compression`` 列的 DataFrame
-
-    边界处理:
-        - return_3d 或 amplitude_compression 缺失 → 交互值 NaN
-        - 截面 std=0 → 加 1e-10 防除零
-        - clip ±3σ × ±3σ
-
-    Note:
-        ``amplitude_compression`` 列字符串字面量为 "amplitude_compression"，
-        其常量 ``_COL_AMP_COMPRESSION`` 定义在 ``volume_price.py``。本模块
-        通过字符串字面量引用，避免反向 import 同包子模块。
+        添加 ``interaction_amp_compression__ret3d_pos`` 列的 DataFrame
     """
-    _logger = get_module_logger(logger_arg)
-
-    amp_compression_col = "amplitude_compression"
-    required = [_COL_DATE, _COL_RETURN_3D, amp_compression_col]
-    missing = [c for c in required if c not in factor_df.columns]
-    if missing:
-        raise ValueError(f"interaction_amp_compression 缺失必需列: {missing}")
-
-    # 不 copy 整个宽表（OOM 根因）：直接在原 df 列上算 z-score，
-    # 用 assign 返回带新列的浅拷贝（底层 buffer 共享，仅新列分配 ~12MB）。
-    # 设计依据: designs/fix_factor_generator_step14_oom.md §4
-    weakness = -_cross_section_zscore(factor_df[_COL_RETURN_3D], factor_df[_COL_DATE])
-    amp_comp_z = _cross_section_zscore(factor_df[amp_compression_col], factor_df[_COL_DATE])
-    df = factor_df.assign(**{_COL_INTERACTION_AMP_COMPRESSION: weakness * amp_comp_z})
-
-    valid_count = int(df[_COL_INTERACTION_AMP_COMPRESSION].notna().sum())
-    _logger.info(
-        "  interaction_amp_compression: valid=%d (%.2f%%)",
-        valid_count,
-        valid_count / len(df) * 100 if len(df) > 0 else 0.0,
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_3D,
+        factor_col="amplitude_compression",
+        output_col=_COL_INTERACTION_AMP_COMPRESSION__RET3D_POS,
+        direction="pos",
+        logger=get_module_logger(logger_arg),
     )
-    return df
 
 
-calculate_interaction_amp_compression.required_cols = [  # type: ignore[attr-defined]
-    "date",
-    "asset",
-    "return_3d",
-    "amplitude_compression",
-]
+calculate_interaction_amp_compression__ret3d_pos.required_cols = ["date", "asset", "return_3d", "amplitude_compression"]  # type: ignore[attr-defined]
 
 
-# ============================================================================
-# 交互因子族 第二批（v2.37, 2026-06-22）—— 6 个新交互因子
-# 设计依据: designs/feat_interaction_factors_batch2.md
-# 实证验证: /tmp/factor_ic.db 149万条记录, IC > 0.005 且 p < 0.05
-# ============================================================================
-
-
-def calculate_interaction_near_high(
+def calculate_interaction_amp_compression__ret3d_neg(
     factor_df: pd.DataFrame,
     *,
     logger_arg: logging.Logger | None = None,
 ) -> pd.DataFrame:
-    """交互因子 interaction_near_high = -z_cs(return_3d) × z_cs(near_high_ratio_5)。
+    """amp_compression 因子的 neg 变体: min(z(ret), 0) × z_cs(amplitude_compression)。
 
-    实证 IC=+0.0425 ICIR=0.487（第一批中最强），primary 角色。
-    含义: 弱势(3日跌) × 近5日高点位置高 = 反弹型。
+    只在过去 N 日跌段启用（ReLU(-)），是旧 weakness 公式 -z(ret)·z(factor) 的跌段子集
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.008；新 neg 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_3d / amplitude_compression 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_amp_compression__ret3d_neg`` 列的 DataFrame
     """
-    _logger = get_module_logger(logger_arg)
-    required = [_COL_DATE, _COL_RETURN_3D, _COL_NEAR_HIGH_RATIO_5]
-    missing = [c for c in required if c not in factor_df.columns]
-    if missing:
-        raise ValueError(f"interaction_near_high 缺失必需列: {missing}")
-    weakness = -_cross_section_zscore(factor_df[_COL_RETURN_3D], factor_df[_COL_DATE])
-    factor_z = _cross_section_zscore(factor_df[_COL_NEAR_HIGH_RATIO_5], factor_df[_COL_DATE])
-    df = factor_df.assign(**{_COL_INTERACTION_NEAR_HIGH: weakness * factor_z})
-    valid_count = int(df[_COL_INTERACTION_NEAR_HIGH].notna().sum())
-    _logger.info(
-        "  interaction_near_high: valid=%d (%.2f%%)", valid_count, valid_count / len(df) * 100 if len(df) > 0 else 0.0
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_3D,
+        factor_col="amplitude_compression",
+        output_col=_COL_INTERACTION_AMP_COMPRESSION__RET3D_NEG,
+        direction="neg",
+        logger=get_module_logger(logger_arg),
     )
-    return df
 
 
-calculate_interaction_near_high.required_cols = ["date", "asset", "return_3d", "near_high_ratio_5"]  # type: ignore[attr-defined]
+calculate_interaction_amp_compression__ret3d_neg.required_cols = ["date", "asset", "return_3d", "amplitude_compression"]  # type: ignore[attr-defined]
 
 
-def calculate_interaction_intraday(
+def calculate_interaction_amp_compression__ret3d_abs(
     factor_df: pd.DataFrame,
     *,
     logger_arg: logging.Logger | None = None,
 ) -> pd.DataFrame:
-    """交互因子 interaction_intraday = -z_cs(past_return_1d) × z_cs(intraday_intensity)。
+    """amp_compression 因子的 abs 变体: |z(ret)| × z_cs(amplitude_compression)。
 
-    实证 IC=+0.0354 ICIR=0.576，primary 角色。
-    含义: 弱势(1日跌) × 日内强度高 = 反弹型。weakness 用 ret1d（短期弱势对日内信号更敏感）。
+    按动幅大小启用，不分方向（|ReLU|），捕捉|过去N日动量|与因子的乘积效应
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.008；新 abs 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_3d / amplitude_compression 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_amp_compression__ret3d_abs`` 列的 DataFrame
     """
-    _logger = get_module_logger(logger_arg)
-    required = [_COL_DATE, _COL_PAST_RETURN_1D, "intraday_intensity"]
-    missing = [c for c in required if c not in factor_df.columns]
-    if missing:
-        raise ValueError(f"interaction_intraday 缺失必需列: {missing}")
-    weakness = -_cross_section_zscore(factor_df[_COL_PAST_RETURN_1D], factor_df[_COL_DATE])
-    factor_z = _cross_section_zscore(factor_df["intraday_intensity"], factor_df[_COL_DATE])
-    df = factor_df.assign(**{_COL_INTERACTION_INTRADAY: weakness * factor_z})
-    valid_count = int(df[_COL_INTERACTION_INTRADAY].notna().sum())
-    _logger.info(
-        "  interaction_intraday: valid=%d (%.2f%%)", valid_count, valid_count / len(df) * 100 if len(df) > 0 else 0.0
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_3D,
+        factor_col="amplitude_compression",
+        output_col=_COL_INTERACTION_AMP_COMPRESSION__RET3D_ABS,
+        direction="abs",
+        logger=get_module_logger(logger_arg),
     )
-    return df
 
 
-calculate_interaction_intraday.required_cols = ["date", "asset", "past_return_1d", "intraday_intensity"]  # type: ignore[attr-defined]
+calculate_interaction_amp_compression__ret3d_abs.required_cols = ["date", "asset", "return_3d", "amplitude_compression"]  # type: ignore[attr-defined]
 
 
-def calculate_interaction_ma5_dev(
+def calculate_interaction_near_high__ret3d_pos(
     factor_df: pd.DataFrame,
     *,
     logger_arg: logging.Logger | None = None,
 ) -> pd.DataFrame:
-    """交互因子 interaction_ma5_dev = -z_cs(return_3d) × z_cs(ma5_deviation)。
+    """near_high 因子的 pos 变体: max(z(ret), 0) × z_cs(near_high_ratio_5)。
 
-    实证 IC=+0.0322 ICIR=0.580（ICIR 最高），primary 角色。
-    含义: 弱势(3日跌) × MA5偏离度高 = 反弹型。
+    只在过去 N 日涨段启用（ReLU(+)），捕捉涨段中因子与未来收益的关系
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0425；新 pos 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_3d / near_high_ratio_5 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_near_high__ret3d_pos`` 列的 DataFrame
     """
-    _logger = get_module_logger(logger_arg)
-    required = [_COL_DATE, _COL_RETURN_3D, _COL_MA5_DEVIATION]
-    missing = [c for c in required if c not in factor_df.columns]
-    if missing:
-        raise ValueError(f"interaction_ma5_dev 缺失必需列: {missing}")
-    weakness = -_cross_section_zscore(factor_df[_COL_RETURN_3D], factor_df[_COL_DATE])
-    factor_z = _cross_section_zscore(factor_df[_COL_MA5_DEVIATION], factor_df[_COL_DATE])
-    df = factor_df.assign(**{_COL_INTERACTION_MA5_DEV: weakness * factor_z})
-    valid_count = int(df[_COL_INTERACTION_MA5_DEV].notna().sum())
-    _logger.info(
-        "  interaction_ma5_dev: valid=%d (%.2f%%)", valid_count, valid_count / len(df) * 100 if len(df) > 0 else 0.0
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_3D,
+        factor_col=_COL_NEAR_HIGH_RATIO_5,
+        output_col=_COL_INTERACTION_NEAR_HIGH__RET3D_POS,
+        direction="pos",
+        logger=get_module_logger(logger_arg),
     )
-    return df
 
 
-calculate_interaction_ma5_dev.required_cols = ["date", "asset", "return_3d", "ma5_deviation"]  # type: ignore[attr-defined]
+calculate_interaction_near_high__ret3d_pos.required_cols = ["date", "asset", "return_3d", "near_high_ratio_5"]  # type: ignore[attr-defined]
 
 
-def calculate_interaction_price_pos(
+def calculate_interaction_near_high__ret3d_neg(
     factor_df: pd.DataFrame,
     *,
     logger_arg: logging.Logger | None = None,
 ) -> pd.DataFrame:
-    """交互因子 interaction_price_pos = -z_cs(past_return_1d) × z_cs(price_position)。
+    """near_high 因子的 neg 变体: min(z(ret), 0) × z_cs(near_high_ratio_5)。
 
-    实证 IC=+0.0317 ICIR=0.513，primary 角色。
-    含义: 弱势(1日跌) × 价格位置高 = 反弹型。weakness 用 ret1d。
+    只在过去 N 日跌段启用（ReLU(-)），是旧 weakness 公式 -z(ret)·z(factor) 的跌段子集
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0425；新 neg 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_3d / near_high_ratio_5 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_near_high__ret3d_neg`` 列的 DataFrame
     """
-    _logger = get_module_logger(logger_arg)
-    required = [_COL_DATE, _COL_PAST_RETURN_1D, _COL_PRICE_POSITION]
-    missing = [c for c in required if c not in factor_df.columns]
-    if missing:
-        raise ValueError(f"interaction_price_pos 缺失必需列: {missing}")
-    weakness = -_cross_section_zscore(factor_df[_COL_PAST_RETURN_1D], factor_df[_COL_DATE])
-    factor_z = _cross_section_zscore(factor_df[_COL_PRICE_POSITION], factor_df[_COL_DATE])
-    df = factor_df.assign(**{_COL_INTERACTION_PRICE_POS: weakness * factor_z})
-    valid_count = int(df[_COL_INTERACTION_PRICE_POS].notna().sum())
-    _logger.info(
-        "  interaction_price_pos: valid=%d (%.2f%%)", valid_count, valid_count / len(df) * 100 if len(df) > 0 else 0.0
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_3D,
+        factor_col=_COL_NEAR_HIGH_RATIO_5,
+        output_col=_COL_INTERACTION_NEAR_HIGH__RET3D_NEG,
+        direction="neg",
+        logger=get_module_logger(logger_arg),
     )
-    return df
 
 
-calculate_interaction_price_pos.required_cols = ["date", "asset", "past_return_1d", "price_position"]  # type: ignore[attr-defined]
+calculate_interaction_near_high__ret3d_neg.required_cols = ["date", "asset", "return_3d", "near_high_ratio_5"]  # type: ignore[attr-defined]
 
 
-def calculate_interaction_kdj(
+def calculate_interaction_near_high__ret3d_abs(
     factor_df: pd.DataFrame,
     *,
     logger_arg: logging.Logger | None = None,
 ) -> pd.DataFrame:
-    """交互因子 interaction_kdj = -z_cs(return_5d) × z_cs(kdj_j)。
+    """near_high 因子的 abs 变体: |z(ret)| × z_cs(near_high_ratio_5)。
 
-    实证 IC=+0.0286 ICIR=0.400，confirmation 角色。
-    含义: 弱势(5日跌) × KDJ J值高 = 反弹型。weakness 用 ret5d（较长期弱势对趋势指标更敏感）。
+    按动幅大小启用，不分方向（|ReLU|），捕捉|过去N日动量|与因子的乘积效应
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0425；新 abs 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_3d / near_high_ratio_5 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_near_high__ret3d_abs`` 列的 DataFrame
     """
-    _logger = get_module_logger(logger_arg)
-    required = [_COL_DATE, _COL_RETURN_5D, "kdj_j"]
-    missing = [c for c in required if c not in factor_df.columns]
-    if missing:
-        raise ValueError(f"interaction_kdj 缺失必需列: {missing}")
-    weakness = -_cross_section_zscore(factor_df[_COL_RETURN_5D], factor_df[_COL_DATE])
-    factor_z = _cross_section_zscore(factor_df["kdj_j"], factor_df[_COL_DATE])
-    df = factor_df.assign(**{_COL_INTERACTION_KDJ: weakness * factor_z})
-    valid_count = int(df[_COL_INTERACTION_KDJ].notna().sum())
-    _logger.info(
-        "  interaction_kdj: valid=%d (%.2f%%)", valid_count, valid_count / len(df) * 100 if len(df) > 0 else 0.0
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_3D,
+        factor_col=_COL_NEAR_HIGH_RATIO_5,
+        output_col=_COL_INTERACTION_NEAR_HIGH__RET3D_ABS,
+        direction="abs",
+        logger=get_module_logger(logger_arg),
     )
-    return df
 
 
-calculate_interaction_kdj.required_cols = ["date", "asset", "return_5d", "kdj_j"]  # type: ignore[attr-defined]
+calculate_interaction_near_high__ret3d_abs.required_cols = ["date", "asset", "return_3d", "near_high_ratio_5"]  # type: ignore[attr-defined]
 
 
-def calculate_interaction_bollinger(
+def calculate_interaction_intraday__ret1d_pos(
     factor_df: pd.DataFrame,
     *,
     logger_arg: logging.Logger | None = None,
 ) -> pd.DataFrame:
-    """交互因子 interaction_bollinger = -z_cs(return_5d) × z_cs(bollinger_pb)。
+    """intraday 因子的 pos 变体: max(z(ret), 0) × z_cs(intraday_intensity)。
 
-    实证 IC=+0.0247 ICIR=0.384，confirmation 角色。
-    含义: 弱势(5日跌) × 布林带%B高 = 反弹型。weakness 用 ret5d。
+    只在过去 N 日涨段启用（ReLU(+)），捕捉涨段中因子与未来收益的关系
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0354；新 pos 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / past_return_1d / intraday_intensity 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_intraday__ret1d_pos`` 列的 DataFrame
     """
-    _logger = get_module_logger(logger_arg)
-    required = [_COL_DATE, _COL_RETURN_5D, "bollinger_pb"]
-    missing = [c for c in required if c not in factor_df.columns]
-    if missing:
-        raise ValueError(f"interaction_bollinger 缺失必需列: {missing}")
-    weakness = -_cross_section_zscore(factor_df[_COL_RETURN_5D], factor_df[_COL_DATE])
-    factor_z = _cross_section_zscore(factor_df["bollinger_pb"], factor_df[_COL_DATE])
-    df = factor_df.assign(**{_COL_INTERACTION_BOLLINGER: weakness * factor_z})
-    valid_count = int(df[_COL_INTERACTION_BOLLINGER].notna().sum())
-    _logger.info(
-        "  interaction_bollinger: valid=%d (%.2f%%)", valid_count, valid_count / len(df) * 100 if len(df) > 0 else 0.0
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_PAST_RETURN_1D,
+        factor_col="intraday_intensity",
+        output_col=_COL_INTERACTION_INTRADAY__RET1D_POS,
+        direction="pos",
+        logger=get_module_logger(logger_arg),
     )
-    return df
 
 
-calculate_interaction_bollinger.required_cols = ["date", "asset", "return_5d", "bollinger_pb"]  # type: ignore[attr-defined]
+calculate_interaction_intraday__ret1d_pos.required_cols = ["date", "asset", "past_return_1d", "intraday_intensity"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_intraday__ret1d_neg(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """intraday 因子的 neg 变体: min(z(ret), 0) × z_cs(intraday_intensity)。
+
+    只在过去 N 日跌段启用（ReLU(-)），是旧 weakness 公式 -z(ret)·z(factor) 的跌段子集
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0354；新 neg 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / past_return_1d / intraday_intensity 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_intraday__ret1d_neg`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_PAST_RETURN_1D,
+        factor_col="intraday_intensity",
+        output_col=_COL_INTERACTION_INTRADAY__RET1D_NEG,
+        direction="neg",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_intraday__ret1d_neg.required_cols = ["date", "asset", "past_return_1d", "intraday_intensity"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_intraday__ret1d_abs(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """intraday 因子的 abs 变体: |z(ret)| × z_cs(intraday_intensity)。
+
+    按动幅大小启用，不分方向（|ReLU|），捕捉|过去N日动量|与因子的乘积效应
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0354；新 abs 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / past_return_1d / intraday_intensity 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_intraday__ret1d_abs`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_PAST_RETURN_1D,
+        factor_col="intraday_intensity",
+        output_col=_COL_INTERACTION_INTRADAY__RET1D_ABS,
+        direction="abs",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_intraday__ret1d_abs.required_cols = ["date", "asset", "past_return_1d", "intraday_intensity"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_ma5_dev__ret3d_pos(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """ma5_dev 因子的 pos 变体: max(z(ret), 0) × z_cs(ma5_deviation)。
+
+    只在过去 N 日涨段启用（ReLU(+)），捕捉涨段中因子与未来收益的关系
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0322；新 pos 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_3d / ma5_deviation 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_ma5_dev__ret3d_pos`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_3D,
+        factor_col=_COL_MA5_DEVIATION,
+        output_col=_COL_INTERACTION_MA5_DEV__RET3D_POS,
+        direction="pos",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_ma5_dev__ret3d_pos.required_cols = ["date", "asset", "return_3d", "ma5_deviation"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_ma5_dev__ret3d_neg(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """ma5_dev 因子的 neg 变体: min(z(ret), 0) × z_cs(ma5_deviation)。
+
+    只在过去 N 日跌段启用（ReLU(-)），是旧 weakness 公式 -z(ret)·z(factor) 的跌段子集
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0322；新 neg 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_3d / ma5_deviation 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_ma5_dev__ret3d_neg`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_3D,
+        factor_col=_COL_MA5_DEVIATION,
+        output_col=_COL_INTERACTION_MA5_DEV__RET3D_NEG,
+        direction="neg",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_ma5_dev__ret3d_neg.required_cols = ["date", "asset", "return_3d", "ma5_deviation"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_ma5_dev__ret3d_abs(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """ma5_dev 因子的 abs 变体: |z(ret)| × z_cs(ma5_deviation)。
+
+    按动幅大小启用，不分方向（|ReLU|），捕捉|过去N日动量|与因子的乘积效应
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0322；新 abs 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_3d / ma5_deviation 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_ma5_dev__ret3d_abs`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_3D,
+        factor_col=_COL_MA5_DEVIATION,
+        output_col=_COL_INTERACTION_MA5_DEV__RET3D_ABS,
+        direction="abs",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_ma5_dev__ret3d_abs.required_cols = ["date", "asset", "return_3d", "ma5_deviation"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_price_pos__ret1d_pos(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """price_pos 因子的 pos 变体: max(z(ret), 0) × z_cs(price_position)。
+
+    只在过去 N 日涨段启用（ReLU(+)），捕捉涨段中因子与未来收益的关系
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0317；新 pos 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / past_return_1d / price_position 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_price_pos__ret1d_pos`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_PAST_RETURN_1D,
+        factor_col=_COL_PRICE_POSITION,
+        output_col=_COL_INTERACTION_PRICE_POS__RET1D_POS,
+        direction="pos",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_price_pos__ret1d_pos.required_cols = ["date", "asset", "past_return_1d", "price_position"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_price_pos__ret1d_neg(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """price_pos 因子的 neg 变体: min(z(ret), 0) × z_cs(price_position)。
+
+    只在过去 N 日跌段启用（ReLU(-)），是旧 weakness 公式 -z(ret)·z(factor) 的跌段子集
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0317；新 neg 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / past_return_1d / price_position 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_price_pos__ret1d_neg`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_PAST_RETURN_1D,
+        factor_col=_COL_PRICE_POSITION,
+        output_col=_COL_INTERACTION_PRICE_POS__RET1D_NEG,
+        direction="neg",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_price_pos__ret1d_neg.required_cols = ["date", "asset", "past_return_1d", "price_position"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_price_pos__ret1d_abs(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """price_pos 因子的 abs 变体: |z(ret)| × z_cs(price_position)。
+
+    按动幅大小启用，不分方向（|ReLU|），捕捉|过去N日动量|与因子的乘积效应
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0317；新 abs 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / past_return_1d / price_position 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_price_pos__ret1d_abs`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_PAST_RETURN_1D,
+        factor_col=_COL_PRICE_POSITION,
+        output_col=_COL_INTERACTION_PRICE_POS__RET1D_ABS,
+        direction="abs",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_price_pos__ret1d_abs.required_cols = ["date", "asset", "past_return_1d", "price_position"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_kdj__ret5d_pos(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """kdj 因子的 pos 变体: max(z(ret), 0) × z_cs(kdj_j)。
+
+    只在过去 N 日涨段启用（ReLU(+)），捕捉涨段中因子与未来收益的关系
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0286；新 pos 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_5d / kdj_j 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_kdj__ret5d_pos`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_5D,
+        factor_col="kdj_j",
+        output_col=_COL_INTERACTION_KDJ__RET5D_POS,
+        direction="pos",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_kdj__ret5d_pos.required_cols = ["date", "asset", "return_5d", "kdj_j"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_kdj__ret5d_neg(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """kdj 因子的 neg 变体: min(z(ret), 0) × z_cs(kdj_j)。
+
+    只在过去 N 日跌段启用（ReLU(-)），是旧 weakness 公式 -z(ret)·z(factor) 的跌段子集
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0286；新 neg 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_5d / kdj_j 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_kdj__ret5d_neg`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_5D,
+        factor_col="kdj_j",
+        output_col=_COL_INTERACTION_KDJ__RET5D_NEG,
+        direction="neg",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_kdj__ret5d_neg.required_cols = ["date", "asset", "return_5d", "kdj_j"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_kdj__ret5d_abs(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """kdj 因子的 abs 变体: |z(ret)| × z_cs(kdj_j)。
+
+    按动幅大小启用，不分方向（|ReLU|），捕捉|过去N日动量|与因子的乘积效应
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0286；新 abs 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_5d / kdj_j 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_kdj__ret5d_abs`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_5D,
+        factor_col="kdj_j",
+        output_col=_COL_INTERACTION_KDJ__RET5D_ABS,
+        direction="abs",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_kdj__ret5d_abs.required_cols = ["date", "asset", "return_5d", "kdj_j"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_bollinger__ret5d_pos(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """bollinger 因子的 pos 变体: max(z(ret), 0) × z_cs(bollinger_pb)。
+
+    只在过去 N 日涨段启用（ReLU(+)），捕捉涨段中因子与未来收益的关系
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0247；新 pos 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_5d / bollinger_pb 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_bollinger__ret5d_pos`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_5D,
+        factor_col="bollinger_pb",
+        output_col=_COL_INTERACTION_BOLLINGER__RET5D_POS,
+        direction="pos",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_bollinger__ret5d_pos.required_cols = ["date", "asset", "return_5d", "bollinger_pb"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_bollinger__ret5d_neg(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """bollinger 因子的 neg 变体: min(z(ret), 0) × z_cs(bollinger_pb)。
+
+    只在过去 N 日跌段启用（ReLU(-)），是旧 weakness 公式 -z(ret)·z(factor) 的跌段子集
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0247；新 neg 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_5d / bollinger_pb 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_bollinger__ret5d_neg`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_5D,
+        factor_col="bollinger_pb",
+        output_col=_COL_INTERACTION_BOLLINGER__RET5D_NEG,
+        direction="neg",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_bollinger__ret5d_neg.required_cols = ["date", "asset", "return_5d", "bollinger_pb"]  # type: ignore[attr-defined]
+
+
+def calculate_interaction_bollinger__ret5d_abs(
+    factor_df: pd.DataFrame,
+    *,
+    logger_arg: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """bollinger 因子的 abs 变体: |z(ret)| × z_cs(bollinger_pb)。
+
+    按动幅大小启用，不分方向（|ReLU|），捕捉|过去N日动量|与因子的乘积效应
+
+    旧 weakness 公式 (v2.36/v2.37) 实证 IC≈+0.0247；新 abs 变体 IC 待 F2 跑出。
+
+    Args:
+        factor_df: 必须包含 date / asset / return_5d / bollinger_pb 列
+        logger_arg: 日志器
+
+    Returns:
+        添加 ``interaction_bollinger__ret5d_abs`` 列的 DataFrame
+    """
+    return _calculate_interaction_variant(
+        factor_df,
+        ret_col=_COL_RETURN_5D,
+        factor_col="bollinger_pb",
+        output_col=_COL_INTERACTION_BOLLINGER__RET5D_ABS,
+        direction="abs",
+        logger=get_module_logger(logger_arg),
+    )
+
+
+calculate_interaction_bollinger__ret5d_abs.required_cols = ["date", "asset", "return_5d", "bollinger_pb"]  # type: ignore[attr-defined]

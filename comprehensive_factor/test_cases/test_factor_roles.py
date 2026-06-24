@@ -41,7 +41,12 @@ class TestFactorRolesDefinition:
             assert role in FACTOR_ROLE_TYPES, f"{f} 角色={role} 不在 {FACTOR_ROLE_TYPES}"
 
     def test_confirmation_factors_are_p5_new(self):
-        """确认信号因子=P5新增5个 + P5-补充6个 + v2.36 交互因子3个 = 14"""
+        """确认信号因子=P5新增5个 + P5-补充6个 + v2.48 交互因子族27变体 = 38
+
+        v2.48: 旧 v2.36/v2.37 共 9 个交互因子（confirmation 3 + primary 6）→
+               重构为 27 个 pos/neg/abs ReLU 变体, 统一默认 confirmation
+               （由 F2 IC 闸口数据驱动后续升级 primary）
+        """
         confirmation = [f for f, r in FACTOR_ROLES.items() if r == "confirmation"]
         expected = {
             # P5 新增5个：趋势变化/量价背离
@@ -57,20 +62,29 @@ class TestFactorRolesDefinition:
             "range_compression",
             "volume_decay_rate",
             "turnover_decay_rate",
-            # v2.36: 交互因子族（IC≈+0.02 < 0.03 门槛, 走 confirmation 固定权重）
-            "interaction_amplitude",
-            "interaction_turnover",
-            "interaction_amp_compression",
-            # v2.37: 交互因子第二批 confirmation 角色
-            "interaction_kdj",
-            "interaction_bollinger",
         }
+        # v2.48: 27 交互变体 (9 base × {pos,neg,abs})
+        _BASES_AND_WINDOWS = [
+            ("amplitude", 3), ("turnover", 3), ("amp_compression", 3),
+            ("near_high", 3), ("intraday", 1), ("ma5_dev", 3),
+            ("price_pos", 1), ("kdj", 5), ("bollinger", 5),
+        ]
+        for base, w in _BASES_AND_WINDOWS:
+            for v in ("pos", "neg", "abs"):
+                expected.add(f"interaction_{base}__ret{w}d_{v}")
         assert set(confirmation) == expected
 
     def test_primary_count(self):
-        """主信号因子=38个 (FACTOR_CATEGORIES 54 - confirmation 16)"""
+        """主信号因子=FACTOR_CATEGORIES 总数 - confirmation - filter
+
+        v2.48 重构后:
+          - FACTOR_CATEGORIES = 72
+          - confirmation = 11 (P5+P5补充) + 27 (v2.48 交互变体) = 38
+          - filter = 0 (cum_return_5d_breakdown 在 ROLES 中但不在 CATEGORIES)
+          - primary = 72 - 38 - 0 = 34
+        """
         primary = [f for f, r in FACTOR_ROLES.items() if r == "primary"]
-        assert len(primary) == 38
+        assert len(primary) == 34
 
     def test_filter_role_has_cum_return_5d_breakdown(self):
         """filter 角色：R3 起新增 cum_return_5d_breakdown（首个 filter 因子）

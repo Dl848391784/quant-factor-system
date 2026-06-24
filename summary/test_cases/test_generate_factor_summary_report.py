@@ -1109,9 +1109,9 @@ def _build_mock_stock_result(n_stocks: int) -> dict:
                 "rank": i + 1,
                 "code": f"60{i:04d}",
                 "composite_value": -0.5 - i * 0.01,
-                "factor_values": {"interaction_kdj": -0.8, "bollinger_pb": 0.04},
+                "factor_values": {"interaction_kdj__ret5d_pos__ret5d_pos": -0.8, "bollinger_pb": 0.04},
                 "factor_values_std": {
-                    "interaction_kdj": 0.14 - i * 0.01,
+                    "interaction_kdj__ret5d_pos__ret5d_pos": 0.14 - i * 0.01,
                     "bollinger_pb": -1.06 + i * 0.02,
                     "return_5d": -0.59,
                 },
@@ -1140,7 +1140,7 @@ class TestShortlistTop30:
     def test_top10_only_uses_detail_only(self):
         """N=10 时仅输出详表 (向后兼容)."""
         result = _build_mock_stock_result(10)
-        weights = {"interaction_kdj": 0.1, "bollinger_pb": 0.08, "return_5d": 0.07}
+        weights = {"interaction_kdj__ret5d_pos__ret5d_pos": 0.1, "bollinger_pb": 0.08, "return_5d": 0.07}
         lines = _generate_stock_selection_section(result, weights, None)
         text = "\n".join(lines)
         # N=10 时保留旧版"【Top 10 股票】"标题, 不进入简表分支
@@ -1151,7 +1151,7 @@ class TestShortlistTop30:
     def test_top30_outputs_detail_plus_brief(self):
         """N=30 时输出 Top 10 详表 + 11~30 简表."""
         result = _build_mock_stock_result(30)
-        weights = {"interaction_kdj": 0.1, "bollinger_pb": 0.08, "return_5d": 0.07}
+        weights = {"interaction_kdj__ret5d_pos__ret5d_pos": 0.1, "bollinger_pb": 0.08, "return_5d": 0.07}
         lines = _generate_stock_selection_section(result, weights, None)
         text = "\n".join(lines)
         # 标题分层
@@ -1165,13 +1165,13 @@ class TestShortlistTop30:
     def test_brief_table_dominant_factors_format(self):
         """简表展示主导因子占比, 格式为 'name(XX%)'."""
         result = _build_mock_stock_result(15)  # 触发简表 (>10)
-        weights = {"interaction_kdj": 0.5, "bollinger_pb": 0.3, "return_5d": 0.2}
+        weights = {"interaction_kdj__ret5d_pos__ret5d_pos": 0.5, "bollinger_pb": 0.3, "return_5d": 0.2}
         lines = _generate_stock_selection_section(result, weights, None)
         # 简表区块至少包含一行 "(XX%)"
         brief_block = [
             line
             for line in lines
-            if "(" in line and "%)" in line and ("interaction_kdj" in line or "bollinger_pb" in line)
+            if "(" in line and "%)" in line and ("interaction_kdj__ret5d_pos__ret5d_pos" in line or "bollinger_pb" in line)
         ]
         assert len(brief_block) > 0, f"简表未找到主导因子百分比行: {lines}"
 

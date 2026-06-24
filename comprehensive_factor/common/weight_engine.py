@@ -54,6 +54,7 @@ WEIGHT_CAP_DEFAULT = 0.25
 # 业界依据: AQR 多因子产品任一策略 ≤ 33%（Asness 2013）；本项目 8 族经济同源聚合
 # 防族级垄断: v2.39 实测 amplitude_family (amplitude_compression 25% +
 #   interaction_amp_compression 13.75%) = 38.75%，绕过维度权重再分配
+# (v2.48 重构后该旧名已替换为 interaction_amp_compression__ret3d_{pos,neg,abs} 三变体)
 # 选择 0.30 而非 0.25: 0.30 允许 1 个族支配但不主导，剩余 70% 分配 6-8 族
 FAMILY_CAP_DEFAULT = 0.30
 

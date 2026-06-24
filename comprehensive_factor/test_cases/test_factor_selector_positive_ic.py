@@ -132,7 +132,7 @@ class TestInteractionFactorAlsoAffected:
         t["require_positive_ic"] = True
         # 交互因子的典型负 IC（ic_mean<0 但 |ic_mean|>0.005）
         factor_data = _make_factor_data(ic_mean=-0.015, icir=-0.1, sharpe=0.5, mono=0.4)
-        is_valid, reasons, _ = validate_factor("interaction_bollinger", factor_data, thresholds=t)
+        is_valid, reasons, _ = validate_factor("interaction_bollinger__ret5d_neg", factor_data, thresholds=t)
         assert not is_valid
         assert any("require_positive_ic" in r for r in reasons), (
             f"交互因子也应被 require_positive_ic 剔除, reasons={reasons}"

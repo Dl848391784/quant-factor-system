@@ -144,20 +144,60 @@ _COL_MOMENTUM_STRENGTH = "momentum_strength"
 _COL_CAPITAL_FLOW_RATIO_TREND = "capital_flow_ratio_trend"
 _COL_CAPITAL_FLOW_INTENSITY = "capital_flow_intensity"
 
-# 交互因子族（v2.36, 2026-06-22）—— 条件因子方向方案 B（design.md feat_interaction_factors）
-# weakness × factor_z, 捕捉"弱势子样本中因子方向翻转"的条件效应，见 skill
-# factor-development ref conditional-ic-analysis.md
-_COL_INTERACTION_AMPLITUDE = "interaction_amplitude"
-_COL_INTERACTION_TURNOVER = "interaction_turnover"
-_COL_INTERACTION_AMP_COMPRESSION = "interaction_amp_compression"
+# v2.48 (2026-06-24, designs/feat_factor_definition_destigmatization_v1.md v1.2)
+# 交互因子族重构 —— pos/neg/abs ReLU 切半轴三变体，替代旧 weakness 单边公式
+# 旧 v2.36/v2.37 公式 = -z(ret_Nd) × z(factor) (单边 weakness)，数学上无对应 strength 变体
+#   ⟹ 因子定义阶段预设方向，违反 AGENTS.md 数据驱动原则
+# 新公式: interaction_<base>__ret<W>d_<DIR>, DIR ∈ {pos, neg, abs}
+#   pos = max(z(ret_Nd), 0) × z(factor)   只在过去 N 日涨段启用
+#   neg = min(z(ret_Nd), 0) × z(factor)   只在过去 N 日跌段启用（旧 weakness 的"跌段子集"）
+#   abs = |z(ret_Nd)|       × z(factor)   按动幅大小启用，不分方向
+# 数学独立性: pos + neg ≡ z(ret) × z(factor)，但三者单独使用时 IC 互相独立
+# 旧名 interaction_amplitude/interaction_turnover/... 全部删除，下游一次性切到新名
+# amplitude (ret3d, v2.36 batch 1)
+_COL_INTERACTION_AMPLITUDE__RET3D_POS = "interaction_amplitude__ret3d_pos"
+_COL_INTERACTION_AMPLITUDE__RET3D_NEG = "interaction_amplitude__ret3d_neg"
+_COL_INTERACTION_AMPLITUDE__RET3D_ABS = "interaction_amplitude__ret3d_abs"
 
-# 交互因子族 第二批（v2.37, 2026-06-22）—— 6 个新交互因子（design.md feat_interaction_factors_batch2）
-_COL_INTERACTION_NEAR_HIGH = "interaction_near_high"
-_COL_INTERACTION_INTRADAY = "interaction_intraday"
-_COL_INTERACTION_MA5_DEV = "interaction_ma5_dev"
-_COL_INTERACTION_PRICE_POS = "interaction_price_pos"
-_COL_INTERACTION_KDJ = "interaction_kdj"
-_COL_INTERACTION_BOLLINGER = "interaction_bollinger"
+# turnover (ret3d, v2.36 batch 1)
+_COL_INTERACTION_TURNOVER__RET3D_POS = "interaction_turnover__ret3d_pos"
+_COL_INTERACTION_TURNOVER__RET3D_NEG = "interaction_turnover__ret3d_neg"
+_COL_INTERACTION_TURNOVER__RET3D_ABS = "interaction_turnover__ret3d_abs"
+
+# amp_compression (ret3d, v2.36 batch 1)
+_COL_INTERACTION_AMP_COMPRESSION__RET3D_POS = "interaction_amp_compression__ret3d_pos"
+_COL_INTERACTION_AMP_COMPRESSION__RET3D_NEG = "interaction_amp_compression__ret3d_neg"
+_COL_INTERACTION_AMP_COMPRESSION__RET3D_ABS = "interaction_amp_compression__ret3d_abs"
+
+# near_high (ret3d, v2.37 batch 2)
+_COL_INTERACTION_NEAR_HIGH__RET3D_POS = "interaction_near_high__ret3d_pos"
+_COL_INTERACTION_NEAR_HIGH__RET3D_NEG = "interaction_near_high__ret3d_neg"
+_COL_INTERACTION_NEAR_HIGH__RET3D_ABS = "interaction_near_high__ret3d_abs"
+
+# intraday (ret1d, v2.37 batch 2)
+_COL_INTERACTION_INTRADAY__RET1D_POS = "interaction_intraday__ret1d_pos"
+_COL_INTERACTION_INTRADAY__RET1D_NEG = "interaction_intraday__ret1d_neg"
+_COL_INTERACTION_INTRADAY__RET1D_ABS = "interaction_intraday__ret1d_abs"
+
+# ma5_dev (ret3d, v2.37 batch 2)
+_COL_INTERACTION_MA5_DEV__RET3D_POS = "interaction_ma5_dev__ret3d_pos"
+_COL_INTERACTION_MA5_DEV__RET3D_NEG = "interaction_ma5_dev__ret3d_neg"
+_COL_INTERACTION_MA5_DEV__RET3D_ABS = "interaction_ma5_dev__ret3d_abs"
+
+# price_pos (ret1d, v2.37 batch 2)
+_COL_INTERACTION_PRICE_POS__RET1D_POS = "interaction_price_pos__ret1d_pos"
+_COL_INTERACTION_PRICE_POS__RET1D_NEG = "interaction_price_pos__ret1d_neg"
+_COL_INTERACTION_PRICE_POS__RET1D_ABS = "interaction_price_pos__ret1d_abs"
+
+# kdj (ret5d, v2.37 batch 2)
+_COL_INTERACTION_KDJ__RET5D_POS = "interaction_kdj__ret5d_pos"
+_COL_INTERACTION_KDJ__RET5D_NEG = "interaction_kdj__ret5d_neg"
+_COL_INTERACTION_KDJ__RET5D_ABS = "interaction_kdj__ret5d_abs"
+
+# bollinger (ret5d, v2.37 batch 2)
+_COL_INTERACTION_BOLLINGER__RET5D_POS = "interaction_bollinger__ret5d_pos"
+_COL_INTERACTION_BOLLINGER__RET5D_NEG = "interaction_bollinger__ret5d_neg"
+_COL_INTERACTION_BOLLINGER__RET5D_ABS = "interaction_bollinger__ret5d_abs"
 
 # 交互因子默认参数
 _DEFAULT_INTERACTION_CLIP_SIGMA = 3.0  # 截面 z-score clip 到 ±3σ 防极端值

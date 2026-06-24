@@ -258,17 +258,9 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask("ic_range_compression", "factor_ic/ic_range_compression_1d.py", 2, []),
     ScriptTask("ic_volume_decay_rate", "factor_ic/ic_volume_decay_rate_1d.py", 2, []),
     ScriptTask("ic_turnover_decay_rate", "factor_ic/ic_turnover_decay_rate_1d.py", 2, []),
-    # v2.36: 交互因子族 IC（条件因子方向方案 B, design.md feat_interaction_factors）
-    ScriptTask("ic_interaction_amplitude", "factor_ic/ic_interaction_amplitude_1d.py", 2, []),
-    ScriptTask("ic_interaction_turnover", "factor_ic/ic_interaction_turnover_1d.py", 2, []),
-    ScriptTask("ic_interaction_amp_compression", "factor_ic/ic_interaction_amp_compression_1d.py", 2, []),
-    # v2.37: 交互因子第二批 IC
-    ScriptTask("ic_interaction_near_high", "factor_ic/ic_interaction_near_high_1d.py", 2, []),
-    ScriptTask("ic_interaction_intraday", "factor_ic/ic_interaction_intraday_1d.py", 2, []),
-    ScriptTask("ic_interaction_ma5_dev", "factor_ic/ic_interaction_ma5_dev_1d.py", 2, []),
-    ScriptTask("ic_interaction_price_pos", "factor_ic/ic_interaction_price_pos_1d.py", 2, []),
-    ScriptTask("ic_interaction_kdj", "factor_ic/ic_interaction_kdj_1d.py", 2, []),
-    ScriptTask("ic_interaction_bollinger", "factor_ic/ic_interaction_bollinger_1d.py", 2, []),
+    # v2.36/v2.37: 交互因子族 IC 旧 9 脚本已在 v2.48 重构中删除
+    # (designs/feat_factor_definition_destigmatization_v1.md v1.2)
+    # F2 阶段将新增 27 个 pos/neg/abs ReLU 变体的 IC 脚本
     # Stage 3: 分层回测
     ScriptTask("backtest_rsi", "backtest/layered_backtest_rsi_1d.py", 3, []),
     ScriptTask("backtest_volume_ratio", "backtest/layered_backtest_volume_ratio_1d.py", 3, []),
@@ -330,32 +322,9 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask("backtest_range_compression", "backtest/layered_backtest_range_compression_1d.py", 3, []),
     ScriptTask("backtest_volume_decay_rate", "backtest/layered_backtest_volume_decay_rate_1d.py", 3, []),
     ScriptTask("backtest_turnover_decay_rate", "backtest/layered_backtest_turnover_decay_rate_1d.py", 3, []),
-    # v2.36: 交互因子族 分层回测（条件因子方向方案 B）
-    ScriptTask(
-        "backtest_interaction_amplitude",
-        "backtest/layered_backtest_interaction_amplitude_1d.py",
-        3,
-        [],
-    ),
-    ScriptTask(
-        "backtest_interaction_turnover",
-        "backtest/layered_backtest_interaction_turnover_1d.py",
-        3,
-        [],
-    ),
-    ScriptTask(
-        "backtest_interaction_amp_compression",
-        "backtest/layered_backtest_interaction_amp_compression_1d.py",
-        3,
-        [],
-    ),
-    # v2.37: 交互因子第二批 分层回测
-    ScriptTask("backtest_interaction_near_high", "backtest/layered_backtest_interaction_near_high_1d.py", 3, []),
-    ScriptTask("backtest_interaction_intraday", "backtest/layered_backtest_interaction_intraday_1d.py", 3, []),
-    ScriptTask("backtest_interaction_ma5_dev", "backtest/layered_backtest_interaction_ma5_dev_1d.py", 3, []),
-    ScriptTask("backtest_interaction_price_pos", "backtest/layered_backtest_interaction_price_pos_1d.py", 3, []),
-    ScriptTask("backtest_interaction_kdj", "backtest/layered_backtest_interaction_kdj_1d.py", 3, []),
-    ScriptTask("backtest_interaction_bollinger", "backtest/layered_backtest_interaction_bollinger_1d.py", 3, []),
+    # v2.36/v2.37: 交互因子族 分层回测旧 9 脚本已在 v2.48 重构中删除
+    # (designs/feat_factor_definition_destigmatization_v1.md v1.2)
+    # F2 阶段将新增 27 个 pos/neg/abs ReLU 变体的 backtest 脚本
     # Stage 4: 综合因子（auto_select 默认启用，无需传参；传 --auto_select 会触发 argparse unrecognized arguments 错误）
     # v2.35: P2 维度权重全方法支持——4种方法统一配置 --dimension_weight icir
     # 消除 rolling_icir 独享维度权重的不公平对比（design.md §2.2 决策点3）

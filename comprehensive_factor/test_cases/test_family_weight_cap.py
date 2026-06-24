@@ -74,7 +74,7 @@ class TestCapFamilyWeightDict:
         """族内按原比例降权（需 ≥4 族保证 cap=0.30 物理可行）"""
         weights = {
             "amplitude_compression_5": 0.40,  # 振幅族 0.60, 原比例 2/3
-            "interaction_amp_compression": 0.20,  # 振幅族, 原比例 1/3
+            "interaction_amp_compression__ret3d_pos": 0.20,  # 振幅族, 原比例 1/3
             "rsi_6": 0.15,  # momentum
             "volume_decay_rate_5": 0.15,  # volume
             "overnight_ret_5": 0.10,  # overnight
@@ -82,14 +82,14 @@ class TestCapFamilyWeightDict:
         result = WeightMethodBase._cap_family_weight(weights, list(weights), cap=0.30, logger=logger)
         # 振幅族降到 0.30 后, 2/3 → 0.20, 1/3 → 0.10
         assert result["amplitude_compression_5"] == pytest.approx(0.20, abs=1e-3)
-        assert result["interaction_amp_compression"] == pytest.approx(0.10, abs=1e-3)
+        assert result["interaction_amp_compression__ret3d_pos"] == pytest.approx(0.10, abs=1e-3)
         assert sum(result.values()) == pytest.approx(1.0, abs=1e-6)
 
     def test_v2_39_realistic_scenario(self, logger):
         """v2.39 实测场景: 振幅族 38.75% → 应降到 30%"""
         weights = {
             "amplitude_compression_5": 0.25,
-            "interaction_amp_compression": 0.1375,
+            "interaction_amp_compression__ret3d_pos": 0.1375,
             "volume_decay_rate_5": 0.10,
             "volume_ratio_5": 0.08,
             "price_position_5": 0.10,
@@ -105,7 +105,7 @@ class TestCapFamilyWeightDict:
         # sum 守恒
         assert sum(result.values()) == pytest.approx(original_sum, abs=1e-6)
         # 振幅族应降到 30%
-        amp_total = result["amplitude_compression_5"] + result["interaction_amp_compression"]
+        amp_total = result["amplitude_compression_5"] + result["interaction_amp_compression__ret3d_pos"]
         assert amp_total == pytest.approx(0.30, abs=1e-3)
         # 验证其他族增加
         assert result["volume_decay_rate_5"] > 0.10
@@ -194,7 +194,7 @@ class TestIntegrationWithSingleFactorCap:
         # 输入: amplitude_compression 40% 超单因子 cap, 振幅族 0.50 超 0.30
         weights = {
             "amplitude_compression_5": 0.40,
-            "interaction_amp_compression": 0.10,
+            "interaction_amp_compression__ret3d_pos": 0.10,
             "rsi_6": 0.20,  # momentum
             "volume_decay_rate_5": 0.15,  # volume
             "overnight_ret_5": 0.10,  # overnight
@@ -209,7 +209,7 @@ class TestIntegrationWithSingleFactorCap:
             capped_single, list(capped_single), cap=FAMILY_CAP_DEFAULT, logger=logger
         )
         # amplitude_family 应 ≤ 30%
-        amp_total = capped_family["amplitude_compression_5"] + capped_family["interaction_amp_compression"]
+        amp_total = capped_family["amplitude_compression_5"] + capped_family["interaction_amp_compression__ret3d_pos"]
         assert amp_total <= 0.30 + 1e-3
         # sum 守恒
         assert sum(capped_family.values()) == pytest.approx(1.0, abs=1e-6)

@@ -67,12 +67,16 @@ class TestThresholdDispatch:
             assert t["layer_1_return_min"] == 0.0
 
     def test_interaction_factor_uses_interaction(self):
-        """interaction_ 前缀因子走 INTERACTION_THRESHOLDS"""
+        """interaction_ 前缀因子走 INTERACTION_THRESHOLDS
+
+        v2.48: 命名升级为 interaction_<base>__ret<N>d_<pos|neg|abs>，
+               startswith('interaction_') 仍命中
+        """
         for fn in [
-            "interaction_amplitude",
-            "interaction_turnover",
-            "interaction_amp_compression",
-            "interaction_kdj",
+            "interaction_amplitude__ret3d_pos",
+            "interaction_turnover__ret3d_neg",
+            "interaction_amp_compression__ret3d_abs",
+            "interaction_kdj__ret5d_pos",
         ]:
             t, src = _get_thresholds_for_factor(fn, DEFAULT_THRESHOLDS)
             assert src == "interaction", f"{fn} 应走 interaction 门槛"
@@ -224,10 +228,10 @@ class TestThresholdSourceField:
 
 
 class TestRealWorldThreeFactors:
-    """v2.36 三因子实测真值场景（design §7.2）"""
+    """v2.36 三因子实测真值场景（v2.48 命名升级: <base>__ret3d_pos）（design §7.2）"""
 
     def test_amp_compression_passes(self):
-        """interaction_amp_compression: ic=0.0077 / icir=0.120 / mono=0.357 / p=0.012 → 进池"""
+        """interaction_amp_compression__ret3d_pos (旧 interaction_amp_compression): ic=0.0077 / icir=0.120 / mono=0.357 / p=0.012 → 进池"""
         data = _make_factor_data(
             ic_mean=0.007729,
             icir=0.1197,
@@ -238,11 +242,11 @@ class TestRealWorldThreeFactors:
             layer_1_annual=-0.1176,
             layer_1_sharpe=-0.52,
         )
-        is_valid, reasons, _ = validate_factor("interaction_amp_compression", data)
+        is_valid, reasons, _ = validate_factor("interaction_amp_compression__ret3d_pos", data)
         assert is_valid, f"amp_compression 应通过, 实际: {reasons}"
 
     def test_amplitude_rejected_by_p_value(self):
-        """interaction_amplitude: ic=0.0048 / p=0.113 → 淘汰（ic_mean+p_value 卡）"""
+        """interaction_amplitude__ret3d_pos (旧 interaction_amplitude): ic=0.0048 / p=0.113 → 淘汰（ic_mean+p_value 卡）"""
         data = _make_factor_data(
             ic_mean=0.004779,
             icir=0.0766,
@@ -253,13 +257,13 @@ class TestRealWorldThreeFactors:
             layer_1_annual=-0.2064,
             layer_1_sharpe=-0.92,
         )
-        is_valid, reasons, _ = validate_factor("interaction_amplitude", data)
+        is_valid, reasons, _ = validate_factor("interaction_amplitude__ret3d_pos", data)
         assert not is_valid
         # 主要应被 ic_mean 或 p_value 卡
         assert any("ic_mean" in r or "p_value" in r for r in reasons), reasons
 
     def test_turnover_rejected_multiple(self):
-        """interaction_turnover: ic=0.0016 / icir=0.024 / p=0.611 → 淘汰"""
+        """interaction_turnover__ret3d_pos (旧 interaction_turnover): ic=0.0016 / icir=0.024 / p=0.611 → 淘汰"""
         data = _make_factor_data(
             ic_mean=0.001648,
             icir=0.0236,
@@ -270,7 +274,7 @@ class TestRealWorldThreeFactors:
             layer_1_annual=-0.1633,
             layer_1_sharpe=-0.73,
         )
-        is_valid, reasons, _ = validate_factor("interaction_turnover", data)
+        is_valid, reasons, _ = validate_factor("interaction_turnover__ret3d_pos", data)
         assert not is_valid
         # 至少 ic_mean / icir / p_value 三条卡
         n_blocked = sum(1 for r in reasons if any(k in r for k in ["ic_mean", "icir", "p_value"]))
@@ -285,7 +289,7 @@ class TestConfirmationRoleOverride:
     """
 
     def test_interaction_overrides_confirmation(self):
-        """interaction_amp_compression 是 confirmation 角色, 但 ic=0.0077 应过 0.005"""
+        """interaction_amp_compression__ret3d_pos 是 confirmation 角色, 但 ic=0.0077 应过 0.005"""
         # 实测精确值: ic=0.0077, 0.005 < 0.0077 < 0.01 (confirmation)
         # 若没有 override, 走 confirmation 0.01 会卡; 走 interaction 0.005 才能过
         data = _make_factor_data(
@@ -297,5 +301,5 @@ class TestConfirmationRoleOverride:
             long_return=0.10,
             layer_1_annual=-0.12,
         )
-        is_valid, reasons, _ = validate_factor("interaction_amp_compression", data)
+        is_valid, reasons, _ = validate_factor("interaction_amp_compression__ret3d_pos", data)
         assert is_valid, f"interaction override confirmation 失败, reasons={reasons}"

@@ -31,15 +31,33 @@ try:
         calculate_industry_amplitude_trend,
         calculate_industry_momentum_5d,
         calculate_industry_turnover_trend,
-        calculate_interaction_amp_compression,  # v2.36: 交互因子 (design.md feat_interaction_factors)
-        calculate_interaction_amplitude,  # v2.36: 交互因子
-        calculate_interaction_bollinger,  # v2.37: 交互因子第二批
-        calculate_interaction_intraday,  # v2.37: 交互因子第二批
-        calculate_interaction_kdj,  # v2.37: 交互因子第二批
-        calculate_interaction_ma5_dev,  # v2.37: 交互因子第二批
-        calculate_interaction_near_high,  # v2.37: 交互因子第二批
-        calculate_interaction_price_pos,  # v2.37: 交互因子第二批
-        calculate_interaction_turnover,  # v2.36: 交互因子
+        calculate_interaction_amp_compression__ret3d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_amp_compression__ret3d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_amp_compression__ret3d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_amplitude__ret3d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_amplitude__ret3d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_amplitude__ret3d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_bollinger__ret5d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_bollinger__ret5d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_bollinger__ret5d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_intraday__ret1d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_intraday__ret1d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_intraday__ret1d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_kdj__ret5d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_kdj__ret5d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_kdj__ret5d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_ma5_dev__ret3d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_ma5_dev__ret3d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_ma5_dev__ret3d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_near_high__ret3d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_near_high__ret3d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_near_high__ret3d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_price_pos__ret1d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_price_pos__ret1d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_price_pos__ret1d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_turnover__ret3d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_turnover__ret3d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_turnover__ret3d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
         calculate_intraday_intensity,
         calculate_kdj_j,
         calculate_lower_shadow_ratio,  # v2.35: P5
@@ -84,15 +102,33 @@ except ImportError:
         calculate_industry_amplitude_trend,
         calculate_industry_momentum_5d,
         calculate_industry_turnover_trend,
-        calculate_interaction_amp_compression,  # v2.36: 交互因子 (design.md feat_interaction_factors)
-        calculate_interaction_amplitude,  # v2.36: 交互因子
-        calculate_interaction_bollinger,  # v2.37: 交互因子第二批
-        calculate_interaction_intraday,  # v2.37: 交互因子第二批
-        calculate_interaction_kdj,  # v2.37: 交互因子第二批
-        calculate_interaction_ma5_dev,  # v2.37: 交互因子第二批
-        calculate_interaction_near_high,  # v2.37: 交互因子第二批
-        calculate_interaction_price_pos,  # v2.37: 交互因子第二批
-        calculate_interaction_turnover,  # v2.36: 交互因子
+        calculate_interaction_amp_compression__ret3d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_amp_compression__ret3d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_amp_compression__ret3d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_amplitude__ret3d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_amplitude__ret3d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_amplitude__ret3d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_bollinger__ret5d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_bollinger__ret5d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_bollinger__ret5d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_intraday__ret1d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_intraday__ret1d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_intraday__ret1d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_kdj__ret5d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_kdj__ret5d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_kdj__ret5d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_ma5_dev__ret3d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_ma5_dev__ret3d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_ma5_dev__ret3d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_near_high__ret3d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_near_high__ret3d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_near_high__ret3d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_price_pos__ret1d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_price_pos__ret1d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_price_pos__ret1d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_turnover__ret3d_abs,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_turnover__ret3d_neg,  # v2.48: pos/neg/abs ReLU 切半轴
+        calculate_interaction_turnover__ret3d_pos,  # v2.48: pos/neg/abs ReLU 切半轴
         calculate_intraday_intensity,
         calculate_kdj_j,
         calculate_lower_shadow_ratio,  # v2.35: P5
@@ -181,17 +217,37 @@ _EXTENDED_FACTOR_COLS: tuple[str, ...] = (
     "range_compression",
     "volume_decay_rate",
     "turnover_decay_rate",
-    # v2.36: 交互因子族 —— 条件因子方向方案 B (design.md feat_interaction_factors)
-    "interaction_amplitude",
-    "interaction_turnover",
-    "interaction_amp_compression",
-    # v2.37: 交互因子第二批
-    "interaction_near_high",
-    "interaction_intraday",
-    "interaction_ma5_dev",
-    "interaction_price_pos",
-    "interaction_kdj",
-    "interaction_bollinger",
+    # v2.48 (designs/feat_factor_definition_destigmatization_v1.md v1.2): 交互因子族 27 变体
+    # pos/neg/abs ReLU 切半轴，替代 v2.36/v2.37 旧 weakness 公式（数据驱动原则修复）
+    # v2.36 第一批 (amplitude/turnover/amp_compression × ret3d × {pos,neg,abs})
+    "interaction_amplitude__ret3d_pos",
+    "interaction_amplitude__ret3d_neg",
+    "interaction_amplitude__ret3d_abs",
+    "interaction_turnover__ret3d_pos",
+    "interaction_turnover__ret3d_neg",
+    "interaction_turnover__ret3d_abs",
+    "interaction_amp_compression__ret3d_pos",
+    "interaction_amp_compression__ret3d_neg",
+    "interaction_amp_compression__ret3d_abs",
+    # v2.37 第二批 (near_high/intraday/ma5_dev/price_pos/kdj/bollinger × 各 ret × {pos,neg,abs})
+    "interaction_near_high__ret3d_pos",
+    "interaction_near_high__ret3d_neg",
+    "interaction_near_high__ret3d_abs",
+    "interaction_intraday__ret1d_pos",
+    "interaction_intraday__ret1d_neg",
+    "interaction_intraday__ret1d_abs",
+    "interaction_ma5_dev__ret3d_pos",
+    "interaction_ma5_dev__ret3d_neg",
+    "interaction_ma5_dev__ret3d_abs",
+    "interaction_price_pos__ret1d_pos",
+    "interaction_price_pos__ret1d_neg",
+    "interaction_price_pos__ret1d_abs",
+    "interaction_kdj__ret5d_pos",
+    "interaction_kdj__ret5d_neg",
+    "interaction_kdj__ret5d_abs",
+    "interaction_bollinger__ret5d_pos",
+    "interaction_bollinger__ret5d_neg",
+    "interaction_bollinger__ret5d_abs",
 )
 
 # 收益数据列名
@@ -491,62 +547,173 @@ _FACTOR_PIPELINE_STEPS: tuple[dict[str, Any], ...] = (
         "output_cols": ("turnover_decay_rate",),
         "emit_valid_log": False,
     },
-    # v2.36: 交互因子族 —— 条件因子方向方案 B (design.md feat_interaction_factors)
-    # 依赖：return_3d (Step 9) + amplitude (Step 9) + turnover_rate (上游) + amplitude_compression (Step 13)
+    # v2.48 (designs/feat_factor_definition_destigmatization_v1.md v1.2): 交互因子族 27 变体
+    # pos/neg/abs ReLU 切半轴，替代 v2.36/v2.37 旧 weakness 公式（数据驱动原则修复）
+    # 依赖：return_3d/return_5d (Step 9) + past_return_1d + amplitude/turnover_rate/
+    #       amplitude_compression/near_high_ratio_5/intraday_intensity/ma5_deviation/
+    #       price_position/kdj_j/bollinger_pb (上游各 Step)
     # 必须放在 _FACTOR_PIPELINE_STEPS 末尾，确保所有依赖列已生成
     {
-        "step_label": "Step 14: 计算交互因子族（条件因子方向方案B）...",
-        "factor_func": calculate_interaction_amplitude,
-        "output_cols": ("interaction_amplitude",),
+        "step_label": "Step 14: 计算交互因子族 v2.48 第一批（amplitude/turnover/amp_compression × ret3d × {pos,neg,abs}）...",
+        "factor_func": calculate_interaction_amplitude__ret3d_pos,
+        "output_cols": ("interaction_amplitude__ret3d_pos",),
         "emit_valid_log": True,
     },
     {
         "step_label": None,
-        "factor_func": calculate_interaction_turnover,
-        "output_cols": ("interaction_turnover",),
+        "factor_func": calculate_interaction_amplitude__ret3d_neg,
+        "output_cols": ("interaction_amplitude__ret3d_neg",),
         "emit_valid_log": False,
     },
     {
         "step_label": None,
-        "factor_func": calculate_interaction_amp_compression,
-        "output_cols": ("interaction_amp_compression",),
+        "factor_func": calculate_interaction_amplitude__ret3d_abs,
+        "output_cols": ("interaction_amplitude__ret3d_abs",),
         "emit_valid_log": False,
     },
-    # v2.37: 交互因子第二批（design.md feat_interaction_factors_batch2）
     {
-        "step_label": "Step 14.2: 计算交互因子第二批...",
-        "factor_func": calculate_interaction_near_high,
-        "output_cols": ("interaction_near_high",),
+        "step_label": None,
+        "factor_func": calculate_interaction_turnover__ret3d_pos,
+        "output_cols": ("interaction_turnover__ret3d_pos",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_turnover__ret3d_neg,
+        "output_cols": ("interaction_turnover__ret3d_neg",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_turnover__ret3d_abs,
+        "output_cols": ("interaction_turnover__ret3d_abs",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_amp_compression__ret3d_pos,
+        "output_cols": ("interaction_amp_compression__ret3d_pos",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_amp_compression__ret3d_neg,
+        "output_cols": ("interaction_amp_compression__ret3d_neg",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_amp_compression__ret3d_abs,
+        "output_cols": ("interaction_amp_compression__ret3d_abs",),
+        "emit_valid_log": False,
+    },
+    # v2.37 第二批 (extended in v2.48: 6 base × 3 ReLU 变体 = 18 step)
+    {
+        "step_label": "Step 14.2: 计算交互因子族 v2.48 第二批（6 base factor × ret×3 ReLU 变体 = 18 step）...",
+        "factor_func": calculate_interaction_near_high__ret3d_pos,
+        "output_cols": ("interaction_near_high__ret3d_pos",),
         "emit_valid_log": True,
     },
     {
         "step_label": None,
-        "factor_func": calculate_interaction_intraday,
-        "output_cols": ("interaction_intraday",),
+        "factor_func": calculate_interaction_near_high__ret3d_neg,
+        "output_cols": ("interaction_near_high__ret3d_neg",),
         "emit_valid_log": False,
     },
     {
         "step_label": None,
-        "factor_func": calculate_interaction_ma5_dev,
-        "output_cols": ("interaction_ma5_dev",),
+        "factor_func": calculate_interaction_near_high__ret3d_abs,
+        "output_cols": ("interaction_near_high__ret3d_abs",),
         "emit_valid_log": False,
     },
     {
         "step_label": None,
-        "factor_func": calculate_interaction_price_pos,
-        "output_cols": ("interaction_price_pos",),
+        "factor_func": calculate_interaction_intraday__ret1d_pos,
+        "output_cols": ("interaction_intraday__ret1d_pos",),
         "emit_valid_log": False,
     },
     {
         "step_label": None,
-        "factor_func": calculate_interaction_kdj,
-        "output_cols": ("interaction_kdj",),
+        "factor_func": calculate_interaction_intraday__ret1d_neg,
+        "output_cols": ("interaction_intraday__ret1d_neg",),
         "emit_valid_log": False,
     },
     {
         "step_label": None,
-        "factor_func": calculate_interaction_bollinger,
-        "output_cols": ("interaction_bollinger",),
+        "factor_func": calculate_interaction_intraday__ret1d_abs,
+        "output_cols": ("interaction_intraday__ret1d_abs",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_ma5_dev__ret3d_pos,
+        "output_cols": ("interaction_ma5_dev__ret3d_pos",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_ma5_dev__ret3d_neg,
+        "output_cols": ("interaction_ma5_dev__ret3d_neg",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_ma5_dev__ret3d_abs,
+        "output_cols": ("interaction_ma5_dev__ret3d_abs",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_price_pos__ret1d_pos,
+        "output_cols": ("interaction_price_pos__ret1d_pos",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_price_pos__ret1d_neg,
+        "output_cols": ("interaction_price_pos__ret1d_neg",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_price_pos__ret1d_abs,
+        "output_cols": ("interaction_price_pos__ret1d_abs",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_kdj__ret5d_pos,
+        "output_cols": ("interaction_kdj__ret5d_pos",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_kdj__ret5d_neg,
+        "output_cols": ("interaction_kdj__ret5d_neg",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_kdj__ret5d_abs,
+        "output_cols": ("interaction_kdj__ret5d_abs",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_bollinger__ret5d_pos,
+        "output_cols": ("interaction_bollinger__ret5d_pos",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_bollinger__ret5d_neg,
+        "output_cols": ("interaction_bollinger__ret5d_neg",),
+        "emit_valid_log": False,
+    },
+    {
+        "step_label": None,
+        "factor_func": calculate_interaction_bollinger__ret5d_abs,
+        "output_cols": ("interaction_bollinger__ret5d_abs",),
         "emit_valid_log": False,
     },
 )
