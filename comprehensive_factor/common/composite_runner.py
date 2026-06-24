@@ -268,13 +268,13 @@ def run_composite_backtest(
 
         logger.info("启用自动因子筛选（筛选决定因子列表）...")
 
-        # v2.46 (OOM 修复): 重排步骤顺序消除 full_df + all_factor_df 叠加峰值
-        # 原顺序: L280 all_factor_df=full_df.copy() 时 full_df 还在 → 瞬时叠加 1.4GB
-        # 新顺序: 先提取 return_df → del full_df → 二次列投影加载 all_factor_df
-        # 内存峰值: 3.2GB (OOM) → ~2.6GB
-        # 设计依据: designs/composite_runner_auto_select_oom_v246.md
+        # v2.52 (OOM 炸弹7): 消除二次加载 — 直接从 full_df 提取列子集
+        # v2.46 的"二次列投影"设计初衷是避免 full_df(85列) + all_factor_df(79列) 叠加峰值,
+        # 但 del full_df 后 glibc 不归还 ~2GB Arrow arena 碎片, 第二次 load_full_data
+        # 又分配 ~2GB Arrow buffer → 叠加 ~4GB 碎片 → 标准化时 OOM
+        # 修复: 直接 full_df[列子集] 提取, 零额外 Arrow 分配, 峰值 = full_df + ~85MB copy
 
-        # v2.17: 单一映射来源（方案 B）—— 直接使用 factor_definitions 模块级常量
+        # v2.17: 单一映射来源（方案 B）—— 直接使用 factor_definitions 模块常量
         all_factor_cols_candidate = list(FACTOR_NAME_TO_COL_MAP.values())
 
         # Step A: 在 full_df 释放前, 检测哪些因子列真实存在
@@ -291,26 +291,24 @@ def run_composite_backtest(
         return_df = full_df[return_cols].copy()
         logger.info("收益数据（从 full_df 提取）: %d 条记录", len(return_df))
 
-        # Step C: 立即释放 full_df (~800MB)
-        del full_df
-        import gc
-
-        gc.collect()
-        logger.info("full_df 已释放（v2.46: 二次列投影前提前释放）")
-
-        # Step D: 二次列投影加载 all_factor_df (~720MB, 此时 full_df 已释放, 不叠加)
-        logger.info("加载所有因子数据用于相关性计算（v2.46: 二次列投影避免叠加峰值）...")
-        all_factor_df = load_full_data(
-            data_source=data_source,
-            factor_cols=all_factor_cols,
-            logger=logger,
-        )
+        # Step C: 从 full_df 提取因子列子集 (不再二次 load_full_data)
+        all_factor_cols = [c for c in all_factor_cols if c in full_df.columns]
+        all_factor_selected = ["date", "asset"] + all_factor_cols
+        all_factor_df = full_df[all_factor_selected].copy()
         logger.info(
-            "all_factor_df 加载完成: %d 行 × %d 列 (含 %d 个因子)",
+            "all_factor_df 从 full_df 提取: %d 行 × %d 列 (含 %d 个因子)",
             len(all_factor_df),
             len(all_factor_df.columns),
             len(all_factor_cols),
         )
+
+        # Step D: 立即释放 full_df (~800MB)
+        del full_df
+        import gc
+
+        gc.collect()
+        _trim_arena()
+        logger.info("full_df 已释放（v2.52: 不再二次加载, 直接列子集提取）")
 
         # v2.28b: 因子列缺失过滤必须在 full_df 释放前执行
         # select_factors 返回的 factor_cols 可能包含不在数据中的列名（如 return_3d）

@@ -132,6 +132,7 @@ def load_full_data(
     # (boolean indexing copy + reset_index copy)，79列×1.5M行每次≈0.95GB，
     # 两次过滤峰值≈2.9GB 叠加已加载 DataFrame→OOM。
     # 修复：pq.read_table → Arrow compute 过滤 → to_pandas，只加载需要的行。
+    import pyarrow as pa
     import pyarrow.compute as pc
     import pyarrow.parquet as pq
 
@@ -150,8 +151,6 @@ def load_full_data(
 
     # 补充缺失列为 null（向后兼容）
     if required_cols is not None:
-        import pyarrow as pa
-
         for col in required_cols:
             if col not in table.column_names:
                 table = table.append_column(col, pa.nulls(table.num_rows, type=pa.null()))
@@ -184,7 +183,15 @@ def load_full_data(
     if keep_mask is not None:
         table = table.filter(keep_mask)
 
+    # v2.52 (OOM 炸弹7): Arrow table → pandas 后立即释放 Arrow memory pool
+    # pq.read_table 的 Arrow 列缓冲通过 Arrow 自己的 mmap 内存池分配, 不走 glibc malloc,
+    # 所以 malloc_trim 无法回收. 必须用 pool.release_unused() 归还 mmap 页给 OS.
+    # 诊断数据: del table 后 RSS=2828MB, pool.release_unused() 后 RSS=1228MB (-1600MB)
     full_df = table.to_pandas()
+    del table
+    gc.collect()
+    pa.default_memory_pool().release_unused()
+    _trim_arena()
 
     for label, excluded in filter_logs:
         logger.info("过滤%s: 排除 %d 条, 剩余 %d 条", label, excluded, len(full_df))
@@ -220,11 +227,21 @@ def load_full_data(
     # 背景：factor_ic_data.json.gz 中 OHLC 等价格列以 Decimal 字符串形式存储，
     #   pandas 读取后 dtype=object，下游计算触发 `Decimal - float` 类型不兼容。
     # 修复：对所有非键列统一 pd.to_numeric(errors="coerce")
-    # Note: Parquet 已保证数值列类型正确，此循环对 float64 列是 no-op
+    # v2.52 (OOM 炸弹7): Parquet 已保证数值列类型为 double, 只转换 object 类型列,
+    #   避免逐列赋值 83 列产生 BlockManager 碎片 (~1GB overhead)
     numeric_cols = [c for c in full_df.columns if c not in ("date", "asset")]
-    for col in numeric_cols:
-        full_df[col] = pd.to_numeric(full_df[col], errors="coerce")
-    logger.info("数值列类型规范化完成: %d 列（pd.to_numeric, Decimal/str → float）", len(numeric_cols))
+    object_cols = [c for c in numeric_cols if full_df[c].dtype == "object"]
+    if object_cols:
+        for col in object_cols:
+            full_df[col] = pd.to_numeric(full_df[col], errors="coerce")
+        logger.info("数值列类型规范化完成: %d 列中 %d 列需转换（object→float）", len(numeric_cols), len(object_cols))
+    else:
+        logger.info("数值列类型规范化完成: %d 列（Parquet 已保证类型，无需转换）", len(numeric_cols))
+
+    # v2.52 (OOM 炸弹7, 模式3c): 逐列 pd.to_numeric 赋值产生 BlockManager 碎片
+    # 但不用 copy()（966MB × 2 在 7.3GB 系统上会 OOM），用 gc + trim 回收 glibc 碎片
+    gc.collect()
+    _trim_arena()
 
     return full_df
 
