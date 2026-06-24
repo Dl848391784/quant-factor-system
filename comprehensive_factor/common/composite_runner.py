@@ -45,6 +45,7 @@ from typing import ClassVar, Optional
 
 import pandas as pd
 from comprehensive_factor.common.factor_loader import (
+    _trim_arena,
     calc_factor_correlation,
     load_full_data,
     load_ic_daily,
@@ -416,6 +417,9 @@ def run_composite_backtest(
         import gc
 
         gc.collect()
+        # v2.52 (模式7): auto_select 第一次标准化(72因子)的 glibc malloc 碎片
+        # gc.collect() 不归还 arena 碎片给 OS，第二次标准化前必须 trim
+        _trim_arena()
         logger.info("auto_select 中间数据已释放（all_factor_df + corr_matrix）")
 
     # v2.26: 过滤数据中不存在的因子列（如 return_3d 有 IC 结果但不在 factor_ic_data 中）

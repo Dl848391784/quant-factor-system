@@ -42,6 +42,25 @@ DEFAULT_DATA_SOURCE = Path(__file__).parent.parent.parent / "data_fetchers" / "r
 DEFAULT_IC_RESULT_DIR = Path(__file__).parent.parent.parent / "factor_ic" / "result"
 
 
+def _trim_arena() -> None:
+    """强制 glibc 归还 malloc arena 碎片给 OS（Linux 专用）。
+
+    gc.collect() 回收 Python 对象，但 glibc malloc 只把碎片放入 arena bins
+    不调用 munmap 归还 OS。多次循环后碎片累积导致 RSS 只增不减 → OOM。
+
+    malloc_trim(0) 强制 glibc 归还所有 free 的 arena 页给 OS。
+    非 Linux 环境无此函数，静默跳过。
+    """
+    import contextlib
+    import ctypes
+    import sys
+
+    if sys.platform != "linux":
+        return
+    with contextlib.suppress(OSError, AttributeError):
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+
+
 def load_full_data(
     data_source: str | Path | None = None,
     factor_cols: list[str] | None = None,
@@ -852,6 +871,12 @@ def standardize_factors(
         # date_col/value_col 是对 factor_df 列的引用（非独立 buffer），不需 del
         # 但 numpy/pandas 分配器缓存的临时 buffer 需要 gc 触发释放
         gc.collect()
+        # v2.52 (OOM 炸弹5, 模式7): glibc malloc arena 碎片不归还 OS
+        # gc.collect() 回收 Python 对象，但 glibc malloc 只把碎片放入 arena bins
+        # 不调用 munmap 归还 OS。107 次标准化循环（auto_select 72 + 主流程 35）累积
+        # ~5.6GB 碎片，远超 ~600MB 活跃数据 → OOM SIGKILL
+        # malloc_trim(0) 强制 glibc 归还所有 free 的 arena 页给 OS
+        _trim_arena()
 
     logger.info("因子标准化完成: %d 个因子", len(factor_cols))
 
