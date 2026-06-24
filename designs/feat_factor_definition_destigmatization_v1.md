@@ -1,11 +1,12 @@
 # Design: 交互因子定义去标签化重构 v1
 
-**Status**: approved (用户已确认 2026-06-24，选路径 A 全量改造)
+**Status**: approved (用户已确认 2026-06-24，选 B'' 方案：pos/neg/abs 三 ReLU 变体)
 **Author**: 云瑶 (Hermes Agent)
 **Date**: 2026-06-24
 **Revisions**:
   - v1.0 (2026-06-24): 初稿，估算 ~525 行 / 8 文件
-  - v1.1 (2026-06-24): 侦察确认真实规模 ~3000+ 行 / 60+ 文件，按用户决定全量做 + 拆 3 commit
+  - v1.1 (2026-06-24): 侦察确认真实规模 ~3000+ 行 / 60+ 文件，按用户决定走 A 全量做 + 拆 3 commit
+  - v1.2 (2026-06-24): **方向变体重设计** — W/S/R 在数学上冗余（W ≡ −S，R ≡ base_factor），改用 pos/neg/abs ReLU 切半轴变体实现真正独立的方向风格
 **违规根因**: AGENTS.md §数据驱动原则（行 64-89）+ PROJECT.md §数据驱动原则（行 139-194）
 **用户原话** (2026-06-24):
 
@@ -74,47 +75,98 @@
 
 ## 3. 重构方案
 
-### 3.1 因子族对称化（核心改动）
+### 3.0 数学事实：为何 W/S/R 在统计上冗余（v1.2 修正）
 
-**对每个 (base_factor, signed_return_window) 配对，构造 3 个方向变体**：
+v1.0/v1.1 的"weakness/strength/raw 三变体"方案在数学上**不能产生独立信号**，已废弃，原因如下：
+
+```
+设 W = -z(ret_Nd) × z(factor),  S = +z(ret_Nd) × z(factor),  R = z(factor)
+
+性质 1: W ≡ −S （在每个截面每个股票上严格成立）
+  ⟹ IC(W) = -IC(S)  （Pearson 线性性质）
+  ⟹ |IC(W)| = |IC(S)|，factor_selector 闸口同时通过/同时拒绝
+  ⟹ composite_runner v2.47 方向归一: IC(S)<0 翻方向 → -S = W
+  ⟹ W、S 两列在 composite 中逐行相等 = 同一因子计权两次
+
+性质 2: R = z(factor) 已等价于 base factor (amplitude/kdj_j 等) 的现有 IC 分析
+  cross-section z-score 是 affine transform，不改变 rank 相关系数符号
+  9 个 base factor 全部已注册为独立因子，IC 报告早已存在
+  ⟹ R 不产生新信息
+
+结论: 乘法交互 f(x)·g(y) 的 sign 是一个自由度，不是两个
+  方向变体必须破坏乘法的 affine 对称性才能引入新信号 → 用 ReLU/abs 切半轴
+```
+
+### 3.1 因子族对称化（核心改动 v1.2: ReLU 切半轴）
+
+**对每个 base_factor，构造 3 个数学独立的方向变体**：
 
 ```python
 # 命名规则: interaction_<base>__ret<W>d_<DIR>
 #   <base>: 基础因子名（amplitude / kdj_j / bollinger_pb / ...）
 #   <W>:    signed return 窗口（1 / 3 / 5）
-#   <DIR>:  方向变体 W=weakness(-) / S=strength(+) / R=raw(无 signed_return，仅 base_factor z-score)
+#   <DIR>:  ReLU 方向变体
+#     pos = max(z(ret), 0) × z(factor)   # 只在过去 N 日涨时启用
+#     neg = min(z(ret), 0) × z(factor)   # 只在过去 N 日跌时启用
+#     abs = |z(ret)|       × z(factor)   # 动幅大就启用，不分方向
 
 # 示例：原 interaction_amplitude 拆为
-interaction_amplitude__ret3d_W = (-z(ret_3d)) * z(amplitude)  # 原行为，命名去标签
-interaction_amplitude__ret3d_S = (+z(ret_3d)) * z(amplitude)  # 新增对照
-interaction_amplitude__ret3d_R = z(amplitude)                 # 新增对照（无 signed return）
+interaction_amplitude__ret3d_pos = max(z(ret_3d), 0) * z(amplitude)
+interaction_amplitude__ret3d_neg = min(z(ret_3d), 0) * z(amplitude)
+interaction_amplitude__ret3d_abs = abs(z(ret_3d))   * z(amplitude)
 ```
 
-**为什么需要 `R` 变体**：检验"乘以 signed return 是否真的比单纯用 base_factor 更好"。如果 R 的 IC 已经足够，乘 signed return 反而稀释信号，那 W/S 都该被筛掉。
+**数学独立性证明**：
+
+```
+pos + neg ≡ z(ret) × z(factor)   （单边求和恒等于原乘积）
+pos − neg ≡ |z(ret)| × z(factor) = abs
+∴ pos / neg / abs 中任意两个可线性组合出第三个 → 三者构成 2 维信号空间
+
+但 pos 单独使用 ≠ neg 单独使用 ≠ abs 单独使用：
+  - corr(pos, future_ret) ≠ corr(neg, future_ret)（在不同子样本上）
+  - corr(pos, future_ret) ≠ corr(z(factor), future_ret)（ReLU 是非线性）
+∴ 三个变体在 IC 计算上互相独立，不会被 composite 方向归一抵消
+```
+
+**与旧 weakness 的语义对应**：
+
+```
+旧 v2.37 公式: weakness × factor = (-z(ret)) × z(factor)
+           = max(-z(ret), 0) × z(factor) + min(-z(ret), 0) × z(factor)
+           = (跌得多的子样本贡献) + (涨得多的子样本贡献，但符号已翻转)
+
+新 neg 变体 = min(z(ret), 0) × z(factor)
+           = (跌得多的子样本贡献)
+∴ neg 是旧 weakness 的"跌段子集"，更精确不引入涨段噪声
+```
 
 ### 3.2 因子总数变化
 
-| | v2.37 当前 | v2.48 重构后 |
+| | v2.37 当前 | v2.48 重构后 (B'') |
 |---|---:|---:|
-| interaction 因子总数 | 9 | **27** (9 × 3) |
-| 计算成本 | baseline | ×3（向量化乘法，可忽略） |
+| interaction 因子总数 | 9 | **27** (9 × 3 个 ReLU 变体) |
+| 计算成本 | baseline | ×3（向量化 ReLU + 乘法，可忽略） |
 | 内存峰值 | baseline | +~50MB (parquet 多 18 列 × 1.5M 行 × 8 byte) |
+| 信号独立性 | — | ✅ 数学独立（与 v1.1 W/S/R 不同） |
 
-### 3.3 命名迁移表
+### 3.3 命名迁移表（v1.2）
 
-| 旧命名 (v2.37) | 新命名 (v2.48, weakness 变体保留旧语义) | strength 对照 | raw 对照 |
+| 旧命名 (v2.37) | pos 变体 | neg 变体 | abs 变体 |
 |---|---|---|---|
-| interaction_amplitude | interaction_amplitude__ret3d_W | interaction_amplitude__ret3d_S | interaction_amplitude__R |
-| interaction_turnover | interaction_turnover__ret3d_W | interaction_turnover__ret3d_S | interaction_turnover__R |
-| interaction_amp_compression | interaction_amp_compression__ret3d_W | interaction_amp_compression__ret3d_S | interaction_amp_compression__R |
-| interaction_near_high | interaction_near_high__ret3d_W | interaction_near_high__ret3d_S | interaction_near_high__R |
-| interaction_intraday | interaction_intraday__ret1d_W | interaction_intraday__ret1d_S | interaction_intraday__R |
-| interaction_ma5_dev | interaction_ma5_dev__ret3d_W | interaction_ma5_dev__ret3d_S | interaction_ma5_dev__R |
-| interaction_price_pos | interaction_price_pos__ret1d_W | interaction_price_pos__ret1d_S | interaction_price_pos__R |
-| interaction_kdj | interaction_kdj__ret5d_W | interaction_kdj__ret5d_S | interaction_kdj__R |
-| interaction_bollinger | interaction_bollinger__ret5d_W | interaction_bollinger__ret5d_S | interaction_bollinger__R |
+| interaction_amplitude | interaction_amplitude__ret3d_pos | interaction_amplitude__ret3d_neg | interaction_amplitude__ret3d_abs |
+| interaction_turnover | interaction_turnover__ret3d_pos | interaction_turnover__ret3d_neg | interaction_turnover__ret3d_abs |
+| interaction_amp_compression | interaction_amp_compression__ret3d_pos | interaction_amp_compression__ret3d_neg | interaction_amp_compression__ret3d_abs |
+| interaction_near_high | interaction_near_high__ret3d_pos | interaction_near_high__ret3d_neg | interaction_near_high__ret3d_abs |
+| interaction_intraday | interaction_intraday__ret1d_pos | interaction_intraday__ret1d_neg | interaction_intraday__ret1d_abs |
+| interaction_ma5_dev | interaction_ma5_dev__ret3d_pos | interaction_ma5_dev__ret3d_neg | interaction_ma5_dev__ret3d_abs |
+| interaction_price_pos | interaction_price_pos__ret1d_pos | interaction_price_pos__ret1d_neg | interaction_price_pos__ret1d_abs |
+| interaction_kdj | interaction_kdj__ret5d_pos | interaction_kdj__ret5d_neg | interaction_kdj__ret5d_abs |
+| interaction_bollinger | interaction_bollinger__ret5d_pos | interaction_bollinger__ret5d_neg | interaction_bollinger__ret5d_abs |
 
-**为什么不彻底重命名 W 变体**：保持 `__ret3d_W` 后缀 = 数学定义未变，命名只是显式化，便于 git blame 追溯。旧名（如 `interaction_amplitude`）作为 deprecation alias **不保留**——下游一次性切到新名。
+**旧名处理**：旧 9 个因子名（如 `interaction_amplitude`）**完全删除**，不保留 runtime 别名——它们既不等同于 pos 也不等同于 neg/abs（旧公式是 ±2 段加和后翻 sign），下游一次性切到新命名。
+
+**关键命名变化**：v1.1 的 `_W`/`_S`/`_R` 全部废弃；v1.2 用全小写 `_pos`/`_neg`/`_abs`，便于 grep 和与 PyTorch ReLU 语义对齐。
 
 ### 3.4 工程改动清单（v1.1：侦察确认后真实规模）
 
@@ -122,11 +174,11 @@ interaction_amplitude__ret3d_R = z(amplitude)                 # 新增对照（�
 |---|---|---|
 | **F1 commit（核心定义层）** | | |
 | `data_fetchers/factor_calculator/_common.py` | `_COL_INTERACTION_*` 常量 9 → 27 | ~25 行 |
-| `data_fetchers/factor_calculator/momentum.py` | 9 个 calculate 函数 → 27 个（W/S/R 变体）；docstring 全去标签 | ~750 行 |
+| `data_fetchers/factor_calculator/momentum.py` | 9 个 calculate 函数 → 27 个（pos/neg/abs 变体）；docstring 全去标签 | ~750 行 |
 | `data_fetchers/factor_calculator/_legacy.py` | `__all__` + import 同步 9 → 27 名称 | ~40 行 |
 | `data_fetchers/factor_generator.py` | `_EXTENDED_FACTOR_COLS` + `_FACTOR_PIPELINE_STEPS` 9 → 27 | ~120 行 |
 | `factor_definitions.py` | FACTOR_DEFINITIONS / COL 映射 / FACTOR_CATEGORIES / FACTOR_FAMILIES 4 张表 9 → 27 | ~140 行 |
-| `data_fetchers/test_cases/test_factor_calculator_interaction.py` | 旧 9 因子断言 → 27 因子断言 + 新增 W/S 对称性测试 + R 退化测试 | ~250 行 |
+| `data_fetchers/test_cases/test_factor_calculator_interaction.py` | 旧 9 因子断言 → 27 因子断言 + ReLU 数学验证 (pos+neg≡raw_product) + 三变体非零差异性测试 | ~250 行 |
 | **F1 合计** | **6 文件** | **~1325 行** |
 | **F2 commit（pipeline 注册层 — 模板复制）** | | |
 | `factor_ic/ic_interaction_<X>_<DIR>_1d.py` | 9 旧脚本改名 + 新增 18 个 = 27 个文件（每个 ~141 行） | ~3800 行 |
