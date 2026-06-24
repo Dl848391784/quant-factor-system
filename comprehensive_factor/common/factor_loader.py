@@ -28,6 +28,7 @@
 创建日期: 2026-05-24
 """
 
+import gc
 import json
 import logging
 from pathlib import Path
@@ -660,12 +661,19 @@ def standardize_factors(
         _ZERO_INFLATED_THRESHOLD = 0.05  # 每日截面零值占比 ≥5% 触发零值分离标准化
         _ZERO_VALUE_THRESHOLD = 0.001  # |v| < 此阈值判定为零值（浮点精度保护）
 
-        # v2.29: 零值分离标准化——先检测零膨胀因子，再分别处理
-        # 步骤1：计算每日截面的零值占比
-        daily_zero_ratio = factor_df.groupby("date")[col].apply(
-            lambda x: (x.abs() < _ZERO_VALUE_THRESHOLD).sum() / len(x) if len(x) > 0 else 0.0
-        )
-        # 步骤2：区分零膨胀日期和正常日期
+        # v2.50: 向量化标准替代 groupby.transform(lambda) — OOM 炸弹2 修复
+        # 原实现: 72因子 × groupby.transform(lambda 3分支) = 39528 次 per-group lambda 调用
+        #   每次 transform 创建 549 group 临时 Series + pandas 索引重建 → ~100-200MB 中间体/次
+        # 新实现: groupby.agg (Cython) + Series.map (向量化查找), 无 per-group 中间体
+        # 遵循 pandas-oom skill 模式 2 (groupby.transform → 向量化)
+        # 行为等价: 零膨胀检测 + 零值分离 + Winsorize ±3σ + 退化组 NaN
+
+        # 步骤1: 零膨胀检测（向量化，替代 groupby.apply(lambda)）
+        zero_mask = factor_df[col].abs() < _ZERO_VALUE_THRESHOLD
+        # size() 计算总行数(含NaN), 与原 lambda 的 len(x) 一致
+        daily_group_size = factor_df.groupby("date")[col].size()
+        daily_zero_count = zero_mask.groupby(factor_df["date"]).sum()
+        daily_zero_ratio = daily_zero_count / daily_group_size.clip(lower=1)
         is_zero_inflated = daily_zero_ratio >= _ZERO_INFLATED_THRESHOLD
         inflated_dates = list(daily_zero_ratio.index[is_zero_inflated])  # type: ignore[reportArgumentType]
 
@@ -680,14 +688,61 @@ def standardize_factors(
                 avg_zero_pct,
             )
 
-        # 步骤3：对零膨胀日期使用零值分离标准化，对正常日期使用原有标准化
-        factor_df[std_col] = factor_df.groupby("date")[col].transform(
-            lambda x: (
-                _standardize_zero_inflated(x, _WINSORIZE_SIGMA, _ZERO_VALUE_THRESHOLD)
-                if _is_zero_inflated_group(x, _ZERO_VALUE_THRESHOLD, _ZERO_INFLATED_THRESHOLD)
-                else (np.clip((x - x.mean()) / x.std(), -_WINSORIZE_SIGMA, _WINSORIZE_SIGMA) if x.std() > 0 else np.nan)
-            )
+        # 步骤2: 向量化 z-score 计算（替代 groupby.transform(lambda)）
+        date_col = factor_df["date"]
+        value_col = factor_df[col]
+
+        # 复用 L622 的 daily_stats (Cython 优化的 groupby.agg)
+        row_mean = date_col.map(daily_stats["mean"])
+        row_std = date_col.map(daily_stats["std"])
+        # std=0 或 NaN → 结果 NaN (对应原 lambda 的 x.std()>0 判断)
+        z_normal = np.clip(
+            (value_col - row_mean) / row_std.replace(0, np.nan),
+            -_WINSORIZE_SIGMA,
+            _WINSORIZE_SIGMA,
         )
+
+        if inflated_dates:
+            # 零膨胀日期: 零值→z=0, 非零值→用非零值自身 μ/σ 标准化 + clip
+            # 对应 _standardize_zero_inflated 的零值分离逻辑
+            nonzero_vals = value_col.where(~zero_mask)
+            daily_mean_nz = nonzero_vals.groupby(factor_df["date"]).mean()
+            daily_std_nz = nonzero_vals.groupby(factor_df["date"]).std()
+            daily_count_nz = (~zero_mask).groupby(factor_df["date"]).sum()
+
+            row_mean_nz = date_col.map(daily_mean_nz)
+            row_std_nz = date_col.map(daily_std_nz)
+            row_count_nz = date_col.map(daily_count_nz)
+
+            z_zi = np.clip(
+                (value_col - row_mean_nz) / row_std_nz.replace(0, np.nan),
+                -_WINSORIZE_SIGMA,
+                _WINSORIZE_SIGMA,
+            )
+            # 退化条件 → z=0 (对应 _standardize_zero_inflated 的 len<=1 和 sigma==0 分支)
+            degenerate_mask = (row_count_nz <= 1) | row_std_nz.isna() | (row_std_nz == 0)
+            z_zi = z_zi.where(~degenerate_mask, 0.0)
+            # 零值 → z=0 (中性信号)
+            z_zi = z_zi.where(~zero_mask, 0.0)
+
+            # 按日期选择分支: 零膨胀日期用 z_zi, 正常日期用 z_normal
+            is_zi_date = date_col.isin(inflated_dates)
+            factor_df[std_col] = z_zi.where(is_zi_date, z_normal)
+
+            # v2.51 (OOM 炸弹4): 释放零膨胀分支临时对象
+            # 35因子循环中，每个零膨胀因子产生 ~8 个 1.39M 元素 Series (~85MB)
+            # pandas/numpy 内存分配器不还给 OS，35 次循环累积 ~3GB 碎片触发 global OOM
+            del nonzero_vals, daily_mean_nz, daily_std_nz, daily_count_nz
+            del row_mean_nz, row_std_nz, row_count_nz, z_zi, is_zi_date, degenerate_mask
+        else:
+            factor_df[std_col] = z_normal
+
+        # v2.51 (OOM 炸弹4): 每因子循环结束后释放临时对象
+        # row_mean/row_std/z_normal 各 1.39M float64 ≈ 33MB/因子
+        # 点质量检测的 groupby+merge 临时 DataFrame ≈ 60MB/因子
+        # 不显式释放则 35 因子累积 ~3GB 碎片，叠加 factor_df + return_df + ic_data 触发 OOM
+        del daily_stats, daily_group_size, daily_zero_count, daily_zero_ratio
+        del row_mean, row_std, z_normal, zero_mask
 
         # v2.28: skip_point_mass=True 时跳过点质量检测（auto_select 简化模式）
         # 设计依据：相关性矩阵只需粗粒度 z-score，Pearson corr() 对 NaN 鲁棒；
@@ -786,6 +841,17 @@ def standardize_factors(
             # NaN 处理：原因子值为 NaN 时标准化后仍为 NaN
             # 使用 fillna 保持原本 NaN 的位置，而非 .loc 后置还原
             factor_df.loc[factor_df[col].isna(), std_col] = np.nan
+
+            # v2.51 (OOM 炸弹4): 释放点质量检测分支临时对象
+            # groupby+merge 链产生 ~60MB/因子的临时 DataFrame，不释放则累积触发 OOM
+            del val_counts, date_totals, daily_unique, daily_n
+            if not point_mass.empty:
+                del daily_bounds, pm_flags, pm_mask, z_mask
+
+        # v2.51 (OOM 炸弹4): 每因子循环末尾 gc 回收内存碎片
+        # date_col/value_col 是对 factor_df 列的引用（非独立 buffer），不需 del
+        # 但 numpy/pandas 分配器缓存的临时 buffer 需要 gc 触发释放
+        gc.collect()
 
     logger.info("因子标准化完成: %d 个因子", len(factor_cols))
 
