@@ -361,11 +361,38 @@ def run_composite_backtest(
         # 使用 select_factors 返回的 factor_cols 映射（已从 FACTOR_NAME_TO_COL_MAP 获取）
         # 修复：不再直接赋值 factor_cols = factor_list，避免列名不匹配
         factor_cols = selection_result.get("factor_cols", factor_list)
+        # selector 返回值类型断言: factor_list/factor_cols 在此分支必非 None (后续防御过滤需用)
+        assert factor_list is not None and factor_cols is not None, (
+            "select_factors 应返回非 None 的 'selected' 和 'factor_cols'"
+        )
 
         # 检查未映射因子警告
         unmapped = selection_result.get("unmapped_factors", [])
         if unmapped:
             logger.warning("以下因子未找到列名映射，可能导致数据加载失败: %s", unmapped)
+
+        # v2.48 (bugfix): auto_select 模式下 selector 从 ic_result_dir 全扫历史 IC 文件,
+        # 可能返回数据源中已不存在的列名 (历史残留 / 上游未重跑等). 与 L316-326 非 auto_select
+        # 分支保持对称, 在拉取 factor_df 前显式过滤掉数据列缺失的因子, 避免 KeyError.
+        # 设计依据: 第一性原理 — selector 输出是"按 IC 闸口胜出的因子集合", 但数据可用性是
+        # 上游契约 (factor_generator 当日 parquet); 二者必须做交集, 不能假设一致.
+        available_cols = all_factor_cols  # Step A 已基于 full_df 真实列计算 (L280)
+        missing_data_cols = [c for c in factor_cols if c not in available_cols]
+        if missing_data_cols:
+            kept_pairs = [(f, c) for f, c in zip(factor_list, factor_cols) if c in available_cols]
+            skipped_factors = [f for f, c in zip(factor_list, factor_cols) if c not in available_cols]
+            factor_list = [f for f, _ in kept_pairs]
+            factor_cols = [c for _, c in kept_pairs]
+            logger.warning(
+                "auto_select 返回的因子列在数据源中缺失, 已从复合因子计算中跳过: %s "
+                "(可能原因: IC 结果残留 / 上游 factor_generator 未重跑)",
+                skipped_factors,
+            )
+            if not factor_cols:
+                raise ValueError(
+                    "auto_select 过滤后无可用因子 (所有 selector 输出的因子在数据源中都缺失). "
+                    "请检查 factor_ic/result/ 是否有历史残留 IC 文件, 或上游 factor_generator 是否需要重跑."
+                )
 
         logger.info("自动筛选完成: %s → %s", factor_list, factor_cols)
 
