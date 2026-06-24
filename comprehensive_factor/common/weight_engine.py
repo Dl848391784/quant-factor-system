@@ -427,10 +427,13 @@ class WeightMethodBase(ABC):
         max_iter: int = 20,
         factor_families: list[int] | None = None,  # v2.40: 族索引，启用族级 cap
         family_cap: float = 0.30,  # v2.40: 族级上限
+        *,
+        copy_input: bool = True,  # v2.53: False 时原地操作（调用方不再需要原始 W）
     ) -> np.ndarray:
         """权重矩阵行级软上限（向量化版本, 用于 RollingICIR 每日动态权重）
 
         v2.40: 增加 family_cap 族级限制
+        v2.53: 增加 copy_input 参数，False 时省略 390MB 防御性 copy
         - factor_families: 每列对应的族 ID（int），None 时跳过族级 cap
         - family_cap: 族级上限（默认 0.30）
 
@@ -463,7 +466,9 @@ class WeightMethodBase(ABC):
         if n_factors * cap < 1.0 - 1e-9:
             return W.copy()  # 不可解, 保留原权重
 
-        W = W.copy()  # 防御性: 不污染原矩阵
+        if copy_input:
+            W = W.copy()  # 防御性: 不污染原矩阵
+        # v2.53 (OOM fix): copy_input=False 时原地操作，省 390MB（调用方不再需要原始 W）
         EPS = 1e-12
 
         for _ in range(max_iter):
@@ -1198,7 +1203,7 @@ class RollingICIRWeightMethod(WeightMethodBase):
         factor_cols: list[str],
         rolling_icir_cols: list[str],
         dimension_groups: dict[str, list[str]],
-    ) -> pd.DataFrame:
+    ) -> tuple[pd.DataFrame, np.ndarray]:
         """两阶段维度感知权重计算
 
         v1.20 方案 B:
@@ -1297,14 +1302,16 @@ class RollingICIRWeightMethod(WeightMethodBase):
         W = W / total_weight_safe.to_numpy(dtype=float)[:, None]
         # 全部为 0 时回退等权
         W = np.where(np.isnan(W), 1.0 / n_factors, W)
-        # 一次性写回
-        factor_df[dim_weight_cols] = W
-
+        # v2.53 (OOM fix, 模式9): 归一化后不写回 DataFrame，直接返回 W 矩阵
+        # 原实现 L1301 写回 factor_df → calculate L1482 再次 to_numpy 提取 = 780MB 冗余
+        # 修复：返回 W 让 calculate 直接传给 _cap_weight_matrix，跳过中间写回+再提取
+        # _dim_weight 列仍保留在 factor_df 中（pd.concat L1286 已添加），
+        # 但值为归一化前的原始权重——calculate 最终会在 L1500 写回 cap 后的最终权重
         # 清理临时列
         if "weight_sum" in factor_df.columns:
             factor_df.drop(columns=["weight_sum"], inplace=True, errors="ignore")
 
-        return factor_df
+        return factor_df, W
 
     def calculate(
         self,
@@ -1438,7 +1445,7 @@ class RollingICIRWeightMethod(WeightMethodBase):
 
         if dimension_groups and self.dimension_weight_method:
             # 两阶段权重：每个日期的每个因子计算维度感知权重
-            factor_df = self._apply_dimension_weights(factor_df, factor_cols, rolling_icir_cols, dimension_groups)
+            factor_df, W = self._apply_dimension_weights(factor_df, factor_cols, rolling_icir_cols, dimension_groups)
         else:
             # 原始逻辑：每日权重 = |rolling_icir| / sum(|rolling_icir|)
             factor_df["weight_sum"] = factor_df[rolling_icir_cols].abs().sum(axis=1)
@@ -1451,6 +1458,11 @@ class RollingICIRWeightMethod(WeightMethodBase):
                 dim_weight_new_cols[f"{col}_dim_weight"] = weight
             factor_df = pd.concat([factor_df, pd.DataFrame(dim_weight_new_cols, index=factor_df.index)], axis=1)
             del dim_weight_new_cols
+            # v2.53: 同样返回归一化后的 W 矩阵
+            dim_weight_cols_tmp = [f"{c}_dim_weight" for c in factor_cols]
+            W = factor_df[dim_weight_cols_tmp].to_numpy(dtype=float)
+            if "weight_sum" in factor_df.columns:
+                factor_df.drop(columns=["weight_sum"], inplace=True, errors="ignore")
 
         # v2.53 (OOM fix, 模式3e 列清理): _dim_weight 列已计算完毕，
         # _rolling_icir 列（35列×1.39M=390MB）不再被后续加权循环使用。
@@ -1479,14 +1491,21 @@ class RollingICIRWeightMethod(WeightMethodBase):
             family_indices.append(family_id_map[family])
 
         dim_weight_cols = [f"{col}_dim_weight" for col in factor_cols]
-        W = factor_df[dim_weight_cols].to_numpy(dtype=float)
+        # v2.53 (OOM fix, 模式9): W 已由 _apply_dimension_weights 返回，无需再次提取
+        # 原实现 L1489: W = factor_df[dim_weight_cols].to_numpy() → 与 L1296 重复提取 = 780MB 冗余
         # 仅对有效行（非全 NaN）进行 cap; NaN 会被 fillna(1/n) 保护
+        # v2.53: cap 统计在 cap 操作前记录（copy_input=False 会原地修改 W）
+        any_capped_mask = (W > WEIGHT_CAP_DEFAULT + 1e-12).any(axis=1)
+        n_capped_rows = int(any_capped_mask.sum())
+
         W_capped = self._cap_weight_matrix(
             W,
             cap=WEIGHT_CAP_DEFAULT,
             factor_families=family_indices,
             family_cap=FAMILY_CAP_DEFAULT,
+            copy_input=False,  # v2.53: 原地操作，省 390MB（W 不再需要）
         )
+        # W_capped 和 W 指向同一数组（copy_input=False），无需 del W
 
         # v2.41 (r2c): 角色固定权重后处理 (与静态版 dict 实现同构)
         # 设计依据: designs/feat_r2c_role_weights_for_rolling_icir.md
@@ -1498,9 +1517,7 @@ class RollingICIRWeightMethod(WeightMethodBase):
         # v2.52 (OOM 炸弹7, 模式3c): 批量写回 _dim_weight 列，避免逐列 insert 碎片化
         dim_weight_cols = [f"{col}_dim_weight" for col in factor_cols]
         factor_df[dim_weight_cols] = W_capped
-        # 截断事件记录（统计层面）
-        any_capped_mask = (W > WEIGHT_CAP_DEFAULT + 1e-12).any(axis=1)
-        n_capped_rows = int(any_capped_mask.sum())
+        # 截断事件记录（v2.53: 统计已移至 cap 操作前，此处仅输出日志）
         if n_capped_rows > 0:
             self.logger.info(
                 "RollingICIR 行级 cap=%.2f: %d/%d 行触发截断, 已摊分至剩余因子",
@@ -1511,24 +1528,25 @@ class RollingICIRWeightMethod(WeightMethodBase):
 
         std_cols = [f"{col}_std" for col in factor_cols]
 
-        # 向量化加权：每日动态权重
-        composite = pd.Series(0.0, index=factor_df.index)
-        valid_weight_per_row = pd.Series(0.0, index=factor_df.index)
-
-        for col, std_col, rolling_col in zip(factor_cols, std_cols, rolling_icir_cols):
-            # v1.20: 使用维度感知权重（_dim_weight 列由两阶段或原始逻辑统一生成）
-            weight = factor_df[f"{col}_dim_weight"]
-
-            # v1.14 修复：NaN 因子不传播到综合因子（与 _apply_weights 同逻辑）
-            # 原实现：factor_df[std_col] * weight → NaN * weight = NaN → composite + NaN = NaN
-            # 修复：NaN 加权值置为 0，同时累积有效权重用于行级归一化
-            weighted_value = (factor_df[std_col] * weight).fillna(0)
-            is_valid = factor_df[std_col].notna()
-            composite = composite + weighted_value
-            valid_weight_per_row = valid_weight_per_row + weight.where(is_valid, 0)
-
+        # v2.53 (OOM fix, 模式3a): 加权循环矩阵化
+        # 原实现: 35 次循环 Series 乘法 + fillna + 累加 = ~385MB 临时 Series
+        # 矩阵化: composite = Σ(std_i × w_i) = (S * W).sum(axis=1)
+        # 数学等价: 结合律，逐元素乘法+求和顺序不变
+        S = factor_df[std_cols].to_numpy(dtype=float)  # (n_days, n_factors)
+        nan_mask = np.isnan(S)
+        # NaN 因子置 0，不传播到综合因子（与原 fillna(0) 语义一致）
+        S_safe = np.where(nan_mask, 0.0, S)
+        # 权重仅在因子有效时计入（与原 weight.where(is_valid, 0) 语义一致）
+        W_masked = np.where(nan_mask, 0.0, W_capped)
+        # composite = Σ(std_i × w_i), valid_weight = Σ(w_i where std_i not NaN)
+        composite_np = (S_safe * W_masked).sum(axis=1)  # (n_days,)
+        valid_weight_np = W_masked.sum(axis=1)  # (n_days,)
         # 行级归一化：有效加权值之和 / 有效权重之和（与 M29 规范一致）
-        composite = composite / valid_weight_per_row.replace(0, np.nan)
+        safe_valid = np.where(valid_weight_np == 0, np.nan, valid_weight_np)
+        composite_np = composite_np / safe_valid
+        composite = pd.Series(composite_np, index=factor_df.index)
+
+        del S, S_safe, W_masked, nan_mask
 
         # v1.18: 提取最后一日滚动ICIR权重，供 composite_runner 展示使用
         # 修复（Pitfall #45）：

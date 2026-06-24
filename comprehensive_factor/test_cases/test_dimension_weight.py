@@ -144,7 +144,7 @@ class TestEqualDimensionWeight:
         factor_df = _make_factor_df(factor_cols, ["2026-06-19"], icir_values)
 
         groups = method._build_dimension_groups(factor_cols)
-        factor_df = method._apply_dimension_weights(factor_df, factor_cols, rolling_icir_cols, groups)
+        factor_df, _ = method._apply_dimension_weights(factor_df, factor_cols, rolling_icir_cols, groups)
 
         # 各维度权重应各 25%
         dim_weights = {}
@@ -171,7 +171,7 @@ class TestEqualDimensionWeight:
         factor_df = _make_factor_df(factor_cols, ["2026-06-19"], icir_values)
 
         groups = method._build_dimension_groups(factor_cols)
-        factor_df = method._apply_dimension_weights(factor_df, factor_cols, rolling_icir_cols, groups)
+        factor_df, _ = method._apply_dimension_weights(factor_df, factor_cols, rolling_icir_cols, groups)
 
         # 各维度 50%
         rsi_w = factor_df["rsi_6_dim_weight"].iloc[0]
@@ -203,7 +203,7 @@ class TestICIRDimensionWeight:
         factor_df = _make_factor_df(factor_cols, ["2026-06-19"], icir_values)
 
         groups = method._build_dimension_groups(factor_cols)
-        factor_df = method._apply_dimension_weights(factor_df, factor_cols, rolling_icir_cols, groups)
+        factor_df, _ = method._apply_dimension_weights(factor_df, factor_cols, rolling_icir_cols, groups)
 
         rsi_w = factor_df["rsi_6_dim_weight"].iloc[0]
         bollinger_w = factor_df["bollinger_pb_20_dim_weight"].iloc[0]
@@ -235,7 +235,7 @@ class TestICIRDimensionWeight:
         factor_df = _make_factor_df(factor_cols, ["2026-06-19"], icir_values)
 
         groups = method_dim._build_dimension_groups(factor_cols)
-        factor_df = method_dim._apply_dimension_weights(factor_df, factor_cols, rolling_icir_cols, groups)
+        factor_df, _ = method_dim._apply_dimension_weights(factor_df, factor_cols, rolling_icir_cols, groups)
 
         rsi_w_dim = factor_df["rsi_6_dim_weight"].iloc[0]
 
@@ -261,7 +261,7 @@ class TestICIRDimensionWeight:
         factor_df = _make_factor_df(factor_cols, ["2026-06-19"], icir_values)
 
         groups = method._build_dimension_groups(factor_cols)
-        factor_df = method._apply_dimension_weights(factor_df, factor_cols, rolling_icir_cols, groups)
+        factor_df, _ = method._apply_dimension_weights(factor_df, factor_cols, rolling_icir_cols, groups)
 
         total_w = factor_df[[f"{c}_dim_weight" for c in factor_cols]].iloc[0].sum()
         assert abs(total_w - 1.0) < 0.01
@@ -327,7 +327,7 @@ class TestNaNHandling:
         factor_df["kdj_j_9_rolling_icir"] = np.nan
 
         groups = method._build_dimension_groups(factor_cols)
-        factor_df = method._apply_dimension_weights(factor_df, factor_cols, rolling_icir_cols, groups)
+        factor_df, _ = method._apply_dimension_weights(factor_df, factor_cols, rolling_icir_cols, groups)
 
         # 维度内 kdj_j 为 NaN → 回退等权
         # momentum 有 2 个因子，equal 模式维度权重 = 0.5
