@@ -539,6 +539,7 @@ def run_composite_backtest(
     #   选股 / 回测结果数值不变，仅符号翻转，但报告语义更直观。
     direction_map = {}  # {factor_name: 'negative'|'positive'|'unknown'}（记录原始 IC 方向）
     flipped_factors = []  # v2.47: 原 IC<0 被翻到 positive 的因子（语义反转，需配合 aligned_to 字段读取）
+    flipped_std_cols = []  # v2.52: 待批量取反的 _std 列名
 
     for i, col in enumerate(factor_cols):
         # 通过 factor_list[i] 查找对应的因子逻辑名
@@ -556,15 +557,20 @@ def run_composite_backtest(
 
         std_col = f"{col}_std"
         if ic_mean_val < 0:
-            # 反向因子：取反标准化值，使其对齐到正向语义
+            # 反向因子：记录，稍后批量取反（v2.52: 避免逐列修改碎片化）
             direction_map[factor_name] = "negative"
-            factor_df[std_col] = -factor_df[std_col]
             flipped_factors.append(factor_name)
+            flipped_std_cols.append(std_col)
             logger.info("因子 %s ic_mean=%.4f<0（反向因子），标准化值已取反以对齐正向语义", factor_name, ic_mean_val)
         else:
             # 正向因子：保持不变
             direction_map[factor_name] = "positive"
 
+    # v2.52 (OOM 炸弹8, 模式3c): 向量化方向统一化，避免逐列修改碎片化
+    # 原实现 for col: factor_df[std_col] = -factor_df[std_col] → 25 次 BlockManager update
+    # 修复：矩阵化批量取反
+    if flipped_std_cols:
+        factor_df[flipped_std_cols] = -factor_df[flipped_std_cols].to_numpy()
     if flipped_factors:
         logger.info(
             "方向统一化完成: %d 个反向因子已取反 (%s)，所有因子对齐到正向语义", len(flipped_factors), flipped_factors
