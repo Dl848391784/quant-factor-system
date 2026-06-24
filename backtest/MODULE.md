@@ -1,7 +1,7 @@
 # backtest 模块规范
 
-> 版本: v2.4
-> 最后更新: 2026-06-23（Parquet 迁移：factor_ic_data.json.gz → .parquet）
+> 版本: v2.5
+> 最后更新: 2026-06-24（M17 去叙事标签反向硬规重写）
 >
 > 本规范由 AI 智能体或人类开发者执行。每条规则采用统一框架:**What / Why / How / Don't / When / Verify**。
 >
@@ -23,7 +23,7 @@
 | **A. 模块基础** | M1-M4 | 模块职责 / 公共模块复用 / 脚本命名 / 输出目录与日志 |
 | **B. Config 与 CLI 入口** | M5-M9 | ClassVar 薄声明 / layer_names Sequence / ic_source 派生 / factor_cli_main / 启动日志 |
 | **C. 分层规则** | M10-M14 | 强制 percentile / fixed_threshold 写法 / 阈值描述格式 / 阈值设计 / 阈值边界依赖 |
-| **D. 因子方向与策略** | M15-M17 | factor_direction 由 IC 派生 / IC 值溯源 / 策略类型注释 |
+| **D. 因子方向与策略** | M15-M17 | factor_direction 由 IC 派生 / IC 值溯源 / 禁贴叙事标签 |
 | **E. 统计指标** | M18-M23 | 累计收益 NaN / 年化覆盖率 / 交易成本 / 夏普 / 最大回撤 / 多空换手率 |
 | **F. 数据类型与 NaN** | M24-M27 | float64 强制 / dict key str / NaN→None JSON / pd.NA vs np.nan |
 | **G. 因子计算** | M28-M30 | RSI Wilder EWM / RSI 边界 / EWM 索引连续 |
@@ -573,9 +573,9 @@ class VolumeRatioLayerConfig(LayerConfigBase):
     """量比分层配置
 
     因子方向说明 (基于 IC 测试结果):
-    - IC 均值 = -0.029 (负相关,显著)
+    - IC 均值 = -0.029 (负相关,显著, p < 0.05)
     - IC 来源:factor_ic/result/volume_ratio_5_ic_result.json (2026-05-22 测试)
-    - 高量比 → 未来收益倾向于更低 (放量可能预示见顶)
+    - 实证结论:截面上 volume_ratio_5 与 forward_return 负相关
     """
 ```
 
@@ -584,39 +584,67 @@ class VolumeRatioLayerConfig(LayerConfigBase):
 ```python
 """
 - IC 均值 = -0.029 (负相关,显著)  # ❌ 无来源,无法追溯
+- 高量比 → 未来收益更低 (放量可能预示见顶)  # ❌ 给数据贴叙事 (见顶/反弹/超跌等)
 """
 ```
 
+**Why 禁叙事**:AGENTS.md "数据驱动原则" — 系统的方向/风格由实证 IC 涌现,不由设计者预设。"见顶 / 放量 / 反弹" 等叙事词汇会在后续 IC 翻转时变成误导文档。规范做法:只陈述统计事实 (IC 符号、p 值、来源文件),禁止解释背后的"市场行为故事"。
+
 ---
 
-## M17. 策略类型必须在注释中明确
+## M17. 策略实现必须由 factor_direction 派生,禁贴叙事标签
 
-**What**:Config 注释必须说明策略类型 (均值回归 / 趋势跟随),并解释 `long_layers/short_layers` 与策略的对应关系。
+**What**:Config 注释只允许描述「Layer 行为 = factor_direction 的函数」,
+**禁止**出现"均值回归 / 趋势跟随 / 反弹 / 超跌 / 放量见顶"等叙事标签。
+策略类型不是设计者预设的,而是 IC 符号决定的结果。
 
-**Why**:`factor_direction` 配置与策略类型直接相关:Layer3 做空在均值回归中合理,在趋势跟随中错误。
+**Why**:
+- AGENTS.md "数据驱动原则":系统的方向/风格由实证数据涌现 (IC 符号),不由设计者贴标签
+- IC 翻转时叙事标签变成误导文档 (本来注释"均值回归",IC 翻正后实际跑的是"趋势跟随",但注释不会自动更新)
+- v2.48 教训:旧 9 个交互因子被硬编码 `-z(ret)×factor` 单边公式 (隐含"反弹/超跌"叙事),用户 06-24 反馈选股与预期不符 → 重构为 27 个 pos/neg/abs 数学变体,由 IC 闸口决定胜出方向
+- 基类 `_load_ic_meta` 已自动从 IC 文件派生 `factor_direction`,Config 注释重复叙事 = 双源信息容易脱钩
 
 **How**:
 
 ```python
 class RSILayerConfig(LayerConfigBase):
-    """RSI 分层配置 (均值回归策略)
+    """RSI 分层配置
 
-    策略说明:
-    - 这是均值回归策略,而非趋势跟随
-    - Layer3 (50≤RSI<70) 做空 = "偏离中性偏强后可能回落"
-    - 若需趋势跟随,改 factor_direction='positive',Layer3 改做多
+    因子方向: 由 _load_ic_meta 从 factor_ic/result/rsi_6_ic_result.json 自动派生
+    Layer 行为 (与 factor_direction 联动):
+    - factor_direction='negative' 时:long_layers=[1,2] 做多低值, short_layers=[3,4] 做空高值
+    - factor_direction='positive' 时:long_layers=[4,5] 做多高值, short_layers=[1,2] 做空低值
+
+    long_layers / short_layers 配置只描述"哪些 Layer 编号做多/做空",
+    禁止注释中加 "均值回归" / "趋势跟随" / "超买回落" 等叙事解读。
     """
-    # 均值回归
-    long_layers = [1, 2]   # Layer1/2 (超卖/偏弱) 做多
-    short_layers = [3, 4]  # Layer3/4 (偏强/超买) 做空
+    long_layers = [1, 2]
+    short_layers = [3, 4]
 ```
 
-**策略类型对照**:
+**Don't**:
 
-| 策略 | factor_direction | Layer 行为 |
-|------|------------------|-----------|
-| 均值回归 | `negative` | 低值做多,高值做空 (Layer1,2 做多) |
-| 趋势跟随 | `positive` | 高值做多,低值做空 (Layer4,5 做多) |
+```python
+class RSILayerConfig(LayerConfigBase):
+    """RSI 分层配置 (均值回归策略)  # ❌ "均值回归"=叙事标签
+
+    策略说明:
+    - 这是均值回归策略,而非趋势跟随       # ❌ 给系统贴风格标签
+    - Layer3 做空 = "偏离中性偏强后可能回落"  # ❌ "可能回落"=故事叙述
+    - 若需趋势跟随,改 factor_direction='positive'  # ❌ 暗示设计者掌握"应该是哪种策略"
+    """
+```
+
+**When 例外**:历史 commit 信息 / CHANGELOG / designs/ 归档文档允许保留旧叙事标签 (作为版本快照),
+但**所有新增/修改的 Config docstring** 都必须遵守本规范。
+若发现现存 Config 仍带叙事标签,在下次修改该 Config 时一并清理。
+
+**Verify**:
+```bash
+# 检测新 Config 是否引入叙事标签 (排除已知存量, v2.5 前未约束)
+grep -nE "均值回归|趋势跟随|反弹|超跌|超买|超卖|见顶|见底|放量|缩量" backtest/layered_backtest_*.py
+# 新增/修改的 Config docstring 不应命中; 存量按 When 条款下次修改时清理
+```
 
 ---
 
@@ -1618,6 +1646,7 @@ factor_df = full_df[["date", "asset", "close", "factor_xxx"]].copy()
 
 | 版本 | 日期 | 主要变更 |
 |------|------|---------|
+| v2.5 | 2026-06-24 | M17 重写：删除"策略类型必须在注释中明确"反向硬规（要求贴"均值回归/趋势跟随"叙事标签），改为"策略实现必须由 factor_direction 派生，禁贴叙事标签"；M16 例子同步去叙事；遵循 AGENTS.md 数据驱动原则，承接 v2.48 交互因子族去标签重构 |
 | v2.3 | 2026-06-13 | 新增 M54（大规模数据加载强制流式 ijson + 列白名单）+ M 类别;源自 RSI 分层回测 OOM 修复 (4.16 GB → 901 MB) |
 | v2.2 | 2026-06-12 | 新增行业方向性因子回测脚本注册表（industry_momentum_5d / industry_turnover_trend / industry_amplitude_trend）；脚本注册表章节 |
 | v2.1 | 2026-06-04 | 新增 M53（预计算因子禁止重复传递 factor_calculator）+ L 类别;修复 5 个尾盘因子回测脚本的列名重复 bug |
