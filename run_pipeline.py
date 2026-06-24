@@ -652,6 +652,27 @@ def run_pipeline(
         is_parallel_batch = len(batch) > 1
         batch_stage = batch[0].stage
 
+        # v2.48: Stage 4 (composite) 前杀 LSP 进程释放内存 (~200MB)
+        # composite 阶段加载全量 parquet + 标准化 + 相关性矩阵, 内存峰值高,
+        # 7.3GB 机器上 LSP 占 ~200MB 可能导致 OOM. LSP 在非交互跑 pipeline 时无用.
+        if batch_stage >= 4 and not any(
+            s.stage >= 4 for s in scripts_to_run[:scripts_to_run.index(batch[0])]
+        ):
+            import signal as _signal
+
+            for _line in subprocess.check_output(
+                ["ps", "aux"], text=True
+            ).splitlines():
+                if "pyright-langserver" in _line and "grep" not in _line:
+                    _pid = int(_line.split()[1])
+                    try:
+                        os.kill(_pid, _signal.SIGTERM)
+                        print(f"[内存] 杀死 LSP 进程 PID={_pid} (释放 ~200MB)")
+                    except ProcessLookupError:
+                        pass
+                    except PermissionError:
+                        print(f"[内存] 无权限杀 LSP PID={_pid}")
+
         print()
         if is_parallel_batch:
             print(
