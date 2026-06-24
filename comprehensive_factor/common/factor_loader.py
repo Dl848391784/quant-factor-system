@@ -591,13 +591,22 @@ def standardize_factors(
         1. 原始 NaN 保持 NaN（不参与标准化计算）
         2. 单只股票有有效值时，标准化结果为 NaN（样本标准差无法计算）
         3. 有效值数量 <=1 时记录警告日志
+
+    Mutation 契约（v2.49, 2026-06-24）：
+        - 原地修改：向输入 DataFrame 新增 _std 列，返回同一对象（不 copy）
+        - 安全依据：两个调用方（composite_runner L336/L506）均使用 var=fn(var) 模式，
+          从不复用旧引用；调用前已有独立 DataFrame（L302 read_parquet / L405 slice.copy()）
+        - OOM 根因：1.39M 行 × 79 列全量 copy ≈ 1GB 冗余峰值，与调用方引用叠加致 OOM
+        - 遵循 pandas-oom skill 模式 3a（管道末端 copy + 无契约测试守护）
     """
     if logger is None:
         from comprehensive_factor.common.logger_config import get_logger
 
         logger = get_logger(__name__)
 
-    factor_df = factor_df.copy()
+    # v2.49: 删除 factor_df.copy() — 调用方均 var=fn(var) 不复用旧引用，
+    # 全量 copy 1.39M×79列 ≈ 1GB 冗余，是 composite OOM 炸弹 1。
+    # 函数仅新增 _std 列，不修改原始因子列，原地操作安全。
 
     for col in factor_cols:
         std_col = f"{col}_std"
