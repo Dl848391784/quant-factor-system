@@ -1210,47 +1210,61 @@ class RollingICIRWeightMethod(WeightMethodBase):
         n_dims = len(dimension_groups)
         n_factors = len(factor_cols)
 
+        # v2.53 (OOM fix, 模式9): 预计算一次 abs_icir 矩阵，两个循环复用
+        # 原实现循环1 (L1222) 和循环2 (L1250) 各自调用 factor_df[dim_rolling_cols].abs()
+        # 每次分配 35列×1.39M=390MB，两次=780MB 冗余分配
+        # 修复：预计算全部 rolling_icir 列的绝对值为 numpy 矩阵，两个循环按列索引复用
+        # 数学等价性：|x| 是纯函数，预计算不改变值；pandas/numpy .abs() 对 NaN 一致
+        col_to_idx = {c: i for i, c in enumerate(factor_cols)}
+        abs_icir_matrix = factor_df[rolling_icir_cols].to_numpy(dtype=float).copy()
+        np.abs(abs_icir_matrix, out=abs_icir_matrix)  # 原地取绝对值
+
         # v2.50 (OOM fix): 不再逐列预分配 _dim_weight，改为 dict 收集后批量 concat
-        # 原实现 for col in factor_cols: factor_df[f"{col}_dim_weight"] = 0.0 → 35 次 insert
         dim_weight_data: dict[str, pd.Series] = {}
 
-        # 向量化实现：逐维度处理
+        # 维度内列索引预计算（避免循环内重复构建 dim_rolling_cols）
+        dim_col_indices: dict[str, list[int]] = {}
         for dim, dim_cols in dimension_groups.items():
-            dim_rolling_cols = [f"{c}_rolling_icir" for c in dim_cols]
+            dim_col_indices[dim] = [col_to_idx[c] for c in dim_cols]
 
-            # 维度内 |ICIR| 绝对值
-            dim_abs_icir = factor_df[dim_rolling_cols].abs()
-            dim_icir_sum = dim_abs_icir.sum(axis=1)  # 每行的维度内 |ICIR| 之和
-
-            # 第一阶段：维度内归一化
+        # 第一阶段：维度内归一化
+        for dim, dim_cols in dimension_groups.items():
+            indices = dim_col_indices[dim]
+            dim_abs = abs_icir_matrix[:, indices]  # view，无 copy
+            dim_icir_sum = pd.Series(dim_abs.sum(axis=1), index=factor_df.index)
             dim_icir_sum_safe = dim_icir_sum.replace(0, np.nan)
-            for col in dim_cols:
-                rolling_col = f"{col}_rolling_icir"
-                intra_weight = factor_df[rolling_col].abs() / dim_icir_sum_safe
+
+            for i, col in enumerate(dim_cols):
+                # 复用预计算的 abs_icir_matrix 列，无需再次 .abs()
+                intra_weight = pd.Series(
+                    abs_icir_matrix[:, col_to_idx[col]] / dim_icir_sum_safe.to_numpy(),
+                    index=factor_df.index,
+                )
                 # 维度内全为 0 或 NaN 时回退等权
                 intra_weight = intra_weight.fillna(1.0 / len(dim_cols))
 
                 if self.dimension_weight_method == "equal":
-                    # equal: 维度等权 1/n_dims
                     dim_weight_data[f"{col}_dim_weight"] = intra_weight * (1.0 / n_dims)
                 elif self.dimension_weight_method == "icir":
-                    # icir: 维度权重 = 维度内平均|ICIR| / Σ_dim_avg
-                    # 维度内平均 |ICIR| = dim_icir_sum / n_factors_in_dim
-                    # 但需要所有维度的平均|ICIR| 才能归一化，暂存中间结果
                     dim_weight_data[f"{col}_dim_weight"] = intra_weight
                 else:
                     dim_weight_data[f"{col}_dim_weight"] = intra_weight
 
         # icir 模式：第二阶段维度间归一化
         if self.dimension_weight_method == "icir":
-            # 计算每个维度每个日期的"平均|ICIR|"
             dim_avg_icir_cols = {}
             for dim, dim_cols in dimension_groups.items():
-                dim_rolling_cols = [f"{c}_rolling_icir" for c in dim_cols]
-                dim_abs_icir = factor_df[dim_rolling_cols].abs()
+                indices = dim_col_indices[dim]
+                dim_abs = abs_icir_matrix[:, indices]  # 复用，无重复分配
                 # 维度内平均 |ICIR|（skipna=True，忽略 NaN 因子）
-                dim_avg_icir = dim_abs_icir.mean(axis=1, skipna=True)
+                dim_avg_icir = pd.Series(
+                    np.nanmean(dim_abs, axis=1),  # nanmean 等价 skipna=True
+                    index=factor_df.index,
+                )
                 dim_avg_icir_cols[dim] = dim_avg_icir
+
+            del abs_icir_matrix  # 释放预计算矩阵（390MB）
+            gc.collect()
 
             # 维度间归一化：dim_weight_d = avg_icir_d / Σ_avg_icir
             total_avg_icir = sum(dim_avg_icir_cols.values())
@@ -1264,6 +1278,9 @@ class RollingICIRWeightMethod(WeightMethodBase):
                 for col in dim_cols:
                     # 最终权重 = 维度内权重 × 维度权重
                     dim_weight_data[f"{col}_dim_weight"] = dim_weight_data[f"{col}_dim_weight"] * dim_weight
+        else:
+            del abs_icir_matrix
+            gc.collect()
 
         # v2.50: 批量 concat 添加所有 _dim_weight 列（无碎片化）
         factor_df = pd.concat([factor_df, pd.DataFrame(dim_weight_data, index=factor_df.index)], axis=1)
@@ -1435,6 +1452,17 @@ class RollingICIRWeightMethod(WeightMethodBase):
             factor_df = pd.concat([factor_df, pd.DataFrame(dim_weight_new_cols, index=factor_df.index)], axis=1)
             del dim_weight_new_cols
 
+        # v2.53 (OOM fix, 模式3e 列清理): _dim_weight 列已计算完毕，
+        # _rolling_icir 列（35列×1.39M=390MB）不再被后续加权循环使用。
+        # 预计算 valid_mask（用于 _last_day_weights 查找次新有效日期）后立即释放。
+        # 依赖点分析：
+        #   1. _extract_weights_from_row 回退分支：无影响——_dim_weight 列已存在，
+        #      L1547 has_dim_weights=True 永远不走 _rolling_icir 回退
+        #   2. valid_rows 查找：预计算 boolean mask 替代列引用，语义一致
+        valid_mask = factor_df[rolling_icir_cols].notna().any(axis=1)
+        factor_df = factor_df.drop(columns=rolling_icir_cols)
+        gc.collect()
+
         # v2.38: 行级单因子权重上限（design.md feat_interaction_exemption_and_weight_cap §4.3）
         # RollingICIR 每日动态权重 _dim_weight 可能某日某因子占比过高（如 amplitude_compression 43.7%）
         # 用 _cap_weight_matrix 对每行做 25% 截断+剩余比例摊分, 保持每行 sum=1.0
@@ -1594,7 +1622,8 @@ class RollingICIRWeightMethod(WeightMethodBase):
 
         # 最大日期无有效权重时（T-1 无 IC 数据），回退查找次新日期
         if not self._last_day_weights:
-            valid_rows = factor_df[factor_df[rolling_icir_cols].notna().any(axis=1)]
+            # v2.53: valid_mask 在删除 _rolling_icir 列前预计算（L1457）
+            valid_rows = factor_df[valid_mask]
             if len(valid_rows) > 0:
                 last_valid_date = valid_rows["date_sorted"].max()
                 last_valid_row = valid_rows[valid_rows["date_sorted"] == last_valid_date].iloc[0]

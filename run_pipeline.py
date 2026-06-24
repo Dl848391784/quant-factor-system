@@ -538,7 +538,7 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
 # ============================================================================
 
 
-def run_script(task: ScriptTask, retry_count: int = 0) -> bool:
+def run_script(task: ScriptTask, retry_count: int = 0) -> bool | None:
     """
     执行单个脚本
 
@@ -548,7 +548,8 @@ def run_script(task: ScriptTask, retry_count: int = 0) -> bool:
 
     Returns:
         True: 执行成功
-        False: 执行失败（重试次数用尽）
+        False: 执行失败（可重试）
+        None: 不可重试失败（如 SIGKILL/OOM，重试只会再次 OOM）
     """
     script_path = PROJECT_ROOT / task.script
 
@@ -592,6 +593,12 @@ def run_script(task: ScriptTask, retry_count: int = 0) -> bool:
         if result.returncode == 0:
             print(f"{prefix} ✓ 执行成功 (耗时 {elapsed:.1f}s, 退出码 0)")
             return True
+        elif result.returncode == -9:
+            # SIGKILL (OOM Killer 或手动 kill -9): 确定性失败，重试不会成功
+            # 第一性原理：OOM 是稳态失败（内存不变，结果不变），重试只会再次 OOM
+            print(f"{prefix} ✗ 被 SIGKILL 终止 (耗时 {elapsed:.1f}s, 退出码 -9)")
+            print(f"{prefix}   可能是 OOM Killer 或手动 kill -9，不重试")
+            return None
         else:
             print(f"{prefix} ✗ 执行失败 (耗时 {elapsed:.1f}s, 退出码 {result.returncode})")
             return False
@@ -625,8 +632,13 @@ def run_script_with_retry(task: ScriptTask) -> tuple[ScriptTask, bool]:
         (task, False): 重试次数用尽全部失败
     """
     for retry in range(MAX_RETRIES + 1):
-        if run_script(task, retry):
+        result = run_script(task, retry)
+        if result is True:
             return task, True
+        if result is None:
+            # SIGKILL/OOM: 确定性失败，不重试
+            print(f"[{task.name}] SIGKILL 不可重试，标记为失败")
+            return task, False
         if retry < MAX_RETRIES:
             print(f"[{task.name}] 等待 %ds 后重试..." % RETRY_DELAY)
             time.sleep(RETRY_DELAY)
