@@ -24,6 +24,7 @@
         - 详见 designs/factor_name_col_map_unification_design.md §3.3
 """
 
+import gc
 import logging
 import re  # v1.11 修复：移至文件顶部（PEP 8 规范）
 from abc import ABC, abstractmethod
@@ -1209,9 +1210,9 @@ class RollingICIRWeightMethod(WeightMethodBase):
         n_dims = len(dimension_groups)
         n_factors = len(factor_cols)
 
-        # 为每个因子列预分配 _dim_weight 列
-        for col in factor_cols:
-            factor_df[f"{col}_dim_weight"] = 0.0
+        # v2.50 (OOM fix): 不再逐列预分配 _dim_weight，改为 dict 收集后批量 concat
+        # 原实现 for col in factor_cols: factor_df[f"{col}_dim_weight"] = 0.0 → 35 次 insert
+        dim_weight_data: dict[str, pd.Series] = {}
 
         # 向量化实现：逐维度处理
         for dim, dim_cols in dimension_groups.items():
@@ -1231,14 +1232,14 @@ class RollingICIRWeightMethod(WeightMethodBase):
 
                 if self.dimension_weight_method == "equal":
                     # equal: 维度等权 1/n_dims
-                    factor_df[f"{col}_dim_weight"] = intra_weight * (1.0 / n_dims)
+                    dim_weight_data[f"{col}_dim_weight"] = intra_weight * (1.0 / n_dims)
                 elif self.dimension_weight_method == "icir":
                     # icir: 维度权重 = 维度内平均|ICIR| / Σ_dim_avg
                     # 维度内平均 |ICIR| = dim_icir_sum / n_factors_in_dim
                     # 但需要所有维度的平均|ICIR| 才能归一化，暂存中间结果
-                    factor_df[f"{col}_dim_weight"] = intra_weight
+                    dim_weight_data[f"{col}_dim_weight"] = intra_weight
                 else:
-                    factor_df[f"{col}_dim_weight"] = intra_weight
+                    dim_weight_data[f"{col}_dim_weight"] = intra_weight
 
         # icir 模式：第二阶段维度间归一化
         if self.dimension_weight_method == "icir":
@@ -1262,7 +1263,10 @@ class RollingICIRWeightMethod(WeightMethodBase):
 
                 for col in dim_cols:
                     # 最终权重 = 维度内权重 × 维度权重
-                    factor_df[f"{col}_dim_weight"] = factor_df[f"{col}_dim_weight"] * dim_weight
+                    dim_weight_data[f"{col}_dim_weight"] = dim_weight_data[f"{col}_dim_weight"] * dim_weight
+
+        # v2.50: 批量 concat 添加所有 _dim_weight 列（无碎片化）
+        factor_df = pd.concat([factor_df, pd.DataFrame(dim_weight_data, index=factor_df.index)], axis=1)
 
         # 对所有因子列的 _dim_weight 做行级归一化（确保每日权重和=1）
         dim_weight_cols = [f"{c}_dim_weight" for c in factor_cols]
@@ -1359,15 +1363,27 @@ class RollingICIRWeightMethod(WeightMethodBase):
         # - factor_df['date_sorted'] 是 datetime 类型
         # - datetime 与字符串无法匹配，导致 map 返回 NaN，回退等权
         # - 修复：将 rolling_icir_series 索引也转换为 datetime 类型
+        # v2.50 (OOM fix): 批量构建 _rolling_icir 列，用 pd.concat 一次性添加
+        # 原实现逐列 factor_df[col] = ... 导致 BlockManager 碎片化（35 因子 × 72 次 insert）
+        # 碎片化使实际内存膨胀到理论值 ~2.5x → 6.3GB OOM (require_positive_ic=False, 35 因子)
+        # 修复：先在 dict 中收集所有新列，最后 pd.concat 一次添加，无碎片化
+        # designs/feat_report_bottom30.md (同源 OOM 修复)
+        new_cols: dict[str, pd.Series] = {}
+
         for col in factor_cols:
             if col in rolling_icir_dict and len(rolling_icir_dict[col]) > 0:
                 rolling_icir_series = rolling_icir_dict[col]
                 # v1.13 修复：索引类型转换（字符串 → datetime）
                 rolling_icir_series_dt = rolling_icir_series.copy()
                 rolling_icir_series_dt.index = pd.to_datetime(rolling_icir_series_dt.index)
-                factor_df[f"{col}_rolling_icir"] = factor_df["date_sorted"].map(rolling_icir_series_dt)
+                new_cols[f"{col}_rolling_icir"] = factor_df["date_sorted"].map(rolling_icir_series_dt)
             else:
-                factor_df[f"{col}_rolling_icir"] = np.nan
+                new_cols[f"{col}_rolling_icir"] = pd.Series(np.nan, index=factor_df.index)
+
+        # 一次性 concat 添加所有 _rolling_icir 列（无碎片化）
+        factor_df = pd.concat([factor_df, pd.DataFrame(new_cols, index=factor_df.index)], axis=1)
+        del new_cols
+        gc.collect()
 
         # v1.19 修复：T-1 rolling ICIR NaN 权重回退策略（遵循 design.md）
         # 问题: 选股日 T-1 无次日收益 → IC 无法计算 → rolling ICIR 全 NaN → fillna(1/n) 等权
@@ -1405,10 +1421,14 @@ class RollingICIRWeightMethod(WeightMethodBase):
             # 原始逻辑：每日权重 = |rolling_icir| / sum(|rolling_icir|)
             factor_df["weight_sum"] = factor_df[rolling_icir_cols].abs().sum(axis=1)
             weight_sum_safe = factor_df["weight_sum"].replace(0, np.nan)
+            # v2.50 (OOM fix): 批量构建 _dim_weight 列，避免逐列 insert 碎片化
+            dim_weight_new_cols: dict[str, pd.Series] = {}
             for col, rolling_col in zip(factor_cols, rolling_icir_cols):
                 weight = factor_df[rolling_col].abs() / weight_sum_safe
                 weight = weight.fillna(1.0 / len(factor_cols))
-                factor_df[f"{col}_dim_weight"] = weight
+                dim_weight_new_cols[f"{col}_dim_weight"] = weight
+            factor_df = pd.concat([factor_df, pd.DataFrame(dim_weight_new_cols, index=factor_df.index)], axis=1)
+            del dim_weight_new_cols
 
         # v2.38: 行级单因子权重上限（design.md feat_interaction_exemption_and_weight_cap §4.3）
         # RollingICIR 每日动态权重 _dim_weight 可能某日某因子占比过高（如 amplitude_compression 43.7%）
