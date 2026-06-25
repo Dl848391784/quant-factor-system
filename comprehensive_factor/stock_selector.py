@@ -1226,12 +1226,26 @@ def apply_lr_filter(
     day_df = day_df[day_df["date"].apply(lambda d: pd.Timestamp(d).strftime("%Y-%m-%d")) == selection_date].copy()
     asset_index = day_df.set_index("asset") if "asset" in day_df.columns else day_df
 
+    # v3.12: 检测当天全 NaN 的特征列, 用 0 填充 (scaler 之后均值=0, 等价于中性贡献)
+    # 根因: 部分因子 (如 capital_flow_ratio_trend) 在最新一天可能全 NaN (增量采集延迟),
+    # 任何一个特征 NaN 会导致整只股票被判 "特征缺失" → 90/90 全中性概率 → LR 过滤无效
+    all_nan_feats = [f for f in unique_parquet_feats if day_df[f].isna().all()]
+    if all_nan_feats:
+        logger.warning(
+            "LR 过滤: 当天全 NaN 特征 %d 个, 用 0 填充: %s",
+            len(all_nan_feats),
+            ", ".join(all_nan_feats[:5]),
+        )
+        day_df[all_nan_feats] = 0.0
+        asset_index = day_df.set_index("asset") if "asset" in day_df.columns else day_df
+
     # 收集每只股票的特征和模型打分
     scored: list[tuple[dict[str, Any], float]] = []
-    missing_features = 0
+    missing_features = 0  # 不在数据源中的股票数
     for stock in bottom_stocks:
         code = stock["code"]
         if code not in asset_index.index:
+            missing_features += 1
             scored.append((stock, 0.5))  # 数据不可用 → 中性概率
             continue
 
@@ -1240,29 +1254,27 @@ def apply_lr_filter(
             row = row.iloc[0]
 
         # 按 selected_features 顺序构建特征向量 (重复的 parquet 列会读到同一个值)
+        # v3.12: 个别股票的 NaN 特征用 0 填充 (scaler 之后均值=0, 中性贡献)
         feature_vals = []
-        valid = True
         for feat in selected_features:
             parquet_col = feat_to_parquet[feat]
             val = row.get(parquet_col, np.nan)
             if isinstance(val, pd.Series):
                 val = val.iloc[0]
             if pd.isna(val):
-                valid = False
-                break
+                val = 0.0
             feature_vals.append(float(val))
-
-        if not valid:
-            missing_features += 1
-            scored.append((stock, 0.5))  # 特征缺失 → 中性概率
-            continue
 
         X = pd.DataFrame([feature_vals], columns=selected_features)
         proba_up = float(model.predict_proba(scaler.transform(X))[0, 1])
         scored.append((stock, proba_up))
 
     if missing_features > 0:
-        logger.info("LR 过滤: %d/%d 只股票特征缺失, 使用中性概率 0.5", missing_features, len(scored))
+        logger.info(
+            "LR 过滤: %d/%d 只股票不在数据源中, 使用中性概率 0.5",
+            missing_features,
+            len(scored),
+        )
 
     # 按 proba_up 降序排 (概率高的 = 预测涨的 = 保留)
     scored.sort(key=lambda x: x[1], reverse=True)
