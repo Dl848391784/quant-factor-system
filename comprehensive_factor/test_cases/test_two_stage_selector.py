@@ -257,13 +257,15 @@ class TestStockSelectorConfigTwoStageValidation:
         config.validate()  # 不应抛异常
 
     def test_overheat_filter_defaults(self):
-        """v3.9.2: LR 数据驱动过滤参数默认值校验."""
+        """v3.10: LR 数据驱动过滤参数默认值校验 (默认关闭, 需积累 90 天)."""
         config = StockSelectorConfig()
-        assert config.enable_overheat_filter is True
+        assert config.enable_overheat_filter is False  # v3.10: 默认关闭
+        assert config.lr_min_training_days == 90  # v3.10: 最小训练天数
         assert config.lr_top_features == 10
         assert config.lr_train_window == 120
         assert config.lr_min_oos_auc == 0.55
         assert config.lr_filter_quantile == 0.3
+        assert config.lr_bottom_pool_size == 90  # v3.10: Bottom90
 
 
 # ============================================================================
@@ -287,3 +289,231 @@ class TestTwoStageDefaults:
         config = StockSelectorConfig()
         assert config.stage2_sort_col == "turnover_rate"
         assert config.stage2_ascending is True
+
+
+# ============================================================================
+# 5. v3.10: LR 训练数据持久化测试 (designs/feat_lr_training_data.md)
+# ============================================================================
+
+
+class TestSaveLrTrainingData:
+    """save_lr_training_data + backfill_forward_return_1d 测试."""
+
+    @pytest.fixture
+    def mock_bottom90(self) -> list[dict]:
+        """模拟 Bottom90 股票列表."""
+        return [{"rank": i + 1, "code": f"{i:06d}", "composite_value": -2.0 + i * 0.01} for i in range(90)]
+
+    @pytest.fixture
+    def mock_factor_df(self) -> pd.DataFrame:
+        """模拟当日全特征数据."""
+        rng = np.random.RandomState(42)
+        return pd.DataFrame(
+            {
+                "asset": [f"{i:06d}" for i in range(90)],
+                "amplitude": rng.uniform(0.01, 0.15, 90),
+                "rsi_6": rng.uniform(10, 90, 90),
+                "turnover_rate": rng.uniform(0.001, 0.1, 90),
+                "volume_ratio_5": rng.uniform(0.5, 3.0, 90),
+                "close": rng.uniform(5, 50, 90),
+                "volume": rng.uniform(1e6, 1e8, 90),
+            }
+        )
+
+    @pytest.fixture
+    def mock_weight_config(self) -> dict:
+        """模拟权重配置."""
+        return {
+            "best_selection": {
+                "method": "equal_weight",
+                "composite_score": 0.75,
+            },
+            "meta": {
+                "weight_meta": {
+                    "last_day_weights": {
+                        "amplitude": 0.15,
+                        "rsi_6": 0.10,
+                        "turnover_rate": 0.08,
+                        "volume_ratio_5": 0.05,
+                    },
+                },
+            },
+        }
+
+    def test_save_basic(
+        self,
+        mock_bottom90: list[dict],
+        mock_factor_df: pd.DataFrame,
+        mock_weight_config: dict,
+        silent_logger: logging.Logger,
+        tmp_path: Path,
+    ) -> None:
+        """保存 90 行, 验证分区路径和行数."""
+        # Monkey-patch LR_TRAINING_DATA_DIR to tmp_path
+        import paths
+        import pyarrow.parquet as pq
+
+        original = paths.LR_TRAINING_DATA_DIR
+        paths.LR_TRAINING_DATA_DIR = tmp_path / "lr_training_data"
+        try:
+            from comprehensive_factor.stock_selector import save_lr_training_data
+
+            config = StockSelectorConfig()
+            partition_dir = save_lr_training_data(
+                mock_bottom90,
+                mock_factor_df,
+                mock_weight_config,
+                config,
+                "2026-06-25",
+                logger=silent_logger,
+            )
+            assert partition_dir is not None
+            assert partition_dir.exists()
+            assert "weight_method=equal_weight" in str(partition_dir)
+            assert "selection_date=2026-06-25" in str(partition_dir)
+
+            # 验证行数
+            df = pq.read_table(partition_dir / "part-0.parquet").to_pandas()
+            assert len(df) == 90
+            assert "forward_return_1d" in df.columns
+            assert df["forward_return_1d"].isna().all()  # 当天为 null
+        finally:
+            paths.LR_TRAINING_DATA_DIR = original
+
+    def test_save_overwrite(
+        self,
+        mock_bottom90: list[dict],
+        mock_factor_df: pd.DataFrame,
+        mock_weight_config: dict,
+        silent_logger: logging.Logger,
+        tmp_path: Path,
+    ) -> None:
+        """同日重跑覆盖, 不产生重复."""
+        import paths
+        import pyarrow.parquet as pq
+
+        original = paths.LR_TRAINING_DATA_DIR
+        paths.LR_TRAINING_DATA_DIR = tmp_path / "lr_training_data"
+        try:
+            from comprehensive_factor.stock_selector import save_lr_training_data
+
+            config = StockSelectorConfig()
+            save_lr_training_data(
+                mock_bottom90,
+                mock_factor_df,
+                mock_weight_config,
+                config,
+                "2026-06-25",
+                logger=silent_logger,
+            )
+            # 重跑
+            save_lr_training_data(
+                mock_bottom90,
+                mock_factor_df,
+                mock_weight_config,
+                config,
+                "2026-06-25",
+                logger=silent_logger,
+            )
+            # 只有一个分区
+            partition_dir = tmp_path / "lr_training_data" / "weight_method=equal_weight" / "selection_date=2026-06-25"
+            df = pq.read_table(partition_dir / "part-0.parquet").to_pandas()
+            assert len(df) == 90  # 不是 180
+        finally:
+            paths.LR_TRAINING_DATA_DIR = original
+
+    def test_backfill_null(
+        self,
+        mock_bottom90: list[dict],
+        mock_factor_df: pd.DataFrame,
+        mock_weight_config: dict,
+        silent_logger: logging.Logger,
+        tmp_path: Path,
+    ) -> None:
+        """补写 forward_return_1d, null 被填充."""
+        import paths
+        import pyarrow.parquet as pq
+
+        original = paths.LR_TRAINING_DATA_DIR
+        paths.LR_TRAINING_DATA_DIR = tmp_path / "lr_training_data"
+        try:
+            from comprehensive_factor.stock_selector import (
+                backfill_forward_return_1d,
+                save_lr_training_data,
+            )
+
+            config = StockSelectorConfig()
+            save_lr_training_data(
+                mock_bottom90,
+                mock_factor_df,
+                mock_weight_config,
+                config,
+                "2026-06-25",
+                logger=silent_logger,
+            )
+
+            # 模拟 data_source (次日数据)
+            data_source = tmp_path / "factor_ic_data.parquet"
+            src_df = pd.DataFrame(
+                {
+                    "date": ["2026-06-25"] * 90,
+                    "asset": [f"{i:06d}" for i in range(90)],
+                    "forward_return_1d": np.random.uniform(-0.05, 0.05, 90),
+                }
+            )
+            src_df.to_parquet(data_source, index=False)
+
+            n = backfill_forward_return_1d(data_source, logger=silent_logger)
+            assert n > 0
+
+            partition_dir = tmp_path / "lr_training_data" / "weight_method=equal_weight" / "selection_date=2026-06-25"
+            df = pq.read_table(partition_dir / "part-0.parquet").to_pandas()
+            assert df["forward_return_1d"].notna().all()
+        finally:
+            paths.LR_TRAINING_DATA_DIR = original
+
+    def test_backfill_no_null_skipped(
+        self,
+        mock_bottom90: list[dict],
+        mock_factor_df: pd.DataFrame,
+        mock_weight_config: dict,
+        silent_logger: logging.Logger,
+        tmp_path: Path,
+    ) -> None:
+        """已补写的分区不重复处理."""
+        import paths
+
+        original = paths.LR_TRAINING_DATA_DIR
+        paths.LR_TRAINING_DATA_DIR = tmp_path / "lr_training_data"
+        try:
+            from comprehensive_factor.stock_selector import (
+                backfill_forward_return_1d,
+                save_lr_training_data,
+            )
+
+            config = StockSelectorConfig()
+            save_lr_training_data(
+                mock_bottom90,
+                mock_factor_df,
+                mock_weight_config,
+                config,
+                "2026-06-25",
+                logger=silent_logger,
+            )
+
+            data_source = tmp_path / "factor_ic_data.parquet"
+            src_df = pd.DataFrame(
+                {
+                    "date": ["2026-06-25"] * 90,
+                    "asset": [f"{i:06d}" for i in range(90)],
+                    "forward_return_1d": np.random.uniform(-0.05, 0.05, 90),
+                }
+            )
+            src_df.to_parquet(data_source, index=False)
+
+            backfill_forward_return_1d(data_source, logger=silent_logger)
+            # 第二次应返回 0 (已无 null)
+            n = backfill_forward_return_1d(data_source, logger=silent_logger)
+            assert n == 0
+        finally:
+            paths.LR_TRAINING_DATA_DIR = original

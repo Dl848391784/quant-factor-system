@@ -149,14 +149,17 @@ class StockSelectorConfig:
     stage2_sort_col: str = "turnover_rate"  # 保留字段, v3.9 不再调用 apply_stage2_resort
     stage2_ascending: bool = True  # 保留字段, v3.9 不再使用
 
-    # v3.9.2: Bottom30 LR 数据驱动过滤 (designs/feat_bottom30_overheat_filter.md)
-    #   方案: 扫描所有特征 → Cohen's d 选 top N → LR 训练 → walk-forward OOS 验证 → 打分过滤
-    #   关键: 每次运行时用全历史数据重新训练, 不写死模型/特征/阈值
-    enable_overheat_filter: bool = True
+    # v3.10: LR 数据驱动过滤 (designs/feat_lr_training_data.md)
+    #   方案: 每日保存 Bottom90 训练数据 → 积累 90 天后训练 LR → walk-forward OOS 验证 → 打分过滤
+    #   关键: 训练样本 = 实际选股目标 (composite Bottom90), 训练分布 = 应用分布 (第一性原理)
+    #   v3.9.2 的 return_5d 代理已废弃 (训练分布 ≠ 应用分布, 重叠率 0%)
+    enable_overheat_filter: bool = False  # v3.10: 默认关闭, 需积累 lr_min_training_days 后启用
+    lr_min_training_days: int = 90  # 最小训练天数, 不足则 calibrate_lr_filter 返回 None
     lr_top_features: int = 10  # Cohen's d 排序取 top N 特征
     lr_train_window: int = 120  # walk-forward 训练窗口 (天)
     lr_min_oos_auc: float = 0.55  # OOS AUC 门槛, 低于此值跳过过滤
     lr_filter_quantile: float = 0.3  # Bottom30 中打分最低 30% 排除
+    lr_bottom_pool_size: int = 90  # 训练数据保存的 Bottom 数量 (Bottom90)
 
     # === 数据路径 ===（问题 4 修复：default_factory 保证延迟求值）
     data_source: Path = field(default_factory=lambda: DEFAULT_DATA_SOURCE)
@@ -1548,6 +1551,353 @@ def write_selection_history(
     )
 
     return partition_dir
+
+
+# ============================================================================
+# v3.10: LR 训练数据持久化 (designs/feat_lr_training_data.md)
+# ============================================================================
+
+
+def _load_stock_name_map() -> dict[str, str]:
+    """加载 code → name 映射 (从 STOCK_LIST_DATA)."""
+    from paths import STOCK_LIST_DATA
+
+    if not STOCK_LIST_DATA.exists():
+        return {}
+    try:
+        with open(STOCK_LIST_DATA, encoding="utf-8") as f:
+            stock_list = json.load(f)
+        if isinstance(stock_list, dict):
+            return stock_list
+        if isinstance(stock_list, list):
+            return {item.get("code", ""): item.get("name", "") for item in stock_list if isinstance(item, dict)}
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def save_lr_training_data(
+    bottom_stocks: list[dict[str, Any]],
+    factor_df: pd.DataFrame,
+    weight_config: dict[str, Any],
+    config: "StockSelectorConfig",
+    selection_date: str,
+    logger: logging.Logger | None = None,
+) -> Path | None:
+    """v3.10: 持久化 Bottom90 训练数据到 Parquet 双分区数据集.
+
+    分区布局:
+        lr_training_data/weight_method=<method>/selection_date=YYYY-MM-DD/part-0.parquet
+
+    每天每个 weight_method 写 90 行, 含因子权重 + 因子原始值 + composite 得分.
+    forward_return_1d 当天为 null, 次日由 backfill_forward_return_1d() 补写.
+    同日重跑覆盖该分区.
+
+    Args:
+        bottom_stocks: Bottom90 股票列表 (composite 升序最低 90 只).
+        factor_df: 当日全特征数据 (含因子列, index 对齐 bottom_stocks).
+        weight_config: 权重配置 (含 best_selection.method, meta.weight_meta.last_day_weights).
+        config: 选股配置.
+        selection_date: 选股日期 'YYYY-MM-DD'.
+        logger: 日志.
+
+    Returns:
+        分区目录路径, 失败返回 None.
+    """
+    if logger is None:
+        logger = _logger
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from paths import LR_TRAINING_DATA_DIR
+
+    if not bottom_stocks:
+        logger.warning("save_lr_training_data: bottom_stocks 为空, 跳过")
+        return None
+
+    best_selection = weight_config.get("best_selection", {})
+    weight_method = best_selection.get("method", "equal_weight")
+    composite_score = float(best_selection.get("composite_score", 0.0))
+
+    # 因子权重 (从 weight_meta.last_day_weights 读取)
+    weight_meta = weight_config.get("meta", {}).get("weight_meta", {})
+    last_day_weights = weight_meta.get("last_day_weights", {})
+
+    # 映射因子逻辑名→列名
+    name_to_col = {v: k for k, v in FACTOR_COL_TO_NAME_MAP.items()}
+    weights_col_map = {name_to_col.get(k, k): v for k, v in last_day_weights.items()}
+
+    # 股票名称映射
+    stock_name_map = _load_stock_name_map()
+
+    # 构建行数据
+    run_id = str(uuid.uuid4())
+    created_at = datetime.now(timezone.utc)
+
+    # 确定因子列 (从 factor_df 中排除非因子列)
+    exclude = {
+        "date",
+        "asset",
+        "forward_return_1d",
+        "forward_return_3d",
+        "forward_return_5d",
+        "past_return_1d",
+        "return_3d",
+        "return_5d",
+        "return_acceleration_5d",
+        "close",
+        "high",
+        "low",
+        "open",
+        "volume",
+        "amount",
+        "turnover_rate",
+    }
+    factor_cols = [
+        c
+        for c in factor_df.columns
+        if c not in exclude
+        and c.startswith(
+            (
+                "amplitude",
+                "bollinger",
+                "capital",
+                "downside",
+                "industry",
+                "interaction",
+                "ma",
+                "momentum",
+                "near",
+                "price",
+                "rsi",
+                "tail",
+                "turnover",
+                "volume",
+                "amplitude_",
+            )
+        )
+    ]
+
+    rows: list[dict[str, Any]] = []
+    for stock in bottom_stocks:
+        code = stock["code"]
+        composite_value = float(stock["composite_value"])
+        rank = int(stock.get("rank", 0))
+
+        row: dict[str, Any] = {
+            "rank": rank,
+            "code": code,
+            "stock_name": stock_name_map.get(code, ""),
+            "composite_value": composite_value,
+            "composite_score": composite_score,
+            "factor_direction": config.factor_direction,
+            # weight_method 是 Hive 分区键, 不写入 body (与 selection_date 同理)
+            "forward_return_1d": None,  # 次日补写
+            "created_at": created_at,
+            "run_id": run_id,
+        }
+
+        # 因子权重列 (weight_<factor_col>)
+        for fcol, w_val in weights_col_map.items():
+            row[f"weight_{fcol}"] = float(w_val)
+
+        # 因子原始值列 (factor_<factor_col>)
+        if code in factor_df["asset"].values:
+            stock_row = factor_df[factor_df["asset"] == code].iloc[0]
+            for fcol in factor_cols:
+                val = stock_row.get(fcol)
+                row[f"factor_{fcol}"] = float(val) if pd.notna(val) else None
+        else:
+            for fcol in factor_cols:
+                row[f"factor_{fcol}"] = None
+
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+
+    # 显式 schema
+    schema_fields = [
+        pa.field("rank", pa.int16(), nullable=False),
+        pa.field("code", pa.string(), nullable=False),
+        pa.field("stock_name", pa.string(), nullable=True),
+        pa.field("composite_value", pa.float64(), nullable=False),
+        pa.field("composite_score", pa.float64(), nullable=False),
+        pa.field("factor_direction", pa.string(), nullable=False),
+        # weight_method 是 Hive 分区键, 不在 schema 中 (pyarrow 读取时自动注入)
+        pa.field("forward_return_1d", pa.float64(), nullable=True),
+        pa.field("created_at", pa.timestamp("us", tz="UTC"), nullable=False),
+        pa.field("run_id", pa.string(), nullable=False),
+    ]
+    # 动态添加权重列和因子列
+    weight_col_names = [f"weight_{c}" for c in weights_col_map]
+    factor_col_names = [f"factor_{c}" for c in factor_cols]
+    for cn in weight_col_names:
+        schema_fields.append(pa.field(cn, pa.float64(), nullable=True))
+    for cn in factor_col_names:
+        schema_fields.append(pa.field(cn, pa.float64(), nullable=True))
+
+    schema = pa.schema(schema_fields)
+
+    # 写入: 双分区 weight_method/selection_date
+    dataset_root = Path(LR_TRAINING_DATA_DIR)
+    partition_dir = dataset_root / f"weight_method={weight_method}" / f"selection_date={selection_date}"
+
+    try:
+        table = pa.Table.from_pandas(df, schema=schema, preserve_index=False)
+    except (pa.ArrowException, ValueError, TypeError) as e:
+        logger.exception("save_lr_training_data: DataFrame → Arrow Table 转换失败")
+        raise RuntimeError(f"save_lr_training_data: schema 转换失败: {type(e).__name__}: {e}") from e
+
+    # file-level metadata
+    existing_meta = table.schema.metadata or {}
+    table = table.replace_schema_metadata(
+        {
+            **existing_meta,
+            b"weight_method": weight_method.encode("utf-8"),
+            b"selection_date": selection_date.encode("utf-8"),
+            b"n_stocks": str(len(rows)).encode("utf-8"),
+            b"factor_cols_json": json.dumps(factor_cols, ensure_ascii=False).encode("utf-8"),
+            b"weight_cols_json": json.dumps(weight_col_names, ensure_ascii=False).encode("utf-8"),
+            b"generated_at": created_at.strftime("%Y-%m-%dT%H:%M:%S%z").encode("utf-8"),
+        }
+    )
+
+    try:
+        partition_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.exception("save_lr_training_data: 创建分区目录失败: %s", partition_dir)
+        raise RuntimeError(f"save_lr_training_data: 创建目录失败: {partition_dir}") from e
+
+    target_path = partition_dir / "part-0.parquet"
+    temp_path = partition_dir / "part-0.parquet.tmp"
+    replaced = False
+    try:
+        pq.write_table(table, temp_path, compression="snappy")
+        os.replace(temp_path, target_path)
+        replaced = True
+    except (pa.ArrowException, OSError) as e:
+        logger.exception("save_lr_training_data: Parquet 写入失败: %s", target_path)
+        raise RuntimeError(f"save_lr_training_data: 写入失败: {target_path}") from e
+    finally:
+        if not replaced:
+            temp_path.unlink(missing_ok=True)
+
+    logger.info(
+        "LR 训练数据已写入: %s (n=%d, 权重列=%d, 因子列=%d, 大小=%.2f KB)",
+        partition_dir,
+        len(rows),
+        len(weight_col_names),
+        len(factor_col_names),
+        target_path.stat().st_size / 1024,
+    )
+    return partition_dir
+
+
+def backfill_forward_return_1d(
+    data_source: str | Path,
+    logger: logging.Logger | None = None,
+) -> int:
+    """v3.10: 补写 lr_training_data 中 forward_return_1d 为 null 的分区.
+
+    流程:
+    1. 扫描 lr_training_data 下所有 weight_method/selection_date 分区
+    2. 找到 forward_return_1d 为 null 的分区
+    3. 从 data_source 读取次日 forward_return_1d
+    4. 原子覆盖回写
+
+    Returns:
+        补写的行数
+    """
+    if logger is None:
+        logger = _logger
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from paths import LR_TRAINING_DATA_DIR
+
+    dataset_root = Path(LR_TRAINING_DATA_DIR)
+    if not dataset_root.exists():
+        logger.info("backfill: lr_training_data 目录不存在, 跳过")
+        return 0
+
+    # 扫描所有分区
+    total_backfilled = 0
+    for wm_dir in sorted(dataset_root.iterdir()):
+        if not wm_dir.is_dir() or not wm_dir.name.startswith("weight_method="):
+            continue
+        weight_method = wm_dir.name.replace("weight_method=", "")
+
+        for date_dir in sorted(wm_dir.iterdir()):
+            if not date_dir.is_dir() or not date_dir.name.startswith("selection_date="):
+                continue
+            selection_date = date_dir.name.replace("selection_date=", "")
+            parquet_path = date_dir / "part-0.parquet"
+            if not parquet_path.exists():
+                continue
+
+            # 读取现有数据
+            try:
+                table = pq.read_table(parquet_path)
+                df = table.to_pandas()
+            except (OSError, ValueError) as e:
+                logger.warning("backfill: 读取 %s 失败: %s", parquet_path, e)
+                continue
+
+            # 检查是否需要补写
+            if "forward_return_1d" not in df.columns:
+                continue
+            null_mask = df["forward_return_1d"].isna()
+            if not null_mask.any():
+                continue  # 已补写
+
+            # 从 data_source 读取次日 forward_return_1d
+            try:
+                full_df = pd.read_parquet(
+                    data_source,
+                    columns=["date", "asset", "forward_return_1d"],
+                )
+                # 次日数据: selection_date 的 forward_return_1d 就是 T+1 收益
+                next_day_data = full_df[
+                    full_df["date"].apply(lambda d: pd.Timestamp(d).strftime("%Y-%m-%d")) == selection_date
+                ]
+                code_to_ret = dict(zip(next_day_data["asset"], next_day_data["forward_return_1d"], strict=True))
+
+                # 补写
+                for idx in df[null_mask].index:
+                    code = df.loc[idx, "code"]
+                    if code in code_to_ret:
+                        ret = code_to_ret[code]
+                        df.loc[idx, "forward_return_1d"] = float(ret) if pd.notna(ret) else None
+
+                # 仍为 null 的说明次日数据不可用 (可能是最新一天, 还没 T+1)
+                still_null = df["forward_return_1d"].isna().sum()
+                if still_null == len(df):
+                    logger.debug("backfill: %s/%s 次日数据不可用, 跳过", weight_method, selection_date)
+                    continue
+
+                # 原子覆盖回写
+                schema = table.schema
+                new_table = pa.Table.from_pandas(df, schema=schema, preserve_index=False)
+                temp_path = parquet_path.parent / "part-0.parquet.tmp"
+                pq.write_table(new_table, temp_path, compression="snappy")
+                os.replace(temp_path, parquet_path)
+
+                backfilled = int(len(df) - still_null - (~null_mask).sum())
+                total_backfilled += backfilled
+                logger.info(
+                    "backfill: %s/%s 补写 %d 行 (剩余 %d 行无次日数据)",
+                    weight_method,
+                    selection_date,
+                    backfilled,
+                    still_null,
+                )
+            except (OSError, ValueError, KeyError) as e:
+                logger.warning("backfill: %s/%s 失败: %s", weight_method, selection_date, e)
+                continue
+
+    if total_backfilled > 0:
+        logger.info("backfill: 共补写 %d 行 forward_return_1d", total_backfilled)
+    return total_backfilled
 
 
 def select_stocks(

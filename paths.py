@@ -38,6 +38,11 @@ COMPREHENSIVE_FACTOR_RESULT = PROJECT_ROOT / "comprehensive_factor" / "result"
 SUMMARY_RESULT = PROJECT_ROOT / "summary" / "result"
 REVERSE_DISCOVERY_RESULT = PROJECT_ROOT / "reverse_discovery" / "result"
 
+# LR 训练数据 (Hive 双分区 Parquet: weight_method × selection_date, v3.10)
+# 来源: stock_selector 每次 pipeline 运行时保存 Bottom90 + 因子权重 + 因子值
+# 用途: calibrate_lr_filter 训练样本 (训练分布 = 应用分布, 第一性原理)
+LR_TRAINING_DATA_DIR = COMPREHENSIVE_FACTOR_RESULT / "lr_training_data"
+
 # ============================================================================
 # 统一数据源（单一来源原则）
 # ============================================================================
@@ -113,6 +118,7 @@ __all__ = [
     "COMPREHENSIVE_FACTOR_RESULT",
     "SUMMARY_RESULT",
     "REVERSE_DISCOVERY_RESULT",
+    "LR_TRAINING_DATA_DIR",
     "FACTOR_IC_DATA",
     "MARKET_CAP_DATA",
     "RETURN_DATA_BACKUP",
