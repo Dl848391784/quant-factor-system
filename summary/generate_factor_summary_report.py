@@ -2258,6 +2258,87 @@ def _compute_factor_concentration(
     return sorted(anomalies, key=lambda x: x["concentration_ratio"], reverse=True)
 
 
+def _generate_lr_training_status() -> list[str]:
+    """v3.10: 读取 lr_training_data 状态, 展示训练数据积累进度.
+
+    展示内容:
+    - 训练数据天数 / 目标 90 天
+    - forward_return_1d 已补写比例
+    - 各 weight_method 的天数分布
+    - 如果 ≥90 天, 尝试运行 calibrate_lr_filter 并展示 OOS AUC
+    """
+    import pyarrow.dataset as ds
+
+    logger = setup_logger()
+    lines: list[str] = []
+    lr_dir = PROJECT_ROOT / "comprehensive_factor" / "result" / "lr_training_data"
+    if not lr_dir.exists():
+        lines.append("【LR 训练数据状态】")
+        lines.append("  训练数据: 尚未积累 (lr_training_data 目录不存在)")
+        lines.append("  过滤状态: 未启用 (需积累 90 天)")
+        return lines
+
+    # 读取所有分区
+    try:
+        dataset = ds.dataset(lr_dir, partitioning="hive")
+        df = dataset.to_table(columns=["forward_return_1d", "selection_date", "weight_method"]).to_pandas()
+    except Exception:
+        lines.append("【LR 训练数据状态】")
+        lines.append("  训练数据: 读取失败")
+        return lines
+
+    if df.empty:
+        lines.append("【LR 训练数据状态】")
+        lines.append("  训练数据: 空")
+        return lines
+
+    lines.append("【LR 训练数据状态 (v3.10)】")
+
+    # 按 weight_method 统计
+    for wm in sorted(df["weight_method"].unique()):
+        wm_df = df[df["weight_method"] == wm]
+        n_days = wm_df["selection_date"].nunique()
+        n_rows = len(wm_df)
+        n_with_ret = wm_df["forward_return_1d"].notna().sum()
+        pct_ret = n_with_ret / n_rows * 100 if n_rows > 0 else 0
+
+        status = "✓ 可训练" if n_days >= 90 else f"积累中 ({n_days}/90 天)"
+        lines.append(f"  {wm}: {n_days} 天, {n_rows} 行, T+1 已补写 {pct_ret:.0f}% [{status}]")
+
+    # 总体状态
+    total_days = df.groupby("weight_method")["selection_date"].nunique().max()
+    if total_days >= 90:
+        lines.append("  过滤状态: ✓ 可启用 (set enable_overheat_filter=True)")
+        # 尝试训练并展示 OOS AUC
+        try:
+            from comprehensive_factor.stock_selector import StockSelectorConfig, calibrate_lr_filter
+
+            config = StockSelectorConfig()
+            for wm in sorted(df["weight_method"].unique()):
+                model, scaler, features, auc = calibrate_lr_filter(
+                    lr_dir,
+                    weight_method=wm,
+                    top_n=config.top_n,
+                    n_features=config.lr_top_features,
+                    train_window=config.lr_train_window,
+                    min_oos_auc=config.lr_min_oos_auc,
+                    min_training_days=config.lr_min_training_days,
+                    filter_quantile=config.lr_filter_quantile,
+                    logger=logger,
+                )
+                if model is not None:
+                    lines.append(f"  {wm} OOS AUC: {auc:.3f} ✓ (≥{config.lr_min_oos_auc}, {len(features)} 特征)")
+                else:
+                    lines.append(f"  {wm} OOS AUC: {auc:.3f} ✗ (< {config.lr_min_oos_auc}, 跳过过滤)")
+        except Exception as e:
+            lines.append(f"  (LR 训练验证失败: {e})")
+    else:
+        remaining = 90 - total_days
+        lines.append(f"  过滤状态: 未启用 (还需 {remaining} 天)")
+
+    return lines
+
+
 def _generate_stock_selection_section(
     stock_result: dict | None,
     comp_weights: dict[str, float] | None = None,
@@ -2344,19 +2425,29 @@ def _generate_stock_selection_section(
 
     lines.append("")
 
-    # === v3.9: Bottom30 过热过滤轨迹展示 (替代 v3.7 Stage 1/2/3 三段) ===
-    # v3.9: Top30 的 Stage 2/3 废弃, 改为 Bottom30 过热过滤.
-    # 展示: Stage 1 (composite 降序 Top 30, 候选池记录) + Bottom30 原始 + Bottom30 过热过滤后最终短名单.
+    # === v3.10: Bottom90 选股轨迹展示 ===
+    # v3.10: LR 过滤需积累 90 天训练数据, 当前冷启动阶段不过滤.
+    # 展示: Stage 1 (composite 降序 Top 30, 候选池记录) + Bottom90 原始 + 最终短名单.
     stage1_top = stock_result.get("stage1_top", []) or []
     stage1_bottom = stock_result.get("stage1_bottom", []) or []
 
+    # v3.10: LR 训练数据状态展示
+    lr_status_lines = _generate_lr_training_status()
+    if lr_status_lines:
+        lines.extend(lr_status_lines)
+        lines.append("")
+
     if stage1_top or stage1_bottom:
-        lines.append("【选股轨迹 (v3.9: Bottom30 过热过滤)】")
+        excluded_by_overheat = meta.get("excluded_by_overheat", 0)
+        filter_status = (
+            f"LR 过滤排除 {excluded_by_overheat} 只" if excluded_by_overheat else "LR 过滤未启用 (积累训练数据中)"
+        )
+        lines.append("【选股轨迹 (v3.10: Bottom90 LR 过滤)】")
         lines.append(f"  Stage 1: 综合因子值降序取 Top {meta.get('stage1_pool_size', 200)} 作为候选池 (基础设施)")
         lines.append(
-            f"  Bottom30: 综合因子值升序取最低 {meta.get('top_n', 0) * 2} → 过热过滤 → Top {meta.get('top_n', 0)} 最终短名单"
+            f"  Bottom90: 综合因子值升序取最低 {meta.get('top_n', 0) * 3} → {filter_status} → Top {meta.get('top_n', 0)} 最终短名单"
         )
-        lines.append("  说明: 最终短名单按综合因子值升序(composite 最低=强势股), 过热股票(高换手+放量)被排除并递补.")
+        lines.append("  说明: 最终短名单按综合因子值升序(composite 最低=弱势股端), LR 模型预测 T+1 跌概率最高的排除.")
         lines.append("")
 
         # Stage 1 简表: composite 降序 Top 30 (弱势股端, 仅供记录)
@@ -2373,12 +2464,12 @@ def _generate_stock_selection_section(
             lines.append("-" * 50)
             lines.append("")
 
-        # Bottom30 原始简表 (过热过滤前)
+        # Bottom90 原始简表 (LR 过滤前)
         if stage1_bottom:
             excluded_by_overheat = meta.get("excluded_by_overheat", 0)
-            overheat_note = f" (过热过滤排除 {excluded_by_overheat} 只)" if excluded_by_overheat else ""
+            overheat_note = f" (LR 过滤排除 {excluded_by_overheat} 只)" if excluded_by_overheat else ""
             lines.append(
-                f"【Bottom {len(stage1_bottom)}: 综合因子值最低 (composite 升序, 强势股端, 过热过滤前{overheat_note})】"
+                f"【Bottom {len(stage1_bottom)}: 综合因子值最低 (composite 升序, 弱势股端, LR 过滤前{overheat_note})】"
             )
             lines.append(f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12}")
             lines.append("-" * 50)
@@ -2391,7 +2482,7 @@ def _generate_stock_selection_section(
             lines.append("-" * 50)
             lines.append("")
 
-        lines.append(f"【最终短名单 Top {meta.get('top_n', 0)} (Bottom30 过热过滤后)】")
+        lines.append(f"【最终短名单 Top {meta.get('top_n', 0)} (Bottom90 LR 过滤后)】")
         lines.append("")
 
     # Top N 股票表格 (v3.9: 即 Bottom30 过热过滤后短名单)

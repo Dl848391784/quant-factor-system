@@ -1572,7 +1572,7 @@ class TestLoadStockSelectionParquet:
         assert mod.load_stock_selection_result(logger) is None
 
     def test_render_section_includes_stage1_and_stage2(self, tmp_path, monkeypatch, populated_dataset):
-        """_generate_stock_selection_section 应渲染 Stage 1 + Bottom30 + 最终短名单 (v3.9)."""
+        """_generate_stock_selection_section 应渲染 Stage 1 + Bottom + 最终短名单 (v3.10)."""
         import summary.generate_factor_summary_report as mod
 
         monkeypatch.setattr(mod, "PROJECT_ROOT", populated_dataset.parent.parent)
@@ -1586,9 +1586,9 @@ class TestLoadStockSelectionParquet:
 
         lines = mod._generate_stock_selection_section(result, {}, None)
         text = "\n".join(lines)
-        assert "选股轨迹 (v3.9: Bottom30 过热过滤)" in text
+        assert "选股轨迹 (v3.10: Bottom90 LR 过滤)" in text
         assert "Stage 1: 综合因子值 Top 3" in text
-        assert "过热过滤后" in text
+        assert "LR 过滤后" in text
         # Stage 1 第一名股票代码必须出现在 Stage 1 段
         assert "600001" in text
 
