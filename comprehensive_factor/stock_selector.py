@@ -44,7 +44,6 @@ Step 7: 股票选股 (stock_selector.py) ← 本脚本
 """
 
 import copy
-import gc
 import json
 import logging
 import os
@@ -74,7 +73,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from comprehensive_factor.common.convert_types import convert_to_native_types  # noqa: E402
 from comprehensive_factor.common.factor_loader import (  # noqa: E402
     load_factor_values,
-    load_full_data,
     load_ic_daily,
     load_ic_results,
     standardize_factors,
@@ -932,39 +930,46 @@ def _discover_features(
 
 
 def calibrate_lr_filter(
-    data_source: str | Path,
-    top_n: int,
-    n_features: int,
-    train_window: int,
-    min_oos_auc: float,
-    filter_quantile: float,
+    training_data_dir: str | Path,
+    weight_method: str,
+    top_n: int = 30,
+    n_features: int = 10,
+    train_window: int = 120,
+    min_oos_auc: float = 0.55,
+    min_training_days: int = 90,
+    filter_quantile: float = 0.3,
     logger: logging.Logger | None = None,
 ) -> tuple["LogisticRegression | None", "StandardScaler | None", list[str], float]:
-    """v3.9.2: 每次运行时训练 LR 模型, walk-forward 验证 OOS 效果.
+    """v3.10: 从 lr_training_data 读取训练样本, 训练 LR 模型.
 
-    自包含: 从 data_source 加载全历史数据 (含 forward_return_1d),
-    用 return_5d 选 Bottom30 (强势股代理), 不依赖调用方传入 factor_df.
+    与 v3.9.2 的根本区别:
+    - 训练样本来自 lr_training_data (真实 Bottom90), 不再用 return_5d 代理
+    - 训练分布 = 应用分布 (第一性原理)
+    - 需要检查训练天数 ≥ min_training_days, 不足则返回 None
+    - forward_return_1d 为 null 的行跳过 (T+1 未补写)
 
     流程:
-    1. 从 data_source 加载全历史数据
-    2. 每日用 return_5d 降序取 top_n 作为 Bottom30 (强势股端)
-    3. 扫描所有特征, Cohen's d 选 top N (数据驱动, 非人工)
-    4. Walk-forward 验证: 滚动 train_window 天训练, 预测下一天, 计算 OOS AUC
-    5. 用全样本训练最终模型
-    6. 如果 OOS AUC < min_oos_auc, 返回 None (跳过过滤)
+    1. 从 training_data_dir 读取 weight_method 分区下所有 selection_date
+    2. 过滤 forward_return_1d 非 null 的行
+    3. 检查有效天数 ≥ min_training_days
+    4. _discover_features: Cohen's d 选 top N (样本来自真实 Bottom90)
+    5. Walk-forward OOS 验证
+    6. 全样本训练最终模型
 
     Args:
-        data_source: 统一数据源路径 (factor_ic_data.parquet/json.gz).
-        top_n: Bottom N (与选股逻辑一致, 默认 30).
+        training_data_dir: lr_training_data 根目录.
+        weight_method: 权重方式 (如 'equal_weight').
+        top_n: Bottom N (用于日志, 默认 30).
         n_features: top N 特征数 (Cohen's d 排序).
         train_window: walk-forward 训练窗口天数.
         min_oos_auc: OOS AUC 门槛.
-        filter_quantile: 排除底 N% (用于日志, 实际排除在 apply_lr_filter 中执行).
+        min_training_days: 最小训练天数, 不足返回 None.
+        filter_quantile: 排除底 N% (用于日志).
         logger: 日志对象.
 
     Returns:
         (model, scaler, selected_features, oos_auc).
-        如果 OOS 验证不通过, 返回 (None, None, [], 0.0).
+        如果训练数据不足或 OOS 验证不通过, 返回 (None, None, [], 0.0).
     """
     if logger is None:
         logger = _logger
@@ -973,63 +978,67 @@ def calibrate_lr_filter(
     from sklearn.metrics import roc_auc_score
     from sklearn.preprocessing import StandardScaler
 
-    # 1) 加载全历史数据 (含 forward_return_1d, return_5d, 所有特征列)
-    logger.info("LR 校准: 加载全历史数据 (%s)...", data_source)
-    full_df = load_full_data(data_source=data_source, logger=logger)
-
-    required_cols = {"date", "asset", "return_5d", "forward_return_1d"}
-    missing = required_cols - set(full_df.columns)
-    if missing:
-        logger.warning("LR 校准: 数据源缺少列 %s, 跳过过滤", missing)
+    # 1) 从 lr_training_data 读取训练样本
+    wm_dir = Path(training_data_dir) / f"weight_method={weight_method}"
+    if not wm_dir.exists():
+        logger.info("LR 校准: 训练数据目录不存在 (%s), 跳过过滤", wm_dir)
         return None, None, [], 0.0
 
-    # 确定特征列 (排除非特征列)
-    exclude = {
-        "date",
-        "asset",
-        "forward_return_1d",
-        "forward_return_3d",
-        "forward_return_5d",
-        "is_untradeable",
-        "return_5d",  # return_5d 用作 Bottom30 选择, 不作为特征
-    }
-    feature_cols = [
-        c for c in full_df.columns if c not in exclude and full_df[c].dtype in ("float64", "float32", "int64", "int32")
-    ]
+    # 读取所有 selection_date 分区
+    import pyarrow.dataset as ds
 
-    # 2) 每日取 return_5d 降序 top_n (Bottom30 = 强势股端)
-    df = full_df.dropna(subset=["return_5d", "forward_return_1d"]).copy()
+    dataset = ds.dataset(wm_dir, partitioning="hive")
+    bottom_df = dataset.to_table().to_pandas()
 
-    bottom_samples = []
-    for _date, group in df.groupby("date"):
-        if len(group) >= top_n:
-            bottom_samples.append(group.nlargest(top_n, "return_5d"))
+    if bottom_df.empty:
+        logger.info("LR 校准: 训练数据为空 (%s), 跳过过滤", weight_method)
+        return None, None, [], 0.0
 
-    if len(bottom_samples) < train_window + 10:
-        logger.warning(
-            "LR 校准: 历史样本不足 (%d 天 < %d+10), 跳过过滤",
-            len(bottom_samples),
-            train_window,
+    # 过滤 forward_return_1d 非 null 的行 (T+1 已补写)
+    bottom_df = bottom_df.dropna(subset=["forward_return_1d"]).copy()
+
+    if bottom_df.empty:
+        logger.info("LR 校准: 无已补写 forward_return_1d 的样本, 跳过过滤")
+        return None, None, [], 0.0
+
+    # 检查训练天数
+    if "selection_date" not in bottom_df.columns:
+        logger.warning("LR 校准: 训练数据缺少 selection_date 列, 跳过过滤")
+        return None, None, [], 0.0
+
+    dates = sorted(bottom_df["selection_date"].unique())
+    n_valid_days = len(dates)
+
+    if n_valid_days < min_training_days:
+        logger.info(
+            "LR 校准: 训练天数 %d < 门槛 %d, 跳过过滤 (积累中)",
+            n_valid_days,
+            min_training_days,
         )
         return None, None, [], 0.0
 
-    bottom_df = pd.concat(bottom_samples, ignore_index=True)
-    dates = sorted(bottom_df["date"].unique())
-    logger.info("LR 校准: %d 天 Bottom30 样本, %d 条记录", len(dates), len(bottom_df))
+    logger.info(
+        "LR 校准: %d 天训练数据, %d 条记录, weight_method=%s",
+        n_valid_days,
+        len(bottom_df),
+        weight_method,
+    )
 
-    # 释放全历史数据内存 (只保留 Bottom30 子集)
-    del full_df
-    gc.collect()
+    # 确定特征列 (factor_ 前缀的列)
+    feature_cols = [c for c in bottom_df.columns if c.startswith("factor_")]
+    if not feature_cols:
+        logger.warning("LR 校准: 训练数据无 factor_ 前缀列, 跳过过滤")
+        return None, None, [], 0.0
 
-    # 1) 数据驱动特征发现
+    # 2) 数据驱动特征发现
     selected_features = _discover_features(bottom_df, feature_cols, n_features, logger)
 
     if len(selected_features) < 3:
         logger.warning("LR 校准: 有效特征不足 (%d < 3), 跳过过滤", len(selected_features))
         return None, None, [], 0.0
 
-    # 2) Walk-forward OOS 验证
-    date_to_data = {d: bottom_df[bottom_df["date"] == d] for d in dates}
+    # 3) Walk-forward OOS 验证
+    date_to_data = {d: bottom_df[bottom_df["selection_date"] == d] for d in dates}
     oos_aucs: list[float] = []
 
     for i in range(train_window, len(dates)):
@@ -1091,7 +1100,7 @@ def calibrate_lr_filter(
         )
         return None, None, selected_features, mean_auc
 
-    # 3) 用全样本训练最终模型
+    # 4) 用全样本训练最终模型
     X_full = bottom_df[selected_features]
     y_full = (bottom_df["forward_return_1d"] > 0).astype(int)
     full_valid = X_full.notna().all(axis=1)
