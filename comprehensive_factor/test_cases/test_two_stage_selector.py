@@ -256,11 +256,12 @@ class TestStockSelectorConfigTwoStageValidation:
         config = StockSelectorConfig(top_n=30, enable_two_stage=False, stage1_pool_size=10)
         config.validate()  # 不应抛异常
 
-    def test_empty_sort_col_raises(self):
-        """stage2_sort_col 空字符串校验失败."""
-        config = StockSelectorConfig(top_n=30, stage2_sort_col="")
-        with pytest.raises(ValueError, match="stage2_sort_col"):
-            config.validate()
+    def test_overheat_filter_defaults(self):
+        """v3.9: 过热过滤参数默认值校验."""
+        config = StockSelectorConfig()
+        assert config.enable_overheat_filter is True
+        assert config.overheat_turnover_percentile == 0.7
+        assert config.overheat_volume_ratio_threshold == 1.5
 
 
 # ============================================================================

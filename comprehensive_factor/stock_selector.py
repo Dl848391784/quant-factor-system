@@ -135,12 +135,18 @@ class StockSelectorConfig:
 
     # v2.44: 两阶段选股 (designs/feat_two_stage_stock_selector_v244.md)
     # Stage 1: composite 取 Top stage1_pool_size (alpha 仍有效的子池)
-    # Stage 2: 在 Stage 1 候选内按 stage2_sort_col 排序取 top_n*2 (避开线性尾部失效)
-    # Stage 3: 企稳过滤切到 top_n (现有 apply_stabilization_filter 不变)
-    enable_two_stage: bool = True  # v2.44: 默认开启
+    # Stage 2/3: v3.9 废弃——不再对 Top30 做 Stage 2 turnover 重排 + Stage 3 企稳过滤
+    #   原因: 企稳信号在 Layer 5 内部方向反了 (有企稳→T+1 更低), 见 designs/feat_bottom30_overheat_filter.md
+    enable_two_stage: bool = True  # v3.9: Stage 1 候选池逻辑保留
     stage1_pool_size: int = 200  # OOS 最优 (vs Top60 +2.31pp, vs Top300 优于 +10pp)
-    stage2_sort_col: str = "turnover_rate"  # 5 候选 OOS 验证最稳健 (IS→OOS 衰减仅 4pp)
-    stage2_ascending: bool = True  # 升序: 选未被游资关注的冷门弱势股
+    stage2_sort_col: str = "turnover_rate"  # 保留字段, v3.9 不再调用 apply_stage2_resort
+    stage2_ascending: bool = True  # 保留字段, v3.9 不再使用
+
+    # v3.9: Bottom30 过热过滤 (designs/feat_bottom30_overheat_filter.md)
+    # 数据驱动: 过热(高换手+放量)强势股 T+1=-0.31%/天 vs 未过热 +0.55%/天, p<0.0001
+    enable_overheat_filter: bool = True
+    overheat_turnover_percentile: float = 0.7  # 截面 70% 分位 (非硬编码绝对值)
+    overheat_volume_ratio_threshold: float = 1.5  # volume_ratio_5 > 1.5 = 放量
 
     # === 数据路径 ===（问题 4 修复：default_factory 保证延迟求值）
     data_source: Path = field(default_factory=lambda: DEFAULT_DATA_SOURCE)
@@ -170,15 +176,22 @@ class StockSelectorConfig:
         if self.factor_direction not in ("positive", "negative"):
             raise ValueError(f"factor_direction 必须为 'positive' 或 'negative'，当前: {self.factor_direction}")
 
-        # v2.44: 两阶段配置校验
-        if self.enable_two_stage:
-            if self.stage1_pool_size <= self.top_n * 2:
+        # v2.44: Stage 1 候选池校验 (v3.9: Stage 2/3 废弃, 仅保留 Stage 1)
+        if self.enable_two_stage and self.stage1_pool_size <= self.top_n * 2:
+            raise ValueError(
+                f"stage1_pool_size ({self.stage1_pool_size}) 必须 > top_n*2 ({self.top_n * 2})，否则候选池过小"
+            )
+
+        # v3.9: 过热过滤参数校验
+        if self.enable_overheat_filter:
+            if not 0 < self.overheat_turnover_percentile < 1:
                 raise ValueError(
-                    f"stage1_pool_size ({self.stage1_pool_size}) 必须 > top_n*2 ({self.top_n * 2})"
-                    "，否则两阶段退化为单阶段"
+                    f"overheat_turnover_percentile 必须在 (0, 1) 区间, 当前: {self.overheat_turnover_percentile}"
                 )
-            if not isinstance(self.stage2_sort_col, str) or not self.stage2_sort_col:
-                raise ValueError(f"stage2_sort_col 必须为非空字符串，当前: {self.stage2_sort_col!r}")
+            if self.overheat_volume_ratio_threshold <= 0:
+                raise ValueError(
+                    f"overheat_volume_ratio_threshold 必须大于 0, 当前: {self.overheat_volume_ratio_threshold}"
+                )
 
 
 # ============================================================================
@@ -863,6 +876,129 @@ def apply_stabilization_filter(
     return filtered[:top_n], excluded
 
 
+def apply_overheat_filter(
+    bottom_stocks: list[dict[str, Any]],
+    factor_df: pd.DataFrame,
+    top_n: int,
+    turnover_percentile: float = 0.7,
+    volume_ratio_threshold: float = 1.5,
+    logger: logging.Logger | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    """Bottom30 过热过滤 (v3.9, designs/feat_bottom30_overheat_filter.md)
+
+    在 Bottom30（强势股, composite 最低端）中排除"过热"股票。
+    过热 = 高换手率(截面 70%+) AND 放量(volume_ratio_5 > 1.5)。
+    被排除的股票从 Bottom31+ 递补, 保持 top_n 数量。
+
+    数据驱动 (548 日全样本, 15531 条 Bottom30 记录):
+        过热: T+1 = -0.31%/天 (年化 -78%), 胜率 42.6%
+        未过热: T+1 = +0.55%/天 (年化 +139%), 胜率 47.6%
+        差异 0.86%/天, p < 0.0001
+
+    Args:
+        bottom_stocks: composite 升序最低 N 只 (含 code 字段)
+        factor_df: 当日因子+行情 DataFrame (含 asset, turnover_rate, volume_ratio_5 列)
+        top_n: 最终输出数量
+        turnover_percentile: 换手率截面分位阈值 (默认 0.7 = 70%)
+        volume_ratio_threshold: volume_ratio_5 阈值 (默认 1.5)
+        logger: 日志对象
+
+    Returns:
+        (filtered_stocks, excluded_count)
+    """
+    if logger is None:
+        logger = _logger
+
+    required_cols = ["turnover_rate", "volume_ratio_5"]
+    available_cols = [c for c in required_cols if c in factor_df.columns]
+
+    if len(available_cols) < 2:
+        logger.info(
+            "过热过滤: turnover_rate/volume_ratio_5 不可用 (%s), 跳过过滤",
+            available_cols,
+        )
+        return bottom_stocks[:top_n], 0
+
+    asset_index = factor_df.set_index("asset") if "asset" in factor_df.columns else factor_df
+
+    # 计算当日换手率截面分位阈值
+    turnover_series = factor_df["turnover_rate"].dropna()
+    if len(turnover_series) == 0:
+        logger.info("过热过滤: turnover_rate 全部为 NaN, 跳过过滤")
+        return bottom_stocks[:top_n], 0
+
+    turnover_threshold = float(turnover_series.quantile(turnover_percentile))
+    logger.info(
+        "过热过滤: 换手率 %.0f%% 分位阈值=%.4f, volume_ratio_5 阈值=%.1f",
+        turnover_percentile * 100,
+        turnover_threshold,
+        volume_ratio_threshold,
+    )
+
+    filtered: list[dict[str, Any]] = []
+    excluded = 0
+    for stock in bottom_stocks:
+        if len(filtered) >= top_n:
+            break
+
+        code = stock["code"]
+        row = asset_index.loc[code] if code in asset_index.index else None
+        if row is None:
+            filtered.append(stock)
+            continue
+
+        # 处理同 code 多行边界（理论上单日唯一, 但保险）
+        if isinstance(row, pd.DataFrame):
+            row = row.iloc[0]
+
+        turnover = float(row.get("turnover_rate", np.nan))
+        vol_ratio = float(row.get("volume_ratio_5", np.nan))
+
+        # 数据不可用 → 不过滤
+        if pd.isna(turnover) or pd.isna(vol_ratio):
+            filtered.append(stock)
+            continue
+
+        # 过热条件: 高换手 AND 放量 (两个条件同时满足才排除)
+        is_overheated = float(turnover) > turnover_threshold and float(vol_ratio) > volume_ratio_threshold
+
+        if is_overheated:
+            excluded += 1
+            logger.debug(
+                "过热过滤排除: %s (换手率=%.4f > %.4f, vol_ratio_5=%.2f > %.1f)",
+                code,
+                float(turnover),
+                turnover_threshold,
+                float(vol_ratio),
+                volume_ratio_threshold,
+            )
+        else:
+            filtered.append(stock)
+
+    # 不足 top_n 时用被排除的股票递补 (与 apply_stabilization_filter 一致)
+    if len(filtered) < top_n:
+        filtered_codes = {s["code"] for s in filtered}
+        for stock in bottom_stocks:
+            if len(filtered) >= top_n:
+                break
+            if stock["code"] not in filtered_codes:
+                stock["overheat_warning"] = True
+                filtered.append(stock)
+
+    # 重新编号 rank
+    for idx, stock in enumerate(filtered[:top_n], start=1):
+        stock["rank"] = idx
+
+    logger.info(
+        "过热过滤: 候选 %d → 通过 %d, 排除 %d",
+        len(bottom_stocks),
+        min(len(filtered), top_n),
+        excluded,
+    )
+
+    return filtered[:top_n], excluded
+
+
 def build_result(
     top_stocks: list[dict[str, Any]],
     config: StockSelectorConfig,
@@ -876,7 +1012,8 @@ def build_result(
     excluded_by_amplitude: int = 0,  # v1.12: 振幅过滤排除数
     excluded_by_coverage: int = 0,  # v1.15: 覆盖率过滤排除数
     excluded_by_liquidity: int = 0,  # v2.40: 流动性过滤排除数
-    excluded_by_confirmation: int = 0,  # v2.35: P6 企稳确认过滤排除数
+    excluded_by_confirmation: int = 0,  # v2.35: P6 企稳确认过滤排除数 (v3.9: 恒为 0)
+    excluded_by_overheat: int = 0,  # v3.9: Bottom30 过热过滤排除数
     excluded_by_filter: dict[str, int] | None = None,  # v2.41 (R3): filter 角色排除数
     min_weight_coverage: float = 0.5,  # v1.15: 覆盖率阈值
     logger: logging.Logger | None = None,
@@ -932,8 +1069,10 @@ def build_result(
             "min_weight_coverage": min_weight_coverage,
             # v2.40: 流动性过滤信息（成交额截面分位过滤）
             "excluded_by_liquidity": excluded_by_liquidity,
-            # v2.35: P6 企稳确认过滤信息
+            # v2.35: P6 企稳确认过滤信息 (v3.9: 恒为 0)
             "excluded_by_confirmation": excluded_by_confirmation,
+            # v3.9: Bottom30 过热过滤信息
+            "excluded_by_overheat": excluded_by_overheat,
             # v2.41 (R3): filter 角色硬过滤信息
             "excluded_by_filter": excluded_by_filter or {},
         },
@@ -1150,6 +1289,7 @@ def write_selection_history(
         b"excluded_by_coverage": str(exclusion_stats.get("excluded_by_coverage", 0)).encode("utf-8"),
         b"excluded_by_liquidity": str(exclusion_stats.get("excluded_by_liquidity", 0)).encode("utf-8"),
         b"excluded_by_confirmation": str(exclusion_stats.get("excluded_by_confirmation", 0)).encode("utf-8"),
+        b"excluded_by_overheat": str(exclusion_stats.get("excluded_by_overheat", 0)).encode("utf-8"),  # v3.9
         b"excluded_by_filter": json.dumps(exclusion_stats.get("excluded_by_filter") or {}, ensure_ascii=False).encode(
             "utf-8"
         ),
@@ -1467,140 +1607,112 @@ def select_stocks(
         name_to_col = dict(zip(factor_list, factor_cols))
         selection_weights = {name_to_col.get(k, k): v for k, v in selection_weights.items()}
 
-    # v2.35: P6 企稳确认过滤——候选池翻倍，为过滤预留递补空间
-    # v2.44: 两阶段选股 (designs/feat_two_stage_stock_selector_v244.md)
-    #   Stage 1: composite Top stage1_pool_size (alpha 仍有效的子池, 默认 200)
-    #   Stage 2: 在 Stage 1 内按 stage2_sort_col 排序取 top_n*2 (避开线性尾部失效)
-    #   Stage 3: apply_stabilization_filter 切到 top_n (现有不变)
-    # v3.7: stage1_top_snapshot / stage2_top_snapshot 用于 write_selection_history (Parquet 归档)
-    # 见 designs/feat_stock_selection_history_parquet.md §3.1
+    # v3.9: Bottom30 过热过滤 (designs/feat_bottom30_overheat_filter.md)
+    #   Stage 1: composite Top stage1_pool_size (保留, 候选池基础设施)
+    #   Stage 2/3: 废弃——不再对 Top30 做 turnover 重排 + 企稳过滤
+    #   Bottom30: composite 升序取最低 top_n*2 → 过热过滤 → top_n (最终短名单)
     stage1_top_snapshot: list[dict[str, Any]] = []
-    stage2_top_snapshot: list[dict[str, Any]] = []
+    stage2_top_snapshot: list[dict[str, Any]] = []  # v3.9: 不再使用, 保留为空
     stage1_bottom_snapshot: list[dict[str, Any]] = []
+    excluded_by_confirmation = 0  # v3.9: 企稳过滤废弃, 恒为 0
+    excluded_by_overheat = 0  # v3.9: 过热过滤排除数
 
-    if config.enable_two_stage:
-        stage1_n = config.stage1_pool_size
-        logger.info(
-            "两阶段选股 (v2.44) | Stage 1: composite Top %d → Stage 2: %s %s Top %d → Stage 3: 企稳过滤 → Top %d",
-            stage1_n,
-            config.stage2_sort_col,
-            "升序" if config.stage2_ascending else "降序",
-            config.top_n * 2,
-            config.top_n,
-        )
-        stage1_stocks, excluded_by_amplitude, excluded_by_coverage, excluded_by_liquidity = sort_and_select(
-            composite_factor,
-            factor_df,
-            stage1_n,
-            config.factor_direction,
-            factor_cols,
-            weights=selection_weights,
-            min_amplitude=config.min_amplitude,
-            enable_liquidity_filter=config.enable_liquidity_filter,
-            min_amount_percentile=config.min_amount_percentile,
-            logger=logger,
-        )
-        # v3.7: 捕获 Stage 1 Top 30 快照 (拷贝, 避免后续 apply_stage2_resort mutate rank/stage1_rank)
-        # 见 designs/feat_stock_selection_history_parquet.md §3.1
-        stage1_top_snapshot = [copy.deepcopy(s) for s in stage1_stocks[: config.top_n]]
-        # v3.8: 捕获全市场 composite 最低 30 只 (用于报告展示两端分布)
-        # 注意: 不是 stage1_stocks[-30:]——那是 Top 200 候选池的倒数, 全是正值
-        # 用户需要看到全市场 composite 最低的股票 (如 603261=-2.34)
-        # designs/feat_report_bottom30.md
-        valid_cf = composite_factor.dropna()
-        if len(valid_cf) > 0:
-            # 升序取最低 30 只 (无论 factor_direction, composite 升序 = 最差)
-            bottom_30 = valid_cf.nsmallest(config.top_n)
-            # rank = 全市场降序排名 (最高=1, 最低=N)
-            full_ranked = valid_cf.sort_values(ascending=False)
-            rank_map = {idx: i + 1 for i, idx in enumerate(full_ranked.index)}
-            stage1_bottom_snapshot = [
-                {
-                    "rank": rank_map[idx],
-                    "code": factor_df.loc[idx, "asset"],
-                    "composite_value": convert_to_native_types(val),
-                }
-                for idx, val in bottom_30.items()
-            ]
+    # Stage 1: composite Top stage1_pool_size (候选池, 保留基础设施)
+    stage1_n = config.stage1_pool_size
+    logger.info("Stage 1: composite Top %d (候选池)", stage1_n)
+    stage1_stocks, excluded_by_amplitude, excluded_by_coverage, excluded_by_liquidity = sort_and_select(
+        composite_factor,
+        factor_df,
+        stage1_n,
+        config.factor_direction,
+        factor_cols,
+        weights=selection_weights,
+        min_amplitude=config.min_amplitude,
+        enable_liquidity_filter=config.enable_liquidity_filter,
+        min_amount_percentile=config.min_amount_percentile,
+        logger=logger,
+    )
+    stage1_top_snapshot = [copy.deepcopy(s) for s in stage1_stocks[: config.top_n]]
 
-        # v2.44: Stage 2 排序列可能不在 standardize 后的 factor_df 中 (如 turnover_rate)
-        # 需要从原始数据源 (factor_ic_data.parquet) 加载并对齐到 selection_date
-        factor_df_for_stage2 = factor_df
-        if config.stage2_sort_col not in factor_df.columns:
+    # v3.9: Bottom30 过热过滤候选池 (composite 升序 top_n*2, 留递补空间)
+    valid_cf = composite_factor.dropna()
+    if len(valid_cf) > 0:
+        bottom_candidates = valid_cf.nsmallest(config.top_n * 2)
+        full_ranked = valid_cf.sort_values(ascending=False)
+        rank_map = {idx: i + 1 for i, idx in enumerate(full_ranked.index)}
+        bottom_pool = [
+            {
+                "rank": rank_map[idx],
+                "code": factor_df.loc[idx, "asset"],
+                "composite_value": convert_to_native_types(val),
+            }
+            for idx, val in bottom_candidates.items()
+        ]
+        # 原始快照 (过滤前, 前 top_n 只)
+        stage1_bottom_snapshot = [copy.deepcopy(s) for s in bottom_pool[: config.top_n]]
+
+        # v3.9: 加载过热过滤所需列 (turnover_rate, volume_ratio_5)
+        overheat_aux_cols = ["turnover_rate", "volume_ratio_5"]
+        missing_oh = [c for c in overheat_aux_cols if c not in factor_df.columns]
+        factor_df_for_overheat = factor_df
+        if missing_oh:
+            logger.info("过热过滤: 加载辅助列 %s", missing_oh)
             try:
-                aux_df_raw = load_factor_values([config.stage2_sort_col], config.data_source, logger)
+                aux_df_raw = load_factor_values(missing_oh, config.data_source, logger)
                 aux_df = cast(pd.DataFrame, aux_df_raw)
                 if "date" in aux_df.columns:
                     aux_df = aux_df[aux_df["date"] == selection_date].copy()
-                if config.stage2_sort_col in aux_df.columns:
-                    factor_df_for_stage2 = factor_df.merge(
-                        cast(pd.DataFrame, aux_df[["asset", config.stage2_sort_col]]),
-                        on="asset",
-                        how="left",
-                    )
-                    logger.info(
-                        "Stage 2: 从原始数据源加载 %s 列, %d 只股票获得值",
-                        config.stage2_sort_col,
-                        factor_df_for_stage2[config.stage2_sort_col].notna().sum(),
-                    )
-                else:
-                    logger.warning(
-                        "Stage 2 排序列 %s 不在原始数据源, 将跳过 Stage 2 重排",
-                        config.stage2_sort_col,
-                    )
-            except (FileNotFoundError, KeyError, ValueError) as e:
-                logger.warning(
-                    "Stage 2 排序列 %s 加载失败 (%s), 将跳过 Stage 2 重排",
-                    config.stage2_sort_col,
-                    e,
+                merge_cols = ["asset"] + [c for c in missing_oh if c in aux_df.columns]
+                factor_df_for_overheat = factor_df.merge(cast(pd.DataFrame, aux_df[merge_cols]), on="asset", how="left")
+                logger.info(
+                    "过热过滤: %d 只股票获得 turnover_rate/volume_ratio_5 值",
+                    factor_df_for_overheat["turnover_rate"].notna().sum(),
                 )
-        # Stage 2: 按次级变量重排, 输出 top_n*2 (留给企稳过滤递补)
-        candidate_n = config.top_n * 2
-        top_stocks = apply_stage2_resort(
-            stage1_stocks,
-            factor_df_for_stage2,
-            candidate_n,
-            sort_col=config.stage2_sort_col,
-            ascending=config.stage2_ascending,
-            logger=logger,
-        )
-        # v3.7: 捕获 Stage 2 Top 30 快照 (深拷贝, 避免后续 stabilization filter 重编号 rank)
-        stage2_top_snapshot = [copy.deepcopy(s) for s in top_stocks[: config.top_n]]
-    else:
-        # 单阶段 (v2.44 之前的行为, 用 enable_two_stage=False 退回)
-        candidate_n = config.top_n * 2
-        top_stocks, excluded_by_amplitude, excluded_by_coverage, excluded_by_liquidity = sort_and_select(
-            composite_factor,
-            factor_df,
-            candidate_n,
-            config.factor_direction,
-            factor_cols,
-            weights=selection_weights,
-            min_amplitude=config.min_amplitude,
-            enable_liquidity_filter=config.enable_liquidity_filter,
-            min_amount_percentile=config.min_amount_percentile,
-            logger=logger,
-        )
+            except (FileNotFoundError, KeyError, ValueError) as e:
+                logger.warning("过热过滤: 辅助列加载失败 (%s), 跳过过滤", e)
 
-    # Step 10.5: P6 企稳确认过滤（v2.35）
-    # 公理4推论4: 区分错杀vs基本面恶化需要"是否企稳"信号
-    top_stocks, excluded_by_confirmation = apply_stabilization_filter(
-        top_stocks, factor_df, config.top_n, logger=logger
-    )
+        # v3.9: 过热过滤
+        if config.enable_overheat_filter:
+            logger.info(
+                "Bottom30 过热过滤 (v3.9) | 换手率分位=%.0f%%, volume_ratio_5 阈值=%.1f → Top %d",
+                config.overheat_turnover_percentile * 100,
+                config.overheat_volume_ratio_threshold,
+                config.top_n,
+            )
+            top_stocks, excluded_by_overheat = apply_overheat_filter(
+                bottom_pool,
+                factor_df_for_overheat,
+                config.top_n,
+                turnover_percentile=config.overheat_turnover_percentile,
+                volume_ratio_threshold=config.overheat_volume_ratio_threshold,
+                logger=logger,
+            )
+        else:
+            top_stocks = bottom_pool[: config.top_n]
+
+        # v3.9: top_stocks 即过热过滤后最终短名单 (与 write_selection_history 的 stage3_top 对应)
+    else:
+        top_stocks = []
 
     # Step 10.6: 决策卡片 (v2.43, designs/feat_decision_card_v1.md)
     # 在短名单上叠加 5 维客观字段, 辅助人工决断 (3~5 只持仓)
     # 战略目标 (AGENTS.md): 量化辅助 + 人工决断
-    # 数据准备: 加载决策卡片所需的原始行情/确认信号列（不在 standardize 后的 factor_df 中）
+    # v3.9: 决策卡片辅助列 — 从企稳信号改为过热/趋势确认信号
+    # D1: amplitude, close, high, low, return_5d (涨跌幅/振幅/区间位置)
+    # D2: turnover_rate, volume_ratio_5, amplitude (过热风险)
+    # D3: near_high_ratio_5, bollinger_pb, rsi_6 (趋势确认)
     card_aux_cols = [
         "amplitude",
         "close",
         "high",
         "low",
-        "volume",
-        "volume_shrink_rate",
-        "lower_shadow_ratio",
-        "price_volume_divergence",
+        "return_5d",
+        "turnover_rate",
+        "volume_ratio_5",
+        "near_high_ratio_5",
+        "bollinger_pb",
+        "rsi_6",
+        "volume",  # for amount = close * volume
     ]
     missing_aux = [c for c in card_aux_cols if c not in factor_df.columns]
     factor_df_for_cards = factor_df
@@ -1640,7 +1752,8 @@ def select_stocks(
         excluded_by_amplitude=excluded_by_amplitude,  # v1.12: 振幅过滤排除数
         excluded_by_coverage=excluded_by_coverage,  # v1.15: 覆盖率过滤排除数
         excluded_by_liquidity=excluded_by_liquidity,  # v2.40: 流动性过滤排除数
-        excluded_by_confirmation=excluded_by_confirmation,  # v2.35: P6 企稳过滤排除数
+        excluded_by_confirmation=excluded_by_confirmation,  # v2.35: P6 企稳过滤排除数 (v3.9: 恒为 0)
+        excluded_by_overheat=excluded_by_overheat,  # v3.9: Bottom30 过热过滤排除数
         excluded_by_filter=filter_exclusions,  # v2.41 (R3): filter 角色排除数
         logger=logger,
     )
@@ -1648,18 +1761,21 @@ def select_stocks(
     # Step 12: 写入 Parquet 选股历史 (v3.7, designs/feat_stock_selection_history_parquet.md)
     # 取代 v3.6 之前的 save_result JSON 单文件——Parquet 单一信源, 失败抛异常无兜底
     # 单阶段模式 (enable_two_stage=False) 时 stage1/stage2 快照为 [], 只归档 stage3
+    # v3.9: exclusion_stats 新增 excluded_by_overheat
     exclusion_stats = {
         "excluded_by_amplitude": excluded_by_amplitude,
         "excluded_by_coverage": excluded_by_coverage,
         "excluded_by_liquidity": excluded_by_liquidity,
-        "excluded_by_confirmation": excluded_by_confirmation,
+        "excluded_by_confirmation": excluded_by_confirmation,  # v3.9: 恒为 0
+        "excluded_by_overheat": excluded_by_overheat,  # v3.9: 过热过滤排除数
         "excluded_by_filter": filter_exclusions,
         "min_weight_coverage": 0.5,  # v1.15 阈值, 与 build_result 默认一致
     }
+    # v3.9: stage3_top 不再使用 (Top30 企稳过滤废弃), 改传 bottom_filtered
     partition_dir = write_selection_history(
         stage1_top=stage1_top_snapshot,
-        stage2_top=stage2_top_snapshot,
-        stage3_top=top_stocks,
+        stage2_top=stage2_top_snapshot,  # v3.9: 空
+        stage3_top=top_stocks,  # v3.9: bottom_filtered 过热过滤后短名单
         config=config,
         weight_config=weight_config,
         selection_date=selection_date,
@@ -1670,7 +1786,7 @@ def select_stocks(
         flipped_factors=flipped_factors,
         exclusion_stats=exclusion_stats,
         output_dir=config.output_dir,
-        stage1_bottom=stage1_bottom_snapshot,  # v3.8: Bottom 30
+        stage1_bottom=stage1_bottom_snapshot,  # v3.8: Bottom 30 原始快照 (过滤前)
         logger=logger,
     )
 

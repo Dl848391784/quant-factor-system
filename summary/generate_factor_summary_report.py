@@ -1134,6 +1134,7 @@ def load_stock_selection_result(logger: logging.Logger) -> dict | None:
         "excluded_by_coverage": _meta_int("excluded_by_coverage"),
         "excluded_by_liquidity": _meta_int("excluded_by_liquidity"),
         "excluded_by_confirmation": _meta_int("excluded_by_confirmation"),
+        "excluded_by_overheat": _meta_int("excluded_by_overheat"),  # v3.9
         "excluded_by_filter": _meta_json("excluded_by_filter", {}),
         "stage1_pool_size": int(ref_row["stage1_pool_size"]) if pd.notna(ref_row.get("stage1_pool_size")) else None,
         "stage2_sort_col": str(ref_row["stage2_sort_col"]) if pd.notna(ref_row.get("stage2_sort_col")) else None,
@@ -2343,33 +2344,24 @@ def _generate_stock_selection_section(
 
     lines.append("")
 
-    # === v3.7: Stage 1 / Stage 2 / Stage 3 三段轨迹展示 ===
-    # 设计依据: designs/feat_stock_selection_history_parquet.md §3 (读取侧)
-    # 用户原始诉求 (2026-06-24): "因子 IC>0 应选暴涨股, 但选出来是下跌横盘股" + "选股是否按评分排序"
-    # 根因: v2.44 两阶段选股 Stage 2 按 stage2_sort_col (turnover_rate) 升序重排,
-    #       Stage 3 经企稳过滤后已不按 composite 排序; 旧报告只展示 Stage 3 隐藏了中间轨迹.
-    # 修复: 显式打印 Stage 1 (composite 降序 真高分股) + Stage 2 (turnover 升序后) + Stage 3 (最终短名单).
+    # === v3.9: Bottom30 过热过滤轨迹展示 (替代 v3.7 Stage 1/2/3 三段) ===
+    # v3.9: Top30 的 Stage 2/3 废弃, 改为 Bottom30 过热过滤.
+    # 展示: Stage 1 (composite 降序 Top 30, 候选池记录) + Bottom30 原始 + Bottom30 过热过滤后最终短名单.
     stage1_top = stock_result.get("stage1_top", []) or []
-    stage2_top = stock_result.get("stage2_top", []) or []
+    stage1_bottom = stock_result.get("stage1_bottom", []) or []
 
-    if stage1_top or stage2_top:
-        stage1_pool_size = meta.get("stage1_pool_size")
-        stage2_sort_col = meta.get("stage2_sort_col")
-        stage2_ascending = meta.get("stage2_ascending")
-
-        lines.append("【两阶段选股轨迹】")
-        if stage1_pool_size is not None:
-            lines.append(f"  Stage 1: 综合因子值降序取 Top {stage1_pool_size} 作为候选池")
-        if stage2_sort_col:
-            direction_label = "升序" if stage2_ascending else "降序"
-            lines.append(f"  Stage 2: 候选池按 {stage2_sort_col} {direction_label}重排, 取 Top {meta.get('top_n', 0)}")
-        lines.append(f"  Stage 3: Stage 2 结果经企稳过滤+决策卡, 输出最终 Top {meta.get('top_n', 0)} 短名单")
-        lines.append("  说明: 最终短名单 (Stage 3) 不按综合因子值排序——rank 是 Stage 2 重排后的名次.")
+    if stage1_top or stage1_bottom:
+        lines.append("【选股轨迹 (v3.9: Bottom30 过热过滤)】")
+        lines.append(f"  Stage 1: 综合因子值降序取 Top {meta.get('stage1_pool_size', 200)} 作为候选池 (基础设施)")
+        lines.append(
+            f"  Bottom30: 综合因子值升序取最低 {meta.get('top_n', 0) * 2} → 过热过滤 → Top {meta.get('top_n', 0)} 最终短名单"
+        )
+        lines.append("  说明: 最终短名单按综合因子值升序(composite 最低=强势股), 过热股票(高换手+放量)被排除并递补.")
         lines.append("")
 
-        # Stage 1 简表: 真正按综合因子值排序的"高分股"
+        # Stage 1 简表: composite 降序 Top 30 (弱势股端, 仅供记录)
         if stage1_top:
-            lines.append(f"【Stage 1: 综合因子值 Top {len(stage1_top)} (composite 降序)】")
+            lines.append(f"【Stage 1: 综合因子值 Top {len(stage1_top)} (composite 降序, 弱势股端)】")
             lines.append(f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12}")
             lines.append("-" * 50)
             for item in stage1_top:
@@ -2381,11 +2373,13 @@ def _generate_stock_selection_section(
             lines.append("-" * 50)
             lines.append("")
 
-        # v3.8: 全市场 Bottom 30 简表 (composite 最低的 30 只)
-        # designs/feat_report_bottom30.md
-        stage1_bottom = stock_result.get("stage1_bottom", []) or []
+        # Bottom30 原始简表 (过热过滤前)
         if stage1_bottom:
-            lines.append(f"【全市场: 综合因子值 Bottom {len(stage1_bottom)} (composite 升序)】")
+            excluded_by_overheat = meta.get("excluded_by_overheat", 0)
+            overheat_note = f" (过热过滤排除 {excluded_by_overheat} 只)" if excluded_by_overheat else ""
+            lines.append(
+                f"【Bottom {len(stage1_bottom)}: 综合因子值最低 (composite 升序, 强势股端, 过热过滤前{overheat_note})】"
+            )
             lines.append(f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12}")
             lines.append("-" * 50)
             for item in stage1_bottom:
@@ -2397,35 +2391,10 @@ def _generate_stock_selection_section(
             lines.append("-" * 50)
             lines.append("")
 
-        # Stage 2 简表: 按 stage2_sort_col 升序重排后, 看每只 stage 2 股票的 Stage 1 名次回溯
-        if stage2_top:
-            sort_col_label = stage2_sort_col or "stage2_sort_value"
-            lines.append(
-                f"【Stage 2: 按 {sort_col_label} {'升' if stage2_ascending else '降'}序 Top {len(stage2_top)}】"
-            )
-            lines.append(
-                f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12} {sort_col_label:>10} {'Stage1名次':>10}"
-            )
-            lines.append("-" * 70)
-            for item in stage2_top:
-                rank = item.get("rank", 0)
-                code = item.get("code", "N/A")
-                name = (stock_name_map or {}).get(code, "--")
-                cv = item.get("composite_value", 0)
-                sort_v = item.get("stage2_sort_value")
-                sort_v_str = format_float(sort_v, 4) if sort_v is not None else "N/A"
-                s1_rank = item.get("stage1_rank")
-                s1_rank_str = f"#{s1_rank}" if s1_rank else "N/A"
-                lines.append(
-                    f"{rank:>4} {code:<10} {name:<8} {format_float(cv, 3):>12} {sort_v_str:>10} {s1_rank_str:>10}"
-                )
-            lines.append("-" * 70)
-            lines.append("")
-
-        lines.append(f"【Stage 3: 最终短名单 Top {meta.get('top_n', 0)} (企稳过滤后)】")
+        lines.append(f"【最终短名单 Top {meta.get('top_n', 0)} (Bottom30 过热过滤后)】")
         lines.append("")
 
-    # Top N 股票表格 (Stage 3, 即向后兼容的 top_stocks)
+    # Top N 股票表格 (v3.9: 即 Bottom30 过热过滤后短名单)
     # v2.42 (designs/feat_shortlist_top30_v1.md §2.2): 拆分 Top 10 详表 + 11~N 简表
     #   - Top 1~10: 详表, 展示全部因子 z-score (保留 v2.14 信息密度)
     #   - Top 11~N: 简表, 展示主导前 3 因子贡献占比 (避免 30 行 × 15 因子冗长)
@@ -2566,7 +2535,7 @@ def _generate_stock_selection_section(
                 lines.append("")
                 lines.append("【决策卡片 (人工决断辅助, 5 维客观字段)】")
                 lines.append(
-                    "  排名 股票代码  股票名称   D1 跌幅档/振幅档/区间位置          | D2 风险 | D3 企稳 | D4 历史"
+                    "  排名 股票代码  股票名称   D1 涨幅档/振幅档/区间位置          | D2 过热 | D3 趋势 | D4 历史"
                 )
                 lines.append("-" * 120)
                 for s in top_stocks:
@@ -2575,7 +2544,7 @@ def _generate_stock_selection_section(
                         continue
                     d1 = card.get("d1_classification", {})
                     d2 = card.get("d2_risk", {})
-                    d3 = card.get("d3_stabilization", {})
+                    d3 = card.get("d3_trend", {})
                     d4 = card.get("d4_history", {})
 
                     d1_str = (
@@ -2583,19 +2552,19 @@ def _generate_stock_selection_section(
                         f"{d1.get('amplitude_bucket', 'n/a')} / "
                         f"{d1.get('close_position_5d', 'n/a')}"
                     )
-                    # D2 风险数 (0~3), 命中详情标注
+                    # D2 过热风险 (0~3), 命中详情标注
                     d2_flags = []
-                    if d2.get("deep_decline_5d"):
-                        d2_flags.append("深跌")
-                    if d2.get("low_liquidity"):
-                        d2_flags.append("低流动性")
+                    if d2.get("high_turnover"):
+                        d2_flags.append("高换手")
+                    if d2.get("high_volume_ratio"):
+                        d2_flags.append("放量")
                     if d2.get("extreme_amplitude"):
                         d2_flags.append("极端振幅")
                     d2_str = f"{d2.get('warning_count', 0)}/3"
                     if d2_flags:
                         d2_str += f"({','.join(d2_flags)})"
 
-                    # D3 企稳数 (0~3), raw_signals_available=False 显示 n/a
+                    # D3 趋势确认 (0~3), raw_signals_available=False 显示 n/a
                     d3_str = "n/a" if not d3.get("raw_signals_available", False) else f"{d3.get('hit_count', 0)}/3"
 
                     # D4 历史 — 本期 null
@@ -2607,9 +2576,9 @@ def _generate_stock_selection_section(
                     )
                 lines.append("-" * 120)
                 lines.append("说明:")
-                lines.append("  D1 客观分类: 纯阈值分桶（跌幅/振幅/收盘价在近 5 日区间位置）, 不带叙事词。")
-                lines.append("  D2 风险标记: 深跌(<-10%) / 低流动性(当日成交额底 5%) / 极端振幅(<1% 或 >12%)。")
-                lines.append("  D3 企稳信号: 缩量 + 价量背离 + 下影线 (与 P6 企稳过滤一致, 0~3 个命中)。")
+                lines.append("  D1 客观分类: 纯阈值分桶（涨幅/振幅/收盘价在近 5 日区间位置）, 不带叙事词。")
+                lines.append("  D2 过热风险: 高换手(截面70%+) / 放量(volume_ratio_5>1.5) / 极端振幅(<1% 或 >12%)。")
+                lines.append("  D3 趋势确认: 近高比例(>0.95) + 布林上轨(>1.0) + RSI超买(>70), 0~3 个命中。")
                 lines.append("  D4 历史画像: 本期为 n/a (需历史归档机制, 独立 design 待启动)。")
                 lines.append("")
                 lines.append("【D5 人工核查清单 (固定模板, 适用每只候选股票)】")

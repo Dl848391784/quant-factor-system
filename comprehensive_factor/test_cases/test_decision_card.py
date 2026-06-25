@@ -1,8 +1,8 @@
 """
-decision_card 模块测试 (v1.0).
+decision_card 模块测试 (v3.9: Bottom30 过热过滤).
 
 遵循 AGENTS.md 规则 #8: 新建脚本同步创建 pytest.
-设计依据: designs/feat_decision_card_v1.md §6
+设计依据: designs/feat_decision_card_v1.md §6, designs/feat_bottom30_overheat_filter.md
 """
 
 from __future__ import annotations
@@ -38,20 +38,20 @@ from comprehensive_factor.decision_card import (  # noqa: E402
 
 
 class TestBucket:
-    """_bucket 边界值测试."""
+    """_bucket 边界值测试 (v3.9: 涨幅分桶)."""
 
-    def test_return_5d_deep_decline(self):
-        assert _bucket(-0.20, RETURN_5D_BUCKETS) == "深跌(<-15%)"
+    def test_return_5d_flat(self):
+        assert _bucket(-0.01, RETURN_5D_BUCKETS) == "横盘(<0%)"
 
-    def test_return_5d_boundary_negative_15(self):
-        # -0.15 不 < -0.15, 应进入下一档
-        assert _bucket(-0.15, RETURN_5D_BUCKETS) == "中跌(-15~-5%)"
+    def test_return_5d_boundary_zero(self):
+        # 0.00 不 < 0.00, 应进入下一档
+        assert _bucket(0.00, RETURN_5D_BUCKETS) == "微涨(0~3%)"
 
-    def test_return_5d_temperate(self):
-        assert _bucket(-0.03, RETURN_5D_BUCKETS) == "温和(-5~0%)"
+    def test_return_5d_slight_rise(self):
+        assert _bucket(0.02, RETURN_5D_BUCKETS) == "微涨(0~3%)"
 
-    def test_return_5d_uprising(self):
-        assert _bucket(0.05, RETURN_5D_BUCKETS) == "上涨(>3%)"
+    def test_return_5d_big_rise(self):
+        assert _bucket(0.20, RETURN_5D_BUCKETS) == "暴涨(>15%)"
 
     def test_amplitude_extreme_low(self):
         assert _bucket(0.005, AMPLITUDE_BUCKETS) == "极低(<2%)"
@@ -105,7 +105,7 @@ class TestComputeD1:
     def test_basic(self):
         row = pd.Series(
             {
-                "return_5d": -0.08,
+                "return_5d": 0.05,
                 "amplitude": 0.05,
                 "close": 12.0,
                 "high": 15.0,
@@ -113,7 +113,7 @@ class TestComputeD1:
             }
         )
         d1 = _compute_d1(row)
-        assert d1.return_5d_bucket == "中跌(-15~-5%)"
+        assert d1.return_5d_bucket == "中涨(3~8%)"
         assert d1.amplitude_bucket == "中(4~8%)"
         assert d1.close_position_5d == "中部"
 
@@ -126,44 +126,46 @@ class TestComputeD1:
 
 
 class TestComputeD2:
-    """D2 风险标记 warning_count 计数."""
+    """D2 过热风险标记 (v3.9) warning_count 计数."""
 
     def test_no_warnings(self):
-        row = pd.Series({"return_5d": -0.02, "amount": 1e8, "amplitude": 0.05})
-        d2 = _compute_d2(row, low_liquidity_amount=1e7)
+        row = pd.Series({"turnover_rate": 0.01, "volume_ratio_5": 1.0, "amplitude": 0.05})
+        d2 = _compute_d2(row, turnover_threshold=0.05)
         assert d2.warning_count == 0
-        assert not d2.deep_decline_5d
-        assert not d2.low_liquidity
+        assert not d2.high_turnover
+        assert not d2.high_volume_ratio
         assert not d2.extreme_amplitude
 
     def test_all_three_warnings(self):
-        row = pd.Series({"return_5d": -0.20, "amount": 1e6, "amplitude": 0.15})
-        d2 = _compute_d2(row, low_liquidity_amount=1e7)
+        row = pd.Series({"turnover_rate": 0.10, "volume_ratio_5": 2.0, "amplitude": 0.15})
+        d2 = _compute_d2(row, turnover_threshold=0.05)
         assert d2.warning_count == 3
-        assert d2.deep_decline_5d
-        assert d2.low_liquidity
+        assert d2.high_turnover
+        assert d2.high_volume_ratio
         assert d2.extreme_amplitude
 
     def test_extreme_amplitude_too_low(self):
         """一字板涨停 (amplitude < 1%) 也算 extreme."""
-        row = pd.Series({"return_5d": 0.0, "amount": 1e8, "amplitude": 0.005})
-        d2 = _compute_d2(row, low_liquidity_amount=1e7)
+        row = pd.Series({"turnover_rate": 0.01, "volume_ratio_5": 1.0, "amplitude": 0.005})
+        d2 = _compute_d2(row, turnover_threshold=0.05)
         assert d2.extreme_amplitude
 
-    def test_no_low_liq_threshold(self):
-        """factor_df 缺 amount 时不判定 low_liquidity."""
-        row = pd.Series({"return_5d": -0.02, "amplitude": 0.05})
-        d2 = _compute_d2(row, low_liquidity_amount=None)
-        assert not d2.low_liquidity
+    def test_no_turnover_threshold(self):
+        """turnover_threshold=None 时不判定 high_turnover."""
+        row = pd.Series({"turnover_rate": 0.01, "volume_ratio_5": 1.0, "amplitude": 0.05})
+        d2 = _compute_d2(row, turnover_threshold=None)
+        assert not d2.high_turnover
 
 
 class TestComputeD3:
+    """D3 趋势确认信号 (v3.9)."""
+
     def test_all_signals_hit(self):
         row = pd.Series(
             {
-                "volume_shrink_rate": 0.8,
-                "price_volume_divergence": 0.1,
-                "lower_shadow_ratio": 0.5,
+                "near_high_ratio_5": 0.98,
+                "bollinger_pb": 1.2,
+                "rsi_6": 75,
             }
         )
         d3 = _compute_d3(row)
@@ -173,31 +175,31 @@ class TestComputeD3:
     def test_all_nan_signals(self):
         row = pd.Series(
             {
-                "volume_shrink_rate": np.nan,
-                "price_volume_divergence": np.nan,
-                "lower_shadow_ratio": np.nan,
+                "near_high_ratio_5": np.nan,
+                "bollinger_pb": np.nan,
+                "rsi_6": np.nan,
             }
         )
         d3 = _compute_d3(row)
         assert d3.hit_count == 0
         assert not d3.raw_signals_available
-        assert d3.volume_shrink is None
-        assert d3.pv_divergence is None
-        assert d3.lower_shadow is None
+        assert d3.near_high is None
+        assert d3.bollinger_upper is None
+        assert d3.rsi_overbought is None
 
     def test_partial_nan(self):
         row = pd.Series(
             {
-                "volume_shrink_rate": 0.8,
-                "price_volume_divergence": np.nan,
-                "lower_shadow_ratio": 0.5,
+                "near_high_ratio_5": 0.98,
+                "bollinger_pb": np.nan,
+                "rsi_6": 75,
             }
         )
         d3 = _compute_d3(row)
         assert d3.hit_count == 2
-        assert d3.volume_shrink is True
-        assert d3.pv_divergence is None
-        assert d3.lower_shadow is True
+        assert d3.near_high is True
+        assert d3.bollinger_upper is None
+        assert d3.rsi_overbought is True
         assert d3.raw_signals_available
 
 
@@ -220,15 +222,16 @@ class TestBuildDecisionCards:
         return pd.DataFrame(
             {
                 "asset": ["600377", "001210", "missing_in_top"],
-                "return_5d": [-0.08, -0.20, 0.05],
+                "return_5d": [0.05, 0.20, -0.02],
                 "amplitude": [0.05, 0.15, 0.03],
-                "amount": [5e8, 1e6, 1e9],
+                "turnover_rate": [0.01, 0.10, 0.03],
+                "volume_ratio_5": [1.0, 2.0, 1.2],
                 "close": [12.0, 5.0, 20.0],
                 "high": [15.0, 10.0, 22.0],
                 "low": [10.0, 4.0, 18.0],
-                "volume_shrink_rate": [0.8, 1.2, 0.5],
-                "price_volume_divergence": [0.1, -0.1, 0.2],
-                "lower_shadow_ratio": [0.5, 0.1, 0.4],
+                "near_high_ratio_5": [0.85, 0.98, 0.90],
+                "bollinger_pb": [0.8, 1.2, 1.0],
+                "rsi_6": [55, 75, 65],
             }
         )
 
@@ -248,7 +251,7 @@ class TestBuildDecisionCards:
             assert card is not None
             assert "d1_classification" in card
             assert "d2_risk" in card
-            assert "d3_stabilization" in card
+            assert "d3_trend" in card
             assert "d4_history" in card
 
     def test_code_not_in_factor_df_returns_null_card(self, mock_factor_df):
@@ -260,21 +263,21 @@ class TestBuildDecisionCards:
         assert build_decision_cards([], mock_factor_df) == []
 
     def test_missing_asset_column(self, mock_top_stocks):
-        bad_df = pd.DataFrame({"code": ["600377"], "return_5d": [-0.08]})
+        bad_df = pd.DataFrame({"code": ["600377"], "return_5d": [0.05]})
         result = build_decision_cards(mock_top_stocks, bad_df)
         # 缺 asset 列时, 原 list 浅拷贝返回, decision_card 字段不存在
         assert len(result) == 2
         for item in result:
             assert "decision_card" not in item
 
-    def test_low_liquidity_uses_5pct_quantile(self, mock_top_stocks, mock_factor_df):
-        """股票 001210 的 amount=1e6 是当日最低, 应触发 low_liquidity."""
+    def test_high_turnover_uses_70pct_quantile(self, mock_top_stocks, mock_factor_df):
+        """股票 001210 的 turnover_rate=0.10 是当日最高, 应触发 high_turnover."""
         enriched = build_decision_cards(mock_top_stocks, mock_factor_df)
         card_001210 = enriched[1]["decision_card"]
-        assert card_001210["d2_risk"]["low_liquidity"] is True
+        assert card_001210["d2_risk"]["high_turnover"] is True
         card_600377 = enriched[0]["decision_card"]
-        # 600377 amount=5e8 不在底部 5%
-        assert card_600377["d2_risk"]["low_liquidity"] is False
+        # 600377 turnover_rate=0.01 不在 70% 分位以上
+        assert card_600377["d2_risk"]["high_turnover"] is False
 
     def test_original_top_stocks_not_mutated(self, mock_top_stocks, mock_factor_df):
         """build_decision_cards 不应修改原 list."""

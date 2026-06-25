@@ -49,13 +49,13 @@ CHECKLIST_D5: list[str] = [
 # 阈值常量（第一性原理：分布尾部用百分位, 统计显著性用固定值）
 # ============================================================================
 
-# D1 跌幅分桶（return_5d, 单位: 比例）
+# D1 涨幅分桶（return_5d, 单位: 比例）— v3.9: 从跌幅改为涨幅 (面向强势股)
 RETURN_5D_BUCKETS: list[tuple[float, str]] = [
-    (-0.15, "深跌(<-15%)"),
-    (-0.05, "中跌(-15~-5%)"),
-    (0.00, "温和(-5~0%)"),
-    (0.03, "横盘(0~3%)"),
-    (float("inf"), "上涨(>3%)"),
+    (0.00, "横盘(<0%)"),
+    (0.03, "微涨(0~3%)"),
+    (0.08, "中涨(3~8%)"),
+    (0.15, "大涨(8~15%)"),
+    (float("inf"), "暴涨(>15%)"),
 ]
 
 # D1 振幅分桶（amplitude, 单位: 比例）
@@ -66,16 +66,16 @@ AMPLITUDE_BUCKETS: list[tuple[float, str]] = [
     (float("inf"), "高(>8%)"),
 ]
 
-# D2 风险阈值
-DEEP_DECLINE_5D_THRESHOLD = -0.10  # return_5d < -10% → 深跌警示
-LOW_LIQUIDITY_AMOUNT_PERCENTILE = 0.05  # 当日截面成交额底部 5% → 流动性风险
+# D2 过热风险阈值（v3.9: 从深跌/低流动性改为过热风险, 面向强势股）
+OVERHEAT_TURNOVER_PERCENTILE = 0.7  # 换手率截面 70% 分位 → 高换手
+OVERHEAT_VOLUME_RATIO_THRESHOLD = 1.5  # volume_ratio_5 > 1.5 → 放量
 EXTREME_AMPLITUDE_HIGH = 0.12  # > 12% → 异常波动
 EXTREME_AMPLITUDE_LOW = 0.01  # < 1% → 一字板涨跌停（不可交易）
 
-# D3 企稳信号阈值（与 stock_selector.apply_stabilization_filter 一致）
-VOLUME_SHRINK_THRESHOLD = 1.0  # < 1.0 → 缩量
-PV_DIVERGENCE_THRESHOLD = 0.0  # > 0 → 价跌量缩背离
-LOWER_SHADOW_THRESHOLD = 0.3  # > 0.3 → 下影线承接
+# D3 趋势确认阈值 (v3.9: 面向强势股)
+NEAR_HIGH_THRESHOLD = 0.95  # near_high_ratio_5 > 0.95 → 接近5日高点
+BOLLINGER_UPPER_THRESHOLD = 1.0  # bollinger_pb > 1.0 → 突破布林上轨
+RSI_OVERBOUGHT_THRESHOLD = 70  # rsi_6 > 70 → RSI 超买
 
 
 # ============================================================================
@@ -96,21 +96,24 @@ class DimD1Classification:
 
 @dataclass
 class DimD2Risk:
-    """D2 风险标记: 布尔命中."""
+    """D2 过热风险标记 (v3.9: 面向强势股). 布尔命中."""
 
-    deep_decline_5d: bool
-    low_liquidity: bool
+    high_turnover: bool  # 换手率 > 截面 70% 分位
+    high_volume_ratio: bool  # volume_ratio_5 > 1.5
     extreme_amplitude: bool
     warning_count: int
 
 
 @dataclass
-class DimD3Stabilization:
-    """D3 企稳信号: 复用 P5 确认信号."""
+class DimD3TrendConfirmation:
+    """D3 趋势确认信号 (v3.9: 从企稳信号改为趋势确认, 面向强势股).
 
-    volume_shrink: bool | None
-    pv_divergence: bool | None
-    lower_shadow: bool | None
+    数据驱动: 近高比例/布林上轨/RSI 在 Bottom30 内是正向信号 (T+1 更高).
+    """
+
+    near_high: bool | None  # near_high_ratio_5 > 0.95
+    bollinger_upper: bool | None  # bollinger_pb > 1.0
+    rsi_overbought: bool | None  # rsi_6 > 70
     hit_count: int  # 命中数（0~3）
     raw_signals_available: bool
 
@@ -130,7 +133,7 @@ class DecisionCard:
 
     d1_classification: DimD1Classification
     d2_risk: DimD2Risk
-    d3_stabilization: DimD3Stabilization
+    d3_trend: DimD3TrendConfirmation  # v3.9: 从 d3_stabilization 改名
     d4_history: DimD4History = field(default_factory=DimD4History)
 
 
@@ -205,54 +208,57 @@ def _compute_d1(row: pd.Series) -> DimD1Classification:
     )
 
 
-def _compute_d2(row: pd.Series, low_liquidity_amount: float | None) -> DimD2Risk:
-    """D2 风险标记.
+def _compute_d2(row: pd.Series, turnover_threshold: float | None) -> DimD2Risk:
+    """D2 过热风险标记 (v3.9: 面向强势股).
 
     Args:
         row: 当日单股行
-        low_liquidity_amount: 当日截面 amount 5% 分位阈值（None → 不判定 low_liquidity）
+        turnover_threshold: 当日换手率截面 70% 分位阈值（None → 不判定 high_turnover）
     """
-    return_5d = _safe_float(row.get("return_5d"))
-    amount = _safe_float(row.get("amount"))
+    turnover = _safe_float(row.get("turnover_rate"))
+    vol_ratio = _safe_float(row.get("volume_ratio_5"))
     amplitude = _safe_float(row.get("amplitude"))
 
-    deep_decline = return_5d is not None and return_5d < DEEP_DECLINE_5D_THRESHOLD
-    low_liq = low_liquidity_amount is not None and amount is not None and amount < low_liquidity_amount
+    high_to = turnover_threshold is not None and turnover is not None and turnover > turnover_threshold
+    high_vr = vol_ratio is not None and vol_ratio > OVERHEAT_VOLUME_RATIO_THRESHOLD
     extreme_amp = amplitude is not None and (amplitude > EXTREME_AMPLITUDE_HIGH or amplitude < EXTREME_AMPLITUDE_LOW)
 
     return DimD2Risk(
-        deep_decline_5d=deep_decline,
-        low_liquidity=low_liq,
+        high_turnover=high_to,
+        high_volume_ratio=high_vr,
         extreme_amplitude=extreme_amp,
-        warning_count=int(deep_decline) + int(low_liq) + int(extreme_amp),
+        warning_count=int(high_to) + int(high_vr) + int(extreme_amp),
     )
 
 
-def _compute_d3(row: pd.Series) -> DimD3Stabilization:
-    """D3 企稳信号 (与 stock_selector.apply_stabilization_filter 一致)."""
-    vs = _safe_float(row.get("volume_shrink_rate"))
-    pv = _safe_float(row.get("price_volume_divergence"))
-    ls = _safe_float(row.get("lower_shadow_ratio"))
+def _compute_d3(row: pd.Series) -> DimD3TrendConfirmation:
+    """D3 趋势确认信号 (v3.9: 从企稳信号改为趋势确认, 面向强势股).
 
-    raw_available = any(v is not None for v in (vs, pv, ls))
+    数据驱动: 近高比例/布林上轨/RSI 在 Bottom30 内是正向信号 (T+1 更高).
+    """
+    nh = _safe_float(row.get("near_high_ratio_5"))
+    bp = _safe_float(row.get("bollinger_pb"))
+    rsi = _safe_float(row.get("rsi_6"))
+
+    raw_available = any(v is not None for v in (nh, bp, rsi))
     if not raw_available:
-        return DimD3Stabilization(
-            volume_shrink=None,
-            pv_divergence=None,
-            lower_shadow=None,
+        return DimD3TrendConfirmation(
+            near_high=None,
+            bollinger_upper=None,
+            rsi_overbought=None,
             hit_count=0,
             raw_signals_available=False,
         )
 
-    vol_shrink_hit = vs is not None and vs < VOLUME_SHRINK_THRESHOLD
-    pv_div_hit = pv is not None and pv > PV_DIVERGENCE_THRESHOLD
-    lower_shadow_hit = ls is not None and ls > LOWER_SHADOW_THRESHOLD
+    near_high_hit = nh is not None and nh > NEAR_HIGH_THRESHOLD
+    bollinger_hit = bp is not None and bp > BOLLINGER_UPPER_THRESHOLD
+    rsi_hit = rsi is not None and rsi > RSI_OVERBOUGHT_THRESHOLD
 
-    return DimD3Stabilization(
-        volume_shrink=vol_shrink_hit if vs is not None else None,
-        pv_divergence=pv_div_hit if pv is not None else None,
-        lower_shadow=lower_shadow_hit if ls is not None else None,
-        hit_count=int(vol_shrink_hit) + int(pv_div_hit) + int(lower_shadow_hit),
+    return DimD3TrendConfirmation(
+        near_high=near_high_hit if nh is not None else None,
+        bollinger_upper=bollinger_hit if bp is not None else None,
+        rsi_overbought=rsi_hit if rsi is not None else None,
+        hit_count=int(near_high_hit) + int(bollinger_hit) + int(rsi_hit),
         raw_signals_available=True,
     )
 
@@ -294,19 +300,19 @@ def build_decision_cards(
 
     asset_index = factor_df.set_index("asset")
 
-    # 当日 amount 5% 分位（low_liquidity 阈值）
-    low_liq_threshold: float | None = None
-    if "amount" in factor_df.columns:
-        valid_amount = factor_df["amount"].dropna()
-        if len(valid_amount) > 0:
-            low_liq_threshold = float(valid_amount.quantile(LOW_LIQUIDITY_AMOUNT_PERCENTILE))  # type: ignore[arg-type]
+    # v3.9: 当日换手率 70% 分位（high_turnover 阈值）
+    turnover_threshold: float | None = None
+    if "turnover_rate" in factor_df.columns:
+        valid_turnover = factor_df["turnover_rate"].dropna()
+        if len(valid_turnover) > 0:
+            turnover_threshold = float(valid_turnover.quantile(OVERHEAT_TURNOVER_PERCENTILE))  # type: ignore[arg-type]
             logger.info(
-                "decision_card: low_liquidity 阈值 (当日 %.0f%% 分位): %.0f",
-                LOW_LIQUIDITY_AMOUNT_PERCENTILE * 100,
-                low_liq_threshold,
+                "decision_card: high_turnover 阈值 (当日 %.0f%% 分位): %.4f",
+                OVERHEAT_TURNOVER_PERCENTILE * 100,
+                turnover_threshold,
             )
     else:
-        logger.warning("decision_card: factor_df 缺 amount 列, D2 low_liquidity 不判定")
+        logger.warning("decision_card: factor_df 缺 turnover_rate 列, D2 high_turnover 不判定")
 
     enriched: list[dict[str, Any]] = []
     skipped = 0
@@ -326,8 +332,8 @@ def build_decision_cards(
 
         card = DecisionCard(
             d1_classification=_compute_d1(row),
-            d2_risk=_compute_d2(row, low_liq_threshold),
-            d3_stabilization=_compute_d3(row),
+            d2_risk=_compute_d2(row, turnover_threshold),
+            d3_trend=_compute_d3(row),
             d4_history=_compute_d4(),
         )
         item["decision_card"] = asdict(card)

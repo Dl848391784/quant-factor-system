@@ -1197,26 +1197,26 @@ class TestShortlistTop30:
 
 
 def _add_decision_cards(result: dict, with_d2_warnings: bool = False) -> dict:
-    """给 mock result 的 top_stocks 追加 decision_card 字段."""
+    """给 mock result 的 top_stocks 追加 decision_card 字段 (v3.9: 过热/趋势维度)."""
     for s in result["top_stocks"]:
         s["decision_card"] = {
             "d1_classification": {
-                "return_5d_bucket": "中跌(-15~-5%)" if with_d2_warnings else "温和(-5~0%)",
-                "return_5d_value": -0.08,
+                "return_5d_bucket": "中涨(3~8%)" if with_d2_warnings else "微涨(0~3%)",
+                "return_5d_value": 0.05,
                 "amplitude_bucket": "中(4~8%)",
                 "amplitude_value": 0.05,
-                "close_position_5d": "底部",
+                "close_position_5d": "顶部",
             },
             "d2_risk": {
-                "deep_decline_5d": with_d2_warnings,
-                "low_liquidity": False,
+                "high_turnover": with_d2_warnings,
+                "high_volume_ratio": False,
                 "extreme_amplitude": False,
                 "warning_count": 1 if with_d2_warnings else 0,
             },
-            "d3_stabilization": {
-                "volume_shrink": True,
-                "pv_divergence": True,
-                "lower_shadow": True,
+            "d3_trend": {
+                "near_high": True,
+                "bollinger_upper": True,
+                "rsi_overbought": True,
                 "hit_count": 3,
                 "raw_signals_available": True,
             },
@@ -1237,7 +1237,7 @@ class TestDecisionCardRendering:
         lines = _generate_stock_selection_section(result, {}, None)
         text = "\n".join(lines)
         assert "【决策卡片 (人工决断辅助, 5 维客观字段)】" in text
-        assert "D1 跌幅档" in text
+        assert "D1 涨幅档" in text
         assert "D5 人工核查清单" in text
 
     def test_card_block_skipped_when_no_cards(self):
@@ -1254,16 +1254,16 @@ class TestDecisionCardRendering:
         lines = _generate_stock_selection_section(result, {}, None)
         text = "\n".join(lines)
         # 1/3 + 命中标签
-        assert "1/3(深跌)" in text
+        assert "1/3(高换手)" in text
 
     def test_d3_na_when_signals_unavailable(self):
         """D3 raw_signals_available=False 时显示 n/a."""
         result = _add_decision_cards(_build_mock_stock_result(11))
         # 把第一只改成 raw_signals_available=False
-        result["top_stocks"][0]["decision_card"]["d3_stabilization"] = {
-            "volume_shrink": None,
-            "pv_divergence": None,
-            "lower_shadow": None,
+        result["top_stocks"][0]["decision_card"]["d3_trend"] = {
+            "near_high": None,
+            "bollinger_upper": None,
+            "rsi_overbought": None,
             "hit_count": 0,
             "raw_signals_available": False,
         }
@@ -1572,7 +1572,7 @@ class TestLoadStockSelectionParquet:
         assert mod.load_stock_selection_result(logger) is None
 
     def test_render_section_includes_stage1_and_stage2(self, tmp_path, monkeypatch, populated_dataset):
-        """_generate_stock_selection_section 应渲染 Stage 1 + Stage 2 简表."""
+        """_generate_stock_selection_section 应渲染 Stage 1 + Bottom30 + 最终短名单 (v3.9)."""
         import summary.generate_factor_summary_report as mod
 
         monkeypatch.setattr(mod, "PROJECT_ROOT", populated_dataset.parent.parent)
@@ -1586,10 +1586,9 @@ class TestLoadStockSelectionParquet:
 
         lines = mod._generate_stock_selection_section(result, {}, None)
         text = "\n".join(lines)
-        assert "两阶段选股轨迹" in text
+        assert "选股轨迹 (v3.9: Bottom30 过热过滤)" in text
         assert "Stage 1: 综合因子值 Top 3" in text
-        assert "Stage 2: 按 turnover_rate 升序" in text
-        assert "Stage 3: 最终短名单" in text
+        assert "过热过滤后" in text
         # Stage 1 第一名股票代码必须出现在 Stage 1 段
         assert "600001" in text
 
