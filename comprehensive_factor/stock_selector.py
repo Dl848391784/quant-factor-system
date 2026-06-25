@@ -143,10 +143,15 @@ class StockSelectorConfig:
     stage2_ascending: bool = True  # 保留字段, v3.9 不再使用
 
     # v3.9: Bottom30 过热过滤 (designs/feat_bottom30_overheat_filter.md)
-    # 数据驱动: 过热(高换手+放量)强势股 T+1=-0.31%/天 vs 未过热 +0.55%/天, p<0.0001
+    # v3.9.1: 彻底数据驱动——每次运行时用全历史数据校准最优分位阈值
+    #   校准逻辑: 扫描 turnover_percentile × volume_ratio_percentile 网格,
+    #   在 Bottom30 历史样本上找 T+1 差异最大且 p<0.05 的组合.
     enable_overheat_filter: bool = True
-    overheat_turnover_percentile: float = 0.7  # 截面 70% 分位 (非硬编码绝对值)
-    overheat_volume_ratio_threshold: float = 1.5  # volume_ratio_5 > 1.5 = 放量
+    overheat_calibrate_min_pvalue: float = 0.05  # 统计显著性门槛
+    overheat_calibrate_grid: tuple[float, ...] = (0.5, 0.6, 0.7, 0.8, 0.9)  # 分位搜索网格
+    # v3.9 校准结果 (运行时填充, 非硬编码)
+    overheat_turnover_percentile: float = 0.7  # fallback: 校准失败时用
+    overheat_volume_ratio_percentile: float = 0.7  # v3.9.1: 从固定 1.5 改为截面分位
 
     # === 数据路径 ===（问题 4 修复：default_factory 保证延迟求值）
     data_source: Path = field(default_factory=lambda: DEFAULT_DATA_SOURCE)
@@ -184,13 +189,15 @@ class StockSelectorConfig:
 
         # v3.9: 过热过滤参数校验
         if self.enable_overheat_filter:
-            if not 0 < self.overheat_turnover_percentile < 1:
+            if not 0 < self.overheat_calibrate_min_pvalue < 1:
                 raise ValueError(
-                    f"overheat_turnover_percentile 必须在 (0, 1) 区间, 当前: {self.overheat_turnover_percentile}"
+                    f"overheat_calibrate_min_pvalue 必须在 (0, 1) 区间, 当前: {self.overheat_calibrate_min_pvalue}"
                 )
-            if self.overheat_volume_ratio_threshold <= 0:
+            if not self.overheat_calibrate_grid:
+                raise ValueError("overheat_calibrate_grid 不能为空")
+            if not all(0 < p < 1 for p in self.overheat_calibrate_grid):
                 raise ValueError(
-                    f"overheat_volume_ratio_threshold 必须大于 0, 当前: {self.overheat_volume_ratio_threshold}"
+                    f"overheat_calibrate_grid 所有值必须在 (0, 1) 区间, 当前: {self.overheat_calibrate_grid}"
                 )
 
 
@@ -876,31 +883,138 @@ def apply_stabilization_filter(
     return filtered[:top_n], excluded
 
 
+def calibrate_overheat_thresholds(
+    factor_df: pd.DataFrame,
+    composite_factor: pd.Series,
+    top_n: int,
+    grid: tuple[float, ...],
+    min_pvalue: float,
+    logger: logging.Logger | None = None,
+) -> tuple[float, float]:
+    """v3.9.1: 每次运行时用全历史数据校准过热过滤最优分位阈值.
+
+    在全历史 Bottom30 样本上, 扫描 turnover_percentile × volume_ratio_percentile 网格,
+    对每组阈值将 Bottom30 分为"过热/未过热"两组, 计算 T+1 均值差异和 Welch t 检验 p 值.
+    选择 |T+1 差异| 最大且 p < min_pvalue 的组合.
+
+    Args:
+        factor_df: 全样本 DataFrame (含 date, asset, turnover_rate, volume_ratio_5, forward_return_1d).
+        composite_factor: 综合因子值 Series (索引与 factor_df 对齐).
+        top_n: Bottom N (与选股逻辑一致, 默认 30).
+        grid: 分位搜索网格, 如 (0.5, 0.6, 0.7, 0.8, 0.9).
+        min_pvalue: 统计显著性门槛 (默认 0.05).
+        logger: 日志对象.
+
+    Returns:
+        (turnover_percentile, volume_ratio_percentile) 最优分位组合.
+        如果无组合通过 p 值门槛, 返回 (0.7, 0.7) fallback.
+    """
+    if logger is None:
+        logger = _logger
+
+    from scipy import stats as sp_stats
+
+    required = {"date", "asset", "turnover_rate", "volume_ratio_5", "forward_return_1d"}
+    missing = required - set(factor_df.columns)
+    if missing:
+        logger.warning("过热校准: 缺少列 %s, 使用 fallback 阈值 (0.7, 0.7)", missing)
+        return 0.7, 0.7
+
+    # 全历史 Bottom30 样本
+    df = factor_df.copy()
+    df["composite"] = composite_factor.reindex(df.index)
+    df = df.dropna(subset=["composite", "turnover_rate", "volume_ratio_5", "forward_return_1d"])
+
+    # 每日截面: composite 升序取最低 top_n 只 (Bottom30, 强势股端)
+    bottom_samples = []
+    for _date, group in df.groupby("date"):
+        if len(group) >= top_n:
+            bottom = group.nsmallest(top_n, "composite")
+            bottom_samples.append(bottom)
+
+    if not bottom_samples:
+        logger.warning("过热校准: 无有效 Bottom30 历史样本, 使用 fallback 阈值 (0.7, 0.7)")
+        return 0.7, 0.7
+
+    bottom_df = pd.concat(bottom_samples, ignore_index=True)
+    total_samples = len(bottom_df)
+    logger.info("过热校准: %d 天 Bottom30 样本, %d 条记录", len(bottom_samples), total_samples)
+
+    best_diff = 0.0
+    best_p = 1.0
+    best_combo = (0.7, 0.7)
+
+    for t_pct in grid:
+        for v_pct in grid:
+            # 每日截面分位阈值
+            t_thresholds = bottom_df.groupby("date")["turnover_rate"].quantile(t_pct)
+            v_thresholds = bottom_df.groupby("date")["volume_ratio_5"].quantile(v_pct)
+
+            # 合并回 bottom_df
+            t_map = t_thresholds.to_dict()
+            v_map = v_thresholds.to_dict()
+            t_thr = bottom_df["date"].map(t_map)
+            v_thr = bottom_df["date"].map(v_map)
+
+            overheat_mask = (bottom_df["turnover_rate"] > t_thr) & (bottom_df["volume_ratio_5"] > v_thr)
+            overheat_ret = bottom_df.loc[overheat_mask, "forward_return_1d"]
+            normal_ret = bottom_df.loc[~overheat_mask, "forward_return_1d"]
+
+            n_oh = len(overheat_ret)
+            n_norm = len(normal_ret)
+            if n_oh < 10 or n_norm < 10:
+                continue
+
+            diff = float(normal_ret.mean() - overheat_ret.mean())
+            if diff <= 0:
+                continue  # 只看"过热→T+1 更低"的方向
+
+            t_stat, p_value = sp_stats.ttest_ind(normal_ret, overheat_ret, equal_var=False)
+
+            if p_value < min_pvalue and diff > best_diff:
+                best_diff = diff
+                best_p = p_value
+                best_combo = (t_pct, v_pct)
+
+    if best_diff > 0:
+        logger.info(
+            "过热校准: 最优 turnover=%.0f%% volume_ratio=%.0f%%, T+1 差异=%.4f%%/天, p=%.2e, 过热N=%d, 未过热N=%d",
+            best_combo[0] * 100,
+            best_combo[1] * 100,
+            best_diff * 100,
+            best_p,
+            n_oh,
+            n_norm,
+        )
+    else:
+        logger.warning("过热校准: 无组合通过 p<%.2f 门槛, 使用 fallback (0.7, 0.7)", min_pvalue)
+
+    return best_combo
+
+
 def apply_overheat_filter(
     bottom_stocks: list[dict[str, Any]],
     factor_df: pd.DataFrame,
     top_n: int,
     turnover_percentile: float = 0.7,
-    volume_ratio_threshold: float = 1.5,
+    volume_ratio_percentile: float = 0.7,
     logger: logging.Logger | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
-    """Bottom30 过热过滤 (v3.9, designs/feat_bottom30_overheat_filter.md)
+    """Bottom30 过热过滤 (v3.9.1, designs/feat_bottom30_overheat_filter.md)
 
     在 Bottom30（强势股, composite 最低端）中排除"过热"股票。
-    过热 = 高换手率(截面 70%+) AND 放量(volume_ratio_5 > 1.5)。
+    过热 = 高换手率(截面分位) AND 放量(volume_ratio_5 截面分位)。
     被排除的股票从 Bottom31+ 递补, 保持 top_n 数量。
 
-    数据驱动 (548 日全样本, 15531 条 Bottom30 记录):
-        过热: T+1 = -0.31%/天 (年化 -78%), 胜率 42.6%
-        未过热: T+1 = +0.55%/天 (年化 +139%), 胜率 47.6%
-        差异 0.86%/天, p < 0.0001
+    v3.9.1: 两个阈值都改为截面分位 (由 calibrate_overheat_thresholds 校准),
+    不再使用固定绝对值。
 
     Args:
         bottom_stocks: composite 升序最低 N 只 (含 code 字段)
         factor_df: 当日因子+行情 DataFrame (含 asset, turnover_rate, volume_ratio_5 列)
         top_n: 最终输出数量
-        turnover_percentile: 换手率截面分位阈值 (默认 0.7 = 70%)
-        volume_ratio_threshold: volume_ratio_5 阈值 (默认 1.5)
+        turnover_percentile: 换手率截面分位阈值 (校准后, 如 0.7)
+        volume_ratio_percentile: volume_ratio_5 截面分位阈值 (校准后, 如 0.7)
         logger: 日志对象
 
     Returns:
@@ -921,18 +1035,21 @@ def apply_overheat_filter(
 
     asset_index = factor_df.set_index("asset") if "asset" in factor_df.columns else factor_df
 
-    # 计算当日换手率截面分位阈值
+    # v3.9.1: 两个阈值都从当日截面分位动态计算
     turnover_series = factor_df["turnover_rate"].dropna()
-    if len(turnover_series) == 0:
-        logger.info("过热过滤: turnover_rate 全部为 NaN, 跳过过滤")
+    vol_ratio_series = factor_df["volume_ratio_5"].dropna()
+    if len(turnover_series) == 0 or len(vol_ratio_series) == 0:
+        logger.info("过热过滤: turnover_rate/volume_ratio_5 全部为 NaN, 跳过过滤")
         return bottom_stocks[:top_n], 0
 
     turnover_threshold = float(turnover_series.quantile(turnover_percentile))
+    vol_ratio_threshold = float(vol_ratio_series.quantile(volume_ratio_percentile))
     logger.info(
-        "过热过滤: 换手率 %.0f%% 分位阈值=%.4f, volume_ratio_5 阈值=%.1f",
+        "过热过滤: 换手率 %.0f%% 分位阈值=%.4f, volume_ratio_5 %.0f%% 分位阈值=%.4f",
         turnover_percentile * 100,
         turnover_threshold,
-        volume_ratio_threshold,
+        volume_ratio_percentile * 100,
+        vol_ratio_threshold,
     )
 
     filtered: list[dict[str, Any]] = []
@@ -959,18 +1076,18 @@ def apply_overheat_filter(
             filtered.append(stock)
             continue
 
-        # 过热条件: 高换手 AND 放量 (两个条件同时满足才排除)
-        is_overheated = float(turnover) > turnover_threshold and float(vol_ratio) > volume_ratio_threshold
+        # v3.9.1: 过热条件——两个截面分位阈值都改为动态计算
+        is_overheated = float(turnover) > turnover_threshold and float(vol_ratio) > vol_ratio_threshold
 
         if is_overheated:
             excluded += 1
             logger.debug(
-                "过热过滤排除: %s (换手率=%.4f > %.4f, vol_ratio_5=%.2f > %.1f)",
+                "过热过滤排除: %s (换手率=%.4f > %.4f, vol_ratio_5=%.2f > %.4f)",
                 code,
                 float(turnover),
                 turnover_threshold,
                 float(vol_ratio),
-                volume_ratio_threshold,
+                vol_ratio_threshold,
             )
         else:
             filtered.append(stock)
@@ -1671,20 +1788,30 @@ def select_stocks(
             except (FileNotFoundError, KeyError, ValueError) as e:
                 logger.warning("过热过滤: 辅助列加载失败 (%s), 跳过过滤", e)
 
-        # v3.9: 过热过滤
+        # v3.9.1: 过热过滤 (彻底数据驱动——每次运行时校准阈值)
         if config.enable_overheat_filter:
+            # 1) 用全历史数据校准最优分位阈值
+            t_pct, v_pct = calibrate_overheat_thresholds(
+                factor_df,
+                composite_factor,
+                config.top_n,
+                config.overheat_calibrate_grid,
+                config.overheat_calibrate_min_pvalue,
+                logger=logger,
+            )
             logger.info(
-                "Bottom30 过热过滤 (v3.9) | 换手率分位=%.0f%%, volume_ratio_5 阈值=%.1f → Top %d",
-                config.overheat_turnover_percentile * 100,
-                config.overheat_volume_ratio_threshold,
+                "Bottom30 过热过滤 (v3.9.1) | 校准阈值: turnover=%.0f%%, volume_ratio=%.0f%% → Top %d",
+                t_pct * 100,
+                v_pct * 100,
                 config.top_n,
             )
+            # 2) 用校准后的阈值执行过滤
             top_stocks, excluded_by_overheat = apply_overheat_filter(
                 bottom_pool,
                 factor_df_for_overheat,
                 config.top_n,
-                turnover_percentile=config.overheat_turnover_percentile,
-                volume_ratio_threshold=config.overheat_volume_ratio_threshold,
+                turnover_percentile=t_pct,
+                volume_ratio_percentile=v_pct,
                 logger=logger,
             )
         else:

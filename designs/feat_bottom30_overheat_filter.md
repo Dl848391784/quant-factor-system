@@ -34,7 +34,7 @@
 
 ### 过热信号的物理含义
 
-高换手率（截面 70%+）意味着筹码松动、短线资金涌入；放量（volume_ratio_5 > 1.5）意味着多空分歧加大。两者结合 = "击鼓传花到最后阶段"，T+1 大概率回落。
+高换手率（截面高分位）意味着筹码松动、短线资金涌入；放量（volume_ratio_5 截面高分位）意味着多空分歧加大。两者结合 = "击鼓传花到最后阶段"，T+1 大概率回落。
 
 这不是叙事标签，而是实证数据：p < 0.0001，样本 15000+，差异 0.86%/天。
 
@@ -42,12 +42,19 @@
 
 Bottom30 是强势股，未过热的强势股 T+1 = +0.55%/天（趋势延续）。过热的强势股 T+1 = -0.31%/天（反转下跌）。**排除过热的 = 保留趋势延续的**，符合第一性原理。
 
-### 阈值依据（非任意调参）
+### 阈值依据（v3.9.1: 彻底数据驱动，非写死）
 
-| 参数 | 阈值 | 依据 |
-|------|------|------|
-| turnover_rate 截面分位 | > 70% | 全样本数据驱动：70% 分位把 Bottom30 劈成 -0.09% vs +0.62%，差异最大 |
-| volume_ratio_5 | > 1.5 | 与 factor_definitions 中 turnover_surge 定义一致（5 日均值比值） |
+| 参数 | v3.9 (写死) | v3.9.1 (数据驱动) |
+|------|------------|-------------------|
+| turnover_rate 分位 | 固定 0.7 | 每次运行时校准 |
+| volume_ratio_5 分位 | 固定绝对值 1.5 | 每次运行时校准为截面分位 |
+
+**校准逻辑** (`calibrate_overheat_thresholds`):
+1. 用全历史数据（549 天）每日取 Bottom30 样本
+2. 扫描 5×5 网格: turnover_percentile × volume_ratio_percentile (0.5/0.6/0.7/0.8/0.9)
+3. 对每组阈值分"过热/未过热"两组，计算 T+1 均值差异和 Welch t 检验 p 值
+4. 选择 |T+1 差异| 最大且 p < 0.05 的组合
+5. 无组合通过门槛时 fallback 到 (0.7, 0.7)
 
 两个条件 AND 组合（高换手 AND 放量），单一条件不足以触发过热。
 
@@ -57,14 +64,24 @@ Bottom30 是强势股，未过热的强势股 T+1 = +0.55%/天（趋势延续）
 
 **位置**: `comprehensive_factor/stock_selector.py`，在 `apply_stabilization_filter` 后
 
-**签名**:
+**签名** (v3.9.1):
 ```python
+def calibrate_overheat_thresholds(
+    factor_df: pd.DataFrame,
+    composite_factor: pd.Series,
+    top_n: int,
+    grid: tuple[float, ...],
+    min_pvalue: float,
+    logger: logging.Logger | None = None,
+) -> tuple[float, float]:
+    """每次运行时用全历史数据校准最优分位阈值."""
+
 def apply_overheat_filter(
     bottom_stocks: list[dict[str, Any]],
     factor_df: pd.DataFrame,
     top_n: int,
-    turnover_percentile: float = 0.7,
-    volume_ratio_threshold: float = 1.5,
+    turnover_percentile: float = 0.7,  # 校准后传入
+    volume_ratio_percentile: float = 0.7,  # 校准后传入 (v3.9.1: 从固定 1.5 改为截面分位)
     logger: logging.Logger | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
 ```
