@@ -989,15 +989,30 @@ def calibrate_lr_filter(
         logger.info("LR 校准: 训练数据目录不存在 (%s), 跳过过滤", wm_dir)
         return None, None, [], 0.0
 
-    # 读取所有 selection_date 分区
-    import pyarrow.dataset as ds
+    # 逐个 selection_date 分区读取 (避免 ds.dataset schema merge 冲突)
+    import os
 
-    dataset = ds.dataset(wm_dir, partitioning="hive")
-    bottom_df = dataset.to_table().to_pandas()
+    parts: list[pd.DataFrame] = []
+    for date_dir_name in sorted(os.listdir(wm_dir)):
+        if not date_dir_name.startswith("selection_date="):
+            continue
+        date_str = date_dir_name.replace("selection_date=", "")
+        parquet_path = wm_dir / date_dir_name / "part-0.parquet"
+        if not parquet_path.exists():
+            continue
+        try:
+            part_df = pd.read_parquet(parquet_path)
+            part_df["selection_date"] = date_str  # 显式注入分区键
+            parts.append(part_df)
+        except Exception as e:
+            logger.debug("LR 校准: 读取 %s 失败: %s", parquet_path, e)
+            continue
 
-    if bottom_df.empty:
+    if not parts:
         logger.info("LR 校准: 训练数据为空 (%s), 跳过过滤", weight_method)
         return None, None, [], 0.0
+
+    bottom_df = pd.concat(parts, ignore_index=True)
 
     # 过滤 forward_return_1d 非 null 的行 (T+1 已补写)
     bottom_df = bottom_df.dropna(subset=["forward_return_1d"]).copy()
@@ -1029,8 +1044,12 @@ def calibrate_lr_filter(
         weight_method,
     )
 
-    # 确定特征列 (factor_ 前缀的列)
-    feature_cols = [c for c in bottom_df.columns if c.startswith("factor_")]
+    # 确定特征列 (factor_ 前缀的列, 排除非数值如 factor_direction)
+    feature_cols = [
+        c
+        for c in bottom_df.columns
+        if c.startswith("factor_") and bottom_df[c].dtype in ("float64", "float32", "int64", "int32")
+    ]
     if not feature_cols:
         logger.warning("LR 校准: 训练数据无 factor_ 前缀列, 跳过过滤")
         return None, None, [], 0.0
