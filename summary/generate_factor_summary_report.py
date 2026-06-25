@@ -1088,6 +1088,9 @@ def load_stock_selection_result(logger: logging.Logger) -> dict | None:
         if isinstance(dc, str) and dc:
             with contextlib.suppress(ValueError, TypeError):
                 out["decision_card"] = _json.loads(dc)
+        # v3.13: LR 打分 proba_up
+        if "lr_proba_up" in row.index and pd.notna(row.get("lr_proba_up")):
+            out["lr_proba_up"] = float(row["lr_proba_up"])
         return out
 
     df_sorted = df.sort_values(["stage", "rank"])
@@ -2455,16 +2458,12 @@ def _generate_stock_selection_section(
             lines.append("")
 
     if stage1_top or stage1_bottom:
-        excluded_by_overheat = meta.get("excluded_by_overheat", 0)
-        filter_status = (
-            f"LR 过滤排除 {excluded_by_overheat} 只" if excluded_by_overheat else "LR 过滤未启用 (积累训练数据中)"
-        )
-        lines.append("【选股轨迹 (v3.10: Bottom90 LR 过滤)】")
+        lines.append("【选股轨迹 (v3.13: Bottom90 LR 打分排序, 不截断)】")
         lines.append(f"  Stage 1: 综合因子值降序取 Top {meta.get('stage1_pool_size', 200)} 作为候选池 (基础设施)")
         lines.append(
-            f"  Bottom90: 综合因子值升序取最低 {meta.get('top_n', 0) * 3} → {filter_status} → Top {meta.get('top_n', 0)} 最终短名单"
+            f"  Bottom90: 综合因子值升序取最低 {meta.get('top_n', 0) * 3} → LR 模型打分 → 全部按 proba_up 降序输出 (不截断)"
         )
-        lines.append("  说明: 最终短名单按综合因子值升序(composite 最低=弱势股端), LR 模型预测 T+1 跌概率最高的排除.")
+        lines.append("  说明: 最终短名单按 LR proba_up 降序 (预测 T+1 涨概率高=排前), 全部 90 只输出供人工决断.")
         lines.append("")
 
         # Stage 1 简表: composite 降序 Top 30 (弱势股端, 仅供记录)
@@ -2481,12 +2480,10 @@ def _generate_stock_selection_section(
             lines.append("-" * 50)
             lines.append("")
 
-        # Bottom90 原始简表 (LR 过滤前)
+        # Bottom90 原始简表 (composite 升序, LR 打分前)
         if stage1_bottom:
-            excluded_by_overheat = meta.get("excluded_by_overheat", 0)
-            overheat_note = f" (LR 过滤排除 {excluded_by_overheat} 只)" if excluded_by_overheat else ""
             lines.append(
-                f"【Bottom {len(stage1_bottom)}: 综合因子值最低 (composite 升序, 弱势股端, LR 过滤前{overheat_note})】"
+                f"【Bottom {len(stage1_bottom)}: 综合因子值最低 (composite 升序, 弱势股端, LR 打分前)】"
             )
             lines.append(f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12}")
             lines.append("-" * 50)
@@ -2499,7 +2496,7 @@ def _generate_stock_selection_section(
             lines.append("-" * 50)
             lines.append("")
 
-        lines.append(f"【最终短名单 Top {meta.get('top_n', 0)} (Bottom90 LR 过滤后)】")
+        lines.append(f"【最终短名单 Top {len(top_stocks)} (Bottom90 LR 打分排序, 不截断)】")
         lines.append("")
 
     # Top N 股票表格 (v3.9: 即 Bottom30 过热过滤后短名单)
@@ -2521,7 +2518,7 @@ def _generate_stock_selection_section(
         # v2.15 / v2.47: 反向因子取反后z-score加*标记，消除解读歧义
         header_note = "  * = 已取反对齐到正向语义" if flipped_factors else ""
         lines.append(
-            f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12} {'覆盖率':>6} {'因子标准化值(z-score)':<40}{header_note}"
+            f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12} {'LR打分':>6} {'覆盖率':>6} {'因子标准化值(z-score)':<40}{header_note}"
         )
         lines.append("-" * 70)
 
@@ -2578,8 +2575,10 @@ def _generate_stock_selection_section(
                 factor_str = "无因子值"
 
             coverage_str = f"{weight_coverage * 100:.0f}%" if weight_coverage < 1 else "100%"
+            lr_proba = item.get("lr_proba_up")
+            lr_str = f"{lr_proba:.2f}" if lr_proba is not None else "  n/a"
             lines.append(
-                f"{rank:>4} {code:<10} {name:<8} {format_float(composite_value, 3):>12} {coverage_str:>6} {factor_str}"
+                f"{rank:>4} {code:<10} {name:<8} {format_float(composite_value, 3):>12} {lr_str:>6} {coverage_str:>6} {factor_str}"
             )
 
         lines.append("-" * 70)
@@ -2590,7 +2589,7 @@ def _generate_stock_selection_section(
             lines.append("")
             lines.append(f"【短名单 11~{len(top_stocks)} 简表（备选池）】")
             lines.append(
-                f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12} {'覆盖率':>6} {'主导前 3 因子（贡献占比）':<40}"
+                f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12} {'LR打分':>6} {'覆盖率':>6} {'主导前 3 因子（贡献占比）':<40}"
             )
             lines.append("-" * 70)
             flipped_set = set(flipped_factors) if flipped_factors else set()
@@ -2627,8 +2626,10 @@ def _generate_stock_selection_section(
                         dominant_str = ", ".join(parts)
 
                 coverage_str = f"{weight_coverage * 100:.0f}%" if weight_coverage < 1 else "100%"
+                lr_proba = item.get("lr_proba_up")
+                lr_str = f"{lr_proba:.2f}" if lr_proba is not None else "  n/a"
                 lines.append(
-                    f"{rank:>4} {code:<10} {name:<8} {format_float(composite_value, 3):>12} {coverage_str:>6} {dominant_str}"
+                    f"{rank:>4} {code:<10} {name:<8} {format_float(composite_value, 3):>12} {lr_str:>6} {coverage_str:>6} {dominant_str}"
                 )
             lines.append("-" * 70)
             lines.append(

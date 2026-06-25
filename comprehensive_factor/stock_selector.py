@@ -151,7 +151,7 @@ class StockSelectorConfig:
     #   方案: 每日保存 Bottom90 训练数据 → 积累 90 天后训练 LR → walk-forward OOS 验证 → 打分过滤
     #   关键: 训练样本 = 实际选股目标 (composite Bottom90), 训练分布 = 应用分布 (第一性原理)
     #   v3.9.2 的 return_5d 代理已废弃 (训练分布 ≠ 应用分布, 重叠率 0%)
-    enable_overheat_filter: bool = False  # v3.13: 关闭 LR 过滤, 短名单按 composite 排序直接取 30
+    enable_overheat_filter: bool = True  # v3.13: LR 打分排序, 不截断, 全部输出到 report
     lr_min_training_days: int = 90  # 最小训练天数, 不足则 calibrate_lr_filter 返回 None
     lr_top_features: int = 10  # Cohen's d 排序取 top N 特征
     lr_train_window: int = 120  # walk-forward 训练窗口 (天)
@@ -1194,18 +1194,18 @@ def apply_lr_filter(
     filter_quantile: float,
     logger: logging.Logger | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
-    """v3.9.2: 用 LR 模型对 Bottom30 打分, 排除预测 T+1 跌概率最高的.
+    """v3.13: 用 LR 模型对 Bottom90 全部打分, 按 proba_up 降序输出 (不截断).
 
     从 data_source 加载当日特征数据 (selected_features 列), 不依赖调用方 factor_df.
-    模型输出 proba_up = P(T+1 > 0). 打分最低的 filter_quantile 比例排除,
-    不足 top_n 时从被排除的股票递补 (标记 lr_warning=True).
+    模型输出 proba_up = P(T+1 > 0). 全部股票按 proba_up 降序排列输出,
+    每只股票附带 lr_proba_up 字段, 不做排除/截断.
     """
     if logger is None:
         logger = _logger
 
     if model is None or scaler is None or not selected_features:
-        logger.info("LR 过滤: 模型不可用, 跳过过滤")
-        return bottom_stocks[:top_n], 0
+        logger.info("LR 过滤: 模型不可用, 返回原始排序 (无 lr_proba_up)")
+        return bottom_stocks, 0
 
     # v3.11 修复: 训练特征名 (factor_xxx / factor_xxx_std) → parquet 原始列名 (xxx) 映射
     # lr_training_data 中列名带 factor_ 前缀和 _std 后缀, 但 parquet 中是原始列名
@@ -1276,44 +1276,22 @@ def apply_lr_filter(
             len(scored),
         )
 
-    # 按 proba_up 降序排 (概率高的 = 预测涨的 = 保留)
+    # 按 proba_up 降序排 (概率高的 = 预测涨的 = 排前面)
     scored.sort(key=lambda x: x[1], reverse=True)
 
-    # 打分最低的 filter_quantile 比例排除
-    n_exclude = int(len(scored) * filter_quantile)
-    n_exclude = min(n_exclude, len(scored) - top_n)  # 确保留够 top_n
-    if n_exclude <= 0:
-        logger.info("LR 过滤: 候选不足, 无需排除")
-        return bottom_stocks[:top_n], 0
-
-    kept = scored[: len(scored) - n_exclude]
-    excluded = scored[len(scored) - n_exclude :]
-
-    # 不足 top_n 时用被排除的递补 (标记 lr_warning)
-    if len(kept) < top_n:
-        for stock, proba in excluded:
-            if len(kept) >= top_n:
-                break
-            stock["lr_warning"] = True
-            stock["lr_proba_up"] = round(proba, 4)
-            kept.append((stock, proba))
-
-    # 重新编号 rank
+    # v3.13: 不再排除/截断, 全部按 proba_up 降序输出, 每只股票附带 lr_proba_up
     filtered = []
-    for idx, (stock, proba) in enumerate(kept[:top_n], start=1):
+    for idx, (stock, proba) in enumerate(scored, start=1):
         stock["rank"] = idx
         stock["lr_proba_up"] = round(proba, 4)
         filtered.append(stock)
 
     logger.info(
-        "LR 过滤: %d 只候选 → 排除 %d (底 %.0f%%), 保留 %d",
+        "LR 打分: %d 只候选全部输出 (按 proba_up 降序, 不截断)",
         len(scored),
-        n_exclude,
-        filter_quantile * 100,
-        len(filtered),
     )
 
-    return filtered, n_exclude
+    return filtered, 0
 
 
 def build_result(
@@ -1543,6 +1521,7 @@ def write_selection_history(
             "factor_values_json": factor_values_json_str,
             "factor_values_std_json": factor_values_std_json_str,
             "decision_card_json": decision_card_json_str,
+            "lr_proba_up": float(stock["lr_proba_up"]) if stock.get("lr_proba_up") is not None else None,
         }
 
     rows: list[dict[str, Any]] = []
@@ -1591,6 +1570,7 @@ def write_selection_history(
             pa.field("factor_values_json", pa.string(), nullable=True),
             pa.field("factor_values_std_json", pa.string(), nullable=True),
             pa.field("decision_card_json", pa.string(), nullable=True),
+            pa.field("lr_proba_up", pa.float64(), nullable=True),  # v3.13: LR 打分 P(T+1>0)
         ]
     )
 
@@ -2445,11 +2425,9 @@ def select_stocks(
             if lr_model is not None:
                 assert lr_scaler is not None  # noqa: S101  # 模型存在则 scaler 必存在
                 logger.info(
-                    "Bottom30 LR 过滤 (v3.9.2) | %d 特征, OOS AUC=%.3f, 过滤底 %.0f%% → Top %d",
+                    "Bottom90 LR 打分 (v3.13) | %d 特征, OOS AUC=%.3f, 全部输出不截断",
                     len(lr_features),
                     lr_auc,
-                    config.lr_filter_quantile * 100,
-                    config.top_n,
                 )
                 top_stocks, excluded_by_overheat = apply_lr_filter(
                     bottom_pool,
@@ -2463,12 +2441,12 @@ def select_stocks(
                     logger=logger,
                 )
             else:
-                logger.warning("LR 过滤: 模型不可用 (OOS AUC 不足或数据缺失), 跳过过滤")
-                top_stocks = bottom_pool[: config.top_n]
+                logger.warning("LR 打分: 模型不可用 (OOS AUC 不足或数据缺失), 返回原始排序")
+                top_stocks = bottom_pool
         else:
-            top_stocks = bottom_pool[: config.top_n]
+            top_stocks = bottom_pool
 
-        # v3.9: top_stocks 即过热过滤后最终短名单 (与 write_selection_history 的 stage3_top 对应)
+        # v3.13: top_stocks 即 LR 打分排序后全部股票 (与 write_selection_history 的 stage3_top 对应)
     else:
         top_stocks = []
 
