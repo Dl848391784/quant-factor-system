@@ -88,7 +88,7 @@ from factor_definitions import FACTOR_CATEGORIES, FACTOR_COL_TO_NAME_MAP  # noqa
 # ============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "3.10"
+__version__ = "3.11"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -1609,6 +1609,100 @@ def _load_stock_name_map() -> dict[str, str]:
     return {}
 
 
+# v3.11: 四种权重方式各计算 composite_factor
+ALL_WEIGHT_METHODS = ("equal_weight", "icir_weight", "ic_weight", "rolling_icir_weight")
+
+
+def _compute_composite_for_method(
+    method: str,
+    factor_df_orig: pd.DataFrame,
+    composite_data: dict[str, Any],
+    config: "StockSelectorConfig",
+    logger: logging.Logger,
+) -> tuple[pd.Series, list[str], list[str]] | None:
+    """v3.11: 对单个 weight_method 计算 composite_factor.
+
+    从 composite_<method>_1d.json 读取 factor_list/factor_cols/direction_map,
+    执行 standardize + direction_flip + weight_engine.calculate.
+
+    Args:
+        method: 权重方式名 (equal_weight/icir_weight/ic_weight/rolling_icir_weight)
+        factor_df_orig: 原始因子 DataFrame (不修改, 内部 copy)
+        composite_data: composite_<method>_1d.json 的完整 dict
+        config: StockSelectorConfig
+        logger: 日志对象
+
+    Returns:
+        (composite_factor, factor_list, factor_cols) 或 None (计算失败)
+    """
+    meta = composite_data.get("meta", {})
+    factor_list = meta.get("factor_list", [])
+    factor_cols = meta.get("factor_cols", [])
+    if not factor_cols:
+        logger.warning("[v3.11] %s: factor_cols 为空, 跳过", method)
+        return None
+
+    # 检查 factor_cols 是否都在 factor_df 中
+    missing_cols = [c for c in factor_cols if c not in factor_df_orig.columns]
+    if missing_cols:
+        logger.warning("[v3.11] %s: %d 个因子列缺失: %s", method, len(missing_cols), missing_cols[:5])
+        return None
+
+    # copy 避免标准化的 _std 列污染其他方式
+    factor_df = factor_df_orig.copy()
+
+    # Step 7: 标准化
+    factor_df = standardize_factors(factor_df, factor_cols, logger)
+
+    # Step 7.5: 方向统一化
+    direction_map = composite_data.get("config", {}).get("direction_map", {})
+
+    if direction_map:
+        for i, col in enumerate(factor_cols):
+            factor_name = factor_list[i] if i < len(factor_list) else col
+            direction = direction_map.get(factor_name, "unknown")
+            std_col = f"{col}_std"
+            if direction == "negative" and std_col in factor_df.columns:
+                factor_df[std_col] = -factor_df[std_col]
+    else:
+        # 回退: 从 ic_results 计算方向
+        logger.debug("[v3.11] %s: direction_map 为空, 从 ic_results 计算", method)
+        ic_results_dir, _ = load_ic_results(factor_list, config.ic_result_dir, config.return_period, logger)
+        for i, col in enumerate(factor_cols):
+            factor_name = factor_list[i] if i < len(factor_list) else col
+            ic_info = ic_results_dir.get(factor_name, {})
+            ic_mean_val = ic_info.get("ic_mean")
+            std_col = f"{col}_std"
+            if ic_mean_val is not None and ic_mean_val < 0 and std_col in factor_df.columns:
+                factor_df[std_col] = -factor_df[std_col]
+
+    # Step 8: 加载 IC 数据
+    ic_results = None
+    ic_daily_data = None
+    if method == "rolling_icir_weight":
+        ic_daily_data = load_ic_daily(factor_list, config.ic_result_dir, config.return_period, logger)
+    elif method in ("icir_weight", "ic_weight"):
+        ic_results, _ = load_ic_results(factor_list, config.ic_result_dir, config.return_period, logger)
+
+    # Step 9: 计算综合因子
+    short_sample_factors = meta.get("selection_result", {}).get("short_sample_factors")
+    dimension_weight_method = meta.get("weight_meta", {}).get("dimension_weight_method")
+    enable_role_weights = meta.get("weight_meta", {}).get("enable_role_weights", True)
+
+    weight_engine = WeightEngine(
+        weight_method=method,
+        window=config.rolling_window,
+        logger=logger,
+        dimension_weight_method=dimension_weight_method,
+        factor_categories=FACTOR_CATEGORIES if dimension_weight_method else None,
+        enable_role_weights=enable_role_weights,
+    )
+    composite_factor = weight_engine.calculate(factor_df, factor_cols, ic_results, ic_daily_data, short_sample_factors)
+
+    logger.info("[v3.11] %s composite_factor: %d valid", method, composite_factor.notna().sum())
+    return composite_factor, factor_list, factor_cols
+
+
 def save_lr_training_data(
     bottom_stocks: list[dict[str, Any]],
     factor_df: pd.DataFrame,
@@ -1648,9 +1742,11 @@ def save_lr_training_data(
         logger.warning("save_lr_training_data: bottom_stocks 为空, 跳过")
         return None
 
-    best_selection = weight_config.get("best_selection", {})
-    weight_method = best_selection.get("method", "equal_weight")
-    composite_score = float(best_selection.get("composite_score", 0.0))
+    # v3.11: weight_method 从 meta.weight_method 读取 (composite JSON 结构)
+    #   之前从 best_selection.method 读取, 但 v3.11 循环传入的是 composite JSON (无 best_selection)
+    meta = weight_config.get("meta", {})
+    weight_method = meta.get("weight_method", "equal_weight")
+    composite_score = float(weight_config.get("best_selection", {}).get("composite_score", 0.0))
 
     # 确定因子列 (从 factor_df 中排除非因子列, 提前到权重处理之前)
     exclude = {
@@ -1696,9 +1792,12 @@ def save_lr_training_data(
         )
     ]
 
-    # 因子权重 (从 weight_meta.last_day_weights 读取, 等权方式自动生成 1/n)
-    weight_meta = weight_config.get("meta", {}).get("weight_meta", {})
+    # 因子权重 (从 weight_meta.last_day_weights 或 meta.weights 读取, 等权方式自动生成 1/n)
+    weight_meta = meta.get("weight_meta", {})
     last_day_weights = weight_meta.get("last_day_weights", {})
+    if not last_day_weights:
+        # v3.11: icir_weight/ic_weight 的权重存在 meta.weights 中 (非 weight_meta.last_day_weights)
+        last_day_weights = meta.get("weights", {})
     if not last_day_weights:
         # equal_weight / icir_weight / ic_weight 无显式权重 → 等权 1/n
         n_factors = len(factor_cols) if factor_cols else 1
@@ -2400,19 +2499,61 @@ def select_stocks(
         logger=logger,
     )
 
-    # Step 13: v3.10 保存 LR 训练数据 (Bottom90 + 因子权重 + 因子值)
+    # Step 13: v3.11 保存四种权重方式的 LR 训练数据 (各 Bottom90 + 因子权重 + 因子值)
     # 次日 backfill_forward_return_1d 补写 T+1 收益
     # 训练分布 = 应用分布 (第一性原理, designs/feat_lr_training_data.md)
-    # 权重从 composite_<method>_1d.json 的 meta.weight_meta.last_day_weights 读取
-    #   (equal_weight/icir_weight/ic_weight 无显式权重 → 等权 1/n 自动生成)
-    save_lr_training_data(
-        bottom_stocks=bottom_pool[: config.lr_bottom_pool_size],
-        factor_df=factor_df,
-        weight_config=composite_data if composite_file.exists() else weight_config,
-        config=config,
-        selection_date=selection_date,
-        logger=logger,
-    )
+    # v3.11: 不再只存 best_method, 每天对四种方式各存一份 (designs/feat_multi_weight_lr_training.md)
+    #   - best_method 切换时不冷启动
+    #   - summary 可对比四种方式的 OOS AUC
+    for train_method in ALL_WEIGHT_METHODS:
+        composite_file_m = config.output_dir / f"composite_{train_method}_{config.return_period}.json"
+        if not composite_file_m.exists():
+            logger.warning("[v3.11] 跳过 %s: composite 文件不存在", train_method)
+            continue
+
+        try:
+            with open(composite_file_m, encoding="utf-8") as f:
+                composite_data_m = json.load(f)
+        except json.JSONDecodeError as e:
+            logger.warning("[v3.11] %s: composite JSON 解析失败: %s", train_method, e)
+            continue
+
+        result_m = _compute_composite_for_method(
+            method=train_method,
+            factor_df_orig=factor_df,
+            composite_data=composite_data_m,
+            config=config,
+            logger=logger,
+        )
+        if result_m is None:
+            continue
+
+        composite_factor_m, _, _ = result_m
+        valid_cf_m = composite_factor_m.dropna()
+        if len(valid_cf_m) == 0:
+            logger.warning("[v3.11] %s: composite_factor 全 NaN, 跳过", train_method)
+            continue
+
+        bottom_candidates_m = valid_cf_m.nsmallest(config.lr_bottom_pool_size)
+        full_ranked_m = valid_cf_m.sort_values(ascending=False)
+        rank_map_m = {idx: i + 1 for i, idx in enumerate(full_ranked_m.index)}
+        bottom_stocks_m = [
+            {
+                "rank": rank_map_m[idx],
+                "code": factor_df.loc[idx, "asset"],
+                "composite_value": convert_to_native_types(val),
+            }
+            for idx, val in bottom_candidates_m.items()
+        ]
+
+        save_lr_training_data(
+            bottom_stocks=bottom_stocks_m[: config.lr_bottom_pool_size],
+            factor_df=factor_df,
+            weight_config=composite_data_m,
+            config=config,
+            selection_date=selection_date,
+            logger=logger,
+        )
 
     # 问题 4 修复：删除流程完成日志，让 CLI 层的成功日志兼任收尾
     return result, partition_dir
