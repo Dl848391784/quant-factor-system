@@ -44,6 +44,7 @@ Step 7: 股票选股 (stock_selector.py) ← 本脚本
 """
 
 import copy
+import gc
 import json
 import logging
 import os
@@ -73,6 +74,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from comprehensive_factor.common.convert_types import convert_to_native_types  # noqa: E402
 from comprehensive_factor.common.factor_loader import (  # noqa: E402
     load_factor_values,
+    load_full_data,
     load_ic_daily,
     load_ic_results,
     standardize_factors,
@@ -927,8 +929,7 @@ def _discover_features(
 
 
 def calibrate_lr_filter(
-    factor_df: pd.DataFrame,
-    composite_factor: pd.Series,
+    data_source: str | Path,
     top_n: int,
     n_features: int,
     train_window: int,
@@ -938,12 +939,25 @@ def calibrate_lr_filter(
 ) -> tuple["LogisticRegression | None", "StandardScaler | None", list[str], float]:
     """v3.9.2: 每次运行时训练 LR 模型, walk-forward 验证 OOS 效果.
 
+    自包含: 从 data_source 加载全历史数据 (含 forward_return_1d),
+    用 return_5d 选 Bottom30 (强势股代理), 不依赖调用方传入 factor_df.
+
     流程:
-    1. 用全历史数据每日取 Bottom30 样本
-    2. 扫描所有特征, Cohen's d 选 top N (数据驱动, 非人工)
-    3. Walk-forward 验证: 滚动 train_window 天训练, 预测下一天, 计算 OOS AUC
-    4. 用全样本训练最终模型
-    5. 如果 OOS AUC < min_oos_auc, 返回 None (跳过过滤)
+    1. 从 data_source 加载全历史数据
+    2. 每日用 return_5d 降序取 top_n 作为 Bottom30 (强势股端)
+    3. 扫描所有特征, Cohen's d 选 top N (数据驱动, 非人工)
+    4. Walk-forward 验证: 滚动 train_window 天训练, 预测下一天, 计算 OOS AUC
+    5. 用全样本训练最终模型
+    6. 如果 OOS AUC < min_oos_auc, 返回 None (跳过过滤)
+
+    Args:
+        data_source: 统一数据源路径 (factor_ic_data.parquet/json.gz).
+        top_n: Bottom N (与选股逻辑一致, 默认 30).
+        n_features: top N 特征数 (Cohen's d 排序).
+        train_window: walk-forward 训练窗口天数.
+        min_oos_auc: OOS AUC 门槛.
+        filter_quantile: 排除底 N% (用于日志, 实际排除在 apply_lr_filter 中执行).
+        logger: 日志对象.
 
     Returns:
         (model, scaler, selected_features, oos_auc).
@@ -956,23 +970,37 @@ def calibrate_lr_filter(
     from sklearn.metrics import roc_auc_score
     from sklearn.preprocessing import StandardScaler
 
-    # 确定特征列
-    exclude = {"date", "asset", "forward_return_1d", "forward_return_3d", "forward_return_5d", "is_untradeable"}
+    # 1) 加载全历史数据 (含 forward_return_1d, return_5d, 所有特征列)
+    logger.info("LR 校准: 加载全历史数据 (%s)...", data_source)
+    full_df = load_full_data(data_source=data_source, logger=logger)
+
+    required_cols = {"date", "asset", "return_5d", "forward_return_1d"}
+    missing = required_cols - set(full_df.columns)
+    if missing:
+        logger.warning("LR 校准: 数据源缺少列 %s, 跳过过滤", missing)
+        return None, None, [], 0.0
+
+    # 确定特征列 (排除非特征列)
+    exclude = {
+        "date",
+        "asset",
+        "forward_return_1d",
+        "forward_return_3d",
+        "forward_return_5d",
+        "is_untradeable",
+        "return_5d",  # return_5d 用作 Bottom30 选择, 不作为特征
+    }
     feature_cols = [
-        c
-        for c in factor_df.columns
-        if c not in exclude and factor_df[c].dtype in ("float64", "float32", "int64", "int32")
+        c for c in full_df.columns if c not in exclude and full_df[c].dtype in ("float64", "float32", "int64", "int32")
     ]
 
-    # 准备 Bottom30 历史样本
-    df = factor_df.copy()
-    df["composite"] = composite_factor.reindex(df.index)
-    df = df.dropna(subset=["composite", "forward_return_1d"])
+    # 2) 每日取 return_5d 降序 top_n (Bottom30 = 强势股端)
+    df = full_df.dropna(subset=["return_5d", "forward_return_1d"]).copy()
 
     bottom_samples = []
     for _date, group in df.groupby("date"):
         if len(group) >= top_n:
-            bottom_samples.append(group.nsmallest(top_n, "composite"))
+            bottom_samples.append(group.nlargest(top_n, "return_5d"))
 
     if len(bottom_samples) < train_window + 10:
         logger.warning(
@@ -985,6 +1013,10 @@ def calibrate_lr_filter(
     bottom_df = pd.concat(bottom_samples, ignore_index=True)
     dates = sorted(bottom_df["date"].unique())
     logger.info("LR 校准: %d 天 Bottom30 样本, %d 条记录", len(dates), len(bottom_df))
+
+    # 释放全历史数据内存 (只保留 Bottom30 子集)
+    del full_df
+    gc.collect()
 
     # 1) 数据驱动特征发现
     selected_features = _discover_features(bottom_df, feature_cols, n_features, logger)
@@ -1078,7 +1110,8 @@ def calibrate_lr_filter(
 
 def apply_lr_filter(
     bottom_stocks: list[dict[str, Any]],
-    factor_df: pd.DataFrame,
+    data_source: str | Path,
+    selection_date: str,
     top_n: int,
     model: "LogisticRegression",
     scaler: "StandardScaler",
@@ -1088,6 +1121,7 @@ def apply_lr_filter(
 ) -> tuple[list[dict[str, Any]], int]:
     """v3.9.2: 用 LR 模型对 Bottom30 打分, 排除预测 T+1 跌概率最高的.
 
+    从 data_source 加载当日特征数据 (selected_features 列), 不依赖调用方 factor_df.
     模型输出 proba_up = P(T+1 > 0). 打分最低的 filter_quantile 比例排除,
     不足 top_n 时从被排除的股票递补 (标记 lr_warning=True).
     """
@@ -1098,7 +1132,10 @@ def apply_lr_filter(
         logger.info("LR 过滤: 模型不可用, 跳过过滤")
         return bottom_stocks[:top_n], 0
 
-    asset_index = factor_df.set_index("asset") if "asset" in factor_df.columns else factor_df
+    # 加载当日特征数据 (仅 selected_features 列, 开销极小)
+    day_df = load_factor_values(selected_features, data_source, logger)
+    day_df = day_df[day_df["date"].apply(lambda d: pd.Timestamp(d).strftime("%Y-%m-%d")) == selection_date].copy()
+    asset_index = day_df.set_index("asset") if "asset" in day_df.columns else day_df
 
     # 收集每只股票的特征和模型打分
     scored: list[tuple[dict[str, Any], float]] = []
@@ -1827,10 +1864,9 @@ def select_stocks(
 
         # v3.9.2: LR 数据驱动过滤 (每次运行时训练, walk-forward 验证)
         if config.enable_overheat_filter:
-            # 1) 训练 LR 模型 + walk-forward OOS 验证
+            # 1) 训练 LR 模型 + walk-forward OOS 验证 (自包含加载全历史数据)
             lr_model, lr_scaler, lr_features, lr_auc = calibrate_lr_filter(
-                factor_df,
-                composite_factor,
+                config.data_source,
                 config.top_n,
                 config.lr_top_features,
                 config.lr_train_window,
@@ -1839,6 +1875,7 @@ def select_stocks(
                 logger=logger,
             )
             if lr_model is not None:
+                assert lr_scaler is not None  # noqa: S101  # 模型存在则 scaler 必存在
                 logger.info(
                     "Bottom30 LR 过滤 (v3.9.2) | %d 特征, OOS AUC=%.3f, 过滤底 %.0f%% → Top %d",
                     len(lr_features),
@@ -1848,7 +1885,8 @@ def select_stocks(
                 )
                 top_stocks, excluded_by_overheat = apply_lr_filter(
                     bottom_pool,
-                    factor_df,
+                    config.data_source,
+                    selection_date,
                     config.top_n,
                     lr_model,
                     lr_scaler,
