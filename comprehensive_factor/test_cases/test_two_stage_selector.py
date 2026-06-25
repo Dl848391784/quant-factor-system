@@ -259,7 +259,7 @@ class TestStockSelectorConfigTwoStageValidation:
     def test_overheat_filter_defaults(self):
         """v3.11: LR 数据驱动过滤参数默认值校验 (已启用, 548 天训练数据, AUC=0.573)."""
         config = StockSelectorConfig()
-        assert config.enable_overheat_filter is True  # v3.11: 已启用
+        assert config.enable_overheat_filter is False  # v3.13: 关闭 LR 过滤, 直接排序取 30
         assert config.lr_min_training_days == 90  # v3.10: 最小训练天数
         assert config.lr_top_features == 10
         assert config.lr_train_window == 120

@@ -151,7 +151,7 @@ class StockSelectorConfig:
     #   方案: 每日保存 Bottom90 训练数据 → 积累 90 天后训练 LR → walk-forward OOS 验证 → 打分过滤
     #   关键: 训练样本 = 实际选股目标 (composite Bottom90), 训练分布 = 应用分布 (第一性原理)
     #   v3.9.2 的 return_5d 代理已废弃 (训练分布 ≠ 应用分布, 重叠率 0%)
-    enable_overheat_filter: bool = True  # v3.11: LR 过滤已启用 (548 天训练数据, OOS AUC=0.573)
+    enable_overheat_filter: bool = False  # v3.13: 关闭 LR 过滤, 短名单按 composite 排序直接取 30
     lr_min_training_days: int = 90  # 最小训练天数, 不足则 calibrate_lr_filter 返回 None
     lr_top_features: int = 10  # Cohen's d 排序取 top N 特征
     lr_train_window: int = 120  # walk-forward 训练窗口 (天)
