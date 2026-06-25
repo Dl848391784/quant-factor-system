@@ -896,12 +896,15 @@ def _discover_features(
     top_n: int,
     logger: logging.Logger,
 ) -> list[str]:
-    """v3.9.2: 数据驱动特征发现——用 Cohen's d 选 top N 特征.
+    """v3.12: 数据驱动特征发现——Cohen's d 选 top N + 同族去重.
 
-    在 Bottom30 历史样本上, 按 T+1 涨跌分组, 计算每个特征的 Cohen's d 效应量.
-    返回 |d| 最大的 top_n 个特征 (不依赖任何主观假设).
+    在 Bottom90 历史样本上, 按 T+1 涨跌分组, 计算每个特征的 Cohen's d 效应量.
+    按 |d| 降序贪心选取, 每次选入前检查与已选特征的 Pearson |r|,
+    若 |r| > 0.7 则跳过 (同族共线性特征, 避免多变量系数翻转).
+
+    根因: 原始特征 (factor_xxx) 与标准化特征 (factor_xxx_std) 高度相关
+    (|r| ≈ 0.78~0.85) 但方向相反, 同时入选会导致 LR 多变量系数翻转.
     """
-
     up_mask = bottom_df["forward_return_1d"] > 0
     down_mask = bottom_df["forward_return_1d"] < 0
 
@@ -923,14 +926,50 @@ def _discover_features(
         scores.append((col, abs(d)))
 
     scores.sort(key=lambda x: x[1], reverse=True)
-    selected = [s[0] for s in scores[:top_n]]
+
+    # v3.12: 同族去重 — 贪心选取, |r| > 0.7 视为同族, 跳过
+    correlation_threshold = 0.7
+    selected: list[str] = []
+    skipped_due_to_correlation: list[tuple[str, str, float]] = []
+
+    for feat_name, feat_d in scores:
+        if len(selected) >= top_n:
+            break
+        if not selected:
+            selected.append(feat_name)
+            continue
+
+        # 计算与已选特征的相关性
+        feat_vals = bottom_df[feat_name].dropna()
+        is_redundant = False
+        for sel_feat in selected:
+            sel_vals = bottom_df[sel_feat]
+            # 对齐索引
+            common_idx = feat_vals.index.intersection(sel_vals.dropna().index)
+            if len(common_idx) < 30:
+                continue
+            r = float(feat_vals.loc[common_idx].corr(sel_vals.loc[common_idx]))
+            if abs(r) > correlation_threshold:
+                skipped_due_to_correlation.append((feat_name, sel_feat, r))
+                is_redundant = True
+                break
+
+        if not is_redundant:
+            selected.append(feat_name)
 
     logger.info(
         "特征发现: 扫描 %d 个特征, 选 top %d: %s",
         len(feature_cols),
         len(selected),
-        ", ".join(f"{s[0]}({s[1]:.3f})" for s in scores[:top_n]),
+        ", ".join(f"{s[0]}({s[1]:.3f})" for s in scores if s[0] in selected),
     )
+    if skipped_due_to_correlation:
+        logger.debug(
+            "特征去重: 跳过 %d 个同族特征 (|r| > %.1f): %s",
+            len(skipped_due_to_correlation),
+            correlation_threshold,
+            ", ".join(f"{f}↔{s}(r={r:.2f})" for f, s, r in skipped_due_to_correlation[:5]),
+        )
     return selected
 
 
