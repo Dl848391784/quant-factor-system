@@ -151,7 +151,7 @@ class StockSelectorConfig:
     #   方案: 每日保存 Bottom90 训练数据 → 积累 90 天后训练 LR → walk-forward OOS 验证 → 打分过滤
     #   关键: 训练样本 = 实际选股目标 (composite Bottom90), 训练分布 = 应用分布 (第一性原理)
     #   v3.9.2 的 return_5d 代理已废弃 (训练分布 ≠ 应用分布, 重叠率 0%)
-    enable_overheat_filter: bool = False  # v3.10: 默认关闭, 需积累 lr_min_training_days 后启用
+    enable_overheat_filter: bool = True  # v3.11: LR 过滤已启用 (548 天训练数据, OOS AUC=0.573)
     lr_min_training_days: int = 90  # 最小训练天数, 不足则 calibrate_lr_filter 返回 None
     lr_top_features: int = 10  # Cohen's d 排序取 top N 特征
     lr_train_window: int = 120  # walk-forward 训练窗口 (天)
@@ -1168,8 +1168,22 @@ def apply_lr_filter(
         logger.info("LR 过滤: 模型不可用, 跳过过滤")
         return bottom_stocks[:top_n], 0
 
-    # 加载当日特征数据 (仅 selected_features 列, 开销极小)
-    day_df = load_factor_values(selected_features, data_source, logger)
+    # v3.11 修复: 训练特征名 (factor_xxx / factor_xxx_std) → parquet 原始列名 (xxx) 映射
+    # lr_training_data 中列名带 factor_ 前缀和 _std 后缀, 但 parquet 中是原始列名
+    def _map_feat_to_parquet(feat: str) -> str:
+        base = feat
+        if base.startswith("factor_"):
+            base = base[7:]
+        if base.endswith("_std"):
+            base = base[:-4]
+        return base
+
+    # 建立 训练特征 → parquet列名 映射, 去重加载 parquet 列
+    feat_to_parquet = {f: _map_feat_to_parquet(f) for f in selected_features}
+    unique_parquet_feats = list(dict.fromkeys(feat_to_parquet.values()))
+
+    # 加载当日特征数据 (仅 unique_parquet_feats 列, 开销极小)
+    day_df = load_factor_values(unique_parquet_feats, data_source, logger)
     day_df = day_df[day_df["date"].apply(lambda d: pd.Timestamp(d).strftime("%Y-%m-%d")) == selection_date].copy()
     asset_index = day_df.set_index("asset") if "asset" in day_df.columns else day_df
 
@@ -1186,10 +1200,14 @@ def apply_lr_filter(
         if isinstance(row, pd.DataFrame):
             row = row.iloc[0]
 
+        # 按 selected_features 顺序构建特征向量 (重复的 parquet 列会读到同一个值)
         feature_vals = []
         valid = True
         for feat in selected_features:
-            val = row.get(feat, np.nan)
+            parquet_col = feat_to_parquet[feat]
+            val = row.get(parquet_col, np.nan)
+            if isinstance(val, pd.Series):
+                val = val.iloc[0]
             if pd.isna(val):
                 valid = False
                 break
