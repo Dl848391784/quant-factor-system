@@ -1164,7 +1164,8 @@ def apply_lr_filter(
             scored.append((stock, 0.5))  # 特征缺失 → 中性概率
             continue
 
-        proba_up = float(model.predict_proba(scaler.transform([feature_vals]))[0, 1])
+        X = pd.DataFrame([feature_vals], columns=selected_features)
+        proba_up = float(model.predict_proba(scaler.transform(X))[0, 1])
         scored.append((stock, proba_up))
 
     if missing_features > 0:
