@@ -257,11 +257,13 @@ class TestStockSelectorConfigTwoStageValidation:
         config.validate()  # 不应抛异常
 
     def test_overheat_filter_defaults(self):
-        """v3.9.1: 过热过滤参数默认值校验 (彻底数据驱动)."""
+        """v3.9.2: LR 数据驱动过滤参数默认值校验."""
         config = StockSelectorConfig()
         assert config.enable_overheat_filter is True
-        assert config.overheat_calibrate_min_pvalue == 0.05
-        assert config.overheat_calibrate_grid == (0.5, 0.6, 0.7, 0.8, 0.9)
+        assert config.lr_top_features == 10
+        assert config.lr_train_window == 120
+        assert config.lr_min_oos_auc == 0.55
+        assert config.lr_filter_quantile == 0.3
 
 
 # ============================================================================

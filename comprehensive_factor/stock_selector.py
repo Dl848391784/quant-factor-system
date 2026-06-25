@@ -53,10 +53,15 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pandas as pd
+
+
+if TYPE_CHECKING:
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.preprocessing import StandardScaler
 
 
 # sys.path 处理（遵循 MODULE.md M49）
@@ -142,16 +147,14 @@ class StockSelectorConfig:
     stage2_sort_col: str = "turnover_rate"  # 保留字段, v3.9 不再调用 apply_stage2_resort
     stage2_ascending: bool = True  # 保留字段, v3.9 不再使用
 
-    # v3.9: Bottom30 过热过滤 (designs/feat_bottom30_overheat_filter.md)
-    # v3.9.1: 彻底数据驱动——每次运行时用全历史数据校准最优分位阈值
-    #   校准逻辑: 扫描 turnover_percentile × volume_ratio_percentile 网格,
-    #   在 Bottom30 历史样本上找 T+1 差异最大且 p<0.05 的组合.
+    # v3.9.2: Bottom30 LR 数据驱动过滤 (designs/feat_bottom30_overheat_filter.md)
+    #   方案: 扫描所有特征 → Cohen's d 选 top N → LR 训练 → walk-forward OOS 验证 → 打分过滤
+    #   关键: 每次运行时用全历史数据重新训练, 不写死模型/特征/阈值
     enable_overheat_filter: bool = True
-    overheat_calibrate_min_pvalue: float = 0.05  # 统计显著性门槛
-    overheat_calibrate_grid: tuple[float, ...] = (0.5, 0.6, 0.7, 0.8, 0.9)  # 分位搜索网格
-    # v3.9 校准结果 (运行时填充, 非硬编码)
-    overheat_turnover_percentile: float = 0.7  # fallback: 校准失败时用
-    overheat_volume_ratio_percentile: float = 0.7  # v3.9.1: 从固定 1.5 改为截面分位
+    lr_top_features: int = 10  # Cohen's d 排序取 top N 特征
+    lr_train_window: int = 120  # walk-forward 训练窗口 (天)
+    lr_min_oos_auc: float = 0.55  # OOS AUC 门槛, 低于此值跳过过滤
+    lr_filter_quantile: float = 0.3  # Bottom30 中打分最低 30% 排除
 
     # === 数据路径 ===（问题 4 修复：default_factory 保证延迟求值）
     data_source: Path = field(default_factory=lambda: DEFAULT_DATA_SOURCE)
@@ -187,18 +190,16 @@ class StockSelectorConfig:
                 f"stage1_pool_size ({self.stage1_pool_size}) 必须 > top_n*2 ({self.top_n * 2})，否则候选池过小"
             )
 
-        # v3.9: 过热过滤参数校验
+        # v3.9.2: LR 过滤参数校验
         if self.enable_overheat_filter:
-            if not 0 < self.overheat_calibrate_min_pvalue < 1:
-                raise ValueError(
-                    f"overheat_calibrate_min_pvalue 必须在 (0, 1) 区间, 当前: {self.overheat_calibrate_min_pvalue}"
-                )
-            if not self.overheat_calibrate_grid:
-                raise ValueError("overheat_calibrate_grid 不能为空")
-            if not all(0 < p < 1 for p in self.overheat_calibrate_grid):
-                raise ValueError(
-                    f"overheat_calibrate_grid 所有值必须在 (0, 1) 区间, 当前: {self.overheat_calibrate_grid}"
-                )
+            if self.lr_top_features < 3:
+                raise ValueError(f"lr_top_features 至少 3, 当前: {self.lr_top_features}")
+            if self.lr_train_window < 30:
+                raise ValueError(f"lr_train_window 至少 30 天, 当前: {self.lr_train_window}")
+            if not 0.5 <= self.lr_min_oos_auc <= 1.0:
+                raise ValueError(f"lr_min_oos_auc 必须在 [0.5, 1.0], 当前: {self.lr_min_oos_auc}")
+            if not 0 < self.lr_filter_quantile < 1:
+                raise ValueError(f"lr_filter_quantile 必须在 (0, 1), 当前: {self.lr_filter_quantile}")
 
 
 # ============================================================================
@@ -880,240 +881,296 @@ def apply_stabilization_filter(
         excluded,
     )
 
-    return filtered[:top_n], excluded
+
+def _discover_features(
+    bottom_df: pd.DataFrame,
+    feature_cols: list[str],
+    top_n: int,
+    logger: logging.Logger,
+) -> list[str]:
+    """v3.9.2: 数据驱动特征发现——用 Cohen's d 选 top N 特征.
+
+    在 Bottom30 历史样本上, 按 T+1 涨跌分组, 计算每个特征的 Cohen's d 效应量.
+    返回 |d| 最大的 top_n 个特征 (不依赖任何主观假设).
+    """
+
+    up_mask = bottom_df["forward_return_1d"] > 0
+    down_mask = bottom_df["forward_return_1d"] < 0
+
+    scores: list[tuple[str, float]] = []
+    for col in feature_cols:
+        up_vals = bottom_df.loc[up_mask, col].dropna()
+        down_vals = bottom_df.loc[down_mask, col].dropna()
+        if len(up_vals) < 30 or len(down_vals) < 30:
+            continue
+        pooled_std = float(
+            np.sqrt(
+                ((len(up_vals) - 1) * up_vals.var() + (len(down_vals) - 1) * down_vals.var())
+                / (len(up_vals) + len(down_vals) - 2)
+            )
+        )
+        if pooled_std <= 0:
+            continue
+        d = float((up_vals.mean() - down_vals.mean()) / pooled_std)
+        scores.append((col, abs(d)))
+
+    scores.sort(key=lambda x: x[1], reverse=True)
+    selected = [s[0] for s in scores[:top_n]]
+
+    logger.info(
+        "特征发现: 扫描 %d 个特征, 选 top %d: %s",
+        len(feature_cols),
+        len(selected),
+        ", ".join(f"{s[0]}({s[1]:.3f})" for s in scores[:top_n]),
+    )
+    return selected
 
 
-def calibrate_overheat_thresholds(
+def calibrate_lr_filter(
     factor_df: pd.DataFrame,
     composite_factor: pd.Series,
     top_n: int,
-    grid: tuple[float, ...],
-    min_pvalue: float,
+    n_features: int,
+    train_window: int,
+    min_oos_auc: float,
+    filter_quantile: float,
     logger: logging.Logger | None = None,
-) -> tuple[float, float]:
-    """v3.9.1: 每次运行时用全历史数据校准过热过滤最优分位阈值.
+) -> tuple["LogisticRegression | None", "StandardScaler | None", list[str], float]:
+    """v3.9.2: 每次运行时训练 LR 模型, walk-forward 验证 OOS 效果.
 
-    在全历史 Bottom30 样本上, 扫描 turnover_percentile × volume_ratio_percentile 网格,
-    对每组阈值将 Bottom30 分为"过热/未过热"两组, 计算 T+1 均值差异和 Welch t 检验 p 值.
-    选择 |T+1 差异| 最大且 p < min_pvalue 的组合.
-
-    Args:
-        factor_df: 全样本 DataFrame (含 date, asset, turnover_rate, volume_ratio_5, forward_return_1d).
-        composite_factor: 综合因子值 Series (索引与 factor_df 对齐).
-        top_n: Bottom N (与选股逻辑一致, 默认 30).
-        grid: 分位搜索网格, 如 (0.5, 0.6, 0.7, 0.8, 0.9).
-        min_pvalue: 统计显著性门槛 (默认 0.05).
-        logger: 日志对象.
+    流程:
+    1. 用全历史数据每日取 Bottom30 样本
+    2. 扫描所有特征, Cohen's d 选 top N (数据驱动, 非人工)
+    3. Walk-forward 验证: 滚动 train_window 天训练, 预测下一天, 计算 OOS AUC
+    4. 用全样本训练最终模型
+    5. 如果 OOS AUC < min_oos_auc, 返回 None (跳过过滤)
 
     Returns:
-        (turnover_percentile, volume_ratio_percentile) 最优分位组合.
-        如果无组合通过 p 值门槛, 返回 (0.7, 0.7) fallback.
+        (model, scaler, selected_features, oos_auc).
+        如果 OOS 验证不通过, 返回 (None, None, [], 0.0).
     """
     if logger is None:
         logger = _logger
 
-    from scipy import stats as sp_stats
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import roc_auc_score
+    from sklearn.preprocessing import StandardScaler
 
-    required = {"date", "asset", "turnover_rate", "volume_ratio_5", "forward_return_1d"}
-    missing = required - set(factor_df.columns)
-    if missing:
-        logger.warning("过热校准: 缺少列 %s, 使用 fallback 阈值 (0.7, 0.7)", missing)
-        return 0.7, 0.7
+    # 确定特征列
+    exclude = {"date", "asset", "forward_return_1d", "forward_return_3d", "forward_return_5d", "is_untradeable"}
+    feature_cols = [
+        c
+        for c in factor_df.columns
+        if c not in exclude and factor_df[c].dtype in ("float64", "float32", "int64", "int32")
+    ]
 
-    # 全历史 Bottom30 样本
+    # 准备 Bottom30 历史样本
     df = factor_df.copy()
     df["composite"] = composite_factor.reindex(df.index)
-    df = df.dropna(subset=["composite", "turnover_rate", "volume_ratio_5", "forward_return_1d"])
+    df = df.dropna(subset=["composite", "forward_return_1d"])
 
-    # 每日截面: composite 升序取最低 top_n 只 (Bottom30, 强势股端)
     bottom_samples = []
     for _date, group in df.groupby("date"):
         if len(group) >= top_n:
-            bottom = group.nsmallest(top_n, "composite")
-            bottom_samples.append(bottom)
+            bottom_samples.append(group.nsmallest(top_n, "composite"))
 
-    if not bottom_samples:
-        logger.warning("过热校准: 无有效 Bottom30 历史样本, 使用 fallback 阈值 (0.7, 0.7)")
-        return 0.7, 0.7
+    if len(bottom_samples) < train_window + 10:
+        logger.warning(
+            "LR 校准: 历史样本不足 (%d 天 < %d+10), 跳过过滤",
+            len(bottom_samples),
+            train_window,
+        )
+        return None, None, [], 0.0
 
     bottom_df = pd.concat(bottom_samples, ignore_index=True)
-    total_samples = len(bottom_df)
-    logger.info("过热校准: %d 天 Bottom30 样本, %d 条记录", len(bottom_samples), total_samples)
+    dates = sorted(bottom_df["date"].unique())
+    logger.info("LR 校准: %d 天 Bottom30 样本, %d 条记录", len(dates), len(bottom_df))
 
-    best_diff = 0.0
-    best_p = 1.0
-    best_combo = (0.7, 0.7)
+    # 1) 数据驱动特征发现
+    selected_features = _discover_features(bottom_df, feature_cols, n_features, logger)
 
-    for t_pct in grid:
-        for v_pct in grid:
-            # 每日截面分位阈值
-            t_thresholds = bottom_df.groupby("date")["turnover_rate"].quantile(t_pct)
-            v_thresholds = bottom_df.groupby("date")["volume_ratio_5"].quantile(v_pct)
+    if len(selected_features) < 3:
+        logger.warning("LR 校准: 有效特征不足 (%d < 3), 跳过过滤", len(selected_features))
+        return None, None, [], 0.0
 
-            # 合并回 bottom_df
-            t_map = t_thresholds.to_dict()
-            v_map = v_thresholds.to_dict()
-            t_thr = bottom_df["date"].map(t_map)
-            v_thr = bottom_df["date"].map(v_map)
+    # 2) Walk-forward OOS 验证
+    date_to_data = {d: bottom_df[bottom_df["date"] == d] for d in dates}
+    oos_aucs: list[float] = []
 
-            overheat_mask = (bottom_df["turnover_rate"] > t_thr) & (bottom_df["volume_ratio_5"] > v_thr)
-            overheat_ret = bottom_df.loc[overheat_mask, "forward_return_1d"]
-            normal_ret = bottom_df.loc[~overheat_mask, "forward_return_1d"]
+    for i in range(train_window, len(dates)):
+        train_dates = dates[i - train_window : i]
+        test_date = dates[i]
 
-            n_oh = len(overheat_ret)
-            n_norm = len(normal_ret)
-            if n_oh < 10 or n_norm < 10:
-                continue
+        train_data = pd.concat([date_to_data[d] for d in train_dates], ignore_index=True)
+        test_data = date_to_data[test_date]
 
-            diff = float(normal_ret.mean() - overheat_ret.mean())
-            if diff <= 0:
-                continue  # 只看"过热→T+1 更低"的方向
+        X_train = train_data[selected_features]
+        y_train = (train_data["forward_return_1d"] > 0).astype(int)
+        X_test = test_data[selected_features]
+        y_test = (test_data["forward_return_1d"] > 0).astype(int)
 
-            t_stat, p_value = sp_stats.ttest_ind(normal_ret, overheat_ret, equal_var=False)
+        train_valid = X_train.notna().all(axis=1)
+        test_valid = X_test.notna().all(axis=1)
+        X_train = X_train[train_valid]
+        y_train = y_train[train_valid]
+        X_test = X_test[test_valid]
+        y_test = y_test[test_valid]
 
-            if p_value < min_pvalue and diff > best_diff:
-                best_diff = diff
-                best_p = p_value
-                best_combo = (t_pct, v_pct)
+        if len(X_train) < 100 or len(X_test) < 5:
+            continue
+        if y_train.nunique() < 2 or y_test.nunique() < 2:
+            continue
 
-    if best_diff > 0:
-        logger.info(
-            "过热校准: 最优 turnover=%.0f%% volume_ratio=%.0f%%, T+1 差异=%.4f%%/天, p=%.2e, 过热N=%d, 未过热N=%d",
-            best_combo[0] * 100,
-            best_combo[1] * 100,
-            best_diff * 100,
-            best_p,
-            n_oh,
-            n_norm,
+        scaler = StandardScaler()
+        model = LogisticRegression(max_iter=1000, random_state=42)
+        try:
+            model.fit(scaler.fit_transform(X_train), y_train)
+            y_pred = model.predict_proba(scaler.transform(X_test))[:, 1]
+            oos_aucs.append(float(roc_auc_score(y_test, y_pred)))
+        except (ValueError, np.linalg.LinAlgError) as e:
+            logger.debug("LR walk-forward 窗口 %s 失败: %s", test_date, e)
+            continue
+
+    if not oos_aucs:
+        logger.warning("LR 校准: walk-forward 无有效窗口, 跳过过滤")
+        return None, None, [], 0.0
+
+    mean_auc = float(np.mean(oos_aucs))
+    median_auc = float(np.median(oos_aucs))
+    pct_above = float(np.mean(np.array(oos_aucs) > min_oos_auc) * 100)
+    logger.info(
+        "LR walk-forward OOS: AUC=%.3f±%.3f (中位 %.3f), >%.2f: %.0f%%, 窗口数=%d",
+        mean_auc,
+        float(np.std(oos_aucs)),
+        median_auc,
+        min_oos_auc,
+        pct_above,
+        len(oos_aucs),
+    )
+
+    if mean_auc < min_oos_auc:
+        logger.warning(
+            "LR 校准: OOS AUC %.3f < 门槛 %.2f, 跳过过滤",
+            mean_auc,
+            min_oos_auc,
         )
-    else:
-        logger.warning("过热校准: 无组合通过 p<%.2f 门槛, 使用 fallback (0.7, 0.7)", min_pvalue)
+        return None, None, selected_features, mean_auc
 
-    return best_combo
+    # 3) 用全样本训练最终模型
+    X_full = bottom_df[selected_features]
+    y_full = (bottom_df["forward_return_1d"] > 0).astype(int)
+    full_valid = X_full.notna().all(axis=1)
+    X_full = X_full[full_valid]
+    y_full = y_full[full_valid]
+
+    final_scaler = StandardScaler()
+    final_model = LogisticRegression(max_iter=1000, random_state=42)
+    final_model.fit(final_scaler.fit_transform(X_full), y_full)
+
+    logger.info(
+        "LR 校准完成: %d 特征, OOS AUC=%.3f, 过滤底 %.0f%%",
+        len(selected_features),
+        mean_auc,
+        filter_quantile * 100,
+    )
+    return final_model, final_scaler, selected_features, mean_auc
 
 
-def apply_overheat_filter(
+def apply_lr_filter(
     bottom_stocks: list[dict[str, Any]],
     factor_df: pd.DataFrame,
     top_n: int,
-    turnover_percentile: float = 0.7,
-    volume_ratio_percentile: float = 0.7,
+    model: "LogisticRegression",
+    scaler: "StandardScaler",
+    selected_features: list[str],
+    filter_quantile: float,
     logger: logging.Logger | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
-    """Bottom30 过热过滤 (v3.9.1, designs/feat_bottom30_overheat_filter.md)
+    """v3.9.2: 用 LR 模型对 Bottom30 打分, 排除预测 T+1 跌概率最高的.
 
-    在 Bottom30（强势股, composite 最低端）中排除"过热"股票。
-    过热 = 高换手率(截面分位) AND 放量(volume_ratio_5 截面分位)。
-    被排除的股票从 Bottom31+ 递补, 保持 top_n 数量。
-
-    v3.9.1: 两个阈值都改为截面分位 (由 calibrate_overheat_thresholds 校准),
-    不再使用固定绝对值。
-
-    Args:
-        bottom_stocks: composite 升序最低 N 只 (含 code 字段)
-        factor_df: 当日因子+行情 DataFrame (含 asset, turnover_rate, volume_ratio_5 列)
-        top_n: 最终输出数量
-        turnover_percentile: 换手率截面分位阈值 (校准后, 如 0.7)
-        volume_ratio_percentile: volume_ratio_5 截面分位阈值 (校准后, 如 0.7)
-        logger: 日志对象
-
-    Returns:
-        (filtered_stocks, excluded_count)
+    模型输出 proba_up = P(T+1 > 0). 打分最低的 filter_quantile 比例排除,
+    不足 top_n 时从被排除的股票递补 (标记 lr_warning=True).
     """
     if logger is None:
         logger = _logger
 
-    required_cols = ["turnover_rate", "volume_ratio_5"]
-    available_cols = [c for c in required_cols if c in factor_df.columns]
-
-    if len(available_cols) < 2:
-        logger.info(
-            "过热过滤: turnover_rate/volume_ratio_5 不可用 (%s), 跳过过滤",
-            available_cols,
-        )
+    if model is None or scaler is None or not selected_features:
+        logger.info("LR 过滤: 模型不可用, 跳过过滤")
         return bottom_stocks[:top_n], 0
 
     asset_index = factor_df.set_index("asset") if "asset" in factor_df.columns else factor_df
 
-    # v3.9.1: 两个阈值都从当日截面分位动态计算
-    turnover_series = factor_df["turnover_rate"].dropna()
-    vol_ratio_series = factor_df["volume_ratio_5"].dropna()
-    if len(turnover_series) == 0 or len(vol_ratio_series) == 0:
-        logger.info("过热过滤: turnover_rate/volume_ratio_5 全部为 NaN, 跳过过滤")
-        return bottom_stocks[:top_n], 0
-
-    turnover_threshold = float(turnover_series.quantile(turnover_percentile))
-    vol_ratio_threshold = float(vol_ratio_series.quantile(volume_ratio_percentile))
-    logger.info(
-        "过热过滤: 换手率 %.0f%% 分位阈值=%.4f, volume_ratio_5 %.0f%% 分位阈值=%.4f",
-        turnover_percentile * 100,
-        turnover_threshold,
-        volume_ratio_percentile * 100,
-        vol_ratio_threshold,
-    )
-
-    filtered: list[dict[str, Any]] = []
-    excluded = 0
+    # 收集每只股票的特征和模型打分
+    scored: list[tuple[dict[str, Any], float]] = []
+    missing_features = 0
     for stock in bottom_stocks:
-        if len(filtered) >= top_n:
-            break
-
         code = stock["code"]
-        row = asset_index.loc[code] if code in asset_index.index else None
-        if row is None:
-            filtered.append(stock)
+        if code not in asset_index.index:
+            scored.append((stock, 0.5))  # 数据不可用 → 中性概率
             continue
 
-        # 处理同 code 多行边界（理论上单日唯一, 但保险）
+        row = asset_index.loc[code]
         if isinstance(row, pd.DataFrame):
             row = row.iloc[0]
 
-        turnover = float(row.get("turnover_rate", np.nan))
-        vol_ratio = float(row.get("volume_ratio_5", np.nan))
+        feature_vals = []
+        valid = True
+        for feat in selected_features:
+            val = row.get(feat, np.nan)
+            if pd.isna(val):
+                valid = False
+                break
+            feature_vals.append(float(val))
 
-        # 数据不可用 → 不过滤
-        if pd.isna(turnover) or pd.isna(vol_ratio):
-            filtered.append(stock)
+        if not valid:
+            missing_features += 1
+            scored.append((stock, 0.5))  # 特征缺失 → 中性概率
             continue
 
-        # v3.9.1: 过热条件——两个截面分位阈值都改为动态计算
-        is_overheated = float(turnover) > turnover_threshold and float(vol_ratio) > vol_ratio_threshold
+        proba_up = float(model.predict_proba(scaler.transform([feature_vals]))[0, 1])
+        scored.append((stock, proba_up))
 
-        if is_overheated:
-            excluded += 1
-            logger.debug(
-                "过热过滤排除: %s (换手率=%.4f > %.4f, vol_ratio_5=%.2f > %.4f)",
-                code,
-                float(turnover),
-                turnover_threshold,
-                float(vol_ratio),
-                vol_ratio_threshold,
-            )
-        else:
-            filtered.append(stock)
+    if missing_features > 0:
+        logger.info("LR 过滤: %d/%d 只股票特征缺失, 使用中性概率 0.5", missing_features, len(scored))
 
-    # 不足 top_n 时用被排除的股票递补 (与 apply_stabilization_filter 一致)
-    if len(filtered) < top_n:
-        filtered_codes = {s["code"] for s in filtered}
-        for stock in bottom_stocks:
-            if len(filtered) >= top_n:
+    # 按 proba_up 降序排 (概率高的 = 预测涨的 = 保留)
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    # 打分最低的 filter_quantile 比例排除
+    n_exclude = int(len(scored) * filter_quantile)
+    n_exclude = min(n_exclude, len(scored) - top_n)  # 确保留够 top_n
+    if n_exclude <= 0:
+        logger.info("LR 过滤: 候选不足, 无需排除")
+        return bottom_stocks[:top_n], 0
+
+    kept = scored[: len(scored) - n_exclude]
+    excluded = scored[len(scored) - n_exclude :]
+
+    # 不足 top_n 时用被排除的递补 (标记 lr_warning)
+    if len(kept) < top_n:
+        for stock, proba in excluded:
+            if len(kept) >= top_n:
                 break
-            if stock["code"] not in filtered_codes:
-                stock["overheat_warning"] = True
-                filtered.append(stock)
+            stock["lr_warning"] = True
+            stock["lr_proba_up"] = round(proba, 4)
+            kept.append((stock, proba))
 
     # 重新编号 rank
-    for idx, stock in enumerate(filtered[:top_n], start=1):
+    filtered = []
+    for idx, (stock, proba) in enumerate(kept[:top_n], start=1):
         stock["rank"] = idx
+        stock["lr_proba_up"] = round(proba, 4)
+        filtered.append(stock)
 
     logger.info(
-        "过热过滤: 候选 %d → 通过 %d, 排除 %d",
-        len(bottom_stocks),
-        min(len(filtered), top_n),
-        excluded,
+        "LR 过滤: %d 只候选 → 排除 %d (底 %.0f%%), 保留 %d",
+        len(scored),
+        n_exclude,
+        filter_quantile * 100,
+        len(filtered),
     )
 
-    return filtered[:top_n], excluded
+    return filtered, n_exclude
 
 
 def build_result(
@@ -1768,52 +1825,40 @@ def select_stocks(
         # 原始快照 (过滤前, 前 top_n 只)
         stage1_bottom_snapshot = [copy.deepcopy(s) for s in bottom_pool[: config.top_n]]
 
-        # v3.9: 加载过热过滤所需列 (turnover_rate, volume_ratio_5)
-        overheat_aux_cols = ["turnover_rate", "volume_ratio_5"]
-        missing_oh = [c for c in overheat_aux_cols if c not in factor_df.columns]
-        factor_df_for_overheat = factor_df
-        if missing_oh:
-            logger.info("过热过滤: 加载辅助列 %s", missing_oh)
-            try:
-                aux_df_raw = load_factor_values(missing_oh, config.data_source, logger)
-                aux_df = cast(pd.DataFrame, aux_df_raw)
-                if "date" in aux_df.columns:
-                    aux_df = aux_df[aux_df["date"] == selection_date].copy()
-                merge_cols = ["asset"] + [c for c in missing_oh if c in aux_df.columns]
-                factor_df_for_overheat = factor_df.merge(cast(pd.DataFrame, aux_df[merge_cols]), on="asset", how="left")
-                logger.info(
-                    "过热过滤: %d 只股票获得 turnover_rate/volume_ratio_5 值",
-                    factor_df_for_overheat["turnover_rate"].notna().sum(),
-                )
-            except (FileNotFoundError, KeyError, ValueError) as e:
-                logger.warning("过热过滤: 辅助列加载失败 (%s), 跳过过滤", e)
-
-        # v3.9.1: 过热过滤 (彻底数据驱动——每次运行时校准阈值)
+        # v3.9.2: LR 数据驱动过滤 (每次运行时训练, walk-forward 验证)
         if config.enable_overheat_filter:
-            # 1) 用全历史数据校准最优分位阈值
-            t_pct, v_pct = calibrate_overheat_thresholds(
+            # 1) 训练 LR 模型 + walk-forward OOS 验证
+            lr_model, lr_scaler, lr_features, lr_auc = calibrate_lr_filter(
                 factor_df,
                 composite_factor,
                 config.top_n,
-                config.overheat_calibrate_grid,
-                config.overheat_calibrate_min_pvalue,
+                config.lr_top_features,
+                config.lr_train_window,
+                config.lr_min_oos_auc,
+                config.lr_filter_quantile,
                 logger=logger,
             )
-            logger.info(
-                "Bottom30 过热过滤 (v3.9.1) | 校准阈值: turnover=%.0f%%, volume_ratio=%.0f%% → Top %d",
-                t_pct * 100,
-                v_pct * 100,
-                config.top_n,
-            )
-            # 2) 用校准后的阈值执行过滤
-            top_stocks, excluded_by_overheat = apply_overheat_filter(
-                bottom_pool,
-                factor_df_for_overheat,
-                config.top_n,
-                turnover_percentile=t_pct,
-                volume_ratio_percentile=v_pct,
-                logger=logger,
-            )
+            if lr_model is not None:
+                logger.info(
+                    "Bottom30 LR 过滤 (v3.9.2) | %d 特征, OOS AUC=%.3f, 过滤底 %.0f%% → Top %d",
+                    len(lr_features),
+                    lr_auc,
+                    config.lr_filter_quantile * 100,
+                    config.top_n,
+                )
+                top_stocks, excluded_by_overheat = apply_lr_filter(
+                    bottom_pool,
+                    factor_df,
+                    config.top_n,
+                    lr_model,
+                    lr_scaler,
+                    lr_features,
+                    config.lr_filter_quantile,
+                    logger=logger,
+                )
+            else:
+                logger.warning("LR 过滤: 模型不可用 (OOS AUC 不足或数据缺失), 跳过过滤")
+                top_stocks = bottom_pool[: config.top_n]
         else:
             top_stocks = bottom_pool[: config.top_n]
 

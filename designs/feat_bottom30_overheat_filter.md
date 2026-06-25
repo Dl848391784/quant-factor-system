@@ -42,21 +42,26 @@
 
 Bottom30 是强势股，未过热的强势股 T+1 = +0.55%/天（趋势延续）。过热的强势股 T+1 = -0.31%/天（反转下跌）。**排除过热的 = 保留趋势延续的**，符合第一性原理。
 
-### 阈值依据（v3.9.1: 彻底数据驱动，非写死）
+### 阈值依据（v3.9.2: 彻底数据驱动, LR 模型）
 
-| 参数 | v3.9 (写死) | v3.9.1 (数据驱动) |
-|------|------------|-------------------|
-| turnover_rate 分位 | 固定 0.7 | 每次运行时校准 |
-| volume_ratio_5 分位 | 固定绝对值 1.5 | 每次运行时校准为截面分位 |
+| 参数 | v3.9 (写死) | v3.9.1 (分位校准) | v3.9.2 (LR 模型) |
+|------|------------|-------------------|-----------------|
+| 特征选择 | 主观选 turnover+volume_ratio | 同 (2 个固定特征) | Cohen's d 选 top 10 (数据发现) |
+| 阈值 | 固定绝对值 1.5 | 分位网格搜索 | LR 模型打分, 底 30% 排除 |
+| OOS 验证 | 无 | 无 | walk-forward 120 天, AUC > 0.55 |
 
-**校准逻辑** (`calibrate_overheat_thresholds`):
+**LR 校准逻辑** (`calibrate_lr_filter`):
 1. 用全历史数据（549 天）每日取 Bottom30 样本
-2. 扫描 5×5 网格: turnover_percentile × volume_ratio_percentile (0.5/0.6/0.7/0.8/0.9)
-3. 对每组阈值分"过热/未过热"两组，计算 T+1 均值差异和 Welch t 检验 p 值
-4. 选择 |T+1 差异| 最大且 p < 0.05 的组合
-5. 无组合通过门槛时 fallback 到 (0.7, 0.7)
+2. 扫描所有 ~78 个特征, 计算 Cohen's d, 选 top 10 (数据驱动)
+3. Walk-forward: 120 天训练窗口滚动, 计算 OOS AUC
+4. OOS AUC > 0.55 → 用全样本训练最终模型
+5. 对当日 Bottom30 打分, 排除预测 T+1 跌概率最高的 30%
 
-两个条件 AND 组合（高换手 AND 放量），单一条件不足以触发过热。
+**Walk-forward 验证结果** (return_5d 选 Bottom30, 384 个 OOS 窗口):
+- OOS AUC = 0.635 ± 0.128, 78% 窗口 > 0.55
+- 保留组 T+1 = +0.0145%, 胜率 55.2%
+- 排除组 T+1 = -0.0123%, 胜率 39.9%
+- 差异 0.027%/天, p = 1e-83
 
 ## 详细设计
 
@@ -64,34 +69,46 @@ Bottom30 是强势股，未过热的强势股 T+1 = +0.55%/天（趋势延续）
 
 **位置**: `comprehensive_factor/stock_selector.py`，在 `apply_stabilization_filter` 后
 
-**签名** (v3.9.1):
+**签名** (v3.9.2):
 ```python
-def calibrate_overheat_thresholds(
+def _discover_features(
+    bottom_df: pd.DataFrame,
+    feature_cols: list[str],
+    top_n: int,
+    logger: logging.Logger,
+) -> list[str]:
+    """数据驱动特征发现: Cohen's d 选 top N 特征."""
+
+def calibrate_lr_filter(
     factor_df: pd.DataFrame,
     composite_factor: pd.Series,
     top_n: int,
-    grid: tuple[float, ...],
-    min_pvalue: float,
+    n_features: int,          # top N 特征数 (默认 10)
+    train_window: int,        # walk-forward 训练窗口 (默认 120 天)
+    min_oos_auc: float,       # OOS AUC 门槛 (默认 0.55)
+    filter_quantile: float,   # 排除底 N% (默认 0.3)
     logger: logging.Logger | None = None,
-) -> tuple[float, float]:
-    """每次运行时用全历史数据校准最优分位阈值."""
+) -> tuple[LogisticRegression | None, StandardScaler | None, list[str], float]:
+    """每次运行时训练 LR + walk-forward OOS 验证."""
 
-def apply_overheat_filter(
+def apply_lr_filter(
     bottom_stocks: list[dict[str, Any]],
     factor_df: pd.DataFrame,
     top_n: int,
-    turnover_percentile: float = 0.7,  # 校准后传入
-    volume_ratio_percentile: float = 0.7,  # 校准后传入 (v3.9.1: 从固定 1.5 改为截面分位)
+    model: LogisticRegression,
+    scaler: StandardScaler,
+    selected_features: list[str],
+    filter_quantile: float,
     logger: logging.Logger | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
+    """LR 模型打分, 排除预测 T+1 跌概率最高的."""
 ```
 
 **逻辑**:
-1. 从 factor_df 提取 turnover_rate 和 volume_ratio_5
-2. 计算当日 turnover_rate 截面 70% 分位阈值
-3. 逐只检查: turnover_rate > 阈值 AND volume_ratio_5 > 1.5 → 标记过热，排除
-4. 不足 top_n 时用被排除的股票递补（向后兼容，与 apply_stabilization_filter 一致）
-5. 重新编号 rank
+1. `_discover_features`: 按 T+1 涨跌分组, 计算每个特征 Cohen's d, 选 top N
+2. `calibrate_lr_filter`: walk-forward 120 天训练验证 OOS AUC > 0.55, 通过则全样本训练最终模型
+3. `apply_lr_filter`: 对当日 Bottom30 打分 (proba_up), 排除底 30%, 递补标记 lr_warning
+4. 重新编号 rank
 
 **输入**: `bottom_stocks` = composite 升序最低 30 只（现有 `stage1_bottom_snapshot`）
 **输出**: (filtered_stocks, excluded_count)
