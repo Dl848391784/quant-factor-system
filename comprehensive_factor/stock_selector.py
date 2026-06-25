@@ -88,7 +88,7 @@ from factor_definitions import FACTOR_CATEGORIES, FACTOR_COL_TO_NAME_MAP  # noqa
 # ============================================================================
 
 # 版本号（遵循 PROJECT.md 规范）
-__version__ = "3.7"
+__version__ = "3.10"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
 _logger = get_logger(__name__)
@@ -193,8 +193,10 @@ class StockSelectorConfig:
                 f"stage1_pool_size ({self.stage1_pool_size}) 必须 > top_n*2 ({self.top_n * 2})，否则候选池过小"
             )
 
-        # v3.9.2: LR 过滤参数校验
+        # v3.10: LR 过滤参数校验
         if self.enable_overheat_filter:
+            if self.lr_min_training_days < 30:
+                raise ValueError(f"lr_min_training_days 至少 30, 当前: {self.lr_min_training_days}")
             if self.lr_top_features < 3:
                 raise ValueError(f"lr_top_features 至少 3, 当前: {self.lr_top_features}")
             if self.lr_train_window < 30:
@@ -203,6 +205,9 @@ class StockSelectorConfig:
                 raise ValueError(f"lr_min_oos_auc 必须在 [0.5, 1.0], 当前: {self.lr_min_oos_auc}")
             if not 0 < self.lr_filter_quantile < 1:
                 raise ValueError(f"lr_filter_quantile 必须在 (0, 1), 当前: {self.lr_filter_quantile}")
+        # v3.10: lr_bottom_pool_size 校验 (不论是否启用过滤)
+        if self.lr_bottom_pool_size < self.top_n:
+            raise ValueError(f"lr_bottom_pool_size ({self.lr_bottom_pool_size}) 必须 >= top_n ({self.top_n})")
 
 
 # ============================================================================
@@ -1628,22 +1633,7 @@ def save_lr_training_data(
     weight_method = best_selection.get("method", "equal_weight")
     composite_score = float(best_selection.get("composite_score", 0.0))
 
-    # 因子权重 (从 weight_meta.last_day_weights 读取)
-    weight_meta = weight_config.get("meta", {}).get("weight_meta", {})
-    last_day_weights = weight_meta.get("last_day_weights", {})
-
-    # 映射因子逻辑名→列名
-    name_to_col = {v: k for k, v in FACTOR_COL_TO_NAME_MAP.items()}
-    weights_col_map = {name_to_col.get(k, k): v for k, v in last_day_weights.items()}
-
-    # 股票名称映射
-    stock_name_map = _load_stock_name_map()
-
-    # 构建行数据
-    run_id = str(uuid.uuid4())
-    created_at = datetime.now(timezone.utc)
-
-    # 确定因子列 (从 factor_df 中排除非因子列)
+    # 确定因子列 (从 factor_df 中排除非因子列, 提前到权重处理之前)
     exclude = {
         "date",
         "asset",
@@ -1686,6 +1676,30 @@ def save_lr_training_data(
             )
         )
     ]
+
+    # 因子权重 (从 weight_meta.last_day_weights 读取, 等权方式自动生成 1/n)
+    weight_meta = weight_config.get("meta", {}).get("weight_meta", {})
+    last_day_weights = weight_meta.get("last_day_weights", {})
+    if not last_day_weights:
+        # equal_weight / icir_weight / ic_weight 无显式权重 → 等权 1/n
+        n_factors = len(factor_cols) if factor_cols else 1
+        last_day_weights = dict.fromkeys(factor_cols, 1.0 / n_factors)
+        logger.info(
+            "save_lr_training_data: 无显式权重 (weight_method=%s), 生成等权 1/%d",
+            weight_method,
+            n_factors,
+        )
+
+    # 映射因子逻辑名→列名
+    name_to_col = {v: k for k, v in FACTOR_COL_TO_NAME_MAP.items()}
+    weights_col_map = {name_to_col.get(k, k): v for k, v in last_day_weights.items()}
+
+    # 股票名称映射
+    stock_name_map = _load_stock_name_map()
+
+    # 构建行数据
+    run_id = str(uuid.uuid4())
+    created_at = datetime.now(timezone.utc)
 
     rows: list[dict[str, Any]] = []
     for stock in bottom_stocks:
@@ -1949,6 +1963,9 @@ def select_stocks(
     # 问题 1 修复：调用 validate() 校验配置完整性
     config.validate()
 
+    # Step 0: v3.10 补写前一天 lr_training_data 的 forward_return_1d (T+1 收益)
+    backfill_forward_return_1d(config.data_source, logger=logger)
+
     # Step 1: 加载最优权重配置（优先获取因子列表）
     # 问题 3 修复：__post_init__ 已处理路径默认值，无需运行时校验
     weight_config = load_weight_config(config.weight_result_path, logger)
@@ -2205,10 +2222,11 @@ def select_stocks(
     )
     stage1_top_snapshot = [copy.deepcopy(s) for s in stage1_stocks[: config.top_n]]
 
-    # v3.9: Bottom30 过热过滤候选池 (composite 升序 top_n*2, 留递补空间)
+    # v3.10: Bottom90 候选池 (composite 升序最低 90 只, 留递补 + 训练数据)
+    #   v3.9 用 top_n*2=60, v3.10 改为 lr_bottom_pool_size=90 (训练数据需要更多样本)
     valid_cf = composite_factor.dropna()
     if len(valid_cf) > 0:
-        bottom_candidates = valid_cf.nsmallest(config.top_n * 2)
+        bottom_candidates = valid_cf.nsmallest(config.lr_bottom_pool_size)
         full_ranked = valid_cf.sort_values(ascending=False)
         rank_map = {idx: i + 1 for i, idx in enumerate(full_ranked.index)}
         bottom_pool = [
@@ -2222,16 +2240,19 @@ def select_stocks(
         # 原始快照 (过滤前, 前 top_n 只)
         stage1_bottom_snapshot = [copy.deepcopy(s) for s in bottom_pool[: config.top_n]]
 
-        # v3.9.2: LR 数据驱动过滤 (每次运行时训练, walk-forward 验证)
+        # v3.10: LR 数据驱动过滤 (从 lr_training_data 读取训练样本, 非代理)
         if config.enable_overheat_filter:
-            # 1) 训练 LR 模型 + walk-forward OOS 验证 (自包含加载全历史数据)
+            from paths import LR_TRAINING_DATA_DIR
+
             lr_model, lr_scaler, lr_features, lr_auc = calibrate_lr_filter(
-                config.data_source,
-                config.top_n,
-                config.lr_top_features,
-                config.lr_train_window,
-                config.lr_min_oos_auc,
-                config.lr_filter_quantile,
+                LR_TRAINING_DATA_DIR,
+                weight_method=best_method,
+                top_n=config.top_n,
+                n_features=config.lr_top_features,
+                train_window=config.lr_train_window,
+                min_oos_auc=config.lr_min_oos_auc,
+                min_training_days=config.lr_min_training_days,
+                filter_quantile=config.lr_filter_quantile,
                 logger=logger,
             )
             if lr_model is not None:
@@ -2357,6 +2378,20 @@ def select_stocks(
         exclusion_stats=exclusion_stats,
         output_dir=config.output_dir,
         stage1_bottom=stage1_bottom_snapshot,  # v3.8: Bottom 30 原始快照 (过滤前)
+        logger=logger,
+    )
+
+    # Step 13: v3.10 保存 LR 训练数据 (Bottom90 + 因子权重 + 因子值)
+    # 次日 backfill_forward_return_1d 补写 T+1 收益
+    # 训练分布 = 应用分布 (第一性原理, designs/feat_lr_training_data.md)
+    # 权重从 composite_<method>_1d.json 的 meta.weight_meta.last_day_weights 读取
+    #   (equal_weight/icir_weight/ic_weight 无显式权重 → 等权 1/n 自动生成)
+    save_lr_training_data(
+        bottom_stocks=bottom_pool[: config.lr_bottom_pool_size],
+        factor_df=factor_df,
+        weight_config=composite_data if composite_file.exists() else weight_config,
+        config=config,
+        selection_date=selection_date,
         logger=logger,
     )
 
