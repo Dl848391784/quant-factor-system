@@ -683,8 +683,9 @@ def main():
 
     try:
         # 确定路径
-        script_dir = Path(__file__).parent
-        result_dir = Path(args.result_dir) if args.result_dir else script_dir / DEFAULT_CONFIG["result_dir"]
+        from paths import COMPREHENSIVE_FACTOR_RESULT
+
+        result_dir = Path(args.result_dir) if args.result_dir else COMPREHENSIVE_FACTOR_RESULT
         output_path = Path(args.output) if args.output else result_dir / "weight_selection_result.json"
 
         _logger.info("result_dir=%s | output=%s", result_dir, output_path)

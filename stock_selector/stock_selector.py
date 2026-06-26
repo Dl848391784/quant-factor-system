@@ -63,6 +63,14 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))  # noqa: E402
 
+# 当本文件作为脚本直接运行时，Python 会把脚本所在目录（stock_selector/）加入
+# sys.path[0]。这导致 `import stock_selector` 找到的是 stock_selector.py 文件
+# 而非 stock_selector/ 包目录，后续 `from stock_selector.xxx import` 会失败。
+# 移除脚本目录以避免此冲突。
+_script_dir = str(Path(__file__).parent.resolve())
+while _script_dir in sys.path:
+    sys.path.remove(_script_dir)
+
 # ============================================================================
 # Re-exports: 保持所有 `from stock_selector.stock_selector import X` 向后兼容
 # ============================================================================
