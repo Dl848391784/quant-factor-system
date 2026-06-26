@@ -54,7 +54,7 @@ class TestVersion:
 
     def test_version_defined(self):
         """验证版本常量存在"""
-        assert __version__ == "3.7"
+        assert __version__ == "3.8"
 
 
 class TestHelperFunctions:
@@ -216,9 +216,9 @@ class TestDataFreshnessCheck:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             with (
-                patch("summary.generate_factor_summary_report.PROJECT_ROOT", root),
+                patch("summary.report.freshness_check.PROJECT_ROOT", root),
                 patch(
-                    "summary.generate_factor_summary_report.DATA_CHECK_SOURCES",
+                    "summary.report.freshness_check.DATA_CHECK_SOURCES",
                     {
                         "test_source": {
                             "path": "nonexistent/file.json.gz",
@@ -251,9 +251,9 @@ class TestDataFreshnessCheck:
                 f.write(json.dumps(test_data) + "\n")
 
             with (
-                patch("summary.generate_factor_summary_report.PROJECT_ROOT", root),
+                patch("summary.report.freshness_check.PROJECT_ROOT", root),
                 patch(
-                    "summary.generate_factor_summary_report.DATA_CHECK_SOURCES",
+                    "summary.report.freshness_check.DATA_CHECK_SOURCES",
                     {
                         "test_source": {
                             "path": "data_fetchers/result/test_data.json.gz",
@@ -288,9 +288,9 @@ class TestDataFreshnessCheck:
                 f.write(json.dumps(test_data) + "\n")
 
             with (
-                patch("summary.generate_factor_summary_report.PROJECT_ROOT", root),
+                patch("summary.report.freshness_check.PROJECT_ROOT", root),
                 patch(
-                    "summary.generate_factor_summary_report.DATA_CHECK_SOURCES",
+                    "summary.report.freshness_check.DATA_CHECK_SOURCES",
                     {
                         "test_source": {
                             "path": "data_fetchers/result/test_data.json.gz",
@@ -324,9 +324,9 @@ class TestDataFreshnessCheck:
                 f.write(json.dumps(test_data))
 
             with (
-                patch("summary.generate_factor_summary_report.PROJECT_ROOT", root),
+                patch("summary.report.freshness_check.PROJECT_ROOT", root),
                 patch(
-                    "summary.generate_factor_summary_report.DATA_CHECK_SOURCES",
+                    "summary.report.freshness_check.DATA_CHECK_SOURCES",
                     {
                         "test_source": {
                             "path": "data_fetchers/result/test_data.json.gz",
@@ -361,9 +361,9 @@ class TestDataFreshnessCheck:
                 f.write("]}")
 
             with (
-                patch("summary.generate_factor_summary_report.PROJECT_ROOT", root),
+                patch("summary.report.freshness_check.PROJECT_ROOT", root),
                 patch(
-                    "summary.generate_factor_summary_report.DATA_CHECK_SOURCES",
+                    "summary.report.freshness_check.DATA_CHECK_SOURCES",
                     {
                         "factor_ic_data": {
                             "path": "data_fetchers/result/factor_ic_data.json.gz",
@@ -412,9 +412,9 @@ class TestDataFreshnessCheck:
                 json.dump(test_data, f)
 
             with (
-                patch("summary.generate_factor_summary_report.PROJECT_ROOT", root),
+                patch("summary.report.freshness_check.PROJECT_ROOT", root),
                 patch(
-                    "summary.generate_factor_summary_report.DATA_CHECK_SOURCES",
+                    "summary.report.freshness_check.DATA_CHECK_SOURCES",
                     {
                         "tail_trading_data": {
                             "path": "data_fetchers/result/tail_trading_data.json.gz",
@@ -450,9 +450,9 @@ class TestDerivedDataFreshnessCheck:
             (root / "comprehensive_factor" / "result").mkdir(parents=True)
 
             with (
-                patch("summary.generate_factor_summary_report.PROJECT_ROOT", root),
+                patch("summary.report.freshness_check.PROJECT_ROOT", root),
                 patch(
-                    "summary.generate_factor_summary_report.DATA_PATHS",
+                    "summary.report.freshness_check.DATA_PATHS",
                     {
                         "ic_result": "factor_ic/result",
                         "backtest_result": "backtest/result",
@@ -497,9 +497,9 @@ class TestDerivedDataFreshnessCheck:
             comp_file.write_text("{}")
 
             with (
-                patch("summary.generate_factor_summary_report.PROJECT_ROOT", root),
+                patch("summary.report.freshness_check.PROJECT_ROOT", root),
                 patch(
-                    "summary.generate_factor_summary_report.DATA_PATHS",
+                    "summary.report.freshness_check.DATA_PATHS",
                     {
                         "ic_result": "factor_ic/result",
                         "backtest_result": "backtest/result",
@@ -815,7 +815,7 @@ class TestReportStructure:
     def test_report_generated(self, mock_project_root):
         """测试报告生成（mock 环境）"""
         # 此测试需要 patch PROJECT_ROOT
-        with patch("summary.generate_factor_summary_report.PROJECT_ROOT", mock_project_root):
+        with patch("summary.report.data_loaders.PROJECT_ROOT", mock_project_root):
             from summary.generate_factor_summary_report import load_backtest_results, load_ic_results
 
             logger = setup_logger("test")
@@ -1171,7 +1171,9 @@ class TestShortlistTop30:
         brief_block = [
             line
             for line in lines
-            if "(" in line and "%)" in line and ("interaction_kdj__ret5d_pos__ret5d_pos" in line or "bollinger_pb" in line)
+            if "(" in line
+            and "%)" in line
+            and ("interaction_kdj__ret5d_pos__ret5d_pos" in line or "bollinger_pb" in line)
         ]
         assert len(brief_block) > 0, f"简表未找到主导因子百分比行: {lines}"
 
@@ -1353,7 +1355,7 @@ class TestLoadStockNameMap:
 
     def test_missing_file_returns_empty_dict(self, tmp_path, monkeypatch):
         """文件不存在时返回 {} 且仅 warning, 不抛错."""
-        import summary.generate_factor_summary_report as mod
+        import summary.report.data_loaders as mod
 
         fake_path = tmp_path / "nonexistent.json"
         monkeypatch.setattr(mod, "STOCK_LIST_DATA", fake_path)
@@ -1363,7 +1365,7 @@ class TestLoadStockNameMap:
 
     def test_valid_file_returns_code_to_name(self, tmp_path, monkeypatch):
         """正常 stock_list.json 返回 {code: name}, 名称清洗全角空格."""
-        import summary.generate_factor_summary_report as mod
+        import summary.report.data_loaders as mod
 
         fake_path = tmp_path / "stock_list.json"
         fake_path.write_text(
@@ -1389,7 +1391,7 @@ class TestLoadStockNameMap:
 
     def test_malformed_file_does_not_crash(self, tmp_path, monkeypatch):
         """文件解析失败时返回 {}, 仅 warning."""
-        import summary.generate_factor_summary_report as mod
+        import summary.report.data_loaders as mod
 
         fake_path = tmp_path / "stock_list.json"
         fake_path.write_text("not a valid json {{{", encoding="utf-8")
@@ -1503,7 +1505,7 @@ class TestLoadStockSelectionParquet:
 
     def test_load_returns_three_stages(self, tmp_path, monkeypatch, populated_dataset):
         """读回应包含 stage1_top / stage2_top / stage3_top 三段 + 向后兼容 top_stocks."""
-        import summary.generate_factor_summary_report as mod
+        import summary.report.data_loaders as mod
 
         # 重写 DATA_PATHS 指向测试数据集 + PROJECT_ROOT
         monkeypatch.setattr(mod, "PROJECT_ROOT", populated_dataset.parent.parent)
@@ -1540,7 +1542,7 @@ class TestLoadStockSelectionParquet:
 
     def test_meta_from_file_metadata(self, tmp_path, monkeypatch, populated_dataset):
         """meta 应从 Parquet file-level metadata 提取 excluded_by_* 等统计."""
-        import summary.generate_factor_summary_report as mod
+        import summary.report.data_loaders as mod
 
         monkeypatch.setattr(mod, "PROJECT_ROOT", populated_dataset.parent.parent)
         monkeypatch.setitem(
@@ -1564,7 +1566,7 @@ class TestLoadStockSelectionParquet:
 
     def test_missing_dataset_returns_none(self, tmp_path, monkeypatch):
         """数据集目录不存在返回 None (不抛异常)."""
-        import summary.generate_factor_summary_report as mod
+        import summary.report.data_loaders as mod
 
         monkeypatch.setattr(mod, "PROJECT_ROOT", tmp_path)
         monkeypatch.setitem(mod.DATA_PATHS, "stock_selection", "nonexistent/dataset")
@@ -1573,18 +1575,19 @@ class TestLoadStockSelectionParquet:
 
     def test_render_section_includes_stage1_and_stage2(self, tmp_path, monkeypatch, populated_dataset):
         """_generate_stock_selection_section 应渲染 Stage 1 + Bottom + 最终短名单 (v3.10)."""
-        import summary.generate_factor_summary_report as mod
+        import summary.report.data_loaders as dl_mod
+        import summary.report.sections as sec_mod
 
-        monkeypatch.setattr(mod, "PROJECT_ROOT", populated_dataset.parent.parent)
+        monkeypatch.setattr(dl_mod, "PROJECT_ROOT", populated_dataset.parent.parent)
         monkeypatch.setitem(
-            mod.DATA_PATHS,
+            dl_mod.DATA_PATHS,
             "stock_selection",
             str(populated_dataset.relative_to(populated_dataset.parent.parent)),
         )
         logger = logging.getLogger("test_render_three_stages")
-        result = mod.load_stock_selection_result(logger)
+        result = dl_mod.load_stock_selection_result(logger)
 
-        lines = mod._generate_stock_selection_section(result, {}, None)
+        lines = sec_mod._generate_stock_selection_section(result, {}, None)
         text = "\n".join(lines)
         assert "选股轨迹 (v3.10: Bottom90 LR 过滤)" in text
         assert "Stage 1: 综合因子值 Top 3" in text
