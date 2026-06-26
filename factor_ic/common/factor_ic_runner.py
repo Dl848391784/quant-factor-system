@@ -670,11 +670,16 @@ def run_factor_ic_analysis(
                 logger=logger,
                 excluded_specs=excluded_specs,
             )
+            # decay_rate 可能为 None（raw_ic_mean 近零保护 → NaN → None），
+            # .get(default) 对值为 None 的 key 不生效，用 `or` 确保回退到 0.0
+            _neu_ic_mean = ic_neutralized_payload.get("ic_mean") or 0.0
+            _neu_decay_rate = ic_neutralized_payload.get("decay_rate") or 0.0
+            _neu_decay_level = ic_neutralized_payload.get("decay_level") or "unknown"
             logger.info(
                 "neutral IC 均值: %.4f / decay_rate: %.4f / decay_level: %s",
-                ic_neutralized_payload.get("ic_mean", 0.0),
-                ic_neutralized_payload.get("decay_rate", 0.0),
-                ic_neutralized_payload.get("decay_level", "unknown"),
+                _neu_ic_mean,
+                _neu_decay_rate,
+                _neu_decay_level,
             )
         except Exception as e:
             # 不让中性化失败拖垮 raw IC 输出，降级为 enabled=false + 失败原因
