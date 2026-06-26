@@ -122,6 +122,10 @@
     "decision_card_json": {
       "type": ["string", "null"],
       "description": "JSON 字符串: 决策卡片 (v2.43, 5 维客观字段). 仅 Stage 3 行有值."
+    },
+    "lr_proba_up": {
+      "type": ["number", "null"],
+      "description": "v3.13 LR 过热过滤打分 (Logistic Regression P(y=up)). 全部 90 只输出, 不截断. null 表示 LR 模型不可用或未启用."
     }
   },
   "additionalProperties": false,
