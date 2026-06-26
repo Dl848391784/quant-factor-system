@@ -34,7 +34,11 @@ def slice_pipeline(alias: str, filter_expr: str | None, source: Path, output: Pa
 
     if filter_expr is None:
         # 无过滤：symlink 到主数据源
-        if output.is_symlink() or output.exists():
+        # 但如果 output 已是真实文件（非 symlink），说明是手动切割的数据，跳过保护
+        if output.exists() and not output.is_symlink():
+            print(f"  [{alias}] 跳过: 已存在手动切割的数据文件")
+            return
+        if output.is_symlink():
             output.unlink()
         output.symlink_to(source)
         print(f"  [{alias}] symlink -> {source}")

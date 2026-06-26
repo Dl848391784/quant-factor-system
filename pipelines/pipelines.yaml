@@ -12,7 +12,7 @@ ob_pool:
 
 temp_history:
   filter: null
-  description: "截止2026-06-24的历史数据，用于验证6月25日选股（数据已手动切割，slicer跳过）"
+  description: "截止2026-06-24的历史数据，用于验证6月25日选股（手动切割，slicer自动跳过）"
 
 # 未来扩展示例（当前不启用）：
 # recent_30d:
