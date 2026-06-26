@@ -49,7 +49,7 @@ class TailVolumeShrinkDeltaLayerConfig(LayerConfigBase):
 
     factor_name: ClassVar[str] = "tail_volume_shrink_delta"
     ic_source: ClassVar[str] = (
-        "factor_ic/result/ic_tail_volume_shrink_delta_1d_analysis_result.json"  # Pitfall #31: 显式声明
+        "ic_tail_volume_shrink_delta_1d_analysis_result.json"  # 纯文件名，基类补充 pipeline 感知目录
     )
     layer_names: ClassVar[Sequence[str]] = (
         "lowest",
