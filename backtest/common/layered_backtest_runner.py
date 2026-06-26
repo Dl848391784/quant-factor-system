@@ -640,7 +640,9 @@ def run_layered_backtest(
 
     # 保存结果
     if output_dir is None:
-        output_dir = PROJECT_ROOT / "backtest" / "result"
+        from paths import BACKTEST_RESULT
+
+        output_dir = BACKTEST_RESULT
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 

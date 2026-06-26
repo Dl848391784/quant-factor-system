@@ -458,9 +458,11 @@ def get_ic_output_path(factor_name: str, return_period: str = "1d") -> Path:
         输出文件路径（Path 对象）
 
     规范:
-        输出路径: factor_ic/result/ic_<factor_name>_<return_period>_analysis_result.json
+        输出路径: factor_ic/result/<pipeline_alias>/ic_<factor_name>_<return_period>_analysis_result.json
     """
-    result_dir = Path(__file__).parent.parent / "result"
+    from paths import FACTOR_IC_RESULT
+
+    result_dir = FACTOR_IC_RESULT
     result_dir.mkdir(parents=True, exist_ok=True)
 
     output_filename = f"ic_{factor_name}_{return_period}_analysis_result.json"
