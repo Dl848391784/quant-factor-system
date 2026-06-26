@@ -32,10 +32,18 @@ _logger = get_logger(__name__)
 # 模块级常量
 # ============================================================================
 
-DEFAULT_DATA_SOURCE = PROJECT_ROOT / "data_fetchers" / "result" / "factor_ic_data.parquet"
-DEFAULT_IC_RESULT_DIR = PROJECT_ROOT / "factor_ic" / "result"
-DEFAULT_WEIGHT_RESULT_PATH = PROJECT_ROOT / "comprehensive_factor" / "result" / "weight_selection_result.json"
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "comprehensive_factor" / "result"
+# Pipeline 感知路径（从 paths.py 导入）
+from paths import (  # noqa: E402
+    COMPREHENSIVE_FACTOR_RESULT,
+    FACTOR_IC_DATA,
+    FACTOR_IC_RESULT,
+)
+
+
+DEFAULT_DATA_SOURCE = FACTOR_IC_DATA
+DEFAULT_IC_RESULT_DIR = FACTOR_IC_RESULT
+DEFAULT_WEIGHT_RESULT_PATH = COMPREHENSIVE_FACTOR_RESULT / "weight_selection_result.json"
+DEFAULT_OUTPUT_DIR = COMPREHENSIVE_FACTOR_RESULT
 
 # 默认因子列表（fallback，优先从 composite 结果读取）
 DEFAULT_FACTOR_LIST: list[str] = []

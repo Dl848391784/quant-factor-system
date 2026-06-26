@@ -54,10 +54,12 @@ from comprehensive_factor.common.logger_config import get_logger
 # 调用方（composite_runner / run_pipeline 等）已将项目根加入 sys.path
 from factor_definitions import FACTOR_CATEGORIES, FACTOR_NAME_TO_COL_MAP, FACTOR_ROLES
 
+# 默认路径（pipeline 感知，从 paths.py 导入）
+from paths import BACKTEST_RESULT, FACTOR_IC_RESULT  # noqa: E402
 
-# 默认路径
-DEFAULT_IC_RESULT_DIR = Path(__file__).parent.parent.parent / "factor_ic" / "result"
-DEFAULT_BACKTEST_RESULT_DIR = Path(__file__).parent.parent.parent / "backtest" / "result"
+
+DEFAULT_IC_RESULT_DIR = FACTOR_IC_RESULT
+DEFAULT_BACKTEST_RESULT_DIR = BACKTEST_RESULT
 
 
 # 默认阈值（业界惯例）

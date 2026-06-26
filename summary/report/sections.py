@@ -9,7 +9,6 @@ from comprehensive_factor.composite_decision_card import CHECKLIST_D5
 from factor_definitions import FACTOR_DEFINITIONS, FACTOR_NAME_TO_COL_MAP
 from summary.report.constants import (
     COL_TO_FACTOR_NAME_MAP,
-    PROJECT_ROOT,
     setup_logger,
 )
 from summary.report.factor_analysis import (
@@ -393,7 +392,9 @@ def _generate_lr_training_status() -> list[str]:
 
     logger = setup_logger()
     lines: list[str] = []
-    lr_root = PROJECT_ROOT / "comprehensive_factor" / "result" / "lr_training_data"
+    from paths import COMPREHENSIVE_FACTOR_RESULT
+
+    lr_root = COMPREHENSIVE_FACTOR_RESULT / "lr_training_data"
     if not lr_root.exists():
         lines.append("【LR 训练数据状态】")
         lines.append("  训练数据: 尚未积累 (lr_training_data 目录不存在)")

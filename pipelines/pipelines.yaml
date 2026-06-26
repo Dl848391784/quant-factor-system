@@ -1,0 +1,19 @@
+# pipelines/pipelines.yaml
+# Pipeline 别名 → 数据切割配置
+# filter 使用 pandas query 表达式，null 表示不切割（全量）
+
+default:
+  filter: null
+  description: "全市场全时段"
+
+ob_pool:
+  filter: "rsi_6 > 70"
+  description: "超买股子集 (RSI>70)，用于超买池内部选股研究"
+
+# 未来扩展示例（当前不启用）：
+# recent_30d:
+#   filter: "date >= '{latest_date_minus_30}'"
+#   description: "近30天子集"
+# ob_recent_30d:
+#   filter: "rsi_6 > 70 and date >= '{latest_date_minus_30}'"
+#   description: "超买股 × 近30天"

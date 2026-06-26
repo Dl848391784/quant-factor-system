@@ -36,10 +36,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+# 统一数据源路径（pipeline 感知，从 paths.py 导入）
+from paths import FACTOR_IC_DATA, FACTOR_IC_RESULT  # noqa: E402
 
-# 统一数据源路径（遵循 PROJECT.md 跨模块数据路径规范）
-DEFAULT_DATA_SOURCE = Path(__file__).parent.parent.parent / "data_fetchers" / "result" / "factor_ic_data.parquet"
-DEFAULT_IC_RESULT_DIR = Path(__file__).parent.parent.parent / "factor_ic" / "result"
+
+DEFAULT_DATA_SOURCE = FACTOR_IC_DATA
+DEFAULT_IC_RESULT_DIR = FACTOR_IC_RESULT
 
 
 def _trim_arena() -> None:

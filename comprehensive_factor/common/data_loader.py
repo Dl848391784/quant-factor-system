@@ -11,12 +11,18 @@ comprehensive_factor 模块专用数据路径配置。
 
 from pathlib import Path
 
+# Pipeline 感知路径（从 paths.py 导入）
+from paths import COMPREHENSIVE_FACTOR_RESULT, FACTOR_IC_DATA, FACTOR_IC_RESULT  # noqa: E402
 
-# 统一数据源路径（遵循 PROJECT.md 跨模块数据路径规范）
-DEFAULT_DATA_SOURCE = Path(__file__).parent.parent.parent / "data_fetchers" / "result" / "factor_ic_data.parquet"
 
-# IC 结果目录（comprehensive_factor 依赖）
-DEFAULT_IC_RESULT_DIR = Path(__file__).parent.parent.parent / "factor_ic" / "result"
+# 统一数据源路径（pipeline 感知）
+DEFAULT_DATA_SOURCE = FACTOR_IC_DATA
+
+# IC 结果目录（pipeline 感知，comprehensive_factor 依赖）
+DEFAULT_IC_RESULT_DIR = FACTOR_IC_RESULT
+
+# comprehensive_factor 输出目录（pipeline 感知）
+COMPREHENSIVE_OUTPUT_DIR = COMPREHENSIVE_FACTOR_RESULT
 
 # 历史路径（已废弃，保留用于向后兼容检查）
 _DEPRECATED_CACHE_DIR = Path(__file__).parent.parent.parent / "cache" / "factor_data"

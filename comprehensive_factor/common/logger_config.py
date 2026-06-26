@@ -70,11 +70,12 @@ def get_logger(name: str, log_dir: Path | None = None) -> logging.Logger:
     if logger.handlers:
         return logger
 
-    # 日志目录：comprehensive_factor/logs/
+    # 日志目录：comprehensive_factor/logs/<pipeline_alias>/
     if log_dir is None:
-        # logger_config.py 位于 comprehensive_factor/common/
-        # log_dir 应为 comprehensive_factor/logs/
-        log_dir = Path(__file__).parent.parent / "logs"
+        import os
+
+        alias = os.environ.get("PIPELINE_ALIAS", "default")
+        log_dir = Path(__file__).parent.parent / "logs" / alias
 
     log_dir.mkdir(exist_ok=True)
 

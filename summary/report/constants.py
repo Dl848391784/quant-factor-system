@@ -23,7 +23,7 @@ from factor_definitions import (  # noqa: E402
     FACTOR_DEFINITIONS,
     FACTOR_NAME_TO_COL_MAP,
 )
-from paths import STOCK_LIST_DATA  # noqa: E402
+from paths import FACTOR_IC_DATA, STOCK_LIST_DATA  # noqa: E402
 
 
 # re-export 导入的名称，供子模块使用
@@ -76,14 +76,21 @@ def _get_factor_abbr(factor_name: str) -> str:
     return FACTOR_ABBR.get(factor_name, factor_name[:3])
 
 
-# 数据路径配置
+# 数据路径配置（pipeline 感知，从 paths.py 导入）
+from paths import (  # noqa: E402
+    BACKTEST_RESULT,
+    COMPREHENSIVE_FACTOR_RESULT,
+    FACTOR_IC_RESULT,
+)
+
+
 DATA_PATHS = {
-    "ic_result": "factor_ic/result",
-    "backtest_result": "backtest/result",
-    "comprehensive_result": "comprehensive_factor/result",
-    "factor_data": "data_fetchers/result",
-    "weight_selection": "comprehensive_factor/result/weight_selection_result.json",
-    "stock_selection": "comprehensive_factor/result/stock_selection_history",
+    "ic_result": str(FACTOR_IC_RESULT),
+    "backtest_result": str(BACKTEST_RESULT),
+    "comprehensive_result": str(COMPREHENSIVE_FACTOR_RESULT),
+    "factor_data": str(FACTOR_IC_DATA.parent),
+    "weight_selection": str(COMPREHENSIVE_FACTOR_RESULT / "weight_selection_result.json"),
+    "stock_selection": str(COMPREHENSIVE_FACTOR_RESULT / "stock_selection_history"),
 }
 
 DATA_FRESHNESS_HEAD_CHARS = 65536  # 覆盖完整顶层 dates 数组，避免解析 factor_ic_data 全量大文件
@@ -91,7 +98,7 @@ DATA_FRESHNESS_HEAD_CHARS = 65536  # 覆盖完整顶层 dates 数组，避免解
 # 数据完整性检查配置
 DATA_CHECK_SOURCES = {
     "factor_ic_data": {
-        "path": "data_fetchers/result/factor_ic_data.parquet",
+        "path": str(FACTOR_IC_DATA),
         "description": "主数据源(行情+因子+收益)",
         "date_field": "dates",  # Parquet metadata 优先读取，fallback 读 JSON.gz 顶层 dates
         "format": "full_json",  # Parquet 优先（L4），JSON.gz fallback
@@ -158,7 +165,10 @@ def setup_logger(name: str = "generate_factor_summary_report") -> logging.Logger
 
     if not logger.handlers:
         # 日志文件路径
-        log_dir = PROJECT_ROOT / "summary" / "logs"
+        import os
+
+        alias = os.environ.get("PIPELINE_ALIAS", "default")
+        log_dir = PROJECT_ROOT / "summary" / "logs" / alias
         log_dir.mkdir(parents=True, exist_ok=True)
 
         log_file = log_dir / f"generate_factor_summary_report_{datetime.now().strftime('%Y-%m-%d')}.log"

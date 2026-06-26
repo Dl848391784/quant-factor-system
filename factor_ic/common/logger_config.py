@@ -61,11 +61,14 @@ def get_logger(name: str, log_dir: Path | None = None) -> logging.Logger:
     if logger.handlers:
         return logger
 
-    # 日志目录：factor_ic/logs/
+    # 日志目录：factor_ic/logs/<pipeline_alias>/
     if log_dir is None:
         # logger_config.py 位于 factor_ic/common/
-        # log_dir 应为 factor_ic/logs/
-        log_dir = Path(__file__).parent.parent / "logs"
+        # log_dir 应为 factor_ic/logs/<alias>/
+        import os
+
+        alias = os.environ.get("PIPELINE_ALIAS", "default")
+        log_dir = Path(__file__).parent.parent / "logs" / alias
 
     log_dir.mkdir(exist_ok=True)
 

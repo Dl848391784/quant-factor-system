@@ -229,9 +229,10 @@ def run_composite_backtest(
 
     # 修复：入口统一转换类型，处理所有情况（包括 None）
     if output_dir is None:
-        # 默认输出目录
-        project_root = Path(__file__).parent.parent.parent
-        output_dir = project_root / "comprehensive_factor" / "result"
+        # 默认输出目录（pipeline 感知）
+        from paths import COMPREHENSIVE_FACTOR_RESULT
+
+        output_dir = COMPREHENSIVE_FACTOR_RESULT
     else:
         output_dir = Path(output_dir)
 

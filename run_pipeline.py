@@ -181,7 +181,7 @@ class ScriptTask(NamedTuple):
 
     name: str  # 任务名称（用于日志）
     script: str  # 脚本相对路径
-    stage: int  # 所属阶段
+    stage: int | float  # 所属阶段（int 为主，1.5 为 Stage 1.5 数据切割）
     args: list[str]  # 命令行参数（可选）
     timeout: int | None = None  # 独立超时时间（秒），None 则使用默认 SCRIPT_TIMEOUT
 
@@ -201,7 +201,9 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     ScriptTask("fetch_market_cap", "data_fetchers/fetch_market_cap.py", 0, []),  # 市值数据（用于市值中性化）
     # Stage 1: 数据整合
     ScriptTask("factor_generator", "data_fetchers/factor_generator.py", 1, []),
-    # Stage 2: IC计算
+    # Stage 1.5: Pipeline 数据切割（共享，为所有 pipeline 生成子集数据）
+    ScriptTask("pipeline_data_slicer", "pipeline_data_slicer.py", 1.5, []),
+    # Stage 2: IC计算（pipeline 隔离，需 PIPELINE_ALIAS 环境变量）
     ScriptTask("ic_rsi", "factor_ic/ic_rsi_1d.py", 2, []),
     ScriptTask("ic_volume_ratio", "factor_ic/ic_volume_ratio_1d.py", 2, []),
     ScriptTask("ic_kdj_j", "factor_ic/ic_kdj_j_1d.py", 2, []),
@@ -538,13 +540,14 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
 # ============================================================================
 
 
-def run_script(task: ScriptTask, retry_count: int = 0) -> bool | None:
+def run_script(task: ScriptTask, retry_count: int = 0, pipeline_alias: str | None = None) -> bool | None:
     """
     执行单个脚本
 
     Args:
         task: 脚本任务定义
         retry_count: 当前重试次数（用于日志）
+        pipeline_alias: pipeline 别名（None 表示共享 stage，不注入环境变量）
 
     Returns:
         True: 执行成功
@@ -561,8 +564,9 @@ def run_script(task: ScriptTask, retry_count: int = 0) -> bool | None:
     # 构建命令
     cmd = [sys.executable, str(script_path)] + task.args
 
-    # 日志前缀
-    prefix = f"[{task.name}]" + (f"(重试#{retry_count})" if retry_count > 0 else "")
+    # 日志前缀（含 pipeline 别名）
+    alias_prefix = f"[{pipeline_alias}]" if pipeline_alias else ""
+    prefix = f"{alias_prefix}[{task.name}]" + (f"(重试#{retry_count})" if retry_count > 0 else "")
 
     print(f"{prefix} 开始执行...")
     print(f"{prefix} 脚本路径: {script_path}")
@@ -572,6 +576,16 @@ def run_script(task: ScriptTask, retry_count: int = 0) -> bool | None:
 
     start_time = time.time()
 
+    # 构建子进程环境变量
+    child_env = {
+        **dict(os.environ),
+        "PYTHONPATH": str(PROJECT_ROOT),
+        "MALLOC_TRIM_THRESHOLD_": "-1",
+        "MALLOC_MMAP_THRESHOLD_": "131072",
+    }
+    if pipeline_alias:
+        child_env["PIPELINE_ALIAS"] = pipeline_alias
+
     try:
         # 执行脚本（流式输出，避免 capture_output 在内存中累积全量日志导致 OOM）
         result = subprocess.run(
@@ -579,12 +593,7 @@ def run_script(task: ScriptTask, retry_count: int = 0) -> bool | None:
             cwd=PROJECT_ROOT,
             text=True,
             timeout=actual_timeout,
-            env={
-                **dict(os.environ),
-                "PYTHONPATH": str(PROJECT_ROOT),
-                "MALLOC_TRIM_THRESHOLD_": "-1",
-                "MALLOC_MMAP_THRESHOLD_": "131072",
-            },
+            env=child_env,
         )
 
         elapsed = time.time() - start_time
@@ -619,7 +628,7 @@ def run_script(task: ScriptTask, retry_count: int = 0) -> bool | None:
 # ============================================================================
 
 
-def run_script_with_retry(task: ScriptTask) -> tuple[ScriptTask, bool]:
+def run_script_with_retry(task: ScriptTask, pipeline_alias: str | None = None) -> tuple[ScriptTask, bool]:
     """
     单脚本 + 重试循环（封装供线程池调用）。
 
@@ -632,7 +641,7 @@ def run_script_with_retry(task: ScriptTask) -> tuple[ScriptTask, bool]:
         (task, False): 重试次数用尽全部失败
     """
     for retry in range(MAX_RETRIES + 1):
-        result = run_script(task, retry)
+        result = run_script(task, retry, pipeline_alias=pipeline_alias)
         if result is True:
             return task, True
         if result is None:
@@ -701,7 +710,9 @@ def _plan_batches(
     return batches
 
 
-def _run_batch_parallel(tasks: list[ScriptTask], parallel: int) -> list[tuple[ScriptTask, bool]]:
+def _run_batch_parallel(
+    tasks: list[ScriptTask], parallel: int, pipeline_alias: str | None = None
+) -> list[tuple[ScriptTask, bool]]:
     """
     并行执行一批 tasks，全部完成才返回（批间严格屏障）。
 
@@ -711,33 +722,39 @@ def _run_batch_parallel(tasks: list[ScriptTask], parallel: int) -> list[tuple[Sc
     Args:
         tasks: 同 stage 的脚本列表（长度 <= parallel）
         parallel: 线程池大小
+        pipeline_alias: pipeline 别名（传递给子进程）
 
     Returns:
         每个 task 的 (task, success) 二元组列表（顺序按完成时间，非提交顺序）
     """
     results: list[tuple[ScriptTask, bool]] = []
     with ThreadPoolExecutor(max_workers=parallel) as pool:
-        futures = {pool.submit(run_script_with_retry, t): t for t in tasks}
+        futures = {pool.submit(run_script_with_retry, t, pipeline_alias): t for t in tasks}
         for fut in as_completed(futures):
             results.append(fut.result())
     return results
 
 
 def run_pipeline(
-    start_stage: int = 0,
+    start_stage: int | float = 0,
     start_script: str | None = None,
     skip_stages: list[int] | None = None,
     parallel: int = 1,
+    pipeline_aliases: list[str] | None = None,
 ) -> bool:
     """
     执行完整流程
 
     Args:
-        start_stage: 从哪个阶段开始（0-7）
+        start_stage: 从哪个阶段开始（0-7，1.5=数据切割）
         start_script: 从哪个脚本开始（脚本名称，如 'fetch_turnover'）
         skip_stages: 跳过的阶段列表
         parallel: 并行度（默认 1=串行）。N>1 时仅 PARALLELIZABLE_STAGES 内的脚本并行，
                   批内 N 个 future 全部完成才进下一批（批间严格屏障）。
+        pipeline_aliases: 要执行的 pipeline 别名列表。
+            None 或 ["all"] 表示执行配置文件中的全部 pipeline。
+            Stage < 2 的脚本（共享区）只跑一次，不注入 PIPELINE_ALIAS。
+            Stage >= 2 的脚本为每个 alias 各跑一遍。
 
     Returns:
         True: 全部成功
@@ -745,8 +762,16 @@ def run_pipeline(
     """
     skip_stages = skip_stages or []
 
+    # 解析 pipeline 别名列表
+    if pipeline_aliases is None or pipeline_aliases == ["all"]:
+        from pipeline_context import load_pipeline_config
+
+        aliases = list(load_pipeline_config().keys())
+    else:
+        aliases = pipeline_aliases
+
     # 过滤要执行的脚本
-    scripts_to_run = []
+    all_scripts = []
     started = False
 
     for task in PIPELINE_SCRIPTS:
@@ -765,100 +790,168 @@ def run_pipeline(
             else:
                 continue
 
-        scripts_to_run.append(task)
+        all_scripts.append(task)
 
-    if not scripts_to_run:
+    if not all_scripts:
         print("[信息] 无脚本需要执行")
         return True
 
-    # 切分批次（基于 _plan_batches 纯函数，便于单元测试）
-    batches = _plan_batches(scripts_to_run, parallel)
+    # 分离共享脚本（stage < 2）和 pipeline 隔离脚本（stage >= 2）
+    shared_scripts = [t for t in all_scripts if t.stage < 2]
+    pipeline_scripts = [t for t in all_scripts if t.stage >= 2]
 
     # 打印执行计划
     print("=" * 70)
     print("因子分析流程执行计划")
     print("=" * 70)
     print(f"项目根目录: {PROJECT_ROOT}")
-    print(f"执行脚本数: {len(scripts_to_run)}")
-    print(f"批次数: {len(batches)}")
+    print(f"Pipelines: {aliases}")
+    print(f"共享脚本数: {len(shared_scripts)} (Stage 0-1.5)")
+    print(
+        f"Pipeline 脚本数: {len(pipeline_scripts)} × {len(aliases)} pipelines = {len(pipeline_scripts) * len(aliases)}"
+    )
     print(f"并行度: {parallel} ({'并行' if parallel > 1 else '串行'}模式)")
     if parallel > 1:
         print(f"可并行 stages: {sorted(PARALLELIZABLE_STAGES)}")
     print(f"重试配置: 最大{MAX_RETRIES}次, 间隔{RETRY_DELAY}s")
     print("-" * 70)
-
-    for i, task in enumerate(scripts_to_run, 1):
-        print(f"  {i}. [{task.stage}] {task.name}: {task.script}")
-
     print("=" * 70)
     print()
 
-    # 逐批执行脚本（批内可并行，批间严格屏障）
     failed_scripts: list[tuple[ScriptTask, int]] = []  # (task, exit_code)
     success_count = 0
 
-    for batch_idx, batch in enumerate(batches, 1):
-        is_parallel_batch = len(batch) > 1
-        batch_stage = batch[0].stage
+    # ========== Phase 1: 共享脚本（Stage 0-1.5，只跑一次）==========
+    if shared_scripts:
+        print(">>> Phase 1: 共享阶段 (Stage 0-1.5)")
+        shared_batches = _plan_batches(shared_scripts, parallel)
 
-        # v2.48: Stage 4 (composite) 前杀 LSP 进程释放内存 (~200MB)
-        # composite 阶段加载全量 parquet + 标准化 + 相关性矩阵, 内存峰值高,
-        # 7.3GB 机器上 LSP 占 ~200MB 可能导致 OOM. LSP 在非交互跑 pipeline 时无用.
-        if batch_stage >= 4 and not any(s.stage >= 4 for s in scripts_to_run[: scripts_to_run.index(batch[0])]):
-            import signal as _signal
+        for batch_idx, batch in enumerate(shared_batches, 1):
+            is_parallel_batch = len(batch) > 1
+            batch_stage = batch[0].stage
 
-            for _line in subprocess.check_output(["ps", "aux"], text=True).splitlines():
-                if "pyright-langserver" in _line and "grep" not in _line:
-                    _pid = int(_line.split()[1])
-                    try:
-                        os.kill(_pid, _signal.SIGTERM)
-                        print(f"[内存] 杀死 LSP 进程 PID={_pid} (释放 ~200MB)")
-                    except ProcessLookupError:
-                        pass
-                    except PermissionError:
-                        print(f"[内存] 无权限杀 LSP PID={_pid}")
+            # v2.48: Stage 4 (composite) 前杀 LSP 进程释放内存 (~200MB)
+            if batch_stage >= 4 and not any(s.stage >= 4 for s in shared_scripts[: shared_scripts.index(batch[0])]):
+                import signal as _signal
 
-        print()
-        if is_parallel_batch:
-            print(
-                f">>> Batch {batch_idx}/{len(batches)} [Stage {batch_stage}] "
-                f"并行启动 ({len(batch)} tasks): {', '.join(t.name for t in batch)}"
-            )
-            t0 = time.time()
-            batch_results = _run_batch_parallel(batch, parallel)
-            batch_elapsed = time.time() - t0
-            ok_count = sum(1 for _, s in batch_results if s)
-            print(
-                f"<<< Batch {batch_idx}/{len(batches)} [Stage {batch_stage}] "
-                f"完成 (耗时 %.1fs, 成功 %d/%d)" % (batch_elapsed, ok_count, len(batch))
-            )
-            for tk, success in batch_results:
+                for _line in subprocess.check_output(["ps", "aux"], text=True).splitlines():
+                    if "pyright-langserver" in _line and "grep" not in _line:
+                        _pid = int(_line.split()[1])
+                        try:
+                            os.kill(_pid, _signal.SIGTERM)
+                            print(f"[内存] 杀死 LSP 进程 PID={_pid} (释放 ~200MB)")
+                        except ProcessLookupError:
+                            pass
+                        except PermissionError:
+                            print(f"[内存] 无权限杀 LSP PID={_pid}")
+
+            print()
+            if is_parallel_batch:
+                print(
+                    f">>> Batch {batch_idx}/{len(shared_batches)} [Stage {batch_stage}] "
+                    f"并行启动 ({len(batch)} tasks): {', '.join(t.name for t in batch)}"
+                )
+                t0 = time.time()
+                batch_results = _run_batch_parallel(batch, parallel)
+                batch_elapsed = time.time() - t0
+                ok_count = sum(1 for _, s in batch_results if s)
+                print(
+                    f"<<< Batch {batch_idx}/{len(shared_batches)} [Stage {batch_stage}] "
+                    f"完成 (耗时 %.1fs, 成功 %d/%d)" % (batch_elapsed, ok_count, len(batch))
+                )
+                for tk, success in batch_results:
+                    if success:
+                        success_count += 1
+                    else:
+                        failed_scripts.append((tk, -1))
+            else:
+                task = batch[0]
+                print(f"[阶段 {task.stage}] 执行: {task.name}")
+                print("-" * 50)
+                _, success = run_script_with_retry(task)
                 if success:
                     success_count += 1
                 else:
-                    failed_scripts.append((tk, -1))
-        else:
-            # 单元素批（串行 stage 或 parallel=1）：保持原行为
-            task = batch[0]
-            print(f"[阶段 {task.stage}] 执行: {task.name}")
-            print("-" * 50)
-            _, success = run_script_with_retry(task)
-            if success:
-                success_count += 1
-            else:
-                failed_scripts.append((task, -1))
+                    failed_scripts.append((task, -1))
 
-        # 每批执行后主动回收内存 + 短暂等待，防止 OOM（7.3GB 机器）
-        # 并行批 N 个子进程已全部 exit，sleep 一次足够（不是 N 次）
-        gc.collect()
-        time.sleep(3)
+            gc.collect()
+            time.sleep(3)
+
+        # 共享阶段失败则不继续 pipeline 阶段
+        if failed_scripts:
+            print("\n[警告] 共享阶段有脚本失败，跳过 pipeline 阶段")
+        print()
+
+    # ========== Phase 2: Pipeline 隔离脚本（Stage 2-7，每个 alias 各跑一遍）==========
+    if pipeline_scripts and not failed_scripts:
+        for alias in aliases:
+            print(f">>> Phase 2: Pipeline [{alias}] (Stage 2-7)")
+            print("=" * 50)
+
+            pipeline_batches = _plan_batches(pipeline_scripts, parallel)
+
+            for batch_idx, batch in enumerate(pipeline_batches, 1):
+                is_parallel_batch = len(batch) > 1
+                batch_stage = batch[0].stage
+
+                # v2.48: Stage 4 (composite) 前杀 LSP 进程释放内存 (~200MB)
+                if batch_stage >= 4 and not any(
+                    s.stage >= 4 for s in pipeline_scripts[: pipeline_scripts.index(batch[0])]
+                ):
+                    import signal as _signal
+
+                    for _line in subprocess.check_output(["ps", "aux"], text=True).splitlines():
+                        if "pyright-langserver" in _line and "grep" not in _line:
+                            _pid = int(_line.split()[1])
+                            try:
+                                os.kill(_pid, _signal.SIGTERM)
+                                print(f"[内存] 杀死 LSP 进程 PID={_pid} (释放 ~200MB)")
+                            except ProcessLookupError:
+                                pass
+                            except PermissionError:
+                                print(f"[内存] 无权限杀 LSP PID={_pid}")
+
+                print()
+                if is_parallel_batch:
+                    print(
+                        f"[{alias}] Batch {batch_idx}/{len(pipeline_batches)} [Stage {batch_stage}] "
+                        f"并行启动 ({len(batch)} tasks): {', '.join(t.name for t in batch)}"
+                    )
+                    t0 = time.time()
+                    batch_results = _run_batch_parallel(batch, parallel, pipeline_alias=alias)
+                    batch_elapsed = time.time() - t0
+                    ok_count = sum(1 for _, s in batch_results if s)
+                    print(
+                        f"[{alias}] Batch {batch_idx}/{len(pipeline_batches)} [Stage {batch_stage}] "
+                        f"完成 (耗时 %.1fs, 成功 %d/%d)" % (batch_elapsed, ok_count, len(batch))
+                    )
+                    for tk, success in batch_results:
+                        if success:
+                            success_count += 1
+                        else:
+                            failed_scripts.append((tk, -1))
+                else:
+                    task = batch[0]
+                    print(f"[{alias}][阶段 {task.stage}] 执行: {task.name}")
+                    print("-" * 50)
+                    _, success = run_script_with_retry(task, pipeline_alias=alias)
+                    if success:
+                        success_count += 1
+                    else:
+                        failed_scripts.append((task, -1))
+
+                gc.collect()
+                time.sleep(3)
+
+            print()
 
     # 打印执行结果
     print()
     print("=" * 70)
     print("执行结果汇总")
     print("=" * 70)
-    print(f"成功: {success_count}/{len(scripts_to_run)}")
+    total_scripts = len(shared_scripts) + len(pipeline_scripts) * len(aliases)
+    print(f"成功: {success_count}/{total_scripts}")
 
     if failed_scripts:
         print(f"失败: {len(failed_scripts)}")
@@ -889,10 +982,10 @@ def main() -> int:
 
     parser.add_argument(
         "--start-stage",
-        type=int,
+        type=float,
         default=0,
-        choices=[0, 1, 2, 3, 4, 5, 6, 7],
-        help="从哪个阶段开始执行（0=数据拉取, 1=数据整合, 2=IC计算, 3=回测, 4=综合因子, 5=权重选择, 6=股票选股, 7=汇总报告）",
+        choices=[0, 1, 1.5, 2, 3, 4, 5, 6, 7],
+        help="从哪个阶段开始执行（0=数据拉取, 1=数据整合, 1.5=数据切割, 2=IC计算, 3=回测, 4=综合因子, 5=权重选择, 6=股票选股, 7=汇总报告）",
     )
 
     parser.add_argument(
@@ -901,6 +994,20 @@ def main() -> int:
 
     parser.add_argument(
         "--skip-stages", type=int, nargs="*", default=[], help="跳过的阶段（如 --skip-stages 0 1 跳过数据拉取和整合）"
+    )
+
+    parser.add_argument(
+        "--pipeline",
+        type=str,
+        default=None,
+        help="只运行指定 pipeline（如 --pipeline ob_pool）。未指定时运行 pipelines.yaml 中的全部 pipeline。",
+    )
+
+    parser.add_argument(
+        "--pipelines",
+        type=str,
+        default=None,
+        help="运行多个指定 pipeline，逗号分隔（如 --pipelines default,ob_pool）。",
     )
 
     parser.add_argument(
@@ -930,12 +1037,20 @@ def main() -> int:
     MAX_RETRIES = args.max_retries
     RETRY_DELAY = args.retry_delay
 
+    # 解析 pipeline 别名
+    pipeline_aliases: list[str] | None = None
+    if args.pipeline:
+        pipeline_aliases = [args.pipeline]
+    elif args.pipelines:
+        pipeline_aliases = args.pipelines.split(",")
+
     # 执行流程
     success = run_pipeline(
         start_stage=args.start_stage,
         start_script=args.start_script,
         skip_stages=args.skip_stages,
         parallel=args.parallel,
+        pipeline_aliases=pipeline_aliases,
     )
 
     return 0 if success else 1

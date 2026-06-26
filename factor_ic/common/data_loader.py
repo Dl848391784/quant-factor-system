@@ -30,16 +30,17 @@ from pathlib import Path
 
 import pandas as pd
 
-from .logger_config import get_logger
-
-
 # ============================================================================
 # 默认路径配置（遵循 PROJECT.md 跨模块数据路径规范）
 # ============================================================================
-# 统一数据源：data_fetchers/result/factor_ic_data.json.gz
-# 包含：行情数据 + 基础因子 + 扩展因子 + 收益数据（forward_return_1d/3d/5d）
-DEFAULT_DATA_DIR = Path(__file__).parent.parent.parent / "data_fetchers" / "result"
-DEFAULT_DATA_CACHE = DEFAULT_DATA_DIR / "factor_ic_data.parquet"
+# 统一数据源：pipeline 感知路径（从 paths.py 导入）
+from paths import FACTOR_IC_DATA  # noqa: E402
+
+from .logger_config import get_logger
+
+
+DEFAULT_DATA_DIR = FACTOR_IC_DATA.parent
+DEFAULT_DATA_CACHE = FACTOR_IC_DATA
 
 
 def load_factor_return_data(

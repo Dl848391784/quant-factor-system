@@ -45,9 +45,12 @@ def get_logger(name: str, log_dir: Path | None = None) -> logging.Logger:
     if logger.handlers:
         return logger
 
-    # 日志目录：reverse_discovery/logs/
+    # 日志目录：reverse_discovery/logs/<pipeline_alias>/
     if log_dir is None:
-        log_dir = Path(__file__).parent.parent / "logs"
+        import os
+
+        alias = os.environ.get("PIPELINE_ALIAS", "default")
+        log_dir = Path(__file__).parent.parent / "logs" / alias
 
     log_dir.mkdir(exist_ok=True)
 
