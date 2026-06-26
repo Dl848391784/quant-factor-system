@@ -10,6 +10,10 @@ ob_pool:
   filter: "rsi_6 > 70"
   description: "超买股子集 (RSI>70)，用于超买池内部选股研究"
 
+temp_history:
+  filter: null
+  description: "截止2026-06-24的历史数据，用于验证6月25日选股（数据已手动切割，slicer跳过）"
+
 # 未来扩展示例（当前不启用）：
 # recent_30d:
 #   filter: "date >= '{latest_date_minus_30}'"
