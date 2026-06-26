@@ -118,7 +118,7 @@ Stage 5: 权重选择（新增 2026-06-03; 2026-06-26 重命名为 composite_wei
   80. composite_weight_selector.py → comprehensive_factor/result/weight_selection_result.json
 
 Stage 6: 股票选股（新增 2026-06-03; 2026-06-26 迁移至 stock_selector/）
-  81. selector.py                → comprehensive_factor/result/stock_selection_history/selection_date=YYYY-MM-DD/part-0.parquet (v3.7: Parquet 分区数据集, 含 Stage 1/2/3 三段)
+  81. stock_selector.py          → comprehensive_factor/result/stock_selection_history/selection_date=YYYY-MM-DD/part-0.parquet (v3.7: Parquet 分区数据集, 含 Stage 1/2/3 三段)
 
 Stage 7: 汇总报告
   82. generate_factor_summary_report.py
@@ -528,7 +528,7 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     # Stage 5: 权重选择（新增 2026-06-03; 2026-06-26 重命名为 composite_weight_selector.py）
     ScriptTask("weight_selector", "comprehensive_factor/composite_weight_selector.py", 5, []),
     # Stage 6: 股票选股（新增 2026-06-03; 2026-06-26 迁移至 stock_selector/）
-    ScriptTask("stock_selector", "stock_selector/selector.py", 6, []),
+    ScriptTask("stock_selector", "stock_selector/stock_selector.py", 6, []),
     # Stage 7: 汇总报告
     ScriptTask("summary_report", "summary/generate_factor_summary_report.py", 7, []),
 ]

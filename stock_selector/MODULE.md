@@ -23,14 +23,33 @@ stock_selector 是独立顶层模块，负责股票选股全流程：权重方�
 
 ---
 
+## 脚本命名规范
+
+**What**: stock_selector 模块下所有业务脚本统一以 `stock_selector_` 前缀命名。
+
+| 脚本类型 | 命名格式 | 示例 |
+|----------|----------|------|
+| 核心选股 + CLI | `stock_selector.py` | — |
+| 配置/常量/数据加载 | `stock_selector_config.py` | — |
+| 选股历史写入 | `stock_selector_history.py` | — |
+| LR 过滤训练/应用 | `stock_selector_lr.py` | — |
+
+**Why**: 与 comprehensive_factor (`composite_*.py`)、factor_ic (`ic_*.py`)、backtest (`layered_backtest_*.py`) 模块命名规则保持一致。`stock_selector_` 前缀表明脚本属于选股模块。
+
+**Don't**: 禁止使用无前缀的裸名称（如 `selector.py`、`config.py`），违反模块命名一致性。
+
+**Verify**: `ls stock_selector/stock_selector*.py` 应列出所有业务脚本。
+
+---
+
 ## 脚本清单
 
 | 脚本 | 职责 |
 |------|------|
-| `selector.py` | 核心选股逻辑 + CLI（原 stock_selector.py） |
-| `config.py` | 配置/常量/数据加载（原 stock_selector_config.py） |
-| `history.py` | Parquet 选股历史写入（原 stock_selector_history.py） |
-| `lr.py` | LR 过滤训练/应用/训练数据持久化（原 stock_selector_lr.py） |
+| `stock_selector.py` | 核心选股逻辑 + CLI |
+| `stock_selector_config.py` | 配置/常量/数据加载 |
+| `stock_selector_history.py` | Parquet 选股历史写入 |
+| `stock_selector_lr.py` | LR 过滤训练/应用/训练数据持久化 |
 
 > **Note**: `weight_selector.py` 已移回 `comprehensive_factor/composite_weight_selector.py`（职责属于综合因子权重评估，不属于选股）。
 
@@ -45,7 +64,7 @@ Step 6: 权重方式选择 (comprehensive_factor/composite_weight_selector.py)
   ├─ 等权综合得分
   └─ 输出最优权重方法
                               ↓
-Step 7: 股票选股 (selector.py)
+Step 7: 股票选股 (stock_selector.py)
   ├─ 加载最优权重配置（weight_selection_result.json）
   ├─ 加载当日因子数据（factor_ic_data.parquet）
   ├─ 标准化因子值
@@ -63,7 +82,7 @@ Step 7: 股票选股 (selector.py)
 
 ## 选股脚本
 
-**脚本**: `selector.py`
+**脚本**: `stock_selector.py`
 
 **功能**: 使用最优权重方法计算股票综合因子值并选出 Top N
 
@@ -163,7 +182,7 @@ trajectory = ds.to_table(
 
 **CLI 参数**:
 ```bash
-python -m stock_selector.selector \
+python -m stock_selector.stock_selector \
     --top_n 10 \
     --min_amplitude 0.01 \
     --selection_date 2026-06-01 \
@@ -178,7 +197,7 @@ python -m stock_selector.selector \
 
 ---
 
-## LR 过滤模块 (lr.py)
+## LR 过滤模块 (stock_selector_lr.py)
 
 **功能**: Logistic Regression 过滤训练/应用/训练数据持久化
 
@@ -197,8 +216,8 @@ python -m stock_selector.selector \
 
 | 输出 | 路径 | 来源脚本 |
 |------|------|----------|
-| 选股历史 Parquet | `comprehensive_factor/result/stock_selection_history/` | `history.py` |
-| LR 训练数据 | `comprehensive_factor/result/lr_training_data/` | `lr.py` |
+| 选股历史 Parquet | `comprehensive_factor/result/stock_selection_history/` | `stock_selector_history.py` |
+| LR 训练数据 | `comprehensive_factor/result/lr_training_data/` | `stock_selector_lr.py` |
 
 ---
 

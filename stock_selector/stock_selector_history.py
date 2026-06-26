@@ -25,7 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))  # noqa: E402
 
 from stock_selector.common.logger_config import get_logger  # noqa: E402
-from stock_selector.config import PROJECT_ROOT, StockSelectorConfig  # noqa: E402
+from stock_selector.stock_selector_config import PROJECT_ROOT, StockSelectorConfig  # noqa: E402
 
 
 _logger = get_logger(__name__)

@@ -38,7 +38,7 @@ Step 7: 股票选股 (stock_selector.py) ← 本脚本
 - v1.12 (2026-06-11): 2项改动：1. 新增 min_amplitude 参数（默认0.01=1%，排除不可交易的一字板涨停股）；2. top_n 默认值从3改为10，扩大选股范围
 - v1.21 (2026-06-20): 修复维度权重不生效 bug——从 composite 结果读取 dimension_weight_method 传给 WeightEngine（之前 stock_selector 自建 WeightEngine 时缺 dimension_weight_method/factor_categories 参数，导致选股排序用不带维度权重的综合因子值，维度分组工作无效）
 - v3.7 (2026-06-24): 废除 stock_selection_result.json 单文件, 改用 Parquet 分区数据集 stock_selection_history/ 作为单一信源 (designs/feat_stock_selection_history_parquet.md). 含 Stage 1/2/3 Top 30 三段, 按 selection_date 分区, file-level metadata 存 excluded_by_* 统计. apply_stage2_resort 写回 stage2_sort_value 字段.
-- v3.12 (2026-06-26): 纯重构——拆分为 4 个文件: stock_selector_config.py (配置+常量+数据加载), stock_selector_lr.py (LR过滤训练/应用/训练数据保存), stock_selector_history.py (Parquet选股历史写入), stock_selector.py (门面: re-export + 核心选股逻辑 + CLI). 所有 `from stock_selector.selector import X` 路径不变. 行为零变化.
+- v3.12 (2026-06-26): 纯重构——拆分为 4 个文件: stock_selector_config.py (配置+常量+数据加载), stock_selector_lr.py (LR过滤训练/应用/训练数据保存), stock_selector_history.py (Parquet选股历史写入), stock_selector.py (门面: re-export + 核心选股逻辑 + CLI). 所有 `from stock_selector.stock_selector import X` 路径不变. 行为零变化.
 - v3.14 (2026-06-26): select_stocks 内部重构——521 行"上帝函数"提取为 6 个内部辅助函数 (_load_weight_and_factors / _load_and_filter_factor_data / _standardize_and_align_direction / _compute_composite_factor / _run_selection_pipeline / _build_and_write_outputs). select_stocks 缩至 100 行编排目录. 纯重构, 行为零变化.
 
 作者: 云瑶
@@ -64,7 +64,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))  # noqa: E402
 
 # ============================================================================
-# Re-exports: 保持所有 `from stock_selector.selector import X` 向后兼容
+# Re-exports: 保持所有 `from stock_selector.stock_selector import X` 向后兼容
 # ============================================================================
 
 # 从 config 模块 re-export
@@ -80,7 +80,7 @@ from comprehensive_factor.composite_decision_card import build_decision_cards  #
 
 # 保持原有 re-export（factor_definitions / factor_loader）
 from factor_definitions import FACTOR_CATEGORIES, FACTOR_COL_TO_NAME_MAP  # noqa: E402, F401
-from stock_selector.config import (  # noqa: E402, F401
+from stock_selector.stock_selector_config import (  # noqa: E402, F401
     ALL_WEIGHT_METHODS,
     DEFAULT_DATA_SOURCE,
     DEFAULT_FACTOR_COLS,
@@ -97,10 +97,10 @@ from stock_selector.config import (  # noqa: E402, F401
 )
 
 # 从 history 模块 re-export
-from stock_selector.history import write_selection_history  # noqa: E402, F401
+from stock_selector.stock_selector_history import write_selection_history  # noqa: E402, F401
 
 # 从 lr 模块 re-export
-from stock_selector.lr import (  # noqa: E402, F401
+from stock_selector.stock_selector_lr import (  # noqa: E402, F401
     apply_lr_filter,
     backfill_forward_return_1d,
     calibrate_lr_filter,
