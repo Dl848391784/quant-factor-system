@@ -5,7 +5,7 @@
 """
 
 import pandas as pd
-from comprehensive_factor.decision_card import CHECKLIST_D5
+from comprehensive_factor.composite_decision_card import CHECKLIST_D5
 from factor_definitions import FACTOR_DEFINITIONS, FACTOR_NAME_TO_COL_MAP
 from summary.report.constants import (
     COL_TO_FACTOR_NAME_MAP,

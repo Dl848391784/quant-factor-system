@@ -267,15 +267,13 @@ result = run_layered_backtest(
 |----------|----------|------|
 | 综合因子分层回测 | `composite_<加权方式>_<收益周期>.py` | `composite_equal_weight_1d.py`、`composite_rolling_icir_weight_1d.py` |
 | 权重方式选择 | `composite_weight_selector.py` | — |
-| 决策卡构建 | `decision_card.py`（特例，见下） | — |
+| 决策卡构建 | `composite_decision_card.py` | — |
 
 **Why**: 与 factor_ic (`ic_<因子>_<周期>.py`) 和 backtest (`layered_backtest_<因子>_<周期>.py`) 模块命名规则保持一致。`composite_` 前缀表明脚本属于综合因子模块。
 
-**Don't**: 禁止使用无前缀的裸名称（如 `weight_selector.py`），违反模块命名一致性。
+**Don't**: 禁止使用无前缀的裸名称（如 `weight_selector.py`、`decision_card.py`），违反模块命名一致性。
 
-**例外**: `decision_card.py` 为决策卡构建工具，命名沿用项目历史约定，不强制 `composite_` 前缀。
-
-**Verify**: `ls comprehensive_factor/composite_*.py` 应列出所有业务脚本（`decision_card.py` 除外）。
+**Verify**: `ls comprehensive_factor/composite_*.py` 应列出所有业务脚本。
 
 ---
 

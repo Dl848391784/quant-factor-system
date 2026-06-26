@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from comprehensive_factor.decision_card import (  # noqa: E402
+from comprehensive_factor.composite_decision_card import (  # noqa: E402
     AMPLITUDE_BUCKETS,
     CHECKLIST_D5,
     RETURN_5D_BUCKETS,

@@ -76,7 +76,7 @@ from comprehensive_factor.common.factor_loader import (  # noqa: E402, F401
     standardize_factors,
 )
 from comprehensive_factor.common.weight_engine import WeightEngine  # noqa: E402, F401
-from comprehensive_factor.decision_card import build_decision_cards  # noqa: E402, F401
+from comprehensive_factor.composite_decision_card import build_decision_cards  # noqa: E402, F401
 
 # 保持原有 re-export（factor_definitions / factor_loader）
 from factor_definitions import FACTOR_CATEGORIES, FACTOR_COL_TO_NAME_MAP  # noqa: E402, F401

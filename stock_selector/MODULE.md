@@ -211,7 +211,7 @@ python -m stock_selector.selector \
 | `factor_loader` | `comprehensive_factor.common` | 因子数据加载 |
 | `weight_engine` | `comprehensive_factor.common` | 权重引擎 |
 | `convert_types` | `comprehensive_factor.common` | 类型转换 |
-| `build_decision_cards` | `comprehensive_factor.decision_card` | 决策卡构建 |
+| `build_decision_cards` | `comprehensive_factor.composite_decision_card` | 决策卡构建 |
 
 ### 上游数据
 
