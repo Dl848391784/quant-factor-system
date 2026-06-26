@@ -35,7 +35,7 @@ class PricePositionLayerConfig(LayerConfigBase):
     """
 
     factor_name: ClassVar[str] = "price_position"
-    ic_source: ClassVar[str] = "factor_ic/result/ic_price_position_1d_analysis_result.json"
+    ic_source: ClassVar[str] = "ic_price_position_1d_analysis_result.json"
 
     layer_names: ClassVar[Sequence[str]] = ("lowest", "lower", "normal", "higher", "highest")
 

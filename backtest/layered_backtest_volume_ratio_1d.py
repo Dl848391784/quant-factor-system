@@ -34,7 +34,7 @@ class VolumeRatioLayerConfig(LayerConfigBase):
 
     factor_name: ClassVar[str] = 'volume_ratio'
     factor_col: ClassVar[str] = 'volume_ratio_5'
-    ic_source: ClassVar[str] = 'factor_ic/result/ic_volume_ratio_1d_analysis_result.json'  # IC文件路径覆盖
+    ic_source: ClassVar[str] = 'ic_volume_ratio_1d_analysis_result.json'  # 纯文件名，基类补充 pipeline 感知目录
 
     layer_names: ClassVar[Sequence[str]] = (
         'lowest',

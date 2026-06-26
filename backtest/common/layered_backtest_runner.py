@@ -198,12 +198,20 @@ class LayerConfigBase:
 
         # 2. 拼接 ic_source_resolved（子类声明优先，否则默认路径）
         #    子类可显式声明 ic_source 以暴露派生路径
+        #    - 空字符串或 None：基类按 factor_name 自动拼接
+        #    - 纯文件名（不含 /）：基类补充 FACTOR_IC_RESULT 目录（pipeline 感知）
+        #    - 含 / 的路径：视为完整路径，原样使用
         cls_ic_source = self.__class__.ic_source
-        if cls_ic_source:
-            self.ic_source_resolved = cls_ic_source
-        else:
-            from paths import FACTOR_IC_RESULT
+        from paths import FACTOR_IC_RESULT
 
+        if cls_ic_source and "/" in cls_ic_source:
+            # 完整路径（向后兼容旧式硬编码）
+            self.ic_source_resolved = cls_ic_source
+        elif cls_ic_source:
+            # 纯文件名：补充 pipeline 感知目录
+            self.ic_source_resolved = str(FACTOR_IC_RESULT / cls_ic_source)
+        else:
+            # 空：按 factor_name 自动拼接
             self.ic_source_resolved = str(
                 FACTOR_IC_RESULT / f"ic_{self.factor_name}_1d_analysis_result.json"
             )

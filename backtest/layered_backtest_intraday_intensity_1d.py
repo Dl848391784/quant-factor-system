@@ -48,7 +48,9 @@ class IntradayIntensityLayerConfig(LayerConfigBase):
 
     factor_name: ClassVar[str] = 'intraday_intensity_1d'
     factor_col: ClassVar[str] = 'intraday_intensity'  # 计算后的因子列名
-    ic_source: ClassVar[str] = 'factor_ic/result/ic_intraday_intensity_1d_analysis_result.json'
+    # ic_source 指定纯文件名，基类自动补充 FACTOR_IC_RESULT 目录（pipeline 感知）
+    # factor_name='intraday_intensity_1d' 会导致基类默认拼接出双 _1d，故需显式指定文件名
+    ic_source: ClassVar[str] = 'ic_intraday_intensity_1d_analysis_result.json'
 
     # 5 层分层
     layer_names: ClassVar[Sequence[str]] = (
