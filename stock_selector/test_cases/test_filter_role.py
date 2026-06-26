@@ -15,7 +15,7 @@ import logging
 import numpy as np
 import pandas as pd
 import pytest
-from comprehensive_factor.stock_selector import apply_filter_role_factors
+from stock_selector import apply_filter_role_factors
 
 
 @pytest.fixture

@@ -30,7 +30,7 @@ import sys  # noqa: E402
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from comprehensive_factor.stock_selector import (  # noqa: E402
+from stock_selector import (  # noqa: E402
     StockSelectorConfig,
     build_result,
     get_latest_date,

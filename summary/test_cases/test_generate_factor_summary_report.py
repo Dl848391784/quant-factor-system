@@ -1413,7 +1413,7 @@ class TestLoadStockSelectionParquet:
     @pytest.fixture
     def populated_dataset(self, tmp_path):
         """跑 write_selection_history 写出真 Parquet 数据集, 返回 history_root."""
-        from comprehensive_factor.stock_selector import (
+        from stock_selector import (
             StockSelectorConfig,
             write_selection_history,
         )

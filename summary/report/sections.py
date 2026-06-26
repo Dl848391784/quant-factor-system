@@ -448,7 +448,7 @@ def _generate_lr_training_status() -> list[str]:
         lines.append("  过滤状态: ✓ 可启用 (set enable_overheat_filter=True)")
         # 尝试训练并展示 OOS AUC
         try:
-            from comprehensive_factor.stock_selector import StockSelectorConfig, calibrate_lr_filter
+            from stock_selector import StockSelectorConfig, calibrate_lr_filter
 
             config = StockSelectorConfig()
             for wm in sorted(wm_stats.keys()):

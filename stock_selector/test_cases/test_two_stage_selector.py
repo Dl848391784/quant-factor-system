@@ -26,7 +26,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 os.environ.setdefault("PYTHONHASHSEED", "0")
 
-from comprehensive_factor.stock_selector import (  # noqa: E402
+from stock_selector import (  # noqa: E402
     StockSelectorConfig,
     apply_stage2_resort,
 )
@@ -356,7 +356,7 @@ class TestSaveLrTrainingData:
         original = paths.LR_TRAINING_DATA_DIR
         paths.LR_TRAINING_DATA_DIR = tmp_path / "lr_training_data"
         try:
-            from comprehensive_factor.stock_selector import save_lr_training_data
+            from stock_selector import save_lr_training_data
 
             config = StockSelectorConfig()
             partition_dir = save_lr_training_data(
@@ -395,7 +395,7 @@ class TestSaveLrTrainingData:
         original = paths.LR_TRAINING_DATA_DIR
         paths.LR_TRAINING_DATA_DIR = tmp_path / "lr_training_data"
         try:
-            from comprehensive_factor.stock_selector import save_lr_training_data
+            from stock_selector import save_lr_training_data
 
             config = StockSelectorConfig()
             save_lr_training_data(
@@ -437,7 +437,7 @@ class TestSaveLrTrainingData:
         original = paths.LR_TRAINING_DATA_DIR
         paths.LR_TRAINING_DATA_DIR = tmp_path / "lr_training_data"
         try:
-            from comprehensive_factor.stock_selector import (
+            from stock_selector import (
                 backfill_forward_return_1d,
                 save_lr_training_data,
             )
@@ -486,7 +486,7 @@ class TestSaveLrTrainingData:
         original = paths.LR_TRAINING_DATA_DIR
         paths.LR_TRAINING_DATA_DIR = tmp_path / "lr_training_data"
         try:
-            from comprehensive_factor.stock_selector import (
+            from stock_selector import (
                 backfill_forward_return_1d,
                 save_lr_training_data,
             )

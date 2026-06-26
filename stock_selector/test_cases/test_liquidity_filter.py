@@ -13,7 +13,7 @@ import logging
 import numpy as np
 import pandas as pd
 import pytest
-from comprehensive_factor.stock_selector import sort_and_select
+from stock_selector import sort_and_select
 
 
 LOGGER = logging.getLogger("test_liquidity_filter")

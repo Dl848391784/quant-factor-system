@@ -109,7 +109,7 @@ class TestMappingChainIntegrity:
 
     def test_stock_selector_imports_categories(self):
         """stock_selector 从 factor_definitions 导入 FACTOR_CATEGORIES"""
-        from comprehensive_factor.stock_selector import FACTOR_CATEGORIES as ss_categories
+        from stock_selector import FACTOR_CATEGORIES as ss_categories
 
         for f in NEW_FACTORS:
             assert f in ss_categories, f"{f} 未通过 stock_selector.FACTOR_CATEGORIES 传播"

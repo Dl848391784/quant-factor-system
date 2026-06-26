@@ -21,7 +21,7 @@
 """
 
 import pytest
-from comprehensive_factor.weight_selector import (
+from stock_selector.weight_selector import (
     DEFAULT_CONFIG,
     EPSILON,
     MetricExtractor,
@@ -262,9 +262,7 @@ class TestScorer:
             "m1": {"direction": "higher_better", "weight": 0.0, "short_name": "m1"},
             "m2": {"direction": "higher_better", "weight": 0.0, "short_name": "m2"},
         }
-        config = WeightSelectorConfig.from_dict(
-            metric_configs=zero_metrics, long_layers=["layer_1"]
-        )
+        config = WeightSelectorConfig.from_dict(metric_configs=zero_metrics, long_layers=["layer_1"])
         scorer = Scorer(config)
         normalized_scores = {"method1": {"m1": 0.5, "m2": 0.5}}
         assert scorer.calculate_weighted(normalized_scores)["method1"] == 0.0
@@ -318,9 +316,7 @@ class TestReportFormatter:
 
     def test_generate_output_meta_fields(self):
         """meta 字段含 created_at / normalization_method='min-max' / total_metrics=7"""
-        formatter, metrics_data, normalized, scores, best, best_score, ranked = (
-            self._build_full_pipeline()
-        )
+        formatter, metrics_data, normalized, scores, best, best_score, ranked = self._build_full_pipeline()
         output = formatter.generate_output(metrics_data, normalized, scores, best, best_score, ranked)
         assert "meta" in output
         assert "created_at" in output["meta"]
@@ -329,20 +325,15 @@ class TestReportFormatter:
 
     def test_generate_output_best_selection(self):
         """best_selection 含 method + composite_score"""
-        formatter, metrics_data, normalized, scores, best, best_score, ranked = (
-            self._build_full_pipeline()
-        )
+        formatter, metrics_data, normalized, scores, best, best_score, ranked = self._build_full_pipeline()
         output = formatter.generate_output(metrics_data, normalized, scores, best, best_score, ranked)
         assert output["best_selection"]["method"] == best
         assert output["best_selection"]["composite_score"] == round(best_score, 4)
 
     def test_generate_output_ranking_length(self):
         """ranking 长度 = 方法数"""
-        formatter, metrics_data, normalized, scores, best, best_score, ranked = (
-            self._build_full_pipeline()
-        )
+        formatter, metrics_data, normalized, scores, best, best_score, ranked = self._build_full_pipeline()
         output = formatter.generate_output(metrics_data, normalized, scores, best, best_score, ranked)
         assert len(output["ranking"]) == len(scores)
         # 排名从 1 开始
         assert output["ranking"][0]["rank"] == 1
-

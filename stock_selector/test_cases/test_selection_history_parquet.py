@@ -22,7 +22,7 @@ import pyarrow.compute as pc
 import pyarrow.dataset as pads
 import pyarrow.parquet as pq
 import pytest
-from comprehensive_factor.stock_selector import StockSelectorConfig, write_selection_history
+from stock_selector import StockSelectorConfig, write_selection_history
 
 
 # ============================================================================

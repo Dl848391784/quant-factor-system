@@ -13,7 +13,7 @@
 import numpy as np
 import pandas as pd
 import pytest
-from comprehensive_factor.stock_selector import apply_stabilization_filter
+from stock_selector import apply_stabilization_filter
 
 
 def _make_stock(code: str, rank: int) -> dict:

@@ -26,12 +26,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))  # noqa: E402
 
 from comprehensive_factor.common.factor_loader import load_factor_values  # noqa: E402
-from comprehensive_factor.common.logger_config import get_logger  # noqa: E402
-from comprehensive_factor.stock_selector_config import (  # noqa: E402
+from factor_definitions import FACTOR_COL_TO_NAME_MAP  # noqa: E402
+from stock_selector.common.logger_config import get_logger  # noqa: E402
+from stock_selector.config import (  # noqa: E402
     StockSelectorConfig,
 )
-from comprehensive_factor.stock_selector_history import _load_stock_name_map  # noqa: E402
-from factor_definitions import FACTOR_COL_TO_NAME_MAP  # noqa: E402
+from stock_selector.history import _load_stock_name_map  # noqa: E402
 
 
 if TYPE_CHECKING:
