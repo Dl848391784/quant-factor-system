@@ -1406,7 +1406,7 @@ class TestLoadStockNameMap:
 class TestLoadStockSelectionParquet:
     """v3.7: load_stock_selection_result 从 Parquet 分区数据集读取最新一日.
 
-    依赖 comprehensive_factor.stock_selector.write_selection_history 生成真 Parquet,
+    依赖 stock_selector.history.write_selection_history 生成真 Parquet,
     避免手搓 schema 导致测试与生产代码漂移 (设计依据: PROJECT.md 规则 #4).
     """
 

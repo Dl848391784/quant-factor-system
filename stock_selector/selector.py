@@ -112,7 +112,7 @@ from stock_selector.lr import (  # noqa: E402, F401
 __version__ = "3.12"
 
 # logger 实例（遵循 PROJECT.md 第380-500行日志规范）
-_logger = logging.getLogger("comprehensive_factor.stock_selector")
+_logger = logging.getLogger("stock_selector.selector")
 
 
 # ============================================================================
