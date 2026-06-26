@@ -273,11 +273,13 @@ def main():
     date = get_date_str(args.date)
     report = generate_report(date, logger, force_full_correlation=args.full_correlation)
 
-    # 默认输出到 summary/result/ 目录
+    # 默认输出到 summary/result/<alias>/ 目录（pipeline 感知）
     if args.output:
         output_path = Path(args.output)
     else:
-        result_dir = PROJECT_ROOT / "summary" / "result"
+        from paths import SUMMARY_RESULT
+
+        result_dir = SUMMARY_RESULT
         result_dir.mkdir(parents=True, exist_ok=True)
         output_path = result_dir / f"factor_summary_report_{date}.txt"
 
