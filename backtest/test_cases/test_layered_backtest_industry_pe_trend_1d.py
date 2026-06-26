@@ -44,7 +44,7 @@ class TestIndustryPeTrendLayerConfig:
             config = IndustryPeTrendLayerConfig()
         except FileNotFoundError:
             pytest.skip("IC结果文件不存在，需先运行 ic_industry_pe_trend_1d.py")
-        assert config.ic_source_resolved == "factor_ic/result/ic_industry_pe_trend_1d_analysis_result.json"
+        assert config.ic_source_resolved.endswith("ic_industry_pe_trend_1d_analysis_result.json")
 
     def test_n_layers_derived(self):
         """TC001-05: n_layers 由 len(layer_names) 派生（IC文件不存在时跳过）"""

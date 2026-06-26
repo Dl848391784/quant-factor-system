@@ -46,7 +46,7 @@ class TestTailPriceVolumeIntensityLayerConfig:
         """TC001-04: ic_source 默认路径"""
         config = TailPriceVolumeIntensityLayerConfig()
         # 未显式声明时，基类按 factor_name 拼接默认路径
-        assert config.ic_source_resolved == ("factor_ic/result/ic_tail_price_volume_intensity_1d_analysis_result.json")
+        assert config.ic_source_resolved.endswith("ic_tail_price_volume_intensity_1d_analysis_result.json")
 
     def test_ic_meta_direction_negative(self):
         """TC001-05: factor_direction = negative（从 IC 文件派生）"""

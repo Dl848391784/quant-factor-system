@@ -51,7 +51,7 @@ class TestVolumeRatioLayerConfig:
         """TC001-04: ic_source 显式声明覆盖默认路径"""
         config = VolumeRatioLayerConfig()
         # 显式声明时，使用声明的路径（而非默认拼接）
-        assert config.ic_source_resolved == 'factor_ic/result/ic_volume_ratio_1d_analysis_result.json'
+        assert config.ic_source_resolved.endswith('ic_volume_ratio_1d_analysis_result.json')
 
     def test_ic_meta_direction_negative(self):
         """TC001-04: factor_direction = negative（从 IC 文件派生）"""

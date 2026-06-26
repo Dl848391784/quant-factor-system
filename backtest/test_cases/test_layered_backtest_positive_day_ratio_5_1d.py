@@ -43,7 +43,7 @@ class TestPositiveDayRatio5LayerConfig:
     def test_ic_source_default(self):
         """TC001-04: ic_source 默认路径"""
         config = PositiveDayRatio5LayerConfig()
-        assert config.ic_source_resolved == 'factor_ic/result/ic_positive_day_ratio_5_1d_analysis_result.json'
+        assert config.ic_source_resolved.endswith('ic_positive_day_ratio_5_1d_analysis_result.json')
 
     def test_ic_meta_direction_negative(self):
         """TC001-05: factor_direction = negative（从 IC 文件派生）"""

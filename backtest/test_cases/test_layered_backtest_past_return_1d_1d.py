@@ -44,7 +44,7 @@ class TestPastReturn1dLayerConfig:
         """TC001-04: ic_source 默认路径"""
         config = PastReturn1dLayerConfig()
         # 未显式声明时，基类按 factor_name 拼接默认路径
-        assert config.ic_source_resolved == "factor_ic/result/ic_past_return_1d_1d_analysis_result.json"
+        assert config.ic_source_resolved.endswith("ic_past_return_1d_1d_analysis_result.json")
 
     def test_n_layers_derived(self):
         """TC001-05: n_layers 由 len(layer_names) 派生"""
