@@ -39,6 +39,7 @@ Step 7: 股票选股 (stock_selector.py) ← 本脚本
 - v1.21 (2026-06-20): 修复维度权重不生效 bug——从 composite 结果读取 dimension_weight_method 传给 WeightEngine（之前 stock_selector 自建 WeightEngine 时缺 dimension_weight_method/factor_categories 参数，导致选股排序用不带维度权重的综合因子值，维度分组工作无效）
 - v3.7 (2026-06-24): 废除 stock_selection_result.json 单文件, 改用 Parquet 分区数据集 stock_selection_history/ 作为单一信源 (designs/feat_stock_selection_history_parquet.md). 含 Stage 1/2/3 Top 30 三段, 按 selection_date 分区, file-level metadata 存 excluded_by_* 统计. apply_stage2_resort 写回 stage2_sort_value 字段.
 - v3.12 (2026-06-26): 纯重构——拆分为 4 个文件: stock_selector_config.py (配置+常量+数据加载), stock_selector_lr.py (LR过滤训练/应用/训练数据保存), stock_selector_history.py (Parquet选股历史写入), stock_selector.py (门面: re-export + 核心选股逻辑 + CLI). 所有 `from comprehensive_factor.stock_selector import X` 路径不变. 行为零变化.
+- v3.14 (2026-06-26): select_stocks 内部重构——521 行"上帝函数"提取为 6 个内部辅助函数 (_load_weight_and_factors / _load_and_filter_factor_data / _standardize_and_align_direction / _compute_composite_factor / _run_selection_pipeline / _build_and_write_outputs). select_stocks 缩至 100 行编排目录. 纯重构, 行为零变化.
 
 作者: 云瑶
 创建日期: 2026-06-03
@@ -809,57 +810,23 @@ def _compute_composite_for_method(
     return composite_factor, factor_list, factor_cols
 
 
-def select_stocks(
+def _load_weight_and_factors(
     config: StockSelectorConfig,
-    logger: logging.Logger | None = None,
-) -> tuple[dict[str, Any], Path]:
-    """股票选股主函数
-
-    流程:
-    1. 加载最优权重配置
-    2. 加载因子数据
-    3. 确定选股日期
-    4. 过滤数据（只保留选股日期）
-    5. 标准化因子
-    6. 加载 IC 数据（根据权重方法）
-    7. 计算综合因子
-    8. 排序选出 Top N
-    9. 构建结果
-    10. 保存结果
-
-    Args:
-        config: 配置对象
-        logger: 日志对象（默认使用模块级 _logger）
+    logger: logging.Logger,
+) -> tuple[dict[str, Any], str, list[str], list[str]]:
+    """Step 0-3: 加载权重配置 + 因子列表 + 校验.
 
     Returns:
-        Tuple[result_dict, output_path]
-            - result_dict: build_result 返回的内存字典（含 meta/top_stocks/weight_config）
-            - output_path: write_selection_history 返回的 Parquet 分区目录
-
-    Raises:
-        ValueError: 数据异常
-        FileNotFoundError: 文件不存在
+        (weight_config, best_method, factor_list, factor_cols)
     """
-    if logger is None:
-        logger = _logger
-
-    # 问题 10 修复：合并流程启停日志为单条 INFO
-    logger.info("股票选股流程启动")
-
-    # 问题 1 修复：调用 validate() 校验配置完整性
-    config.validate()
-
     # Step 0: v3.10 补写前一天 lr_training_data 的 forward_return_1d (T+1 收益)
     backfill_forward_return_1d(config.data_source, logger=logger)
 
     # Step 1: 加载最优权重配置（优先获取因子列表）
-    # 问题 3 修复：__post_init__ 已处理路径默认值，无需运行时校验
     weight_config = load_weight_config(config.weight_result_path, logger)
     best_method = weight_config["best_selection"]["method"]
 
     # Step 2: 从最优权重 composite 结果中读取选中的因子列表
-    # 遵循数据层架构原则：因子筛选结果由 comprehensive_factor 模块决定
-    # 问题 3+5 修复：__post_init__ 已处理路径默认值，无需运行时校验
     factor_list, factor_cols = load_selected_factors_from_composite(
         weight_config, config.output_dir, config.return_period, logger
     )
@@ -870,16 +837,25 @@ def select_stocks(
     if len(factor_list) != len(factor_cols):
         raise ValueError(f"factor_list ({len(factor_list)}) 与 factor_cols ({len(factor_cols)}) 数量不一致")
 
+    return weight_config, best_method, factor_list, factor_cols
+
+
+def _load_and_filter_factor_data(
+    config: StockSelectorConfig,
+    factor_cols: list[str],
+    logger: logging.Logger,
+) -> tuple[pd.DataFrame, str, int]:
+    """Step 4-6: 加载因子数据 + 流动性 + 日期过滤.
+
+    Returns:
+        (factor_df, selection_date, stocks_on_date)
+    """
     # Step 4: 加载因子数据
-    # 不可交易股票（涨停类）由 factor_loader 在 load_full_data 阶段过滤
     logger.info("加载因子数据...")
     factor_df_raw = load_factor_values(factor_cols, config.data_source, logger)
-    # 类型转换：load_factor_values 返回 DataFrame（pandas DataFrame 构造返回类型不稳定）
     factor_df = cast(pd.DataFrame, factor_df_raw)
 
     # v2.40: 独立加载流动性列（volume + close），不污染 standardize_factors 工作流
-    # 设计依据：composite_runner OOM 修复 — 把 liquidity 与因子标准化解耦
-    # stock_selector 阶段 factor_df 已被 selection_date 过滤为单日，merge 成本极低
     if config.enable_liquidity_filter:
         logger.info("加载流动性数据（volume + close）...")
         try:
@@ -893,12 +869,11 @@ def select_stocks(
         liquidity_df = None
 
     # Step 5: 确定选股日期
-    selection_date = config.selection_date  # 问题 5 修复：用局部变量持有
+    selection_date = config.selection_date
     if selection_date is None:
         selection_date = get_latest_date(factor_df, logger)
 
     # Step 6: 过滤数据（只保留选股日期）
-    # 问题 1 修复：available_dates 归一化为 str，与 selection_date 同格式比较
     available_dates = sorted({pd.Timestamp(d).strftime("%Y-%m-%d") for d in factor_df["date"].unique()})
     if selection_date not in available_dates:
         raise ValueError(
@@ -908,7 +883,6 @@ def select_stocks(
         )
 
     logger.info("过滤选股日期: %s", selection_date)
-    # 问题 1 修复：合并为一行 mask 过滤，避免引入临时列污染上游对象
     mask = factor_df["date"].apply(lambda d: pd.Timestamp(d).strftime("%Y-%m-%d")) == selection_date
     factor_df = factor_df[mask].copy()
 
@@ -925,18 +899,31 @@ def select_stocks(
             factor_df["volume"].notna().mean() * 100,
         )
 
-    # 问题 2 修复：变量名改为 stocks_on_date，避免误解为"全部股票数"
     stocks_on_date = len(factor_df)
     logger.info("选股日期股票数: %d", stocks_on_date)
 
+    return factor_df, selection_date, stocks_on_date
+
+
+def _standardize_and_align_direction(
+    factor_df: pd.DataFrame,
+    factor_list: list[str],
+    factor_cols: list[str],
+    weight_config: dict[str, Any],
+    best_method: str,
+    config: StockSelectorConfig,
+    logger: logging.Logger,
+) -> tuple[pd.DataFrame, dict[str, str], list[str]]:
+    """Step 7-7.5: 标准化因子 + 方向统一化.
+
+    Returns:
+        (factor_df, direction_map, flipped_factors)
+    """
     # Step 7: 标准化因子（截面标准化）
-    # 注意：单日数据标准化时，每日截面就是当日所有股票
     logger.info("标准化因子...")
     factor_df = standardize_factors(factor_df, factor_cols, logger)
 
     # Step 7.5: 方向统一化（遵循 MODULE.md M56）
-    # v2.47: 按 sign(IC) 对齐到正向语义 —— 反向因子 (ic_mean<0) 标准化值取反
-    # 与 composite_runner Step 5 保持一致，确保综合因子值与回测时相同
     direction_map: dict[str, str] = {}
     flipped_factors: list[str] = []
 
@@ -957,7 +944,6 @@ def select_stocks(
     # 如果 direction_map 为空，从 ic_results 自行计算（回退方案）
     if not direction_map:
         logger.info("direction_map 为空，从 ic_results 自行计算方向统一化...")
-        # 加载 IC 结果（静态权重方法需要）
         ic_results_for_direction, _ = load_ic_results(factor_list, config.ic_result_dir, config.return_period, logger)
 
         for i, col in enumerate(factor_cols):
@@ -1002,25 +988,38 @@ def select_stocks(
             flipped_factors,
         )
 
+    return factor_df, direction_map, flipped_factors
+
+
+def _compute_composite_factor(
+    factor_df: pd.DataFrame,
+    factor_list: list[str],
+    factor_cols: list[str],
+    best_method: str,
+    config: StockSelectorConfig,
+    logger: logging.Logger,
+) -> tuple[pd.Series, dict[str, Any] | None, str | None, str | None, pd.DataFrame, dict[str, int]]:
+    """Step 8-9: 加载 IC 数据 + 计算综合因子.
+
+    Returns:
+        (composite_factor, selection_weights, dimension_weight_method, short_sample_factors, factor_df, filter_exclusions)
+        factor_df 可能被 apply_filter_role_factors 修改 (R3 过滤).
+    """
     # Step 8: 加载 IC 数据（根据权重方法）
     ic_results = None
     ic_daily_data = None
 
     if best_method == "rolling_icir_weight":
-        # 滚动 ICIR 需要历史 IC 序列
         logger.info("加载 IC 每日序列（滚动 ICIR 需要）...")
-        # 问题 3 修复：__post_init__ 已处理路径默认值，无需运行时校验
         ic_daily_data = load_ic_daily(factor_list, config.ic_result_dir, config.return_period, logger)
     elif best_method in ("icir_weight", "ic_weight"):
-        # 静态权重需要 IC 统计结果
         logger.info("加载 IC 统计结果（静态权重需要）...")
-        # 问题 3 修复：__post_init__ 已处理路径默认值，无需运行时校验
         ic_results, _ = load_ic_results(factor_list, config.ic_result_dir, config.return_period, logger)
 
     # Step 9: 计算综合因子
-    # v1.10: 从 composite 结果读取 short_sample_factors，传给 weight_engine 进行 ICIR 惩罚
     short_sample_factors = None
-    dimension_weight_method = None  # v1.21: 维度权重方法（从 composite 结果读取）
+    dimension_weight_method = None
+    composite_file = config.output_dir / f"composite_{best_method}_{config.return_period}.json"
     if composite_file.exists():
         try:
             with open(composite_file, encoding="utf-8") as f:
@@ -1033,7 +1032,6 @@ def select_stocks(
                     "短样本因子ICIR权重惩罚: %s",
                     {k: f"×{v}/30={v / 30:.2f}" for k, v in short_sample_factors.items()},
                 )
-            # v1.21: 读取维度权重方法，传给 WeightEngine（修复维度权重不生效 bug）
             dimension_weight_method = (
                 composite_data_for_ss.get("meta", {}).get("weight_meta", {}).get("dimension_weight_method")
             )
@@ -1055,42 +1053,60 @@ def select_stocks(
     )
     composite_factor = weight_engine.calculate(factor_df, factor_cols, ic_results, ic_daily_data, short_sample_factors)
 
-    # Step 10: 排序选出 Top N
-    logger.info("排序选股（Top N: %d，方向: %s）...", config.top_n, config.factor_direction)
-
-    # v1.10: 获取权重用于覆盖率过滤
-    # 从 composite 结果读取权重，或从 weight_engine 计算获取
+    # 获取权重用于覆盖率过滤
     selection_weights = None
     if composite_file.exists():
         try:
             with open(composite_file, encoding="utf-8") as f:
                 composite_data_for_weights = json.load(f)
-            # 尝试从 meta.weights 读取（ICIR/IC 等静态权重）
             selection_weights = composite_data_for_weights.get("meta", {}).get("weights")
             if not selection_weights:
-                # 尝试从 weight_meta.last_day_weights 读取（滚动ICIR）
                 wm = composite_data_for_weights.get("meta", {}).get("weight_meta", {})
                 selection_weights = wm.get("last_day_weights")
         except (json.JSONDecodeError, KeyError):
             logger.warning("无法从 composite 结果读取权重，跳过覆盖率过滤")
 
     # v1.13: 映射权重键名：因子名 → 列名
-    # last_day_weights 键为因子名(如 volume_ratio)，factor_cols 为列名(如 volume_ratio_5)
-    # 不映射会导致覆盖率计算中 col in factor_cols 永远 False，覆盖率恒为 1-volume_ratio_weight
     if selection_weights and factor_list and factor_cols:
         name_to_col = dict(zip(factor_list, factor_cols))
         selection_weights = {name_to_col.get(k, k): v for k, v in selection_weights.items()}
 
-    # v3.9: Bottom30 过热过滤 (designs/feat_bottom30_overheat_filter.md)
-    #   Stage 1: composite Top stage1_pool_size (保留, 候选池基础设施)
-    #   Stage 2/3: 废弃——不再对 Top30 做 turnover 重排 + 企稳过滤
-    #   Bottom30: composite 升序取最低 top_n*2 → 过热过滤 → top_n (最终短名单)
-    stage1_top_snapshot: list[dict[str, Any]] = []
-    stage2_top_snapshot: list[dict[str, Any]] = []  # v3.9: 不再使用, 保留为空
-    stage1_bottom_snapshot: list[dict[str, Any]] = []
-    excluded_by_confirmation = 0  # v3.9: 企稳过滤废弃, 恒为 0
-    excluded_by_overheat = 0  # v3.9: 过热过滤排除数
+    return (
+        composite_factor,
+        selection_weights,
+        dimension_weight_method,
+        short_sample_factors,
+        factor_df,
+        filter_exclusions,
+    )
 
+
+def _run_selection_pipeline(
+    composite_factor: pd.Series,
+    factor_df: pd.DataFrame,
+    config: StockSelectorConfig,
+    best_method: str,
+    selection_date: str,
+    selection_weights: dict[str, float] | None,
+    factor_cols: list[str],
+    logger: logging.Logger,
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    int,
+    int,
+    int,
+    int,
+    int,
+]:
+    """Step 10: Stage 1 候选池 + Bottom90 + LR 过滤.
+
+    Returns:
+        (top_stocks, stage1_top_snapshot, stage1_bottom_snapshot,
+         excluded_by_amplitude, excluded_by_coverage, excluded_by_liquidity,
+         excluded_by_confirmation, excluded_by_overheat)
+    """
     # Stage 1: composite Top stage1_pool_size (候选池, 保留基础设施)
     stage1_n = config.stage1_pool_size
     logger.info("Stage 1: composite Top %d (候选池)", stage1_n)
@@ -1099,7 +1115,7 @@ def select_stocks(
         factor_df,
         stage1_n,
         config.factor_direction,
-        factor_cols,
+        factor_cols=factor_cols,
         weights=selection_weights,
         min_amplitude=config.min_amplitude,
         enable_liquidity_filter=config.enable_liquidity_filter,
@@ -1108,8 +1124,12 @@ def select_stocks(
     )
     stage1_top_snapshot = [copy.deepcopy(s) for s in stage1_stocks[: config.top_n]]
 
-    # v3.10: Bottom90 候选池 (composite 升序最低 90 只, 留递补 + 训练数据)
-    #   v3.9 用 top_n*2=60, v3.10 改为 lr_bottom_pool_size=90 (训练数据需要更多样本)
+    stage2_top_snapshot: list[dict[str, Any]] = []  # v3.9: 不再使用, 保留为空
+    stage1_bottom_snapshot: list[dict[str, Any]] = []
+    excluded_by_confirmation = 0  # v3.9: 企稳过滤废弃, 恒为 0
+    excluded_by_overheat = 0  # v3.9: 过热过滤排除数
+
+    # v3.10: Bottom90 候选池
     valid_cf = composite_factor.dropna()
     if len(valid_cf) > 0:
         bottom_candidates = valid_cf.nsmallest(config.lr_bottom_pool_size)
@@ -1123,10 +1143,9 @@ def select_stocks(
             }
             for idx, val in bottom_candidates.items()
         ]
-        # 原始快照 (过滤前, 前 top_n 只)
         stage1_bottom_snapshot = [copy.deepcopy(s) for s in bottom_pool[: config.top_n]]
 
-        # v3.10: LR 数据驱动过滤 (从 lr_training_data 读取训练样本, 非代理)
+        # v3.10: LR 数据驱动过滤
         if config.enable_overheat_filter:
             from paths import LR_TRAINING_DATA_DIR
 
@@ -1164,18 +1183,50 @@ def select_stocks(
                 top_stocks = bottom_pool
         else:
             top_stocks = bottom_pool
-
-        # v3.13: top_stocks 即 LR 打分排序后全部股票 (与 write_selection_history 的 stage3_top 对应)
     else:
         top_stocks = []
 
-    # Step 10.6: 决策卡片 (v2.43, designs/feat_decision_card_v1.md)
-    # 在短名单上叠加 5 维客观字段, 辅助人工决断 (3~5 只持仓)
-    # 战略目标 (AGENTS.md): 量化辅助 + 人工决断
-    # v3.9: 决策卡片辅助列 — 从企稳信号改为过热/趋势确认信号
-    # D1: amplitude, close, high, low, return_5d (涨跌幅/振幅/区间位置)
-    # D2: turnover_rate, volume_ratio_5, amplitude (过热风险)
-    # D3: near_high_ratio_5, bollinger_pb, rsi_6 (趋势确认)
+    return (
+        top_stocks,
+        stage1_top_snapshot,
+        stage2_top_snapshot,
+        stage1_bottom_snapshot,
+        excluded_by_amplitude,
+        excluded_by_coverage,
+        excluded_by_liquidity,
+        excluded_by_confirmation,
+        excluded_by_overheat,
+    )
+
+
+def _build_and_write_outputs(
+    top_stocks: list[dict[str, Any]],
+    factor_df: pd.DataFrame,
+    config: StockSelectorConfig,
+    weight_config: dict[str, Any],
+    selection_date: str,
+    stocks_on_date: int,
+    factor_list: list[str],
+    factor_cols: list[str],
+    direction_map: dict[str, str],
+    flipped_factors: list[str],
+    stage1_top_snapshot: list[dict[str, Any]],
+    stage2_top_snapshot: list[dict[str, Any]],
+    stage1_bottom_snapshot: list[dict[str, Any]],
+    excluded_by_amplitude: int,
+    excluded_by_coverage: int,
+    excluded_by_liquidity: int,
+    excluded_by_confirmation: int,
+    excluded_by_overheat: int,
+    filter_exclusions: dict[str, int],
+    logger: logging.Logger,
+) -> tuple[dict[str, Any], Path]:
+    """Step 10.6-13: 决策卡片 + 结果构建 + Parquet 写入 + LR 训练数据保存.
+
+    Returns:
+        (result_dict, partition_dir)
+    """
+    # Step 10.6: 决策卡片 (v2.43)
     card_aux_cols = [
         "amplitude",
         "close",
@@ -1196,7 +1247,6 @@ def select_stocks(
         try:
             aux_df_raw = load_factor_values(missing_aux, config.data_source, logger)
             aux_df = cast(pd.DataFrame, aux_df_raw)
-            # 过滤到 selection_date (与 factor_df 对齐)
             if "date" in aux_df.columns:
                 aux_df = aux_df[aux_df["date"] == selection_date].copy()
             merge_cols = ["asset"] + [c for c in missing_aux if c in aux_df.columns]
@@ -1210,10 +1260,7 @@ def select_stocks(
         )
     top_stocks = build_decision_cards(top_stocks, factor_df_for_cards, logger=logger)
 
-    # Step 11: 构建结果（仅作为函数返回供 CLI/调用方查看, 不再写 JSON 落盘——v3.7 改用 Parquet）
-    # 问题 2 修复：total_stocks → stocks_on_date
-    # v1.10: 传入 direction_map 和 flipped_factors
-    # v1.12: 传入 excluded_by_amplitude
+    # Step 11: 构建结果
     result = build_result(
         top_stocks,
         config,
@@ -1224,33 +1271,29 @@ def select_stocks(
         selection_date,
         direction_map=direction_map,
         flipped_factors=flipped_factors,
-        excluded_by_amplitude=excluded_by_amplitude,  # v1.12: 振幅过滤排除数
-        excluded_by_coverage=excluded_by_coverage,  # v1.15: 覆盖率过滤排除数
-        excluded_by_liquidity=excluded_by_liquidity,  # v2.40: 流动性过滤排除数
-        excluded_by_confirmation=excluded_by_confirmation,  # v2.35: P6 企稳过滤排除数 (v3.9: 恒为 0)
-        excluded_by_overheat=excluded_by_overheat,  # v3.9: Bottom30 过热过滤排除数
-        excluded_by_filter=filter_exclusions,  # v2.41 (R3): filter 角色排除数
+        excluded_by_amplitude=excluded_by_amplitude,
+        excluded_by_coverage=excluded_by_coverage,
+        excluded_by_liquidity=excluded_by_liquidity,
+        excluded_by_confirmation=excluded_by_confirmation,
+        excluded_by_overheat=excluded_by_overheat,
+        excluded_by_filter=filter_exclusions,
         logger=logger,
     )
 
-    # Step 12: 写入 Parquet 选股历史 (v3.7, designs/feat_stock_selection_history_parquet.md)
-    # 取代 v3.6 之前的 save_result JSON 单文件——Parquet 单一信源, 失败抛异常无兜底
-    # 单阶段模式 (enable_two_stage=False) 时 stage1/stage2 快照为 [], 只归档 stage3
-    # v3.9: exclusion_stats 新增 excluded_by_overheat
+    # Step 12: 写入 Parquet 选股历史
     exclusion_stats = {
         "excluded_by_amplitude": excluded_by_amplitude,
         "excluded_by_coverage": excluded_by_coverage,
         "excluded_by_liquidity": excluded_by_liquidity,
-        "excluded_by_confirmation": excluded_by_confirmation,  # v3.9: 恒为 0
-        "excluded_by_overheat": excluded_by_overheat,  # v3.9: 过热过滤排除数
+        "excluded_by_confirmation": excluded_by_confirmation,
+        "excluded_by_overheat": excluded_by_overheat,
         "excluded_by_filter": filter_exclusions,
-        "min_weight_coverage": 0.5,  # v1.15 阈值, 与 build_result 默认一致
+        "min_weight_coverage": 0.5,
     }
-    # v3.9: stage3_top 不再使用 (Top30 企稳过滤废弃), 改传 bottom_filtered
     partition_dir = write_selection_history(
         stage1_top=stage1_top_snapshot,
-        stage2_top=stage2_top_snapshot,  # v3.9: 空
-        stage3_top=top_stocks,  # v3.9: bottom_filtered 过热过滤后短名单
+        stage2_top=stage2_top_snapshot,
+        stage3_top=top_stocks,
         config=config,
         weight_config=weight_config,
         selection_date=selection_date,
@@ -1261,16 +1304,11 @@ def select_stocks(
         flipped_factors=flipped_factors,
         exclusion_stats=exclusion_stats,
         output_dir=config.output_dir,
-        stage1_bottom=stage1_bottom_snapshot,  # v3.8: Bottom 30 原始快照 (过滤前)
+        stage1_bottom=stage1_bottom_snapshot,
         logger=logger,
     )
 
-    # Step 13: v3.11 保存四种权重方式的 LR 训练数据 (各 Bottom90 + 因子权重 + 因子值)
-    # 次日 backfill_forward_return_1d 补写 T+1 收益
-    # 训练分布 = 应用分布 (第一性原理, designs/feat_lr_training_data.md)
-    # v3.11: 不再只存 best_method, 每天对四种方式各存一份 (designs/feat_multi_weight_lr_training.md)
-    #   - best_method 切换时不冷启动
-    #   - summary 可对比四种方式的 OOS AUC
+    # Step 13: v3.11 保存四种权重方式的 LR 训练数据
     for train_method in ALL_WEIGHT_METHODS:
         composite_file_m = config.output_dir / f"composite_{train_method}_{config.return_period}.json"
         if not composite_file_m.exists():
@@ -1321,7 +1359,108 @@ def select_stocks(
             logger=logger,
         )
 
-    # 问题 4 修复：删除流程完成日志，让 CLI 层的成功日志兼任收尾
+    return result, partition_dir
+
+
+def select_stocks(
+    config: StockSelectorConfig,
+    logger: logging.Logger | None = None,
+) -> tuple[dict[str, Any], Path]:
+    """股票选股主函数
+
+    流程:
+    1. 加载最优权重配置
+    2. 加载因子数据
+    3. 确定选股日期
+    4. 过滤数据（只保留选股日期）
+    5. 标准化因子
+    6. 加载 IC 数据（根据权重方法）
+    7. 计算综合因子
+    8. 排序选出 Top N
+    9. 构建结果
+    10. 保存结果
+
+    Args:
+        config: 配置对象
+        logger: 日志对象（默认使用模块级 _logger）
+
+    Returns:
+        Tuple[result_dict, output_path]
+            - result_dict: build_result 返回的内存字典（含 meta/top_stocks/weight_config）
+            - output_path: write_selection_history 返回的 Parquet 分区目录
+
+    Raises:
+        ValueError: 数据异常
+        FileNotFoundError: 文件不存在
+    """
+    if logger is None:
+        logger = _logger
+
+    logger.info("股票选股流程启动")
+    config.validate()
+
+    # Step 0-3: 加载权重配置 + 因子列表
+    weight_config, best_method, factor_list, factor_cols = _load_weight_and_factors(config, logger)
+
+    # Step 4-6: 加载因子数据 + 日期过滤
+    factor_df, selection_date, stocks_on_date = _load_and_filter_factor_data(config, factor_cols, logger)
+
+    # Step 7-7.5: 标准化 + 方向统一化
+    factor_df, direction_map, flipped_factors = _standardize_and_align_direction(
+        factor_df, factor_list, factor_cols, weight_config, best_method, config, logger
+    )
+
+    # Step 8-9: IC 数据 + 综合因子计算
+    composite_factor, selection_weights, _, _, factor_df, filter_exclusions = _compute_composite_factor(
+        factor_df, factor_list, factor_cols, best_method, config, logger
+    )
+
+    # Step 10: 排序选股 + LR 过滤
+    (
+        top_stocks,
+        stage1_top_snapshot,
+        stage2_top_snapshot,
+        stage1_bottom_snapshot,
+        excluded_by_amplitude,
+        excluded_by_coverage,
+        excluded_by_liquidity,
+        excluded_by_confirmation,
+        excluded_by_overheat,
+    ) = _run_selection_pipeline(
+        composite_factor,
+        factor_df,
+        config,
+        best_method,
+        selection_date,
+        selection_weights,
+        factor_cols,
+        logger,
+    )
+
+    # Step 10.6-13: 决策卡片 + 结果构建 + Parquet 写入 + LR 训练数据保存
+    result, partition_dir = _build_and_write_outputs(
+        top_stocks,
+        factor_df,
+        config,
+        weight_config,
+        selection_date,
+        stocks_on_date,
+        factor_list,
+        factor_cols,
+        direction_map,
+        flipped_factors,
+        stage1_top_snapshot,
+        stage2_top_snapshot,
+        stage1_bottom_snapshot,
+        excluded_by_amplitude,
+        excluded_by_coverage,
+        excluded_by_liquidity,
+        excluded_by_confirmation,
+        excluded_by_overheat,
+        filter_exclusions,
+        logger,
+    )
+
     return result, partition_dir
 
 
