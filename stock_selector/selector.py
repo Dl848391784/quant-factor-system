@@ -9,7 +9,7 @@
 
 流程:
 Step 1-5: 单因子分析 → 因子筛选 → 标准化 → 加权计算 → 分层回测
-Step 6: 权重方式选择 (weight_selector.py)
+Step 6: 权重方式选择 (comprehensive_factor/composite_weight_selector.py)
 Step 7: 股票选股 (stock_selector.py) ← 本脚本
 
 版本历史:

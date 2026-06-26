@@ -756,7 +756,7 @@ grep -rn "assert False\|if False:" factor_ic/ comprehensive_factor/ backtest/
 
 **When**: 所有涉及因子筛选、方法评分、选股执行的场景必须遵守。
 
-**Verify**: `grep -r "long_short_return_annual" comprehensive_factor/common/factor_selector.py stock_selector/weight_selector.py` 应零命中
+**Verify**: `grep -r "long_short_return_annual" comprehensive_factor/common/factor_selector.py comprehensive_factor/composite_weight_selector.py` 应零命中
 
 ---
 
@@ -1009,7 +1009,7 @@ Run_pipeline 按 8 个阶段顺序执行，每个阶段对应独立的日志目�
 || Stage 2 | IC计算 | 14 | `factor_ic/logs/` | `ic_*_2026-MM-DD.log`, `__main___2026-MM-DD.log` |
 || Stage 3 | 分层回测 | 14 | `backtest/logs/` | `*_2026-MM-DD.log` |
 || Stage 4 | 综合因子 | 4 | `comprehensive_factor/logs/` | `composite_*_2026-MM-DD.log` |
-|| Stage 5 | 权重选择 | 1 | `stock_selector/logs/` | `weight_selector_2026-MM-DD.log` |
+|| Stage 5 | 权重选择 | 1 | `comprehensive_factor/logs/` | `composite_weight_selector_2026-MM-DD.log` |
 || Stage 6 | 股票选股 | 1 | `stock_selector/logs/` | `selector_2026-MM-DD.log` |
 || Stage 7 | 汇总报告 | 1 | `summary/logs/` | `generate_*_2026-MM-DD.log` |
 

@@ -31,14 +31,15 @@ stock_selector 是独立顶层模块，负责股票选股全流程：权重方�
 | `config.py` | 配置/常量/数据加载（原 stock_selector_config.py） |
 | `history.py` | Parquet 选股历史写入（原 stock_selector_history.py） |
 | `lr.py` | LR 过滤训练/应用/训练数据持久化（原 stock_selector_lr.py） |
-| `weight_selector.py` | 权重方式选择（原 weight_selector.py） |
+
+> **Note**: `weight_selector.py` 已移回 `comprehensive_factor/composite_weight_selector.py`（职责属于综合因子权重评估，不属于选股）。
 
 ---
 
 ## 选股流程
 
 ```
-Step 6: 权重方式选择 (weight_selector.py)
+Step 6: 权重方式选择 (comprehensive_factor/composite_weight_selector.py)
   ├─ 提取评价指标（v2.35: 7指标全对齐只做多——含layer_1_annual/layer_1_sharpe）
   ├─ Min-Max归一化（方向统一化）
   ├─ 等权综合得分
@@ -57,31 +58,6 @@ Step 7: 股票选股 (selector.py)
   ├─ v2.35: P6 企稳确认过滤（Stage 3，排除无企稳信号股票）
   └─ 输出 Top N 股票列表
 ```
-
----
-
-## 权重选择脚本
-
-**脚本**: `weight_selector.py`
-
-**功能**: 从4种权重方式中选择最优方案
-
-| 类别 | 指标 | 方向 |
-|------|------|------|
-| **收益类** | 多空年化收益、多空夏普比率、多头年化收益、多头夏普比率、成本后日收益 | 越大越好 |
-| **稳定性** | 单调性相关性绝对值 | 越大越好 |
-| **成本风险** | 多头换手率、空头换手率、最大回撤 | 越小越好 |
-
-**打分流程**:
-```
-1. 提取9个指标值
-2. 方向统一化（单调性取绝对值，回撤/换手反转）
-3. Min-Max归一化到[0, 1]
-4. 等权平均得到综合得分
-5. 排序选出最优方法
-```
-
-**输出**: `comprehensive_factor/result/weight_selection_result.json`
 
 ---
 
@@ -223,7 +199,6 @@ python -m stock_selector.selector \
 |------|------|----------|
 | 选股历史 Parquet | `comprehensive_factor/result/stock_selection_history/` | `history.py` |
 | LR 训练数据 | `comprehensive_factor/result/lr_training_data/` | `lr.py` |
-| 权重选择结果 | `comprehensive_factor/result/weight_selection_result.json` | `weight_selector.py` |
 
 ---
 

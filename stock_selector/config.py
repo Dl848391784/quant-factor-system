@@ -178,7 +178,7 @@ def load_weight_config(
 
     if not weight_result_path.exists():
         raise FileNotFoundError(
-            f"权重选择结果文件不存在: {weight_result_path}\n请先运行 weight_selector.py 生成最优权重配置"
+            f"权重选择结果文件不存在: {weight_result_path}\n请先运行 composite_weight_selector.py 生成最优权重配置"
         )
 
     logger.info("加载权重选择结果: %s", weight_result_path)

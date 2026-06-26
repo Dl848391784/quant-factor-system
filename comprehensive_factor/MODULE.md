@@ -98,7 +98,7 @@ Step 4: 加权计算综合因子 (B 类规则)
 Step 5: 综合因子分层回测
   对 4 个综合因子分别做分层回测
                               ↓
-Step 6: 权重方式选择 (stock_selector/weight_selector.py)
+Step 6: 权重方式选择 (comprehensive_factor/composite_weight_selector.py)
   ├─ 提取评价指标（v2.35: 7指标全对齐只做多——含layer_1_annual/layer_1_sharpe）
   ├─ Min-Max归一化（方向统一化）
   ├─ 等权综合得分
@@ -118,7 +118,32 @@ Step 7: 股票选股 (stock_selector/selector.py)
   └─ 输出 Top N 股票列表
 ```
 
-> **Note**: Step 6-7 已迁移至独立模块 `stock_selector/`，详见 `stock_selector/MODULE.md`。
+> **Note**: Step 7 已迁移至独立模块 `stock_selector/`，详见 `stock_selector/MODULE.md`。
+
+---
+
+## 权重选择脚本
+
+**脚本**: `composite_weight_selector.py`（原名 `weight_selector.py`，2026-06-26 按命名规范重命名）
+
+**功能**: 从4种权重方式中选择最优方案
+
+| 类别 | 指标 | 方向 |
+|------|------|------|
+| **收益类** | 多空年化收益、多空夏普比率、多头年化收益、多头夏普比率、成本后日收益 | 越大越好 |
+| **稳定性** | 单调性相关性绝对值 | 越大越好 |
+| **成本风险** | 多头换手率、空头换手率、最大回撤 | 越小越好 |
+
+**打分流程**:
+```
+1. 提取9个指标值
+2. 方向统一化（单调性取绝对值，回撤/换手反转）
+3. Min-Max归一化到[0, 1]
+4. 等权平均得到综合得分
+5. 排序选出最优方法
+```
+
+**输出**: `result/weight_selection_result.json`
 
 ---
 
@@ -236,11 +261,21 @@ result = run_layered_backtest(
 
 ## M3. 脚本命名
 
-**What**:综合因子分层回测脚本统一命名为 `composite_<加权方式>_<收益周期>.py`。
+**What**: comprehensive_factor 模块下所有业务脚本统一以 `composite_` 前缀命名。
 
-**Why**:与 factor_ic (`ic_<因子>_<周期>.py`) 和 backtest (`layered_backtest_<因子>_<周期>.py`) 模块命名规则保持一致。
+| 脚本类型 | 命名格式 | 示例 |
+|----------|----------|------|
+| 综合因子分层回测 | `composite_<加权方式>_<收益周期>.py` | `composite_equal_weight_1d.py`、`composite_rolling_icir_weight_1d.py` |
+| 权重方式选择 | `composite_weight_selector.py` | — |
+| 决策卡构建 | `decision_card.py`（特例，见下） | — |
 
-**示例**:`composite_equal_weight_1d.py`、`composite_rolling_icir_weight_1d.py`。
+**Why**: 与 factor_ic (`ic_<因子>_<周期>.py`) 和 backtest (`layered_backtest_<因子>_<周期>.py`) 模块命名规则保持一致。`composite_` 前缀表明脚本属于综合因子模块。
+
+**Don't**: 禁止使用无前缀的裸名称（如 `weight_selector.py`），违反模块命名一致性。
+
+**例外**: `decision_card.py` 为决策卡构建工具，命名沿用项目历史约定，不强制 `composite_` 前缀。
+
+**Verify**: `ls comprehensive_factor/composite_*.py` 应列出所有业务脚本（`decision_card.py` 除外）。
 
 ---
 

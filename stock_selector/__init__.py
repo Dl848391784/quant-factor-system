@@ -8,7 +8,8 @@ stock_selector 模块 — 股票选股系统
 - config: 配置/常量/数据加载
 - history: Parquet 选股历史写入
 - lr: LR 过滤训练/应用
-- weight_selector: 权重方式选择
+
+Note: weight_selector.py 已移回 comprehensive_factor/composite_weight_selector.py
 
 向后兼容: `from stock_selector import X` 等价于原 `from comprehensive_factor.stock_selector import X`
 """

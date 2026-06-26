@@ -243,7 +243,7 @@ def _generate_weight_selection_section(weight_result: dict | None) -> list[str]:
     lines.append("-" * 70)
 
     if weight_result is None:
-        lines.append("权重选择结果文件不存在，请先运行 weight_selector.py")
+        lines.append("权重选择结果文件不存在，请先运行 composite_weight_selector.py")
         lines.append("-" * 70)
         return lines
 

@@ -21,7 +21,7 @@
 """
 
 import pytest
-from stock_selector.weight_selector import (
+from comprehensive_factor.composite_weight_selector import (
     DEFAULT_CONFIG,
     EPSILON,
     MetricExtractor,
