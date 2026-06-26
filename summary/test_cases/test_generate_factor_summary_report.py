@@ -345,20 +345,22 @@ class TestDataFreshnessCheck:
                 assert results[0]["status"] == "ok"
 
     def test_check_data_freshness_factor_ic_data_full_json_dates(self):
-        """测试 factor_ic_data 完整 JSON 格式从顶层 dates[-1] 提取日期"""
+        """测试 factor_ic_data Parquet 从 schema metadata dates[-1] 提取日期"""
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
         logger = MagicMock()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "data_fetchers" / "result").mkdir(parents=True)
 
-            file_path = root / "data_fetchers" / "result" / "factor_ic_data.json.gz"
-            with gzip.open(file_path, "wt", encoding="utf-8") as f:
-                f.write('{"dates": ')
-                json.dump(["2026-05-29", "2026-06-01"], f)
-                f.write(', "data": [')
-                f.write(json.dumps({"date": "2026-06-01", "asset": "000001"}))
-                f.write("]}")
+            # 造一个带 dates metadata 的 Parquet 文件（与生产一致）
+            file_path = root / "data_fetchers" / "result" / "factor_ic_data.parquet"
+            table = pa.table({"date": ["2026-06-01"], "asset": ["000001"]})
+            dates_meta = json.dumps(["2026-05-29", "2026-06-01"]).encode()
+            table = table.replace_schema_metadata({b"dates": dates_meta})
+            pq.write_table(table, file_path)
 
             with (
                 patch("summary.report.freshness_check.PROJECT_ROOT", root),
@@ -366,7 +368,7 @@ class TestDataFreshnessCheck:
                     "summary.report.freshness_check.DATA_CHECK_SOURCES",
                     {
                         "factor_ic_data": {
-                            "path": "data_fetchers/result/factor_ic_data.json.gz",
+                            "path": "data_fetchers/result/factor_ic_data.parquet",
                             "description": "主数据源(行情+因子+收益)",
                             "date_field": "dates",
                             "format": "full_json",
@@ -1589,9 +1591,9 @@ class TestLoadStockSelectionParquet:
 
         lines = sec_mod._generate_stock_selection_section(result, {}, None)
         text = "\n".join(lines)
-        assert "选股轨迹 (v3.10: Bottom90 LR 过滤)" in text
+        assert "选股轨迹 (v3.13: Bottom90 LR 打分排序, 不截断)" in text
         assert "Stage 1: 综合因子值 Top 3" in text
-        assert "LR 过滤后" in text
+        assert "LR 打分排序" in text
         # Stage 1 第一名股票代码必须出现在 Stage 1 段
         assert "600001" in text
 
