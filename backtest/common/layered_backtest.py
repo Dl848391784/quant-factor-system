@@ -108,7 +108,16 @@ class LayeredBacktestEngine:
         self._merge_data(factor_df, return_df)
 
     def _merge_data(self, factor_df: pd.DataFrame, return_df: pd.DataFrame):
-        """合并因子和收益数据"""
+        """合并因子和收益数据（T-1 对齐，消除前视偏差）
+
+        交易规则（PROJECT.md）：T-1 日数据 → T 日 09:25 算 → T 日尾盘买 → T+1 日卖
+        - factor[D] 基于 D 日收盘价计算，只能在 D+1 日 09:25 使用
+        - forward_return_1d[D] = D→D+1 收益
+        - 正确配对：factor[D-1] → forward_return_1d[D]（T-1 因子 → T→T+1 收益）
+
+        修复前（前视偏差）：factor[D] → forward_return_1d[D]，等于偷看 D 日收盘后买 D 日收盘
+        修复后：将因子日期 shift +1 交易日，使 factor[D] 与 forward_return_1d[D+1] 配对
+        """
         # 选择需要的列
         factor_cols = [self.date_col, self.asset_col, self.factor_col]
         if self.volume_col and self.volume_col in factor_df.columns:
@@ -118,6 +127,17 @@ class LayeredBacktestEngine:
 
         factor_subset = factor_df[factor_cols].copy()
         return_subset = return_df[return_cols].copy()
+
+        # T-1 对齐：因子日期 shift +1 交易日
+        # factor[D] 重标记为 D+1，merge 后与 forward_return_1d[D+1]（D+1→D+2 收益）配对
+        all_dates = sorted(
+            set(factor_subset[self.date_col].unique())
+            | set(return_subset[self.date_col].unique())
+        )
+        date_to_next = {all_dates[i]: all_dates[i + 1] for i in range(len(all_dates) - 1)}
+        factor_subset[self.date_col] = factor_subset[self.date_col].map(date_to_next)
+        # 最后一个交易日的因子无次日收益，丢弃
+        factor_subset = factor_subset.dropna(subset=[self.date_col])
 
         # 合并
         self.merged_df = pd.merge(factor_subset, return_subset, on=[self.date_col, self.asset_col], how="inner")
