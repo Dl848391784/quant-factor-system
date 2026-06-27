@@ -360,6 +360,58 @@ def load_weight_selection_result(logger: logging.Logger) -> dict | None:
     return data
 
 
+def _load_all_composite_stocks(
+    weight_method: str,
+    selection_date: str,
+    logger: logging.Logger,
+) -> list[dict]:
+    """从 composite daily parquet 加载选股日全部股票的 composite 值（按降序排列）.
+
+    v3.14 (2026-06-27): 新增. 当股票池 ≤400 只时, 报告全量展示所有股票.
+    数据源: comprehensive_factor/result/<pipeline>/composite_{weight_method}_1d_daily.parquet
+
+    Args:
+        weight_method: 权重方法名称 (如 "rolling_icir_weight")
+        selection_date: 选股日期 (YYYY-MM-DD)
+        logger: 日志记录器
+
+    Returns:
+        按 composite_value 降序排列的股票列表 [{rank, code, composite_value}, ...];
+        数据不可用时返回空列表 (调用方回退到 Stage 1 + Bottom 展示).
+    """
+    comp_dir = Path(DATA_PATHS["comprehensive_result"])
+    daily_path = comp_dir / f"composite_{weight_method}_1d_daily.parquet"
+    if not daily_path.exists():
+        logger.debug("composite daily parquet 不存在: %s", daily_path)
+        return []
+
+    try:
+        df = pd.read_parquet(daily_path, columns=["date", "asset", "composite_factor"])
+    except Exception:
+        logger.exception("读取 composite daily parquet 失败: %s", daily_path)
+        return []
+
+    day_df = df[df["date"].astype(str) == selection_date]
+    if day_df.empty:
+        logger.warning("composite daily parquet 中无 %s 的数据", selection_date)
+        return []
+
+    day_df = day_df.sort_values("composite_factor", ascending=False).reset_index(drop=True)
+
+    stocks: list[dict] = []
+    for i, row in day_df.iterrows():
+        cv = row["composite_factor"]
+        stocks.append(
+            {
+                "rank": i + 1,
+                "code": str(row["asset"]),
+                "composite_value": float(cv) if pd.notna(cv) else None,
+            }
+        )
+    logger.info("加载全量 composite 股票: %s, %d 只", selection_date, len(stocks))
+    return stocks
+
+
 def load_stock_selection_result(logger: logging.Logger) -> dict | None:
     """加载股票选股结果 (v3.7: 从 Parquet 分区数据集读取最新一日).
 
@@ -561,6 +613,13 @@ def load_stock_selection_result(logger: logging.Logger) -> dict | None:
         "stage1_bottom": stage1_bottom,  # v3.8: Bottom 30
         "weight_config": weight_config,
     }
+
+    # v3.14: 加载全量 composite 股票 (≤400 只时报告全量展示)
+    result["all_composite_stocks"] = _load_all_composite_stocks(
+        meta["weight_method"],
+        meta["selection_date"],
+        logger,
+    )
 
     logger.info(
         "加载股票选股结果 (Parquet): 选股日期=%s, Top N=%d, 最优权重=%s, "

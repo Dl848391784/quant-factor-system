@@ -1598,5 +1598,150 @@ class TestLoadStockSelectionParquet:
         assert "600001" in text
 
 
+# ============================================================================
+# v3.14: 全量展示测试 — 股票池 ≤400 只时按 10 只一组全量展示
+# ============================================================================
+
+
+class TestAllCompositeStocksDisplay:
+    """v3.14: 股票池 ≤400 只时全量展示, 替代 Stage 1 + Bottom 简表."""
+
+    def test_all_stocks_shown_when_under_400(self):
+        """all_composite_stocks ≤400 只时全量展示, 不显示 Stage 1/Bottom 简表."""
+        all_stocks = [{"rank": i + 1, "code": f"60{i:04d}", "composite_value": 1.0 - i * 0.01} for i in range(25)]
+        result = {
+            "meta": {
+                "selection_date": "2026-06-24",
+                "weight_method": "rolling_icir_weight",
+                "composite_score": 0.5,
+                "factor_direction": "positive",
+                "top_n": 10,
+                "stocks_on_date": 25,
+                "stage1_pool_size": 200,
+            },
+            "top_stocks": [],
+            "stage1_top": [{"rank": 1, "code": "600001", "composite_value": 1.0}],
+            "stage1_bottom": [{"rank": 25, "code": "600025", "composite_value": 0.75}],
+            "all_composite_stocks": all_stocks,
+            "weight_config": {},
+        }
+        lines = _generate_stock_selection_section(result, {}, None)
+        text = "\n".join(lines)
+
+        # 全量展示标题
+        assert "全量展示: 25 只股票" in text
+        # 不再显示旧的 Stage 1 / Bottom 标题
+        assert "Stage 1: 综合因子值 Top" not in text
+        assert "Bottom" not in text
+        # 每只股票都应出现
+        for i in range(25):
+            assert f"60{i:04d}" in text
+
+    def test_group_separator_every_10_stocks(self):
+        """每 10 只股票之间有分隔线."""
+        all_stocks = [{"rank": i + 1, "code": f"60{i:04d}", "composite_value": 1.0 - i * 0.01} for i in range(35)]
+        result = {
+            "meta": {
+                "selection_date": "2026-06-24",
+                "weight_method": "rolling_icir_weight",
+                "composite_score": 0.5,
+                "factor_direction": "positive",
+                "top_n": 10,
+                "stocks_on_date": 35,
+                "stage1_pool_size": 200,
+            },
+            "top_stocks": [],
+            "all_composite_stocks": all_stocks,
+            "weight_config": {},
+        }
+        lines = _generate_stock_selection_section(result, {}, None)
+        # 35 只 = 4 组 (10+10+10+5), 组间分隔线 = 3 条
+        # 每组以 "排名" 开头行后跟 10 只, 然后分隔线
+        # 统计分隔线数量 (排除标题行后的分隔线和末尾分隔线)
+        separator_count = sum(1 for line in lines if line == "-" * 50)
+        # 预期: 1 (表头后) + 3 (组间) + 1 (末尾) = 5
+        assert separator_count >= 4
+
+    def test_fallback_to_stage1_when_over_400(self):
+        """all_composite_stocks > 400 只时回退到 Stage 1 + Bottom 展示."""
+        all_stocks = [{"rank": i + 1, "code": f"60{i:04d}", "composite_value": 1.0 - i * 0.001} for i in range(401)]
+        result = {
+            "meta": {
+                "selection_date": "2026-06-24",
+                "weight_method": "rolling_icir_weight",
+                "composite_score": 0.5,
+                "factor_direction": "positive",
+                "top_n": 30,
+                "stocks_on_date": 2500,
+                "stage1_pool_size": 200,
+            },
+            "top_stocks": [],
+            "stage1_top": [{"rank": 1, "code": "600001", "composite_value": 1.0}],
+            "stage1_bottom": [{"rank": 30, "code": "600030", "composite_value": -1.0}],
+            "all_composite_stocks": all_stocks,
+            "weight_config": {},
+        }
+        lines = _generate_stock_selection_section(result, {}, None)
+        text = "\n".join(lines)
+
+        # 超过 400, 回退到 Stage 1 展示
+        assert "Stage 1: 综合因子值 Top" in text
+        assert "全量展示" not in text
+
+    def test_fallback_to_stage1_when_no_all_stocks(self):
+        """all_composite_stocks 为空时回退到 Stage 1 + Bottom 展示."""
+        result = {
+            "meta": {
+                "selection_date": "2026-06-24",
+                "weight_method": "rolling_icir_weight",
+                "composite_score": 0.5,
+                "factor_direction": "positive",
+                "top_n": 30,
+                "stocks_on_date": 2500,
+                "stage1_pool_size": 200,
+            },
+            "top_stocks": [],
+            "stage1_top": [{"rank": 1, "code": "600001", "composite_value": 1.0}],
+            "stage1_bottom": [{"rank": 30, "code": "600030", "composite_value": -1.0}],
+            "all_composite_stocks": [],
+            "weight_config": {},
+        }
+        lines = _generate_stock_selection_section(result, {}, None)
+        text = "\n".join(lines)
+
+        assert "Stage 1: 综合因子值 Top" in text
+        assert "全量展示" not in text
+
+    def test_stocks_sorted_by_composite_descending(self):
+        """全量展示的股票按 composite 值降序排列."""
+        all_stocks = [
+            {"rank": 1, "code": "600001", "composite_value": 1.5},
+            {"rank": 2, "code": "600002", "composite_value": 0.8},
+            {"rank": 3, "code": "600003", "composite_value": -0.3},
+        ]
+        result = {
+            "meta": {
+                "selection_date": "2026-06-24",
+                "weight_method": "rolling_icir_weight",
+                "composite_score": 0.5,
+                "factor_direction": "positive",
+                "top_n": 3,
+                "stocks_on_date": 3,
+                "stage1_pool_size": 200,
+            },
+            "top_stocks": [],
+            "all_composite_stocks": all_stocks,
+            "weight_config": {},
+        }
+        lines = _generate_stock_selection_section(result, {}, None)
+        text = "\n".join(lines)
+
+        # rank 1 的 composite_value > rank 2 > rank 3
+        assert "600001" in text
+        assert "1.500" in text
+        assert "0.800" in text
+        assert "-0.300" in text
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

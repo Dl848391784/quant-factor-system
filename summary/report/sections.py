@@ -578,7 +578,33 @@ def _generate_stock_selection_section(
             lines.extend(lr_status_lines)
             lines.append("")
 
-    if stage1_top or stage1_bottom:
+    # v3.14: 股票池 ≤400 只时全量展示 (每 10 只一组), 替代 Stage 1 + Bottom 简表
+    all_composite_stocks = stock_result.get("all_composite_stocks", [])
+    SHOW_ALL_THRESHOLD = 400
+
+    if all_composite_stocks and len(all_composite_stocks) <= SHOW_ALL_THRESHOLD:
+        # v3.14: 全量展示所有股票
+        lines.append(f"【全量展示: {len(all_composite_stocks)} 只股票 (composite 降序, 每 10 只一组)】")
+        lines.append(f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>12}")
+        lines.append("-" * 50)
+        group_size = 10
+        for i in range(0, len(all_composite_stocks), group_size):
+            group = all_composite_stocks[i : i + group_size]
+            for item in group:
+                rank = item.get("rank", 0)
+                code = item.get("code", "N/A")
+                name = (stock_name_map or {}).get(code, "--")
+                cv = item.get("composite_value", 0)
+                lines.append(f"{rank:>4} {code:<10} {name:<8} {format_float(cv, 3):>12}")
+            # 组间分隔线 (最后一组后由统一分隔线收尾)
+            if i + group_size < len(all_composite_stocks):
+                lines.append("-" * 50)
+        lines.append("-" * 50)
+        lines.append("")
+
+        lines.append(f"【最终短名单 Top {len(top_stocks)} (LR 打分排序)】")
+        lines.append("")
+    elif stage1_top or stage1_bottom:
         lines.append("【选股轨迹 (v3.13: Bottom90 LR 打分排序, 不截断)】")
         lines.append(f"  Stage 1: 综合因子值降序取 Top {meta.get('stage1_pool_size', 200)} 作为候选池 (基础设施)")
         lines.append(
