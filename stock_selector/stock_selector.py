@@ -188,7 +188,11 @@ def apply_secondary_sort(
 
     try:
         if full_factor_path.exists():
-            available_cols = pd.read_parquet(full_factor_path, columns=[]).columns.tolist()
+            # 读取 Parquet schema 获取可用列名
+            import pyarrow.parquet as pq
+
+            schema = pq.read_schema(full_factor_path)
+            available_cols = [f.name for f in schema]
             load_cols = ["date", "asset"] + [f for f in factor_weights if f != "composite" and f in available_cols]
             full_df = pd.read_parquet(full_factor_path, columns=load_cols)
             day_df = full_df[full_df["date"].astype(str) == selection_date]
@@ -213,7 +217,7 @@ def apply_secondary_sort(
             vals = df["composite_value"].copy()
         else:
             # 从 factor_map 获取
-            vals = df["code"].map(lambda c: factor_map.get(c, {}).get(factor_name, np.nan))
+            vals = df["code"].map(lambda c, fn=factor_name: factor_map.get(c, {}).get(fn, np.nan))
 
         # z-score 标准化 (截面)
         mean = vals.mean()
