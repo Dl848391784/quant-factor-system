@@ -364,21 +364,23 @@ def _load_all_composite_stocks(
     weight_method: str,
     selection_date: str,
     logger: logging.Logger,
+    secondary_meta: dict | None = None,
 ) -> list[dict]:
     """从 composite daily parquet 加载选股日全部股票的 composite 值（按降序排列）.
 
     v3.14 (2026-06-27): 新增. 当股票池 ≤400 只时, 报告全量展示所有股票.
-    v3.15: 新增二次排序 (composite + turnover + market_cap), 返回两套排序结果.
+    v3.16: 二次排序改为通用因子加权框架 (price_position/tail_slope/pos_day5 等).
     数据源: comprehensive_factor/result/<pipeline>/composite_{weight_method}_1d_daily.parquet
 
     Args:
         weight_method: 权重方法名称 (如 "rolling_icir_weight")
         selection_date: 选股日期 (YYYY-MM-DD)
         logger: 日志记录器
+        secondary_meta: 二次排序配置 (含 factor_weights, flip_factors)
 
     Returns:
-        按 composite_value 降序排列的股票列表 [{rank, code, composite_value}, ...];
-        数据不可用时返回空列表 (调用方回退到 Stage 1 + Bottom 展示).
+        按 composite_value 降序排列的股票列表 [{rank, code, composite_value, ss_*}, ...];
+        数据不可用时返回空列表.
     """
     comp_dir = Path(DATA_PATHS["comprehensive_result"])
     daily_path = comp_dir / f"composite_{weight_method}_1d_daily.parquet"
@@ -399,53 +401,44 @@ def _load_all_composite_stocks(
 
     day_df = day_df.sort_values("composite_factor", ascending=False).reset_index(drop=True)
 
-    # v3.15: 加载 turnover_rate (从 factor_ic_data.parquet)
-    turnover_map: dict[str, float] = {}
-    try:
-        factor_path = Path(DATA_PATHS["factor_ic_data"])
-        if factor_path.exists():
-            factor_df = pd.read_parquet(
-                factor_path,
-                columns=["date", "asset", "turnover_rate"],
-            )
-            day_factor = factor_df[factor_df["date"].astype(str) == selection_date]
-            turnover_map = day_factor.set_index("asset")["turnover_rate"].to_dict()
-    except Exception:
-        logger.debug("turnover_rate 加载失败, 二次排序忽略此维度")
+    # v3.16: 从 factor_ic_data.parquet 加载二次排序所需因子
+    # (通用框架: 根据 secondary_meta.factor_weights 动态加载)
+    factor_maps: dict[str, dict[str, float]] = {}
+    if secondary_meta and secondary_meta.get("enabled"):
+        factor_weights = secondary_meta.get("factor_weights", {})
+        needed_factors = [f for f in factor_weights if f != "composite"]
+        if needed_factors:
+            try:
+                factor_path = Path(DATA_PATHS["factor_ic_data"])
+                if factor_path.exists():
+                    import pyarrow.parquet as pq
 
-    # v3.15: 加载 market_cap (从 market_cap_data.json.gz)
-    market_cap_map: dict[str, float] = {}
-    try:
-        from paths import MARKET_CAP_DATA
-
-        if MARKET_CAP_DATA.exists():
-            import gzip
-
-            with gzip.open(MARKET_CAP_DATA, "rt") as f:
-                mc_data = json.load(f)
-            for record in mc_data.get("data", []):
-                if record.get("date") == selection_date:
-                    code = str(record.get("asset", ""))
-                    cap = record.get("total_market_cap")
-                    if cap is not None:
-                        market_cap_map[code] = float(cap)
-    except Exception:
-        logger.debug("market_cap 加载失败, 二次排序忽略此维度")
+                    schema = pq.read_schema(factor_path)
+                    available_cols = [field.name for field in schema]
+                    load_cols = ["date", "asset"] + [f for f in needed_factors if f in available_cols]
+                    factor_df = pd.read_parquet(factor_path, columns=load_cols)
+                    day_factor = factor_df[factor_df["date"].astype(str) == selection_date]
+                    for fn in needed_factors:
+                        if fn in day_factor.columns:
+                            factor_maps[fn] = day_factor.set_index("asset")[fn].to_dict()
+                            logger.debug("二次排序因子 %s 加载成功, 有效 %d 只", fn, len(factor_maps[fn]))
+            except Exception:
+                logger.debug("二次排序因子数据加载失败")
 
     stocks: list[dict] = []
     for i, row in day_df.iterrows():
         cv = row["composite_factor"]
         code = str(row["asset"])
-        stocks.append(
-            {
-                "rank": i + 1,
-                "code": code,
-                "composite_value": float(cv) if pd.notna(cv) else None,
-                "turnover_rate": turnover_map.get(code),
-                "market_cap": market_cap_map.get(code),
-            }
-        )
-    logger.info("加载全量 composite 股票: %s, %d 只", selection_date, len(stocks))
+        stock_dict = {
+            "rank": i + 1,
+            "code": code,
+            "composite_value": float(cv) if pd.notna(cv) else None,
+        }
+        # v3.16: 添加二次排序因子值
+        for fn, fmap in factor_maps.items():
+            stock_dict[f"ss_{fn}"] = fmap.get(code)
+        stocks.append(stock_dict)
+    logger.info("加载全量 composite 股票: %s, %d 只 (因子: %s)", selection_date, len(stocks), list(factor_maps.keys()))
     return stocks
 
 
@@ -663,6 +656,7 @@ def load_stock_selection_result(logger: logging.Logger) -> dict | None:
         meta["weight_method"],
         meta["selection_date"],
         logger,
+        secondary_meta=meta.get("secondary_sort", {}),
     )
 
     logger.info(
