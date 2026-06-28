@@ -102,7 +102,7 @@ def format_percentage(value: float, decimals: int = 2) -> str:
     return f"{value:.{decimals}f}%"
 
 
-def convert_return_to_percentage(decimal_value: float) -> float:
+def convert_return_to_percentage(decimal_value: float | None) -> float | None:
     """将小数形式的收益率转换为百分比
 
     原始数据中 long_short_return_annual 为小数形式（如 0.15 表示 15%）。
@@ -117,6 +117,8 @@ def convert_return_to_percentage(decimal_value: float) -> float:
     Note:
         若上游数据格式变更（已经是百分比），需修改 RETURN_DATA_IS_DECIMAL 常量
     """
+    if decimal_value is None:
+        return None
     if RETURN_DATA_IS_DECIMAL:
         return decimal_value * 100
     return decimal_value  # 数据已是百分比，直接返回
