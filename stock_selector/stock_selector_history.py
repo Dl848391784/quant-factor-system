@@ -243,7 +243,7 @@ def write_selection_history(
         b"factor_cols_json": json.dumps(factor_cols, ensure_ascii=False).encode("utf-8"),
         b"generated_at": created_at.strftime("%Y-%m-%dT%H:%M:%S%z").encode("utf-8"),
         # v3.16: 二次排序配置 (通用因子加权框架)
-        b"secondary_sort_enabled": str(exclusion_stats.get("secondary_sort_enabled", False)).encode("utf-8"),
+        b"secondary_sort_enabled": str(int(bool(exclusion_stats.get("secondary_sort_enabled", False)))).encode("utf-8"),
         b"secondary_sort_pool_threshold": str(exclusion_stats.get("secondary_sort_pool_threshold", 400)).encode(
             "utf-8"
         ),

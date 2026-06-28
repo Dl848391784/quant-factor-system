@@ -628,7 +628,7 @@ def load_stock_selection_result(logger: logging.Logger) -> dict | None:
         "valid_stocks": len(stage3_top),
         # v3.16: 二次排序配置 (通用因子加权框架, 从 Parquet metadata 读取)
         "secondary_sort": {
-            "enabled": _meta_float("secondary_sort_enabled", 0) > 0,
+            "enabled": _meta_str("secondary_sort_enabled") in ("1", "True", "true"),
             "pool_threshold": int(_meta_float("secondary_sort_pool_threshold", 400)),
             "factor_weights": _meta_json("secondary_sort_factor_weights", {}),
             "flip_factors": _meta_json("secondary_sort_flip_factors", []),
