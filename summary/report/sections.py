@@ -591,12 +591,13 @@ def _generate_lr_training_status() -> list[str]:
     return lines
 
 
-def _render_decile_section(decile_stats: dict, lines: list[str]) -> None:
-    """渲染十分位分段胜率表格.
+def _render_decile_section(decile_stats: dict, lines: list[str], stock_name_map: dict[str, str] | None = None) -> None:
+    """渲染十分位分段胜率表格, 含每段股票明细.
 
     Args:
         decile_stats: load_decile_stats() 的返回值
         lines: 报告行列表 (原地追加)
+        stock_name_map: {code: name} 映射, 用于展示股票名称
     """
     segs = decile_stats.get("segments", [])
     if not segs:
@@ -630,6 +631,31 @@ def _render_decile_section(decile_stats: dict, lines: list[str]) -> None:
     if best_label:
         lines.append(f"  最佳段: {best_label} (胜率 {best_wr:.1f}%)")
     lines.append("")
+
+    # 每段股票明细
+    name_map = stock_name_map or {}
+    for seg in segs:
+        if seg.get("n", 0) == 0:
+            continue
+        stocks = seg.get("stocks", [])
+        if not stocks:
+            continue
+        label = seg["label"]
+        wr = seg["win_rate"]
+        ar = seg["avg_ret"]
+        lines.append(f"【{label} 段 (胜率 {wr:.1f}%, 均收 {ar:+.2f}%)】")
+        lines.append(f"  {'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>10} {'T+1收益':>10}")
+        lines.append("  " + "-" * 50)
+        for s in stocks:
+            code = s.get("code", "")
+            cv = s.get("composite_value", 0)
+            fr = s.get("forward_return")
+            rank = s.get("rank", 0)
+            name = name_map.get(code, "--")
+            ret_str = f"{fr * 100:+.2f}%" if fr is not None else "n/a"
+            lines.append(f"  {rank:>4} {code:<10} {name:<8} {cv:>10.3f} {ret_str:>10}")
+        lines.append("  " + "-" * 50)
+        lines.append("")
 
 
 def _generate_stock_selection_section(
@@ -775,7 +801,7 @@ def _generate_stock_selection_section(
         # v3.17: 十分位分段胜率 (D1-D10)
         decile_stats = stock_result.get("decile_stats")
         if decile_stats:
-            _render_decile_section(decile_stats, lines)
+            _render_decile_section(decile_stats, lines, stock_name_map)
 
         lines.append(f"【最终短名单 Top {len(top_stocks)} (LR 打分排序)】")
         lines.append("")

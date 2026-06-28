@@ -819,6 +819,15 @@ def load_decile_stats(
                 "pl_ratio": round(plr, 2),
                 "wins": wc,
                 "losses": lc,
+                "stocks": [
+                    {
+                        "code": str(r["asset"]),
+                        "composite_value": float(r["composite_factor"]),
+                        "forward_return": float(r["forward_return_1d"]) if pd.notna(r["forward_return_1d"]) else None,
+                        "rank": int(r["rank"]),
+                    }
+                    for _, r in subset.sort_values("rank").iterrows()
+                ],
             }
         )
 
