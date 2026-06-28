@@ -135,17 +135,21 @@ def apply_secondary_sort(
     selection_date: str,
     logger: logging.Logger | None = None,
 ) -> list[dict[str, Any]]:
-    """v3.15: ob_pool 二次排序（换手率 + 市值）.
+    """v3.16: ob_pool 二次排序（通用因子加权框架）.
 
-    对 Stage 1 候选池的全部股票, 用换手率 + 市值做二次排序.
-    最终排序键 = composite × w1 + turnover_z × w2 + market_cap_z × w3.
+    对 Stage 1 候选池的全部股票, 用 config.secondary_sort_factor_weights
+    指定的因子做加权二次排序.
+
+    v3.16 调整: 从 (composite×0.5 + turnover×0.3 + market_cap×0.2) 改为
+    (composite×0.1 + price_position_flip×0.4 + tail_price_slope_flip×0.3 + positive_day×0.2).
+    实证依据: 6管线1166只股票统一分析——composite IC 3/6天为负值,
+    price_position 5/6天优于全量(+10.4pp), turnover/market_cap p>0.05.
 
     仅当 enable_secondary_sort=True 且股票池 ≤ secondary_sort_pool_threshold 时生效.
-    否则原样返回 stage1_stocks.
 
     Args:
         stage1_stocks: Stage 1 候选池 (sort_and_select 返回)
-        factor_df: 因子 DataFrame (含 turnover_rate)
+        factor_df: 因子 DataFrame (含各因子列)
         config: 选股配置
         selection_date: 选股日期
         logger: 日志
@@ -175,66 +179,77 @@ def apply_secondary_sort(
     df = pd.DataFrame(stage1_stocks).copy()
     df["code"] = df["code"].astype(str)
 
-    # 1. composite z-score (已在 stage1_stocks 中)
-    composite_z = (df["composite_value"] - df["composite_value"].mean()) / (df["composite_value"].std() + 1e-10)
+    factor_weights = config.secondary_sort_factor_weights
+    flip_factors = config.secondary_sort_flip_factors
 
-    # 2. turnover_rate z-score (从完整数据源重新加载, 不依赖 factor_df 的列选择)
-    turnover_series = pd.Series(dtype=float)
+    # 加载完整因子数据 (factor_df 可能只含少数列)
+    full_factor_path = config.data_source
+    factor_map: dict[str, dict[str, float]] = {}  # code → {factor_name: value}
+
     try:
-        # 从 factor_ic_data.parquet 加载完整数据 (factor_df 可能只含少数因子列)
-        full_factor_path = config.data_source
         if full_factor_path.exists():
-            full_df = pd.read_parquet(full_factor_path, columns=["date", "asset", "turnover_rate"])
+            available_cols = pd.read_parquet(full_factor_path, columns=[]).columns.tolist()
+            load_cols = ["date", "asset"] + [f for f in factor_weights if f != "composite" and f in available_cols]
+            full_df = pd.read_parquet(full_factor_path, columns=load_cols)
             day_df = full_df[full_df["date"].astype(str) == selection_date]
-            if "turnover_rate" in day_df.columns:
-                turnover_series = day_df.set_index("asset")["turnover_rate"]
+            # 构建 code → factor_value 映射
+            for factor_name in factor_weights:
+                if factor_name == "composite" or factor_name not in day_df.columns:
+                    continue
+                series = day_df.set_index("asset")[factor_name]
+                for code, val in series.items():
+                    if code not in factor_map:
+                        factor_map[code] = {}
+                    factor_map[code][factor_name] = float(val)
     except Exception as exc:
-        logger.warning("二次排序: turnover_rate 加载失败 (%s)", exc)
+        logger.warning("二次排序: 因子数据加载失败 (%s)", exc)
 
-    df["turnover_rate"] = df["code"].map(
-        lambda c: float(turnover_series.get(c, np.nan)) if not turnover_series.empty else np.nan
-    )
-    turnover_z = (df["turnover_rate"] - df["turnover_rate"].mean()) / (df["turnover_rate"].std() + 1e-10)
-    turnover_z = turnover_z.fillna(0.0)
+    # 计算各因子 z-score
+    z_scores: dict[str, pd.Series] = {}
 
-    # 3. market_cap z-score (从 market_cap_data.json.gz 加载)
-    market_cap_map: dict[str, float] = {}
-    try:
-        from paths import MARKET_CAP_DATA
+    for factor_name, weight in factor_weights.items():
+        if factor_name == "composite":
+            # composite 已在 stage1_stocks 中
+            vals = df["composite_value"].copy()
+        else:
+            # 从 factor_map 获取
+            vals = df["code"].map(lambda c: factor_map.get(c, {}).get(factor_name, np.nan))
 
-        if MARKET_CAP_DATA.exists():
-            import gzip
+        # z-score 标准化 (截面)
+        mean = vals.mean()
+        std = vals.std()
+        z = pd.Series(0.0, index=df.index) if std < 1e-10 else (vals - mean) / std
 
-            with gzip.open(MARKET_CAP_DATA, "rt") as f:
-                mc_data = json.load(f)
-            for record in mc_data.get("data", []):
-                if record.get("date") == selection_date:
-                    code = str(record.get("asset", ""))
-                    cap = record.get("total_market_cap")
-                    if cap is not None:
-                        market_cap_map[code] = float(cap)
-    except Exception as exc:
-        logger.warning("二次排序: 市值数据加载失败 (%s), 市值维度置 0", exc)
+        # 方向翻转: flip_factors 中的因子乘 -1 (选低值股)
+        if factor_name in flip_factors:
+            z = -z
 
-    df["market_cap"] = df["code"].map(lambda c: market_cap_map.get(c, np.nan))
-    market_cap_z = (df["market_cap"] - df["market_cap"].mean()) / (df["market_cap"].std() + 1e-10)
-    market_cap_z = market_cap_z.fillna(0.0)
+        z = z.fillna(0.0)
+        z_scores[factor_name] = z
 
-    # 4. 加权求和
-    w_comp = config.secondary_sort_composite_weight
-    w_turn = config.secondary_sort_turnover_weight
-    w_cap = config.secondary_sort_market_cap_weight
+        # 记录因子值到 df (供输出展示)
+        df[f"_ss_{factor_name}"] = vals
 
-    df["secondary_score"] = composite_z * w_comp + turnover_z * w_turn + market_cap_z * w_cap
+    # 加权求和
+    secondary_score = pd.Series(0.0, index=df.index)
+    weight_parts = []
+    for factor_name, weight in factor_weights.items():
+        secondary_score += z_scores[factor_name] * weight
+        if factor_name in flip_factors:
+            weight_parts.append(f"{factor_name}_flip×{weight}")
+        else:
+            weight_parts.append(f"{factor_name}×{weight}")
 
-    # 5. 按 secondary_score 降序排列
+    df["secondary_score"] = secondary_score
+
+    # 按 secondary_score 降序排列
     df = df.sort_values("secondary_score", ascending=False).reset_index(drop=True)
 
-    # 6. 重新分配 rank
+    # 重新分配 rank
     df["rank"] = range(1, len(df) + 1)
     df["secondary_rank"] = df["rank"]
 
-    # 保留原始 rank 为 stage1_rank
+    # 构建输出 (保留原始 factor_values, 添加二次排序信息)
     result = []
     for _, row in df.iterrows():
         stock = {
@@ -246,17 +261,18 @@ def apply_secondary_sort(
             "weight_coverage": float(row["weight_coverage"]) if pd.notna(row.get("weight_coverage")) else None,
             "secondary_score": round(float(row["secondary_score"]), 6),
             "secondary_rank": int(row["secondary_rank"]),
-            "turnover_rate": round(float(row["turnover_rate"]), 4) if pd.notna(row["turnover_rate"]) else None,
-            "market_cap_yi": round(float(row["market_cap"]) / 1e8, 2) if pd.notna(row["market_cap"]) else None,
         }
+        # 添加各因子原始值 (供报告展示)
+        for factor_name in factor_weights:
+            val = row.get(f"_ss_{factor_name}", np.nan)
+            if pd.notna(val):
+                stock[f"ss_{factor_name}"] = round(float(val), 4)
         result.append(stock)
 
     logger.info(
-        "二次排序完成: %d 只股票 (composite×%.1f + turnover×%.1f + market_cap×%.1f)",
+        "二次排序完成: %d 只股票 (%s)",
         len(result),
-        w_comp,
-        w_turn,
-        w_cap,
+        " + ".join(weight_parts),
     )
 
     return result
@@ -852,9 +868,8 @@ def build_result(
             "secondary_sort": {
                 "enabled": config.enable_secondary_sort,
                 "pool_threshold": config.secondary_sort_pool_threshold,
-                "composite_weight": config.secondary_sort_composite_weight,
-                "turnover_weight": config.secondary_sort_turnover_weight,
-                "market_cap_weight": config.secondary_sort_market_cap_weight,
+                "factor_weights": config.secondary_sort_factor_weights,
+                "flip_factors": config.secondary_sort_flip_factors,
                 "count": len(secondary_sorted_stocks) if secondary_sorted_stocks else 0,
             },
         },
@@ -1462,9 +1477,8 @@ def _build_and_write_outputs(
         # v3.15: 二次排序配置 (写入 Parquet metadata, 供报告读取)
         "secondary_sort_enabled": config.enable_secondary_sort,
         "secondary_sort_pool_threshold": config.secondary_sort_pool_threshold,
-        "secondary_sort_composite_weight": config.secondary_sort_composite_weight,
-        "secondary_sort_turnover_weight": config.secondary_sort_turnover_weight,
-        "secondary_sort_market_cap_weight": config.secondary_sort_market_cap_weight,
+        "secondary_sort_factor_weights": config.secondary_sort_factor_weights,
+        "secondary_sort_flip_factors": config.secondary_sort_flip_factors,
     }
     partition_dir = write_selection_history(
         stage1_top=stage1_top_snapshot,

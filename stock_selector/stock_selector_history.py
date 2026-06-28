@@ -242,20 +242,17 @@ def write_selection_history(
         b"factor_list_json": json.dumps(factor_list, ensure_ascii=False).encode("utf-8"),
         b"factor_cols_json": json.dumps(factor_cols, ensure_ascii=False).encode("utf-8"),
         b"generated_at": created_at.strftime("%Y-%m-%dT%H:%M:%S%z").encode("utf-8"),
-        # v3.15: 二次排序配置
+        # v3.16: 二次排序配置 (通用因子加权框架)
         b"secondary_sort_enabled": str(exclusion_stats.get("secondary_sort_enabled", False)).encode("utf-8"),
         b"secondary_sort_pool_threshold": str(exclusion_stats.get("secondary_sort_pool_threshold", 400)).encode(
             "utf-8"
         ),
-        b"secondary_sort_composite_weight": str(exclusion_stats.get("secondary_sort_composite_weight", 0.5)).encode(
-            "utf-8"
-        ),
-        b"secondary_sort_turnover_weight": str(exclusion_stats.get("secondary_sort_turnover_weight", 0.3)).encode(
-            "utf-8"
-        ),
-        b"secondary_sort_market_cap_weight": str(exclusion_stats.get("secondary_sort_market_cap_weight", 0.2)).encode(
-            "utf-8"
-        ),
+        b"secondary_sort_factor_weights": json.dumps(
+            exclusion_stats.get("secondary_sort_factor_weights", {}), ensure_ascii=False
+        ).encode("utf-8"),
+        b"secondary_sort_flip_factors": json.dumps(
+            exclusion_stats.get("secondary_sort_flip_factors", []), ensure_ascii=False
+        ).encode("utf-8"),
     }
     existing_meta = table.schema.metadata or {}
     table = table.replace_schema_metadata({**existing_meta, **exclusion_meta})

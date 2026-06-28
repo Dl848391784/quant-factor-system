@@ -633,13 +633,12 @@ def load_stock_selection_result(logger: logging.Logger) -> dict | None:
         "stage2_sort_col": str(ref_row["stage2_sort_col"]) if pd.notna(ref_row.get("stage2_sort_col")) else None,
         "stage2_ascending": bool(ref_row["stage2_ascending"]) if pd.notna(ref_row.get("stage2_ascending")) else None,
         "valid_stocks": len(stage3_top),
-        # v3.15: 二次排序配置 (从 Parquet metadata 读取)
+        # v3.16: 二次排序配置 (通用因子加权框架, 从 Parquet metadata 读取)
         "secondary_sort": {
             "enabled": _meta_float("secondary_sort_enabled", 0) > 0,
             "pool_threshold": int(_meta_float("secondary_sort_pool_threshold", 400)),
-            "composite_weight": _meta_float("secondary_sort_composite_weight", 0.5),
-            "turnover_weight": _meta_float("secondary_sort_turnover_weight", 0.3),
-            "market_cap_weight": _meta_float("secondary_sort_market_cap_weight", 0.2),
+            "factor_weights": _meta_json("secondary_sort_factor_weights", {}),
+            "flip_factors": _meta_json("secondary_sort_flip_factors", []),
         },
     }
 

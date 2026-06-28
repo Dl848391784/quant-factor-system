@@ -107,16 +107,32 @@ class StockSelectorConfig:
     lr_filter_quantile: float = 0.3  # Bottom30 中打分最低 30% 排除
     lr_bottom_pool_size: int = 90  # 训练数据保存的 Bottom 数量 (Bottom90)
 
-    # v3.15: ob_pool 二次排序（换手率 + 市值, designs/feat_ob_pool_secondary_sort.md）
-    #   实证依据: 跨 4 pipeline 840 只股票分析
-    #   - 换手率 p=0.008 (上涨组 8.78% vs 下跌组 5.18%)
-    #   - 市值 p≈0.05 (上涨组中位 197亿 vs 下跌组 85亿)
+    # v3.16: ob_pool 二次排序（实证因子, designs/feat_ob_pool_secondary_sort.md）
+    #   v3.16 权重调整依据: 6管线 1166 只股票统一分析
+    #   - composite IC 3/6天为负值 (-0.30, -0.18, -0.16), 降权至 0.1
+    #   - price_position (选低) 5/6天优于全量, 差值均值 +10.4pp, Cohen-d=0.16, 升权至 0.4
+    #   - tail_price_slope (选低) Cohen-d=0.41, IC=-0.17, 权重 0.3
+    #   - positive_day_ratio_5 Cohen-d=0.77, 权重 0.2
+    #   - turnover/market_cap 移除 (p>0.05, Cohen-d<0.05)
     #   仅对股票池 ≤400 只的 pipeline 生效 (ob_pool ~200 只), 全市场不启用
     enable_secondary_sort: bool = True
     secondary_sort_pool_threshold: int = 400  # 股票池超过此数不启用
-    secondary_sort_composite_weight: float = 0.5  # composite 因子权重
-    secondary_sort_turnover_weight: float = 0.3  # 换手率权重
-    secondary_sort_market_cap_weight: float = 0.2  # 市值权重
+    # 方向翻转因子: price_position/tail_price_slope 选低值 → 乘 -1 后降序排序
+    secondary_sort_factor_weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "composite": 0.1,
+            "price_position": 0.4,  # 选低 → 自动翻转
+            "tail_price_slope": 0.3,  # 选低 → 自动翻转
+            "positive_day_ratio_5": 0.2,
+        }
+    )
+    # 方向翻转标记: 值为负时翻转(选低值股)
+    secondary_sort_flip_factors: list[str] = field(
+        default_factory=lambda: [
+            "price_position",
+            "tail_price_slope",
+        ]
+    )
 
     # === 数据路径 ===（问题 4 修复：default_factory 保证延迟求值）
     data_source: Path = field(default_factory=lambda: DEFAULT_DATA_SOURCE)
