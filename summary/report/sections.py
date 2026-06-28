@@ -644,17 +644,15 @@ def _render_decile_section(decile_stats: dict, lines: list[str], stock_name_map:
         wr = seg["win_rate"]
         ar = seg["avg_ret"]
         lines.append(f"【{label} 段 (胜率 {wr:.1f}%, 均收 {ar:+.2f}%)】")
-        lines.append(f"  {'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>10} {'T+1收益':>10}")
-        lines.append("  " + "-" * 50)
+        lines.append(f"  {'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>10}")
+        lines.append("  " + "-" * 45)
         for s in stocks:
             code = s.get("code", "")
             cv = s.get("composite_value", 0)
-            fr = s.get("forward_return")
             rank = s.get("rank", 0)
             name = name_map.get(code, "--")
-            ret_str = f"{fr * 100:+.2f}%" if fr is not None else "n/a"
-            lines.append(f"  {rank:>4} {code:<10} {name:<8} {cv:>10.3f} {ret_str:>10}")
-        lines.append("  " + "-" * 50)
+            lines.append(f"  {rank:>4} {code:<10} {name:<8} {cv:>10.3f}")
+        lines.append("  " + "-" * 45)
         lines.append("")
 
 
