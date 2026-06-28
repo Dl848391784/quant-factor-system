@@ -409,7 +409,7 @@ def _load_all_composite_stocks(
         needed_factors = [f for f in factor_weights if f != "composite"]
         if needed_factors:
             try:
-                factor_path = Path(DATA_PATHS["factor_ic_data"])
+                factor_path = Path(DATA_PATHS["factor_data"]) / "factor_ic_data.parquet"
                 if factor_path.exists():
                     import pyarrow.parquet as pq
 
