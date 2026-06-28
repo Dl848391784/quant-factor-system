@@ -591,6 +591,47 @@ def _generate_lr_training_status() -> list[str]:
     return lines
 
 
+def _render_decile_section(decile_stats: dict, lines: list[str]) -> None:
+    """渲染十分位分段胜率表格.
+
+    Args:
+        decile_stats: load_decile_stats() 的返回值
+        lines: 报告行列表 (原地追加)
+    """
+    segs = decile_stats.get("segments", [])
+    if not segs:
+        return
+
+    lines.append("【十分位分段胜率 (composite 降序, T+1 收益)】")
+    lines.append(
+        f"选股日: {decile_stats['selection_date']}, "
+        f"交易验证日: {decile_stats['trade_date']}, "
+        f"共 {decile_stats['n_total']} 只"
+    )
+    lines.append("")
+    lines.append(f"  {'段':<6} {'N':>5} {'胜率':>8} {'均收':>8} {'盈亏比':>8} {'涨:跌'}")
+    lines.append("  " + "-" * 50)
+
+    best_wr, best_label = 0, ""
+    for seg in segs:
+        if seg["n"] == 0:
+            continue
+        label = seg["label"]
+        wr = seg["win_rate"]
+        ar = seg["avg_ret"]
+        plr = seg["pl_ratio"]
+        wc = seg["wins"]
+        lc = seg["losses"]
+        star = ""
+        if wr > best_wr:
+            best_wr, best_label = wr, label
+        lines.append(f"  {label:<6} {seg['n']:>5} {wr:>7.1f}% {ar:>+7.2f}% {plr:>7.2f} {wc:>4}:{lc:<4}{star}")
+    lines.append("  " + "-" * 50)
+    if best_label:
+        lines.append(f"  最佳段: {best_label} (胜率 {best_wr:.1f}%)")
+    lines.append("")
+
+
 def _generate_stock_selection_section(
     stock_result: dict | None,
     comp_weights: dict[str, float] | None = None,
@@ -728,6 +769,13 @@ def _generate_stock_selection_section(
                 flip_factors,
                 lines,
             )
+
+        lines.append("")
+
+        # v3.17: 十分位分段胜率 (D1-D10)
+        decile_stats = stock_result.get("decile_stats")
+        if decile_stats:
+            _render_decile_section(decile_stats, lines)
 
         lines.append(f"【最终短名单 Top {len(top_stocks)} (LR 打分排序)】")
         lines.append("")

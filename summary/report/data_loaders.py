@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 from factor_definitions import FACTOR_COL_TO_NAME_MAP, FACTOR_DEFINITIONS
+from paths import FACTOR_IC_DATA_MASTER
 from summary.report.constants import (
     DATA_PATHS,
     MAX_STOCKS_SAMPLE,
@@ -713,6 +714,116 @@ def load_stock_name_map(logger: logging.Logger) -> dict[str, str]:
             name_map[str(code)] = str(name).replace(" ", "").replace("\u3000", "")
     logger.info("加载股票名称映射: %d 只", len(name_map))
     return name_map
+
+
+def load_decile_stats(
+    weight_method: str,
+    selection_date: str,
+    logger: logging.Logger,
+    n_segments: int = 10,
+) -> dict | None:
+    """加载选股日十分位分段胜率.
+
+    从 composite daily parquet 取选股日排名, 从主数据源取 T+1 收益,
+    按 composite 降序 qcut 为 n_segments 段, 每段计算胜率/均收/盈亏比.
+
+    Args:
+        weight_method: 权重方法名称
+        selection_date: 选股日期 (YYYY-MM-DD)
+        logger: 日志记录器
+        n_segments: 分段数 (默认 10)
+
+    Returns:
+        {"selection_date", "trade_date", "n_total", "segments": [{...}]};
+        数据不可用或 sample 过小时返回 None.
+    """
+    from summary.report.constants import DATA_PATHS
+
+    comp_dir = Path(DATA_PATHS["comprehensive_result"])
+    daily_path = comp_dir / f"composite_{weight_method}_1d_daily.parquet"
+    if not daily_path.exists():
+        logger.debug("composite daily 不存在: %s (跳过分段分析)", daily_path)
+        return None
+
+    try:
+        comp_df = pd.read_parquet(daily_path, columns=["date", "asset", "composite_factor"])
+    except Exception:
+        logger.exception("读取 composite daily 失败: %s", daily_path)
+        return None
+
+    day_df = comp_df[comp_df["date"].astype(str) == selection_date]
+    if len(day_df) < 20:
+        logger.warning("选股日 %s 仅 %d 只股票, 样本不足不分段", selection_date, len(day_df))
+        return None
+
+    # 获取 master 中 selection_date 的下一个交易日
+    master_path = FACTOR_IC_DATA_MASTER
+    try:
+        all_dates = sorted(pd.read_parquet(master_path, columns=["date"])["date"].dropna().unique())
+    except Exception:
+        logger.exception("读取主数据源日期失败")
+        return None
+
+    try:
+        idx = all_dates.index(selection_date)
+        trade_date = all_dates[idx + 1]
+    except (ValueError, IndexError):
+        logger.warning("选股日 %s 无下一个交易日, 跳过分段分析", selection_date)
+        return None
+
+    # 加载 T+1 收益
+    try:
+        ret_df = pd.read_parquet(master_path, columns=["date", "asset", "forward_return_1d"])
+        ret_df = ret_df[ret_df["date"] == trade_date]
+    except Exception:
+        logger.exception("读取主数据源 T+1 收益失败")
+        return None
+
+    # merge
+    merged = pd.merge(day_df, ret_df[["asset", "forward_return_1d"]], on="asset", how="inner")
+    if len(merged) == 0:
+        return None
+
+    merged["rank"] = merged["composite_factor"].rank(ascending=False)
+    try:
+        merged["segment"] = pd.qcut(merged["rank"], n_segments, labels=[f"D{i + 1}" for i in range(n_segments)])
+    except ValueError:
+        logger.warning("qcut 失败 (重复边界), 跳过分段分析")
+        return None
+
+    segments = []
+    for seg_label in [f"D{i + 1}" for i in range(n_segments)]:
+        subset = merged[merged["segment"] == seg_label]
+        ret = subset["forward_return_1d"].dropna()
+        t = len(ret)
+        if t == 0:
+            segments.append(
+                {"label": seg_label, "n": 0, "win_rate": 0, "avg_ret": 0, "pl_ratio": 0, "wins": 0, "losses": 0}
+            )
+            continue
+        wins = ret[ret > 0]
+        losses = ret[ret < 0]
+        wc = len(wins)
+        lc = len(losses)
+        wr = wc / t * 100
+        ar = ret.mean() * 100
+        aw = wins.mean() * 100 if wc > 0 else 0
+        al = abs(losses.mean() * 100) if lc > 0 else 0
+        plr = aw / al if al > 0 else float("inf")
+        segments.append(
+            {
+                "label": seg_label,
+                "n": t,
+                "win_rate": round(wr, 1),
+                "avg_ret": round(ar, 2),
+                "pl_ratio": round(plr, 2),
+                "wins": wc,
+                "losses": lc,
+            }
+        )
+
+    logger.info("十分位分段胜率: %d 只 → %d 段, 交易验证日=%s", len(merged), n_segments, trade_date)
+    return {"selection_date": selection_date, "trade_date": trade_date, "n_total": len(merged), "segments": segments}
 
 
 def merge_factor_data(ic_results: list[dict], backtest_results: list[dict]) -> list[dict]:

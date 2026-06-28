@@ -79,6 +79,7 @@ from summary.report.data_loaders import (  # noqa: E402,F401
     calculate_factor_correlation,
     load_backtest_results,
     load_composite_results,
+    load_decile_stats,
     load_ic_results,
     load_json_file,
     load_stock_name_map,
@@ -246,6 +247,15 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
             stock_comp_weights = last_day_weights if last_day_weights else best_item.get("weights", {})
         else:
             stock_comp_weights = best_item.get("weights", {})
+
+    # v3.17: 十分位分段胜率 (D1-D10)
+    if stock_result:
+        stock_meta = stock_result.get("meta", {})
+        stock_result["decile_stats"] = load_decile_stats(
+            stock_meta.get("weight_method", best_weight_method),
+            stock_meta.get("selection_date", date),
+            logger,
+        )
 
     lines.extend(_generate_stock_selection_section(stock_result, stock_comp_weights, data_results, stock_name_map))
 
