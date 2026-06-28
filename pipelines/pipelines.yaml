@@ -10,6 +10,43 @@ ob_pool:
   filter: "rsi_6 > 70"
   description: "超买股子集 (RSI>70)，用于超买池内部选股研究"
 
+# ============================================================================
+# ob_quality: 路径A第一波 — 超买股 × 高换手率 (Phase 1, 2026-06-28)
+# 假设: 高流动性超买股抗跌性更强 → 胜率更高
+# 只加 turnover_rate 过滤，后续 Phase 2/3 再加行业和市值
+# ============================================================================
+ob_quality:
+  filter: "rsi_6 > 70 and turnover_rate > 5"
+  description: "超买股 × 高换手率 (>5%)，路径A第一波——验证流动性溢价假设"
+
+ob_quality_0624:
+  filter: "rsi_6 > 70 and turnover_rate > 5 and date <= '2026-06-24'"
+  description: "ob_quality 截止2026-06-24，验证06-24选→06-25买→06-26卖"
+
+ob_quality_0623:
+  filter: "rsi_6 > 70 and turnover_rate > 5 and date <= '2026-06-23'"
+  description: "ob_quality 截止2026-06-23，验证06-23选→06-24买→06-25卖"
+
+ob_quality_0622:
+  filter: "rsi_6 > 70 and turnover_rate > 5 and date <= '2026-06-22'"
+  description: "ob_quality 截止2026-06-22，验证06-22选→06-23买→06-24卖"
+
+ob_quality_0618:
+  filter: "rsi_6 > 70 and turnover_rate > 5 and date <= '2026-06-18'"
+  description: "ob_quality 截止2026-06-18，验证06-18选→06-22买→06-23卖"
+
+ob_quality_0617:
+  filter: "rsi_6 > 70 and turnover_rate > 5 and date <= '2026-06-17'"
+  description: "ob_quality 截止2026-06-17，验证06-17选→06-18买→06-19卖"
+
+ob_quality_0616:
+  filter: "rsi_6 > 70 and turnover_rate > 5 and date <= '2026-06-16'"
+  description: "ob_quality 截止2026-06-16，验证06-16选→06-17买→06-18卖"
+
+ob_quality_0615:
+  filter: "rsi_6 > 70 and turnover_rate > 5 and date <= '2026-06-15'"
+  description: "ob_quality 截止2026-06-15，验证06-15选→06-16买→06-17卖"
+
 temp_history:
   filter: null
   description: "截止2026-06-24的历史数据，用于验证6月25日选股（手动切割，slicer自动跳过）"
