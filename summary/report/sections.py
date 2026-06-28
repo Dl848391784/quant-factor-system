@@ -380,6 +380,84 @@ def _generate_weight_selection_section(weight_result: dict | None) -> list[str]:
     return lines
 
 
+def _render_secondary_sort_table(
+    all_composite_stocks: list[dict],
+    stock_name_map: dict[str, str] | None,
+    w_comp: float,
+    w_turn: float,
+    w_cap: float,
+    lines: list[str],
+) -> None:
+    """v3.15: 渲染二次排序结果表 (composite×w1 + turnover_z×w2 + market_cap_z×w3).
+
+    对所有股票做 z-score 标准化后加权求和, 按最终分数降序排列, 全量输出.
+    """
+    # 构建 DataFrame
+    df = pd.DataFrame(all_composite_stocks)
+    if df.empty:
+        return
+
+    # 1. composite z-score
+    comp_vals = df["composite_value"].dropna()
+    comp_mean = comp_vals.mean()
+    comp_std = comp_vals.std() + 1e-10
+    df["comp_z"] = (df["composite_value"] - comp_mean) / comp_std
+
+    # 2. turnover z-score
+    tr_vals = df["turnover_rate"].dropna()
+    tr_mean = tr_vals.mean()
+    tr_std = tr_vals.std() + 1e-10
+    df["turn_z"] = (df["turnover_rate"] - tr_mean) / tr_std
+    df["turn_z"] = df["turn_z"].fillna(0.0)
+
+    # 3. market_cap z-score
+    cap_vals = df["market_cap"].dropna()
+    cap_mean = cap_vals.mean()
+    cap_std = cap_vals.std() + 1e-10
+    df["cap_z"] = (df["market_cap"] - cap_mean) / cap_std
+    df["cap_z"] = df["cap_z"].fillna(0.0)
+
+    # 4. 加权求和
+    df["secondary_score"] = df["comp_z"] * w_comp + df["turn_z"] * w_turn + df["cap_z"] * w_cap
+
+    # 5. 降序排列
+    df = df.sort_values("secondary_score", ascending=False).reset_index(drop=True)
+    df["secondary_rank"] = range(1, len(df) + 1)
+
+    # 6. 渲染表格
+    lines.append(
+        f"【二次排序: {len(df)} 只股票 "
+        f"(composite×{w_comp:.1f} + 换手率×{w_turn:.1f} + 市值×{w_cap:.1f}, 每 10 只一组)】"
+    )
+    lines.append(
+        f"{'排名':>4} {'股票代码':<10} {'股票名称':<8} "
+        f"{'二次得分':>10} {'换手率':>8} {'市值(亿)':>10} {'composite':>10}"
+    )
+    lines.append("-" * 70)
+
+    group_size = 10
+    for i in range(0, len(df), group_size):
+        group = df.iloc[i : i + group_size]
+        for row in group.itertuples():
+            code = row.code
+            name = (stock_name_map or {}).get(code, "--")
+            sec_score = row.secondary_score
+            tr = row.turnover_rate
+            cap = row.market_cap
+            cv = row.composite_value
+            tr_str = f"{tr:.1f}%" if pd.notna(tr) else "N/A"
+            cap_str = f"{cap / 1e8:.1f}" if pd.notna(cap) else "N/A"
+            cv_str = format_float(cv, 3) if pd.notna(cv) else "N/A"
+            lines.append(
+                f"{row.secondary_rank:>4} {code:<10} {name:<8} "
+                f"{sec_score:>10.3f} {tr_str:>8} {cap_str:>10} {cv_str:>10}"
+            )
+        if i + group_size < len(df):
+            lines.append("-" * 70)
+    lines.append("-" * 70)
+    lines.append("")
+
+
 def _generate_lr_training_status() -> list[str]:
     """v3.10: 读取 lr_training_data 状态, 展示训练数据积累进度.
 
@@ -601,6 +679,21 @@ def _generate_stock_selection_section(
                 lines.append("-" * 50)
         lines.append("-" * 50)
         lines.append("")
+
+        # v3.15: 二次排序展示 (composite×0.5 + turnover×0.3 + market_cap×0.2)
+        secondary_meta = meta.get("secondary_sort", {})
+        if secondary_meta.get("enabled", False):
+            w_comp = secondary_meta.get("composite_weight", 0.5)
+            w_turn = secondary_meta.get("turnover_weight", 0.3)
+            w_cap = secondary_meta.get("market_cap_weight", 0.2)
+            _render_secondary_sort_table(
+                all_composite_stocks,
+                stock_name_map,
+                w_comp,
+                w_turn,
+                w_cap,
+                lines,
+            )
 
         lines.append(f"【最终短名单 Top {len(top_stocks)} (LR 打分排序)】")
         lines.append("")

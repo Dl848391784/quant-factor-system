@@ -368,6 +368,7 @@ def _load_all_composite_stocks(
     """从 composite daily parquet 加载选股日全部股票的 composite 值（按降序排列）.
 
     v3.14 (2026-06-27): 新增. 当股票池 ≤400 只时, 报告全量展示所有股票.
+    v3.15: 新增二次排序 (composite + turnover + market_cap), 返回两套排序结果.
     数据源: comprehensive_factor/result/<pipeline>/composite_{weight_method}_1d_daily.parquet
 
     Args:
@@ -398,14 +399,50 @@ def _load_all_composite_stocks(
 
     day_df = day_df.sort_values("composite_factor", ascending=False).reset_index(drop=True)
 
+    # v3.15: 加载 turnover_rate (从 factor_ic_data.parquet)
+    turnover_map: dict[str, float] = {}
+    try:
+        factor_path = Path(DATA_PATHS["factor_ic_data"])
+        if factor_path.exists():
+            factor_df = pd.read_parquet(
+                factor_path,
+                columns=["date", "asset", "turnover_rate"],
+            )
+            day_factor = factor_df[factor_df["date"].astype(str) == selection_date]
+            turnover_map = day_factor.set_index("asset")["turnover_rate"].to_dict()
+    except Exception:
+        logger.debug("turnover_rate 加载失败, 二次排序忽略此维度")
+
+    # v3.15: 加载 market_cap (从 market_cap_data.json.gz)
+    market_cap_map: dict[str, float] = {}
+    try:
+        from paths import MARKET_CAP_DATA
+
+        if MARKET_CAP_DATA.exists():
+            import gzip
+
+            with gzip.open(MARKET_CAP_DATA, "rt") as f:
+                mc_data = json.load(f)
+            for record in mc_data.get("data", []):
+                if record.get("date") == selection_date:
+                    code = str(record.get("asset", ""))
+                    cap = record.get("total_market_cap")
+                    if cap is not None:
+                        market_cap_map[code] = float(cap)
+    except Exception:
+        logger.debug("market_cap 加载失败, 二次排序忽略此维度")
+
     stocks: list[dict] = []
     for i, row in day_df.iterrows():
         cv = row["composite_factor"]
+        code = str(row["asset"])
         stocks.append(
             {
                 "rank": i + 1,
-                "code": str(row["asset"]),
+                "code": code,
                 "composite_value": float(cv) if pd.notna(cv) else None,
+                "turnover_rate": turnover_map.get(code),
+                "market_cap": market_cap_map.get(code),
             }
         )
     logger.info("加载全量 composite 股票: %s, %d 只", selection_date, len(stocks))
@@ -596,6 +633,14 @@ def load_stock_selection_result(logger: logging.Logger) -> dict | None:
         "stage2_sort_col": str(ref_row["stage2_sort_col"]) if pd.notna(ref_row.get("stage2_sort_col")) else None,
         "stage2_ascending": bool(ref_row["stage2_ascending"]) if pd.notna(ref_row.get("stage2_ascending")) else None,
         "valid_stocks": len(stage3_top),
+        # v3.15: 二次排序配置 (从 Parquet metadata 读取)
+        "secondary_sort": {
+            "enabled": _meta_float("secondary_sort_enabled", 0) > 0,
+            "pool_threshold": int(_meta_float("secondary_sort_pool_threshold", 400)),
+            "composite_weight": _meta_float("secondary_sort_composite_weight", 0.5),
+            "turnover_weight": _meta_float("secondary_sort_turnover_weight", 0.3),
+            "market_cap_weight": _meta_float("secondary_sort_market_cap_weight", 0.2),
+        },
     }
 
     weight_config = {

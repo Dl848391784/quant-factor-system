@@ -107,6 +107,17 @@ class StockSelectorConfig:
     lr_filter_quantile: float = 0.3  # Bottom30 中打分最低 30% 排除
     lr_bottom_pool_size: int = 90  # 训练数据保存的 Bottom 数量 (Bottom90)
 
+    # v3.15: ob_pool 二次排序（换手率 + 市值, designs/feat_ob_pool_secondary_sort.md）
+    #   实证依据: 跨 4 pipeline 840 只股票分析
+    #   - 换手率 p=0.008 (上涨组 8.78% vs 下跌组 5.18%)
+    #   - 市值 p≈0.05 (上涨组中位 197亿 vs 下跌组 85亿)
+    #   仅对股票池 ≤400 只的 pipeline 生效 (ob_pool ~200 只), 全市场不启用
+    enable_secondary_sort: bool = True
+    secondary_sort_pool_threshold: int = 400  # 股票池超过此数不启用
+    secondary_sort_composite_weight: float = 0.5  # composite 因子权重
+    secondary_sort_turnover_weight: float = 0.3  # 换手率权重
+    secondary_sort_market_cap_weight: float = 0.2  # 市值权重
+
     # === 数据路径 ===（问题 4 修复：default_factory 保证延迟求值）
     data_source: Path = field(default_factory=lambda: DEFAULT_DATA_SOURCE)
     ic_result_dir: Path = field(default_factory=lambda: DEFAULT_IC_RESULT_DIR)

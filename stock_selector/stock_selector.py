@@ -128,6 +128,140 @@ _logger = logging.getLogger("stock_selector.selector")
 # ============================================================================
 
 
+def apply_secondary_sort(
+    stage1_stocks: list[dict[str, Any]],
+    factor_df: pd.DataFrame,
+    config: "StockSelectorConfig",
+    selection_date: str,
+    logger: logging.Logger | None = None,
+) -> list[dict[str, Any]]:
+    """v3.15: ob_pool 二次排序（换手率 + 市值）.
+
+    对 Stage 1 候选池的全部股票, 用换手率 + 市值做二次排序.
+    最终排序键 = composite × w1 + turnover_z × w2 + market_cap_z × w3.
+
+    仅当 enable_secondary_sort=True 且股票池 ≤ secondary_sort_pool_threshold 时生效.
+    否则原样返回 stage1_stocks.
+
+    Args:
+        stage1_stocks: Stage 1 候选池 (sort_and_select 返回)
+        factor_df: 因子 DataFrame (含 turnover_rate)
+        config: 选股配置
+        selection_date: 选股日期
+        logger: 日志
+
+    Returns:
+        二次排序后的股票列表 (rank 重新分配)
+    """
+    if logger is None:
+        logger = _logger
+
+    # 条件检查: 开关 + 股票池大小
+    if not config.enable_secondary_sort:
+        return stage1_stocks
+
+    if len(stage1_stocks) > config.secondary_sort_pool_threshold:
+        logger.info(
+            "二次排序跳过: 股票池 %d > 阈值 %d",
+            len(stage1_stocks),
+            config.secondary_sort_pool_threshold,
+        )
+        return stage1_stocks
+
+    if len(stage1_stocks) == 0:
+        return stage1_stocks
+
+    # 构建 DataFrame
+    df = pd.DataFrame(stage1_stocks).copy()
+    df["code"] = df["code"].astype(str)
+
+    # 1. composite z-score (已在 stage1_stocks 中)
+    composite_z = (df["composite_value"] - df["composite_value"].mean()) / (df["composite_value"].std() + 1e-10)
+
+    # 2. turnover_rate z-score (从完整数据源重新加载, 不依赖 factor_df 的列选择)
+    turnover_series = pd.Series(dtype=float)
+    try:
+        # 从 factor_ic_data.parquet 加载完整数据 (factor_df 可能只含少数因子列)
+        full_factor_path = config.data_source
+        if full_factor_path.exists():
+            full_df = pd.read_parquet(full_factor_path, columns=["date", "asset", "turnover_rate"])
+            day_df = full_df[full_df["date"].astype(str) == selection_date]
+            if "turnover_rate" in day_df.columns:
+                turnover_series = day_df.set_index("asset")["turnover_rate"]
+    except Exception as exc:
+        logger.warning("二次排序: turnover_rate 加载失败 (%s)", exc)
+
+    df["turnover_rate"] = df["code"].map(
+        lambda c: float(turnover_series.get(c, np.nan)) if not turnover_series.empty else np.nan
+    )
+    turnover_z = (df["turnover_rate"] - df["turnover_rate"].mean()) / (df["turnover_rate"].std() + 1e-10)
+    turnover_z = turnover_z.fillna(0.0)
+
+    # 3. market_cap z-score (从 market_cap_data.json.gz 加载)
+    market_cap_map: dict[str, float] = {}
+    try:
+        from paths import MARKET_CAP_DATA
+
+        if MARKET_CAP_DATA.exists():
+            import gzip
+
+            with gzip.open(MARKET_CAP_DATA, "rt") as f:
+                mc_data = json.load(f)
+            for record in mc_data.get("data", []):
+                if record.get("date") == selection_date:
+                    code = str(record.get("asset", ""))
+                    cap = record.get("total_market_cap")
+                    if cap is not None:
+                        market_cap_map[code] = float(cap)
+    except Exception as exc:
+        logger.warning("二次排序: 市值数据加载失败 (%s), 市值维度置 0", exc)
+
+    df["market_cap"] = df["code"].map(lambda c: market_cap_map.get(c, np.nan))
+    market_cap_z = (df["market_cap"] - df["market_cap"].mean()) / (df["market_cap"].std() + 1e-10)
+    market_cap_z = market_cap_z.fillna(0.0)
+
+    # 4. 加权求和
+    w_comp = config.secondary_sort_composite_weight
+    w_turn = config.secondary_sort_turnover_weight
+    w_cap = config.secondary_sort_market_cap_weight
+
+    df["secondary_score"] = composite_z * w_comp + turnover_z * w_turn + market_cap_z * w_cap
+
+    # 5. 按 secondary_score 降序排列
+    df = df.sort_values("secondary_score", ascending=False).reset_index(drop=True)
+
+    # 6. 重新分配 rank
+    df["rank"] = range(1, len(df) + 1)
+    df["secondary_rank"] = df["rank"]
+
+    # 保留原始 rank 为 stage1_rank
+    result = []
+    for _, row in df.iterrows():
+        stock = {
+            "rank": int(row["rank"]),
+            "code": row["code"],
+            "composite_value": float(row["composite_value"]),
+            "factor_values": row.get("factor_values", {}),
+            "factor_values_std": row.get("factor_values_std", {}),
+            "weight_coverage": float(row["weight_coverage"]) if pd.notna(row.get("weight_coverage")) else None,
+            "secondary_score": round(float(row["secondary_score"]), 6),
+            "secondary_rank": int(row["secondary_rank"]),
+            "turnover_rate": round(float(row["turnover_rate"]), 4) if pd.notna(row["turnover_rate"]) else None,
+            "market_cap_yi": round(float(row["market_cap"]) / 1e8, 2) if pd.notna(row["market_cap"]) else None,
+        }
+        result.append(stock)
+
+    logger.info(
+        "二次排序完成: %d 只股票 (composite×%.1f + turnover×%.1f + market_cap×%.1f)",
+        len(result),
+        w_comp,
+        w_turn,
+        w_cap,
+    )
+
+    return result
+
+
 def sort_and_select(
     composite_factor: pd.Series,
     factor_df: pd.DataFrame,
@@ -654,6 +788,7 @@ def build_result(
     excluded_by_overheat: int = 0,  # v3.9: Bottom30 过热过滤排除数
     excluded_by_filter: dict[str, int] | None = None,  # v2.41 (R3): filter 角色排除数
     min_weight_coverage: float = 0.5,  # v1.15: 覆盖率阈值
+    secondary_sorted_stocks: list[dict[str, Any]] | None = None,  # v3.15: 二次排序结果
     logger: logging.Logger | None = None,
 ) -> dict[str, Any]:
     """构建输出结果
@@ -713,8 +848,18 @@ def build_result(
             "excluded_by_overheat": excluded_by_overheat,
             # v2.41 (R3): filter 角色硬过滤信息
             "excluded_by_filter": excluded_by_filter or {},
+            # v3.15: 二次排序信息
+            "secondary_sort": {
+                "enabled": config.enable_secondary_sort,
+                "pool_threshold": config.secondary_sort_pool_threshold,
+                "composite_weight": config.secondary_sort_composite_weight,
+                "turnover_weight": config.secondary_sort_turnover_weight,
+                "market_cap_weight": config.secondary_sort_market_cap_weight,
+                "count": len(secondary_sorted_stocks) if secondary_sorted_stocks else 0,
+            },
         },
         "top_stocks": top_stocks,
+        "secondary_sorted_stocks": secondary_sorted_stocks or [],
         "weight_config": {
             "method": best_selection["method"],
             "window": config.rolling_window if best_selection["method"] == "rolling_icir_weight" else None,
@@ -1102,18 +1247,22 @@ def _run_selection_pipeline(
     list[dict[str, Any]],
     list[dict[str, Any]],
     list[dict[str, Any]],
+    list[dict[str, Any]],
     int,
     int,
     int,
     int,
     int,
+    list[dict[str, Any]],
 ]:
     """Step 10: Stage 1 候选池 + Bottom90 + LR 过滤.
 
     Returns:
-        (top_stocks, stage1_top_snapshot, stage1_bottom_snapshot,
+        (top_stocks, stage1_top_snapshot, stage2_top_snapshot,
+         stage1_bottom_snapshot,
          excluded_by_amplitude, excluded_by_coverage, excluded_by_liquidity,
-         excluded_by_confirmation, excluded_by_overheat)
+         excluded_by_confirmation, excluded_by_overheat,
+         secondary_sorted_stocks)
     """
     # Stage 1: composite Top stage1_pool_size (候选池, 保留基础设施)
     stage1_n = config.stage1_pool_size
@@ -1130,7 +1279,17 @@ def _run_selection_pipeline(
         min_amount_percentile=config.min_amount_percentile,
         logger=logger,
     )
-    stage1_top_snapshot = [copy.deepcopy(s) for s in stage1_stocks[: config.top_n]]
+
+    # v3.15: ob_pool 二次排序（换手率 + 市值）
+    secondary_sorted_stocks = apply_secondary_sort(
+        stage1_stocks,
+        factor_df,
+        config,
+        selection_date,
+        logger=logger,
+    )
+
+    stage1_top_snapshot = [copy.deepcopy(s) for s in secondary_sorted_stocks[: config.top_n]]
 
     stage2_top_snapshot: list[dict[str, Any]] = []  # v3.9: 不再使用, 保留为空
     stage1_bottom_snapshot: list[dict[str, Any]] = []
@@ -1204,6 +1363,7 @@ def _run_selection_pipeline(
         excluded_by_liquidity,
         excluded_by_confirmation,
         excluded_by_overheat,
+        secondary_sorted_stocks,
     )
 
 
@@ -1228,6 +1388,7 @@ def _build_and_write_outputs(
     excluded_by_overheat: int,
     filter_exclusions: dict[str, int],
     logger: logging.Logger,
+    secondary_sorted_stocks: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], Path]:
     """Step 10.6-13: 决策卡片 + 结果构建 + Parquet 写入 + LR 训练数据保存.
 
@@ -1285,6 +1446,7 @@ def _build_and_write_outputs(
         excluded_by_confirmation=excluded_by_confirmation,
         excluded_by_overheat=excluded_by_overheat,
         excluded_by_filter=filter_exclusions,
+        secondary_sorted_stocks=secondary_sorted_stocks,
         logger=logger,
     )
 
@@ -1297,6 +1459,12 @@ def _build_and_write_outputs(
         "excluded_by_overheat": excluded_by_overheat,
         "excluded_by_filter": filter_exclusions,
         "min_weight_coverage": 0.5,
+        # v3.15: 二次排序配置 (写入 Parquet metadata, 供报告读取)
+        "secondary_sort_enabled": config.enable_secondary_sort,
+        "secondary_sort_pool_threshold": config.secondary_sort_pool_threshold,
+        "secondary_sort_composite_weight": config.secondary_sort_composite_weight,
+        "secondary_sort_turnover_weight": config.secondary_sort_turnover_weight,
+        "secondary_sort_market_cap_weight": config.secondary_sort_market_cap_weight,
     }
     partition_dir = write_selection_history(
         stage1_top=stage1_top_snapshot,
@@ -1434,6 +1602,7 @@ def select_stocks(
         excluded_by_liquidity,
         excluded_by_confirmation,
         excluded_by_overheat,
+        secondary_sorted_stocks,
     ) = _run_selection_pipeline(
         composite_factor,
         factor_df,
@@ -1467,6 +1636,7 @@ def select_stocks(
         excluded_by_overheat,
         filter_exclusions,
         logger,
+        secondary_sorted_stocks=secondary_sorted_stocks,
     )
 
     return result, partition_dir
