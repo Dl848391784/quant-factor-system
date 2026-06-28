@@ -61,6 +61,24 @@
 - 跑一次本地 pre-commit → 若失败，先修复再继续，不可 `--no-verify`
 - 在 PR 描述中按"PR 模板必填字段"格式填写规范引用
 
+### Pipeline 长任务执行约定 [stable]
+
+**规则**: pipeline 整体运行（`run_pipeline.py`）或单条时间递减管线是长任务（15-30 分钟），一律走后台执行（`background=true + notify_on_complete=true`），不实施实时监控轮询。
+
+| 正确 | 错误 |
+|------|------|
+| 启动后台 → 等通知 → 收结果 | 启动前台 → 阻塞等待 → 浪费时间 |
+| `process(action='wait')` 偶尔用 | 频繁 `process(action='poll')` 轮询 |
+| `--start-stage N` 并说明为何选 N | 盲跑全 Stage 不说明 |
+
+**禁止行为**：
+- ❌ 禁止 `| tail` 或 pipe 到其他命令（SIGPIPE 杀进程，exit code=0 误判成功）
+- ❌ 禁止用 watch/while 循环轮询进程状态
+- ❌ 被问及进度时只读当前日志、报 PID，**禁止 kill 正在运行的 pipeline**
+
+**Why**（历史教训）:
+> 2026-06-26 pipeline 输出经 `| tail -20` 导致 SIGPIPE 提前终止进程，但 exit code=0，agent 误判 pipeline 全部成功。见 factor-development skill ref `sigpipe-pipeline-truncation.md`。
+
 ---
 
 ## 战略目标：量化辅助 + 人工决断 [stable]
