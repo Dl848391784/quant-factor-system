@@ -122,14 +122,16 @@ def convert_return_to_percentage(decimal_value: float) -> float:
     return decimal_value  # 数据已是百分比，直接返回
 
 
-def format_float(value: float, decimals: int = 4) -> str:
+def format_float(value: float | None, decimals: int = 4) -> str:
     """格式化浮点数
 
     Args:
-        value: 数值
+        value: 数值（可为 None）
         decimals: 小数位数
 
     Returns:
-        格式化的浮点数字符串
+        格式化的浮点数字符串，None 返回 "n/a"
     """
+    if value is None:
+        return "n/a".rjust(3 + decimals + 1)  # 对齐占位符
     return f"{value:.{decimals}f}"
