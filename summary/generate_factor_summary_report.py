@@ -259,7 +259,161 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
 
     lines.extend(_generate_stock_selection_section(stock_result, stock_comp_weights, data_results, stock_name_map))
 
-    return "\n".join(lines)
+    # v3.18: ob_quality 跨管线分段胜率汇总
+    if stock_result:
+        _render_cross_pipeline_summary(lines, stock_result, logger, stock_name_map)
+
+    return "\\n".join(lines)
+
+
+def _render_cross_pipeline_summary(
+    lines: list[str],
+    stock_result: dict,
+    logger: logging.Logger,
+    stock_name_map: dict[str, str] | None = None,
+) -> None:
+    """ob_quality 全管线每日独立30分段胜率汇总.
+
+    遍历 ob_quality_0615 ~ ob_quality_0624 的 composite daily,
+    每日独立 qcut 为 30 段, 计算各段胜率, 输出矩阵表格.
+    仅在 ob_quality pipeline 且非临时管线时输出.
+    """
+    import os
+
+    import pandas as pd
+    from paths import COMPREHENSIVE_FACTOR_RESULT
+
+    alias = os.environ.get("PIPELINE_ALIAS", "")
+    # 只在 ob_quality 主管线(非时间递减)输出
+    if not alias.startswith("ob_quality") or "_" in alias:
+        return
+
+    weight_method = (stock_result.get("meta", {}) or {}).get("weight_method", "rolling_icir_weight")
+    daily_filename = f"composite_{weight_method}_1d_daily.parquet"
+
+    # 收集所有 ob_quality_06XX 管线
+    parent_dir = COMPREHENSIVE_FACTOR_RESULT.parent  # comprehensive_factor/result/
+    pipeline_dirs = sorted(
+        [d for d in parent_dir.iterdir() if d.is_dir() and d.name.startswith("ob_quality_")],
+        key=lambda d: d.name,
+    )
+
+    if len(pipeline_dirs) < 2:
+        return
+
+    n_segments = 30
+    master_path = Path(DATA_PATHS.get("master_parquet", str(PROJECT_ROOT / "data_fetchers/result/factor_ic_data.parquet")))
+
+    try:
+        master_dates = sorted(pd.read_parquet(master_path, columns=["date"])["date"].dropna().unique())
+        master_ret = pd.read_parquet(master_path, columns=["date", "asset", "forward_return_1d"])
+    except Exception:
+        logger.debug("跨管线汇总: 无法读取主数据源, 跳过")
+        return
+
+    # 收集每管线的30分段结果
+    pipeline_results = []  # [(label, comp_date, trade_date, n_total, seg_stats)]
+    for pipe_dir in pipeline_dirs:
+        daily_path = pipe_dir / daily_filename
+        if not daily_path.exists():
+            continue
+        try:
+            comp_df = pd.read_parquet(daily_path, columns=["date", "asset", "composite_factor"])
+        except Exception:
+            continue
+
+        # 取最新选股日
+        comp_dates = sorted(comp_df["date"].dropna().unique())
+        if not comp_dates:
+            continue
+        selection_date = comp_dates[-1]
+        day_df = comp_df[comp_df["date"].astype(str) == selection_date]
+        if len(day_df) < 20:
+            continue
+
+        # 找下一个交易日
+        try:
+            idx = master_dates.index(selection_date)
+            trade_date = master_dates[idx + 1]
+        except (ValueError, IndexError):
+            continue
+
+        ret_df = master_ret[master_ret["date"] == trade_date]
+        merged = pd.merge(day_df, ret_df[["asset", "forward_return_1d"]], on="asset", how="inner")
+        if len(merged) == 0:
+            continue
+
+        merged["rank"] = merged["composite_factor"].rank(ascending=False)
+        try:
+            merged["seg"] = pd.qcut(merged["rank"], n_segments, labels=[f"S{i+1}" for i in range(n_segments)])
+        except ValueError:
+            continue
+
+        seg_stats = {}
+        for seg_label in [f"S{i+1}" for i in range(n_segments)]:
+            sub = merged[merged["seg"] == seg_label]
+            ret_vals = sub["forward_return_1d"].dropna()
+            w = (ret_vals > 0).sum()
+            t = len(ret_vals)
+            seg_stats[seg_label] = {"wins": w, "total": t, "wr": w / t * 100 if t > 0 else 0}
+
+        label = pipe_dir.name.replace("ob_quality_", "")
+        pipeline_results.append((label, selection_date, trade_date, len(merged), seg_stats))
+
+    if len(pipeline_results) < 2:
+        return
+
+    n_pipes = len(pipeline_results)
+    lines.append("")
+    lines.append("=" * 70)
+    lines.append(f"九、ob_quality 全管线 {n_segments}分段胜率汇总 (每日独立选股)")
+    lines.append("-" * 70)
+    lines.append(f"  共 {n_pipes} 条时间递减管线, 每天独立按 composite 排名切 {n_segments} 段")
+    lines.append("  选股日 → T+1交易日 (T-1 对齐), 统计 forward_return_1d")
+    lines.append("")
+
+    # 表头: 段 | date1 date2 ... | 合并
+    header = f"  {'段':<6}"
+    date_labels = [r[0] for r in pipeline_results]
+    for dl in date_labels:
+        header += f" {dl:>6}"
+    header += f" {'合并':>8}"
+    lines.append(header)
+    lines.append("  " + "-" * (8 + 8 * n_pipes + 10))
+
+    # 每段一行
+    best_overall_wr = 0
+    best_overall_seg = ""
+    for seg_label in [f"S{i+1}" for i in range(n_segments)]:
+        row = f"  {seg_label:<6}"
+        total_w = 0
+        total_n = 0
+        for _, _, _, _, seg_stats in pipeline_results:
+            ss = seg_stats.get(seg_label, {"wins": 0, "total": 0})
+            wr = ss["wr"]
+            total_w += ss["wins"]
+            total_n += ss["total"]
+            if ss["total"] > 0:
+                row += f" {wr:>5.0f}% "
+            else:
+                row += f" {'--':>5} "
+        overall_wr = total_w / total_n * 100 if total_n > 0 else 0
+        row += f" {overall_wr:>7.1f}%"
+        if overall_wr > best_overall_wr:
+            best_overall_wr = overall_wr
+            best_overall_seg = seg_label
+        lines.append(row)
+
+    lines.append("  " + "-" * (8 + 8 * n_pipes + 10))
+    lines.append(f"  最佳段: {best_overall_seg} (合并胜率 {best_overall_wr:.1f}%)")
+    lines.append("")
+
+    # 最佳段逐日
+    lines.append(f"  {best_overall_seg} 逐日胜率:")
+    for label, _, _, _, seg_stats in pipeline_results:
+        ss = seg_stats.get(best_overall_seg, {"wins": 0, "total": 0, "wr": 0})
+        lines.append(f"    {label:>6}: {ss['wins']}/{ss['total']} = {ss['wr']:.1f}%")
+    lines.append("")
 
 
 def main():

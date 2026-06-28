@@ -592,7 +592,10 @@ def _generate_lr_training_status() -> list[str]:
 
 
 def _render_decile_section(decile_stats: dict, lines: list[str], stock_name_map: dict[str, str] | None = None) -> None:
-    """渲染十分位分段胜率表格, 含每段股票明细.
+    """渲染分段胜率表格, 含每段股票明细.
+
+    30段时仅展示胜率 Top5 段 + 最佳段股票明细, 避免报告过长.
+    10段时展示全部.
 
     Args:
         decile_stats: load_decile_stats() 的返回值
@@ -603,56 +606,73 @@ def _render_decile_section(decile_stats: dict, lines: list[str], stock_name_map:
     if not segs:
         return
 
-    lines.append("【十分位分段胜率 (composite 降序, T+1 收益)】")
+    n_segs = len(segs)
+    lines.append(f"【{n_segs}分段胜率 (composite 降序, T+1 收益)】")
     lines.append(
         f"选股日: {decile_stats['selection_date']}, "
         f"交易验证日: {decile_stats['trade_date']}, "
         f"共 {decile_stats['n_total']} 只"
     )
     lines.append("")
+
+    # 30段时仅展示 Top5, 10段展示全部
+    show_all = n_segs <= 10
+    if not show_all:
+        lines.append(f"  (共{n_segs}段, 仅展示胜率 Top5)")
     lines.append(f"  {'段':<6} {'N':>5} {'胜率':>8} {'均收':>8} {'盈亏比':>8} {'涨:跌'}")
     lines.append("  " + "-" * 50)
 
-    best_wr, best_label = 0, ""
-    for seg in segs:
-        if seg["n"] == 0:
-            continue
+    # 按胜率排序取 Top5
+    ranked = sorted([s for s in segs if s["n"] > 0], key=lambda s: -s["win_rate"])
+    display_segs = ranked if show_all else ranked[:5]
+    best_label = ranked[0]["label"] if ranked else ""
+    best_wr = ranked[0]["win_rate"] if ranked else 0
+
+    for seg in display_segs:
         label = seg["label"]
         wr = seg["win_rate"]
         ar = seg["avg_ret"]
         plr = seg["pl_ratio"]
         wc = seg["wins"]
         lc = seg["losses"]
-        star = ""
-        if wr > best_wr:
-            best_wr, best_label = wr, label
+        star = " <-- BEST" if label == best_label else ""
         lines.append(f"  {label:<6} {seg['n']:>5} {wr:>7.1f}% {ar:>+7.2f}% {plr:>7.2f} {wc:>4}:{lc:<4}{star}")
     lines.append("  " + "-" * 50)
     if best_label:
         lines.append(f"  最佳段: {best_label} (胜率 {best_wr:.1f}%)")
     lines.append("")
 
-    # 每段股票明细
+    # 最佳段股票明细
     name_map = stock_name_map or {}
-    for seg in segs:
-        if seg.get("n", 0) == 0:
-            continue
-        stocks = seg.get("stocks", [])
-        if not stocks:
-            continue
-        label = seg["label"]
-        wr = seg["win_rate"]
-        ar = seg["avg_ret"]
-        lines.append(f"【{label} 段 (胜率 {wr:.1f}%, 均收 {ar:+.2f}%)】")
-        lines.append(f"  {'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>10}")
-        lines.append("  " + "-" * 45)
-        for s in stocks:
-            code = s.get("code", "")
-            cv = s.get("composite_value", 0)
-            rank = s.get("rank", 0)
-            name = name_map.get(code, "--")
-            lines.append(f"  {rank:>4} {code:<10} {name:<8} {cv:>10.3f}")
-        lines.append("  " + "-" * 45)
+    best_seg_data = next((s for s in segs if s["label"] == best_label), None)
+    if best_seg_data:
+        stocks = best_seg_data.get("stocks", [])
+        if stocks:
+            wr = best_seg_data["win_rate"]
+            ar = best_seg_data["avg_ret"]
+            lines.append(f"【{best_label} 段明细 (胜率 {wr:.1f}%, 均收 {ar:+.2f}%)】")
+            lines.append(f"  {'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>10}")
+            lines.append("  " + "-" * 45)
+            for s in stocks:
+                code = s.get("code", "")
+                cv = s.get("composite_value", 0)
+                rank = s.get("rank", 0)
+                name = name_map.get(code, "--")
+                lines.append(f"  {rank:>4} {code:<10} {name:<8} {cv:>10.3f}")
+            lines.append("  " + "-" * 45)
+            lines.append("")
+
+    # 30段时附加: 全部段胜率一览 (紧凑表格)
+    if not show_all:
+        all_ranked = sorted([s for s in segs if s["n"] > 0], key=lambda s: int(s["label"][1:]))
+        lines.append(f"【全部 {n_segs} 段胜率一览】")
+        per_row = 6
+        for i in range(0, len(all_ranked), per_row):
+            row_segs = all_ranked[i:i+per_row]
+            row = ""
+            for seg in row_segs:
+                row += f" {seg['label']:<5} {seg['win_rate']:>5.0f}% "
+            lines.append(f"  {row}")
         lines.append("")
 
 

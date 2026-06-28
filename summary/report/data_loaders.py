@@ -720,9 +720,9 @@ def load_decile_stats(
     weight_method: str,
     selection_date: str,
     logger: logging.Logger,
-    n_segments: int = 10,
+    n_segments: int = 30,
 ) -> dict | None:
-    """加载选股日十分位分段胜率.
+    """加载选股日分段胜率 (默认30段).
 
     从 composite daily parquet 取选股日排名, 从主数据源取 T+1 收益,
     按 composite 降序 qcut 为 n_segments 段, 每段计算胜率/均收/盈亏比.
