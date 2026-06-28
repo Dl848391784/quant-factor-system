@@ -89,16 +89,18 @@ def format_weights(weights: dict) -> str:
     return ", ".join(parts)
 
 
-def format_percentage(value: float, decimals: int = 2) -> str:
+def format_percentage(value: float | None, decimals: int = 2) -> str:
     """格式化百分比
 
     Args:
-        value: 数值（已转换为百分比，如 15.5 表示 15.5%）
+        value: 数值（已转换为百分比，如 15.5 表示 15.5%），可为 None
         decimals: 小数位数
 
     Returns:
-        格式化的百分比字符串
+        格式化的百分比字符串，None 返回 "n/a"
     """
+    if value is None:
+        return "n/a".rjust(3 + decimals + 1 + 1)  # +1 for % sign
     return f"{value:.{decimals}f}%"
 
 
