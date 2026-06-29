@@ -642,25 +642,27 @@ def _render_decile_section(decile_stats: dict, lines: list[str], stock_name_map:
         lines.append(f"  最佳段: {best_label} (胜率 {best_wr:.1f}%)")
     lines.append("")
 
-    # 最佳段股票明细
+    # Top5 段股票明细 (30段时展示全部Top5, 10段时展示全部)
     name_map = stock_name_map or {}
-    best_seg_data = next((s for s in segs if s["label"] == best_label), None)
-    if best_seg_data:
-        stocks = best_seg_data.get("stocks", [])
-        if stocks:
-            wr = best_seg_data["win_rate"]
-            ar = best_seg_data["avg_ret"]
-            lines.append(f"【{best_label} 段明细 (胜率 {wr:.1f}%, 均收 {ar:+.2f}%)】")
-            lines.append(f"  {'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>10}")
-            lines.append("  " + "-" * 45)
-            for s in stocks:
-                code = s.get("code", "")
-                cv = s.get("composite_value", 0)
-                rank = s.get("rank", 0)
-                name = name_map.get(code, "--")
-                lines.append(f"  {rank:>4} {code:<10} {name:<8} {cv:>10.3f}")
-            lines.append("  " + "-" * 45)
-            lines.append("")
+    for seg in display_segs:
+        stocks = seg.get("stocks", [])
+        if not stocks:
+            continue
+        label = seg["label"]
+        wr = seg["win_rate"]
+        ar = seg["avg_ret"]
+        star = " (BEST)" if label == best_label else ""
+        lines.append(f"【{label} 段明细{star} (胜率 {wr:.1f}%, 均收 {ar:+.2f}%)】")
+        lines.append(f"  {'排名':>4} {'股票代码':<10} {'股票名称':<8} {'综合因子值':>10}")
+        lines.append("  " + "-" * 45)
+        for s in stocks:
+            code = s.get("code", "")
+            cv = s.get("composite_value", 0)
+            rank = s.get("rank", 0)
+            name = name_map.get(code, "--")
+            lines.append(f"  {rank:>4} {code:<10} {name:<8} {cv:>10.3f}")
+        lines.append("  " + "-" * 45)
+        lines.append("")
 
     # 30段时附加: 全部段胜率一览 (紧凑表格)
     if not show_all:
