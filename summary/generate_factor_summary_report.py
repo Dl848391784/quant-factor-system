@@ -473,7 +473,7 @@ def _render_today_best_segment_candidates(
 ) -> None:
     """展示今日三十分段候选明细.
 
-    将当日候选池按 composite 排名 qcut 为 30 段 (D1~D30),
+    将当日候选池按 composite 排名 qcut 为 30 段 (S1~S30),
     每段展示股票明细 + 历史合并胜率.
     """
     import pandas as pd
@@ -494,9 +494,9 @@ def _render_today_best_segment_candidates(
     n_stocks = len(today)
     n_segments = 30
 
-    # qcut 分 30 段, 标签 D1~D30
+    # qcut 分 30 段, 标签 S1~S30
     try:
-        today["seg"] = pd.qcut(today["rank"], n_segments, labels=[f"D{i + 1}" for i in range(n_segments)])
+        today["seg"] = pd.qcut(today["rank"], n_segments, labels=[f"S{i + 1}" for i in range(n_segments)])
     except ValueError:
         return
 
@@ -509,16 +509,15 @@ def _render_today_best_segment_candidates(
     lines.append("  操作: 今日尾盘买入 -> 下一交易日卖出 (高开开盘锁利, 低开等反抽减亏)")
     lines.append("")
 
-    for seg_label in [f"D{i + 1}" for i in range(n_segments)]:
+    for seg_label in [f"S{i + 1}" for i in range(n_segments)]:
         subset = today[today["seg"] == seg_label].sort_values("rank")
         if len(subset) == 0:
             continue
 
-        # 获取合并胜率: D1 → S1 映射
+        # 获取合并胜率
         wr_str = ""
         if seg_merge_stats:
-            s_key = f"S{seg_label[1:]}"  # D1 → S1, D15 → S15
-            ss = seg_merge_stats.get(s_key, {})
+            ss = seg_merge_stats.get(seg_label, {})
             wr = ss.get("wr", 0)
             if ss.get("total", 0) > 0:
                 wr_str = f" 合并胜率: {wr:.1f}%"
