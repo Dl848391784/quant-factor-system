@@ -248,8 +248,10 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
         else:
             stock_comp_weights = best_item.get("weights", {})
 
-    # v3.17: 十分位分段胜率 (D1-D10)
-    if stock_result:
+    # v3.17: 分段胜率 (非 ob_quality, 需 T+1 数据; ob_quality 走跨管线汇总)
+    import os as _os
+    _is_obq = _os.environ.get("PIPELINE_ALIAS", "").startswith("ob_quality")
+    if stock_result and not _is_obq:
         stock_meta = stock_result.get("meta", {})
         stock_result["decile_stats"] = load_decile_stats(
             stock_meta.get("weight_method", best_weight_method),
@@ -272,6 +274,10 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     # v3.18: ob_quality 跨管线分段胜率汇总
     if stock_result:
         _render_cross_pipeline_summary(lines, stock_result, logger, stock_name_map)
+
+    # ob_quality: 展示今日在历史最佳段(S6/S7)的候选
+    if _is_obq and stock_result:
+        _render_today_best_segment_candidates(lines, stock_result, stock_name_map)
 
     return "\n".join(lines)
 
@@ -424,6 +430,56 @@ def _render_cross_pipeline_summary(
         ss = seg_stats.get(best_overall_seg, {"wins": 0, "total": 0, "wr": 0})
         lines.append(f"    {label:>6}: {ss['wins']}/{ss['total']} = {ss['wr']:.1f}%")
     lines.append("")
+
+def _render_today_best_segment_candidates(
+    lines: list,
+    stock_result: dict,
+    stock_name_map: dict | None,
+) -> None:
+    """展示今日落在历史最佳段(S6/S7)的候选股票."""
+    import pandas as pd
+    from paths import COMPREHENSIVE_FACTOR_RESULT
+
+    weight_method = (stock_result.get("meta", {}) or {}).get("weight_method", "rolling_icir_weight")
+    daily_path = COMPREHENSIVE_FACTOR_RESULT / f"composite_{weight_method}_1d_daily.parquet"
+    if not daily_path.exists():
+        return
+
+    comp = pd.read_parquet(daily_path, columns=["date", "asset", "composite_factor"])
+    dates = sorted(comp["date"].dropna().unique())
+    if not dates:
+        return
+    latest = dates[-1]
+    today = comp[comp["date"] == latest].copy()
+    today["rank"] = today["composite_factor"].rank(ascending=False)
+    n_stocks = len(today)
+
+    seg_ranges = [("S6 (rank 21-25)", 21, 25), ("S7 (rank 26-30)", 26, 30)]
+    name_map = stock_name_map or {}
+
+    lines.append("")
+    lines.append("十、今日历史最佳段候选")
+    lines.append("-" * 70)
+    lines.append(f"  选股日: {latest}, 候选池共 {n_stocks} 只")
+    lines.append(f"  历史验证: S6合并胜率 69.2%, S7合并胜率 65.5%")
+    lines.append(f"  操作: 今日尾盘买入 -> 下一交易日卖出 (高开开盘锁利, 低开等反抽减亏)")
+    lines.append("")
+
+    for seg_name, rmin, rmax in seg_ranges:
+        subset = today[(today["rank"] >= rmin) & (today["rank"] <= rmax)].sort_values("rank")
+        if len(subset) == 0:
+            continue
+        lines.append(f"  [{seg_name}] {len(subset)} 只")
+        lines.append(f"  {'排名':>4} {'代码':<10} {'名称':<8} {'composite':>10}")
+        lines.append("  " + "-" * 38)
+        for _, s in subset.iterrows():
+            code = s["asset"]
+            nm = name_map.get(code, "--")
+            cv = s["composite_factor"]
+            rk = int(s["rank"])
+            lines.append(f"  {rk:>4} {code:<10} {nm:<8} {cv:>10.3f}")
+        lines.append("  " + "-" * 38)
+        lines.append("")
 
 
 def main():
