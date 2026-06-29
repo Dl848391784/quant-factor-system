@@ -816,8 +816,19 @@ class TestReportStructure:
 
     def test_report_generated(self, mock_project_root):
         """测试报告生成（mock 环境）"""
-        # 此测试需要 patch PROJECT_ROOT
-        with patch("summary.report.data_loaders.PROJECT_ROOT", mock_project_root):
+        # patch PROJECT_ROOT + DATA_PATHS（DATA_PATHS 值为绝对路径，须重写为相对路径）
+        mock_data_paths = {
+            "ic_result": "factor_ic/result",
+            "backtest_result": "backtest/result",
+            "comprehensive_result": "comprehensive_factor/result",
+            "factor_data": "data_fetchers/result",
+            "weight_selection": "comprehensive_factor/result/weight_selection_result.json",
+            "stock_selection": "comprehensive_factor/result/stock_selection_history",
+        }
+        with (
+            patch("summary.report.data_loaders.PROJECT_ROOT", mock_project_root),
+            patch.dict("summary.report.data_loaders.DATA_PATHS", mock_data_paths),
+        ):
             from summary.generate_factor_summary_report import load_backtest_results, load_ic_results
 
             logger = setup_logger("test")
