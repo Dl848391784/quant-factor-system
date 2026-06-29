@@ -263,7 +263,7 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     if stock_result:
         _render_cross_pipeline_summary(lines, stock_result, logger, stock_name_map)
 
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def _render_cross_pipeline_summary(
