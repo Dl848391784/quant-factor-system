@@ -284,8 +284,8 @@ def _render_cross_pipeline_summary(
     from paths import COMPREHENSIVE_FACTOR_RESULT
 
     alias = os.environ.get("PIPELINE_ALIAS", "")
-    # 只在 ob_quality 主管线(非时间递减)输出
-    if not alias.startswith("ob_quality") or "_" in alias:
+    # 只在 ob_quality 主管线输出 (跳过 ob_quality_0615 等时间递减管线)
+    if alias != "ob_quality":
         return
 
     weight_method = (stock_result.get("meta", {}) or {}).get("weight_method", "rolling_icir_weight")
