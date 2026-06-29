@@ -295,12 +295,13 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     lines.extend(stock_lines)
 
     # v3.18: ob_quality 跨管线分段胜率汇总
+    seg_merge_stats = None
     if stock_result:
-        _render_cross_pipeline_summary(lines, stock_result, logger, stock_name_map)
+        seg_merge_stats = _render_cross_pipeline_summary(lines, stock_result, logger, stock_name_map)
 
-    # ob_quality: 展示今日在历史最佳段(S6/S7)的候选
+    # ob_quality: 展示今日三十分段候选明细
     if _is_obq and stock_result:
-        _render_today_best_segment_candidates(lines, stock_result, stock_name_map)
+        _render_today_best_segment_candidates(lines, stock_result, stock_name_map, seg_merge_stats)
 
     return "\n".join(lines)
 
@@ -310,12 +311,15 @@ def _render_cross_pipeline_summary(
     stock_result: dict,
     logger: logging.Logger,
     stock_name_map: dict[str, str] | None = None,
-) -> None:
+) -> dict[str, dict] | None:
     """ob_quality 全管线每日独立30分段胜率汇总.
 
     遍历 ob_quality_0615 ~ ob_quality_0624 的 composite daily,
     每日独立 qcut 为 30 段, 计算各段胜率, 输出矩阵表格.
     仅在 ob_quality pipeline 且非临时管线时输出.
+
+    Returns:
+        各段合并统计 {seg_label: {wins, total, wr}}, 或 None (非 ob_quality/数据不足).
     """
     import os
 
@@ -325,7 +329,7 @@ def _render_cross_pipeline_summary(
     alias = os.environ.get("PIPELINE_ALIAS", "")
     # 只在 ob_quality 主管线输出 (跳过 ob_quality_0615 等时间递减管线)
     if alias != "ob_quality":
-        return
+        return None
 
     weight_method = (stock_result.get("meta", {}) or {}).get("weight_method", "rolling_icir_weight")
     daily_filename = f"composite_{weight_method}_1d_daily.parquet"
@@ -338,7 +342,7 @@ def _render_cross_pipeline_summary(
     )
 
     if len(pipeline_dirs) < 2:
-        return
+        return None
 
     n_segments = 30
     master_path = Path(
@@ -350,7 +354,7 @@ def _render_cross_pipeline_summary(
         master_ret = pd.read_parquet(master_path, columns=["date", "asset", "forward_return_1d"])
     except Exception:
         logger.debug("跨管线汇总: 无法读取主数据源, 跳过")
-        return
+        return None
 
     # 收集每管线的30分段结果
     pipeline_results = []  # [(label, comp_date, trade_date, n_total, seg_stats)]
@@ -402,7 +406,7 @@ def _render_cross_pipeline_summary(
         pipeline_results.append((label, selection_date, trade_date, len(merged), seg_stats))
 
     if len(pipeline_results) < 2:
-        return
+        return None
 
     n_pipes = len(pipeline_results)
     lines.append("")
@@ -422,9 +426,10 @@ def _render_cross_pipeline_summary(
     lines.append(header)
     lines.append("  " + "-" * (8 + 8 * n_pipes + 10))
 
-    # 每段一行
+    # 每段一行, 同时收集合并统计用于第十部分
     best_overall_wr = 0
     best_overall_seg = ""
+    merge_stats: dict[str, dict] = {}
     for seg_label in [f"S{i + 1}" for i in range(n_segments)]:
         row = f"  {seg_label:<6}"
         total_w = 0
@@ -439,6 +444,7 @@ def _render_cross_pipeline_summary(
             else:
                 row += f" {'--':>5} "
         overall_wr = total_w / total_n * 100 if total_n > 0 else 0
+        merge_stats[seg_label] = {"wins": total_w, "total": total_n, "wr": overall_wr}
         row += f" {overall_wr:>7.1f}%"
         if overall_wr > best_overall_wr:
             best_overall_wr = overall_wr
@@ -456,13 +462,20 @@ def _render_cross_pipeline_summary(
         lines.append(f"    {label:>6}: {ss['wins']}/{ss['total']} = {ss['wr']:.1f}%")
     lines.append("")
 
+    return merge_stats
+
 
 def _render_today_best_segment_candidates(
     lines: list,
     stock_result: dict,
     stock_name_map: dict | None,
+    seg_merge_stats: dict[str, dict] | None = None,
 ) -> None:
-    """展示今日落在历史最佳段(S6/S7)的候选股票."""
+    """展示今日三十分段候选明细.
+
+    将当日候选池按 composite 排名 qcut 为 30 段 (D1~D30),
+    每段展示股票明细 + 历史合并胜率.
+    """
     import pandas as pd
     from paths import COMPREHENSIVE_FACTOR_RESULT
 
@@ -479,23 +492,38 @@ def _render_today_best_segment_candidates(
     today = comp[comp["date"] == latest].copy()
     today["rank"] = today["composite_factor"].rank(ascending=False)
     n_stocks = len(today)
+    n_segments = 30
 
-    seg_ranges = [("S6 (rank 21-25)", 21, 25), ("S7 (rank 26-30)", 26, 30)]
+    # qcut 分 30 段, 标签 D1~D30
+    try:
+        today["seg"] = pd.qcut(today["rank"], n_segments, labels=[f"D{i + 1}" for i in range(n_segments)])
+    except ValueError:
+        return
+
     name_map = stock_name_map or {}
 
     lines.append("")
-    lines.append("十、今日历史最佳段候选")
+    lines.append("十、今日三十分段候选明细")
     lines.append("-" * 70)
-    lines.append(f"  选股日: {latest}, 候选池共 {n_stocks} 只")
-    lines.append("  历史验证: S6合并胜率 69.2%, S7合并胜率 65.5%")
+    lines.append(f"  选股日: {latest}, 候选池共 {n_stocks} 只, 切 {n_segments} 段")
     lines.append("  操作: 今日尾盘买入 -> 下一交易日卖出 (高开开盘锁利, 低开等反抽减亏)")
     lines.append("")
 
-    for seg_name, rmin, rmax in seg_ranges:
-        subset = today[(today["rank"] >= rmin) & (today["rank"] <= rmax)].sort_values("rank")
+    for seg_label in [f"D{i + 1}" for i in range(n_segments)]:
+        subset = today[today["seg"] == seg_label].sort_values("rank")
         if len(subset) == 0:
             continue
-        lines.append(f"  [{seg_name}] {len(subset)} 只")
+
+        # 获取合并胜率: D1 → S1 映射
+        wr_str = ""
+        if seg_merge_stats:
+            s_key = f"S{seg_label[1:]}"  # D1 → S1, D15 → S15
+            ss = seg_merge_stats.get(s_key, {})
+            wr = ss.get("wr", 0)
+            if ss.get("total", 0) > 0:
+                wr_str = f" 合并胜率: {wr:.1f}%"
+
+        lines.append(f"  [{seg_label}] {len(subset)} 只{wr_str}")
         lines.append(f"  {'排名':>4} {'代码':<10} {'名称':<8} {'composite':>10}")
         lines.append("  " + "-" * 38)
         for _, s in subset.iterrows():
