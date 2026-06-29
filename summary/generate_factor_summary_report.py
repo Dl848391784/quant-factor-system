@@ -268,7 +268,7 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
             ln for ln in stock_lines
             if not any(kw in ln for kw in [
                 "最终短名单", "决策卡片", "D5 人工核查",
-                "Top 10 详表", "短名单 11",
+                "Top 10 详表", "短名单 11", "二次排序",
             ])
         ]
 
