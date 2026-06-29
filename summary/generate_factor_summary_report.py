@@ -261,16 +261,28 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
 
     stock_lines = _generate_stock_selection_section(stock_result, stock_comp_weights, data_results, stock_name_map)
 
-    # ob_quality 管线: 去掉最终短名单和决策卡片 (LR未训练, 分段分析已替代)
+    # ob_quality 管线: 精简报告, 去掉不需要的章节
     import os as _os2
     if _os2.environ.get("PIPELINE_ALIAS", "").startswith("ob_quality"):
-        stock_lines = [
-            ln for ln in stock_lines
-            if not any(kw in ln for kw in [
-                "最终短名单", "决策卡片", "D5 人工核查",
-                "Top 10 详表", "短名单 11", "二次排序",
-            ])
-        ]
+        section_kw = ["二次排序"]  # 匹配到后整段移除(含后续行直到下一个【或空行)
+        result = []
+        skip = False
+        for ln in stock_lines:
+            stripped = ln.strip()
+            if any(kw in stripped for kw in section_kw):
+                skip = True
+                continue
+            if skip:
+                # 遇到下一个章节标题或空行结束跳过
+                if stripped.startswith("【") or stripped == "":
+                    skip = False
+                else:
+                    continue
+            # 也要过滤掉单行关键词
+            if any(kw in stripped for kw in ["最终短名单", "决策卡片", "D5 人工核查", "Top 10 详表", "短名单 11"]):
+                continue
+            result.append(ln)
+        stock_lines = result
 
     lines.extend(stock_lines)
 
