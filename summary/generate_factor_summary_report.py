@@ -262,11 +262,14 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     stock_lines = _generate_stock_selection_section(stock_result, stock_comp_weights, data_results, stock_name_map)
 
     # ob_quality 管线: 去掉最终短名单和决策卡片 (LR未训练, 分段分析已替代)
-    import os as _os
-    if _os.environ.get("PIPELINE_ALIAS", "").startswith("ob_quality"):
+    import os as _os2
+    if _os2.environ.get("PIPELINE_ALIAS", "").startswith("ob_quality"):
         stock_lines = [
             ln for ln in stock_lines
-            if "最终短名单" not in ln and "决策卡片" not in ln and "D5 人工核查" not in ln
+            if not any(kw in ln for kw in [
+                "最终短名单", "决策卡片", "D5 人工核查",
+                "Top 10 详表", "短名单 11",
+            ])
         ]
 
     lines.extend(stock_lines)
