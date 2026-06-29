@@ -250,6 +250,7 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
 
     # v3.17: 分段胜率 (非 ob_quality, 需 T+1 数据; ob_quality 走跨管线汇总)
     import os as _os
+
     _is_obq = _os.environ.get("PIPELINE_ALIAS", "").startswith("ob_quality")
     if stock_result and not _is_obq:
         stock_meta = stock_result.get("meta", {})
@@ -263,8 +264,15 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
 
     # ob_quality 管线: 精简报告, 去掉不需要的章节
     import os as _os2
+
     if _os2.environ.get("PIPELINE_ALIAS", "").startswith("ob_quality"):
-        section_kw = ["二次排序"]  # 匹配到后整段移除(含后续行直到下一个【或空行)
+        section_kw = [
+            "二次排序",
+            "因子标准化值(z-score)",  # v3.x: ob_quality 不需要因子 z-score 详细表
+            "主导前 3 因子（贡献占比）",  # v3.x: ob_quality 不需要因子贡献简表
+            "决策卡片",  # v3.x: 块级移除 D1/D2/D3/D4 质量明细表
+            "D5 人工核查",  # v3.x: 块级移除 D5 人工核查清单
+        ]  # 匹配到后整段移除(含后续行直到下一个【或空行)
         result = []
         skip = False
         for ln in stock_lines:
@@ -278,8 +286,8 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
                     skip = False
                 else:
                     continue
-            # 也要过滤掉单行关键词
-            if any(kw in stripped for kw in ["最终短名单", "决策卡片", "D5 人工核查", "Top 10 详表", "短名单 11"]):
+            # 也要过滤掉单行关键词 (冗余防护, 防块级跳过未触发时仍能过滤)
+            if any(kw in stripped for kw in ["最终短名单", "Top 10 详表", "短名单 11"]):
                 continue
             result.append(ln)
         stock_lines = result
@@ -333,7 +341,9 @@ def _render_cross_pipeline_summary(
         return
 
     n_segments = 30
-    master_path = Path(DATA_PATHS.get("master_parquet", str(PROJECT_ROOT / "data_fetchers/result/factor_ic_data.parquet")))
+    master_path = Path(
+        DATA_PATHS.get("master_parquet", str(PROJECT_ROOT / "data_fetchers/result/factor_ic_data.parquet"))
+    )
 
     try:
         master_dates = sorted(pd.read_parquet(master_path, columns=["date"])["date"].dropna().unique())
@@ -376,12 +386,12 @@ def _render_cross_pipeline_summary(
 
         merged["rank"] = merged["composite_factor"].rank(ascending=False)
         try:
-            merged["seg"] = pd.qcut(merged["rank"], n_segments, labels=[f"S{i+1}" for i in range(n_segments)])
+            merged["seg"] = pd.qcut(merged["rank"], n_segments, labels=[f"S{i + 1}" for i in range(n_segments)])
         except ValueError:
             continue
 
         seg_stats = {}
-        for seg_label in [f"S{i+1}" for i in range(n_segments)]:
+        for seg_label in [f"S{i + 1}" for i in range(n_segments)]:
             sub = merged[merged["seg"] == seg_label]
             ret_vals = sub["forward_return_1d"].dropna()
             w = (ret_vals > 0).sum()
@@ -415,7 +425,7 @@ def _render_cross_pipeline_summary(
     # 每段一行
     best_overall_wr = 0
     best_overall_seg = ""
-    for seg_label in [f"S{i+1}" for i in range(n_segments)]:
+    for seg_label in [f"S{i + 1}" for i in range(n_segments)]:
         row = f"  {seg_label:<6}"
         total_w = 0
         total_n = 0
@@ -445,6 +455,7 @@ def _render_cross_pipeline_summary(
         ss = seg_stats.get(best_overall_seg, {"wins": 0, "total": 0, "wr": 0})
         lines.append(f"    {label:>6}: {ss['wins']}/{ss['total']} = {ss['wr']:.1f}%")
     lines.append("")
+
 
 def _render_today_best_segment_candidates(
     lines: list,
@@ -476,8 +487,8 @@ def _render_today_best_segment_candidates(
     lines.append("十、今日历史最佳段候选")
     lines.append("-" * 70)
     lines.append(f"  选股日: {latest}, 候选池共 {n_stocks} 只")
-    lines.append(f"  历史验证: S6合并胜率 69.2%, S7合并胜率 65.5%")
-    lines.append(f"  操作: 今日尾盘买入 -> 下一交易日卖出 (高开开盘锁利, 低开等反抽减亏)")
+    lines.append("  历史验证: S6合并胜率 69.2%, S7合并胜率 65.5%")
+    lines.append("  操作: 今日尾盘买入 -> 下一交易日卖出 (高开开盘锁利, 低开等反抽减亏)")
     lines.append("")
 
     for seg_name, rmin, rmax in seg_ranges:
