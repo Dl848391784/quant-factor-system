@@ -1327,3 +1327,140 @@ def _generate_comparison_section(
         # overnight_ret 未入选时不输出方向处理说明（讨论不存在的场景无意义）
 
     return lines
+
+
+# ══════════════════════════════════════════════════════════════════════
+# §10 日内操作建议 (S6 段)
+# ══════════════════════════════════════════════════════════════════════
+#
+# 数据源: segment_intraday_strategy.parquet (compute_intraday_strategy() 生成)
+# 算法依据: factor-development/references/t1-alignment-and-segment-winrate-analysis.md §7.7/§7.8
+# 阈值: ±0.5% 区分高开 / 低开 (与其他段落风格统一)
+
+
+_ACTION_LABEL = {
+    "sell_at_open": "开盘卖 (09:25 集合竞价)",
+    "wait_bounce": "等反弹回本价 (09:50 前必出)",
+    "monitor": "自行判断 (复权/平开/无信号)",
+}
+
+_SIGNAL_LABEL = {
+    "high": "高开",
+    "low": "低开",
+    "flat": "平开",
+    "abnormal": "⚠️数据异常",
+}
+
+
+def _render_intraday_strategy_section(
+    rows: list[dict],
+    lines: list[str],
+    selection_date: str,
+    trade_date: str | None,
+    stock_name_map: dict[str, str] | None = None,
+) -> None:
+    """渲染 §10 S6 段日内操作建议 (append 到 lines).
+
+    Args:
+        rows: 来自 load_intraday_strategy() 的 dict 列表 (compute_intraday_strategy 落盘内容)
+        lines: 报告行缓冲 (mutate)
+        selection_date: 选股日 T
+        trade_date: T+1 日 (用于报告头部说明)
+        stock_name_map: {code: name} 映射, 没有也能跑
+    """
+    if not rows:
+        return  # 数据不可用时不输出整段 (而不是输出空段)
+
+    n_total = len(rows)
+    n_high = sum(1 for r in rows if r.get("open_signal") == "high")
+    n_low = sum(1 for r in rows if r.get("open_signal") == "low")
+    n_flat = sum(1 for r in rows if r.get("open_signal") == "flat")
+    n_abnormal = sum(1 for r in rows if r.get("open_signal") == "abnormal")
+
+    trade_str = str(trade_date) if trade_date else "T+1"
+    lines.append("")
+    lines.append("十、S6 段日内操作建议 (T→T+1 实战指引)")
+    lines.append("-" * 70)
+    lines.append(
+        f"基于 selection_date={selection_date} (composite 计算日) → "
+        f"trade_date={trade_str} (D+1 开盘日)"
+    )
+    lines.append(
+        f"本次 S6 段共 {n_total} 只 | 高开: {n_high} | 低开: {n_low} | "
+        f"平开: {n_flat} | 数据异常: {n_abnormal}"
+    )
+    if n_abnormal > 0:
+        lines.append(
+            f"⚠️ {n_abnormal} 只复权异常股 (|gap|>10%) 已标记 monitor, "
+            f"因前收推断失真, 跳过自动建议"
+        )
+    lines.append("")
+
+    # 主表格
+    lines.append(
+        f"{'rank':>4} {'代码':<8} {'名称':<8} "
+        f"{'前收':>8} {'D+1开盘':>9} {'真实gap':>9} "
+        f"{'信号':<10} {'操作':<26} {'期望%':>8} {'止损价':>9}"
+    )
+    lines.append("-" * 100)
+
+    for r in sorted(rows, key=lambda x: x.get("rank", 99)):
+        rank = int(r.get("rank", 0))
+        code = str(r.get("asset", ""))
+        name = (stock_name_map or {}).get(code, "--")
+        prev_close = float(r.get("prev_close", 0) or 0)
+        open_p = float(r.get("open", 0) or 0)
+        gap = float(r.get("real_gap_pct", 0) or 0)
+        signal = _SIGNAL_LABEL.get(str(r.get("open_signal", "")), str(r.get("open_signal", "")))
+        action = _ACTION_LABEL.get(
+            str(r.get("recommended_action", "")), str(r.get("recommended_action", ""))
+        )
+        eret = float(r.get("expected_return_pct", 0) or 0)
+        stop_loss = float(r.get("stop_loss_price", 0) or 0)
+        if str(r.get("open_signal")) == "high":
+            eret_str = format_float(eret, 2) + "%"
+        elif str(r.get("open_signal")) == "low":
+            eret_str = f"+{format_float(eret, 2)}%"
+        else:
+            eret_str = format_float(eret, 2) + "%"
+        stop_str = format_float(stop_loss, 2) if stop_loss > 0 else "--"
+        abnormal_mark = "⚠️" if str(r.get("open_signal")) == "abnormal" else "  "
+        lines.append(
+            f"{rank:>4} {code:<8} {name:<8} "
+            f"{prev_close:>8.2f} {open_p:>9.2f} {gap:>+8.2f}% "
+            f"{abnormal_mark}{signal:<8} {action:<26} {eret_str:>8} {stop_str:>9}"
+        )
+    lines.append("-" * 100)
+
+    # 操作规则说明
+    lines.append("")
+    lines.append("【操作规则】")
+    lines.append(
+        "  高开 (gap > +0.5%): 9:25 集合竞价直接卖出 — "
+        "D+1 开盘价 > 前一日收盘价, 历史 8 天 10/10 命中"
+    )
+    lines.append(
+        "  低开 (gap < -0.5%): 不在 9:25 卖, 等盘中反弹回买入成本价 (即 D 日收盘价) 出手, "
+        "若 9:50 仍未回到成本价则按止损价强制出场"
+    )
+    lines.append(
+        "  平开 (-0.5% ~ +0.5%): 样本不足 4 只, 无强规律, 建议按当日分时自行判断"
+    )
+    lines.append(
+        "  数据异常 (|gap| > 10%): 复权事件 (除权/分红/增发), 真实跳空被掩盖, "
+        "建议手算或根据实时行情判断"
+    )
+
+    # 历史胜率参考
+    lines.append("")
+    lines.append("【历史胜率参考 (06-15 ~ 06-25 8 天 31 只实测)】")
+    lines.append(
+        "  高开开盘卖: 10/10 = 100% 胜率, 均收 +2.18% (vs 死等尾盘 +0.73%, 增厚 +1.46pp)"
+    )
+    lines.append(
+        "  低开等反弹: 12/13 = 92.3% 命中回本, 等高卖均收 +2.18% (vs 开盘即卖 -1.79%, 减亏 +3.97pp)"
+    )
+    lines.append(
+        "  ⚠️ 样本量仅 8 天, 实战请谨慎, 后续数据增加后将更新"
+    )
+    lines.append("")

@@ -836,6 +836,50 @@ def load_decile_stats(
     return {"selection_date": selection_date, "trade_date": trade_date, "n_total": len(merged), "segments": segments}
 
 
+def load_intraday_strategy(
+    pipeline: str,
+    weight_method: str,
+    selection_date: str,
+    logger: logging.Logger,
+) -> list[dict]:
+    """加载 S6 段日内操作建议 (报告渲染入口).
+
+    Args:
+        pipeline: 'ob_quality' (固定)
+        weight_method: 'rolling_icir_weight' 等
+        selection_date: 选股日 T (YYYY-MM-DD)
+        logger: 日志记录器
+
+    Returns:
+        [{asset, prev_close, open, real_gap_pct, open_signal,
+          recommended_action, expected_return_pct, stop_loss_price,
+          adjustment_abnormal, ...}] 若无数据返回 []
+    """
+    from summary.report.segment_win_db import load_intraday_strategy_recommendation
+
+    rows = load_intraday_strategy_recommendation(
+        pipeline=pipeline,
+        weight_method=weight_method,
+        selection_date=selection_date,
+    )
+    if not rows:
+        logger.debug(
+            "%s/%s/%s 无 intraday strategy (可能 T+1 OHLC 未到位)",
+            pipeline,
+            weight_method,
+            selection_date,
+        )
+    else:
+        logger.info(
+            "intraday_strategy 加载: %s/%s/%s 共 %d 只",
+            pipeline,
+            weight_method,
+            selection_date,
+            len(rows),
+        )
+    return rows
+
+
 def merge_factor_data(ic_results: list[dict], backtest_results: list[dict]) -> list[dict]:
     """合并 IC 和回测数据
 

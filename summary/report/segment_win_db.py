@@ -257,6 +257,324 @@ def load_segment_win_rates(
 
 
 # ══════════════════════════════════════════════════════════════════════
+# segment_intraday_strategy — 每日 S6 段日内操作建议 (T+1 开盘时)
+# ══════════════════════════════════════════════════════════════════════
+#
+# 数据流:
+#   generate_factor_summary_report.py 主调度
+#     → compute_intraday_strategy() 计算 + 落盘
+#     → load_intraday_strategy_recommendation() 报告渲染时读
+#     → _render_intraday_strategy_section() 输出 §10 表格
+#
+# 算法依据:
+#   factor-development/references/t1-alignment-and-segment-winrate-analysis.md §7.7/§7.8
+#   - gap > +0.5%  → sell_at_open (9:25 集合竞价卖, 历史 100%)
+#   - gap < -0.5%  → wait_bounce (等盘中反弹回 D 日收盘价, 历史 92.3%)
+#   - 复权异常股   → data_abnormal (强制 monitor, 不自动建议)
+#
+# 关键 fix (2026-06-30 user 抓出):
+#   不要用 forward_return_1d 反推前收 (001339 类复权股会给出 -15% 假跳空).
+#   一律用 T 日真实 close[T] 作为 prev_close.
+
+# ── 路径 ──────────────────────────────────────────────────────────────
+_INTRADAY_STRATEGY_PATH = _RESULT_DIR / "segment_intraday_strategy.parquet"
+
+# ── 列定义 ────────────────────────────────────────────────────────────
+INTRADAY_STRATEGY_COLUMNS = [
+    "pipeline",
+    "weight_method",
+    "selection_date",
+    "trade_date",
+    "segment_label",
+    "asset",
+    "rank",
+    "composite_value",
+    "prev_close",
+    "open",
+    "high",
+    "low",
+    "close",
+    "forward_return_1d",
+    "real_gap_pct",
+    "open_signal",
+    "recommended_action",
+    "expected_return_pct",
+    "stop_loss_price",
+    "adjustment_abnormal",
+    "created_at",
+]  # noqa: E501
+
+# ── 阈值常量 (硬编码, 显式标注, 来源: §7.7/§7.8 历史 8 天 31 只验证) ──
+_GAP_LOWER_THRESHOLD = -0.5    # gap < -0.5% 视为低开
+_GAP_UPPER_THRESHOLD = 0.5     # gap > +0.5% 视为高开
+_ADJUSTMENT_ABNORMAL_GAP = 10.0  # |gap| > 10% 视为复权异常 (001339 类)
+_STOP_LOSS_PCT_FROM_COST = 0.02  # 反向突破成本价 2% 强制止损
+
+# 历史期望收益 (N=18 低开 + N=10 高开 实测均值, 用于报告说明文字)
+_HISTORICAL_LOW_EXPECTED_PCT = 2.18    # 等高卖均收
+_HISTORICAL_HIGH_EXPECTED_PCT = 2.18   # 开盘卖均收
+_HISTORICAL_WAIT_BOUNCE_HIT_RATE = 92.3  # 反抽率 (%)
+
+# ══════════════════════════════════════════════════════════════════════
+
+
+def compute_intraday_strategy(
+    pipeline: str,
+    weight_method: str,
+    selection_date: str,
+    logger: logging.Logger,
+    factor_data_path: Path | None = None,
+    stock_details_path: Path | None = None,
+) -> pd.DataFrame | None:
+    """计算某日 S6 段的日内操作建议并写入 parquet.
+
+    Args:
+        pipeline: 'ob_quality' (固定)
+        weight_method: 'rolling_icir_weight' / 'equal_weight' 等
+        selection_date: 选股日 T (YYYY-MM-DD), 即 composite 计算日
+        logger: 日志记录器
+        factor_data_path: 主数据源 (factor_ic_data.parquet), 默认从 paths 读
+        stock_details_path: S6 段明细 parquet, 默认从 paths 读
+
+    Returns:
+        DataFrame (按 INTRADAY_STRATEGY_COLUMNS) or None if 数据缺失
+    """
+    from paths import FACTOR_IC_DATA_MASTER
+
+    master_path = factor_data_path or FACTOR_IC_DATA_MASTER
+    details_path = stock_details_path or _STOCK_DETAILS_PATH
+
+    # 1. 读 S6 段明细
+    details_df = _read_parquet(details_path, SEGMENT_STOCK_COLUMNS)
+    if details_df.empty:
+        logger.warning("segment_stock_details 为空, 跳过 intraday strategy")
+        return None
+    s6 = details_df.loc[
+        (details_df["selection_date"] == selection_date)
+        & (details_df["segment_label"] == "S6")
+        & (details_df["weight_method"] == weight_method),
+        ["asset", "composite_value", "rank"],
+    ].drop_duplicates()
+    if s6.empty:
+        logger.warning(
+            "%s/%s/S6 无明细 (%s), 跳过 intraday strategy",
+            pipeline,
+            weight_method,
+            selection_date,
+        )
+        return None
+
+    # 2. 读主数据源日期列, 计算 trade_date (T+1)
+    try:
+        all_dates = sorted(
+            pd.read_parquet(master_path, columns=["date"])["date"].dropna().astype(str).unique()
+        )
+    except Exception:
+        logger.exception("读 master 日期列表失败, 跳过 intraday strategy")
+        return None
+    if selection_date not in all_dates:
+        logger.warning("selection_date %s 不在主数据源, 跳过", selection_date)
+        return None
+    idx = all_dates.index(selection_date)
+    if idx + 1 >= len(all_dates):
+        logger.warning("selection_date %s 是最新日, 无 T+1, 跳过", selection_date)
+        return None
+    trade_date = all_dates[idx + 1]
+
+    # 3. 读 T 日 close + T+1 日 OHLC (一次性只读必要列)
+    try:
+        ohlc = pd.read_parquet(
+            master_path,
+            columns=["date", "asset", "open", "high", "low", "close", "forward_return_1d"],
+        )
+    except Exception:
+        logger.exception("读 master OHLC 失败, 跳过 intraday strategy")
+        return None
+
+    day_t = ohlc.loc[
+        ohlc["date"].astype(str) == selection_date, ["asset", "close"]
+    ].rename(columns={"close": "prev_close"})
+
+    day_t1 = ohlc.loc[
+        ohlc["date"].astype(str) == trade_date,
+        ["asset", "open", "high", "low", "close", "forward_return_1d"],
+    ]
+
+    # 4. 合并: S6 段明细 ↔ D 日 prev_close ↔ D+1 日 OHLC
+    merged = s6.merge(day_t, on="asset", how="left").merge(
+        day_t1, on="asset", how="left"
+    )
+    key_cols = ["prev_close", "open", "high", "low", "close"]
+    na_mask = merged[key_cols].isna().any(axis=1)
+    if bool(na_mask.any()):
+        na_assets = merged.loc[na_mask, "asset"].tolist()
+        logger.warning(
+            "%s S6 段 %d 只缺 OHLC 数据 (%s...), 已剔除",
+            selection_date,
+            len(na_assets),
+            na_assets[:3],
+        )
+        merged = merged.dropna(subset=key_cols)
+
+    if merged.empty:
+        logger.warning("%s 合并后无有效股票, 跳过", selection_date)
+        return None
+
+    # 5. real_gap_pct = (open - prev_close) / prev_close * 100
+    # 关键 fix: 用真实 close[T], 不用 forward_return_1d 反推 (会因复权失真)
+    merged = merged.assign(
+        real_gap_pct=lambda d: (d["open"] - d["prev_close"]) / d["prev_close"] * 100,
+    )
+
+    # 6. open_signal 分桶 + adjustment_abnormal 标记
+    def classify(row: pd.Series) -> tuple[str, bool]:
+        gap = float(row["real_gap_pct"])
+        abnormal = abs(gap) > _ADJUSTMENT_ABNORMAL_GAP
+        if abnormal:
+            return ("abnormal", True)
+        if gap > _GAP_UPPER_THRESHOLD:
+            return ("high", False)
+        if gap < _GAP_LOWER_THRESHOLD:
+            return ("low", False)
+        return ("flat", False)
+
+    classes = merged.apply(classify, axis=1)
+    signal_series = classes.apply(lambda x: x[0])
+    abnormal_series = classes.apply(lambda x: bool(x[1]))
+    merged = merged.assign(
+        open_signal=signal_series,
+        adjustment_abnormal=abnormal_series,
+    )
+
+    # 7. recommended_action + expected_return + stop_loss_price
+    def recommend(row: pd.Series) -> tuple[str, float, float]:
+        sig = str(row["open_signal"])
+        if sig == "high":
+            eret = (float(row["open"]) - float(row["prev_close"])) / float(row["prev_close"]) * 100
+            return ("sell_at_open", float(eret), 0.0)
+        if sig == "low":
+            stop_loss = round(float(row["prev_close"]) * (1 - _STOP_LOSS_PCT_FROM_COST), 4)
+            return ("wait_bounce", _HISTORICAL_LOW_EXPECTED_PCT, stop_loss)
+        if sig == "abnormal":
+            return ("monitor", 0.0, 0.0)
+        # flat: 样本不足, 给中性期望 (告知用户无强规律)
+        return ("monitor", 0.0, 0.0)
+
+    recs = merged.apply(recommend, axis=1)
+    merged = merged.assign(
+        recommended_action=recs.apply(lambda x: x[0]),
+        expected_return_pct=recs.apply(lambda x: float(x[1])),
+        stop_loss_price=recs.apply(lambda x: float(x[2])),
+    )
+
+    # 8. 组装成 INTRADAY_STRATEGY_COLUMNS schema
+    out = pd.DataFrame()
+    now = datetime.now(timezone.utc).isoformat()
+    out["pipeline"] = [pipeline] * len(merged)
+    out["weight_method"] = [weight_method] * len(merged)
+    out["selection_date"] = [selection_date] * len(merged)
+    out["trade_date"] = [trade_date] * len(merged)
+    out["segment_label"] = ["S6"] * len(merged)
+    out["asset"] = merged["asset"].values
+    out["rank"] = merged["rank"].values
+    out["composite_value"] = merged["composite_value"].values
+    out["prev_close"] = merged["prev_close"].values
+    out["open"] = merged["open"].values
+    out["high"] = merged["high"].values
+    out["low"] = merged["low"].values
+    out["close"] = merged["close"].values
+    out["forward_return_1d"] = merged["forward_return_1d"].values
+    out["real_gap_pct"] = merged["real_gap_pct"].values
+    out["open_signal"] = merged["open_signal"].values
+    out["recommended_action"] = merged["recommended_action"].values
+    out["expected_return_pct"] = merged["expected_return_pct"].values
+    out["stop_loss_price"] = merged["stop_loss_price"].values
+    out["adjustment_abnormal"] = merged["adjustment_abnormal"].values
+    out["created_at"] = [now] * len(merged)
+
+    # 9. 落盘
+    save_intraday_strategy_recommendation(
+        pipeline=pipeline,
+        weight_method=weight_method,
+        selection_date=selection_date,
+        df=out,
+    )
+    logger.info(
+        "intraday_strategy: %s/%s/%s S6 段写入 %d 行",
+        pipeline,
+        weight_method,
+        selection_date,
+        len(out),
+    )
+    return out
+
+
+def save_intraday_strategy_recommendation(
+    pipeline: str,
+    weight_method: str,
+    selection_date: str,
+    df: pd.DataFrame,
+    file_path: Path | None = None,
+) -> None:
+    """写入 intraday strategy 建议 (去重同 key 旧行)."""
+    fp = file_path or _INTRADAY_STRATEGY_PATH
+    new_df = df.copy()
+    for col in INTRADAY_STRATEGY_COLUMNS:
+        if col not in new_df.columns:
+            new_df[col] = None
+    new_df = new_df[INTRADAY_STRATEGY_COLUMNS]
+
+    existing = _read_parquet(fp, INTRADAY_STRATEGY_COLUMNS)
+    if not existing.empty:
+        mask = (
+            (existing["pipeline"] == pipeline)
+            & (existing["weight_method"] == weight_method)
+            & (existing["selection_date"] == selection_date)
+        )
+        existing = existing[~mask]
+
+    combined = pd.concat([existing, new_df], ignore_index=True)
+    combined.to_parquet(fp, index=False)
+    logger.info(
+        "segment_intraday_strategy: %s/%s/%s 已写入 %s (累计 %d 行)",
+        pipeline,
+        weight_method,
+        selection_date,
+        fp.name,
+        len(combined),
+    )
+
+
+def load_intraday_strategy_recommendation(
+    pipeline: str,
+    weight_method: str,
+    selection_date: str,
+    file_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """读取某日的 S6 段日内操作建议.
+
+    Returns:
+        [{asset, prev_close, open, real_gap_pct, open_signal, recommended_action, ...}]
+        若无数据返回 []
+    """
+    fp = file_path or _INTRADAY_STRATEGY_PATH
+    df = _read_parquet(fp, INTRADAY_STRATEGY_COLUMNS)
+    if df.empty:
+        return []
+
+    mask = (
+        (df["pipeline"] == pipeline)
+        & (df["weight_method"] == weight_method)
+        & (df["selection_date"] == selection_date)
+    )
+    df = df[mask]
+    if df.empty:
+        return []
+
+    return df.to_dict(orient="records")  # type: ignore[arg-type]  # noqa: TID251
+
+
+# ══════════════════════════════════════════════════════════════════════
 # 内部工具
 # ══════════════════════════════════════════════════════════════════════
 

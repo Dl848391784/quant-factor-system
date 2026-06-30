@@ -124,8 +124,10 @@ from summary.report.sections import (  # noqa: E402,F401
     _generate_lr_training_status,
     _generate_stock_selection_section,
     _generate_weight_selection_section,
+    _render_intraday_strategy_section,
 )
 from summary.report.segment_win_db import (  # noqa: E402
+    compute_intraday_strategy,
     load_segment_stock_details,
     load_segment_win_rates,
     save_segment_stock_details,
@@ -316,6 +318,40 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     # ob_quality: 展示今日三十分段候选明细
     if _is_obq and stock_result:
         _render_today_best_segment_candidates(lines, stock_result, stock_name_map, seg_merge_stats)
+
+    # v2.3: S6 段日内操作建议 (§10) — 仅 ob_quality 管线, 含计算 + 渲染
+    if _is_obq and stock_result:
+        try:
+            from summary.report.data_loaders import load_intraday_strategy as _load_strategy
+
+            weight_method = (
+                stock_result.get("meta", {}).get("weight_method", "rolling_icir_weight")
+            )
+            # 1. 计算 + 落盘 (idempotent: 同 (date, weight_method) 已存在的行会被去重覆盖)
+            compute_intraday_strategy(
+                pipeline="ob_quality",
+                weight_method=weight_method,
+                selection_date=date,
+                logger=logger,
+            )
+            # 2. 读 + 渲染
+            strategy_rows = _load_strategy(
+                pipeline="ob_quality",
+                weight_method=weight_method,
+                selection_date=date,
+                logger=logger,
+            )
+            if strategy_rows:
+                trade_date_hint = strategy_rows[0].get("trade_date") if strategy_rows else None
+                _render_intraday_strategy_section(
+                    rows=strategy_rows,
+                    lines=lines,
+                    selection_date=date,
+                    trade_date=trade_date_hint,
+                    stock_name_map=stock_name_map,
+                )
+        except Exception as e:
+            logger.warning("§10 intraday strategy 渲染失败, 跳过: %s", str(e)[:200])
 
     return "\n".join(lines)
 
