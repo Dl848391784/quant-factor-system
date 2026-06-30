@@ -126,7 +126,9 @@ from summary.report.sections import (  # noqa: E402,F401
     _generate_weight_selection_section,
 )
 from summary.report.segment_win_db import (  # noqa: E402
+    load_segment_stock_details,
     load_segment_win_rates,
+    save_segment_stock_details,
     save_segment_win_rates,
 )
 
@@ -300,15 +302,16 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
 
     # v3.18: ob_quality 跨管线分段胜率汇总
     seg_merge_stats = None
-    if stock_result:
-        _is_obq_main = _os.environ.get("PIPELINE_ALIAS", "") == "ob_quality"
-        _is_obq_sub = _os.environ.get("PIPELINE_ALIAS", "").startswith("ob_quality_")
-        if _is_obq_main:
-            # 主管线: 从 Parquet 读全量渲染 Section 9
-            seg_merge_stats = _render_cross_pipeline_summary(lines, stock_result, logger, stock_name_map)
-        elif _is_obq_sub:
-            # 时间切片子管线: 算自己的胜率 → 写入共享 Parquet
-            _save_own_segment_win_rates(stock_result, logger)
+    if stock_result and _os.environ.get("PIPELINE_ALIAS", "").startswith("ob_quality"):
+        # All ob_quality* pipelines:
+        #   1. Write today's stock details (no win rate yet)
+        _save_today_segment_details(stock_result, logger)
+        #   2. Compute win rates for pending dates (forward_return_1d now available)
+        _compute_pending_win_rates(logger)
+
+    if stock_result and _os.environ.get("PIPELINE_ALIAS", "") == "ob_quality":
+        # Main pipeline only: render Section 9 from Parquet
+        seg_merge_stats = _render_cross_pipeline_summary(lines, stock_result, logger, stock_name_map)
 
     # ob_quality: 展示今日三十分段候选明细
     if _is_obq and stock_result:
@@ -317,15 +320,13 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     return "\n".join(lines)
 
 
-def _save_own_segment_win_rates(
+def _save_today_segment_details(
     stock_result: dict,
     logger: logging.Logger,
 ) -> None:
-    """时间切片子管线 (ob_quality_0625 等): 算自己的 30 段胜率 → 写共享 Parquet.
+    """T 日: 写当前管线的 30 段股票明细到 segment_stock_details.parquet.
 
-    从当前管线的 composite daily 读取选股日数据,
-    qcut 30 段, 计算各段 forward_return_1d 胜率,
-    写入 shared segment_win_rates.parquet.
+    不等收益——只存选股结果。T+1 由 _compute_pending_win_rates 读取后算胜率.
     """
     import os
 
@@ -349,10 +350,64 @@ def _save_own_segment_win_rates(
     if not comp_dates:
         return
     selection_date = str(comp_dates[-1])
-    day_df = comp_df[comp_df["date"].astype(str) == selection_date]
+    day_df = comp_df[comp_df["date"].astype(str) == selection_date].copy()
     if len(day_df) < 20:
         return
 
+    n_segments = 30
+    day_df["rank"] = day_df["composite_factor"].rank(ascending=False)
+    try:
+        day_df["seg"] = pd.qcut(day_df["rank"], n_segments, labels=[f"S{i + 1}" for i in range(n_segments)])
+    except ValueError:
+        return
+
+    # 按段分组
+    seg_stocks: dict[str, list[dict]] = {}
+    for seg_label in [f"S{i + 1}" for i in range(n_segments)]:
+        subset = day_df[day_df["seg"] == seg_label].sort_values("rank")
+        seg_stocks[seg_label] = [
+            {"asset": row["asset"], "composite_value": float(row["composite_factor"]), "rank": int(row["rank"])}
+            for _, row in subset.iterrows()
+        ]
+
+    try:
+        save_segment_stock_details("ob_quality", selection_date, seg_stocks)
+        logger.info("stock_details 落库: %s (%s) %d 只", alias, selection_date, len(day_df))
+    except Exception:
+        logger.warning("stock_details 落库失败: %s/%s", alias, selection_date, exc_info=True)
+
+
+def _compute_pending_win_rates(logger: logging.Logger) -> None:
+    """T+1: 遍历 stock_details 中所有日期, 有 forward_return_1d 就算胜率.
+
+    读取 segment_stock_details, 对比 segment_win_rates 中已有日期,
+    对未计算胜率的日期尝试匹配 forward_return_1d → qcut → 写 win_rates.
+    """
+    import os
+
+    import pandas as pd
+
+    os.environ.get("PIPELINE_ALIAS", "")
+    # 读取所有 stock_details 日期
+    stock_df = load_segment_stock_details("ob_quality")
+    if stock_df.empty:
+        return
+
+    all_dates = sorted(stock_df["selection_date"].unique())
+
+    # 读取已计算胜率的日期
+    done_dates: set[str] = set()
+    try:
+        existing_wins = load_segment_win_rates("ob_quality", "rolling_icir_weight")
+        done_dates = {r["selection_date"] for r in existing_wins}
+    except Exception:
+        pass
+
+    pending = [d for d in all_dates if d not in done_dates]
+    if not pending:
+        return
+
+    # 读取 master 数据
     master_path = Path(
         DATA_PATHS.get("master_parquet", str(PROJECT_ROOT / "data_fetchers/result/factor_ic_data.parquet"))
     )
@@ -360,50 +415,68 @@ def _save_own_segment_win_rates(
         master_dates = sorted(pd.read_parquet(master_path, columns=["date"])["date"].dropna().unique())
         master_ret = pd.read_parquet(master_path, columns=["date", "asset", "forward_return_1d"])
     except Exception:
-        logger.debug("子管线落库: 无法读取主数据源, 跳过")
-        return
-
-    try:
-        idx = master_dates.index(selection_date)
-        trade_date = master_dates[idx + 1]
-    except (ValueError, IndexError):
-        logger.debug("子管线落库: %s 无下一个交易日, 跳过", selection_date)
-        return
-
-    ret_df = master_ret[master_ret["date"] == trade_date]
-    merged = pd.merge(day_df, ret_df[["asset", "forward_return_1d"]], on="asset", how="inner")
-    if len(merged) == 0:
-        logger.debug("子管线落库: %s forward_return_1d[%s] 全 NaN, 跳过 (等待 T+1 数据)", selection_date, trade_date)
+        logger.debug("_compute_pending_win_rates: 无法读取主数据源")
         return
 
     n_segments = 30
-    merged["rank"] = merged["composite_factor"].rank(ascending=False)
-    try:
-        merged["seg"] = pd.qcut(merged["rank"], n_segments, labels=[f"S{i + 1}" for i in range(n_segments)])
-    except ValueError:
-        return
+    computed = 0
+    for selection_date in pending:
+        # 找下一个交易日
+        try:
+            idx = master_dates.index(selection_date)
+            trade_date = master_dates[idx + 1]
+        except (ValueError, IndexError):
+            logger.debug("_compute_pending: %s 无 T+1 交易日", selection_date)
+            continue
 
-    seg_stats = {}
-    for seg_label in [f"S{i + 1}" for i in range(n_segments)]:
-        sub = merged[merged["seg"] == seg_label]
-        ret_vals = sub["forward_return_1d"].dropna()
-        w = int((ret_vals > 0).sum())
-        t = len(ret_vals)
-        seg_stats[seg_label] = {"wins": w, "total": t, "wr": w / t * 100 if t > 0 else 0}
+        ret_df = master_ret[master_ret["date"] == trade_date]
+        if ret_df.empty or ret_df["forward_return_1d"].dropna().empty:
+            logger.debug("_compute_pending: %s forward_return_1d[%s] 全 NaN (等待数据)", selection_date, trade_date)
+            continue
 
-    try:
-        save_segment_win_rates(
-            pipeline="ob_quality",
-            selection_date=selection_date,
-            trade_date=str(trade_date),
-            weight_method=weight_method,
-            n_segments=n_segments,
-            n_total=len(merged),
-            seg_stats=seg_stats,
+        # 取该日股票明细
+        day_stocks = stock_df[stock_df["selection_date"] == selection_date]
+        if day_stocks.empty:
+            continue
+
+        # merge 收益
+        merged = pd.merge(
+            day_stocks[["asset", "segment_label", "rank"]],
+            ret_df[["asset", "forward_return_1d"]],
+            on="asset", how="inner",
         )
-        logger.info("子管线落库: %s (%s) → segment_win_rates.parquet", alias, selection_date)
-    except Exception:
-        logger.warning("子管线落库失败: %s/%s", alias, selection_date, exc_info=True)
+        if len(merged) == 0:
+            continue
+
+        # qcut (按原 rank 排序)
+        merged = merged.sort_values("rank")
+
+        # 按 segment_label 分组算胜率
+        seg_stats = {}
+        for seg_label in sorted(day_stocks["segment_label"].unique()):
+            sub = merged[merged["segment_label"] == seg_label]
+            ret_vals = sub["forward_return_1d"].dropna()
+            w = int((ret_vals > 0).sum())
+            t = len(ret_vals)
+            seg_stats[seg_label] = {"wins": w, "total": t, "wr": w / t * 100 if t > 0 else 0}
+
+        # 推断 weight_method: 从已有 win_rates 或 stock_result meta
+        try:
+            save_segment_win_rates(
+                pipeline="ob_quality",
+                selection_date=selection_date,
+                trade_date=str(trade_date),
+                weight_method="rolling_icir_weight",
+                n_segments=n_segments,
+                n_total=len(merged),
+                seg_stats=seg_stats,
+            )
+            computed += 1
+        except Exception:
+            logger.warning("_compute_pending: 写 win_rates 失败 %s", selection_date, exc_info=True)
+
+    if computed:
+        logger.info("_compute_pending_win_rates: 完成 %d 个新日期", computed)
 
 
 def _render_cross_pipeline_summary(

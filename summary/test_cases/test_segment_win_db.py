@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 from summary.report.segment_win_db import (
     SEGMENT_WIN_COLUMNS,
-    _read_existing,
+    _read_parquet,
     load_segment_win_rates,
     save_segment_win_rates,
 )
@@ -113,12 +113,12 @@ class TestSaveAndLoad:
 
 
 class TestReadExisting:
-    """_read_existing 测试."""
+    """_read_parquet 测试."""
 
     def test_nonexistent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             fp = Path(tmpdir) / "nope.parquet"
-            df = _read_existing(fp)
+            df = _read_parquet(fp, SEGMENT_WIN_COLUMNS)
             assert df.empty
             assert list(df.columns) == SEGMENT_WIN_COLUMNS
 
@@ -127,6 +127,6 @@ class TestReadExisting:
             fp = Path(tmpdir) / "test.parquet"
             seg_stats = _sample_seg_stats(3)
             save_segment_win_rates("test", "2026-06-30", "2026-07-01", "wr", 3, 100, seg_stats, file_path=fp)
-            df = _read_existing(fp)
+            df = _read_parquet(fp, SEGMENT_WIN_COLUMNS)
             assert not df.empty
             assert len(df) == 3
