@@ -125,6 +125,10 @@ from summary.report.sections import (  # noqa: E402,F401
     _generate_stock_selection_section,
     _generate_weight_selection_section,
 )
+from summary.report.segment_win_db import (  # noqa: E402
+    load_segment_win_rates,
+    save_segment_win_rates,
+)
 
 
 def generate_report(date: str, logger: logging.Logger, force_full_correlation: bool = False) -> str:
@@ -402,11 +406,38 @@ def _render_cross_pipeline_summary(
             t = len(ret_vals)
             seg_stats[seg_label] = {"wins": w, "total": t, "wr": w / t * 100 if t > 0 else 0}
 
+        # 落库：当日30段胜率写入 Parquet（去重覆盖）
+        try:
+            save_segment_win_rates(
+                pipeline="ob_quality",
+                selection_date=str(selection_date),
+                trade_date=str(trade_date),
+                weight_method=weight_method,
+                n_segments=n_segments,
+                n_total=len(merged),
+                seg_stats=seg_stats,
+            )
+        except Exception:
+            logger.warning("segment_win_rates 落库失败: %s/%s", pipe_dir.name, selection_date, exc_info=True)
+
         label = pipe_dir.name.replace("ob_quality_", "")
         pipeline_results.append((label, selection_date, trade_date, len(merged), seg_stats))
 
     if len(pipeline_results) < 2:
-        return None
+        # 目录扫描数据不足，尝试从 Parquet 读取历史数据
+        try:
+            db_results = load_segment_win_rates("ob_quality", weight_method)
+        except Exception:
+            logger.debug("segment_win_rates 读取失败，跳过", exc_info=True)
+            db_results = []
+        if len(db_results) >= 2:
+            # 用 Parquet 数据直接渲染（目录不存在但数据已落库）
+            pipeline_results = [
+                (r["selection_date"][5:], r["selection_date"], r["trade_date"], r["n_total"], r["seg_stats"])
+                for r in db_results
+            ]
+        else:
+            return None
 
     n_pipes = len(pipeline_results)
     lines.append("")
