@@ -360,8 +360,16 @@ def _render_cross_pipeline_summary(
         logger.debug("跨管线汇总: 无法读取主数据源, 跳过")
         return None
 
-    # 收集每管线的30分段结果
-    pipeline_results = []  # [(label, comp_date, trade_date, n_total, seg_stats)]
+    # ── 读取 Parquet 中已有日期 (避免重复扫描目录) ──────────────────
+    existing_dates: set[str] = set()
+    try:
+        for r in load_segment_win_rates("ob_quality", weight_method):
+            existing_dates.add(r["selection_date"])
+    except Exception:
+        pass
+
+    # ── 扫描目录，只处理 Parquet 中还没有的新日期 ──────────────────
+    new_count = 0
     for pipe_dir in pipeline_dirs:
         daily_path = pipe_dir / daily_filename
         if not daily_path.exists():
@@ -375,7 +383,12 @@ def _render_cross_pipeline_summary(
         comp_dates = sorted(comp_df["date"].dropna().unique())
         if not comp_dates:
             continue
-        selection_date = comp_dates[-1]
+        selection_date = str(comp_dates[-1])
+
+        # 已在 Parquet 中，跳过
+        if selection_date in existing_dates:
+            continue
+
         day_df = comp_df[comp_df["date"].astype(str) == selection_date]
         if len(day_df) < 20:
             continue
@@ -406,38 +419,34 @@ def _render_cross_pipeline_summary(
             t = len(ret_vals)
             seg_stats[seg_label] = {"wins": w, "total": t, "wr": w / t * 100 if t > 0 else 0}
 
-        # 落库：当日30段胜率写入 Parquet（去重覆盖）
+        # 落库
         try:
             save_segment_win_rates(
                 pipeline="ob_quality",
-                selection_date=str(selection_date),
+                selection_date=selection_date,
                 trade_date=str(trade_date),
                 weight_method=weight_method,
                 n_segments=n_segments,
                 n_total=len(merged),
                 seg_stats=seg_stats,
             )
+            existing_dates.add(selection_date)
+            new_count += 1
         except Exception:
             logger.warning("segment_win_rates 落库失败: %s/%s", pipe_dir.name, selection_date, exc_info=True)
 
-        label = pipe_dir.name.replace("ob_quality_", "")
-        pipeline_results.append((label, selection_date, trade_date, len(merged), seg_stats))
+    logger.debug("跨管线汇总: Parquet 已有 %d 日, 目录新增 %d 日", len(existing_dates), new_count)
 
-    if len(pipeline_results) < 2:
-        # 目录扫描数据不足，尝试从 Parquet 读取历史数据
-        try:
-            db_results = load_segment_win_rates("ob_quality", weight_method)
-        except Exception:
-            logger.debug("segment_win_rates 读取失败，跳过", exc_info=True)
-            db_results = []
-        if len(db_results) >= 2:
-            # 用 Parquet 数据直接渲染（目录不存在但数据已落库）
-            pipeline_results = [
-                (r["selection_date"][5:], r["selection_date"], r["trade_date"], r["n_total"], r["seg_stats"])
-                for r in db_results
-            ]
-        else:
-            return None
+    # ── 从 Parquet 读取全部数据渲染 (主数据源) ────────────────────
+    db_results = load_segment_win_rates("ob_quality", weight_method)
+
+    if len(db_results) < 2:
+        return None
+
+    pipeline_results = [
+        (r["selection_date"][5:], r["selection_date"], r["trade_date"], r["n_total"], r["seg_stats"])
+        for r in db_results
+    ]
 
     n_pipes = len(pipeline_results)
     lines.append("")
