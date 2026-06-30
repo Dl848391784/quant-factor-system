@@ -40,6 +40,8 @@ import sys
 import time
 from pathlib import Path
 
+import pandas as pd
+
 
 # 项目根目录（用于 sys.path 和路径常量）
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
@@ -334,26 +336,86 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
                 selection_date=date,
                 logger=logger,
             )
-            # 2. 读 + 渲染
+            # 2. 读 + 渲染 (用计算结果或读盘)
             strategy_rows = _load_strategy(
                 pipeline="ob_quality",
                 weight_method=weight_method,
                 selection_date=date,
                 logger=logger,
             )
+            used_fallback_date = None
+            # Fallback: 当 T+1 数据未到位 (今天还在开盘 / 06:30 没数据), 用最近一个有 T+1 的日期
+            if not strategy_rows:
+                fallback_date = _find_latest_intraday_date(
+                    pipeline="ob_quality",
+                    weight_method=weight_method,
+                    logger=logger,
+                )
+                if fallback_date and fallback_date != date:
+                    used_fallback_date = fallback_date
+                    logger.info(
+                        "%s 无 T+1 OHLC, §10 fallback 到最近一日 %s",
+                        date,
+                        fallback_date,
+                    )
+                    compute_intraday_strategy(
+                        pipeline="ob_quality",
+                        weight_method=weight_method,
+                        selection_date=fallback_date,
+                        logger=logger,
+                    )
+                    strategy_rows = _load_strategy(
+                        pipeline="ob_quality",
+                        weight_method=weight_method,
+                        selection_date=fallback_date,
+                        logger=logger,
+                    )
+
             if strategy_rows:
                 trade_date_hint = strategy_rows[0].get("trade_date") if strategy_rows else None
                 _render_intraday_strategy_section(
                     rows=strategy_rows,
                     lines=lines,
-                    selection_date=date,
+                    selection_date=used_fallback_date or date,
                     trade_date=trade_date_hint,
                     stock_name_map=stock_name_map,
+                    is_fallback=used_fallback_date is not None,
                 )
         except Exception as e:
             logger.warning("§10 intraday strategy 渲染失败, 跳过: %s", str(e)[:200])
 
     return "\n".join(lines)
+
+
+def _find_latest_intraday_date(
+    pipeline: str,
+    weight_method: str,
+    logger: logging.Logger,
+) -> str | None:
+    """找到 parquet 中最新一个有 intraday_strategy 数据的 selection_date.
+
+    当今天是没有 T+1 OHLC 的最新交易日时, 用这个 fallback 出最近一日.
+    """
+    try:
+        from summary.report.segment_win_db import (
+            _INTRADAY_STRATEGY_PATH,
+        )
+        df = pd.read_parquet(_INTRADAY_STRATEGY_PATH, columns=["selection_date"])
+        mask = df["selection_date"].notna()
+        df = df[mask]
+        if df.empty:
+            return None
+        sub_series = df["selection_date"].astype("string")
+        sub_filtered = sub_series[sub_series.str.match(r"^\d{4}-\d{2}-\d{2}$")]
+        if sub_filtered.empty:
+            return None
+        # 取最大日期 (最近一日)
+        latest = sorted(sub_filtered.unique().tolist())[-1]
+        logger.debug("latest intraday date for %s/%s = %s", pipeline, weight_method, latest)
+        return latest
+    except Exception:
+        logger.exception("找最近 intraday 日期失败")
+        return None
 
 
 def _save_today_segment_details(

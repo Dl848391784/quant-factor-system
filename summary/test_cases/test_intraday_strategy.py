@@ -363,3 +363,81 @@ def test_columns_schema_complete():
     assert required.issubset(actual), (
         f"missing columns: {required - actual}"
     )
+
+
+# ── T11: _render_intraday_strategy_section 接受 is_fallback 参数 ──────────
+
+
+def test_render_section_accepts_fallback_flag():
+    """验证 fallback 模式渲染不会报错 (None 时静默跳过, Truthy 时加标题与说明)."""
+    from summary.report.data_loaders import load_intraday_strategy
+    from summary.report.sections import _render_intraday_strategy_section
+    from summary.report.segment_win_db import INTRADAY_STRATEGY_COLUMNS
+
+    # 构造一个 minimal row
+    rows = [
+        {
+            "asset": "000001",
+            "rank": 21,
+            "composite_value": 0.5,
+            "prev_close": 100.0,
+            "open": 105.0,
+            "high": 110.0,
+            "low": 102.0,
+            "close": 108.0,
+            "forward_return_1d": 0.08,
+            "real_gap_pct": 5.0,
+            "open_signal": "high",
+            "recommended_action": "sell_at_open",
+            "expected_return_pct": 5.0,
+            "stop_loss_price": 0.0,
+            "adjustment_abnormal": False,
+            "trade_date": "2026-06-16",
+        }
+    ]
+
+    # is_fallback=True 应输出 fallback 标记
+    lines = []
+    _render_intraday_strategy_section(
+        rows=rows,
+        lines=lines,
+        selection_date="2026-06-15",
+        trade_date="2026-06-16",
+        is_fallback=True,
+    )
+    body = "\n".join(lines)
+    assert "fallback" in body.lower()
+    assert "[⚠️ fallback]" in body
+    assert "OHLC 未到位" in body
+
+    # is_fallback=False (默认) 不显示 fallback 标记
+    lines = []
+    _render_intraday_strategy_section(
+        rows=rows,
+        lines=lines,
+        selection_date="2026-06-15",
+        trade_date="2026-06-16",
+    )
+    body = "\n".join(lines)
+    assert "fallback" not in body.lower()
+    assert "[⚠️ fallback]" not in body
+
+
+# ── T12: 报告主流程 _find_latest_intraday_date ────────────────────────────
+
+
+def test_find_latest_intraday_date_returns_valid_string():
+    """_find_latest_intraday_date 必须返回 YYYY-MM-DD 格式字符串 (或 None)."""
+    from summary.generate_factor_summary_report import _find_latest_intraday_date
+
+    latest = _find_latest_intraday_date(
+        pipeline="ob_quality",
+        weight_method="rolling_icir_weight",
+        logger=fixture_logger if "fixture_logger" in dir() else logging.getLogger("test"),
+    )
+    # 应该返回 None 或者一个 YYYY-MM-DD 字符串
+    if latest is not None:
+        import re
+        assert re.match(r"^\d{4}-\d{2}-\d{2}$", latest), (
+            f"latest intraday date 格式错误: {latest}"
+        )

@@ -1358,6 +1358,7 @@ def _render_intraday_strategy_section(
     selection_date: str,
     trade_date: str | None,
     stock_name_map: dict[str, str] | None = None,
+    is_fallback: bool = False,
 ) -> None:
     """渲染 §10 S6 段日内操作建议 (append 到 lines).
 
@@ -1367,6 +1368,7 @@ def _render_intraday_strategy_section(
         selection_date: 选股日 T
         trade_date: T+1 日 (用于报告头部说明)
         stock_name_map: {code: name} 映射, 没有也能跑
+        is_fallback: 是否是 fallback 到前几天 (没有 T+1 时) 的提示
     """
     if not rows:
         return  # 数据不可用时不输出整段 (而不是输出空段)
@@ -1379,12 +1381,19 @@ def _render_intraday_strategy_section(
 
     trade_str = str(trade_date) if trade_date else "T+1"
     lines.append("")
-    lines.append("十、S6 段日内操作建议 (T→T+1 实战指引)")
+    title = "十、S6 段日内操作建议 (T→T+1 实战指引)"
+    if is_fallback:
+        title += " [⚠️ fallback]"
+    lines.append(title)
     lines.append("-" * 70)
     lines.append(
         f"基于 selection_date={selection_date} (composite 计算日) → "
         f"trade_date={trade_str} (D+1 开盘日)"
     )
+    if is_fallback:
+        lines.append(
+            "⚠️ 当前最新交易日 OHLC 未到位, fallback 到最近一个有 T+1 数据的日期"
+        )
     lines.append(
         f"本次 S6 段共 {n_total} 只 | 高开: {n_high} | 低开: {n_low} | "
         f"平开: {n_flat} | 数据异常: {n_abnormal}"
