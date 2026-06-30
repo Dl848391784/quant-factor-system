@@ -79,9 +79,9 @@ class TestHelperFunctions:
         result = get_expected_t_minus_1("2026-06-02")
         assert result == "2026-06-01"
 
-        # 跨月测试：2026-06-01 的前一天是 2026-05-31
+        # 跨月测试：2026-06-01是周一，上一个交易日是2026-05-29（周五）
         result = get_expected_t_minus_1("2026-06-01")
-        assert result == "2026-05-31"
+        assert result == "2026-05-29"
 
     def test_get_monotonicity_symbol_good(self):
         """测试良好单调性符号"""
@@ -509,10 +509,10 @@ class TestDerivedDataFreshnessCheck:
                     },
                 ),
             ):
-                results = check_derived_data_freshness("2026-06-02", logger)
+                results = check_derived_data_freshness("2026-06-03", logger)
 
                 assert len(results) == 3
-                # IC 结果存在且日期匹配
+                # IC 结果存在且日期匹配（T-2=2026-06-01，IC数据最新=2026-06-01）
                 assert results[0]["source"] == "ic_results"
                 assert results[0]["actual_date"] == "2026-06-01"
                 assert results[0]["status"] == "ok"

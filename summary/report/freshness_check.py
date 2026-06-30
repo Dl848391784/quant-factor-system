@@ -18,28 +18,50 @@ from summary.report.constants import (
 )
 
 
-def get_expected_t_minus_1(date: str) -> str:
-    """获取期望的 T-1 日期（前一天）
+def _prev_trading_day(dt: datetime) -> datetime:
+    """获取给定日期之前的最近一个交易日（跳过周末）
 
-    注意：这是简单的前一天计算，不考虑交易日历。
-    如果 T-1 是非交易日（如周末），数据文件可能不会更新，
-    检查结果会显示异常，但这是预期行为。
+    v3.9 (2026-06-29): 新增——修复 T-1/T-2 在周末返回非交易日的问题。
+
+    Args:
+        dt: 给定日期
+
+    Returns:
+        上一个交易日 datetime
+    """
+    weekday = dt.weekday()
+    if weekday == 0:  # Monday → previous Friday
+        return dt - timedelta(days=3)
+    elif weekday == 6:  # Sunday → previous Friday
+        return dt - timedelta(days=2)
+    else:  # Tuesday(1)~Saturday(5) → previous day
+        return dt - timedelta(days=1)
+
+
+def get_expected_t_minus_1(date: str) -> str:
+    """获取期望的 T-1 日期（上一个交易日）
+
+    v3.9 (2026-06-29): 修复——跳过周末，避免周日被误认为期望数据日。
+    注意：仅跳过周末，不处理 A 股法定节假日（春节、国庆等），
+    节假日后的首个交易日 T-1/T-2 仍可能不匹配。
 
     Args:
         date: 当前日期字符串（YYYY-MM-DD）
 
     Returns:
-        T-1 日期字符串
+        T-1 日期字符串（上一个交易日）
     """
     current_date = datetime.strptime(date, "%Y-%m-%d")
-    t_minus_1 = current_date - timedelta(days=1)
+    t_minus_1 = _prev_trading_day(current_date)
     return t_minus_1.strftime("%Y-%m-%d")
 
 
 def get_expected_t_minus_2(date: str) -> str:
-    """获取期望的 T-2 日期（前两天）
+    """获取期望的 T-2 日期（T-1 的上一个交易日）
 
     IC 分析结果需要次日收益数据，因此最新可计算日期是 T-2。
+    v3.9 (2026-06-29): 从 simple date-2 改为基于 _prev_trading_day 链式计算，
+    避免周末导致 T-2 为非交易日。
 
     Args:
         date: 当前日期字符串（YYYY-MM-DD）
@@ -47,8 +69,9 @@ def get_expected_t_minus_2(date: str) -> str:
     Returns:
         T-2 日期字符串
     """
-    current_date = datetime.strptime(date, "%Y-%m-%d")
-    t_minus_2 = current_date - timedelta(days=2)
+    t_minus_1 = get_expected_t_minus_1(date)
+    t_minus_1_date = datetime.strptime(t_minus_1, "%Y-%m-%d")
+    t_minus_2 = _prev_trading_day(t_minus_1_date)
     return t_minus_2.strftime("%Y-%m-%d")
 
 

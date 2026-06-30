@@ -15,6 +15,7 @@ from paths import FACTOR_IC_DATA_MASTER
 from summary.report.constants import (
     DATA_PATHS,
     MAX_STOCKS_SAMPLE,
+    PROJECT_ROOT,
     STOCK_LIST_DATA,
 )
 from summary.report.formatters import (
@@ -77,7 +78,7 @@ def load_ic_results(logger: logging.Logger) -> list[dict]:
     Returns:
         IC 结果列表，按 ICIR 降序排序
     """
-    ic_dir = Path(DATA_PATHS["ic_result"])
+    ic_dir = PROJECT_ROOT / DATA_PATHS["ic_result"]
     results = []
 
     file_count = 0
@@ -125,7 +126,7 @@ def load_backtest_results(logger: logging.Logger) -> list[dict]:
     Returns:
         回测结果列表
     """
-    backtest_dir = Path(DATA_PATHS["backtest_result"])
+    backtest_dir = PROJECT_ROOT / DATA_PATHS["backtest_result"]
     results = []
 
     file_count = 0
@@ -192,7 +193,7 @@ def calculate_factor_correlation(logger: logging.Logger, force_full: bool = Fals
     """
     # 如果不强制全量计算，优先从综合因子结果文件读取
     if not force_full:
-        comp_file = Path(DATA_PATHS["comprehensive_result"]) / "composite_icir_weight_1d.json"
+        comp_file = PROJECT_ROOT / DATA_PATHS["comprehensive_result"] / "composite_icir_weight_1d.json"
         data = load_json_file(comp_file, logger)
 
         if data and "meta" in data:
@@ -216,7 +217,7 @@ def calculate_factor_correlation(logger: logging.Logger, force_full: bool = Fals
                 return corr_df
 
     # 如果综合因子结果中没有相关性数据，尝试从原始数据计算
-    factor_data_path = Path(DATA_PATHS["factor_data"]) / "factor_ic_data.parquet"
+    factor_data_path = PROJECT_ROOT / DATA_PATHS["factor_data"] / "factor_ic_data.parquet"
 
     if not factor_data_path.exists():
         logger.warning("因子数据文件不存在，无法计算相关性")
@@ -267,7 +268,7 @@ def load_composite_results(logger: logging.Logger) -> list[dict]:
     Returns:
         综合因子回测结果列表
     """
-    comp_dir = Path(DATA_PATHS["comprehensive_result"])
+    comp_dir = PROJECT_ROOT / DATA_PATHS["comprehensive_result"]
     results = []
 
     weight_methods = ["ic_weight", "icir_weight", "rolling_icir_weight", "equal_weight"]
@@ -345,7 +346,7 @@ def load_weight_selection_result(logger: logging.Logger) -> dict | None:
         }
         或 None（文件不存在）
     """
-    weight_file = Path(DATA_PATHS["weight_selection"])
+    weight_file = PROJECT_ROOT / DATA_PATHS["weight_selection"]
 
     if not weight_file.exists():
         logger.debug("权重选择结果文件不存在: %s", weight_file)
@@ -383,7 +384,7 @@ def _load_all_composite_stocks(
         按 composite_value 降序排列的股票列表 [{rank, code, composite_value, ss_*}, ...];
         数据不可用时返回空列表.
     """
-    comp_dir = Path(DATA_PATHS["comprehensive_result"])
+    comp_dir = PROJECT_ROOT / DATA_PATHS["comprehensive_result"]
     daily_path = comp_dir / f"composite_{weight_method}_1d_daily.parquet"
     if not daily_path.exists():
         logger.debug("composite daily parquet 不存在: %s", daily_path)
@@ -410,7 +411,7 @@ def _load_all_composite_stocks(
         needed_factors = [f for f in factor_weights if f != "composite"]
         if needed_factors:
             try:
-                factor_path = Path(DATA_PATHS["factor_data"]) / "factor_ic_data.parquet"
+                factor_path = PROJECT_ROOT / DATA_PATHS["factor_data"] / "factor_ic_data.parquet"
                 if factor_path.exists():
                     import pyarrow.parquet as pq
 
@@ -479,7 +480,7 @@ def load_stock_selection_result(logger: logging.Logger) -> dict | None:
     import pyarrow.dataset as pads
     import pyarrow.parquet as pq
 
-    history_root = Path(DATA_PATHS["stock_selection"])
+    history_root = PROJECT_ROOT / DATA_PATHS["stock_selection"]
 
     if not history_root.exists():
         logger.debug("股票选股 Parquet 数据集不存在: %s", history_root)
@@ -739,7 +740,7 @@ def load_decile_stats(
     """
     from summary.report.constants import DATA_PATHS
 
-    comp_dir = Path(DATA_PATHS["comprehensive_result"])
+    comp_dir = PROJECT_ROOT / DATA_PATHS["comprehensive_result"]
     daily_path = comp_dir / f"composite_{weight_method}_1d_daily.parquet"
     if not daily_path.exists():
         logger.debug("composite daily 不存在: %s (跳过分段分析)", daily_path)
