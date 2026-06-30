@@ -1359,8 +1359,10 @@ def _render_intraday_strategy_section(
     trade_date: str | None,
     stock_name_map: dict[str, str] | None = None,
     is_fallback: bool = False,
+    segment_label: str = "S6",
+    seg9_note: str | None = None,
 ) -> None:
-    """渲染 §10 S6 段日内操作建议 (append 到 lines).
+    """渲染 §10 段日内操作建议 (append 到 lines).
 
     Args:
         rows: 来自 load_intraday_strategy() 的 dict 列表 (compute_intraday_strategy 落盘内容)
@@ -1369,6 +1371,8 @@ def _render_intraday_strategy_section(
         trade_date: T+1 日 (用于报告头部说明)
         stock_name_map: {code: name} 映射, 没有也能跑
         is_fallback: 是否是 fallback 到前几天 (没有 T+1 时) 的提示
+        segment_label: 段标签 (e.g. 'S6', 'S7', 数据驱动, §9 算出胜率最高段)
+        seg9_note: §9 数据不足时的额外说明 (None = 无)
     """
     if not rows:
         return  # 数据不可用时不输出整段 (而不是输出空段)
@@ -1381,7 +1385,7 @@ def _render_intraday_strategy_section(
 
     trade_str = str(trade_date) if trade_date else "T+1"
     lines.append("")
-    title = "十、S6 段日内操作建议 (T→T+1 实战指引)"
+    title = f"十、{segment_label} 段日内操作建议 (T→T+1 实战指引)"
     if is_fallback:
         title += " [⚠️ fallback]"
     lines.append(title)
@@ -1390,12 +1394,14 @@ def _render_intraday_strategy_section(
         f"基于 selection_date={selection_date} (composite 计算日) → "
         f"trade_date={trade_str} (D+1 开盘日)"
     )
+    if seg9_note:
+        lines.append(seg9_note)
     if is_fallback:
         lines.append(
             "⚠️ 当前最新交易日 OHLC 未到位, fallback 到最近一个有 T+1 数据的日期"
         )
     lines.append(
-        f"本次 S6 段共 {n_total} 只 | 高开: {n_high} | 低开: {n_low} | "
+        f"本次 {segment_label} 段共 {n_total} 只 | 高开: {n_high} | 低开: {n_low} | "
         f"平开: {n_flat} | 数据异常: {n_abnormal}"
     )
     if n_abnormal > 0:

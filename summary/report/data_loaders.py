@@ -841,14 +841,16 @@ def load_intraday_strategy(
     weight_method: str,
     selection_date: str,
     logger: logging.Logger,
+    segment_label: str | None = None,
 ) -> list[dict]:
-    """加载 S6 段日内操作建议 (报告渲染入口).
+    """加载段日内操作建议 (报告渲染入口).
 
     Args:
         pipeline: 'ob_quality' (固定)
         weight_method: 'rolling_icir_weight' 等
         selection_date: 选股日 T (YYYY-MM-DD)
         logger: 日志记录器
+        segment_label: 段标签 (None = 不限段, 用于 fallback 查找)
 
     Returns:
         [{asset, prev_close, open, real_gap_pct, open_signal,
@@ -861,20 +863,24 @@ def load_intraday_strategy(
         pipeline=pipeline,
         weight_method=weight_method,
         selection_date=selection_date,
+        segment_label=segment_label,
     )
+    seg_log = segment_label or "*"
     if not rows:
         logger.debug(
-            "%s/%s/%s 无 intraday strategy (可能 T+1 OHLC 未到位)",
+            "%s/%s/%s/%s 无 intraday strategy (可能 T+1 OHLC 未到位)",
             pipeline,
             weight_method,
             selection_date,
+            seg_log,
         )
     else:
         logger.info(
-            "intraday_strategy 加载: %s/%s/%s 共 %d 只",
+            "intraday_strategy 加载: %s/%s/%s/%s 共 %d 只",
             pipeline,
             weight_method,
             selection_date,
+            seg_log,
             len(rows),
         )
     return rows

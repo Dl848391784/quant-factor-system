@@ -249,6 +249,7 @@ def test_parquet_round_trip(
         pipeline="ob_quality",
         weight_method="rolling_icir_weight",
         selection_date="2026-06-15",
+        segment_label="S6",
         df=out,
         file_path=fp,
     )
@@ -441,3 +442,87 @@ def test_find_latest_intraday_date_returns_valid_string():
         assert re.match(r"^\d{4}-\d{2}-\d{2}$", latest), (
             f"latest intraday date 格式错误: {latest}"
         )
+
+
+# ── T13: segment_label 参数化 (取代原写死 S6) ────────────────────────────
+
+
+def test_compute_intraday_strategy_accepts_segment_label(
+    fixture_logger, fixture_master_with_t1, fixture_details_path, tmp_path
+):
+    """传入任意 segment_label (e.g. 'S7', 'S9') 都应计算并落盘指定段的数据."""
+    import pandas as pd
+
+    # 把原本 fixture_details 里的 8 只资产重新标段为 S7 (asset 范围 000001-000008 与
+    # fixture_master_with_t1 的 OHLC 范围一致, 这样能正确算出 gap)
+    df = pd.read_parquet(fixture_details_path)
+    df["segment_label"] = "S7"  # 整段改标 S7
+    fp_details = tmp_path / "seg7_details.parquet"
+    df.to_parquet(fp_details, index=False)
+
+    from summary.report.segment_win_db import compute_intraday_strategy
+
+    out = compute_intraday_strategy(
+        pipeline="ob_quality",
+        weight_method="rolling_icir_weight",
+        selection_date="2026-06-15",
+        logger=fixture_logger,
+        segment_label="S7",
+        factor_data_path=fixture_master_with_t1,
+        stock_details_path=fp_details,
+    )
+    assert out is not None, "compute 返回 None, 表示数据未找全 (asset 范围未对齐)"
+    assert len(out) == 8
+    # 关键 invariant: 落盘时 segment_label 写入的是用户传的 S7
+    assert (out["segment_label"] == "S7").all(), (
+        f"segment_label 应当全是 'S7', 实际 {out['segment_label'].unique()}"
+    )
+    # 资产必须与 fixture_master 同范围
+    assert set(out["asset"]) == {
+        "000001", "000002", "000003", "000004",
+        "000005", "000006", "000007", "000008",
+    }
+
+
+# ── T14: segments.Section 接受 segment_label 参数 ─────────────────────────
+
+
+def test_render_section_uses_passed_in_segment_label():
+    """_render_intraday_strategy_section 应该用传入的 segment_label, 不写死 S6."""
+    from summary.report.sections import _render_intraday_strategy_section
+
+    rows = [
+        {
+            "asset": "000001",
+            "rank": 17,
+            "composite_value": 0.45,
+            "prev_close": 100.0,
+            "open": 105.0,
+            "high": 110.0,
+            "low": 102.0,
+            "close": 108.0,
+            "forward_return_1d": 0.08,
+            "real_gap_pct": 5.0,
+            "open_signal": "high",
+            "recommended_action": "sell_at_open",
+            "expected_return_pct": 5.0,
+            "stop_loss_price": 0.0,
+            "adjustment_abnormal": False,
+            "trade_date": "2026-06-16",
+        }
+    ]
+    lines: list = []
+    _render_intraday_strategy_section(
+        rows=rows,
+        lines=lines,
+        selection_date="2026-06-15",
+        trade_date="2026-06-16",
+        segment_label="S9",  # 不是 S6, 验证动态化生效
+    )
+    body = "\n".join(lines)
+    # 标题应当是 "S9", 不是 "S6"
+    assert "S9 段日内操作建议" in body
+    assert "本次 S9 段" in body
+    # 不应该残留 S6 段字样
+    assert "本次 S6 段" not in body
+    assert "十、S6 段" not in body

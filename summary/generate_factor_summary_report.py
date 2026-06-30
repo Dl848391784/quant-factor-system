@@ -305,7 +305,7 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     lines.extend(stock_lines)
 
     # v3.18: ob_quality 跨管线分段胜率汇总
-    seg_merge_stats = None
+    seg9_result = None  # 来自 §9 的返回 (新结构 dict)
     if stock_result and _os.environ.get("PIPELINE_ALIAS", "").startswith("ob_quality"):
         # All ob_quality* pipelines:
         #   1. Write today's stock details (no win rate yet)
@@ -315,13 +315,24 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
 
     if stock_result and _os.environ.get("PIPELINE_ALIAS", "") == "ob_quality":
         # Main pipeline only: render Section 9 from Parquet
-        seg_merge_stats = _render_cross_pipeline_summary(lines, stock_result, logger, stock_name_map)
+        seg9_result = _render_cross_pipeline_summary(lines, stock_result, logger, stock_name_map)
+        # 向后兼容: 解包 §9 返回值, 让 §10 段明细渲染仍可用 stats[seg_label]
+        seg_merge_stats = (
+            seg9_result.get("merge_stats", {}) if isinstance(seg9_result, dict) else None
+        )
+        # §9 best_seg 是 §10 要选的最高胜率段 (替代原来的硬写 S6)
+        best_seg_from_sec9 = (
+            seg9_result.get("best_seg") if isinstance(seg9_result, dict) else None
+        )
+    else:
+        seg_merge_stats = None
+        best_seg_from_sec9 = None
 
     # ob_quality: 展示今日三十分段候选明细
     if _is_obq and stock_result:
         _render_today_best_segment_candidates(lines, stock_result, stock_name_map, seg_merge_stats)
 
-    # v2.3: S6 段日内操作建议 (§10) — 仅 ob_quality 管线, 含计算 + 渲染
+    # v2.3: 胜率最高段日内操作建议 (§10) — 段标签数据驱动, 默认 §9 算的合并胜率最高段
     if _is_obq and stock_result:
         try:
             from summary.report.data_loaders import load_intraday_strategy as _load_strategy
@@ -329,19 +340,25 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
             weight_method = (
                 stock_result.get("meta", {}).get("weight_method", "rolling_icir_weight")
             )
-            # 1. 计算 + 落盘 (idempotent: 同 (date, weight_method) 已存在的行会被去重覆盖)
+            # 段标签优先用 §9 算的合并胜率最高段; fallback = None (不限段, 适配 §9 数据不足)
+            target_seg = best_seg_from_sec9
+            target_date = date
+
+            # 1. 计算 + 落盘 (idempotent: 同 key 旧行去重覆盖)
             compute_intraday_strategy(
                 pipeline="ob_quality",
                 weight_method=weight_method,
-                selection_date=date,
+                selection_date=target_date,
                 logger=logger,
+                segment_label=target_seg if target_seg else "S6",
             )
-            # 2. 读 + 渲染 (用计算结果或读盘)
+            # 2. 读 + 渲染
             strategy_rows = _load_strategy(
                 pipeline="ob_quality",
                 weight_method=weight_method,
-                selection_date=date,
+                selection_date=target_date,
                 logger=logger,
+                segment_label=target_seg,
             )
             used_fallback_date = None
             # Fallback: 当 T+1 数据未到位 (今天还在开盘 / 06:30 没数据), 用最近一个有 T+1 的日期
@@ -358,21 +375,41 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
                         date,
                         fallback_date,
                     )
+                    # fallback 日也要用 §9 在该日算的最佳段 — 这里简化: 重跑当日 §9 收益汇总
+                    fb_seg9 = _compute_best_seg_for_date(
+                        pipeline="ob_quality",
+                        weight_method=weight_method,
+                        selection_date=fallback_date,
+                        logger=logger,
+                    )
                     compute_intraday_strategy(
                         pipeline="ob_quality",
                         weight_method=weight_method,
                         selection_date=fallback_date,
                         logger=logger,
+                        segment_label=fb_seg9 or "S6",
                     )
+                    target_seg = fb_seg9 or target_seg
                     strategy_rows = _load_strategy(
                         pipeline="ob_quality",
                         weight_method=weight_method,
                         selection_date=fallback_date,
                         logger=logger,
+                        segment_label=target_seg,
                     )
+
+            # 段标题展示 (如果 §9 数据不足, 段标签 fallback 到 S6, 加说明)
+            sec9_note = None
+            if not best_seg_from_sec9:
+                sec9_note = (
+                    "⚠️ §9 数据不足 (<2日), §10 暂用 S6 段默认值, "
+                    "累计更多管线数据后会自动选胜率最高段"
+                )
+                target_seg = target_seg or "S6"
 
             if strategy_rows:
                 trade_date_hint = strategy_rows[0].get("trade_date") if strategy_rows else None
+                # 段胜率优先用 strategy_rows[0].open_signal 等聚合得到, 这里用 None 让 section 自处理
                 _render_intraday_strategy_section(
                     rows=strategy_rows,
                     lines=lines,
@@ -380,6 +417,8 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
                     trade_date=trade_date_hint,
                     stock_name_map=stock_name_map,
                     is_fallback=used_fallback_date is not None,
+                    segment_label=target_seg or "S6",
+                    seg9_note=sec9_note,
                 )
         except Exception as e:
             logger.warning("§10 intraday strategy 渲染失败, 跳过: %s", str(e)[:200])
@@ -415,6 +454,50 @@ def _find_latest_intraday_date(
         return latest
     except Exception:
         logger.exception("找最近 intraday 日期失败")
+        return None
+
+
+def _compute_best_seg_for_date(
+    pipeline: str,
+    weight_method: str,
+    selection_date: str,
+    logger: logging.Logger,
+) -> str | None:
+    """从 segment_win_rates.parquet 找到指定日期所在批次的最佳段标签.
+
+    用法: fallback 路径下, 我们想要 fallback 日所在的批次 (含该日的窗口)
+    的合并胜率最高段, 而不是整个 parquet 的全局最高段 (因为那可能跨越不同
+    市场环境).
+
+    简化: 这里直接返回 _render_cross_pipeline_summary 算出的全局 best_seg
+    (跨日期聚合), 因为设计原意就是用合并胜率, 而不是单日.
+    """
+    try:
+        db_results = load_segment_win_rates(pipeline, weight_method)
+        if len(db_results) < 2:
+            return None
+        # 跨日聚合, 复用 §9 的 max 逻辑
+        merge_stats: dict[str, dict] = {}
+        for r in db_results:
+            for seg, ss in r["seg_stats"].items():
+                if seg not in merge_stats:
+                    merge_stats[seg] = {"wins": 0, "total": 0}
+                merge_stats[seg]["wins"] += ss.get("wins", 0)
+                merge_stats[seg]["total"] += ss.get("total", 0)
+        best_seg = None
+        best_wr = -1.0
+        for seg, ss in merge_stats.items():
+            n = ss["total"]
+            if n == 0:
+                continue
+            wr = ss["wins"] / n
+            if wr > best_wr:
+                best_wr = wr
+                best_seg = seg
+        logger.debug("best seg for fallback date %s = %s (wr=%.3f)", selection_date, best_seg, best_wr)
+        return best_seg
+    except Exception:
+        logger.exception("算 fallback 日期最佳段失败, fallback date=%s", selection_date)
         return None
 
 
@@ -590,10 +673,14 @@ def _render_cross_pipeline_summary(
     stock_result: dict,
     logger: logging.Logger,
     stock_name_map: dict[str, str] | None = None,
-) -> dict[str, dict] | None:
+) -> dict | None:
     """ob_quality 主管线 Section 9: 从 Parquet 读全量 30 段胜率渲染.
 
     纯读 segment_win_rates.parquet, 不扫目录.
+
+    Returns:
+        {"merge_stats": {S1: {...}}, "best_seg": "S6", "best_wr": 65.5}
+        或 None (< 2 日数据时)
     """
     weight_method = (stock_result.get("meta", {}) or {}).get("weight_method", "rolling_icir_weight")
     n_segments = 30
@@ -662,7 +749,11 @@ def _render_cross_pipeline_summary(
         lines.append(f"    {label:>6}: {ss['wins']}/{ss['total']} = {ss['wr']:.1f}%")
     lines.append("")
 
-    return merge_stats
+    return {
+        "merge_stats": merge_stats,
+        "best_seg": best_overall_seg,
+        "best_wr": best_overall_wr,
+    }
 
 
 def _render_today_best_segment_candidates(

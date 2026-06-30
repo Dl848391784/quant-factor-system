@@ -323,18 +323,20 @@ def compute_intraday_strategy(
     weight_method: str,
     selection_date: str,
     logger: logging.Logger,
+    segment_label: str = "S6",
     factor_data_path: Path | None = None,
     stock_details_path: Path | None = None,
 ) -> pd.DataFrame | None:
-    """计算某日 S6 段的日内操作建议并写入 parquet.
+    """计算某日指定段的日内操作建议并写入 parquet.
 
     Args:
         pipeline: 'ob_quality' (固定)
         weight_method: 'rolling_icir_weight' / 'equal_weight' 等
         selection_date: 选股日 T (YYYY-MM-DD), 即 composite 计算日
         logger: 日志记录器
+        segment_label: 段标签 (默认 "S6", 通常传 §9 算出的合并胜率最高段, 如 "S6" / "S7" / "S9")
         factor_data_path: 主数据源 (factor_ic_data.parquet), 默认从 paths 读
-        stock_details_path: S6 段明细 parquet, 默认从 paths 读
+        stock_details_path: 段明细 parquet, 默认从 paths 读
 
     Returns:
         DataFrame (按 INTRADAY_STRATEGY_COLUMNS) or None if 数据缺失
@@ -344,22 +346,23 @@ def compute_intraday_strategy(
     master_path = factor_data_path or FACTOR_IC_DATA_MASTER
     details_path = stock_details_path or _STOCK_DETAILS_PATH
 
-    # 1. 读 S6 段明细
+    # 1. 读指定段明细
     details_df = _read_parquet(details_path, SEGMENT_STOCK_COLUMNS)
     if details_df.empty:
         logger.warning("segment_stock_details 为空, 跳过 intraday strategy")
         return None
     s6 = details_df.loc[
         (details_df["selection_date"] == selection_date)
-        & (details_df["segment_label"] == "S6")
+        & (details_df["segment_label"] == segment_label)
         & (details_df["weight_method"] == weight_method),
         ["asset", "composite_value", "rank"],
     ].drop_duplicates()
     if s6.empty:
         logger.warning(
-            "%s/%s/S6 无明细 (%s), 跳过 intraday strategy",
+            "%s/%s/%s 无明细 (%s), 跳过 intraday strategy",
             pipeline,
             weight_method,
+            segment_label,
             selection_date,
         )
         return None
@@ -409,8 +412,9 @@ def compute_intraday_strategy(
     if bool(na_mask.any()):
         na_assets = merged.loc[na_mask, "asset"].tolist()
         logger.warning(
-            "%s S6 段 %d 只缺 OHLC 数据 (%s...), 已剔除",
+            "%s %s 段 %d 只缺 OHLC 数据 (%s...), 已剔除",
             selection_date,
+            segment_label,
             len(na_assets),
             na_assets[:3],
         )
@@ -474,7 +478,7 @@ def compute_intraday_strategy(
     out["weight_method"] = [weight_method] * len(merged)
     out["selection_date"] = [selection_date] * len(merged)
     out["trade_date"] = [trade_date] * len(merged)
-    out["segment_label"] = ["S6"] * len(merged)
+    out["segment_label"] = [segment_label] * len(merged)
     out["asset"] = merged["asset"].values
     out["rank"] = merged["rank"].values
     out["composite_value"] = merged["composite_value"].values
@@ -497,13 +501,14 @@ def compute_intraday_strategy(
         pipeline=pipeline,
         weight_method=weight_method,
         selection_date=selection_date,
+        segment_label=segment_label,
         df=out,
     )
     logger.info(
-        "intraday_strategy: %s/%s/%s S6 段写入 %d 行",
+        "intraday_strategy: %s/%s/%s 段写入 %d 行",
         pipeline,
         weight_method,
-        selection_date,
+        segment_label,
         len(out),
     )
     return out
@@ -513,10 +518,16 @@ def save_intraday_strategy_recommendation(
     pipeline: str,
     weight_method: str,
     selection_date: str,
+    segment_label: str,
     df: pd.DataFrame,
     file_path: Path | None = None,
 ) -> None:
-    """写入 intraday strategy 建议 (去重同 key 旧行)."""
+    """写入 intraday strategy 建议 (去重同 key 旧行).
+
+    去重 key: (pipeline, weight_method, selection_date, segment_label)
+    同一 (pipeline, weight_method, selection_date) 但不同段 (如 S6 -> S7)
+    的旧行会保留, 因为段可能随时变化 (胜率最高段是数据驱动的).
+    """
     fp = file_path or _INTRADAY_STRATEGY_PATH
     new_df = df.copy()
     for col in INTRADAY_STRATEGY_COLUMNS:
@@ -530,16 +541,18 @@ def save_intraday_strategy_recommendation(
             (existing["pipeline"] == pipeline)
             & (existing["weight_method"] == weight_method)
             & (existing["selection_date"] == selection_date)
+            & (existing["segment_label"] == segment_label)
         )
         existing = existing[~mask]
 
     combined = pd.concat([existing, new_df], ignore_index=True)
     combined.to_parquet(fp, index=False)
     logger.info(
-        "segment_intraday_strategy: %s/%s/%s 已写入 %s (累计 %d 行)",
+        "segment_intraday_strategy: %s/%s/%s/%s 已写入 %s (累计 %d 行)",
         pipeline,
         weight_method,
         selection_date,
+        segment_label,
         fp.name,
         len(combined),
     )
@@ -549,12 +562,19 @@ def load_intraday_strategy_recommendation(
     pipeline: str,
     weight_method: str,
     selection_date: str,
+    segment_label: str | None = None,
     file_path: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """读取某日的 S6 段日内操作建议.
+    """读取某日的指定段日内操作建议.
+
+    Args:
+        pipeline, weight_method, selection_date: 同 §10 调度
+        segment_label: 段标签 (None = 不限段标签, 用于 fallback 查找)
 
     Returns:
-        [{asset, prev_close, open, real_gap_pct, open_signal, recommended_action, ...}]
+        [{asset, prev_close, open, real_gap_pct, open_signal,
+          recommended_action, expected_return_pct, stop_loss_price,
+          adjustment_abnormal, ...}]
         若无数据返回 []
     """
     fp = file_path or _INTRADAY_STRATEGY_PATH
@@ -567,6 +587,8 @@ def load_intraday_strategy_recommendation(
         & (df["weight_method"] == weight_method)
         & (df["selection_date"] == selection_date)
     )
+    if segment_label is not None:
+        mask = mask & (df["segment_label"] == segment_label)
     df = df[mask]
     if df.empty:
         return []
