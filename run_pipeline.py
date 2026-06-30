@@ -202,7 +202,7 @@ PIPELINE_SCRIPTS: list[ScriptTask] = [
     # Stage 1: 数据整合
     ScriptTask("factor_generator", "data_fetchers/factor_generator.py", 1, []),
     # Stage 1.5: Pipeline 数据切割（共享，为所有 pipeline 生成子集数据）
-    ScriptTask("pipeline_data_slicer", "pipeline_data_slicer.py", 1.5, []),
+    ScriptTask("pipeline_data_slicer", "pipelines/pipeline_data_slicer.py", 1.5, []),
     # Stage 2: IC计算（pipeline 隔离，需 PIPELINE_ALIAS 环境变量）
     ScriptTask("ic_rsi", "factor_ic/ic_rsi_1d.py", 2, []),
     ScriptTask("ic_volume_ratio", "factor_ic/ic_volume_ratio_1d.py", 2, []),
@@ -764,7 +764,7 @@ def run_pipeline(
 
     # 解析 pipeline 别名列表
     if pipeline_aliases is None or pipeline_aliases == ["all"]:
-        from pipeline_context import load_pipeline_config
+        from pipelines.pipeline_context import load_pipeline_config
 
         aliases = list(load_pipeline_config().keys())
     else:

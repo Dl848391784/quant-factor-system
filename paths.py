@@ -10,6 +10,9 @@ Pipeline 感知（2026-06-26 新增）：
     PIPELINE_ALIAS=default     → factor_ic/result/default/ic_*.json
     PIPELINE_ALIAS=ob_quality  → factor_ic/result/ob_quality/ic_*.json
 
+    Stage 1.5 (pipelines/pipeline_data_slicer.py) 读取 pipelines/pipelines.yaml
+    按 alias 为每个 pipeline 切割/链接数据子集到 data_fetchers/result/<alias>/.
+
 正确导入方式：
     # 方式 1：通过 pip install -e . 安装项目后使用包导入
     from factor_ic_analyzer.paths import FACTOR_IC_DATA

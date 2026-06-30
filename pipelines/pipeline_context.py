@@ -8,7 +8,7 @@ from datetime import timedelta
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).parent
+PROJECT_ROOT = Path(__file__).parent.parent
 
 
 def get_pipeline_alias() -> str:

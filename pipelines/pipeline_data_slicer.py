@@ -14,11 +14,11 @@ import sys
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).parent
+PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd  # noqa: E402
-from pipeline_context import load_pipeline_config, resolve_filter  # noqa: E402
+from pipelines.pipeline_context import load_pipeline_config, resolve_filter  # noqa: E402
 
 
 def slice_pipeline(alias: str, filter_expr: str | None, source: Path, output: Path) -> None:
