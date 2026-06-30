@@ -301,7 +301,14 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     # v3.18: ob_quality 跨管线分段胜率汇总
     seg_merge_stats = None
     if stock_result:
-        seg_merge_stats = _render_cross_pipeline_summary(lines, stock_result, logger, stock_name_map)
+        _is_obq_main = _os.environ.get("PIPELINE_ALIAS", "") == "ob_quality"
+        _is_obq_sub = _os.environ.get("PIPELINE_ALIAS", "").startswith("ob_quality_")
+        if _is_obq_main:
+            # 主管线: 从 Parquet 读全量渲染 Section 9
+            seg_merge_stats = _render_cross_pipeline_summary(lines, stock_result, logger, stock_name_map)
+        elif _is_obq_sub:
+            # 时间切片子管线: 算自己的胜率 → 写入共享 Parquet
+            _save_own_segment_win_rates(stock_result, logger)
 
     # ob_quality: 展示今日三十分段候选明细
     if _is_obq and stock_result:
@@ -310,20 +317,15 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
     return "\n".join(lines)
 
 
-def _render_cross_pipeline_summary(
-    lines: list[str],
+def _save_own_segment_win_rates(
     stock_result: dict,
     logger: logging.Logger,
-    stock_name_map: dict[str, str] | None = None,
-) -> dict[str, dict] | None:
-    """ob_quality 全管线每日独立30分段胜率汇总.
+) -> None:
+    """时间切片子管线 (ob_quality_0625 等): 算自己的 30 段胜率 → 写共享 Parquet.
 
-    遍历 ob_quality_0615 ~ ob_quality_0624 的 composite daily,
-    每日独立 qcut 为 30 段, 计算各段胜率, 输出矩阵表格.
-    仅在 ob_quality pipeline 且非临时管线时输出.
-
-    Returns:
-        各段合并统计 {seg_label: {wins, total, wr}}, 或 None (非 ob_quality/数据不足).
+    从当前管线的 composite daily 读取选股日数据,
+    qcut 30 段, 计算各段 forward_return_1d 胜率,
+    写入 shared segment_win_rates.parquet.
     """
     import os
 
@@ -331,116 +333,95 @@ def _render_cross_pipeline_summary(
     from paths import COMPREHENSIVE_FACTOR_RESULT
 
     alias = os.environ.get("PIPELINE_ALIAS", "")
-    # 只在 ob_quality 主管线输出 (跳过 ob_quality_0615 等时间递减管线)
-    if alias != "ob_quality":
-        return None
-
     weight_method = (stock_result.get("meta", {}) or {}).get("weight_method", "rolling_icir_weight")
-    daily_filename = f"composite_{weight_method}_1d_daily.parquet"
+    daily_path = COMPREHENSIVE_FACTOR_RESULT / f"composite_{weight_method}_1d_daily.parquet"
+    if not daily_path.exists():
+        logger.debug("composite daily 不存在: %s (跳过落库)", daily_path)
+        return
 
-    # 收集所有 ob_quality_06XX 管线
-    parent_dir = COMPREHENSIVE_FACTOR_RESULT.parent  # comprehensive_factor/result/
-    pipeline_dirs = sorted(
-        [d for d in parent_dir.iterdir() if d.is_dir() and d.name.startswith("ob_quality_")],
-        key=lambda d: d.name,
-    )
+    try:
+        comp_df = pd.read_parquet(daily_path, columns=["date", "asset", "composite_factor"])
+    except Exception:
+        logger.debug("读取 composite daily 失败: %s", daily_path, exc_info=True)
+        return
 
-    if len(pipeline_dirs) < 2:
-        return None
+    comp_dates = sorted(comp_df["date"].dropna().unique())
+    if not comp_dates:
+        return
+    selection_date = str(comp_dates[-1])
+    day_df = comp_df[comp_df["date"].astype(str) == selection_date]
+    if len(day_df) < 20:
+        return
 
-    n_segments = 30
     master_path = Path(
         DATA_PATHS.get("master_parquet", str(PROJECT_ROOT / "data_fetchers/result/factor_ic_data.parquet"))
     )
-
     try:
         master_dates = sorted(pd.read_parquet(master_path, columns=["date"])["date"].dropna().unique())
         master_ret = pd.read_parquet(master_path, columns=["date", "asset", "forward_return_1d"])
     except Exception:
-        logger.debug("跨管线汇总: 无法读取主数据源, 跳过")
-        return None
+        logger.debug("子管线落库: 无法读取主数据源, 跳过")
+        return
 
-    # ── 读取 Parquet 中已有日期 (避免重复扫描目录) ──────────────────
-    existing_dates: set[str] = set()
     try:
-        for r in load_segment_win_rates("ob_quality", weight_method):
-            existing_dates.add(r["selection_date"])
+        idx = master_dates.index(selection_date)
+        trade_date = master_dates[idx + 1]
+    except (ValueError, IndexError):
+        logger.debug("子管线落库: %s 无下一个交易日, 跳过", selection_date)
+        return
+
+    ret_df = master_ret[master_ret["date"] == trade_date]
+    merged = pd.merge(day_df, ret_df[["asset", "forward_return_1d"]], on="asset", how="inner")
+    if len(merged) == 0:
+        logger.debug("子管线落库: %s forward_return_1d[%s] 全 NaN, 跳过 (等待 T+1 数据)", selection_date, trade_date)
+        return
+
+    n_segments = 30
+    merged["rank"] = merged["composite_factor"].rank(ascending=False)
+    try:
+        merged["seg"] = pd.qcut(merged["rank"], n_segments, labels=[f"S{i + 1}" for i in range(n_segments)])
+    except ValueError:
+        return
+
+    seg_stats = {}
+    for seg_label in [f"S{i + 1}" for i in range(n_segments)]:
+        sub = merged[merged["seg"] == seg_label]
+        ret_vals = sub["forward_return_1d"].dropna()
+        w = int((ret_vals > 0).sum())
+        t = len(ret_vals)
+        seg_stats[seg_label] = {"wins": w, "total": t, "wr": w / t * 100 if t > 0 else 0}
+
+    try:
+        save_segment_win_rates(
+            pipeline="ob_quality",
+            selection_date=selection_date,
+            trade_date=str(trade_date),
+            weight_method=weight_method,
+            n_segments=n_segments,
+            n_total=len(merged),
+            seg_stats=seg_stats,
+        )
+        logger.info("子管线落库: %s (%s) → segment_win_rates.parquet", alias, selection_date)
     except Exception:
-        pass
+        logger.warning("子管线落库失败: %s/%s", alias, selection_date, exc_info=True)
 
-    # ── 扫描目录，只处理 Parquet 中还没有的新日期 ──────────────────
-    new_count = 0
-    for pipe_dir in pipeline_dirs:
-        daily_path = pipe_dir / daily_filename
-        if not daily_path.exists():
-            continue
-        try:
-            comp_df = pd.read_parquet(daily_path, columns=["date", "asset", "composite_factor"])
-        except Exception:
-            continue
 
-        # 取最新选股日
-        comp_dates = sorted(comp_df["date"].dropna().unique())
-        if not comp_dates:
-            continue
-        selection_date = str(comp_dates[-1])
+def _render_cross_pipeline_summary(
+    lines: list[str],
+    stock_result: dict,
+    logger: logging.Logger,
+    stock_name_map: dict[str, str] | None = None,
+) -> dict[str, dict] | None:
+    """ob_quality 主管线 Section 9: 从 Parquet 读全量 30 段胜率渲染.
 
-        # 已在 Parquet 中，跳过
-        if selection_date in existing_dates:
-            continue
+    纯读 segment_win_rates.parquet, 不扫目录.
+    """
+    weight_method = (stock_result.get("meta", {}) or {}).get("weight_method", "rolling_icir_weight")
+    n_segments = 30
 
-        day_df = comp_df[comp_df["date"].astype(str) == selection_date]
-        if len(day_df) < 20:
-            continue
-
-        # 找下一个交易日
-        try:
-            idx = master_dates.index(selection_date)
-            trade_date = master_dates[idx + 1]
-        except (ValueError, IndexError):
-            continue
-
-        ret_df = master_ret[master_ret["date"] == trade_date]
-        merged = pd.merge(day_df, ret_df[["asset", "forward_return_1d"]], on="asset", how="inner")
-        if len(merged) == 0:
-            continue
-
-        merged["rank"] = merged["composite_factor"].rank(ascending=False)
-        try:
-            merged["seg"] = pd.qcut(merged["rank"], n_segments, labels=[f"S{i + 1}" for i in range(n_segments)])
-        except ValueError:
-            continue
-
-        seg_stats = {}
-        for seg_label in [f"S{i + 1}" for i in range(n_segments)]:
-            sub = merged[merged["seg"] == seg_label]
-            ret_vals = sub["forward_return_1d"].dropna()
-            w = (ret_vals > 0).sum()
-            t = len(ret_vals)
-            seg_stats[seg_label] = {"wins": w, "total": t, "wr": w / t * 100 if t > 0 else 0}
-
-        # 落库
-        try:
-            save_segment_win_rates(
-                pipeline="ob_quality",
-                selection_date=selection_date,
-                trade_date=str(trade_date),
-                weight_method=weight_method,
-                n_segments=n_segments,
-                n_total=len(merged),
-                seg_stats=seg_stats,
-            )
-            existing_dates.add(selection_date)
-            new_count += 1
-        except Exception:
-            logger.warning("segment_win_rates 落库失败: %s/%s", pipe_dir.name, selection_date, exc_info=True)
-
-    logger.debug("跨管线汇总: Parquet 已有 %d 日, 目录新增 %d 日", len(existing_dates), new_count)
-
-    # ── 从 Parquet 读取全部数据渲染 (主数据源) ────────────────────
     db_results = load_segment_win_rates("ob_quality", weight_method)
-
     if len(db_results) < 2:
+        logger.debug("segment_win_rates 数据不足 (%d 日), 跳过 Section 9", len(db_results))
         return None
 
     pipeline_results = [
