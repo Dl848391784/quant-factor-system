@@ -371,8 +371,8 @@ def _save_today_segment_details(
         ]
 
     try:
-        save_segment_stock_details("ob_quality", selection_date, seg_stocks)
-        logger.info("stock_details 落库: %s (%s) %d 只", alias, selection_date, len(day_df))
+        save_segment_stock_details("ob_quality", weight_method, selection_date, seg_stocks)
+        logger.info("stock_details 落库: %s (%s/%s) %d 只", alias, weight_method, selection_date, len(day_df))
     except Exception:
         logger.warning("stock_details 落库失败: %s/%s", alias, selection_date, exc_info=True)
 
@@ -380,103 +380,111 @@ def _save_today_segment_details(
 def _compute_pending_win_rates(logger: logging.Logger) -> None:
     """T+1: 遍历 stock_details 中所有日期, 有 forward_return_1d 就算胜率.
 
-    读取 segment_stock_details, 对比 segment_win_rates 中已有日期,
+    读取 segment_stock_details, 按 weight_method 分组,
+    对比 segment_win_rates 中已有日期,
     对未计算胜率的日期尝试匹配 forward_return_1d → qcut → 写 win_rates.
     """
-    import os
-
     import pandas as pd
+    from paths import FACTOR_IC_DATA
 
-    os.environ.get("PIPELINE_ALIAS", "")
     # 读取所有 stock_details 日期
     stock_df = load_segment_stock_details("ob_quality")
     if stock_df.empty:
         return
 
-    all_dates = sorted(stock_df["selection_date"].unique())
+    # 按 weight_method 分组处理
+    all_weight_methods = sorted(stock_df["weight_method"].unique())
 
-    # 读取已计算胜率的日期
-    done_dates: set[str] = set()
+    # 读取 master 数据 (pipeline-aware)
     try:
-        existing_wins = load_segment_win_rates("ob_quality", "rolling_icir_weight")
-        done_dates = {r["selection_date"] for r in existing_wins}
+        master_dates = sorted(pd.read_parquet(FACTOR_IC_DATA, columns=["date"])["date"].dropna().unique())
+        master_ret = pd.read_parquet(FACTOR_IC_DATA, columns=["date", "asset", "forward_return_1d"])
     except Exception:
-        pass
-
-    pending = [d for d in all_dates if d not in done_dates]
-    if not pending:
-        return
-
-    # 读取 master 数据
-    master_path = Path(
-        DATA_PATHS.get("master_parquet", str(PROJECT_ROOT / "data_fetchers/result/factor_ic_data.parquet"))
-    )
-    try:
-        master_dates = sorted(pd.read_parquet(master_path, columns=["date"])["date"].dropna().unique())
-        master_ret = pd.read_parquet(master_path, columns=["date", "asset", "forward_return_1d"])
-    except Exception:
-        logger.debug("_compute_pending_win_rates: 无法读取主数据源")
+        logger.debug("_compute_pending_win_rates: 无法读取主数据源 %s", FACTOR_IC_DATA)
         return
 
     n_segments = 30
-    computed = 0
-    for selection_date in pending:
-        # 找下一个交易日
+    total_computed = 0
+    for weight_method in all_weight_methods:
+        wm_stock_df = stock_df[stock_df["weight_method"] == weight_method]
+        all_dates = sorted(wm_stock_df["selection_date"].unique())
+
+        # 读取已计算胜率的日期
+        done_dates: set[str] = set()
         try:
-            idx = master_dates.index(selection_date)
-            trade_date = master_dates[idx + 1]
-        except (ValueError, IndexError):
-            logger.debug("_compute_pending: %s 无 T+1 交易日", selection_date)
-            continue
-
-        ret_df = master_ret[master_ret["date"] == trade_date]
-        if ret_df.empty or ret_df["forward_return_1d"].dropna().empty:
-            logger.debug("_compute_pending: %s forward_return_1d[%s] 全 NaN (等待数据)", selection_date, trade_date)
-            continue
-
-        # 取该日股票明细
-        day_stocks = stock_df[stock_df["selection_date"] == selection_date]
-        if day_stocks.empty:
-            continue
-
-        # merge 收益
-        merged = pd.merge(
-            day_stocks[["asset", "segment_label", "rank"]],
-            ret_df[["asset", "forward_return_1d"]],
-            on="asset", how="inner",
-        )
-        if len(merged) == 0:
-            continue
-
-        # qcut (按原 rank 排序)
-        merged = merged.sort_values("rank")
-
-        # 按 segment_label 分组算胜率
-        seg_stats = {}
-        for seg_label in sorted(day_stocks["segment_label"].unique()):
-            sub = merged[merged["segment_label"] == seg_label]
-            ret_vals = sub["forward_return_1d"].dropna()
-            w = int((ret_vals > 0).sum())
-            t = len(ret_vals)
-            seg_stats[seg_label] = {"wins": w, "total": t, "wr": w / t * 100 if t > 0 else 0}
-
-        # 推断 weight_method: 从已有 win_rates 或 stock_result meta
-        try:
-            save_segment_win_rates(
-                pipeline="ob_quality",
-                selection_date=selection_date,
-                trade_date=str(trade_date),
-                weight_method="rolling_icir_weight",
-                n_segments=n_segments,
-                n_total=len(merged),
-                seg_stats=seg_stats,
-            )
-            computed += 1
+            existing_wins = load_segment_win_rates("ob_quality", weight_method)
+            done_dates = {r["selection_date"] for r in existing_wins}
         except Exception:
-            logger.warning("_compute_pending: 写 win_rates 失败 %s", selection_date, exc_info=True)
+            pass
 
-    if computed:
-        logger.info("_compute_pending_win_rates: 完成 %d 个新日期", computed)
+        pending = [d for d in all_dates if d not in done_dates]
+        if not pending:
+            continue
+
+        computed = 0
+        for selection_date in pending:
+            # 找下一个交易日
+            try:
+                idx = master_dates.index(selection_date)
+                trade_date = master_dates[idx + 1]
+            except (ValueError, IndexError):
+                logger.debug("_compute_pending: %s 无 T+1 交易日", selection_date)
+                continue
+
+            ret_df = master_ret[master_ret["date"] == trade_date]
+            if ret_df.empty or ret_df["forward_return_1d"].dropna().empty:
+                logger.debug("_compute_pending: %s forward_return_1d[%s] 全 NaN (等待数据)", selection_date, trade_date)
+                continue
+
+            # 取该日股票明细
+            day_stocks = wm_stock_df[wm_stock_df["selection_date"] == selection_date]
+            if day_stocks.empty:
+                continue
+
+            # merge 收益
+            merged = pd.merge(
+                day_stocks[["asset", "segment_label", "rank"]],
+                ret_df[["asset", "forward_return_1d"]],
+                on="asset",
+                how="inner",
+            )
+            if len(merged) == 0:
+                continue
+
+            # qcut (按原 rank 排序)
+            merged = merged.sort_values("rank")
+
+            # 按 segment_label 分组算胜率
+            seg_stats = {}
+            for seg_label in sorted(day_stocks["segment_label"].unique()):
+                sub = merged[merged["segment_label"] == seg_label]
+                ret_vals = sub["forward_return_1d"].dropna()
+                w = int((ret_vals > 0).sum())
+                t = len(ret_vals)
+                seg_stats[seg_label] = {"wins": w, "total": t, "wr": w / t * 100 if t > 0 else 0}
+
+            try:
+                save_segment_win_rates(
+                    pipeline="ob_quality",
+                    selection_date=selection_date,
+                    trade_date=str(trade_date),
+                    weight_method=weight_method,
+                    n_segments=n_segments,
+                    n_total=len(merged),
+                    seg_stats=seg_stats,
+                )
+                computed += 1
+            except Exception:
+                logger.warning(
+                    "_compute_pending: 写 win_rates 失败 %s/%s", weight_method, selection_date, exc_info=True
+                )
+
+        if computed:
+            logger.info("_compute_pending_win_rates: %s 完成 %d 个新日期", weight_method, computed)
+            total_computed += computed
+
+    if total_computed:
+        logger.info("_compute_pending_win_rates: 全部完成 %d 个新日期", total_computed)
 
 
 def _render_cross_pipeline_summary(
@@ -507,7 +515,7 @@ def _render_cross_pipeline_summary(
     lines.append("=" * 70)
     lines.append(f"九、ob_quality 全管线 {n_segments}分段胜率汇总 (每日独立选股)")
     lines.append("-" * 70)
-    lines.append(f"  共 {n_pipes} 条时间递减管线, 每天独立按 composite 排名切 {n_segments} 段")
+    lines.append(f"  共 {n_pipes} 个选股日期, 每天独立按 composite 排名切 {n_segments} 段")
     lines.append("  选股日 → T+1交易日 (T-1 对齐), 统计 forward_return_1d")
     lines.append("")
 
@@ -567,44 +575,36 @@ def _render_today_best_segment_candidates(
 ) -> None:
     """展示今日三十分段候选明细.
 
-    将当日候选池按 composite 排名 qcut 为 30 段 (S1~S30),
+    从 segment_stock_details.parquet 读取最新日期的股票明细（T 日已落库），
     每段展示股票明细 + 历史合并胜率.
     """
-    import pandas as pd
-    from paths import COMPREHENSIVE_FACTOR_RESULT
-
     weight_method = (stock_result.get("meta", {}) or {}).get("weight_method", "rolling_icir_weight")
-    daily_path = COMPREHENSIVE_FACTOR_RESULT / f"composite_{weight_method}_1d_daily.parquet"
-    if not daily_path.exists():
+
+    # 直接读 stock_details, 不再重复读 composite_daily + qcut
+    stock_df = load_segment_stock_details("ob_quality", weight_method=weight_method)
+    if stock_df.empty:
         return
 
-    comp = pd.read_parquet(daily_path, columns=["date", "asset", "composite_factor"])
-    dates = sorted(comp["date"].dropna().unique())
-    if not dates:
-        return
+    dates = sorted(stock_df["selection_date"].unique())
     latest = dates[-1]
-    today = comp[comp["date"] == latest].copy()
-    today["rank"] = today["composite_factor"].rank(ascending=False)
+    today = stock_df[stock_df["selection_date"] == latest].copy()
     n_stocks = len(today)
-    n_segments = 30
-
-    # qcut 分 30 段, 标签 S1~S30
-    try:
-        today["seg"] = pd.qcut(today["rank"], n_segments, labels=[f"S{i + 1}" for i in range(n_segments)])
-    except ValueError:
+    if n_stocks == 0:
         return
 
+    n_segments = 30
     name_map = stock_name_map or {}
 
     lines.append("")
     lines.append("十、今日三十分段候选明细")
     lines.append("-" * 70)
     lines.append(f"  选股日: {latest}, 候选池共 {n_stocks} 只, 切 {n_segments} 段")
+    lines.append(f"  权重方法: {weight_method}")
     lines.append("  操作: 今日尾盘买入 -> 下一交易日卖出 (高开开盘锁利, 低开等反抽减亏)")
     lines.append("")
 
     for seg_label in [f"S{i + 1}" for i in range(n_segments)]:
-        subset = today[today["seg"] == seg_label].sort_values("rank")
+        subset = today[today["segment_label"] == seg_label].sort_values("rank")
         if len(subset) == 0:
             continue
 
@@ -622,7 +622,7 @@ def _render_today_best_segment_candidates(
         for _, s in subset.iterrows():
             code = s["asset"]
             nm = name_map.get(code, "--")
-            cv = s["composite_factor"]
+            cv = s["composite_value"]
             rk = int(s["rank"])
             lines.append(f"  {rk:>4} {code:<10} {nm:<8} {cv:>10.3f}")
         lines.append("  " + "-" * 38)
