@@ -135,7 +135,7 @@ def apply_secondary_sort(
     selection_date: str,
     logger: logging.Logger | None = None,
 ) -> list[dict[str, Any]]:
-    """v3.16: ob_pool 二次排序（通用因子加权框架）.
+    """v3.16: 小股票池二次排序（通用因子加权框架）.
 
     对 Stage 1 候选池的全部股票, 用 config.secondary_sort_factor_weights
     指定的因子做加权二次排序.
@@ -146,6 +146,7 @@ def apply_secondary_sort(
     price_position 5/6天优于全量(+10.4pp), turnover/market_cap p>0.05.
 
     仅当 enable_secondary_sort=True 且股票池 ≤ secondary_sort_pool_threshold 时生效.
+    当前活跃子集管线: ob_quality（~75K 行 → 候选池 <400 只），default 全市场不启用.
 
     Args:
         stage1_stocks: Stage 1 候选池 (sort_and_select 返回)
@@ -1299,7 +1300,7 @@ def _run_selection_pipeline(
         logger=logger,
     )
 
-    # v3.15: ob_pool 二次排序（换手率 + 市值）
+    # v3.15: 小股票池二次排序（换手率 + 市值）
     secondary_sorted_stocks = apply_secondary_sort(
         stage1_stocks,
         factor_df,

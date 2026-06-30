@@ -803,7 +803,7 @@ grep -rn "assert False\|if False:" factor_ic/ comprehensive_factor/ backtest/
 | 别名 | 投资域 | filter | 用途 |
 |------|--------|--------|------|
 | `default` | 全市场全时段 | `null`（不切割） | 基准对比，现有行为不变 |
-| `ob_pool` | RSI>70 超买股子集 | `rsi_6 > 70` | 超买股内部选 Better 的研究 |
+| `ob_quality` | 超买股 × 高换手率 | `rsi_6 > 70 and turnover_rate > 5` | 超买股中选 Better 的研究（路径 A） |
 
 ### 目录架构
 
@@ -818,8 +818,8 @@ data_fetchers/result/
 ├── stock_list.json                 # 股票列表（共享）
 ├── default/                        # default pipeline 数据
 │   └── factor_ic_data.parquet      # symlink → 主数据源（0 额外存储）
-└── ob_pool/                        # ob_pool pipeline 数据
-    └── factor_ic_data.parquet      # 切割后子集（~200K 行，约 13.4%）
+└── ob_quality/                     # ob_quality pipeline 数据
+    └── factor_ic_data.parquet      # 切割后子集（~75K 行，约 5%）
 ```
 
 **隔离区**（Stage 2-7 产出，按 alias 隔离）：
@@ -828,18 +828,18 @@ data_fetchers/result/
 factor_ic/
 ├── result/
 │   ├── default/                    # default pipeline 的 IC 结果 (ic_*.json)
-│   └── ob_pool/                    # ob_pool pipeline 的 IC 结果
+│   └── ob_quality/                 # ob_quality pipeline 的 IC 结果
 └── logs/
     ├── default/                    # default pipeline 的日志
-    └── ob_pool/
+    └── ob_quality/
 
 backtest/
 ├── result/
 │   ├── default/                    # (*_layered_backtest.json)
-│   └── ob_pool/
+│   └── ob_quality/
 └── logs/
     ├── default/
-    └── ob_pool/
+    └── ob_quality/
 
 comprehensive_factor/
 ├── result/
@@ -850,24 +850,24 @@ comprehensive_factor/
 │   │       ├── weight_method=icir_weight/
 │   │       │   └── selection_date=YYYY-MM-DD/part-0.parquet
 │   │       └── weight_method=equal_weight/
-│   └── ob_pool/
+│   └── ob_quality/
 │       └── lr_training_data/             # 独立训练数据
 └── logs/
     ├── default/
-    └── ob_pool/
+    └── ob_quality/
 
 stock_selector/
 └── logs/                              # 选股日志（实际输出在 comprehensive_factor/result/<alias>/stock_selection_history/）
     ├── default/
-    └── ob_pool/
+    └── ob_quality/
 
 summary/
 ├── result/
 │   ├── default/                        # factor_summary_report_*.txt
-│   └── ob_pool/
+│   └── ob_quality/
 └── logs/
     ├── default/
-    └── ob_pool/
+    └── ob_quality/
 ```
 
 ### 路径解析机制
@@ -968,7 +968,7 @@ ls <module>/result/default/
 ### Don't
 
 - ❌ 禁止在 Stage 2-7 的代码中硬编码路径（如 `Path(__file__).parent.parent / "result"`），必须 `from paths import`
-- ❌ 禁止跨 pipeline 读取数据（default 的脚本不应直接读 ob_pool 的结果）
+- ❌ 禁止跨 pipeline 读取数据（default 的脚本不应直接读 ob_quality 的结果）
 - ❌ 禁止修改 `FACTOR_IC_DATA_MASTER`（主数据源是所有 pipeline 的共享源头，只有 factor_generator 可写）
 - ❌ 禁止在 `paths.py` 之外定义 pipeline 感知路径（所有路径必须通过 `PIPELINE_ALIAS` 解析）
 
@@ -1004,20 +1004,20 @@ python3 run_pipeline.py --pipelines default,high_turnover --start-stage 2
 
 ```bash
 # 验证路径解析
-PIPELINE_ALIAS=ob_pool python3 -c "from paths import FACTOR_IC_RESULT; print(FACTOR_IC_RESULT)"
-# 期望: .../factor_ic/result/ob_pool
+PIPELINE_ALIAS=ob_quality python3 -c "from paths import FACTOR_IC_RESULT; print(FACTOR_IC_RESULT)"
+# 期望: .../factor_ic/result/ob_quality
 
 # 验证数据隔离
 ls factor_ic/result/default/ | wc -l    # default 的 IC 结果数
-ls factor_ic/result/ob_pool/ | wc -l    # ob_pool 的 IC 结果数
+ls factor_ic/result/ob_quality/ | wc -l  # ob_quality 的 IC 结果数
 
 # 验证 LR 训练数据隔离
 ls comprehensive_factor/result/default/lr_training_data/
-ls comprehensive_factor/result/ob_pool/lr_training_data/
+ls comprehensive_factor/result/ob_quality/lr_training_data/
 
 # 验证日志隔离
 ls factor_ic/logs/default/
-ls factor_ic/logs/ob_pool/
+ls factor_ic/logs/ob_quality/
 ```
 
 设计文档：`designs/feat_multi_pipeline_architecture.md`（B 方案，含 A/B 选型对比）
@@ -1061,20 +1061,20 @@ ls factor_ic/logs/ob_pool/
 
 ### 隔离区路径常量（Stage 2-7，按 PIPELINE_ALIAS 隔离）
 
-| 路径常量 | 用途 | pipeline 感知 | 实际路径（alias=default） | 实际路径（alias=ob_pool） |
+| 路径常量 | 用途 | pipeline 感知 | 实际路径（alias=default） | 实际路径（alias=ob_quality） |
 |---------|------|:---:|---|---|
-| FACTOR_IC_DATA | 管线数据源 | ✅ | `data_fetchers/result/default/factor_ic_data.parquet` | `data_fetchers/result/ob_pool/factor_ic_data.parquet` |
-| FACTOR_IC_RESULT | IC 输出目录 | ✅ | `factor_ic/result/default/` | `factor_ic/result/ob_pool/` |
-| FACTOR_IC_LOGS | IC 日志目录 | ✅ | `factor_ic/logs/default/` | `factor_ic/logs/ob_pool/` |
-| BACKTEST_RESULT | 回测输出目录 | ✅ | `backtest/result/default/` | `backtest/result/ob_pool/` |
-| BACKTEST_LOGS | 回测日志目录 | ✅ | `backtest/logs/default/` | `backtest/logs/ob_pool/` |
-| COMPREHENSIVE_FACTOR_RESULT | 综合因子输出目录 | ✅ | `comprehensive_factor/result/default/` | `comprehensive_factor/result/ob_pool/` |
-| COMPREHENSIVE_FACTOR_LOGS | 综合因子日志目录 | ✅ | `comprehensive_factor/logs/default/` | `comprehensive_factor/logs/ob_pool/` |
-| LR_TRAINING_DATA_DIR | LR 训练数据 | ✅ | `comprehensive_factor/result/default/lr_training_data/` | `comprehensive_factor/result/ob_pool/lr_training_data/` |
-| SUMMARY_RESULT | 汇总报告输出目录 | ✅ | `summary/result/default/` | `summary/result/ob_pool/` |
-| SUMMARY_LOGS | 汇总日志目录 | ✅ | `summary/logs/default/` | `summary/logs/ob_pool/` |
-| REVERSE_DISCOVERY_RESULT | 逆向发现输出目录 | ✅ | `reverse_discovery/result/default/` | `reverse_discovery/result/ob_pool/` |
-| REVERSE_DISCOVERY_LOGS | 逆向发现日志目录 | ✅ | `reverse_discovery/logs/default/` | `reverse_discovery/logs/ob_pool/` |
+| FACTOR_IC_DATA | 管线数据源 | ✅ | `data_fetchers/result/default/factor_ic_data.parquet` | `data_fetchers/result/ob_quality/factor_ic_data.parquet` |
+| FACTOR_IC_RESULT | IC 输出目录 | ✅ | `factor_ic/result/default/` | `factor_ic/result/ob_quality/` |
+| FACTOR_IC_LOGS | IC 日志目录 | ✅ | `factor_ic/logs/default/` | `factor_ic/logs/ob_quality/` |
+| BACKTEST_RESULT | 回测输出目录 | ✅ | `backtest/result/default/` | `backtest/result/ob_quality/` |
+| BACKTEST_LOGS | 回测日志目录 | ✅ | `backtest/logs/default/` | `backtest/logs/ob_quality/` |
+| COMPREHENSIVE_FACTOR_RESULT | 综合因子输出目录 | ✅ | `comprehensive_factor/result/default/` | `comprehensive_factor/result/ob_quality/` |
+| COMPREHENSIVE_FACTOR_LOGS | 综合因子日志目录 | ✅ | `comprehensive_factor/logs/default/` | `comprehensive_factor/logs/ob_quality/` |
+| LR_TRAINING_DATA_DIR | LR 训练数据 | ✅ | `comprehensive_factor/result/default/lr_training_data/` | `comprehensive_factor/result/ob_quality/lr_training_data/` |
+| SUMMARY_RESULT | 汇总报告输出目录 | ✅ | `summary/result/default/` | `summary/result/ob_quality/` |
+| SUMMARY_LOGS | 汇总日志目录 | ✅ | `summary/logs/default/` | `summary/logs/ob_quality/` |
+| REVERSE_DISCOVERY_RESULT | 逆向发现输出目录 | ✅ | `reverse_discovery/result/default/` | `reverse_discovery/result/ob_quality/` |
+| REVERSE_DISCOVERY_LOGS | 逆向发现日志目录 | ✅ | `reverse_discovery/logs/default/` | `reverse_discovery/logs/ob_quality/` |
 
 > ⚠️ 新增 pipeline 时无需修改 `paths.py`——所有隔离区路径通过 `PIPELINE_ALIAS` 自动解析。只需在 `pipelines/pipelines.yaml` 中添加别名并运行 `pipeline_data_slicer.py`。详见"多管线架构"章节。
 
@@ -1149,7 +1149,8 @@ ls factor_ic/logs/ob_pool/
 
 | 版本 | 日期 | 更新内容 | 稳定性标注 |
 |---|------|---------|-----------|
-| v3.8 | 2026-06-26 | **多管线架构**：新增 `PIPELINE_ALIAS` 环境变量，`paths.py` 所有 Stage 2-7 路径动态解析到 `<module>/result/<alias>/`。新增 `pipelines/pipelines.yaml`、`pipeline_context.py`、`pipeline_data_slicer.py`（Stage 1.5）。`run_pipeline.py` 支持 `--pipeline`/`--pipelines`/`--start-stage 1.5`，两阶段执行（共享 Stage 0-1.5 + 隔离 Stage 2-7）。6 个 `logger_config.py` + 8 个 `data_loader`/`factor_loader`/`factor_selector`/`composite_runner`/`ic_result_builder`/`layered_backtest_runner`/`constants`/`sections`/`data_loaders`/`generate_factor_summary_report` 适配 pipeline 感知路径。LR 训练数据隔离（`LR_TRAINING_DATA_DIR` 随 alias 解析）。现有管线：`default`（全市场）+ `ob_pool`（RSI>70，200K 行/13.4%）。新增"多管线架构"章节（What/How/Don't/Why/When/Examples/Verify）、更新目录结构/路径常量清单/执行顺序日志表 | [experimental] |
+| (当前) | 2026-06-30 | **管线收敛**：删 `ob_pool` + `ob_quality_06xx` × 10 + `temp_history*` × 7 共 17 个历史管线，只保留 `default` + `ob_quality`。移除 140 个数据/结果/日志目录。同步更新 `paths.py` docstring、`run_pipeline.py` argparse help、`stock_selector*.py` 注释（本批次"小股票池二次排序"曾误标 `ob_pool`，已改为 `ob_quality`）、`PROJECT.md` 目录示例与路径常量表 | — |
+| v3.8 | 2026-06-26 | **多管线架构**：新增 `PIPELINE_ALIAS` 环境变量，`paths.py` 所有 Stage 2-7 路径动态解析到 `<module>/result/<alias>/`。新增 `pipelines/pipelines.yaml`、`pipeline_context.py`、`pipeline_data_slicer.py`（Stage 1.5）。`run_pipeline.py` 支持 `--pipeline`/`--pipelines`/`--start-stage 1.5`，两阶段执行（共享 Stage 0-1.5 + 隔离 Stage 2-7）。6 个 `logger_config.py` + 8 个 `data_loader`/`factor_loader`/`factor_selector`/`composite_runner`/`ic_result_builder`/`layered_backtest_runner`/`constants`/`sections`/`data_loaders`/`generate_factor_summary_report` 适配 pipeline 感知路径。LR 训练数据隔离（`LR_TRAINING_DATA_DIR` 随 alias 解析）。现有管线：`default`（全市场）+ `ob_pool`（RSI>70，200K 行/13.4%，已废弃）。新增"多管线架构"章节（What/How/Don't/Why/When/Examples/Verify）、更新目录结构/路径常量清单/执行顺序日志表 | [experimental] |
 | v3.7 | 2026-06-23 | **run_pipeline.py 并行改造**：新增 `--parallel N` 参数，Stage 2 (IC) + Stage 3 (Backtest) 内的脚本按批并行（`ThreadPoolExecutor` 调度 subprocess.run）；批间严格屏障（N 个完成才进下一批，`as_completed` 等所有 future）；其他 stage 始终串行；不跨 stage 边界拼批；失败处理保持原 `failed_scripts` 汇总语义。`PARALLELIZABLE_STAGES = {2, 3}` 显式配置避免 Stage 4 (~2.6GB/脚本) 风险。新增"并行执行模式 [experimental]"章节（What/How/Why/When/Don't/Examples/Verify）。新增 `test_cases/test_run_pipeline_batching.py`（12 用例）覆盖批次切分逻辑。**实测后默认改 N=1（串行）**：N=2 在 7.3GB 机器上触发 OOM Killed（ic_amplitude >4GB / ic_rsi 2.46GB），用户显式 `--parallel 2` 才启用并承担 OOM 风险 | [experimental] |
 ||| v3.6 | 2026-06-23 | **Parquet 迁移完成**：`factor_ic_data.json.gz` → `factor_ic_data.parquet`，删除所有 ijson fallback / JSON.gz dual-write 路径（净减 ~290 行死代码）。实测数据加载耗时 88s → 1.9s（46x），单脚本峰值内存 OOM → 626MB。Parquet file-level metadata 存 `dates` 数组。§1 数据契约表 + 新鲜度检查脚本（步骤 3）同步更新 | [stable] ||
 ||| v1.42 | 2026-06-12 | 新增行业方向性因子（industry_momentum_5d / industry_turnover_trend / industry_amplitude_trend）；因子分类一览表；行业方向性因子说明（What/Why/How/Don't/When/Verify） | [experimental] ||

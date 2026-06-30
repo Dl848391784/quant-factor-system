@@ -7,8 +7,8 @@ Pipeline 感知（2026-06-26 新增）：
     所有 Stage 2-7 的产出路径根据 PIPELINE_ALIAS 环境变量动态解析。
     未设置时默认 "default"，与现有行为一致。
 
-    PIPELINE_ALIAS=default  → factor_ic/result/default/ic_*.json
-    PIPELINE_ALIAS=ob_pool  → factor_ic/result/ob_pool/ic_*.json
+    PIPELINE_ALIAS=default     → factor_ic/result/default/ic_*.json
+    PIPELINE_ALIAS=ob_quality  → factor_ic/result/ob_quality/ic_*.json
 
 正确导入方式：
     # 方式 1：通过 pip install -e . 安装项目后使用包导入

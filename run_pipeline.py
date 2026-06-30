@@ -1000,14 +1000,14 @@ def main() -> int:
         "--pipeline",
         type=str,
         default=None,
-        help="只运行指定 pipeline（如 --pipeline ob_pool）。未指定时运行 pipelines.yaml 中的全部 pipeline。",
+        help="只运行指定 pipeline（如 --pipeline ob_quality）。未指定时运行 pipelines.yaml 中的全部 pipeline。",
     )
 
     parser.add_argument(
         "--pipelines",
         type=str,
         default=None,
-        help="运行多个指定 pipeline，逗号分隔（如 --pipelines default,ob_pool）。",
+        help="运行多个指定 pipeline，逗号分隔（如 --pipelines default,ob_quality）。",
     )
 
     parser.add_argument(

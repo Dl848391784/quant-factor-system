@@ -107,12 +107,12 @@ class StockSelectorConfig:
     lr_filter_quantile: float = 0.3  # Bottom30 中打分最低 30% 排除
     lr_bottom_pool_size: int = 90  # 训练数据保存的 Bottom 数量 (Bottom90)
 
-    # v3.16d: ob_pool 二次排序 (Walk-Forward 验证, designs/feat_ob_pool_secondary_sort.md)
+    # v3.16d: 小股票池二次排序 (Walk-Forward 验证, designs/feat_ob_pool_secondary_sort.md)
     #   v3.16d 权重调整依据: 6管线 Walk-Forward 逐日验证
     #   - 所有因子 vs 随机50%均不显著(p>0.05) → 保守策略, composite 主导
     #   - compBot (composite 升序) 胜率 45%, 5/6天>全量 → composite 翻转选低
     #   - 辅助因子降权, composite 升权至 0.5
-    #   仅对股票池 ≤400 只的 pipeline 生效 (ob_pool ~200 只), 全市场不启用
+    #   仅对股票池 ≤400 只的子集管线生效 (ob_quality ~75K 行 → 候选池 <400 只), default 全市场不启用
     enable_secondary_sort: bool = True
     secondary_sort_pool_threshold: int = 400  # 股票池超过此数不启用
     # 方向翻转因子: composite/price_position/tail_price_slope 选低值 → 乘 -1 后降序排序
