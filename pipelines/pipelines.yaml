@@ -23,6 +23,18 @@ ob_quality_0624:
   filter: "rsi_6 > 70 and turnover_rate > 5 and date <= '2026-06-24'"
   description: "ob_quality 截止2026-06-24，验证06-24选→06-25买→06-26卖"
 
+ob_quality_0625:
+  filter: "rsi_6 > 70 and turnover_rate > 5 and date <= '2026-06-25'"
+  description: "ob_quality 截止2026-06-25，验证06-25选→06-26买→06-29卖"
+
+ob_quality_0626:
+  filter: "rsi_6 > 70 and turnover_rate > 5 and date <= '2026-06-26'"
+  description: "ob_quality 截止2026-06-26，验证06-26选→06-29买→06-30卖"
+
+ob_quality_0629:
+  filter: "rsi_6 > 70 and turnover_rate > 5 and date <= '2026-06-29'"
+  description: "ob_quality 截止2026-06-29，验证06-29选→06-30买→07-01卖"
+
 ob_quality_0623:
   filter: "rsi_6 > 70 and turnover_rate > 5 and date <= '2026-06-23'"
   description: "ob_quality 截止2026-06-23，验证06-23选→06-24买→06-25卖"
