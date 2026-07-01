@@ -317,13 +317,9 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
         # Main pipeline only: render Section 9 from Parquet
         seg9_result = _render_cross_pipeline_summary(lines, stock_result, logger, stock_name_map)
         # 向后兼容: 解包 §9 返回值, 让 §10 段明细渲染仍可用 stats[seg_label]
-        seg_merge_stats = (
-            seg9_result.get("merge_stats", {}) if isinstance(seg9_result, dict) else None
-        )
+        seg_merge_stats = seg9_result.get("merge_stats", {}) if isinstance(seg9_result, dict) else None
         # §9 best_seg 是 §10 要选的最高胜率段 (替代原来的硬写 S6)
-        best_seg_from_sec9 = (
-            seg9_result.get("best_seg") if isinstance(seg9_result, dict) else None
-        )
+        best_seg_from_sec9 = seg9_result.get("best_seg") if isinstance(seg9_result, dict) else None
     else:
         seg_merge_stats = None
         best_seg_from_sec9 = None
@@ -337,9 +333,7 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
         try:
             from summary.report.data_loaders import load_intraday_strategy as _load_strategy
 
-            weight_method = (
-                stock_result.get("meta", {}).get("weight_method", "rolling_icir_weight")
-            )
+            weight_method = stock_result.get("meta", {}).get("weight_method", "rolling_icir_weight")
             # 段标签优先用 §9 算的合并胜率最高段; fallback = None (不限段, 适配 §9 数据不足)
             target_seg = best_seg_from_sec9
             target_date = date
@@ -401,15 +395,18 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
             # 段标题展示 (如果 §9 数据不足, 段标签 fallback 到 S6, 加说明)
             sec9_note = None
             if not best_seg_from_sec9:
-                sec9_note = (
-                    "⚠️ §9 数据不足 (<2日), §10 暂用 S6 段默认值, "
-                    "累计更多管线数据后会自动选胜率最高段"
-                )
+                sec9_note = "⚠️ §9 数据不足 (<2日), §10 暂用 S6 段默认值, 累计更多管线数据后会自动选胜率最高段"
                 target_seg = target_seg or "S6"
 
             if strategy_rows:
                 trade_date_hint = strategy_rows[0].get("trade_date") if strategy_rows else None
-                # 段胜率优先用 strategy_rows[0].open_signal 等聚合得到, 这里用 None 让 section 自处理
+                # 数据驱动: 计算历史实战样本的高开/低开胜率 (用于 §10 底部展示)
+                from summary.report.sections import _compute_intraday_historical_stats
+
+                historical_stats = _compute_intraday_historical_stats(
+                    pipeline="ob_quality",
+                    weight_method=weight_method,
+                )
                 _render_intraday_strategy_section(
                     rows=strategy_rows,
                     lines=lines,
@@ -419,6 +416,7 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
                     is_fallback=used_fallback_date is not None,
                     segment_label=target_seg or "S6",
                     seg9_note=sec9_note,
+                    historical_stats=historical_stats,
                 )
         except Exception as e:
             logger.warning("§10 intraday strategy 渲染失败, 跳过: %s", str(e)[:200])
@@ -439,6 +437,7 @@ def _find_latest_intraday_date(
         from summary.report.segment_win_db import (
             _INTRADAY_STRATEGY_PATH,
         )
+
         df = pd.read_parquet(_INTRADAY_STRATEGY_PATH, columns=["selection_date"])
         mask = df["selection_date"].notna()
         df = df[mask]

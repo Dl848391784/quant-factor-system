@@ -39,8 +39,7 @@ def fixture_details_path(tmp_path: Path) -> Path:
             "weight_method": ["rolling_icir_weight"] * 8,
             "selection_date": ["2026-06-15"] * 8,
             "segment_label": ["S6"] * 8,
-            "asset": ["000001", "000002", "000003", "000004",
-                      "000005", "000006", "000007", "000008"],
+            "asset": ["000001", "000002", "000003", "000004", "000005", "000006", "000007", "000008"],
             "composite_value": [0.5, 0.4, 0.3, 0.2, 0.1, 0.0, -0.1, -0.2],
             "rank": [21, 22, 23, 24, 25, 26, 27, 28],
             "created_at": ["2026-06-15T00:00:00"] * 8,
@@ -59,14 +58,14 @@ def fixture_master_with_t1(tmp_path: Path) -> Path:
 
     rows = []
     for asset, t_close, t1_open, t1_high, t1_low, t1_close, fwd_ret in [
-        ("000001", 10.00, 10.50, 11.00, 10.20, 10.80, 0.08),   # 高开 +5%
+        ("000001", 10.00, 10.50, 11.00, 10.20, 10.80, 0.08),  # 高开 +5%
         ("000002", 20.00, 19.50, 20.50, 19.00, 19.80, -0.01),  # 低开 -2.5%
-        ("000003", 30.00, 30.05, 30.50, 29.80, 30.10, 0.003),   # 平开 +0.17%
+        ("000003", 30.00, 30.05, 30.50, 29.80, 30.10, 0.003),  # 平开 +0.17%
         ("000004", 40.00, 39.00, 39.50, 36.50, 37.00, -0.075),  # 低开 -2.5% (深)
-        ("000005", 50.00, 50.50, 51.00, 50.20, 50.80, 0.016),   # 平开 +1% (其实算高)
-        ("000006", 60.00, 60.10, 60.30, 59.95, 60.20, 0.003),   # 平开 +0.17%
-        ("000007", 70.00, 71.00, 72.00, 70.50, 71.50, 0.021),   # 高开 +1.4%
-        ("000008", 80.00, 90.00, 92.00, 88.00, 91.00, 0.14),    # 异常 +12.5%
+        ("000005", 50.00, 50.50, 51.00, 50.20, 50.80, 0.016),  # 平开 +1% (其实算高)
+        ("000006", 60.00, 60.10, 60.30, 59.95, 60.20, 0.003),  # 平开 +0.17%
+        ("000007", 70.00, 71.00, 72.00, 70.50, 71.50, 0.021),  # 高开 +1.4%
+        ("000008", 80.00, 90.00, 92.00, 88.00, 91.00, 0.14),  # 异常 +12.5%
     ]:
         # T 日 close
         rows.append(
@@ -104,9 +103,7 @@ def fixture_master_with_t1(tmp_path: Path) -> Path:
 # ── T1: 8 只分桶边界正确 ────────────────────────────────────────────────
 
 
-def test_5_segment_buckets_correct(
-    fixture_logger, fixture_master_with_t1, fixture_details_path
-):
+def test_5_segment_buckets_correct(fixture_logger, fixture_master_with_t1, fixture_details_path):
     df = compute_intraday_strategy(
         pipeline="ob_quality",
         weight_method="rolling_icir_weight",
@@ -140,9 +137,7 @@ def test_5_segment_buckets_correct(
 # ── T2: 复权异常股被识别 ────────────────────────────────────────────────
 
 
-def test_adjustment_abnormal_marked(
-    fixture_logger, fixture_master_with_t1, fixture_details_path
-):
+def test_adjustment_abnormal_marked(fixture_logger, fixture_master_with_t1, fixture_details_path):
     df = compute_intraday_strategy(
         pipeline="ob_quality",
         weight_method="rolling_icir_weight",
@@ -160,9 +155,7 @@ def test_adjustment_abnormal_marked(
 # ── T3: real_gap_pct 用真前收, 不用 forward_return_1d 反推 ─────────────
 
 
-def test_real_gap_uses_actual_close_not_inferred(
-    fixture_logger, fixture_master_with_t1, fixture_details_path
-):
+def test_real_gap_uses_actual_close_not_inferred(fixture_logger, fixture_master_with_t1, fixture_details_path):
     """关键 invariant: gap = (open - prev_close)/prev_close, 不是 (open - close/(1+fwd))/..."""
     df = compute_intraday_strategy(
         pipeline="ob_quality",
@@ -185,9 +178,7 @@ def test_real_gap_uses_actual_close_not_inferred(
 # ── T4: gap > +0.5% → sell_at_open ────────────────────────────────────
 
 
-def test_gap_above_threshold_sell_at_open(
-    fixture_logger, fixture_master_with_t1, fixture_details_path
-):
+def test_gap_above_threshold_sell_at_open(fixture_logger, fixture_master_with_t1, fixture_details_path):
     df = compute_intraday_strategy(
         pipeline="ob_quality",
         weight_method="rolling_icir_weight",
@@ -208,9 +199,7 @@ def test_gap_above_threshold_sell_at_open(
 # ── T5: gap < -0.5% → wait_bounce + stop_loss = prev_close * 0.98 ──────
 
 
-def test_gap_below_threshold_wait_bounce_with_stop_loss(
-    fixture_logger, fixture_master_with_t1, fixture_details_path
-):
+def test_gap_below_threshold_wait_bounce_with_stop_loss(fixture_logger, fixture_master_with_t1, fixture_details_path):
     df = compute_intraday_strategy(
         pipeline="ob_quality",
         weight_method="rolling_icir_weight",
@@ -232,9 +221,7 @@ def test_gap_below_threshold_wait_bounce_with_stop_loss(
 # ── T6: parquet round-trip 一致 ────────────────────────────────────────
 
 
-def test_parquet_round_trip(
-    fixture_logger, fixture_master_with_t1, fixture_details_path, tmp_path
-):
+def test_parquet_round_trip(fixture_logger, fixture_master_with_t1, fixture_details_path, tmp_path):
     fp = tmp_path / "intraday.parquet"
     out = compute_intraday_strategy(
         pipeline="ob_quality",
@@ -276,8 +263,7 @@ def test_missing_t1_returns_none(fixture_logger, fixture_details_path, tmp_path)
     # master 只有 T 日数据, 没有 T+1
     p = tmp_path / "factor_ic_data.parquet"
     rows = []
-    for asset in ["000001", "000002", "000003", "000004",
-                  "000005", "000006", "000007", "000008"]:
+    for asset in ["000001", "000002", "000003", "000004", "000005", "000006", "000007", "000008"]:
         rows.append(
             {
                 "date": pd.Timestamp("2026-06-15"),
@@ -310,6 +296,7 @@ def test_missing_t1_returns_none(fixture_logger, fixture_details_path, tmp_path)
 def test_render_section_importable():
     from summary.report.data_loaders import load_intraday_strategy
     from summary.report.sections import _render_intraday_strategy_section
+
     assert callable(_render_intraday_strategy_section)
     assert callable(load_intraday_strategy)
 
@@ -317,9 +304,7 @@ def test_render_section_importable():
 # ── T9: S6 段无明细 → 返回 None ────────────────────────────────────────
 
 
-def test_missing_s6_segment(
-    fixture_logger, fixture_master_with_t1, tmp_path
-):
+def test_missing_s6_segment(fixture_logger, fixture_master_with_t1, tmp_path):
     """stock_details 没有 S6 段 → 返回 None."""
     p = tmp_path / "segment_stock_details.parquet"
     df = pd.DataFrame(
@@ -353,17 +338,30 @@ def test_missing_s6_segment(
 def test_columns_schema_complete():
     """INTRADAY_STRATEGY_COLUMNS 必须覆盖所有段渲染字段."""
     required = {
-        "pipeline", "weight_method", "selection_date", "trade_date",
-        "segment_label", "asset", "rank", "composite_value",
-        "prev_close", "open", "high", "low", "close",
-        "forward_return_1d", "real_gap_pct", "open_signal",
-        "recommended_action", "expected_return_pct", "stop_loss_price",
-        "adjustment_abnormal", "created_at",
+        "pipeline",
+        "weight_method",
+        "selection_date",
+        "trade_date",
+        "segment_label",
+        "asset",
+        "rank",
+        "composite_value",
+        "prev_close",
+        "open",
+        "high",
+        "low",
+        "close",
+        "forward_return_1d",
+        "real_gap_pct",
+        "open_signal",
+        "recommended_action",
+        "expected_return_pct",
+        "stop_loss_price",
+        "adjustment_abnormal",
+        "created_at",
     }
     actual = set(INTRADAY_STRATEGY_COLUMNS)
-    assert required.issubset(actual), (
-        f"missing columns: {required - actual}"
-    )
+    assert required.issubset(actual), f"missing columns: {required - actual}"
 
 
 # ── T11: _render_intraday_strategy_section 接受 is_fallback 参数 ──────────
@@ -439,9 +437,8 @@ def test_find_latest_intraday_date_returns_valid_string():
     # 应该返回 None 或者一个 YYYY-MM-DD 字符串
     if latest is not None:
         import re
-        assert re.match(r"^\d{4}-\d{2}-\d{2}$", latest), (
-            f"latest intraday date 格式错误: {latest}"
-        )
+
+        assert re.match(r"^\d{4}-\d{2}-\d{2}$", latest), f"latest intraday date 格式错误: {latest}"
 
 
 # ── T13: segment_label 参数化 (取代原写死 S6) ────────────────────────────
@@ -474,13 +471,17 @@ def test_compute_intraday_strategy_accepts_segment_label(
     assert out is not None, "compute 返回 None, 表示数据未找全 (asset 范围未对齐)"
     assert len(out) == 8
     # 关键 invariant: 落盘时 segment_label 写入的是用户传的 S7
-    assert (out["segment_label"] == "S7").all(), (
-        f"segment_label 应当全是 'S7', 实际 {out['segment_label'].unique()}"
-    )
+    assert (out["segment_label"] == "S7").all(), f"segment_label 应当全是 'S7', 实际 {out['segment_label'].unique()}"
     # 资产必须与 fixture_master 同范围
     assert set(out["asset"]) == {
-        "000001", "000002", "000003", "000004",
-        "000005", "000006", "000007", "000008",
+        "000001",
+        "000002",
+        "000003",
+        "000004",
+        "000005",
+        "000006",
+        "000007",
+        "000008",
     }
 
 
@@ -526,3 +527,196 @@ def test_render_section_uses_passed_in_segment_label():
     # 不应该残留 S6 段字样
     assert "本次 S6 段" not in body
     assert "十、S6 段" not in body
+
+
+# ── T15: 历史胜率统计 — 数据驱动 (代替 v1 硬编码字符串) ──────────────────
+
+
+def test_compute_historical_stats_returns_typed_dict():
+    """_compute_intraday_historical_stats 返回结构化 dict, 包含 high/low/flat/abnormal/n_dates."""
+    from summary.report.sections import _compute_intraday_historical_stats
+
+    stats = _compute_intraday_historical_stats()
+
+    # 必须包含所有 key
+    assert "high" in stats
+    assert "low" in stats
+    assert "flat" in stats
+    assert "abnormal" in stats
+    assert "n_dates" in stats
+
+    # high 子结构
+    h = stats["high"]
+    for k in ("wins", "total", "win_rate", "avg_return_pct", "baseline_avg_return_pct", "edge_pp"):
+        assert k in h, f"high 缺字段: {k}"
+
+    # low 子结构
+    l_stat = stats["low"]
+    for k in ("hits", "total", "hit_rate", "avg_return_pct", "baseline_avg_return_pct", "edge_pp"):
+        assert k in l_stat, f"low 缺字段: {k}"
+
+
+def test_compute_historical_stats_high_correct():
+    """高开: wins = count(forward_return_1d > 0); edge = 开盘卖均收 - 死等尾盘均收."""
+    import pandas as pd
+    from summary.report.sections import _compute_intraday_historical_stats
+    from summary.report.segment_win_db import _INTRADAY_STRATEGY_PATH
+
+    df = pd.read_parquet(_INTRADAY_STRATEGY_PATH)
+    df = df[(df["pipeline"] == "ob_quality") & (df["weight_method"] == "rolling_icir_weight")]
+    high = df[df["open_signal"] == "high"]
+    if len(high) == 0:
+        return  # 没有数据时跳过 (环境差异)
+
+    stats = _compute_intraday_historical_stats()
+    h = stats["high"]
+
+    expected_wins = int((high["forward_return_1d"] > 0).sum())
+    expected_total = int(len(high))
+    expected_win_rate = expected_wins / expected_total * 100
+    expected_open_sell = float(((high["open"] / high["prev_close"]) - 1).mean() * 100)
+    expected_wait = float(high["forward_return_1d"].mean() * 100)
+    expected_edge = expected_open_sell - expected_wait
+
+    assert h["wins"] == expected_wins
+    assert h["total"] == expected_total
+    assert abs(h["win_rate"] - expected_win_rate) < 0.01
+    assert abs(h["avg_return_pct"] - expected_open_sell) < 0.01
+    assert abs(h["baseline_avg_return_pct"] - expected_wait) < 0.01
+    assert abs(h["edge_pp"] - expected_edge) < 0.01
+
+
+def test_compute_historical_stats_low_correct():
+    """低开: hits = count(close >= prev_close); 等高卖均收 = mean(close/prev_close - 1)."""
+    import pandas as pd
+    from summary.report.sections import _compute_intraday_historical_stats
+    from summary.report.segment_win_db import _INTRADAY_STRATEGY_PATH
+
+    df = pd.read_parquet(_INTRADAY_STRATEGY_PATH)
+    df = df[(df["pipeline"] == "ob_quality") & (df["weight_method"] == "rolling_icir_weight")]
+    low = df[df["open_signal"] == "low"]
+    if len(low) == 0:
+        return  # 没有数据时跳过
+
+    stats = _compute_intraday_historical_stats()
+    l_stat = stats["low"]
+
+    expected_hits = int((low["close"] >= low["prev_close"]).sum())
+    expected_total = int(len(low))
+    expected_hit_rate = expected_hits / expected_total * 100
+    expected_avg = float(((low["close"] / low["prev_close"]) - 1).mean() * 100)
+    expected_baseline = float(((low["open"] / low["prev_close"]) - 1).mean() * 100)
+    expected_edge = expected_avg - expected_baseline
+
+    assert l_stat["hits"] == expected_hits
+    assert l_stat["total"] == expected_total
+    assert abs(l_stat["hit_rate"] - expected_hit_rate) < 0.01
+    assert abs(l_stat["avg_return_pct"] - expected_avg) < 0.01
+    assert abs(l_stat["baseline_avg_return_pct"] - expected_baseline) < 0.01
+    assert abs(l_stat["edge_pp"] - expected_edge) < 0.01
+
+
+def test_render_section_uses_historical_stats_data_driven():
+    """§10 底部 '历史胜率参考' 应该用 historical_stats 数据驱动, 不再硬编码 8 天 31 只."""
+    from summary.report.sections import _render_intraday_strategy_section
+
+    rows = [
+        {
+            "asset": "000001",
+            "rank": 17,
+            "composite_value": 0.45,
+            "prev_close": 100.0,
+            "open": 105.0,
+            "high": 110.0,
+            "low": 102.0,
+            "close": 108.0,
+            "forward_return_1d": 0.08,
+            "real_gap_pct": 5.0,
+            "open_signal": "high",
+            "recommended_action": "sell_at_open",
+            "expected_return_pct": 5.0,
+            "stop_loss_price": 0.0,
+            "adjustment_abnormal": False,
+            "trade_date": "2026-06-16",
+        }
+    ]
+    # 传入历史统计, 验证渲染时不出现旧硬编码字符串
+    historical_stats = {
+        "n_dates": 6,
+        "high": {
+            "wins": 12,
+            "total": 12,
+            "win_rate": 100.0,
+            "avg_return_pct": 1.94,
+            "baseline_avg_return_pct": 3.80,
+            "edge_pp": -1.86,
+        },
+        "low": {
+            "hits": 5,
+            "total": 24,
+            "hit_rate": 20.8,
+            "avg_return_pct": -2.80,
+            "baseline_avg_return_pct": -1.62,
+            "edge_pp": -1.19,
+        },
+        "flat": {"total": 8},
+        "abnormal": {"total": 2},
+    }
+    lines: list = []
+    _render_intraday_strategy_section(
+        rows=rows,
+        lines=lines,
+        selection_date="2026-06-15",
+        trade_date="2026-06-16",
+        segment_label="S9",
+        historical_stats=historical_stats,
+    )
+    body = "\n".join(lines)
+
+    # 数据驱动文字应该出现
+    assert "近 6 个选股日 46 只实测" in body
+    assert "12/12 = 100.0% 胜率" in body
+    assert "5/24 = 20.8% 命中回本" in body
+
+    # 旧硬编码文字不应再出现
+    assert "06-15 ~ 06-25 8 天 31 只实测" not in body
+    assert "10/10 = 100% 胜率" not in body  # 旧版是 10/10, 新版应是 12/12
+    assert "12/13 = 92.3%" not in body  # 旧版是 12/13, 新版应是 5/24
+
+
+def test_render_section_no_historical_stats_fallback():
+    """无 historical_stats 时降级到 '样本不足'."""
+    from summary.report.sections import _render_intraday_strategy_section
+
+    rows = [
+        {
+            "asset": "000001",
+            "rank": 17,
+            "composite_value": 0.45,
+            "prev_close": 100.0,
+            "open": 105.0,
+            "high": 110.0,
+            "low": 102.0,
+            "close": 108.0,
+            "forward_return_1d": 0.08,
+            "real_gap_pct": 5.0,
+            "open_signal": "high",
+            "recommended_action": "sell_at_open",
+            "expected_return_pct": 5.0,
+            "stop_loss_price": 0.0,
+            "adjustment_abnormal": False,
+            "trade_date": "2026-06-16",
+        }
+    ]
+    lines: list = []
+    _render_intraday_strategy_section(
+        rows=rows,
+        lines=lines,
+        selection_date="2026-06-15",
+        trade_date="2026-06-16",
+        segment_label="S9",
+        historical_stats=None,  # 不传
+    )
+    body = "\n".join(lines)
+    assert "样本不足" in body
+    assert "近 " not in body  # 不应该出现 "近 N 个选股日"

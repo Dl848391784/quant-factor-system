@@ -4,6 +4,10 @@
 包含 IC、回测、综合因子、权重选择、选股结果、对比等 section 渲染。
 """
 
+from __future__ import annotations
+
+from typing import Any
+
 import pandas as pd
 from comprehensive_factor.composite_decision_card import CHECKLIST_D5
 from factor_definitions import FACTOR_DEFINITIONS, FACTOR_NAME_TO_COL_MAP
@@ -670,7 +674,7 @@ def _render_decile_section(decile_stats: dict, lines: list[str], stock_name_map:
         lines.append(f"【全部 {n_segs} 段胜率一览】")
         per_row = 6
         for i in range(0, len(all_ranked), per_row):
-            row_segs = all_ranked[i:i+per_row]
+            row_segs = all_ranked[i : i + per_row]
             row = ""
             for seg in row_segs:
                 row += f" {seg['label']:<5} {seg['win_rate']:>5.0f}% "
@@ -1352,6 +1356,134 @@ _SIGNAL_LABEL = {
 }
 
 
+def _compute_intraday_historical_stats(
+    pipeline: str = "ob_quality",
+    weight_method: str = "rolling_icir_weight",
+) -> dict[str, Any]:
+    """统计 §10 历史实战样本的高开/低开胜率, 数据驱动.
+
+    数据源: segment_intraday_strategy.parquet (compute_intraday_strategy 落盘).
+    每个 selection_date + segment_label = 一批实战样本 (历史 §10 真实跑过的数据).
+
+    算法 (来源: t1-alignment-and-segment-winrate-analysis.md §7.7/§7.8):
+      高开 (open_signal='high'):
+        - 胜率 = count(forward_return_1d > 0) / total
+        - 均收 = mean(forward_return_1d) * 100
+        - 增厚 = 均收 - 死等尾盘均收 (D 日 close→T+1 close 全程收益)
+      低开 (open_signal='low'):
+        - 命中回本率 = count(close[T+1] >= prev_close[T]) / total
+        - 等高卖均收 = mean(close[T+1]/prev_close[T] - 1) * 100
+        - 减亏 = 等高卖均收 - 开盘即卖均收 (open[T+1]/prev_close[T] - 1)
+
+    Returns:
+        {
+            'high': {'wins', 'total', 'win_rate', 'avg_return_pct', 'baseline_avg_return_pct', 'edge_pp'},
+            'low':  {'hits', 'total', 'hit_rate', 'avg_return_pct', 'baseline_avg_return_pct', 'edge_pp'},
+            'flat': {'total'},
+            'abnormal': {'total'},
+            'n_dates': 历史样本覆盖的选股日数,
+        }
+        数据为空时各 key 值为 0.
+    """
+    try:
+        from summary.report.segment_win_db import _INTRADAY_STRATEGY_PATH
+
+        df = pd.read_parquet(_INTRADAY_STRATEGY_PATH)
+    except Exception:
+        return _empty_historical_stats()
+
+    df = df[(df["pipeline"] == pipeline) & (df["weight_method"] == weight_method)]
+    if df.empty:
+        return _empty_historical_stats()
+
+    stats: dict[str, float | dict[str, float]] = {
+        "n_dates": int(df["selection_date"].nunique()),
+    }
+
+    high = df[df["open_signal"] == "high"]
+    if len(high) > 0:
+        wins = int((high["forward_return_1d"] > 0).sum())
+        total = int(len(high))
+        # 开盘卖均收 = mean(open[T+1]/prev_close[T] - 1)
+        open_sell_avg = float(((high["open"] / high["prev_close"]) - 1).mean() * 100)
+        # 死等尾盘均收 = forward_return_1d (即 close[T+1]/prev_close[T] - 1)
+        wait_close_avg = float(high["forward_return_1d"].mean() * 100)
+        stats["high"] = {
+            "wins": wins,
+            "total": total,
+            "win_rate": wins / total * 100 if total else 0.0,
+            "avg_return_pct": open_sell_avg,
+            "baseline_avg_return_pct": wait_close_avg,
+            "edge_pp": open_sell_avg - wait_close_avg,
+        }
+    else:
+        stats["high"] = {
+            "wins": 0,
+            "total": 0,
+            "win_rate": 0.0,
+            "avg_return_pct": 0.0,
+            "baseline_avg_return_pct": 0.0,
+            "edge_pp": 0.0,
+        }
+
+    low = df[df["open_signal"] == "low"]
+    if len(low) > 0:
+        hits = int((low["close"] >= low["prev_close"]).sum())
+        total = int(len(low))
+        # 等高卖均收 = mean(close[T+1]/prev_close[T] - 1)
+        avg_ret = float(((low["close"] / low["prev_close"]) - 1).mean() * 100)
+        # 开盘即卖均收 (对照组) = mean(open[T+1]/prev_close[T] - 1)
+        baseline_avg = float(((low["open"] / low["prev_close"]) - 1).mean() * 100)
+        stats["low"] = {
+            "hits": hits,
+            "total": total,
+            "hit_rate": hits / total * 100 if total else 0.0,
+            "avg_return_pct": avg_ret,
+            "baseline_avg_return_pct": baseline_avg,
+            "edge_pp": avg_ret - baseline_avg,
+        }
+    else:
+        stats["low"] = {
+            "hits": 0,
+            "total": 0,
+            "hit_rate": 0.0,
+            "avg_return_pct": 0.0,
+            "baseline_avg_return_pct": 0.0,
+            "edge_pp": 0.0,
+        }
+
+    flat = df[df["open_signal"] == "flat"]
+    stats["flat"] = {"total": int(len(flat))}
+    abnormal = df[df["open_signal"] == "abnormal"]
+    stats["abnormal"] = {"total": int(len(abnormal))}
+
+    return stats
+
+
+def _empty_historical_stats() -> dict[str, dict[str, float]]:
+    return {
+        "n_dates": 0,
+        "high": {
+            "wins": 0,
+            "total": 0,
+            "win_rate": 0.0,
+            "avg_return_pct": 0.0,
+            "baseline_avg_return_pct": 0.0,
+            "edge_pp": 0.0,
+        },
+        "low": {
+            "hits": 0,
+            "total": 0,
+            "hit_rate": 0.0,
+            "avg_return_pct": 0.0,
+            "baseline_avg_return_pct": 0.0,
+            "edge_pp": 0.0,
+        },
+        "flat": {"total": 0},
+        "abnormal": {"total": 0},
+    }
+
+
 def _render_intraday_strategy_section(
     rows: list[dict],
     lines: list[str],
@@ -1361,6 +1493,7 @@ def _render_intraday_strategy_section(
     is_fallback: bool = False,
     segment_label: str = "S6",
     seg9_note: str | None = None,
+    historical_stats: dict[str, Any] | None = None,
 ) -> None:
     """渲染 §10 段日内操作建议 (append 到 lines).
 
@@ -1373,6 +1506,8 @@ def _render_intraday_strategy_section(
         is_fallback: 是否是 fallback 到前几天 (没有 T+1 时) 的提示
         segment_label: 段标签 (e.g. 'S6', 'S7', 数据驱动, §9 算出胜率最高段)
         seg9_note: §9 数据不足时的额外说明 (None = 无)
+        historical_stats: 历史胜率统计, 来自 _compute_intraday_historical_stats().
+                          None = 调用方未传, 段内降级展示 (旧行为)
     """
     if not rows:
         return  # 数据不可用时不输出整段 (而不是输出空段)
@@ -1390,25 +1525,17 @@ def _render_intraday_strategy_section(
         title += " [⚠️ fallback]"
     lines.append(title)
     lines.append("-" * 70)
-    lines.append(
-        f"基于 selection_date={selection_date} (composite 计算日) → "
-        f"trade_date={trade_str} (D+1 开盘日)"
-    )
+    lines.append(f"基于 selection_date={selection_date} (composite 计算日) → trade_date={trade_str} (D+1 开盘日)")
     if seg9_note:
         lines.append(seg9_note)
     if is_fallback:
-        lines.append(
-            "⚠️ 当前最新交易日 OHLC 未到位, fallback 到最近一个有 T+1 数据的日期"
-        )
+        lines.append("⚠️ 当前最新交易日 OHLC 未到位, fallback 到最近一个有 T+1 数据的日期")
     lines.append(
         f"本次 {segment_label} 段共 {n_total} 只 | 高开: {n_high} | 低开: {n_low} | "
         f"平开: {n_flat} | 数据异常: {n_abnormal}"
     )
     if n_abnormal > 0:
-        lines.append(
-            f"⚠️ {n_abnormal} 只复权异常股 (|gap|>10%) 已标记 monitor, "
-            f"因前收推断失真, 跳过自动建议"
-        )
+        lines.append(f"⚠️ {n_abnormal} 只复权异常股 (|gap|>10%) 已标记 monitor, 因前收推断失真, 跳过自动建议")
     lines.append("")
 
     # 主表格
@@ -1427,9 +1554,7 @@ def _render_intraday_strategy_section(
         open_p = float(r.get("open", 0) or 0)
         gap = float(r.get("real_gap_pct", 0) or 0)
         signal = _SIGNAL_LABEL.get(str(r.get("open_signal", "")), str(r.get("open_signal", "")))
-        action = _ACTION_LABEL.get(
-            str(r.get("recommended_action", "")), str(r.get("recommended_action", ""))
-        )
+        action = _ACTION_LABEL.get(str(r.get("recommended_action", "")), str(r.get("recommended_action", "")))
         eret = float(r.get("expected_return_pct", 0) or 0)
         stop_loss = float(r.get("stop_loss_price", 0) or 0)
         if str(r.get("open_signal")) == "high":
@@ -1450,32 +1575,71 @@ def _render_intraday_strategy_section(
     # 操作规则说明
     lines.append("")
     lines.append("【操作规则】")
-    lines.append(
-        "  高开 (gap > +0.5%): 9:25 集合竞价直接卖出 — "
-        "D+1 开盘价 > 前一日收盘价, 历史 8 天 10/10 命中"
-    )
-    lines.append(
-        "  低开 (gap < -0.5%): 不在 9:25 卖, 等盘中反弹回买入成本价 (即 D 日收盘价) 出手, "
-        "若 9:50 仍未回到成本价则按止损价强制出场"
-    )
-    lines.append(
-        "  平开 (-0.5% ~ +0.5%): 样本不足 4 只, 无强规律, 建议按当日分时自行判断"
-    )
-    lines.append(
-        "  数据异常 (|gap| > 10%): 复权事件 (除权/分红/增发), 真实跳空被掩盖, "
-        "建议手算或根据实时行情判断"
-    )
 
-    # 历史胜率参考
+    # 数据驱动: 操作规则中的历史命中率从 historical_stats 算, 无数据时降级到旧文字
+    if historical_stats and historical_stats.get("n_dates", 0) > 0:
+        h_stat = historical_stats["high"]
+        l_stat = historical_stats["low"]
+        high_note = f"历史 {h_stat['wins']}/{h_stat['total']} = {h_stat['win_rate']:.1f}% 命中 (n={h_stat['total']})"
+        low_note = f"历史 {l_stat['hits']}/{l_stat['total']} = {l_stat['hit_rate']:.1f}% 命中回本 (n={l_stat['total']})"
+    else:
+        high_note = "历史样本不足, 命中率为参考"
+        low_note = "历史样本不足, 命中率为参考"
+
+    lines.append(f"  高开 (gap > +0.5%): 9:25 集合竞价直接卖出 — D+1 开盘价 > 前一日收盘价, {high_note}")
+    lines.append(
+        f"  低开 (gap < -0.5%): 不在 9:25 卖, 等盘中反弹回买入成本价 (即 D 日收盘价) 出手, "
+        f"若 9:50 仍未回到成本价则按止损价强制出场, {low_note}"
+    )
+    lines.append("  平开 (-0.5% ~ +0.5%): 样本不足 4 只, 无强规律, 建议按当日分时自行判断")
+    lines.append("  数据异常 (|gap| > 10%): 复权事件 (除权/分红/增发), 真实跳空被掩盖, 建议手算或根据实时行情判断")
+
+    # 历史胜率参考 (数据驱动)
     lines.append("")
-    lines.append("【历史胜率参考 (06-15 ~ 06-25 8 天 31 只实测)】")
-    lines.append(
-        "  高开开盘卖: 10/10 = 100% 胜率, 均收 +2.18% (vs 死等尾盘 +0.73%, 增厚 +1.46pp)"
-    )
-    lines.append(
-        "  低开等反弹: 12/13 = 92.3% 命中回本, 等高卖均收 +2.18% (vs 开盘即卖 -1.79%, 减亏 +3.97pp)"
-    )
-    lines.append(
-        "  ⚠️ 样本量仅 8 天, 实战请谨慎, 后续数据增加后将更新"
-    )
+    if historical_stats and historical_stats.get("n_dates", 0) > 0:
+        n_dates = historical_stats["n_dates"]
+        h_stat = historical_stats["high"]
+        l_stat = historical_stats["low"]
+
+        # 全部样本数 (含 flat + abnormal, 用于全貌展示)
+        total_n = (
+            h_stat["total"]
+            + l_stat["total"]
+            + historical_stats["flat"]["total"]
+            + historical_stats["abnormal"]["total"]
+        )
+
+        lines.append(f"【历史胜率参考 (近 {n_dates} 个选股日 {total_n} 只实测)】")
+        # 高开: 增厚 = 开盘卖均收 - 死等尾盘均收
+        if h_stat["total"] > 0:
+            edge_sign = "+" if h_stat["edge_pp"] >= 0 else ""
+            lines.append(
+                f"  高开开盘卖: {h_stat['wins']}/{h_stat['total']} = {h_stat['win_rate']:.1f}% 胜率, "
+                f"均收 {h_stat['avg_return_pct']:+.2f}% (vs 死等尾盘 {h_stat['baseline_avg_return_pct']:+.2f}%, "
+                f"增厚 {edge_sign}{h_stat['edge_pp']:.2f}pp)"
+            )
+        else:
+            lines.append("  高开开盘卖: 样本为 0")
+
+        # 低开: 减亏 = 等高卖均收 - 开盘即卖均收
+        if l_stat["total"] > 0:
+            edge_sign = "+" if l_stat["edge_pp"] >= 0 else ""
+            edge_word = "减亏" if l_stat["edge_pp"] >= 0 else "反亏"
+            lines.append(
+                f"  低开等反弹: {l_stat['hits']}/{l_stat['total']} = {l_stat['hit_rate']:.1f}% 命中回本, "
+                f"等高卖均收 {l_stat['avg_return_pct']:+.2f}% (vs 开盘即卖 {l_stat['baseline_avg_return_pct']:+.2f}%, "
+                f"{edge_word} {edge_sign}{l_stat['edge_pp']:.2f}pp)"
+            )
+        else:
+            lines.append("  低开等反弹: 样本为 0")
+
+        # 样本量警告
+        if total_n < 20:
+            lines.append(f"  ⚠️ 样本量仅 {total_n} 只, 实战请谨慎, 后续数据增加后将更新")
+        else:
+            lines.append(f"  ✅ 样本量 {total_n} 只, 统计置信度较高")
+    else:
+        # 无数据时降级
+        lines.append("【历史胜率参考 (样本不足)】")
+        lines.append("  ⚠️ 历史 §10 实战样本不足, 无法给出胜率统计")
     lines.append("")
