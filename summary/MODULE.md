@@ -287,6 +287,47 @@ ls comprehensive_factor/result/composite_*_1d.json | wc -l | expect 4
 
 ---
 
+## 分段日内操作规范（v2.1 新增）
+
+报告 §10「S9 段日内操作建议 (T→T+1 实战指引)」由 `compute_intraday_strategy(...)` 计算并落库到 `summary/result/segment_intraday_strategy.parquet`，渲染时由 `load_intraday_strategy_recommendation(...)` 读回展示。
+
+**What**: `compute_intraday_strategy` 必须是**按 pending dates 循环补跑**的模式运行，而不是仅在报告生成当天跑 1 次。
+
+**Why（第一性原理推导）**:
+- D 日 9:30 开盘选股 → D 日尾盘买入 → D+1 早盘按 S9 段指引卖出
+- intraday_strategy 数据需求: D 日 close (prev_close) + D+1 日 OHLC —— 这两个数据在 **D+1 日当晚**齐备
+- 因此在 D+1 日脚本运行时, 既有的 stock_details + D+1 当日收盘价都已完整, **应当**为 D 日补充 intraday_strategy 行
+- (修复前) §10 渲染时只在 schedule 里调用一次 `compute_intraday_strategy(selection_date=today)`, 导致 historical dates 的 intraday_strategy 行永远不会被写入, 后续的报告只能 fallback 到一份**很旧**的快照, 实战参考价值随时间衰减为零
+
+**How**:
+- 函数 `_compute_pending_intraday_strategy(weight_method, segment_label, logger)` 实现
+- 每次跑 summary 脚本时:
+  1. 读全部 `segment_stock_details` 获取所有 selection_date
+  2. 读已有 `segment_intraday_strategy.parquet` 获取 done `(sd, segment_label)` 集合
+  3. 对每个尚未写入的 (sd, segment_label), 调用 `compute_intraday_strategy(sd, segment_label=best_seg)`
+  4. 由 `compute_intraday_strategy` 内部检查 OHLC 完备性, 缺失时静默 skip
+- 调度点: `_compute_pending_win_rates` 之后, 在 `_render_cross_pipeline_summary` 拿到 best_seg 后立即调用
+
+**Don't**:
+- 禁止直接调 `compute_intraday_strategy(selection_date=today)` 作为唯一调用入口——这是设计漏洞
+- 禁止在 `_compute_pending_intraday_strategy` 之外的渲染逻辑里补数据——保持职责单一
+- 禁止在数据写入失败时 raise 终止报告生成——必须静默 skip, 日志 WARN
+
+**When**: 仅 `PIPELINE_ALIAS == "ob_quality"` 主管线 + best_seg 非空时调用。
+
+**Verify**:
+```python
+# 检查 parquet 中最新 selection_date 是否接近"昨天"
+import pandas as pd
+from datetime import date, timedelta
+df = pd.read_parquet('summary/result/segment_intraday_strategy.parquet')
+latest = sorted(df['selection_date'].unique())[-1]
+print(f'最新 selection_date = {latest} (期望: T-1={today})')
+assert latest >= (date.today() - timedelta(days=3)).isoformat()
+```
+
+---
+
 ## 脚本规范
 
 ### 脚本命名规则
@@ -575,6 +616,13 @@ rsi                -0.045     0.51      0.089       498
    - 报告新增第零部分（数据完整性检查）
    - 新增 get_expected_t_minus_1() 计算期望日期
    - 新增测试用例 9 个（数据完整性检查相关）
+
+12. v2.1（2026-07-02）：
+   - 新增 `_compute_pending_intraday_strategy(weight_method, segment_label, logger)`: 按 pending dates 循环补跑 intraday_strategy
+   - 修复 §10 fallback 一直回到 2026-06-26 的设计漏洞（应回到 T-1 / 最近有 T+1 的 selection_date）
+   - 一次性补跑历史: 6-15 ~ 6-30 共 9 个 selection_date 的 S9 段 intraday_strategy 行
+   - 验证: 7-02 报告 §10 selection_date 从 2026-06-26 升级到 2026-06-30（最新已结算）
+   - 同步更新 MODULE.md 增加"分段日内操作规范"章节
 
 11. v2.0（2026-06-02）：
    - MODULE.md 规范扩展（v1.9 → v2.0）

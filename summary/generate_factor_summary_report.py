@@ -320,6 +320,19 @@ def generate_report(date: str, logger: logging.Logger, force_full_correlation: b
         seg_merge_stats = seg9_result.get("merge_stats", {}) if isinstance(seg9_result, dict) else None
         # §9 best_seg 是 §10 要选的最高胜率段 (替代原来的硬写 S6)
         best_seg_from_sec9 = seg9_result.get("best_seg") if isinstance(seg9_result, dict) else None
+        # v2.1: 按 pending dates 补跑 intraday_strategy (6-30 补 6-29, 7-01 补 6-30, ...)
+        # 设计意图: D+1 日当晚跑批时, D 日 close + D+1 日 OHLC 已齐备,
+        # 应在 §10 渲染前补齐历史 selection_date 的 intraday_strategy 行, 让 fallback
+        # 时返回的 selection_date 是最新的一个, 而不是 6-26 这种 N 天前的快照.
+        # 见 _compute_pending_intraday_strategy docstring 的设计意图段.
+        if best_seg_from_sec9:
+            weight_method_for_strategy = stock_result.get("meta", {}).get("weight_method", "rolling_icir_weight")
+            _compute_pending_intraday_strategy(
+                pipeline="ob_quality",
+                weight_method=weight_method_for_strategy,
+                segment_label=best_seg_from_sec9,
+                logger=logger,
+            )
     else:
         seg_merge_stats = None
         best_seg_from_sec9 = None
@@ -665,6 +678,103 @@ def _compute_pending_win_rates(logger: logging.Logger) -> None:
 
     if total_computed:
         logger.info("_compute_pending_win_rates: 全部完成 %d 个新日期", total_computed)
+
+
+def _compute_pending_intraday_strategy(
+    pipeline: str,
+    weight_method: str,
+    segment_label: str,
+    logger: logging.Logger,
+) -> None:
+    """T+1: 按 pending dates 补跑 intraday_strategy.
+
+    设计意图（为什么这是这个模块的核心设计）:
+      - D 日 9:30 开盘选股 → D 日尾盘买入 → D+1 早盘按 S9 段指引卖出
+      - intraday_strategy 的数据需求: D 日 close (prev_close) + D+1 日 OHLC
+      - 因此 D+1 日当晚 (即下一次 summary 脚本运行时), 既有的 stock_details
+        + D+1 当日收盘价都已齐备, 可以完整补跑 D 日的 intraday_strategy 行
+      - 当前 (修复前) §10 渲染时只在 schedule 里调用一次
+        `compute_intraday_strategy(selection_date=today)` —— 这导致
+        historical dates 的 intraday_strategy 行永远不会被写入, 后续的报告
+        只能 fallback 到一份**很旧**的快照, 实战参考价值随时间衰减为零
+
+    与 _compute_pending_win_rates 完全类比的设计:
+      - pending = stock_details 中所有 selection_date, 减去
+        segment_intraday_strategy.parquet 中已有 (selection_date, segment_label) 的 (sd, segment_label) 元组
+      - 对每个 pending sd: 调用 compute_intraday_strategy(sd, segment_label=best_seg)
+      - compute_intraday_strategy 内含 OHLC + segment_label + master date 完备检查, 失败时静默 skip
+
+    Args:
+        pipeline: 'ob_quality' (固定)
+        weight_method: 权重方法
+        segment_label: §9 算出的合并胜率最高段 (best_seg), 用于补跑
+        logger: 日志记录器
+
+    Returns:
+        None
+    """
+    try:
+        from summary.report.segment_win_db import (
+            _INTRADAY_STRATEGY_PATH,
+            INTRADAY_STRATEGY_COLUMNS,
+            _read_parquet,
+            compute_intraday_strategy,
+            load_segment_stock_details,
+        )
+    except ImportError:
+        logger.debug("_compute_pending_intraday_strategy: 模块不可用, 跳过")
+        return
+
+    try:
+        # 读全部 stock_details (不限段, 因为 segment_label 只是 best_seg 一个)
+        stock_df = load_segment_stock_details(pipeline, weight_method=weight_method)
+    except Exception:
+        logger.debug("_compute_pending_intraday_strategy: 读 stock_details 失败, 跳过")
+        return
+    if stock_df.empty:
+        return
+
+    all_dates = sorted(stock_df["selection_date"].unique())
+    if not all_dates:
+        return
+
+    # 已有的 (selection_date, segment_label) 集合, 直接读 parquet 过滤
+    done_pairs: set[tuple[str, str]] = set()
+    try:
+        df = _read_parquet(_INTRADAY_STRATEGY_PATH, INTRADAY_STRATEGY_COLUMNS)
+        if not df.empty:
+            mask = (df["pipeline"] == pipeline) & (df["weight_method"] == weight_method)
+            df = df[mask]
+            done_pairs = set(zip(df["selection_date"].astype(str), df["segment_label"].astype(str)))
+    except Exception:
+        logger.debug("_compute_pending_intraday_strategy: 读已有 intraday_strategy 失败")
+
+    computed = 0
+    for sd in all_dates:
+        if (sd, segment_label) in done_pairs:
+            continue
+        try:
+            out = compute_intraday_strategy(
+                pipeline=pipeline,
+                weight_method=weight_method,
+                selection_date=sd,
+                logger=logger,
+                segment_label=segment_label,
+            )
+        except Exception:
+            logger.warning("intraday_strategy 补跑失败 %s/%s/%s", pipeline, weight_method, sd, exc_info=True)
+            continue
+        if out is not None and not out.empty:
+            computed += 1
+
+    if computed:
+        logger.info(
+            "_compute_pending_intraday_strategy: %s/%s/段%s 完成 %d 个新日期",
+            pipeline,
+            weight_method,
+            segment_label,
+            computed,
+        )
 
 
 def _render_cross_pipeline_summary(
