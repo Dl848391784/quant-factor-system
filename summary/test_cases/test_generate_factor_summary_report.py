@@ -1754,5 +1754,44 @@ class TestAllCompositeStocksDisplay:
         assert "-0.300" in text
 
 
+class TestComputePendingWinRatesDataSource:
+    """回归测试：_compute_pending_win_rates 必须读 master 数据源.
+
+    Bug 历史 (v2.2): 修复前读 FACTOR_IC_DATA (alias 切片)，导致股票池筛选被剔除的
+    股票的 forward_return_1d 缺失，从而 wins/total 静默减小（例如 6-29 S9 段
+    1/1 = 100% 应为 2/2 = 100% 但 alias 切片中 002861 在 6-30 被 filter 排除).
+    修复后必须读 FACTOR_IC_DATA_MASTER（即 data_fetchers/result/factor_ic_data.parquet）.
+    """
+
+    def test_uses_master_not_alias(self):
+        """_compute_pending_win_rates 必须 import FACTOR_IC_DATA_MASTER, 不能是 FACTOR_IC_DATA."""
+        import inspect
+
+        from summary import generate_factor_summary_report as mod
+
+        src = inspect.getsource(mod._compute_pending_win_rates)
+        # 必须显式 import FACTOR_IC_DATA_MASTER
+        assert "FACTOR_IC_DATA_MASTER" in src, (
+            "_compute_pending_win_rates 必须使用 FACTOR_IC_DATA_MASTER (master 全市场数据), "
+            "不能用 FACTOR_IC_DATA (alias 切片, 会被 pipeline filter 剔除非业务相关股票)"
+        )
+        # 不能单独 import FACTOR_IC_DATA (alias) 作为胜率计算源
+        assert "from paths import FACTOR_IC_DATA\n" not in src, (
+            "_compute_pending_win_rates 不能 import FACTOR_IC_DATA (alias), "
+            "历史 bug 来源 (2026-07-02, 002861 在 6-30 因换手率 4.92% < 5% 被 alias 排除)"
+        )
+
+    def test_docstring_documents_master_choice(self):
+        """docstring 必须记录「为什么读 master」的根因, 防回归."""
+        import inspect
+
+        from summary import generate_factor_summary_report as mod
+
+        doc = inspect.getdoc(mod._compute_pending_win_rates) or ""
+        assert "master" in doc.lower(), "docstring 应说明 master vs alias 的设计意图"
+        # 关键反例: 必须提到 alias 和 factor_ic_data.parquet 或 ob_quality
+        assert "alias" in doc.lower(), "docstring 应明确说 不用 alias 切片 的理由"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

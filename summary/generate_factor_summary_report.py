@@ -576,9 +576,19 @@ def _compute_pending_win_rates(logger: logging.Logger) -> None:
     读取 segment_stock_details, 按 weight_method 分组,
     对比 segment_win_rates 中已有日期,
     对未计算胜率的日期尝试匹配 forward_return_1d → qcut → 写 win_rates.
+
+    数据源: 必须读 master 全市场数据 (FACTOR_IC_DATA_MASTER),
+    不能读 pipeline alias 切片 (FACTOR_IC_DATA, e.g. ob_quality/factor_ic_data.parquet).
+    原因: alias 切片只含「股票池筛选通过」的股票. 若一只股票当天不满足
+    pipeline filter (e.g. ob_quality 的 rsi_6 > 70 and turnover_rate > 5),
+    alias 切片会剔除该股票, 但其 forward_return_1d 在 master 中依然真实存在.
+    若胜率计算用 alias 切片, 会造成"非业务原因"的样本丢失, 例如 002861
+    在 2026-06-30 换手率 4.92% < 5% 被 ob_quality 排除, 但胜率应基于
+    master 的 +5.79% 计算. 设计意图 (与 compute_intraday_strategy 一致):
+    胜率/价格 = master; 股票池筛选 = alias. 详见 MODULE.md §数据来源规范.
     """
     import pandas as pd
-    from paths import FACTOR_IC_DATA
+    from paths import FACTOR_IC_DATA_MASTER
 
     # 读取所有 stock_details 日期
     stock_df = load_segment_stock_details("ob_quality")
@@ -588,12 +598,12 @@ def _compute_pending_win_rates(logger: logging.Logger) -> None:
     # 按 weight_method 分组处理
     all_weight_methods = sorted(stock_df["weight_method"].unique())
 
-    # 读取 master 数据 (pipeline-aware)
+    # 读取 master 全市场数据 (NOT alias 切片)
     try:
-        master_dates = sorted(pd.read_parquet(FACTOR_IC_DATA, columns=["date"])["date"].dropna().unique())
-        master_ret = pd.read_parquet(FACTOR_IC_DATA, columns=["date", "asset", "forward_return_1d"])
+        master_dates = sorted(pd.read_parquet(FACTOR_IC_DATA_MASTER, columns=["date"])["date"].dropna().unique())
+        master_ret = pd.read_parquet(FACTOR_IC_DATA_MASTER, columns=["date", "asset", "forward_return_1d"])
     except Exception:
-        logger.debug("_compute_pending_win_rates: 无法读取主数据源 %s", FACTOR_IC_DATA)
+        logger.debug("_compute_pending_win_rates: 无法读取 master 主数据源 %s", FACTOR_IC_DATA_MASTER)
         return
 
     n_segments = 30

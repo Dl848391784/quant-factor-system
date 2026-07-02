@@ -35,6 +35,54 @@ summary/
 
 ## 数据来源规范
 
+### 因子数据源: master vs alias (v2.2 新增, 2026-07-02)
+
+**绝对规则**: 胜率计算与价格相关字段 (OHLC, forward_return_1d) **必须** 读 `FACTOR_IC_DATA_MASTER` (i.e. `data_fetchers/result/factor_ic_data.parquet`), **禁止** 读 alias 切片 (`FACTOR_IC_DATA`, i.e. `data_fetchers/result/<alias>/factor_ic_data.parquet`).
+
+| 数据需求 | 应使用 | 禁止使用 | 理由 |
+|---------|--------|---------|------|
+| 股票池筛选 (composite 计算, 选哪些股票) | `FACTOR_IC_DATA` (alias 切片) | - | alias 是为 pipeline filter 设计的 |
+| 胜率计算 (wins/total/forward_return_1d) | `FACTOR_IC_DATA_MASTER` | `FACTOR_IC_DATA` | alias 切片中"被 filter 剔除的股票"行缺失, 计算胜率会漏样本 |
+| OHLC 价格 (D 日 close, D+1 日 open/close) | `FACTOR_IC_DATA_MASTER` | `FACTOR_IC_DATA` | 同上, 价格应来自全市场真实交易 |
+| `compute_intraday_strategy` 的 prev_close | `FACTOR_IC_DATA_MASTER` (line 346 已正确) | - | 此函数已正确用 master, 与本规范一致 |
+
+**What**: 任何 `summary/` 模块代码, 取胜率 / 价格 / OHLC / forward_return_1d 时, 都必须 `from paths import FACTOR_IC_DATA_MASTER` 然后 `pd.read_parquet(FACTOR_IC_DATA_MASTER, ...)`.
+
+**Why (根因, 2026-07-02 实测)**:
+- 例: 002861 在 2026-06-30 换手率 4.92%, 不满足 ob_quality filter `turnover_rate > 5`
+  → 在 `data_fetchers/result/ob_quality/factor_ic_data.parquet` (alias) 中 6-30 整行缺失
+  → 但在 `data_fetchers/result/factor_ic_data.parquet` (master) 中 close=22.28, forward_return_1d=+5.79%
+- `_compute_pending_win_rates` (line 593-594) 之前误读 alias, 002861 被静默丢弃, 导致 §9 报告 `06-29: 1/1 = 100%` (应为 `2/2 = 100%`)
+- alias 切片的本意是"缩小 pipeline 内的因子计算范围"——**计算胜率时必须从 master 取**, 否则引入"非业务原因"样本丢失
+
+**Don't**:
+- ❌ 任何 `summary/*.py` 文件内胜率/价格计算用 `FACTOR_IC_DATA`
+- ❌ 注释写"读取 master 数据 (pipeline-aware)"却用 `FACTOR_IC_DATA` (alias) (历史 bug 注释, 已修复)
+
+**When**: 任何 `paths.FACTOR_IC_DATA_MASTER` 存在的项目 (这是项目级常量, 永远可用).
+
+**Examples**:
+```python
+# ✓ 正确 (胜率计算):
+from paths import FACTOR_IC_DATA_MASTER
+master_ret = pd.read_parquet(FACTOR_IC_DATA_MASTER, columns=["date", "asset", "forward_return_1d"])
+
+# ✗ 错误 (alias 切片, 历史 bug):
+from paths import FACTOR_IC_DATA
+master_ret = pd.read_parquet(FACTOR_IC_DATA, columns=["date", "asset", "forward_return_1d"])
+```
+
+**Verify** (防止回归):
+```python
+import inspect
+from summary import generate_factor_summary_report as mod
+src = inspect.getsource(mod._compute_pending_win_rates)
+assert "FACTOR_IC_DATA_MASTER" in src
+assert "from paths import FACTOR_IC_DATA\n" not in src
+```
+
+详见: `summary/test_cases/test_generate_factor_summary_report.py::TestComputePendingWinRatesDataSource` (2 个回归测试).
+
 ### 输入数据路径
 
 **summary 模块读取其他模块的输出数据，不自行计算。**
@@ -44,8 +92,9 @@ summary/
 | IC 分析结果 | factor_ic | `factor_ic/result/` | `ic_<因子名>_analysis_result.json` |
 | 分层回测结果 | backtest | `backtest/result/` | `<因子名>_layered_backtest.json` |
 | 综合因子结果 | comprehensive_factor | `comprehensive_factor/result/` | `composite_<加权方式>_1d.json` |
-| 因子数据 | data_fetchers | `data_fetchers/result/` | `factor_ic_data.parquet` |
-| 股票名称映射（v2.26） | data_fetchers | `data_fetchers/result/stock_list.json` (`paths.STOCK_LIST_DATA`) | `{"stocks": [{"code","name",...}]}` |
+| 因子数据 (master, 全市场) | data_fetchers | `data_fetchers/result/factor_ic_data.parquet` (`paths.FACTOR_IC_DATA_MASTER`) | parquet |
+| 因子数据 (alias 切片, pipeline filter 后) | data_fetchers | `data_fetchers/result/<alias>/factor_ic_data.parquet` (`paths.FACTOR_IC_DATA`) | parquet |
+| 股票名称映射 (v2.26) | data_fetchers | `data_fetchers/result/stock_list.json` (`paths.STOCK_LIST_DATA`) | `{"stocks": [{"code","name",...}]}` |
 
 ### 数据流向
 
@@ -623,6 +672,13 @@ rsi                -0.045     0.51      0.089       498
    - 一次性补跑历史: 6-15 ~ 6-30 共 9 个 selection_date 的 S9 段 intraday_strategy 行
    - 验证: 7-02 报告 §10 selection_date 从 2026-06-26 升级到 2026-06-30（最新已结算）
    - 同步更新 MODULE.md 增加"分段日内操作规范"章节
+
+13. v2.2（2026-07-02）：
+   - **Bug 修复**: `_compute_pending_win_rates` (line 581, 593, 594, 596) 改为读 `FACTOR_IC_DATA_MASTER` 全市场数据源, 不再读 alias 切片 (`FACTOR_IC_DATA`)
+   - 根因: alias 切片 (e.g. `data_fetchers/result/ob_quality/factor_ic_data.parquet`) 只含 pipeline filter 通过的股票. 002861 在 2026-06-30 因 turnover_rate=4.92%<5% 被 alias 排除, 但 master 仍有 +5.79% 的真实收益. 修复前胜率计算被静默删除 002861, 导致 §9 报告 `06-29: 1/1=100%` 误报 (应是 2/2)
+   - 验证: 修复后 6-29 S9 段 wins=2, total=2, win_rate=100%
+   - 新增回归测试 `TestComputePendingWinRatesDataSource` (2 用例) 防回归
+   - 同步更新 MODULE.md 增加"因子数据源: master vs alias" 章节, 明确绝对规则
 
 11. v2.0（2026-06-02）：
    - MODULE.md 规范扩展（v1.9 → v2.0）
