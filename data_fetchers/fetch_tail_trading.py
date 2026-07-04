@@ -885,7 +885,7 @@ def merge_records(
         # 合并失败股票列表
         existing_failed_stocks = set(existing_meta.get("failed_stocks", [])) if existing_meta else set()
         final_failed_stocks = existing_failed_stocks.union(set(failed_stocks))
-        final_failed_stocks_list = sorted(list(final_failed_stocks))
+        final_failed_stocks_list = sorted(final_failed_stocks)
 
         if final_failed_stocks_list:
             _logger.info("失败股票累计: %s 支（下次将优先拉取）", len(final_failed_stocks_list))
@@ -972,7 +972,7 @@ def merge_records(
     final_failed_stocks = final_failed_stocks.difference(successful_stocks)
 
     # 转为排序后的列表（便于调试）
-    final_failed_stocks_list = sorted(list(final_failed_stocks))
+    final_failed_stocks_list = sorted(final_failed_stocks)
 
     if final_failed_stocks_list:
         _logger.info("失败股票累计: %s 支（下次将优先拉取）", len(final_failed_stocks_list))
