@@ -1,0 +1,104 @@
+{# ob_quality 第八节 (v0.4.8 R2)
+
+参数:
+- result: load_stock_selection_result() 返回的 dict (ob_quality pipeline)
+- stock_name_map: 代码→名称 字典
+
+data_loaders 已暴露的 stage 字段 (H1.1 严守, 不改 data_loaders):
+- stage1_top: 30 行 (Stage 1 composite 降序 Top 30, 候选池头部)
+- stage1_bottom: 30 行 (Stage 1 Bottom 30, 弱势股端)
+- stage3_top / top_stocks: 57 行 (Stage 3 LR proba_up 降序, 短名单)
+- all_composite_stocks: 选股日全量 (≤400 只时) → ob_quality 61 只全量展示
+#}
+{% if result is none %}
+  <p class="empty">选股数据不可用 — 请确认 summary 流水线已成功运行</p>
+{% else %}
+  <div class="meta-box">
+    <p><strong>选股日期</strong>: {{ result.meta.selection_date }}（T-1 数据）</p>
+    <p><strong>权重方法</strong>: {{ result.meta.weight_method }} · <strong>方向</strong>: {{ result.meta.factor_direction }} · <strong>Top N</strong>: {{ result.meta.top_n }}</p>
+    <p><strong>候选池</strong>: {{ result.meta.stocks_on_date | default(0) }} 只 → 有效 {{ result.meta.valid_stocks | default(0) }} → Stage1 {{ result.meta.stage1_pool_size | default(0) }} → 最终 {{ result.top_stocks | length }} 只</p>
+    <p><strong>Composite Score</strong>: {{ "%.4f" | format(result.meta.composite_score | default(0)) }}</p>
+  </div>
+
+  {# 1. 全量 composite 股票 (≤400 只时) — ob_quality 61 只全量展示 #}
+  {% if result.all_composite_stocks %}
+  <h3>全量展示: {{ result.all_composite_stocks | length }} 只股票 (composite 降序)</h3>
+  <p class="muted">v0.4.8 R2: ob_quality 候选池小, 全量展示便于人工决断 (每 10 只一组, v0.4.8 R4 实施分组)</p>
+  <table>
+    <thead>
+      <tr><th>#</th><th>代码</th><th>名称</th><th>Composite</th></tr>
+    </thead>
+    <tbody>
+    {% for stock in result.all_composite_stocks %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ stock.code }}</td>
+        <td>{{ stock_name_map.get(stock.code, "—") }}</td>
+        <td>{{ "%.3f" | format(stock.composite_value) if stock.composite_value is not none else "—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {# 2. Stage 1: 候选池头部 30 只 (composite 降序) #}
+  {% if result.stage1_top %}
+  <h3>Stage 1: composite 降序 Top {{ result.stage1_top | length }} (候选池)</h3>
+  <table>
+    <thead>
+      <tr><th>#</th><th>代码</th><th>名称</th><th>Composite</th></tr>
+    </thead>
+    <tbody>
+    {% for stock in result.stage1_top %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ stock.code }}</td>
+        <td>{{ stock_name_map.get(stock.code, "—") }}</td>
+        <td>{{ "%.3f" | format(stock.composite_value) if stock.composite_value is not none else "—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {# 3. Stage 1 Bottom: 弱势股端 30 只 (composite 升序) #}
+  {% if result.stage1_bottom %}
+  <h3>Stage 1 Bottom: composite 升序 Top {{ result.stage1_bottom | length }} (弱势股端)</h3>
+  <p class="muted">v0.4.8 R2: ob_quality 完整 30 段 = 30 Top + 30 Bottom + Stage 3 LR 短名单</p>
+  <table>
+    <thead>
+      <tr><th>#</th><th>代码</th><th>名称</th><th>Composite</th></tr>
+    </thead>
+    <tbody>
+    {% for stock in result.stage1_bottom %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ stock.code }}</td>
+        <td>{{ stock_name_map.get(stock.code, "—") }}</td>
+        <td>{{ "%.3f" | format(stock.composite_value) if stock.composite_value is not none else "—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {# 4. Stage 3: LR 短名单 (top_stocks) #}
+  {% if result.top_stocks %}
+  <h3>Stage 3: LR 短名单（{{ result.top_stocks | length }} 只）</h3>
+  <table>
+    <thead>
+      <tr><th>#</th><th>代码</th><th>名称</th><th>Composite</th></tr>
+    </thead>
+    <tbody>
+    {% for stock in result.top_stocks %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ stock.code }}</td>
+        <td>{{ stock_name_map.get(stock.code, "—") }}</td>
+        <td>{{ "%.3f" | format(stock.composite_value) if stock.composite_value is not none else "—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+{% endif %}
