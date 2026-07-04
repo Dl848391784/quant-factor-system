@@ -14,6 +14,7 @@ dependencies = [
     "pytest-cov>=4.0",
     "ruff>=0.1.0",
     "ijson>=3.0",
+    "scipy>=1.11,<2",  # factor_ic/common/ic_calculator.py 使用 scipy.stats
     "flask>=3.0,<4",  # web_ui 模块（2026-07-04 新增）
 ]
 
