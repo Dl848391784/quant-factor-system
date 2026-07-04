@@ -70,6 +70,7 @@ from web_ui.common.txt_parser import (  # noqa: E402
     parse_obq_intraday_fallback as parse_obq_intraday,
     parse_obq_section_8_meta as parse_obq_s8,
     parse_obq_section_9_matrix as parse_obq_s9,
+    parse_obq_section_10_segments as parse_obq_s10,
 )
 
 
@@ -139,6 +140,7 @@ def show_report(date: str):
     # v0.4.8 R4: 解析 ob_quality txt 报告补全字段 (H1.1 严守: 不改 data_loaders)
     txt_s8_meta: dict = {}
     txt_s9_matrix: dict | None = None
+    txt_s10_segments: dict | None = None
     intraday_fallback: dict = {}
     try:
         txt_s8_meta = parse_obq_s8(logger=logger) or {}
@@ -148,6 +150,12 @@ def show_report(date: str):
         txt_s9_matrix = parse_obq_s9(logger=logger)
     except Exception as e:
         logger.warning("parse_obq_s9 失败: %s", e)
+    # v0.4.8 R16: 第十节 30 分段候选明细 (txt 来源, S1~S30)
+    try:
+        txt_s10_segments = parse_obq_s10(logger=logger)
+    except Exception as e:
+        logger.warning("parse_obq_s10 失败: %s", e)
+        txt_s10_segments = None
     # v0.4.8 R6: 解析操作规则 + 历史胜率
     try:
         intraday_fallback = parse_obq_intraday(logger=logger) or {}
@@ -223,6 +231,7 @@ def show_report(date: str):
         intraday_rows=intraday_rows,
         txt_s8_meta=txt_s8_meta,
         txt_s9_matrix=txt_s9_matrix,
+        txt_s10_segments=txt_s10_segments,
         intraday_fallback=intraday_fallback,
         data_results=data_results,
         derived_results=derived_results,

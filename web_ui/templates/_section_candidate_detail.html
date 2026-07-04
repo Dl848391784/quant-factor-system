@@ -1,80 +1,57 @@
-{# 10·今日三十分段候选明细 (v0.4.8 R3)
+{# 10·今日三十分段候选明细 (v0.4.8 R16)
 
 参数:
-- result: load_stock_selection_result() 返回的 dict (ob_quality)
-- stock_name_map: 代码→名称
+- txt_s10_segments: parse_obq_section_10_segments() 返回的 dict (从 summary txt 报告解析)
+  - H1.1 内部实现, 不读 master Parquet
+  - 与 §9 矩阵不同源 (此节 = S1~S30 段的当前选股日 30 段分组; §9 = 30 段 × 12 选股日 矩阵)
+- stock_name_map: 代码→名称 (避免重复解析, txt 已含名称)
 
-合并 stage1_top + stage1_bottom + top_stocks 展示 (30 段 = 30 Top + 30 Bottom + Stage 3 LR 短名单)
+数据格式 (txt §10 原样):
+  每段 [Sn] N 只 合并胜率: 48.8%
+  + 排名 代码 名称 composite (1-3 只/段)
 #}
-{% if not result %}
-  <p class="empty">候选数据不可用</p>
+{% if not txt_s10_segments %}
+  <p class="empty">候选明细数据不可用 — txt 第十节未找到 (H1.1: web_ui 只读 summary/result/ob_quality/factor_summary_report_*.txt)</p>
 {% else %}
-  {# v0.4.8 R5: 候选池大小从 meta.valid_stocks 取 (txt 一致: 57 只), 不用 stocks_on_date #}
-  {% set pool_size = result.meta.valid_stocks | default(0) %}
   <div class="meta-box">
     <p>
-      <strong>选股日</strong>: {{ result.meta.selection_date }}
-      · <strong>权重方法</strong>: {{ result.meta.weight_method }}
-      · <strong>操作</strong>: 今日尾盘买入 → 下一交易日卖出 (高开开盘锁利, 低开等反抽减亏)
+      <strong>选股日</strong>: {{ txt_s10_segments.selection_date }}
+      · <strong>候选池</strong>: {{ txt_s10_segments.pool_size }} 只
+      · <strong>权重方法</strong>: {{ txt_s10_segments.weight_method }}
+      · <strong>共 {{ txt_s10_segments.segments | length }} 段</strong>
     </p>
     <p>
-      <strong>候选池共</strong>: {{ pool_size }} 只
-      · <strong>切 30 段</strong>
+      <strong>操作</strong>: {{ txt_s10_segments.operation | default("—") }}
     </p>
-    <p class="muted">v0.4.8 R3: 合并 stage1_top (30) + stage1_bottom (30) + stage3_top (57) 全量展示</p>
+    {% if txt_s10_segments.best_segment %}
+    <p>
+      <strong>最佳段</strong>: <code>{{ txt_s10_segments.best_segment.label }}</code>
+      (合并胜率 {{ "%.1f" | format(txt_s10_segments.best_segment.win_rate) }}%)
+    </p>
+    {% endif %}
+    <p class="muted">v0.4.8 R16: 数据源 web_ui/common/txt_parser.parse_obq_section_10_segments (从 summary/result/ob_quality/factor_summary_report_&lt;latest&gt;.txt 解析 S1~S30 段, H1.1 内部实现, 不读 master Parquet)</p>
   </div>
 
-  {# Stage 1 Top: 候选池头部 #}
-  {% if result.stage1_top %}
-  <h3>Stage 1 Top {{ result.stage1_top | length }}: 候选池头部 (composite 降序)</h3>
+  {% set best_label = txt_s10_segments.best_segment.label if txt_s10_segments.best_segment else None %}
+  {% for seg in txt_s10_segments.segments %}
+  <h3>
+    [{{ seg.label }}] {{ seg.n_stocks }} 只 · 合并胜率 {{ "%.1f" | format(seg.win_rate) }}%
+    {% if seg.label == best_label %}⭐ BEST{% endif %}
+  </h3>
+  {% if seg.stocks %}
   <table>
     <thead><tr><th>排名</th><th>代码</th><th>名称</th><th>Composite</th></tr></thead>
     <tbody>
-    {% for stock in result.stage1_top %}
+    {% for stock in seg.stocks %}
       <tr>
-        <td>{{ loop.index }}</td>
+        <td>{{ stock.rank }}</td>
         <td>{{ stock.code }}</td>
-        <td>{{ stock_name_map.get(stock.code, "—") }}</td>
-        <td>{{ "%.3f" | format(stock.composite_value) if stock.composite_value is not none else "—" }}</td>
+        <td>{{ stock.name }}</td>
+        <td>{{ "%.3f" | format(stock.composite) }}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
   {% endif %}
-
-  {# Stage 3: LR 短名单 #}
-  {% if result.top_stocks %}
-  <h3>Stage 3 Top {{ result.top_stocks | length }}: LR 短名单 (proba_up 降序)</h3>
-  <table>
-    <thead><tr><th>排名</th><th>代码</th><th>名称</th><th>Composite</th></tr></thead>
-    <tbody>
-    {% for stock in result.top_stocks %}
-      <tr>
-        <td>{{ loop.index }}</td>
-        <td>{{ stock.code }}</td>
-        <td>{{ stock_name_map.get(stock.code, "—") }}</td>
-        <td>{{ "%.3f" | format(stock.composite_value) if stock.composite_value is not none else "—" }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
-
-  {# Stage 1 Bottom: 弱势股端 (v3.8: stage=4) #}
-  {% if result.stage1_bottom %}
-  <h3>Stage 1 Bottom {{ result.stage1_bottom | length }}: 候选池尾部 (composite 升序)</h3>
-  <table>
-    <thead><tr><th>排名</th><th>代码</th><th>名称</th><th>Composite</th></tr></thead>
-    <tbody>
-    {% for stock in result.stage1_bottom %}
-      <tr>
-        <td>{{ loop.index }}</td>
-        <td>{{ stock.code }}</td>
-        <td>{{ stock_name_map.get(stock.code, "—") }}</td>
-        <td>{{ "%.3f" | format(stock.composite_value) if stock.composite_value is not none else "—" }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
+  {% endfor %}
 {% endif %}

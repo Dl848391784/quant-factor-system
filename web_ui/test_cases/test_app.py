@@ -399,25 +399,62 @@ def test_intraday_handles_empty_rows(client, mock_obq_full_result):
     assert "无日内操作建议数据" in body
 
 
-def test_candidate_detail_renders_three_stage_tables(client, mock_obq_full_result):
-    """v0.4.8 R3: 候选明细 section 渲染 3 个表格"""
+def test_candidate_detail_renders_txt_s10_segments(client, mock_obq_full_result):
+    """v0.4.8 R16: 第十节 渲染 txt 解析的 S1~S30 段候选明细 (替换原 stage1/stage3 表)"""
+    s10_mock = {
+        "selection_date": "2026-07-03",
+        "pool_size": 57,
+        "weight_method": "rolling_icir_weight",
+        "operation": "今日尾盘买入 -> 下一交易日卖出 (高开开盘锁利, 低开等反抽减亏)",
+        "best_segment": {"label": "S7", "win_rate": 59.6},
+        "segments": [
+            {"label": "S1", "n_stocks": 2, "win_rate": 46.3, "stocks": [
+                {"rank": 1, "code": "002687", "name": "乔治白", "composite": 1.392},
+                {"rank": 2, "code": "000520", "name": "凤凰航运", "composite": 1.189},
+            ]},
+            {"label": "S7", "n_stocks": 2, "win_rate": 59.6, "stocks": [
+                {"rank": 13, "code": "002628", "name": "成都路桥", "composite": 0.677},
+                {"rank": 14, "code": "603607", "name": "京华激光", "composite": 0.671},
+            ]},
+            {"label": "S16", "n_stocks": 1, "win_rate": 52.3, "stocks": [
+                {"rank": 31, "code": "000925", "name": "众合科技", "composite": 0.177},
+            ]},
+        ],
+    }
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
-        patch("web_ui.app.load_stock_name_map", return_value={"002687": "乔治白", "600857": "测试1"}),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.parse_obq_s10", return_value=s10_mock),
     ):
         resp = client.get("/report/2026-07-03")
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
-    # 3 个子标题
-    assert "Stage 1 Top" in body
-    assert "Stage 3 Top" in body
-    assert "Stage 1 Bottom" in body
-    # 真实股票 (mock_obq_full_result 覆盖)
-    assert "600857" in body
+    # 30 段视图 (样本段)
+    assert "[S1]" in body
+    assert "合并胜率" in body
+    # 最佳段标记
+    assert "S7" in body
+    assert "BEST" in body  # 标记
+    # 真实股票
     assert "002687" in body
-    assert "000566" in body
+    assert "乔治白" in body
     # 操作提示
     assert "今日尾盘买入" in body
+    # 候选池
+    assert "57" in body
+
+
+def test_candidate_detail_falls_back_when_txt_s10_missing(client, mock_obq_full_result):
+    """v0.4.8 R16: txt §10 解析失败时降级提示, 不 500"""
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.parse_obq_s10", return_value=None),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    assert "候选明细数据不可用" in body
 
 
 # ============================================================
@@ -474,24 +511,28 @@ def test_section_8_handles_no_flipped_factors(client, mock_obq_full_result):
 
 
 def test_candidate_detail_uses_valid_stocks_for_pool_size(client, mock_obq_full_result):
-    """v0.4.8 R5: 候选池大小从 meta.valid_stocks 取 (txt 一致: 57 只), 不是 stocks_on_date=61"""
+    """v0.4.8 R16: 候选池大小从 txt_s10_segments.pool_size 取 (=57 只), 跟 txt 一致"""
+    s10_mock = {
+        "selection_date": "2026-07-03",
+        "pool_size": 57,
+        "weight_method": "rolling_icir_weight",
+        "operation": "今日尾盘买入",
+        "best_segment": None,
+        "segments": [],
+    }
     # mock_obq_full_result.valid_stocks = 57, stocks_on_date = 61
     # txt 第 10 节说 "候选池共 57 只", web_ui 应当显示 57
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
         patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.parse_obq_s10", return_value=s10_mock),
     ):
         resp = client.get("/report/2026-07-03")
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
-    # meta-box 显示 "候选池共 57 只" (从 valid_stocks)
-    assert "候选池共" in body
-    # 不能显示 61 (因为 candidate_detail 用 valid_stocks=57)
-    # 但 meta-box "候选池" 行还在用 stocks_on_date=61, 是另一段
-    # candidate_detail 段独立: '候选池共 57 只'
-    # 简单检查: body 含 "57" 至少 1 次 (valid_stocks) 且 candidate_detail 段不含 "61"
-    assert "57" in body
-    # candidate_detail 段的 pool_size = 57 (不应该是 61)
+    # 第十节 meta-box 用 txt 来源的 pool_size=57
+    assert "57" in body  # 候选池 57 只 (来自 txt)
+    # 不应单独显示 61 只作为第十节的候选池 (61 是 stocks_on_date, 不用于候选明细)
 
 
 def test_section_8_renders_full_txt_format(client, mock_obq_full_result):

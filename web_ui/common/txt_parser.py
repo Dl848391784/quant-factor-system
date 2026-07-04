@@ -297,3 +297,343 @@ def parse_obq_intraday_fallback(logger: logging.Logger) -> dict:
         len(operation_rules), len(history_stats),
     )
     return result
+
+
+def parse_obq_correlation(logger: logging.Logger) -> dict | None:
+    """v0.4.8 R9: 解析 ob_quality txt 第 3 节 因子相关性矩阵
+
+    Returns:
+        {
+            "selected_factors": ["amplitude", "interaction_amplitude__ret3d_abs", ...],
+            "matrix": {
+                "amplitude": {"amplitude": 1.00, "interaction_amplitude__ret3d_abs": 0.80},
+                "interaction_amplitude__ret3d_abs": {"amplitude": 0.80, "interaction_amplitude__ret3d_abs": 1.00},
+            },
+            "abbrev": {"amp": "amplitude", ...},
+            "high_corr_pairs": [{"factor1": "amplitude", "factor2": "...", "corr": 0.80, "dim1": "volatility", "dim2": "..."}],
+        }
+        None: 解析失败
+    """
+    latest = _find_latest_txt()
+    if latest is None:
+        return None
+
+    try:
+        content = latest.read_text(encoding="utf-8")
+    except Exception as e:
+        logger.warning("读 ob_quality txt 失败: %s (%s)", latest, e)
+        return None
+
+    # 找到第三节起始
+    section3_match = re.search(
+        r"三、因子相关性矩阵.*?\n(.*?)(?=^四、|\Z)",
+        content,
+        re.MULTILINE | re.DOTALL,
+    )
+    if not section3_match:
+        logger.debug("ob_quality txt 第三节未找到")
+        return None
+
+    section3_text = section3_match.group(1)
+
+    # 选中因子: "(选中因子相关性矩阵, 共 N 个因子)"
+    factors_match = re.search(r"共\s*(\d+)\s*个因子", section3_text)
+    if not factors_match:
+        return None
+
+    lines = section3_text.split("\n")
+    # 矩阵行: 第一行是列名, 数据行第一列是因子名 (其余是数字)
+    # 跳过 ( 共 N 个因子) 注释
+    # 跳过 "------" 分隔线
+    col_names: list[str] = []
+    matrix: dict[str, dict[str, float]] = {}
+    in_matrix = False  # 进入矩阵数据区标志
+    for i, line in enumerate(lines):
+        if "共" in line and "个因子" in line:
+            continue
+        if "------" in line:
+            in_matrix = True  # 第一个 "------" 之后是列名行
+            continue
+        if not in_matrix:
+            continue
+        tokens = line.split()
+        if not tokens:
+            continue
+        if not col_names:
+            # 列名行: 全部 a-z A-Z 0-9 短词 (skip 中文 "因子")
+            col_tokens = [t for t in tokens if t != "因子"]
+            if len(col_tokens) > 0 and all(re.match(r"^[a-zA-Z0-9_]+$", t) for t in col_tokens):
+                col_names = col_tokens
+        else:
+            # 数据行: 第一列因子名, 后面是数字
+            # 注: 因子名可能含数字 (interaction_amplitude__ret3d_abs)
+            row_name = tokens[0]
+            if not re.match(r"^[a-zA-Z0-9_]+$", row_name):
+                continue
+            row_values = []
+            for t in tokens[1:]:
+                try:
+                    row_values.append(float(t))
+                except ValueError:
+                    break
+            if len(row_values) == len(col_names):
+                matrix[row_name] = dict(zip(col_names, row_values))
+
+    selected_factors = list(matrix.keys())
+
+    # 缩写对照表
+    abbrev: dict[str, str] = {}
+    in_abbrev = False
+    for line in lines:
+        if line.strip().startswith("【缩写对照表】"):
+            in_abbrev = True
+            continue
+        if in_abbrev:
+            if line.strip().startswith("【") or line.strip().startswith("-"):
+                break
+            m = re.match(r"^\s+(\S+)\s+=\s+(\S+)\s*$", line)
+            if m:
+                abbrev[m.group(1)] = m.group(2)
+
+    # 跨维度高相关因子对
+    high_corr_pairs: list[dict] = []
+    in_pairs = False
+    for line in lines:
+        if "跨维度高相关因子对" in line:
+            in_pairs = True
+            continue
+        if in_pairs:
+            if "------" in line or "【" in line:
+                break
+            m = re.match(
+                r"^\s*-\s*(\S+?)\[([^\]]+)\]\s+vs\s+(\S+?)\[([^\]]+)\]:\s*([\d.-]+)\s*$",
+                line,
+            )
+            if m:
+                high_corr_pairs.append({
+                    "factor1": m.group(1),
+                    "dim1": m.group(2),
+                    "factor2": m.group(3),
+                    "dim2": m.group(4),
+                    "corr": float(m.group(5)),
+                })
+
+    if not matrix:
+        return None
+    return {
+        "selected_factors": selected_factors,
+        "matrix": matrix,
+        "abbrev": abbrev,
+        "high_corr_pairs": high_corr_pairs,
+    }
+
+
+def parse_obq_filter(logger: logging.Logger) -> dict | None:
+    """v0.4.8 R9: 解析 ob_quality txt 第 4 节 因子筛选结果
+
+    Returns:
+        {
+            "selected_factors": [{"name": "amplitude", "icir": 0.65, "weight": 75.0}, ...],
+            "note": "权重来自...",
+            "high_corr_threshold": 0.7,
+            "excluded": [{"name": "rsi", "reasons": ["long_return=-27.3%<3%", ...]}, ...],
+        }
+        None: 解析失败
+    """
+    latest = _find_latest_txt()
+    if latest is None:
+        return None
+
+    try:
+        content = latest.read_text(encoding="utf-8")
+    except Exception as e:
+        logger.warning("读 ob_quality txt 失败: %s (%s)", latest, e)
+        return None
+
+    section4_match = re.search(
+        r"四、因子筛选结果.*?\n(.*?)(?=^五、|\Z)",
+        content,
+        re.MULTILINE | re.DOTALL,
+    )
+    if not section4_match:
+        return None
+
+    section4_text = section4_match.group(1)
+    result: dict = {}
+
+    # 选中因子: "- 选中因子: amplitude(ICIR=0.65,权重=75.0%), ..."
+    sel_match = re.search(r"选中因子[::]\s*(.+?)(?=\n  -|\n  高相关|\n  剔除|\Z)", section4_text, re.DOTALL)
+    if sel_match:
+        selected = []
+        for m in re.finditer(r"(\S+?)\(ICIR=([\d.-]+),权重=([\d.]+)%\)", sel_match.group(1)):
+            selected.append({
+                "name": m.group(1),
+                "icir": float(m.group(2)),
+                "weight": float(m.group(3)),
+            })
+        result["selected_factors"] = selected
+
+    # 注 + 阈值
+    note_match = re.search(r"注[::]\s*(.+?)(?=\n|\Z)", section4_text)
+    if note_match:
+        result["note"] = note_match.group(1).strip()
+    thresh_match = re.search(r"高相关阈值[::]\s*([\d.]+)", section4_text)
+    if thresh_match:
+        result["high_corr_threshold"] = float(thresh_match.group(1))
+
+    # 剔除因子
+    excluded = []
+    in_excluded = False
+    for line in section4_text.split("\n"):
+        if "剔除因子" in line:
+            in_excluded = True
+            continue
+        if in_excluded:
+            if not line.strip():
+                break
+            if "------" in line:
+                continue
+            # "· factor(reason1; reason2)"
+            m = re.match(r"^\s*·\s*(\S+)\((.+)\)\s*$", line)
+            if m:
+                excluded.append({
+                    "name": m.group(1),
+                    "reasons": [r.strip() for r in m.group(2).split(";")],
+                })
+    result["excluded"] = excluded
+
+    if "selected_factors" not in result:
+        return None
+
+
+def parse_obq_section_10_segments(logger: logging.Logger) -> dict | None:
+    """v0.4.8 R16: 解析 ob_quality txt 第十节 (今日三十分段候选明细)
+
+    数据格式: 每段 [Sn] 标头 + 合并胜率 + 1-3 只股票 (排名/代码/名称/composite)
+    段号不连续 (S1~S30 共 30 段, 跳过中间无股票的段)
+
+    Returns:
+        {
+            "selection_date": str,
+            "pool_size": int,
+            "weight_method": str,
+            "operation": str,
+            "segments": [
+                {
+                    "label": "S1",
+                    "n_stocks": 2,
+                    "win_rate": 42.0,  # 合并胜率 %
+                    "stocks": [
+                        {"rank": 1, "code": "002303", "name": "美盈森", "composite": 1.569},
+                        ...
+                    ],
+                },
+                ...30 段
+            ],
+            "best_segment": {"label": "S7", "win_rate": 61.4},
+        }
+        None: 解析失败
+    """
+    latest = _find_latest_txt()
+    if latest is None:
+        return None
+
+    try:
+        content = latest.read_text(encoding="utf-8")
+    except Exception as e:
+        logger.warning("读 ob_quality txt 失败: %s (%s)", latest, e)
+        return None
+
+    # 找到第十节范围: 从"十、今日三十分段候选明细"到下一个"十、"标题 (今日分段操作) 或文件结尾
+    # 注: 本节标题是"十、今日三十分段候选明细", 下个同名"十、"是"S7 段日内操作建议" — 用具体子标题精准锚定避免误命中
+    section10_match = re.search(
+        r"^十、今日三十分段候选明细.*?\n(.*?)(?=^十、S7 段日内操作建议|\Z)",
+        content,
+        re.MULTILINE | re.DOTALL,
+    )
+    if not section10_match:
+        logger.debug("ob_quality txt 第十节 (今日三十分段) 未找到")
+        return None
+
+    section10_text = section10_match.group(1)
+
+    # 选股日 + 候选池 (第一行元信息)
+    # 选股日格式 "2026-07-03" — 用 lookahead 避免 greedy 抓到后随逗号
+    date_match = re.search(r"选股日:\s*(\d{4}-\d{2}-\d{2})", section10_text)
+    pool_match = re.search(r"候选池共\s*(\d+)\s*只", section10_text)
+    wm_match = re.search(r"权重方法:\s*(\S+)", section10_text)
+    op_match = re.search(r"操作:\s*(.+?)(?=\n\n|\n\[|\Z)", section10_text, re.DOTALL)
+
+    segments: list[dict] = []
+    best_segment = None
+
+    # 段行格式: "[S1] 2 只 合并胜率: 42.0%"
+    # 后面紧跟 "    排名 代码         名称        composite"
+    # 然后是 dash line, 然后 1-3 行股票数据 (rank code name composite)
+    for seg_match in re.finditer(
+        r"\[(S\d+)\]\s+(\d+)\s+只\s+合并胜率:\s+([\d.]+)%",
+        section10_text,
+    ):
+        label = seg_match.group(1)
+        n_stocks = int(seg_match.group(2))
+        win_rate = float(seg_match.group(3))
+
+        # 找到该段股票数据区域: 从 [Sn] 行后到下一个 [S(n+1)] 段标头 (段间有空行)
+        seg_start = seg_match.end()
+        after_header = section10_text[seg_start:]
+        # 段间有空行 — 用更宽松的 pattern: 新行 + 可选空白行 + [S数字]
+        # 锚定正则要避免回溯灾难, 用顺序扫描 next_seg
+        next_seg_match = re.search(r"\n\s*\[S\d+\]", after_header)
+        seg_block = after_header[: next_seg_match.start()] if next_seg_match else after_header
+
+        # 解析股票行: "    1 002303     美盈森           1.569"
+        # rank(数字) code(6位数字) name(composite 前的中文名) composite(浮点数)
+        stocks: list[dict] = []
+        for stock_match in re.finditer(
+            r"^\s*(\d+)\s+(\d{6})\s+(\S+)\s+(-?\d+\.\d+)\s*$",
+            seg_block,
+            re.MULTILINE,
+        ):
+            stocks.append({
+                "rank": int(stock_match.group(1)),
+                "code": stock_match.group(2),
+                "name": stock_match.group(3),
+                "composite": float(stock_match.group(4)),
+            })
+
+        # 校验股票数一致性 (txt 里 S16=1, S29=3 等不规则情况)
+        if len(stocks) != n_stocks:
+            logger.debug(
+                "txt §10 %s: 期望 %d 只, 实际解析到 %d 只",
+                label, n_stocks, len(stocks),
+            )
+
+        segments.append({
+            "label": label,
+            "n_stocks": n_stocks,
+            "win_rate": win_rate,
+            "stocks": stocks,
+        })
+
+        # 跟踪最佳段 (胜率最高)
+        if best_segment is None or win_rate > best_segment["win_rate"]:
+            best_segment = {"label": label, "win_rate": win_rate}
+
+    if not segments:
+        logger.debug("ob_quality txt 第十节 0 段 (regex 未匹配)")
+        return None
+
+    result = {
+        "selection_date": date_match.group(1) if date_match else "",
+        "pool_size": int(pool_match.group(1)) if pool_match else 0,
+        "weight_method": wm_match.group(1) if wm_match else "",
+        "operation": op_match.group(1).strip() if op_match else "",
+        "segments": segments,
+        "best_segment": best_segment,
+    }
+    logger.info(
+        "ob_quality txt 第十节 30 分段候选明细解析: %d 段, 最佳段 %s",
+        len(segments),
+        best_segment,
+    )
+    return result
