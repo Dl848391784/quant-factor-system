@@ -730,8 +730,8 @@ def test_freshness_section_renders_data_and_derived(client, mock_obq_full_result
 def test_ic_section_renders_table(client, mock_obq_full_result):
     """v0.4.8 R7: 一·单因子 IC 数据汇总 渲染表格"""
     ic_mock = [
-        {"factor_name": "tail_price_position", "ic_mean": -0.0629, "icir": 0.9381, "ic_std": 0.0670, "valid_days": 34, "neutralization_sensitivity": 0.28, "neutralization_method": "industry+log_market_cap"},
-        {"factor_name": "rsi", "ic_mean": -0.0483, "icir": 0.3382, "ic_std": 0.1428, "valid_days": 516, "neutralization_sensitivity": 0.19, "neutralization_method": "industry+log_market_cap"},
+        {"factor_name": "tail_price_position", "ic_mean": -0.0629, "icir": 0.9381, "ic_std": 0.0670, "valid_days": 34, "neutral_enabled": True, "neutral_method": "industry+log_market_cap"},
+        {"factor_name": "rsi", "ic_mean": -0.0483, "icir": 0.3382, "ic_std": 0.1428, "valid_days": 516, "neutral_enabled": True, "neutral_method": "industry+log_market_cap"},
     ]
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
@@ -772,8 +772,8 @@ def test_ic_section_handles_no_data(client, mock_obq_full_result):
 def test_backtest_section_renders_table(client, mock_obq_full_result):
     """v0.4.8 R8: 二·单因子分层回测 渲染表格"""
     bt_mock = [
-        {"factor_name": "tail_price_position", "long_short_annual": -0.0547, "sharpe": -0.78, "monotonicity": 0.1992, "monotonicity_quality": "✗较差"},
-        {"factor_name": "amplitude", "long_short_annual": 0.0906, "sharpe": 0.76, "monotonicity": -0.4409, "monotonicity_quality": "△一般"},
+        {"factor_name": "tail_price_position", "long_short_return_annual": -0.0547, "long_short_sharpe": -0.78, "monotonicity_correlation": 0.1992, "monotonicity_quality": "✗较差"},
+        {"factor_name": "amplitude", "long_short_return_annual": 0.0906, "long_short_sharpe": 0.76, "monotonicity_correlation": -0.4409, "monotonicity_quality": "△一般"},
     ]
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
@@ -797,8 +797,8 @@ def test_backtest_section_renders_table(client, mock_obq_full_result):
 def test_composite_section_renders_table(client, mock_obq_full_result):
     """v0.4.8 R8: 五·综合因子 4 种权重回测 渲染表格"""
     comp_mock = [
-        {"weight_method": "equal_weight", "annual_return": 0.05, "sharpe": 0.4, "max_drawdown": -0.08, "monotonicity": 0.5},
-        {"weight_method": "rolling_icir_weight", "annual_return": 0.08, "sharpe": 0.6, "max_drawdown": -0.05, "monotonicity": 0.7},
+        {"weight_method": "equal_weight", "long_short_return_annual": 0.05, "long_short_sharpe": 0.4, "monotonicity_correlation": 0.5, "monotonicity_quality": "✓良好"},
+        {"weight_method": "rolling_icir_weight", "long_short_return_annual": 0.08, "long_short_sharpe": 0.6, "monotonicity_correlation": 0.7, "monotonicity_quality": "✓良好"},
     ]
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
@@ -818,12 +818,16 @@ def test_composite_section_renders_table(client, mock_obq_full_result):
 def test_weights_section_renders_best_and_methods(client, mock_obq_full_result):
     """v0.4.8 R8: 七·权重选择结果 渲染最优方法 + 全部方法"""
     weights_mock = {
-        "best_selection": {"method": "rolling_icir_weight", "composite_score": 0.7766},
-        "all_methods": [
-            {"method": "equal_weight", "composite_score": 0.5285, "annual_return": 0.0081, "sharpe": 0.0429, "monotonicity": 0.5635},
-            {"method": "rolling_icir_weight", "composite_score": 0.7766, "annual_return": 0.0080, "sharpe": 0.0382, "monotonicity": 0.5860},
+        "best_selection": {"method": "rolling_icir_weight", "composite_score": 0.7766, "selection_reason": "综合得分最高"},
+        "ranking": [
+            {"method": "equal_weight", "composite_score": 0.5285, "scores": {"annual_return": 0.0081, "sharpe": 0.0429, "monotonicity": 0.5635}},
+            {"method": "rolling_icir_weight", "composite_score": 0.7766, "scores": {"annual_return": 0.0080, "sharpe": 0.0382, "monotonicity": 0.5860}},
         ],
-        "scoring_metrics": ["annual_return", "sharpe", "monotonicity"],
+        "metric_configs": [
+            {"name": "annual_return"},
+            {"name": "sharpe"},
+            {"name": "monotonicity"},
+        ],
     }
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
@@ -963,13 +967,13 @@ def test_filter_section_handles_none(client, mock_obq_full_result):
 def test_compare_section_renders_composite_and_selected_factor(client, mock_obq_full_result):
     """v0.4.8 R10: 六·对比 渲染综合 4 权重 + 选中单因子"""
     comp_mock = [
-        {"weight_method": "ic_weight", "annual_return": 0.5843, "sharpe": 2.99, "max_drawdown": -0.05, "monotonicity": 0.9851, "monotonicity_quality": "✓良好"},
-        {"weight_method": "rolling_icir_weight", "annual_return": 0.5829, "sharpe": 2.98, "max_drawdown": -0.05, "monotonicity": 0.9861, "monotonicity_quality": "✓良好"},
+        {"weight_method": "ic_weight", "long_short_return_annual": 0.5843, "long_short_sharpe": 2.99, "monotonicity_correlation": 0.9851, "monotonicity_quality": "✓良好"},
+        {"weight_method": "rolling_icir_weight", "long_short_return_annual": 0.5829, "long_short_sharpe": 2.98, "monotonicity_correlation": 0.9861, "monotonicity_quality": "✓良好"},
     ]
     bt_mock = [
-        {"factor_name": "amplitude", "long_short_annual": 0.5178, "sharpe": 2.62, "monotonicity": -0.9785, "monotonicity_quality": "✓良好"},
-        {"factor_name": "interaction_amplitude__ret3d_abs", "long_short_annual": 0.5129, "sharpe": 2.66, "monotonicity": -0.9523, "monotonicity_quality": "✓良好"},
-        {"factor_name": "rsi", "long_short_annual": 0.15, "sharpe": 1.4, "monotonicity": 0.5, "monotonicity_quality": "△一般"},  # 未选中
+        {"factor_name": "amplitude", "long_short_return_annual": 0.5178, "long_short_sharpe": 2.62, "monotonicity_correlation": -0.9785, "monotonicity_quality": "✓良好"},
+        {"factor_name": "interaction_amplitude__ret3d_abs", "long_short_return_annual": 0.5129, "long_short_sharpe": 2.66, "monotonicity_correlation": -0.9523, "monotonicity_quality": "✓良好"},
+        {"factor_name": "rsi", "long_short_return_annual": 0.15, "long_short_sharpe": 1.4, "monotonicity_correlation": 0.5, "monotonicity_quality": "△一般"},  # 未选中
     ]
     filt_mock = {
         "selected_factors": [

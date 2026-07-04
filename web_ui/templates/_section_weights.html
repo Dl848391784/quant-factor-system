@@ -16,14 +16,14 @@
     </p>
   </div>
 
-  {% set methods = weight_selection.get("all_methods", []) %}
+  {% set methods = weight_selection.get("ranking", []) %}
   {% if methods %}
   <h3>各权重方法得分</h3>
   <table>
     <thead>
       <tr>
         <th>权重方法</th><th>综合得分</th>
-        {% for metric in weight_selection.get("scoring_metrics", [])[:5] %}
+        {% for metric in (weight_selection.get("metric_configs", []) | map(attribute='name') | list)[:5] %}
           <th>{{ metric }}</th>
         {% endfor %}
       </tr>
@@ -33,8 +33,8 @@
       <tr>
         <td><code>{{ m.get("method", m.get("weight_method", "—")) }}</code></td>
         <td>{{ "%.4f" | format(m.get("composite_score", 0)) }}</td>
-        {% for metric in weight_selection.get("scoring_metrics", [])[:5] %}
-          <td>{{ "%.4f" | format(m.get(metric, 0)) }}</td>
+        {% for metric in (weight_selection.get("metric_configs", []) | map(attribute='name') | list)[:5] %}
+          <td>{{ "%.4f" | format(m.get(metric, m.get("scores", {}).get(metric, 0))) }}</td>
         {% endfor %}
       </tr>
     {% endfor %}

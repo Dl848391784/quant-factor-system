@@ -19,10 +19,10 @@
     {% for r in composite_results %}
       <tr>
         <td><code>{{ r.weight_method }}</code></td>
-        <td>{{ "%+.2f%%" | format(r.annual_return * 100) if r.annual_return is not none else "—" }}</td>
-        <td>{{ "%+.2f" | format(r.sharpe) if r.sharpe is not none else "—" }}</td>
-        <td>{{ "%+.2f%%" | format(r.max_drawdown * 100) if r.max_drawdown is not none else "—" }}</td>
-        <td>{{ "%+.4f" | format(r.monotonicity) if r.monotonicity is not none else "—" }}</td>
+        <td>{{ "%+.2f%%" | format(r.long_short_return_annual * 100) if r.long_short_return_annual is not none else "—" }}</td>
+        <td>{{ "%+.2f" | format(r.long_short_sharpe) if r.long_short_sharpe is not none else "—" }}</td>
+        <td>{{ "%+.4f" | format(r.monotonicity_correlation) if r.monotonicity_correlation is not none else "—" }}</td>
+        <td>{{ r.monotonicity_quality if r.monotonicity_quality else "—" }}</td>
       </tr>
     {% endfor %}
     </tbody>
