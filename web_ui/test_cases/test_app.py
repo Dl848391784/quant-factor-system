@@ -29,6 +29,15 @@ def client():
         yield c
 
 
+@pytest.fixture(autouse=True)
+def mock_lr_status_internal():
+    """v0.4.8 R2a: 全局 mock load_lr_status (web_ui.common.lr_training_status.load_status)
+    避免真读 Parquet 慢加载, 单测 focus 路由 + 模板
+    """
+    with patch("web_ui.app.load_lr_status", return_value=[]):
+        yield
+
+
 @pytest.fixture
 def mock_obq_result():
     """v0.4.8: ob_quality mock (基于 v0.4.6.2 R2b 真实结构)"""
@@ -199,4 +208,45 @@ def test_obq_section_handles_missing_optional_fields(client, mock_obq_result):
     # mock 股票: top_stocks 有 3 个, 但 stage1_top/stage1_bottom/all_composite_stocks 都是 []
     assert "002687" in body
     assert "000520" in body
+
+
+# ============================================================
+# v0.4.8 R2a: LR 训练数据状态 (web_ui 内部实现, H1.1 严守)
+# ============================================================
+
+
+def test_lr_status_renders_obq(client, mock_obq_result):
+    """v0.4.8 R2a: LR 训练数据状态表格渲染 (web_ui 内部实现, H1.1 严守)"""
+    lr_mock = [
+        {"method": "equal_weight", "days": 553, "rows": 46610, "t1_pct": 99.8, "status": "✓ 可训练"},
+        {"method": "rolling_icir_weight", "days": 555, "rows": 46790, "t1_pct": 99.8, "status": "✓ 可训练"},
+    ]
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_lr_status", return_value=lr_mock),  # override autouse
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 表格标题 + 真实数据
+    assert "LR 训练数据状态" in body
+    assert "v3.10" in body
+    assert "✓ 可训练" in body
+    assert "46610" in body
+    assert "equal_weight" in body
+    assert "rolling_icir_weight" in body
+
+
+def test_lr_status_handles_load_exception(client, mock_obq_result):
+    """v0.4.8 R2a: load_lr_status 抛异常时 200 + 降级 (不渲染表格)"""
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_lr_status", side_effect=RuntimeError("parquet missing")),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    # 异常降级为 [], 不渲染表格
+    assert "LR 训练数据状态" not in resp.data.decode("utf-8")
 

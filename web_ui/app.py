@@ -43,6 +43,9 @@ from summary.report.data_loaders import (  # noqa: E402
     load_stock_selection_result,
 )
 
+# v0.4.8 R2a: web_ui 内部实现的辅助模块 (H1.1 严守: 不修改 data_loaders)
+from web_ui.common.lr_training_status import load_status as load_lr_status  # noqa: E402
+
 
 logger = logging.getLogger("web_ui")
 
@@ -69,6 +72,13 @@ def show_report(date: str):
     result = load_stock_selection_result(logger=logger)
     stock_name_map = load_stock_name_map(logger=logger) or {}
 
+    # v0.4.8 R2a: LR 训练数据状态 (web_ui 内部实现, H1.1 严守)
+    try:
+        lr_status = load_lr_status(logger=logger) or []
+    except Exception as e:
+        logger.warning("load_lr_status 失败: %s", e)
+        lr_status = []
+
     # v0.4.8 R1: meta 派生字段 (H1.1 不改 data_loaders, 用 result.get 兼容)
     # 注意: result 是 dict, 必须用 item 访问 result["meta"] 而非 result.meta
     expected_data_date = (
@@ -83,6 +93,7 @@ def show_report(date: str):
         expected_data_date=expected_data_date,
         result=result,
         stock_name_map=stock_name_map,
+        lr_status=lr_status,
     )
 
 

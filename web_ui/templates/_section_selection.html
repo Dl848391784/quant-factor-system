@@ -20,6 +20,25 @@ data_loaders 已暴露的 stage 字段 (H1.1 严守, 不改 data_loaders):
     <p><strong>Composite Score</strong>: {{ "%.4f" | format(result.meta.composite_score | default(0)) }}</p>
   </div>
 
+  {# v0.4.8 R2a: LR 训练数据状态 (web_ui 内部实现, H1.1 严守) #}
+  {% if lr_status %}
+  <h3>LR 训练数据状态 (v3.10, web_ui 内部实现)</h3>
+  <table>
+    <thead><tr><th>权重方法</th><th>天数</th><th>行数</th><th>T+1 补写</th><th>状态</th></tr></thead>
+    <tbody>
+    {% for row in lr_status %}
+      <tr>
+        <td>{{ row.method }}</td>
+        <td>{{ row.days }}</td>
+        <td>{{ row.rows }}</td>
+        <td>{{ row.t1_pct }}%</td>
+        <td>{{ row.status }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
   {# 1. 全量 composite 股票 (≤400 只时) — ob_quality 61 只全量展示 #}
   {% if result.all_composite_stocks %}
   <h3>全量展示: {{ result.all_composite_stocks | length }} 只股票 (composite 降序)</h3>
