@@ -16,7 +16,7 @@ data_loaders 已暴露的 stage 字段 (H1.1 严守, 不改 data_loaders):
   <div class="meta-box">
     <p><strong>选股日期</strong>: {{ result.meta.selection_date }}（使用T-1数据）</p>
     <p><strong>权重方法</strong>: {{ result.meta.weight_method }} · <strong>方向</strong>: {{ result.meta.factor_direction }} · <strong>选出股票数</strong>: {{ result.meta.top_n }} 只（共 {{ result.meta.stocks_on_date | default(0) }} 只股票）</p>
-    <p><strong>候选池</strong>: {{ result.meta.stocks_on_date | default(0) }} 只 → 有效 {{ result.meta.valid_stocks | default(0) }} → Stage1 {{ result.meta.stage1_pool_size | default(0) }} → 最终 {{ result.top_stocks | length }} 只</p>
+    <p><strong>候选池</strong>: {{ result.meta.stocks_on_date | default(0) }} 只 → 有效 {{ result.meta.valid_stocks | default(0) }} → 短名单 {{ result.top_stocks | length }} 只</p>
     <p><strong>Composite Score</strong>: {{ "%.4f" | format(result.meta.composite_score | default(0)) }}</p>
     {% if txt_s8_meta %}
     {% if txt_s8_meta.get("excluded_by_amplitude") is not none %}
@@ -84,64 +84,4 @@ data_loaders 已暴露的 stage 字段 (H1.1 严守, 不改 data_loaders):
   </table>
   {% endif %}
 
-  {# 2. Stage 1: 候选池头部 30 只 (composite 降序) #}
-  {% if result.stage1_top %}
-  <h3>Stage 1: composite 降序 Top {{ result.stage1_top | length }} (候选池)</h3>
-  <table>
-    <thead>
-      <tr><th>#</th><th>代码</th><th>名称</th><th>Composite</th></tr>
-    </thead>
-    <tbody>
-    {% for stock in result.stage1_top %}
-      <tr>
-        <td>{{ loop.index }}</td>
-        <td>{{ stock.code }}</td>
-        <td>{{ stock_name_map.get(stock.code, "—") }}</td>
-        <td>{{ "%.3f" | format(stock.composite_value) if stock.composite_value is not none else "—" }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
-
-  {# 3. Stage 1 Bottom: 弱势股端 30 只 (composite 升序) #}
-  {% if result.stage1_bottom %}
-  <h3>Stage 1 Bottom: composite 升序 Top {{ result.stage1_bottom | length }} (弱势股端)</h3>
-  <p class="muted">v0.4.8 R2: ob_quality 完整 30 段 = 30 Top + 30 Bottom + Stage 3 LR 短名单</p>
-  <table>
-    <thead>
-      <tr><th>#</th><th>代码</th><th>名称</th><th>Composite</th></tr>
-    </thead>
-    <tbody>
-    {% for stock in result.stage1_bottom %}
-      <tr>
-        <td>{{ loop.index }}</td>
-        <td>{{ stock.code }}</td>
-        <td>{{ stock_name_map.get(stock.code, "—") }}</td>
-        <td>{{ "%.3f" | format(stock.composite_value) if stock.composite_value is not none else "—" }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
-
-  {# 4. Stage 3: LR 短名单 (top_stocks) #}
-  {% if result.top_stocks %}
-  <h3>Stage 3: LR 短名单（{{ result.top_stocks | length }} 只）</h3>
-  <table>
-    <thead>
-      <tr><th>#</th><th>代码</th><th>名称</th><th>Composite</th></tr>
-    </thead>
-    <tbody>
-    {% for stock in result.top_stocks %}
-      <tr>
-        <td>{{ loop.index }}</td>
-        <td>{{ stock.code }}</td>
-        <td>{{ stock_name_map.get(stock.code, "—") }}</td>
-        <td>{{ "%.3f" | format(stock.composite_value) if stock.composite_value is not none else "—" }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
 {% endif %}
