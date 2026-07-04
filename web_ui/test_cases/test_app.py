@@ -348,7 +348,7 @@ def test_segment_win_renders_top5(client, mock_obq_full_result):
 
 
 def test_segment_win_handles_no_data(client, mock_obq_full_result):
-    """v0.4.8 R3: decile_stats 为空时降级提示"""
+    """v0.4.8 R14: decile_stats 为空时降级提示 (Parquet 来源缺失, txt 矩阵仍可展示)"""
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
         patch("web_ui.app.load_stock_name_map", return_value={}),
@@ -357,7 +357,7 @@ def test_segment_win_handles_no_data(client, mock_obq_full_result):
         resp = client.get("/report/2026-07-03")
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
-    assert "无 30 分段胜率数据" in body
+    assert "本节所需 Parquet 实时计算的逐段胜率尚未就绪" in body
 
 
 def test_intraday_renders_rows(client, mock_obq_full_result):

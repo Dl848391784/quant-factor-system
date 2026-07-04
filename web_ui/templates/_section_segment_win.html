@@ -1,10 +1,11 @@
 {# 9·30 分段胜率 (v0.4.8 R3)
 
 参数:
-- decile_stats: load_decile_stats() 返回的 dict, 含 segments: [{label, n, win_rate, avg_ret, pl_ratio, wins, losses}]
+- decile_stats: load_decile_stats() 返回的 dict (从 master Parquet 计算, 须 T+2 数据)
+- txt_s9_matrix: parse_obq_section_9_matrix() 返回的 dict (从 summary txt 报告解析, H1.1 内部实现)
 #}
 {% if not decile_stats or not decile_stats.get("segments") %}
-  <p class="empty">无 30 分段胜率数据 — 通常因选股日 T+1 交易日不存在 (master 数据未到 T+2)</p>
+  <p class="empty">本节所需 Parquet 实时计算的逐段胜率尚未就绪（通常因选股日 T+2 master 数据未到）— 下方 txt 报告矩阵仍可展示（不依赖 Parquet）</p>
 {% else %}
   {% set segs = decile_stats["segments"] %}
   {% set n_segs = segs | length %}
@@ -67,7 +68,7 @@
 {# v0.4.8 R4: txt 报告 30 段 × 12 选股日 完整胜率矩阵 (data_loaders 拿不到, 从 txt 解析) #}
 {% if txt_s9_matrix and txt_s9_matrix.get("segments") %}
   <h3>30 分段 × 12 选股日 完整胜率矩阵 (txt 来源)</h3>
-  <p class="muted">v0.4.8 R4: 从 summary/result/ob_quality/factor_summary_report_*.txt 解析</p>
+  <p class="muted">数据源: web_ui/common/txt_parser.py 解析 summary/result/ob_quality/factor_summary_report_*.txt (H1.1 内部实现, 不读 master Parquet) · 上方 decile_stats 表从 Parquet 实时计算, 须 T+2 数据</p>
   {% set best_seg = txt_s9_matrix.get("best_segment") %}
   {% if best_seg %}
   <p><strong>最佳段</strong>: <code>{{ best_seg.label }}</code> (合并胜率 {{ "%.1f" | format(best_seg.merged) }}%)</p>
