@@ -1,30 +1,48 @@
-"""web_ui Flask 入口（v0.3 v1 MVP）
+"""web_ui Flask 入口（v0.4.8 简化版）
 
-定位: web_ui 是 summary 的前端分支——复用 summary/report/data_loaders.py 读取数据，
+定位: web_ui 是 summary 的前端分支——复用 summary/report/data_loaders.py 读取 ob_quality 管线数据。
 Jinja2 模板渲染 HTML，与 summary 的 txt 输出共用数据契约。
 
+v0.4.8 简化（伴随 v0.4.7 严格回退 + PROJECT.md H1.1 边界铁律）:
+- web_ui 只展示 ob_quality 管线（去掉 default/ob_quality tab 切换）
+- 启动时自动设 PIPELINE_ALIAS=ob_quality（避免运行时 reload）
+- 数据契约: 复用 summary/report/data_loaders.py 已有接口 (只读, 不扩)
+- LR 训练状态: web_ui 内部实现 (web_ui/common/lr_training_status.py)
+- 字段补完: web_ui 读 ob_quality txt 报告 (web_ui/common/txt_parser.py, R4 实施)
+
 详见:
-- web_ui/MODULE.md（本模块规范）
-- designs/feat_web_ui_module.md（v0.3 design）
-- PROJECT.md §"前端模块豁免条款"
+- web_ui/MODULE.md (v0.4.7, 边界强约束)
+- designs/feat_web_ui_obq_parity_v0.4.8.md (R1-R4 规划)
+- PROJECT.md §硬规则 H1 / H1.1
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
-from flask import Flask, abort, render_template
 
-# 复用 summary 数据加载器（web_ui 不直接读 Parquet）
-from summary.report.data_loaders import load_stock_selection_result
-
+# v0.4.8 简化: web_ui 只展示 ob_quality, 启动时强制设 PIPELINE_ALIAS
+# 必须在 import paths 之前执行 (paths.py line 43 PIPELINE_ALIAS = os.environ.get(...))
+os.environ.setdefault("PIPELINE_ALIAS", "ob_quality")
 
 # PROJECT_ROOT 加入 sys.path（让 from summary.report.data_loaders 可用）
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from flask import Flask, abort, redirect, render_template  # noqa: E402
+
+# 复用 summary 数据加载器（web_ui 不直接读 Parquet）
+# v0.4.8: H1.1 严守, 只调 data_loaders 已有接口, 不修改 data_loaders
+# 注: load_intraday_strategy / load_decile_stats 在 R3 引入, R1 仅基础数据
+from summary.report.data_loaders import (  # noqa: E402
+    load_stock_name_map,
+    load_stock_selection_result,
+)
+
 
 logger = logging.getLogger("web_ui")
 
@@ -33,18 +51,49 @@ app = Flask(__name__)
 
 @app.route("/")
 def index():
-    """首页: 重定向到 /selection 展示最新一日 stock_selection"""
-    return render_template("selection.html", result=None)
+    """首页: 302 → /report/latest"""
+    return redirect("/report/latest")
 
 
-@app.route("/selection")
-def show_selection():
-    """展示最新一日 stock_selection (复用 load_stock_selection_result)"""
+@app.route("/report/<date>")
+def show_report(date: str):
+    """v0.4.8: 展示 ob_quality 报告页 (固定 pipeline, 不再 ?pipeline= 切换)
+
+    Args:
+        date: YYYY-MM-DD 报告日期
+    """
+    # 简化的日期格式校验
+    if len(date) != 10 or date[4] != "-" or date[7] != "-":
+        abort(400, description=f"日期格式必须为 YYYY-MM-DD，收到: {date}")
+
     result = load_stock_selection_result(logger=logger)
-    if result is None:
-        logger.error("stock_selection_result 数据不可用")
+    stock_name_map = load_stock_name_map(logger=logger) or {}
+
+    # v0.4.8 R1: meta 派生字段 (H1.1 不改 data_loaders, 用 result.get 兼容)
+    # 注意: result 是 dict, 必须用 item 访问 result["meta"] 而非 result.meta
+    expected_data_date = (
+        "T-1 (见 summary 实际输出)"
+        if result is None
+        else result.get("meta", {}).get("selection_date", "未知")
+    )
+
+    return render_template(
+        "report.html",
+        report_date=date,
+        expected_data_date=expected_data_date,
+        result=result,
+        stock_name_map=stock_name_map,
+    )
+
+
+@app.route("/report/latest")
+def show_report_latest():
+    """v0.4.8: 重定向到最新可用报告日期"""
+    result = load_stock_selection_result(logger=logger)
+    if result is None or not result.get("meta", {}).get("selection_date"):
+        logger.error("无法定位最新报告日期")
         abort(404)
-    return render_template("selection.html", result=result)
+    return redirect(f"/report/{result['meta']['selection_date']}")
 
 
 if __name__ == "__main__":
@@ -53,4 +102,5 @@ if __name__ == "__main__":
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
     logger.addHandler(handler)
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    logger.info("web_ui 启动: PIPELINE_ALIAS=%s (v0.4.8 固定 ob_quality)", os.environ.get("PIPELINE_ALIAS"))
+    app.run(host="0.0.0.0", port=9001, debug=False)
