@@ -396,7 +396,8 @@ dependencies = [
 
 | 规则编号 | 规则 | 目的 | 检查工具 | 执行阶段 |
 |---|------|------|----------|----------|
-| H1 | 模块边界：只能复用自己目录的 `common/` | 防止模块间隐式耦合；重构单模块时不会牵连其他模块 | import-linter | CI |
+| H1 | 模块边界（强约束）：① 只能复用自己目录的 `common/`；② **禁止修改其他模块目录**（web_ui/ 改 summary/ 等禁止；反之亦然）；③ 跨目录的"数据契约扩展"必须走 Design-First + 各模块 owner 确认 | 防止模块间隐式耦合；重构单模块时不会牵连其他模块；保证各模块责任清晰、可独立 review | import-linter + `scripts/check_cross_module_modify.py`（[待实施]） | pre-commit + CI |
+| H1.1 | web_ui 边界（v0.4.7 起）：web_ui 目录的代码**只读**其他模块的 Python 脚本（`from summary.report.data_loaders import ...`），**禁止修改** `summary/`、`factor_ic/`、`backtest/`、`comprehensive_factor/`、`data_fetchers/`、`factor_definitions/`、`paths.py` 等任何 web_ui 目录外的文件 | web_ui 是 summary 的"前端分支"，单向依赖；改 web_ui 时不应"顺手"改后端 | 人工 review + `scripts/check_web_ui_boundary.py`（[待实施]） | pre-commit + CI |
 | H2 | 输出位置：`<模块>/result/`（详见下方正反例） | 让产物可被清理/打包脚本统一处理，避免散落根目录 | AST 静态分析（`scripts/check_path_literals.py`） | pre-commit + CI |
 | H3 | 临时文件：放 `temporary/` | 避免污染版本控制；统一清理入口 | AST 静态分析（`scripts/check_temp_file_path.py`） | pre-commit + CI |
 | H5 | 因子方向：根据实际 IC 确定（不可硬编码方向） | 防止方向写反导致回测结论与实际相反 | pytest 断言 | CI |
