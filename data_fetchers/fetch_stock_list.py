@@ -390,7 +390,7 @@ def fetch_stocks_from_sina(logger_arg: logging.Logger | None = None) -> tuple[li
                         _logger.warning("    ! 请求超时 (第 %s 页)", page)
                         # 最后一次重试失败则 raise，否则继续下一次重试
                         if attempt == API_RETRIES - 1:
-                            raise RuntimeError(f"请求超时，已重试 {API_RETRIES} 次")
+                            raise RuntimeError(f"请求超时，已重试 {API_RETRIES} 次") from None
                         # 非最后一次失败，显式 continue 进入下一次重试
                         continue
 
@@ -398,7 +398,7 @@ def fetch_stocks_from_sina(logger_arg: logging.Logger | None = None) -> tuple[li
                         _logger.warning("    ! 请求失败: %s (第 %s 页)", e, page)
                         # 最后一次重试失败则 raise，否则继续下一次重试
                         if attempt == API_RETRIES - 1:
-                            raise RuntimeError(f"请求失败: {e}，已重试 {API_RETRIES} 次")
+                            raise RuntimeError(f"请求失败: {e}，已重试 {API_RETRIES} 次") from e
                         # 非最后一次失败，显式 continue 进入下一次重试
                         continue
 
@@ -406,7 +406,7 @@ def fetch_stocks_from_sina(logger_arg: logging.Logger | None = None) -> tuple[li
                         _logger.warning("    ! JSON解析失败: %s (第 %s 页)", e, page)
                         # 最后一次重试失败则 raise，否则继续下一次重试
                         if attempt == API_RETRIES - 1:
-                            raise RuntimeError(f"JSON解析失败: {e}，已重试 {API_RETRIES} 次")
+                            raise RuntimeError(f"JSON解析失败: {e}，已重试 {API_RETRIES} 次") from e
                         # 非最后一次失败，显式 continue 进入下一次重试
                         continue
 
