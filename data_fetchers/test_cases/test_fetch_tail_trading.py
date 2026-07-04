@@ -23,7 +23,7 @@ _data_fetchers_dir = os.path.dirname(_test_dir)
 if _data_fetchers_dir not in sys.path:
     sys.path.insert(0, _data_fetchers_dir)
 
-import fetch_tail_trading
+import fetch_tail_trading  # noqa: E402
 
 
 class TestParseKline:

@@ -22,7 +22,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from factor_ic.common import (
+from factor_ic.common import (  # noqa: E402
     build_ic_result,
     calculate_ic_with_direction_verification,
     get_ic_output_path,

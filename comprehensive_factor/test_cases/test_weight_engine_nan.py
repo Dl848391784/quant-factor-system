@@ -24,8 +24,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from comprehensive_factor.common.logger_config import get_logger
-from comprehensive_factor.common.weight_engine import (
+from comprehensive_factor.common.logger_config import get_logger  # noqa: E402
+from comprehensive_factor.common.weight_engine import (  # noqa: E402
     EqualWeightMethod,
     ICIRWeightMethod,
     ICWeightMethod,
