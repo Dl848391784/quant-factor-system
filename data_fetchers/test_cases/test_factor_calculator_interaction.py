@@ -33,15 +33,15 @@ from data_fetchers.factor_calculator._common import _cross_section_zscore
 # (base_short_name, factor_column_in_df, return_column_in_df, return_window_for_naming)
 # 注意 ret1d 用 past_return_1d (T-1 历史收益, 非 forward_return_1d 预测目标)
 BASES = [
-    ("amplitude",       "amplitude",             "return_3d",      3),
-    ("turnover",        "turnover_rate",         "return_3d",      3),
-    ("amp_compression", "amplitude_compression", "return_3d",      3),
-    ("near_high",       "near_high_ratio_5",     "return_3d",      3),
-    ("intraday",        "intraday_intensity",    "past_return_1d", 1),
-    ("ma5_dev",         "ma5_deviation",         "return_3d",      3),
-    ("price_pos",       "price_position",        "past_return_1d", 1),
-    ("kdj",             "kdj_j",                 "return_5d",      5),
-    ("bollinger",       "bollinger_pb",          "return_5d",      5),
+    ("amplitude", "amplitude", "return_3d", 3),
+    ("turnover", "turnover_rate", "return_3d", 3),
+    ("amp_compression", "amplitude_compression", "return_3d", 3),
+    ("near_high", "near_high_ratio_5", "return_3d", 3),
+    ("intraday", "intraday_intensity", "past_return_1d", 1),
+    ("ma5_dev", "ma5_deviation", "return_3d", 3),
+    ("price_pos", "price_position", "past_return_1d", 1),
+    ("kdj", "kdj_j", "return_5d", 5),
+    ("bollinger", "bollinger_pb", "return_5d", 5),
 ]
 
 DIRECTIONS = ("pos", "neg", "abs")
@@ -66,9 +66,7 @@ def full_df():
     np.random.seed(42)
     n_dates, n_assets = 3, 4
     n = n_dates * n_assets
-    dates = pd.Series(
-        ["2026-01-01"] * n_assets + ["2026-01-02"] * n_assets + ["2026-01-03"] * n_assets
-    )
+    dates = pd.Series(["2026-01-01"] * n_assets + ["2026-01-02"] * n_assets + ["2026-01-03"] * n_assets)
     assets = pd.Series(["A", "B", "C", "D"] * n_dates)
     return pd.DataFrame(
         {
@@ -219,7 +217,9 @@ class TestRelueMathOrthogonality:
         expected = ret_z * fac_z
 
         np.testing.assert_allclose(
-            sum_half.dropna().values, expected.dropna().values, atol=1e-9,
+            sum_half.dropna().values,
+            expected.dropna().values,
+            atol=1e-9,
             err_msg=f"{base}__ret{window}d: pos+neg 应恒等 ret_z×factor_z",
         )
 
@@ -234,7 +234,9 @@ class TestRelueMathOrthogonality:
         expected = ret_z.abs() * fac_z
 
         np.testing.assert_allclose(
-            r_abs[abs_col].dropna().values, expected.dropna().values, atol=1e-9,
+            r_abs[abs_col].dropna().values,
+            expected.dropna().values,
+            atol=1e-9,
             err_msg=f"{base}__ret{window}d_abs 应恒等 |ret_z|×factor_z",
         )
 
@@ -253,8 +255,7 @@ class TestRelueMathOrthogonality:
         product = r_pos[pos_col] * r_neg[neg_col]
         valid = product.dropna()
         assert (valid.abs() < 1e-12).all(), (
-            f"{base}__ret{window}d: pos × neg 应严格为 0（半轴互斥）, "
-            f"max|product|={valid.abs().max():.2e}"
+            f"{base}__ret{window}d: pos × neg 应严格为 0（半轴互斥）, max|product|={valid.abs().max():.2e}"
         )
 
 
@@ -294,12 +295,14 @@ class TestReluHalfAxisZeroSide:
         """同日 ret 全正 → z_cs(ret) 有正有负? 实际 z_cs 中心化后必有正负 — 用极端构造"""
         # 用单股票截面 (n=1) 时 z_cs 退化, 改用 2 股极端不对称
         # 同日 ret = [+0.1, +0.1] → z 全 0 (std=0 防除零) → pos=neg=abs=0
-        df = pd.DataFrame({
-            "date": ["2026-01-01"] * 2,
-            "asset": ["A", "B"],
-            "return_3d": [0.10, 0.10],  # 全相同 → z=0
-            "amplitude": [0.05, 0.02],
-        })
+        df = pd.DataFrame(
+            {
+                "date": ["2026-01-01"] * 2,
+                "asset": ["A", "B"],
+                "return_3d": [0.10, 0.10],  # 全相同 → z=0
+                "amplitude": [0.05, 0.02],
+            }
+        )
         r_pos = func_for("amplitude", 3, "pos")(df)
         r_neg = func_for("amplitude", 3, "neg")(df)
         # ret_z=0 ⇒ max(0,0)=0 ⇒ pos=0; min(0,0)=0 ⇒ neg=0
@@ -310,12 +313,14 @@ class TestReluHalfAxisZeroSide:
         """3 股：ret=[-1, 0, +1] z 后大致 [-1.22, 0, +1.22]
         → pos 只在 ret_z>0 的行非零, neg 只在 ret_z<0 的行非零
         """
-        df = pd.DataFrame({
-            "date": ["2026-01-01"] * 3,
-            "asset": ["A", "B", "C"],
-            "return_3d": [-0.10, 0.0, 0.10],
-            "amplitude": [0.03, 0.03, 0.03],  # 同 factor 排除干扰
-        })
+        df = pd.DataFrame(
+            {
+                "date": ["2026-01-01"] * 3,
+                "asset": ["A", "B", "C"],
+                "return_3d": [-0.10, 0.0, 0.10],
+                "amplitude": [0.03, 0.03, 0.03],  # 同 factor 排除干扰
+            }
+        )
         # amplitude 同值 → z_cs(amplitude) = 0 → pos = neg = 0 (退化)
         # 改用不同 amplitude 才看得见
         df["amplitude"] = [0.01, 0.03, 0.05]

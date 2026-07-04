@@ -17,10 +17,10 @@ import pandas as pd
 
 def convert_to_native_types(obj):
     """递归转换 numpy/pandas 类型为 Python 原生类型
-    
+
     Args:
         obj: 待转换对象（dict, list, numpy类型, pandas类型等）
-    
+
     Returns:
         转换后的 Python 原生类型对象
     """
@@ -45,7 +45,7 @@ def convert_to_native_types(obj):
     if isinstance(obj, pd.Series):
         return [convert_to_native_types(item) for item in obj.tolist()]
     if isinstance(obj, pd.DataFrame):
-        return obj.applymap(convert_to_native_types).to_dict(orient='records')
+        return obj.applymap(convert_to_native_types).to_dict(orient="records")
 
     # datetime/date
     if isinstance(obj, datetime):

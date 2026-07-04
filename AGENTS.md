@@ -10,12 +10,36 @@
 **开始任何开发任务前，必须按顺序执行：**
 
 ```
-1. 加载 skill：skill_view(name='superpowers-workflow')
+1. 加载 skill：skill_view(name='superpowers-workflow')（已由 plugin 自动注入，但建议确认上下文已含入口守门员）
 2. 查询知识图谱：sqlite3 .codegraph/codegraph.db "SELECT ..."
 ```
 
 **禁止跳过**：即使任务看似简单，也必须先了解代码结构和规范流程。
 **违规后果**：未加载 skill 或未查询 codegraph 直接改代码 = 流程违规，必须回退重做。
+
+---
+
+## 🎯 Skill 触发识别（按场景主动加载）
+
+> **完整触发识别表见 `superpowers-workflow` skill 主文件 §🎯 Skill 触发识别表**（每次 LLM call 顶部已自动注入）。
+
+**核心规则（精简版）**：
+
+| 触发关键词 / 场景 | 必须加载的 skill |
+|------------------|------------------|
+| "开发因子"/"新增因子"/"IC 脚本"/"分层回测"/"权重"/"选股" | `factor-development` |
+| "死代码"/"静默失败"/"5+ bug 批量修复" | `dead-code-and-observability-fixes` |
+| "对 X.py 优化"/"按规范流程优化"/"common/ 公共模块" | `public-module-optimization` |
+| "跑报告"/"出 summary"/"生成因子汇总报告" | `factor-summary-reporting` |
+| 新增函数/脚本/API（**写代码前**） | `test-driven-development` |
+| 测试失败/运行时错误（**先于猜测修复**） | `systematic-debugging` |
+| 任何编码任务（行为约束） | `karpathy-guidelines` |
+| WebUI bug / session 异常 | `hermes-webui-debugging` |
+| 任务交给 Codex 执行 | `kanban-codex-lane` |
+
+**违规检测**：用户追问"你没加载 skill 吗？"或"你没读 AGENTS.md？" = 你已经踩坑。
+
+**superpowers-workflow 唯一例外**：已由 plugin 自动注入，不需要重复加载。
 
 ---
 

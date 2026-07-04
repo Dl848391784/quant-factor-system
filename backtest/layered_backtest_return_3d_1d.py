@@ -24,28 +24,22 @@ from data_fetchers.factor_calculator import calculate_return_3d
 
 class Return3dLayerConfig(LayerConfigBase):
     """3日收益因子分层配置
-    
+
     薄声明：因子元数据集中在 ClassVar，逻辑完全下沉基类。
     """
 
-    factor_name: ClassVar[str] = 'return_3d'
+    factor_name: ClassVar[str] = "return_3d"
 
-    layer_names: ClassVar[Sequence[str]] = (
-        'lowest',
-        'lower',
-        'normal',
-        'higher',
-        'highest'
-    )
+    layer_names: ClassVar[Sequence[str]] = ("lowest", "lower", "normal", "higher", "highest")
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        '极低层(3日跌幅最大)',
-        '偏低层(3日小幅下跌)',
-        '正常层(3日变化不大)',
-        '偏高层(3日小幅上涨)',
-        '极高层(3日涨幅最大)'
+        "极低层(3日跌幅最大)",
+        "偏低层(3日小幅下跌)",
+        "正常层(3日变化不大)",
+        "偏高层(3日小幅上涨)",
+        "极高层(3日涨幅最大)",
     )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     factor_cli_main(Return3dLayerConfig, calculate_return_3d)

@@ -23,35 +23,29 @@ from backtest.common.layered_backtest_runner import LayerConfigBase
 
 class VolumeRatioLayerConfig(LayerConfigBase):
     """量比因子分层配置
-    
+
     薄声明：因子元数据集中在 ClassVar，逻辑完全下沉基类。
-    
+
     特点：
     - factor_name=volume_ratio（IC 文件命名对应）
     - factor_col=volume_ratio_5（数据源列名，预计算因子）
     - layer_names 纯标签（用于目录/列名），layer_descriptions 含中文（用于日志）
     """
 
-    factor_name: ClassVar[str] = 'volume_ratio'
-    factor_col: ClassVar[str] = 'volume_ratio_5'
-    ic_source: ClassVar[str] = 'ic_volume_ratio_1d_analysis_result.json'  # 纯文件名，基类补充 pipeline 感知目录
+    factor_name: ClassVar[str] = "volume_ratio"
+    factor_col: ClassVar[str] = "volume_ratio_5"
+    ic_source: ClassVar[str] = "ic_volume_ratio_1d_analysis_result.json"  # 纯文件名，基类补充 pipeline 感知目录
 
-    layer_names: ClassVar[Sequence[str]] = (
-        'lowest',
-        'lower',
-        'normal',
-        'higher',
-        'highest'
-    )
+    layer_names: ClassVar[Sequence[str]] = ("lowest", "lower", "normal", "higher", "highest")
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        '极低层(量比极低)',
-        '偏低层(量比偏低)',
-        '正常层(量比适中)',
-        '偏高层(量比偏高)',
-        '极高层(量比极高)'
+        "极低层(量比极低)",
+        "偏低层(量比偏低)",
+        "正常层(量比适中)",
+        "偏高层(量比偏高)",
+        "极高层(量比极高)",
     )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     factor_cli_main(VolumeRatioLayerConfig)

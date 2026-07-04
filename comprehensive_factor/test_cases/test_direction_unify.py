@@ -328,9 +328,7 @@ class TestStockSelectorDirectionConsistency:
 
         dataset = pads.dataset(str(history_root), partitioning="hive")
         # 最新分区
-        partitions = sorted(
-            p for p in history_root.iterdir() if p.is_dir() and p.name.startswith("selection_date=")
-        )
+        partitions = sorted(p for p in history_root.iterdir() if p.is_dir() and p.name.startswith("selection_date="))
         latest = partitions[-1].name.split("=", 1)[1]
         df = dataset.to_table(filter=pc.field("selection_date") == latest).to_pandas()
 

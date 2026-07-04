@@ -27,14 +27,14 @@ class TestLayerConfig:
         from backtest.layered_backtest_intraday_intensity_1d import IntradayIntensityLayerConfig
 
         config = IntradayIntensityLayerConfig()
-        assert config.factor_name == 'intraday_intensity_1d'
+        assert config.factor_name == "intraday_intensity_1d"
 
     def test_factor_col_declared(self):
         """factor_col 必须声明为 intraday_intensity"""
         from backtest.layered_backtest_intraday_intensity_1d import IntradayIntensityLayerConfig
 
         config = IntradayIntensityLayerConfig()
-        assert config.factor_col == 'intraday_intensity'
+        assert config.factor_col == "intraday_intensity"
 
     def test_n_layers_derived(self):
         """n_layers 应从 layer_names 派生"""
@@ -48,7 +48,7 @@ class TestLayerConfig:
         from backtest.layered_backtest_intraday_intensity_1d import IntradayIntensityLayerConfig
 
         config = IntradayIntensityLayerConfig()
-        assert config.factor_direction == 'negative'
+        assert config.factor_direction == "negative"
 
 
 class TestOutputFile:
@@ -56,8 +56,8 @@ class TestOutputFile:
 
     def test_output_file_exists(self):
         """分层回测输出文件应存在"""
-        output_path = Path('/home/admin/projects/factor_ic_analyzer/backtest/result')
-        output_file = output_path / 'intraday_intensity_1d_layered_backtest.json'
+        output_path = Path("/home/admin/projects/factor_ic_analyzer/backtest/result")
+        output_file = output_path / "intraday_intensity_1d_layered_backtest.json"
 
         if not output_file.exists():
             pytest.skip("输出文件不存在，请先运行分层回测脚本")
@@ -66,8 +66,8 @@ class TestOutputFile:
 
     def test_output_has_required_fields(self):
         """输出 JSON 应包含规范要求的字段"""
-        output_path = Path('/home/admin/projects/factor_ic_analyzer/backtest/result')
-        output_file = output_path / 'intraday_intensity_1d_layered_backtest.json'
+        output_path = Path("/home/admin/projects/factor_ic_analyzer/backtest/result")
+        output_file = output_path / "intraday_intensity_1d_layered_backtest.json"
 
         if not output_file.exists():
             pytest.skip("输出文件不存在")
@@ -76,21 +76,16 @@ class TestOutputFile:
             data = json.load(f)
 
         # 顶层必需字段
-        required_fields = [
-            'meta',
-            'layer_stats',
-            'long_short',
-            'monotonicity'
-        ]
+        required_fields = ["meta", "layer_stats", "long_short", "monotonicity"]
 
         for field in required_fields:
             assert field in data, f"缺失顶层字段: {field}"
 
         # meta 子字段
-        meta = data.get('meta') or {}
-        assert 'factor_name' in meta, "meta 缺失 factor_name"
-        assert 'factor_direction' in meta, "meta 缺失 factor_direction"
-        assert 'n_layers' in meta, "meta 缺失 n_layers"
+        meta = data.get("meta") or {}
+        assert "factor_name" in meta, "meta 缺失 factor_name"
+        assert "factor_direction" in meta, "meta 缺失 factor_direction"
+        assert "n_layers" in meta, "meta 缺失 n_layers"
 
 
 class TestCLIExecution:
@@ -102,11 +97,11 @@ class TestCLIExecution:
         import sys
 
         result = subprocess.run(
-            [sys.executable, 'backtest/layered_backtest_intraday_intensity_1d.py'],
-            cwd='/home/admin/projects/factor_ic_analyzer',
+            [sys.executable, "backtest/layered_backtest_intraday_intensity_1d.py"],
+            cwd="/home/admin/projects/factor_ic_analyzer",
             capture_output=True,
             text=True,
-            timeout=180
+            timeout=180,
         )
 
         # 脚本应正常退出
@@ -114,12 +109,12 @@ class TestCLIExecution:
 
         # 输出应包含分层回测报告（日志输出到 stderr）
         output = result.stderr
-        assert '分层回测报告' in output or '完成' in output
+        assert "分层回测报告" in output or "完成" in output
 
 
 # ============================================================================
 # 运行入口
 # ============================================================================
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

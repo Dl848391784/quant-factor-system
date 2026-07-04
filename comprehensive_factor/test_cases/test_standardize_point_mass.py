@@ -140,11 +140,13 @@ class TestDiscreteFactorExemption:
     @staticmethod
     def _build_df(values: list[float], date_str: str = "2026-06-18") -> pd.DataFrame:
         n = len(values)
-        return pd.DataFrame({
-            "date": [date_str] * n,
-            "asset": [f"stock_{i:04d}" for i in range(n)],
-            "test_factor": values,
-        })
+        return pd.DataFrame(
+            {
+                "date": [date_str] * n,
+                "asset": [f"stock_{i:04d}" for i in range(n)],
+                "test_factor": values,
+            }
+        )
 
     def test_discrete_factor_no_point_mass(self):
         """离散型因子（unique < 20）即使高频聚集也不置 NaN。
@@ -154,18 +156,14 @@ class TestDiscreteFactorExemption:
         """
         # 300 只股票，6 个离散值（模拟 5 日上涨比例）
         # 0.0:88, 0.2:588, 0.4:965, 0.6:904, 0.8:406, 1.0:70（≈真实分布）
-        values = (
-            [0.0] * 9 + [0.2] * 59 + [0.4] * 96 + [0.6] * 90 + [0.8] * 41 + [1.0] * 5
-        )
+        values = [0.0] * 9 + [0.2] * 59 + [0.4] * 96 + [0.6] * 90 + [0.8] * 41 + [1.0] * 5
         df = self._build_df(values)
         result = standardize_factors(df, ["test_factor"])
 
         # 离散因子：所有 z-score 都不应被置 NaN（豁免点质量检测）
         z_scores = result["test_factor_std"]
         nan_count = z_scores.isna().sum()
-        assert nan_count == 0, (
-            f"离散因子不应有点质量 NaN, 实际 NaN 数: {nan_count}/{len(z_scores)}"
-        )
+        assert nan_count == 0, f"离散因子不应有点质量 NaN, 实际 NaN 数: {nan_count}/{len(z_scores)}"
 
     def test_discrete_factor_by_ratio(self):
         """离散型因子（unique/N < 5%）豁免。
@@ -209,11 +207,13 @@ class TestDiscreteFactorExemption:
         rng = np.random.RandomState(42)
         values_b = rng.uniform(0.0, 0.2, size=280).tolist() + rng.uniform(0.8, 1.0, size=13).tolist() + [0.5] * 7
 
-        df = pd.DataFrame({
-            "date": ["2026-06-18"] * 300 + ["2026-06-19"] * 300,
-            "asset": [f"s_{i:04d}" for i in range(600)],
-            "test_factor": values_a + values_b,
-        })
+        df = pd.DataFrame(
+            {
+                "date": ["2026-06-18"] * 300 + ["2026-06-19"] * 300,
+                "asset": [f"s_{i:04d}" for i in range(600)],
+                "test_factor": values_a + values_b,
+            }
+        )
         result = standardize_factors(df, ["test_factor"])
 
         # 日期 A（离散）：无 NaN
@@ -237,11 +237,13 @@ class TestPhysicalBoundaryExemption:
     @staticmethod
     def _build_df(values: list[float], date_str: str = "2026-06-18") -> pd.DataFrame:
         n = len(values)
-        return pd.DataFrame({
-            "date": [date_str] * n,
-            "asset": [f"stock_{i:04d}" for i in range(n)],
-            "test_factor": values,
-        })
+        return pd.DataFrame(
+            {
+                "date": [date_str] * n,
+                "asset": [f"stock_{i:04d}" for i in range(n)],
+                "test_factor": values,
+            }
+        )
 
     def test_boundary_min_exempt(self):
         """高频值=截面 min 时不置 NaN。
@@ -260,9 +262,7 @@ class TestPhysicalBoundaryExemption:
 
         # 0.0 是截面 min → 豁免，不应被置 NaN
         boundary_z = result.loc[result["test_factor"] == 0.0, "test_factor_std"]
-        assert boundary_z.notna().all(), (
-            f"物理边界 min=0.0 应豁免点质量检测, 实际 NaN 数: {boundary_z.isna().sum()}"
-        )
+        assert boundary_z.notna().all(), f"物理边界 min=0.0 应豁免点质量检测, 实际 NaN 数: {boundary_z.isna().sum()}"
 
     def test_boundary_max_exempt(self):
         """高频值=截面 max 时不置 NaN。
@@ -281,9 +281,7 @@ class TestPhysicalBoundaryExemption:
 
         # 1.0 是截面 max → 豁免，不应被置 NaN
         boundary_z = result.loc[result["test_factor"] == 1.0, "test_factor_std"]
-        assert boundary_z.notna().all(), (
-            f"物理边界 max=1.0 应豁免点质量检测, 实际 NaN 数: {boundary_z.isna().sum()}"
-        )
+        assert boundary_z.notna().all(), f"物理边界 max=1.0 应豁免点质量检测, 实际 NaN 数: {boundary_z.isna().sum()}"
 
     def test_interior_point_mass_still_detected(self):
         """非边界中间值的高频聚集仍被检测。
@@ -304,9 +302,7 @@ class TestPhysicalBoundaryExemption:
 
         # 0.5 不是 min 也不是 max → 不豁免，应被置 NaN
         interior_z = result.loc[result["test_factor"] == 0.5, "test_factor_std"]
-        assert interior_z.isna().all(), (
-            f"非边界中间值的高频聚集应被检测, 实际 NaN 数: {interior_z.isna().sum()}"
-        )
+        assert interior_z.isna().all(), f"非边界中间值的高频聚集应被检测, 实际 NaN 数: {interior_z.isna().sum()}"
 
     def test_both_boundaries_exempt(self):
         """0.0 和 1.0 同时高频时都豁免。

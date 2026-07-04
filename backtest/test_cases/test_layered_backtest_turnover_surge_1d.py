@@ -24,27 +24,27 @@ class TestTurnoverSurgeLayerConfig:
 
     def test_factor_name_classvar(self):
         """TC001-01: factor_name 类属性"""
-        assert TurnoverSurgeLayerConfig.factor_name == 'turnover_surge'
+        assert TurnoverSurgeLayerConfig.factor_name == "turnover_surge"
 
     def test_layer_names_classvar(self):
         """TC001-02: layer_names 类属性为纯标签"""
         assert len(TurnoverSurgeLayerConfig.layer_names) == 5
-        assert TurnoverSurgeLayerConfig.layer_names[0] == 'lowest'
+        assert TurnoverSurgeLayerConfig.layer_names[0] == "lowest"
 
     def test_layer_descriptions_classvar(self):
         """TC001-03: layer_descriptions 含中文描述"""
         assert len(TurnoverSurgeLayerConfig.layer_descriptions) == 5
-        assert '突增' in TurnoverSurgeLayerConfig.layer_descriptions[0]
+        assert "突增" in TurnoverSurgeLayerConfig.layer_descriptions[0]
 
     def test_ic_source_default(self):
         """TC001-04: ic_source 默认路径"""
         config = TurnoverSurgeLayerConfig()
-        assert config.ic_source_resolved.endswith('ic_turnover_surge_1d_analysis_result.json')
+        assert config.ic_source_resolved.endswith("ic_turnover_surge_1d_analysis_result.json")
 
     def test_factor_col_resolved(self):
         """TC001-05: factor_col_resolved 默认=factor_name"""
         config = TurnoverSurgeLayerConfig()
-        assert config.factor_col_resolved == 'turnover_surge'
+        assert config.factor_col_resolved == "turnover_surge"
 
     def test_n_layers_derived(self):
         """TC001-06: n_layers 由 len(layer_names) 派生"""
@@ -54,13 +54,13 @@ class TestTurnoverSurgeLayerConfig:
     def test_layer_names_dict_generated(self):
         """TC001-07: layer_names_dict 使用 layer_descriptions"""
         config = TurnoverSurgeLayerConfig()
-        assert '1' in config.layer_names_dict
-        assert '5' in config.layer_names_dict
+        assert "1" in config.layer_names_dict
+        assert "5" in config.layer_names_dict
 
     def test_layer_names_semantic(self):
         """TC001-08: layer_descriptions 语义描述"""
         for desc in TurnoverSurgeLayerConfig.layer_descriptions:
-            assert '突增' in desc or '无' in desc
+            assert "突增" in desc or "无" in desc
 
     def test_layer_names_no_fixed_threshold(self):
         """TC001-09: layer_names 纯标签无固定阈值"""
@@ -74,7 +74,8 @@ class TestTurnoverSurgeCalculator:
     def test_required_cols(self):
         """TC002-01: calculate_turnover_surge.required_cols"""
         from data_fetchers.factor_calculator import calculate_turnover_surge
-        required_cols = getattr(calculate_turnover_surge, 'required_cols', None)
+
+        required_cols = getattr(calculate_turnover_surge, "required_cols", None)
         assert required_cols is not None
 
 
@@ -88,10 +89,10 @@ class TestLayeredBacktestExecution:
 
     def test_factor_direction_literal_type(self):
         """TC003-02: factor_direction 类型约束"""
-        valid_values = get_args(Literal['positive', 'negative'])
+        valid_values = get_args(Literal["positive", "negative"])
         config = TurnoverSurgeLayerConfig()
         assert config.factor_direction in valid_values
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

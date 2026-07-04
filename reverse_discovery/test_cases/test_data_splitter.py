@@ -85,8 +85,6 @@ def fake_data_source(tmp_path: Path) -> Path:
     return path
 
 
-
-
 def _read_subset(path: Path) -> dict:
     """读取 split_data 输出的 Parquet 子集，返回 dict(data, dates, metadata) 兼容旧断言。"""
     table = pq.read_table(path)
@@ -97,6 +95,7 @@ def _read_subset(path: Path) -> dict:
         "dates": json.loads(meta[b"dates"]) if b"dates" in meta else [],
         "metadata": json.loads(meta[b"split_metadata"]) if b"split_metadata" in meta else {},
     }
+
 
 # ============================================================================
 # 1. 日期切分边界

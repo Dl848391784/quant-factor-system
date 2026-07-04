@@ -70,31 +70,31 @@ JsonValue = Union[dict[str, Any], list[Any], str, int, float, bool, None]
 
 __all__ = [
     # Session 创建函数（手动管理生命周期）
-    'create_retry_session',
-    'create_session',  # 统一入口（注册表驱动）
-    'create_eastmoney_session',  # 保留向后兼容
-    'create_sina_session',  # 保留向后兼容
+    "create_retry_session",
+    "create_session",  # 统一入口（注册表驱动）
+    "create_eastmoney_session",  # 保留向后兼容
+    "create_sina_session",  # 保留向后兼容
     # Session 上下文管理器（自动管理生命周期，推荐使用）
-    'retry_session',
-    'source_session',  # 统一入口上下文管理器（避免与变量名 session 冲突）
-    'eastmoney_session',
-    'sina_session',
+    "retry_session",
+    "source_session",  # 统一入口上下文管理器（避免与变量名 session 冲突）
+    "eastmoney_session",
+    "sina_session",
     # 请求函数
-    'request_with_retry',
+    "request_with_retry",
     # 日志函数
-    'get_module_logger',
+    "get_module_logger",
     # 请求头常量（供外部复用）
-    'DEFAULT_EASTMONEY_HEADERS',
-    'DEFAULT_SINA_HEADERS',
+    "DEFAULT_EASTMONEY_HEADERS",
+    "DEFAULT_SINA_HEADERS",
     # 数据源注册（供外部查询可用数据源）
-    'get_available_sources',
+    "get_available_sources",
     # 类型别名（供外部类型注解使用）
-    'JsonValue',
+    "JsonValue",
 ]
 
 # 模块级 fallback logger（遵循 PROJECT.md 公共模块日志规范）
 # 直接初始化，避免延迟初始化的多线程安全问题
-_MODULE_LOGGER = logging.getLogger('data_fetchers.common.http_client')
+_MODULE_LOGGER = logging.getLogger("data_fetchers.common.http_client")
 
 # 默认重试参数（模块私有常量）
 _DEFAULT_TOTAL_RETRIES = 3
@@ -140,33 +140,33 @@ DEFAULT_SINA_HEADERS = types.MappingProxyType(_SINA_HEADERS_DICT)
 # key: 数据源名称（用于 create_session(source) 参数）
 # value: 默认请求头 MappingProxyType
 _SOURCE_CONFIGS: dict[str, Mapping[str, str]] = {
-    'eastmoney': DEFAULT_EASTMONEY_HEADERS,
-    'sina': DEFAULT_SINA_HEADERS,
+    "eastmoney": DEFAULT_EASTMONEY_HEADERS,
+    "sina": DEFAULT_SINA_HEADERS,
 }
 
 
 def get_module_logger(logger: logging.Logger | None = None) -> logging.Logger:
     """
     获取 logger，遵循 PROJECT.md 公共模块日志规范
-    
+
     公共模块接收 logger 参数，调用方传入以追溯调用方。
     不传 logger 时使用模块级 fallback logger（模块加载时已初始化）。
-    
+
     Args:
         logger: 调用方传入的 logger（可选），必须是 logging.Logger 类型
-        
+
     Returns:
         logging.Logger: Logger 对象
-        
+
     Raises:
         TypeError: logger 参数不是 logging.Logger 类型
-        
+
     Example:
         >>> logger = get_module_logger()
         >>> logger.name
         'data_fetchers.common.http_client'
-        
-        >>> my_logger = logging.getLogger('my_module')
+
+        >>> my_logger = logging.getLogger("my_module")
         >>> logger = get_module_logger(my_logger)
         >>> logger.name
         'my_module'
@@ -185,33 +185,33 @@ def _create_retry_strategy(
 ) -> Retry:
     """
     创建 urllib3 Retry 策略（根据版本自动选择参数名）
-    
+
     urllib3 >= 2.0 使用 allowed_methods 参数
     urllib3 < 2.0 使用 method_whitelist 参数
-    
+
     Args:
         retry_params: Retry 公共参数（total, backoff_factor, status_forcelist）
         allowed_methods: 允许重试的 HTTP 方法列表
-        
+
     Returns:
         Retry: 配置好的重试策略
-        
+
     Example:
-        >>> retry_params = {'total': 3, 'backoff_factor': 1.0, 'status_forcelist': [429, 500]}
-        >>> strategy = _create_retry_strategy(retry_params, ['GET'])
+        >>> retry_params = {"total": 3, "backoff_factor": 1.0, "status_forcelist": [429, 500]}
+        >>> strategy = _create_retry_strategy(retry_params, ["GET"])
     """
     # 直接检测 urllib3 版本号，避免异常消息字符串匹配的不确定性
     # urllib3.__version__ 是公开属性，Pyright 静态分析不认可但运行时有效
     # fallback='0.0.0' 仅用于极端异常场景，确保走旧版本分支（method_whitelist）
-    version_str = getattr(urllib3, '__version__', '0.0.0')
-    major_version = int(version_str.split('.')[0])
+    version_str = getattr(urllib3, "__version__", "0.0.0")
+    major_version = int(version_str.split(".")[0])
 
     if major_version >= 2:
         # urllib3 >= 2.0 使用 allowed_methods
         return Retry(**retry_params, allowed_methods=allowed_methods)
     else:
         # urllib3 < 2.0 使用 method_whitelist（Pyright 不认可但旧版本存在）
-        return Retry(**retry_params, **{'method_whitelist': allowed_methods})  # pyright: ignore[reportCallIssue]
+        return Retry(**retry_params, **{"method_whitelist": allowed_methods})  # pyright: ignore[reportCallIssue]
 
 
 def create_retry_session(
@@ -225,22 +225,22 @@ def create_retry_session(
 ) -> requests.Session:
     """
     创建带重试机制的 HTTP Session（urllib3 层自动重试）
-    
+
     ⚠️ 互斥警告：此函数与 request_with_retry() 互斥，二选一使用：
-    
+
     方案 A（推荐用于标准 HTTP 错误）：
         session = create_retry_session(total_retries=3)
         response = session.get(url)  # urllib3 自动重试 3 次
-    
+
     方案 B（用于需解析响应内容判断重试的场景）：
         session = create_retry_session(total_retries=0)  # 禁用 urllib3 重试
         data = request_with_retry(session, url, max_attempts=3)  # 应用层重试
-    
+
     错误用法（双重重试叠加）：
         session = create_retry_session(total_retries=3)
         data = request_with_retry(session, url, max_attempts=3)
         # 最坏情况：3×(1+3)=12 次请求，行为不透明
-    
+
     Args:
         headers: 自定义请求头（默认 None，支持 Dict 或 MappingProxyType）
         total_retries: 总重试次数（默认 3）
@@ -249,24 +249,24 @@ def create_retry_session(
         pool_maxsize: 最大连接数（默认 10）
         allowed_methods: 允许重试的 HTTP 方法（默认 ["GET"]）
         logger: 调用方传入的 logger（可选）
-        
+
     Returns:
         requests.Session: 配置好的 Session
-        
+
     Raises:
         TypeError: urllib3 版本不兼容（极少见）
-        
+
     Example:
         # 创建通用 Session（默认配置）
         session = create_retry_session()
-        
+
         # 创建东财 Session（业务特定）
         session = create_retry_session(
             headers=DEFAULT_EASTMONEY_HEADERS,
             total_retries=5,
             logger=my_logger
         )
-        
+
         # 创建新浪 Session（业务特定）
         session = create_retry_session(
             headers=DEFAULT_SINA_HEADERS,
@@ -287,9 +287,9 @@ def create_retry_session(
 
     # 创建重试策略（使用版本检测而非异常消息字符串匹配）
     retry_params = {
-        'total': total_retries,
-        'backoff_factor': backoff_factor,
-        'status_forcelist': _DEFAULT_RETRY_STATUS_CODES,
+        "total": total_retries,
+        "backoff_factor": backoff_factor,
+        "status_forcelist": _DEFAULT_RETRY_STATUS_CODES,
     }
     retry_strategy = _create_retry_strategy(retry_params, allowed_methods)
 
@@ -306,21 +306,19 @@ def create_retry_session(
     return session
 
 
-def create_eastmoney_session(
-    logger: logging.Logger | None = None
-) -> requests.Session:
+def create_eastmoney_session(logger: logging.Logger | None = None) -> requests.Session:
     """
     创建东财 API Session（使用默认配置）
-    
+
     Args:
         logger: 调用方传入的 logger（可选）
-        
+
     Returns:
         requests.Session: 配置好的 Session
-        
+
     Raises:
         TypeError: urllib3 版本不兼容（继承自 create_retry_session）
-        
+
     Example:
         session = create_eastmoney_session(logger=my_logger)
         response = session.get('https://api.eastmoney.com/...')
@@ -328,21 +326,19 @@ def create_eastmoney_session(
     return create_retry_session(headers=DEFAULT_EASTMONEY_HEADERS, logger=logger)
 
 
-def create_sina_session(
-    logger: logging.Logger | None = None
-) -> requests.Session:
+def create_sina_session(logger: logging.Logger | None = None) -> requests.Session:
     """
     创建新浪 API Session
-    
+
     Args:
         logger: 调用方传入的 logger（可选）
-        
+
     Returns:
         requests.Session: 配置好的 Session
-        
+
     Raises:
         TypeError: urllib3 版本不兼容（继承自 create_retry_session）
-        
+
     Example:
         session = create_sina_session(logger=my_logger)
         response = session.get('http://vip.stock.finance.sina.com.cn/...')
@@ -353,10 +349,10 @@ def create_sina_session(
 def get_available_sources() -> list[str]:
     """
     获取可用的数据源列表
-    
+
     Returns:
         List[str]: 数据源名称列表
-        
+
     Example:
         >>> get_available_sources()
         ['eastmoney', 'sina']
@@ -375,10 +371,10 @@ def create_session(
 ) -> requests.Session:
     """
     创建数据源 Session（注册表驱动，统一入口）
-    
+
     新增数据源只需在 _SOURCE_CONFIGS 注册表添加一行，
     无需新增函数，避免模块随数据源数量线性膨胀。
-    
+
     Args:
         source: 数据源名称（eastmoney/sina，可通过 get_available_sources() 查询）
         total_retries: 总重试次数（默认 3）
@@ -387,23 +383,23 @@ def create_session(
         pool_maxsize: 最大连接数（默认 10）
         allowed_methods: 允许重试的 HTTP 方法（默认 ["GET"]）
         logger: 调用方传入的 logger（可选）
-        
+
     Returns:
         requests.Session: 配置好的 Session
-        
+
     Raises:
         ValueError: 数据源不存在
-        
+
     Example:
         # 查询可用数据源
         >>> get_available_sources()
         ['eastmoney', 'sina']
-        
+
         # 创建东财 Session
-        >>> session = create_session('eastmoney', logger=my_logger)
-        
+        >>> session = create_session("eastmoney", logger=my_logger)
+
         # 创建新浪 Session
-        >>> session = create_session('sina', total_retries=5)
+        >>> session = create_session("sina", total_retries=5)
     """
     if source not in _SOURCE_CONFIGS:
         available = get_available_sources()
@@ -427,14 +423,14 @@ def create_session(
 def _calc_wait_time(attempt: int, delay: float) -> float:
     """
     计算线性递增退避等待时间
-    
+
     Args:
         attempt: 当前尝试次数（从 0 开始）
         delay: 基础延迟（秒）
-        
+
     Returns:
         等待时间（秒）
-        
+
     Example:
         >>> _calc_wait_time(0, 1.0)  # 第 1 次失败后等待 1 秒
         1.0
@@ -449,7 +445,7 @@ def _calc_wait_time(attempt: int, delay: float) -> float:
 def request_with_retry(
     session: requests.Session,
     url: str,
-    method: str = 'GET',
+    method: str = "GET",
     params: dict[str, Any] | None = None,
     data: dict[str, Any] | None = None,
     json_data: dict[str, Any] | None = None,
@@ -460,15 +456,15 @@ def request_with_retry(
 ) -> JsonValue:
     """
     带手动重试的请求（应用层重试，用于需解析响应内容判断重试的场景）
-    
+
     ⚠️ 互斥警告：此函数与 create_retry_session(total_retries>0) 互斥。
     若 session 已配置 urllib3 重试，叠加此函数会导致双重重试。
     正确用法：create_retry_session(total_retries=0) 禁用 urllib3 重试后使用此函数。
-    
+
     退避策略：线性递增（attempt=0 等待 1×delay，attempt=1 等待 2×delay...）
     与 urllib3 Retry 的指数退避（backoff_factor × 2^attempt）不同。
     线性退避适合快速恢复的临时故障，指数退避适合服务器压力场景。
-    
+
     Args:
         session: HTTP Session（应使用 create_retry_session(total_retries=0) 创建）
         url: 请求 URL
@@ -480,17 +476,17 @@ def request_with_retry(
         max_attempts: 最大尝试次数（默认 3）
         delay: 重试基础延迟（秒，默认 1.0，线性递增）
         logger: 调用方传入的 logger（可选）
-        
+
     Returns:
         JsonValue: JSON 反序列化结果（dict/list/str/int/float/bool/None）
-        
+
     Raises:
         RuntimeError: 所有尝试失败（含 429 限流重试耗尽），保留原始异常链
         requests.HTTPError: HTTP 状态码错误（仅限非 429 错误）
         requests.Timeout: 请求超时
         requests.ConnectionError: 连接错误
         json.JSONDecodeError: JSON 解析失败
-        
+
     Example:
         # 应用层重试（需解析响应内容）
         session = create_retry_session(total_retries=0)  # 禁用 urllib3 重试
@@ -501,7 +497,7 @@ def request_with_retry(
             max_attempts=3,
             logger=my_logger
         )
-        
+
         # POST 请求
         data = request_with_retry(
             session,
@@ -515,7 +511,7 @@ def request_with_retry(
     last_error: Exception | None = None
 
     # 验证 method 参数
-    valid_methods = ['GET', 'POST', 'PUT', 'DELETE']
+    valid_methods = ["GET", "POST", "PUT", "DELETE"]
     if method.upper() not in valid_methods:
         raise ValueError(f"不支持的 HTTP 方法: {method}，支持: {valid_methods}")
     method = method.upper()
@@ -524,13 +520,13 @@ def request_with_retry(
         response: requests.Response | None = None  # 类型注解 + 防御性初始化
         try:
             # 根据方法类型选择请求方式
-            if method == 'GET':
+            if method == "GET":
                 response = session.get(url, params=params, timeout=timeout)
-            elif method == 'POST':
+            elif method == "POST":
                 response = session.post(url, data=data, json=json_data, timeout=timeout)
-            elif method == 'PUT':
+            elif method == "PUT":
                 response = session.put(url, data=data, json=json_data, timeout=timeout)
-            elif method == 'DELETE':
+            elif method == "DELETE":
                 response = session.delete(url, timeout=timeout)
             else:
                 raise ValueError(f"未实现的 HTTP 方法: {method}")
@@ -545,7 +541,7 @@ def request_with_retry(
 
             if status_code == 429 and attempt < max_attempts - 1:
                 # 读取 Retry-After 头（服务器要求的最短等待时间）
-                retry_after = response.headers.get('Retry-After') if response else None
+                retry_after = response.headers.get("Retry-After") if response else None
 
                 # 计算 wait_time：有 Retry-After 用其值，否则回退线性退避
                 if retry_after is not None:
@@ -561,73 +557,76 @@ def request_with_retry(
                     wait_time = _calc_wait_time(attempt, delay)
 
                 logger.warning(
-                    "请求被限流 (429) (尝试 %d/%d)\n"
-                    "URL: %s\n"
-                    "方法: %s\n"
-                    "Retry-After: %s\n"
-                    "等待 %.1f秒后重试...",
-                    attempt + 1, max_attempts, url, method, retry_after if retry_after is not None else 'N/A', wait_time
+                    "请求被限流 (429) (尝试 %d/%d)\nURL: %s\n方法: %s\nRetry-After: %s\n等待 %.1f秒后重试...",
+                    attempt + 1,
+                    max_attempts,
+                    url,
+                    method,
+                    retry_after if retry_after is not None else "N/A",
+                    wait_time,
                 )
                 time.sleep(wait_time)
                 continue  # 继续下一次尝试
 
             # 非 429 直接抛出；429 最后一次失败由循环后统一处理
             if status_code != 429:
-                logger.error("HTTP 错误: %s\nURL: %s\n方法: %s\n状态码: %s",
-                             e, url, method, status_code if status_code else 'N/A')
+                logger.error(
+                    "HTTP 错误: %s\nURL: %s\n方法: %s\n状态码: %s",
+                    e,
+                    url,
+                    method,
+                    status_code if status_code else "N/A",
+                )
                 raise
         except requests.Timeout as e:
             last_error = e
             if attempt < max_attempts - 1:
                 wait_time = _calc_wait_time(attempt, delay)
                 logger.warning(
-                    "请求超时 (尝试 %d/%d): %s\n"
-                    "URL: %s\n"
-                    "方法: %s\n"
-                    "等待 %.1f秒后重试...",
-                    attempt + 1, max_attempts, e, url, method, wait_time
+                    "请求超时 (尝试 %d/%d): %s\nURL: %s\n方法: %s\n等待 %.1f秒后重试...",
+                    attempt + 1,
+                    max_attempts,
+                    e,
+                    url,
+                    method,
+                    wait_time,
                 )
                 time.sleep(wait_time)
             else:
                 # 最后一次失败记录详细日志（循环后统一 error 丢失"第几次尝试"上下文）
                 logger.warning(
-                    "请求超时（最后一次尝试 %d/%d）: %s\n"
-                    "URL: %s\n"
-                    "方法: %s",
-                    attempt + 1, max_attempts, e, url, method
+                    "请求超时（最后一次尝试 %d/%d）: %s\nURL: %s\n方法: %s", attempt + 1, max_attempts, e, url, method
                 )
         except requests.ConnectionError as e:
             last_error = e
             if attempt < max_attempts - 1:
                 wait_time = _calc_wait_time(attempt, delay)
                 logger.warning(
-                    "连接错误 (尝试 %d/%d): %s\n"
-                    "URL: %s\n"
-                    "方法: %s\n"
-                    "等待 %.1f秒后重试...",
-                    attempt + 1, max_attempts, e, url, method, wait_time
+                    "连接错误 (尝试 %d/%d): %s\nURL: %s\n方法: %s\n等待 %.1f秒后重试...",
+                    attempt + 1,
+                    max_attempts,
+                    e,
+                    url,
+                    method,
+                    wait_time,
                 )
                 time.sleep(wait_time)
             else:
                 # 最后一次失败记录详细日志（循环后统一 error 丢失"第几次尝试"上下文）
                 logger.warning(
-                    "连接错误（最后一次尝试 %d/%d）: %s\n"
-                    "URL: %s\n"
-                    "方法: %s",
-                    attempt + 1, max_attempts, e, url, method
+                    "连接错误（最后一次尝试 %d/%d）: %s\nURL: %s\n方法: %s", attempt + 1, max_attempts, e, url, method
                 )
         except (json.JSONDecodeError, requests.exceptions.JSONDecodeError) as e:
             # JSON 解析失败，记录详细信息
             # 使用 getattr 安全访问 response.text，避免 streaming 模式问题
-            response_text = getattr(response, 'text', None)
-            preview = response_text[:200] if response_text else 'N/A'
+            response_text = getattr(response, "text", None)
+            preview = response_text[:200] if response_text else "N/A"
             logger.error(
-                "JSON 解析失败\n"
-                "URL: %s\n"
-                "方法: %s\n"
-                "响应内容前200字符: %s\n"
-                "错误类型: %s",
-                url, method, preview, type(e).__name__
+                "JSON 解析失败\nURL: %s\n方法: %s\n响应内容前200字符: %s\n错误类型: %s",
+                url,
+                method,
+                preview,
+                type(e).__name__,
             )
             raise  # 直接抛出，不重试
         except Exception as e:
@@ -636,20 +635,19 @@ def request_with_retry(
             if attempt < max_attempts - 1:
                 wait_time = _calc_wait_time(attempt, delay)
                 logger.warning(
-                    "请求失败 (尝试 %d/%d): %s\n"
-                    "URL: %s\n"
-                    "方法: %s\n"
-                    "等待 %.1f秒后重试...",
-                    attempt + 1, max_attempts, e, url, method, wait_time
+                    "请求失败 (尝试 %d/%d): %s\nURL: %s\n方法: %s\n等待 %.1f秒后重试...",
+                    attempt + 1,
+                    max_attempts,
+                    e,
+                    url,
+                    method,
+                    wait_time,
                 )
                 time.sleep(wait_time)
             else:
                 # 最后一次失败记录详细日志（循环后统一 error 丢失"第几次尝试"上下文）
                 logger.warning(
-                    "请求失败（最后一次尝试 %d/%d）: %s\n"
-                    "URL: %s\n"
-                    "方法: %s",
-                    attempt + 1, max_attempts, e, url, method
+                    "请求失败（最后一次尝试 %d/%d）: %s\nURL: %s\n方法: %s", attempt + 1, max_attempts, e, url, method
                 )
 
     # 所有尝试失败，统一记录 error 日志
@@ -669,10 +667,10 @@ def retry_session(
 ) -> Iterator[requests.Session]:
     """
     带自动资源清理的 HTTP Session 上下文管理器
-    
+
     推荐用于长期运行的服务或频繁创建 Session 的场景，
     避免忘记调用 session.close() 导致连接泄漏。
-    
+
     Args:
         headers: 自定义请求头（默认 None）
         total_retries: 总重试次数（默认 3）
@@ -681,10 +679,10 @@ def retry_session(
         pool_maxsize: 最大连接数（默认 10）
         allowed_methods: 允许重试的 HTTP 方法（默认 ["GET"]）
         logger: 调用方传入的 logger（可选）
-        
+
     Yields:
         requests.Session: 配置好的 Session（自动关闭）
-        
+
     Example:
         >>> with retry_session(headers=DEFAULT_EASTMONEY_HEADERS) as sess:
         >>>     response = sess.get('https://api.eastmoney.com/...')
@@ -706,18 +704,16 @@ def retry_session(
 
 
 @contextlib.contextmanager
-def eastmoney_session(
-    logger: logging.Logger | None = None
-) -> Iterator[requests.Session]:
+def eastmoney_session(logger: logging.Logger | None = None) -> Iterator[requests.Session]:
     """
     东财 API Session 上下文管理器（自动资源清理）
-    
+
     Args:
         logger: 调用方传入的 logger（可选）
-        
+
     Yields:
         requests.Session: 配置好的东财 Session（自动关闭）
-        
+
     Example:
         >>> with eastmoney_session(logger=my_logger) as sess:
         >>>     response = sess.get('https://api.eastmoney.com/...')
@@ -731,18 +727,16 @@ def eastmoney_session(
 
 
 @contextlib.contextmanager
-def sina_session(
-    logger: logging.Logger | None = None
-) -> Iterator[requests.Session]:
+def sina_session(logger: logging.Logger | None = None) -> Iterator[requests.Session]:
     """
     新浪 API Session 上下文管理器（自动资源清理）
-    
+
     Args:
         logger: 调用方传入的 logger（可选）
-        
+
     Yields:
         requests.Session: 配置好的新浪 Session（自动关闭）
-        
+
     Example:
         >>> with sina_session(logger=my_logger) as sess:
         >>>     response = sess.get('http://vip.stock.finance.sina.com.cn/...')
@@ -767,7 +761,7 @@ def source_session(
 ) -> Iterator[requests.Session]:
     """
     数据源 Session 上下文管理器（注册表驱动，自动资源清理）
-    
+
     Args:
         source: 数据源名称（eastmoney/sina）
         total_retries: 总重试次数（默认 3）
@@ -776,13 +770,13 @@ def source_session(
         pool_maxsize: 最大连接数（默认 10）
         allowed_methods: 允许重试的 HTTP 方法（默认 ["GET"]）
         logger: 调用方传入的 logger（可选）
-        
+
     Yields:
         requests.Session: 配置好的 Session（自动关闭）
-        
+
     Raises:
         ValueError: 数据源不存在
-        
+
     Example:
         >>> with source_session('eastmoney', logger=my_logger) as sess:
         >>>     response = sess.get('https://api.eastmoney.com/...')
@@ -801,5 +795,3 @@ def source_session(
         yield sess
     finally:
         sess.close()
-
-

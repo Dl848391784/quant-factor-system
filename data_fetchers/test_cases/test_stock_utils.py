@@ -44,23 +44,26 @@ from data_fetchers.common.stock_utils import (
 class TestIsMainBoardStock:
     """测试 is_main_board_stock 函数"""
 
-    @pytest.mark.parametrize("code,name,expected", [
-        # 主板股票
-        ('600000', '浦发银行', True),
-        ('000001', '平安银行', True),
-        # 创业板（剔除）
-        ('300001', '特锐德', False),
-        # 科创板（剔除）
-        ('688001', '华兴源创', False),
-        # 北交所（剔除）
-        ('830001', '新三板', False),
-        # ST股票（剔除）
-        ('600000', 'ST某某', False),
-        # 边界测试：空值
-        ('', '浦发银行', False),
-        ('600000', '', False),
-        ('', '', False),
-    ])
+    @pytest.mark.parametrize(
+        "code,name,expected",
+        [
+            # 主板股票
+            ("600000", "浦发银行", True),
+            ("000001", "平安银行", True),
+            # 创业板（剔除）
+            ("300001", "特锐德", False),
+            # 科创板（剔除）
+            ("688001", "华兴源创", False),
+            # 北交所（剔除）
+            ("830001", "新三板", False),
+            # ST股票（剔除）
+            ("600000", "ST某某", False),
+            # 边界测试：空值
+            ("", "浦发银行", False),
+            ("600000", "", False),
+            ("", "", False),
+        ],
+    )
     def test_is_main_board_stock(self, code: str, name: str, expected: bool):
         """测试主板股票判断"""
         result = is_main_board_stock(code, name)
@@ -69,12 +72,12 @@ class TestIsMainBoardStock:
     def test_type_error_code_int(self):
         """测试 code 参数类型错误（传入 int）"""
         with pytest.raises(TypeError, match="code 必须是字符串类型"):
-            is_main_board_stock(600000, '浦发银行')
+            is_main_board_stock(600000, "浦发银行")
 
     def test_type_error_name_int(self):
         """测试 name 参数类型错误（传入 int）"""
         with pytest.raises(TypeError, match="name 必须是字符串类型"):
-            is_main_board_stock('600000', 12345)
+            is_main_board_stock("600000", 12345)
 
 
 class TestLoadMainBoardStockList:
@@ -88,16 +91,13 @@ class TestLoadMainBoardStockList:
         assert isinstance(stocks, list)
         if stocks:
             assert isinstance(stocks[0], dict)
-            assert 'code' in stocks[0]
-            assert 'name' in stocks[0]
+            assert "code" in stocks[0]
+            assert "name" in stocks[0]
 
     def test_file_not_found(self, test_logger: logging.Logger):
         """测试文件不存在"""
         with pytest.raises(FileNotFoundError, match="股票列表缓存不存在"):
-            load_main_board_stock_list(
-                stock_list_file=Path('/nonexistent/path/stock_list.json'),
-                logger=test_logger
-            )
+            load_main_board_stock_list(stock_list_file=Path("/nonexistent/path/stock_list.json"), logger=test_logger)
 
 
 class TestGetStockCodesOnly:
@@ -106,12 +106,12 @@ class TestGetStockCodesOnly:
     def test_extract_codes(self, test_logger: logging.Logger):
         """测试提取代码（过滤空代码）"""
         test_stocks = [
-            {'code': '600000', 'name': '浦发银行'},
-            {'code': '000001', 'name': '平安银行'},
-            {'code': '', 'name': '异常股票'},
+            {"code": "600000", "name": "浦发银行"},
+            {"code": "000001", "name": "平安银行"},
+            {"code": "", "name": "异常股票"},
         ]
         codes = get_stock_codes_only(test_stocks, logger=test_logger)
-        assert codes == ['600000', '000001']
+        assert codes == ["600000", "000001"]
 
     def test_empty_list(self, test_logger: logging.Logger):
         """测试空列表"""
@@ -121,13 +121,13 @@ class TestGetStockCodesOnly:
     def test_type_error_not_list(self):
         """测试参数不是列表"""
         with pytest.raises(TypeError, match="stock_list 必须是列表类型"):
-            get_stock_codes_only('not_a_list')
+            get_stock_codes_only("not_a_list")
 
     def test_filter_non_dict_elements(self, test_logger: logging.Logger):
         """测试过滤非字典元素"""
-        test_stocks = [{'code': '600000'}, 'not_a_dict']
+        test_stocks = [{"code": "600000"}, "not_a_dict"]
         codes = get_stock_codes_only(test_stocks, logger=test_logger)
-        assert codes == ['600000']
+        assert codes == ["600000"]
 
 
 class TestGetStockNameMap:
@@ -136,12 +136,12 @@ class TestGetStockNameMap:
     def test_build_map(self, test_logger: logging.Logger):
         """测试构建名称映射（过滤空值）"""
         test_stocks = [
-            {'code': '600000', 'name': '浦发银行'},
-            {'code': '', 'name': '异常股票'},
-            {'code': '000001', 'name': ''},
+            {"code": "600000", "name": "浦发银行"},
+            {"code": "", "name": "异常股票"},
+            {"code": "000001", "name": ""},
         ]
         name_map = get_stock_name_map(test_stocks, logger=test_logger)
-        assert name_map == {'600000': '浦发银行'}
+        assert name_map == {"600000": "浦发银行"}
 
     def test_empty_list(self, test_logger: logging.Logger):
         """测试空列表"""
@@ -151,13 +151,13 @@ class TestGetStockNameMap:
     def test_type_error_not_list(self):
         """测试参数不是列表"""
         with pytest.raises(TypeError, match="stock_list 必须是列表类型"):
-            get_stock_name_map('not_a_list')
+            get_stock_name_map("not_a_list")
 
     def test_filter_non_dict_elements(self, test_logger: logging.Logger):
         """测试过滤非字典元素"""
-        test_stocks = [{'code': '600000', 'name': '浦发银行'}, 'not_a_dict']
+        test_stocks = [{"code": "600000", "name": "浦发银行"}, "not_a_dict"]
         name_map = get_stock_name_map(test_stocks, logger=test_logger)
-        assert name_map == {'600000': '浦发银行'}
+        assert name_map == {"600000": "浦发银行"}
 
 
 class TestFilterStocksByDate:
@@ -165,64 +165,61 @@ class TestFilterStocksByDate:
 
     def test_filter_success(self, test_logger: logging.Logger):
         """测试正常筛选"""
-        test_stocks = [{'code': '600000', 'list_date': '2020-06-01'}]
-        filtered = filter_stocks_by_date(
-            test_stocks, '2020-01-01', '2020-12-31', logger=test_logger
-        )
+        test_stocks = [{"code": "600000", "list_date": "2020-06-01"}]
+        filtered = filter_stocks_by_date(test_stocks, "2020-01-01", "2020-12-31", logger=test_logger)
         assert len(filtered) == 1
 
     def test_empty_list(self, test_logger: logging.Logger):
         """测试空列表"""
-        filtered = filter_stocks_by_date([], '2020-01-01', '2020-12-31', logger=test_logger)
+        filtered = filter_stocks_by_date([], "2020-01-01", "2020-12-31", logger=test_logger)
         assert filtered == []
 
     def test_invalid_date_format(self):
         """测试日期格式错误"""
-        test_stocks = [{'code': '600000', 'list_date': '2020-06-01'}]
+        test_stocks = [{"code": "600000", "list_date": "2020-06-01"}]
         with pytest.raises(ValueError, match="开始日期格式不正确"):
-            filter_stocks_by_date(test_stocks, '2020-1-1', '2020-12-31')
+            filter_stocks_by_date(test_stocks, "2020-1-1", "2020-12-31")
 
     def test_invalid_date_boundary_before_1990(self):
         """测试日期边界错误（早于1990）"""
-        test_stocks = [{'code': '600000', 'list_date': '2020-06-01'}]
+        test_stocks = [{"code": "600000", "list_date": "2020-06-01"}]
         with pytest.raises(ValueError, match="开始日期超出合理边界"):
-            filter_stocks_by_date(test_stocks, '1980-01-01', '2020-12-31')
+            filter_stocks_by_date(test_stocks, "1980-01-01", "2020-12-31")
 
     def test_invalid_date_range(self):
         """测试日期范围错误（start > end）"""
-        test_stocks = [{'code': '600000', 'list_date': '2020-06-01'}]
+        test_stocks = [{"code": "600000", "list_date": "2020-06-01"}]
         with pytest.raises(ValueError, match="日期范围无效"):
-            filter_stocks_by_date(test_stocks, '2020-12-31', '2020-01-01')
+            filter_stocks_by_date(test_stocks, "2020-12-31", "2020-01-01")
 
     def test_type_error_not_list(self):
         """测试参数不是列表"""
         with pytest.raises(TypeError, match="stock_list 必须是列表类型"):
-            filter_stocks_by_date('not_a_list', '2020-01-01', '2020-12-31')
+            filter_stocks_by_date("not_a_list", "2020-01-01", "2020-12-31")
 
     def test_filter_non_dict_elements(self, test_logger: logging.Logger):
         """测试过滤非字典元素"""
-        test_stocks = [{'code': '600000', 'list_date': '2020-06-01'}, 'not_a_dict']
-        filtered = filter_stocks_by_date(
-            test_stocks, '2020-01-01', '2020-12-31', logger=test_logger
-        )
+        test_stocks = [{"code": "600000", "list_date": "2020-06-01"}, "not_a_dict"]
+        filtered = filter_stocks_by_date(test_stocks, "2020-01-01", "2020-12-31", logger=test_logger)
         assert len(filtered) == 1
 
     def test_invalid_calendar_date(self):
         """测试日历非法日期（如2020-13-01）"""
-        test_stocks = [{'code': '600000', 'list_date': '2020-06-01'}]
+        test_stocks = [{"code": "600000", "list_date": "2020-06-01"}]
         with pytest.raises(ValueError, match="开始日期不是合法日期"):
-            filter_stocks_by_date(test_stocks, '2020-13-01', '2020-12-31')
+            filter_stocks_by_date(test_stocks, "2020-13-01", "2020-12-31")
 
     def test_type_error_date_not_string(self):
         """测试日期参数不是字符串类型"""
-        test_stocks = [{'code': '600000', 'list_date': '2020-06-01'}]
+        test_stocks = [{"code": "600000", "list_date": "2020-06-01"}]
         # start_date 为 None
         with pytest.raises(TypeError, match="日期参数必须是字符串类型"):
-            filter_stocks_by_date(test_stocks, None, '2020-12-31')
+            filter_stocks_by_date(test_stocks, None, "2020-12-31")
         # end_date 为 datetime 对象
         from datetime import datetime
+
         with pytest.raises(TypeError, match="日期参数必须是字符串类型"):
-            filter_stocks_by_date(test_stocks, '2020-01-01', datetime(2020, 12, 31))
+            filter_stocks_by_date(test_stocks, "2020-01-01", datetime(2020, 12, 31))
 
 
 class TestGetModuleLogger:
@@ -231,7 +228,7 @@ class TestGetModuleLogger:
     def test_fallback_logger(self):
         """测试 fallback logger"""
         logger = get_module_logger()
-        assert logger.name == 'data_fetchers.common.stock_utils'
+        assert logger.name == "data_fetchers.common.stock_utils"
 
     def test_custom_logger(self, test_logger: logging.Logger):
         """测试自定义 logger"""
@@ -241,7 +238,7 @@ class TestGetModuleLogger:
     def test_type_error_not_logger(self):
         """测试参数不是 Logger 类型"""
         with pytest.raises(TypeError, match="logger 必须是 logging.Logger 类型"):
-            get_module_logger('not_a_logger')
+            get_module_logger("not_a_logger")
 
 
 class TestConstants:
@@ -249,22 +246,22 @@ class TestConstants:
 
     def test_main_board_prefixes(self):
         """测试主板前缀常量"""
-        assert MAIN_BOARD_PREFIXES == ('60', '00')
+        assert MAIN_BOARD_PREFIXES == ("60", "00")
         assert isinstance(MAIN_BOARD_PREFIXES, tuple)  # 不可变
 
     def test_excluded_prefixes(self):
         """测试剔除前缀常量（精简后：'8' 覆盖 '688'）"""
-        assert EXCLUDED_PREFIXES == ('30', '8', '4')
+        assert EXCLUDED_PREFIXES == ("30", "8", "4")
         assert isinstance(EXCLUDED_PREFIXES, tuple)
 
     def test_excluded_name_keywords(self):
         """测试剔除名称关键词常量"""
-        assert 'ST' in EXCLUDED_NAME_KEYWORDS
+        assert "ST" in EXCLUDED_NAME_KEYWORDS
         assert isinstance(EXCLUDED_NAME_KEYWORDS, tuple)
 
     def test_min_stock_date(self):
         """测试最小日期常量"""
-        assert MIN_STOCK_DATE == '1990-12-19'
+        assert MIN_STOCK_DATE == "1990-12-19"
 
     def test_get_max_stock_date(self):
         """测试动态获取最大日期"""
@@ -272,7 +269,8 @@ class TestConstants:
         assert isinstance(max_date, str)
         # 格式验证
         import re
-        assert re.match(r'^\d{4}-\d{2}-\d{2}$', max_date)
+
+        assert re.match(r"^\d{4}-\d{2}-\d{2}$", max_date)
 
     def test_max_stock_date_alias(self):
         """测试 deprecated 别名（快照值）"""
@@ -280,19 +278,22 @@ class TestConstants:
         assert isinstance(MAX_STOCK_DATE, str)
         # 格式验证
         import re
-        assert re.match(r'^\d{4}-\d{2}-\d{2}$', MAX_STOCK_DATE)
+
+        assert re.match(r"^\d{4}-\d{2}-\d{2}$", MAX_STOCK_DATE)
 
 
 # ============== pytest fixtures ==============
 
+
 @pytest.fixture
 def test_logger() -> logging.Logger:
     """测试 logger fixture"""
-    return logging.getLogger('test_stock_utils')
+    return logging.getLogger("test_stock_utils")
 
 
 @pytest.fixture
 def stock_list_exists() -> bool:
     """检查股票列表缓存是否存在"""
     from data_fetchers.common.paths import get_stock_list_file
+
     return get_stock_list_file().exists()

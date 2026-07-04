@@ -47,6 +47,6 @@ class IndustryRoeTrendLayerConfig(LayerConfigBase):
 
 if __name__ == "__main__":
     factor_cli_main(
-            config_cls=IndustryRoeTrendLayerConfig,
-            factor_calculator=calculate_industry_roe_trend,
-        )
+        config_cls=IndustryRoeTrendLayerConfig,
+        factor_calculator=calculate_industry_roe_trend,
+    )

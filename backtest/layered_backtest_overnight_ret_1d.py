@@ -24,28 +24,22 @@ from data_fetchers.factor_calculator import calculate_overnight_return
 
 class OvernightRetLayerConfig(LayerConfigBase):
     """隔夜收益因子分层配置
-    
+
     薄声明：因子元数据集中在 ClassVar，逻辑完全下沉基类。
     """
 
-    factor_name: ClassVar[str] = 'overnight_ret'
+    factor_name: ClassVar[str] = "overnight_ret"
 
-    layer_names: ClassVar[Sequence[str]] = (
-        'lowest',
-        'lower',
-        'normal',
-        'higher',
-        'highest'
-    )
+    layer_names: ClassVar[Sequence[str]] = ("lowest", "lower", "normal", "higher", "highest")
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        '极低层(隔夜跌幅最大)',
-        '偏低层(隔夜小幅下跌)',
-        '正常层(隔夜变化不大)',
-        '偏高层(隔夜小幅上涨)',
-        '极高层(隔夜涨幅最大)'
+        "极低层(隔夜跌幅最大)",
+        "偏低层(隔夜小幅下跌)",
+        "正常层(隔夜变化不大)",
+        "偏高层(隔夜小幅上涨)",
+        "极高层(隔夜涨幅最大)",
     )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     factor_cli_main(OvernightRetLayerConfig, calculate_overnight_return)

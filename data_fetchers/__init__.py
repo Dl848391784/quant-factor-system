@@ -13,8 +13,8 @@
 """
 
 __all__ = [
-    'generate_all_factors',
-    'get_module_logger',
+    "generate_all_factors",
+    "get_module_logger",
 ]
 
 from data_fetchers.factor_generator import (

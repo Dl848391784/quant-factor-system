@@ -6,4 +6,4 @@
 # 因子计算脚本在 factor_ic/ 目录下
 # 分层回测在 backtest/ 目录下
 
-__version__ = '1.0.0'
+__version__ = "1.0.0"

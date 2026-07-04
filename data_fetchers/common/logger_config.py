@@ -17,48 +17,45 @@ from datetime import datetime
 from pathlib import Path
 
 
-__all__ = ['setup_logger']
+__all__ = ["setup_logger"]
 
 
 def setup_logger(
-    script_name: str,
-    logs_dir: Path | None = None,
-    level: int = logging.INFO,
-    console_level: int = logging.INFO
+    script_name: str, logs_dir: Path | None = None, level: int = logging.INFO, console_level: int = logging.INFO
 ) -> logging.Logger:
     """
     配置日志记录器
-    
+
     遵循 PROJECT.md 第780-839行规范。
-    
+
     Args:
         script_name: 脚本名称（不含 .py 后缀）
         logs_dir: 日志目录（默认：脚本当前目录/logs/）
         level: 文件日志级别（默认：INFO）
         console_level: 控制台日志级别（默认：INFO）
-        
+
     Returns:
         配置好的 Logger 对象
-        
+
     Example:
         # 生产环境
         logger = setup_logger('ic_rsi_1d')
         logger.info("开始计算 IC...")
-        
+
         # 开发环境（DEBUG 级别）
         logger = setup_logger('ic_rsi_1d', level=logging.DEBUG)
         logger.debug("详细调试信息...")
-        
+
         # 自定义日志目录
         logger = setup_logger('ic_rsi_1d', logs_dir=Path('/custom/logs'))
     """
     # 日志目录（默认：脚本所在目录/logs/）
     if logs_dir is None:
-        logs_dir = Path(__file__).parent.parent / 'logs'
+        logs_dir = Path(__file__).parent.parent / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)  # 自动创建
 
     # 日志文件名
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = datetime.now().strftime("%Y-%m-%d")
     log_file = logs_dir / f"{script_name}_{today}.log"
 
     # 创建 Logger
@@ -72,8 +69,8 @@ def setup_logger(
     # 文件 Handler
     file_handler = logging.FileHandler(
         log_file,
-        mode='a',  # 追加模式，同一天的日志合并到同一文件
-        encoding='utf-8'
+        mode="a",  # 追加模式，同一天的日志合并到同一文件
+        encoding="utf-8",
     )
     file_handler.setLevel(level)
 
@@ -82,10 +79,7 @@ def setup_logger(
     console_handler.setLevel(console_level)
 
     # Formatter（遵循 PROJECT.md 规范）
-    formatter = logging.Formatter(
-        '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
+    formatter = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     file_handler.setFormatter(formatter)
     console_handler.setFormatter(formatter)
 

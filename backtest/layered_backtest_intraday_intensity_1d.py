@@ -37,42 +37,33 @@ from factor_ic.ic_intraday_intensity_1d import calculate_intraday_intensity
 
 class IntradayIntensityLayerConfig(LayerConfigBase):
     """日内价格强度因子分层配置
-    
+
     薄声明：因子元数据集中在 ClassVar，逻辑完全下沉基类。
-    
+
     特点：
     - 因子类型：复杂因子（需从 open/close/high/low 计算）
     - 因子方向：反向因子（ic_mean < 0），做多低值组
     - layer_names 纯标签（用于目录/列名），layer_descriptions 含中文（用于日志）
     """
 
-    factor_name: ClassVar[str] = 'intraday_intensity_1d'
-    factor_col: ClassVar[str] = 'intraday_intensity'  # 计算后的因子列名
+    factor_name: ClassVar[str] = "intraday_intensity_1d"
+    factor_col: ClassVar[str] = "intraday_intensity"  # 计算后的因子列名
     # ic_source 指定纯文件名，基类自动补充 FACTOR_IC_RESULT 目录（pipeline 感知）
     # factor_name='intraday_intensity_1d' 会导致基类默认拼接出双 _1d，故需显式指定文件名
-    ic_source: ClassVar[str] = 'ic_intraday_intensity_1d_analysis_result.json'
+    ic_source: ClassVar[str] = "ic_intraday_intensity_1d_analysis_result.json"
 
     # 5 层分层
-    layer_names: ClassVar[Sequence[str]] = (
-        'lowest',
-        'lower',
-        'normal',
-        'higher',
-        'highest'
-    )
+    layer_names: ClassVar[Sequence[str]] = ("lowest", "lower", "normal", "higher", "highest")
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        '极低层(日内强度极低，强势下跌)',
-        '偏低层(日内强度偏低，下跌)',
-        '正常层(日内强度适中，震荡)',
-        '偏高层(日内强度偏高，上涨)',
-        '极高层(日内强度极高，强势上涨)'
+        "极低层(日内强度极低，强势下跌)",
+        "偏低层(日内强度偏低，下跌)",
+        "正常层(日内强度适中，震荡)",
+        "偏高层(日内强度偏高，上涨)",
+        "极高层(日内强度极高，强势上涨)",
     )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # 传入因子计算函数（复杂因子需要）
-    factor_cli_main(
-        IntradayIntensityLayerConfig,
-        factor_calculator=calculate_intraday_intensity
-    )
+    factor_cli_main(IntradayIntensityLayerConfig, factor_calculator=calculate_intraday_intensity)

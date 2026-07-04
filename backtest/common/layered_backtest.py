@@ -130,10 +130,7 @@ class LayeredBacktestEngine:
 
         # T-1 对齐：因子日期 shift +1 交易日
         # factor[D] 重标记为 D+1，merge 后与 forward_return_1d[D+1]（D+1→D+2 收益）配对
-        all_dates = sorted(
-            set(factor_subset[self.date_col].unique())
-            | set(return_subset[self.date_col].unique())
-        )
+        all_dates = sorted(set(factor_subset[self.date_col].unique()) | set(return_subset[self.date_col].unique()))
         date_to_next = {all_dates[i]: all_dates[i + 1] for i in range(len(all_dates) - 1)}
         factor_subset[self.date_col] = factor_subset[self.date_col].map(date_to_next)
         # 最后一个交易日的因子无次日收益，丢弃

@@ -26,28 +26,22 @@ from data_fetchers.factor_calculator import calculate_return_5d
 
 class Return5dLayerConfig(LayerConfigBase):
     """5日收益因子分层配置
-    
+
     薄声明：因子元数据集中在 ClassVar，逻辑完全下沉基类。
     """
 
-    factor_name: ClassVar[str] = 'return_5d'
+    factor_name: ClassVar[str] = "return_5d"
 
-    layer_names: ClassVar[Sequence[str]] = (
-        'lowest',
-        'lower',
-        'normal',
-        'higher',
-        'highest'
-    )
+    layer_names: ClassVar[Sequence[str]] = ("lowest", "lower", "normal", "higher", "highest")
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        '极低层(5日涨幅最小)',
-        '偏低层(5日小幅下跌)',
-        '正常层(5日变化不大)',
-        '偏高层(5日小幅上涨)',
-        '极高层(5日涨幅最大)'
+        "极低层(5日涨幅最小)",
+        "偏低层(5日小幅下跌)",
+        "正常层(5日变化不大)",
+        "偏高层(5日小幅上涨)",
+        "极高层(5日涨幅最大)",
     )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     factor_cli_main(Return5dLayerConfig, calculate_return_5d)

@@ -18,11 +18,11 @@ import sys
 def get_memory_usage_mb() -> float:
     """
     获取当前进程真实RSS内存（MB）- 从 /proc/self/status
-    
+
     Returns:
         float: RSS内存大小（MB），Linux下从/proc/self/status读取，
                其他系统使用resource.getrusage()，Windows返回0.0
-    
+
     Note:
         - Linux: 读取VmRSS字段（实际物理内存使用）
         - macOS/Unix: 使用ru_maxrss（最大RSS值，可能不准确）
@@ -31,17 +31,18 @@ def get_memory_usage_mb() -> float:
         - Windows: 返回0.0（不支持）
     """
     try:
-        with open('/proc/self/status') as f:
+        with open("/proc/self/status") as f:
             for line in f:
-                if line.startswith('VmRSS:'):
+                if line.startswith("VmRSS:"):
                     return int(line.split()[1]) / 1024  # kB -> MB
     except Exception:
         pass
     try:
         import resource
+
         maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         # macOS: ru_maxrss 单位是 bytes；Linux: 单位是 KB
-        if sys.platform == 'darwin':
+        if sys.platform == "darwin":
             return maxrss / (1024 * 1024)  # bytes -> MB
         else:
             return maxrss / 1024  # KB -> MB
@@ -52,21 +53,21 @@ def get_memory_usage_mb() -> float:
 def get_memory_info_str() -> str:
     """
     获取详细内存信息字符串
-    
+
     Returns:
         str: 格式化的内存信息，如 "RSS=700.5MB, VM=900.0MB"
-    
+
     Note:
         - Linux: 同时读取VmRSS和VmSize
         - 其他系统: 仅返回RSS信息
     """
     try:
-        with open('/proc/self/status') as f:
+        with open("/proc/self/status") as f:
             vmrss = vmsize = None
             for line in f:
-                if line.startswith('VmRSS:'):
+                if line.startswith("VmRSS:"):
                     vmrss = int(line.split()[1]) / 1024
-                elif line.startswith('VmSize:'):
+                elif line.startswith("VmSize:"):
                     vmsize = int(line.split()[1]) / 1024
             if vmrss is not None:
                 return f"RSS={vmrss:.1f}MB" + (f", VM={vmsize:.1f}MB" if vmsize is not None else "")
@@ -76,4 +77,4 @@ def get_memory_info_str() -> str:
 
 
 # 模块级常量
-__all__ = ['get_memory_usage_mb', 'get_memory_info_str']
+__all__ = ["get_memory_usage_mb", "get_memory_info_str"]

@@ -23,28 +23,22 @@ from data_fetchers.factor_calculator import calculate_kdj_j
 
 class KdjJLayerConfig(LayerConfigBase):
     """KDJ-J因子分层配置
-    
+
     薄声明：仅定义因子名称与分层命名，逻辑完全下沉基类。
     """
 
-    factor_name: ClassVar[str] = 'kdj_j'
+    factor_name: ClassVar[str] = "kdj_j"
 
-    layer_names: ClassVar[Sequence[str]] = (
-        'lowest',
-        'lower',
-        'normal',
-        'higher',
-        'highest'
-    )
+    layer_names: ClassVar[Sequence[str]] = ("lowest", "lower", "normal", "higher", "highest")
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        '极低层(J值极低)',
-        '偏低层(J值偏低)',
-        '正常层(J值适中)',
-        '偏高层(J值偏高)',
-        '极高层(J值极高)'
+        "极低层(J值极低)",
+        "偏低层(J值偏低)",
+        "正常层(J值适中)",
+        "偏高层(J值偏高)",
+        "极高层(J值极高)",
     )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     factor_cli_main(KdjJLayerConfig, calculate_kdj_j)

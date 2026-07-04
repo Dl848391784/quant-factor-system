@@ -31,33 +31,33 @@ class TestVolumeRatioLayerConfig:
         factor_col='volume_ratio_5' 是数据源列名（5 日均量比）。两者职责分离，
         不应混淆。本测试仅校验 factor_name；factor_col 由其他测试覆盖。
         """
-        assert VolumeRatioLayerConfig.factor_name == 'volume_ratio'
+        assert VolumeRatioLayerConfig.factor_name == "volume_ratio"
 
     def test_factor_col_classvar(self):
         """TC001-01b: factor_col 类属性 = 数据源列名"""
-        assert VolumeRatioLayerConfig.factor_col == 'volume_ratio_5'
+        assert VolumeRatioLayerConfig.factor_col == "volume_ratio_5"
 
     def test_layer_names_classvar(self):
         """TC001-02: layer_names 类属性为纯标签"""
         assert len(VolumeRatioLayerConfig.layer_names) == 5
-        assert VolumeRatioLayerConfig.layer_names[0] == 'lowest'
+        assert VolumeRatioLayerConfig.layer_names[0] == "lowest"
 
     def test_layer_descriptions_classvar(self):
         """TC001-03: layer_descriptions 含中文描述"""
         assert len(VolumeRatioLayerConfig.layer_descriptions) == 5
-        assert VolumeRatioLayerConfig.layer_descriptions[0] == '极低层(量比极低)'
+        assert VolumeRatioLayerConfig.layer_descriptions[0] == "极低层(量比极低)"
 
     def test_ic_source_default(self):
         """TC001-04: ic_source 显式声明覆盖默认路径"""
         config = VolumeRatioLayerConfig()
         # 显式声明时，使用声明的路径（而非默认拼接）
-        assert config.ic_source_resolved.endswith('ic_volume_ratio_1d_analysis_result.json')
+        assert config.ic_source_resolved.endswith("ic_volume_ratio_1d_analysis_result.json")
 
     def test_ic_meta_direction_negative(self):
         """TC001-04: factor_direction = negative（从 IC 文件派生）"""
         config = VolumeRatioLayerConfig()
         # ic_mean < 0 时 direction = negative
-        assert config.factor_direction == 'negative'
+        assert config.factor_direction == "negative"
 
     def test_n_layers_derived(self):
         """TC001-05: n_layers 由 len(layer_names) 派生"""
@@ -67,16 +67,16 @@ class TestVolumeRatioLayerConfig:
     def test_layer_names_dict_generated(self):
         """TC001-06: layer_names_dict 使用 layer_descriptions"""
         config = VolumeRatioLayerConfig()
-        assert '1' in config.layer_names_dict
-        assert '5' in config.layer_names_dict
-        assert config.layer_names_dict['1'] == '极低层(量比极低)'
+        assert "1" in config.layer_names_dict
+        assert "5" in config.layer_names_dict
+        assert config.layer_names_dict["1"] == "极低层(量比极低)"
 
     def test_layer_names_semantic(self):
         """TC001-07: layer_descriptions 语义描述"""
         config = VolumeRatioLayerConfig()
         # layer_descriptions 应包含"量比"相关描述
         for desc in config.__class__.layer_descriptions:
-            assert '量比' in desc
+            assert "量比" in desc
 
     def test_layer_names_no_fixed_threshold(self):
         """TC001-08: layer_names 纯标签无固定阈值"""
@@ -87,11 +87,11 @@ class TestVolumeRatioLayerConfig:
     def test_factor_direction_negative(self):
         """TC001-09: factor_direction = negative"""
         config = VolumeRatioLayerConfig()
-        assert config.factor_direction == 'negative'
+        assert config.factor_direction == "negative"
 
     def test_factor_direction_literal_type(self):
         """TC001-10: factor_direction 类型约束"""
-        valid_values = get_args(Literal['positive', 'negative'])
+        valid_values = get_args(Literal["positive", "negative"])
         config = VolumeRatioLayerConfig()
         assert config.factor_direction in valid_values
 
@@ -110,7 +110,7 @@ class TestVolumeRatioPrecomputed:
         """TC002-01: 预计算因子无需 calculator"""
         # volume_ratio_5 已在数据源中，factor_cli_main 调用不传 factor_calculator
         # 此测试验证配置类无 calculator 属性
-        assert not hasattr(VolumeRatioLayerConfig, 'factor_calculator')
+        assert not hasattr(VolumeRatioLayerConfig, "factor_calculator")
 
 
 class TestLayeredBacktestResult:
@@ -118,41 +118,41 @@ class TestLayeredBacktestResult:
 
     def test_result_file_exists(self):
         """TC003-01: 结果文件存在"""
-        result_path = Path('backtest/result/volume_ratio_layered_backtest.json')
+        result_path = Path("backtest/result/volume_ratio_layered_backtest.json")
         if not result_path.exists():
             pytest.skip("结果文件不存在，需先运行脚本")
 
     def test_result_structure(self):
         """TC003-02: 结果结构完整"""
-        result_path = Path('backtest/result/volume_ratio_layered_backtest.json')
+        result_path = Path("backtest/result/volume_ratio_layered_backtest.json")
         if not result_path.exists():
             pytest.skip("结果文件不存在")
 
         result = json.loads(result_path.read_text())
-        required_keys = ['meta', 'layer_stats', 'monotonicity', 'long_short']
+        required_keys = ["meta", "layer_stats", "monotonicity", "long_short"]
         for k in required_keys:
             assert k in result
 
     def test_meta_fields(self):
         """TC003-03: meta 字段"""
-        result_path = Path('backtest/result/volume_ratio_layered_backtest.json')
+        result_path = Path("backtest/result/volume_ratio_layered_backtest.json")
         if not result_path.exists():
             pytest.skip("结果文件不存在")
 
         result = json.loads(result_path.read_text())
-        meta = result['meta']
-        assert meta['factor_name'] == 'volume_ratio'
-        assert meta['factor_direction'] == 'negative'
-        assert meta['n_layers'] == 5
+        meta = result["meta"]
+        assert meta["factor_name"] == "volume_ratio"
+        assert meta["factor_direction"] == "negative"
+        assert meta["n_layers"] == 5
 
     def test_layer_stats_complete(self):
         """TC003-04: layer_stats 完整"""
-        result_path = Path('backtest/result/volume_ratio_layered_backtest.json')
+        result_path = Path("backtest/result/volume_ratio_layered_backtest.json")
         if not result_path.exists():
             pytest.skip("结果文件不存在")
 
         result = json.loads(result_path.read_text())
-        assert len(result['layer_stats']) == 5  # 5层
+        assert len(result["layer_stats"]) == 5  # 5层
 
 
 class TestLayeredBacktestExecution:
@@ -162,14 +162,14 @@ class TestLayeredBacktestExecution:
         """TC004-01: 配置类可实例化"""
         config = VolumeRatioLayerConfig()
         assert config.n_layers == 5
-        assert config.factor_direction == 'negative'
+        assert config.factor_direction == "negative"
 
     def test_factor_direction_derives_long_short(self):
         """TC004-02: factor_direction 决定多空组合"""
         config = VolumeRatioLayerConfig()
         # 反向因子：低值层做多，高值层做空
-        assert config.factor_direction == 'negative'
+        assert config.factor_direction == "negative"
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

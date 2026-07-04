@@ -1103,9 +1103,9 @@ class TestForElseReturnsNone:
                 for stmt in node.orelse:
                     if isinstance(stmt, ast.Return):
                         # 必须是 return None
-                        assert (
-                            isinstance(stmt.value, ast.Constant) and stmt.value.value is None
-                        ), "for-else 分支的 return 必须是 return None"
+                        assert isinstance(stmt.value, ast.Constant) and stmt.value.value is None, (
+                            "for-else 分支的 return 必须是 return None"
+                        )
 
 
 # ─── v1.0k Fix 1-4: 5 项缺陷修复的补充测试 ──────────────────────
@@ -1256,7 +1256,13 @@ class TestReportDateWarningMessage:
         with (
             patch(
                 "data_fetchers.fetch_financial.ak.stock_financial_abstract_ths",
-                return_value=pd.DataFrame({"报告期": ["20240331"], "基本每股收益": [0.5], **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"}}),
+                return_value=pd.DataFrame(
+                    {
+                        "报告期": ["20240331"],
+                        "基本每股收益": [0.5],
+                        **{cn: [None] for cn in _FINANCIAL_FIELD_MAP if cn != "基本每股收益"},
+                    }
+                ),
             ),
             patch("data_fetchers.fetch_financial.time.sleep"),
             caplog.at_level(logging.WARNING, logger="data_fetchers.fetch_financial"),
@@ -1477,7 +1483,7 @@ class TestMetaTimestampDynamic:
         # Step 6 的 meta 构建中不应使用 _NOW.strftime
         # 查找 meta 构建区域
         meta_start = source.find('"version": _OUTPUT_VERSION')
-        meta_section = source[meta_start:meta_start + 500] if meta_start >= 0 else ""
+        meta_section = source[meta_start : meta_start + 500] if meta_start >= 0 else ""
         assert "_NOW.strftime" not in meta_section, "meta 构建不应使用 _NOW，应使用 dt_cls.now()"
 
 

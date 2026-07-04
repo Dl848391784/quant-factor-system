@@ -51,7 +51,7 @@ class TestCalcVolumeAcceleration:
 
     def test_volumes_contains_nan(self):
         """TC001-03: volumes 包含 NaN"""
-        volumes = [10.0, 20.0, float('nan'), 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0]
+        volumes = [10.0, 20.0, float("nan"), 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0]
         result = _calc_volume_acceleration(volumes)
         assert np.isnan(result)
 
@@ -126,6 +126,7 @@ class TestScriptIntegration:
     def test_script_imports(self):
         """TC003-01: 脚本可导入"""
         from factor_ic.ic_tail_volume_acceleration_1d import main
+
         assert callable(main)
 
     def test_factor_name_consistency(self):

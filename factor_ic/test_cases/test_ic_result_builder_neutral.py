@@ -157,9 +157,7 @@ def test_r17c_build_ic_result_payload_disabled():
         "controls_used": [],
         "excluded_specs": [],
     }
-    result = build_ic_result(
-        ic_result, raw_meta, factor_name="test_1d", ic_neutralized_payload=payload
-    )
+    result = build_ic_result(ic_result, raw_meta, factor_name="test_1d", ic_neutralized_payload=payload)
     assert RESULT_KEY_IC_NEUTRALIZED in result
     neutral = result[RESULT_KEY_IC_NEUTRALIZED]
     assert list(neutral.keys()) == list(NEUTRALIZED_REQUIRED_KEYS_DISABLED)
@@ -173,9 +171,7 @@ def test_r17c_build_ic_result_payload_enabled_field_order():
 
     ic_result, raw_meta = _make_minimal_ic_result_and_meta()
     payload = _make_full_neutralized_payload()
-    result = build_ic_result(
-        ic_result, raw_meta, factor_name="test_1d", ic_neutralized_payload=payload
-    )
+    result = build_ic_result(ic_result, raw_meta, factor_name="test_1d", ic_neutralized_payload=payload)
     neutral = result[RESULT_KEY_IC_NEUTRALIZED]
     assert list(neutral.keys()) == list(NEUTRALIZED_REQUIRED_KEYS_ENABLED)
     assert neutral["decay_level"] == "high"

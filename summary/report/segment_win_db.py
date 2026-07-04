@@ -305,14 +305,14 @@ INTRADAY_STRATEGY_COLUMNS = [
 ]  # noqa: E501
 
 # ── 阈值常量 (硬编码, 显式标注, 来源: §7.7/§7.8 历史 8 天 31 只验证) ──
-_GAP_LOWER_THRESHOLD = -0.5    # gap < -0.5% 视为低开
-_GAP_UPPER_THRESHOLD = 0.5     # gap > +0.5% 视为高开
+_GAP_LOWER_THRESHOLD = -0.5  # gap < -0.5% 视为低开
+_GAP_UPPER_THRESHOLD = 0.5  # gap > +0.5% 视为高开
 _ADJUSTMENT_ABNORMAL_GAP = 10.0  # |gap| > 10% 视为复权异常 (001339 类)
 _STOP_LOSS_PCT_FROM_COST = 0.02  # 反向突破成本价 2% 强制止损
 
 # 历史期望收益 (N=18 低开 + N=10 高开 实测均值, 用于报告说明文字)
-_HISTORICAL_LOW_EXPECTED_PCT = 2.18    # 等高卖均收
-_HISTORICAL_HIGH_EXPECTED_PCT = 2.18   # 开盘卖均收
+_HISTORICAL_LOW_EXPECTED_PCT = 2.18  # 等高卖均收
+_HISTORICAL_HIGH_EXPECTED_PCT = 2.18  # 开盘卖均收
 _HISTORICAL_WAIT_BOUNCE_HIT_RATE = 92.3  # 反抽率 (%)
 
 # ══════════════════════════════════════════════════════════════════════
@@ -369,9 +369,7 @@ def compute_intraday_strategy(
 
     # 2. 读主数据源日期列, 计算 trade_date (T+1)
     try:
-        all_dates = sorted(
-            pd.read_parquet(master_path, columns=["date"])["date"].dropna().astype(str).unique()
-        )
+        all_dates = sorted(pd.read_parquet(master_path, columns=["date"])["date"].dropna().astype(str).unique())
     except Exception:
         logger.exception("读 master 日期列表失败, 跳过 intraday strategy")
         return None
@@ -394,9 +392,9 @@ def compute_intraday_strategy(
         logger.exception("读 master OHLC 失败, 跳过 intraday strategy")
         return None
 
-    day_t = ohlc.loc[
-        ohlc["date"].astype(str) == selection_date, ["asset", "close"]
-    ].rename(columns={"close": "prev_close"})
+    day_t = ohlc.loc[ohlc["date"].astype(str) == selection_date, ["asset", "close"]].rename(
+        columns={"close": "prev_close"}
+    )
 
     day_t1 = ohlc.loc[
         ohlc["date"].astype(str) == trade_date,
@@ -404,9 +402,7 @@ def compute_intraday_strategy(
     ]
 
     # 4. 合并: S6 段明细 ↔ D 日 prev_close ↔ D+1 日 OHLC
-    merged = s6.merge(day_t, on="asset", how="left").merge(
-        day_t1, on="asset", how="left"
-    )
+    merged = s6.merge(day_t, on="asset", how="left").merge(day_t1, on="asset", how="left")
     key_cols = ["prev_close", "open", "high", "low", "close"]
     na_mask = merged[key_cols].isna().any(axis=1)
     if bool(na_mask.any()):
@@ -583,9 +579,7 @@ def load_intraday_strategy_recommendation(
         return []
 
     mask = (
-        (df["pipeline"] == pipeline)
-        & (df["weight_method"] == weight_method)
-        & (df["selection_date"] == selection_date)
+        (df["pipeline"] == pipeline) & (df["weight_method"] == weight_method) & (df["selection_date"] == selection_date)
     )
     if segment_label is not None:
         mask = mask & (df["segment_label"] == segment_label)

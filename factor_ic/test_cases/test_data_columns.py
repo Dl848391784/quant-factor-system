@@ -169,6 +169,7 @@ class TestLoadAvailableColumns:
 
         # 清缓存
         import factor_ic.common.data_columns as _mod
+
         _mod._CACHED_COLUMNS = None
 
         result = load_available_columns(columns_path=manifest_path)
@@ -182,6 +183,7 @@ class TestLoadAvailableColumns:
         """文件不存在时返回空 dict。"""
         import factor_ic.common.data_columns as _mod
         from factor_ic.common.data_columns import load_available_columns
+
         _mod._CACHED_COLUMNS = None
 
         result = load_available_columns(columns_path=tmp_path / "nonexistent.json")
@@ -198,6 +200,7 @@ class TestLoadAvailableColumns:
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
         import factor_ic.common.data_columns as _mod
+
         _mod._CACHED_COLUMNS = None
 
         r1 = load_available_columns(columns_path=manifest_path)

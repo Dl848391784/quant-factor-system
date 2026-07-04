@@ -114,4 +114,3 @@ def load_available_columns(columns_path: Path | None = None) -> dict[str, list[s
         logger.warning("列名清单读取失败: %s, 原因: %s（降级: 跳过 schema 预校验）", path, e)
         _CACHED_COLUMNS = {}
         return {}
-

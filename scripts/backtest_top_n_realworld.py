@@ -96,9 +96,7 @@ def select_top_n_daily(df: pd.DataFrame, top_n: int) -> pd.DataFrame:
     n_missing_ret = int(missing_ret_mask.sum())
     n_missing_comp = int(missing_comp_mask.sum())
 
-    valid = df[
-        ~untradeable_mask & ~low_liq_mask & ~missing_ret_mask & ~missing_comp_mask
-    ].copy()
+    valid = df[~untradeable_mask & ~low_liq_mask & ~missing_ret_mask & ~missing_comp_mask].copy()
     logger.info(
         "  过滤: 不可交易 %d, 低流动性 %d, 缺收益 %d, 缺 composite %d, 剩余 %d",
         n_untradeable,
@@ -110,9 +108,7 @@ def select_top_n_daily(df: pd.DataFrame, top_n: int) -> pd.DataFrame:
 
     # 用 rank(pct=True, method='first') 而非排序+head, 保证与 layered_backtest 分层一致
     # Top N 实际是 rank_pct <= N/n_today 的子集
-    valid["rank_pct"] = valid.groupby("date")["composite_factor"].rank(
-        pct=True, method="first"
-    )
+    valid["rank_pct"] = valid.groupby("date")["composite_factor"].rank(pct=True, method="first")
     # 按 rank 升序取每日前 N
     valid = valid.sort_values(["date", "rank_pct"])
     top_n_df = valid.groupby("date", as_index=False).head(top_n).reset_index(drop=True)
@@ -246,9 +242,7 @@ def main() -> int:
     logger.info("Top N 短名单 T+1 实战回测 (持仓 1 日, 含成本 %.2f%%)", args.cost * 200)
     logger.info("=" * 80)
 
-    composite_file = (
-        PROJECT_ROOT / "comprehensive_factor" / "result" / f"{args.composite}_daily.parquet"
-    )
+    composite_file = PROJECT_ROOT / "comprehensive_factor" / "result" / f"{args.composite}_daily.parquet"
     if not composite_file.exists():
         logger.error("composite 文件不存在: %s", composite_file)
         return 1

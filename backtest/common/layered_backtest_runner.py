@@ -212,9 +212,7 @@ class LayerConfigBase:
             self.ic_source_resolved = str(FACTOR_IC_RESULT / cls_ic_source)
         else:
             # 空：按 factor_name 自动拼接
-            self.ic_source_resolved = str(
-                FACTOR_IC_RESULT / f"ic_{self.factor_name}_1d_analysis_result.json"
-            )
+            self.ic_source_resolved = str(FACTOR_IC_RESULT / f"ic_{self.factor_name}_1d_analysis_result.json")
 
         # 3. 派生 factor_col_resolved（子类声明优先，否则回退 factor_name）
         cls_factor_col = self.__class__.factor_col

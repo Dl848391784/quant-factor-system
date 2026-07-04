@@ -91,17 +91,13 @@ class TestRoleWeights:
         result_3 = method_enabled._apply_role_weights_static(weights_3, cols_3)
         per_factor_3 = 0.25 / 3
         for col in all_confirm[:3]:
-            assert abs(result_3[col] - per_factor_3) < 1e-9, (
-                f"3 confirmation: {col} 应为 {per_factor_3}"
-            )
+            assert abs(result_3[col] - per_factor_3) < 1e-9, f"3 confirmation: {col} 应为 {per_factor_3}"
 
         weights_10 = dict.fromkeys(cols_10, 1.0 / len(cols_10))
         result_10 = method_enabled._apply_role_weights_static(weights_10, cols_10)
         per_factor_10 = 0.25 / 10
         for col in all_confirm[:10]:
-            assert abs(result_10[col] - per_factor_10) < 1e-9, (
-                f"10 confirmation: {col} 应为 {per_factor_10} (非 0.05)"
-            )
+            assert abs(result_10[col] - per_factor_10) < 1e-9, f"10 confirmation: {col} 应为 {per_factor_10} (非 0.05)"
 
     def test_sum_equals_one(self, method_enabled):
         """各种组合, 权重和 = 1.0 (1e-9 精度)."""

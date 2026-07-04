@@ -136,7 +136,8 @@ if __name__ == "__main__":
         cause = e.__cause__
         if cause is not None:
             logger.warning(
-                "摘要日志层原始异常类型: %s", type(cause).__name__,
+                "摘要日志层原始异常类型: %s",
+                type(cause).__name__,
             )
         logger.error("摘要日志层失败（主结果产物已生成，可用）: %s", e)
         sys.exit(3)  # H12 R17: 辅助层失败专用退出码

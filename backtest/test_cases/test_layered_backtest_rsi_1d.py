@@ -26,36 +26,36 @@ class TestRsiLayerConfig:
 
     def test_factor_name_classvar(self):
         """TC001-01: factor_name 类属性"""
-        assert RsiLayerConfig.factor_name == 'rsi'
+        assert RsiLayerConfig.factor_name == "rsi"
 
     def test_layer_names_classvar(self):
         """TC001-02: layer_names 类属性为纯标签"""
         assert len(RsiLayerConfig.layer_names) == 5
-        assert RsiLayerConfig.layer_names[0] == 'oversold'
-        assert RsiLayerConfig.layer_names[1] == 'low'
-        assert RsiLayerConfig.layer_names[2] == 'normal'
-        assert RsiLayerConfig.layer_names[3] == 'high'
-        assert RsiLayerConfig.layer_names[4] == 'overbought'
+        assert RsiLayerConfig.layer_names[0] == "oversold"
+        assert RsiLayerConfig.layer_names[1] == "low"
+        assert RsiLayerConfig.layer_names[2] == "normal"
+        assert RsiLayerConfig.layer_names[3] == "high"
+        assert RsiLayerConfig.layer_names[4] == "overbought"
 
     def test_layer_descriptions_classvar(self):
         """TC001-03: layer_descriptions 含相对语义描述（与 percentile 模式一致）"""
         assert len(RsiLayerConfig.layer_descriptions) == 5
-        assert RsiLayerConfig.layer_descriptions[0] == '极低层(RSI极低)'
-        assert RsiLayerConfig.layer_descriptions[1] == '偏低层(RSI偏低)'
-        assert RsiLayerConfig.layer_descriptions[2] == '正常层(RSI适中)'
-        assert RsiLayerConfig.layer_descriptions[3] == '偏高层(RSI偏高)'
-        assert RsiLayerConfig.layer_descriptions[4] == '极高层(RSI极高)'
+        assert RsiLayerConfig.layer_descriptions[0] == "极低层(RSI极低)"
+        assert RsiLayerConfig.layer_descriptions[1] == "偏低层(RSI偏低)"
+        assert RsiLayerConfig.layer_descriptions[2] == "正常层(RSI适中)"
+        assert RsiLayerConfig.layer_descriptions[3] == "偏高层(RSI偏高)"
+        assert RsiLayerConfig.layer_descriptions[4] == "极高层(RSI极高)"
 
     def test_ic_source_default(self):
         """TC001-04: ic_source 默认路径"""
         config = RsiLayerConfig()
-        assert config.ic_source_resolved.endswith('ic_rsi_1d_analysis_result.json')
+        assert config.ic_source_resolved.endswith("ic_rsi_1d_analysis_result.json")
 
     def test_ic_meta_direction_negative(self):
         """TC001-05: factor_direction = negative（从 IC 文件派生）"""
         config = RsiLayerConfig()
         # ic_mean < 0 时 direction = negative
-        assert config.factor_direction == 'negative'
+        assert config.factor_direction == "negative"
 
     def test_n_layers_derived(self):
         """TC001-06: n_layers 由 len(layer_names) 派生"""
@@ -66,17 +66,17 @@ class TestRsiLayerConfig:
     def test_layer_names_dict_generated(self):
         """TC001-07: layer_names_dict 使用 layer_descriptions"""
         config = RsiLayerConfig()
-        assert '1' in config.layer_names_dict
-        assert '5' in config.layer_names_dict
-        assert config.layer_names_dict['1'] == '极低层(RSI极低)'
-        assert config.layer_names_dict['5'] == '极高层(RSI极高)'
+        assert "1" in config.layer_names_dict
+        assert "5" in config.layer_names_dict
+        assert config.layer_names_dict["1"] == "极低层(RSI极低)"
+        assert config.layer_names_dict["5"] == "极高层(RSI极高)"
 
     def test_layer_names_semantic(self):
         """TC001-08: layer_descriptions 语义描述"""
         config = RsiLayerConfig()
         # layer_descriptions 应包含"RSI"相关描述
         for desc in config.__class__.layer_descriptions:
-            assert 'RSI' in desc or 'rsi' in desc.lower()
+            assert "RSI" in desc or "rsi" in desc.lower()
 
     def test_layer_names_no_fixed_threshold(self):
         """TC001-09: layer_names 纯标签无固定阈值"""
@@ -87,11 +87,11 @@ class TestRsiLayerConfig:
     def test_factor_direction_negative(self):
         """TC001-10: factor_direction = negative"""
         config = RsiLayerConfig()
-        assert config.factor_direction == 'negative'
+        assert config.factor_direction == "negative"
 
     def test_factor_direction_literal_type(self):
         """TC001-11: factor_direction 类型约束"""
-        valid_values = get_args(Literal['positive', 'negative'])
+        valid_values = get_args(Literal["positive", "negative"])
         config = RsiLayerConfig()
         assert config.factor_direction in valid_values
 
@@ -111,6 +111,7 @@ class TestRsiCalculator:
     def test_factor_calculator_exists(self):
         """TC002-01: 因子计算器存在"""
         from data_fetchers.factor_calculator import calculate_rsi_df
+
         assert callable(calculate_rsi_df)
 
 
@@ -119,41 +120,41 @@ class TestLayeredBacktestResult:
 
     def test_result_file_exists(self):
         """TC003-01: 结果文件存在"""
-        result_path = Path('backtest/result/rsi_layered_backtest.json')
+        result_path = Path("backtest/result/rsi_layered_backtest.json")
         if not result_path.exists():
             pytest.skip("结果文件不存在，需先运行脚本")
 
     def test_result_structure(self):
         """TC003-02: 结果结构完整"""
-        result_path = Path('backtest/result/rsi_layered_backtest.json')
+        result_path = Path("backtest/result/rsi_layered_backtest.json")
         if not result_path.exists():
             pytest.skip("结果文件不存在")
 
         result = json.load(open(result_path))
-        required_keys = ['meta', 'layer_stats', 'monotonicity', 'long_short']
+        required_keys = ["meta", "layer_stats", "monotonicity", "long_short"]
         for k in required_keys:
             assert k in result
 
     def test_meta_fields(self):
         """TC003-03: meta 字段"""
-        result_path = Path('backtest/result/rsi_layered_backtest.json')
+        result_path = Path("backtest/result/rsi_layered_backtest.json")
         if not result_path.exists():
             pytest.skip("结果文件不存在")
 
         result = json.load(open(result_path))
-        meta = result['meta']
-        assert meta['factor_name'] == 'rsi'
-        assert meta['factor_direction'] == 'negative'
-        assert meta['n_layers'] == 5
+        meta = result["meta"]
+        assert meta["factor_name"] == "rsi"
+        assert meta["factor_direction"] == "negative"
+        assert meta["n_layers"] == 5
 
     def test_layer_stats_complete(self):
         """TC003-04: layer_stats 完整"""
-        result_path = Path('backtest/result/rsi_layered_backtest.json')
+        result_path = Path("backtest/result/rsi_layered_backtest.json")
         if not result_path.exists():
             pytest.skip("结果文件不存在")
 
         result = json.load(open(result_path))
-        assert len(result['layer_stats']) == 5  # 5层
+        assert len(result["layer_stats"]) == 5  # 5层
 
 
 class TestLayeredBacktestExecution:
@@ -163,18 +164,18 @@ class TestLayeredBacktestExecution:
         """TC004-01: 配置类可实例化"""
         config = RsiLayerConfig()
         assert config.n_layers == 5
-        assert config.factor_direction == 'negative'
+        assert config.factor_direction == "negative"
 
     def test_factor_direction_derives_long_short(self):
         """TC004-02: factor_direction 决定多空组合"""
         config = RsiLayerConfig()
         # 反向因子：低值层做多，高值层做空
-        assert config.factor_direction == 'negative'
+        assert config.factor_direction == "negative"
         assert config.long_layers is not None
         assert config.short_layers is not None
         assert 1 in config.long_layers
         assert 5 in config.short_layers
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

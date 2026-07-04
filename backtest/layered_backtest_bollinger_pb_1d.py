@@ -21,28 +21,22 @@ from data_fetchers.factor_calculator import calculate_bollinger_pb
 
 class BollingerPbLayerConfig(LayerConfigBase):
     """布林带位置因子分层配置
-    
+
     薄声明：因子元数据集中在 ClassVar，逻辑完全下沉基类。
     """
 
-    factor_name: ClassVar[str] = 'bollinger_pb'
+    factor_name: ClassVar[str] = "bollinger_pb"
 
-    layer_names: ClassVar[Sequence[str]] = (
-        'lowest',
-        'lower',
-        'normal',
-        'higher',
-        'highest'
-    )
+    layer_names: ClassVar[Sequence[str]] = ("lowest", "lower", "normal", "higher", "highest")
 
     layer_descriptions: ClassVar[Sequence[str]] = (
-        '极低层(接近下轨)',
-        '偏低层(低于中轨)',
-        '正常层(在中轨附近)',
-        '偏高层(高于中轨)',
-        '极高层(接近上轨)'
+        "极低层(接近下轨)",
+        "偏低层(低于中轨)",
+        "正常层(在中轨附近)",
+        "偏高层(高于中轨)",
+        "极高层(接近上轨)",
     )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     factor_cli_main(BollingerPbLayerConfig, calculate_bollinger_pb)

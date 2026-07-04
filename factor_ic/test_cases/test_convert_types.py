@@ -53,23 +53,19 @@ class TestConvertToNativeTypes:
 
     def test_pandas_timestamp_conversion(self):
         """pandas Timestamp 转换为字符串"""
-        ts = pd.Timestamp('2026-05-19')
+        ts = pd.Timestamp("2026-05-19")
         result = convert_to_native_types(ts)
-        assert result == '2026-05-19 00:00:00' or result == '2026-05-19'
+        assert result == "2026-05-19 00:00:00" or result == "2026-05-19"
         assert type(result) == str
 
     def test_dict_conversion(self):
         """字典递归转换"""
-        data = {
-            'int': np.int64(10),
-            'float': np.float64(1.5),
-            'nested': {'value': np.float32(2.5)}
-        }
+        data = {"int": np.int64(10), "float": np.float64(1.5), "nested": {"value": np.float32(2.5)}}
         result = convert_to_native_types(data)
-        assert result['int'] == 10
-        assert result['float'] == 1.5
-        assert result['nested']['value'] == 2.5
-        assert type(result['int']) == int
+        assert result["int"] == 10
+        assert result["float"] == 1.5
+        assert result["nested"]["value"] == 2.5
+        assert type(result["int"]) == int
 
     def test_list_conversion(self):
         """列表递归转换"""
@@ -92,7 +88,7 @@ class TestConvertToNativeTypes:
 
     def test_python_float_nan_to_none(self):
         """Python float NaN 转换为 None"""
-        nan_val = float('nan')
+        nan_val = float("nan")
         result = convert_to_native_types(nan_val)
         assert result is None
 
@@ -104,25 +100,16 @@ class TestConvertToNativeTypes:
 
     def test_dict_with_nan(self):
         """字典中的 NaN 转换为 None"""
-        data = {
-            'normal': np.float64(1.5),
-            'nan': np.float64(np.nan)
-        }
+        data = {"normal": np.float64(1.5), "nan": np.float64(np.nan)}
         result = convert_to_native_types(data)
-        assert result['normal'] == 1.5
-        assert result['nan'] is None
+        assert result["normal"] == 1.5
+        assert result["nan"] is None
 
     def test_nested_dict_with_nan(self):
         """嵌套字典中的 NaN 转换为 None"""
-        data = {
-            'level1': {
-                'level2': {
-                    'nan': np.float64(np.nan)
-                }
-            }
-        }
+        data = {"level1": {"level2": {"nan": np.float64(np.nan)}}}
         result = convert_to_native_types(data)
-        assert result['level1']['level2']['nan'] is None
+        assert result["level1"]["level2"]["nan"] is None
 
     # =========================================================================
     # JSON 序列化验证（核心验证）
@@ -130,27 +117,21 @@ class TestConvertToNativeTypes:
 
     def test_json_serialization_with_none(self):
         """包含 None 的数据可以正常 JSON 序列化，None → null"""
-        data = {
-            'value': None,
-            'nan_converted': convert_to_native_types(np.float64(np.nan))
-        }
+        data = {"value": None, "nan_converted": convert_to_native_types(np.float64(np.nan))}
         # 验证 JSON 序列化成功
         json_str = json.dumps(data, ensure_ascii=False)
         assert json_str is not None
 
         # 验证 JSON 内容：None → null
         parsed = json.loads(json_str)
-        assert parsed['value'] is None  # JSON null → Python None
-        assert parsed['nan_converted'] is None
+        assert parsed["value"] is None  # JSON null → Python None
+        assert parsed["nan_converted"] is None
 
     def test_json_serialization_numpy_types(self):
         """numpy 类型转换后可以正常 JSON 序列化"""
-        data = convert_to_native_types({
-            'int': np.int64(10),
-            'float': np.float64(1.5),
-            'array': np.array([1, 2, 3]),
-            'nan': np.float64(np.nan)
-        })
+        data = convert_to_native_types(
+            {"int": np.int64(10), "float": np.float64(1.5), "array": np.array([1, 2, 3]), "nan": np.float64(np.nan)}
+        )
 
         # 验证 JSON 序列化成功
         json_str = json.dumps(data, ensure_ascii=False)
@@ -158,23 +139,22 @@ class TestConvertToNativeTypes:
 
         # 验证 JSON 内容
         parsed = json.loads(json_str)
-        assert parsed['int'] == 10
-        assert parsed['float'] == 1.5
-        assert parsed['array'] == [1, 2, 3]
-        assert parsed['nan'] is None  # NaN → None → null
+        assert parsed["int"] == 10
+        assert parsed["float"] == 1.5
+        assert parsed["array"] == [1, 2, 3]
+        assert parsed["nan"] is None  # NaN → None → null
 
     def test_json_serialization_nested_structure(self):
         """嵌套结构可以正常 JSON 序列化"""
-        data = convert_to_native_types({
-            'level1': {
-                'int': np.int64(10),
-                'nan': np.float64(np.nan),
-                'level2': {
-                    'float': np.float64(1.5),
-                    'nan': np.float64(np.nan)
+        data = convert_to_native_types(
+            {
+                "level1": {
+                    "int": np.int64(10),
+                    "nan": np.float64(np.nan),
+                    "level2": {"float": np.float64(1.5), "nan": np.float64(np.nan)},
                 }
             }
-        })
+        )
 
         # 验证 JSON 序列化成功
         json_str = json.dumps(data, ensure_ascii=False, indent=2)
@@ -182,30 +162,26 @@ class TestConvertToNativeTypes:
 
         # 验证 JSON 内容
         parsed = json.loads(json_str)
-        assert parsed['level1']['int'] == 10
-        assert parsed['level1']['nan'] is None
-        assert parsed['level1']['level2']['float'] == 1.5
-        assert parsed['level1']['level2']['nan'] is None
+        assert parsed["level1"]["int"] == 10
+        assert parsed["level1"]["nan"] is None
+        assert parsed["level1"]["level2"]["float"] == 1.5
+        assert parsed["level1"]["level2"]["nan"] is None
 
     def test_json_no_nan_in_output(self):
         """验证 JSON 输出中不含 NaN（标准 JSON 不支持 nan）"""
-        data = convert_to_native_types({
-            'nan1': np.float64(np.nan),
-            'nan2': float('nan'),
-            'normal': 1.5
-        })
+        data = convert_to_native_types({"nan1": np.float64(np.nan), "nan2": float("nan"), "normal": 1.5})
 
         json_str = json.dumps(data, ensure_ascii=False)
 
         # 验证 JSON 字符串中不含 "NaN" 或 "nan"
-        assert 'NaN' not in json_str
-        assert 'nan' not in json_str.lower() or 'null' in json_str  # null 是合法的
+        assert "NaN" not in json_str
+        assert "nan" not in json_str.lower() or "null" in json_str  # null 是合法的
 
         # 验证 JSON 内容
         parsed = json.loads(json_str)
-        assert parsed['nan1'] is None
-        assert parsed['nan2'] is None
-        assert parsed['normal'] == 1.5
+        assert parsed["nan1"] is None
+        assert parsed["nan2"] is None
+        assert parsed["normal"] == 1.5
 
     # =========================================================================
     # 边界情况测试
@@ -231,9 +207,9 @@ class TestConvertToNativeTypes:
 
     def test_mixed_types_list(self):
         """混合类型列表转换"""
-        data = [np.int64(10), None, np.float64(np.nan), 'string', 1.5]
+        data = [np.int64(10), None, np.float64(np.nan), "string", 1.5]
         result = convert_to_native_types(data)
-        assert result == [10, None, None, 'string', 1.5]
+        assert result == [10, None, None, "string", 1.5]
 
     def test_inf_converted_to_none(self):
         """inf（无穷大）转换为 None（JSON 不支持 inf）"""
@@ -243,7 +219,7 @@ class TestConvertToNativeTypes:
         assert result is None
 
         # Python float inf
-        inf_val = float('inf')
+        inf_val = float("inf")
         result = convert_to_native_types(inf_val)
         assert result is None
 
@@ -255,7 +231,7 @@ class TestConvertToNativeTypes:
     def test_dict_key_conversion(self):
         """字典键转换：numpy 类型键应转换为 Python 原生类型"""
         # numpy int 作为键
-        data = {np.int64(10): 'value'}
+        data = {np.int64(10): "value"}
         result = convert_to_native_types(data)
         # 验证键被转换（检查键的类型）
         keys = list(result.keys())
@@ -264,7 +240,7 @@ class TestConvertToNativeTypes:
         assert keys[0] == 10
 
         # numpy float 作为键
-        data = {np.float64(1.5): 'value'}
+        data = {np.float64(1.5): "value"}
         result = convert_to_native_types(data)
         keys = list(result.keys())
         assert len(keys) == 1
@@ -303,9 +279,9 @@ class TestConvertTypesBehaviorVerification:
         assert result is None
 
         # 验证：None → null（JSON 序列化）
-        json_str = json.dumps({'value': result}, ensure_ascii=False)
+        json_str = json.dumps({"value": result}, ensure_ascii=False)
         parsed = json.loads(json_str)
-        assert parsed['value'] is None  # JSON null
+        assert parsed["value"] is None  # JSON null
 
     def test_json_output_format_consistency(self):
         """验证 JSON 输出格式一致性"""
@@ -313,21 +289,21 @@ class TestConvertTypesBehaviorVerification:
         # JSON 输出格式都是 null
 
         data = {
-            'numpy_nan': convert_to_native_types(np.float64(np.nan)),
-            'python_nan': convert_to_native_types(float('nan'))
+            "numpy_nan": convert_to_native_types(np.float64(np.nan)),
+            "python_nan": convert_to_native_types(float("nan")),
         }
 
         json_str = json.dumps(data, ensure_ascii=False)
         parsed = json.loads(json_str)
 
         # 两种 NaN 都应转为 null
-        assert parsed['numpy_nan'] is None
-        assert parsed['python_nan'] is None
+        assert parsed["numpy_nan"] is None
+        assert parsed["python_nan"] is None
 
         # JSON 字符串中应包含 null，而非 NaN
-        assert 'null' in json_str
-        assert 'NaN' not in json_str
+        assert "null" in json_str
+        assert "NaN" not in json_str
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

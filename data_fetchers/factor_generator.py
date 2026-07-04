@@ -1299,9 +1299,7 @@ def _mark_low_liquidity(
     # 标记规则:
     #   - cross_size < min_cross_section_size：当日截面样本不足，跳过（flag=0，与原循环 continue 一致）
     #   - 否则：amount NaN / <=0 / < threshold 均标 1
-    low_mask = (cross_size >= min_cross_section_size) & (
-        amount.isna() | (amount <= 0) | (amount < threshold)
-    )
+    low_mask = (cross_size >= min_cross_section_size) & (amount.isna() | (amount <= 0) | (amount < threshold))
     factor_df["is_low_liquidity"] = low_mask.to_numpy().astype(np.int8)
 
     total = len(factor_df)

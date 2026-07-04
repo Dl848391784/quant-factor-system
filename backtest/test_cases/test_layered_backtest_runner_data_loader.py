@@ -17,6 +17,7 @@
 - 改用 ijson 流式 + 列过滤后内存峰值降低 ~10x
 - 单测使用 100 行 × 10 列 fake fixture，不依赖真实数据
 """
+
 import sys
 from pathlib import Path
 
@@ -65,6 +66,7 @@ def fake_data_source(tmp_path: Path) -> Path:
     path = tmp_path / "factor_ic_data.parquet"
     pd.DataFrame(records).to_parquet(path, engine="pyarrow")
     return path
+
 
 # ============================================================================
 # TC01-03: 基本返回结构

@@ -65,9 +65,15 @@ class TestFactorRolesDefinition:
         }
         # v2.48: 27 交互变体 (9 base × {pos,neg,abs})
         _BASES_AND_WINDOWS = [
-            ("amplitude", 3), ("turnover", 3), ("amp_compression", 3),
-            ("near_high", 3), ("intraday", 1), ("ma5_dev", 3),
-            ("price_pos", 1), ("kdj", 5), ("bollinger", 5),
+            ("amplitude", 3),
+            ("turnover", 3),
+            ("amp_compression", 3),
+            ("near_high", 3),
+            ("intraday", 1),
+            ("ma5_dev", 3),
+            ("price_pos", 1),
+            ("kdj", 5),
+            ("bollinger", 5),
         ]
         for base, w in _BASES_AND_WINDOWS:
             for v in ("pos", "neg", "abs"):
