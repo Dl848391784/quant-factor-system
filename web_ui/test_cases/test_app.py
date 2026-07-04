@@ -282,6 +282,19 @@ def mock_r4_txt_parser():
         yield
 
 
+@pytest.fixture(autouse=True)
+def mock_r7_freshness_ic():
+    """v0.4.8 R7: 全局 mock check_data_freshness + check_derived_data_freshness + load_ic_results
+    避免真函数依赖文件系统 / Parquet IO, 单测 focus 模板
+    """
+    with (
+        patch("web_ui.app.check_data_freshness", return_value=[]),
+        patch("web_ui.app.check_derived_data_freshness", return_value=[]),
+        patch("web_ui.app.load_ic_results", return_value=[]),
+    ):
+        yield
+
+
 def test_segment_win_renders_top5(client, mock_obq_full_result):
     """v0.4.8 R3: 9·30 分段胜率渲染 (30 段 → Top 5 展示)"""
     decile_mock = {
@@ -666,4 +679,72 @@ def test_intraday_fallback_handles_empty(client, mock_obq_full_result):
     # 空 fallback, 不渲染操作规则 / 历史胜率
     assert "操作规则" not in body
     assert "历史胜率参考" not in body
+
+
+# ============================================================
+# v0.4.8 R7: 零·数据完整性检查 + 一·单因子 IC 数据汇总
+# ============================================================
+
+
+def test_freshness_section_renders_data_and_derived(client, mock_obq_full_result):
+    """v0.4.8 R7: 零·数据完整性检查 渲染 2 表格 (基础数据源 + 衍生数据)"""
+    data_mock = [
+        {"source": "factor_ic_data", "description": "主数据源(行情+因子+收益)", "expected_date": "2026-07-02", "actual_date": "2026-07-03", "status": "warning", "status_symbol": "△延迟"},
+    ]
+    derived_mock = [
+        {"source": "ic_results", "description": "IC分析结果", "expected_date": "2026-07-01", "actual_date": "2026-07-02", "file_count": 72, "status": "warning", "status_symbol": "△延迟(72因子)"},
+    ]
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.check_data_freshness", return_value=data_mock),  # override autouse
+        patch("web_ui.app.check_derived_data_freshness", return_value=derived_mock),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 基础数据源
+    assert "factor_ic_data" in body
+    assert "2026-07-02" in body
+    assert "△延迟" in body
+    # 衍生数据
+    assert "ic_results" in body
+    assert "72" in body
+
+
+def test_ic_section_renders_table(client, mock_obq_full_result):
+    """v0.4.8 R7: 一·单因子 IC 数据汇总 渲染表格"""
+    ic_mock = [
+        {"factor_name": "tail_price_position", "ic_mean": -0.0629, "icir": 0.9381, "ic_std": 0.0670, "valid_days": 34, "neutralization_sensitivity": 0.28, "neutralization_method": "industry+log_market_cap"},
+        {"factor_name": "rsi", "ic_mean": -0.0483, "icir": 0.3382, "ic_std": 0.1428, "valid_days": 516, "neutralization_sensitivity": 0.19, "neutralization_method": "industry+log_market_cap"},
+    ]
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_ic_results", return_value=ic_mock),  # override autouse
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 真实因子
+    assert "tail_price_position" in body
+    assert "rsi" in body
+    # IC 数值
+    assert "-0.0629" in body
+    assert "0.9381" in body
+    # 中性化
+    assert "industry+log_market_cap" in body
+
+
+def test_ic_section_handles_no_data(client, mock_obq_full_result):
+    """v0.4.8 R7: IC 数据为空时显示降级提示"""
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        # autouse 已 mock load_ic_results = []
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    assert "IC 数据不可用" in body
 

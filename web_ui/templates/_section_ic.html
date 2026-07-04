@@ -1,0 +1,32 @@
+{# 一·单因子 IC 数据汇总 (v0.4.8 R7)
+
+参数:
+- ic_results: load_ic_results() 返回的 list[dict]
+  字段: factor_name, ic_mean, icir, ic_std, valid_days, neutralization_sensitivity, neutralization_method
+#}
+{% if not ic_results %}
+  <p class="empty">IC 数据不可用 — 请确认 summary 流水线已成功运行</p>
+{% else %}
+  <p class="muted">v0.4.8 R7: 复用 data_loaders.load_ic_results() (H1.1 严守, 只读)</p>
+  <table>
+    <thead>
+      <tr>
+        <th>因子</th><th>IC均值</th><th>ICIR</th><th>IC标准差</th>
+        <th>有效天数</th><th>中性化敏感</th><th>中性化方式</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in ic_results %}
+      <tr>
+        <td><code>{{ r.factor_name }}</code></td>
+        <td>{{ "%.4f" | format(r.ic_mean) if r.ic_mean is not none else "—" }}</td>
+        <td>{{ "%.4f" | format(r.icir) if r.icir is not none else "—" }}</td>
+        <td>{{ "%.4f" | format(r.ic_std) if r.ic_std is not none else "—" }}</td>
+        <td>{{ r.valid_days if r.valid_days is not none else "—" }}</td>
+        <td>{{ "%.0f%%" | format(r.neutralization_sensitivity * 100) if r.neutralization_sensitivity is not none else "—" }}</td>
+        <td>{{ r.neutralization_method if r.neutralization_method else "—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endif %}

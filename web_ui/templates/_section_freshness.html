@@ -1,0 +1,48 @@
+{# 零·数据完整性检查 (v0.4.8 R7)
+
+参数:
+- data_results: check_data_freshness() 返回的 list[dict]
+- derived_results: check_derived_data_freshness() 返回的 list[dict]
+#}
+{% if not data_results and not derived_results %}
+  <p class="empty">数据完整性检查不可用 — 请确认 summary 流水线已成功运行</p>
+{% else %}
+  <h3>【基础数据源】</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>数据源</th><th>描述</th><th>期望日期</th><th>实际日期</th><th>状态</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in data_results %}
+      <tr>
+        <td>{{ r.source }}</td>
+        <td>{{ r.description }}</td>
+        <td>{{ r.expected_date }}</td>
+        <td>{{ r.actual_date }}</td>
+        <td>{{ r.status_symbol }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h3>【衍生数据】</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>数据源</th><th>描述</th><th>文件数</th><th>状态</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in derived_results %}
+      <tr>
+        <td>{{ r.source }}</td>
+        <td>{{ r.description }}</td>
+        <td>{{ r.file_count }}</td>
+        <td>{{ r.status_symbol }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endif %}

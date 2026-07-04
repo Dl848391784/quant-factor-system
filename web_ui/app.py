@@ -39,9 +39,16 @@ from flask import Flask, abort, redirect, render_template  # noqa: E402
 # v0.4.8: H1.1 严守, 只调 data_loaders 已有接口, 不修改 data_loaders
 from summary.report.data_loaders import (  # noqa: E402
     load_decile_stats,
+    load_ic_results,
     load_intraday_strategy,
     load_stock_name_map,
     load_stock_selection_result,
+)
+
+# v0.4.8 R7: 数据完整性检查 (H1.1 严守: 从 freshness_check.py 调, 不改 data_loaders)
+from summary.report.freshness_check import (  # noqa: E402
+    check_data_freshness,
+    check_derived_data_freshness,
 )
 
 # v0.4.8 R2a: web_ui 内部实现的辅助模块 (H1.1 严守: 不修改 data_loaders)
@@ -129,6 +136,25 @@ def show_report(date: str):
         logger.warning("parse_obq_intraday 失败: %s", e)
         intraday_fallback = {}
 
+    # v0.4.8 R7: 数据完整性检查 (零·)
+    data_results: list[dict] = []
+    derived_results: list[dict] = []
+    # v0.4.8 R7: 单因子 IC (一·)
+    ic_results: list[dict] = []
+    try:
+        data_results = check_data_freshness(selection_date or date, logger=logger) or []
+    except Exception as e:
+        logger.warning("check_data_freshness 失败: %s", e)
+    try:
+        derived_results = check_derived_data_freshness(selection_date or date, logger=logger) or []
+    except Exception as e:
+        logger.warning("check_derived_data_freshness 失败: %s", e)
+    try:
+        ic_results = load_ic_results(logger=logger) or []
+    except Exception as e:
+        logger.warning("load_ic_results 失败: %s", e)
+        ic_results = []
+
     # v0.4.8 R1: meta 派生字段 (H1.1 不改 data_loaders, 用 result.get 兼容)
     # 注意: result 是 dict, 必须用 item 访问 result["meta"] 而非 result.meta
     expected_data_date = (
@@ -149,6 +175,9 @@ def show_report(date: str):
         txt_s8_meta=txt_s8_meta,
         txt_s9_matrix=txt_s9_matrix,
         intraday_fallback=intraday_fallback,
+        data_results=data_results,
+        derived_results=derived_results,
+        ic_results=ic_results,
     )
 
 

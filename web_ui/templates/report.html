@@ -47,10 +47,10 @@ tr:nth-child(even) { background: #f8f9fa; }
 </div>
 
 <h2 id="section-freshness">零、数据完整性检查</h2>
-<div class="section-placeholder">v0.4.8 暂不实施 — 与 txt 报告零节内容对齐留待 v0.4.9+</div>
+{% include "_section_freshness.html" with context %}
 
 <h2 id="section-ic">一、单因子 IC 数据汇总</h2>
-<div class="section-placeholder">v0.4.8 暂不实施 — 留待 v0.4.9+ (复用 data_loaders.load_ic_results())</div>
+{% include "_section_ic.html" with context %}
 
 <h2 id="section-backtest">二、单因子分层回测</h2>
 <div class="section-placeholder">v0.4.8 暂不实施 — 留待 v0.4.9+</div>
