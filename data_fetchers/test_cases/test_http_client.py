@@ -137,7 +137,6 @@ class TestRequestWithRetryMethodValidation:
     def test_request_with_retry_valid_methods(self):
         """测试有效 HTTP 方法列表"""
         session = create_retry_session()
-        valid_methods = ["GET", "POST", "PUT", "DELETE"]
         # 不实际调用，只验证参数解析逻辑
         # 实际调用需要真实 API 环境
         session.close()

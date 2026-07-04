@@ -497,7 +497,7 @@ def merge_factors(
     # 4. 数据验证
     logger.info("=" * 60)
     logger.info("数据验证...")
-    validation_results = validate_merged_data(merged_df, main_df, merged_factors, logger)
+    validate_merged_data(merged_df, main_df, merged_factors, logger)  # noqa: F841  # 函数内有 logger.info 副作用, 不检查返回值
 
     # 5. 汇总统计
     logger.info("=" * 60)

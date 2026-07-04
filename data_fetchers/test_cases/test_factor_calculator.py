@@ -239,7 +239,6 @@ class TestCalculateForwardReturn:
 
     def test_custom_shift(self, sample_close_prices):
         """测试自定义前瞻天数"""
-        fr_1 = calculate_forward_return(sample_close_prices, shift=1)
         fr_3 = calculate_forward_return(sample_close_prices, shift=3)
         # shift=3 时最后 3 天应为 NaN
         assert pd.isna(fr_3.iloc[-1])
@@ -271,7 +270,7 @@ class TestCalculateBollingerPB:
     def test_original_df_not_modified(self, sample_factor_df):
         """测试原始 DataFrame 未被修改"""
         original_cols = sample_factor_df.columns.tolist()
-        result = calculate_bollinger_pb(sample_factor_df, n=20, k=2.0)
+        _ = calculate_bollinger_pb(sample_factor_df, n=20, k=2.0)  # noqa: F841  # 调用触发 in-place 检测, 不检查返回值
         # 原始 DataFrame 列数未变
         assert sample_factor_df.columns.tolist() == original_cols
 
@@ -312,7 +311,7 @@ class TestCalculateKDJJ:
     def test_original_df_not_modified(self, sample_factor_df):
         """测试原始 DataFrame 未被修改"""
         original_cols = sample_factor_df.columns.tolist()
-        result = calculate_kdj_j(sample_factor_df, n=9, m1=3, m2=3)
+        _ = calculate_kdj_j(sample_factor_df, n=9, m1=3, m2=3)  # noqa: F841  # 调用触发 in-place 检测
         # 原始 DataFrame 列数未变
         assert sample_factor_df.columns.tolist() == original_cols
 
@@ -353,7 +352,7 @@ class TestCalculateTurnoverSurge:
     def test_original_df_not_modified(self, sample_factor_df):
         """测试原始 DataFrame 未被修改"""
         original_cols = sample_factor_df.columns.tolist()
-        result = calculate_turnover_surge(sample_factor_df, surge_window=5)
+        _ = calculate_turnover_surge(sample_factor_df, surge_window=5)  # noqa: F841  # 调用触发 in-place 检测
         # 原始 DataFrame 列数未变
         assert sample_factor_df.columns.tolist() == original_cols
 
