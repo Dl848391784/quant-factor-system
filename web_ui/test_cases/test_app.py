@@ -269,6 +269,18 @@ def mock_r3_loaders():
         yield
 
 
+@pytest.fixture(autouse=True)
+def mock_r4_txt_parser():
+    """v0.4.8 R4: 全局 mock txt_parser (parse_obq_s8/s9)
+    避免真函数读文件系统, 单测 focus 模板
+    """
+    with (
+        patch("web_ui.app.parse_obq_s8", return_value={}),
+        patch("web_ui.app.parse_obq_s9", return_value=None),
+    ):
+        yield
+
+
 def test_segment_win_renders_top5(client, mock_obq_full_result):
     """v0.4.8 R3: 9·30 分段胜率渲染 (30 段 → Top 5 展示)"""
     decile_mock = {
@@ -365,4 +377,158 @@ def test_candidate_detail_renders_three_stage_tables(client, mock_obq_full_resul
     assert "000566" in body
     # 操作提示
     assert "今日尾盘买入" in body
+
+
+# ============================================================
+# v0.4.8 R4: 字段补完 (txt 解析, parity test)
+# ============================================================
+
+
+def test_section_8_renders_filter_fields(client, mock_obq_full_result):
+    """v0.4.8 R4: 第八节补全 — 振幅过滤 / 覆盖率过滤 / 反向因子 (从 txt 解析)"""
+    s8_mock = {
+        "composite_score": 0.5714,
+        "top_n": 30,
+        "stocks_on_date": 61,
+        "excluded_by_amplitude": 0,
+        "excluded_by_coverage": 15,
+        "flipped_factors": ["amplitude", "interaction_amplitude__ret3d_abs"],
+    }
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.parse_obq_s8", return_value=s8_mock),  # override autouse
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 振幅过滤 / 覆盖率过滤
+    assert "振幅过滤" in body
+    assert "排除 0 只" in body
+    assert "覆盖率过滤" in body
+    assert "排除 15 只" in body
+    # 反向因子
+    assert "方向处理说明" in body
+    assert "amplitude" in body
+    assert "interaction_amplitude__ret3d_abs" in body
+
+
+def test_section_8_handles_no_flipped_factors(client, mock_obq_full_result):
+    """v0.4.8 R4: txt 解析无 flipped_factors 时, 不渲染方向处理说明"""
+    s8_mock = {"composite_score": 0.5, "excluded_by_amplitude": 0, "excluded_by_coverage": 0}
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.parse_obq_s8", return_value=s8_mock),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 没 flipped_factors, 不渲染方向处理说明
+    assert "方向处理说明" not in body
+
+
+def test_section_9_renders_matrix(client, mock_obq_full_result):
+    """v0.4.8 R4: 第九节 30 段 × 12 选股日 完整胜率矩阵渲染 (从 txt 解析)"""
+    s9_mock = {
+        "dates": ["06-15", "06-16", "06-17", "06-18", "06-22", "06-23", "06-24", "06-25", "06-26", "06-29", "06-30", "07-01"],
+        "segments": [
+            {"label": f"S{i}", "win_rates": [50.0] * 12, "merged": 50.0 + i / 10}
+            for i in range(1, 31)
+        ],
+        "best_segment": {"label": "S7", "merged": 59.6},
+        "daily_rates": {"06-15": "2/3 = 66.7%", "06-16": "3/3 = 100.0%"},
+    }
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.parse_obq_s9", return_value=s9_mock),  # override autouse
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 完整胜率矩阵
+    assert "30 分段 × 12 选股日" in body
+    # 最佳段
+    assert "最佳段" in body
+    assert "S7" in body
+    assert "59.6" in body
+    # 逐日胜率
+    assert "逐日胜率" in body
+    assert "06-15" in body
+    assert "66.7%" in body
+
+
+def test_section_9_handles_no_matrix(client, mock_obq_full_result):
+    """v0.4.8 R4: txt 解析失败 (无 matrix) 时, 不渲染 30×12 表格 (但 R3 decile_stats 仍渲染)"""
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        # autouse 已 mock parse_obq_s9 = None
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 30×12 矩阵不渲染
+    assert "30 分段 × 12 选股日" not in body
+
+
+def test_section_8_handles_parse_exception(client, mock_obq_full_result):
+    """v0.4.8 R4: parse_obq_s8 抛异常时 200 + 降级 (不渲染 txt 字段)"""
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.parse_obq_s8", side_effect=RuntimeError("txt missing")),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    # 异常降级为 {}, 不渲染振幅过滤 / 覆盖率过滤 / 方向处理说明
+    assert "振幅过滤" not in resp.data.decode("utf-8")
+    assert "方向处理说明" not in resp.data.decode("utf-8")
+
+
+def test_parity_obq_txt_fields_match_webui(client, mock_obq_full_result):
+    """v0.4.8 R4: 字段级 parity test — 从 txt 解析字段必须在 web_ui 渲染
+
+    验证 web_ui 页面含 txt 第八节所有 6 个关键字段。
+    """
+    s8_mock = {
+        "composite_score": 0.5714,
+        "top_n": 30,
+        "stocks_on_date": 61,
+        "excluded_by_amplitude": 0,
+        "excluded_by_coverage": 15,
+        "flipped_factors": ["amplitude", "interaction_amplitude__ret3d_abs"],
+    }
+    s9_mock = {
+        "dates": ["06-15", "06-16", "06-17", "06-18", "06-22", "06-23", "06-24", "06-25", "06-26", "06-29", "06-30", "07-01"],
+        "segments": [
+            {"label": f"S{i}", "win_rates": [50.0] * 12, "merged": 50.0 + i / 10}
+            for i in range(1, 31)
+        ],
+        "best_segment": {"label": "S7", "merged": 59.6},
+        "daily_rates": {"06-15": "2/3 = 66.7%"},
+    }
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.parse_obq_s8", return_value=s8_mock),
+        patch("web_ui.app.parse_obq_s9", return_value=s9_mock),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 第八节 6 字段 parity check
+    assert "0.5714" in body  # composite_score
+    assert "30 只" in body  # top_n
+    assert "61" in body  # stocks_on_date
+    assert "振幅过滤" in body and "排除 0 只" in body
+    assert "覆盖率过滤" in body and "排除 15 只" in body
+    assert "amplitude" in body  # flipped_factors
+    # 第九节 3 字段 parity check
+    assert "最佳段" in body
+    assert "S7" in body and "59.6" in body
+    assert "逐日胜率" in body
+    # 30×12 矩阵
+    assert "30 分段 × 12 选股日" in body
 

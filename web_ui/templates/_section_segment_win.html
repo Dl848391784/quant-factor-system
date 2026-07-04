@@ -63,3 +63,44 @@
   </table>
   {% endif %}
 {% endif %}
+
+{# v0.4.8 R4: txt 报告 30 段 × 12 选股日 完整胜率矩阵 (data_loaders 拿不到, 从 txt 解析) #}
+{% if txt_s9_matrix and txt_s9_matrix.get("segments") %}
+  <h3>30 分段 × 12 选股日 完整胜率矩阵 (txt 来源)</h3>
+  <p class="muted">v0.4.8 R4: 从 summary/result/ob_quality/factor_summary_report_*.txt 解析</p>
+  {% set best_seg = txt_s9_matrix.get("best_segment") %}
+  {% if best_seg %}
+  <p><strong>最佳段</strong>: <code>{{ best_seg.label }}</code> (合并胜率 {{ "%.1f" | format(best_seg.merged) }}%)</p>
+  {% if txt_s9_matrix.get("daily_rates") %}
+  <h4>{{ best_seg.label }} 逐日胜率 ({{ txt_s9_matrix.daily_rates | length }} 个选股日)</h4>
+  <table>
+    <thead><tr><th>选股日</th><th>胜率</th></tr></thead>
+    <tbody>
+    {% for date, rate in txt_s9_matrix.daily_rates.items() %}
+      <tr><td>{{ date }}</td><td>{{ rate }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% endif %}
+  <div style="overflow-x: auto;">
+  <table>
+    <thead>
+      <tr>
+        <th>段</th>
+        {% for d in txt_s9_matrix.dates %}<th>{{ d }}</th>{% endfor %}
+        <th>合并</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for seg in txt_s9_matrix.segments %}
+      <tr {% if best_seg and seg.label == best_seg.label %}style="background:#fff3cd;font-weight:bold"{% endif %}>
+        <td>{{ seg.label }}</td>
+        {% for wr in seg.win_rates %}<td>{{ "%.0f" | format(wr) }}%</td>{% endfor %}
+        <td><strong>{{ "%.1f" | format(seg.merged) }}%</strong></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}

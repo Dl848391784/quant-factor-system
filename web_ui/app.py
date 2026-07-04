@@ -47,6 +47,12 @@ from summary.report.data_loaders import (  # noqa: E402
 # v0.4.8 R2a: web_ui 内部实现的辅助模块 (H1.1 严守: 不修改 data_loaders)
 from web_ui.common.lr_training_status import load_status as load_lr_status  # noqa: E402
 
+# v0.4.8 R4: 解析 ob_quality txt 报告 (H1.1 严守: txt 是 summary 已生成产物)
+from web_ui.common.txt_parser import (  # noqa: E402
+    parse_obq_section_8_meta as parse_obq_s8,
+    parse_obq_section_9_matrix as parse_obq_s9,
+)
+
 
 logger = logging.getLogger("web_ui")
 
@@ -103,6 +109,18 @@ def show_report(date: str):
             logger.warning("load_decile_stats 失败: %s", e)
             decile_stats = None
 
+    # v0.4.8 R4: 解析 ob_quality txt 报告补全字段 (H1.1 严守: 不改 data_loaders)
+    txt_s8_meta: dict = {}
+    txt_s9_matrix: dict | None = None
+    try:
+        txt_s8_meta = parse_obq_s8(logger=logger) or {}
+    except Exception as e:
+        logger.warning("parse_obq_s8 失败: %s", e)
+    try:
+        txt_s9_matrix = parse_obq_s9(logger=logger)
+    except Exception as e:
+        logger.warning("parse_obq_s9 失败: %s", e)
+
     # v0.4.8 R1: meta 派生字段 (H1.1 不改 data_loaders, 用 result.get 兼容)
     # 注意: result 是 dict, 必须用 item 访问 result["meta"] 而非 result.meta
     expected_data_date = (
@@ -120,6 +138,8 @@ def show_report(date: str):
         lr_status=lr_status,
         decile_stats=decile_stats,
         intraday_rows=intraday_rows,
+        txt_s8_meta=txt_s8_meta,
+        txt_s9_matrix=txt_s9_matrix,
     )
 
 

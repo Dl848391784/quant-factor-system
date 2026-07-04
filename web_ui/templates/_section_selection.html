@@ -15,10 +15,28 @@ data_loaders 已暴露的 stage 字段 (H1.1 严守, 不改 data_loaders):
 {% else %}
   <div class="meta-box">
     <p><strong>选股日期</strong>: {{ result.meta.selection_date }}（T-1 数据）</p>
-    <p><strong>权重方法</strong>: {{ result.meta.weight_method }} · <strong>方向</strong>: {{ result.meta.factor_direction }} · <strong>Top N</strong>: {{ result.meta.top_n }}</p>
+    <p><strong>权重方法</strong>: {{ result.meta.weight_method }} · <strong>方向</strong>: {{ result.meta.factor_direction }} · <strong>选出股票数</strong>: {{ result.meta.top_n }} 只（共 {{ result.meta.stocks_on_date | default(0) }} 只股票）</p>
     <p><strong>候选池</strong>: {{ result.meta.stocks_on_date | default(0) }} 只 → 有效 {{ result.meta.valid_stocks | default(0) }} → Stage1 {{ result.meta.stage1_pool_size | default(0) }} → 最终 {{ result.top_stocks | length }} 只</p>
     <p><strong>Composite Score</strong>: {{ "%.4f" | format(result.meta.composite_score | default(0)) }}</p>
+    {% if txt_s8_meta %}
+    <p>
+      <strong>振幅过滤</strong>: 排除 {{ txt_s8_meta.get("excluded_by_amplitude", 0) }} 只
+      · <strong>覆盖率过滤</strong>: 排除 {{ txt_s8_meta.get("excluded_by_coverage", 0) }} 只
+    </p>
+    {% endif %}
   </div>
+
+  {# v0.4.8 R4: 方向处理说明 (反向因子列表) #}
+  {% if txt_s8_meta and txt_s8_meta.get("flipped_factors") %}
+  <h3>方向处理说明 (反向因子标准化值已取反)</h3>
+  <p class="muted">v0.4.8 R4: 从 txt 报告解析, 对齐到正向语义</p>
+  <p><strong>反向因子列表</strong>（{{ txt_s8_meta.flipped_factors | length }} 个）:</p>
+  <ul>
+    {% for f in txt_s8_meta.flipped_factors %}
+      <li><code>{{ f }}</code></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
 
   {# v0.4.8 R2a: LR 训练数据状态 (web_ui 内部实现, H1.1 严守) #}
   {% if lr_status %}
