@@ -186,6 +186,7 @@ class TestCacheMechanism:
         """TC003-1: 从有效缓存加载"""
         # 正确配置 Mock
         mock_cache_path.__str__ = lambda: str(mock_cache_file)
+        mock_cache_path.__fspath__ = lambda: str(mock_cache_file)  # 防止 pytest 收集到 MagicMock/<id> 目录
         mock_cache_path.exists.return_value = True
 
         # 不需要 mock refresh，因为缓存是新鲜的
@@ -244,6 +245,7 @@ class TestCacheMechanism:
 
         # 正确配置 Mock
         mock_cache_path.__str__ = lambda: str(mock_cache_file)
+        mock_cache_path.__fspath__ = lambda: str(mock_cache_file)  # 防止 pytest 收集到 MagicMock/<id> 目录
         mock_cache_path.exists.return_value = True
         mock_cache_path.unlink = MagicMock()
 
