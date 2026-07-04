@@ -9,7 +9,8 @@
 {% if not result %}
   <p class="empty">候选数据不可用</p>
 {% else %}
-  {% set pool_size = (result.all_composite_stocks | default(result.top_stocks, true) | length) %}
+  {# v0.4.8 R5: 候选池大小从 meta.valid_stocks 取 (txt 一致: 57 只), 不用 stocks_on_date #}
+  {% set pool_size = result.meta.valid_stocks | default(0) %}
   <div class="meta-box">
     <p>
       <strong>选股日</strong>: {{ result.meta.selection_date }}

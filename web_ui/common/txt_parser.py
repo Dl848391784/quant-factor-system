@@ -78,15 +78,17 @@ def parse_obq_section_8_meta(logger: logging.Logger) -> dict:
         result["top_n"] = int(m.group(1))
         result["stocks_on_date"] = int(m.group(2))
 
-    # 振幅过滤: 排除 0 只股票
-    m = re.search(r"振幅过滤[::]\s*排除\s*(\d+)\s*只", content)
+    # 振幅过滤: 排除 0 只股票（振幅 < 1.00%，不可交易的一字板涨停股）
+    m = re.search(r"振幅过滤[::]\s*排除\s*(\d+)\s*只股票?（([^）]+)）", content)
     if m:
         result["excluded_by_amplitude"] = int(m.group(1))
+        result["amplitude_detail"] = m.group(2).strip()
 
-    # 覆盖率过滤: 排除 15 只股票
-    m = re.search(r"覆盖率过滤[::]\s*排除\s*(\d+)\s*只", content)
+    # 覆盖率过滤: 排除 15 只股票（覆盖率 < 50%，缺失高权重因子导致综合因子值不可信）
+    m = re.search(r"覆盖率过滤[::]\s*排除\s*(\d+)\s*只股票?（([^）]+)）", content)
     if m:
         result["excluded_by_coverage"] = int(m.group(1))
+        result["coverage_detail"] = m.group(2).strip()
 
     # 反向因子列表: ['amplitude', 'interaction_amplitude__ret3d_abs']
     m = re.search(r"反向因子.*?\[([^\]]+)\]", content)

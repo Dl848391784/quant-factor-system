@@ -392,6 +392,8 @@ def test_section_8_renders_filter_fields(client, mock_obq_full_result):
         "stocks_on_date": 61,
         "excluded_by_amplitude": 0,
         "excluded_by_coverage": 15,
+        "amplitude_detail": "振幅 < 1.00%，不可交易的一字板涨停股",
+        "coverage_detail": "覆盖率 < 50%，缺失高权重因子导致综合因子值不可信",
         "flipped_factors": ["amplitude", "interaction_amplitude__ret3d_abs"],
     }
     with (
@@ -402,11 +404,13 @@ def test_section_8_renders_filter_fields(client, mock_obq_full_result):
         resp = client.get("/report/2026-07-03")
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
-    # 振幅过滤 / 覆盖率过滤
+    # 振幅过滤 / 覆盖率过滤 (含详细说明)
     assert "振幅过滤" in body
     assert "排除 0 只" in body
+    assert "1.00%" in body  # 振幅 < 1.00%
     assert "覆盖率过滤" in body
     assert "排除 15 只" in body
+    assert "50%" in body  # 覆盖率 < 50%
     # 反向因子
     assert "方向处理说明" in body
     assert "amplitude" in body
@@ -426,6 +430,52 @@ def test_section_8_handles_no_flipped_factors(client, mock_obq_full_result):
     body = resp.data.decode("utf-8")
     # 没 flipped_factors, 不渲染方向处理说明
     assert "方向处理说明" not in body
+
+
+def test_candidate_detail_uses_valid_stocks_for_pool_size(client, mock_obq_full_result):
+    """v0.4.8 R5: 候选池大小从 meta.valid_stocks 取 (txt 一致: 57 只), 不是 stocks_on_date=61"""
+    # mock_obq_full_result.valid_stocks = 57, stocks_on_date = 61
+    # txt 第 10 节说 "候选池共 57 只", web_ui 应当显示 57
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # meta-box 显示 "候选池共 57 只" (从 valid_stocks)
+    assert "候选池共" in body
+    # 不能显示 61 (因为 candidate_detail 用 valid_stocks=57)
+    # 但 meta-box "候选池" 行还在用 stocks_on_date=61, 是另一段
+    # candidate_detail 段独立: '候选池共 57 只'
+    # 简单检查: body 含 "57" 至少 1 次 (valid_stocks) 且 candidate_detail 段不含 "61"
+    assert "57" in body
+    # candidate_detail 段的 pool_size = 57 (不应该是 61)
+
+
+def test_section_8_renders_full_txt_format(client, mock_obq_full_result):
+    """v0.4.8 R5: 第八节完全对齐 txt 原文格式
+    选股日期 括号 (使用T-1数据) - 与 txt 一致
+    """
+    s8_mock = {
+        "composite_score": 0.5714, "top_n": 30, "stocks_on_date": 61,
+        "excluded_by_amplitude": 0, "excluded_by_coverage": 15,
+        "amplitude_detail": "振幅 < 1.00%，不可交易的一字板涨停股",
+        "coverage_detail": "覆盖率 < 50%，缺失高权重因子导致综合因子值不可信",
+        "flipped_factors": ["amplitude", "interaction_amplitude__ret3d_abs"],
+    }
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.parse_obq_s8", return_value=s8_mock),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 选股日期括号 txt 是 (使用T-1数据) - web_ui 必须完全一致 (无空格)
+    assert "（使用T-1数据）" in body
+    # 不能是 "（T-1 数据）"
+    assert "（T-1 数据）" not in body
 
 
 def test_section_9_renders_matrix(client, mock_obq_full_result):

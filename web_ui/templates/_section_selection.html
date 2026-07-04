@@ -14,15 +14,21 @@ data_loaders 已暴露的 stage 字段 (H1.1 严守, 不改 data_loaders):
   <p class="empty">选股数据不可用 — 请确认 summary 流水线已成功运行</p>
 {% else %}
   <div class="meta-box">
-    <p><strong>选股日期</strong>: {{ result.meta.selection_date }}（T-1 数据）</p>
+    <p><strong>选股日期</strong>: {{ result.meta.selection_date }}（使用T-1数据）</p>
     <p><strong>权重方法</strong>: {{ result.meta.weight_method }} · <strong>方向</strong>: {{ result.meta.factor_direction }} · <strong>选出股票数</strong>: {{ result.meta.top_n }} 只（共 {{ result.meta.stocks_on_date | default(0) }} 只股票）</p>
     <p><strong>候选池</strong>: {{ result.meta.stocks_on_date | default(0) }} 只 → 有效 {{ result.meta.valid_stocks | default(0) }} → Stage1 {{ result.meta.stage1_pool_size | default(0) }} → 最终 {{ result.top_stocks | length }} 只</p>
     <p><strong>Composite Score</strong>: {{ "%.4f" | format(result.meta.composite_score | default(0)) }}</p>
     {% if txt_s8_meta %}
+    {% if txt_s8_meta.get("excluded_by_amplitude") is not none %}
     <p>
-      <strong>振幅过滤</strong>: 排除 {{ txt_s8_meta.get("excluded_by_amplitude", 0) }} 只
-      · <strong>覆盖率过滤</strong>: 排除 {{ txt_s8_meta.get("excluded_by_coverage", 0) }} 只
+      <strong>振幅过滤</strong>: 排除 {{ txt_s8_meta.excluded_by_amplitude }} 只股票（{{ txt_s8_meta.get("amplitude_detail", "") }}）
     </p>
+    {% endif %}
+    {% if txt_s8_meta.get("excluded_by_coverage") is not none %}
+    <p>
+      <strong>覆盖率过滤</strong>: 排除 {{ txt_s8_meta.excluded_by_coverage }} 只股票（{{ txt_s8_meta.get("coverage_detail", "") }}）
+    </p>
+    {% endif %}
     {% endif %}
   </div>
 
