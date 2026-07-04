@@ -119,7 +119,8 @@ class TestLayeredBacktestResult:
         if not result_path.exists():
             pytest.skip("结果文件不存在")
 
-        result = json.load(open(result_path))
+        with open(result_path) as f:  # noqa: SIM115
+            result = json.load(f)
         required_keys = ["meta", "layer_stats", "monotonicity", "long_short"]
         for k in required_keys:
             assert k in result
@@ -130,7 +131,8 @@ class TestLayeredBacktestResult:
         if not result_path.exists():
             pytest.skip("结果文件不存在")
 
-        result = json.load(open(result_path))
+        with open(result_path) as f:  # noqa: SIM115
+            result = json.load(f)
         meta = result["meta"]
         assert meta["factor_name"] == "bollinger_pb"
         assert meta["factor_direction"] == "negative"
@@ -142,7 +144,8 @@ class TestLayeredBacktestResult:
         if not result_path.exists():
             pytest.skip("结果文件不存在")
 
-        result = json.load(open(result_path))
+        with open(result_path) as f:  # noqa: SIM115
+            result = json.load(f)
         assert len(result["layer_stats"]) == 5  # 5层
 
 

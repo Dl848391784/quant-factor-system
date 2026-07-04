@@ -22,9 +22,10 @@ fetch_industry.py pytest 测试文件
 
 import json
 import logging
+import contextlib
+import sys
 
 # 添加项目根目录到 sys.path
-import sys
 import tempfile
 import threading
 import time
@@ -331,11 +332,8 @@ class TestBackupFallback:
             ),
             caplog.at_level(logging.WARNING, logger="data_fetchers.fetch_industry"),
         ):
-            try:
-                load_local_industry_backup(stock_list_path=mock_backup_file, write_cache=True)
-            except RuntimeError:
-                # 写缓存异常按真实类型抛出（不再被 except 包装为"解析失败"）
-                pass
+            with contextlib.suppress(RuntimeError):
+                load_local_industry_backup(stock_list_path=mock_backup_file, write_cache=True)  # noqa: SIM105
 
             # v3.13 修复后：日志中不应出现"本地备用文件解析失败"
             # （若修复未生效，旧代码会把 _write_backup_cache 异常归为解析失败误判）
@@ -585,21 +583,25 @@ class TestEdgeCases:
         empty_cache.write_text("")
 
         # 验证：空文件应返回空字典或触发 refresh
-        with patch("data_fetchers.fetch_industry.INDUSTRY_CACHE_PATH", empty_cache):
-            with patch("data_fetchers.fetch_industry.refresh_industry_cache", return_value={}):
-                data = load_stock_industry()
-                assert data == {}
+        with (
+            patch("data_fetchers.fetch_industry.INDUSTRY_CACHE_PATH", empty_cache),
+            patch("data_fetchers.fetch_industry.refresh_industry_cache", return_value={}),
+        ):
+            data = load_stock_industry()
+            assert data == {}
 
     def test_invalid_json_format(self, temp_dir):
         """TC008-2: JSON 格式错误"""
         invalid_cache = temp_dir / "invalid.json"
         invalid_cache.write_text('{"invalid": json}')
 
-        with patch("data_fetchers.fetch_industry.INDUSTRY_CACHE_PATH", invalid_cache):
-            with patch("data_fetchers.fetch_industry.refresh_industry_cache", return_value={}):
-                data = load_stock_industry()
-                # 验证：格式错误触发 refresh
-                assert data == {}
+        with (
+            patch("data_fetchers.fetch_industry.INDUSTRY_CACHE_PATH", invalid_cache),
+            patch("data_fetchers.fetch_industry.refresh_industry_cache", return_value={}),
+        ):
+            data = load_stock_industry()
+            # 验证：格式错误触发 refresh
+            assert data == {}
 
 
 class TestEMSource:
