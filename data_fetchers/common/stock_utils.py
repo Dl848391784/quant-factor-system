@@ -334,10 +334,7 @@ def load_main_board_stock_list(
     logger = get_module_logger(logger)
 
     # 使用默认路径
-    if stock_list_file is None:
-        stock_list_file = get_stock_list_file()
-    else:
-        stock_list_file = Path(stock_list_file)  # 统一转换为 Path
+    stock_list_file = get_stock_list_file() if stock_list_file is None else Path(stock_list_file)  # noqa: SIM108
 
     if not stock_list_file.exists():
         raise FileNotFoundError(f"股票列表缓存不存在: {stock_list_file}")

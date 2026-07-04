@@ -696,10 +696,7 @@ class LayeredBacktestEngine:
             ls_series["date"] = date_val
             daily_ls_list.append(ls_series)
 
-        if len(daily_ls_list) > 0:
-            long_short_df = pd.DataFrame(daily_ls_list)
-        else:
-            long_short_df = pd.DataFrame()  # 空 DataFrame
+        long_short_df = pd.DataFrame(daily_ls_list) if len(daily_ls_list) > 0 else pd.DataFrame()  # noqa: SIM108
 
         # 多空组合统计
         long_short_stats = {}

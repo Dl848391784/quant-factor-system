@@ -47,6 +47,7 @@ Requires: Python >= 3.8 (gzip.BadGzipFile 异常类)
 """
 
 # 标准库导入（PEP 8 规范：按字母顺序分组）
+import contextlib
 import gc
 import gzip
 import json
@@ -458,10 +459,8 @@ def validate_final_data(logger: logging.Logger | None = None) -> tuple[bool, int
                     records_count += 1
                     # 抽样：基于 records_count（已修复问题4：无论解析是否成功都计入）
                     if records_count % step == 0 and len(sample_records) < sample_size:
-                        try:
-                            sample_records.append(json.loads(stripped.rstrip(",")))
-                        except json.JSONDecodeError:
-                            pass  # 抽样解析失败不影响计数
+                        with contextlib.suppress(json.JSONDecodeError):
+                            sample_records.append(json.loads(stripped.rstrip(",")))  # noqa: SIM105
 
     except Exception as e:
         # 修复 issue #3（v1.3）: 区分文件不存在（前置已拦截）与 IO/解析失败两类错误。

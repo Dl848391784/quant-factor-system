@@ -275,8 +275,7 @@ def is_valid_main_board_stock(code: str, name: str) -> bool:
         return True
 
     # 深市主板（00开头，含003）
-    if code.startswith("00"):
-        return True
+    return code.startswith("00")  # noqa: SIM103
 
     # 其他情况剔除
     return False

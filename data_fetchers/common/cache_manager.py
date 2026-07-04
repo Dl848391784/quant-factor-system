@@ -90,7 +90,7 @@ import logging
 import os
 import tempfile
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -207,10 +207,8 @@ def _atomic_write(path: Path) -> Generator[Path, None, None]:
     finally:
         # 异常退出或替换失败：清理临时文件
         if not replaced:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError:
-                pass  # 清理失败不影响原始异常传播
+            with suppress(OSError):
+                temp_path.unlink(missing_ok=True)  # noqa: SIM105
 
 
 def _read_cache_impl(path: Path, use_gzip: bool, logger: logging.Logger) -> dict[str, Any]:
@@ -333,10 +331,7 @@ def _write_cache_impl(
         logger.debug("创建目录（ensure_dir=True）: %s", path.parent)
 
     # JSON 序列化参数
-    if json_indent is None:
-        separators = _JSON_COMPACT_SEPARATORS
-    else:
-        separators = None  # 使用默认分隔符
+    separators = _JSON_COMPACT_SEPARATORS if json_indent is None else None  # noqa: SIM108
 
     # 使用 _atomic_write contextmanager 管理临时文件生命周期
     # 正常退出时原子替换，异常退出时自动清理临时文件
