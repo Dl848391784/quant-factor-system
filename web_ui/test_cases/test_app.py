@@ -295,6 +295,19 @@ def mock_r7_freshness_ic():
         yield
 
 
+@pytest.fixture(autouse=True)
+def mock_r8_loaders():
+    """v0.4.8 R8: 全局 mock load_backtest_results / load_composite_results / load_weight_selection_result
+    避免真函数依赖 Parquet IO, 单测 focus 模板
+    """
+    with (
+        patch("web_ui.app.load_backtest_results", return_value=[]),
+        patch("web_ui.app.load_composite_results", return_value=[]),
+        patch("web_ui.app.load_weight_selection_result", return_value=None),
+    ):
+        yield
+
+
 def test_segment_win_renders_top5(client, mock_obq_full_result):
     """v0.4.8 R3: 9·30 分段胜率渲染 (30 段 → Top 5 展示)"""
     decile_mock = {
@@ -747,4 +760,94 @@ def test_ic_section_handles_no_data(client, mock_obq_full_result):
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
     assert "IC 数据不可用" in body
+
+
+# ============================================================
+# v0.4.8 R8: 二·回测 + 五·综合回测 + 七·权重选择
+# ============================================================
+
+
+def test_backtest_section_renders_table(client, mock_obq_full_result):
+    """v0.4.8 R8: 二·单因子分层回测 渲染表格"""
+    bt_mock = [
+        {"factor_name": "tail_price_position", "long_short_annual": -0.0547, "sharpe": -0.78, "monotonicity": 0.1992, "monotonicity_quality": "✗较差"},
+        {"factor_name": "amplitude", "long_short_annual": 0.0906, "sharpe": 0.76, "monotonicity": -0.4409, "monotonicity_quality": "△一般"},
+    ]
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_backtest_results", return_value=bt_mock),  # override autouse
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 真实因子
+    assert "tail_price_position" in body
+    assert "amplitude" in body
+    # 收益 / 夏普 / 单调性
+    assert "-5.47%" in body
+    assert "0.76" in body
+    # 单调性质量
+    assert "✗较差" in body
+    assert "△一般" in body
+
+
+def test_composite_section_renders_table(client, mock_obq_full_result):
+    """v0.4.8 R8: 五·综合因子 4 种权重回测 渲染表格"""
+    comp_mock = [
+        {"weight_method": "equal_weight", "annual_return": 0.05, "sharpe": 0.4, "max_drawdown": -0.08, "monotonicity": 0.5},
+        {"weight_method": "rolling_icir_weight", "annual_return": 0.08, "sharpe": 0.6, "max_drawdown": -0.05, "monotonicity": 0.7},
+    ]
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_composite_results", return_value=comp_mock),  # override autouse
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 4 种权重方法
+    assert "equal_weight" in body
+    assert "rolling_icir_weight" in body
+    # 数值
+    assert "5.00%" in body or "0.05" in body  # 容忍任一
+
+
+def test_weights_section_renders_best_and_methods(client, mock_obq_full_result):
+    """v0.4.8 R8: 七·权重选择结果 渲染最优方法 + 全部方法"""
+    weights_mock = {
+        "best_selection": {"method": "rolling_icir_weight", "composite_score": 0.7766},
+        "all_methods": [
+            {"method": "equal_weight", "composite_score": 0.5285, "annual_return": 0.0081, "sharpe": 0.0429, "monotonicity": 0.5635},
+            {"method": "rolling_icir_weight", "composite_score": 0.7766, "annual_return": 0.0080, "sharpe": 0.0382, "monotonicity": 0.5860},
+        ],
+        "scoring_metrics": ["annual_return", "sharpe", "monotonicity"],
+    }
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_weight_selection_result", return_value=weights_mock),  # override autouse
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 最优方法
+    assert "rolling_icir_weight" in body
+    assert "0.7766" in body
+    # 各方法得分表
+    assert "各权重方法得分" in body
+    assert "equal_weight" in body
+
+
+def test_weights_section_handles_none(client, mock_obq_full_result):
+    """v0.4.8 R8: weight_selection 为 None 时显示降级"""
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        # autouse 已 mock load_weight_selection_result = None
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    assert "权重选择数据不可用" in body
 

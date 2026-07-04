@@ -1,0 +1,30 @@
+{# 二·单因子分层回测 (v0.4.8 R8)
+
+参数:
+- backtest_results: load_backtest_results() 返回的 list[dict]
+  字段: factor_name, long_short_annual, sharpe, monotonicity, monotonicity_quality
+#}
+{% if not backtest_results %}
+  <p class="empty">回测数据不可用 — 请确认 summary 流水线已成功运行</p>
+{% else %}
+  <p class="muted">v0.4.8 R8: 复用 data_loaders.load_backtest_results() (H1.1 严守, 只读)</p>
+  <table>
+    <thead>
+      <tr>
+        <th>因子</th><th>多空年化收益</th><th>夏普比率</th>
+        <th>单调性系数</th><th>单调性质量</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in backtest_results %}
+      <tr>
+        <td><code>{{ r.factor_name }}</code></td>
+        <td>{{ "%+.2f%%" | format(r.long_short_annual * 100) if r.long_short_annual is not none else "—" }}</td>
+        <td>{{ "%+.2f" | format(r.sharpe) if r.sharpe is not none else "—" }}</td>
+        <td>{{ "%+.4f" | format(r.monotonicity) if r.monotonicity is not none else "—" }}</td>
+        <td>{{ r.monotonicity_quality if r.monotonicity_quality else "—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endif %}

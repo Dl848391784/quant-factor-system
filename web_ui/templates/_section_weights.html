@@ -1,0 +1,44 @@
+{# 七·权重选择结果 (v0.4.8 R8)
+
+参数:
+- weight_selection: load_weight_selection_result() 返回的 dict | None
+  字段: best_selection {method, composite_score}, all_methods [...]
+#}
+{% if not weight_selection %}
+  <p class="empty">权重选择数据不可用 — 请确认 summary 流水线已成功运行</p>
+{% else %}
+  {% set best = weight_selection.get("best_selection", {}) %}
+  <p class="muted">v0.4.8 R8: 复用 data_loaders.load_weight_selection_result() (H1.1 严守, 只读)</p>
+  <div class="meta-box">
+    <p>
+      <strong>最优权重方法</strong>: {{ best.get("method", "—") }}
+      · <strong>综合得分</strong>: {{ "%.4f" | format(best.get("composite_score", 0)) }}
+    </p>
+  </div>
+
+  {% set methods = weight_selection.get("all_methods", []) %}
+  {% if methods %}
+  <h3>各权重方法得分</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>权重方法</th><th>综合得分</th>
+        {% for metric in weight_selection.get("scoring_metrics", [])[:5] %}
+          <th>{{ metric }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+    {% for m in methods %}
+      <tr>
+        <td><code>{{ m.get("method", m.get("weight_method", "—")) }}</code></td>
+        <td>{{ "%.4f" | format(m.get("composite_score", 0)) }}</td>
+        {% for metric in weight_selection.get("scoring_metrics", [])[:5] %}
+          <td>{{ "%.4f" | format(m.get(metric, 0)) }}</td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+{% endif %}

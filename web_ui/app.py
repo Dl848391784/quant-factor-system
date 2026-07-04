@@ -38,11 +38,14 @@ from flask import Flask, abort, redirect, render_template  # noqa: E402
 # 复用 summary 数据加载器（web_ui 不直接读 Parquet）
 # v0.4.8: H1.1 严守, 只调 data_loaders 已有接口, 不修改 data_loaders
 from summary.report.data_loaders import (  # noqa: E402
+    load_backtest_results,
+    load_composite_results,
     load_decile_stats,
     load_ic_results,
     load_intraday_strategy,
     load_stock_name_map,
     load_stock_selection_result,
+    load_weight_selection_result,
 )
 
 # v0.4.8 R7: 数据完整性检查 (H1.1 严守: 从 freshness_check.py 调, 不改 data_loaders)
@@ -141,6 +144,10 @@ def show_report(date: str):
     derived_results: list[dict] = []
     # v0.4.8 R7: 单因子 IC (一·)
     ic_results: list[dict] = []
+    # v0.4.8 R8: 二/五/七 section
+    backtest_results: list[dict] = []
+    composite_results: list[dict] = []
+    weight_selection: dict | None = None
     try:
         data_results = check_data_freshness(selection_date or date, logger=logger) or []
     except Exception as e:
@@ -154,6 +161,21 @@ def show_report(date: str):
     except Exception as e:
         logger.warning("load_ic_results 失败: %s", e)
         ic_results = []
+    try:
+        backtest_results = load_backtest_results(logger=logger) or []
+    except Exception as e:
+        logger.warning("load_backtest_results 失败: %s", e)
+        backtest_results = []
+    try:
+        composite_results = load_composite_results(logger=logger) or []
+    except Exception as e:
+        logger.warning("load_composite_results 失败: %s", e)
+        composite_results = []
+    try:
+        weight_selection = load_weight_selection_result(logger=logger)
+    except Exception as e:
+        logger.warning("load_weight_selection_result 失败: %s", e)
+        weight_selection = None
 
     # v0.4.8 R1: meta 派生字段 (H1.1 不改 data_loaders, 用 result.get 兼容)
     # 注意: result 是 dict, 必须用 item 访问 result["meta"] 而非 result.meta
@@ -178,6 +200,9 @@ def show_report(date: str):
         data_results=data_results,
         derived_results=derived_results,
         ic_results=ic_results,
+        backtest_results=backtest_results,
+        composite_results=composite_results,
+        weight_selection=weight_selection,
     )
 
 
