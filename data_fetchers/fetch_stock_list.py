@@ -638,8 +638,8 @@ def save_cache(
     _logger.info("  API股票: %s 只", len(new_stocks))
 
     # 构建代码集合用于快速查找
-    api_stock_codes = set(s["code"] for s in new_stocks)
-    existing_stock_codes = set(s["code"] for s in existing_stocks)
+    api_stock_codes = set(s["code"] for s in new_stocks)  # noqa: C401
+    existing_stock_codes = set(s["code"] for s in existing_stocks)  # noqa: C401
 
     # 找出新增的股票（API有但文件没有）
     added_stocks: list[dict[str, Any]] = []

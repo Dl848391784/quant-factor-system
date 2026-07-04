@@ -943,8 +943,8 @@ def merge_records(
     merged_records.sort(key=lambda x: (x.get("date", ""), x.get("asset", "")))
 
     # 提取元信息（过滤 None 值）
-    unique_dates = sorted(set(r.get("date") for r in merged_records if r.get("date")))
-    unique_assets = sorted(set(r.get("asset") for r in merged_records if r.get("asset")))
+    unique_dates = sorted(set(r.get("date") for r in merged_records if r.get("date")))  # noqa: C401
+    unique_assets = sorted(set(r.get("asset") for r in merged_records if r.get("asset")))  # noqa: C401
 
     # 数据源合并逻辑：优先使用现有缓存的 source，若新旧数据源不同则标记为 'mixed'
     final_source = source
@@ -968,7 +968,7 @@ def merge_records(
     final_failed_stocks = existing_failed_stocks.union(set(failed_stocks))
 
     # 3. 从失败列表中移除本次成功拉取的股票（有新记录的股票）
-    successful_stocks = set(r.get("asset") for r in new_records if r.get("asset"))
+    successful_stocks = set(r.get("asset") for r in new_records if r.get("asset"))  # noqa: C401
     final_failed_stocks = final_failed_stocks.difference(successful_stocks)
 
     # 转为排序后的列表（便于调试）
