@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>web_ui - stock_selection 当日结果</title>
+<style>
+body { font-family: sans-serif; max-width: 1200px; margin: 20px auto; padding: 0 20px; }
+h1 { color: #2c3e50; }
+.meta-box { background: #ecf0f1; padding: 12px 16px; border-radius: 4px; margin: 16px 0; }
+.meta-box p { margin: 4px 0; }
+table { width: 100%; border-collapse: collapse; margin: 10px 0 30px 0; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 0.9em; }
+th { background: #34495e; color: white; }
+tr:nth-child(even) { background: #f8f9fa; }
+.empty { color: #999; padding: 40px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>📊 stock_selection 当日结果</h1>
+{% if result is none %}
+  <p class="empty">未选中日期 — 请访问 <a href="/selection">/selection</a> 查看最新一日</p>
+{% else %}
+  <div class="meta-box">
+    <p><strong>日期</strong>: {{ result.meta.selection_date }}</p>
+    <p><strong>权重方法</strong>: {{ result.meta.weight_method }} · <strong>方向</strong>: {{ result.meta.factor_direction }} · <strong>Top N</strong>: {{ result.meta.top_n }}</p>
+    <p><strong>候选池</strong>: {{ result.meta.stocks_on_date }} 只 → 有效 {{ result.meta.valid_stocks }} → Stage1 {{ result.meta.stage1_pool_size }} → 最终 {{ result.top_stocks | length }} 只</p>
+    <p><strong>Composite Score</strong>: {{ result.meta.composite_score | round(4) }}</p>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th><th>代码</th><th>Composite</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for stock in result.top_stocks %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ stock.code }}</td>
+        <td>{{ stock.composite_value | round(4) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+</body>
+</html>
