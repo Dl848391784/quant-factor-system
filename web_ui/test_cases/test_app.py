@@ -277,6 +277,7 @@ def mock_r4_txt_parser():
     with (
         patch("web_ui.app.parse_obq_s8", return_value={}),
         patch("web_ui.app.parse_obq_s9", return_value=None),
+        patch("web_ui.app.parse_obq_intraday", return_value={}),  # R6
     ):
         yield
 
@@ -581,4 +582,88 @@ def test_parity_obq_txt_fields_match_webui(client, mock_obq_full_result):
     assert "逐日胜率" in body
     # 30×12 矩阵
     assert "30 分段 × 12 选股日" in body
+
+
+# ============================================================
+# v0.4.8 R6: 十·fallback 操作规则 + 历史胜率参考
+# ============================================================
+
+
+def test_intraday_fallback_renders_operation_rules(client, mock_obq_full_result):
+    """v0.4.8 R6: 操作规则 4 行渲染 (高开/低开/平开/数据异常)"""
+    fallback_mock = {
+        "operation_rules": [
+            {"scenario": "高开", "condition": "gap > +0.5%", "action": "9:25 集合竞价直接卖出", "hit_rate": "23/28 = 82.1%", "sample_n": 28},
+            {"scenario": "低开", "condition": "gap < -0.5%", "action": "等盘中反弹回本价", "hit_rate": "22/65 = 33.8%", "sample_n": 65},
+            {"scenario": "平开", "condition": "-0.5% ~ +0.5%", "action": "样本不足 4 只, 无强规律", "hit_rate": None, "sample_n": None},
+            {"scenario": "数据异常", "condition": "|gap| > 10%", "action": "复权事件", "hit_rate": None, "sample_n": None},
+        ],
+        "history_stats": [],
+        "sample_size": "122 只",
+        "confidence": "统计置信度较高",
+    }
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.parse_obq_intraday", return_value=fallback_mock),  # override autouse
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 操作规则 4 个场景
+    assert "操作规则" in body
+    assert "高开" in body
+    assert "低开" in body
+    assert "平开" in body
+    assert "数据异常" in body
+    # 条件 + 行动 + 胜率 (注: HTML 转义, < > 变 &lt; &gt;)
+    assert "gap &gt; +0.5%" in body
+    assert "23/28 = 82.1%" in body
+    assert "n=28" in body
+
+
+def test_intraday_fallback_renders_history_stats(client, mock_obq_full_result):
+    """v0.4.8 R6: 历史胜率参考 2 行渲染 (高开开盘卖/低开等反弹)"""
+    fallback_mock = {
+        "operation_rules": [],
+        "history_stats": [
+            {"scenario": "高开开盘卖", "detail": "23/28 = 82.1% 胜率, 均收 +1.75% (vs 死等尾盘 +2.89%, 增厚 -1.15pp)"},
+            {"scenario": "低开等反弹", "detail": "22/65 = 33.8% 命中回本, 等高卖均收 -1.93% (vs 开盘即卖 -1.88%, 反亏 -0.05pp)"},
+        ],
+        "sample_size": "122 只",
+        "confidence": "统计置信度较高",
+    }
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.parse_obq_intraday", return_value=fallback_mock),  # override autouse
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 历史胜率参考 + 样本量
+    assert "历史胜率参考" in body
+    assert "122 只" in body
+    assert "统计置信度较高" in body
+    # 2 行历史
+    assert "高开开盘卖" in body
+    assert "23/28 = 82.1%" in body
+    assert "均收 +1.75%" in body
+    assert "低开等反弹" in body
+    assert "22/65 = 33.8%" in body
+
+
+def test_intraday_fallback_handles_empty(client, mock_obq_full_result):
+    """v0.4.8 R6: parse_obq_intraday 返回空时不渲染操作规则段"""
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        # autouse 已 mock parse_obq_intraday = {}
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 空 fallback, 不渲染操作规则 / 历史胜率
+    assert "操作规则" not in body
+    assert "历史胜率参考" not in body
 

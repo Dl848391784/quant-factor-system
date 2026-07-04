@@ -201,3 +201,99 @@ def parse_obq_section_9_matrix(logger: logging.Logger) -> dict | None:
         best_segment,
     )
     return result
+
+
+def parse_obq_intraday_fallback(logger: logging.Logger) -> dict:
+    """v0.4.8 R6: 解析 ob_quality txt 十·fallback 段 (操作规则 + 历史胜率参考)
+
+    Returns:
+        {
+            "operation_rules": [
+                {"scenario": "高开 (gap > +0.5%)", "action": "9:25 集合竞价直接卖出 ...", "hit_rate": "23/28 = 82.1%"},
+                ...
+            ],
+            "history_stats": [
+                {"scenario": "高开开盘卖", "win_rate": "23/28 = 82.1%", "avg_ret": "+1.75%", "delta": "增厚 -1.15pp"},
+                ...
+            ],
+            "sample_size": "122 只",
+            "confidence": "统计置信度较高",
+        }
+        解析失败 → {}
+    """
+    latest = _find_latest_txt()
+    if latest is None:
+        return {}
+
+    try:
+        content = latest.read_text(encoding="utf-8")
+    except Exception as e:
+        logger.warning("读 ob_quality txt 失败: %s (%s)", latest, e)
+        return {}
+
+    result: dict = {}
+
+    # 找到十·fallback 段
+    fallback_match = re.search(
+        r"^十、S7 段日内操作建议.*?\【操作规则】(.*?)\【历史胜率参考(.*?)\Z",
+        content,
+        re.MULTILINE | re.DOTALL,
+    )
+    if not fallback_match:
+        logger.debug("ob_quality txt 十·fallback 段未找到")
+        return {}
+
+    rules_text = fallback_match.group(1)
+    history_text = fallback_match.group(2)
+
+    # 操作规则: 4 行格式 "  场景 (条件): 行动 + 历史胜率 (n=N)"
+    # 例: "  高开 (gap > +0.5%): 9:25 集合竞价直接卖出 — D+1 开盘价 > 前一日收盘价, 历史 23/28 = 82.1% 命中 (n=28)"
+    operation_rules = []
+    for line in rules_text.split("\n"):
+        line = line.strip()
+        if not line or line.startswith("【"):
+            continue
+        # 解析: "场景 (条件): 行动 ... 胜率 (n=N)"
+        # 注: txt 实际用半角 "(" 而非全角 "（", 正则同时支持
+        m = re.match(
+            r"^([^:(（(]+)[\(（]([^\)）]+)[\)）][::]\s*(.+?)(?:\s+历史\s*([\d./%\s]+?))?\s*(?:\(n\s*=\s*(\d+)\))?\s*$",
+            line,
+        )
+        if m:
+            operation_rules.append({
+                "scenario": m.group(1).strip(),
+                "condition": m.group(2).strip(),
+                "action": m.group(3).strip(),
+                "hit_rate": m.group(4).strip() if m.group(4) else None,
+                "sample_n": int(m.group(5)) if m.group(5) else None,
+            })
+    result["operation_rules"] = operation_rules
+
+    # 历史胜率: 简单行 "  场景: 胜率, 详情 ..."
+    # 例: "  高开开盘卖: 23/28 = 82.1% 胜率, 均收 +1.75% (vs 死等尾盘 +2.89%, 增厚 -1.15pp)"
+    history_stats = []
+    for line in history_text.split("\n"):
+        line = line.strip()
+        if not line or line.startswith("【") or "样本量" in line or "✅" in line:
+            continue
+        m = re.match(r"^([^:：]+)[:：]\s*(.+)$", line)
+        if m:
+            history_stats.append({
+                "scenario": m.group(1).strip(),
+                "detail": m.group(2).strip(),
+            })
+    result["history_stats"] = history_stats
+
+    # 样本量 + 置信度
+    sample_match = re.search(r"样本量\s*(\d+)\s*只", history_text)
+    if sample_match:
+        result["sample_size"] = f"{sample_match.group(1)} 只"
+    confidence_match = re.search(r"(统计置信度.+)", history_text)
+    if confidence_match:
+        result["confidence"] = confidence_match.group(1).strip()
+
+    logger.info(
+        "ob_quality txt 十·fallback 解析: %d 操作规则, %d 历史胜率",
+        len(operation_rules), len(history_stats),
+    )
+    return result

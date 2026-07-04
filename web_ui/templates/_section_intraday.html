@@ -3,6 +3,7 @@
 参数:
 - intraday_rows: load_intraday_strategy() 返回的 list[dict]
 - stock_name_map: 代码→名称
+- intraday_fallback: parse_obq_intraday_fallback() 返回的 dict (v0.4.8 R6, 从 txt 解析)
 #}
 {% if not intraday_rows %}
   <p class="empty">无日内操作建议数据 — 通常因选股日 T+1 交易日不存在 (数据未到 T+2)</p>
@@ -31,4 +32,28 @@
     {% endfor %}
     </tbody>
   </table>
+{% endif %}
+
+{# v0.4.8 R6: 操作规则 + 历史胜率参考 (从 txt 解析) #}
+{% if intraday_fallback %}
+  {% if intraday_fallback.get("operation_rules") %}
+  <h3>【操作规则】</h3>
+  <ul>
+  {% for r in intraday_fallback.operation_rules %}
+    <li>
+      <strong>{{ r.scenario }} ({{ r.condition }})</strong>: {{ r.action
+      }}{% if r.hit_rate %} (历史 {{ r.hit_rate }}{% endif %}{% if r.sample_n %}, n={{ r.sample_n }}){% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if intraday_fallback.get("history_stats") %}
+  <h3>【历史胜率参考 ({{ intraday_fallback.get("sample_size", "") }}, {{ intraday_fallback.get("confidence", "") }})】</h3>
+  <ul>
+  {% for h in intraday_fallback.history_stats %}
+    <li><strong>{{ h.scenario }}</strong>: {{ h.detail }}</li>
+  {% endfor %}
+  </ul>
+  {% endif %}
 {% endif %}
