@@ -61,7 +61,7 @@ from .stock_utils import (
     MAX_STOCK_DATE,
     MIN_STOCK_DATE,
     filter_stocks_by_date,
-    get_module_logger,
+    # get_module_logger intentionally not re-exported: same name defined in cache_manager
     get_stock_codes_only,
     get_stock_name_map,
     is_main_board_stock,
