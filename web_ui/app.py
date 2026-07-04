@@ -59,6 +59,8 @@ from web_ui.common.lr_training_status import load_status as load_lr_status  # no
 
 # v0.4.8 R4: 解析 ob_quality txt 报告 (H1.1 严守: txt 是 summary 已生成产物)
 from web_ui.common.txt_parser import (  # noqa: E402
+    parse_obq_correlation as parse_obq_corr,
+    parse_obq_filter as parse_obq_filt,
     parse_obq_intraday_fallback as parse_obq_intraday,
     parse_obq_section_8_meta as parse_obq_s8,
     parse_obq_section_9_matrix as parse_obq_s9,
@@ -138,6 +140,17 @@ def show_report(date: str):
     except Exception as e:
         logger.warning("parse_obq_intraday 失败: %s", e)
         intraday_fallback = {}
+    # v0.4.8 R9: 因子相关性 (三) + 筛选 (四)
+    txt_correlation: dict | None = None
+    txt_filter: dict | None = None
+    try:
+        txt_correlation = parse_obq_corr(logger=logger)
+    except Exception as e:
+        logger.warning("parse_obq_corr 失败: %s", e)
+    try:
+        txt_filter = parse_obq_filt(logger=logger)
+    except Exception as e:
+        logger.warning("parse_obq_filt 失败: %s", e)
 
     # v0.4.8 R7: 数据完整性检查 (零·)
     data_results: list[dict] = []
@@ -203,6 +216,10 @@ def show_report(date: str):
         backtest_results=backtest_results,
         composite_results=composite_results,
         weight_selection=weight_selection,
+        correlation=txt_correlation,
+        filter_result=txt_filter,
+        # v0.4.8 R10: 选中单因子从 txt_filter.selected_factors 拿 (六·对比 模板用)
+        selected_factors=(txt_filter or {}).get("selected_factors", []),
     )
 
 

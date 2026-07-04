@@ -56,16 +56,16 @@ tr:nth-child(even) { background: #f8f9fa; }
 {% include "_section_backtest.html" with context %}
 
 <h2 id="section-corr">三、因子相关性矩阵</h2>
-<div class="section-placeholder">v0.4.8 暂不实施 — 留待 v0.4.9+</div>
+{% include "_section_correlation.html" with context %}
 
 <h2 id="section-filter">四、因子筛选结果</h2>
-<div class="section-placeholder">v0.4.8 暂不实施 — 留待 v0.4.9+</div>
+{% include "_section_filter.html" with context %}
 
 <h2 id="section-comp">五、综合因子 4 种权重回测</h2>
 {% include "_section_composite.html" with context %}
 
 <h2 id="section-compare">六、综合因子与单因子对比</h2>
-<div class="section-placeholder">v0.4.8 暂不实施 — 留待 v0.4.9+</div>
+{% include "_section_compare.html" with context %}
 
 <h2 id="section-weights">七、权重选择结果</h2>
 {% include "_section_weights.html" with context %}

@@ -278,6 +278,8 @@ def mock_r4_txt_parser():
         patch("web_ui.app.parse_obq_s8", return_value={}),
         patch("web_ui.app.parse_obq_s9", return_value=None),
         patch("web_ui.app.parse_obq_intraday", return_value={}),  # R6
+        patch("web_ui.app.parse_obq_corr", return_value=None),  # R9
+        patch("web_ui.app.parse_obq_filt", return_value=None),  # R9
     ):
         yield
 
@@ -850,4 +852,165 @@ def test_weights_section_handles_none(client, mock_obq_full_result):
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
     assert "权重选择数据不可用" in body
+
+
+# ============================================================
+# v0.4.8 R9: 三·相关性矩阵 + 四·因子筛选
+# ============================================================
+
+
+def test_correlation_section_renders_matrix_and_abbrev(client, mock_obq_full_result):
+    """v0.4.8 R9: 三·相关性矩阵 渲染矩阵 + 缩写对照表"""
+    corr_mock = {
+        "selected_factors": ["amplitude", "interaction_amplitude__ret3d_abs"],
+        "matrix": {
+            "amplitude": {"amp": 1.00, "int": 0.80},
+            "interaction_amplitude__ret3d_abs": {"amp": 0.80, "int": 1.00},
+        },
+        "abbrev": {"amp": "amplitude", "int": "interaction_amplitude__ret3d_abs"},
+        "high_corr_pairs": [
+            {"factor1": "amplitude", "dim1": "volatility", "factor2": "interaction_amplitude__ret3d_abs", "dim2": "momentum_x_volatility", "corr": 0.80},
+        ],
+    }
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.parse_obq_corr", return_value=corr_mock),  # override autouse
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 选中因子
+    assert "amplitude" in body
+    assert "interaction_amplitude__ret3d_abs" in body
+    # 矩阵值
+    assert "1.00" in body
+    assert "0.80" in body
+    # 缩写对照表
+    assert "缩写对照表" in body
+    assert "&gt; 0.7" in body  # 高相关阈值
+    # 高相关因子对
+    assert "volatility" in body
+    assert "momentum_x_volatility" in body
+
+
+def test_correlation_section_handles_none(client, mock_obq_full_result):
+    """v0.4.8 R9: correlation 为 None 时显示降级"""
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        # autouse 已 mock parse_obq_corr = None
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    assert "因子相关性数据不可用" in body
+
+
+def test_filter_section_renders_selected_and_excluded(client, mock_obq_full_result):
+    """v0.4.8 R9: 四·因子筛选 渲染选中 + 剔除"""
+    filt_mock = {
+        "selected_factors": [
+            {"name": "amplitude", "icir": 0.65, "weight": 75.0},
+            {"name": "interaction_amplitude__ret3d_abs", "icir": 0.39, "weight": 25.0},
+        ],
+        "note": "权重来自Rolling ICIR加权最新日(60日滚动窗口)",
+        "high_corr_threshold": 0.7,
+        "excluded": [
+            {"name": "rsi", "reasons": ["long_return=-27.3%<3%", "layer_1_annual=-70.4%<=0%（只做多硬约束）"]},
+            {"name": "ma5_deviation", "reasons": ["long_return=-19.8%<3%"]},
+        ],
+    }
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.parse_obq_filt", return_value=filt_mock),  # override autouse
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 选中因子
+    assert "选中因子" in body
+    assert "amplitude" in body
+    assert "75.0%" in body
+    # 剔除因子
+    assert "剔除因子" in body
+    assert "rsi" in body
+    assert "long_return=-27.3%&lt;3%" in body  # HTML 转义
+    # 注 + 阈值
+    assert "Rolling ICIR加权" in body
+    assert "0.70" in body
+
+
+def test_filter_section_handles_none(client, mock_obq_full_result):
+    """v0.4.8 R9: filter 为 None 时显示降级"""
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        # autouse 已 mock parse_obq_filt = None
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    assert "因子筛选数据不可用" in body
+
+
+# ============================================================
+# v0.4.8 R10: 六·综合因子与单因子对比
+# ============================================================
+
+
+def test_compare_section_renders_composite_and_selected_factor(client, mock_obq_full_result):
+    """v0.4.8 R10: 六·对比 渲染综合 4 权重 + 选中单因子"""
+    comp_mock = [
+        {"weight_method": "ic_weight", "annual_return": 0.5843, "sharpe": 2.99, "max_drawdown": -0.05, "monotonicity": 0.9851, "monotonicity_quality": "✓良好"},
+        {"weight_method": "rolling_icir_weight", "annual_return": 0.5829, "sharpe": 2.98, "max_drawdown": -0.05, "monotonicity": 0.9861, "monotonicity_quality": "✓良好"},
+    ]
+    bt_mock = [
+        {"factor_name": "amplitude", "long_short_annual": 0.5178, "sharpe": 2.62, "monotonicity": -0.9785, "monotonicity_quality": "✓良好"},
+        {"factor_name": "interaction_amplitude__ret3d_abs", "long_short_annual": 0.5129, "sharpe": 2.66, "monotonicity": -0.9523, "monotonicity_quality": "✓良好"},
+        {"factor_name": "rsi", "long_short_annual": 0.15, "sharpe": 1.4, "monotonicity": 0.5, "monotonicity_quality": "△一般"},  # 未选中
+    ]
+    filt_mock = {
+        "selected_factors": [
+            {"name": "amplitude", "icir": 0.65, "weight": 75.0},
+            {"name": "interaction_amplitude__ret3d_abs", "icir": 0.39, "weight": 25.0},
+        ],
+        "excluded": [],
+    }
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_composite_results", return_value=comp_mock),  # override autouse
+        patch("web_ui.app.load_backtest_results", return_value=bt_mock),
+        patch("web_ui.app.parse_obq_filt", return_value=filt_mock),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 综合 4 权重
+    assert "综合因子四种权重方法回测数据" in body
+    assert "ic_weight" in body
+    assert "rolling_icir_weight" in body
+    assert "58.43%" in body
+    # 选中单因子 (amplitude + interaction_amplitude 都被 backtest 过滤出)
+    assert "选中单因子回测数据" in body
+    assert "amplitude" in body
+    # rsi 不在选中表 (因为不在 selected_factors)
+    # 权重 (从 selected_factors.weight 拿)
+    assert "75.0%" in body
+    assert "25.0%" in body
+
+
+def test_compare_section_handles_empty_data(client, mock_obq_full_result):
+    """v0.4.8 R10: composite + backtest 都空时显示降级"""
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        # autouse 已 mock load_composite_results = [] + load_backtest_results = []
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    assert "综合/回测数据不可用" in body
 

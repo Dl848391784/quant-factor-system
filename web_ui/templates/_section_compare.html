@@ -1,0 +1,67 @@
+{# 六·综合因子与单因子对比 (v0.4.8 R10)
+
+参数:
+- composite_results: load_composite_results() 返回的 list[dict]  (4 权重)
+- backtest_results: load_backtest_results() 返回的 list[dict]   (72 因子)
+- selected_factors: txt 第 4 节解析的 选中因子 [{name, weight, icir}, ...]
+#}
+{% if not composite_results and not backtest_results %}
+  <p class="empty">综合/回测数据不可用 — 请确认 summary 流水线已成功运行</p>
+{% else %}
+  <p class="muted">v0.4.8 R10: 复用 data_loaders.load_composite_results + load_backtest_results
+  (H1.1 严守, 只读); 选中因子从 txt 第 4 节解析</p>
+
+  {# 1. 综合因子四种权重方法回测 #}
+  {% if composite_results %}
+  <h3>综合因子四种权重方法回测数据</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>权重方法</th><th>多空年化收益</th><th>夏普比率</th>
+        <th>单调性系数</th><th>单调性质量</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in composite_results %}
+      <tr>
+        <td><code>{{ r.weight_method }}</code></td>
+        <td>{{ "%+.2f%%" | format(r.annual_return * 100) if r.annual_return is not none else "—" }}</td>
+        <td>{{ "%+.2f" | format(r.sharpe) if r.sharpe is not none else "—" }}</td>
+        <td>{{ "%+.4f" | format(r.monotonicity) if r.monotonicity is not none else "—" }}</td>
+        <td>{{ r.monotonicity_quality if r.monotonicity_quality else "—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {# 2. 选中单因子回测数据 (从 backtest_results 过滤 selected_factors.name) #}
+  {% if selected_factors and backtest_results %}
+  {% set selected_names = selected_factors | map(attribute='name') | list %}
+  {% set selected_bt = backtest_results | selectattr('factor_name', 'in', selected_names) | list %}
+  {% if selected_bt %}
+  <h3>选中单因子回测数据</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>因子名</th><th>多空年化收益</th><th>夏普比率</th>
+        <th>单调性系数</th><th>单调性质量</th><th>权重</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in selected_bt %}
+      {% set sel = selected_factors | selectattr('name', 'equalto', r.factor_name) | first %}
+      <tr>
+        <td><code>{{ r.factor_name }}</code></td>
+        <td>{{ "%+.2f%%" | format(r.long_short_annual * 100) if r.long_short_annual is not none else "—" }}</td>
+        <td>{{ "%+.2f" | format(r.sharpe) if r.sharpe is not none else "—" }}</td>
+        <td>{{ "%+.4f" | format(r.monotonicity) if r.monotonicity is not none else "—" }}</td>
+        <td>{{ r.monotonicity_quality if r.monotonicity_quality else "—" }}</td>
+        <td>{{ "%.1f%%" | format(sel.weight) if sel and sel.weight is not none else "—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% endif %}
+{% endif %}
