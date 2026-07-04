@@ -21,7 +21,60 @@
       <strong>候选池共</strong>: {{ pool_size }} 只
       · <strong>切 30 段</strong>
     </p>
-    <p class="muted">v0.4.8 R13: stage1/stage3 表格已删除, 仅保留 meta 信息</p>
+    <p class="muted">v0.4.8 R3: 合并 stage1_top (30) + stage1_bottom (30) + stage3_top (57) 全量展示</p>
   </div>
 
+  {# Stage 1 Top: 候选池头部 #}
+  {% if result.stage1_top %}
+  <h3>Stage 1 Top {{ result.stage1_top | length }}: 候选池头部 (composite 降序)</h3>
+  <table>
+    <thead><tr><th>排名</th><th>代码</th><th>名称</th><th>Composite</th></tr></thead>
+    <tbody>
+    {% for stock in result.stage1_top %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ stock.code }}</td>
+        <td>{{ stock_name_map.get(stock.code, "—") }}</td>
+        <td>{{ "%.3f" | format(stock.composite_value) if stock.composite_value is not none else "—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {# Stage 3: LR 短名单 #}
+  {% if result.top_stocks %}
+  <h3>Stage 3 Top {{ result.top_stocks | length }}: LR 短名单 (proba_up 降序)</h3>
+  <table>
+    <thead><tr><th>排名</th><th>代码</th><th>名称</th><th>Composite</th></tr></thead>
+    <tbody>
+    {% for stock in result.top_stocks %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ stock.code }}</td>
+        <td>{{ stock_name_map.get(stock.code, "—") }}</td>
+        <td>{{ "%.3f" | format(stock.composite_value) if stock.composite_value is not none else "—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {# Stage 1 Bottom: 弱势股端 (v3.8: stage=4) #}
+  {% if result.stage1_bottom %}
+  <h3>Stage 1 Bottom {{ result.stage1_bottom | length }}: 候选池尾部 (composite 升序)</h3>
+  <table>
+    <thead><tr><th>排名</th><th>代码</th><th>名称</th><th>Composite</th></tr></thead>
+    <tbody>
+    {% for stock in result.stage1_bottom %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ stock.code }}</td>
+        <td>{{ stock_name_map.get(stock.code, "—") }}</td>
+        <td>{{ "%.3f" | format(stock.composite_value) if stock.composite_value is not none else "—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
 {% endif %}

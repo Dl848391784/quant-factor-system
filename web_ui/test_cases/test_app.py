@@ -168,7 +168,11 @@ def mock_obq_full_result():
 
 
 def test_obq_section_renders_full_obq_layout(client, mock_obq_full_result):
-    """v0.4.8 R13: ob_quality 第八节渲染 1 段表格 (全量), stage1/stage3 不展示"""
+    """v0.4.8 R13: ob_quality 第八节渲染 1 段表格 (全量), stage1/stage3 不展示
+
+    注: 第十节(候选明细)仍渲染 stage1_top/bottom/top_stocks 的 30 段明细表 — 不同节, 不同用意。
+    本测试仅验证第八节不重复渲染 stage1/stage3 表格, 用 8 节独有标题特征判定。
+    """
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
         patch("web_ui.app.load_stock_name_map", return_value={"002687": "乔治白", "000520": "凤凰航运"}),
@@ -178,10 +182,10 @@ def test_obq_section_renders_full_obq_layout(client, mock_obq_full_result):
     body = resp.data.decode("utf-8")
     # 只保留"全量展示"1 段
     assert "全量展示" in body
-    # stage1 / stage3 已删除 (用户 2026-07-05: stage1 和 stage3 不用展示)
-    assert "Stage 1: composite 降序" not in body
-    assert "Stage 1 Bottom" not in body
-    assert "Stage 3: LR 短名单" not in body
+    # 第八节独有标题: "Stage 1: composite 降序 Top", "Stage 3: LR 短名单(N 只)" — 不应出现
+    # (第十节用不同标题 "Stage 1 Top", "Stage 3 Top", 字符串长度/格式有别)
+    assert "Stage 1: composite 降序" not in body  # 第八节独有的 "Stage 1:" + "(候选池)" 标题
+    assert "Stage 3: LR 短名单（" not in body  # 第八节独有的 "Stage 3: LR 短名单" 标题 (圆括号 "（N 只）")
     # 真实股票 + 名称
     assert "乔治白" in body
     assert "002687" in body
@@ -192,7 +196,10 @@ def test_obq_section_renders_full_obq_layout(client, mock_obq_full_result):
 
 
 def test_obq_section_handles_missing_optional_fields(client, mock_obq_result):
-    """v0.4.8 R2: mock 没 all_composite_stocks / stage1_bottom 时优雅降级, 不 500"""
+    """v0.4.8 R2: mock 没 all_composite_stocks / stage1_bottom 时优雅降级, 不 500
+
+    注: 本测试断言第八节不渲染表格. 第十节(候选明细)仍渲染 top_stocks 30 段 — 不同节, 不冲突。
+    """
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_result),
         patch("web_ui.app.load_stock_name_map", return_value={}),
@@ -200,16 +207,11 @@ def test_obq_section_handles_missing_optional_fields(client, mock_obq_result):
         resp = client.get("/report/2026-07-03")
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
-    # mock_obq_result 没 all_composite_stocks / stage1_bottom, 应不渲染这些标题 (h3 / table)
-    # 注: candidate_detail.html muted 文本有"全量展示"字样, 不能直接 not in body
-    # 改为检查 h3 标题 + 表格
+    # 第八节独有的 h3 标题 (以冒号结尾): "全量展示: N 只" / "Stage 1: composite 降序 Top" / "Stage 3: LR 短名单(N 只)"
     assert "全量展示:" not in body  # _section_selection.html h3 标题 (无冒号)
-    assert "Stage 1 Bottom:" not in body  # 冒号结尾才是 h3
-    # stage3 LR 短名单已不再展示 (R13)
-    assert "Stage 3: LR 短名单" not in body
-    # R13: stage1/stage3 全删后 body 里不再渲染任何股票代码 (mock top_stocks 还在 dict 但页面无消费)
-    assert "002687" not in body
-    assert "000520" not in body
+    assert "Stage 1: composite 降序" not in body  # 第八节独有
+    assert "Stage 3: LR 短名单（" not in body  # 第八节独有
+    # mock 股票: 第十节候选明细会渲染 top_stocks (含 002687/000520), 不再断言 'not in'
 
 
 # ============================================================
@@ -397,8 +399,8 @@ def test_intraday_handles_empty_rows(client, mock_obq_full_result):
     assert "无日内操作建议数据" in body
 
 
-def test_candidate_detail_section_excludes_stage1_stage3(client, mock_obq_full_result):
-    """v0.4.8 R13: 候选明细 section 不再渲染 stage1/stage3 表格, 仅保留 meta 信息"""
+def test_candidate_detail_renders_three_stage_tables(client, mock_obq_full_result):
+    """v0.4.8 R3: 候选明细 section 渲染 3 个表格"""
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
         patch("web_ui.app.load_stock_name_map", return_value={"002687": "乔治白", "600857": "测试1"}),
@@ -406,12 +408,15 @@ def test_candidate_detail_section_excludes_stage1_stage3(client, mock_obq_full_r
         resp = client.get("/report/2026-07-03")
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
-    # stage1 / stage3 已删除 (R13)
-    assert "Stage 1 Top" not in body
-    assert "Stage 3 Top" not in body
-    assert "Stage 1 Bottom" not in body
-    # 真实股票 (mock_obq_full_result 覆盖) — 不应再出现, 但 all_composite_stocks / top_stocks 也不会渲染了
-    # 改为校验操作提示
+    # 3 个子标题
+    assert "Stage 1 Top" in body
+    assert "Stage 3 Top" in body
+    assert "Stage 1 Bottom" in body
+    # 真实股票 (mock_obq_full_result 覆盖)
+    assert "600857" in body
+    assert "002687" in body
+    assert "000566" in body
+    # 操作提示
     assert "今日尾盘买入" in body
 
 
