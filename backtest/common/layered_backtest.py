@@ -506,10 +506,10 @@ class LayeredBacktestEngine:
 
         for layer_id in all_layers:
             # 当前层股票
-            curr_stocks = {s for s, l in curr_assignment.items() if l == layer_id}
+            curr_stocks = {s for s, layer in curr_assignment.items() if layer == layer_id}
 
             # 前一期该层股票
-            prev_stocks = {s for s, l in prev_assignment.items() if l == layer_id}
+            prev_stocks = {s for s, layer in prev_assignment.items() if layer == layer_id}
 
             # 新入股票
             new_stocks = curr_stocks - prev_stocks
