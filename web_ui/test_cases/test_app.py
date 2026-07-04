@@ -107,10 +107,9 @@ def test_report_renders_obq_page(client, mock_obq_result):
     assert "v0.4.8" in body
     # R1 不渲染 top_stocks (R2 才实施) - 仅 meta-box 显示 selection_date
     assert "2026-07-03" in body
-    # R2 已实施, 不应再有 R2 占位
+    # R2 + R2a + R3 已实施, 不应再有 R2/R2a/R3 占位
     assert "v0.4.8 R2 待实施" not in body
-    # R3 占位仍存在
-    assert "v0.4.8 R3 待实施" in body
+    assert "v0.4.8 R3 待实施" not in body
 
 
 def test_report_invalid_date_returns_400(client):
@@ -200,9 +199,11 @@ def test_obq_section_handles_missing_optional_fields(client, mock_obq_result):
         resp = client.get("/report/2026-07-03")
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
-    # mock_obq_result 没 all_composite_stocks / stage1_bottom, 应不渲染这些标题
-    assert "全量展示" not in body
-    assert "Stage 1 Bottom" not in body
+    # mock_obq_result 没 all_composite_stocks / stage1_bottom, 应不渲染这些标题 (h3 / table)
+    # 注: candidate_detail.html muted 文本有"全量展示"字样, 不能直接 not in body
+    # 改为检查 h3 标题 + 表格
+    assert "全量展示:" not in body  # _section_selection.html h3 标题 (无冒号)
+    assert "Stage 1 Bottom:" not in body  # 冒号结尾才是 h3
     # 至少 Stage 3 表格有渲染
     assert "Stage 3: LR 短名单" in body
     # mock 股票: top_stocks 有 3 个, 但 stage1_top/stage1_bottom/all_composite_stocks 都是 []
@@ -249,4 +250,119 @@ def test_lr_status_handles_load_exception(client, mock_obq_result):
     assert resp.status_code == 200
     # 异常降级为 [], 不渲染表格
     assert "LR 训练数据状态" not in resp.data.decode("utf-8")
+
+
+# ============================================================
+# v0.4.8 R3: 9·30 分段胜率 + 候选明细 + 日内操作
+# ============================================================
+
+
+@pytest.fixture(autouse=True)
+def mock_r3_loaders():
+    """v0.4.8 R3: 全局 mock load_intraday_strategy + load_decile_stats
+    避免真函数依赖 T+1 数据, 单测 focus 路由 + 模板
+    """
+    with (
+        patch("web_ui.app.load_intraday_strategy", return_value=[]),
+        patch("web_ui.app.load_decile_stats", return_value=None),
+    ):
+        yield
+
+
+def test_segment_win_renders_top5(client, mock_obq_full_result):
+    """v0.4.8 R3: 9·30 分段胜率渲染 (30 段 → Top 5 展示)"""
+    decile_mock = {
+        "selection_date": "2026-07-02",
+        "trade_date": "2026-07-03",
+        "n_total": 88,
+        "segments": [
+            {"label": f"D{i}", "n": 3, "win_rate": 60.0 + i, "avg_ret": 0.5,
+             "pl_ratio": 1.2, "wins": 2, "losses": 1}
+            for i in range(1, 31)
+        ],
+    }
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_decile_stats", return_value=decile_mock),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 30 段 schema 渲染
+    assert "88" in body  # n_total
+    assert "30 段" in body
+    assert "★ BEST" in body
+    assert "全部 30 段胜率一览" in body
+
+
+def test_segment_win_handles_no_data(client, mock_obq_full_result):
+    """v0.4.8 R3: decile_stats 为空时降级提示"""
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_decile_stats", return_value=None),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    assert "无 30 分段胜率数据" in body
+
+
+def test_intraday_renders_rows(client, mock_obq_full_result):
+    """v0.4.8 R3: 日内操作建议渲染 (9 列表格)"""
+    intraday_mock = [
+        {
+            "asset": "002628", "prev_close": 5.41, "open": 5.45, "real_gap_pct": 0.74,
+            "open_signal": "高开", "recommended_action": "开盘卖 (09:25 集合竞价)",
+            "expected_return_pct": 0.74, "stop_loss_price": None,
+        },
+    ]
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={"002628": "成都路桥"}),
+        patch("web_ui.app.load_intraday_strategy", return_value=intraday_mock),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    assert "002628" in body
+    assert "成都路桥" in body
+    assert "高开" in body
+    assert "开盘卖" in body
+    assert "5.41" in body
+
+
+def test_intraday_handles_empty_rows(client, mock_obq_full_result):
+    """v0.4.8 R3: intraday_rows 为空时降级提示 (T+1 不存在)"""
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_intraday_strategy", return_value=[]),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    assert "无日内操作建议数据" in body
+
+
+def test_candidate_detail_renders_three_stage_tables(client, mock_obq_full_result):
+    """v0.4.8 R3: 候选明细 section 渲染 3 个表格"""
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={"002687": "乔治白", "600857": "测试1"}),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 3 个子标题
+    assert "Stage 1 Top" in body
+    assert "Stage 3 Top" in body
+    assert "Stage 1 Bottom" in body
+    # 真实股票 (mock_obq_full_result 覆盖)
+    assert "600857" in body
+    assert "002687" in body
+    assert "000566" in body
+    # 操作提示
+    assert "今日尾盘买入" in body
 

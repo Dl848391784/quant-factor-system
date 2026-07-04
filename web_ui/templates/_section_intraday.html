@@ -1,0 +1,34 @@
+{# 10·S7/S9 段日内操作建议 (v0.4.8 R3)
+
+参数:
+- intraday_rows: load_intraday_strategy() 返回的 list[dict]
+- stock_name_map: 代码→名称
+#}
+{% if not intraday_rows %}
+  <p class="empty">无日内操作建议数据 — 通常因选股日 T+1 交易日不存在 (数据未到 T+2)</p>
+{% else %}
+  <p class="muted">v0.4.8 R3: ob_quality S7/S9 段日内操作建议 (T→T+1 实战指引)。开盘观察 gap, 触发 open_signal 即按 recommended_action 操作。</p>
+  <table>
+    <thead>
+      <tr>
+        <th>代码</th><th>名称</th><th>前收</th><th>开盘</th><th>Gap%</th>
+        <th>Open Signal</th><th>操作建议</th><th>期望收益%</th><th>止损价</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in intraday_rows %}
+      <tr>
+        <td>{{ row.asset }}</td>
+        <td>{{ stock_name_map.get(row.asset, "—") }}</td>
+        <td>{{ "%.2f" | format(row.prev_close) if row.prev_close is not none else "—" }}</td>
+        <td>{{ "%.2f" | format(row.open) if row.open is not none else "—" }}</td>
+        <td>{{ "%.2f" | format(row.real_gap_pct) if row.real_gap_pct is not none else "—" }}</td>
+        <td>{{ row.open_signal if row.open_signal is defined else "—" }}</td>
+        <td>{{ row.recommended_action if row.recommended_action is defined else "—" }}</td>
+        <td>{{ "%.2f" | format(row.expected_return_pct) if row.expected_return_pct is not none else "—" }}</td>
+        <td>{{ "%.2f" | format(row.stop_loss_price) if row.stop_loss_price is not none else "—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endif %}

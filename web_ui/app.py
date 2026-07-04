@@ -37,8 +37,9 @@ from flask import Flask, abort, redirect, render_template  # noqa: E402
 
 # 复用 summary 数据加载器（web_ui 不直接读 Parquet）
 # v0.4.8: H1.1 严守, 只调 data_loaders 已有接口, 不修改 data_loaders
-# 注: load_intraday_strategy / load_decile_stats 在 R3 引入, R1 仅基础数据
 from summary.report.data_loaders import (  # noqa: E402
+    load_decile_stats,
+    load_intraday_strategy,
     load_stock_name_map,
     load_stock_selection_result,
 )
@@ -79,6 +80,29 @@ def show_report(date: str):
         logger.warning("load_lr_status 失败: %s", e)
         lr_status = []
 
+    # v0.4.8 R3: ob_quality 专属 — 30 分段胜率 + 日内操作建议
+    # 注意: load_intraday_strategy pipeline 参数固定 'ob_quality', 已在 data_loaders 内部校验
+    intraday_rows: list[dict] = []
+    decile_stats: dict | None = None
+    selection_date = result.get("meta", {}).get("selection_date") if result else None
+    weight_method = (
+        result.get("meta", {}).get("weight_method", "rolling_icir_weight")
+        if result else "rolling_icir_weight"
+    )
+    if selection_date:
+        try:
+            intraday_rows = load_intraday_strategy(
+                "ob_quality", weight_method, selection_date, logger=logger
+            ) or []
+        except Exception as e:
+            logger.warning("load_intraday_strategy 失败: %s", e)
+            intraday_rows = []
+        try:
+            decile_stats = load_decile_stats(weight_method, selection_date, logger=logger)
+        except Exception as e:
+            logger.warning("load_decile_stats 失败: %s", e)
+            decile_stats = None
+
     # v0.4.8 R1: meta 派生字段 (H1.1 不改 data_loaders, 用 result.get 兼容)
     # 注意: result 是 dict, 必须用 item 访问 result["meta"] 而非 result.meta
     expected_data_date = (
@@ -94,6 +118,8 @@ def show_report(date: str):
         result=result,
         stock_name_map=stock_name_map,
         lr_status=lr_status,
+        decile_stats=decile_stats,
+        intraday_rows=intraday_rows,
     )
 
 

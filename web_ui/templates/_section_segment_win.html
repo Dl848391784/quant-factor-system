@@ -1,0 +1,65 @@
+{# 9·30 分段胜率 (v0.4.8 R3)
+
+参数:
+- decile_stats: load_decile_stats() 返回的 dict, 含 segments: [{label, n, win_rate, avg_ret, pl_ratio, wins, losses}]
+#}
+{% if not decile_stats or not decile_stats.get("segments") %}
+  <p class="empty">无 30 分段胜率数据 — 通常因选股日 T+1 交易日不存在 (master 数据未到 T+2)</p>
+{% else %}
+  {% set segs = decile_stats["segments"] %}
+  {% set n_segs = segs | length %}
+  {% set ranked = segs | sort(attribute='win_rate', reverse=true) %}
+  {% set best = ranked[0] if ranked else {} %}
+  {% set show_all = n_segs <= 10 %}
+  {% set display_segs = ranked if show_all else ranked[:5] %}
+
+  <div class="meta-box">
+    <p>
+      <strong>选股日</strong>: {{ decile_stats["selection_date"] }}
+      · <strong>交易验证日</strong>: {{ decile_stats["trade_date"] }}
+      · <strong>共 {{ decile_stats["n_total"] }} 只</strong>
+      · <strong>分段数</strong>: {{ n_segs }}
+    </p>
+    {% if not show_all %}
+      <p class="muted">v0.4.8 R3: 共 {{ n_segs }} 段, 按胜率降序展示 Top 5</p>
+    {% endif %}
+  </div>
+
+  <h3>胜率排名 (Top {{ display_segs | length }})</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>段</th><th>N</th><th>胜率</th><th>均收%</th><th>盈亏比</th><th>涨:跌</th><th>Best</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for seg in display_segs %}
+      <tr {% if seg.label == best.label %}style="background:#fff3cd"{% endif %}>
+        <td>{{ seg.label }}</td>
+        <td>{{ seg.n }}</td>
+        <td>{{ "%.1f" | format(seg.win_rate) }}%</td>
+        <td>{{ "%+.2f" | format(seg.avg_ret) }}%</td>
+        <td>{{ "%.2f" | format(seg.pl_ratio) }}</td>
+        <td>{{ seg.wins }}:{{ seg.losses }}</td>
+        <td>{% if seg.label == best.label %}★ BEST ({{ "%.1f" | format(best.win_rate) }}%){% else %}—{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% if not show_all %}
+  <h3>全部 {{ n_segs }} 段胜率一览 (按段号顺序)</h3>
+  <table>
+    <thead><tr>
+      {% for seg in ranked | sort(attribute='label') %}
+        <th>{{ seg.label }}</th>
+      {% endfor %}
+    </tr></thead>
+    <tbody><tr>
+      {% for seg in ranked | sort(attribute='label') %}
+        <td>{{ "%.0f" | format(seg.win_rate) }}%</td>
+      {% endfor %}
+    </tr></tbody>
+  </table>
+  {% endif %}
+{% endif %}
