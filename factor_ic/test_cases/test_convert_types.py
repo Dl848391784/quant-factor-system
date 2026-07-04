@@ -29,34 +29,34 @@ class TestConvertToNativeTypes:
         """numpy integer 类型转换为 Python int"""
         assert convert_to_native_types(np.int64(10)) == 10
         assert convert_to_native_types(np.int32(5)) == 5
-        assert type(convert_to_native_types(np.int64(10))) == int
+        assert type(convert_to_native_types(np.int64(10))) == int  # noqa: E721
 
     def test_numpy_float_conversion(self):
         """numpy float 类型转换为 Python float"""
         assert convert_to_native_types(np.float64(1.5)) == 1.5
         assert convert_to_native_types(np.float32(2.5)) == 2.5
-        assert type(convert_to_native_types(np.float64(1.5))) == float
+        assert type(convert_to_native_types(np.float64(1.5))) == float  # noqa: E721
 
     def test_numpy_array_conversion(self):
         """numpy array 转换为 Python list"""
         arr = np.array([1, 2, 3])
         result = convert_to_native_types(arr)
         assert result == [1, 2, 3]
-        assert type(result) == list
+        assert type(result) == list  # noqa: E721
 
     def test_pandas_series_conversion(self):
         """pandas Series 转换为 Python list"""
         series = pd.Series([1.5, 2.5, 3.5])
         result = convert_to_native_types(series)
         assert result == [1.5, 2.5, 3.5]
-        assert type(result) == list
+        assert type(result) == list  # noqa: E721
 
     def test_pandas_timestamp_conversion(self):
         """pandas Timestamp 转换为字符串"""
         ts = pd.Timestamp("2026-05-19")
         result = convert_to_native_types(ts)
         assert result == "2026-05-19 00:00:00" or result == "2026-05-19"
-        assert type(result) == str
+        assert type(result) == str  # noqa: E721
 
     def test_dict_conversion(self):
         """字典递归转换"""
@@ -65,7 +65,7 @@ class TestConvertToNativeTypes:
         assert result["int"] == 10
         assert result["float"] == 1.5
         assert result["nested"]["value"] == 2.5
-        assert type(result["int"]) == int
+        assert type(result["int"]) == int  # noqa: E721
 
     def test_list_conversion(self):
         """列表递归转换"""
@@ -74,7 +74,7 @@ class TestConvertToNativeTypes:
         assert result[0] == 10
         assert result[1] == 1.5
         assert result[2] == [1, 2, 3]
-        assert type(result[0]) == int
+        assert type(result[0]) == int  # noqa: E721
 
     # =========================================================================
     # NaN 处理测试（核心验证）
@@ -236,7 +236,7 @@ class TestConvertToNativeTypes:
         # 验证键被转换（检查键的类型）
         keys = list(result.keys())
         assert len(keys) == 1
-        assert type(keys[0]) == int  # 键类型应为 int，而非 np.int64
+        assert type(keys[0]) == int  # 键类型应为 int，而非 np.int64  # noqa: E721
         assert keys[0] == 10
 
         # numpy float 作为键
@@ -244,7 +244,7 @@ class TestConvertToNativeTypes:
         result = convert_to_native_types(data)
         keys = list(result.keys())
         assert len(keys) == 1
-        assert type(keys[0]) == float  # 键类型应为 float
+        assert type(keys[0]) == float  # 键类型应为 float  # noqa: E721
         assert keys[0] == 1.5
 
     def test_singleton_check_order(self):
