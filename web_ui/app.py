@@ -37,6 +37,9 @@ from flask import Flask, abort, redirect, render_template  # noqa: E402
 
 # 复用 summary 数据加载器（web_ui 不直接读 Parquet）
 # v0.4.8: H1.1 严守, 只调 data_loaders 已有接口, 不修改 data_loaders
+# 注: load_stock_selection_result 不支持 date 参数 (R12 已知 issue)
+#   v0.4.8 R12 用 web_ui.common.stock_selection.load_stock_selection_for_date
+#   但此 view 同时保留旧调用作为 fallback (txt_parser 仍需 latest_date 数据)
 from summary.report.data_loaders import (  # noqa: E402
     load_backtest_results,
     load_composite_results,
@@ -56,6 +59,9 @@ from summary.report.freshness_check import (  # noqa: E402
 
 # v0.4.8 R2a: web_ui 内部实现的辅助模块 (H1.1 严守: 不修改 data_loaders)
 from web_ui.common.lr_training_status import load_status as load_lr_status  # noqa: E402
+
+# v0.4.8 R12: 接受 date 参数的 stock_selection_result (H1.1 严守: 不修改 data_loaders)
+from web_ui.common.stock_selection import load_stock_selection_for_date  # noqa: E402
 
 # v0.4.8 R4: 解析 ob_quality txt 报告 (H1.1 严守: txt 是 summary 已生成产物)
 from web_ui.common.txt_parser import (  # noqa: E402
@@ -89,7 +95,15 @@ def show_report(date: str):
     if len(date) != 10 or date[4] != "-" or date[7] != "-":
         abort(400, description=f"日期格式必须为 YYYY-MM-DD，收到: {date}")
 
-    result = load_stock_selection_result(logger=logger)
+    # v0.4.8 R12: 优先用 date-aware load_stock_selection_for_date(date)
+    # 失败 / 不存在 时 fallback 到 data_loaders.load_stock_selection_result (取 max)
+    try:
+        result = load_stock_selection_for_date(date, logger=logger)
+    except Exception as e:
+        logger.warning("load_stock_selection_for_date(%s) 失败: %s, fallback to data_loaders", date, e)
+        result = None
+    if result is None:
+        result = load_stock_selection_result(logger=logger)
     stock_name_map = load_stock_name_map(logger=logger) or {}
 
     # v0.4.8 R2a: LR 训练数据状态 (web_ui 内部实现, H1.1 严守)

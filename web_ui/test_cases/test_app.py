@@ -298,6 +298,15 @@ def mock_r7_freshness_ic():
 
 
 @pytest.fixture(autouse=True)
+def mock_r12_stock_selection_for_date():
+    """v0.4.8 R12: 全局 mock load_stock_selection_for_date
+    避免真函数读 Parquet 慢加载, 单测 focus 模板
+    """
+    with patch("web_ui.app.load_stock_selection_for_date", return_value=None):  # 返 None 触发 fallback
+        yield
+
+
+@pytest.fixture(autouse=True)
 def mock_r8_loaders():
     """v0.4.8 R8: 全局 mock load_backtest_results / load_composite_results / load_weight_selection_result
     避免真函数依赖 Parquet IO, 单测 focus 模板
@@ -1017,4 +1026,62 @@ def test_compare_section_handles_empty_data(client, mock_obq_full_result):
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
     assert "综合/回测数据不可用" in body
+
+
+# ============================================================
+# v0.4.8 R12: load_stock_selection_for_date 接受 date 参数 (修 v0.4.7 known issue)
+# ============================================================
+
+
+def test_r12_uses_date_aware_loader(client):
+    """v0.4.8 R12: view 优先调 load_stock_selection_for_date(date), 不用 data_loaders 固定取 max"""
+    date_aware_result = {
+        "meta": {"selection_date": "2026-07-02", "weight_method": "rolling_icir_weight", "factor_direction": "positive", "top_n": 30, "composite_score": 0.7143, "stocks_on_date": 200, "valid_stocks": 90, "stage1_pool_size": 200, "min_amplitude": 0.01, "excluded_by_amplitude": 0, "excluded_by_coverage": 0},
+        "top_stocks": [{"code": "603078", "composite_value": 0.95, "rank": 1}],
+        "stage1_top": [{"code": "603078", "composite_value": 0.95, "rank": 1}],
+        "stage1_bottom": [],
+        "all_composite_stocks": [],
+    }
+    with (
+        patch("web_ui.app.load_stock_selection_for_date", return_value=date_aware_result),  # override autouse
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+    ):
+        resp = client.get("/report/2026-07-02")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 选股日期 应是 2026-07-02 (用 date_aware_result)
+    assert "2026-07-02" in body
+    # composite_score 0.7143 (date-aware 数据, 不是 fallback 0.5714)
+    assert "0.7143" in body
+
+
+def test_r12_falls_back_to_data_loaders_on_none(client, mock_obq_full_result):
+    """v0.4.8 R12: load_stock_selection_for_date 返 None 时 fallback 到 data_loaders"""
+    # autouse 已 mock load_stock_selection_for_date = None (触发 fallback)
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),  # fallback
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+    ):
+        resp = client.get("/report/2026-07-02")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # fallback 成功 → 0.5714 (mock_obq_full_result 的 composite_score)
+    assert "0.5714" in body
+
+
+def test_r12_handles_missing_date_partition(client):
+    """v0.4.8 R12: URL date 不在 partition 列表时 fallback 到 data_loaders"""
+    # date 2026-06-01 不存在 → load_stock_selection_for_date 应返 None
+    with (
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_stock_selection_result", return_value={
+            "meta": {"selection_date": "2026-07-03", "weight_method": "x", "factor_direction": "p", "top_n": 30, "composite_score": 0.5, "stocks_on_date": 1, "valid_stocks": 1, "stage1_pool_size": 1},
+            "top_stocks": [], "stage1_top": [], "stage1_bottom": [], "all_composite_stocks": [],
+        }),
+    ):
+        resp = client.get("/report/2026-06-01")  # 不存在的日期
+    assert resp.status_code == 200  # 不 500
+    body = resp.data.decode("utf-8")
+    # fallback 显示 mock 数据 (composite_score 0.5)
+    assert "0.5000" in body
 
