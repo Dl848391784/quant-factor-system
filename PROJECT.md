@@ -298,6 +298,7 @@ factor_ic_analyzer/
 ├── data_fetchers/          # 数据获取模块
 ├── summary/                # 数据汇总模块
 ├── reverse_discovery/      # 逆向因子发现模块（experimental，2026-06-18 新增）
+├── web_ui/                 # 前端展示模块（experimental，2026-07-04 新增）—— 复用 summary/report/data_loaders.py
 ├── scripts/                # 自动化检查脚本
 ├── tests/integration/      # 跨模块集成测试
 ├── designs/                # design.md 存放目录
@@ -317,6 +318,18 @@ factor_ic_analyzer/
 - `test_cases/` —— 单元测试
 - `schemas/` —— JSON Schema 校验文件
 - 产物输出到 `result/`（见 H2）
+
+**⚠️ 前端模块豁免条款**（适用于 `web_ui/`，2026-07-04 起）：
+- **定位**：web_ui 是 summary 的"前端分支"——复用 `summary/report/data_loaders.py` 读取数据，用 Jinja2 模板渲染 HTML，与 summary 的 txt 输出共用数据契约
+- 无 `schemas/` —— 前端无 JSON Schema 校验概念
+- 无 `result/` —— 前端不直接产生 Python 业务产物（产物由 Python 业务模块生成后由前端消费）
+- H1（common/ 复用）**不适用** —— web_ui 不定义自己的 common/
+- H2（输出位置）**不适用** —— 前端不写业务 result/
+- H3（临时文件）**适用** —— 前端调试仍走 `temporary/`
+- H7（路径导入）**部分适用** —— 内部 Python 模块用 `from paths import`，**不**直接拼路径
+- H11（日志格式）**部分适用** —— Python 端遵守 % 惰性格式化（与 summary 一致）
+- **适用**：H8（Design-First）/ H9（任务粒度 ≤3 文件 ≤200 行）/ H10（测试覆盖率）/ H12（退出码语义）/ H13（死代码禁止）
+- 数据契约铁律：**禁止 web_ui 直接读 Parquet/JSON**——必须经 `summary/report/data_loaders.py` 加载；summary 改 schema 时 web_ui 自动同步
 
 **⚠️ paths.py 导入路径待确认**：
 - 当前 H7 要求 `from paths import`，但 `paths.py` 位于 `factor_ic_analyzer/paths.py`，且 `pyproject.toml` 包名为 `factor_ic_analyzer`。
