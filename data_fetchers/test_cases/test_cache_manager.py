@@ -164,13 +164,13 @@ class TestCacheExists:
         test_path = temp_dir / "test.json.gz"
         write_cache(test_path, {"data": "test"}, logger=test_logger)
 
-        assert cache_exists(test_path) == True
+        assert cache_exists(test_path)
 
     def test_cache_exists_false(self, temp_dir):
         """文件不存在时返回 False"""
         test_path = temp_dir / "not_exist.json.gz"
 
-        assert cache_exists(test_path) == False
+        assert not cache_exists(test_path)
 
 
 class TestDeleteCache:
@@ -182,7 +182,7 @@ class TestDeleteCache:
         write_cache(test_path, {"data": "test"}, logger=test_logger)
 
         result = delete_cache(test_path, logger=test_logger)
-        assert result == True
+        assert result
         assert not test_path.exists()
 
     def test_delete_non_existing_file(self, temp_dir, test_logger):
@@ -190,7 +190,7 @@ class TestDeleteCache:
         test_path = temp_dir / "not_exist.json.gz"
 
         result = delete_cache(test_path, logger=test_logger)
-        assert result == False
+        assert not result
 
 
 class TestAppendToCache:
@@ -232,7 +232,7 @@ class TestGetCacheFileInfo:
 
         info = get_cache_file_info(test_path, logger=test_logger)
 
-        assert info["exists"] == True
+        assert info["exists"]
         assert info["size_mb"] > 0
         assert info["modified_time"] is not None
         assert info["error"] is None  # 无错误
@@ -243,7 +243,7 @@ class TestGetCacheFileInfo:
 
         info = get_cache_file_info(test_path, logger=test_logger)
 
-        assert info["exists"] == False
+        assert not info["exists"]
         assert info["error"] is None  # 不是权限错误，只是不存在
 
 
