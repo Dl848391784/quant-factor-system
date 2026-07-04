@@ -20,12 +20,10 @@ fetch_industry.py pytest 测试文件
 - v1.1 (2026-06-14): TC010 新增 SW SSL 修复 + 防覆盖测试（6 个用例，对应 fetch_industry v3.1）
 """
 
+import contextlib
 import json
 import logging
-import contextlib
 import sys
-
-# 添加项目根目录到 sys.path
 import tempfile
 import threading
 import time
@@ -33,6 +31,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+# 添加项目根目录到 sys.path
 import pytest
 
 

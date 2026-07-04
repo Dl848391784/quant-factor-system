@@ -57,7 +57,7 @@ import logging
 import time
 import types
 from collections.abc import Iterator, Mapping
-from typing import Any, Union
+from typing import Any
 
 import requests
 import urllib3
@@ -66,7 +66,7 @@ from urllib3.util.retry import Retry
 
 
 # JSON 反序列化结果类型别名（用于 request_with_retry 返回类型）
-JsonValue = Union[dict[str, Any], list[Any], str, int, float, bool, None]
+JsonValue = dict[str, Any] | list[Any] | str | int | float | bool | None
 
 __all__ = [
     # Session 创建函数（手动管理生命周期）
