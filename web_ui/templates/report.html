@@ -708,6 +708,30 @@ td code {
 .factor-badge-neutral { background: rgba(139, 148, 158, 0.2); color: #8b949e; }
 .factor-badge-sh { background: rgba(88, 166, 255, 0.2); color: #58a6ff; }
 
+/* v0.4.8 R28-3: 权重卡片专属 — progress 条 + BEST 高亮 */
+.factor-card-progress {
+  height: 6px;
+  background: rgba(48, 54, 61, 0.6);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.factor-card-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.factor-bg-pos { background: linear-gradient(90deg, #3fb950, #2ea043); }
+.factor-bg-warn { background: linear-gradient(90deg, #f0883e, #d9650e); }
+.factor-bg-neg { background: rgba(48, 54, 61, 0.6); }
+.factor-card-best {
+  border-color: rgba(88, 166, 255, 0.5);
+  background: rgba(22, 27, 34, 0.8);
+}
+.factor-card-best:hover {
+  border-color: rgba(88, 166, 255, 0.9);
+}
+
 @media (max-width: 768px) {
   .factor-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
   .factor-card { padding: 10px 12px; }

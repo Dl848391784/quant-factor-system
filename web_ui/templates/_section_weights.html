@@ -1,15 +1,27 @@
-{# 七·权重选择结果 (v0.4.8 R8 → R18 + R24-1 性能回退)
+{# 七·权重选择结果 (v0.4.8 R8 → R18 + R24-1 简化 + R28-3 卡片网格)
 
 参数:
 - weight_selection: load_weight_selection_result() 返回的 dict | None
   字段: best_selection {method, composite_score}, ranking [{method, composite_score, metric1, metric2, ...}],
-        metric_configs [{name, ...}, ...]
+        metric_configs {name: {direction, weight, description}}
 
-R24-1 改动 (按用户 2026-07-05 反馈 "移动端卡, 关注 0/9/10/11"):
-- 移除 R23-6 Chart.js 柱状 + ApexCharts 雷达 — 移动端性能优先
-- 仅保留 KPI + 表格 — 简单展示
-- 关注度: 不在 0/9/10/11 列表, 简化
+R28-3 组件化改造 (按用户 2026-07-05 反馈 "组件化不够, 不现代, 大多数都是 table"):
+- 候选方法扁平表格 → 卡片网格 (复用 R28-1 .factor-grid + .factor-card CSS)
+- _macros.html 新增 render_weight_card macro (第 6 个 macro)
+  - 参数: name, score (0-1), is_best, metric_scores dict
+  - 内部计算: _score_cls (3 段: 优/良/弱), _score_pct (×100)
+  - 取第一个 metric 作为辅助显示 (避免单卡片信息过载)
+  - 输出: 综合得分 progress 条 + best 蓝边框高亮 + badge (优/良/弱 + 指标数)
+- KPI 卡 4 张保留 (R18 + render_kpi_card R22 macro)
+- R18 表格保留在 <details> 折叠 ("全部方法得分详情表 · 默认折叠")
+
+R23-6 inspect 实战 (避免再次踩坑):
+- 真 schema metric_configs 是 dict {name: cfg}, 不是 list of dict
+- 真 schema ranking[i] 有 metric_scores 嵌套 dict, 不是直接 m[metric]
+- macro 安全处理: metric_scores or {} fallback, _first_metric 循环取首个
 #}
+{% from '_macros.html' import render_kpi_card, render_weight_card %}
+
 {% if not weight_selection %}
   <p class="empty">权重选择数据不可用 — 请确认 summary 流水线已成功运行</p>
 {% else %}
@@ -19,67 +31,69 @@ R24-1 改动 (按用户 2026-07-05 反馈 "移动端卡, 关注 0/9/10/11"):
   {% set metric_configs = weight_selection.get("metric_configs") or {} %}
   {% set metric_names = (metric_configs.keys() | list)[:5] if metric_configs else [] %}
 
-  <p class="muted">v0.4.8 R8+R18+R24-1: 复用 data_loaders.load_weight_selection_result() (H1.1 严守, 只读)</p>
+  <p class="muted">v0.4.8 R8+R18+R24-1+R28-3: 复用 data_loaders.load_weight_selection_result() (H1.1 严守, 只读) · 卡片: 综合得分 progress 条 + BEST 蓝边框高亮, 优/良/弱 badge + 指标数</p>
 
   {# === R18: 顶部 KPI 卡 (4 张) === #}
   {% set _best_score = best.get("composite_score", 0) | float %}
   <div class="kpi-grid">
-    <div class="kpi-card kpi-pos">
-      <div class="kpi-label">最优权重方法</div>
-      <div class="kpi-value" style="font-size: 1.4em;">{{ best.get("method", "—") }}</div>
-      <div class="kpi-sub">★ 推荐</div>
-    </div>
-    <div class="kpi-card {% if _best_score > 0 %}kpi-pos{% elif _best_score < 0 %}kpi-neg{% else %}kpi-neutral{% endif %}">
-      <div class="kpi-label">综合得分</div>
-      <div class="kpi-value">{{ "%+.4f" | format(_best_score) }}</div>
-      <div class="kpi-sub">{{ methods | length }} 种方法中最高</div>
-    </div>
-    <div class="kpi-card kpi-neutral">
-      <div class="kpi-label">候选方法</div>
-      <div class="kpi-value">{{ methods | length }}</div>
-      <div class="kpi-sub">权重方案数</div>
-    </div>
-    <div class="kpi-card kpi-neutral">
-      <div class="kpi-label">评估指标</div>
-      <div class="kpi-value">{{ metric_names | length }}</div>
-      <div class="kpi-sub">{{ metric_names | join(", ") if metric_names else "—" }}</div>
-    </div>
+    {{ render_kpi_card('最优权重方法', best.get('method', '—'), '★ 推荐', 'pos') }}
+    {{ render_kpi_card('综合得分', "%+.4f" | format(_best_score), methods | length | string + ' 种方法中最高', 'pos' if _best_score > 0 else ('neg' if _best_score < 0 else 'neutral')) }}
+    {{ render_kpi_card('候选方法', methods | length, '权重方案数', 'neutral') }}
+    {{ render_kpi_card('评估指标', metric_names | length, (metric_names | join(', '))[:30] if metric_names else '—', 'neutral') }}
   </div>
 
-  {# === R18 表格 (R24-1 简化, 移除 R23-6 chart + radar) === #}
-  {% if methods %}
-  <h3>各权重方法得分详情表</h3>
-  <div class="data-table-wrap">
-  <table class="data-table numeric">
-    <thead><tr>
-      <th>权重方法</th><th>综合得分</th>
-      {% for metric in metric_names %}<th>{{ metric }}</th>{% endfor %}
-    </tr></thead>
-    <tbody>
-      {% set _scores = methods | map(attribute='composite_score') | map('float') | list %}
-      {% set _max_abs = (_scores | map('abs') | max) if _scores else 1 %}
-      {% if _max_abs == 0 %}{% set _max_abs = 1 %}{% endif %}
-      {% for m in methods %}
-        {% set _is_best = m.get("method", m.get("weight_method", "—")) == best.get("method") %}
-        {% set _score = m.get("composite_score", 0) | float %}
-        {% set _bar_pct = ([(_score | abs / _max_abs * 100) | int, 100] | min) %}
-        {% set _score_cls = 'pos' if _score > 0 else ('neg' if _score < 0 else 'warn') %}
-        <tr {% if _is_best %}class="row-best"{% endif %}>
-          <td>
-            {% if _is_best %}<span class="status-badge ok">★ BEST</span> {% endif %}
-            <code>{{ m.get("method", m.get("weight_method", "—")) }}</code>
-          </td>
-          <td class="rank-bar-cell">
-            <span class="progress-bar {{ _score_cls }}"><span style="width: {{ _bar_pct }}%"></span></span>
-            <span class="cell-strong">{{ "%+.4f" | format(_score) }}</span>
-          </td>
-          {% for metric in metric_names %}
-            <td>{{ "%+.4f" | format((m.metric_scores or {}).get(metric, (m.scores or {}).get(metric, m.get(metric, 0))) | float) }}</td>
-          {% endfor %}
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  {# === R28-3: 权重方法卡片网格 === #}
+  <h3>各权重方法得分卡片 (按综合得分降序, {{ methods | length }} 张)</h3>
+  <div class="factor-grid">
+    {% set _sorted = methods | sort(attribute='composite_score', reverse=true) %}
+    {% set _best_method = best.get('method') %}
+    {% for m in _sorted %}
+      {% set _is_best = (m.get('method', m.get('weight_method')) == _best_method) %}
+      {{ render_weight_card(
+          m.get('method', m.get('weight_method', '—')),
+          score=m.get('composite_score'),
+          is_best=_is_best,
+          metric_scores=m.get('metric_scores') or {}
+      ) }}
+    {% endfor %}
   </div>
+
+  {# === R18 表格保留 (折叠, 详尽视图) === #}
+  {% if methods %}
+  <details>
+    <summary><strong>全部方法得分详情表</strong> ({{ methods | length }} 种 · 默认折叠)</summary>
+    <div class="data-table-wrap">
+      <table class="data-table numeric">
+        <thead><tr>
+          <th>权重方法</th><th>综合得分</th>
+          {% for metric in metric_names %}<th>{{ metric }}</th>{% endfor %}
+        </tr></thead>
+        <tbody>
+          {% set _scores = methods | map(attribute='composite_score') | map('float') | list %}
+          {% set _max_abs = (_scores | map('abs') | max) if _scores else 1 %}
+          {% if _max_abs == 0 %}{% set _max_abs = 1 %}{% endif %}
+          {% for m in methods %}
+            {% set _is_best = m.get("method", m.get("weight_method", "—")) == best.get("method") %}
+            {% set _score = m.get("composite_score", 0) | float %}
+            {% set _bar_pct = ([(_score | abs / _max_abs * 100) | int, 100] | min) %}
+            {% set _score_cls = 'pos' if _score > 0 else ('neg' if _score < 0 else 'warn') %}
+            <tr {% if _is_best %}class="row-best"{% endif %}>
+              <td>
+                {% if _is_best %}<span class="status-badge ok">★ BEST</span> {% endif %}
+                <code>{{ m.get("method", m.get("weight_method", "—")) }}</code>
+              </td>
+              <td class="rank-bar-cell">
+                <span class="progress-bar {{ _score_cls }}"><span style="width: {{ _bar_pct }}%"></span></span>
+                <span class="cell-strong">{{ "%+.4f" | format(_score) }}</span>
+              </td>
+              {% for metric in metric_names %}
+                <td>{{ "%+.4f" | format((m.metric_scores or {}).get(metric, (m.scores or {}).get(metric, m.get(metric, 0))) | float) }}</td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
   {% endif %}
 {% endif %}
