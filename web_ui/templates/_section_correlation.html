@@ -1,4 +1,4 @@
-{# 三·因子相关性矩阵 (v0.4.8 R9 → R18 数据风酷炫升级)
+{# 三·因子相关性矩阵 (v0.4.8 R9 → R18 数据风酷炫升级 + R23-4 ApexCharts heatmap)
 
 参数:
 - correlation: parse_obq_correlation() 返回的 dict
@@ -7,17 +7,16 @@
   - abbrev: {缩略词: 完整因子}
   - high_corr_pairs: [{factor1, dim1, factor2, dim2, corr}]
 
-v0.4.8 R18 改动 (用户反馈 "页面布局平铺"):
-- 顶部 KPI 卡: 选中因子数 / 相关性矩阵维度 / 高相关对数
-- 矩阵变热力图: 相关系数 [-1, 1] → 红蓝渐变 (R17 已有 .heatmap-strong-pos/pos/neutral/neg/strong-neg 样式)
-- 高相关对加 ⚠️ status-badge.ok/warn (|corr|>=0.85 warn / >=0.95 fail)
-- 缩写对照表折叠进 <details> 默认折叠 (参考用)
-- 保留 H1.1 严守 (txt 来源, 不读 Parquet)
+R23-4 改造:
+- 顶部 3 KPI 卡 (R18) 保留
+- 矩阵 HTML 表格 → ApexCharts heatmap (tooltip + 红蓝渐变 + 数值标签)
+- 高相关对加 Chart.js 横向柱状 (R23-2/3 同模式)
+- 缩写对照表 → <details> 折叠保留 (R18)
 #}
 {% if not correlation %}
   <p class="empty">因子相关性数据不可用</p>
 {% else %}
-  <p class="muted">v0.4.8 R9: 从 txt 报告第三节解析 (H1.1 严守, 不改 data_loaders)</p>
+  <p class="muted">v0.4.8 R9+R18+R23-4: 从 txt 报告第三节解析 (H1.1 严守, 不改 data_loaders) · 图 1: ApexCharts heatmap · 图 2: 高相关对排序</p>
 
   {% set sel = correlation.get("selected_factors", []) %}
   {% set matrix = correlation.get("matrix", {}) %}
@@ -48,11 +47,83 @@ v0.4.8 R18 改动 (用户反馈 "页面布局平铺"):
     </div>
   </div>
 
-  {# === R18: 矩阵 → 热力图 (红蓝渐变) === #}
+  {# === R23-4 ApexCharts heatmap (与原 HTML 表格并存, 测试契约兼容) === #}
   {% if matrix %}
-  <h3>相关性矩阵热力图</h3>
-  <div style="overflow-x: auto;">
-  <table class="heatmap">
+  <h3>相关性矩阵热力图 (ApexCharts 交互视图)</h3>
+  <div class="chart-wrap">
+    <div id="corrHeatmap" style="min-height: 480px;"></div>
+  </div>
+  <script>
+  (function() {
+    const matrix = {{ matrix | tojson }};
+    const abbrev = {{ abbrev | tojson }};
+    const cols = Object.keys(abbrev);
+    const rows = Object.keys(matrix);
+
+    const series = rows.map(rowName => {
+      const row = matrix[rowName];
+      return {
+        name: rowName,
+        data: cols.map(colName => ({
+          x: colName,
+          y: parseFloat(row[colName]) || 0
+        }))
+      };
+    });
+
+    const options = {
+      series,
+      chart: {
+        type: 'heatmap',
+        height: Math.max(480, rows.length * 36),
+        background: 'transparent',
+        toolbar: { show: false },
+        animations: { enabled: true, speed: 400 },
+        foreColor: '#f0f0f5'
+      },
+      dataLabels: {
+        enabled: true,
+        style: { fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', colors: ['#fff'] },
+        formatter: (val) => val.toFixed(2)
+      },
+      plotOptions: {
+        heatmap: {
+          shadeIntensity: 0.6,
+          radius: 2,
+          colorScale: {
+            ranges: [
+              { from: -1.0, to: -0.7, color: '#1e3a8a', name: '极强负' },
+              { from: -0.7, to: -0.3, color: '#3b82f6', name: '负' },
+              { from: -0.3, to:  0.3, color: '#21262d', name: '弱' },
+              { from:  0.3, to:  0.7, color: '#f85149', name: '正' },
+              { from:  0.7, to:  1.01, color: '#7f1d1d', name: '极强正' }
+            ]
+          }
+        }
+      },
+      xaxis: {
+        labels: { style: { colors: '#f0f0f5', fontSize: '11px' } },
+        axisBorder: { color: '#21262d' },
+        axisTicks: { color: '#21262d' }
+      },
+      yaxis: {
+        labels: { style: { colors: '#f0f0f5', fontSize: '11px' } }
+      },
+      tooltip: {
+        theme: 'dark',
+        y: { formatter: (v) => `r = ${v.toFixed(4)}` }
+      },
+      grid: { borderColor: '#21262d' },
+      legend: { show: false }
+    };
+    new ApexCharts(document.querySelector('#corrHeatmap'), options).render();
+  })();
+  </script>
+
+  {# === R18: 原 HTML 表格保留 (测试契约兼容: '1.00' 在 body) === #}
+  <h3>相关性矩阵数据表 (R18 红蓝渐变)</h3>
+  <div class="data-table-wrap">
+  <table class="heatmap data-table">
     <thead>
       <tr>
         <th></th>
@@ -68,7 +139,6 @@ v0.4.8 R18 改动 (用户反馈 "页面布局平铺"):
         {% for col in abbrev.keys() %}
           {% set _c = row.get(col, 0) | float %}
           {% set _abs = _c | abs %}
-          {# 红蓝渐变: 正=红 / 负=蓝 / 强度由 |c| 决定 #}
           {% if _c >= 0.7 %}{% set _cls = 'heatmap-strong-pos' %}
           {% elif _c >= 0.3 %}{% set _cls = 'heatmap-pos' %}
           {% elif _c >= -0.3 %}{% set _cls = 'heatmap-neutral' %}
@@ -84,11 +154,84 @@ v0.4.8 R18 改动 (用户反馈 "页面布局平铺"):
   </div>
   {% endif %}
 
+  {# === R23-4 Chart.js: 高相关对横向柱状 === #}
+  {% if pairs %}
+  <h3>跨维度高相关因子对 (|corr| ≥ 0.7)</h3>
+  <div class="chart-grid-2">
+    <div class="chart-wrap">
+      <div class="chart-title">高相关对 |r| 排序 (≥ 0.7)</div>
+      <canvas id="pairBarChart" height="280"></canvas>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-title">正负分布 (红=正相关, 橙=负相关)</div>
+      <canvas id="pairDoughnut" height="280"></canvas>
+    </div>
+  </div>
+  <script>
+  (function() {
+    const pairs = {{ pairs | tojson }};
+    const sorted = [...pairs].sort((a, b) => Math.abs(b.corr) - Math.abs(a.corr)).slice(0, 20);
+    const labels = sorted.map(p => `${p.factor1}[${p.dim1}] × ${p.factor2}[${p.dim2}]`);
+    const values = sorted.map(p => p.corr);
+    const colors = sorted.map(p => p.corr >= 0 ? '#f85149' : '#f0883e');
+
+    new Chart(document.getElementById('pairBarChart'), {
+      type: 'bar',
+      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 4, barThickness: 14 }] },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `r = ${ctx.parsed.x.toFixed(3)}` } } },
+        scales: {
+          x: { min: -1, max: 1, grid: { color: 'rgba(139,148,158,0.15)' }, ticks: { color: '#f0f0f5', callback: (v) => v.toFixed(1) } },
+          y: { grid: { display: false }, ticks: { color: '#f0f0f5', font: { size: 9 } } }
+        }
+      }
+    });
+
+    const posN = pairs.filter(p => p.corr >= 0).length;
+    const negN = pairs.length - posN;
+    new Chart(document.getElementById('pairDoughnut'), {
+      type: 'doughnut',
+      data: { labels: ['正相关', '负相关'], datasets: [{ data: [posN, negN], backgroundColor: ['#f85149', '#f0883e'], borderColor: '#0d1117', borderWidth: 2 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { color: '#f0f0f5' } }, tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.parsed} 对 (${((ctx.parsed / pairs.length) * 100).toFixed(0)}%)` } } },
+        cutout: '65%'
+      }
+    });
+  })();
+  </script>
+
+  {# === R18 详情表保留 (具体配对列表) === #}
+  <details>
+    <summary><strong>高相关对详情表</strong> ({{ pairs | length }} 对 · 默认折叠)</summary>
+    <div class="data-table-wrap">
+    <table class="data-table numeric">
+      <thead><tr><th>因子对</th><th>相关性</th><th>强度</th></tr></thead>
+      <tbody>
+      {% for p in pairs %}
+        {% set _abs = p.corr | abs %}
+        {% if _abs >= 0.95 %}{% set _badge_cls = 'fail' %}{% set _badge_text = '⚠ 极强' %}
+        {% elif _abs >= 0.85 %}{% set _badge_cls = 'warn' %}{% set _badge_text = '强' %}
+        {% else %}{% set _badge_cls = 'ok' %}{% set _badge_text = '中' %}{% endif %}
+        <tr>
+          <td><code>{{ p.factor1 }}[{{ p.dim1 }}]</code> × <code>{{ p.factor2 }}[{{ p.dim2 }}]</code></td>
+          <td class="{% if p.corr > 0 %}cell-pos-bg{% else %}cell-neg-bg{% endif %}"><strong>{{ "%+.2f" | format(p.corr) }}</strong></td>
+          <td><span class="status-badge {{ _badge_cls }}">{{ _badge_text }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </details>
+  {% endif %}
+
   {# === R18: 缩写对照表 → 折叠面板 === #}
   {% if abbrev %}
   <details>
     <summary><strong>缩写对照表</strong> ({{ abbrev | length }} 项 · 默认折叠)</summary>
-    <table>
+    <div class="data-table-wrap">
+    <table class="data-table">
       <thead><tr><th>缩写</th><th>完整名</th></tr></thead>
       <tbody>
       {% for short, full in abbrev.items() %}
@@ -96,35 +239,7 @@ v0.4.8 R18 改动 (用户反馈 "页面布局平铺"):
       {% endfor %}
       </tbody>
     </table>
+    </div>
   </details>
-  {% endif %}
-
-  {# === R18: 高相关对 → 加 ⚠️ 徽章 === #}
-  {% if pairs %}
-  <h3>跨维度高相关因子对 (|corr| ≥ 0.7)</h3>
-  <table>
-    <thead>
-      <tr><th>因子对</th><th>相关性</th><th>强度</th></tr>
-    </thead>
-    <tbody>
-    {% for p in pairs %}
-      {% set _abs = p.corr | abs %}
-      {% if _abs >= 0.95 %}{% set _badge_cls = 'fail' %}{% set _badge_text = '⚠ 极强' %}
-      {% elif _abs >= 0.85 %}{% set _badge_cls = 'warn' %}{% set _badge_text = '强' %}
-      {% else %}{% set _badge_cls = 'ok' %}{% set _badge_text = '中' %}
-      {% endif %}
-      <tr>
-        <td>
-          <code>{{ p.factor1 }}[{{ p.dim1 }}]</code> ×
-          <code>{{ p.factor2 }}[{{ p.dim2 }}]</code>
-        </td>
-        <td class="{% if p.corr > 0 %}cell-pos-bg{% else %}cell-neg-bg{% endif %}">
-          <strong>{{ "%+.2f" | format(p.corr) }}</strong>
-        </td>
-        <td><span class="status-badge {{ _badge_cls }}">{{ _badge_text }}</span></td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
   {% endif %}
 {% endif %}
