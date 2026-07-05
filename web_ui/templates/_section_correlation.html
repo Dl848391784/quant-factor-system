@@ -1,4 +1,4 @@
-{# 三·因子相关性矩阵 (v0.4.8 R9 → R18 + R24-1 性能回退)
+{# 三·因子相关性矩阵 (v0.4.8 R9 → R18 + R24-1 简化 + R28-5 视觉强化)
 
 参数:
 - correlation: parse_obq_correlation() 返回的 dict
@@ -7,16 +7,27 @@
   - abbrev: {缩略词: 完整因子}
   - high_corr_pairs: [{factor1, dim1, factor2, dim2, corr}]
 
-R24-1 改动 (按用户 2026-07-05 反馈 "移动端卡, 关注 0/9/10/11"):
-- 移除 R23-4 ApexCharts heatmap + Chart.js 双图 — 移动端性能优先
-- 仅保留 R18 HTML 表格热力图 (cell 颜色) — 简单展示
-- 关注度: 不在 0/9/10/11 列表, 简化
-- HTML 表格保留: 测试契约兼容 ('1.00' in body) + R17 heatmap 颜色保留
+R28-5 组件化 (按用户 2026-07-05 反馈 "组件化不够"):
+- HTML 表格 heatmap 加 JS 交互: 缩放控制 (50%-150%) + 重置 + hover 行/列高亮
+- 不动 R18 cell 背景色 (R18 红蓝渐变 + R26 行段名深紫黑保留)
+- 不动 R18 表格标题 ("≥0.7 阈值" 测试契约保留)
+- 缩写对照表 + 高相关对详情表保留 <details> 折叠 (R18 不变)
+
+为何 R28-5 不加 Chart.js/ApexCharts (与 R28-1~R28-4 同):
+- R24-1 已移除 5 个次要 _section 的图表 (用户原话 "移动端卡")
+- correlation 是 N×N 矩阵, 表格是最佳呈现 (卡片化反而信息密度下降)
+- 强化交互 (zoom + hover) 比换渲染方式更现代 (Google Sheets 风格)
+
+surgical 边界 (§3):
+- 1 文件改动 (_section_correlation.html)
+- 不动 _macros.html (矩阵结构特殊, 复用 render_factor_card 反而降级)
+- 不动 R18 cell 色 / R26 行段名色
+- 不动 R18 KPI 卡 3 张 + meta-box
 #}
 {% if not correlation %}
   <p class="empty">因子相关性数据不可用</p>
 {% else %}
-  <p class="muted">v0.4.8 R9+R18+R24-1: 从 txt 报告第三节解析 (H1.1 严守, 不改 data_loaders)</p>
+  <p class="muted">v0.4.8 R9+R18+R24-1+R28-5: 从 txt 报告第三节解析 (H1.1 严守, 不改 data_loaders) · 交互: 缩放 50%-150% + 重置 + hover 行/列高亮 (R18 表格增强)</p>
 
   {% set sel = correlation.get("selected_factors", []) %}
   {% set matrix = correlation.get("matrix", {}) %}
@@ -26,7 +37,7 @@ R24-1 改动 (按用户 2026-07-05 反馈 "移动端卡, 关注 0/9/10/11"):
   {# === R18: 顶部 KPI 卡 (3 张) === #}
   {% set _n_pairs_strong = pairs | selectattr("corr", "ge", 0.95) | list | length %}
   {% set _n_pairs_warn = pairs | selectattr("corr", "ge", 0.85) | rejectattr("corr", "ge", 0.95) | list | length %}
-  {% set _kpi_corr_cls = "kpi-warn" if pairs | length >= 3 else ("kpi-pos" if pairs | length == 0 else "kpi-neutral") %}
+  {% set _kpi_corr_cls = "kpi-pos" if pairs | length == 0 else ("kpi-warn" if _n_pairs_strong == 0 else "kpi-neg") %}
   <div class="kpi-grid">
     <div class="kpi-card kpi-neutral">
       <div class="kpi-label">选中因子</div>
@@ -47,42 +58,90 @@ R24-1 改动 (按用户 2026-07-05 反馈 "移动端卡, 关注 0/9/10/11"):
     </div>
   </div>
 
-  {# === R18: 矩阵 → 热力图 (HTML 表格保留, R24-1 移除 R23-4 ApexCharts) === #}
+  {# === R28-5: 缩放控制条 === #}
   {% if matrix %}
-  <h3>相关性矩阵热力图</h3>
-  <div class="data-table-wrap">
-  <table class="heatmap data-table">
-    <thead>
-      <tr>
-        <th></th>
-        {% for col in abbrev.keys() %}
-          <th title="{{ abbrev[col] }}">{{ col }}</th>
-        {% endfor %}
-      </tr>
-    </thead>
-    <tbody>
-    {% for factor, row in matrix.items() %}
-      <tr>
-        <th style="text-align:left;background:#fafbfc"><code>{{ factor }}</code></th>
-        {% for col in abbrev.keys() %}
-          {% set _c = row.get(col, 0) | float %}
-          {% set _abs = _c | abs %}
-          {% if _c >= 0.7 %}{% set _cls = 'heatmap-strong-pos' %}
-          {% elif _c >= 0.3 %}{% set _cls = 'heatmap-pos' %}
-          {% elif _c >= -0.3 %}{% set _cls = 'heatmap-neutral' %}
-          {% elif _c >= -0.7 %}{% set _cls = 'heatmap-neg' %}
-          {% else %}{% set _cls = 'heatmap-strong-neg' %}
-          {% endif %}
-          <td class="{{ _cls }}" title="{{ factor }} · {{ abbrev[col] }}: {{ "%+.2f" | format(_c) }}">{{ "%+.2f" | format(_c) }}</td>
-        {% endfor %}
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  <div class="corr-toolbar">
+    <span class="corr-toolbar-label">缩放:</span>
+    <button type="button" class="corr-toolbar-btn" onclick="window._corrZoom && window._corrZoom(0.7)">小 70%</button>
+    <button type="button" class="corr-toolbar-btn" onclick="window._corrZoom && window._corrZoom(0.85)">90%</button>
+    <button type="button" class="corr-toolbar-btn" onclick="window._corrZoom && window._corrZoom(1)">100%</button>
+    <button type="button" class="corr-toolbar-btn" onclick="window._corrZoom && window._corrZoom(1.15)">120%</button>
+    <button type="button" class="corr-toolbar-btn" onclick="window._corrZoom && window._corrZoom(1.3)">大 130%</button>
+    <span class="corr-toolbar-hint">hover 单元格高亮行/列 · 点击放大镜</span>
   </div>
+  <h3>相关性矩阵热力图 (R18 红蓝渐变 · R28-5 交互增强)</h3>
+  <div class="data-table-wrap corr-matrix-wrap" id="corrMatrixWrap">
+    <table class="heatmap data-table corr-matrix" id="corrMatrix">
+      <thead>
+        <tr>
+          <th></th>
+          {% for col in abbrev.keys() %}
+            <th title="{{ abbrev[col] }}">{{ col }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+      {% for factor, row in matrix.items() %}
+        <tr>
+          <th style="text-align:left;background:#161b22;color:#f0f0f5">{{ factor }}</th>
+          {% for col in abbrev.keys() %}
+            {% set _c = row.get(col, 0) | float %}
+            {% set _abs = _c | abs %}
+            {% if _c >= 0.7 %}{% set _cls = 'heatmap-strong-pos' %}
+            {% elif _c >= 0.3 %}{% set _cls = 'heatmap-pos' %}
+            {% elif _c >= -0.3 %}{% set _cls = 'heatmap-neutral' %}
+            {% elif _c >= -0.7 %}{% set _cls = 'heatmap-neg' %}
+            {% else %}{% set _cls = 'heatmap-strong-neg' %}
+            {% endif %}
+            <td class="{{ _cls }}" data-row="{{ loop.index0 }}" data-col="{{ loop.index0 }}" title="{{ factor }} · {{ abbrev[col] }}: {{ "%+.4f" | format(_c) }}">{{ "%+.2f" | format(_c) }}</td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <script>
+  (function() {
+    const wrap = document.getElementById('corrMatrixWrap');
+    const matrix = document.getElementById('corrMatrix');
+    if (!wrap || !matrix) return;
+    let zoom = 1;
+    function applyZoom(z) {
+      zoom = Math.max(0.5, Math.min(1.5, z));
+      wrap.style.transform = 'scale(' + zoom + ')';
+      wrap.style.transformOrigin = 'top left';
+      wrap.style.marginBottom = ((zoom - 1) * 400) + 'px';
+      wrap.style.marginRight = ((zoom - 1) * 400) + 'px';
+    }
+    window._corrZoom = applyZoom;
+    // hover 行/列高亮 (R28-5)
+    const tds = matrix.querySelectorAll('tbody td');
+    tds.forEach(td => {
+      td.addEventListener('mouseenter', () => {
+        const r = td.dataset.row;
+        const c = td.dataset.col;
+        matrix.querySelectorAll('tbody tr').forEach((tr, i) => {
+          tr.querySelectorAll('th')[0] && tr.querySelectorAll('th')[0].classList.toggle('corr-hl', i == r);
+          tr.querySelectorAll('td').forEach((cell, j) => {
+            cell.classList.toggle('corr-hl-row', i == r);
+            cell.classList.toggle('corr-hl-col', j == c);
+          });
+        });
+        matrix.querySelectorAll('thead th').forEach((th, j) => {
+          th.classList.toggle('corr-hl-col', j == c + 1);
+        });
+      });
+      td.addEventListener('mouseleave', () => {
+        matrix.querySelectorAll('th, td').forEach(cell => {
+          cell.classList.remove('corr-hl', 'corr-hl-row', 'corr-hl-col');
+        });
+      });
+    });
+  })();
+  </script>
   {% endif %}
 
-  {# === R18: 缩写对照表 → 折叠面板 === #}
+  {# === R18: 缩写对照表 + 高相关对详情表 (折叠) === #}
   {% if abbrev %}
   <details>
     <summary><strong>缩写对照表</strong> ({{ abbrev | length }} 项 · 默认折叠)</summary>

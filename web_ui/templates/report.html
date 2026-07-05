@@ -754,6 +754,60 @@ td code {
   color: #8b949e;
 }
 
+/* === v0.4.8 R28-5: 相关性矩阵交互 (缩放 + hover 高亮) === */
+.corr-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+  flex-wrap: wrap;
+}
+.corr-toolbar-label {
+  font-size: 12px;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-weight: 600;
+}
+.corr-toolbar-btn {
+  background: rgba(22, 27, 34, 0.6);
+  border: 1px solid rgba(48, 54, 61, 0.6);
+  color: #f0f0f5;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.corr-toolbar-btn:hover {
+  background: rgba(88, 166, 255, 0.15);
+  border-color: rgba(88, 166, 255, 0.6);
+}
+.corr-toolbar-hint {
+  font-size: 11px;
+  color: #8b949e;
+  font-style: italic;
+  margin-left: auto;
+}
+.corr-matrix-wrap {
+  transform-origin: top left;
+  transition: transform 0.2s ease;
+}
+.corr-matrix th,
+.corr-matrix td {
+  transition: background 0.1s ease, box-shadow 0.1s ease;
+}
+.corr-hl {
+  box-shadow: inset 0 0 0 2px #58a6ff;
+}
+.corr-hl-row {
+  background: rgba(88, 166, 255, 0.12) !important;
+}
+.corr-hl-col {
+  background: rgba(88, 166, 255, 0.12) !important;
+}
+
 @media (max-width: 768px) {
   .factor-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
   .factor-card { padding: 10px 12px; }
