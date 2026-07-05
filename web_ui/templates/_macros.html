@@ -8,13 +8,15 @@
 
 R28-1 新增:
 - 因子卡片 (render_factor_card): 替代 72 因子扁平表格 (卡片网格 3 列)
+- 因子 IC 卡片 (render_ic_card): 段一 72 因子 IC 卡片 (颜色按 IC 符号, badge 按 ICIR)
 
 使用示例:
-{% from '_macros.html' import render_kpi_card, render_data_table, render_rank_bar, render_factor_card %}
+{% from '_macros.html' import render_kpi_card, render_data_table, render_rank_bar, render_factor_card, render_ic_card %}
 {{ render_kpi_card('操作数', _n_total, 'S7/S9 段个股') }}
 {{ render_data_table(headers, rows, value_class='numeric') }}
 {{ render_rank_bar('S7', 59.6, max_val=70, variant='pos') }}
 {{ render_factor_card('tail_price_position', -0.0629, 0.9381, 0.067, 'medium') }}
+{{ render_ic_card('ret3d', ic_mean=0.052, icir=0.83, valid_days=240) }}
 #}
 
 {% macro render_kpi_card(label, value, sub='', variant='neutral') %}
@@ -82,6 +84,44 @@ R28-1 新增:
   <div class="factor-card-footer">
     <span class="factor-card-badge factor-badge-{{ _ann_cls }}">{{ _ann_lbl }}</span>
     <span class="factor-card-badge factor-badge-sh">{{ _sh_lbl }}</span>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro render_ic_card(name, ic_mean=None, icir=None, valid_days=None) %}
+{# R28-2 因子 IC 卡片: 名字 + IC 均值 + ICIR + 有效天数
+   ic_mean: float (0.05 = 5%), icir: float (>=0.5 显著), valid_days: int #}
+{% set _ic = ic_mean if ic_mean is number else 0 %}
+{% set _abs_ic = _ic | abs %}
+{% if _ic > 0 %}{% set _ic_dot = '#3fb950' %}
+{% elif _ic < 0 %}{% set _ic_dot = '#f0883e' %}
+{% else %}{% set _ic_dot = '#8b949e' %}{% endif %}
+{% if _abs_ic >= 0.05 %}{% set _ic_lbl = '强' %}
+{% elif _abs_ic >= 0.03 %}{% set _ic_lbl = '中' %}
+{% else %}{% set _ic_lbl = '弱' %}{% endif %}
+{% set _icir_v = icir if icir is number else 0 %}
+{% if _icir_v >= 1.0 %}{% set _icir_lbl = '优' %}{% set _icir_dot = '#3fb950' %}
+{% elif _icir_v >= 0.5 %}{% set _icir_lbl = '良' %}{% set _icir_dot = '#58a6ff' %}
+{% else %}{% set _icir_lbl = '弱' %}{% set _icir_dot = '#8b949e' %}{% endif %}
+<div class="factor-card">
+  <div class="factor-card-header">
+    <span class="factor-card-dot" style="background: {{ _ic_dot }};"></span>
+    <code class="factor-card-name">{{ name }}</code>
+  </div>
+  <div class="factor-card-stats">
+    <div class="factor-card-stat">
+      <div class="factor-card-stat-label">IC 均值</div>
+      <div class="factor-card-stat-value">{{ "%+.4f" | format(_ic) }}</div>
+    </div>
+    <div class="factor-card-stat">
+      <div class="factor-card-stat-label">ICIR</div>
+      <div class="factor-card-stat-value">{{ "%+.3f" | format(_icir_v) }}</div>
+    </div>
+  </div>
+  <div class="factor-card-footer">
+    <span class="factor-card-badge factor-badge-{{ 'pos' if _ic > 0 else ('neg' if _ic < 0 else 'neutral') }}">IC {{ _ic_lbl }}</span>
+    <span class="factor-card-badge" style="background: {{ _icir_dot }}33; color: {{ _icir_dot }};">{{ _icir_lbl }}</span>
+    {% if valid_days is number %}<span class="factor-card-badge" style="background: rgba(48,54,61,0.6); color: #f0f0f5;">{{ valid_days }} 日</span>{% endif %}
   </div>
 </div>
 {% endmacro %}
