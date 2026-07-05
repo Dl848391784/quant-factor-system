@@ -41,6 +41,72 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
     {% endif %}
   </div>
 
+  {# === R23-7 Chart.js: 30 段胜率 + 均收双图 === #}
+  <div class="chart-grid-2">
+    <div class="chart-wrap">
+      <div class="chart-title">30 段胜率分布 (柱状, 颜色按 |胜率|)</div>
+      <canvas id="segBarChart" height="280"></canvas>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-title">30 段均收 (line, 红=负绿=正)</div>
+      <canvas id="segLineChart" height="280"></canvas>
+    </div>
+  </div>
+  <script>
+  (function() {
+    const segs = {{ segs | tojson }};
+    const SENTRY = { pos: '#3fb950', neg: '#f0883e', warn: '#f85149', neutral: '#58a6ff', grid: 'rgba(139,148,158,0.15)', text: '#f0f0f5' };
+    // 按段号排序
+    const sorted = [...segs].sort((a, b) => {
+      const na = parseInt((a.label || 'S0').replace(/\D/g, '')) || 0;
+      const nb = parseInt((b.label || 'S0').replace(/\D/g, '')) || 0;
+      return na - nb;
+    });
+    const labels = sorted.map(s => s.label || '');
+    const wins = sorted.map(s => typeof s.win_rate === 'number' ? s.win_rate : 0);
+    const rets = sorted.map(s => typeof s.avg_ret === 'number' ? s.avg_ret : 0);
+    const winColors = wins.map(w => w >= 60 ? SENTRY.pos : (w <= 40 ? SENTRY.neg : SENTRY.warn));
+    const retColors = rets.map(r => r >= 0 ? SENTRY.pos : SENTRY.neg);
+
+    new Chart(document.getElementById('segBarChart'), {
+      type: 'bar',
+      data: { labels, datasets: [{ data: wins, backgroundColor: winColors, borderRadius: 3, barThickness: 12 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `胜率 = ${ctx.parsed.y.toFixed(1)}%` } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 9 } } },
+          y: { min: 0, max: 100, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } }
+        }
+      }
+    });
+
+    new Chart(document.getElementById('segLineChart'), {
+      type: 'line',
+      data: { labels, datasets: [{
+        data: rets,
+        borderColor: SENTRY.neutral,
+        backgroundColor: 'rgba(88,166,255,0.1)',
+        pointBackgroundColor: retColors,
+        pointBorderColor: '#fff',
+        pointBorderWidth: 1,
+        pointRadius: 5,
+        pointHoverRadius: 8,
+        tension: 0.3,
+        fill: true
+      }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `均收 = ${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y.toFixed(2)}%` } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 9 } } },
+          y: { grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } }
+        }
+      }
+    });
+  })();
+  </script>
+
   <h3>胜率排名 (Top {{ display_segs | length }})</h3>
   <div class="data-table-wrap">
     <table class="data-table numeric">
