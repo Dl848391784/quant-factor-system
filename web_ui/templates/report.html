@@ -440,6 +440,9 @@ td code {
     </div>
     <ul class="sidebar-nav">
       <li><a href="#section-freshness">零·数据完整性</a></li>
+      <li><a href="#section-segment-win">九·30 分段胜率</a></li>
+      <li><a href="#section-candidate-detail">十·候选明细</a></li>
+      <li class="section-marker-alt"><a href="#section-intraday">十一·S7/S9 日内操作</a></li>
       <li><a href="#section-ic">一·IC</a></li>
       <li><a href="#section-backtest">二·回测</a></li>
       <li><a href="#section-corr">三·相关性</a></li>
@@ -448,9 +451,6 @@ td code {
       <li><a href="#section-compare">六·对比</a></li>
       <li><a href="#section-weights">七·权重</a></li>
       <li><a href="#section-selection">八·选股</a></li>
-      <li><a href="#section-segment-win">九·30 分段胜率</a></li>
-      <li><a href="#section-candidate-detail">十·候选明细</a></li>
-      <li class="section-marker-alt"><a href="#section-intraday">十一·S7/S9 日内操作</a></li>
     </ul>
   </aside>
 
@@ -504,11 +504,26 @@ td code {
       </div>
     </div>
 
-    <!-- 12 节内容卡片化 -->
+    <!-- 12 节内容卡片化 (R18: 九/十/十一前置 — 用户最常看三节) -->
     <section class="card"><h2 id="section-freshness">零、数据完整性检查</h2>
       {% include "_section_freshness.html" with context %}
     </section>
 
+    {# === R18 前置章节: 九·30 分段胜率 / 十·候选明细 / 十一·S7/S9 日内操作 === #}
+    {# 用户 2026-07-05 反馈最常看, 提到 KPI 卡之后立刻可见 #}
+    <section class="card"><h2 id="section-segment-win">九、ob_quality 全管线 30 分段胜率汇总</h2>
+      {% include "_section_segment_win.html" with context %}
+    </section>
+
+    <section class="card"><h2 id="section-candidate-detail">十、今日三十分段候选明细</h2>
+      {% include "_section_candidate_detail.html" with context %}
+    </section>
+
+    <section class="card"><h2 id="section-intraday">十一、S7/S9 段日内操作建议 (T→T+1 实战指引) [⚠️ fallback]</h2>
+      {% include "_section_intraday.html" with context %}
+    </section>
+
+    {# === 其他章节 (按编号顺序) === #}
     <section class="card"><h2 id="section-ic">一、单因子 IC 数据汇总</h2>
       {% include "_section_ic.html" with context %}
     </section>
@@ -539,18 +554,6 @@ td code {
 
     <section class="card"><h2 id="section-selection">八、股票选股结果</h2>
       {% include "_section_selection.html" with context %}
-    </section>
-
-    <section class="card"><h2 id="section-segment-win">九、ob_quality 全管线 30 分段胜率汇总</h2>
-      {% include "_section_segment_win.html" with context %}
-    </section>
-
-    <section class="card"><h2 id="section-candidate-detail">十、今日三十分段候选明细</h2>
-      {% include "_section_candidate_detail.html" with context %}
-    </section>
-
-    <section class="card"><h2 id="section-intraday">十一、S7/S9 段日内操作建议 (T→T+1 实战指引) [⚠️ fallback]</h2>
-      {% include "_section_intraday.html" with context %}
     </section>
 
   </main>
