@@ -287,8 +287,13 @@ td code {
   /* v0.4.8 R19: Sentry gradient — purple → lime */
   background: linear-gradient(90deg, #58a6ff, #3fb950);
   z-index: 200;
-  width: 0%;
-  transition: width 0.1s ease-out;
+  /* v0.4.8 R21-5 (impeccable anti-pattern): layout-transition
+     transition: width → transition: transform (scaleX)
+     配合 JS L692 bar.style.transform = scaleX(ratio/100)
+     transition: width 会触发 layout thrash, scaleX 只触发 composite */
+  transform-origin: left center;
+  transform: scaleX(0);
+  transition: transform 0.1s ease-out;
   box-shadow: 0 1px 4px rgba(194, 239, 78, 0.5);
 }
 
@@ -401,6 +406,9 @@ td code {
   display: block;
   height: 100%;
   background: #58a6ff;
+  /* v0.4.8 R21-5 (impeccable anti-pattern): layout-transition — width 是数据可视化的合理用法
+     (30 分段胜率柱状图, X% 表示该段胜率, scaleX 会扭曲视觉, 不替换)
+     impeccable-disable-line layout-transition: 进度条宽度是数据维度, scaleX 替换会扭曲 */
   transition: width 0.3s ease;
 }
 .progress-bar.pos > span { background: #3fb950; }
@@ -689,7 +697,9 @@ td code {
     var scrollTop = window.scrollY;
     var docHeight = document.documentElement.scrollHeight - window.innerHeight;
     var ratio = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
-    bar.style.width = ratio + '%';
+    // v0.4.8 R21-5 (impeccable anti-pattern): bar.style.width → bar.style.transform = scaleX
+    // 配合 CSS .scroll-progress transition: transform (避免 layout thrash)
+    bar.style.transform = 'scaleX(' + (ratio / 100) + ')';
     if (scrollTop > 400) { btn.classList.add('visible'); }
     else { btn.classList.remove('visible'); }
   }
