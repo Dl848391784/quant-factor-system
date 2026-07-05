@@ -47,7 +47,8 @@ aside.sidebar {
   width: 220px;
   flex-shrink: 0;
   /* v0.4.8 R19: Sentry 玻璃效果 — 替换白底 */
-  background: rgba(54, 45, 89, 0.5);
+  /* v0.4.8 R27 (用户反馈 "紫色不好看"): 紫色玻璃 rgba(54,45,89) → 深灰玻璃 rgba(22,27,34) GitHub dark sidebar */
+  background: rgba(22, 27, 34, 0.85);
   backdrop-filter: blur(18px) saturate(180%);
   -webkit-backdrop-filter: blur(18px) saturate(180%);
   border-radius: 12px;
@@ -118,7 +119,8 @@ main.content {
 /* === 报告头部 (Sentry 玻璃 + ambient glow) === */
 .report-header {
   /* v0.4.8 R19: Sentry ambient glow — 深紫 ambient 阴影 */
-  background: linear-gradient(135deg, #21262d 0%, #1f6feb 100%);
+  /* v0.4.8 R27 (用户反馈 "紫色不好看"): 蓝紫渐变 → 深灰渐变 (去掉 #1f6feb 蓝色) */
+  background: linear-gradient(135deg, #161b22 0%, #30363d 100%);
   color: white;
   padding: 24px 28px;
   border-radius: 12px;
