@@ -6,6 +6,11 @@
 <title>web_ui - 因子分析报告 (ob_quality) {{ report_date }}</title>
 <!-- v0.4.8 R19: 加载 Sentry 设计系统字体 (R17 升级基于 web-design skill) -->
 <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<!-- v0.4.8 R23-1: 引入 Chart.js 4 + ApexCharts (CDN, 无 npm 依赖) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.0/dist/apexcharts.min.js"></script>
+
 <style>
 /* === 全局重置 === */
 * { box-sizing: border-box; }
@@ -616,6 +621,51 @@ td code {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
   color: #f0f0f5;
+}
+
+/* === v0.4.8 R23-1: Chart.js + ApexCharts 容器样式 === */
+.chart-wrap {
+  position: relative;
+  width: 100%;
+  background: rgba(54, 45, 89, 0.2);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 12px 0;
+  border: 1px solid #21262d;
+}
+.chart-wrap canvas,
+.chart-wrap .apexcharts-canvas {
+  max-width: 100%;
+}
+.chart-title {
+  font-size: 12px;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.chart-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 16px 0;
+}
+.chart-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin: 16px 0;
+}
+@media (max-width: 1024px) {
+  .chart-grid-2, .chart-grid-3 { grid-template-columns: 1fr; }
+}
+
+/* KPI 卡内嵌 sparkline */
+.kpi-sparkline {
+  margin-top: 8px;
+  height: 32px;
+  opacity: 0.85;
 }
 </style>
 </head>
