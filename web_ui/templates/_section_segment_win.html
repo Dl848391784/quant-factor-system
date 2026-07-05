@@ -192,16 +192,16 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
   <table class="heatmap">
     <thead>
       <tr>
-        <th style="text-align:left">段</th>
+        <th style="text-align:left;background:#161b22;color:#f0f0f5">段</th>
         {% for d in txt_s9_matrix.dates %}<th>{{ d[5:] }}</th>{% endfor %}
-        <th style="background:#fff8e1">合并</th>
+        <th style="background:#58a6ff;color:#ffffff;font-weight:700">合并胜率</th>
       </tr>
     </thead>
     <tbody>
     {% for seg in txt_s9_matrix.segments %}
       {% set _is_best = (best_seg and seg.label == best_seg.label) %}
       <tr {% if _is_best %}class="heatmap-best"{% endif %}>
-        <th style="text-align:left;background:#fafbfc">{% if _is_best %}<span class="status-badge ok">★</span>{% endif %} {{ seg.label }}</th>
+        <th style="text-align:left;background:#161b22;color:#f0f0f5">{% if _is_best %}<span class="status-badge ok">★</span>{% endif %} {{ seg.label }}</th>
         {% for wr in seg.win_rates %}
           {% set _w = wr | float %}
           {% if _w >= 60 %}{% set _w_cls = 'heatmap-strong-pos' %}
@@ -211,7 +211,7 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
           {% else %}{% set _w_cls = 'heatmap-strong-neg' %}{% endif %}
           <td class="{{ _w_cls }}" title="{{ seg.label }} · {{ txt_s9_matrix.dates[loop.index0] }}: {{ "%.0f" | format(_w) }}%">{{ "%.0f" | format(_w) }}</td>
         {% endfor %}
-        <td style="background:#fff8e1;font-weight:700">{{ "%.1f" | format(seg.merged) }}%</td>
+        <td style="background:#58a6ff;color:#ffffff;font-weight:700">{{ "%.1f" | format(seg.merged) }}%</td>
       </tr>
     {% endfor %}
     </tbody>
