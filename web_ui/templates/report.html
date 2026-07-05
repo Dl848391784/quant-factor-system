@@ -68,7 +68,8 @@ aside.sidebar {
   /* v0.4.8 R19: Sentry Purple 主色 */
   background: #58a6ff;
   color: white;
-  font-size: 11px;
+  /* v0.4.8 R21-4 (impeccable anti-pattern): tiny-text — 11px → 12px (badge 满足 ≥12 门槛) */
+  font-size: 12px;
   padding: 2px 8px;
   border-radius: 3px;
   font-weight: 500;
@@ -143,7 +144,8 @@ main.content {
   letter-spacing: 0.2px;
 }
 .report-header .version-tag {
-  font-size: 11px;
+  /* v0.4.8 R21-4 (impeccable anti-pattern): tiny-text — 11px → 12px (version-tag 满足 ≥12 门槛) */
+  font-size: 12px;
   opacity: 0.6;
   margin-top: 6px;
   text-transform: uppercase;
@@ -352,7 +354,8 @@ td code {
 .kpi-card.kpi-neg .kpi-value { color: #f0883e; }
 .kpi-card.kpi-warn .kpi-value { color: #f85149; }
 .kpi-card .kpi-sub {
-  font-size: 11px;
+  /* v0.4.8 R21-4 (impeccable anti-pattern): tiny-text — 11px → 12px (KPI sub-label 满足 ≥12 门槛) */
+  font-size: 12px;
   color: #f0f0f5;
   margin-top: 4px;
   opacity: 0.6;
@@ -409,7 +412,8 @@ td code {
   display: inline-block;
   padding: 3px 10px;
   border-radius: 12px;
-  font-size: 11px;
+  /* v0.4.8 R21-4 (impeccable anti-pattern): tiny-text — 11px → 12px (status-badge 满足 ≥12 门槛) */
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.2px;
   text-transform: uppercase;
@@ -422,7 +426,8 @@ td code {
 .heatmap {
   border-collapse: separate;
   border-spacing: 2px;
-  font-size: 11px;
+  /* v0.4.8 R21-4 (impeccable anti-pattern): tiny-text — 11px → 12px (heatmap table 满足 ≥12 门槛) */
+  font-size: 12px;
 }
 .heatmap th, .heatmap td {
   padding: 4px 6px;
