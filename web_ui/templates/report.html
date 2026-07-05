@@ -515,6 +515,95 @@ td code {
   .sidebar-nav li a { border-left: none; border-bottom: 3px solid transparent; }
   .sidebar-nav li a:hover { border-left-color: transparent; border-bottom-color: #3498db; }
 }
+
+/* === v0.4.8 R22-1: 现代表格 (.data-table) + 水平柱状条 (.rank-bar) === */
+.data-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 6px;
+}
+.data-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+.data-table thead th {
+  position: sticky;
+  top: 0;
+  background: rgba(54, 45, 89, 0.7);
+  backdrop-filter: blur(8px);
+  color: #f0f0f5;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  border-bottom: 1px solid #21262d;
+}
+.data-table tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(54, 45, 89, 0.3);
+  color: #f0f0f5;
+}
+.data-table tbody tr {
+  transition: background 0.15s ease;
+}
+.data-table tbody tr:hover {
+  background: rgba(106, 95, 193, 0.12);
+}
+.data-table tbody tr:nth-child(even) {
+  background: rgba(54, 45, 89, 0.15);
+}
+.data-table tbody tr:nth-child(even):hover {
+  background: rgba(106, 95, 193, 0.18);
+}
+.data-table.numeric tbody td:nth-child(n+2) {
+  text-align: right;
+  font-family: 'JetBrains Mono', ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.rank-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+.rank-bar-label {
+  flex: 0 0 auto;
+  min-width: 48px;
+  font-weight: 600;
+  color: #f0f0f5;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.rank-bar-track {
+  flex: 1 1 auto;
+  height: 8px;
+  background: rgba(54, 45, 89, 0.4);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.rank-bar-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #1f6feb, #3fb950);
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+.rank-bar-pos .rank-bar-fill { background: linear-gradient(90deg, #3fb950, #2ea043); }
+.rank-bar-neg .rank-bar-fill { background: linear-gradient(90deg, #f0883e, #d9650e); }
+.rank-bar-warn .rank-bar-fill { background: linear-gradient(90deg, #f85149, #c0392b); }
+.rank-bar-value {
+  flex: 0 0 auto;
+  min-width: 64px;
+  text-align: right;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  color: #f0f0f5;
+}
 </style>
 </head>
 <body>

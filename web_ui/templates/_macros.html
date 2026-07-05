@@ -1,0 +1,45 @@
+{# === 通用组件宏 (v0.4.8 R22-1)
+
+设计原则 (按 karpathy §2 Simplicity First + §3 Surgical):
+- 3 个核心 macro 覆盖全 13 个 _section_*.html 共有组件
+- KPI 卡 (render_kpi_card): 替代 inline .kpi-card div (R20 已有 class, 缺 macro)
+- 数据表格 (render_data_table): 替代 <table> (现代表格特性: hover/striped/sticky-header)
+- 水平柱状条 (render_rank_bar): 替代排名/数值列 (用 width 过渡, 不 transform scaleX)
+
+使用示例:
+{% from '_macros.html' import render_kpi_card, render_data_table, render_rank_bar %}
+{{ render_kpi_card('操作数', _n_total, 'S7/S9 段个股') }}
+{{ render_data_table(headers, rows, value_class='numeric') }}
+{{ render_rank_bar('S7', 59.6, max_val=70, variant='pos') }}
+#}
+
+{% macro render_kpi_card(label, value, sub='', variant='neutral') %}
+<div class="kpi-card kpi-{{ variant }}">
+  <div class="kpi-label">{{ label }}</div>
+  <div class="kpi-value">{{ value }}</div>
+  {% if sub %}<div class="kpi-sub">{{ sub }}</div>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro render_data_table(headers, rows, value_class='') %}
+<div class="data-table-wrap">
+  <table class="data-table {{ value_class }}">
+    <thead><tr>{% for h in headers %}<th>{{ h }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+{% macro render_rank_bar(label, value, max_val=100, variant='neutral', fmt='%.2f%%') %}
+<div class="rank-bar rank-bar-{{ variant }}">
+  <span class="rank-bar-label">{{ label }}</span>
+  <span class="rank-bar-track">
+    <span class="rank-bar-fill" style="width: {{ [100, (value / max_val * 100) if max_val else 0] | min | round(1) }}%"></span>
+  </span>
+  <span class="rank-bar-value">{{ fmt | format(value) if value is number else value }}</span>
+</div>
+{% endmacro %}
