@@ -732,6 +732,28 @@ td code {
   border-color: rgba(88, 166, 255, 0.9);
 }
 
+/* v0.4.8 R28-4: composite 卡片 wrap + selected 标记 */
+.factor-card-wrap {
+  position: relative;
+}
+.factor-card-wrap .factor-card {
+  height: 100%;
+}
+.factor-card-selected-mark {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  pointer-events: none;
+}
+.factor-card-sym {
+  font-size: 11px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(48, 54, 61, 0.4);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  color: #8b949e;
+}
+
 @media (max-width: 768px) {
   .factor-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
   .factor-card { padding: 10px 12px; }

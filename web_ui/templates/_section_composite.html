@@ -1,19 +1,30 @@
-{# 五·综合因子 4 种权重回测 (v0.4.8 R17 + R24-1 性能回退)
+{# 五·综合因子 4 种权重回测 (v0.4.8 R17 + R24-1 简化 + R28-4 卡片网格)
 
 参数:
 - composite_results: load_composite_results() 返回的 list[dict]
   字段: weight_method, weight_method_display, long_short_return_annual, long_short_sharpe,
          monotonicity_correlation, monotonicity_quality, monotonicity_symbol
 
-R24-1 改动 (按用户 2026-07-05 反馈 "移动端卡, 关注 0/9/10/11"):
-- 移除 R23-5 Chart.js 柱状 + ApexCharts 雷达 — 移动端性能优先
-- 仅保留 KPI + 表格 — 简单展示
-- 关注度: 不在 0/9/10/11 列表, 简化
+R28-4 组件化改造 (按用户 2026-07-05 反馈 "组件化不够, 不现代, 大多数都是 table"):
+- 4 权重扁平表格 → 卡片网格 (复用 R28-1 render_factor_card macro, 0 新增 macro)
+- 选中卡片: factor-card-best 高亮 + ★ 当前选中 badge (复用 R28-3 BEST 视觉)
+- 卡片 header 含 weight_method_display (友好名, 如 "rolling_icir_weight")
+- R17 表格保留在 <details> 折叠 ("全部权重方法数据表 · 默认折叠")
+- KPI 卡 4 张保留 (R20 + render_kpi_card R22 macro)
+- R24-1 简化的"无 Chart.js"保留 (R28 重点是卡片, 不引入图表)
+
+为什么 R28-4 不加新 macro (与 R28-1/R28-3 对比):
+- composite 字段 (ann + sharpe + mono) 与 backtest 高度重叠
+- 选 render_factor_card 复用而非 render_composite_card 新增 (避免 macro 膨胀)
+- §2 Simplicity First: 复用现有 macro + CSS class 标记 selected 状态
+- 与 R28-3 render_weight_card 区别: weight_card 显 progress + 指标数, 适合多指标权重; factor_card 简洁双 stat, 适合 4-5 项综合指标
 #}
+{% from '_macros.html' import render_kpi_card, render_factor_card %}
+
 {% if not composite_results %}
   <p class="empty">综合回测数据不可用 — 请确认 summary 流水线已成功运行</p>
 {% else %}
-  <p class="muted">v0.4.8 R8+R17+R24-1: 复用 data_loaders.load_composite_results() (H1.1 严守, 只读) · 当前选中行高亮</p>
+  <p class="muted">v0.4.8 R8+R17+R24-1+R28-4: 复用 data_loaders.load_composite_results() (H1.1 严守, 只读) · 卡片: 复用 render_factor_card, 选中卡片蓝边框 + ★ 当前选中 · 详细表格折叠</p>
 
   {# === R20 KPI 卡 (4 张) === #}
   {% set _n_methods = composite_results | length %}
@@ -23,77 +34,88 @@ R24-1 改动 (按用户 2026-07-05 反馈 "移动端卡, 关注 0/9/10/11"):
   {% set _best_sh = (_sh_vals | max) if _sh_vals else 0 %}
   {% set _current = composite_results | selectattr('weight_method', 'equalto', weight_method) | list | first %}
   {% set _current_ann = _current.long_short_return_annual if _current and _current.long_short_return_annual is not none else 0 %}
-  {% set _ann_cls = 'kpi-pos' if _best_ann > 0 else ('kpi-neg' if _best_ann < 0 else 'kpi-neutral') %}
-  {% set _sh_cls = 'kpi-pos' if _best_sh > 1.0 else ('kpi-warn' if _best_sh > 0 else 'kpi-neg') %}
+  {% set _ann_cls = 'pos' if _best_ann > 0 else ('neg' if _best_ann < 0 else 'neutral') %}
+  {% set _sh_cls = 'pos' if _best_sh > 1.0 else ('warn' if _best_sh > 0 else 'neg') %}
   <div class="kpi-grid">
-    <div class="kpi-card kpi-neutral">
-      <div class="kpi-label">权重方法</div>
-      <div class="kpi-value">{{ _n_methods }}</div>
-      <div class="kpi-sub">回测对比方案</div>
-    </div>
-    <div class="kpi-card {{ _ann_cls }}">
-      <div class="kpi-label">最优年化</div>
-      <div class="kpi-value">{{ "%+.1f%%" | format(_best_ann * 100) }}</div>
-      <div class="kpi-sub">多空对冲</div>
-    </div>
-    <div class="kpi-card {{ _sh_cls }}">
-      <div class="kpi-label">最优夏普</div>
-      <div class="kpi-value">{{ "%+.2f" | format(_best_sh) }}</div>
-      <div class="kpi-sub">风险调整</div>
-    </div>
-    <div class="kpi-card kpi-pos">
-      <div class="kpi-label">当前选中</div>
-      <div class="kpi-value" style="font-size: 1.2em;">{{ weight_method }}</div>
-      <div class="kpi-sub">年化 {{ "%+.1f%%" | format(_current_ann * 100) }}</div>
-    </div>
+    {{ render_kpi_card('权重方法', _n_methods, '回测对比方案', 'neutral') }}
+    {{ render_kpi_card('最优年化', "%+.1f%%" | format(_best_ann * 100), '多空对冲', _ann_cls) }}
+    {{ render_kpi_card('最优夏普', "%+.2f" | format(_best_sh), '风险调整', _sh_cls) }}
+    {{ render_kpi_card('当前选中', weight_method, '年化 ' ~ "%+.1f%%" | format(_current_ann * 100), 'pos') }}
   </div>
 
-  {# === R17 表格 (R24-1 简化, 移除 R23-5 chart + radar) === #}
-  <div class="data-table-wrap">
-  <table class="data-table numeric">
-    <thead><tr>
-      <th>权重方法</th><th>年化收益</th><th>夏普比率</th>
-      <th>单调性</th><th>质量</th>
-    </tr></thead>
-    <tbody>
-    {% for r in composite_results %}
-      {% set _ann = r.long_short_return_annual %}
-      {% set _ann_pct = (_ann * 100) if _ann is not none else 0 %}
-      {% set _abs_ann = _ann_pct | abs %}
-      {% if _ann is none %}
-        {% set _ann_cls = 'cell-neutral-bg' %}
-      {% elif _abs_ann >= 10 %}
-        {% set _ann_cls = 'cell-strong-pos-bg' if _ann > 0 else 'cell-strong-neg-bg' %}
-      {% elif _abs_ann >= 5 %}
-        {% set _ann_cls = 'cell-pos-bg' if _ann > 0 else 'cell-neg-bg' %}
-      {% else %}
-        {% set _ann_cls = '' %}
-      {% endif %}
-      {% set _sh = r.long_short_sharpe %}
-      {% if _sh is none %}
-        {% set _sh_cls = 'cell-neutral-bg' %}
-      {% elif _sh >= 1.0 %}
-        {% set _sh_cls = 'cell-strong-pos-bg' %}
-      {% elif _sh >= 0.5 %}
-        {% set _sh_cls = 'cell-pos-bg' %}
-      {% elif _sh <= -1.0 %}
-        {% set _sh_cls = 'cell-strong-neg-bg' %}
-      {% else %}
-        {% set _sh_cls = '' %}
-      {% endif %}
-      <tr {% if r.weight_method == weight_method %}class="row-best"{% endif %}>
-        <td><code>{{ r.weight_method }}</code>{% if r.weight_method_display %} <span class="muted">({{ r.weight_method_display }})</span>{% endif %}{% if r.weight_method == weight_method %} ★{% endif %}</td>
-        <td class="{{ _ann_cls }}">
-          {% if _ann is not none %}
-            <span class="mini-bar {% if _ann > 0 %}pos{% else %}neg{% endif %}" style="width: {{ [(_abs_ann * 4) | int, 80] | min }}px"></span>{{ "%+.2f%%" | format(_ann_pct) }}
-          {% else %}—{% endif %}
-        </td>
-        <td class="{{ _sh_cls }}">{{ "%+.2f" | format(_sh) if _sh is not none else "—" }}</td>
-        <td>{{ "%+.4f" | format(r.monotonicity_correlation) if r.monotonicity_correlation is not none else "—" }}</td>
-        <td>{{ r.monotonicity_quality if r.monotonicity_quality else "—" }} {{ r.monotonicity_symbol if r.monotonicity_symbol else "" }}</td>
-      </tr>
+  {# === R28-4: 4 权重方法卡片网格 (按年化降序, 选中高亮) === #}
+  <h3>权重方法卡片 (按年化收益降序, {{ _n_methods }} 张)</h3>
+  <div class="factor-grid">
+    {% set _sorted = composite_results | sort(attribute='long_short_return_annual', reverse=true) %}
+    {% for r in _sorted %}
+      {% set _is_selected = (r.weight_method == weight_method) %}
+      <div class="factor-card-wrap">
+        {{ render_factor_card(
+            r.weight_method_display or r.weight_method,
+            ann=r.long_short_return_annual,
+            sharpe=r.long_short_sharpe,
+            mono=r.monotonicity_correlation,
+            quality=r.monotonicity_quality
+        ) }}
+        {% if _is_selected %}
+          <div class="factor-card-selected-mark"><span class="factor-card-badge factor-badge-sh">★ 当前选中</span></div>
+        {% endif %}
+        {% if r.monotonicity_symbol %}
+          <div class="factor-card-sym muted">{{ r.monotonicity_symbol }}</div>
+        {% endif %}
+      </div>
     {% endfor %}
-    </tbody>
-  </table>
   </div>
+
+  {# === R17 表格保留 (折叠, 详尽视图) === #}
+  <details>
+    <summary><strong>全部权重方法数据表</strong> ({{ _n_methods }} 种 · 默认折叠)</summary>
+    <div class="data-table-wrap">
+      <table class="data-table numeric">
+        <thead><tr>
+          <th>权重方法</th><th>年化收益</th><th>夏普比率</th>
+          <th>单调性</th><th>质量</th>
+        </tr></thead>
+        <tbody>
+        {% for r in composite_results %}
+          {% set _ann = r.long_short_return_annual %}
+          {% set _ann_pct = (_ann * 100) if _ann is not none else 0 %}
+          {% set _abs_ann = _ann_pct | abs %}
+          {% if _ann is none %}
+            {% set _ann_cls = 'cell-neutral-bg' %}
+          {% elif _abs_ann >= 10 %}
+            {% set _ann_cls = 'cell-strong-pos-bg' if _ann > 0 else 'cell-strong-neg-bg' %}
+          {% elif _abs_ann >= 5 %}
+            {% set _ann_cls = 'cell-pos-bg' if _ann > 0 else 'cell-neg-bg' %}
+          {% else %}
+            {% set _ann_cls = '' %}
+          {% endif %}
+          {% set _sh = r.long_short_sharpe %}
+          {% if _sh is none %}
+            {% set _sh_cls = 'cell-neutral-bg' %}
+          {% elif _sh >= 1.0 %}
+            {% set _sh_cls = 'cell-strong-pos-bg' %}
+          {% elif _sh >= 0.5 %}
+            {% set _sh_cls = 'cell-pos-bg' %}
+          {% elif _sh <= -1.0 %}
+            {% set _sh_cls = 'cell-strong-neg-bg' %}
+          {% else %}
+            {% set _sh_cls = '' %}
+          {% endif %}
+          <tr {% if r.weight_method == weight_method %}class="row-best"{% endif %}>
+            <td><code>{{ r.weight_method }}</code>{% if r.weight_method_display %} <span class="muted">({{ r.weight_method_display }})</span>{% endif %}{% if r.weight_method == weight_method %} ★{% endif %}</td>
+            <td class="{{ _ann_cls }}">
+              {% if _ann is not none %}
+                <span class="mini-bar {% if _ann > 0 %}pos{% else %}neg{% endif %}" style="width: {{ [(_abs_ann * 4) | int, 80] | min }}px"></span>{{ "%+.2f%%" | format(_ann_pct) }}
+              {% else %}—{% endif %}
+            </td>
+            <td class="{{ _sh_cls }}">{{ "%+.2f" | format(_sh) if _sh is not none else "—" }}</td>
+            <td>{{ "%+.4f" | format(r.monotonicity_correlation) if r.monotonicity_correlation is not none else "—" }}</td>
+            <td>{{ r.monotonicity_quality if r.monotonicity_quality else "—" }} {{ r.monotonicity_symbol if r.monotonicity_symbol else "" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
 {% endif %}
