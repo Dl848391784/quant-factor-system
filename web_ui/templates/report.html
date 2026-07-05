@@ -65,8 +65,9 @@ aside.sidebar {
 }
 .sidebar-brand .pipeline-tag {
   display: inline-block;
-  /* v0.4.8 R19: Sentry Purple 主色 */
-  background: #58a6ff;
+  /* v0.4.8 R21-8 (impeccable anti-pattern): low-contrast — #58a6ff (2.5:1) → #1f6feb (4.6:1 AA 通过)
+     Sentry 蓝保留视觉接近, 但通过 WCAG AA 4.5:1 门槛 */
+  background: #1f6feb;
   color: white;
   /* v0.4.8 R21-4 (impeccable anti-pattern): tiny-text — 11px → 12px (badge 满足 ≥12 门槛) */
   font-size: 12px;
@@ -484,7 +485,8 @@ td code {
   right: 24px;
   width: 40px;
   height: 40px;
-  background: #58a6ff;
+  /* v0.4.8 R21-8 (impeccable anti-pattern): low-contrast — #58a6ff (2.5:1) → #1f6feb (4.6:1 AA 通过) */
+  background: #1f6feb;
   color: white;
   border: 1px solid #584674;
   border-radius: 13px;
