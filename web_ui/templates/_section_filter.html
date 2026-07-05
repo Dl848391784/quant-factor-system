@@ -1,0 +1,55 @@
+{# 四·因子筛选结果 (v0.4.8 R9)
+
+参数:
+- filter_result: parse_obq_filter() 返回的 dict
+  - selected_factors: [{name, icir, weight}, ...]
+  - note: "权重来自..."
+  - high_corr_threshold: 0.7
+  - excluded: [{name, reasons: [str, ...]}, ...]
+#}
+{% if not filter_result %}
+  <p class="empty">因子筛选数据不可用</p>
+{% else %}
+  <p class="muted">v0.4.8 R9: 从 txt 报告第四节解析 (H1.1 严守, 不改 data_loaders)</p>
+
+  {% set sel = filter_result.get("selected_factors", []) %}
+  {% if sel %}
+  <h3>选中因子 ({{ sel | length }} 个)</h3>
+  <table>
+    <thead>
+      <tr><th>因子</th><th>ICIR</th><th>权重</th></tr>
+    </thead>
+    <tbody>
+    {% for f in sel %}
+      <tr>
+        <td><code>{{ f.name }}</code></td>
+        <td>{{ "%.2f" | format(f.icir) }}</td>
+        <td>{{ "%.1f%%" | format(f.weight) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if filter_result.get("note") %}
+  <p><strong>注</strong>: {{ filter_result.note }}</p>
+  {% endif %}
+  {% if filter_result.get("high_corr_threshold") is not none %}
+  <p><strong>高相关阈值</strong>: {{ "%.2f" | format(filter_result.high_corr_threshold) }}</p>
+  {% endif %}
+
+  {% set excluded = filter_result.get("excluded", []) %}
+  {% if excluded %}
+  <h3>剔除因子 ({{ excluded | length }} 个)</h3>
+  <ul>
+  {% for e in excluded[:30] %}
+    <li>
+      <code>{{ e.name }}</code>: {{ e.reasons | join("; ") }}
+    </li>
+  {% endfor %}
+  {% if excluded | length > 30 %}
+  <li class="muted">... 还有 {{ excluded | length - 30 }} 个</li>
+  {% endif %}
+  </ul>
+  {% endif %}
+{% endif %}

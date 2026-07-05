@@ -1,0 +1,68 @@
+{# 三·因子相关性矩阵 (v0.4.8 R9)
+
+参数:
+- correlation: parse_obq_correlation() 返回的 dict
+  - selected_factors: [完整因子名, ...]
+  - matrix: {完整因子: {缩略词: 系数}}
+  - abbrev: {缩略词: 完整因子}
+  - high_corr_pairs: [{factor1, dim1, factor2, dim2, corr}]
+#}
+{% if not correlation %}
+  <p class="empty">因子相关性数据不可用</p>
+{% else %}
+  <p class="muted">v0.4.8 R9: 从 txt 报告第三节解析 (H1.1 严守, 不改 data_loaders)</p>
+
+  {% set sel = correlation.get("selected_factors", []) %}
+  {% set matrix = correlation.get("matrix", {}) %}
+  {% set abbrev = correlation.get("abbrev", {}) %}
+  <p><strong>选中因子</strong>: {{ sel | length }} 个 ({{ sel | join(", ") }})</p>
+
+  {% if matrix %}
+  <h3>相关性矩阵 (缩略列名: {{ abbrev.keys() | list | join(", ") if abbrev else "amp/int" }})</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>因子</th>
+        {% for col in abbrev.keys() %}
+          <th>{{ col }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+    {% for factor, row in matrix.items() %}
+      <tr>
+        <td><code>{{ factor }}</code></td>
+        {% for col in abbrev.keys() %}
+          <td>{{ "%.2f" | format(row.get(col, 0)) }}</td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if abbrev %}
+  <h3>缩写对照表</h3>
+  <table>
+    <thead><tr><th>缩写</th><th>完整名</th></tr></thead>
+    <tbody>
+    {% for short, full in abbrev.items() %}
+      <tr><td><code>{{ short }}</code></td><td><code>{{ full }}</code></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% set pairs = correlation.get("high_corr_pairs", []) %}
+  {% if pairs %}
+  <h3>跨维度高相关因子对 (|corr| &gt; 0.7)</h3>
+  <ul>
+  {% for p in pairs %}
+    <li>
+      <code>{{ p.factor1 }}[{{ p.dim1 }}]</code> vs
+      <code>{{ p.factor2 }}[{{ p.dim2 }}]</code>: <strong>{{ "%.2f" | format(p.corr) }}</strong>
+    </li>
+  {% endfor %}
+  </ul>
+  {% endif %}
+{% endif %}
