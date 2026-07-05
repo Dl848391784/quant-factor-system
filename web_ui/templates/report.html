@@ -15,7 +15,9 @@ body {
   margin: 0;
   /* v0.4.8 R19: Sentry 深紫黑背景 (#0d1117) — 永不纯黑 */
   background: #0d1117;
-  color: #e5e7eb;
+  /* v0.4.8 R21-2 (impeccable anti-pattern fix): gray-on-color — 原 #e5e7eb 在紫底 (#362d59/rgba(54,45,89)) 上发灰
+     改用更亮的 #f0f0f5 (仍 non-pure-white 符合 Sentry 风格) */
+  color: #f0f0f5;
   font-size: 14px;
   line-height: 1.6;
 }
@@ -76,7 +78,7 @@ aside.sidebar {
 .sidebar-brand .date {
   display: block;
   font-size: 12px;
-  color: #e5e7eb;
+  color: #f0f0f5;
   margin-top: 4px;
   opacity: 0.7;
 }
@@ -84,7 +86,7 @@ aside.sidebar {
 .sidebar-nav li a {
   display: block;
   padding: 8px 16px;
-  color: #e5e7eb;
+  color: #f0f0f5;
   text-decoration: none;
   font-size: 13px;
   border-left: 3px solid transparent;
@@ -329,7 +331,7 @@ td code {
 .kpi-card.kpi-neutral::before { background: #8b949e; }
 .kpi-card .kpi-label {
   font-size: 10px;
-  color: #e5e7eb;
+  color: #f0f0f5;
   text-transform: uppercase;
   letter-spacing: 0.25px;
   margin-bottom: 6px;
@@ -349,7 +351,7 @@ td code {
 .kpi-card.kpi-warn .kpi-value { color: #f85149; }
 .kpi-card .kpi-sub {
   font-size: 11px;
-  color: #e5e7eb;
+  color: #f0f0f5;
   margin-top: 4px;
   opacity: 0.6;
 }
@@ -362,7 +364,7 @@ td code {
 .cell-strong-pos-bg { background: #3fb950; color: #0d1117; font-weight: 700; }
 .cell-strong-neg-bg { background: #f0883e; color: #0d1117; font-weight: 700; }
 .cell-warn-bg { background: rgba(250, 127, 170, 0.18); color: #f85149; }
-.cell-neutral-bg { background: rgba(54, 45, 89, 0.4); color: #e5e7eb; }
+.cell-neutral-bg { background: rgba(54, 45, 89, 0.4); color: #f0f0f5; }
 .cell-strong { font-weight: 700; }
 
 /* === 微型柱状图 === */
@@ -429,7 +431,7 @@ td code {
 }
 .heatmap th {
   background: transparent;
-  color: #e5e7eb;
+  color: #f0f0f5;
   font-weight: 600;
   font-size: 10px;
   text-transform: uppercase;
@@ -446,7 +448,7 @@ td code {
 }
 .heatmap td.heatmap-strong-pos { background: #3fb950; color: #0d1117; font-weight: 700; }
 .heatmap td.heatmap-pos { background: rgba(194, 239, 78, 0.5); color: #3fb950; }
-.heatmap td.heatmap-neutral { background: rgba(54, 45, 89, 0.5); color: #e5e7eb; }
+.heatmap td.heatmap-neutral { background: rgba(54, 45, 89, 0.5); color: #f0f0f5; }
 .heatmap td.heatmap-neg { background: rgba(255, 178, 135, 0.5); color: #f0883e; }
 .heatmap td.heatmap-strong-neg { background: #f0883e; color: #0d1117; font-weight: 700; }
 
@@ -493,7 +495,7 @@ td code {
   font-style: italic;
 }
 .muted {
-  color: #e5e7eb;
+  color: #f0f0f5;
   opacity: 0.7;
   font-size: 12px;
   margin: 4px 0 12px 0;
@@ -504,7 +506,7 @@ td code {
   /* v0.4.8 R21-1 (impeccable anti-pattern fix): 3px 灰条 → inset accent (Sentry 暗色版) */
   box-shadow: inset 3px 0 0 #8b949e;
   margin: 12px 0;
-  color: #e5e7eb;
+  color: #f0f0f5;
   border-radius: 0 4px 4px 0;
 }
 
