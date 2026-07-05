@@ -165,6 +165,48 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
 {% if txt_s9_matrix and txt_s9_matrix.get("segments") %}
   <h3>30 分段 × 12 选股日 完整胜率矩阵 (txt 来源 · 热力图)</h3>
   <p class="muted">数据源: web_ui/common/txt_parser.py 解析 summary/result/ob_quality/factor_summary_report_*.txt (H1.1 内部实现, 不读 master Parquet) · 上方 decile_stats 表从 Parquet 实时计算, 须 T+2 数据 · 颜色: >=60% 绿 / 50-60 浅绿 / 40-50 中性 / 30-40 浅红 / <30% 深红</p>
+
+  {# === R30-2: 30 段 × N 选股日 折线概览图 (B 方案, 顶部 overview) === #}
+  <h3>30 段胜率趋势概览 (R30-2 折线图 · R30-3 切换 12/30/90/全部)</h3>
+  <div class="chart-wrap">
+    <canvas id="segOverviewChart" height="280"></canvas>
+  </div>
+  <script>
+  (function() {
+    // R30-2 inspector fix: txt_s9_matrix.segments[].win_rates[] 是 30 段 × N 选股日完整数据
+    // 旧代码用 segs (decile_stats 数据, T+2 不一定有), 真 server 经常空 → 折线图无数据
+    const segs = {{ txt_s9_matrix.segments | tojson }} || [];
+    const SENTRY = { pos: '#3fb950', neg: '#f0883e', warn: '#f85149', neutral: '#58a6ff', grid: 'rgba(139,148,158,0.15)', text: '#f0f0f5' };
+    const COLORS = ['#3fb950', '#58a6ff', '#f0883e', '#f85149', '#a371f7', '#7ee787', '#d2a8ff', '#ff7b6e', '#56d4dd', '#ffd33d', '#9ecaff', '#f97583', '#85e89d', '#ffab70', '#b392f0'];
+    const sortedSegs = [...segs].sort((a, b) => parseInt((a.label||'S0').replace(/\D/g, '')) - parseInt((b.label||'S0').replace(/\D/g, '')));
+    if (sortedSegs.length === 0) return;
+    // X 轴 = dates (R30-1 修复 schema 后用 d 不用 d[5:])
+    const dates = {{ txt_s9_matrix.dates | tojson }} || [];
+    const datasets = sortedSegs.slice(0, 30).map((s, i) => ({
+      label: s.label,
+      data: (s.win_rates || []).map(v => parseFloat(v) || 0),
+      borderColor: COLORS[i % COLORS.length],
+      backgroundColor: COLORS[i % COLORS.length] + '20',
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      borderWidth: 1.5,
+      tension: 0.3
+    }));
+    new Chart(document.getElementById('segOverviewChart'), {
+      type: 'line',
+      data: { labels: dates, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'right', labels: { color: SENTRY.text, font: { size: 9 }, boxWidth: 8 } }, tooltip: { mode: 'index', intersect: false } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 10 } } },
+          y: { min: 0, max: 100, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } }
+        },
+        interaction: { mode: 'nearest', intersect: false }
+      }
+    });
+  })();
+  </script>
   {% set best_seg = txt_s9_matrix.get("best_segment") %}
   {% if best_seg %}
   <p><strong>最佳段</strong>: <code>{{ best_seg.label }}</code> (合并胜率 {{ "%.1f" | format(best_seg.merged) }}%)</p>
