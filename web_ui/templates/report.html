@@ -343,7 +343,9 @@ td code {
   font-weight: 700;
   color: #ffffff;
   font-family: 'JetBrains Mono', ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  line-height: 1.2;
+  /* v0.4.8 R21-3 (impeccable anti-pattern fix): tight-leading — line-height: 1.2 → 1.3
+     KPI value 26px 单行数字原本不换行, 1.2 → 1.3 对单行无视觉影响, 但满足 ≥1.3 门槛 */
+  line-height: 1.3;
   letter-spacing: -0.5px;
 }
 .kpi-card.kpi-pos .kpi-value { color: #3fb950; }
