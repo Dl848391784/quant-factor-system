@@ -1,18 +1,27 @@
-{# 二·单因子分层回测 (v0.4.8 R17 + R24-1 性能回退)
+{# 二·单因子分层回测 (v0.4.8 R17 + R24-1 简化 + R28-1 卡片网格)
 
 参数:
 - backtest_results: load_backtest_results() 返回的 list[dict]
   字段: factor_name, long_short_return_annual, long_short_sharpe, monotonicity_correlation, monotonicity_quality
 
-R24-1 改动 (按用户 2026-07-05 反馈 "移动端卡, 关注 0/9/10/11"):
-- 移除 R23-3 Chart.js 双图 — 移动端性能优先
-- 仅保留表格 — 简单展示
-- 关注度: 不在 0/9/10/11 列表, 简化
+R28-1 组件化改造 (按用户 2026-07-05 反馈 "组件化不够, 不现代, 大多数都是 table"):
+- 72 因子扁平表格 → 卡片网格 (.factor-grid auto-fill 3 列)
+- 卡片含: dot (夏普颜色) + 名字 + 年化/夏普双 stat + 年化/夏普双 badge
+- R17 表格保留在 <details> 折叠 ("全部 72 因子数据表" 默认折叠, 详尽视图)
+- KPI 卡 4 张保留 (R20)
+- R24-1 简化的"无 Chart.js"保留 (R28 重点是卡片, 不引入图表)
+
+为什么 R28-1 不加 Chart.js:
+- R24-1 已移除 5 个次要 _section 的图表 (用户原话 "移动端卡")
+- 卡片网格是更现代的视觉, 替代 "折线图/横向柱状图" 的角色
+- 加图表 + 卡片会双重增加移动端加载 (违背 R24-1 简化原则)
 #}
+{% from '_macros.html' import render_kpi_card, render_factor_card %}
+
 {% if not backtest_results %}
   <p class="empty">回测数据不可用 — 请确认 summary 流水线已成功运行</p>
 {% else %}
-  <p class="muted">v0.4.8 R8+R17+R24-1: 复用 data_loaders.load_backtest_results() (H1.1 严守, 只读) · 单元格颜色: 年化>=±10% 强色 / 夏普>=±1 显著 / 单调性>=|0.5| 加粗</p>
+  <p class="muted">v0.4.8 R8+R17+R24-1+R28-1: 复用 data_loaders.load_backtest_results() (H1.1 严守, 只读) · 卡片: dot 色=夏普强度, 年化+夏普双 stat, 5 段语义 badge (强正/正/弱/弱负/强负) · 详细表格折叠</p>
 
   {# === R20 KPI 卡 (4 张) === #}
   {% set _n_total = backtest_results | length %}
@@ -21,88 +30,90 @@ R24-1 改动 (按用户 2026-07-05 反馈 "移动端卡, 关注 0/9/10/11"):
   {% set _n_good = _sh_vals | select('ge', 1.0) | list | length %}
   {% set _best_ann = (_ann_vals | max) if _ann_vals else 0 %}
   {% set _avg_sh = (_sh_vals | sum / _sh_vals | length) if _sh_vals else 0 %}
-  {% set _ann_cls = 'kpi-pos' if _best_ann > 0 else ('kpi-neg' if _best_ann < 0 else 'kpi-neutral') %}
-  {% set _sh_cls = 'kpi-pos' if _avg_sh > 0.5 else ('kpi-warn' if _avg_sh > 0 else 'kpi-neg') %}
+  {% set _ann_cls = 'pos' if _best_ann > 0 else ('neg' if _best_ann < 0 else 'neutral') %}
+  {% set _sh_cls = 'pos' if _avg_sh > 0.5 else ('warn' if _avg_sh > 0 else 'neg') %}
   <div class="kpi-grid">
-    <div class="kpi-card kpi-neutral">
-      <div class="kpi-label">因子数</div>
-      <div class="kpi-value">{{ _n_total }}</div>
-      <div class="kpi-sub">单因子分层回测</div>
-    </div>
-    <div class="kpi-card kpi-pos">
-      <div class="kpi-label">优因子</div>
-      <div class="kpi-value">{{ _n_good }}</div>
-      <div class="kpi-sub">夏普 ≥ 1.0</div>
-    </div>
-    <div class="kpi-card {{ _ann_cls }}">
-      <div class="kpi-label">最佳年化</div>
-      <div class="kpi-value">{{ "%+.1f%%" | format(_best_ann * 100) }}</div>
-      <div class="kpi-sub">多空对冲</div>
-    </div>
-    <div class="kpi-card {{ _sh_cls }}">
-      <div class="kpi-label">平均夏普</div>
-      <div class="kpi-value">{{ "%+.2f" | format(_avg_sh) }}</div>
-      <div class="kpi-sub">风险调整后收益</div>
-    </div>
+    {{ render_kpi_card('因子数', _n_total, '单因子分层回测', 'neutral') }}
+    {{ render_kpi_card('优因子', _n_good, '夏普 ≥ 1.0', 'pos') }}
+    {{ render_kpi_card('最佳年化', "%+.1f%%" | format(_best_ann * 100), '多空对冲', _ann_cls) }}
+    {{ render_kpi_card('平均夏普', "%+.2f" | format(_avg_sh), '风险调整后收益', _sh_cls) }}
   </div>
 
-  {# === R17 表格 (R24-1 简化, 移除 R23-3 chart) === #}
-  <div class="data-table-wrap">
-  <table class="data-table numeric">
-    <thead><tr>
-      <th>因子</th><th>多空年化收益</th><th>夏普比率</th>
-      <th>单调性系数</th><th>单调性质量</th>
-    </tr></thead>
-    <tbody>
-    {% for r in backtest_results %}
-      {% set _ann = r.long_short_return_annual %}
-      {% set _ann_pct = (_ann * 100) if _ann is not none else 0 %}
-      {% set _abs_ann = _ann_pct | abs %}
-      {% if _ann is none %}
-        {% set _ann_cls = 'cell-neutral-bg' %}
-      {% elif _abs_ann >= 10 %}
-        {% set _ann_cls = 'cell-strong-pos-bg' if _ann > 0 else 'cell-strong-neg-bg' %}
-      {% elif _abs_ann >= 5 %}
-        {% set _ann_cls = 'cell-pos-bg' if _ann > 0 else 'cell-neg-bg' %}
-      {% else %}
-        {% set _ann_cls = '' %}
-      {% endif %}
-      {% set _sh = r.long_short_sharpe %}
-      {% if _sh is none %}
-        {% set _sh_cls = 'cell-neutral-bg' %}
-      {% elif _sh >= 1.0 %}
-        {% set _sh_cls = 'cell-strong-pos-bg' %}
-      {% elif _sh >= 0.5 %}
-        {% set _sh_cls = 'cell-pos-bg' %}
-      {% elif _sh <= -1.0 %}
-        {% set _sh_cls = 'cell-strong-neg-bg' %}
-      {% elif _sh <= -0.5 %}
-        {% set _sh_cls = 'cell-neg-bg' %}
-      {% else %}
-        {% set _sh_cls = '' %}
-      {% endif %}
-      {% set _mono = r.monotonicity_correlation %}
-      {% set _abs_mono = (_mono | abs) if _mono is not none else 0 %}
-      {% if _mono is none %}
-        {% set _mono_cls = 'cell-neutral-bg' %}
-      {% elif _abs_mono >= 0.5 %}
-        {% set _mono_cls = 'cell-strong' %}
-      {% else %}
-        {% set _mono_cls = '' %}
-      {% endif %}
-      <tr>
-        <td><code>{{ r.factor_name }}</code></td>
-        <td class="{{ _ann_cls }}">
-          {% if _ann is not none %}
-            <span class="mini-bar {% if _ann > 0 %}pos{% else %}neg{% endif %}" style="width: {{ [(_abs_ann * 4) | int, 80] | min }}px"></span>{{ "%+.2f%%" | format(_ann_pct) }}
-          {% else %}—{% endif %}
-        </td>
-        <td class="{{ _sh_cls }}">{{ "%+.2f" | format(_sh) if _sh is not none else "—" }}</td>
-        <td class="{{ _mono_cls }}">{{ "%+.4f" | format(_mono) if _mono is not none else "—" }}</td>
-        <td>{{ r.monotonicity_quality if r.monotonicity_quality else "—" }}</td>
-      </tr>
+  {# === R28-1: 因子卡片网格 (按夏普降序, 视觉焦点强因子在前) === #}
+  <h3>因子卡片 (按夏普降序, {{ _n_total }} 张)</h3>
+  <div class="factor-grid">
+    {% set _sorted = backtest_results | sort(attribute='long_short_sharpe', reverse=true) %}
+    {% for r in _sorted %}
+      {{ render_factor_card(
+          r.factor_name,
+          ann=r.long_short_return_annual,
+          sharpe=r.long_short_sharpe,
+          mono=r.monotonicity_correlation,
+          quality=r.monotonicity_quality
+      ) }}
     {% endfor %}
-    </tbody>
-  </table>
   </div>
+
+  {# === R17 表格保留 (折叠, 详尽视图) === #}
+  <details>
+    <summary><strong>全部 {{ _n_total }} 因子数据表</strong> (R17 详尽视图 · 默认折叠)</summary>
+    <div class="data-table-wrap">
+      <table class="data-table numeric">
+        <thead><tr>
+          <th>因子</th><th>多空年化收益</th><th>夏普比率</th>
+          <th>单调性系数</th><th>单调性质量</th>
+        </tr></thead>
+        <tbody>
+        {% for r in backtest_results %}
+          {% set _ann = r.long_short_return_annual %}
+          {% set _ann_pct = (_ann * 100) if _ann is not none else 0 %}
+          {% set _abs_ann = _ann_pct | abs %}
+          {% if _ann is none %}
+            {% set _ann_cls = 'cell-neutral-bg' %}
+          {% elif _abs_ann >= 10 %}
+            {% set _ann_cls = 'cell-strong-pos-bg' if _ann > 0 else 'cell-strong-neg-bg' %}
+          {% elif _abs_ann >= 5 %}
+            {% set _ann_cls = 'cell-pos-bg' if _ann > 0 else 'cell-neg-bg' %}
+          {% else %}
+            {% set _ann_cls = '' %}
+          {% endif %}
+          {% set _sh = r.long_short_sharpe %}
+          {% if _sh is none %}
+            {% set _sh_cls = 'cell-neutral-bg' %}
+          {% elif _sh >= 1.0 %}
+            {% set _sh_cls = 'cell-strong-pos-bg' %}
+          {% elif _sh >= 0.5 %}
+            {% set _sh_cls = 'cell-pos-bg' %}
+          {% elif _sh <= -1.0 %}
+            {% set _sh_cls = 'cell-strong-neg-bg' %}
+          {% elif _sh <= -0.5 %}
+            {% set _sh_cls = 'cell-neg-bg' %}
+          {% else %}
+            {% set _sh_cls = '' %}
+          {% endif %}
+          {% set _mono = r.monotonicity_correlation %}
+          {% set _abs_mono = (_mono | abs) if _mono is not none else 0 %}
+          {% if _mono is none %}
+            {% set _mono_cls = 'cell-neutral-bg' %}
+          {% elif _abs_mono >= 0.5 %}
+            {% set _mono_cls = 'cell-strong' %}
+          {% else %}
+            {% set _mono_cls = '' %}
+          {% endif %}
+          <tr>
+            <td><code>{{ r.factor_name }}</code></td>
+            <td class="{{ _ann_cls }}">
+              {% if _ann is not none %}
+                <span class="mini-bar {% if _ann > 0 %}pos{% else %}neg{% endif %}" style="width: {{ [(_abs_ann * 4) | int, 80] | min }}px"></span>{{ "%+.2f%%" | format(_ann_pct) }}
+              {% else %}—{% endif %}
+            </td>
+            <td class="{{ _sh_cls }}">{{ "%+.2f" | format(_sh) if _sh is not none else "—" }}</td>
+            <td class="{{ _mono_cls }}">{{ "%+.4f" | format(_mono) if _mono is not none else "—" }}</td>
+            <td>{{ r.monotonicity_quality if r.monotonicity_quality else "—" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
 {% endif %}

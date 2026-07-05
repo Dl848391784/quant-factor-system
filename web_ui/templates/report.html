@@ -625,6 +625,98 @@ td code {
   color: #f0f0f5;
 }
 
+/* === v0.4.8 R28-1: 因子卡片 (.factor-card) — 替代 72 因子扁平表格 === */
+.factor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+.factor-card {
+  background: rgba(22, 27, 34, 0.6);
+  border: 1px solid rgba(48, 54, 61, 0.6);
+  border-radius: 8px;
+  padding: 14px 16px;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.factor-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(88, 166, 255, 0.6);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.factor-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.4);
+}
+.factor-card-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor;
+}
+.factor-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f0f0f5;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  word-break: break-all;
+}
+.factor-card-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.factor-card-stat-label {
+  font-size: 11px;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 2px;
+}
+.factor-card-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  color: #f0f0f5;
+}
+.factor-pos { color: #3fb950; }
+.factor-neg { color: #f0883e; }
+.factor-neutral { color: #8b949e; }
+.factor-card-footer {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.factor-card-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  background: rgba(48, 54, 61, 0.6);
+  color: #f0f0f5;
+}
+.factor-badge-pos { background: rgba(63, 185, 80, 0.2); color: #3fb950; }
+.factor-badge-neg { background: rgba(240, 136, 62, 0.2); color: #f0883e; }
+.factor-badge-neutral { background: rgba(139, 148, 158, 0.2); color: #8b949e; }
+.factor-badge-sh { background: rgba(88, 166, 255, 0.2); color: #58a6ff; }
+
+@media (max-width: 768px) {
+  .factor-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+  .factor-card { padding: 10px 12px; }
+  .factor-card-stat-value { font-size: 16px; }
+}
+@media (max-width: 480px) {
+  .factor-grid { grid-template-columns: 1fr; }
+}
+
 /* === v0.4.8 R23-1: Chart.js + ApexCharts 容器样式 === */
 .chart-wrap {
   position: relative;

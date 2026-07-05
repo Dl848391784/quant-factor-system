@@ -6,11 +6,15 @@
 - 数据表格 (render_data_table): 替代 <table> (现代表格特性: hover/striped/sticky-header)
 - 水平柱状条 (render_rank_bar): 替代排名/数值列 (用 width 过渡, 不 transform scaleX)
 
+R28-1 新增:
+- 因子卡片 (render_factor_card): 替代 72 因子扁平表格 (卡片网格 3 列)
+
 使用示例:
-{% from '_macros.html' import render_kpi_card, render_data_table, render_rank_bar %}
+{% from '_macros.html' import render_kpi_card, render_data_table, render_rank_bar, render_factor_card %}
 {{ render_kpi_card('操作数', _n_total, 'S7/S9 段个股') }}
 {{ render_data_table(headers, rows, value_class='numeric') }}
 {{ render_rank_bar('S7', 59.6, max_val=70, variant='pos') }}
+{{ render_factor_card('tail_price_position', -0.0629, 0.9381, 0.067, 'medium') }}
 #}
 
 {% macro render_kpi_card(label, value, sub='', variant='neutral') %}
@@ -41,5 +45,43 @@
     <span class="rank-bar-fill" style="width: {{ [100, (value / max_val * 100) if max_val else 0] | min | round(1) }}%"></span>
   </span>
   <span class="rank-bar-value">{{ fmt | format(value) if value is number else value }}</span>
+</div>
+{% endmacro %}
+
+{% macro render_factor_card(name, ann=None, sharpe=None, mono=None, quality='') %}
+{# R28-1 因子卡片: 名字 + 年化收益 + 夏普 + 单调性 mini-bars
+   ann: 年化 decimal (0.2 = 20%), sharpe: float, mono: float, quality: 'high'/'medium'/'low'/'' #}
+{% set _ann = ann if ann is number else 0 %}
+{% set _ann_pct = _ann * 100 %}
+{% set _abs_ann = _ann_pct | abs %}
+{% if _ann_pct >= 10 %}{% set _ann_cls = 'pos' %}{% set _ann_lbl = '强正' %}
+{% elif _ann_pct >= 5 %}{% set _ann_cls = 'pos' %}{% set _ann_lbl = '正' %}
+{% elif _ann_pct >= 0 %}{% set _ann_cls = 'neutral' %}{% set _ann_lbl = '弱' %}
+{% elif _ann_pct >= -5 %}{% set _ann_cls = 'neg' %}{% set _ann_lbl = '弱负' %}
+{% else %}{% set _ann_cls = 'neg' %}{% set _ann_lbl = '强负' %}{% endif %}
+{% set _sh = sharpe if sharpe is number else 0 %}
+{% if _sh >= 1.0 %}{% set _sh_lbl = '优' %}{% set _sh_dot = '#3fb950' %}
+{% elif _sh >= 0.5 %}{% set _sh_lbl = '良' %}{% set _sh_dot = '#58a6ff' %}
+{% elif _sh >= 0 %}{% set _sh_lbl = '弱' %}{% set _sh_dot = '#f0883e' %}
+{% else %}{% set _sh_lbl = '差' %}{% set _sh_dot = '#f85149' %}{% endif %}
+<div class="factor-card">
+  <div class="factor-card-header">
+    <span class="factor-card-dot" style="background: {{ _sh_dot }};"></span>
+    <code class="factor-card-name">{{ name }}</code>
+  </div>
+  <div class="factor-card-stats">
+    <div class="factor-card-stat">
+      <div class="factor-card-stat-label">年化</div>
+      <div class="factor-card-stat-value factor-{{ _ann_cls }}">{{ "%+.1f%%" | format(_ann_pct) }}</div>
+    </div>
+    <div class="factor-card-stat">
+      <div class="factor-card-stat-label">夏普</div>
+      <div class="factor-card-stat-value">{{ "%+.2f" | format(_sh) }}</div>
+    </div>
+  </div>
+  <div class="factor-card-footer">
+    <span class="factor-card-badge factor-badge-{{ _ann_cls }}">{{ _ann_lbl }}</span>
+    <span class="factor-card-badge factor-badge-sh">{{ _sh_lbl }}</span>
+  </div>
 </div>
 {% endmacro %}
