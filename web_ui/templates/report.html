@@ -2,85 +2,367 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>web_ui - 因子分析报告 (ob_quality) {{ report_date }}</title>
 <style>
-body { font-family: sans-serif; max-width: 1400px; margin: 20px auto; padding: 0 20px; }
-h1 { color: #2c3e50; border-bottom: 2px solid #34495e; padding-bottom: 8px; }
-h2 { color: #34495e; margin-top: 40px; }
-h3 { color: #555; margin-top: 24px; }
-nav.toc { background: #ecf0f1; padding: 12px 16px; border-radius: 4px; position: sticky; top: 0; }
-nav.toc a { margin-right: 16px; color: #2c3e50; text-decoration: none; }
-nav.toc a:hover { text-decoration: underline; }
-.meta-box { background: #ecf0f1; padding: 12px 16px; border-radius: 4px; margin: 16px 0; }
-.meta-box p { margin: 4px 0; }
-table { width: 100%; border-collapse: collapse; margin: 10px 0 20px 0; }
-th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 0.9em; }
-th { background: #34495e; color: white; }
-tr:nth-child(even) { background: #f8f9fa; }
-.empty { color: #999; padding: 20px; text-align: center; }
-.muted { color: #7f8c8d; font-size: 0.85em; }
-.section-placeholder { background: #fafafa; padding: 16px; border-left: 3px solid #95a5a6; margin: 16px 0; color: #555; }
+/* === 全局重置 === */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  margin: 0;
+  background: #f5f7fa;
+  color: #2c3e50;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* === 主体布局 (侧栏 + 主区) === */
+.layout {
+  display: flex;
+  gap: 24px;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 24px;
+  align-items: flex-start;
+}
+
+/* === 左侧固定导航 === */
+aside.sidebar {
+  position: sticky;
+  top: 24px;
+  width: 220px;
+  flex-shrink: 0;
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+  padding: 16px 0;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+.sidebar-brand {
+  padding: 0 16px 12px 16px;
+  border-bottom: 1px solid #ecf0f1;
+  margin-bottom: 8px;
+}
+.sidebar-brand h1 {
+  font-size: 16px;
+  margin: 0 0 4px 0;
+  color: #1a252f;
+  font-weight: 600;
+}
+.sidebar-brand .pipeline-tag {
+  display: inline-block;
+  background: #3498db;
+  color: white;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+.sidebar-brand .date {
+  display: block;
+  font-size: 12px;
+  color: #7f8c8d;
+  margin-top: 4px;
+}
+.sidebar-nav { list-style: none; padding: 0; margin: 0; }
+.sidebar-nav li a {
+  display: block;
+  padding: 8px 16px;
+  color: #4a5568;
+  text-decoration: none;
+  font-size: 13px;
+  border-left: 3px solid transparent;
+  transition: all 0.15s ease;
+}
+.sidebar-nav li a:hover {
+  background: #f8f9fa;
+  color: #2c3e50;
+  border-left-color: #3498db;
+}
+.sidebar-nav li a.section-marker-alt {
+  color: #95a5a6;
+  font-size: 12px;
+}
+
+/* === 右侧主内容 === */
+main.content {
+  flex: 1;
+  min-width: 0;  /* 防止 flex item overflow */
+}
+
+/* === 报告头部 === */
+.report-header {
+  background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+  color: white;
+  padding: 24px 28px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+  margin-bottom: 24px;
+}
+.report-header h1 {
+  margin: 0 0 8px 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+.report-header .meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 13px;
+  opacity: 0.92;
+}
+.report-header .meta-row span strong { font-weight: 600; }
+.report-header .pipeline-badge {
+  background: rgba(255,255,255,0.18);
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+.report-header .version-tag {
+  font-size: 11px;
+  opacity: 0.75;
+  margin-top: 6px;
+}
+
+/* === 章节卡片 === */
+section.card {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+  padding: 24px 28px;
+  margin-bottom: 20px;
+  transition: box-shadow 0.2s ease;
+}
+section.card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.04);
+}
+section.card h2 {
+  margin: 0 0 16px 0;
+  padding-left: 12px;
+  border-left: 4px solid #3498db;
+  font-size: 18px;
+  color: #1a252f;
+  font-weight: 600;
+}
+section.card h3 {
+  margin: 20px 0 12px 0;
+  font-size: 15px;
+  color: #34495e;
+  font-weight: 600;
+}
+
+/* === 表格美化 === */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 13px;
+}
+th, td {
+  border: 1px solid #e8ecef;
+  padding: 8px 12px;
+  text-align: left;
+}
+th {
+  background: #f8f9fa;
+  color: #4a5568;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: none;
+  border-bottom: 2px solid #d0d7de;
+}
+tbody tr { transition: background 0.1s ease; }
+tbody tr:hover { background: #f0f7fc; }
+tbody tr:nth-child(even) { background: #fafbfc; }
+tbody tr:nth-child(even):hover { background: #f0f7fc; }
+td code {
+  background: #f1f3f5;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  color: #c7254e;
+}
+
+/* === 占位/空态/注释 === */
+.empty {
+  color: #95a5a6;
+  padding: 24px;
+  text-align: center;
+  background: #fafbfc;
+  border-radius: 6px;
+  font-style: italic;
+}
+.muted {
+  color: #7f8c8d;
+  font-size: 12px;
+  margin: 4px 0 12px 0;
+}
+.section-placeholder {
+  background: #fafbfc;
+  padding: 14px 16px;
+  border-left: 3px solid #95a5a6;
+  margin: 12px 0;
+  color: #555;
+  border-radius: 0 4px 4px 0;
+}
+
+/* === 回到顶部 === */
+.back-to-top {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 40px;
+  height: 40px;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  font-size: 18px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(52,152,219,0.4);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 100;
+}
+.back-to-top.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.back-to-top:hover { transform: translateY(-2px); }
+
+/* === 响应式: 小屏侧栏折叠 === */
+@media (max-width: 1024px) {
+  .layout { flex-direction: column; padding: 16px; }
+  aside.sidebar {
+    position: static;
+    width: 100%;
+    max-height: none;
+    margin-bottom: 16px;
+  }
+  .sidebar-nav { display: flex; flex-wrap: wrap; }
+  .sidebar-nav li a { border-left: none; border-bottom: 3px solid transparent; }
+  .sidebar-nav li a:hover { border-left-color: transparent; border-bottom-color: #3498db; }
+}
 </style>
 </head>
 <body>
-<h1>📊 因子分析报告 (ob_quality) - {{ report_date }}</h1>
 
-<nav class="toc">
-  <strong>章节</strong>:
-  <a href="#section-freshness">零·数据完整性</a>
-  <a href="#section-ic">一·IC</a>
-  <a href="#section-backtest">二·回测</a>
-  <a href="#section-corr">三·相关性</a>
-  <a href="#section-filter">四·筛选</a>
-  <a href="#section-comp">五·综合回测</a>
-  <a href="#section-compare">六·对比</a>
-  <a href="#section-weights">七·权重</a>
-  <a href="#section-selection">八·选股</a>
-  <a href="#section-segment-win">九·30分段胜率</a>
-  <a href="#section-candidate-detail">十·候选明细</a>
-  <a href="#section-intraday">十·S7/S9 段日内操作</a>
-</nav>
+<div class="layout">
 
-<div class="meta-box">
-  <p><strong>报告日期</strong>: {{ report_date }} · <strong>期望数据日期</strong>: {{ expected_data_date }} (T-1) · <strong>Pipeline</strong>: <code>ob_quality</code> (v0.4.8 固定)</p>
-  <p class="muted">web_ui v0.4.8 R1 — ob_quality 单 pipeline, 严格遵守 PROJECT.md H1.1 边界铁律 (web_ui 目录外 0 改动)</p>
+  <!-- 左侧导航 -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <h1>📊 ob_quality</h1>
+      <span class="pipeline-tag">ob_quality</span>
+      <span class="date">{{ report_date }}</span>
+    </div>
+    <ul class="sidebar-nav">
+      <li><a href="#section-freshness">零·数据完整性</a></li>
+      <li><a href="#section-ic">一·IC</a></li>
+      <li><a href="#section-backtest">二·回测</a></li>
+      <li><a href="#section-corr">三·相关性</a></li>
+      <li><a href="#section-filter">四·筛选</a></li>
+      <li><a href="#section-comp">五·综合回测</a></li>
+      <li><a href="#section-compare">六·对比</a></li>
+      <li><a href="#section-weights">七·权重</a></li>
+      <li><a href="#section-selection">八·选股</a></li>
+      <li><a href="#section-segment-win">九·30 分段胜率</a></li>
+      <li><a href="#section-candidate-detail">十·候选明细</a></li>
+      <li class="section-marker-alt"><a href="#section-intraday">十·S7/S9 日内操作</a></li>
+    </ul>
+  </aside>
+
+  <!-- 主内容 -->
+  <main class="content">
+
+    <!-- 报告头部 -->
+    <div class="report-header">
+      <h1>因子分析报告 (ob_quality) - {{ report_date }}</h1>
+      <div class="meta-row">
+        <span><strong>报告日期</strong>: {{ report_date }}</span>
+        <span><strong>期望数据日期</strong>: {{ expected_data_date }} (T-1)</span>
+        <span><strong>Pipeline</strong>: <span class="pipeline-badge">ob_quality</span></span>
+      </div>
+      <div class="version-tag">web_ui v0.4.8 R1 — ob_quality 单 pipeline, 严格遵守 PROJECT.md H1.1 边界铁律 (web_ui 目录外 0 改动)</div>
+    </div>
+
+    <!-- 12 节内容卡片化 -->
+    <section class="card"><h2 id="section-freshness">零、数据完整性检查</h2>
+      {% include "_section_freshness.html" with context %}
+    </section>
+
+    <section class="card"><h2 id="section-ic">一、单因子 IC 数据汇总</h2>
+      {% include "_section_ic.html" with context %}
+    </section>
+
+    <section class="card"><h2 id="section-backtest">二、单因子分层回测</h2>
+      {% include "_section_backtest.html" with context %}
+    </section>
+
+    <section class="card"><h2 id="section-corr">三、因子相关性矩阵</h2>
+      {% include "_section_correlation.html" with context %}
+    </section>
+
+    <section class="card"><h2 id="section-filter">四、因子筛选结果</h2>
+      {% include "_section_filter.html" with context %}
+    </section>
+
+    <section class="card"><h2 id="section-comp">五、综合因子 4 种权重回测</h2>
+      {% include "_section_composite.html" with context %}
+    </section>
+
+    <section class="card"><h2 id="section-compare">六、综合因子与单因子对比</h2>
+      {% include "_section_compare.html" with context %}
+    </section>
+
+    <section class="card"><h2 id="section-weights">七、权重选择结果</h2>
+      {% include "_section_weights.html" with context %}
+    </section>
+
+    <section class="card"><h2 id="section-selection">八、股票选股结果</h2>
+      {% include "_section_selection.html" with context %}
+    </section>
+
+    <section class="card"><h2 id="section-segment-win">九、ob_quality 全管线 30 分段胜率汇总</h2>
+      {% include "_section_segment_win.html" with context %}
+    </section>
+
+    <section class="card"><h2 id="section-candidate-detail">十、今日三十分段候选明细</h2>
+      {% include "_section_candidate_detail.html" with context %}
+    </section>
+
+    <section class="card"><h2 id="section-intraday">十、S7/S9 段日内操作建议 (T→T+1 实战指引) [⚠️ fallback]</h2>
+      {% include "_section_intraday.html" with context %}
+    </section>
+
+  </main>
+
 </div>
 
-<h2 id="section-freshness">零、数据完整性检查</h2>
-{% include "_section_freshness.html" with context %}
+<!-- 回到顶部 -->
+<button class="back-to-top" id="backToTop" title="回到顶部">↑</button>
 
-<h2 id="section-ic">一、单因子 IC 数据汇总</h2>
-{% include "_section_ic.html" with context %}
-
-<h2 id="section-backtest">二、单因子分层回测</h2>
-{% include "_section_backtest.html" with context %}
-
-<h2 id="section-corr">三、因子相关性矩阵</h2>
-{% include "_section_correlation.html" with context %}
-
-<h2 id="section-filter">四、因子筛选结果</h2>
-{% include "_section_filter.html" with context %}
-
-<h2 id="section-comp">五、综合因子 4 种权重回测</h2>
-{% include "_section_composite.html" with context %}
-
-<h2 id="section-compare">六、综合因子与单因子对比</h2>
-{% include "_section_compare.html" with context %}
-
-<h2 id="section-weights">七、权重选择结果</h2>
-{% include "_section_weights.html" with context %}
-
-<h2 id="section-selection">八、股票选股结果</h2>
-{% include "_section_selection.html" with context %}
-
-<h2 id="section-segment-win">九、ob_quality 全管线 30分段胜率汇总</h2>
-{% include "_section_segment_win.html" with context %}
-
-<h2 id="section-candidate-detail">十、今日三十分段候选明细</h2>
-{% include "_section_candidate_detail.html" with context %}
-
-<h2 id="section-intraday">十、S7/S9 段日内操作建议 (T→T+1 实战指引) [⚠️ fallback]</h2>
-{% include "_section_intraday.html" with context %}
+<script>
+// 回到顶部按钮的显示/隐藏
+(function() {
+  var btn = document.getElementById('backToTop');
+  if (!btn) return;
+  window.addEventListener('scroll', function() {
+    if (window.scrollY > 400) {
+      btn.classList.add('visible');
+    } else {
+      btn.classList.remove('visible');
+    }
+  });
+  btn.addEventListener('click', function() {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+})();
+</script>
 
 </body>
 </html>
