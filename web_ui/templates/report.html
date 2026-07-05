@@ -565,6 +565,19 @@ td code {
   font-variant-numeric: tabular-nums;
 }
 
+/* v0.4.8 R22-3: BEST 行高亮 (替代 R17 inline style="background:#fff8e1") */
+.data-table tbody tr.row-best,
+.data-table tbody tr.row-best:nth-child(even) {
+  background: rgba(255, 248, 225, 0.08);
+  font-weight: 600;
+}
+.data-table tbody tr.row-best:hover {
+  background: rgba(255, 248, 225, 0.12);
+}
+.rank-bar-cell {
+  padding: 6px 14px !important;
+}
+
 .rank-bar {
   display: flex;
   align-items: center;
