@@ -1,20 +1,18 @@
-{# 二·单因子分层回测 (v0.4.8 R17 数据风酷炫升级)
+{# 二·单因子分层回测 (v0.4.8 R17 数据风酷炫升级 + R23-3 Chart.js 多图)
 
 参数:
 - backtest_results: load_backtest_results() 返回的 list[dict]
   字段: factor_name, long_short_return_annual, long_short_sharpe, monotonicity_correlation, monotonicity_quality
 
-R17 改动:
-- 年化收益: >=10% 绿底 / >=5% 浅绿 / <-5% 浅红 / <-10% 红底
-- 夏普比率: >=1.0 显著绿 / <=-1.0 红
-- 单调性: |x|>=0.5 显著
-- mini-bar 替代纯数字
-- 完整保留 H1.1 严守
+R23-3 改造:
+- KPI 卡 4 张 (R20) 保留
+- 双图 (年化收益排名 + 年化 vs 夏普 散点)
+- R17 表格保留 (单元格色 + mini-bar)
 #}
 {% if not backtest_results %}
   <p class="empty">回测数据不可用 — 请确认 summary 流水线已成功运行</p>
 {% else %}
-  <p class="muted">v0.4.8 R8+R17: 复用 data_loaders.load_backtest_results() (H1.1 严守, 只读) · 单元格颜色: 年化>=±10% 强色 / 夏普>=±1 显著 / 单调性>=|0.5| 加粗</p>
+  <p class="muted">v0.4.8 R8+R17+R23-3: 复用 data_loaders.load_backtest_results() (H1.1 严守, 只读) · 图 1: Top/Bottom 年化收益 · 图 2: 年化 vs 夏普散点</p>
 
   {# === R20 KPI 卡 (4 张): 因子数 / 优因子 / 最佳年化 / 平均夏普 === #}
   {% set _n_total = backtest_results | length %}
@@ -47,16 +45,81 @@ R17 改动:
       <div class="kpi-sub">风险调整后收益</div>
     </div>
   </div>
-  <table>
-    <thead>
-      <tr>
-        <th>因子</th><th>多空年化收益</th><th>夏普比率</th>
-        <th>单调性系数</th><th>单调性质量</th>
-      </tr>
-    </thead>
+
+  {# === R23-3 Chart.js: 双图布局 === #}
+  <div class="chart-grid-2">
+    <div class="chart-wrap">
+      <div class="chart-title">多空年化收益排名 (Top 15 + Bottom 5, 按 |年化|)</div>
+      <canvas id="btBarChart" height="280"></canvas>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-title">年化 vs 夏普 散点 (右上象限=稳健高收益)</div>
+      <canvas id="btScatter" height="280"></canvas>
+    </div>
+  </div>
+
+  <script>
+  (function() {
+    const raw = {{ backtest_results | tojson }};
+    const SENTRY = { pos: '#3fb950', neg: '#f0883e', warn: '#f85149', neutral: '#58a6ff', grid: 'rgba(139,148,158,0.15)', text: '#f0f0f5' };
+
+    // === 图 1: 横向柱状 Top 15 正 + Bottom 5 负 ===
+    const valid = raw.filter(r => typeof r.long_short_return_annual === 'number');
+    const sorted = [...valid].sort((a, b) => Math.abs(b.long_short_return_annual) - Math.abs(a.long_short_return_annual));
+    const pos = sorted.filter(r => r.long_short_return_annual > 0).slice(0, 15);
+    const neg = sorted.filter(r => r.long_short_return_annual < 0).slice(0, 5);
+    const barData = [...neg.reverse(), ...pos];
+    new Chart(document.getElementById('btBarChart'), {
+      type: 'bar',
+      data: {
+        labels: barData.map(r => r.factor_name),
+        datasets: [{
+          data: barData.map(r => (r.long_short_return_annual * 100).toFixed(2)),
+          backgroundColor: barData.map(r => r.long_short_return_annual >= 0 ? SENTRY.pos : SENTRY.neg),
+          borderRadius: 4, barThickness: 14
+        }]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `年化 = ${ctx.parsed.x}%` } } },
+        scales: {
+          x: { grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } },
+          y: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 11 } } }
+        }
+      }
+    });
+
+    // === 图 2: 年化 vs 夏普 散点 ===
+    const pts = valid.filter(r => typeof r.long_short_sharpe === 'number').map(r => ({
+      x: r.long_short_return_annual * 100,
+      y: r.long_short_sharpe,
+      label: r.factor_name,
+      bg: r.long_short_return_annual >= 0 ? SENTRY.pos : SENTRY.neg
+    }));
+    new Chart(document.getElementById('btScatter'), {
+      type: 'scatter',
+      data: { datasets: [{ label: '因子', data: pts, backgroundColor: pts.map(p => p.bg), pointRadius: 5, pointHoverRadius: 8, borderColor: 'rgba(255,255,255,0.4)', borderWidth: 1 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.raw.label}: 年化=${ctx.parsed.x.toFixed(2)}%, 夏普=${ctx.parsed.y.toFixed(2)}` } } },
+        scales: {
+          x: { title: { display: true, text: '年化 %', color: SENTRY.text }, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } },
+          y: { title: { display: true, text: '夏普', color: SENTRY.text }, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text } }
+        }
+      }
+    });
+  })();
+  </script>
+
+  {# === R17 表格保留 === #}
+  <div class="data-table-wrap">
+  <table class="data-table numeric">
+    <thead><tr>
+      <th>因子</th><th>多空年化收益</th><th>夏普比率</th>
+      <th>单调性系数</th><th>单调性质量</th>
+    </tr></thead>
     <tbody>
     {% for r in backtest_results %}
-      {# 年化收益 #}
       {% set _ann = r.long_short_return_annual %}
       {% set _ann_pct = (_ann * 100) if _ann is not none else 0 %}
       {% set _abs_ann = _ann_pct | abs %}
@@ -69,7 +132,6 @@ R17 改动:
       {% else %}
         {% set _ann_cls = '' %}
       {% endif %}
-      {# 夏普 #}
       {% set _sh = r.long_short_sharpe %}
       {% if _sh is none %}
         {% set _sh_cls = 'cell-neutral-bg' %}
@@ -84,7 +146,6 @@ R17 改动:
       {% else %}
         {% set _sh_cls = '' %}
       {% endif %}
-      {# 单调性 #}
       {% set _mono = r.monotonicity_correlation %}
       {% set _abs_mono = (_mono | abs) if _mono is not none else 0 %}
       {% if _mono is none %}
@@ -108,4 +169,5 @@ R17 改动:
     {% endfor %}
     </tbody>
   </table>
+  </div>
 {% endif %}
