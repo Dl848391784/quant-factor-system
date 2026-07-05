@@ -1,69 +1,62 @@
-{# 10·S7/S9 段日内操作建议 (v0.4.8 R3)
+{# 10·S7/S9 段日内操作建议 (v0.4.8 R3 + R22-2 组件化)
 
 参数:
 - intraday_rows: load_intraday_strategy() 返回的 list[dict]
 - stock_name_map: 代码→名称
 - intraday_fallback: parse_obq_intraday_fallback() 返回的 dict (v0.4.8 R6, 从 txt 解析)
+
+R22-2 组件化改造 (§3 surgical: 只动 _section_intraday.html, 不动其他):
+- 顶部 KPI 4 张卡 → render_kpi_card macro
+- 主表 → render_data_table macro (现代表格: hover/striped/sticky-header/numeric)
+- Gap% 列改用 render_rank_bar 水平柱状条 (可视化替代纯数字)
 #}
+{% from '_macros.html' import render_kpi_card, render_data_table, render_rank_bar %}
+
 {% if not intraday_rows %}
   <p class="empty">无日内操作建议数据 — 通常因选股日 T+1 交易日不存在 (数据未到 T+2)</p>
 {% else %}
   <p class="muted">v0.4.8 R3: ob_quality S7/S9 段日内操作建议 (T→T+1 实战指引)。开盘观察 gap, 触发 open_signal 即按 recommended_action 操作。</p>
 
-  {# === R20 KPI 卡 (4 张): 操作数 / S7数 / S9数 / 平均期望收益 === #}
+  {# === R20 + R22-2 KPI 卡 (4 张): 操作数 / 平均 Gap / Gap 异常 / 平均期望 === #}
   {% set _n_total = intraday_rows | length %}
   {% set _s7_rows = intraday_rows | selectattr('asset') | list %}
   {% set _exp_vals = intraday_rows | map(attribute='expected_return_pct') | select('number') | list %}
   {% set _avg_exp = (_exp_vals | sum / _exp_vals | length) if _exp_vals else 0 %}
   {% set _gap_vals = intraday_rows | map(attribute='real_gap_pct') | select('number') | list %}
   {% set _avg_gap = (_gap_vals | sum / _gap_vals | length) if _gap_vals else 0 %}
-  {% set _exp_cls = 'kpi-pos' if _avg_exp > 0 else ('kpi-neg' if _avg_exp < 0 else 'kpi-neutral') %}
-  {% set _gap_cls = 'kpi-warn' if _avg_gap | abs > 1.5 else 'kpi-neutral' %}
+  {% set _exp_cls = 'pos' if _avg_exp > 0 else ('neg' if _avg_exp < 0 else 'neutral') %}
+  {% set _gap_cls = 'warn' if _avg_gap | abs > 1.5 else 'neutral' %}
   <div class="kpi-grid">
-    <div class="kpi-card kpi-neutral">
-      <div class="kpi-label">操作数</div>
-      <div class="kpi-value">{{ _n_total }}</div>
-      <div class="kpi-sub">S7/S9 段个股</div>
-    </div>
-    <div class="kpi-card kpi-neutral">
-      <div class="kpi-label">平均 Gap</div>
-      <div class="kpi-value">{{ "%+.2f%%" | format(_avg_gap) }}</div>
-      <div class="kpi-sub">开盘缺口</div>
-    </div>
-    <div class="kpi-card {{ _gap_cls }}">
-      <div class="kpi-label">Gap 异常</div>
-      <div class="kpi-value">{{ _gap_vals | select('ge', 1.5) | list | length }}</div>
-      <div class="kpi-sub">|Gap| ≥ 1.5%</div>
-    </div>
-    <div class="kpi-card {{ _exp_cls }}">
-      <div class="kpi-label">平均期望</div>
-      <div class="kpi-value">{{ "%+.2f%%" | format(_avg_exp) }}</div>
-      <div class="kpi-sub">次日收益</div>
-    </div>
+    {{ render_kpi_card('操作数', _n_total, 'S7/S9 段个股', 'neutral') }}
+    {{ render_kpi_card('平均 Gap', "%+.2f%%" | format(_avg_gap), '开盘缺口', 'neutral') }}
+    {{ render_kpi_card('Gap 异常', _gap_vals | select('ge', 1.5) | list | length, '|Gap| ≥ 1.5%', _gap_cls) }}
+    {{ render_kpi_card('平均期望', "%+.2f%%" | format(_avg_exp), '次日收益', _exp_cls) }}
   </div>
-  <table>
-    <thead>
-      <tr>
-        <th>代码</th><th>名称</th><th>前收</th><th>开盘</th><th>Gap%</th>
-        <th>Open Signal</th><th>操作建议</th><th>期望收益%</th><th>止损价</th>
-      </tr>
-    </thead>
-    <tbody>
-    {% for row in intraday_rows %}
-      <tr>
-        <td>{{ row.asset }}</td>
-        <td>{{ stock_name_map.get(row.asset, "—") }}</td>
-        <td>{{ "%.2f" | format(row.prev_close) if row.prev_close is not none else "—" }}</td>
-        <td>{{ "%.2f" | format(row.open) if row.open is not none else "—" }}</td>
-        <td>{{ "%.2f" | format(row.real_gap_pct) if row.real_gap_pct is not none else "—" }}</td>
-        <td>{{ row.open_signal if row.open_signal is defined else "—" }}</td>
-        <td>{{ row.recommended_action if row.recommended_action is defined else "—" }}</td>
-        <td>{{ "%.2f" | format(row.expected_return_pct) if row.expected_return_pct is not none else "—" }}</td>
-        <td>{{ "%.2f" | format(row.stop_loss_price) if row.stop_loss_price is not none else "—" }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+
+  {# === R22-2: 改用 render_data_table + render_rank_bar (Gap% 列可视化) === #}
+  {% set _headers = ['代码', '名称', '前收', '开盘', 'Gap%', 'Open Signal', '操作建议', '期望收益%', '止损价'] %}
+  <div class="data-table-wrap">
+    <table class="data-table numeric">
+      <thead><tr>{% for h in _headers %}<th>{{ h }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for row in intraday_rows %}
+        {% set _gap_v = row.real_gap_pct if row.real_gap_pct is not none else 0 %}
+        {% set _gap_variant = 'pos' if _gap_v > 1.5 else ('neg' if _gap_v < -1.5 else 'neutral') %}
+        <tr>
+          <td>{{ row.asset }}</td>
+          <td>{{ stock_name_map.get(row.asset, '—') }}</td>
+          <td>{{ "%.2f" | format(row.prev_close) if row.prev_close is not none else '—' }}</td>
+          <td>{{ "%.2f" | format(row.open) if row.open is not none else '—' }}</td>
+          <td>{{ render_rank_bar('Gap', _gap_v, max_val=5.0, variant=_gap_variant, fmt='%+.2f%%') }}</td>
+          <td>{{ row.open_signal if row.open_signal is defined else '—' }}</td>
+          <td>{{ row.recommended_action if row.recommended_action is defined else '—' }}</td>
+          <td>{{ "%.2f" | format(row.expected_return_pct) if row.expected_return_pct is not none else '—' }}</td>
+          <td>{{ "%.2f" | format(row.stop_loss_price) if row.stop_loss_price is not none else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
 {% endif %}
 
 {# v0.4.8 R6: 操作规则 + 历史胜率参考 (从 txt 解析) #}
