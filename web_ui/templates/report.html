@@ -148,7 +148,8 @@ main.content {
   font-size: 12px;
   opacity: 0.6;
   margin-top: 6px;
-  text-transform: uppercase;
+  /* v0.4.8 R21-7 (impeccable anti-pattern): all-caps-body — 移除 text-transform: uppercase
+     version-tag 是 metadata 描述, 不需要 uppercase 强调, 普通 lowercase 已足够区分 */
   letter-spacing: 0.2px;
 }
 
@@ -587,7 +588,7 @@ td code {
         <span><strong>期望数据日期</strong>: {{ expected_data_date }} (T-1)</span>
         <span><strong>Pipeline</strong>: <span class="pipeline-badge">ob_quality</span></span>
       </div>
-      <div class="version-tag">web_ui v0.4.8 R1 — ob_quality 单 pipeline, 严格遵守 PROJECT.md H1.1 边界铁律 (web_ui 目录外 0 改动)</div>
+      <div class="version-tag">web_ui v0.4.8 — ob_quality (H1.1 enforced)</div>
     </div>
 
     {# === KPI 顶部数据卡片 (v0.4.8 R17 数据风酷炫升级) ===
