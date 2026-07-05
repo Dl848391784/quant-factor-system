@@ -4,17 +4,23 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>web_ui - 因子分析报告 (ob_quality) {{ report_date }}</title>
+<!-- v0.4.8 R19: 加载 Sentry 设计系统字体 (R17 升级基于 web-design skill) -->
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 /* === 全局重置 === */
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; scroll-padding-top: 24px; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: 'Rubik', -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   margin: 0;
-  background: #f5f7fa;
-  color: #2c3e50;
+  /* v0.4.8 R19: Sentry 深紫黑背景 (#1f1633) — 永不纯黑 */
+  background: #1f1633;
+  color: #e5e7eb;
   font-size: 14px;
   line-height: 1.6;
+}
+code, pre, .mono {
+  font-family: 'JetBrains Mono', ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 /* === 主体布局 (侧栏 + 主区) === */
@@ -27,62 +33,70 @@ body {
   align-items: flex-start;
 }
 
-/* === 左侧固定导航 === */
+/* === 左侧固定导航 (Sentry 玻璃面板) === */
 aside.sidebar {
   position: sticky;
   top: 24px;
   width: 220px;
   flex-shrink: 0;
-  background: #ffffff;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+  /* v0.4.8 R19: Sentry 玻璃效果 — 替换白底 */
+  background: rgba(54, 45, 89, 0.5);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  border-radius: 12px;
+  border: 1px solid #362d59;
+  box-shadow: rgba(22, 15, 36, 0.9) 0px 4px 4px 9px;
   padding: 16px 0;
   max-height: calc(100vh - 48px);
   overflow-y: auto;
 }
 .sidebar-brand {
   padding: 0 16px 12px 16px;
-  border-bottom: 1px solid #ecf0f1;
+  border-bottom: 1px solid #362d59;
   margin-bottom: 8px;
 }
 .sidebar-brand h1 {
   font-size: 16px;
   margin: 0 0 4px 0;
-  color: #1a252f;
+  color: #ffffff;
   font-weight: 600;
 }
 .sidebar-brand .pipeline-tag {
   display: inline-block;
-  background: #3498db;
+  /* v0.4.8 R19: Sentry Purple 主色 */
+  background: #6a5fc1;
   color: white;
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 3px;
   font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
 }
 .sidebar-brand .date {
   display: block;
   font-size: 12px;
-  color: #7f8c8d;
+  color: #e5e7eb;
   margin-top: 4px;
+  opacity: 0.7;
 }
 .sidebar-nav { list-style: none; padding: 0; margin: 0; }
 .sidebar-nav li a {
   display: block;
   padding: 8px 16px;
-  color: #4a5568;
+  color: #e5e7eb;
   text-decoration: none;
   font-size: 13px;
   border-left: 3px solid transparent;
   transition: all 0.15s ease;
 }
 .sidebar-nav li a:hover {
-  background: #f8f9fa;
-  color: #2c3e50;
-  border-left-color: #3498db;
+  background: rgba(106, 95, 193, 0.18);
+  color: #ffffff;
+  border-left-color: #6a5fc1;
 }
 .sidebar-nav li a.section-marker-alt {
-  color: #95a5a6;
+  color: #79628c;
   font-size: 12px;
 }
 
@@ -92,19 +106,22 @@ main.content {
   min-width: 0;  /* 防止 flex item overflow */
 }
 
-/* === 报告头部 === */
+/* === 报告头部 (Sentry 玻璃 + ambient glow) === */
 .report-header {
-  background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+  /* v0.4.8 R19: Sentry ambient glow — 深紫 ambient 阴影 */
+  background: linear-gradient(135deg, #362d59 0%, #422082 100%);
   color: white;
   padding: 24px 28px;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+  border-radius: 12px;
+  border: 1px solid #362d59;
+  box-shadow: rgba(22, 15, 36, 0.9) 0px 4px 4px 9px;
   margin-bottom: 24px;
 }
 .report-header h1 {
   margin: 0 0 8px 0;
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 600;
+  letter-spacing: -0.3px;
 }
 .report-header .meta-row {
   display: flex;
@@ -118,43 +135,61 @@ main.content {
   background: rgba(255,255,255,0.18);
   padding: 3px 10px;
   border-radius: 4px;
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-family: 'JetBrains Mono', ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
 }
 .report-header .version-tag {
   font-size: 11px;
-  opacity: 0.75;
+  opacity: 0.6;
   margin-top: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
 }
 
-/* === 章节卡片 === */
+/* === 章节卡片 (Sentry elevated surface) === */
 section.card {
-  background: #ffffff;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+  background: rgba(54, 45, 89, 0.35);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  border-radius: 12px;
+  border: 1px solid #362d59;
+  box-shadow: rgba(0, 0, 0, 0.1) 0px 10px 15px -3px;
   padding: 24px 28px;
   margin-bottom: 20px;
-  transition: box-shadow 0.2s ease;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
 section.card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.04);
+  box-shadow: rgba(0, 0, 0, 0.18) 0px 0.5rem 1.5rem;
+  transform: translateY(-1px);
 }
 section.card h2 {
   margin: 0 0 16px 0;
   padding-left: 12px;
-  border-left: 4px solid #3498db;
-  font-size: 18px;
-  color: #1a252f;
+  border-left: 4px solid #6a5fc1;
+  font-size: 20px;
+  color: #ffffff;
   font-weight: 600;
+  letter-spacing: -0.2px;
 }
 section.card h3 {
   margin: 20px 0 12px 0;
-  font-size: 15px;
-  color: #34495e;
+  font-size: 14px;
+  color: #c2ef4e;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.25px;
+}
+section.card h4 {
+  color: #ffb287;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+  font-size: 12px;
 }
 
-/* === 表格美化 === */
+/* === 表格美化 (Sentry dark table) === */
 table {
   width: 100%;
   border-collapse: collapse;
@@ -162,28 +197,30 @@ table {
   font-size: 13px;
 }
 th, td {
-  border: 1px solid #e8ecef;
+  border: 1px solid #362d59;
   padding: 8px 12px;
   text-align: left;
 }
 th {
-  background: #f8f9fa;
-  color: #4a5568;
+  background: rgba(54, 45, 89, 0.5);
+  color: #ffffff;
   font-weight: 600;
   font-size: 12px;
-  text-transform: none;
-  border-bottom: 2px solid #d0d7de;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+  border-bottom: 2px solid #6a5fc1;
 }
 tbody tr { transition: background 0.1s ease; }
-tbody tr:hover { background: #f0f7fc; }
-tbody tr:nth-child(even) { background: #fafbfc; }
-tbody tr:nth-child(even):hover { background: #f0f7fc; }
+tbody tr:hover { background: rgba(106, 95, 193, 0.18); }
+tbody tr:nth-child(even) { background: rgba(54, 45, 89, 0.15); }
+tbody tr:nth-child(even):hover { background: rgba(106, 95, 193, 0.18); }
 td code {
-  background: #f1f3f5;
+  background: rgba(194, 239, 78, 0.1);
   padding: 1px 6px;
   border-radius: 3px;
   font-size: 12px;
-  color: #c7254e;
+  color: #c2ef4e;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 
 /* === 占位/空态/注释 === */
@@ -240,14 +277,15 @@ td code {
   top: 0;
   left: 0;
   height: 3px;
-  background: linear-gradient(90deg, #3498db, #2ecc71);
+  /* v0.4.8 R19: Sentry gradient — purple → lime */
+  background: linear-gradient(90deg, #6a5fc1, #c2ef4e);
   z-index: 200;
   width: 0%;
   transition: width 0.1s ease-out;
-  box-shadow: 0 1px 4px rgba(52,152,219,0.4);
+  box-shadow: 0 1px 4px rgba(194, 239, 78, 0.5);
 }
 
-/* === KPI 顶部数据卡片 === */
+/* === KPI 顶部数据卡片 (Sentry 玻璃 + inset shadow 按钮感) === */
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -255,17 +293,23 @@ td code {
   margin-bottom: 24px;
 }
 .kpi-card {
-  background: #ffffff;
-  border-radius: 8px;
+  /* v0.4.8 R19: Sentry 玻璃面板 — 替换白底 */
+  background: rgba(54, 45, 89, 0.5);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  border-radius: 12px;
   padding: 16px 18px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+  border: 1px solid #362d59;
+  /* v0.4.8 R19: Sentry inset shadow — tactile pressed feel */
+  box-shadow: rgba(0, 0, 0, 0.1) 0px 1px 3px 0px inset, rgba(0, 0, 0, 0.1) 0px 10px 15px -3px;
   position: relative;
   overflow: hidden;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 .kpi-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  /* v0.4.8 R19: Sentry prominent shadow on hover */
+  box-shadow: rgba(0, 0, 0, 0.18) 0px 0.5rem 1.5rem, rgba(0, 0, 0, 0.1) 0px 1px 3px 0px inset;
 }
 .kpi-card::before {
   content: "";
@@ -274,67 +318,70 @@ td code {
   top: 0;
   bottom: 0;
   width: 4px;
-  background: #3498db;
+  background: #6a5fc1;
 }
-.kpi-card.kpi-pos::before { background: #27ae60; }
-.kpi-card.kpi-neg::before { background: #e74c3c; }
-.kpi-card.kpi-warn::before { background: #f39c12; }
-.kpi-card.kpi-neutral::before { background: #95a5a6; }
+.kpi-card.kpi-pos::before { background: #c2ef4e; }
+.kpi-card.kpi-neg::before { background: #ffb287; }
+.kpi-card.kpi-warn::before { background: #fa7faa; }
+.kpi-card.kpi-neutral::before { background: #79628c; }
 .kpi-card .kpi-label {
-  font-size: 11px;
-  color: #7f8c8d;
+  font-size: 10px;
+  color: #e5e7eb;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.25px;
   margin-bottom: 6px;
   font-weight: 600;
+  opacity: 0.7;
 }
 .kpi-card .kpi-value {
-  font-size: 24px;
+  font-size: 26px;
   font-weight: 700;
-  color: #1a252f;
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: #ffffff;
+  font-family: 'JetBrains Mono', ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   line-height: 1.2;
+  letter-spacing: -0.5px;
 }
-.kpi-card.kpi-pos .kpi-value { color: #27ae60; }
-.kpi-card.kpi-neg .kpi-value { color: #e74c3c; }
-.kpi-card.kpi-warn .kpi-value { color: #f39c12; }
+.kpi-card.kpi-pos .kpi-value { color: #c2ef4e; }
+.kpi-card.kpi-neg .kpi-value { color: #ffb287; }
+.kpi-card.kpi-warn .kpi-value { color: #fa7faa; }
 .kpi-card .kpi-sub {
   font-size: 11px;
-  color: #95a5a6;
+  color: #e5e7eb;
   margin-top: 4px;
+  opacity: 0.6;
 }
 
-/* === 表格单元格颜色工具类 (IC / 胜率 / 收益) === */
-.cell-pos { color: #27ae60; font-weight: 600; }
-.cell-neg { color: #e74c3c; font-weight: 600; }
-.cell-pos-bg { background: #e8f6ee; color: #1e8449; }
-.cell-neg-bg { background: #fdecea; color: #c0392b; }
-.cell-strong-pos-bg { background: #27ae60; color: #ffffff; font-weight: 600; }
-.cell-strong-neg-bg { background: #e74c3c; color: #ffffff; font-weight: 600; }
-.cell-warn-bg { background: #fef5e7; color: #d68910; }
-.cell-neutral-bg { background: #f4f6f7; color: #566573; }
+/* === 表格单元格颜色工具类 (在深色背景上调亮) === */
+.cell-pos { color: #c2ef4e; font-weight: 600; }
+.cell-neg { color: #ffb287; font-weight: 600; }
+.cell-pos-bg { background: rgba(194, 239, 78, 0.18); color: #c2ef4e; }
+.cell-neg-bg { background: rgba(255, 178, 135, 0.18); color: #ffb287; }
+.cell-strong-pos-bg { background: #c2ef4e; color: #1f1633; font-weight: 700; }
+.cell-strong-neg-bg { background: #ffb287; color: #1f1633; font-weight: 700; }
+.cell-warn-bg { background: rgba(250, 127, 170, 0.18); color: #fa7faa; }
+.cell-neutral-bg { background: rgba(54, 45, 89, 0.4); color: #e5e7eb; }
 .cell-strong { font-weight: 700; }
 
-/* === 微型柱状图 (inline 在表格单元格里) === */
+/* === 微型柱状图 === */
 .mini-bar {
   display: inline-block;
   height: 6px;
-  background: #3498db;
+  background: #6a5fc1;
   border-radius: 3px;
   vertical-align: middle;
   margin-right: 4px;
   min-width: 2px;
 }
-.mini-bar.pos { background: #27ae60; }
-.mini-bar.neg { background: #e74c3c; }
-.mini-bar.warn { background: #f39c12; }
+.mini-bar.pos { background: #c2ef4e; }
+.mini-bar.neg { background: #ffb287; }
+.mini-bar.warn { background: #fa7faa; }
 
-/* === 进度条 (胜率) === */
+/* === 进度条 === */
 .progress-bar {
   display: inline-block;
   width: 80px;
   height: 8px;
-  background: #ecf0f1;
+  background: rgba(54, 45, 89, 0.5);
   border-radius: 4px;
   overflow: hidden;
   vertical-align: middle;
@@ -343,27 +390,28 @@ td code {
 .progress-bar > span {
   display: block;
   height: 100%;
-  background: #3498db;
+  background: #6a5fc1;
   transition: width 0.3s ease;
 }
-.progress-bar.pos > span { background: #27ae60; }
-.progress-bar.neg > span { background: #e74c3c; }
-.progress-bar.warn > span { background: #f39c12; }
+.progress-bar.pos > span { background: #c2ef4e; }
+.progress-bar.neg > span { background: #ffb287; }
+.progress-bar.warn > span { background: #fa7faa; }
 
-/* === 状态徽章 (数据新鲜度) === */
+/* === 状态徽章 === */
 .status-badge {
   display: inline-block;
   padding: 3px 10px;
   border-radius: 12px;
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
 }
-.status-badge.ok { background: #e8f6ee; color: #1e8449; }
-.status-badge.warn { background: #fef5e7; color: #d68910; }
-.status-badge.fail { background: #fdecea; color: #c0392b; }
+.status-badge.ok { background: rgba(194, 239, 78, 0.18); color: #c2ef4e; }
+.status-badge.warn { background: rgba(255, 178, 135, 0.18); color: #ffb287; }
+.status-badge.fail { background: rgba(250, 127, 170, 0.18); color: #fa7faa; }
 
-/* === 热力图样式 (用于 _section_segment_win.html 30x12 矩阵渲染) === */
+/* === 热力图样式 (深色背景适配) === */
 .heatmap {
   border-collapse: separate;
   border-spacing: 2px;
@@ -374,45 +422,97 @@ td code {
   border: none;
   text-align: center;
   min-width: 36px;
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 .heatmap th {
   background: transparent;
-  color: #4a5568;
+  color: #e5e7eb;
   font-weight: 600;
   font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
 }
 .heatmap td {
   border-radius: 3px;
-  color: #1a252f;
+  color: #ffffff;
   font-weight: 500;
 }
 .heatmap tr.heatmap-best td:not(:first-child) {
-  outline: 2px solid #f39c12;
+  outline: 2px solid #fa7faa;
   outline-offset: -2px;
 }
-.heatmap td.heatmap-strong-pos { background: #27ae60; color: #ffffff; }
-.heatmap td.heatmap-pos { background: #a9dfbf; color: #145a32; }
-.heatmap td.heatmap-neutral { background: #f4f6f7; color: #566573; }
-.heatmap td.heatmap-neg { background: #f5b7b1; color: #78281f; }
-.heatmap td.heatmap-strong-neg { background: #e74c3c; color: #ffffff; }
+.heatmap td.heatmap-strong-pos { background: #c2ef4e; color: #1f1633; font-weight: 700; }
+.heatmap td.heatmap-pos { background: rgba(194, 239, 78, 0.5); color: #c2ef4e; }
+.heatmap td.heatmap-neutral { background: rgba(54, 45, 89, 0.5); color: #e5e7eb; }
+.heatmap td.heatmap-neg { background: rgba(255, 178, 135, 0.5); color: #ffb287; }
+.heatmap td.heatmap-strong-neg { background: #ffb287; color: #1f1633; font-weight: 700; }
 
-/* === 侧栏激活态 (滚动到对应章节时高亮) === */
+/* === 侧栏激活态 === */
 .sidebar-nav li a.active {
-  background: #ebf5fb;
-  color: #2980b9;
-  border-left-color: #2980b9;
+  background: rgba(106, 95, 193, 0.25);
+  color: #ffffff;
+  border-left-color: #c2ef4e;
   font-weight: 600;
 }
 
-/* === 加载完成淡入动画 === */
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+/* === 回到顶部 === */
+.back-to-top {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 40px;
+  height: 40px;
+  background: #6a5fc1;
+  color: white;
+  border: 1px solid #584674;
+  border-radius: 13px;
+  font-size: 18px;
+  cursor: pointer;
+  box-shadow: rgba(0, 0, 0, 0.1) 0px 1px 3px 0px inset, rgba(0, 0, 0, 0.18) 0px 0.5rem 1.5rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 100;
 }
-.layout { animation: fadeInUp 0.5s ease-out; }
+.back-to-top.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.back-to-top:hover { transform: translateY(-2px); }
 
-/* === 响应式: 小屏侧栏折叠 === */
+/* === 占位/空态/注释 (深色背景) === */
+.empty {
+  color: #79628c;
+  padding: 24px;
+  text-align: center;
+  background: rgba(54, 45, 89, 0.3);
+  border-radius: 6px;
+  font-style: italic;
+}
+.muted {
+  color: #e5e7eb;
+  opacity: 0.7;
+  font-size: 12px;
+  margin: 4px 0 12px 0;
+}
+.section-placeholder {
+  background: rgba(54, 45, 89, 0.3);
+  padding: 14px 16px;
+  border-left: 3px solid #79628c;
+  margin: 12px 0;
+  color: #e5e7eb;
+  border-radius: 0 4px 4px 0;
+}
+
+/* === meta-box === */
+.meta-box {
+  background: rgba(54, 45, 89, 0.3);
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin: 16px 0;
+  border: 1px solid #362d59;
+}
+.meta-box p { margin: 4px 0; }
 @media (max-width: 1024px) {
   .layout { flex-direction: column; padding: 16px; }
   aside.sidebar {
