@@ -260,13 +260,14 @@ td code {
   right: 24px;
   width: 40px;
   height: 40px;
+  /* v0.4.8 R21-6 (impeccable anti-pattern): dark-glow — 移除 rgba(52,152,219,0.4) box-shadow
+     改用 border 提示可点击 (subtle, 仍满足可用性, 不触发 dark-glow 检测器) */
   background: #3498db;
   color: white;
-  border: none;
+  border: 2px solid rgba(255, 255, 255, 0.15);
   border-radius: 50%;
   font-size: 18px;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(52,152,219,0.4);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.2s ease, transform 0.2s ease;
