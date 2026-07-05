@@ -13,6 +13,35 @@
 {% if not txt_s10_segments %}
   <p class="empty">候选明细数据不可用 — txt 第十节未找到 (H1.1: web_ui 只读 summary/result/ob_quality/factor_summary_report_*.txt)</p>
 {% else %}
+  {# === R20 KPI 卡 (4 张): 候选池 / 段数 / 最佳段 / 最佳胜率 === #}
+  {% set _pool = txt_s10_segments.pool_size %}
+  {% set _n_segs = txt_s10_segments.segments | length %}
+  {% set _best_seg = txt_s10_segments.best_segment %}
+  {% set _best_wr = _best_seg.win_rate if _best_seg else 0 %}
+  {% set _best_cls = 'kpi-pos' if _best_wr >= 55 else ('kpi-warn' if _best_wr >= 45 else 'kpi-neg') %}
+  {% set _segs_filled = txt_s10_segments.segments | selectattr('n_stocks') | selectattr('n_stocks', 'ge', 1) | list | length %}
+  <div class="kpi-grid">
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">候选池</div>
+      <div class="kpi-value">{{ _pool }}</div>
+      <div class="kpi-sub">当日全市场</div>
+    </div>
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">段数 / 有候选</div>
+      <div class="kpi-value">{{ _n_segs }} / {{ _segs_filled }}</div>
+      <div class="kpi-sub">S1~S30 段</div>
+    </div>
+    <div class="kpi-card kpi-pos">
+      <div class="kpi-label">最佳段</div>
+      <div class="kpi-value" style="font-size: 1.4em;">{{ _best_seg.label if _best_seg else "—" }}</div>
+      <div class="kpi-sub">⭐ 推荐操作</div>
+    </div>
+    <div class="kpi-card {{ _best_cls }}">
+      <div class="kpi-label">最佳胜率</div>
+      <div class="kpi-value">{{ "%.1f%%" | format(_best_wr) }}</div>
+      <div class="kpi-sub">12 选股日合并</div>
+    </div>
+  </div>
   <div class="meta-box">
     <p>
       <strong>选股日</strong>: {{ txt_s10_segments.selection_date }}

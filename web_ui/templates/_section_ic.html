@@ -14,6 +14,38 @@ R17 改动:
   <p class="empty">IC 数据不可用 — 请确认 summary 流水线已成功运行</p>
 {% else %}
   <p class="muted">v0.4.8 R7+R17: 复用 data_loaders.load_ic_results() (H1.1 严守, 只读) · 单元格颜色: |IC|>=0.05 强色 / 0.03~0.05 浅色 / 否则中性</p>
+
+  {# === R20 KPI 卡 (4 张): 总因子 / 显著因子 / 平均IC / 平均ICIR === #}
+  {% set _n_total = ic_results | length %}
+  {% set _n_sig = ic_results | selectattr('icir') | selectattr('icir', 'ge', 0.5) | list | length %}
+  {% set _ic_vals = ic_results | map(attribute='ic_mean') | select('number') | list %}
+  {% set _avg_ic = (_ic_vals | sum / _ic_vals | length) if _ic_vals else 0 %}
+  {% set _icir_vals = ic_results | map(attribute='icir') | select('number') | list %}
+  {% set _avg_icir = (_icir_vals | sum / _icir_vals | length) if _icir_vals else 0 %}
+  {% set _ic_cls = 'kpi-pos' if _avg_ic > 0 else ('kpi-neg' if _avg_ic < 0 else 'kpi-neutral') %}
+  {% set _icir_cls = 'kpi-pos' if _avg_icir > 0.5 else ('kpi-warn' if _avg_icir > 0 else 'kpi-neg') %}
+  <div class="kpi-grid">
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">总因子</div>
+      <div class="kpi-value">{{ _n_total }}</div>
+      <div class="kpi-sub">进入 IC 评估</div>
+    </div>
+    <div class="kpi-card kpi-pos">
+      <div class="kpi-label">显著因子</div>
+      <div class="kpi-value">{{ _n_sig }}</div>
+      <div class="kpi-sub">|ICIR| ≥ 0.5</div>
+    </div>
+    <div class="kpi-card {{ _ic_cls }}">
+      <div class="kpi-label">截面 IC 均值</div>
+      <div class="kpi-value">{{ "%+.4f" | format(_avg_ic) }}</div>
+      <div class="kpi-sub">{{ _n_total }} 因子平均</div>
+    </div>
+    <div class="kpi-card {{ _icir_cls }}">
+      <div class="kpi-label">平均 ICIR</div>
+      <div class="kpi-value">{{ "%+.4f" | format(_avg_icir) }}</div>
+      <div class="kpi-sub">稳定性指标</div>
+    </div>
+  </div>
   <table>
     <thead>
       <tr>

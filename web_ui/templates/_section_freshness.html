@@ -13,6 +13,44 @@ R17 改动:
 {% if not data_results and not derived_results %}
   <p class="empty">数据完整性检查不可用 — 请确认 summary 流水线已成功运行</p>
 {% else %}
+  {# === R20 KPI 卡 (4 张): 数据源总数 / 基础数据 / 衍生数据 / 失败数 === #}
+  {% set _all = (data_results or []) + (derived_results or []) %}
+  {% set _n_total = _all | length %}
+  {% set _n_basic = data_results | length if data_results else 0 %}
+  {% set _n_derived = derived_results | length if derived_results else 0 %}
+  {% set _fail_rows = [] %}
+  {% set _warn_rows = [] %}
+  {% for r in _all %}
+    {% if r.status_symbol is defined and r.status_symbol is string %}
+      {% if '❌' in r.status_symbol %}{% set _ = _fail_rows.append(r) %}{% endif %}
+      {% if '⚠️' in r.status_symbol %}{% set _ = _warn_rows.append(r) %}{% endif %}
+    {% endif %}
+  {% endfor %}
+  {% set _n_fail = _fail_rows | length %}
+  {% set _n_warn = _warn_rows | length %}
+  {% set _overall_cls = 'kpi-pos' if _n_fail == 0 and _n_warn == 0 else ('kpi-warn' if _n_fail == 0 else 'kpi-neg') %}
+  <div class="kpi-grid">
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">数据源总数</div>
+      <div class="kpi-value">{{ _n_total }}</div>
+      <div class="kpi-sub">基础 + 衍生</div>
+    </div>
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">基础 / 衍生</div>
+      <div class="kpi-value">{{ _n_basic }} / {{ _n_derived }}</div>
+      <div class="kpi-sub">分项明细</div>
+    </div>
+    <div class="kpi-card kpi-warn">
+      <div class="kpi-label">告警数</div>
+      <div class="kpi-value">{{ _n_warn }}</div>
+      <div class="kpi-sub">⚠️ 陈旧数据</div>
+    </div>
+    <div class="kpi-card {{ _overall_cls }}">
+      <div class="kpi-label">失败数</div>
+      <div class="kpi-value">{{ _n_fail }}</div>
+      <div class="kpi-sub">❌ 异常数据</div>
+    </div>
+  </div>
   <h3>【基础数据源】</h3>
   <table>
     <thead>

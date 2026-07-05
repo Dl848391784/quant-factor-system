@@ -11,6 +11,39 @@
   <p class="muted">v0.4.8 R10: 复用 data_loaders.load_composite_results + load_backtest_results
   (H1.1 严守, 只读); 选中因子从 txt 第 4 节解析</p>
 
+  {# === R20 KPI 卡 (4 张): 综合权重数 / 综合最优 / 选中单因子数 / 选中权重总和 === #}
+  {% set _ann_vals = (composite_results or []) | map(attribute='long_short_return_annual') | select('number') | list %}
+  {% set _sh_vals = (composite_results or []) | map(attribute='long_short_sharpe') | select('number') | list %}
+  {% set _best_ann = (_ann_vals | max) if _ann_vals else 0 %}
+  {% set _best_sh = (_sh_vals | max) if _sh_vals else 0 %}
+  {% set selected_names = (selected_factors or []) | map(attribute='name') | list %}
+  {% set _n_selected = selected_names | length %}
+  {% set _wt_sum = (selected_factors or []) | map(attribute='weight') | select('number') | sum %}
+  {% set _ann_cls = 'kpi-pos' if _best_ann > 0 else ('kpi-neg' if _best_ann < 0 else 'kpi-neutral') %}
+  {% set _sh_cls = 'kpi-pos' if _best_sh > 1.0 else ('kpi-warn' if _best_sh > 0 else 'kpi-neg') %}
+  <div class="kpi-grid">
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">综合权重方法</div>
+      <div class="kpi-value">{{ composite_results | length if composite_results else 0 }}</div>
+      <div class="kpi-sub">回测对比</div>
+    </div>
+    <div class="kpi-card {{ _ann_cls }}">
+      <div class="kpi-label">综合最优年化</div>
+      <div class="kpi-value">{{ "%+.1f%%" | format(_best_ann * 100) }}</div>
+      <div class="kpi-sub">多空对冲</div>
+    </div>
+    <div class="kpi-card {{ _sh_cls }}">
+      <div class="kpi-label">综合最优夏普</div>
+      <div class="kpi-value">{{ "%+.2f" | format(_best_sh) }}</div>
+      <div class="kpi-sub">风险调整</div>
+    </div>
+    <div class="kpi-card kpi-pos">
+      <div class="kpi-label">选中单因子</div>
+      <div class="kpi-value">{{ _n_selected }} / 权重 {{ "%.0f%%" | format(_wt_sum) }}</div>
+      <div class="kpi-sub">进综合</div>
+    </div>
+  </div>
+
   {# 1. 综合因子四种权重方法回测 #}
   {% if composite_results %}
   <h3>综合因子四种权重方法回测数据</h3>

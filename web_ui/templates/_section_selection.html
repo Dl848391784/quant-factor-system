@@ -13,6 +13,35 @@ data_loaders 已暴露的 stage 字段 (H1.1 严守, 不改 data_loaders):
 {% if result is none %}
   <p class="empty">选股数据不可用 — 请确认 summary 流水线已成功运行</p>
 {% else %}
+  {# === R20 KPI 卡 (4 张): 候选池 / 有效 / 短名单 / Composite Score === #}
+  {% set _pool = result.meta.stocks_on_date | default(0) %}
+  {% set _valid = result.meta.valid_stocks | default(0) %}
+  {% set _top_n = result.top_stocks | length %}
+  {% set _composite = result.meta.composite_score | default(0) %}
+  {% set _pass_rate = (_top_n / _pool * 100) if _pool > 0 else 0 %}
+  {% set _composite_cls = 'kpi-pos' if _composite > 0.5 else ('kpi-warn' if _composite > 0 else 'kpi-neg') %}
+  <div class="kpi-grid">
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">候选池</div>
+      <div class="kpi-value">{{ _pool }}</div>
+      <div class="kpi-sub">当日全市场</div>
+    </div>
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">有效 / 短名单</div>
+      <div class="kpi-value">{{ _valid }} / {{ _top_n }}</div>
+      <div class="kpi-sub">通过率 {{ "%.1f%%" | format(_pass_rate) }}</div>
+    </div>
+    <div class="kpi-card kpi-pos">
+      <div class="kpi-label">方向 · 权重</div>
+      <div class="kpi-value" style="font-size: 1em;">{{ result.meta.factor_direction }}</div>
+      <div class="kpi-sub">{{ result.meta.weight_method }}</div>
+    </div>
+    <div class="kpi-card {{ _composite_cls }}">
+      <div class="kpi-label">Composite</div>
+      <div class="kpi-value">{{ "%.4f" | format(_composite) }}</div>
+      <div class="kpi-sub">截面综合得分</div>
+    </div>
+  </div>
   <div class="meta-box">
     <p><strong>选股日期</strong>: {{ result.meta.selection_date }}（使用T-1数据）</p>
     <p><strong>权重方法</strong>: {{ result.meta.weight_method }} · <strong>方向</strong>: {{ result.meta.factor_direction }} · <strong>选出股票数</strong>: {{ result.meta.top_n }} 只（共 {{ result.meta.stocks_on_date | default(0) }} 只股票）</p>

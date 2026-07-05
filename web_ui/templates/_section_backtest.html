@@ -15,6 +15,38 @@ R17 改动:
   <p class="empty">回测数据不可用 — 请确认 summary 流水线已成功运行</p>
 {% else %}
   <p class="muted">v0.4.8 R8+R17: 复用 data_loaders.load_backtest_results() (H1.1 严守, 只读) · 单元格颜色: 年化>=±10% 强色 / 夏普>=±1 显著 / 单调性>=|0.5| 加粗</p>
+
+  {# === R20 KPI 卡 (4 张): 因子数 / 优因子 / 最佳年化 / 平均夏普 === #}
+  {% set _n_total = backtest_results | length %}
+  {% set _ann_vals = backtest_results | map(attribute='long_short_return_annual') | select('number') | list %}
+  {% set _sh_vals = backtest_results | map(attribute='long_short_sharpe') | select('number') | list %}
+  {% set _n_good = _sh_vals | select('ge', 1.0) | list | length %}
+  {% set _best_ann = (_ann_vals | max) if _ann_vals else 0 %}
+  {% set _avg_sh = (_sh_vals | sum / _sh_vals | length) if _sh_vals else 0 %}
+  {% set _ann_cls = 'kpi-pos' if _best_ann > 0 else ('kpi-neg' if _best_ann < 0 else 'kpi-neutral') %}
+  {% set _sh_cls = 'kpi-pos' if _avg_sh > 0.5 else ('kpi-warn' if _avg_sh > 0 else 'kpi-neg') %}
+  <div class="kpi-grid">
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">因子数</div>
+      <div class="kpi-value">{{ _n_total }}</div>
+      <div class="kpi-sub">单因子分层回测</div>
+    </div>
+    <div class="kpi-card kpi-pos">
+      <div class="kpi-label">优因子</div>
+      <div class="kpi-value">{{ _n_good }}</div>
+      <div class="kpi-sub">夏普 ≥ 1.0</div>
+    </div>
+    <div class="kpi-card {{ _ann_cls }}">
+      <div class="kpi-label">最佳年化</div>
+      <div class="kpi-value">{{ "%+.1f%%" | format(_best_ann * 100) }}</div>
+      <div class="kpi-sub">多空对冲</div>
+    </div>
+    <div class="kpi-card {{ _sh_cls }}">
+      <div class="kpi-label">平均夏普</div>
+      <div class="kpi-value">{{ "%+.2f" | format(_avg_sh) }}</div>
+      <div class="kpi-sub">风险调整后收益</div>
+    </div>
+  </div>
   <table>
     <thead>
       <tr>

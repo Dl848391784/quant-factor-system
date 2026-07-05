@@ -9,6 +9,38 @@
   <p class="empty">无日内操作建议数据 — 通常因选股日 T+1 交易日不存在 (数据未到 T+2)</p>
 {% else %}
   <p class="muted">v0.4.8 R3: ob_quality S7/S9 段日内操作建议 (T→T+1 实战指引)。开盘观察 gap, 触发 open_signal 即按 recommended_action 操作。</p>
+
+  {# === R20 KPI 卡 (4 张): 操作数 / S7数 / S9数 / 平均期望收益 === #}
+  {% set _n_total = intraday_rows | length %}
+  {% set _s7_rows = intraday_rows | selectattr('asset') | list %}
+  {% set _exp_vals = intraday_rows | map(attribute='expected_return_pct') | select('number') | list %}
+  {% set _avg_exp = (_exp_vals | sum / _exp_vals | length) if _exp_vals else 0 %}
+  {% set _gap_vals = intraday_rows | map(attribute='real_gap_pct') | select('number') | list %}
+  {% set _avg_gap = (_gap_vals | sum / _gap_vals | length) if _gap_vals else 0 %}
+  {% set _exp_cls = 'kpi-pos' if _avg_exp > 0 else ('kpi-neg' if _avg_exp < 0 else 'kpi-neutral') %}
+  {% set _gap_cls = 'kpi-warn' if _avg_gap | abs > 1.5 else 'kpi-neutral' %}
+  <div class="kpi-grid">
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">操作数</div>
+      <div class="kpi-value">{{ _n_total }}</div>
+      <div class="kpi-sub">S7/S9 段个股</div>
+    </div>
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">平均 Gap</div>
+      <div class="kpi-value">{{ "%+.2f%%" | format(_avg_gap) }}</div>
+      <div class="kpi-sub">开盘缺口</div>
+    </div>
+    <div class="kpi-card {{ _gap_cls }}">
+      <div class="kpi-label">Gap 异常</div>
+      <div class="kpi-value">{{ _gap_vals | select('ge', 1.5) | list | length }}</div>
+      <div class="kpi-sub">|Gap| ≥ 1.5%</div>
+    </div>
+    <div class="kpi-card {{ _exp_cls }}">
+      <div class="kpi-label">平均期望</div>
+      <div class="kpi-value">{{ "%+.2f%%" | format(_avg_exp) }}</div>
+      <div class="kpi-sub">次日收益</div>
+    </div>
+  </div>
   <table>
     <thead>
       <tr>

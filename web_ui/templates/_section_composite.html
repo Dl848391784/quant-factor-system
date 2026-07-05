@@ -14,6 +14,39 @@ R17 改动:
   <p class="empty">综合回测数据不可用 — 请确认 summary 流水线已成功运行</p>
 {% else %}
   <p class="muted">v0.4.8 R8+R17: 复用 data_loaders.load_composite_results() (H1.1 严守, 只读) · 颜色: 年化>=±10% 强色 / 夏普>=±1 显著 · 当前选中行高亮</p>
+
+  {# === R20 KPI 卡 (4 张): 权重方法数 / 最优年化 / 最优夏普 / 当前选中 === #}
+  {% set _n_methods = composite_results | length %}
+  {% set _ann_vals = composite_results | map(attribute='long_short_return_annual') | select('number') | list %}
+  {% set _sh_vals = composite_results | map(attribute='long_short_sharpe') | select('number') | list %}
+  {% set _best_ann = (_ann_vals | max) if _ann_vals else 0 %}
+  {% set _best_sh = (_sh_vals | max) if _sh_vals else 0 %}
+  {% set _current = composite_results | selectattr('weight_method', 'equalto', weight_method) | list | first %}
+  {% set _current_ann = _current.long_short_return_annual if _current and _current.long_short_return_annual is not none else 0 %}
+  {% set _ann_cls = 'kpi-pos' if _best_ann > 0 else ('kpi-neg' if _best_ann < 0 else 'kpi-neutral') %}
+  {% set _sh_cls = 'kpi-pos' if _best_sh > 1.0 else ('kpi-warn' if _best_sh > 0 else 'kpi-neg') %}
+  <div class="kpi-grid">
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">权重方法</div>
+      <div class="kpi-value">{{ _n_methods }}</div>
+      <div class="kpi-sub">回测对比方案</div>
+    </div>
+    <div class="kpi-card {{ _ann_cls }}">
+      <div class="kpi-label">最优年化</div>
+      <div class="kpi-value">{{ "%+.1f%%" | format(_best_ann * 100) }}</div>
+      <div class="kpi-sub">多空对冲</div>
+    </div>
+    <div class="kpi-card {{ _sh_cls }}">
+      <div class="kpi-label">最优夏普</div>
+      <div class="kpi-value">{{ "%+.2f" | format(_best_sh) }}</div>
+      <div class="kpi-sub">风险调整</div>
+    </div>
+    <div class="kpi-card kpi-pos">
+      <div class="kpi-label">当前选中</div>
+      <div class="kpi-value" style="font-size: 1.2em;">{{ weight_method }}</div>
+      <div class="kpi-sub">年化 {{ "%+.1f%%" | format(_current_ann * 100) }}</div>
+    </div>
+  </div>
   <table>
     <thead>
       <tr>
