@@ -1,14 +1,14 @@
-{# 七·权重选择结果 (v0.4.8 R8 → R18 数据风酷炫升级 + R23-6 Chart.js + ApexCharts)
+{# 七·权重选择结果 (v0.4.8 R8 → R18 + R24-1 性能回退)
 
 参数:
 - weight_selection: load_weight_selection_result() 返回的 dict | None
   字段: best_selection {method, composite_score}, ranking [{method, composite_score, metric1, metric2, ...}],
         metric_configs [{name, ...}, ...]
 
-R23-6 改造:
-- 4 KPI 卡 (R18) 保留
-- 双图: 各方法综合得分柱状 + 多方法多指标雷达图
-- R18 表格保留 (含 BEST 行)
+R24-1 改动 (按用户 2026-07-05 反馈 "移动端卡, 关注 0/9/10/11"):
+- 移除 R23-6 Chart.js 柱状 + ApexCharts 雷达 — 移动端性能优先
+- 仅保留 KPI + 表格 — 简单展示
+- 关注度: 不在 0/9/10/11 列表, 简化
 #}
 {% if not weight_selection %}
   <p class="empty">权重选择数据不可用 — 请确认 summary 流水线已成功运行</p>
@@ -19,7 +19,7 @@ R23-6 改造:
   {% set metric_configs = weight_selection.get("metric_configs") or {} %}
   {% set metric_names = (metric_configs.keys() | list)[:5] if metric_configs else [] %}
 
-  <p class="muted">v0.4.8 R8+R18+R23-6: 复用 data_loaders.load_weight_selection_result() (H1.1 严守, 只读) · 图 1: 各方法综合得分 · 图 2: 多方法多指标雷达</p>
+  <p class="muted">v0.4.8 R8+R18+R24-1: 复用 data_loaders.load_weight_selection_result() (H1.1 严守, 只读)</p>
 
   {# === R18: 顶部 KPI 卡 (4 张) === #}
   {% set _best_score = best.get("composite_score", 0) | float %}
@@ -46,79 +46,7 @@ R23-6 改造:
     </div>
   </div>
 
-  {# === R23-6 双图 === #}
-  <div class="chart-grid-2">
-    <div class="chart-wrap">
-      <div class="chart-title">各权重方法综合得分 (按得分排序)</div>
-      <canvas id="wBarChart" height="280"></canvas>
-    </div>
-    <div class="chart-wrap">
-      <div class="chart-title">多方法多指标雷达图 (归一化到 0-100)</div>
-      <div id="wRadar" style="min-height: 280px;"></div>
-    </div>
-  </div>
-
-  <script>
-  (function() {
-    const methods = {{ methods | tojson }};
-    const metricNames = {{ metric_names | tojson }};
-    const bestMethod = {{ best.get('method', '') | tojson }};
-    const SENTRY = { pos: '#3fb950', neg: '#f0883e', grid: 'rgba(139,148,158,0.15)', text: '#f0f0f5' };
-
-    // 图 1: 各方法综合得分柱状 (按得分排序, BEST 高亮)
-    const sorted = [...methods].sort((a, b) => (b.composite_score || 0) - (a.composite_score || 0));
-    const labels = sorted.map(m => m.method || m.weight_method || '—');
-    const data = sorted.map(m => parseFloat((m.composite_score || 0).toFixed(4)));
-    const colors = sorted.map(m => (m.method || m.weight_method) === bestMethod ? '#58a6ff' : (m.composite_score >= 0 ? SENTRY.pos : SENTRY.neg));
-
-    new Chart(document.getElementById('wBarChart'), {
-      type: 'bar',
-      data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 6, barThickness: 28 }] },
-      options: {
-        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `得分 = ${ctx.parsed.x.toFixed(4)}` } } },
-        scales: {
-          x: { grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text } },
-          y: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 11 } } }
-        }
-      }
-    });
-
-    // 图 2: 多方法多指标雷达 (归一化)
-    function norm(v) {
-      if (typeof v !== 'number' || !isFinite(v)) return 50;
-      return Math.max(0, Math.min(100, v * 50 + 50));
-    }
-    const COLORS = ['#58a6ff', '#3fb950', '#f0883e', '#f85149', '#a371f7', '#7ee787'];
-    const series = sorted.map((m, i) => {
-      const name = m.method || m.weight_method || '—';
-      return {
-        name,
-        // R23-6 inspect fix: 真 schema 在 m.metric_scores[mn], 不是直接 m[mn]
-        data: metricNames.map(mn => {
-          const scores = m.metric_scores || m.scores || {};
-          const v = scores[mn] !== undefined ? scores[mn] : (typeof m[mn] === 'number' ? m[mn] : 0);
-          return norm(typeof v === 'number' ? v : 0);
-        })
-      };
-    });
-
-    new ApexCharts(document.querySelector('#wRadar'), {
-      series,
-      chart: { type: 'radar', height: 320, background: 'transparent', toolbar: { show: false }, foreColor: '#f0f0f5' },
-      xaxis: { categories: metricNames.length ? metricNames : ['指标 1'], labels: { style: { colors: '#f0f0f5', fontSize: '11px' } } },
-      yaxis: { min: 0, max: 100, tickAmount: 4, labels: { style: { colors: '#8b949e', fontSize: '10px' } } },
-      stroke: { width: 2 },
-      fill: { opacity: 0.10 },
-      colors: COLORS,
-      markers: { size: 4, strokeWidth: 2 },
-      legend: { position: 'bottom', labels: { colors: '#f0f0f5' } },
-      tooltip: { theme: 'dark' }
-    }).render();
-  })();
-  </script>
-
-  {# === R18 表格保留 === #}
+  {# === R18 表格 (R24-1 简化, 移除 R23-6 chart + radar) === #}
   {% if methods %}
   <h3>各权重方法得分详情表</h3>
   <div class="data-table-wrap">
