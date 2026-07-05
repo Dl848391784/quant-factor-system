@@ -1,4 +1,4 @@
-{# 零·数据完整性检查 (v0.4.8 R17 数据风酷炫升级)
+{# 零·数据完整性检查 (v0.4.8 R17 数据风酷炫升级 + R24-3 现代感强化)
 
 参数:
 - data_results: check_data_freshness() 返回的 list[dict]
@@ -9,6 +9,10 @@ R17 改动:
 - status_symbol 转为 status-badge (绿/黄/红)
 - 行内嵌入 ✅/⚠️/❌ → .ok/.warn/.fail 徽章
 - 完整保留 H1.1 严守
+
+R24-3 现代感强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现代感元素"):
+- 新增 Chart.js doughnut: PASS / WARN / FAIL 数据源状态分布
+- 新增 Chart.js 横向柱状: 数据源 vs 文件数 (文件计数最多的前 10 数据源)
 #}
 {% if not data_results and not derived_results %}
   <p class="empty">数据完整性检查不可用 — 请确认 summary 流水线已成功运行</p>
@@ -48,62 +52,126 @@ R17 改动:
     <div class="kpi-card {{ _overall_cls }}">
       <div class="kpi-label">失败数</div>
       <div class="kpi-value">{{ _n_fail }}</div>
-      <div class="kpi-sub">❌ 异常数据</div>
+      <div class="kpi-sub">❌ 数据缺失</div>
     </div>
   </div>
+
+  {# === R24-3 新增 Chart.js 双图: 状态分布 + 数据源文件数 === #}
+  <div class="chart-grid-2">
+    <div class="chart-wrap">
+      <div class="chart-title">数据源状态分布 (✅ / ⚠️ / ❌)</div>
+      <canvas id="freshStatusChart" height="280"></canvas>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-title">数据源文件数 Top 10</div>
+      <canvas id="freshFileChart" height="280"></canvas>
+    </div>
+  </div>
+  <script>
+  (function() {
+    const all = {{ _all | tojson }};
+    const SENTRY = { pos: '#3fb950', warn: '#f85149', grid: 'rgba(139,148,158,0.15)', text: '#f0f0f5' };
+
+    // 图 1: 状态分布 doughnut
+    const statusCounts = all.reduce((acc, r) => {
+      let k = '未知';
+      const sym = r.status_symbol || '';
+      if (typeof sym === 'string') {
+        if (sym.includes('✅')) k = '正常';
+        else if (sym.includes('⚠️')) k = '告警';
+        else if (sym.includes('❌')) k = '失败';
+      }
+      acc[k] = (acc[k] || 0) + 1;
+      return acc;
+    }, {});
+    const order = ['正常', '告警', '失败', '未知'];
+    const labels = order.filter(k => statusCounts[k] !== undefined);
+    if (labels.length === 0) labels.push('无数据');
+    new Chart(document.getElementById('freshStatusChart'), {
+      type: 'doughnut',
+      data: {
+        labels,
+        datasets: [{
+          data: labels.map(k => statusCounts[k] || 0),
+          backgroundColor: [SENTRY.pos, '#f0883e', SENTRY.warn, '#8b949e'],
+          borderColor: '#0d1117', borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { color: SENTRY.text } },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.parsed} 项 (${((ctx.parsed / all.length) * 100).toFixed(0)}%)` } }
+        },
+        cutout: '65%'
+      }
+    });
+
+    // 图 2: 文件数 Top 10 横向柱状
+    const top = [...all].filter(r => typeof r.file_count === 'number').sort((a, b) => b.file_count - a.file_count).slice(0, 10);
+    new Chart(document.getElementById('freshFileChart'), {
+      type: 'bar',
+      data: {
+        labels: top.map(r => r.source || 'unknown'),
+        datasets: [{ data: top.map(r => r.file_count), backgroundColor: SENTRY.pos, borderRadius: 4, barThickness: 16 }]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.parsed.x} 文件` } } },
+        scales: {
+          x: { beginAtZero: true, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, stepSize: 1 } },
+          y: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 10 } } }
+        }
+      }
+    });
+  })();
+  </script>
+
   <h3>【基础数据源】</h3>
   <table>
     <thead>
-      <tr>
-        <th>数据源</th><th>描述</th><th>期望日期</th><th>实际日期</th><th>状态</th>
-      </tr>
+      <tr><th>数据源</th><th>说明</th><th>期望日期</th><th>实际日期</th><th>状态</th><th>文件数</th></tr>
     </thead>
     <tbody>
-    {% for r in data_results %}
-      {# status → badge class. status_symbol 形如 "✅", "⚠️", "❌" #}
-      {% set _badge_cls = 'ok' %}
-      {% if r.status_symbol %}
-        {% if '❌' in r.status_symbol or '失败' in r.status_symbol or '异常' in r.status_symbol %}
-          {% set _badge_cls = 'fail' %}
-        {% elif '⚠️' in r.status_symbol or '警告' in r.status_symbol or '陈旧' in r.status_symbol %}
-          {% set _badge_cls = 'warn' %}
-        {% endif %}
-      {% endif %}
+    {% for r in data_results or [] %}
+      {% set _sym = r.status_symbol or '' %}
+      {% if '❌' in _sym %}{% set _cls = 'fail' %}{% set _txt = '❌ 失败' %}
+      {% elif '⚠️' in _sym %}{% set _cls = 'warn' %}{% set _txt = '⚠️ 告警' %}
+      {% else %}{% set _cls = 'ok' %}{% set _txt = '✅ 正常' %}{% endif %}
       <tr>
-        <td>{{ r.source }}</td>
+        <td><code>{{ r.source }}</code></td>
         <td>{{ r.description }}</td>
-        <td>{{ r.expected_date }}</td>
-        <td>{{ r.actual_date }}</td>
-        <td><span class="status-badge {{ _badge_cls }}">{{ r.status_symbol }}</span></td>
+        <td>{{ r.expected_date or '—' }}</td>
+        <td>{{ r.actual_date or '—' }}</td>
+        <td><span class="status-badge {{ _cls }}">{{ _sym or _txt }}</span></td>
+        <td>{{ r.file_count if r.file_count is not none else '—' }}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
 
-  <h3>【衍生数据】</h3>
+  {% if derived_results %}
+  <h3>【衍生数据源】</h3>
   <table>
     <thead>
-      <tr>
-        <th>数据源</th><th>描述</th><th>文件数</th><th>状态</th>
-      </tr>
+      <tr><th>数据源</th><th>说明</th><th>期望日期</th><th>实际日期</th><th>状态</th><th>文件数</th></tr>
     </thead>
     <tbody>
     {% for r in derived_results %}
-      {% set _badge_cls = 'ok' %}
-      {% if r.status_symbol %}
-        {% if '❌' in r.status_symbol or '失败' in r.status_symbol or '异常' in r.status_symbol %}
-          {% set _badge_cls = 'fail' %}
-        {% elif '⚠️' in r.status_symbol or '警告' in r.status_symbol or '陈旧' in r.status_symbol %}
-          {% set _badge_cls = 'warn' %}
-        {% endif %}
-      {% endif %}
+      {% set _sym = r.status_symbol or '' %}
+      {% if '❌' in _sym %}{% set _cls = 'fail' %}{% set _txt = '❌ 失败' %}
+      {% elif '⚠️' in _sym %}{% set _cls = 'warn' %}{% set _txt = '⚠️ 告警' %}
+      {% else %}{% set _cls = 'ok' %}{% set _txt = '✅ 正常' %}{% endif %}
       <tr>
-        <td>{{ r.source }}</td>
+        <td><code>{{ r.source }}</code></td>
         <td>{{ r.description }}</td>
-        <td>{{ r.file_count }}</td>
-        <td><span class="status-badge {{ _badge_cls }}">{{ r.status_symbol }}</span></td>
+        <td>{{ r.expected_date or '—' }}</td>
+        <td>{{ r.actual_date or '—' }}</td>
+        <td><span class="status-badge {{ _cls }}">{{ _sym or _txt }}</span></td>
+        <td>{{ r.file_count if r.file_count is not none else '—' }}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
+  {% endif %}
 {% endif %}

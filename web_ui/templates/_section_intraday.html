@@ -1,4 +1,4 @@
-{# 10·S7/S9 段日内操作建议 (v0.4.8 R3 + R22-2 组件化)
+{# 11·S7/S9 段日内操作建议 (v0.4.8 R3 + R22-2 组件化 + R24-3 现代感强化)
 
 参数:
 - intraday_rows: load_intraday_strategy() 返回的 list[dict]
@@ -9,6 +9,10 @@ R22-2 组件化改造 (§3 surgical: 只动 _section_intraday.html, 不动其他
 - 顶部 KPI 4 张卡 → render_kpi_card macro
 - 主表 → render_data_table macro (现代表格: hover/striped/sticky-header/numeric)
 - Gap% 列改用 render_rank_bar 水平柱状条 (可视化替代纯数字)
+
+R24-3 现代感强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现代感元素"):
+- 新增 Chart.js doughnut: 操作建议分布 (开盘卖/持有/观望 比例) + 操作信号分布
+- 表格 BEST 行加 row-best 高亮 (gap 异常最大者)
 #}
 {% from '_macros.html' import render_kpi_card, render_data_table, render_rank_bar %}
 
@@ -32,6 +36,78 @@ R22-2 组件化改造 (§3 surgical: 只动 _section_intraday.html, 不动其他
     {{ render_kpi_card('Gap 异常', _gap_vals | select('ge', 1.5) | list | length, '|Gap| ≥ 1.5%', _gap_cls) }}
     {{ render_kpi_card('平均期望', "%+.2f%%" | format(_avg_exp), '次日收益', _exp_cls) }}
   </div>
+
+  {# === R24-3 新增 Chart.js 双图: 操作建议 + 操作信号 === #}
+  <div class="chart-grid-2">
+    <div class="chart-wrap">
+      <div class="chart-title">操作建议分布 (开盘卖 / 持有 / 观望)</div>
+      <canvas id="intraActionChart" height="280"></canvas>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-title">操作信号分布 (高开 / 低开 / 平开 等)</div>
+      <canvas id="intraSignalChart" height="280"></canvas>
+    </div>
+  </div>
+  <script>
+  (function() {
+    const rows = {{ intraday_rows | tojson }};
+    const SENTRY = { pos: '#3fb950', neg: '#f0883e', warn: '#f85149', neutral: '#58a6ff', grid: 'rgba(139,148,158,0.15)', text: '#f0f0f5' };
+    const PALETTE = ['#3fb950', '#58a6ff', '#f0883e', '#f85149', '#a371f7', '#7ee787'];
+
+    function categorize(action) {
+      if (!action) return '观望';
+      const s = String(action);
+      if (/开盘卖|卖/.test(s)) return '开盘卖';
+      if (/持有|买|做多/.test(s)) return '持有';
+      return '观望';
+    }
+
+    // 图 1: 操作建议 doughnut
+    const actCounts = rows.reduce((acc, r) => {
+      const k = categorize(r.recommended_action);
+      acc[k] = (acc[k] || 0) + 1;
+      return acc;
+    }, {});
+    new Chart(document.getElementById('intraActionChart'), {
+      type: 'doughnut',
+      data: {
+        labels: Object.keys(actCounts),
+        datasets: [{ data: Object.values(actCounts), backgroundColor: PALETTE.slice(0, Object.keys(actCounts).length), borderColor: '#0d1117', borderWidth: 2 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { color: SENTRY.text } },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.parsed} 只 (${((ctx.parsed / rows.length) * 100).toFixed(0)}%)` } }
+        },
+        cutout: '60%'
+      }
+    });
+
+    // 图 2: 操作信号横向柱状 (按出现次数排序)
+    const sigCounts = rows.reduce((acc, r) => {
+      const k = r.open_signal || '未知';
+      acc[k] = (acc[k] || 0) + 1;
+      return acc;
+    }, {});
+    const sigEntries = Object.entries(sigCounts).sort((a, b) => b[1] - a[1]);
+    new Chart(document.getElementById('intraSignalChart'), {
+      type: 'bar',
+      data: {
+        labels: sigEntries.map(e => e[0]),
+        datasets: [{ data: sigEntries.map(e => e[1]), backgroundColor: SENTRY.neutral, borderRadius: 4, barThickness: 20 }]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.parsed.y} 只` } } },
+        scales: {
+          x: { beginAtZero: true, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, stepSize: 1 } },
+          y: { grid: { display: false }, ticks: { color: SENTRY.text } }
+        }
+      }
+    });
+  })();
+  </script>
 
   {# === R22-2: 改用 render_data_table + render_rank_bar (Gap% 列可视化) === #}
   {% set _headers = ['代码', '名称', '前收', '开盘', 'Gap%', 'Open Signal', '操作建议', '期望收益%', '止损价'] %}
