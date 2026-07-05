@@ -1,28 +1,62 @@
-{# 五·综合因子 4 种权重回测 (v0.4.8 R8)
+{# 五·综合因子 4 种权重回测 (v0.4.8 R17 数据风酷炫升级)
 
 参数:
 - composite_results: load_composite_results() 返回的 list[dict]
-  字段: weight_method, annual_return, sharpe, max_drawdown, monotonicity
+  字段: weight_method, weight_method_display, long_short_return_annual, long_short_sharpe,
+         monotonicity_correlation, monotonicity_quality, monotonicity_symbol
+
+R17 改动:
+- 年化收益 + 夏普 单元格颜色映射
+- 选中当前 weight_method 的行高亮
+- 完整保留 H1.1 严守
 #}
 {% if not composite_results %}
   <p class="empty">综合回测数据不可用 — 请确认 summary 流水线已成功运行</p>
 {% else %}
-  <p class="muted">v0.4.8 R8: 复用 data_loaders.load_composite_results() (H1.1 严守, 只读)</p>
+  <p class="muted">v0.4.8 R8+R17: 复用 data_loaders.load_composite_results() (H1.1 严守, 只读) · 颜色: 年化>=±10% 强色 / 夏普>=±1 显著 · 当前选中行高亮</p>
   <table>
     <thead>
       <tr>
         <th>权重方法</th><th>年化收益</th><th>夏普比率</th>
-        <th>最大回撤</th><th>单调性</th>
+        <th>单调性</th><th>质量</th>
       </tr>
     </thead>
     <tbody>
     {% for r in composite_results %}
-      <tr>
-        <td><code>{{ r.weight_method }}</code></td>
-        <td>{{ "%+.2f%%" | format(r.long_short_return_annual * 100) if r.long_short_return_annual is not none else "—" }}</td>
-        <td>{{ "%+.2f" | format(r.long_short_sharpe) if r.long_short_sharpe is not none else "—" }}</td>
+      {% set _ann = r.long_short_return_annual %}
+      {% set _ann_pct = (_ann * 100) if _ann is not none else 0 %}
+      {% set _abs_ann = _ann_pct | abs %}
+      {% if _ann is none %}
+        {% set _ann_cls = 'cell-neutral-bg' %}
+      {% elif _abs_ann >= 10 %}
+        {% set _ann_cls = 'cell-strong-pos-bg' if _ann > 0 else 'cell-strong-neg-bg' %}
+      {% elif _abs_ann >= 5 %}
+        {% set _ann_cls = 'cell-pos-bg' if _ann > 0 else 'cell-neg-bg' %}
+      {% else %}
+        {% set _ann_cls = '' %}
+      {% endif %}
+      {% set _sh = r.long_short_sharpe %}
+      {% if _sh is none %}
+        {% set _sh_cls = 'cell-neutral-bg' %}
+      {% elif _sh >= 1.0 %}
+        {% set _sh_cls = 'cell-strong-pos-bg' %}
+      {% elif _sh >= 0.5 %}
+        {% set _sh_cls = 'cell-pos-bg' %}
+      {% elif _sh <= -1.0 %}
+        {% set _sh_cls = 'cell-strong-neg-bg' %}
+      {% else %}
+        {% set _sh_cls = '' %}
+      {% endif %}
+      <tr {% if r.weight_method == weight_method %}style="background:#fff8e1;font-weight:600"{% endif %}>
+        <td><code>{{ r.weight_method }}</code>{% if r.weight_method_display %} <span class="muted">({{ r.weight_method_display }})</span>{% endif %}{% if r.weight_method == weight_method %} ★{% endif %}</td>
+        <td class="{{ _ann_cls }}">
+          {% if _ann is not none %}
+            <span class="mini-bar {% if _ann > 0 %}pos{% else %}neg{% endif %}" style="width: {{ [(_abs_ann * 4) | int, 80] | min }}px"></span>{{ "%+.2f%%" | format(_ann_pct) }}
+          {% else %}—{% endif %}
+        </td>
+        <td class="{{ _sh_cls }}">{{ "%+.2f" | format(_sh) if _sh is not none else "—" }}</td>
         <td>{{ "%+.4f" | format(r.monotonicity_correlation) if r.monotonicity_correlation is not none else "—" }}</td>
-        <td>{{ r.monotonicity_quality if r.monotonicity_quality else "—" }}</td>
+        <td>{{ r.monotonicity_quality if r.monotonicity_quality else "—" }} {{ r.monotonicity_symbol if r.monotonicity_symbol else "" }}</td>
       </tr>
     {% endfor %}
     </tbody>

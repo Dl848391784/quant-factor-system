@@ -1,13 +1,20 @@
-{# 二·单因子分层回测 (v0.4.8 R8)
+{# 二·单因子分层回测 (v0.4.8 R17 数据风酷炫升级)
 
 参数:
 - backtest_results: load_backtest_results() 返回的 list[dict]
-  字段: factor_name, long_short_annual, sharpe, monotonicity, monotonicity_quality
+  字段: factor_name, long_short_return_annual, long_short_sharpe, monotonicity_correlation, monotonicity_quality
+
+R17 改动:
+- 年化收益: >=10% 绿底 / >=5% 浅绿 / <-5% 浅红 / <-10% 红底
+- 夏普比率: >=1.0 显著绿 / <=-1.0 红
+- 单调性: |x|>=0.5 显著
+- mini-bar 替代纯数字
+- 完整保留 H1.1 严守
 #}
 {% if not backtest_results %}
   <p class="empty">回测数据不可用 — 请确认 summary 流水线已成功运行</p>
 {% else %}
-  <p class="muted">v0.4.8 R8: 复用 data_loaders.load_backtest_results() (H1.1 严守, 只读)</p>
+  <p class="muted">v0.4.8 R8+R17: 复用 data_loaders.load_backtest_results() (H1.1 严守, 只读) · 单元格颜色: 年化>=±10% 强色 / 夏普>=±1 显著 / 单调性>=|0.5| 加粗</p>
   <table>
     <thead>
       <tr>
@@ -17,11 +24,53 @@
     </thead>
     <tbody>
     {% for r in backtest_results %}
+      {# 年化收益 #}
+      {% set _ann = r.long_short_return_annual %}
+      {% set _ann_pct = (_ann * 100) if _ann is not none else 0 %}
+      {% set _abs_ann = _ann_pct | abs %}
+      {% if _ann is none %}
+        {% set _ann_cls = 'cell-neutral-bg' %}
+      {% elif _abs_ann >= 10 %}
+        {% set _ann_cls = 'cell-strong-pos-bg' if _ann > 0 else 'cell-strong-neg-bg' %}
+      {% elif _abs_ann >= 5 %}
+        {% set _ann_cls = 'cell-pos-bg' if _ann > 0 else 'cell-neg-bg' %}
+      {% else %}
+        {% set _ann_cls = '' %}
+      {% endif %}
+      {# 夏普 #}
+      {% set _sh = r.long_short_sharpe %}
+      {% if _sh is none %}
+        {% set _sh_cls = 'cell-neutral-bg' %}
+      {% elif _sh >= 1.0 %}
+        {% set _sh_cls = 'cell-strong-pos-bg' %}
+      {% elif _sh >= 0.5 %}
+        {% set _sh_cls = 'cell-pos-bg' %}
+      {% elif _sh <= -1.0 %}
+        {% set _sh_cls = 'cell-strong-neg-bg' %}
+      {% elif _sh <= -0.5 %}
+        {% set _sh_cls = 'cell-neg-bg' %}
+      {% else %}
+        {% set _sh_cls = '' %}
+      {% endif %}
+      {# 单调性 #}
+      {% set _mono = r.monotonicity_correlation %}
+      {% set _abs_mono = (_mono | abs) if _mono is not none else 0 %}
+      {% if _mono is none %}
+        {% set _mono_cls = 'cell-neutral-bg' %}
+      {% elif _abs_mono >= 0.5 %}
+        {% set _mono_cls = 'cell-strong' %}
+      {% else %}
+        {% set _mono_cls = '' %}
+      {% endif %}
       <tr>
         <td><code>{{ r.factor_name }}</code></td>
-        <td>{{ "%+.2f%%" | format(r.long_short_return_annual * 100) if r.long_short_return_annual is not none else "—" }}</td>
-        <td>{{ "%+.2f" | format(r.long_short_sharpe) if r.long_short_sharpe is not none else "—" }}</td>
-        <td>{{ "%+.4f" | format(r.monotonicity_correlation) if r.monotonicity_correlation is not none else "—" }}</td>
+        <td class="{{ _ann_cls }}">
+          {% if _ann is not none %}
+            <span class="mini-bar {% if _ann > 0 %}pos{% else %}neg{% endif %}" style="width: {{ [(_abs_ann * 4) | int, 80] | min }}px"></span>{{ "%+.2f%%" | format(_ann_pct) }}
+          {% else %}—{% endif %}
+        </td>
+        <td class="{{ _sh_cls }}">{{ "%+.2f" | format(_sh) if _sh is not none else "—" }}</td>
+        <td class="{{ _mono_cls }}">{{ "%+.4f" | format(_mono) if _mono is not none else "—" }}</td>
         <td>{{ r.monotonicity_quality if r.monotonicity_quality else "—" }}</td>
       </tr>
     {% endfor %}

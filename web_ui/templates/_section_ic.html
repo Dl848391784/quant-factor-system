@@ -1,26 +1,56 @@
-{# 一·单因子 IC 数据汇总 (v0.4.8 R7)
+{# 一·单因子 IC 数据汇总 (v0.4.8 R17 数据风酷炫升级)
 
 参数:
 - ic_results: load_ic_results() 返回的 list[dict]
   字段: factor_name, ic_mean, icir, ic_std, valid_days, neutralization_sensitivity, neutralization_method
+
+R17 改动:
+- IC 均值按绝对值大小映射背景色 (强正=绿底白字 / 强负=红底白字 / 弱=浅色)
+- ICIR 按业界标准 |ICIR|>0.5 加粗
+- 列内嵌入 mini-bar (IC 均值绝对值大小可视化)
+- 完整保留 H1.1 严守: 字段名 + 数据来源不变
 #}
 {% if not ic_results %}
   <p class="empty">IC 数据不可用 — 请确认 summary 流水线已成功运行</p>
 {% else %}
-  <p class="muted">v0.4.8 R7: 复用 data_loaders.load_ic_results() (H1.1 严守, 只读)</p>
+  <p class="muted">v0.4.8 R7+R17: 复用 data_loaders.load_ic_results() (H1.1 严守, 只读) · 单元格颜色: |IC|>=0.05 强色 / 0.03~0.05 浅色 / 否则中性</p>
   <table>
     <thead>
       <tr>
-        <th>因子</th><th>IC均值</th><th>ICIR</th><th>IC标准差</th>
+        <th>因子</th><th>IC 均值</th><th>ICIR</th><th>IC 标准差</th>
         <th>有效天数</th><th>中性化敏感</th><th>中性化方式</th>
       </tr>
     </thead>
     <tbody>
     {% for r in ic_results %}
+      {# IC 均值单元格: |x|>=0.05 强色, |x|>=0.03 浅色, 否则中性 #}
+      {% set _abs_ic = (r.ic_mean | abs) if r.ic_mean is not none else 0 %}
+      {% if r.ic_mean is none %}
+        {% set _ic_cls = 'cell-neutral-bg' %}
+      {% elif _abs_ic >= 0.05 %}
+        {% set _ic_cls = 'cell-strong-pos-bg' if r.ic_mean > 0 else 'cell-strong-neg-bg' %}
+      {% elif _abs_ic >= 0.03 %}
+        {% set _ic_cls = 'cell-pos-bg' if r.ic_mean > 0 else 'cell-neg-bg' %}
+      {% else %}
+        {% set _ic_cls = 'cell-neutral-bg' %}
+      {% endif %}
+      {# ICIR 单元格: |x|>=0.5 显著 #}
+      {% set _abs_icir = (r.icir | abs) if r.icir is not none else 0 %}
+      {% if r.icir is none %}
+        {% set _icir_cls = 'cell-neutral-bg' %}
+      {% elif _abs_icir >= 0.5 %}
+        {% set _icir_cls = 'cell-strong' %}
+      {% else %}
+        {% set _icir_cls = '' %}
+      {% endif %}
       <tr>
         <td><code>{{ r.factor_name }}</code></td>
-        <td>{{ "%.4f" | format(r.ic_mean) if r.ic_mean is not none else "—" }}</td>
-        <td>{{ "%.4f" | format(r.icir) if r.icir is not none else "—" }}</td>
+        <td class="{{ _ic_cls }}">
+          {% if r.ic_mean is not none %}
+            <span class="mini-bar {% if r.ic_mean > 0 %}pos{% else %}neg{% endif %}" style="width: {{ [(_abs_ic * 800) | int, 80] | min }}px"></span>{{ "%+.4f" | format(r.ic_mean) }}
+          {% else %}—{% endif %}
+        </td>
+        <td class="{{ _icir_cls }}">{{ "%+.4f" | format(r.icir) if r.icir is not none else "—" }}</td>
         <td>{{ "%.4f" | format(r.ic_std) if r.ic_std is not none else "—" }}</td>
         <td>{{ r.valid_days if r.valid_days is not none else "—" }}</td>
         <td>{{ r.neutral_enabled if r.neutral_enabled is not none else "—" }}</td>

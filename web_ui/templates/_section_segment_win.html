@@ -1,8 +1,16 @@
-{# 9·30 分段胜率 (v0.4.8 R3)
+{# 9·30 分段胜率 (v0.4.8 R17 数据风酷炫升级)
 
 参数:
 - decile_stats: load_decile_stats() 返回的 dict (从 master Parquet 计算, 须 T+2 数据)
+  字段: selection_date, trade_date, n_total, segments[].label/n/win_rate/avg_ret/pl_ratio/wins/losses
 - txt_s9_matrix: parse_obq_section_9_matrix() 返回的 dict (从 summary txt 报告解析, H1.1 内部实现)
+  字段: dates[], segments[].label/win_rates[]/merged, best_segment, daily_rates{}
+
+R17 改动:
+- 上方 decile_stats 表: 胜率进度条 + 颜色 + mini-bar
+- 下方 txt 矩阵: 30×12 替换为热力图 (heatmap-strong-pos/pos/neutral/neg/strong-neg)
+- BEST 段用橙色 outline
+- 完整保留 H1.1 严守 + 双源 fallback 文案 (§5b)
 #}
 {% if not decile_stats or not decile_stats.get("segments") %}
   <p class="empty">本节所需 Parquet 实时计算的逐段胜率尚未就绪（通常因选股日 T+2 master 数据未到）— 下方 txt 报告矩阵仍可展示（不依赖 Parquet）</p>
@@ -35,14 +43,23 @@
     </thead>
     <tbody>
     {% for seg in display_segs %}
-      <tr {% if seg.label == best.label %}style="background:#fff3cd"{% endif %}>
-        <td>{{ seg.label }}</td>
+      {# 胜率: 进度条 + 颜色. >=60% 绿 / <=40% 红 #}
+      {% set _wr = seg.win_rate %}
+      {% if _wr >= 60 %}{% set _wr_cls = 'pos' %}{% elif _wr <= 40 %}{% set _wr_cls = 'neg' %}{% else %}{% set _wr_cls = 'warn' %}{% endif %}
+      {# 均收 #}
+      {% set _ret = seg.avg_ret %}
+      {% set _ret_cls = 'cell-pos-bg' if _ret > 0 else ('cell-neg-bg' if _ret < 0 else 'cell-neutral-bg') %}
+      <tr {% if seg.label == best.label %}style="background:#fff8e1;font-weight:600"{% endif %}>
+        <td><code>{{ seg.label }}</code></td>
         <td>{{ seg.n }}</td>
-        <td>{{ "%.1f" | format(seg.win_rate) }}%</td>
-        <td>{{ "%+.2f" | format(seg.avg_ret) }}%</td>
+        <td>
+          <span class="progress-bar {{ _wr_cls }}"><span style="width: {{ [_wr | int, 100] | min }}%"></span></span>
+          <span class="cell-strong">{{ "%.1f" | format(_wr) }}%</span>
+        </td>
+        <td class="{{ _ret_cls }}">{{ "%+.2f" | format(_ret) }}%</td>
         <td>{{ "%.2f" | format(seg.pl_ratio) }}</td>
         <td>{{ seg.wins }}:{{ seg.losses }}</td>
-        <td>{% if seg.label == best.label %}★ BEST ({{ "%.1f" | format(best.win_rate) }}%){% else %}—{% endif %}</td>
+        <td>{% if seg.label == best.label %}<span class="status-badge ok">★ BEST</span> {{ "%.1f" | format(best.win_rate) }}%{% else %}—{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -50,15 +67,19 @@
 
   {% if not show_all %}
   <h3>全部 {{ n_segs }} 段胜率一览 (按段号顺序)</h3>
-  <table>
+  <table class="heatmap">
     <thead><tr>
+      <th></th>
       {% for seg in ranked | sort(attribute='label') %}
         <th>{{ seg.label }}</th>
       {% endfor %}
     </tr></thead>
     <tbody><tr>
+      <th style="text-align:right">胜率</th>
       {% for seg in ranked | sort(attribute='label') %}
-        <td>{{ "%.0f" | format(seg.win_rate) }}%</td>
+        {% set _wr = seg.win_rate %}
+        {% if _wr >= 60 %}{% set _wr_cls = 'heatmap-strong-pos' %}{% elif _wr >= 50 %}{% set _wr_cls = 'heatmap-pos' %}{% elif _wr >= 40 %}{% set _wr_cls = 'heatmap-neutral' %}{% elif _wr >= 30 %}{% set _wr_cls = 'heatmap-neg' %}{% else %}{% set _wr_cls = 'heatmap-strong-neg' %}{% endif %}
+        <td class="{{ _wr_cls }}" title="{{ seg.label }}: {{ "%.1f" | format(_wr) }}%">{{ "%.0f" | format(_wr) }}</td>
       {% endfor %}
     </tr></tbody>
   </table>
@@ -67,8 +88,8 @@
 
 {# v0.4.8 R4: txt 报告 30 段 × 12 选股日 完整胜率矩阵 (data_loaders 拿不到, 从 txt 解析) #}
 {% if txt_s9_matrix and txt_s9_matrix.get("segments") %}
-  <h3>30 分段 × 12 选股日 完整胜率矩阵 (txt 来源)</h3>
-  <p class="muted">数据源: web_ui/common/txt_parser.py 解析 summary/result/ob_quality/factor_summary_report_*.txt (H1.1 内部实现, 不读 master Parquet) · 上方 decile_stats 表从 Parquet 实时计算, 须 T+2 数据</p>
+  <h3>30 分段 × 12 选股日 完整胜率矩阵 (txt 来源 · 热力图)</h3>
+  <p class="muted">数据源: web_ui/common/txt_parser.py 解析 summary/result/ob_quality/factor_summary_report_*.txt (H1.1 内部实现, 不读 master Parquet) · 上方 decile_stats 表从 Parquet 实时计算, 须 T+2 数据 · 颜色: >=60% 绿 / 50-60 浅绿 / 40-50 中性 / 30-40 浅红 / <30% 深红</p>
   {% set best_seg = txt_s9_matrix.get("best_segment") %}
   {% if best_seg %}
   <p><strong>最佳段</strong>: <code>{{ best_seg.label }}</code> (合并胜率 {{ "%.1f" | format(best_seg.merged) }}%)</p>
@@ -78,30 +99,37 @@
     <thead><tr><th>选股日</th><th>胜率</th></tr></thead>
     <tbody>
     {% for date, rate in txt_s9_matrix.daily_rates.items() %}
-      <tr><td>{{ date }}</td><td>{{ rate }}</td></tr>
+      {% set _r = rate | float %}
+      {% if _r >= 60 %}{% set _r_cls = 'cell-strong-pos-bg' %}{% elif _r >= 50 %}{% set _r_cls = 'cell-pos-bg' %}{% elif _r < 40 %}{% set _r_cls = 'cell-neg-bg' %}{% else %}{% set _r_cls = '' %}{% endif %}
+      <tr><td>{{ date }}</td><td class="{{ _r_cls }}">{{ rate }}%</td></tr>
     {% endfor %}
     </tbody>
   </table>
   {% endif %}
   {% endif %}
   <div style="overflow-x: auto;">
-  <table>
+  <table class="heatmap">
     <thead>
       <tr>
-        <th>段</th>
-        {% for d in txt_s9_matrix.dates %}<th>{{ d }}</th>{% endfor %}
-        <th>合并</th>
+        <th style="text-align:left">段</th>
+        {% for d in txt_s9_matrix.dates %}<th>{{ d[5:] }}</th>{% endfor %}
+        <th style="background:#fff8e1">合并</th>
       </tr>
     </thead>
     <tbody>
     {% for seg in txt_s9_matrix.segments %}
-      <tr {% if best_seg and seg.label == best_seg.label %}style="background:#fff3cd;font-weight:bold"{% endif %}>
-        <td>{{ seg.label }}</td>
-        {% for wr in seg.win_rates %}<td>{{ "%.0f" | format(wr) }}%</td>{% endfor %}
-        <td><strong>{{ "%.1f" | format(seg.merged) }}%</strong></td>
+      {% set _is_best = (best_seg and seg.label == best_seg.label) %}
+      <tr {% if _is_best %}class="heatmap-best"{% endif %}>
+        <th style="text-align:left;background:#fafbfc">{% if _is_best %}<span class="status-badge ok">★</span>{% endif %} {{ seg.label }}</th>
+        {% for wr in seg.win_rates %}
+          {% set _w = wr | float %}
+          {% if _w >= 60 %}{% set _w_cls = 'heatmap-strong-pos' %}{% elif _w >= 50 %}{% set _w_cls = 'heatmap-pos' %}{% elif _w >= 40 %}{% set _w_cls = 'heatmap-neutral' %}{% elif _w >= 30 %}{% set _w_cls = 'heatmap-neg' %}{% else %}{% set _w_cls = 'heatmap-strong-neg' %}{% endif %}
+          <td class="{{ _w_cls }}" title="{{ seg.label }} · {{ txt_s9_matrix.dates[loop.index0] }}: {{ "%.0f" | format(_w) }}%">{{ "%.0f" | format(_w) }}</td>
+        {% endfor %}
+        <td style="background:#fff8e1;font-weight:700">{{ "%.1f" | format(seg.merged) }}%</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
-  {% endif %}
+{% endif %}

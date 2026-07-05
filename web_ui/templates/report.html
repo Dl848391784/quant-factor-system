@@ -234,6 +234,184 @@ td code {
 }
 .back-to-top:hover { transform: translateY(-2px); }
 
+/* === 顶部滚动进度条 === */
+.scroll-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #3498db, #2ecc71);
+  z-index: 200;
+  width: 0%;
+  transition: width 0.1s ease-out;
+  box-shadow: 0 1px 4px rgba(52,152,219,0.4);
+}
+
+/* === KPI 顶部数据卡片 === */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.kpi-card {
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 16px 18px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+.kpi-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: #3498db;
+}
+.kpi-card.kpi-pos::before { background: #27ae60; }
+.kpi-card.kpi-neg::before { background: #e74c3c; }
+.kpi-card.kpi-warn::before { background: #f39c12; }
+.kpi-card.kpi-neutral::before { background: #95a5a6; }
+.kpi-card .kpi-label {
+  font-size: 11px;
+  color: #7f8c8d;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.kpi-card .kpi-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1a252f;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  line-height: 1.2;
+}
+.kpi-card.kpi-pos .kpi-value { color: #27ae60; }
+.kpi-card.kpi-neg .kpi-value { color: #e74c3c; }
+.kpi-card.kpi-warn .kpi-value { color: #f39c12; }
+.kpi-card .kpi-sub {
+  font-size: 11px;
+  color: #95a5a6;
+  margin-top: 4px;
+}
+
+/* === 表格单元格颜色工具类 (IC / 胜率 / 收益) === */
+.cell-pos { color: #27ae60; font-weight: 600; }
+.cell-neg { color: #e74c3c; font-weight: 600; }
+.cell-pos-bg { background: #e8f6ee; color: #1e8449; }
+.cell-neg-bg { background: #fdecea; color: #c0392b; }
+.cell-strong-pos-bg { background: #27ae60; color: #ffffff; font-weight: 600; }
+.cell-strong-neg-bg { background: #e74c3c; color: #ffffff; font-weight: 600; }
+.cell-warn-bg { background: #fef5e7; color: #d68910; }
+.cell-neutral-bg { background: #f4f6f7; color: #566573; }
+.cell-strong { font-weight: 700; }
+
+/* === 微型柱状图 (inline 在表格单元格里) === */
+.mini-bar {
+  display: inline-block;
+  height: 6px;
+  background: #3498db;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-right: 4px;
+  min-width: 2px;
+}
+.mini-bar.pos { background: #27ae60; }
+.mini-bar.neg { background: #e74c3c; }
+.mini-bar.warn { background: #f39c12; }
+
+/* === 进度条 (胜率) === */
+.progress-bar {
+  display: inline-block;
+  width: 80px;
+  height: 8px;
+  background: #ecf0f1;
+  border-radius: 4px;
+  overflow: hidden;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+.progress-bar > span {
+  display: block;
+  height: 100%;
+  background: #3498db;
+  transition: width 0.3s ease;
+}
+.progress-bar.pos > span { background: #27ae60; }
+.progress-bar.neg > span { background: #e74c3c; }
+.progress-bar.warn > span { background: #f39c12; }
+
+/* === 状态徽章 (数据新鲜度) === */
+.status-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.status-badge.ok { background: #e8f6ee; color: #1e8449; }
+.status-badge.warn { background: #fef5e7; color: #d68910; }
+.status-badge.fail { background: #fdecea; color: #c0392b; }
+
+/* === 热力图样式 (用于 _section_segment_win.html 30x12 矩阵渲染) === */
+.heatmap {
+  border-collapse: separate;
+  border-spacing: 2px;
+  font-size: 11px;
+}
+.heatmap th, .heatmap td {
+  padding: 4px 6px;
+  border: none;
+  text-align: center;
+  min-width: 36px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+.heatmap th {
+  background: transparent;
+  color: #4a5568;
+  font-weight: 600;
+  font-size: 10px;
+}
+.heatmap td {
+  border-radius: 3px;
+  color: #1a252f;
+  font-weight: 500;
+}
+.heatmap tr.heatmap-best td:not(:first-child) {
+  outline: 2px solid #f39c12;
+  outline-offset: -2px;
+}
+.heatmap td.heatmap-strong-pos { background: #27ae60; color: #ffffff; }
+.heatmap td.heatmap-pos { background: #a9dfbf; color: #145a32; }
+.heatmap td.heatmap-neutral { background: #f4f6f7; color: #566573; }
+.heatmap td.heatmap-neg { background: #f5b7b1; color: #78281f; }
+.heatmap td.heatmap-strong-neg { background: #e74c3c; color: #ffffff; }
+
+/* === 侧栏激活态 (滚动到对应章节时高亮) === */
+.sidebar-nav li a.active {
+  background: #ebf5fb;
+  color: #2980b9;
+  border-left-color: #2980b9;
+  font-weight: 600;
+}
+
+/* === 加载完成淡入动画 === */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.layout { animation: fadeInUp 0.5s ease-out; }
+
 /* === 响应式: 小屏侧栏折叠 === */
 @media (max-width: 1024px) {
   .layout { flex-direction: column; padding: 16px; }
@@ -288,6 +466,42 @@ td code {
         <span><strong>Pipeline</strong>: <span class="pipeline-badge">ob_quality</span></span>
       </div>
       <div class="version-tag">web_ui v0.4.8 R1 — ob_quality 单 pipeline, 严格遵守 PROJECT.md H1.1 边界铁律 (web_ui 目录外 0 改动)</div>
+    </div>
+
+    {# === KPI 顶部数据卡片 (v0.4.8 R17 数据风酷炫升级) ===
+       从 composite_results (当前 weight_method 的综合因子) + ic_results (均值 IC) + selection 派生
+    #}
+    {% set _kpi_weight_method = weight_method | default('rolling_icir_weight', true) %}
+    {% set _kpi_composite = (composite_results | selectattr('weight_method', 'equalto', _kpi_weight_method) | list | first) if composite_results else None %}
+    {% set _kpi_ic_avg = (ic_results | map(attribute='ic_mean') | select('number') | list | sum / (ic_results | map(attribute='ic_mean') | select('number') | list | length)) if ic_results else None %}
+    {% set _kpi_top_n = ((result or {}).get('top_stocks', []) | length) if result else 0 %}
+    {% set _kpi_selected = (txt_filter or {}).get('selection_result', {}).get('valid_count', 0) if txt_filter else 0 %}
+    <div class="kpi-grid">
+      <div class="kpi-card {% if _kpi_composite and _kpi_composite.long_short_return_annual and _kpi_composite.long_short_return_annual > 0 %}kpi-pos{% else %}kpi-neg{% endif %}">
+        <div class="kpi-label">综合年化收益</div>
+        <div class="kpi-value">{{ "%+.1f%%" | format(_kpi_composite.long_short_return_annual) if _kpi_composite and _kpi_composite.long_short_return_annual is not none else "—" }}</div>
+        <div class="kpi-sub">权重: {{ _kpi_weight_method }}</div>
+      </div>
+      <div class="kpi-card {% if _kpi_composite and _kpi_composite.long_short_sharpe and _kpi_composite.long_short_sharpe > 0 %}kpi-pos{% else %}kpi-neg{% endif %}">
+        <div class="kpi-label">综合夏普比率</div>
+        <div class="kpi-value">{{ "%+.2f" | format((_kpi_composite.long_short_sharpe) if _kpi_composite and _kpi_composite.long_short_sharpe is not none else 0) }}</div>
+        <div class="kpi-sub">长短期对冲</div>
+      </div>
+      <div class="kpi-card {% if _kpi_ic_avg is not none and _kpi_ic_avg > 0 %}kpi-pos{% elif _kpi_ic_avg is not none and _kpi_ic_avg < 0 %}kpi-neg{% else %}kpi-neutral{% endif %}">
+        <div class="kpi-label">截面 IC 均值</div>
+        <div class="kpi-value">{{ "%+.4f" | format(_kpi_ic_avg) if _kpi_ic_avg is not none else "—" }}</div>
+        <div class="kpi-sub">{{ ic_results | length if ic_results else 0 }} 个因子均值</div>
+      </div>
+      <div class="kpi-card kpi-warn">
+        <div class="kpi-label">入选因子数</div>
+        <div class="kpi-value">{{ _kpi_selected }} / {{ ((txt_filter or {}).get('selection_result', {}) or {}).get('total_count', 0) or '—' }}</div>
+        <div class="kpi-sub">经过筛选阈值</div>
+      </div>
+      <div class="kpi-card kpi-pos">
+        <div class="kpi-label">当日 Top N</div>
+        <div class="kpi-value">{{ _kpi_top_n }}</div>
+        <div class="kpi-sub">候选股票数</div>
+      </div>
     </div>
 
     <!-- 12 节内容卡片化 -->
@@ -346,21 +560,53 @@ td code {
 <!-- 回到顶部 -->
 <button class="back-to-top" id="backToTop" title="回到顶部">↑</button>
 
+<!-- 顶部滚动进度条 -->
+<div class="scroll-progress" id="scrollProgress"></div>
+
 <script>
-// 回到顶部按钮的显示/隐藏
+// 1) 回到顶部按钮 + 顶部滚动进度条
 (function() {
   var btn = document.getElementById('backToTop');
-  if (!btn) return;
-  window.addEventListener('scroll', function() {
-    if (window.scrollY > 400) {
-      btn.classList.add('visible');
-    } else {
-      btn.classList.remove('visible');
-    }
-  });
+  var bar = document.getElementById('scrollProgress');
+  if (!btn || !bar) return;
+  function update() {
+    var scrollTop = window.scrollY;
+    var docHeight = document.documentElement.scrollHeight - window.innerHeight;
+    var ratio = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
+    bar.style.width = ratio + '%';
+    if (scrollTop > 400) { btn.classList.add('visible'); }
+    else { btn.classList.remove('visible'); }
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
   btn.addEventListener('click', function() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
+})();
+
+// 2) 侧栏章节激活高亮 (IntersectionObserver)
+(function() {
+  var sections = document.querySelectorAll('section.card[id^="section-"]');
+  var navLinks = document.querySelectorAll('.sidebar-nav a[href^="#section-"]');
+  if (!sections.length || !navLinks.length) return;
+  var activeLink = null;
+  function setActive(id) {
+    if (activeLink) activeLink.classList.remove('active');
+    var link = document.querySelector('.sidebar-nav a[href="#' + id + '"]');
+    if (link) {
+      link.classList.add('active');
+      activeLink = link;
+    }
+  }
+  // 简化版: 滚动时找最近的 section
+  window.addEventListener('scroll', function() {
+    var scrollY = window.scrollY + 100;
+    var current = null;
+    sections.forEach(function(sec) {
+      if (sec.offsetTop <= scrollY) current = sec.id;
+    });
+    if (current) setActive(current);
+  }, { passive: true });
 })();
 </script>
 

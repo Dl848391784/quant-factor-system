@@ -1,8 +1,14 @@
-{# 零·数据完整性检查 (v0.4.8 R7)
+{# 零·数据完整性检查 (v0.4.8 R17 数据风酷炫升级)
 
 参数:
 - data_results: check_data_freshness() 返回的 list[dict]
 - derived_results: check_derived_data_freshness() 返回的 list[dict]
+  字段: source, description, expected_date, actual_date, status_symbol, file_count, status
+
+R17 改动:
+- status_symbol 转为 status-badge (绿/黄/红)
+- 行内嵌入 ✅/⚠️/❌ → .ok/.warn/.fail 徽章
+- 完整保留 H1.1 严守
 #}
 {% if not data_results and not derived_results %}
   <p class="empty">数据完整性检查不可用 — 请确认 summary 流水线已成功运行</p>
@@ -16,12 +22,21 @@
     </thead>
     <tbody>
     {% for r in data_results %}
+      {# status → badge class. status_symbol 形如 "✅", "⚠️", "❌" #}
+      {% set _badge_cls = 'ok' %}
+      {% if r.status_symbol %}
+        {% if '❌' in r.status_symbol or '失败' in r.status_symbol or '异常' in r.status_symbol %}
+          {% set _badge_cls = 'fail' %}
+        {% elif '⚠️' in r.status_symbol or '警告' in r.status_symbol or '陈旧' in r.status_symbol %}
+          {% set _badge_cls = 'warn' %}
+        {% endif %}
+      {% endif %}
       <tr>
         <td>{{ r.source }}</td>
         <td>{{ r.description }}</td>
         <td>{{ r.expected_date }}</td>
         <td>{{ r.actual_date }}</td>
-        <td>{{ r.status_symbol }}</td>
+        <td><span class="status-badge {{ _badge_cls }}">{{ r.status_symbol }}</span></td>
       </tr>
     {% endfor %}
     </tbody>
@@ -36,11 +51,19 @@
     </thead>
     <tbody>
     {% for r in derived_results %}
+      {% set _badge_cls = 'ok' %}
+      {% if r.status_symbol %}
+        {% if '❌' in r.status_symbol or '失败' in r.status_symbol or '异常' in r.status_symbol %}
+          {% set _badge_cls = 'fail' %}
+        {% elif '⚠️' in r.status_symbol or '警告' in r.status_symbol or '陈旧' in r.status_symbol %}
+          {% set _badge_cls = 'warn' %}
+        {% endif %}
+      {% endif %}
       <tr>
         <td>{{ r.source }}</td>
         <td>{{ r.description }}</td>
         <td>{{ r.file_count }}</td>
-        <td>{{ r.status_symbol }}</td>
+        <td><span class="status-badge {{ _badge_cls }}">{{ r.status_symbol }}</span></td>
       </tr>
     {% endfor %}
     </tbody>
