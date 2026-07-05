@@ -1,21 +1,21 @@
-{# 一·单因子 IC 数据汇总 (v0.4.8 R17 数据风酷炫升级)
+{# 一·单因子 IC 数据汇总 (v0.4.8 R17 数据风酷炫升级 + R23-2 Chart.js 折线/柱状)
 
 参数:
 - ic_results: load_ic_results() 返回的 list[dict]
-  字段: factor_name, ic_mean, icir, ic_std, valid_days, neutralization_sensitivity, neutralization_method
+  字段: factor_name, ic_mean, icir, ic_std, valid_days, neutral_enabled, neutral_method
 
-R17 改动:
-- IC 均值按绝对值大小映射背景色 (强正=绿底白字 / 强负=红底白字 / 弱=浅色)
-- ICIR 按业界标准 |ICIR|>0.5 加粗
-- 列内嵌入 mini-bar (IC 均值绝对值大小可视化)
-- 完整保留 H1.1 严守: 字段名 + 数据来源不变
+R23-2 改造:
+- KPI 卡 4 张 (顶部) 保留 R20 风格
+- IC 均值分布图 (Chart.js 横向柱状, 按 |IC| 排序) — 替代纯数字浏览
+- IC vs ICIR 散点图 (Chart.js scatter) — 一眼看出哪些因子稳 + 强
+- 因子表保留 (R17 单元格色 + mini-bar)
 #}
 {% if not ic_results %}
   <p class="empty">IC 数据不可用 — 请确认 summary 流水线已成功运行</p>
 {% else %}
-  <p class="muted">v0.4.8 R7+R17: 复用 data_loaders.load_ic_results() (H1.1 严守, 只读) · 单元格颜色: |IC|>=0.05 强色 / 0.03~0.05 浅色 / 否则中性</p>
+  <p class="muted">v0.4.8 R7+R17+R23-2: 复用 data_loaders.load_ic_results() (H1.1 严守, 只读) · 单元格颜色: |IC|>=0.05 强色 / 0.03~0.05 浅色 / 否则中性 · 图 1: |IC| 排序 · 图 2: IC vs ICIR 散点</p>
 
-  {# === R20 KPI 卡 (4 张): 总因子 / 显著因子 / 平均IC / 平均ICIR === #}
+  {# === R20 + R22 KPI 卡 (4 张): 总因子 / 显著因子 / 平均IC / 平均ICIR === #}
   {% set _n_total = ic_results | length %}
   {% set _n_sig = ic_results | selectattr('icir') | selectattr('icir', 'ge', 0.5) | list | length %}
   {% set _ic_vals = ic_results | map(attribute='ic_mean') | select('number') | list %}
@@ -46,16 +46,90 @@ R17 改动:
       <div class="kpi-sub">稳定性指标</div>
     </div>
   </div>
-  <table>
-    <thead>
-      <tr>
-        <th>因子</th><th>IC 均值</th><th>ICIR</th><th>IC 标准差</th>
-        <th>有效天数</th><th>中性化敏感</th><th>中性化方式</th>
-      </tr>
-    </thead>
+
+  {# === R23-2 Chart.js: 双图布局 (IC 均值柱状 + IC vs ICIR 散点) === #}
+  <div class="chart-grid-2">
+    <div class="chart-wrap">
+      <div class="chart-title">IC 均值排名 (Top 15 + Bottom 5, 按 |IC| 排序)</div>
+      <canvas id="icBarChart" height="280"></canvas>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-title">IC vs ICIR 散点 (横=IC, 纵=ICIR, 红=负向 绿=正向)</div>
+      <canvas id="icScatter" height="280"></canvas>
+    </div>
+  </div>
+
+  {# === R23-2 JS: 排序 + 注入数据 + 渲染 Chart.js (Sentry 暗色主题) === #}
+  <script>
+  (function() {
+    const raw = {{ ic_results | tojson }};
+    const SENTRY = { pos: '#3fb950', neg: '#f0883e', warn: '#f85149', neutral: '#58a6ff', grid: 'rgba(139,148,158,0.15)', text: '#f0f0f5' };
+
+    // === 图 1: 横向柱状 (Top 15 正 + Bottom 5 负, 按 |IC|) ===
+    const validIcs = raw.filter(r => typeof r.ic_mean === 'number');
+    const sortedAbs = [...validIcs].sort((a, b) => Math.abs(b.ic_mean) - Math.abs(a.ic_mean));
+    const topPos = sortedAbs.filter(r => r.ic_mean > 0).slice(0, 15);
+    const topNeg = sortedAbs.filter(r => r.ic_mean < 0).slice(0, 5);
+    const barData = [...topNeg.reverse(), ...topPos];
+    const labels = barData.map(r => r.factor_name);
+    const values = barData.map(r => r.ic_mean);
+    const colors = barData.map(r => r.ic_mean >= 0 ? SENTRY.pos : SENTRY.neg);
+
+    new Chart(document.getElementById('icBarChart'), {
+      type: 'bar',
+      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 4, barThickness: 14 }] },
+      options: {
+        indexAxis: 'y',
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `IC = ${ctx.parsed.x.toFixed(4)}` } } },
+        scales: {
+          x: { grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v.toFixed(3) } },
+          y: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 11 } } }
+        }
+      }
+    });
+
+    // === 图 2: IC vs ICIR 散点 ===
+    const scatterPts = validIcs.filter(r => typeof r.icir === 'number').map(r => ({
+      x: r.ic_mean, y: r.icir,
+      label: r.factor_name,
+      bg: r.ic_mean >= 0 ? SENTRY.pos : SENTRY.neg
+    }));
+    new Chart(document.getElementById('icScatter'), {
+      type: 'scatter',
+      data: { datasets: [{
+        label: '因子',
+        data: scatterPts,
+        backgroundColor: scatterPts.map(p => p.bg),
+        pointRadius: 5,
+        pointHoverRadius: 8,
+        borderColor: 'rgba(255,255,255,0.4)',
+        borderWidth: 1
+      }]},
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.raw.label}: IC=${ctx.parsed.x.toFixed(4)}, ICIR=${ctx.parsed.y.toFixed(3)}` } }
+        },
+        scales: {
+          x: { title: { display: true, text: 'IC 均值', color: SENTRY.text }, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text } },
+          y: { title: { display: true, text: 'ICIR', color: SENTRY.text }, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text } }
+        }
+      }
+    });
+  })();
+  </script>
+
+  {# === R17 表格保留 (兼容不改色) === #}
+  <div class="data-table-wrap">
+  <table class="data-table numeric">
+    <thead><tr>
+      <th>因子</th><th>IC 均值</th><th>ICIR</th><th>IC 标准差</th>
+      <th>有效天数</th><th>中性化敏感</th><th>中性化方式</th>
+    </tr></thead>
     <tbody>
     {% for r in ic_results %}
-      {# IC 均值单元格: |x|>=0.05 强色, |x|>=0.03 浅色, 否则中性 #}
       {% set _abs_ic = (r.ic_mean | abs) if r.ic_mean is not none else 0 %}
       {% if r.ic_mean is none %}
         {% set _ic_cls = 'cell-neutral-bg' %}
@@ -66,7 +140,6 @@ R17 改动:
       {% else %}
         {% set _ic_cls = 'cell-neutral-bg' %}
       {% endif %}
-      {# ICIR 单元格: |x|>=0.5 显著 #}
       {% set _abs_icir = (r.icir | abs) if r.icir is not none else 0 %}
       {% if r.icir is none %}
         {% set _icir_cls = 'cell-neutral-bg' %}
@@ -91,4 +164,5 @@ R17 改动:
     {% endfor %}
     </tbody>
   </table>
+  </div>
 {% endif %}
