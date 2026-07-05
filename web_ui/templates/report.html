@@ -661,6 +661,71 @@ td code {
   .chart-grid-2, .chart-grid-3 { grid-template-columns: 1fr; }
 }
 
+/* v0.4.8 R25-1: 移动端适配 (用户反馈 "移动端尺寸适配行不好")
+   - 768px 平板: KPI 卡紧凑 + 表格字号缩小 + chart 高度调整
+   - 480px 手机: KPI 卡 font 缩 + sidebar 隐藏或顶部化 + 全局 padding 缩 */
+@media (max-width: 768px) {
+  /* 主区 padding 缩 */
+  .layout { padding: 12px; gap: 16px; }
+  /* KPI 卡字号缩 + grid 紧凑 */
+  .kpi-card { padding: 12px 14px; }
+  .kpi-card .kpi-value { font-size: 20px; }
+  .kpi-card .kpi-label { font-size: 12px; }
+  .kpi-card .kpi-sub { font-size: 12px; }
+  /* KPI grid 4 列变 2 列 */
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  /* Chart 容器紧凑 */
+  .chart-wrap { padding: 12px; }
+  /* Chart canvas 高度响应式 (避免 280px 在窄屏过高) */
+  .chart-wrap canvas { max-height: 220px; }
+  /* 表格字号 + padding 缩 */
+  .data-table thead th, .data-table tbody td {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+  .data-table thead th { font-size: 12px; }
+  /* Section 卡片 padding 缩 */
+  section.card { padding: 16px 20px; }
+  section.card h2 { font-size: 18px; }
+  /* Sidebar 顶部化 (sticky → 普通文档流) */
+  aside.sidebar {
+    position: static;
+    width: 100%;
+    max-height: none;
+    margin-bottom: 16px;
+    padding: 12px 0;
+  }
+  .sidebar-brand { padding: 0 16px 8px 16px; }
+  .sidebar-nav { display: flex; flex-wrap: wrap; }
+  .sidebar-nav li a {
+    padding: 6px 12px;
+    font-size: 12px;
+    border-left: none;
+    border-bottom: 3px solid transparent;
+  }
+  .sidebar-nav li a:hover { border-left-color: transparent; border-bottom-color: #1f6feb; }
+}
+
+@media (max-width: 480px) {
+  /* 手机更紧凑 */
+  .layout { padding: 8px; gap: 12px; }
+  /* KPI 1 列堆叠 (4 卡叠很高, 但手机宽度只够 1 卡) */
+  .kpi-grid { grid-template-columns: 1fr; gap: 6px; }
+  .kpi-card { padding: 10px 12px; }
+  .kpi-card .kpi-value { font-size: 18px; }
+  /* Section 标题缩小 */
+  section.card h2 { font-size: 16px; }
+  section.card h3 { font-size: 14px; }
+  /* rank-bar 紧凑 */
+  .rank-bar-label { min-width: 36px; font-size: 12px; }
+  .rank-bar-value { min-width: 48px; font-size: 12px; }
+  /* Chart wrap 更紧凑 */
+  .chart-wrap { padding: 8px; }
+  .chart-wrap canvas { max-height: 180px; }
+  /* body 字号微调 */
+  body { font-size: 13px; }
+}
+
 /* KPI 卡内嵌 sparkline */
 .kpi-sparkline {
   margin-top: 8px;
