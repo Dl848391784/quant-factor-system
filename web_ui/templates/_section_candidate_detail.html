@@ -1,4 +1,4 @@
-{# 10·今日三十分段候选明细 (v0.4.8 R16)
+{# 10·今日三十分段候选明细 (v0.4.8 R16 + R24-2 现代感强化)
 
 参数:
 - txt_s10_segments: parse_obq_section_10_segments() 返回的 dict (从 summary txt 报告解析)
@@ -9,6 +9,13 @@
 数据格式 (txt §10 原样):
   每段 [Sn] N 只 合并胜率: 48.8%
   + 排名 代码 名称 composite (1-3 只/段)
+
+R24-2 强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现代感元素"):
+- 新增双图: 30 段胜率柱状 (按段号排序, BEST 高亮) + 30 段候选数柱状
+- 段卡片表格升级 data-table numeric + rank-bar-cell
+- BEST 段加 row-best 高亮
+- KPI 卡 4 张保留 (R20)
+- meta-box 保留 (R16)
 #}
 {% if not txt_s10_segments %}
   <p class="empty">候选明细数据不可用 — txt 第十节未找到 (H1.1: web_ui 只读 summary/result/ob_quality/factor_summary_report_*.txt)</p>
@@ -42,6 +49,66 @@
       <div class="kpi-sub">12 选股日合并</div>
     </div>
   </div>
+
+  {# === R24-2 新增 Chart.js 双图: 段胜率 + 段候选数 === #}
+  <div class="chart-grid-2">
+    <div class="chart-wrap">
+      <div class="chart-title">30 段合并胜率 (按段号排序, BEST 蓝色高亮)</div>
+      <canvas id="s10WinChart" height="280"></canvas>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-title">30 段候选数分布 (绿=BEST 段)</div>
+      <canvas id="s10NStockChart" height="280"></canvas>
+    </div>
+  </div>
+  <script>
+  (function() {
+    const segs = {{ txt_s10_segments.segments | tojson }};
+    const bestLabel = {{ (_best_seg.label if _best_seg else '') | tojson }};
+    const SENTRY = { pos: '#3fb950', neg: '#f0883e', warn: '#f85149', neutral: '#58a6ff', best: '#58a6ff', grid: 'rgba(139,148,158,0.15)', text: '#f0f0f5' };
+
+    // 按段号排序 (S1, S2, ..., S30)
+    const sorted = [...segs].sort((a, b) => {
+      const na = parseInt((a.label || 'S0').replace(/\D/g, '')) || 0;
+      const nb = parseInt((b.label || 'S0').replace(/\D/g, '')) || 0;
+      return na - nb;
+    });
+    const labels = sorted.map(s => s.label || '');
+    const wins = sorted.map(s => typeof s.win_rate === 'number' ? s.win_rate : 0);
+    const nstocks = sorted.map(s => typeof s.n_stocks === 'number' ? s.n_stocks : 0);
+
+    // 图 1: 胜率柱状
+    const winColors = sorted.map(s => s.label === bestLabel ? SENTRY.best : (wins[sorted.indexOf(s)] >= 55 ? SENTRY.pos : (wins[sorted.indexOf(s)] >= 45 ? SENTRY.warn : SENTRY.neg)));
+    new Chart(document.getElementById('s10WinChart'), {
+      type: 'bar',
+      data: { labels, datasets: [{ data: wins, backgroundColor: winColors, borderRadius: 3, barThickness: 12 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `胜率 = ${ctx.parsed.y.toFixed(1)}%${ctx.label === bestLabel ? ' ⭐' : ''}` } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 9 } } },
+          y: { min: 0, max: 100, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } }
+        }
+      }
+    });
+
+    // 图 2: 候选数柱状
+    const nsColors = sorted.map(s => s.label === bestLabel ? SENTRY.best : (nstocks[sorted.indexOf(s)] >= 3 ? SENTRY.pos : (nstocks[sorted.indexOf(s)] >= 1 ? SENTRY.warn : SENTRY.neg)));
+    new Chart(document.getElementById('s10NStockChart'), {
+      type: 'bar',
+      data: { labels, datasets: [{ data: nstocks, backgroundColor: nsColors, borderRadius: 3, barThickness: 12 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `候选数 = ${ctx.parsed.y}${ctx.label === bestLabel ? ' ⭐' : ''}` } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 9 } } },
+          y: { beginAtZero: true, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, stepSize: 1 } }
+        }
+      }
+    });
+  })();
+  </script>
+
   <div class="meta-box">
     <p>
       <strong>选股日</strong>: {{ txt_s10_segments.selection_date }}
@@ -68,19 +135,21 @@
     {% if seg.label == best_label %}⭐ BEST{% endif %}
   </h3>
   {% if seg.stocks %}
-  <table>
+  <div class="data-table-wrap">
+  <table class="data-table numeric {% if seg.label == best_label %}row-best-table{% endif %}">
     <thead><tr><th>排名</th><th>代码</th><th>名称</th><th>Composite</th></tr></thead>
     <tbody>
     {% for stock in seg.stocks %}
-      <tr>
+      <tr {% if seg.label == best_label %}class="row-best"{% endif %}>
         <td>{{ stock.rank }}</td>
-        <td>{{ stock.code }}</td>
+        <td><code>{{ stock.code }}</code></td>
         <td>{{ stock.name }}</td>
         <td>{{ "%.3f" | format(stock.composite) }}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
+  </div>
   {% endif %}
   {% endfor %}
 {% endif %}
