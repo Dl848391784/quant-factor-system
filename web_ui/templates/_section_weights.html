@@ -1,43 +1,87 @@
-{# 七·权重选择结果 (v0.4.8 R8)
+{# 七·权重选择结果 (v0.4.8 R8 → R18 数据风酷炫升级)
 
 参数:
 - weight_selection: load_weight_selection_result() 返回的 dict | None
-  字段: best_selection {method, composite_score}, all_methods [...]
+  字段: best_selection {method, composite_score}, ranking [{method, composite_score, metric1, metric2, ...}],
+        metric_configs [{name, ...}, ...]
+
+v0.4.8 R18 改动 (用户反馈 "页面布局平铺"):
+- 顶部 KPI 卡: 最优方法 / 综合得分 / 候选方法数 / 评估指标数
+- 最优方法行加 ★ BEST status-badge.ok
+- 综合得分加 mini 进度条 (复用 R17 .progress-bar)
+- 保留 H1.1 严守 (复用 data_loaders.load_weight_selection_result 只读)
 #}
 {% if not weight_selection %}
   <p class="empty">权重选择数据不可用 — 请确认 summary 流水线已成功运行</p>
 {% else %}
   {% set best = weight_selection.get("best_selection", {}) %}
+  {% set methods = weight_selection.get("ranking", []) %}
+  {% set metric_configs = weight_selection.get("metric_configs", []) %}
+  {% set metric_names = (metric_configs | map(attribute='name') | list)[:5] %}
+
   <p class="muted">v0.4.8 R8: 复用 data_loaders.load_weight_selection_result() (H1.1 严守, 只读)</p>
-  <div class="meta-box">
-    <p>
-      <strong>最优权重方法</strong>: {{ best.get("method", "—") }}
-      · <strong>综合得分</strong>: {{ "%.4f" | format(best.get("composite_score", 0)) }}
-    </p>
+
+  {# === R18: 顶部 KPI 卡 (4 张) === #}
+  {% set _best_score = best.get("composite_score", 0) | float %}
+  <div class="kpi-grid">
+    <div class="kpi-card kpi-pos">
+      <div class="kpi-label">最优权重方法</div>
+      <div class="kpi-value" style="font-size: 1.4em;">{{ best.get("method", "—") }}</div>
+      <div class="kpi-sub">★ 推荐</div>
+    </div>
+    <div class="kpi-card {% if _best_score > 0 %}kpi-pos{% elif _best_score < 0 %}kpi-neg{% else %}kpi-neutral{% endif %}">
+      <div class="kpi-label">综合得分</div>
+      <div class="kpi-value">{{ "%+.4f" | format(_best_score) }}</div>
+      <div class="kpi-sub">{{ methods | length }} 种方法中最高</div>
+    </div>
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">候选方法</div>
+      <div class="kpi-value">{{ methods | length }}</div>
+      <div class="kpi-sub">权重方案数</div>
+    </div>
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">评估指标</div>
+      <div class="kpi-value">{{ metric_names | length }}</div>
+      <div class="kpi-sub">{{ metric_names | join(", ") if metric_names else "—" }}</div>
+    </div>
   </div>
 
-  {% set methods = weight_selection.get("ranking", []) %}
+  {# === R18: 各方法得分表 + ★ BEST + mini 进度条 === #}
   {% if methods %}
-  <h3>各权重方法得分</h3>
+  <h3>各权重方法得分排名</h3>
   <table>
     <thead>
       <tr>
         <th>权重方法</th><th>综合得分</th>
-        {% for metric in (weight_selection.get("metric_configs", []) | map(attribute='name') | list)[:5] %}
+        {% for metric in metric_names %}
           <th>{{ metric }}</th>
         {% endfor %}
       </tr>
     </thead>
     <tbody>
-    {% for m in methods %}
-      <tr>
-        <td><code>{{ m.get("method", m.get("weight_method", "—")) }}</code></td>
-        <td>{{ "%.4f" | format(m.get("composite_score", 0)) }}</td>
-        {% for metric in (weight_selection.get("metric_configs", []) | map(attribute='name') | list)[:5] %}
-          <td>{{ "%.4f" | format(m.get(metric, m.get("scores", {}).get(metric, 0))) }}</td>
-        {% endfor %}
-      </tr>
-    {% endfor %}
+      {# 计算得分归一化基准 (最高分 → 100%) #}
+      {% set _scores = methods | map(attribute='composite_score') | map('float') | list %}
+      {% set _max_abs = (_scores | map('abs') | max) if _scores else 1 %}
+      {% if _max_abs == 0 %}{% set _max_abs = 1 %}{% endif %}
+      {% for m in methods %}
+        {% set _is_best = m.get("method", m.get("weight_method", "—")) == best.get("method") %}
+        {% set _score = m.get("composite_score", 0) | float %}
+        {% set _bar_pct = ([(_score | abs / _max_abs * 100) | int, 100] | min) %}
+        {% set _score_cls = 'pos' if _score > 0 else ('neg' if _score < 0 else 'warn') %}
+        <tr {% if _is_best %}style="background:rgba(194,239,78,0.08);font-weight:600"{% endif %}>
+          <td>
+            {% if _is_best %}<span class="status-badge ok">★ BEST</span> {% endif %}
+            <code>{{ m.get("method", m.get("weight_method", "—")) }}</code>
+          </td>
+          <td>
+            <span class="progress-bar {{ _score_cls }}"><span style="width: {{ _bar_pct }}%"></span></span>
+            <span class="cell-strong">{{ "%+.4f" | format(_score) }}</span>
+          </td>
+          {% for metric in metric_names %}
+            <td>{{ "%+.4f" | format(m.get(metric, m.get("scores", {}).get(metric, 0)) | float) }}</td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
     </tbody>
   </table>
   {% endif %}

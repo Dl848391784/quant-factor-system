@@ -1,4 +1,4 @@
-{# 三·因子相关性矩阵 (v0.4.8 R9)
+{# 三·因子相关性矩阵 (v0.4.8 R9 → R18 数据风酷炫升级)
 
 参数:
 - correlation: parse_obq_correlation() 返回的 dict
@@ -6,6 +6,13 @@
   - matrix: {完整因子: {缩略词: 系数}}
   - abbrev: {缩略词: 完整因子}
   - high_corr_pairs: [{factor1, dim1, factor2, dim2, corr}]
+
+v0.4.8 R18 改动 (用户反馈 "页面布局平铺"):
+- 顶部 KPI 卡: 选中因子数 / 相关性矩阵维度 / 高相关对数
+- 矩阵变热力图: 相关系数 [-1, 1] → 红蓝渐变 (R17 已有 .heatmap-strong-pos/pos/neutral/neg/strong-neg 样式)
+- 高相关对加 ⚠️ status-badge.ok/warn (|corr|>=0.85 warn / >=0.95 fail)
+- 缩写对照表折叠进 <details> 默认折叠 (参考用)
+- 保留 H1.1 严守 (txt 来源, 不读 Parquet)
 #}
 {% if not correlation %}
   <p class="empty">因子相关性数据不可用</p>
@@ -15,54 +22,109 @@
   {% set sel = correlation.get("selected_factors", []) %}
   {% set matrix = correlation.get("matrix", {}) %}
   {% set abbrev = correlation.get("abbrev", {}) %}
-  <p><strong>选中因子</strong>: {{ sel | length }} 个 ({{ sel | join(", ") }})</p>
+  {% set pairs = correlation.get("high_corr_pairs", []) %}
 
+  {# === R18: 顶部 KPI 卡 (3 张) === #}
+  {% set _n_pairs_strong = pairs | selectattr("corr", "ge", 0.95) | list | length %}
+  {% set _n_pairs_warn = pairs | selectattr("corr", "ge", 0.85) | rejectattr("corr", "ge", 0.95) | list | length %}
+  {% set _kpi_corr_cls = "kpi-warn" if pairs | length >= 3 else ("kpi-pos" if pairs | length == 0 else "kpi-neutral") %}
+  <div class="kpi-grid">
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">选中因子</div>
+      <div class="kpi-value">{{ sel | length }}</div>
+      <div class="kpi-sub">进入相关性分析</div>
+    </div>
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">矩阵维度</div>
+      <div class="kpi-value">{{ matrix | length }} × {{ abbrev | length }}</div>
+      <div class="kpi-sub">{{ abbrev.keys() | list | join(", ") if abbrev else "—" }}</div>
+    </div>
+    <div class="kpi-card {{ _kpi_corr_cls }}">
+      <div class="kpi-label">高相关对 (|r|≥0.7)</div>
+      <div class="kpi-value">{{ pairs | length }}</div>
+      <div class="kpi-sub">
+        {% if _n_pairs_strong > 0 %}⚠ {{ _n_pairs_strong }} 极强 ({{ _n_pairs_warn }} 强){% else %}无强相关{% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# === R18: 矩阵 → 热力图 (红蓝渐变) === #}
   {% if matrix %}
-  <h3>相关性矩阵 (缩略列名: {{ abbrev.keys() | list | join(", ") if abbrev else "amp/int" }})</h3>
-  <table>
+  <h3>相关性矩阵热力图</h3>
+  <div style="overflow-x: auto;">
+  <table class="heatmap">
     <thead>
       <tr>
-        <th>因子</th>
+        <th></th>
         {% for col in abbrev.keys() %}
-          <th>{{ col }}</th>
+          <th title="{{ abbrev[col] }}">{{ col }}</th>
         {% endfor %}
       </tr>
     </thead>
     <tbody>
     {% for factor, row in matrix.items() %}
       <tr>
-        <td><code>{{ factor }}</code></td>
+        <th style="text-align:left;background:#fafbfc"><code>{{ factor }}</code></th>
         {% for col in abbrev.keys() %}
-          <td>{{ "%.2f" | format(row.get(col, 0)) }}</td>
+          {% set _c = row.get(col, 0) | float %}
+          {% set _abs = _c | abs %}
+          {# 红蓝渐变: 正=红 / 负=蓝 / 强度由 |c| 决定 #}
+          {% if _c >= 0.7 %}{% set _cls = 'heatmap-strong-pos' %}
+          {% elif _c >= 0.3 %}{% set _cls = 'heatmap-pos' %}
+          {% elif _c >= -0.3 %}{% set _cls = 'heatmap-neutral' %}
+          {% elif _c >= -0.7 %}{% set _cls = 'heatmap-neg' %}
+          {% else %}{% set _cls = 'heatmap-strong-neg' %}
+          {% endif %}
+          <td class="{{ _cls }}" title="{{ factor }} · {{ abbrev[col] }}: {{ "%+.2f" | format(_c) }}">{{ "%+.2f" | format(_c) }}</td>
         {% endfor %}
       </tr>
     {% endfor %}
     </tbody>
   </table>
+  </div>
   {% endif %}
 
+  {# === R18: 缩写对照表 → 折叠面板 === #}
   {% if abbrev %}
-  <h3>缩写对照表</h3>
+  <details>
+    <summary><strong>缩写对照表</strong> ({{ abbrev | length }} 项 · 默认折叠)</summary>
+    <table>
+      <thead><tr><th>缩写</th><th>完整名</th></tr></thead>
+      <tbody>
+      {% for short, full in abbrev.items() %}
+        <tr><td><code>{{ short }}</code></td><td><code>{{ full }}</code></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endif %}
+
+  {# === R18: 高相关对 → 加 ⚠️ 徽章 === #}
+  {% if pairs %}
+  <h3>跨维度高相关因子对 (|corr| ≥ 0.7)</h3>
   <table>
-    <thead><tr><th>缩写</th><th>完整名</th></tr></thead>
+    <thead>
+      <tr><th>因子对</th><th>相关性</th><th>强度</th></tr>
+    </thead>
     <tbody>
-    {% for short, full in abbrev.items() %}
-      <tr><td><code>{{ short }}</code></td><td><code>{{ full }}</code></td></tr>
+    {% for p in pairs %}
+      {% set _abs = p.corr | abs %}
+      {% if _abs >= 0.95 %}{% set _badge_cls = 'fail' %}{% set _badge_text = '⚠ 极强' %}
+      {% elif _abs >= 0.85 %}{% set _badge_cls = 'warn' %}{% set _badge_text = '强' %}
+      {% else %}{% set _badge_cls = 'ok' %}{% set _badge_text = '中' %}
+      {% endif %}
+      <tr>
+        <td>
+          <code>{{ p.factor1 }}[{{ p.dim1 }}]</code> ×
+          <code>{{ p.factor2 }}[{{ p.dim2 }}]</code>
+        </td>
+        <td class="{% if p.corr > 0 %}cell-pos-bg{% else %}cell-neg-bg{% endif %}">
+          <strong>{{ "%+.2f" | format(p.corr) }}</strong>
+        </td>
+        <td><span class="status-badge {{ _badge_cls }}">{{ _badge_text }}</span></td>
+      </tr>
     {% endfor %}
     </tbody>
   </table>
-  {% endif %}
-
-  {% set pairs = correlation.get("high_corr_pairs", []) %}
-  {% if pairs %}
-  <h3>跨维度高相关因子对 (|corr| &gt; 0.7)</h3>
-  <ul>
-  {% for p in pairs %}
-    <li>
-      <code>{{ p.factor1 }}[{{ p.dim1 }}]</code> vs
-      <code>{{ p.factor2 }}[{{ p.dim2 }}]</code>: <strong>{{ "%.2f" | format(p.corr) }}</strong>
-    </li>
-  {% endfor %}
-  </ul>
   {% endif %}
 {% endif %}

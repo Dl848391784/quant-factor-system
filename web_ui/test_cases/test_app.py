@@ -943,9 +943,10 @@ def test_correlation_section_renders_matrix_and_abbrev(client, mock_obq_full_res
     # 矩阵值
     assert "1.00" in body
     assert "0.80" in body
-    # 缩写对照表
+    # 缩写对照表 (R18: 折叠进 <details>, 默认折叠, body 仍含 summary 标签)
     assert "缩写对照表" in body
-    assert "&gt; 0.7" in body  # 高相关阈值
+    # R18: Unicode ≥ 替换 ASCII &gt; (更可读)
+    assert "≥ 0.7" in body  # 高相关阈值
     # 高相关因子对
     assert "volatility" in body
     assert "momentum_x_volatility" in body
