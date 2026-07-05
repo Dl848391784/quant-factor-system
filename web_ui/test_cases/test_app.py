@@ -869,18 +869,18 @@ def test_composite_section_renders_table(client, mock_obq_full_result):
 
 
 def test_weights_section_renders_best_and_methods(client, mock_obq_full_result):
-    """v0.4.8 R8: 七·权重选择结果 渲染最优方法 + 全部方法"""
+    """v0.4.8 R8: 七·权重选择结果 渲染最优方法 + 全部方法 (R23-6: mock 改为真 schema)"""
     weights_mock = {
         "best_selection": {"method": "rolling_icir_weight", "composite_score": 0.7766, "selection_reason": "综合得分最高"},
         "ranking": [
-            {"method": "equal_weight", "composite_score": 0.5285, "scores": {"annual_return": 0.0081, "sharpe": 0.0429, "monotonicity": 0.5635}},
-            {"method": "rolling_icir_weight", "composite_score": 0.7766, "scores": {"annual_return": 0.0080, "sharpe": 0.0382, "monotonicity": 0.5860}},
+            {"method": "equal_weight", "composite_score": 0.5285, "metric_scores": {"long_return_annual": 0.0081, "long_sharpe": 0.0429, "monotonicity_abs": 0.5635}},
+            {"method": "rolling_icir_weight", "composite_score": 0.7766, "metric_scores": {"long_return_annual": 0.0080, "long_sharpe": 0.0382, "monotonicity_abs": 0.5860}},
         ],
-        "metric_configs": [
-            {"name": "annual_return"},
-            {"name": "sharpe"},
-            {"name": "monotonicity"},
-        ],
+        "metric_configs": {
+            "long_return_annual": {"direction": "higher_better", "weight": 1.0, "description": "多头年化"},
+            "long_sharpe": {"direction": "higher_better", "weight": 1.0, "description": "多头夏普"},
+            "monotonicity_abs": {"direction": "higher_better", "weight": 1.0, "description": "单调性绝对值"},
+        },
     }
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),

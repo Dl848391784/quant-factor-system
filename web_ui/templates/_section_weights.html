@@ -1,25 +1,25 @@
-{# 七·权重选择结果 (v0.4.8 R8 → R18 数据风酷炫升级)
+{# 七·权重选择结果 (v0.4.8 R8 → R18 数据风酷炫升级 + R23-6 Chart.js + ApexCharts)
 
 参数:
 - weight_selection: load_weight_selection_result() 返回的 dict | None
   字段: best_selection {method, composite_score}, ranking [{method, composite_score, metric1, metric2, ...}],
         metric_configs [{name, ...}, ...]
 
-v0.4.8 R18 改动 (用户反馈 "页面布局平铺"):
-- 顶部 KPI 卡: 最优方法 / 综合得分 / 候选方法数 / 评估指标数
-- 最优方法行加 ★ BEST status-badge.ok
-- 综合得分加 mini 进度条 (复用 R17 .progress-bar)
-- 保留 H1.1 严守 (复用 data_loaders.load_weight_selection_result 只读)
+R23-6 改造:
+- 4 KPI 卡 (R18) 保留
+- 双图: 各方法综合得分柱状 + 多方法多指标雷达图
+- R18 表格保留 (含 BEST 行)
 #}
 {% if not weight_selection %}
   <p class="empty">权重选择数据不可用 — 请确认 summary 流水线已成功运行</p>
 {% else %}
   {% set best = weight_selection.get("best_selection", {}) %}
   {% set methods = weight_selection.get("ranking", []) %}
-  {% set metric_configs = weight_selection.get("metric_configs", []) %}
-  {% set metric_names = (metric_configs | map(attribute='name') | list)[:5] %}
+  {# R23-6 inspect fix: 真 schema metric_configs 是 dict {name: cfg}, 不是 list of dict #}
+  {% set metric_configs = weight_selection.get("metric_configs") or {} %}
+  {% set metric_names = (metric_configs.keys() | list)[:5] if metric_configs else [] %}
 
-  <p class="muted">v0.4.8 R8: 复用 data_loaders.load_weight_selection_result() (H1.1 严守, 只读)</p>
+  <p class="muted">v0.4.8 R8+R18+R23-6: 复用 data_loaders.load_weight_selection_result() (H1.1 严守, 只读) · 图 1: 各方法综合得分 · 图 2: 多方法多指标雷达</p>
 
   {# === R18: 顶部 KPI 卡 (4 张) === #}
   {% set _best_score = best.get("composite_score", 0) | float %}
@@ -46,20 +46,88 @@ v0.4.8 R18 改动 (用户反馈 "页面布局平铺"):
     </div>
   </div>
 
-  {# === R18: 各方法得分表 + ★ BEST + mini 进度条 === #}
+  {# === R23-6 双图 === #}
+  <div class="chart-grid-2">
+    <div class="chart-wrap">
+      <div class="chart-title">各权重方法综合得分 (按得分排序)</div>
+      <canvas id="wBarChart" height="280"></canvas>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-title">多方法多指标雷达图 (归一化到 0-100)</div>
+      <div id="wRadar" style="min-height: 280px;"></div>
+    </div>
+  </div>
+
+  <script>
+  (function() {
+    const methods = {{ methods | tojson }};
+    const metricNames = {{ metric_names | tojson }};
+    const bestMethod = {{ best.get('method', '') | tojson }};
+    const SENTRY = { pos: '#3fb950', neg: '#f0883e', grid: 'rgba(139,148,158,0.15)', text: '#f0f0f5' };
+
+    // 图 1: 各方法综合得分柱状 (按得分排序, BEST 高亮)
+    const sorted = [...methods].sort((a, b) => (b.composite_score || 0) - (a.composite_score || 0));
+    const labels = sorted.map(m => m.method || m.weight_method || '—');
+    const data = sorted.map(m => parseFloat((m.composite_score || 0).toFixed(4)));
+    const colors = sorted.map(m => (m.method || m.weight_method) === bestMethod ? '#58a6ff' : (m.composite_score >= 0 ? SENTRY.pos : SENTRY.neg));
+
+    new Chart(document.getElementById('wBarChart'), {
+      type: 'bar',
+      data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 6, barThickness: 28 }] },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `得分 = ${ctx.parsed.x.toFixed(4)}` } } },
+        scales: {
+          x: { grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text } },
+          y: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 11 } } }
+        }
+      }
+    });
+
+    // 图 2: 多方法多指标雷达 (归一化)
+    function norm(v) {
+      if (typeof v !== 'number' || !isFinite(v)) return 50;
+      return Math.max(0, Math.min(100, v * 50 + 50));
+    }
+    const COLORS = ['#58a6ff', '#3fb950', '#f0883e', '#f85149', '#a371f7', '#7ee787'];
+    const series = sorted.map((m, i) => {
+      const name = m.method || m.weight_method || '—';
+      return {
+        name,
+        // R23-6 inspect fix: 真 schema 在 m.metric_scores[mn], 不是直接 m[mn]
+        data: metricNames.map(mn => {
+          const scores = m.metric_scores || m.scores || {};
+          const v = scores[mn] !== undefined ? scores[mn] : (typeof m[mn] === 'number' ? m[mn] : 0);
+          return norm(typeof v === 'number' ? v : 0);
+        })
+      };
+    });
+
+    new ApexCharts(document.querySelector('#wRadar'), {
+      series,
+      chart: { type: 'radar', height: 320, background: 'transparent', toolbar: { show: false }, foreColor: '#f0f0f5' },
+      xaxis: { categories: metricNames.length ? metricNames : ['指标 1'], labels: { style: { colors: '#f0f0f5', fontSize: '11px' } } },
+      yaxis: { min: 0, max: 100, tickAmount: 4, labels: { style: { colors: '#8b949e', fontSize: '10px' } } },
+      stroke: { width: 2 },
+      fill: { opacity: 0.10 },
+      colors: COLORS,
+      markers: { size: 4, strokeWidth: 2 },
+      legend: { position: 'bottom', labels: { colors: '#f0f0f5' } },
+      tooltip: { theme: 'dark' }
+    }).render();
+  })();
+  </script>
+
+  {# === R18 表格保留 === #}
   {% if methods %}
-  <h3>各权重方法得分排名</h3>
-  <table>
-    <thead>
-      <tr>
-        <th>权重方法</th><th>综合得分</th>
-        {% for metric in metric_names %}
-          <th>{{ metric }}</th>
-        {% endfor %}
-      </tr>
-    </thead>
+  <h3>各权重方法得分详情表</h3>
+  <div class="data-table-wrap">
+  <table class="data-table numeric">
+    <thead><tr>
+      <th>权重方法</th><th>综合得分</th>
+      {% for metric in metric_names %}<th>{{ metric }}</th>{% endfor %}
+    </tr></thead>
     <tbody>
-      {# 计算得分归一化基准 (最高分 → 100%) #}
       {% set _scores = methods | map(attribute='composite_score') | map('float') | list %}
       {% set _max_abs = (_scores | map('abs') | max) if _scores else 1 %}
       {% if _max_abs == 0 %}{% set _max_abs = 1 %}{% endif %}
@@ -68,21 +136,22 @@ v0.4.8 R18 改动 (用户反馈 "页面布局平铺"):
         {% set _score = m.get("composite_score", 0) | float %}
         {% set _bar_pct = ([(_score | abs / _max_abs * 100) | int, 100] | min) %}
         {% set _score_cls = 'pos' if _score > 0 else ('neg' if _score < 0 else 'warn') %}
-        <tr {% if _is_best %}style="background:rgba(194,239,78,0.08);font-weight:600"{% endif %}>
+        <tr {% if _is_best %}class="row-best"{% endif %}>
           <td>
             {% if _is_best %}<span class="status-badge ok">★ BEST</span> {% endif %}
             <code>{{ m.get("method", m.get("weight_method", "—")) }}</code>
           </td>
-          <td>
+          <td class="rank-bar-cell">
             <span class="progress-bar {{ _score_cls }}"><span style="width: {{ _bar_pct }}%"></span></span>
             <span class="cell-strong">{{ "%+.4f" | format(_score) }}</span>
           </td>
           {% for metric in metric_names %}
-            <td>{{ "%+.4f" | format(m.get(metric, m.get("scores", {}).get(metric, 0)) | float) }}</td>
+            <td>{{ "%+.4f" | format((m.metric_scores or {}).get(metric, (m.scores or {}).get(metric, m.get(metric, 0))) | float) }}</td>
           {% endfor %}
         </tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
   {% endif %}
 {% endif %}
