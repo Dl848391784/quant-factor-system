@@ -12,16 +12,10 @@ H1.1 严守: 不改 data_loaders, web_ui 内部实现按 date 过滤 Parquet
 
 from __future__ import annotations
 
-import contextlib
-import json as _json
 import logging
 from pathlib import Path
 
 import pandas as pd
-import pyarrow.compute as pc
-import pyarrow.dataset as pads
-import pyarrow.parquet as pq
-
 from paths import COMPREHENSIVE_FACTOR_RESULT
 
 
@@ -130,8 +124,11 @@ def load_stock_selection_for_date(date: str, logger: logging.Logger) -> dict | N
     # all_composite_stocks (从 composite daily parquet 读)
     try:
         from summary.report.data_loaders import _load_all_composite_stocks
+
         result["all_composite_stocks"] = _load_all_composite_stocks(
-            meta["weight_method"], date, logger,
+            meta["weight_method"],
+            date,
+            logger,
             secondary_meta=None,
         )
     except Exception as e:
@@ -139,9 +136,12 @@ def load_stock_selection_for_date(date: str, logger: logging.Logger) -> dict | N
         result["all_composite_stocks"] = []
 
     logger.info(
-        "加载股票选股结果 (web_ui 内部 R12): 选股日=%s, Top N=%d, 最优权重=%s, "
-        "Stage1=%d/Stage2=%d/Stage3=%d",
-        meta["selection_date"], meta["top_n"], meta["weight_method"],
-        len(stage1_top), len(stage2_top), len(stage3_top),
+        "加载股票选股结果 (web_ui 内部 R12): 选股日=%s, Top N=%d, 最优权重=%s, Stage1=%d/Stage2=%d/Stage3=%d",
+        meta["selection_date"],
+        meta["top_n"],
+        meta["weight_method"],
+        len(stage1_top),
+        len(stage2_top),
+        len(stage3_top),
     )
     return result

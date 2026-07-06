@@ -59,13 +59,13 @@ def check_path_import(filepath: str) -> list[str]:
 
     # 检查是否使用了路径常量但未导入
     for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and node.id in PATH_CONSTANTS:
+        if isinstance(node, ast.Name) and node.id in PATH_CONSTANTS:  # noqa: SIM102
             if not has_paths_import or node.id not in imported_names:
                 violations.append(f"{filepath}: 使用 {node.id} 但未 from paths import")
 
     # 检查字符串字面量中的路径
     for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):  # noqa: SIM102
             if "result/" in node.value or "/result" in node.value:
                 violations.append(f"{filepath}: 发现路径字面量 '{node.value}'")
 

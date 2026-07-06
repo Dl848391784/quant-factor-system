@@ -151,17 +151,11 @@ def parse_obq_section_9_matrix(logger: logging.Logger) -> dict | None:
     # 段行: "S1 0% 75% 40% ... 46.3%"  30 行
     # 注: txt 第九节每行以 "  S1" 前导空格开头, 不能用 ^ (默认匹配字符串开头, 不是行首)
     segments = []
-    for line_match in re.finditer(
-        r"(S\d+)\s+((?:\d+%\s+)+)(\d+\.\d+)%\s*$", section9_text, re.MULTILINE
-    ):
+    for line_match in re.finditer(r"(S\d+)\s+((?:\d+%\s+)+)(\d+\.\d+)%\s*$", section9_text, re.MULTILINE):
         label = line_match.group(1)
-        win_rates = [
-            float(r.rstrip("%")) for r in line_match.group(2).split()
-        ]
+        win_rates = [float(r.rstrip("%")) for r in line_match.group(2).split()]
         merged = float(line_match.group(3))
-        segments.append(
-            {"label": label, "win_rates": win_rates, "merged": merged}
-        )
+        segments.append({"label": label, "win_rates": win_rates, "merged": merged})
 
     # 最佳段: "最佳段: S7 (合并胜率 59.6%)"
     best_match = re.search(r"最佳段[::]\s*(S\d+).*?(\d+\.\d+)\s*%", section9_text)
@@ -173,9 +167,7 @@ def parse_obq_section_9_matrix(logger: logging.Logger) -> dict | None:
         }
 
     # 逐日胜率: 找 "S7 逐日胜率:" 段
-    best_label_pattern = (
-        re.escape(best_match.group(1)) if best_match else r"S\d+"
-    )
+    best_label_pattern = re.escape(best_match.group(1)) if best_match else r"S\d+"
     daily_match = re.search(
         rf"{best_label_pattern} 逐日胜率[::].*?(?=\n\n|\Z)",
         section9_text,
@@ -260,13 +252,15 @@ def parse_obq_intraday_fallback(logger: logging.Logger) -> dict:
             line,
         )
         if m:
-            operation_rules.append({
-                "scenario": m.group(1).strip(),
-                "condition": m.group(2).strip(),
-                "action": m.group(3).strip(),
-                "hit_rate": m.group(4).strip() if m.group(4) else None,
-                "sample_n": int(m.group(5)) if m.group(5) else None,
-            })
+            operation_rules.append(
+                {
+                    "scenario": m.group(1).strip(),
+                    "condition": m.group(2).strip(),
+                    "action": m.group(3).strip(),
+                    "hit_rate": m.group(4).strip() if m.group(4) else None,
+                    "sample_n": int(m.group(5)) if m.group(5) else None,
+                }
+            )
     result["operation_rules"] = operation_rules
 
     # 历史胜率: 简单行 "  场景: 胜率, 详情 ..."
@@ -278,10 +272,12 @@ def parse_obq_intraday_fallback(logger: logging.Logger) -> dict:
             continue
         m = re.match(r"^([^:：]+)[:：]\s*(.+)$", line)
         if m:
-            history_stats.append({
-                "scenario": m.group(1).strip(),
-                "detail": m.group(2).strip(),
-            })
+            history_stats.append(
+                {
+                    "scenario": m.group(1).strip(),
+                    "detail": m.group(2).strip(),
+                }
+            )
     result["history_stats"] = history_stats
 
     # 样本量 + 置信度
@@ -294,7 +290,8 @@ def parse_obq_intraday_fallback(logger: logging.Logger) -> dict:
 
     logger.info(
         "ob_quality txt 十·fallback 解析: %d 操作规则, %d 历史胜率",
-        len(operation_rules), len(history_stats),
+        len(operation_rules),
+        len(history_stats),
     )
     return result
 
@@ -410,13 +407,15 @@ def parse_obq_correlation(logger: logging.Logger) -> dict | None:
                 line,
             )
             if m:
-                high_corr_pairs.append({
-                    "factor1": m.group(1),
-                    "dim1": m.group(2),
-                    "factor2": m.group(3),
-                    "dim2": m.group(4),
-                    "corr": float(m.group(5)),
-                })
+                high_corr_pairs.append(
+                    {
+                        "factor1": m.group(1),
+                        "dim1": m.group(2),
+                        "factor2": m.group(3),
+                        "dim2": m.group(4),
+                        "corr": float(m.group(5)),
+                    }
+                )
 
     if not matrix:
         return None
@@ -466,11 +465,13 @@ def parse_obq_filter(logger: logging.Logger) -> dict | None:
     if sel_match:
         selected = []
         for m in re.finditer(r"(\S+?)\(ICIR=([\d.-]+),权重=([\d.]+)%\)", sel_match.group(1)):
-            selected.append({
-                "name": m.group(1),
-                "icir": float(m.group(2)),
-                "weight": float(m.group(3)),
-            })
+            selected.append(
+                {
+                    "name": m.group(1),
+                    "icir": float(m.group(2)),
+                    "weight": float(m.group(3)),
+                }
+            )
         result["selected_factors"] = selected
 
     # 注 + 阈值
@@ -496,10 +497,12 @@ def parse_obq_filter(logger: logging.Logger) -> dict | None:
             # "· factor(reason1; reason2)"
             m = re.match(r"^\s*·\s*(\S+)\((.+)\)\s*$", line)
             if m:
-                excluded.append({
-                    "name": m.group(1),
-                    "reasons": [r.strip() for r in m.group(2).split(";")],
-                })
+                excluded.append(
+                    {
+                        "name": m.group(1),
+                        "reasons": [r.strip() for r in m.group(2).split(";")],
+                    }
+                )
     result["excluded"] = excluded
 
     if "selected_factors" not in result:
@@ -594,26 +597,32 @@ def parse_obq_section_10_segments(logger: logging.Logger) -> dict | None:
             seg_block,
             re.MULTILINE,
         ):
-            stocks.append({
-                "rank": int(stock_match.group(1)),
-                "code": stock_match.group(2),
-                "name": stock_match.group(3),
-                "composite": float(stock_match.group(4)),
-            })
+            stocks.append(
+                {
+                    "rank": int(stock_match.group(1)),
+                    "code": stock_match.group(2),
+                    "name": stock_match.group(3),
+                    "composite": float(stock_match.group(4)),
+                }
+            )
 
         # 校验股票数一致性 (txt 里 S16=1, S29=3 等不规则情况)
         if len(stocks) != n_stocks:
             logger.debug(
                 "txt §10 %s: 期望 %d 只, 实际解析到 %d 只",
-                label, n_stocks, len(stocks),
+                label,
+                n_stocks,
+                len(stocks),
             )
 
-        segments.append({
-            "label": label,
-            "n_stocks": n_stocks,
-            "win_rate": win_rate,
-            "stocks": stocks,
-        })
+        segments.append(
+            {
+                "label": label,
+                "n_stocks": n_stocks,
+                "win_rate": win_rate,
+                "stocks": stocks,
+            }
+        )
 
         # 跟踪最佳段 (胜率最高)
         if best_segment is None or win_rate > best_segment["win_rate"]:

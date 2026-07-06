@@ -95,9 +95,17 @@ def test_report_renders_obq_page(client, mock_obq_result):
     body = resp.data.decode("utf-8")
     # 12 个 section 锚点 (零~十·fallback)
     sections = [
-        "section-freshness", "section-ic", "section-backtest", "section-corr",
-        "section-filter", "section-comp", "section-compare", "section-weights",
-        "section-selection", "section-segment-win", "section-candidate-detail",
+        "section-freshness",
+        "section-ic",
+        "section-backtest",
+        "section-corr",
+        "section-filter",
+        "section-comp",
+        "section-compare",
+        "section-weights",
+        "section-selection",
+        "section-segment-win",
+        "section-candidate-detail",
         "section-intraday",
     ]
     for sec in sections:
@@ -347,8 +355,7 @@ def test_segment_win_renders_top5(client, mock_obq_full_result):
         "trade_date": "2026-07-03",
         "n_total": 88,
         "segments": [
-            {"label": f"D{i}", "n": 3, "win_rate": 60.0 + i, "avg_ret": 0.5,
-             "pl_ratio": 1.2, "wins": 2, "losses": 1}
+            {"label": f"D{i}", "n": 3, "win_rate": 60.0 + i, "avg_ret": 0.5, "pl_ratio": 1.2, "wins": 2, "losses": 1}
             for i in range(1, 31)
         ],
     }
@@ -357,8 +364,7 @@ def test_segment_win_renders_top5(client, mock_obq_full_result):
     s9_mock = {
         "dates": ["2026-06-25", "2026-06-26", "2026-06-27", "2026-06-30", "2026-07-01", "2026-07-02"],
         "segments": [
-            {"label": f"S{i}", "win_rates": [55.0, 60.0, 58.0, 62.0, 59.0, 61.0], "merged": 59.2}
-            for i in range(1, 31)
+            {"label": f"S{i}", "win_rates": [55.0, 60.0, 58.0, 62.0, 59.0, 61.0], "merged": 59.2} for i in range(1, 31)
         ],
         "best_segment": {"label": "S7", "merged": 59.6},
         "daily_rates": {"2026-06-25": 55.0, "2026-06-26": 60.0},
@@ -412,24 +418,19 @@ def test_segment_win_renders_merged_chart(client, mock_obq_full_result):
         "trade_date": "2026-07-03",
         "n_total": 88,
         "segments": [
-            {"label": f"D{i}", "n": 3, "win_rate": 60.0 + i, "avg_ret": 0.5,
-             "pl_ratio": 1.2, "wins": 2, "losses": 1}
+            {"label": f"D{i}", "n": 3, "win_rate": 60.0 + i, "avg_ret": 0.5, "pl_ratio": 1.2, "wins": 2, "losses": 1}
             for i in range(1, 31)
         ],
     }
     s9_mock = {
         "dates": ["06-25", "06-26", "06-27"],
-        "segments": [
-            {"label": f"S{i}", "win_rates": [55.0, 60.0, 58.0], "merged": 59.2}
-            for i in range(1, 31)
-        ],
+        "segments": [{"label": f"S{i}", "win_rates": [55.0, 60.0, 58.0], "merged": 59.2} for i in range(1, 31)],
         "best_segment": {"label": "S7", "merged": 59.6},
     }
     merged_trend_mock = {
         "dates": ["06-15", "06-16", "06-17"],
         "segments": [
-            {"label": f"S{i}", "merged_running": [46.30, 47.50, 48.20], "merged_final": 48.20}
-            for i in range(1, 31)
+            {"label": f"S{i}", "merged_running": [46.30, 47.50, 48.20], "merged_final": 48.20} for i in range(1, 31)
         ],
         "source": "parquet",
     }
@@ -491,25 +492,18 @@ def test_segment_win_renders_pl_ratio_chart(client, mock_obq_full_result):
         "trade_date": "2026-07-03",
         "n_total": 88,
         "segments": [
-            {"label": f"D{i}", "n": 3, "win_rate": 60.0 + i, "avg_ret": 0.5,
-             "pl_ratio": 1.2, "wins": 2, "losses": 1}
+            {"label": f"D{i}", "n": 3, "win_rate": 60.0 + i, "avg_ret": 0.5, "pl_ratio": 1.2, "wins": 2, "losses": 1}
             for i in range(1, 31)
         ],
     }
     s9_mock = {
         "dates": ["06-25", "06-26", "06-27"],
-        "segments": [
-            {"label": f"S{i}", "win_rates": [55.0, 60.0, 58.0], "merged": 59.2}
-            for i in range(1, 31)
-        ],
+        "segments": [{"label": f"S{i}", "win_rates": [55.0, 60.0, 58.0], "merged": 59.2} for i in range(1, 31)],
         "best_segment": {"label": "S7", "merged": 59.6},
     }
     pl_ratio_mock = {
         "dates": ["06-15", "06-16", "06-17"],
-        "segments": [
-            {"label": f"S{i}", "pl_ratios": [1.23, 0.98, 1.45], "avg_pl_ratio": 1.22}
-            for i in range(1, 31)
-        ],
+        "segments": [{"label": f"S{i}", "pl_ratios": [1.23, 0.98, 1.45], "avg_pl_ratio": 1.22} for i in range(1, 31)],
         "avg_line": [1.50, 1.45, 1.40],
         "source": "parquet",
     }
@@ -568,9 +562,14 @@ def test_intraday_renders_rows(client, mock_obq_full_result):
     """v0.4.8 R3: 日内操作建议渲染 (9 列表格)"""
     intraday_mock = [
         {
-            "asset": "002628", "prev_close": 5.41, "open": 5.45, "real_gap_pct": 0.74,
-            "open_signal": "高开", "recommended_action": "开盘卖 (09:25 集合竞价)",
-            "expected_return_pct": 0.74, "stop_loss_price": None,
+            "asset": "002628",
+            "prev_close": 5.41,
+            "open": 5.45,
+            "real_gap_pct": 0.74,
+            "open_signal": "高开",
+            "recommended_action": "开盘卖 (09:25 集合竞价)",
+            "expected_return_pct": 0.74,
+            "stop_loss_price": None,
         },
     ]
     with (
@@ -610,17 +609,32 @@ def test_candidate_detail_renders_txt_s10_segments(client, mock_obq_full_result)
         "operation": "今日尾盘买入 -> 下一交易日卖出 (高开开盘锁利, 低开等反抽减亏)",
         "best_segment": {"label": "S7", "win_rate": 59.6},
         "segments": [
-            {"label": "S1", "n_stocks": 2, "win_rate": 46.3, "stocks": [
-                {"rank": 1, "code": "002687", "name": "乔治白", "composite": 1.392},
-                {"rank": 2, "code": "000520", "name": "凤凰航运", "composite": 1.189},
-            ]},
-            {"label": "S7", "n_stocks": 2, "win_rate": 59.6, "stocks": [
-                {"rank": 13, "code": "002628", "name": "成都路桥", "composite": 0.677},
-                {"rank": 14, "code": "603607", "name": "京华激光", "composite": 0.671},
-            ]},
-            {"label": "S16", "n_stocks": 1, "win_rate": 52.3, "stocks": [
-                {"rank": 31, "code": "000925", "name": "众合科技", "composite": 0.177},
-            ]},
+            {
+                "label": "S1",
+                "n_stocks": 2,
+                "win_rate": 46.3,
+                "stocks": [
+                    {"rank": 1, "code": "002687", "name": "乔治白", "composite": 1.392},
+                    {"rank": 2, "code": "000520", "name": "凤凰航运", "composite": 1.189},
+                ],
+            },
+            {
+                "label": "S7",
+                "n_stocks": 2,
+                "win_rate": 59.6,
+                "stocks": [
+                    {"rank": 13, "code": "002628", "name": "成都路桥", "composite": 0.677},
+                    {"rank": 14, "code": "603607", "name": "京华激光", "composite": 0.671},
+                ],
+            },
+            {
+                "label": "S16",
+                "n_stocks": 1,
+                "win_rate": 52.3,
+                "stocks": [
+                    {"rank": 31, "code": "000925", "name": "众合科技", "composite": 0.177},
+                ],
+            },
         ],
     }
     with (
@@ -742,8 +756,11 @@ def test_section_8_renders_full_txt_format(client, mock_obq_full_result):
     选股日期 括号 (使用T-1数据) - 与 txt 一致
     """
     s8_mock = {
-        "composite_score": 0.5714, "top_n": 30, "stocks_on_date": 61,
-        "excluded_by_amplitude": 0, "excluded_by_coverage": 15,
+        "composite_score": 0.5714,
+        "top_n": 30,
+        "stocks_on_date": 61,
+        "excluded_by_amplitude": 0,
+        "excluded_by_coverage": 15,
         "amplitude_detail": "振幅 < 1.00%，不可交易的一字板涨停股",
         "coverage_detail": "覆盖率 < 50%，缺失高权重因子导致综合因子值不可信",
         "flipped_factors": ["amplitude", "interaction_amplitude__ret3d_abs"],
@@ -765,11 +782,21 @@ def test_section_8_renders_full_txt_format(client, mock_obq_full_result):
 def test_section_9_renders_matrix(client, mock_obq_full_result):
     """v0.4.8 R4: 第九节 30 段 × 12 选股日 完整胜率矩阵渲染 (从 txt 解析)"""
     s9_mock = {
-        "dates": ["06-15", "06-16", "06-17", "06-18", "06-22", "06-23", "06-24", "06-25", "06-26", "06-29", "06-30", "07-01"],
-        "segments": [
-            {"label": f"S{i}", "win_rates": [50.0] * 12, "merged": 50.0 + i / 10}
-            for i in range(1, 31)
+        "dates": [
+            "06-15",
+            "06-16",
+            "06-17",
+            "06-18",
+            "06-22",
+            "06-23",
+            "06-24",
+            "06-25",
+            "06-26",
+            "06-29",
+            "06-30",
+            "07-01",
         ],
+        "segments": [{"label": f"S{i}", "win_rates": [50.0] * 12, "merged": 50.0 + i / 10} for i in range(1, 31)],
         "best_segment": {"label": "S7", "merged": 59.6},
         "daily_rates": {"06-15": "2/3 = 66.7%", "06-16": "3/3 = 100.0%"},
     }
@@ -835,11 +862,21 @@ def test_parity_obq_txt_fields_match_webui(client, mock_obq_full_result):
         "flipped_factors": ["amplitude", "interaction_amplitude__ret3d_abs"],
     }
     s9_mock = {
-        "dates": ["06-15", "06-16", "06-17", "06-18", "06-22", "06-23", "06-24", "06-25", "06-26", "06-29", "06-30", "07-01"],
-        "segments": [
-            {"label": f"S{i}", "win_rates": [50.0] * 12, "merged": 50.0 + i / 10}
-            for i in range(1, 31)
+        "dates": [
+            "06-15",
+            "06-16",
+            "06-17",
+            "06-18",
+            "06-22",
+            "06-23",
+            "06-24",
+            "06-25",
+            "06-26",
+            "06-29",
+            "06-30",
+            "07-01",
         ],
+        "segments": [{"label": f"S{i}", "win_rates": [50.0] * 12, "merged": 50.0 + i / 10} for i in range(1, 31)],
         "best_segment": {"label": "S7", "merged": 59.6},
         "daily_rates": {"06-15": "2/3 = 66.7%"},
     }
@@ -876,10 +913,34 @@ def test_intraday_fallback_renders_operation_rules(client, mock_obq_full_result)
     """v0.4.8 R6: 操作规则 4 行渲染 (高开/低开/平开/数据异常)"""
     fallback_mock = {
         "operation_rules": [
-            {"scenario": "高开", "condition": "gap > +0.5%", "action": "9:25 集合竞价直接卖出", "hit_rate": "23/28 = 82.1%", "sample_n": 28},
-            {"scenario": "低开", "condition": "gap < -0.5%", "action": "等盘中反弹回本价", "hit_rate": "22/65 = 33.8%", "sample_n": 65},
-            {"scenario": "平开", "condition": "-0.5% ~ +0.5%", "action": "样本不足 4 只, 无强规律", "hit_rate": None, "sample_n": None},
-            {"scenario": "数据异常", "condition": "|gap| > 10%", "action": "复权事件", "hit_rate": None, "sample_n": None},
+            {
+                "scenario": "高开",
+                "condition": "gap > +0.5%",
+                "action": "9:25 集合竞价直接卖出",
+                "hit_rate": "23/28 = 82.1%",
+                "sample_n": 28,
+            },
+            {
+                "scenario": "低开",
+                "condition": "gap < -0.5%",
+                "action": "等盘中反弹回本价",
+                "hit_rate": "22/65 = 33.8%",
+                "sample_n": 65,
+            },
+            {
+                "scenario": "平开",
+                "condition": "-0.5% ~ +0.5%",
+                "action": "样本不足 4 只, 无强规律",
+                "hit_rate": None,
+                "sample_n": None,
+            },
+            {
+                "scenario": "数据异常",
+                "condition": "|gap| > 10%",
+                "action": "复权事件",
+                "hit_rate": None,
+                "sample_n": None,
+            },
         ],
         "history_stats": [],
         "sample_size": "122 只",
@@ -911,7 +972,10 @@ def test_intraday_fallback_renders_history_stats(client, mock_obq_full_result):
         "operation_rules": [],
         "history_stats": [
             {"scenario": "高开开盘卖", "detail": "23/28 = 82.1% 胜率, 均收 +1.75% (vs 死等尾盘 +2.89%, 增厚 -1.15pp)"},
-            {"scenario": "低开等反弹", "detail": "22/65 = 33.8% 命中回本, 等高卖均收 -1.93% (vs 开盘即卖 -1.88%, 反亏 -0.05pp)"},
+            {
+                "scenario": "低开等反弹",
+                "detail": "22/65 = 33.8% 命中回本, 等高卖均收 -1.93% (vs 开盘即卖 -1.88%, 反亏 -0.05pp)",
+            },
         ],
         "sample_size": "122 只",
         "confidence": "统计置信度较高",
@@ -959,10 +1023,25 @@ def test_intraday_fallback_handles_empty(client, mock_obq_full_result):
 def test_freshness_section_renders_data_and_derived(client, mock_obq_full_result):
     """v0.4.8 R7: 零·数据完整性检查 渲染 2 表格 (基础数据源 + 衍生数据)"""
     data_mock = [
-        {"source": "factor_ic_data", "description": "主数据源(行情+因子+收益)", "expected_date": "2026-07-02", "actual_date": "2026-07-03", "status": "warning", "status_symbol": "△延迟"},
+        {
+            "source": "factor_ic_data",
+            "description": "主数据源(行情+因子+收益)",
+            "expected_date": "2026-07-02",
+            "actual_date": "2026-07-03",
+            "status": "warning",
+            "status_symbol": "△延迟",
+        },
     ]
     derived_mock = [
-        {"source": "ic_results", "description": "IC分析结果", "expected_date": "2026-07-01", "actual_date": "2026-07-02", "file_count": 72, "status": "warning", "status_symbol": "△延迟(72因子)"},
+        {
+            "source": "ic_results",
+            "description": "IC分析结果",
+            "expected_date": "2026-07-01",
+            "actual_date": "2026-07-02",
+            "file_count": 72,
+            "status": "warning",
+            "status_symbol": "△延迟(72因子)",
+        },
     ]
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
@@ -997,8 +1076,24 @@ def test_freshness_section_renders_data_and_derived(client, mock_obq_full_result
 def test_ic_section_renders_table(client, mock_obq_full_result):
     """v0.4.8 R7: 一·单因子 IC 数据汇总 渲染表格"""
     ic_mock = [
-        {"factor_name": "tail_price_position", "ic_mean": -0.0629, "icir": 0.9381, "ic_std": 0.0670, "valid_days": 34, "neutral_enabled": True, "neutral_method": "industry+log_market_cap"},
-        {"factor_name": "rsi", "ic_mean": -0.0483, "icir": 0.3382, "ic_std": 0.1428, "valid_days": 516, "neutral_enabled": True, "neutral_method": "industry+log_market_cap"},
+        {
+            "factor_name": "tail_price_position",
+            "ic_mean": -0.0629,
+            "icir": 0.9381,
+            "ic_std": 0.0670,
+            "valid_days": 34,
+            "neutral_enabled": True,
+            "neutral_method": "industry+log_market_cap",
+        },
+        {
+            "factor_name": "rsi",
+            "ic_mean": -0.0483,
+            "icir": 0.3382,
+            "ic_std": 0.1428,
+            "valid_days": 516,
+            "neutral_enabled": True,
+            "neutral_method": "industry+log_market_cap",
+        },
     ]
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
@@ -1039,8 +1134,20 @@ def test_ic_section_handles_no_data(client, mock_obq_full_result):
 def test_backtest_section_renders_table(client, mock_obq_full_result):
     """v0.4.8 R8: 二·单因子分层回测 渲染表格"""
     bt_mock = [
-        {"factor_name": "tail_price_position", "long_short_return_annual": -0.0547, "long_short_sharpe": -0.78, "monotonicity_correlation": 0.1992, "monotonicity_quality": "✗较差"},
-        {"factor_name": "amplitude", "long_short_return_annual": 0.0906, "long_short_sharpe": 0.76, "monotonicity_correlation": -0.4409, "monotonicity_quality": "△一般"},
+        {
+            "factor_name": "tail_price_position",
+            "long_short_return_annual": -0.0547,
+            "long_short_sharpe": -0.78,
+            "monotonicity_correlation": 0.1992,
+            "monotonicity_quality": "✗较差",
+        },
+        {
+            "factor_name": "amplitude",
+            "long_short_return_annual": 0.0906,
+            "long_short_sharpe": 0.76,
+            "monotonicity_correlation": -0.4409,
+            "monotonicity_quality": "△一般",
+        },
     ]
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
@@ -1064,8 +1171,20 @@ def test_backtest_section_renders_table(client, mock_obq_full_result):
 def test_composite_section_renders_table(client, mock_obq_full_result):
     """v0.4.8 R8: 五·综合因子 4 种权重回测 渲染表格"""
     comp_mock = [
-        {"weight_method": "equal_weight", "long_short_return_annual": 0.05, "long_short_sharpe": 0.4, "monotonicity_correlation": 0.5, "monotonicity_quality": "✓良好"},
-        {"weight_method": "rolling_icir_weight", "long_short_return_annual": 0.08, "long_short_sharpe": 0.6, "monotonicity_correlation": 0.7, "monotonicity_quality": "✓良好"},
+        {
+            "weight_method": "equal_weight",
+            "long_short_return_annual": 0.05,
+            "long_short_sharpe": 0.4,
+            "monotonicity_correlation": 0.5,
+            "monotonicity_quality": "✓良好",
+        },
+        {
+            "weight_method": "rolling_icir_weight",
+            "long_short_return_annual": 0.08,
+            "long_short_sharpe": 0.6,
+            "monotonicity_correlation": 0.7,
+            "monotonicity_quality": "✓良好",
+        },
     ]
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
@@ -1085,10 +1204,22 @@ def test_composite_section_renders_table(client, mock_obq_full_result):
 def test_weights_section_renders_best_and_methods(client, mock_obq_full_result):
     """v0.4.8 R8: 七·权重选择结果 渲染最优方法 + 全部方法 (R23-6: mock 改为真 schema)"""
     weights_mock = {
-        "best_selection": {"method": "rolling_icir_weight", "composite_score": 0.7766, "selection_reason": "综合得分最高"},
+        "best_selection": {
+            "method": "rolling_icir_weight",
+            "composite_score": 0.7766,
+            "selection_reason": "综合得分最高",
+        },
         "ranking": [
-            {"method": "equal_weight", "composite_score": 0.5285, "metric_scores": {"long_return_annual": 0.0081, "long_sharpe": 0.0429, "monotonicity_abs": 0.5635}},
-            {"method": "rolling_icir_weight", "composite_score": 0.7766, "metric_scores": {"long_return_annual": 0.0080, "long_sharpe": 0.0382, "monotonicity_abs": 0.5860}},
+            {
+                "method": "equal_weight",
+                "composite_score": 0.5285,
+                "metric_scores": {"long_return_annual": 0.0081, "long_sharpe": 0.0429, "monotonicity_abs": 0.5635},
+            },
+            {
+                "method": "rolling_icir_weight",
+                "composite_score": 0.7766,
+                "metric_scores": {"long_return_annual": 0.0080, "long_sharpe": 0.0382, "monotonicity_abs": 0.5860},
+            },
         ],
         "metric_configs": {
             "long_return_annual": {"direction": "higher_better", "weight": 1.0, "description": "多头年化"},
@@ -1140,7 +1271,13 @@ def test_correlation_section_renders_matrix_and_abbrev(client, mock_obq_full_res
         },
         "abbrev": {"amp": "amplitude", "int": "interaction_amplitude__ret3d_abs"},
         "high_corr_pairs": [
-            {"factor1": "amplitude", "dim1": "volatility", "factor2": "interaction_amplitude__ret3d_abs", "dim2": "momentum_x_volatility", "corr": 0.80},
+            {
+                "factor1": "amplitude",
+                "dim1": "volatility",
+                "factor2": "interaction_amplitude__ret3d_abs",
+                "dim2": "momentum_x_volatility",
+                "corr": 0.80,
+            },
         ],
     }
     with (
@@ -1235,13 +1372,43 @@ def test_filter_section_handles_none(client, mock_obq_full_result):
 def test_compare_section_renders_composite_and_selected_factor(client, mock_obq_full_result):
     """v0.4.8 R10: 六·对比 渲染综合 4 权重 + 选中单因子"""
     comp_mock = [
-        {"weight_method": "ic_weight", "long_short_return_annual": 0.5843, "long_short_sharpe": 2.99, "monotonicity_correlation": 0.9851, "monotonicity_quality": "✓良好"},
-        {"weight_method": "rolling_icir_weight", "long_short_return_annual": 0.5829, "long_short_sharpe": 2.98, "monotonicity_correlation": 0.9861, "monotonicity_quality": "✓良好"},
+        {
+            "weight_method": "ic_weight",
+            "long_short_return_annual": 0.5843,
+            "long_short_sharpe": 2.99,
+            "monotonicity_correlation": 0.9851,
+            "monotonicity_quality": "✓良好",
+        },
+        {
+            "weight_method": "rolling_icir_weight",
+            "long_short_return_annual": 0.5829,
+            "long_short_sharpe": 2.98,
+            "monotonicity_correlation": 0.9861,
+            "monotonicity_quality": "✓良好",
+        },
     ]
     bt_mock = [
-        {"factor_name": "amplitude", "long_short_return_annual": 0.5178, "long_short_sharpe": 2.62, "monotonicity_correlation": -0.9785, "monotonicity_quality": "✓良好"},
-        {"factor_name": "interaction_amplitude__ret3d_abs", "long_short_return_annual": 0.5129, "long_short_sharpe": 2.66, "monotonicity_correlation": -0.9523, "monotonicity_quality": "✓良好"},
-        {"factor_name": "rsi", "long_short_return_annual": 0.15, "long_short_sharpe": 1.4, "monotonicity_correlation": 0.5, "monotonicity_quality": "△一般"},  # 未选中
+        {
+            "factor_name": "amplitude",
+            "long_short_return_annual": 0.5178,
+            "long_short_sharpe": 2.62,
+            "monotonicity_correlation": -0.9785,
+            "monotonicity_quality": "✓良好",
+        },
+        {
+            "factor_name": "interaction_amplitude__ret3d_abs",
+            "long_short_return_annual": 0.5129,
+            "long_short_sharpe": 2.66,
+            "monotonicity_correlation": -0.9523,
+            "monotonicity_quality": "✓良好",
+        },
+        {
+            "factor_name": "rsi",
+            "long_short_return_annual": 0.15,
+            "long_short_sharpe": 1.4,
+            "monotonicity_correlation": 0.5,
+            "monotonicity_quality": "△一般",
+        },  # 未选中
     ]
     filt_mock = {
         "selected_factors": [
@@ -1295,7 +1462,19 @@ def test_compare_section_handles_empty_data(client, mock_obq_full_result):
 def test_r12_uses_date_aware_loader(client):
     """v0.4.8 R12: view 优先调 load_stock_selection_for_date(date), 不用 data_loaders 固定取 max"""
     date_aware_result = {
-        "meta": {"selection_date": "2026-07-02", "weight_method": "rolling_icir_weight", "factor_direction": "positive", "top_n": 30, "composite_score": 0.7143, "stocks_on_date": 200, "valid_stocks": 90, "stage1_pool_size": 200, "min_amplitude": 0.01, "excluded_by_amplitude": 0, "excluded_by_coverage": 0},
+        "meta": {
+            "selection_date": "2026-07-02",
+            "weight_method": "rolling_icir_weight",
+            "factor_direction": "positive",
+            "top_n": 30,
+            "composite_score": 0.7143,
+            "stocks_on_date": 200,
+            "valid_stocks": 90,
+            "stage1_pool_size": 200,
+            "min_amplitude": 0.01,
+            "excluded_by_amplitude": 0,
+            "excluded_by_coverage": 0,
+        },
         "top_stocks": [{"code": "603078", "composite_value": 0.95, "rank": 1}],
         "stage1_top": [{"code": "603078", "composite_value": 0.95, "rank": 1}],
         "stage1_bottom": [],
@@ -1333,14 +1512,28 @@ def test_r12_handles_missing_date_partition(client):
     # date 2026-06-01 不存在 → load_stock_selection_for_date 应返 None
     with (
         patch("web_ui.app.load_stock_name_map", return_value={}),
-        patch("web_ui.app.load_stock_selection_result", return_value={
-            "meta": {"selection_date": "2026-07-03", "weight_method": "x", "factor_direction": "p", "top_n": 30, "composite_score": 0.5, "stocks_on_date": 1, "valid_stocks": 1, "stage1_pool_size": 1},
-            "top_stocks": [], "stage1_top": [], "stage1_bottom": [], "all_composite_stocks": [],
-        }),
+        patch(
+            "web_ui.app.load_stock_selection_result",
+            return_value={
+                "meta": {
+                    "selection_date": "2026-07-03",
+                    "weight_method": "x",
+                    "factor_direction": "p",
+                    "top_n": 30,
+                    "composite_score": 0.5,
+                    "stocks_on_date": 1,
+                    "valid_stocks": 1,
+                    "stage1_pool_size": 1,
+                },
+                "top_stocks": [],
+                "stage1_top": [],
+                "stage1_bottom": [],
+                "all_composite_stocks": [],
+            },
+        ),
     ):
         resp = client.get("/report/2026-06-01")  # 不存在的日期
     assert resp.status_code == 200  # 不 500
     body = resp.data.decode("utf-8")
     # fallback 显示 mock 数据 (composite_score 0.5)
     assert "0.5000" in body
-
