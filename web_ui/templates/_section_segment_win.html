@@ -207,10 +207,10 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
   {# === v0.4.8 R39 (Stage 6): 30 段每日盈亏比趋势概览 (与上方共用 toolbar, 30 段折线 + 1 条粗黑虚线 30 段均值) === #}
   {# 数据源: composite_daily.parquet + master parquet · 算法 wins.mean / |losses.mean| (与 load_decile_stats 一致) #}
   {% if pl_ratio_trend and pl_ratio_trend.get("segments") %}
-  <h3>30 段每日盈亏比趋势概览 (pl_ratio = wins.mean / |losses.mean|)</h3>
-  <p class="muted">数据源: comprehensive_factor/result/ob_quality/composite_rolling_icir_weight_1d_daily.parquet + data_fetchers/result/ob_quality/factor_ic_data.parquet · 算法 wins.mean/|losses.mean| (与 load_decile_stats 一致) · 共用上方 toolbar (12/30/90/全部切换 + 段选择器)</p>
+  <h3>30 段每日合并收益率趋势概览 (seg_return = mean(forward_return_1d))</h3>
+  <p class="muted">数据源: composite_rolling_icir_weight_1d_daily.parquet + factor_ic_data.parquet · 算法等权合并收益率 = mean(forward_return_1d) · 用户原话 2026-07-06: "等权买入 1:1:1, 3 只 +5%/+1%/-8% → (5+1-8)/3 = -0.67%" · 共用上方 toolbar (R39a 算法重设计: R39 wins.mean/|losses.mean| 是盈亏比, 改为简单算术平均收益率)</p>
   <div class="chart-wrap">
-    <canvas id="segPlRatioChart" data-chart-key="segPlRatioChart" height="280"></canvas>
+    <canvas id="segReturnChart" data-chart-key="segReturnChart" height="280"></canvas>
   </div>
   {% endif %}
   <script>
@@ -285,8 +285,8 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
                 // 根因: R35 legend.onClick 自定义 handler 没走 _soloSeg() 函数, R38 只补了 _soloSeg 函数末尾
                 // → select 路径有联动, Shift+单击图例路径没联动. 这里直接调 sync 函数
                 if (window._syncSegMergedFromOverview) window._syncSegMergedFromOverview();
-                // === v0.4.8 R39 (Stage 6, §3c sub-trigger 5): 同步联动 segPlRatioChart
-                if (window._syncSegPlRatioFromOverview) window._syncSegPlRatioFromOverview();
+                // === v0.4.8 R39a (Stage 6 §3c sub-trigger 5): 同步联动 segReturnChart
+                if (window._syncSegReturnFromOverview) window._syncSegReturnFromOverview();
               }
             },
             tooltip: { mode: 'index', intersect: false }
@@ -310,8 +310,8 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
         chart.update();
         // === v0.4.8 R38 (Stage 6, §3c reverse trigger): 同步刷新 segMergedChart (新图, 共用 toolbar) ===
         if (window._segMergedOverview) window._segMergedOverview(n);
-        // === v0.4.8 R39 (Stage 6, §3c sub-trigger 5): 同步刷新 segPlRatioChart (新图, 共用 toolbar) ===
-        if (window._plRatioOverview) window._plRatioOverview(n);
+        // === v0.4.8 R39a (Stage 6 §3c sub-trigger 5): 同步刷新 segReturnChart (新图, 共用 toolbar) ===
+        if (window._segReturnOverview) window._segReturnOverview(n);
         const countEl = document.getElementById('segOverviewCount');
         if (countEl) countEl.textContent = n >= 999 ? '全部 ' + allDates.length + ' 选股日' : '最近 ' + len + ' 选股日';
       };
@@ -331,8 +331,8 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
         }
         // === v0.4.8 R38 (Stage 6, §3c reverse trigger): 同步 solo segMergedChart ===
         if (window._soloSegMerged) window._soloSegMerged(label);
-        // === v0.4.8 R39 (Stage 6, §3c sub-trigger 5): 同步 solo segPlRatioChart ===
-        if (window._soloPlRatio) window._soloPlRatio(label);
+        // === v0.4.8 R39a (Stage 6 §3c sub-trigger 5): 同步 solo segReturnChart ===
+        if (window._soloSegReturn) window._soloSegReturn(label);
         chart.update();
       };
       // === v0.4.8 R38a (Stage 6 bugfix): 从 segOverviewChart visibility 同步到 segMergedChart
@@ -348,11 +348,11 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
         });
         mgChart.update();
       };
-      // === v0.4.8 R39 (Stage 6, §3c sub-trigger 5): 从 segOverviewChart visibility 同步到 segPlRatioChart
-      // 注意: segPlRatioChart 有 31 个 datasets (30 段 + 1 平均线), 平均线 dataset index = 30
-      // 同步规则: 段 idx 对应 plRatio idx (0-29), 平均线 (idx=30) 永远 visible
-      window._syncSegPlRatioFromOverview = function() {
-        const pCanvas = document.querySelector('[data-chart-key="segPlRatioChart"]');
+      // === v0.4.8 R39a (Stage 6 §3c sub-trigger 5): 从 segOverviewChart visibility 同步到 segReturnChart
+      // 注意: segReturnChart 有 31 个 datasets (30 段 + 1 平均线), 平均线 dataset index = 30
+      // 同步规则: 段 idx 对应 returnChart idx (0-29), 平均线 (idx=30) 永远 visible
+      window._syncSegReturnFromOverview = function() {
+        const pCanvas = document.querySelector('[data-chart-key="segReturnChart"]');
         const pChart = pCanvas ? Chart.getChart(pCanvas) : null;
         if (!pChart) return;
         chart.data.datasets.forEach(function(_, idx) {
@@ -419,7 +419,7 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
     };
     {% endif %}
 
-    // === v0.4.8 R39 (Stage 6): segPlRatioChart factory (30 段每日盈亏比趋势, 共用上方 toolbar) ===
+    // === v0.4.8 R39a (Stage 6): segReturnChart factory (30 段每日合并收益率趋势, 共用上方 toolbar) ===
     {% if pl_ratio_trend and pl_ratio_trend.get("segments") %}
     const plSegs = {{ pl_ratio_trend.segments | tojson }} || [];
     const plDates = {{ pl_ratio_trend.dates | tojson }} || [];
@@ -448,7 +448,7 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
       borderDash: [8, 4],
       tension: 0.2
     });
-    window._chartFactories['segPlRatioChart'] = function(canvas) {
+    window._chartFactories['segReturnChart'] = function(canvas) {
       const pChart = new Chart(canvas, {
         type: 'line',
         data: { labels: plDates.slice(-12), datasets: plDatasets },
@@ -466,7 +466,7 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
         }
       });
       // === R39 (Stage 6, §3c reverse trigger): 共用 toolbar 范围切换 ===
-      window._plRatioOverview = function(n) {
+      window._segReturnOverview = function(n) {
         const len = Math.min(n, plDates.length);
         pChart.data.labels = plDates.slice(-len);
         pChart.data.datasets.forEach((ds, i) => {
@@ -480,9 +480,9 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
         });
         pChart.update();
       };
-      // === R39 (Stage 6, §3c reverse trigger): 共用 toolbar 段选择器 solo ===
+      // === R39a (Stage 6, §3c reverse trigger): 共用 toolbar 段选择器 solo ===
       // 平均线 dataset index = 30 (最后 1 个), solo 时也保留显示
-      window._soloPlRatio = function(label) {
+      window._soloSegReturn = function(label) {
         if (!label) {
           pChart.data.datasets.forEach((_, idx) => pChart.setDatasetVisibility(idx, true));
         } else {

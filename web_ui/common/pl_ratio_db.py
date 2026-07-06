@@ -82,15 +82,15 @@ def _compute_segment_pl_ratio(
         return None
 
     result: dict[str, float] = {}
+    # v0.4.8 R39a 算法重设计: 每段当天 seg_return = mean(forward_return_1d) * 100
+    # 用户原话: "等权买入 1:1:1, 3 只股票 +5%/+1%/-8% → 合并收益率 = (5+1-8)/3 = -0.67%"
+    # 不是 wins.mean()/|losses.mean()| (盈亏比) — 是简单算术平均 (收益率)
+    # 公式统一: 涨含跌一起平均, 不分 wins/losses
     for seg_label in [f"S{i + 1}" for i in range(n_segments)]:
         subset = merged[merged["segment"] == seg_label]
         ret = subset["forward_return_1d"].dropna()
-        wins = ret[ret > 0]
-        losses = ret[ret < 0]
-        aw = wins.mean() * 100 if len(wins) > 0 else 0.0
-        al = abs(losses.mean()) * 100 if len(losses) > 0 else 0.0
-        plr = aw / al if al > 0 else 0.0
-        result[seg_label] = round(plr, 2)
+        seg_return_pct = round(float(ret.mean() * 100), 2) if len(ret) > 0 else 0.0
+        result[seg_label] = seg_return_pct
     return result
 
 

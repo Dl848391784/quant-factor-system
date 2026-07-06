@@ -482,9 +482,11 @@ def test_segment_win_merged_chart_skipped_when_no_data(client, mock_obq_full_res
     assert "_segMergedOverview" not in body
 
 
-def test_segment_win_renders_pl_ratio_chart(client, mock_obq_full_result):
-    """v0.4.8 R39 (Stage 6): 30 段每日盈亏比趋势 (segPlRatioChart) 渲染
-    数据源: composite_daily.parquet + master parquet, 算法 wins.mean/|losses.mean|
+def test_segment_win_renders_seg_return_chart(client, mock_obq_full_result):
+    """v0.4.8 R39a (Stage 6 算法重设计): 30 段每日合并收益率 (segReturnChart) 渲染
+    数据源: composite_daily.parquet + master parquet, 算法 mean(forward_return_1d) * 100
+    用户原话 2026-07-06: "等权买入 1:1:1, 3 只 +5%/+1%/-8% → (5+1-8)/3 = -0.67%" (合并收益率, 不是盈亏比)
+    R39 wins.mean/|losses.mean| 是盈亏比, R39a 改为简单算术平均收益率
     用户选项 B: 30 段折线 + 1 条粗黑虚线 30 段当日平均
     """
     decile_mock = {
@@ -501,10 +503,11 @@ def test_segment_win_renders_pl_ratio_chart(client, mock_obq_full_result):
         "segments": [{"label": f"S{i}", "win_rates": [55.0, 60.0, 58.0], "merged": 59.2} for i in range(1, 31)],
         "best_segment": {"label": "S7", "merged": 59.6},
     }
-    pl_ratio_mock = {
+    # R39a: 字段名沿用 pl_ratios/avg_line (兼容 pl_ratio_trend context 内部), 实际值是 seg_return (%)
+    seg_return_mock = {
         "dates": ["06-15", "06-16", "06-17"],
-        "segments": [{"label": f"S{i}", "pl_ratios": [1.23, 0.98, 1.45], "avg_pl_ratio": 1.22} for i in range(1, 31)],
-        "avg_line": [1.50, 1.45, 1.40],
+        "segments": [{"label": f"S{i}", "pl_ratios": [1.23, -0.98, 1.45], "avg_pl_ratio": 1.22} for i in range(1, 31)],
+        "avg_line": [1.50, -1.45, 1.40],
         "source": "parquet",
     }
     with (
@@ -512,33 +515,43 @@ def test_segment_win_renders_pl_ratio_chart(client, mock_obq_full_result):
         patch("web_ui.app.load_stock_name_map", return_value={}),
         patch("web_ui.app.load_decile_stats", return_value=decile_mock),
         patch("web_ui.app.parse_obq_s9", return_value=s9_mock),
-        patch("web_ui.app.load_pl_ratio_trend", return_value=pl_ratio_mock),
+        patch("web_ui.app.load_pl_ratio_trend", return_value=seg_return_mock),
     ):
         resp = client.get("/report/2026-07-03")
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
-    # 新组件渲染
-    assert "segPlRatioChart" in body  # canvas id
-    assert "30 段每日盈亏比趋势概览" in body  # h3 标题
-    # 数据契约 (mock 的 pl_ratios 进入 HTML)
+    # 新组件渲染 (R39a: canvas id 重命名 segPlRatioChart → segReturnChart)
+    assert "segReturnChart" in body  # canvas id (新名字)
+    assert "segPlRatioChart" not in body  # 旧名字不残留
+    assert "30 段每日合并收益率趋势概览" in body  # h3 标题 (R39a: "盈亏比" → "合并收益率")
+    assert "30 段每日盈亏比趋势概览" not in body  # 旧标题不残留
+    assert "seg_return = mean(forward_return_1d)" in body  # h3 算法公式
+    # 数据契约 (mock 的 pl_ratios 进入 HTML, 字段名沿用兼容)
     assert "pl_ratios" in body
     assert "avg_line" in body
-    # 工厂注册 (R31 lazy render)
-    assert "_chartFactories['segPlRatioChart']" in body
+    # 工厂注册 (R31 lazy render) - R39a: 工厂名重命名
+    assert "_chartFactories['segReturnChart']" in body
+    assert "_chartFactories['segPlRatioChart']" not in body
     # 30 段 + 1 条粗黑虚线平均线
     assert "30 段当日平均" in body  # 平均线 label
     assert "borderDash" in body  # 虚线
     assert "borderColor: '#000000'" in body  # 黑色
-    # §3c sub-trigger 5: 共用 toolbar 范围切换 + solo 同步
-    assert "_plRatioOverview" in body
-    assert "_soloPlRatio" in body
+    # §3c sub-trigger 5: 共用 toolbar 范围切换 + solo 同步 - R39a 函数名重命名
+    assert "_segReturnOverview" in body
+    assert "_soloSegReturn" in body
+    assert "_plRatioOverview" not in body  # 旧名不残留
+    assert "_soloPlRatio" not in body
     # §3c sub-trigger 5: 上方 _segOverview / _soloSeg 调用新函数
-    assert "window._plRatioOverview" in body
-    assert "window._soloPlRatio" in body
-    # R38a + R39 联动 sync (Shift+单击图例路径)
-    assert "_syncSegPlRatioFromOverview" in body
-    # 数据源声明 (muted)
+    assert "window._segReturnOverview" in body
+    assert "window._soloSegReturn" in body
+    # R38a + R39a 联动 sync (Shift+单击图例路径) - R39a 函数名重命名
+    assert "_syncSegReturnFromOverview" in body
+    assert "_syncSegPlRatioFromOverview" not in body
+    # 数据源声明 (muted) + 用户原话引用
     assert "composite_rolling_icir_weight_1d_daily.parquet" in body
+    assert "(5+1-8)/3" in body  # 用户原话: "3 只 +5%/+1%/-8% → -0.67%"
+    # R39a 算法声明 (muted 改 mean(forward_return_1d))
+    assert "mean(forward_return_1d)" in body
 
 
 def test_segment_win_pl_ratio_chart_skipped_when_no_data(client, mock_obq_full_result):

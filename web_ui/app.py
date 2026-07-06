@@ -60,9 +60,10 @@ from summary.report.freshness_check import (  # noqa: E402
 # v0.4.8 R2a: web_ui 内部实现的辅助模块 (H1.1 严守: 不修改 data_loaders)
 from web_ui.common.lr_training_status import load_status as load_lr_status  # noqa: E402
 
-# v0.4.8 R39 (Stage 6): 30 段每日盈亏比趋势 (从 master + composite daily parquet 算 pl_ratio)
+# v0.4.8 R39a (Stage 6 算法重设计): 30 段每日合并收益率 (seg_return = mean(forward_return_1d))
+# R39 原算法 wins.mean/|losses.mean| (盈亏比) 用户反馈方向错, 改为简单算术平均收益率
 # H1.1 严守 + §18 fork pattern: web_ui 内部读 parquet, 不修改 data_loaders / summary 模块
-from web_ui.common.pl_ratio_db import load_pl_ratio_trend  # noqa: E402
+from web_ui.common.pl_ratio_db import load_pl_ratio_trend  # 函数名保留 (R39a 内部已重写算法)  # noqa: E402
 
 # v0.4.8 R38 (Stage 6): 30 段合并胜率趋势概览 (从 segment_win_rates.parquet 算 cumsum)
 # H1.1 严守 + §18 fork pattern: web_ui 内部读 parquet, 不修改 summary 模块
@@ -186,7 +187,7 @@ def show_report(date: str):
     except Exception as e:
         logger.warning("load_merged_win_trend 失败: %s", e)
 
-    # v0.4.8 R39 (Stage 6): 30 段每日盈亏比趋势 (从 master + composite daily parquet 算 pl_ratio)
+    # v0.4.8 R39a (Stage 6 算法重设计): 30 段每日合并收益率 (字段名沿用 pl_ratio_trend 兼容 R39 mock)
     pl_ratio_trend: dict | None = None
     try:
         pl_ratio_trend = load_pl_ratio_trend(logger=logger)
