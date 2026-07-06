@@ -359,6 +359,11 @@ def test_segment_win_renders_top5(client, mock_obq_full_result):
     assert "30 段" in body
     assert "★ BEST" in body
     assert "全部 30 段胜率一览" in body
+    # v0.4.8 R36 (Stage 3 适配): matrix-fold 折叠 transition 防 layout 跳
+    assert "matrix-fold > .data-table-wrap" in body
+    assert "max-height: 0" in body
+    assert "max-height: 2000px" in body
+    assert "transition: max-height 0.3s ease" in body
     # v0.4.8 R35 (Stage 6): 30 段 solo 功能 (PC Shift+单击图例 + 移动端 select)
     assert "segOverviewSeg" in body  # 移动端 select id
     assert "window._soloSeg" in body  # solo 函数

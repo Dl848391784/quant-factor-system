@@ -947,6 +947,24 @@ details.matrix-fold > summary {
   margin: 12px 0 8px 0;
   transition: background 0.15s ease;
 }
+/* === v0.4.8 R36 (Stage 3 适配): 全局 <details> 展开/折叠 transition (修 layout 跳) ===
+   用户原话 '移动端尺寸适配不好, 页面大小会跳' 诊断:
+   matrix-fold/R30-4c/daily_rates 等 <details> 展开时无 transition, 折叠态→展开态 layout 跳
+   修法: summary 高度 transition + matrix 容器 max-height 过渡
+   §3 surgical: 仅改 details.matrix-fold 内部 + 1 段新规则, 不动 matrix-fold summary 已有样式 */
+details.matrix-fold[open] > summary {
+  border-radius: 6px 6px 0 0;
+  border-bottom: 1px solid #21262d;
+}
+/* matrix 内容用 max-height 过渡, 避免展开时整页 layout 跳 (R32 默认折叠, 展开时延后入 layout tree) */
+details.matrix-fold > .data-table-wrap {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+details.matrix-fold[open] > .data-table-wrap {
+  max-height: 2000px;  /* 30×12 矩阵 ~1800px, 留 200px buffer */
+}
 details.matrix-fold > summary::-webkit-details-marker {
   display: none;  /* WebKit 旧版 */
 }
