@@ -447,6 +447,10 @@ def test_segment_win_renders_merged_chart(client, mock_obq_full_result):
     assert "_soloSegMerged" in body
     # §3c reverse trigger: 上方 _segOverview 调用新函数
     assert "window._segMergedOverview" in body
+    # v0.4.8 R38a (Stage 6 bugfix): PC Shift+单击图例联动 segMergedChart
+    # legend.onClick 自定义 handler 不走 _soloSeg → 直接读 chart visibility 状态同步
+    assert "_syncSegMergedFromOverview" in body
+    assert "window._syncSegMergedFromOverview" in body
     # 数据源声明 (muted)
     assert "segment_win_rates.parquet" in body
 

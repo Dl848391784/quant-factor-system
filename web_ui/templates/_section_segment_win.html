@@ -271,6 +271,10 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
                   chart.setDatasetVisibility(ci, !chart.isDatasetVisible(ci));
                 }
                 chart.update();
+                // === v0.4.8 R38a (Stage 6 bugfix): PC Shift+单击图例 = solo 联动 segMergedChart
+                // 根因: R35 legend.onClick 自定义 handler 没走 _soloSeg() 函数, R38 只补了 _soloSeg 函数末尾
+                // → select 路径有联动, Shift+单击图例路径没联动. 这里直接调 sync 函数
+                if (window._syncSegMergedFromOverview) window._syncSegMergedFromOverview();
               }
             },
             tooltip: { mode: 'index', intersect: false }
@@ -314,6 +318,19 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
         // === v0.4.8 R38 (Stage 6, §3c reverse trigger): 同步 solo segMergedChart ===
         if (window._soloSegMerged) window._soloSegMerged(label);
         chart.update();
+      };
+      // === v0.4.8 R38a (Stage 6 bugfix): 从 segOverviewChart visibility 同步到 segMergedChart
+      // 位置: segOverviewChart factory 内, 闭包能访问 chart (= segOverviewChart 实例)
+      // 联动: 读 chart (segOverviewChart) 的 visibility → 同步 segMergedChart (Chart.getChart 拿)
+      // 触发: legend.onClick (Shift+单击图例 / 普通单击切换) → 不走 _soloSeg() 函数
+      window._syncSegMergedFromOverview = function() {
+        const mgCanvas = document.querySelector('[data-chart-key="segMergedChart"]');
+        const mgChart = mgCanvas ? Chart.getChart(mgCanvas) : null;
+        if (!mgChart) return;
+        chart.data.datasets.forEach(function(_, idx) {
+          mgChart.setDatasetVisibility(idx, chart.isDatasetVisible(idx));
+        });
+        mgChart.update();
       };
     };
 
