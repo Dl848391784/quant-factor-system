@@ -926,6 +926,42 @@ td code {
   height: 32px;
   opacity: 0.85;
 }
+
+/* === v0.4.8 R32 (perf, Stage 2.2): 30×12 矩阵 <details> 深色样式 override ===
+   仅 .matrix-fold 类生效, 不影响其他 <details> (R30-4c daily_rates 等) === */
+details.matrix-fold > summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  background: rgba(22, 27, 34, 0.5);
+  border-radius: 6px;
+  border: 1px solid #21262d;
+  color: #f0f0f5;
+  font-weight: 600;
+  font-size: 13px;
+  list-style: none;  /* 隐藏默认三角 (Safari 用 ::-webkit-details-marker, Firefox/Chrome 用 list-style) */
+  margin: 12px 0 8px 0;
+  transition: background 0.15s ease;
+}
+details.matrix-fold > summary::-webkit-details-marker {
+  display: none;  /* WebKit 旧版 */
+}
+details.matrix-fold > summary::before {
+  content: '▶ ';
+  display: inline-block;
+  transition: transform 0.15s ease;
+  margin-right: 4px;
+}
+details.matrix-fold[open] > summary::before {
+  transform: rotate(90deg);  /* 展开时 ▶ 转 ▼ */
+}
+details.matrix-fold > summary:hover {
+  background: rgba(31, 111, 235, 0.15);
+  border-color: rgba(88, 166, 255, 0.6);
+}
+details.matrix-fold[open] > summary {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
 </style>
 </head>
 <body>
@@ -1066,6 +1102,58 @@ td code {
 
 <!-- 顶部滚动进度条 -->
 <div class="scroll-progress" id="scrollProgress"></div>
+
+<!-- v0.4.8 R31 (perf, Stage 2.1): Chart.js IntersectionObserver 懒渲染
+     工厂注册表 + IntersectionObserver (rootMargin: 200px 提前触发)
+     _section_*.html 注册 window._chartFactories[key](canvas) 而非 new Chart(canvas) -->
+<script>
+window._chartFactories = {};
+window._renderChart = function(key) {
+  var el = document.querySelector('[data-chart-key="' + key + '"]');
+  if (!el || el._chart_rendered === true) return;
+  var f = window._chartFactories[key];
+  if (!f) return;
+  f(el);
+  el._chart_rendered = true;
+};
+(function() {
+  var observer = null;
+  function ensureObserver() {
+    if (observer) return observer;
+    if (!('IntersectionObserver' in window)) {
+      // 无 IO: 立即渲染所有
+      document.querySelectorAll('[data-chart-key]').forEach(function(el) {
+        window._renderChart(el.dataset.chartKey);
+      });
+      return null;
+    }
+    observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(e) {
+        if (e.isIntersecting) {
+          window._renderChart(e.target.dataset.chartKey);
+          observer.unobserve(e.target);  // 渲染一次即停
+        }
+      });
+    }, { rootMargin: '200px 0px' });  // 提前 200px 渲染避免用户感知延迟
+    return observer;
+  }
+  window.addEventListener('DOMContentLoaded', function() {
+    var obs = ensureObserver();
+    document.querySelectorAll('[data-chart-key]').forEach(function(el) {
+      if (obs) {
+        obs.observe(el);
+        // 已位于视口的立即渲染
+        var r = el.getBoundingClientRect();
+        if (r.top < window.innerHeight && r.bottom > 0) {
+          window._renderChart(el.dataset.chartKey);
+        }
+      } else {
+        window._renderChart(el.dataset.chartKey);
+      }
+    });
+  });
+})();
+</script>
 
 <script>
 // 1) 回到顶部按钮 + 顶部滚动进度条

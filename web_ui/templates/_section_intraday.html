@@ -41,11 +41,11 @@ R24-3 现代感强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现�
   <div class="chart-grid-2">
     <div class="chart-wrap">
       <div class="chart-title">操作建议分布 (开盘卖 / 持有 / 观望)</div>
-      <canvas id="intraActionChart" height="280"></canvas>
+      <canvas id="intraActionChart" data-chart-key="intraActionChart" height="280"></canvas>
     </div>
     <div class="chart-wrap">
       <div class="chart-title">操作信号分布 (高开 / 低开 / 平开 等)</div>
-      <canvas id="intraSignalChart" height="280"></canvas>
+      <canvas id="intraSignalChart" data-chart-key="intraSignalChart" height="280"></canvas>
     </div>
   </div>
   <script>
@@ -68,21 +68,24 @@ R24-3 现代感强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现�
       acc[k] = (acc[k] || 0) + 1;
       return acc;
     }, {});
-    new Chart(document.getElementById('intraActionChart'), {
-      type: 'doughnut',
-      data: {
-        labels: Object.keys(actCounts),
-        datasets: [{ data: Object.values(actCounts), backgroundColor: PALETTE.slice(0, Object.keys(actCounts).length), borderColor: '#0d1117', borderWidth: 2 }]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: {
-          legend: { position: 'bottom', labels: { color: SENTRY.text } },
-          tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.parsed} 只 (${((ctx.parsed / rows.length) * 100).toFixed(0)}%)` } }
+    // === R31: 注册 factory + IntersectionObserver 懒渲染 (WebUi Stage 2.1 perf) ===
+    window._chartFactories['intraActionChart'] = function(canvas) {
+      new Chart(canvas, {
+        type: 'doughnut',
+        data: {
+          labels: Object.keys(actCounts),
+          datasets: [{ data: Object.values(actCounts), backgroundColor: PALETTE.slice(0, Object.keys(actCounts).length), borderColor: '#0d1117', borderWidth: 2 }]
         },
-        cutout: '60%'
-      }
-    });
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom', labels: { color: SENTRY.text } },
+            tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.parsed} 只 (${((ctx.parsed / rows.length) * 100).toFixed(0)}%)` } }
+          },
+          cutout: '60%'
+        }
+      });
+    };
 
     // 图 2: 操作信号横向柱状 (按出现次数排序)
     const sigCounts = rows.reduce((acc, r) => {
@@ -91,21 +94,24 @@ R24-3 现代感强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现�
       return acc;
     }, {});
     const sigEntries = Object.entries(sigCounts).sort((a, b) => b[1] - a[1]);
-    new Chart(document.getElementById('intraSignalChart'), {
-      type: 'bar',
-      data: {
-        labels: sigEntries.map(e => e[0]),
-        datasets: [{ data: sigEntries.map(e => e[1]), backgroundColor: SENTRY.neutral, borderRadius: 4, barThickness: 20 }]
-      },
-      options: {
-        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.parsed.y} 只` } } },
-        scales: {
-          x: { beginAtZero: true, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, stepSize: 1 } },
-          y: { grid: { display: false }, ticks: { color: SENTRY.text } }
+    // === R31: 注册 factory + IntersectionObserver 懒渲染 (WebUi Stage 2.1 perf) ===
+    window._chartFactories['intraSignalChart'] = function(canvas) {
+      new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: sigEntries.map(e => e[0]),
+          datasets: [{ data: sigEntries.map(e => e[1]), backgroundColor: SENTRY.neutral, borderRadius: 4, barThickness: 20 }]
+        },
+        options: {
+          indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.parsed.y} 只` } } },
+          scales: {
+            x: { beginAtZero: true, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, stepSize: 1 } },
+            y: { grid: { display: false }, ticks: { color: SENTRY.text } }
+          }
         }
-      }
-    });
+      });
+    };
   })();
   </script>
 

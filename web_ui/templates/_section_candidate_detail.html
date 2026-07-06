@@ -54,11 +54,11 @@ R24-2 强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现代感元�
   <div class="chart-grid-2">
     <div class="chart-wrap">
       <div class="chart-title">30 段合并胜率 (按段号排序, BEST 蓝色高亮)</div>
-      <canvas id="s10WinChart" height="280"></canvas>
+      <canvas id="s10WinChart" data-chart-key="s10WinChart" height="280"></canvas>
     </div>
     <div class="chart-wrap">
       <div class="chart-title">30 段候选数分布 (绿=BEST 段)</div>
-      <canvas id="s10NStockChart" height="280"></canvas>
+      <canvas id="s10NStockChart" data-chart-key="s10NStockChart" height="280"></canvas>
     </div>
   </div>
   <script>
@@ -79,33 +79,39 @@ R24-2 强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现代感元�
 
     // 图 1: 胜率柱状
     const winColors = sorted.map(s => s.label === bestLabel ? SENTRY.best : (wins[sorted.indexOf(s)] >= 55 ? SENTRY.pos : (wins[sorted.indexOf(s)] >= 45 ? SENTRY.warn : SENTRY.neg)));
-    new Chart(document.getElementById('s10WinChart'), {
-      type: 'bar',
-      data: { labels, datasets: [{ data: wins, backgroundColor: winColors, borderRadius: 3, barThickness: 12 }] },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `胜率 = ${ctx.parsed.y.toFixed(1)}%${ctx.label === bestLabel ? ' ⭐' : ''}` } } },
-        scales: {
-          x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 9 } } },
-          y: { min: 0, max: 100, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } }
+    // === R31: 注册 factory + IntersectionObserver 懒渲染 (WebUi Stage 2.1 perf) ===
+    window._chartFactories['s10WinChart'] = function(canvas) {
+      new Chart(canvas, {
+        type: 'bar',
+        data: { labels, datasets: [{ data: wins, backgroundColor: winColors, borderRadius: 3, barThickness: 12 }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `胜率 = ${ctx.parsed.y.toFixed(1)}%${ctx.label === bestLabel ? ' ⭐' : ''}` } } },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 9 } } },
+            y: { min: 0, max: 100, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } }
+          }
         }
-      }
-    });
+      });
+    };
 
     // 图 2: 候选数柱状
     const nsColors = sorted.map(s => s.label === bestLabel ? SENTRY.best : (nstocks[sorted.indexOf(s)] >= 3 ? SENTRY.pos : (nstocks[sorted.indexOf(s)] >= 1 ? SENTRY.warn : SENTRY.neg)));
-    new Chart(document.getElementById('s10NStockChart'), {
-      type: 'bar',
-      data: { labels, datasets: [{ data: nstocks, backgroundColor: nsColors, borderRadius: 3, barThickness: 12 }] },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `候选数 = ${ctx.parsed.y}${ctx.label === bestLabel ? ' ⭐' : ''}` } } },
-        scales: {
-          x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 9 } } },
-          y: { beginAtZero: true, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, stepSize: 1 } }
+    // === R31: 注册 factory + IntersectionObserver 懒渲染 (WebUi Stage 2.1 perf) ===
+    window._chartFactories['s10NStockChart'] = function(canvas) {
+      new Chart(canvas, {
+        type: 'bar',
+        data: { labels, datasets: [{ data: nstocks, backgroundColor: nsColors, borderRadius: 3, barThickness: 12 }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `候选数 = ${ctx.parsed.y}${ctx.label === bestLabel ? ' ⭐' : ''}` } } },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 9 } } },
+            y: { beginAtZero: true, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, stepSize: 1 } }
+          }
         }
-      }
-    });
+      });
+    };
   })();
   </script>
 

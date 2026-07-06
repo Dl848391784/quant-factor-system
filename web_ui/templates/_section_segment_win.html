@@ -42,14 +42,15 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
   </div>
 
   {# === R23-7 Chart.js: 30 段胜率 + 均收双图 === #}
+  {# v0.4.8 R31 (perf, Stage 2.1): 加 data-chart-key + IntersectionObserver 懒渲染 #}
   <div class="chart-grid-2">
     <div class="chart-wrap">
       <div class="chart-title">30 段胜率分布 (柱状, 颜色按 |胜率|)</div>
-      <canvas id="segBarChart" height="280"></canvas>
+      <canvas id="segBarChart" data-chart-key="segBarChart" height="280"></canvas>
     </div>
     <div class="chart-wrap">
       <div class="chart-title">30 段均收 (line, 红=负绿=正)</div>
-      <canvas id="segLineChart" height="280"></canvas>
+      <canvas id="segLineChart" data-chart-key="segLineChart" height="280"></canvas>
     </div>
   </div>
   <script>
@@ -68,42 +69,46 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
     const winColors = wins.map(w => w >= 60 ? SENTRY.pos : (w <= 40 ? SENTRY.neg : SENTRY.warn));
     const retColors = rets.map(r => r >= 0 ? SENTRY.pos : SENTRY.neg);
 
-    new Chart(document.getElementById('segBarChart'), {
-      type: 'bar',
-      data: { labels, datasets: [{ data: wins, backgroundColor: winColors, borderRadius: 3, barThickness: 12 }] },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `胜率 = ${ctx.parsed.y.toFixed(1)}%` } } },
-        scales: {
-          x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 9 } } },
-          y: { min: 0, max: 100, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } }
+    // === R31: 注册 factory + IntersectionObserver 懒渲染 ===
+    window._chartFactories['segBarChart'] = function(canvas) {
+      new Chart(canvas, {
+        type: 'bar',
+        data: { labels, datasets: [{ data: wins, backgroundColor: winColors, borderRadius: 3, barThickness: 12 }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `胜率 = ${ctx.parsed.y.toFixed(1)}%` } } },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 9 } } },
+            y: { min: 0, max: 100, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } }
+          }
         }
-      }
-    });
-
-    new Chart(document.getElementById('segLineChart'), {
-      type: 'line',
-      data: { labels, datasets: [{
-        data: rets,
-        borderColor: SENTRY.neutral,
-        backgroundColor: 'rgba(88,166,255,0.1)',
-        pointBackgroundColor: retColors,
-        pointBorderColor: '#fff',
-        pointBorderWidth: 1,
-        pointRadius: 5,
-        pointHoverRadius: 8,
-        tension: 0.3,
-        fill: true
-      }] },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `均收 = ${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y.toFixed(2)}%` } } },
-        scales: {
-          x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 9 } } },
-          y: { grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } }
+      });
+    };
+    window._chartFactories['segLineChart'] = function(canvas) {
+      new Chart(canvas, {
+        type: 'line',
+        data: { labels, datasets: [{
+          data: rets,
+          borderColor: SENTRY.neutral,
+          backgroundColor: 'rgba(88,166,255,0.1)',
+          pointBackgroundColor: retColors,
+          pointBorderColor: '#fff',
+          pointBorderWidth: 1,
+          pointRadius: 5,
+          pointHoverRadius: 8,
+          tension: 0.3,
+          fill: true
+        }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `均收 = ${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y.toFixed(2)}%` } } },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 9 } } },
+            y: { grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } }
+          }
         }
-      }
-    });
+      });
+    };
   })();
   </script>
 
@@ -178,7 +183,7 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
     <span class="corr-toolbar-hint" id="segOverviewCount">12 选股日 (默认 12)</span>
   </div>
   <div class="chart-wrap">
-    <canvas id="segOverviewChart" height="280"></canvas>
+    <canvas id="segOverviewChart" data-chart-key="segOverviewChart" height="280"></canvas>
   </div>
   <script>
   (function() {
@@ -204,32 +209,35 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
       borderWidth: 1.5,
       tension: 0.3
     }));
+    // === R31: 注册 factory + IntersectionObserver 懒渲染 ===
     // R30-3: 默认 12, 按钮切 12/30/90/全部
-    const chart = new Chart(document.getElementById('segOverviewChart'), {
-      type: 'line',
-      data: { labels: allDates.slice(-12), datasets },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { position: 'right', display: !isMobile, labels: { color: SENTRY.text, font: { size: 9 }, boxWidth: 8 } }, tooltip: { mode: 'index', intersect: false } },
-        scales: {
-          x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: isMobile ? 8 : 10 } } },
-          y: { min: 0, max: 100, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } }
-        },
-        interaction: { mode: 'nearest', intersect: false }
-      }
-    });
-    // R30-3: 范围切换函数 (datasets 切 .data 长度, labels 同步切)
-    window._segOverview = function(n) {
-      const len = Math.min(n, allDates.length);
-      const sliced = allDates.slice(-len);
-      chart.data.labels = sliced;
-      chart.data.datasets.forEach((ds, i) => {
-        const fullData = (sortedSegs[i].win_rates || []).map(v => parseFloat(v) || 0);
-        ds.data = fullData.slice(-len);
+    window._chartFactories['segOverviewChart'] = function(canvas) {
+      const chart = new Chart(canvas, {
+        type: 'line',
+        data: { labels: allDates.slice(-12), datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'right', display: !isMobile, labels: { color: SENTRY.text, font: { size: 9 }, boxWidth: 8 } }, tooltip: { mode: 'index', intersect: false } },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: isMobile ? 8 : 10 } } },
+            y: { min: 0, max: 100, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } }
+          },
+          interaction: { mode: 'nearest', intersect: false }
+        }
       });
-      chart.update();
-      const countEl = document.getElementById('segOverviewCount');
-      if (countEl) countEl.textContent = n >= 999 ? '全部 ' + allDates.length + ' 选股日' : '最近 ' + len + ' 选股日';
+      // R30-3: 范围切换函数 (datasets 切 .data 长度, labels 同步切)
+      window._segOverview = function(n) {
+        const len = Math.min(n, allDates.length);
+        const sliced = allDates.slice(-len);
+        chart.data.labels = sliced;
+        chart.data.datasets.forEach((ds, i) => {
+          const fullData = (sortedSegs[i].win_rates || []).map(v => parseFloat(v) || 0);
+          ds.data = fullData.slice(-len);
+        });
+        chart.update();
+        const countEl = document.getElementById('segOverviewCount');
+        if (countEl) countEl.textContent = n >= 999 ? '全部 ' + allDates.length + ' 选股日' : '最近 ' + len + ' 选股日';
+      };
     };
   })();
   </script>
@@ -241,7 +249,7 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
   <h4>{{ best_seg.label }} 逐日胜率 ({{ txt_s9_matrix.daily_rates | length }} 个选股日)</h4>
   <div class="chart-wrap">
     <div class="chart-title">{{ best_seg.label }} 逐日胜率 (柱状, 颜色按胜率强弱)</div>
-    <canvas id="segDailyChart" height="220"></canvas>
+    <canvas id="segDailyChart" data-chart-key="segDailyChart" height="220"></canvas>
   </div>
   <details class="muted" style="margin: 8px 0 16px 0;">
     <summary>展开 {{ best_seg.label }} 逐日胜率明细表 (12 行)</summary>
@@ -274,22 +282,29 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
     });
     const SENTRY = { pos: '#3fb950', neg: '#f85149', warn: '#f0883e', grid: 'rgba(139,148,158,0.15)', text: '#f0f0f5' };
     const colors = vals.map(v => v >= 60 ? SENTRY.pos : (v < 40 ? SENTRY.neg : SENTRY.warn));
-    new Chart(document.getElementById('segDailyChart'), {
-      type: 'bar',
-      data: { labels: dates, datasets: [{ data: vals, backgroundColor: colors, borderRadius: 3, barThickness: 18 }] },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `胜率 = ${ctx.parsed.y.toFixed(1)}%` } } },
-        scales: {
-          x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 9 } } },
-          y: { min: 0, max: 100, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } }
+    // === R31: 注册 factory + IntersectionObserver 懒渲染 ===
+    window._chartFactories['segDailyChart'] = function(canvas) {
+      new Chart(canvas, {
+        type: 'bar',
+        data: { labels: dates, datasets: [{ data: vals, backgroundColor: colors, borderRadius: 3, barThickness: 18 }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `胜率 = ${ctx.parsed.y.toFixed(1)}%` } } },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 9 } } },
+            y: { min: 0, max: 100, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } }
+          }
         }
-      }
-    });
+      });
+    };
   })();
   </script>
   {% endif %}
   {% endif %}
+  {# === R32 (perf, Stage 2.2): 30×12 矩阵折叠为 <details> 默认折叠 ===
+     节省 360 cells DOM 树, HTML 估计减 7.5KB, JS 减少 ~50ms 解析 === #}
+  <details class="matrix-fold">
+    <summary>▼ 展开 30 段 × {{ txt_s9_matrix.dates | length }} 选股日 完整胜率矩阵 (热力图, {{ txt_s9_matrix.segments | length }} 段)</summary>
   <div class="data-table-wrap">
   <table class="heatmap">
     <thead>
@@ -319,4 +334,5 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
     </tbody>
   </table>
   </div>
+  </details>
 {% endif %}

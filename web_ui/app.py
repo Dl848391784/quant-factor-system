@@ -33,7 +33,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from flask import Flask, abort, redirect, render_template  # noqa: E402
+from flask import Flask, abort, redirect, render_template, request  # noqa: E402
 
 # 复用 summary 数据加载器（web_ui 不直接读 Parquet）
 # v0.4.8: H1.1 严守, 只调 data_loaders 已有接口, 不修改 data_loaders
@@ -254,6 +254,14 @@ def show_report_latest():
         logger.error("无法定位最新报告日期")
         abort(404)
     return redirect(f"/report/{result['meta']['selection_date']}")
+
+
+@app.after_request
+def _add_cache_control(response):
+    """R33 (perf, Stage 2.3): /report/<date> 缓存 5 分钟让浏览器走 304 重访命中"""
+    if request.path.startswith("/report/"):
+        response.headers["Cache-Control"] = "private, max-age=300"
+    return response
 
 
 if __name__ == "__main__":

@@ -60,11 +60,11 @@ R24-3 现代感强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现�
   <div class="chart-grid-2">
     <div class="chart-wrap">
       <div class="chart-title">数据源状态分布 (✅ / ⚠️ / ❌)</div>
-      <canvas id="freshStatusChart" height="280"></canvas>
+      <canvas id="freshStatusChart" data-chart-key="freshStatusChart" height="280"></canvas>
     </div>
     <div class="chart-wrap">
       <div class="chart-title">数据源文件数 Top 10</div>
-      <canvas id="freshFileChart" height="280"></canvas>
+      <canvas id="freshFileChart" data-chart-key="freshFileChart" height="280"></canvas>
     </div>
   </div>
   <script>
@@ -87,43 +87,49 @@ R24-3 现代感强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现�
     const order = ['正常', '告警', '失败', '未知'];
     const labels = order.filter(k => statusCounts[k] !== undefined);
     if (labels.length === 0) labels.push('无数据');
-    new Chart(document.getElementById('freshStatusChart'), {
-      type: 'doughnut',
-      data: {
-        labels,
-        datasets: [{
-          data: labels.map(k => statusCounts[k] || 0),
-          backgroundColor: [SENTRY.pos, '#f0883e', SENTRY.warn, '#8b949e'],
-          borderColor: '#0d1117', borderWidth: 2
-        }]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: {
-          legend: { position: 'bottom', labels: { color: SENTRY.text } },
-          tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.parsed} 项 (${((ctx.parsed / all.length) * 100).toFixed(0)}%)` } }
+    // === R31: 注册 factory + IntersectionObserver 懒渲染 (WebUi Stage 2.1 perf) ===
+    window._chartFactories['freshStatusChart'] = function(canvas) {
+      new Chart(canvas, {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{
+            data: labels.map(k => statusCounts[k] || 0),
+            backgroundColor: [SENTRY.pos, '#f0883e', SENTRY.warn, '#8b949e'],
+            borderColor: '#0d1117', borderWidth: 2
+          }]
         },
-        cutout: '65%'
-      }
-    });
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom', labels: { color: SENTRY.text } },
+            tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.parsed} 项 (${((ctx.parsed / all.length) * 100).toFixed(0)}%)` } }
+          },
+          cutout: '65%'
+        }
+      });
+    };
 
     // 图 2: 文件数 Top 10 横向柱状
     const top = [...all].filter(r => typeof r.file_count === 'number').sort((a, b) => b.file_count - a.file_count).slice(0, 10);
-    new Chart(document.getElementById('freshFileChart'), {
-      type: 'bar',
-      data: {
-        labels: top.map(r => r.source || 'unknown'),
-        datasets: [{ data: top.map(r => r.file_count), backgroundColor: SENTRY.pos, borderRadius: 4, barThickness: 16 }]
-      },
-      options: {
-        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.parsed.x} 文件` } } },
-        scales: {
-          x: { beginAtZero: true, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, stepSize: 1 } },
-          y: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 10 } } }
+    // === R31: 注册 factory + IntersectionObserver 懒渲染 (WebUi Stage 2.1 perf) ===
+    window._chartFactories['freshFileChart'] = function(canvas) {
+      new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: top.map(r => r.source || 'unknown'),
+          datasets: [{ data: top.map(r => r.file_count), backgroundColor: SENTRY.pos, borderRadius: 4, barThickness: 16 }]
+        },
+        options: {
+          indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.parsed.x} 文件` } } },
+          scales: {
+            x: { beginAtZero: true, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, stepSize: 1 } },
+            y: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: 10 } } }
+          }
         }
-      }
-    });
+      });
+    };
   })();
   </script>
 
