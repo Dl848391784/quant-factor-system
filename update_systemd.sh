@@ -11,15 +11,16 @@ After=network.target
 Type=simple
 User=admin
 WorkingDirectory=/home/admin/projects/factor_ic_analyzer
-# 启动前杀掉所有旧进程（防止叠加）
-ExecStartPre=/usr/bin/pkill -9 -f "python.*web_app.py"
-ExecStartPre=/usr/bin/sleep 2
-ExecStart=/usr/bin/python3 web_app.py
+# R34 fix: 真实入口是 web_ui/app.py (旧配置 web_app.py 不存在)
+# venv 才有 flask, /usr/bin/python3 没有
+ExecStart=/home/admin/projects/factor_ic_analyzer/venv/bin/python web_ui/app.py
+# PIPELINE_ALIAS=ob_quality 是 web_ui/app.py 默认 (硬编码), 无需 Environment
+TimeoutStartSec=90
 Restart=always
 RestartSec=30
-MemoryMax=2.5G
-# 内存警告阈值（超过2G时警告）
-MemoryHigh=2G
+ExecStopPost=/bin/bash -c 'pkill -9 -f "web_ui/app.py" || true'
+MemoryMax=4G
+MemoryHigh=3G
 
 [Install]
 WantedBy=multi-user.target
