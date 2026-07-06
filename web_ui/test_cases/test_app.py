@@ -331,6 +331,15 @@ def mock_r38_merged_win_trend():
         yield
 
 
+@pytest.fixture(autouse=True)
+def mock_r39_pl_ratio_trend():
+    """v0.4.8 R39 (Stage 6): 全局 mock load_pl_ratio_trend = None
+    默认 segPlRatioChart 不渲染, 测试 R39 渲染时显式 override
+    """
+    with patch("web_ui.app.load_pl_ratio_trend", return_value=None):
+        yield
+
+
 def test_segment_win_renders_top5(client, mock_obq_full_result):
     """v0.4.8 R3: 9·30 分段胜率渲染 (30 段 → Top 5 展示)"""
     decile_mock = {
@@ -470,6 +479,89 @@ def test_segment_win_merged_chart_skipped_when_no_data(client, mock_obq_full_res
     # 新组件不存在
     assert "segMergedChart" not in body
     assert "_segMergedOverview" not in body
+
+
+def test_segment_win_renders_pl_ratio_chart(client, mock_obq_full_result):
+    """v0.4.8 R39 (Stage 6): 30 段每日盈亏比趋势 (segPlRatioChart) 渲染
+    数据源: composite_daily.parquet + master parquet, 算法 wins.mean/|losses.mean|
+    用户选项 B: 30 段折线 + 1 条粗黑虚线 30 段当日平均
+    """
+    decile_mock = {
+        "selection_date": "2026-07-02",
+        "trade_date": "2026-07-03",
+        "n_total": 88,
+        "segments": [
+            {"label": f"D{i}", "n": 3, "win_rate": 60.0 + i, "avg_ret": 0.5,
+             "pl_ratio": 1.2, "wins": 2, "losses": 1}
+            for i in range(1, 31)
+        ],
+    }
+    s9_mock = {
+        "dates": ["06-25", "06-26", "06-27"],
+        "segments": [
+            {"label": f"S{i}", "win_rates": [55.0, 60.0, 58.0], "merged": 59.2}
+            for i in range(1, 31)
+        ],
+        "best_segment": {"label": "S7", "merged": 59.6},
+    }
+    pl_ratio_mock = {
+        "dates": ["06-15", "06-16", "06-17"],
+        "segments": [
+            {"label": f"S{i}", "pl_ratios": [1.23, 0.98, 1.45], "avg_pl_ratio": 1.22}
+            for i in range(1, 31)
+        ],
+        "avg_line": [1.50, 1.45, 1.40],
+        "source": "parquet",
+    }
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_decile_stats", return_value=decile_mock),
+        patch("web_ui.app.parse_obq_s9", return_value=s9_mock),
+        patch("web_ui.app.load_pl_ratio_trend", return_value=pl_ratio_mock),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 新组件渲染
+    assert "segPlRatioChart" in body  # canvas id
+    assert "30 段每日盈亏比趋势概览" in body  # h3 标题
+    # 数据契约 (mock 的 pl_ratios 进入 HTML)
+    assert "pl_ratios" in body
+    assert "avg_line" in body
+    # 工厂注册 (R31 lazy render)
+    assert "_chartFactories['segPlRatioChart']" in body
+    # 30 段 + 1 条粗黑虚线平均线
+    assert "30 段当日平均" in body  # 平均线 label
+    assert "borderDash" in body  # 虚线
+    assert "borderColor: '#000000'" in body  # 黑色
+    # §3c sub-trigger 5: 共用 toolbar 范围切换 + solo 同步
+    assert "_plRatioOverview" in body
+    assert "_soloPlRatio" in body
+    # §3c sub-trigger 5: 上方 _segOverview / _soloSeg 调用新函数
+    assert "window._plRatioOverview" in body
+    assert "window._soloPlRatio" in body
+    # R38a + R39 联动 sync (Shift+单击图例路径)
+    assert "_syncSegPlRatioFromOverview" in body
+    # 数据源声明 (muted)
+    assert "composite_rolling_icir_weight_1d_daily.parquet" in body
+
+
+def test_segment_win_pl_ratio_chart_skipped_when_no_data(client, mock_obq_full_result):
+    """v0.4.8 R39 (Stage 6): pl_ratio_trend=None 时 segPlRatioChart 不渲染
+    (与 R38 segMergedChart fallback 模式一致)
+    """
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_decile_stats", return_value=None),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 新组件不存在
+    assert "segPlRatioChart" not in body
+    assert "_plRatioOverview" not in body
 
 
 def test_intraday_renders_rows(client, mock_obq_full_result):

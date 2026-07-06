@@ -60,6 +60,10 @@ from summary.report.freshness_check import (  # noqa: E402
 # v0.4.8 R2a: web_ui 内部实现的辅助模块 (H1.1 严守: 不修改 data_loaders)
 from web_ui.common.lr_training_status import load_status as load_lr_status  # noqa: E402
 
+# v0.4.8 R39 (Stage 6): 30 段每日盈亏比趋势 (从 master + composite daily parquet 算 pl_ratio)
+# H1.1 严守 + §18 fork pattern: web_ui 内部读 parquet, 不修改 data_loaders / summary 模块
+from web_ui.common.pl_ratio_db import load_pl_ratio_trend  # noqa: E402
+
 # v0.4.8 R38 (Stage 6): 30 段合并胜率趋势概览 (从 segment_win_rates.parquet 算 cumsum)
 # H1.1 严守 + §18 fork pattern: web_ui 内部读 parquet, 不修改 summary 模块
 from web_ui.common.segment_win_db import load_merged_win_trend  # noqa: E402
@@ -182,6 +186,13 @@ def show_report(date: str):
     except Exception as e:
         logger.warning("load_merged_win_trend 失败: %s", e)
 
+    # v0.4.8 R39 (Stage 6): 30 段每日盈亏比趋势 (从 master + composite daily parquet 算 pl_ratio)
+    pl_ratio_trend: dict | None = None
+    try:
+        pl_ratio_trend = load_pl_ratio_trend(logger=logger)
+    except Exception as e:
+        logger.warning("load_pl_ratio_trend 失败: %s", e)
+
     # v0.4.8 R7: 数据完整性检查 (零·)
     data_results: list[dict] = []
     derived_results: list[dict] = []
@@ -239,6 +250,7 @@ def show_report(date: str):
         txt_s9_matrix=txt_s9_matrix,
         txt_s10_segments=txt_s10_segments,
         merged_win_trend=merged_win_trend,
+        pl_ratio_trend=pl_ratio_trend,
         intraday_fallback=intraday_fallback,
         data_results=data_results,
         derived_results=derived_results,

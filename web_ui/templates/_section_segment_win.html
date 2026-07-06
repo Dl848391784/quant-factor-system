@@ -203,6 +203,16 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
     <canvas id="segMergedChart" data-chart-key="segMergedChart" height="280"></canvas>
   </div>
   {% endif %}
+
+  {# === v0.4.8 R39 (Stage 6): 30 段每日盈亏比趋势概览 (与上方共用 toolbar, 30 段折线 + 1 条粗黑虚线 30 段均值) === #}
+  {# 数据源: composite_daily.parquet + master parquet · 算法 wins.mean / |losses.mean| (与 load_decile_stats 一致) #}
+  {% if pl_ratio_trend and pl_ratio_trend.get("segments") %}
+  <h3>30 段每日盈亏比趋势概览 (pl_ratio = wins.mean / |losses.mean|)</h3>
+  <p class="muted">数据源: comprehensive_factor/result/ob_quality/composite_rolling_icir_weight_1d_daily.parquet + data_fetchers/result/ob_quality/factor_ic_data.parquet · 算法 wins.mean/|losses.mean| (与 load_decile_stats 一致) · 共用上方 toolbar (12/30/90/全部切换 + 段选择器)</p>
+  <div class="chart-wrap">
+    <canvas id="segPlRatioChart" data-chart-key="segPlRatioChart" height="280"></canvas>
+  </div>
+  {% endif %}
   <script>
   (function() {
     // R30-2 inspector fix: txt_s9_matrix.segments[].win_rates[] 是 30 段 × N 选股日完整数据
@@ -275,6 +285,8 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
                 // 根因: R35 legend.onClick 自定义 handler 没走 _soloSeg() 函数, R38 只补了 _soloSeg 函数末尾
                 // → select 路径有联动, Shift+单击图例路径没联动. 这里直接调 sync 函数
                 if (window._syncSegMergedFromOverview) window._syncSegMergedFromOverview();
+                // === v0.4.8 R39 (Stage 6, §3c sub-trigger 5): 同步联动 segPlRatioChart
+                if (window._syncSegPlRatioFromOverview) window._syncSegPlRatioFromOverview();
               }
             },
             tooltip: { mode: 'index', intersect: false }
@@ -298,6 +310,8 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
         chart.update();
         // === v0.4.8 R38 (Stage 6, §3c reverse trigger): 同步刷新 segMergedChart (新图, 共用 toolbar) ===
         if (window._segMergedOverview) window._segMergedOverview(n);
+        // === v0.4.8 R39 (Stage 6, §3c sub-trigger 5): 同步刷新 segPlRatioChart (新图, 共用 toolbar) ===
+        if (window._plRatioOverview) window._plRatioOverview(n);
         const countEl = document.getElementById('segOverviewCount');
         if (countEl) countEl.textContent = n >= 999 ? '全部 ' + allDates.length + ' 选股日' : '最近 ' + len + ' 选股日';
       };
@@ -317,6 +331,8 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
         }
         // === v0.4.8 R38 (Stage 6, §3c reverse trigger): 同步 solo segMergedChart ===
         if (window._soloSegMerged) window._soloSegMerged(label);
+        // === v0.4.8 R39 (Stage 6, §3c sub-trigger 5): 同步 solo segPlRatioChart ===
+        if (window._soloPlRatio) window._soloPlRatio(label);
         chart.update();
       };
       // === v0.4.8 R38a (Stage 6 bugfix): 从 segOverviewChart visibility 同步到 segMergedChart
@@ -331,6 +347,19 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
           mgChart.setDatasetVisibility(idx, chart.isDatasetVisible(idx));
         });
         mgChart.update();
+      };
+      // === v0.4.8 R39 (Stage 6, §3c sub-trigger 5): 从 segOverviewChart visibility 同步到 segPlRatioChart
+      // 注意: segPlRatioChart 有 31 个 datasets (30 段 + 1 平均线), 平均线 dataset index = 30
+      // 同步规则: 段 idx 对应 plRatio idx (0-29), 平均线 (idx=30) 永远 visible
+      window._syncSegPlRatioFromOverview = function() {
+        const pCanvas = document.querySelector('[data-chart-key="segPlRatioChart"]');
+        const pChart = pCanvas ? Chart.getChart(pCanvas) : null;
+        if (!pChart) return;
+        chart.data.datasets.forEach(function(_, idx) {
+          if (idx === 30) return;  // 平均线, 永远显示
+          pChart.setDatasetVisibility(idx, chart.isDatasetVisible(idx));
+        });
+        pChart.update();
       };
     };
 
@@ -386,6 +415,86 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
           mChart.data.datasets.forEach((_, idx) => mChart.setDatasetVisibility(idx, idx === ci));
         }
         mChart.update();
+      };
+    };
+    {% endif %}
+
+    // === v0.4.8 R39 (Stage 6): segPlRatioChart factory (30 段每日盈亏比趋势, 共用上方 toolbar) ===
+    {% if pl_ratio_trend and pl_ratio_trend.get("segments") %}
+    const plSegs = {{ pl_ratio_trend.segments | tojson }} || [];
+    const plDates = {{ pl_ratio_trend.dates | tojson }} || [];
+    const plAvgLine = {{ pl_ratio_trend.avg_line | tojson }} || [];
+    const sortedPlSegs = [...plSegs].sort((a, b) => parseInt((a.label||'S0').replace(/\D/g, '')) - parseInt((b.label||'S0').replace(/\D/g, '')));
+    // 30 段折线 + 1 条粗黑虚线 (30 段当日算术平均, R39-B 用户选项)
+    const plDatasets = sortedPlSegs.slice(0, 30).map((s, i) => ({
+      label: s.label,
+      data: (s.pl_ratios || []).map(v => parseFloat(v) || 0),
+      borderColor: COLORS[i % COLORS.length],
+      backgroundColor: COLORS[i % COLORS.length] + '20',
+      pointRadius: isMobile ? 0 : 0,
+      pointHoverRadius: 4,
+      borderWidth: 1.5,
+      tension: 0.3
+    }));
+    // 30 段当日平均线 (粗黑虚线, 排第 31 = 最显眼)
+    plDatasets.push({
+      label: '30 段当日平均',
+      data: plAvgLine.map(v => parseFloat(v) || 0),
+      borderColor: '#000000',
+      backgroundColor: 'rgba(0,0,0,0)',
+      pointRadius: isMobile ? 0 : 2,
+      pointHoverRadius: 5,
+      borderWidth: 3,
+      borderDash: [8, 4],
+      tension: 0.2
+    });
+    window._chartFactories['segPlRatioChart'] = function(canvas) {
+      const pChart = new Chart(canvas, {
+        type: 'line',
+        data: { labels: plDates.slice(-12), datasets: plDatasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { mode: 'index', intersect: false }
+          },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: isMobile ? 8 : 10 } } },
+            y: { grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v.toFixed(2) } }
+          },
+          interaction: { mode: 'nearest', intersect: false }
+        }
+      });
+      // === R39 (Stage 6, §3c reverse trigger): 共用 toolbar 范围切换 ===
+      window._plRatioOverview = function(n) {
+        const len = Math.min(n, plDates.length);
+        pChart.data.labels = plDates.slice(-len);
+        pChart.data.datasets.forEach((ds, i) => {
+          // 最后 1 个 dataset = 平均线 (avg_line)
+          if (i === plDatasets.length - 1) {
+            ds.data = plAvgLine.slice(-len).map(v => parseFloat(v) || 0);
+          } else {
+            const fullData = (sortedPlSegs[i].pl_ratios || []).map(v => parseFloat(v) || 0);
+            ds.data = fullData.slice(-len);
+          }
+        });
+        pChart.update();
+      };
+      // === R39 (Stage 6, §3c reverse trigger): 共用 toolbar 段选择器 solo ===
+      // 平均线 dataset index = 30 (最后 1 个), solo 时也保留显示
+      window._soloPlRatio = function(label) {
+        if (!label) {
+          pChart.data.datasets.forEach((_, idx) => pChart.setDatasetVisibility(idx, true));
+        } else {
+          const ci = sortedPlSegs.findIndex(s => s.label === label);
+          if (ci < 0) return;
+          pChart.data.datasets.forEach((_, idx) => {
+            // idx === 30 = 平均线, 永远显示; 其他段 solo 时只显示选中的 + 平均线
+            if (idx === 30) pChart.setDatasetVisibility(idx, true);
+            else pChart.setDatasetVisibility(idx, idx === ci);
+          });
+        }
+        pChart.update();
       };
     };
     {% endif %}
