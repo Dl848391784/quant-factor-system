@@ -334,10 +334,22 @@ def test_segment_win_renders_top5(client, mock_obq_full_result):
             for i in range(1, 31)
         ],
     }
+    # v0.4.8 R35 (Stage 6): mock txt_s9_matrix 让 R30 折线 chart + R35 select toolbar 都进 body
+    # R30-2 之前没 mock = 折线图不在 test body, 也没人 assert; R35 加 select 触发此问题暴露 (§18.1b)
+    s9_mock = {
+        "dates": ["2026-06-25", "2026-06-26", "2026-06-27", "2026-06-30", "2026-07-01", "2026-07-02"],
+        "segments": [
+            {"label": f"S{i}", "win_rates": [55.0, 60.0, 58.0, 62.0, 59.0, 61.0], "merged": 59.2}
+            for i in range(1, 31)
+        ],
+        "best_segment": {"label": "S7", "merged": 59.6},
+        "daily_rates": {"2026-06-25": 55.0, "2026-06-26": 60.0},
+    }
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
         patch("web_ui.app.load_stock_name_map", return_value={}),
         patch("web_ui.app.load_decile_stats", return_value=decile_mock),
+        patch("web_ui.app.parse_obq_s9", return_value=s9_mock),
     ):
         resp = client.get("/report/2026-07-03")
     assert resp.status_code == 200
@@ -347,6 +359,12 @@ def test_segment_win_renders_top5(client, mock_obq_full_result):
     assert "30 段" in body
     assert "★ BEST" in body
     assert "全部 30 段胜率一览" in body
+    # v0.4.8 R35 (Stage 6): 30 段 solo 功能 (PC Shift+单击图例 + 移动端 select)
+    assert "segOverviewSeg" in body  # 移动端 select id
+    assert "window._soloSeg" in body  # solo 函数
+    assert "e.native.shiftKey" in body  # PC Shift 检测
+    assert "onClick: function" in body or "onClick:function" in body  # legend 自定义 onClick
+    assert "当前 solo:" in body  # 用户提示文案 (hint 段)
 
 
 def test_segment_win_handles_no_data(client, mock_obq_full_result):

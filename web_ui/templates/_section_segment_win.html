@@ -174,6 +174,7 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
   {# === R30-2: 30 段 × N 选股日 折线概览图 (B 方案, 顶部 overview) === #}
   <h3>30 段胜率趋势概览</h3>
   {# === R30-3: C 方案 - 时间范围切换按钮 (12/30/90/全部) === #}
+  {# === v0.4.8 R35 (Stage 6): 加段选择器 (移动端用, <select> 不依赖 legend 点击) === #}
   <div class="corr-toolbar" style="margin-bottom: 12px;">
     <span class="corr-toolbar-label">选股日范围:</span>
     <button type="button" class="corr-toolbar-btn" onclick="window._segOverview && window._segOverview(12)">最近 12 日</button>
@@ -181,6 +182,13 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
     <button type="button" class="corr-toolbar-btn" onclick="window._segOverview && window._segOverview(90)">最近 90 日</button>
     <button type="button" class="corr-toolbar-btn" onclick="window._segOverview && window._segOverview(999)">全部</button>
     <span class="corr-toolbar-hint" id="segOverviewCount">12 选股日 (默认 12)</span>
+  </div>
+  <div class="corr-toolbar" style="margin-bottom: 12px;">
+    <span class="corr-toolbar-label">只看某段 (PC: Shift+单击图例 / 移动: 选下拉):</span>
+    <select id="segOverviewSeg" class="corr-toolbar-btn" onchange="window._soloSeg && window._soloSeg(this.value)">
+      <option value="">— 全部显示 —</option>
+    </select>
+    <span class="corr-toolbar-hint" id="segOverviewSegHint">30 段可solo</span>
   </div>
   <div class="chart-wrap">
     <canvas id="segOverviewChart" data-chart-key="segOverviewChart" height="280"></canvas>
@@ -209,6 +217,16 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
       borderWidth: 1.5,
       tension: 0.3
     }));
+    // === v0.4.8 R35 (Stage 6): 动态填充 30 段 option 到移动端 select ===
+    const segSelect = document.getElementById('segOverviewSeg');
+    if (segSelect) {
+      sortedSegs.slice(0, 30).forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.label;
+        opt.textContent = s.label;
+        segSelect.appendChild(opt);
+      });
+    }
     // === R31: 注册 factory + IntersectionObserver 懒渲染 ===
     // R30-3: 默认 12, 按钮切 12/30/90/全部
     window._chartFactories['segOverviewChart'] = function(canvas) {
@@ -217,7 +235,36 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
         data: { labels: allDates.slice(-12), datasets },
         options: {
           responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { position: 'right', display: !isMobile, labels: { color: SENTRY.text, font: { size: 9 }, boxWidth: 8 } }, tooltip: { mode: 'index', intersect: false } },
+          plugins: {
+            legend: {
+              position: 'right', display: !isMobile, labels: { color: SENTRY.text, font: { size: 9 }, boxWidth: 8 },
+              // v0.4.8 R35: Shift+单击图例 = solo 显示该段; 普通单击 = 默认 toggle 显隐
+              onClick: function(e, item, legend) {
+                if (e.native && e.native.shiftKey) {
+                  const ci = item.datasetIndex;
+                  const onlyOne = chart.data.datasets.every((ds, idx) => idx === ci || chart.getDatasetMeta(idx).hidden);
+                  if (onlyOne && !chart.getDatasetMeta(ci).hidden) {
+                    // 二次 Shift+单击同一段 = 恢复全显示
+                    chart.data.datasets.forEach((_, idx) => chart.setDatasetVisibility(idx, true));
+                    if (segSelect) segSelect.value = '';
+                    const hint = document.getElementById('segOverviewSegHint');
+                    if (hint) hint.textContent = '30 段可solo (已恢复全显)';
+                  } else {
+                    chart.data.datasets.forEach((_, idx) => chart.setDatasetVisibility(idx, idx === ci));
+                    if (segSelect) segSelect.value = item.text;
+                    const hint = document.getElementById('segOverviewSegHint');
+                    if (hint) hint.textContent = '当前 solo: ' + item.text + ' (再次 Shift+单击恢复)';
+                  }
+                } else {
+                  // 默认 Chart.js 单击行为 = 切换显隐
+                  const ci = item.datasetIndex;
+                  chart.setDatasetVisibility(ci, !chart.isDatasetVisible(ci));
+                }
+                chart.update();
+              }
+            },
+            tooltip: { mode: 'index', intersect: false }
+          },
           scales: {
             x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: isMobile ? 8 : 10 } } },
             y: { min: 0, max: 100, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } }
@@ -237,6 +284,22 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
         chart.update();
         const countEl = document.getElementById('segOverviewCount');
         if (countEl) countEl.textContent = n >= 999 ? '全部 ' + allDates.length + ' 选股日' : '最近 ' + len + ' 选股日';
+      };
+      // === v0.4.8 R35 (Stage 6): 移动端 select 选段 = solo ===
+      // 选空 = 恢复全显示; 选 S7 = 只显示 S7
+      window._soloSeg = function(label) {
+        if (!label) {
+          chart.data.datasets.forEach((_, idx) => chart.setDatasetVisibility(idx, true));
+          const hint = document.getElementById('segOverviewSegHint');
+          if (hint) hint.textContent = '30 段可solo (已恢复全显)';
+        } else {
+          const ci = sortedSegs.findIndex(s => s.label === label);
+          if (ci < 0) return;
+          chart.data.datasets.forEach((_, idx) => chart.setDatasetVisibility(idx, idx === ci));
+          const hint = document.getElementById('segOverviewSegHint');
+          if (hint) hint.textContent = '当前 solo: ' + label + ' (选"—全部显示—"恢复)';
+        }
+        chart.update();
       };
     };
   })();
