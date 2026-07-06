@@ -821,6 +821,10 @@ td code {
 .chart-wrap {
   position: relative;
   width: 100%;
+  /* R34 bugfix (chart 渲染回归): Chart.js responsive + maintainAspectRatio:false
+     要求父容器有明确高度, 否则会撑到全文档高度(用户视觉上看不到 chart)
+     固定 320px 高度, canvas max-height 跟随即可 */
+  height: 320px;
   background: rgba(22, 27, 34, 0.2);
   border-radius: 8px;
   padding: 16px;
@@ -830,6 +834,7 @@ td code {
 .chart-wrap canvas,
 .chart-wrap .apexcharts-canvas {
   max-width: 100%;
+  max-height: 100%;
 }
 .chart-title {
   font-size: 12px;
@@ -1041,6 +1046,11 @@ details.matrix-fold[open] > summary {
       </div>
     </div>
 
+    <!-- R34 bugfix: R31 factory 注册表必须早于第一个 section include 的 IIFE 执行,
+         否则 window._chartFactories[key] = fn 抛 TypeError(undefined 没有属性) →
+         所有 chart factory 没注册上 → 6 个 exception + chart 不渲染 -->
+    <script>window._chartFactories = window._chartFactories || {};</script>
+
     <!-- 12 节内容卡片化 (R18: 九/十/十一前置 — 用户最常看三节) -->
     <section class="card"><h2 id="section-freshness">零、数据完整性检查</h2>
       {% include "_section_freshness.html" with context %}
@@ -1105,9 +1115,10 @@ details.matrix-fold[open] > summary {
 
 <!-- v0.4.8 R31 (perf, Stage 2.1): Chart.js IntersectionObserver 懒渲染
      工厂注册表 + IntersectionObserver (rootMargin: 200px 提前触发)
-     _section_*.html 注册 window._chartFactories[key](canvas) 而非 new Chart(canvas) -->
+     _section_*.html 注册 window._chartFactories[key](canvas) 而非 new Chart(canvas)
+     R34 bugfix: 工厂对象 init 已前移到第一个 include 之前 (避免 IIFE 早于 init 抛 TypeError) -->
 <script>
-window._chartFactories = {};
+window._chartFactories = window._chartFactories || {};
 window._renderChart = function(key) {
   var el = document.querySelector('[data-chart-key="' + key + '"]');
   if (!el || el._chart_rendered === true) return;
