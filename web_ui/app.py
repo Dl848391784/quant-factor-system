@@ -60,6 +60,10 @@ from summary.report.freshness_check import (  # noqa: E402
 # v0.4.8 R2a: web_ui 内部实现的辅助模块 (H1.1 严守: 不修改 data_loaders)
 from web_ui.common.lr_training_status import load_status as load_lr_status  # noqa: E402
 
+# v0.4.8 R38 (Stage 6): 30 段合并胜率趋势概览 (从 segment_win_rates.parquet 算 cumsum)
+# H1.1 严守 + §18 fork pattern: web_ui 内部读 parquet, 不修改 summary 模块
+from web_ui.common.segment_win_db import load_merged_win_trend  # noqa: E402
+
 # v0.4.8 R12: 接受 date 参数的 stock_selection_result (H1.1 严守: 不修改 data_loaders)
 from web_ui.common.stock_selection import load_stock_selection_for_date  # noqa: E402
 
@@ -120,14 +124,11 @@ def show_report(date: str):
     decile_stats: dict | None = None
     selection_date = result.get("meta", {}).get("selection_date") if result else None
     weight_method = (
-        result.get("meta", {}).get("weight_method", "rolling_icir_weight")
-        if result else "rolling_icir_weight"
+        result.get("meta", {}).get("weight_method", "rolling_icir_weight") if result else "rolling_icir_weight"
     )
     if selection_date:
         try:
-            intraday_rows = load_intraday_strategy(
-                "ob_quality", weight_method, selection_date, logger=logger
-            ) or []
+            intraday_rows = load_intraday_strategy("ob_quality", weight_method, selection_date, logger=logger) or []
         except Exception as e:
             logger.warning("load_intraday_strategy 失败: %s", e)
             intraday_rows = []
@@ -174,6 +175,13 @@ def show_report(date: str):
     except Exception as e:
         logger.warning("parse_obq_filt 失败: %s", e)
 
+    # v0.4.8 R38 (Stage 6): 30 段合并胜率趋势 (从 segment_win_rates.parquet 算 cumsum)
+    merged_win_trend: dict | None = None
+    try:
+        merged_win_trend = load_merged_win_trend(logger=logger)
+    except Exception as e:
+        logger.warning("load_merged_win_trend 失败: %s", e)
+
     # v0.4.8 R7: 数据完整性检查 (零·)
     data_results: list[dict] = []
     derived_results: list[dict] = []
@@ -215,9 +223,7 @@ def show_report(date: str):
     # v0.4.8 R1: meta 派生字段 (H1.1 不改 data_loaders, 用 result.get 兼容)
     # 注意: result 是 dict, 必须用 item 访问 result["meta"] 而非 result.meta
     expected_data_date = (
-        "T-1 (见 summary 实际输出)"
-        if result is None
-        else result.get("meta", {}).get("selection_date", "未知")
+        "T-1 (见 summary 实际输出)" if result is None else result.get("meta", {}).get("selection_date", "未知")
     )
 
     return render_template(
@@ -232,6 +238,7 @@ def show_report(date: str):
         txt_s8_meta=txt_s8_meta,
         txt_s9_matrix=txt_s9_matrix,
         txt_s10_segments=txt_s10_segments,
+        merged_win_trend=merged_win_trend,
         intraday_fallback=intraday_fallback,
         data_results=data_results,
         derived_results=derived_results,

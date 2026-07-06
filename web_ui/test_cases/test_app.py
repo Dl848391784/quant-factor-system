@@ -322,6 +322,15 @@ def mock_r8_loaders():
         yield
 
 
+@pytest.fixture(autouse=True)
+def mock_r38_merged_win_trend():
+    """v0.4.8 R38 (Stage 6): 全局 mock load_merged_win_trend = None
+    默认 segMergedChart 不渲染, 测试 R38 渲染时显式 override
+    """
+    with patch("web_ui.app.load_merged_win_trend", return_value=None):
+        yield
+
+
 def test_segment_win_renders_top5(client, mock_obq_full_result):
     """v0.4.8 R3: 9·30 分段胜率渲染 (30 段 → Top 5 展示)"""
     decile_mock = {
@@ -383,6 +392,80 @@ def test_segment_win_handles_no_data(client, mock_obq_full_result):
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
     assert "本节所需 Parquet 实时计算的逐段胜率尚未就绪" in body
+
+
+def test_segment_win_renders_merged_chart(client, mock_obq_full_result):
+    """v0.4.8 R38 (Stage 6): 30 段合并胜率趋势 (segMergedChart) 渲染
+    数据源: segment_win_rates.parquet, 算法 cumsum_wins/cumsum_total
+    """
+    decile_mock = {
+        "selection_date": "2026-07-02",
+        "trade_date": "2026-07-03",
+        "n_total": 88,
+        "segments": [
+            {"label": f"D{i}", "n": 3, "win_rate": 60.0 + i, "avg_ret": 0.5,
+             "pl_ratio": 1.2, "wins": 2, "losses": 1}
+            for i in range(1, 31)
+        ],
+    }
+    s9_mock = {
+        "dates": ["06-25", "06-26", "06-27"],
+        "segments": [
+            {"label": f"S{i}", "win_rates": [55.0, 60.0, 58.0], "merged": 59.2}
+            for i in range(1, 31)
+        ],
+        "best_segment": {"label": "S7", "merged": 59.6},
+    }
+    merged_trend_mock = {
+        "dates": ["06-15", "06-16", "06-17"],
+        "segments": [
+            {"label": f"S{i}", "merged_running": [46.30, 47.50, 48.20], "merged_final": 48.20}
+            for i in range(1, 31)
+        ],
+        "source": "parquet",
+    }
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_decile_stats", return_value=decile_mock),
+        patch("web_ui.app.parse_obq_s9", return_value=s9_mock),
+        patch("web_ui.app.load_merged_win_trend", return_value=merged_trend_mock),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 新组件渲染
+    assert "segMergedChart" in body  # canvas id
+    assert "30 段合并胜率趋势概览" in body  # h3 标题
+    # 数据契约 (mock 的 merged_running 进入 HTML)
+    assert "merged_running" in body
+    assert "merged_final" in body
+    # 工厂注册 (R31 lazy render)
+    assert "_chartFactories['segMergedChart']" in body
+    # §3c reverse trigger: 共用 toolbar 范围切换函数
+    assert "_segMergedOverview" in body
+    assert "_soloSegMerged" in body
+    # §3c reverse trigger: 上方 _segOverview 调用新函数
+    assert "window._segMergedOverview" in body
+    # 数据源声明 (muted)
+    assert "segment_win_rates.parquet" in body
+
+
+def test_segment_win_merged_chart_skipped_when_no_data(client, mock_obq_full_result):
+    """v0.4.8 R38 (Stage 6): merged_win_trend=None 时 segMergedChart 不渲染
+    (与 decile_stats fallback 文案风格一致 — §5b 多源 section 文案独立声明)
+    """
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_decile_stats", return_value=None),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 新组件不存在
+    assert "segMergedChart" not in body
+    assert "_segMergedOverview" not in body
 
 
 def test_intraday_renders_rows(client, mock_obq_full_result):

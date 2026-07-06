@@ -193,6 +193,16 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
   <div class="chart-wrap">
     <canvas id="segOverviewChart" data-chart-key="segOverviewChart" height="280"></canvas>
   </div>
+
+  {# === v0.4.8 R38 (Stage 6): 30 段合并胜率趋势概览 (与上方共用 toolbar, §3c reverse trigger) === #}
+  {# 数据源: segment_win_rates.parquet (T+1 日 forward_return_1d 计算) · 算法 cumsum_wins/cumsum_total · 验证 0/30 段偏差 > 0.5% #}
+  {% if merged_win_trend and merged_win_trend.get("segments") %}
+  <h3>30 段合并胜率趋势概览 (截至当日累计合并)</h3>
+  <p class="muted">数据源: summary/result/segment_win_rates.parquet (T+1 日 forward_return_1d 计算) · 算法 cumsum_wins/cumsum_total · 与上方"30 段胜率趋势"区别: 上方=每日 wr%, 下方=截至当日累计合并胜率 · 共用上方 toolbar (12/30/90/全部切换 + 段选择器)</p>
+  <div class="chart-wrap">
+    <canvas id="segMergedChart" data-chart-key="segMergedChart" height="280"></canvas>
+  </div>
+  {% endif %}
   <script>
   (function() {
     // R30-2 inspector fix: txt_s9_matrix.segments[].win_rates[] 是 30 段 × N 选股日完整数据
@@ -282,6 +292,8 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
           ds.data = fullData.slice(-len);
         });
         chart.update();
+        // === v0.4.8 R38 (Stage 6, §3c reverse trigger): 同步刷新 segMergedChart (新图, 共用 toolbar) ===
+        if (window._segMergedOverview) window._segMergedOverview(n);
         const countEl = document.getElementById('segOverviewCount');
         if (countEl) countEl.textContent = n >= 999 ? '全部 ' + allDates.length + ' 选股日' : '最近 ' + len + ' 选股日';
       };
@@ -299,9 +311,67 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
           const hint = document.getElementById('segOverviewSegHint');
           if (hint) hint.textContent = '当前 solo: ' + label + ' (选"—全部显示—"恢复)';
         }
+        // === v0.4.8 R38 (Stage 6, §3c reverse trigger): 同步 solo segMergedChart ===
+        if (window._soloSegMerged) window._soloSegMerged(label);
         chart.update();
       };
     };
+
+    // === v0.4.8 R38 (Stage 6): segMergedChart factory (30 段合并胜率趋势, 共用上方 toolbar) ===
+    {% if merged_win_trend and merged_win_trend.get("segments") %}
+    const mergedSegs = {{ merged_win_trend.segments | tojson }} || [];
+    const mergedDates = {{ merged_win_trend.dates | tojson }} || [];
+    const sortedMergedSegs = [...mergedSegs].sort((a, b) => parseInt((a.label||'S0').replace(/\D/g, '')) - parseInt((b.label||'S0').replace(/\D/g, '')));
+    const mergedDatasets = sortedMergedSegs.slice(0, 30).map((s, i) => ({
+      label: s.label,
+      data: (s.merged_running || []).map(v => parseFloat(v) || 0),
+      borderColor: COLORS[i % COLORS.length],
+      backgroundColor: COLORS[i % COLORS.length] + '20',
+      pointRadius: isMobile ? 0 : 0,
+      pointHoverRadius: 4,
+      borderWidth: 1.5,
+      tension: 0.3
+    }));
+    window._chartFactories['segMergedChart'] = function(canvas) {
+      const mChart = new Chart(canvas, {
+        type: 'line',
+        data: { labels: mergedDates.slice(-12), datasets: mergedDatasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { mode: 'index', intersect: false }
+          },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: isMobile ? 8 : 10 } } },
+            y: { min: 0, max: 100, grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v + '%' } }
+          },
+          interaction: { mode: 'nearest', intersect: false }
+        }
+      });
+      // === R38 (Stage 6, §3c reverse trigger): 共用 toolbar 范围切换 ===
+      window._segMergedOverview = function(n) {
+        const len = Math.min(n, mergedDates.length);
+        mChart.data.labels = mergedDates.slice(-len);
+        mChart.data.datasets.forEach((ds, i) => {
+          const fullData = (sortedMergedSegs[i].merged_running || []).map(v => parseFloat(v) || 0);
+          ds.data = fullData.slice(-len);
+        });
+        mChart.update();
+      };
+      // === R38 (Stage 6, §3c reverse trigger): 共用 toolbar 段选择器 solo ===
+      window._soloSegMerged = function(label) {
+        if (!label) {
+          mChart.data.datasets.forEach((_, idx) => mChart.setDatasetVisibility(idx, true));
+        } else {
+          const ci = sortedMergedSegs.findIndex(s => s.label === label);
+          if (ci < 0) return;
+          mChart.data.datasets.forEach((_, idx) => mChart.setDatasetVisibility(idx, idx === ci));
+        }
+        mChart.update();
+      };
+    };
+    {% endif %}
   })();
   </script>
   {% set best_seg = txt_s9_matrix.get("best_segment") %}
