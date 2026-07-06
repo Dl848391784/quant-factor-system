@@ -289,7 +289,7 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
                 if (window._syncSegReturnFromOverview) window._syncSegReturnFromOverview();
               }
             },
-            tooltip: { mode: 'index', intersect: false }
+            tooltip: { mode: 'index', intersect: false, sortItems: (a, b) => b.parsed.y - a.parsed.y }
           },
           scales: {
             x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: isMobile ? 8 : 10 } } },
@@ -386,7 +386,7 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
           responsive: true, maintainAspectRatio: false,
           plugins: {
             legend: { display: false },
-            tooltip: { mode: 'index', intersect: false }
+            tooltip: { mode: 'index', intersect: false, sortItems: (a, b) => b.parsed.y - a.parsed.y }
           },
           scales: {
             x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: isMobile ? 8 : 10 } } },
@@ -456,7 +456,7 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
           responsive: true, maintainAspectRatio: false,
           plugins: {
             legend: { display: false },
-            tooltip: { mode: 'index', intersect: false }
+            tooltip: { mode: 'index', intersect: false, sortItems: (a, b) => b.parsed.y - a.parsed.y }
           },
           scales: {
             x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: isMobile ? 8 : 10 } } },
