@@ -778,6 +778,18 @@ def test_freshness_section_renders_data_and_derived(client, mock_obq_full_result
     # 衍生数据
     assert "ic_results" in body
     assert "72" in body
+    # v0.4.8 R34: 状态分布 doughnut JS 应正确分类契约符号
+    # status_symbol='△延迟' → 告警; status_symbol='✗缺失' → 失败; status_symbol='✓正常' → 正常
+    # 修复前: 模板用 emoji ✅/⚠️/❌ 匹配, 全部落到'未知'
+    # 修复后: 改用契约关键词匹配 (正常/缺失/失败/无日期/延迟)
+    assert "statusCounts" in body
+    assert "sym.includes('正常')" in body
+    assert "sym.includes('缺失')" in body
+    assert "sym.includes('延迟')" in body
+    # 防回归: 不再用 emoji 字符匹配
+    assert "'✅'" not in body
+    assert "'⚠️'" not in body
+    assert "'❌'" not in body
 
 
 def test_ic_section_renders_table(client, mock_obq_full_result):

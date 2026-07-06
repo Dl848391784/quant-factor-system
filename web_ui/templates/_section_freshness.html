@@ -73,13 +73,15 @@ R24-3 现代感强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现�
     const SENTRY = { pos: '#3fb950', warn: '#f85149', grid: 'rgba(139,148,158,0.15)', text: '#f0f0f5' };
 
     // 图 1: 状态分布 doughnut
+    // v0.4.8 R34: 匹配 summary/report/freshness_check.py 实际输出
+    // (✓正常 / ✗缺失 / △延迟), 不是 ✓/✗/△ 几何符号, 改对齐契约
     const statusCounts = all.reduce((acc, r) => {
       let k = '未知';
       const sym = r.status_symbol || '';
       if (typeof sym === 'string') {
-        if (sym.includes('✅')) k = '正常';
-        else if (sym.includes('⚠️')) k = '告警';
-        else if (sym.includes('❌')) k = '失败';
+        if (sym.includes('正常')) k = '正常';
+        else if (sym.includes('缺失') || sym.includes('失败') || sym.includes('无日期')) k = '失败';
+        else if (sym.includes('延迟')) k = '告警';
       }
       acc[k] = (acc[k] || 0) + 1;
       return acc;
