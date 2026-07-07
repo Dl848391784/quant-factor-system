@@ -1,21 +1,17 @@
 """web_ui/common/pl_ratio_db.py
 
-v0.4.8 R39 (Stage 6 功能扩展): 从 master parquet + composite daily parquet 算"每段每日 pl_ratio"
-H1.1 严守 + §18 fork pattern: web_ui 内部读 parquet, 不直接 import summary 模块
-不修改 data_loaders / summary 模块
+v0.4.8 R42 (Stage 6 算法重设计 + B1 主路径): 从 summary/result/segment_stock_details.parquet
+读 30 段每日合并收益率 (seg_return = mean(forward_return_1d) * 100)。
 
-数据源:
-- comprehensive_factor/result/ob_quality/composite_<weight_method>_1d_daily.parquet
-  (含 date / asset / composite_factor, 506 个日期)
-- data_fetchers/result/ob_quality/factor_ic_data.parquet
-  (含 date / asset / forward_return_1d, master parquet)
+R42 设计要点:
+- 段号直接用 ssd.segment_label, 不再现场 qcut
+- 段内资产 = summary alias 切片 (ob_quality 管线筛后 ~1-5 只/段), 与 R39a 全市场 composite 段位不同
+- 无 fallback (用户 2026-07-07 拍板候选 A, 原话"以 ssd 为主")
+- trade_date 复用 summary 算法: master_dates.index(selection_date); idx + 1
 
-算法 (复 data_loaders.py:786-820 L 段的 load_decile_stats):
-  1. 取 selection_date 当日 composite_daily.day_df (按 composite 降序)
-  2. merge forward_return_1d (T+1 交易日)
-  3. qcut 30 段 (按 composite rank)
-  4. 每段算 wins.mean() / |losses.mean()| = pl_ratio
-  5. 加粗黑虚线 = 30 段 pl_ratio 算术平均 (按用户 R39-B 选项)
+H1.1 严守:
+- web_ui 只读 summary 产物 (R16 txt_parser 先例), 不修改 summary 模块
+- 所有路径从 paths 模块导入 (AGENTS.md §硬规则 #11)
 
 数据契约:
 {
@@ -23,13 +19,13 @@ H1.1 严守 + §18 fork pattern: web_ui 内部读 parquet, 不直接 import summ
     "segments": [
         {
             "label": "S1",
-            "pl_ratios": [1.23, 0.98, ...],  # 每选股日的 pl_ratio
+            "pl_ratios": [1.23, 0.98, ...],  # 每选股日的 seg_return (%)
             "avg_pl_ratio": 1.05,            # 末日累计 30 段平均 (用于排序/参考)
         },
         ...
     ],
     "avg_line": [1.20, 1.15, ...],           # 30 段当日算术平均 (粗黑虚线)
-    "source": "parquet",
+    "source": "summary_segment_stock_details",
 }
 """
 
@@ -43,30 +39,26 @@ from paths import PROJECT_ROOT
 
 
 # 路径: 复用 paths 模块定义 (AGENTS.md §硬规则 #11)
-_COMPOSITE_DAILY_PATH: Path = (
-    PROJECT_ROOT / "comprehensive_factor" / "result" / "ob_quality" / "composite_rolling_icir_weight_1d_daily.parquet"
-)
+_SEGMENT_STOCK_DETAILS_PATH: Path = PROJECT_ROOT / "summary" / "result" / "segment_stock_details.parquet"
 _MASTER_PARQUET_PATH: Path = PROJECT_ROOT / "data_fetchers" / "result" / "ob_quality" / "factor_ic_data.parquet"
 _N_SEGMENTS = 30
 
 
-def _compute_segment_pl_ratio(
-    composite_daily: pd.DataFrame,
+def _compute_segment_return(
+    day_stocks: pd.DataFrame,
     forward_returns: pd.DataFrame,
-    selection_date: str,
-    n_segments: int = _N_SEGMENTS,
-) -> dict | None:
-    """对单个选股日, 算 30 段每段的 pl_ratio.
+) -> dict[str, float] | None:
+    """对单个选股日, 算 30 段每段的 seg_return (%).
+
+    Args:
+        day_stocks: 当日 ssd 明细 (列: asset, segment_label)
+        forward_returns: T+1 trade_date forward_return_1d (列: asset, forward_return_1d)
 
     Returns:
-        {seg_label: pl_ratio} 或 None (数据不足 / qcut 失败)
+        {seg_label: seg_return_pct} 或 None (merge 后空)
     """
-    day_df = composite_daily[composite_daily["date"] == selection_date].copy()
-    if day_df.empty:
-        return None
-
     merged = pd.merge(
-        day_df[["asset", "composite_factor"]],
+        day_stocks,
         forward_returns[["asset", "forward_return_1d"]],
         on="asset",
         how="inner",
@@ -74,22 +66,10 @@ def _compute_segment_pl_ratio(
     if merged.empty:
         return None
 
-    merged["rank"] = merged["composite_factor"].rank(ascending=False)
-    try:
-        merged["segment"] = pd.qcut(merged["rank"], n_segments, labels=[f"S{i + 1}" for i in range(n_segments)])
-    except ValueError:
-        # qcut 失败 (重复边界, 资产数不足)
-        return None
-
     result: dict[str, float] = {}
-    # v0.4.8 R39a 算法重设计: 每段当天 seg_return = mean(forward_return_1d) * 100
-    # 用户原话: "等权买入 1:1:1, 3 只股票 +5%/+1%/-8% → 合并收益率 = (5+1-8)/3 = -0.67%"
-    # 不是 wins.mean()/|losses.mean()| (盈亏比) — 是简单算术平均 (收益率)
-    # 公式统一: 涨含跌一起平均, 不分 wins/losses
-    for seg_label in [f"S{i + 1}" for i in range(n_segments)]:
-        subset = merged[merged["segment"] == seg_label]
-        ret = subset["forward_return_1d"].dropna()
-        seg_return_pct = round(float(ret.mean() * 100), 2) if len(ret) > 0 else 0.0
+    for seg_label in [f"S{i + 1}" for i in range(_N_SEGMENTS)]:
+        subset = merged[merged["segment_label"] == seg_label]["forward_return_1d"].dropna()
+        seg_return_pct = round(float(subset.mean() * 100), 2) if len(subset) > 0 else 0.0
         result[seg_label] = seg_return_pct
     return result
 
@@ -99,7 +79,7 @@ def load_pl_ratio_trend(
     weight_method: str = "rolling_icir_weight",
     logger: logging.Logger | None = None,
 ) -> dict | None:
-    """读 composite_daily + master parquet, 算最近 N 选股日 × 30 段 pl_ratio.
+    """读 summary/result/segment_stock_details.parquet, 算最近 N 选股日 × 30 段 seg_return.
 
     Args:
         n_recent_dates: 取最近多少个选股日 (默认 12 与 txt 第九节对齐)
@@ -110,18 +90,14 @@ def load_pl_ratio_trend(
         {
             "dates": ["06-15", ...],
             "segments": [{"label": "S1", "pl_ratios": [...], "avg_pl_ratio": float}, ...],
-            "avg_line": [float, ...],   # 30 段当日算术平均 (粗黑虚线)
-            "source": "parquet",
+            "avg_line": [float, ...],
+            "source": "summary_segment_stock_details",
         }
-        None: 数据缺失
+        None: 数据缺失 (ssd parquet 不存在 / 读失败 / 0 有效日期)
     """
-    # 路径根据 weight_method 动态 (R39 兼容 ic_weight / equal_weight)
-    composite_path = (
-        PROJECT_ROOT / "comprehensive_factor" / "result" / "ob_quality" / f"composite_{weight_method}_1d_daily.parquet"
-    )
-    if not composite_path.exists():
+    if not _SEGMENT_STOCK_DETAILS_PATH.exists():
         if logger:
-            logger.warning("composite daily parquet 不存在: %s", composite_path)
+            logger.warning("ssd parquet 不存在: %s", _SEGMENT_STOCK_DETAILS_PATH)
         return None
     if not _MASTER_PARQUET_PATH.exists():
         if logger:
@@ -129,61 +105,57 @@ def load_pl_ratio_trend(
         return None
 
     try:
-        composite_daily = pd.read_parquet(composite_path, columns=["date", "asset", "composite_factor"])
-        forward_returns = pd.read_parquet(_MASTER_PARQUET_PATH, columns=["date", "asset", "forward_return_1d"])
+        ssd = pd.read_parquet(
+            _SEGMENT_STOCK_DETAILS_PATH,
+            columns=["selection_date", "segment_label", "asset", "weight_method"],
+        )
+        ssd = ssd[ssd["weight_method"] == weight_method]
+        if ssd.empty:
+            if logger:
+                logger.warning("ssd parquet 无 weight_method=%s 数据", weight_method)
+            return None
+
+        recent_dates = sorted(ssd["selection_date"].unique())
+        if len(recent_dates) > n_recent_dates:
+            recent_dates = recent_dates[-n_recent_dates:]
+
+        master = pd.read_parquet(
+            _MASTER_PARQUET_PATH,
+            columns=["date", "asset", "forward_return_1d"],
+        )
+        master_dates = sorted(master["date"].dropna().unique())
     except Exception as e:
         if logger:
             logger.warning("读 parquet 失败: %s", e)
         return None
 
-    # 取最近 n_recent_dates 个有足够资产 (>= 30 只) 的选股日
-    # qcut 30 段要求 >= 30 只 (实际 R38 实战每段 2-3 只). 早期日期 (< 06-15) pipeline 没跑资产 < 30
-    # R38 segment_win_rates.parquet 的 12 天从 06-15 开始 (txt 第九节对齐), 这里也取 12 天
-    asset_counts = composite_daily.groupby("date").size()
-    eligible = asset_counts[asset_counts >= 30].sort_index()
-    if eligible.empty:
-        if logger:
-            logger.warning("composite daily parquet 中无资产数 >= 30 的日期")
-        return None
-    # 取最后 n_recent_dates 个 (允许未来日期不足, 后面逐日处理)
-    recent_dates = sorted(eligible.index.tolist())
-    # 跳过最后 1 天 (T+2 master parquet 经常没到, 06-17 实战)
-    # 然后取最近 n_recent_dates 个 (与 txt 第九节 12 天对齐)
-    if len(recent_dates) > 1:
-        recent_dates = recent_dates[:-1]
-    if len(recent_dates) > n_recent_dates:
-        recent_dates = recent_dates[-n_recent_dates:]
-
-    # 对每个选股日算 pl_ratio
-    seg_pl_ratios: dict[str, list[float]] = {f"S{i + 1}": [] for i in range(_N_SEGMENTS)}
+    seg_returns: dict[str, list[float]] = {f"S{i + 1}": [] for i in range(_N_SEGMENTS)}
     avg_line: list[float] = []
     valid_dates_mmdd: list[str] = []
 
     for selection_date in recent_dates:
-        # 取 T+1 收益 (master parquet 里 date=trade_date)
-        # data_loaders.py:770 用 next trading day, 但此处每天独立算 pl_ratio,
-        # 简化: 假设 master parquet 里 forward_return_1d 已经按 date 对齐 trade_date
-        # (即 composite daily.date = trade_date - 1, master parquet.date = trade_date)
-        # 所以 merge 时 selection_date + 1 天 = master 的 date
-        # 实战 60-100 只复 R38 用同一套 master parquet, 直接按 composite daily.date 算
-        # (因为 summary 第九节 txt 显示 selection_date=06-15 → forward 是 06-16)
-        # 安全起见: 取 master parquet 中 date > selection_date 的最小日期作为 trade_date
-        future = forward_returns[forward_returns["date"] > selection_date]
-        if future.empty:
-            continue
-        trade_date = sorted(future["date"].unique().tolist())[0]
-        trade_rets = forward_returns[forward_returns["date"] == trade_date]
-
-        # 复用 _compute_segment_pl_ratio 但传 trade_rets 而不是全部 forward_returns
-        day_pl = _compute_segment_pl_ratio(composite_daily, trade_rets, selection_date)
-        if day_pl is None:
+        # 复用 summary 算法 (generate_factor_summary_report.py:629-633)
+        try:
+            idx = master_dates.index(selection_date)
+            trade_date = master_dates[idx + 1]
+        except (ValueError, IndexError):
+            if logger:
+                logger.debug("selection_date=%s 无 T+1 交易日, 跳过", selection_date)
             continue
 
-        for seg_label, plr in day_pl.items():
-            # cast np.float64 → float (避免 json.dumps 报错)
-            seg_pl_ratios[seg_label].append(float(plr))
-        avg_line.append(float(round(sum(day_pl.values()) / len(day_pl), 2)))
-        valid_dates_mmdd.append(selection_date[5:])  # mm-dd
+        ret_df = master[(master["date"] == trade_date) & master["forward_return_1d"].notna()]
+        if ret_df.empty:
+            continue
+
+        day_stocks = ssd[ssd["selection_date"] == selection_date][["asset", "segment_label"]]
+        day_seg_return = _compute_segment_return(day_stocks, ret_df)
+        if day_seg_return is None:
+            continue
+
+        for seg_label, seg_return_pct in day_seg_return.items():
+            seg_returns[seg_label].append(float(seg_return_pct))
+        avg_line.append(float(round(sum(day_seg_return.values()) / len(day_seg_return), 2)))
+        valid_dates_mmdd.append(selection_date[5:])
 
     if not valid_dates_mmdd:
         if logger:
@@ -192,7 +164,7 @@ def load_pl_ratio_trend(
 
     segments = []
     for seg_label in [f"S{i + 1}" for i in range(_N_SEGMENTS)]:
-        plr_list = seg_pl_ratios[seg_label]
+        plr_list = seg_returns[seg_label]
         segments.append(
             {
                 "label": seg_label,
@@ -203,15 +175,15 @@ def load_pl_ratio_trend(
 
     if logger:
         logger.info(
-            "pl_ratio_trend 加载完成: %d 段 × %d 选股日 (来源=%s)",
+            "pl_ratio_trend 加载 (R42 B1 读 ssd): %d 段 × %d 选股日 (源=%s)",
             len(segments),
             len(valid_dates_mmdd),
-            weight_method,
+            _SEGMENT_STOCK_DETAILS_PATH.name,
         )
 
     return {
         "dates": valid_dates_mmdd,
         "segments": segments,
-        "avg_line": [float(v) for v in avg_line],
-        "source": "parquet",
+        "avg_line": avg_line,
+        "source": "summary_segment_stock_details",
     }

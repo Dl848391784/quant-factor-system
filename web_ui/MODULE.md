@@ -74,7 +74,8 @@ web_ui/
 ├── common/                         # web_ui 私有 common/ (v0.4.7 新增)
 │   ├── __init__.py
 │   ├── lr_training_status.py       # 解析 lr_training_data HIVE 分区
-│   └── txt_parser.py               # 解析 ob_quality txt 报告 (v0.4.7 R3+)
+│   ├── pl_ratio_db.py              # v0.4.8 R42: 30 段每日合并收益率 (B1 主路径, 读 ssd)
+│   └── txt_parser.py               # 解析 ob_quality txt 报告 (v0.4.7 R3+) |
 ├── templates/                      # Jinja2 模板
 │   ├── report.html                 # 主报告页 (ob_quality 8+9+10+10-fallback)
 │   ├── _section_selection.html     # 八·股票选股结果
@@ -99,7 +100,7 @@ web_ui/
 | 2026-07-04 | v0.4.1 | /report/<date> 路由 + 8 section 框架 (本会话 commit 后已严格回退) |
 | 2026-07-04 | v0.4.5-v0.4.6.2 R2b | pipeline 切换 + ob_quality 9/10 段 (本会话 commit 后已严格回退) |
 | 2026-07-04 | v0.4.7 规范升级 | 加 H1.1 模块边界条款 + 简化需求 (只 ob_quality) + 严格回退到 217f1ad |
-| 待实施 | v0.4.8 | 重新实施 v0.4.1-R2b 全部 web_ui 内部版本 + parity test |
+| 2026-07-07 | v0.4.8 R42 | 30 段每日合并收益率趋势概览 B1 主路径: web_ui 直接读 summary/result/segment_stock_details.parquet (alias 切片, 无 fallback), merge forward_return_1d · 段内资产 = 管线筛后 ~1-5 只/段, 与 R39a 全市场 composite 段位不一致 (用户知情决策, h3 加 alias 切片警告) |
 
 ---
 

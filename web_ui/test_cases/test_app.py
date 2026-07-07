@@ -483,11 +483,11 @@ def test_segment_win_merged_chart_skipped_when_no_data(client, mock_obq_full_res
 
 
 def test_segment_win_renders_seg_return_chart(client, mock_obq_full_result):
-    """v0.4.8 R39a (Stage 6 算法重设计): 30 段每日合并收益率 (segReturnChart) 渲染
-    数据源: composite_daily.parquet + master parquet, 算法 mean(forward_return_1d) * 100
-    用户原话 2026-07-06: "等权买入 1:1:1, 3 只 +5%/+1%/-8% → (5+1-8)/3 = -0.67%" (合并收益率, 不是盈亏比)
-    R39 wins.mean/|losses.mean| 是盈亏比, R39a 改为简单算术平均收益率
-    用户选项 B: 30 段折线 + 1 条粗黑虚线 30 段当日平均
+    """v0.4.8 R42 (Stage 6 算法重设计 + B1 主路径): 30 段每日合并收益率 (segReturnChart) 渲染
+    数据源: summary/result/segment_stock_details.parquet (alias 切片, R42 起) + master parquet
+    算法: mean(forward_return_1d) * 100 (按 ssd.segment_label 直接分组, 不再现场 qcut)
+    无 fallback (用户原话 2026-07-07 "以 ssd 为主")
+    已知语义变化: 段内资产 = ob_quality 管线筛后 ~1-5 只/段, 与 R39a 全市场 composite 段位不一致
     """
     decile_mock = {
         "selection_date": "2026-07-02",
@@ -547,16 +547,18 @@ def test_segment_win_renders_seg_return_chart(client, mock_obq_full_result):
     # R38a + R39a 联动 sync (Shift+单击图例路径) - R39a 函数名重命名
     assert "_syncSegReturnFromOverview" in body
     assert "_syncSegPlRatioFromOverview" not in body
-    # 数据源声明 (muted) + 用户原话引用
-    assert "composite_rolling_icir_weight_1d_daily.parquet" in body
+    # 数据源声明 (muted, R42 起从 ssd 读) + 用户原话引用
+    assert "summary/result/segment_stock_details.parquet" in body
+    assert "alias 切片" in body  # R42 语义警告
+    assert "composite_rolling_icir_weight_1d_daily.parquet" not in body  # R39a 数据源不残留
     assert "(5+1-8)/3" in body  # 用户原话: "3 只 +5%/+1%/-8% → -0.67%"
     # R39a 算法声明 (muted 改 mean(forward_return_1d))
     assert "mean(forward_return_1d)" in body
 
 
 def test_segment_win_pl_ratio_chart_skipped_when_no_data(client, mock_obq_full_result):
-    """v0.4.8 R39 (Stage 6): pl_ratio_trend=None 时 segPlRatioChart 不渲染
-    (与 R38 segMergedChart fallback 模式一致)
+    """v0.4.8 R42: pl_ratio_trend=None 时 segReturnChart 不渲染
+    (R42 v2 无 fallback 路径, ssd 缺失直接 None)
     """
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
