@@ -508,7 +508,7 @@ def test_segment_win_renders_seg_return_chart(client, mock_obq_full_result):
         "dates": ["06-15", "06-16", "06-17"],
         "segments": [{"label": f"S{i}", "pl_ratios": [1.23, -0.98, 1.45], "avg_pl_ratio": 1.22} for i in range(1, 31)],
         "avg_line": [1.50, -1.45, 1.40],
-        "source": "parquet",
+        "source": "summary_segment_stock_details_plus_master",  # R43 方向 A 标识
     }
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),

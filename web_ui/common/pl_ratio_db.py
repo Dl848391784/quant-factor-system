@@ -1,16 +1,23 @@
 """web_ui/common/pl_ratio_db.py
 
-v0.4.8 R42 (Stage 6 算法重设计 + B1 主路径): 从 summary/result/segment_stock_details.parquet
-读 30 段每日合并收益率 (seg_return = mean(forward_return_1d) * 100)。
+v0.4.8 R43 (方向 A): 从 paths.FACTOR_IC_DATA_MASTER (全市场主数据源, 558 MB)
+替换 R42 的 ob_quality alias 切片 (32 MB)。这样 S7 段内被 ob_quality 筛选掉的资产
+(如 603607) 在 master 全市场里有 forward_return_1d 时能 merge 上.
 
-R42 设计要点:
+R42 设计要点 (继承):
 - 段号直接用 ssd.segment_label, 不再现场 qcut
-- 段内资产 = summary alias 切片 (ob_quality 管线筛后 ~1-5 只/段), 与 R39a 全市场 composite 段位不同
+- 段内资产 = summary alias 切片 (ob_quality 管线筛后 ~1-5 只/段) ∩ master 全市场
 - 无 fallback (用户 2026-07-07 拍板候选 A, 原话"以 ssd 为主")
 - trade_date 复用 summary 算法: master_dates.index(selection_date); idx + 1
 
+R43 方向 A 改动:
+- _MASTER_PARQUET_PATH 从 data_fetchers/result/ob_quality/factor_ic_data.parquet (32 MB, 82 行/天)
+  改到 data_fetchers/result/factor_ic_data.parquet (558 MB, 3037 行/天, 全市场)
+- 段内资产数量从 ~1-5 → ~1-5 (ssd 仍 alias, 但 master 端数据更多)
+- seg_return 数值有变化 (R43 diff CSV: 420 行, max diff 13.33pp)
+
 H1.1 严守:
-- web_ui 只读 summary 产物 (R16 txt_parser 先例), 不修改 summary 模块
+- web_ui 只读 summary/data_fetchers 产物 (R16 txt_parser 先例), 不修改其他模块
 - 所有路径从 paths 模块导入 (AGENTS.md §硬规则 #11)
 
 数据契约:
@@ -40,7 +47,9 @@ from paths import PROJECT_ROOT
 
 # 路径: 复用 paths 模块定义 (AGENTS.md §硬规则 #11)
 _SEGMENT_STOCK_DETAILS_PATH: Path = PROJECT_ROOT / "summary" / "result" / "segment_stock_details.parquet"
-_MASTER_PARQUET_PATH: Path = PROJECT_ROOT / "data_fetchers" / "result" / "ob_quality" / "factor_ic_data.parquet"
+# R43 方向 A: 从 paths.FACTOR_IC_DATA_MASTER 读 (全市场主数据源), 替换 R42 的 ob_quality alias 切片
+# 这样 S7 段内 603607 等资产在 master 全市场里有 forward_return_1d 时能 merge 上
+_MASTER_PARQUET_PATH: Path = PROJECT_ROOT / "data_fetchers" / "result" / "factor_ic_data.parquet"
 _N_SEGMENTS = 30
 
 
@@ -180,7 +189,7 @@ def load_pl_ratio_trend(
 
     if logger:
         logger.info(
-            "pl_ratio_trend 加载 (R42 B1 读 ssd): %d 段 × %d 选股日 (源=%s)",
+            "pl_ratio_trend 加载 (R43 方向 A 读 ssd + master 全市场): %d 段 × %d 选股日 (源=%s)",
             len(segments),
             len(valid_dates_mmdd),
             _SEGMENT_STOCK_DETAILS_PATH.name,
@@ -190,5 +199,5 @@ def load_pl_ratio_trend(
         "dates": valid_dates_mmdd,
         "segments": segments,
         "avg_line": avg_line,
-        "source": "summary_segment_stock_details",
+        "source": "summary_segment_stock_details_plus_master",
     }

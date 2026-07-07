@@ -204,11 +204,11 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
   </div>
   {% endif %}
 
-  {# === v0.4.8 R42 (Stage 6 算法重设计 + B1 主路径): 30 段每日合并收益率趋势概览 === #}
-  {# 数据源: summary/result/segment_stock_details.parquet (alias 切片, ob_quality 管线筛后 ~1-5 只/段) + factor_ic_data.parquet (forward_return_1d) · 算法 mean(forward_return_1d) * 100 · 无 fallback (用户原话 2026-07-07 "以 ssd 为主") #}
+  {# === v0.4.8 R43 (方向 A 实施): 30 段每日合并收益率趋势概览 === #}
+  {# 数据源: summary/result/segment_stock_details.parquet (alias 切片, ob_quality 管线筛后 ~1-5 只/段) + data_fetchers/result/factor_ic_data.parquet (FACTOR_IC_DATA_MASTER 全市场主数据源, 替换 R42 ob_quality alias) · 算法 mean(forward_return_1d) * 100 · 无 fallback (用户原话 2026-07-07 "以 ssd 为主") #}
   {% if pl_ratio_trend and pl_ratio_trend.get("segments") %}
   <h3>30 段每日合并收益率趋势概览 (seg_return = mean(forward_return_1d), alias 切片 = ob_quality 管线筛后每段 ~1-5 只)</h3>
-  <p class="muted">v0.4.8 R42 数据源: summary/result/segment_stock_details.parquet + data_fetchers/result/ob_quality/factor_ic_data.parquet · 算法 mean(forward_return_1d) * 100 · <strong>语义变化: R42 起段内资产 = 管线 alias 切片, 与 R39a 全市场 composite 段位不一致 (实测 diff 最大 15.28pp, R42 empirical validation 420 行 CSV)</strong> · 用户原话 2026-07-06: "等权买入 1:1:1, 3 只 +5%/+1%/-8% → (5+1-8)/3 = -0.67%" · 共用上方 toolbar</p>
+  <p class="muted">v0.4.8 R43 数据源: summary/result/segment_stock_details.parquet + data_fetchers/result/factor_ic_data.parquet (FACTOR_IC_DATA_MASTER 全市场, R43 方向 A 替换 R42 ob_quality alias) · 算法 mean(forward_return_1d) * 100 · <strong>语义变化: R43 起 master 端 = 全市场 558 MB, 段内 merge 找回被 ob_quality 筛选掉的资产 (如 603607), 数值有变化 (R43 diff CSV: 420 行, max diff 13.33pp)</strong> · 用户原话 2026-07-06: "等权买入 1:1:1, 3 只 +5%/+1%/-8% → (5+1-8)/3 = -0.67%" · 共用上方 toolbar</p>
   <div class="chart-wrap">
     <canvas id="segReturnChart" data-chart-key="segReturnChart" height="280"></canvas>
   </div>
