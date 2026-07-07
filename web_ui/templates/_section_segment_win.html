@@ -296,9 +296,11 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
                 // 根因: R35 legend.onClick 自定义 handler 没走 _soloSeg() 函数, R38 只补了 _soloSeg 函数末尾
                 // → select 路径有联动, Shift+单击图例路径没联动. 这里直接调 sync 函数
                 if (window._syncSegMergedFromOverview) window._syncSegMergedFromOverview();
-                // === v0.4.8 R39a (Stage 6 §3c sub-trigger 5): 同步联动 segReturnChart
-                if (window._syncSegReturnFromOverview) window._syncSegReturnFromOverview();
-              }
+                                // === v0.4.8 R39a (Stage 6 §3c sub-trigger 5): 同步联动 segReturnChart ===
+                                if (window._syncSegReturnFromOverview) window._syncSegReturnFromOverview();
+                                // === v0.4.8 R45b (bugfix): 同步联动 assetValueChart (PC Shift+单击图例路径) ===
+                                if (window._syncAssetValueFromOverview) window._syncAssetValueFromOverview();
+                              }
             },
             tooltip: { mode: 'index', intersect: false, itemSort: (a, b) => b.parsed.y - a.parsed.y }
           },
@@ -344,6 +346,8 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
         if (window._soloSegMerged) window._soloSegMerged(label);
         // === v0.4.8 R39a (Stage 6 §3c sub-trigger 5): 同步 solo segReturnChart ===
         if (window._soloSegReturn) window._soloSegReturn(label);
+        // === v0.4.8 R45b (bugfix): R44 漏写 _soloAssetValue 联动, 导致资产值图不响应"只看某段"下拉 (用户原话 2026-07-07) ===
+        if (window._soloAssetValue) window._soloAssetValue(label);
         chart.update();
       };
       // === v0.4.8 R38a (Stage 6 bugfix): 从 segOverviewChart visibility 同步到 segMergedChart
@@ -371,6 +375,18 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
           pChart.setDatasetVisibility(idx, chart.isDatasetVisible(idx));
         });
         pChart.update();
+      };
+      // === v0.4.8 R45b (bugfix): PC Shift+单击图例路径也要同步 assetValueChart
+      // assetValueChart datasets: 30 段 + 1 基准线 (idx=30 永远 visible), 同步规则同 segReturnChart
+      window._syncAssetValueFromOverview = function() {
+        const avCanvas = document.querySelector('[data-chart-key="assetValueChart"]');
+        const avChart = avCanvas ? Chart.getChart(avCanvas) : null;
+        if (!avChart) return;
+        chart.data.datasets.forEach(function(_, idx) {
+          if (idx === 30) return;  // 基准线, 永远显示
+          avChart.setDatasetVisibility(idx, chart.isDatasetVisible(idx));
+        });
+        avChart.update();
       };
     };
 
