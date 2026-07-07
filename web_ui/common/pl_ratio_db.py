@@ -135,13 +135,18 @@ def load_pl_ratio_trend(
 
     for selection_date in recent_dates:
         # 复用 summary 算法 (generate_factor_summary_report.py:629-633)
+        # 显式守卫: selection_date 是 master 最晚日时 idx+1 越界,优雅跳过而非 IndexError
         try:
             idx = master_dates.index(selection_date)
-            trade_date = master_dates[idx + 1]
-        except (ValueError, IndexError):
+        except ValueError:
             if logger:
-                logger.debug("selection_date=%s 无 T+1 交易日, 跳过", selection_date)
+                logger.debug("selection_date=%s 不在 master dates, 跳过", selection_date)
             continue
+        if idx + 1 >= len(master_dates):
+            if logger:
+                logger.debug("selection_date=%s 是 master 最晚日, 无 T+1 交易日, 跳过", selection_date)
+            continue
+        trade_date = master_dates[idx + 1]
 
         ret_df = master[(master["date"] == trade_date) & master["forward_return_1d"].notna()]
         if ret_df.empty:
