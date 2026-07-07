@@ -213,6 +213,16 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
     <canvas id="segReturnChart" data-chart-key="segReturnChart" height="280"></canvas>
   </div>
   {% endif %}
+
+  {# === v0.4.8 R44 (Stage 6 新组件): 30 段每日复合资产值趋势 (geom compound, 起点 1.00, Y 轴 = 资产值) === #}
+  {# 算法: asset[0] = 1.00; asset[i+1] = asset[i] * (1 + seg_return[i+1]/100) · 数据源 = R43 seg_return trend (R44 geom compound) · 共用上方 toolbar (12/30/90/全部 + solo) #}
+  {% if asset_value_trend and asset_value_trend.get("segments") %}
+  <h3>30 段每日复合资产值趋势概览 (geom compound, 起点 1.00, Y 轴 = 资产值)</h3>
+  <p class="muted">v0.4.8 R44 数据源: 复用 R43 pl_ratio_trend (summary/result/segment_stock_details.parquet + data_fetchers/result/factor_ic_data.parquet 全市场) · <strong>算法: asset[0]=1.00 (起点=ssd 第一天), asset[i+1] = asset[i] × (1 + seg_return[i+1]/100)</strong> · 用户原话 2026-07-07: "初始 1 元, 第一天收益率多少后计算资产, 然后用这个资产再和第二天收益率计算" · 共用上方 toolbar · 与上一节 (seg_return %) 区别: 本节是链式复合 (geom compound), 不是每日 reset</p>
+  <div class="chart-wrap">
+    <canvas id="assetValueChart" data-chart-key="assetValueChart" height="280"></canvas>
+  </div>
+  {% endif %}
   <script>
   (function() {
     // R30-2 inspector fix: txt_s9_matrix.segments[].win_rates[] 是 30 段 × N 选股日完整数据
@@ -495,6 +505,87 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
           });
         }
         pChart.update();
+      };
+    };
+    {% endif %}
+
+    // === v0.4.8 R44 (Stage 6 新组件): assetValueChart factory (30 段每日复合资产值趋势, 共用上方 toolbar) ===
+    {% if asset_value_trend and asset_value_trend.get("segments") %}
+    const avSegs = {{ asset_value_trend.segments | tojson }} || [];
+    const avDates = {{ asset_value_trend.dates | tojson }} || [];
+    const avStartDate = {{ asset_value_trend.start_date | tojson }} || null;
+    const sortedAvSegs = [...avSegs].sort((a, b) => parseInt((a.label||'S0').replace(/\D/g, '')) - parseInt((b.label||'S0').replace(/\D/g, '')));
+    // 30 段资产值曲线 (含起点 1.00, 数据点长度 = dates.length + 1)
+    // x 轴 label = ['起点', ...dates] 让起点可见
+    const avDatasets = sortedAvSegs.slice(0, 30).map((s, i) => ({
+      label: s.label,
+      data: (s.asset_values || []).map(v => parseFloat(v) || 0),
+      borderColor: COLORS[i % COLORS.length],
+      backgroundColor: COLORS[i % COLORS.length] + '20',
+      pointRadius: isMobile ? 0 : 0,
+      pointHoverRadius: 4,
+      borderWidth: 1.5,
+      tension: 0.3
+    }));
+    // 1.00 基准线 (灰色横线, 表示本金)
+    avDatasets.push({
+      label: '本金 1.00',
+      data: Array((sortedAvSegs[0]?.asset_values || []).length || 1).fill(1.0),
+      borderColor: '#8b949e',
+      backgroundColor: 'rgba(0,0,0,0)',
+      pointRadius: 0,
+      borderWidth: 1,
+      borderDash: [4, 4],
+      tension: 0
+    });
+    const avLabels = avStartDate ? ['起点 ' + avStartDate].concat(avDates) : avDates;
+    window._chartFactories['assetValueChart'] = function(canvas) {
+      const avChart = new Chart(canvas, {
+        type: 'line',
+        data: { labels: avLabels.slice(-13), datasets: avDatasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { mode: 'index', intersect: false, itemSort: (a, b) => b.parsed.y - a.parsed.y }
+          },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: SENTRY.text, font: { size: isMobile ? 8 : 10 } } },
+            y: { grid: { color: SENTRY.grid }, ticks: { color: SENTRY.text, callback: (v) => v.toFixed(2) } }
+          },
+          interaction: { mode: 'nearest', intersect: false }
+        }
+      });
+      // 共用 toolbar 范围切换 (R44 与 R39a/R38 同 toolbar)
+      window._assetValueOverview = function(n) {
+        const len = Math.min(n + 1, avLabels.length);  // +1 因为含起点
+        const slicedLabels = avLabels.slice(-len);
+        avChart.data.labels = slicedLabels;
+        avChart.data.datasets.forEach((ds, i) => {
+          if (i === avDatasets.length - 1) {
+            // 基准线 dataset, 全程 1.00
+            ds.data = Array(len).fill(1.0);
+          } else {
+            const fullData = (sortedAvSegs[i].asset_values || []).map(v => parseFloat(v) || 0);
+            ds.data = fullData.slice(-len);
+          }
+        });
+        avChart.update();
+      };
+      // 共用 toolbar solo (R44 与 R39a 同 solo 模式)
+      window._soloAssetValue = function(label) {
+        if (!label) {
+          avChart.data.datasets.forEach((_, idx) => avChart.setDatasetVisibility(idx, true));
+        } else {
+          const ci = sortedAvSegs.findIndex(s => s.label === label);
+          if (ci < 0) return;
+          avChart.data.datasets.forEach((_, idx) => {
+            // idx === 30 = 基准线, 永远显示
+            if (idx === avDatasets.length - 1) avChart.setDatasetVisibility(idx, true);
+            else avChart.setDatasetVisibility(idx, idx === ci);
+          });
+        }
+        avChart.update();
       };
     };
     {% endif %}

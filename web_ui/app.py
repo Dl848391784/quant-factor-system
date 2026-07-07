@@ -57,6 +57,9 @@ from summary.report.freshness_check import (  # noqa: E402
     check_derived_data_freshness,
 )
 
+# v0.4.8 R44 (Stage 6 新组件): 30 段每日复合资产值 trend (geom compound over pl_ratio_trend)
+from web_ui.common.asset_value_db import load_asset_value_trend  # noqa: E402, F401
+
 # v0.4.8 R2a: web_ui 内部实现的辅助模块 (H1.1 严守: 不修改 data_loaders)
 from web_ui.common.lr_training_status import load_status as load_lr_status  # noqa: E402
 
@@ -194,6 +197,13 @@ def show_report(date: str):
     except Exception as e:
         logger.warning("load_pl_ratio_trend 失败: %s", e)
 
+    # v0.4.8 R44 (Stage 6 新组件): 30 段每日复合资产值 trend (geom compound over pl_ratio_trend)
+    asset_value_trend: dict | None = None
+    try:
+        asset_value_trend = load_asset_value_trend(logger=logger)
+    except Exception as e:
+        logger.warning("load_asset_value_trend 失败: %s", e)
+
     # v0.4.8 R7: 数据完整性检查 (零·)
     data_results: list[dict] = []
     derived_results: list[dict] = []
@@ -252,6 +262,7 @@ def show_report(date: str):
         txt_s10_segments=txt_s10_segments,
         merged_win_trend=merged_win_trend,
         pl_ratio_trend=pl_ratio_trend,
+        asset_value_trend=asset_value_trend,  # v0.4.8 R44
         intraday_fallback=intraday_fallback,
         data_results=data_results,
         derived_results=derived_results,

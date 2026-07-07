@@ -343,6 +343,7 @@ def mock_r38_merged_win_trend():
 def mock_r39_pl_ratio_trend():
     """v0.4.8 R39 (Stage 6): 全局 mock load_pl_ratio_trend = None
     默认 segPlRatioChart 不渲染, 测试 R39 渲染时显式 override
+    R44: asset_value_trend 通过 test_segment_win_asset_value_chart_skipped_when_no_data 默认 None 隐式测试
     """
     with patch("web_ui.app.load_pl_ratio_trend", return_value=None):
         yield
@@ -571,6 +572,101 @@ def test_segment_win_pl_ratio_chart_skipped_when_no_data(client, mock_obq_full_r
     # 新组件不存在
     assert "segPlRatioChart" not in body
     assert "_plRatioOverview" not in body
+
+
+def test_segment_win_renders_asset_value_chart(client, mock_obq_full_result):
+    """v0.4.8 R44 (Stage 6 新组件): 30 段每日复合资产值趋势 (assetValueChart) 渲染
+    数据源: 复用 R43 pl_ratio_trend (geom compound over R43)
+    算法: asset[0] = 1.00, asset[i+1] = asset[i] * (1 + seg_return[i+1]/100)
+    用户原话 2026-07-07: "初始 1 元, 第一天收益率多少后计算资产, 然后用这个资产再和第二天收益率计算"
+    Q1: 30 段各算各 (30 条曲线)
+    Q2: 起点 = ssd 第一天
+    Q3: 实战几何复合版 (链式乘法)
+    Q4: Y 轴 = 资产值
+    """
+    decile_mock = {
+        "selection_date": "2026-07-02",
+        "trade_date": "2026-07-03",
+        "n_total": 88,
+        "segments": [
+            {"label": f"D{i}", "n": 3, "win_rate": 60.0 + i, "avg_ret": 0.5, "pl_ratio": 1.2, "wins": 2, "losses": 1}
+            for i in range(1, 31)
+        ],
+    }
+    s9_mock = {
+        "dates": ["06-25", "06-26", "06-27"],
+        "segments": [{"label": f"S{i}", "win_rates": [55.0, 60.0, 58.0], "merged": 59.2} for i in range(1, 31)],
+        "best_segment": {"label": "S7", "merged": 59.6},
+    }
+    seg_return_mock = {
+        "dates": ["06-15", "06-16", "06-17"],
+        "segments": [{"label": f"S{i}", "pl_ratios": [1.23, -0.98, 1.45], "avg_pl_ratio": 1.22} for i in range(1, 31)],
+        "avg_line": [1.50, -1.45, 1.40],
+        "source": "summary_segment_stock_details_plus_master",
+    }
+    # R44: asset_value_trend 是 geom compound over R43
+    asset_value_mock = {
+        "dates": ["06-15", "06-16", "06-17"],
+        "start_date": "06-15",
+        "segments": [
+            {
+                "label": f"S{i}",
+                "asset_values": [1.0, 1.0123, 1.0024, 1.0170],  # geom compound 起点 + 3 天
+                "final_value": 1.0170,
+                "total_return_pct": 1.70,
+            }
+            for i in range(1, 31)
+        ],
+        "source": "summary_segment_stock_details_plus_master",
+    }
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_decile_stats", return_value=decile_mock),
+        patch("web_ui.app.parse_obq_s9", return_value=s9_mock),
+        patch("web_ui.app.load_pl_ratio_trend", return_value=seg_return_mock),
+        patch("web_ui.common.asset_value_db.load_pl_ratio_trend", return_value=seg_return_mock),  # R44 内部依赖
+        patch("web_ui.app.load_asset_value_trend", return_value=asset_value_mock),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 新组件渲染
+    assert "assetValueChart" in body  # canvas id
+    assert "30 段每日复合资产值趋势概览" in body  # h3 标题
+    assert "geom compound" in body  # 算法标识
+    # 数据契约 (mock 的 asset_values 进入 HTML)
+    assert "asset_values" in body
+    assert "final_value" in body
+    assert "total_return_pct" in body
+    # 工厂注册 (R31 lazy render)
+    assert "_chartFactories['assetValueChart']" in body
+    # 共用 toolbar 范围切换 + solo
+    assert "_assetValueOverview" in body
+    assert "_soloAssetValue" in body
+    # 本金 1.00 基准线
+    assert "本金 1.00" in body
+    assert "Array(len).fill(1.0)" in body
+    # 用户原话引用
+    assert "初始 1 元" in body
+
+
+def test_segment_win_asset_value_chart_skipped_when_no_data(client, mock_obq_full_result):
+    """v0.4.8 R44: asset_value_trend=None 时 assetValueChart 不渲染
+    (与 R42 pl_ratio_trend None 行为一致)
+    """
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_decile_stats", return_value=None),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 新组件不存在
+    assert "assetValueChart" not in body
+    assert "_assetValueOverview" not in body
+    assert "30 段每日复合资产值趋势概览" not in body
 
 
 def test_intraday_renders_rows(client, mock_obq_full_result):
