@@ -72,12 +72,23 @@ def test_index_redirects_to_report_latest(client):
     assert resp.headers["Location"] == "/report/latest"
 
 
-def test_report_latest_redirects_to_date(client, mock_obq_result):
-    """v0.4.8: GET /report/latest 302 → /report/<selection_date>"""
+def test_report_latest_returns_200_with_latest_report(client, mock_obq_result):
+    """v0.4.8 R46: GET /report/latest 直接 200 渲染最新报告 (不再 302 重定向)
+
+    用户原话: /report/latest 就是最近报告就好, 不用每次重定向 URL 发生变化。
+    历史行为: /report/latest → 302 → /report/<date>, URL 跟着日期变。
+    新行为: /report/latest → 200 + 最新报告内容, URL 始终是 /report/latest。
+    """
     with patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_result):
         resp = client.get("/report/latest", follow_redirects=False)
-    assert resp.status_code == 302
-    assert "/report/2026-07-03" in resp.headers["Location"]
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # 复用 /report/<date> 的渲染路径, 12 个 section 锚点都在
+    assert "section-freshness" in body
+    assert "section-ic" in body
+    assert "section-backtest" in body
+    # selection_date 在页面里 (来自 mock_obq_result)
+    assert "2026-07-03" in body
 
 
 def test_report_latest_404_when_no_data(client):

@@ -97,14 +97,13 @@ def index():
     return redirect("/report/latest")
 
 
-@app.route("/report/<date>")
-def show_report(date: str):
-    """v0.4.8: 展示 ob_quality 报告页 (固定 pipeline, 不再 ?pipeline= 切换)
+def _render_report(date: str):
+    """v0.4.8 R46: 渲染 ob_quality 报告页 (内部 helper, 抽离 /report/<date> 与 /report/latest 共用)
 
     Args:
-        date: YYYY-MM-DD 报告日期
+        date: YYYY-MM-DD 报告日期 (调用方已保证格式合法)
     """
-    # 简化的日期格式校验
+    # 简化的日期格式校验 (内部 helper 防御性 double-check)
     if len(date) != 10 or date[4] != "-" or date[7] != "-":
         abort(400, description=f"日期格式必须为 YYYY-MM-DD，收到: {date}")
 
@@ -277,14 +276,30 @@ def show_report(date: str):
     )
 
 
+@app.route("/report/<date>")
+def show_report(date: str):
+    """v0.4.8 R46: 展示 ob_quality 报告页 (固定 pipeline, 不再 ?pipeline= 切换)
+
+    Args:
+        date: YYYY-MM-DD 报告日期
+    """
+    return _render_report(date)
+
+
 @app.route("/report/latest")
 def show_report_latest():
-    """v0.4.8: 重定向到最新可用报告日期"""
+    """v0.4.8 R46: 直接 200 渲染最新可用报告 (用户原话: /report/latest 就是最近报告就好)
+
+    历史行为: 302 重定向到 /report/<date>, 浏览器每次跟随 302 → URL 变化 → 书签/分享的
+    "latest" URL 实际上指向特定日期, 重启服务器或换天后需要重新发链接。
+    新行为: 直接 200 渲染, URL 始终是 /report/latest 不变, 永远拿当前最新日期报告。
+    """
     result = load_stock_selection_result(logger=logger)
     if result is None or not result.get("meta", {}).get("selection_date"):
         logger.error("无法定位最新报告日期")
         abort(404)
-    return redirect(f"/report/{result['meta']['selection_date']}")
+    latest_date = result["meta"]["selection_date"]
+    return _render_report(latest_date)
 
 
 @app.after_request
