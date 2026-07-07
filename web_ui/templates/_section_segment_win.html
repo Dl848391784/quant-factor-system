@@ -180,8 +180,9 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
     <button type="button" class="corr-toolbar-btn" onclick="window._segOverview && window._segOverview(12)">最近 12 日</button>
     <button type="button" class="corr-toolbar-btn" onclick="window._segOverview && window._segOverview(30)">最近 30 日</button>
     <button type="button" class="corr-toolbar-btn" onclick="window._segOverview && window._segOverview(90)">最近 90 日</button>
+    {# R45 (用户原话 2026-07-07 "默认全部"): 4 个折线图 (overview/merged/return/assetValue) 全部用全部数据为默认值 #}
     <button type="button" class="corr-toolbar-btn" onclick="window._segOverview && window._segOverview(999)">全部</button>
-    <span class="corr-toolbar-hint" id="segOverviewCount">12 选股日 (默认 12)</span>
+    <span class="corr-toolbar-hint" id="segOverviewCount">全部 N 选股日 (默认 全部)</span>
   </div>
   <div class="corr-toolbar" style="margin-bottom: 12px;">
     <span class="corr-toolbar-label">只看某段 (PC: Shift+单击图例 / 移动: 选下拉):</span>
@@ -258,11 +259,11 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
       });
     }
     // === R31: 注册 factory + IntersectionObserver 懒渲染 ===
-    // R30-3: 默认 12, 按钮切 12/30/90/全部
+    // R30-3: 默认 12; R45 (用户原话 2026-07-07 "默认全部"): 改为默认全部
     window._chartFactories['segOverviewChart'] = function(canvas) {
       const chart = new Chart(canvas, {
         type: 'line',
-        data: { labels: allDates.slice(-12), datasets },
+        data: { labels: allDates.slice(), datasets },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: {
@@ -391,7 +392,8 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
     window._chartFactories['segMergedChart'] = function(canvas) {
       const mChart = new Chart(canvas, {
         type: 'line',
-        data: { labels: mergedDates.slice(-12), datasets: mergedDatasets },
+        // R45 (用户原话 2026-07-07 "默认全部"): 改为默认全部
+        data: { labels: mergedDates.slice(), datasets: mergedDatasets },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: {
@@ -461,7 +463,8 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
     window._chartFactories['segReturnChart'] = function(canvas) {
       const pChart = new Chart(canvas, {
         type: 'line',
-        data: { labels: plDates.slice(-12), datasets: plDatasets },
+        // R45 (用户原话 2026-07-07 "默认全部"): 改为默认全部
+        data: { labels: plDates.slice(), datasets: plDatasets },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: {
@@ -542,7 +545,8 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
     window._chartFactories['assetValueChart'] = function(canvas) {
       const avChart = new Chart(canvas, {
         type: 'line',
-        data: { labels: avLabels.slice(-13), datasets: avDatasets },
+        // R45 (用户原话 2026-07-07 "默认全部"): 改为默认全部 (avLabels 含 '起点' 1 个, 默认全显)
+        data: { labels: avLabels.slice(), datasets: avDatasets },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: {
