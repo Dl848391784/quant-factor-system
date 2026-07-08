@@ -45,3 +45,10 @@ temporary/
 
 # Codegraph
 .codegraph/codegraph.lock
+
+# v0.4.8 R49 (Round 6 字面 "key 写在本地配置 + 不要在脚本里不安全"): API key 落地保护
+.env
+summary/.env
+web_ui/.env
+*.env.local
+.env.*
