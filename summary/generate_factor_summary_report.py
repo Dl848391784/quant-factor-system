@@ -543,15 +543,30 @@ def _save_today_segment_details(
     if not comp_dates:
         return
     selection_date = str(comp_dates[-1])
-    day_df = comp_df[comp_df["date"].astype(str) == selection_date].copy()
+    # R48 bugfix v1.5.18: dropna composite_factor 先, 防 NaN rank 让 qcut 抛 ValueError.
+    # 历史上 5 个 NaN 让 46 行 → 41 行整数 rank 切 30 段 → bin edges 撞到 40.0 重复
+    # → qcut ValueError → except: return 静默吞掉 → 报告 §10 用昨天的 dates[-1] 冒充今天.
+    day_df = comp_df[comp_df["date"].astype(str) == selection_date].dropna(subset=["composite_factor"]).copy()
     if len(day_df) < 20:
+        logger.debug(
+            "composite daily %s NaN-dropped 后样本数 < 20 (raw=%d), 跳过落库",
+            selection_date,
+            len(comp_df[comp_df["date"].astype(str) == selection_date]),
+        )
         return
 
     n_segments = 30
-    day_df["rank"] = day_df["composite_factor"].rank(ascending=False)
+    day_df["rank"] = day_df["composite_factor"].rank(ascending=False, method="first")
     try:
         day_df["seg"] = pd.qcut(day_df["rank"], n_segments, labels=[f"S{i + 1}" for i in range(n_segments)])
     except ValueError:
+        # R48 bugfix v1.5.18: 不能 silent return. 让异常对运维可见, 否则下一次
+        # 类似 41 行切 30 段的 boundary 重复 case 还会被静默吞掉.
+        logger.exception(
+            "qcut 30 段失败 (selection_date=%s, %d 行有效 rank), 跳过落库. 详见 stock_result 完整性.",
+            selection_date,
+            len(day_df),
+        )
         return
 
     # 按段分组
@@ -885,6 +900,12 @@ def _render_today_best_segment_candidates(
 
     从 segment_stock_details.parquet 读取最新日期的股票明细（T 日已落库），
     每段展示股票明细 + 历史合并胜率.
+
+    R48 bugfix v1.5.18: 引入 expected_date vs actual_date 区分.
+    expected_date = stock_result 的 meta.select_xxx_date (T 日应有日期).
+    actual_date = segment_stock_details 里实际最晚的日期.
+    如果不等 (e.g. T 日落库没成功), 报告头标 [⚠️ fallback], 让 user 一眼能看到.
+    之前 R47 silent fallback bug: dates[-1] = 07-06 冒充 07-07, 无任何标记.
     """
     weight_method = (stock_result.get("meta", {}) or {}).get("weight_method", "rolling_icir_weight")
 
@@ -900,13 +921,47 @@ def _render_today_best_segment_candidates(
     if n_stocks == 0:
         return
 
+    # R48: 检测 silent fallback. expected = selection_date (T-1 友好表达, 这里用 stock_result
+    # 最近一次 selection_date; R47 root case 07-08 报告应有 selection_date=2026-07-07).
+    # stock_result.get('meta') 没有 selection_date 字段, fallback 用 date 参数 (报告生成日) 或 today_str().
+    # 设计意图: expected_date 不是用来强校验, 而是用来"今天应有日期 vs 实际最晚"对比.
+    expected_date = stock_result.get("selection_date")
+    if not expected_date:
+        # 从 stock_result 取 weight_selection_result.json 里的 date
+        try:
+            wm_results = stock_result.get("weight_selection_results", [])
+            for wm in wm_results:
+                if wm.get("weight_method") == weight_method:
+                    expected_date = wm.get("selection_date")
+                    break
+        except (AttributeError, TypeError):
+            pass
+    if not expected_date:
+        # 最后保底: 用 stock_result 任意顶层 date 字段
+        expected_date = stock_result.get("date") or stock_result.get("target_date") or stock_result.get("report_date")
+    if not expected_date:
+        expected_date = latest  # 实在拿不到就认命, 不强标 fallback
+
+    is_fallback = str(expected_date) != str(latest)
+
     n_segments = 30
     name_map = stock_name_map or {}
+
+    # R48 v1.5.18: 报告头加 expected_date 标注 + fallback 警示
+    if is_fallback:
+        fallback_note = (
+            f"  [⚠️ fallback] 应有选股日 {expected_date} 在 segment_stock_details 缺失, "
+            f"实际展示最晚一日 {latest} (数据回退, 不是今天)"
+        )
+    else:
+        fallback_note = ""
 
     lines.append("")
     lines.append("十、今日三十分段候选明细")
     lines.append("-" * 70)
     lines.append(f"  选股日: {latest}, 候选池共 {n_stocks} 只, 切 {n_segments} 段")
+    if fallback_note:
+        lines.append(fallback_note)
     lines.append(f"  权重方法: {weight_method}")
     lines.append("  操作: 今日尾盘买入 -> 下一交易日卖出 (高开开盘锁利, 低开等反抽减亏)")
     lines.append("")

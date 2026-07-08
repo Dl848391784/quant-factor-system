@@ -1793,5 +1793,231 @@ class TestComputePendingWinRatesDataSource:
         assert "alias" in doc.lower(), "docstring 应明确说 不用 alias 切片 的理由"
 
 
+class TestSaveTodaySegmentDetailsR48:
+    """R48 bugfix v1.5.18: _save_today_segment_details 上游防御 + 异常可见.
+
+    历史 root case (2026-07-08): 5 行 composite NaN 让 46 行 qcut(30) 抛
+    Bin edges must be unique ValueError, except: return 静默吞掉, 没任何 log,
+    导致 summary/result/segment_stock_details.parquet 缺 07-07 行, 报告 §10
+    用 07-06 冒充 07-07. R48 修: (a) dropna composite_factor 先, (b) 加
+    logger.exception 让 ValueError 可见.
+    """
+
+    def _write_daily(self, tmp_path, n_total, n_nan, date):
+        """写临时 composite_rolling_icir_weight_1d_daily.parquet 到 tmp_path."""
+        import pandas as pd
+
+        rng = list(range(n_total))
+        comp = [1.0 - i * 0.05 for i in rng]
+        for i in range(n_nan):
+            comp[n_total - 1 - i] = float("nan")
+        assets = [f"{600000 + i:06d}" for i in rng]
+        df = pd.DataFrame(
+            {
+                "date": [date] * n_total,
+                "asset": assets,
+                "composite_factor": comp,
+            }
+        )
+        path = tmp_path / "composite_rolling_icir_weight_1d_daily.parquet"
+        df.to_parquet(path)
+        return path
+
+    def test_drops_nan_and_proceeds_to_qcut(self, tmp_path, monkeypatch):
+        """A 修: 46 行含 5 NaN, dropna 后 41 行 → save 应被调用 1 次 (vs R47 静默 0 次)."""
+        import logging
+
+        from summary import generate_factor_summary_report as mod
+        from summary.report import segment_win_db
+
+        self._write_daily(tmp_path, n_total=46, n_nan=5, date="2026-07-07")
+        import paths
+
+        monkeypatch.setattr(paths, "COMPREHENSIVE_FACTOR_RESULT", tmp_path)
+        seg_path = tmp_path / "segment_stock_details.parquet"
+        saved_calls = []
+
+        def fake_save(pipeline, weight_method, selection_date, seg_stocks, file_path=None):
+            segment_win_db.save_segment_stock_details(
+                pipeline, weight_method, selection_date, seg_stocks, file_path=seg_path
+            )
+            saved_calls.append(
+                {
+                    "selection_date": selection_date,
+                    "n_segments": len(seg_stocks),
+                    "n_total": sum(len(v) for v in seg_stocks.values()),
+                }
+            )
+
+        monkeypatch.setattr(mod, "save_segment_stock_details", fake_save)
+
+        mod._save_today_segment_details(
+            {"meta": {"weight_method": "rolling_icir_weight"}},
+            logging.getLogger("generate_factor_summary_report"),
+        )
+
+        assert len(saved_calls) == 1, (
+            f"R47 silent swallow bug 复现: save 应被调 1 次, 实际 {len(saved_calls)} 次. calls={saved_calls}"
+        )
+        call = saved_calls[0]
+        assert call["selection_date"] == "2026-07-07"
+        assert call["n_total"] == 41, f"dropna 后应为 41 行, 实际 {call['n_total']}"
+
+    def test_logs_exception_when_qcut_still_fails(self, tmp_path, monkeypatch, caplog):
+        """A 修: qcut 抛 ValueError 时必须 logger.exception 让运维可见 (R47 silent swallow 修复)."""
+        import logging
+
+        from summary import generate_factor_summary_report as mod
+
+        self._write_daily(tmp_path, n_total=20, n_nan=0, date="2026-07-07")
+        import paths
+
+        monkeypatch.setattr(paths, "COMPREHENSIVE_FACTOR_RESULT", tmp_path)
+
+        # monkeypatch pd.qcut 抛 ValueError 模拟边界 case.
+        import pandas as pd
+
+        def fake_qcut(*args, **kwargs):
+            raise ValueError("Bin edges must be unique (simulated for R48 test)")
+
+        monkeypatch.setattr(pd, "qcut", fake_qcut)
+
+        saved_calls = []
+
+        def fake_save(pipeline, weight_method, selection_date, seg_stocks, file_path=None):
+            saved_calls.append(selection_date)
+
+        monkeypatch.setattr(mod, "save_segment_stock_details", fake_save)
+
+        caplog.set_level(logging.DEBUG, logger="generate_factor_summary_report")
+        mod._save_today_segment_details(
+            {"meta": {"weight_method": "rolling_icir_weight"}},
+            logging.getLogger("generate_factor_summary_report"),
+        )
+
+        # save 不被调用
+        assert saved_calls == [], f"qcut 失败时 save 不应被调用, 实际 {saved_calls}"
+
+        # ERROR 日志含 'qcut 30 段失败' 且 exc_info 不为 None
+        error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert error_records, f"应有 ERROR 日志, 实际:\n{caplog.text}"
+        msg_combined = "\n".join(r.getMessage() for r in error_records)
+        assert "qcut 30 段失败" in msg_combined, f"ERROR 日志应含 'qcut 30 段失败', 实际: {msg_combined}"
+        has_exc = any(r.exc_info is not None for r in error_records)
+        assert has_exc, (
+            "logger.exception 必须带 exc_info (堆栈). R47 silent swallow bug 复现 "
+            "(except ValueError: return 把堆栈丢了)"
+        )
+        # 验证 exc 里确实有 ValueError
+        exc_types = [r.exc_info[0] for r in error_records if r.exc_info]
+        assert ValueError in exc_types, f"exc_info 应含 ValueError 类型, 实际: {exc_types}"
+
+    def test_skips_when_dropna_below_threshold_with_debug_log(self, tmp_path, monkeypatch, caplog):
+        """A 修: dropna 后 < 20 行应跳过 + DEBUG log."""
+        import logging
+
+        from summary import generate_factor_summary_report as mod
+        from summary.report import segment_win_db
+
+        self._write_daily(tmp_path, n_total=28, n_nan=9, date="2026-07-07")
+        import paths
+
+        monkeypatch.setattr(paths, "COMPREHENSIVE_FACTOR_RESULT", tmp_path)
+        saved_calls = []
+
+        def fake_save(pipeline, weight_method, selection_date, seg_stocks, file_path=None):
+            saved_calls.append(selection_date)
+
+        monkeypatch.setattr(mod, "save_segment_stock_details", fake_save)
+
+        caplog.set_level(logging.DEBUG, logger="generate_factor_summary_report")
+        mod._save_today_segment_details(
+            {"meta": {"weight_method": "rolling_icir_weight"}},
+            logging.getLogger("generate_factor_summary_report"),
+        )
+
+        assert saved_calls == [], f"样本 < 20 时 save 不应被调用, 实际 {saved_calls}"
+        debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG]
+        debug_text = "\n".join(r.getMessage() for r in debug_records)
+        assert "NaN-dropped 后样本数 < 20" in debug_text, f"应 DEBUG log '样本数 < 20', 实际: {debug_text[:500]}"
+
+
+class TestRenderTodaySegmentCandidatesFallbackR48:
+    """R48 bugfix v1.5.18: _render_today_best_segment_candidates 下游 silent fallback 标记.
+
+    历史 root case (07-08 报告): expected_date=2026-07-07 但 segment_stock_details
+    只有 07-06 → dates[-1] 静默回退到 07-06, 报告头 '选股日: 2026-07-06' 看似正常
+    实则错位. R48 修: 显式 expected vs actual 对比 + [⚠️ fallback] 标记.
+    """
+
+    def _build_stock_at(self, file_path, dates):
+        from summary.report.segment_win_db import save_segment_stock_details
+
+        seg_stocks = {
+            f"S{i + 1}": [{"asset": f"{600000 + i:03d}000", "composite_value": 1.0 - i * 0.01, "rank": i + 1}]
+            for i in range(15)
+        }
+        for d in dates:
+            save_segment_stock_details("ob_quality", "rolling_icir_weight", d, seg_stocks, file_path=file_path)
+
+    def test_marks_fallback_when_today_selection_date_missing(self, tmp_path, monkeypatch):
+        """stock_result 期望 07-07, 但 parquet 只有 07-06 → 报告头应含 [⚠️ fallback] 标记."""
+        from summary import generate_factor_summary_report as mod
+        from summary.report import segment_win_db
+
+        seg_path = tmp_path / "segment_stock_details.parquet"
+        self._build_stock_at(seg_path, ["2026-07-06"])
+
+        def fake_load(pipeline, selection_date=None, weight_method=None, file_path=None):
+            return segment_win_db.load_segment_stock_details(
+                pipeline, selection_date, weight_method, file_path=seg_path
+            )
+
+        monkeypatch.setattr(mod, "load_segment_stock_details", fake_load)
+
+        stock_result = {
+            "meta": {"weight_method": "rolling_icir_weight"},
+            "selection_date": "2026-07-07",
+            "weight_selection_results": [{"weight_method": "rolling_icir_weight", "selection_date": "2026-07-07"}],
+        }
+        lines = []
+        mod._render_today_best_segment_candidates(lines, stock_result, None, None)
+
+        joined = "\n".join(lines)
+        assert "[⚠️ fallback]" in joined, f"应标 [⚠️ fallback], 实际:\n{joined[:600]}"
+        assert "2026-07-07" in joined and "2026-07-06" in joined, (
+            f"应同时含 expected_date (2026-07-07) 和 actual_latest (2026-07-06), 实际:\n{joined[:600]}"
+        )
+        assert "数据回退" in joined or "不是今天" in joined, f"应说明 '数据回退/不是今天', 实际:\n{joined[:600]}"
+
+    def test_no_fallback_mark_when_actual_matches_expected(self, tmp_path, monkeypatch):
+        """正向用例: expected_date == latest → 无 fallback 标记."""
+        from summary import generate_factor_summary_report as mod
+        from summary.report import segment_win_db
+
+        seg_path = tmp_path / "segment_stock_details.parquet"
+        self._build_stock_at(seg_path, ["2026-07-07"])
+
+        def fake_load(pipeline, selection_date=None, weight_method=None, file_path=None):
+            return segment_win_db.load_segment_stock_details(
+                pipeline, selection_date, weight_method, file_path=seg_path
+            )
+
+        monkeypatch.setattr(mod, "load_segment_stock_details", fake_load)
+
+        stock_result = {
+            "meta": {"weight_method": "rolling_icir_weight"},
+            "selection_date": "2026-07-07",
+            "weight_selection_results": [{"weight_method": "rolling_icir_weight", "selection_date": "2026-07-07"}],
+        }
+        lines = []
+        mod._render_today_best_segment_candidates(lines, stock_result, None, None)
+
+        joined = "\n".join(lines)
+        assert "[⚠️ fallback]" not in joined, f"actual=expected 时不应标 fallback, 实际:\n{joined[:600]}"
+        assert "选股日: 2026-07-07" in joined
+        assert "数据回退" not in joined
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
