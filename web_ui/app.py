@@ -67,6 +67,7 @@ from web_ui.common.lr_training_status import load_status as load_lr_status  # no
 # R39 原算法 wins.mean/|losses.mean| (盈亏比) 用户反馈方向错, 改为简单算术平均收益率
 # H1.1 严守 + §18 fork pattern: web_ui 内部读 parquet, 不修改 data_loaders / summary 模块
 from web_ui.common.pl_ratio_db import load_pl_ratio_trend  # 函数名保留 (R39a 内部已重写算法)  # noqa: E402
+from web_ui.common.segment_ai_db import load_segment_ai_decisions  # noqa: E402, F401  # v0.4.8 R49
 
 # v0.4.8 R38 (Stage 6): 30 段合并胜率趋势概览 (从 segment_win_rates.parquet 算 cumsum)
 # H1.1 严守 + §18 fork pattern: web_ui 内部读 parquet, 不修改 summary 模块
@@ -203,6 +204,18 @@ def _render_report(date: str):
     except Exception as e:
         logger.warning("load_asset_value_trend 失败: %s", e)
 
+    # v0.4.8 R49 (用户原话 2026-07-08 "web_ui 资产值图组件下方展示"):
+    # 30 段 AI 客观分析师角色 LLM 决策 + 反思. 失败 fallback to None (R38 模式)
+    segment_ai_decisions: dict | None = None
+    try:
+        segment_ai_decisions = load_segment_ai_decisions(
+            pipeline="ob_quality",
+            weight_method="rolling_icir_weight",
+            logger=logger,
+        )
+    except Exception as e:
+        logger.warning("load_segment_ai_decisions 失败: %s", e)
+
     # v0.4.8 R7: 数据完整性检查 (零·)
     data_results: list[dict] = []
     derived_results: list[dict] = []
@@ -262,6 +275,7 @@ def _render_report(date: str):
         merged_win_trend=merged_win_trend,
         pl_ratio_trend=pl_ratio_trend,
         asset_value_trend=asset_value_trend,  # v0.4.8 R44
+        segment_ai_decisions=segment_ai_decisions,  # v0.4.8 R49 (Round 1 "web_ui 资产值图组件下方展示")
         intraday_fallback=intraday_fallback,
         data_results=data_results,
         derived_results=derived_results,

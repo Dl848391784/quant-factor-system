@@ -224,6 +224,74 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
     <canvas id="assetValueChart" data-chart-key="assetValueChart" height="280"></canvas>
   </div>
   {% endif %}
+
+  {# === v0.4.8 R49 (Stage 6 用户原话 2026-07-08 "资产值图组件下方展示"): 30 段 AI 客观分析师角色决策 === #}
+  {# 算法: 30 段同模板客观分析师 (Round 3 字面 "公正公平不带有性格色彩") + LLM (MiniMax-M3, Anthropic Messages API via requests, base_url=/anthropic) #}
+  {# 决策 = operate/skip + confidence + reasoning; fixed action: T 日尾盘买 / T+1 尾盘卖 (PROJECT.md 实战交易规则) #}
+  {% if segment_ai_decisions and segment_ai_decisions.get("source") == "parquet" %}
+    <h3 id="section-ai-decisions">30 段 AI 客观分析师角色决策 (T 日尾盘买 / T+1 尾盘卖)</h3>
+    <p class="muted">v0.4.8 R49 数据源: summary/result/rolling_icir_weight/segment_ai_simulation.parquet (R49a-1 落地) · 30 段各自决策 operate/skip · Round 3 字面约束: 30 段同模板客观分析师 (公正公平不带有性格色彩) · 决策含义: <strong>operate</strong> = T 日尾盘等权买入该段当日资产清单 + <strong>T+1 尾盘卖出</strong> · <strong>skip</strong> = 今天不操作 · 实测: 模型 MiniMax-M3 via Anthropic Messages API (base_url=…/anthropic) · 用户原话 2026-07-08: "每个 AI 自己判断今天是否按照该段推荐买入"</p>
+    <div class="meta-box">
+      <p>
+        <strong>共 {{ segment_ai_decisions["segments"] | length }} 段</strong>
+        · 共 <strong>{{ segment_ai_decisions["dates"] | length }} 个选股日</strong>
+        · 数据源 <strong>{{ segment_ai_decisions["source"] }}</strong>
+        {% if segment_ai_decisions.get("fallback_warning") %}
+          · <span style="color:#f0883e;font-weight:700">{{ segment_ai_decisions["fallback_warning"] }}</span>
+        {% endif %}
+      </p>
+    </div>
+    <div class="data-table-wrap">
+    <table class="data-table numeric">
+      <thead>
+        <tr>
+          <th>段</th>
+          <th>operate 次数</th>
+          <th>skip 次数</th>
+          <th>总次数</th>
+          <th>operate 占比</th>
+          <th>最新决策</th>
+          <th>最新 confidence</th>
+          <th>最新 reasoning (节选)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for seg in segment_ai_decisions["segments"] %}
+          {% set operate_count = seg["decisions"] | selectattr("equalto", "operate") | list | length %}
+          {% set skip_count = seg["decisions"] | selectattr("equalto", "skip") | list | length %}
+          {% set total_count = seg["decisions"] | length %}
+          {% set operate_pct = (operate_count / total_count * 100) if total_count > 0 else 0 %}
+          <tr>
+            <td><strong>{{ seg["label"] }}</strong></td>
+            <td style="color:#3fb950;font-weight:700">{{ operate_count }}</td>
+            <td style="color:#f85149;font-weight:700">{{ skip_count }}</td>
+            <td>{{ total_count }}</td>
+            <td>
+              <span style="color:{% if operate_pct >= 60 %}#3fb950{% elif operate_pct >= 40 %}#f0883e{% else %}#f85149{% endif %};font-weight:700">
+                {{ "%.1f" | format(operate_pct) }}%
+              </span>
+            </td>
+            <td>
+              {% if seg["latest_decision"] == "operate" %}
+                <span style="color:#3fb950;font-weight:700">⚙ operate</span>
+              {% elif seg["latest_decision"] == "skip" %}
+                <span style="color:#f85149;font-weight:700">⊘ skip</span>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td>{{ "%.2f" | format(seg["latest_confidence"]) if seg["latest_confidence"] is not none else "—" }}</td>
+            <td style="max-width:600px">{{ seg["latest_reasoning"][:200] }}{% if seg["latest_reasoning"] | length > 200 %}…{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% elif segment_ai_decisions and segment_ai_decisions.get("source") == "missing" %}
+    <h3 id="section-ai-decisions">30 段 AI 客观分析师角色决策 (T 日尾盘买 / T+1 尾盘卖)</h3>
+    <p class="muted" style="color:#f0883e;font-weight:700">{{ segment_ai_decisions["fallback_warning"] }}</p>
+  {% endif %}
+
   <script>
   (function() {
     // R30-2 inspector fix: txt_s9_matrix.segments[].win_rates[] 是 30 段 × N 选股日完整数据
