@@ -233,9 +233,29 @@ def _parse_minimax_response(data: dict[str, Any], model: str) -> dict[str, Any]:
         if not text:
             raise ValueError("empty text in content[0]")
 
+        # Strip markdown JSON code fences if present (LLM may wrap JSON in ```json ... ```).
+        # 实测 2026-07-08: MiniMax-M3 倾向 3 种输出格式:
+        #   1. ```json\n{...}\n``` (开头 ```json + 换行)
+        #   2. ```\n{...}\n``` (开头 ``` + 换行)
+        #   3. ```json{...}``` (开头 ```json 无换行, 直接 JSON)
+        stripped = text.strip()
+        if stripped.startswith("```"):
+            # 1) 切掉开头的 ``` / ```json (找第一个空白或非字母数字字符)
+            rest = stripped[3:]
+            # 跳过 ``` 后可能有的 json 字眼
+            if rest.lower().startswith("json"):
+                rest = rest[4:]
+            # 跳过可选的换行/空格
+            while rest and rest[0] in ("\n", "\r", " ", "\t"):
+                rest = rest[1:]
+            # 2) 切掉结尾的 ```
+            if rest.endswith("```"):
+                rest = rest[:-3]
+            stripped = rest.strip()
+
         # 尝试解析 JSON (system prompt 强制 JSON schema)
         try:
-            parsed = json.loads(text)
+            parsed = json.loads(stripped)
         except json.JSONDecodeError:
             # fallback: 把 text 包到 reasoning 里, decision 默认为 skip
             logger.warning(
@@ -249,8 +269,6 @@ def _parse_minimax_response(data: dict[str, Any], model: str) -> dict[str, Any]:
                 "reasoning": (f"[⚠️ LLM 响应非 JSON (model={model}, text={text[:100]})]"),
                 "data_observations": [],
             }
-
-        # 校验必需字段
         if not isinstance(parsed, dict):
             raise ValueError(f"response is not a dict: {type(parsed)}")
         decision = parsed.get("decision", "skip")

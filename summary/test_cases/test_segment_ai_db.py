@@ -177,7 +177,44 @@ def test_minimax_parse_response_invalid_json_falls_back():
     assert "[⚠️" in parsed["reasoning"]
 
 
-# ════════════════════════════════════════════════════════════════════
+def test_minimax_parse_response_strips_markdown_code_fences():
+    """实测 2026-07-08 MiniMax-M3 输出 ```json\\n{...}\\n``` markdown fence — parser 必须先 strip。
+
+    R49 实战锚点: 实跑发现 markdown fence 不 strip → json.loads 失败 → fallback skip + confidence=0
+    (vs 真实 confidence 0.55-0.72). 这是 R49 业务调用 100% 命中场景必须修的 bug.
+
+    v1.5.19 v1.5.21 R47 实战: 真实 LLM call 前必有真实 API call 验证, 不凭印象答.
+    """
+    # 测试 3 种 markdown fence 格式 + 1 个裸 JSON (control case)
+    markdown_responses = [
+        # 形式 1: ```json \\n { ... } \\n```
+        _fake_minimax_ok_response(
+            '```json\n{"decision": "operate", "confidence": 0.62, "reasoning": "测试 markdown fence 1", "data_observations": []}\n```'
+        ),
+        # 形式 2: ``` \\n { ... } \\n``` (没 json 字眼)
+        _fake_minimax_ok_response(
+            '```\n{"decision": "skip", "confidence": 0.45, "reasoning": "测试 markdown fence 2", "data_observations": []}\n```'
+        ),
+        # 形式 3: ```json{...}``` (无空格直接 JSON)
+        _fake_minimax_ok_response(
+            '```json{"decision": "operate", "confidence": 0.78, "reasoning": "测试 markdown 3", "data_observations": []}```'
+        ),
+        # control case: 裸 JSON (之前一直 work)
+        _fake_minimax_ok_response(
+            '{"decision": "operate", "confidence": 0.91, "reasoning": "裸 JSON", "data_observations": []}'
+        ),
+    ]
+    expected_decisions = ["operate", "skip", "operate", "operate"]
+    expected_confidences = [0.62, 0.45, 0.78, 0.91]
+    for resp, exp_d, exp_c in zip(markdown_responses, expected_decisions, expected_confidences):
+        parsed = _parse_minimax_response(resp, model=DEFAULT_MODEL)
+        assert parsed["decision"] == exp_d, f"markdown fence parse fail: got {parsed['decision']}"
+        assert abs(parsed["confidence"] - exp_c) < 0.01, (
+            f"markdown fence conf: got {parsed['confidence']}, expected {exp_c}"
+        )
+        assert "[⚠️" not in parsed["reasoning"], "markdown fence should not trigger fallback"
+
+
 # Test 2: Role prompt Round 3 字面约束 — 30 段同模板 + 不含性格关键字
 # ════════════════════════════════════════════════════════════════════
 
