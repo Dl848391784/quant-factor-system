@@ -802,6 +802,93 @@ def _compute_pending_intraday_strategy(
         )
 
 
+# ════════════════════════════════════════════════════════════════════
+# v0.4.8 R49 (用户原话 2026-07-08): 30 段 AI 客观分析师角色 LLM 调度
+# ════════════════════════════════════════════════════════════════════
+
+
+def _compute_pending_segment_ai_simulation(
+    pipeline: str,
+    weight_method: str,
+    selection_date: str,
+    trade_date: str,
+    logger: logging.Logger,
+) -> None:
+    """D+1: 调 LLM 为 30 段 S1~S30 各生成一条 operate/skip 决策, 落 parquet.
+
+    设计 (跟 _compute_pending_intraday_strategy 完全类比):
+      - 数据需求: 4 曲线 (每日胜率 / 每日收益 / 合并胜率 / 合并收益) 来自
+        segment_win_rates.parquet + segment_stock_details.parquet + master forward_return_1d
+      - 30 段独立决策 (Round 3 字面 "公正公平不带有性格色彩"), 每段调 1 次 LLM
+      - 失败时单段 [⚠️ fallback] (R47 silent fallback 防御), 不拖垮全段
+      - 总耗时预期: 30 段 × ~3-5s/段 (含网络) ≈ 1-3 分钟
+
+    Args:
+        pipeline: 'ob_quality'
+        weight_method: 'rolling_icir_weight' / 'ic_weight'
+        selection_date: T 日 (YYYY-MM-DD)
+        trade_date: T+1 日
+        logger: 日志记录器
+
+    Returns:
+        None
+    """
+    try:
+        from summary.report.llm_provider import MinMaxClient
+        from summary.report.segment_ai_db import (
+            run_segment_ai_simulation,
+            save_segment_ai_simulation,
+        )
+    except ImportError:
+        logger.debug("_compute_pending_segment_ai_simulation: 模块不可用, 跳过")
+        return
+
+    try:
+        # 1. 跑 30 段决策 (调用 MiniMax-M3)
+        client = MinMaxClient()
+        rows = run_segment_ai_simulation(
+            selection_date=selection_date,
+            trade_date=trade_date,
+            weight_method=weight_method,
+            pipeline=pipeline,
+            history_window=5,
+            n_segments=30,
+            client=client,
+        )
+    except Exception:
+        # R47 silent fallback: 失败时静默 skip, 不让 LLM 错误拖垮主报告
+        logger.debug(
+            "_compute_pending_segment_ai_simulation: %s/%s LLM 调用失败, 跳过",
+            pipeline,
+            selection_date,
+        )
+        return
+
+    if not rows:
+        logger.debug(
+            "_compute_pending_segment_ai_simulation: %s/%s 数据缺失, 跳过",
+            pipeline,
+            selection_date,
+        )
+        return
+
+    try:
+        # 2. 落 parquet
+        save_segment_ai_simulation(rows, weight_method=weight_method)
+        logger.info(
+            "_compute_pending_segment_ai_simulation: %s/%s/%s 完成 30 段 LLM 决策",
+            pipeline,
+            weight_method,
+            selection_date,
+        )
+    except Exception:
+        logger.exception(
+            "_compute_pending_segment_ai_simulation: %s/%s 写 parquet 失败",
+            pipeline,
+            selection_date,
+        )
+
+
 def _render_cross_pipeline_summary(
     lines: list[str],
     stock_result: dict,
@@ -1030,6 +1117,30 @@ def main():
     except OSError as e:
         logger.error("文件写入失败: %s, 原因: %s", output_path, e)
         sys.exit(1)
+
+    # v0.4.8 R49 (用户原话 2026-07-08 "执行 generate_factor_summary_report.py 时执行"):
+    # 30 段 AI 客观分析师角色 LLM 调度 — D 日 date = T 日, trade_date = master 中 T 日的下一天
+    try:
+        import pandas as pd
+        from paths import FACTOR_IC_DATA_MASTER
+
+        _master_dates = sorted(pd.read_parquet(FACTOR_IC_DATA_MASTER, columns=["date"])["date"].dropna().unique())
+        _idx = _master_dates.index(date)
+        _trade_date = str(_master_dates[_idx + 1]) if _idx + 1 < len(_master_dates) else None
+    except (ValueError, KeyError, IndexError, Exception):
+        _trade_date = None
+    if _trade_date:
+        try:
+            _compute_pending_segment_ai_simulation(
+                pipeline="ob_quality",
+                weight_method="rolling_icir_weight",
+                selection_date=date,
+                trade_date=_trade_date,
+                logger=logger,
+            )
+        except Exception:
+            # R47 silent fallback: 失败时静默 skip, 不让 LLM 错误拖垮主报告
+            logger.debug("main: _compute_pending_segment_ai_simulation 失败, 跳过 (不拖垮主报告)")
 
     # 记录总耗时
     elapsed = time.time() - start_time
