@@ -214,8 +214,7 @@ def compute_one_segment_decision(
     segment_label: str,
     selection_date: str,
     trade_date: str,
-    daily_data: dict[str, Any],
-    history_data: dict[str, Any],
+    segment_data: dict[str, Any],
     weight_method: str = _DEFAULT_WEIGHT_METHOD,
     pipeline: str = _DEFAULT_PIPELINE,
     history_window: int = _DEFAULT_HISTORY_WINDOW,
@@ -224,12 +223,15 @@ def compute_one_segment_decision(
 ) -> dict[str, Any]:
     """Compute 1 segment × 1 day 的 AI decision + 落盘 1 行数据.
 
+    R49f: segment_data = read_segment_data_for_decision() 返回的 5 字段 dict:
+      daily_win_rates, merged_win_rates, daily_return_pcts,
+      merged_asset_values, today_stock_recommendations
+
     Args:
         segment_label: 'S1' ~ 'S30'
         selection_date: T 日
         trade_date: T+1 日
-        daily_data: 当日胜率/收益率 + 累计胜率/累计资产 (4 字段)
-        history_data: 历史 4 曲线 + 起止日期
+        segment_data: 5 字段 dict (R49f 新接口, 替代旧 daily_data + history_data)
         weight_method: 'rolling_icir_weight' (默认)
         pipeline: 'ob_quality' (默认)
         history_window: 决策看的历史天数
@@ -238,21 +240,16 @@ def compute_one_segment_decision(
 
     Returns:
         行 dict, keys = SEGMENT_AI_COLUMNS, ready for save_segment_ai_simulation
-
-    R47 v1.5.18 silent fallback 防御:
-        - LLM call 失败: client.call() 返回 fallback dict, 决策层**只**继续 (不重试, 不抛)
-        - 不允许 return None 假装成功
     """
     if client is None:
         client = MinMaxClient()
 
-    # Round 3 字面: 30 段同模板, 测试必断言无性格关键字
+    # R49f: build_role_prompt 接收 5 字段 segment_data (替代旧 daily_data + history_data)
     system_prompt = build_role_prompt(
         segment_label=segment_label,
         selection_date=selection_date,
         trade_date=trade_date,
-        daily_data=daily_data,
-        history_data=history_data,
+        segment_data=segment_data,
         past_decisions=past_decisions,
         history_window=history_window,
         past_k_days=_DEFAULT_REFLECTION_K_DAYS,
@@ -269,7 +266,7 @@ def compute_one_segment_decision(
         system=system_prompt,
         user=user_message,
         max_tokens=500,
-        json_mode=True,  # 简化 (Anthropic 不支持 json_object mode, 靠 system prompt 强制)
+        json_mode=True,
     )
 
     now = datetime.now(timezone.utc).isoformat()
@@ -347,161 +344,149 @@ def read_segment_data_for_decision(
     weight_method: str = _DEFAULT_WEIGHT_METHOD,
     pipeline: str = _DEFAULT_PIPELINE,
 ) -> dict[str, Any] | None:
-    """读 parquet 算 4 曲线 (daily win_rate / daily return / cum win_rate / cum asset).
+    """R49f (用户原话 2026-07-08): 复用 web_ui 4 个组件同款函数 + segment_stock_details.
 
-    Args:
-        segment_label: 'S1' ~ 'S30'
-        selection_date: T 日 (YYYY-MM-DD)
-        trade_date: T+1 日 (YYYY-MM-DD)
-        history_window: 决策看的历史天数
+    5 步精确算法 (用户原话 "严格按我下面的步骤执行"):
+      1. 每日胜率 = parse_obq_section_9_matrix() → segments[].win_rates[]
+         (跟 web_ui【30 段胜率趋势概览】组件一样)
+      2. 合并胜率 = load_merged_win_trend() → segments[].merged_running[]
+         (跟 web_ui【30 段合并胜率趋势概览】组件一样)
+      3. 每日收益率 = load_pl_ratio_trend() → segments[].pl_ratios[]
+         (跟 web_ui【30 段每日合并收益率趋势概览】组件一样)
+      4. 合并资产值 = load_asset_value_trend() → segments[].asset_values[]
+         (跟 web_ui【30 段每日复合资产值趋势概览】组件一样)
+      5. 今日股票推荐 = pd.read_parquet(segment_stock_details) filtered by seg + date
+         (用户原话 "每日推荐不是在 segment_stock_details.parquet 里么?")
 
     Returns:
         {
-            "daily_data": {8 字段},
-            "history_data": {6 字段},
+            "daily_win_rates": [...],       # Step 1
+            "merged_win_rates": [...],      # Step 2
+            "daily_return_pcts": [...],     # Step 3
+            "merged_asset_values": [...],   # Step 4
+            "today_stock_recommendations": [...],  # Step 5
         }
-        None: 数据不完整 (silent fallback 上游不调 LLM)
-
-    R47 silent fallback: 数据缺失返回 None, 跑时**不**抛
+        None: 任一步数据缺失 (R47 silent fallback: logger.warning + return None)
     """
-    from summary.report.segment_win_db import load_segment_win_rates  # 局部 import 避免循环
+    import logging
 
-    # 1. 读 win_rate (segment_win_rates.parquet)
-    win_df = load_segment_win_rates(
-        pipeline=pipeline,
-        weight_method=weight_method,
-        selection_date=selection_date,
-    )
-    seg_row = win_df[win_df["segment_label"] == segment_label]
-    if seg_row.empty:
-        logger.warning(
-            "read_segment_data_for_decision: no win_rate for %s/%s/%s",
-            pipeline,
-            selection_date,
-            segment_label,
-        )
+    _logger = logging.getLogger(__name__)
+
+    # Step 1: 每日胜率 — 复用 parse_obq_section_9_matrix (跟 web_ui segOverviewChart 一样)
+    try:
+        from web_ui.common.txt_parser import parse_obq_section_9_matrix
+
+        s9 = parse_obq_section_9_matrix(_logger)
+        if not s9 or not s9.get("segments"):
+            _logger.warning("R49f Step 1: parse_obq_section_9_matrix 返回空")
+            return None
+        seg_s1 = next((s for s in s9["segments"] if s["label"] == segment_label), None)
+        if not seg_s1:
+            _logger.warning("R49f Step 1: %s 不在 txt_s9_matrix", segment_label)
+            return None
+        daily_win_rates = [float(v) for v in seg_s1.get("win_rates", [])]
+
+    except Exception:
+        _logger.exception("R49f Step 1: parse_obq_section_9_matrix 失败")
         return None
 
-    daily_wins = int(seg_row["wins"].iloc[0])
-    daily_total = int(seg_row["total"].iloc[0])
-    daily_win_rate = float(seg_row["win_rate"].iloc[0])
+    # Step 2: 合并胜率 — 复用 load_merged_win_trend (跟 web_ui segMergedChart 一样)
+    try:
+        from web_ui.common.segment_win_db import load_merged_win_trend
 
-    # 2. 读 daily return (%) — 用 segment_stock_details + master 的 forward_return_1d 计算
-    ssd = pd.read_parquet(
-        SUMMARY_RESULT / "segment_stock_details.parquet"
-        if (SUMMARY_RESULT / "segment_stock_details.parquet").exists()
-        else SUMMARY_RESULT / "segment_stock_details.parquet",
-        columns=["pipeline", "weight_method", "selection_date", "segment_label", "asset"],
-    )
-    ssd = ssd[
-        (ssd["pipeline"] == pipeline)
-        & (ssd["weight_method"] == weight_method)
-        & (ssd["selection_date"] == selection_date)
-        & (ssd["segment_label"] == segment_label)
-    ]
-    if ssd.empty:
-        logger.warning(
-            "read_segment_data_for_decision: no ssd for %s/%s/%s",
-            pipeline,
-            selection_date,
-            segment_label,
-        )
+        merged = load_merged_win_trend(pipeline=pipeline, weight_method=weight_method, logger=_logger)
+        if not merged or not merged.get("segments"):
+            _logger.warning("R49f Step 2: load_merged_win_trend 返回空")
+            return None
+        seg_m = next((s for s in merged["segments"] if s["label"] == segment_label), None)
+        if not seg_m:
+            _logger.warning("R49f Step 2: %s 不在 merged_win_trend", segment_label)
+            return None
+        merged_win_rates = [float(v) for v in seg_m.get("merged_running", [])]
+    except Exception:
+        _logger.exception("R49f Step 2: load_merged_win_trend 失败")
         return None
 
-    master = pd.read_parquet(
-        "data_fetchers/result/factor_ic_data.parquet",
-        columns=["date", "asset", "forward_return_1d"],
-    )
-    daily_returns = master[
-        (master["date"] == trade_date) & master["asset"].isin(ssd["asset"]) & master["forward_return_1d"].notna()
-    ]["forward_return_1d"]
-    daily_return_pct = round(float(daily_returns.mean() * 100), 2) if len(daily_returns) > 0 else 0.0
+    # Step 3: 每日收益率 — 复用 load_pl_ratio_trend (跟 web_ui segReturnChart 一样)
+    try:
+        from web_ui.common.pl_ratio_db import load_pl_ratio_trend
 
-    # 3. 算累计胜率 (cumulative) + 累计资产 (geom compound)
-    hist = win_df.sort_values("selection_date")
-    cum_wins = int(hist["wins"].sum())
-    cum_total = int(hist["total"].sum())
-    cum_win_rate = round(cum_wins / cum_total * 100, 2) if cum_total > 0 else 0.0
+        pl = load_pl_ratio_trend(weight_method=weight_method, logger=_logger)
+        if not pl or not pl.get("segments"):
+            _logger.warning("R49f Step 3: load_pl_ratio_trend 返回空")
+            return None
+        seg_p = next((s for s in pl["segments"] if s["label"] == segment_label), None)
+        if not seg_p:
+            _logger.warning("R49f Step 3: %s 不在 pl_ratio_trend", segment_label)
+            return None
+        daily_return_pcts = [float(v) for v in seg_p.get("pl_ratios", [])]
+    except Exception:
+        _logger.exception("R49f Step 3: load_pl_ratio_trend 失败")
+        return None
 
-    # 4. 历史窗口 K 天
-    all_dates = sorted(win_df["selection_date"].unique())
-    history_dates = [d for d in all_dates if d <= selection_date]
-    history_dates = history_dates[-history_window:] if len(history_dates) > history_window else history_dates
+    # Step 4: 合并资产值 — 复用 load_asset_value_trend (跟 web_ui assetValueChart 一样)
+    try:
+        from web_ui.common.asset_value_db import load_asset_value_trend
 
-    history_win_rates = []
-    history_return_pcts = []
-    history_cum_win_rates = []
-    history_cum_asset_values = []
+        av = load_asset_value_trend(weight_method=weight_method, logger=_logger)
+        if not av or not av.get("segments"):
+            _logger.warning("R49f Step 4: load_asset_value_trend 返回空")
+            return None
+        seg_a = next((s for s in av["segments"] if s["label"] == segment_label), None)
+        if not seg_a:
+            _logger.warning("R49f Step 4: %s 不在 asset_value_trend", segment_label)
+            return None
+        merged_asset_values = [float(v) for v in seg_a.get("asset_values", [])]
+    except Exception:
+        _logger.exception("R49f Step 4: load_asset_value_trend 失败")
+        return None
 
-    running_asset = 1.0  # geom compound 起点
-    for d in history_dates:
-        d_win = win_df[win_df["selection_date"] == d]
-        if d_win.empty:
-            continue
-        wr = float(d_win["win_rate"].iloc[0])
-        history_win_rates.append(round(wr, 2))
-
-        # 当日收益率 (复用上面算法 — 用 ssd + master forward_return_1d)
-        d_ssd = pd.read_parquet(
-            SUMMARY_RESULT / "segment_stock_details.parquet",
-            columns=["pipeline", "weight_method", "selection_date", "segment_label", "asset"],
+    # Step 5: 今日股票推荐 — segment_stock_details.parquet (用户原话)
+    try:
+        ssd_path = PROJECT_ROOT / "summary" / "result" / "segment_stock_details.parquet"
+        if not ssd_path.exists():
+            _logger.warning("R49f Step 5: segment_stock_details.parquet 不存在")
+            return None
+        ssd = pd.read_parquet(
+            ssd_path,
+            columns=[
+                "pipeline",
+                "weight_method",
+                "selection_date",
+                "segment_label",
+                "asset",
+                "composite_value",
+                "rank",
+            ],
         )
-        d_ssd = d_ssd[
-            (d_ssd["pipeline"] == pipeline)
-            & (d_ssd["weight_method"] == weight_method)
-            & (d_ssd["selection_date"] == d)
-            & (d_ssd["segment_label"] == segment_label)
-        ]
-        if not d_ssd.empty:
-            # 找 d 的 trade_date = master[d] 的下一天
-            master_dates = sorted(master["date"].dropna().unique())
-            try:
-                idx = master_dates.index(d)
-                d_trade = master_dates[idx + 1] if idx + 1 < len(master_dates) else None
-            except ValueError:
-                d_trade = None
-            if d_trade:
-                d_returns = master[
-                    (master["date"] == d_trade)
-                    & master["asset"].isin(d_ssd["asset"])
-                    & master["forward_return_1d"].notna()
-                ]["forward_return_1d"]
-                d_return_pct = round(float(d_returns.mean() * 100), 2) if len(d_returns) > 0 else 0.0
-            else:
-                d_return_pct = 0.0
-        else:
-            d_return_pct = 0.0
+        today_stocks_df = ssd[
+            (ssd["pipeline"] == pipeline)
+            & (ssd["weight_method"] == weight_method)
+            & (ssd["selection_date"] == selection_date)
+            & (ssd["segment_label"] == segment_label)
+        ].sort_values("rank")
+        today_stock_recommendations = today_stocks_df.to_dict("records")
+    except Exception:
+        _logger.exception("R49f Step 5: segment_stock_details 读失败")
+        return None
 
-        history_return_pcts.append(d_return_pct)
-
-        # 累计
-        cum_w = int(d_win["wins"].iloc[0])
-        cum_t = int(d_win["total"].iloc[0])
-        history_cum_win_rates.append(round(cum_w / cum_t * 100, 2) if cum_t > 0 else 0.0)
-
-        # geom compound over daily_return
-        running_asset *= 1 + d_return_pct / 100.0
-        history_cum_asset_values.append(round(running_asset, 4))
+    _logger.info(
+        "R49f read_segment_data_for_decision: %s 5 步全部成功 "
+        "(win_rates=%d, merged=%d, return=%d, asset=%d, stocks=%d)",
+        segment_label,
+        len(daily_win_rates),
+        len(merged_win_rates),
+        len(daily_return_pcts),
+        len(merged_asset_values),
+        len(today_stock_recommendations),
+    )
 
     return {
-        "daily_data": {
-            "daily_win_rate": daily_win_rate,
-            "daily_wins": daily_wins,
-            "daily_total": daily_total,
-            "daily_return_pct": daily_return_pct,
-            "cum_win_rate": cum_win_rate,
-            "cum_wins": cum_wins,
-            "cum_total": cum_total,
-            "cum_asset_value": round(running_asset, 4),
-        },
-        "history_data": {
-            "history_win_rates": history_win_rates,
-            "history_return_pcts": history_return_pcts,
-            "history_cum_win_rates": history_cum_win_rates,
-            "history_cum_asset_values": history_cum_asset_values,
-            "history_start": history_dates[0] if history_dates else "(无)",
-            "history_end": history_dates[-1] if history_dates else "(无)",
-        },
+        "daily_win_rates": daily_win_rates,
+        "merged_win_rates": merged_win_rates,
+        "daily_return_pcts": daily_return_pcts,
+        "merged_asset_values": merged_asset_values,
+        "today_stock_recommendations": today_stock_recommendations,
     }
 
 
@@ -572,8 +557,7 @@ def run_segment_ai_simulation(
                 segment_label=seg_label,
                 selection_date=selection_date,
                 trade_date=trade_date,
-                daily_data=data["daily_data"],
-                history_data=data["history_data"],
+                segment_data=data,  # R49f: 5 字段 dict 替代旧 daily_data + history_data
                 weight_method=weight_method,
                 pipeline=pipeline,
                 history_window=history_window,

@@ -1118,29 +1118,47 @@ def main():
         logger.error("文件写入失败: %s, 原因: %s", output_path, e)
         sys.exit(1)
 
-    # v0.4.8 R49 (用户原话 2026-07-08 "执行 generate_factor_summary_report.py 时执行"):
-    # 30 段 AI 客观分析师角色 LLM 调度 — D 日 date = T 日, trade_date = master 中 T 日的下一天
+    # v0.4.8 R49f (用户原话 2026-07-08 "执行 generate_factor_summary_report.py 时执行" +
+    #               "又忘记了一点 2026-07-08 跑脚本时 selection_date 应该是 2026-07-07"):
+    # 30 段 AI 客观分析师角色 LLM 调度 — selection_date = master 最晚日 (不是 today()!),
+    # trade_date = selection_date 的下一天 in master
+    # v1.5.22 silent fallback 修复: 拆 except + 显式 fallback + 不允许 bare Exception
+    _selection_date: str | None = None
+    _trade_date: str | None = None
     try:
         import pandas as pd
         from paths import FACTOR_IC_DATA_MASTER
 
         _master_dates = sorted(pd.read_parquet(FACTOR_IC_DATA_MASTER, columns=["date"])["date"].dropna().unique())
-        _idx = _master_dates.index(date)
+        # v1.5.22 用户事实校正: selection_date = master 最晚日 (永远有数据),
+        # 不是 today() — 原因: today() (2026-07-08) 不在 master 里 = 4 曲线 + ssd 没数据
+        _selection_date = str(_master_dates[-1])
+        _idx = _master_dates.index(_selection_date)
         _trade_date = str(_master_dates[_idx + 1]) if _idx + 1 < len(_master_dates) else None
-    except (ValueError, KeyError, IndexError, Exception):
-        _trade_date = None
-    if _trade_date:
+    except ValueError as e:
+        # v1.5.22 拆显式守卫: 不允许 bare Exception + 静默吞
+        logger.warning("R49f main: master 最晚日不在 master 中 (%s), R49 调度跳过", e)
+    except (KeyError, IndexError):
+        logger.warning(
+            "R49f main: trade_date 越界 (master 最晚日 = %s, 无下一交易日), R49 调度跳过",
+            _selection_date,
+        )
+    except Exception:
+        # v1.5.18 silent fallback 防御: logger.exception 替代 logger.debug
+        logger.exception("R49f main: master parquet 读失败, R49 调度跳过 (不拖垮主报告)")
+
+    if _selection_date and _trade_date:
         try:
             _compute_pending_segment_ai_simulation(
                 pipeline="ob_quality",
                 weight_method="rolling_icir_weight",
-                selection_date=date,
+                selection_date=_selection_date,
                 trade_date=_trade_date,
                 logger=logger,
             )
         except Exception:
-            # R47 silent fallback: 失败时静默 skip, 不让 LLM 错误拖垮主报告
-            logger.debug("main: _compute_pending_segment_ai_simulation 失败, 跳过 (不拖垮主报告)")
+            # v1.5.18 silent fallback 防御: logger.exception 替代 logger.debug
+            logger.exception("R49f main: _compute_pending_segment_ai_simulation 失败, 跳过 (不拖垮主报告)")
 
     # 记录总耗时
     elapsed = time.time() - start_time

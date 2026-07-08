@@ -61,27 +61,52 @@ def _fake_minimax_ok_response(
     }
 
 
-def _sample_daily_data() -> dict:
-    return {
-        "daily_win_rate": 60.00,
-        "daily_wins": 3,
-        "daily_total": 5,
-        "daily_return_pct": 1.50,
-        "cum_win_rate": 55.00,
-        "cum_wins": 11,
-        "cum_total": 20,
-        "cum_asset_value": 1.0500,
-    }
+def _sample_segment_data() -> dict:
+    """R49f: 5 字段 segment_data (替代旧 daily_data + history_data).
 
-
-def _sample_history_data() -> dict:
+    字段来源:
+      1. daily_win_rates         (Step 1, 跟 web_ui【30 段胜率趋势概览】)
+      2. merged_win_rates        (Step 2, 跟 web_ui【30 段合并胜率趋势概览】)
+      3. daily_return_pcts       (Step 3, 跟 web_ui【30 段每日合并收益率趋势概览】)
+      4. merged_asset_values     (Step 4, 跟 web_ui【30 段每日复合资产值趋势概览】)
+      5. today_stock_recommendations (Step 5, 来自 segment_stock_details.parquet)
+    """
     return {
-        "history_win_rates": [50.0, 55.0, 60.0, 65.0, 60.0],
-        "history_return_pcts": [0.5, -0.3, 1.2, 0.8, 0.5],
-        "history_cum_win_rates": [50.0, 52.5, 55.0, 57.5, 58.0],
-        "history_cum_asset_values": [1.005, 1.002, 1.014, 1.022, 1.027],
-        "history_start": "2026-06-29",
-        "history_end": "2026-07-03",
+        "daily_win_rates": [0.0, 75.0, 40.0, 40.0, 67.0, 40.0, 0.0, 50.0, 50.0, 33.0, 50.0, 100.0, 0.0, 0.0],
+        "merged_win_rates": [
+            0.0,
+            42.86,
+            41.67,
+            41.18,
+            47.83,
+            46.43,
+            39.39,
+            41.03,
+            41.86,
+            41.3,
+            42.0,
+            46.3,
+            44.64,
+            43.1,
+        ],
+        "daily_return_pcts": [3.15, -0.94, -4.51, -1.24, 0.46, -2.16, 2.68, 5.59, -1.61, -2.72],
+        "merged_asset_values": [
+            1.0,
+            1.0315,
+            1.021804,
+            0.975721,
+            0.963622,
+            0.968055,
+            0.947145,
+            0.972528,
+            1.026892,
+            1.010359,
+            0.982877,
+        ],
+        "today_stock_recommendations": [
+            {"asset": "603190", "composite_value": 1.7664, "rank": 1},
+            {"asset": "603477", "composite_value": 0.9258, "rank": 2},
+        ],
     }
 
 
@@ -228,8 +253,7 @@ def test_role_prompt_no_personality_keywords_for_all_30_segments():
             segment_label=seg_label,
             selection_date="2026-07-06",
             trade_date="2026-07-07",
-            daily_data=_sample_daily_data(),
-            history_data=_sample_history_data(),
+            segment_data=_sample_segment_data(),
             history_window=5,
         )
         # Round 3 字面约束
@@ -248,8 +272,7 @@ def test_role_prompt_past_decisions_serialization():
         segment_label="S15",
         selection_date="2026-07-06",
         trade_date="2026-07-07",
-        daily_data=_sample_daily_data(),
-        history_data=_sample_history_data(),
+        segment_data=_sample_segment_data(),
         past_decisions=past_decisions,
         history_window=5,
     )
@@ -321,8 +344,7 @@ def test_compute_one_segment_decision_returns_valid_row():
         segment_label="S7",
         selection_date="2026-07-06",
         trade_date="2026-07-07",
-        daily_data=_sample_daily_data(),
-        history_data=_sample_history_data(),
+        segment_data=_sample_segment_data(),
         client=mock_client,
     )
 
@@ -352,8 +374,7 @@ def test_compute_one_segment_decision_on_llm_failure_returns_skip_row():
         segment_label="S20",
         selection_date="2026-07-06",
         trade_date="2026-07-07",
-        daily_data=_sample_daily_data(),
-        history_data=_sample_history_data(),
+        segment_data=_sample_segment_data(),
         client=mock_client,
     )
     assert row["decision"] == "skip"
