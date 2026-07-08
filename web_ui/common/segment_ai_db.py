@@ -45,9 +45,10 @@ from paths import PROJECT_ROOT
 
 
 # 路径: 复用 paths 模块定义 (AGENTS.md §硬规则 #11)
-# R49d (用户原话 2026-07-08 "移动到 summary/result 目录下"): 扁平布局, 跟
-# segment_win_rates / segment_intraday_strategy / segment_stock_details 一致,
-# 不嵌 rolling_icir_weight 子目录. PIPELINE_ALIAS 已经包含在 SUMMARY_RESULT.
+# R49e (用户原话 2026-07-08 "移动到 summary/result/, 而不是 summary/result/ob_quality/"):
+# 完全扁平到顶层, 不嵌 PIPELINE_ALIAS 子目录 (跟 web_ui/common/segment_win_db.py:33 同模式:
+# `PROJECT_ROOT / "summary" / "result" / "segment_win_rates.parquet"`). 跟既有 3 段段落布局
+# 100% 对齐. v1.5.14 §18.1a paths.py 路径常量命名陷阱: 不应该凭印象嵌额外子目录.
 _PARQUET_PATH: Path = (
     PROJECT_ROOT / "summary" / "result" / "segment_ai_simulation.parquet"
 )

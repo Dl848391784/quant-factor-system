@@ -35,7 +35,7 @@ from typing import Any
 import pandas as pd
 
 # AGENTS.md §11 路径从 paths.py 导入 (硬规则)
-from paths import SUMMARY_RESULT  # noqa: F401
+from paths import PROJECT_ROOT, SUMMARY_RESULT  # noqa: F401
 from summary.report.llm_provider import MinMaxClient, _load_api_key, _load_base_url  # noqa: F401
 from summary.report.segment_ai_prompts import (  # noqa: F401
     assert_no_personality_keywords,
@@ -81,13 +81,15 @@ _DEFAULT_MODEL = "MiniMax-M3"
 def _result_path(weight_method: str | None = None) -> Path:
     """Return parquet path: summary/result/segment_ai_simulation.parquet.
 
-    R49d (用户原话 2026-07-08 "移动到 summary/result 目录下"):
-      - 改用扁平布局 (跟 segment_win_rates / segment_intraday_strategy / segment_stock_details 一致)
-      - 不带 weight_method 子目录: weight_method 仍存在 parquet schema 列里 (SEGMENT_AI_COLUMNS[3])
-      - `weight_method` 参数保留向后兼容 (但**不**影响路径, 仅为调用方不需要改签名)
-      - PIPELINE_ALIAS 子目录已包含在 SUMMARY_RESULT (paths.py:78) → **不**重复嵌
+    R49e (用户原话 2026-07-08 "移动到 summary/result/, 而不是 summary/result/ob_quality/"):
+      - 完全扁平到顶层, 不嵌 PIPELINE_ALIAS 子目录
+      - 跟既有 3 段段落布局 100% 对齐 (segment_win_rates / segment_intraday_strategy /
+        segment_stock_details 都在 summary/result/ 顶层, 不走 SUMMARY_RESULT)
+      - 走 PROJECT_ROOT / "summary" / "result" 直挂顶层 (跟 web_ui/common/segment_win_db.py R38 同模式)
+      - `weight_method` 参数保留向后兼容 (但**不**影响路径, PIPELINE_ALIAS 跟 weight_method 都不进路径)
+      - v1.5.14 §18.1a paths.py 路径常量命名陷阱: 不应该凭印象嵌额外子目录
     """
-    return SUMMARY_RESULT / "segment_ai_simulation.parquet"
+    return PROJECT_ROOT / "summary" / "result" / "segment_ai_simulation.parquet"
 
 
 def _read_parquet(fp: Path) -> pd.DataFrame:

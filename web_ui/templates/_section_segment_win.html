@@ -230,7 +230,7 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
   {# 决策 = operate/skip + confidence + reasoning; fixed action: T 日尾盘买 / T+1 尾盘卖 (PROJECT.md 实战交易规则) #}
   {% if segment_ai_decisions and segment_ai_decisions.get("source") == "parquet" %}
     <h3 id="section-ai-decisions">30 段 AI 客观分析师角色决策 (T 日尾盘买 / T+1 尾盘卖)</h3>
-    <p class="muted">v0.4.8 R49 数据源: summary/result/segment_ai_simulation.parquet (R49a-1 落地, R49d 扁平化路径) · 30 段各自决策 operate/skip · Round 3 字面约束: 30 段同模板客观分析师 (公正公平不带有性格色彩) · 决策含义: <strong>operate</strong> = T 日尾盘等权买入该段当日资产清单 + <strong>T+1 尾盘卖出</strong> · <strong>skip</strong> = 今天不操作 · 实测: 模型 MiniMax-M3 via Anthropic Messages API (base_url=…/anthropic) · 用户原话 2026-07-08: "每个 AI 自己判断今天是否按照该段推荐买入"</p>
+    <p class="muted">v0.4.8 R49 数据源: summary/result/segment_ai_simulation.parquet (R49a-1 落地, R49e 完全扁平顶层, 不嵌 PIPELINE_ALIAS/weight_method 子目录) · 30 段各自决策 operate/skip · Round 3 字面约束: 30 段同模板客观分析师 (公正公平不带有性格色彩) · 决策含义: <strong>operate</strong> = T 日尾盘等权买入该段当日资产清单 + <strong>T+1 尾盘卖出</strong> · <strong>skip</strong> = 今天不操作 · 实测: 模型 MiniMax-M3 via Anthropic Messages API (base_url=…/anthropic) · 用户原话 2026-07-08: "每个 AI 自己判断今天是否按照该段推荐买入"</p>
     <div class="meta-box">
       <p>
         <strong>共 {{ segment_ai_decisions["segments"] | length }} 段</strong>
