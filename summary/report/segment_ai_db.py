@@ -78,9 +78,16 @@ _DEFAULT_MODEL = "MiniMax-M3"
 # ════════════════════════════════════════════════════════════════════
 
 
-def _result_path(weight_method: str) -> Path:
-    """Return parquet path: summary/result/<weight_method>/segment_ai_simulation.parquet."""
-    return SUMMARY_RESULT / weight_method / "segment_ai_simulation.parquet"
+def _result_path(weight_method: str | None = None) -> Path:
+    """Return parquet path: summary/result/segment_ai_simulation.parquet.
+
+    R49d (用户原话 2026-07-08 "移动到 summary/result 目录下"):
+      - 改用扁平布局 (跟 segment_win_rates / segment_intraday_strategy / segment_stock_details 一致)
+      - 不带 weight_method 子目录: weight_method 仍存在 parquet schema 列里 (SEGMENT_AI_COLUMNS[3])
+      - `weight_method` 参数保留向后兼容 (但**不**影响路径, 仅为调用方不需要改签名)
+      - PIPELINE_ALIAS 子目录已包含在 SUMMARY_RESULT (paths.py:78) → **不**重复嵌
+    """
+    return SUMMARY_RESULT / "segment_ai_simulation.parquet"
 
 
 def _read_parquet(fp: Path) -> pd.DataFrame:

@@ -392,7 +392,7 @@ def test_save_load_segment_ai_simulation_roundtrip(tmp_path: Path):
 
     # patch _result_path to tmp_path
     with patch("summary.report.segment_ai_db._result_path") as mock_fp:
-        mock_fp.return_value = tmp_path / "ob_quality" / "segment_ai_simulation.parquet"
+        mock_fp.return_value = tmp_path / "segment_ai_simulation.parquet"
         # 1. save
         fp = save_segment_ai_simulation(rows, weight_method="rolling_icir_weight")
         assert fp.exists()
@@ -415,7 +415,7 @@ def test_save_load_segment_ai_simulation_roundtrip(tmp_path: Path):
 def test_save_segment_ai_simulation_empty_rows_warns_but_not_raises(tmp_path: Path):
     """rows=[] → logger.warning 但不抛 (R47 silent fallback 防御: graceful degrade)."""
     with patch("summary.report.segment_ai_db._result_path") as mock_fp:
-        mock_fp.return_value = tmp_path / "ob_quality" / "segment_ai_simulation.parquet"
+        mock_fp.return_value = tmp_path / "segment_ai_simulation.parquet"
         # 不抛 = 测试 pass
         fp = save_segment_ai_simulation([], weight_method="rolling_icir_weight")
         # parquet **不**被创建 (空 rows 跳过)

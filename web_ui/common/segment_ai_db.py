@@ -45,7 +45,12 @@ from paths import PROJECT_ROOT
 
 
 # 路径: 复用 paths 模块定义 (AGENTS.md §硬规则 #11)
-_PARQUET_PATH: Path = PROJECT_ROOT / "summary" / "result" / "rolling_icir_weight" / "segment_ai_simulation.parquet"
+# R49d (用户原话 2026-07-08 "移动到 summary/result 目录下"): 扁平布局, 跟
+# segment_win_rates / segment_intraday_strategy / segment_stock_details 一致,
+# 不嵌 rolling_icir_weight 子目录. PIPELINE_ALIAS 已经包含在 SUMMARY_RESULT.
+_PARQUET_PATH: Path = (
+    PROJECT_ROOT / "summary" / "result" / "segment_ai_simulation.parquet"
+)
 logger = logging.getLogger(__name__)
 
 
