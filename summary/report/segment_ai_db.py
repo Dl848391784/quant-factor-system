@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -506,6 +507,13 @@ def run_segment_ai_simulation(
 ) -> list[dict[str, Any]]:
     """跑 30 段 × 1 天 AI 模拟, 返回行 list (ready for save_segment_ai_simulation).
 
+    v0.4.8 R49v3 (用户原话 2026-07-08 "我不知道执行到哪一步了, 加下日志吧"):
+      加 3 类显式进度日志让用户**看得见** 调度跑在哪:
+        - L538 LOGGER.info 启动: "R49v3: 开始 30 段 AI 角色调度 (selection=X, trade=Y)..."
+        - L548 LOGGER.warning 段进度 (每 5 段 + 最后一段 + 失败段): "[3/30] S3 调度..." etc
+        - L566 LOGGER.warning 段耗时: "[5/30] S5 调度 done (ms3.2 / win=ok)..."
+        - L582 LOGGER.warning 调度完成: "R49v3: 完成 30 段 (success=28, fallback=2, total=45.3s)"
+
     Args:
         selection_date: T 日
         trade_date: T+1 日
@@ -521,9 +529,36 @@ def run_segment_ai_simulation(
     if client is None:
         client = MinMaxClient()
 
+    # R49v3 启动进度日志
+    started_ts = time.time()
+    logger.info(
+        "R49v3 run_segment_ai_simulation 启动: pipeline=%s / weight_method=%s / "
+        "selection_date=%s / trade_date=%s / n_segments=%d",
+        pipeline,
+        weight_method,
+        selection_date,
+        trade_date,
+        n_segments,
+    )
     rows: list[dict[str, Any]] = []
+    n_success = 0
+    n_data_fallback = 0
+    n_decision_fallback = 0
+    seg_durations: list[float] = []
+
     for i in range(1, n_segments + 1):
         seg_label = f"S{i}"
+        seg_started = time.time()
+        # R49v3 段进度日志: 每 5 段 + 最后一 + 首段报告 (用户能看见到第几段)
+        if i == 1 or i % 5 == 0 or i == n_segments:
+            logger.info(
+                "[%d/%d] R49v3 调度中: %s (start_ts=%.1f)",
+                i,
+                n_segments,
+                seg_label,
+                seg_started - started_ts,
+            )
+
         try:
             data = read_segment_data_for_decision(
                 segment_label=seg_label,
@@ -535,9 +570,11 @@ def run_segment_ai_simulation(
             )
             if data is None:
                 # 数据缺失 → silent fallback 行 (R47 防御)
+                n_data_fallback += 1
                 logger.warning(
-                    "run_segment_ai_simulation: %s/%s 数据缺失, fallback row",
-                    pipeline,
+                    "[%d/%d] R49v3 %s 数据缺失, 写 fallback row [⚠️ 数据缺失]",
+                    i,
+                    n_segments,
                     seg_label,
                 )
                 rows.append(
@@ -551,6 +588,7 @@ def run_segment_ai_simulation(
                         "[⚠️ 数据缺失]",
                     )
                 )
+                _log_seg_done(i, n_segments, seg_label, seg_started, started_ts, "data_fallback", seg_durations)
                 continue
 
             row = compute_one_segment_decision(
@@ -564,9 +602,20 @@ def run_segment_ai_simulation(
                 client=client,
             )
             rows.append(row)
+            n_success += 1
+            _log_seg_done(
+                i, n_segments, seg_label, seg_started, started_ts, f"decision={row['decision']}", seg_durations
+            )
         except Exception as e:
             # 不让单段失败拖垮全跑 (R47 silent fallback)
-            logger.exception("run_segment_ai_simulation: %s failed", seg_label)
+            n_decision_fallback += 1
+            logger.exception(
+                "[%d/%d] R49v3 %s LLM 决策失败 (%s), 写 fallback row",
+                i,
+                n_segments,
+                seg_label,
+                type(e).__name__,
+            )
             rows.append(
                 _empty_fallback_row(
                     seg_label,
@@ -578,8 +627,60 @@ def run_segment_ai_simulation(
                     f"[⚠️ 决策失败 ({type(e).__name__}): {e}]",
                 )
             )
+            _log_seg_done(
+                i,
+                n_segments,
+                seg_label,
+                seg_started,
+                started_ts,
+                f"decision_fallback ({type(e).__name__})",
+                seg_durations,
+            )
 
+    # R49v3 调度完成汇总日志
+    total_elapsed = time.time() - started_ts
+    if seg_durations:
+        avg_ms = (sum(seg_durations) / len(seg_durations)) * 1000
+        max_ms = max(seg_durations) * 1000
+        min_ms = min(seg_durations) * 1000
+    else:
+        avg_ms = max_ms = min_ms = 0.0
+    logger.warning(
+        "R49v3 run_segment_ai_simulation 完成: success=%d / data_fallback=%d / "
+        "decision_fallback=%d / total=%d 段, 耗时=%.2fs (avg=%.0fms / max=%.0fms / min=%.0fms)",
+        n_success,
+        n_data_fallback,
+        n_decision_fallback,
+        n_segments,
+        total_elapsed,
+        avg_ms,
+        max_ms,
+        min_ms,
+    )
     return rows
+
+
+def _log_seg_done(
+    idx: int,
+    total: int,
+    seg_label: str,
+    seg_started: float,
+    run_started: float,
+    status: str,
+    durations: list[float],
+) -> None:
+    """R49v3: 段调度完成耗时日志 (内部辅助)."""
+    elapsed = time.time() - seg_started
+    durations.append(elapsed)
+    logger.info(
+        "[%d/%d] R49v3 %s done: status=%s, seg_elapsed=%.2fs (total_run=%.1fs)",
+        idx,
+        total,
+        seg_label,
+        status,
+        elapsed,
+        time.time() - run_started,
+    )
 
 
 def _empty_fallback_row(

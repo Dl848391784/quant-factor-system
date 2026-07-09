@@ -471,3 +471,90 @@ def test_load_api_key_raises_when_no_env_and_no_file(monkeypatch: pytest.MonkeyP
         MockPath.return_value.parent.parent.__truediv__.return_value = fake_env_path
         with pytest.raises(RuntimeError, match="MINIMAX_CN_API_KEY"):
             llm_provider._load_api_key()
+
+
+# ════════════════════════════════════════════════════════════════════
+# Test 7 (R49v3): 进度日志 — 用户原话"我不知道执行到哪一步了, 加下日志吧"
+# ════════════════════════════════════════════════════════════════════
+
+
+def _fake_r49v3_row(seg_label: str) -> dict:
+    """R49v3: 构造 mock 1 行决策行 (R49 main() save_segment_ai_simulation 用)."""
+    return {
+        "pipeline": "ob_quality",
+        "selection_date": "2026-07-06",
+        "trade_date": "2026-07-07",
+        "weight_method": "rolling_icir_weight",
+        "segment_label": seg_label,
+        "decision": "operate",
+        "confidence": 0.5,
+        "reasoning_text": "R49v3 mock reasoning",
+        "data_observations_json": "[]",
+        "history_window": 5,
+        "past_decisions_json": None,
+        "reflection_text": None,
+        "reflection_k_days": 5,
+        "model_name": "MiniMax-M3",
+        "provider_endpoint": "https://api.minimaxi.com/anthropic/v1/messages",
+        "created_at": "2026-07-08T10:00:00+00:00",
+    }
+
+
+def test_run_segment_ai_simulation_emits_progress_logs_r49v3(caplog):
+    """R49v3 (用户原话 2026-07-08 "我不知道执行到哪一步了, 加下日志吧"):
+    run_segment_ai_simulation 必须触发 3 类日志让用户**看得见**:
+      1) 启动行 + n_segments + selection_date + trade_date
+      2) 段进度 [i/n] (i=1 + i%5==0 + i==n)
+      3) 完成汇总 (success / data_fallback / decision_fallback / 耗时)
+
+    caplog: pytest fixture 捕获 logger records.
+    """
+    import logging
+
+    from summary.report.segment_ai_db import run_segment_ai_simulation
+
+    mock_row = _fake_r49v3_row("S1")
+    fake_data = {
+        "daily_win_rates": [0.0, 75.0],
+        "merged_win_rates": [0.0, 42.86],
+        "daily_return_pcts": [3.15, -0.94],
+        "merged_asset_values": [1.0, 1.0315],
+        "today_stock_recommendations": [],
+    }
+
+    with (
+        patch(
+            "summary.report.segment_ai_db.read_segment_data_for_decision",
+            return_value=fake_data,
+        ),
+        patch(
+            "summary.report.segment_ai_db.compute_one_segment_decision",
+            return_value=mock_row,
+        ),
+        patch(
+            "summary.report.segment_ai_db.save_segment_ai_simulation",
+            return_value=Path("/tmp/never.parquet"),
+        ) as mock_save,
+        caplog.at_level(logging.INFO, logger="summary.report.segment_ai_db"),
+    ):
+        rows = run_segment_ai_simulation(
+            selection_date="2026-07-06",
+            trade_date="2026-07-07",
+            weight_method="rolling_icir_weight",
+            pipeline="ob_quality",
+            n_segments=5,
+        )
+
+    assert len(rows) == 5
+    log_msgs = [r.getMessage() for r in caplog.records]
+
+    # R49v3 3 类日志全部触发
+    assert any(
+        "R49v3 run_segment_ai_simulation 启动" in m for m in log_msgs
+    ), "应触发启动日志 (含 selection_date / trade_date / n_segments)"
+    assert any("[1/5]" in m for m in log_msgs), "i==1 触发 [1/5]"
+    assert any("[5/5]" in m for m in log_msgs), "i==n_segments + i%5==0 触发 [5/5]"
+    assert any(
+        "R49v3 run_segment_ai_simulation 完成" in m for m in log_msgs
+    ), "应触发完成汇总日志 (含 success / data_fallback / decision_fallback / 耗时)"
+    assert any("success=" in m for m in log_msgs), "完成日志含 success 计数"
