@@ -1169,18 +1169,32 @@ def main():
         # v1.5.18 silent fallback 防御: logger.exception 替代 logger.debug
         logger.exception("R49f main: master parquet 读失败, R49 调度跳过 (不拖垮主报告)")
 
+    # R49-off (B 方案 minimal disable): 改 R49_ENABLED=False 即可关闭 (重启 = 易)
+    # main() 入口调度短路 — 关闭时不打 30 段 LLM 调用
+    try:
+        from summary.report.segment_ai_db import R49_ENABLED as _R49_ENABLED
+    except ImportError:
+        _R49_ENABLED = True
+
     if _selection_date and _trade_date:
-        try:
-            _compute_pending_segment_ai_simulation(
-                pipeline="ob_quality",
-                weight_method="rolling_icir_weight",
-                selection_date=_selection_date,
-                trade_date=_trade_date,
-                logger=logger,
+        if not _R49_ENABLED:
+            logger.warning(
+                "R49-off: main() R49 调度被 disabled (R49_ENABLED=False), 跳过 _compute_pending_segment_ai_simulation (selection=%s / trade=%s)",
+                _selection_date,
+                _trade_date,
             )
-        except Exception:
-            # v1.5.18 silent fallback 防御: logger.exception 替代 logger.debug
-            logger.exception("R49f main: _compute_pending_segment_ai_simulation 失败, 跳过 (不拖垮主报告)")
+        else:
+            try:
+                _compute_pending_segment_ai_simulation(
+                    pipeline="ob_quality",
+                    weight_method="rolling_icir_weight",
+                    selection_date=_selection_date,
+                    trade_date=_trade_date,
+                    logger=logger,
+                )
+            except Exception:
+                # v1.5.18 silent fallback 防御: logger.exception 替代 logger.debug
+                logger.exception("R49f main: _compute_pending_segment_ai_simulation 失败, 跳过 (不拖垮主报告)")
 
     # 记录总耗时
     elapsed = time.time() - start_time

@@ -73,6 +73,17 @@ _DEFAULT_WEIGHT_METHOD = "rolling_icir_weight"
 _DEFAULT_PIPELINE = "ob_quality"
 _DEFAULT_MODEL = "MiniMax-M3"
 
+# v0.4.8 R49-off (用户原话 2026-07-08 "先关闭 30 个 AI 分析师的功能吧"):
+#   全局开关 — True=开放 (默认), False=关闭 (跳过 R49 调度 + web_ui 不渲染).
+#   B 方案 minimal disable 实战锚点: 改 1 个常量 = 重启 = 极易.
+#   关闭时:
+#     - summary/report/segment_ai_db.run_segment_ai_simulation() → return [] (跳过 30 段 LLM)
+#     - generate_factor_summary_report.main() R49v2 调度 → skip (不打 LLM)
+#     - web_ui/app.py load_segment_ai_decisions() → return None (段数=0 不渲染)
+# 跟 v1.5.22 调度入口层 silent fallback 防御协同 (R49v2 实战):
+#   关闭时不让 R49 调度静默跳过 — 显式 logger.warning 让用户**看得见** 关了.
+R49_ENABLED = True
+
 
 # ════════════════════════════════════════════════════════════════════
 # IO 函数 (parquet 落盘, 跟 segment_win_db.py 一致)
@@ -526,6 +537,11 @@ def run_segment_ai_simulation(
     Returns:
         list of 30 dict rows; 失败的段以 [⚠️] fallback dict 形式落
     """
+    # R49-off (B 方案): 全局开关 False → 跳过 30 段 LLM 调用
+    if not R49_ENABLED:
+        logger.warning("R49-off: run_segment_ai_simulation 被 disabled (R49_ENABLED=False), return [] (跳过 30 段 LLM)")
+        return []
+
     if client is None:
         client = MinMaxClient()
 

@@ -52,6 +52,12 @@ from paths import PROJECT_ROOT
 _PARQUET_PATH: Path = PROJECT_ROOT / "summary" / "result" / "segment_ai_simulation.parquet"
 logger = logging.getLogger(__name__)
 
+# R49-off (B 方案 minimal disable): 全局开关 R49_ENABLED 控制 web_ui 渲染层短路
+try:
+    from summary.report.segment_ai_db import R49_ENABLED  # noqa: F401  # 失败默认 True
+except ImportError:
+    R49_ENABLED = True
+
 
 def load_segment_ai_decisions(
     pipeline: str = "ob_quality",
@@ -59,6 +65,8 @@ def load_segment_ai_decisions(
     logger: logging.Logger | None = None,
 ) -> dict | None:
     """读 segment_ai_simulation.parquet, 构造 web_ui 渲染 dict.
+
+    R49-off (B 方案): 全局开关 R49_ENABLED=False → 短路 return None (段数=0 web_ui 不渲染)
 
     Args:
         pipeline: 管线名 (默认 ob_quality)
@@ -85,6 +93,12 @@ def load_segment_ai_decisions(
         }
         None: parquet 不存在 / 读失败 / 数据为空
     """
+    # R49-off (B 方案 minimal disable): 全局开关 R49_ENABLED=False -> 短路 return None (段数=0)
+    if not R49_ENABLED:
+        if logger:
+            logger.warning("R49-off: load_segment_ai_decisions 被 disabled (R49_ENABLED=False), return None (段数=0)")
+        return None
+
     if not _PARQUET_PATH.exists():
         if logger:
             logger.warning("segment_ai_simulation.parquet 不存在: %s", _PARQUET_PATH)
