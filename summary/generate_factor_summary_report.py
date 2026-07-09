@@ -1143,8 +1143,9 @@ def main():
             _selection_date = str(_master_dates[-2])
             _trade_date = str(_master_dates[-1])
             # v1.5.18 silent fallback 防御: 显式记录 — 跑过程能看见
+            # R49v2 用户字面提到 "0708 凌晨跑", 但 daily cron 后 day 都会变化, **不**写死日期
             logger.info(
-                "R49v2 main: 0708 凌晨跑 — selection_date=%s (T 日选股), trade_date=%s (T+1 实测已回填)",
+                "R49v2 main: daily 主调度启动 — master 末尾 2 天 = master[-2]=%s (selection, T-1 选股), master[-1]=%s (trade, T+1 已实测)",
                 _selection_date,
                 _trade_date,
             )
