@@ -82,7 +82,8 @@ _DEFAULT_MODEL = "MiniMax-M3"
 #     - web_ui/app.py load_segment_ai_decisions() → return None (段数=0 不渲染)
 # 跟 v1.5.22 调度入口层 silent fallback 防御协同 (R49v2 实战):
 #   关闭时不让 R49 调度静默跳过 — 显式 logger.warning 让用户**看得见** 关了.
-R49_ENABLED = True
+# R49-off commit `a786e37` v2.0.21 实践锚点 + 用户原话 2026-07-08 "立即改 R49_ENABLED=False" 改 = 关闭:
+R49_ENABLED = False
 
 
 # ════════════════════════════════════════════════════════════════════

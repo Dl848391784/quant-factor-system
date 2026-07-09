@@ -87,11 +87,16 @@ def test_r49_off_web_ui_short_circuits_to_none(caplog, tmp_path, monkeypatch):
     from unittest.mock import MagicMock, patch
 
     import pandas as pd
-    import web_ui.common.segment_ai_db as ui_sa_module
+    import summary.report.segment_ai_db as sa_module  # v2.0.21 v1.5.22 实战:
+
+    # web_ui/common 顶层**不**再 from-import R49_ENABLED (会冻结模块加载时的值),
+    # 改为: 读 module.<attr> fresh value. 这里改**后端** sa_module.R49_ENABLED,
+    # web_ui/common/segment_ai_db.py L98 读 _sa_module_for_r49_enabled.R49_ENABLED 自动同步.
+    import web_ui.common.segment_ai_db as ui_sa_module  # _PARQUET_PATH 注入用
 
     # 强制 R49_ENABLED=False
-    original = ui_sa_module.R49_ENABLED
-    ui_sa_module.R49_ENABLED = False
+    original = sa_module.R49_ENABLED
+    sa_module.R49_ENABLED = False
     try:
         # mock _PARQUET_PATH 到 tmp parquet (保证如果短路**不**触发会实际读 parquet 而**不**报缺文件)
         fake_parquet = tmp_path / "segment_ai_simulation.parquet"
@@ -126,4 +131,4 @@ def test_r49_off_web_ui_short_circuits_to_none(caplog, tmp_path, monkeypatch):
             f"logger.warning 必含 'R49-off ... load_segment_ai_decisions ... disabled'; 实际: {log_msgs}"
         )
     finally:
-        ui_sa_module.R49_ENABLED = original
+        sa_module.R49_ENABLED = original

@@ -53,10 +53,10 @@ _PARQUET_PATH: Path = PROJECT_ROOT / "summary" / "result" / "segment_ai_simulati
 logger = logging.getLogger(__name__)
 
 # R49-off (B 方案 minimal disable): 全局开关 R49_ENABLED 控制 web_ui 渲染层短路
-try:
-    from summary.report.segment_ai_db import R49_ENABLED  # noqa: F401  # 失败默认 True
-except ImportError:
-    R49_ENABLED = True
+# v2.0.21 v1.5.22 实战: web_ui/common module 顶层 import R49_ENABLED**冻结**模块级变量,
+#   fixture (monkeypatch.test) 改 sa_module.R49_ENABLED **不**同步到 ui module 顶层变量.
+#   修复: 不用模块级 from-import, **直接** import module + 读其 .R49_ENABLED 属性, 永远 fresh.
+import summary.report.segment_ai_db as _sa_module_for_r49_enabled  # noqa: E402, F401
 
 
 def load_segment_ai_decisions(
@@ -94,7 +94,10 @@ def load_segment_ai_decisions(
         None: parquet 不存在 / 读失败 / 数据为空
     """
     # R49-off (B 方案 minimal disable): 全局开关 R49_ENABLED=False -> 短路 return None (段数=0)
-    if not R49_ENABLED:
+    # v2.0.21 v1.5.22 实战: 读 module .R49_ENABLED 属性, **不**读模块级 R49_ENABLED 冻结值
+    #   web_ui/common 顶层 from-import R49_ENABLED 会冻结**模块加载时**的值,
+    #   fixture (test 改 sa_module.R49_ENABLED) 后**不**同步 → 必须用 module.<attr> fresh read
+    if not _sa_module_for_r49_enabled.R49_ENABLED:
         if logger:
             logger.warning("R49-off: load_segment_ai_decisions 被 disabled (R49_ENABLED=False), return None (段数=0)")
         return None

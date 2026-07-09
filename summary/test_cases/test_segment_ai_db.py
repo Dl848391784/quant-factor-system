@@ -478,6 +478,22 @@ def test_load_api_key_raises_when_no_env_and_no_file(monkeypatch: pytest.MonkeyP
 # ════════════════════════════════════════════════════════════════════
 
 
+# v0.4.8 R49-off B 方案 (commit `a786e37` + 后续 R49_ENABLED=False): 测试隔离 fixture.
+# R49_ENABLED 全局开关=False → run_segment_ai_simulation() 短路 return [].
+# 这个文件 13 个测试**都是**默认 R49 开放语义, 必须**临时**改 True 才能跑.
+@pytest.fixture(autouse=True)
+def _force_r49_enabled_for_tests():
+    """R49-off (R49_ENABLED 默认 False 关闭): 这套测试**默认** R49 开放, 必须**临时**改 True."""
+    import summary.report.segment_ai_db as sa_module
+
+    original = sa_module.R49_ENABLED
+    sa_module.R49_ENABLED = True
+    try:
+        yield
+    finally:
+        sa_module.R49_ENABLED = original
+
+
 def _fake_r49v3_row(seg_label: str) -> dict:
     """R49v3: 构造 mock 1 行决策行 (R49 main() save_segment_ai_simulation 用)."""
     return {
@@ -534,7 +550,7 @@ def test_run_segment_ai_simulation_emits_progress_logs_r49v3(caplog):
         patch(
             "summary.report.segment_ai_db.save_segment_ai_simulation",
             return_value=Path("/tmp/never.parquet"),
-        ) as mock_save,
+        ),
         caplog.at_level(logging.INFO, logger="summary.report.segment_ai_db"),
     ):
         rows = run_segment_ai_simulation(
@@ -549,12 +565,12 @@ def test_run_segment_ai_simulation_emits_progress_logs_r49v3(caplog):
     log_msgs = [r.getMessage() for r in caplog.records]
 
     # R49v3 3 类日志全部触发
-    assert any(
-        "R49v3 run_segment_ai_simulation 启动" in m for m in log_msgs
-    ), "应触发启动日志 (含 selection_date / trade_date / n_segments)"
+    assert any("R49v3 run_segment_ai_simulation 启动" in m for m in log_msgs), (
+        "应触发启动日志 (含 selection_date / trade_date / n_segments)"
+    )
     assert any("[1/5]" in m for m in log_msgs), "i==1 触发 [1/5]"
     assert any("[5/5]" in m for m in log_msgs), "i==n_segments + i%5==0 触发 [5/5]"
-    assert any(
-        "R49v3 run_segment_ai_simulation 完成" in m for m in log_msgs
-    ), "应触发完成汇总日志 (含 success / data_fallback / decision_fallback / 耗时)"
+    assert any("R49v3 run_segment_ai_simulation 完成" in m for m in log_msgs), (
+        "应触发完成汇总日志 (含 success / data_fallback / decision_fallback / 耗时)"
+    )
     assert any("success=" in m for m in log_msgs), "完成日志含 success 计数"

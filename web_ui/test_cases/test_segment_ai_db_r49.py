@@ -31,6 +31,22 @@ if str(PROJECT_ROOT) not in sys.path:
 from web_ui.common.segment_ai_db import _PARQUET_PATH, load_segment_ai_decisions  # noqa: E402
 
 
+# v0.4.8 R49-off B 方案 (commit `a786e37` + 后续 R49_ENABLED=False): 测试隔离 fixture.
+# R49_ENABLED 全局开关=False → load_segment_ai_decisions() 短路 return None.
+# 这 3 个测试**要**验 load 返回非 None 字典 → 必须在测试里**强制**改 R49_ENABLED=True.
+@pytest.fixture(autouse=True)
+def _force_r49_enabled_for_tests():
+    """R49-off (R49_ENABLED 默认 False 关闭): 这套测试验 load 函数, 必须**临时**改 True."""
+    import summary.report.segment_ai_db as sa_module
+
+    original = sa_module.R49_ENABLED
+    sa_module.R49_ENABLED = True
+    try:
+        yield
+    finally:
+        sa_module.R49_ENABLED = original
+
+
 @pytest.mark.skipif(
     not _PARQUET_PATH.exists(),
     reason="R49a-1 未跑过 (summary/result/.../segment_ai_simulation.parquet 不存在), 跳过实测",
