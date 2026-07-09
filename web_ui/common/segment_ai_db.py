@@ -49,9 +49,7 @@ from paths import PROJECT_ROOT
 # 完全扁平到顶层, 不嵌 PIPELINE_ALIAS 子目录 (跟 web_ui/common/segment_win_db.py:33 同模式:
 # `PROJECT_ROOT / "summary" / "result" / "segment_win_rates.parquet"`). 跟既有 3 段段落布局
 # 100% 对齐. v1.5.14 §18.1a paths.py 路径常量命名陷阱: 不应该凭印象嵌额外子目录.
-_PARQUET_PATH: Path = (
-    PROJECT_ROOT / "summary" / "result" / "segment_ai_simulation.parquet"
-)
+_PARQUET_PATH: Path = PROJECT_ROOT / "summary" / "result" / "segment_ai_simulation.parquet"
 logger = logging.getLogger(__name__)
 
 
