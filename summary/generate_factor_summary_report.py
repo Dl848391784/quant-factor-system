@@ -1124,17 +1124,38 @@ def main():
     # trade_date = selection_date 的下一天 in master
     # v1.5.22 silent fallback 修复: 拆 except + 显式 fallback + 不允许 bare Exception
     _selection_date: str | None = None
-    _trade_date: str | None = None
     try:
         import pandas as pd
         from paths import FACTOR_IC_DATA_MASTER
 
         _master_dates = sorted(pd.read_parquet(FACTOR_IC_DATA_MASTER, columns=["date"])["date"].dropna().unique())
-        # v1.5.22 用户事实校正: selection_date = master 最晚日 (永远有数据),
-        # 不是 today() — 原因: today() (2026-07-08) 不在 master 里 = 4 曲线 + ssd 没数据
-        _selection_date = str(_master_dates[-1])
-        _idx = _master_dates.index(_selection_date)
-        _trade_date = str(_master_dates[_idx + 1]) if _idx + 1 < len(_master_dates) else None
+        # v0.4.8 R49v2 (用户原话 2026-07-08 凌晨跑 scenario + 算法三件套):
+        #   - selection_date = T 日选股日 (composite 计算 + close 数据可拿到)
+        #   - trade_date = T+1 日 (前一日选股 → 当日尾盘买 → 明天尾盘卖)
+        #   - 用户实战 (0708 凌晨跑, master 只到 0707):
+        #       selection_date = 2026-07-06 (master 倒数第 3)
+        #       trade_date     = 2026-07-07 (master 最晚 = 倒数第 2)
+        #     ↑ 这天 master 已有 forward_return_1d = T+1 实测有
+        # R49f 凭印象说 "selection_date = master 最晚日" 错 (那是 T+1 不是 T)
+        _selection_date: str | None = None
+        _trade_date: str | None = None
+        if len(_master_dates) >= 2:
+            _selection_date = str(_master_dates[-2])
+            _trade_date = str(_master_dates[-1])
+            # v1.5.18 silent fallback 防御: 显式记录 — 跑过程能看见
+            logger.info(
+                "R49v2 main: 0708 凌晨跑 — selection_date=%s (T 日选股), trade_date=%s (T+1 实测已回填)",
+                _selection_date,
+                _trade_date,
+            )
+        elif len(_master_dates) == 1:
+            # 极端: master 只有 1 天 → trade_date 没法算 (没下一日)
+            # v1.5.18 silent fallback: 显式 logger.warning + [⚠️] 标记 (不静默)
+            _selection_date = str(_master_dates[0])
+            logger.warning(
+                "R49 main: master 只有 1 天 (%s), trade_date 没法算, R49 跳过",
+                _selection_date,
+            )
     except ValueError as e:
         # v1.5.22 拆显式守卫: 不允许 bare Exception + 静默吞
         logger.warning("R49f main: master 最晚日不在 master 中 (%s), R49 调度跳过", e)
