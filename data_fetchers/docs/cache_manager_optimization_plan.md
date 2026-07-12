@@ -12,7 +12,7 @@
 | 问题 | 类型 | 规范依据 |
 |------|------|---------|
 | 公共模块独立创建 logger | 规范遗漏 | PROJECT.md 第783-857行：公共模块接收 logger 参数 |
-| JSONDecodeError 内存翻倍 | 规范遗漏 | references/backtest-module-optimization-patterns.md Section 1.2 |
+| JSONDecodeError 内存翻倍 | 规范遗漏 | 2026-05-23 layered_backtest.py 公共模块优化（不传递 e.doc 完整文档字符串） |
 | path 参数不支持 str | 代码改进 | PROJECT.md 参数类型约定规范 |
 | 测试入口引用不存在模块 | 代码改进 | __main__ 测试代码 |
 
@@ -86,7 +86,7 @@ def get_cache_file_info(path: Path | str, logger: logging.Logger = None) -> Dict
 
 ### Step 2: 修复 JSONDecodeError 内存翻倍问题
 
-**任务：** 按照 references/backtest-module-optimization-patterns.md Section 1.2，避免传递完整 JSON 文档字符串。
+**任务：** 不传递完整 JSON 文档字符串（e.doc 可能几十MB，导致内存翻倍）。
 
 **修改内容：**
 ```python
@@ -112,7 +112,7 @@ except json.JSONDecodeError as e:
 - 传递 e.doc 会导致内存翻倍
 - 使用 `raise ValueError(...) from e` 保留异常链但避免内存问题
 
-**规范依据：** references/backtest-module-optimization-patterns.md Section 1.2
+**规范依据：** 2026-05-23 layered_backtest.py 公共模块优化实战
 
 ---
 

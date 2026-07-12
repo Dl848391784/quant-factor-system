@@ -260,8 +260,8 @@ def _read_cache_impl(path: Path, use_gzip: bool, logger: logging.Logger) -> dict
         # 覆盖 stat() 和 open() 两种场景
         raise FileNotFoundError(f"缓存文件不存在: {path}") from e
     except json.JSONDecodeError as e:
-        # 遵循 references/backtest-module-optimization-patterns.md Section 1.2
-        # 避免传递完整 JSON 文档字符串导致内存翻倍
+        # 不传递完整 JSON 文档字符串（避免内存翻倍——e.doc 可能几十MB）
+        # 修复来源: 2026-05-23 layered_backtest.py 公共模块优化
         # 移除 e.pos == 0 分支（存在误判），统一按普通 JSON 格式错误处理
         logger.error(
             "%s 文件内容解析失败\n"

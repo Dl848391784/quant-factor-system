@@ -60,6 +60,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, cast
 
+# akshare 必须放文件顶层（模块级 import），原因：
+# 1. 模块属性可被 @patch('akshare.<func>') 命中——测试 mock 规范
+# 2. 函数内本地 import 会创建局部变量 ak，覆盖模块属性，导致 @patch('data_fetchers.fetch_industry.ak') 失效
+# 3. fetch_financial/fetch_fund_flow/fetch_market_cap 已统一为模块级 import，
+#    本文件 v3.15 之前 fetch_stock_industry_em/sw 仍本地 import，现统一
+# 详见 references/akshare-local-import-mock-pattern.md
+import akshare as ak  # noqa: E402  (放公共模块 try/except 之后)
+
 
 # 公共模块导入（遵循 MODULE.md 约束 #4）
 # 条件导入：脚本直接运行时可能路径未配置
@@ -196,8 +204,6 @@ def fetch_stock_industry_em() -> dict:
             会产生 3 条同类错误日志；现交由调用方统一记录）
     """
     import time
-
-    import akshare as ak
 
     logger.info("[行业数据 v%s] 开始获取东方财富行业分类（31个板块）...", _OUTPUT_VERSION)
 
@@ -359,7 +365,6 @@ def fetch_stock_industry_sw() -> dict:
     import requests
 
     try:
-        import akshare as ak
         import pandas as pd
 
         logger.info("[行业数据 v%s] 开始获取申万行业分类...", _OUTPUT_VERSION)
