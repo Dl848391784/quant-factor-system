@@ -938,16 +938,20 @@ def _render_cross_pipeline_summary(
     best_overall_wr = 0
     best_overall_seg = ""
     merge_stats: dict[str, dict] = {}
+    # 统一空段默认值 (修复 KeyError: 'wr' — L946 历史 typo, L969 已对齐;
+    # 抽常量避免两处字典字面量漂移)
+    _EMPTY_SEG_STATS = {"wins": 0, "total": 0, "wr": 0}
     for seg_label in [f"S{i + 1}" for i in range(n_segments)]:
         row = f"  {seg_label:<6}"
         total_w = 0
         total_n = 0
         for _, _, _, _, seg_stats in pipeline_results:
-            ss = seg_stats.get(seg_label, {"wins": 0, "total": 0})
-            wr = ss["wr"]
-            total_w += ss["wins"]
-            total_n += ss["total"]
-            if ss["total"] > 0:
+            ss = seg_stats.get(seg_label, _EMPTY_SEG_STATS)
+            # 防御 get: 上游 parquet 旧行可能缺 wr 键 (schema 漂移)
+            wr = ss.get("wr", 0)
+            total_w += ss.get("wins", 0)
+            total_n += ss.get("total", 0)
+            if ss.get("total", 0) > 0:
                 row += f" {wr:>5.0f}% "
             else:
                 row += f" {'--':>5} "
@@ -966,8 +970,9 @@ def _render_cross_pipeline_summary(
     # 最佳段逐日
     lines.append(f"  {best_overall_seg} 逐日胜率:")
     for label, _, _, _, seg_stats in pipeline_results:
-        ss = seg_stats.get(best_overall_seg, {"wins": 0, "total": 0, "wr": 0})
-        lines.append(f"    {label:>6}: {ss['wins']}/{ss['total']} = {ss['wr']:.1f}%")
+        ss = seg_stats.get(best_overall_seg, _EMPTY_SEG_STATS)
+        # 防御 get: 同上, 防 schema 漂移
+        lines.append(f"    {label:>6}: {ss.get('wins', 0)}/{ss.get('total', 0)} = {ss.get('wr', 0):.1f}%")
     lines.append("")
 
     return {
