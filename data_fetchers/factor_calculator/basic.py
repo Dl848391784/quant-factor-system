@@ -289,8 +289,7 @@ def calculate_bollinger_pb(
         添加 bollinger_pb 列的 DataFrame
 
     注意:
-        1. 函数入口必须先 .copy()，避免修改原始数据
-        2. 布林带是单只股票的时序指标，必须按 asset 分组后再做 rolling
+        1. 布林带是单只股票的时序指标，必须按 asset 分组后再做 rolling
 
     Example:
         >>> import pandas as pd
@@ -302,9 +301,6 @@ def calculate_bollinger_pb(
         True
     """
     _logger = get_module_logger(logger_arg)
-
-    # 入口：创建副本避免副作用
-    factor_df = factor_df.copy()
 
     # 列存在性校验
     missing = [c for c in calculate_bollinger_pb.required_cols if c not in factor_df.columns]
@@ -399,7 +395,6 @@ def calculate_kdj_j(
         添加了 kdj_j 列的 DataFrame
 
     规范:
-        - 函数入口必须先 .copy()，避免修改原始数据
         - KDJ 是单股票时序指标，必须按 asset 分组后再做 rolling/ewm
 
     Example:
@@ -418,9 +413,6 @@ def calculate_kdj_j(
         True
     """
     _logger = get_module_logger(logger_arg)
-
-    # 函数入口必须先 copy
-    factor_df = factor_df.copy()
 
     # 列存在性校验
     missing = [c for c in calculate_kdj_j.required_cols if c not in factor_df.columns]
@@ -517,7 +509,6 @@ def calculate_turnover_surge(
         添加了 turnover_surge 列的 DataFrame
 
     规范:
-        - 函数入口必须先 .copy()，避免修改原始数据
         - 异常检测而非静默修正
 
     Example:
@@ -534,9 +525,6 @@ def calculate_turnover_surge(
         True
     """
     _logger = get_module_logger(logger_arg)
-
-    # 函数入口必须先 copy
-    factor_df = factor_df.copy()
 
     # 列存在性校验
     missing = [c for c in calculate_turnover_surge.required_cols if c not in factor_df.columns]
@@ -632,9 +620,6 @@ def calculate_rsi_df(
         True
     """
     _logger = get_module_logger(logger_arg)
-
-    # 函数入口必须先 copy
-    factor_df = factor_df.copy()
 
     # 列存在性校验
     missing = [c for c in calculate_rsi_df.required_cols if c not in factor_df.columns]

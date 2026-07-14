@@ -141,11 +141,8 @@ def calculate_price_position(factor_df: pd.DataFrame, logger_arg: logging.Logger
     """
     _logger = get_module_logger(logger_arg)
 
-    # 入口 copy（遵循 MODULE.md 约束）
-    df = factor_df.copy()
-
     # 计算振幅
-    range_val = df[_COL_HIGH] - df[_COL_LOW]
+    range_val = factor_df[_COL_HIGH] - factor_df[_COL_LOW]
 
     # 防止除零
     zero_range_mask = np.abs(range_val) < _DEFAULT_PRICE_POSITION_EPSILON
@@ -155,15 +152,15 @@ def calculate_price_position(factor_df: pd.DataFrame, logger_arg: logging.Logger
         _logger.warning("检测到 %s 个振幅为零的记录（high=low），price_position 设为 0.5（中位）", zero_count)
 
     # 计算价格位置
-    df[_COL_PRICE_POSITION] = np.where(
+    factor_df[_COL_PRICE_POSITION] = np.where(
         zero_range_mask,
         0.5,  # 振幅为零时设为中位
-        (df[_COL_CLOSE] - df[_COL_LOW]) / range_val,
+        (factor_df[_COL_CLOSE] - factor_df[_COL_LOW]) / range_val,
     )
 
-    _logger.info("price_position 计算完成，共 %s 条记录", len(df))
+    _logger.info("price_position 计算完成，共 %s 条记录", len(factor_df))
 
-    return df
+    return factor_df
 
 
 calculate_price_position.required_cols = ["close", "high", "low"]  # type: ignore[attr-defined]
@@ -208,30 +205,27 @@ def calculate_amplitude(factor_df: pd.DataFrame, logger_arg: logging.Logger | No
     """
     _logger = get_module_logger(logger_arg)
 
-    # 入口 copy（遵循 MODULE.md 约束）
-    df = factor_df.copy()
-
     # 计算振幅
-    range_val = df[_COL_HIGH] - df[_COL_LOW]
+    range_val = factor_df[_COL_HIGH] - factor_df[_COL_LOW]
 
     # 检查 close 为零的情况
-    zero_close_mask = np.abs(df[_COL_CLOSE]) < _DEFAULT_AMPLITUDE_EPSILON
+    zero_close_mask = np.abs(factor_df[_COL_CLOSE]) < _DEFAULT_AMPLITUDE_EPSILON
 
     if zero_close_mask.any():
         zero_count = zero_close_mask.sum()
         _logger.warning("检测到 %s 个收盘价为零的记录，amplitude 设为 NaN（无效数据）", zero_count)
 
     # 计算振幅因子
-    # close=0 → NaN，否则计算 (high - low) / close
-    df[_COL_AMPLITUDE] = np.where(
+    # close=0 -> NaN，否则计算 (high - low) / close
+    factor_df[_COL_AMPLITUDE] = np.where(
         zero_close_mask,
         np.nan,  # 收盘价为零设为 NaN
-        range_val / df[_COL_CLOSE],
+        range_val / factor_df[_COL_CLOSE],
     )
 
-    _logger.info("amplitude 计算完成，共 %s 条记录", len(df))
+    _logger.info("amplitude 计算完成，共 %s 条记录", len(factor_df))
 
-    return df
+    return factor_df
 
 
 calculate_amplitude.required_cols = ["close", "high", "low"]  # type: ignore[attr-defined]
@@ -269,7 +263,6 @@ def calculate_past_return_1d(
         - close[t-1] = 0 时设为 NaN（无效数据）
 
     规范:
-        - 函数入口必须先 .copy()，避免修改原始数据
         - 必须按 asset 分组后再做 shift（单股票时序指标）
 
     Example:
@@ -293,11 +286,8 @@ def calculate_past_return_1d(
     if window is None:
         window = _DEFAULT_PAST_RETURN_1D_WINDOW
 
-    # 入口 copy（遵循 MODULE.md 约束）
-    df = factor_df.copy()
-
     # 按 asset+date 排序
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     # 按 asset 分组，shift(1) 获取昨日收盘价
     close_shifted = df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].shift(window)
@@ -348,7 +338,6 @@ def calculate_return_3d(
         - close[t-N] = 0 时设为 NaN（无效数据）
 
     规范:
-        - 函数入口必须先 .copy()，避免修改原始数据
         - 必须按 asset 分组后再做 shift（单股票时序指标）
 
     Example:
@@ -372,11 +361,8 @@ def calculate_return_3d(
     if window is None:
         window = _DEFAULT_RETURN_3D_WINDOW
 
-    # 入口 copy（遵循 MODULE.md 约束）
-    df = factor_df.copy()
-
     # 按 asset+date 排序
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     # 按 asset 分组，shift(window) 获取历史收盘价
     close_shifted = df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].shift(window)
@@ -427,7 +413,6 @@ def calculate_return_5d(
         - close[t-N] = 0 时设为 NaN（无效数据）
 
     规范:
-        - 函数入口必须先 .copy()，避免修改原始数据
         - 必须按 asset 分组后再做 shift（单股票时序指标）
 
     Example:
@@ -451,11 +436,8 @@ def calculate_return_5d(
     if window is None:
         window = _DEFAULT_RETURN_5D_WINDOW
 
-    # 入口 copy（遵循 MODULE.md 约束）
-    df = factor_df.copy()
-
     # 按 asset+date 排序
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     # 按 asset 分组，shift(window) 获取历史收盘价
     close_shifted = df.groupby(_COL_ASSET, group_keys=False)[_COL_CLOSE].shift(window)
@@ -506,7 +488,6 @@ def calculate_momentum_strength(
         - 前 window 日数据设为 NaN（rolling window 不足）
 
     规范:
-        - 函数入口必须先 .copy()，避免修改原始数据（遵循 MODULE.md 约束 M11）
         - 必须按 asset 分组后再做 rolling（单股票时序指标）
 
     Example:
@@ -529,11 +510,8 @@ def calculate_momentum_strength(
     if window is None:
         window = _DEFAULT_MOMENTUM_STRENGTH_WINDOW
 
-    # 入口 copy（遵循 MODULE.md 约束 M11）
-    df = factor_df.copy()
-
     # 按 asset+date 排序
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     # 计算日收益率 return_1d（临时列）
     # 公式: close[t] / close[t-1] - 1
@@ -612,8 +590,7 @@ def calculate_overnight_return(factor_df: pd.DataFrame, logger_arg: logging.Logg
     """
     _logger = get_module_logger(logger_arg)
 
-    df = factor_df.copy()
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     # 按资产分组计算昨日收盘价
     prev_close = df.groupby(_COL_ASSET)[_COL_CLOSE].shift(1)
@@ -670,8 +647,7 @@ def calculate_rsi_slope_3d(
     _logger = get_module_logger(logger_arg)
     _logger.debug("  输入 %s: %d 行", "calculate_rsi_slope_3d", len(factor_df))
 
-    df = factor_df.copy()
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     rsi = df.groupby(_COL_ASSET)[_COL_RSI_6]
     df[_COL_RSI_SLOPE_3D] = rsi.transform(lambda x: x - x.shift(_RSI_SLOPE_WINDOW))
@@ -712,8 +688,7 @@ def calculate_ma5_slope(
     _logger = get_module_logger(logger_arg)
     _logger.debug("  输入 %s: %d 行", "calculate_ma5_slope", len(factor_df))
 
-    df = factor_df.copy()
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     ma5 = (
         df.groupby(_COL_ASSET)[_COL_CLOSE]
@@ -769,29 +744,27 @@ def calculate_lower_shadow_ratio(
     _logger = get_module_logger(logger_arg)
     _logger.debug("  输入 %s: %d 行", "calculate_lower_shadow_ratio", len(factor_df))
 
-    df = factor_df.copy()
-
-    body_bottom = np.minimum(df[_COL_OPEN], df[_COL_CLOSE])
-    lower_shadow = np.maximum(0.0, body_bottom - df[_COL_LOW])
-    total_range = df[_COL_HIGH] - df[_COL_LOW]
+    body_bottom = np.minimum(factor_df[_COL_OPEN], factor_df[_COL_CLOSE])
+    lower_shadow = np.maximum(0.0, body_bottom - factor_df[_COL_LOW])
+    total_range = factor_df[_COL_HIGH] - factor_df[_COL_LOW]
 
     zero_range_mask = np.abs(total_range) < _LOWER_SHADOW_EPSILON
-    df[_COL_LOWER_SHADOW_RATIO] = np.where(
+    factor_df[_COL_LOWER_SHADOW_RATIO] = np.where(
         zero_range_mask,
         0.5,
         lower_shadow / total_range,
     )
 
-    valid_count = int(df[_COL_LOWER_SHADOW_RATIO].notna().sum())
+    valid_count = int(factor_df[_COL_LOWER_SHADOW_RATIO].notna().sum())
     _logger.info(
         "  有效 %s: %d (%.2f%%)，NaN %d 行",
         _COL_LOWER_SHADOW_RATIO,
         valid_count,
-        valid_count / len(df) * 100 if len(df) > 0 else 0,
-        len(df) - valid_count,
+        valid_count / len(factor_df) * 100 if len(factor_df) > 0 else 0,
+        len(factor_df) - valid_count,
     )
 
-    return df
+    return factor_df
 
 
 calculate_lower_shadow_ratio.required_cols = ["open", "close", "high", "low"]  # type: ignore[attr-defined]
