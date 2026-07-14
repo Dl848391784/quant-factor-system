@@ -83,16 +83,33 @@ def load_merged_win_trend(
     df["cum_total"] = df.groupby("segment_label")["total"].cumsum()
     df["merged_running"] = df["cum_wins"] / df["cum_total"] * 100
 
-    dates_mmdd = [d[5:] for d in sorted(df["selection_date"].unique())]
+    all_dates = sorted(df["selection_date"].unique())
+    dates_mmdd = [d[5:] for d in all_dates]
 
+    # 修复: 原代码直接用 groupby 后每段的 merged_running.tolist(), 但某些段在
+    # 某些日期无数据 (如 S7 缺 07-08), 导致段数组长度 < dates 长度, Chart.js
+    # 从缺失日期起数据左移. 改为 reindex 到完整日期列表, 缺失日期填 None.
     segments = []
     for _label, g in df.groupby("segment_label"):
-        merged_running = g["merged_running"].tolist()
+        # reindex: 将该段数据按完整日期对齐, 缺失日期的 merged_running = None
+        g_indexed = g.set_index("selection_date").reindex(all_dates)
+        merged_running = g_indexed["merged_running"].tolist()
+        # forward fill cumsum 值: 缺失日期的胜率沿用前一天的累计值 (合理:
+        # 该日无交易则胜率不变), 但如果该段从第 N 天才开始有数据, 前面的填 None
+        last_valid = None
+        filled_running: list[float | None] = []
+        for v in merged_running:
+            if v is not None and not (isinstance(v, float) and v != v):  # not NaN
+                last_valid = round(v, 2)
+                filled_running.append(last_valid)
+            else:
+                filled_running.append(last_valid)  # None if no prior data, else carry forward
+
         segments.append(
             {
                 "label": str(g["segment_label"].iloc[0]),
-                "merged_running": [round(v, 2) for v in merged_running],
-                "merged_final": round(merged_running[-1], 2),
+                "merged_running": filled_running,
+                "merged_final": round(merged_running[-1], 2) if merged_running else 0.0,
             }
         )
 

@@ -147,27 +147,28 @@ def _render_report(date: str):
             decile_stats = None
 
     # v0.4.8 R4: 解析 ob_quality txt 报告补全字段 (H1.1 严守: 不改 data_loaders)
+    # 修复: 传入 date 参数让 txt_parser 优先读取该日期的报告 (原: 始终读最新)
     txt_s8_meta: dict = {}
     txt_s9_matrix: dict | None = None
     txt_s10_segments: dict | None = None
     intraday_fallback: dict = {}
     try:
-        txt_s8_meta = parse_obq_s8(logger=logger) or {}
+        txt_s8_meta = parse_obq_s8(logger=logger, date=date) or {}
     except Exception as e:
         logger.warning("parse_obq_s8 失败: %s", e)
     try:
-        txt_s9_matrix = parse_obq_s9(logger=logger)
+        txt_s9_matrix = parse_obq_s9(logger=logger, date=date)
     except Exception as e:
         logger.warning("parse_obq_s9 失败: %s", e)
     # v0.4.8 R16: 第十节 30 分段候选明细 (txt 来源, S1~S30)
     try:
-        txt_s10_segments = parse_obq_s10(logger=logger)
+        txt_s10_segments = parse_obq_s10(logger=logger, date=date)
     except Exception as e:
         logger.warning("parse_obq_s10 失败: %s", e)
         txt_s10_segments = None
     # v0.4.8 R6: 解析操作规则 + 历史胜率
     try:
-        intraday_fallback = parse_obq_intraday(logger=logger) or {}
+        intraday_fallback = parse_obq_intraday(logger=logger, date=date) or {}
     except Exception as e:
         logger.warning("parse_obq_intraday 失败: %s", e)
         intraday_fallback = {}
@@ -175,11 +176,11 @@ def _render_report(date: str):
     txt_correlation: dict | None = None
     txt_filter: dict | None = None
     try:
-        txt_correlation = parse_obq_corr(logger=logger)
+        txt_correlation = parse_obq_corr(logger=logger, date=date)
     except Exception as e:
         logger.warning("parse_obq_corr 失败: %s", e)
     try:
-        txt_filter = parse_obq_filt(logger=logger)
+        txt_filter = parse_obq_filt(logger=logger, date=date)
     except Exception as e:
         logger.warning("parse_obq_filt 失败: %s", e)
 

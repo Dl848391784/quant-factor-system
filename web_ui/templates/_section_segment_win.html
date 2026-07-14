@@ -465,13 +465,14 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
     const sortedMergedSegs = [...mergedSegs].sort((a, b) => parseInt((a.label||'S0').replace(/\D/g, '')) - parseInt((b.label||'S0').replace(/\D/g, '')));
     const mergedDatasets = sortedMergedSegs.slice(0, 30).map((s, i) => ({
       label: s.label,
-      data: (s.merged_running || []).map(v => parseFloat(v) || 0),
+      data: (s.merged_running || []).map(v => v === null ? null : parseFloat(v)),
       borderColor: COLORS[i % COLORS.length],
       backgroundColor: COLORS[i % COLORS.length] + '20',
       pointRadius: isMobile ? 0 : 0,
       pointHoverRadius: 4,
       borderWidth: 1.5,
-      tension: 0.3
+      tension: 0.3,
+      spanGaps: true  // 修复: null 值处断开线条, 有数据处连接 (原 parseFloat(v)||0 把 null 变 0%)
     }));
     window._chartFactories['segMergedChart'] = function(canvas) {
       const mChart = new Chart(canvas, {
@@ -496,7 +497,7 @@ R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不�
         const len = Math.min(n, mergedDates.length);
         mChart.data.labels = mergedDates.slice(-len);
         mChart.data.datasets.forEach((ds, i) => {
-          const fullData = (sortedMergedSegs[i].merged_running || []).map(v => parseFloat(v) || 0);
+          const fullData = (sortedMergedSegs[i].merged_running || []).map(v => v === null ? null : parseFloat(v));
           ds.data = fullData.slice(-len);
         });
         mChart.update();

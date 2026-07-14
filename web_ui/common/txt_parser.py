@@ -31,16 +31,27 @@ def _get_obq_txt_root() -> Path:
     return PROJECT_ROOT / "summary" / "result" / "ob_quality"
 
 
-def _find_latest_txt() -> Path | None:
-    """查找最新的 ob_quality txt 报告"""
+def _find_latest_txt(date: str | None = None) -> Path | None:
+    """查找 ob_quality txt 报告.
+
+    Args:
+        date: YYYY-MM-DD 日期. 若指定, 优先返回该日期的报告文件;
+              若该日期不存在则 fallback 到最新文件 (保持旧行为兼容).
+              None = 返回最新文件 (旧行为).
+    """
     txt_root = _get_obq_txt_root()
     if not txt_root.exists():
         return None
+    if date:
+        exact = txt_root / f"factor_summary_report_{date}.txt"
+        if exact.exists():
+            return exact
+        # date 指定的报告不存在, fallback 到最新 (保持旧行为兼容)
     txt_files = sorted(txt_root.glob("factor_summary_report_*.txt"), reverse=True)
     return txt_files[0] if txt_files else None
 
 
-def parse_obq_section_8_meta(logger: logging.Logger) -> dict:
+def parse_obq_section_8_meta(logger: logging.Logger, date: str | None = None) -> dict:
     """v0.4.8 R4: 解析第八节 meta 字段 (权重综合得分/选出股票数/振幅过滤/覆盖率过滤/反向因子)
 
     Returns:
@@ -54,7 +65,7 @@ def parse_obq_section_8_meta(logger: logging.Logger) -> dict:
         }
         任意字段缺失时该字段为 None
     """
-    latest = _find_latest_txt()
+    latest = _find_latest_txt(date)
     if latest is None:
         logger.debug("ob_quality txt 报告不存在")
         return {}
@@ -103,7 +114,7 @@ def parse_obq_section_8_meta(logger: logging.Logger) -> dict:
     return result
 
 
-def parse_obq_section_9_matrix(logger: logging.Logger) -> dict | None:
+def parse_obq_section_9_matrix(logger: logging.Logger, date: str | None = None) -> dict | None:
     """v0.4.8 R4: 解析第九节 30 段 × 12 选股日 胜率矩阵
 
     Returns:
@@ -120,7 +131,7 @@ def parse_obq_section_9_matrix(logger: logging.Logger) -> dict | None:
         }
         None: 解析失败
     """
-    latest = _find_latest_txt()
+    latest = _find_latest_txt(date)
     if latest is None:
         return None
 
@@ -150,10 +161,14 @@ def parse_obq_section_9_matrix(logger: logging.Logger) -> dict | None:
 
     # 段行: "S1 0% 75% 40% ... 46.3%"  30 行
     # 注: txt 第九节每行以 "  S1" 前导空格开头, 不能用 ^ (默认匹配字符串开头, 不是行首)
+    # 修复: 原正则 (?:\d+%\s+)+ 不匹配 "--" 占位符 (某选股日该段无股票时 txt 输出 --),
+    #   导致含 -- 的整行被丢弃 (2026-07-14 报告 11/30 段丢失). 改为 (?:\d+%|--)\s+ 同时匹配
     segments = []
-    for line_match in re.finditer(r"(S\d+)\s+((?:\d+%\s+)+)(\d+\.\d+)%\s*$", section9_text, re.MULTILINE):
+    for line_match in re.finditer(r"(S\d+)\s+((?:(?:\d+%|--)\s+)+)(\d+\.\d+)%\s*$", section9_text, re.MULTILINE):
         label = line_match.group(1)
-        win_rates = [float(r.rstrip("%")) for r in line_match.group(2).split()]
+        raw_rates = line_match.group(2).split()
+        # "--" = 无数据, 用 None 表示 (Chart.js parseFloat(null)->NaN->0, 不丢段)
+        win_rates = [float(r.rstrip("%")) if r != "--" else None for r in raw_rates]
         merged = float(line_match.group(3))
         segments.append({"label": label, "win_rates": win_rates, "merged": merged})
 
@@ -195,7 +210,7 @@ def parse_obq_section_9_matrix(logger: logging.Logger) -> dict | None:
     return result
 
 
-def parse_obq_intraday_fallback(logger: logging.Logger) -> dict:
+def parse_obq_intraday_fallback(logger: logging.Logger, date: str | None = None) -> dict:
     """v0.4.8 R6: 解析 ob_quality txt 十·fallback 段 (操作规则 + 历史胜率参考)
 
     Returns:
@@ -213,7 +228,7 @@ def parse_obq_intraday_fallback(logger: logging.Logger) -> dict:
         }
         解析失败 → {}
     """
-    latest = _find_latest_txt()
+    latest = _find_latest_txt(date)
     if latest is None:
         return {}
 
@@ -226,8 +241,10 @@ def parse_obq_intraday_fallback(logger: logging.Logger) -> dict:
     result: dict = {}
 
     # 找到十·fallback 段
+    # 修复: 原正则硬编码 "S7", 但最佳段不总是 S7 (历史报告有 S9),
+    #   导致 S9 报告此函数返回空 {}. 改为 S\d+ 通配
     fallback_match = re.search(
-        r"^十、S7 段日内操作建议.*?\【操作规则】(.*?)\【历史胜率参考(.*?)\Z",
+        r"^十、S\d+ 段日内操作建议.*?【操作规则】(.*?)【历史胜率参考(.*?)\Z",
         content,
         re.MULTILINE | re.DOTALL,
     )
@@ -296,7 +313,7 @@ def parse_obq_intraday_fallback(logger: logging.Logger) -> dict:
     return result
 
 
-def parse_obq_correlation(logger: logging.Logger) -> dict | None:
+def parse_obq_correlation(logger: logging.Logger, date: str | None = None) -> dict | None:
     """v0.4.8 R9: 解析 ob_quality txt 第 3 节 因子相关性矩阵
 
     Returns:
@@ -311,7 +328,7 @@ def parse_obq_correlation(logger: logging.Logger) -> dict | None:
         }
         None: 解析失败
     """
-    latest = _find_latest_txt()
+    latest = _find_latest_txt(date)
     if latest is None:
         return None
 
@@ -427,7 +444,7 @@ def parse_obq_correlation(logger: logging.Logger) -> dict | None:
     }
 
 
-def parse_obq_filter(logger: logging.Logger) -> dict | None:
+def parse_obq_filter(logger: logging.Logger, date: str | None = None) -> dict | None:
     """v0.4.8 R9: 解析 ob_quality txt 第 4 节 因子筛选结果
 
     Returns:
@@ -439,7 +456,7 @@ def parse_obq_filter(logger: logging.Logger) -> dict | None:
         }
         None: 解析失败
     """
-    latest = _find_latest_txt()
+    latest = _find_latest_txt(date)
     if latest is None:
         return None
 
@@ -507,9 +524,10 @@ def parse_obq_filter(logger: logging.Logger) -> dict | None:
 
     if "selected_factors" not in result:
         return None
+    return result
 
 
-def parse_obq_section_10_segments(logger: logging.Logger) -> dict | None:
+def parse_obq_section_10_segments(logger: logging.Logger, date: str | None = None) -> dict | None:
     """v0.4.8 R16: 解析 ob_quality txt 第十节 (今日三十分段候选明细)
 
     数据格式: 每段 [Sn] 标头 + 合并胜率 + 1-3 只股票 (排名/代码/名称/composite)
@@ -537,7 +555,7 @@ def parse_obq_section_10_segments(logger: logging.Logger) -> dict | None:
         }
         None: 解析失败
     """
-    latest = _find_latest_txt()
+    latest = _find_latest_txt(date)
     if latest is None:
         return None
 
@@ -547,10 +565,11 @@ def parse_obq_section_10_segments(logger: logging.Logger) -> dict | None:
         logger.warning("读 ob_quality txt 失败: %s (%s)", latest, e)
         return None
 
-    # 找到第十节范围: 从"十、今日三十分段候选明细"到下一个"十、"标题 (今日分段操作) 或文件结尾
-    # 注: 本节标题是"十、今日三十分段候选明细", 下个同名"十、"是"S7 段日内操作建议" — 用具体子标题精准锚定避免误命中
+    # 找到第十节范围: 从"十、今日三十分段候选明细"到下一个"十、S<n> 段日内操作建议"或文件结尾
+    # 修复: 原正则硬编码 "S7" 作为边界, 但最佳段不总是 S7 (历史报告有 S9),
+    #   导致 S9 报告的 §10 边界泄漏整个 intraday section. 改为 S\d+ 通配
     section10_match = re.search(
-        r"^十、今日三十分段候选明细.*?\n(.*?)(?=^十、S7 段日内操作建议|\Z)",
+        r"^十、今日三十分段候选明细.*?\n(.*?)(?=^十、S\d+ 段日内操作建议|\Z)",
         content,
         re.MULTILINE | re.DOTALL,
     )
