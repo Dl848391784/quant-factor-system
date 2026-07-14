@@ -88,7 +88,7 @@ def calculate_intraday_intensity(
         logger_arg: 日志记录器（可选）
 
     Returns:
-        添加 ``intraday_intensity`` 列的 DataFrame（入口 .copy()）
+        添加 ``intraday_intensity`` 列的 DataFrame
 
     边界处理:
         - 任一价格列为 None / 非数值 → NaN
@@ -109,17 +109,16 @@ def calculate_intraday_intensity(
         True
     """
     _logger = get_module_logger(logger_arg)
-    df = factor_df.copy()
 
-    df[_COL_INTRADAY_INTENSITY] = df.apply(
+    factor_df[_COL_INTRADAY_INTENSITY] = factor_df.apply(
         lambda row: _calc_intraday_intensity_row(row[_COL_OPEN], row[_COL_CLOSE], row[_COL_HIGH], row[_COL_LOW]),
         axis=1,
     )
 
-    valid_count = int(df[_COL_INTRADAY_INTENSITY].notna().sum())
-    _logger.info("intraday_intensity 计算完成，共 %s 条记录，有效 %s", len(df), valid_count)
+    valid_count = int(factor_df[_COL_INTRADAY_INTENSITY].notna().sum())
+    _logger.info("intraday_intensity 计算完成，共 %s 条记录，有效 %s", len(factor_df), valid_count)
 
-    return df
+    return factor_df
 
 
 calculate_intraday_intensity.required_cols = ["open", "close", "high", "low"]  # type: ignore[attr-defined]

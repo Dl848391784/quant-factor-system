@@ -95,13 +95,9 @@ def calculate_industry_momentum_5d(
     """
     _logger = get_module_logger(logger_arg)
 
-    df = factor_df.copy()
-
     # Step 1: 添加 industry 列
     _logger.info("  Step 1: 添加行业分类列...")
-    df = _add_industry_column(df, _logger)
-
-    # Step 2: 计算个股日收益率（按 asset 分组 shift）
+    df = _add_industry_column(factor_df, _logger)
     _logger.info("  Step 2: 计算个股日收益率...")
     df = df.sort_values([_COL_ASSET, _COL_DATE])
     prev_close = df.groupby(_COL_ASSET)[_COL_CLOSE].shift(1)
@@ -177,13 +173,11 @@ def calculate_industry_turnover_trend(
     """
     _logger = get_module_logger(logger_arg)
 
-    df = factor_df.copy()
-
     # Step 1: 添加 industry 列
     _logger.info("  Step 1: 添加行业分类列...")
-    df = _add_industry_column(df, _logger)
+    df = _add_industry_column(factor_df, _logger)
 
-    # Step 2: 按 (industry, date) 分组 → mean(turnover_rate)
+    # Step 2: 按 (industry, date) 分组 -> mean(turnover_rate)
     _logger.info("  Step 2: 按行业分组计算日均换手率...")
     industry_daily_turnover = df.groupby(["industry", _COL_DATE])[_COL_TURNOVER_RATE].mean().reset_index()
     industry_daily_turnover = industry_daily_turnover.sort_values(["industry", _COL_DATE])
@@ -251,13 +245,11 @@ def calculate_industry_amplitude_trend(
     """
     _logger = get_module_logger(logger_arg)
 
-    df = factor_df.copy()
-
     # Step 1: 添加 industry 列
     _logger.info("  Step 1: 添加行业分类列...")
-    df = _add_industry_column(df, _logger)
+    df = _add_industry_column(factor_df, _logger)
 
-    # Step 2: 按 (industry, date) 分组 → mean(amplitude)
+    # Step 2: 按 (industry, date) 分组 -> mean(amplitude)
     _logger.info("  Step 2: 按行业分组计算日均振幅...")
     industry_daily_amplitude = df.groupby(["industry", _COL_DATE])[_COL_AMPLITUDE].mean().reset_index()
     industry_daily_amplitude = industry_daily_amplitude.sort_values(["industry", _COL_DATE])

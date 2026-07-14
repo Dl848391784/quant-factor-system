@@ -85,25 +85,23 @@ def calculate_volume_price_strength(
     _logger = get_module_logger(logger_arg)
     _logger.debug("  输入 %s: %d 行", "calculate_volume_price_strength", len(factor_df))
 
-    df = factor_df.copy()
-
     # 计算日内涨幅 (close - open) / open
-    intraday_return = (df[_COL_CLOSE] - df[_COL_OPEN]) / df[_COL_OPEN]
+    intraday_return = (factor_df[_COL_CLOSE] - factor_df[_COL_OPEN]) / factor_df[_COL_OPEN]
 
     # 乘以换手突增系数
-    df[_COL_VOLUME_PRICE_STRENGTH] = intraday_return * df[_COL_TURNOVER_SURGE]
+    factor_df[_COL_VOLUME_PRICE_STRENGTH] = intraday_return * factor_df[_COL_TURNOVER_SURGE]
 
-    valid_count = int(df[_COL_VOLUME_PRICE_STRENGTH].notna().sum())
-    nan_count = len(df) - valid_count
+    valid_count = int(factor_df[_COL_VOLUME_PRICE_STRENGTH].notna().sum())
+    nan_count = len(factor_df) - valid_count
     _logger.info(
         "  有效 %s: %d (%.2f%%)，NaN %d 行",
         _COL_VOLUME_PRICE_STRENGTH,
         valid_count,
-        valid_count / len(df) * 100 if len(df) > 0 else 0,
+        valid_count / len(factor_df) * 100 if len(factor_df) > 0 else 0,
         nan_count,
     )
 
-    return df
+    return factor_df
 
 
 calculate_volume_price_strength.required_cols = ["open", "close", "turnover_surge"]  # type: ignore[attr-defined]
@@ -133,8 +131,7 @@ def calculate_positive_day_ratio_5(
     _logger = get_module_logger(logger_arg)
     _logger.debug("  输入 %s: %d 行", "calculate_positive_day_ratio_5", len(factor_df))
 
-    df = factor_df.copy()
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     # 按asset分组计算日收益率
     daily_return = df.groupby(_COL_ASSET)[_COL_CLOSE].diff()
@@ -193,8 +190,7 @@ def calculate_ma5_deviation(
     _logger = get_module_logger(logger_arg)
     _logger.debug("  输入 %s: %d 行", "calculate_ma5_deviation", len(factor_df))
 
-    df = factor_df.copy()
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     # 计算5日移动平均线
     ma5 = df.groupby(_COL_ASSET)[_COL_CLOSE].rolling(5, min_periods=5).mean().reset_index(level=0, drop=True)
@@ -248,8 +244,7 @@ def calculate_near_high_ratio_5(
     _logger = get_module_logger(logger_arg)
     _logger.debug("  输入 %s: %d 行", "calculate_near_high_ratio_5", len(factor_df))
 
-    df = factor_df.copy()
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     # 计算5日滚动最高价和最低价
     roll_max = df.groupby(_COL_ASSET)[_COL_CLOSE].rolling(5, min_periods=5).max().reset_index(level=0, drop=True)
@@ -318,8 +313,7 @@ def calculate_volume_shrink_rate(
     _logger = get_module_logger(logger_arg)
     _logger.debug("  输入 %s: %d 行", "calculate_volume_shrink_rate", len(factor_df))
 
-    df = factor_df.copy()
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     vol_ma5 = (
         df.groupby(_COL_ASSET)[_COL_VOLUME]
@@ -374,8 +368,7 @@ def calculate_price_volume_divergence(
     _logger = get_module_logger(logger_arg)
     _logger.debug("  输入 %s: %d 行", "calculate_price_volume_divergence", len(factor_df))
 
-    df = factor_df.copy()
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     # 5日价格收益率
     close_prev = df.groupby(_COL_ASSET)[_COL_CLOSE].shift(_PRICE_DIV_WINDOW)
