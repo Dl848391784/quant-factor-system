@@ -392,13 +392,11 @@ def calculate_tail_factors(
         - ``tail_volume_shrink``：尾盘缩量程度 ``[0, 1]``
 
     Note:
-        - 遵循 MODULE.md 约束 #4：函数入口先 ``copy()``
         - 尾盘数据不存在 / 损坏：5 个因子全部置 NaN
         - 尾盘数据缺 ``volumes`` 列：仅 ``tail_price_position`` /
           ``tail_price_slope`` 有值，其余 3 个置 NaN（warning）
     """
     _logger = get_module_logger(logger_arg)
-    factor_df = factor_df.copy()
 
     # 加载尾盘数据
     tail_df = _load_tail_trading_data(_logger)
