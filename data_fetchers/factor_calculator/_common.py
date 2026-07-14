@@ -713,8 +713,7 @@ def _calculate_delta(
     """
     _logger = get_module_logger(logger_arg)
 
-    df = factor_df.copy()  # M11: DataFrame参数先copy
-    df = df.sort_values([_COL_ASSET, _COL_DATE])
+    df = factor_df.sort_values([_COL_ASSET, _COL_DATE])
 
     # 按asset分组，获取前一日值
     prev_value = df.groupby(_COL_ASSET)[base_col].shift(1)

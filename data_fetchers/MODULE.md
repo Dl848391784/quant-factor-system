@@ -1108,7 +1108,7 @@ factor_generator.py 的因子计算逻辑从 IC 脚本迁移:
 | Industry_Amplitude_Trend | min_stocks | 5 | 行业最小股票数 |
 
 **计算规范 (遵循 PROJECT.md)**:
-- 函数入口必须 `.copy()` 避免副作用
+- 函数入口**禁止** `.copy()` 整表拷贝（OOM 根因）；直接在输入 df 上加列，`_run_pipeline_step` 重新赋值后旧引用立即丢弃
 - 使用 `transform` 方法避免 pandas 3.0 索引问题 (见 R21)
 - 异常检测而非静默修正
 - 使用 EPSILON 避免除零 (见 R15)

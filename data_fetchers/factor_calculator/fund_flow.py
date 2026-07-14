@@ -279,7 +279,7 @@ def calculate_capital_flow_ratio_trend(
     """
     _logger = get_module_logger(logger_arg)
 
-    df = factor_df.copy()
+    df = factor_df
 
     # Step 1: 加载资金流数据
     _logger.info("  Step 1: 加载资金流数据...")
@@ -359,7 +359,7 @@ def calculate_capital_flow_intensity(
     """
     _logger = get_module_logger(logger_arg)
 
-    df = factor_df.copy()
+    df = factor_df
 
     # Step 1: 加载资金流数据
     _logger.info("  Step 1: 加载资金流数据...")
@@ -453,7 +453,7 @@ def calculate_capital_flow_block(
     """
     _logger = get_module_logger(logger_arg)
 
-    df = factor_df.copy()
+    df = factor_df
 
     # Step 1: 加载资金流数据（默认路径走 lru_cache）
     _logger.info("  Step 1: 加载资金流数据 (orchestrator)...")

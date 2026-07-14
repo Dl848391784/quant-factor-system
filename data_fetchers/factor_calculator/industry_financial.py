@@ -265,7 +265,7 @@ def calculate_industry_roe_trend(
     """
     _logger = get_module_logger(logger_arg)
 
-    df = factor_df.copy()
+    df = factor_df
 
     # Step 1: 加载财务数据
     _logger.info("  Step 1: 加载季度财务数据...")
@@ -343,7 +343,7 @@ def calculate_industry_earnings_growth(
     """
     _logger = get_module_logger(logger_arg)
 
-    df = factor_df.copy()
+    df = factor_df
 
     # Step 1: 加载财务数据
     _logger.info("  Step 1: 加载季度财务数据...")
@@ -421,7 +421,7 @@ def calculate_industry_pe_trend(
     """
     _logger = get_module_logger(logger_arg)
 
-    df = factor_df.copy()
+    df = factor_df
 
     # Step 1: 加载财务数据
     _logger.info("  Step 1: 加载季度财务数据...")
@@ -503,7 +503,7 @@ def calculate_industry_financial_block(
     """
     _logger = get_module_logger(logger_arg)
 
-    df = factor_df.copy()
+    df = factor_df
 
     # Step 1: 加载财务数据（一次加载，替代三个独立函数重复 gzip/json/DataFrame）
     _logger.info("  Step 1: 加载季度财务数据 (orchestrator)...")
