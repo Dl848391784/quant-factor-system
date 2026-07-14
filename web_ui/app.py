@@ -305,10 +305,25 @@ def show_report(date: str):
 def show_report_latest():
     """v0.4.8 R46: 直接 200 渲染最新可用报告 (用户原话: /report/latest 就是最近报告就好)
 
-    历史行为: 302 重定向到 /report/<date>, 浏览器每次跟随 302 → URL 变化 → 书签/分享的
+    历史行为: 302 重定向到 /report/<date>, 浏览器每次跟随 302 -> URL 变化 -> 书签/分享的
     "latest" URL 实际上指向特定日期, 重启服务器或换天后需要重新发链接。
     新行为: 直接 200 渲染, URL 始终是 /report/latest 不变, 永远拿当前最新日期报告。
+
+    修复: 原代码用 stock_selection_result.meta.selection_date (选股日, T-1) 作为
+    "最新报告日期", 但 txt 报告在 T+1 生成 (文件名日期 = 报告生成日), 导致选股日
+    比 txt 最新文件名日期早一天, txt_parser 读到的是前一天的报告. 改为直接取
+    最新 txt 报告文件的日期作为 date 参数.
     """
+    # 优先: 从最新 txt 报告文件名取日期 (报告生成日, 与 txt 内容一致)
+    from web_ui.common.txt_parser import _find_latest_txt
+
+    latest_txt = _find_latest_txt()
+    if latest_txt is not None:
+        # 文件名格式: factor_summary_report_YYYY-MM-DD.txt
+        date = latest_txt.stem.replace("factor_summary_report_", "")
+        return _render_report(date)
+
+    # fallback: txt 不存在时用 stock_selection_result.selection_date (旧行为)
     result = load_stock_selection_result(logger=logger)
     if result is None or not result.get("meta", {}).get("selection_date"):
         logger.error("无法定位最新报告日期")
