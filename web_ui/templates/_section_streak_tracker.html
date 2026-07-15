@@ -1,0 +1,65 @@
+{# 十·附: 连续入选追踪 (streak tracker)
+
+筛选条件: 当前连选 2~4 天 + 分段跨度 >= 2 (跳跃型)
+数据源: segment_stock_details.parquet + factor_ic_data.parquet
+
+参数:
+- streak_data: load_streak_tracker() 返回的 dict
+#}
+{% if not streak_data %}
+  <p class="empty">连续入选追踪数据不可用</p>
+{% elif streak_data.tracked_count == 0 %}
+  <p class="empty">今日无符合条件 (连选 2~4 天 + 分段跳跃) 的股票</p>
+{% else %}
+  <div class="meta-box">
+    <p>
+      <strong>选股日</strong>: {{ streak_data.selection_date }}
+      · <strong>今日候选</strong>: {{ streak_data.total_today }} 只
+      · <strong>符合条件</strong>: {{ streak_data.tracked_count }} 只
+    </p>
+    <p class="muted">筛选: 连选 2~4 天 (排除 5 天以上) + 分段跨度 ≥ 2 (跳跃型) · 累计收益 = 连选期间 forward_return_1d 复乘</p>
+  </div>
+
+  <div class="data-table-wrap">
+  <table class="data-table numeric">
+    <thead>
+    <tr>
+      <th>连选天数</th>
+      <th>代码</th>
+      <th>名称</th>
+      <th>连选区间</th>
+      <th>分段轨迹</th>
+      <th>分段跨度</th>
+      <th>每日排名</th>
+      <th>每日收益</th>
+      <th>累计收益</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for s in streak_data.stocks %}
+    <tr>
+      <td><strong>{{ s.streak_len }}d</strong></td>
+      <td><code>{{ s.code }}</code></td>
+      <td>{{ s.name }}</td>
+      <td class="mono">{{ s.streak_start }}~{{ s.streak_end }}</td>
+      <td class="mono" style="font-size: 12px;">{{ s.segments | join(' → ') }}</td>
+      <td>{{ s.seg_range }}</td>
+      <td class="mono" style="font-size: 12px;">{{ s.ranks | join(' → ') }}</td>
+      <td class="mono" style="font-size: 12px;">
+        {% for r in s.daily_returns %}
+          {% if r is not none %}
+            <span class="{{ 'cell-pos' if r > 0 else 'cell-neg' }}">{{ '%+.2f%%' | format(r * 100) }}</span>{{ ' → ' if not loop.last else '' }}
+          {% else %}
+            <span class="muted">N/A</span>{{ ' → ' if not loop.last else '' }}
+          {% endif %}
+        {% endfor %}
+      </td>
+      <td class="mono {{ 'cell-pos-bg' if s.cum_return > 0 else ('cell-neg-bg' if s.cum_return < 0 else '') }}">
+        <strong>{{ '%+.2f%%' | format(s.cum_return * 100) }}</strong>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+{% endif %}

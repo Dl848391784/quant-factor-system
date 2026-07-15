@@ -75,6 +75,7 @@ from web_ui.common.segment_win_db import load_merged_win_trend  # noqa: E402
 
 # v0.4.8 R12: 接受 date 参数的 stock_selection_result (H1.1 严守: 不修改 data_loaders)
 from web_ui.common.stock_selection import load_stock_selection_for_date  # noqa: E402
+from web_ui.common.streak_tracker import load_streak_tracker  # noqa: E402
 
 # v0.4.8 R4: 解析 ob_quality txt 报告 (H1.1 严守: txt 是 summary 已生成产物)
 from web_ui.common.txt_parser import (  # noqa: E402
@@ -84,6 +85,15 @@ from web_ui.common.txt_parser import (  # noqa: E402
     parse_obq_section_8_meta as parse_obq_s8,
     parse_obq_section_9_matrix as parse_obq_s9,
     parse_obq_section_10_segments as parse_obq_s10,
+)
+
+# v0.4.9: 从 parquet 直接读取四种 weight_method 的胜率+候选明细 (替代 txt_parser 单一 wm 限制)
+from web_ui.common.weight_method_data import (  # noqa: E402
+    ALL_WEIGHT_METHODS,
+    WEIGHT_METHOD_DISPLAY,
+    get_best_weight_method,
+    load_candidates as load_parq_candidates,
+    load_win_matrix as load_parq_win_matrix,
 )
 
 
@@ -101,12 +111,19 @@ def index():
 def _render_report(date: str):
     """v0.4.8 R46: 渲染 ob_quality 报告页 (内部 helper, 抽离 /report/<date> 与 /report/latest 共用)
 
+    v0.4.9: 接受 ?wm=xxx query param 切换 weight_method (Section 9/10 页签)
+
     Args:
         date: YYYY-MM-DD 报告日期 (调用方已保证格式合法)
     """
     # 简化的日期格式校验 (内部 helper 防御性 double-check)
     if len(date) != 10 or date[4] != "-" or date[7] != "-":
         abort(400, description=f"日期格式必须为 YYYY-MM-DD，收到: {date}")
+
+    # v0.4.9: weight_method 页签 (?wm=xxx)
+    best_wm = get_best_weight_method(logger=logger)
+    requested_wm = request.args.get("wm", "").strip()
+    current_wm = requested_wm if requested_wm and requested_wm in ALL_WEIGHT_METHODS else best_wm
 
     # v0.4.8 R12: 优先用 date-aware load_stock_selection_for_date(date)
     # 失败 / 不存在 时 fallback 到 data_loaders.load_stock_selection_result (取 max)
@@ -185,16 +202,18 @@ def _render_report(date: str):
         logger.warning("parse_obq_filt 失败: %s", e)
 
     # v0.4.8 R38 (Stage 6): 30 段合并胜率趋势 (从 segment_win_rates.parquet 算 cumsum)
+    # v0.4.9: 用 current_wm 替代硬编码 rolling_icir_weight
     merged_win_trend: dict | None = None
     try:
-        merged_win_trend = load_merged_win_trend(logger=logger)
+        merged_win_trend = load_merged_win_trend(weight_method=current_wm, logger=logger)
     except Exception as e:
         logger.warning("load_merged_win_trend 失败: %s", e)
 
     # v0.4.8 R39a (Stage 6 算法重设计): 30 段每日合并收益率 (字段名沿用 pl_ratio_trend 兼容 R39 mock)
+    # v0.4.9: 用 current_wm 替代硬编码 rolling_icir_weight
     pl_ratio_trend: dict | None = None
     try:
-        pl_ratio_trend = load_pl_ratio_trend(logger=logger)
+        pl_ratio_trend = load_pl_ratio_trend(weight_method=current_wm, logger=logger)
     except Exception as e:
         logger.warning("load_pl_ratio_trend 失败: %s", e)
 
@@ -261,6 +280,37 @@ def _render_report(date: str):
         "T-1 (见 summary 实际输出)" if result is None else result.get("meta", {}).get("selection_date", "未知")
     )
 
+    # v0.4.9: 从 parquet 直接读取四种 weight_method 的胜率矩阵 + 候选明细
+    # 替代 txt_parser (txt 只有"最优" weight_method 的数据, 切 wm 时历史断层)
+    parq_s9_matrix: dict | None = None
+    parq_s10_segments: dict | None = None
+    try:
+        parq_s9_matrix = load_parq_win_matrix(current_wm, logger=logger)
+    except Exception as e:
+        logger.warning("load_parq_win_matrix(%s) 失败: %s", current_wm, e)
+    try:
+        parq_s10_segments = load_parq_candidates(current_wm, stock_name_map=stock_name_map, logger=logger)
+    except Exception as e:
+        logger.warning("load_parq_candidates(%s) 失败: %s", current_wm, e)
+
+    # v0.4.9 R50: 连续入选追踪 (连选 2~4 天 + 分段跳跃型)
+    streak_data: dict | None = None
+    try:
+        streak_data = load_streak_tracker(current_wm, stock_name_map=stock_name_map, logger=logger)
+    except Exception as e:
+        logger.warning("load_streak_tracker(%s) 失败: %s", current_wm, e)
+
+    # v0.4.9: 页签数据 (所有 weight_method 的显示名 + 是否有数据)
+    wm_tabs = [
+        {
+            "key": wm,
+            "label": WEIGHT_METHOD_DISPLAY.get(wm, wm),
+            "is_best": wm == best_wm,
+            "is_current": wm == current_wm,
+        }
+        for wm in ALL_WEIGHT_METHODS
+    ]
+
     return render_template(
         "report.html",
         report_date=date,
@@ -271,8 +321,8 @@ def _render_report(date: str):
         decile_stats=decile_stats,
         intraday_rows=intraday_rows,
         txt_s8_meta=txt_s8_meta,
-        txt_s9_matrix=txt_s9_matrix,
-        txt_s10_segments=txt_s10_segments,
+        txt_s9_matrix=parq_s9_matrix if parq_s9_matrix else txt_s9_matrix,
+        txt_s10_segments=parq_s10_segments if parq_s10_segments else txt_s10_segments,
         merged_win_trend=merged_win_trend,
         pl_ratio_trend=pl_ratio_trend,
         asset_value_trend=asset_value_trend,  # v0.4.8 R44
@@ -288,6 +338,12 @@ def _render_report(date: str):
         filter_result=txt_filter,
         # v0.4.8 R10: 选中单因子从 txt_filter.selected_factors 拿 (六·对比 模板用)
         selected_factors=(txt_filter or {}).get("selected_factors", []),
+        # v0.4.9: weight_method 页签
+        wm_tabs=wm_tabs,
+        current_wm=current_wm,
+        current_wm_label=WEIGHT_METHOD_DISPLAY.get(current_wm, current_wm),
+        # v0.4.9 R50: 连续入选追踪
+        streak_data=streak_data,
     )
 
 

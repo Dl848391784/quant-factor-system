@@ -985,6 +985,53 @@ details.matrix-fold[open] > summary {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }
+
+/* === v0.4.9: weight_method 页签 === */
+.wm-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.wm-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid #21262d;
+  background: rgba(22, 27, 34, 0.5);
+  color: #f0f0f5;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+.wm-tab:hover {
+  background: rgba(88, 166, 255, 0.12);
+  border-color: rgba(88, 166, 255, 0.4);
+}
+.wm-tab.wm-active {
+  background: rgba(31, 111, 235, 0.2);
+  border-color: #1f6feb;
+  color: #ffffff;
+  font-weight: 600;
+}
+.wm-tab .wm-best-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(63, 185, 80, 0.2);
+  color: #3fb950;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.wm-current-label {
+  font-size: 12px;
+  color: #8b949e;
+  margin-bottom: 8px;
+}
 </style>
 </head>
 <body>
@@ -1002,6 +1049,7 @@ details.matrix-fold[open] > summary {
       <li><a href="#section-freshness">零·数据完整性</a></li>
       <li><a href="#section-segment-win">九·30 分段胜率</a></li>
       <li><a href="#section-candidate-detail">十·候选明细</a></li>
+      <li><a href="#section-streak-tracker">十·附 连选追踪</a></li>
       <li class="section-marker-alt"><a href="#section-intraday">十一·S7/S9 日内操作</a></li>
       <li><a href="#section-ic">一·IC</a></li>
       <li><a href="#section-backtest">二·回测</a></li>
@@ -1082,6 +1130,10 @@ details.matrix-fold[open] > summary {
 
     <section class="card"><h2 id="section-candidate-detail">十、今日三十分段候选明细</h2>
       {% include "_section_candidate_detail.html" with context %}
+    </section>
+
+    <section class="card"><h2 id="section-streak-tracker">十·附、连续入选追踪 (连选 2~4 天 · 分段跳跃型)</h2>
+      {% include "_section_streak_tracker.html" with context %}
     </section>
 
     <section class="card"><h2 id="section-intraday">十一、S7/S9 段日内操作建议 (T→T+1 实战指引) [⚠️ fallback]</h2>
