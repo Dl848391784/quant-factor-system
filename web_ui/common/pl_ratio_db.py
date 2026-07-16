@@ -84,14 +84,14 @@ def _compute_segment_return(
 
 
 def load_pl_ratio_trend(
-    n_recent_dates: int = 12,
+    n_recent_dates: int | None = None,
     weight_method: str = "rolling_icir_weight",
     logger: logging.Logger | None = None,
 ) -> dict | None:
-    """读 summary/result/segment_stock_details.parquet, 算最近 N 选股日 × 30 段 seg_return.
+    """读 summary/result/segment_stock_details.parquet, 算选股日 × 30 段 seg_return.
 
     Args:
-        n_recent_dates: 取最近多少个选股日 (默认 12 与 txt 第九节对齐)
+        n_recent_dates: 取最近多少个选股日, None=全部 (与第九节胜率汇总对齐)
         weight_method: 权重方法 (默认 rolling_icir_weight)
         logger: 日志
 
@@ -125,7 +125,7 @@ def load_pl_ratio_trend(
             return None
 
         recent_dates = sorted(ssd["selection_date"].unique())
-        if len(recent_dates) > n_recent_dates:
+        if n_recent_dates is not None and len(recent_dates) > n_recent_dates:
             recent_dates = recent_dates[-n_recent_dates:]
 
         master = pd.read_parquet(

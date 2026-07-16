@@ -42,7 +42,7 @@ from web_ui.common.pl_ratio_db import load_pl_ratio_trend
 
 
 def load_asset_value_trend(
-    n_recent_dates: int = 12,
+    n_recent_dates: int | None = None,
     weight_method: str = "rolling_icir_weight",
     initial_asset: float = 1.0,
     logger: logging.Logger | None = None,
@@ -50,7 +50,7 @@ def load_asset_value_trend(
     """基于 R43 seg_return trend, 算 30 段每日几何复合资产值 trend.
 
     Args:
-        n_recent_dates: 取最近多少个选股日 (与 R43 对齐)
+        n_recent_dates: 取最近多少个选股日, None=全部 (与第九节胜率汇总对齐)
         weight_method: 权重方法 (与 R43 对齐)
         initial_asset: 起始资产值, 默认 1.00 (R44 Q2: 第一天 = ssd[0])
         logger: 日志
