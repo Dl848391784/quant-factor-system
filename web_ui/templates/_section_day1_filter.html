@@ -109,6 +109,7 @@
         <th>分段</th>
         <th>昨日收益</th>
         <th>换手率</th>
+        <th>新入选</th>
         <th>P1</th>
         <th>P2</th>
       </tr>
@@ -133,6 +134,7 @@
             <span class="muted">N/A</span>
           {% endif %}
         </td>
+        <td class="mono">{% if s.is_new_today %}✓{% else %}<span class="muted">连选</span>{% endif %}</td>
         <td class="mono">{{ '✓' if s.pass_p1 else '—' }}</td>
         <td class="mono">{{ '✓' if s.pass_p2 else '—' }}</td>
       </tr>

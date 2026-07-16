@@ -112,6 +112,13 @@ def load_day1_filter(
     breadth = len(today_codes)
     breadth_pass = breadth >= _MIN_BREADTH
 
+    # 找昨日的选股日期 (用于排除连选股: Day 1 = 昨天不在名单)
+    prev_dates = [d for d in all_dates if d < latest]
+    prev_date = prev_dates[-1] if prev_dates else None
+    prev_codes: set[str] = set()
+    if prev_date is not None:
+        prev_codes = set(df[df["selection_date"] == prev_date]["asset"].unique())
+
     # 加载 past_return_1d, turnover_rate
     feat_map: dict[str, dict] = {}
     if _FACTOR_IC_DATA_PATH.exists():
@@ -142,7 +149,10 @@ def load_day1_filter(
         past_ret = feat.get("past_return_1d")
         turnover = feat.get("turnover_rate")
 
-        pass_p1 = past_ret is not None and past_ret < 0
+        # P0: 候选池 >= 80 (已在外层判断)
+        # P1: 昨日收益 < 0 且昨天不在选股名单 (Day 1 = 首次入选)
+        is_new_today = code not in prev_codes
+        pass_p1 = is_new_today and past_ret is not None and past_ret < 0
         pass_p2 = turnover is not None and turnover >= _SOFT_TURNOVER
 
         name = stock_name_map.get(code, "") if stock_name_map else ""
@@ -156,6 +166,7 @@ def load_day1_filter(
                 "turnover_rate": round(turnover, 2) if turnover is not None else None,
                 "pass_p1": pass_p1,
                 "pass_p2": pass_p2,
+                "is_new_today": is_new_today,
             }
         )
 
@@ -178,10 +189,14 @@ def load_day1_filter(
     filtered_stocks.sort(key=lambda x: x["past_return_1d"])
 
     if logger:
+        today_set = set(today_codes)
+        n_continued = len(today_set & prev_codes) if prev_codes else 0
         logger.info(
-            "day1_filter(%s): 今日 %d 只, 候选池%s80 (%d), P1通过 %d 只",
+            "day1_filter(%s): 今日 %d 只 (连选 %d, 新入选 %d), 候选池%s80 (%d), P1通过 %d 只",
             weight_method,
             len(today_codes),
+            n_continued,
+            len(today_codes) - n_continued,
             ">=" if breadth_pass else "<",
             breadth,
             len(filtered_stocks),
