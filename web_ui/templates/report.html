@@ -1050,6 +1050,7 @@ details.matrix-fold[open] > summary {
       <li><a href="#section-segment-win">九·30 分段胜率</a></li>
       <li><a href="#section-candidate-detail">十·候选明细</a></li>
       <li><a href="#section-streak-tracker">十·附 连选追踪</a></li>
+      <li><a href="#section-day1-filter">十·附2 Day1三层过滤</a></li>
       <li class="section-marker-alt"><a href="#section-intraday">十一·S7/S9 日内操作</a></li>
       <li><a href="#section-ic">一·IC</a></li>
       <li><a href="#section-backtest">二·回测</a></li>
@@ -1134,6 +1135,10 @@ details.matrix-fold[open] > summary {
 
     <section class="card"><h2 id="section-streak-tracker">十·附、连续入选追踪 (连选 2~4 天 · 分段跳跃型)</h2>
       {% include "_section_streak_tracker.html" with context %}
+    </section>
+
+    <section class="card"><h2 id="section-day1-filter">十·附2、Day 1 三层过滤 (候选池≥80 · 昨日跌 · 换手≥10%)</h2>
+      {% include "_section_day1_filter.html" with context %}
     </section>
 
     <section class="card"><h2 id="section-intraday">十一、S7/S9 段日内操作建议 (T→T+1 实战指引) [⚠️ fallback]</h2>

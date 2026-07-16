@@ -59,6 +59,7 @@ from summary.report.freshness_check import (  # noqa: E402
 
 # v0.4.8 R44 (Stage 6 新组件): 30 段每日复合资产值 trend (geom compound over pl_ratio_trend)
 from web_ui.common.asset_value_db import load_asset_value_trend  # noqa: E402, F401
+from web_ui.common.day1_filter import load_day1_filter  # noqa: E402
 
 # v0.4.8 R2a: web_ui 内部实现的辅助模块 (H1.1 严守: 不修改 data_loaders)
 from web_ui.common.lr_training_status import load_status as load_lr_status  # noqa: E402
@@ -300,6 +301,13 @@ def _render_report(date: str):
     except Exception as e:
         logger.warning("load_streak_tracker(%s) 失败: %s", current_wm, e)
 
+    # v0.4.9 R51: Day 1 三层过滤 (breadth>=80 + past_ret<0 + turnover>=10%)
+    day1_data: dict | None = None
+    try:
+        day1_data = load_day1_filter(current_wm, stock_name_map=stock_name_map, logger=logger)
+    except Exception as e:
+        logger.warning("load_day1_filter(%s) 失败: %s", current_wm, e)
+
     # v0.4.9: 页签数据 (所有 weight_method 的显示名 + 是否有数据)
     wm_tabs = [
         {
@@ -344,6 +352,8 @@ def _render_report(date: str):
         current_wm_label=WEIGHT_METHOD_DISPLAY.get(current_wm, current_wm),
         # v0.4.9 R50: 连续入选追踪
         streak_data=streak_data,
+        # v0.4.9 R51: Day 1 三层过滤
+        day1_data=day1_data,
     )
 
 

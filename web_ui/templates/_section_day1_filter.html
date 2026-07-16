@@ -1,0 +1,145 @@
+{# 十·附2: Day 1 三层过滤 (day1_filter)
+
+三层过滤逻辑 (基于 21 天历史数据实证):
+  P0 (必须): 候选池 >= 80 只 -- 市场信号充足, <80 直接不做
+  P1 (必须): 昨日收益 < 0   -- 回调买入, 排除追高
+  P2 (加分): 换手率 >= 10%   -- 流动性支撑, 软条件
+
+参数:
+- day1_data: load_day1_filter() 返回的 dict
+#}
+{% if not day1_data %}
+  <p class="empty">Day 1 三层过滤数据不可用</p>
+{% else %}
+  <div class="meta-box">
+    <p>
+      <strong>选股日</strong>: {{ day1_data.selection_date }}
+      · <strong>候选池</strong>: {{ day1_data.breadth }} 只
+      {% if day1_data.breadth_pass %}
+        <span class="cell-pos">✓ ≥ 80</span>
+      {% else %}
+        <span class="cell-neg">✗ < 80 (一票否决)</span>
+      {% endif %}
+      · <strong>通过 P1 (昨日跌)</strong>: {{ day1_data.filtered_count }} / {{ day1_data.total_today }} 只
+    </p>
+    <p class="muted">
+      P0: 候选池 ≥ 80 (必须) · P1: 昨日收益 &lt; 0 (必须) · P2: 换手率 ≥ 10% (加分)
+      · 实证: 三条件全满足 avg=+1.95%, win=64.7% (n=51, 06-15~07-01)
+    </p>
+  </div>
+
+  {% if not day1_data.breadth_pass %}
+    <div class="warn-box" style="background: rgba(255,77,79,0.1); border: 1px solid rgba(255,77,79,0.3); padding: 10px 14px; border-radius: 6px; margin: 10px 0;">
+      <strong style="color: #ff4d4f;">⚠ 候选池 {{ day1_data.breadth }} < 80，市场信号稀疏期，今日不建议操作。</strong>
+    </div>
+  {% endif %}
+
+  {% if day1_data.filtered_count == 0 %}
+    {% if day1_data.breadth_pass %}
+      <p class="empty">今日候选池 ≥ 80，但无股票通过 P1 (昨日收益 < 0)。今日无入场候选。</p>
+    {% endif %}
+  {% else %}
+  <div class="data-table-wrap">
+  <table class="data-table numeric">
+    <thead>
+    <tr>
+      <th>代码</th>
+      <th>名称</th>
+      <th>分段</th>
+      <th>排名</th>
+      <th>昨日收益</th>
+      <th>换手率</th>
+      <th>换手率≥10%</th>
+      <th>composite</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for s in day1_data.stocks %}
+    <tr>
+      <td><code>{{ s.code }}</code></td>
+      <td>{{ s.name }}</td>
+      <td>{{ s.segment_label }}</td>
+      <td>{{ s.rank }}</td>
+      <td class="mono {{ 'cell-neg' if s.past_return_1d < 0 else 'cell-pos' }}">
+        {{ '%+.2f%%' | format(s.past_return_1d * 100) }}
+      </td>
+      <td class="mono">
+        {% if s.turnover_rate is not none %}
+          {{ '%.2f%%' | format(s.turnover_rate) }}
+        {% else %}
+          <span class="muted">N/A</span>
+        {% endif %}
+      </td>
+      <td class="mono">
+        {% if s.turnover_pass %}
+          <span class="cell-pos">✓</span>
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </td>
+      <td class="mono">
+        {% if s.composite_value is not none %}
+          {{ '%.3f' | format(s.composite_value) }}
+        {% else %}
+          <span class="muted">N/A</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  {% if day1_data.filtered_count <= 5 %}
+  <p class="muted" style="margin-top: 8px;">
+    今日通过 P0+P1 的股票仅 {{ day1_data.filtered_count }} 只，集中在少数标的。结合个人判断择优入场，注意分散仓位。
+  </p>
+  {% endif %}
+  {% endif %}
+
+  {% if day1_data.breadth_pass and day1_data.all_stocks %}
+  <details style="margin-top: 10px;">
+    <summary style="cursor: pointer; color: var(--text-muted, #888); font-size: 13px;">展开全部 {{ day1_data.total_today }} 只今日候选</summary>
+    <div class="data-table-wrap" style="margin-top: 8px;">
+    <table class="data-table numeric" style="font-size: 12px;">
+      <thead>
+      <tr>
+        <th>代码</th>
+        <th>名称</th>
+        <th>分段</th>
+        <th>昨日收益</th>
+        <th>换手率</th>
+        <th>P1</th>
+        <th>P2</th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for s in day1_data.all_stocks %}
+      <tr style="{{ '' if s.pass_p1 else 'opacity: 0.5;' }}">
+        <td><code>{{ s.code }}</code></td>
+        <td>{{ s.name }}</td>
+        <td>{{ s.segment_label }}</td>
+        <td class="mono">
+          {% if s.past_return_1d is not none %}
+            {{ '%+.2f%%' | format(s.past_return_1d * 100) }}
+          {% else %}
+            <span class="muted">N/A</span>
+          {% endif %}
+        </td>
+        <td class="mono">
+          {% if s.turnover_rate is not none %}
+            {{ '%.2f%%' | format(s.turnover_rate) }}
+          {% else %}
+            <span class="muted">N/A</span>
+          {% endif %}
+        </td>
+        <td class="mono">{{ '✓' if s.pass_p1 else '—' }}</td>
+        <td class="mono">{{ '✓' if s.pass_p2 else '—' }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </details>
+  {% endif %}
+{% endif %}
