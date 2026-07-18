@@ -105,9 +105,19 @@ aside.sidebar {
   color: #ffffff;
   border-left-color: #58a6ff;
 }
-.sidebar-nav li a.section-marker-alt {
+/* 分组标签 (当日 / 分析), 2026-07-18 去编号后引入 */
+.sidebar-nav li.nav-group {
+  font-size: 10px;
+  font-weight: 600;
   color: #8b949e;
-  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 14px 16px 4px;
+  cursor: default;
+  user-select: none;
+}
+.sidebar-nav li.nav-group:first-child {
+  padding-top: 4px;
 }
 
 /* === 右侧主内容 === */
@@ -181,8 +191,9 @@ section.card h2 {
   margin: 0 0 16px 0;
   padding-left: 14px;
   /* v0.4.8 R21-1 (impeccable anti-pattern fix): 用 inset box-shadow 替代 4px 紫条
-     side-tab 反模式: thick colored border on one side of a card — most recognizable tell of AI-generated UIs */
-  box-shadow: inset 4px 0 0 #58a6ff;
+     side-tab 反模式: thick colored border on one side of a card — most recognizable tell of AI-generated UIs
+     B-a (2026-07-18): accent 蓝 #58a6ff → 绿 #3fb950, 与热力图/数据正色统一 */
+  box-shadow: inset 4px 0 0 #3fb950;
   font-size: 20px;
   color: #ffffff;
   font-weight: 600;
@@ -193,8 +204,9 @@ section.card h3 {
   font-size: 14px;
   color: #3fb950;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.25px;
+  /* B-b (2026-07-18): 去 text-transform:uppercase — CJK 报告里英文 label 全大写突兀;
+     letter-spacing 微保留以维持 label 感 */
+  letter-spacing: 0.2px;
 }
 section.card h4 {
   color: #f0883e;
@@ -238,20 +250,8 @@ td code {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 
-/* === 占位/空态/注释 === */
-.empty {
-  color: #95a5a6;
-  padding: 24px;
-  text-align: center;
-  background: #fafbfc;
-  border-radius: 6px;
-  font-style: italic;
-}
-.muted {
-  color: #7f8c8d;
-  font-size: 12px;
-  margin: 4px 0 12px 0;
-}
+/* === 占位/空态/注释 ===
+   (暗色定义见下方 L480 区, 此处浅色残留已删除 — 暗色主题下 #fafbfc 白底是 bug) */
 
 /* === 顶部滚动进度条 === */
 .scroll-progress {
@@ -1055,20 +1055,22 @@ details.matrix-fold[open] > summary {
       <span class="date">{{ report_date }}</span>
     </div>
     <ul class="sidebar-nav">
-      <li><a href="#section-freshness">零·数据完整性</a></li>
-      <li><a href="#section-segment-win">九·30 分段胜率</a></li>
-      <li><a href="#section-candidate-detail">十·候选明细</a></li>
-      <li><a href="#section-streak-tracker">十·附 连选追踪</a></li>
-      <li><a href="#section-day1-filter">十·附2 Day1三层过滤</a></li>
-      <li class="section-marker-alt"><a href="#section-intraday">十一·S7/S9 日内操作</a></li>
-      <li><a href="#section-ic">一·IC</a></li>
-      <li><a href="#section-backtest">二·回测</a></li>
-      <li><a href="#section-corr">三·相关性</a></li>
-      <li><a href="#section-filter">四·筛选</a></li>
-      <li><a href="#section-comp">五·综合回测</a></li>
-      <li><a href="#section-compare">六·对比</a></li>
-      <li><a href="#section-weights">七·权重</a></li>
-      <li><a href="#section-selection">八·选股</a></li>
+      <li class="nav-group">当日</li>
+      <li><a href="#section-freshness">数据完整性</a></li>
+      <li><a href="#section-segment-win">30 分段胜率</a></li>
+      <li><a href="#section-candidate-detail">候选明细</a></li>
+      <li><a href="#section-streak-tracker">连选追踪</a></li>
+      <li><a href="#section-day1-filter">Day1 三层过滤</a></li>
+      <li><a href="#section-intraday">S7/S9 日内操作</a></li>
+      <li class="nav-group">分析</li>
+      <li><a href="#section-ic">单因子 IC</a></li>
+      <li><a href="#section-backtest">分层回测</a></li>
+      <li><a href="#section-corr">相关性矩阵</a></li>
+      <li><a href="#section-filter">因子筛选</a></li>
+      <li><a href="#section-comp">综合回测</a></li>
+      <li><a href="#section-compare">因子对比</a></li>
+      <li><a href="#section-weights">权重选择</a></li>
+      <li><a href="#section-selection">选股结果</a></li>
     </ul>
   </aside>
 
@@ -1135,62 +1137,62 @@ details.matrix-fold[open] > summary {
     <script>window._chartFactories = window._chartFactories || {};</script>
 
     <!-- 12 节内容卡片化 (R18: 九/十/十一前置 — 用户最常看三节) -->
-    <section class="card"><h2 id="section-freshness">零、数据完整性检查</h2>
+    <section class="card"><h2 id="section-freshness">数据完整性检查</h2>
       {% include "_section_freshness.html" with context %}
     </section>
 
     {# === R18 前置章节: 九·30 分段胜率 / 十·候选明细 / 十一·S7/S9 日内操作 === #}
     {# 用户 2026-07-05 反馈最常看, 提到 KPI 卡之后立刻可见 #}
-    <section class="card"><h2 id="section-segment-win">九、ob_quality 全管线 30 分段胜率汇总</h2>
+    <section class="card"><h2 id="section-segment-win">ob_quality 全管线 30 分段胜率汇总</h2>
       {% include "_section_segment_win.html" with context %}
     </section>
 
-    <section class="card"><h2 id="section-candidate-detail">十、今日三十分段候选明细</h2>
+    <section class="card"><h2 id="section-candidate-detail">今日三十分段候选明细</h2>
       {% include "_section_candidate_detail.html" with context %}
     </section>
 
-    <section class="card"><h2 id="section-streak-tracker">十·附、连续入选追踪 (连选 2~4 天 · 分段跳跃型)</h2>
+    <section class="card"><h2 id="section-streak-tracker">连续入选追踪 (连选 2~4 天 · 分段跳跃型)</h2>
       {% include "_section_streak_tracker.html" with context %}
     </section>
 
-    <section class="card"><h2 id="section-day1-filter">十·附2、Day 1 三层过滤 (候选池≥80 · 昨日跌 · 换手≥10%)</h2>
+    <section class="card"><h2 id="section-day1-filter">Day 1 三层过滤 (候选池≥80 · 昨日跌 · 换手≥10%)</h2>
       {% include "_section_day1_filter.html" with context %}
     </section>
 
-    <section class="card"><h2 id="section-intraday">十一、S7/S9 段日内操作建议 (T→T+1 实战指引) [⚠️ fallback]</h2>
+    <section class="card"><h2 id="section-intraday">S7/S9 段日内操作建议 (T→T+1 实战指引) [⚠️ fallback]</h2>
       {% include "_section_intraday.html" with context %}
     </section>
 
     {# === 其他章节 (按编号顺序) === #}
-    <section class="card"><h2 id="section-ic">一、单因子 IC 数据汇总</h2>
+    <section class="card"><h2 id="section-ic">单因子 IC 数据汇总</h2>
       {% include "_section_ic.html" with context %}
     </section>
 
-    <section class="card"><h2 id="section-backtest">二、单因子分层回测</h2>
+    <section class="card"><h2 id="section-backtest">单因子分层回测</h2>
       {% include "_section_backtest.html" with context %}
     </section>
 
-    <section class="card"><h2 id="section-corr">三、因子相关性矩阵</h2>
+    <section class="card"><h2 id="section-corr">因子相关性矩阵</h2>
       {% include "_section_correlation.html" with context %}
     </section>
 
-    <section class="card"><h2 id="section-filter">四、因子筛选结果</h2>
+    <section class="card"><h2 id="section-filter">因子筛选结果</h2>
       {% include "_section_filter.html" with context %}
     </section>
 
-    <section class="card"><h2 id="section-comp">五、综合因子 4 种权重回测</h2>
+    <section class="card"><h2 id="section-comp">综合因子 4 种权重回测</h2>
       {% include "_section_composite.html" with context %}
     </section>
 
-    <section class="card"><h2 id="section-compare">六、综合因子与单因子对比</h2>
+    <section class="card"><h2 id="section-compare">综合因子与单因子对比</h2>
       {% include "_section_compare.html" with context %}
     </section>
 
-    <section class="card"><h2 id="section-weights">七、权重选择结果</h2>
+    <section class="card"><h2 id="section-weights">权重选择结果</h2>
       {% include "_section_weights.html" with context %}
     </section>
 
-    <section class="card"><h2 id="section-selection">八、股票选股结果</h2>
+    <section class="card"><h2 id="section-selection">股票选股结果</h2>
       {% include "_section_selection.html" with context %}
     </section>
 
