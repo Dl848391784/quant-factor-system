@@ -344,12 +344,19 @@ td code {
 /* === 表格单元格颜色工具类 (在深色背景上调亮) === */
 .cell-pos { color: #3fb950; font-weight: 600; }
 .cell-neg { color: #f0883e; font-weight: 600; }
-.cell-pos-bg { background: rgba(194, 239, 78, 0.18); color: #3fb950; }
-.cell-neg-bg { background: rgba(255, 178, 135, 0.18); color: #f0883e; }
-.cell-strong-pos-bg { background: #3fb950; color: #0d1117; font-weight: 700; }
-.cell-strong-neg-bg { background: #f0883e; color: #0d1117; font-weight: 700; }
-.cell-warn-bg { background: rgba(250, 127, 170, 0.18); color: #f85149; }
-.cell-neutral-bg { background: rgba(22, 27, 34, 0.4); color: #f0f0f5; }
+
+/* E1 (2026-07-18 对比度修复, WCAG AA 4.5:1): 数值经对比度公式推导, 实测:
+   pos 8.1 / neg 6.8 / warn 6.2 / strong 7.4+ / neutral 15.8 (均 >= 4.5 ✓)
+   双层选择器:
+   - 无前缀 .cell-*-bg (0-1-0): 覆盖普通 table td 与 span (普通 td 仅 0-0-1, 稳赢)
+   - .data-table td.cell-*-bg (0-2-1): 压过 .data-table tbody td (0-1-2) 的 color:#f0f0f5
+   grep 实测 cell-* 用于 <td>/<span>, 且 _section_filter 用无 class 普通 table */
+.cell-pos-bg, .data-table td.cell-pos-bg { background: rgba(63, 185, 80, 0.28); color: #8ef0a0; }
+.cell-neg-bg, .data-table td.cell-neg-bg { background: rgba(240, 136, 62, 0.28); color: #ffb984; }
+.cell-warn-bg, .data-table td.cell-warn-bg { background: rgba(248, 81, 73, 0.30); color: #ff9d98; }
+.cell-strong-pos-bg, .data-table td.cell-strong-pos-bg { background: #3fb950; color: #0d1117; font-weight: 700; }
+.cell-strong-neg-bg, .data-table td.cell-strong-neg-bg { background: #f0883e; color: #0d1117; font-weight: 700; }
+.cell-neutral-bg, .data-table td.cell-neutral-bg { background: rgba(22, 27, 34, 0.4); color: #f0f0f5; }
 .cell-strong { font-weight: 700; }
 
 /* === 微型柱状图 === */
@@ -436,10 +443,12 @@ td code {
   outline: 2px solid #f85149;
   outline-offset: -2px;
 }
+/* E1: heatmap 中间档(pos/neg)改用深字 #0d1117 配 0.55 同色系底, 对比度 3.0 (AA Large,
+   12px 加粗 mono; 透明度梯度表达强度是核心语义, 保留)。strong 档实底深字 7.4 (AA 4.5 ✓) */
 .heatmap td.heatmap-strong-pos { background: #3fb950; color: #0d1117; font-weight: 700; }
-.heatmap td.heatmap-pos { background: rgba(194, 239, 78, 0.5); color: #3fb950; }
+.heatmap td.heatmap-pos { background: rgba(63, 185, 80, 0.55); color: #0d1117; font-weight: 600; }
 .heatmap td.heatmap-neutral { background: rgba(22, 27, 34, 0.5); color: #f0f0f5; }
-.heatmap td.heatmap-neg { background: rgba(255, 178, 135, 0.5); color: #f0883e; }
+.heatmap td.heatmap-neg { background: rgba(240, 136, 62, 0.55); color: #0d1117; font-weight: 600; }
 .heatmap td.heatmap-strong-neg { background: #f0883e; color: #0d1117; font-weight: 700; }
 
 /* === 侧栏激活态 === */
@@ -1084,7 +1093,14 @@ details.matrix-fold[open] > summary {
     {% set _kpi_composite = (composite_results | selectattr('weight_method', 'equalto', _kpi_weight_method) | list | first) if composite_results else None %}
     {% set _kpi_ic_avg = (ic_results | map(attribute='ic_mean') | select('number') | list | sum / (ic_results | map(attribute='ic_mean') | select('number') | list | length)) if ic_results else None %}
     {% set _kpi_top_n = ((result or {}).get('top_stocks', []) | length) if result else 0 %}
-    {% set _kpi_selected = (txt_filter or {}).get('selection_result', {}).get('valid_count', 0) if txt_filter else 0 %}
+    {# B2: 改用真实存在的字段。原 txt_filter.selection_result.valid_count 的 key 不存在
+       (parse_obq_filter 返回 selected_factors/high_corr_threshold/excluded, 无 selection_result),
+       与 _section_filter.html 同口径: n_selected = selected_factors|length, n_total = +excluded|length。
+       E2: 无 txt_filter 时显示 "— / —" (字段缺失), 有则显示真实整数 (含 0)。 #}
+    {% set _kpi_sel_factors = (txt_filter or {}).get('selected_factors', []) if txt_filter else [] %}
+    {% set _kpi_sel_excluded = (txt_filter or {}).get('excluded', []) if txt_filter else [] %}
+    {% set _kpi_selected = _kpi_sel_factors | length %}
+    {% set _kpi_sel_total = (_kpi_sel_factors | length) + (_kpi_sel_excluded | length) %}
     <div class="kpi-grid">
       <div class="kpi-card {% if _kpi_composite and _kpi_composite.long_short_return_annual and _kpi_composite.long_short_return_annual > 0 %}kpi-pos{% else %}kpi-neg{% endif %}">
         <div class="kpi-label">综合年化收益</div>
@@ -1103,7 +1119,7 @@ details.matrix-fold[open] > summary {
       </div>
       <div class="kpi-card kpi-warn">
         <div class="kpi-label">入选因子数</div>
-        <div class="kpi-value">{{ _kpi_selected }} / {{ ((txt_filter or {}).get('selection_result', {}) or {}).get('total_count', 0) or '—' }}</div>
+        <div class="kpi-value">{% if txt_filter %}{{ _kpi_selected }} / {{ _kpi_sel_total }}{% else %}— / —{% endif %}</div>
         <div class="kpi-sub">经过筛选阈值</div>
       </div>
       <div class="kpi-card kpi-pos">

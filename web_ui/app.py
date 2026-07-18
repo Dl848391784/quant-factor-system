@@ -344,6 +344,9 @@ def _render_report(date: str):
         weight_selection=weight_selection,
         correlation=txt_correlation,
         filter_result=txt_filter,
+        # B2 bugfix: report.html 顶部 KPI 用变量名 txt_filter, 但此前仅传 filter_result →
+        # 模板 {% if txt_filter %} 永远为假, KPI 永远 "0 / —"。补传 txt_filter 使两变量同指。
+        txt_filter=txt_filter,
         # v0.4.8 R10: 选中单因子从 txt_filter.selected_factors 拿 (六·对比 模板用)
         selected_factors=(txt_filter or {}).get("selected_factors", []),
         # v0.4.9: weight_method 页签

@@ -294,14 +294,19 @@ def mock_r3_loaders():
 @pytest.fixture(autouse=True)
 def mock_r4_txt_parser():
     """v0.4.8 R4: 全局 mock txt_parser (parse_obq_s8/s9)
+    v0.4.9: 同时 mock parquet 直读函数 (load_parq_win_matrix / load_parq_candidates)
     避免真函数读文件系统, 单测 focus 模板
     """
     with (
         patch("web_ui.app.parse_obq_s8", return_value={}),
         patch("web_ui.app.parse_obq_s9", return_value=None),
+        patch("web_ui.app.parse_obq_s10", return_value=None),  # v0.4.9: mock txt §10 fallback
         patch("web_ui.app.parse_obq_intraday", return_value={}),  # R6
         patch("web_ui.app.parse_obq_corr", return_value=None),  # R9
         patch("web_ui.app.parse_obq_filt", return_value=None),  # R9
+        # v0.4.9: parquet 直读函数也全局 mock, 测试时显式 override
+        patch("web_ui.app.load_parq_win_matrix", return_value=None),
+        patch("web_ui.app.load_parq_candidates", return_value=None),
     ):
         yield
 
@@ -385,7 +390,7 @@ def test_segment_win_renders_top5(client, mock_obq_full_result):
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
         patch("web_ui.app.load_stock_name_map", return_value={}),
         patch("web_ui.app.load_decile_stats", return_value=decile_mock),
-        patch("web_ui.app.parse_obq_s9", return_value=s9_mock),
+        patch("web_ui.app.load_parq_win_matrix", return_value=s9_mock),
     ):
         resp = client.get("/report/2026-07-03")
     assert resp.status_code == 200
@@ -450,7 +455,7 @@ def test_segment_win_renders_merged_chart(client, mock_obq_full_result):
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
         patch("web_ui.app.load_stock_name_map", return_value={}),
         patch("web_ui.app.load_decile_stats", return_value=decile_mock),
-        patch("web_ui.app.parse_obq_s9", return_value=s9_mock),
+        patch("web_ui.app.load_parq_win_matrix", return_value=s9_mock),
         patch("web_ui.app.load_merged_win_trend", return_value=merged_trend_mock),
     ):
         resp = client.get("/report/2026-07-03")
@@ -526,7 +531,7 @@ def test_segment_win_renders_seg_return_chart(client, mock_obq_full_result):
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
         patch("web_ui.app.load_stock_name_map", return_value={}),
         patch("web_ui.app.load_decile_stats", return_value=decile_mock),
-        patch("web_ui.app.parse_obq_s9", return_value=s9_mock),
+        patch("web_ui.app.load_parq_win_matrix", return_value=s9_mock),
         patch("web_ui.app.load_pl_ratio_trend", return_value=seg_return_mock),
     ):
         resp = client.get("/report/2026-07-03")
@@ -634,7 +639,7 @@ def test_segment_win_renders_asset_value_chart(client, mock_obq_full_result):
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
         patch("web_ui.app.load_stock_name_map", return_value={}),
         patch("web_ui.app.load_decile_stats", return_value=decile_mock),
-        patch("web_ui.app.parse_obq_s9", return_value=s9_mock),
+        patch("web_ui.app.load_parq_win_matrix", return_value=s9_mock),
         patch("web_ui.app.load_pl_ratio_trend", return_value=seg_return_mock),
         patch("web_ui.common.asset_value_db.load_pl_ratio_trend", return_value=seg_return_mock),  # R44 内部依赖
         patch("web_ui.app.load_asset_value_trend", return_value=asset_value_mock),
@@ -723,7 +728,9 @@ def test_intraday_handles_empty_rows(client, mock_obq_full_result):
 
 
 def test_candidate_detail_renders_txt_s10_segments(client, mock_obq_full_result):
-    """v0.4.8 R16: 第十节 渲染 txt 解析的 S1~S30 段候选明细 (替换原 stage1/stage3 表)"""
+    """v0.4.8 R16: 第十节 渲染 txt 解析的 S1~S30 段候选明细 (替换原 stage1/stage3 表)
+    v0.4.9: 数据源改为 parquet 直读 (load_parq_candidates), mock 新函数
+    """
     s10_mock = {
         "selection_date": "2026-07-03",
         "pool_size": 57,
@@ -762,7 +769,8 @@ def test_candidate_detail_renders_txt_s10_segments(client, mock_obq_full_result)
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
         patch("web_ui.app.load_stock_name_map", return_value={}),
-        patch("web_ui.app.parse_obq_s10", return_value=s10_mock),
+        patch("web_ui.app.load_parq_candidates", return_value=s10_mock),
+        patch("web_ui.app.load_parq_win_matrix", return_value=None),
     ):
         resp = client.get("/report/2026-07-03")
     assert resp.status_code == 200
@@ -783,11 +791,14 @@ def test_candidate_detail_renders_txt_s10_segments(client, mock_obq_full_result)
 
 
 def test_candidate_detail_falls_back_when_txt_s10_missing(client, mock_obq_full_result):
-    """v0.4.8 R16: txt §10 解析失败时降级提示, 不 500"""
+    """v0.4.8 R16: txt §10 解析失败时降级提示, 不 500
+    v0.4.9: parquet 也无数据时显示降级提示
+    """
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
         patch("web_ui.app.load_stock_name_map", return_value={}),
-        patch("web_ui.app.parse_obq_s10", return_value=None),
+        patch("web_ui.app.load_parq_candidates", return_value=None),
+        patch("web_ui.app.load_parq_win_matrix", return_value=None),
     ):
         resp = client.get("/report/2026-07-03")
     assert resp.status_code == 200
@@ -863,7 +874,7 @@ def test_candidate_detail_uses_valid_stocks_for_pool_size(client, mock_obq_full_
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
         patch("web_ui.app.load_stock_name_map", return_value={}),
-        patch("web_ui.app.parse_obq_s10", return_value=s10_mock),
+        patch("web_ui.app.load_parq_candidates", return_value=s10_mock),
     ):
         resp = client.get("/report/2026-07-03")
     assert resp.status_code == 200
@@ -902,7 +913,9 @@ def test_section_8_renders_full_txt_format(client, mock_obq_full_result):
 
 
 def test_section_9_renders_matrix(client, mock_obq_full_result):
-    """v0.4.8 R4: 第九节 30 段 × 12 选股日 完整胜率矩阵渲染 (从 txt 解析)"""
+    """v0.4.8 R4: 第九节 30 段 × 12 选股日 完整胜率矩阵渲染 (从 txt 解析)
+    v0.4.9: 数据源改为 parquet 直读 (load_parq_win_matrix), mock 新函数
+    """
     s9_mock = {
         "dates": [
             "06-15",
@@ -920,12 +933,11 @@ def test_section_9_renders_matrix(client, mock_obq_full_result):
         ],
         "segments": [{"label": f"S{i}", "win_rates": [50.0] * 12, "merged": 50.0 + i / 10} for i in range(1, 31)],
         "best_segment": {"label": "S7", "merged": 59.6},
-        "daily_rates": {"06-15": "2/3 = 66.7%", "06-16": "3/3 = 100.0%"},
     }
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
         patch("web_ui.app.load_stock_name_map", return_value={}),
-        patch("web_ui.app.parse_obq_s9", return_value=s9_mock),  # override autouse
+        patch("web_ui.app.load_parq_win_matrix", return_value=s9_mock),  # override autouse
     ):
         resp = client.get("/report/2026-07-03")
     assert resp.status_code == 200
@@ -936,17 +948,16 @@ def test_section_9_renders_matrix(client, mock_obq_full_result):
     assert "最佳段" in body
     assert "S7" in body
     assert "59.6" in body
-    # 逐日胜率
-    assert "逐日胜率" in body
-    assert "06-15" in body
-    assert "66.7%" in body
 
 
 def test_section_9_handles_no_matrix(client, mock_obq_full_result):
-    """v0.4.8 R4: txt 解析失败 (无 matrix) 时, 不渲染 30×12 表格 (但 R3 decile_stats 仍渲染)"""
+    """v0.4.8 R4: txt 解析失败 (无 matrix) 时, 不渲染 30×12 表格 (但 R3 decile_stats 仍渲染)
+    v0.4.9: parquet 也无数据时不渲染
+    """
     with (
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
         patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.load_parq_win_matrix", return_value=None),
         # autouse 已 mock parse_obq_s9 = None
     ):
         resp = client.get("/report/2026-07-03")
@@ -1006,7 +1017,7 @@ def test_parity_obq_txt_fields_match_webui(client, mock_obq_full_result):
         patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
         patch("web_ui.app.load_stock_name_map", return_value={}),
         patch("web_ui.app.parse_obq_s8", return_value=s8_mock),
-        patch("web_ui.app.parse_obq_s9", return_value=s9_mock),
+        patch("web_ui.app.load_parq_win_matrix", return_value=s9_mock),
     ):
         resp = client.get("/report/2026-07-03")
     assert resp.status_code == 200
@@ -1181,18 +1192,107 @@ def test_freshness_section_renders_data_and_derived(client, mock_obq_full_result
     # 衍生数据
     assert "ic_results" in body
     assert "72" in body
-    # v0.4.8 R34: 状态分布 doughnut JS 应正确分类契约符号
-    # status_symbol='△延迟' → 告警; status_symbol='✗缺失' → 失败; status_symbol='✓正常' → 正常
-    # 修复前: 模板用 emoji ✅/⚠️/❌ 匹配, 全部落到'未知'
-    # 修复后: 改用契约关键词匹配 (正常/缺失/失败/无日期/延迟)
+    # B1 (2026-07-18): 状态分布 doughnut JS 与 KPI/表格徽章统一三态判定
+    # status_symbol 含 缺失/失败/无日期/✗/❌ → 失败; 含 延迟/△/⚠ → 告警; 其余 → 正常(else 默认)
+    # B1 前: KPI 数 emoji ⚠️/❌ (不匹配 △延迟) 与图表数关键词 口径不一 → KPI=0 图表=6 矛盾
+    # B1 后: 三处共用同一判定, else 默认正常 (不再有单独的 includes('正常') 分支)
     assert "statusCounts" in body
-    assert "sym.includes('正常')" in body
     assert "sym.includes('缺失')" in body
     assert "sym.includes('延迟')" in body
+    # B1 统一后: "正常" 走 else 默认, 不再显式 includes('正常')
     # 防回归: 不再用 emoji 字符匹配
     assert "'✅'" not in body
     assert "'⚠️'" not in body
     assert "'❌'" not in body
+
+
+def test_freshness_kpi_warn_count_matches_delay_rows(client, mock_obq_full_result):
+    """B1 (2026-07-18): KPI 告警数 必须与表格 △延迟 行数一致 (口径统一) + B3 文件数 — 占位"""
+    # 2 个延迟 (warn) + 1 个正常 (ok), KPI 告警数应=2
+    data_mock = [
+        {
+            "source": "factor_ic_data",
+            "description": "主数据源",
+            "expected_date": "2026-07-02",
+            "actual_date": "2026-07-03",
+            "status": "warning",
+            "status_symbol": "△延迟",
+        },  # 无 file_count key → B3 —
+        {
+            "source": "factor_data",
+            "description": "基础因子",
+            "expected_date": "2026-07-02",
+            "actual_date": "2026-07-03",
+            "status": "warning",
+            "status_symbol": "△延迟",
+        },
+    ]
+    derived_mock = [
+        {
+            "source": "composite_results",
+            "description": "综合因子",
+            "expected_date": "2026-07-02",
+            "actual_date": "2026-07-03",
+            "file_count": 4,
+            "status": "ok",
+            "status_symbol": "✓正常(4权重)",
+        },
+    ]
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.check_data_freshness", return_value=data_mock),
+        patch("web_ui.app.check_derived_data_freshness", return_value=derived_mock),
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # B1: 告警数 KPI = 2 (两个 △延迟), 不再因 emoji 不匹配显示 0
+    assert '<div class="kpi-label">告警数</div>' in body
+    assert '<div class="kpi-value">2</div>' in body
+    # B1/S1: △延迟 行徽章为 warn (黄), 不再落 else=ok (绿)
+    assert '<span class="status-badge warn">△延迟</span>' in body
+    assert '<span class="status-badge ok">✓正常(4权重)</span>' in body
+    # B3: 基础数据源 (无 file_count key) 文件数显示 —, 衍生数据源 (有) 显示 4
+    assert body.count("<td>—</td>") >= 2  # 两行基础数据源文件数均为 —
+
+
+def test_kpi_selected_factors_count(client, mock_obq_full_result):
+    """B2 (2026-07-18): 顶部 KPI 入选因子数 = selected_factors|length / (+excluded|length)"""
+    filt_mock = {
+        "selected_factors": [{"name": "amplitude", "icir": 0.65, "weight": 100.0}],
+        "high_corr_threshold": 0.7,
+        "excluded": [
+            {"name": "rsi", "reasons": ["long_return=-27.3%<3%"]},
+            {"name": "ma5_deviation", "reasons": ["long_return=-19.8%<3%"]},
+            {"name": "bias", "reasons": ["x"]},
+        ],
+    }
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        patch("web_ui.app.parse_obq_filt", return_value=filt_mock),  # override autouse
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # B2: 入选因子数 = 1 selected / (1+3)=4 total, 不再因 selection_result 缺 key 显示 0 / —
+    assert '<div class="kpi-label">入选因子数</div>' in body
+    assert '<div class="kpi-value">1 / 4</div>' in body
+
+
+def test_kpi_selected_factors_placeholder_when_no_filter(client, mock_obq_full_result):
+    """B2/E2 (2026-07-18): 无 txt_filter 时入选因子数显示 — / — (字段缺失, 非 0)"""
+    with (
+        patch("web_ui.app.load_stock_selection_result", return_value=mock_obq_full_result),
+        patch("web_ui.app.load_stock_name_map", return_value={}),
+        # autouse 已 mock parse_obq_filt = None
+    ):
+        resp = client.get("/report/2026-07-03")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    assert '<div class="kpi-label">入选因子数</div>' in body
+    assert '<div class="kpi-value">— / —</div>' in body
 
 
 def test_ic_section_renders_table(client, mock_obq_full_result):

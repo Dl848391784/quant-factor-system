@@ -24,10 +24,17 @@ R24-3 现代感强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现�
   {% set _n_derived = derived_results | length if derived_results else 0 %}
   {% set _fail_rows = [] %}
   {% set _warn_rows = [] %}
+  {# B1 统一三态判定 (与下方 freshStatusChart 图表口径一致):
+     status_symbol 契约值为 "✓正常 / ✗缺失 / △延迟" (freshness_check.py, R34)。
+     之前 KPI 数 "⚠️"/"❌" emoji, 与契约值不匹配 → KPI=0 但图表=6 自相矛盾。
+     统一: 缺失/失败/无日期/✗ → fail; 延迟/△ → warn; 其余 → ok。三处共用同一判定。
+     (仅契约符号, 不含 emoji — 上游永不输出 emoji, 硬规则#14 禁死代码) #}
   {% for r in _all %}
-    {% if r.status_symbol is defined and r.status_symbol is string %}
-      {% if '❌' in r.status_symbol %}{% set _ = _fail_rows.append(r) %}{% endif %}
-      {% if '⚠️' in r.status_symbol %}{% set _ = _warn_rows.append(r) %}{% endif %}
+    {% set _sym = r.status_symbol if (r.status_symbol is defined and r.status_symbol is string) else '' %}
+    {% if '缺失' in _sym or '失败' in _sym or '无日期' in _sym or '✗' in _sym %}
+      {% set _ = _fail_rows.append(r) %}
+    {% elif '延迟' in _sym or '△' in _sym %}
+      {% set _ = _warn_rows.append(r) %}
     {% endif %}
   {% endfor %}
   {% set _n_fail = _fail_rows | length %}
@@ -44,7 +51,8 @@ R24-3 现代感强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现�
       <div class="kpi-value">{{ _n_basic }} / {{ _n_derived }}</div>
       <div class="kpi-sub">分项明细</div>
     </div>
-    <div class="kpi-card kpi-warn">
+    {# S2: 告警=0 时用中性灰边, 避免"看起来有告警"的错觉 #}
+    <div class="kpi-card {{ 'kpi-warn' if _n_warn > 0 else 'kpi-neutral' }}">
       <div class="kpi-label">告警数</div>
       <div class="kpi-value">{{ _n_warn }}</div>
       <div class="kpi-sub">⚠️ 陈旧数据</div>
@@ -75,13 +83,14 @@ R24-3 现代感强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现�
     // 图 1: 状态分布 doughnut
     // v0.4.8 R34: 匹配 summary/report/freshness_check.py 实际输出
     // (✓正常 / ✗缺失 / △延迟), 不是 ✓/✗/△ 几何符号, 改对齐契约
+    // B1 统一三态判定: 与上方 KPI 统计、下方表格徽章共用同一口径
+    // (缺失/失败/无日期/✗ → 失败; 延迟/△ → 告警; 其余 → 正常; 仅契约符号, 硬规则#14)
     const statusCounts = all.reduce((acc, r) => {
-      let k = '未知';
+      let k = '正常';
       const sym = r.status_symbol || '';
       if (typeof sym === 'string') {
-        if (sym.includes('正常')) k = '正常';
-        else if (sym.includes('缺失') || sym.includes('失败') || sym.includes('无日期')) k = '失败';
-        else if (sym.includes('延迟')) k = '告警';
+        if (sym.includes('缺失') || sym.includes('失败') || sym.includes('无日期') || sym.includes('✗')) k = '失败';
+        else if (sym.includes('延迟') || sym.includes('△')) k = '告警';
       }
       acc[k] = (acc[k] || 0) + 1;
       return acc;
@@ -142,17 +151,19 @@ R24-3 现代感强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现�
     </thead>
     <tbody>
     {% for r in data_results or [] %}
-      {% set _sym = r.status_symbol or '' %}
-      {% if '❌' in _sym %}{% set _cls = 'fail' %}{% set _txt = '❌ 失败' %}
-      {% elif '⚠️' in _sym %}{% set _cls = 'warn' %}{% set _txt = '⚠️ 告警' %}
-      {% else %}{% set _cls = 'ok' %}{% set _txt = '✅ 正常' %}{% endif %}
+      {# S1: 徽章判定与 B1 统一 (延迟/△ → warn 黄; 缺失/失败/无日期/✗ → fail 红; 否则 ok 绿) #}
+      {% set _sym = r.status_symbol if (r.status_symbol is defined and r.status_symbol is string) else '' %}
+      {% if '缺失' in _sym or '失败' in _sym or '无日期' in _sym or '✗' in _sym %}{% set _cls = 'fail' %}
+      {% elif '延迟' in _sym or '△' in _sym %}{% set _cls = 'warn' %}
+      {% else %}{% set _cls = 'ok' %}{% endif %}
       <tr>
         <td><code>{{ r.source }}</code></td>
         <td>{{ r.description }}</td>
         <td>{{ r.expected_date or '—' }}</td>
         <td>{{ r.actual_date or '—' }}</td>
-        <td><span class="status-badge {{ _cls }}">{{ _sym or _txt }}</span></td>
-        <td>{{ r.file_count if r.file_count is not none else '—' }}</td>
+        <td><span class="status-badge {{ _cls }}">{{ _sym }}</span></td>
+        {# B3: file_count 可能缺 key (基础数据源无此字段), is defined 守卫否则 undefined 渲染空串 #}
+        <td>{{ r.file_count if (r.file_count is defined and r.file_count is not none) else '—' }}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -166,17 +177,19 @@ R24-3 现代感强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现�
     </thead>
     <tbody>
     {% for r in derived_results %}
-      {% set _sym = r.status_symbol or '' %}
-      {% if '❌' in _sym %}{% set _cls = 'fail' %}{% set _txt = '❌ 失败' %}
-      {% elif '⚠️' in _sym %}{% set _cls = 'warn' %}{% set _txt = '⚠️ 告警' %}
-      {% else %}{% set _cls = 'ok' %}{% set _txt = '✅ 正常' %}{% endif %}
+      {# S1: 徽章判定与 B1 统一 (同基础数据源表, 仅契约符号) #}
+      {% set _sym = r.status_symbol if (r.status_symbol is defined and r.status_symbol is string) else '' %}
+      {% if '缺失' in _sym or '失败' in _sym or '无日期' in _sym or '✗' in _sym %}{% set _cls = 'fail' %}
+      {% elif '延迟' in _sym or '△' in _sym %}{% set _cls = 'warn' %}
+      {% else %}{% set _cls = 'ok' %}{% endif %}
       <tr>
         <td><code>{{ r.source }}</code></td>
         <td>{{ r.description }}</td>
         <td>{{ r.expected_date or '—' }}</td>
         <td>{{ r.actual_date or '—' }}</td>
-        <td><span class="status-badge {{ _cls }}">{{ _sym or _txt }}</span></td>
-        <td>{{ r.file_count if r.file_count is not none else '—' }}</td>
+        <td><span class="status-badge {{ _cls }}">{{ _sym }}</span></td>
+        {# B3: file_count is defined 守卫 (同基础数据源表) #}
+        <td>{{ r.file_count if (r.file_count is defined and r.file_count is not none) else '—' }}</td>
       </tr>
     {% endfor %}
     </tbody>
