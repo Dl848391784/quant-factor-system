@@ -124,14 +124,22 @@ def _extract_date_from_json_content(content: str, date_field: str) -> str | None
     return None
 
 
-def check_data_freshness(date: str, logger: logging.Logger) -> list[dict]:
+def check_data_freshness(
+    date: str, logger: logging.Logger, report_date: str | None = None
+) -> list[dict]:
     """检查各数据源的新鲜度（最新日期是否为 T-1）
 
     v1.9 (2026-06-02): 新增数据完整性检查功能
+    v1.10 (2026-07-19): 新增 report_date 参数——修复 web_ui 传 selection_date(=T-1 数据日)
+        导致内部再 prev_td 一天、期望早一天、误报「△延迟」的问题。
+        期望日期应由"报告日"推导（核心数据契约: 基础源应有最新=prev_td(报告日)）。
+        report_date=None 时行为与 v1.9 一致（向后兼容）。
 
     Args:
-        date: 当前日期字符串
+        date: 数据日期字符串（契约中的 selection_date=T-1 数据日）
         logger: 日志记录器
+        report_date: 报告日（可选）。提供时期望日期 = prev_td(report_date)；
+            不提供则回退为 prev_td(date)（旧行为）。
 
     Returns:
         检查结果列表，每项包含：
@@ -142,7 +150,8 @@ def check_data_freshness(date: str, logger: logging.Logger) -> list[dict]:
         - status: 状态（ok/warning/error）
         - status_symbol: 状态符号
     """
-    expected_t_minus_1 = get_expected_t_minus_1(date)
+    # 期望基准: 优先用 report_date（报告日）推 T-1；缺省回退 date（旧行为）
+    expected_t_minus_1 = get_expected_t_minus_1(report_date or date)
     results = []
 
     for source_name, config in DATA_CHECK_SOURCES.items():
@@ -234,20 +243,29 @@ def check_data_freshness(date: str, logger: logging.Logger) -> list[dict]:
     return results
 
 
-def check_derived_data_freshness(date: str, logger: logging.Logger) -> list[dict]:
+def check_derived_data_freshness(
+    date: str, logger: logging.Logger, report_date: str | None = None
+) -> list[dict]:
     """检查衍生数据（IC 结果、回测结果）的新鲜度
 
     衍生数据由上游数据生成，检查文件是否存在及其数量。
 
+    v1.10 (2026-07-19): 新增 report_date 参数（同 check_data_freshness）——
+        ic_results 期望应为 T-2 = prev_td(prev_td(报告日))，
+        之前 web_ui 传 selection_date(=T-1) 致期望算成 T-3 误报。
+        report_date=None 时行为不变（向后兼容）。
+
     Args:
-        date: 当前日期字符串
+        date: 数据日期字符串（契约中的 selection_date=T-1 数据日）
         logger: 日志记录器
+        report_date: 报告日（可选）。提供时 T-1/T-2 由 report_date 推导；
+            不提供则回退由 date 推导（旧行为）。
 
     Returns:
         检查结果列表
     """
-    expected_t_minus_1 = get_expected_t_minus_1(date)
-    expected_t_minus_2 = get_expected_t_minus_2(date)  # IC 结果需要 T-2（次日收益）
+    expected_t_minus_1 = get_expected_t_minus_1(report_date or date)
+    expected_t_minus_2 = get_expected_t_minus_2(report_date or date)  # IC 结果需要 T-2（次日收益）
     results = []
 
     # 检查 IC 结果文件（期望 T-2）

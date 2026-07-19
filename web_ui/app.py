@@ -247,11 +247,19 @@ def _render_report(date: str):
     composite_results: list[dict] = []
     weight_selection: dict | None = None
     try:
-        data_results = check_data_freshness(selection_date or date, logger=logger) or []
+        # v1.10 (2026-07-19): report_date 传"报告日 R"(=date, 如 07-18), 函数内部
+        # prev_td(R) 得期望 T-1(=07-17), 对齐 PROJECT.md 核心数据契约"基础源应有最新=prev_td(报告日)".
+        # 之前误传 report_date=selection_date(数据日 07-17) → prev_td(07-17)=07-16 仍早一天, 已纠正.
+        # 第一参数 date 保持原语义 (report_date=None 时的 fallback).
+        data_results = check_data_freshness(
+            selection_date or date, logger=logger, report_date=date
+        ) or []
     except Exception as e:
         logger.warning("check_data_freshness 失败: %s", e)
     try:
-        derived_results = check_derived_data_freshness(selection_date or date, logger=logger) or []
+        derived_results = check_derived_data_freshness(
+            selection_date or date, logger=logger, report_date=date
+        ) or []
     except Exception as e:
         logger.warning("check_derived_data_freshness 失败: %s", e)
     try:
