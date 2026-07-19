@@ -10,12 +10,14 @@
 **开始任何开发任务前，必须按顺序执行：**
 
 ```
-1. 加载 skill：skill_view(name='superpowers-workflow')（已由 plugin 自动注入，但建议确认上下文已含入口守门员）
-2. 查询知识图谱：sqlite3 .codegraph/codegraph.db "SELECT ..."
+1. superpowers-workflow + karpathy-guidelines：已由 pre_llm_call hook 自动注入 routing table（无需主动 skill_view）
+2. codegraph 上下文：已由 pre_llm_call hook 自动注入（模块地图 + 任务相关 symbols）
+3. 如需更深层结构信息（callers/callees/impact）：主动执行 codegraph callers <symbol> 或 sqlite3 .codegraph/codegraph.db "SELECT ..."
 ```
 
-**禁止跳过**：即使任务看似简单，也必须先了解代码结构和规范流程。
-**违规后果**：未加载 skill 或未查询 codegraph 直接改代码 = 流程违规，必须回退重做。
+**说明**：hook 注入的是"模块地图 + FTS5 匹配的 symbols"，覆盖了 80% 的"改代码前先看结构"场景。剩下 20% 需要更深层信息时（如"改 X 会影响哪些文件"），主动查询 codegraph callers/impact。
+
+**禁止跳过**：即使 hook 已自动注入，agent 仍需**阅读注入内容**而非直接开始改代码。未读注入内容直接改代码 = 流程违规。
 
 ---
 
@@ -112,6 +114,8 @@
 **T-1 日数据 → T 日 09:25 算 → T 日尾盘买 → T+1 日卖**
 
 **持仓周期 = 1 日 → 评估指标必须用 `forward_return_1d`，禁用 5d/10d 评估实战表现。**
+
+> **📌 日期语义权威定义（判"数据是否最新/延迟"必读）**：`selection_date`、各 parquet 应有最新日期、segment_win_rates 为何"看着旧"非延迟等，**唯一定义在 PROJECT.md §实战交易规则 →「核心数据契约（T+1 日期语义）」**。本处不重复，判 freshness/延迟前先对齐该节。
 
 | 场景 | 评估指标 |
 |---|---|

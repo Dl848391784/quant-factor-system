@@ -225,7 +225,57 @@ T+1 日:        卖出（可能开盘 / 盘中 / 收盘）
 
 **这意味着评估指标只能是 1 日收益（`forward_return_1d`），不能用 5d / 10d。**
 
-**How**:
+### 核心数据契约（T+1 日期语义 · 唯一权威定义）
+
+> **本节是全系统最重要的日期语义定义，所有"数据是否最新/是否延迟"的判断都以此为准。**
+> 其它文档（AGENTS.md §⏰ / intraday-strategy-design skill / MEMORY）只放指针，不重复本节内容——避免多份拷贝漂移。
+
+**What**: 各数据文件的 `selection_date` / 日期字段在"报告日 R 清晨生成报告"这一流程下的语义与**应有最新日期**。
+
+**核心等式**（R = 报告日，`prev_td(X)` = X 的上一个交易日，跳过周末，不处理法定节假日）：
+
+```
+selection_date = T-1 数据日  = prev_td(R)          # = master parquet 最大日期
+trade_date     = T 买入日    = R 若是交易日否则下一交易日
+持有收益       = forward_return_1d[trade_date]     # T 收盘 → T+1 收盘
+```
+
+**各数据文件应有最新日期**（报告日 R 清晨拉 prev_td(R) 数据计算）：
+
+| 数据文件 | 关键日期字段 | 应有最新日期 | 原因（Why） |
+|---|---|---|---|
+| `factor_ic_data`（master） | `date` | `prev_td(R)` | T-1 数据已拉取到位 |
+| `segment_stock_details.parquet` | `selection_date` | `prev_td(R)` | T 日写入，**不等收益**（`segment_win_db.py:64`） |
+| `segment_win_rates.parquet` | `selection_date` | `prev_td(prev_td(R))` | 收益需 **T+1 闭环**才可算胜率：0715推荐→0716尾盘买→0717尾盘卖→0717后才可写 0715 胜率 |
+| `ic_results`（衍生） | `date` | `prev_td(prev_td(R))` | IC 需次日收益（`forward_return_1d`），最新只能算到 T-2 |
+
+**实例**（R = 2026-07-18 周六，prev_td = 07-17 周五）：
+
+- master 到 **07-17** ✓ 正常
+- segment_stock_details 到 **07-17** ✓ 正常（T 日写入）
+- segment_win_rates 到 **07-15** ✓ 正常（0716/0717 推荐收益尚未闭环，**不是延迟**）
+- ic_results 到 **07-16** ✓ 正常（需次日收益）
+
+**Don't**:
+
+- ❌ 把 `selection_date` 当成"T 日"再往前推一天算期望——这会让期望比应有值早一天，把"已到位"误判为"延迟"（2026-07-19 freshness「△延迟」误报根因）
+- ❌ 把 segment_win_rates 只到 `prev_td(prev_td(R))` 当成延迟——那是 T+1 收益闭环的物理必然
+- ❌ 用 `actual != expected` 判延迟却不区分"落后"与"超前"——数据超前于期望不是延迟
+- ❌ 在 AGENTS.md / skill / MEMORY 里重复本表全文——只放指针，改时只改本节
+
+**Why（历史教训）**:
+
+> 2026-07-19 freshness 检查把 5 个基础数据源（实际 07-17）+ ic_results（实际 07-16）全部标「△延迟」。
+> 真相：`check_data_freshness(selection_date)` 把 `selection_date`(=07-17, T-1 数据日) 当作"T"再 `prev_td` 一天 → 期望 07-16，
+> 比本契约的应有值（07-17）早一天 → 全部误报。agent 当时未对齐本契约，凭代码字面 `!=` 判延迟，得出错误结论。
+>
+> 同类先例：S13「-24.9%」假结论（实为 +28.0%）——也是未验证 producer 日期语义直接判错位。
+>
+> 教训：**判任何"日期是否最新/是否延迟"前，必须先对齐本契约的日期语义，不能只看代码字面比较。**
+
+**Verify**: 改契约只改本节；其它处发现契约全文拷贝 = 漂移，应改为指针。判断 freshness 类问题前 grep 本节确认语义。
+
+**How**（落地）:
 
 | 评估指标 | 用途 | 数据列 |
 |---------|------|--------|
