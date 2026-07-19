@@ -92,8 +92,17 @@ def test_report_latest_returns_200_with_latest_report(client, mock_obq_result):
 
 
 def test_report_latest_404_when_no_data(client):
-    """load_stock_selection_result 返回 None 时 /report/latest 404"""
-    with patch("web_ui.app.load_stock_selection_result", return_value=None):
+    """两条数据源路径都无数据时 /report/latest → 404 (优雅, 非 500).
+
+    R-fix (2026-07-19): 原只 mock load_stock_selection_result=None, 但 /report/latest
+    主路径是 _find_latest_txt (txt 报告文件名), 真实 txt 存在时永远走主路径返回 200,
+    到不了 fallback 的 404 分支 → 测试依赖真实环境, 日历/数据效应失效.
+    修复: 同时 mock txt 主路径 + selection fallback 都无数据, 确定性触发 404.
+    """
+    with (
+        patch("web_ui.common.txt_parser._find_latest_txt", return_value=None),
+        patch("web_ui.app.load_stock_selection_result", return_value=None),
+    ):
         resp = client.get("/report/latest")
     assert resp.status_code == 404
 

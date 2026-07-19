@@ -28,24 +28,29 @@ from web_ui.common.pl_ratio_db import (
 def test_load_pl_ratio_trend_no_indexerror_when_latest_selection_date():
     """R42a: selection_date = master 最晚日时, 显式守卫优雅跳过, 不抛 IndexError.
 
-    真实数据: ssd selection_date 含 2026-07-06 (master 最晚日), 不应抛异常.
+    R-fix (2026-07-19): 原硬编码 "07-06" 为最晚日 → 日历过期失效 (master 已更新到更晚).
+    改为动态取当前 master 最晚日, 消除日历依赖: 无论数据更新到哪天, 守卫场景都真实触发.
     """
+    import pandas as pd
+
     logger = logging.getLogger(__name__)
-    # n_recent_dates=12 让 recent_dates 包含 ssd 最晚日 (2026-07-06)
-    # master 最晚日也是 2026-07-06, idx+1 越界
+    # 动态取当前 master 最晚日 (mm-dd), 替代硬编码 "07-06"
+    _m = pd.read_parquet(_MASTER_PARQUET_PATH, columns=["date"])
+    latest_mmdd = str(_m["date"].max())[5:]  # "2026-07-17" → "07-17"
+    # n_recent_dates=12 让 recent_dates 包含 ssd 最晚日 (= master 最晚日), idx+1 越界
     result = load_pl_ratio_trend(n_recent_dates=12, logger=logger)
 
     # 断言 1: 不抛 IndexError (主路径 try/except 已兜住, 这里再次确认无异常)
     assert result is not None, "n_recent_dates=12 应有至少一天有效日期"
 
     # 断言 2: 返回的 dates 不含 master 最晚日 (被守卫跳过)
-    assert "07-06" not in result["dates"], (
-        f"2026-07-06 = master 最晚日, 应被守卫跳过, 不应在 dates 里; 实际 dates={result['dates']}"
+    assert latest_mmdd not in result["dates"], (
+        f"{latest_mmdd} = master 最晚日, 应被守卫跳过, 不应在 dates 里; 实际 dates={result['dates']}"
     )
 
-    # 断言 3: dates 长度 < 12 (因为最晚日被跳过, 实际 10-11 天)
+    # 断言 3: dates 长度 < 12 (因为最晚日被跳过)
     assert len(result["dates"]) < 12, (
-        f"dates 长度应 < 12 (07-06 被跳过), 实际 {len(result['dates'])}: {result['dates']}"
+        f"dates 长度应 < 12 ({latest_mmdd} 被跳过), 实际 {len(result['dates'])}: {result['dates']}"
     )
 
     # 断言 4: 30 段 × N 天 结构完整

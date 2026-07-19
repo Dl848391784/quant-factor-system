@@ -21,14 +21,19 @@ import pandas as pd
 import pytest
 
 # 导入被测试模块
+# R-fix (2026-07-19): NEW_FACTORS 已重命名为 DEFAULT_FACTORS (merge_factors v1.4), 同步接口漂移
 from summary.merge_factors import (
-    NEW_FACTORS,
+    DEFAULT_FACTORS,
     __version__,
     load_main_data,
     load_parquet_factor,
     merge_factors,
     setup_logger,
 )
+
+
+# 向后兼容别名: 模块 NEW_FACTORS → DEFAULT_FACTORS (本测试文件内统一用别名, 最小改动)
+NEW_FACTORS = DEFAULT_FACTORS
 
 
 class TestSetupLogger:
@@ -68,25 +73,31 @@ class TestLoadMainData:
         if result is None:
             logger.warning.assert_called()
 
-    @patch("summary.merge_factors.PROJECT_ROOT")
-    @patch("gzip.open")
-    @patch("json.load")
-    def test_load_main_data_success(self, mock_json_load, mock_gzip_open, mock_project_root):
-        """测试主数据源加载成功"""
-        # 设置 mock
-        mock_json_load.return_value = {"data": [{"date": "2024-01-01", "asset": "000001"}]}
-        mock_gzip_open.return_value.__enter__.return_value = MagicMock()
+    def test_load_main_data_success(self, tmp_path):
+        """测试主数据源加载成功
 
-        # 模拟文件存在
-        mock_file = Mock()
-        mock_file.exists.return_value = True
-        mock_project_root.__truediv__ = Mock(return_value=mock_file)
+        R-fix (2026-07-19): 弃用失效的 mock_project_root.__truediv__ + mock gzip/json,
+        改为 tmp_path 下造真实 gzip JSON 文件 — load_main_data 读
+        PROJECT_ROOT/DATA_PATHS['factor_data']/factor_data.json.gz, 用真文件端到端最可靠.
+        """
+        import gzip
+        import json
+
+        from summary.merge_factors import DATA_PATHS
+
+        data_dir = tmp_path / DATA_PATHS["factor_data"]
+        data_dir.mkdir(parents=True, exist_ok=True)
+        payload = {"data": [{"date": "2024-01-01", "asset": "000001", "close": 10.0}]}
+        with gzip.open(data_dir / "factor_data.json.gz", "wt", encoding="utf-8") as f:
+            json.dump(payload, f)
 
         logger = Mock()
-        result = load_main_data(logger)
+        with patch("summary.merge_factors.PROJECT_ROOT", tmp_path):
+            result = load_main_data(logger)
 
-        # 返回 DataFrame
         assert isinstance(result, pd.DataFrame)
+        assert len(result) == 1
+        assert result.iloc[0]["asset"] == "000001"
 
 
 class TestLoadParquetFactor:
@@ -99,39 +110,39 @@ class TestLoadParquetFactor:
         assert result is None
         logger.warning.assert_called()
 
-    @patch("summary.merge_factors.PROJECT_ROOT")
-    @patch("pandas.read_parquet")
-    def test_load_parquet_factor_success(self, mock_read_parquet, mock_project_root):
-        """测试因子文件加载成功"""
-        # 设置 mock
-        mock_read_parquet.return_value = pd.DataFrame(
-            {"date": ["2024-01-01"], "asset": ["000001"], "factor_value": [0.5]}
+    def test_load_parquet_factor_success(self, tmp_path):
+        """测试因子文件加载成功
+
+        R-fix (2026-07-19): 弃用失效 mock, tmp_path 造真实 parquet —
+        load_parquet_factor 读 PROJECT_ROOT/DATA_PATHS['factors']/<name>.parquet.
+        """
+        from summary.merge_factors import DATA_PATHS
+
+        factors_dir = tmp_path / DATA_PATHS["factors"]
+        factors_dir.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame({"date": ["2024-01-01"], "asset": ["000001"], "factor_value": [0.5]}).to_parquet(
+            factors_dir / "test_factor.parquet"
         )
 
-        # 模拟文件存在
-        mock_file = Mock()
-        mock_file.exists.return_value = True
-        mock_project_root.__truediv__ = Mock(return_value=mock_file)
-
         logger = Mock()
-        result = load_parquet_factor("test_factor", logger)
+        with patch("summary.merge_factors.PROJECT_ROOT", tmp_path):
+            result = load_parquet_factor("test_factor", logger)
 
         assert isinstance(result, pd.DataFrame)
+        assert len(result) == 1
 
-    @patch("summary.merge_factors.PROJECT_ROOT")
-    @patch("pandas.read_parquet")
-    def test_load_parquet_factor_exception(self, mock_read_parquet, mock_project_root):
-        """测试因子文件加载异常"""
-        # 设置 mock 抛出异常
-        mock_read_parquet.side_effect = Exception("读取失败")
+    def test_load_parquet_factor_exception(self, tmp_path):
+        """测试因子文件加载异常 (损坏的 parquet → 返回 None + error 日志)"""
+        from summary.merge_factors import DATA_PATHS
 
-        # 模拟文件存在
-        mock_file = Mock()
-        mock_file.exists.return_value = True
-        mock_project_root.__truediv__ = Mock(return_value=mock_file)
+        factors_dir = tmp_path / DATA_PATHS["factors"]
+        factors_dir.mkdir(parents=True, exist_ok=True)
+        # 写一个非 parquet 内容 → pd.read_parquet 抛异常
+        (factors_dir / "test_factor.parquet").write_bytes(b"not a parquet")
 
         logger = Mock()
-        result = load_parquet_factor("test_factor", logger)
+        with patch("summary.merge_factors.PROJECT_ROOT", tmp_path):
+            result = load_parquet_factor("test_factor", logger)
 
         assert result is None
         logger.error.assert_called()
@@ -164,9 +175,13 @@ class TestMergeFactors:
 
     @patch("summary.merge_factors.load_main_data")
     @patch("summary.merge_factors.load_parquet_factor")
-    @patch("summary.merge_factors.PROJECT_ROOT")
-    def test_merge_factors_success(self, mock_project_root, mock_load_factor, mock_load_main):
-        """测试合并成功"""
+    def test_merge_factors_success(self, mock_load_factor, mock_load_main, tmp_path):
+        """测试合并成功
+
+        R-fix (2026-07-19): 弃用 patch PROJECT_ROOT + 失效 __truediv__,
+        改用 merge_factors 的 output_dir 参数传 tmp_path (生产代码 L452 支持),
+        避免对 PROJECT_ROOT 的魔术方法 mock. 最小且可靠.
+        """
         # 设置主数据
         mock_load_main.return_value = pd.DataFrame(
             {"date": ["2024-01-01", "2024-01-02"], "asset": ["000001", "000002"], "existing_factor": [0.1, 0.2]}
@@ -177,16 +192,11 @@ class TestMergeFactors:
             {"date": ["2024-01-01", "2024-01-02"], "asset": ["000001", "000002"], "factor_value": [0.5, 0.6]}
         )
 
-        # 模拟输出目录
-        mock_dir = Mock()
-        mock_dir.mkdir = Mock()
-        mock_project_root.__truediv__ = Mock(return_value=mock_dir)
-
         logger = Mock()
 
-        # 只测试一个因子
-        with patch("summary.merge_factors.NEW_FACTORS", ["test_factor"]):
-            result = merge_factors(logger)
+        # 只测试一个因子 (patch 生产代码实际读取的 DEFAULT_FACTORS)
+        with patch("summary.merge_factors.DEFAULT_FACTORS", ["test_factor"]):
+            result = merge_factors(logger, output_dir=tmp_path)
 
         assert isinstance(result, pd.DataFrame)
 
@@ -195,8 +205,8 @@ class TestConstants:
     """常量测试"""
 
     def test_version_defined(self):
-        """测试版本常量定义"""
-        assert __version__ == "1.1"
+        """测试版本常量定义 (R-fix 2026-07-19: 模块已升级到 1.4, 同步断言)"""
+        assert __version__ == "1.4"
 
     def test_new_factors_not_empty(self):
         """测试新因子列表非空"""
