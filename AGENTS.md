@@ -36,6 +36,7 @@
 | 新增函数/脚本/API（**写代码前**） | `test-driven-development` |
 | 测试失败/运行时错误（**先于猜测修复**） | `systematic-debugging` |
 | 任何编码任务（行为约束） | `karpathy-guidelines` |
+| 裁决类结论（**给结论前**）："根因"/"有效吗"/"选哪个方案"/"要不要废弃"/"能上线吗" | `adversarial-review` |
 | WebUI bug / session 异常 | `hermes-webui-debugging` |
 | 任务交给 Codex 执行 | `kanban-codex-lane` |
 
