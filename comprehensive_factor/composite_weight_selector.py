@@ -357,14 +357,27 @@ class MetricExtractor:
                     raise ValueError("必需字段缺失: monotonicity.correlation")
 
                 # 提取多头分层数据
+                # 从 backtest meta 动态读取 long_layers（整数列表），而非 hardcode 固定层号
+                # 根因: IC>0 因子 long_layers=[1,2]，IC<0 因子 long_layers=[4,5]
+                #       hardcode ["layer_1","layer_2"] 对 IC<0 因子取到做空层，方向反了
+                meta = backtest.get("meta", {})
+                meta_long_layers = meta.get("long_layers", None)
+
+                if meta_long_layers:
+                    # 动态: [4, 5] -> ["layer_4", "layer_5"]
+                    long_layer_names = [f"layer_{n}" for n in meta_long_layers]
+                else:
+                    # 回退: 旧数据无 meta 字段时用配置默认值（向后兼容）
+                    long_layer_names = list(self._config.long_layers)
+
                 long_layer_data = []
-                for layer_name in self._config.long_layers:
+                for layer_name in long_layer_names:
                     layer_data = layer_stats.get(layer_name, {})
                     if layer_data:
                         long_layer_data.append(layer_data)
 
                 if not long_layer_data:
-                    raise ValueError(f"多头分层数据缺失: {self._config.long_layers}")
+                    raise ValueError(f"多头分层数据缺失: {long_layer_names}")
 
                 # 检查层内必需字段
                 for layer in long_layer_data:
@@ -376,10 +389,13 @@ class MetricExtractor:
                 long_sharpe = sum(layer["sharpe_ratio"] for layer in long_layer_data) / len(long_layer_data)
                 max_drawdown = sum(abs(layer["max_drawdown"]) for layer in long_layer_data) / len(long_layer_data)
 
-                # v2.35: P3 新增——提取 Layer1 单独指标（只做多核心指标）
-                layer_1 = layer_stats.get("layer_1", {})
-                layer_1_annual = layer_1.get("annual_return")
-                layer_1_sharpe = layer_1.get("sharpe_ratio")
+                # v2.35: P3 新增--提取首个做多层指标（只做多核心指标）
+                # 修复: 从动态 long_layer_names 取首个做多层，而非硬编码 layer_1
+                # 根因: IC<0 因子 long_layers=[4,5]，layer_1 是做空层不是买入层
+                first_long_layer_name = long_layer_names[0]  # e.g. "layer_4"
+                first_long_layer = layer_stats.get(first_long_layer_name, {})
+                layer_1_annual = first_long_layer.get("annual_return")
+                layer_1_sharpe = first_long_layer.get("sharpe_ratio")
 
                 metrics_data[method] = {
                     "long_return_annual": long_return_annual,

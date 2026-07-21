@@ -36,13 +36,19 @@ def _make_factor_data(
     layer_1_annual: float | None = 0.15,
     layer_1_sharpe: float | None = 0.60,
     long_short_return: float = 0.20,
+    long_layers: list[int] | None = None,
 ) -> dict:
     """构造测试用因子数据（含 layer_stats）
+
+    Args:
+        long_layers: backtest meta 的 long_layers。None 时默认 [1, 2]（IC>0 因子）。
 
     默认值代表一个健康的反转因子：
     - IC=-0.04(通过0.03门槛), ICIR=0.30(通过0.15), 夏普=2.0, 单调性=0.5
     - L1年化=+15%, L1夏普=0.60, 多头年化=10%
     """
+    if long_layers is None:
+        long_layers = [1, 2]
     return {
         "ic_metrics": {
             "ic_mean": ic_mean,
@@ -51,6 +57,7 @@ def _make_factor_data(
         },
         "sample_stats": {"valid_days": valid_days},
         "backtest": {
+            "meta": {"long_layers": long_layers},
             "long_short": {
                 "long_short_sharpe": sharpe,
                 "long_short_return_annual": long_short_return,
@@ -61,6 +68,10 @@ def _make_factor_data(
                 "layer_1": {
                     "annual_return": layer_1_annual,
                     "sharpe_ratio": layer_1_sharpe,
+                },
+                "layer_4": {
+                    "annual_return": 0.12,
+                    "sharpe_ratio": 0.55,
                 },
                 "layer_5": {
                     "annual_return": -0.20,
@@ -236,3 +247,49 @@ class TestInteractionFactorL1Threshold:
         )
         is_valid, reasons, _ = validate_factor("interaction_test_pos_l1", data)
         assert is_valid, f"L1已正向的交互因子应通过, reasons={reasons}"
+
+
+class TestDynamicLongLayers:
+    """修复: factor_selector 从 backtest meta 动态读取 long_layers
+
+    根因: IC<0 因子 meta.long_layers=[4,5]，layer_1 是做空层不是买入层。
+    修复前硬编码读 layer_1，对 [4,5] 因子的 L1 检查取到错误层级。
+    """
+
+    def test_ic_negative_uses_layer_4_not_layer_1(self):
+        """IC<0 因子 long_layers=[4,5] -> L1 检查读 layer_4（做多层），不读 layer_1（做空层）
+
+        layer_4 annual_return=0.12 > 0 -> 通过 L1 硬约束
+        layer_1 annual_return=-0.50 -> 如果错误读 layer_1 则会被淘汰（误判）
+        """
+        data = _make_factor_data(
+            layer_1_annual=-0.50,  # layer_1（做空层）年化为负
+            layer_1_sharpe=-2.0,  # layer_1（做空层）夏普为负
+            long_layers=[4, 5],  # IC<0: 做多层是 layer_4/5
+            long_return=0.10,
+        )
+        is_valid, reasons, _ = validate_factor("ic_negative_factor", data)
+        # 修复后: L1 检查读 layer_4 (annual_return=0.12 > 0) -> 通过
+        assert is_valid, f"IC<0 因子应从 layer_4 检查 L1, reasons={reasons}"
+        assert not any("layer_1_annual" in r and "硬约束" in r for r in reasons)
+
+    def test_ic_positive_still_uses_layer_1(self):
+        """IC>0 因子 long_layers=[1,2] -> L1 检查仍读 layer_1（向后兼容）"""
+        data = _make_factor_data(
+            layer_1_annual=-0.20,  # layer_1 年化为负
+            layer_1_sharpe=-1.0,
+            long_layers=[1, 2],  # IC>0: 做多层是 layer_1/2
+        )
+        is_valid, reasons, _ = validate_factor("ic_positive_factor", data)
+        # 修复后: L1 检查仍读 layer_1 (annual_return=-0.20 <= 0) -> 淘汰
+        assert not is_valid
+        assert any("layer_1_annual" in r and "硬约束" in r for r in reasons)
+
+    def test_no_meta_falls_back_to_layer_1(self):
+        """旧数据无 meta 字段时回退到 layer_1（向后兼容）"""
+        data = _make_factor_data(layer_1_annual=-0.20, layer_1_sharpe=-1.0)
+        # 删除 meta 模拟旧数据
+        del data["backtest"]["meta"]
+        is_valid, reasons, _ = validate_factor("legacy_factor", data)
+        assert not is_valid
+        assert any("layer_1_annual" in r and "硬约束" in r for r in reasons)

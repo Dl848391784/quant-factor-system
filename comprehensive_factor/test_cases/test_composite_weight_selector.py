@@ -51,11 +51,21 @@ def _make_backtest_result(
     l1_sharpe: float = 0.60,
     turnover: float = 0.30,
     correlation: float = -0.5,
+    long_layers: list[int] | None = None,
 ) -> dict:
-    """构造单 method 的 backtest_result 数据（覆盖 P3 7 个指标所需字段）"""
+    """构造单 method 的 backtest_result 数据（覆盖 P3 7 个指标所需字段）
+
+    Args:
+        long_layers: backtest meta 的 long_layers（整数列表）。
+                     None 时默认 [1, 2]（IC>0 因子）。
+                     [4, 5] 模拟 IC<0 因子（layer_1/2 = 做空层）。
+    """
+    if long_layers is None:
+        long_layers = [1, 2]
     return {
         method: {
             "backtest_result": {
+                "meta": {"long_layers": long_layers},
                 "long_short": {"turnover_long_avg": turnover},
                 "monotonicity": {"correlation": correlation},
                 "layer_stats": {
@@ -68,6 +78,16 @@ def _make_backtest_result(
                         "annual_return": 0.08,
                         "sharpe_ratio": 0.40,
                         "max_drawdown": -0.12,
+                    },
+                    "layer_4": {
+                        "annual_return": 0.12,
+                        "sharpe_ratio": 0.55,
+                        "max_drawdown": -0.08,
+                    },
+                    "layer_5": {
+                        "annual_return": 0.18,
+                        "sharpe_ratio": 0.70,
+                        "max_drawdown": -0.06,
                     },
                 },
             }
@@ -173,6 +193,49 @@ class TestMetricExtractor:
         broken = {"equal_weight": {"backtest_result": {}}}
         with pytest.raises(ValueError, match="所有方法提取失败"):
             extractor.extract(broken)
+
+    def test_dynamic_long_layers_ic_positive(self):
+        """IC>0 因子 meta.long_layers=[1,2] -> 从 layer_1/layer_2 提取"""
+        extractor = MetricExtractor(_make_config())
+        metrics_data = extractor.extract(_make_backtest_result(l1_annual=0.22, l1_sharpe=0.80, long_layers=[1, 2]))
+        # long_return_annual = (0.22 + 0.08) / 2 = 0.15
+        assert pytest.approx(metrics_data["equal_weight"]["long_return_annual"], abs=1e-6) == 0.15
+        # layer_1_annual = layer_1.annual_return (首个做多层)
+        assert pytest.approx(metrics_data["equal_weight"]["layer_1_annual"], abs=1e-6) == 0.22
+
+    def test_dynamic_long_layers_ic_negative(self):
+        """IC<0 因子 meta.long_layers=[4,5] -> 从 layer_4/layer_5 提取，不读 layer_1（做空层）
+
+        修复前 bug: 硬编码 long_layers=["layer_1","layer_2"] 对 IC<0 因子取到做空层，
+        导致 long_return_annual 为负（实际做多层为正）。
+        """
+        extractor = MetricExtractor(_make_config())
+        metrics_data = extractor.extract(_make_backtest_result(l1_annual=-0.50, l1_sharpe=-2.0, long_layers=[4, 5]))
+        # long_return_annual = (0.12 + 0.18) / 2 = 0.15（做多层正收益，非做空层 -0.50）
+        assert pytest.approx(metrics_data["equal_weight"]["long_return_annual"], abs=1e-6) == 0.15
+        # layer_1_annual = layer_4.annual_return（首个做多层，非 layer_1 的 -0.50）
+        assert pytest.approx(metrics_data["equal_weight"]["layer_1_annual"], abs=1e-6) == 0.12
+        assert pytest.approx(metrics_data["equal_weight"]["layer_1_sharpe"], abs=1e-6) == 0.55
+
+    def test_fallback_when_no_meta(self):
+        """旧数据无 meta 字段时回退到 DEFAULT_CONFIG 的 long_layers"""
+        extractor = MetricExtractor(_make_config())
+        # 构造无 meta 的旧格式数据
+        legacy_data = {
+            "equal_weight": {
+                "backtest_result": {
+                    "long_short": {"turnover_long_avg": 0.30},
+                    "monotonicity": {"correlation": -0.5},
+                    "layer_stats": {
+                        "layer_1": {"annual_return": 0.15, "sharpe_ratio": 0.60, "max_drawdown": -0.10},
+                        "layer_2": {"annual_return": 0.08, "sharpe_ratio": 0.40, "max_drawdown": -0.12},
+                    },
+                }
+            }
+        }
+        metrics_data = extractor.extract(legacy_data)
+        # 回退到 [1, 2]: (0.15 + 0.08) / 2 = 0.115
+        assert pytest.approx(metrics_data["equal_weight"]["long_return_annual"], abs=1e-6) == 0.115
 
 
 # =============================================================================

@@ -543,20 +543,25 @@ def validate_factor(
             min_sample_days,
         )
 
-    # 7. Layer1 绝对收益硬约束（v2.35: P1 只做多对齐）
-    # 公理1: 只做多策略收益 = Layer1 买入层收益，L1<=0 的因子有害无益
+    # 7. 首个做多层绝对收益硬约束（v2.35: P1 只做多对齐）
+    # 公理1: 只做多策略收益 = 做多买入层收益，做多层<=0 的因子有害无益
     #
+    # 修复: 从 backtest meta 动态读取 long_layers，而非硬编码 layer_1
+    # 根因: IC<0 因子 meta.long_layers=[4,5]，layer_1 是做空层不是买入层
     # v2.39: 交互因子族走独立门槛（INTERACTION_THRESHOLDS）：
     #   - layer_1_return_min = -0.25（承认乘法结构 L1 必亏的数学必然）
     #   - layer_1_sharpe_min = -1.50（容忍 L1 夏普负值）
     #   设计依据：design.md feat_interaction_thresholds_v239.md §2.2
     # 线性因子继续走 DEFAULT_THRESHOLDS 的 0.0 硬约束（不变）
-    # 历史：v2.38 Batch 1 的 L1 豁免分支（commit 4c845c0）已在 v2.39 删除——
+    # 历史：v2.38 Batch 1 的 L1 豁免分支（commit 4c845c0）已在 v2.39 删除--
     #       独立门槛体系下交互因子的 L1 阈值已下移到 -0.25，不再需要"豁免"逻辑
+    meta = backtest.get("meta", {})
+    meta_long_layers = meta.get("long_layers", [1])  # 回退 [1]
+    first_long_layer_name = f"layer_{meta_long_layers[0]}"
     layer_stats = backtest.get("layer_stats", {})
-    layer_1 = layer_stats.get("layer_1", {})
-    layer_1_annual = layer_1.get("annual_return", None)
-    layer_1_sharpe = layer_1.get("sharpe_ratio", None)
+    first_long_layer = layer_stats.get(first_long_layer_name, {})
+    layer_1_annual = first_long_layer.get("annual_return", None)
+    layer_1_sharpe = first_long_layer.get("sharpe_ratio", None)
 
     if layer_1_annual is not None and layer_1_annual <= thresholds["layer_1_return_min"]:
         reasons.append(
