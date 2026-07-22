@@ -6,12 +6,15 @@
 
 ---
 
-## 本文档与 AGENTS.md 的关系 [reference]
+## 文档架构与加载关系（CLAUDE.md -> PROJECT.md / MODULE.md）[reference]
+
+> AGENTS.md 已退役（见 `designs/retire_agents_md_gateway_design.md`）。现两层架构：CLAUDE.md 自动加载（瘦路由 + 精华指针）指向 PROJECT.md / MODULE.md 真源全文。
 
 | 文档 | 加载方式 | 内容定位 | 何时读取 |
 |------|----------|----------|----------|
-| AGENTS.md | agent 启动时由框架自动注入到上下文 | 精华索引、硬规则速查表 | 每次对话自动注入 |
-| PROJECT.md | 按需主动读取 | 详细参考、背景说明、完整规范 | 下列触发条件 |
+| CLAUDE.md | 每会话自动注入上下文 | 路由入口 + 精华指针（§1.5）+ 硬规则编号速查 + skill 路由表 | 每次对话自动加载 |
+| PROJECT.md | 按需主动读取 | 详细参考、背景说明、完整规范（本文件） | 下列触发条件 |
+| `<模块>/MODULE.md` | 按需主动读取 | 模块内规范 | 改该模块代码前必读 |
 
 **必须主动读取 PROJECT.md 的触发条件（任一命中即触发）：**
 
@@ -33,7 +36,7 @@
 
 ### 任务启动 checklist（每次新任务必跑）
 
-1. 加载 AGENTS.md / PROJECT.md → 拿到硬规则速查表
+1. CLAUDE.md 已自动加载（含精华指针 §1.5 + 硬规则速查）；命中触发读 PROJECT.md
 2. 判断本任务是否命中"主动读取 PROJECT.md 的触发条件"，命中则读本文件
 3. 列出本任务预计触及的 H 规则编号（用于 PR 模板取证）
 4. 判断是否触发 Design-First（2+ 文件）→ 若是，先写 design.md 并停下等审核
@@ -228,7 +231,7 @@ T+1 日:        卖出（可能开盘 / 盘中 / 收盘）
 ### 核心数据契约（T+1 日期语义 · 唯一权威定义）
 
 > **本节是全系统最重要的日期语义定义，所有"数据是否最新/是否延迟"的判断都以此为准。**
-> 其它文档（AGENTS.md §⏰ / intraday-strategy-design skill / MEMORY）只放指针，不重复本节内容——避免多份拷贝漂移。
+> 其它文档（CLAUDE.md §1.5 / intraday-strategy-design skill / MEMORY）只放指针，不重复本节内容——避免多份拷贝漂移。
 
 **What**: 各数据文件的 `selection_date` / 日期字段在"报告日 R 清晨生成报告"这一流程下的语义与**应有最新日期**。
 
@@ -261,7 +264,7 @@ trade_date     = T 买入日    = R 若是交易日否则下一交易日
 - ❌ 把 `selection_date` 当成"T 日"再往前推一天算期望——这会让期望比应有值早一天，把"已到位"误判为"延迟"（2026-07-19 freshness「△延迟」误报根因）
 - ❌ 把 segment_win_rates 只到 `prev_td(prev_td(R))` 当成延迟——那是 T+1 收益闭环的物理必然
 - ❌ 用 `actual != expected` 判延迟却不区分"落后"与"超前"——数据超前于期望不是延迟
-- ❌ 在 AGENTS.md / skill / MEMORY 里重复本表全文——只放指针，改时只改本节
+- ❌ 在 CLAUDE.md / skill / MEMORY 里重复本表全文——只放指针，改时只改本节
 
 **Why（历史教训）**:
 
@@ -459,6 +462,7 @@ dependencies = [
 | H11 | 日志格式：% 惰性格式化（禁止 f-string / + 拼接 / `exc_info=True`） | 性能（高 verbosity 时跳过格式化）+ 风格统一 + 与标准库 logging 结构化处理器（如 JSON）兼容 | ruff G004 / G003 / G201 | pre-commit + CI |
 | H12 | 退出码语义：0=成功 / 1=未预期错误（程序 bug） / 2=import-time 配置或注册失败（R16 后已弃用，改 logger.critical+raise）/ 3=辅助层失败（R17，计算成功，但日志摘要 / 监控输出 / sidecar 类组件失败）/ 4=DataSchemaError（R18，数据 schema 不匹配，需检查上游列契约）/ 5=FactorCalcError（R19，因子计算内部失败，需检查计算代码）；附 R20 = `main()` 函数体内禁 sys.exit，必须 raise 让 `__main__` 块统一处理 | CI / shell 脚本能区分 6 种状态：成功 vs 程序 bug（exit 1）vs 代码不能加载（exit 2 弃用）vs 主结果可用但旁路告警（exit 3）vs 数据 schema 失败（exit 4，检查上游）vs 因子计算失败（exit 5，检查代码）；R20 保证 main() 可被单元测试直接调用 | 人工 review + `scripts/check_exit_codes.py` | pre-commit + CI |
 | H13 | 死代码禁止：禁止永不触发的防御性兜底分支（如 `if result is None` 守卫面对永不返回 None 的 callee） | 死代码掩盖真实错误来源、误导维护者、增加噪音；必须删除而非保留 | 人工 review + `scripts/check_dead_branches.py`（[待实施]） | pre-commit + CI |
+| H15 | codegraph 查证：改已有 `.py` 源码前必须对该 symbol 跑 `codegraph callers`/`impact`/`affected`；跨文件调用/影响面断言必附 codegraph 输出或 `file:line` 证据 | 防止"该查没查"凭片段猜/伪造跨文件调用关系（单文件明面事实 Read 即得不在此列）；根治 spec_bridge 行 89 留的"靠自觉"口子 | PreToolUse `.claude/hooks/codegraph_gate.py` + PostToolUse 留痕 `codegraph_audit.py`（designs/codegraph_enforcement_gate_design.md） | 实时（Edit/Write 前） |
 
 **H2 正反例**：
 - ✅ 算输出（必须放 `<模块>/result/`）：分析结果 JSON、回测报告、汇总文件、对外暴露的数据产物
@@ -534,6 +538,7 @@ ruff check --select G factor_ic/
 - H9：超粒度时不可强拆为多次 commit 绕过，必须走 Design-First 走审核
 - H10：阶段计划与设定依据见"测试覆盖规范"章节
 - H11：当前仅 `factor_ic/` 强制；其他模块在 `pyproject.toml [tool.ruff.lint.per-file-ignores]` 中暂放行，迁移完成后逐步移除
+- H15：弱门禁边界--挡"零 codegraph 查询就改源码"，不挡"查错 symbol"（靠断言附证据 + commit 取证补缝）；白名单跳过非 .py / test_*.py / 新建文件 / scripts/check_*.py；索引超 72h 只警告不阻断；详见 designs/codegraph_enforcement_gate_design.md
 
 **H12 正反例**：
 ```python
@@ -1103,7 +1108,7 @@ ls factor_ic/logs/ob_quality/
 - [ ] 硬规则表 H 表新增 H4 行（完整规则文字、目的、检查工具、执行阶段）
 - [ ] 若 H4 需补充背景，新增"H4 注释"条目
 - [ ] 输出结构校验章节"字段非空校验进度"：`详见路线图 S4` → `详见硬规则 H4`
-- [ ] AGENTS.md 速查表同步更新
+- [ ] CLAUDE.md §5 硬规则速查同步更新
 - [ ] PR 校验脚本 `scripts/validate_pr_reference.py`：将 H4 从"不可引用"列表移到"可引用"列表
 - [ ] 校验失败示例：删除 H4 预留示例
 - [ ] 在版本历史中记录升级时间与升级 PR
@@ -1465,7 +1470,7 @@ for name, path in files:
 - `stock_list.json`（股票列表，非时间序列）
 - `stock_industry.json`（行业分类，非时间序列）
 
-**相关历史教训**：Pitfall 162（见 AGENTS.md）——跳过逻辑必须检查日期新鲜度（`latest_date >= T-1`），而非只检查实体存在。
+**相关历史教训**：跳过逻辑必须检查日期新鲜度（`latest_date >= T-1`），而非只检查实体存在。（原标注"Pitfall 162 见 AGENTS.md"，AGENTS.md 已退役且全文无该定义；权威源已失，实质教训保留于此，不悬空重定向。）
 
 **步骤 4：检索异常与警告**
 
