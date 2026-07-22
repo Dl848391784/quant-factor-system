@@ -172,8 +172,23 @@ scripts/workflow/wf-lib.sh            新：state 读写 / worktree / 阶段定�
 
 | # | 风险 | 缓解 |
 |---|---|---|
-| 1 | Stop hook 的 `transcript_path` 字段名/格式不确定（二进制无法 grep） | 防御式读取（试多个字段）；缺失则降级为手动 `/wf next`，绝不阻断 |
-| 2 | `--settings` 与 `settings.local.json` 的 merge 优先级（skillOverrides:off 是否波及工作流） | 实现时验证；若 execute 阶段需 skill，在 wf-settings 内显式启用 |
-| 3 | worktree 内 `.codegraph/codegraph.db` 可能缺失（gitignored） -> execute 阶段 H15 gate 行为 | 确认 codegraph_gate.py 在 db 缺失时的 fallback；worktree 内首次 `codegraph sync` |
+| 1 | Stop hook 的 `transcript_path` 字段名/格式不确定（二进制无法 grep） | 防御式读取（试多个字段）；缺失则降级为手动 `/wf next`，绝不阻断。**实测**：交互式 transcript 格式为 `{type:assistant,message:{role:assistant,content:[{type:text,text}]}}`，`_last_assistant_text` 能正确解析；`-p` 模式 transcript 可能空（-p 特性），交互式正常 |
+| 2 | `--settings` 与 `settings.local.json` 的 merge 优先级 | `--settings` 在 worktree 内实测可加载（Stop 探针触发）；per-wf settings 自含全部 hook，不依赖 project settings 叠加 |
+| 3 | worktree 内 `.codegraph/codegraph.db` + `codegraph_gate.py`/`codegraph_audit.py` 缺失（gitignored / 未跟踪） | **已修复**：per-wf settings hook command 用主仓库绝对路径，引用主仓库内存在的文件（见 §10 根因修复） |
 | 4 | 思考块在原生 TUI 仍显示 | §3 caveat，已留 stream 渲染器替换路径（用户已知悉） |
 | 5 | bashrc dotfile 不在版本控制 | 瘦 shim 只 `exec` repo 内 launcher，重逻辑全在 repo；用户改机器只需保 shim |
+
+## 10. 根因修复记录（2026-07-22, commit f017f91）
+
+**症状**：`ac-ark --workflow demo` 开的会话不显示阶段横幅、不自动推进、注入 hook 没跑（`.wf_phase.log`/`.wf_advance.log` 无新增）。
+
+**根因（systematic-debugging 定位）**：worktree 内的 hook 文件是 `git worktree add` 从 HEAD checkout 的**快照**。hook 脚本用 `PROJECT_ROOT = Path(__file__).resolve().parents[2]`，而 worktree 内 hook 文件路径是 `<repo>/.claude/worktrees/<name>/.claude/hooks/x.py`，`parents[2]` = **worktree 根**（非主仓库根）。state.json 在主仓库 `.claude/workflows/<name>/`，hook 在 worktree 根下找不到 -> `_load_state` 返回 None -> 走 `no_state` 分支不注入、不推进。日志写在 worktree 内（误导主仓库日志无新增）。
+
+**修复**：per-wf settings.json 的 hook command 改用**主仓库绝对路径**（`$WF_REPO_ROOT/.claude/hooks/x.py`），在 `wf_write_settings`（`scripts/workflow/wf-lib.sh`）生成。三重收益：
+1. hook 永远是主仓库最新版（改完即生效，无需 commit + 重建 worktree）。
+2. `parents[2]` = 主仓库根，正确读到 state.json。
+3. 引用主仓库内存在的 `codegraph_gate.py`/`codegraph_audit.py`（worktree 内缺，未跟踪）。
+
+**验证**：注入 hook 真实会话 `injected` 日志、Stop hook 触发、`_last_assistant_text` 解析 transcript 正确、闸门阻断（understand gate=pending 不推进）。
+
+**调试教训**：`printf | claude` 管道模拟交互会出 `Execution error`（管道 EOF 伪问题），真实 TTY 不受影响；勿被管道假象误导，验证用真实会话行为。
