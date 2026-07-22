@@ -154,12 +154,20 @@ wf_state_mark_artifact() {
 # ---------- per-workflow settings.json ----------
 # worktree 内无 project settings.json（.gitignore *.json 规则致 settings.json 未入库），
 # 故 per-wf settings 须自包含全部 hook（codegraph + workflow）+ outputStyle。
-# hook command 用相对路径（worktree cwd 下 .claude/hooks/*.py 已随 git 跟踪进入 worktree）。
+#
+# hook command 用主仓库绝对路径（非 worktree 相对路径），原因（design 根因修复）：
+# 1. worktree 内 hook 文件是 git checkout 的快照，主仓库改 hook 后 worktree 内不更新（需 commit + 重建 worktree）。
+#    用主仓库绝对路径 -> hook 永远是最新版，改完即生效。
+# 2. worktree 内缺 codegraph_gate.py / codegraph_audit.py（未跟踪文件不进 worktree）。
+#    用主仓库绝对路径 -> 引用主仓库内存在的文件。
+# 3. hook 用 __file__.parents[2] 解析 PROJECT_ROOT。主仓库 hook 文件的 parents[2] = 主仓库根，
+#    state.json 在主仓库 .claude/workflows/，正确读到。
 wf_write_settings() {
   local name="$1"
   local dir="$WF_META_ROOT/$name"
+  local hk="$WF_REPO_ROOT/.claude/hooks"
   mkdir -p "$dir"
-  cat > "$dir/settings.json" <<'JSON'
+  cat > "$dir/settings.json" <<JSON
 {
   "outputStyle": "workflow",
   "hooks": {
@@ -167,7 +175,7 @@ wf_write_settings() {
       {
         "matcher": "Edit|Write",
         "hooks": [
-          { "type": "command", "command": "python3 .claude/hooks/codegraph_gate.py" }
+          { "type": "command", "command": "python3 $hk/codegraph_gate.py" }
         ]
       }
     ],
@@ -175,22 +183,22 @@ wf_write_settings() {
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "python3 .claude/hooks/codegraph_audit.py" }
+          { "type": "command", "command": "python3 $hk/codegraph_audit.py" }
         ]
       }
     ],
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "python3 .claude/hooks/codegraph_inject.py" },
-          { "type": "command", "command": "python3 .claude/hooks/workflow_phase.py" }
+          { "type": "command", "command": "python3 $hk/codegraph_inject.py" },
+          { "type": "command", "command": "python3 $hk/workflow_phase.py" }
         ]
       }
     ],
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "python3 .claude/hooks/workflow_advance.py" }
+          { "type": "command", "command": "python3 $hk/workflow_advance.py" }
         ]
       }
     ]

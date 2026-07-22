@@ -18,6 +18,9 @@ import time
 from pathlib import Path
 
 
+# 主仓库根：hook 经 per-wf settings.json 以主仓库绝对路径调用（非 worktree 相对路径），
+# 故 __file__.parents[2] = 主仓库根，state.json 在主仓库 .claude/workflows/ 下，正确读到。
+# （若改回 worktree 相对路径，parents[2] 会指向 worktree 根，读不到 state。见 design 根因修复。）
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WF_META_ROOT = PROJECT_ROOT / ".claude" / "workflows"
 WF_WT_ROOT = PROJECT_ROOT / ".claude" / "worktrees"
