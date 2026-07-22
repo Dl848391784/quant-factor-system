@@ -71,14 +71,16 @@ STATE_FILE="$WF_META_ROOT/$WF_NAME/state.json"
 WORKTREE_PATH="$WF_WT_ROOT/$WF_NAME"
 BRANCH="wf/$WF_NAME"
 
-# ---------- --done：归档 ----------
+# ---------- --done：归档（彻底清理） ----------
 if [ "$WF_DONE" = "1" ]; then
   if [ ! -f "$STATE_FILE" ]; then
     echo "wf-launch: 工作流 '$WF_NAME' 不存在。" >&2; exit 1
   fi
-  echo "▸ 归档工作流 '$WF_NAME'：删除 worktree（保留元数据 $STATE_FILE）"
+  echo "▸ 归档工作流 '$WF_NAME'（彻底清理）"
   git -C "$WF_REPO_ROOT" worktree remove --force "$WORKTREE_PATH" 2>/dev/null || true
-  echo "  worktree 已移除。元数据保留于 $STATE_FILE（手动删 .claude/workflows/$WF_NAME 清理）"
+  git -C "$WF_REPO_ROOT" branch -D "$BRANCH" 2>/dev/null || true
+  rm -rf "$WF_META_ROOT/$WF_NAME"
+  echo "  worktree + 分支 $BRANCH + 元数据 已删除。"
   exit 0
 fi
 
@@ -96,6 +98,8 @@ if [ -f "$STATE_FILE" ]; then
   fi
   WORKTREE_PATH="$WORKTREE_EXISTING"
   WF_PHASE_OVERRIDE_SET=0
+  # 续接时补 settings（若缺失，如旧工作流或手动删过）
+  [ -f "$WF_META_ROOT/$WF_NAME/settings.json" ] || wf_write_settings "$WF_NAME"
 else
   # 新建
   [ -z "$WF_BASE" ] && WF_BASE="$(git -C "$WF_REPO_ROOT" rev-parse --abbrev-ref HEAD)"
@@ -115,6 +119,7 @@ else
     SESSION_ID="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || python3 -c 'import uuid;print(uuid.uuid4())')"
   fi
   wf_state_init "$WF_NAME" "$SESSION_ID" "$WF_BASE" "$BRANCH" "$WORKTREE_PATH"
+  wf_write_settings "$WF_NAME"
   echo "  session: $SESSION_ID"
 fi
 

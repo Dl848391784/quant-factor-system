@@ -127,10 +127,12 @@ case "$SUB" in
 
   done)
     WT="$(wf_state_get "$NAME" worktree_path)"
-    echo "▸ 归档工作流 '$NAME'：删 worktree（保留元数据）"
+    BR="$(wf_state_get "$NAME" branch)"
+    echo "▸ 归档工作流 '$NAME'（彻底清理）"
     git -C "$WF_REPO_ROOT" worktree remove --force "$WT" 2>/dev/null || true
-    echo "  worktree 已移除。元数据保留: $WF_META_ROOT/$NAME"
-    echo "  手动彻底清理: rm -rf $WF_META_ROOT/$NAME"
+    git -C "$WF_REPO_ROOT" branch -D "$BR" 2>/dev/null || true
+    rm -rf "$WF_META_ROOT/$NAME"
+    echo "  worktree + 分支 $BR + 元数据 已删除。"
     ;;
 
   *)

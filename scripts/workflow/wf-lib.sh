@@ -151,6 +151,54 @@ wf_state_mark_artifact() {
   : # 阶段产物命名固定（understand.md 等），hook 从 phase 推导，无需 state 记录
 }
 
+# ---------- per-workflow settings.json ----------
+# worktree 内无 project settings.json（.gitignore *.json 规则致 settings.json 未入库），
+# 故 per-wf settings 须自包含全部 hook（codegraph + workflow）+ outputStyle。
+# hook command 用相对路径（worktree cwd 下 .claude/hooks/*.py 已随 git 跟踪进入 worktree）。
+wf_write_settings() {
+  local name="$1"
+  local dir="$WF_META_ROOT/$name"
+  mkdir -p "$dir"
+  cat > "$dir/settings.json" <<'JSON'
+{
+  "outputStyle": "workflow",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": "python3 .claude/hooks/codegraph_gate.py" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "python3 .claude/hooks/codegraph_audit.py" }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 .claude/hooks/codegraph_inject.py" },
+          { "type": "command", "command": "python3 .claude/hooks/workflow_phase.py" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 .claude/hooks/workflow_advance.py" }
+        ]
+      }
+    ]
+  }
+}
+JSON
+}
+
 # ---------- 列举工作流 ----------
 
 wf_list() {
