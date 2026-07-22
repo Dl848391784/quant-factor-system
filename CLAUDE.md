@@ -36,6 +36,7 @@
 | 跑报告/出 summary/报告异常/基础数据源/freshness/§9 §10 | `/factor-summary-reporting` |
 | 日内操作/开盘怎么卖/高开低开止损/9:25集合竞价/反抽 | `/intraday-strategy-design` |
 | pipeline 没跑/X没落库/silent fallback/selection_date/trade_date/weight_method 切换断层 | `/factor-ic-analyzer-workflow` |
+| 建工作流/ac-ark --workflow/阶段不推进/注入没生效/`/wf`报错/worktree hook 失效/模型否认注入 | `/workflow-creation` |
 | 新增函数/脚本(写代码前) | `superpowers:test-driven-development` |
 | 测试失败/运行时错误 | `superpowers:systematic-debugging` |
 | 裁决类结论(给结论前)：根因/有效吗/选哪个/能上线吗 | 对抗性审视：尝试反驳自己的结论 |
