@@ -140,7 +140,7 @@ holdout: 451-500 天 → 最终一次性评估，不调参
 
 **禁止**：
 - 直接修改 `factor_ic_data.parquet`（违反 D3 不修改原则）
-- 从 `return_data.json.gz` 读取收益数据（AGENTS.md 已明确该文件仅备份）
+- 从 `return_data.json.gz` 读取收益数据（PROJECT.md §核心数据契约 / CLAUDE.md §1.5：统一数据源为 factor_ic_data.parquet，该文件仅备份）
 
 ### 输出数据
 
@@ -152,7 +152,7 @@ holdout: 451-500 天 → 最终一次性评估，不调参
 | 候选因子定义 | `reverse_discovery/result/candidate_factors_<日期>.json` | JSON | 记录逆向发现的因子公式、参数、显著性指标 | 人工审核 → factor_generator 注册 |
 | 发现报告 | `reverse_discovery/result/discovery_report_<日期>.txt` | 纯文本 | 归因分析结果、统计检验、特征重要性排序 | 人工阅读 |
 
-**字段非空规则**（遵循 AGENTS.md 硬规则 #4）：
+**字段非空规则**（遵循 PROJECT.md H4）：
 - 候选因子定义中 None 字段必须显式记录原因（如 `"correlation_with_existing": null, "reason": "新因子，无现有因子可比"`）
 
 ### 数据流向
@@ -199,7 +199,7 @@ holdout: 451-500 天 → 最终一次性评估，不调参
 
 | 依赖项 | 用途 | 导入方式 |
 |-------|------|---------|
-| `paths.py` | 主数据源路径单一来源 | `from paths import ...`（遵循 AGENTS.md 规则 #11）|
+| `paths.py` | 主数据源路径单一来源 | `from paths import ...`（遵循 PROJECT.md H7 路径导入）|
 | `factor_definitions` | 现有因子定义（避免重复发现） | `from factor_definitions import FACTOR_DEFINITIONS` |
 
 **禁止依赖**（违反模块边界）：
@@ -359,7 +359,7 @@ target_return    = data.loc[t_minus_1, 'forward_return_1d']  # T-1 时刻 = T-1�
 
 **遵循 PROJECT.md 公共模块规范**：
 - 公共函数接收 `logger` 参数（不在公共模块内独立创建 logger）
-- 公共模块仅在本模块内复用，禁止跨模块调用（违反 AGENTS.md 硬规则 #1）
+- 公共模块仅在本模块内复用，禁止跨模块调用（违反 PROJECT.md H1 模块边界）
 
 ### M3. 跨模块协作方式
 
@@ -378,7 +378,7 @@ target_return    = data.loc[t_minus_1, 'forward_return_1d']  # T-1 时刻 = T-1�
 
 ### M4. paths.py 单一来源
 
-遵循 AGENTS.md 硬规则 #11，所有数据路径必须从 `paths.py` 导入：
+遵循 PROJECT.md H7 路径导入，所有数据路径必须从 `paths.py` 导入：
 
 ```python
 # ✓ 正确
@@ -474,7 +474,7 @@ paths.py 中需新增的常量（待 reverse_discovery 首个脚本实现时添�
 **字段约束**：
 - `discovery_evidence.p_value_adjusted` 必须有值（FDR 校正后的 p 值，遵循 D2 / 用户偏好"阈值需统计依据"）
 - `expected_direction` 取值：`"positive"` / `"negative"` / `"unknown"`（不可省略，缺失即填 `"unknown"` + 注明原因）
-- `correlation_with_existing` 为 None 时必须填 `correlation_reason`（遵循 AGENTS.md 硬规则 #4）
+- `correlation_with_existing` 为 None 时必须填 `correlation_reason`（遵循 PROJECT.md H4 字段非空）
 
 ### 发现报告（纯文本）
 
@@ -524,7 +524,7 @@ factor_ic_data_test_*.json.gz）验证。
 
 ### T1. 测试目录与发现
 
-**测试用例必须放在 `reverse_discovery/test_cases/`**（遵循 AGENTS.md 硬规则 #7）。
+**测试用例必须放在 `reverse_discovery/test_cases/`**（AGENTS.md 原硬规则 #7 测试位置；PROJECT.md 无 H 对应 -- 最近 H9 是任务粒度不是测试位置；按 MODULE 范围规则保留为模块内约定）。
 
 ```
 reverse_discovery/test_cases/
@@ -564,16 +564,16 @@ reverse_discovery/test_cases/
 |-------|------------|------------|
 | **M5+ 脚本命名规则** | 首个脚本 PR | "脚本规范"新章节 |
 | **schemas/*.schema.json** | 首个输出文件类型确定 | `reverse_discovery/schemas/` 目录创建 |
-| **paths.py 常量** | 首个输出脚本 PR | `paths.py` + AGENTS.md 跨模块数据路径表 |
+| **paths.py 常量** | 首个输出脚本 PR | `paths.py` + PROJECT.md §跨模块数据路径表 |
 | **CLI 参数规范** | 首个 CLI 入口脚本 | "CLI 入口设计"新章节（参考 backtest M8） |
 | **logger_config.py** | 首个脚本 PR | `reverse_discovery/common/logger_config.py` |
-| **AGENTS.md 跨模块数据路径表条目** | 首个输出文件契约稳定 | AGENTS.md §1 表格 |
+| **PROJECT.md §跨模块数据路径表 条目** | 首个输出文件契约稳定 | PROJECT.md §1 跨模块数据路径表 |
 | **具体特征发现算法（t-test / 互信息 / 树模型）选型** | Phase 1 收益画像探索后 | "发现方法"新章节 |
 | **FDR 校正方法选型** | 同上 | 同上 |
 
-**触发流程**（遵循 AGENTS.md 陷阱 1）：每补充一项，必须同步检查：
+**触发流程**（遵循 PROJECT.md 陷阱 1 路径迁移未同步）：每补充一项，必须同步检查：
 1. 本 MODULE.md 对应章节
-2. 依赖的 PROJECT.md / AGENTS.md 表格
+2. 依赖的 PROJECT.md 表格
 3. 测试用例（`test_cases/test_<脚本名>.py`）
 4. 时间标注（用户偏好：改动后更新时间标注）
 
