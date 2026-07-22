@@ -124,9 +124,7 @@ def _extract_date_from_json_content(content: str, date_field: str) -> str | None
     return None
 
 
-def check_data_freshness(
-    date: str, logger: logging.Logger, report_date: str | None = None
-) -> list[dict]:
+def check_data_freshness(date: str, logger: logging.Logger, report_date: str | None = None) -> list[dict]:
     """检查各数据源的新鲜度（最新日期是否为 T-1）
 
     v1.9 (2026-06-02): 新增数据完整性检查功能
@@ -243,9 +241,7 @@ def check_data_freshness(
     return results
 
 
-def check_derived_data_freshness(
-    date: str, logger: logging.Logger, report_date: str | None = None
-) -> list[dict]:
+def check_derived_data_freshness(date: str, logger: logging.Logger, report_date: str | None = None) -> list[dict]:
     """检查衍生数据（IC 结果、回测结果）的新鲜度
 
     衍生数据由上游数据生成，检查文件是否存在及其数量。

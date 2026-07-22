@@ -197,8 +197,9 @@ class TestApplyWeightsNaNPropagation:
         assert abs(composite_missing.iloc[0] - 0.0) < 1e-10
 
         # 关键验证：缺失因子的综合因子绝对值 < 有极端因子的绝对值
-        assert abs(composite_missing.iloc[0]) < abs(composite_extreme.iloc[0]), \
+        assert abs(composite_missing.iloc[0]) < abs(composite_extreme.iloc[0]), (
             "缺失因子后综合因子应自然趋中（绝对值更小），不应放大"
+        )
 
     def test_weight_engine_ic_weight_with_nan_factor(self):
         """WeightEngine ic_weight 方法：含 NaN 因子时综合因子有效"""

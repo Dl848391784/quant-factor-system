@@ -40,9 +40,7 @@ def test_public_modules():
     # ========== Step 1: 加载数据 ==========
     print("\n[Step 1] 测试 data_loader.load_factor_return_data()")
     try:
-        factor_df, return_df, raw_metadata = load_factor_return_data(
-            factor_cols=['rsi_6']
-        )
+        factor_df, return_df, raw_metadata = load_factor_return_data(factor_cols=["rsi_6"])
         print("✓ 加载成功")
         print(f"  - factor_df 行数: {len(factor_df)}")
         print(f"  - return_df 行数: {len(return_df)}")
@@ -59,11 +57,7 @@ def test_public_modules():
     print("\n[Step 2] 测试 ic_calculator.calculate_ic_with_direction_verification()")
     try:
         ic_result = calculate_ic_with_direction_verification(
-            factor_df=factor_df,
-            return_df=return_df,
-            factor_col='rsi_6',
-return_col='forward_return_1d',
-            min_stocks=10
+            factor_df=factor_df, return_df=return_df, factor_col="rsi_6", return_col="forward_return_1d", min_stocks=10
         )
         print("✓ 计算成功")
         print(f"  - ic_mean: {ic_result['ic_mean']:.6f}")
@@ -81,9 +75,9 @@ return_col='forward_return_1d',
         result = build_ic_result(
             ic_result=ic_result,
             raw_metadata=raw_metadata,
-            factor_name='test_rsi_1d',
-            data_source='data_fetchers/result/factor_ic_data.json.gz',
-            factor_col='rsi_6'
+            factor_name="test_rsi_1d",
+            data_source="data_fetchers/result/factor_ic_data.json.gz",
+            factor_col="rsi_6",
         )
         print("✓ 构建成功")
         print(f"  - 顶层字段数: {len(result)}")
@@ -92,17 +86,31 @@ return_col='forward_return_1d',
     except Exception as e:
         print(f"✗ 构建失败: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
     # ========== Step 4: 检查输出结构 ==========
     print("\n[Step 4] 检查输出结构是否符合规范")
     required_top_fields = [
-        'factor_name', 'calculation_date', 'period', 'ic_metrics', 'sample_stats',
-        'statistical_significance', 'factor_direction', 'economic_significance',
-        'icir_stability', 'ic_distribution_consistency', 'dates', 'ic_values',
-        'rolling_ic_mean', 'positive_ratio', 'n_assets', 'summary', 'factor_stats',
-        'update_mode'
+        "factor_name",
+        "calculation_date",
+        "period",
+        "ic_metrics",
+        "sample_stats",
+        "statistical_significance",
+        "factor_direction",
+        "economic_significance",
+        "icir_stability",
+        "ic_distribution_consistency",
+        "dates",
+        "ic_values",
+        "rolling_ic_mean",
+        "positive_ratio",
+        "n_assets",
+        "summary",
+        "factor_stats",
+        "update_mode",
     ]
 
     missing_fields = []
@@ -117,8 +125,8 @@ return_col='forward_return_1d',
         print("✓ 所有必需字段存在（17个）")
 
     # 检查 ic_metrics 结构（应为5字段）
-    ic_metrics_fields = ['ic_mean', 'ic_std', 'icir', 'p_value', 'p_value_display']
-    missing_ic_metrics = [f for f in ic_metrics_fields if f not in result.get('ic_metrics', {})]
+    ic_metrics_fields = ["ic_mean", "ic_std", "icir", "p_value", "p_value_display"]
+    missing_ic_metrics = [f for f in ic_metrics_fields if f not in result.get("ic_metrics", {})]
     if missing_ic_metrics:
         print(f"✗ ic_metrics 缺少字段: {missing_ic_metrics}")
         return False
@@ -126,8 +134,8 @@ return_col='forward_return_1d',
         print("✓ ic_metrics 字段完整（5个）")
 
     # 检查 sample_stats 结构
-    sample_stats = result.get('sample_stats', {})
-    if 'avg_stocks_period' not in sample_stats:
+    sample_stats = result.get("sample_stats", {})
+    if "avg_stocks_period" not in sample_stats:
         print("✗ sample_stats 缺少 avg_stocks_period")
         return False
     else:
@@ -135,8 +143,8 @@ return_col='forward_return_1d',
 
     # 检查 statistical_significance 结构（应为7字段）
     # 字段定义：见 MODULE.md 第935行
-    ss_fields = ['t_stat', 'p_value', 'p_value_display', 'nw_lag', 'nw_lag_method', 'is_significant', 'conclusion']
-    ss = result.get('statistical_significance', {})
+    ss_fields = ["t_stat", "p_value", "p_value_display", "nw_lag", "nw_lag_method", "is_significant", "conclusion"]
+    ss = result.get("statistical_significance", {})
     missing_ss = [f for f in ss_fields if f not in ss]
     if missing_ss:
         print(f"✗ statistical_significance 缺少字段: {missing_ss}")
@@ -147,10 +155,10 @@ return_col='forward_return_1d',
 
     # ========== Step 5: 保存结果 ==========
     print("\n[Step 5] 测试 save_ic_result()")
-    test_output_path = project_root / 'factor_ic' / 'result' / 'test_rsi_1d_analysis_result.json'
+    test_output_path = project_root / "factor_ic" / "result" / "test_rsi_1d_analysis_result.json"
     try:
         # 手动保存到测试路径
-        with open(test_output_path, 'w', encoding='utf-8') as f:
+        with open(test_output_path, "w", encoding="utf-8") as f:
             json.dump(result, f, indent=2, ensure_ascii=False)
         print(f"✓ 保存成功: {test_output_path}")
         print(f"  文件大小: {test_output_path.stat().st_size} bytes")
@@ -171,6 +179,6 @@ return_col='forward_return_1d',
     return True
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     success = test_public_modules()
     sys.exit(0 if success else 1)
