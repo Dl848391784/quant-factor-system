@@ -16,8 +16,9 @@
 (extract_metrics/normalize_minmax/...) 导致 ImportError，v1.8 已封装入 4 类。
 
 遵循:
-- AGENTS.md §0 (Execute / Review)
-- AGENTS.md §2 规则 #7 (测试位置), #8 (配套测试)
+- CLAUDE.md §1 入口守门员 (Plan→Execute→Review→Debug 流)
+- PROJECT.md §S2 配套文件同步创建 (原 AGENTS.md §2 规则 #8 配套测试;
+  #7 测试位置在 PROJECT.md 无 H 对应，已剔除)
 """
 
 import pytest
