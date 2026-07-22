@@ -151,14 +151,35 @@ AGENTS.md 实际承担两件事：
 
 > 注：多数 `.py` 注释引用的是「AGENTS.md 数据驱动原则」「AGENTS.md 规则 #N」等，**不一定都带 `#N` 编号**；带 `#N` 的需查上表映射，不带编号的（如"数据驱动原则"）直接重指 `CLAUDE.md §1.5 / PROJECT.md §数据驱动原则`。后续任务须**逐处核实**引用形式，不可机械套映射。
 
-**待迁移完整清单（60 文件 · 2026-07-22 全量核实）**：
+**⚠️ 勘误（2026-07-22 后续迁移启动时发现）**：原"4 处映射种子"声明经全量核实**严重不完整**：
 
-**A. `factor_ic/ic_interaction_*.py` 族（27 文件，最大单一来源）**——均引用「AGENTS.md 数据驱动原则」：
+| 情况 | 详情 |
+|---|---|
+| **#7->H9 是错的** | AGENTS.md #7 = "测试位置 <模块>/test_cases/"，但 PROJECT.md H9 = "任务粒度 ≤3 文件"（不是测试位置）。**H{X} 与 #N 非一一对应**。 |
+| **#8->H8 是错的** | #8 = "配套测试"，H8 = "Design-First"，不同。 |
+| **#9->H10 是错的** | #9 = "日志格式 logger_config"，H10 = 异常链。 |
+| **#10 #9 都映射到 H10** | 一对多冲突。 |
+| **#15 不存在** | `factor_loader.py:839` 引 "AGENTS.md 规则 #15（第一性原理）"，但 AGENTS.md 只到 #14。#15 是凭空捏造。 |
+| **#14 被乱用** | `ic_intraday_intensity_1d.py` 三处引用 #14 含义分别为"同名变量伪装作用域"、"禁止先算 inf 再覆盖" -- **与 AGENTS.md #14 原定义（死代码禁止）不符**。原注释张冠李戴。 |
+
+**结论**：散落 `#N` 引用**不可机械映射**。后续迁移必须**逐处语义判断**，看注释实际表达的规则，重指到 PROJECT.md 对应章节或 CLAUDE.md §1.5。
+
+**A 族勘误**：原列 27 ic_interaction_*.py + ic_intraday_intensity_1d.py + ic_calculator.py = 29，实际 A 族（统一模式 `AGENTS.md "数据驱动原则" + backtest/MODULE.md v2.5 M17`，27 个）。`ic_intraday_intensity_1d.py` 和 `ic_calculator.py` **不是 A 族**，各自有不同引用模式，需单独语义判断（归入后续"逐处语义"批）。
+
+**修正后的待迁移完整清单（60 文件 · 2026-07-22 全量核实）**：
+
+**A. `factor_ic/ic_interaction_*.py` 族（27 文件，统一机械模式）**——均引用 `遵循 AGENTS.md "数据驱动原则" + backtest/MODULE.md v2.5 M17`，line 11：
 
 ```
-factor_ic/ic_interaction_{amp_compression,amplitude,bollinger,intraday,kdj,ma5_dev,near_high,price_pos,turnover}__ret{1d,3d,5d}_{abs,neg,pos}_1d.py
-factor_ic/ic_intraday_intensity_1d.py
-factor_ic/common/ic_calculator.py
+factor_ic/ic_interaction_amp_compression__ret3d_{abs,neg,pos}_1d.py
+factor_ic/ic_interaction_amplitude__ret3d_{abs,neg,pos}_1d.py
+factor_ic/ic_interaction_bollinger__ret5d_{abs,neg,pos}_1d.py
+factor_ic/ic_interaction_intraday__ret1d_{abs,neg,pos}_1d.py
+factor_ic/ic_interaction_kdj__ret5d_{abs,neg,pos}_1d.py
+factor_ic/ic_interaction_ma5_dev__ret3d_{abs,neg,pos}_1d.py
+factor_ic/ic_interaction_near_high__ret3d_{abs,neg,pos}_1d.py
+factor_ic/ic_interaction_price_pos__ret1d_{abs,neg,pos}_1d.py
+factor_ic/ic_interaction_turnover__ret3d_{abs,neg,pos}_1d.py
 ```
 
 **B. 其余 `.py` 生产代码（17 文件）**：
