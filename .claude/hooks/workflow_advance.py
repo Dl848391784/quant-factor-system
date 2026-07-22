@@ -14,6 +14,7 @@ Stop hook：工作流阶段推进。
 """
 
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -29,8 +30,6 @@ PHASES = ["understand", "plan", "execute", "review", "evolution"]
 GATED_AFTER = {"understand", "plan"}
 
 # 完成标记正则
-import re
-
 DONE_RE = re.compile(r"###\s*PHASE_DONE:\s*(\w+)", re.IGNORECASE)
 
 
@@ -199,7 +198,7 @@ def main() -> int:
             # 闸门未放行：不自动推进，提示用户
             _emit(
                 f"\n┌─ WORKFLOW · {name} · {cur} 完成，闸门待放行 ─────────────┐\n"
-                f"│ 阶段 {cur} 已完成（检测到 PHASE_DONE），但进 {PHASES[PHASES.index(cur)+1]} 需闸门。│\n"
+                f"│ 阶段 {cur} 已完成（检测到 PHASE_DONE），但进 {PHASES[PHASES.index(cur) + 1]} 需闸门。│\n"
                 f"│ 输入 /wf gate 放行，或 /wf next 强制推进。            │\n"
                 f"└──────────────────────────────────────────────────────┘"
             )
@@ -221,7 +220,7 @@ def main() -> int:
     _advance(state, name)
     _emit(
         f"\n╔═ WORKFLOW · {name} · 阶段切换 ─────────────────────────════╗\n"
-        f"║ {cur} [{nxt_idx}/5]  ──►  {nxt} [{nxt_idx+1}/5]               ║\n"
+        f"║ {cur} [{nxt_idx}/5]  ──►  {nxt} [{nxt_idx + 1}/5]               ║\n"
         f"╚════════════════════════════════════════════════════════════╝"
     )
     _log("advanced", wf=name, frm=cur, to=nxt)
