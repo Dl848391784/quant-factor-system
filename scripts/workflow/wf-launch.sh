@@ -127,12 +127,12 @@ fi
 if [ -n "$WF_PHASE_OVERRIDE" ]; then
   idx=$(wf_phase_index "$WF_PHASE_OVERRIDE") || { echo "wf-launch: 非法阶段 '$WF_PHASE_OVERRIDE'" >&2; exit 1; }
   wf_state_set_phase "$WF_NAME" "$WF_PHASE_OVERRIDE" "manual-launch"
-  echo "  阶段跳转: $WF_PHASE_OVERRIDE [$idx/5]"
+  echo "  阶段跳转: $(wf_phase_label "$WF_PHASE_OVERRIDE") [$idx/5]"
 fi
 
 CUR_PHASE=$(wf_state_get "$WF_NAME" phase)
 CUR_IDX=$(wf_state_get "$WF_NAME" index)
-echo "  当前阶段: $CUR_PHASE [$CUR_IDX/5]"
+echo "  当前阶段: $(wf_phase_label "$CUR_PHASE") [$CUR_IDX/5]"
 echo "──────────────────────────────────────────────────────────"
 echo "进入工作流（隔离 worktree）。/wf status 查看阶段，/wf next 推进。"
 echo "──────────────────────────────────────────────────────────"

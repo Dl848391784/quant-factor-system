@@ -28,6 +28,14 @@ WF_WT_ROOT = PROJECT_ROOT / ".claude" / "worktrees"
 ADVANCE_LOG = PROJECT_ROOT / ".claude" / ".wf_advance.log"
 
 PHASES = ["understand", "plan", "execute", "review", "evolution"]
+# 阶段中文显示名（仅显示用；逻辑层仍用英文标识；与 workflow_phase.py 一致）
+PHASE_LABELS = {
+    "understand": "理解和求证问题",
+    "plan": "生成执行计划",
+    "execute": "执行",
+    "review": "审核结果",
+    "evolution": "进化",
+}
 # 闸门：这些阶段完成后进下一阶段需 gate=passed
 GATED_AFTER = {"understand", "plan"}
 
@@ -198,18 +206,19 @@ def main() -> int:
         gate = state.get("gate", "pending")
         if gate != "passed":
             # 闸门未放行：不自动推进，提示用户
+            cur_lbl = PHASE_LABELS.get(cur, cur)
+            nxt_lbl = PHASE_LABELS.get(PHASES[PHASES.index(cur) + 1], "")
             _emit(
-                f"\n┌─ WORKFLOW · {name} · {cur} 完成，闸门待放行 ─────────────┐\n"
-                f"│ 阶段 {cur} 已完成（检测到 PHASE_DONE），但进 {PHASES[PHASES.index(cur) + 1]} 需闸门。│\n"
-                f"│ 输入 /wf gate 放行，或 /wf next 强制推进。            │\n"
-                f"└──────────────────────────────────────────────────────┘"
+                f"\n┌─ WORKFLOW · {name} · {cur_lbl} 完成，闸门待放行\n"
+                f"│ {cur_lbl} 已完成（检测到 PHASE_DONE），但进 {nxt_lbl} 需闸门放行。\n"
+                f"│ 输入 /wf gate 放行，或 /wf next 强制推进。"
             )
             _log("gated_block", wf=name, phase=cur, gate=gate)
             return 0
 
     # 终结？
     if cur == "evolution":
-        _emit(f"\n╔═ WORKFLOW · {name} · 已完成全部 5 阶段（evolution 终结）══╗")
+        _emit(f"\n╔═ WORKFLOW · {name} · 已完成全部 5 阶段（进化终结）")
         _log("finished", wf=name, phase=cur)
         state["gate"] = "done"
         state["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
@@ -220,10 +229,11 @@ def main() -> int:
     nxt_idx = PHASES.index(cur) + 1
     nxt = PHASES[nxt_idx]
     _advance(state, name)
+    cur_lbl = PHASE_LABELS.get(cur, cur)
+    nxt_lbl = PHASE_LABELS.get(nxt, nxt)
     _emit(
-        f"\n╔═ WORKFLOW · {name} · 阶段切换 ─────────────────────────════╗\n"
-        f"║ {cur} [{nxt_idx}/5]  ──►  {nxt} [{nxt_idx + 1}/5]               ║\n"
-        f"╚════════════════════════════════════════════════════════════╝"
+        f"\n╔═ WORKFLOW · {name} · 阶段切换\n"
+        f"║ {cur_lbl} [{nxt_idx}/5]  ──►  {nxt_lbl} [{nxt_idx + 1}/5]"
     )
     _log("advanced", wf=name, frm=cur, to=nxt)
     return 0

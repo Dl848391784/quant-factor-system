@@ -57,26 +57,26 @@ case "$SUB" in
     G="$(wf_state_get "$NAME" gate)"
     BR="$(wf_state_get "$NAME" branch)"
     echo "═══ 工作流: $NAME ═══"
-    echo "  阶段:  $P [$I/5]"
+    echo "  阶段:  $(wf_phase_label "$P") [$I/5]"
     echo "  闸门:  $G"
     echo "  分支:  $BR"
     echo "  worktree: $(wf_state_get "$NAME" worktree_path)"
     echo "  session:  $(wf_state_get "$NAME" session_id)"
-    echo "  阶段顺序: ${WF_PHASES[*]}"
+    echo "  阶段顺序(英文，供 /wf jump): ${WF_PHASES[*]}"
     echo "  闸门后置: $WF_GATED_AFTER（这些阶段完成需 /wf gate 放行）"
     ;;
 
   next)
     P="$(cur_phase)"
     if [ "$P" = "evolution" ]; then
-      echo "✗ 已在终末阶段 evolution，无下一阶段。用 /wf done 归档。" >&2
+      echo "✗ 已在终末阶段（进化），无下一阶段。用 /wf done 归档。" >&2
       exit 1
     fi
     # 闸门检查
     if wf_is_gated_after "$P"; then
       G="$(wf_state_get "$NAME" gate)"
       if [ "$G" != "passed" ]; then
-        echo "⚠ 阶段 $P 完成后是闸门阶段。当前 gate=$G。" >&2
+        echo "⚠ 阶段 $(wf_phase_label "$P") 完成后是闸门阶段。当前 gate=$G。" >&2
         echo "  先 /wf gate 放行，或再次 /wf next 强制推进（跳过闸门）。" >&2
         # 允许二次 next 强制（用户明确意图）
         exit 1
@@ -84,44 +84,44 @@ case "$SUB" in
     fi
     N="$(wf_next_phase "$P")"
     wf_state_set_phase "$NAME" "$N" "manual-next"
-    echo "▸ $P -> $N"
-    echo "  当前阶段: $N [$(wf_phase_index "$N")/5]"
+    echo "▸ $(wf_phase_label "$P") -> $(wf_phase_label "$N")"
+    echo "  当前阶段: $(wf_phase_label "$N") [$(wf_phase_index "$N")/5]"
     ;;
 
   back)
     P="$(cur_phase)"; I="$(cur_idx)"
     if [ "$I" -le 1 ]; then
-      echo "✗ 已在 understand，无法回退。" >&2
+      echo "✗ 已在理解和求证问题，无法回退。" >&2
       exit 1
     fi
     B="$(wf_phase_at $((I - 1)))"
     wf_state_set_phase "$NAME" "$B" "manual-back"
-    echo "▸ $P -> $B（回退）"
-    echo "  当前阶段: $B [$((I - 1))/5]"
+    echo "▸ $(wf_phase_label "$P") -> $(wf_phase_label "$B")（回退）"
+    echo "  当前阶段: $(wf_phase_label "$B") [$((I - 1))/5]"
     ;;
 
   jump)
-    [ $# -ge 1 ] || { echo "用法: /wf jump <phase>" >&2; exit 1; }
+    [ $# -ge 1 ] || { echo "用法: /wf jump <phase>（英文标识，见 /wf status 阶段顺序）" >&2; exit 1; }
     T="$1"
     if ! wf_phase_index "$T" >/dev/null; then
       echo "✗ 非法阶段 '$T'。可选: ${WF_PHASES[*]}" >&2
       exit 1
     fi
     wf_state_set_phase "$NAME" "$T" "manual-jump"
-    echo "▸ 跳转到 $T [$(wf_phase_index "$T")/5]"
+    echo "▸ 跳转到 $(wf_phase_label "$T") [$(wf_phase_index "$T")/5]"
     ;;
 
   gate)
     P="$(cur_phase)"
     if ! wf_is_gated_after "$P"; then
-      echo "ℹ 当前阶段 $P 不是闸门后置阶段（闸门后置: $WF_GATED_AFTER）。"
-      echo "  gate 仅在 understand/plan 完成后有意义。"
+      echo "ℹ 当前阶段 $(wf_phase_label "$P") 不是闸门后置阶段（闸门后置: $WF_GATED_AFTER）。"
+      echo "  gate 仅在 理解和求证问题/生成执行计划 完成后有意义。"
       exit 0
     fi
     wf_state_set_gate "$NAME" passed
     N="$(wf_next_phase "$P")"
     echo "✓ 闸门放行: gate=passed"
-    echo "  阶段 $P 已批准，可进入 $N。"
+    echo "  阶段 $(wf_phase_label "$P") 已批准，可进入 $(wf_phase_label "$N")。"
     echo "  下一步: /wf next 推进（或模型输出 PHASE_DONE 后 Stop hook 自动推进）。"
     ;;
 

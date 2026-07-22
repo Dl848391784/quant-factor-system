@@ -24,7 +24,7 @@ ac-ark --workflow <name>  ─►  scripts/workflow/wf-launch.sh
      └─ /wf status|next|back|jump|gate|done → 手动控制
 ```
 
-**5 阶段**：understand（理清真实问题，禁改源码）→ plan（设计，禁改源码）→ execute → review → evolution。
+**5 阶段**：understand 理解和求证问题（禁改源码）-> plan 生成执行计划（禁改源码）-> execute 执行 -> review 审核结果 -> evolution 进化。显示用中文名，逻辑层（state/PHASE_DONE/jump）用英文标识。
 **推进**：自动 + 闸门。`understand->plan`、`plan->execute` 需 `/wf gate` 放行；其余自动推进。
 
 ## 1. 建工作流 / 改工作流
@@ -118,6 +118,13 @@ tail -5 .claude/.wf_advance.log
 
 **这是测试方法伪问题，非工作流 bug**。管道 EOF 触发 claude 异常。真实 TTY 交互不受影响。
 - **别用管道模拟交互会话验证**。用真实 TTY 或 `-p`（注意 -p 下 transcript 不可靠，见症状 B）。
+
+### 症状 F：置顶阶段清单没建 / 不同步（5 阶段任务不显示或状态错）
+
+置顶清单机制：`workflow_phase.py` 每轮注入「任务清单目标状态」块，模型用 `TaskCreate`/`TaskUpdate` 镜像。源真值是 `state.json`，任务只做镜像。
+- **首轮无清单**：模型没执行 TaskCreate。检 `.wf_phase.log` 有 `injected` 行 -> 注入到位，问题在模型；`.claude/output-styles/workflow.md` 未加载则强规则失效（检 per-wf settings.json 的 `outputStyle: workflow`）。
+- **清单状态与当前阶段不符**：读注入段「任务清单」5 行看 hook 给的目标状态，与实际 TaskList 对比。目标错 -> hook bug（查 `state.json` 的 `index`）；目标对但清单错 -> 模型漏 TaskUpdate，用 `/wf status` 促模型下一轮对齐。
+- **execute 工作子任务把 5 阶段任务顶掉**：模型违规改了 5 阶段任务的 subject/顺序。规则：工作子任务追加在下方，5 个阶段任务全程保留。
 
 ## 3. 排查方法论（systematic-debugging 适配）
 

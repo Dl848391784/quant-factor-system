@@ -40,6 +40,21 @@ WF_PHASES=(understand plan execute review evolution)
 # understand->plan、plan->execute 两处闸门（认知/决策关口）
 WF_GATED_AFTER="understand plan"
 
+# 阶段中文显示名（仅显示用；逻辑层 state/PHASE_DONE/jump 仍用英文标识）
+declare -A WF_PHASE_LABELS=(
+  [understand]="理解和求证问题"
+  [plan]="生成执行计划"
+  [execute]="执行"
+  [review]="审核结果"
+  [evolution]="进化"
+)
+
+# 英文阶段名 -> 中文显示名（未知回退原值）；仅供显示，不参与逻辑判定
+wf_phase_label() {
+  local p="$1"
+  printf '%s' "${WF_PHASE_LABELS[$p]:-$p}"
+}
+
 # 阶段 -> index
 wf_phase_index() {
   local p="$1" i
@@ -238,6 +253,6 @@ PY
     local phase session_id
     phase=$(wf_state_get "$name" phase 2>/dev/null)
     session_id=$(wf_state_get "$name" session_id 2>/dev/null)
-    printf "%-24s phase=%-11s session=%s\n" "$name" "${phase:-?}" "${session_id:-?}"
+    printf "%-24s 阶段=%s session=%s\n" "$name" "$(wf_phase_label "${phase:-?}")" "${session_id:-?}"
   done
 }

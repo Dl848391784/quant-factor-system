@@ -29,6 +29,15 @@ PHASE_LOG = PROJECT_ROOT / ".claude" / ".wf_phase.log"
 # 5 阶段顺序（与 wf-lib.sh WF_PHASES 一致；hook 独立持有，避免 source bash）
 PHASES = ["understand", "plan", "execute", "review", "evolution"]
 
+# 阶段中文显示名（仅显示用；逻辑层 state/PHASE_DONE 标记/jump 参数仍用英文标识）
+PHASE_LABELS = {
+    "understand": "理解和求证问题",
+    "plan": "生成执行计划",
+    "execute": "执行",
+    "review": "审核结果",
+    "evolution": "进化",
+}
+
 # 各阶段规则（注入给模型的"允许/禁止/产物/推进"四要素）
 PHASE_RULES = {
     "understand": {
@@ -140,14 +149,26 @@ def _format_injection(state: dict) -> str:
         total = len(PHASES)
     except Exception:
         total = 5
+    # 任务清单目标状态（镜像 state.json 当前 index；供模型同步原生 TaskList）
+    task_rows = []
+    for i, p in enumerate(PHASES, 1):
+        lbl = PHASE_LABELS.get(p, p)
+        st = "completed" if i < idx else ("in_progress" if i == idx else "pending")
+        task_rows.append(f"  {i}. {lbl} -> {st}")
+
     lines = [
         "## WORKFLOW 当前阶段",
-        f"工作流: {name} | 阶段: **{phase}** [{idx}/{total}] | gate: {gate}",
+        f"工作流: {name} | 阶段: **{PHASE_LABELS.get(phase, phase)}** [{idx}/{total}] | gate: {gate}",
         f"- 目标: {rules.get('goal', '')}",
         f"- 允许: {rules.get('allow', '')}",
         f"- 禁止: {rules.get('deny', '')}",
         f"- 阶段产物: {rules.get('artifact', '')}",
         f"- 推进: {rules.get('advance', '')}",
+        "- 任务清单(原生 TaskList, 置顶常驻): 维护 5 个阶段任务作常驻进度清单, 状态须镜像当前 index:",
+        *task_rows,
+        "  首轮或续接后缺失时 TaskCreate 建齐 5 个(subject=各阶段中文名)并按上设状态;",
+        "  其后每轮若 in_progress 任务与当前阶段不符则 TaskUpdate 对齐(旧->completed, 当前->in_progress);",
+        "  5 个阶段任务全程保留勿删; execute 阶段工作子任务可追加在下方, 勿动这 5 个。",
         "完成本阶段后，回复末尾单独一行输出: `### PHASE_DONE: " + phase + "`",
         "（仅当阶段目标真正达成时输出；闸门阶段不会自动推进，需 /wf gate 放行）",
     ]
