@@ -264,7 +264,7 @@ python data_fetchers/fetch_market_cap.py [--start YYYY-MM-DD --end YYYY-MM-DD]
 | 总失败率 > 5% | `main` 末尾 | 校验仍跑完，最终退出 1 |
 | V1-V7 任一失败 | `validate_final_data` | 返回 1 |
 
-### 退出码（遵循 AGENTS.md 规则 #6）
+### 退出码（遵循 PROJECT.md H12 退出码语义）
 
 | 码 | 含义 | 触发条件 |
 |---|---|---|

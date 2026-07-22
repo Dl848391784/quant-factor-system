@@ -106,7 +106,7 @@ result = run_complex_factor_ic(
 按照 `superpowers-workflow` 4阶段流程：
 
 ### Phase 1: Plan（当前阶段）
-- [x] 读取 AGENTS.md
+- [x] 读取 PROJECT.md（AGENTS.md 已退役，等价内容已并入 PROJECT.md / CLAUDE.md）
 - [x] 加载 superpowers-workflow skill
 - [x] 查询 codegraph 知识图谱
 - [x] 读取 PROJECT.md 了解规范

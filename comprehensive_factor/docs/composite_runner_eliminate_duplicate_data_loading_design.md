@@ -37,7 +37,7 @@
 | `comprehensive_factor/common/factor_loader.py` | 新增 `load_full_data()` 函数，一次加载返回完整 DataFrame | ~30 行 |
 | `comprehensive_factor/MODULE.md` | 版本历史记录 | ~5 行 |
 
-**不改动** `backtest/common/layered_backtest_runner.py`（跨模块边界，只复用自己目录的 common/，遵循 AGENTS.md 规则 #1）。
+**不改动** `backtest/common/layered_backtest_runner.py`（跨模块边界，只复用自己目录的 common/，遵循 PROJECT.md H1 模块边界）。
 
 ### 详细设计
 
