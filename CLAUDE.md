@@ -36,7 +36,7 @@
 | 跑报告/出 summary/报告异常/基础数据源/freshness/§9 §10 | `/factor-summary-reporting` |
 | 日内操作/开盘怎么卖/高开低开止损/9:25集合竞价/反抽 | `/intraday-strategy-design` |
 | pipeline 没跑/X没落库/silent fallback/selection_date/trade_date/weight_method 切换断层 | `/factor-ic-analyzer-workflow` |
-| 建工作流/ac-ark --workflow/阶段不推进/注入没生效/`/wf`报错/worktree hook 失效/模型否认注入 | `/workflow-creation` |
+| 建工作流/ac-ark --workflow/阶段不推进/注入没生效/`/wf`报错/hook 失效/模型否认注入 | `/workflow-creation`（`~/.dl-workflow/`，用户级安装） |
 | 新增函数/脚本(写代码前) | `superpowers:test-driven-development` |
 | 测试失败/运行时错误 | `superpowers:systematic-debugging` |
 | 裁决类结论(给结论前)：根因/有效吗/选哪个/能上线吗 | 对抗性审视：尝试反驳自己的结论 |
@@ -75,12 +75,12 @@ H1-H13 完整定义见 **PROJECT.md §硬规则**。最易踩：
 - **H11**：日志 `%` 惰性格式化，禁 f-string / `exc_info=True`
 - **H12**：退出码语义(0/1/3/4/5)，main 内禁 sys.exit
 - **H13**：禁死代码兜底分支
-- **H15**：codegraph 查证--改已有源码前强制查（PreToolUse hook 门禁）；跨文件断言必附证据。详见 `designs/codegraph_enforcement_gate_design.md`
+- **H15**：codegraph 查证--改已有源码前强制查（PreToolUse hook 门禁）；跨文件断言必附证据。详见 `~/.dl-workflow/designs/codegraph_enforcement_gate_design.md`
 
 ## 6. 环境
 本项目由 Claude Code 独占维护。4 个项目 skill 在 `.claude/skills/`（自包含）。`.codegraph/codegraph.db` 可用。完整规范见 PROJECT.md / MODULE.md（本文件为路由入口）。
 
-**H15 门禁**（2026-07-22 起）：`.claude/hooks/` 下 codegraph_gate.py（PreToolUse 阻断）+ codegraph_audit.py（PostToolUse 留痕）+ codegraph_inject.py（UserPromptSubmit，瘦档注入真源；运行约定见 `designs/codegraph_auto_inject_design.md` §运行约定：重启生效后 assistant 每轮显式复述「## codegraph 自动注入」段落作证据源）已启用，注册于 `.claude/settings.json`。改已有 .py 源码前强制查 codegraph。
+**H15 门禁**（2026-07-23 起）：codegraph_gate.py（PreToolUse 阻断）+ codegraph_audit.py（PostToolUse 留痕）已迁至 `~/.dl-workflow/` 独立仓库，装到 `~/.claude/hooks/`（用户级，跨项目通用）。**项目专属**的 codegraph_inject.py（UserPromptSubmit，瘦档注入项目 db 真源；运行约定见 `designs/codegraph_auto_inject_design.md`）仍留在 `.claude/hooks/`，注册于 `.claude/settings.json`。改已有 .py 源码前强制查 codegraph。
 
 > ⚠️ `check_doc_layer.py` 被 PROJECT.md/CLAUDE.md/skills README 多处引用"禁止跨层重复"，但脚本未实现--该约束当前零强制（H15 检查工具列只引用真实存在的 hook 脚本，不引幽灵）。重建它属独立项。
 > ⚠️ Claude Code 项目 skill 注册可能需**重启会话**才能 `/invoke`。未生效前读 `.claude/skills/<name>/SKILL.md`。
