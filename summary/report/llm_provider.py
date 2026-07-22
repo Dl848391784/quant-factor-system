@@ -100,14 +100,14 @@ def _load_base_url() -> str:
 class MinMaxClient:
     """minimax-cn LLM 客户端 — Anthropic Messages API over requests.
 
-    设计要点 (R49 + v1.5.20 + R47 silent fallback + AGENTS.md §13):
+    设计要点 (R49 + v1.5.20 + R47 silent fallback + PROJECT.md H11 日志 % 惰性):
       1. 单段一次调用, 返回 parsed JSON dict
       2. 3 次重试 + 指数退避 (transient failure 防御)
       3. 失败 fallback dict 含 [⚠️] 标记 + decision=skip
       4. logger.exception(...) 替代 logger.error(...) (R48 修复实战)
       5. 超时 60s (单段), 30 段 × 60s = 最坏 30 分钟
       6. json_mode=True 时强制 response_format=json_object
-      7. % 惰性格式化日志 (AGENTS.md §13 硬规则)
+      7. % 惰性格式化日志 (PROJECT.md H11 硬规则)
     """
 
     def __init__(

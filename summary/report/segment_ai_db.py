@@ -35,7 +35,7 @@ from typing import Any
 
 import pandas as pd
 
-# AGENTS.md §11 路径从 paths.py 导入 (硬规则)
+# PROJECT.md H7 路径从 paths.py 导入
 from paths import PROJECT_ROOT, SUMMARY_RESULT  # noqa: F401
 from summary.report.llm_provider import MinMaxClient, _load_api_key, _load_base_url  # noqa: F401
 from summary.report.segment_ai_prompts import (  # noqa: F401

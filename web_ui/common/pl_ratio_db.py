@@ -18,7 +18,7 @@ R43 方向 A 改动:
 
 H1.1 严守:
 - web_ui 只读 summary/data_fetchers 产物 (R16 txt_parser 先例), 不修改其他模块
-- 所有路径从 paths 模块导入 (AGENTS.md §硬规则 #11)
+- 所有路径从 paths 模块导入 (PROJECT.md H7 路径导入)
 
 数据契约:
 {
@@ -45,7 +45,7 @@ import pandas as pd
 from paths import PROJECT_ROOT
 
 
-# 路径: 复用 paths 模块定义 (AGENTS.md §硬规则 #11)
+# 路径: 复用 paths 模块定义 (PROJECT.md H7 路径导入)
 _SEGMENT_STOCK_DETAILS_PATH: Path = PROJECT_ROOT / "summary" / "result" / "segment_stock_details.parquet"
 # R43 方向 A: 从 paths.FACTOR_IC_DATA_MASTER 读 (全市场主数据源), 替换 R42 的 ob_quality alias 切片
 # 这样 S7 段内 603607 等资产在 master 全市场里有 forward_return_1d 时能 merge 上
