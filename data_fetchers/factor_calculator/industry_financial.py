@@ -21,7 +21,7 @@ financial 数据做测试，只需 mock ``_load_financial_data``，``industry.py
 ====
 - ``_common``：列名、``_add_industry_column`` helper、``get_module_logger``
 - ``data_fetchers.common.get_module_result_dir``：财务 parquet 路径解析（避免
-  字符串字面量；遵循 AGENTS.md 规则 #11）
+  字符串字面量；遵循 PROJECT.md H7 路径导入）
 - ``numpy`` / ``pandas`` / ``logging`` / ``pathlib.Path``
 
 注意事项

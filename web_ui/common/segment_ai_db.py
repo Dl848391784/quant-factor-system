@@ -44,7 +44,7 @@ import pandas as pd
 from paths import PROJECT_ROOT
 
 
-# 路径: 复用 paths 模块定义 (AGENTS.md §硬规则 #11)
+# 路径: 复用 paths 模块定义 (PROJECT.md H7 路径导入)
 # R49e (用户原话 2026-07-08 "移动到 summary/result/, 而不是 summary/result/ob_quality/"):
 # 完全扁平到顶层, 不嵌 PIPELINE_ALIAS 子目录 (跟 web_ui/common/segment_win_db.py:33 同模式:
 # `PROJECT_ROOT / "summary" / "result" / "segment_win_rates.parquet"`). 跟既有 3 段段落布局

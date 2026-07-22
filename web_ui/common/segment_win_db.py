@@ -29,7 +29,7 @@ import pandas as pd
 from paths import PROJECT_ROOT
 
 
-# 路径: 复用 paths 模块定义 (AGENTS.md §硬规则 #11)
+# 路径: 复用 paths 模块定义 (PROJECT.md H7 路径导入)
 _PARQUET_PATH: Path = PROJECT_ROOT / "summary" / "result" / "segment_win_rates.parquet"
 
 
