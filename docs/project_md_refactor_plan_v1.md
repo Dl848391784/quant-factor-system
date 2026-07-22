@@ -104,9 +104,9 @@ FACTOR_IC_DATA = DATA_FETCHERS_RESULT / "factor_ic_data.json.gz"
 
 ---
 
-### Step 7: 更新 AGENTS.md
+### Step 7: 更新 PROJECT.md（AGENTS.md 退役方案，精华并入 CLAUDE.md）
 
-**操作**: 同步更新 AGENTS.md 的硬规则部分
+**操作**: 同步更新 PROJECT.md 的硬规则部分（AGENTS.md 硬规则已并入 PROJECT.md）
 
 ---
 
@@ -115,7 +115,7 @@ FACTOR_IC_DATA = DATA_FETCHERS_RESULT / "factor_ic_data.json.gz"
 | 文件 | 操作 |
 |------|------|
 | PROJECT.md | 重构 |
-| AGENTS.md | 更新 |
+| PROJECT.md | 更新（AGENTS.md 硬规则已并入） |
 | paths.py | 新建 |
 | schemas/*.schema.json | 新建 |
 | pyproject.toml | 更新（pytest 配置） |

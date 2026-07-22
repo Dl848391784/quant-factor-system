@@ -154,8 +154,8 @@ result = run_complex_factor_ic(
 
 ## 5. 引用规范
 
-- AGENTS.md L92：2+ 文件改动先提交 design.md
-- AGENTS.md L100-101：跨模块数据路径 / 输出位置（不涉及）
+- PROJECT.md H8 Design-First：2+ 文件改动先提交 design.md
+- PROJECT.md H2 输出位置 / §跨模块数据路径表（不涉及）
 - factor_ic/MODULE.md M3：logger 传递规范（本方案扩展）
 - factor_ic/MODULE.md M19：异常处理（不涉及，本方案不动）
 - factor_ic/docs/plans/logger_style_unification_v1.0.md：同类全模块统一参考

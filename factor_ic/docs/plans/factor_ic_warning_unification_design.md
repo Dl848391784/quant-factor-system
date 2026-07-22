@@ -428,8 +428,8 @@ log_factor_summary(
 | **M19. 异常按类型分类处理** | `factor_ic/MODULE.md:698-741` | 本函数**不抛异常**，只输出 WARNING；`__main__` 异常捕获块 line 130-139 不动，原 `FactorCalcError / Exception` 双分支差异化保留 |
 | **M22. CLI 异常按类别选择 `logger.error` 或 `logger.exception`** | `factor_ic/MODULE.md:777-833` | 本函数仅 `logger.warning(...)`，与 M22 的 error/exception 选择无冲突——None 状态属"流程继续但需运维关注"语义，warning 是正确级别 |
 | **PROJECT.md 规则 #5: 因子方向由实际 IC 决定** | `PROJECT.md` | 不影响——本函数只输出摘要，不修改因子方向判断逻辑 |
-| **PROJECT.md Design-First** | `AGENTS.md L92` | 本设计文档即为 Design-First 产出，覆盖 17 + 2 文件改动 |
-| **PROJECT.md 任务粒度 ≤3 文件 ≤200 行** | `AGENTS.md` | 实施时按 §6 分批执行，每批 ≤3 文件 |
+| **PROJECT.md Design-First** | `PROJECT.md H8` | 本设计文档即为 Design-First 产出，覆盖 17 + 2 文件改动 |
+| **PROJECT.md 任务粒度 ≤3 文件 ≤200 行** | `PROJECT.md H9` | 实施时按 §6 分批执行，每批 ≤3 文件 |
 
 ### 5.2 与 M3 的契合度细化
 
