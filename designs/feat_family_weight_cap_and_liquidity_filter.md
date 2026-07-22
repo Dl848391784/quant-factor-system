@@ -2,7 +2,7 @@
 
 > 根因：v2.39 验证交互因子门槛后，振幅信号族(amplitude_compression 25% + interaction_amp_compression 13.75% = 38.75%)主导权重，叠加 volume 族(18.09%) + price_position(14.33%) → "阴跌组合" 71.17% 权重。Top10 alpha 实测 -4.45%/6d。
 >
-> 关联：factor-diversity-and-classification.md §15.9
+> 关联：git history (v2.39 实证) + `factor-pool-diversity-and-selection-framework.md` §6
 
 ---
 
@@ -312,4 +312,4 @@ factor_df = full_df[factor_required_cols].copy()
 - PROJECT.md 规则 #14（死代码禁止）——新增代码不造成死分支
 - MODULE.md M16a（交互因子独立门槛）——不冲突，B 方案与 M16a 正交
 - MODULE.md M49（sys.path 处理）——继承现有
-- factor-diversity-and-classification.md §15.9——B 方案直接响应"维度族权重硬上限"和"极端分位流动性硬过滤"
+- git history (v2.39 实证) + `factor-pool-diversity-and-selection-framework.md` §6——B 方案直接响应"维度族权重硬上限"和"极端分位流动性硬过滤"

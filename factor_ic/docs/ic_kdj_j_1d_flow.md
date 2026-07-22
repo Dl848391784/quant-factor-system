@@ -272,7 +272,7 @@ except Exception as e:
 **关键原则：**
 - FileNotFoundError：可恢复，降级全量计算
 - JSONDecodeError/PermissionError：严重错误，不静默降级
-- 遵循 factor-script-optimization-checklist.md Section 22 规范
+- 遵循 factor-ic-script-optimization-checklist.md 规范（已合并原中文诊断 + 英文 Deep Audit）
 
 ---
 
@@ -377,7 +377,7 @@ EPSILON = 1e-10
 rsv = np.where(np.abs(diff) < EPSILON, 50.0, ...)
 ```
 
-**参考规范：** factor-script-optimization-checklist.md Section 17
+**参考规范：** factor-ic-script-optimization-checklist.md（已合并原中文诊断 + 英文 Deep Audit）
 
 ---
 

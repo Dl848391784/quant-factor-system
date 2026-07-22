@@ -2,7 +2,7 @@
 
 > 遵循 AGENTS.md Design-First 流程 + PROJECT.md H8。涉及 6+ 文件改动，必须先通过审核才能动手。
 > 关联讨论: 2026-06-22 会话（条件IC分析）+ skill ref `conditional-ic-analysis.md`
-> 关联规范: factor-diversity-and-classification.md §14（方向多样性不够）+ §15（极端值规避：补丁vs根本解法）
+> 关联规范: `factor-pool-diversity-and-selection-framework.md` §5（方向多样性不够）+ §15（极端值规避：补丁vs根本解法）
 
 ---
 
