@@ -16,7 +16,7 @@
 - ③ R20：main() 函数体内禁 sys.exit（仅对 R20_MIGRATED_FILES 白名单强制）
 - 任何 sys.exit(0) 在 except 块中视为违规（隐藏失败）
 
-对应 PROJECT.md 规则 H12 / AGENTS.md 规则 #6。
+对应 PROJECT.md 规则 H12。
 """
 
 from __future__ import annotations
