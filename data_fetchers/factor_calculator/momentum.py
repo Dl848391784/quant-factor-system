@@ -872,7 +872,7 @@ calculate_downside_deceleration.required_cols = ["date", "asset", "return_5d"]  
 # 交互因子族（v2.48, 2026-06-24, designs/feat_factor_definition_destigmatization_v1.md v1.2）
 #
 # 重构原因：旧 v2.36/v2.37 公式 = -z(ret_Nd) × z(factor) 单边 weakness 输入，
-# 数学上无对应 strength 变体，违反 AGENTS.md 数据驱动原则（行 64-89）
+# 数学上无对应 strength 变体，违反 CLAUDE.md §1.5 / PROJECT.md §数据驱动原则（行 64-89）
 # —— 因子定义阶段就预设了"跌段中因子有效"的方向假设。
 #
 # 新方案 (B''): 每个 base_factor 配 pos/neg/abs 三个 ReLU 切半轴变体：

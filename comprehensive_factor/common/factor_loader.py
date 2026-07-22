@@ -836,7 +836,7 @@ def standardize_factors(
             #   tail_price_position=0.0 表示"价格处于窗口期最低点"，11% 股票触底
             #   在下跌市中完全正常。将其置 NaN 等于消除最极端的真实信号。
             #   点质量检测应只针对中间值的异常聚集（可能是计算 bug），
-            #   而非物理边界的自然聚集。遵循 AGENTS.md 规则 #15（第一性原理）。
+            #   而非物理边界的自然聚集。遵循 CLAUDE.md §1.5 / PROJECT.md §第一性原理（AGENTS.md 原 #15 不存在，#15 编号为原文笔误）。
             if not point_mass.empty:
                 daily_bounds = factor_df.groupby("date")[col].agg(["min", "max"]).reset_index()
                 daily_bounds.columns = ["date", "daily_min", "daily_max"]

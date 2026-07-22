@@ -165,7 +165,7 @@ FACTOR_DEFINITIONS: dict[str, str] = {
     # v2.48 (designs/feat_factor_definition_destigmatization_v1.md v1.2): 交互因子族 27 变体
     # 第一性原理: ReLU 切半轴产生独立信号（pos/neg/abs 数学独立, ReLU 非线性破坏 affine 对称）。
     # 旧 v2.36/v2.37 公式 = -z(ret)×z(factor) 单边 weakness 预设方向; v2.48 改三 ReLU 变体,
-    # 由 IC 闸口数据驱动淘汰, 不预设方向（AGENTS.md 数据驱动原则）。
+    # 由 IC 闸口数据驱动淘汰, 不预设方向（CLAUDE.md §1.5 / PROJECT.md §数据驱动原则）。
     "interaction_amplitude__ret3d_pos": "max(z_cs(return_3d), 0) × z_cs(amplitude), 涨段启用(ReLU+)",
     "interaction_amplitude__ret3d_neg": "min(z_cs(return_3d), 0) × z_cs(amplitude), 跌段启用(ReLU-)",
     "interaction_amplitude__ret3d_abs": "|z_cs(return_3d)| × z_cs(amplitude), 按动幅启用(|ReLU|)",
