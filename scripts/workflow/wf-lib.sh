@@ -17,13 +17,16 @@ WF_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # repo 根：优先 git 反查（worktree 内 __file__.parents[2] 会指向 worktree 根而非主仓库根，
 # 导致读不到主仓库 .claude/workflows/<name>/state.json）。
 # git rev-parse --git-common-dir: worktree 内返回主仓库 .git 绝对路径，dirname 即主仓库根。
-# fallback: BASH_SOURCE 的 parents[2]（普通会话 / 非 git 环境）。
+# 主仓库内返回 ".git"（相对）-> 用 --show-toplevel 取绝对根。
+# fallback: BASH_SOURCE 的 parents[2]（非 git 环境）。
 _wf_common_dir="$(git rev-parse --git-common-dir 2>/dev/null || true)"
 if [ -n "$_wf_common_dir" ] && [ "$_wf_common_dir" != ".git" ]; then
   WF_REPO_ROOT="$(cd "$(dirname "$_wf_common_dir")" && pwd)"
 else
-  # common-dir 为空或 ".git"（主仓库内相对）-> 用 toplevel 或 lib parents[2]
-  WF_REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || cd "$WF_LIB_DIR/../.." && pwd)"
+  WF_REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -z "$WF_REPO_ROOT" ]; then
+    WF_REPO_ROOT="$(cd "$WF_LIB_DIR/../.." && pwd)"
+  fi
 fi
 WF_META_ROOT="$WF_REPO_ROOT/.claude/workflows"
 WF_WT_ROOT="$WF_REPO_ROOT/.claude/worktrees"
