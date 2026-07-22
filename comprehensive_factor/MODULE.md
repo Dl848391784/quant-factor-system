@@ -734,7 +734,7 @@ v2.39 用**独立门槛 dict** 取代 v2.38 的 L1 豁免分支：本质相同�
 **引用**:
 - 设计文档: `designs/feat_interaction_thresholds_v239.md` §2.2, §3, §7 (Post-Mortem)
 - 历史: v2.38 L1 豁免（commit 4c845c0）已在 v2.39 删除，由独立门槛体系取代
-- 项目规范: PROJECT.md §⚡ 第一性原理 / AGENTS.md 硬规则 #5（因子方向由数据定）
+- 项目规范: PROJECT.md §第一性原理 / PROJECT.md H5（因子方向由数据定）
 
 ---
 
@@ -2129,7 +2129,7 @@ weight_engine = WeightEngine(dimension_weight_method="icir")  # 硬编码
 | v2.34 | 2026-06-20 | stock_selector.py v1.21: 修复维度权重不生效 bug——从 composite 结果读取 dimension_weight_method 传给 WeightEngine（之前 stock_selector 自建 WeightEngine 时缺 dimension_weight_method/factor_categories 参数，导致选股排序用不带维度权重的综合因子值，v2.28 维度权重工作无效）。修复后 Top10 中 #4-#10 重新排列，维度权重分布从 price_position 54%→34.6% |
 | v2.32 | 2026-06-20 | stock_selector.py v1.4: factor_values/factor_values_std 的 key 统一用逻辑名（通过 FACTOR_COL_TO_NAME_MAP 反向映射列名→逻辑名），与 weight_config.factor_list 一致——修复 rsi vs rsi_6、volume_ratio vs volume_ratio_5 命名不一致；同步修复 summary 模块 L1858 集中度检测隐藏 bug（comp_weights key 是逻辑名但 factor_values_std key 是列名导致 rsi/volume_ratio 集中度检测失效）；test_stock_selector.py 更新 4 处断言 |
 | v2.31 | 2026-06-20 | factor_selector.py v2.9: select_best_from_groups 新增 corr_matrix 参数——Union-Find 传递性归组时被淘汰因子和 best_factor 之间可能没有直接 >0.7 的配对（如 positive_day_ratio_5 通过中间因子间接归入 rsi 组），从 corr_matrix 查找实际相关系数补全去重原因显示；test_dimension_aware_dedup.py 新增 TestTransitiveGroupCorrDisplay 2 测试（corr_matrix 补全 + None 兜底"传递性归组"） |
-| v2.30 | 2026-06-20 | factor_loader.py v2.27: standardize_factors 点质量检测增加物理边界值豁免——高频值=当日截面 min/max 时不置 NaN（tail_price_position 0.0=11.1%/1.0=6.9%、price_position 0.0=4.3%/1.0=2.6%、near_high_ratio_5 1.0=15.5% 均为有界分布的真实极端信号）；遵循 AGENTS.md 规则 #15（第一性原理）；AGENTS.md 新增规则 #15；test_standardize_point_mass.py 重写为 12 测试（4 原有+4 离散豁免+4 物理边界豁免），原有测试改用非边界值 0.5 |
+| v2.30 | 2026-06-20 | factor_loader.py v2.27: standardize_factors 点质量检测增加物理边界值豁免——高频值=当日截面 min/max 时不置 NaN（tail_price_position 0.0=11.1%/1.0=6.9%、price_position 0.0=4.3%/1.0=2.6%、near_high_ratio_5 1.0=15.5% 均为有界分布的真实极端信号）；遵循 PROJECT.md §第一性原理（AGENTS.md 原 #15 不存在，原文档误称"AGENTS.md 新增规则 #15"为历史笔误）；test_standardize_point_mass.py 重写为 12 测试（4 原有+4 离散豁免+4 物理边界豁免），原有测试改用非边界值 0.5 |
 | v2.29 | 2026-06-20 | factor_loader.py v2.26: standardize_factors 点质量检测增加离散因子豁免——unique/N < 5% 或 unique < 20 的因子跳过点质量检测（positive_day_ratio_5 的 6 个离散值天然高频聚集，误杀 80%+ 股票 z-score）；test_standardize_point_mass.py 新增 TestDiscreteFactorExemption 4 测试 |
 | v2.28 | 2026-06-20 | weight_engine.py v1.20: 维度级别权重分配（方案 B）——RollingICIRWeightMethod 新增 dimension_weight_method + factor_categories 参数，两阶段权重计算（维度内归一化 → 维度间归一化）；WeightEngine 透传维度参数；composite_runner 新增 --dimension_weight CLI 参数（none/equal/icir）；M58 规则；test_dimension_weight.py 12 测试 |
 | v2.27 | 2026-06-20 | factor_selector.py v1.9: 移除跨维度兜底合并——跨维度因子对一律不合并（v1.8 的 0.9 兜底导致 Union-Find 传递性桥接消灭整个 momentum 维度）；移除 cross_dimension_threshold 参数 + cross_dimension_corr_threshold 配置；M57 规则同步更新；test_dimension_aware_dedup.py 更新为 18 测试（含桥接回归测试） |

@@ -167,7 +167,7 @@ sys.exit(1)
 ```
 
 **Don't**:
-- ❌ 退出码 2 (那是 import-time 配置/注册失败专用, 见 AGENTS.md §2 规则 #6)
+- ❌ 退出码 2 (那是 import-time 配置/注册失败专用, 见 PROJECT.md H12 退出码语义)
 - ❌ `sys.exit(0)` 即便有 pipeline 处理失败也退出 0 (必须保证所有 pipeline 都成功才 exit 0)
 
 **Why**: `run_pipeline.py` 的 ScriptTask 重试机制依赖退出码语义 (0=成功不重试, 非0=重试)。
@@ -359,7 +359,7 @@ python -c "from pipelines.pipeline_context import load_pipeline_config; cfg = lo
 - **新增规则**: P1 兜底警告 (当前代码仍保留 yaml 不存在时的 default 兜底, v2 计划移除——因为它与 P9 配合时会**双重静默**丢配置)
 
 ### 未来计划 (v2)
-- 移除 `load_pipeline_config()` 的 `{"default": ...}` 兜底, 改为 `FileNotFoundError` (符合 AGENTS.md §2 规则 #14 "死代码禁止" + 符合第一性原理 "不要兜底")
+- 移除 `load_pipeline_config()` 的 `{"default": ...}` 兜底, 改为 `FileNotFoundError` (符合 PROJECT.md H13 死代码禁止 + 符合第一性原理 "不要兜底")
 - 增加 `pipelines/test_cases/` 单元测试 (等 P9 这类边界条件有 2+ 个真实案例后再加, 避免为假想需求写空测试)
 
 ---
@@ -370,9 +370,9 @@ python -c "from pipelines.pipeline_context import load_pipeline_config; cfg = lo
 |---------|---------|
 | `PROJECT.md` 跨模块数据路径 | Stage 1.5 输出契约: `data_fetchers/result/<alias>/factor_ic_data.parquet` |
 | `PROJECT.md` 第一性原理 | "不要兜底" 原则 → P1 v2 计划 |
-| `AGENTS.md` §2 硬规则 #6 | 退出码语义 (P3) |
-| `AGENTS.md` §2 硬规则 #11 | `from paths import` 规范 (P6 反例, 因循环依赖) |
-| `AGENTS.md` §2 硬规则 #14 | 死代码禁止 (P1 v2 计划) |
-| `AGENTS.md` §6 规范补充结构模板 | 本文档采用的 What/How/Don't/Why/When/Verify 七段式 |
+| `PROJECT.md` H12 退出码语义 | 退出码语义 (P3) |
+| `PROJECT.md` H7 路径导入 | `from paths import` 规范 (P6 反例, 因循环依赖) |
+| `PROJECT.md` H13 死代码禁止 | 死代码禁止 (P1 v2 计划) |
+| `PROJECT.md` §规范补充结构模板 (What/How/Don't/Why/When/Examples/Verify 七段式) | 本文档采用的七段式 |
 | `paths.py` 注释 | Stage 1.5 与 PIPELINE_ALIAS 关系 (本次同步更新) |
 | `designs/refactor_pipelines_subpackage.md` | 本次重构完整 design 记录 + P9 实战案例详细复盘 |
