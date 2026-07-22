@@ -5,6 +5,7 @@
 """
 
 import argparse
+import gc
 import gzip
 import json
 import logging
@@ -1195,6 +1196,11 @@ def _run_factor_pipeline(
     for step in _FACTOR_PIPELINE_STEPS:
         factor_df, step_valid_counts = _run_pipeline_step(factor_df, step, logger)
         valid_counts.update(step_valid_counts)
+        # 每步后 gc.collect()：interaction 因子族 assign() 产生浅拷贝，
+        # 旧 DataFrame 引用虽被 reassign 丢弃但 GC 不保证立即回收。
+        # 18 步 interaction 累积的垃圾在峰值时刻可吃掉数百 MB，
+        # 与系统物理内存 7.3GB 边际导致 OOM Kill（2026-07-16 实测）。
+        gc.collect()
 
     # step 11.7~11.9 添加的 industry 临时列不属于 _OUTPUT_COLS
     factor_df = _drop_industry_column(factor_df)
