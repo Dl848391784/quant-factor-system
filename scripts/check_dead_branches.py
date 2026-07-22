@@ -8,7 +8,7 @@
 注：死代码检查无法纯静态判定（需跨文件分析 callee 行为），本脚本只检查
 确定性死代码模式 + 项目特定 regression guard。复杂死代码仍依赖 code review。
 
-对应 PROJECT.md 规则 H13 / AGENTS.md 规则 #14。
+对应 PROJECT.md 规则 H13。
 """
 
 from __future__ import annotations

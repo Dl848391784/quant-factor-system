@@ -6,7 +6,7 @@ scripts/check_dead_branches.py 的单元测试
 - 模式 2：assert False 之后的可执行代码
 - 模式 3：factor_ic/ic_*.py 中 `if result is None`（仅当 result 来自 run_factor_ic 时）
 
-对应 PROJECT.md 规则 H13 / AGENTS.md 规则 #14。
+对应 PROJECT.md 规则 H13。
 """
 
 from __future__ import annotations

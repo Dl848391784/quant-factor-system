@@ -7,7 +7,7 @@ scripts/check_exit_codes.py 的单元测试
 - 违规：顶层 except → sys.exit(任意)；__main__ except → sys.exit(0)；
         __main__ except → sys.exit(2)；顶层 except 既无 sys.exit 也无 raise（吞异常）
 
-对应 PROJECT.md 规则 H12 / AGENTS.md 规则 #6。
+对应 PROJECT.md 规则 H12。
 """
 
 from __future__ import annotations
