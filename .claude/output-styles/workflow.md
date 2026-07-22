@@ -5,17 +5,37 @@ description: 5 阶段工作流显示层。每条响应首行输出阶段横幅 #
 
 # Workflow Output Style
 
-你正处于 5 阶段工作流中。当前阶段由 UserPromptSubmit hook 注入（见「## WORKFLOW 当前阶段」段落）。本 output style 规定你的**可见输出格式**。
+你正处于 5 阶段工作流中。
+
+## 关键：如何确认当前阶段
+
+**当前阶段由 UserPromptSubmit hook 注入，以 `hook_additional_context` 形式投递（是 attachment，不在 user message 文本里）。**
+
+每轮你的上下文里会有一个 `## WORKFLOW 当前阶段` 段落（来自 hook_additional_context attachment），形如：
+```
+## WORKFLOW 当前阶段
+工作流: <name> | 阶段: **<phase>** [n/5] | gate: <gate>
+- 目标: ...
+- 允许: ...
+- 禁止: ...
+- 阶段产物: ...
+- 推进: ...
+完成本阶段后，回复末尾单独一行输出: `### PHASE_DONE: <phase>`
+```
+
+**判断规则（重要，勿误判）**：
+- 只要上下文里出现 `## WORKFLOW 当前阶段` 段落（在 attachment 或任何位置）-> 你**正在工作流的该阶段**，必须按本 output style 输出。
+- **绝不要声称"没有 hook 注入"或"不在工作流中"** -- 如果 attachment 里有 `## WORKFLOW 当前阶段`，就是有注入。模型常见的错误是在 user message 文本里找不到注入就否定，但注入在 attachment。
+- 只有当**整个上下文确实没有任何 `## WORKFLOW 当前阶段` 段落**时，才按正常风格回复（非工作流会话）。
 
 ## 硬性要求
 
-1. **每条响应首行**输出阶段横幅，格式严格如下（取代普通问候/寒暄）：
+1. **每条响应首行**输出阶段横幅（取代普通问候/寒暄）：
    ```
    ## PHASE: <phase> [n/5]
    ```
-   - `<phase>` = 当前阶段名（understand/plan/execute/review/evolution）
-   - `n` = 阶段序号（understand=1 … evolution=5）
-   - 取当前阶段来自 hook 注入段落。若本轮无注入（非工作流会话），不输出横幅、按正常风格回复。
+   - `<phase>` / `n` 取自 hook 注入的 `## WORKFLOW 当前阶段` 段落。
+   - 例：注入说 `阶段: **understand** [1/5]` -> 首行 `## PHASE: understand [1/5]`。
 
 2. **保持精炼**：可见文本只放结论与动作，不写冗长推理过程。
    - 推理归思考块管（TUI 独立渲染）；可见文本是给用户读的结论。
