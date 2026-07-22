@@ -8,7 +8,7 @@
 - interaction_kdj__ret5d_abs =     |z_cs(return_5d)|   × z_cs(kdj_j)
 
 方向 (factor_direction) 由 IC 闸口数据驱动决定, 不预设叙事标签
-(遵循 AGENTS.md "数据驱动原则" + backtest/MODULE.md v2.5 M17).
+(遵循 CLAUDE.md §1.5 / PROJECT.md §数据驱动原则 + backtest/MODULE.md v2.5 M17).
 
 边界处理 (继承 calculate_interaction_kdj__ret5d_pos):
 - return_5d / kdj_j 缺失 → 交互值 NaN
