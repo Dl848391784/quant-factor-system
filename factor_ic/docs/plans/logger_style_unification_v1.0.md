@@ -137,7 +137,7 @@ logger.info("IC 均值: %.4f", ic_result.get("ic_mean", 0.0))
 
 ---
 
-## 6. 任务粒度评估（AGENTS.md 规则 #12）
+## 6. 任务粒度评估（PROJECT.md H9 任务粒度）
 
 - 涉及文件：39 个（factor_ic/ 内）
 - 实际人工动手：**1 个命令 + 全量审查**（不是 39 个文件逐个手改）

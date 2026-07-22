@@ -350,4 +350,4 @@ DATA_CHECK_SOURCES = {
 7. v2.2（2026-06-19）：
    - 同步脚本版本至 v2.25
    - v2.25: DATA_CHECK_SOURCES 新增 market_cap_data 数据源检查
-     （市值数据用于市值中性化，AGENTS.md 跨模块数据路径表已定义）
+     （市值数据用于市值中性化，PROJECT.md §跨模块数据路径表已定义）

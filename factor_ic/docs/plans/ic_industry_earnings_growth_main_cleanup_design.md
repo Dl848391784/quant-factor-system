@@ -4,7 +4,7 @@
 > 创建日期：2026-06-16
 > 状态：✅ R4-R7b 完成（2026-06-16 切方案 B + H12/H13 升级硬规则）
 > 历史状态：已审核（2026-06-16 用户确认 A / 2 / Q3=是）→ R3 收口后用户改方案 B
-> 关联规范：AGENTS.md §0 Design-First / 规则 #12；factor_ic/MODULE.md M19-M23（异常与错误）；
+> 关联规范：PROJECT.md H8 Design-First / H9 任务粒度；factor_ic/MODULE.md M19-M23（异常与错误）；
 > 关联范例：`factor_ic/ic_industry_amplitude_trend_1d.py`（同类清理已落地）；
 > 关联 skill：dead-code-and-observability-fixes 模式 E（防御 `is None` 兜底面对永不返回 None 的函数）
 
@@ -65,7 +65,7 @@
 
 > 退出码约定：0 成功 / 1 运行时失败（数据/计算）/ 2 配置/注册期失败。当前文件原本只用 0/1，
 > 引入 2 的理由：register_factor 失败属于"代码或配置 bug"，与运行时数据错误本质不同；
-> 与 AGENTS.md 规则 #6（退出码 0/1）兼容性见 §6 待用户确认事项。
+> 与 PROJECT.md H12（退出码 0/1/2/3/4/5 语义）兼容性见 §6 待用户确认事项。
 
 ---
 
@@ -135,7 +135,7 @@ python -c "import factor_ic.ic_industry_earnings_growth_1d; print('OK')"
 | ID | 问题 | 默认决定 | 影响 |
 |----|------|---------|------|
 | Q1 | fix #1 选方案 A（保留死分支按字面修）还是方案 B（彻底删，与 amplitude_trend 一致）？ | **A**（严格按用户措辞） | Round-2 patch 内容 |
-| Q2 | fix #5 用 exit code 2 还是仍用 1？ | **2**（与运行时错误区分） | AGENTS.md 规则 #6 是否需补"2 = import-time 配置失败" |
+| Q2 | fix #5 用 exit code 2 还是仍用 1？ | **2**（与运行时错误区分） | PROJECT.md H12 是否需明确"2 = import-time 配置失败"语义 |
 | Q3 | 是否同步把 `ic_industry_momentum_5d_1d.py` / `ic_industry_turnover_trend_1d.py` 也按本方案清理？（这俩是同时期写的姊妹脚本，结构与本次目标文件一模一样） | **是**（用户确认） | 三脚本每轮一起 patch + 一起 commit |
 
 ---
@@ -174,7 +174,7 @@ python -c "import factor_ic.ic_industry_earnings_growth_1d; print('OK')"
 
 R1-R3 已落地方案 A（保留 `if result is None` 死分支作为防御性守卫，注释说明
 "上游契约破坏 → error 级别便于排查"）。**但用户在 R3 收口后明确表态**：
-> "AGENTS.md需要更新规则，应该彻底删除死代码"
+> "PROJECT.md H13 死代码禁止，需彻底删除死代码"
 
 因此放弃方案 A，改方案 B（彻底删除 `if result is None` 死代码块），并将
 "退出码 0/1/2" 与"删除死代码"上升为项目级硬规则。
@@ -204,7 +204,7 @@ R1-R3 已落地方案 A（保留 `if result is None` 死分支作为防御性守
 | R4 | earnings_growth 切方案 B | `factor_ic/ic_industry_earnings_growth_1d.py` | ~30 行变更 |
 | R5 | momentum_5d 切方案 B | `factor_ic/ic_industry_momentum_5d_1d.py` | ~30 行变更 |
 | R6 | turnover_trend 切方案 B | `factor_ic/ic_industry_turnover_trend_1d.py` | ~30 行变更 |
-| R7 | 规范升级 | `PROJECT.md`（S1→H12）+ `AGENTS.md` 规则 #6 | ~15 行变更 |
+| R7 | 规范升级 | `PROJECT.md`（S1→H12）+ `PROJECT.md` H12 退出码语义 | ~15 行变更 |
 | R8 | design.md 状态闭环 | 本文档（标记方案 B 完成 + 追加结果） | ~10 行变更 |
 
 每轮独立 commit，每轮显式路径，每轮 ruff + pytest。
@@ -228,7 +228,7 @@ R1-R3 已落地方案 A（保留 `if result is None` 死分支作为防御性守
 - 历史教训：本次 R1-R3 误以为方案 A（保留死分支作为防御性守卫）合规，
   R4-R6 才修正为方案 B（彻底删除）。规则化后避免再次走偏。
 
-**AGENTS.md** 规则 #6：从 `0/1` 扩展为 `0/1/2`（同步 H12 定义）；
+**PROJECT.md** H12：从 `0/1` 扩展为 `0/1/2/3/4/5`（语义细化）；
 新增规则 #14（对应 PROJECT.md H13 死代码禁止）。
 
 ### 9.6 退出码 2 的语义边界（明确约定）
@@ -292,7 +292,7 @@ R1-R3 已落地方案 A（保留 `if result is None` 死分支作为防御性守
 
 - 把 30 个 allowlist 文件按 R4-R6 模板逐个迁移（每文件独立 commit），allowlist 清空后从 PROJECT.md H13 当前覆盖范围移除 ⏳ 标记
 - 把 `scripts/check_exit_codes.py` 和 `scripts/check_dead_branches.py` 接入 pre-commit hook 与 CI workflow（当前可手工运行 `python scripts/check_*.py all`）
-- AGENTS.md 规则速查表 + 项目根 README 补充 H12 / H13 说明
+- PROJECT.md §硬规则速查表 + 项目根 README 补充 H12 / H13 说明
 
 ---
 
