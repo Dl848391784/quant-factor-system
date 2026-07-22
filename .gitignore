@@ -46,6 +46,11 @@ temporary/
 # Codegraph
 .codegraph/codegraph.lock
 
+# Workflow system (designs/workflow-system-design.md)
+# 运行态：每个工作流 = 独立 worktree + 独立元数据目录，不入版本控制
+.claude/worktrees/
+.claude/workflows/
+
 # v0.4.8 R49 (Round 6 字面 "key 写在本地配置 + 不要在脚本里不安全"): API key 落地保护
 .env
 summary/.env
