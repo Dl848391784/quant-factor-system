@@ -147,7 +147,7 @@ _COL_CAPITAL_FLOW_INTENSITY = "capital_flow_intensity"
 # v2.48 (2026-06-24, designs/feat_factor_definition_destigmatization_v1.md v1.2)
 # 交互因子族重构 —— pos/neg/abs ReLU 切半轴三变体，替代旧 weakness 单边公式
 # 旧 v2.36/v2.37 公式 = -z(ret_Nd) × z(factor) (单边 weakness)，数学上无对应 strength 变体
-#   ⟹ 因子定义阶段预设方向，违反 AGENTS.md 数据驱动原则
+#   ⟹ 因子定义阶段预设方向，违反 CLAUDE.md §1.5 / PROJECT.md §数据驱动原则
 # 新公式: interaction_<base>__ret<W>d_<DIR>, DIR ∈ {pos, neg, abs}
 #   pos = max(z(ret_Nd), 0) × z(factor)   只在过去 N 日涨段启用
 #   neg = min(z(ret_Nd), 0) × z(factor)   只在过去 N 日跌段启用（旧 weakness 的"跌段子集"）

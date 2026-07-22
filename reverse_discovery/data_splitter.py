@@ -125,7 +125,7 @@ def _build_metadata(
     """
     构建子集文件的 metadata 字段。
 
-    遵循 MODULE.md 输出结构模板 + AGENTS.md 硬规则 #4（字段非空）。
+    遵循 MODULE.md 输出结构模板 + PROJECT.md H4（字段非空）。
     """
     return {
         "source": "reverse_discovery/data_splitter.py",

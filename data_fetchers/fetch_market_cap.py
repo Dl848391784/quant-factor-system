@@ -5,7 +5,7 @@
 为市值中性化（ln(circ_market_cap) 截面回归残差法）提供数据基础。
 本脚本仅做"采集 + 落盘 + 验证"，中性化逻辑在下游模块。
 
-输出路径：data_fetchers/result/market_cap_data.json.gz（遵循 AGENTS.md 规则 #2）
+输出路径：data_fetchers/result/market_cap_data.json.gz（遵循 PROJECT.md H2 输出位置）
 设计文档：designs/feat_market_cap_data_fetcher.md
 稳定性：[experimental] 2026-06-18
 
@@ -20,7 +20,7 @@
   date, asset, total_market_cap, circ_market_cap,
   total_shares, circ_shares, pe_ttm, pe_lyr, pb, peg, pcf_ttm, ps_ttm
 
-退出码（遵循 AGENTS.md 规则 #6）:
+退出码（遵循 PROJECT.md H12 退出码语义）:
   0 = 成功
   1 = 运行时错误（采集失败率 > 5% / 验证失败 / 上游 factor_data 缺失）
   2 = 配置或导入错误
@@ -147,7 +147,7 @@ __all__ = [
 ]
 
 # ============================================================
-# 输出路径（遵循 AGENTS.md 规则 #2）
+# 输出路径（遵循 PROJECT.md H2 输出位置）
 # ============================================================
 RESULT_DIR = get_module_result_dir()
 OUTPUT_FILE = get_market_cap_data_file()
@@ -155,7 +155,7 @@ STOCK_LIST_FILE = get_stock_list_file()
 FACTOR_DATA_FILE = get_factor_data_backup_file()
 
 # ============================================================
-# 日志配置（遵循 AGENTS.md 规则 #9）
+# 日志配置（遵循 PROJECT.md §S3 日志格式统一 / AGENTS.md 原 #9 "使用模块 logger_config" 尚未升 H）
 # ============================================================
 _SCRIPT_NAME = Path(__file__).stem
 _LOGS_DIR = get_module_logs_dir()
@@ -526,7 +526,7 @@ def save_batch_cache(
         "data": df.to_dict(orient="records"),
     }
 
-    # 原子写（tempfile + Path.replace，遵循 AGENTS.md 规则 #2）
+    # 原子写（tempfile + Path.replace，遵循 PROJECT.md H2 输出位置）
     with tempfile.NamedTemporaryFile(suffix=".json.gz", dir=target_dir, delete=False) as temp_f:
         temp_path = Path(temp_f.name)
         with gzip.open(temp_f, "wt", encoding="utf-8") as gz_f:
@@ -817,7 +817,7 @@ def main(
         logger_arg: 日志记录器。
 
     Returns:
-        退出码（遵循 AGENTS.md 规则 #6）：
+        退出码（遵循 PROJECT.md H12 退出码语义）：
             0 = 成功
             1 = 运行时错误（失败率/校验失败/上游缺失）
             2 = 配置或导入错误（已被外层 try/except 捕获）
