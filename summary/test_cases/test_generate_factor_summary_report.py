@@ -1803,9 +1803,15 @@ class TestSaveTodaySegmentDetailsR48:
     logger.exception 让 ValueError 可见.
     """
 
-    def _write_daily(self, tmp_path, n_total, n_nan, date):
-        """写临时 composite_rolling_icir_weight_1d_daily.parquet 到 tmp_path."""
+    def _write_daily(self, tmp_path, n_total, n_nan, date, weight_methods=None):
+        """写临时 composite_XXX_1d_daily.parquet 到 tmp_path.
+
+        v0.4.9: 4 种 weight_method 都写 (默认), 因为 _save_today_segment_details 现在对 4 种 wm 都跑.
+        """
         import pandas as pd
+
+        if weight_methods is None:
+            weight_methods = ["equal_weight", "ic_weight", "icir_weight", "rolling_icir_weight"]
 
         rng = list(range(n_total))
         comp = [1.0 - i * 0.05 for i in rng]
@@ -1819,12 +1825,17 @@ class TestSaveTodaySegmentDetailsR48:
                 "composite_factor": comp,
             }
         )
-        path = tmp_path / "composite_rolling_icir_weight_1d_daily.parquet"
-        df.to_parquet(path)
-        return path
+        paths = []
+        for wm in weight_methods:
+            p = tmp_path / f"composite_{wm}_1d_daily.parquet"
+            df.to_parquet(p)
+            paths.append(p)
+        return paths
 
     def test_drops_nan_and_proceeds_to_qcut(self, tmp_path, monkeypatch):
-        """A 修: 46 行含 5 NaN, dropna 后 41 行 → save 应被调用 1 次 (vs R47 静默 0 次)."""
+        """A 修: 46 行含 5 NaN, dropna 后 41 行 → save 应被调用 4 次 (4 种 weight_method).
+        v0.4.9: 改为 4 次, _save_today_segment_details 现在对 4 种 weight_method 都跑.
+        """
         import logging
 
         from summary import generate_factor_summary_report as mod
@@ -1844,6 +1855,7 @@ class TestSaveTodaySegmentDetailsR48:
             saved_calls.append(
                 {
                     "selection_date": selection_date,
+                    "weight_method": weight_method,
                     "n_segments": len(seg_stocks),
                     "n_total": sum(len(v) for v in seg_stocks.values()),
                 }
@@ -1856,12 +1868,16 @@ class TestSaveTodaySegmentDetailsR48:
             logging.getLogger("generate_factor_summary_report"),
         )
 
-        assert len(saved_calls) == 1, (
-            f"R47 silent swallow bug 复现: save 应被调 1 次, 实际 {len(saved_calls)} 次. calls={saved_calls}"
+        assert len(saved_calls) == 4, (
+            f"R47 silent swallow bug 复现: 4 种 weight_method 各应 save 1 次, 实际 {len(saved_calls)} 次. calls={saved_calls}"
         )
-        call = saved_calls[0]
-        assert call["selection_date"] == "2026-07-07"
-        assert call["n_total"] == 41, f"dropna 后应为 41 行, 实际 {call['n_total']}"
+        # 每个 weight_method 都应被调用, selection_date 都是 07-07, dropna 后 n_total=41
+        expected_wms = {"equal_weight", "ic_weight", "icir_weight", "rolling_icir_weight"}
+        actual_wms = {c["weight_method"] for c in saved_calls}
+        assert actual_wms == expected_wms, f"应覆盖 4 种 weight_method, 实际: {actual_wms}"
+        for call in saved_calls:
+            assert call["selection_date"] == "2026-07-07"
+            assert call["n_total"] == 41, f"dropna 后应为 41 行, 实际 {call['n_total']} (wm={call['weight_method']})"
 
     def test_logs_exception_when_qcut_still_fails(self, tmp_path, monkeypatch, caplog):
         """A 修: qcut 抛 ValueError 时必须 logger.exception 让运维可见 (R47 silent swallow 修复)."""

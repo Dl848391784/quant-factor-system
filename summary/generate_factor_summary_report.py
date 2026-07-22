@@ -517,9 +517,12 @@ def _save_today_segment_details(
     stock_result: dict,
     logger: logging.Logger,
 ) -> None:
-    """T 日: 写当前管线的 30 段股票明细到 segment_stock_details.parquet.
+    """T 日: 对 4 种 weight_method 都写 30 段股票明细到 segment_stock_details.parquet.
 
     不等收益——只存选股结果。T+1 由 _compute_pending_win_rates 读取后算胜率.
+
+    v0.4.9: 改为对 4 种 weight_method 都跑 (之前只看 stock_result.meta.weight_method,
+    weight_selector 切换时新 wm 没历史数据 -> WebUI 页签空白).
     """
     import os
 
@@ -527,62 +530,83 @@ def _save_today_segment_details(
     from paths import COMPREHENSIVE_FACTOR_RESULT
 
     alias = os.environ.get("PIPELINE_ALIAS", "")
-    weight_method = (stock_result.get("meta", {}) or {}).get("weight_method", "rolling_icir_weight")
-    daily_path = COMPREHENSIVE_FACTOR_RESULT / f"composite_{weight_method}_1d_daily.parquet"
-    if not daily_path.exists():
-        logger.debug("composite daily 不存在: %s (跳过落库)", daily_path)
-        return
-
-    try:
-        comp_df = pd.read_parquet(daily_path, columns=["date", "asset", "composite_factor"])
-    except Exception:
-        logger.debug("读取 composite daily 失败: %s", daily_path, exc_info=True)
-        return
-
-    comp_dates = sorted(comp_df["date"].dropna().unique())
-    if not comp_dates:
-        return
-    selection_date = str(comp_dates[-1])
-    # R48 bugfix v1.5.18: dropna composite_factor 先, 防 NaN rank 让 qcut 抛 ValueError.
-    # 历史上 5 个 NaN 让 46 行 → 41 行整数 rank 切 30 段 → bin edges 撞到 40.0 重复
-    # → qcut ValueError → except: return 静默吞掉 → 报告 §10 用昨天的 dates[-1] 冒充今天.
-    day_df = comp_df[comp_df["date"].astype(str) == selection_date].dropna(subset=["composite_factor"]).copy()
-    if len(day_df) < 20:
-        logger.debug(
-            "composite daily %s NaN-dropped 后样本数 < 20 (raw=%d), 跳过落库",
-            selection_date,
-            len(comp_df[comp_df["date"].astype(str) == selection_date]),
-        )
-        return
+    # v0.4.9: 4 种 weight_method 都落库, 不再只落 stock_result.meta.weight_method
+    # 当 weight_selector 切换时, 新 wm 从此有完整历史, WebUI 4 个页签都有数据
+    weight_methods = [
+        "equal_weight",
+        "ic_weight",
+        "icir_weight",
+        "rolling_icir_weight",
+    ]
 
     n_segments = 30
-    day_df["rank"] = day_df["composite_factor"].rank(ascending=False, method="first")
-    try:
-        day_df["seg"] = pd.qcut(day_df["rank"], n_segments, labels=[f"S{i + 1}" for i in range(n_segments)])
-    except ValueError:
-        # R48 bugfix v1.5.18: 不能 silent return. 让异常对运维可见, 否则下一次
-        # 类似 41 行切 30 段的 boundary 重复 case 还会被静默吞掉.
-        logger.exception(
-            "qcut 30 段失败 (selection_date=%s, %d 行有效 rank), 跳过落库. 详见 stock_result 完整性.",
-            selection_date,
-            len(day_df),
-        )
-        return
+    saved_count = 0
+    for weight_method in weight_methods:
+        daily_path = COMPREHENSIVE_FACTOR_RESULT / f"composite_{weight_method}_1d_daily.parquet"
+        if not daily_path.exists():
+            logger.debug("composite daily 不存在: %s (跳过落库)", daily_path)
+            continue
 
-    # 按段分组
-    seg_stocks: dict[str, list[dict]] = {}
-    for seg_label in [f"S{i + 1}" for i in range(n_segments)]:
-        subset = day_df[day_df["seg"] == seg_label].sort_values("rank")
-        seg_stocks[seg_label] = [
-            {"asset": row["asset"], "composite_value": float(row["composite_factor"]), "rank": int(row["rank"])}
-            for _, row in subset.iterrows()
-        ]
+        try:
+            comp_df = pd.read_parquet(daily_path, columns=["date", "asset", "composite_factor"])
+        except Exception:
+            logger.debug("读取 composite daily 失败: %s", daily_path, exc_info=True)
+            continue
 
-    try:
-        save_segment_stock_details("ob_quality", weight_method, selection_date, seg_stocks)
-        logger.info("stock_details 落库: %s (%s/%s) %d 只", alias, weight_method, selection_date, len(day_df))
-    except Exception:
-        logger.warning("stock_details 落库失败: %s/%s", alias, selection_date, exc_info=True)
+        comp_dates = sorted(comp_df["date"].dropna().unique())
+        if not comp_dates:
+            continue
+        selection_date = str(comp_dates[-1])
+        # R48 bugfix v1.5.18: dropna composite_factor 先, 防 NaN rank 让 qcut 抛 ValueError.
+        # 历史上 5 个 NaN 让 46 行 → 41 行整数 rank 切 30 段 → bin edges 撞到 40.0 重复
+        # → qcut ValueError → except: return 静默吞掉 → 报告 §10 用昨天的 dates[-1] 冒充今天.
+        day_df = comp_df[comp_df["date"].astype(str) == selection_date].dropna(subset=["composite_factor"]).copy()
+        if len(day_df) < 20:
+            logger.debug(
+                "composite daily %s NaN-dropped 后样本数 < 20 (raw=%d), 跳过落库",
+                selection_date,
+                len(comp_df[comp_df["date"].astype(str) == selection_date]),
+            )
+            continue
+
+        day_df["rank"] = day_df["composite_factor"].rank(ascending=False, method="first")
+        try:
+            day_df["seg"] = pd.qcut(day_df["rank"], n_segments, labels=[f"S{i + 1}" for i in range(n_segments)])
+        except ValueError:
+            # R48 bugfix v1.5.18: 不能 silent return. 让异常对运维可见, 否则下一次
+            # 类似 41 行切 30 段的 boundary 重复 case 还会被静默吞掉.
+            logger.exception(
+                "qcut 30 段失败 (selection_date=%s/%s, %d 行有效 rank), 跳过落库. 详见 stock_result 完整性.",
+                selection_date,
+                weight_method,
+                len(day_df),
+            )
+            continue
+
+        # 按段分组
+        seg_stocks: dict[str, list[dict]] = {}
+        for seg_label in [f"S{i + 1}" for i in range(n_segments)]:
+            subset = day_df[day_df["seg"] == seg_label].sort_values("rank")
+            seg_stocks[seg_label] = [
+                {"asset": row["asset"], "composite_value": float(row["composite_factor"]), "rank": int(row["rank"])}
+                for _, row in subset.iterrows()
+            ]
+
+        try:
+            save_segment_stock_details("ob_quality", weight_method, selection_date, seg_stocks)
+            saved_count += 1
+            logger.info(
+                "stock_details 落库: %s (%s/%s) %d 只",
+                alias,
+                weight_method,
+                selection_date,
+                len(day_df),
+            )
+        except Exception:
+            logger.warning("stock_details 落库失败: %s/%s", weight_method, selection_date, exc_info=True)
+
+    if saved_count == 0:
+        logger.warning("_save_today_segment_details: 4 种 weight_method 均落库失败")
 
 
 def _compute_pending_win_rates(logger: logging.Logger) -> None:

@@ -1,24 +1,29 @@
 {# 10·今日三十分段候选明细 (v0.4.8 R16 + R24-2 现代感强化)
 
-参数:
-- txt_s10_segments: parse_obq_section_10_segments() 返回的 dict (从 summary txt 报告解析)
-  - H1.1 内部实现, 不读 master Parquet
-  - 与 §9 矩阵不同源 (此节 = S1~S30 段的当前选股日 30 段分组; §9 = 30 段 × 12 选股日 矩阵)
-- stock_name_map: 代码→名称 (避免重复解析, txt 已含名称)
+v0.4.9: 数据源从 txt_parser 改为 parquet 直接读取, 支持 ?wm=xxx 页签切换 weight_method
 
-数据格式 (txt §10 原样):
+参数:
+- txt_s10_segments: load_candidates() 返回的 dict (从 segment_stock_details.parquet 读取, v0.4.9 替代 txt_parser)
+- stock_name_map: 代码->名称
+- wm_tabs: 四种 weight_method 页签数据
+- current_wm / current_wm_label: 当前选中的 weight_method
+
+数据格式 (与 txt §10 对齐):
   每段 [Sn] N 只 合并胜率: 48.8%
   + 排名 代码 名称 composite (1-3 只/段)
-
-R24-2 强化 (按用户 2026-07-05 反馈 "零/九/十/十一需要现代感元素"):
-- 新增双图: 30 段胜率柱状 (按段号排序, BEST 高亮) + 30 段候选数柱状
-- 段卡片表格升级 data-table numeric + rank-bar-cell
-- BEST 段加 row-best 高亮
-- KPI 卡 4 张保留 (R20)
-- meta-box 保留 (R16)
 #}
+{# v0.4.9: weight_method 页签 #}
+<div class="wm-tabs">
+  {% for tab in wm_tabs %}
+  <a href="?wm={{ tab.key }}" class="wm-tab {% if tab.is_current %}wm-active{% endif %}">
+    {{ tab.label }}
+    {% if tab.is_best %}<span class="wm-best-badge">BEST</span>{% endif %}
+  </a>
+  {% endfor %}
+</div>
+
 {% if not txt_s10_segments %}
-  <p class="empty">候选明细数据不可用 — txt 第十节未找到 (H1.1: web_ui 只读 summary/result/ob_quality/factor_summary_report_*.txt)</p>
+  <p class="empty">候选明细数据不可用 - segment_stock_details.parquet 中无 {{ current_wm }} 数据 (可能今日尚未落库)</p>
 {% else %}
   {# === R20 KPI 卡 (4 张): 候选池 / 段数 / 最佳段 / 最佳胜率 === #}
   {% set _pool = txt_s10_segments.pool_size %}

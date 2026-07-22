@@ -1,10 +1,13 @@
 {# 9·30 分段胜率 (v0.4.8 R17 数据风酷炫升级 + R22-3 组件化)
 
+v0.4.9: 数据源从 txt_parser 改为 parquet 直接读取, 支持 ?wm=xxx 页签切换 weight_method
+
 参数:
-- decile_stats: load_decile_stats() 返回的 dict (从 master Parquet 计算, 须 T+2 数据)
-  字段: selection_date, trade_date, n_total, segments[].label/n/win_rate/avg_ret/pl_ratio/wins/losses
-- txt_s9_matrix: parse_obq_section_9_matrix() 返回的 dict (从 summary txt 报告解析, H1.1 内部实现)
-  字段: dates[], segments[].label/win_rates[]/merged, best_segment, daily_rates{}
+- txt_s9_matrix: load_win_matrix() 返回的 dict (从 segment_win_rates.parquet 读取, v0.4.9 替代 txt_parser)
+  字段: dates[], segments[].label/win_rates[]/merged, best_segment
+- wm_tabs: 四种 weight_method 页签数据 [{key, label, is_best, is_current}, ...]
+- current_wm: 当前选中的 weight_method (如 "rolling_icir_weight")
+- current_wm_label: 当前选中的 weight_method 中文显示名
 
 R17 改动:
 - 上方 decile_stats 表: 胜率进度条 + 颜色 + mini-bar
@@ -13,11 +16,22 @@ R17 改动:
 - 完整保留 H1.1 严守 + 双源 fallback 文案 (§5b)
 
 R22-3 组件化改造 (§3 surgical: 仅加 class + 胜率列改 rank-bar, 不破坏 R17 heatmap 视觉):
-- 顶部胜率排名表 → <table class="data-table numeric"> + 胜率列用 render_rank_bar
-- 全部 N 段一览 → <table class="data-table heatmap"> (保留 heatmap 颜色)
-- 30×12 矩阵 → <div class="data-table-wrap"> 包裹 + 兼容 R17 heatmap 颜色 + merged 列改 rank-bar
+- 顶部胜率排名表 -> <table class="data-table numeric"> + 胜率列用 render_rank_bar
+- 全部 N 段一览 -> <table class="data-table heatmap"> (保留 heatmap 颜色)
+- 30×12 矩阵 -> <div class="data-table-wrap"> 包裹 + 兼容 R17 heatmap 颜色 + merged 列改 rank-bar
 #}
 {% from '_macros.html' import render_rank_bar %}
+
+{# v0.4.9: weight_method 页签 #}
+<div class="wm-tabs">
+  {% for tab in wm_tabs %}
+  <a href="?wm={{ tab.key }}" class="wm-tab {% if tab.is_current %}wm-active{% endif %}">
+    {{ tab.label }}
+    {% if tab.is_best %}<span class="wm-best-badge">BEST</span>{% endif %}
+  </a>
+  {% endfor %}
+</div>
+<p class="wm-current-label">当前: {{ current_wm_label }} ({{ current_wm }}) · 数据源: segment_win_rates.parquet (v0.4.9 parquet 直读, 替代 txt)</p>
 
 {% if not decile_stats or not decile_stats.get("segments") %}
   <p class="empty">本节所需 Parquet 实时计算的逐段胜率尚未就绪（通常因选股日 T+2 master 数据未到）— 下方 txt 报告矩阵仍可展示（不依赖 Parquet）</p>
