@@ -4,7 +4,7 @@
 为 stock_selector 选出的 Top N 短名单生成 5 维客观字段, 辅助人工决断 (3~5 只持仓)。
 
 设计依据: designs/feat_decision_card_v1.md
-战略目标: AGENTS.md "战略目标：量化辅助 + 人工决断"
+战略目标: CLAUDE.md §1.5 / PROJECT.md §战略目标（量化辅助 + 人工决断）
 数据驱动原则: PROJECT.md "禁止给系统贴叙事标签" — 所有维度仅做客观陈述
 
 5 维设计:

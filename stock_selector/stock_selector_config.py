@@ -77,7 +77,7 @@ class StockSelectorConfig:
     # v2.42: 短名单扩展 10 → 30
     # 设计依据: designs/feat_shortlist_top30_v1.md §1.2
     # 第一性原理: √N 降噪 (N=10→30 降噪 1.73x), 退出极端尾部 (0.36% → 1.1%)
-    # 战略目标 (AGENTS.md): Layer 1 (549) → 短名单 30~50 → 人工决断 3~5
+    # 战略目标 (CLAUDE.md §1.5 / PROJECT.md §战略目标): Layer 1 (549) → 短名单 30~50 → 人工决断 3~5
     top_n: int = 30  # v2.42: 短名单扩展, 从 10 改为 30
     factor_direction: str = "positive"  # v2.47: 综合因子方向（对齐到正向语义，值大=好）
     rolling_window: int = 60  # 滚动 ICIR 窗口

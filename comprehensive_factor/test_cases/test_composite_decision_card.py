@@ -1,7 +1,7 @@
 """
 decision_card 模块测试 (v3.9: Bottom30 过热过滤).
 
-遵循 AGENTS.md 规则 #8: 新建脚本同步创建 pytest.
+遵循 PROJECT.md §S2 配套文件同步创建: 新建脚本同步创建 pytest.
 设计依据: designs/feat_decision_card_v1.md §6, designs/feat_bottom30_overheat_filter.md
 """
 
