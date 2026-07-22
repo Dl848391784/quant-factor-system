@@ -90,7 +90,7 @@ def calculate_intraday_intensity(
         0.25
     """
     # 局部 logger 命名为 _logger，避免与模块级 logger 同名遮蔽
-    # （遵循 AGENTS.md 规则 #14：禁止用同名变量"伪装"作用域隔离）
+    # （遵循 CLAUDE.md §1.5 / PROJECT.md §第一性原理：禁止用同名变量"伪装"作用域隔离）
     _logger = logger_arg or logger
 
     # 1. 数据校验（遵循 MODULE.md v3.16 新因子数据校验规范）
@@ -120,7 +120,7 @@ def calculate_intraday_intensity(
     amplitude = factor_df["high"] - factor_df["low"]
 
     # 5. 除零/异常保护：振幅 ≤ 0 时分母置 NaN，避免中间产生 inf
-    #    （遵循 AGENTS.md 规则 #14：不允许"先算 inf 再覆盖"的二次处理歧义；
+    #    （遵循 CLAUDE.md §1.5 / PROJECT.md §第一性原理：不允许"先算 inf 再覆盖"的二次处理歧义；
     #    统计 mask 与替换 mask 必须共用同一份，防止负振幅等数据异常时计数与
     #    实际替换数不匹配）
     zero_or_negative_mask = amplitude <= 0
@@ -189,7 +189,7 @@ def main():
     # run_factor_ic 在 factor_ic_runner.py 中所有路径都显式 return result 或
     # build_error_result(...)（始终为 dict），不存在返回 None 的代码路径。
     # 因此此处的 `if result is None` 守卫属于永不触发的死代码（违反
-    # AGENTS.md 规则 #14），已删除。若未来 callee 行为变化可由调用方在
+    # PROJECT.md H13（死代码禁止）），已删除。若未来 callee 行为变化可由调用方在
     # 解构字段时通过 .get(...) 防御。
 
     # 使用 .get() + or {} 防御性访问结果（避免 None 导致格式化失败）

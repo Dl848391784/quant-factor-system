@@ -788,7 +788,7 @@ def calculate_ic_statistics(ic_series: pd.Series, logger=None) -> dict:
 # v2026-06-18: 删除 industry_neutral_rank 死代码
 #   - 历史定义仅 1 处，0 处调用（grep 确认）
 #   - 行业中性化方案统一采用残差回归（design.md D1+D10）
-#   - 遵循 AGENTS.md 硬规则 #14：禁止死代码
+#   - 遵循 PROJECT.md H13：死代码禁止
 
 
 def industry_neutral_residual(
