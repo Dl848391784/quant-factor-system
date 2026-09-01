@@ -70,7 +70,7 @@
 H1-H13 完整定义见 **PROJECT.md §硬规则**。最易踩：
 - **H1/H1.1**：模块边界；web_ui 只读不改后端
 - **H7**：路径只能 `from paths import`（改前核实 PROJECT.md 待确认项）
-- **H8**：2+ 文件先写 design.md
+- **H8**：2+ 文件先写 design.md（dl-workflow 驱动改动豁免）
 - **H9**：单次 ≤3 文件 AND ≤200 行
 - **H11**：日志 `%` 惰性格式化，禁 f-string / `exc_info=True`
 - **H12**：退出码语义(0/1/3/4/5)，main 内禁 sys.exit

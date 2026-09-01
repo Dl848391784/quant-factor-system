@@ -24,7 +24,7 @@
 | 新增脚本类型 | 在 `scripts/` 下新建 `check_*.py` 或 `validate_*.py` |
 | 修改跨模块数据契约 | 修改 `paths.py`、任一 `schemas/*.schema.json`、或被 2+ 模块读取的产物文件名/字段 |
 | 涉及数据契约 / 路径 / 输出结构讨论 | 由 AI 根据语义判定（不依赖字面关键词匹配） |
-| 涉及 2+ 文件改动 | 需写 design.md（见 Design-First 流程） |
+| 涉及 2+ 文件改动 | 需写 design.md（dl-workflow 驱动改动豁免，见 Design-First 流程） |
 
 ---
 
@@ -39,7 +39,7 @@
 1. CLAUDE.md 已自动加载（含精华指针 §1.5 + 硬规则速查）；命中触发读 PROJECT.md
 2. 判断本任务是否命中"主动读取 PROJECT.md 的触发条件"，命中则读本文件
 3. 列出本任务预计触及的 H 规则编号（用于 PR 模板取证）
-4. 判断是否触发 Design-First（2+ 文件）→ 若是，先写 design.md 并停下等审核
+4. 判断是否触发 Design-First（2+ 文件且非 dl-workflow 驱动改动）→ 若是，先写 design.md 并停下等审核
 
 ### 何时必须停下问用户（不要自行决策）
 
@@ -412,6 +412,11 @@ dependencies = [
 
 **涉及 2 个以上文件的改动必须先提交 design.md 通过审核才能动手。**
 
+**分流（2026-09-01 用户决议）**：dl-workflow 驱动的改动（`wf/*` 分支）**豁免**本流程——
+dl-workflow 的 evidence 链 + 读回裁决 + 机械门已是 Design-First 等价物，且其 design.md
+装配已退役（见 `~/.dl-workflow/designs/design-md-assembly-retire-design.md`）。
+非工作流改动（手动/临时会话）仍须遵守本流程。
+
 **目的**：避免边写边改、推倒重来。让用户在动笔前对齐方案，减少返工。
 
 ```
@@ -437,7 +442,8 @@ dependencies = [
 **自动检查**：
 - 脚本：`scripts/check_design_first.py`
 - 检查逻辑：PR 涉及 2+ 文件改动时，仓库 designs/ 目录下必须存在对应的 design.md 文件
-- pre-commit 软提示：pre-commit 无法读取 PR 信息，仅做轻量启发式——若本次提交涉及 2+ 文件且 designs/ 目录在 git 工作区中无任何新增 .md 文件，则 stderr 输出警告（不阻止提交）；最终对应规则匹配在 CI 强制检查
+- 豁免：`wf/*` 分支（dl-workflow 驱动）跳过检查（脚本按分支前缀判定）
+- ⚠ pre-commit 软提示未实现——`.pre-commit-config.yaml` 无此 hook，当前零强制；最终对应规则匹配在 CI 强制检查
 - CI 硬关卡：PR 创建时强制检查（可访问 PR 分支名/描述），缺少匹配的 design.md 则 CI 失败
 - CI 调用：`python scripts/check_design_first.py`
 
@@ -456,7 +462,7 @@ dependencies = [
 | H5 | 因子方向：根据实际 IC 确定（不可硬编码方向） | 防止方向写反导致回测结论与实际相反 | pytest 断言 | CI |
 | H6 | 异常链：`raise ... from e`（详见下方正反例） | 保留错误来源，调试时能追溯根因 | ruff B904 | pre-commit + CI |
 | H7 | 路径导入：`from paths import`（⚠️ 见目录结构节导入说明） | 单一来源原则：路径变更只需改一处 | AST 静态分析（`scripts/check_path_import.py`） | pre-commit + CI |
-| H8 | Design-First：2+ 文件需 design.md | 大改动先对齐再写，避免推倒重来 | CI `scripts/check_design_first.py` | CI |
+| H8 | Design-First：2+ 文件需 design.md（dl-workflow 驱动改动[wf/* 分支]豁免） | 大改动先对齐再写，避免推倒重来 | CI `scripts/check_design_first.py` | CI |
 | H9 | 任务粒度：≤3 文件 **AND** ≤200 行（两者都需满足，违反任一即超粒度） | 控制单次改动规模，便于 review 和回退；超粒度走 Design-First | pre-commit `scripts/check_task_size.py` | pre-commit |
 | H10 | 测试覆盖率：不低于阶段性阈值（当前 60%，目标 70%） | 防止新代码无测试拉低基线 | pytest `--cov-fail-under=60`（当前阶段） | CI |
 | H11 | 日志格式：% 惰性格式化（禁止 f-string / + 拼接 / `exc_info=True`） | 性能（高 verbosity 时跳过格式化）+ 风格统一 + 与标准库 logging 结构化处理器（如 JSON）兼容 | ruff G004 / G003 / G201 | pre-commit + CI |
