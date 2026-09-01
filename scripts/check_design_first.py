@@ -27,6 +27,20 @@ def check_design_first() -> int:
         print("非 PR 环境，跳过 Design-First 检查")
         return 0
 
+    # dl-workflow 驱动改动豁免（2026-09-01 用户决议，PROJECT.md H8 分流）：
+    # wf/* 分支由 dl-workflow 编排（evidence 链 + 读回裁决 = Design-First
+    # 等价物，其 design.md 装配已退役），不再要求 designs/ design.md。
+    branch = os.environ.get("GITHUB_HEAD_REF", "")
+    if not branch:
+        branch = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    if branch.startswith("wf/"):
+        print(f"✓ dl-workflow 分支 {branch}：豁免 Design-First 检查（H8 分流）")
+        return 0
+
     # 获取改动的文件数
     result = subprocess.run(
         ["git", "diff", "--name-only", "HEAD~1"],
