@@ -64,3 +64,14 @@ Serena 无仓内文件（装用户级 ~/.claude.json + ~/.serena/）。
 ## 验收记录
 
 （验证后回填）
+
+### 落地实测（2026-09-03，主会话）
+
+- **Layer 0 cgx**：`scripts/cgx.py`（200 行）+ 7 测试全绿。精度对比实证：CLI `codegraph callers load_factor_values` → "No callers found"；cgx → [textual] 召回 6 个真实调用点（stock_selector 2 文件 4 点 + 2 测试文件），与 grep 真值一致。`run_factor_ic` 29 条边全部带 conf/resolvedBy 分档（[resolved] 0.90 exact-match 等）。同名多 target（3 模块 convert_to_native_types）按调用点去重正常。
+- **Layer 1 Serena**：schema 从 23 工具 ~6.8k token 裁到 12 工具 **~4.3k token**（stdio 握手实测 tools/list 字节数/4；裁剪面=memory/onboarding/config/批量编辑类，全局 `~/.serena/serena_config.yml` excluded_tools）。语言服务器选型实证：jedi-language-server 0.47 与 pyrefly 初装均失败——根因① uv tool 只暴露 3 个 entry point，`jedi-language-server`/`pyrefly` 不在 PATH（已 symlink 到 ~/.local/bin）；根因② solidlsp 硬编码 `uvx -p 3.13 --from pyrefly==1.1.1` 走默认 PyPI 下载卡死（已配 `~/.config/uv/uv.toml` 阿里云镜像 + 预热缓存）。**pyrefly find_referencing_symbols 跨文件返回空 `{}`（能力不满足），jedi 返回真实跨文件引用**（含 codegraph 丢边的 stock_selector 两文件）→ 定 jedi。首调 find_symbol 56.6s（jedi 建 workspace 符号缓存，每会话一次性），后续调用 ~2.5s。
+- **Layer 2 触发门**：本仓 434 源码文件 / 109,821 行 → 未触发（阈值 5000/30 万）。4 测试全绿（advisory/strict/非 git 仓 exit 3）。
+- **MCP 注册**：`claude mcp add --scope user` 已生效，`claude mcp list` 健康检查 Connected。
+
+### 测试工作流验证（cgx_verify1，ac-deepseek1 / deepseek-v4-flash）
+
+（运行后回填：模型是否用上 cgx 分层输出、unresolved/textual 召回是否被引用、段耗时/token 台账）
