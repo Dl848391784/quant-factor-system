@@ -72,6 +72,18 @@ Serena 无仓内文件（装用户级 ~/.claude.json + ~/.serena/）。
 - **Layer 2 触发门**：本仓 434 源码文件 / 109,821 行 → 未触发（阈值 5000/30 万）。4 测试全绿（advisory/strict/非 git 仓 exit 3）。
 - **MCP 注册**：`claude mcp add --scope user` 已生效，`claude mcp list` 健康检查 Connected。
 
-### 测试工作流验证（cgx_verify1，ac-deepseek1 / deepseek-v4-flash）
+### 测试工作流验证（cgx_verify1，ac-deepseek1 / deepseek-v4-flash，fermate 轨道，2026-09-03 03:17 完结）
 
-（运行后回填：模型是否用上 cgx 分层输出、unresolved/textual 召回是否被引用、段耗时/token 台账）
+**精度（核心目标达成）**：
+- cgx 被真实调用 2 次（transcript tool_use 实证），`cgx callers load_factor_values` [textual] 档单工具召回 6/6 真实调用点（4 生产+2 测试），与 grep 真值完全一致；CLI 基线为 0 召回。
+- 模型正确判读「codegraph callers 空 = 索引局限非零调用方」（引用本文件第 9 行记载），并用 grep×cgx×codegraph import 边三通道交叉闭合全集。
+- 交付质量超预期：逐点 break 分析（每个消费点依赖 len/掩码/随机访问→全部失效需改）+ 外溢封顶判定（止于 get_latest_date 第二层）+ **证伪预置前提**（json.load 全量峰值已随 v3.6 移除、当前 parquet 列式读取）+ 定位真实内存成因（factor_loader.py:290-296 双帧并存）。
+
+**成本**：28 段 / 段内 129min / output 934k tok / cache_read 14.3M；harness 报 $42.28 系按 Claude 牌价计的虚数，deepseek 实价口径约 $2-3。无人值守全程 ~3h（含驱动周转税），交互断点 4 次注入答案。cgx 单次查询 <1s（零可感开销）；Serena schema +4.3k token/会话（仅 MCP 加载时）。
+
+**发现与衍生落地**：
+- Serena MCP 0 调用。根因=Claude Code MCP 工具 deferral（ToolSearch 按需加载）：headless 探针实证 serena server 正常启动应答 ListTools，但弱模型看不见 deferred 工具、自报"没有"。本任务 cgx 已足，serena 升级通道地位不变；若需强推，在 node-rules 写明 ToolSearch serena。
+- **dl_codebase.py 已 patch**：callers/impact 优先项目 scripts/cgx.py（无则回落 CLI），dl-workflow main 已 merge 生效（54b44d8）——工作流模型的主查询入口（dl-cmd codebase trace）从此系统化获得精度层，不依赖提示词点名 cgx。端到端实测 via=cgx、6 点召回。
+- discoveries.jsonl 台账会缓存旧格式结果（source=discovery-ledger），验证工具变更时须换 symbol 或在非 worktree cwd 跑。
+
+**结论**：三层全部落地并经真实弱模型工作流验证；精度提升有 transcript 级实证；额外时间/token 开销可忽略（cgx）或可计量且已裁剪（Serena 4.3k）。
