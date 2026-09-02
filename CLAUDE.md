@@ -49,6 +49,8 @@
 | 任务 | 做法 |
 |---|---|
 | 查代码结构/callers/impact | Bash: `codegraph callers <symbol>` 或 `sqlite3 .codegraph/codegraph.db "..."`（CLI 在 `/home/admin/.npm-global/bin/codegraph`；db 用 `nodes` 表 + `kind` 字段；新鲜度 `SELECT datetime(MAX(indexed_at)/1000,'unixepoch','+8 hours') FROM files;`） |
+| 精确查 callers/impact（置信度分层，优先于裸 CLI） | Bash: `python3 scripts/cgx.py callers <symbol>`（[resolved]/[inferred]/[weak] 分档 + [unresolved-candidate] + [textual] 兜底；CLI 漏召回时用它，见 designs/precision_tiers_landing-design.md） |
+| LSP 级精查（跨文件引用/接口实现，编译器验证） | Serena MCP（user-scope 已装）：先 `activate_project`，再 `find_referencing_symbols`/`find_implementations`；cgx 低置信度边的复核通道 |
 | **跨文件调用/影响面断言**（H15 证据约定） | 凡说"X 调用了 Y / 改这个影响 Z"，必附 `codegraph callers/impact` 原始输出或 `file:line` 证据。伪造的断言经不起"贴行号"--用户怀疑时可要求"贴 codegraph 输出"即验真 |
 | 改已有 .py 源码（H15 门禁） | PreToolUse hook 强制：本会话 audit log 无 codegraph 查询记录则阻断(exit 2)。先跑一次 `codegraph impact <symbol>` 留痕后放行。白名单跳过：非 .py / test_*.py / 新建文件 / scripts/check_*.py |
 | 跑长 pipeline(15-30min) | 后台 Bash(`run_in_background:true`)，等通知收结果；**禁 `| tail`/pipe**（SIGPIPE 杀进程 exit 0 误判成功）；禁轮询；禁 kill 运行中的 pipeline |
