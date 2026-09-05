@@ -46,6 +46,9 @@ temporary/
 # Codegraph
 .codegraph/codegraph.lock
 
+# Convention mining 产物（mine_conventions.py 运行态 db，不入库）
+.conventions/
+
 # Workflow system (designs/workflow-system-design.md)
 # 运行态：每个工作流 = 独立 worktree + 独立元数据目录，不入版本控制
 .claude/worktrees/

@@ -228,7 +228,7 @@ def mine_d2_layering(cg: sqlite3.Connection, root: Path, files: list[str]) -> li
     return records
 
 
-# 维度 miner 注册表：统一签名 fn(cg, root, files) -> list[dict]，逐 task 追加
+# D3 正则：H11 日志风格 + 退出码字面量
 _LOG_FN = r"logger\.(?:debug|info|warning|error|critical)\("
 FSTRING_LOG_RE = re.compile(_LOG_FN + r"""\s*f["']""")
 LAZY_LOG_RE = re.compile(_LOG_FN + r"""\s*["'][^"'\n]*%[srda]""")
@@ -285,11 +285,49 @@ def mine_d3_style(cg, root: Path, files: list[str]) -> list[dict]:
     return records
 
 
+SKELETON_TRAITS = (
+    ("argparse", lambda t: "import argparse" in t),
+    ("main 函数", lambda t: "def main(" in t),
+    ("__main__ 守卫", lambda t: '__name__ == "__main__"' in t or "__name__ == '__main__'" in t),
+    ("paths 导入", lambda t: "from paths import" in t or "import paths" in t),
+)
+
+
+def mine_d4_skeleton(cg, root: Path, files: list[str]) -> list[dict]:
+    """D4：scripts/ 非测试脚本的结构共性统计（argparse/main/守卫/paths 导入率）。"""
+    scripts = [rel for rel in files if rel.startswith("scripts/") and not Path(rel).name.startswith("test_")]
+    texts: dict[str, str] = {}
+    for rel in scripts:
+        try:
+            texts[rel] = (root / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+    records = []
+    for trait, pred in SKELETON_TRAITS:
+        hits = [rel for rel, t in texts.items() if pred(t)]
+        n = len(texts)
+        records.append(
+            {
+                "dimension": "d4_skeleton",
+                "subject": f"scripts/ 骨架：{trait}",
+                "statement": f"scripts/ 非测试脚本 {n} 个中 {len(hits)} 个含{trait}",
+                "source": "code_evidence",
+                "sample_size": n,
+                "compliance": (len(hits) / n) if n else None,
+                "drift": 0,
+                "evidence": [{"file": rel, "line": 1} for rel in hits[:EVIDENCE_CAP]],
+            }
+        )
+    return records
+
+
+# 维度 miner 注册表：统一签名 fn(cg, root, files) -> list[dict]，逐 task 追加
 DIMENSIONS: tuple = (
     mine_d1_shared_utils,
     mine_d1_path_literals,
     mine_d2_layering,
     mine_d3_style,
+    mine_d4_skeleton,
 )
 
 

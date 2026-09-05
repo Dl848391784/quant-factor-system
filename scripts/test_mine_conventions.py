@@ -14,6 +14,7 @@ from scripts.mine_conventions import (
     mine_d1_shared_utils,
     mine_d2_layering,
     mine_d3_style,
+    mine_d4_skeleton,
 )
 
 
@@ -170,3 +171,19 @@ def test_d3_style(tmp_path):
     ec = by["scripts/ 退出码分布"]
     assert ec["source"] == "code_evidence" and ec["drift"] == 0
     assert "0" in ec["statement"] and "1" in ec["statement"] and "3" in ec["statement"]
+
+
+def test_d4_skeleton(tmp_path):
+    (tmp_path / "scripts").mkdir(exist_ok=True)
+    (tmp_path / "scripts" / "a.py").write_text(
+        'import argparse\nfrom paths import DATA_DIR\ndef main():\n    pass\nif __name__ == "__main__":\n    main()\n'
+    )
+    (tmp_path / "scripts" / "b.py").write_text("print('hi')\n")
+    (tmp_path / "scripts" / "test_z.py").write_text("def test_z():\n    pass\n")  # 排除
+    recs = mine_d4_skeleton(None, tmp_path, ["scripts/a.py", "scripts/b.py", "scripts/test_z.py"])
+    by = {r["subject"]: r for r in recs}
+    assert by["scripts/ 骨架：argparse"]["compliance"] == pytest.approx(0.5)
+    assert by["scripts/ 骨架：argparse"]["sample_size"] == 2
+    assert by["scripts/ 骨架：main 函数"]["compliance"] == pytest.approx(0.5)
+    assert by["scripts/ 骨架：paths 导入"]["compliance"] == pytest.approx(0.5)
+    assert all(r["drift"] == 0 and r["source"] == "code_evidence" for r in recs)
