@@ -105,16 +105,13 @@ def _write_db(out_path: Path, records: list[dict], generated_at: str, commit_has
     os.replace(tmp, out_path)
 
 
-USAGE_EDGE_KINDS = ("calls", "references", "imports")
-
-
 def mine_d1_shared_utils(cg: sqlite3.Connection, root: Path, files: list[str]) -> list[dict]:
     """D1a：paths.py 公共符号的外部使用统计（调用方按顶层模块分布）。"""
     symbols = cg.execute(
-        "SELECT id, name, start_line FROM nodes WHERE file_path = 'paths.py' AND kind != 'import'"
+        "SELECT id, name FROM nodes WHERE file_path = 'paths.py' AND kind != 'import'"
     ).fetchall()
     records = []
-    for sid, name, sline in symbols:
+    for sid, name in symbols:
         rows = cg.execute(
             "SELECT n.file_path, e.line, n.kind FROM edges e JOIN nodes n ON n.id = e.source"
             " WHERE e.target = ? AND e.kind IN ('calls','references','imports')",

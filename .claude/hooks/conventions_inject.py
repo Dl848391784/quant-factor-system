@@ -11,6 +11,7 @@ import json
 import sqlite3
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -23,8 +24,6 @@ STALE_COMMITS = 5
 
 
 def _log(status: str) -> None:
-    import time
-
     try:
         ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
         with open(INJECT_LOG, "a", encoding="utf-8") as f:
@@ -51,10 +50,10 @@ def _commit_gap(root: Path, base_hash: str) -> int | None:
     try:
         proc = subprocess.run(
             ["git", "rev-list", "--count", f"{base_hash}..HEAD"],
-            cwd=root, capture_output=True, text=True, check=True,
+            cwd=root, capture_output=True, text=True, check=True, timeout=5,
         )
         return int(proc.stdout.strip())
-    except (subprocess.CalledProcessError, ValueError, OSError):
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError, OSError):
         return None
 
 
@@ -76,7 +75,7 @@ def _format(drifts: list[tuple], total: int, gap: int | None) -> str | None:
 def main() -> int:
     try:
         json.load(sys.stdin)  # 消费 hook payload（本注入与 prompt 内容无关）
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
         _log("malformed_stdin")
         return 0
     if not CONV_DB.exists():

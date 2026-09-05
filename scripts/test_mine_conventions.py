@@ -186,4 +186,5 @@ def test_d4_skeleton(tmp_path):
     assert by["scripts/ 骨架：argparse"]["sample_size"] == 2
     assert by["scripts/ 骨架：main 函数"]["compliance"] == pytest.approx(0.5)
     assert by["scripts/ 骨架：paths 导入"]["compliance"] == pytest.approx(0.5)
+    assert by["scripts/ 骨架：__main__ 守卫"]["compliance"] == pytest.approx(0.5)
     assert all(r["drift"] == 0 and r["source"] == "code_evidence" for r in recs)
