@@ -12,6 +12,7 @@ from scripts.mine_conventions import (
     _write_db,
     mine_d1_path_literals,
     mine_d1_shared_utils,
+    mine_d2_layering,
 )
 
 
@@ -121,3 +122,31 @@ def test_d1_path_literals_clean(tmp_path):
     recs = mine_d1_path_literals(None, tmp_path, ["a.py"])
     assert recs[0]["drift"] == 0 and recs[0]["compliance"] == 1.0
     assert recs[0]["evidence"] == []
+
+
+def test_d2_layering(tmp_path):
+    conn = sqlite3.connect(tmp_path / "cg.db")
+    conn.executescript(CG_SCHEMA)
+    nodes = [
+        ("a", "function", "f1", "web_ui/app.py", 1),
+        ("b", "function", "f2", "factor_ic/calc.py", 1),
+        ("c", "function", "f3", "web_ui/page.py", 1),
+        ("d", "function", "f4", "web_ui/helper.py", 1),
+        ("e", "function", "f5", "backtest/engine.py", 1),
+    ]
+    conn.executemany("INSERT INTO nodes VALUES (?,?,?,?,?)", nodes)
+    edges = [
+        ("a", "b", "imports", 2),   # web_ui -> factor_ui 正常方向
+        ("c", "b", "imports", 2),   # web_ui -> factor_ic 第二处
+        ("e", "d", "imports", 2),   # backtest -> web_ui：H1 子集违规（后端 import UI）
+    ]
+    conn.executemany("INSERT INTO edges (source, target, kind, line) VALUES (?,?,?,?)", edges)
+    conn.commit()
+    recs = mine_d2_layering(conn, tmp_path, [])
+    facts = [r for r in recs if r["source"] == "code_evidence"]
+    h1 = [r for r in recs if r["source"] == "doc_declared"]
+    pair = {(r["subject"]): r for r in facts}
+    assert pair["web_ui->factor_ic"]["sample_size"] == 2
+    assert len(h1) == 1 and h1[0]["drift"] == 1
+    assert h1[0]["evidence"] == [{"file": "backtest/engine.py", "line": 2}]
+    assert "H1" in h1[0]["subject"]

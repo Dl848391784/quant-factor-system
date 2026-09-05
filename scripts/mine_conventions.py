@@ -178,8 +178,55 @@ def mine_d1_path_literals(cg, root: Path, files: list[str]) -> list[dict]:
     ]
 
 
+def mine_d2_layering(cg: sqlite3.Connection, root: Path, files: list[str]) -> list[dict]:
+    """D2：模块间实际 import 方向聚合；H1 子集实证——后端模块禁 import web_ui。"""
+    rows = cg.execute(
+        "SELECT n1.file_path, n2.file_path, e.line FROM edges e"
+        " JOIN nodes n1 ON n1.id = e.source JOIN nodes n2 ON n2.id = e.target"
+        " WHERE e.kind = 'imports'"
+    ).fetchall()
+    pairs: dict[tuple[str, str], int] = {}
+    violations: list[dict] = []
+    for src_fp, dst_fp, line in rows:
+        src_mod, dst_mod = _top_module(src_fp), _top_module(dst_fp)
+        if src_mod == dst_mod:
+            continue
+        pairs[(src_mod, dst_mod)] = pairs.get((src_mod, dst_mod), 0) + 1
+        if dst_mod == "web_ui" and src_mod != "web_ui":
+            violations.append({"file": src_fp, "line": line})
+    records = [
+        {
+            "dimension": "d2_layering",
+            "subject": f"{s}->{d}",
+            "statement": f"{s} import {d}：{c} 处",
+            "source": "code_evidence",
+            "sample_size": c,
+            "compliance": None,
+            "drift": 0,
+            "evidence": [],
+        }
+        for (s, d), c in sorted(pairs.items(), key=lambda kv: -kv[1])
+    ]
+    total_viol = len(violations)
+    records.append(
+        {
+            "dimension": "d2_layering",
+            "subject": "H1 模块边界（后端禁 import web_ui）",
+            "statement": (
+                f"H1 声明模块边界（web_ui 只读后端）；实证后端 import web_ui {total_viol} 处"
+            ),
+            "source": "doc_declared",
+            "sample_size": sum(pairs.values()),
+            "compliance": 1.0 if total_viol == 0 else None,
+            "drift": 1 if total_viol else 0,
+            "evidence": violations[:EVIDENCE_CAP],
+        }
+    )
+    return records
+
+
 # 维度 miner 注册表：统一签名 fn(cg, root, files) -> list[dict]，逐 task 追加
-DIMENSIONS: tuple = (mine_d1_shared_utils, mine_d1_path_literals)
+DIMENSIONS: tuple = (mine_d1_shared_utils, mine_d1_path_literals, mine_d2_layering)
 
 
 def main(argv=None) -> int:
