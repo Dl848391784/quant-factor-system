@@ -47,9 +47,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
 
 
 def _git(root: Path, *args: str) -> str:
-    proc = subprocess.run(
-        ["git", *args], cwd=root, capture_output=True, text=True, check=True
-    )
+    proc = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True)
     return proc.stdout.strip()
 
 
@@ -83,9 +81,16 @@ def _write_db(out_path: Path, records: list[dict], generated_at: str, commit_has
             " VALUES (?,?,?,?,?,?,?,?,?,?)",
             [
                 (
-                    r["dimension"], r["subject"], r["statement"], r["source"], r["sample_size"],
-                    r["compliance"], r["drift"], json.dumps(r["evidence"], ensure_ascii=False),
-                    generated_at, commit_hash,
+                    r["dimension"],
+                    r["subject"],
+                    r["statement"],
+                    r["source"],
+                    r["sample_size"],
+                    r["compliance"],
+                    r["drift"],
+                    json.dumps(r["evidence"], ensure_ascii=False),
+                    generated_at,
+                    commit_hash,
                 )
                 for r in records
             ],
@@ -212,9 +217,7 @@ def mine_d2_layering(cg: sqlite3.Connection, root: Path, files: list[str]) -> li
         {
             "dimension": "d2_layering",
             "subject": "H1 模块边界（后端禁 import web_ui）",
-            "statement": (
-                f"H1 声明模块边界（web_ui 只读后端）；实证后端 import web_ui {total_viol} 处"
-            ),
+            "statement": (f"H1 声明模块边界（web_ui 只读后端）；实证后端 import web_ui {total_viol} 处"),
             "source": "doc_declared",
             "sample_size": sum(pairs.values()),
             "compliance": 1.0 if total_viol == 0 else None,
@@ -226,7 +229,68 @@ def mine_d2_layering(cg: sqlite3.Connection, root: Path, files: list[str]) -> li
 
 
 # 维度 miner 注册表：统一签名 fn(cg, root, files) -> list[dict]，逐 task 追加
-DIMENSIONS: tuple = (mine_d1_shared_utils, mine_d1_path_literals, mine_d2_layering)
+_LOG_FN = r"logger\.(?:debug|info|warning|error|critical)\("
+FSTRING_LOG_RE = re.compile(_LOG_FN + r"""\s*f["']""")
+LAZY_LOG_RE = re.compile(_LOG_FN + r"""\s*["'][^"'\n]*%[srda]""")
+SYS_EXIT_RE = re.compile(r"\bsys\.exit\((\d+)\)")
+RETURN_CODE_RE = re.compile(r"^\s*return (\d)\s*(?:#.*)?$")
+
+
+def mine_d3_style(cg, root: Path, files: list[str]) -> list[dict]:
+    """D3：H11 日志风格实证（f-string vs %-惰性）+ scripts/ 退出码使用分布。"""
+    fstring_hits: list[dict] = []
+    lazy_count = 0
+    exit_codes: dict[str, int] = {}
+    for rel in files:
+        try:
+            lines = (root / rel).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for i, line in enumerate(lines, 1):
+            if FSTRING_LOG_RE.search(line):
+                fstring_hits.append({"file": rel, "line": i})
+            elif LAZY_LOG_RE.search(line):
+                lazy_count += 1
+            if rel.startswith("scripts/"):
+                m = SYS_EXIT_RE.search(line) or RETURN_CODE_RE.match(line)
+                if m:
+                    exit_codes[m.group(1)] = exit_codes.get(m.group(1), 0) + 1
+    n_f, n_l = len(fstring_hits), lazy_count
+    denom = n_f + n_l
+    records = [
+        {
+            "dimension": "d3_style",
+            "subject": "H11 日志风格",
+            "statement": (f"H11 声明日志 % 惰性禁 f-string；实证 f-string {n_f} 处、%-惰性 {n_l} 处"),
+            "source": "doc_declared",
+            "sample_size": denom,
+            "compliance": (n_l / denom) if denom else None,
+            "drift": 1 if n_f else 0,
+            "evidence": fstring_hits[:EVIDENCE_CAP],
+        }
+    ]
+    hist = ", ".join(f"{code}×{c}" for code, c in sorted(exit_codes.items())) or "(无)"
+    records.append(
+        {
+            "dimension": "d3_style",
+            "subject": "scripts/ 退出码分布",
+            "statement": f"scripts/ 退出码字面量分布：{hist}（H12 语义 0/1/3/4/5）",
+            "source": "code_evidence",
+            "sample_size": sum(exit_codes.values()),
+            "compliance": None,
+            "drift": 0,
+            "evidence": [],
+        }
+    )
+    return records
+
+
+DIMENSIONS: tuple = (
+    mine_d1_shared_utils,
+    mine_d1_path_literals,
+    mine_d2_layering,
+    mine_d3_style,
+)
 
 
 def main(argv=None) -> int:

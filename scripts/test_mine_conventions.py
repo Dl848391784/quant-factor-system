@@ -13,6 +13,7 @@ from scripts.mine_conventions import (
     mine_d1_path_literals,
     mine_d1_shared_utils,
     mine_d2_layering,
+    mine_d3_style,
 )
 
 
@@ -50,8 +51,9 @@ def test_top_module():
 
 def test_write_db_atomic_and_meta(tmp_path):
     out = tmp_path / "sub" / "conventions.db"
-    _write_db(out, [_record(), _record(drift=1, source="doc_declared", compliance=0.5)],
-              "2026-09-05T00:00:00", "abc123")
+    _write_db(
+        out, [_record(), _record(drift=1, source="doc_declared", compliance=0.5)], "2026-09-05T00:00:00", "abc123"
+    )
     rows, meta = _read_records(out)
     assert len(rows) == 2
     assert rows[0][1] == "s" and json.loads(rows[0][7]) == [{"file": "a.py", "line": 1}]
@@ -136,9 +138,9 @@ def test_d2_layering(tmp_path):
     ]
     conn.executemany("INSERT INTO nodes VALUES (?,?,?,?,?)", nodes)
     edges = [
-        ("a", "b", "imports", 2),   # web_ui -> factor_ui 正常方向
-        ("c", "b", "imports", 2),   # web_ui -> factor_ic 第二处
-        ("e", "d", "imports", 2),   # backtest -> web_ui：H1 子集违规（后端 import UI）
+        ("a", "b", "imports", 2),  # web_ui -> factor_ui 正常方向
+        ("c", "b", "imports", 2),  # web_ui -> factor_ic 第二处
+        ("e", "d", "imports", 2),  # backtest -> web_ui：H1 子集违规（后端 import UI）
     ]
     conn.executemany("INSERT INTO edges (source, target, kind, line) VALUES (?,?,?,?)", edges)
     conn.commit()
@@ -150,3 +152,21 @@ def test_d2_layering(tmp_path):
     assert len(h1) == 1 and h1[0]["drift"] == 1
     assert h1[0]["evidence"] == [{"file": "backtest/engine.py", "line": 2}]
     assert "H1" in h1[0]["subject"]
+
+
+def test_d3_style(tmp_path):
+    (tmp_path / "x.py").write_text(
+        'logger.info("loaded %s rows", n)\nlogger.info(f"done {n}")\nlogger.error("fail %s", e)\n'
+    )
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "s1.py").write_text("import sys\nsys.exit(0)\n")
+    (tmp_path / "scripts" / "s2.py").write_text("def main():\n    return 1\n    return 3\n")
+    recs = mine_d3_style(None, tmp_path, ["x.py", "scripts/s1.py", "scripts/s2.py"])
+    by = {r["subject"]: r for r in recs}
+    h11 = by["H11 日志风格"]
+    assert h11["source"] == "doc_declared" and h11["drift"] == 1
+    assert h11["sample_size"] == 3 and h11["compliance"] == pytest.approx(2 / 3)
+    assert h11["evidence"] == [{"file": "x.py", "line": 2}]
+    ec = by["scripts/ 退出码分布"]
+    assert ec["source"] == "code_evidence" and ec["drift"] == 0
+    assert "0" in ec["statement"] and "1" in ec["statement"] and "3" in ec["statement"]
