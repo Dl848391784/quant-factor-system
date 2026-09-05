@@ -16,6 +16,7 @@
 import argparse
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -137,8 +138,48 @@ def mine_d1_shared_utils(cg: sqlite3.Connection, root: Path, files: list[str]) -
     return records
 
 
+# 绝对路径字面量（H7 违规候选）：字符串以常见挂载根开头
+ABS_PATH_RE = re.compile(r"""["'](/(?:home|data|mnt|opt|srv)/)""")
+
+
+def mine_d1_path_literals(cg, root: Path, files: list[str]) -> list[dict]:
+    """D1b：H7「路径只能 from paths import」实证——paths.py 之外的绝对路径字面量扫描。"""
+    violations: list[dict] = []
+    scanned = 0
+    for rel in files:
+        scanned += 1
+        if rel == "paths.py":
+            continue  # paths.py 豁免扫描，但仍计入分母（合规率口径含它自身）
+        try:
+            text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for i, line in enumerate(text.splitlines(), 1):
+            if ABS_PATH_RE.search(line):
+                violations.append({"file": rel, "line": i})
+                break  # 每文件记一次（统计口径=文件级合规率）
+    total = max(scanned, 1)
+    clean = scanned - len(violations)
+    drift = 1 if violations else 0
+    return [
+        {
+            "dimension": "d1_path_literal",
+            "subject": "H7 路径字面量",
+            "statement": (
+                f"H7 声明路径只能 from paths import；实证 {scanned} 个 .py 中"
+                f" {len(violations)} 个含绝对路径字面量（合规率 {clean / total:.2f}）"
+            ),
+            "source": "doc_declared",
+            "sample_size": scanned,
+            "compliance": clean / total,
+            "drift": drift,
+            "evidence": violations[:EVIDENCE_CAP],
+        }
+    ]
+
+
 # 维度 miner 注册表：统一签名 fn(cg, root, files) -> list[dict]，逐 task 追加
-DIMENSIONS: tuple = (mine_d1_shared_utils,)
+DIMENSIONS: tuple = (mine_d1_shared_utils, mine_d1_path_literals)
 
 
 def main(argv=None) -> int:

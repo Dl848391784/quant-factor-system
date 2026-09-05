@@ -6,9 +6,11 @@
 import json
 import sqlite3
 
+import pytest
 from scripts.mine_conventions import (
     _top_module,
     _write_db,
+    mine_d1_path_literals,
     mine_d1_shared_utils,
 )
 
@@ -99,3 +101,23 @@ def test_d1_shared_utils(tmp_path):
     assert "web_ui" in d["statement"] and "scripts" in d["statement"]
     p = by_subject["paths.PROJECT_ROOT"]
     assert p["sample_size"] == 1
+
+
+def test_d1_path_literals(tmp_path):
+    (tmp_path / "a.py").write_text("from paths import DATA_DIR\nx = DATA_DIR / 'f'\n")
+    (tmp_path / "b.py").write_text("LOG = '/home/admin/logs/x.log'\n")
+    (tmp_path / "paths.py").write_text("ROOT = '/home/admin/projects'\n")  # paths.py 豁免
+    recs = mine_d1_path_literals(None, tmp_path, ["a.py", "b.py", "paths.py"])
+    assert len(recs) == 1
+    r = recs[0]
+    assert r["source"] == "doc_declared" and r["dimension"] == "d1_path_literal"
+    assert r["sample_size"] == 3 and r["compliance"] == pytest.approx(2 / 3)
+    assert r["drift"] == 1 and r["evidence"] == [{"file": "b.py", "line": 1}]
+    assert "H7" in r["subject"]
+
+
+def test_d1_path_literals_clean(tmp_path):
+    (tmp_path / "a.py").write_text("from paths import DATA_DIR\n")
+    recs = mine_d1_path_literals(None, tmp_path, ["a.py"])
+    assert recs[0]["drift"] == 0 and recs[0]["compliance"] == 1.0
+    assert recs[0]["evidence"] == []
