@@ -1,6 +1,6 @@
 # .claude/skills/ - Claude Code 项目 skill
 
-本目录 5 个 skill 是 factor_ic_analyzer 项目的方法论 skill，**自包含**（正文即要点，不依赖外部文件）。
+本目录 6 个 skill 是 factor_ic_analyzer 项目的方法论 skill，**自包含**（正文即要点，不依赖外部文件）。
 
 ## 清单
 | skill | 覆盖 |
@@ -10,6 +10,7 @@
 | `factor-summary-reporting` | summary 报告完整性、基础数据源新鲜度、跨节一致性核对 |
 | `intraday-strategy-design` | T+1 日内操作三档信号、β 暴露误诊、连选前视偏差、Day1 三层过滤 |
 | `workflow-creation` | 建工作流系统 + 运行诊断（ac-ark --workflow、注入/推进/wf 报错、worktree 快照陷阱） |
+| `factor-understand-case-knowledge` | understand sub1「验证问题是否真实」的领域拆解案例库（因子IC/turnover/分层回测等"为什么X偏低"类问题的四步前提落到哪些表/列/口径）；v0.1 空库随实战补 |
 
 ## 设计原则
 1. **自包含**：每个 skill 正文即方法论要点，不依赖外部 reference 文件。
