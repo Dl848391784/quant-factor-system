@@ -44,9 +44,6 @@ CREATE TABLE conventions (
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
-# 维度 miner 注册表：统一签名 fn(cg, root, files) -> list[dict]，逐 task 追加
-DIMENSIONS: tuple = ()
-
 
 def _git(root: Path, *args: str) -> str:
     proc = subprocess.run(
@@ -100,6 +97,48 @@ def _write_db(out_path: Path, records: list[dict], generated_at: str, commit_has
     finally:
         conn.close()
     os.replace(tmp, out_path)
+
+
+USAGE_EDGE_KINDS = ("calls", "references", "imports")
+
+
+def mine_d1_shared_utils(cg: sqlite3.Connection, root: Path, files: list[str]) -> list[dict]:
+    """D1a：paths.py 公共符号的外部使用统计（调用方按顶层模块分布）。"""
+    symbols = cg.execute(
+        "SELECT id, name, start_line FROM nodes WHERE file_path = 'paths.py' AND kind != 'import'"
+    ).fetchall()
+    records = []
+    for sid, name, sline in symbols:
+        rows = cg.execute(
+            "SELECT n.file_path, e.line, n.kind FROM edges e JOIN nodes n ON n.id = e.source"
+            " WHERE e.target = ? AND e.kind IN ('calls','references','imports')",
+            (sid,),
+        ).fetchall()
+        # 排除 paths.py 自引用与 import 节点噪音
+        uses = [(fp, ln) for fp, ln, kind in rows if fp != "paths.py" and kind != "import"]
+        if not uses:
+            continue
+        dist: dict[str, int] = {}
+        for fp, _ln in uses:
+            dist[_top_module(fp)] = dist.get(_top_module(fp), 0) + 1
+        dist_s = ", ".join(f"{m}({c})" for m, c in sorted(dist.items(), key=lambda kv: -kv[1]))
+        records.append(
+            {
+                "dimension": "d1_shared_util",
+                "subject": f"paths.{name}",
+                "statement": f"paths.{name} 被 {len(uses)} 处外部引用，分布：{dist_s}",
+                "source": "code_evidence",
+                "sample_size": len(uses),
+                "compliance": None,
+                "drift": 0,
+                "evidence": [{"file": fp, "line": ln} for fp, ln in uses[:EVIDENCE_CAP]],
+            }
+        )
+    return records
+
+
+# 维度 miner 注册表：统一签名 fn(cg, root, files) -> list[dict]，逐 task 追加
+DIMENSIONS: tuple = (mine_d1_shared_utils,)
 
 
 def main(argv=None) -> int:

@@ -9,6 +9,7 @@ import sqlite3
 from scripts.mine_conventions import (
     _top_module,
     _write_db,
+    mine_d1_shared_utils,
 )
 
 
@@ -53,3 +54,48 @@ def test_write_db_atomic_and_meta(tmp_path):
     assert rows[0][1] == "s" and json.loads(rows[0][7]) == [{"file": "a.py", "line": 1}]
     assert meta["generated_at"] == "2026-09-05T00:00:00"
     assert meta["commit_hash"] == "abc123"
+
+
+CG_SCHEMA = """
+CREATE TABLE nodes (id TEXT PRIMARY KEY, kind TEXT, name TEXT, file_path TEXT, start_line INTEGER);
+CREATE TABLE edges (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT, target TEXT,
+                    kind TEXT, line INTEGER);
+"""
+
+
+def _fixture_cg(tmp_path):
+    conn = sqlite3.connect(tmp_path / "cg.db")
+    conn.executescript(CG_SCHEMA)
+    nodes = [
+        ("n_data", "variable", "DATA_DIR", "paths.py", 10),
+        ("n_root", "variable", "PROJECT_ROOT", "paths.py", 5),
+        ("n_caller1", "function", "load_page", "web_ui/app.py", 20),
+        ("n_caller2", "function", "main", "scripts/foo.py", 30),
+        ("n_caller3", "function", "main", "scripts/bar.py", 40),
+        ("n_imp", "import", "paths", "web_ui/app.py", 1),
+    ]
+    conn.executemany("INSERT INTO nodes VALUES (?,?,?,?,?)", nodes)
+    edges = [
+        ("n_caller1", "n_data", "references", 21),
+        ("n_caller2", "n_data", "references", 31),
+        ("n_caller3", "n_data", "imports", 3),
+        ("n_caller1", "n_root", "references", 22),
+        ("n_imp", "n_data", "imports", 1),  # import 节点自身作 source：应被排除（self/import 噪音）
+    ]
+    conn.executemany("INSERT INTO edges (source, target, kind, line) VALUES (?,?,?,?)", edges)
+    conn.commit()
+    return conn
+
+
+def test_d1_shared_utils(tmp_path):
+    cg = _fixture_cg(tmp_path)
+    recs = mine_d1_shared_utils(cg, tmp_path, [])
+    by_subject = {r["subject"]: r for r in recs}
+    assert set(by_subject) == {"paths.DATA_DIR", "paths.PROJECT_ROOT"}
+    d = by_subject["paths.DATA_DIR"]
+    assert d["dimension"] == "d1_shared_util" and d["source"] == "code_evidence"
+    assert d["sample_size"] == 3  # web_ui 1 处 + scripts 2 处（n_imp import 节点被排除）
+    assert d["compliance"] is None and d["drift"] == 0
+    assert "web_ui" in d["statement"] and "scripts" in d["statement"]
+    p = by_subject["paths.PROJECT_ROOT"]
+    assert p["sample_size"] == 1
