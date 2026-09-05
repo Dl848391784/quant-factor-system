@@ -79,4 +79,22 @@
 
 ## 验收记录
 
-（待回填：对账数据 / 反证结果 / 瘦档 token 实测 / 案例复盘）
+> 2026-09-05 一期落地（branch feat/codegraph-auto-inject，commits dffe1d1..9b52097）。执行方式：subagent-driven（10 task × 实现+审查），中间一次会话中断经台账恢复。
+
+**对账验证（H 规则 ground truth）——通过**：
+- H11：蒸馏器报 f-string 1 处；手工 grep 复核 = 1 处，且文件清单一致（`scripts/test_mine_conventions.py` 测试夹具）。数字与文件级 100% 对得上。
+- H7：蒸馏器报 3 文件含绝对路径字面量；手工 grep 复核 = 3 文件，清单一致（`scripts/test_mine_conventions.py`、`backtest/test_cases/...`、`factor_ic/test_cases/...`）。
+- **呈证有效性即时验证**：H7/H11 的"违规"证据 2/3 落在测试夹具上——正是「不裁决只呈证」设计的预期行为：数字是真的，是否豁免测试文件是人的仲裁问题，蒸馏层不擅自站队。后续维度精化可讨论是否过滤 test_* 文件。
+
+**反证验证（无文档强模式挖掘）——通过**：
+- D4 在无文档指引下挖出 scripts/ 族模式：argparse 6/17、main 8/17、`__main__` 守卫 16/17、paths 导入 3/17。
+- 附带产出真实信号：退出码直方图出现 `2×10`（H12 语义 0/1/3/4/5 不含 2），抽查为 exit-code 检查器自身测试的合法用法——但这类「语义外代码出现」正是蒸馏层该暴露的漂移候选。
+
+**已知局限（一期接受）**：
+- d1_shared_util 真实仓 0 条 / d2_layering 1 条——codegraph 对常量/模块级符号的边召回不足（imports 边多为同文件节点），D1a 图谱维度在真实数据上暂空转；待 codegraph 索引质量改善或改走 AST 解析后重验。
+- 正则口径：日志仅 `%[srda]`、退出码仅单数字 `return N`；绝对路径正则会命中注释/字符串内字面量（呈证可接受）。
+- mypy 本机不可用（exit 127），类型注解未过静态检查。
+
+**瘦档 token 实测**：有漂移时注入块 628 字节（JSON 包装），约 300-400 token/次；无漂移不注入（0 开销）。
+
+**Minor 遗留清单**（汇总自各 task 审查，交最终全分支审查分诊）：USAGE_EDGE_KINDS 死常量、SELECT 未用列、D1b OSError 文件计入分母、cvx evidence JSON 无 try、inject hook UnicodeDecodeError 未捕获/异常路径 conn 未关、SKELETON_TRAITS 子串匹配无词边界。
